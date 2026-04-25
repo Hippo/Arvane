@@ -1,0 +1,572 @@
+# Blocks and Registry
+
+## Purpose
+
+This document defines the block system used by the engine and game layer.
+
+The goals of this design are:
+
+* fully data-driven block definitions
+* strong support for modding and extensibility
+* fast runtime queries for simulation and rendering
+* clean separation between logical block identity and runtime representation
+* minimal decoding work in hot paths (meshing, physics, lighting)
+
+This document defines:
+
+* block definitions
+* runtime ID model
+* air invariants
+* variant expansion
+* registry loading
+* face visibility rules
+* tags and properties
+
+---
+
+## Core Principles
+
+### Data-driven definitions
+
+Blocks are defined entirely through data.
+
+The engine does not hardcode block types. Instead, it loads block definitions at startup and builds a runtime registry.
+
+Block definitions describe:
+
+* logical identity
+* properties and behavior flags
+* tags
+* optional state schema
+
+---
+
+### Logical names are stable
+
+Blocks are referenced by stable logical names:
+
+* `arvane:air`
+* `arvane:stone`
+* `arvane:grass_block`
+* `arvane:stone_stairs`
+
+These names are used in:
+
+* authored content
+* gameplay logic
+* commands and debugging
+* save formats (directly or indirectly)
+
+---
+
+### Runtime IDs are not stable
+
+Runtime IDs are assigned during registry load.
+
+They:
+
+* are compact integers
+* are optimized for performance
+* are not stable across runs or mod sets
+
+Game code must never hardcode numeric IDs.
+
+---
+
+## Runtime Identity Model
+
+The system uses two runtime identifiers.
+
+---
+
+### BlockID
+
+`BlockID` identifies a block **family**.
+
+Examples:
+
+* air
+* stone
+* grass
+* stone_stairs
+
+This is used for:
+
+* tags
+* high-level property queries
+* gameplay logic
+* logical grouping
+
+---
+
+### BlockVariantID
+
+`BlockVariantID` identifies an exact **resolved runtime variant** of a block.
+
+Examples:
+
+* air
+* stone
+* stone_stairs[facing=north]
+* stone_stairs[facing=south]
+* stone_stairs[facing=east]
+* stone_stairs[facing=west]
+* grass
+
+This is what is stored in chunk data.
+
+It is used for:
+
+* meshing
+* collision
+* occlusion
+* rendering
+* exact behavior lookup
+
+---
+
+### Relationship
+
+* Each `BlockVariantID` maps to exactly one `BlockID`
+* A `BlockID` may own one or many variants
+
+---
+
+### Example
+
+| BlockID | BlockVariantID | Meaning |
+|--------|--------------:|--------|
+| 0 | 0 | Air |
+| 1 | 1 | Stone |
+| 2 | 2 | Stairs North |
+| 2 | 3 | Stairs South |
+| 2 | 4 | Stairs East |
+| 2 | 5 | Stairs West |
+| 3 | 6 | Grass |
+
+---
+
+### Storage Rule
+
+Chunk cells store:
+
+```
+
+BlockVariantID
+
+```
+
+They do not store:
+
+* logical names
+* separate `(BlockID, state_bits)`
+* dynamic state objects
+
+All meaning is derived through the registry.
+
+---
+
+## Air Invariants
+
+Air is a special block and must obey strict rules.
+
+---
+
+### Identity
+
+* Logical name: `arvane:air`
+* `BlockID(0)` is always Air
+* `BlockVariantID(0)` is always Air
+
+No other block or variant may use `0`.
+
+---
+
+### Behavior
+
+Air must always be:
+
+* non-solid
+* non-collidable
+* non-opaque
+* non-light-blocking
+* non-occluding
+* empty
+* safe default for uninitialized cells
+
+---
+
+### Engine implications
+
+Because Air is zero:
+
+* chunks can be zero-initialized
+* empty memory is valid world data
+* many hot-path checks become trivial (`id == 0`)
+* sparse or compressed storage becomes simpler
+
+---
+
+## Block Definitions
+
+A block definition describes a **block family**.
+
+---
+
+### Required fields
+
+* logical name
+* default variant
+* tags
+* base properties
+
+---
+
+### Common properties
+
+Definitions should support:
+
+* `solid`
+* `collidable`
+* `opaque`
+* `blocks_light`
+* `emits_light`
+* `replaceable`
+* `fluid`
+* `full_cube`
+
+These may be defined at the block level or overridden per variant if necessary.
+
+---
+
+### Tags
+
+Tags are group memberships used for behavior queries.
+
+Examples:
+
+* `arvane:mineable/pickaxe`
+* `arvane:mineable/shovel`
+* `arvane:transparent`
+* `arvane:logs`
+* `arvane:leaves`
+* `arvane:fluids`
+* `arvane:replaceable`
+
+Tags must be:
+
+* data-driven
+* efficiently queryable
+* usable in both engine and gameplay code
+
+---
+
+## Variant Expansion
+
+Block definitions may define **state schemas**.
+
+These are expanded into concrete runtime variants during registry load.
+
+---
+
+### Example (authored)
+
+```yaml
+name: arvane:stone_stairs
+
+states:
+  facing: [north, south, east, west]
+```
+
+---
+
+### Expanded (runtime)
+
+Variants:
+
+* stone_stairs[north]
+* stone_stairs[south]
+* stone_stairs[east]
+* stone_stairs[west]
+
+Each variant receives its own `BlockVariantID`.
+
+---
+
+### Important rule
+
+At runtime:
+
+* state schemas are **not interpreted dynamically**
+* variants are **fully resolved ahead of time**
+
+This avoids per-block decoding in hot paths.
+
+---
+
+### Variant responsibilities
+
+Each variant defines:
+
+* exact mesh/geometry
+* collision shape
+* occlusion behavior
+* face visibility rules
+* light behavior (if state-dependent)
+
+---
+
+### Block vs Variant responsibilities
+
+**BlockID (family level):**
+
+* logical identity
+* tags
+* broad properties
+* gameplay classification
+
+**BlockVariantID (exact state):**
+
+* geometry
+* collision shape
+* occlusion
+* rendering behavior
+* face visibility
+
+---
+
+## Registry Loading
+
+The block registry is built once at startup.
+
+---
+
+### Load pipeline
+
+1. load all block definitions (engine + game + mods)
+2. validate definitions
+3. ensure `arvane:air` exists
+4. expand state schemas into variants
+5. assign runtime IDs
+6. build lookup tables
+7. finalize and freeze registry
+
+---
+
+### Runtime ID assignment
+
+Rules:
+
+* `BlockID(0)` = air
+* `BlockVariantID(0)` = air
+* all other IDs assigned sequentially
+* ordering must be deterministic
+
+Recommended approach:
+
+* sort by logical name before assignment
+
+---
+
+### Immutability
+
+The registry is immutable after load.
+
+It must be:
+
+* thread-safe for read access
+* shared across all systems
+* never modified during simulation
+
+---
+
+### Validation
+
+Registry loading must fail on:
+
+* duplicate block names
+* missing air definition
+* invalid state schemas
+* invalid variant expansion
+* exceeding ID limits
+
+---
+
+## Face Visibility Rules
+
+Face visibility determines whether a face should be emitted during meshing.
+
+---
+
+### Key concept
+
+Face visibility is not simply:
+
+> "visible if neighbor is air"
+
+It must be explicitly defined.
+
+---
+
+### Evaluation model
+
+```
+should_emit_face(self_variant, neighbor_variant, face)
+```
+
+This may depend on:
+
+* both variants
+* face direction
+
+---
+
+### Baseline behavior
+
+* faces against air are visible
+* faces between two full opaque cubes are hidden
+* faces between identical materials may be hidden
+* faces against non-occluding blocks may be visible
+
+---
+
+### Special cases
+
+Some blocks require custom rules:
+
+* glass vs glass (hide internal faces)
+* water vs water (hide internal faces)
+* leaves vs leaves (configurable)
+* partial shapes (stairs, slabs)
+* fluids
+
+---
+
+### Important distinction
+
+Do not conflate:
+
+* visibility
+* collision
+* light blocking
+
+These are separate systems.
+
+---
+
+## Tags and Properties
+
+---
+
+### Tags
+
+Used for classification:
+
+* fast boolean membership checks
+* gameplay logic
+* tool interaction
+* rule grouping
+
+---
+
+### Properties
+
+Used for structured values:
+
+* hardness
+* friction
+* light emission
+* sound type
+* fluid type
+
+---
+
+### Rule
+
+* use **tags** for grouping
+* use **properties** for values
+
+---
+
+## Query Surface
+
+Systems must be able to query efficiently using `BlockVariantID`.
+
+Examples:
+
+* `is_air(variant)`
+* `block_id(variant)`
+* `is_solid(variant)`
+* `is_opaque(variant)`
+* `blocks_light(variant)`
+* `emits_light(variant)`
+* `has_tag(block_id, tag)`
+* `collision_shape(variant)`
+* `occlusion_shape(variant)`
+
+Hot-path queries must avoid string lookups.
+
+---
+
+## Serialization Considerations
+
+Runtime IDs are not stable.
+
+Therefore:
+
+* saves must not rely solely on raw IDs
+* logical names or registry mappings must be preserved
+* worlds should track registry version or fingerprint
+
+---
+
+## Networking Considerations
+
+Client and server must share the same registry.
+
+They must agree on:
+
+* block definitions
+* variant expansion
+* runtime ID mapping
+
+Recommended:
+
+* validate registry compatibility during connection
+* reject mismatches cleanly
+
+---
+
+## Threading Model
+
+The registry is:
+
+* constructed once
+* immutable
+* safe for concurrent reads
+
+This allows use across:
+
+* meshing threads
+* lighting threads
+* physics
+* generation
+
+with no locking.
+
+---
+
+## Final Rules
+
+* Air is always `BlockID(0)` and `BlockVariantID(0)`
+* Runtime IDs are assigned at load time only
+* Runtime IDs are not stable across runs
+* Block definitions are data-driven
+* Chunk storage uses `BlockVariantID`
+* Variant expansion happens at load time
+* No dynamic state decoding in hot paths
+* Registry is immutable after load
+* Face visibility must use explicit rules, not assumptions
+* Game code must not hardcode numeric IDs
+
+```

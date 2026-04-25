@@ -1,0 +1,66 @@
+{
+  "blocks": [
+    {
+      "name": "arvane:air",
+      "render_category": "none",
+      "properties": {
+        "replaceable": true
+      }
+    },
+    {
+      "name": "arvane:dirt",
+      "render_category": "opaque",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true
+      }
+    },
+    {
+      "name": "arvane:glass",
+      "render_category": "transparent",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "full_cube": true
+      }
+    },
+    {
+      "name": "arvane:glowstone",
+      "render_category": "opaque",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "emits_light": true,
+        "emission_rgb": [15, 12, 6],
+        "full_cube": true
+      }
+    },
+    {
+      "name": "arvane:grass_block",
+      "render_category": "opaque",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true
+      }
+    },
+    {
+      "name": "arvane:stone",
+      "render_category": "opaque",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true
+      }
+    }
+  ]
+}

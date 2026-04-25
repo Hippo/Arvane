@@ -1,0 +1,33 @@
+id: arvane:overworld
+version: 1
+seed_salt: "overworld"
+
+vertical:
+  min_y: -32
+  max_y: 96
+  sea_level: 24
+
+noise:
+  terrain:
+    type: simplex_2d
+    frequency: 0.035
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+density:
+  base_height: 12
+  height_scale: 14
+
+surface:
+  rules:
+    - when:
+        above_sea_level: true
+      layers:
+        - block: arvane:grass_block
+          depth: 1
+        - block: arvane:dirt
+          depth: 3
+        - block: arvane:stone
+          depth: remaining

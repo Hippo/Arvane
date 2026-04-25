@@ -1,0 +1,2 @@
+add_subdirectory(arv_desktop)
+add_subdirectory(arv_dedicated)

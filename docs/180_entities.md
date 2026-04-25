@@ -1,0 +1,378 @@
+# Entities
+
+This document defines the non-block world simulation model for Arvane.
+
+Entities are runtime objects that exist inside a world but are not part of chunk block storage.
+
+Examples include:
+
+- players
+- dropped items
+- mobs
+- projectiles
+- vehicles
+- temporary effects
+- interactable non-block objects
+
+Entities must not be treated as blocks, chunk data, or renderer-only objects.
+
+---
+
+## Core Rules
+
+- Entities are owned by a world instance.
+- Runtime entities are represented using EnTT.
+- Each world owns its own ECS registry.
+- Entities may reference world positions, chunk positions, and block positions.
+- Entities do not own chunk storage.
+- Chunks do not own entities.
+- Entity simulation may be suspended outside the active simulation range.
+- Entity persistence is separate from chunk block persistence.
+
+---
+
+## Ownership Model
+
+Each world owns:
+
+- an EnTT registry
+- entity lifecycle state
+- entity simulation systems
+- entity persistence queues
+- entity spatial indexing
+- entity-to-chunk relevance tracking
+
+Entities belong to exactly one world at a time.
+
+An entity may move between worlds only through an explicit transfer operation.
+
+Player handling is split between:
+
+- global player profile/session state
+- world-local player entity state
+
+The global player profile is not an ECS entity.
+
+---
+
+## ECS Usage
+
+Arvane uses EnTT for runtime entity storage and queries.
+
+The ECS should store runtime simulation data such as:
+
+- transform
+- velocity
+- physics body
+- inventory reference
+- health
+- AI state
+- render representation
+- interaction state
+- lifetime timers
+
+The ECS should not store:
+
+- chunk block arrays
+- global registries
+- asset definitions
+- stable authored entity definitions
+- long-lived account/profile data
+
+Entity definitions should come from registries or authored data.
+
+Runtime ECS components are instances of those definitions.
+
+---
+
+## Entity Identity
+
+Entities have two identities:
+
+### Runtime Entity
+
+The EnTT entity handle is used for runtime ECS operations.
+
+This handle is not stable across saves, loads, or world transfers.
+
+### Persistent Entity ID
+
+Persistent entities have a stable entity ID.
+
+This ID is used for:
+
+- saving
+- loading
+- networking
+- debugging
+- cross-system references
+
+Temporary entities do not require persistent IDs unless they need to be replicated or saved.
+
+---
+
+## Transform Rules
+
+Entities use a world-space transform.
+
+A standard entity transform contains:
+
+- position
+- rotation
+- scale, if needed
+- previous position for interpolation
+- previous rotation for interpolation
+
+Position is expressed in world coordinates.
+
+Rendering may interpolate between previous and current transforms.
+
+Simulation must use fixed-tick transforms.
+
+Render interpolation must not feed back into simulation state.
+
+---
+
+## Chunk Relevance
+
+Entities are not stored inside chunks, but they may be spatially associated with chunks.
+
+The world maintains an entity spatial index for:
+
+- querying entities near a position
+- finding entities inside an area
+- determining which entities are relevant to loaded chunks
+- networking visibility
+- simulation activation
+
+An entity may track its current chunk coordinate as cached metadata.
+
+This cached chunk coordinate must be updated when the entity crosses chunk boundaries.
+
+The cached chunk coordinate is not ownership.
+
+---
+
+## Simulation Range
+
+Entity simulation depends on world activity rules.
+
+Entities inside the active simulation range are ticked normally.
+
+Entities outside the active simulation range may be:
+
+- fully suspended
+- lightly ticked
+- persisted and unloaded
+- handled by a special offline simulation rule
+
+The default behavior is:
+
+- active range: full simulation
+- loaded but inactive range: no expensive AI or physics
+- unloaded range: entity is saved and removed from runtime ECS unless marked global or always-active
+
+---
+
+## Entity Persistence
+
+Persistent entities must be saved independently from block data.
+
+Entity persistence records should include:
+
+- entity type
+- persistent entity ID
+- world ID
+- position
+- rotation
+- velocity, if relevant
+- component state required for restoration
+- inventory state, if relevant
+- custom entity data
+
+Entities should be saved by world region or spatial partition.
+
+Saving entities inside chunk files is allowed only if the format clearly separates block storage from entity storage.
+
+Chunk unload must trigger persistence for relevant entities.
+
+---
+
+## Temporary Entities
+
+Temporary entities include things like:
+
+- particles
+- short-lived projectiles
+- hit effects
+- client-only visuals
+
+Temporary entities may skip persistence.
+
+Client-only entities must never affect authoritative gameplay simulation.
+
+Server-authoritative temporary entities must still follow normal ECS ownership and networking rules.
+
+---
+
+## Update Phases
+
+Entity updates run as part of the fixed world tick.
+
+The default entity update phases are:
+
+1. spawn/despawn flush
+2. input command application
+3. AI and behavior
+4. physics integration
+5. collision resolution
+6. interaction processing
+7. gameplay effects
+8. transform finalization
+9. spatial index update
+10. networking replication collection
+11. render extraction
+
+Systems should not freely mutate entities at arbitrary times.
+
+Structural ECS changes should be queued when needed and flushed at defined points.
+
+---
+
+## Physics Integration
+
+Entity physics is separate from block storage.
+
+Physics systems may query the world through an abstract collision interface.
+
+The physics system must not directly depend on chunk internals.
+
+For example, physics may ask:
+
+- is this block solid?
+- what collision shape exists at this block position?
+- what entities overlap this volume?
+
+Physics must not own or mutate chunk storage.
+
+---
+
+## Interaction Model
+
+Entities can participate in interactions.
+
+Interactions may include:
+
+- player targeting
+- attacking
+- using
+- picking up
+- pushing
+- riding
+- opening UI
+- triggering plugin behavior
+
+Entity interaction priority must be coordinated with block interaction priority.
+
+A player raycast may hit both entities and blocks.
+
+The interaction system decides which target wins based on the input and interaction rules.
+
+---
+
+## Networking Rules
+
+On multiplayer servers, the server owns authoritative entity state.
+
+Clients may own prediction state for local responsiveness, but server state is authoritative.
+
+Networked entities require:
+
+- persistent or network entity ID
+- spawn message
+- despawn message
+- replicated component state
+- relevance filtering
+- interpolation support
+
+Clients must not create authoritative gameplay entities directly.
+
+---
+
+## Threading Rules
+
+The ECS registry is world-owned and should be treated as main-simulation-thread state unless explicitly protected.
+
+Background jobs may operate on snapshots.
+
+Allowed background work:
+
+- pathfinding jobs using world snapshots
+- entity save serialization
+- AI planning snapshots
+- broad query preparation
+- render extraction upload preparation
+
+Background jobs must not directly mutate the live registry.
+
+Results from jobs are returned to the world and applied during a safe update phase.
+
+---
+
+## Render Extraction
+
+Rendering does not own entities.
+
+The renderer receives extracted render data from the world.
+
+Render extraction should produce:
+
+- mesh/model handle
+- transform
+- animation state
+- material overrides
+- visibility flags
+- interpolation data
+
+The renderer must not read arbitrary ECS components directly unless explicitly routed through a render extraction layer.
+
+---
+
+## Despawn Rules
+
+Entity despawning must be explicit.
+
+Reasons for despawn include:
+
+- death
+- pickup
+- timeout
+- world unload
+- transfer to another world
+- conversion into another entity
+- administrative removal
+
+Despawn should clean up:
+
+- ECS components
+- spatial index entries
+- networking state
+- ownership references
+- pending interactions
+- persistence state, if needed
+
+---
+
+## Required Invariants
+
+- EnTT owns runtime entity component storage.
+- Worlds own ECS registries.
+- Chunks do not own entities.
+- Entities do not own chunk block storage.
+- Runtime entity handles are not persistent IDs.
+- Entity simulation runs on fixed ticks.
+- Rendering uses extracted/interpolated state.
+- Background jobs operate on snapshots, not the live registry.
+- Entity persistence is separate from chunk block storage.
+
+---

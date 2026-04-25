@@ -1,0 +1,620 @@
+# Save Format
+
+Arvane save data is designed to be stable across engine versions, registry changes, and long-term iteration.
+
+The save system must not depend on runtime-only identifiers or memory layout.
+
+All persisted data must be:
+
+- versioned
+- explicit
+- reconstructable
+- migratable
+
+---
+
+## Core Principles
+
+- Runtime IDs are not stable and must not be saved directly
+- Registries are reconstructed at startup, not serialized
+- Save data references stable string IDs indirectly via local tables
+- Worlds are independent save units
+- Server save owns global state (players, permissions, etc.)
+- Derived data is not saved (meshes, caches, etc.)
+- Save format must support migration
+
+---
+
+## Save Root Structure
+
+A save root represents a **server save**, not a single world.
+
+This applies to:
+
+- dedicated servers
+- singleplayer (integrated server)
+
+Example:
+
+```text
+server-save/
+  save.json
+  players/
+    <player_uuid>.dat
+  worlds/
+    world-a/
+      world.json
+      regions/
+        r.<x>.<z>.arvr
+    world-b/
+      world.json
+      regions/
+        r.<x>.<z>.arvr
+  server/
+    permissions.json
+    whitelist.json
+    ops.json
+```
+
+Notes:
+
+* Each world is fully independent
+* A “dimension” is simply another world
+* Worlds do not nest inside each other
+* Players exist at the server level (not per-world)
+
+---
+
+## What Is Persisted
+
+### Server Level
+
+* save format version
+* global settings
+* player profiles
+* server configuration
+* plugin/mod list (optional but recommended)
+
+### World Level
+
+Each world stores:
+
+* world metadata
+* seed and generator config
+* world time / tick counter
+* simulation settings
+* region files
+
+### Region / Chunk Level
+
+* block state data
+* lighting data
+* block entities
+* scheduled ticks
+* biome data (if used)
+
+### Entity Level
+
+* persistent entities
+* entity data and components
+
+### Inventory Level
+
+* item stacks
+* item metadata
+
+---
+
+## What Is NOT Persisted
+
+* runtime IDs
+* ECS entity handles
+* renderer state
+* GPU resources
+* chunk meshes
+* temporary simulation queues
+* derived caches
+
+All derived data must be rebuilt on load.
+
+---
+
+## Versioning
+
+Every save must declare a version:
+
+```json
+{
+  "save_format_version": 1,
+  "game_version": "0.1.0"
+}
+```
+
+Subsystems may version independently:
+
+```json
+{
+  "lighting_version": 1,
+  "entity_version": 1,
+  "inventory_version": 1
+}
+```
+
+---
+
+## Registry Policy
+
+Registries are **not serialized**.
+
+They are rebuilt at startup from:
+
+* engine content
+* game content
+* plugins/mods
+* data definitions
+
+Save data contains only the information required to resolve saved content.
+
+---
+
+## Local Save Tables
+
+Local tables are the core compatibility mechanism.
+
+They map compact indices → stable string IDs.
+
+Example:
+
+```text
+block_table = [
+  "arvane:air",
+  "arvane:grass",
+  "arvane:stone",
+  "arvane:dirt"
+]
+
+block_data = [
+  0, 1, 1, 2, 3, 2, 1, 0
+]
+```
+
+Rules:
+
+* indices are local to the save container
+* index `0` is reserved for air (for blocks)
+* entries are stable string IDs
+* runtime IDs are resolved at load time
+
+Load path:
+
+```text
+index -> stable string ID -> runtime ID
+```
+
+---
+
+## Region-Wide Tables
+
+Tables should exist at the **region level**, not per chunk.
+
+Example:
+
+```text
+region:
+  block_state_table:
+    0 = arvane:air
+    1 = arvane:stone
+    2 = arvane:grass
+    3 = arvane:stairs[facing=north]
+    4 = arvane:stairs[facing=south]
+```
+
+Benefits:
+
+* avoids duplication
+* improves compression
+* enables stable remapping
+
+---
+
+## Block State Serialization
+
+Chunks store **block states**, not just block types.
+
+States are represented as stable IDs:
+
+```text
+arvane:stairs[facing=north]
+```
+
+Chunk sections store indices into the region’s `block_state_table`.
+
+---
+
+## Chunk Serialization
+
+Chunks are divided into vertical sections.
+
+Each section contains:
+
+* block states (packed indices)
+* lighting
+* optional biome data
+
+All-air sections may be omitted.
+
+---
+
+## Block Data Encoding
+
+Each section contains:
+
+```text
+4096 entries (16x16x16)
+```
+
+Each entry is an index into the block state table.
+
+Bit width depends on table size:
+
+```text
+<=16 entries   → 4 bits
+<=256 entries  → 8 bits
+<=4096 entries → 12 bits
+```
+
+Index order:
+
+```text
+index = x + z * 16 + y * 256
+```
+
+This must be consistent globally.
+
+---
+
+## Lighting Serialization
+
+Lighting is stored separately from block data.
+
+Format:
+
+```text
+4 bits red
+4 bits green
+4 bits blue
+4 bits sky
+```
+
+Total: 16 bits per block.
+
+Lighting may be invalidated during migration if needed.
+
+---
+
+## Block Entities
+
+Stored separately from block arrays.
+
+Example:
+
+```json
+{
+  "pos": [4, 12, 9],
+  "type": "arvane:chest",
+  "version": 1,
+  "data": {}
+}
+```
+
+Rules:
+
+* must match block at position
+* invalid entries are skipped with warning
+
+---
+
+## Inventory Serialization
+
+Uses local tables (same concept as chunks).
+
+Example:
+
+```text
+item_table = [
+  "arvane:air",
+  "arvane:stone",
+  "arvane:iron_pickaxe"
+]
+```
+
+```json
+{
+  "slots": [
+    { "item": 1, "count": 64 },
+    { "item": 2, "count": 1, "data": {} }
+  ]
+}
+```
+
+---
+
+## Entity Serialization
+
+Entities are saved independently of ECS.
+
+Example:
+
+```json
+{
+  "uuid": "...",
+  "type": "arvane:item_entity",
+  "version": 1,
+  "position": [x, y, z],
+  "components": {}
+}
+```
+
+Rules:
+
+* ECS IDs are never saved
+* UUID is the persistent identity
+
+---
+
+## Scheduled Ticks
+
+Must be persisted when gameplay-relevant.
+
+Example:
+
+```json
+{
+  "type": "arvane:fluid_tick",
+  "pos": [x, y, z],
+  "due_tick": 123456
+}
+```
+
+World tick counter must also be saved.
+
+---
+
+## Missing Registry Entries
+
+If a saved ID is missing:
+
+Default behavior: **safe mode**
+
+* replace with:
+
+  * `arvane:missing_block`
+  * `arvane:missing_item`
+* log warning
+
+Never silently map to another valid block.
+
+---
+
+## Migration Handling
+
+Migrations transform old saves to new formats.
+
+They may:
+
+* rename IDs
+* rewrite states
+* update data formats
+* invalidate lighting
+
+Example:
+
+```text
+v2 → v3:
+  rename arvane:grass_old → arvane:grass
+```
+
+Migration pipeline:
+
+```text
+load tables
+apply migrations to table entries
+resolve to runtime IDs
+load data
+```
+
+---
+
+## Compression
+
+Region payloads may be compressed.
+
+Recommended:
+
+```text
+zstd
+```
+
+Compression applies to:
+
+* block data
+* lighting
+* entity blobs
+
+---
+
+## Region Files
+
+Regions group chunks spatially.
+
+Example:
+
+```text
+32x32 chunks per region
+```
+
+Region contains:
+
+* header
+* tables
+* chunk index
+* chunk data
+* optional entity data
+
+---
+
+## Region File Format
+
+Chunk data is stored inside region files using a structured binary format.
+
+Region files:
+
+- group chunks spatially
+- provide fast lookup via fixed indexing
+- store region-local tables for registry resolution
+- allow independent chunk reads and writes
+- support compression and future extensions
+
+The exact byte-level structure is defined in:
+
+- [Region Format](210_region_file_binary_layout.md)
+
+This document defines:
+
+- header layout and magic value
+- chunk location and metadata tables
+- region-wide table encoding
+- chunk block storage format
+- compression rules
+- block entity and scheduled tick encoding
+- append/write strategy
+
+The save format specification defines **what must be stored**.
+
+The region file layout defines **how it is stored on disk**.
+
+### Implementation Rule
+
+All region file reads and writes must conform exactly to the binary layout specification.
+
+No assumptions about layout, padding, or ordering should be made outside of that document.
+
+### Evolution
+
+The region file format is versioned independently via:
+
+- `format_version` in the file header
+
+Changes to the binary layout must:
+
+- increment the format version
+- provide migration or compatibility handling
+- not silently reinterpret old data
+
+### Safety
+
+Region files must be treated as:
+
+- partially corruptible (per-chunk failures must not crash the engine)
+- independently readable (chunks can be skipped if invalid)
+- append-friendly (writes should avoid full rewrites where possible)
+
+---
+
+## Atomic Saves
+
+Writes must be crash-safe:
+
+```text
+write temp file
+flush
+rename over original
+```
+
+---
+
+## Dirty Tracking
+
+Separate flags:
+
+* block data dirty
+* lighting dirty
+* entity dirty
+* save dirty
+
+Saving is independent of meshing.
+
+---
+
+## Threading Rules
+
+Saving runs on background threads.
+
+Workers operate on **snapshots only**.
+
+They must not:
+
+* access live world state
+* mutate ECS directly
+
+---
+
+## Plugin Data
+
+Plugins may store namespaced data:
+
+```json
+{
+  "plugin_data": {
+    "mod:id": {
+      "version": 1,
+      "data": {}
+    }
+  }
+}
+```
+
+Unknown plugin data should be preserved when possible.
+
+---
+
+## Load Pipeline
+
+```text
+1. Read save metadata
+2. Load registries
+3. Open world
+4. Open region
+5. Read tables
+6. Apply migrations
+7. Resolve IDs
+8. Load chunk data
+9. Load entities
+10. Rebuild derived data
+```
+
+---
+
+## Save Pipeline
+
+```text
+1. Collect dirty data
+2. Snapshot world state
+3. Update tables
+4. Encode chunk data
+5. Compress
+6. Write atomically
+```
+
+---
+
+## Summary
+
+* Server save owns global state
+* Worlds are independent
+* Registries are not saved
+* Local tables provide stability
+* Runtime IDs are never trusted
+* Save format is versioned and migratable
+
+```

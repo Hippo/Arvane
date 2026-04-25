@@ -1,0 +1,15 @@
+set(ARV_CORE_HEADERS
+  include/arv/core/coordinates.hpp
+  include/arv/core/domain_ids.hpp
+  include/arv/core/expected.hpp
+  include/arv/core/fixed_timestep.hpp
+  include/arv/core/id.hpp
+  include/arv/core/log.hpp
+  include/arv/core/math.hpp
+  include/arv/core/thread_roles.hpp
+  include/arv/core/time.hpp
+  include/arv/core/types.hpp
+)
+
+add_library(arv_core INTERFACE)
+target_include_directories(arv_core INTERFACE include)
