@@ -5,6 +5,10 @@ set(ARV_NET_HEADERS
   include/arv/net/transport.hpp
 )
 
-add_library(arv_net INTERFACE)
-target_include_directories(arv_net INTERFACE include)
-target_link_libraries(arv_net INTERFACE arv_core arv_protocol GameNetworkingSockets::static)
+add_library(arv_net STATIC
+  src/gns_transport.cpp
+  src/in_process_transport.cpp
+  src/transport.cpp
+)
+target_include_directories(arv_net PUBLIC include)
+target_link_libraries(arv_net PUBLIC arv_core arv_protocol GameNetworkingSockets::static)

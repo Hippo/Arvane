@@ -26,31 +26,11 @@ struct WorldRecord {
 
 class WorldRegistry {
 public:
-  bool register_world(WorldRecord record) {
-    const WorldID id = record.id;
-    return worlds_.emplace(id, std::move(record)).second;
-  }
-
-  void ensure_default_world() {
-    if (find(DefaultWorldID) != nullptr) {
-      return;
-    }
-    register_world({DefaultWorldID, "default", WorldRuntimeState::Running, 1});
-  }
-
-  [[nodiscard]] WorldRecord* find(WorldID id) noexcept {
-    const auto found = worlds_.find(id);
-    return found == worlds_.end() ? nullptr : &found->second;
-  }
-
-  [[nodiscard]] const WorldRecord* find(WorldID id) const noexcept {
-    const auto found = worlds_.find(id);
-    return found == worlds_.end() ? nullptr : &found->second;
-  }
-
-  [[nodiscard]] usize size() const noexcept {
-    return worlds_.size();
-  }
+  bool register_world(WorldRecord record);
+  void ensure_default_world();
+  [[nodiscard]] WorldRecord* find(WorldID id) noexcept;
+  [[nodiscard]] const WorldRecord* find(WorldID id) const noexcept;
+  [[nodiscard]] usize size() const noexcept;
 
 private:
   std::unordered_map<WorldID, WorldRecord> worlds_;

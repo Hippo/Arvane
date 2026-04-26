@@ -15,7 +15,8 @@
         "collidable": true,
         "opaque": true,
         "blocks_light": true,
-        "full_cube": true
+        "full_cube": true,
+        "ao_occluder": true
       }
     },
     {
@@ -37,7 +38,8 @@
         "blocks_light": true,
         "emits_light": true,
         "emission_rgb": [15, 12, 6],
-        "full_cube": true
+        "full_cube": true,
+        "ao_occluder": true
       }
     },
     {
@@ -48,7 +50,8 @@
         "collidable": true,
         "opaque": true,
         "blocks_light": true,
-        "full_cube": true
+        "full_cube": true,
+        "ao_occluder": true
       }
     },
     {
@@ -59,7 +62,8 @@
         "collidable": true,
         "opaque": true,
         "blocks_light": true,
-        "full_cube": true
+        "full_cube": true,
+        "ao_occluder": true
       }
     }
   ]

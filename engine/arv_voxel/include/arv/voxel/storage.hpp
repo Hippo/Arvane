@@ -8,13 +8,14 @@
 
 #include <array>
 #include <optional>
-#include <utility>
 
 namespace arv::voxel {
 
 inline constexpr usize ChunkSide = static_cast<usize>(ChunkSize);
 inline constexpr usize ChunkArea = ChunkSide * ChunkSide;
 inline constexpr usize ChunkVolume = ChunkArea * ChunkSide;
+inline constexpr usize ChunkHaloSide = ChunkSide + 2U;
+inline constexpr usize ChunkHaloVolume = ChunkHaloSide * ChunkHaloSide * ChunkHaloSide;
 
 enum class ChunkLifecycleState {
   Unloaded,
@@ -83,46 +84,54 @@ constexpr ChunkDirtyFlags& operator&=(ChunkDirtyFlags& lhs, ChunkDirtyFlags rhs)
          ChunkSide * (static_cast<usize>(local.value.y) + ChunkSide * static_cast<usize>(local.value.z));
 }
 
+[[nodiscard]] constexpr bool is_valid_halo_local(SectionLocalPos local) noexcept {
+  return local.value.x >= -1 && local.value.x <= ChunkSize &&
+         local.value.y >= -1 && local.value.y <= ChunkSize &&
+         local.value.z >= -1 && local.value.z <= ChunkSize;
+}
+
+[[nodiscard]] constexpr usize halo_index(SectionLocalPos local) noexcept {
+  return static_cast<usize>(local.value.x + 1) +
+         ChunkHaloSide * (static_cast<usize>(local.value.y + 1) +
+                          ChunkHaloSide * static_cast<usize>(local.value.z + 1));
+}
+
 [[nodiscard]] constexpr usize boundary_index_for_face(BlockFace face, SectionLocalPos local) noexcept {
   switch (face) {
-  case BlockFace::PositiveX:
-  case BlockFace::NegativeX:
-    return static_cast<usize>(local.value.y) + ChunkSide * static_cast<usize>(local.value.z);
-  case BlockFace::PositiveY:
-  case BlockFace::NegativeY:
-    return static_cast<usize>(local.value.x) + ChunkSide * static_cast<usize>(local.value.z);
-  case BlockFace::PositiveZ:
-  case BlockFace::NegativeZ:
-    return static_cast<usize>(local.value.x) + ChunkSide * static_cast<usize>(local.value.y);
+    case BlockFace::PositiveX:
+    case BlockFace::NegativeX:
+      return static_cast<usize>(local.value.y) + ChunkSide * static_cast<usize>(local.value.z);
+    case BlockFace::PositiveY:
+    case BlockFace::NegativeY:
+      return static_cast<usize>(local.value.x) + ChunkSide * static_cast<usize>(local.value.z);
+    case BlockFace::PositiveZ:
+    case BlockFace::NegativeZ:
+      return static_cast<usize>(local.value.x) + ChunkSide * static_cast<usize>(local.value.y);
   }
   return 0;
 }
 
 [[nodiscard]] constexpr AxisDirection axis_direction_from_face(BlockFace face) noexcept {
   switch (face) {
-  case BlockFace::PositiveX:
-    return AxisDirection::PositiveX;
-  case BlockFace::NegativeX:
-    return AxisDirection::NegativeX;
-  case BlockFace::PositiveY:
-    return AxisDirection::PositiveY;
-  case BlockFace::NegativeY:
-    return AxisDirection::NegativeY;
-  case BlockFace::PositiveZ:
-    return AxisDirection::PositiveZ;
-  case BlockFace::NegativeZ:
-    return AxisDirection::NegativeZ;
+    case BlockFace::PositiveX:
+      return AxisDirection::PositiveX;
+    case BlockFace::NegativeX:
+      return AxisDirection::NegativeX;
+    case BlockFace::PositiveY:
+      return AxisDirection::PositiveY;
+    case BlockFace::NegativeY:
+      return AxisDirection::NegativeY;
+    case BlockFace::PositiveZ:
+      return AxisDirection::PositiveZ;
+    case BlockFace::NegativeZ:
+      return AxisDirection::NegativeZ;
   }
   return AxisDirection::PositiveX;
 }
 
 class ChunkSection {
 public:
-  explicit ChunkSection(ChunkCoord coord = {}) : coord_(coord) {
-    blocks_.fill(AirBlockVariantID);
-    lights_.fill(NoLight);
-    fluids_.fill(empty_fluid_cell());
-  }
+  explicit ChunkSection(ChunkCoord coord = {});
 
   [[nodiscard]] ChunkCoord coord() const noexcept {
     return coord_;
@@ -176,98 +185,21 @@ public:
     return fluids_;
   }
 
-  bool set_block(SectionLocalPos local, BlockVariantID variant) noexcept {
-    if (!is_valid_local(local)) {
-      return false;
-    }
+  bool set_block(SectionLocalPos local, BlockVariantID variant) noexcept;
 
-    BlockVariantID& cell = blocks_[local_index(local)];
-    if (cell == variant) {
-      return false;
-    }
+  bool set_light(SectionLocalPos local, LightWord light) noexcept;
 
-    cell = variant;
-    ++version_;
-    mark_dirty(
-        ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh |
-        ChunkDirtyFlags::NeedsRelight | ChunkDirtyFlags::NeedsFluidStep);
-    return true;
-  }
+  bool set_fluid(SectionLocalPos local, FluidCell fluid, bool affects_lighting = false) noexcept;
 
-  bool set_light(SectionLocalPos local, LightWord light) noexcept {
-    if (!is_valid_local(local)) {
-      return false;
-    }
+  void replace_generated_blocks(std::array<BlockVariantID, ChunkVolume> blocks) noexcept;
 
-    LightWord& cell = lights_[local_index(local)];
-    if (cell == light) {
-      return false;
-    }
+  bool replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept;
 
-    cell = light;
-    ++version_;
-    mark_dirty(ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh);
-    return true;
-  }
+  void mark_dirty(ChunkDirtyFlags flags) noexcept;
 
-  bool set_fluid(SectionLocalPos local, FluidCell fluid, bool affects_lighting = false) noexcept {
-    if (!is_valid_local(local)) {
-      return false;
-    }
+  void mark_mesh_dependency_dirty() noexcept;
 
-    FluidCell& cell = fluids_[local_index(local)];
-    if (cell == fluid) {
-      return false;
-    }
-
-    cell = fluid;
-    ++version_;
-    ChunkDirtyFlags flags = ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh |
-                            ChunkDirtyFlags::NeedsFluidStep;
-    if (affects_lighting) {
-      flags |= ChunkDirtyFlags::NeedsRelight;
-    }
-    mark_dirty(flags);
-    return true;
-  }
-
-  void replace_generated_blocks(std::array<BlockVariantID, ChunkVolume> blocks) noexcept {
-    blocks_ = std::move(blocks);
-    lights_.fill(NoLight);
-    fluids_.fill(empty_fluid_cell());
-    ++version_;
-    mark_dirty(ChunkDirtyFlags::NeedsMesh | ChunkDirtyFlags::NeedsRelight);
-  }
-
-  bool replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept {
-    if (lights_ == lights) {
-      return false;
-    }
-
-    lights_ = std::move(lights);
-    ++version_;
-    mark_dirty(ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh);
-    return true;
-  }
-
-  void mark_dirty(ChunkDirtyFlags flags) noexcept {
-    dirty_flags_ |= flags;
-    if (has_flag(flags, ChunkDirtyFlags::NeedsMesh)) {
-      mesh_state_ = ChunkMeshState::Dirty;
-    }
-  }
-
-  void mark_mesh_dependency_dirty() noexcept {
-    ++version_;
-    mark_dirty(ChunkDirtyFlags::NeedsMesh);
-  }
-
-  void clear_dirty(ChunkDirtyFlags flags) noexcept {
-    dirty_flags_ = static_cast<ChunkDirtyFlags>(static_cast<u32>(dirty_flags_) & ~static_cast<u32>(flags));
-    if (!has_flag(dirty_flags_, ChunkDirtyFlags::NeedsMesh) && mesh_state_ == ChunkMeshState::Dirty) {
-      mesh_state_ = ChunkMeshState::Clean;
-    }
-  }
+  void clear_dirty(ChunkDirtyFlags flags) noexcept;
 
   void mark_mesh_queued() noexcept {
     mesh_state_ = ChunkMeshState::Queued;
@@ -281,11 +213,7 @@ public:
     mesh_state_ = ChunkMeshState::WaitingForUpload;
   }
 
-  void mark_mesh_ready(u64 published_version) noexcept {
-    published_mesh_version_ = published_version;
-    mesh_state_ = ChunkMeshState::Ready;
-    clear_dirty(ChunkDirtyFlags::NeedsMesh);
-  }
+  void mark_mesh_ready(u64 published_version) noexcept;
 
   [[nodiscard]] u64 published_mesh_version() const noexcept {
     return published_mesh_version_;
@@ -315,114 +243,20 @@ struct ChunkSnapshot {
   std::array<BlockVariantID, ChunkVolume> blocks{};
   std::array<LightWord, ChunkVolume> lights{};
   std::array<ChunkBoundarySnapshot, BlockFaceCount> neighbors{};
+  std::array<BlockVariantID, ChunkHaloVolume> halo_blocks{};
+  std::array<LightWord, ChunkHaloVolume> halo_lights{};
 };
 
-[[nodiscard]] inline ChunkBoundarySnapshot air_boundary_snapshot() {
-  ChunkBoundarySnapshot snapshot;
-  snapshot.blocks.fill(AirBlockVariantID);
-  snapshot.lights.fill(NoLight);
-  snapshot.available = true;
-  return snapshot;
-}
+[[nodiscard]] ChunkBoundarySnapshot air_boundary_snapshot();
 
-[[nodiscard]] inline ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk) {
-  ChunkSnapshot snapshot;
-  snapshot.coord = chunk.coord();
-  snapshot.source_version = chunk.version();
-  snapshot.blocks = chunk.blocks();
-  snapshot.lights = chunk.lights();
-  for (ChunkBoundarySnapshot& boundary : snapshot.neighbors) {
-    boundary = air_boundary_snapshot();
-  }
-  return snapshot;
-}
+[[nodiscard]] ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk);
 
-[[nodiscard]] inline BlockVariantID snapshot_block(
+[[nodiscard]] BlockVariantID snapshot_block(
     const ChunkSnapshot& snapshot,
-    SectionLocalPos local) noexcept {
-  if (is_valid_local(local)) {
-    return snapshot.blocks[local_index(local)];
-  }
+    SectionLocalPos local) noexcept;
 
-  if (local.value.x < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeX)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::NegativeX, {{0, local.value.y, local.value.z}})]
-               : AirBlockVariantID;
-  }
-  if (local.value.x >= ChunkSize) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveX)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::PositiveX, {{0, local.value.y, local.value.z}})]
-               : AirBlockVariantID;
-  }
-  if (local.value.y < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeY)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::NegativeY, {{local.value.x, 0, local.value.z}})]
-               : AirBlockVariantID;
-  }
-  if (local.value.y >= ChunkSize) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveY)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::PositiveY, {{local.value.x, 0, local.value.z}})]
-               : AirBlockVariantID;
-  }
-  if (local.value.z < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeZ)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::NegativeZ, {{local.value.x, local.value.y, 0}})]
-               : AirBlockVariantID;
-  }
-
-  const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveZ)];
-  return boundary.available
-             ? boundary.blocks[boundary_index_for_face(BlockFace::PositiveZ, {{local.value.x, local.value.y, 0}})]
-             : AirBlockVariantID;
-}
-
-[[nodiscard]] inline LightWord snapshot_light(
+[[nodiscard]] LightWord snapshot_light(
     const ChunkSnapshot& snapshot,
-    SectionLocalPos local) noexcept {
-  if (is_valid_local(local)) {
-    return snapshot.lights[local_index(local)];
-  }
-
-  if (local.value.x < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeX)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::NegativeX, {{0, local.value.y, local.value.z}})]
-               : NoLight;
-  }
-  if (local.value.x >= ChunkSize) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveX)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::PositiveX, {{0, local.value.y, local.value.z}})]
-               : NoLight;
-  }
-  if (local.value.y < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeY)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::NegativeY, {{local.value.x, 0, local.value.z}})]
-               : NoLight;
-  }
-  if (local.value.y >= ChunkSize) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveY)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::PositiveY, {{local.value.x, 0, local.value.z}})]
-               : NoLight;
-  }
-  if (local.value.z < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeZ)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::NegativeZ, {{local.value.x, local.value.y, 0}})]
-               : NoLight;
-  }
-
-  const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveZ)];
-  return boundary.available
-             ? boundary.lights[boundary_index_for_face(BlockFace::PositiveZ, {{local.value.x, local.value.y, 0}})]
-             : NoLight;
-}
+    SectionLocalPos local) noexcept;
 
 } // namespace arv::voxel

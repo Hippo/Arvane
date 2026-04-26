@@ -4,118 +4,40 @@
 
 #include <glad/glad.h>
 
-#include <cstddef>
+#include <deque>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace arv::render {
 
 class OpenGLRenderer final : public IRenderer {
 public:
-  void set_chunk_shader_sources(std::string vertex_source, std::string fragment_source) {
-    chunk_vertex_shader_source_ = std::move(vertex_source);
-    chunk_fragment_shader_source_ = std::move(fragment_source);
-    if (chunk_program_ != 0) {
-      glDeleteProgram(chunk_program_);
-      chunk_program_ = 0;
-    }
+  void set_chunk_shader_sources(std::string vertex_source, std::string fragment_source);
+
+  void resize(u32 width, u32 height) override;
+
+  void submit_frame(FramePacket packet) override;
+
+  void set_chunk_mesh_upload_budget(u32 max_uploads_per_frame) noexcept;
+
+  void enqueue_chunk_mesh_upload(ChunkMeshUpload upload) override;
+
+  [[nodiscard]] u32 mesh_uploads_last_frame() const noexcept {
+    return mesh_uploads_last_frame_;
   }
 
-  void resize(u32 width, u32 height) override {
-    width_ = width;
-    height_ = height;
-    glViewport(0, 0, static_cast<GLsizei>(width_), static_cast<GLsizei>(height_));
+  [[nodiscard]] usize pending_mesh_upload_count() const noexcept {
+    return pending_chunk_mesh_uploads_.size();
   }
 
-  void submit_frame(FramePacket packet) override {
-    frame_ = packet;
+  [[nodiscard]] double mesh_upload_time_ms_last_frame() const noexcept {
+    return mesh_upload_time_ms_last_frame_;
   }
 
-  void enqueue_chunk_mesh_upload(ChunkMeshUpload upload) override {
-    const ChunkMeshKey key{upload.mesh.world_id, upload.mesh.coord};
-    const auto found = chunks_.find(key);
-    if (found != chunks_.end() && !should_accept_chunk_mesh_upload(&found->second.state, upload)) {
-      return;
-    }
+  void render() override;
 
-    if (found != chunks_.end()) {
-      destroy_chunk_gpu_state(found->second);
-    }
-
-    ChunkGpuState gpu_state;
-    gpu_state.opaque = create_gpu_mesh(upload.mesh.opaque);
-    gpu_state.transparent = create_gpu_mesh(upload.mesh.transparent);
-    gpu_state.state.opaque_mesh = gpu_state.opaque.index_count == 0 ? MeshID{} : allocate_mesh_id();
-    gpu_state.state.transparent_mesh = gpu_state.transparent.index_count == 0 ? MeshID{} : allocate_mesh_id();
-    gpu_state.state.uploaded_version = upload.mesh.source_version;
-    gpu_state.state.resident = true;
-    chunks_[key] = gpu_state;
-  }
-
-  void render() override {
-    glEnable(GL_DEPTH_TEST);
-    glClearColor(0.08F, 0.10F, 0.12F, 1.0F);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    if (!ensure_chunk_program()) {
-      return;
-    }
-
-    glUseProgram(chunk_program_);
-    glUniform3f(
-        chunk_camera_position_uniform_,
-        frame_.world_view.position.x,
-        frame_.world_view.position.y,
-        frame_.world_view.position.z);
-    glUniform3f(
-        chunk_camera_forward_uniform_,
-        frame_.world_view.forward.x,
-        frame_.world_view.forward.y,
-        frame_.world_view.forward.z);
-    glUniform3f(
-        chunk_camera_right_uniform_,
-        frame_.world_view.right.x,
-        frame_.world_view.right.y,
-        frame_.world_view.right.z);
-    glUniform3f(
-        chunk_camera_up_uniform_,
-        frame_.world_view.up.x,
-        frame_.world_view.up.y,
-        frame_.world_view.up.z);
-    const f32 aspect = height_ == 0 ? 1.0F : static_cast<f32>(width_) / static_cast<f32>(height_);
-    glUniform1f(chunk_camera_aspect_uniform_, aspect);
-    glUniform1f(chunk_camera_fov_y_uniform_, frame_.world_view.fov_y_degrees);
-    glUniform1f(chunk_camera_near_uniform_, frame_.world_view.near_plane);
-    glUniform1f(chunk_camera_far_uniform_, frame_.world_view.far_plane);
-
-    glDisable(GL_BLEND);
-    glDepthMask(GL_TRUE);
-    draw_chunk_list(frame_.opaque_chunks, false);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
-    draw_chunk_list(frame_.transparent_chunks, true);
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
-    glBindVertexArray(0);
-    glUseProgram(0);
-  }
-
-  void begin_shutdown() override {
-    for (auto& [key, chunk] : chunks_) {
-      (void)key;
-      destroy_chunk_gpu_state(chunk);
-    }
-    chunks_.clear();
-    if (chunk_program_ != 0) {
-      glDeleteProgram(chunk_program_);
-      chunk_program_ = 0;
-    }
-    frame_ = {};
-  }
+  void begin_shutdown() override;
 
 private:
   struct GpuMesh {
@@ -131,176 +53,30 @@ private:
     GpuMesh transparent{};
   };
 
-  [[nodiscard]] MeshID allocate_mesh_id() noexcept {
-    return MeshID{next_mesh_id_++};
-  }
+  void process_chunk_mesh_uploads();
 
-  [[nodiscard]] static GpuMesh create_gpu_mesh(const CpuMeshBuffer& mesh) {
-    GpuMesh gpu;
-    if (mesh.vertex_bytes.empty() || mesh.indices.empty()) {
-      return gpu;
-    }
+  [[nodiscard]] bool upload_chunk_mesh_now(ChunkMeshUpload upload);
 
-    glGenVertexArrays(1, &gpu.vao);
-    glBindVertexArray(gpu.vao);
+  [[nodiscard]] MeshID allocate_mesh_id() noexcept;
 
-    glGenBuffers(1, &gpu.vertex_buffer);
-    glBindBuffer(GL_ARRAY_BUFFER, gpu.vertex_buffer);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(mesh.vertex_bytes.size()),
-        mesh.vertex_bytes.data(),
-        GL_STATIC_DRAW);
+  [[nodiscard]] static GpuMesh create_gpu_mesh(const CpuMeshBuffer& mesh);
 
-    glGenBuffers(1, &gpu.index_buffer);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpu.index_buffer);
-    glBufferData(
-        GL_ELEMENT_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(u32)),
-        mesh.indices.data(),
-        GL_STATIC_DRAW);
+  static void destroy_gpu_mesh(GpuMesh& mesh);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribIPointer(
-        0,
-        1,
-        GL_UNSIGNED_INT,
-        sizeof(ChunkVertex),
-        reinterpret_cast<const void*>(offsetof(ChunkVertex, pos_ao)));
-    glEnableVertexAttribArray(1);
-    glVertexAttribIPointer(
-        1,
-        1,
-        GL_UNSIGNED_INT,
-        sizeof(ChunkVertex),
-        reinterpret_cast<const void*>(offsetof(ChunkVertex, uv)));
-    glEnableVertexAttribArray(2);
-    glVertexAttribIPointer(
-        2,
-        1,
-        GL_UNSIGNED_INT,
-        sizeof(ChunkVertex),
-        reinterpret_cast<const void*>(offsetof(ChunkVertex, light_face_flags)));
+  static void destroy_chunk_gpu_state(ChunkGpuState& state);
 
-    gpu.index_count = static_cast<GLsizei>(mesh.indices.size());
-    glBindVertexArray(0);
-    return gpu;
-  }
+  [[nodiscard]] static GLuint compile_shader(GLenum type, const char* source);
 
-  static void destroy_gpu_mesh(GpuMesh& mesh) {
-    if (mesh.index_buffer != 0) {
-      glDeleteBuffers(1, &mesh.index_buffer);
-    }
-    if (mesh.vertex_buffer != 0) {
-      glDeleteBuffers(1, &mesh.vertex_buffer);
-    }
-    if (mesh.vao != 0) {
-      glDeleteVertexArrays(1, &mesh.vao);
-    }
-    mesh = {};
-  }
+  [[nodiscard]] bool ensure_chunk_program();
 
-  static void destroy_chunk_gpu_state(ChunkGpuState& state) {
-    destroy_gpu_mesh(state.opaque);
-    destroy_gpu_mesh(state.transparent);
-    state.state = {};
-  }
-
-  [[nodiscard]] static GLuint compile_shader(GLenum type, const char* source) {
-    const GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, nullptr);
-    glCompileShader(shader);
-
-    GLint success = GL_FALSE;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (success != GL_TRUE) {
-      glDeleteShader(shader);
-      return 0;
-    }
-
-    return shader;
-  }
-
-  [[nodiscard]] bool ensure_chunk_program() {
-    if (chunk_program_ != 0) {
-      return true;
-    }
-
-    if (chunk_vertex_shader_source_.empty() || chunk_fragment_shader_source_.empty()) {
-      return false;
-    }
-
-    const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, chunk_vertex_shader_source_.c_str());
-    const GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, chunk_fragment_shader_source_.c_str());
-    if (vertex_shader == 0 || fragment_shader == 0) {
-      if (vertex_shader != 0) {
-        glDeleteShader(vertex_shader);
-      }
-      if (fragment_shader != 0) {
-        glDeleteShader(fragment_shader);
-      }
-      return false;
-    }
-
-    const GLuint program = glCreateProgram();
-    glAttachShader(program, vertex_shader);
-    glAttachShader(program, fragment_shader);
-    glLinkProgram(program);
-    glDeleteShader(vertex_shader);
-    glDeleteShader(fragment_shader);
-
-    GLint success = GL_FALSE;
-    glGetProgramiv(program, GL_LINK_STATUS, &success);
-    if (success != GL_TRUE) {
-      glDeleteProgram(program);
-      return false;
-    }
-
-    chunk_program_ = program;
-    chunk_origin_uniform_ = glGetUniformLocation(chunk_program_, "u_chunk_origin");
-    chunk_camera_position_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_position");
-    chunk_camera_forward_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_forward");
-    chunk_camera_right_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_right");
-    chunk_camera_up_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_up");
-    chunk_camera_aspect_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_aspect");
-    chunk_camera_fov_y_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_fov_y_degrees");
-    chunk_camera_near_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_near_plane");
-    chunk_camera_far_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_far_plane");
-    chunk_alpha_uniform_ = glGetUniformLocation(chunk_program_, "u_alpha");
-    return true;
-  }
-
-  void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent) {
-    glUniform1f(chunk_alpha_uniform_, transparent ? 0.55F : 1.0F);
-    for (const ChunkDrawItem& item : draw_items) {
-      const auto found = chunks_.find(item.key);
-      if (found == chunks_.end()) {
-        continue;
-      }
-
-      const ChunkGpuState& chunk = found->second;
-      if (item.expected_version != 0 && chunk.state.uploaded_version != item.expected_version) {
-        continue;
-      }
-
-      const GpuMesh& mesh = transparent ? chunk.transparent : chunk.opaque;
-      if (mesh.index_count == 0) {
-        continue;
-      }
-
-      glUniform3f(
-          chunk_origin_uniform_,
-          static_cast<f32>(item.key.coord.value.x * ChunkSize),
-          static_cast<f32>(item.key.coord.value.y * ChunkSize),
-          static_cast<f32>(item.key.coord.value.z * ChunkSize));
-      glBindVertexArray(mesh.vao);
-      glDrawElements(GL_TRIANGLES, mesh.index_count, GL_UNSIGNED_INT, nullptr);
-    }
-  }
+  void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
 
   u32 width_{};
   u32 height_{};
   u32 next_mesh_id_{1};
+  u32 max_chunk_mesh_uploads_per_frame_{2};
+  u32 mesh_uploads_last_frame_{};
+  double mesh_upload_time_ms_last_frame_{};
   GLuint chunk_program_{};
   GLint chunk_origin_uniform_{-1};
   GLint chunk_camera_position_uniform_{-1};
@@ -316,6 +92,7 @@ private:
   std::string chunk_fragment_shader_source_{};
   FramePacket frame_{};
   std::unordered_map<ChunkMeshKey, ChunkGpuState> chunks_;
+  std::deque<ChunkMeshUpload> pending_chunk_mesh_uploads_;
 };
 
 } // namespace arv::render

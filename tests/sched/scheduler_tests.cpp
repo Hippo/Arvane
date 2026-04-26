@@ -30,3 +30,22 @@ TEST(SchedulerTests, CompletionQueuePublishesWorkerResult) {
   EXPECT_EQ(drained.front(), 7);
   EXPECT_TRUE(completions.empty());
 }
+
+TEST(SchedulerTests, WorkerThreadPolicyClampsConfiguredCount) {
+  arv::sched::WorkerThreadConfig config;
+  config.worker_thread_count = 99;
+  config.min_worker_thread_count = 2;
+  config.max_worker_thread_count = 8;
+
+  EXPECT_EQ(arv::sched::resolve_worker_thread_count(config), 8U);
+}
+
+TEST(SchedulerTests, WorkerThreadPolicyReservesEngineThreadsForAutomaticCount) {
+  arv::sched::WorkerThreadConfig config;
+  config.worker_thread_count = 0;
+  config.reserved_thread_count = arv::sched::hardware_thread_count_or_one() + 10U;
+  config.min_worker_thread_count = 1;
+  config.max_worker_thread_count = 64;
+
+  EXPECT_EQ(arv::sched::resolve_worker_thread_count(config), 1U);
+}

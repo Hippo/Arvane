@@ -26,10 +26,23 @@ enum class JobKind {
   RenderHandoff,
 };
 
+struct WorkerThreadConfig {
+  // 0 means automatic: hardware_concurrency minus reserved_thread_count.
+  usize worker_thread_count{};
+  usize reserved_thread_count{4};
+  usize min_worker_thread_count{1};
+  usize max_worker_thread_count{64};
+};
+
+[[nodiscard]] usize hardware_thread_count_or_one() noexcept;
+
+[[nodiscard]] usize resolve_worker_thread_count(WorkerThreadConfig config) noexcept;
+
 template<typename T>
 class JobHandle {
 public:
-  JobHandle(JobID id, std::future<T>&& future) : id_(id), future_(std::move(future)) {}
+  JobHandle(JobID id, std::future<T>&& future) : id_(id), future_(std::move(future)) {
+  }
 
   [[nodiscard]] JobID id() const noexcept {
     return id_;
@@ -50,19 +63,16 @@ private:
 
 class Scheduler {
 public:
-  explicit Scheduler(usize worker_count = default_worker_count())
-      : executor_(std::max<usize>(worker_count, 1)) {}
+  explicit Scheduler(usize worker_count = default_worker_count());
+
+  explicit Scheduler(WorkerThreadConfig config);
 
   Scheduler(const Scheduler&) = delete;
   Scheduler& operator=(const Scheduler&) = delete;
 
-  ~Scheduler() {
-    wait_for_all();
-  }
+  ~Scheduler();
 
-  [[nodiscard]] usize worker_count() const noexcept {
-    return executor_.num_workers();
-  }
+  [[nodiscard]] usize worker_count() const noexcept;
 
   template<typename Fn>
   auto submit(std::string name, Fn&& fn) {
@@ -79,17 +89,9 @@ public:
     return JobHandle<Result>{id, std::move(future)};
   }
 
-  void wait_for_all() {
-    executor_.wait_for_all();
-  }
+  void wait_for_all();
 
-  [[nodiscard]] static usize default_worker_count() noexcept {
-    const unsigned hardware_threads = std::thread::hardware_concurrency();
-    if (hardware_threads <= 1) {
-      return 1;
-    }
-    return static_cast<usize>(hardware_threads - 1);
-  }
+  [[nodiscard]] static usize default_worker_count() noexcept;
 
 private:
   tf::Executor executor_;

@@ -11,5 +11,8 @@ set(ARV_CORE_HEADERS
   include/arv/core/types.hpp
 )
 
-add_library(arv_core INTERFACE)
-target_include_directories(arv_core INTERFACE include)
+add_library(arv_core STATIC
+  src/log.cpp
+  src/thread_roles.cpp
+)
+target_include_directories(arv_core PUBLIC include)

@@ -22,6 +22,7 @@ void main() {
   uint mx = (a_pos_ao >> 15u) & 31u;
   uint my = (a_pos_ao >> 20u) & 31u;
   uint mz = (a_pos_ao >> 25u) & 31u;
+  uint ao = (a_pos_ao >> 30u) & 3u;
 
   uint red = a_light_face_flags & 15u;
   uint green = (a_light_face_flags >> 4u) & 15u;
@@ -43,8 +44,10 @@ void main() {
                  (2.0 * far_plane * near_plane) / (far_plane - near_plane);
 
   float face_shade = face == 2u ? 1.0 : (face == 3u ? 0.55 : 0.78);
+  float min_ao_shade = face == 2u ? 0.86 : 0.70;
+  float ao_shade = min_ao_shade + float(ao) / 3.0 * (1.0 - min_ao_shade);
   float sky_shade = 0.2 + float(sky) / 15.0 * 0.8;
   vec3 block_light = vec3(red, green, blue) / 15.0;
-  v_color = (vec3(0.46, 0.66, 0.34) * sky_shade + block_light * 0.35) * face_shade;
+  v_color = (vec3(0.46, 0.66, 0.34) * sky_shade + block_light * 0.35) * face_shade * ao_shade;
   gl_Position = vec4(view_x * focal / aspect, view_y * focal, clip_z, view_z);
 }

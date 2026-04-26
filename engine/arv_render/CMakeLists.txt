@@ -4,6 +4,11 @@ set(ARV_RENDER_HEADERS
   include/arv/render/render_types.hpp
 )
 
-add_library(arv_render INTERFACE)
-target_include_directories(arv_render INTERFACE include)
-target_link_libraries(arv_render INTERFACE arv_core arv_voxel glad OpenGL::GL)
+add_library(arv_render STATIC
+  src/chunk_mesher.cpp
+  src/opengl_renderer.cpp
+  src/render_types.cpp
+)
+target_include_directories(arv_render PUBLIC include)
+target_link_libraries(arv_render PUBLIC arv_core arv_voxel glad)
+target_link_libraries(arv_render PRIVATE OpenGL::GL)

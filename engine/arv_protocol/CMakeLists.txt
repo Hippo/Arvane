@@ -7,6 +7,10 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/protocol_version.hpp
 )
 
-add_library(arv_protocol INTERFACE)
-target_include_directories(arv_protocol INTERFACE include)
-target_link_libraries(arv_protocol INTERFACE arv_core)
+add_library(arv_protocol STATIC
+  src/handshake.cpp
+  src/message_envelope.cpp
+  src/message_registry.cpp
+)
+target_include_directories(arv_protocol PUBLIC include)
+target_link_libraries(arv_protocol PUBLIC arv_core)

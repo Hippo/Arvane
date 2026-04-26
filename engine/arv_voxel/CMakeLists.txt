@@ -5,6 +5,10 @@ set(ARV_VOXEL_HEADERS
   include/arv/voxel/storage.hpp
 )
 
-add_library(arv_voxel INTERFACE)
-target_include_directories(arv_voxel INTERFACE include)
-target_link_libraries(arv_voxel INTERFACE arv_core nlohmann_json::nlohmann_json)
+add_library(arv_voxel STATIC
+  src/block.cpp
+  src/storage.cpp
+)
+target_include_directories(arv_voxel PUBLIC include)
+target_link_libraries(arv_voxel PUBLIC arv_core)
+target_link_libraries(arv_voxel PRIVATE nlohmann_json::nlohmann_json)

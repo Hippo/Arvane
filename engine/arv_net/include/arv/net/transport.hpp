@@ -60,19 +60,7 @@ public:
   virtual ConnectResult connect(const NetworkAddress& address) = 0;
   virtual NetworkResult send(TransportMessage message) = 0;
   virtual std::vector<NetworkEvent> poll_events() = 0;
-  virtual std::vector<TransportMessage> poll() {
-    std::vector<TransportMessage> messages;
-    for (NetworkEvent& event : poll_events()) {
-      if (event.type != NetworkEventType::MessageReceived) {
-        continue;
-      }
-      messages.push_back({
-          event.connection_id,
-          event.reliability,
-          std::move(event.payload)});
-    }
-    return messages;
-  }
+  virtual std::vector<TransportMessage> poll();
   virtual ConnectionState state(ConnectionID connection_id) const = 0;
   virtual void shutdown() = 0;
 };

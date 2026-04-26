@@ -21,6 +21,15 @@ chunks:
   render_distance: 4
   stream_distance: 5
   unload_margin: 3
+jobs:
+  worker_threads: 6
+  reserved_threads: 5
+render:
+  max_chunk_mesh_uploads_per_frame: 3
+chunk_pipeline:
+  max_generation_jobs_per_frame: 2
+  max_mesh_jobs_per_frame: 5
+  frame_spike_log_ms: 25
 )");
 
   ASSERT_TRUE(result);
@@ -35,6 +44,12 @@ chunks:
   EXPECT_EQ(result.value().chunks.render_distance, 4);
   EXPECT_EQ(result.value().chunks.stream_distance, 5);
   EXPECT_EQ(result.value().chunks.unload_margin, 3);
+  EXPECT_EQ(result.value().jobs.worker_threads, 6U);
+  EXPECT_EQ(result.value().jobs.reserved_threads, 5U);
+  EXPECT_EQ(result.value().render.max_chunk_mesh_uploads_per_frame, 3U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_generation_jobs_per_frame, 2U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_mesh_jobs_per_frame, 5U);
+  EXPECT_EQ(result.value().chunk_pipeline.frame_spike_log_ms, 25U);
 }
 
 TEST(ConfigTests, RejectsUnsupportedBaseTps) {
@@ -64,7 +79,18 @@ TEST(ConfigTests, ResolvesDefaultAssetRootFromProjectRoot) {
   arv::io::resolve_runtime_paths(options, config);
 
   EXPECT_EQ(config.paths.asset_root, std::filesystem::path("/tmp/arvane_project/assets"));
-  EXPECT_EQ(config.paths.config_file, std::filesystem::path("/tmp/arvane_project/config/arvane.yaml"));
+  EXPECT_TRUE(config.paths.config_file.empty());
+}
+
+TEST(ConfigTests, ExplicitConfigPathIsResolvedFromProjectRoot) {
+  arv::io::EngineConfig config = arv::io::default_config();
+  arv::io::ConfigLoadOptions options;
+  options.project_root = "/tmp/arvane_project";
+  options.explicit_config_path = "config/dev.yaml";
+
+  arv::io::resolve_runtime_paths(options, config);
+
+  EXPECT_EQ(config.paths.config_file, std::filesystem::path("/tmp/arvane_project/config/dev.yaml"));
 }
 
 TEST(ConfigTests, ExplicitAssetRootOverridesConfigAssetRoot) {
@@ -82,4 +108,13 @@ paths:
   arv::io::resolve_runtime_paths(options, config);
 
   EXPECT_EQ(config.paths.asset_root, std::filesystem::path("/opt/arvane/assets"));
+}
+
+TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectAssets) {
+  auto result = arv::io::load_config({});
+  ASSERT_TRUE(result);
+
+  EXPECT_TRUE(std::filesystem::exists(result.value().paths.asset_root / "config/blocks.json"));
+  EXPECT_TRUE(std::filesystem::exists(result.value().paths.asset_root / "shaders/world/chunk.vert"));
+  EXPECT_TRUE(result.value().paths.config_file.empty());
 }

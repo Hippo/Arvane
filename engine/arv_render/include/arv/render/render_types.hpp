@@ -8,7 +8,6 @@
 #include "arv/voxel/block.hpp"
 
 #include <cstddef>
-#include <cstring>
 #include <functional>
 #include <vector>
 
@@ -129,21 +128,13 @@ struct CpuMeshBuffer {
   std::vector<u32> indices{};
 };
 
-inline void append_chunk_vertex(CpuMeshBuffer& buffer, ChunkVertex vertex) {
-  const usize offset = buffer.vertex_bytes.size();
-  buffer.vertex_bytes.resize(offset + sizeof(ChunkVertex));
-  std::memcpy(buffer.vertex_bytes.data() + offset, &vertex, sizeof(ChunkVertex));
-}
+void append_chunk_vertex(CpuMeshBuffer& buffer, ChunkVertex vertex);
 
 [[nodiscard]] inline usize chunk_vertex_count(const CpuMeshBuffer& buffer) noexcept {
   return buffer.vertex_bytes.size() / sizeof(ChunkVertex);
 }
 
-[[nodiscard]] inline ChunkVertex chunk_vertex_at(const CpuMeshBuffer& buffer, usize index) noexcept {
-  ChunkVertex vertex;
-  std::memcpy(&vertex, buffer.vertex_bytes.data() + index * sizeof(ChunkVertex), sizeof(ChunkVertex));
-  return vertex;
-}
+[[nodiscard]] ChunkVertex chunk_vertex_at(const CpuMeshBuffer& buffer, usize index) noexcept;
 
 struct ChunkMeshData {
   WorldID world_id{};

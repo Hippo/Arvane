@@ -15,11 +15,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -59,7 +62,46 @@ arv::client::InputFrame to_client_input(const arv::platform::InputSnapshot& inpu
 }
 
 struct ChunkViewState {
+  struct TimedGeneratedChunkResult {
+    arv::world::GeneratedChunkResult result;
+    double duration_ms{};
+  };
+
+  struct TimedChunkMeshResult {
+    arv::render::ChunkMeshData mesh;
+    double duration_ms{};
+  };
+
+  struct TimedLightingResult {
+    arv::world::LightingResult result;
+    double duration_ms{};
+  };
+
+  struct PendingGeneration {
+    arv::ChunkCoord coord{};
+    arv::sched::JobHandle<TimedGeneratedChunkResult> job;
+  };
+
+  struct PendingMesh {
+    arv::ChunkCoord coord{};
+    arv::u64 source_version{};
+    arv::sched::JobHandle<TimedChunkMeshResult> job;
+  };
+
   std::unordered_map<arv::ChunkCoord, arv::render::ChunkDrawItem> draw_items;
+  std::vector<PendingGeneration> pending_generations;
+  std::vector<PendingMesh> pending_meshes;
+  std::unordered_set<arv::ChunkCoord> generation_in_flight;
+  std::unordered_set<arv::ChunkCoord> mesh_in_flight;
+  std::optional<arv::sched::JobHandle<TimedLightingResult>> lighting_job;
+  std::chrono::steady_clock::time_point last_profile_log{};
+  arv::u64 frames{};
+  arv::u32 generated_completed_last_frame{};
+  arv::u32 mesh_completed_last_frame{};
+  arv::u32 lighting_completed_last_frame{};
+  double generation_ms_last_frame{};
+  double mesh_ms_last_frame{};
+  double lighting_ms_last_frame{};
 };
 
 arv::ChunkCoord camera_chunk_coord(const arv::client::CameraShell& camera) {
@@ -112,6 +154,7 @@ bool refresh_chunk_view(
     arv::sched::Scheduler& scheduler,
     ChunkViewState& view,
     const arv::io::ChunkDistanceConfig& distances,
+    const arv::io::ChunkPipelineConfig& pipeline,
     arv::ChunkCoord center,
     arv::i32 min_chunk_y,
     arv::i32 max_chunk_y,
@@ -119,11 +162,77 @@ bool refresh_chunk_view(
     const arv::world::WorldGenerationPalette& generation_palette,
     const arv::voxel::BlockRegistry& block_registry,
     arv::core::Logger& logger) {
-  struct PendingGeneration {
-    arv::sched::JobHandle<arv::world::GeneratedChunkResult> job;
-  };
+  const auto refresh_start = std::chrono::steady_clock::now();
+  ++view.frames;
+  view.generated_completed_last_frame = 0;
+  view.mesh_completed_last_frame = 0;
+  view.lighting_completed_last_frame = 0;
+  view.generation_ms_last_frame = 0.0;
+  view.mesh_ms_last_frame = 0.0;
+  view.lighting_ms_last_frame = 0.0;
 
-  std::vector<PendingGeneration> pending_generations;
+  for (arv::usize index = 0; index < view.pending_generations.size();) {
+    auto& pending = view.pending_generations[index];
+    if (!pending.job.is_complete()) {
+      ++index;
+      continue;
+    }
+
+    auto timed = pending.job.get();
+    view.generation_in_flight.erase(pending.coord);
+    view.generated_completed_last_frame++;
+    view.generation_ms_last_frame += timed.duration_ms;
+    if (!timed.result) {
+      logger.error("worldgen", timed.result.error().message);
+      return false;
+    }
+    if (world.find_chunk(timed.result.value().coord) == nullptr &&
+        !world.publish_generated_chunk(std::move(timed.result.value()))) {
+      logger.error("worldgen", "failed to publish generated view chunk");
+      return false;
+    }
+
+    view.pending_generations.erase(view.pending_generations.begin() + static_cast<std::ptrdiff_t>(index));
+  }
+
+  if (view.lighting_job && view.lighting_job->is_complete()) {
+    auto timed = view.lighting_job->get();
+    const arv::world::LightingPublishStats stats =
+        world.publish_lighting_result(std::move(timed.result));
+    view.lighting_completed_last_frame = stats.accepted_chunks;
+    view.lighting_ms_last_frame = timed.duration_ms;
+    if (stats.stale_chunks > 0U) {
+      logger.warn("lighting", "discarded stale async lighting chunks");
+    }
+    view.lighting_job.reset();
+  }
+
+  for (arv::usize index = 0; index < view.pending_meshes.size();) {
+    auto& pending = view.pending_meshes[index];
+    if (!pending.job.is_complete()) {
+      ++index;
+      continue;
+    }
+
+    auto timed = pending.job.get();
+    view.mesh_in_flight.erase(pending.coord);
+    view.mesh_completed_last_frame++;
+    view.mesh_ms_last_frame += timed.duration_ms;
+    if (world.validate_mesh_result(timed.mesh.coord, timed.mesh.source_version)) {
+      arv::render::ChunkDrawItem draw_item;
+      draw_item.key = {timed.mesh.world_id, timed.mesh.coord};
+      draw_item.expected_version = timed.mesh.source_version;
+      arv::render::ChunkMeshUpload upload;
+      upload.mesh = std::move(timed.mesh);
+      renderer.enqueue_chunk_mesh_upload(std::move(upload));
+      (void)world.publish_mesh_result(draw_item.key.coord, draw_item.expected_version);
+      view.draw_items[draw_item.key.coord] = draw_item;
+    }
+
+    view.pending_meshes.erase(view.pending_meshes.begin() + static_cast<std::ptrdiff_t>(index));
+  }
+
+  arv::u32 generation_jobs_scheduled = 0;
   for (arv::i32 z = center.value.z - distances.load_distance;
        z <= center.value.z + distances.load_distance;
        ++z) {
@@ -132,7 +241,9 @@ bool refresh_chunk_view(
          ++x) {
       for (arv::i32 y = min_chunk_y; y <= max_chunk_y; ++y) {
         const arv::ChunkCoord coord{{x, y, z}};
-        if (world.find_chunk(coord) != nullptr) {
+        if (generation_jobs_scheduled >= pipeline.max_generation_jobs_per_frame ||
+            world.find_chunk(coord) != nullptr ||
+            view.generation_in_flight.find(coord) != view.generation_in_flight.end()) {
           continue;
         }
 
@@ -143,29 +254,35 @@ bool refresh_chunk_view(
         request.config = generation_config;
         request.palette = generation_palette;
         auto job = scheduler.submit("view_chunk_generation", [request] {
-          return arv::world::generate_chunk(request);
+          const auto start = std::chrono::steady_clock::now();
+          auto result = arv::world::generate_chunk(request);
+          const auto end = std::chrono::steady_clock::now();
+          return ChunkViewState::TimedGeneratedChunkResult{
+              std::move(result),
+              std::chrono::duration<double, std::milli>(end - start).count()};
         });
-        pending_generations.push_back({std::move(job)});
+        view.generation_in_flight.insert(coord);
+        view.pending_generations.push_back({coord, std::move(job)});
+        ++generation_jobs_scheduled;
       }
-    }
-  }
-
-  for (PendingGeneration& pending : pending_generations) {
-    auto generated = pending.job.get();
-    if (!generated) {
-      logger.error("worldgen", generated.error().message);
-      return false;
-    }
-    if (!world.publish_generated_chunk(std::move(generated.value()))) {
-      logger.error("worldgen", "failed to publish generated view chunk");
-      return false;
     }
   }
 
   // TODO(arvane): Apply stream_distance and unload_margin once networking and
   // save-aware chunk unload candidates exist.
   world.update_simulation_radius(center, distances.simulation_distance);
-  (void)world.process_lighting(block_registry);
+
+  if (!view.lighting_job && world.has_lighting_work()) {
+    const arv::world::LightingSnapshot snapshot = world.make_lighting_snapshot();
+    view.lighting_job = scheduler.submit("view_chunk_lighting", [snapshot, &block_registry] {
+      const auto start = std::chrono::steady_clock::now();
+      auto result = arv::world::WorldRuntime::build_lighting_result(snapshot, block_registry);
+      const auto end = std::chrono::steady_clock::now();
+      return ChunkViewState::TimedLightingResult{
+          std::move(result),
+          std::chrono::duration<double, std::milli>(end - start).count()};
+    });
+  }
 
   remove_draw_items_outside_view(
       view,
@@ -182,8 +299,13 @@ bool refresh_chunk_view(
          ++x) {
       for (arv::i32 y = min_chunk_y; y <= max_chunk_y; ++y) {
         const arv::ChunkCoord coord{{x, y, z}};
-        const arv::voxel::ChunkSection* chunk = world.find_chunk(coord);
+        arv::voxel::ChunkSection* chunk = world.find_chunk(coord);
         if (chunk == nullptr) {
+          continue;
+        }
+        if (view.pending_meshes.size() >= pipeline.max_mesh_jobs_per_frame ||
+            chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight) ||
+            view.mesh_in_flight.find(coord) != view.mesh_in_flight.end()) {
           continue;
         }
         if (!chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh) &&
@@ -199,22 +321,58 @@ bool refresh_chunk_view(
           continue;
         }
 
-        arv::render::ChunkMeshData mesh =
-            arv::render::build_chunk_mesh(arv::server::DefaultWorldID, snapshot.value(), block_registry);
-        if (!world.validate_mesh_result(mesh.coord, mesh.source_version)) {
-          continue;
-        }
-
-        arv::render::ChunkDrawItem draw_item;
-        draw_item.key = {mesh.world_id, mesh.coord};
-        draw_item.expected_version = mesh.source_version;
-        arv::render::ChunkMeshUpload upload;
-        upload.mesh = std::move(mesh);
-        renderer.enqueue_chunk_mesh_upload(std::move(upload));
-        (void)world.publish_mesh_result(draw_item.key.coord, draw_item.expected_version);
-        view.draw_items[coord] = draw_item;
+        const arv::u64 source_version = snapshot->source_version;
+        auto job = scheduler.submit(
+            "view_chunk_meshing",
+            [snapshot = snapshot.value(), &block_registry] {
+          const auto start = std::chrono::steady_clock::now();
+          auto mesh = arv::render::build_chunk_mesh(
+              arv::server::DefaultWorldID,
+              snapshot,
+              block_registry);
+          const auto end = std::chrono::steady_clock::now();
+          return ChunkViewState::TimedChunkMeshResult{
+              std::move(mesh),
+              std::chrono::duration<double, std::milli>(end - start).count()};
+        });
+        chunk->mark_mesh_queued();
+        view.mesh_in_flight.insert(coord);
+        view.pending_meshes.push_back({coord, source_version, std::move(job)});
       }
     }
+  }
+
+  const auto refresh_end = std::chrono::steady_clock::now();
+  const double refresh_ms =
+      std::chrono::duration<double, std::milli>(refresh_end - refresh_start).count();
+  if (refresh_ms > static_cast<double>(pipeline.frame_spike_log_ms)) {
+    std::ostringstream message;
+    message << "chunk refresh spike " << refresh_ms << "ms"
+            << " queued_generation=" << view.pending_generations.size()
+            << " queued_mesh=" << view.pending_meshes.size()
+            << " lighting_in_flight=" << (view.lighting_job ? 1 : 0);
+    logger.warn("chunk_profile", message.str());
+  }
+
+  if (view.last_profile_log.time_since_epoch().count() == 0) {
+    view.last_profile_log = refresh_end;
+  }
+  if (std::chrono::duration_cast<std::chrono::milliseconds>(refresh_end - view.last_profile_log)
+          .count() >= static_cast<long long>(pipeline.profile_log_interval_ms)) {
+    /*std::ostringstream message;
+    message << "workers queued_generation=" << view.pending_generations.size()
+            << " queued_mesh=" << view.pending_meshes.size()
+            << " completed_generation=" << view.generated_completed_last_frame
+            << " generation_ms=" << view.generation_ms_last_frame
+            << " completed_lighting_chunks=" << view.lighting_completed_last_frame
+            << " lighting_ms=" << view.lighting_ms_last_frame
+            << " completed_mesh=" << view.mesh_completed_last_frame
+            << " mesh_ms=" << view.mesh_ms_last_frame
+            << " pending_uploads=" << renderer.pending_mesh_upload_count()
+            << " uploads_last_frame=" << renderer.mesh_uploads_last_frame()
+            << " upload_ms=" << renderer.mesh_upload_time_ms_last_frame();
+    logger.info("chunk_profile", message.str());*/
+    view.last_profile_log = refresh_end;
   }
 
   return true;
@@ -305,6 +463,7 @@ int main(int argc, char** argv) {
   renderer.set_chunk_shader_sources(
       std::move(chunk_vertex_shader.value()),
       std::move(chunk_fragment_shader.value()));
+  renderer.set_chunk_mesh_upload_budget(config.render.max_chunk_mesh_uploads_per_frame);
 
   auto framebuffer = window.framebuffer_size();
   renderer.resize(framebuffer.width, framebuffer.height);
@@ -355,7 +514,22 @@ int main(int argc, char** argv) {
   const arv::world::WorldGenerationConfig generation_config = std::move(worldgen_config.value());
   const arv::world::WorldGenerationPalette generation_palette = std::move(worldgen_palette.value());
   const auto [min_chunk_y, max_chunk_y] = visible_worldgen_chunk_y_range(generation_config);
-  arv::sched::Scheduler world_jobs;
+  arv::sched::WorkerThreadConfig worker_thread_config;
+  worker_thread_config.worker_thread_count = config.jobs.worker_threads;
+  worker_thread_config.reserved_thread_count = config.jobs.reserved_threads;
+  worker_thread_config.min_worker_thread_count = config.jobs.min_worker_threads;
+  worker_thread_config.max_worker_thread_count = config.jobs.max_worker_threads;
+  arv::sched::Scheduler world_jobs{worker_thread_config};
+  {
+    std::ostringstream message;
+    message << "worker_threads=" << world_jobs.worker_count()
+            << " reserved_threads=" << config.jobs.reserved_threads;
+    logger.info("jobs", message.str());
+  }
+  arv::world::WorldTickPolicy tick_policy =
+      integrated_server.voxel_world().tick_policy();
+  tick_policy.process_lighting_synchronously = false;
+  integrated_server.voxel_world().set_tick_policy(tick_policy);
   ChunkViewState chunk_view;
 
   if (!refresh_chunk_view(
@@ -364,6 +538,7 @@ int main(int argc, char** argv) {
           world_jobs,
           chunk_view,
           config.chunks,
+          config.chunk_pipeline,
           camera_chunk_coord(client.camera()),
           min_chunk_y,
           max_chunk_y,
@@ -381,6 +556,17 @@ int main(int argc, char** argv) {
     const auto now = std::chrono::steady_clock::now();
     const std::chrono::duration<arv::Seconds> delta = now - previous_time;
     previous_time = now;
+    const double frame_delta_ms =
+        std::chrono::duration<double, std::milli>(delta).count();
+    if (frame_delta_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
+      std::ostringstream message;
+      message << "frame spike " << frame_delta_ms << "ms"
+              << " queued_generation=" << chunk_view.pending_generations.size()
+              << " queued_mesh=" << chunk_view.pending_meshes.size()
+              << " pending_uploads=" << renderer.pending_mesh_upload_count()
+              << " uploads_last_frame=" << renderer.mesh_uploads_last_frame();
+      logger.warn("chunk_profile", message.str());
+    }
 
     arv::platform::OpenGLWindow::poll_events();
     const arv::platform::InputSnapshot platform_input = window.poll_input();
@@ -395,6 +581,7 @@ int main(int argc, char** argv) {
             world_jobs,
             chunk_view,
             config.chunks,
+            config.chunk_pipeline,
             camera_chunk_coord(client.camera()),
             min_chunk_y,
             max_chunk_y,

@@ -27,7 +27,65 @@ arv::voxel::BlockRegistry make_registry() {
   return mesh.indices.size() / 6U;
 }
 
+[[nodiscard]] arv::u8 vertex_ao(arv::render::ChunkVertex vertex) {
+  return static_cast<arv::u8>((vertex.pos_ao >> 30U) & 0x03U);
+}
+
+[[nodiscard]] bool vertex_matches(
+    arv::render::ChunkVertex vertex,
+    arv::SectionLocalPos block,
+    arv::Vec3i model_position,
+    arv::voxel::BlockFace face) {
+  return (vertex.pos_ao & 0x1FU) == static_cast<arv::u32>(block.value.x) &&
+         ((vertex.pos_ao >> 5U) & 0x1FU) == static_cast<arv::u32>(block.value.y) &&
+         ((vertex.pos_ao >> 10U) & 0x1FU) == static_cast<arv::u32>(block.value.z) &&
+         ((vertex.pos_ao >> 15U) & 0x1FU) == static_cast<arv::u32>(model_position.x) &&
+         ((vertex.pos_ao >> 20U) & 0x1FU) == static_cast<arv::u32>(model_position.y) &&
+         ((vertex.pos_ao >> 25U) & 0x1FU) == static_cast<arv::u32>(model_position.z) &&
+         static_cast<arv::voxel::BlockFace>((vertex.light_face_flags >> 16U) & 0x07U) == face;
+}
+
+[[nodiscard]] std::optional<arv::render::ChunkVertex> find_vertex(
+    const arv::render::CpuMeshBuffer& mesh,
+    arv::SectionLocalPos block,
+    arv::Vec3i model_position,
+    arv::voxel::BlockFace face) {
+  for (arv::usize i = 0; i < arv::render::chunk_vertex_count(mesh); ++i) {
+    const arv::render::ChunkVertex vertex = arv::render::chunk_vertex_at(mesh, i);
+    if (vertex_matches(vertex, block, model_position, face)) {
+      return vertex;
+    }
+  }
+  return std::nullopt;
+}
+
 } // namespace
+
+TEST(ChunkMeshingTests, AmbientOcclusionRuleCoversAllOccupancyCombinations) {
+  for (int side0 = 0; side0 <= 1; ++side0) {
+    for (int side1 = 0; side1 <= 1; ++side1) {
+      for (int corner = 0; corner <= 1; ++corner) {
+        const arv::u8 expected = side0 != 0 && side1 != 0
+                                     ? 0
+                                     : static_cast<arv::u8>(3 - side0 - side1 - corner);
+        EXPECT_EQ(
+            arv::render::voxel_ambient_occlusion_value(side0 != 0, side1 != 0, corner != 0),
+            expected);
+      }
+    }
+  }
+}
+
+TEST(ChunkMeshingTests, AmbientOcclusionBothSidesFilledIsFullyOccluded) {
+  EXPECT_EQ(arv::render::voxel_ambient_occlusion_value(true, true, false), 0U);
+  EXPECT_EQ(arv::render::voxel_ambient_occlusion_value(true, true, true), 0U);
+}
+
+TEST(ChunkMeshingTests, AmbientOcclusionQuadFlipDecisionUsesDiagonalSums) {
+  EXPECT_FALSE(arv::render::should_flip_voxel_ao_quad({{2, 1, 0, 1}}));
+  EXPECT_FALSE(arv::render::should_flip_voxel_ao_quad({{3, 0, 1, 2}}));
+  EXPECT_TRUE(arv::render::should_flip_voxel_ao_quad({{1, 2, 1, 0}}));
+}
 
 TEST(ChunkMeshingTests, SingleOpaqueCubeEmitsSixFaces) {
   const arv::voxel::BlockRegistry registry = make_registry();
@@ -69,6 +127,113 @@ TEST(ChunkMeshingTests, TransparentCubeUsesTransparentMeshOutput) {
 
   EXPECT_EQ(face_count(mesh.opaque), 0U);
   EXPECT_EQ(face_count(mesh.transparent), 6U);
+}
+
+TEST(ChunkMeshingTests, SameLayerNeighborsDoNotDarkenFlatTopFaces) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{0, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{1, 1, 2}}, stone));
+  ASSERT_TRUE(chunk.set_block({{0, 1, 2}}, stone));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {0, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(vertex_ao(vertex.value()), 3U);
+}
+
+TEST(ChunkMeshingTests, FaceAdjacentOpaqueOccludersPackPerVertexAmbientOcclusion) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{0, 2, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{1, 2, 2}}, stone));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {0, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(vertex_ao(vertex.value()), 0U);
+}
+
+TEST(ChunkMeshingTests, SideFacesUseFaceAdjacentAmbientOcclusionSamples) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{2, 2, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{1, 2, 2}}, stone));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {16, 16, 16},
+      arv::voxel::BlockFace::PositiveX);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(vertex_ao(vertex.value()), 0U);
+}
+
+TEST(ChunkMeshingTests, TransparentBlocksDoNotContributeToAmbientOcclusion) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID glass = registry.find_variant("arvane:glass").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{0, 2, 1}}, glass));
+  ASSERT_TRUE(chunk.set_block({{1, 2, 2}}, glass));
+  ASSERT_TRUE(chunk.set_block({{0, 2, 2}}, glass));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {0, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(vertex_ao(vertex.value()), 3U);
+}
+
+TEST(ChunkMeshingTests, AmbientOcclusionSamplesChunkHaloCorners) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  world.ensure_chunk({{1, 1, 1}});
+  ASSERT_TRUE(world.set_block({{15, 15, 15}}, stone));
+  ASSERT_TRUE(world.set_block({{16, 16, 16}}, stone));
+
+  const auto snapshot = world.make_meshing_snapshot(
+      {{0, 0, 0}},
+      arv::world::MissingNeighborPolicy::TreatMissingAsAir);
+  ASSERT_TRUE(snapshot);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot.value(), registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{15, 15, 15}},
+      {16, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(vertex_ao(vertex.value()), 2U);
 }
 
 TEST(ChunkMeshingTests, NeighborBoundaryCullsChunkEdgeFace) {
