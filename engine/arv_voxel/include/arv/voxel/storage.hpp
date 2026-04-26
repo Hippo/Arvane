@@ -7,6 +7,7 @@
 #include "arv/voxel/light.hpp"
 
 #include <array>
+#include <memory>
 #include <optional>
 
 namespace arv::voxel {
@@ -16,6 +17,9 @@ inline constexpr usize ChunkArea = ChunkSide * ChunkSide;
 inline constexpr usize ChunkVolume = ChunkArea * ChunkSide;
 inline constexpr usize ChunkHaloSide = ChunkSide + 2U;
 inline constexpr usize ChunkHaloVolume = ChunkHaloSide * ChunkHaloSide * ChunkHaloSide;
+inline constexpr usize ChunkSnapshotNeighborhoodSide = 3U;
+inline constexpr usize ChunkSnapshotNeighborhoodVolume =
+    ChunkSnapshotNeighborhoodSide * ChunkSnapshotNeighborhoodSide * ChunkSnapshotNeighborhoodSide;
 
 enum class ChunkLifecycleState {
   Unloaded,
@@ -90,12 +94,6 @@ constexpr ChunkDirtyFlags& operator&=(ChunkDirtyFlags& lhs, ChunkDirtyFlags rhs)
          local.value.z >= -1 && local.value.z <= ChunkSize;
 }
 
-[[nodiscard]] constexpr usize halo_index(SectionLocalPos local) noexcept {
-  return static_cast<usize>(local.value.x + 1) +
-         ChunkHaloSide * (static_cast<usize>(local.value.y + 1) +
-                          ChunkHaloSide * static_cast<usize>(local.value.z + 1));
-}
-
 [[nodiscard]] constexpr usize boundary_index_for_face(BlockFace face, SectionLocalPos local) noexcept {
   switch (face) {
     case BlockFace::PositiveX:
@@ -128,6 +126,23 @@ constexpr ChunkDirtyFlags& operator&=(ChunkDirtyFlags& lhs, ChunkDirtyFlags rhs)
   }
   return AxisDirection::PositiveX;
 }
+
+[[nodiscard]] constexpr usize snapshot_storage_index(i32 offset_x, i32 offset_y, i32 offset_z) noexcept {
+  return static_cast<usize>(offset_x + 1) +
+         ChunkSnapshotNeighborhoodSide * (static_cast<usize>(offset_y + 1) +
+                                          ChunkSnapshotNeighborhoodSide * static_cast<usize>(offset_z + 1));
+}
+
+inline constexpr usize ChunkSnapshotCenterStorageIndex = snapshot_storage_index(0, 0, 0);
+
+struct ChunkStorage {
+  std::array<BlockVariantID, ChunkVolume> blocks{};
+  std::array<LightWord, ChunkVolume> lights{};
+  std::array<FluidCell, ChunkVolume> fluids{};
+};
+
+using ChunkStorageHandle = std::shared_ptr<ChunkStorage>;
+using ChunkStorageView = std::shared_ptr<const ChunkStorage>;
 
 class ChunkSection {
 public:
@@ -162,27 +177,35 @@ public:
   }
 
   [[nodiscard]] BlockVariantID block(SectionLocalPos local) const noexcept {
-    return blocks_[local_index(local)];
+    return storage_->blocks[local_index(local)];
   }
 
   [[nodiscard]] const std::array<BlockVariantID, ChunkVolume>& blocks() const noexcept {
-    return blocks_;
+    return storage_->blocks;
   }
 
   [[nodiscard]] LightWord light(SectionLocalPos local) const noexcept {
-    return lights_[local_index(local)];
+    return storage_->lights[local_index(local)];
   }
 
   [[nodiscard]] const std::array<LightWord, ChunkVolume>& lights() const noexcept {
-    return lights_;
+    return storage_->lights;
   }
 
   [[nodiscard]] FluidCell fluid(SectionLocalPos local) const noexcept {
-    return fluids_[local_index(local)];
+    return storage_->fluids[local_index(local)];
   }
 
   [[nodiscard]] const std::array<FluidCell, ChunkVolume>& fluids() const noexcept {
-    return fluids_;
+    return storage_->fluids;
+  }
+
+  [[nodiscard]] ChunkStorageView storage_view() const noexcept {
+    return storage_;
+  }
+
+  [[nodiscard]] const ChunkStorage* storage_identity() const noexcept {
+    return storage_.get();
   }
 
   bool set_block(SectionLocalPos local, BlockVariantID variant) noexcept;
@@ -220,34 +243,39 @@ public:
   }
 
 private:
+  void ensure_detached_storage();
+
   ChunkCoord coord_{};
   ChunkLifecycleState lifecycle_state_{ChunkLifecycleState::Loaded};
-  std::array<BlockVariantID, ChunkVolume> blocks_{};
-  std::array<LightWord, ChunkVolume> lights_{};
-  std::array<FluidCell, ChunkVolume> fluids_{};
+  ChunkStorageHandle storage_{};
   u64 version_{1};
   u64 published_mesh_version_{};
   ChunkDirtyFlags dirty_flags_{ChunkDirtyFlags::NeedsMesh};
   ChunkMeshState mesh_state_{ChunkMeshState::Dirty};
 };
 
-struct ChunkBoundarySnapshot {
-  std::array<BlockVariantID, ChunkArea> blocks{};
-  std::array<LightWord, ChunkArea> lights{};
-  bool available{};
-};
-
 struct ChunkSnapshot {
   ChunkCoord coord{};
   u64 source_version{};
-  std::array<BlockVariantID, ChunkVolume> blocks{};
-  std::array<LightWord, ChunkVolume> lights{};
-  std::array<ChunkBoundarySnapshot, BlockFaceCount> neighbors{};
-  std::array<BlockVariantID, ChunkHaloVolume> halo_blocks{};
-  std::array<LightWord, ChunkHaloVolume> halo_lights{};
-};
 
-[[nodiscard]] ChunkBoundarySnapshot air_boundary_snapshot();
+  std::array<ChunkStorageView, ChunkSnapshotNeighborhoodVolume> storages{};
+
+  [[nodiscard]] const ChunkStorageView& center_storage() const noexcept {
+    return storages[ChunkSnapshotCenterStorageIndex];
+  }
+
+  [[nodiscard]] const std::array<BlockVariantID, ChunkVolume>& blocks() const noexcept {
+    return center_storage()->blocks;
+  }
+
+  [[nodiscard]] const std::array<LightWord, ChunkVolume>& lights() const noexcept {
+    return center_storage()->lights;
+  }
+
+  [[nodiscard]] const ChunkStorage* center_storage_identity() const noexcept {
+    return center_storage().get();
+  }
+};
 
 [[nodiscard]] ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk);
 

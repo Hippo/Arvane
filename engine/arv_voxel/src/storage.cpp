@@ -3,11 +3,61 @@
 #include <utility>
 
 namespace arv::voxel {
+namespace {
 
-ChunkSection::ChunkSection(ChunkCoord coord) : coord_(coord) {
-  blocks_.fill(AirBlockVariantID);
-  lights_.fill(NoLight);
-  fluids_.fill(empty_fluid_cell());
+[[nodiscard]] ChunkStorageHandle make_chunk_storage() {
+  ChunkStorageHandle storage = std::make_shared<ChunkStorage>();
+  storage->blocks.fill(AirBlockVariantID);
+  storage->lights.fill(NoLight);
+  storage->fluids.fill(empty_fluid_cell());
+  return storage;
+}
+
+[[nodiscard]] ChunkStorageHandle clone_chunk_storage(const ChunkStorage& storage) {
+  return std::make_shared<ChunkStorage>(storage);
+}
+
+[[nodiscard]] constexpr i32 wrapped_snapshot_local(i32 value) noexcept {
+  return value < 0 ? ChunkSize - 1 : (value >= ChunkSize ? 0 : value);
+}
+
+[[nodiscard]] const ChunkStorage* snapshot_storage_for_local(
+    const ChunkSnapshot& snapshot,
+    SectionLocalPos local,
+    SectionLocalPos& storage_local) noexcept {
+  const i32 offset_x = local.value.x < 0 ? -1 : (local.value.x >= ChunkSize ? 1 : 0);
+  const i32 offset_y = local.value.y < 0 ? -1 : (local.value.y >= ChunkSize ? 1 : 0);
+  const i32 offset_z = local.value.z < 0 ? -1 : (local.value.z >= ChunkSize ? 1 : 0);
+
+  if ((offset_x != 0 || offset_y != 0 || offset_z != 0) && !is_valid_halo_local(local)) {
+    return nullptr;
+  }
+
+  const ChunkStorageView& storage =
+      snapshot.storages[snapshot_storage_index(offset_x, offset_y, offset_z)];
+  if (!storage) {
+    return nullptr;
+  }
+
+  storage_local = {{
+      wrapped_snapshot_local(local.value.x),
+      wrapped_snapshot_local(local.value.y),
+      wrapped_snapshot_local(local.value.z),
+  }};
+  return storage.get();
+}
+
+} // namespace
+
+ChunkSection::ChunkSection(ChunkCoord coord) : coord_(coord), storage_(make_chunk_storage()) {
+}
+
+void ChunkSection::ensure_detached_storage() {
+  if (storage_.use_count() <= 1) {
+    return;
+  }
+
+  storage_ = clone_chunk_storage(*storage_);
 }
 
 bool ChunkSection::set_block(SectionLocalPos local, BlockVariantID variant) noexcept {
@@ -15,12 +65,13 @@ bool ChunkSection::set_block(SectionLocalPos local, BlockVariantID variant) noex
     return false;
   }
 
-  BlockVariantID& cell = blocks_[local_index(local)];
-  if (cell == variant) {
+  const usize index = local_index(local);
+  if (storage_->blocks[index] == variant) {
     return false;
   }
 
-  cell = variant;
+  ensure_detached_storage();
+  storage_->blocks[index] = variant;
   ++version_;
   mark_dirty(
       ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh |
@@ -33,12 +84,13 @@ bool ChunkSection::set_light(SectionLocalPos local, LightWord light) noexcept {
     return false;
   }
 
-  LightWord& cell = lights_[local_index(local)];
-  if (cell == light) {
+  const usize index = local_index(local);
+  if (storage_->lights[index] == light) {
     return false;
   }
 
-  cell = light;
+  ensure_detached_storage();
+  storage_->lights[index] = light;
   ++version_;
   mark_dirty(ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh);
   return true;
@@ -49,12 +101,13 @@ bool ChunkSection::set_fluid(SectionLocalPos local, FluidCell fluid, bool affect
     return false;
   }
 
-  FluidCell& cell = fluids_[local_index(local)];
-  if (cell == fluid) {
+  const usize index = local_index(local);
+  if (storage_->fluids[index] == fluid) {
     return false;
   }
 
-  cell = fluid;
+  ensure_detached_storage();
+  storage_->fluids[index] = fluid;
   ++version_;
   ChunkDirtyFlags flags = ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh |
                           ChunkDirtyFlags::NeedsFluidStep;
@@ -66,19 +119,26 @@ bool ChunkSection::set_fluid(SectionLocalPos local, FluidCell fluid, bool affect
 }
 
 void ChunkSection::replace_generated_blocks(std::array<BlockVariantID, ChunkVolume> blocks) noexcept {
-  blocks_ = std::move(blocks);
-  lights_.fill(NoLight);
-  fluids_.fill(empty_fluid_cell());
+  if (storage_.use_count() <= 1) {
+    storage_->blocks = std::move(blocks);
+    storage_->lights.fill(NoLight);
+    storage_->fluids.fill(empty_fluid_cell());
+  } else {
+    ChunkStorageHandle storage = make_chunk_storage();
+    storage->blocks = std::move(blocks);
+    storage_ = std::move(storage);
+  }
   ++version_;
   mark_dirty(ChunkDirtyFlags::NeedsMesh | ChunkDirtyFlags::NeedsRelight);
 }
 
 bool ChunkSection::replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept {
-  if (lights_ == lights) {
+  if (storage_->lights == lights) {
     return false;
   }
 
-  lights_ = std::move(lights);
+  ensure_detached_storage();
+  storage_->lights = std::move(lights);
   ++version_;
   mark_dirty(ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh);
   return true;
@@ -109,126 +169,24 @@ void ChunkSection::mark_mesh_ready(u64 published_version) noexcept {
   clear_dirty(ChunkDirtyFlags::NeedsMesh);
 }
 
-ChunkBoundarySnapshot air_boundary_snapshot() {
-  ChunkBoundarySnapshot snapshot;
-  snapshot.blocks.fill(AirBlockVariantID);
-  snapshot.lights.fill(NoLight);
-  snapshot.available = true;
-  return snapshot;
-}
-
 ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk) {
   ChunkSnapshot snapshot;
   snapshot.coord = chunk.coord();
   snapshot.source_version = chunk.version();
-  snapshot.blocks = chunk.blocks();
-  snapshot.lights = chunk.lights();
-  for (ChunkBoundarySnapshot& boundary : snapshot.neighbors) {
-    boundary = air_boundary_snapshot();
-  }
-  snapshot.halo_blocks.fill(AirBlockVariantID);
-  snapshot.halo_lights.fill(NoLight);
+  snapshot.storages[ChunkSnapshotCenterStorageIndex] = chunk.storage_view();
   return snapshot;
 }
 
 BlockVariantID snapshot_block(const ChunkSnapshot& snapshot, SectionLocalPos local) noexcept {
-  if (is_valid_local(local)) {
-    return snapshot.blocks[local_index(local)];
-  }
-
-  const bool out_x = local.value.x < 0 || local.value.x >= ChunkSize;
-  const bool out_y = local.value.y < 0 || local.value.y >= ChunkSize;
-  const bool out_z = local.value.z < 0 || local.value.z >= ChunkSize;
-  const int out_count = static_cast<int>(out_x) + static_cast<int>(out_y) + static_cast<int>(out_z);
-  if (out_count > 1) {
-    return is_valid_halo_local(local) ? snapshot.halo_blocks[halo_index(local)] : AirBlockVariantID;
-  }
-
-  if (local.value.x < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeX)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::NegativeX, {{0, local.value.y, local.value.z}})]
-               : AirBlockVariantID;
-  }
-  if (local.value.x >= ChunkSize) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveX)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::PositiveX, {{0, local.value.y, local.value.z}})]
-               : AirBlockVariantID;
-  }
-  if (local.value.y < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeY)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::NegativeY, {{local.value.x, 0, local.value.z}})]
-               : AirBlockVariantID;
-  }
-  if (local.value.y >= ChunkSize) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveY)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::PositiveY, {{local.value.x, 0, local.value.z}})]
-               : AirBlockVariantID;
-  }
-  if (local.value.z < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeZ)];
-    return boundary.available
-               ? boundary.blocks[boundary_index_for_face(BlockFace::NegativeZ, {{local.value.x, local.value.y, 0}})]
-               : AirBlockVariantID;
-  }
-
-  const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveZ)];
-  return boundary.available
-             ? boundary.blocks[boundary_index_for_face(BlockFace::PositiveZ, {{local.value.x, local.value.y, 0}})]
-             : AirBlockVariantID;
+  SectionLocalPos storage_local{};
+  const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
+  return storage != nullptr ? storage->blocks[local_index(storage_local)] : AirBlockVariantID;
 }
 
 LightWord snapshot_light(const ChunkSnapshot& snapshot, SectionLocalPos local) noexcept {
-  if (is_valid_local(local)) {
-    return snapshot.lights[local_index(local)];
-  }
-
-  const bool out_x = local.value.x < 0 || local.value.x >= ChunkSize;
-  const bool out_y = local.value.y < 0 || local.value.y >= ChunkSize;
-  const bool out_z = local.value.z < 0 || local.value.z >= ChunkSize;
-  const int out_count = static_cast<int>(out_x) + static_cast<int>(out_y) + static_cast<int>(out_z);
-  if (out_count > 1) {
-    return is_valid_halo_local(local) ? snapshot.halo_lights[halo_index(local)] : NoLight;
-  }
-
-  if (local.value.x < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeX)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::NegativeX, {{0, local.value.y, local.value.z}})]
-               : NoLight;
-  }
-  if (local.value.x >= ChunkSize) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveX)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::PositiveX, {{0, local.value.y, local.value.z}})]
-               : NoLight;
-  }
-  if (local.value.y < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeY)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::NegativeY, {{local.value.x, 0, local.value.z}})]
-               : NoLight;
-  }
-  if (local.value.y >= ChunkSize) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveY)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::PositiveY, {{local.value.x, 0, local.value.z}})]
-               : NoLight;
-  }
-  if (local.value.z < 0) {
-    const auto& boundary = snapshot.neighbors[face_index(BlockFace::NegativeZ)];
-    return boundary.available
-               ? boundary.lights[boundary_index_for_face(BlockFace::NegativeZ, {{local.value.x, local.value.y, 0}})]
-               : NoLight;
-  }
-
-  const auto& boundary = snapshot.neighbors[face_index(BlockFace::PositiveZ)];
-  return boundary.available
-             ? boundary.lights[boundary_index_for_face(BlockFace::PositiveZ, {{local.value.x, local.value.y, 0}})]
-             : NoLight;
+  SectionLocalPos storage_local{};
+  const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
+  return storage != nullptr ? storage->lights[local_index(storage_local)] : NoLight;
 }
 
 } // namespace arv::voxel

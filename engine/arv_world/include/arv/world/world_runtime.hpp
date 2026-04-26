@@ -69,7 +69,11 @@ struct WorldTickStats {
 struct ChunkLightingSnapshot {
   ChunkCoord coord{};
   u64 source_version{};
-  std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks{};
+  voxel::ChunkStorageView storage{};
+
+  [[nodiscard]] const std::array<voxel::BlockVariantID, voxel::ChunkVolume>& blocks() const noexcept {
+    return storage->blocks;
+  }
 };
 
 struct LightingSnapshot {
@@ -178,6 +182,8 @@ private:
   void enqueue_chunk_activation_updates(ChunkCoord coord);
   void store_deferred_boundary_fluid_update(ChunkCoord target, FluidUpdate update);
   void mark_boundary_neighbors_dirty(ChunkCoord coord, SectionLocalPos local) noexcept;
+  void mark_loaded_chunk_neighbors_dirty(ChunkCoord coord) noexcept;
+  void mark_light_dependency_neighbors_dirty(ChunkCoord coord) noexcept;
   void mark_neighbor_mesh_dependency_dirty(ChunkCoord coord) noexcept;
   void mark_neighbor_mesh_only_dependency_dirty(ChunkCoord coord) noexcept;
   u32 process_due_scheduled_ticks();
@@ -203,9 +209,6 @@ private:
       const voxel::BlockRegistry& registry,
       BlockPos pos) const noexcept;
   void rebuild_loaded_lighting(const voxel::BlockRegistry& registry);
-  [[nodiscard]] static voxel::ChunkBoundarySnapshot copy_neighbor_boundary(
-      const voxel::ChunkSection& neighbor,
-      voxel::BlockFace target_face) noexcept;
 
   WorldID id_{};
   std::unordered_map<ChunkCoord, voxel::ChunkSection> chunks_;

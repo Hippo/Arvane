@@ -280,6 +280,14 @@ Preferred approaches:
 * use immutable shared chunk snapshot objects
 * use versioned read-only views with clear lifetime guarantees
 
+For loaded chunk storage, prefer shared immutable payloads with copy-on-write style mutation on the simulation thread.
+
+That means:
+
+* snapshot creation should usually share the current immutable payload cheaply
+* later simulation-thread mutation should detach/clone only if an older payload is still shared by an active snapshot or job
+* workers still receive immutable inputs and must never mutate live chunk storage directly
+
 ---
 
 ## Meshing Jobs

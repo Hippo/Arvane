@@ -176,20 +176,8 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
   }
 
   voxel::ChunkSnapshot snapshot = voxel::make_chunk_snapshot_without_neighbors(*chunk);
-  for (voxel::BlockFace face : AllFaces) {
-    const ChunkCoord neighbor_coord = neighbor_chunk(coord, voxel::axis_direction_from_face(face));
-    const voxel::ChunkSection* neighbor = find_chunk(neighbor_coord);
-    if (neighbor == nullptr) {
-      if (missing_neighbor_policy == MissingNeighborPolicy::RequireLoaded) {
-        return std::nullopt;
-      }
-      snapshot.neighbors[voxel::face_index(face)] = voxel::air_boundary_snapshot();
-      continue;
-    }
-    snapshot.neighbors[voxel::face_index(face)] = copy_neighbor_boundary(*neighbor, face);
-  }
-
-  std::array<const voxel::ChunkSection*, 27> halo_chunks{};
+  // TODO(arvane): Narrow meshing neighbor inputs to compact immutable boundary/edge views
+  // if retaining whole neighboring chunk payload handles becomes a measurable cost.
   for (i32 oz = -1; oz <= 1; ++oz) {
     for (i32 oy = -1; oy <= 1; ++oy) {
       for (i32 ox = -1; ox <= 1; ++ox) {
@@ -205,35 +193,9 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
         if (neighbor == nullptr && missing_neighbor_policy == MissingNeighborPolicy::RequireLoaded) {
           return std::nullopt;
         }
-        halo_chunks[static_cast<usize>((ox + 1) + 3 * ((oy + 1) + 3 * (oz + 1)))] = neighbor;
-      }
-    }
-  }
-
-  for (i32 z = -1; z <= ChunkSize; ++z) {
-    for (i32 y = -1; y <= ChunkSize; ++y) {
-      for (i32 x = -1; x <= ChunkSize; ++x) {
-        const SectionLocalPos halo_local{{x, y, z}};
-        if (voxel::is_valid_local(halo_local)) {
-          continue;
+        if (neighbor != nullptr) {
+          snapshot.storages[voxel::snapshot_storage_index(ox, oy, oz)] = neighbor->storage_view();
         }
-
-        const i32 ox = x < 0 ? -1 : (x >= ChunkSize ? 1 : 0);
-        const i32 oy = y < 0 ? -1 : (y >= ChunkSize ? 1 : 0);
-        const i32 oz = z < 0 ? -1 : (z >= ChunkSize ? 1 : 0);
-        const voxel::ChunkSection* neighbor =
-            halo_chunks[static_cast<usize>((ox + 1) + 3 * ((oy + 1) + 3 * (oz + 1)))];
-        if (neighbor == nullptr) {
-          continue;
-        }
-
-        const SectionLocalPos neighbor_local{{
-            x < 0 ? ChunkSize - 1 : (x >= ChunkSize ? 0 : x),
-            y < 0 ? ChunkSize - 1 : (y >= ChunkSize ? 0 : y),
-            z < 0 ? ChunkSize - 1 : (z >= ChunkSize ? 0 : z),
-        }};
-        snapshot.halo_blocks[voxel::halo_index(halo_local)] = neighbor->block(neighbor_local);
-        snapshot.halo_lights[voxel::halo_index(halo_local)] = neighbor->light(neighbor_local);
       }
     }
   }
@@ -264,6 +226,7 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
       generated.coord,
       voxel::ChunkLifecycleState::Loaded);
   chunk.replace_generated_blocks(std::move(generated.blocks));
+  mark_loaded_chunk_neighbors_dirty(generated.coord);
   return true;
 }
 
@@ -339,7 +302,7 @@ LightingSnapshot WorldRuntime::make_lighting_snapshot() const {
   snapshot.world_id = id_;
   snapshot.chunks.reserve(chunks_.size());
   for (const auto& [coord, chunk] : chunks_) {
-    snapshot.chunks.push_back({coord, chunk.version(), chunk.blocks()});
+    snapshot.chunks.push_back({coord, chunk.version(), chunk.storage_view()});
   }
   return snapshot;
 }
@@ -377,7 +340,7 @@ LightingResult WorldRuntime::build_lighting_result(
     }
 
     const voxel::BlockVariantRecord* variant =
-        registry.variant(chunk->blocks[voxel::local_index(block_to_local(pos))]);
+        registry.variant(chunk->blocks()[voxel::local_index(block_to_local(pos))]);
     return variant != nullptr && !variant->properties.blocks_light;
   };
 
@@ -488,7 +451,7 @@ LightingResult WorldRuntime::build_lighting_result(
         for (i32 x = 0; x < ChunkSize; ++x) {
           const SectionLocalPos local{{x, y, z}};
           const voxel::BlockVariantRecord* variant =
-              registry.variant(chunk.blocks[voxel::local_index(local)]);
+              registry.variant(chunk.blocks()[voxel::local_index(local)]);
           if (variant == nullptr || !variant->properties.emits_light) {
             continue;
           }
@@ -552,6 +515,7 @@ LightingPublishStats WorldRuntime::publish_lighting_result(LightingResult result
 
     if (chunk->replace_lights(std::move(chunk_result.lights))) {
       ++stats.changed_chunks;
+      mark_light_dependency_neighbors_dirty(chunk_result.coord);
     }
     chunk->clear_dirty(voxel::ChunkDirtyFlags::NeedsRelight);
     ++stats.accepted_chunks;
@@ -713,6 +677,42 @@ void WorldRuntime::mark_boundary_neighbors_dirty(ChunkCoord coord, SectionLocalP
         }
       }
     }
+  }
+}
+
+void WorldRuntime::mark_loaded_chunk_neighbors_dirty(ChunkCoord coord) noexcept {
+  for (i32 z = -1; z <= 1; ++z) {
+    for (i32 y = -1; y <= 1; ++y) {
+      for (i32 x = -1; x <= 1; ++x) {
+        if (x == 0 && y == 0 && z == 0) {
+          continue;
+        }
+
+        const ChunkCoord neighbor{{
+            coord.value.x + x,
+            coord.value.y + y,
+            coord.value.z + z,
+        }};
+        const int axis_count =
+            static_cast<int>(x != 0) + static_cast<int>(y != 0) + static_cast<int>(z != 0);
+        if (axis_count == 1) {
+          mark_neighbor_mesh_dependency_dirty(neighbor);
+        } else {
+          mark_neighbor_mesh_only_dependency_dirty(neighbor);
+        }
+      }
+    }
+  }
+}
+
+void WorldRuntime::mark_light_dependency_neighbors_dirty(ChunkCoord coord) noexcept {
+  for (const Vec3i& offset : NeighborOffsets) {
+    mark_neighbor_mesh_only_dependency_dirty(
+        {{
+            coord.value.x + offset.x,
+            coord.value.y + offset.y,
+            coord.value.z + offset.z,
+        }});
   }
 }
 
@@ -1065,43 +1065,6 @@ void WorldRuntime::rebuild_loaded_lighting(const voxel::BlockRegistry& registry)
       chunk->replace_lights(std::move(buffer));
     }
   }
-}
-
-voxel::ChunkBoundarySnapshot WorldRuntime::copy_neighbor_boundary(
-    const voxel::ChunkSection& neighbor,
-    voxel::BlockFace target_face) noexcept {
-  voxel::ChunkBoundarySnapshot boundary;
-  boundary.available = true;
-
-  for (i32 a = 0; a < ChunkSize; ++a) {
-    for (i32 b = 0; b < ChunkSize; ++b) {
-      SectionLocalPos local{};
-      switch (target_face) {
-        case voxel::BlockFace::PositiveX:
-          local = {{0, a, b}};
-          break;
-        case voxel::BlockFace::NegativeX:
-          local = {{ChunkSize - 1, a, b}};
-          break;
-        case voxel::BlockFace::PositiveY:
-          local = {{a, 0, b}};
-          break;
-        case voxel::BlockFace::NegativeY:
-          local = {{a, ChunkSize - 1, b}};
-          break;
-        case voxel::BlockFace::PositiveZ:
-          local = {{a, b, 0}};
-          break;
-        case voxel::BlockFace::NegativeZ:
-          local = {{a, b, ChunkSize - 1}};
-          break;
-      }
-      boundary.blocks[voxel::boundary_index_for_face(target_face, local)] = neighbor.block(local);
-      boundary.lights[voxel::boundary_index_for_face(target_face, local)] = neighbor.light(local);
-    }
-  }
-
-  return boundary;
 }
 
 } // namespace arv::world

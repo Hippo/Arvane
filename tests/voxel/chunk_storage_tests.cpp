@@ -32,12 +32,51 @@ TEST(ChunkStorageTests, SetBlockIncrementsVersionAndMarksDirty) {
   EXPECT_EQ(chunk.version(), initial_version + 1);
 }
 
+TEST(ChunkStorageTests, SnapshotCreationSharesChunkStorageWithoutCopying) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{4}));
+
+  const arv::voxel::ChunkStorage* storage = chunk.storage_identity();
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+
+  EXPECT_EQ(snapshot.center_storage_identity(), storage);
+  EXPECT_EQ(arv::voxel::snapshot_block(snapshot, {{1, 2, 3}}), arv::voxel::BlockVariantID{4});
+}
+
+TEST(ChunkStorageTests, MutatingChunkWithoutActiveSnapshotReusesStorage) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+
+  const arv::voxel::ChunkStorage* storage = chunk.storage_identity();
+  const arv::u64 version = chunk.version();
+  ASSERT_TRUE(chunk.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{4}));
+
+  EXPECT_EQ(chunk.storage_identity(), storage);
+  EXPECT_EQ(chunk.version(), version + 1);
+}
+
+TEST(ChunkStorageTests, MutatingChunkWithActiveSnapshotDetachesAndPreservesSnapshotView) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{4}));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::voxel::ChunkStorage* snapshot_storage = snapshot.center_storage_identity();
+  const arv::u64 version = chunk.version();
+
+  ASSERT_TRUE(chunk.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{9}));
+
+  EXPECT_EQ(snapshot.center_storage_identity(), snapshot_storage);
+  EXPECT_NE(chunk.storage_identity(), snapshot_storage);
+  EXPECT_EQ(arv::voxel::snapshot_block(snapshot, {{1, 2, 3}}), arv::voxel::BlockVariantID{4});
+  EXPECT_EQ(chunk.block({{1, 2, 3}}), arv::voxel::BlockVariantID{9});
+  EXPECT_EQ(chunk.version(), version + 1);
+}
+
 TEST(ChunkStorageTests, SnapshotSamplesPreparedNeighborBoundaries) {
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  arv::voxel::ChunkSection neighbor{{{1, 0, 0}}};
+  ASSERT_TRUE(neighbor.set_block({{0, 7, 9}}, arv::voxel::BlockVariantID{8}));
   arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
-  snapshot.neighbors[arv::voxel::face_index(arv::voxel::BlockFace::PositiveX)]
-      .blocks[arv::voxel::boundary_index_for_face(arv::voxel::BlockFace::PositiveX, {{0, 7, 9}})] =
-      arv::voxel::BlockVariantID{8};
+  snapshot.storages[arv::voxel::snapshot_storage_index(1, 0, 0)] = neighbor.storage_view();
 
   EXPECT_EQ(arv::voxel::snapshot_block(snapshot, {{16, 7, 9}}), arv::voxel::BlockVariantID{8});
   EXPECT_EQ(arv::voxel::snapshot_block(snapshot, {{15, 7, 9}}), arv::voxel::AirBlockVariantID);

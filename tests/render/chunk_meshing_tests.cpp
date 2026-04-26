@@ -176,6 +176,26 @@ TEST(ChunkMeshingTests, SideFacesUseFaceAdjacentAmbientOcclusionSamples) {
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
   ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
   ASSERT_TRUE(chunk.set_block({{2, 2, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{2, 1, 2}}, stone));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {16, 16, 16},
+      arv::voxel::BlockFace::PositiveX);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(vertex_ao(vertex.value()), 0U);
+}
+
+TEST(ChunkMeshingTests, SideFacesIgnoreOccludersOutsideTheirFacePlane) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{2, 2, 1}}, stone));
   ASSERT_TRUE(chunk.set_block({{1, 2, 2}}, stone));
 
   const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
@@ -185,6 +205,26 @@ TEST(ChunkMeshingTests, SideFacesUseFaceAdjacentAmbientOcclusionSamples) {
       {{1, 1, 1}},
       {16, 16, 16},
       arv::voxel::BlockFace::PositiveX);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(vertex_ao(vertex.value()), 2U);
+}
+
+TEST(ChunkMeshingTests, FrontFacesUseFaceAdjacentAmbientOcclusionSamples) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_block({{2, 1, 2}}, stone));
+  ASSERT_TRUE(chunk.set_block({{1, 2, 2}}, stone));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {16, 16, 16},
+      arv::voxel::BlockFace::PositiveZ);
 
   ASSERT_TRUE(vertex);
   EXPECT_EQ(vertex_ao(vertex.value()), 0U);
@@ -240,10 +280,11 @@ TEST(ChunkMeshingTests, NeighborBoundaryCullsChunkEdgeFace) {
   const arv::voxel::BlockRegistry registry = make_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  arv::voxel::ChunkSection neighbor{{{1, 0, 0}}};
   ASSERT_TRUE(chunk.set_block({{15, 1, 1}}, stone));
+  ASSERT_TRUE(neighbor.set_block({{0, 1, 1}}, stone));
   arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
-  snapshot.neighbors[arv::voxel::face_index(arv::voxel::BlockFace::PositiveX)]
-      .blocks[arv::voxel::boundary_index_for_face(arv::voxel::BlockFace::PositiveX, {{0, 1, 1}})] = stone;
+  snapshot.storages[arv::voxel::snapshot_storage_index(1, 0, 0)] = neighbor.storage_view();
 
   const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
 

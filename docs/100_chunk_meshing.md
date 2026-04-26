@@ -792,6 +792,12 @@ A snapshot should include:
 * required lighting data
 * compact render descriptors or lookup handles
 
+Snapshot creation should avoid deep-copying whole chunk payloads by default.
+
+When the runtime already stores chunk data in immutable or shareable payload objects, a meshing snapshot should usually capture shared read-only handles or views instead of copying the full chunk contents.
+
+If the live chunk later mutates while those handles are still in use by a worker, the runtime should detach/clone on write so the in-flight meshing snapshot keeps observing its original stable data.
+
 ### Source Version
 
 Each meshing job must carry the chunk source version it was built from.

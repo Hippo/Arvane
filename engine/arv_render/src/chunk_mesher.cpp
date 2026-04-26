@@ -138,19 +138,50 @@ void emit_cube_face(
   return variant != nullptr && variant->properties.ao_occluder;
 }
 
+[[nodiscard]] std::array<Vec3i, 3> corner_ao_offsets(
+    const ChunkFaceGeometry& face,
+    Vec3i corner) noexcept {
+  const i32 x_offset = corner.x == 0 ? -1 : 1;
+  const i32 y_offset = corner.y == 0 ? -1 : 1;
+  const i32 z_offset = corner.z == 0 ? -1 : 1;
+
+  switch (face.face) {
+    case voxel::BlockFace::PositiveX:
+    case voxel::BlockFace::NegativeX:
+      return {{
+          {face.neighbor_offset.x, y_offset, 0},
+          {face.neighbor_offset.x, 0, z_offset},
+          {face.neighbor_offset.x, y_offset, z_offset},
+      }};
+    case voxel::BlockFace::PositiveY:
+    case voxel::BlockFace::NegativeY:
+      return {{
+          {x_offset, face.neighbor_offset.y, 0},
+          {0, face.neighbor_offset.y, z_offset},
+          {x_offset, face.neighbor_offset.y, z_offset},
+      }};
+    case voxel::BlockFace::PositiveZ:
+    case voxel::BlockFace::NegativeZ:
+      return {{
+          {x_offset, 0, face.neighbor_offset.z},
+          {0, y_offset, face.neighbor_offset.z},
+          {x_offset, y_offset, face.neighbor_offset.z},
+      }};
+  }
+
+  return {{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}};
+}
+
 [[nodiscard]] u8 corner_ao(
     const voxel::ChunkSnapshot& snapshot,
     const voxel::BlockRegistry& registry,
     SectionLocalPos local,
     const ChunkFaceGeometry& face,
     Vec3i corner) noexcept {
-  (void)face;
-  const i32 x_offset = corner.x == 0 ? -1 : 1;
-  const i32 y_offset = corner.y == 0 ? -1 : 1;
-  const i32 z_offset = corner.z == 0 ? -1 : 1;
-  const bool side0_occluded = is_ao_occluder(snapshot, registry, offset_local(local, {x_offset, y_offset, 0}));
-  const bool side1_occluded = is_ao_occluder(snapshot, registry, offset_local(local, {0, y_offset, z_offset}));
-  const bool corner_occluded = is_ao_occluder(snapshot, registry, offset_local(local, {x_offset, y_offset, z_offset}));
+  const std::array<Vec3i, 3> samples = corner_ao_offsets(face, corner);
+  const bool side0_occluded = is_ao_occluder(snapshot, registry, offset_local(local, samples[0]));
+  const bool side1_occluded = is_ao_occluder(snapshot, registry, offset_local(local, samples[1]));
+  const bool corner_occluded = is_ao_occluder(snapshot, registry, offset_local(local, samples[2]));
   return voxel_ambient_occlusion_value(side0_occluded, side1_occluded, corner_occluded);
 }
 
@@ -185,7 +216,7 @@ ChunkMeshData build_chunk_mesh(
     for (i32 y = 0; y < ChunkSize; ++y) {
       for (i32 x = 0; x < ChunkSize; ++x) {
         const SectionLocalPos local{{x, y, z}};
-        const voxel::BlockVariantID self_id = snapshot.blocks[voxel::local_index(local)];
+        const voxel::BlockVariantID self_id = snapshot.blocks()[voxel::local_index(local)];
         const voxel::BlockVariantRecord* self = registry.variant(self_id);
         if (self == nullptr || self->render_category == voxel::RenderCategory::None) {
           continue;

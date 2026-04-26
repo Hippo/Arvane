@@ -720,6 +720,7 @@ The engine should expose chunk access in a way that makes the safe path the easy
 - read access is easier than write access
 - multi-chunk mutation requires deliberate coordination
 - background jobs should prefer snapshots or publication workflows
+- live chunk payloads should use shared immutable storage or equivalent copy-on-write techniques where practical so snapshots stay cheap
 - long-lived raw references to chunk internals should be avoided
 - chunk lifetime and chunk access validity should be mechanically enforced where possible
 
