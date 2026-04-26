@@ -4,6 +4,8 @@
 #include "arv/io/config.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/platform/glfw_window.hpp"
+#include "arv/persistence/save.hpp"
+#include "arv/player/item.hpp"
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/sched/scheduler.hpp"
@@ -20,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -54,11 +57,125 @@ arv::client::InputFrame to_client_input(const arv::platform::InputSnapshot& inpu
       input.move_backward,
       input.move_left,
       input.move_right,
-      input.jump,
-      input.move_down,
-      input.fast,
+      input.jump_pressed,
+      input.jump_held,
+      input.move_down_held,
+      input.sprint_held,
+      input.primary_pressed,
+      input.primary_held,
+      input.secondary_pressed,
+      input.secondary_held,
+      input.toggle_fly_pressed,
+      input.hotbar_select,
+      input.hotbar_scroll_steps,
       input.mouse_delta_x,
       input.mouse_delta_y};
+}
+
+std::filesystem::path default_save_root(const arv::io::EngineConfig& config) {
+  return config.paths.project_root / "server-save";
+}
+
+std::vector<arv::persistence::SavedChunkSection> capture_saved_chunks(
+    const arv::world::WorldRuntime& world) {
+  std::vector<arv::ChunkCoord> coords = world.loaded_chunk_coords();
+  std::sort(coords.begin(), coords.end(), [](const auto& lhs, const auto& rhs) {
+    if (lhs.value.x != rhs.value.x) {
+      return lhs.value.x < rhs.value.x;
+    }
+    if (lhs.value.z != rhs.value.z) {
+      return lhs.value.z < rhs.value.z;
+    }
+    return lhs.value.y < rhs.value.y;
+  });
+
+  std::vector<arv::persistence::SavedChunkSection> chunks;
+  chunks.reserve(coords.size());
+  for (const arv::ChunkCoord coord : coords) {
+    const arv::voxel::ChunkSection* chunk = world.find_chunk(coord);
+    if (chunk == nullptr) {
+      continue;
+    }
+
+    arv::persistence::SavedChunkSection saved;
+    saved.coord = coord;
+    saved.blocks = chunk->blocks();
+    saved.lights = chunk->lights();
+    saved.lighting_valid = !chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+    chunks.push_back(std::move(saved));
+  }
+  return chunks;
+}
+
+std::vector<arv::persistence::PlayerSaveData> capture_player_saves(
+    const arv::server::ServerRuntime& server,
+    std::string_view world_name) {
+  std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
+  std::sort(session_ids.begin(), session_ids.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.value < rhs.value;
+  });
+
+  std::vector<arv::persistence::PlayerSaveData> players;
+  players.reserve(session_ids.size());
+  for (const arv::SessionID session_id : session_ids) {
+    const arv::server::ServerSession* session = server.sessions().find(session_id);
+    if (session == nullptr) {
+      continue;
+    }
+
+    const arv::player::PlayerState* player_state = server.voxel_world().find_player(session->player_id);
+    if (player_state == nullptr) {
+      continue;
+    }
+
+    arv::persistence::PlayerSaveData save;
+    save.profile_name = session->profile_name;
+    save.world_name = std::string{world_name};
+    save.position = player_state->position;
+    save.velocity = player_state->velocity;
+    save.yaw_radians = player_state->yaw_radians;
+    save.pitch_radians = player_state->pitch_radians;
+    save.grounded = player_state->grounded;
+    save.movement_mode = player_state->movement_mode;
+    save.selected_hotbar_slot = player_state->selected_hotbar_slot;
+    save.inventory = player_state->inventory;
+    players.push_back(std::move(save));
+  }
+
+  return players;
+}
+
+void apply_loaded_player_saves(
+    arv::server::ServerRuntime& server,
+    std::string_view world_name,
+    const std::vector<arv::persistence::PlayerSaveData>& loaded_players) {
+  for (const arv::SessionID session_id : server.sessions().session_ids()) {
+    const arv::server::ServerSession* session = server.sessions().find(session_id);
+    if (session == nullptr) {
+      continue;
+    }
+
+    const auto found = std::find_if(
+        loaded_players.begin(),
+        loaded_players.end(),
+        [&](const arv::persistence::PlayerSaveData& player) {
+          return player.profile_name == session->profile_name &&
+                 player.world_name == world_name;
+        });
+    if (found == loaded_players.end()) {
+      continue;
+    }
+
+    arv::player::PlayerState& player_state = server.voxel_world().ensure_player(session->player_id);
+    player_state.position = found->position;
+    player_state.velocity = found->velocity;
+    player_state.yaw_radians = found->yaw_radians;
+    player_state.pitch_radians = found->pitch_radians;
+    player_state.grounded = found->grounded;
+    player_state.movement_mode = found->movement_mode;
+    player_state.selected_hotbar_slot = found->selected_hotbar_slot;
+    player_state.inventory = found->inventory;
+  }
 }
 
 struct ChunkViewState {
@@ -158,6 +275,7 @@ bool refresh_chunk_view(
     arv::ChunkCoord center,
     arv::i32 min_chunk_y,
     arv::i32 max_chunk_y,
+    arv::u64 world_seed,
     const arv::world::WorldGenerationConfig& generation_config,
     const arv::world::WorldGenerationPalette& generation_palette,
     const arv::voxel::BlockRegistry& block_registry,
@@ -249,7 +367,7 @@ bool refresh_chunk_view(
 
         arv::world::ChunkGenerationRequest request;
         request.world_id = arv::server::DefaultWorldID;
-        request.seed = 1;
+        request.seed = world_seed;
         request.coord = coord;
         request.config = generation_config;
         request.palette = generation_palette;
@@ -428,23 +546,6 @@ int main(int argc, char** argv) {
 
   auto transport_pair = arv::net::make_in_process_transport_pair();
 
-  arv::server::ServerRuntime integrated_server(std::move(transport_pair.server));
-  auto server_start = integrated_server.start({
-      arv::server::ServerMode::Integrated,
-      config.simulation.base_tps,
-      {"in-process", 0}});
-  if (!server_start) {
-    logger.error("server", server_start.error().message);
-    return 1;
-  }
-
-  arv::client::ClientRuntime client(std::move(transport_pair.client));
-  auto connect_result = client.connect_integrated();
-  if (!connect_result) {
-    logger.error("client", connect_result.error().message);
-    return 1;
-  }
-
   arv::render::OpenGLRenderer renderer;
   auto chunk_vertex_shader = arv::io::read_text_file(
       config.paths.asset_root / "shaders/world/chunk.vert",
@@ -488,6 +589,24 @@ int main(int argc, char** argv) {
     return 1;
   }
   const arv::voxel::BlockRegistry block_registry = std::move(block_registry_result.value());
+  const arv::u64 block_registry_hash = arv::persistence::hash_block_registry(block_registry);
+
+  auto item_registry_result = arv::player::ItemRegistry::build_default_block_items(block_registry);
+  if (!item_registry_result) {
+    logger.error("items", item_registry_result.error().message);
+    return 1;
+  }
+  const arv::player::ItemRegistry item_registry = std::move(item_registry_result.value());
+  const arv::u64 item_registry_hash = arv::persistence::hash_item_registry(item_registry);
+
+  const std::filesystem::path save_root = default_save_root(config);
+  auto loaded_save_result =
+      arv::persistence::load_server_root(save_root, block_registry, item_registry);
+  if (!loaded_save_result) {
+    logger.error("save", loaded_save_result.error().message);
+    return 1;
+  }
+  const arv::persistence::LoadedSaveData loaded_save = std::move(loaded_save_result.value());
 
   auto worldgen_text = arv::io::read_text_file(
       config.paths.asset_root / "config/worldgen/overworld.yaml",
@@ -503,17 +622,67 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  arv::world::WorldGenerationConfig generation_config = std::move(worldgen_config.value());
+  arv::u64 world_seed = 1;
+  std::string world_save_name{"default"};
+  std::pair<arv::i32, arv::i32> visible_chunk_y =
+      visible_worldgen_chunk_y_range(generation_config);
+  if (loaded_save.has_world_metadata) {
+    generation_config = loaded_save.world.generation_config;
+    world_seed = loaded_save.world.seed;
+    world_save_name = loaded_save.world.name;
+    visible_chunk_y = {loaded_save.world.min_chunk_y, loaded_save.world.max_chunk_y};
+  }
+
   auto worldgen_palette = arv::world::resolve_world_generation_palette(
-      worldgen_config.value(),
+      generation_config,
       block_registry);
   if (!worldgen_palette) {
     logger.error("worldgen", worldgen_palette.error().message);
     return 1;
   }
 
-  const arv::world::WorldGenerationConfig generation_config = std::move(worldgen_config.value());
   const arv::world::WorldGenerationPalette generation_palette = std::move(worldgen_palette.value());
-  const auto [min_chunk_y, max_chunk_y] = visible_worldgen_chunk_y_range(generation_config);
+  const auto [min_chunk_y, max_chunk_y] = visible_chunk_y;
+
+  arv::server::ServerRuntime integrated_server(std::move(transport_pair.server));
+  auto server_start = integrated_server.start({
+      arv::server::ServerMode::Integrated,
+      config.simulation.base_tps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry,
+      arv::player::default_player_tuning(),
+      arv::voxel::make_water_fluid_definition()});
+  if (!server_start) {
+    logger.error("server", server_start.error().message);
+    return 1;
+  }
+
+  if (loaded_save.has_world_metadata) {
+    integrated_server.voxel_world().set_tick_index(loaded_save.world.tick_index);
+  }
+  for (const arv::persistence::SavedChunkSection& chunk : loaded_save.chunks) {
+    integrated_server.voxel_world().restore_saved_chunk(
+        chunk.coord,
+        chunk.blocks,
+        chunk.lights);
+  }
+
+  arv::client::ClientRuntime client(std::move(transport_pair.client));
+  auto connect_result = client.connect_integrated();
+  if (!connect_result) {
+    logger.error("client", connect_result.error().message);
+    return 1;
+  }
+  integrated_server.tick();
+  client.fixed_tick(integrated_server.tick_index());
+  apply_loaded_player_saves(integrated_server, world_save_name, loaded_save.players);
+  if (!loaded_save.players.empty()) {
+    integrated_server.tick();
+    client.fixed_tick(integrated_server.tick_index());
+  }
+
   arv::sched::WorkerThreadConfig worker_thread_config;
   worker_thread_config.worker_thread_count = config.jobs.worker_threads;
   worker_thread_config.reserved_thread_count = config.jobs.reserved_threads;
@@ -542,6 +711,7 @@ int main(int argc, char** argv) {
           camera_chunk_coord(client.camera()),
           min_chunk_y,
           max_chunk_y,
+          world_seed,
           generation_config,
           generation_palette,
           block_registry,
@@ -574,7 +744,6 @@ int main(int argc, char** argv) {
       window.request_close();
     }
     client.submit_input(to_client_input(platform_input));
-    client.update_freecam(delta.count());
     if (!refresh_chunk_view(
             integrated_server.voxel_world(),
             renderer,
@@ -585,6 +754,7 @@ int main(int argc, char** argv) {
             camera_chunk_coord(client.camera()),
             min_chunk_y,
             max_chunk_y,
+            world_seed,
             generation_config,
             generation_palette,
             block_registry,
@@ -595,9 +765,6 @@ int main(int argc, char** argv) {
     ticks.add_time(delta.count());
     while (ticks.consume_tick()) {
       integrated_server.tick();
-      (void)integrated_server.voxel_world().tick(
-          block_registry,
-          arv::voxel::make_water_fluid_definition());
       client.fixed_tick(integrated_server.tick_index());
     }
 
@@ -613,8 +780,39 @@ int main(int argc, char** argv) {
     window.swap_buffers();
   }
 
+  const std::vector<arv::persistence::SavedChunkSection> saved_chunks =
+      capture_saved_chunks(integrated_server.voxel_world());
+  const std::vector<arv::persistence::PlayerSaveData> player_saves =
+      capture_player_saves(integrated_server, world_save_name);
+  const arv::persistence::SaveMetadata save_metadata{
+      arv::persistence::CurrentSaveFormatVersion,
+      std::string{arv::persistence::CurrentGameVersion},
+      block_registry_hash,
+      item_registry_hash};
+  const arv::persistence::WorldMetadata world_metadata{
+      world_save_name,
+      world_seed,
+      integrated_server.voxel_world().tick_index(),
+      generation_config,
+      min_chunk_y,
+      max_chunk_y,
+      block_registry_hash,
+      item_registry_hash};
+  auto save_result = arv::persistence::save_server_root(
+      save_root,
+      save_metadata,
+      world_metadata,
+      saved_chunks,
+      player_saves,
+      block_registry,
+      item_registry);
+
   renderer.begin_shutdown();
   integrated_server.shutdown();
+  if (!save_result) {
+    logger.error("save", save_result.error().message);
+    return 1;
+  }
   logger.info("desktop", "shutdown complete");
   return 0;
 }

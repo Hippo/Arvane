@@ -4,17 +4,23 @@ include(GoogleTest)
 
 add_executable(arv_tests
   client/camera_tests.cpp
+  client/local_player_controller_tests.cpp
   core/coordinate_tests.cpp
   core/fixed_timestep_tests.cpp
   core/id_tests.cpp
   core/math_tests.cpp
   io/config_tests.cpp
   net/integrated_handshake_tests.cpp
+  persistence/region_file_tests.cpp
+  persistence/save_tests.cpp
+  physics/collision_tests.cpp
   protocol/handshake_tests.cpp
   protocol/packet_tests.cpp
+  player/inventory_tests.cpp
   render/mesh_handoff_tests.cpp
   render/chunk_meshing_tests.cpp
   sched/scheduler_tests.cpp
+  server/player_interaction_tests.cpp
   server/registry_tests.cpp
   voxel/block_registry_tests.cpp
   voxel/chunk_storage_tests.cpp
@@ -25,11 +31,16 @@ add_executable(arv_tests
   world/world_runtime_tests.cpp
 )
 
+target_include_directories(arv_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 target_link_libraries(arv_tests PRIVATE
   arv_client
   arv_core
   arv_io
   arv_net
+  arv_persistence
+  arv_physics
+  arv_player
   arv_protocol
   arv_render
   arv_sched

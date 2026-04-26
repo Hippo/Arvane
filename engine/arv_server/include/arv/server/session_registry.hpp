@@ -6,6 +6,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace arv::server {
 
@@ -37,6 +38,7 @@ public:
   [[nodiscard]] const ServerSession* find_by_connection(net::ConnectionID connection_id) const noexcept;
   bool remove_by_connection(net::ConnectionID connection_id);
   [[nodiscard]] usize size() const noexcept;
+  [[nodiscard]] std::vector<SessionID> session_ids() const;
 
 private:
   u64 next_session_id_{1};

@@ -2,12 +2,20 @@
 
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
+#include "arv/player/item.hpp"
+#include "arv/player/player_constants.hpp"
+#include "arv/player/player_state.hpp"
+#include "arv/protocol/player_input.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/server/session_registry.hpp"
 #include "arv/server/world_registry.hpp"
+#include "arv/voxel/block.hpp"
+#include "arv/voxel/fluid.hpp"
 #include "arv/world/world_runtime.hpp"
 
+#include <optional>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace arv::server {
@@ -27,6 +35,10 @@ struct ServerStartInfo {
   ServerMode mode{ServerMode::Integrated};
   TickRate base_tps{DefaultBaseTps};
   net::ListenAddress listen_address{};
+  const voxel::BlockRegistry* block_registry{};
+  const player::ItemRegistry* item_registry{};
+  player::PlayerTuning player_tuning{};
+  voxel::FluidDefinition fluid_definition{voxel::make_water_fluid_definition()};
 };
 
 class ServerRuntime {
@@ -75,6 +87,12 @@ private:
   void handle_network_event(net::NetworkEvent event);
 
   void handle_message(net::ConnectionID connection_id, const std::vector<u8>& packet);
+  void handle_input_batch(net::ConnectionID connection_id, const protocol::ClientInputBatch& batch);
+  void tick_players();
+  void apply_player_command(player::PlayerState& player_state, const player::PlayerCommand& command);
+  void send_player_corrections();
+  void seed_player_inventory(player::PlayerState& player_state);
+  [[nodiscard]] bool inventory_is_empty(const player::Inventory& inventory) const noexcept;
 
   std::unique_ptr<net::ITransport> transport_;
   ServerRuntimeState state_{ServerRuntimeState::Stopped};
@@ -86,6 +104,11 @@ private:
   WorldRegistry worlds_;
   world::WorldRuntime default_world_{DefaultWorldID};
   std::vector<net::NetworkEvent> inbound_events_;
+  const voxel::BlockRegistry* block_registry_{};
+  const player::ItemRegistry* item_registry_{};
+  player::PlayerTuning player_tuning_{};
+  voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
+  std::unordered_map<PlayerID, player::PlayerCommand> pending_player_commands_;
 };
 
 } // namespace arv::server

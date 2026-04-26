@@ -1,0 +1,44 @@
+{
+  "generation_config": {
+    "base_height": 12,
+    "height_scale": 14,
+    "id": "arvane:overworld",
+    "max_y": 96,
+    "min_y": -32,
+    "sea_level": 24,
+    "seed_salt": "overworld",
+    "surface_layers": [
+      {
+        "block_name": "arvane:grass_block",
+        "depth": 1,
+        "remaining": false
+      },
+      {
+        "block_name": "arvane:dirt",
+        "depth": 3,
+        "remaining": false
+      },
+      {
+        "block_name": "arvane:stone",
+        "depth": 0,
+        "remaining": true
+      }
+    ],
+    "terrain_amplitude": 1.0,
+    "terrain_frequency": 0.03500000014901161,
+    "terrain_gain": 0.5,
+    "terrain_lacunarity": 2.0,
+    "terrain_noise_type": "simplex_2d",
+    "terrain_octaves": 4,
+    "version": 1
+  },
+  "max_chunk_y": 1,
+  "min_chunk_y": -2,
+  "name": "default",
+  "registry_refs": {
+    "block_registry_hash": 10230449840359385109,
+    "item_registry_hash": 554112307292356826
+  },
+  "seed": 1,
+  "tick_index": 10604
+}

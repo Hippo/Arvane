@@ -2,10 +2,12 @@
 
 #include "arv/core/expected.hpp"
 #include "arv/core/id.hpp"
+#include "arv/core/math.hpp"
 #include "arv/core/types.hpp"
 
 #include <array>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -91,6 +93,7 @@ struct BlockVariantRecord {
   bool hide_same_variant_faces{};
   std::array<bool, BlockFaceCount> renders_face{};
   std::array<bool, BlockFaceCount> occludes_face{};
+  std::vector<Aabb3f> collision_boxes{};
 };
 
 using BlockDefinitionsResult = Expected<std::vector<BlockDefinition>, BlockRegistryError>;
@@ -152,6 +155,14 @@ public:
   [[nodiscard]] std::optional<BlockVariantID> find_variant(std::string_view debug_name) const;
 
   [[nodiscard]] bool has_tag(BlockID id, std::string_view tag) const;
+
+  [[nodiscard]] BlockID block_id(BlockVariantID variant_id) const noexcept;
+
+  [[nodiscard]] std::string_view variant_name(BlockVariantID variant_id) const noexcept;
+
+  [[nodiscard]] std::span<const Aabb3f> collision_boxes(BlockVariantID variant_id) const noexcept;
+
+  [[nodiscard]] bool is_replaceable(BlockVariantID variant_id) const noexcept;
 
   [[nodiscard]] bool should_emit_face(
       BlockVariantID self_id,

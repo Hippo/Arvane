@@ -150,3 +150,12 @@ struct std::hash<arv::ChunkColumnCoord> {
     return (x * 16777619U) ^ z;
   }
 };
+
+template<>
+struct std::hash<arv::RegionCoord> {
+  std::size_t operator()(const arv::RegionCoord& coord) const noexcept {
+    const std::size_t x = std::hash<arv::i32>{}(coord.x);
+    const std::size_t z = std::hash<arv::i32>{}(coord.z);
+    return (x * 16777619U) ^ z;
+  }
+};

@@ -132,6 +132,26 @@ void ChunkSection::replace_generated_blocks(std::array<BlockVariantID, ChunkVolu
   mark_dirty(ChunkDirtyFlags::NeedsMesh | ChunkDirtyFlags::NeedsRelight);
 }
 
+void ChunkSection::replace_saved_contents(
+    std::array<BlockVariantID, ChunkVolume> blocks,
+    std::array<LightWord, ChunkVolume> lights) noexcept {
+  if (storage_.use_count() <= 1) {
+    storage_->blocks = std::move(blocks);
+    storage_->lights = std::move(lights);
+    storage_->fluids.fill(empty_fluid_cell());
+  } else {
+    ChunkStorageHandle storage = make_chunk_storage();
+    storage->blocks = std::move(blocks);
+    storage->lights = std::move(lights);
+    storage_ = std::move(storage);
+  }
+
+  ++version_;
+  dirty_flags_ = ChunkDirtyFlags::NeedsMesh;
+  mesh_state_ = ChunkMeshState::Dirty;
+  published_mesh_version_ = 0;
+}
+
 bool ChunkSection::replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept {
   if (storage_->lights == lights) {
     return false;

@@ -35,8 +35,22 @@ usize WorldRuntime::loaded_chunk_count() const noexcept {
   return chunks_.size();
 }
 
+std::vector<ChunkCoord> WorldRuntime::loaded_chunk_coords() const {
+  std::vector<ChunkCoord> coords;
+  coords.reserve(chunks_.size());
+  for (const auto& [coord, chunk] : chunks_) {
+    (void)chunk;
+    coords.push_back(coord);
+  }
+  return coords;
+}
+
 TickIndex WorldRuntime::tick_index() const noexcept {
   return tick_index_;
+}
+
+void WorldRuntime::set_tick_index(TickIndex tick_index) noexcept {
+  tick_index_ = tick_index;
 }
 
 void WorldRuntime::set_tick_policy(WorldTickPolicy policy) noexcept {
@@ -228,6 +242,47 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
   chunk.replace_generated_blocks(std::move(generated.blocks));
   mark_loaded_chunk_neighbors_dirty(generated.coord);
   return true;
+}
+
+void WorldRuntime::restore_saved_chunk(
+    ChunkCoord coord,
+    std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
+    std::array<voxel::LightWord, voxel::ChunkVolume> lights) noexcept {
+  voxel::ChunkSection& chunk = ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded);
+  chunk.replace_saved_contents(std::move(blocks), std::move(lights));
+}
+
+player::PlayerState& WorldRuntime::ensure_player(PlayerID player_id) {
+  auto [iter, inserted] = players_.try_emplace(player_id);
+  if (inserted) {
+    iter->second.player_id = player_id;
+    iter->second.world_id = id_;
+  }
+  return iter->second;
+}
+
+player::PlayerState* WorldRuntime::find_player(PlayerID player_id) noexcept {
+  const auto found = players_.find(player_id);
+  return found == players_.end() ? nullptr : &found->second;
+}
+
+const player::PlayerState* WorldRuntime::find_player(PlayerID player_id) const noexcept {
+  const auto found = players_.find(player_id);
+  return found == players_.end() ? nullptr : &found->second;
+}
+
+usize WorldRuntime::player_count() const noexcept {
+  return players_.size();
+}
+
+std::vector<PlayerID> WorldRuntime::player_ids() const {
+  std::vector<PlayerID> ids;
+  ids.reserve(players_.size());
+  for (const auto& [player_id, player] : players_) {
+    (void)player;
+    ids.push_back(player_id);
+  }
+  return ids;
 }
 
 void WorldRuntime::schedule_block_update(

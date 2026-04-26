@@ -4,6 +4,7 @@
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
+#include "arv/player/player_state.hpp"
 #include "arv/voxel/storage.hpp"
 #include "arv/world/world_generation.hpp"
 
@@ -108,7 +109,9 @@ public:
   [[nodiscard]] voxel::ChunkSection* find_chunk(ChunkCoord coord) noexcept;
   [[nodiscard]] const voxel::ChunkSection* find_chunk(ChunkCoord coord) const noexcept;
   [[nodiscard]] usize loaded_chunk_count() const noexcept;
+  [[nodiscard]] std::vector<ChunkCoord> loaded_chunk_coords() const;
   [[nodiscard]] TickIndex tick_index() const noexcept;
+  void set_tick_index(TickIndex tick_index) noexcept;
   void set_tick_policy(WorldTickPolicy policy) noexcept;
   [[nodiscard]] WorldTickPolicy tick_policy() const noexcept;
   [[nodiscard]] bool is_chunk_active(ChunkCoord coord) const noexcept;
@@ -130,6 +133,15 @@ public:
   [[nodiscard]] bool validate_mesh_result(ChunkCoord coord, u64 source_version) const noexcept;
   bool publish_mesh_result(ChunkCoord coord, u64 source_version) noexcept;
   bool publish_generated_chunk(GeneratedChunk generated) noexcept;
+  void restore_saved_chunk(
+      ChunkCoord coord,
+      std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
+      std::array<voxel::LightWord, voxel::ChunkVolume> lights) noexcept;
+  player::PlayerState& ensure_player(PlayerID player_id);
+  [[nodiscard]] player::PlayerState* find_player(PlayerID player_id) noexcept;
+  [[nodiscard]] const player::PlayerState* find_player(PlayerID player_id) const noexcept;
+  [[nodiscard]] usize player_count() const noexcept;
+  [[nodiscard]] std::vector<PlayerID> player_ids() const;
   void schedule_block_update(
       BlockPos pos,
       TickIndex delay_ticks,
@@ -212,6 +224,7 @@ private:
 
   WorldID id_{};
   std::unordered_map<ChunkCoord, voxel::ChunkSection> chunks_;
+  std::unordered_map<PlayerID, player::PlayerState> players_;
   TickIndex tick_index_{};
   WorldTickPolicy tick_policy_{};
   std::vector<ScheduledBlockUpdate> scheduled_block_updates_;

@@ -1,0 +1,83 @@
+#include "arv/client/local_player_controller.hpp"
+
+#include <algorithm>
+
+namespace arv::client {
+namespace {
+
+[[nodiscard]] u8 wrap_hotbar_slot(i32 slot) noexcept {
+  constexpr i32 Count = player::DefaultHotbarSlotCount;
+  const i32 wrapped = ((slot % Count) + Count) % Count;
+  return static_cast<u8>(wrapped);
+}
+
+} // namespace
+
+void LocalPlayerController::submit_input(InputFrame input) noexcept {
+  move_forward_ = input.move_forward;
+  move_backward_ = input.move_backward;
+  move_left_ = input.move_left;
+  move_right_ = input.move_right;
+  jump_held_ = input.jump_held;
+  move_down_held_ = input.move_down_held;
+  sprint_held_ = input.sprint_held;
+  primary_held_ = input.primary_held;
+  secondary_held_ = input.secondary_held;
+  jump_pressed_ = jump_pressed_ || input.jump_pressed;
+  primary_pressed_ = primary_pressed_ || input.primary_pressed;
+  secondary_pressed_ = secondary_pressed_ || input.secondary_pressed;
+  toggle_fly_pressed_ = toggle_fly_pressed_ || input.toggle_fly_pressed;
+
+  if (input.hotbar_select.has_value() && player::is_valid_hotbar_slot(input.hotbar_select.value())) {
+    selected_hotbar_slot_ = input.hotbar_select.value();
+  }
+  if (input.hotbar_scroll_steps != 0) {
+    selected_hotbar_slot_ = wrap_hotbar_slot(
+        static_cast<i32>(selected_hotbar_slot_) + static_cast<i32>(input.hotbar_scroll_steps));
+  }
+
+  look_delta_x_ += input.mouse_delta_x;
+  look_delta_y_ += input.mouse_delta_y;
+  camera_.apply_mouse_delta(
+      input.mouse_delta_x * player::DefaultMouseSensitivityRadians,
+      -input.mouse_delta_y * player::DefaultMouseSensitivityRadians);
+}
+
+player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_index) noexcept {
+  player::PlayerCommand command;
+  command.client_tick = tick_index;
+  command.move_x = static_cast<i16>((move_right_ ? 1 : 0) - (move_left_ ? 1 : 0));
+  command.move_z = static_cast<i16>((move_forward_ ? 1 : 0) - (move_backward_ ? 1 : 0));
+  command.look_delta_x = static_cast<i16>(std::clamp(look_delta_x_, -32768.0F, 32767.0F));
+  command.look_delta_y = static_cast<i16>(std::clamp(look_delta_y_, -32768.0F, 32767.0F));
+  command.jump_pressed = jump_pressed_;
+  command.jump_held = jump_held_;
+  command.move_down_held = move_down_held_;
+  command.sprint_held = sprint_held_;
+  command.primary_pressed = primary_pressed_;
+  command.primary_held = primary_held_;
+  command.secondary_pressed = secondary_pressed_;
+  command.secondary_held = secondary_held_;
+  command.toggle_fly_pressed = toggle_fly_pressed_;
+  command.selected_hotbar_slot = selected_hotbar_slot_;
+
+  jump_pressed_ = false;
+  primary_pressed_ = false;
+  secondary_pressed_ = false;
+  toggle_fly_pressed_ = false;
+  look_delta_x_ = 0.0F;
+  look_delta_y_ = 0.0F;
+  return command;
+}
+
+void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorrection& correction) noexcept {
+  selected_hotbar_slot_ = correction.selected_hotbar_slot;
+  camera_.set_world_id(correction.world_id);
+  camera_.set_rotation(correction.yaw_radians, correction.pitch_radians);
+  camera_.set_position(
+      {correction.position.x,
+       correction.position.y + player::DefaultStandingEyeHeight,
+       correction.position.z});
+}
+
+} // namespace arv::client

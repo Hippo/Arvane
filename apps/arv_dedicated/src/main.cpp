@@ -2,8 +2,12 @@
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
+#include "arv/player/item.hpp"
+#include "arv/player/player_constants.hpp"
 #include "arv/server/dedicated_lifetime.hpp"
 #include "arv/server/server_runtime.hpp"
+#include "arv/voxel/block.hpp"
+#include "arv/voxel/fluid.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -79,6 +83,43 @@ int main(int argc, char** argv) {
   const arv::io::EngineConfig config = config_result.value();
 
   transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingRegistries, logger);
+  auto block_definition_text = arv::io::read_text_file(
+      config.paths.asset_root / "config/blocks.json",
+      "dedicated block definitions");
+  if (!block_definition_text) {
+    logger.error("blocks", block_definition_text.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    return 1;
+  }
+
+  auto block_definitions =
+      arv::voxel::parse_block_definitions_json(block_definition_text.value());
+  if (!block_definitions) {
+    logger.error("blocks", block_definitions.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    return 1;
+  }
+
+  auto block_registry_result =
+      arv::voxel::BlockRegistry::build(std::move(block_definitions.value()));
+  if (!block_registry_result) {
+    logger.error("blocks", block_registry_result.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    return 1;
+  }
+  const arv::voxel::BlockRegistry block_registry =
+      std::move(block_registry_result.value());
+
+  auto item_registry_result =
+      arv::player::ItemRegistry::build_default_block_items(block_registry);
+  if (!item_registry_result) {
+    logger.error("items", item_registry_result.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    return 1;
+  }
+  const arv::player::ItemRegistry item_registry =
+      std::move(item_registry_result.value());
+
   transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingWorlds, logger);
 
   arv::net::GameNetworkingSocketsEnvironment gns;
@@ -92,7 +133,11 @@ int main(int argc, char** argv) {
   auto start_result = server.start({
       arv::server::ServerMode::Dedicated,
       config.simulation.base_tps,
-      {config.network.bind_address, config.network.port}});
+      {config.network.bind_address, config.network.port},
+      &block_registry,
+      &item_registry,
+      arv::player::default_player_tuning(),
+      arv::voxel::make_water_fluid_definition()});
   if (!start_result) {
     logger.error("server", start_result.error().message);
     transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);

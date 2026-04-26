@@ -10,6 +10,8 @@ target_link_libraries(arv_desktop PRIVATE
   arv_io
   arv_net
   arv_platform
+  arv_persistence
+  arv_player
   arv_render
   arv_sched
   arv_server

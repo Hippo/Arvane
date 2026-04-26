@@ -3,6 +3,7 @@
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
 
+#include <optional>
 #include <string>
 
 struct GLFWwindow;
@@ -30,9 +31,17 @@ struct InputSnapshot {
   bool move_backward{};
   bool move_left{};
   bool move_right{};
-  bool jump{};
-  bool move_down{};
-  bool fast{};
+  bool jump_pressed{};
+  bool jump_held{};
+  bool move_down_held{};
+  bool sprint_held{};
+  bool primary_pressed{};
+  bool primary_held{};
+  bool secondary_pressed{};
+  bool secondary_held{};
+  bool toggle_fly_pressed{};
+  std::optional<u8> hotbar_select{};
+  i8 hotbar_scroll_steps{};
   f32 mouse_delta_x{};
   f32 mouse_delta_y{};
 };
@@ -83,6 +92,8 @@ public:
 
   static void poll_events();
 
+  void accumulate_scroll(f64 y_offset) noexcept;
+
 private:
   void destroy();
 
@@ -90,6 +101,12 @@ private:
   bool has_last_cursor_{};
   f64 last_cursor_x_{};
   f64 last_cursor_y_{};
+  f64 accumulated_scroll_y_{};
+  bool previous_jump_held_{};
+  bool previous_primary_held_{};
+  bool previous_secondary_held_{};
+  bool previous_toggle_fly_held_{};
+  bool previous_hotbar_keys_[9]{};
 };
 
 } // namespace arv::platform

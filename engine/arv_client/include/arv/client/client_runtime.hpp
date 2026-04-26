@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/client/camera_shell.hpp"
+#include "arv/client/local_player_controller.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/protocol/handshake.hpp"
@@ -12,24 +13,11 @@
 
 namespace arv::client {
 
-struct InputFrame {
-  bool move_forward{};
-  bool move_backward{};
-  bool move_left{};
-  bool move_right{};
-  bool jump{};
-  bool move_down{};
-  bool fast{};
-  f32 mouse_delta_x{};
-  f32 mouse_delta_y{};
-};
-
 class ClientRuntime {
 public:
   explicit ClientRuntime(std::unique_ptr<net::ITransport> transport);
   net::ConnectResult connect_integrated();
   void submit_input(InputFrame input);
-  void update_freecam(Seconds delta_seconds) noexcept;
   void fixed_tick(TickIndex tick_index);
   [[nodiscard]] render::FramePacket build_frame_packet(
       f32 interpolation_alpha,
@@ -43,12 +31,12 @@ private:
   net::NetworkResult send_client_hello();
   void handle_network_event(net::NetworkEvent event);
   void handle_message(const std::vector<u8>& packet);
+  net::NetworkResult send_input_batch(TickIndex tick_index);
 
   std::unique_ptr<net::ITransport> transport_;
   net::ConnectionID connection_id_{};
   net::ConnectionState connection_state_{net::ConnectionState::Disconnected};
-  CameraShell camera_{};
-  InputFrame latest_input_{};
+  LocalPlayerController player_controller_{};
   std::vector<net::NetworkEvent> inbound_events_;
 };
 

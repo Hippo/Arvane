@@ -64,4 +64,14 @@ usize SessionRegistry::size() const noexcept {
   return sessions_.size();
 }
 
+std::vector<SessionID> SessionRegistry::session_ids() const {
+  std::vector<SessionID> ids;
+  ids.reserve(sessions_.size());
+  for (const auto& [session_id, session] : sessions_) {
+    (void)session;
+    ids.push_back(session_id);
+  }
+  return ids;
+}
+
 } // namespace arv::server

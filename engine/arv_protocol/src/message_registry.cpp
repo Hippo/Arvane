@@ -29,6 +29,10 @@ MessageRegistry MessageRegistry::make_core_registry() {
                              MessageDirection::Bidirectional, ReliabilityClass::UnreliableEvent});
   registry.register_message({MessageType::Pong, "Pong",
                              MessageDirection::Bidirectional, ReliabilityClass::UnreliableEvent});
+  registry.register_message({MessageType::ClientInputBatch, "ClientInputBatch",
+                             MessageDirection::ClientToServer, ReliabilityClass::UnreliableLatestWins});
+  registry.register_message({MessageType::PlayerCorrection, "PlayerCorrection",
+                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins});
   return registry;
 }
 

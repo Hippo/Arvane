@@ -22,6 +22,8 @@ enum class MessageType : u16 {
   DisconnectReason = 0x0003,
   Ping = 0x0004,
   Pong = 0x0005,
+  ClientInputBatch = 0x0100,
+  PlayerCorrection = 0x0101,
 };
 
 } // namespace arv::protocol

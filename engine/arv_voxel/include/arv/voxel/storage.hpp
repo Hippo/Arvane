@@ -216,6 +216,10 @@ public:
 
   void replace_generated_blocks(std::array<BlockVariantID, ChunkVolume> blocks) noexcept;
 
+  void replace_saved_contents(
+      std::array<BlockVariantID, ChunkVolume> blocks,
+      std::array<LightWord, ChunkVolume> lights) noexcept;
+
   bool replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept;
 
   void mark_dirty(ChunkDirtyFlags flags) noexcept;

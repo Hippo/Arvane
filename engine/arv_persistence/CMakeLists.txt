@@ -1,0 +1,12 @@
+set(ARV_PERSISTENCE_HEADERS
+  include/arv/persistence/region_file.hpp
+  include/arv/persistence/save.hpp
+)
+
+add_library(arv_persistence STATIC
+  src/region_file.cpp
+  src/save.cpp
+)
+target_include_directories(arv_persistence PUBLIC include)
+target_link_libraries(arv_persistence PUBLIC arv_core arv_player arv_voxel arv_world)
+target_link_libraries(arv_persistence PRIVATE nlohmann_json::nlohmann_json)

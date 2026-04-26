@@ -25,26 +25,17 @@ net::ConnectResult ClientRuntime::connect_integrated() {
 }
 
 void ClientRuntime::submit_input(InputFrame input) {
-  latest_input_ = input;
-}
-
-void ClientRuntime::update_freecam(Seconds delta_seconds) noexcept {
-  camera_.apply_freecam_input({latest_input_.move_forward,
-                               latest_input_.move_backward,
-                               latest_input_.move_left,
-                               latest_input_.move_right,
-                               latest_input_.jump,
-                               latest_input_.move_down,
-                               latest_input_.fast,
-                               latest_input_.mouse_delta_x,
-                               latest_input_.mouse_delta_y,
-                               delta_seconds});
+  player_controller_.submit_input(std::move(input));
 }
 
 void ClientRuntime::fixed_tick(TickIndex tick_index) {
   (void)tick_index;
   if (!transport_) {
     return;
+  }
+
+  if (connection_state_ == net::ConnectionState::InGame) {
+    (void)send_input_batch(tick_index);
   }
 
   inbound_events_ = transport_->poll_events();
@@ -55,7 +46,7 @@ void ClientRuntime::fixed_tick(TickIndex tick_index) {
 
 render::FramePacket ClientRuntime::build_frame_packet(f32 interpolation_alpha, u32 viewport_width, u32 viewport_height) const {
   render::FramePacket packet;
-  packet.camera = camera_.snapshot(viewport_width, viewport_height, interpolation_alpha);
+  packet.camera = player_controller_.camera().snapshot(viewport_width, viewport_height, interpolation_alpha);
   packet.world_view = render::render_view_from_camera(packet.camera);
   return packet;
 }
@@ -65,11 +56,11 @@ net::ConnectionState ClientRuntime::connection_state() const noexcept {
 }
 
 const CameraShell& ClientRuntime::camera() const noexcept {
-  return camera_;
+  return player_controller_.camera();
 }
 
 CameraShell& ClientRuntime::camera() noexcept {
-  return camera_;
+  return player_controller_.camera();
 }
 
 net::NetworkResult ClientRuntime::send_client_hello() {
@@ -105,25 +96,54 @@ void ClientRuntime::handle_network_event(net::NetworkEvent event) {
 
 void ClientRuntime::handle_message(const std::vector<u8>& packet) {
   auto decoded = protocol::deserialize_envelope(packet);
-  if (!decoded || decoded.value().envelope.message_type != protocol::MessageType::ServerHello) {
+  if (!decoded) {
     return;
   }
 
-  auto server_hello = protocol::deserialize_server_hello(decoded.value().payload);
-  if (!server_hello) {
-    connection_state_ = net::ConnectionState::Disconnecting;
-    return;
-  }
+  switch (decoded.value().envelope.message_type) {
+    case protocol::MessageType::ServerHello: {
+      auto server_hello = protocol::deserialize_server_hello(decoded.value().payload);
+      if (!server_hello) {
+        connection_state_ = net::ConnectionState::Disconnecting;
+        return;
+      }
 
-  if (!server_hello.value().accepted) {
-    connection_state_ = net::ConnectionState::Disconnecting;
-    return;
-  }
+      if (!server_hello.value().accepted) {
+        connection_state_ = net::ConnectionState::Disconnecting;
+        return;
+      }
 
-  camera_.set_world_id(server_hello.value().initial_world_id);
-  connection_state_ = server_hello.value().required_followup_sync
-                          ? net::ConnectionState::RegistrySync
-                          : net::ConnectionState::InGame;
+      player_controller_.camera().set_world_id(server_hello.value().initial_world_id);
+      connection_state_ = server_hello.value().required_followup_sync
+                              ? net::ConnectionState::RegistrySync
+                              : net::ConnectionState::InGame;
+      return;
+    }
+    case protocol::MessageType::PlayerCorrection: {
+      auto correction = protocol::deserialize_player_correction(decoded.value().payload);
+      if (!correction) {
+        return;
+      }
+      player_controller_.apply_authoritative_state(correction.value());
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+net::NetworkResult ClientRuntime::send_input_batch(TickIndex tick_index) {
+  const player::PlayerCommand command = player_controller_.consume_command(tick_index);
+  protocol::ClientInputBatch batch;
+  batch.first_input_tick = tick_index;
+  batch.inputs.push_back(protocol::input_sample_from_command(command));
+
+  const std::vector<u8> payload = protocol::serialize_client_input_batch(batch);
+  const std::vector<u8> packet = protocol::serialize_envelope(
+      {protocol::CurrentProtocolVersion, protocol::MessageType::ClientInputBatch, 0, 0, 0, 0},
+      payload);
+  return transport_->send(
+      {connection_id_, protocol::ReliabilityClass::UnreliableLatestWins, std::move(packet)});
 }
 
 } // namespace arv::client

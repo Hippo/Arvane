@@ -108,6 +108,9 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
       variant.hide_same_variant_faces = definition.hide_same_variant_faces;
       variant.renders_face.fill(definition.render_category != RenderCategory::None && definition.properties.full_cube);
       variant.occludes_face.fill(definition.properties.full_cube && definition.properties.opaque);
+      if (definition.properties.collidable && definition.properties.full_cube) {
+        variant.collision_boxes.push_back({{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 1.0F}});
+      }
 
       if (block.variants.empty()) {
         block.default_variant = variant_id;
@@ -167,6 +170,29 @@ bool BlockRegistry::has_tag(BlockID id, std::string_view tag) const {
     return false;
   }
   return std::find(record->tags.begin(), record->tags.end(), tag) != record->tags.end();
+}
+
+BlockID BlockRegistry::block_id(BlockVariantID variant_id) const noexcept {
+  const BlockVariantRecord* record = variant(variant_id);
+  return record == nullptr ? AirBlockID : record->block_id;
+}
+
+std::string_view BlockRegistry::variant_name(BlockVariantID variant_id) const noexcept {
+  const BlockVariantRecord* record = variant(variant_id);
+  return record == nullptr ? AirBlockName : std::string_view{record->debug_name};
+}
+
+std::span<const Aabb3f> BlockRegistry::collision_boxes(BlockVariantID variant_id) const noexcept {
+  const BlockVariantRecord* record = variant(variant_id);
+  if (record == nullptr) {
+    return {};
+  }
+  return record->collision_boxes;
+}
+
+bool BlockRegistry::is_replaceable(BlockVariantID variant_id) const noexcept {
+  const BlockVariantRecord* record = variant(variant_id);
+  return record != nullptr && record->properties.replaceable;
 }
 
 bool BlockRegistry::should_emit_face(
