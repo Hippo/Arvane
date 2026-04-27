@@ -42,8 +42,8 @@ DedicatedLaunchOptions parse_launch_options(int argc, char** argv) {
     } else if (arg == "--config") {
       options.config.explicit_config_path = std::filesystem::path{argv[++i]};
       explicit_config = true;
-    } else if (arg == "--asset-root") {
-      options.config.explicit_asset_root = std::filesystem::path{argv[++i]};
+    } else if (arg == "--arvane-home") {
+      options.config.explicit_arvane_home_path = std::filesystem::path{argv[++i]};
     } else if (arg == "--project-root") {
       options.config.project_root = std::filesystem::path{argv[++i]};
     }
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
 
   transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingRegistries, logger);
   auto block_definition_text = arv::io::read_text_file(
-      config.paths.asset_root / "config/blocks.json",
+      config.paths.assets_path() / "config/blocks.json",
       "dedicated block definitions");
   if (!block_definition_text) {
     logger.error("blocks", block_definition_text.error().message);

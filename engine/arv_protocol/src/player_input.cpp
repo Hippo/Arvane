@@ -83,6 +83,7 @@ std::vector<u8> serialize_player_correction(const PlayerCorrection& correction) 
   write_f32(writer, correction.pitch_radians);
   writer.write<player::MovementMode>(correction.movement_mode);
   writer.write_bool(correction.grounded);
+  writer.write_bool(correction.sneaking);
   writer.write<u8>(correction.selected_hotbar_slot);
   return std::move(writer).take_bytes();
 }
@@ -102,10 +103,12 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
   auto pitch = read_f32(reader);
   auto movement_mode = reader.read<player::MovementMode>();
   auto grounded = reader.read_bool();
+  auto sneaking = reader.read_bool();
   auto selected_hotbar_slot = reader.read<u8>();
 
   if (!server_tick || !player_id || !world_id || !pos_x || !pos_y || !pos_z || !vel_x ||
-      !vel_y || !vel_z || !yaw || !pitch || !movement_mode || !grounded || !selected_hotbar_slot) {
+      !vel_y || !vel_z || !yaw || !pitch || !movement_mode || !grounded || !sneaking ||
+      !selected_hotbar_slot) {
     return Expected<PlayerCorrection, ProtocolError>::failure(
         ProtocolError{"failed to decode player correction"});
   }
@@ -120,6 +123,7 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
   correction.pitch_radians = pitch.value();
   correction.movement_mode = movement_mode.value();
   correction.grounded = grounded.value();
+  correction.sneaking = sneaking.value();
   correction.selected_hotbar_slot = selected_hotbar_slot.value();
   return Expected<PlayerCorrection, ProtocolError>::success(std::move(correction));
 }
@@ -135,7 +139,7 @@ player::PlayerCommand input_sample_to_command(
   command.look_delta_y = sample.look_delta_y;
   command.jump_pressed = has_button(sample.buttons, ClientInputButtons::JumpPressed);
   command.jump_held = has_button(sample.buttons, ClientInputButtons::JumpHeld);
-  command.move_down_held = has_button(sample.buttons, ClientInputButtons::MoveDownHeld);
+  command.sneak_held = has_button(sample.buttons, ClientInputButtons::SneakHeld);
   command.sprint_held = has_button(sample.buttons, ClientInputButtons::SprintHeld);
   command.primary_pressed = has_button(sample.buttons, ClientInputButtons::PrimaryPressed);
   command.primary_held = has_button(sample.buttons, ClientInputButtons::PrimaryHeld);
@@ -154,8 +158,8 @@ InputSample input_sample_from_command(const player::PlayerCommand& command) noex
   if (command.jump_held) {
     buttons = buttons | ClientInputButtons::JumpHeld;
   }
-  if (command.move_down_held) {
-    buttons = buttons | ClientInputButtons::MoveDownHeld;
+  if (command.sneak_held) {
+    buttons = buttons | ClientInputButtons::SneakHeld;
   }
   if (command.sprint_held) {
     buttons = buttons | ClientInputButtons::SprintHeld;

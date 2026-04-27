@@ -95,6 +95,7 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   correction.pitch_radians = -0.25F;
   correction.movement_mode = arv::player::MovementMode::Flying;
   correction.grounded = false;
+  correction.sneaking = true;
   correction.selected_hotbar_slot = 6;
 
   const std::vector<arv::u8> bytes = arv::protocol::serialize_player_correction(correction);
@@ -110,5 +111,6 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   EXPECT_FLOAT_EQ(decoded.value().pitch_radians, -0.25F);
   EXPECT_EQ(decoded.value().movement_mode, arv::player::MovementMode::Flying);
   EXPECT_FALSE(decoded.value().grounded);
+  EXPECT_TRUE(decoded.value().sneaking);
   EXPECT_EQ(decoded.value().selected_hotbar_slot, 6U);
 }

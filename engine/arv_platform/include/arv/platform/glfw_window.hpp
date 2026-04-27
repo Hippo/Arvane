@@ -1,8 +1,11 @@
 #pragma once
 
+#include "arv/platform/input_bindings.hpp"
+
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
 
+#include <array>
 #include <optional>
 #include <string>
 
@@ -33,7 +36,7 @@ struct InputSnapshot {
   bool move_right{};
   bool jump_pressed{};
   bool jump_held{};
-  bool move_down_held{};
+  bool sneak_held{};
   bool sprint_held{};
   bool primary_pressed{};
   bool primary_held{};
@@ -85,6 +88,7 @@ public:
   void request_close();
 
   InputSnapshot poll_input();
+  void set_input_bindings(InputBindings bindings) noexcept;
 
   [[nodiscard]] FramebufferSize framebuffer_size() const;
 
@@ -102,11 +106,8 @@ private:
   f64 last_cursor_x_{};
   f64 last_cursor_y_{};
   f64 accumulated_scroll_y_{};
-  bool previous_jump_held_{};
-  bool previous_primary_held_{};
-  bool previous_secondary_held_{};
-  bool previous_toggle_fly_held_{};
-  bool previous_hotbar_keys_[9]{};
+  InputBindings input_bindings_{default_input_bindings()};
+  std::array<bool, static_cast<usize>(LogicalAction::Count)> previous_action_active_{};
 };
 
 } // namespace arv::platform

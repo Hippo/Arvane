@@ -291,15 +291,11 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
   glUniform1f(chunk_alpha_uniform_, transparent ? 0.55F : 1.0F);
   for (const ChunkDrawItem& item : draw_items) {
     const auto found = chunks_.find(item.key);
-    if (found == chunks_.end()) {
+    if (!should_draw_chunk_mesh(found == chunks_.end() ? nullptr : &found->second.state, item)) {
       continue;
     }
 
     const ChunkGpuState& chunk = found->second;
-    if (item.expected_version != 0 && chunk.state.uploaded_version != item.expected_version) {
-      continue;
-    }
-
     const GpuMesh& mesh = transparent ? chunk.transparent : chunk.opaque;
     if (mesh.index_count == 0) {
       continue;

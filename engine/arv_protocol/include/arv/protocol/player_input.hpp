@@ -14,7 +14,7 @@ enum class ClientInputButtons : u32 {
   None = 0U,
   JumpPressed = 1U << 0U,
   JumpHeld = 1U << 1U,
-  MoveDownHeld = 1U << 2U,
+  SneakHeld = 1U << 2U,
   SprintHeld = 1U << 3U,
   PrimaryPressed = 1U << 4U,
   PrimaryHeld = 1U << 5U,
@@ -55,6 +55,7 @@ struct PlayerCorrection {
   f32 pitch_radians{};
   player::MovementMode movement_mode{player::MovementMode::Walking};
   bool grounded{};
+  bool sneaking{};
   u8 selected_hotbar_slot{};
 };
 

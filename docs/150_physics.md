@@ -672,6 +672,295 @@ The controller should not:
 
 ---
 
+Here’s a clean, drop-in section for your physics doc that stays consistent with your existing movement + AABB model and avoids introducing weird coupling:
+
+---
+
+## Sprinting
+
+Sprinting is a movement modifier applied to player-controlled entities that increases horizontal movement speed while active.
+
+It does **not** change the core collision or physics model. Instead, it scales the intended movement velocity before collision resolution.
+
+---
+
+### Activation Rules
+
+Sprinting is controlled at the **player controller/input layer**, not the physics system.
+
+The physics system receives sprinting as a simple boolean flag:
+
+```cpp
+bool is_sprinting;
+```
+
+Typical activation conditions (implemented outside physics):
+
+- Forward movement input is active
+- Sprint key is held (or toggled)
+- Player is not obstructed in a way that prevents sprinting
+- Player has sufficient stamina (if stamina is implemented later)
+
+Physics does **not** validate these rules.
+
+---
+
+### Movement Behavior
+
+When sprinting is active:
+
+- Horizontal movement speed is increased by a configurable multiplier
+- Vertical motion (gravity, jumping, falling) is unchanged
+
+Example:
+
+```cpp
+float base_speed = player.walk_speed;
+float speed = is_sprinting
+    ? base_speed * player.sprint_multiplier
+    : base_speed;
+```
+
+This `speed` is used to compute the desired movement vector before collision resolution.
+
+---
+
+### Collision Interaction
+
+Sprinting does **not** modify collision handling:
+
+- AABB collision resolution remains identical
+- Per-axis movement stepping is unchanged
+- No tunneling behavior should be introduced
+
+If higher speeds increase the risk of tunneling:
+
+- The physics system should rely on existing safeguards (e.g., smaller step sizes or swept checks if implemented)
+
+---
+
+### Directional Constraints
+
+By default:
+
+- Sprinting only applies when moving **forward**
+
+Optional (controller-level decision):
+
+- Disable sprinting when moving backward or strafing
+- Reduce multiplier when not moving forward
+
+Physics remains agnostic to direction—it only consumes the final velocity.
+
+---
+
+### Jump Interaction
+
+Apply a small horizontal boost when jumping while sprinting
+
+This should be implemented in the player controller, not physics.
+
+---
+
+### Extensibility
+
+Sprinting is designed to compose cleanly with future systems:
+
+- Stamina systems (enable/disable sprint)
+- Status effects (speed boosts/slows)
+- Surface modifiers (ice, mud, etc.)
+
+All such systems should modify the **input velocity**, not the collision system.
+
+---
+
+### Summary
+
+- Sprinting is a **velocity modifier**, not a physics rule
+- Physics remains deterministic and unchanged
+- All logic lives in the controller layer except final velocity application
+
+---
+
+Drop-in section:
+
+---
+
+## Sneaking / Crouching
+
+### Overview
+
+Sneaking is a player movement state that reduces movement speed, shortens the player collision box, lowers the camera, and enables safe-walk behavior near ledges.
+
+Unlike sprinting, sneaking affects both the controller and the physics representation because the player’s effective collision height changes.
+
+---
+
+### Responsibilities
+
+The **player controller** owns:
+
+- Sneak input state
+- Whether the player wants to sneak
+- Sneak speed multiplier
+- Camera target height
+- Safe-walk movement intent
+
+The **physics system** owns:
+
+- Applying the shorter collision box
+- Validating whether the player can safely stand back up
+- Resolving movement against blocks using the active AABB
+
+---
+
+### Collision Box Height
+
+When sneaking is active, the player AABB height is reduced.
+
+Example configuration:
+
+```cpp
+struct PlayerPhysicsConfig {
+    float standing_height = 1.8f;
+    float sneaking_height = 1.5f;
+    float width = 0.6f;
+};
+```
+
+The bottom of the AABB remains anchored at the player’s feet. Only the top of the AABB changes.
+
+This means:
+
+- Sneaking does not move the player downward
+- The player can fit under lower ceilings
+- Standing back up requires a clearance check
+
+---
+
+### Standing Up Clearance
+
+When the player releases sneak, physics must check whether the standing-height AABB would collide with the world.
+
+If the standing AABB overlaps solid blocks:
+
+- Keep the player sneaking
+- Keep the shorter AABB
+- Keep the lowered camera target
+
+If the standing AABB is clear:
+
+- Restore standing height
+- Restore normal movement speed
+- Restore standing camera target
+
+The controller may request unsneak, but physics has final authority over whether it is valid.
+
+---
+
+### Camera Height
+
+Sneaking lowers the player camera.
+
+The camera should smoothly interpolate toward the sneaking eye height instead of snapping instantly.
+
+Example configuration:
+
+```cpp
+struct PlayerCameraConfig {
+    float standing_eye_height = 1.62f;
+    float sneaking_eye_height = 1.35f;
+    float eye_height_lerp_speed = 12.0f;
+};
+```
+
+Camera height is visual only and must not drive collision behavior.
+
+The collision box determines physics; the camera follows the resolved player state.
+
+---
+
+### Movement Speed
+
+Sneaking reduces horizontal movement speed using a configurable multiplier.
+
+Example:
+
+```cpp
+float speed = is_sneaking
+    ? walk_speed * sneak_speed_multiplier
+    : walk_speed;
+```
+
+Vertical movement, gravity, and jumping are unchanged unless explicitly handled by the player controller.
+
+---
+
+### Safe Walk
+
+Safe walk prevents a sneaking player from walking off ledges.
+
+When sneaking and grounded, horizontal movement should be clamped so the player remains supported by solid ground beneath their AABB.
+
+This behavior is part of player movement resolution, not world collision itself.
+
+Safe walk should:
+
+- Apply only while sneaking
+- Apply only while grounded
+- Affect horizontal movement only
+- Prevent movement that would leave the player unsupported
+- Still allow falling if the block beneath the player is removed
+
+---
+
+### Safe Walk Support Check
+
+Before accepting horizontal movement while sneaking, test whether the resulting AABB would still have support below it.
+
+A simple implementation:
+
+1. Compute the candidate horizontal movement.
+2. Move the player AABB horizontally by that amount.
+3. Check a small distance below the candidate AABB feet.
+4. If no supporting solid block exists, reduce or cancel the movement.
+
+The support check should use a small downward epsilon rather than relying on exact floating-point contact.
+
+Example:
+
+```cpp
+constexpr float support_check_depth = 0.05f;
+```
+
+---
+
+### Axis Clamping
+
+Safe walk should clamp movement per axis instead of simply cancelling all movement.
+
+For example, if diagonal movement would walk off a ledge:
+
+- Try X movement independently
+- Try Z movement independently
+- Keep any axis that remains supported
+- Reject the axis that would leave support
+
+This preserves smooth edge movement and allows sliding along ledges.
+
+---
+
+### Summary
+
+- Sneaking shortens the player AABB
+- The feet remain anchored; only the top changes
+- Standing back up requires a clearance check
+- Camera height follows the resolved sneak state
+- Safe walk clamps grounded horizontal movement near ledges
+- Safe walk is controller/player movement behavior, not a general collision rule
+
+---
+
 ## Terrain Edges and Corner Behavior
 
 ### Wall Sliding

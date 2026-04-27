@@ -21,7 +21,7 @@ struct PlayerCommand {
   i16 look_delta_y{};
   bool jump_pressed{};
   bool jump_held{};
-  bool move_down_held{};
+  bool sneak_held{};
   bool sprint_held{};
   bool primary_pressed{};
   bool primary_held{};
@@ -39,6 +39,7 @@ struct PlayerState {
   f32 yaw_radians{};
   f32 pitch_radians{};
   bool grounded{};
+  bool sneaking{};
   MovementMode movement_mode{MovementMode::Walking};
   Inventory inventory{DefaultPlayerInventorySlotCount};
   u8 selected_hotbar_slot{};
@@ -53,6 +54,7 @@ struct PlayerViewState {
   f32 yaw_radians{};
   f32 pitch_radians{};
   bool grounded{};
+  bool sneaking{};
   MovementMode movement_mode{MovementMode::Walking};
   u8 selected_hotbar_slot{};
 };

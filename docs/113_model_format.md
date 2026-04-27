@@ -80,7 +80,7 @@ This means:
 
 ## Block Model Format
 
-Example: [stairs.json](../assets/models/block/stairs.json)
+Example: [stairs.json](../arvane_home/assets/models/block/stairs.json)
 
 ### Structure
 
@@ -140,7 +140,7 @@ A block model is composed of one or more axis-aligned boxes.
 
 ## Entity Model Format
 
-Example: [pig.json](../assets/models/entity/pig.json)
+Example: [pig.json](../arvane_home/assets/models/entity/pig.json)
 
 ### Structure
 

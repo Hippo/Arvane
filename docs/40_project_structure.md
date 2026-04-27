@@ -83,7 +83,13 @@ Defines runnable products.
 arvane/
 ├─ docs/
 ├─ tools/
-├─ assets/
+├─ arvane_home/
+│  ├─ assets/
+│  ├─ plugins/
+│  ├─ config/
+│  ├─ saves/
+│  ├─ logs/
+│  └─ cache/
 ├─ tests/
 ├─ examples/
 ├─ engine/
@@ -113,6 +119,36 @@ arvane/
 │  └─ arv_dedicated/
 └─ sandbox/
 ```
+
+## Runtime Home Directory
+
+`arvane_home/` is the runtime home directory for the engine/game.
+
+In development, it lives at the project root by default.
+
+It contains:
+
+* `assets/`
+* `plugins/`
+* `config/`
+* `saves/`
+* optional `logs/`
+* optional `cache/`
+
+`saves/` contains **server save directories**, not individual world directories.
+
+Example:
+
+```text
+arvane_home/
+  saves/
+    server-save-1/
+      players/
+      worlds/
+        default/
+```
+
+Code should not hardcode root-relative runtime paths outside the central filesystem/path utility.
 
 ---
 
@@ -607,4 +643,3 @@ Arvane is built around:
 * **minimal global systems**
 * **interface-driven architecture**
 * **plugin-first extensibility**
-

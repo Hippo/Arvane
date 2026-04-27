@@ -15,6 +15,29 @@ TEST(RenderMeshHandoffTests, RejectsStaleMeshUpload) {
   EXPECT_FALSE(arv::render::should_accept_chunk_mesh_upload(&current, stale));
 }
 
+TEST(RenderMeshHandoffTests, KeepsResidentMeshDrawableWhileNewerUploadIsPending) {
+  arv::render::ChunkRenderState current;
+  current.uploaded_version = 4;
+  current.resident = true;
+
+  arv::render::ChunkDrawItem draw_item;
+  draw_item.expected_version = 5;
+
+  EXPECT_TRUE(arv::render::should_draw_chunk_mesh(&current, draw_item));
+}
+
+TEST(RenderMeshHandoffTests, SkipsChunkWithoutResidentMesh) {
+  arv::render::ChunkDrawItem draw_item;
+  draw_item.expected_version = 5;
+
+  EXPECT_FALSE(arv::render::should_draw_chunk_mesh(nullptr, draw_item));
+
+  arv::render::ChunkRenderState current;
+  current.uploaded_version = 4;
+  current.resident = false;
+  EXPECT_FALSE(arv::render::should_draw_chunk_mesh(&current, draw_item));
+}
+
 TEST(RenderMeshHandoffTests, AcceptsMatchingLiveChunkVersion) {
   arv::render::ChunkMeshData mesh;
   mesh.source_version = 8;

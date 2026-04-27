@@ -24,9 +24,11 @@ namespace {
 [[nodiscard]] arv::Vec3f player_eye_position(
     const player::PlayerState& player_state,
     const player::PlayerTuning& tuning) noexcept {
+  const f32 eye_height =
+      player_state.sneaking ? tuning.sneaking_eye_height : tuning.standing_eye_height;
   return {
       player_state.position.x,
-      player_state.position.y + tuning.standing_eye_height,
+      player_state.position.y + eye_height,
       player_state.position.z};
 }
 
@@ -260,6 +262,7 @@ void ServerRuntime::apply_player_command(
   physics::KinematicConfig physics_config;
   physics_config.walk_speed = player_tuning_.walk_speed;
   physics_config.sprint_speed = player_tuning_.sprint_speed;
+  physics_config.sneak_speed = player_tuning_.sneak_speed;
   physics_config.air_speed = player_tuning_.air_speed;
   physics_config.fly_speed = player_tuning_.fly_speed;
   physics_config.fly_vertical_speed = player_tuning_.fly_vertical_speed;
@@ -268,19 +271,21 @@ void ServerRuntime::apply_player_command(
   physics_config.terminal_velocity = player_tuning_.terminal_velocity;
   physics_config.body_width = player_tuning_.body_width;
   physics_config.body_height = player_tuning_.body_height;
+  physics_config.sneaking_body_height = player_tuning_.sneaking_body_height;
+  physics_config.sneak_support_probe_depth = player_tuning_.sneak_support_probe_depth;
 
   physics::KinematicInput input;
   input.move_x = command.move_x;
   input.move_z = command.move_z;
   input.jump_pressed = command.jump_pressed;
   input.jump_held = command.jump_held;
-  input.move_down_held = command.move_down_held;
+  input.sneak_held = command.sneak_held;
   input.sprint_held = command.sprint_held;
   input.fly_mode = player_state.movement_mode == player::MovementMode::Flying;
 
   const physics::KinematicStepResult step = physics::step_kinematic_body(
       collision_query,
-      {player_state.position, player_state.velocity, player_state.grounded},
+      {player_state.position, player_state.velocity, player_state.grounded, player_state.sneaking},
       player_state.yaw_radians,
       tick_duration_seconds(base_tps_),
       input,
@@ -288,6 +293,7 @@ void ServerRuntime::apply_player_command(
   player_state.position = step.body.position;
   player_state.velocity = step.body.velocity;
   player_state.grounded = step.body.grounded;
+  player_state.sneaking = step.body.sneaking;
 
   world::WorldCollisionQuery interaction_query(default_world_, *block_registry_, false);
   const Vec3f eye_position = player_eye_position(player_state, player_tuning_);
@@ -348,6 +354,7 @@ void ServerRuntime::apply_player_command(
     const physics::KinematicConfig placement_config{
         player_tuning_.walk_speed,
         player_tuning_.sprint_speed,
+        player_tuning_.sneak_speed,
         player_tuning_.air_speed,
         player_tuning_.fly_speed,
         player_tuning_.fly_vertical_speed,
@@ -355,8 +362,11 @@ void ServerRuntime::apply_player_command(
         player_tuning_.gravity_per_second,
         player_tuning_.terminal_velocity,
         player_tuning_.body_width,
-        player_tuning_.body_height};
-    const Aabb3f player_bounds = physics::make_body_bounds(player_state.position, placement_config);
+        player_tuning_.body_height,
+        player_tuning_.sneaking_body_height,
+        player_tuning_.sneak_support_probe_depth};
+    const Aabb3f player_bounds =
+        physics::make_body_bounds(player_state.position, placement_config, player_state.sneaking);
     for (const Aabb3f& local_box : block_registry_->collision_boxes(placed_variant)) {
       Aabb3f world_box{
           {local_box.min.x + static_cast<f32>(place_pos.value.x),
@@ -398,6 +408,7 @@ void ServerRuntime::send_player_corrections() {
     correction.pitch_radians = player_state->pitch_radians;
     correction.movement_mode = player_state->movement_mode;
     correction.grounded = player_state->grounded;
+    correction.sneaking = player_state->sneaking;
     correction.selected_hotbar_slot = player_state->selected_hotbar_slot;
 
     std::vector<u8> payload = protocol::serialize_player_correction(correction);

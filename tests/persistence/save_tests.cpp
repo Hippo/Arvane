@@ -74,6 +74,8 @@ arv::persistence::SavedChunkSection make_saved_chunk(
 
 TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   TempDir temp_dir;
+  const std::filesystem::path server_save_root =
+      temp_dir.path / "arvane_home" / "saves" / "server-save-1";
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
       arv::testsupport::make_test_item_registry(block_registry);
@@ -111,7 +113,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   const std::vector<arv::persistence::PlayerSaveData> players{player};
 
   ASSERT_TRUE(arv::persistence::save_server_root(
-      temp_dir.path,
+      server_save_root,
       save_metadata,
       world_metadata,
       chunks,
@@ -119,8 +121,12 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       block_registry,
       item_registry));
 
+  EXPECT_TRUE(std::filesystem::exists(server_save_root / "save.json"));
+  EXPECT_TRUE(std::filesystem::exists(server_save_root / "players" / "local_player.dat"));
+  EXPECT_TRUE(std::filesystem::exists(server_save_root / "worlds" / "default" / "world.json"));
+
   auto loaded = arv::persistence::load_server_root(
-      temp_dir.path,
+      server_save_root,
       block_registry,
       item_registry);
 

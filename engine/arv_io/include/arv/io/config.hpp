@@ -10,6 +10,11 @@
 
 namespace arv::io {
 
+inline constexpr std::string_view DefaultArvaneHomeDirectoryName = "arvane_home";
+inline constexpr std::string_view DefaultEngineConfigFileName = "engine.yaml";
+inline constexpr std::string_view DefaultInputBindingsFileName = "input_bindings.yaml";
+inline constexpr std::string_view DefaultServerSaveName = "server-save-1";
+
 struct WindowConfig {
   u32 width{1280};
   u32 height{720};
@@ -54,8 +59,47 @@ struct ChunkPipelineConfig {
 
 struct PathConfig {
   std::filesystem::path project_root{"."};
-  std::filesystem::path asset_root{"assets"};
+  std::filesystem::path arvane_home_root{};
+  std::filesystem::path asset_root{};
+  std::filesystem::path plugins_root{};
+  std::filesystem::path config_root{};
+  std::filesystem::path saves_root{};
+  std::filesystem::path logs_root{};
+  std::filesystem::path cache_root{};
   std::filesystem::path config_file{};
+  std::filesystem::path input_bindings_file{};
+
+  [[nodiscard]] const std::filesystem::path& arvane_home_path() const noexcept {
+    return arvane_home_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& assets_path() const noexcept {
+    return asset_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& plugins_path() const noexcept {
+    return plugins_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& config_path() const noexcept {
+    return config_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& saves_path() const noexcept {
+    return saves_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& logs_path() const noexcept {
+    return logs_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& cache_path() const noexcept {
+    return cache_root;
+  }
+
+  [[nodiscard]] std::filesystem::path server_save_path(std::string_view save_name) const {
+    return saves_root / std::filesystem::path{save_name};
+  }
 };
 
 struct EngineConfig {
@@ -78,7 +122,7 @@ using TextFileResult = Expected<std::string, ConfigError>;
 
 struct ConfigLoadOptions {
   std::filesystem::path explicit_config_path{};
-  std::filesystem::path explicit_asset_root{};
+  std::filesystem::path explicit_arvane_home_path{};
   std::filesystem::path project_root{};
   bool missing_config_is_error{};
 };

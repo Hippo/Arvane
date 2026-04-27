@@ -10,6 +10,13 @@
 namespace arv::io {
 namespace {
 
+constexpr std::string_view kAssetsDirectoryName = "assets";
+constexpr std::string_view kPluginsDirectoryName = "plugins";
+constexpr std::string_view kConfigDirectoryName = "config";
+constexpr std::string_view kSavesDirectoryName = "saves";
+constexpr std::string_view kLogsDirectoryName = "logs";
+constexpr std::string_view kCacheDirectoryName = "cache";
+
 template<typename T>
 void read_scalar(const YAML::Node& parent, const char* key, T& value) {
   const YAML::Node child = parent[key];
@@ -30,8 +37,13 @@ std::filesystem::path normalize_lexical(std::filesystem::path path) {
 }
 
 bool has_project_assets(const std::filesystem::path& path) {
-  return std::filesystem::exists(path / "assets" / "config" / "blocks.json") &&
-         std::filesystem::exists(path / "assets" / "shaders" / "world" / "chunk.vert");
+  return std::filesystem::exists(
+             path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /
+             std::filesystem::path{kAssetsDirectoryName} /
+             std::filesystem::path{kConfigDirectoryName} / "blocks.json") &&
+         std::filesystem::exists(
+             path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /
+             std::filesystem::path{kAssetsDirectoryName} / "shaders" / "world" / "chunk.vert");
 }
 
 std::filesystem::path discover_project_root(std::filesystem::path start) {
@@ -74,6 +86,14 @@ std::filesystem::path resolve_project_relative(
   return normalize_lexical(project_root / candidate);
 }
 
+std::filesystem::path default_config_path_from(const std::filesystem::path& config_root) {
+  return normalize_lexical(config_root / std::filesystem::path{DefaultEngineConfigFileName});
+}
+
+std::filesystem::path default_input_bindings_path_from(const std::filesystem::path& config_root) {
+  return normalize_lexical(config_root / std::filesystem::path{DefaultInputBindingsFileName});
+}
+
 } // namespace
 
 EngineConfig default_config() {
@@ -86,17 +106,42 @@ void resolve_runtime_paths(const ConfigLoadOptions& options, EngineConfig& confi
 
   config.paths.project_root = normalize_lexical(project_root);
 
+  const std::filesystem::path arvane_home_root =
+      !options.explicit_arvane_home_path.empty()
+          ? options.explicit_arvane_home_path
+          : (config.paths.arvane_home_root.empty()
+                 ? std::filesystem::path{DefaultArvaneHomeDirectoryName}
+                 : config.paths.arvane_home_root);
+  config.paths.arvane_home_root =
+      resolve_project_relative(config.paths.project_root, arvane_home_root);
+
+  config.paths.asset_root = normalize_lexical(
+      config.paths.arvane_home_path() / std::filesystem::path{kAssetsDirectoryName});
+  config.paths.plugins_root = normalize_lexical(
+      config.paths.arvane_home_path() / std::filesystem::path{kPluginsDirectoryName});
+  config.paths.config_root = normalize_lexical(
+      config.paths.arvane_home_path() / std::filesystem::path{kConfigDirectoryName});
+  config.paths.saves_root = normalize_lexical(
+      config.paths.arvane_home_path() / std::filesystem::path{kSavesDirectoryName});
+  config.paths.logs_root = normalize_lexical(
+      config.paths.arvane_home_path() / std::filesystem::path{kLogsDirectoryName});
+  config.paths.cache_root = normalize_lexical(
+      config.paths.arvane_home_path() / std::filesystem::path{kCacheDirectoryName});
+
   const std::filesystem::path config_file =
       !options.explicit_config_path.empty()
           ? options.explicit_config_path
-          : config.paths.config_file;
+          : (config.paths.config_file.empty()
+                 ? default_config_path_from(config.paths.config_path())
+                 : config.paths.config_file);
   config.paths.config_file = resolve_project_relative(config.paths.project_root, config_file);
 
-  const std::filesystem::path asset_root =
-      !options.explicit_asset_root.empty()
-          ? options.explicit_asset_root
-          : (config.paths.asset_root.empty() ? std::filesystem::path{"assets"} : config.paths.asset_root);
-  config.paths.asset_root = resolve_project_relative(config.paths.project_root, asset_root);
+  const std::filesystem::path input_bindings_file =
+      config.paths.input_bindings_file.empty()
+          ? default_input_bindings_path_from(config.paths.config_path())
+          : config.paths.input_bindings_file;
+  config.paths.input_bindings_file =
+      resolve_project_relative(config.paths.project_root, input_bindings_file);
 }
 
 ConfigResult parse_config_yaml(std::string_view text) {
@@ -110,8 +155,9 @@ ConfigResult parse_config_yaml(std::string_view text) {
 
     const YAML::Node paths = root["paths"];
     if (paths) {
-      read_path_scalar(paths, "asset_root", config.paths.asset_root);
+      read_path_scalar(paths, "arvane_home", config.paths.arvane_home_root);
       read_path_scalar(paths, "config_file", config.paths.config_file);
+      read_path_scalar(paths, "input_bindings_file", config.paths.input_bindings_file);
     }
 
     const YAML::Node window = root["window"];

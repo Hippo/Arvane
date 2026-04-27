@@ -1199,11 +1199,12 @@ A world represents one independent simulation space, dimension, or instance. Wor
 Examples:
 
 ```text
-server-save/
+arvane_home/saves/server-save-1/
     players/
-    overworld/
-    caves/
-    arena-instance-001/
+    worlds/
+        overworld/
+        caves/
+        arena-instance-001/
 ```
 
 Each world has its own:
@@ -1294,11 +1295,12 @@ Persistent player data belongs under the server save, not inside a specific worl
 Example:
 
 ```text
-server-save/
+arvane_home/saves/server-save-1/
     players/
         <player-id>.yaml
-    overworld/
-    caves/
+    worlds/
+        overworld/
+        caves/
 ```
 
 Player data may include:

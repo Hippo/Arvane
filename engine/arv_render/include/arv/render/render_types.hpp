@@ -205,6 +205,26 @@ struct FramePacket {
   return current == nullptr || upload.mesh.source_version >= current->uploaded_version;
 }
 
+[[nodiscard]] inline bool should_draw_chunk_mesh(
+    const ChunkRenderState* current,
+    const ChunkDrawItem& item) noexcept {
+  if (current == nullptr || !current->resident || current->uploaded_version == 0) {
+    return false;
+  }
+
+  if (item.expected_version == 0) {
+    return true;
+  }
+
+  if (current->uploaded_version == item.expected_version) {
+    return true;
+  }
+
+  // Keep the last resident mesh visible while a fresher validated upload is
+  // still queued for the GPU so block edits do not momentarily disappear.
+  return current->uploaded_version < item.expected_version;
+}
+
 class IRenderer {
 public:
   virtual ~IRenderer() = default;

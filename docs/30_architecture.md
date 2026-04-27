@@ -904,7 +904,7 @@ World saves and player saves have separate ownership.
 
 During shutdown:
 
-* player/session data should be saved under `server-save/players/`
+* player/session data should be saved under `arvane_home/saves/<server-save-name>/players/`
 * each world should save its own world/chunk data
 * server-level metadata should be saved separately
 * runtime-only IDs should not be persisted unless explicitly remappable

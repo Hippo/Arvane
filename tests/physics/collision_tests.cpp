@@ -105,3 +105,55 @@ TEST(PhysicsTests, RaycastReturnsMissBeyondReachLimit) {
 
   EXPECT_FALSE(hit.has_value());
 }
+
+TEST(PhysicsTests, SneakingPreventsWalkingOffSupportedLedge) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  ensure_loaded_chunk(world, {{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+
+  const arv::world::WorldCollisionQuery query(world, registry, false);
+  arv::physics::KinematicConfig config;
+  config.walk_speed = 1.0F;
+  config.sneak_speed = 1.0F;
+
+  arv::physics::KinematicInput input;
+  input.move_z = 1;
+  input.sneak_held = true;
+
+  const arv::physics::KinematicStepResult result = arv::physics::step_kinematic_body(
+      query,
+      {{0.5F, 1.0F, 0.5F}, {}, true, false},
+      0.0F,
+      1.0F,
+      input,
+      config);
+
+  EXPECT_TRUE(result.body.sneaking);
+  EXPECT_NEAR(result.body.position.z, 0.5F, 0.0001F);
+  EXPECT_TRUE(result.body.grounded);
+}
+
+TEST(PhysicsTests, StandingUpUnderLowCeilingKeepsBodySneaking) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  ensure_loaded_chunk(world, {{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{0, 2, 0}}, stone));
+
+  const arv::world::WorldCollisionQuery query(world, registry, false);
+  arv::physics::KinematicConfig config;
+  config.walk_speed = 0.0F;
+
+  const arv::physics::KinematicStepResult result = arv::physics::step_kinematic_body(
+      query,
+      {{0.5F, 1.0F, 0.5F}, {}, true, true},
+      0.0F,
+      1.0F / 60.0F,
+      {},
+      config);
+
+  EXPECT_TRUE(result.body.sneaking);
+}

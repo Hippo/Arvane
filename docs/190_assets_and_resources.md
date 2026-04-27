@@ -18,11 +18,36 @@ Assets must not be loaded ad hoc from random systems. Systems should request ass
 
 ## Assets Directory Layout
 
-The `assets/` directory is the root location for all game-facing, data-driven content.
+`arvane_home/assets/` is the root location for all game-facing, data-driven content.
 
 This folder must remain **cleanly structured, predictable, and stable**, as many systems (rendering, world generation, UI, plugins) depend on it.
 
 ### Directory Structure
+
+```
+arvane_home/
+  assets/
+    textures/
+      block/
+      entity/
+      ui/
+      font/
+    models/
+      block/
+      entity/
+    shaders/
+    fonts/
+    materials/
+    ui/
+    config/
+    audio/
+```
+
+`arvane_home/` is the runtime home directory for the engine/game. In development it lives at the project root by default and also contains `plugins/`, `config/`, `saves/`, and optional `logs/` / `cache/` directories.
+
+Systems should resolve asset paths through the central filesystem/path utility instead of hardcoding root-relative paths.
+
+### Asset Subtree
 
 ```
 assets/
@@ -364,7 +389,7 @@ Example:
 
 ```txt
 arvane:texture/block/stone
-  -> assets/arvane/textures/block/stone.png
+  -> arvane_home/assets/arvane/textures/block/stone.png
 ```
 
 Resolution should support layered sources later, such as:
@@ -581,11 +606,11 @@ Block textures are authored as individual texture files.
 Example:
 
 ```txt
-assets/arvane/textures/block/stone.png
-assets/arvane/textures/block/dirt.png
-assets/arvane/textures/block/grass_top.png
-assets/arvane/textures/block/grass_side.png
-assets/arvane/textures/block/grass_bottom.png
+arvane_home/assets/arvane/textures/block/stone.png
+arvane_home/assets/arvane/textures/block/dirt.png
+arvane_home/assets/arvane/textures/block/grass_top.png
+arvane_home/assets/arvane/textures/block/grass_side.png
+arvane_home/assets/arvane/textures/block/grass_bottom.png
 ```
 
 Block definitions reference texture asset identifiers.
@@ -865,7 +890,7 @@ Shader source files should live in a predictable folder structure.
 Example:
 
 ```txt
-assets/arvane/shaders/
+arvane_home/assets/arvane/shaders/
   world/
     chunk_opaque.vert
     chunk_opaque.frag
@@ -1235,7 +1260,7 @@ Example:
 ```txt
 Failed to build block atlas:
   asset: arvane:texture/block/grass_side
-  path: assets/arvane/textures/block/grass_side.png
+  path: arvane_home/assets/arvane/textures/block/grass_side.png
   reason: texture size 17x16 does not match required block texture size 16x16
 ```
 

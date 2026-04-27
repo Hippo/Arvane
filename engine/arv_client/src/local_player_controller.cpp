@@ -19,7 +19,7 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
   move_left_ = input.move_left;
   move_right_ = input.move_right;
   jump_held_ = input.jump_held;
-  move_down_held_ = input.move_down_held;
+  sneak_held_ = input.sneak_held;
   sprint_held_ = input.sprint_held;
   primary_held_ = input.primary_held;
   secondary_held_ = input.secondary_held;
@@ -44,6 +44,17 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
 }
 
 player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_index) noexcept {
+  const f32 eye_step = player::default_player_tuning().eye_height_lerp_per_second / 60.0F;
+  if (current_eye_height_ < target_eye_height_) {
+    current_eye_height_ = std::min(current_eye_height_ + eye_step, target_eye_height_);
+  } else {
+    current_eye_height_ = std::max(current_eye_height_ - eye_step, target_eye_height_);
+  }
+  camera_.set_position(
+      {body_position_.x,
+       body_position_.y + current_eye_height_,
+       body_position_.z});
+
   player::PlayerCommand command;
   command.client_tick = tick_index;
   command.move_x = static_cast<i16>((move_right_ ? 1 : 0) - (move_left_ ? 1 : 0));
@@ -52,8 +63,8 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   command.look_delta_y = static_cast<i16>(std::clamp(look_delta_y_, -32768.0F, 32767.0F));
   command.jump_pressed = jump_pressed_;
   command.jump_held = jump_held_;
-  command.move_down_held = move_down_held_;
-  command.sprint_held = sprint_held_;
+  command.sneak_held = sneak_held_;
+  command.sprint_held = sprint_held_ && move_forward_ && !move_backward_ && !sneak_held_;
   command.primary_pressed = primary_pressed_;
   command.primary_held = primary_held_;
   command.secondary_pressed = secondary_pressed_;
@@ -72,11 +83,14 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
 
 void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorrection& correction) noexcept {
   selected_hotbar_slot_ = correction.selected_hotbar_slot;
+  body_position_ = correction.position;
+  target_eye_height_ =
+      correction.sneaking ? player::DefaultSneakingEyeHeight : player::DefaultStandingEyeHeight;
   camera_.set_world_id(correction.world_id);
   camera_.set_rotation(correction.yaw_radians, correction.pitch_radians);
   camera_.set_position(
       {correction.position.x,
-       correction.position.y + player::DefaultStandingEyeHeight,
+       correction.position.y + current_eye_height_,
        correction.position.z});
 }
 

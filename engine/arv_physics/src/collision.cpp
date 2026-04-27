@@ -175,13 +175,73 @@ struct RayAabbHit {
   return static_cast<i32>(std::floor(value));
 }
 
+[[nodiscard]] bool is_space_clear(
+    const ICollisionQuery& query,
+    const Aabb3f& bounds,
+    f32 collision_epsilon) {
+  std::vector<Aabb3f> boxes;
+  boxes.reserve(32);
+  query.gather_collision_boxes(
+      {{bounds.min.x - collision_epsilon, bounds.min.y - collision_epsilon, bounds.min.z - collision_epsilon},
+       {bounds.max.x + collision_epsilon, bounds.max.y + collision_epsilon, bounds.max.z + collision_epsilon}},
+      boxes);
+  for (const Aabb3f& box : boxes) {
+    if (bounds.overlaps(box)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] Vec3f clamp_sneak_horizontal_delta(
+    const ICollisionQuery& query,
+    const Aabb3f& bounds,
+    Vec3f delta,
+    f32 probe_depth) {
+  if ((delta.x == 0.0F && delta.z == 0.0F) || has_support_below(
+                                                query,
+                                                {{bounds.min.x + delta.x, bounds.min.y, bounds.min.z + delta.z},
+                                                 {bounds.max.x + delta.x, bounds.max.y, bounds.max.z + delta.z}},
+                                                probe_depth)) {
+    return delta;
+  }
+
+  Aabb3f resolved = bounds;
+  if (delta.x != 0.0F) {
+    const Aabb3f x_bounds{
+        {resolved.min.x + delta.x, resolved.min.y, resolved.min.z},
+        {resolved.max.x + delta.x, resolved.max.y, resolved.max.z}};
+    if (has_support_below(query, x_bounds, probe_depth)) {
+      resolved = x_bounds;
+    } else {
+      delta.x = 0.0F;
+    }
+  }
+
+  if (delta.z != 0.0F) {
+    const Aabb3f z_bounds{
+        {resolved.min.x, resolved.min.y, resolved.min.z + delta.z},
+        {resolved.max.x, resolved.max.y, resolved.max.z + delta.z}};
+    if (!has_support_below(query, z_bounds, probe_depth)) {
+      delta.z = 0.0F;
+    }
+  }
+
+  return delta;
+}
+
 } // namespace
 
 Aabb3f make_body_bounds(Vec3f position, const KinematicConfig& config) noexcept {
+  return make_body_bounds(position, config, false);
+}
+
+Aabb3f make_body_bounds(Vec3f position, const KinematicConfig& config, bool sneaking) noexcept {
   const f32 half_width = config.body_width * 0.5F;
+  const f32 body_height = sneaking ? config.sneaking_body_height : config.body_height;
   return {
       {position.x - half_width, position.y, position.z - half_width},
-      {position.x + half_width, position.y + config.body_height, position.z + half_width}};
+      {position.x + half_width, position.y + body_height, position.z + half_width}};
 }
 
 MovementResolution resolve_movement(
@@ -259,6 +319,13 @@ KinematicStepResult step_kinematic_body(
     const KinematicInput& input,
     const KinematicConfig& config) {
   KinematicBody next = body;
+  next.sneaking = input.fly_mode ? false : input.sneak_held;
+  if (body.sneaking && !input.fly_mode && !input.sneak_held) {
+    next.sneaking = !is_space_clear(
+        query,
+        make_body_bounds(body.position, config, false),
+        config.collision_epsilon);
+  }
 
   Vec3f move{};
   if (input.move_z != 0) {
@@ -270,21 +337,21 @@ KinematicStepResult step_kinematic_body(
   move = normalize_or_zero(move);
 
   if (input.fly_mode) {
-    const f32 speed = input.sprint_held ? config.sprint_speed : config.fly_speed;
-    next.velocity.x = move.x * speed;
-    next.velocity.z = move.z * speed;
+    next.velocity.x = move.x * config.fly_speed;
+    next.velocity.z = move.z * config.fly_speed;
 
     f32 vertical = 0.0F;
     if (input.jump_held) {
       vertical += 1.0F;
     }
-    if (input.move_down_held) {
+    if (input.sneak_held) {
       vertical -= 1.0F;
     }
     next.velocity.y = vertical * config.fly_vertical_speed;
   } else {
     const f32 horizontal_speed =
-        body.grounded ? (input.sprint_held ? config.sprint_speed : config.walk_speed)
+        body.grounded ? (next.sneaking ? config.sneak_speed
+                                       : (input.sprint_held ? config.sprint_speed : config.walk_speed))
                       : config.air_speed;
     next.velocity.x = move.x * horizontal_speed;
     next.velocity.z = move.z * horizontal_speed;
@@ -300,10 +367,21 @@ KinematicStepResult step_kinematic_body(
     }
   }
 
+  Vec3f movement_delta = next.velocity * tick_seconds;
+  const Aabb3f active_bounds = make_body_bounds(body.position, config, next.sneaking);
+  if (!input.fly_mode && body.grounded && next.sneaking) {
+    movement_delta =
+        clamp_sneak_horizontal_delta(query, active_bounds, movement_delta, config.sneak_support_probe_depth);
+    if (tick_seconds > 0.0F) {
+      next.velocity.x = movement_delta.x / tick_seconds;
+      next.velocity.z = movement_delta.z / tick_seconds;
+    }
+  }
+
   const MovementResolution movement = resolve_movement(
       query,
-      make_body_bounds(body.position, config),
-      next.velocity * tick_seconds,
+      active_bounds,
+      movement_delta,
       config.collision_epsilon);
 
   next.position = body.position + movement.applied_delta;

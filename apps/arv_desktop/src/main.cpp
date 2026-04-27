@@ -2,6 +2,7 @@
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
+#include "arv/io/input_bindings.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/platform/glfw_window.hpp"
 #include "arv/persistence/save.hpp"
@@ -40,8 +41,8 @@ arv::io::ConfigLoadOptions parse_config_options(int argc, char** argv) {
     if (arg == "--config") {
       options.explicit_config_path = std::filesystem::path{argv[++i]};
       explicit_config = true;
-    } else if (arg == "--asset-root") {
-      options.explicit_asset_root = std::filesystem::path{argv[++i]};
+    } else if (arg == "--arvane-home") {
+      options.explicit_arvane_home_path = std::filesystem::path{argv[++i]};
     } else if (arg == "--project-root") {
       options.project_root = std::filesystem::path{argv[++i]};
     }
@@ -59,7 +60,7 @@ arv::client::InputFrame to_client_input(const arv::platform::InputSnapshot& inpu
       input.move_right,
       input.jump_pressed,
       input.jump_held,
-      input.move_down_held,
+      input.sneak_held,
       input.sprint_held,
       input.primary_pressed,
       input.primary_held,
@@ -73,7 +74,7 @@ arv::client::InputFrame to_client_input(const arv::platform::InputSnapshot& inpu
 }
 
 std::filesystem::path default_save_root(const arv::io::EngineConfig& config) {
-  return config.paths.project_root / "server-save";
+  return config.paths.server_save_path(arv::io::DefaultServerSaveName);
 }
 
 std::vector<arv::persistence::SavedChunkSection> capture_saved_chunks(
@@ -543,19 +544,26 @@ int main(int argc, char** argv) {
     return 1;
   }
   arv::platform::OpenGLWindow window = std::move(window_result.value());
+  const auto input_bindings_result =
+      arv::io::load_input_bindings_file_or_defaults(config.paths.input_bindings_file);
+  if (!input_bindings_result) {
+    logger.warn("input", input_bindings_result.error().message);
+  } else {
+    window.set_input_bindings(input_bindings_result.value());
+  }
 
   auto transport_pair = arv::net::make_in_process_transport_pair();
 
   arv::render::OpenGLRenderer renderer;
   auto chunk_vertex_shader = arv::io::read_text_file(
-      config.paths.asset_root / "shaders/world/chunk.vert",
+      config.paths.assets_path() / "shaders/world/chunk.vert",
       "chunk vertex shader");
   if (!chunk_vertex_shader) {
     logger.error("assets", chunk_vertex_shader.error().message);
     return 1;
   }
   auto chunk_fragment_shader = arv::io::read_text_file(
-      config.paths.asset_root / "shaders/world/chunk.frag",
+      config.paths.assets_path() / "shaders/world/chunk.frag",
       "chunk fragment shader");
   if (!chunk_fragment_shader) {
     logger.error("assets", chunk_fragment_shader.error().message);
@@ -570,7 +578,7 @@ int main(int argc, char** argv) {
   renderer.resize(framebuffer.width, framebuffer.height);
 
   auto block_definition_text = arv::io::read_text_file(
-      config.paths.asset_root / "config/blocks.json",
+      config.paths.assets_path() / "config/blocks.json",
       "startup block definitions");
   if (!block_definition_text) {
     logger.error("blocks", block_definition_text.error().message);
@@ -609,7 +617,7 @@ int main(int argc, char** argv) {
   const arv::persistence::LoadedSaveData loaded_save = std::move(loaded_save_result.value());
 
   auto worldgen_text = arv::io::read_text_file(
-      config.paths.asset_root / "config/worldgen/overworld.yaml",
+      config.paths.assets_path() / "config/worldgen/overworld.yaml",
       "overworld generator definition");
   if (!worldgen_text) {
     logger.error("worldgen", worldgen_text.error().message);

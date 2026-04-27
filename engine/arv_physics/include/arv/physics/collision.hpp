@@ -27,11 +27,13 @@ struct KinematicBody {
   Vec3f position{};
   Vec3f velocity{};
   bool grounded{};
+  bool sneaking{};
 };
 
 struct KinematicConfig {
   f32 walk_speed{4.5F};
   f32 sprint_speed{6.0F};
+  f32 sneak_speed{2.25F};
   f32 air_speed{3.5F};
   f32 fly_speed{8.0F};
   f32 fly_vertical_speed{6.0F};
@@ -40,6 +42,8 @@ struct KinematicConfig {
   f32 terminal_velocity{55.0F};
   f32 body_width{0.6F};
   f32 body_height{1.8F};
+  f32 sneaking_body_height{1.5F};
+  f32 sneak_support_probe_depth{0.05F};
   f32 collision_epsilon{CollisionEpsilon};
 };
 
@@ -48,7 +52,7 @@ struct KinematicInput {
   i16 move_z{};
   bool jump_pressed{};
   bool jump_held{};
-  bool move_down_held{};
+  bool sneak_held{};
   bool sprint_held{};
   bool fly_mode{};
 };
@@ -78,6 +82,10 @@ struct BlockRaycastHit {
 };
 
 [[nodiscard]] Aabb3f make_body_bounds(Vec3f position, const KinematicConfig& config) noexcept;
+[[nodiscard]] Aabb3f make_body_bounds(
+    Vec3f position,
+    const KinematicConfig& config,
+    bool sneaking) noexcept;
 [[nodiscard]] KinematicStepResult step_kinematic_body(
     const ICollisionQuery& query,
     const KinematicBody& body,

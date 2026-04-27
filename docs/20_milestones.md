@@ -220,7 +220,7 @@ Make the world playable and persistent.
 - held item semantics
 - block item placement
 - drops/pickups if ready
-- save directory layout
+- `arvane_home` save directory layout
 - player save data
 - world save data
 - region file format
@@ -262,6 +262,8 @@ Add tests for:
 
 Implement the user-facing presentation layer once the core world interaction loop exists.
 
+Wire up block textures from a texture atlas generated at runtime.
+
 ## Scope
 
 - retained-mode UI system
@@ -291,6 +293,7 @@ Implement the user-facing presentation layer once the core world interaction loo
 - basic menus/HUD
 - hotbar UI
 - inventory UI if ready
+- block textures
 
 ## Tests
 
@@ -316,6 +319,7 @@ Add tests for:
 - Font fallback is supported.
 - Assets are loaded through the resource system.
 - HUD/hotbar can render through the UI system.
+- World has textured blocks.
 
 ---
 

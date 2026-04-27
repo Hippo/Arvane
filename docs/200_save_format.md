@@ -34,33 +34,39 @@ This applies to:
 - dedicated servers
 - singleplayer (integrated server)
 
+In development, server saves live under `arvane_home/saves/`.
+
 Example:
 
 ```text
-server-save/
-  save.json
-  players/
-    <player_uuid>.dat
-  worlds/
-    world-a/
-      world.json
-      regions/
-        r.<x>.<z>.arvr
-    world-b/
-      world.json
-      regions/
-        r.<x>.<z>.arvr
-  server/
-    permissions.json
-    whitelist.json
-    ops.json
+arvane_home/
+  saves/
+    server-save-1/
+      save.json
+      players/
+        <player_uuid>.dat
+      worlds/
+        world-a/
+          world.json
+          regions/
+            r.<x>.<z>.arvr
+        world-b/
+          world.json
+          regions/
+            r.<x>.<z>.arvr
+      server/
+        permissions.json
+        whitelist.json
+        ops.json
 ```
 
 Notes:
 
+* `arvane_home/saves/<server-save-name>/` is the top-level save boundary
 * Each world is fully independent
 * A “dimension” is simply another world
 * Worlds do not nest inside each other
+* `saves/` contains server save directories, not worlds directly
 * Players exist at the server level (not per-world)
 
 ---

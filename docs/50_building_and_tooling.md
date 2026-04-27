@@ -279,20 +279,26 @@ Static analysis tools are used to detect:
 
 Arvane should use a simple, predictable configuration discovery model during development.
 
-Configuration files are expected to live in the project root or in clearly documented subdirectories beneath the project root. The engine must not rely on hidden global state, implicit user directories, or platform-specific install paths during early milestones.
+The engine must not rely on hidden global state, implicit user directories, or platform-specific install paths during early milestones.
 
 The default project layout assumes:
 
 ```text
 arvane/
-    assets/
-    config/
+    arvane_home/
+        assets/
+        plugins/
+        config/
+        saves/
+        logs/
+        cache/
     docs/
-    src/
+    engine/
+    apps/
     CMakeLists.txt
 ```
 
-The root `assets/` directory is the canonical development asset directory.
+`arvane_home/` is the canonical development runtime home directory.
 
 Examples of assets include:
 
@@ -305,7 +311,9 @@ Examples of assets include:
 * world generation presets
 * test assets
 
-The engine may later support mounted resource packs or user-provided asset directories, but the default development behavior should remain rooted at `assets/`.
+The engine may later support mounted resource packs or user-provided asset directories, but the default development behavior should remain rooted at `arvane_home/`.
+
+Code should resolve runtime paths through the central filesystem/path utility rather than hardcoding root-relative strings such as `assets/`, `config/`, `plugins/`, or `saves/`.
 
 ## Configuration Search Order
 
@@ -313,22 +321,28 @@ When loading configuration or data files, Arvane should use the following search
 
 1. Explicit path provided by command-line argument
 2. Explicit path provided by runtime configuration
-3. Project root relative path
+3. Default path inside `arvane_home/`
 4. Built-in default values
 
-For example, when looking for the main asset directory:
+For example, when resolving the runtime home and default config file:
 
 ```text
---asset-root <path>
-runtime config asset_root
-./assets/
+--arvane-home <path>
+runtime config paths.arvane_home
+./arvane_home/
+```
+
+```text
+--config <path>
+runtime config paths.config_file
+./arvane_home/config/engine.yaml
 built-in fallback behavior
 ```
 
 If no explicit path is provided, the engine should assume:
 
 ```text
-assets/
+arvane_home/
 ```
 
 relative to the current working directory or resolved project root.
@@ -352,9 +366,9 @@ Example:
 
 ```text
 Failed to load block registry.
-Attempted path: assets/blocks/
+Attempted path: arvane_home/assets/config/blocks.json
 Reason: directory does not exist.
-Fix: create assets/blocks/ or pass --asset-root <path>.
+Fix: populate arvane_home/assets/ or pass --arvane-home <path>.
 ```
 
 The engine should not silently continue with partially loaded core data unless the missing data is explicitly optional.

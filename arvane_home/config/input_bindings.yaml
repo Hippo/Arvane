@@ -1,0 +1,65 @@
+version: 1
+bindings:
+  MoveForward:
+    - device: keyboard
+      key: W
+  MoveBackward:
+    - device: keyboard
+      key: S
+  MoveLeft:
+    - device: keyboard
+      key: A
+  MoveRight:
+    - device: keyboard
+      key: D
+  Jump:
+    - device: keyboard
+      key: Space
+  Sneak:
+    - device: keyboard
+      key: LShift
+  Sprint:
+    - device: keyboard
+      key: LCtrl
+  PrimaryInteract:
+    - device: mouse_button
+      button: Left
+  SecondaryInteract:
+    - device: mouse_button
+      button: Right
+  Hotbar1:
+    - device: keyboard
+      key: 1
+  Hotbar2:
+    - device: keyboard
+      key: 2
+  Hotbar3:
+    - device: keyboard
+      key: 3
+  Hotbar4:
+    - device: keyboard
+      key: 4
+  Hotbar5:
+    - device: keyboard
+      key: 5
+  Hotbar6:
+    - device: keyboard
+      key: 6
+  Hotbar7:
+    - device: keyboard
+      key: 7
+  Hotbar8:
+    - device: keyboard
+      key: 8
+  Hotbar9:
+    - device: keyboard
+      key: 9
+  NextHotbarSlot:
+    - device: mouse_wheel
+      direction: Up
+  PrevHotbarSlot:
+    - device: mouse_wheel
+      direction: Down
+  ToggleFly:
+    - device: keyboard
+      key: F

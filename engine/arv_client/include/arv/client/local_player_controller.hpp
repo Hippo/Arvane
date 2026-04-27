@@ -16,7 +16,7 @@ struct InputFrame {
   bool move_right{};
   bool jump_pressed{};
   bool jump_held{};
-  bool move_down_held{};
+  bool sneak_held{};
   bool sprint_held{};
   bool primary_pressed{};
   bool primary_held{};
@@ -51,7 +51,7 @@ private:
   bool move_left_{};
   bool move_right_{};
   bool jump_held_{};
-  bool move_down_held_{};
+  bool sneak_held_{};
   bool sprint_held_{};
   bool primary_held_{};
   bool secondary_held_{};
@@ -61,6 +61,9 @@ private:
   bool toggle_fly_pressed_{};
   f32 look_delta_x_{};
   f32 look_delta_y_{};
+  Vec3f body_position_{8.0F, 20.0F, -20.0F};
+  f32 current_eye_height_{player::DefaultStandingEyeHeight};
+  f32 target_eye_height_{player::DefaultStandingEyeHeight};
 };
 
 } // namespace arv::client
