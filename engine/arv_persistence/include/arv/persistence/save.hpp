@@ -44,6 +44,7 @@ struct PlayerSaveData {
   f32 pitch_radians{};
   bool grounded{};
   player::MovementMode movement_mode{player::MovementMode::Walking};
+  std::string game_mode_id{std::string{player::SurvivalGameModeID}};
   u8 selected_hotbar_slot{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
 };

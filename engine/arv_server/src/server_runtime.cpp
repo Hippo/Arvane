@@ -21,6 +21,14 @@ namespace {
        std::cos(player_state.yaw_radians) * cos_pitch});
 }
 
+[[nodiscard]] arv::Vec3f horizontal_forward(f32 yaw_radians) noexcept {
+  return arv::normalize_or_zero({std::sin(yaw_radians), 0.0F, std::cos(yaw_radians)});
+}
+
+[[nodiscard]] arv::Vec3f horizontal_right(f32 yaw_radians) noexcept {
+  return arv::normalize_or_zero({std::cos(yaw_radians), 0.0F, -std::sin(yaw_radians)});
+}
+
 [[nodiscard]] arv::Vec3f player_eye_position(
     const player::PlayerState& player_state,
     const player::PlayerTuning& tuning) noexcept {
@@ -30,6 +38,36 @@ namespace {
       player_state.position.x,
       player_state.position.y + eye_height,
       player_state.position.z};
+}
+
+void step_player_without_collision(
+    player::PlayerState& player_state,
+    const player::PlayerCommand& command,
+    const player::PlayerTuning& tuning,
+    Seconds tick_seconds) noexcept {
+  Vec3f move{};
+  if (command.move_z != 0) {
+    move = move + horizontal_forward(player_state.yaw_radians) * static_cast<f32>(command.move_z);
+  }
+  if (command.move_x != 0) {
+    move = move + horizontal_right(player_state.yaw_radians) * static_cast<f32>(command.move_x);
+  }
+  move = normalize_or_zero(move);
+
+  player_state.velocity.x = move.x * tuning.fly_speed;
+  player_state.velocity.z = move.z * tuning.fly_speed;
+
+  f32 vertical = 0.0F;
+  if (command.jump_held) {
+    vertical += 1.0F;
+  }
+  if (command.sneak_held) {
+    vertical -= 1.0F;
+  }
+  player_state.velocity.y = vertical * tuning.fly_vertical_speed;
+  player_state.position = player_state.position + player_state.velocity * tick_seconds;
+  player_state.grounded = false;
+  player_state.sneaking = false;
 }
 
 [[nodiscard]] arv::BlockPos offset_block(arv::BlockPos pos, arv::voxel::BlockFace face) noexcept {
@@ -117,6 +155,17 @@ void ServerRuntime::shutdown() {
   state_ = ServerRuntimeState::Stopped;
 }
 
+bool ServerRuntime::set_player_game_mode(PlayerID player_id, std::string_view mode_id) {
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr || game_modes_.find(mode_id) == nullptr) {
+    return false;
+  }
+
+  player_state->game_mode_id = std::string{mode_id};
+  refresh_player_permissions(*player_state);
+  return true;
+}
+
 void ServerRuntime::handle_network_event(net::NetworkEvent event) {
   switch (event.type) {
     case net::NetworkEventType::ConnectionRequested:
@@ -169,6 +218,7 @@ void ServerRuntime::handle_message(net::ConnectionID connection_id, const std::v
         player::PlayerState& player_state = default_world_.ensure_player(session.player_id);
         player_state.world_id = session.world_id;
         seed_player_inventory(player_state);
+        refresh_player_permissions(player_state);
       }
 
       std::vector<u8> payload = protocol::serialize_server_hello(server_hello);
@@ -237,9 +287,29 @@ void ServerRuntime::tick_players() {
   }
 }
 
+void ServerRuntime::refresh_player_permissions(player::PlayerState& player_state) {
+  const world::RegionQuery query{player_state.world_id, player_state.position};
+  (void)default_world_.update_player_region_state(player_state.player_id, query);
+  const player::PermissionLayer region_layer =
+      default_world_.regions().permission_layer_at(query);
+
+  player_state.resolved_permissions = player::resolve_permissions(
+      game_modes_,
+      permission_groups_,
+      {
+          player_state.game_mode_id,
+          &player_state.permission_overrides,
+          {},
+          &region_layer,
+          {},
+      });
+}
+
 void ServerRuntime::apply_player_command(
     player::PlayerState& player_state,
     const player::PlayerCommand& command) {
+  refresh_player_permissions(player_state);
+
   player_state.selected_hotbar_slot =
       player::is_valid_hotbar_slot(command.selected_hotbar_slot)
           ? command.selected_hotbar_slot
@@ -251,7 +321,12 @@ void ServerRuntime::apply_player_command(
       -player::DefaultMaxPitchRadians,
       player::DefaultMaxPitchRadians);
 
-  if (command.toggle_fly_pressed) {
+  if (!player_state.resolved_permissions.core.can_fly &&
+      player_state.movement_mode == player::MovementMode::Flying) {
+    player_state.movement_mode = player::MovementMode::Walking;
+  }
+
+  if (command.toggle_fly_pressed && player_state.resolved_permissions.core.can_fly) {
     player_state.movement_mode =
         player_state.movement_mode == player::MovementMode::Flying
             ? player::MovementMode::Walking
@@ -281,25 +356,34 @@ void ServerRuntime::apply_player_command(
   input.jump_held = command.jump_held;
   input.sneak_held = command.sneak_held;
   input.sprint_held = command.sprint_held;
-  input.fly_mode = player_state.movement_mode == player::MovementMode::Flying;
+  input.fly_mode =
+      player_state.resolved_permissions.core.can_fly &&
+      player_state.movement_mode == player::MovementMode::Flying;
 
-  const physics::KinematicStepResult step = physics::step_kinematic_body(
-      collision_query,
-      {player_state.position, player_state.velocity, player_state.grounded, player_state.sneaking},
-      player_state.yaw_radians,
-      tick_duration_seconds(base_tps_),
-      input,
-      physics_config);
-  player_state.position = step.body.position;
-  player_state.velocity = step.body.velocity;
-  player_state.grounded = step.body.grounded;
-  player_state.sneaking = step.body.sneaking;
+  const Seconds tick_seconds = tick_duration_seconds(base_tps_);
+  if (player_state.resolved_permissions.core.has_collision) {
+    const physics::KinematicStepResult step = physics::step_kinematic_body(
+        collision_query,
+        {player_state.position, player_state.velocity, player_state.grounded, player_state.sneaking},
+        player_state.yaw_radians,
+        tick_seconds,
+        input,
+        physics_config);
+    player_state.position = step.body.position;
+    player_state.velocity = step.body.velocity;
+    player_state.grounded = step.body.grounded;
+    player_state.sneaking = step.body.sneaking;
+  } else {
+    step_player_without_collision(player_state, command, player_tuning_, tick_seconds);
+  }
+
+  refresh_player_permissions(player_state);
 
   world::WorldCollisionQuery interaction_query(default_world_, *block_registry_, false);
   const Vec3f eye_position = player_eye_position(player_state, player_tuning_);
   const Vec3f look_direction = player_look_direction(player_state);
 
-  if (command.primary_pressed) {
+  if (command.primary_pressed && player_state.resolved_permissions.core.can_modify_world) {
     auto hit = physics::raycast_blocks(
         interaction_query,
         eye_position,
@@ -314,7 +398,7 @@ void ServerRuntime::apply_player_command(
     }
   }
 
-  if (command.secondary_pressed) {
+  if (command.secondary_pressed && player_state.resolved_permissions.core.can_modify_world) {
     const std::optional<player::ItemStack>& held_slot =
         player_state.inventory.slot(player_state.selected_hotbar_slot);
     if (!held_slot.has_value()) {
@@ -407,6 +491,8 @@ void ServerRuntime::send_player_corrections() {
     correction.yaw_radians = player_state->yaw_radians;
     correction.pitch_radians = player_state->pitch_radians;
     correction.movement_mode = player_state->movement_mode;
+    correction.game_mode_id = player_state->game_mode_id;
+    correction.resolved_core_permissions = player_state->resolved_permissions.core;
     correction.grounded = player_state->grounded;
     correction.sneaking = player_state->sneaking;
     correction.selected_hotbar_slot = player_state->selected_hotbar_slot;

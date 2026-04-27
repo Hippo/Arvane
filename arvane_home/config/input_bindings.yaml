@@ -63,3 +63,12 @@ bindings:
   ToggleFly:
     - device: keyboard
       key: F
+  OpenInventory:
+    - device: keyboard
+      key: E
+  OpenChat:
+    - device: keyboard
+      key: T
+  ShowTabMenu:
+    - device: keyboard
+      key: Tab

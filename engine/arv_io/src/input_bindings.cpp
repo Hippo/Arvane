@@ -9,13 +9,10 @@
 namespace arv::io {
 namespace {
 
-void apply_required_action_fallbacks(platform::InputBindings& bindings) {
+void apply_default_action_fallbacks(platform::InputBindings& bindings) {
   const platform::InputBindings defaults = platform::default_input_bindings();
   for (usize index = 0; index < static_cast<usize>(platform::LogicalAction::Count); ++index) {
     const auto action = static_cast<platform::LogicalAction>(index);
-    if (!platform::is_required_logical_action(action)) {
-      continue;
-    }
     if (platform::bindings_for_action(bindings, action).empty()) {
       platform::bindings_for_action(bindings, action) =
           platform::bindings_for_action(defaults, action);
@@ -158,7 +155,7 @@ InputBindingsResult parse_input_bindings_yaml(std::string_view text) {
     return InputBindingsResult::failure(ConfigError{ex.what()});
   }
 
-  apply_required_action_fallbacks(bindings);
+  apply_default_action_fallbacks(bindings);
   return InputBindingsResult::success(std::move(bindings));
 }
 

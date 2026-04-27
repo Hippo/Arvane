@@ -29,11 +29,18 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
   toggle_fly_pressed_ = toggle_fly_pressed_ || input.toggle_fly_pressed;
 
   if (input.hotbar_select.has_value() && player::is_valid_hotbar_slot(input.hotbar_select.value())) {
-    selected_hotbar_slot_ = input.hotbar_select.value();
+    if (selected_hotbar_slot_ != input.hotbar_select.value()) {
+      selected_hotbar_slot_ = input.hotbar_select.value();
+      has_unconfirmed_hotbar_selection_ = true;
+    }
   }
   if (input.hotbar_scroll_steps != 0) {
-    selected_hotbar_slot_ = wrap_hotbar_slot(
+    const u8 next_slot = wrap_hotbar_slot(
         static_cast<i32>(selected_hotbar_slot_) + static_cast<i32>(input.hotbar_scroll_steps));
+    if (selected_hotbar_slot_ != next_slot) {
+      selected_hotbar_slot_ = next_slot;
+      has_unconfirmed_hotbar_selection_ = true;
+    }
   }
 
   look_delta_x_ += input.mouse_delta_x;
@@ -81,9 +88,18 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   return command;
 }
 
-void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorrection& correction) noexcept {
-  selected_hotbar_slot_ = correction.selected_hotbar_slot;
+void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorrection& correction) {
+  if (correction.server_tick < last_authoritative_server_tick_) {
+    return;
+  }
+  last_authoritative_server_tick_ = correction.server_tick;
+  if (!has_unconfirmed_hotbar_selection_ || correction.selected_hotbar_slot == selected_hotbar_slot_) {
+    selected_hotbar_slot_ = correction.selected_hotbar_slot;
+    has_unconfirmed_hotbar_selection_ = false;
+  }
   body_position_ = correction.position;
+  game_mode_id_ = correction.game_mode_id;
+  resolved_permissions_.core = correction.resolved_core_permissions;
   target_eye_height_ =
       correction.sneaking ? player::DefaultSneakingEyeHeight : player::DefaultStandingEyeHeight;
   camera_.set_world_id(correction.world_id);

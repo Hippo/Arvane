@@ -25,6 +25,7 @@ namespace arv::render {
 [[nodiscard]] ChunkMeshData build_chunk_mesh(
     WorldID world_id,
     const voxel::ChunkSnapshot& snapshot,
-    const voxel::BlockRegistry& registry);
+    const voxel::BlockRegistry& registry,
+    const voxel::BlockRenderData* render_data = nullptr);
 
 } // namespace arv::render

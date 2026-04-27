@@ -110,6 +110,44 @@ TEST(PlayerInteractionTests, PrimaryBreakRemovesTargetBlockThroughServerAuthorit
   EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), arv::voxel::AirBlockVariantID);
 }
 
+TEST(PlayerInteractionTests, RegionDenyPreventsWorldModification) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID dirt = block_registry.find_variant("arvane:dirt").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, dirt));
+  prepare_test_player(server, item_registry);
+
+  arv::world::Region spawn;
+  spawn.name = "spawn";
+  spawn.world = arv::server::DefaultWorldID;
+  spawn.priority = 100;
+  spawn.shape.min = {-16.0F, -4.0F, -16.0F};
+  spawn.shape.max = {16.0F, 16.0F, 16.0F};
+  spawn.core.can_modify_world = arv::player::TriState::Deny;
+  ASSERT_NE(server.voxel_world().regions().add_region(std::move(spawn)).value, 0U);
+
+  client.submit_input(arv::client::InputFrame{.primary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), dirt);
+}
+
 TEST(PlayerInteractionTests, PlacementOutsideConfiguredReachIsRejected) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =

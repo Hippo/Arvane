@@ -14,6 +14,9 @@ namespace arv::render {
 class OpenGLRenderer final : public IRenderer {
 public:
   void set_chunk_shader_sources(std::string vertex_source, std::string fragment_source);
+  void set_ui_shader_sources(std::string vertex_source, std::string fragment_source);
+  void set_chunk_texture_atlas(TextureUploadData upload);
+  void set_ui_font_atlas(TextureUploadData upload);
 
   void resize(u32 width, u32 height) override;
 
@@ -53,6 +56,12 @@ private:
     GpuMesh transparent{};
   };
 
+  struct GpuTexture {
+    GLuint id{};
+    u32 width{};
+    u32 height{};
+  };
+
   void process_chunk_mesh_uploads();
 
   [[nodiscard]] bool upload_chunk_mesh_now(ChunkMeshUpload upload);
@@ -65,11 +74,21 @@ private:
 
   static void destroy_chunk_gpu_state(ChunkGpuState& state);
 
+  static void destroy_gpu_texture(GpuTexture& texture);
+
+  [[nodiscard]] static GpuTexture create_texture(const TextureUploadData& upload, bool mipmaps);
+
   [[nodiscard]] static GLuint compile_shader(GLenum type, const char* source);
 
   [[nodiscard]] bool ensure_chunk_program();
+  [[nodiscard]] bool ensure_ui_program();
 
   void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
+  void draw_ui();
+  void draw_ui_rects();
+  void draw_ui_glyphs();
+  void ensure_ui_buffers();
+  void ensure_white_texture();
 
   u32 width_{};
   u32 height_{};
@@ -88,11 +107,24 @@ private:
   GLint chunk_camera_near_uniform_{-1};
   GLint chunk_camera_far_uniform_{-1};
   GLint chunk_alpha_uniform_{-1};
+  GLint chunk_atlas_size_uniform_{-1};
+  GLint chunk_terrain_atlas_uniform_{-1};
+  GLuint ui_program_{};
+  GLint ui_viewport_uniform_{-1};
+  GLint ui_texture_uniform_{-1};
   std::string chunk_vertex_shader_source_{};
   std::string chunk_fragment_shader_source_{};
+  std::string ui_vertex_shader_source_{};
+  std::string ui_fragment_shader_source_{};
   FramePacket frame_{};
   std::unordered_map<ChunkMeshKey, ChunkGpuState> chunks_;
   std::deque<ChunkMeshUpload> pending_chunk_mesh_uploads_;
+  GpuTexture terrain_atlas_{};
+  GpuTexture font_atlas_{};
+  GpuTexture white_texture_{};
+  GLuint ui_vao_{};
+  GLuint ui_vertex_buffer_{};
+  GLuint ui_index_buffer_{};
 };
 
 } // namespace arv::render

@@ -1,12 +1,45 @@
 #include "arv/protocol/player_input.hpp"
 
 #include <bit>
+#include <utility>
 
 namespace arv::protocol {
 namespace {
 
 void write_f32(MessageWriter& writer, f32 value) {
   writer.write<u32>(std::bit_cast<u32>(value));
+}
+
+[[nodiscard]] u16 pack_core_permissions(
+    const player::ResolvedCorePermissions& permissions) noexcept {
+  u16 flags = 0;
+  auto set = [&flags](bool value, u16 bit) {
+    if (value) {
+      flags = static_cast<u16>(flags | bit);
+    }
+  };
+  set(permissions.can_take_damage, 1U << 0U);
+  set(permissions.can_modify_world, 1U << 1U);
+  set(permissions.can_interact, 1U << 2U);
+  set(permissions.can_open_inventory, 1U << 3U);
+  set(permissions.has_creative_inventory, 1U << 4U);
+  set(permissions.can_fly, 1U << 5U);
+  set(permissions.has_collision, 1U << 6U);
+  set(permissions.is_visible_to_others, 1U << 7U);
+  return flags;
+}
+
+[[nodiscard]] player::ResolvedCorePermissions unpack_core_permissions(u16 flags) noexcept {
+  return {
+      (flags & (1U << 0U)) != 0U,
+      (flags & (1U << 1U)) != 0U,
+      (flags & (1U << 2U)) != 0U,
+      (flags & (1U << 3U)) != 0U,
+      (flags & (1U << 4U)) != 0U,
+      (flags & (1U << 5U)) != 0U,
+      (flags & (1U << 6U)) != 0U,
+      (flags & (1U << 7U)) != 0U,
+  };
 }
 
 Expected<f32, ProtocolError> read_f32(MessageReader& reader) {
@@ -82,6 +115,8 @@ std::vector<u8> serialize_player_correction(const PlayerCorrection& correction) 
   write_f32(writer, correction.yaw_radians);
   write_f32(writer, correction.pitch_radians);
   writer.write<player::MovementMode>(correction.movement_mode);
+  writer.write_string(correction.game_mode_id);
+  writer.write<u16>(pack_core_permissions(correction.resolved_core_permissions));
   writer.write_bool(correction.grounded);
   writer.write_bool(correction.sneaking);
   writer.write<u8>(correction.selected_hotbar_slot);
@@ -102,13 +137,15 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
   auto yaw = read_f32(reader);
   auto pitch = read_f32(reader);
   auto movement_mode = reader.read<player::MovementMode>();
+  auto game_mode_id = reader.read_string();
+  auto resolved_core_permissions = reader.read<u16>();
   auto grounded = reader.read_bool();
   auto sneaking = reader.read_bool();
   auto selected_hotbar_slot = reader.read<u8>();
 
   if (!server_tick || !player_id || !world_id || !pos_x || !pos_y || !pos_z || !vel_x ||
-      !vel_y || !vel_z || !yaw || !pitch || !movement_mode || !grounded || !sneaking ||
-      !selected_hotbar_slot) {
+      !vel_y || !vel_z || !yaw || !pitch || !movement_mode || !game_mode_id ||
+      !resolved_core_permissions || !grounded || !sneaking || !selected_hotbar_slot) {
     return Expected<PlayerCorrection, ProtocolError>::failure(
         ProtocolError{"failed to decode player correction"});
   }
@@ -122,6 +159,8 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
   correction.yaw_radians = yaw.value();
   correction.pitch_radians = pitch.value();
   correction.movement_mode = movement_mode.value();
+  correction.game_mode_id = std::move(game_mode_id.value());
+  correction.resolved_core_permissions = unpack_core_permissions(resolved_core_permissions.value());
   correction.grounded = grounded.value();
   correction.sneaking = sneaking.value();
   correction.selected_hotbar_slot = selected_hotbar_slot.value();

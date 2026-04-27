@@ -6,6 +6,7 @@
 #include "arv/core/types.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/voxel/storage.hpp"
+#include "arv/world/regions.hpp"
 #include "arv/world/world_generation.hpp"
 
 #include <array>
@@ -142,6 +143,14 @@ public:
   [[nodiscard]] const player::PlayerState* find_player(PlayerID player_id) const noexcept;
   [[nodiscard]] usize player_count() const noexcept;
   [[nodiscard]] std::vector<PlayerID> player_ids() const;
+  [[nodiscard]] const RegionRegistry& regions() const noexcept {
+    return regions_;
+  }
+  [[nodiscard]] RegionRegistry& regions() noexcept {
+    return regions_;
+  }
+  [[nodiscard]] const PlayerRegionState* player_region_state(PlayerID player_id) const noexcept;
+  RegionMembershipChange update_player_region_state(PlayerID player_id, RegionQuery query);
   void schedule_block_update(
       BlockPos pos,
       TickIndex delay_ticks,
@@ -225,6 +234,8 @@ private:
   WorldID id_{};
   std::unordered_map<ChunkCoord, voxel::ChunkSection> chunks_;
   std::unordered_map<PlayerID, player::PlayerState> players_;
+  RegionRegistry regions_{};
+  std::unordered_map<PlayerID, PlayerRegionState> player_region_states_;
   TickIndex tick_index_{};
   WorldTickPolicy tick_policy_{};
   std::vector<ScheduledBlockUpdate> scheduled_block_updates_;

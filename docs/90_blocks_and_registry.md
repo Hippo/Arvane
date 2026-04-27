@@ -293,6 +293,139 @@ Each variant receives its own `BlockVariantID`.
 
 ---
 
+## Model and Textures
+
+### Overview
+
+Blocks in Arvane are **data-driven** and define their visual representation through either:
+
+1. A **model reference**
+2. A **direct texture definition**
+
+These two approaches are **mutually exclusive** per block entry. A block must define **exactly one** of them.
+
+This separation allows simple blocks to remain lightweight, while more complex geometry (stairs, slabs, custom shapes) can use full models.
+
+---
+
+### Model-Based Blocks
+
+A block may specify a `model` component that references a model file located in:
+
+```
+assets/models/block/
+```
+
+Example:
+
+```json
+"model": "stairs.json"
+```
+
+#### Behavior
+
+* The model defines:
+
+  * geometry (faces, elements, rotations)
+  * UV mapping
+  * textures (via the model’s own texture definitions)
+
+* The block registry does **not** define textures when `model` is used.
+
+* Models are responsible for being fully self-contained.
+
+#### Use Cases
+
+Use models for:
+
+* non-cubic blocks (stairs, slabs, fences)
+* rotated or directional geometry
+* multi-part shapes
+* blocks requiring custom UV layouts
+
+---
+
+### Texture-Based Blocks
+
+For simple cube blocks, a `texture` component can be used instead of a model.
+
+#### Single Texture (All Faces)
+
+```json
+"texture": "all_sides.png"
+```
+
+* Applies the same texture to all six faces.
+* Equivalent to a standard cube with uniform material.
+
+---
+
+#### Per-Face Textures
+
+```json
+"texture": [
+  "top.png",
+  "bottom.png",
+  "front.png",
+  "back.png",
+  "left.png",
+  "right.png"
+]
+```
+
+Face order is strictly defined as:
+
+```
+[top, bottom, front, back, left, right]
+```
+
+#### Behavior
+
+* The engine generates a **default cube model** internally.
+* UVs are automatically assigned to map each texture to its respective face.
+* Texture references resolve through the material/atlas system.
+
+---
+
+### Validation Rules
+
+The following rules must be enforced during block loading:
+
+* A block must define **exactly one** of:
+
+  * `model`
+  * `texture`
+
+* Defining both is invalid.
+
+* Defining neither is invalid.
+
+* If `texture` is:
+
+  * a string → treated as single-texture mode
+  * an array → must contain exactly 6 entries
+
+---
+
+### Engine Responsibilities
+
+When loading blocks:
+
+* Resolve `model` paths relative to `assets/models/block/`
+* Resolve `texture` paths through the texture/material system
+* Register all referenced textures for atlas packing
+* Associate the resolved visual data with the block’s **StateID**
+
+---
+
+### Notes
+
+* Texture definitions are **logical references**, not direct GPU resources.
+* Atlas packing and UV normalization are handled later in the rendering pipeline.
+* This system keeps block definitions simple while allowing full extensibility through models.
+
+---
+
 ### Important rule
 
 At runtime:
@@ -569,4 +702,3 @@ with no locking.
 * Face visibility must use explicit rules, not assumptions
 * Game code must not hardcode numeric IDs
 
-```

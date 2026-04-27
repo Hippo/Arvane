@@ -25,6 +25,38 @@ net::ConnectResult ClientRuntime::connect_integrated() {
 }
 
 void ClientRuntime::submit_input(InputFrame input) {
+  tab_menu_visible_ = input.tab_menu_held;
+  if (input.open_inventory_pressed && player_controller_.resolved_permissions().core.can_open_inventory) {
+    inventory_open_ = !inventory_open_;
+    if (inventory_open_) {
+      chat_open_ = false;
+    }
+  }
+  if (input.open_chat_pressed) {
+    chat_open_ = true;
+    inventory_open_ = false;
+  }
+
+  if (inventory_open_ || chat_open_) {
+    input.move_forward = false;
+    input.move_backward = false;
+    input.move_left = false;
+    input.move_right = false;
+    input.jump_pressed = false;
+    input.jump_held = false;
+    input.sneak_held = false;
+    input.sprint_held = false;
+    input.primary_pressed = false;
+    input.primary_held = false;
+    input.secondary_pressed = false;
+    input.secondary_held = false;
+    input.toggle_fly_pressed = false;
+    input.hotbar_select.reset();
+    input.hotbar_scroll_steps = 0;
+    input.mouse_delta_x = 0.0F;
+    input.mouse_delta_y = 0.0F;
+  }
+
   player_controller_.submit_input(std::move(input));
 }
 
@@ -61,6 +93,18 @@ const CameraShell& ClientRuntime::camera() const noexcept {
 
 CameraShell& ClientRuntime::camera() noexcept {
   return player_controller_.camera();
+}
+
+u8 ClientRuntime::selected_hotbar_slot() const noexcept {
+  return player_controller_.selected_hotbar_slot();
+}
+
+const std::string& ClientRuntime::game_mode_id() const noexcept {
+  return player_controller_.game_mode_id();
+}
+
+const player::ResolvedPermissions& ClientRuntime::resolved_permissions() const noexcept {
+  return player_controller_.resolved_permissions();
 }
 
 net::NetworkResult ClientRuntime::send_client_hello() {

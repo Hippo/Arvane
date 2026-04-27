@@ -4,7 +4,10 @@
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
 #include "arv/player/inventory.hpp"
+#include "arv/player/permissions.hpp"
 #include "arv/player/player_constants.hpp"
+
+#include <string>
 
 namespace arv::player {
 
@@ -41,6 +44,9 @@ struct PlayerState {
   bool grounded{};
   bool sneaking{};
   MovementMode movement_mode{MovementMode::Walking};
+  std::string game_mode_id{std::string{SurvivalGameModeID}};
+  PlayerPermissions permission_overrides{};
+  ResolvedPermissions resolved_permissions{};
   Inventory inventory{DefaultPlayerInventorySlotCount};
   u8 selected_hotbar_slot{};
   TickIndex last_processed_input_tick{};
@@ -56,6 +62,8 @@ struct PlayerViewState {
   bool grounded{};
   bool sneaking{};
   MovementMode movement_mode{MovementMode::Walking};
+  std::string game_mode_id{std::string{SurvivalGameModeID}};
+  ResolvedPermissions resolved_permissions{};
   u8 selected_hotbar_slot{};
 };
 

@@ -1,4 +1,8 @@
+#include "arv/asset/font.hpp"
+#include "arv/asset/resource.hpp"
+#include "arv/asset/texture_atlas.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/ui.hpp"
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
@@ -22,6 +26,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -67,6 +72,9 @@ arv::client::InputFrame to_client_input(const arv::platform::InputSnapshot& inpu
       input.secondary_pressed,
       input.secondary_held,
       input.toggle_fly_pressed,
+      input.open_inventory_pressed,
+      input.open_chat_pressed,
+      input.tab_menu_held,
       input.hotbar_select,
       input.hotbar_scroll_steps,
       input.mouse_delta_x,
@@ -75,6 +83,10 @@ arv::client::InputFrame to_client_input(const arv::platform::InputSnapshot& inpu
 
 std::filesystem::path default_save_root(const arv::io::EngineConfig& config) {
   return config.paths.server_save_path(arv::io::DefaultServerSaveName);
+}
+
+arv::render::TextureUploadData texture_upload_from_image(const arv::asset::Image& image) {
+  return {image.width, image.height, image.pixels};
 }
 
 std::vector<arv::persistence::SavedChunkSection> capture_saved_chunks(
@@ -138,11 +150,44 @@ std::vector<arv::persistence::PlayerSaveData> capture_player_saves(
     save.pitch_radians = player_state->pitch_radians;
     save.grounded = player_state->grounded;
     save.movement_mode = player_state->movement_mode;
+    save.game_mode_id = player_state->game_mode_id;
     save.selected_hotbar_slot = player_state->selected_hotbar_slot;
     save.inventory = player_state->inventory;
     players.push_back(std::move(save));
   }
 
+  return players;
+}
+
+std::vector<arv::client::UiItemStackView> inventory_slots_for_ui(
+    const arv::player::Inventory& inventory,
+    const arv::player::ItemRegistry& item_registry) {
+  std::vector<arv::client::UiItemStackView> slots;
+  slots.reserve(inventory.slot_count());
+  for (arv::usize index = 0; index < inventory.slot_count(); ++index) {
+    arv::client::UiItemStackView view;
+    const std::optional<arv::player::ItemStack>& stack = inventory.slot(index);
+    if (stack.has_value()) {
+      const arv::player::ItemRecord* item = item_registry.item(stack->item);
+      view.item_name = item == nullptr ? std::string{arv::player::MissingItemName} : item->name;
+      view.display_name = item == nullptr ? view.item_name : item->display_name;
+      view.count = stack->count;
+    }
+    slots.push_back(std::move(view));
+  }
+  return slots;
+}
+
+std::vector<arv::client::PlayerListEntryView> player_list_for_ui(
+    const arv::server::ServerRuntime& server) {
+  std::vector<arv::client::PlayerListEntryView> players;
+  for (const arv::SessionID session_id : server.sessions().session_ids()) {
+    const arv::server::ServerSession* session = server.sessions().find(session_id);
+    if (session == nullptr) {
+      continue;
+    }
+    players.push_back({session->profile_name, std::nullopt});
+  }
   return players;
 }
 
@@ -174,6 +219,7 @@ void apply_loaded_player_saves(
     player_state.pitch_radians = found->pitch_radians;
     player_state.grounded = found->grounded;
     player_state.movement_mode = found->movement_mode;
+    player_state.game_mode_id = found->game_mode_id;
     player_state.selected_hotbar_slot = found->selected_hotbar_slot;
     player_state.inventory = found->inventory;
   }
@@ -280,6 +326,7 @@ bool refresh_chunk_view(
     const arv::world::WorldGenerationConfig& generation_config,
     const arv::world::WorldGenerationPalette& generation_palette,
     const arv::voxel::BlockRegistry& block_registry,
+    const arv::voxel::BlockRenderData& block_render_data,
     arv::core::Logger& logger) {
   const auto refresh_start = std::chrono::steady_clock::now();
   ++view.frames;
@@ -443,12 +490,13 @@ bool refresh_chunk_view(
         const arv::u64 source_version = snapshot->source_version;
         auto job = scheduler.submit(
             "view_chunk_meshing",
-            [snapshot = snapshot.value(), &block_registry] {
+            [snapshot = snapshot.value(), &block_registry, &block_render_data] {
           const auto start = std::chrono::steady_clock::now();
           auto mesh = arv::render::build_chunk_mesh(
               arv::server::DefaultWorldID,
               snapshot,
-              block_registry);
+              block_registry,
+              &block_render_data);
           const auto end = std::chrono::steady_clock::now();
           return ChunkViewState::TimedChunkMeshResult{
               std::move(mesh),
@@ -528,6 +576,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   const arv::io::EngineConfig config = config_result.value();
+  arv::asset::ResourceManager resources(config.paths.assets_path());
 
   arv::platform::GlfwLibrary glfw;
   if (!glfw.initialized()) {
@@ -555,16 +604,12 @@ int main(int argc, char** argv) {
   auto transport_pair = arv::net::make_in_process_transport_pair();
 
   arv::render::OpenGLRenderer renderer;
-  auto chunk_vertex_shader = arv::io::read_text_file(
-      config.paths.assets_path() / "shaders/world/chunk.vert",
-      "chunk vertex shader");
+  auto chunk_vertex_shader = resources.load_text({"arvane:shader/world/chunk.vert"}, arv::asset::AssetKind::ShaderSource);
   if (!chunk_vertex_shader) {
     logger.error("assets", chunk_vertex_shader.error().message);
     return 1;
   }
-  auto chunk_fragment_shader = arv::io::read_text_file(
-      config.paths.assets_path() / "shaders/world/chunk.frag",
-      "chunk fragment shader");
+  auto chunk_fragment_shader = resources.load_text({"arvane:shader/world/chunk.frag"}, arv::asset::AssetKind::ShaderSource);
   if (!chunk_fragment_shader) {
     logger.error("assets", chunk_fragment_shader.error().message);
     return 1;
@@ -572,6 +617,19 @@ int main(int argc, char** argv) {
   renderer.set_chunk_shader_sources(
       std::move(chunk_vertex_shader.value()),
       std::move(chunk_fragment_shader.value()));
+  auto ui_vertex_shader = resources.load_text({"arvane:shader/ui/ui.vert"}, arv::asset::AssetKind::ShaderSource);
+  if (!ui_vertex_shader) {
+    logger.error("assets", ui_vertex_shader.error().message);
+    return 1;
+  }
+  auto ui_fragment_shader = resources.load_text({"arvane:shader/ui/ui.frag"}, arv::asset::AssetKind::ShaderSource);
+  if (!ui_fragment_shader) {
+    logger.error("assets", ui_fragment_shader.error().message);
+    return 1;
+  }
+  renderer.set_ui_shader_sources(
+      std::move(ui_vertex_shader.value()),
+      std::move(ui_fragment_shader.value()));
   renderer.set_chunk_mesh_upload_budget(config.render.max_chunk_mesh_uploads_per_frame);
 
   auto framebuffer = window.framebuffer_size();
@@ -598,6 +656,48 @@ int main(int argc, char** argv) {
   }
   const arv::voxel::BlockRegistry block_registry = std::move(block_registry_result.value());
   const arv::u64 block_registry_hash = arv::persistence::hash_block_registry(block_registry);
+
+  auto block_atlas_result = arv::asset::build_block_texture_atlas(resources, block_registry);
+  if (!block_atlas_result) {
+    logger.error("assets", block_atlas_result.error().message);
+    return 1;
+  }
+  const arv::asset::BlockTextureAtlas block_atlas = std::move(block_atlas_result.value());
+  if (block_atlas.atlas.pages.empty()) {
+    logger.error("assets", "block texture atlas did not produce a page");
+    return 1;
+  }
+  renderer.set_chunk_texture_atlas(texture_upload_from_image(block_atlas.atlas.pages.front().image));
+
+  arv::asset::FontSystem font_system;
+  auto ui_font = font_system.load_face(
+      resources.resolve_asset_path({"arvane:font/font"}, arv::asset::AssetKind::Font),
+      18,
+      {"arvane:font/font"});
+  if (!ui_font) {
+    logger.error("assets", ui_font.error().message);
+    return 1;
+  }
+  std::vector<arv::asset::FontFaceHandle> ui_faces{ui_font.value()};
+  for (const arv::asset::AssetID fallback : {
+           arv::asset::AssetID{"arvane:font/symbol"},
+           arv::asset::AssetID{"arvane:font/arabic"},
+           arv::asset::AssetID{"arvane:font/emoji"},
+       }) {
+    const std::filesystem::path path = resources.resolve_asset_path(fallback, arv::asset::AssetKind::Font);
+    if (!std::filesystem::exists(path)) {
+      continue;
+    }
+    auto face = font_system.load_face(path, 18, fallback);
+    if (face) {
+      ui_faces.push_back(face.value());
+    } else {
+      logger.warn("assets", face.error().message);
+    }
+  }
+  const arv::asset::FontStack ui_font_stack = font_system.make_stack(ui_faces);
+  arv::client::FontUiTextMeasurer ui_text_measurer(font_system, ui_font_stack);
+  arv::client::UiTree ui_tree;
 
   auto item_registry_result = arv::player::ItemRegistry::build_default_block_items(block_registry);
   if (!item_registry_result) {
@@ -723,6 +823,7 @@ int main(int argc, char** argv) {
           generation_config,
           generation_palette,
           block_registry,
+          block_atlas.render_data,
           logger)) {
     return 1;
   }
@@ -766,6 +867,7 @@ int main(int argc, char** argv) {
             generation_config,
             generation_palette,
             block_registry,
+            block_atlas.render_data,
             logger)) {
       return 1;
     }
@@ -783,6 +885,64 @@ int main(int argc, char** argv) {
         framebuffer.width,
         framebuffer.height);
     frame.opaque_chunks = collect_draw_items(chunk_view);
+    std::vector<arv::client::UiItemStackView> inventory_slots;
+    const std::vector<arv::SessionID> ui_session_ids = integrated_server.sessions().session_ids();
+    if (const arv::server::ServerSession* session =
+            ui_session_ids.empty() ? nullptr : integrated_server.sessions().find(ui_session_ids.front());
+        session != nullptr) {
+      if (const arv::player::PlayerState* player_state =
+              integrated_server.voxel_world().find_player(session->player_id);
+          player_state != nullptr) {
+        inventory_slots = inventory_slots_for_ui(player_state->inventory, item_registry);
+      }
+    }
+    const std::vector<arv::client::PlayerListEntryView> tab_players =
+        player_list_for_ui(integrated_server);
+    arv::client::build_gameplay_ui(
+        ui_tree,
+        {
+            {
+                client.selected_hotbar_slot(),
+                arv::player::DefaultHotbarSlotCount,
+                {static_cast<arv::f32>(framebuffer.width), static_cast<arv::f32>(framebuffer.height)},
+                std::span<const arv::client::UiItemStackView>{
+                    inventory_slots.data(),
+                    std::min<arv::usize>(inventory_slots.size(), arv::player::DefaultHotbarSlotCount)},
+            },
+            {
+                client.inventory_open(),
+                "Inventory",
+                client.selected_hotbar_slot(),
+                arv::player::DefaultHotbarSlotCount,
+                {static_cast<arv::f32>(framebuffer.width), static_cast<arv::f32>(framebuffer.height)},
+                std::span<const arv::client::UiItemStackView>{
+                    inventory_slots.data(),
+                    inventory_slots.size()},
+            },
+            {
+                true,
+                client.chat_open(),
+                {},
+                {},
+            },
+            {
+                client.tab_menu_visible(),
+                "Players",
+                "",
+                std::span<const arv::client::PlayerListEntryView>{
+                    tab_players.data(),
+                    tab_players.size()},
+            },
+            {},
+        });
+    ui_tree.layout(
+        {static_cast<arv::f32>(framebuffer.width), static_cast<arv::f32>(framebuffer.height)},
+        &ui_text_measurer);
+    arv::client::append_ui_draw_commands(ui_tree, font_system, ui_font_stack, frame);
+    if (font_system.atlas_dirty()) {
+      renderer.set_ui_font_atlas(texture_upload_from_image(font_system.atlas_image()));
+      font_system.clear_atlas_dirty();
+    }
     renderer.submit_frame(std::move(frame));
     renderer.render();
     window.swap_buffers();

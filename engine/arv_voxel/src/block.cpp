@@ -30,6 +30,79 @@ void read_bool_property(const nlohmann::json& object, const char* key, bool& val
   }
 }
 
+void set_texture_slot(
+    std::array<std::string, BlockFaceCount>& textures,
+    BlockFace face,
+    const std::string& asset_id) {
+  textures[face_index(face)] = asset_id;
+}
+
+void set_side_textures(
+    std::array<std::string, BlockFaceCount>& textures,
+    const std::string& asset_id) {
+  set_texture_slot(textures, BlockFace::PositiveX, asset_id);
+  set_texture_slot(textures, BlockFace::NegativeX, asset_id);
+  set_texture_slot(textures, BlockFace::PositiveZ, asset_id);
+  set_texture_slot(textures, BlockFace::NegativeZ, asset_id);
+}
+
+[[nodiscard]] std::optional<BlockRegistryError> read_texture_references(
+    const nlohmann::json& item,
+    BlockDefinition& definition) {
+  const auto textures_iter = item.find("textures");
+  if (textures_iter == item.end()) {
+    return std::nullopt;
+  }
+
+  if (textures_iter->is_string()) {
+    definition.texture_assets.fill(textures_iter->get<std::string>());
+    return std::nullopt;
+  }
+  if (!textures_iter->is_object()) {
+    return BlockRegistryError{"textures must be a string or object for " + definition.name};
+  }
+
+  const auto assign_if_present = [&](std::string_view key, auto assign) {
+    const auto found = textures_iter->find(std::string{key});
+    if (found != textures_iter->end()) {
+      assign(found->get<std::string>());
+    }
+  };
+
+  assign_if_present("all", [&](const std::string& value) {
+    definition.texture_assets.fill(value);
+  });
+  assign_if_present("side", [&](const std::string& value) {
+    set_side_textures(definition.texture_assets, value);
+  });
+  assign_if_present("top", [&](const std::string& value) {
+    set_texture_slot(definition.texture_assets, BlockFace::PositiveY, value);
+  });
+  assign_if_present("up", [&](const std::string& value) {
+    set_texture_slot(definition.texture_assets, BlockFace::PositiveY, value);
+  });
+  assign_if_present("bottom", [&](const std::string& value) {
+    set_texture_slot(definition.texture_assets, BlockFace::NegativeY, value);
+  });
+  assign_if_present("down", [&](const std::string& value) {
+    set_texture_slot(definition.texture_assets, BlockFace::NegativeY, value);
+  });
+  assign_if_present("east", [&](const std::string& value) {
+    set_texture_slot(definition.texture_assets, BlockFace::PositiveX, value);
+  });
+  assign_if_present("west", [&](const std::string& value) {
+    set_texture_slot(definition.texture_assets, BlockFace::NegativeX, value);
+  });
+  assign_if_present("south", [&](const std::string& value) {
+    set_texture_slot(definition.texture_assets, BlockFace::PositiveZ, value);
+  });
+  assign_if_present("north", [&](const std::string& value) {
+    set_texture_slot(definition.texture_assets, BlockFace::NegativeZ, value);
+  });
+
+  return std::nullopt;
+}
+
 } // namespace
 
 BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definitions) {
@@ -106,6 +179,7 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
       variant.properties = definition.properties;
       variant.render_category = definition.render_category;
       variant.hide_same_variant_faces = definition.hide_same_variant_faces;
+      variant.texture_assets = definition.texture_assets;
       variant.renders_face.fill(definition.render_category != RenderCategory::None && definition.properties.full_cube);
       variant.occludes_face.fill(definition.properties.full_cube && definition.properties.opaque);
       if (definition.properties.collidable && definition.properties.full_cube) {
@@ -215,6 +289,36 @@ bool BlockRegistry::should_emit_face(
   }
 
   return !neighbor->occludes_face[face_index(opposite_face(face))];
+}
+
+BlockRenderData BlockRenderData::make_empty(usize variant_count) {
+  BlockRenderData data;
+  data.variants_.resize(variant_count);
+  for (BlockVariantRenderData& variant : data.variants_) {
+    for (BlockFace face : AllBlockFaces) {
+      variant.faces[face_index(face)].uvs = default_cube_face_uvs(face);
+    }
+  }
+  return data;
+}
+
+const BlockFaceRenderData* BlockRenderData::face(
+    BlockVariantID variant_id,
+    BlockFace block_face) const noexcept {
+  if (variant_id.value >= variants_.size()) {
+    return nullptr;
+  }
+  return &variants_[variant_id.value].faces[face_index(block_face)];
+}
+
+void BlockRenderData::set_face(
+    BlockVariantID variant_id,
+    BlockFace block_face,
+    BlockFaceRenderData data) {
+  if (variant_id.value >= variants_.size()) {
+    return;
+  }
+  variants_[variant_id.value].faces[face_index(block_face)] = data;
 }
 
 std::optional<std::string> BlockRegistry::validate_states(const BlockDefinition& definition) {
@@ -385,6 +489,10 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
       const auto hide_iter = item.find("hide_same_variant_faces");
       if (hide_iter != item.end()) {
         definition.hide_same_variant_faces = hide_iter->get<bool>();
+      }
+
+      if (auto texture_error = read_texture_references(item, definition); texture_error.has_value()) {
+        return BlockDefinitionsResult::failure(texture_error.value());
       }
 
       const auto states_iter = item.find("states");

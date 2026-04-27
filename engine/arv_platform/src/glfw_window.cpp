@@ -349,6 +349,21 @@ InputSnapshot OpenGLWindow::poll_input() {
                                  previous_action_active_[logical_action_index(LogicalAction::ToggleFly)],
                                  wheel_up_steps,
                                  wheel_down_steps) > 0;
+  input.open_inventory_pressed = action_press_count(
+                                     window_,
+                                     input_bindings_,
+                                     LogicalAction::OpenInventory,
+                                     previous_action_active_[logical_action_index(LogicalAction::OpenInventory)],
+                                     wheel_up_steps,
+                                     wheel_down_steps) > 0;
+  input.open_chat_pressed = action_press_count(
+                                window_,
+                                input_bindings_,
+                                LogicalAction::OpenChat,
+                                previous_action_active_[logical_action_index(LogicalAction::OpenChat)],
+                                wheel_up_steps,
+                                wheel_down_steps) > 0;
+  input.tab_menu_held = action_hold_active(window_, input_bindings_, LogicalAction::ShowTabMenu);
 
   for (usize slot = 0; slot < 9U; ++slot) {
     const LogicalAction action = static_cast<LogicalAction>(

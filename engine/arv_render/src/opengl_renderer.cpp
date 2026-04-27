@@ -1,6 +1,7 @@
 #include "arv/render/opengl_renderer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <utility>
@@ -13,6 +14,29 @@ void OpenGLRenderer::set_chunk_shader_sources(std::string vertex_source, std::st
   if (chunk_program_ != 0) {
     glDeleteProgram(chunk_program_);
     chunk_program_ = 0;
+  }
+}
+
+void OpenGLRenderer::set_ui_shader_sources(std::string vertex_source, std::string fragment_source) {
+  ui_vertex_shader_source_ = std::move(vertex_source);
+  ui_fragment_shader_source_ = std::move(fragment_source);
+  if (ui_program_ != 0) {
+    glDeleteProgram(ui_program_);
+    ui_program_ = 0;
+  }
+}
+
+void OpenGLRenderer::set_chunk_texture_atlas(TextureUploadData upload) {
+  destroy_gpu_texture(terrain_atlas_);
+  if (upload.valid()) {
+    terrain_atlas_ = create_texture(upload, true);
+  }
+}
+
+void OpenGLRenderer::set_ui_font_atlas(TextureUploadData upload) {
+  destroy_gpu_texture(font_atlas_);
+  if (upload.valid()) {
+    font_atlas_ = create_texture(upload, false);
   }
 }
 
@@ -42,6 +66,7 @@ void OpenGLRenderer::enqueue_chunk_mesh_upload(ChunkMeshUpload upload) {
 
 void OpenGLRenderer::render() {
   process_chunk_mesh_uploads();
+  ensure_white_texture();
 
   glEnable(GL_DEPTH_TEST);
   glClearColor(0.08F, 0.10F, 0.12F, 1.0F);
@@ -77,6 +102,13 @@ void OpenGLRenderer::render() {
   glUniform1f(chunk_camera_fov_y_uniform_, frame_.world_view.fov_y_degrees);
   glUniform1f(chunk_camera_near_uniform_, frame_.world_view.near_plane);
   glUniform1f(chunk_camera_far_uniform_, frame_.world_view.far_plane);
+  glUniform2f(
+      chunk_atlas_size_uniform_,
+      static_cast<f32>(terrain_atlas_.width == 0 ? 1U : terrain_atlas_.width),
+      static_cast<f32>(terrain_atlas_.height == 0 ? 1U : terrain_atlas_.height));
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
+  glUniform1i(chunk_terrain_atlas_uniform_, 0);
 
   glDisable(GL_BLEND);
   glDepthMask(GL_TRUE);
@@ -90,6 +122,8 @@ void OpenGLRenderer::render() {
   glDisable(GL_BLEND);
   glBindVertexArray(0);
   glUseProgram(0);
+
+  draw_ui();
 }
 
 void OpenGLRenderer::begin_shutdown() {
@@ -103,6 +137,25 @@ void OpenGLRenderer::begin_shutdown() {
     glDeleteProgram(chunk_program_);
     chunk_program_ = 0;
   }
+  if (ui_program_ != 0) {
+    glDeleteProgram(ui_program_);
+    ui_program_ = 0;
+  }
+  destroy_gpu_texture(terrain_atlas_);
+  destroy_gpu_texture(font_atlas_);
+  destroy_gpu_texture(white_texture_);
+  if (ui_index_buffer_ != 0) {
+    glDeleteBuffers(1, &ui_index_buffer_);
+  }
+  if (ui_vertex_buffer_ != 0) {
+    glDeleteBuffers(1, &ui_vertex_buffer_);
+  }
+  if (ui_vao_ != 0) {
+    glDeleteVertexArrays(1, &ui_vao_);
+  }
+  ui_index_buffer_ = 0;
+  ui_vertex_buffer_ = 0;
+  ui_vao_ = 0;
   frame_ = {};
 }
 
@@ -223,6 +276,45 @@ void OpenGLRenderer::destroy_chunk_gpu_state(ChunkGpuState& state) {
   state.state = {};
 }
 
+void OpenGLRenderer::destroy_gpu_texture(GpuTexture& texture) {
+  if (texture.id != 0) {
+    glDeleteTextures(1, &texture.id);
+  }
+  texture = {};
+}
+
+OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture(const TextureUploadData& upload, bool mipmaps) {
+  GpuTexture texture;
+  if (!upload.valid()) {
+    return texture;
+  }
+  glGenTextures(1, &texture.id);
+  glBindTexture(GL_TEXTURE_2D, texture.id);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(
+      GL_TEXTURE_2D,
+      GL_TEXTURE_MIN_FILTER,
+      mipmaps ? GL_NEAREST_MIPMAP_NEAREST : GL_NEAREST);
+  glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      GL_RGBA8,
+      static_cast<GLsizei>(upload.width),
+      static_cast<GLsizei>(upload.height),
+      0,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      upload.rgba_pixels.data());
+  if (mipmaps) {
+    glGenerateMipmap(GL_TEXTURE_2D);
+  }
+  texture.width = upload.width;
+  texture.height = upload.height;
+  return texture;
+}
+
 GLuint OpenGLRenderer::compile_shader(GLenum type, const char* source) {
   const GLuint shader = glCreateShader(type);
   glShaderSource(shader, 1, &source, nullptr);
@@ -284,6 +376,49 @@ bool OpenGLRenderer::ensure_chunk_program() {
   chunk_camera_near_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_near_plane");
   chunk_camera_far_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_far_plane");
   chunk_alpha_uniform_ = glGetUniformLocation(chunk_program_, "u_alpha");
+  chunk_atlas_size_uniform_ = glGetUniformLocation(chunk_program_, "u_atlas_size");
+  chunk_terrain_atlas_uniform_ = glGetUniformLocation(chunk_program_, "u_terrain_atlas");
+  return true;
+}
+
+bool OpenGLRenderer::ensure_ui_program() {
+  if (ui_program_ != 0) {
+    return true;
+  }
+
+  if (ui_vertex_shader_source_.empty() || ui_fragment_shader_source_.empty()) {
+    return false;
+  }
+
+  const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, ui_vertex_shader_source_.c_str());
+  const GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, ui_fragment_shader_source_.c_str());
+  if (vertex_shader == 0 || fragment_shader == 0) {
+    if (vertex_shader != 0) {
+      glDeleteShader(vertex_shader);
+    }
+    if (fragment_shader != 0) {
+      glDeleteShader(fragment_shader);
+    }
+    return false;
+  }
+
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vertex_shader);
+  glAttachShader(program, fragment_shader);
+  glLinkProgram(program);
+  glDeleteShader(vertex_shader);
+  glDeleteShader(fragment_shader);
+
+  GLint success = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &success);
+  if (success != GL_TRUE) {
+    glDeleteProgram(program);
+    return false;
+  }
+
+  ui_program_ = program;
+  ui_viewport_uniform_ = glGetUniformLocation(ui_program_, "u_viewport_size");
+  ui_texture_uniform_ = glGetUniformLocation(ui_program_, "u_texture");
   return true;
 }
 
@@ -309,6 +444,158 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
     glBindVertexArray(mesh.vao);
     glDrawElements(GL_TRIANGLES, mesh.index_count, GL_UNSIGNED_INT, nullptr);
   }
+}
+
+void OpenGLRenderer::draw_ui() {
+  if (frame_.ui_rects.empty() && frame_.ui_glyphs.empty()) {
+    return;
+  }
+  if (!ensure_ui_program()) {
+    return;
+  }
+  ensure_ui_buffers();
+
+  glDisable(GL_DEPTH_TEST);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glUseProgram(ui_program_);
+  glUniform2f(ui_viewport_uniform_, static_cast<f32>(width_), static_cast<f32>(height_));
+  glUniform1i(ui_texture_uniform_, 0);
+
+  draw_ui_rects();
+  draw_ui_glyphs();
+
+  glBindVertexArray(0);
+  glUseProgram(0);
+  glDisable(GL_BLEND);
+}
+
+void OpenGLRenderer::draw_ui_rects() {
+  if (frame_.ui_rects.empty()) {
+    return;
+  }
+
+  std::vector<UIVertex> vertices;
+  std::vector<u32> indices;
+  vertices.reserve(frame_.ui_rects.size() * 4U);
+  indices.reserve(frame_.ui_rects.size() * 6U);
+  for (const UIRectDrawItem& rect : frame_.ui_rects) {
+    const u32 base = static_cast<u32>(vertices.size());
+    vertices.push_back({{rect.min.x, rect.min.y}, {0.0F, 0.0F}, rect.color});
+    vertices.push_back({{rect.max.x, rect.min.y}, {1.0F, 0.0F}, rect.color});
+    vertices.push_back({{rect.max.x, rect.max.y}, {1.0F, 1.0F}, rect.color});
+    vertices.push_back({{rect.min.x, rect.max.y}, {0.0F, 1.0F}, rect.color});
+    indices.insert(indices.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
+  }
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, white_texture_.id);
+  glBindVertexArray(ui_vao_);
+  glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
+  glBufferData(
+      GL_ARRAY_BUFFER,
+      static_cast<GLsizeiptr>(vertices.size() * sizeof(UIVertex)),
+      vertices.data(),
+      GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
+  glBufferData(
+      GL_ELEMENT_ARRAY_BUFFER,
+      static_cast<GLsizeiptr>(indices.size() * sizeof(u32)),
+      indices.data(),
+      GL_DYNAMIC_DRAW);
+  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+}
+
+void OpenGLRenderer::draw_ui_glyphs() {
+  if (frame_.ui_glyphs.empty() || font_atlas_.id == 0) {
+    return;
+  }
+
+  std::vector<UIVertex> vertices;
+  std::vector<u32> indices;
+  vertices.reserve(frame_.ui_glyphs.size() * 4U);
+  indices.reserve(frame_.ui_glyphs.size() * 6U);
+  for (const UIGlyphDrawItem& glyph : frame_.ui_glyphs) {
+    if (glyph.page != 0) {
+      continue;
+    }
+    const u32 base = static_cast<u32>(vertices.size());
+    vertices.push_back({{glyph.min.x, glyph.min.y}, {glyph.uv_min.x, glyph.uv_min.y}, glyph.color});
+    vertices.push_back({{glyph.max.x, glyph.min.y}, {glyph.uv_max.x, glyph.uv_min.y}, glyph.color});
+    vertices.push_back({{glyph.max.x, glyph.max.y}, {glyph.uv_max.x, glyph.uv_max.y}, glyph.color});
+    vertices.push_back({{glyph.min.x, glyph.max.y}, {glyph.uv_min.x, glyph.uv_max.y}, glyph.color});
+    indices.insert(indices.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
+  }
+  if (vertices.empty()) {
+    return;
+  }
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, font_atlas_.id);
+  glBindVertexArray(ui_vao_);
+  glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
+  glBufferData(
+      GL_ARRAY_BUFFER,
+      static_cast<GLsizeiptr>(vertices.size() * sizeof(UIVertex)),
+      vertices.data(),
+      GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
+  glBufferData(
+      GL_ELEMENT_ARRAY_BUFFER,
+      static_cast<GLsizeiptr>(indices.size() * sizeof(u32)),
+      indices.data(),
+      GL_DYNAMIC_DRAW);
+  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+}
+
+void OpenGLRenderer::ensure_ui_buffers() {
+  if (ui_vao_ != 0) {
+    return;
+  }
+
+  glGenVertexArrays(1, &ui_vao_);
+  glBindVertexArray(ui_vao_);
+  glGenBuffers(1, &ui_vertex_buffer_);
+  glGenBuffers(1, &ui_index_buffer_);
+  glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
+
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(
+      0,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIVertex),
+      reinterpret_cast<const void*>(offsetof(UIVertex, position)));
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(
+      1,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIVertex),
+      reinterpret_cast<const void*>(offsetof(UIVertex, uv)));
+  glEnableVertexAttribArray(2);
+  glVertexAttribPointer(
+      2,
+      4,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIVertex),
+      reinterpret_cast<const void*>(offsetof(UIVertex, color)));
+  glBindVertexArray(0);
+}
+
+void OpenGLRenderer::ensure_white_texture() {
+  if (white_texture_.id != 0) {
+    return;
+  }
+  TextureUploadData upload;
+  upload.width = 1;
+  upload.height = 1;
+  upload.rgba_pixels = {255U, 255U, 255U, 255U};
+  white_texture_ = create_texture(upload, false);
 }
 
 } // namespace arv::render

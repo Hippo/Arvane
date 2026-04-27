@@ -14,6 +14,7 @@ uniform float u_camera_near_plane;
 uniform float u_camera_far_plane;
 
 out vec3 v_color;
+out vec2 v_uv;
 
 void main() {
   uint bx = a_pos_ao & 31u;
@@ -29,6 +30,8 @@ void main() {
   uint blue = (a_light_face_flags >> 8u) & 15u;
   uint sky = (a_light_face_flags >> 12u) & 15u;
   uint face = (a_light_face_flags >> 16u) & 7u;
+  uint atlas_u = a_uv & 65535u;
+  uint atlas_v = (a_uv >> 16u) & 65535u;
 
   vec3 world = u_chunk_origin + vec3(bx, by, bz) + vec3(mx, my, mz) / 16.0;
   vec3 relative = world - u_camera_position;
@@ -49,5 +52,6 @@ void main() {
   float sky_shade = 0.2 + float(sky) / 15.0 * 0.8;
   vec3 block_light = vec3(red, green, blue) / 15.0;
   v_color = (vec3(0.46, 0.66, 0.34) * sky_shade + block_light * 0.35) * face_shade * ao_shade;
+  v_uv = vec2(float(atlas_u), float(atlas_v));
   gl_Position = vec4(view_x * focal / aspect, view_y * focal, clip_z, view_z);
 }

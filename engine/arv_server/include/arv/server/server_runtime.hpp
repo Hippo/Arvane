@@ -15,6 +15,7 @@
 
 #include <optional>
 #include <memory>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -83,12 +84,31 @@ public:
     return default_world_;
   }
 
+  [[nodiscard]] const player::GameModeRegistry& game_modes() const noexcept {
+    return game_modes_;
+  }
+
+  [[nodiscard]] player::GameModeRegistry& game_modes() noexcept {
+    return game_modes_;
+  }
+
+  [[nodiscard]] const player::PermissionGroupRegistry& permission_groups() const noexcept {
+    return permission_groups_;
+  }
+
+  [[nodiscard]] player::PermissionGroupRegistry& permission_groups() noexcept {
+    return permission_groups_;
+  }
+
+  [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
+
 private:
   void handle_network_event(net::NetworkEvent event);
 
   void handle_message(net::ConnectionID connection_id, const std::vector<u8>& packet);
   void handle_input_batch(net::ConnectionID connection_id, const protocol::ClientInputBatch& batch);
   void tick_players();
+  void refresh_player_permissions(player::PlayerState& player_state);
   void apply_player_command(player::PlayerState& player_state, const player::PlayerCommand& command);
   void send_player_corrections();
   void seed_player_inventory(player::PlayerState& player_state);
@@ -108,6 +128,8 @@ private:
   const player::ItemRegistry* item_registry_{};
   player::PlayerTuning player_tuning_{};
   voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
+  player::GameModeRegistry game_modes_{player::GameModeRegistry::with_builtins()};
+  player::PermissionGroupRegistry permission_groups_{};
   std::unordered_map<PlayerID, player::PlayerCommand> pending_player_commands_;
 };
 

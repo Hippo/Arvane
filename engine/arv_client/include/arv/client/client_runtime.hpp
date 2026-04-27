@@ -8,6 +8,7 @@
 #include "arv/protocol/message_envelope.hpp"
 
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -26,6 +27,18 @@ public:
   [[nodiscard]] net::ConnectionState connection_state() const noexcept;
   [[nodiscard]] const CameraShell& camera() const noexcept;
   CameraShell& camera() noexcept;
+  [[nodiscard]] u8 selected_hotbar_slot() const noexcept;
+  [[nodiscard]] const std::string& game_mode_id() const noexcept;
+  [[nodiscard]] const player::ResolvedPermissions& resolved_permissions() const noexcept;
+  [[nodiscard]] bool inventory_open() const noexcept {
+    return inventory_open_;
+  }
+  [[nodiscard]] bool chat_open() const noexcept {
+    return chat_open_;
+  }
+  [[nodiscard]] bool tab_menu_visible() const noexcept {
+    return tab_menu_visible_;
+  }
 
 private:
   net::NetworkResult send_client_hello();
@@ -38,6 +51,9 @@ private:
   net::ConnectionState connection_state_{net::ConnectionState::Disconnected};
   LocalPlayerController player_controller_{};
   std::vector<net::NetworkEvent> inbound_events_;
+  bool inventory_open_{};
+  bool chat_open_{};
+  bool tab_menu_visible_{};
 };
 
 } // namespace arv::client

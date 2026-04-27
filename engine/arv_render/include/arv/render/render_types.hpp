@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace arv::render {
@@ -128,6 +129,38 @@ struct CpuMeshBuffer {
   std::vector<u32> indices{};
 };
 
+struct UIVertex {
+  Vec2f position{};
+  Vec2f uv{};
+  Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+};
+
+struct TextureUploadData {
+  u32 width{};
+  u32 height{};
+  std::vector<u8> rgba_pixels{};
+
+  [[nodiscard]] bool valid() const noexcept {
+    return width > 0 && height > 0 &&
+           rgba_pixels.size() == static_cast<usize>(width) * static_cast<usize>(height) * 4U;
+  }
+};
+
+struct UIRectDrawItem {
+  Vec2f min{};
+  Vec2f max{};
+  Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+};
+
+struct UIGlyphDrawItem {
+  Vec2f min{};
+  Vec2f max{};
+  Vec2f uv_min{};
+  Vec2f uv_max{};
+  Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+  u32 page{};
+};
+
 void append_chunk_vertex(CpuMeshBuffer& buffer, ChunkVertex vertex);
 
 [[nodiscard]] inline usize chunk_vertex_count(const CpuMeshBuffer& buffer) noexcept {
@@ -172,6 +205,8 @@ struct FramePacket {
   RenderView world_view{};
   std::vector<ChunkDrawItem> opaque_chunks{};
   std::vector<ChunkDrawItem> transparent_chunks{};
+  std::vector<UIRectDrawItem> ui_rects{};
+  std::vector<UIGlyphDrawItem> ui_glyphs{};
 };
 
 [[nodiscard]] inline RenderView render_view_from_camera(const CameraSnapshot& camera) noexcept {

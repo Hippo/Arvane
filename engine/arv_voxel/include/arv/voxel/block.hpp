@@ -35,6 +35,14 @@ enum class BlockFace : u8 {
 };
 
 inline constexpr usize BlockFaceCount = 6;
+inline constexpr std::array<BlockFace, BlockFaceCount> AllBlockFaces{{
+    BlockFace::PositiveX,
+    BlockFace::NegativeX,
+    BlockFace::PositiveY,
+    BlockFace::NegativeY,
+    BlockFace::PositiveZ,
+    BlockFace::NegativeZ,
+}};
 
 enum class RenderCategory : u8 {
   None,
@@ -72,6 +80,7 @@ struct BlockDefinition {
   BlockProperties properties{};
   RenderCategory render_category{RenderCategory::None};
   bool hide_same_variant_faces{true};
+  std::array<std::string, BlockFaceCount> texture_assets{};
   std::vector<StatePropertyDefinition> states{};
 };
 
@@ -91,15 +100,41 @@ struct BlockVariantRecord {
   BlockProperties properties{};
   RenderCategory render_category{RenderCategory::None};
   bool hide_same_variant_faces{};
+  std::array<std::string, BlockFaceCount> texture_assets{};
   std::array<bool, BlockFaceCount> renders_face{};
   std::array<bool, BlockFaceCount> occludes_face{};
   std::vector<Aabb3f> collision_boxes{};
+};
+
+struct BlockFaceRenderData {
+  u32 page{};
+  u32 texture_index{};
+  std::array<Vec2i, 4> uvs{};
+};
+
+struct BlockVariantRenderData {
+  std::array<BlockFaceRenderData, BlockFaceCount> faces{};
 };
 
 using BlockDefinitionsResult = Expected<std::vector<BlockDefinition>, BlockRegistryError>;
 
 [[nodiscard]] constexpr usize face_index(BlockFace face) noexcept {
   return static_cast<usize>(face);
+}
+
+[[nodiscard]] constexpr std::array<Vec2i, 4> default_cube_face_uvs(BlockFace face) noexcept {
+  switch (face) {
+    case BlockFace::PositiveX:
+    case BlockFace::NegativeX:
+    case BlockFace::PositiveY:
+    case BlockFace::PositiveZ:
+      return {{{0, 16}, {16, 16}, {0, 0}, {16, 0}}};
+    case BlockFace::NegativeY:
+      return {{{16, 0}, {0, 0}, {16, 16}, {0, 16}}};
+    case BlockFace::NegativeZ:
+      return {{{16, 16}, {0, 16}, {16, 0}, {0, 0}}};
+  }
+  return {{{0, 16}, {16, 16}, {0, 0}, {16, 0}}};
 }
 
 [[nodiscard]] constexpr BlockFace opposite_face(BlockFace face) noexcept {
@@ -180,6 +215,24 @@ private:
   std::vector<BlockVariantRecord> variants_;
   std::unordered_map<std::string, BlockID> block_name_to_id_;
   std::unordered_map<std::string, BlockVariantID> variant_name_to_id_;
+};
+
+class BlockRenderData {
+public:
+  [[nodiscard]] static BlockRenderData make_empty(usize variant_count);
+
+  [[nodiscard]] const BlockFaceRenderData* face(
+      BlockVariantID variant_id,
+      BlockFace block_face) const noexcept;
+
+  void set_face(BlockVariantID variant_id, BlockFace block_face, BlockFaceRenderData data);
+
+  [[nodiscard]] usize variant_count() const noexcept {
+    return variants_.size();
+  }
+
+private:
+  std::vector<BlockVariantRenderData> variants_{};
 };
 
 [[nodiscard]] BlockDefinition make_air_definition();

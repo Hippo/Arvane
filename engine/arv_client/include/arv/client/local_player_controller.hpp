@@ -6,6 +6,7 @@
 #include "arv/protocol/player_input.hpp"
 
 #include <optional>
+#include <string>
 
 namespace arv::client {
 
@@ -23,6 +24,9 @@ struct InputFrame {
   bool secondary_pressed{};
   bool secondary_held{};
   bool toggle_fly_pressed{};
+  bool open_inventory_pressed{};
+  bool open_chat_pressed{};
+  bool tab_menu_held{};
   std::optional<u8> hotbar_select{};
   i8 hotbar_scroll_steps{};
   f32 mouse_delta_x{};
@@ -33,7 +37,7 @@ class LocalPlayerController {
 public:
   void submit_input(InputFrame input) noexcept;
   [[nodiscard]] player::PlayerCommand consume_command(TickIndex tick_index) noexcept;
-  void apply_authoritative_state(const protocol::PlayerCorrection& correction) noexcept;
+  void apply_authoritative_state(const protocol::PlayerCorrection& correction);
 
   [[nodiscard]] const CameraShell& camera() const noexcept {
     return camera_;
@@ -43,9 +47,25 @@ public:
     return camera_;
   }
 
+  [[nodiscard]] u8 selected_hotbar_slot() const noexcept {
+    return selected_hotbar_slot_;
+  }
+
+  [[nodiscard]] const std::string& game_mode_id() const noexcept {
+    return game_mode_id_;
+  }
+
+  [[nodiscard]] const player::ResolvedPermissions& resolved_permissions() const noexcept {
+    return resolved_permissions_;
+  }
+
 private:
   CameraShell camera_{};
   u8 selected_hotbar_slot_{};
+  bool has_unconfirmed_hotbar_selection_{};
+  TickIndex last_authoritative_server_tick_{};
+  std::string game_mode_id_{std::string{player::SurvivalGameModeID}};
+  player::ResolvedPermissions resolved_permissions_{};
   bool move_forward_{};
   bool move_backward_{};
   bool move_left_{};

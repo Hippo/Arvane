@@ -1,10 +1,12 @@
 set(ARV_WORLD_HEADERS
+  include/arv/world/regions.hpp
   include/arv/world/world_generation.hpp
   include/arv/world/world_runtime.hpp
   include/arv/world/world_queries.hpp
 )
 
 add_library(arv_world STATIC
+  src/regions.cpp
   src/world_generation.cpp
   src/world_runtime.cpp
 )

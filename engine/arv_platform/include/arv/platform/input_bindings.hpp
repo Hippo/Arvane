@@ -32,6 +32,9 @@ enum class LogicalAction : u8 {
   NextHotbarSlot,
   PrevHotbarSlot,
   ToggleFly,
+  OpenInventory,
+  OpenChat,
+  ShowTabMenu,
   Count,
 };
 

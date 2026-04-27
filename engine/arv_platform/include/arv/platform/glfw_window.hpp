@@ -43,6 +43,9 @@ struct InputSnapshot {
   bool secondary_pressed{};
   bool secondary_held{};
   bool toggle_fly_pressed{};
+  bool open_inventory_pressed{};
+  bool open_chat_pressed{};
+  bool tab_menu_held{};
   std::optional<u8> hotbar_select{};
   i8 hotbar_scroll_steps{};
   f32 mouse_delta_x{};

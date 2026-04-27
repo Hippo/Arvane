@@ -91,6 +91,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   player.yaw_radians = 1.25F;
   player.pitch_radians = -0.5F;
   player.grounded = true;
+  player.game_mode_id = std::string{arv::player::CreativeGameModeID};
   player.selected_hotbar_slot = 3;
   ASSERT_TRUE(player.inventory.set_slot(0, arv::player::ItemStack{stone_item, 7}));
 
@@ -141,6 +142,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(loaded.value().chunks[0].blocks[0], stone);
   ASSERT_EQ(loaded.value().players.size(), 1U);
   EXPECT_EQ(loaded.value().players[0].profile_name, "local_player");
+  EXPECT_EQ(loaded.value().players[0].game_mode_id, arv::player::CreativeGameModeID);
   EXPECT_EQ(loaded.value().players[0].selected_hotbar_slot, 3U);
   ASSERT_TRUE(loaded.value().players[0].inventory.slot(0).has_value());
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->item, stone_item);

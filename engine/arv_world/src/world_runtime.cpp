@@ -285,6 +285,18 @@ std::vector<PlayerID> WorldRuntime::player_ids() const {
   return ids;
 }
 
+const PlayerRegionState* WorldRuntime::player_region_state(PlayerID player_id) const noexcept {
+  const auto found = player_region_states_.find(player_id);
+  return found == player_region_states_.end() ? nullptr : &found->second;
+}
+
+RegionMembershipChange WorldRuntime::update_player_region_state(
+    PlayerID player_id,
+    RegionQuery query) {
+  PlayerRegionState& state = player_region_states_[player_id];
+  return regions_.update_membership(state, query);
+}
+
 void WorldRuntime::schedule_block_update(
     BlockPos pos,
     TickIndex delay_ticks,

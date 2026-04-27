@@ -10,6 +10,7 @@
     {
       "name": "arvane:dirt",
       "render_category": "opaque",
+      "textures": "arvane:texture/block/dirt",
       "properties": {
         "solid": true,
         "collidable": true,
@@ -22,6 +23,7 @@
     {
       "name": "arvane:glass",
       "render_category": "transparent",
+      "textures": "arvane:texture/block/glass",
       "properties": {
         "solid": true,
         "collidable": true,
@@ -31,6 +33,7 @@
     {
       "name": "arvane:glowstone",
       "render_category": "opaque",
+      "textures": "arvane:texture/block/glowstone",
       "properties": {
         "solid": true,
         "collidable": true,
@@ -45,6 +48,11 @@
     {
       "name": "arvane:grass_block",
       "render_category": "opaque",
+      "textures": {
+        "top": "arvane:texture/block/grass_top",
+        "side": "arvane:texture/block/grass_side",
+        "bottom": "arvane:texture/block/dirt"
+      },
       "properties": {
         "solid": true,
         "collidable": true,
@@ -57,6 +65,7 @@
     {
       "name": "arvane:stone",
       "render_category": "opaque",
+      "textures": "arvane:texture/block/stone",
       "properties": {
         "solid": true,
         "collidable": true,

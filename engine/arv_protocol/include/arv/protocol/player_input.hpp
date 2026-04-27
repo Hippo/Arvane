@@ -6,6 +6,7 @@
 #include "arv/player/player_state.hpp"
 #include "arv/protocol/message_writer.hpp"
 
+#include <string>
 #include <vector>
 
 namespace arv::protocol {
@@ -54,6 +55,8 @@ struct PlayerCorrection {
   f32 yaw_radians{};
   f32 pitch_radians{};
   player::MovementMode movement_mode{player::MovementMode::Walking};
+  std::string game_mode_id{std::string{player::SurvivalGameModeID}};
+  player::ResolvedCorePermissions resolved_core_permissions{};
   bool grounded{};
   bool sneaking{};
   u8 selected_hotbar_slot{};

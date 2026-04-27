@@ -169,6 +169,8 @@ bindings:
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::MoveBackward);
   const auto& sneak =
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Sneak);
+  const auto& open_inventory =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::OpenInventory);
 
   ASSERT_EQ(move_forward.size(), 1U);
   EXPECT_EQ(move_forward[0].input_code, "F");
@@ -176,6 +178,8 @@ bindings:
   EXPECT_EQ(move_backward[0].input_code, "S");
   ASSERT_EQ(sneak.size(), 1U);
   EXPECT_EQ(sneak[0].input_code, "LShift");
+  ASSERT_EQ(open_inventory.size(), 1U);
+  EXPECT_EQ(open_inventory[0].input_code, "E");
 }
 
 TEST(ConfigTests, MissingInputBindingsFileReturnsDefaultsAndWritesConfig) {

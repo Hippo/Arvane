@@ -32,6 +32,9 @@ constexpr std::array<ActionNameEntry, static_cast<usize>(LogicalAction::Count)> 
     {LogicalAction::NextHotbarSlot, "NextHotbarSlot"},
     {LogicalAction::PrevHotbarSlot, "PrevHotbarSlot"},
     {LogicalAction::ToggleFly, "ToggleFly"},
+    {LogicalAction::OpenInventory, "OpenInventory"},
+    {LogicalAction::OpenChat, "OpenChat"},
+    {LogicalAction::ShowTabMenu, "ShowTabMenu"},
 }};
 
 constexpr std::array<std::string_view, 49> kKeyboardCodes{{
@@ -269,6 +272,9 @@ InputBindings default_input_bindings() {
   set_default_binding(bindings, LogicalAction::NextHotbarSlot, InputDeviceType::MouseWheel, "Up");
   set_default_binding(bindings, LogicalAction::PrevHotbarSlot, InputDeviceType::MouseWheel, "Down");
   set_default_binding(bindings, LogicalAction::ToggleFly, InputDeviceType::Keyboard, "F");
+  set_default_binding(bindings, LogicalAction::OpenInventory, InputDeviceType::Keyboard, "E");
+  set_default_binding(bindings, LogicalAction::OpenChat, InputDeviceType::Keyboard, "T");
+  set_default_binding(bindings, LogicalAction::ShowTabMenu, InputDeviceType::Keyboard, "Tab");
   return bindings;
 }
 

@@ -16,6 +16,30 @@ TEST(LocalPlayerControllerTests, HotbarSelectionAndScrollWrapProduceStableComman
   EXPECT_EQ(wrapped.selected_hotbar_slot, 1U);
 }
 
+TEST(LocalPlayerControllerTests, StaleCorrectionDoesNotOverrideUnconfirmedHotbarSelection) {
+  arv::client::LocalPlayerController controller;
+
+  controller.submit_input(arv::client::InputFrame{.hotbar_select = 5});
+
+  arv::protocol::PlayerCorrection stale;
+  stale.server_tick = 10;
+  stale.selected_hotbar_slot = 0;
+  controller.apply_authoritative_state(stale);
+  EXPECT_EQ(controller.selected_hotbar_slot(), 5U);
+
+  arv::protocol::PlayerCorrection confirmed;
+  confirmed.server_tick = 11;
+  confirmed.selected_hotbar_slot = 5;
+  controller.apply_authoritative_state(confirmed);
+  EXPECT_EQ(controller.selected_hotbar_slot(), 5U);
+
+  arv::protocol::PlayerCorrection late_stale;
+  late_stale.server_tick = 10;
+  late_stale.selected_hotbar_slot = 0;
+  controller.apply_authoritative_state(late_stale);
+  EXPECT_EQ(controller.selected_hotbar_slot(), 5U);
+}
+
 TEST(LocalPlayerControllerTests, SprintOnlyAppliesWhileMovingForwardAndNotSneaking) {
   arv::client::LocalPlayerController controller;
 

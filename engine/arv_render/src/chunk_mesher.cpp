@@ -9,7 +9,6 @@ struct ChunkFaceGeometry {
   voxel::BlockFace face{};
   Vec3i neighbor_offset{};
   std::array<Vec3i, 4> corners{};
-  std::array<Vec2i, 4> uvs{};
   std::array<u8, 6> indices{};
   std::array<u8, 6> flipped_indices{};
 };
@@ -19,7 +18,6 @@ constexpr std::array<ChunkFaceGeometry, voxel::BlockFaceCount> ChunkCubeFaces{{
         voxel::BlockFace::PositiveX,
         {1, 0, 0},
         {{{16, 0, 16}, {16, 0, 0}, {16, 16, 16}, {16, 16, 0}}},
-        {{{0, 16}, {16, 16}, {0, 0}, {16, 0}}},
         {{2, 1, 3, 1, 2, 0}},
         {{3, 2, 0, 0, 1, 3}},
     },
@@ -27,7 +25,6 @@ constexpr std::array<ChunkFaceGeometry, voxel::BlockFaceCount> ChunkCubeFaces{{
         voxel::BlockFace::NegativeX,
         {-1, 0, 0},
         {{{0, 0, 0}, {0, 0, 16}, {0, 16, 0}, {0, 16, 16}}},
-        {{{0, 16}, {16, 16}, {0, 0}, {16, 0}}},
         {{3, 2, 0, 0, 1, 3}},
         {{2, 1, 3, 1, 2, 0}},
     },
@@ -35,7 +32,6 @@ constexpr std::array<ChunkFaceGeometry, voxel::BlockFaceCount> ChunkCubeFaces{{
         voxel::BlockFace::PositiveY,
         {0, 1, 0},
         {{{0, 16, 16}, {16, 16, 16}, {0, 16, 0}, {16, 16, 0}}},
-        {{{0, 16}, {16, 16}, {0, 0}, {16, 0}}},
         {{2, 1, 3, 1, 2, 0}},
         {{3, 2, 0, 0, 1, 3}},
     },
@@ -43,7 +39,6 @@ constexpr std::array<ChunkFaceGeometry, voxel::BlockFaceCount> ChunkCubeFaces{{
         voxel::BlockFace::NegativeY,
         {0, -1, 0},
         {{{16, 0, 16}, {0, 0, 16}, {16, 0, 0}, {0, 0, 0}}},
-        {{{16, 0}, {0, 0}, {16, 16}, {0, 16}}},
         {{3, 2, 0, 0, 1, 3}},
         {{2, 1, 3, 1, 2, 0}},
     },
@@ -51,7 +46,6 @@ constexpr std::array<ChunkFaceGeometry, voxel::BlockFaceCount> ChunkCubeFaces{{
         voxel::BlockFace::PositiveZ,
         {0, 0, 1},
         {{{0, 0, 16}, {16, 0, 16}, {0, 16, 16}, {16, 16, 16}}},
-        {{{0, 16}, {16, 16}, {0, 0}, {16, 0}}},
         {{0, 1, 3, 3, 2, 0}},
         {{1, 2, 0, 2, 1, 3}},
     },
@@ -59,7 +53,6 @@ constexpr std::array<ChunkFaceGeometry, voxel::BlockFaceCount> ChunkCubeFaces{{
         voxel::BlockFace::NegativeZ,
         {0, 0, -1},
         {{{0, 0, 0}, {16, 0, 0}, {0, 16, 0}, {16, 16, 0}}},
-        {{{16, 16}, {0, 16}, {16, 0}, {0, 0}}},
         {{0, 3, 1, 3, 0, 2}},
         {{1, 0, 2, 2, 3, 1}},
     },
@@ -69,6 +62,7 @@ void emit_cube_face(
     CpuMeshBuffer& output,
     SectionLocalPos local,
     const ChunkFaceGeometry& face,
+    std::array<Vec2i, 4> uvs,
     voxel::LightWord light,
     std::array<u8, 4> ao) {
   const u32 base_index = static_cast<u32>(chunk_vertex_count(output));
@@ -76,8 +70,8 @@ void emit_cube_face(
   append_chunk_vertex(output, make_chunk_vertex(
                                   local,
                                   face.corners[0],
-                                  static_cast<u16>(face.uvs[0].x),
-                                  static_cast<u16>(face.uvs[0].y),
+                                  static_cast<u16>(uvs[0].x),
+                                  static_cast<u16>(uvs[0].y),
                                   face.face,
                                   ao[0],
                                   voxel::light_sky(light),
@@ -87,8 +81,8 @@ void emit_cube_face(
   append_chunk_vertex(output, make_chunk_vertex(
                                   local,
                                   face.corners[1],
-                                  static_cast<u16>(face.uvs[1].x),
-                                  static_cast<u16>(face.uvs[1].y),
+                                  static_cast<u16>(uvs[1].x),
+                                  static_cast<u16>(uvs[1].y),
                                   face.face,
                                   ao[1],
                                   voxel::light_sky(light),
@@ -98,8 +92,8 @@ void emit_cube_face(
   append_chunk_vertex(output, make_chunk_vertex(
                                   local,
                                   face.corners[2],
-                                  static_cast<u16>(face.uvs[2].x),
-                                  static_cast<u16>(face.uvs[2].y),
+                                  static_cast<u16>(uvs[2].x),
+                                  static_cast<u16>(uvs[2].y),
                                   face.face,
                                   ao[2],
                                   voxel::light_sky(light),
@@ -109,8 +103,8 @@ void emit_cube_face(
   append_chunk_vertex(output, make_chunk_vertex(
                                   local,
                                   face.corners[3],
-                                  static_cast<u16>(face.uvs[3].x),
-                                  static_cast<u16>(face.uvs[3].y),
+                                  static_cast<u16>(uvs[3].x),
+                                  static_cast<u16>(uvs[3].y),
                                   face.face,
                                   ao[3],
                                   voxel::light_sky(light),
@@ -203,7 +197,8 @@ void emit_cube_face(
 ChunkMeshData build_chunk_mesh(
     WorldID world_id,
     const voxel::ChunkSnapshot& snapshot,
-    const voxel::BlockRegistry& registry) {
+    const voxel::BlockRegistry& registry,
+    const voxel::BlockRenderData* render_data) {
   ChunkMeshData mesh;
   mesh.world_id = world_id;
   mesh.coord = snapshot.coord;
@@ -234,10 +229,18 @@ ChunkMeshData build_chunk_mesh(
           const SectionLocalPos neighbor_local = offset_local(local, face.neighbor_offset);
           const voxel::BlockVariantID neighbor_id = voxel::snapshot_block(snapshot, neighbor_local);
           if (registry.should_emit_face(self_id, neighbor_id, face.face)) {
+            std::array<Vec2i, 4> uvs = voxel::default_cube_face_uvs(face.face);
+            if (render_data != nullptr) {
+              if (const voxel::BlockFaceRenderData* face_data = render_data->face(self_id, face.face);
+                  face_data != nullptr) {
+                uvs = face_data->uvs;
+              }
+            }
             emit_cube_face(
                 output,
                 local,
                 face,
+                uvs,
                 voxel::snapshot_light(snapshot, neighbor_local),
                 face_ao(snapshot, registry, local, face));
           }

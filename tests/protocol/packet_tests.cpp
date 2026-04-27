@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
 #include <vector>
 
 TEST(ProtocolTests, PacketEnvelopeRoundTripsPayload) {
@@ -94,6 +95,9 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   correction.yaw_radians = 0.75F;
   correction.pitch_radians = -0.25F;
   correction.movement_mode = arv::player::MovementMode::Flying;
+  correction.game_mode_id = std::string{arv::player::CreativeGameModeID};
+  correction.resolved_core_permissions.can_fly = true;
+  correction.resolved_core_permissions.has_creative_inventory = true;
   correction.grounded = false;
   correction.sneaking = true;
   correction.selected_hotbar_slot = 6;
@@ -110,6 +114,9 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   EXPECT_FLOAT_EQ(decoded.value().yaw_radians, 0.75F);
   EXPECT_FLOAT_EQ(decoded.value().pitch_radians, -0.25F);
   EXPECT_EQ(decoded.value().movement_mode, arv::player::MovementMode::Flying);
+  EXPECT_EQ(decoded.value().game_mode_id, arv::player::CreativeGameModeID);
+  EXPECT_TRUE(decoded.value().resolved_core_permissions.can_fly);
+  EXPECT_TRUE(decoded.value().resolved_core_permissions.has_creative_inventory);
   EXPECT_FALSE(decoded.value().grounded);
   EXPECT_TRUE(decoded.value().sneaking);
   EXPECT_EQ(decoded.value().selected_hotbar_slot, 6U);
