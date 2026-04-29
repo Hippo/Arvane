@@ -127,4 +127,7 @@ endif()
 
 
 add_subdirectory(engine)
+if(ARVANE_BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
+endif()
 add_subdirectory(apps)

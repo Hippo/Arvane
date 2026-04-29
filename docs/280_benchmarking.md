@@ -6,6 +6,22 @@ GoogleTest and GoogleMock are reserved for correctness tests. Do not use unit te
 
 Benchmarks live under `benchmarks/` and should be built as separate executables from `tests/`.
 
+The main local benchmark executable is `arv_benchmarks`.
+
+Typical local workflow:
+
+```sh
+cmake -S . -B build -DARVANE_BUILD_BENCHMARKS=ON
+cmake --build build --target arv_benchmarks
+./build/benchmarks/arv_benchmarks
+```
+
+Use Google Benchmark filters when investigating one area:
+
+```sh
+./build/benchmarks/arv_benchmarks --benchmark_filter=BM_NoisyTerrainSectionMesh
+```
+
 Benchmarks should focus on stable engine hot paths:
 - chunk section meshing
 - lighting propagation
