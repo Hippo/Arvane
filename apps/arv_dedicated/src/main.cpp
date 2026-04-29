@@ -17,6 +17,7 @@
 #include <memory>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -84,7 +85,7 @@ int main(int argc, char** argv) {
 
   transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingRegistries, logger);
   auto block_definition_text = arv::io::read_text_file(
-      config.paths.assets_path() / "config/blocks.json",
+      config.paths.config_path() / "blocks.json",
       "dedicated block definitions");
   if (!block_definition_text) {
     logger.error("blocks", block_definition_text.error().message);
@@ -110,8 +111,27 @@ int main(int argc, char** argv) {
   const arv::voxel::BlockRegistry block_registry =
       std::move(block_registry_result.value());
 
+  auto item_definition_text = arv::io::read_text_file(
+      config.paths.config_path() / "items.json",
+      "dedicated item definitions");
+  if (!item_definition_text) {
+    logger.error("items", item_definition_text.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    return 1;
+  }
+
+  auto item_definitions =
+      arv::player::parse_item_definitions_json(item_definition_text.value());
+  if (!item_definitions) {
+    logger.error("items", item_definitions.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    return 1;
+  }
+
   auto item_registry_result =
-      arv::player::ItemRegistry::build_default_block_items(block_registry);
+      arv::player::ItemRegistry::build_from_blocks_and_items(
+          block_registry,
+          std::move(item_definitions.value()));
   if (!item_registry_result) {
     logger.error("items", item_registry_result.error().message);
     transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);

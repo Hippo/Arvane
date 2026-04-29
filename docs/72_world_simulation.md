@@ -194,15 +194,15 @@ Examples:
 
 When a block or fluid cell changes, the world must:
 
-- increment the owning chunk version
+- increment the owning section block/geometry version when geometry or block contents changed
 - mark the chunk dirty for save if persistent
-- mark affected render/mesh state dirty
+- mark affected `Geometry` render/mesh state dirty
 - enqueue neighbor updates
 - enqueue lighting updates if relevant
 - enqueue fluid updates if relevant
 - emit world events if needed
 
-No system should perform recursive neighbor updates inline.
+No system should perform recursive neighbor updates, lighting propagation, meshing, or simulation cascades inline from the edit. The edit queues work; worker jobs compute; the world commits.
 
 ---
 
@@ -880,7 +880,7 @@ When applying a fluid delta:
 3. verify version assumptions if present
 4. compare old fluid cell to new fluid cell
 5. apply if changed
-6. increment chunk version
+6. increment the relevant section block/geometry version
 7. mark dirty systems
 8. enqueue follow-up fluid updates
 
@@ -1002,22 +1002,23 @@ Relevant flags:
 enum class ChunkDirtyFlags : u32 {
   None             = 0,
   NeedsSave        = 1 << 0,
-  NeedsMesh        = 1 << 1,
-  NeedsRelight     = 1 << 2,
-  NeedsFluidStep   = 1 << 3,
+  Geometry         = 1 << 1,
+  Lighting         = 1 << 2,
+  LightMesh        = 1 << 3,
+  NeedsFluidStep   = 1 << 4,
 };
 ```
 
 Fluid changes usually set:
 
 * `NeedsSave`
-* `NeedsMesh`
+* `Geometry`
 
 They may set:
 
-* `NeedsRelight`
+* `Lighting`
 
-They should set `NeedsRelight` when:
+They should set `Lighting` when:
 
 * the fluid affects transparency/light attenuation
 * the fluid replaced a light-emitting block
@@ -1245,14 +1246,14 @@ A fluid worker task may receive:
 * neighbor boundary block data
 * fluid definitions
 * queued update positions
-* source chunk version
+* source block/geometry version
 
 ## Worker Output
 
 A fluid worker task returns:
 
 * source chunk coordinate
-* source version
+* source block/geometry version
 * fluid deltas
 * boundary update requests
 * dirty hints
@@ -1262,7 +1263,7 @@ A fluid worker task returns:
 When results return:
 
 * if the chunk no longer exists, discard
-* if the chunk version changed and the result cannot be safely merged, discard or partially revalidate
+* if the source block/geometry version changed and the result cannot be safely merged, discard or partially revalidate
 * otherwise commit deltas through the world
 
 Fluid work should be more conservative than meshing because it mutates simulation state.
@@ -1524,16 +1525,16 @@ world_simulation:
 
 # Interaction With Chunk Versions
 
-Any committed simulation change that affects chunk state increments the chunk version.
+Committed simulation changes update the relevant section versions.
 
 This includes:
 
-* block changes
-* fluid changes
-* lighting changes
+* block changes increment `block_version`
+* fluid geometry changes increment `block_version`
+* lighting changes increment `light_version`
 * block entity changes
 
-Derived tasks must validate against chunk versions where applicable.
+Derived tasks must validate against the correct versions. Mesh results reject stale `block_version` but may temporarily accept stale `light_version`.
 
 For fluid jobs, stale results should usually be discarded unless the system can safely revalidate each delta.
 

@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -161,6 +162,21 @@ struct UIGlyphDrawItem {
   u32 page{};
 };
 
+enum class UiTextureSource : u8 {
+  White,
+  FontAtlas,
+  TerrainAtlas,
+  ItemAtlas,
+};
+
+struct UITexturedQuadDrawItem {
+  std::array<Vec2f, 4> positions{};
+  std::array<Vec2f, 4> uvs{};
+  Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+  UiTextureSource source{UiTextureSource::White};
+  u32 page{};
+};
+
 void append_chunk_vertex(CpuMeshBuffer& buffer, ChunkVertex vertex);
 
 [[nodiscard]] inline usize chunk_vertex_count(const CpuMeshBuffer& buffer) noexcept {
@@ -173,6 +189,8 @@ struct ChunkMeshData {
   WorldID world_id{};
   ChunkCoord coord{};
   u64 source_version{};
+  u64 source_content_version{};
+  u64 source_light_version{};
   CpuMeshBuffer opaque{};
   CpuMeshBuffer transparent{};
 };
@@ -192,12 +210,14 @@ struct ChunkRenderState {
   MeshID opaque_mesh{};
   MeshID transparent_mesh{};
   u64 uploaded_version{};
+  u64 uploaded_light_version{};
   bool resident{};
 };
 
 struct ChunkDrawItem {
   ChunkMeshKey key{};
   u64 expected_version{};
+  u64 expected_light_version{};
 };
 
 struct FramePacket {
@@ -206,6 +226,7 @@ struct FramePacket {
   std::vector<ChunkDrawItem> opaque_chunks{};
   std::vector<ChunkDrawItem> transparent_chunks{};
   std::vector<UIRectDrawItem> ui_rects{};
+  std::vector<UITexturedQuadDrawItem> ui_textured_quads{};
   std::vector<UIGlyphDrawItem> ui_glyphs{};
 };
 
@@ -234,10 +255,32 @@ struct FramePacket {
   return mesh.source_version == live_chunk_version;
 }
 
+[[nodiscard]] inline bool chunk_mesh_matches_live_versions(
+    const ChunkMeshData& mesh,
+    u64 live_block_version,
+    u64 live_light_version) noexcept {
+  return mesh.source_version == live_block_version &&
+         mesh.source_light_version == live_light_version;
+}
+
+[[nodiscard]] inline bool chunk_mesh_upload_at_least_as_new(
+    u64 lhs_block_version,
+    u64 lhs_light_version,
+    u64 rhs_block_version,
+    u64 rhs_light_version) noexcept {
+  return lhs_block_version > rhs_block_version ||
+         (lhs_block_version == rhs_block_version && lhs_light_version >= rhs_light_version);
+}
+
 [[nodiscard]] inline bool should_accept_chunk_mesh_upload(
     const ChunkRenderState* current,
     const ChunkMeshUpload& upload) noexcept {
-  return current == nullptr || upload.mesh.source_version >= current->uploaded_version;
+  return current == nullptr ||
+         chunk_mesh_upload_at_least_as_new(
+             upload.mesh.source_version,
+             upload.mesh.source_light_version,
+             current->uploaded_version,
+             current->uploaded_light_version);
 }
 
 [[nodiscard]] inline bool should_draw_chunk_mesh(
@@ -257,7 +300,7 @@ struct FramePacket {
 
   // Keep the last resident mesh visible while a fresher validated upload is
   // still queued for the GPU so block edits do not momentarily disappear.
-  return current->uploaded_version < item.expected_version;
+  return true;
 }
 
 class IRenderer {
@@ -266,6 +309,7 @@ public:
 
   virtual void resize(u32 width, u32 height) = 0;
   virtual void enqueue_chunk_mesh_upload(ChunkMeshUpload upload) = 0;
+  virtual void remove_chunk_mesh(ChunkMeshKey key) = 0;
   virtual void submit_frame(FramePacket packet) = 0;
   virtual void render() = 0;
   virtual void begin_shutdown() = 0;

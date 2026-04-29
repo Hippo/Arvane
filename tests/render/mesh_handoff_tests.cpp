@@ -1,6 +1,27 @@
+#include "arv/render/opengl_renderer.hpp"
 #include "arv/render/render_types.hpp"
 
 #include <gtest/gtest.h>
+
+namespace {
+
+arv::render::ChunkMeshUpload make_chunk_upload(arv::u64 source_version) {
+  arv::render::ChunkMeshUpload upload;
+  upload.mesh.world_id = arv::WorldID{1};
+  upload.mesh.coord = {{0, 0, 0}};
+  upload.mesh.source_version = source_version;
+  return upload;
+}
+
+arv::render::ChunkMeshUpload make_chunk_upload(
+    arv::u64 source_version,
+    arv::u64 source_light_version) {
+  arv::render::ChunkMeshUpload upload = make_chunk_upload(source_version);
+  upload.mesh.source_light_version = source_light_version;
+  return upload;
+}
+
+} // namespace
 
 TEST(RenderMeshHandoffTests, RejectsStaleMeshUpload) {
   arv::render::ChunkRenderState current;
@@ -44,6 +65,31 @@ TEST(RenderMeshHandoffTests, AcceptsMatchingLiveChunkVersion) {
 
   EXPECT_TRUE(arv::render::chunk_mesh_matches_live_version(mesh, 8));
   EXPECT_FALSE(arv::render::chunk_mesh_matches_live_version(mesh, 7));
+}
+
+TEST(RenderMeshHandoffTests, DeduplicatesPendingChunkMeshUploadsByVersion) {
+  arv::render::OpenGLRenderer renderer;
+
+  renderer.enqueue_chunk_mesh_upload(make_chunk_upload(5));
+  renderer.enqueue_chunk_mesh_upload(make_chunk_upload(4));
+  EXPECT_EQ(renderer.pending_mesh_upload_count(), 1U);
+
+  renderer.enqueue_chunk_mesh_upload(make_chunk_upload(6));
+  EXPECT_EQ(renderer.pending_mesh_upload_count(), 1U);
+}
+
+TEST(RenderMeshHandoffTests, AcceptsNewerLightOnlyMeshUpload) {
+  arv::render::ChunkRenderState current;
+  current.uploaded_version = 5;
+  current.uploaded_light_version = 2;
+  current.resident = true;
+
+  EXPECT_TRUE(arv::render::should_accept_chunk_mesh_upload(
+      &current,
+      make_chunk_upload(5, 3)));
+  EXPECT_FALSE(arv::render::should_accept_chunk_mesh_upload(
+      &current,
+      make_chunk_upload(5, 1)));
 }
 
 TEST(RenderMeshHandoffTests, ChunkVertexPackingFollowsDocumentedBitLayout) {

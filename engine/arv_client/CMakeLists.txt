@@ -1,5 +1,6 @@
 set(ARV_CLIENT_HEADERS
   include/arv/client/camera_shell.hpp
+  include/arv/client/chunk_interest.hpp
   include/arv/client/client_runtime.hpp
   include/arv/client/local_player_controller.hpp
   include/arv/client/ui.hpp
@@ -7,6 +8,7 @@ set(ARV_CLIENT_HEADERS
 
 add_library(arv_client STATIC
   src/camera_shell.cpp
+  src/chunk_interest.cpp
   src/client_runtime.cpp
   src/local_player_controller.cpp
   src/ui.cpp

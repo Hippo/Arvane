@@ -36,9 +36,15 @@ enum class ChunkLifecycleState {
 enum class ChunkDirtyFlags : u32 {
   None = 0,
   NeedsSave = 1U << 0U,
-  NeedsMesh = 1U << 1U,
-  NeedsRelight = 1U << 2U,
-  NeedsFluidStep = 1U << 3U,
+  Geometry = 1U << 1U,
+  Lighting = 1U << 2U,
+  LightMesh = 1U << 3U,
+  NeedsFluidStep = 1U << 4U,
+
+  // Compatibility names for older call sites. New code should prefer the
+  // geometry/lighting/light-mesh split above.
+  NeedsMesh = Geometry,
+  NeedsRelight = Lighting,
 };
 
 enum class ChunkMeshState {
@@ -161,7 +167,23 @@ public:
   }
 
   [[nodiscard]] u64 version() const noexcept {
-    return version_;
+    return block_version_;
+  }
+
+  [[nodiscard]] u64 block_version() const noexcept {
+    return block_version_;
+  }
+
+  [[nodiscard]] u64 light_version() const noexcept {
+    return light_version_;
+  }
+
+  [[nodiscard]] u64 light_data_version() const noexcept {
+    return light_data_version_;
+  }
+
+  [[nodiscard]] u64 content_version() const noexcept {
+    return content_version_;
   }
 
   [[nodiscard]] ChunkDirtyFlags dirty_flags() const noexcept {
@@ -226,6 +248,8 @@ public:
 
   void mark_mesh_dependency_dirty() noexcept;
 
+  void mark_light_dependency_dirty() noexcept;
+
   void clear_dirty(ChunkDirtyFlags flags) noexcept;
 
   void mark_mesh_queued() noexcept {
@@ -240,10 +264,18 @@ public:
     mesh_state_ = ChunkMeshState::WaitingForUpload;
   }
 
-  void mark_mesh_ready(u64 published_version) noexcept;
+  void mark_mesh_ready(u64 source_block_version, u64 source_light_version) noexcept;
 
   [[nodiscard]] u64 published_mesh_version() const noexcept {
-    return published_mesh_version_;
+    return mesh_built_from_block_version_;
+  }
+
+  [[nodiscard]] u64 mesh_built_from_block_version() const noexcept {
+    return mesh_built_from_block_version_;
+  }
+
+  [[nodiscard]] u64 mesh_built_from_light_version() const noexcept {
+    return mesh_built_from_light_version_;
   }
 
 private:
@@ -252,15 +284,21 @@ private:
   ChunkCoord coord_{};
   ChunkLifecycleState lifecycle_state_{ChunkLifecycleState::Loaded};
   ChunkStorageHandle storage_{};
-  u64 version_{1};
-  u64 published_mesh_version_{};
-  ChunkDirtyFlags dirty_flags_{ChunkDirtyFlags::NeedsMesh};
+  u64 block_version_{1};
+  u64 light_version_{1};
+  u64 light_data_version_{1};
+  u64 content_version_{1};
+  u64 mesh_built_from_block_version_{};
+  u64 mesh_built_from_light_version_{};
+  ChunkDirtyFlags dirty_flags_{ChunkDirtyFlags::Geometry};
   ChunkMeshState mesh_state_{ChunkMeshState::Dirty};
 };
 
 struct ChunkSnapshot {
   ChunkCoord coord{};
   u64 source_version{};
+  u64 source_content_version{};
+  u64 source_light_version{};
 
   std::array<ChunkStorageView, ChunkSnapshotNeighborhoodVolume> storages{};
 

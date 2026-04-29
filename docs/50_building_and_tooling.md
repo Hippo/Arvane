@@ -300,16 +300,15 @@ arvane/
 
 `arvane_home/` is the canonical development runtime home directory.
 
-Examples of assets include:
+Examples of runtime files include:
 
-* block definitions
 * entity definitions
 * textures
 * shaders
 * fonts
 * UI definitions
-* world generation presets
 * test assets
+* config-driven block, item, and world generation definitions
 
 The engine may later support mounted resource packs or user-provided asset directories, but the default development behavior should remain rooted at `arvane_home/`.
 
@@ -366,9 +365,9 @@ Example:
 
 ```text
 Failed to load block registry.
-Attempted path: arvane_home/assets/config/blocks.json
+Attempted path: arvane_home/config/blocks.json
 Reason: directory does not exist.
-Fix: populate arvane_home/assets/ or pass --arvane-home <path>.
+Fix: populate arvane_home/config/ or pass --arvane-home <path>.
 ```
 
 The engine should not silently continue with partially loaded core data unless the missing data is explicitly optional.

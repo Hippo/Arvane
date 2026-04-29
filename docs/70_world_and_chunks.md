@@ -600,6 +600,8 @@ The engine does not eagerly generate the infinite world.
 
 Chunks are generated when required by load or explicit generation requests.
 
+Generation is asynchronous. A streaming or gameplay caller may mark a section `Requested`, but it must not run terrain generation inline on the caller path. The authoritative server/world scheduler owns generation jobs, workers compute generated block data from immutable seed/config inputs, and the world thread publishes accepted results by transitioning the section to `Loaded`.
+
 ### Generation triggers
 
 Generation may occur when:
@@ -608,6 +610,8 @@ Generation may occur when:
 - neighboring generation dependencies require it
 - pregeneration tools request it
 - editor or server workflows explicitly force it
+
+All of these triggers enqueue generation work. They do not synchronously fill live chunk storage.
 
 ### Boundary rules
 
@@ -883,31 +887,52 @@ Workers may assist computation, but **world commits changes**.
 
 ---
 
-## Chunk Versioning
+## Chunk Section Versioning
 
-Each chunk must maintain a monotonically increasing **version counter**.
+Each chunk section tracks block/geometry and lighting versions separately.
 
-The version must increment when:
+Required section version fields:
 
-- blocks change
-- lighting changes
-- fluid state changes (if visible or structural)
-- any data affecting derived outputs changes
+```text
+block_version
+light_version
+mesh_built_from_block_version
+mesh_built_from_light_version
+```
 
-Background tasks must include:
+`block_version` increments when local block data, fluid geometry data, or a required neighbor boundary geometry dependency changes.
 
-- chunk coordinate
-- source version
+`light_version` increments when local lighting data changes or when neighbor boundary lighting used by this section's mesh changes.
 
-### Publication Rule
+Implementations may also track a transport/persistence light-data version that only increments when the section's own light buffer changes. Streaming uses that data version so dependency-only `LightMesh` invalidation does not resend otherwise unchanged chunk payloads.
 
-When a task completes:
+Mesh workers carry both source versions in their result.
 
-- if chunk no longer exists → discard result
-- if chunk version != source version → discard result
-- otherwise → apply result
+### Mesh Publication Rule
 
-This avoids complex cancellation logic.
+When a mesh task completes:
+
+- if chunk no longer exists -> discard result
+- if `source_block_version != current block_version` -> discard result
+- otherwise -> the mesh may be accepted
+
+A mesh result may be accepted when `source_light_version` is stale. Stale lighting in visible geometry is temporarily acceptable. If the accepted mesh used stale lighting, the section remains light-mesh dirty so a later light-only remesh can replace it.
+
+### Lighting Publication Rule
+
+Lighting results are authoritative world results.
+
+When a lighting task completes:
+
+- if chunk no longer exists -> discard result
+- if source block/geometry inputs are stale -> discard result
+- otherwise -> publish the light data through world-owned commit logic
+
+Accepted light changes increment `light_version`, mark affected sections `LightMesh` dirty, and enqueue a future section mesh rebuild. Lighting publication must not rebuild meshes inline.
+
+Consumers applying received chunk snapshots must compare block and light buffers before dirtying dependencies. Duplicate snapshots must not advance mesh revisions, light-only changes must not dirty geometry neighbors, and boundary-only light changes should dirty only the face neighbors whose mesh samples can observe that light.
+
+This avoids complex cancellation logic while allowing geometry responsiveness to win over perfect lighting freshness.
 
 ---
 
@@ -972,15 +997,16 @@ Worker returns:
 
 - mesh buffers
 - chunk coordinate
-- source version
+- source block/geometry version
+- source light version
 
 ### Publish
 
 World:
 
-- validates version
+- validates block/geometry version
 - hands mesh to rendering system
-- marks mesh state clean
+- marks mesh state clean only for versions that match current section state
 
 ---
 
@@ -1094,15 +1120,17 @@ Block changes are always **authoritative world operations**.
 When a block changes:
 
 1. world applies mutation
-2. chunk version increments
+2. owning section `block_version` increments
 3. chunk marked dirty:
-   - mesh
-   - lighting
+   - geometry mesh
+   - lighting propagation
    - fluid
    - save
-4. neighbors marked dirty if boundary affected
+4. a section mesh rebuild is queued immediately
+5. lighting work is queued separately
+6. neighbors are marked dirty only when boundary geometry or boundary lighting can affect them
 
-No system should directly trigger deep recursive updates inline.
+Meshing must not wait for lighting. No system should directly trigger deep recursive updates, lighting propagation, simulation stepping, or mesh rebuilding inline from block placement or breaking.
 
 ---
 
@@ -1116,17 +1144,25 @@ Example:
 enum class ChunkDirtyFlags : u32 {
   None             = 0,
   NeedsSave        = 1 << 0,
-  NeedsMesh        = 1 << 1,
-  NeedsRelight     = 1 << 2,
-  NeedsFluidStep   = 1 << 3,
+  Geometry         = 1 << 1,
+  Lighting         = 1 << 2,
+  LightMesh        = 1 << 3,
+  NeedsFluidStep   = 1 << 4,
 };
 ```
 
 World update loop:
 
 * gathers dirty chunks
-* schedules tasks
+* schedules section mesh tasks for `Geometry` and `LightMesh`
+* schedules section-local lighting tasks for `Lighting`
 * processes results
+
+`Geometry` means block shape, opacity, model, texture, fluid geometry, or boundary geometry input changed.
+
+`Lighting` means authoritative lighting propagation/update work is required.
+
+`LightMesh` means lighting changed and vertex lighting should be remeshed, without implying block geometry changed.
 
 ---
 

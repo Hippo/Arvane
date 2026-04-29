@@ -47,7 +47,7 @@ struct JobSystemConfig {
 };
 
 struct RenderConfig {
-  u32 max_chunk_mesh_uploads_per_frame{2};
+  u32 max_chunk_mesh_uploads_per_frame{8};
 };
 
 struct ChunkPipelineConfig {

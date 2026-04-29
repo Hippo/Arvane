@@ -58,8 +58,8 @@ TEST(LocalPlayerControllerTests, SprintOnlyAppliesWhileMovingForwardAndNotSneaki
 
   controller.submit_input(arv::client::InputFrame{
       .move_forward = true,
-      .sprint_held = true,
-      .sneak_held = true});
+      .sneak_held = true,
+      .sprint_held = true});
   const arv::player::PlayerCommand sneaking = controller.consume_command(14);
   EXPECT_TRUE(sneaking.sneak_held);
   EXPECT_FALSE(sneaking.sprint_held);

@@ -4,6 +4,7 @@ include(GoogleTest)
 
 add_executable(arv_tests
   assets/asset_tests.cpp
+  client/chunk_interest_tests.cpp
   client/camera_tests.cpp
   client/local_player_controller_tests.cpp
   client/ui_tests.cpp
@@ -23,6 +24,7 @@ add_executable(arv_tests
   render/mesh_handoff_tests.cpp
   render/chunk_meshing_tests.cpp
   sched/scheduler_tests.cpp
+  server/chunk_streamer_tests.cpp
   server/player_interaction_tests.cpp
   server/registry_tests.cpp
   voxel/block_registry_tests.cpp

@@ -33,6 +33,12 @@ MessageRegistry MessageRegistry::make_core_registry() {
                              MessageDirection::ClientToServer, ReliabilityClass::UnreliableLatestWins});
   registry.register_message({MessageType::PlayerCorrection, "PlayerCorrection",
                              MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins});
+  registry.register_message({MessageType::ChunkInterestUpdate, "ChunkInterestUpdate",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered});
+  registry.register_message({MessageType::ChunkData, "ChunkData",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
+  registry.register_message({MessageType::ChunkUnload, "ChunkUnload",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
   return registry;
 }
 

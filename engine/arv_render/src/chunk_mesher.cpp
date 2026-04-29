@@ -203,6 +203,8 @@ ChunkMeshData build_chunk_mesh(
   mesh.world_id = world_id;
   mesh.coord = snapshot.coord;
   mesh.source_version = snapshot.source_version;
+  mesh.source_content_version = snapshot.source_content_version;
+  mesh.source_light_version = snapshot.source_light_version;
 
   mesh.opaque.vertex_bytes.reserve(voxel::ChunkVolume * 3U * sizeof(ChunkVertex));
   mesh.opaque.indices.reserve(voxel::ChunkVolume * 6U);
@@ -224,6 +226,11 @@ ChunkMeshData build_chunk_mesh(
         CpuMeshBuffer& output = self->render_category == voxel::RenderCategory::Transparent
                                     ? mesh.transparent
                                     : mesh.opaque;
+        if (self->render_category == voxel::RenderCategory::Transparent &&
+            output.vertex_bytes.empty()) {
+          output.vertex_bytes.reserve(voxel::ChunkVolume * sizeof(ChunkVertex));
+          output.indices.reserve(voxel::ChunkVolume * 6U);
+        }
 
         for (const ChunkFaceGeometry& face : ChunkCubeFaces) {
           const SectionLocalPos neighbor_local = offset_local(local, face.neighbor_offset);

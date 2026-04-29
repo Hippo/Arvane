@@ -131,8 +131,11 @@ TEST(WorldGenerationTests, WorldPublishesGeneratedChunksOnlyForItsWorldId) {
   ASSERT_TRUE(generated);
 
   arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.request_chunk_load({{0, 0, 0}});
   EXPECT_TRUE(world.publish_generated_chunk(generated.value()));
-  EXPECT_NE(world.find_chunk({{0, 0, 0}}), nullptr);
+  const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(chunk, nullptr);
+  EXPECT_EQ(chunk->lifecycle_state(), arv::voxel::ChunkLifecycleState::Loaded);
 
   generated.value().world_id = arv::WorldID{2};
   EXPECT_FALSE(world.publish_generated_chunk(generated.value()));

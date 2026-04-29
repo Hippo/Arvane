@@ -59,6 +59,10 @@ public:
     return resolved_permissions_;
   }
 
+  [[nodiscard]] const Vec3f& player_position() const noexcept {
+    return body_position_;
+  }
+
 private:
   CameraShell camera_{};
   u8 selected_hotbar_slot_{};

@@ -1,4 +1,5 @@
 set(ARV_SERVER_HEADERS
+  include/arv/server/chunk_streamer.hpp
   include/arv/server/dedicated_lifetime.hpp
   include/arv/server/session_registry.hpp
   include/arv/server/server_runtime.hpp
@@ -6,6 +7,7 @@ set(ARV_SERVER_HEADERS
 )
 
 add_library(arv_server STATIC
+  src/chunk_streamer.cpp
   src/server_runtime.cpp
   src/session_registry.cpp
   src/world_registry.cpp

@@ -131,6 +131,26 @@ TEST(HotbarHudTests, RebuildClearsPreviousSelectedSlot) {
   EXPECT_TRUE(new_slot->selected);
 }
 
+TEST(HotbarHudTests, BuildsTextureItemIconsFromResolvedRenderMetadata) {
+  FixedTextMeasurer text;
+  arv::client::UiTree tree;
+  std::vector<arv::client::UiItemStackView> slots(9);
+  slots[0].item_name = "arvane:coal";
+  slots[0].display_name = "Coal";
+  slots[0].count = 32;
+  slots[0].render_type = arv::player::ItemRenderType::Texture;
+  slots[0].texture_icon.valid = true;
+  slots[0].texture_icon.source = arv::render::UiTextureSource::ItemAtlas;
+
+  arv::client::build_hotbar_hud(tree, {0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* icon = tree.find_by_stable_id("hud.hotbar.slot.0.icon");
+  ASSERT_NE(icon, nullptr);
+  EXPECT_EQ(icon->type, arv::client::UiElementType::Image);
+  EXPECT_TRUE(icon->image.valid);
+}
+
 TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   FixedTextMeasurer text;
   arv::client::UiTree tree;
@@ -150,6 +170,7 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
           {true, true, {chat.data(), chat.size()}, "test"},
           {true, "Players", "footer", {players.data(), players.size()}},
           {true, "Stats", {scoreboard_lines.data(), scoreboard_lines.size()}, &vars},
+          {true, 144},
       });
   tree.layout({800.0F, 600.0F}, &text);
 
@@ -159,4 +180,9 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   const auto* scoreboard_line = tree.find_by_stable_id("scoreboard.line.0");
   ASSERT_NE(scoreboard_line, nullptr);
   EXPECT_EQ(scoreboard_line->text, "Health: 20");
+  const auto* fps = tree.find_by_stable_id("hud.debug.fps");
+  ASSERT_NE(fps, nullptr);
+  EXPECT_EQ(fps->text, "FPS: 144");
+  EXPECT_FLOAT_EQ(fps->rect.x, 8.0F);
+  EXPECT_FLOAT_EQ(fps->rect.y, 8.0F);
 }

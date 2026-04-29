@@ -17,6 +17,7 @@ public:
   void set_ui_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_chunk_texture_atlas(TextureUploadData upload);
   void set_ui_font_atlas(TextureUploadData upload);
+  void set_ui_item_atlas(TextureUploadData upload);
 
   void resize(u32 width, u32 height) override;
 
@@ -25,6 +26,7 @@ public:
   void set_chunk_mesh_upload_budget(u32 max_uploads_per_frame) noexcept;
 
   void enqueue_chunk_mesh_upload(ChunkMeshUpload upload) override;
+  void remove_chunk_mesh(ChunkMeshKey key) override;
 
   [[nodiscard]] u32 mesh_uploads_last_frame() const noexcept {
     return mesh_uploads_last_frame_;
@@ -70,6 +72,8 @@ private:
 
   [[nodiscard]] static GpuMesh create_gpu_mesh(const CpuMeshBuffer& mesh);
 
+  static void upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& mesh);
+
   static void destroy_gpu_mesh(GpuMesh& mesh);
 
   static void destroy_chunk_gpu_state(ChunkGpuState& state);
@@ -86,14 +90,16 @@ private:
   void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
   void draw_ui();
   void draw_ui_rects();
+  void draw_ui_textured_quads();
   void draw_ui_glyphs();
   void ensure_ui_buffers();
   void ensure_white_texture();
+  [[nodiscard]] GLuint texture_for_ui_source(UiTextureSource source) const noexcept;
 
   u32 width_{};
   u32 height_{};
   u32 next_mesh_id_{1};
-  u32 max_chunk_mesh_uploads_per_frame_{2};
+  u32 max_chunk_mesh_uploads_per_frame_{8};
   u32 mesh_uploads_last_frame_{};
   double mesh_upload_time_ms_last_frame_{};
   GLuint chunk_program_{};
@@ -121,6 +127,7 @@ private:
   std::deque<ChunkMeshUpload> pending_chunk_mesh_uploads_;
   GpuTexture terrain_atlas_{};
   GpuTexture font_atlas_{};
+  GpuTexture item_atlas_{};
   GpuTexture white_texture_{};
   GLuint ui_vao_{};
   GLuint ui_vertex_buffer_{};

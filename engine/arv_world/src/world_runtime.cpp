@@ -1,8 +1,77 @@
 #include "arv/world/world_runtime.hpp"
 
+#include <array>
 #include <utility>
 
 namespace arv::world {
+namespace {
+
+using DependencyMask = std::array<bool, voxel::ChunkSnapshotNeighborhoodVolume>;
+
+[[nodiscard]] SectionLocalPos local_from_index(usize index) noexcept {
+  const i32 x = static_cast<i32>(index % voxel::ChunkSide);
+  index /= voxel::ChunkSide;
+  const i32 y = static_cast<i32>(index % voxel::ChunkSide);
+  const i32 z = static_cast<i32>(index / voxel::ChunkSide);
+  return {{x, y, z}};
+}
+
+void add_dependency_offset(DependencyMask& mask, i32 x, i32 y, i32 z) noexcept {
+  if (x == 0 && y == 0 && z == 0) {
+    return;
+  }
+  mask[voxel::snapshot_storage_index(x, y, z)] = true;
+}
+
+void add_all_neighbor_dependency_offsets(DependencyMask& mask) noexcept {
+  for (i32 z = -1; z <= 1; ++z) {
+    for (i32 y = -1; y <= 1; ++y) {
+      for (i32 x = -1; x <= 1; ++x) {
+        add_dependency_offset(mask, x, y, z);
+      }
+    }
+  }
+}
+
+void add_block_dependency_offsets(DependencyMask& mask, SectionLocalPos local) noexcept {
+  const i32 min_x = local.value.x == 0 ? -1 : 0;
+  const i32 max_x = local.value.x == ChunkSize - 1 ? 1 : 0;
+  const i32 min_y = local.value.y == 0 ? -1 : 0;
+  const i32 max_y = local.value.y == ChunkSize - 1 ? 1 : 0;
+  const i32 min_z = local.value.z == 0 ? -1 : 0;
+  const i32 max_z = local.value.z == ChunkSize - 1 ? 1 : 0;
+
+  for (i32 z = min_z; z <= max_z; ++z) {
+    for (i32 y = min_y; y <= max_y; ++y) {
+      for (i32 x = min_x; x <= max_x; ++x) {
+        add_dependency_offset(mask, x, y, z);
+      }
+    }
+  }
+}
+
+void add_light_dependency_offsets(DependencyMask& mask, SectionLocalPos local) noexcept {
+  if (local.value.x == 0) {
+    add_dependency_offset(mask, -1, 0, 0);
+  }
+  if (local.value.x == ChunkSize - 1) {
+    add_dependency_offset(mask, 1, 0, 0);
+  }
+  if (local.value.y == 0) {
+    add_dependency_offset(mask, 0, -1, 0);
+  }
+  if (local.value.y == ChunkSize - 1) {
+    add_dependency_offset(mask, 0, 1, 0);
+  }
+  if (local.value.z == 0) {
+    add_dependency_offset(mask, 0, 0, -1);
+  }
+  if (local.value.z == ChunkSize - 1) {
+    add_dependency_offset(mask, 0, 0, 1);
+  }
+}
+
+} // namespace
 
 WorldRuntime::WorldRuntime(WorldID id) : id_(id) {
 }
@@ -19,6 +88,131 @@ voxel::ChunkSection& WorldRuntime::ensure_chunk(
     iter->second.set_lifecycle_state(state);
   }
   return iter->second;
+}
+
+void WorldRuntime::request_chunk_load(ChunkCoord coord) {
+  if (find_chunk(coord) != nullptr) {
+    return;
+  }
+  (void)ensure_chunk(coord, voxel::ChunkLifecycleState::Requested);
+}
+
+std::optional<voxel::ChunkSnapshot> WorldRuntime::get_chunk_snapshot(ChunkCoord coord) const {
+  const voxel::ChunkSection* chunk = find_chunk(coord);
+  if (chunk == nullptr) {
+    return std::nullopt;
+  }
+
+  switch (chunk->lifecycle_state()) {
+    case voxel::ChunkLifecycleState::Loaded:
+    case voxel::ChunkLifecycleState::Active:
+      return voxel::make_chunk_snapshot_without_neighbors(*chunk);
+    case voxel::ChunkLifecycleState::Unloaded:
+    case voxel::ChunkLifecycleState::Requested:
+    case voxel::ChunkLifecycleState::Loading:
+    case voxel::ChunkLifecycleState::Generating:
+    case voxel::ChunkLifecycleState::Populating:
+    case voxel::ChunkLifecycleState::MarkedForUnload:
+    case voxel::ChunkLifecycleState::Saving:
+      return std::nullopt;
+  }
+
+  return std::nullopt;
+}
+
+void WorldRuntime::apply_chunk_snapshot(
+    ChunkCoord coord,
+    std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
+    std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights) noexcept {
+  const voxel::ChunkSection* existing_chunk = find_chunk(coord);
+  const bool first_mesh =
+      existing_chunk == nullptr || existing_chunk->mesh_built_from_block_version() == 0U;
+  const bool needs_first_mesh_dirty =
+      first_mesh &&
+      (existing_chunk == nullptr ||
+       !existing_chunk->is_dirty(voxel::ChunkDirtyFlags::Geometry));
+
+  DependencyMask block_dependency_offsets{};
+  DependencyMask light_dependency_offsets{};
+  bool blocks_changed = existing_chunk == nullptr;
+  bool lights_changed = existing_chunk == nullptr;
+
+  std::array<voxel::LightWord, voxel::ChunkVolume> resolved_lights;
+  if (lights.has_value()) {
+    resolved_lights = std::move(lights.value());
+  } else {
+    resolved_lights.fill(voxel::pack_light(0, 0, 0, voxel::MaxLightLevel));
+  }
+
+  if (existing_chunk != nullptr) {
+    blocks_changed = existing_chunk->blocks() != blocks;
+    lights_changed = existing_chunk->lights() != resolved_lights;
+
+    if (blocks_changed) {
+      for (usize index = 0; index < voxel::ChunkVolume; ++index) {
+        if (existing_chunk->blocks()[index] != blocks[index]) {
+          add_block_dependency_offsets(block_dependency_offsets, local_from_index(index));
+        }
+      }
+    }
+    if (lights_changed) {
+      for (usize index = 0; index < voxel::ChunkVolume; ++index) {
+        if (existing_chunk->lights()[index] != resolved_lights[index]) {
+          add_light_dependency_offsets(light_dependency_offsets, local_from_index(index));
+        }
+      }
+    }
+  } else {
+    add_all_neighbor_dependency_offsets(block_dependency_offsets);
+    add_all_neighbor_dependency_offsets(light_dependency_offsets);
+  }
+
+  voxel::ChunkSection& chunk = ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded);
+  chunk.set_lifecycle_state(voxel::ChunkLifecycleState::Loaded);
+  chunk.replace_saved_contents(std::move(blocks), std::move(resolved_lights));
+
+  if (needs_first_mesh_dirty || blocks_changed || lights_changed) {
+    mark_mesh_content_dirty();
+  }
+  if (blocks_changed || needs_first_mesh_dirty) {
+    for (i32 z = -1; z <= 1; ++z) {
+      for (i32 y = -1; y <= 1; ++y) {
+        for (i32 x = -1; x <= 1; ++x) {
+          if (!block_dependency_offsets[voxel::snapshot_storage_index(x, y, z)]) {
+            continue;
+          }
+          mark_neighbor_mesh_only_dependency_dirty({{
+              coord.value.x + x,
+              coord.value.y + y,
+              coord.value.z + z,
+          }});
+        }
+      }
+    }
+  }
+  if (lights_changed) {
+    for (const Vec3i& offset : NeighborOffsets) {
+      if (!light_dependency_offsets[voxel::snapshot_storage_index(offset.x, offset.y, offset.z)]) {
+        continue;
+      }
+      mark_neighbor_light_dependency_dirty({{
+          coord.value.x + offset.x,
+          coord.value.y + offset.y,
+          coord.value.z + offset.z,
+      }});
+    }
+  }
+}
+
+bool WorldRuntime::unload_chunk(ChunkCoord coord) noexcept {
+  if (chunks_.erase(coord) == 0U) {
+    return false;
+  }
+
+  mark_mesh_content_dirty();
+  mark_loaded_chunk_neighbors_dirty(coord);
+  recompute_lighting_work_pending();
+  return true;
 }
 
 voxel::ChunkSection* WorldRuntime::find_chunk(ChunkCoord coord) noexcept {
@@ -53,6 +247,14 @@ void WorldRuntime::set_tick_index(TickIndex tick_index) noexcept {
   tick_index_ = tick_index;
 }
 
+u64 WorldRuntime::lighting_revision() const noexcept {
+  return lighting_revision_;
+}
+
+u64 WorldRuntime::mesh_revision() const noexcept {
+  return mesh_revision_;
+}
+
 void WorldRuntime::set_tick_policy(WorldTickPolicy policy) noexcept {
   tick_policy_ = policy;
 }
@@ -84,7 +286,7 @@ bool WorldRuntime::set_chunk_lifecycle_state(ChunkCoord coord, voxel::ChunkLifec
   }
   chunk->set_lifecycle_state(state);
   if (state == voxel::ChunkLifecycleState::Active) {
-    enqueue_chunk_activation_updates(coord);
+    FluidSolver::enqueue_chunk_activation_updates(*this, coord);
   }
   return true;
 }
@@ -104,7 +306,7 @@ void WorldRuntime::update_simulation_radius(ChunkCoord center, i32 radius) noexc
       chunk.set_lifecycle_state(next_state);
     }
     if (became_active) {
-      enqueue_chunk_activation_updates(coord);
+      FluidSolver::enqueue_chunk_activation_updates(*this, coord);
     }
   }
 }
@@ -148,9 +350,11 @@ bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexce
     return false;
   }
 
+  mark_mesh_content_dirty();
   mark_boundary_neighbors_dirty(chunk_coord, local);
+  mark_lighting_content_dirty();
   enqueue_neighbor_block_updates(pos);
-  enqueue_neighbor_fluid_updates(pos, FluidUpdateReason::BlockChanged);
+  FluidSolver::enqueue_neighbor_updates(*this, pos, FluidUpdateReason::BlockChanged);
   return true;
 }
 
@@ -170,8 +374,13 @@ bool WorldRuntime::set_fluid(
     return false;
   }
 
+  mark_mesh_content_dirty();
   mark_boundary_neighbors_dirty(chunk_coord, local);
-  enqueue_neighbor_fluid_updates(
+  if (affects_lighting) {
+    mark_lighting_content_dirty();
+  }
+  FluidSolver::enqueue_neighbor_updates(
+      *this,
       pos,
       fluid.empty() ? FluidUpdateReason::FluidRemoved : FluidUpdateReason::FluidAdded);
   return true;
@@ -222,12 +431,22 @@ bool WorldRuntime::validate_mesh_result(ChunkCoord coord, u64 source_version) co
   return chunk != nullptr && chunk->version() == source_version;
 }
 
-bool WorldRuntime::publish_mesh_result(ChunkCoord coord, u64 source_version) noexcept {
+bool WorldRuntime::validate_mesh_content_result(
+    ChunkCoord coord,
+    u64 source_content_version) const noexcept {
+  const voxel::ChunkSection* chunk = find_chunk(coord);
+  return chunk != nullptr && chunk->content_version() == source_content_version;
+}
+
+bool WorldRuntime::publish_mesh_result(
+    ChunkCoord coord,
+    u64 source_version,
+    u64 source_light_version) noexcept {
   voxel::ChunkSection* chunk = find_chunk(coord);
-  if (chunk == nullptr || chunk->version() != source_version) {
+  if (chunk == nullptr || chunk->block_version() != source_version) {
     return false;
   }
-  chunk->mark_mesh_ready(source_version);
+  chunk->mark_mesh_ready(source_version, source_light_version);
   return true;
 }
 
@@ -239,7 +458,10 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
   voxel::ChunkSection& chunk = ensure_chunk(
       generated.coord,
       voxel::ChunkLifecycleState::Loaded);
+  chunk.set_lifecycle_state(voxel::ChunkLifecycleState::Loaded);
   chunk.replace_generated_blocks(std::move(generated.blocks));
+  mark_mesh_content_dirty();
+  mark_lighting_content_dirty();
   mark_loaded_chunk_neighbors_dirty(generated.coord);
   return true;
 }
@@ -250,6 +472,9 @@ void WorldRuntime::restore_saved_chunk(
     std::array<voxel::LightWord, voxel::ChunkVolume> lights) noexcept {
   voxel::ChunkSection& chunk = ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded);
   chunk.replace_saved_contents(std::move(blocks), std::move(lights));
+  chunk.mark_dirty(voxel::ChunkDirtyFlags::Lighting);
+  mark_mesh_content_dirty();
+  mark_lighting_content_dirty();
 }
 
 player::PlayerState& WorldRuntime::ensure_player(PlayerID player_id) {
@@ -332,261 +557,26 @@ usize WorldRuntime::pending_block_update_count() const noexcept {
   return block_updates_.size() + scheduled_block_updates_.size();
 }
 
-bool WorldRuntime::process_lighting(const voxel::BlockRegistry& registry) {
-  bool needs_lighting = false;
-  for (const auto& [coord, chunk] : chunks_) {
-    (void)coord;
-    if (chunk.is_dirty(voxel::ChunkDirtyFlags::NeedsRelight)) {
-      needs_lighting = true;
-      break;
-    }
-  }
-
-  if (!needs_lighting) {
-    return false;
-  }
-
-  rebuild_loaded_lighting(registry);
-  for (auto& [coord, chunk] : chunks_) {
-    (void)coord;
-    chunk.clear_dirty(voxel::ChunkDirtyFlags::NeedsRelight);
-  }
-  return true;
-}
-
 bool WorldRuntime::has_lighting_work() const noexcept {
-  for (const auto& [coord, chunk] : chunks_) {
-    (void)coord;
-    if (chunk.is_dirty(voxel::ChunkDirtyFlags::NeedsRelight)) {
-      return true;
-    }
-  }
-  return false;
+  return lighting_work_pending_;
 }
 
 LightingSnapshot WorldRuntime::make_lighting_snapshot() const {
-  LightingSnapshot snapshot;
-  snapshot.world_id = id_;
-  snapshot.chunks.reserve(chunks_.size());
-  for (const auto& [coord, chunk] : chunks_) {
-    snapshot.chunks.push_back({coord, chunk.version(), chunk.storage_view()});
-  }
-  return snapshot;
+  return WorldLighting::make_snapshot(*this);
 }
 
 LightingResult WorldRuntime::build_lighting_result(
     const LightingSnapshot& snapshot,
     const voxel::BlockRegistry& registry) {
-  using LightArray = std::array<voxel::LightWord, voxel::ChunkVolume>;
-
-  LightingResult result;
-  result.world_id = snapshot.world_id;
-  result.chunks.reserve(snapshot.chunks.size());
-
-  std::unordered_map<ChunkCoord, LightArray> buffers;
-  std::unordered_map<ChunkCoord, const ChunkLightingSnapshot*> chunks;
-  buffers.reserve(snapshot.chunks.size());
-  chunks.reserve(snapshot.chunks.size());
-  for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
-    LightArray buffer{};
-    buffer.fill(voxel::NoLight);
-    buffers.emplace(chunk.coord, buffer);
-    chunks.emplace(chunk.coord, &chunk);
-  }
-
-  auto find_snapshot_chunk = [&chunks](ChunkCoord coord) -> const ChunkLightingSnapshot* {
-    const auto found = chunks.find(coord);
-    return found == chunks.end() ? nullptr : found->second;
-  };
-
-  auto can_light_enter_snapshot =
-      [&registry, &find_snapshot_chunk](BlockPos pos) -> bool {
-    const ChunkLightingSnapshot* chunk = find_snapshot_chunk(block_to_chunk(pos));
-    if (chunk == nullptr) {
-      return false;
-    }
-
-    const voxel::BlockVariantRecord* variant =
-        registry.variant(chunk->blocks()[voxel::local_index(block_to_local(pos))]);
-    return variant != nullptr && !variant->properties.blocks_light;
-  };
-
-  auto set_sky = [&buffers](BlockPos pos, u8 value) {
-    const ChunkCoord coord = block_to_chunk(pos);
-    auto found = buffers.find(coord);
-    if (found == buffers.end()) {
-      return false;
-    }
-
-    voxel::LightWord& light = found->second[voxel::local_index(block_to_local(pos))];
-    if (value <= voxel::light_sky(light)) {
-      return false;
-    }
-
-    light = voxel::with_sky_light(light, value);
-    return true;
-  };
-
-  auto set_rgb = [&buffers](BlockPos pos, u8 r, u8 g, u8 b) {
-    const ChunkCoord coord = block_to_chunk(pos);
-    auto found = buffers.find(coord);
-    if (found == buffers.end()) {
-      return false;
-    }
-
-    voxel::LightWord& light = found->second[voxel::local_index(block_to_local(pos))];
-    const u8 next_r = r > voxel::light_r(light) ? r : voxel::light_r(light);
-    const u8 next_g = g > voxel::light_g(light) ? g : voxel::light_g(light);
-    const u8 next_b = b > voxel::light_b(light) ? b : voxel::light_b(light);
-    if (next_r == voxel::light_r(light) && next_g == voxel::light_g(light) &&
-        next_b == voxel::light_b(light)) {
-      return false;
-    }
-
-    light = voxel::pack_light(next_r, next_g, next_b, voxel::light_sky(light));
-    return true;
-  };
-
-  std::unordered_map<ChunkColumnCoord, i32> top_by_column;
-  std::unordered_map<ChunkColumnCoord, i32> bottom_by_column;
-  for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
-    for (i32 z = 0; z < ChunkSize; ++z) {
-      for (i32 x = 0; x < ChunkSize; ++x) {
-        const i32 world_x = chunk.coord.value.x * ChunkSize + x;
-        const i32 world_z = chunk.coord.value.z * ChunkSize + z;
-        const i32 top_y = chunk.coord.value.y * ChunkSize + (ChunkSize - 1);
-        const i32 bottom_y = chunk.coord.value.y * ChunkSize;
-        const ChunkColumnCoord key{world_x, world_z};
-        auto top = top_by_column.find(key);
-        if (top == top_by_column.end() || top_y > top->second) {
-          top_by_column[key] = top_y;
-        }
-        auto bottom = bottom_by_column.find(key);
-        if (bottom == bottom_by_column.end() || bottom_y < bottom->second) {
-          bottom_by_column[key] = bottom_y;
-        }
-      }
-    }
-  }
-
-  std::queue<std::pair<BlockPos, u8>> sky_queue;
-  for (const auto& [key, top_y] : top_by_column) {
-    const i32 world_x = key.x;
-    const i32 world_z = key.z;
-    const i32 bottom_y = bottom_by_column[key];
-    for (i32 world_y = top_y; world_y >= bottom_y; --world_y) {
-      const BlockPos pos{{world_x, world_y, world_z}};
-      if (!can_light_enter_snapshot(pos)) {
-        break;
-      }
-      if (set_sky(pos, voxel::MaxLightLevel)) {
-        sky_queue.push({pos, voxel::MaxLightLevel});
-      }
-    }
-  }
-
-  while (!sky_queue.empty()) {
-    const auto [pos, level] = sky_queue.front();
-    sky_queue.pop();
-    if (level <= 1U) {
-      continue;
-    }
-
-    const u8 next = static_cast<u8>(level - 1U);
-    for (const Vec3i offset : NeighborOffsets) {
-      const BlockPos neighbor = offset_block(pos, offset);
-      if (!can_light_enter_snapshot(neighbor)) {
-        continue;
-      }
-      if (set_sky(neighbor, next)) {
-        sky_queue.push({neighbor, next});
-      }
-    }
-  }
-
-  struct RgbNode {
-    BlockPos pos{};
-    u8 r{};
-    u8 g{};
-    u8 b{};
-  };
-
-  std::queue<RgbNode> rgb_queue;
-  for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
-    for (i32 z = 0; z < ChunkSize; ++z) {
-      for (i32 y = 0; y < ChunkSize; ++y) {
-        for (i32 x = 0; x < ChunkSize; ++x) {
-          const SectionLocalPos local{{x, y, z}};
-          const voxel::BlockVariantRecord* variant =
-              registry.variant(chunk.blocks()[voxel::local_index(local)]);
-          if (variant == nullptr || !variant->properties.emits_light) {
-            continue;
-          }
-
-          const BlockPos pos = chunk_local_to_block(chunk.coord, local);
-          const u8 r = voxel::clamp_light_channel(variant->properties.emission_r);
-          const u8 g = voxel::clamp_light_channel(variant->properties.emission_g);
-          const u8 b = voxel::clamp_light_channel(variant->properties.emission_b);
-          if (set_rgb(pos, r, g, b)) {
-            rgb_queue.push({pos, r, g, b});
-          }
-        }
-      }
-    }
-  }
-
-  while (!rgb_queue.empty()) {
-    const RgbNode node = rgb_queue.front();
-    rgb_queue.pop();
-
-    const u8 next_r = node.r > 0 ? static_cast<u8>(node.r - 1U) : 0;
-    const u8 next_g = node.g > 0 ? static_cast<u8>(node.g - 1U) : 0;
-    const u8 next_b = node.b > 0 ? static_cast<u8>(node.b - 1U) : 0;
-    if (next_r == 0 && next_g == 0 && next_b == 0) {
-      continue;
-    }
-
-    for (const Vec3i offset : NeighborOffsets) {
-      const BlockPos neighbor = offset_block(node.pos, offset);
-      if (!can_light_enter_snapshot(neighbor)) {
-        continue;
-      }
-      if (set_rgb(neighbor, next_r, next_g, next_b)) {
-        rgb_queue.push({neighbor, next_r, next_g, next_b});
-      }
-    }
-  }
-
-  for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
-    auto found = buffers.find(chunk.coord);
-    if (found != buffers.end()) {
-      result.chunks.push_back({chunk.coord, chunk.source_version, std::move(found->second)});
-    }
-  }
-  return result;
+  return WorldLighting::build_result(snapshot, registry);
 }
 
 LightingPublishStats WorldRuntime::publish_lighting_result(LightingResult result) noexcept {
-  LightingPublishStats stats;
-  if (result.world_id != id_) {
-    stats.stale_chunks = static_cast<u32>(result.chunks.size());
-    return stats;
+  const LightingPublishStats stats = WorldLighting::publish_result(*this, std::move(result));
+  if (stats.changed_chunks > 0U) {
+    mark_mesh_content_dirty();
   }
-
-  for (ChunkLightingResult& chunk_result : result.chunks) {
-    voxel::ChunkSection* chunk = find_chunk(chunk_result.coord);
-    if (chunk == nullptr || chunk->version() != chunk_result.source_version) {
-      ++stats.stale_chunks;
-      continue;
-    }
-
-    if (chunk->replace_lights(std::move(chunk_result.lights))) {
-      ++stats.changed_chunks;
-      mark_light_dependency_neighbors_dirty(chunk_result.coord);
-    }
-    chunk->clear_dirty(voxel::ChunkDirtyFlags::NeedsRelight);
-    ++stats.accepted_chunks;
-  }
+  recompute_lighting_work_pending();
   return stats;
 }
 
@@ -594,22 +584,7 @@ u32 WorldRuntime::process_fluid_updates(
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& definition,
     u32 budget) {
-  u32 processed = 0;
-  while (processed < budget && !fluid_updates_.empty()) {
-    FluidUpdate update = fluid_updates_.front();
-    fluid_updates_.pop_front();
-
-    const ChunkCoord chunk_coord = block_to_chunk(update.pos);
-    if (!is_chunk_active(chunk_coord)) {
-      store_deferred_boundary_fluid_update(chunk_coord, update);
-      ++processed;
-      continue;
-    }
-
-    process_single_fluid_update(registry, definition, update.pos);
-    ++processed;
-  }
-  return processed;
+  return FluidSolver::process_updates(*this, registry, definition, budget);
 }
 
 WorldTickStats WorldRuntime::tick(
@@ -618,9 +593,6 @@ WorldTickStats WorldRuntime::tick(
   ++tick_index_;
 
   WorldTickStats stats;
-  stats.lighting_processed = tick_policy_.process_lighting_synchronously
-                                 ? process_lighting(registry)
-                                 : false;
   stats.scheduled_ticks_processed = process_due_scheduled_ticks();
 
   if (tick_policy_.block_update_interval == 0U ||
@@ -659,61 +631,23 @@ BlockPos WorldRuntime::offset_block(BlockPos pos, Vec3i offset) noexcept {
   return {{pos.value.x + offset.x, pos.value.y + offset.y, pos.value.z + offset.z}};
 }
 
+void WorldRuntime::mark_lighting_content_dirty() noexcept {
+  ++lighting_revision_;
+  lighting_work_pending_ = true;
+}
+
+void WorldRuntime::mark_mesh_content_dirty() noexcept {
+  ++mesh_revision_;
+}
+
+void WorldRuntime::recompute_lighting_work_pending() noexcept {
+  lighting_work_pending_ = WorldLighting::has_work(*this);
+}
+
 void WorldRuntime::enqueue_neighbor_block_updates(BlockPos pos) {
   for (const Vec3i offset : NeighborOffsets) {
     block_updates_.push_back({offset_block(pos, offset), BlockUpdateReason::NeighborChanged});
   }
-}
-
-void WorldRuntime::enqueue_neighbor_fluid_updates(BlockPos pos, FluidUpdateReason reason) {
-  fluid_updates_.push_back({pos, reason});
-  for (const Vec3i offset : NeighborOffsets) {
-    const BlockPos neighbor = offset_block(pos, offset);
-    const ChunkCoord origin_chunk = block_to_chunk(pos);
-    const ChunkCoord neighbor_chunk_coord = block_to_chunk(neighbor);
-    if (origin_chunk != neighbor_chunk_coord && !is_chunk_active(neighbor_chunk_coord)) {
-      store_deferred_boundary_fluid_update(neighbor_chunk_coord, {neighbor, reason});
-      continue;
-    }
-    fluid_updates_.push_back({neighbor, reason});
-  }
-}
-
-void WorldRuntime::enqueue_chunk_activation_updates(ChunkCoord coord) {
-  const voxel::ChunkSection* chunk = find_chunk(coord);
-  if (chunk == nullptr) {
-    return;
-  }
-
-  auto deferred = deferred_boundary_fluid_updates_.find(coord);
-  if (deferred != deferred_boundary_fluid_updates_.end()) {
-    for (const FluidUpdate& update : deferred->second) {
-      fluid_updates_.push_back(update);
-    }
-    deferred_boundary_fluid_updates_.erase(deferred);
-  }
-
-  for (i32 z = 0; z < ChunkSize; ++z) {
-    for (i32 y = 0; y < ChunkSize; ++y) {
-      for (i32 x = 0; x < ChunkSize; ++x) {
-        const SectionLocalPos local{{x, y, z}};
-        if (!chunk->fluid(local).empty()) {
-          fluid_updates_.push_back(
-              {chunk_local_to_block(coord, local), FluidUpdateReason::ChunkActivated});
-        }
-      }
-    }
-  }
-}
-
-void WorldRuntime::store_deferred_boundary_fluid_update(ChunkCoord target, FluidUpdate update) {
-  auto& updates = deferred_boundary_fluid_updates_[target];
-  for (const FluidUpdate& existing : updates) {
-    if (existing.pos == update.pos) {
-      return;
-    }
-  }
-  updates.push_back(update);
 }
 
 void WorldRuntime::mark_boundary_neighbors_dirty(ChunkCoord coord, SectionLocalPos local) noexcept {
@@ -774,7 +708,7 @@ void WorldRuntime::mark_loaded_chunk_neighbors_dirty(ChunkCoord coord) noexcept 
 
 void WorldRuntime::mark_light_dependency_neighbors_dirty(ChunkCoord coord) noexcept {
   for (const Vec3i& offset : NeighborOffsets) {
-    mark_neighbor_mesh_only_dependency_dirty(
+    mark_neighbor_light_dependency_dirty(
         {{
             coord.value.x + offset.x,
             coord.value.y + offset.y,
@@ -787,7 +721,9 @@ void WorldRuntime::mark_neighbor_mesh_dependency_dirty(ChunkCoord coord) noexcep
   voxel::ChunkSection* neighbor = find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_mesh_dependency_dirty();
-    neighbor->mark_dirty(voxel::ChunkDirtyFlags::NeedsRelight | voxel::ChunkDirtyFlags::NeedsFluidStep);
+    neighbor->mark_dirty(voxel::ChunkDirtyFlags::Lighting | voxel::ChunkDirtyFlags::NeedsFluidStep);
+    mark_mesh_content_dirty();
+    lighting_work_pending_ = true;
   }
 }
 
@@ -795,6 +731,15 @@ void WorldRuntime::mark_neighbor_mesh_only_dependency_dirty(ChunkCoord coord) no
   voxel::ChunkSection* neighbor = find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_mesh_dependency_dirty();
+    mark_mesh_content_dirty();
+  }
+}
+
+void WorldRuntime::mark_neighbor_light_dependency_dirty(ChunkCoord coord) noexcept {
+  voxel::ChunkSection* neighbor = find_chunk(coord);
+  if (neighbor != nullptr) {
+    neighbor->mark_light_dependency_dirty();
+    mark_mesh_content_dirty();
   }
 }
 
@@ -823,315 +768,6 @@ u32 WorldRuntime::drain_block_updates(u32 budget) {
     ++processed;
   }
   return processed;
-}
-
-bool WorldRuntime::can_fluid_occupy(
-    const voxel::BlockRegistry& registry,
-    const voxel::FluidDefinition& definition,
-    BlockPos pos) const noexcept {
-  if (!definition.can_replace_air) {
-    return false;
-  }
-
-  const voxel::ChunkSection* chunk = find_chunk(block_to_chunk(pos));
-  if (chunk == nullptr) {
-    return false;
-  }
-
-  const voxel::BlockVariantRecord* variant = registry.variant(chunk->block(block_to_local(pos)));
-  return variant != nullptr &&
-         (registry.is_air(variant->id) || variant->properties.replaceable);
-}
-
-bool WorldRuntime::can_flow_down_from(
-    const voxel::BlockRegistry& registry,
-    const voxel::FluidDefinition& definition,
-    BlockPos pos) const noexcept {
-  return definition.can_flow_down &&
-         can_fluid_occupy(registry, definition, offset_block(pos, {0, -1, 0}));
-}
-
-voxel::FluidCell WorldRuntime::ideal_fluid_at(
-    const voxel::BlockRegistry& registry,
-    const voxel::FluidDefinition& definition,
-    BlockPos pos,
-    voxel::FluidCell current) const noexcept {
-  if (!can_fluid_occupy(registry, definition, pos)) {
-    return voxel::empty_fluid_cell();
-  }
-
-  if (current.source() && current.type == definition.type) {
-    return voxel::make_fluid_source(definition);
-  }
-
-  const BlockPos above = offset_block(pos, {0, 1, 0});
-  const voxel::FluidCell above_fluid = get_fluid(above);
-  if (definition.can_flow_down && above_fluid.type == definition.type && !above_fluid.empty()) {
-    return voxel::make_flowing_fluid(
-        definition,
-        definition.vertical_flow_level,
-        voxel::FluidFlags::Falling);
-  }
-
-  const BlockPos below = offset_block(pos, {0, -1, 0});
-  const voxel::FluidCell below_fluid = get_fluid(below);
-  if (definition.can_create_sources &&
-      (!can_fluid_occupy(registry, definition, below) ||
-       (below_fluid.type == definition.type && below_fluid.source()))) {
-    u32 adjacent_sources = 0;
-    for (const Vec3i offset : std::array<Vec3i, 4>{{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}}) {
-      const voxel::FluidCell neighbor = get_fluid(offset_block(pos, offset));
-      if (neighbor.type == definition.type && neighbor.source()) {
-        ++adjacent_sources;
-      }
-    }
-    if (adjacent_sources >= 2U) {
-      return voxel::make_fluid_source(definition);
-    }
-  }
-
-  if (!definition.can_flow_sideways) {
-    return voxel::empty_fluid_cell();
-  }
-
-  u8 best_level = 0;
-  for (const Vec3i offset : std::array<Vec3i, 4>{{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}}) {
-    const BlockPos neighbor_pos = offset_block(pos, offset);
-    if (can_flow_down_from(registry, definition, neighbor_pos)) {
-      continue;
-    }
-
-    const voxel::FluidCell neighbor = get_fluid(neighbor_pos);
-    if (neighbor.type != definition.type || neighbor.empty()) {
-      continue;
-    }
-
-    const u8 neighbor_level = neighbor.source() ? definition.max_level : neighbor.level;
-    if (neighbor_level <= definition.horizontal_decay) {
-      continue;
-    }
-
-    const u8 candidate = static_cast<u8>(neighbor_level - definition.horizontal_decay);
-    if (candidate > best_level) {
-      best_level = candidate;
-    }
-  }
-
-  if (best_level == 0) {
-    return voxel::empty_fluid_cell();
-  }
-  return voxel::make_flowing_fluid(definition, best_level);
-}
-
-void WorldRuntime::process_single_fluid_update(
-    const voxel::BlockRegistry& registry,
-    const voxel::FluidDefinition& definition,
-    BlockPos pos) {
-  voxel::ChunkSection* chunk = find_chunk(block_to_chunk(pos));
-  if (chunk == nullptr) {
-    return;
-  }
-
-  const SectionLocalPos local = block_to_local(pos);
-  const voxel::FluidCell current = chunk->fluid(local);
-  const voxel::FluidCell ideal = ideal_fluid_at(registry, definition, pos, current);
-  if (current == ideal) {
-    return;
-  }
-
-  const bool affects_lighting = definition.reduces_sky_light || definition.emits_light;
-  if (!chunk->set_fluid(local, ideal, affects_lighting)) {
-    return;
-  }
-
-  mark_boundary_neighbors_dirty(block_to_chunk(pos), local);
-  enqueue_neighbor_fluid_updates(
-      pos,
-      ideal.empty() ? FluidUpdateReason::FluidRemoved : FluidUpdateReason::FluidAdded);
-}
-
-bool WorldRuntime::can_light_enter(
-    const voxel::BlockRegistry& registry,
-    BlockPos pos) const noexcept {
-  const voxel::ChunkSection* chunk = find_chunk(block_to_chunk(pos));
-  if (chunk == nullptr) {
-    return false;
-  }
-
-  const voxel::BlockVariantRecord* variant = registry.variant(chunk->block(block_to_local(pos)));
-  return variant != nullptr && !variant->properties.blocks_light;
-}
-
-void WorldRuntime::rebuild_loaded_lighting(const voxel::BlockRegistry& registry) {
-  using LightArray = std::array<voxel::LightWord, voxel::ChunkVolume>;
-
-  std::unordered_map<ChunkCoord, LightArray> buffers;
-  buffers.reserve(chunks_.size());
-  for (const auto& [coord, chunk] : chunks_) {
-    (void)chunk;
-    LightArray buffer{};
-    buffer.fill(voxel::NoLight);
-    buffers.emplace(coord, buffer);
-  }
-
-  auto set_sky = [&buffers](BlockPos pos, u8 value) {
-    const ChunkCoord coord = block_to_chunk(pos);
-    auto found = buffers.find(coord);
-    if (found == buffers.end()) {
-      return false;
-    }
-
-    const SectionLocalPos local = block_to_local(pos);
-    voxel::LightWord& light = found->second[voxel::local_index(local)];
-    if (value <= voxel::light_sky(light)) {
-      return false;
-    }
-
-    light = voxel::with_sky_light(light, value);
-    return true;
-  };
-
-  auto set_rgb = [&buffers](BlockPos pos, u8 r, u8 g, u8 b) {
-    const ChunkCoord coord = block_to_chunk(pos);
-    auto found = buffers.find(coord);
-    if (found == buffers.end()) {
-      return false;
-    }
-
-    const SectionLocalPos local = block_to_local(pos);
-    voxel::LightWord& light = found->second[voxel::local_index(local)];
-    const u8 next_r = r > voxel::light_r(light) ? r : voxel::light_r(light);
-    const u8 next_g = g > voxel::light_g(light) ? g : voxel::light_g(light);
-    const u8 next_b = b > voxel::light_b(light) ? b : voxel::light_b(light);
-    if (next_r == voxel::light_r(light) && next_g == voxel::light_g(light) &&
-        next_b == voxel::light_b(light)) {
-      return false;
-    }
-
-    light = voxel::pack_light(next_r, next_g, next_b, voxel::light_sky(light));
-    return true;
-  };
-
-  std::unordered_map<ChunkColumnCoord, i32> top_by_column;
-  std::unordered_map<ChunkColumnCoord, i32> bottom_by_column;
-  for (const auto& [coord, chunk] : chunks_) {
-    (void)chunk;
-    for (i32 z = 0; z < ChunkSize; ++z) {
-      for (i32 x = 0; x < ChunkSize; ++x) {
-        const i32 world_x = coord.value.x * ChunkSize + x;
-        const i32 world_z = coord.value.z * ChunkSize + z;
-        const i32 top_y = coord.value.y * ChunkSize + (ChunkSize - 1);
-        const i32 bottom_y = coord.value.y * ChunkSize;
-        const ChunkColumnCoord key{world_x, world_z};
-        auto top = top_by_column.find(key);
-        if (top == top_by_column.end() || top_y > top->second) {
-          top_by_column[key] = top_y;
-        }
-        auto bottom = bottom_by_column.find(key);
-        if (bottom == bottom_by_column.end() || bottom_y < bottom->second) {
-          bottom_by_column[key] = bottom_y;
-        }
-      }
-    }
-  }
-
-  std::queue<std::pair<BlockPos, u8>> sky_queue;
-  for (const auto& [key, top_y] : top_by_column) {
-    const i32 world_x = key.x;
-    const i32 world_z = key.z;
-    const i32 bottom_y = bottom_by_column[key];
-    for (i32 world_y = top_y; world_y >= bottom_y; --world_y) {
-      const BlockPos pos{{world_x, world_y, world_z}};
-      const voxel::ChunkSection* chunk = find_chunk(block_to_chunk(pos));
-      if (chunk == nullptr) {
-        continue;
-      }
-      if (!can_light_enter(registry, pos)) {
-        break;
-      }
-      if (set_sky(pos, voxel::MaxLightLevel)) {
-        sky_queue.push({pos, voxel::MaxLightLevel});
-      }
-    }
-  }
-
-  while (!sky_queue.empty()) {
-    const auto [pos, level] = sky_queue.front();
-    sky_queue.pop();
-    if (level <= 1U) {
-      continue;
-    }
-
-    const u8 next = static_cast<u8>(level - 1U);
-    for (const Vec3i offset : NeighborOffsets) {
-      const BlockPos neighbor = offset_block(pos, offset);
-      if (!can_light_enter(registry, neighbor)) {
-        continue;
-      }
-      if (set_sky(neighbor, next)) {
-        sky_queue.push({neighbor, next});
-      }
-    }
-  }
-
-  struct RgbNode {
-    BlockPos pos{};
-    u8 r{};
-    u8 g{};
-    u8 b{};
-  };
-
-  std::queue<RgbNode> rgb_queue;
-  for (const auto& [coord, chunk] : chunks_) {
-    for (i32 z = 0; z < ChunkSize; ++z) {
-      for (i32 y = 0; y < ChunkSize; ++y) {
-        for (i32 x = 0; x < ChunkSize; ++x) {
-          const SectionLocalPos local{{x, y, z}};
-          const voxel::BlockVariantRecord* variant = registry.variant(chunk.block(local));
-          if (variant == nullptr || !variant->properties.emits_light) {
-            continue;
-          }
-
-          const BlockPos pos = chunk_local_to_block(coord, local);
-          const u8 r = voxel::clamp_light_channel(variant->properties.emission_r);
-          const u8 g = voxel::clamp_light_channel(variant->properties.emission_g);
-          const u8 b = voxel::clamp_light_channel(variant->properties.emission_b);
-          if (set_rgb(pos, r, g, b)) {
-            rgb_queue.push({pos, r, g, b});
-          }
-        }
-      }
-    }
-  }
-
-  while (!rgb_queue.empty()) {
-    const RgbNode node = rgb_queue.front();
-    rgb_queue.pop();
-
-    const u8 next_r = node.r > 0 ? static_cast<u8>(node.r - 1U) : 0;
-    const u8 next_g = node.g > 0 ? static_cast<u8>(node.g - 1U) : 0;
-    const u8 next_b = node.b > 0 ? static_cast<u8>(node.b - 1U) : 0;
-    if (next_r == 0 && next_g == 0 && next_b == 0) {
-      continue;
-    }
-
-    for (const Vec3i offset : NeighborOffsets) {
-      const BlockPos neighbor = offset_block(node.pos, offset);
-      if (!can_light_enter(registry, neighbor)) {
-        continue;
-      }
-      if (set_rgb(neighbor, next_r, next_g, next_b)) {
-        rgb_queue.push({neighbor, next_r, next_g, next_b});
-      }
-    }
-  }
-
-  for (auto& [coord, buffer] : buffers) {
-    voxel::ChunkSection* chunk = find_chunk(coord);
-    if (chunk != nullptr) {
-      chunk->replace_lights(std::move(buffer));
-    }
-  }
 }
 
 } // namespace arv::world

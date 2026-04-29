@@ -39,7 +39,6 @@ std::filesystem::path normalize_lexical(std::filesystem::path path) {
 bool has_project_assets(const std::filesystem::path& path) {
   return std::filesystem::exists(
              path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /
-             std::filesystem::path{kAssetsDirectoryName} /
              std::filesystem::path{kConfigDirectoryName} / "blocks.json") &&
          std::filesystem::exists(
              path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /

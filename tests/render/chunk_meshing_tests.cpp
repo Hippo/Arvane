@@ -339,5 +339,10 @@ TEST(ChunkMeshingTests, WorkerMeshResultUsesSnapshotVersionAndStaleResultsAreRej
   const arv::render::ChunkMeshData mesh = job.get();
 
   EXPECT_EQ(mesh.source_version, snapshot->source_version);
-  EXPECT_FALSE(world.publish_mesh_result(mesh.coord, mesh.source_version));
+  EXPECT_EQ(mesh.source_content_version, snapshot->source_content_version);
+  EXPECT_EQ(mesh.source_light_version, snapshot->source_light_version);
+  EXPECT_FALSE(world.publish_mesh_result(
+      mesh.coord,
+      mesh.source_version,
+      mesh.source_light_version));
 }

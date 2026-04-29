@@ -244,7 +244,8 @@ For chunk work, validation usually includes:
 
 * chunk coordinate
 * world identifier
-* source version
+* source block/geometry version
+* source light version when lighting affects output
 * job type
 * dependency versions
 * whether the chunk is still loaded
@@ -261,7 +262,8 @@ Chunk-related worker jobs must operate on snapshots.
 A snapshot may contain:
 
 * chunk coordinate
-* chunk version
+* block/geometry version
+* light version
 * block state data
 * lighting data
 * relevant neighbor boundary data
@@ -307,7 +309,8 @@ Output:
 * CPU-side index buffers
 * mesh metadata
 * chunk coordinate
-* source chunk version
+* source block/geometry version
+* source light version
 
 Meshing jobs must not:
 
@@ -318,11 +321,13 @@ Meshing jobs must not:
 
 The simulation/render owner validates the result before publishing it.
 
+For mesh jobs, stale block/geometry versions are rejected. Stale light versions may be accepted temporarily; the section remains `LightMesh` dirty so a light-only remesh can replace the stale-light mesh.
+
 ---
 
 ## Lighting Jobs
 
-Lighting work may run on workers, but application of lighting results is owned by the simulation thread.
+Lighting work runs on workers, but application of lighting results is owned by the simulation thread.
 
 Lighting jobs may compute:
 
@@ -333,7 +338,7 @@ Lighting jobs may compute:
 
 Lighting jobs must output either:
 
-* a complete replacement lighting buffer for a chunk
+* a complete replacement lighting buffer for a section
 * a validated lighting delta
 * a relight command list
 
@@ -341,11 +346,13 @@ The simulation thread applies accepted lighting results.
 
 Lighting jobs must not directly mutate live chunk lighting arrays.
 
+Publishing accepted lighting increments affected section light versions, marks `LightMesh`, and queues future meshing. Dependency-only neighbor invalidation may advance the meshing light version without changing the section's serialized light-data version, so chunk streaming does not resend unchanged neighbor payloads. Lighting publication must not rebuild meshes synchronously.
+
 ---
 
 ## Chunk Generation Jobs
 
-Chunk generation jobs may run on workers.
+Chunk generation jobs must run on workers during normal gameplay and streaming. Chunk streaming, player movement, block edits, and server ticks must not call terrain generation synchronously on their caller path.
 
 Input:
 
@@ -372,6 +379,18 @@ The simulation thread inserts generated chunks after validating:
 * save data did not arrive first
 
 Save-loaded data takes priority over generated data.
+
+Recommended runtime flow:
+
+```text
+streaming system requests missing chunk
+  -> world marks section Requested
+  -> server/world scheduler submits generation job
+  -> worker computes GeneratedChunk from seed/config/palette
+  -> simulation thread drains completed job
+  -> simulation thread validates lifecycle and publishes as Loaded
+  -> streaming system sends the now-available snapshot within budget
+```
 
 ---
 
@@ -450,8 +469,8 @@ Any job operating on mutable world-derived data must include source version meta
 
 Examples:
 
-* chunk version
-* lighting version
+* block/geometry version
+* light version
 * mesh generation version
 * registry version
 * asset version
@@ -464,9 +483,10 @@ A result must be discarded if:
 * the chunk was unloaded
 * the chunk was regenerated
 * the relevant block data changed
-* the lighting data changed in a way that invalidates the result
 * the target world was destroyed
 * the result depends on an outdated registry/material configuration
+
+Mesh results are special: a stale block/geometry version invalidates the result, but a stale light version does not. Stale-light mesh results may publish temporarily and must leave light-only remesh work queued.
 
 Discarding stale jobs is normal behavior.
 

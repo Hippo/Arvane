@@ -4,9 +4,12 @@
 #include "arv/core/id.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/types.hpp"
+#include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/render/render_types.hpp"
+#include "arv/voxel/block.hpp"
 
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -87,6 +90,16 @@ struct UiStyle {
   Vec4f accent{1.0F, 1.0F, 1.0F, 1.0F};
 };
 
+struct UiImageData {
+  bool valid{};
+  render::UiTextureSource source{render::UiTextureSource::White};
+  u32 page{};
+  std::array<Vec2f, 4> uvs{};
+  bool custom_points{};
+  std::array<Vec2f, 4> points{};
+  Vec4f tint{1.0F, 1.0F, 1.0F, 1.0F};
+};
+
 struct UiElement {
   UiNodeID node_id{};
   std::string stable_id{};
@@ -100,6 +113,7 @@ struct UiElement {
   bool focusable{};
   bool hit_test{true};
   bool selected{};
+  UiImageData image{};
   UiRect rect{};
   UiRect clip{};
   std::vector<UiNodeID> children{};
@@ -223,6 +237,9 @@ struct UiItemStackView {
   u16 count{};
   u16 durability{};
   u16 max_durability{};
+  player::ItemRenderType render_type{player::ItemRenderType::Texture};
+  UiImageData texture_icon{};
+  std::array<UiImageData, voxel::BlockFaceCount> block_faces{};
 
   [[nodiscard]] bool empty() const noexcept {
     return item_name.empty() || count == 0U;
@@ -278,12 +295,18 @@ struct ScoreboardUiModel {
   const ScoreboardVariableMap* variables{};
 };
 
+struct DebugHudModel {
+  bool show_fps{};
+  u32 fps{};
+};
+
 struct GameplayUiModel {
   HotbarHudModel hotbar{};
   InventoryUiModel inventory{};
   ChatUiModel chat{};
   TabMenuUiModel tab_menu{};
   ScoreboardUiModel scoreboard{};
+  DebugHudModel debug{};
 };
 
 void build_hotbar_hud(UiTree& tree, HotbarHudModel model);

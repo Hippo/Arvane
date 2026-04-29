@@ -51,7 +51,8 @@ void main() {
   float ao_shade = min_ao_shade + float(ao) / 3.0 * (1.0 - min_ao_shade);
   float sky_shade = 0.2 + float(sky) / 15.0 * 0.8;
   vec3 block_light = vec3(red, green, blue) / 15.0;
-  v_color = (vec3(0.46, 0.66, 0.34) * sky_shade + block_light * 0.35) * face_shade * ao_shade;
+  vec3 sky_light = vec3(sky_shade);
+  v_color = clamp(sky_light + block_light * 0.35, vec3(0.0), vec3(1.0)) * face_shade * ao_shade;
   v_uv = vec2(float(atlas_u), float(atlas_v));
   gl_Position = vec4(view_x * focal / aspect, view_y * focal, clip_z, view_z);
 }

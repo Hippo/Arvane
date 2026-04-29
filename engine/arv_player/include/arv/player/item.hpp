@@ -20,6 +20,12 @@ inline constexpr ItemID AirItemID{0};
 inline constexpr std::string_view AirItemName = "arvane:air";
 inline constexpr std::string_view MissingItemName = "arvane:missing_item";
 
+enum class ItemRenderType : u8 {
+  Texture,
+  Model,
+  Block,
+};
+
 struct ItemRegistryError {
   std::string message{};
 };
@@ -27,16 +33,29 @@ struct ItemRegistryError {
 struct ItemDefinition {
   std::string name{};
   std::string display_name{};
+  std::string category{};
   u16 max_stack_size{64};
+  std::string places_block{};
+  std::string texture_asset{};
+  std::string model_asset{};
+  std::optional<ItemRenderType> explicit_render_type{};
+  bool generated_from_block{};
   std::optional<voxel::BlockVariantID> placement_variant{};
+  std::optional<voxel::BlockID> source_block{};
 };
 
 struct ItemRecord {
   ItemID id{};
   std::string name{};
   std::string display_name{};
+  std::string category{};
   u16 max_stack_size{64};
+  ItemRenderType render_type{ItemRenderType::Texture};
+  std::string texture_asset{};
+  std::string model_asset{};
   std::optional<voxel::BlockVariantID> placement_variant{};
+  std::optional<voxel::BlockVariantID> render_block_variant{};
+  std::optional<voxel::BlockID> source_block{};
 };
 
 struct ItemStack {
@@ -52,6 +71,9 @@ public:
 
   [[nodiscard]] static Result build(std::vector<ItemDefinition> definitions);
   [[nodiscard]] static Result build_default_block_items(const voxel::BlockRegistry& registry);
+  [[nodiscard]] static Result build_from_blocks_and_items(
+      const voxel::BlockRegistry& registry,
+      std::vector<ItemDefinition> explicit_definitions);
 
   [[nodiscard]] const ItemRecord* item(ItemID id) const noexcept;
   [[nodiscard]] std::optional<ItemID> find_item(std::string_view name) const;
@@ -71,5 +93,8 @@ private:
 
 [[nodiscard]] ItemDefinition make_air_item_definition();
 [[nodiscard]] ItemDefinition make_missing_item_definition();
+[[nodiscard]] Expected<ItemRenderType, ItemRegistryError> parse_item_render_type(std::string_view value);
+[[nodiscard]] Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_json(
+    std::string_view text);
 
 } // namespace arv::player

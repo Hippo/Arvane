@@ -137,7 +137,7 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomeAssets) {
   auto result = arv::io::load_config({});
   ASSERT_TRUE(result);
 
-  EXPECT_TRUE(std::filesystem::exists(result.value().paths.assets_path() / "config/blocks.json"));
+  EXPECT_TRUE(std::filesystem::exists(result.value().paths.config_path() / "blocks.json"));
   EXPECT_TRUE(std::filesystem::exists(result.value().paths.assets_path() / "shaders/world/chunk.vert"));
   EXPECT_EQ(
       result.value().paths.config_file,

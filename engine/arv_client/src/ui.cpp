@@ -1,7 +1,6 @@
 #include "arv/client/ui.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <unordered_set>
 #include <utility>
@@ -109,6 +108,31 @@ void append_rect(render::FramePacket& frame, UiRect rect, Vec4f color) {
     return;
   }
   frame.ui_rects.push_back({{rect.x, rect.y}, {rect.x + rect.width, rect.y + rect.height}, color});
+}
+
+void append_image(render::FramePacket& frame, UiRect rect, const UiImageData& image) {
+  if (!image.valid || rect.width <= 0.0F || rect.height <= 0.0F || image.tint.w <= 0.0F) {
+    return;
+  }
+
+  render::UITexturedQuadDrawItem quad;
+  if (image.custom_points) {
+    for (usize index = 0; index < image.points.size(); ++index) {
+      quad.positions[index] = {rect.x + image.points[index].x, rect.y + image.points[index].y};
+    }
+  } else {
+    quad.positions = {{
+        {rect.x, rect.y},
+        {rect.x + rect.width, rect.y},
+        {rect.x + rect.width, rect.y + rect.height},
+        {rect.x, rect.y + rect.height},
+    }};
+  }
+  quad.uvs = image.uvs;
+  quad.color = image.tint;
+  quad.source = image.source;
+  quad.page = image.page;
+  frame.ui_textured_quads.push_back(quad);
 }
 
 } // namespace
@@ -266,7 +290,8 @@ Vec2f UiTree::measure_element(
   Vec2f measured{};
   if (current->type == UiElementType::Text) {
     measured = text_measurer == nullptr ? Vec2f{} : text_measurer->measure(current->text);
-  } else if (current->type == UiElementType::Spacer || current->type == UiElementType::ItemSlot) {
+  } else if (current->type == UiElementType::Spacer || current->type == UiElementType::ItemSlot ||
+             current->type == UiElementType::Image) {
     measured = {current->layout.width, current->layout.height};
     for (const UiNodeID child : current->children) {
       (void)measure_element(child, measured, text_measurer);
@@ -506,23 +531,89 @@ namespace {
   return panel;
 }
 
-[[nodiscard]] std::string compact_item_label(const UiItemStackView& stack) {
-  if (stack.empty()) {
-    return {};
+[[nodiscard]] UiElement image_element(
+    std::string stable_id,
+    UiImageData image,
+    f32 width,
+    f32 height) {
+  UiElement element;
+  element.stable_id = std::move(stable_id);
+  element.type = UiElementType::Image;
+  element.layout.width_mode = UiSizeMode::Fixed;
+  element.layout.height_mode = UiSizeMode::Fixed;
+  element.layout.width = width;
+  element.layout.height = height;
+  element.layout.anchor = UiAnchor::Center;
+  element.image = image;
+  element.hit_test = false;
+  return element;
+}
+
+[[nodiscard]] UiImageData with_custom_points(
+    UiImageData image,
+    std::array<Vec2f, 4> points,
+    Vec4f tint) {
+  image.custom_points = true;
+  image.points = points;
+  image.tint = tint;
+  return image;
+}
+
+void add_texture_item_icon(
+    UiTree& tree,
+    UiNodeID slot_id,
+    std::string_view stable_prefix,
+    const UiImageData& texture_icon) {
+  if (!texture_icon.valid) {
+    return;
   }
-  const std::string& source = stack.display_name.empty() ? stack.item_name : stack.display_name;
-  std::string label;
-  label.reserve(3);
-  for (const char ch : source) {
-    if (std::isalnum(static_cast<unsigned char>(ch)) == 0) {
-      continue;
-    }
-    label.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(ch))));
-    if (label.size() == 3U) {
-      break;
-    }
+  tree.add_child(
+      slot_id,
+      image_element(std::string{stable_prefix} + ".icon", texture_icon, 30.0F, 30.0F));
+}
+
+void add_block_item_icon(
+    UiTree& tree,
+    UiNodeID slot_id,
+    std::string_view stable_prefix,
+    const UiItemStackView& stack) {
+  const UiImageData& top = stack.block_faces[voxel::face_index(voxel::BlockFace::PositiveY)];
+  const UiImageData& right = stack.block_faces[voxel::face_index(voxel::BlockFace::PositiveX)];
+  const UiImageData& front = stack.block_faces[voxel::face_index(voxel::BlockFace::PositiveZ)];
+  if (!top.valid || !right.valid || !front.valid) {
+    add_texture_item_icon(tree, slot_id, stable_prefix, stack.texture_icon);
+    return;
   }
-  return label.empty() ? "?" : label;
+
+  constexpr f32 width = 34.0F;
+  constexpr f32 height = 30.0F;
+  UiElement left_face = image_element(
+      std::string{stable_prefix} + ".block.front",
+      with_custom_points(
+          front,
+          {{{3.0F, 9.0F}, {17.0F, 16.0F}, {17.0F, 30.0F}, {3.0F, 23.0F}}},
+          {0.70F, 0.70F, 0.70F, 1.0F}),
+      width,
+      height);
+  UiElement right_face = image_element(
+      std::string{stable_prefix} + ".block.right",
+      with_custom_points(
+          right,
+          {{{17.0F, 16.0F}, {31.0F, 9.0F}, {31.0F, 23.0F}, {17.0F, 30.0F}}},
+          {0.82F, 0.82F, 0.82F, 1.0F}),
+      width,
+      height);
+  UiElement top_face = image_element(
+      std::string{stable_prefix} + ".block.top",
+      with_custom_points(
+          top,
+          {{{17.0F, 2.0F}, {31.0F, 9.0F}, {17.0F, 16.0F}, {3.0F, 9.0F}}},
+          {1.0F, 1.0F, 1.0F, 1.0F}),
+      width,
+      height);
+  tree.add_child(slot_id, std::move(left_face));
+  tree.add_child(slot_id, std::move(right_face));
+  tree.add_child(slot_id, std::move(top_face));
 }
 
 void add_item_slot_children(
@@ -533,12 +624,11 @@ void add_item_slot_children(
     const UiItemStackView* stack,
     bool show_number) {
   if (stack != nullptr && !stack->empty()) {
-    UiElement icon = text_element(
-        std::string{stable_prefix} + ".icon",
-        compact_item_label(*stack),
-        {0.96F, 0.97F, 0.99F, 1.0F});
-    icon.layout.anchor = UiAnchor::Center;
-    tree.add_child(slot_id, std::move(icon));
+    if (stack->render_type == player::ItemRenderType::Block) {
+      add_block_item_icon(tree, slot_id, stable_prefix, *stack);
+    } else {
+      add_texture_item_icon(tree, slot_id, stable_prefix, stack->texture_icon);
+    }
 
     if (stack->count > 1U) {
       UiElement count = text_element(
@@ -855,6 +945,20 @@ void append_scoreboard_ui(UiTree& tree, ScoreboardUiModel model) {
   }
 }
 
+void append_debug_hud(UiTree& tree, DebugHudModel model) {
+  if (!model.show_fps) {
+    return;
+  }
+
+  UiElement fps = text_element(
+      "hud.debug.fps",
+      "FPS: " + std::to_string(model.fps),
+      {0.86F, 0.94F, 0.78F, 1.0F});
+  fps.layout.anchor = UiAnchor::TopLeft;
+  fps.layout.offset = {8.0F, 8.0F};
+  tree.add_child(tree.root_id(), std::move(fps));
+}
+
 } // namespace
 
 void build_hotbar_hud(UiTree& tree, HotbarHudModel model) {
@@ -885,6 +989,7 @@ void build_scoreboard_ui(UiTree& tree, ScoreboardUiModel model) {
 void build_gameplay_ui(UiTree& tree, GameplayUiModel model) {
   tree.clear();
   append_hotbar_hud(tree, model.hotbar);
+  append_debug_hud(tree, model.debug);
   append_scoreboard_ui(tree, model.scoreboard);
   append_chat_ui(tree, model.chat);
   append_tab_menu_ui(tree, model.tab_menu);
@@ -910,6 +1015,9 @@ void append_ui_draw_commands(
         append_rect(frame, {element.rect.x, element.rect.y, 3.0F, element.rect.height}, element.style.accent);
         append_rect(frame, {element.rect.x + element.rect.width - 3.0F, element.rect.y, 3.0F, element.rect.height}, element.style.accent);
       }
+    }
+    if (element.type == UiElementType::Image) {
+      append_image(frame, element.rect, element.image);
     }
     if (element.type == UiElementType::Text && !element.text.empty()) {
       auto layout = fonts.layout_text(

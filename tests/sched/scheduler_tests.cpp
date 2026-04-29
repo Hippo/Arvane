@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <vector>
 
 TEST(SchedulerTests, JobCompletesAndReturnsValue) {
@@ -28,6 +29,31 @@ TEST(SchedulerTests, CompletionQueuePublishesWorkerResult) {
 
   ASSERT_EQ(drained.size(), 1U);
   EXPECT_EQ(drained.front(), 7);
+  EXPECT_TRUE(completions.empty());
+}
+
+TEST(SchedulerTests, CompletionQueueDrainsConcurrentWorkerResults) {
+  arv::sched::Scheduler scheduler(4);
+  arv::sched::CompletionQueue<int> completions;
+  std::vector<arv::sched::JobHandle<void>> jobs;
+
+  for (int value = 0; value < 32; ++value) {
+    jobs.push_back(scheduler.submit("publish_result", [&completions, value] {
+      completions.push(value);
+    }));
+  }
+
+  for (auto& job : jobs) {
+    job.get();
+  }
+
+  std::vector<int> drained = completions.drain();
+  std::sort(drained.begin(), drained.end());
+
+  ASSERT_EQ(drained.size(), 32U);
+  for (int value = 0; value < 32; ++value) {
+    EXPECT_EQ(drained[static_cast<std::size_t>(value)], value);
+  }
   EXPECT_TRUE(completions.empty());
 }
 

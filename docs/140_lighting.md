@@ -155,7 +155,7 @@ A section therefore owns:
 
 Lighting is not renderer-owned and is not mesher-owned.
 
-The renderer and mesher only consume lighting snapshots or finalized lighting state.
+The renderer and mesher only consume lighting snapshots or published lighting state.
 
 ---
 
@@ -314,14 +314,14 @@ An implementation may optimize vertical sunlight columns, but the externally vis
 
 Lighting is solved as **world simulation work**, not render work.
 
-Lighting updates may be processed asynchronously, but publication into the live world must be synchronized by world ownership rules.
+Lighting updates are processed asynchronously, but publication into the live world must be synchronized by world ownership rules.
 
 ### Authoritative Rule
 
 * the world owns the canonical light state
 * background workers may compute lighting updates from immutable job inputs
 * workers must not mutate live chunk storage directly
-* finalized lighting results must be published back through world-owned commit logic
+* lighting results must be published back through world-owned commit logic
 
 ### Recommended Model
 
@@ -339,7 +339,7 @@ This matches the same general safety model used for meshing.
 
 ---
 
-## Synchronous vs Asynchronous Behavior
+## Asynchronous-Only Behavior
 
 Lighting behavior must distinguish between:
 
@@ -354,12 +354,11 @@ For example, if a player places or removes a light-blocking block, the world mus
 
 ### Execution Location
 
-The engine may process lighting:
+Lighting propagation must be queued as asynchronous world/server work.
 
-* synchronously on the world thread for small edits
-* asynchronously on worker threads for larger relight regions
+Block placement, block breaking, chunk streaming, rendering, and client code must not run authoritative lighting propagation inline.
 
-This is an implementation choice.
+Small local edits may produce small section-local jobs, but they are still jobs. Synchronous lighting helpers are allowed only as worker-side routines or test helpers around worker inputs/results; public world/client-facing APIs enqueue or publish work rather than solving it immediately.
 
 ### Required External Contract
 
@@ -367,21 +366,18 @@ Regardless of execution strategy:
 
 * lighting results must be version-checked before publish
 * stale lighting jobs must be discarded
-* chunk mesh rebuilds must only consume published lighting data
+* chunk mesh rebuilds may consume stale published lighting data temporarily
 * border propagation must not be silently dropped
 
-A hybrid model is recommended:
-
-* small local edits may relight synchronously
-* large terrain changes or generation batches may relight asynchronously
+Meshing does not wait for lighting. A block edit queues geometry remeshing immediately, queues lighting separately, and later lighting publication queues `LightMesh` remeshing.
 
 ---
 
 ## Dirty Region Handling
 
-Lighting should not require full-world recomputation after every edit.
+Lighting should not require full-world, full-region, or whole-column recomputation after every edit.
 
-Instead, world changes mark a bounded lighting-dirty region.
+Instead, world changes mark bounded lighting-dirty chunk sections and any necessary boundary continuation work.
 
 A dirty lighting region represents a voxel-space area whose solved light values may have become invalid.
 
@@ -419,7 +415,7 @@ In practice, the relight job may begin from a seed set and expand until converge
 
 ### Mesh Invalidation
 
-Whenever lighting changes are published, all touched chunk sections must be marked mesh-dirty.
+Whenever lighting changes are published, all touched chunk sections must increment `light_version` and be marked `LightMesh` dirty.
 
 A mesh must be rebuilt if any voxel affecting its visible faces had light changes.
 
@@ -581,17 +577,19 @@ Recommended pipeline:
 
 1. generate chunk blocks
 2. ensure required neighbors or border snapshots exist
-3. run initial lighting solve
-4. publish finalized lighting
-5. queue meshing
+3. publish chunk blocks
+4. queue initial section meshing using current or placeholder light data
+5. queue initial lighting solve asynchronously
+6. publish finalized lighting
+7. queue light-only remeshing for affected sections
 
-A chunk should ideally not be meshed before its initial lighting solve has completed, unless a temporary placeholder policy is explicitly desired.
+A chunk section may be meshed before its initial lighting solve has completed. Stale or placeholder lighting is temporarily acceptable; stale geometry is not.
 
 ---
 
 ## Interaction With Meshing
 
-Meshing consumes finalized light data.
+Meshing consumes the best currently published light data.
 
 The mesher must treat lighting as input, not recompute it.
 
@@ -613,7 +611,7 @@ A meshing job must read:
 
 The mesher must not mutate lighting.
 
-If lighting changes after a mesh was built, the chunk section must be re-meshed.
+If lighting changes after a mesh was built, the chunk section must be marked `LightMesh` dirty and re-meshed asynchronously.
 
 ---
 
@@ -676,7 +674,7 @@ Lighting jobs should carry enough version information to detect staleness.
 At minimum include:
 
 * target chunk/section coordinates
-* source version or generation counter for input data
+* source block/geometry version or generation counter for input data
 * possibly neighbor version info if boundary-sensitive
 
 On publish:
@@ -691,8 +689,10 @@ On publish:
 Exact containers are implementation details, but the engine should conceptually support:
 
 * per-section `LightWord` arrays
-* lighting-dirty flags
-* region or section lighting queues
+* `Lighting` dirty flags
+* `LightMesh` dirty flags
+* section lighting queues
+* per-section `block_version` and `light_version`
 * worker job payloads containing:
 
   * target region
@@ -736,10 +736,10 @@ For the first stable implementation, prefer the following:
 * sky light as a 4-bit scalar
 * RGB block light as 3 independent 4-bit channels
 * simple opaque vs non-opaque propagation rules
-* bounded-region relight jobs
+* bounded section-local relight jobs with boundary continuation
 * reliable queued cross-chunk propagation
 * version-validated asynchronous publish
-* chunk mesh invalidation on lighting publish
+* `LightMesh` invalidation on lighting publish
 
 Avoid prematurely adding:
 
@@ -762,11 +762,13 @@ The engine must uphold all of the following:
 * sky light is separate from RGB block light
 * lighting propagation crosses chunk boundaries
 * block edits can trigger relight
-* relight results may be computed asynchronously
+* relight results are computed asynchronously
 * relight publication must be synchronized and version-checked
-* meshing consumes finalized light data
+* meshing consumes current published light data and may temporarily bake stale lighting
+* meshing never waits for lighting propagation
 * stale lighting jobs must not overwrite newer world state
 * deferred border propagation must still converge to the correct result
+* clients do not generate authoritative light updates
 
 ---
 
@@ -783,7 +785,7 @@ Sky light and block light are separate channels packed into one `u16`.
 
 Lighting belongs to world simulation, not rendering.
 
-Lighting updates may be processed asynchronously, but canonical light state is published only through world-owned validated commit steps.
+Lighting updates are processed asynchronously, but canonical light state is published only through world-owned validated commit steps.
 
 Lighting must propagate across chunk boundaries, must handle both light addition and removal, and must invalidate chunk meshes when finalized values change.
 

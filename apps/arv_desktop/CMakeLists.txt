@@ -1,6 +1,13 @@
 
 set(ARV_CLIENT_SOURCES
+  src/app_config.cpp
+  src/asset_helpers.cpp
+  src/chunk_view.cpp
+  src/input_adapter.cpp
   src/main.cpp
+  src/renderer_bootstrap.cpp
+  src/save_state.cpp
+  src/ui_model.cpp
 )
 
 add_executable(arv_desktop ${ARV_CLIENT_SOURCES})

@@ -72,10 +72,11 @@ bool ChunkSection::set_block(SectionLocalPos local, BlockVariantID variant) noex
 
   ensure_detached_storage();
   storage_->blocks[index] = variant;
-  ++version_;
+  ++block_version_;
+  ++content_version_;
   mark_dirty(
-      ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh |
-      ChunkDirtyFlags::NeedsRelight | ChunkDirtyFlags::NeedsFluidStep);
+      ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::Geometry |
+      ChunkDirtyFlags::Lighting | ChunkDirtyFlags::NeedsFluidStep);
   return true;
 }
 
@@ -91,8 +92,9 @@ bool ChunkSection::set_light(SectionLocalPos local, LightWord light) noexcept {
 
   ensure_detached_storage();
   storage_->lights[index] = light;
-  ++version_;
-  mark_dirty(ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh);
+  ++light_version_;
+  ++light_data_version_;
+  mark_dirty(ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::LightMesh);
   return true;
 }
 
@@ -108,11 +110,12 @@ bool ChunkSection::set_fluid(SectionLocalPos local, FluidCell fluid, bool affect
 
   ensure_detached_storage();
   storage_->fluids[index] = fluid;
-  ++version_;
-  ChunkDirtyFlags flags = ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh |
+  ++block_version_;
+  ++content_version_;
+  ChunkDirtyFlags flags = ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::Geometry |
                           ChunkDirtyFlags::NeedsFluidStep;
   if (affects_lighting) {
-    flags |= ChunkDirtyFlags::NeedsRelight;
+    flags |= ChunkDirtyFlags::Lighting;
   }
   mark_dirty(flags);
   return true;
@@ -128,28 +131,56 @@ void ChunkSection::replace_generated_blocks(std::array<BlockVariantID, ChunkVolu
     storage->blocks = std::move(blocks);
     storage_ = std::move(storage);
   }
-  ++version_;
-  mark_dirty(ChunkDirtyFlags::NeedsMesh | ChunkDirtyFlags::NeedsRelight);
+  ++block_version_;
+  ++light_version_;
+  ++light_data_version_;
+  ++content_version_;
+  mark_dirty(ChunkDirtyFlags::Geometry | ChunkDirtyFlags::Lighting);
 }
 
 void ChunkSection::replace_saved_contents(
     std::array<BlockVariantID, ChunkVolume> blocks,
     std::array<LightWord, ChunkVolume> lights) noexcept {
-  if (storage_.use_count() <= 1) {
-    storage_->blocks = std::move(blocks);
-    storage_->lights = std::move(lights);
-    storage_->fluids.fill(empty_fluid_cell());
-  } else {
-    ChunkStorageHandle storage = make_chunk_storage();
-    storage->blocks = std::move(blocks);
-    storage->lights = std::move(lights);
-    storage_ = std::move(storage);
+  const bool blocks_changed = storage_->blocks != blocks;
+  const bool lights_changed = storage_->lights != lights;
+  const bool first_mesh = mesh_built_from_block_version_ == 0U;
+
+  if (blocks_changed || lights_changed) {
+    ensure_detached_storage();
+    if (blocks_changed) {
+      storage_->blocks = std::move(blocks);
+      storage_->fluids.fill(empty_fluid_cell());
+      ++block_version_;
+      ++content_version_;
+    }
+    if (lights_changed) {
+      storage_->lights = std::move(lights);
+      ++light_version_;
+      ++light_data_version_;
+    }
   }
 
-  ++version_;
-  dirty_flags_ = ChunkDirtyFlags::NeedsMesh;
-  mesh_state_ = ChunkMeshState::Dirty;
-  published_mesh_version_ = 0;
+  if (!blocks_changed && !lights_changed && !first_mesh) {
+    return;
+  }
+
+  dirty_flags_ = ChunkDirtyFlags::None;
+  if (blocks_changed || first_mesh) {
+    dirty_flags_ |= ChunkDirtyFlags::Geometry;
+  }
+  if (lights_changed && !blocks_changed) {
+    dirty_flags_ |= ChunkDirtyFlags::LightMesh;
+  }
+  if (has_flag(dirty_flags_, ChunkDirtyFlags::Geometry) ||
+      has_flag(dirty_flags_, ChunkDirtyFlags::LightMesh)) {
+    mesh_state_ = ChunkMeshState::Dirty;
+  } else if (mesh_state_ == ChunkMeshState::Dirty) {
+    mesh_state_ = ChunkMeshState::Clean;
+  }
+  if (blocks_changed) {
+    mesh_built_from_block_version_ = 0;
+    mesh_built_from_light_version_ = 0;
+  }
 }
 
 bool ChunkSection::replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept {
@@ -159,40 +190,62 @@ bool ChunkSection::replace_lights(std::array<LightWord, ChunkVolume> lights) noe
 
   ensure_detached_storage();
   storage_->lights = std::move(lights);
-  ++version_;
-  mark_dirty(ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::NeedsMesh);
+  ++light_version_;
+  ++light_data_version_;
+  mark_dirty(ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::LightMesh);
   return true;
 }
 
 void ChunkSection::mark_dirty(ChunkDirtyFlags flags) noexcept {
   dirty_flags_ |= flags;
-  if (has_flag(flags, ChunkDirtyFlags::NeedsMesh)) {
+  if (has_flag(flags, ChunkDirtyFlags::Geometry) ||
+      has_flag(flags, ChunkDirtyFlags::LightMesh)) {
     mesh_state_ = ChunkMeshState::Dirty;
   }
 }
 
 void ChunkSection::mark_mesh_dependency_dirty() noexcept {
-  ++version_;
-  mark_dirty(ChunkDirtyFlags::NeedsMesh);
+  ++block_version_;
+  ++content_version_;
+  mark_dirty(ChunkDirtyFlags::Geometry);
+}
+
+void ChunkSection::mark_light_dependency_dirty() noexcept {
+  ++light_version_;
+  mark_dirty(ChunkDirtyFlags::LightMesh);
 }
 
 void ChunkSection::clear_dirty(ChunkDirtyFlags flags) noexcept {
   dirty_flags_ = static_cast<ChunkDirtyFlags>(static_cast<u32>(dirty_flags_) & ~static_cast<u32>(flags));
-  if (!has_flag(dirty_flags_, ChunkDirtyFlags::NeedsMesh) && mesh_state_ == ChunkMeshState::Dirty) {
+  if (!has_flag(dirty_flags_, ChunkDirtyFlags::Geometry) &&
+      !has_flag(dirty_flags_, ChunkDirtyFlags::LightMesh) &&
+      mesh_state_ == ChunkMeshState::Dirty) {
     mesh_state_ = ChunkMeshState::Clean;
   }
 }
 
-void ChunkSection::mark_mesh_ready(u64 published_version) noexcept {
-  published_mesh_version_ = published_version;
-  mesh_state_ = ChunkMeshState::Ready;
-  clear_dirty(ChunkDirtyFlags::NeedsMesh);
+void ChunkSection::mark_mesh_ready(u64 source_block_version, u64 source_light_version) noexcept {
+  mesh_built_from_block_version_ = source_block_version;
+  mesh_built_from_light_version_ = source_light_version;
+  if (source_block_version == block_version_) {
+    clear_dirty(ChunkDirtyFlags::Geometry);
+  }
+  if (source_light_version == light_version_) {
+    clear_dirty(ChunkDirtyFlags::LightMesh);
+  }
+  mesh_state_ =
+      (has_flag(dirty_flags_, ChunkDirtyFlags::Geometry) ||
+       has_flag(dirty_flags_, ChunkDirtyFlags::LightMesh))
+          ? ChunkMeshState::Dirty
+          : ChunkMeshState::Ready;
 }
 
 ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk) {
   ChunkSnapshot snapshot;
   snapshot.coord = chunk.coord();
-  snapshot.source_version = chunk.version();
+  snapshot.source_version = chunk.block_version();
+  snapshot.source_content_version = chunk.content_version();
+  snapshot.source_light_version = chunk.light_version();
   snapshot.storages[ChunkSnapshotCenterStorageIndex] = chunk.storage_view();
   return snapshot;
 }

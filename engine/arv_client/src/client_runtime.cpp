@@ -60,19 +60,32 @@ void ClientRuntime::submit_input(InputFrame input) {
   player_controller_.submit_input(std::move(input));
 }
 
+void ClientRuntime::set_chunk_view_distance(i32 view_distance) noexcept {
+  chunk_interest_.set_view_distance(view_distance);
+}
+
 void ClientRuntime::fixed_tick(TickIndex tick_index) {
-  (void)tick_index;
   if (!transport_) {
     return;
   }
 
-  if (connection_state_ == net::ConnectionState::InGame) {
-    (void)send_input_batch(tick_index);
-  }
+  const bool was_in_game = connection_state_ == net::ConnectionState::InGame;
 
   inbound_events_ = transport_->poll_events();
   for (net::NetworkEvent& event : inbound_events_) {
     handle_network_event(std::move(event));
+  }
+
+  if (was_in_game && connection_state_ == net::ConnectionState::InGame) {
+    (void)send_input_batch(tick_index);
+  }
+
+  if (connection_state_ == net::ConnectionState::InGame) {
+    chunk_interest_.set_world_id(player_controller_.camera().world_id());
+    chunk_interest_.update_player_position(player_controller_.player_position());
+    if (chunk_interest_.consume_interest_changed()) {
+      (void)send_chunk_interest_update();
+    }
   }
 }
 
@@ -107,6 +120,18 @@ const player::ResolvedPermissions& ClientRuntime::resolved_permissions() const n
   return player_controller_.resolved_permissions();
 }
 
+std::vector<protocol::ChunkData> ClientRuntime::drain_received_chunk_data() {
+  std::vector<protocol::ChunkData> drained = std::move(received_chunk_data_);
+  received_chunk_data_.clear();
+  return drained;
+}
+
+std::vector<protocol::ChunkUnload> ClientRuntime::drain_received_chunk_unloads() {
+  std::vector<protocol::ChunkUnload> drained = std::move(received_chunk_unloads_);
+  received_chunk_unloads_.clear();
+  return drained;
+}
+
 net::NetworkResult ClientRuntime::send_client_hello() {
   protocol::ClientHello hello;
   std::vector<u8> payload = protocol::serialize_client_hello(hello);
@@ -114,6 +139,16 @@ net::NetworkResult ClientRuntime::send_client_hello() {
       {protocol::CurrentProtocolVersion, protocol::MessageType::ClientHello, 0, 0, 0, 0},
       payload);
   return transport_->send({connection_id_, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+}
+
+net::NetworkResult ClientRuntime::send_chunk_interest_update() {
+  const protocol::ChunkInterestUpdate update = chunk_interest_.build_interest_update();
+  const std::vector<u8> payload = protocol::serialize_chunk_interest_update(update);
+  std::vector<u8> packet = protocol::serialize_envelope(
+      {protocol::CurrentProtocolVersion, protocol::MessageType::ChunkInterestUpdate, 0, 0, 0, 0},
+      payload);
+  return transport_->send(
+      {connection_id_, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
 }
 
 void ClientRuntime::handle_network_event(net::NetworkEvent event) {
@@ -158,6 +193,7 @@ void ClientRuntime::handle_message(const std::vector<u8>& packet) {
       }
 
       player_controller_.camera().set_world_id(server_hello.value().initial_world_id);
+      chunk_interest_.set_world_id(server_hello.value().initial_world_id);
       connection_state_ = server_hello.value().required_followup_sync
                               ? net::ConnectionState::RegistrySync
                               : net::ConnectionState::InGame;
@@ -169,6 +205,22 @@ void ClientRuntime::handle_message(const std::vector<u8>& packet) {
         return;
       }
       player_controller_.apply_authoritative_state(correction.value());
+      return;
+    }
+    case protocol::MessageType::ChunkData: {
+      auto chunk_data = protocol::deserialize_chunk_data(decoded.value().payload);
+      if (!chunk_data) {
+        return;
+      }
+      received_chunk_data_.push_back(std::move(chunk_data.value()));
+      return;
+    }
+    case protocol::MessageType::ChunkUnload: {
+      auto unload = protocol::deserialize_chunk_unload(decoded.value().payload);
+      if (!unload) {
+        return;
+      }
+      received_chunk_unloads_.push_back(unload.value());
       return;
     }
     default:

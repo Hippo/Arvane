@@ -45,6 +45,7 @@ The server owns:
 - world state
 - chunk data
 - block mutations
+- lighting propagation and authoritative light data
 - entity simulation
 - inventory state
 - player profiles and sessions
@@ -57,12 +58,15 @@ The client owns:
 - input collection
 - camera presentation
 - local render state
+- rendering received chunk/block/light/mesh data
 - client-side prediction
 - interpolation buffers
 - UI state
 - temporary visual effects
 
 The client may request actions, but it does not directly mutate authoritative world state.
+
+The client must not generate authoritative lighting updates after block edits. In integrated singleplayer, the integrated server/world still owns lighting; the client consumes replicated chunk/light data and performs local rendering work only.
 
 Examples:
 
@@ -337,6 +341,8 @@ If the server sends a chunk snapshot, later block updates must either:
 - be deferred until the base chunk arrives
 - be replaced by a newer full chunk snapshot
 
+Chunk lighting changes are authoritative server/world updates. They may be streamed as part of a newer section snapshot or a future light-delta message. Clients may remesh received sections using that data, but they do not decide lighting propagation.
+
 ---
 
 ## Chunk Data Messages
@@ -345,7 +351,8 @@ Chunk data messages should include:
 
 - world identifier
 - chunk coordinate
-- chunk version
+- block/geometry version
+- light version
 - serialized section data
 - lighting data
 - height or occupancy metadata if needed
@@ -736,6 +743,8 @@ Required pattern:
 - transport sends serialized packets
 
 World mutation remains owned by the simulation side.
+
+Chunk generation follows the same rule. A networking or streaming path may request missing chunk data, but it must not synchronously generate terrain while handling a packet or preparing a send. The authoritative server/world scheduler runs generation on workers, then the simulation thread publishes completed chunks before replication serializes them.
 
 ---
 

@@ -18,7 +18,7 @@ Assets must not be loaded ad hoc from random systems. Systems should request ass
 
 ## Assets Directory Layout
 
-`arvane_home/assets/` is the root location for all game-facing, data-driven content.
+`arvane_home/assets/` is the root location for reloadable media assets.
 
 This folder must remain **cleanly structured, predictable, and stable**, as many systems (rendering, world generation, UI, plugins) depend on it.
 
@@ -39,8 +39,8 @@ arvane_home/
     fonts/
     materials/
     ui/
-    config/
     audio/
+  config/
 ```
 
 `arvane_home/` is the runtime home directory for the engine/game. In development it lives at the project root by default and also contains `plugins/`, `config/`, `saves/`, and optional `logs/` / `cache/` directories.
@@ -63,7 +63,6 @@ assets/
   fonts/
   materials/
   ui/
-  config/
   audio/
 ```
 
@@ -178,12 +177,12 @@ ui/
 
 ---
 
-### `config/`
+### `arvane_home/config/`
 
 Game and engine configuration files.
 
 ```
-config/
+arvane_home/config/
 ```
 
 **Notes:**

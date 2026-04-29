@@ -5,8 +5,11 @@
 #include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
+#include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/handshake.hpp"
+#include "arv/sched/scheduler.hpp"
+#include "arv/server/chunk_streamer.hpp"
 #include "arv/server/session_registry.hpp"
 #include "arv/server/world_registry.hpp"
 #include "arv/voxel/block.hpp"
@@ -40,6 +43,8 @@ struct ServerStartInfo {
   const player::ItemRegistry* item_registry{};
   player::PlayerTuning player_tuning{};
   voxel::FluidDefinition fluid_definition{voxel::make_water_fluid_definition()};
+  ServerChunkStreamingConfig chunk_streaming{};
+  std::optional<ServerChunkGenerationSettings> chunk_generation{};
 };
 
 class ServerRuntime {
@@ -107,7 +112,15 @@ private:
 
   void handle_message(net::ConnectionID connection_id, const std::vector<u8>& packet);
   void handle_input_batch(net::ConnectionID connection_id, const protocol::ClientInputBatch& batch);
+  void handle_chunk_interest_update(
+      net::ConnectionID connection_id,
+      const protocol::ChunkInterestUpdate& interest);
   void tick_players();
+  void tick_chunk_streaming();
+  void drain_generation_jobs();
+  void schedule_generation_jobs();
+  void drain_lighting_jobs();
+  void schedule_lighting_jobs();
   void refresh_player_permissions(player::PlayerState& player_state);
   void apply_player_command(player::PlayerState& player_state, const player::PlayerCommand& command);
   void send_player_corrections();
@@ -128,9 +141,29 @@ private:
   const player::ItemRegistry* item_registry_{};
   player::PlayerTuning player_tuning_{};
   voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
+  ServerChunkStreamer chunk_streamer_{};
+  std::optional<ServerChunkGenerationSettings> chunk_generation_{};
+  std::vector<QueuedChunkStreamMessage> queued_chunk_stream_messages_;
   player::GameModeRegistry game_modes_{player::GameModeRegistry::with_builtins()};
   player::PermissionGroupRegistry permission_groups_{};
   std::unordered_map<PlayerID, player::PlayerCommand> pending_player_commands_;
+  std::unordered_map<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
+
+  struct PendingLightingJob {
+    u64 source_revision{};
+    sched::JobHandle<world::LightingResult> job;
+  };
+
+  struct PendingGenerationJob {
+    ChunkCoord coord{};
+    sched::JobHandle<world::GeneratedChunkResult> job;
+  };
+
+  sched::Scheduler world_jobs_;
+  std::vector<PendingGenerationJob> pending_generation_jobs_;
+  std::vector<PendingLightingJob> pending_lighting_jobs_;
+  u32 max_pending_generation_jobs_{4};
+  u32 max_pending_lighting_jobs_{2};
 };
 
 } // namespace arv::server

@@ -24,6 +24,9 @@ enum class MessageType : u16 {
   Pong = 0x0005,
   ClientInputBatch = 0x0100,
   PlayerCorrection = 0x0101,
+  ChunkInterestUpdate = 0x0400,
+  ChunkData = 0x0401,
+  ChunkUnload = 0x0402,
 };
 
 } // namespace arv::protocol

@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "name": "arvane:coal",
+      "display_name": "Coal",
+      "category": "resources",
+      "max_stack_size": 64,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/coal"
+    },
+    {
+      "name": "arvane:wood_pickaxe",
+      "display_name": "Wood Pickaxe",
+      "category": "tools",
+      "max_stack_size": 1,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/pickaxe"
+    }
+  ]
+}

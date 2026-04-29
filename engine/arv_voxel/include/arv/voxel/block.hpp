@@ -79,6 +79,7 @@ struct BlockDefinition {
   std::vector<std::string> tags{};
   BlockProperties properties{};
   RenderCategory render_category{RenderCategory::None};
+  bool is_item{true};
   bool hide_same_variant_faces{true};
   std::array<std::string, BlockFaceCount> texture_assets{};
   std::vector<StatePropertyDefinition> states{};
@@ -89,6 +90,7 @@ struct BlockRecord {
   std::string name{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
+  bool is_item{true};
   BlockVariantID default_variant{};
   std::vector<BlockVariantID> variants{};
 };

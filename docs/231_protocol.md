@@ -425,13 +425,18 @@ Reliable ordered.
 ```text
 ChunkData
 {
+    WorldID world_id;
     ChunkCoord coord;
-    u32 chunk_version;
-    u32 generation_version;
-    u32 payload_flags;
-    bytes chunk_payload;
+    u64 chunk_version;          // block/geometry version
+    u64 chunk_content_version;  // mesh-relevant content/boundary version
+    u64 chunk_light_version;    // serialized section light-buffer version
+    bool has_lighting;
+    BlockStateID blocks[4096];
+    LightWord lighting[4096] if has_lighting;
 }
 ```
+
+`chunk_light_version` describes the section's own light buffer. It does not advance for dependency-only neighbor `LightMesh` invalidations; those are derived by the receiver when changed boundary light data arrives.
 
 Chunk payload may contain:
 
@@ -446,8 +451,10 @@ The client must discard chunk data if:
 
 * it targets an unloaded world
 * the chunk is no longer relevant
-* the version is older than already-applied data
+* the block/geometry version and light version are older than already-applied data
 * registry compatibility is missing
+
+Lighting data is server-authoritative. Clients may render and remesh from received lighting, including temporary placeholder/stale lighting, but must not generate authoritative light propagation.
 
 ### Chunk Unload
 
@@ -781,7 +788,7 @@ Messages with ticks, revisions, or versions must reject stale data.
 
 Examples:
 
-* older chunk version is discarded
+* older chunk block/light versions are discarded
 * older inventory revision is discarded
 * older entity snapshot is discarded
 * client input older than the server input window is discarded

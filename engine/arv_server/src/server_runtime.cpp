@@ -5,6 +5,7 @@
 #include "arv/world/world_queries.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <optional>
 #include <sstream>
@@ -19,6 +20,14 @@ namespace {
       {std::sin(player_state.yaw_radians) * cos_pitch,
        std::sin(player_state.pitch_radians),
        std::cos(player_state.yaw_radians) * cos_pitch});
+}
+
+[[nodiscard]] ChunkCoord player_chunk_coord(const player::PlayerState& player_state) noexcept {
+  return block_to_chunk({{
+      static_cast<i32>(std::floor(player_state.position.x)),
+      static_cast<i32>(std::floor(player_state.position.y)),
+      static_cast<i32>(std::floor(player_state.position.z)),
+  }});
 }
 
 [[nodiscard]] arv::Vec3f horizontal_forward(f32 yaw_radians) noexcept {
@@ -94,6 +103,43 @@ void step_player_without_collision(
   return pos;
 }
 
+[[nodiscard]] protocol::PlayerCorrection make_player_correction(
+    TickIndex server_tick,
+    const player::PlayerState& player_state) {
+  protocol::PlayerCorrection correction;
+  correction.server_tick = server_tick;
+  correction.player_id = player_state.player_id;
+  correction.world_id = player_state.world_id;
+  correction.position = player_state.position;
+  correction.velocity = player_state.velocity;
+  correction.yaw_radians = player_state.yaw_radians;
+  correction.pitch_radians = player_state.pitch_radians;
+  correction.movement_mode = player_state.movement_mode;
+  correction.game_mode_id = player_state.game_mode_id;
+  correction.resolved_core_permissions = player_state.resolved_permissions.core;
+  correction.grounded = player_state.grounded;
+  correction.sneaking = player_state.sneaking;
+  correction.selected_hotbar_slot = player_state.selected_hotbar_slot;
+  return correction;
+}
+
+[[nodiscard]] bool same_correction_payload(
+    const protocol::PlayerCorrection& lhs,
+    const protocol::PlayerCorrection& rhs) {
+  return lhs.player_id == rhs.player_id &&
+         lhs.world_id == rhs.world_id &&
+         lhs.position == rhs.position &&
+         lhs.velocity == rhs.velocity &&
+         lhs.yaw_radians == rhs.yaw_radians &&
+         lhs.pitch_radians == rhs.pitch_radians &&
+         lhs.movement_mode == rhs.movement_mode &&
+         lhs.game_mode_id == rhs.game_mode_id &&
+         lhs.resolved_core_permissions == rhs.resolved_core_permissions &&
+         lhs.grounded == rhs.grounded &&
+         lhs.sneaking == rhs.sneaking &&
+         lhs.selected_hotbar_slot == rhs.selected_hotbar_slot;
+}
+
 } // namespace
 
 ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
@@ -110,6 +156,10 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
   item_registry_ = start_info.item_registry;
   player_tuning_ = start_info.player_tuning;
   fluid_definition_ = start_info.fluid_definition;
+  chunk_streamer_.configure(start_info.chunk_streaming);
+  chunk_generation_ = start_info.chunk_generation;
+  max_pending_generation_jobs_ =
+      std::max<u32>(start_info.chunk_streaming.max_chunks_sent_per_player_tick, 1U);
   worlds_.ensure_default_world();
   handshake_policy_.server_name =
       mode_ == ServerMode::Dedicated ? "Arvane Dedicated Server" : "Arvane Integrated Server";
@@ -133,12 +183,17 @@ void ServerRuntime::tick() {
     return;
   }
 
+  drain_generation_jobs();
+  drain_lighting_jobs();
   inbound_events_ = transport_->poll_events();
   for (net::NetworkEvent& event : inbound_events_) {
     handle_network_event(std::move(event));
   }
   tick_players();
   (void)default_world_.tick(*block_registry_, fluid_definition_);
+  schedule_lighting_jobs();
+  tick_chunk_streaming();
+  schedule_generation_jobs();
   send_player_corrections();
   ++tick_index_;
 }
@@ -149,6 +204,9 @@ void ServerRuntime::shutdown() {
   }
 
   state_ = ServerRuntimeState::Stopping;
+  world_jobs_.wait_for_all();
+  drain_generation_jobs();
+  drain_lighting_jobs();
   if (transport_) {
     transport_->shutdown();
   }
@@ -173,6 +231,12 @@ void ServerRuntime::handle_network_event(net::NetworkEvent event) {
       return;
     case net::NetworkEventType::ConnectionClosed:
     case net::NetworkEventType::ConnectionFailed:
+      if (const ServerSession* session = sessions_.find_by_connection(event.connection_id);
+          session != nullptr) {
+        chunk_streamer_.remove_session(session->session_id);
+        pending_player_commands_.erase(session->player_id);
+        last_sent_player_corrections_.erase(session->player_id);
+      }
       sessions_.remove_by_connection(event.connection_id);
       return;
     case net::NetworkEventType::MessageReceived:
@@ -236,6 +300,14 @@ void ServerRuntime::handle_message(net::ConnectionID connection_id, const std::v
       handle_input_batch(connection_id, batch.value());
       return;
     }
+    case protocol::MessageType::ChunkInterestUpdate: {
+      auto interest = protocol::deserialize_chunk_interest_update(decoded.value().payload);
+      if (!interest) {
+        return;
+      }
+      handle_chunk_interest_update(connection_id, interest.value());
+      return;
+    }
     default:
       return;
   }
@@ -285,6 +357,151 @@ void ServerRuntime::tick_players() {
     apply_player_command(*player_state, command);
     player_state->last_processed_input_tick = command.client_tick;
   }
+}
+
+void ServerRuntime::handle_chunk_interest_update(
+    net::ConnectionID connection_id,
+    const protocol::ChunkInterestUpdate& interest) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr) {
+    return;
+  }
+  const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  if (player_state == nullptr) {
+    return;
+  }
+
+  chunk_streamer_.update_player_interest(*session, player_chunk_coord(*player_state), interest);
+}
+
+void ServerRuntime::tick_chunk_streaming() {
+  queued_chunk_stream_messages_.clear();
+  chunk_streamer_.tick_streaming_budget(
+      default_world_,
+      queued_chunk_stream_messages_);
+
+  for (QueuedChunkStreamMessage& message : queued_chunk_stream_messages_) {
+    std::vector<u8> packet = protocol::serialize_envelope(
+        {protocol::CurrentProtocolVersion, message.message_type, 0, 0, 0, 0},
+        message.payload);
+    (void)transport_->send(
+        {message.connection_id, message.reliability, std::move(packet)});
+  }
+}
+
+void ServerRuntime::drain_generation_jobs() {
+  for (usize index = 0; index < pending_generation_jobs_.size();) {
+    PendingGenerationJob& pending = pending_generation_jobs_[index];
+    if (!pending.job.is_complete()) {
+      ++index;
+      continue;
+    }
+
+    world::GeneratedChunkResult generated = pending.job.get();
+    voxel::ChunkSection* chunk = default_world_.find_chunk(pending.coord);
+    if (generated &&
+        chunk != nullptr &&
+        chunk->lifecycle_state() == voxel::ChunkLifecycleState::Generating) {
+      (void)default_world_.publish_generated_chunk(std::move(generated.value()));
+    } else if (chunk != nullptr &&
+               chunk->lifecycle_state() == voxel::ChunkLifecycleState::Generating) {
+      (void)default_world_.set_chunk_lifecycle_state(
+          pending.coord,
+          voxel::ChunkLifecycleState::Requested);
+    }
+
+    pending_generation_jobs_.erase(
+        pending_generation_jobs_.begin() + static_cast<std::ptrdiff_t>(index));
+  }
+}
+
+void ServerRuntime::schedule_generation_jobs() {
+  if (!chunk_generation_.has_value() || !chunk_generation_->enabled) {
+    return;
+  }
+
+  const std::vector<ChunkCoord> candidates =
+      chunk_streamer_.pending_generation_requests(default_world_);
+  for (const ChunkCoord coord : candidates) {
+    if (pending_generation_jobs_.size() >= max_pending_generation_jobs_) {
+      return;
+    }
+
+    const bool already_pending = std::any_of(
+        pending_generation_jobs_.begin(),
+        pending_generation_jobs_.end(),
+        [coord](const PendingGenerationJob& pending) {
+          return pending.coord == coord;
+        });
+    if (already_pending) {
+      continue;
+    }
+
+    voxel::ChunkSection* chunk = default_world_.find_chunk(coord);
+    if (chunk == nullptr ||
+        chunk->lifecycle_state() != voxel::ChunkLifecycleState::Requested) {
+      continue;
+    }
+
+    if (!default_world_.set_chunk_lifecycle_state(
+            coord,
+            voxel::ChunkLifecycleState::Generating)) {
+      continue;
+    }
+
+    world::ChunkGenerationRequest request;
+    request.world_id = default_world_.id();
+    request.seed = chunk_generation_->seed;
+    request.coord = coord;
+    request.config = chunk_generation_->config;
+    request.palette = chunk_generation_->palette;
+    auto job = world_jobs_.submit("server_world_generation", [request] {
+      return world::generate_chunk(request);
+    });
+    pending_generation_jobs_.push_back({coord, std::move(job)});
+  }
+}
+
+void ServerRuntime::drain_lighting_jobs() {
+  for (usize index = 0; index < pending_lighting_jobs_.size();) {
+    PendingLightingJob& pending = pending_lighting_jobs_[index];
+    if (!pending.job.is_complete()) {
+      ++index;
+      continue;
+    }
+
+    world::LightingResult result = pending.job.get();
+    (void)default_world_.publish_lighting_result(std::move(result));
+    pending_lighting_jobs_.erase(
+        pending_lighting_jobs_.begin() + static_cast<std::ptrdiff_t>(index));
+  }
+}
+
+void ServerRuntime::schedule_lighting_jobs() {
+  if (block_registry_ == nullptr || !default_world_.has_lighting_work()) {
+    return;
+  }
+
+  const world::LightingSnapshot snapshot = default_world_.make_lighting_snapshot();
+  if (snapshot.chunks.empty()) {
+    return;
+  }
+
+  const bool revision_in_flight = std::any_of(
+      pending_lighting_jobs_.begin(),
+      pending_lighting_jobs_.end(),
+      [revision = snapshot.source_revision](const PendingLightingJob& pending) {
+        return pending.source_revision == revision;
+      });
+  if (revision_in_flight || pending_lighting_jobs_.size() >= max_pending_lighting_jobs_) {
+    return;
+  }
+
+  const voxel::BlockRegistry* registry = block_registry_;
+  auto job = world_jobs_.submit("server_world_lighting", [snapshot, registry] {
+    return world::WorldRuntime::build_lighting_result(snapshot, *registry);
+  });
+  pending_lighting_jobs_.push_back({snapshot.source_revision, std::move(job)});
 }
 
 void ServerRuntime::refresh_player_permissions(player::PlayerState& player_state) {
@@ -482,27 +699,22 @@ void ServerRuntime::send_player_corrections() {
       continue;
     }
 
-    protocol::PlayerCorrection correction;
-    correction.server_tick = tick_index_;
-    correction.player_id = player_state->player_id;
-    correction.world_id = player_state->world_id;
-    correction.position = player_state->position;
-    correction.velocity = player_state->velocity;
-    correction.yaw_radians = player_state->yaw_radians;
-    correction.pitch_radians = player_state->pitch_radians;
-    correction.movement_mode = player_state->movement_mode;
-    correction.game_mode_id = player_state->game_mode_id;
-    correction.resolved_core_permissions = player_state->resolved_permissions.core;
-    correction.grounded = player_state->grounded;
-    correction.sneaking = player_state->sneaking;
-    correction.selected_hotbar_slot = player_state->selected_hotbar_slot;
+    protocol::PlayerCorrection correction = make_player_correction(tick_index_, *player_state);
+    if (const auto found = last_sent_player_corrections_.find(player_state->player_id);
+        found != last_sent_player_corrections_.end() &&
+        same_correction_payload(found->second, correction)) {
+      continue;
+    }
 
     std::vector<u8> payload = protocol::serialize_player_correction(correction);
     std::vector<u8> packet = protocol::serialize_envelope(
         {protocol::CurrentProtocolVersion, protocol::MessageType::PlayerCorrection, 0, 0, 0, 0},
         payload);
-    (void)transport_->send(
+    const net::NetworkResult send_result = transport_->send(
         {session->connection_id, protocol::ReliabilityClass::UnreliableLatestWins, std::move(packet)});
+    if (send_result) {
+      last_sent_player_corrections_[player_state->player_id] = std::move(correction);
+    }
   }
 }
 
@@ -513,17 +725,19 @@ void ServerRuntime::seed_player_inventory(player::PlayerState& player_state) {
 
   // TODO(arvane): Replace this starter loadout with documented gameplay spawn
   // inventory rules once the built-in game layer is defined.
-  for (const std::string_view item_name :
-       {std::string_view{"arvane:stone"},
-        std::string_view{"arvane:dirt"},
-        std::string_view{"arvane:grass_block"},
-        std::string_view{"arvane:glass"},
-        std::string_view{"arvane:glowstone"}}) {
+  for (const auto [item_name, count] :
+       {std::pair{std::string_view{"arvane:stone"}, u16{64}},
+        std::pair{std::string_view{"arvane:dirt"}, u16{64}},
+        std::pair{std::string_view{"arvane:grass_block"}, u16{64}},
+        std::pair{std::string_view{"arvane:glass"}, u16{64}},
+        std::pair{std::string_view{"arvane:glowstone"}, u16{64}},
+        std::pair{std::string_view{"arvane:coal"}, u16{32}},
+        std::pair{std::string_view{"arvane:wood_pickaxe"}, u16{1}}}) {
     const auto item_id = item_registry_->find_item(item_name);
     if (!item_id.has_value()) {
       continue;
     }
-    (void)player_state.inventory.insert_stack({item_id.value(), 64U}, *item_registry_);
+    (void)player_state.inventory.insert_stack({item_id.value(), count}, *item_registry_);
   }
 }
 

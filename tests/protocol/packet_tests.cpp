@@ -2,6 +2,7 @@
 #include "arv/protocol/message_registry.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/message_writer.hpp"
+#include "arv/protocol/chunk_streaming.hpp"
 
 #include <gtest/gtest.h>
 
@@ -44,14 +45,23 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto ping = registry.lookup(arv::protocol::MessageType::Ping);
   const auto input = registry.lookup(arv::protocol::MessageType::ClientInputBatch);
   const auto correction = registry.lookup(arv::protocol::MessageType::PlayerCorrection);
+  const auto chunk_interest = registry.lookup(arv::protocol::MessageType::ChunkInterestUpdate);
+  const auto chunk_data = registry.lookup(arv::protocol::MessageType::ChunkData);
+  const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ChunkUnload);
 
   ASSERT_TRUE(ping.has_value());
   ASSERT_TRUE(input.has_value());
   ASSERT_TRUE(correction.has_value());
+  ASSERT_TRUE(chunk_interest.has_value());
+  ASSERT_TRUE(chunk_data.has_value());
+  ASSERT_TRUE(chunk_unload.has_value());
   EXPECT_EQ(ping->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
   EXPECT_EQ(input->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(correction->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
-  EXPECT_EQ(registry.size(), 7U);
+  EXPECT_EQ(chunk_interest->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(chunk_data->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(chunk_unload->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(registry.size(), 10U);
 }
 
 TEST(ProtocolTests, ClientInputBatchRoundTripsThroughSerialization) {
@@ -120,4 +130,66 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   EXPECT_FALSE(decoded.value().grounded);
   EXPECT_TRUE(decoded.value().sneaking);
   EXPECT_EQ(decoded.value().selected_hotbar_slot, 6U);
+}
+
+TEST(ProtocolTests, ChunkInterestUpdateRoundTripsThroughSerialization) {
+  arv::protocol::ChunkInterestUpdate update;
+  update.world_id = arv::WorldID{3};
+  update.center_chunk = {{4, 5, -6}};
+  update.client_view_distance = 7;
+  update.previous_center_chunk = arv::ChunkCoord{{3, 5, -6}};
+  update.sequence_id = 42;
+
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_interest_update(update);
+  const auto decoded = arv::protocol::deserialize_chunk_interest_update(bytes);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().world_id, (arv::WorldID{3}));
+  EXPECT_EQ(decoded.value().center_chunk, (arv::ChunkCoord{{4, 5, -6}}));
+  EXPECT_EQ(decoded.value().client_view_distance, 7);
+  ASSERT_TRUE(decoded.value().previous_center_chunk.has_value());
+  EXPECT_EQ(decoded.value().previous_center_chunk.value(), (arv::ChunkCoord{{3, 5, -6}}));
+  EXPECT_EQ(decoded.value().sequence_id, 42U);
+}
+
+TEST(ProtocolTests, ChunkDataRoundTripsThroughSerialization) {
+  arv::protocol::ChunkData data;
+  data.world_id = arv::WorldID{5};
+  data.coord = {{1, -2, 3}};
+  data.chunk_version = 12;
+  data.chunk_content_version = 9;
+  data.chunk_light_version = 14;
+  data.has_lighting = true;
+  data.blocks.fill(arv::voxel::AirBlockVariantID);
+  data.lights.fill(arv::voxel::NoLight);
+  data.blocks[arv::voxel::local_index({{1, 2, 3}})] = arv::voxel::BlockVariantID{8};
+  data.lights[arv::voxel::local_index({{1, 2, 3}})] = arv::voxel::pack_light(1, 2, 3, 4);
+
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_data(data);
+  const auto decoded = arv::protocol::deserialize_chunk_data(bytes);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().world_id, (arv::WorldID{5}));
+  EXPECT_EQ(decoded.value().coord, (arv::ChunkCoord{{1, -2, 3}}));
+  EXPECT_EQ(decoded.value().chunk_version, 12U);
+  EXPECT_EQ(decoded.value().chunk_content_version, 9U);
+  EXPECT_EQ(decoded.value().chunk_light_version, 14U);
+  EXPECT_TRUE(decoded.value().has_lighting);
+  EXPECT_EQ(
+      decoded.value().blocks[arv::voxel::local_index({{1, 2, 3}})],
+      (arv::voxel::BlockVariantID{8}));
+  EXPECT_EQ(
+      decoded.value().lights[arv::voxel::local_index({{1, 2, 3}})],
+      arv::voxel::pack_light(1, 2, 3, 4));
+}
+
+TEST(ProtocolTests, ChunkUnloadRoundTripsThroughSerialization) {
+  const arv::protocol::ChunkUnload unload{arv::WorldID{2}, {{-1, 0, 1}}};
+
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_unload(unload);
+  const auto decoded = arv::protocol::deserialize_chunk_unload(bytes);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().world_id, (arv::WorldID{2}));
+  EXPECT_EQ(decoded.value().coord, (arv::ChunkCoord{{-1, 0, 1}}));
 }

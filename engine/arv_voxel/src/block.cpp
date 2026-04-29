@@ -46,25 +46,34 @@ void set_side_textures(
   set_texture_slot(textures, BlockFace::NegativeZ, asset_id);
 }
 
-[[nodiscard]] std::optional<BlockRegistryError> read_texture_references(
-    const nlohmann::json& item,
-    BlockDefinition& definition) {
-  const auto textures_iter = item.find("textures");
-  if (textures_iter == item.end()) {
+[[nodiscard]] std::optional<BlockRegistryError> read_texture_value(
+    const nlohmann::json& textures,
+    BlockDefinition& definition,
+    std::string_view field_name) {
+  if (textures.is_string()) {
+    definition.texture_assets.fill(textures.get<std::string>());
     return std::nullopt;
   }
-
-  if (textures_iter->is_string()) {
-    definition.texture_assets.fill(textures_iter->get<std::string>());
+  if (textures.is_array()) {
+    if (textures.size() != BlockFaceCount) {
+      return BlockRegistryError{
+          std::string{field_name} + " array must contain exactly 6 entries for " + definition.name};
+    }
+    definition.texture_assets[face_index(BlockFace::PositiveY)] = textures[0].get<std::string>();
+    definition.texture_assets[face_index(BlockFace::NegativeY)] = textures[1].get<std::string>();
+    definition.texture_assets[face_index(BlockFace::PositiveZ)] = textures[2].get<std::string>();
+    definition.texture_assets[face_index(BlockFace::NegativeZ)] = textures[3].get<std::string>();
+    definition.texture_assets[face_index(BlockFace::NegativeX)] = textures[4].get<std::string>();
+    definition.texture_assets[face_index(BlockFace::PositiveX)] = textures[5].get<std::string>();
     return std::nullopt;
   }
-  if (!textures_iter->is_object()) {
-    return BlockRegistryError{"textures must be a string or object for " + definition.name};
+  if (!textures.is_object()) {
+    return BlockRegistryError{std::string{field_name} + " must be a string, array, or object for " + definition.name};
   }
 
   const auto assign_if_present = [&](std::string_view key, auto assign) {
-    const auto found = textures_iter->find(std::string{key});
-    if (found != textures_iter->end()) {
+    const auto found = textures.find(std::string{key});
+    if (found != textures.end()) {
       assign(found->get<std::string>());
     }
   };
@@ -101,6 +110,24 @@ void set_side_textures(
   });
 
   return std::nullopt;
+}
+
+[[nodiscard]] std::optional<BlockRegistryError> read_texture_references(
+    const nlohmann::json& item,
+    BlockDefinition& definition) {
+  const auto texture_iter = item.find("texture");
+  const auto textures_iter = item.find("textures");
+  if (texture_iter == item.end() && textures_iter == item.end()) {
+    return std::nullopt;
+  }
+  if (texture_iter != item.end() && textures_iter != item.end()) {
+    return BlockRegistryError{"block defines both texture and textures for " + definition.name};
+  }
+
+  return read_texture_value(
+      texture_iter != item.end() ? *texture_iter : *textures_iter,
+      definition,
+      texture_iter != item.end() ? "texture" : "textures");
 }
 
 } // namespace
@@ -160,6 +187,7 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     block.name = definition.name;
     block.tags = definition.tags;
     block.properties = definition.properties;
+    block.is_item = definition.is_item;
 
     std::vector<std::string> variant_names = expand_variant_names(definition);
     if (variant_names.empty()) {
@@ -402,6 +430,7 @@ BlockDefinition make_air_definition() {
   definition.name = std::string{AirBlockName};
   definition.properties.replaceable = true;
   definition.render_category = RenderCategory::None;
+  definition.is_item = false;
   return definition;
 }
 
@@ -489,6 +518,11 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
       const auto hide_iter = item.find("hide_same_variant_faces");
       if (hide_iter != item.end()) {
         definition.hide_same_variant_faces = hide_iter->get<bool>();
+      }
+
+      const auto is_item_iter = item.find("is_item");
+      if (is_item_iter != item.end()) {
+        definition.is_item = is_item_iter->get<bool>();
       }
 
       if (auto texture_error = read_texture_references(item, definition); texture_error.has_value()) {

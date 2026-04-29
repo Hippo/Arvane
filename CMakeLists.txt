@@ -79,6 +79,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(FastNoise2)
 
+FetchContent_Declare(
+  concurrentqueue
+  GIT_REPOSITORY https://github.com/cameron314/concurrentqueue.git
+  GIT_TAG v1.0.5
+  UPDATE_DISCONNECTED TRUE
+)
+FetchContent_MakeAvailable(concurrentqueue)
+
 if(ARVANE_BUILD_TESTS)
   set(BUILD_TESTING ON CACHE BOOL "Build tests" FORCE)
 

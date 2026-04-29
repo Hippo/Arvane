@@ -261,6 +261,142 @@ Tags must be:
 
 ---
 
+### Item Derivation
+
+Blocks may optionally define whether they should produce a corresponding item in the item registry.
+
+This allows the engine to automatically generate item definitions from block data, reducing duplication and ensuring consistency between blocks and their inventory representation.
+
+---
+
+### `is_item` Property
+
+Blocks may define:
+
+```json
+"is_item": true
+```
+
+#### Behavior
+
+* `is_item: true`
+
+  * The engine will generate a corresponding item for this block.
+  * This is the default behavior.
+
+* `is_item: false`
+
+  * No item will be generated for this block.
+  * The block will exist only in world simulation and not in inventories.
+
+If the property is omitted, it is treated as:
+
+```json
+"is_item": true
+```
+
+---
+
+### Use Cases
+
+Blocks that should typically disable item generation:
+
+* fluids (`water`, `lava`)
+* temporary simulation blocks
+* technical/internal blocks
+* invisible or placeholder blocks
+
+Example:
+
+```json
+{
+  "name": "arvane:water",
+  "texture": "water.png",
+  "fluid": true,
+  "is_item": false
+}
+```
+
+---
+
+### Generated Item Behavior
+
+When a block has `is_item: true`, the item registry may automatically derive an item using:
+
+* the block’s logical name
+* the block’s visual definition (`model` or `texture`)
+* default item properties (stack size, category, etc.)
+
+Example:
+
+```json
+{
+  "name": "arvane:stone",
+  "texture": "stone.png"
+}
+```
+
+This will produce an item equivalent to:
+
+```json
+{
+  "name": "arvane:stone",
+  "category": "blocks",
+  "max_stack_size": <default_block_stack_size>,
+  "places_block": "arvane:stone"
+}
+```
+
+---
+
+### Override Rule
+
+If an explicit item definition exists with the same logical name as a generated block item:
+
+* the explicit item definition overrides configurable fields
+* the association with the source block should be preserved unless explicitly disabled
+
+This allows:
+
+* custom display names
+* custom stack sizes
+* custom rendering
+* custom behaviors
+
+without duplicating block definitions.
+
+---
+
+### Engine Responsibilities
+
+During registry loading:
+
+1. load block definitions
+2. evaluate `is_item`
+3. generate item definitions for eligible blocks
+4. merge/override with explicit item definitions
+5. finalize item registry
+
+---
+
+### Validation Rules
+
+Registry loading should fail or warn if:
+
+* a generated item references a missing block
+* an explicit item conflicts with a non-item block (`is_item: false`)
+* duplicate item definitions cannot be resolved deterministically
+
+---
+
+### Important Notes
+
+* Item derivation is a **convenience layer**, not a requirement.
+* Blocks remain the source of truth for world representation.
+* Items are a separate registry, even when derived from blocks.
+
+---
+
 ## Variant Expansion
 
 Block definitions may define **state schemas**.

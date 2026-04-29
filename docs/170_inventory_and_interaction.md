@@ -170,6 +170,293 @@ Two stacks can only merge if they are compatible.
 
 ---
 
+# Item Rendering
+
+## Purpose
+
+Item rendering defines how items appear in:
+
+- inventory slots
+- hotbar slots
+- the player’s hand
+- dropped item entities in the world
+
+Item rendering is data-driven and resolved through the item registry.
+
+The renderer must not guess how an item should be displayed based only on which fields happen to exist.  
+Each item must resolve to an explicit render type.
+
+---
+
+## Item Render Type
+
+Every item definition must resolve to an `ItemRenderType`.
+
+```cpp
+enum class ItemRenderType {
+  Texture,
+  Model,
+  Block
+};
+```
+
+### `Texture`
+
+The item uses a flat texture as its primary authored visual.
+
+Used for:
+
+- tools
+- resources
+- consumables
+- simple non-block items
+
+Required field:
+
+```json
+"texture": "wood_pickaxe.png"
+```
+
+### `Model`
+
+The item uses an authored item model.
+
+Used for:
+
+- custom 3D tools
+- weapons
+- equipment
+- special modded items
+
+Required field:
+
+```json
+"model": "custom_sword.json"
+```
+
+### `Block`
+
+The item represents a block.
+
+Used for:
+
+- generated block items
+- explicit items that place blocks
+
+Required field:
+
+```json
+"places_block": "arvane:stone"
+```
+
+Block items render from the source block’s visual definition.
+
+---
+
+## Render Type Resolution
+
+The item registry is responsible for resolving the render type during loading.
+
+Recommended rules:
+
+1. If `render_type` is explicitly provided, validate it against the item fields.
+2. If the item is generated from a block, default to `Block`.
+3. If `texture` is provided, default to `Texture`.
+4. If `model` is provided, default to `Model`.
+5. Otherwise use a missing-item fallback.
+
+Example explicit item:
+
+```json
+{
+  "name": "arvane:wood_pickaxe",
+  "render_type": "texture",
+  "texture": "wood_pickaxe.png"
+}
+```
+
+Example block item:
+
+```json
+{
+  "name": "arvane:stone",
+  "render_type": "block",
+  "places_block": "arvane:stone"
+}
+```
+
+The resolved render type must be stored in the item registry.
+
+The renderer should consume resolved item render metadata, not raw JSON.
+
+---
+
+## Inventory and Hotbar Rendering
+
+Inventory and hotbar rendering covers items displayed in 2D UI slots.
+
+This includes:
+
+- hotbar items
+- inventory grid items
+- creative inventory entries
+- container slots
+- dragged item stacks
+
+### Texture Items
+
+For `ItemRenderType::Texture`, the UI renderer draws the item texture directly in the slot.
+
+The texture should be treated as a 2D icon.
+
+### Model Items
+
+For `ItemRenderType::Model`, the UI renderer renders the model into the slot using a consistent preview setup.
+
+The preview should define:
+
+- camera angle
+- scale normalization
+- lighting
+- origin/pivot behavior
+
+### Block Items
+
+For `ItemRenderType::Block`, the UI renderer renders the source block.
+
+Rules:
+
+1. If the source block has a custom model, render that model.
+2. If the source block uses texture-based cube rendering, render an isometric cube preview.
+3. If no custom block model is specified, the block is treated as a cube.
+
+Cube previews should:
+
+- show the top face and two side faces
+- use the resolved block face textures
+- match the block’s normal visual definition
+- avoid requiring separate hand-authored item icons
+
+---
+
+## Hand and World Rendering
+
+Hand and world rendering covers items displayed as 3D objects.
+
+This includes:
+
+- first-person held item
+- third-person held item
+- dropped item entities
+- item display entities, if added later
+
+### Texture Items
+
+For `ItemRenderType::Texture`, the world renderer generates a thin 3D mesh from the flat image.
+
+The mesh should be created by extruding visible pixels from the texture.
+
+Expected behavior:
+
+- transparent pixels do not contribute front/back area
+- visible pixels produce front and back faces
+- boundary pixels produce side faces
+- the item has a small configurable thickness
+- UVs map back to the source texture
+- the generated mesh may be cached per texture
+
+This gives flat items physical depth when held or dropped.
+
+### Model Items
+
+For `ItemRenderType::Model`, the world renderer renders the authored model directly.
+
+Different contexts may apply different transforms:
+
+- first-person hand transform
+- third-person hand transform
+- dropped item spin/bob transform
+- inventory preview transform
+
+The model itself remains the source visual.
+
+### Block Items
+
+For `ItemRenderType::Block`, the world renderer renders the item using the source block’s world representation.
+
+Rules:
+
+- custom block models render as their custom geometry
+- cube blocks render as cube blocks
+- block textures and UVs match normal world rendering
+- generated block items do not use the flat texture extrusion path
+
+A block item represents a block, so its hand/world representation should look like the block.
+
+---
+
+## Missing Item Fallback
+
+If an item cannot resolve a valid render type or visual source, the renderer should use an explicit missing-item fallback.
+
+The fallback should be obvious during development.
+
+Examples:
+
+- checker texture icon
+- bright placeholder cube
+- debug “missing item” model
+
+Missing visuals must not fail silently.
+
+---
+
+## Render Caching
+
+The renderer should avoid rebuilding item visuals every frame.
+
+Cacheable data includes:
+
+- resolved texture handles
+- generated extruded meshes
+- generated block preview meshes
+- model references
+- inventory preview render targets, if used
+
+Caches must be invalidated when relevant assets reload.
+
+---
+
+## Validation Rules
+
+Item loading should fail or warn if:
+
+- `render_type: "texture"` is used without `texture`
+- `render_type: "model"` is used without `model`
+- `render_type: "block"` is used without `places_block` or generated block source data
+- an item defines multiple incompatible visual sources
+- a referenced texture is missing
+- a referenced model is missing
+- a block render item references a missing block
+
+---
+
+## Required Invariants
+
+Implementations must preserve these invariants:
+
+- every item resolves to exactly one `ItemRenderType`
+- item rendering uses resolved registry metadata
+- renderer code does not infer behavior from raw JSON fields
+- texture items render as flat icons in UI
+- texture items render as extruded pixel meshes in hand/world
+- model items render using their authored model
+- block items render using source block visual data
+- block items never use flat texture extrusion
+- missing visuals use an explicit fallback
+
+---
+
 # Inventory Model
 
 ## Inventory Structure

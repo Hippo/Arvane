@@ -40,6 +40,13 @@ void OpenGLRenderer::set_ui_font_atlas(TextureUploadData upload) {
   }
 }
 
+void OpenGLRenderer::set_ui_item_atlas(TextureUploadData upload) {
+  destroy_gpu_texture(item_atlas_);
+  if (upload.valid()) {
+    item_atlas_ = create_texture(upload, false);
+  }
+}
+
 void OpenGLRenderer::resize(u32 width, u32 height) {
   width_ = width;
   height_ = height;
@@ -61,7 +68,44 @@ void OpenGLRenderer::enqueue_chunk_mesh_upload(ChunkMeshUpload upload) {
     return;
   }
 
+  for (auto pending = pending_chunk_mesh_uploads_.begin();
+       pending != pending_chunk_mesh_uploads_.end();) {
+    const ChunkMeshKey pending_key{pending->mesh.world_id, pending->mesh.coord};
+    if (!(pending_key == key)) {
+      ++pending;
+      continue;
+    }
+
+    if (chunk_mesh_upload_at_least_as_new(
+            pending->mesh.source_version,
+            pending->mesh.source_light_version,
+            upload.mesh.source_version,
+            upload.mesh.source_light_version)) {
+      return;
+    }
+    pending = pending_chunk_mesh_uploads_.erase(pending);
+  }
+
   pending_chunk_mesh_uploads_.push_back(std::move(upload));
+}
+
+void OpenGLRenderer::remove_chunk_mesh(ChunkMeshKey key) {
+  for (auto pending = pending_chunk_mesh_uploads_.begin();
+       pending != pending_chunk_mesh_uploads_.end();) {
+    const ChunkMeshKey pending_key{pending->mesh.world_id, pending->mesh.coord};
+    if (pending_key == key) {
+      pending = pending_chunk_mesh_uploads_.erase(pending);
+    } else {
+      ++pending;
+    }
+  }
+
+  const auto found = chunks_.find(key);
+  if (found == chunks_.end()) {
+    return;
+  }
+  destroy_chunk_gpu_state(found->second);
+  chunks_.erase(found);
 }
 
 void OpenGLRenderer::render() {
@@ -143,6 +187,7 @@ void OpenGLRenderer::begin_shutdown() {
   }
   destroy_gpu_texture(terrain_atlas_);
   destroy_gpu_texture(font_atlas_);
+  destroy_gpu_texture(item_atlas_);
   destroy_gpu_texture(white_texture_);
   if (ui_index_buffer_ != 0) {
     glDeleteBuffers(1, &ui_index_buffer_);
@@ -186,16 +231,17 @@ bool OpenGLRenderer::upload_chunk_mesh_now(ChunkMeshUpload upload) {
     return false;
   }
 
+  ChunkGpuState gpu_state;
   if (found != chunks_.end()) {
-    destroy_chunk_gpu_state(found->second);
+    gpu_state = std::move(found->second);
   }
 
-  ChunkGpuState gpu_state;
-  gpu_state.opaque = create_gpu_mesh(upload.mesh.opaque);
-  gpu_state.transparent = create_gpu_mesh(upload.mesh.transparent);
+  upload_cpu_mesh_to_gpu(gpu_state.opaque, upload.mesh.opaque);
+  upload_cpu_mesh_to_gpu(gpu_state.transparent, upload.mesh.transparent);
   gpu_state.state.opaque_mesh = gpu_state.opaque.index_count == 0 ? MeshID{} : allocate_mesh_id();
   gpu_state.state.transparent_mesh = gpu_state.transparent.index_count == 0 ? MeshID{} : allocate_mesh_id();
   gpu_state.state.uploaded_version = upload.mesh.source_version;
+  gpu_state.state.uploaded_light_version = upload.mesh.source_light_version;
   gpu_state.state.resident = true;
   chunks_[key] = gpu_state;
   return true;
@@ -207,14 +253,24 @@ MeshID OpenGLRenderer::allocate_mesh_id() noexcept {
 
 OpenGLRenderer::GpuMesh OpenGLRenderer::create_gpu_mesh(const CpuMeshBuffer& mesh) {
   GpuMesh gpu;
-  if (mesh.vertex_bytes.empty() || mesh.indices.empty()) {
-    return gpu;
+  upload_cpu_mesh_to_gpu(gpu, mesh);
+  return gpu;
+}
+
+void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& mesh) {
+  if ((mesh.vertex_bytes.empty() || mesh.indices.empty()) && gpu.vao == 0) {
+    gpu.index_count = 0;
+    return;
   }
 
-  glGenVertexArrays(1, &gpu.vao);
+  if (gpu.vao == 0) {
+    glGenVertexArrays(1, &gpu.vao);
+  }
   glBindVertexArray(gpu.vao);
 
-  glGenBuffers(1, &gpu.vertex_buffer);
+  if (gpu.vertex_buffer == 0) {
+    glGenBuffers(1, &gpu.vertex_buffer);
+  }
   glBindBuffer(GL_ARRAY_BUFFER, gpu.vertex_buffer);
   glBufferData(
       GL_ARRAY_BUFFER,
@@ -222,7 +278,9 @@ OpenGLRenderer::GpuMesh OpenGLRenderer::create_gpu_mesh(const CpuMeshBuffer& mes
       mesh.vertex_bytes.data(),
       GL_STATIC_DRAW);
 
-  glGenBuffers(1, &gpu.index_buffer);
+  if (gpu.index_buffer == 0) {
+    glGenBuffers(1, &gpu.index_buffer);
+  }
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpu.index_buffer);
   glBufferData(
       GL_ELEMENT_ARRAY_BUFFER,
@@ -254,7 +312,6 @@ OpenGLRenderer::GpuMesh OpenGLRenderer::create_gpu_mesh(const CpuMeshBuffer& mes
 
   gpu.index_count = static_cast<GLsizei>(mesh.indices.size());
   glBindVertexArray(0);
-  return gpu;
 }
 
 void OpenGLRenderer::destroy_gpu_mesh(GpuMesh& mesh) {
@@ -447,7 +504,7 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
 }
 
 void OpenGLRenderer::draw_ui() {
-  if (frame_.ui_rects.empty() && frame_.ui_glyphs.empty()) {
+  if (frame_.ui_rects.empty() && frame_.ui_textured_quads.empty() && frame_.ui_glyphs.empty()) {
     return;
   }
   if (!ensure_ui_program()) {
@@ -463,11 +520,26 @@ void OpenGLRenderer::draw_ui() {
   glUniform1i(ui_texture_uniform_, 0);
 
   draw_ui_rects();
+  draw_ui_textured_quads();
   draw_ui_glyphs();
 
   glBindVertexArray(0);
   glUseProgram(0);
   glDisable(GL_BLEND);
+}
+
+GLuint OpenGLRenderer::texture_for_ui_source(UiTextureSource source) const noexcept {
+  switch (source) {
+    case UiTextureSource::White:
+      return white_texture_.id;
+    case UiTextureSource::FontAtlas:
+      return font_atlas_.id;
+    case UiTextureSource::TerrainAtlas:
+      return terrain_atlas_.id;
+    case UiTextureSource::ItemAtlas:
+      return item_atlas_.id;
+  }
+  return white_texture_.id;
 }
 
 void OpenGLRenderer::draw_ui_rects() {
@@ -504,6 +576,60 @@ void OpenGLRenderer::draw_ui_rects() {
       indices.data(),
       GL_DYNAMIC_DRAW);
   glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+}
+
+void OpenGLRenderer::draw_ui_textured_quads() {
+  if (frame_.ui_textured_quads.empty()) {
+    return;
+  }
+
+  for (const UiTextureSource source : {
+           UiTextureSource::TerrainAtlas,
+           UiTextureSource::ItemAtlas,
+           UiTextureSource::White,
+       }) {
+    const GLuint texture = texture_for_ui_source(source);
+    if (texture == 0) {
+      continue;
+    }
+
+    std::vector<UIVertex> vertices;
+    std::vector<u32> indices;
+    vertices.reserve(frame_.ui_textured_quads.size() * 4U);
+    indices.reserve(frame_.ui_textured_quads.size() * 6U);
+    for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
+      if (quad.source != source || quad.page != 0) {
+        continue;
+      }
+
+      const u32 base = static_cast<u32>(vertices.size());
+      vertices.push_back({quad.positions[0], quad.uvs[0], quad.color});
+      vertices.push_back({quad.positions[1], quad.uvs[1], quad.color});
+      vertices.push_back({quad.positions[2], quad.uvs[2], quad.color});
+      vertices.push_back({quad.positions[3], quad.uvs[3], quad.color});
+      indices.insert(indices.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
+    }
+    if (vertices.empty()) {
+      continue;
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glBindVertexArray(ui_vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        static_cast<GLsizeiptr>(vertices.size() * sizeof(UIVertex)),
+        vertices.data(),
+        GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
+    glBufferData(
+        GL_ELEMENT_ARRAY_BUFFER,
+        static_cast<GLsizeiptr>(indices.size() * sizeof(u32)),
+        indices.data(),
+        GL_DYNAMIC_DRAW);
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+  }
 }
 
 void OpenGLRenderer::draw_ui_glyphs() {

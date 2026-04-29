@@ -20,16 +20,48 @@ TEST(ChunkStorageTests, ChunksDefaultToAirStorage) {
 TEST(ChunkStorageTests, SetBlockIncrementsVersionAndMarksDirty) {
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
   const arv::u64 initial_version = chunk.version();
+  const arv::u64 initial_light_version = chunk.light_version();
   chunk.clear_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh);
 
   EXPECT_TRUE(chunk.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{4}));
   EXPECT_EQ(chunk.block({{1, 2, 3}}), arv::voxel::BlockVariantID{4});
   EXPECT_EQ(chunk.version(), initial_version + 1);
+  EXPECT_EQ(chunk.light_version(), initial_light_version);
   EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
+  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
   EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsSave));
 
   EXPECT_FALSE(chunk.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{4}));
   EXPECT_EQ(chunk.version(), initial_version + 1);
+}
+
+TEST(ChunkStorageTests, SetLightIncrementsLightVersionAndMarksLightMeshOnly) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  const arv::u64 block_version = chunk.block_version();
+  const arv::u64 light_version = chunk.light_version();
+  const arv::u64 light_data_version = chunk.light_data_version();
+  chunk.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry | arv::voxel::ChunkDirtyFlags::LightMesh);
+
+  ASSERT_TRUE(chunk.set_light({{1, 2, 3}}, arv::voxel::pack_light(1, 2, 3, 4)));
+
+  EXPECT_EQ(chunk.block_version(), block_version);
+  EXPECT_EQ(chunk.light_version(), light_version + 1);
+  EXPECT_EQ(chunk.light_data_version(), light_data_version + 1);
+  EXPECT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
+  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
+}
+
+TEST(ChunkStorageTests, LightDependencyDirtyDoesNotChangeSerializedLightDataVersion) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  const arv::u64 light_version = chunk.light_version();
+  const arv::u64 light_data_version = chunk.light_data_version();
+  chunk.clear_dirty(arv::voxel::ChunkDirtyFlags::LightMesh);
+
+  chunk.mark_light_dependency_dirty();
+
+  EXPECT_EQ(chunk.light_version(), light_version + 1);
+  EXPECT_EQ(chunk.light_data_version(), light_data_version);
+  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
 }
 
 TEST(ChunkStorageTests, SnapshotCreationSharesChunkStorageWithoutCopying) {

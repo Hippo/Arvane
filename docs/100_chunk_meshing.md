@@ -51,7 +51,7 @@ At a high level:
 1. world marks a chunk dirty for meshing
 2. world prepares a meshing input snapshot
 3. worker thread builds mesh buffers from the snapshot
-4. worker returns mesh result with source version
+4. worker returns mesh result with source block and light versions
 5. main/world thread validates the result
 6. validated mesh is uploaded or handed off to renderer
 7. chunk mesh state becomes clean
@@ -62,17 +62,17 @@ Meshing is snapshot-driven. Worker threads must not read live chunk state direct
 
 ## Chunk Meshing Scope
 
-Meshing is performed per chunk section or per chunk, depending on engine policy.
+Meshing is performed per chunk section.
 
-For Arvane, the meshing unit must match the chunk simulation/storage unit defined by the world model. If chunk sections are the storage unit, meshing should also operate per section. If full chunks are the storage unit, meshing may operate per full chunk.
-
-Regardless of storage granularity, the meshing rules in this document apply identically.
+For Arvane, the storage and simulation unit is a 16 x 16 x 16 chunk section, so the meshing unit is also one chunk section. A block edit must not remesh a whole column, whole chunk region, or arbitrary multi-section area.
 
 The meshing unit must have access to:
 
 - its own full block/state data
 - enough neighbor data to determine boundary face visibility
 - enough lighting data to shade produced vertices correctly
+
+Meshing must not wait for lighting propagation to finish. A section should remesh immediately from the best currently available light data. If that light data is stale, the mesh may be shown temporarily and replaced by a light-only remesh after authoritative lighting updates publish.
 
 ---
 
@@ -150,7 +150,8 @@ Meshing workers operate on immutable inputs.
 A meshing job must include:
 
 - chunk coordinate
-- source version
+- source block/geometry version
+- source light version
 - block/state data for the target chunk
 - neighbor boundary data
 - lighting data required for vertex shading
@@ -212,7 +213,8 @@ This can be achieved by:
 Worker output must contain:
 
 - chunk coordinate
-- source version
+- source block/geometry version
+- source light version
 - opaque mesh buffers
 - transparent mesh buffers
 - any bounds or counts needed by the renderer
@@ -641,11 +643,13 @@ At minimum, meshing rebuild triggers include:
 
 ### Block Change
 
-If any block/state changes in a chunk, that chunk must be marked `NeedsMesh`.
+If any block/state changes in a section, that section must be marked `Geometry` and a mesh rebuild should be queued immediately.
+
+The same edit must separately mark `Lighting` if opacity, emission, sky exposure, or other lighting inputs may have changed. The geometry rebuild does not wait for the lighting job.
 
 ### Boundary Neighbor Change
 
-If a block/state changes on a chunk boundary, neighboring chunks sharing that boundary must also be marked `NeedsMesh` if the change could affect:
+If a block/state changes on a section boundary, neighboring sections sharing that boundary must also be marked `Geometry` if the change could affect:
 
 - visible boundary faces
 - AO samples
@@ -655,9 +659,11 @@ This rule is mandatory. Border changes are not local to one chunk visually.
 
 ### Lighting Change
 
-If lighting data used by the mesher changes for a chunk, that chunk must be marked `NeedsMesh`.
+If lighting data used by the mesher changes for a section, that section must be marked `LightMesh`.
 
-If the lighting change affects border samples used by a neighbor, that neighbor must also be marked as needed.
+If the lighting change affects border samples used by a neighbor, that neighbor must also be marked `LightMesh`.
+
+Received light snapshots are compared before invalidation. Interior light-only changes remesh only the owning section; boundary light-only changes remesh only face neighbors that sample the changed boundary light. They must not be promoted into geometry dirtiness.
 
 ---
 
@@ -713,24 +719,29 @@ Example:
 enum class ChunkDirtyFlags : u32 {
   None             = 0,
   NeedsSave        = 1 << 0,
-  NeedsMesh        = 1 << 1,
-  NeedsRelight     = 1 << 2,
-  NeedsFluidStep   = 1 << 3,
+  Geometry         = 1 << 1,
+  Lighting         = 1 << 2,
+  LightMesh        = 1 << 3,
+  NeedsFluidStep   = 1 << 4,
 };
 ```
 
 ### Rule
 
-Any meshing-relevant change must set `NeedsMesh`.
+Any block-shape, opacity, model, texture, fluid geometry, or boundary geometry change must set `Geometry`.
+
+Any published light change affecting vertex lighting must set `LightMesh`.
+
+`Lighting` is separate; it means authoritative lighting propagation is required, not that the mesh must wait.
 
 The world update loop is responsible for:
 
-* collecting chunks with `NeedsMesh`
+* collecting sections with `Geometry` or `LightMesh`
 * preparing valid meshing snapshots
 * dispatching worker jobs
 * receiving results
-* validating versions
-* clearing the dirty state when publish succeeds
+* validating block/geometry versions
+* clearing `Geometry` and/or `LightMesh` only when the accepted mesh was built from the current corresponding versions
 
 ---
 
@@ -754,9 +765,9 @@ The world or main thread is responsible for:
 
 * deciding when to schedule a meshing job
 * building the snapshot
-* assigning source version
+* assigning source block and light versions
 * receiving worker result
-* validating result against current chunk version
+* validating result against the current block/geometry version
 * handing validated mesh to renderer
 * updating chunk mesh state
 
@@ -786,7 +797,8 @@ This avoids:
 A snapshot should include:
 
 * chunk coordinate
-* source version
+* source block/geometry version
+* source light version
 * target chunk block/state data
 * required neighbor boundaries
 * required lighting data
@@ -798,17 +810,18 @@ When the runtime already stores chunk data in immutable or shareable payload obj
 
 If the live chunk later mutates while those handles are still in use by a worker, the runtime should detach/clone on write so the in-flight meshing snapshot keeps observing its original stable data.
 
-### Source Version
+### Source Versions
 
-Each meshing job must carry the chunk source version it was built from.
+Each meshing job must carry the block/geometry and light source versions it was built from.
 
-The source version must change whenever any meshing-relevant input changes.
+The block/geometry version changes whenever geometry-relevant input changes.
 
 At minimum this includes:
 
 * local block/state changes
-* local lighting changes
 * required neighbor-boundary changes that affect the chunk’s mesh
+
+The light version changes whenever local or boundary lighting used by the section mesh changes.
 
 ---
 
@@ -816,17 +829,19 @@ At minimum this includes:
 
 When a worker finishes, its result is not automatically accepted.
 
-The world must compare the returned source version against the chunk’s current meshing version.
+The world must compare the returned source block/geometry version against the section’s current block/geometry version.
 
 ### Accept Result
 
-If versions match, the result is still current and may be published.
+If the block/geometry version matches, the result may be published even if the light version is stale.
+
+If the light version is stale, the accepted mesh keeps the section `LightMesh` dirty for a future light-only remesh.
 
 ### Reject Result
 
-If versions do not match, the result is stale and must be discarded.
+If the block/geometry version does not match, the result is stale and must be discarded.
 
-This prevents late worker results from overwriting newer chunk state.
+This prevents late worker results from overwriting newer geometry while still allowing stale lighting to be corrected asynchronously.
 
 ---
 
@@ -838,7 +853,7 @@ Chunks needing rebuild are scheduled through a rebuild queue managed by the worl
 
 The rebuild queue must:
 
-* avoid enqueuing duplicate active jobs for the same chunk/version
+* avoid enqueuing duplicate active jobs for the same section/block-version/light-version tuple
 * allow prioritization of visible or near-player chunks
 * support rescheduling when dependencies become available
 * drop or ignore stale completed results safely
@@ -860,9 +875,9 @@ Lower priority can go to:
 
 ### Deduplication
 
-If a chunk already has a meshing job in flight for its current version, the world should not enqueue another identical job.
+If a chunk already has a meshing job in flight for its current block/light versions, the world should not enqueue another identical job.
 
-If the chunk version changes while a job is in flight, the old job may complete and be discarded, while a new current-version job is scheduled.
+If the block/geometry version changes while a job is in flight, the old job may complete and be discarded, while a new current-version job is scheduled.
 
 ---
 
@@ -873,8 +888,10 @@ A chunk should be considered ready for meshing only when all required meshing in
 At minimum this means:
 
 * target chunk data exists
-* required lighting snapshot exists
+* a current or stale lighting snapshot exists
 * required neighbor boundaries are obtainable under current policy
+
+Readiness must not require pending authoritative lighting propagation to finish. Meshing should use the best published light data currently available.
 
 If neighbor availability is a hard requirement, the chunk remains dirty but unscheduled until the inputs are ready.
 
@@ -902,7 +919,7 @@ The handoff layer must:
 Preferred publish order:
 
 1. worker result arrives
-2. world validates source version
+2. world validates source block version and records source light version
 3. renderer upload request is created
 4. renderer performs GPU upload
 5. renderer swaps active mesh handle
@@ -992,7 +1009,8 @@ Useful debug checks include:
 
 * no out-of-bounds local reads
 * no live world access from worker meshing code
-* source version mismatch discard counts
+* source block-version mismatch discard counts
+* stale-light mesh acceptance counts
 * face/vertex count statistics
 * border mismatch diagnostics between neighboring chunks
 * AO sample correctness visualization
@@ -1013,8 +1031,9 @@ Any compliant meshing implementation must satisfy all of the following:
 * neighbor sampling works correctly across chunk boundaries
 * AO is computed per face vertex using neighbor occupancy rules
 * boundary edits invalidate both affected chunks as needed
-* worker results carry source version information
-* stale results are rejected before publish
+* worker results carry source block and light version information
+* stale block/geometry results are rejected before publish
+* stale light versions may be accepted temporarily and must leave a light-only remesh queued
 * GPU upload occurs through a render-safe handoff
 * chunk mesh state is updated only after successful validation/publish
 
@@ -1037,6 +1056,6 @@ Those may be defined elsewhere, but they must remain compatible with the rules i
 
 ## Final Rule
 
-Chunk meshing is a snapshot-driven, neighbor-aware, version-validated background build pipeline that produces separate opaque and transparent render meshes from block/state/light data.
+Chunk meshing is a per-section, snapshot-driven, neighbor-aware, version-validated background build pipeline that produces separate opaque and transparent render meshes from block/state/light data.
 
-It must never rely on live worker-thread world access, and it must rebuild whenever any local or boundary visual input changes.
+It must never rely on live worker-thread world access. It must rebuild immediately for geometry changes using current available light data, then rebuild again for light-only changes after authoritative lighting publishes.
