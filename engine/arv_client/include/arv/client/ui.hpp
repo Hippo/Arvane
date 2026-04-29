@@ -14,7 +14,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::client {
@@ -193,7 +192,7 @@ private:
   UiNodeID root_id_{UiNodeID{1}};
   UiNodeID next_id_{UiNodeID{2}};
   std::vector<UiElement> elements_{};
-  std::unordered_map<std::string, UiNodeID> stable_ids_{};
+  HashMap<std::string, UiNodeID> stable_ids_{};
   UiNodeID hovered_{};
   UiNodeID active_{};
   UiNodeID keyboard_focus_{};
@@ -286,7 +285,7 @@ struct TabMenuUiModel {
   std::span<const PlayerListEntryView> players{};
 };
 
-using ScoreboardVariableMap = std::unordered_map<std::string, std::string>;
+using ScoreboardVariableMap = HashMap<std::string, std::string>;
 
 struct ScoreboardUiModel {
   bool visible{};

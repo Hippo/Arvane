@@ -5,6 +5,7 @@ include(GoogleTest)
 add_executable(arv_tests
   assets/asset_tests.cpp
   client/chunk_interest_tests.cpp
+  client/client_runtime_tests.cpp
   client/camera_tests.cpp
   client/local_player_controller_tests.cpp
   client/ui_tests.cpp
@@ -12,6 +13,7 @@ add_executable(arv_tests
   core/fixed_timestep_tests.cpp
   core/id_tests.cpp
   core/math_tests.cpp
+  core/types_tests.cpp
   io/config_tests.cpp
   net/integrated_handshake_tests.cpp
   persistence/region_file_tests.cpp

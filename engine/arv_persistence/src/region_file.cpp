@@ -6,7 +6,6 @@
 #include <fstream>
 #include <limits>
 #include <system_error>
-#include <unordered_map>
 #include <utility>
 
 namespace arv::persistence {
@@ -407,7 +406,7 @@ Expected<std::vector<u8>, PersistenceError> encode_region_file(
     std::span<const SavedChunkSection> chunks,
     const voxel::BlockRegistry& registry,
     i32 min_chunk_y) {
-  std::unordered_map<std::string, u16> block_state_indices;
+  HashMap<std::string, u16> block_state_indices;
   std::vector<std::string> block_state_table;
   block_state_table.push_back(std::string{voxel::AirBlockName});
   block_state_indices.emplace(std::string{voxel::AirBlockName}, 0U);

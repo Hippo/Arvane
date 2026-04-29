@@ -7,6 +7,48 @@
 #include <utility>
 
 namespace arv::render {
+namespace {
+
+constexpr f32 UiTextureSlotWhite = 0.0F;
+constexpr f32 UiTextureSlotFont = 1.0F;
+constexpr f32 UiTextureSlotTerrain = 2.0F;
+constexpr f32 UiTextureSlotItem = 3.0F;
+
+[[nodiscard]] f32 texture_slot_for_ui_source(UiTextureSource source) noexcept {
+  switch (source) {
+    case UiTextureSource::White:
+      return UiTextureSlotWhite;
+    case UiTextureSource::FontAtlas:
+      return UiTextureSlotFont;
+    case UiTextureSource::TerrainAtlas:
+      return UiTextureSlotTerrain;
+    case UiTextureSource::ItemAtlas:
+      return UiTextureSlotItem;
+  }
+  return UiTextureSlotWhite;
+}
+
+void append_ui_quad(
+    std::vector<UIVertex>& vertices,
+    std::vector<u32>& indices,
+    const std::array<Vec2f, 4>& positions,
+    const std::array<Vec2f, 4>& uvs,
+    Vec4f color,
+    f32 texture_slot) {
+  const u32 base = static_cast<u32>(vertices.size());
+  vertices.push_back({positions[0], uvs[0], color, texture_slot});
+  vertices.push_back({positions[1], uvs[1], color, texture_slot});
+  vertices.push_back({positions[2], uvs[2], color, texture_slot});
+  vertices.push_back({positions[3], uvs[3], color, texture_slot});
+  indices.push_back(base);
+  indices.push_back(base + 1U);
+  indices.push_back(base + 2U);
+  indices.push_back(base + 2U);
+  indices.push_back(base + 3U);
+  indices.push_back(base);
+}
+
+} // namespace
 
 void OpenGLRenderer::set_chunk_shader_sources(std::string vertex_source, std::string fragment_source) {
   chunk_vertex_shader_source_ = std::move(vertex_source);
@@ -481,7 +523,7 @@ bool OpenGLRenderer::ensure_ui_program() {
 
   ui_program_ = program;
   ui_viewport_uniform_ = glGetUniformLocation(ui_program_, "u_viewport_size");
-  ui_texture_uniform_ = glGetUniformLocation(ui_program_, "u_texture");
+  ui_texture_uniform_ = glGetUniformLocation(ui_program_, "u_textures");
   return true;
 }
 
@@ -523,143 +565,91 @@ void OpenGLRenderer::draw_ui() {
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glUseProgram(ui_program_);
   glUniform2f(ui_viewport_uniform_, static_cast<f32>(width_), static_cast<f32>(height_));
-  glUniform1i(ui_texture_uniform_, 0);
+  const std::array<GLint, 4> texture_units{{0, 1, 2, 3}};
+  glUniform1iv(
+      ui_texture_uniform_,
+      static_cast<GLsizei>(texture_units.size()),
+      texture_units.data());
 
-  draw_ui_rects();
-  draw_ui_textured_quads();
-  draw_ui_glyphs();
+  draw_ui_quads();
 
   glBindVertexArray(0);
   glUseProgram(0);
   glDisable(GL_BLEND);
 }
 
-GLuint OpenGLRenderer::texture_for_ui_source(UiTextureSource source) const noexcept {
-  switch (source) {
-    case UiTextureSource::White:
-      return white_texture_.id;
-    case UiTextureSource::FontAtlas:
-      return font_atlas_.id;
-    case UiTextureSource::TerrainAtlas:
-      return terrain_atlas_.id;
-    case UiTextureSource::ItemAtlas:
-      return item_atlas_.id;
-  }
-  return white_texture_.id;
-}
-
-void OpenGLRenderer::draw_ui_rects() {
-  if (frame_.ui_rects.empty()) {
+void OpenGLRenderer::draw_ui_quads() {
+  const usize quad_count =
+      frame_.ui_rects.size() + frame_.ui_textured_quads.size() +
+      (font_atlas_.id == 0 ? 0U : frame_.ui_glyphs.size());
+  if (quad_count == 0U) {
     return;
   }
 
   ui_vertices_.clear();
   ui_indices_.clear();
-  ui_vertices_.reserve(frame_.ui_rects.size() * 4U);
-  ui_indices_.reserve(frame_.ui_rects.size() * 6U);
+  ui_vertices_.reserve(quad_count * 4U);
+  ui_indices_.reserve(quad_count * 6U);
+
   for (const UIRectDrawItem& rect : frame_.ui_rects) {
-    const u32 base = static_cast<u32>(ui_vertices_.size());
-    ui_vertices_.push_back({{rect.min.x, rect.min.y}, {0.0F, 0.0F}, rect.color});
-    ui_vertices_.push_back({{rect.max.x, rect.min.y}, {1.0F, 0.0F}, rect.color});
-    ui_vertices_.push_back({{rect.max.x, rect.max.y}, {1.0F, 1.0F}, rect.color});
-    ui_vertices_.push_back({{rect.min.x, rect.max.y}, {0.0F, 1.0F}, rect.color});
-    ui_indices_.insert(ui_indices_.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
+    append_ui_quad(
+        ui_vertices_,
+        ui_indices_,
+        {{{rect.min.x, rect.min.y},
+          {rect.max.x, rect.min.y},
+          {rect.max.x, rect.max.y},
+          {rect.min.x, rect.max.y}}},
+        {{{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}}},
+        rect.color,
+        UiTextureSlotWhite);
   }
 
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, white_texture_.id);
-  glBindVertexArray(ui_vao_);
-  glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
-  const GLsizeiptr vertex_bytes =
-      static_cast<GLsizeiptr>(ui_vertices_.size() * sizeof(UIVertex));
-  glBufferData(GL_ARRAY_BUFFER, vertex_bytes, nullptr, GL_DYNAMIC_DRAW);
-  glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, ui_vertices_.data());
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
-  const GLsizeiptr index_bytes =
-      static_cast<GLsizeiptr>(ui_indices_.size() * sizeof(u32));
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_DYNAMIC_DRAW);
-  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
-  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
-}
-
-void OpenGLRenderer::draw_ui_textured_quads() {
-  if (frame_.ui_textured_quads.empty()) {
-    return;
-  }
-
-  for (const UiTextureSource source : {
-           UiTextureSource::TerrainAtlas,
-           UiTextureSource::ItemAtlas,
-           UiTextureSource::White,
-       }) {
-    const GLuint texture = texture_for_ui_source(source);
-    if (texture == 0) {
+  for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
+    if (quad.page != 0) {
       continue;
     }
+    append_ui_quad(
+        ui_vertices_,
+        ui_indices_,
+        quad.positions,
+        quad.uvs,
+        quad.color,
+        texture_slot_for_ui_source(quad.source));
+  }
 
-    ui_vertices_.clear();
-    ui_indices_.clear();
-    ui_vertices_.reserve(frame_.ui_textured_quads.size() * 4U);
-    ui_indices_.reserve(frame_.ui_textured_quads.size() * 6U);
-    for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
-      if (quad.source != source || quad.page != 0) {
+  if (font_atlas_.id != 0) {
+    for (const UIGlyphDrawItem& glyph : frame_.ui_glyphs) {
+      if (glyph.page != 0) {
         continue;
       }
-
-      const u32 base = static_cast<u32>(ui_vertices_.size());
-      ui_vertices_.push_back({quad.positions[0], quad.uvs[0], quad.color});
-      ui_vertices_.push_back({quad.positions[1], quad.uvs[1], quad.color});
-      ui_vertices_.push_back({quad.positions[2], quad.uvs[2], quad.color});
-      ui_vertices_.push_back({quad.positions[3], quad.uvs[3], quad.color});
-      ui_indices_.insert(ui_indices_.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
+      append_ui_quad(
+          ui_vertices_,
+          ui_indices_,
+          {{{glyph.min.x, glyph.min.y},
+            {glyph.max.x, glyph.min.y},
+            {glyph.max.x, glyph.max.y},
+            {glyph.min.x, glyph.max.y}}},
+          {{{glyph.uv_min.x, glyph.uv_min.y},
+            {glyph.uv_max.x, glyph.uv_min.y},
+            {glyph.uv_max.x, glyph.uv_max.y},
+            {glyph.uv_min.x, glyph.uv_max.y}}},
+          glyph.color,
+          UiTextureSlotFont);
     }
-    if (ui_vertices_.empty()) {
-      continue;
-    }
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glBindVertexArray(ui_vao_);
-    glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
-    const GLsizeiptr vertex_bytes =
-        static_cast<GLsizeiptr>(ui_vertices_.size() * sizeof(UIVertex));
-    glBufferData(GL_ARRAY_BUFFER, vertex_bytes, nullptr, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, ui_vertices_.data());
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
-    const GLsizeiptr index_bytes =
-        static_cast<GLsizeiptr>(ui_indices_.size() * sizeof(u32));
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
-  }
-}
-
-void OpenGLRenderer::draw_ui_glyphs() {
-  if (frame_.ui_glyphs.empty() || font_atlas_.id == 0) {
-    return;
-  }
-
-  ui_vertices_.clear();
-  ui_indices_.clear();
-  ui_vertices_.reserve(frame_.ui_glyphs.size() * 4U);
-  ui_indices_.reserve(frame_.ui_glyphs.size() * 6U);
-  for (const UIGlyphDrawItem& glyph : frame_.ui_glyphs) {
-    if (glyph.page != 0) {
-      continue;
-    }
-    const u32 base = static_cast<u32>(ui_vertices_.size());
-    ui_vertices_.push_back({{glyph.min.x, glyph.min.y}, {glyph.uv_min.x, glyph.uv_min.y}, glyph.color});
-    ui_vertices_.push_back({{glyph.max.x, glyph.min.y}, {glyph.uv_max.x, glyph.uv_min.y}, glyph.color});
-    ui_vertices_.push_back({{glyph.max.x, glyph.max.y}, {glyph.uv_max.x, glyph.uv_max.y}, glyph.color});
-    ui_vertices_.push_back({{glyph.min.x, glyph.max.y}, {glyph.uv_min.x, glyph.uv_max.y}, glyph.color});
-    ui_indices_.insert(ui_indices_.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
   }
   if (ui_vertices_.empty()) {
     return;
   }
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, font_atlas_.id);
+  glBindTexture(GL_TEXTURE_2D, white_texture_.id);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, font_atlas_.id == 0 ? white_texture_.id : font_atlas_.id);
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_2D, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
+  glActiveTexture(GL_TEXTURE3);
+  glBindTexture(GL_TEXTURE_2D, item_atlas_.id == 0 ? white_texture_.id : item_atlas_.id);
+
   glBindVertexArray(ui_vao_);
   glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
   const GLsizeiptr vertex_bytes =
@@ -672,6 +662,7 @@ void OpenGLRenderer::draw_ui_glyphs() {
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_DYNAMIC_DRAW);
   glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
   glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
+  glActiveTexture(GL_TEXTURE0);
 }
 
 void OpenGLRenderer::ensure_ui_buffers() {
@@ -710,6 +701,14 @@ void OpenGLRenderer::ensure_ui_buffers() {
       GL_FALSE,
       sizeof(UIVertex),
       reinterpret_cast<const void*>(offsetof(UIVertex, color)));
+  glEnableVertexAttribArray(3);
+  glVertexAttribPointer(
+      3,
+      1,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIVertex),
+      reinterpret_cast<const void*>(offsetof(UIVertex, texture_slot)));
   glBindVertexArray(0);
 }
 

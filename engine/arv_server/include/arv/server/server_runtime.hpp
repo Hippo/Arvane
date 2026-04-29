@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/core/types.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/player/item.hpp"
@@ -19,7 +20,6 @@
 #include <optional>
 #include <memory>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::server {
@@ -149,8 +149,8 @@ private:
   std::vector<QueuedChunkStreamMessage> queued_chunk_stream_messages_;
   player::GameModeRegistry game_modes_{player::GameModeRegistry::with_builtins()};
   player::PermissionGroupRegistry permission_groups_{};
-  std::unordered_map<PlayerID, player::PlayerCommand> pending_player_commands_;
-  std::unordered_map<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
+  HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
+  HashMap<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
 
   struct PendingLightingJob {
     u64 source_revision{};

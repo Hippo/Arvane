@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <unordered_set>
 #include <utility>
 
 namespace arv::client {
@@ -72,7 +71,7 @@ void validate_document_element(
     u32 depth,
     u32& count,
     u32& text_total,
-    std::unordered_set<std::string>& ids,
+    HashSet<std::string>& ids,
     UiDocumentValidation& validation) {
   ++count;
   if (count > limits.max_elements) {
@@ -494,7 +493,7 @@ UiDocumentValidation validate_ui_document(const UiDocument& document, UiDocument
   }
   u32 count = 0;
   u32 text_total = 0;
-  std::unordered_set<std::string> ids;
+  HashSet<std::string> ids;
   validate_document_element(document.root, limits, 1, count, text_total, ids, validation);
   validation.accepted = validation.errors.empty();
   return validation;

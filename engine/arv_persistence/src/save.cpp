@@ -4,7 +4,6 @@
 #include <fstream>
 #include <sstream>
 #include <system_error>
-#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
@@ -144,7 +143,7 @@ Expected<void, PersistenceError> write_text_atomic(
 [[nodiscard]] json inventory_to_json(
     const player::Inventory& inventory,
     const player::ItemRegistry& registry) {
-  std::unordered_map<std::string, u16> indices;
+  HashMap<std::string, u16> indices;
   std::vector<std::string> table{std::string{player::AirItemName}};
   indices.emplace(std::string{player::AirItemName}, 0U);
 
@@ -265,7 +264,7 @@ Expected<void, PersistenceError> save_server_root(
     return save_result;
   }
 
-  std::unordered_map<RegionCoord, std::vector<SavedChunkSection>> regions;
+  HashMap<RegionCoord, std::vector<SavedChunkSection>> regions;
   for (const SavedChunkSection& chunk : chunks) {
     regions[chunk_column_to_region(chunk_to_column(chunk.coord))].push_back(chunk);
   }

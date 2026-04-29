@@ -3,6 +3,24 @@
 #include <utility>
 
 namespace arv::client {
+namespace {
+
+constexpr usize MaxChatDraftBytes = 256U;
+constexpr usize MaxChatMessages = 64U;
+
+void erase_last_utf8_codepoint(std::string& text) {
+  if (text.empty()) {
+    return;
+  }
+  usize index = text.size() - 1U;
+  while (index > 0U &&
+         (static_cast<unsigned char>(text[index]) & 0xC0U) == 0x80U) {
+    --index;
+  }
+  text.erase(index);
+}
+
+} // namespace
 
 ClientRuntime::ClientRuntime(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
 }
@@ -26,16 +44,24 @@ net::ConnectResult ClientRuntime::connect_integrated() {
 
 void ClientRuntime::submit_input(InputFrame input) {
   tab_menu_visible_ = input.tab_menu_held;
-  if (input.open_inventory_pressed && player_controller_.resolved_permissions().core.can_open_inventory) {
+  const bool was_chat_open = chat_open_;
+  const std::optional<u8> ui_hotbar_select = input.ui_hotbar_select;
+
+  if (input.text_cancel_pressed && (inventory_open_ || chat_open_)) {
+    close_ui();
+  } else if (!chat_open_ && input.open_inventory_pressed &&
+             player_controller_.resolved_permissions().core.can_open_inventory) {
     inventory_open_ = !inventory_open_;
     if (inventory_open_) {
       chat_open_ = false;
     }
   }
-  if (input.open_chat_pressed) {
+  if (!was_chat_open && input.open_chat_pressed) {
     chat_open_ = true;
     inventory_open_ = false;
   }
+
+  handle_chat_input(input, was_chat_open);
 
   if (inventory_open_ || chat_open_) {
     input.move_forward = false;
@@ -53,8 +79,12 @@ void ClientRuntime::submit_input(InputFrame input) {
     input.toggle_fly_pressed = false;
     input.hotbar_select.reset();
     input.hotbar_scroll_steps = 0;
+    input.ui_hotbar_select.reset();
     input.mouse_delta_x = 0.0F;
     input.mouse_delta_y = 0.0F;
+  }
+  if (ui_hotbar_select.has_value()) {
+    input.hotbar_select = ui_hotbar_select;
   }
 
   player_controller_.submit_input(std::move(input));
@@ -130,6 +160,37 @@ std::vector<protocol::ChunkUnload> ClientRuntime::drain_received_chunk_unloads()
   std::vector<protocol::ChunkUnload> drained = std::move(received_chunk_unloads_);
   received_chunk_unloads_.clear();
   return drained;
+}
+
+void ClientRuntime::handle_chat_input(const InputFrame& input, bool was_chat_open) {
+  if (!chat_open_) {
+    return;
+  }
+
+  if (was_chat_open && input.text_backspace_pressed) {
+    erase_last_utf8_codepoint(chat_draft_);
+  }
+  if (was_chat_open && !input.text_input.empty()) {
+    const usize remaining =
+        chat_draft_.size() >= MaxChatDraftBytes ? 0U : MaxChatDraftBytes - chat_draft_.size();
+    chat_draft_.append(input.text_input.substr(0U, remaining));
+  }
+  if (was_chat_open && input.text_submit_pressed) {
+    if (!chat_draft_.empty()) {
+      chat_messages_.push_back(chat_draft_);
+      if (chat_messages_.size() > MaxChatMessages) {
+        chat_messages_.erase(chat_messages_.begin());
+      }
+      chat_draft_.clear();
+    }
+    chat_open_ = false;
+  }
+}
+
+void ClientRuntime::close_ui() noexcept {
+  inventory_open_ = false;
+  chat_open_ = false;
+  chat_draft_.clear();
 }
 
 net::NetworkResult ClientRuntime::send_client_hello() {

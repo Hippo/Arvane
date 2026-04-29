@@ -36,8 +36,84 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
+
+namespace {
+
+[[nodiscard]] std::optional<arv::u8> hotbar_slot_from_ui_action(
+    const arv::client::UiAction& action) noexcept {
+  if (action.action_id != "select_hotbar_slot") {
+    return std::nullopt;
+  }
+
+  constexpr std::array<std::string_view, 2> prefixes{{
+      "hud.hotbar.slot.",
+      "inventory.slot.",
+  }};
+  for (std::string_view prefix : prefixes) {
+    const std::string_view id{action.element_id};
+    if (!id.starts_with(prefix)) {
+      continue;
+    }
+
+    arv::u32 value = 0;
+    const std::string_view suffix = id.substr(prefix.size());
+    if (suffix.empty()) {
+      return std::nullopt;
+    }
+    for (const char ch : suffix) {
+      if (ch < '0' || ch > '9') {
+        return std::nullopt;
+      }
+      value = value * 10U + static_cast<arv::u32>(ch - '0');
+    }
+    if (value < arv::player::DefaultHotbarSlotCount) {
+      return static_cast<arv::u8>(value);
+    }
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+void apply_ui_action_to_input(
+    const std::optional<arv::client::UiAction>& action,
+    arv::client::InputFrame& input) {
+  if (!action.has_value()) {
+    return;
+  }
+  if (const std::optional<arv::u8> slot = hotbar_slot_from_ui_action(action.value());
+      slot.has_value()) {
+    input.ui_hotbar_select = slot.value();
+  }
+}
+
+void route_ui_mouse_input(
+    arv::client::UiTree& ui_tree,
+    const arv::platform::InputSnapshot& platform_input,
+    arv::client::InputFrame& input) {
+  const arv::Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
+  (void)ui_tree.route_mouse_move(cursor);
+  if (platform_input.mouse_left_pressed) {
+    apply_ui_action_to_input(
+        ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Left),
+        input);
+  }
+  if (platform_input.mouse_right_pressed) {
+    apply_ui_action_to_input(
+        ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Right),
+        input);
+  }
+  if (platform_input.mouse_left_released) {
+    (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Left);
+  }
+  if (platform_input.mouse_right_released) {
+    (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Right);
+  }
+}
+
+} // namespace
 
 int main(int argc, char** argv) {
   arv::core::Logger logger;
@@ -400,6 +476,7 @@ int main(int argc, char** argv) {
   constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
   std::vector<arv::client::UiItemStackView> inventory_slots;
   std::vector<arv::client::PlayerListEntryView> tab_players;
+  std::vector<arv::client::ChatLineView> chat_lines;
   bool ui_snapshot_initialized = false;
   auto refresh_inventory_slots = [&]() {
     inventory_slots.clear();
@@ -452,10 +529,16 @@ int main(int argc, char** argv) {
 
     arv::platform::OpenGLWindow::poll_events();
     const arv::platform::InputSnapshot platform_input = window.poll_input();
-    if (platform_input.close_requested) {
+    const bool ui_accepts_pointer = client.inventory_open() || client.chat_open();
+    arv::client::InputFrame client_input = arv::desktop::to_client_input(platform_input);
+    if (ui_accepts_pointer) {
+      route_ui_mouse_input(ui_tree, platform_input, client_input);
+    }
+    if (platform_input.close_requested && !ui_accepts_pointer) {
       window.request_close();
     }
-    client.submit_input(arv::desktop::to_client_input(platform_input));
+    client.submit_input(std::move(client_input));
+    window.set_cursor_captured(!(client.inventory_open() || client.chat_open()));
 
     ticks.add_time(delta.count());
     bool fixed_tick_ran = false;
@@ -510,6 +593,10 @@ int main(int argc, char** argv) {
     } else if (!client.tab_menu_visible() && !tab_players.empty()) {
       tab_players.clear();
     }
+    chat_lines.clear();
+    for (const std::string& message : client.chat_messages()) {
+      chat_lines.push_back({message, 1.0F});
+    }
     arv::client::build_gameplay_ui(
         ui_tree,
         {
@@ -542,8 +629,8 @@ int main(int argc, char** argv) {
             {
                 true,
                 client.chat_open(),
-                {},
-                {},
+                std::span<const arv::client::ChatLineView>{chat_lines.data(), chat_lines.size()},
+                client.chat_draft(),
             },
             {
                 client.tab_menu_visible(),

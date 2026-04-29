@@ -4,7 +4,6 @@
 #include "arv/core/types.hpp"
 
 #include <string>
-#include <unordered_map>
 
 namespace arv::server {
 
@@ -33,7 +32,7 @@ public:
   [[nodiscard]] usize size() const noexcept;
 
 private:
-  std::unordered_map<WorldID, WorldRecord> worlds_;
+  StableHashMap<WorldID, WorldRecord> worlds_;
 };
 
 } // namespace arv::server

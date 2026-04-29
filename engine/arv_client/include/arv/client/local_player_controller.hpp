@@ -29,8 +29,13 @@ struct InputFrame {
   bool tab_menu_held{};
   std::optional<u8> hotbar_select{};
   i8 hotbar_scroll_steps{};
+  std::optional<u8> ui_hotbar_select{};
   f32 mouse_delta_x{};
   f32 mouse_delta_y{};
+  std::string text_input{};
+  bool text_backspace_pressed{};
+  bool text_submit_pressed{};
+  bool text_cancel_pressed{};
 };
 
 class LocalPlayerController {

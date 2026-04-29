@@ -3,8 +3,6 @@
 #include "arv/world/world_runtime.hpp"
 
 #include <queue>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 namespace arv::world {
@@ -43,7 +41,7 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
   snapshot.source_revision = world.lighting_revision_;
 
   std::vector<ChunkCoord> coords;
-  std::unordered_set<ChunkCoord> coord_set;
+  HashSet<ChunkCoord> coord_set;
   auto add_if_loaded = [&world, &coords, &coord_set](ChunkCoord coord) {
     if (world.find_chunk(coord) == nullptr) {
       return;
@@ -97,8 +95,8 @@ LightingResult WorldLighting::build_result(
   }
   result.chunks.reserve(dirty_chunk_count);
 
-  std::unordered_map<ChunkCoord, LightArray> buffers;
-  std::unordered_map<ChunkCoord, const ChunkLightingSnapshot*> chunks;
+  HashMap<ChunkCoord, LightArray> buffers;
+  HashMap<ChunkCoord, const ChunkLightingSnapshot*> chunks;
   buffers.reserve(snapshot.chunks.size());
   chunks.reserve(snapshot.chunks.size());
   for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
@@ -161,8 +159,8 @@ LightingResult WorldLighting::build_result(
     return true;
   };
 
-  std::unordered_map<ChunkColumnCoord, i32> top_by_column;
-  std::unordered_map<ChunkColumnCoord, i32> bottom_by_column;
+  HashMap<ChunkColumnCoord, i32> top_by_column;
+  HashMap<ChunkColumnCoord, i32> bottom_by_column;
   for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
     for (i32 z = 0; z < ChunkSize; ++z) {
       for (i32 x = 0; x < ChunkSize; ++x) {

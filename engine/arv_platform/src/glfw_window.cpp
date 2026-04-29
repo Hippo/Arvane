@@ -212,6 +212,13 @@ void glfw_scroll_callback(GLFWwindow* window, double x_offset, double y_offset) 
   }
 }
 
+void glfw_char_callback(GLFWwindow* window, unsigned int codepoint) {
+  auto* owner = static_cast<OpenGLWindow*>(glfwGetWindowUserPointer(window));
+  if (owner != nullptr) {
+    owner->append_text_input(static_cast<u32>(codepoint));
+  }
+}
+
 } // namespace
 
 GlfwLibrary::GlfwLibrary() : initialized_(glfwInit() == GLFW_TRUE) {
@@ -229,6 +236,13 @@ OpenGLWindow::OpenGLWindow(OpenGLWindow&& other) noexcept
       last_cursor_x_(std::exchange(other.last_cursor_x_, 0.0)),
       last_cursor_y_(std::exchange(other.last_cursor_y_, 0.0)),
       accumulated_scroll_y_(std::exchange(other.accumulated_scroll_y_, 0.0)),
+      cursor_captured_(std::exchange(other.cursor_captured_, true)),
+      previous_left_mouse_down_(std::exchange(other.previous_left_mouse_down_, false)),
+      previous_right_mouse_down_(std::exchange(other.previous_right_mouse_down_, false)),
+      previous_backspace_down_(std::exchange(other.previous_backspace_down_, false)),
+      previous_enter_down_(std::exchange(other.previous_enter_down_, false)),
+      previous_escape_down_(std::exchange(other.previous_escape_down_, false)),
+      pending_text_input_(std::move(other.pending_text_input_)),
       input_bindings_(std::move(other.input_bindings_)),
       previous_action_active_(other.previous_action_active_) {
   other.previous_action_active_.fill(false);
@@ -245,6 +259,13 @@ OpenGLWindow& OpenGLWindow::operator=(OpenGLWindow&& other) noexcept {
     last_cursor_x_ = std::exchange(other.last_cursor_x_, 0.0);
     last_cursor_y_ = std::exchange(other.last_cursor_y_, 0.0);
     accumulated_scroll_y_ = std::exchange(other.accumulated_scroll_y_, 0.0);
+    cursor_captured_ = std::exchange(other.cursor_captured_, true);
+    previous_left_mouse_down_ = std::exchange(other.previous_left_mouse_down_, false);
+    previous_right_mouse_down_ = std::exchange(other.previous_right_mouse_down_, false);
+    previous_backspace_down_ = std::exchange(other.previous_backspace_down_, false);
+    previous_enter_down_ = std::exchange(other.previous_enter_down_, false);
+    previous_escape_down_ = std::exchange(other.previous_escape_down_, false);
+    pending_text_input_ = std::move(other.pending_text_input_);
     input_bindings_ = std::move(other.input_bindings_);
     previous_action_active_ = other.previous_action_active_;
     other.previous_action_active_.fill(false);
@@ -289,6 +310,7 @@ Expected<OpenGLWindow, PlatformError> OpenGLWindow::create(const WindowConfig& c
 
   glfwSetWindowUserPointer(raw_window, &window);
   glfwSetScrollCallback(raw_window, glfw_scroll_callback);
+  glfwSetCharCallback(raw_window, glfw_char_callback);
   glfwSwapInterval(config.vsync ? 1 : 0);
   return Expected<OpenGLWindow, PlatformError>::success(std::move(window));
 }
@@ -307,7 +329,23 @@ void OpenGLWindow::request_close() {
 
 InputSnapshot OpenGLWindow::poll_input() {
   InputSnapshot input;
-  input.close_requested = glfwGetKey(window_, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+  const bool escape_down = glfwGetKey(window_, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+  const bool backspace_down = glfwGetKey(window_, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
+  const bool enter_down = glfwGetKey(window_, GLFW_KEY_ENTER) == GLFW_PRESS;
+  const bool left_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  const bool right_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+  input.close_requested = escape_down && !previous_escape_down_;
+  input.text_cancel_pressed = input.close_requested;
+  input.text_backspace_pressed = backspace_down && !previous_backspace_down_;
+  input.text_submit_pressed = enter_down && !previous_enter_down_;
+  input.mouse_left_pressed = left_mouse_down && !previous_left_mouse_down_;
+  input.mouse_left_released = !left_mouse_down && previous_left_mouse_down_;
+  input.mouse_left_held = left_mouse_down;
+  input.mouse_right_pressed = right_mouse_down && !previous_right_mouse_down_;
+  input.mouse_right_released = !right_mouse_down && previous_right_mouse_down_;
+  input.mouse_right_held = right_mouse_down;
+  input.text_input = std::move(pending_text_input_);
+  pending_text_input_.clear();
   const i32 wheel_up_steps = static_cast<i32>(std::max(accumulated_scroll_y_, 0.0));
   const i32 wheel_down_steps = static_cast<i32>(std::max(-accumulated_scroll_y_, 0.0));
 
@@ -407,13 +445,20 @@ InputSnapshot OpenGLWindow::poll_input() {
   f64 cursor_x = 0.0;
   f64 cursor_y = 0.0;
   glfwGetCursorPos(window_, &cursor_x, &cursor_y);
-  if (has_last_cursor_) {
+  input.cursor_x = static_cast<f32>(cursor_x);
+  input.cursor_y = static_cast<f32>(cursor_y);
+  if (cursor_captured_ && has_last_cursor_) {
     input.mouse_delta_x = static_cast<f32>(cursor_x - last_cursor_x_);
     input.mouse_delta_y = static_cast<f32>(cursor_y - last_cursor_y_);
   }
   last_cursor_x_ = cursor_x;
   last_cursor_y_ = cursor_y;
   has_last_cursor_ = true;
+  previous_left_mouse_down_ = left_mouse_down;
+  previous_right_mouse_down_ = right_mouse_down;
+  previous_backspace_down_ = backspace_down;
+  previous_enter_down_ = enter_down;
+  previous_escape_down_ = escape_down;
   return input;
 }
 
@@ -422,8 +467,43 @@ void OpenGLWindow::set_input_bindings(InputBindings bindings) noexcept {
   previous_action_active_.fill(false);
 }
 
+void OpenGLWindow::set_cursor_captured(bool captured) noexcept {
+  if (window_ == nullptr || cursor_captured_ == captured) {
+    return;
+  }
+  cursor_captured_ = captured;
+  glfwSetInputMode(window_, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+  if (captured && glfwRawMouseMotionSupported() == GLFW_TRUE) {
+    glfwSetInputMode(window_, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+  }
+  has_last_cursor_ = false;
+}
+
 void OpenGLWindow::accumulate_scroll(f64 y_offset) noexcept {
   accumulated_scroll_y_ += y_offset;
+}
+
+void OpenGLWindow::append_text_input(u32 codepoint) {
+  if (codepoint == 0U || codepoint > 0x10FFFFU ||
+      (codepoint >= 0xD800U && codepoint <= 0xDFFFU)) {
+    return;
+  }
+
+  if (codepoint <= 0x7FU) {
+    pending_text_input_.push_back(static_cast<char>(codepoint));
+  } else if (codepoint <= 0x7FFU) {
+    pending_text_input_.push_back(static_cast<char>(0xC0U | (codepoint >> 6U)));
+    pending_text_input_.push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+  } else if (codepoint <= 0xFFFFU) {
+    pending_text_input_.push_back(static_cast<char>(0xE0U | (codepoint >> 12U)));
+    pending_text_input_.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3FU)));
+    pending_text_input_.push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+  } else {
+    pending_text_input_.push_back(static_cast<char>(0xF0U | (codepoint >> 18U)));
+    pending_text_input_.push_back(static_cast<char>(0x80U | ((codepoint >> 12U) & 0x3FU)));
+    pending_text_input_.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3FU)));
+    pending_text_input_.push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+  }
 }
 
 FramebufferSize OpenGLWindow::framebuffer_size() const {

@@ -1,11 +1,11 @@
 #pragma once
 
 #include "arv/asset/resource.hpp"
+#include "arv/core/types.hpp"
 #include "arv/voxel/block.hpp"
 
 #include <span>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::asset {
@@ -32,7 +32,7 @@ struct TextureAtlasPage {
 struct TextureAtlas {
   std::vector<TextureAtlasPage> pages{};
   std::vector<TextureAtlasEntry> entries{};
-  std::unordered_map<std::string, u32> entry_by_asset_id{};
+  HashMap<std::string, u32> entry_by_asset_id{};
   u32 padding{};
   u32 version{1};
 

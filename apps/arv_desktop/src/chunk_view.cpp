@@ -232,7 +232,7 @@ void drain_mesh_jobs(
     }
 
     view.pending_meshes.erase(
-        view.pending_meshes.begin() + static_cast<std::ptrdiff_t>(index));
+        view.pending_meshes.begin() + static_cast<isize>(index));
   }
 }
 

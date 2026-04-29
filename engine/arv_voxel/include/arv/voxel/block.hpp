@@ -10,7 +10,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::voxel {
@@ -215,8 +214,8 @@ private:
 
   std::vector<BlockRecord> blocks_;
   std::vector<BlockVariantRecord> variants_;
-  std::unordered_map<std::string, BlockID> block_name_to_id_;
-  std::unordered_map<std::string, BlockVariantID> variant_name_to_id_;
+  HashMap<std::string, BlockID> block_name_to_id_;
+  HashMap<std::string, BlockVariantID> variant_name_to_id_;
 };
 
 class BlockRenderData {

@@ -1,12 +1,12 @@
 #pragma once
 
+#include "arv/core/types.hpp"
 #include "arv/net/transport.hpp"
 
 #include <deque>
 #include <mutex>
 #include <optional>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -60,9 +60,9 @@ private:
   HSteamNetPollGroup poll_group_{k_HSteamNetPollGroup_Invalid};
   u32 next_connection_id_{1};
   mutable std::mutex mutex_;
-  std::unordered_map<ConnectionID, HSteamNetConnection> connections_;
-  std::unordered_map<HSteamNetConnection, ConnectionID> connection_ids_;
-  std::unordered_map<ConnectionID, ConnectionState> states_;
+  HashMap<ConnectionID, HSteamNetConnection> connections_;
+  HashMap<HSteamNetConnection, ConnectionID> connection_ids_;
+  HashMap<ConnectionID, ConnectionState> states_;
   std::deque<NetworkEvent> queued_events_;
 
   inline static std::mutex callback_mutex_;

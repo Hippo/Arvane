@@ -24,7 +24,7 @@ struct ID {
 
 template<typename Tag, typename ValueType>
 struct std::hash<arv::ID<Tag, ValueType>> {
-  std::size_t operator()(const arv::ID<Tag, ValueType>& id) const noexcept {
+  arv::usize operator()(const arv::ID<Tag, ValueType>& id) const noexcept {
     return std::hash<ValueType>{}(id.value);
   }
 };

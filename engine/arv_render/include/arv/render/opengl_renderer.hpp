@@ -1,12 +1,12 @@
 #pragma once
 
+#include "arv/core/types.hpp"
 #include "arv/render/render_types.hpp"
 
 #include <glad/glad.h>
 
 #include <deque>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::render {
@@ -89,12 +89,9 @@ private:
 
   void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
   void draw_ui();
-  void draw_ui_rects();
-  void draw_ui_textured_quads();
-  void draw_ui_glyphs();
+  void draw_ui_quads();
   void ensure_ui_buffers();
   void ensure_white_texture();
-  [[nodiscard]] GLuint texture_for_ui_source(UiTextureSource source) const noexcept;
 
   u32 width_{};
   u32 height_{};
@@ -124,7 +121,7 @@ private:
   std::string ui_vertex_shader_source_{};
   std::string ui_fragment_shader_source_{};
   FramePacket frame_{};
-  std::unordered_map<ChunkMeshKey, ChunkGpuState> chunks_;
+  HashMap<ChunkMeshKey, ChunkGpuState> chunks_;
   std::deque<ChunkMeshUpload> pending_chunk_mesh_uploads_;
   GpuTexture terrain_atlas_{};
   GpuTexture font_atlas_{};

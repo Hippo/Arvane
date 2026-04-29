@@ -451,7 +451,117 @@ Separate:
 
 ---
 
-## 14. Summary of Critical Rules
+Here’s a rewritten version that keeps your structure but makes `arv::FunctionRef` a first-class concept (same level of clarity as `arv::HashMap`):
+
+---
+
+## 14. Container & Callable Policy
+
+Arvane prefers standard library containers by default unless profiling,
+data layout, or hot-path behavior justifies a specialized container.
+
+For performance-sensitive hash maps and hash sets, use `arv::HashMap`
+and `arv::HashSet` rather than spelling `std::unordered_map` or a third-party
+container directly.
+
+The default implementation of `arv::HashMap` / `arv::HashSet` may use a
+high-performance open-addressing hash table such as `ankerl::unordered_dense`.
+
+Use `arv::StableHashMap` when code depends on stronger reference, pointer, or
+iterator stability semantics from `std::unordered_map`.
+
+Hot ID-indexed data should prefer dense arrays/vectors over hash maps whenever
+possible. For example, runtime block state tables, material tables, light tables,
+and chunk-local arrays should generally be indexed by compact integer IDs.
+
+---
+
+## Callable Policy (`arv::FunctionRef`)
+
+Arvane distinguishes between **borrowed (non-owning)** and **owning** callables.
+
+### `arv::FunctionRef`
+
+`arv::FunctionRef<R(Args...)>` is a lightweight, non-owning reference to a callable.
+
+* **Zero allocation**
+* **Very cheap to copy (two pointers)**
+* **Does not own the callable**
+* **Does not extend lifetime**
+
+It should be used for **immediate, synchronous invocation** in hot paths.
+
+```cpp
+void for_each_entity(arv::FunctionRef<void(Entity)> fn);
+```
+
+```cpp
+for_each_entity([&](Entity e) {
+    // Executed immediately, no allocation
+});
+```
+
+### Rules
+
+`FunctionRef` is a *borrowed callable*. It must not outlive the callable it references.
+
+#### ✔ Use `FunctionRef` when:
+
+* The callable is invoked **immediately**
+* The API does **not store** the callable
+* The call is part of a **hot path** (ECS iteration, rendering, jobs, traversal)
+* You would otherwise pass `std::function` **by const reference**
+
+#### ✖ Do NOT use `FunctionRef` when:
+
+* The callable must be **stored**
+* The callable is used **asynchronously**
+* The callable may **outlive the caller’s stack frame**
+
+```cpp
+// ❌ Incorrect: storing a FunctionRef
+struct Task
+{
+    arv::FunctionRef<void()> fn;
+};
+```
+
+---
+
+### Owning Callables
+
+When ownership is required, use an owning callable type.
+
+```cpp
+using JobFunction = std::function<void()>;
+```
+
+Use cases:
+
+* job systems
+* event queues
+* deferred execution
+* long-lived callbacks
+
+This alias may later be replaced with a small-buffer optimized or move-only
+callable without changing call sites.
+
+---
+
+## Preferred Performance Containers / Patterns
+
+* Use `arv::HashMap` / `arv::HashSet` for hot hash tables.
+* Use `arv::StableHashMap` when element address/iterator stability is required.
+* Avoid `std::map` / `std::set` unless ordered iteration and stable node semantics are required.
+* Prefer sorted vectors or hash maps for small/medium lookup tables.
+* Avoid `std::list` and `std::forward_list` in engine/runtime code.
+* Prefer dense vectors indexed by runtime IDs over associative containers.
+* Avoid `std::function` in hot paths; prefer template callables, function pointers, or `arv::FunctionRef`.
+* Avoid `std::shared_ptr` in hot paths; prefer explicit ownership, handles, indices, or arenas.
+
+---
+
+## 15. Summary of Critical Rules
 
 * Use **strong ID types** for all domain identities
 * Raw pointers are non-owning
@@ -463,31 +573,3 @@ Separate:
 * Never mix coordinate spaces implicitly
 
 ---
-
-## 15. Future Extensions
-
-* Handle types (generation-based IDs)
-* Fixed-point math
-* Serialization/versioning utilities
-* Custom allocators
-
-```
-
----
-
-## What changed (important)
-
-This version tightens a few things in a way that will matter a lot later:
-
-### 1. IDs are now **first-class**
-- Not just mentioned — **enforced as a rule**
-- Explicit “CRITICAL” section so agents don’t ignore it
-- Clear “when to use / not use”
-
-### 2. Removed ambiguity around `0`
-- This avoids future bugs with:
-  - `BlockID(0)` = Air
-  - `EntityID(0)` maybe invalid
-
-### 3. Reinforced API boundaries
-- Prevents agents from drifting back to `u32 id` everywhere

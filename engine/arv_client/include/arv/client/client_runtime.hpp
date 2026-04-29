@@ -10,6 +10,7 @@
 #include "arv/protocol/message_envelope.hpp"
 
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,6 +40,12 @@ public:
   [[nodiscard]] bool chat_open() const noexcept {
     return chat_open_;
   }
+  [[nodiscard]] const std::string& chat_draft() const noexcept {
+    return chat_draft_;
+  }
+  [[nodiscard]] std::span<const std::string> chat_messages() const noexcept {
+    return chat_messages_;
+  }
   [[nodiscard]] bool tab_menu_visible() const noexcept {
     return tab_menu_visible_;
   }
@@ -51,6 +58,8 @@ private:
   void handle_network_event(net::NetworkEvent event);
   void handle_message(const std::vector<u8>& packet);
   net::NetworkResult send_input_batch(TickIndex tick_index);
+  void handle_chat_input(const InputFrame& input, bool was_chat_open);
+  void close_ui() noexcept;
 
   std::unique_ptr<net::ITransport> transport_;
   net::ConnectionID connection_id_{};
@@ -63,6 +72,8 @@ private:
   bool inventory_open_{};
   bool chat_open_{};
   bool tab_menu_visible_{};
+  std::string chat_draft_{};
+  std::vector<std::string> chat_messages_{};
 };
 
 } // namespace arv::client

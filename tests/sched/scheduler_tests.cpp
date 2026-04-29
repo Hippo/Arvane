@@ -52,7 +52,7 @@ TEST(SchedulerTests, CompletionQueueDrainsConcurrentWorkerResults) {
 
   ASSERT_EQ(drained.size(), 32U);
   for (int value = 0; value < 32; ++value) {
-    EXPECT_EQ(drained[static_cast<std::size_t>(value)], value);
+    EXPECT_EQ(drained[static_cast<arv::usize>(value)], value);
   }
   EXPECT_TRUE(completions.empty());
 }

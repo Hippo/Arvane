@@ -7,8 +7,6 @@
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
 
-#include <unordered_map>
-#include <unordered_set>
 #include <optional>
 #include <vector>
 
@@ -66,19 +64,19 @@ private:
     WorldID world_id{};
     ChunkCoord center_chunk{};
     i32 view_distance{};
-    std::unordered_set<ChunkCoord> desired_chunks{};
-    std::unordered_map<ChunkCoord, SentChunkVersions> sent_chunk_versions{};
-    std::unordered_set<ChunkCoord> pending_chunks{};
+    HashSet<ChunkCoord> desired_chunks{};
+    HashMap<ChunkCoord, SentChunkVersions> sent_chunk_versions{};
+    HashSet<ChunkCoord> pending_chunks{};
     std::vector<ChunkCoord> unload_queue{};
   };
 
   [[nodiscard]] i32 clamp_view_distance(i32 requested_distance) const noexcept;
-  [[nodiscard]] std::unordered_set<ChunkCoord> compute_streaming_set(
+  [[nodiscard]] HashSet<ChunkCoord> compute_streaming_set(
       ChunkCoord center,
       i32 radius) const;
   void compute_streaming_diff(
       PlayerChunkStreamState& state,
-      std::unordered_set<ChunkCoord> next_desired);
+      HashSet<ChunkCoord> next_desired);
   void queue_dirty_sent_chunks(PlayerChunkStreamState& state, const world::WorldRuntime& world);
   [[nodiscard]] std::optional<voxel::ChunkSnapshot> prepare_chunk_snapshot(
       world::WorldRuntime& world,
@@ -92,7 +90,7 @@ private:
       std::vector<QueuedChunkStreamMessage>& out_messages);
 
   ServerChunkStreamingConfig config_{};
-  std::unordered_map<SessionID, PlayerChunkStreamState> players_;
+  HashMap<SessionID, PlayerChunkStreamState> players_;
 };
 
 } // namespace arv::server

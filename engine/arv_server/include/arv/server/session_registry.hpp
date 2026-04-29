@@ -5,7 +5,6 @@
 #include "arv/net/connection_state.hpp"
 
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::server {
@@ -43,8 +42,8 @@ public:
 private:
   u64 next_session_id_{1};
   u64 next_player_id_{1};
-  std::unordered_map<SessionID, ServerSession> sessions_;
-  std::unordered_map<net::ConnectionID, SessionID> connection_index_;
+  StableHashMap<SessionID, ServerSession> sessions_;
+  HashMap<net::ConnectionID, SessionID> connection_index_;
 };
 
 } // namespace arv::server

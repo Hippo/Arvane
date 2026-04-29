@@ -9,7 +9,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::asset {
@@ -113,7 +112,7 @@ private:
 
   std::filesystem::path asset_root_{};
   std::vector<TextureResource> textures_{{}};
-  std::unordered_map<std::string, TextureResourceHandle> texture_cache_{};
+  HashMap<std::string, TextureResourceHandle> texture_cache_{};
 };
 
 [[nodiscard]] ImageResult load_png_image(
@@ -124,14 +123,14 @@ private:
 
 template<>
 struct std::hash<arv::asset::TextureResourceHandle> {
-  std::size_t operator()(const arv::asset::TextureResourceHandle& handle) const noexcept {
+  arv::usize operator()(const arv::asset::TextureResourceHandle& handle) const noexcept {
     return std::hash<arv::asset::TextureResourceID>{}(handle.id);
   }
 };
 
 template<>
 struct std::hash<arv::asset::AssetID> {
-  std::size_t operator()(const arv::asset::AssetID& id) const noexcept {
+  arv::usize operator()(const arv::asset::AssetID& id) const noexcept {
     return std::hash<std::string>{}(id.value);
   }
 };

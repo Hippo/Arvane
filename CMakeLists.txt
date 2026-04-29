@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ARVANE_BUILD_TESTS "Build Arvane tests" ON)
-include(CTest)
+option(ARVANE_BUILD_BENCHMARKS "Build Arvane benchmarks" ON)
 
 if(NOT ARVANE_BUILD_TESTS)
   set(BUILD_TESTING OFF CACHE BOOL "Build tests" FORCE)
@@ -87,7 +87,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(concurrentqueue)
 
+FetchContent_Declare(
+  unordered_dense
+  GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
+  GIT_TAG v4.8.1
+  UPDATE_DISCONNECTED TRUE
+)
+FetchContent_MakeAvailable(unordered_dense)
+
 if(ARVANE_BUILD_TESTS)
+  include(CTest)
   set(BUILD_TESTING ON CACHE BOOL "Build tests" FORCE)
 
   FetchContent_Declare(
@@ -102,6 +111,18 @@ if(ARVANE_BUILD_TESTS)
   FetchContent_MakeAvailable(googletest)
 
   add_subdirectory(tests)
+endif()
+
+if(ARVANE_BUILD_BENCHMARKS)
+  FetchContent_Declare(
+    benchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG v1.9.5
+    UPDATE_DISCONNECTED TRUE
+  )
+  # Disable testing for the library itself to speed up build
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(benchmark)
 endif()
 
 

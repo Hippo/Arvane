@@ -134,28 +134,28 @@ enum class AxisDirection {
 
 template<>
 struct std::hash<arv::ChunkCoord> {
-  std::size_t operator()(const arv::ChunkCoord& coord) const noexcept {
-    const std::size_t x = std::hash<arv::i32>{}(coord.value.x);
-    const std::size_t y = std::hash<arv::i32>{}(coord.value.y);
-    const std::size_t z = std::hash<arv::i32>{}(coord.value.z);
+  arv::usize operator()(const arv::ChunkCoord& coord) const noexcept {
+    const arv::usize x = std::hash<arv::i32>{}(coord.value.x);
+    const arv::usize y = std::hash<arv::i32>{}(coord.value.y);
+    const arv::usize z = std::hash<arv::i32>{}(coord.value.z);
     return ((x * 16777619U) ^ y) * 16777619U ^ z;
   }
 };
 
 template<>
 struct std::hash<arv::ChunkColumnCoord> {
-  std::size_t operator()(const arv::ChunkColumnCoord& coord) const noexcept {
-    const std::size_t x = std::hash<arv::i32>{}(coord.x);
-    const std::size_t z = std::hash<arv::i32>{}(coord.z);
+  arv::usize operator()(const arv::ChunkColumnCoord& coord) const noexcept {
+    const arv::usize x = std::hash<arv::i32>{}(coord.x);
+    const arv::usize z = std::hash<arv::i32>{}(coord.z);
     return (x * 16777619U) ^ z;
   }
 };
 
 template<>
 struct std::hash<arv::RegionCoord> {
-  std::size_t operator()(const arv::RegionCoord& coord) const noexcept {
-    const std::size_t x = std::hash<arv::i32>{}(coord.x);
-    const std::size_t z = std::hash<arv::i32>{}(coord.z);
+  arv::usize operator()(const arv::RegionCoord& coord) const noexcept {
+    const arv::usize x = std::hash<arv::i32>{}(coord.x);
+    const arv::usize z = std::hash<arv::i32>{}(coord.z);
     return (x * 16777619U) ^ z;
   }
 };

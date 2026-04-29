@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <sstream>
-#include <unordered_set>
 #include <utility>
 
 #include <rectpack2D/finders_interface.h>
@@ -258,7 +257,7 @@ BlockTextureAtlasResult build_block_texture_atlas(
     const voxel::BlockRegistry& registry,
     TextureAtlasBuildOptions options) {
   std::vector<AssetID> texture_ids;
-  std::unordered_set<std::string> seen;
+  HashSet<std::string> seen;
   for (u32 variant_value = 0; variant_value < registry.variant_count(); ++variant_value) {
     const auto* variant = registry.variant(voxel::BlockVariantID{variant_value});
     if (variant == nullptr || variant->render_category == voxel::RenderCategory::None) {

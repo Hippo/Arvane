@@ -8,7 +8,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::player {
@@ -87,7 +86,7 @@ public:
 
 private:
   std::vector<ItemRecord> items_{};
-  std::unordered_map<std::string, ItemID> name_to_id_{};
+  HashMap<std::string, ItemID> name_to_id_{};
   std::optional<ItemID> missing_item_id_{};
 };
 

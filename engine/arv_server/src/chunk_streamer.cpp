@@ -111,7 +111,7 @@ void ServerChunkStreamer::tick_streaming_budget(
 std::vector<ChunkCoord> ServerChunkStreamer::pending_generation_requests(
     const world::WorldRuntime& world) const {
   std::vector<ChunkCoord> requests;
-  std::unordered_set<ChunkCoord> request_set;
+  HashSet<ChunkCoord> request_set;
   for (const auto& [session_id, state] : players_) {
     (void)session_id;
     if (state.world_id != world.id()) {
@@ -170,10 +170,10 @@ i32 ServerChunkStreamer::clamp_view_distance(i32 requested_distance) const noexc
   return std::min(requested_distance, config_.max_view_distance);
 }
 
-std::unordered_set<ChunkCoord> ServerChunkStreamer::compute_streaming_set(
+HashSet<ChunkCoord> ServerChunkStreamer::compute_streaming_set(
     ChunkCoord center,
     i32 radius) const {
-  std::unordered_set<ChunkCoord> chunks;
+  HashSet<ChunkCoord> chunks;
   const i32 side = radius * 2 + 1;
   chunks.reserve(static_cast<usize>(side * side * side));
   for (i32 z = center.value.z - radius; z <= center.value.z + radius; ++z) {
@@ -188,8 +188,8 @@ std::unordered_set<ChunkCoord> ServerChunkStreamer::compute_streaming_set(
 
 void ServerChunkStreamer::compute_streaming_diff(
     PlayerChunkStreamState& state,
-    std::unordered_set<ChunkCoord> next_desired) {
-  const std::unordered_set<ChunkCoord> retained_chunks = compute_streaming_set(
+    HashSet<ChunkCoord> next_desired) {
+  const HashSet<ChunkCoord> retained_chunks = compute_streaming_set(
       state.center_chunk,
       state.view_distance + config_.unload_margin);
 

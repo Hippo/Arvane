@@ -418,7 +418,7 @@ void ServerRuntime::drain_generation_jobs(bool drain_all) {
     }
 
     pending_generation_jobs_.erase(
-        pending_generation_jobs_.begin() + static_cast<std::ptrdiff_t>(index));
+        pending_generation_jobs_.begin() + static_cast<isize>(index));
     ++drained;
   }
 }
@@ -484,7 +484,7 @@ void ServerRuntime::drain_lighting_jobs(bool drain_all) {
     world::LightingResult result = pending.job.get();
     (void)default_world_.publish_lighting_result(std::move(result));
     pending_lighting_jobs_.erase(
-        pending_lighting_jobs_.begin() + static_cast<std::ptrdiff_t>(index));
+        pending_lighting_jobs_.begin() + static_cast<isize>(index));
     ++drained;
   }
 }

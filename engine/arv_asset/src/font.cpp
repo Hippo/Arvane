@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <fstream>
 #include <memory>
-#include <unordered_map>
 #include <utility>
 
 #include <ft2build.h>
@@ -113,7 +112,7 @@ struct FontSystem::Impl {
     FT_Face face{};
     hb_font_t* hb_font{};
     u32 pixel_size{};
-    std::unordered_map<u32, GlyphInfo> glyphs{};
+    HashMap<u32, GlyphInfo> glyphs{};
   };
 
   FT_Library library{};

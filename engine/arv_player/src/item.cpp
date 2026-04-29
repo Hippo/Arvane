@@ -1,8 +1,6 @@
 #include "arv/player/item.hpp"
 
 #include <algorithm>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -132,7 +130,7 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     return Result::failure({"item registry is empty; required item arvane:air is missing"});
   }
 
-  std::unordered_map<std::string, usize> definition_names;
+  HashMap<std::string, usize> definition_names;
   for (usize index = 0; index < definitions.size(); ++index) {
     const ItemDefinition& definition = definitions[index];
     if (definition.name.empty()) {
@@ -216,7 +214,7 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
   definitions.reserve(registry.block_count() + 2U);
   definitions.push_back(make_air_item_definition());
   definitions.push_back(make_missing_item_definition());
-  std::unordered_map<std::string, usize> definition_indices;
+  HashMap<std::string, usize> definition_indices;
   definition_indices.emplace(definitions[0].name, 0U);
   definition_indices.emplace(definitions[1].name, 1U);
 
@@ -239,7 +237,7 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
     definitions.push_back(std::move(definition));
   }
 
-  std::unordered_set<std::string> explicit_names;
+  HashSet<std::string> explicit_names;
   for (ItemDefinition& definition : explicit_definitions) {
     if (definition.name.empty()) {
       return Result::failure({"item definition has empty name"});

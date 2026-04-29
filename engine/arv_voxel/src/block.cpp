@@ -137,7 +137,7 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     return Result::failure({"block registry is empty; required block arvane:air is missing"});
   }
 
-  std::unordered_map<std::string, usize> definition_names;
+  HashMap<std::string, usize> definition_names;
   for (usize i = 0; i < definitions.size(); ++i) {
     const BlockDefinition& definition = definitions[i];
     if (definition.name.empty()) {

@@ -9,7 +9,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace arv::world {
@@ -87,8 +86,8 @@ private:
 
   std::vector<Zone> zones_{};
   std::vector<Region> regions_{};
-  std::unordered_map<std::string, ZoneID> zone_names_{};
-  std::unordered_map<std::string, RegionID> region_names_{};
+  HashMap<std::string, ZoneID> zone_names_{};
+  HashMap<std::string, RegionID> region_names_{};
 };
 
 } // namespace arv::world

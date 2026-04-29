@@ -14,7 +14,6 @@
 #include <array>
 #include <deque>
 #include <optional>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -183,10 +182,10 @@ private:
   u32 drain_block_updates(u32 budget);
 
   WorldID id_{};
-  std::unordered_map<ChunkCoord, voxel::ChunkSection> chunks_;
-  std::unordered_map<PlayerID, player::PlayerState> players_;
+  StableHashMap<ChunkCoord, voxel::ChunkSection> chunks_;
+  StableHashMap<PlayerID, player::PlayerState> players_;
   RegionRegistry regions_{};
-  std::unordered_map<PlayerID, PlayerRegionState> player_region_states_;
+  StableHashMap<PlayerID, PlayerRegionState> player_region_states_;
   TickIndex tick_index_{};
   u64 lighting_revision_{1};
   u64 mesh_revision_{1};
@@ -195,7 +194,7 @@ private:
   std::vector<ScheduledBlockUpdate> scheduled_block_updates_;
   std::deque<BlockUpdate> block_updates_;
   std::deque<FluidUpdate> fluid_updates_;
-  std::unordered_map<ChunkCoord, std::vector<FluidUpdate>> deferred_boundary_fluid_updates_;
+  HashMap<ChunkCoord, std::vector<FluidUpdate>> deferred_boundary_fluid_updates_;
 };
 
 } // namespace arv::world

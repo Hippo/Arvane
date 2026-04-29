@@ -49,8 +49,20 @@ struct InputSnapshot {
   bool tab_menu_held{};
   std::optional<u8> hotbar_select{};
   i8 hotbar_scroll_steps{};
+  bool mouse_left_pressed{};
+  bool mouse_left_released{};
+  bool mouse_left_held{};
+  bool mouse_right_pressed{};
+  bool mouse_right_released{};
+  bool mouse_right_held{};
+  f32 cursor_x{};
+  f32 cursor_y{};
   f32 mouse_delta_x{};
   f32 mouse_delta_y{};
+  std::string text_input{};
+  bool text_backspace_pressed{};
+  bool text_submit_pressed{};
+  bool text_cancel_pressed{};
 };
 
 class GlfwLibrary {
@@ -93,6 +105,7 @@ public:
 
   InputSnapshot poll_input();
   void set_input_bindings(InputBindings bindings) noexcept;
+  void set_cursor_captured(bool captured) noexcept;
 
   [[nodiscard]] FramebufferSize framebuffer_size() const;
 
@@ -101,6 +114,7 @@ public:
   static void poll_events();
 
   void accumulate_scroll(f64 y_offset) noexcept;
+  void append_text_input(u32 codepoint);
 
 private:
   void destroy();
@@ -110,6 +124,13 @@ private:
   f64 last_cursor_x_{};
   f64 last_cursor_y_{};
   f64 accumulated_scroll_y_{};
+  bool cursor_captured_{true};
+  bool previous_left_mouse_down_{};
+  bool previous_right_mouse_down_{};
+  bool previous_backspace_down_{};
+  bool previous_enter_down_{};
+  bool previous_escape_down_{};
+  std::string pending_text_input_{};
   InputBindings input_bindings_{default_input_bindings()};
   std::array<bool, static_cast<usize>(LogicalAction::Count)> previous_action_active_{};
 };

@@ -2,6 +2,7 @@
 
 #include "arv/client/camera_shell.hpp"
 #include "arv/core/log.hpp"
+#include "arv/core/types.hpp"
 #include "arv/io/config.hpp"
 #include "arv/render/render_types.hpp"
 #include "arv/sched/scheduler.hpp"
@@ -11,8 +12,6 @@
 #include <chrono>
 #include <deque>
 #include <optional>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace arv::render {
@@ -34,16 +33,16 @@ struct ChunkViewState {
     sched::JobHandle<TimedChunkMeshResult> job;
   };
 
-  std::unordered_map<ChunkCoord, render::ChunkDrawItem> draw_items;
+  HashMap<ChunkCoord, render::ChunkDrawItem> draw_items;
   std::vector<PendingMesh> pending_meshes;
-  std::unordered_set<ChunkCoord> mesh_in_flight;
+  HashSet<ChunkCoord> mesh_in_flight;
 
   std::optional<ChunkCoord> target_center;
   i32 target_min_chunk_y{};
   i32 target_max_chunk_y{};
   i32 target_render_distance{};
   std::deque<ChunkCoord> mesh_candidates;
-  std::unordered_set<ChunkCoord> mesh_candidate_set;
+  HashSet<ChunkCoord> mesh_candidate_set;
   u64 observed_mesh_revision{};
   bool mesh_rescan_requested{true};
   bool draw_items_dirty{true};

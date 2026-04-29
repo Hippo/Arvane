@@ -7,8 +7,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace arv::player {
@@ -51,7 +49,7 @@ struct ResolvedCorePermissions {
   constexpr bool operator==(const ResolvedCorePermissions&) const = default;
 };
 
-using CustomPermissionMap = std::unordered_map<std::string, TriState>;
+using CustomPermissionMap = HashMap<std::string, TriState>;
 
 struct PermissionLayer {
   CorePermissionSet core{};
@@ -98,7 +96,7 @@ private:
   void add_builtin(std::string_view id, ResolvedCorePermissions permissions);
 
   std::vector<GameModeDefinition> modes_{};
-  std::unordered_map<std::string, usize> mode_indices_{};
+  HashMap<std::string, usize> mode_indices_{};
 };
 
 struct PermissionGroup {
@@ -130,7 +128,7 @@ private:
       std::vector<std::string>& stack) const;
 
   std::vector<PermissionGroup> groups_{};
-  std::unordered_map<std::string, usize> group_indices_{};
+  HashMap<std::string, usize> group_indices_{};
 };
 
 struct PermissionResolveRequest {

@@ -134,6 +134,7 @@ struct UIVertex {
   Vec2f position{};
   Vec2f uv{};
   Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+  f32 texture_slot{};
 };
 
 struct TextureUploadData {
@@ -319,11 +320,11 @@ public:
 
 template<>
 struct std::hash<arv::render::ChunkMeshKey> {
-  std::size_t operator()(const arv::render::ChunkMeshKey& key) const noexcept {
-    const std::size_t x = std::hash<arv::WorldID>{}(key.world_id);
-    const std::size_t y = std::hash<arv::i32>{}(key.coord.value.x);
-    const std::size_t z = std::hash<arv::i32>{}(key.coord.value.y);
-    const std::size_t w = std::hash<arv::i32>{}(key.coord.value.z);
+  arv::usize operator()(const arv::render::ChunkMeshKey& key) const noexcept {
+    const arv::usize x = std::hash<arv::WorldID>{}(key.world_id);
+    const arv::usize y = std::hash<arv::i32>{}(key.coord.value.x);
+    const arv::usize z = std::hash<arv::i32>{}(key.coord.value.y);
+    const arv::usize w = std::hash<arv::i32>{}(key.coord.value.z);
     return (((x * 16777619U) ^ y) * 16777619U ^ z) * 16777619U ^ w;
   }
 };

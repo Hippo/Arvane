@@ -1,7 +1,6 @@
 #include "asset_helpers.hpp"
 
 #include <string>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -50,7 +49,7 @@ asset::TextureAtlasResult build_item_texture_atlas(
     asset::ResourceManager& resources,
     const player::ItemRegistry& item_registry) {
   std::vector<asset::AssetID> texture_ids;
-  std::unordered_set<std::string> seen;
+  HashSet<std::string> seen;
   const auto add_texture = [&](std::string texture) {
     if (!texture.empty() && seen.insert(texture).second) {
       texture_ids.push_back({std::move(texture)});

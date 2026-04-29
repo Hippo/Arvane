@@ -1,10 +1,10 @@
 #pragma once
 
+#include "arv/core/types.hpp"
 #include "arv/protocol/message_type.hpp"
 
 #include <optional>
 #include <string>
-#include <unordered_map>
 
 namespace arv::protocol {
 
@@ -28,7 +28,7 @@ public:
   static MessageRegistry make_core_registry();
 
 private:
-  std::unordered_map<MessageType, MessageDescriptor> descriptors_;
+  HashMap<MessageType, MessageDescriptor> descriptors_;
 };
 
 } // namespace arv::protocol
