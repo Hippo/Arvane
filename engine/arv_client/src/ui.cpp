@@ -692,7 +692,7 @@ void append_slot(
   item.selected = selected;
   item.hit_test = true;
   item.focusable = true;
-  item.action = "select_hotbar_slot";
+  item.action = "inventory_slot";
   const UiNodeID slot_id = tree.add_child(parent, std::move(item));
 
   add_item_slot_children(tree, slot_id, stable_id, slot, stack, show_number);
@@ -781,6 +781,29 @@ void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
         in_hotbar && slot_index == model.selected_hotbar_slot,
         false,
         40.0F);
+  }
+
+  if (model.cursor_stack.has_value() && !model.cursor_stack->empty()) {
+    UiElement cursor_slot;
+    cursor_slot.stable_id = "inventory.cursor_stack";
+    cursor_slot.type = UiElementType::ItemSlot;
+    cursor_slot.layout.width_mode = UiSizeMode::Fixed;
+    cursor_slot.layout.height_mode = UiSizeMode::Fixed;
+    cursor_slot.layout.width = 40.0F;
+    cursor_slot.layout.height = 40.0F;
+    cursor_slot.layout.offset = {
+        model.cursor_position.x - 20.0F,
+        model.cursor_position.y - 20.0F};
+    cursor_slot.style.background = {0.0F, 0.0F, 0.0F, 0.0F};
+    cursor_slot.hit_test = false;
+    const UiNodeID cursor_slot_id = tree.add_child(tree.root_id(), std::move(cursor_slot));
+    add_item_slot_children(
+        tree,
+        cursor_slot_id,
+        "inventory.cursor_stack",
+        0,
+        &model.cursor_stack.value(),
+        false);
   }
 
   (void)model.viewport;

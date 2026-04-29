@@ -8,6 +8,28 @@
 
 namespace arv::player {
 
+enum class InventoryOperationResultKind : u8 {
+  Success,
+  PartialSuccess,
+  NoOp,
+  RejectedInvalidSlot,
+  RejectedIncompatibleItem,
+  RejectedFullInventory,
+  RejectedInsufficientQuantity,
+};
+
+struct InventoryOperationResult {
+  InventoryOperationResultKind kind{InventoryOperationResultKind::NoOp};
+  u16 moved_count{};
+  std::optional<ItemStack> stack{};
+
+  [[nodiscard]] bool accepted() const noexcept {
+    return kind == InventoryOperationResultKind::Success ||
+           kind == InventoryOperationResultKind::PartialSuccess ||
+           kind == InventoryOperationResultKind::NoOp;
+  }
+};
+
 struct InventoryInsertResult {
   std::optional<ItemStack> leftover{};
 
@@ -38,8 +60,17 @@ public:
   bool clear_slot(usize slot_index);
 
   [[nodiscard]] InventoryInsertResult insert_stack(ItemStack stack, const ItemRegistry& registry);
+  [[nodiscard]] InventoryOperationResult merge_stack_into_slot(
+      usize slot_index,
+      ItemStack& stack,
+      const ItemRegistry& registry);
   [[nodiscard]] std::optional<ItemStack> remove_amount(usize slot_index, u16 amount);
   [[nodiscard]] std::optional<ItemStack> split_stack(usize slot_index, u16 amount);
+  [[nodiscard]] bool swap_slots(usize first_slot, usize second_slot);
+  [[nodiscard]] std::optional<usize> find_first_compatible_stack(
+      const ItemStack& stack,
+      const ItemRegistry& registry) const;
+  [[nodiscard]] std::optional<usize> find_first_empty_slot() const noexcept;
   [[nodiscard]] bool consume_one(usize slot_index);
 
   [[nodiscard]] bool operator==(const Inventory& other) const noexcept {
@@ -49,5 +80,19 @@ public:
 private:
   std::vector<std::optional<ItemStack>> slots_{};
 };
+
+enum class InventoryClickButton : u8 {
+  Primary,
+  Secondary,
+};
+
+[[nodiscard]] bool item_stacks_compatible(const ItemStack& lhs, const ItemStack& rhs) noexcept;
+
+[[nodiscard]] InventoryOperationResult apply_inventory_slot_click(
+    Inventory& inventory,
+    usize slot_index,
+    InventoryClickButton button,
+    std::optional<ItemStack>& carried_stack,
+    const ItemRegistry& registry);
 
 } // namespace arv::player

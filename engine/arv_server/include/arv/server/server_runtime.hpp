@@ -50,6 +50,12 @@ struct ServerStartInfo {
   u32 max_pending_generation_jobs{4};
 };
 
+struct DroppedItemStack {
+  WorldID world_id{};
+  Vec3f position{};
+  player::ItemStack stack{};
+};
+
 class ServerRuntime {
 public:
   explicit ServerRuntime(std::unique_ptr<net::ITransport> transport);
@@ -84,6 +90,10 @@ public:
     return worlds_;
   }
 
+  [[nodiscard]] const std::vector<DroppedItemStack>& dropped_item_stacks() const noexcept {
+    return dropped_item_stacks_;
+  }
+
   [[nodiscard]] const world::WorldRuntime& voxel_world() const noexcept {
     return default_world_;
   }
@@ -109,6 +119,14 @@ public:
   }
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
+  [[nodiscard]] player::InventoryOperationResult apply_player_inventory_click(
+      PlayerID player_id,
+      usize slot_index,
+      player::InventoryClickButton button);
+  [[nodiscard]] std::optional<player::ItemStack> drop_player_inventory_cursor(PlayerID player_id);
+  [[nodiscard]] std::optional<player::ItemStack> drop_one_from_player_inventory_cursor(
+      PlayerID player_id);
+  [[nodiscard]] player::InventoryOperationResult close_player_inventory_menu(PlayerID player_id);
 
 private:
   void handle_network_event(net::NetworkEvent event);
@@ -151,6 +169,7 @@ private:
   player::PermissionGroupRegistry permission_groups_{};
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   HashMap<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
+  std::vector<DroppedItemStack> dropped_item_stacks_;
 
   struct PendingLightingJob {
     u64 source_revision{};

@@ -45,7 +45,6 @@ net::ConnectResult ClientRuntime::connect_integrated() {
 void ClientRuntime::submit_input(InputFrame input) {
   tab_menu_visible_ = input.tab_menu_held;
   const bool was_chat_open = chat_open_;
-  const std::optional<u8> ui_hotbar_select = input.ui_hotbar_select;
 
   if (input.text_cancel_pressed && (inventory_open_ || chat_open_)) {
     close_ui();
@@ -79,12 +78,8 @@ void ClientRuntime::submit_input(InputFrame input) {
     input.toggle_fly_pressed = false;
     input.hotbar_select.reset();
     input.hotbar_scroll_steps = 0;
-    input.ui_hotbar_select.reset();
     input.mouse_delta_x = 0.0F;
     input.mouse_delta_y = 0.0F;
-  }
-  if (ui_hotbar_select.has_value()) {
-    input.hotbar_select = ui_hotbar_select;
   }
 
   player_controller_.submit_input(std::move(input));

@@ -24,11 +24,3 @@ TEST(ClientRuntimeTests, ChatDraftIgnoresOpeningKeyThenAcceptsTextEditingAndSubm
   ASSERT_EQ(client.chat_messages().size(), 1U);
   EXPECT_EQ(client.chat_messages().front(), "hell");
 }
-
-TEST(ClientRuntimeTests, UiHotbarSelectionSurvivesOpenInventoryInputSuppression) {
-  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
-
-  client.submit_input(arv::client::InputFrame{.ui_hotbar_select = 4});
-
-  EXPECT_EQ(client.selected_hotbar_slot(), 4U);
-}

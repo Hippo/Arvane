@@ -179,3 +179,120 @@ TEST(PlayerInteractionTests, PlacementOutsideConfiguredReachIsRejected) {
   ASSERT_TRUE(player_state.inventory.slot(0).has_value());
   EXPECT_EQ(player_state.inventory.slot(0)->count, 2U);
 }
+
+TEST(PlayerInteractionTests, InventorySlotClicksMutateAuthoritativeServerInventory) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+  ASSERT_TRUE(player_state.inventory.set_slot(0, arv::player::ItemStack{stone_item, 8}));
+  ASSERT_TRUE(player_state.inventory.clear_slot(1));
+
+  const auto pick = server.apply_player_inventory_click(
+      player_state.player_id,
+      0,
+      arv::player::InventoryClickButton::Primary);
+  EXPECT_EQ(pick.kind, arv::player::InventoryOperationResultKind::Success);
+  EXPECT_FALSE(player_state.inventory.slot(0).has_value());
+  ASSERT_TRUE(player_state.inventory_cursor_stack.has_value());
+  EXPECT_EQ(player_state.inventory_cursor_stack->count, 8U);
+
+  const auto place = server.apply_player_inventory_click(
+      player_state.player_id,
+      1,
+      arv::player::InventoryClickButton::Primary);
+  EXPECT_EQ(place.kind, arv::player::InventoryOperationResultKind::Success);
+  EXPECT_FALSE(player_state.inventory_cursor_stack.has_value());
+  ASSERT_TRUE(player_state.inventory.slot(1).has_value());
+  EXPECT_EQ(player_state.inventory.slot(1)->item, stone_item);
+  EXPECT_EQ(player_state.inventory.slot(1)->count, 8U);
+}
+
+TEST(PlayerInteractionTests, DroppingInventoryCursorRecordsServerDroppedStack) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+  player_state.position = {4.0F, 5.0F, 6.0F};
+  player_state.inventory_cursor_stack = arv::player::ItemStack{stone_item, 3};
+
+  const std::optional<arv::player::ItemStack> dropped =
+      server.drop_player_inventory_cursor(player_state.player_id);
+
+  ASSERT_TRUE(dropped.has_value());
+  EXPECT_EQ(dropped->item, stone_item);
+  EXPECT_EQ(dropped->count, 3U);
+  EXPECT_FALSE(player_state.inventory_cursor_stack.has_value());
+  ASSERT_EQ(server.dropped_item_stacks().size(), 1U);
+  EXPECT_EQ(server.dropped_item_stacks().front().world_id, player_state.world_id);
+  EXPECT_EQ(server.dropped_item_stacks().front().position, player_state.position);
+  EXPECT_EQ(server.dropped_item_stacks().front().stack, dropped.value());
+}
+
+TEST(PlayerInteractionTests, DroppingOneFromInventoryCursorLeavesRemainderCarried) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+  player_state.position = {4.0F, 5.0F, 6.0F};
+  player_state.inventory_cursor_stack = arv::player::ItemStack{stone_item, 3};
+
+  const std::optional<arv::player::ItemStack> dropped =
+      server.drop_one_from_player_inventory_cursor(player_state.player_id);
+
+  ASSERT_TRUE(dropped.has_value());
+  EXPECT_EQ(dropped->item, stone_item);
+  EXPECT_EQ(dropped->count, 1U);
+  ASSERT_TRUE(player_state.inventory_cursor_stack.has_value());
+  EXPECT_EQ(player_state.inventory_cursor_stack->item, stone_item);
+  EXPECT_EQ(player_state.inventory_cursor_stack->count, 2U);
+  ASSERT_EQ(server.dropped_item_stacks().size(), 1U);
+  EXPECT_EQ(server.dropped_item_stacks().front().world_id, player_state.world_id);
+  EXPECT_EQ(server.dropped_item_stacks().front().position, player_state.position);
+  EXPECT_EQ(server.dropped_item_stacks().front().stack, dropped.value());
+}

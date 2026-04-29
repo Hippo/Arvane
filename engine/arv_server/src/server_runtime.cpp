@@ -228,6 +228,87 @@ bool ServerRuntime::set_player_game_mode(PlayerID player_id, std::string_view mo
   return true;
 }
 
+player::InventoryOperationResult ServerRuntime::apply_player_inventory_click(
+    PlayerID player_id,
+    usize slot_index,
+    player::InventoryClickButton button) {
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr || item_registry_ == nullptr) {
+    return {player::InventoryOperationResultKind::RejectedInvalidSlot};
+  }
+
+  return player::apply_inventory_slot_click(
+      player_state->inventory,
+      slot_index,
+      button,
+      player_state->inventory_cursor_stack,
+      *item_registry_);
+}
+
+std::optional<player::ItemStack> ServerRuntime::drop_player_inventory_cursor(PlayerID player_id) {
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr || !player_state->inventory_cursor_stack.has_value()) {
+    return std::nullopt;
+  }
+
+  std::optional<player::ItemStack> dropped = player_state->inventory_cursor_stack;
+  dropped_item_stacks_.push_back({
+      player_state->world_id,
+      player_state->position,
+      dropped.value()});
+  player_state->inventory_cursor_stack.reset();
+  return dropped;
+}
+
+std::optional<player::ItemStack> ServerRuntime::drop_one_from_player_inventory_cursor(
+    PlayerID player_id) {
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr || !player_state->inventory_cursor_stack.has_value() ||
+      player_state->inventory_cursor_stack->count == 0U) {
+    return std::nullopt;
+  }
+
+  player::ItemStack dropped{
+      player_state->inventory_cursor_stack->item,
+      1U};
+  dropped_item_stacks_.push_back({
+      player_state->world_id,
+      player_state->position,
+      dropped});
+  player_state->inventory_cursor_stack->count =
+      static_cast<u16>(player_state->inventory_cursor_stack->count - 1U);
+  if (player_state->inventory_cursor_stack->count == 0U) {
+    player_state->inventory_cursor_stack.reset();
+  }
+  return dropped;
+}
+
+player::InventoryOperationResult ServerRuntime::close_player_inventory_menu(PlayerID player_id) {
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr || item_registry_ == nullptr) {
+    return {player::InventoryOperationResultKind::RejectedInvalidSlot};
+  }
+  if (!player_state->inventory_cursor_stack.has_value()) {
+    return {player::InventoryOperationResultKind::NoOp};
+  }
+
+  player::ItemStack carried = player_state->inventory_cursor_stack.value();
+  const player::InventoryInsertResult insert_result =
+      player_state->inventory.insert_stack(carried, *item_registry_);
+  if (insert_result.complete()) {
+    player_state->inventory_cursor_stack.reset();
+    return {player::InventoryOperationResultKind::Success, carried.count, carried};
+  }
+
+  player_state->inventory_cursor_stack = insert_result.leftover;
+  return {
+      insert_result.leftover->count == carried.count
+          ? player::InventoryOperationResultKind::RejectedFullInventory
+          : player::InventoryOperationResultKind::PartialSuccess,
+      static_cast<u16>(carried.count - insert_result.leftover->count),
+      insert_result.leftover};
+}
+
 void ServerRuntime::handle_network_event(net::NetworkEvent event) {
   switch (event.type) {
     case net::NetworkEventType::ConnectionRequested:

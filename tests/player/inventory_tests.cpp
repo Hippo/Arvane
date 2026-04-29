@@ -45,6 +45,107 @@ TEST(InventoryTests, SplitStackReturnsRequestedAmountAndLeavesRemainder) {
   EXPECT_EQ(inventory.slot(0)->count, 6U);
 }
 
+TEST(InventoryTests, PrimaryClickPicksUpMergesAndSwapsStacks) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+  const arv::player::ItemID dirt_item =
+      item_registry.find_item("arvane:dirt").value();
+
+  arv::player::Inventory inventory(3);
+  ASSERT_TRUE(inventory.set_slot(0, arv::player::ItemStack{stone_item, 10}));
+  ASSERT_TRUE(inventory.set_slot(1, arv::player::ItemStack{stone_item, 60}));
+  ASSERT_TRUE(inventory.set_slot(2, arv::player::ItemStack{dirt_item, 4}));
+  std::optional<arv::player::ItemStack> carried;
+
+  auto pick = arv::player::apply_inventory_slot_click(
+      inventory,
+      0,
+      arv::player::InventoryClickButton::Primary,
+      carried,
+      item_registry);
+  EXPECT_EQ(pick.kind, arv::player::InventoryOperationResultKind::Success);
+  ASSERT_TRUE(carried.has_value());
+  EXPECT_EQ(carried->count, 10U);
+  EXPECT_FALSE(inventory.slot(0).has_value());
+
+  auto merge = arv::player::apply_inventory_slot_click(
+      inventory,
+      1,
+      arv::player::InventoryClickButton::Primary,
+      carried,
+      item_registry);
+  EXPECT_EQ(merge.kind, arv::player::InventoryOperationResultKind::PartialSuccess);
+  ASSERT_TRUE(carried.has_value());
+  EXPECT_EQ(carried->count, 6U);
+  ASSERT_TRUE(inventory.slot(1).has_value());
+  EXPECT_EQ(inventory.slot(1)->count, 64U);
+
+  auto swap = arv::player::apply_inventory_slot_click(
+      inventory,
+      2,
+      arv::player::InventoryClickButton::Primary,
+      carried,
+      item_registry);
+  EXPECT_EQ(swap.kind, arv::player::InventoryOperationResultKind::Success);
+  ASSERT_TRUE(carried.has_value());
+  EXPECT_EQ(carried->item, dirt_item);
+  EXPECT_EQ(carried->count, 4U);
+  ASSERT_TRUE(inventory.slot(2).has_value());
+  EXPECT_EQ(inventory.slot(2)->item, stone_item);
+  EXPECT_EQ(inventory.slot(2)->count, 6U);
+}
+
+TEST(InventoryTests, SecondaryClickSplitsAndPlacesSingleItems) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+
+  arv::player::Inventory inventory(2);
+  ASSERT_TRUE(inventory.set_slot(0, arv::player::ItemStack{stone_item, 9}));
+  std::optional<arv::player::ItemStack> carried;
+
+  auto split = arv::player::apply_inventory_slot_click(
+      inventory,
+      0,
+      arv::player::InventoryClickButton::Secondary,
+      carried,
+      item_registry);
+  EXPECT_EQ(split.kind, arv::player::InventoryOperationResultKind::Success);
+  ASSERT_TRUE(carried.has_value());
+  EXPECT_EQ(carried->count, 5U);
+  ASSERT_TRUE(inventory.slot(0).has_value());
+  EXPECT_EQ(inventory.slot(0)->count, 4U);
+
+  auto place_one_empty = arv::player::apply_inventory_slot_click(
+      inventory,
+      1,
+      arv::player::InventoryClickButton::Secondary,
+      carried,
+      item_registry);
+  EXPECT_EQ(place_one_empty.kind, arv::player::InventoryOperationResultKind::Success);
+  ASSERT_TRUE(carried.has_value());
+  EXPECT_EQ(carried->count, 4U);
+  ASSERT_TRUE(inventory.slot(1).has_value());
+  EXPECT_EQ(inventory.slot(1)->count, 1U);
+
+  auto place_one_existing = arv::player::apply_inventory_slot_click(
+      inventory,
+      1,
+      arv::player::InventoryClickButton::Secondary,
+      carried,
+      item_registry);
+  EXPECT_EQ(place_one_existing.kind, arv::player::InventoryOperationResultKind::Success);
+  ASSERT_TRUE(carried.has_value());
+  EXPECT_EQ(carried->count, 3U);
+  ASSERT_TRUE(inventory.slot(1).has_value());
+  EXPECT_EQ(inventory.slot(1)->count, 2U);
+}
+
 TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   auto definitions = arv::player::parse_item_definitions_json(R"json(

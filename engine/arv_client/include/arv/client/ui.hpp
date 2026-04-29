@@ -259,6 +259,8 @@ struct InventoryUiModel {
   u8 hotbar_slot_count{player::DefaultHotbarSlotCount};
   Vec2f viewport{};
   std::span<const UiItemStackView> slots{};
+  std::optional<UiItemStackView> cursor_stack{};
+  Vec2f cursor_position{};
 };
 
 struct ChatLineView {

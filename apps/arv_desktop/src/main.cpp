@@ -41,9 +41,30 @@
 
 namespace {
 
-[[nodiscard]] std::optional<arv::u8> hotbar_slot_from_ui_action(
+[[nodiscard]] const arv::server::ServerSession* local_session(
+    const arv::server::ServerRuntime& server) noexcept {
+  const std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
+  if (session_ids.empty()) {
+    return nullptr;
+  }
+  return server.sessions().find(session_ids.front());
+}
+
+[[nodiscard]] arv::player::PlayerState* local_player_state(
+    arv::server::ServerRuntime& server) noexcept {
+  const arv::server::ServerSession* session = local_session(server);
+  return session == nullptr ? nullptr : server.voxel_world().find_player(session->player_id);
+}
+
+[[nodiscard]] const arv::player::PlayerState* local_player_state(
+    const arv::server::ServerRuntime& server) noexcept {
+  const arv::server::ServerSession* session = local_session(server);
+  return session == nullptr ? nullptr : server.voxel_world().find_player(session->player_id);
+}
+
+[[nodiscard]] std::optional<arv::usize> inventory_slot_from_ui_action(
     const arv::client::UiAction& action) noexcept {
-  if (action.action_id != "select_hotbar_slot") {
+  if (action.action_id != "inventory_slot") {
     return std::nullopt;
   }
 
@@ -57,7 +78,7 @@ namespace {
       continue;
     }
 
-    arv::u32 value = 0;
+    arv::usize value = 0;
     const std::string_view suffix = id.substr(prefix.size());
     if (suffix.empty()) {
       return std::nullopt;
@@ -66,43 +87,83 @@ namespace {
       if (ch < '0' || ch > '9') {
         return std::nullopt;
       }
-      value = value * 10U + static_cast<arv::u32>(ch - '0');
+      value = value * 10U + static_cast<arv::usize>(ch - '0');
     }
-    if (value < arv::player::DefaultHotbarSlotCount) {
-      return static_cast<arv::u8>(value);
-    }
-    return std::nullopt;
+    return value;
   }
   return std::nullopt;
 }
 
-void apply_ui_action_to_input(
+[[nodiscard]] bool apply_inventory_action(
+    arv::server::ServerRuntime& server,
+    arv::PlayerID player_id,
     const std::optional<arv::client::UiAction>& action,
-    arv::client::InputFrame& input) {
+    arv::player::InventoryClickButton button) {
   if (!action.has_value()) {
-    return;
+    return false;
   }
-  if (const std::optional<arv::u8> slot = hotbar_slot_from_ui_action(action.value());
+  if (const std::optional<arv::usize> slot = inventory_slot_from_ui_action(action.value());
       slot.has_value()) {
-    input.ui_hotbar_select = slot.value();
+    (void)server.apply_player_inventory_click(player_id, slot.value(), button);
+    return true;
   }
+  return false;
 }
 
-void route_ui_mouse_input(
+[[nodiscard]] bool route_inventory_mouse_input(
     arv::client::UiTree& ui_tree,
+    arv::server::ServerRuntime& server,
+    arv::PlayerID player_id,
     const arv::platform::InputSnapshot& platform_input,
-    arv::client::InputFrame& input) {
+    bool has_carried_stack) {
+  bool changed = false;
   const arv::Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
   (void)ui_tree.route_mouse_move(cursor);
   if (platform_input.mouse_left_pressed) {
-    apply_ui_action_to_input(
-        ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Left),
-        input);
+    const std::optional<arv::client::UiNodeID> hit = ui_tree.hit_test(cursor);
+    changed = apply_inventory_action(
+                  server,
+                  player_id,
+                  ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Left),
+                  arv::player::InventoryClickButton::Primary) ||
+              changed;
+    if (!changed && !hit.has_value() && has_carried_stack) {
+      (void)server.drop_player_inventory_cursor(player_id);
+      changed = true;
+    }
   }
   if (platform_input.mouse_right_pressed) {
-    apply_ui_action_to_input(
-        ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Right),
-        input);
+    const std::optional<arv::client::UiNodeID> hit = ui_tree.hit_test(cursor);
+    changed = apply_inventory_action(
+                  server,
+                  player_id,
+                  ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Right),
+                  arv::player::InventoryClickButton::Secondary) ||
+              changed;
+    if (!changed && !hit.has_value() && has_carried_stack) {
+      (void)server.drop_one_from_player_inventory_cursor(player_id);
+      changed = true;
+    }
+  }
+  if (platform_input.mouse_left_released) {
+    (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Left);
+  }
+  if (platform_input.mouse_right_released) {
+    (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Right);
+  }
+  return changed;
+}
+
+void route_ui_mouse_focus(
+    arv::client::UiTree& ui_tree,
+    const arv::platform::InputSnapshot& platform_input) {
+  const arv::Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
+  (void)ui_tree.route_mouse_move(cursor);
+  if (platform_input.mouse_left_pressed) {
+    (void)ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Left);
+  }
+  if (platform_input.mouse_right_pressed) {
+    (void)ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Right);
   }
   if (platform_input.mouse_left_released) {
     (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Left);
@@ -471,27 +532,25 @@ int main(int argc, char** argv) {
   arv::Seconds fps_sample_seconds = 0.0F;
   constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
   std::vector<arv::client::UiItemStackView> inventory_slots;
+  std::optional<arv::client::UiItemStackView> carried_inventory_stack;
   std::vector<arv::client::PlayerListEntryView> tab_players;
   std::vector<arv::client::ChatLineView> chat_lines;
   bool ui_snapshot_initialized = false;
   auto refresh_inventory_slots = [&]() {
     inventory_slots.clear();
-    const std::vector<arv::SessionID> ui_session_ids =
-        integrated_server.sessions().session_ids();
-    if (const arv::server::ServerSession* session =
-            ui_session_ids.empty()
-                ? nullptr
-                : integrated_server.sessions().find(ui_session_ids.front());
-        session != nullptr) {
-      if (const arv::player::PlayerState* player_state =
-              integrated_server.voxel_world().find_player(session->player_id);
-          player_state != nullptr) {
-        inventory_slots = arv::desktop::inventory_slots_for_ui(
-            player_state->inventory,
-            item_registry,
-            item_atlas,
-            block_atlas);
-      }
+    carried_inventory_stack.reset();
+    if (const arv::player::PlayerState* player_state = local_player_state(integrated_server);
+        player_state != nullptr) {
+      inventory_slots = arv::desktop::inventory_slots_for_ui(
+          player_state->inventory,
+          item_registry,
+          item_atlas,
+          block_atlas);
+      carried_inventory_stack = arv::desktop::item_stack_for_ui(
+          player_state->inventory_cursor_stack,
+          item_registry,
+          item_atlas,
+          block_atlas);
     }
   };
 
@@ -526,15 +585,38 @@ int main(int argc, char** argv) {
 
     arv::platform::OpenGLWindow::poll_events();
     const arv::platform::InputSnapshot platform_input = window.poll_input();
+    const bool was_inventory_open = client.inventory_open();
     const bool ui_accepts_pointer = client.inventory_open() || client.chat_open();
     arv::client::InputFrame client_input = arv::desktop::to_client_input(platform_input);
-    if (ui_accepts_pointer) {
-      route_ui_mouse_input(ui_tree, platform_input, client_input);
+    bool inventory_changed_by_ui = false;
+    if (client.inventory_open()) {
+      if (const arv::server::ServerSession* session = local_session(integrated_server);
+          session != nullptr) {
+        const arv::player::PlayerState* player_state = local_player_state(integrated_server);
+        inventory_changed_by_ui = route_inventory_mouse_input(
+            ui_tree,
+            integrated_server,
+            session->player_id,
+            platform_input,
+            player_state != nullptr && player_state->inventory_cursor_stack.has_value());
+      }
+    } else if (client.chat_open()) {
+      route_ui_mouse_focus(ui_tree, platform_input);
     }
     if (platform_input.close_requested && !ui_accepts_pointer) {
       window.request_close();
     }
     client.submit_input(std::move(client_input));
+    if (was_inventory_open && !client.inventory_open()) {
+      if (const arv::server::ServerSession* session = local_session(integrated_server);
+          session != nullptr) {
+        (void)integrated_server.close_player_inventory_menu(session->player_id);
+        inventory_changed_by_ui = true;
+      }
+    }
+    if (inventory_changed_by_ui) {
+      refresh_inventory_slots();
+    }
     window.set_cursor_captured(!(client.inventory_open() || client.chat_open()));
 
     ticks.add_time(delta.count());
@@ -621,6 +703,11 @@ int main(int argc, char** argv) {
                 std::span<const arv::client::UiItemStackView>{
                     inventory_slots.data(),
                     inventory_slots.size()},
+                carried_inventory_stack,
+                {
+                    platform_input.cursor_x,
+                    platform_input.cursor_y,
+                },
             },
             {
                 true,
@@ -654,6 +741,11 @@ int main(int argc, char** argv) {
     renderer.submit_frame(std::move(frame));
     renderer.render();
     window.swap_buffers();
+  }
+
+  if (const arv::server::ServerSession* session = local_session(integrated_server);
+      session != nullptr) {
+    (void)integrated_server.close_player_inventory_menu(session->player_id);
   }
 
   const std::vector<arv::persistence::SavedChunkSection> saved_chunks =

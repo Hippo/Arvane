@@ -1,7 +1,5 @@
 #include "input_adapter.hpp"
 
-#include <optional>
-
 namespace arv::desktop {
 
 client::InputFrame to_client_input(const platform::InputSnapshot& input) {
@@ -24,7 +22,6 @@ client::InputFrame to_client_input(const platform::InputSnapshot& input) {
       input.tab_menu_held,
       input.hotbar_select,
       input.hotbar_scroll_steps,
-      std::nullopt,
       input.mouse_delta_x,
       input.mouse_delta_y,
       input.text_input,

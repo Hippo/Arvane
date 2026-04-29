@@ -88,6 +88,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(concurrentqueue)
 
 FetchContent_Declare(
+  readerwriterqueue
+  GIT_REPOSITORY https://github.com/cameron314/readerwriterqueue.git
+  GIT_TAG v1.0.7
+  UPDATE_DISCONNECTED TRUE
+)
+FetchContent_MakeAvailable(readerwriterqueue)
+
+FetchContent_Declare(
   unordered_dense
   GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
   GIT_TAG v4.8.1

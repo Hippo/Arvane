@@ -7,6 +7,7 @@
 #include "arv/player/permissions.hpp"
 #include "arv/player/player_constants.hpp"
 
+#include <optional>
 #include <string>
 
 namespace arv::player {
@@ -48,6 +49,7 @@ struct PlayerState {
   PlayerPermissions permission_overrides{};
   ResolvedPermissions resolved_permissions{};
   Inventory inventory{DefaultPlayerInventorySlotCount};
+  std::optional<ItemStack> inventory_cursor_stack{};
   u8 selected_hotbar_slot{};
   TickIndex last_processed_input_tick{};
 };
