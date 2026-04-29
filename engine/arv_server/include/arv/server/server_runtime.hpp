@@ -45,6 +45,9 @@ struct ServerStartInfo {
   voxel::FluidDefinition fluid_definition{voxel::make_water_fluid_definition()};
   ServerChunkStreamingConfig chunk_streaming{};
   std::optional<ServerChunkGenerationSettings> chunk_generation{};
+  u32 max_generation_results_per_tick{2};
+  u32 max_lighting_results_per_tick{1};
+  u32 max_pending_generation_jobs{4};
 };
 
 class ServerRuntime {
@@ -117,9 +120,9 @@ private:
       const protocol::ChunkInterestUpdate& interest);
   void tick_players();
   void tick_chunk_streaming();
-  void drain_generation_jobs();
+  void drain_generation_jobs(bool drain_all);
   void schedule_generation_jobs();
-  void drain_lighting_jobs();
+  void drain_lighting_jobs(bool drain_all);
   void schedule_lighting_jobs();
   void refresh_player_permissions(player::PlayerState& player_state);
   void apply_player_command(player::PlayerState& player_state, const player::PlayerCommand& command);
@@ -164,6 +167,8 @@ private:
   std::vector<PendingLightingJob> pending_lighting_jobs_;
   u32 max_pending_generation_jobs_{4};
   u32 max_pending_lighting_jobs_{2};
+  u32 max_generation_results_per_tick_{2};
+  u32 max_lighting_results_per_tick_{1};
 };
 
 } // namespace arv::server

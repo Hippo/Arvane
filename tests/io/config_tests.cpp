@@ -31,8 +31,13 @@ render:
   max_chunk_mesh_uploads_per_frame: 3
 chunk_pipeline:
   max_generation_jobs_per_frame: 2
+  max_generation_results_per_tick: 3
+  max_lighting_results_per_tick: 4
+  max_client_chunk_applies_per_frame: 6
+  max_client_chunk_unloads_per_frame: 7
   max_mesh_jobs_per_frame: 5
   frame_spike_log_ms: 25
+  profile_log_interval_ms: 750
 )");
 
   ASSERT_TRUE(result);
@@ -51,8 +56,13 @@ chunk_pipeline:
   EXPECT_EQ(result.value().jobs.reserved_threads, 5U);
   EXPECT_EQ(result.value().render.max_chunk_mesh_uploads_per_frame, 3U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_jobs_per_frame, 2U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_generation_results_per_tick, 3U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_lighting_results_per_tick, 4U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_client_chunk_applies_per_frame, 6U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_client_chunk_unloads_per_frame, 7U);
   EXPECT_EQ(result.value().chunk_pipeline.max_mesh_jobs_per_frame, 5U);
   EXPECT_EQ(result.value().chunk_pipeline.frame_spike_log_ms, 25U);
+  EXPECT_EQ(result.value().chunk_pipeline.profile_log_interval_ms, 750U);
 }
 
 TEST(ConfigTests, RejectsUnsupportedBaseTps) {

@@ -330,6 +330,9 @@ void log_chunk_view_profile(
   if (view.last_profile_log.time_since_epoch().count() == 0) {
     view.last_profile_log = refresh_end;
   }
+  if (pipeline.profile_log_interval_ms == 0U) {
+    return;
+  }
   if (std::chrono::duration_cast<std::chrono::milliseconds>(refresh_end - view.last_profile_log)
           .count() >= static_cast<long long>(pipeline.profile_log_interval_ms)) {
     const bool has_worker_activity =

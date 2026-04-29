@@ -159,7 +159,11 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
   chunk_streamer_.configure(start_info.chunk_streaming);
   chunk_generation_ = start_info.chunk_generation;
   max_pending_generation_jobs_ =
-      std::max<u32>(start_info.chunk_streaming.max_chunks_sent_per_player_tick, 1U);
+      std::max<u32>(start_info.max_pending_generation_jobs, 1U);
+  max_generation_results_per_tick_ =
+      std::max<u32>(start_info.max_generation_results_per_tick, 1U);
+  max_lighting_results_per_tick_ =
+      std::max<u32>(start_info.max_lighting_results_per_tick, 1U);
   worlds_.ensure_default_world();
   handshake_policy_.server_name =
       mode_ == ServerMode::Dedicated ? "Arvane Dedicated Server" : "Arvane Integrated Server";
@@ -183,8 +187,8 @@ void ServerRuntime::tick() {
     return;
   }
 
-  drain_generation_jobs();
-  drain_lighting_jobs();
+  drain_generation_jobs(false);
+  drain_lighting_jobs(false);
   inbound_events_ = transport_->poll_events();
   for (net::NetworkEvent& event : inbound_events_) {
     handle_network_event(std::move(event));
@@ -205,8 +209,8 @@ void ServerRuntime::shutdown() {
 
   state_ = ServerRuntimeState::Stopping;
   world_jobs_.wait_for_all();
-  drain_generation_jobs();
-  drain_lighting_jobs();
+  drain_generation_jobs(true);
+  drain_lighting_jobs(true);
   if (transport_) {
     transport_->shutdown();
   }
@@ -389,8 +393,11 @@ void ServerRuntime::tick_chunk_streaming() {
   }
 }
 
-void ServerRuntime::drain_generation_jobs() {
-  for (usize index = 0; index < pending_generation_jobs_.size();) {
+void ServerRuntime::drain_generation_jobs(bool drain_all) {
+  u32 drained = 0;
+  for (usize index = 0;
+       index < pending_generation_jobs_.size() &&
+       (drain_all || drained < max_generation_results_per_tick_);) {
     PendingGenerationJob& pending = pending_generation_jobs_[index];
     if (!pending.job.is_complete()) {
       ++index;
@@ -412,6 +419,7 @@ void ServerRuntime::drain_generation_jobs() {
 
     pending_generation_jobs_.erase(
         pending_generation_jobs_.begin() + static_cast<std::ptrdiff_t>(index));
+    ++drained;
   }
 }
 
@@ -462,8 +470,11 @@ void ServerRuntime::schedule_generation_jobs() {
   }
 }
 
-void ServerRuntime::drain_lighting_jobs() {
-  for (usize index = 0; index < pending_lighting_jobs_.size();) {
+void ServerRuntime::drain_lighting_jobs(bool drain_all) {
+  u32 drained = 0;
+  for (usize index = 0;
+       index < pending_lighting_jobs_.size() &&
+       (drain_all || drained < max_lighting_results_per_tick_);) {
     PendingLightingJob& pending = pending_lighting_jobs_[index];
     if (!pending.job.is_complete()) {
       ++index;
@@ -474,6 +485,7 @@ void ServerRuntime::drain_lighting_jobs() {
     (void)default_world_.publish_lighting_result(std::move(result));
     pending_lighting_jobs_.erase(
         pending_lighting_jobs_.begin() + static_cast<std::ptrdiff_t>(index));
+    ++drained;
   }
 }
 

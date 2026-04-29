@@ -30,6 +30,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -238,7 +239,7 @@ int main(int argc, char** argv) {
   chunk_streaming.max_view_distance = config.chunks.load_distance;
   chunk_streaming.unload_margin = config.chunks.unload_margin;
   chunk_streaming.max_chunks_sent_per_player_tick =
-      std::max<arv::u32>(config.chunk_pipeline.max_generation_jobs_per_frame, 1U);
+      std::max<arv::u32>(config.chunk_pipeline.max_client_chunk_applies_per_frame, 1U);
   chunk_streaming.max_unloads_sent_per_player_tick = 64;
 
   arv::server::ServerChunkGenerationSettings chunk_generation;
@@ -257,7 +258,10 @@ int main(int argc, char** argv) {
       arv::player::default_player_tuning(),
       arv::voxel::make_water_fluid_definition(),
       chunk_streaming,
-      chunk_generation});
+      chunk_generation,
+      config.chunk_pipeline.max_generation_results_per_tick,
+      config.chunk_pipeline.max_lighting_results_per_tick,
+      config.chunk_pipeline.max_generation_jobs_per_frame});
   if (!server_start) {
     logger.error("server", server_start.error().message);
     return 1;
@@ -283,9 +287,28 @@ int main(int argc, char** argv) {
 
   arv::world::WorldRuntime client_world{arv::server::DefaultWorldID};
   arv::desktop::ChunkViewState chunk_view;
-  auto apply_client_chunk_stream = [&]() {
+  std::deque<arv::protocol::ChunkUnload> pending_client_chunk_unloads;
+  std::deque<arv::protocol::ChunkData> pending_client_chunk_data;
+  auto collect_client_chunk_stream = [&]() {
+    std::vector<arv::protocol::ChunkUnload> drained_unloads =
+        client.drain_received_chunk_unloads();
+    for (const arv::protocol::ChunkUnload& unload : drained_unloads) {
+      pending_client_chunk_unloads.push_back(unload);
+    }
+
+    std::vector<arv::protocol::ChunkData> drained_chunks =
+        client.drain_received_chunk_data();
+    for (arv::protocol::ChunkData& data : drained_chunks) {
+      pending_client_chunk_data.push_back(std::move(data));
+    }
+  };
+  auto apply_pending_client_chunk_stream = [&](arv::u32 chunk_budget, arv::u32 unload_budget) {
     bool changed = false;
-    for (const arv::protocol::ChunkUnload& unload : client.drain_received_chunk_unloads()) {
+    arv::u32 unloads_applied = 0;
+    while (unloads_applied < unload_budget && !pending_client_chunk_unloads.empty()) {
+      const arv::protocol::ChunkUnload unload = pending_client_chunk_unloads.front();
+      pending_client_chunk_unloads.pop_front();
+      ++unloads_applied;
       if (unload.world_id != client_world.id()) {
         continue;
       }
@@ -296,7 +319,11 @@ int main(int argc, char** argv) {
       }
     }
 
-    for (arv::protocol::ChunkData& data : client.drain_received_chunk_data()) {
+    arv::u32 chunks_applied = 0;
+    while (chunks_applied < chunk_budget && !pending_client_chunk_data.empty()) {
+      arv::protocol::ChunkData data = std::move(pending_client_chunk_data.front());
+      pending_client_chunk_data.pop_front();
+      ++chunks_applied;
       if (data.world_id != client_world.id()) {
         continue;
       }
@@ -319,7 +346,10 @@ int main(int argc, char** argv) {
 
   integrated_server.tick();
   client.fixed_tick(integrated_server.tick_index());
-  apply_client_chunk_stream();
+  collect_client_chunk_stream();
+  apply_pending_client_chunk_stream(
+      config.chunk_pipeline.max_client_chunk_applies_per_frame,
+      config.chunk_pipeline.max_client_chunk_unloads_per_frame);
   arv::desktop::apply_loaded_player_saves(
       integrated_server,
       world_save_name,
@@ -327,7 +357,10 @@ int main(int argc, char** argv) {
   if (!loaded_save.players.empty()) {
     integrated_server.tick();
     client.fixed_tick(integrated_server.tick_index());
-    apply_client_chunk_stream();
+    collect_client_chunk_stream();
+    apply_pending_client_chunk_stream(
+        config.chunk_pipeline.max_client_chunk_applies_per_frame,
+        config.chunk_pipeline.max_client_chunk_unloads_per_frame);
   }
 
   arv::sched::WorkerThreadConfig worker_thread_config;
@@ -360,64 +393,16 @@ int main(int argc, char** argv) {
 
   arv::core::FixedTimestepAccumulator ticks(config.simulation.base_tps);
   auto previous_time = std::chrono::steady_clock::now();
-
-  while (!window.should_close()) {
-    const auto now = std::chrono::steady_clock::now();
-    const std::chrono::duration<arv::Seconds> delta = now - previous_time;
-    previous_time = now;
-    const double frame_delta_ms =
-        std::chrono::duration<double, std::milli>(delta).count();
-    const arv::u32 current_fps = delta.count() > 0.0F
-                                     ? static_cast<arv::u32>(std::round(1.0F / delta.count()))
-                                     : 0U;
-    if (frame_delta_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
-      std::ostringstream message;
-      message << "frame spike " << frame_delta_ms << "ms"
-              << " queued_mesh=" << chunk_view.pending_meshes.size()
-              << " pending_uploads=" << renderer.pending_mesh_upload_count()
-              << " uploads_last_frame=" << renderer.mesh_uploads_last_frame();
-      logger.warn("chunk_profile", message.str());
-    }
-
-    arv::platform::OpenGLWindow::poll_events();
-    const arv::platform::InputSnapshot platform_input = window.poll_input();
-    if (platform_input.close_requested) {
-      window.request_close();
-    }
-    client.submit_input(arv::desktop::to_client_input(platform_input));
-
-    ticks.add_time(delta.count());
-    while (ticks.consume_tick()) {
-      integrated_server.tick();
-      client.fixed_tick(integrated_server.tick_index());
-      apply_client_chunk_stream();
-    }
-
-    if (!arv::desktop::update_chunk_view(
-            client_world,
-            renderer,
-            world_jobs,
-            chunk_view,
-            config.chunks,
-            config.chunk_pipeline,
-            arv::desktop::camera_chunk_coord(client.camera()),
-            min_chunk_y,
-            max_chunk_y,
-            block_registry,
-            block_atlas.render_data,
-            logger)) {
-      return 1;
-    }
-
-    framebuffer = window.framebuffer_size();
-    renderer.resize(framebuffer.width, framebuffer.height);
-    arv::render::FramePacket frame = client.build_frame_packet(
-        ticks.interpolation_alpha(),
-        framebuffer.width,
-        framebuffer.height);
-    frame.opaque_chunks = arv::desktop::chunk_draw_items(chunk_view);
-
-    std::vector<arv::client::UiItemStackView> inventory_slots;
+  auto last_fps_display_time = previous_time;
+  arv::u32 displayed_fps = 0;
+  arv::u32 fps_sample_frames = 0;
+  arv::Seconds fps_sample_seconds = 0.0F;
+  constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
+  std::vector<arv::client::UiItemStackView> inventory_slots;
+  std::vector<arv::client::PlayerListEntryView> tab_players;
+  bool ui_snapshot_initialized = false;
+  auto refresh_inventory_slots = [&]() {
+    inventory_slots.clear();
     const std::vector<arv::SessionID> ui_session_ids =
         integrated_server.sessions().session_ids();
     if (const arv::server::ServerSession* session =
@@ -435,8 +420,96 @@ int main(int argc, char** argv) {
             block_atlas);
       }
     }
-    const std::vector<arv::client::PlayerListEntryView> tab_players =
-        arv::desktop::player_list_for_ui(integrated_server);
+  };
+
+  while (!window.should_close()) {
+    const auto now = std::chrono::steady_clock::now();
+    const std::chrono::duration<arv::Seconds> delta = now - previous_time;
+    previous_time = now;
+    const double frame_delta_ms =
+        std::chrono::duration<double, std::milli>(delta).count();
+    ++fps_sample_frames;
+    fps_sample_seconds += delta.count();
+    if (displayed_fps == 0U ||
+        now - last_fps_display_time >= FpsHudRefreshInterval) {
+      displayed_fps = fps_sample_seconds > 0.0F
+                          ? static_cast<arv::u32>(
+                                std::round(static_cast<double>(fps_sample_frames) /
+                                           static_cast<double>(fps_sample_seconds)))
+                          : 0U;
+      last_fps_display_time = now;
+      fps_sample_frames = 0;
+      fps_sample_seconds = 0.0F;
+    }
+    if (frame_delta_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
+      std::ostringstream message;
+      message << "frame spike " << frame_delta_ms << "ms"
+              << " queued_mesh=" << chunk_view.pending_meshes.size()
+              << " pending_uploads=" << renderer.pending_mesh_upload_count()
+              << " uploads_last_frame=" << renderer.mesh_uploads_last_frame();
+      logger.warn("chunk_profile", message.str());
+    }
+
+    arv::platform::OpenGLWindow::poll_events();
+    const arv::platform::InputSnapshot platform_input = window.poll_input();
+    if (platform_input.close_requested) {
+      window.request_close();
+    }
+    client.submit_input(arv::desktop::to_client_input(platform_input));
+
+    ticks.add_time(delta.count());
+    bool fixed_tick_ran = false;
+    while (ticks.consume_tick()) {
+      integrated_server.tick();
+      client.fixed_tick(integrated_server.tick_index());
+      collect_client_chunk_stream();
+      fixed_tick_ran = true;
+    }
+    apply_pending_client_chunk_stream(
+        config.chunk_pipeline.max_client_chunk_applies_per_frame,
+        config.chunk_pipeline.max_client_chunk_unloads_per_frame);
+
+    if (!arv::desktop::update_chunk_view(
+            client_world,
+            renderer,
+            world_jobs,
+            chunk_view,
+            config.chunks,
+            config.chunk_pipeline,
+            arv::desktop::camera_chunk_coord(client.camera()),
+            min_chunk_y,
+            max_chunk_y,
+            block_registry,
+            block_atlas.render_data,
+            logger)) {
+      return 1;
+    }
+
+    const auto next_framebuffer = window.framebuffer_size();
+    if (next_framebuffer.width != framebuffer.width ||
+        next_framebuffer.height != framebuffer.height) {
+      framebuffer = next_framebuffer;
+      renderer.resize(framebuffer.width, framebuffer.height);
+    }
+    arv::render::FramePacket frame = client.build_frame_packet(
+        ticks.interpolation_alpha(),
+        framebuffer.width,
+        framebuffer.height);
+    frame.opaque_chunks = arv::desktop::chunk_draw_items(chunk_view);
+
+    if (!ui_snapshot_initialized || fixed_tick_ran) {
+      refresh_inventory_slots();
+      if (client.tab_menu_visible()) {
+        tab_players = arv::desktop::player_list_for_ui(integrated_server);
+      } else {
+        tab_players.clear();
+      }
+      ui_snapshot_initialized = true;
+    } else if (client.tab_menu_visible() && tab_players.empty()) {
+      tab_players = arv::desktop::player_list_for_ui(integrated_server);
+    } else if (!client.tab_menu_visible() && !tab_players.empty()) {
+      tab_players.clear();
+    }
     arv::client::build_gameplay_ui(
         ui_tree,
         {
@@ -481,7 +554,7 @@ int main(int argc, char** argv) {
                     tab_players.size()},
             },
             {},
-            {true, current_fps},
+            {true, displayed_fps},
         });
     ui_tree.layout(
         {

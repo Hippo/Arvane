@@ -210,6 +210,22 @@ ConfigResult parse_config_yaml(std::string_view text) {
           config.chunk_pipeline.max_generation_jobs_per_frame);
       read_scalar(
           chunk_pipeline,
+          "max_generation_results_per_tick",
+          config.chunk_pipeline.max_generation_results_per_tick);
+      read_scalar(
+          chunk_pipeline,
+          "max_lighting_results_per_tick",
+          config.chunk_pipeline.max_lighting_results_per_tick);
+      read_scalar(
+          chunk_pipeline,
+          "max_client_chunk_applies_per_frame",
+          config.chunk_pipeline.max_client_chunk_applies_per_frame);
+      read_scalar(
+          chunk_pipeline,
+          "max_client_chunk_unloads_per_frame",
+          config.chunk_pipeline.max_client_chunk_unloads_per_frame);
+      read_scalar(
+          chunk_pipeline,
           "max_mesh_jobs_per_frame",
           config.chunk_pipeline.max_mesh_jobs_per_frame);
       read_scalar(
@@ -262,6 +278,10 @@ ConfigResult parse_config_yaml(std::string_view text) {
         ConfigError{"render.max_chunk_mesh_uploads_per_frame must be non-zero"});
   }
   if (config.chunk_pipeline.max_generation_jobs_per_frame == 0U ||
+      config.chunk_pipeline.max_generation_results_per_tick == 0U ||
+      config.chunk_pipeline.max_lighting_results_per_tick == 0U ||
+      config.chunk_pipeline.max_client_chunk_applies_per_frame == 0U ||
+      config.chunk_pipeline.max_client_chunk_unloads_per_frame == 0U ||
       config.chunk_pipeline.max_mesh_jobs_per_frame == 0U) {
     return ConfigResult::failure(
         ConfigError{"chunk_pipeline job budgets must be non-zero"});

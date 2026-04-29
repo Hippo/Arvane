@@ -48,8 +48,12 @@ void OpenGLRenderer::set_ui_item_atlas(TextureUploadData upload) {
 }
 
 void OpenGLRenderer::resize(u32 width, u32 height) {
+  if (viewport_set_ && width_ == width && height_ == height) {
+    return;
+  }
   width_ = width;
   height_ = height;
+  viewport_set_ = true;
   glViewport(0, 0, static_cast<GLsizei>(width_), static_cast<GLsizei>(height_));
 }
 
@@ -272,21 +276,23 @@ void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& m
     glGenBuffers(1, &gpu.vertex_buffer);
   }
   glBindBuffer(GL_ARRAY_BUFFER, gpu.vertex_buffer);
-  glBufferData(
-      GL_ARRAY_BUFFER,
-      static_cast<GLsizeiptr>(mesh.vertex_bytes.size()),
-      mesh.vertex_bytes.data(),
-      GL_STATIC_DRAW);
+  const GLsizeiptr vertex_bytes =
+      static_cast<GLsizeiptr>(mesh.vertex_bytes.size());
+  glBufferData(GL_ARRAY_BUFFER, vertex_bytes, nullptr, GL_STATIC_DRAW);
+  if (vertex_bytes > 0) {
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, mesh.vertex_bytes.data());
+  }
 
   if (gpu.index_buffer == 0) {
     glGenBuffers(1, &gpu.index_buffer);
   }
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpu.index_buffer);
-  glBufferData(
-      GL_ELEMENT_ARRAY_BUFFER,
-      static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(u32)),
-      mesh.indices.data(),
-      GL_STATIC_DRAW);
+  const GLsizeiptr index_bytes =
+      static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(u32));
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_STATIC_DRAW);
+  if (index_bytes > 0) {
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, mesh.indices.data());
+  }
 
   glEnableVertexAttribArray(0);
   glVertexAttribIPointer(
@@ -547,35 +553,33 @@ void OpenGLRenderer::draw_ui_rects() {
     return;
   }
 
-  std::vector<UIVertex> vertices;
-  std::vector<u32> indices;
-  vertices.reserve(frame_.ui_rects.size() * 4U);
-  indices.reserve(frame_.ui_rects.size() * 6U);
+  ui_vertices_.clear();
+  ui_indices_.clear();
+  ui_vertices_.reserve(frame_.ui_rects.size() * 4U);
+  ui_indices_.reserve(frame_.ui_rects.size() * 6U);
   for (const UIRectDrawItem& rect : frame_.ui_rects) {
-    const u32 base = static_cast<u32>(vertices.size());
-    vertices.push_back({{rect.min.x, rect.min.y}, {0.0F, 0.0F}, rect.color});
-    vertices.push_back({{rect.max.x, rect.min.y}, {1.0F, 0.0F}, rect.color});
-    vertices.push_back({{rect.max.x, rect.max.y}, {1.0F, 1.0F}, rect.color});
-    vertices.push_back({{rect.min.x, rect.max.y}, {0.0F, 1.0F}, rect.color});
-    indices.insert(indices.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
+    const u32 base = static_cast<u32>(ui_vertices_.size());
+    ui_vertices_.push_back({{rect.min.x, rect.min.y}, {0.0F, 0.0F}, rect.color});
+    ui_vertices_.push_back({{rect.max.x, rect.min.y}, {1.0F, 0.0F}, rect.color});
+    ui_vertices_.push_back({{rect.max.x, rect.max.y}, {1.0F, 1.0F}, rect.color});
+    ui_vertices_.push_back({{rect.min.x, rect.max.y}, {0.0F, 1.0F}, rect.color});
+    ui_indices_.insert(ui_indices_.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
   }
 
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, white_texture_.id);
   glBindVertexArray(ui_vao_);
   glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
-  glBufferData(
-      GL_ARRAY_BUFFER,
-      static_cast<GLsizeiptr>(vertices.size() * sizeof(UIVertex)),
-      vertices.data(),
-      GL_DYNAMIC_DRAW);
+  const GLsizeiptr vertex_bytes =
+      static_cast<GLsizeiptr>(ui_vertices_.size() * sizeof(UIVertex));
+  glBufferData(GL_ARRAY_BUFFER, vertex_bytes, nullptr, GL_DYNAMIC_DRAW);
+  glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, ui_vertices_.data());
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
-  glBufferData(
-      GL_ELEMENT_ARRAY_BUFFER,
-      static_cast<GLsizeiptr>(indices.size() * sizeof(u32)),
-      indices.data(),
-      GL_DYNAMIC_DRAW);
-  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+  const GLsizeiptr index_bytes =
+      static_cast<GLsizeiptr>(ui_indices_.size() * sizeof(u32));
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_DYNAMIC_DRAW);
+  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
+  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
 }
 
 void OpenGLRenderer::draw_ui_textured_quads() {
@@ -593,23 +597,23 @@ void OpenGLRenderer::draw_ui_textured_quads() {
       continue;
     }
 
-    std::vector<UIVertex> vertices;
-    std::vector<u32> indices;
-    vertices.reserve(frame_.ui_textured_quads.size() * 4U);
-    indices.reserve(frame_.ui_textured_quads.size() * 6U);
+    ui_vertices_.clear();
+    ui_indices_.clear();
+    ui_vertices_.reserve(frame_.ui_textured_quads.size() * 4U);
+    ui_indices_.reserve(frame_.ui_textured_quads.size() * 6U);
     for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
       if (quad.source != source || quad.page != 0) {
         continue;
       }
 
-      const u32 base = static_cast<u32>(vertices.size());
-      vertices.push_back({quad.positions[0], quad.uvs[0], quad.color});
-      vertices.push_back({quad.positions[1], quad.uvs[1], quad.color});
-      vertices.push_back({quad.positions[2], quad.uvs[2], quad.color});
-      vertices.push_back({quad.positions[3], quad.uvs[3], quad.color});
-      indices.insert(indices.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
+      const u32 base = static_cast<u32>(ui_vertices_.size());
+      ui_vertices_.push_back({quad.positions[0], quad.uvs[0], quad.color});
+      ui_vertices_.push_back({quad.positions[1], quad.uvs[1], quad.color});
+      ui_vertices_.push_back({quad.positions[2], quad.uvs[2], quad.color});
+      ui_vertices_.push_back({quad.positions[3], quad.uvs[3], quad.color});
+      ui_indices_.insert(ui_indices_.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
     }
-    if (vertices.empty()) {
+    if (ui_vertices_.empty()) {
       continue;
     }
 
@@ -617,18 +621,16 @@ void OpenGLRenderer::draw_ui_textured_quads() {
     glBindTexture(GL_TEXTURE_2D, texture);
     glBindVertexArray(ui_vao_);
     glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(vertices.size() * sizeof(UIVertex)),
-        vertices.data(),
-        GL_DYNAMIC_DRAW);
+    const GLsizeiptr vertex_bytes =
+        static_cast<GLsizeiptr>(ui_vertices_.size() * sizeof(UIVertex));
+    glBufferData(GL_ARRAY_BUFFER, vertex_bytes, nullptr, GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, ui_vertices_.data());
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
-    glBufferData(
-        GL_ELEMENT_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(indices.size() * sizeof(u32)),
-        indices.data(),
-        GL_DYNAMIC_DRAW);
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+    const GLsizeiptr index_bytes =
+        static_cast<GLsizeiptr>(ui_indices_.size() * sizeof(u32));
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
   }
 }
 
@@ -637,22 +639,22 @@ void OpenGLRenderer::draw_ui_glyphs() {
     return;
   }
 
-  std::vector<UIVertex> vertices;
-  std::vector<u32> indices;
-  vertices.reserve(frame_.ui_glyphs.size() * 4U);
-  indices.reserve(frame_.ui_glyphs.size() * 6U);
+  ui_vertices_.clear();
+  ui_indices_.clear();
+  ui_vertices_.reserve(frame_.ui_glyphs.size() * 4U);
+  ui_indices_.reserve(frame_.ui_glyphs.size() * 6U);
   for (const UIGlyphDrawItem& glyph : frame_.ui_glyphs) {
     if (glyph.page != 0) {
       continue;
     }
-    const u32 base = static_cast<u32>(vertices.size());
-    vertices.push_back({{glyph.min.x, glyph.min.y}, {glyph.uv_min.x, glyph.uv_min.y}, glyph.color});
-    vertices.push_back({{glyph.max.x, glyph.min.y}, {glyph.uv_max.x, glyph.uv_min.y}, glyph.color});
-    vertices.push_back({{glyph.max.x, glyph.max.y}, {glyph.uv_max.x, glyph.uv_max.y}, glyph.color});
-    vertices.push_back({{glyph.min.x, glyph.max.y}, {glyph.uv_min.x, glyph.uv_max.y}, glyph.color});
-    indices.insert(indices.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
+    const u32 base = static_cast<u32>(ui_vertices_.size());
+    ui_vertices_.push_back({{glyph.min.x, glyph.min.y}, {glyph.uv_min.x, glyph.uv_min.y}, glyph.color});
+    ui_vertices_.push_back({{glyph.max.x, glyph.min.y}, {glyph.uv_max.x, glyph.uv_min.y}, glyph.color});
+    ui_vertices_.push_back({{glyph.max.x, glyph.max.y}, {glyph.uv_max.x, glyph.uv_max.y}, glyph.color});
+    ui_vertices_.push_back({{glyph.min.x, glyph.max.y}, {glyph.uv_min.x, glyph.uv_max.y}, glyph.color});
+    ui_indices_.insert(ui_indices_.end(), {base, base + 1U, base + 2U, base + 2U, base + 3U, base});
   }
-  if (vertices.empty()) {
+  if (ui_vertices_.empty()) {
     return;
   }
 
@@ -660,18 +662,16 @@ void OpenGLRenderer::draw_ui_glyphs() {
   glBindTexture(GL_TEXTURE_2D, font_atlas_.id);
   glBindVertexArray(ui_vao_);
   glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
-  glBufferData(
-      GL_ARRAY_BUFFER,
-      static_cast<GLsizeiptr>(vertices.size() * sizeof(UIVertex)),
-      vertices.data(),
-      GL_DYNAMIC_DRAW);
+  const GLsizeiptr vertex_bytes =
+      static_cast<GLsizeiptr>(ui_vertices_.size() * sizeof(UIVertex));
+  glBufferData(GL_ARRAY_BUFFER, vertex_bytes, nullptr, GL_DYNAMIC_DRAW);
+  glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, ui_vertices_.data());
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
-  glBufferData(
-      GL_ELEMENT_ARRAY_BUFFER,
-      static_cast<GLsizeiptr>(indices.size() * sizeof(u32)),
-      indices.data(),
-      GL_DYNAMIC_DRAW);
-  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+  const GLsizeiptr index_bytes =
+      static_cast<GLsizeiptr>(ui_indices_.size() * sizeof(u32));
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_DYNAMIC_DRAW);
+  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
+  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
 }
 
 void OpenGLRenderer::ensure_ui_buffers() {

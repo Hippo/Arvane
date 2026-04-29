@@ -98,6 +98,7 @@ private:
 
   u32 width_{};
   u32 height_{};
+  bool viewport_set_{};
   u32 next_mesh_id_{1};
   u32 max_chunk_mesh_uploads_per_frame_{8};
   u32 mesh_uploads_last_frame_{};
@@ -132,6 +133,8 @@ private:
   GLuint ui_vao_{};
   GLuint ui_vertex_buffer_{};
   GLuint ui_index_buffer_{};
+  std::vector<UIVertex> ui_vertices_;
+  std::vector<u32> ui_indices_;
 };
 
 } // namespace arv::render

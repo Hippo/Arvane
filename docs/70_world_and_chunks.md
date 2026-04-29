@@ -602,6 +602,11 @@ Chunks are generated when required by load or explicit generation requests.
 
 Generation is asynchronous. A streaming or gameplay caller may mark a section `Requested`, but it must not run terrain generation inline on the caller path. The authoritative server/world scheduler owns generation jobs, workers compute generated block data from immutable seed/config inputs, and the world thread publishes accepted results by transitioning the section to `Loaded`.
 
+Publication of completed generation jobs is budgeted independently from job
+submission. If several workers finish at once, the world/server publishes a
+small number per tick and leaves the rest queued, preventing chunk streaming,
+client application, meshing, and upload work from collapsing onto one frame.
+
 ### Generation triggers
 
 Generation may occur when:

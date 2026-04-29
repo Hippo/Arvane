@@ -927,6 +927,12 @@ Preferred publish order:
 
 A mesh should not be considered fully published until the renderer has accepted the new buffers.
 
+Renderer upload queues are budgeted. A frame may upload only a limited number of
+chunk section meshes, and any remaining validated CPU meshes stay queued for a
+later frame. Buffer updates should avoid synchronizing with in-flight GPU reads;
+for OpenGL-style backends this usually means orphaning or otherwise replacing
+buffer storage before copying the new CPU data.
+
 ---
 
 ## Mesh State Model

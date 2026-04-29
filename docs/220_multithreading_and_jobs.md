@@ -392,6 +392,13 @@ streaming system requests missing chunk
   -> streaming system sends the now-available snapshot within budget
 ```
 
+Completed generation publication is also budgeted. The server/world may have
+several finished generation jobs in a single tick, but it should publish only a
+small number before returning to the tick loop. Remaining completed jobs stay in
+the completion queue for later ticks. This keeps integrated singleplayer from
+turning one render frame into a burst of generation publish, chunk serialization,
+client chunk application, meshing, and GPU upload work.
+
 ---
 
 ## Save and Load Jobs
@@ -666,6 +673,11 @@ Rendering:
 Data passed from simulation to rendering should be snapshot-based or command-based.
 
 Rendering must not read live mutable simulation state directly.
+
+Render frames should also consume bounded queues. Client chunk snapshots, mesh
+upload requests, and diagnostic profiling output must not be drained without a
+budget on the render path. Spike warnings may remain enabled, but recurring
+profiling logs should be opt-in so logging does not become a frame pacing hazard.
 
 ---
 

@@ -289,7 +289,7 @@ Expected<OpenGLWindow, PlatformError> OpenGLWindow::create(const WindowConfig& c
 
   glfwSetWindowUserPointer(raw_window, &window);
   glfwSetScrollCallback(raw_window, glfw_scroll_callback);
-  glfwSwapInterval(1);
+  glfwSwapInterval(config.vsync ? 1 : 0);
   return Expected<OpenGLWindow, PlatformError>::success(std::move(window));
 }
 

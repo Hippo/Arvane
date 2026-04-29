@@ -254,6 +254,11 @@ Recommended controls:
 * priority based on distance from player
 * higher priority for chunks in front of the player if facing direction is available
 
+Integrated clients should apply received chunk snapshots through a separate
+render-frame budget. Server send limits prevent network bursts, but the client
+still needs its own cap so deserialized chunk data does not all mutate the
+client world and request mesh rescans on one frame.
+
 Example priority:
 
 ```text
@@ -491,4 +496,4 @@ Chunk streaming is not a render-frame operation.
 
 The client declares chunk interest only when its chunk position or settings change. The server computes the authoritative streaming set, diffs it against what was already sent, asks the world for chunk snapshots, and sends only necessary chunk data within a budget.
 
-The world provides chunk data. The streaming system decides what should be sent. The networking system transports messages. The client applies chunk data and schedules rendering work separately.
+The world provides chunk data. The streaming system decides what should be sent. The networking system transports messages. The client queues chunk data, applies it with a per-frame budget, and schedules rendering work separately.
