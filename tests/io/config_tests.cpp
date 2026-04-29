@@ -14,6 +14,7 @@ paths:
 window:
   width: 1920
   title: Test Window
+  vsync: false
 simulation:
   base_tps: 30
 network:
@@ -45,6 +46,7 @@ chunk_pipeline:
   EXPECT_EQ(result.value().window.width, 1920U);
   EXPECT_EQ(result.value().window.height, 720U);
   EXPECT_EQ(result.value().window.title, "Test Window");
+  EXPECT_FALSE(result.value().window.vsync);
   EXPECT_EQ(result.value().simulation.base_tps, 30U);
   EXPECT_EQ(result.value().network.port, 28000U);
   EXPECT_EQ(result.value().chunks.load_distance, 6);

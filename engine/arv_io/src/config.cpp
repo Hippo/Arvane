@@ -7,6 +7,8 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <arv/core/log.hpp>
+
 namespace arv::io {
 namespace {
 
@@ -164,6 +166,7 @@ ConfigResult parse_config_yaml(std::string_view text) {
       read_scalar(window, "width", config.window.width);
       read_scalar(window, "height", config.window.height);
       read_scalar(window, "title", config.window.title);
+      read_scalar(window, "vsync", config.window.vsync);
     }
 
     const YAML::Node simulation = root["simulation"];

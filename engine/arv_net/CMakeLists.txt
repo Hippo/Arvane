@@ -11,4 +11,10 @@ add_library(arv_net STATIC
   src/transport.cpp
 )
 target_include_directories(arv_net PUBLIC include)
-target_link_libraries(arv_net PUBLIC arv_core arv_protocol GameNetworkingSockets::static)
+target_link_libraries(arv_net PUBLIC
+  arv_core
+  arv_protocol
+  concurrentqueue
+  readerwriterqueue
+  GameNetworkingSockets::static
+)

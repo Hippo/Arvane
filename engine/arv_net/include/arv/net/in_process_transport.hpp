@@ -2,11 +2,14 @@
 
 #include "arv/net/transport.hpp"
 
-#include <deque>
+#include <atomic>
 #include <memory>
-#include <mutex>
+
+#include <readerwriterqueue.h>
 
 namespace arv::net {
+
+inline constexpr usize DefaultInProcessEventQueueCapacity = 1024U;
 
 enum class InProcessEndpointSide {
   Client,
@@ -16,15 +19,17 @@ enum class InProcessEndpointSide {
 namespace detail {
 
 struct InProcessEndpointState {
-  mutable std::mutex mutex;
-  std::deque<NetworkEvent> events;
-  ConnectionState state{ConnectionState::Disconnected};
+  std::atomic<ConnectionState> state{ConnectionState::Disconnected};
 };
 
 struct InProcessSharedState {
+  explicit InProcessSharedState(usize event_queue_capacity = DefaultInProcessEventQueueCapacity);
+
   InProcessEndpointState client;
   InProcessEndpointState server;
-  bool server_listening{};
+  std::atomic_bool server_listening{};
+  moodycamel::ReaderWriterQueue<NetworkEvent> client_to_server_events;
+  moodycamel::ReaderWriterQueue<NetworkEvent> server_to_client_events;
 };
 
 } // namespace detail
@@ -44,6 +49,10 @@ private:
   detail::InProcessEndpointState& local_state();
   const detail::InProcessEndpointState& local_state() const;
   detail::InProcessEndpointState& peer_state();
+  const detail::InProcessEndpointState& peer_state() const;
+  moodycamel::ReaderWriterQueue<NetworkEvent>& inbound_events();
+  moodycamel::ReaderWriterQueue<NetworkEvent>& outbound_events();
+  [[nodiscard]] static bool connection_is_active(ConnectionState state) noexcept;
 
   std::shared_ptr<detail::InProcessSharedState> shared_;
   InProcessEndpointSide side_{InProcessEndpointSide::Client};
@@ -54,6 +63,7 @@ struct InProcessTransportPair {
   std::unique_ptr<ITransport> server;
 };
 
-InProcessTransportPair make_in_process_transport_pair();
+InProcessTransportPair make_in_process_transport_pair(
+    usize event_queue_capacity = DefaultInProcessEventQueueCapacity);
 
 } // namespace arv::net

@@ -159,7 +159,7 @@ void rebuild_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
 }
 
 void enqueue_dirty_mesh_chunks_in_view(world::WorldRuntime& world, ChunkViewState& view) {
-  for (const ChunkCoord coord : world.dirty_chunks(
+  for (const ChunkCoord coord : world.consume_dirty_mesh_chunks(
            voxel::ChunkDirtyFlags::Geometry | voxel::ChunkDirtyFlags::LightMesh)) {
     enqueue_mesh_candidate(view, coord);
   }
@@ -180,6 +180,8 @@ void retarget_chunk_view(
 
   remove_draw_items_outside_view(view);
   rebuild_mesh_candidates(world, view);
+  (void)world.consume_dirty_mesh_chunks(
+      voxel::ChunkDirtyFlags::Geometry | voxel::ChunkDirtyFlags::LightMesh);
   view.mesh_rescan_requested = false;
 }
 
@@ -199,7 +201,10 @@ void drain_mesh_jobs(
     view.mesh_completed_last_frame++;
     view.mesh_ms_last_frame += timed.duration_ms;
     const bool mesh_matches_current_version =
-        world.validate_mesh_result(timed.mesh.coord, timed.mesh.source_version);
+        world.validate_mesh_result(timed.mesh.coord, timed.mesh.source_version) &&
+        world.validate_mesh_content_result(
+            timed.mesh.coord,
+            timed.mesh.source_content_version);
     if (mesh_matches_current_version) {
       render::ChunkDrawItem draw_item;
       draw_item.key = {timed.mesh.world_id, timed.mesh.coord};
@@ -208,10 +213,10 @@ void drain_mesh_jobs(
       render::ChunkMeshUpload upload;
       upload.mesh = std::move(timed.mesh);
       renderer.enqueue_chunk_mesh_upload(std::move(upload));
-      (void)world.publish_mesh_result(
-          draw_item.key.coord,
-          draw_item.expected_version,
-          draw_item.expected_light_version);
+      if (voxel::ChunkSection* upload_chunk = world.find_chunk(draw_item.key.coord);
+          upload_chunk != nullptr) {
+        upload_chunk->mark_mesh_waiting_for_upload();
+      }
       const auto existing_draw_item = view.draw_items.find(draw_item.key.coord);
       if (existing_draw_item == view.draw_items.end() ||
           render::chunk_mesh_upload_at_least_as_new(
@@ -232,6 +237,30 @@ void drain_mesh_jobs(
 
     view.pending_meshes.erase(
         view.pending_meshes.begin() + static_cast<isize>(index));
+  }
+}
+
+void drain_mesh_upload_receipts(
+    world::WorldRuntime& world,
+    render::OpenGLRenderer& renderer,
+    ChunkViewState& view) {
+  for (const render::ChunkMeshUploadReceipt& receipt :
+       renderer.drain_chunk_mesh_upload_receipts()) {
+    if (!receipt.accepted) {
+      if (is_inside_render_view(view, receipt.key.coord)) {
+        enqueue_mesh_candidate(view, receipt.key.coord);
+      }
+      continue;
+    }
+
+    const bool published = world.publish_mesh_result(
+        receipt.key.coord,
+        receipt.source_version,
+        receipt.source_light_version,
+        receipt.source_content_version);
+    if (!published && is_inside_render_view(view, receipt.key.coord)) {
+      enqueue_mesh_candidate(view, receipt.key.coord);
+    }
   }
 }
 
@@ -287,6 +316,7 @@ void schedule_mesh_jobs(
 
     const WorldID world_id = world.id();
     const u64 source_version = snapshot->source_version;
+    const u64 source_content_version = snapshot->source_content_version;
     const u64 source_light_version = snapshot->source_light_version;
     auto job = scheduler.submit(
         "view_chunk_meshing",
@@ -304,7 +334,8 @@ void schedule_mesh_jobs(
     });
     chunk->mark_mesh_queued();
     view.mesh_in_flight.insert(coord);
-    view.pending_meshes.push_back({coord, source_version, source_light_version, std::move(job)});
+    view.pending_meshes.push_back(
+        {coord, source_version, source_content_version, source_light_version, std::move(job)});
     ++mesh_jobs_scheduled;
   }
 }
@@ -347,12 +378,13 @@ void log_chunk_view_profile(
     arv::core::info(
         "chunk_profile",
         "workers queued_mesh={} completed_mesh={} mesh_ms={} pending_uploads={} "
-        "uploads_last_frame={} upload_ms={}",
+        "uploads_last_frame={} upload_discards={} upload_ms={}",
         view.pending_meshes.size(),
         view.mesh_completed_last_frame,
         view.mesh_ms_last_frame,
         renderer.pending_mesh_upload_count(),
         renderer.mesh_uploads_last_frame(),
+        renderer.mesh_upload_discards_last_frame(),
         renderer.mesh_upload_time_ms_last_frame());
     (void)renderer;
     view.last_profile_log = refresh_end;
@@ -423,6 +455,7 @@ bool update_chunk_view(
       view.observed_mesh_revision != 0U &&
       view.observed_mesh_revision != entry_mesh_revision;
 
+  drain_mesh_upload_receipts(world, renderer, view);
   drain_mesh_jobs(world, renderer, view);
 
   if (!target_matches(view, distances, center, min_chunk_y, max_chunk_y)) {

@@ -22,6 +22,58 @@ usize resolve_worker_thread_count(WorkerThreadConfig config) noexcept {
   return std::clamp(requested, min_workers, max_workers);
 }
 
+RuntimeThreadBudgetPlan plan_runtime_thread_budget(
+    RuntimeThreadBudgetConfig config) noexcept {
+  RuntimeThreadBudgetPlan plan;
+  plan.hardware_thread_count = hardware_thread_count_or_one();
+  const usize named_role_threads =
+      config.main_thread_count +
+      config.simulation_thread_count +
+      config.render_thread_count +
+      config.network_thread_count;
+  plan.reserved_thread_count =
+      std::max(config.workers.reserved_thread_count, named_role_threads);
+
+  WorkerThreadConfig total_config = config.workers;
+  total_config.reserved_thread_count = plan.reserved_thread_count;
+  plan.total_worker_thread_count = resolve_worker_thread_count(total_config);
+  if (config.split_primary_secondary_pools) {
+    plan.total_worker_thread_count = std::max<usize>(plan.total_worker_thread_count, 2U);
+  }
+
+  if (!config.split_primary_secondary_pools || plan.total_worker_thread_count <= 1U) {
+    plan.primary_worker_thread_count = plan.total_worker_thread_count;
+    plan.secondary_worker_thread_count = 0U;
+  } else {
+    plan.primary_worker_thread_count =
+        std::max<usize>(plan.total_worker_thread_count / 2U, 1U);
+    plan.secondary_worker_thread_count =
+        plan.total_worker_thread_count - plan.primary_worker_thread_count;
+    if (plan.secondary_worker_thread_count == 0U) {
+      plan.secondary_worker_thread_count = 1U;
+      plan.primary_worker_thread_count =
+          plan.primary_worker_thread_count > 1U ? plan.primary_worker_thread_count - 1U : 1U;
+    }
+  }
+
+  auto explicit_pool_config =
+      [reserved = plan.reserved_thread_count](usize worker_count) noexcept {
+        WorkerThreadConfig pool;
+        pool.worker_thread_count = std::max<usize>(worker_count, 1U);
+        pool.reserved_thread_count = reserved;
+        pool.min_worker_thread_count = 1U;
+        pool.max_worker_thread_count = pool.worker_thread_count;
+        return pool;
+      };
+
+  plan.primary_workers = explicit_pool_config(plan.primary_worker_thread_count);
+  plan.secondary_workers = explicit_pool_config(
+      plan.secondary_worker_thread_count == 0U
+          ? plan.primary_worker_thread_count
+          : plan.secondary_worker_thread_count);
+  return plan;
+}
+
 Scheduler::Scheduler(usize worker_count) : executor_(std::max<usize>(worker_count, 1)) {
 }
 

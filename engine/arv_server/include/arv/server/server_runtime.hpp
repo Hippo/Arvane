@@ -48,6 +48,7 @@ struct ServerStartInfo {
   u32 max_generation_results_per_tick{2};
   u32 max_lighting_results_per_tick{1};
   u32 max_pending_generation_jobs{4};
+  sched::WorkerThreadConfig worker_threads{};
 };
 
 struct DroppedItemStack {
@@ -181,7 +182,7 @@ private:
     sched::JobHandle<world::GeneratedChunkResult> job;
   };
 
-  sched::Scheduler world_jobs_;
+  std::unique_ptr<sched::Scheduler> world_jobs_;
   std::vector<PendingGenerationJob> pending_generation_jobs_;
   std::vector<PendingLightingJob> pending_lighting_jobs_;
   u32 max_pending_generation_jobs_{4};

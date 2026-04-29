@@ -207,6 +207,14 @@ struct ChunkMeshKey {
   constexpr bool operator==(const ChunkMeshKey&) const = default;
 };
 
+struct ChunkMeshUploadReceipt {
+  ChunkMeshKey key{};
+  u64 source_version{};
+  u64 source_content_version{};
+  u64 source_light_version{};
+  bool accepted{};
+};
+
 struct ChunkRenderState {
   MeshID opaque_mesh{};
   MeshID transparent_mesh{};

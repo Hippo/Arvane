@@ -59,6 +59,53 @@ void BM_UnorderedMapRegistryLookup(benchmark::State& state) {
   benchmark::DoNotOptimize(sum);
 }
 
+void BM_ChunkCoordHash(benchmark::State& state) {
+  const std::vector<arv::ChunkCoord> keys = make_lookup_keys();
+  std::hash<arv::ChunkCoord> hasher;
+  arv::usize sum = 0;
+  arv::usize index = 0;
+  for (auto _ : state) {
+    sum ^= hasher(keys[index & (keys.size() - 1U)]);
+    ++index;
+  }
+  benchmark::DoNotOptimize(sum);
+}
+
+void BM_NearbyChunkLookup(benchmark::State& state) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  for (arv::i32 z = -8; z <= 8; ++z) {
+    for (arv::i32 y = -2; y <= 2; ++y) {
+      for (arv::i32 x = -8; x <= 8; ++x) {
+        world.ensure_chunk({{x, y, z}});
+      }
+    }
+  }
+
+  const std::vector<arv::ChunkCoord> centers = make_lookup_keys();
+  arv::usize index = 0;
+  arv::usize hits = 0;
+  for (auto _ : state) {
+    const arv::ChunkCoord center = centers[index & (centers.size() - 1U)];
+    for (arv::i32 z = -1; z <= 1; ++z) {
+      for (arv::i32 y = -1; y <= 1; ++y) {
+        for (arv::i32 x = -1; x <= 1; ++x) {
+          if (x == 0 && y == 0 && z == 0) {
+            continue;
+          }
+          const arv::ChunkCoord coord{{
+              center.value.x + x,
+              center.value.y + y,
+              center.value.z + z,
+          }};
+          hits += world.find_chunk(coord) != nullptr ? 1U : 0U;
+        }
+      }
+    }
+    ++index;
+  }
+  benchmark::DoNotOptimize(hits);
+}
+
 void BM_BlockRegistryStableNameLookup(benchmark::State& state) {
   const arv::voxel::BlockRegistry registry = arv::bench_support::make_registry();
   std::vector<std::string> names;
@@ -137,6 +184,8 @@ void BM_BlockVariantPaletteLookup(benchmark::State& state) {
 
 BENCHMARK(BM_HashMapRegistryLookup);
 BENCHMARK(BM_UnorderedMapRegistryLookup);
+BENCHMARK(BM_ChunkCoordHash);
+BENCHMARK(BM_NearbyChunkLookup);
 BENCHMARK(BM_BlockRegistryStableNameLookup);
 BENCHMARK(BM_PackedVertexGeneration);
 BENCHMARK(BM_BlockVariantPaletteLookup);

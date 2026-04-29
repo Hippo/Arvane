@@ -15,6 +15,7 @@ add_executable(arv_tests
   core/math_tests.cpp
   core/types_tests.cpp
   io/config_tests.cpp
+  net/in_process_transport_tests.cpp
   net/integrated_handshake_tests.cpp
   persistence/region_file_tests.cpp
   persistence/save_tests.cpp

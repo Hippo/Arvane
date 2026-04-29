@@ -29,6 +29,7 @@ struct ChunkViewState {
   struct PendingMesh {
     ChunkCoord coord{};
     u64 source_version{};
+    u64 source_content_version{};
     u64 source_light_version{};
     sched::JobHandle<TimedChunkMeshResult> job;
   };

@@ -75,3 +75,37 @@ TEST(SchedulerTests, WorkerThreadPolicyReservesEngineThreadsForAutomaticCount) {
 
   EXPECT_EQ(arv::sched::resolve_worker_thread_count(config), 1U);
 }
+
+TEST(SchedulerTests, RuntimeThreadBudgetReservesNamedRolesAndSplitsPools) {
+  arv::sched::RuntimeThreadBudgetConfig config;
+  config.workers.worker_thread_count = 6;
+  config.workers.reserved_thread_count = 1;
+  config.workers.min_worker_thread_count = 1;
+  config.workers.max_worker_thread_count = 16;
+  config.split_primary_secondary_pools = true;
+
+  const arv::sched::RuntimeThreadBudgetPlan plan =
+      arv::sched::plan_runtime_thread_budget(config);
+
+  EXPECT_GE(plan.reserved_thread_count, 4U);
+  EXPECT_EQ(plan.total_worker_thread_count, 6U);
+  EXPECT_EQ(
+      plan.primary_worker_thread_count + plan.secondary_worker_thread_count,
+      plan.total_worker_thread_count);
+  EXPECT_EQ(plan.primary_workers.worker_thread_count, plan.primary_worker_thread_count);
+  EXPECT_EQ(plan.secondary_workers.worker_thread_count, plan.secondary_worker_thread_count);
+}
+
+TEST(SchedulerTests, RuntimeThreadBudgetKeepsSplitPoolsRunnableWhenAutoResolvesLow) {
+  arv::sched::RuntimeThreadBudgetConfig config;
+  config.workers.worker_thread_count = 1;
+  config.workers.min_worker_thread_count = 1;
+  config.workers.max_worker_thread_count = 1;
+  config.split_primary_secondary_pools = true;
+
+  const arv::sched::RuntimeThreadBudgetPlan plan =
+      arv::sched::plan_runtime_thread_budget(config);
+
+  EXPECT_EQ(plan.primary_worker_thread_count, 1U);
+  EXPECT_EQ(plan.secondary_worker_thread_count, 1U);
+}

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <optional>
+#include <vector>
 
 TEST(WorldRuntimeTests, SetAndGetBlockUseFloorBasedNegativeCoordinates) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
@@ -299,6 +300,39 @@ TEST(WorldRuntimeTests, AcceptsMeshWithStaleLightVersionButKeepsLightMeshDirty) 
       snapshot->source_light_version));
   EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
   EXPECT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
+}
+
+TEST(WorldRuntimeTests, MeshPublicationRejectsStaleContentVersion) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
+  const auto snapshot = world.make_meshing_snapshot(
+      {{0, 0, 0}},
+      arv::world::MissingNeighborPolicy::TreatMissingAsAir);
+  ASSERT_TRUE(snapshot);
+
+  ASSERT_TRUE(world.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{7}));
+
+  EXPECT_FALSE(world.publish_mesh_result(
+      {{0, 0, 0}},
+      chunk.block_version(),
+      snapshot->source_light_version,
+      snapshot->source_content_version));
+  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
+}
+
+TEST(WorldRuntimeTests, DirtyMeshQueueReportsEditedSectionsWithoutFullScan) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  (void)world.consume_dirty_mesh_chunks(arv::voxel::ChunkDirtyFlags::NeedsMesh);
+
+  ASSERT_TRUE(world.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{7}));
+  const std::vector<arv::ChunkCoord> dirty =
+      world.consume_dirty_mesh_chunks(arv::voxel::ChunkDirtyFlags::NeedsMesh);
+
+  ASSERT_EQ(dirty.size(), 1U);
+  EXPECT_EQ(dirty.front(), (arv::ChunkCoord{{0, 0, 0}}));
+  EXPECT_TRUE(world.consume_dirty_mesh_chunks(
+      arv::voxel::ChunkDirtyFlags::NeedsMesh).empty());
 }
 
 TEST(WorldRuntimeTests, ApplyingChunkSnapshotWithoutLightingKeepsChunkMeshable) {

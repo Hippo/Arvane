@@ -308,6 +308,7 @@ LightingPublishStats WorldLighting::publish_result(
 
     if (chunk->replace_lights(std::move(chunk_result.lights))) {
       ++stats.changed_chunks;
+      world.enqueue_dirty_mesh_chunk(chunk_result.coord);
       world.mark_light_dependency_neighbors_dirty(chunk_result.coord);
     }
     chunk->clear_dirty(voxel::ChunkDirtyFlags::Lighting);

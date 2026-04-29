@@ -136,6 +136,18 @@ The transport backend should be replaceable without rewriting gameplay networkin
 
 ---
 
+## Transport Pump Ownership
+
+Transport backends use explicit owner-thread pumping.
+
+The owner thread calls `poll_events()` and owns backend state mutation. For GameNetworkingSockets this includes socket handles, listen handles, poll groups, connection maps, connection state, callback dispatch, and queued inbound `NetworkEvent`s. GameNetworkingSockets callbacks are routed during `RunCallbacks()` on the owner thread and must not update gameplay systems directly.
+
+`send()` may be called from outside the owner thread, but it only enqueues an outbound send command. The owner thread drains outbound commands, resolves engine `ConnectionID` values to backend handles, applies the selected reliability flags, receives poll-group messages, and returns engine events for the client or server runtime to process at its normal tick point.
+
+The in-process transport uses bounded single-producer/single-consumer queues. The client writes the client-to-server queue and the server reads it. The server writes the server-to-client queue and the client reads it. Queue-full conditions fail the send/connect operation instead of blocking.
+
+---
+
 ## Protocol Design
 
 Protocol messages should be explicit, versioned, and direction-aware.
@@ -987,6 +999,8 @@ They may:
 * copy packet bytes into owned buffers
 * mark connections as closing
 * record diagnostics/statistics
+
+The current GameNetworkingSockets backend assumes one active callback owner per process. This is asserted in the transport implementation. Supporting simultaneous independent GameNetworkingSockets transports in one process requires replacing that singleton callback route with an explicit per-instance dispatch mechanism.
 
 ## Send Path
 

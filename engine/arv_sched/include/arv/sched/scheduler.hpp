@@ -34,9 +34,31 @@ struct WorkerThreadConfig {
   usize max_worker_thread_count{64};
 };
 
+struct RuntimeThreadBudgetConfig {
+  WorkerThreadConfig workers{};
+  usize main_thread_count{1};
+  usize simulation_thread_count{1};
+  usize render_thread_count{1};
+  usize network_thread_count{1};
+  bool split_primary_secondary_pools{};
+};
+
+struct RuntimeThreadBudgetPlan {
+  usize hardware_thread_count{};
+  usize reserved_thread_count{};
+  usize total_worker_thread_count{};
+  usize primary_worker_thread_count{};
+  usize secondary_worker_thread_count{};
+  WorkerThreadConfig primary_workers{};
+  WorkerThreadConfig secondary_workers{};
+};
+
 [[nodiscard]] usize hardware_thread_count_or_one() noexcept;
 
 [[nodiscard]] usize resolve_worker_thread_count(WorkerThreadConfig config) noexcept;
+
+[[nodiscard]] RuntimeThreadBudgetPlan plan_runtime_thread_budget(
+    RuntimeThreadBudgetConfig config) noexcept;
 
 template<typename T>
 class JobHandle {

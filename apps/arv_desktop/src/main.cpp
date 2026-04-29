@@ -195,11 +195,16 @@ int main(int argc, char** argv) {
   auto window_result = arv::platform::OpenGLWindow::create({
       config.window.width,
       config.window.height,
-      config.window.title});
+      config.window.title,
+      config.window.vsync});
   if (!window_result) {
     arv::core::error("platform", window_result.error().message);
     return 1;
   }
+  arv::core::info(
+      "render",
+      "vsync={}",
+      config.window.vsync ? "enabled" : "disabled");
   arv::platform::OpenGLWindow window = std::move(window_result.value());
   const auto input_bindings_result =
       arv::io::load_input_bindings_file_or_defaults(config.paths.input_bindings_file);
@@ -383,6 +388,15 @@ int main(int argc, char** argv) {
   chunk_generation.config = generation_config;
   chunk_generation.palette = generation_palette;
 
+  arv::sched::RuntimeThreadBudgetConfig thread_budget_config;
+  thread_budget_config.workers.worker_thread_count = config.jobs.worker_threads;
+  thread_budget_config.workers.reserved_thread_count = config.jobs.reserved_threads;
+  thread_budget_config.workers.min_worker_thread_count = config.jobs.min_worker_threads;
+  thread_budget_config.workers.max_worker_thread_count = config.jobs.max_worker_threads;
+  thread_budget_config.split_primary_secondary_pools = true;
+  const arv::sched::RuntimeThreadBudgetPlan thread_budget =
+      arv::sched::plan_runtime_thread_budget(thread_budget_config);
+
   arv::server::ServerRuntime integrated_server(std::move(transport_pair.server));
   auto server_start = integrated_server.start({
       arv::server::ServerMode::Integrated,
@@ -396,7 +410,8 @@ int main(int argc, char** argv) {
       chunk_generation,
       config.chunk_pipeline.max_generation_results_per_tick,
       config.chunk_pipeline.max_lighting_results_per_tick,
-      config.chunk_pipeline.max_generation_jobs_per_frame});
+      config.chunk_pipeline.max_generation_jobs_per_frame,
+      thread_budget.primary_workers});
   if (!server_start) {
     arv::core::error("server", server_start.error().message);
     return 1;
@@ -498,17 +513,14 @@ int main(int argc, char** argv) {
         config.chunk_pipeline.max_client_chunk_unloads_per_frame);
   }
 
-  arv::sched::WorkerThreadConfig worker_thread_config;
-  worker_thread_config.worker_thread_count = config.jobs.worker_threads;
-  worker_thread_config.reserved_thread_count = config.jobs.reserved_threads;
-  worker_thread_config.min_worker_thread_count = config.jobs.min_worker_threads;
-  worker_thread_config.max_worker_thread_count = config.jobs.max_worker_threads;
-  arv::sched::Scheduler world_jobs{worker_thread_config};
+  arv::sched::Scheduler world_jobs{thread_budget.secondary_workers};
   arv::core::info(
       "jobs",
-      "worker_threads={} reserved_threads={}",
-      world_jobs.worker_count(),
-      config.jobs.reserved_threads);
+      "hardware_threads={} reserved_threads={} server_workers={} client_workers={}",
+      thread_budget.hardware_thread_count,
+      thread_budget.reserved_thread_count,
+      thread_budget.primary_worker_thread_count,
+      world_jobs.worker_count());
   if (!arv::desktop::update_chunk_view(
           client_world,
           renderer,
@@ -573,16 +585,8 @@ int main(int argc, char** argv) {
       fps_sample_frames = 0;
       fps_sample_seconds = 0.0F;
     }
-    if (frame_delta_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
-      arv::core::warn(
-          "chunk_profile",
-          "frame spike {}ms queued_mesh={} pending_uploads={} uploads_last_frame={}",
-          frame_delta_ms,
-          chunk_view.pending_meshes.size(),
-          renderer.pending_mesh_upload_count(),
-          renderer.mesh_uploads_last_frame());
-    }
 
+    const auto frame_work_start = std::chrono::steady_clock::now();
     arv::platform::OpenGLWindow::poll_events();
     const arv::platform::InputSnapshot platform_input = window.poll_input();
     const bool was_inventory_open = client.inventory_open();
@@ -656,7 +660,10 @@ int main(int argc, char** argv) {
         ticks.interpolation_alpha(),
         framebuffer.width,
         framebuffer.height);
-    frame.opaque_chunks = arv::desktop::chunk_draw_items(chunk_view);
+    const std::vector<arv::render::ChunkDrawItem>& visible_chunks =
+        arv::desktop::chunk_draw_items(chunk_view);
+    frame.opaque_chunks = visible_chunks;
+    frame.transparent_chunks = visible_chunks;
 
     if (!ui_snapshot_initialized || fixed_tick_ran) {
       refresh_inventory_slots();
@@ -740,6 +747,20 @@ int main(int argc, char** argv) {
     }
     renderer.submit_frame(std::move(frame));
     renderer.render();
+    const auto frame_work_end = std::chrono::steady_clock::now();
+    const double frame_work_ms =
+        std::chrono::duration<double, std::milli>(
+            frame_work_end - frame_work_start).count();
+    if (frame_work_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
+      arv::core::warn(
+          "frame_profile",
+          "cpu frame work spike {}ms frame_delta={}ms queued_mesh={} pending_uploads={} uploads_last_frame={}",
+          frame_work_ms,
+          frame_delta_ms,
+          chunk_view.pending_meshes.size(),
+          renderer.pending_mesh_upload_count(),
+          renderer.mesh_uploads_last_frame());
+    }
     window.swap_buffers();
   }
 

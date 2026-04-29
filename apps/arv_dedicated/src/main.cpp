@@ -6,6 +6,7 @@
 #include "arv/player/player_constants.hpp"
 #include "arv/server/dedicated_lifetime.hpp"
 #include "arv/server/server_runtime.hpp"
+#include "arv/sched/scheduler.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/voxel/fluid.hpp"
 
@@ -15,6 +16,7 @@
 #include <csignal>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -147,6 +149,14 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  arv::sched::RuntimeThreadBudgetConfig thread_budget_config;
+  thread_budget_config.workers.worker_thread_count = config.jobs.worker_threads;
+  thread_budget_config.workers.reserved_thread_count = config.jobs.reserved_threads;
+  thread_budget_config.workers.min_worker_thread_count = config.jobs.min_worker_threads;
+  thread_budget_config.workers.max_worker_thread_count = config.jobs.max_worker_threads;
+  const arv::sched::RuntimeThreadBudgetPlan thread_budget =
+      arv::sched::plan_runtime_thread_budget(thread_budget_config);
+
   arv::server::ServerRuntime server(std::make_unique<arv::net::GameNetworkingSocketsTransport>());
   auto start_result = server.start({
       arv::server::ServerMode::Dedicated,
@@ -155,7 +165,13 @@ int main(int argc, char** argv) {
       &block_registry,
       &item_registry,
       arv::player::default_player_tuning(),
-      arv::voxel::make_water_fluid_definition()});
+      arv::voxel::make_water_fluid_definition(),
+      {},
+      std::nullopt,
+      config.chunk_pipeline.max_generation_results_per_tick,
+      config.chunk_pipeline.max_lighting_results_per_tick,
+      config.chunk_pipeline.max_generation_jobs_per_frame,
+      thread_budget.primary_workers});
   if (!start_result) {
     arv::core::error("server", start_result.error().message);
     transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);

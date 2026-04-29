@@ -100,7 +100,8 @@ public:
   bool publish_mesh_result(
       ChunkCoord coord,
       u64 source_block_version,
-      u64 source_light_version) noexcept;
+      u64 source_light_version,
+      u64 source_content_version = 0U) noexcept;
   bool publish_generated_chunk(GeneratedChunk generated) noexcept;
   void restore_saved_chunk(
       ChunkCoord coord,
@@ -144,6 +145,8 @@ public:
       const voxel::BlockRegistry& registry,
       const voxel::FluidDefinition& fluid_definition);
   [[nodiscard]] std::vector<ChunkCoord> dirty_chunks(voxel::ChunkDirtyFlags flag) const;
+  [[nodiscard]] std::vector<ChunkCoord> consume_dirty_mesh_chunks(
+      voxel::ChunkDirtyFlags flag);
 
 private:
   friend class FluidSolver;
@@ -170,6 +173,7 @@ private:
   [[nodiscard]] static BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept;
   void mark_lighting_content_dirty() noexcept;
   void mark_mesh_content_dirty() noexcept;
+  void enqueue_dirty_mesh_chunk(ChunkCoord coord);
   void recompute_lighting_work_pending() noexcept;
   void enqueue_neighbor_block_updates(BlockPos pos);
   void mark_boundary_neighbors_dirty(ChunkCoord coord, SectionLocalPos local) noexcept;
@@ -195,6 +199,8 @@ private:
   std::deque<BlockUpdate> block_updates_;
   std::deque<FluidUpdate> fluid_updates_;
   HashMap<ChunkCoord, std::vector<FluidUpdate>> deferred_boundary_fluid_updates_;
+  std::deque<ChunkCoord> dirty_mesh_chunks_;
+  HashSet<ChunkCoord> dirty_mesh_chunk_set_;
 };
 
 } // namespace arv::world

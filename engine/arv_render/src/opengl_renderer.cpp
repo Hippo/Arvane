@@ -253,6 +253,7 @@ void OpenGLRenderer::begin_shutdown() {
 void OpenGLRenderer::process_chunk_mesh_uploads() {
   const auto start = std::chrono::steady_clock::now();
   mesh_uploads_last_frame_ = 0;
+  mesh_upload_discards_last_frame_ = 0;
   u32 upload_attempts = 0;
 
   while (upload_attempts < max_chunk_mesh_uploads_per_frame_ &&
@@ -260,14 +261,35 @@ void OpenGLRenderer::process_chunk_mesh_uploads() {
     ChunkMeshUpload upload = std::move(pending_chunk_mesh_uploads_.front());
     pending_chunk_mesh_uploads_.pop_front();
     ++upload_attempts;
+    const ChunkMeshUploadReceipt receipt{
+        {upload.mesh.world_id, upload.mesh.coord},
+        upload.mesh.source_version,
+        upload.mesh.source_content_version,
+        upload.mesh.source_light_version,
+        false};
     if (upload_chunk_mesh_now(std::move(upload))) {
       ++mesh_uploads_last_frame_;
+      chunk_mesh_upload_receipts_.push_back({
+          receipt.key,
+          receipt.source_version,
+          receipt.source_content_version,
+          receipt.source_light_version,
+          true});
+    } else {
+      ++mesh_upload_discards_last_frame_;
+      chunk_mesh_upload_receipts_.push_back(receipt);
     }
   }
 
   const auto end = std::chrono::steady_clock::now();
   mesh_upload_time_ms_last_frame_ =
       std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+std::vector<ChunkMeshUploadReceipt> OpenGLRenderer::drain_chunk_mesh_upload_receipts() {
+  std::vector<ChunkMeshUploadReceipt> receipts;
+  receipts.swap(chunk_mesh_upload_receipts_);
+  return receipts;
 }
 
 bool OpenGLRenderer::upload_chunk_mesh_now(ChunkMeshUpload upload) {

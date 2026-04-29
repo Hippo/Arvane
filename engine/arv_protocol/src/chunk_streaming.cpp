@@ -29,6 +29,12 @@ Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
   return Expected<void, ProtocolError>::success();
 }
 
+[[nodiscard]] constexpr usize chunk_data_wire_size(bool has_lighting) noexcept {
+  return sizeof(u32) + sizeof(i32) * 3U + sizeof(u64) * 3U + sizeof(u8) +
+         voxel::ChunkVolume * sizeof(u32) +
+         (has_lighting ? voxel::ChunkVolume * sizeof(voxel::LightWord) : 0U);
+}
+
 } // namespace
 
 std::vector<u8> serialize_chunk_interest_update(const ChunkInterestUpdate& update) {
@@ -85,7 +91,7 @@ Expected<ChunkInterestUpdate, ProtocolError> deserialize_chunk_interest_update(
 }
 
 std::vector<u8> serialize_chunk_data(const ChunkData& data) {
-  MessageWriter writer;
+  MessageWriter writer(chunk_data_wire_size(data.has_lighting));
   writer.write<u32>(data.world_id.value);
   write_chunk_coord(writer, data.coord);
   writer.write<u64>(data.chunk_version);

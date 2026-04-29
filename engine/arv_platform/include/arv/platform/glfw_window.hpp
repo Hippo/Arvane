@@ -21,7 +21,7 @@ struct WindowConfig {
   u32 width{1280};
   u32 height{720};
   std::string title{"Arvane"};
-  bool vsync{true};
+  bool vsync{false};
 };
 
 struct FramebufferSize {

@@ -162,6 +162,29 @@ Forbidden:
 
 ---
 
+## Network Transport Pump Thread
+
+The transport pump thread owns transport backend state.
+
+For GameNetworkingSockets, the owner thread is the only thread that may mutate:
+
+- socket and listen handles
+- poll groups
+- connection handle maps
+- transport connection states
+- inbound transport event queues
+
+Other threads may request sends through the transport API, but those calls enqueue outbound send commands. The owner thread drains the send command queue, calls GameNetworkingSockets, runs transport callbacks, receives poll-group messages, and publishes engine-level `NetworkEvent`s at an explicit pump point.
+
+In-process transport uses one single-producer/single-consumer queue in each direction:
+
+- client writes client-to-server events, server reads them
+- server writes server-to-client events, client reads them
+
+Transport callbacks and receive loops must not mutate simulation, world, renderer, or plugin state directly.
+
+---
+
 ## Job System Model
 
 Arvane uses a job system for asynchronous work.

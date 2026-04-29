@@ -40,6 +40,12 @@ public:
     return mesh_upload_time_ms_last_frame_;
   }
 
+  [[nodiscard]] u32 mesh_upload_discards_last_frame() const noexcept {
+    return mesh_upload_discards_last_frame_;
+  }
+
+  [[nodiscard]] std::vector<ChunkMeshUploadReceipt> drain_chunk_mesh_upload_receipts();
+
   void render() override;
 
   void begin_shutdown() override;
@@ -99,6 +105,7 @@ private:
   u32 next_mesh_id_{1};
   u32 max_chunk_mesh_uploads_per_frame_{8};
   u32 mesh_uploads_last_frame_{};
+  u32 mesh_upload_discards_last_frame_{};
   double mesh_upload_time_ms_last_frame_{};
   GLuint chunk_program_{};
   GLint chunk_origin_uniform_{-1};
@@ -123,6 +130,7 @@ private:
   FramePacket frame_{};
   HashMap<ChunkMeshKey, ChunkGpuState> chunks_;
   std::deque<ChunkMeshUpload> pending_chunk_mesh_uploads_;
+  std::vector<ChunkMeshUploadReceipt> chunk_mesh_upload_receipts_;
   GpuTexture terrain_atlas_{};
   GpuTexture font_atlas_{};
   GpuTexture item_atlas_{};

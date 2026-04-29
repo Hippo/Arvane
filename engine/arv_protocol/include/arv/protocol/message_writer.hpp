@@ -35,6 +35,12 @@ using WireValueTypeT = typename WireValueType<T>::type;
 
 class MessageWriter {
 public:
+  explicit MessageWriter(usize reserve_bytes = 0U) {
+    if (reserve_bytes > 0U) {
+      bytes_.reserve(reserve_bytes);
+    }
+  }
+
   template<typename T>
   void write(T value) {
     static_assert(std::is_integral_v<T> || std::is_enum_v<T>);

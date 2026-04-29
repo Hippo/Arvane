@@ -142,7 +142,9 @@ void step_player_without_collision(
 
 } // namespace
 
-ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
+ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport)
+    : transport_(std::move(transport)),
+      world_jobs_(std::make_unique<sched::Scheduler>()) {
 }
 
 net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
@@ -164,6 +166,7 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
       std::max<u32>(start_info.max_generation_results_per_tick, 1U);
   max_lighting_results_per_tick_ =
       std::max<u32>(start_info.max_lighting_results_per_tick, 1U);
+  world_jobs_ = std::make_unique<sched::Scheduler>(start_info.worker_threads);
   worlds_.ensure_default_world();
   handshake_policy_.server_name =
       mode_ == ServerMode::Dedicated ? "Arvane Dedicated Server" : "Arvane Integrated Server";
@@ -208,7 +211,9 @@ void ServerRuntime::shutdown() {
   }
 
   state_ = ServerRuntimeState::Stopping;
-  world_jobs_.wait_for_all();
+  if (world_jobs_) {
+    world_jobs_->wait_for_all();
+  }
   drain_generation_jobs(true);
   drain_lighting_jobs(true);
   if (transport_) {
@@ -544,7 +549,7 @@ void ServerRuntime::schedule_generation_jobs() {
     request.coord = coord;
     request.config = chunk_generation_->config;
     request.palette = chunk_generation_->palette;
-    auto job = world_jobs_.submit("server_world_generation", [request] {
+    auto job = world_jobs_->submit("server_world_generation", [request] {
       return world::generate_chunk(request);
     });
     pending_generation_jobs_.push_back({coord, std::move(job)});
@@ -591,7 +596,7 @@ void ServerRuntime::schedule_lighting_jobs() {
   }
 
   const voxel::BlockRegistry* registry = block_registry_;
-  auto job = world_jobs_.submit("server_world_lighting", [snapshot, registry] {
+  auto job = world_jobs_->submit("server_world_lighting", [snapshot, registry] {
     return world::WorldRuntime::build_lighting_result(snapshot, *registry);
   });
   pending_lighting_jobs_.push_back({snapshot.source_revision, std::move(job)});
@@ -745,22 +750,8 @@ void ServerRuntime::apply_player_command(
     }
 
     const voxel::BlockVariantID placed_variant = held_item->placement_variant.value();
-    const physics::KinematicConfig placement_config{
-        player_tuning_.walk_speed,
-        player_tuning_.sprint_speed,
-        player_tuning_.sneak_speed,
-        player_tuning_.air_speed,
-        player_tuning_.fly_speed,
-        player_tuning_.fly_vertical_speed,
-        player_tuning_.jump_velocity,
-        player_tuning_.gravity_per_second,
-        player_tuning_.terminal_velocity,
-        player_tuning_.body_width,
-        player_tuning_.body_height,
-        player_tuning_.sneaking_body_height,
-        player_tuning_.sneak_support_probe_depth};
     const Aabb3f player_bounds =
-        physics::make_body_bounds(player_state.position, placement_config, player_state.sneaking);
+        physics::make_body_bounds(player_state.position, physics_config, player_state.sneaking);
     for (const Aabb3f& local_box : block_registry_->collision_boxes(placed_variant)) {
       Aabb3f world_box{
           {local_box.min.x + static_cast<f32>(place_pos.value.x),

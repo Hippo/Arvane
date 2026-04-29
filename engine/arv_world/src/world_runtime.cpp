@@ -86,6 +86,7 @@ voxel::ChunkSection& WorldRuntime::ensure_chunk(
   auto [iter, inserted] = chunks_.try_emplace(coord, coord);
   if (inserted) {
     iter->second.set_lifecycle_state(state);
+    enqueue_dirty_mesh_chunk(coord);
   }
   return iter->second;
 }
@@ -173,6 +174,7 @@ void WorldRuntime::apply_chunk_snapshot(
 
   if (needs_first_mesh_dirty || blocks_changed || lights_changed) {
     mark_mesh_content_dirty();
+    enqueue_dirty_mesh_chunk(coord);
   }
   if (blocks_changed || needs_first_mesh_dirty) {
     for (i32 z = -1; z <= 1; ++z) {
@@ -351,6 +353,7 @@ bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexce
   }
 
   mark_mesh_content_dirty();
+  enqueue_dirty_mesh_chunk(chunk_coord);
   mark_boundary_neighbors_dirty(chunk_coord, local);
   mark_lighting_content_dirty();
   enqueue_neighbor_block_updates(pos);
@@ -375,6 +378,7 @@ bool WorldRuntime::set_fluid(
   }
 
   mark_mesh_content_dirty();
+  enqueue_dirty_mesh_chunk(chunk_coord);
   mark_boundary_neighbors_dirty(chunk_coord, local);
   if (affects_lighting) {
     mark_lighting_content_dirty();
@@ -441,9 +445,13 @@ bool WorldRuntime::validate_mesh_content_result(
 bool WorldRuntime::publish_mesh_result(
     ChunkCoord coord,
     u64 source_version,
-    u64 source_light_version) noexcept {
+    u64 source_light_version,
+    u64 source_content_version) noexcept {
   voxel::ChunkSection* chunk = find_chunk(coord);
   if (chunk == nullptr || chunk->block_version() != source_version) {
+    return false;
+  }
+  if (source_content_version != 0U && chunk->content_version() != source_content_version) {
     return false;
   }
   chunk->mark_mesh_ready(source_version, source_light_version);
@@ -461,6 +469,7 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
   chunk.set_lifecycle_state(voxel::ChunkLifecycleState::Loaded);
   chunk.replace_generated_blocks(std::move(generated.blocks));
   mark_mesh_content_dirty();
+  enqueue_dirty_mesh_chunk(generated.coord);
   mark_lighting_content_dirty();
   mark_loaded_chunk_neighbors_dirty(generated.coord);
   return true;
@@ -474,6 +483,7 @@ void WorldRuntime::restore_saved_chunk(
   chunk.replace_saved_contents(std::move(blocks), std::move(lights));
   chunk.mark_dirty(voxel::ChunkDirtyFlags::Lighting);
   mark_mesh_content_dirty();
+  enqueue_dirty_mesh_chunk(coord);
   mark_lighting_content_dirty();
 }
 
@@ -618,6 +628,23 @@ std::vector<ChunkCoord> WorldRuntime::dirty_chunks(voxel::ChunkDirtyFlags flag) 
   return coords;
 }
 
+std::vector<ChunkCoord> WorldRuntime::consume_dirty_mesh_chunks(
+    voxel::ChunkDirtyFlags flag) {
+  std::vector<ChunkCoord> coords;
+  coords.reserve(dirty_mesh_chunks_.size());
+  while (!dirty_mesh_chunks_.empty()) {
+    const ChunkCoord coord = dirty_mesh_chunks_.front();
+    dirty_mesh_chunks_.pop_front();
+    dirty_mesh_chunk_set_.erase(coord);
+
+    const voxel::ChunkSection* chunk = find_chunk(coord);
+    if (chunk != nullptr && chunk->is_dirty(flag)) {
+      coords.push_back(coord);
+    }
+  }
+  return coords;
+}
+
 i32 WorldRuntime::abs_i32(i32 value) noexcept {
   return value < 0 ? -value : value;
 }
@@ -638,6 +665,12 @@ void WorldRuntime::mark_lighting_content_dirty() noexcept {
 
 void WorldRuntime::mark_mesh_content_dirty() noexcept {
   ++mesh_revision_;
+}
+
+void WorldRuntime::enqueue_dirty_mesh_chunk(ChunkCoord coord) {
+  if (dirty_mesh_chunk_set_.insert(coord).second) {
+    dirty_mesh_chunks_.push_back(coord);
+  }
 }
 
 void WorldRuntime::recompute_lighting_work_pending() noexcept {
@@ -721,6 +754,7 @@ void WorldRuntime::mark_neighbor_mesh_dependency_dirty(ChunkCoord coord) noexcep
   voxel::ChunkSection* neighbor = find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_mesh_dependency_dirty();
+    enqueue_dirty_mesh_chunk(coord);
     neighbor->mark_dirty(voxel::ChunkDirtyFlags::Lighting | voxel::ChunkDirtyFlags::NeedsFluidStep);
     mark_mesh_content_dirty();
     lighting_work_pending_ = true;
@@ -731,6 +765,7 @@ void WorldRuntime::mark_neighbor_mesh_only_dependency_dirty(ChunkCoord coord) no
   voxel::ChunkSection* neighbor = find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_mesh_dependency_dirty();
+    enqueue_dirty_mesh_chunk(coord);
     mark_mesh_content_dirty();
   }
 }
@@ -739,6 +774,7 @@ void WorldRuntime::mark_neighbor_light_dependency_dirty(ChunkCoord coord) noexce
   voxel::ChunkSection* neighbor = find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_light_dependency_dirty();
+    enqueue_dirty_mesh_chunk(coord);
     mark_mesh_content_dirty();
   }
 }

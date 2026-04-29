@@ -1,8 +1,17 @@
 #include "arv/net/in_process_transport.hpp"
 
+#include <chrono>
 #include <utility>
 
 namespace arv::net {
+
+namespace detail {
+
+InProcessSharedState::InProcessSharedState(usize event_queue_capacity) : client_to_server_events(event_queue_capacity),
+                                                                         server_to_client_events(event_queue_capacity) {
+}
+
+} // namespace detail
 
 InProcessTransport::InProcessTransport(std::shared_ptr<detail::InProcessSharedState> shared, InProcessEndpointSide side) : shared_(std::move(shared)), side_(side) {
 }
@@ -12,8 +21,7 @@ NetworkResult InProcessTransport::start_listening(const ListenAddress&) {
     return NetworkResult::failure(NetworkError{"only the server endpoint can listen"});
   }
 
-  std::lock_guard lock(shared_->server.mutex);
-  shared_->server_listening = true;
+  shared_->server_listening.store(true, std::memory_order_release);
   return NetworkResult::success();
 }
 
@@ -22,85 +30,92 @@ ConnectResult InProcessTransport::connect(const NetworkAddress&) {
     return ConnectResult::failure(NetworkError{"only the client endpoint can connect"});
   }
 
-  {
-    std::lock_guard server_lock(shared_->server.mutex);
-    if (!shared_->server_listening) {
-      return ConnectResult::failure(NetworkError{"in-process server is not listening"});
-    }
-    shared_->server.state = ConnectionState::TransportConnected;
-    shared_->server.events.push_back({NetworkEventType::ConnectionAccepted,
-                                      LocalConnectionID,
-                                      protocol::ReliabilityClass::ReliableOrdered,
-                                      {},
-                                      {},
-                                      std::chrono::steady_clock::now()});
+  if (!shared_->server_listening.load(std::memory_order_acquire)) {
+    return ConnectResult::failure(NetworkError{"in-process server is not listening"});
   }
 
-  {
-    std::lock_guard client_lock(shared_->client.mutex);
-    shared_->client.state = ConnectionState::TransportConnected;
-    shared_->client.events.push_back({NetworkEventType::ConnectionAccepted,
-                                      LocalConnectionID,
-                                      protocol::ReliabilityClass::ReliableOrdered,
-                                      {},
-                                      {},
-                                      std::chrono::steady_clock::now()});
-  }
+  shared_->client.state.store(ConnectionState::TransportConnected, std::memory_order_release);
+  shared_->server.state.store(ConnectionState::TransportConnected, std::memory_order_release);
 
+  NetworkEvent accepted{NetworkEventType::ConnectionAccepted,
+                        LocalConnectionID,
+                        protocol::ReliabilityClass::ReliableOrdered,
+                        {},
+                        {},
+                        std::chrono::steady_clock::now()};
+  if (!shared_->client_to_server_events.try_enqueue(std::move(accepted))) {
+    shared_->client.state.store(ConnectionState::Disconnected, std::memory_order_release);
+    shared_->server.state.store(ConnectionState::Disconnected, std::memory_order_release);
+    return ConnectResult::failure(NetworkError{"in-process server event queue is full"});
+  }
   return ConnectResult::success(LocalConnectionID);
 }
 
 NetworkResult InProcessTransport::send(TransportMessage message) {
-  auto& local = local_state();
-  auto& peer = peer_state();
-
-  {
-    std::lock_guard lock(local.mutex);
-    if (local.state == ConnectionState::Disconnected || local.state == ConnectionState::Disconnecting) {
-      return NetworkResult::failure(NetworkError{"connection is not active"});
-    }
+  if (!connection_is_active(local_state().state.load(std::memory_order_acquire)) ||
+      !connection_is_active(peer_state().state.load(std::memory_order_acquire))) {
+    return NetworkResult::failure(NetworkError{"connection is not active"});
   }
 
-  std::lock_guard peer_lock(peer.mutex);
   message.connection_id = LocalConnectionID;
-  peer.events.push_back({NetworkEventType::MessageReceived,
-                         message.connection_id,
-                         message.reliability,
-                         std::move(message.payload),
-                         {},
-                         std::chrono::steady_clock::now()});
+  NetworkEvent received{NetworkEventType::MessageReceived,
+                        message.connection_id,
+                        message.reliability,
+                        std::move(message.payload),
+                        {},
+                        std::chrono::steady_clock::now()};
+  if (!outbound_events().try_enqueue(std::move(received))) {
+    return NetworkResult::failure(NetworkError{"in-process peer event queue is full"});
+  }
   return NetworkResult::success();
 }
 
 std::vector<NetworkEvent> InProcessTransport::poll_events() {
-  auto& local = local_state();
-  std::lock_guard lock(local.mutex);
   std::vector<NetworkEvent> events;
-  events.reserve(local.events.size());
-  while (!local.events.empty()) {
-    events.push_back(std::move(local.events.front()));
-    local.events.pop_front();
+  NetworkEvent event;
+  while (inbound_events().try_dequeue(event)) {
+    if (side_ == InProcessEndpointSide::Server &&
+        event.type == NetworkEventType::ConnectionAccepted) {
+      NetworkEvent client_accepted{NetworkEventType::ConnectionAccepted,
+                                   LocalConnectionID,
+                                   protocol::ReliabilityClass::ReliableOrdered,
+                                   {},
+                                   {},
+                                   std::chrono::steady_clock::now()};
+      (void)shared_->server_to_client_events.try_enqueue(std::move(client_accepted));
+    }
+    events.push_back(std::move(event));
+    event = {};
   }
   return events;
 }
 
 ConnectionState InProcessTransport::state(ConnectionID) const {
-  const auto& local = local_state();
-  std::lock_guard lock(local.mutex);
-  return local.state;
+  return local_state().state.load(std::memory_order_acquire);
 }
 
 void InProcessTransport::shutdown() {
-  {
-    std::lock_guard lock(shared_->client.mutex);
-    shared_->client.state = ConnectionState::Disconnected;
-    shared_->client.events.clear();
+  const ConnectionState previous =
+      local_state().state.exchange(ConnectionState::Disconnected, std::memory_order_acq_rel);
+  peer_state().state.store(ConnectionState::Disconnected, std::memory_order_release);
+
+  if (side_ == InProcessEndpointSide::Server) {
+    shared_->server_listening.store(false, std::memory_order_release);
   }
-  {
-    std::lock_guard lock(shared_->server.mutex);
-    shared_->server.state = ConnectionState::Disconnected;
-    shared_->server.events.clear();
-    shared_->server_listening = false;
+
+  NetworkEvent discarded;
+  while (inbound_events().try_dequeue(discarded)) {
+    discarded = {};
+  }
+
+  if (connection_is_active(previous)) {
+    NetworkEvent closed{NetworkEventType::ConnectionClosed,
+                        LocalConnectionID,
+                        protocol::ReliabilityClass::ReliableOrdered,
+                        {},
+                        {},
+                        std::chrono::steady_clock::now()};
+    (void)outbound_events().try_enqueue(std::move(closed));
   }
 }
 
@@ -116,8 +131,26 @@ detail::InProcessEndpointState& InProcessTransport::peer_state() {
   return side_ == InProcessEndpointSide::Client ? shared_->server : shared_->client;
 }
 
-InProcessTransportPair make_in_process_transport_pair() {
-  auto shared = std::make_shared<detail::InProcessSharedState>();
+const detail::InProcessEndpointState& InProcessTransport::peer_state() const {
+  return side_ == InProcessEndpointSide::Client ? shared_->server : shared_->client;
+}
+
+moodycamel::ReaderWriterQueue<NetworkEvent>& InProcessTransport::inbound_events() {
+  return side_ == InProcessEndpointSide::Client ? shared_->server_to_client_events
+                                                : shared_->client_to_server_events;
+}
+
+moodycamel::ReaderWriterQueue<NetworkEvent>& InProcessTransport::outbound_events() {
+  return side_ == InProcessEndpointSide::Client ? shared_->client_to_server_events
+                                                : shared_->server_to_client_events;
+}
+
+bool InProcessTransport::connection_is_active(ConnectionState state) noexcept {
+  return state != ConnectionState::Disconnected && state != ConnectionState::Disconnecting;
+}
+
+InProcessTransportPair make_in_process_transport_pair(usize event_queue_capacity) {
+  auto shared = std::make_shared<detail::InProcessSharedState>(event_queue_capacity);
   return {
       std::make_unique<InProcessTransport>(shared, InProcessEndpointSide::Client),
       std::make_unique<InProcessTransport>(shared, InProcessEndpointSide::Server)};

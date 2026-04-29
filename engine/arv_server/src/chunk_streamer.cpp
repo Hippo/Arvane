@@ -111,7 +111,7 @@ void ServerChunkStreamer::tick_streaming_budget(
 std::vector<ChunkCoord> ServerChunkStreamer::pending_generation_requests(
     const world::WorldRuntime& world) const {
   std::vector<ChunkCoord> requests;
-  HashSet<ChunkCoord> request_set;
+  HashMap<ChunkCoord, i32> request_priorities;
   for (const auto& [session_id, state] : players_) {
     (void)session_id;
     if (state.world_id != world.id()) {
@@ -126,8 +126,12 @@ std::vector<ChunkCoord> ServerChunkStreamer::pending_generation_requests(
           chunk->lifecycle_state() != voxel::ChunkLifecycleState::Requested) {
         continue;
       }
-      if (request_set.insert(coord).second) {
+      const i32 priority = generation_priority_distance(coord, state.center_chunk);
+      auto [priority_iter, inserted] = request_priorities.try_emplace(coord, priority);
+      if (inserted) {
         requests.push_back(coord);
+      } else {
+        priority_iter->second = std::min(priority_iter->second, priority);
       }
     }
   }
@@ -135,20 +139,9 @@ std::vector<ChunkCoord> ServerChunkStreamer::pending_generation_requests(
   std::sort(
       requests.begin(),
       requests.end(),
-      [this](ChunkCoord lhs, ChunkCoord rhs) {
-        i32 lhs_distance = std::numeric_limits<i32>::max();
-        i32 rhs_distance = std::numeric_limits<i32>::max();
-        for (const auto& [session_id, state] : players_) {
-          (void)session_id;
-          if (state.desired_chunks.find(lhs) != state.desired_chunks.end()) {
-            lhs_distance =
-                std::min(lhs_distance, generation_priority_distance(lhs, state.center_chunk));
-          }
-          if (state.desired_chunks.find(rhs) != state.desired_chunks.end()) {
-            rhs_distance =
-                std::min(rhs_distance, generation_priority_distance(rhs, state.center_chunk));
-          }
-        }
+      [&request_priorities](ChunkCoord lhs, ChunkCoord rhs) {
+        const i32 lhs_distance = request_priorities.at(lhs);
+        const i32 rhs_distance = request_priorities.at(rhs);
         if (lhs_distance != rhs_distance) {
           return lhs_distance < rhs_distance;
         }
@@ -287,23 +280,25 @@ void ServerChunkStreamer::queue_chunk_sends(
     world::WorldRuntime& world,
     PlayerChunkStreamState& state,
     std::vector<QueuedChunkStreamMessage>& out_messages) {
-  std::vector<ChunkCoord> candidates;
-  candidates.reserve(state.pending_chunks.size());
-  for (const ChunkCoord coord : state.pending_chunks) {
-    candidates.push_back(coord);
-  }
-  std::sort(
-      candidates.begin(),
-      candidates.end(),
-      [center = state.center_chunk](ChunkCoord lhs, ChunkCoord rhs) {
-        return chunk_order_less(lhs, rhs, center);
-      });
-
   u32 sent = 0;
-  for (const ChunkCoord coord : candidates) {
-    if (sent >= config_.max_chunks_sent_per_player_tick) {
+  HashSet<ChunkCoord> deferred_this_tick;
+  while (sent < config_.max_chunks_sent_per_player_tick) {
+    std::optional<ChunkCoord> next_coord;
+    for (const ChunkCoord coord : state.pending_chunks) {
+      if (deferred_this_tick.find(coord) != deferred_this_tick.end()) {
+        continue;
+      }
+      if (!next_coord.has_value() ||
+          chunk_order_less(coord, next_coord.value(), state.center_chunk)) {
+        next_coord = coord;
+      }
+    }
+
+    if (!next_coord.has_value()) {
       return;
     }
+
+    const ChunkCoord coord = next_coord.value();
     if (state.desired_chunks.find(coord) == state.desired_chunks.end()) {
       state.pending_chunks.erase(coord);
       continue;
@@ -312,6 +307,7 @@ void ServerChunkStreamer::queue_chunk_sends(
     const std::optional<voxel::ChunkSnapshot> snapshot =
         prepare_chunk_snapshot(world, coord);
     if (!snapshot.has_value()) {
+      deferred_this_tick.insert(coord);
       continue;
     }
 
