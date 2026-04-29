@@ -34,7 +34,6 @@
 #include <filesystem>
 #include <optional>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -116,12 +115,11 @@ void route_ui_mouse_input(
 } // namespace
 
 int main(int argc, char** argv) {
-  arv::core::Logger logger;
-  logger.info("desktop", "starting Arvane desktop client");
+  arv::core::info("desktop", "starting Arvane desktop client");
 
   auto config_result = arv::io::load_config(arv::desktop::parse_config_options(argc, argv));
   if (!config_result) {
-    logger.error("config", config_result.error().message);
+    arv::core::error("config", config_result.error().message);
     return 1;
   }
   const arv::io::EngineConfig config = config_result.value();
@@ -129,7 +127,7 @@ int main(int argc, char** argv) {
 
   arv::platform::GlfwLibrary glfw;
   if (!glfw.initialized()) {
-    logger.error("platform", "failed to initialize GLFW");
+    arv::core::error("platform", "failed to initialize GLFW");
     return 1;
   }
 
@@ -138,14 +136,14 @@ int main(int argc, char** argv) {
       config.window.height,
       config.window.title});
   if (!window_result) {
-    logger.error("platform", window_result.error().message);
+    arv::core::error("platform", window_result.error().message);
     return 1;
   }
   arv::platform::OpenGLWindow window = std::move(window_result.value());
   const auto input_bindings_result =
       arv::io::load_input_bindings_file_or_defaults(config.paths.input_bindings_file);
   if (!input_bindings_result) {
-    logger.warn("input", input_bindings_result.error().message);
+    arv::core::warn("input", input_bindings_result.error().message);
   } else {
     window.set_input_bindings(input_bindings_result.value());
   }
@@ -153,7 +151,7 @@ int main(int argc, char** argv) {
   auto transport_pair = arv::net::make_in_process_transport_pair();
 
   arv::render::OpenGLRenderer renderer;
-  if (!arv::desktop::configure_renderer(renderer, resources, config, logger)) {
+  if (!arv::desktop::configure_renderer(renderer, resources, config)) {
     return 1;
   }
 
@@ -164,20 +162,20 @@ int main(int argc, char** argv) {
       config.paths.config_path() / "blocks.json",
       "startup block definitions");
   if (!block_definition_text) {
-    logger.error("blocks", block_definition_text.error().message);
+    arv::core::error("blocks", block_definition_text.error().message);
     return 1;
   }
 
   auto block_definitions = arv::voxel::parse_block_definitions_json(block_definition_text.value());
   if (!block_definitions) {
-    logger.error("blocks", block_definitions.error().message);
+    arv::core::error("blocks", block_definitions.error().message);
     return 1;
   }
 
   auto block_registry_result =
       arv::voxel::BlockRegistry::build(std::move(block_definitions.value()));
   if (!block_registry_result) {
-    logger.error("blocks", block_registry_result.error().message);
+    arv::core::error("blocks", block_registry_result.error().message);
     return 1;
   }
   const arv::voxel::BlockRegistry block_registry = std::move(block_registry_result.value());
@@ -185,12 +183,12 @@ int main(int argc, char** argv) {
 
   auto block_atlas_result = arv::asset::build_block_texture_atlas(resources, block_registry);
   if (!block_atlas_result) {
-    logger.error("assets", block_atlas_result.error().message);
+    arv::core::error("assets", block_atlas_result.error().message);
     return 1;
   }
   const arv::asset::BlockTextureAtlas block_atlas = std::move(block_atlas_result.value());
   if (block_atlas.atlas.pages.empty()) {
-    logger.error("assets", "block texture atlas did not produce a page");
+    arv::core::error("assets", "block texture atlas did not produce a page");
     return 1;
   }
   renderer.set_chunk_texture_atlas(
@@ -202,7 +200,7 @@ int main(int argc, char** argv) {
       18,
       {"arvane:font/font"});
   if (!ui_font) {
-    logger.error("assets", ui_font.error().message);
+    arv::core::error("assets", ui_font.error().message);
     return 1;
   }
   std::vector<arv::asset::FontFaceHandle> ui_faces{ui_font.value()};
@@ -220,7 +218,7 @@ int main(int argc, char** argv) {
     if (face) {
       ui_faces.push_back(face.value());
     } else {
-      logger.warn("assets", face.error().message);
+      arv::core::warn("assets", face.error().message);
     }
   }
   const arv::asset::FontStack ui_font_stack = font_system.make_stack(ui_faces);
@@ -231,12 +229,12 @@ int main(int argc, char** argv) {
       config.paths.config_path() / "items.json",
       "startup item definitions");
   if (!item_definition_text) {
-    logger.error("items", item_definition_text.error().message);
+    arv::core::error("items", item_definition_text.error().message);
     return 1;
   }
   auto item_definitions = arv::player::parse_item_definitions_json(item_definition_text.value());
   if (!item_definitions) {
-    logger.error("items", item_definitions.error().message);
+    arv::core::error("items", item_definitions.error().message);
     return 1;
   }
 
@@ -244,7 +242,7 @@ int main(int argc, char** argv) {
       block_registry,
       std::move(item_definitions.value()));
   if (!item_registry_result) {
-    logger.error("items", item_registry_result.error().message);
+    arv::core::error("items", item_registry_result.error().message);
     return 1;
   }
   const arv::player::ItemRegistry item_registry = std::move(item_registry_result.value());
@@ -252,12 +250,12 @@ int main(int argc, char** argv) {
 
   auto item_atlas_result = arv::desktop::build_item_texture_atlas(resources, item_registry);
   if (!item_atlas_result) {
-    logger.error("assets", item_atlas_result.error().message);
+    arv::core::error("assets", item_atlas_result.error().message);
     return 1;
   }
   const arv::asset::TextureAtlas item_atlas = std::move(item_atlas_result.value());
   if (item_atlas.pages.empty()) {
-    logger.error("assets", "item texture atlas did not produce a page");
+    arv::core::error("assets", "item texture atlas did not produce a page");
     return 1;
   }
   renderer.set_ui_item_atlas(
@@ -267,7 +265,7 @@ int main(int argc, char** argv) {
   auto loaded_save_result =
       arv::persistence::load_server_root(save_root, block_registry, item_registry);
   if (!loaded_save_result) {
-    logger.error("save", loaded_save_result.error().message);
+    arv::core::error("save", loaded_save_result.error().message);
     return 1;
   }
   const arv::persistence::LoadedSaveData loaded_save =
@@ -277,13 +275,13 @@ int main(int argc, char** argv) {
       config.paths.config_path() / "worldgen/overworld.yaml",
       "overworld generator definition");
   if (!worldgen_text) {
-    logger.error("worldgen", worldgen_text.error().message);
+    arv::core::error("worldgen", worldgen_text.error().message);
     return 1;
   }
 
   auto worldgen_config = arv::world::parse_world_generation_yaml(worldgen_text.value());
   if (!worldgen_config) {
-    logger.error("worldgen", worldgen_config.error().message);
+    arv::core::error("worldgen", worldgen_config.error().message);
     return 1;
   }
 
@@ -303,7 +301,7 @@ int main(int argc, char** argv) {
       generation_config,
       block_registry);
   if (!worldgen_palette) {
-    logger.error("worldgen", worldgen_palette.error().message);
+    arv::core::error("worldgen", worldgen_palette.error().message);
     return 1;
   }
 
@@ -339,7 +337,7 @@ int main(int argc, char** argv) {
       config.chunk_pipeline.max_lighting_results_per_tick,
       config.chunk_pipeline.max_generation_jobs_per_frame});
   if (!server_start) {
-    logger.error("server", server_start.error().message);
+    arv::core::error("server", server_start.error().message);
     return 1;
   }
 
@@ -357,7 +355,7 @@ int main(int argc, char** argv) {
   client.set_chunk_view_distance(config.chunks.stream_distance);
   auto connect_result = client.connect_integrated();
   if (!connect_result) {
-    logger.error("client", connect_result.error().message);
+    arv::core::error("client", connect_result.error().message);
     return 1;
   }
 
@@ -445,12 +443,11 @@ int main(int argc, char** argv) {
   worker_thread_config.min_worker_thread_count = config.jobs.min_worker_threads;
   worker_thread_config.max_worker_thread_count = config.jobs.max_worker_threads;
   arv::sched::Scheduler world_jobs{worker_thread_config};
-  {
-    std::ostringstream message;
-    message << "worker_threads=" << world_jobs.worker_count()
-            << " reserved_threads=" << config.jobs.reserved_threads;
-    logger.info("jobs", message.str());
-  }
+  arv::core::info(
+      "jobs",
+      "worker_threads={} reserved_threads={}",
+      world_jobs.worker_count(),
+      config.jobs.reserved_threads);
   if (!arv::desktop::update_chunk_view(
           client_world,
           renderer,
@@ -462,8 +459,7 @@ int main(int argc, char** argv) {
           min_chunk_y,
           max_chunk_y,
           block_registry,
-          block_atlas.render_data,
-          logger)) {
+          block_atlas.render_data)) {
     return 1;
   }
 
@@ -519,12 +515,13 @@ int main(int argc, char** argv) {
       fps_sample_seconds = 0.0F;
     }
     if (frame_delta_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
-      std::ostringstream message;
-      message << "frame spike " << frame_delta_ms << "ms"
-              << " queued_mesh=" << chunk_view.pending_meshes.size()
-              << " pending_uploads=" << renderer.pending_mesh_upload_count()
-              << " uploads_last_frame=" << renderer.mesh_uploads_last_frame();
-      logger.warn("chunk_profile", message.str());
+      arv::core::warn(
+          "chunk_profile",
+          "frame spike {}ms queued_mesh={} pending_uploads={} uploads_last_frame={}",
+          frame_delta_ms,
+          chunk_view.pending_meshes.size(),
+          renderer.pending_mesh_upload_count(),
+          renderer.mesh_uploads_last_frame());
     }
 
     arv::platform::OpenGLWindow::poll_events();
@@ -563,8 +560,7 @@ int main(int argc, char** argv) {
             min_chunk_y,
             max_chunk_y,
             block_registry,
-            block_atlas.render_data,
-            logger)) {
+            block_atlas.render_data)) {
       return 1;
     }
 
@@ -690,9 +686,9 @@ int main(int argc, char** argv) {
   renderer.begin_shutdown();
   integrated_server.shutdown();
   if (!save_result) {
-    logger.error("save", save_result.error().message);
+    arv::core::error("save", save_result.error().message);
     return 1;
   }
-  logger.info("desktop", "shutdown complete");
+  arv::core::info("desktop", "shutdown complete");
   return 0;
 }

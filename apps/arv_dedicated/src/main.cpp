@@ -56,56 +56,54 @@ DedicatedLaunchOptions parse_launch_options(int argc, char** argv) {
 
 void transition(
     arv::server::DedicatedServerLifetime& lifetime,
-    arv::server::DedicatedServerLifetimeState state,
-    arv::core::Logger& logger) {
+    arv::server::DedicatedServerLifetimeState state) {
   lifetime.transition(state);
-  logger.info("dedicated", arv::server::to_string(state));
+  arv::core::info("dedicated", arv::server::to_string(state));
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-  arv::core::Logger logger;
   arv::server::DedicatedServerLifetime lifetime;
   std::signal(SIGINT, handle_shutdown_signal);
   std::signal(SIGTERM, handle_shutdown_signal);
 
-  transition(lifetime, arv::server::DedicatedServerLifetimeState::Starting, logger);
+  transition(lifetime, arv::server::DedicatedServerLifetimeState::Starting);
 
   const DedicatedLaunchOptions launch_options = parse_launch_options(argc, argv);
 
-  transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingConfig, logger);
+  transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingConfig);
   auto config_result = arv::io::load_config(launch_options.config);
   if (!config_result) {
-    logger.error("config", config_result.error().message);
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("config", config_result.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
   const arv::io::EngineConfig config = config_result.value();
 
-  transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingRegistries, logger);
+  transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingRegistries);
   auto block_definition_text = arv::io::read_text_file(
       config.paths.config_path() / "blocks.json",
       "dedicated block definitions");
   if (!block_definition_text) {
-    logger.error("blocks", block_definition_text.error().message);
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("blocks", block_definition_text.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
 
   auto block_definitions =
       arv::voxel::parse_block_definitions_json(block_definition_text.value());
   if (!block_definitions) {
-    logger.error("blocks", block_definitions.error().message);
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("blocks", block_definitions.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
 
   auto block_registry_result =
       arv::voxel::BlockRegistry::build(std::move(block_definitions.value()));
   if (!block_registry_result) {
-    logger.error("blocks", block_registry_result.error().message);
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("blocks", block_registry_result.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
   const arv::voxel::BlockRegistry block_registry =
@@ -115,16 +113,16 @@ int main(int argc, char** argv) {
       config.paths.config_path() / "items.json",
       "dedicated item definitions");
   if (!item_definition_text) {
-    logger.error("items", item_definition_text.error().message);
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("items", item_definition_text.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
 
   auto item_definitions =
       arv::player::parse_item_definitions_json(item_definition_text.value());
   if (!item_definitions) {
-    logger.error("items", item_definitions.error().message);
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("items", item_definitions.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
 
@@ -133,19 +131,19 @@ int main(int argc, char** argv) {
           block_registry,
           std::move(item_definitions.value()));
   if (!item_registry_result) {
-    logger.error("items", item_registry_result.error().message);
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("items", item_registry_result.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
   const arv::player::ItemRegistry item_registry =
       std::move(item_registry_result.value());
 
-  transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingWorlds, logger);
+  transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingWorlds);
 
   arv::net::GameNetworkingSocketsEnvironment gns;
   if (!gns.initialized()) {
-    logger.error("net", gns.error_message());
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("net", gns.error_message());
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
 
@@ -159,12 +157,12 @@ int main(int argc, char** argv) {
       arv::player::default_player_tuning(),
       arv::voxel::make_water_fluid_definition()});
   if (!start_result) {
-    logger.error("server", start_result.error().message);
-    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed, logger);
+    arv::core::error("server", start_result.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
     return 1;
   }
 
-  transition(lifetime, arv::server::DedicatedServerLifetimeState::Running, logger);
+  transition(lifetime, arv::server::DedicatedServerLifetimeState::Running);
   const auto sleep_duration = std::chrono::duration<arv::Seconds>(
       arv::tick_duration_seconds(config.simulation.base_tps));
 
@@ -176,9 +174,9 @@ int main(int argc, char** argv) {
     std::this_thread::sleep_for(sleep_duration);
   }
 
-  transition(lifetime, arv::server::DedicatedServerLifetimeState::Stopping, logger);
+  transition(lifetime, arv::server::DedicatedServerLifetimeState::Stopping);
   server.shutdown();
-  transition(lifetime, arv::server::DedicatedServerLifetimeState::Saving, logger);
-  transition(lifetime, arv::server::DedicatedServerLifetimeState::Stopped, logger);
+  transition(lifetime, arv::server::DedicatedServerLifetimeState::Saving);
+  transition(lifetime, arv::server::DedicatedServerLifetimeState::Stopped);
   return 0;
 }

@@ -95,6 +95,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(unordered_dense)
 
+FetchContent_Declare(
+  spdlog
+  GIT_REPOSITORY https://github.com/gabime/spdlog.git
+  GIT_TAG v1.17.0
+  UPDATE_DISCONNECTED TRUE
+)
+FetchContent_MakeAvailable(spdlog)
+
 if(ARVANE_BUILD_TESTS)
   include(CTest)
   set(BUILD_TESTING ON CACHE BOOL "Build tests" FORCE)

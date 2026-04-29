@@ -16,4 +16,4 @@ add_library(arv_core STATIC
   src/thread_roles.cpp
 )
 target_include_directories(arv_core PUBLIC include)
-target_link_libraries(arv_core PUBLIC unordered_dense)
+target_link_libraries(arv_core PUBLIC unordered_dense spdlog::spdlog)

@@ -10,7 +10,6 @@ namespace arv::desktop {
 [[nodiscard]] bool configure_renderer(
     render::OpenGLRenderer& renderer,
     asset::ResourceManager& resources,
-    const io::EngineConfig& config,
-    core::Logger& logger);
+    const io::EngineConfig& config);
 
 } // namespace arv::desktop

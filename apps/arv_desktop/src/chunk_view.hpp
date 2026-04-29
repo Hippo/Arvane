@@ -75,8 +75,7 @@ void remove_chunk_view_chunk(ChunkViewState& view, ChunkCoord coord);
     i32 min_chunk_y,
     i32 max_chunk_y,
     const voxel::BlockRegistry& block_registry,
-    const voxel::BlockRenderData& block_render_data,
-    core::Logger& logger);
+    const voxel::BlockRenderData& block_render_data);
 
 [[nodiscard]] const std::vector<render::ChunkDrawItem>& chunk_draw_items(ChunkViewState& view);
 

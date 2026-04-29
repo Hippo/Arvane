@@ -7,7 +7,6 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <sstream>
 #include <utility>
 
 namespace arv::desktop {
@@ -314,17 +313,17 @@ void log_chunk_view_profile(
     ChunkViewState& view,
     render::OpenGLRenderer& renderer,
     const io::ChunkPipelineConfig& pipeline,
-    core::Logger& logger,
     std::chrono::steady_clock::time_point refresh_start) {
   const auto refresh_end = std::chrono::steady_clock::now();
   const double refresh_ms =
       std::chrono::duration<double, std::milli>(refresh_end - refresh_start).count();
   if (refresh_ms > static_cast<double>(pipeline.frame_spike_log_ms)) {
-    std::ostringstream message;
-    message << "chunk view update spike " << refresh_ms << "ms"
-            << " queued_mesh=" << view.pending_meshes.size()
-            << " mesh_candidates=" << view.mesh_candidates.size();
-    logger.warn("chunk_profile", message.str());
+    arv::core::warn(
+        "chunk_profile",
+        "chunk view update spike {}ms queued_mesh={} mesh_candidates={}",
+        refresh_ms,
+        view.pending_meshes.size(),
+        view.mesh_candidates.size());
   }
 
   if (view.last_profile_log.time_since_epoch().count() == 0) {
@@ -345,14 +344,16 @@ void log_chunk_view_profile(
       return;
     }
 
-    std::ostringstream message;
-    message << "workers queued_mesh=" << view.pending_meshes.size()
-            << " completed_mesh=" << view.mesh_completed_last_frame
-            << " mesh_ms=" << view.mesh_ms_last_frame
-            << " pending_uploads=" << renderer.pending_mesh_upload_count()
-            << " uploads_last_frame=" << renderer.mesh_uploads_last_frame()
-            << " upload_ms=" << renderer.mesh_upload_time_ms_last_frame();
-    logger.info("chunk_profile", message.str());
+    arv::core::info(
+        "chunk_profile",
+        "workers queued_mesh={} completed_mesh={} mesh_ms={} pending_uploads={} "
+        "uploads_last_frame={} upload_ms={}",
+        view.pending_meshes.size(),
+        view.mesh_completed_last_frame,
+        view.mesh_ms_last_frame,
+        renderer.pending_mesh_upload_count(),
+        renderer.mesh_uploads_last_frame(),
+        renderer.mesh_upload_time_ms_last_frame());
     (void)renderer;
     view.last_profile_log = refresh_end;
   }
@@ -412,8 +413,7 @@ bool update_chunk_view(
     i32 min_chunk_y,
     i32 max_chunk_y,
     const voxel::BlockRegistry& block_registry,
-    const voxel::BlockRenderData& block_render_data,
-    core::Logger& logger) {
+    const voxel::BlockRenderData& block_render_data) {
   const auto refresh_start = std::chrono::steady_clock::now();
   ++view.frames;
   view.mesh_completed_last_frame = 0;
@@ -440,7 +440,7 @@ bool update_chunk_view(
       block_registry,
       block_render_data);
 
-  log_chunk_view_profile(view, renderer, pipeline, logger, refresh_start);
+  log_chunk_view_profile(view, renderer, pipeline, refresh_start);
   view.observed_mesh_revision = world.mesh_revision();
   return true;
 }
