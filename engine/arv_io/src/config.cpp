@@ -95,6 +95,119 @@ std::filesystem::path default_input_bindings_path_from(const std::filesystem::pa
   return normalize_lexical(config_root / std::filesystem::path{DefaultInputBindingsFileName});
 }
 
+bool path_starts_with_parent_reference(const std::filesystem::path& path) {
+  auto part = path.begin();
+  return part != path.end() && *part == "..";
+}
+
+std::string config_path_string(
+    const std::filesystem::path& project_root,
+    const std::filesystem::path& path) {
+  if (path.empty()) {
+    return {};
+  }
+
+  const std::filesystem::path relative = path.lexically_relative(project_root);
+  if (!relative.empty() && !path_starts_with_parent_reference(relative)) {
+    return relative.string();
+  }
+
+  return path.string();
+}
+
+ConfigResult save_default_config_file(const std::filesystem::path& path, const EngineConfig& config) {
+  std::error_code error;
+  const std::filesystem::path parent = path.parent_path();
+  if (!parent.empty()) {
+    std::filesystem::create_directories(parent, error);
+    if (error) {
+      return ConfigResult::failure(
+          ConfigError{"failed to create config directory: " + error.message()});
+    }
+  }
+
+  YAML::Emitter emitter;
+  emitter << YAML::BeginMap;
+  emitter << YAML::Key << "paths" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "arvane_home" << YAML::Value
+          << config_path_string(config.paths.project_root, config.paths.arvane_home_path());
+  emitter << YAML::Key << "input_bindings_file" << YAML::Value
+          << config_path_string(config.paths.project_root, config.paths.input_bindings_file);
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "window" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "width" << YAML::Value << config.window.width;
+  emitter << YAML::Key << "height" << YAML::Value << config.window.height;
+  emitter << YAML::Key << "title" << YAML::Value << config.window.title;
+  emitter << YAML::Key << "vsync" << YAML::Value << config.window.vsync;
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "simulation" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "base_tps" << YAML::Value << config.simulation.base_tps;
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "network" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "bind_address" << YAML::Value << config.network.bind_address;
+  emitter << YAML::Key << "port" << YAML::Value << config.network.port;
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "chunks" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "load_distance" << YAML::Value << config.chunks.load_distance;
+  emitter << YAML::Key << "simulation_distance" << YAML::Value
+          << config.chunks.simulation_distance;
+  emitter << YAML::Key << "render_distance" << YAML::Value << config.chunks.render_distance;
+  emitter << YAML::Key << "stream_distance" << YAML::Value << config.chunks.stream_distance;
+  emitter << YAML::Key << "unload_margin" << YAML::Value << config.chunks.unload_margin;
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "jobs" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "worker_threads" << YAML::Value << config.jobs.worker_threads;
+  emitter << YAML::Key << "reserved_threads" << YAML::Value << config.jobs.reserved_threads;
+  emitter << YAML::Key << "min_worker_threads" << YAML::Value << config.jobs.min_worker_threads;
+  emitter << YAML::Key << "max_worker_threads" << YAML::Value << config.jobs.max_worker_threads;
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "render" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "max_chunk_mesh_uploads_per_frame" << YAML::Value
+          << config.render.max_chunk_mesh_uploads_per_frame;
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "max_generation_jobs_per_frame" << YAML::Value
+          << config.chunk_pipeline.max_generation_jobs_per_frame;
+  emitter << YAML::Key << "max_generation_results_per_tick" << YAML::Value
+          << config.chunk_pipeline.max_generation_results_per_tick;
+  emitter << YAML::Key << "max_lighting_results_per_tick" << YAML::Value
+          << config.chunk_pipeline.max_lighting_results_per_tick;
+  emitter << YAML::Key << "max_client_chunk_applies_per_frame" << YAML::Value
+          << config.chunk_pipeline.max_client_chunk_applies_per_frame;
+  emitter << YAML::Key << "max_client_chunk_unloads_per_frame" << YAML::Value
+          << config.chunk_pipeline.max_client_chunk_unloads_per_frame;
+  emitter << YAML::Key << "max_mesh_jobs_per_frame" << YAML::Value
+          << config.chunk_pipeline.max_mesh_jobs_per_frame;
+  emitter << YAML::Key << "frame_spike_log_ms" << YAML::Value
+          << config.chunk_pipeline.frame_spike_log_ms;
+  emitter << YAML::Key << "profile_log_interval_ms" << YAML::Value
+          << config.chunk_pipeline.profile_log_interval_ms;
+  emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
+
+  std::ofstream output(path, std::ios::trunc);
+  if (!output) {
+    return ConfigResult::failure(
+        ConfigError{"failed to open config file for write: " + path.string()});
+  }
+  output << emitter.c_str();
+  output << '\n';
+  output.flush();
+  if (!output) {
+    return ConfigResult::failure(
+        ConfigError{"failed to write config file: " + path.string()});
+  }
+
+  return ConfigResult::success(config);
+}
+
 } // namespace
 
 EngineConfig default_config() {
@@ -315,6 +428,10 @@ ConfigResult load_config(const ConfigLoadOptions& options) {
   if (!std::filesystem::exists(config.paths.config_file)) {
     if (options.missing_config_is_error) {
       return ConfigResult::failure(ConfigError{"failed to open config file: " + config.paths.config_file.string()});
+    }
+    auto saved = save_default_config_file(config.paths.config_file, config);
+    if (!saved) {
+      core::warn("config", saved.error().message);
     }
     return ConfigResult::success(std::move(config));
   }

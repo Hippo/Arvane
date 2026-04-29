@@ -159,6 +159,38 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomeAssets) {
       result.value().paths.config_path() / "input_bindings.yaml");
 }
 
+TEST(ConfigTests, MissingEngineConfigReturnsDefaultsAndWritesConfig) {
+  const std::filesystem::path temp_root =
+      std::filesystem::temp_directory_path() /
+      ("arvane_config_" +
+       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::error_code error;
+  std::filesystem::remove_all(temp_root, error);
+
+  arv::io::ConfigLoadOptions options;
+  options.project_root = temp_root;
+
+  const auto result = arv::io::load_config(options);
+
+  ASSERT_TRUE(result);
+  const std::filesystem::path config_file =
+      temp_root / "arvane_home/config/engine.yaml";
+  EXPECT_EQ(result.value().paths.config_file, config_file);
+  EXPECT_TRUE(std::filesystem::exists(config_file));
+
+  const auto written = arv::io::load_config_file(config_file);
+  ASSERT_TRUE(written);
+  EXPECT_EQ(written.value().window.width, arv::io::default_config().window.width);
+  EXPECT_EQ(written.value().network.port, arv::io::default_config().network.port);
+
+  const auto written_text = arv::io::read_text_file(config_file, "generated engine config");
+  ASSERT_TRUE(written_text);
+  EXPECT_NE(written_text.value().find("arvane_home: arvane_home"), std::string::npos);
+  EXPECT_EQ(written_text.value().find(temp_root.string()), std::string::npos);
+
+  std::filesystem::remove_all(temp_root, error);
+}
+
 TEST(ConfigTests, ParsesAndFallsBackInputBindings) {
   auto result = arv::io::parse_input_bindings_yaml(R"yaml(
 version: 1
