@@ -1,11 +1,5 @@
 paths:
   arvane_home: arvane_home
-  input_bindings_file: arvane_home/config/input_bindings.yaml
-window:
-  width: 1280
-  height: 720
-  title: Arvane
-  vsync: false
 simulation:
   base_tps: 60
   systems:
@@ -29,14 +23,9 @@ simulation:
       flow_interval_ticks: 10
     lava:
       flow_interval_ticks: 30
-network:
-  bind_address: 0.0.0.0
-  port: 27020
 chunks:
   load_distance: 3
   simulation_distance: 1
-  render_distance: 2
-  stream_distance: 2
   unload_margin: 1
 jobs:
   worker_threads: 0
@@ -77,14 +66,7 @@ physics:
   surface_buoyancy: 10.0
   underwater_buoyancy: 1.0
   breath_seconds: 15.0
-render:
-  max_chunk_mesh_uploads_per_frame: 8
 chunk_pipeline:
   max_generation_jobs_per_frame: 4
   max_generation_results_per_tick: 2
   max_lighting_results_per_tick: 1
-  max_client_chunk_applies_per_frame: 2
-  max_client_chunk_unloads_per_frame: 32
-  max_mesh_jobs_per_frame: 4
-  frame_spike_log_ms: 10
-  profile_log_interval_ms: 0

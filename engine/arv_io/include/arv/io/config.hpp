@@ -11,6 +11,9 @@
 namespace arv::io {
 
 inline constexpr std::string_view DefaultArvaneHomeDirectoryName = "arvane_home";
+inline constexpr std::string_view DefaultSharedConfigFileName = "arvane.yaml";
+inline constexpr std::string_view DefaultClientConfigFileName = "client.yaml";
+inline constexpr std::string_view DefaultServerConfigFileName = "server.yaml";
 inline constexpr std::string_view DefaultEngineConfigFileName = "engine.yaml";
 inline constexpr std::string_view DefaultInputBindingsFileName = "input_bindings.yaml";
 inline constexpr std::string_view DefaultServerSaveName = "server-save-1";
@@ -136,6 +139,9 @@ struct PathConfig {
   std::filesystem::path logs_root{};
   std::filesystem::path cache_root{};
   std::filesystem::path config_file{};
+  std::filesystem::path shared_config_file{};
+  std::filesystem::path client_config_file{};
+  std::filesystem::path server_config_file{};
   std::filesystem::path input_bindings_file{};
 
   [[nodiscard]] const std::filesystem::path& arvane_home_path() const noexcept {
@@ -190,10 +196,16 @@ struct ConfigError {
 using ConfigResult = Expected<EngineConfig, ConfigError>;
 using TextFileResult = Expected<std::string, ConfigError>;
 
+enum class ConfigProfile {
+  Client,
+  Server,
+};
+
 struct ConfigLoadOptions {
   std::filesystem::path explicit_config_path{};
   std::filesystem::path explicit_arvane_home_path{};
   std::filesystem::path project_root{};
+  ConfigProfile profile{ConfigProfile::Client};
   bool missing_config_is_error{};
 };
 

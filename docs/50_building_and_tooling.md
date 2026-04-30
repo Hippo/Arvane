@@ -334,7 +334,9 @@ runtime config paths.arvane_home
 ```text
 --config <path>
 runtime config paths.config_file
-./arvane_home/config/engine.yaml
+./arvane_home/config/arvane.yaml
+./arvane_home/config/client.yaml
+./arvane_home/config/server.yaml
 built-in fallback behavior
 ```
 

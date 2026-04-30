@@ -1412,7 +1412,7 @@ The exact values should be tuned through gameplay testing, but the behavior rule
 above are part of the physics contract.
 
 These constants are configured through the top-level `physics` section of
-`engine.yaml`, alongside the existing land movement, collision shape, eye height,
+`arvane.yaml`, alongside the existing land movement, collision shape, eye height,
 gravity, and reach values:
 
 ```yaml

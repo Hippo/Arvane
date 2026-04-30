@@ -75,6 +75,7 @@ struct DedicatedLaunchOptions {
 
 DedicatedLaunchOptions parse_launch_options(int argc, char** argv) {
   DedicatedLaunchOptions options;
+  options.config.profile = arv::io::ConfigProfile::Server;
   bool explicit_config = false;
 
   for (int i = 1; i + 1 < argc; ++i) {

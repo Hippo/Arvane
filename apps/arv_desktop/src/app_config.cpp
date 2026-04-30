@@ -6,6 +6,7 @@ namespace arv::desktop {
 
 io::ConfigLoadOptions parse_config_options(int argc, char** argv) {
   io::ConfigLoadOptions options;
+  options.profile = io::ConfigProfile::Client;
   bool explicit_config = false;
 
   for (int i = 1; i + 1 < argc; ++i) {
