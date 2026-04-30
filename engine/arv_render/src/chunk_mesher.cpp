@@ -80,7 +80,8 @@ void emit_quad(
     const std::array<u8, 6>& flipped_indices,
     std::array<Vec2i, 4> uvs,
     voxel::LightWord light,
-    std::array<u8, 4> ao) {
+    std::array<u8, 4> ao,
+    VertexMaterialHints material_hints) {
   const u32 base_index = static_cast<u32>(chunk_vertex_count(output));
 
   for (usize index = 0; index < corners.size(); ++index) {
@@ -94,7 +95,8 @@ void emit_quad(
                                     voxel::light_sky(light),
                                     voxel::light_r(light),
                                     voxel::light_g(light),
-                                    voxel::light_b(light)));
+                                    voxel::light_b(light),
+                                    material_hints));
   }
 
   const std::array<u8, 6>& face_indices = should_flip_voxel_ao_quad(ao)
@@ -111,8 +113,19 @@ void emit_cube_face(
     const ChunkFaceGeometry& face,
     std::array<Vec2i, 4> uvs,
     voxel::LightWord light,
-    std::array<u8, 4> ao) {
-  emit_quad(output, local, face.face, face.corners, face.indices, face.flipped_indices, uvs, light, ao);
+    std::array<u8, 4> ao,
+    VertexMaterialHints material_hints) {
+  emit_quad(
+      output,
+      local,
+      face.face,
+      face.corners,
+      face.indices,
+      face.flipped_indices,
+      uvs,
+      light,
+      ao,
+      material_hints);
 }
 
 [[nodiscard]] constexpr SectionLocalPos offset_local(SectionLocalPos local, Vec3i offset) noexcept {
@@ -317,6 +330,45 @@ void emit_cube_face(
   return uvs;
 }
 
+[[nodiscard]] VertexMaterialHints material_hints_for_block(
+    const voxel::BlockVariantRecord& variant) noexcept {
+  VertexMaterialHints hints;
+  switch (variant.render_category) {
+    case voxel::RenderCategory::None:
+    case voxel::RenderCategory::Opaque:
+      hints.material_class = VertexMaterialClass::Opaque;
+      break;
+    case voxel::RenderCategory::Cutout:
+      hints.material_class = VertexMaterialClass::Cutout;
+      break;
+    case voxel::RenderCategory::Transparent:
+      hints.material_class = VertexMaterialClass::Transparent;
+      break;
+  }
+  return hints;
+}
+
+[[nodiscard]] VertexAnimationId water_animation_id(
+    voxel::FluidCell fluid,
+    voxel::BlockFace face) noexcept {
+  if (face == voxel::BlockFace::PositiveY) {
+    return VertexAnimationId::WaterSurface;
+  }
+  if (fluid.falling() || !fluid.source()) {
+    return VertexAnimationId::WaterFlow;
+  }
+  return VertexAnimationId::WaterStill;
+}
+
+[[nodiscard]] VertexMaterialHints water_material_hints(
+    voxel::FluidCell fluid,
+    voxel::BlockFace face) noexcept {
+  return {
+      VertexMaterialClass::Water,
+      water_animation_id(fluid, face),
+      VertexMaterialFlag_TintFromFluid | VertexMaterialFlag_DisableAo};
+}
+
 void emit_fluid_cell(
     CpuMeshBuffer& output,
     const voxel::ChunkSnapshot& snapshot,
@@ -346,7 +398,8 @@ void emit_fluid_cell(
         top_face.flipped_indices,
         face_uvs_for(water_variant, voxel::BlockFace::PositiveY, render_data),
         voxel::snapshot_light(snapshot, above),
-        FluidAo);
+        FluidAo,
+        water_material_hints(fluid, voxel::BlockFace::PositiveY));
   }
 
   for (const voxel::BlockFace face : {
@@ -370,7 +423,8 @@ void emit_fluid_cell(
         geometry.flipped_indices,
         face_uvs_for(water_variant, face, render_data),
         voxel::snapshot_light(snapshot, neighbor),
-        FluidAo);
+        FluidAo,
+        water_material_hints(fluid, face));
   }
 
   const SectionLocalPos below = offset_local(local, {0, -1, 0});
@@ -386,7 +440,8 @@ void emit_fluid_cell(
         bottom_face.flipped_indices,
         face_uvs_for(water_variant, voxel::BlockFace::NegativeY, render_data),
         voxel::snapshot_light(snapshot, below),
-        FluidAo);
+        FluidAo,
+        water_material_hints(fluid, voxel::BlockFace::NegativeY));
   }
 }
 
@@ -438,6 +493,7 @@ ChunkMeshData build_chunk_mesh(
         if (self->render_category == voxel::RenderCategory::Transparent) {
           ensure_transparent_capacity(output);
         }
+        const VertexMaterialHints material_hints = material_hints_for_block(*self);
 
         for (const ChunkFaceGeometry& face : ChunkCubeFaces) {
           const SectionLocalPos neighbor_local = offset_local(local, face.neighbor_offset);
@@ -449,7 +505,8 @@ ChunkMeshData build_chunk_mesh(
                 face,
                 face_uvs_for(self_id, face.face, render_data),
                 voxel::snapshot_light(snapshot, neighbor_local),
-                face_ao(snapshot, registry, local, face));
+                face_ao(snapshot, registry, local, face),
+                material_hints);
           }
         }
       }

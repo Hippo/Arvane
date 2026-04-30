@@ -69,7 +69,7 @@ Chunk geometry uses a **packed voxel-optimized format**.
 struct ChunkVertex {
     u32 pos_ao;
     u32 uv;
-    u32 light_face_flags;
+    u32 light_face_material_hints;
 };
 ```
 
@@ -144,7 +144,7 @@ uv = vec2(atlas_u, atlas_v) / vec2(atlas_width, atlas_height)
 
 ---
 
-## Packed Lighting, Face, Flags (`light_face_flags`)
+## Packed Lighting, Face, Material Hints (`light_face_material_hints`)
 
 ```text
 bits  0..3   = block_light_r
@@ -153,8 +153,13 @@ bits  8..11  = block_light_b
 bits 12..15  = sky_light
 
 bits 16..18  = face
-bits 19..31  = flags
+bits 19..22  = material_class
+bits 23..26  = animation_id
+bits 27..31  = material_flags
 ```
+
+Bits `19..31` are a compact per-vertex material hint payload. They are not
+generic ad-hoc flags.
 
 ---
 
@@ -184,14 +189,130 @@ Used for:
 
 ---
 
-### Flags
+### Material Hints
 
-Reserved for documented features:
+This field is not a full material system. It is a compact render hint used by
+the shader/renderer to select lightweight behavior.
 
-* cutout hint
-* water hint
-* animation flags
-* future extensions
+Actual material definitions remain in block, material, and fluid data. If a
+feature needs more information than these fields can provide, that feature
+belongs in material/block/fluid data and should be referenced indirectly.
+
+These hints must not become a dumping ground for arbitrary gameplay state. They
+are render-facing hints only.
+
+#### `material_class`
+
+Broad rendering category:
+
+```cpp
+enum class VertexMaterialClass : u8 {
+    Opaque = 0,
+    Cutout = 1,
+    Transparent = 2,
+    Water = 3,
+    Lava = 4,
+    Foliage = 5,
+
+    Reserved6 = 6,
+    Reserved7 = 7,
+    Reserved8 = 8,
+    Reserved9 = 9,
+    Reserved10 = 10,
+    Reserved11 = 11,
+    Reserved12 = 12,
+    Reserved13 = 13,
+    Reserved14 = 14,
+
+    Custom = 15,
+};
+```
+
+#### `animation_id`
+
+Small enum for shader-supported lightweight animations:
+
+```cpp
+enum class VertexAnimationId : u8 {
+    None = 0,
+
+    WaterStill = 1,
+    WaterFlow = 2,
+    WaterSurface = 3,
+
+    LavaStill = 4,
+    LavaFlow = 5,
+
+    Reserved6 = 6,
+    Reserved7 = 7,
+    Reserved8 = 8,
+    Reserved9 = 9,
+    Reserved10 = 10,
+    Reserved11 = 11,
+    Reserved12 = 12,
+    Reserved13 = 13,
+    Reserved14 = 14,
+
+    Custom = 15,
+};
+```
+
+#### `material_flags`
+
+Boolean render modifiers:
+
+```cpp
+enum VertexMaterialFlags : u8 {
+    VertexMaterialFlag_None          = 0,
+    VertexMaterialFlag_TintFromBiome = 1 << 0,
+    VertexMaterialFlag_TintFromFluid = 1 << 1,
+    VertexMaterialFlag_DoubleSided   = 1 << 2,
+    VertexMaterialFlag_DisableAo     = 1 << 3,
+    VertexMaterialFlag_Reserved4     = 1 << 4,
+};
+```
+
+### Examples
+
+Opaque block:
+
+```text
+material_class = Opaque
+animation_id   = None
+material_flags = None
+```
+
+Cutout block:
+
+```text
+material_class = Cutout
+animation_id   = None
+material_flags = optional, depending on material data
+```
+
+Water:
+
+```text
+material_class = Water
+animation_id   = WaterStill / WaterFlow / WaterSurface
+material_flags = TintFromFluid | DisableAo
+```
+
+Water color is not stored in these 13 bits and is not packed per vertex. The
+vertex stores only enough information to say that the face is water and should
+receive fluid tint and water animation behavior.
+
+Actual water color is resolved through material, fluid, block, biome, or
+environment tint data. Until that lookup path is complete, the shader/material
+path may use a clearly marked temporary default water tint.
+
+Water vertices should use:
+
+* `material_class = Water`
+* `animation_id = WaterStill`, `WaterFlow`, or `WaterSurface`
+* `material_flags` includes `TintFromFluid`
+* `material_flags` includes `DisableAo`, unless the visual design explicitly
+  wants AO on water
 
 ---
 
@@ -352,6 +473,7 @@ Chunk shaders assume:
 * precomputed UVs
 * precomputed AO
 * precomputed lighting
+* packed material hints
 
 No inference from world data.
 
@@ -382,8 +504,10 @@ They must NOT:
 * reconstruct positions
 * normalize UVs
 * decode lighting
+* decode material class, animation id, and material flags
 * apply AO
-* apply tint
+* apply biome/fluid tint when requested by material flags
+* apply shader-supported lightweight animations when requested by animation id
 * apply fog
 
 ---
@@ -408,6 +532,20 @@ They must NOT:
 * no depth write
 * uses OIT or blending
 * fog must match opaque pass
+
+---
+
+## Water
+
+Water is represented by material hints, not a standalone water bit.
+
+* `material_class = Water`
+* `animation_id` selects water still, flow, or surface behavior
+* `material_flags` includes `TintFromFluid`
+* `material_flags` usually includes `DisableAo`
+
+The shader may branch on these hints, but the water color itself comes from the
+material/fluid/biome tint path rather than the packed vertex.
 
 ---
 
@@ -508,6 +646,7 @@ The rendering pipeline uses:
 * a packed 12-byte chunk vertex
 * runtime-resolved atlas UVs
 * precomputed AO and lighting
+* compact render-facing material hints
 * clean separation of responsibilities
 
 This ensures:

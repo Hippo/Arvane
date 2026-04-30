@@ -17,6 +17,9 @@ namespace {
   if (value == "opaque") {
     return Expected<RenderCategory, BlockRegistryError>::success(RenderCategory::Opaque);
   }
+  if (value == "cutout") {
+    return Expected<RenderCategory, BlockRegistryError>::success(RenderCategory::Cutout);
+  }
   if (value == "transparent") {
     return Expected<RenderCategory, BlockRegistryError>::success(RenderCategory::Transparent);
   }

@@ -46,6 +46,7 @@ inline constexpr std::array<BlockFace, BlockFaceCount> AllBlockFaces{{
 enum class RenderCategory : u8 {
   None,
   Opaque,
+  Cutout,
   Transparent,
 };
 

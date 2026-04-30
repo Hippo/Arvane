@@ -202,6 +202,10 @@ void OpenGLRenderer::render() {
   glUniform1f(chunk_camera_fov_y_uniform_, frame_.world_view.fov_y_degrees);
   glUniform1f(chunk_camera_near_uniform_, frame_.world_view.near_plane);
   glUniform1f(chunk_camera_far_uniform_, frame_.world_view.far_plane);
+  const auto animation_now = std::chrono::steady_clock::now().time_since_epoch();
+  glUniform1f(
+      chunk_animation_time_uniform_,
+      std::chrono::duration<f32>(animation_now).count());
   glUniform2f(
       chunk_atlas_size_uniform_,
       static_cast<f32>(terrain_atlas_.width == 0 ? 1U : terrain_atlas_.width),
@@ -388,7 +392,7 @@ void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& m
       1,
       GL_UNSIGNED_INT,
       sizeof(ChunkVertex),
-      reinterpret_cast<const void*>(offsetof(ChunkVertex, light_face_flags)));
+      reinterpret_cast<const void*>(offsetof(ChunkVertex, light_face_material_hints)));
 
   gpu.index_count = static_cast<GLsizei>(mesh.indices.size());
   glBindVertexArray(0);
@@ -517,6 +521,7 @@ bool OpenGLRenderer::ensure_chunk_program() {
   chunk_camera_fov_y_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_fov_y_degrees");
   chunk_camera_near_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_near_plane");
   chunk_camera_far_uniform_ = glGetUniformLocation(chunk_program_, "u_camera_far_plane");
+  chunk_animation_time_uniform_ = glGetUniformLocation(chunk_program_, "u_animation_time_seconds");
   chunk_alpha_uniform_ = glGetUniformLocation(chunk_program_, "u_alpha");
   chunk_atlas_size_uniform_ = glGetUniformLocation(chunk_program_, "u_atlas_size");
   chunk_terrain_atlas_uniform_ = glGetUniformLocation(chunk_program_, "u_terrain_atlas");

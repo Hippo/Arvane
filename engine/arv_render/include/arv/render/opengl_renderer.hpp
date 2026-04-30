@@ -117,6 +117,7 @@ private:
   GLint chunk_camera_fov_y_uniform_{-1};
   GLint chunk_camera_near_uniform_{-1};
   GLint chunk_camera_far_uniform_{-1};
+  GLint chunk_animation_time_uniform_{-1};
   GLint chunk_alpha_uniform_{-1};
   GLint chunk_atlas_size_uniform_{-1};
   GLint chunk_terrain_atlas_uniform_{-1};

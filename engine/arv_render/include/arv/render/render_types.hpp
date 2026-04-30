@@ -71,10 +71,113 @@ struct CameraSnapshot {
 struct ChunkVertex {
   u32 pos_ao{};
   u32 uv{};
-  u32 light_face_flags{};
+  u32 light_face_material_hints{};
 };
 
 static_assert(sizeof(ChunkVertex) == 12);
+
+enum class VertexMaterialClass : u8 {
+  Opaque = 0,
+  Cutout = 1,
+  Transparent = 2,
+  Water = 3,
+  Lava = 4,
+  Foliage = 5,
+
+  Reserved6 = 6,
+  Reserved7 = 7,
+  Reserved8 = 8,
+  Reserved9 = 9,
+  Reserved10 = 10,
+  Reserved11 = 11,
+  Reserved12 = 12,
+  Reserved13 = 13,
+  Reserved14 = 14,
+
+  Custom = 15,
+};
+
+enum class VertexAnimationId : u8 {
+  None = 0,
+
+  WaterStill = 1,
+  WaterFlow = 2,
+  WaterSurface = 3,
+
+  LavaStill = 4,
+  LavaFlow = 5,
+
+  Reserved6 = 6,
+  Reserved7 = 7,
+  Reserved8 = 8,
+  Reserved9 = 9,
+  Reserved10 = 10,
+  Reserved11 = 11,
+  Reserved12 = 12,
+  Reserved13 = 13,
+  Reserved14 = 14,
+
+  Custom = 15,
+};
+
+enum VertexMaterialFlags : u8 {
+  VertexMaterialFlag_None = 0,
+  VertexMaterialFlag_TintFromBiome = 1U << 0U,
+  VertexMaterialFlag_TintFromFluid = 1U << 1U,
+  VertexMaterialFlag_DoubleSided = 1U << 2U,
+  VertexMaterialFlag_DisableAo = 1U << 3U,
+  VertexMaterialFlag_Reserved4 = 1U << 4U,
+};
+
+[[nodiscard]] constexpr VertexMaterialFlags operator|(
+    VertexMaterialFlags lhs,
+    VertexMaterialFlags rhs) noexcept {
+  return static_cast<VertexMaterialFlags>(static_cast<u8>(lhs) | static_cast<u8>(rhs));
+}
+
+[[nodiscard]] constexpr VertexMaterialFlags operator&(
+    VertexMaterialFlags lhs,
+    VertexMaterialFlags rhs) noexcept {
+  return static_cast<VertexMaterialFlags>(static_cast<u8>(lhs) & static_cast<u8>(rhs));
+}
+
+constexpr VertexMaterialFlags& operator|=(
+    VertexMaterialFlags& lhs,
+    VertexMaterialFlags rhs) noexcept {
+  lhs = lhs | rhs;
+  return lhs;
+}
+
+[[nodiscard]] constexpr bool any(VertexMaterialFlags flags) noexcept {
+  return static_cast<u8>(flags) != 0U;
+}
+
+[[nodiscard]] constexpr bool has_vertex_material_flag(
+    VertexMaterialFlags flags,
+    VertexMaterialFlags flag) noexcept {
+  return any(flags & flag);
+}
+
+struct VertexMaterialHints {
+  VertexMaterialClass material_class{VertexMaterialClass::Opaque};
+  VertexAnimationId animation_id{VertexAnimationId::None};
+  VertexMaterialFlags material_flags{VertexMaterialFlag_None};
+};
+
+inline constexpr u32 ChunkBlockLightRShift = 0U;
+inline constexpr u32 ChunkBlockLightGShift = 4U;
+inline constexpr u32 ChunkBlockLightBShift = 8U;
+inline constexpr u32 ChunkSkyLightShift = 12U;
+inline constexpr u32 ChunkFaceShift = 16U;
+inline constexpr u32 ChunkMaterialClassShift = 19U;
+inline constexpr u32 ChunkAnimationIdShift = 23U;
+inline constexpr u32 ChunkMaterialFlagsShift = 27U;
+
+inline constexpr u32 ChunkLightMask = 0x0FU;
+inline constexpr u32 ChunkFaceMask = 0x07U;
+inline constexpr u32 ChunkMaterialClassMask = 0x0FU;
+inline constexpr u32 ChunkAnimationIdMask = 0x0FU;
+inline constexpr u32 ChunkMaterialFlagsMask = 0x1FU;
 
 [[nodiscard]] constexpr u32 pack_chunk_pos_ao(
     SectionLocalPos block,
@@ -93,19 +196,58 @@ static_assert(sizeof(ChunkVertex) == 12);
   return static_cast<u32>(atlas_u) | (static_cast<u32>(atlas_v) << 16U);
 }
 
-[[nodiscard]] constexpr u32 pack_chunk_light_face_flags(
+[[nodiscard]] constexpr u32 pack_chunk_light_face_material_hints(
     u8 block_light_r,
     u8 block_light_g,
     u8 block_light_b,
     u8 sky_light,
     voxel::BlockFace face,
-    u16 flags = 0) noexcept {
-  return (static_cast<u32>(block_light_r) & 0x0FU) |
-         ((static_cast<u32>(block_light_g) & 0x0FU) << 4U) |
-         ((static_cast<u32>(block_light_b) & 0x0FU) << 8U) |
-         ((static_cast<u32>(sky_light) & 0x0FU) << 12U) |
-         ((static_cast<u32>(face) & 0x07U) << 16U) |
-         ((static_cast<u32>(flags) & 0x1FFFU) << 19U);
+    VertexMaterialHints material_hints = {}) noexcept {
+  return ((static_cast<u32>(block_light_r) & ChunkLightMask) << ChunkBlockLightRShift) |
+         ((static_cast<u32>(block_light_g) & ChunkLightMask) << ChunkBlockLightGShift) |
+         ((static_cast<u32>(block_light_b) & ChunkLightMask) << ChunkBlockLightBShift) |
+         ((static_cast<u32>(sky_light) & ChunkLightMask) << ChunkSkyLightShift) |
+         ((static_cast<u32>(face) & ChunkFaceMask) << ChunkFaceShift) |
+         ((static_cast<u32>(material_hints.material_class) & ChunkMaterialClassMask)
+          << ChunkMaterialClassShift) |
+         ((static_cast<u32>(material_hints.animation_id) & ChunkAnimationIdMask)
+          << ChunkAnimationIdShift) |
+         ((static_cast<u32>(material_hints.material_flags) & ChunkMaterialFlagsMask)
+          << ChunkMaterialFlagsShift);
+}
+
+[[nodiscard]] constexpr u8 unpack_chunk_block_light_r(u32 packed) noexcept {
+  return static_cast<u8>((packed >> ChunkBlockLightRShift) & ChunkLightMask);
+}
+
+[[nodiscard]] constexpr u8 unpack_chunk_block_light_g(u32 packed) noexcept {
+  return static_cast<u8>((packed >> ChunkBlockLightGShift) & ChunkLightMask);
+}
+
+[[nodiscard]] constexpr u8 unpack_chunk_block_light_b(u32 packed) noexcept {
+  return static_cast<u8>((packed >> ChunkBlockLightBShift) & ChunkLightMask);
+}
+
+[[nodiscard]] constexpr u8 unpack_chunk_sky_light(u32 packed) noexcept {
+  return static_cast<u8>((packed >> ChunkSkyLightShift) & ChunkLightMask);
+}
+
+[[nodiscard]] constexpr voxel::BlockFace unpack_chunk_face(u32 packed) noexcept {
+  return static_cast<voxel::BlockFace>((packed >> ChunkFaceShift) & ChunkFaceMask);
+}
+
+[[nodiscard]] constexpr VertexMaterialClass unpack_chunk_material_class(u32 packed) noexcept {
+  return static_cast<VertexMaterialClass>(
+      (packed >> ChunkMaterialClassShift) & ChunkMaterialClassMask);
+}
+
+[[nodiscard]] constexpr VertexAnimationId unpack_chunk_animation_id(u32 packed) noexcept {
+  return static_cast<VertexAnimationId>((packed >> ChunkAnimationIdShift) & ChunkAnimationIdMask);
+}
+
+[[nodiscard]] constexpr VertexMaterialFlags unpack_chunk_material_flags(u32 packed) noexcept {
+  return static_cast<VertexMaterialFlags>(
+      (packed >> ChunkMaterialFlagsShift) & ChunkMaterialFlagsMask);
 }
 
 [[nodiscard]] constexpr ChunkVertex make_chunk_vertex(
@@ -118,11 +260,18 @@ static_assert(sizeof(ChunkVertex) == 12);
     u8 sky_light = 15,
     u8 block_light_r = 0,
     u8 block_light_g = 0,
-    u8 block_light_b = 0) noexcept {
+    u8 block_light_b = 0,
+    VertexMaterialHints material_hints = {}) noexcept {
   return {
       pack_chunk_pos_ao(block, model_position_sixteenths, ao),
       pack_chunk_uv(atlas_u, atlas_v),
-      pack_chunk_light_face_flags(block_light_r, block_light_g, block_light_b, sky_light, face)};
+      pack_chunk_light_face_material_hints(
+          block_light_r,
+          block_light_g,
+          block_light_b,
+          sky_light,
+          face,
+          material_hints)};
 }
 
 struct CpuMeshBuffer {

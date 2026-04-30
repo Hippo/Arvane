@@ -100,7 +100,14 @@ TEST(RenderMeshHandoffTests, ChunkVertexPackingFollowsDocumentedBitLayout) {
       34,
       arv::voxel::BlockFace::PositiveY,
       2,
-      15);
+      15,
+      3,
+      4,
+      5,
+      {arv::render::VertexMaterialClass::Water,
+       arv::render::VertexAnimationId::WaterSurface,
+       arv::render::VertexMaterialFlag_TintFromFluid |
+           arv::render::VertexMaterialFlag_DisableAo});
 
   EXPECT_EQ(vertex.pos_ao & 0x1FU, 3U);
   EXPECT_EQ((vertex.pos_ao >> 5U) & 0x1FU, 4U);
@@ -110,6 +117,34 @@ TEST(RenderMeshHandoffTests, ChunkVertexPackingFollowsDocumentedBitLayout) {
   EXPECT_EQ((vertex.pos_ao >> 30U) & 0x03U, 2U);
   EXPECT_EQ(vertex.uv & 0xFFFFU, 12U);
   EXPECT_EQ((vertex.uv >> 16U) & 0xFFFFU, 34U);
-  EXPECT_EQ((vertex.light_face_flags >> 12U) & 0x0FU, 15U);
-  EXPECT_EQ((vertex.light_face_flags >> 16U) & 0x07U, 2U);
+  EXPECT_EQ(
+      (vertex.light_face_material_hints >> arv::render::ChunkBlockLightRShift) &
+          arv::render::ChunkLightMask,
+      3U);
+  EXPECT_EQ(
+      (vertex.light_face_material_hints >> arv::render::ChunkBlockLightGShift) &
+          arv::render::ChunkLightMask,
+      4U);
+  EXPECT_EQ(
+      (vertex.light_face_material_hints >> arv::render::ChunkBlockLightBShift) &
+          arv::render::ChunkLightMask,
+      5U);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex.light_face_material_hints), 15U);
+  EXPECT_EQ(
+      arv::render::unpack_chunk_face(vertex.light_face_material_hints),
+      arv::voxel::BlockFace::PositiveY);
+  EXPECT_EQ(
+      arv::render::unpack_chunk_material_class(vertex.light_face_material_hints),
+      arv::render::VertexMaterialClass::Water);
+  EXPECT_EQ(
+      arv::render::unpack_chunk_animation_id(vertex.light_face_material_hints),
+      arv::render::VertexAnimationId::WaterSurface);
+  const arv::render::VertexMaterialFlags flags =
+      arv::render::unpack_chunk_material_flags(vertex.light_face_material_hints);
+  EXPECT_TRUE(arv::render::has_vertex_material_flag(
+      flags,
+      arv::render::VertexMaterialFlag_TintFromFluid));
+  EXPECT_TRUE(arv::render::has_vertex_material_flag(
+      flags,
+      arv::render::VertexMaterialFlag_DisableAo));
 }

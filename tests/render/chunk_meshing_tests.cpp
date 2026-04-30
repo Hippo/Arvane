@@ -17,6 +17,9 @@ arv::voxel::BlockRegistry make_registry() {
   definitions.push_back(arv::voxel::make_full_cube_definition(
       "arvane:glass",
       arv::voxel::RenderCategory::Transparent));
+  definitions.push_back(arv::voxel::make_full_cube_definition(
+      "arvane:leaves",
+      arv::voxel::RenderCategory::Cutout));
   arv::voxel::BlockDefinition water;
   water.name = "arvane:water";
   water.properties.replaceable = true;
@@ -50,7 +53,7 @@ arv::voxel::BlockRegistry make_registry() {
          ((vertex.pos_ao >> 15U) & 0x1FU) == static_cast<arv::u32>(model_position.x) &&
          ((vertex.pos_ao >> 20U) & 0x1FU) == static_cast<arv::u32>(model_position.y) &&
          ((vertex.pos_ao >> 25U) & 0x1FU) == static_cast<arv::u32>(model_position.z) &&
-         static_cast<arv::voxel::BlockFace>((vertex.light_face_flags >> 16U) & 0x07U) == face;
+         arv::render::unpack_chunk_face(vertex.light_face_material_hints) == face;
 }
 
 [[nodiscard]] std::optional<arv::render::ChunkVertex> find_vertex(
@@ -135,6 +138,35 @@ TEST(ChunkMeshingTests, TransparentCubeUsesTransparentMeshOutput) {
 
   EXPECT_EQ(face_count(mesh.opaque), 0U);
   EXPECT_EQ(face_count(mesh.transparent), 6U);
+  ASSERT_GT(arv::render::chunk_vertex_count(mesh.transparent), 0U);
+  const arv::render::ChunkVertex vertex = arv::render::chunk_vertex_at(mesh.transparent, 0);
+  EXPECT_EQ(
+      arv::render::unpack_chunk_material_class(vertex.light_face_material_hints),
+      arv::render::VertexMaterialClass::Transparent);
+  EXPECT_EQ(
+      arv::render::unpack_chunk_animation_id(vertex.light_face_material_hints),
+      arv::render::VertexAnimationId::None);
+  EXPECT_EQ(
+      arv::render::unpack_chunk_material_flags(vertex.light_face_material_hints),
+      arv::render::VertexMaterialFlag_None);
+}
+
+TEST(ChunkMeshingTests, CutoutCubeUsesOpaqueMeshWithCutoutMaterialClass) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID leaves = registry.find_variant("arvane:leaves").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{4, 4, 4}}, leaves));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+
+  EXPECT_EQ(face_count(mesh.opaque), 6U);
+  EXPECT_EQ(face_count(mesh.transparent), 0U);
+  ASSERT_GT(arv::render::chunk_vertex_count(mesh.opaque), 0U);
+  const arv::render::ChunkVertex vertex = arv::render::chunk_vertex_at(mesh.opaque, 0);
+  EXPECT_EQ(
+      arv::render::unpack_chunk_material_class(vertex.light_face_material_hints),
+      arv::render::VertexMaterialClass::Cutout);
 }
 
 TEST(ChunkMeshingTests, FluidCellsEmitIntoTransparentMesh) {
@@ -148,6 +180,35 @@ TEST(ChunkMeshingTests, FluidCellsEmitIntoTransparentMesh) {
 
   EXPECT_EQ(face_count(mesh.opaque), 0U);
   EXPECT_EQ(face_count(mesh.transparent), 6U);
+
+  bool saw_surface_animation = false;
+  bool saw_still_animation = false;
+  for (arv::usize i = 0; i < arv::render::chunk_vertex_count(mesh.transparent); ++i) {
+    const arv::render::ChunkVertex vertex = arv::render::chunk_vertex_at(mesh.transparent, i);
+    const arv::u32 packed = vertex.light_face_material_hints;
+    EXPECT_EQ(
+        arv::render::unpack_chunk_material_class(packed),
+        arv::render::VertexMaterialClass::Water);
+    const arv::render::VertexMaterialFlags material_flags =
+        arv::render::unpack_chunk_material_flags(packed);
+    EXPECT_TRUE(arv::render::has_vertex_material_flag(
+        material_flags,
+        arv::render::VertexMaterialFlag_TintFromFluid));
+    EXPECT_TRUE(arv::render::has_vertex_material_flag(
+        material_flags,
+        arv::render::VertexMaterialFlag_DisableAo));
+
+    const arv::render::VertexAnimationId animation_id =
+        arv::render::unpack_chunk_animation_id(packed);
+    if (arv::render::unpack_chunk_face(packed) == arv::voxel::BlockFace::PositiveY) {
+      EXPECT_EQ(animation_id, arv::render::VertexAnimationId::WaterSurface);
+      saw_surface_animation = true;
+    } else if (animation_id == arv::render::VertexAnimationId::WaterStill) {
+      saw_still_animation = true;
+    }
+  }
+  EXPECT_TRUE(saw_surface_animation);
+  EXPECT_TRUE(saw_still_animation);
 }
 
 TEST(ChunkMeshingTests, SameLayerNeighborsDoNotDarkenFlatTopFaces) {
@@ -326,7 +387,7 @@ TEST(ChunkMeshingTests, MeshVerticesUseExposedNeighborLighting) {
   std::optional<arv::render::ChunkVertex> top_face_vertex;
   for (arv::usize i = 0; i < arv::render::chunk_vertex_count(mesh.opaque); ++i) {
     const arv::render::ChunkVertex vertex = arv::render::chunk_vertex_at(mesh.opaque, i);
-    const auto face = static_cast<arv::voxel::BlockFace>((vertex.light_face_flags >> 16U) & 0x07U);
+    const auto face = arv::render::unpack_chunk_face(vertex.light_face_material_hints);
     if (face == arv::voxel::BlockFace::PositiveY) {
       top_face_vertex = vertex;
       break;
@@ -334,10 +395,10 @@ TEST(ChunkMeshingTests, MeshVerticesUseExposedNeighborLighting) {
   }
 
   ASSERT_TRUE(top_face_vertex.has_value());
-  EXPECT_EQ(top_face_vertex->light_face_flags & 0x0FU, 3U);
-  EXPECT_EQ((top_face_vertex->light_face_flags >> 4U) & 0x0FU, 4U);
-  EXPECT_EQ((top_face_vertex->light_face_flags >> 8U) & 0x0FU, 5U);
-  EXPECT_EQ((top_face_vertex->light_face_flags >> 12U) & 0x0FU, 6U);
+  EXPECT_EQ(arv::render::unpack_chunk_block_light_r(top_face_vertex->light_face_material_hints), 3U);
+  EXPECT_EQ(arv::render::unpack_chunk_block_light_g(top_face_vertex->light_face_material_hints), 4U);
+  EXPECT_EQ(arv::render::unpack_chunk_block_light_b(top_face_vertex->light_face_material_hints), 5U);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(top_face_vertex->light_face_material_hints), 6U);
 }
 
 TEST(ChunkMeshingTests, WorkerMeshResultUsesSnapshotVersionAndStaleResultsAreRejected) {

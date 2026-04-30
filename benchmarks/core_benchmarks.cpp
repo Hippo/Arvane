@@ -155,7 +155,7 @@ void BM_PackedVertexGeneration(benchmark::State& state) {
         static_cast<arv::u8>((index >> 4U) & 15U),
         static_cast<arv::u8>((index >> 8U) & 15U),
         static_cast<arv::u8>((index >> 12U) & 15U));
-    sum ^= vertex.pos_ao ^ vertex.uv ^ vertex.light_face_flags;
+    sum ^= vertex.pos_ao ^ vertex.uv ^ vertex.light_face_material_hints;
     ++index;
   }
   benchmark::DoNotOptimize(sum);
