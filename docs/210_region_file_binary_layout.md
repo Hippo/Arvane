@@ -127,13 +127,23 @@ Each entry (8 bytes):
 
 #### `section_mask` (16 bits)
 
-Each bit represents a vertical section:
+For format v3 and newer, this field is a legacy quick-reject hint, not an
+authoritative height limit.
+
+If every stored section in the column falls inside the first 16 sections
+relative to the world's `min_chunk_y`, each bit represents one vertical
+section:
 
 ```text
-bit i = section (y = i) exists
+bit i = section (chunk_y = min_chunk_y + i) exists
 ```
 
-Allows skipping empty chunks quickly.
+If any stored section is outside that 16-section window, the writer sets
+`section_mask = 0xFFFF` to mean "non-empty column, inspect the chunk payload".
+Readers must not reject or skip a chunk section only because its Y coordinate
+cannot be represented in this mask.
+
+Legacy format v1/v2 files used this field as an exact 16-section mask.
 
 #### `flags`
 
@@ -211,6 +221,21 @@ Offset: from location table
 
 ### Chunk Header
 
+Format v3 and newer:
+
+```text
+Offset  Size  Field
+0       1     compression_type
+1       1     reserved
+2       2     reserved
+4       4     section_count
+8       4     uncompressed_size
+12      4     compressed_size
+16      ...   compressed_payload
+```
+
+Legacy format v1/v2 files used an 8-bit section count:
+
 ```text
 Offset  Size  Field
 0       1     compression_type
@@ -246,6 +271,29 @@ Offset  Size  Field
 
 Each section:
 
+Format v3 and newer:
+
+```text
+i32 chunk_y
+u8  bits_per_block
+u8  reserved
+u16 reserved
+
+u32 block_data_size
+[u8 * block_data_size] packed block data
+
+u32 lighting_data_size
+[u8 * lighting_data_size] lighting data
+
+u32 fluid_data_size
+[u8 * fluid_data_size] fluid data
+```
+
+`chunk_y` is the absolute signed chunk-section Y coordinate. Region files must
+not impose a fixed world-height window.
+
+Legacy format v1/v2 files used an 8-bit relative Y index:
+
 ```text
 u8  y_index
 u8  bits_per_block
@@ -256,6 +304,10 @@ u32 block_data_size
 
 u32 lighting_data_size
 [u8 * lighting_data_size] lighting data
+
+format v2 only:
+u32 fluid_data_size
+[u8 * fluid_data_size] fluid data
 ```
 
 ---
@@ -435,21 +487,5 @@ Header and block structures allow extension without breaking compatibility.
 * Chunk blocks → isolated, replaceable
 * Compression → efficient storage
 * Append-style writes → safe updates
-
-```
-
----
-
-### Why this design is strong (quick sanity check)
-
-This matches *exactly* what you want architecturally:
-
-- ✅ **No runtime IDs leak into disk**
-- ✅ **Local tables = compatibility layer**
-- ✅ **Region-level deduplication**
-- ✅ **O(1) chunk lookup**
-- ✅ **Append-friendly writes (no full rewrite)**
-- ✅ **Easy migration hooks**
-- ✅ **Parallel load-friendly**
 
 ---

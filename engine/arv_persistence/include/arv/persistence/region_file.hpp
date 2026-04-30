@@ -18,7 +18,7 @@ struct PersistenceError {
   std::string message{};
 };
 
-inline constexpr u16 CurrentRegionFormatVersion = 2;
+inline constexpr u16 CurrentRegionFormatVersion = 3;
 inline constexpr u16 MinimumReadableRegionFormatVersion = 1;
 inline constexpr u16 RegionHeaderSize = 48;
 inline constexpr u32 RegionChunkSlotCount =

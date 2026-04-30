@@ -65,6 +65,48 @@ TEST(RegionFileTests, ChunkSerializationRoundTripsThroughRegionEncoding) {
   EXPECT_FALSE(neighbor->lighting_valid);
 }
 
+TEST(RegionFileTests, ChunkSerializationAllowsSectionsOutsideLegacyMetadataWindow) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID dirt = registry.find_variant("arvane:dirt").value();
+  const std::vector<arv::persistence::SavedChunkSection> chunks{
+      make_saved_chunk({{0, -48, 0}}, stone, true),
+      make_saved_chunk({{0, 300, 0}}, dirt, true)};
+
+  auto encoded = arv::persistence::encode_region_file({0, 0}, chunks, registry, 0);
+  ASSERT_TRUE(encoded) << encoded.error().message;
+  auto decoded = arv::persistence::decode_region_file(encoded.value(), registry, 123);
+
+  ASSERT_TRUE(decoded);
+  ASSERT_EQ(decoded.value().chunks.size(), 2U);
+  const arv::persistence::SavedChunkSection* lower =
+      find_chunk(decoded.value().chunks, {{0, -48, 0}});
+  const arv::persistence::SavedChunkSection* upper =
+      find_chunk(decoded.value().chunks, {{0, 300, 0}});
+  ASSERT_NE(lower, nullptr);
+  ASSERT_NE(upper, nullptr);
+  EXPECT_EQ(lower->blocks[0], stone);
+  EXPECT_EQ(upper->blocks[0], dirt);
+}
+
+TEST(RegionFileTests, ChunkSerializationAllowsMoreThanU8SectionsPerColumn) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  std::vector<arv::persistence::SavedChunkSection> chunks;
+  chunks.reserve(260U);
+  for (arv::i32 y = 0; y < 260; ++y) {
+    chunks.push_back(make_saved_chunk({{0, y, 0}}, stone, true));
+  }
+
+  auto encoded = arv::persistence::encode_region_file({0, 0}, chunks, registry, 0);
+  ASSERT_TRUE(encoded) << encoded.error().message;
+  auto decoded = arv::persistence::decode_region_file(encoded.value(), registry, 0);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().chunks.size(), chunks.size());
+  EXPECT_NE(find_chunk(decoded.value().chunks, {{0, 259, 0}}), nullptr);
+}
+
 TEST(RegionFileTests, ParsesEncodedRegionHeaderMetadata) {
   const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();

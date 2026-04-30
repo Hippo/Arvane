@@ -240,6 +240,8 @@ Chunk sections store indices into the region’s `block_state_table`.
 ## Chunk Serialization
 
 Chunks are divided into vertical sections.
+Region files store each section's absolute chunk-section Y coordinate and must
+not impose a fixed 16-section world-height window.
 
 Each section contains:
 

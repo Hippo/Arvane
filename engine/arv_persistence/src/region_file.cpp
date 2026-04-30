@@ -17,7 +17,6 @@ constexpr u8 ChunkMetadataVersion = 1;
 constexpr u8 ChunkFlagLightingValid = 1U << 2U;
 constexpr usize ChunkLocationEntrySize = 8U;
 constexpr usize ChunkMetadataEntrySize = 8U;
-constexpr usize ChunkHeaderSize = 12U;
 constexpr usize LightingBytesPerSection = voxel::ChunkVolume * sizeof(voxel::LightWord);
 constexpr usize FluidBytesPerCell = sizeof(u32) + sizeof(u8) + sizeof(u8);
 constexpr usize FluidBytesPerSection = voxel::ChunkVolume * FluidBytesPerCell;
@@ -37,6 +36,12 @@ public:
     for (usize index = 0; index < sizeof(u32); ++index) {
       bytes_.push_back(static_cast<u8>((value >> (index * 8U)) & 0xFFU));
     }
+  }
+
+  void write_i32(i32 value) {
+    u32 raw{};
+    std::memcpy(&raw, &value, sizeof(value));
+    write_u32(raw);
   }
 
   void write_bytes(std::span<const u8> bytes) {
@@ -117,6 +122,18 @@ public:
       value |= static_cast<u32>(bytes_[offset_ + index]) << (index * 8U);
     }
     offset_ += sizeof(u32);
+    return value;
+  }
+
+  [[nodiscard]] std::optional<i32> read_i32() {
+    const auto raw = read_u32();
+    if (!raw) {
+      return std::nullopt;
+    }
+
+    i32 value{};
+    const u32 raw_value = raw.value();
+    std::memcpy(&value, &raw_value, sizeof(value));
     return value;
   }
 
@@ -454,12 +471,6 @@ Expected<std::vector<u8>, PersistenceError> encode_region_file(
           make_error("chunk does not belong to the requested region file"));
     }
 
-    const i32 local_y = chunk.coord.value.y - min_chunk_y;
-    if (local_y < 0 || local_y >= 16) {
-      return Expected<std::vector<u8>, PersistenceError>::failure(
-          make_error("chunk Y is outside the documented 16-section region metadata window"));
-    }
-
     for (const voxel::BlockVariantID variant : chunk.blocks) {
       const std::string name{registry.variant_name(variant)};
       if (block_state_indices.find(name) != block_state_indices.end()) {
@@ -524,12 +535,23 @@ Expected<std::vector<u8>, PersistenceError> encode_region_file(
       return lhs->coord.value.y < rhs->coord.value.y;
     });
 
+    if (column.size() > std::numeric_limits<u32>::max()) {
+      return Expected<std::vector<u8>, PersistenceError>::failure(
+          make_error("chunk column has too many sections for region encoding"));
+    }
+
     ByteWriter payload_writer;
     u16 section_mask{};
+    bool section_mask_overflow = false;
     bool lighting_valid = true;
     for (const SavedChunkSection* section : column) {
-      const i32 local_y = section->coord.value.y - min_chunk_y;
-      section_mask |= static_cast<u16>(1U << local_y);
+      const i64 local_y =
+          static_cast<i64>(section->coord.value.y) - static_cast<i64>(min_chunk_y);
+      if (local_y >= 0 && local_y < 16) {
+        section_mask |= static_cast<u16>(1U << static_cast<u32>(local_y));
+      } else {
+        section_mask_overflow = true;
+      }
       lighting_valid = lighting_valid && section->lighting_valid;
 
       std::array<u16, voxel::ChunkVolume> indices{};
@@ -539,8 +561,9 @@ Expected<std::vector<u8>, PersistenceError> encode_region_file(
       }
       const std::vector<u8> packed_blocks = pack_block_indices(indices, bits_per_block);
 
-      payload_writer.write_u8(static_cast<u8>(local_y));
+      payload_writer.write_i32(section->coord.value.y);
       payload_writer.write_u8(bits_per_block);
+      payload_writer.write_u8(0U);
       payload_writer.write_u16(0U);
       payload_writer.write_u32(static_cast<u32>(packed_blocks.size()));
       payload_writer.write_bytes(packed_blocks);
@@ -556,8 +579,9 @@ Expected<std::vector<u8>, PersistenceError> encode_region_file(
 
     ByteWriter chunk_writer;
     chunk_writer.write_u8(0U); // compression none
-    chunk_writer.write_u8(static_cast<u8>(column.size()));
+    chunk_writer.write_u8(0U);
     chunk_writer.write_u16(0U);
+    chunk_writer.write_u32(static_cast<u32>(column.size()));
     chunk_writer.write_u32(static_cast<u32>(payload_writer.size()));
     chunk_writer.write_u32(static_cast<u32>(payload_writer.size()));
     chunk_writer.write_bytes(payload_writer.bytes());
@@ -573,6 +597,9 @@ Expected<std::vector<u8>, PersistenceError> encode_region_file(
 
     const usize metadata_offset =
         header.metadata_table_offset + slot_index * ChunkMetadataEntrySize;
+    if (section_mask_overflow) {
+      section_mask = std::numeric_limits<u16>::max();
+    }
     writer.patch_u16(metadata_offset, section_mask);
     writer.bytes()[metadata_offset + 2U] = lighting_valid ? ChunkFlagLightingValid : 0U;
     writer.bytes()[metadata_offset + 3U] = ChunkMetadataVersion;
@@ -627,13 +654,35 @@ Expected<DecodedRegionFile, PersistenceError> decode_region_file(
     const std::span<const u8> chunk_bytes = bytes.subspan(chunk_offset.value(), chunk_length.value());
     ByteReader chunk_reader(chunk_bytes);
     const auto compression_type = chunk_reader.read_u8();
-    const auto section_count = chunk_reader.read_u8();
-    const auto chunk_reserved = chunk_reader.read_u16();
-    const auto uncompressed_size = chunk_reader.read_u32();
-    const auto compressed_size = chunk_reader.read_u32();
-    if (!compression_type || !section_count || !chunk_reserved || !uncompressed_size || !compressed_size) {
+    if (!compression_type) {
       continue;
     }
+
+    u32 section_count{};
+    std::optional<u32> uncompressed_size;
+    std::optional<u32> compressed_size;
+    if (header.format_version >= 3U) {
+      const auto chunk_reserved_u8 = chunk_reader.read_u8();
+      const auto chunk_reserved_u16 = chunk_reader.read_u16();
+      const auto encoded_section_count = chunk_reader.read_u32();
+      uncompressed_size = chunk_reader.read_u32();
+      compressed_size = chunk_reader.read_u32();
+      if (!chunk_reserved_u8 || !chunk_reserved_u16 || !encoded_section_count ||
+          !uncompressed_size || !compressed_size) {
+        continue;
+      }
+      section_count = encoded_section_count.value();
+    } else {
+      const auto encoded_section_count = chunk_reader.read_u8();
+      const auto chunk_reserved = chunk_reader.read_u16();
+      uncompressed_size = chunk_reader.read_u32();
+      compressed_size = chunk_reader.read_u32();
+      if (!encoded_section_count || !chunk_reserved || !uncompressed_size || !compressed_size) {
+        continue;
+      }
+      section_count = encoded_section_count.value();
+    }
+
     if (compression_type.value() != 0U || !chunk_reader.can_read(compressed_size.value())) {
       continue;
     }
@@ -648,14 +697,34 @@ Expected<DecodedRegionFile, PersistenceError> decode_region_file(
     const i32 chunk_z = header.region.z * RegionSizeInChunks + static_cast<i32>(local_z);
 
     ByteReader payload_reader(*payload_view);
-    for (u8 section_index = 0; section_index < section_count.value(); ++section_index) {
-      const auto y_index = payload_reader.read_u8();
-      const auto bits_per_block = payload_reader.read_u8();
-      const auto section_reserved = payload_reader.read_u16();
-      const auto block_data_size = payload_reader.read_u32();
-      if (!y_index || !bits_per_block || !section_reserved || !block_data_size) {
-        break;
+    for (u32 section_index = 0; section_index < section_count; ++section_index) {
+      i32 chunk_y{};
+      u8 bits_per_block{};
+      std::optional<u32> block_data_size;
+      if (header.format_version >= 3U) {
+        const auto encoded_chunk_y = payload_reader.read_i32();
+        const auto encoded_bits_per_block = payload_reader.read_u8();
+        const auto section_reserved_u8 = payload_reader.read_u8();
+        const auto section_reserved_u16 = payload_reader.read_u16();
+        block_data_size = payload_reader.read_u32();
+        if (!encoded_chunk_y || !encoded_bits_per_block || !section_reserved_u8 ||
+            !section_reserved_u16 || !block_data_size) {
+          break;
+        }
+        chunk_y = encoded_chunk_y.value();
+        bits_per_block = encoded_bits_per_block.value();
+      } else {
+        const auto y_index = payload_reader.read_u8();
+        const auto encoded_bits_per_block = payload_reader.read_u8();
+        const auto section_reserved = payload_reader.read_u16();
+        block_data_size = payload_reader.read_u32();
+        if (!y_index || !encoded_bits_per_block || !section_reserved || !block_data_size) {
+          break;
+        }
+        chunk_y = min_chunk_y + static_cast<i32>(y_index.value());
+        bits_per_block = encoded_bits_per_block.value();
       }
+
       auto block_data = payload_reader.read_bytes(block_data_size.value());
       const auto lighting_data_size = payload_reader.read_u32();
       if (!block_data || !lighting_data_size) {
@@ -685,13 +754,13 @@ Expected<DecodedRegionFile, PersistenceError> decode_region_file(
         fluids.fill(voxel::empty_fluid_cell());
       }
 
-      auto indices_result = unpack_block_indices(*block_data, bits_per_block.value());
+      auto indices_result = unpack_block_indices(*block_data, bits_per_block);
       if (!indices_result) {
         break;
       }
 
       SavedChunkSection section;
-      section.coord = {{chunk_x, min_chunk_y + static_cast<i32>(y_index.value()), chunk_z}};
+      section.coord = {{chunk_x, chunk_y, chunk_z}};
       section.lighting_valid = (flags.value() & ChunkFlagLightingValid) != 0U;
 
       for (usize index = 0; index < voxel::ChunkVolume; ++index) {
