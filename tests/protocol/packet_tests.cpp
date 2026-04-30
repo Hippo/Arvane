@@ -110,6 +110,8 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   correction.resolved_core_permissions.has_creative_inventory = true;
   correction.grounded = false;
   correction.sneaking = true;
+  correction.swimming = true;
+  correction.breath_seconds = 12.5F;
   correction.selected_hotbar_slot = 6;
 
   const std::vector<arv::u8> bytes = arv::protocol::serialize_player_correction(correction);
@@ -129,6 +131,8 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   EXPECT_TRUE(decoded.value().resolved_core_permissions.has_creative_inventory);
   EXPECT_FALSE(decoded.value().grounded);
   EXPECT_TRUE(decoded.value().sneaking);
+  EXPECT_TRUE(decoded.value().swimming);
+  EXPECT_FLOAT_EQ(decoded.value().breath_seconds, 12.5F);
   EXPECT_EQ(decoded.value().selected_hotbar_slot, 6U);
 }
 
@@ -160,10 +164,14 @@ TEST(ProtocolTests, ChunkDataRoundTripsThroughSerialization) {
   data.chunk_content_version = 9;
   data.chunk_light_version = 14;
   data.has_lighting = true;
+  data.has_fluids = true;
   data.blocks.fill(arv::voxel::AirBlockVariantID);
   data.lights.fill(arv::voxel::NoLight);
+  data.fluids.fill(arv::voxel::empty_fluid_cell());
   data.blocks[arv::voxel::local_index({{1, 2, 3}})] = arv::voxel::BlockVariantID{8};
   data.lights[arv::voxel::local_index({{1, 2, 3}})] = arv::voxel::pack_light(1, 2, 3, 4);
+  data.fluids[arv::voxel::local_index({{1, 2, 3}})] =
+      arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
 
   const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_data(data);
   const auto decoded = arv::protocol::deserialize_chunk_data(bytes);
@@ -175,12 +183,14 @@ TEST(ProtocolTests, ChunkDataRoundTripsThroughSerialization) {
   EXPECT_EQ(decoded.value().chunk_content_version, 9U);
   EXPECT_EQ(decoded.value().chunk_light_version, 14U);
   EXPECT_TRUE(decoded.value().has_lighting);
+  EXPECT_TRUE(decoded.value().has_fluids);
   EXPECT_EQ(
       decoded.value().blocks[arv::voxel::local_index({{1, 2, 3}})],
       (arv::voxel::BlockVariantID{8}));
   EXPECT_EQ(
       decoded.value().lights[arv::voxel::local_index({{1, 2, 3}})],
       arv::voxel::pack_light(1, 2, 3, 4));
+  EXPECT_TRUE(decoded.value().fluids[arv::voxel::local_index({{1, 2, 3}})].source());
 }
 
 TEST(ProtocolTests, ChunkUnloadRoundTripsThroughSerialization) {

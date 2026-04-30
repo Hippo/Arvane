@@ -74,6 +74,16 @@
         "full_cube": true,
         "ao_occluder": true
       }
+    },
+    {
+      "name": "arvane:water",
+      "render_category": "transparent",
+      "textures": "arvane:texture/block/water",
+      "is_item": false,
+      "properties": {
+        "replaceable": true,
+        "fluid": true
+      }
     }
   ]
 }

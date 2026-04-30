@@ -734,7 +734,7 @@ Validation should reject:
 
 Atlas padding is mandatory.
 
-Without padding, mipmaps will bleed neighboring atlas entries into each other at distance.
+Without padding, mipmaps will bleed neighboring atlas; entries into each other at distance.
 
 Each atlas entry must include duplicated edge padding around the original texture.
 

@@ -49,6 +49,9 @@ struct ServerStartInfo {
   u32 max_lighting_results_per_tick{1};
   u32 max_pending_generation_jobs{4};
   sched::WorkerThreadConfig worker_threads{};
+  world::WorldTickPolicy world_tick_policy{};
+  u32 max_fluid_results_per_tick{1};
+  u32 max_pending_fluid_jobs{1};
 };
 
 struct DroppedItemStack {
@@ -120,6 +123,11 @@ public:
   }
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
+  [[nodiscard]] player::InventoryInsertResult insert_player_inventory_stack(
+      PlayerID player_id,
+      player::ItemStack stack,
+      std::optional<usize> preferred_slot = std::nullopt,
+      bool replace_preferred_slot = false);
   [[nodiscard]] player::InventoryOperationResult apply_player_inventory_click(
       PlayerID player_id,
       usize slot_index,
@@ -138,11 +146,14 @@ private:
       net::ConnectionID connection_id,
       const protocol::ChunkInterestUpdate& interest);
   void tick_players();
+  void update_world_simulation_activity();
   void tick_chunk_streaming();
   void drain_generation_jobs(bool drain_all);
   void schedule_generation_jobs();
   void drain_lighting_jobs(bool drain_all);
   void schedule_lighting_jobs();
+  void drain_fluid_jobs(bool drain_all);
+  void schedule_fluid_jobs();
   void refresh_player_permissions(player::PlayerState& player_state);
   void apply_player_command(player::PlayerState& player_state, const player::PlayerCommand& command);
   void send_player_corrections();
@@ -177,6 +188,10 @@ private:
     sched::JobHandle<world::LightingResult> job;
   };
 
+  struct PendingFluidJob {
+    sched::JobHandle<world::FluidSimulationResult> job;
+  };
+
   struct PendingGenerationJob {
     ChunkCoord coord{};
     sched::JobHandle<world::GeneratedChunkResult> job;
@@ -185,10 +200,16 @@ private:
   std::unique_ptr<sched::Scheduler> world_jobs_;
   std::vector<PendingGenerationJob> pending_generation_jobs_;
   std::vector<PendingLightingJob> pending_lighting_jobs_;
+  std::vector<PendingFluidJob> pending_fluid_jobs_;
   u32 max_pending_generation_jobs_{4};
   u32 max_pending_lighting_jobs_{2};
+  u32 max_pending_fluid_jobs_{1};
   u32 max_generation_results_per_tick_{2};
   u32 max_lighting_results_per_tick_{1};
+  u32 max_fluid_results_per_tick_{1};
+  u32 fluid_update_interval_{1};
+  u32 fluid_update_budget_{2000};
+  i32 simulation_radius_{1};
 };
 
 } // namespace arv::server

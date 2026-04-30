@@ -17,10 +17,10 @@ bindings:
       key: Space
   Sneak:
     - device: keyboard
-      key: LShift
+      key: LCtrl
   Sprint:
     - device: keyboard
-      key: LCtrl
+      key: LShift
   PrimaryInteract:
     - device: mouse_button
       button: Left
@@ -72,3 +72,6 @@ bindings:
   ShowTabMenu:
     - device: keyboard
       key: Tab
+  ToggleDebugMenu:
+    - device: keyboard
+      key: Grave

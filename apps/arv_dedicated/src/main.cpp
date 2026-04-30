@@ -29,6 +29,45 @@ void handle_shutdown_signal(int) {
   g_shutdown_requested.store(true);
 }
 
+[[nodiscard]] arv::player::PlayerTuning make_player_tuning(
+    const arv::io::PhysicsConfig& physics) noexcept {
+  arv::player::PlayerTuning tuning = arv::player::default_player_tuning();
+  tuning.standing_eye_height = physics.standing_eye_height;
+  tuning.sneaking_eye_height = physics.sneaking_eye_height;
+  tuning.swimming_eye_height = physics.swimming_eye_height;
+  tuning.eye_height_lerp_per_second = physics.eye_height_lerp_per_second;
+  tuning.reach_distance = physics.reach_distance;
+  tuning.mouse_sensitivity_radians = physics.mouse_sensitivity_radians;
+  tuning.walk_speed = physics.walk_speed;
+  tuning.sprint_speed = physics.sprint_speed;
+  tuning.sneak_speed = physics.sneak_speed;
+  tuning.air_speed = physics.air_speed;
+  tuning.fly_speed = physics.fly_speed;
+  tuning.fly_vertical_speed = physics.fly_vertical_speed;
+  tuning.jump_velocity = physics.jump_velocity;
+  tuning.gravity_per_second = physics.gravity_per_second;
+  tuning.terminal_velocity = physics.terminal_velocity;
+  tuning.body_width = physics.body_width;
+  tuning.body_height = physics.body_height;
+  tuning.sneaking_body_height = physics.sneaking_body_height;
+  tuning.swimming_body_width = physics.swimming_body_width;
+  tuning.swimming_body_height = physics.swimming_body_height;
+  tuning.sneak_support_probe_depth = physics.sneak_support_probe_depth;
+  tuning.collision_epsilon = physics.collision_epsilon;
+  tuning.surface_swim_speed = physics.surface_swim_speed;
+  tuning.underwater_swim_speed = physics.underwater_swim_speed;
+  tuning.fast_surface_swim_speed = physics.fast_surface_swim_speed;
+  tuning.fast_underwater_swim_speed = physics.fast_underwater_swim_speed;
+  tuning.upward_swim_acceleration = physics.upward_swim_acceleration;
+  tuning.downward_swim_acceleration = physics.downward_swim_acceleration;
+  tuning.liquid_drag = physics.liquid_drag;
+  tuning.surface_float_depth = physics.surface_float_depth;
+  tuning.surface_buoyancy = physics.surface_buoyancy;
+  tuning.underwater_buoyancy = physics.underwater_buoyancy;
+  tuning.breath_seconds = physics.breath_seconds;
+  return tuning;
+}
+
 struct DedicatedLaunchOptions {
   arv::io::ConfigLoadOptions config{};
   arv::u64 max_ticks{};
@@ -157,6 +196,27 @@ int main(int argc, char** argv) {
   const arv::sched::RuntimeThreadBudgetPlan thread_budget =
       arv::sched::plan_runtime_thread_budget(thread_budget_config);
 
+  arv::server::ServerChunkStreamingConfig chunk_streaming;
+  chunk_streaming.max_view_distance = config.chunks.load_distance;
+  chunk_streaming.simulation_distance = config.chunks.simulation_distance;
+  chunk_streaming.unload_margin = config.chunks.unload_margin;
+
+  arv::world::WorldTickPolicy world_tick_policy;
+  world_tick_policy.block_update_interval =
+      config.simulation.systems.block_updates.interval;
+  world_tick_policy.block_update_budget =
+      config.simulation.systems.block_updates.budget;
+  world_tick_policy.fluid_interval =
+      config.simulation.systems.fluids.interval;
+  world_tick_policy.fluid_budget =
+      config.simulation.systems.fluids.budget;
+
+  arv::voxel::FluidDefinition water_fluid =
+      arv::voxel::make_water_fluid_definition();
+  water_fluid.flow_interval_ticks =
+      config.simulation.fluids.water.flow_interval_ticks;
+  const arv::player::PlayerTuning player_tuning = make_player_tuning(config.physics);
+
   arv::server::ServerRuntime server(std::make_unique<arv::net::GameNetworkingSocketsTransport>());
   auto start_result = server.start({
       arv::server::ServerMode::Dedicated,
@@ -164,14 +224,15 @@ int main(int argc, char** argv) {
       {config.network.bind_address, config.network.port},
       &block_registry,
       &item_registry,
-      arv::player::default_player_tuning(),
-      arv::voxel::make_water_fluid_definition(),
-      {},
+      player_tuning,
+      water_fluid,
+      chunk_streaming,
       std::nullopt,
       config.chunk_pipeline.max_generation_results_per_tick,
       config.chunk_pipeline.max_lighting_results_per_tick,
       config.chunk_pipeline.max_generation_jobs_per_frame,
-      thread_budget.primary_workers});
+      thread_budget.primary_workers,
+      world_tick_policy});
   if (!start_result) {
     arv::core::error("server", start_result.error().message);
     transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);

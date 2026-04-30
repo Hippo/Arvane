@@ -57,6 +57,9 @@ namespace {
   if (code == "Apostrophe") {
     return GLFW_KEY_APOSTROPHE;
   }
+  if (code == "Grave") {
+    return GLFW_KEY_GRAVE_ACCENT;
+  }
   if (code == "Comma") {
     return GLFW_KEY_COMMA;
   }
@@ -404,6 +407,15 @@ InputSnapshot OpenGLWindow::poll_input() {
                                 wheel_up_steps,
                                 wheel_down_steps) > 0;
   input.tab_menu_held = action_hold_active(window_, input_bindings_, LogicalAction::ShowTabMenu);
+  input.debug_menu_toggle_pressed =
+      action_press_count(
+          window_,
+          input_bindings_,
+          LogicalAction::ToggleDebugMenu,
+          previous_action_active_[logical_action_index(LogicalAction::ToggleDebugMenu)],
+          wheel_up_steps,
+          wheel_down_steps) > 0;
+  input.mouse_wheel_y = static_cast<f32>(accumulated_scroll_y_);
 
   for (usize slot = 0; slot < 9U; ++slot) {
     const LogicalAction action = static_cast<LogicalAction>(

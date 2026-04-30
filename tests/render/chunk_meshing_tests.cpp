@@ -17,6 +17,14 @@ arv::voxel::BlockRegistry make_registry() {
   definitions.push_back(arv::voxel::make_full_cube_definition(
       "arvane:glass",
       arv::voxel::RenderCategory::Transparent));
+  arv::voxel::BlockDefinition water;
+  water.name = "arvane:water";
+  water.properties.replaceable = true;
+  water.properties.fluid = true;
+  water.render_category = arv::voxel::RenderCategory::Transparent;
+  water.is_item = false;
+  water.texture_assets.fill("arvane:texture/block/water");
+  definitions.push_back(std::move(water));
 
   auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions));
   EXPECT_TRUE(registry_result);
@@ -121,6 +129,19 @@ TEST(ChunkMeshingTests, TransparentCubeUsesTransparentMeshOutput) {
   const arv::voxel::BlockVariantID glass = registry.find_variant("arvane:glass").value();
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
   ASSERT_TRUE(chunk.set_block({{4, 4, 4}}, glass));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+
+  EXPECT_EQ(face_count(mesh.opaque), 0U);
+  EXPECT_EQ(face_count(mesh.transparent), 6U);
+}
+
+TEST(ChunkMeshingTests, FluidCellsEmitIntoTransparentMesh) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_fluid({{4, 4, 4}}, arv::voxel::make_fluid_source(water)));
 
   const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
   const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);

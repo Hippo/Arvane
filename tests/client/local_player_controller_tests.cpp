@@ -40,7 +40,7 @@ TEST(LocalPlayerControllerTests, StaleCorrectionDoesNotOverrideUnconfirmedHotbar
   EXPECT_EQ(controller.selected_hotbar_slot(), 5U);
 }
 
-TEST(LocalPlayerControllerTests, SprintOnlyAppliesWhileMovingForwardAndNotSneaking) {
+TEST(LocalPlayerControllerTests, SendsRawSprintIntentForServerMovementRules) {
   arv::client::LocalPlayerController controller;
 
   controller.submit_input(arv::client::InputFrame{
@@ -54,7 +54,7 @@ TEST(LocalPlayerControllerTests, SprintOnlyAppliesWhileMovingForwardAndNotSneaki
       .move_right = true,
       .sprint_held = true});
   const arv::player::PlayerCommand strafing = controller.consume_command(13);
-  EXPECT_FALSE(strafing.sprint_held);
+  EXPECT_TRUE(strafing.sprint_held);
 
   controller.submit_input(arv::client::InputFrame{
       .move_forward = true,
@@ -62,5 +62,27 @@ TEST(LocalPlayerControllerTests, SprintOnlyAppliesWhileMovingForwardAndNotSneaki
       .sprint_held = true});
   const arv::player::PlayerCommand sneaking = controller.consume_command(14);
   EXPECT_TRUE(sneaking.sneak_held);
-  EXPECT_FALSE(sneaking.sprint_held);
+  EXPECT_TRUE(sneaking.sprint_held);
+}
+
+TEST(LocalPlayerControllerTests, SprintingAppliesCameraFovBoost) {
+  arv::client::LocalPlayerController controller;
+
+  controller.submit_input(arv::client::InputFrame{
+      .move_forward = true,
+      .sprint_held = true});
+  EXPECT_FLOAT_EQ(
+      controller.camera().fov_y_degrees(),
+      arv::client::DefaultCameraFovYDegrees + arv::client::DefaultSprintCameraFovBoostDegrees);
+
+  controller.submit_input(arv::client::InputFrame{
+      .move_right = true,
+      .sprint_held = true});
+  EXPECT_FLOAT_EQ(controller.camera().fov_y_degrees(), arv::client::DefaultCameraFovYDegrees);
+
+  controller.submit_input(arv::client::InputFrame{
+      .move_forward = true,
+      .sneak_held = true,
+      .sprint_held = true});
+  EXPECT_FLOAT_EQ(controller.camera().fov_y_degrees(), arv::client::DefaultCameraFovYDegrees);
 }

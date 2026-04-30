@@ -8,6 +8,27 @@ window:
   vsync: false
 simulation:
   base_tps: 60
+  systems:
+    physics:
+      interval: 1
+    entities:
+      interval: 1
+    ai:
+      interval: 2
+    block_updates:
+      interval: 3
+      budget: 5000
+    fluids:
+      interval: 1
+      budget: 2000
+    random_ticks:
+      interval: 20
+      samples_per_chunk: 3
+  fluids:
+    water:
+      flow_interval_ticks: 10
+    lava:
+      flow_interval_ticks: 30
 network:
   bind_address: 0.0.0.0
   port: 27020
@@ -22,6 +43,40 @@ jobs:
   reserved_threads: 4
   min_worker_threads: 1
   max_worker_threads: 64
+physics:
+  standing_eye_height: 1.62
+  sneaking_eye_height: 1.35
+  swimming_eye_height: 0.45
+  eye_height_lerp_per_second: 12.0
+  reach_distance: 5.0
+  mouse_sensitivity_radians: 0.0025
+  walk_speed: 4.5
+  sprint_speed: 6.0
+  sneak_speed: 2.25
+  air_speed: 3.5
+  fly_speed: 8.0
+  fly_vertical_speed: 6.0
+  jump_velocity: 8.5
+  gravity_per_second: 32.0
+  terminal_velocity: 55.0
+  body_width: 0.6
+  body_height: 1.8
+  sneaking_body_height: 1.5
+  swimming_body_width: 0.9
+  swimming_body_height: 0.6
+  sneak_support_probe_depth: 0.05
+  collision_epsilon: 0.001
+  surface_swim_speed: 2.5
+  underwater_swim_speed: 2.0
+  fast_surface_swim_speed: 5.6
+  fast_underwater_swim_speed: 5.0
+  upward_swim_acceleration: 18.0
+  downward_swim_acceleration: 18.0
+  liquid_drag: 0.8
+  surface_float_depth: 1.0
+  surface_buoyancy: 10.0
+  underwater_buoyancy: 1.0
+  breath_seconds: 15.0
 render:
   max_chunk_mesh_uploads_per_frame: 8
 chunk_pipeline:

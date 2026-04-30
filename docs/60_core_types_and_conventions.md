@@ -558,6 +558,7 @@ callable without changing call sites.
 * Prefer dense vectors indexed by runtime IDs over associative containers.
 * Avoid `std::function` in hot paths; prefer template callables, function pointers, or `arv::FunctionRef`.
 * Avoid `std::shared_ptr` in hot paths; prefer explicit ownership, handles, indices, or arenas.
+* Prefer `emplace_back` over `push_back` when possible.
 
 ---
 

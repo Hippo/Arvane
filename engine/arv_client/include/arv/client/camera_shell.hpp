@@ -10,6 +10,7 @@
 namespace arv::client {
 
 inline constexpr f32 DefaultCameraFovYDegrees = 70.0F;
+inline constexpr f32 DefaultSprintCameraFovBoostDegrees = 5.0F;
 inline constexpr f32 DefaultCameraNearPlane = 0.05F;
 inline constexpr f32 DefaultCameraFarPlane = 1000.0F;
 inline constexpr f32 MaxCameraPitchRadians = 1.55334306F;
@@ -38,7 +39,9 @@ public:
   void set_position(Vec3f position) noexcept;
   [[nodiscard]] f32 yaw_radians() const noexcept;
   [[nodiscard]] f32 pitch_radians() const noexcept;
+  [[nodiscard]] f32 fov_y_degrees() const noexcept;
   void set_rotation(f32 yaw_radians, f32 pitch_radians) noexcept;
+  void set_fov_y_degrees(f32 fov_y_degrees) noexcept;
   void apply_mouse_delta(f32 yaw_delta_radians, f32 pitch_delta_radians) noexcept;
   void apply_freecam_input(FreecamInput input) noexcept;
   [[nodiscard]] Vec3f forward_vector() const noexcept;
@@ -57,6 +60,7 @@ private:
   Vec3f position_{8.0F, 14.0F, -20.0F};
   f32 yaw_radians_{};
   f32 pitch_radians_{-0.28F};
+  f32 fov_y_degrees_{DefaultCameraFovYDegrees};
 };
 
 } // namespace arv::client

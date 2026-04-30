@@ -119,6 +119,8 @@ std::vector<u8> serialize_player_correction(const PlayerCorrection& correction) 
   writer.write<u16>(pack_core_permissions(correction.resolved_core_permissions));
   writer.write_bool(correction.grounded);
   writer.write_bool(correction.sneaking);
+  writer.write_bool(correction.swimming);
+  write_f32(writer, correction.breath_seconds);
   writer.write<u8>(correction.selected_hotbar_slot);
   return std::move(writer).take_bytes();
 }
@@ -141,11 +143,14 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
   auto resolved_core_permissions = reader.read<u16>();
   auto grounded = reader.read_bool();
   auto sneaking = reader.read_bool();
+  auto swimming = reader.read_bool();
+  auto breath_seconds = read_f32(reader);
   auto selected_hotbar_slot = reader.read<u8>();
 
   if (!server_tick || !player_id || !world_id || !pos_x || !pos_y || !pos_z || !vel_x ||
       !vel_y || !vel_z || !yaw || !pitch || !movement_mode || !game_mode_id ||
-      !resolved_core_permissions || !grounded || !sneaking || !selected_hotbar_slot) {
+      !resolved_core_permissions || !grounded || !sneaking || !swimming ||
+      !breath_seconds || !selected_hotbar_slot) {
     return Expected<PlayerCorrection, ProtocolError>::failure(
         ProtocolError{"failed to decode player correction"});
   }
@@ -163,6 +168,8 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
   correction.resolved_core_permissions = unpack_core_permissions(resolved_core_permissions.value());
   correction.grounded = grounded.value();
   correction.sneaking = sneaking.value();
+  correction.swimming = swimming.value();
+  correction.breath_seconds = breath_seconds.value();
   correction.selected_hotbar_slot = selected_hotbar_slot.value();
   return Expected<PlayerCorrection, ProtocolError>::success(std::move(correction));
 }

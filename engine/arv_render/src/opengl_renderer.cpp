@@ -28,6 +28,16 @@ constexpr f32 UiTextureSlotItem = 3.0F;
   return UiTextureSlotWhite;
 }
 
+[[nodiscard]] u32 full_mipmap_max_level(u32 width, u32 height) noexcept {
+  u32 size = std::max(width, height);
+  u32 level = 0;
+  while (size > 1U) {
+    size /= 2U;
+    ++level;
+  }
+  return level;
+}
+
 void append_ui_quad(
     std::vector<UIVertex>& vertices,
     std::vector<u32>& indices,
@@ -420,6 +430,11 @@ OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture(const TextureUploadDat
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  const u32 full_max_level = mipmaps ? full_mipmap_max_level(upload.width, upload.height) : 0U;
+  const u32 max_level = mipmaps && upload.limit_mipmap_levels
+                            ? std::min(upload.max_mipmap_level, full_max_level)
+                            : full_max_level;
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(max_level));
   glTexParameteri(
       GL_TEXTURE_2D,
       GL_TEXTURE_MIN_FILTER,

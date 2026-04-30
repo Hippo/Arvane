@@ -1256,22 +1256,180 @@ This rule exists to ensure:
 
 ---
 
-## Implementation Guidance
+## Liquid Movement and Swimming Physics
 
-A good baseline implementation order is:
+Player movement in liquids uses a dedicated swimming movement mode instead of
+treating water as ordinary air movement with extra drag. The goal is to support
+Minecraft Aquatic Update-style swimming while keeping the implementation simple,
+predictable, and compatible with the existing AABB physics model.
 
-1. world collision query interface
-2. block-state collision box extraction
-3. AABB overlap / sweep helpers
-4. per-axis terrain resolution
-5. grounded detection
-6. gravity and jump integration
-7. player controller horizontal movement
-8. step-up logic
-9. sneak ledge prevention
-10. client interpolation / prediction integration
+### Liquid Contact State
 
-This ordering keeps the system stable and testable.
+The physics system should distinguish between these player liquid states:
+
+- `NotInLiquid`
+- `PartiallyInLiquid`
+- `SwimmingAtSurface`
+- `SwimmingUnderwater`
+
+A player is considered in liquid when their movement/collision AABB overlaps a
+liquid block volume. A player is considered underwater when the camera/head
+sample point is below the liquid surface.
+
+The exact sample points should be centralized in the physics/controller code
+rather than scattered across systems.
+
+### Surface Swimming
+
+When the player is in water and their head is above the water surface, they
+should float at the surface by default.
+
+While surface swimming:
+
+- The player should not naturally sink.
+- The player should not naturally rise past the configured surface float depth;
+  by default this keeps the feet about one block below the liquid surface.
+- Breath should remain full and should not decrease.
+- Gravity should be heavily reduced or disabled while the player is supported by
+  the liquid surface.
+- Normal movement should feel slower and more buoyant than land movement.
+- Jump input swims upward.
+- Sneak input intentionally descends into the water.
+
+The player should only transition from surface swimming to underwater swimming
+when they intentionally descend, usually by holding the sneak key or otherwise
+moving below the surface.
+
+### Underwater Swimming
+
+When the player is underwater, movement should become full 3D swimming movement.
+
+While underwater:
+
+- Jump input swims upward.
+- Sneak input swims downward.
+- Horizontal movement should work relative to the player view direction.
+- Gravity should be replaced by liquid buoyancy and drag.
+- Breath should decrease only while the player is underwater.
+- Leaving water or returning to the surface should restore breath according to
+  the normal breath/air rules.
+
+Underwater movement should still use fixed-tick physics and should not depend on
+render frame rate.
+
+### Sprint Swimming / Fast Swim
+
+Holding sprint while swimming enables fast swim mode.
+
+Fast swim behavior depends on whether the player is at the surface or underwater:
+
+- If the player is at the surface and sprinting, they remain at the surface and
+  move faster across the water.
+- If the player is underwater and sprinting, they move faster through the water
+  in the direction they are swimming.
+- Sprinting at the surface does not consume breath because the player remains
+  above water.
+- Sprinting underwater does not by itself restore breath; normal underwater
+  breath rules still apply.
+
+Fast swim should be a movement mode modifier, not a separate physics system.
+
+### Swimming AABB
+
+Fast swim uses a different player collision shape to represent the player being
+horizontal in the water.
+
+The engine should not rotate the AABB. Instead, it should swap to a wider and
+shorter swimming AABB.
+
+For example:
+
+```cpp
+enum class PlayerCollisionPose {
+    Standing,
+    Sneaking,
+    Swimming,
+};
+```
+
+The swimming pose should:
+
+* Reduce player height.
+* Increase horizontal length or width enough to represent the player being
+  stretched forward.
+* Keep collision resolution axis-aligned.
+* Be validated before entering the pose, similar to standing/sneaking pose
+  transitions.
+
+The player should only enter the swimming collision pose while in liquid and
+fast swimming. When leaving fast swim or exiting liquid, the controller should
+attempt to restore the normal standing or sneaking pose if there is enough space.
+
+If there is not enough space to restore the taller pose, the player should remain
+in the smaller collision pose until the space is clear.
+
+### Pose Transition Safety
+
+Changing the player collision pose must never push the player into solid blocks.
+
+Before changing to a larger or taller AABB, the physics system must check whether
+the new AABB would collide with solid terrain. If the target pose is blocked, the
+pose change is delayed.
+
+This applies to:
+
+* Sneaking to standing.
+* Swimming to standing.
+* Swimming to sneaking.
+* Any future crawl/prone-style poses.
+
+### Liquid Movement Constants
+
+Liquid movement constants should be centralized with the rest of the player
+physics constants.
+
+Suggested constants include:
+
+```cpp
+struct PlayerLiquidMovementConstants {
+    float surface_swim_speed;
+    float underwater_swim_speed;
+    float fast_surface_swim_speed;
+    float fast_underwater_swim_speed;
+
+    float upward_swim_acceleration;
+    float downward_swim_acceleration;
+
+    float liquid_drag;
+    float surface_buoyancy;
+    float underwater_buoyancy;
+
+    float breath_seconds;
+};
+```
+
+The exact values should be tuned through gameplay testing, but the behavior rules
+above are part of the physics contract.
+
+These constants are configured through the top-level `physics` section of
+`engine.yaml`, alongside the existing land movement, collision shape, eye height,
+gravity, and reach values:
+
+```yaml
+physics:
+  walk_speed: 4.5
+  sprint_speed: 6.0
+  body_height: 1.8
+  swimming_body_width: 0.9
+  swimming_body_height: 0.6
+  surface_swim_speed: 2.5
+  underwater_swim_speed: 2.0
+  fast_surface_swim_speed: 5.6
+  fast_underwater_swim_speed: 5.0
+  liquid_drag: 0.8
+  surface_float_depth: 1.0
+  breath_seconds: 15.0
+```
 
 ---
 

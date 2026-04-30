@@ -140,18 +140,27 @@ void ChunkSection::replace_generated_blocks(std::array<BlockVariantID, ChunkVolu
 
 void ChunkSection::replace_saved_contents(
     std::array<BlockVariantID, ChunkVolume> blocks,
-    std::array<LightWord, ChunkVolume> lights) noexcept {
+    std::array<LightWord, ChunkVolume> lights,
+    std::optional<std::array<FluidCell, ChunkVolume>> fluids) noexcept {
   const bool blocks_changed = storage_->blocks != blocks;
   const bool lights_changed = storage_->lights != lights;
+  const std::array<FluidCell, ChunkVolume>* next_fluids = fluids ? &fluids.value() : nullptr;
+  const bool fluids_changed = next_fluids != nullptr && storage_->fluids != *next_fluids;
   const bool first_mesh = mesh_built_from_block_version_ == 0U;
 
-  if (blocks_changed || lights_changed) {
+  if (blocks_changed || lights_changed || fluids_changed) {
     ensure_detached_storage();
     if (blocks_changed) {
       storage_->blocks = std::move(blocks);
-      storage_->fluids.fill(empty_fluid_cell());
       ++block_version_;
       ++content_version_;
+    }
+    if (fluids_changed) {
+      storage_->fluids = std::move(fluids.value());
+      ++block_version_;
+      ++content_version_;
+    } else if (blocks_changed && next_fluids == nullptr) {
+      storage_->fluids.fill(empty_fluid_cell());
     }
     if (lights_changed) {
       storage_->lights = std::move(lights);
@@ -160,15 +169,15 @@ void ChunkSection::replace_saved_contents(
     }
   }
 
-  if (!blocks_changed && !lights_changed && !first_mesh) {
+  if (!blocks_changed && !lights_changed && !fluids_changed && !first_mesh) {
     return;
   }
 
   dirty_flags_ = ChunkDirtyFlags::None;
-  if (blocks_changed || first_mesh) {
+  if (blocks_changed || fluids_changed || first_mesh) {
     dirty_flags_ |= ChunkDirtyFlags::Geometry;
   }
-  if (lights_changed && !blocks_changed) {
+  if (lights_changed && !blocks_changed && !fluids_changed) {
     dirty_flags_ |= ChunkDirtyFlags::LightMesh;
   }
   if (has_flag(dirty_flags_, ChunkDirtyFlags::Geometry) ||
@@ -177,7 +186,7 @@ void ChunkSection::replace_saved_contents(
   } else if (mesh_state_ == ChunkMeshState::Dirty) {
     mesh_state_ = ChunkMeshState::Clean;
   }
-  if (blocks_changed) {
+  if (blocks_changed || fluids_changed) {
     mesh_built_from_block_version_ = 0;
     mesh_built_from_light_version_ = 0;
   }
@@ -260,6 +269,12 @@ LightWord snapshot_light(const ChunkSnapshot& snapshot, SectionLocalPos local) n
   SectionLocalPos storage_local{};
   const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
   return storage != nullptr ? storage->lights[local_index(storage_local)] : NoLight;
+}
+
+FluidCell snapshot_fluid(const ChunkSnapshot& snapshot, SectionLocalPos local) noexcept {
+  SectionLocalPos storage_local{};
+  const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
+  return storage != nullptr ? storage->fluids[local_index(storage_local)] : empty_fluid_cell();
 }
 
 } // namespace arv::voxel

@@ -44,6 +44,8 @@ struct PlayerState {
   f32 pitch_radians{};
   bool grounded{};
   bool sneaking{};
+  bool swimming{};
+  f32 breath_seconds{DefaultBreathSeconds};
   MovementMode movement_mode{MovementMode::Walking};
   std::string game_mode_id{std::string{SurvivalGameModeID}};
   PlayerPermissions permission_overrides{};
@@ -63,6 +65,8 @@ struct PlayerViewState {
   f32 pitch_radians{};
   bool grounded{};
   bool sneaking{};
+  bool swimming{};
+  f32 breath_seconds{DefaultBreathSeconds};
   MovementMode movement_mode{MovementMode::Walking};
   std::string game_mode_id{std::string{SurvivalGameModeID}};
   ResolvedPermissions resolved_permissions{};

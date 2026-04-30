@@ -83,6 +83,23 @@ TEST(TextureAtlasTests, AppliesDuplicatedEdgePadding) {
   EXPECT_EQ(entry.unpadded_pixel_min.y, entry.padded_pixel_min.y + 1);
 }
 
+TEST(TextureAtlasTests, RecordsPaddingSafeMipmapLimit) {
+  const arv::asset::Image image = make_test_image(
+      {1, 2, 3, 255},
+      {4, 5, 6, 255},
+      {7, 8, 9, 255},
+      {10, 11, 12, 255});
+  const arv::asset::TextureAtlasInput input{{"arvane:texture/block/test"}, image, false};
+
+  auto atlas = arv::asset::build_texture_atlas(
+      std::span<const arv::asset::TextureAtlasInput>{&input, 1},
+      {.max_page_size = 32, .padding = 4});
+
+  ASSERT_TRUE(atlas);
+  EXPECT_EQ(atlas.value().padding, 4U);
+  EXPECT_EQ(atlas.value().mip_safe_max_level, 2U);
+}
+
 TEST(FontTests, ShapesMeasuresAndCachesGlyphs) {
   const std::filesystem::path asset_root{ARVANE_TEST_ASSET_ROOT};
   arv::asset::ResourceManager resources(asset_root);

@@ -25,6 +25,10 @@ public:
     return world_.get_block(pos);
   }
 
+  [[nodiscard]] voxel::FluidCell fluid_cell(BlockPos pos) const noexcept override {
+    return world_.get_fluid(pos);
+  }
+
   void gather_collision_boxes(const Aabb3f& world_bounds, std::vector<Aabb3f>& out_boxes) const override {
     const i32 min_x = static_cast<i32>(std::floor(world_bounds.min.x));
     const i32 min_y = static_cast<i32>(std::floor(world_bounds.min.y));

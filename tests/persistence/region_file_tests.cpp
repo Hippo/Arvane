@@ -16,8 +16,10 @@ arv::persistence::SavedChunkSection make_saved_chunk(
   chunk.coord = coord;
   chunk.blocks.fill(fill_variant);
   chunk.lights.fill(arv::voxel::NoLight);
+  chunk.fluids.fill(arv::voxel::empty_fluid_cell());
   chunk.lighting_valid = lighting_valid;
   chunk.lights[0] = arv::voxel::pack_light(1, 2, 3, 4);
+  chunk.fluids[0] = arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
   return chunk;
 }
 
@@ -58,6 +60,7 @@ TEST(RegionFileTests, ChunkSerializationRoundTripsThroughRegionEncoding) {
   EXPECT_EQ(lower->blocks[0], stone);
   EXPECT_EQ(neighbor->blocks[0], dirt);
   EXPECT_EQ(lower->lights[0], arv::voxel::pack_light(1, 2, 3, 4));
+  EXPECT_TRUE(lower->fluids[0].source());
   EXPECT_TRUE(lower->lighting_valid);
   EXPECT_FALSE(neighbor->lighting_valid);
 }

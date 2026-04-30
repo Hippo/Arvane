@@ -25,6 +25,10 @@ void erase_last_utf8_codepoint(std::string& text) {
 ClientRuntime::ClientRuntime(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
 }
 
+void ClientRuntime::set_player_tuning(player::PlayerTuning tuning) noexcept {
+  player_controller_.set_player_tuning(tuning);
+}
+
 net::ConnectResult ClientRuntime::connect_integrated() {
   if (!transport_) {
     return net::ConnectResult::failure(net::NetworkError{"client has no transport"});

@@ -143,6 +143,16 @@ struct std::hash<arv::ChunkCoord> {
 };
 
 template<>
+struct std::hash<arv::BlockPos> {
+  arv::usize operator()(const arv::BlockPos& pos) const noexcept {
+    const arv::usize x = std::hash<arv::i32>{}(pos.value.x);
+    const arv::usize y = std::hash<arv::i32>{}(pos.value.y);
+    const arv::usize z = std::hash<arv::i32>{}(pos.value.z);
+    return ((x * 16777619U) ^ y) * 16777619U ^ z;
+  }
+};
+
+template<>
 struct std::hash<arv::ChunkColumnCoord> {
   arv::usize operator()(const arv::ChunkColumnCoord& coord) const noexcept {
     const arv::usize x = std::hash<arv::i32>{}(coord.x);

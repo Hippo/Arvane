@@ -141,6 +141,8 @@ struct TextureUploadData {
   u32 width{};
   u32 height{};
   std::vector<u8> rgba_pixels{};
+  bool limit_mipmap_levels{};
+  u32 max_mipmap_level{};
 
   [[nodiscard]] bool valid() const noexcept {
     return width > 0 && height > 0 &&

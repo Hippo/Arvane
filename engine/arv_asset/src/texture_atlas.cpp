@@ -36,6 +36,16 @@ private:
   return value != 0 && (value & (value - 1U)) == 0;
 }
 
+[[nodiscard]] u32 mip_safe_max_level_for_padding(u32 padding) noexcept {
+  u32 level = 0;
+  u32 footprint = 1;
+  while (footprint <= padding / 2U) {
+    footprint *= 2U;
+    ++level;
+  }
+  return level;
+}
+
 [[nodiscard]] u8 image_pixel_channel(const Image& image, u32 x, u32 y, usize channel) noexcept {
   const usize offset = (static_cast<usize>(y) * image.width + x) * image.channels + channel;
   return image.pixels[offset];
@@ -209,6 +219,7 @@ TextureAtlasResult build_texture_atlas(
 
   TextureAtlas atlas;
   atlas.padding = options.padding;
+  atlas.mip_safe_max_level = mip_safe_max_level_for_padding(options.padding);
   TextureAtlasPage page;
   page.image.width = static_cast<u32>(result_size.w);
   page.image.height = static_cast<u32>(result_size.h);

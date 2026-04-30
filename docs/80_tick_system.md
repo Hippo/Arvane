@@ -49,6 +49,7 @@ The base tick rate defines:
 * Scheduler granularity
 
 > IMPORTANT: Base TPS is the **scheduler resolution**, not the update frequency of all systems.
+> It is not a tuning knob for individual gameplay speeds such as water or lava flow.
 
 ---
 
@@ -128,7 +129,7 @@ Example (base_tps = 60):
 | Entities      | 1        | 60 TPS    |
 | AI            | 2        | 30 TPS    |
 | Block Updates | 3        | 20 TPS    |
-| Fluids        | 3        | 20 TPS    |
+| Fluid Queue Dispatch | 1 | 60 TPS    |
 | Random Ticks  | 20       | 3 TPS     |
 
 ---
@@ -183,6 +184,10 @@ struct WorldTickPolicy {
 };
 ```
 
+`fluid_interval` controls how often due fluid events are drained and submitted to the
+bounded simulation worker path. Liquid speed itself is configured on the fluid type
+through `flow_interval_ticks`.
+
 ---
 
 ### Example Configuration (YAML)
@@ -190,28 +195,27 @@ struct WorldTickPolicy {
 ```yaml
 simulation:
   base_tps: 60
-
-systems:
-  physics:
-    interval: 1
-
-  entities:
-    interval: 1
-
-  ai:
-    interval: 2
-
-  block_updates:
-    interval: 3
-    budget: 5000
-
-  liquids:
-    interval: 3
-    budget: 2000
-
-  random_ticks:
-    interval: 20
-    samples_per_chunk: 3
+  systems:
+    physics:
+      interval: 1
+    entities:
+      interval: 1
+    ai:
+      interval: 2
+    block_updates:
+      interval: 3
+      budget: 5000
+    fluids:
+      interval: 1
+      budget: 2000
+    random_ticks:
+      interval: 20
+      samples_per_chunk: 3
+  fluids:
+    water:
+      flow_interval_ticks: 10
+    lava:
+      flow_interval_ticks: 30
 ```
 
 ---
@@ -280,21 +284,42 @@ ticks = seconds * base_tps
 ```cpp
 struct FluidUpdate {
     BlockPos pos;
+    TickIndex execute_at;
 };
 ```
 
 System maintains:
 
 ```
-queue<FluidUpdate> pending_updates;
+scheduled_queue<FluidUpdate> pending_updates;
 ```
 
 ---
 
 ### Execution
 
-* Runs at `fluid_interval`
-* Processes up to `fluid_budget` updates per run
+* Runs queue dispatch at `fluid_interval`
+* Processes only updates whose `execute_at <= current_tick`
+* Processes up to `fluid_budget` due updates per run
+* Commits fluid deltas on the simulation thread
+
+Each fluid type defines:
+
+```cpp
+struct FluidDefinition {
+    uint32_t flow_interval_ticks;
+};
+```
+
+When a fluid cell changes, follow-up work for that cell and affected neighbors is
+scheduled at:
+
+```
+current_tick + fluid.flow_interval_ticks
+```
+
+Fluid speed changes update cadence, not propagation distance. A faster fluid may
+schedule its next step sooner, but it still moves one discrete flow step at a time.
 
 ---
 
@@ -311,6 +336,8 @@ Fluid updates are triggered by:
 ### Key Rule
 
 > Fluid simulation must be **event-driven**, not full-grid iteration.
+> Rendering, meshing, lighting, input, and block placement must not synchronously run
+> fluid propagation.
 
 ---
 
@@ -373,10 +400,17 @@ executor.silent_async([&] {
 ### Competitive
 
 ```yaml
-base_tps: 60
-ai_interval: 1
-fluid_interval: 4
-fluid_budget: 1500
+simulation:
+  base_tps: 60
+  systems:
+    ai:
+      interval: 1
+    fluids:
+      interval: 1
+      budget: 1500
+  fluids:
+    water:
+      flow_interval_ticks: 8
 ```
 
 ---
@@ -384,10 +418,19 @@ fluid_budget: 1500
 ### Survival (Default)
 
 ```yaml
-base_tps: 60
-ai_interval: 2
-fluid_interval: 3
-fluid_budget: 2000
+simulation:
+  base_tps: 60
+  systems:
+    ai:
+      interval: 2
+    fluids:
+      interval: 1
+      budget: 2000
+  fluids:
+    water:
+      flow_interval_ticks: 10
+    lava:
+      flow_interval_ticks: 30
 ```
 
 ---
@@ -395,10 +438,19 @@ fluid_budget: 2000
 ### Large Server
 
 ```yaml
-base_tps: 30
-ai_interval: 2
-fluid_interval: 4
-fluid_budget: 1000
+simulation:
+  base_tps: 30
+  systems:
+    ai:
+      interval: 2
+    fluids:
+      interval: 1
+      budget: 1000
+  fluids:
+    water:
+      flow_interval_ticks: 10
+    lava:
+      flow_interval_ticks: 30
 ```
 
 ---
@@ -410,6 +462,8 @@ fluid_budget: 1000
 * Tick-dependent gameplay logic without time abstraction
 * Arbitrary floating-point TPS
 * Full world iteration per system
+* Changing global TPS to tune water, lava, or other individual simulation speeds
+* Making a fluid move multiple blocks in one tick to imitate faster flow
 
 ---
 
@@ -420,6 +474,7 @@ fluid_budget: 1000
 3. **Simulation frequency is per-system, not global**
 4. **Gameplay should depend on time, not ticks**
 5. **Event-driven systems scale better than polling**
+6. **Fluid speed is per-fluid cadence, not global TPS**
 
 ---
 

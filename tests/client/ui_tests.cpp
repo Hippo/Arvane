@@ -151,6 +151,45 @@ TEST(HotbarHudTests, BuildsTextureItemIconsFromResolvedRenderMetadata) {
   EXPECT_TRUE(icon->image.valid);
 }
 
+TEST(HotbarHudTests, BlockItemIconsKeepSideTextureTopAtTop) {
+  FixedTextMeasurer text;
+  arv::client::UiTree tree;
+  std::vector<arv::client::UiItemStackView> slots(9);
+
+  arv::client::UiImageData mesh_ordered_face;
+  mesh_ordered_face.valid = true;
+  mesh_ordered_face.source = arv::render::UiTextureSource::TerrainAtlas;
+  mesh_ordered_face.uvs = {{
+      {0.0F, 1.0F},
+      {1.0F, 1.0F},
+      {0.0F, 0.0F},
+      {1.0F, 0.0F},
+  }};
+
+  slots[0].item_name = "arvane:grass_block";
+  slots[0].display_name = "Grass Block";
+  slots[0].count = 1;
+  slots[0].render_type = arv::player::ItemRenderType::Block;
+  slots[0].block_faces[arv::voxel::face_index(arv::voxel::BlockFace::PositiveY)] =
+      mesh_ordered_face;
+  slots[0].block_faces[arv::voxel::face_index(arv::voxel::BlockFace::PositiveX)] =
+      mesh_ordered_face;
+  slots[0].block_faces[arv::voxel::face_index(arv::voxel::BlockFace::PositiveZ)] =
+      mesh_ordered_face;
+
+  arv::client::build_hotbar_hud(tree, {0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* front = tree.find_by_stable_id("hud.hotbar.slot.0.block.front");
+  const auto* right = tree.find_by_stable_id("hud.hotbar.slot.0.block.right");
+  ASSERT_NE(front, nullptr);
+  ASSERT_NE(right, nullptr);
+  EXPECT_FLOAT_EQ(front->image.uvs[0].y, 0.0F);
+  EXPECT_FLOAT_EQ(front->image.uvs[2].y, 1.0F);
+  EXPECT_FLOAT_EQ(right->image.uvs[0].y, 0.0F);
+  EXPECT_FLOAT_EQ(right->image.uvs[2].y, 1.0F);
+}
+
 TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   FixedTextMeasurer text;
   arv::client::UiTree tree;

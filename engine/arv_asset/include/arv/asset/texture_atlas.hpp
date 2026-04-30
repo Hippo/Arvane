@@ -34,6 +34,7 @@ struct TextureAtlas {
   std::vector<TextureAtlasEntry> entries{};
   HashMap<std::string, u32> entry_by_asset_id{};
   u32 padding{};
+  u32 mip_safe_max_level{};
   u32 version{1};
 
   [[nodiscard]] const TextureAtlasEntry* find(std::string_view asset_id) const noexcept;

@@ -146,11 +146,11 @@ bindings:
   
   Sneak:
     - device: keyboard
-      key: LShift
+      key: LCtrl
 
   Sprint:
     - device: keyboard
-      key: LCtrl
+      key: LShift
 
   PrimaryInteract:
     - device: mouse_button

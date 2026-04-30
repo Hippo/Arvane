@@ -17,6 +17,27 @@ window:
   vsync: false
 simulation:
   base_tps: 30
+  systems:
+    physics:
+      interval: 1
+    entities:
+      interval: 1
+    ai:
+      interval: 4
+    block_updates:
+      interval: 5
+      budget: 1234
+    fluids:
+      interval: 2
+      budget: 3456
+    random_ticks:
+      interval: 40
+      samples_per_chunk: 9
+  fluids:
+    water:
+      flow_interval_ticks: 11
+    lava:
+      flow_interval_ticks: 37
 network:
   port: 28000
 chunks:
@@ -28,6 +49,40 @@ chunks:
 jobs:
   worker_threads: 6
   reserved_threads: 5
+physics:
+  standing_eye_height: 1.7
+  sneaking_eye_height: 1.4
+  swimming_eye_height: 0.5
+  eye_height_lerp_per_second: 10.0
+  reach_distance: 6.0
+  mouse_sensitivity_radians: 0.003
+  walk_speed: 4.0
+  sprint_speed: 7.0
+  sneak_speed: 2.0
+  air_speed: 3.0
+  fly_speed: 9.0
+  fly_vertical_speed: 7.0
+  jump_velocity: 9.0
+  gravity_per_second: 30.0
+  terminal_velocity: 50.0
+  body_width: 0.65
+  body_height: 1.9
+  sneaking_body_height: 1.45
+  swimming_body_width: 0.95
+  swimming_body_height: 0.55
+  sneak_support_probe_depth: 0.06
+  collision_epsilon: 0.002
+  surface_swim_speed: 2.75
+  underwater_swim_speed: 2.25
+  fast_surface_swim_speed: 5.75
+  fast_underwater_swim_speed: 5.25
+  upward_swim_acceleration: 19.0
+  downward_swim_acceleration: 20.0
+  liquid_drag: 0.75
+  surface_float_depth: 0.9
+  surface_buoyancy: 11.0
+  underwater_buoyancy: 1.25
+  breath_seconds: 18.0
 render:
   max_chunk_mesh_uploads_per_frame: 3
 chunk_pipeline:
@@ -48,6 +103,17 @@ chunk_pipeline:
   EXPECT_EQ(result.value().window.title, "Test Window");
   EXPECT_FALSE(result.value().window.vsync);
   EXPECT_EQ(result.value().simulation.base_tps, 30U);
+  EXPECT_EQ(result.value().simulation.systems.physics.interval, 1U);
+  EXPECT_EQ(result.value().simulation.systems.entities.interval, 1U);
+  EXPECT_EQ(result.value().simulation.systems.ai.interval, 4U);
+  EXPECT_EQ(result.value().simulation.systems.block_updates.interval, 5U);
+  EXPECT_EQ(result.value().simulation.systems.block_updates.budget, 1234U);
+  EXPECT_EQ(result.value().simulation.systems.fluids.interval, 2U);
+  EXPECT_EQ(result.value().simulation.systems.fluids.budget, 3456U);
+  EXPECT_EQ(result.value().simulation.systems.random_ticks.interval, 40U);
+  EXPECT_EQ(result.value().simulation.systems.random_ticks.samples_per_chunk, 9U);
+  EXPECT_EQ(result.value().simulation.fluids.water.flow_interval_ticks, 11U);
+  EXPECT_EQ(result.value().simulation.fluids.lava.flow_interval_ticks, 37U);
   EXPECT_EQ(result.value().network.port, 28000U);
   EXPECT_EQ(result.value().chunks.load_distance, 6);
   EXPECT_EQ(result.value().chunks.simulation_distance, 2);
@@ -56,6 +122,39 @@ chunk_pipeline:
   EXPECT_EQ(result.value().chunks.unload_margin, 3);
   EXPECT_EQ(result.value().jobs.worker_threads, 6U);
   EXPECT_EQ(result.value().jobs.reserved_threads, 5U);
+  EXPECT_FLOAT_EQ(result.value().physics.standing_eye_height, 1.7F);
+  EXPECT_FLOAT_EQ(result.value().physics.sneaking_eye_height, 1.4F);
+  EXPECT_FLOAT_EQ(result.value().physics.swimming_eye_height, 0.5F);
+  EXPECT_FLOAT_EQ(result.value().physics.eye_height_lerp_per_second, 10.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.reach_distance, 6.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.mouse_sensitivity_radians, 0.003F);
+  EXPECT_FLOAT_EQ(result.value().physics.walk_speed, 4.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.sprint_speed, 7.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.sneak_speed, 2.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.air_speed, 3.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.fly_speed, 9.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.fly_vertical_speed, 7.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.jump_velocity, 9.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.gravity_per_second, 30.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.terminal_velocity, 50.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.body_width, 0.65F);
+  EXPECT_FLOAT_EQ(result.value().physics.body_height, 1.9F);
+  EXPECT_FLOAT_EQ(result.value().physics.sneaking_body_height, 1.45F);
+  EXPECT_FLOAT_EQ(result.value().physics.swimming_body_width, 0.95F);
+  EXPECT_FLOAT_EQ(result.value().physics.swimming_body_height, 0.55F);
+  EXPECT_FLOAT_EQ(result.value().physics.sneak_support_probe_depth, 0.06F);
+  EXPECT_FLOAT_EQ(result.value().physics.collision_epsilon, 0.002F);
+  EXPECT_FLOAT_EQ(result.value().physics.surface_swim_speed, 2.75F);
+  EXPECT_FLOAT_EQ(result.value().physics.underwater_swim_speed, 2.25F);
+  EXPECT_FLOAT_EQ(result.value().physics.fast_surface_swim_speed, 5.75F);
+  EXPECT_FLOAT_EQ(result.value().physics.fast_underwater_swim_speed, 5.25F);
+  EXPECT_FLOAT_EQ(result.value().physics.upward_swim_acceleration, 19.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.downward_swim_acceleration, 20.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.liquid_drag, 0.75F);
+  EXPECT_FLOAT_EQ(result.value().physics.surface_float_depth, 0.9F);
+  EXPECT_FLOAT_EQ(result.value().physics.surface_buoyancy, 11.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.underwater_buoyancy, 1.25F);
+  EXPECT_FLOAT_EQ(result.value().physics.breath_seconds, 18.0F);
   EXPECT_EQ(result.value().render.max_chunk_mesh_uploads_per_frame, 3U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_jobs_per_frame, 2U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_results_per_tick, 3U);
@@ -71,6 +170,38 @@ TEST(ConfigTests, RejectsUnsupportedBaseTps) {
   const auto result = arv::io::parse_config_yaml(R"(
 simulation:
   base_tps: 57
+)");
+
+  EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsInvalidTickSystemConfig) {
+  const auto result = arv::io::parse_config_yaml(R"(
+simulation:
+  systems:
+    fluids:
+      interval: 0
+      budget: 2000
+)");
+
+  EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsInvalidFluidSpeedConfig) {
+  const auto result = arv::io::parse_config_yaml(R"(
+simulation:
+  fluids:
+    water:
+      flow_interval_ticks: 0
+)");
+
+  EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsInvalidPhysicsConfig) {
+  const auto result = arv::io::parse_config_yaml(R"(
+physics:
+  body_width: 0
 )");
 
   EXPECT_FALSE(result);
@@ -215,6 +346,8 @@ bindings:
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Sneak);
   const auto& open_inventory =
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::OpenInventory);
+  const auto& debug_menu =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::ToggleDebugMenu);
 
   ASSERT_EQ(move_forward.size(), 1U);
   EXPECT_EQ(move_forward[0].input_code, "F");
@@ -224,6 +357,8 @@ bindings:
   EXPECT_EQ(sneak[0].input_code, "LShift");
   ASSERT_EQ(open_inventory.size(), 1U);
   EXPECT_EQ(open_inventory[0].input_code, "E");
+  ASSERT_EQ(debug_menu.size(), 1U);
+  EXPECT_EQ(debug_menu[0].input_code, "Grave");
 }
 
 TEST(ConfigTests, MissingInputBindingsFileReturnsDefaultsAndWritesConfig) {
@@ -241,8 +376,12 @@ TEST(ConfigTests, MissingInputBindingsFileReturnsDefaultsAndWritesConfig) {
   EXPECT_TRUE(std::filesystem::exists(temp_root));
   const auto& jump =
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Jump);
+  const auto& debug_menu =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::ToggleDebugMenu);
   ASSERT_EQ(jump.size(), 1U);
   EXPECT_EQ(jump[0].input_code, "Space");
+  ASSERT_EQ(debug_menu.size(), 1U);
+  EXPECT_EQ(debug_menu[0].input_code, "Grave");
 
   std::filesystem::remove(temp_root, error);
 }

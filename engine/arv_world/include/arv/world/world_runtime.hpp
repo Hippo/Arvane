@@ -14,6 +14,7 @@
 #include <array>
 #include <deque>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -42,7 +43,7 @@ struct ScheduledBlockUpdate {
 
 struct WorldTickPolicy {
   u32 block_update_interval{3};
-  u32 fluid_interval{3};
+  u32 fluid_interval{1};
   u32 block_update_budget{5000};
   u32 fluid_budget{2000};
 };
@@ -65,7 +66,8 @@ public:
   void apply_chunk_snapshot(
       ChunkCoord coord,
       std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
-      std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights) noexcept;
+      std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights,
+      std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids = std::nullopt) noexcept;
   bool unload_chunk(ChunkCoord coord) noexcept;
   [[nodiscard]] voxel::ChunkSection* find_chunk(ChunkCoord coord) noexcept;
   [[nodiscard]] const voxel::ChunkSection* find_chunk(ChunkCoord coord) const noexcept;
@@ -81,6 +83,7 @@ public:
   [[nodiscard]] usize active_chunk_count() const noexcept;
   bool set_chunk_lifecycle_state(ChunkCoord coord, voxel::ChunkLifecycleState state) noexcept;
   void update_simulation_radius(ChunkCoord center, i32 radius) noexcept;
+  void update_simulation_radii(std::span<const ChunkCoord> centers, i32 radius) noexcept;
   [[nodiscard]] voxel::BlockVariantID get_block(BlockPos pos) const noexcept;
   [[nodiscard]] voxel::LightWord get_light(BlockPos pos) const noexcept;
   [[nodiscard]] voxel::FluidCell get_fluid(BlockPos pos) const noexcept;
@@ -106,7 +109,8 @@ public:
   void restore_saved_chunk(
       ChunkCoord coord,
       std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
-      std::array<voxel::LightWord, voxel::ChunkVolume> lights) noexcept;
+      std::array<voxel::LightWord, voxel::ChunkVolume> lights,
+      std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids = std::nullopt) noexcept;
   player::PlayerState& ensure_player(PlayerID player_id);
   [[nodiscard]] player::PlayerState* find_player(PlayerID player_id) noexcept;
   [[nodiscard]] const player::PlayerState* find_player(PlayerID player_id) const noexcept;
@@ -126,7 +130,8 @@ public:
       BlockUpdateReason reason = BlockUpdateReason::ScheduledTick);
   void enqueue_fluid_update(
       BlockPos pos,
-      FluidUpdateReason reason = FluidUpdateReason::NeighborChanged);
+      FluidUpdateReason reason = FluidUpdateReason::NeighborChanged,
+      u32 delay_ticks = 0U);
   [[nodiscard]] usize pending_fluid_update_count() const noexcept;
   [[nodiscard]] usize deferred_boundary_fluid_event_count(ChunkCoord coord) const noexcept;
   [[nodiscard]] usize total_deferred_boundary_fluid_event_count() const noexcept;
@@ -141,6 +146,11 @@ public:
       const voxel::BlockRegistry& registry,
       const voxel::FluidDefinition& definition,
       u32 budget);
+  [[nodiscard]] std::optional<FluidSimulationRequest> make_fluid_simulation_request(
+      u32 budget);
+  u32 apply_fluid_simulation_result(
+      FluidSimulationResult result,
+      const voxel::FluidDefinition& definition);
   WorldTickStats tick(
       const voxel::BlockRegistry& registry,
       const voxel::FluidDefinition& fluid_definition);
@@ -173,6 +183,13 @@ private:
   [[nodiscard]] static BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept;
   void mark_lighting_content_dirty() noexcept;
   void mark_mesh_content_dirty() noexcept;
+  bool set_fluid_internal(
+      BlockPos pos,
+      voxel::FluidCell fluid,
+      const voxel::FluidDefinition& definition,
+      bool enqueue_updates) noexcept;
+  void enqueue_fluid_update_unique(FluidUpdate update);
+  [[nodiscard]] std::vector<FluidUpdate> drain_due_fluid_updates(u32 budget);
   void enqueue_dirty_mesh_chunk(ChunkCoord coord);
   void recompute_lighting_work_pending() noexcept;
   void enqueue_neighbor_block_updates(BlockPos pos);
@@ -198,6 +215,7 @@ private:
   std::vector<ScheduledBlockUpdate> scheduled_block_updates_;
   std::deque<BlockUpdate> block_updates_;
   std::deque<FluidUpdate> fluid_updates_;
+  HashMap<BlockPos, FluidUpdate> pending_fluid_updates_by_position_;
   HashMap<ChunkCoord, std::vector<FluidUpdate>> deferred_boundary_fluid_updates_;
   std::deque<ChunkCoord> dirty_mesh_chunks_;
   HashSet<ChunkCoord> dirty_mesh_chunk_set_;

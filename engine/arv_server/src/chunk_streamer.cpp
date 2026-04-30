@@ -39,12 +39,25 @@ namespace {
   return horizontal_chunk_distance(coord, center) * 4 + abs_i32(coord.value.y - center.value.y);
 }
 
+[[nodiscard]] bool has_any_fluid(const voxel::ChunkSection& chunk) noexcept {
+  for (const voxel::FluidCell fluid : chunk.fluids()) {
+    if (!fluid.empty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace
 
 void ServerChunkStreamer::configure(ServerChunkStreamingConfig config) noexcept {
   if (config.max_view_distance < 0) {
     config.max_view_distance = 0;
   }
+  if (config.simulation_distance < 0) {
+    config.simulation_distance = 0;
+  }
+  config.simulation_distance = std::min(config.simulation_distance, config.max_view_distance);
   if (config.unload_margin < 0) {
     config.unload_margin = 0;
   }
@@ -325,11 +338,17 @@ void ServerChunkStreamer::queue_chunk_sends(
     data.chunk_light_version = source_chunk->light_data_version();
     data.has_lighting =
         !source_chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting);
+    data.has_fluids = has_any_fluid(*source_chunk);
     data.blocks = snapshot->blocks();
     if (data.has_lighting) {
       data.lights = snapshot->lights();
     } else {
       data.lights.fill(voxel::NoLight);
+    }
+    if (data.has_fluids) {
+      data.fluids = snapshot->fluids();
+    } else {
+      data.fluids.fill(voxel::empty_fluid_cell());
     }
 
     out_messages.push_back({

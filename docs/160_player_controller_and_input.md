@@ -987,20 +987,64 @@ If rendering and simulation/input run on different threads, camera snapshots mus
 
 ---
 
-## Minimum Baseline Behavior
+## Liquid Movement Input
 
-At minimum, a valid implementation must support:
+The player controller is responsible for translating input into liquid movement
+intent. The physics system is responsible for applying that intent safely.
 
-- keyboard movement input abstraction
-- mouse look
-- first-person camera with yaw/pitch
-- walking
-- jumping
-- flying mode
-- block ray targeting
-- fixed reach distance
-- hotbar slot selection by keys and scroll
-- primary and secondary interaction intents
-- explicit interaction priority order
+When the controlled player is in water:
 
-Anything beyond this can be layered on later, but this baseline must remain stable.
+- `Jump` means swim upward.
+- `Sneak` means descend.
+- `Sprint` enables fast swim.
+- Movement input controls swimming direction.
+
+The input command should carry sprint intent to the simulation. Land sprint
+eligibility and liquid fast-swim eligibility are resolved by the movement
+physics because they depend on world state.
+
+### Surface Behavior
+
+When the player is at the water surface:
+
+- The player should remain at the surface by default.
+- Pressing sprint should start fast surface swimming.
+- Fast surface swimming keeps the player above water.
+- Breath should not decrease while the player's head remains above water.
+- Pressing sneak intentionally descends below the surface.
+- Pressing jump at the surface should launch the player up and out of the water.
+
+The controller should not force the player underwater just because they are
+moving forward or sprinting.
+
+### Underwater Behavior
+
+When the player is underwater:
+
+- Jump swims upward.
+- Sneak swims downward.
+- Sprint enables fast underwater swimming.
+- Looking direction may influence swim direction during fast swim.
+- Breath decreases according to the underwater breath rules.
+
+### Swimming Pose Intent
+
+The controller may request the swimming collision pose while the player is fast
+swimming in liquid.
+
+The controller must not directly resize or move the collision box. Instead, it
+should submit a pose intent to the physics system, such as:
+
+```cpp
+enum class PlayerPoseIntent {
+    Standing,
+    Sneaking,
+    Swimming,
+};
+```
+
+The physics system validates the requested pose against collision before applying
+it.
+
+This keeps input handling separate from collision correctness and prevents the
+controller from placing the player inside solid terrain.

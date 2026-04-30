@@ -15,6 +15,22 @@
       "max_stack_size": 1,
       "render_type": "texture",
       "texture": "arvane:texture/item/pickaxe"
+    },
+    {
+      "name": "arvane:bucket",
+      "display_name": "Bucket",
+      "category": "tools",
+      "max_stack_size": 16,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/bucket"
+    },
+    {
+      "name": "arvane:water_bucket",
+      "display_name": "Water Bucket",
+      "category": "tools",
+      "max_stack_size": 1,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/water_bucket"
     }
   ]
 }

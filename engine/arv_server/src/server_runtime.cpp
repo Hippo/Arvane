@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -42,7 +43,10 @@ namespace {
     const player::PlayerState& player_state,
     const player::PlayerTuning& tuning) noexcept {
   const f32 eye_height =
-      player_state.sneaking ? tuning.sneaking_eye_height : tuning.standing_eye_height;
+      player_state.swimming
+          ? tuning.swimming_eye_height
+          : (player_state.sneaking ? tuning.sneaking_eye_height
+                                   : tuning.standing_eye_height);
   return {
       player_state.position.x,
       player_state.position.y + eye_height,
@@ -77,6 +81,8 @@ void step_player_without_collision(
   player_state.position = player_state.position + player_state.velocity * tick_seconds;
   player_state.grounded = false;
   player_state.sneaking = false;
+  player_state.swimming = false;
+  player_state.breath_seconds = tuning.breath_seconds;
 }
 
 [[nodiscard]] arv::BlockPos offset_block(arv::BlockPos pos, arv::voxel::BlockFace face) noexcept {
@@ -103,6 +109,178 @@ void step_player_without_collision(
   return pos;
 }
 
+[[nodiscard]] arv::i32 floor_i32(arv::f32 value) noexcept {
+  return static_cast<arv::i32>(std::floor(value));
+}
+
+[[nodiscard]] bool block_stops_bucket_raycast(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry& registry,
+    BlockPos pos) noexcept {
+  const voxel::BlockVariantID block = world.get_block(pos);
+  const voxel::BlockVariantRecord* variant = registry.variant(block);
+  return variant != nullptr && !registry.is_air(block) && !variant->properties.replaceable;
+}
+
+[[nodiscard]] std::optional<BlockPos> raycast_source_fluid(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry& registry,
+    const voxel::FluidDefinition& definition,
+    Vec3f origin,
+    Vec3f direction,
+    f32 max_distance) {
+  direction = normalize_or_zero(direction);
+  if (direction == Vec3f{}) {
+    return std::nullopt;
+  }
+
+  i32 x = floor_i32(origin.x);
+  i32 y = floor_i32(origin.y);
+  i32 z = floor_i32(origin.z);
+
+  const i32 step_x = direction.x > 0.0F ? 1 : (direction.x < 0.0F ? -1 : 0);
+  const i32 step_y = direction.y > 0.0F ? 1 : (direction.y < 0.0F ? -1 : 0);
+  const i32 step_z = direction.z > 0.0F ? 1 : (direction.z < 0.0F ? -1 : 0);
+
+  const f32 inf = std::numeric_limits<f32>::infinity();
+  auto initial_t_max = [&](f32 origin_axis, f32 direction_axis, i32 cell, i32 step) -> f32 {
+    if (step == 0) {
+      return inf;
+    }
+    const f32 boundary = step > 0 ? static_cast<f32>(cell + 1) : static_cast<f32>(cell);
+    return (boundary - origin_axis) / direction_axis;
+  };
+
+  f32 t_max_x = initial_t_max(origin.x, direction.x, x, step_x);
+  f32 t_max_y = initial_t_max(origin.y, direction.y, y, step_y);
+  f32 t_max_z = initial_t_max(origin.z, direction.z, z, step_z);
+  const f32 t_delta_x = step_x == 0 ? inf : std::abs(1.0F / direction.x);
+  const f32 t_delta_y = step_y == 0 ? inf : std::abs(1.0F / direction.y);
+  const f32 t_delta_z = step_z == 0 ? inf : std::abs(1.0F / direction.z);
+
+  constexpr usize MaxIterations = 2048;
+  for (usize iteration = 0; iteration < MaxIterations; ++iteration) {
+    const BlockPos block{{x, y, z}};
+    if (!world.find_chunk(block_to_chunk(block))) {
+      return std::nullopt;
+    }
+
+    const voxel::FluidCell fluid = world.get_fluid(block);
+    if (fluid.type == definition.type && fluid.source()) {
+      return block;
+    }
+    if (block_stops_bucket_raycast(world, registry, block)) {
+      return std::nullopt;
+    }
+
+    const f32 next_t = std::min(t_max_x, std::min(t_max_y, t_max_z));
+    if (next_t > max_distance) {
+      break;
+    }
+
+    if (t_max_x <= t_max_y && t_max_x <= t_max_z) {
+      x += step_x;
+      t_max_x += t_delta_x;
+    } else if (t_max_y <= t_max_z) {
+      y += step_y;
+      t_max_y += t_delta_y;
+    } else {
+      z += step_z;
+      t_max_z += t_delta_z;
+    }
+  }
+
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<player::ItemID> find_item_id(
+    const player::ItemRegistry& registry,
+    std::string_view name) {
+  return registry.find_item(name);
+}
+
+[[nodiscard]] std::optional<player::Inventory> inventory_after_bucket_fill(
+    const player::PlayerState& player_state,
+    const player::ItemRegistry& item_registry) {
+  const std::optional<player::ItemID> water_bucket =
+      find_item_id(item_registry, "arvane:water_bucket");
+  if (!water_bucket.has_value()) {
+    return std::nullopt;
+  }
+
+  player::Inventory next_inventory = player_state.inventory;
+  const usize slot = player_state.selected_hotbar_slot;
+  const std::optional<player::ItemStack>& held = next_inventory.slot(slot);
+  if (!held.has_value()) {
+    return std::nullopt;
+  }
+
+  if (held->count == 1U) {
+    if (!next_inventory.set_slot(slot, player::ItemStack{water_bucket.value(), 1U})) {
+      return std::nullopt;
+    }
+  } else {
+    if (!next_inventory.consume_one(slot)) {
+      return std::nullopt;
+    }
+    const player::InventoryInsertResult insert =
+        next_inventory.insert_stack({water_bucket.value(), 1U}, item_registry);
+    if (!insert.complete()) {
+      return std::nullopt;
+    }
+  }
+
+  return next_inventory;
+}
+
+[[nodiscard]] std::optional<player::Inventory> inventory_after_water_place(
+    const player::PlayerState& player_state,
+    const player::ItemRegistry& item_registry) {
+  const std::optional<player::ItemID> bucket = find_item_id(item_registry, "arvane:bucket");
+  if (!bucket.has_value()) {
+    return std::nullopt;
+  }
+
+  player::Inventory next_inventory = player_state.inventory;
+  const usize slot = player_state.selected_hotbar_slot;
+  const std::optional<player::ItemStack>& held = next_inventory.slot(slot);
+  if (!held.has_value()) {
+    return std::nullopt;
+  }
+
+  if (held->count == 1U) {
+    if (!next_inventory.set_slot(slot, player::ItemStack{bucket.value(), 1U})) {
+      return std::nullopt;
+    }
+  } else {
+    if (!next_inventory.consume_one(slot)) {
+      return std::nullopt;
+    }
+    const player::InventoryInsertResult insert =
+        next_inventory.insert_stack({bucket.value(), 1U}, item_registry);
+    if (!insert.complete()) {
+      return std::nullopt;
+    }
+  }
+
+  return next_inventory;
+}
+
+[[nodiscard]] bool can_place_fluid_source_at(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry& registry,
+    const voxel::FluidDefinition& definition,
+    BlockPos pos) noexcept {
+  const voxel::BlockVariantID existing_block = world.get_block(pos);
+  if (!(registry.is_air(existing_block) || registry.is_replaceable(existing_block))) {
+    return false;
+  }
+
+  const voxel::FluidCell existing_fluid = world.get_fluid(pos);
+  return existing_fluid.empty() ||
+         (existing_fluid.type == definition.type && !existing_fluid.source());
+}
+
 [[nodiscard]] protocol::PlayerCorrection make_player_correction(
     TickIndex server_tick,
     const player::PlayerState& player_state) {
@@ -119,6 +297,8 @@ void step_player_without_collision(
   correction.resolved_core_permissions = player_state.resolved_permissions.core;
   correction.grounded = player_state.grounded;
   correction.sneaking = player_state.sneaking;
+  correction.swimming = player_state.swimming;
+  correction.breath_seconds = player_state.breath_seconds;
   correction.selected_hotbar_slot = player_state.selected_hotbar_slot;
   return correction;
 }
@@ -137,6 +317,8 @@ void step_player_without_collision(
          lhs.resolved_core_permissions == rhs.resolved_core_permissions &&
          lhs.grounded == rhs.grounded &&
          lhs.sneaking == rhs.sneaking &&
+         lhs.swimming == rhs.swimming &&
+         lhs.breath_seconds == rhs.breath_seconds &&
          lhs.selected_hotbar_slot == rhs.selected_hotbar_slot;
 }
 
@@ -159,6 +341,11 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
   player_tuning_ = start_info.player_tuning;
   fluid_definition_ = start_info.fluid_definition;
   chunk_streamer_.configure(start_info.chunk_streaming);
+  const i32 max_view_distance = std::max<i32>(start_info.chunk_streaming.max_view_distance, 0);
+  simulation_radius_ = std::clamp(
+      start_info.chunk_streaming.simulation_distance,
+      0,
+      max_view_distance);
   chunk_generation_ = start_info.chunk_generation;
   max_pending_generation_jobs_ =
       std::max<u32>(start_info.max_pending_generation_jobs, 1U);
@@ -166,7 +353,17 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
       std::max<u32>(start_info.max_generation_results_per_tick, 1U);
   max_lighting_results_per_tick_ =
       std::max<u32>(start_info.max_lighting_results_per_tick, 1U);
+  max_fluid_results_per_tick_ =
+      std::max<u32>(start_info.max_fluid_results_per_tick, 1U);
   world_jobs_ = std::make_unique<sched::Scheduler>(start_info.worker_threads);
+  max_pending_fluid_jobs_ = std::max<u32>(start_info.max_pending_fluid_jobs, 1U);
+  fluid_update_interval_ = start_info.world_tick_policy.fluid_interval;
+  fluid_update_budget_ = start_info.world_tick_policy.fluid_budget == 0U
+                             ? world::WorldTickPolicy{}.fluid_budget
+                             : start_info.world_tick_policy.fluid_budget;
+  world::WorldTickPolicy tick_policy = start_info.world_tick_policy;
+  tick_policy.fluid_budget = 0U;
+  default_world_.set_tick_policy(tick_policy);
   worlds_.ensure_default_world();
   handshake_policy_.server_name =
       mode_ == ServerMode::Dedicated ? "Arvane Dedicated Server" : "Arvane Integrated Server";
@@ -191,13 +388,16 @@ void ServerRuntime::tick() {
   }
 
   drain_generation_jobs(false);
+  drain_fluid_jobs(false);
   drain_lighting_jobs(false);
   inbound_events_ = transport_->poll_events();
   for (net::NetworkEvent& event : inbound_events_) {
     handle_network_event(std::move(event));
   }
   tick_players();
+  update_world_simulation_activity();
   (void)default_world_.tick(*block_registry_, fluid_definition_);
+  schedule_fluid_jobs();
   schedule_lighting_jobs();
   tick_chunk_streaming();
   schedule_generation_jobs();
@@ -215,6 +415,7 @@ void ServerRuntime::shutdown() {
     world_jobs_->wait_for_all();
   }
   drain_generation_jobs(true);
+  drain_fluid_jobs(true);
   drain_lighting_jobs(true);
   if (transport_) {
     transport_->shutdown();
@@ -231,6 +432,44 @@ bool ServerRuntime::set_player_game_mode(PlayerID player_id, std::string_view mo
   player_state->game_mode_id = std::string{mode_id};
   refresh_player_permissions(*player_state);
   return true;
+}
+
+player::InventoryInsertResult ServerRuntime::insert_player_inventory_stack(
+    PlayerID player_id,
+    player::ItemStack stack,
+    std::optional<usize> preferred_slot,
+    bool replace_preferred_slot) {
+  player::InventoryInsertResult result;
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr || item_registry_ == nullptr || stack.count == 0U ||
+      item_registry_->item(stack.item) == nullptr) {
+    result.leftover = stack;
+    return result;
+  }
+
+  if (preferred_slot.has_value()) {
+    if (!player_state->inventory.is_valid_slot(preferred_slot.value())) {
+      result.leftover = stack;
+      return result;
+    }
+
+    if (replace_preferred_slot) {
+      player_state->inventory.set_slot(preferred_slot.value(), stack);
+      return result;
+    }
+
+    player::ItemStack remaining = stack;
+    (void)player_state->inventory.merge_stack_into_slot(
+        preferred_slot.value(),
+        remaining,
+        *item_registry_);
+    if (remaining.count == 0U) {
+      return result;
+    }
+    stack = remaining;
+  }
+
+  return player_state->inventory.insert_stack(stack, *item_registry_);
 }
 
 player::InventoryOperationResult ServerRuntime::apply_player_inventory_click(
@@ -449,6 +688,27 @@ void ServerRuntime::tick_players() {
   }
 }
 
+void ServerRuntime::update_world_simulation_activity() {
+  std::vector<ChunkCoord> centers;
+  centers.reserve(sessions_.size());
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr || session->world_id != default_world_.id()) {
+      continue;
+    }
+
+    const player::PlayerState* player_state =
+        default_world_.find_player(session->player_id);
+    if (player_state == nullptr) {
+      continue;
+    }
+
+    centers.push_back(player_chunk_coord(*player_state));
+  }
+
+  default_world_.update_simulation_radii(centers, simulation_radius_);
+}
+
 void ServerRuntime::handle_chunk_interest_update(
     net::ConnectionID connection_id,
     const protocol::ChunkInterestUpdate& interest) {
@@ -575,6 +835,56 @@ void ServerRuntime::drain_lighting_jobs(bool drain_all) {
   }
 }
 
+void ServerRuntime::drain_fluid_jobs(bool drain_all) {
+  u32 drained = 0;
+  for (usize index = 0;
+       index < pending_fluid_jobs_.size() &&
+       (drain_all || drained < max_fluid_results_per_tick_);) {
+    PendingFluidJob& pending = pending_fluid_jobs_[index];
+    if (!pending.job.is_complete()) {
+      ++index;
+      continue;
+    }
+
+    world::FluidSimulationResult result = pending.job.get();
+    (void)default_world_.apply_fluid_simulation_result(
+        std::move(result),
+        fluid_definition_);
+    pending_fluid_jobs_.erase(
+        pending_fluid_jobs_.begin() + static_cast<isize>(index));
+    ++drained;
+  }
+}
+
+void ServerRuntime::schedule_fluid_jobs() {
+  if (block_registry_ == nullptr ||
+      pending_fluid_jobs_.size() >= max_pending_fluid_jobs_) {
+    return;
+  }
+
+  if (fluid_update_interval_ != 0U &&
+      default_world_.tick_index() % fluid_update_interval_ != 0U) {
+    return;
+  }
+  std::optional<world::FluidSimulationRequest> request =
+      default_world_.make_fluid_simulation_request(fluid_update_budget_);
+  if (!request.has_value()) {
+    return;
+  }
+
+  const voxel::BlockRegistry* registry = block_registry_;
+  const voxel::FluidDefinition definition = fluid_definition_;
+  auto job = world_jobs_->submit(
+      "server_world_fluids",
+      [request = std::move(request.value()), registry, definition]() mutable {
+        return world::FluidSolver::build_simulation_result(
+            std::move(request),
+            *registry,
+            definition);
+      });
+  pending_fluid_jobs_.push_back({std::move(job)});
+}
+
 void ServerRuntime::schedule_lighting_jobs() {
   if (block_registry_ == nullptr || !default_world_.has_lighting_work()) {
     return;
@@ -650,6 +960,9 @@ void ServerRuntime::apply_player_command(
 
   world::WorldCollisionQuery collision_query(default_world_, *block_registry_, true);
   physics::KinematicConfig physics_config;
+  physics_config.standing_eye_height = player_tuning_.standing_eye_height;
+  physics_config.sneaking_eye_height = player_tuning_.sneaking_eye_height;
+  physics_config.swimming_eye_height = player_tuning_.swimming_eye_height;
   physics_config.walk_speed = player_tuning_.walk_speed;
   physics_config.sprint_speed = player_tuning_.sprint_speed;
   physics_config.sneak_speed = player_tuning_.sneak_speed;
@@ -662,7 +975,21 @@ void ServerRuntime::apply_player_command(
   physics_config.body_width = player_tuning_.body_width;
   physics_config.body_height = player_tuning_.body_height;
   physics_config.sneaking_body_height = player_tuning_.sneaking_body_height;
+  physics_config.swimming_body_width = player_tuning_.swimming_body_width;
+  physics_config.swimming_body_height = player_tuning_.swimming_body_height;
   physics_config.sneak_support_probe_depth = player_tuning_.sneak_support_probe_depth;
+  physics_config.collision_epsilon = player_tuning_.collision_epsilon;
+  physics_config.surface_swim_speed = player_tuning_.surface_swim_speed;
+  physics_config.underwater_swim_speed = player_tuning_.underwater_swim_speed;
+  physics_config.fast_surface_swim_speed = player_tuning_.fast_surface_swim_speed;
+  physics_config.fast_underwater_swim_speed = player_tuning_.fast_underwater_swim_speed;
+  physics_config.upward_swim_acceleration = player_tuning_.upward_swim_acceleration;
+  physics_config.downward_swim_acceleration = player_tuning_.downward_swim_acceleration;
+  physics_config.liquid_drag = player_tuning_.liquid_drag;
+  physics_config.surface_float_depth = player_tuning_.surface_float_depth;
+  physics_config.surface_buoyancy = player_tuning_.surface_buoyancy;
+  physics_config.underwater_buoyancy = player_tuning_.underwater_buoyancy;
+  physics_config.breath_seconds = player_tuning_.breath_seconds;
 
   physics::KinematicInput input;
   input.move_x = command.move_x;
@@ -674,12 +1001,18 @@ void ServerRuntime::apply_player_command(
   input.fly_mode =
       player_state.resolved_permissions.core.can_fly &&
       player_state.movement_mode == player::MovementMode::Flying;
+  input.pitch_radians = player_state.pitch_radians;
 
   const Seconds tick_seconds = tick_duration_seconds(base_tps_);
   if (player_state.resolved_permissions.core.has_collision) {
     const physics::KinematicStepResult step = physics::step_kinematic_body(
         collision_query,
-        {player_state.position, player_state.velocity, player_state.grounded, player_state.sneaking},
+        {player_state.position,
+         player_state.velocity,
+         player_state.grounded,
+         player_state.sneaking,
+         player_state.swimming,
+         player_state.breath_seconds},
         player_state.yaw_radians,
         tick_seconds,
         input,
@@ -688,6 +1021,8 @@ void ServerRuntime::apply_player_command(
     player_state.velocity = step.body.velocity;
     player_state.grounded = step.body.grounded;
     player_state.sneaking = step.body.sneaking;
+    player_state.swimming = step.body.swimming;
+    player_state.breath_seconds = step.body.breath_seconds;
   } else {
     step_player_without_collision(player_state, command, player_tuning_, tick_seconds);
   }
@@ -721,7 +1056,74 @@ void ServerRuntime::apply_player_command(
     }
 
     const player::ItemRecord* held_item = item_registry_->item(held_slot->item);
-    if (held_item == nullptr || !held_item->placement_variant.has_value()) {
+    if (held_item == nullptr) {
+      return;
+    }
+
+    if (held_item->name == "arvane:bucket") {
+      const std::optional<BlockPos> source = raycast_source_fluid(
+          default_world_,
+          *block_registry_,
+          fluid_definition_,
+          eye_position,
+          look_direction,
+          player_tuning_.reach_distance);
+      if (!source.has_value()) {
+        return;
+      }
+      std::optional<player::Inventory> next_inventory =
+          inventory_after_bucket_fill(player_state, *item_registry_);
+      if (!next_inventory.has_value()) {
+        return;
+      }
+      if (default_world_.set_fluid(
+              source.value(),
+              voxel::empty_fluid_cell(),
+              fluid_definition_)) {
+        player_state.inventory = std::move(next_inventory.value());
+      }
+      return;
+    }
+
+    if (held_item->name == "arvane:water_bucket") {
+      auto hit = physics::raycast_blocks(
+          interaction_query,
+          eye_position,
+          look_direction,
+          player_tuning_.reach_distance);
+      if (!hit.has_value()) {
+        return;
+      }
+
+      BlockPos place_pos = hit->block;
+      const voxel::BlockVariantID target_variant = default_world_.get_block(hit->block);
+      if (!block_registry_->is_replaceable(target_variant)) {
+        place_pos = offset_block(place_pos, hit->face);
+      }
+      if (!interaction_query.is_block_loaded(place_pos)) {
+        return;
+      }
+
+      if (!can_place_fluid_source_at(
+              default_world_,
+              *block_registry_,
+              fluid_definition_,
+              place_pos)) {
+        return;
+      }
+
+      std::optional<player::Inventory> next_inventory =
+          inventory_after_water_place(player_state, *item_registry_);
+      if (!next_inventory.has_value()) {
+        return;
+      }
+      if (default_world_.place_fluid_source(place_pos, fluid_definition_)) {
+        player_state.inventory = std::move(next_inventory.value());
+      }
+      return;
+    }
+
+    if (!held_item->placement_variant.has_value()) {
       return;
     }
 
@@ -750,8 +1152,13 @@ void ServerRuntime::apply_player_command(
     }
 
     const voxel::BlockVariantID placed_variant = held_item->placement_variant.value();
+    const physics::PlayerCollisionPose player_pose =
+        player_state.swimming
+            ? physics::PlayerCollisionPose::Swimming
+            : (player_state.sneaking ? physics::PlayerCollisionPose::Sneaking
+                                     : physics::PlayerCollisionPose::Standing);
     const Aabb3f player_bounds =
-        physics::make_body_bounds(player_state.position, physics_config, player_state.sneaking);
+        physics::make_body_bounds(player_state.position, physics_config, player_pose);
     for (const Aabb3f& local_box : block_registry_->collision_boxes(placed_variant)) {
       Aabb3f world_box{
           {local_box.min.x + static_cast<f32>(place_pos.value.x),
@@ -816,7 +1223,9 @@ void ServerRuntime::seed_player_inventory(player::PlayerState& player_state) {
         std::pair{std::string_view{"arvane:glass"}, u16{64}},
         std::pair{std::string_view{"arvane:glowstone"}, u16{64}},
         std::pair{std::string_view{"arvane:coal"}, u16{32}},
-        std::pair{std::string_view{"arvane:wood_pickaxe"}, u16{1}}}) {
+        std::pair{std::string_view{"arvane:wood_pickaxe"}, u16{1}},
+        std::pair{std::string_view{"arvane:bucket"}, u16{1}},
+        std::pair{std::string_view{"arvane:water_bucket"}, u16{1}}}) {
     const auto item_id = item_registry_->find_item(item_name);
     if (!item_id.has_value()) {
       continue;

@@ -359,6 +359,27 @@ TEST(WorldRuntimeTests, ApplyingChunkSnapshotWithoutLightingKeepsChunkMeshable) 
       (arv::voxel::BlockVariantID{7}));
 }
 
+TEST(WorldRuntimeTests, ApplyingChunkSnapshotCarriesFluidCells) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks;
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::FluidCell, arv::voxel::ChunkVolume> fluids;
+  fluids.fill(arv::voxel::empty_fluid_cell());
+  fluids[arv::voxel::local_index({{1, 2, 3}})] =
+      arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
+
+  world.apply_chunk_snapshot(
+      {{0, 0, 0}},
+      std::move(blocks),
+      std::nullopt,
+      std::move(fluids));
+
+  const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(chunk, nullptr);
+  EXPECT_TRUE(chunk->fluid({{1, 2, 3}}).source());
+  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
+}
+
 TEST(WorldRuntimeTests, DuplicateChunkSnapshotDoesNotAdvanceMeshRevisionAgain) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks;

@@ -47,6 +47,7 @@ struct InputSnapshot {
   bool open_inventory_pressed{};
   bool open_chat_pressed{};
   bool tab_menu_held{};
+  bool debug_menu_toggle_pressed{};
   std::optional<u8> hotbar_select{};
   i8 hotbar_scroll_steps{};
   bool mouse_left_pressed{};
@@ -59,6 +60,7 @@ struct InputSnapshot {
   f32 cursor_y{};
   f32 mouse_delta_x{};
   f32 mouse_delta_y{};
+  f32 mouse_wheel_y{};
   std::string text_input{};
   bool text_backspace_pressed{};
   bool text_submit_pressed{};
@@ -108,6 +110,12 @@ public:
   void set_cursor_captured(bool captured) noexcept;
 
   [[nodiscard]] FramebufferSize framebuffer_size() const;
+  [[nodiscard]] GLFWwindow* native_handle() noexcept {
+    return window_;
+  }
+  [[nodiscard]] const GLFWwindow* native_handle() const noexcept {
+    return window_;
+  }
 
   void swap_buffers();
 

@@ -379,6 +379,25 @@ Examples:
 * oil
 * honey
 
+Fluid definitions also own their timing. A water-like fluid may use a smaller
+`flow_interval_ticks` than a lava-like fluid, while both continue to run under
+the same global world tick rate.
+
+Example:
+
+```cpp
+struct FluidDefinition {
+  FluidTypeID type;
+  u8 max_level;
+  u8 horizontal_decay;
+  u8 vertical_flow_level;
+  u32 flow_interval_ticks;
+};
+```
+
+`flow_interval_ticks` controls update cadence only. It must not cause a fluid to
+move multiple blocks in one tick or make rendering responsible for liquid speed.
+
 ### Fluid Cell
 
 A fluid cell is the liquid state stored at a block position.
@@ -586,7 +605,22 @@ Fluid updates may be stored:
 
 The system should avoid duplicate work where practical.
 
-A position already queued for fluid update does not need to be queued again unless priority or reason matters.
+A position already queued for fluid update does not need to be queued again unless priority,
+reason, or an earlier scheduled tick matters.
+
+Scheduled fluid updates include:
+
+```cpp
+struct FluidUpdate {
+  BlockPos pos;
+  FluidUpdateReason reason;
+  TickIndex execute_at;
+};
+```
+
+Only due updates (`execute_at <= current_tick`) are drained into a bounded fluid
+simulation request. Future updates remain queued. Repeated work for the same cell
+is coalesced where practical, and stale superseded events are ignored when drained.
 
 ---
 
@@ -604,6 +638,17 @@ A fluid cell becomes active when:
 * a fluid delta crosses a chunk boundary
 
 Stable fluid should not continuously update forever.
+
+When a fluid cell changes, the next update for that cell and affected neighbors is
+scheduled at:
+
+```
+current_tick + fluid_definition.flow_interval_ticks
+```
+
+This means water/lava-style differences are data-driven. Water can flow every few
+ticks, lava can flow every larger number of ticks, and neither requires changing
+global TPS.
 
 ---
 
@@ -654,6 +699,10 @@ If the block no longer allows fluid:
 * remove the fluid cell
 * enqueue neighboring fluid updates
 * mark mesh/save dirty
+
+Fluid propagation remains discrete. Processing one fluid update computes one local
+state transition from the current/snapshot state; it does not chase the resulting
+neighbor work immediately through multiple blocks in the same tick.
 
 Example:
 
@@ -882,7 +931,11 @@ When applying a fluid delta:
 5. apply if changed
 6. increment the relevant section block/geometry version
 7. mark dirty systems
-8. enqueue follow-up fluid updates
+8. enqueue follow-up fluid updates at `current_tick + flow_interval_ticks`
+
+Fluid deltas are committed by world simulation. They mark chunk sections dirty and
+allow the normal async meshing and lighting paths to react later. Fluid mutation
+must not synchronously rebuild meshes or solve lighting.
 
 ---
 
@@ -1519,6 +1572,10 @@ world_simulation:
     settle_enabled: true
     allow_cross_chunk_flow: true
     allow_flow_into_inactive_chunks: false
+    water:
+      flow_interval_ticks: 10
+    lava:
+      flow_interval_ticks: 30
 ```
 
 ---

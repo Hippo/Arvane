@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 
 #include <numbers>
+#include <string_view>
+#include <thread>
 
 namespace {
 
@@ -44,6 +46,25 @@ void prepare_test_player(
       arv::player::ItemStack{
           item_registry.find_item("arvane:stone").value(),
           2}));
+}
+
+void set_test_player_held_item(
+    arv::server::ServerRuntime& server,
+    const arv::player::ItemRegistry& item_registry,
+    std::string_view item_name,
+    arv::u16 count = 1U) {
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.5F, 0.0F, 0.5F};
+  player_state.velocity = {};
+  player_state.yaw_radians = std::numbers::pi_v<float> * 0.5F;
+  player_state.pitch_radians = 0.0F;
+  player_state.grounded = false;
+  player_state.selected_hotbar_slot = 0;
+  ASSERT_TRUE(player_state.inventory.set_slot(
+      0,
+      arv::player::ItemStack{
+          item_registry.find_item(item_name).value(),
+          count}));
 }
 
 } // namespace
@@ -108,6 +129,156 @@ TEST(PlayerInteractionTests, PrimaryBreakRemovesTargetBlockThroughServerAuthorit
   server.tick();
 
   EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), arv::voxel::AirBlockVariantID);
+}
+
+TEST(PlayerInteractionTests, BucketPicksUpSourceWaterAndBecomesWaterBucket) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().place_fluid_source({{3, 1, 0}}, water));
+  set_test_player_held_item(server, item_registry, "arvane:bucket");
+
+  client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_TRUE(server.voxel_world().get_fluid({{3, 1, 0}}).empty());
+  const arv::player::PlayerState& player_state = connected_player(server);
+  ASSERT_TRUE(player_state.inventory.slot(0).has_value());
+  EXPECT_EQ(
+      player_state.inventory.slot(0)->item,
+      item_registry.find_item("arvane:water_bucket").value());
+}
+
+TEST(PlayerInteractionTests, WaterBucketPlacesSourceWaterAndBecomesBucket) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID dirt = block_registry.find_variant("arvane:dirt").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, dirt));
+  set_test_player_held_item(server, item_registry, "arvane:water_bucket");
+
+  client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_TRUE(server.voxel_world().get_fluid({{2, 1, 0}}).source());
+  const arv::player::PlayerState& player_state = connected_player(server);
+  ASSERT_TRUE(player_state.inventory.slot(0).has_value());
+  EXPECT_EQ(
+      player_state.inventory.slot(0)->item,
+      item_registry.find_item("arvane:bucket").value());
+}
+
+TEST(PlayerInteractionTests, WaterBucketReplacesPartialWaterWithSource) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID dirt = block_registry.find_variant("arvane:dirt").value();
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, dirt));
+  ASSERT_TRUE(server.voxel_world().set_fluid(
+      {{2, 1, 0}},
+      arv::voxel::make_flowing_fluid(water, 4U),
+      water));
+  set_test_player_held_item(server, item_registry, "arvane:water_bucket");
+
+  client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_TRUE(server.voxel_world().get_fluid({{2, 1, 0}}).source());
+  const arv::player::PlayerState& player_state = connected_player(server);
+  ASSERT_TRUE(player_state.inventory.slot(0).has_value());
+  EXPECT_EQ(
+      player_state.inventory.slot(0)->item,
+      item_registry.find_item("arvane:bucket").value());
+}
+
+TEST(PlayerInteractionTests, PlacedWaterFlowsThroughActiveServerSimulation) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID dirt = block_registry.find_variant("arvane:dirt").value();
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, dirt));
+  set_test_player_held_item(server, item_registry, "arvane:water_bucket");
+
+  client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+  ASSERT_TRUE(server.voxel_world().get_fluid({{2, 1, 0}}).source());
+
+  bool flowed = false;
+  for (arv::u32 tick = 0; tick < 64U; ++tick) {
+    client.fixed_tick(server.tick_index());
+    server.tick();
+    const arv::voxel::FluidCell below = server.voxel_world().get_fluid({{2, 0, 0}});
+    if (below.type == water.type && below.falling()) {
+      flowed = true;
+      break;
+    }
+    std::this_thread::yield();
+  }
+
+  EXPECT_TRUE(flowed);
 }
 
 TEST(PlayerInteractionTests, RegionDenyPreventsWorldModification) {

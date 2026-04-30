@@ -59,6 +59,8 @@ struct PlayerCorrection {
   player::ResolvedCorePermissions resolved_core_permissions{};
   bool grounded{};
   bool sneaking{};
+  bool swimming{};
+  f32 breath_seconds{player::DefaultBreathSeconds};
   u8 selected_hotbar_slot{};
 };
 

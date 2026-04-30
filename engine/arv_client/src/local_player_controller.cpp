@@ -11,7 +11,24 @@ namespace {
   return static_cast<u8>(wrapped);
 }
 
+[[nodiscard]] bool sprint_fov_active(
+    bool sprint_held,
+    bool move_forward,
+    bool move_backward,
+    bool sneak_held) noexcept {
+  return sprint_held && move_forward && !move_backward && !sneak_held;
+}
+
 } // namespace
+
+void LocalPlayerController::set_player_tuning(player::PlayerTuning tuning) noexcept {
+  tuning_ = tuning;
+  current_eye_height_ = std::clamp(
+      current_eye_height_,
+      0.0F,
+      std::max(tuning_.standing_eye_height, tuning_.sneaking_eye_height));
+  target_eye_height_ = tuning_.standing_eye_height;
+}
 
 void LocalPlayerController::submit_input(InputFrame input) noexcept {
   move_forward_ = input.move_forward;
@@ -46,12 +63,17 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
   look_delta_x_ += input.mouse_delta_x;
   look_delta_y_ += input.mouse_delta_y;
   camera_.apply_mouse_delta(
-      input.mouse_delta_x * player::DefaultMouseSensitivityRadians,
-      -input.mouse_delta_y * player::DefaultMouseSensitivityRadians);
+      input.mouse_delta_x * tuning_.mouse_sensitivity_radians,
+      -input.mouse_delta_y * tuning_.mouse_sensitivity_radians);
+  camera_.set_fov_y_degrees(
+      DefaultCameraFovYDegrees +
+      (sprint_fov_active(sprint_held_, move_forward_, move_backward_, sneak_held_)
+           ? DefaultSprintCameraFovBoostDegrees
+           : 0.0F));
 }
 
 player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_index) noexcept {
-  const f32 eye_step = player::default_player_tuning().eye_height_lerp_per_second / 60.0F;
+  const f32 eye_step = tuning_.eye_height_lerp_per_second / 60.0F;
   if (current_eye_height_ < target_eye_height_) {
     current_eye_height_ = std::min(current_eye_height_ + eye_step, target_eye_height_);
   } else {
@@ -71,7 +93,7 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   command.jump_pressed = jump_pressed_;
   command.jump_held = jump_held_;
   command.sneak_held = sneak_held_;
-  command.sprint_held = sprint_held_ && move_forward_ && !move_backward_ && !sneak_held_;
+  command.sprint_held = sprint_held_;
   command.primary_pressed = primary_pressed_;
   command.primary_held = primary_held_;
   command.secondary_pressed = secondary_pressed_;
@@ -101,7 +123,10 @@ void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorr
   game_mode_id_ = correction.game_mode_id;
   resolved_permissions_.core = correction.resolved_core_permissions;
   target_eye_height_ =
-      correction.sneaking ? player::DefaultSneakingEyeHeight : player::DefaultStandingEyeHeight;
+      correction.swimming
+          ? tuning_.swimming_eye_height
+          : (correction.sneaking ? tuning_.sneaking_eye_height
+                                 : tuning_.standing_eye_height);
   camera_.set_world_id(correction.world_id);
   camera_.set_rotation(correction.yaw_radians, correction.pitch_radians);
   camera_.set_position(

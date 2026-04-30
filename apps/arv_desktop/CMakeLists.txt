@@ -3,6 +3,8 @@ set(ARV_CLIENT_SOURCES
   src/app_config.cpp
   src/asset_helpers.cpp
   src/chunk_view.cpp
+  src/debug_imgui.cpp
+  src/debug_menu.cpp
   src/input_adapter.cpp
   src/main.cpp
   src/renderer_bootstrap.cpp
@@ -24,4 +26,7 @@ target_link_libraries(arv_desktop PRIVATE
   arv_server
   arv_voxel
   arv_world
+  imgui
+  glfw
+  OpenGL::GL
 )

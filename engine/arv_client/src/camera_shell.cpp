@@ -29,9 +29,17 @@ f32 CameraShell::pitch_radians() const noexcept {
   return pitch_radians_;
 }
 
+f32 CameraShell::fov_y_degrees() const noexcept {
+  return fov_y_degrees_;
+}
+
 void CameraShell::set_rotation(f32 yaw_radians, f32 pitch_radians) noexcept {
   yaw_radians_ = yaw_radians;
   pitch_radians_ = std::clamp(pitch_radians, -MaxCameraPitchRadians, MaxCameraPitchRadians);
+}
+
+void CameraShell::set_fov_y_degrees(f32 fov_y_degrees) noexcept {
+  fov_y_degrees_ = std::clamp(fov_y_degrees, 1.0F, 170.0F);
 }
 
 void CameraShell::apply_mouse_delta(f32 yaw_delta_radians, f32 pitch_delta_radians) noexcept {
@@ -99,7 +107,7 @@ render::CameraSnapshot CameraShell::snapshot(u32 viewport_width, u32 viewport_he
   camera.view_projection = identity_mat4f();
   camera.near_plane = DefaultCameraNearPlane;
   camera.far_plane = DefaultCameraFarPlane;
-  camera.fov_y_degrees = DefaultCameraFovYDegrees;
+  camera.fov_y_degrees = fov_y_degrees_;
   camera.viewport_width = viewport_width;
   camera.viewport_height = viewport_height;
   camera.partial_tick_alpha = partial_tick_alpha;

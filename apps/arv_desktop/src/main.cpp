@@ -1,6 +1,8 @@
 #include "app_config.hpp"
 #include "asset_helpers.hpp"
 #include "chunk_view.hpp"
+#include "debug_imgui.hpp"
+#include "debug_menu.hpp"
 #include "input_adapter.hpp"
 #include "renderer_bootstrap.hpp"
 #include "save_state.hpp"
@@ -60,6 +62,45 @@ namespace {
     const arv::server::ServerRuntime& server) noexcept {
   const arv::server::ServerSession* session = local_session(server);
   return session == nullptr ? nullptr : server.voxel_world().find_player(session->player_id);
+}
+
+[[nodiscard]] arv::player::PlayerTuning make_player_tuning(
+    const arv::io::PhysicsConfig& physics) noexcept {
+  arv::player::PlayerTuning tuning = arv::player::default_player_tuning();
+  tuning.standing_eye_height = physics.standing_eye_height;
+  tuning.sneaking_eye_height = physics.sneaking_eye_height;
+  tuning.swimming_eye_height = physics.swimming_eye_height;
+  tuning.eye_height_lerp_per_second = physics.eye_height_lerp_per_second;
+  tuning.reach_distance = physics.reach_distance;
+  tuning.mouse_sensitivity_radians = physics.mouse_sensitivity_radians;
+  tuning.walk_speed = physics.walk_speed;
+  tuning.sprint_speed = physics.sprint_speed;
+  tuning.sneak_speed = physics.sneak_speed;
+  tuning.air_speed = physics.air_speed;
+  tuning.fly_speed = physics.fly_speed;
+  tuning.fly_vertical_speed = physics.fly_vertical_speed;
+  tuning.jump_velocity = physics.jump_velocity;
+  tuning.gravity_per_second = physics.gravity_per_second;
+  tuning.terminal_velocity = physics.terminal_velocity;
+  tuning.body_width = physics.body_width;
+  tuning.body_height = physics.body_height;
+  tuning.sneaking_body_height = physics.sneaking_body_height;
+  tuning.swimming_body_width = physics.swimming_body_width;
+  tuning.swimming_body_height = physics.swimming_body_height;
+  tuning.sneak_support_probe_depth = physics.sneak_support_probe_depth;
+  tuning.collision_epsilon = physics.collision_epsilon;
+  tuning.surface_swim_speed = physics.surface_swim_speed;
+  tuning.underwater_swim_speed = physics.underwater_swim_speed;
+  tuning.fast_surface_swim_speed = physics.fast_surface_swim_speed;
+  tuning.fast_underwater_swim_speed = physics.fast_underwater_swim_speed;
+  tuning.upward_swim_acceleration = physics.upward_swim_acceleration;
+  tuning.downward_swim_acceleration = physics.downward_swim_acceleration;
+  tuning.liquid_drag = physics.liquid_drag;
+  tuning.surface_float_depth = physics.surface_float_depth;
+  tuning.surface_buoyancy = physics.surface_buoyancy;
+  tuning.underwater_buoyancy = physics.underwater_buoyancy;
+  tuning.breath_seconds = physics.breath_seconds;
+  return tuning;
 }
 
 [[nodiscard]] std::optional<arv::usize> inventory_slot_from_ui_action(
@@ -206,6 +247,12 @@ int main(int argc, char** argv) {
       "vsync={}",
       config.window.vsync ? "enabled" : "disabled");
   arv::platform::OpenGLWindow window = std::move(window_result.value());
+  arv::desktop::DebugImGuiLayer debug_imgui;
+  if (!debug_imgui.initialize(window.native_handle())) {
+    arv::core::error("debug_ui", "failed to initialize ImGui debug UI");
+    return 1;
+  }
+  arv::desktop::DebugMenuState debug_menu;
   const auto input_bindings_result =
       arv::io::load_input_bindings_file_or_defaults(config.paths.input_bindings_file);
   if (!input_bindings_result) {
@@ -257,8 +304,11 @@ int main(int argc, char** argv) {
     arv::core::error("assets", "block texture atlas did not produce a page");
     return 1;
   }
-  renderer.set_chunk_texture_atlas(
-      arv::desktop::texture_upload_from_image(block_atlas.atlas.pages.front().image));
+  arv::render::TextureUploadData terrain_atlas_upload =
+      arv::desktop::texture_upload_from_image(block_atlas.atlas.pages.front().image);
+  terrain_atlas_upload.limit_mipmap_levels = true;
+  terrain_atlas_upload.max_mipmap_level = block_atlas.atlas.mip_safe_max_level;
+  renderer.set_chunk_texture_atlas(std::move(terrain_atlas_upload));
 
   arv::asset::FontSystem font_system;
   auto ui_font = font_system.load_face(
@@ -377,6 +427,7 @@ int main(int argc, char** argv) {
 
   arv::server::ServerChunkStreamingConfig chunk_streaming;
   chunk_streaming.max_view_distance = config.chunks.load_distance;
+  chunk_streaming.simulation_distance = config.chunks.simulation_distance;
   chunk_streaming.unload_margin = config.chunks.unload_margin;
   chunk_streaming.max_chunks_sent_per_player_tick =
       std::max<arv::u32>(config.chunk_pipeline.max_client_chunk_applies_per_frame, 1U);
@@ -387,6 +438,22 @@ int main(int argc, char** argv) {
   chunk_generation.seed = world_seed;
   chunk_generation.config = generation_config;
   chunk_generation.palette = generation_palette;
+
+  arv::world::WorldTickPolicy world_tick_policy;
+  world_tick_policy.block_update_interval =
+      config.simulation.systems.block_updates.interval;
+  world_tick_policy.block_update_budget =
+      config.simulation.systems.block_updates.budget;
+  world_tick_policy.fluid_interval =
+      config.simulation.systems.fluids.interval;
+  world_tick_policy.fluid_budget =
+      config.simulation.systems.fluids.budget;
+
+  arv::voxel::FluidDefinition water_fluid =
+      arv::voxel::make_water_fluid_definition();
+  water_fluid.flow_interval_ticks =
+      config.simulation.fluids.water.flow_interval_ticks;
+  const arv::player::PlayerTuning player_tuning = make_player_tuning(config.physics);
 
   arv::sched::RuntimeThreadBudgetConfig thread_budget_config;
   thread_budget_config.workers.worker_thread_count = config.jobs.worker_threads;
@@ -404,14 +471,15 @@ int main(int argc, char** argv) {
       {"in-process", 0},
       &block_registry,
       &item_registry,
-      arv::player::default_player_tuning(),
-      arv::voxel::make_water_fluid_definition(),
+      player_tuning,
+      water_fluid,
       chunk_streaming,
       chunk_generation,
       config.chunk_pipeline.max_generation_results_per_tick,
       config.chunk_pipeline.max_lighting_results_per_tick,
       config.chunk_pipeline.max_generation_jobs_per_frame,
-      thread_budget.primary_workers});
+      thread_budget.primary_workers,
+      world_tick_policy});
   if (!server_start) {
     arv::core::error("server", server_start.error().message);
     return 1;
@@ -424,10 +492,12 @@ int main(int argc, char** argv) {
     integrated_server.voxel_world().restore_saved_chunk(
         chunk.coord,
         chunk.blocks,
-        chunk.lights);
+        chunk.lights,
+        chunk.fluids);
   }
 
   arv::client::ClientRuntime client(std::move(transport_pair.client));
+  client.set_player_tuning(player_tuning);
   client.set_chunk_view_distance(config.chunks.stream_distance);
   auto connect_result = client.connect_integrated();
   if (!connect_result) {
@@ -485,7 +555,8 @@ int main(int argc, char** argv) {
       client_world.apply_chunk_snapshot(
           data.coord,
           std::move(data.blocks),
-          std::move(lights));
+          std::move(lights),
+          std::move(data.fluids));
       changed = true;
     }
 
@@ -542,6 +613,7 @@ int main(int argc, char** argv) {
   arv::u32 displayed_fps = 0;
   arv::u32 fps_sample_frames = 0;
   arv::Seconds fps_sample_seconds = 0.0F;
+  double last_frame_work_ms = 0.0;
   constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
   std::vector<arv::client::UiItemStackView> inventory_slots;
   std::optional<arv::client::UiItemStackView> carried_inventory_stack;
@@ -589,11 +661,23 @@ int main(int argc, char** argv) {
     const auto frame_work_start = std::chrono::steady_clock::now();
     arv::platform::OpenGLWindow::poll_events();
     const arv::platform::InputSnapshot platform_input = window.poll_input();
+    if (platform_input.debug_menu_toggle_pressed) {
+      debug_menu.open = !debug_menu.open;
+    }
+    debug_imgui.begin_frame(
+        window.native_handle(),
+        platform_input,
+        window.framebuffer_size(),
+        delta.count());
     const bool was_inventory_open = client.inventory_open();
-    const bool ui_accepts_pointer = client.inventory_open() || client.chat_open();
+    const bool ui_accepts_pointer =
+        client.inventory_open() || client.chat_open() || debug_menu.open;
     arv::client::InputFrame client_input = arv::desktop::to_client_input(platform_input);
+    if (debug_menu.open) {
+      client_input = {};
+    }
     bool inventory_changed_by_ui = false;
-    if (client.inventory_open()) {
+    if (!debug_menu.open && client.inventory_open()) {
       if (const arv::server::ServerSession* session = local_session(integrated_server);
           session != nullptr) {
         const arv::player::PlayerState* player_state = local_player_state(integrated_server);
@@ -604,7 +688,7 @@ int main(int argc, char** argv) {
             platform_input,
             player_state != nullptr && player_state->inventory_cursor_stack.has_value());
       }
-    } else if (client.chat_open()) {
+    } else if (!debug_menu.open && client.chat_open()) {
       route_ui_mouse_focus(ui_tree, platform_input);
     }
     if (platform_input.close_requested && !ui_accepts_pointer) {
@@ -621,7 +705,7 @@ int main(int argc, char** argv) {
     if (inventory_changed_by_ui) {
       refresh_inventory_slots();
     }
-    window.set_cursor_captured(!(client.inventory_open() || client.chat_open()));
+    window.set_cursor_captured(!(client.inventory_open() || client.chat_open() || debug_menu.open));
 
     ticks.add_time(delta.count());
     bool fixed_tick_ran = false;
@@ -664,6 +748,25 @@ int main(int argc, char** argv) {
         arv::desktop::chunk_draw_items(chunk_view);
     frame.opaque_chunks = visible_chunks;
     frame.transparent_chunks = visible_chunks;
+
+    const arv::desktop::DebugMenuResult debug_menu_result = arv::desktop::render_debug_menu(
+        debug_menu,
+        {
+            frame_delta_ms,
+            last_frame_work_ms,
+            displayed_fps,
+            visible_chunks.size(),
+            pending_client_chunk_data.size(),
+            pending_client_chunk_unloads.size(),
+        },
+        integrated_server,
+        client,
+        item_registry,
+        world_jobs,
+        renderer);
+    if (debug_menu_result.inventory_changed) {
+      refresh_inventory_slots();
+    }
 
     if (!ui_snapshot_initialized || fixed_tick_ran) {
       refresh_inventory_slots();
@@ -747,10 +850,12 @@ int main(int argc, char** argv) {
     }
     renderer.submit_frame(std::move(frame));
     renderer.render();
+    debug_imgui.render();
     const auto frame_work_end = std::chrono::steady_clock::now();
     const double frame_work_ms =
         std::chrono::duration<double, std::milli>(
             frame_work_end - frame_work_start).count();
+    last_frame_work_ms = frame_work_ms;
     if (frame_work_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
       arv::core::warn(
           "frame_profile",
@@ -796,6 +901,7 @@ int main(int argc, char** argv) {
       block_registry,
       item_registry);
 
+  debug_imgui.shutdown();
   renderer.begin_shutdown();
   integrated_server.shutdown();
   if (!save_result) {

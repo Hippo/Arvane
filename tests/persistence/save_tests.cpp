@@ -67,6 +67,8 @@ arv::persistence::SavedChunkSection make_saved_chunk(
   chunk.coord = coord;
   chunk.blocks.fill(fill_variant);
   chunk.lights.fill(arv::voxel::pack_light(0, 0, 0, 15));
+  chunk.fluids.fill(arv::voxel::empty_fluid_cell());
+  chunk.fluids[0] = arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
   return chunk;
 }
 
@@ -140,6 +142,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_EQ(loaded.value().chunks.size(), 1U);
   EXPECT_EQ(loaded.value().chunks[0].coord, (arv::ChunkCoord{{0, 0, 0}}));
   EXPECT_EQ(loaded.value().chunks[0].blocks[0], stone);
+  EXPECT_TRUE(loaded.value().chunks[0].fluids[0].source());
   ASSERT_EQ(loaded.value().players.size(), 1U);
   EXPECT_EQ(loaded.value().players[0].profile_name, "local_player");
   EXPECT_EQ(loaded.value().players[0].game_mode_id, arv::player::CreativeGameModeID);

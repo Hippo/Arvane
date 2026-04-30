@@ -1,6 +1,8 @@
 #include "arv/io/config.hpp"
 
 #include <fstream>
+#include <cmath>
+#include <optional>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -32,6 +34,66 @@ void read_path_scalar(const YAML::Node& parent, const char* key, std::filesystem
   if (child) {
     value = child.as<std::string>();
   }
+}
+
+void read_tick_system_config(
+    const YAML::Node& systems,
+    const char* key,
+    SimulationConfig::TickSystemConfig& config) {
+  const YAML::Node system = systems[key];
+  if (!system) {
+    return;
+  }
+  read_scalar(system, "interval", config.interval);
+  read_scalar(system, "budget", config.budget);
+  read_scalar(system, "samples_per_chunk", config.samples_per_chunk);
+}
+
+void read_fluid_speed_config(
+    const YAML::Node& fluids,
+    const char* key,
+    SimulationConfig::FluidSpeedConfig& config) {
+  const YAML::Node fluid = fluids[key];
+  if (!fluid) {
+    return;
+  }
+  read_scalar(fluid, "flow_interval_ticks", config.flow_interval_ticks);
+}
+
+void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
+  read_scalar(physics, "standing_eye_height", config.standing_eye_height);
+  read_scalar(physics, "sneaking_eye_height", config.sneaking_eye_height);
+  read_scalar(physics, "swimming_eye_height", config.swimming_eye_height);
+  read_scalar(physics, "eye_height_lerp_per_second", config.eye_height_lerp_per_second);
+  read_scalar(physics, "reach_distance", config.reach_distance);
+  read_scalar(physics, "mouse_sensitivity_radians", config.mouse_sensitivity_radians);
+  read_scalar(physics, "walk_speed", config.walk_speed);
+  read_scalar(physics, "sprint_speed", config.sprint_speed);
+  read_scalar(physics, "sneak_speed", config.sneak_speed);
+  read_scalar(physics, "air_speed", config.air_speed);
+  read_scalar(physics, "fly_speed", config.fly_speed);
+  read_scalar(physics, "fly_vertical_speed", config.fly_vertical_speed);
+  read_scalar(physics, "jump_velocity", config.jump_velocity);
+  read_scalar(physics, "gravity_per_second", config.gravity_per_second);
+  read_scalar(physics, "terminal_velocity", config.terminal_velocity);
+  read_scalar(physics, "body_width", config.body_width);
+  read_scalar(physics, "body_height", config.body_height);
+  read_scalar(physics, "sneaking_body_height", config.sneaking_body_height);
+  read_scalar(physics, "swimming_body_width", config.swimming_body_width);
+  read_scalar(physics, "swimming_body_height", config.swimming_body_height);
+  read_scalar(physics, "sneak_support_probe_depth", config.sneak_support_probe_depth);
+  read_scalar(physics, "collision_epsilon", config.collision_epsilon);
+  read_scalar(physics, "surface_swim_speed", config.surface_swim_speed);
+  read_scalar(physics, "underwater_swim_speed", config.underwater_swim_speed);
+  read_scalar(physics, "fast_surface_swim_speed", config.fast_surface_swim_speed);
+  read_scalar(physics, "fast_underwater_swim_speed", config.fast_underwater_swim_speed);
+  read_scalar(physics, "upward_swim_acceleration", config.upward_swim_acceleration);
+  read_scalar(physics, "downward_swim_acceleration", config.downward_swim_acceleration);
+  read_scalar(physics, "liquid_drag", config.liquid_drag);
+  read_scalar(physics, "surface_float_depth", config.surface_float_depth);
+  read_scalar(physics, "surface_buoyancy", config.surface_buoyancy);
+  read_scalar(physics, "underwater_buoyancy", config.underwater_buoyancy);
+  read_scalar(physics, "breath_seconds", config.breath_seconds);
 }
 
 std::filesystem::path normalize_lexical(std::filesystem::path path) {
@@ -144,6 +206,37 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
 
   emitter << YAML::Key << "simulation" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "base_tps" << YAML::Value << config.simulation.base_tps;
+  emitter << YAML::Key << "systems" << YAML::Value << YAML::BeginMap;
+  auto emit_system = [&emitter](
+                         std::string_view name,
+                         const SimulationConfig::TickSystemConfig& system) {
+    emitter << YAML::Key << std::string{name} << YAML::Value << YAML::BeginMap;
+    emitter << YAML::Key << "interval" << YAML::Value << system.interval;
+    if (system.budget != 0U) {
+      emitter << YAML::Key << "budget" << YAML::Value << system.budget;
+    }
+    if (system.samples_per_chunk != 0U) {
+      emitter << YAML::Key << "samples_per_chunk" << YAML::Value << system.samples_per_chunk;
+    }
+    emitter << YAML::EndMap;
+  };
+  emit_system("physics", config.simulation.systems.physics);
+  emit_system("entities", config.simulation.systems.entities);
+  emit_system("ai", config.simulation.systems.ai);
+  emit_system("block_updates", config.simulation.systems.block_updates);
+  emit_system("fluids", config.simulation.systems.fluids);
+  emit_system("random_ticks", config.simulation.systems.random_ticks);
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "fluids" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "water" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "flow_interval_ticks" << YAML::Value
+          << config.simulation.fluids.water.flow_interval_ticks;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "lava" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "flow_interval_ticks" << YAML::Value
+          << config.simulation.fluids.lava.flow_interval_ticks;
+  emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "network" << YAML::Value << YAML::BeginMap;
@@ -165,6 +258,64 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "reserved_threads" << YAML::Value << config.jobs.reserved_threads;
   emitter << YAML::Key << "min_worker_threads" << YAML::Value << config.jobs.min_worker_threads;
   emitter << YAML::Key << "max_worker_threads" << YAML::Value << config.jobs.max_worker_threads;
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "physics" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "standing_eye_height" << YAML::Value
+          << config.physics.standing_eye_height;
+  emitter << YAML::Key << "sneaking_eye_height" << YAML::Value
+          << config.physics.sneaking_eye_height;
+  emitter << YAML::Key << "swimming_eye_height" << YAML::Value
+          << config.physics.swimming_eye_height;
+  emitter << YAML::Key << "eye_height_lerp_per_second" << YAML::Value
+          << config.physics.eye_height_lerp_per_second;
+  emitter << YAML::Key << "reach_distance" << YAML::Value << config.physics.reach_distance;
+  emitter << YAML::Key << "mouse_sensitivity_radians" << YAML::Value
+          << config.physics.mouse_sensitivity_radians;
+  emitter << YAML::Key << "walk_speed" << YAML::Value << config.physics.walk_speed;
+  emitter << YAML::Key << "sprint_speed" << YAML::Value << config.physics.sprint_speed;
+  emitter << YAML::Key << "sneak_speed" << YAML::Value << config.physics.sneak_speed;
+  emitter << YAML::Key << "air_speed" << YAML::Value << config.physics.air_speed;
+  emitter << YAML::Key << "fly_speed" << YAML::Value << config.physics.fly_speed;
+  emitter << YAML::Key << "fly_vertical_speed" << YAML::Value
+          << config.physics.fly_vertical_speed;
+  emitter << YAML::Key << "jump_velocity" << YAML::Value << config.physics.jump_velocity;
+  emitter << YAML::Key << "gravity_per_second" << YAML::Value
+          << config.physics.gravity_per_second;
+  emitter << YAML::Key << "terminal_velocity" << YAML::Value
+          << config.physics.terminal_velocity;
+  emitter << YAML::Key << "body_width" << YAML::Value << config.physics.body_width;
+  emitter << YAML::Key << "body_height" << YAML::Value << config.physics.body_height;
+  emitter << YAML::Key << "sneaking_body_height" << YAML::Value
+          << config.physics.sneaking_body_height;
+  emitter << YAML::Key << "swimming_body_width" << YAML::Value
+          << config.physics.swimming_body_width;
+  emitter << YAML::Key << "swimming_body_height" << YAML::Value
+          << config.physics.swimming_body_height;
+  emitter << YAML::Key << "sneak_support_probe_depth" << YAML::Value
+          << config.physics.sneak_support_probe_depth;
+  emitter << YAML::Key << "collision_epsilon" << YAML::Value
+          << config.physics.collision_epsilon;
+  emitter << YAML::Key << "surface_swim_speed" << YAML::Value
+          << config.physics.surface_swim_speed;
+  emitter << YAML::Key << "underwater_swim_speed" << YAML::Value
+          << config.physics.underwater_swim_speed;
+  emitter << YAML::Key << "fast_surface_swim_speed" << YAML::Value
+          << config.physics.fast_surface_swim_speed;
+  emitter << YAML::Key << "fast_underwater_swim_speed" << YAML::Value
+          << config.physics.fast_underwater_swim_speed;
+  emitter << YAML::Key << "upward_swim_acceleration" << YAML::Value
+          << config.physics.upward_swim_acceleration;
+  emitter << YAML::Key << "downward_swim_acceleration" << YAML::Value
+          << config.physics.downward_swim_acceleration;
+  emitter << YAML::Key << "liquid_drag" << YAML::Value << config.physics.liquid_drag;
+  emitter << YAML::Key << "surface_float_depth" << YAML::Value
+          << config.physics.surface_float_depth;
+  emitter << YAML::Key << "surface_buoyancy" << YAML::Value
+          << config.physics.surface_buoyancy;
+  emitter << YAML::Key << "underwater_buoyancy" << YAML::Value
+          << config.physics.underwater_buoyancy;
+  emitter << YAML::Key << "breath_seconds" << YAML::Value << config.physics.breath_seconds;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "render" << YAML::Value << YAML::BeginMap;
@@ -285,6 +436,26 @@ ConfigResult parse_config_yaml(std::string_view text) {
     const YAML::Node simulation = root["simulation"];
     if (simulation) {
       read_scalar(simulation, "base_tps", config.simulation.base_tps);
+      const YAML::Node systems = simulation["systems"];
+      if (systems) {
+        read_tick_system_config(systems, "physics", config.simulation.systems.physics);
+        read_tick_system_config(systems, "entities", config.simulation.systems.entities);
+        read_tick_system_config(systems, "ai", config.simulation.systems.ai);
+        read_tick_system_config(
+            systems,
+            "block_updates",
+            config.simulation.systems.block_updates);
+        read_tick_system_config(systems, "fluids", config.simulation.systems.fluids);
+        read_tick_system_config(
+            systems,
+            "random_ticks",
+            config.simulation.systems.random_ticks);
+      }
+      const YAML::Node fluids = simulation["fluids"];
+      if (fluids) {
+        read_fluid_speed_config(fluids, "water", config.simulation.fluids.water);
+        read_fluid_speed_config(fluids, "lava", config.simulation.fluids.lava);
+      }
     }
 
     const YAML::Node network = root["network"];
@@ -308,6 +479,11 @@ ConfigResult parse_config_yaml(std::string_view text) {
       read_scalar(jobs, "reserved_threads", config.jobs.reserved_threads);
       read_scalar(jobs, "min_worker_threads", config.jobs.min_worker_threads);
       read_scalar(jobs, "max_worker_threads", config.jobs.max_worker_threads);
+    }
+
+    const YAML::Node physics = root["physics"];
+    if (physics) {
+      read_physics_config(physics, config.physics);
     }
 
     const YAML::Node render = root["render"];
@@ -361,6 +537,39 @@ ConfigResult parse_config_yaml(std::string_view text) {
       config.simulation.base_tps != 60) {
     return ConfigResult::failure(ConfigError{"simulation.base_tps must be one of 20, 30, or 60"});
   }
+  auto validate_interval = [](u32 interval, std::string_view name) -> std::optional<ConfigError> {
+    if (interval == 0U) {
+      return ConfigError{std::string{name} + ".interval must be non-zero"};
+    }
+    return std::nullopt;
+  };
+  for (const auto [name, interval] : {
+           std::pair{std::string_view{"simulation.systems.physics"}, config.simulation.systems.physics.interval},
+           std::pair{std::string_view{"simulation.systems.entities"}, config.simulation.systems.entities.interval},
+           std::pair{std::string_view{"simulation.systems.ai"}, config.simulation.systems.ai.interval},
+           std::pair{std::string_view{"simulation.systems.block_updates"}, config.simulation.systems.block_updates.interval},
+           std::pair{std::string_view{"simulation.systems.fluids"}, config.simulation.systems.fluids.interval},
+           std::pair{std::string_view{"simulation.systems.random_ticks"}, config.simulation.systems.random_ticks.interval},
+       }) {
+    if (std::optional<ConfigError> error = validate_interval(interval, name);
+        error.has_value()) {
+      return ConfigResult::failure(std::move(error.value()));
+    }
+  }
+  if (config.simulation.systems.block_updates.budget == 0U ||
+      config.simulation.systems.fluids.budget == 0U) {
+    return ConfigResult::failure(
+        ConfigError{"simulation system budgets for block_updates and fluids must be non-zero"});
+  }
+  if (config.simulation.systems.random_ticks.samples_per_chunk == 0U) {
+    return ConfigResult::failure(
+        ConfigError{"simulation.systems.random_ticks.samples_per_chunk must be non-zero"});
+  }
+  if (config.simulation.fluids.water.flow_interval_ticks == 0U ||
+      config.simulation.fluids.lava.flow_interval_ticks == 0U) {
+    return ConfigResult::failure(
+        ConfigError{"simulation fluid flow_interval_ticks values must be non-zero"});
+  }
 
   if (config.window.width == 0 || config.window.height == 0) {
     return ConfigResult::failure(ConfigError{"window dimensions must be non-zero"});
@@ -388,6 +597,65 @@ ConfigResult parse_config_yaml(std::string_view text) {
   if (config.jobs.max_worker_threads < config.jobs.min_worker_threads) {
     return ConfigResult::failure(
         ConfigError{"jobs.max_worker_threads must be >= jobs.min_worker_threads"});
+  }
+  auto validate_positive_f32 = [](f32 value, std::string_view name) -> std::optional<ConfigError> {
+    if (!std::isfinite(value) || value <= 0.0F) {
+      return ConfigError{std::string{name} + " must be finite and > 0"};
+    }
+    return std::nullopt;
+  };
+  for (const auto [name, value] : {
+           std::pair{std::string_view{"physics.standing_eye_height"}, config.physics.standing_eye_height},
+           std::pair{std::string_view{"physics.sneaking_eye_height"}, config.physics.sneaking_eye_height},
+           std::pair{std::string_view{"physics.swimming_eye_height"}, config.physics.swimming_eye_height},
+           std::pair{std::string_view{"physics.eye_height_lerp_per_second"}, config.physics.eye_height_lerp_per_second},
+           std::pair{std::string_view{"physics.reach_distance"}, config.physics.reach_distance},
+           std::pair{std::string_view{"physics.mouse_sensitivity_radians"}, config.physics.mouse_sensitivity_radians},
+           std::pair{std::string_view{"physics.walk_speed"}, config.physics.walk_speed},
+           std::pair{std::string_view{"physics.sprint_speed"}, config.physics.sprint_speed},
+           std::pair{std::string_view{"physics.sneak_speed"}, config.physics.sneak_speed},
+           std::pair{std::string_view{"physics.air_speed"}, config.physics.air_speed},
+           std::pair{std::string_view{"physics.fly_speed"}, config.physics.fly_speed},
+           std::pair{std::string_view{"physics.fly_vertical_speed"}, config.physics.fly_vertical_speed},
+           std::pair{std::string_view{"physics.jump_velocity"}, config.physics.jump_velocity},
+           std::pair{std::string_view{"physics.gravity_per_second"}, config.physics.gravity_per_second},
+           std::pair{std::string_view{"physics.terminal_velocity"}, config.physics.terminal_velocity},
+           std::pair{std::string_view{"physics.body_width"}, config.physics.body_width},
+           std::pair{std::string_view{"physics.body_height"}, config.physics.body_height},
+           std::pair{std::string_view{"physics.sneaking_body_height"}, config.physics.sneaking_body_height},
+           std::pair{std::string_view{"physics.swimming_body_width"}, config.physics.swimming_body_width},
+           std::pair{std::string_view{"physics.swimming_body_height"}, config.physics.swimming_body_height},
+           std::pair{std::string_view{"physics.sneak_support_probe_depth"}, config.physics.sneak_support_probe_depth},
+           std::pair{std::string_view{"physics.collision_epsilon"}, config.physics.collision_epsilon},
+           std::pair{std::string_view{"physics.surface_swim_speed"}, config.physics.surface_swim_speed},
+           std::pair{std::string_view{"physics.underwater_swim_speed"}, config.physics.underwater_swim_speed},
+           std::pair{std::string_view{"physics.fast_surface_swim_speed"}, config.physics.fast_surface_swim_speed},
+           std::pair{std::string_view{"physics.fast_underwater_swim_speed"}, config.physics.fast_underwater_swim_speed},
+           std::pair{std::string_view{"physics.upward_swim_acceleration"}, config.physics.upward_swim_acceleration},
+           std::pair{std::string_view{"physics.downward_swim_acceleration"}, config.physics.downward_swim_acceleration},
+           std::pair{std::string_view{"physics.surface_float_depth"}, config.physics.surface_float_depth},
+           std::pair{std::string_view{"physics.surface_buoyancy"}, config.physics.surface_buoyancy},
+           std::pair{std::string_view{"physics.breath_seconds"}, config.physics.breath_seconds},
+       }) {
+    if (std::optional<ConfigError> error = validate_positive_f32(value, name);
+        error.has_value()) {
+      return ConfigResult::failure(std::move(error.value()));
+    }
+  }
+  if (!std::isfinite(config.physics.underwater_buoyancy)) {
+    return ConfigResult::failure(
+        ConfigError{"physics.underwater_buoyancy must be finite"});
+  }
+  if (!std::isfinite(config.physics.liquid_drag) ||
+      config.physics.liquid_drag < 0.0F ||
+      config.physics.liquid_drag > 1.0F) {
+    return ConfigResult::failure(
+        ConfigError{"physics.liquid_drag must be finite and between 0 and 1"});
+  }
+  if (config.physics.swimming_body_height > config.physics.body_height ||
+      config.physics.sneaking_body_height > config.physics.body_height) {
+    return ConfigResult::failure(
+        ConfigError{"physics swimming/sneaking body heights must be <= body_height"});
   }
   if (config.render.max_chunk_mesh_uploads_per_frame == 0U) {
     return ConfigResult::failure(

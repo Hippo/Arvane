@@ -311,10 +311,26 @@ Example:
 ```json
 {
   "name": "arvane:water",
-  "texture": "water.png",
-  "fluid": true,
+  "render_category": "transparent",
+  "textures": "arvane:texture/block/water",
+  "properties": {
+    "replaceable": true,
+    "fluid": true
+  },
   "is_item": false
 }
+```
+
+Fluid speed is not configured on rendering or item data. It belongs to the fluid
+definition/timing config, for example:
+
+```yaml
+simulation:
+  fluids:
+    water:
+      flow_interval_ticks: 10
+    lava:
+      flow_interval_ticks: 30
 ```
 
 ---
@@ -837,4 +853,3 @@ with no locking.
 * Registry is immutable after load
 * Face visibility must use explicit rules, not assumptions
 * Game code must not hardcode numeric IDs
-

@@ -29,10 +29,15 @@ Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
   return Expected<void, ProtocolError>::success();
 }
 
-[[nodiscard]] constexpr usize chunk_data_wire_size(bool has_lighting) noexcept {
-  return sizeof(u32) + sizeof(i32) * 3U + sizeof(u64) * 3U + sizeof(u8) +
+[[nodiscard]] constexpr usize fluid_wire_size() noexcept {
+  return sizeof(u32) + sizeof(u8) + sizeof(u8);
+}
+
+[[nodiscard]] constexpr usize chunk_data_wire_size(bool has_lighting, bool has_fluids) noexcept {
+  return sizeof(u32) + sizeof(i32) * 3U + sizeof(u64) * 3U + sizeof(u8) * 2U +
          voxel::ChunkVolume * sizeof(u32) +
-         (has_lighting ? voxel::ChunkVolume * sizeof(voxel::LightWord) : 0U);
+         (has_lighting ? voxel::ChunkVolume * sizeof(voxel::LightWord) : 0U) +
+         (has_fluids ? voxel::ChunkVolume * fluid_wire_size() : 0U);
 }
 
 } // namespace
@@ -91,19 +96,27 @@ Expected<ChunkInterestUpdate, ProtocolError> deserialize_chunk_interest_update(
 }
 
 std::vector<u8> serialize_chunk_data(const ChunkData& data) {
-  MessageWriter writer(chunk_data_wire_size(data.has_lighting));
+  MessageWriter writer(chunk_data_wire_size(data.has_lighting, data.has_fluids));
   writer.write<u32>(data.world_id.value);
   write_chunk_coord(writer, data.coord);
   writer.write<u64>(data.chunk_version);
   writer.write<u64>(data.chunk_content_version);
   writer.write<u64>(data.chunk_light_version);
   writer.write_bool(data.has_lighting);
+  writer.write_bool(data.has_fluids);
   for (const voxel::BlockVariantID block : data.blocks) {
     writer.write<u32>(block.value);
   }
   if (data.has_lighting) {
     for (const voxel::LightWord light : data.lights) {
       writer.write<voxel::LightWord>(light);
+    }
+  }
+  if (data.has_fluids) {
+    for (const voxel::FluidCell fluid : data.fluids) {
+      writer.write<u32>(fluid.type.value);
+      writer.write<u8>(fluid.level);
+      writer.write<u8>(static_cast<u8>(fluid.flags));
     }
   }
   return std::move(writer).take_bytes();
@@ -117,8 +130,9 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
   auto chunk_content_version = reader.read<u64>();
   auto chunk_light_version = reader.read<u64>();
   auto has_lighting = reader.read_bool();
+  auto has_fluids = reader.read_bool();
   if (!world_id || !coord || !chunk_version || !chunk_content_version ||
-      !chunk_light_version || !has_lighting) {
+      !chunk_light_version || !has_lighting || !has_fluids) {
     return Expected<ChunkData, ProtocolError>::failure(
         ProtocolError{"failed to decode chunk data header"});
   }
@@ -130,8 +144,10 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
   data.chunk_content_version = chunk_content_version.value();
   data.chunk_light_version = chunk_light_version.value();
   data.has_lighting = has_lighting.value();
+  data.has_fluids = has_fluids.value();
   data.blocks.fill(voxel::AirBlockVariantID);
   data.lights.fill(voxel::NoLight);
+  data.fluids.fill(voxel::empty_fluid_cell());
 
   for (voxel::BlockVariantID& block : data.blocks) {
     auto value = reader.read<u32>();
@@ -150,6 +166,21 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
             ProtocolError{"failed to decode chunk lighting data"});
       }
       light = value.value();
+    }
+  }
+  if (data.has_fluids) {
+    for (voxel::FluidCell& fluid : data.fluids) {
+      auto type = reader.read<u32>();
+      auto level = reader.read<u8>();
+      auto flags = reader.read<u8>();
+      if (!type || !level || !flags) {
+        return Expected<ChunkData, ProtocolError>::failure(
+            ProtocolError{"failed to decode chunk fluid data"});
+      }
+      fluid = {
+          voxel::FluidTypeID{type.value()},
+          level.value(),
+          static_cast<voxel::FluidFlags>(flags.value())};
     }
   }
 

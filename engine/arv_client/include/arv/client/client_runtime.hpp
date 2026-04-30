@@ -20,6 +20,7 @@ namespace arv::client {
 class ClientRuntime {
 public:
   explicit ClientRuntime(std::unique_ptr<net::ITransport> transport);
+  void set_player_tuning(player::PlayerTuning tuning) noexcept;
   net::ConnectResult connect_integrated();
   void submit_input(InputFrame input);
   void set_chunk_view_distance(i32 view_distance) noexcept;

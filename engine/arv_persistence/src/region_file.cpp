@@ -19,6 +19,8 @@ constexpr usize ChunkLocationEntrySize = 8U;
 constexpr usize ChunkMetadataEntrySize = 8U;
 constexpr usize ChunkHeaderSize = 12U;
 constexpr usize LightingBytesPerSection = voxel::ChunkVolume * sizeof(voxel::LightWord);
+constexpr usize FluidBytesPerCell = sizeof(u32) + sizeof(u8) + sizeof(u8);
+constexpr usize FluidBytesPerSection = voxel::ChunkVolume * FluidBytesPerCell;
 
 class ByteWriter {
 public:
@@ -221,6 +223,39 @@ private:
   return Expected<std::array<u16, voxel::ChunkVolume>, PersistenceError>::success(indices);
 }
 
+void write_fluid_cells(ByteWriter& writer, const std::array<voxel::FluidCell, voxel::ChunkVolume>& fluids) {
+  for (const voxel::FluidCell fluid : fluids) {
+    writer.write_u32(fluid.type.value);
+    writer.write_u8(fluid.level);
+    writer.write_u8(static_cast<u8>(fluid.flags));
+  }
+}
+
+[[nodiscard]] Expected<std::array<voxel::FluidCell, voxel::ChunkVolume>, PersistenceError> read_fluid_cells(
+    std::span<const u8> bytes) {
+  if (bytes.size() != FluidBytesPerSection) {
+    return Expected<std::array<voxel::FluidCell, voxel::ChunkVolume>, PersistenceError>::failure(
+        make_error("fluid data section has unexpected size"));
+  }
+
+  ByteReader reader(bytes);
+  std::array<voxel::FluidCell, voxel::ChunkVolume> fluids{};
+  for (voxel::FluidCell& fluid : fluids) {
+    const auto type = reader.read_u32();
+    const auto level = reader.read_u8();
+    const auto flags = reader.read_u8();
+    if (!type || !level || !flags) {
+      return Expected<std::array<voxel::FluidCell, voxel::ChunkVolume>, PersistenceError>::failure(
+          make_error("fluid data section is truncated"));
+    }
+    fluid = {
+        voxel::FluidTypeID{type.value()},
+        level.value(),
+        static_cast<voxel::FluidFlags>(flags.value())};
+  }
+  return Expected<std::array<voxel::FluidCell, voxel::ChunkVolume>, PersistenceError>::success(fluids);
+}
+
 [[nodiscard]] Expected<std::vector<u8>, PersistenceError> encode_region_tables(
     const std::vector<std::string>& block_state_table) {
   ByteWriter tables;
@@ -382,7 +417,8 @@ Expected<RegionFileHeader, PersistenceError> parse_region_header(std::span<const
       static_cast<u64>(header.metadata_table_offset) +
       static_cast<u64>(header.chunk_count) * ChunkMetadataEntrySize;
 
-  if (header.format_version != CurrentRegionFormatVersion) {
+  if (header.format_version < MinimumReadableRegionFormatVersion ||
+      header.format_version > CurrentRegionFormatVersion) {
     return Expected<RegionFileHeader, PersistenceError>::failure(
         make_error("unsupported region format version"));
   }
@@ -511,6 +547,8 @@ Expected<std::vector<u8>, PersistenceError> encode_region_file(
       payload_writer.write_u32(static_cast<u32>(LightingBytesPerSection));
       payload_writer.write_bytes(
           {reinterpret_cast<const u8*>(section->lights.data()), LightingBytesPerSection});
+      payload_writer.write_u32(static_cast<u32>(FluidBytesPerSection));
+      write_fluid_cells(payload_writer, section->fluids);
     }
 
     payload_writer.write_u32(0U); // block entity count
@@ -628,6 +666,25 @@ Expected<DecodedRegionFile, PersistenceError> decode_region_file(
         break;
       }
 
+      std::array<voxel::FluidCell, voxel::ChunkVolume> fluids{};
+      if (header.format_version >= 2U) {
+        const auto fluid_data_size = payload_reader.read_u32();
+        if (!fluid_data_size) {
+          break;
+        }
+        auto fluid_data = payload_reader.read_bytes(fluid_data_size.value());
+        if (!fluid_data) {
+          break;
+        }
+        auto fluid_result = read_fluid_cells(*fluid_data);
+        if (!fluid_result) {
+          break;
+        }
+        fluids = std::move(fluid_result.value());
+      } else {
+        fluids.fill(voxel::empty_fluid_cell());
+      }
+
       auto indices_result = unpack_block_indices(*block_data, bits_per_block.value());
       if (!indices_result) {
         break;
@@ -650,6 +707,7 @@ Expected<DecodedRegionFile, PersistenceError> decode_region_file(
         section.blocks[index] = resolved.value_or(voxel::AirBlockVariantID);
       }
       std::memcpy(section.lights.data(), lighting_data->data(), LightingBytesPerSection);
+      section.fluids = std::move(fluids);
       decoded.chunks.push_back(std::move(section));
     }
   }

@@ -93,6 +93,14 @@ struct RayAabbHit {
   return normalize_or_zero({std::cos(yaw_radians), 0.0F, -std::sin(yaw_radians)});
 }
 
+[[nodiscard]] Vec3f view_forward(f32 yaw_radians, f32 pitch_radians) noexcept {
+  const f32 cos_pitch = std::cos(pitch_radians);
+  return normalize_or_zero(
+      {std::sin(yaw_radians) * cos_pitch,
+       std::sin(pitch_radians),
+       std::cos(yaw_radians) * cos_pitch});
+}
+
 [[nodiscard]] Aabb3f swept_bounds(const Aabb3f& bounds, Vec3f delta) noexcept {
   return {
       {min_component(bounds.min.x, bounds.min.x + delta.x),
@@ -230,18 +238,123 @@ struct RayAabbHit {
   return delta;
 }
 
+[[nodiscard]] PlayerCollisionPose pose_from_body(const KinematicBody& body) noexcept {
+  if (body.swimming) {
+    return PlayerCollisionPose::Swimming;
+  }
+  return body.sneaking ? PlayerCollisionPose::Sneaking : PlayerCollisionPose::Standing;
+}
+
+[[nodiscard]] f32 fluid_surface_y(BlockPos pos, voxel::FluidCell fluid) noexcept {
+  if (fluid.empty()) {
+    return static_cast<f32>(pos.value.y);
+  }
+  constexpr f32 MaxFluidLevel = 8.0F;
+  const f32 level = fluid.source()
+                        ? MaxFluidLevel
+                        : std::clamp(static_cast<f32>(fluid.level), 0.0F, MaxFluidLevel);
+  return static_cast<f32>(pos.value.y) + level / MaxFluidLevel;
+}
+
+struct LiquidContactProbe {
+  LiquidContactState state{LiquidContactState::NotInLiquid};
+  f32 highest_surface_y{};
+};
+
+[[nodiscard]] bool point_is_under_liquid_surface(
+    const ICollisionQuery& query,
+    Vec3f point,
+    f32 collision_epsilon) {
+  const BlockPos pos{{floor_i32(point.x), floor_i32(point.y), floor_i32(point.z)}};
+  const voxel::FluidCell fluid = query.fluid_cell(pos);
+  return !fluid.empty() && point.y < fluid_surface_y(pos, fluid) - collision_epsilon;
+}
+
+[[nodiscard]] LiquidContactProbe probe_liquid_contact(
+    const ICollisionQuery& query,
+    const Aabb3f& bounds,
+    Vec3f head_point,
+    f32 collision_epsilon) {
+  const i32 min_x = floor_i32(bounds.min.x);
+  const i32 min_y = floor_i32(bounds.min.y);
+  const i32 min_z = floor_i32(bounds.min.z);
+  const i32 max_x = static_cast<i32>(std::ceil(bounds.max.x));
+  const i32 max_y = static_cast<i32>(std::ceil(bounds.max.y));
+  const i32 max_z = static_cast<i32>(std::ceil(bounds.max.z));
+
+  LiquidContactProbe probe;
+  bool overlaps_liquid = false;
+  for (i32 z = min_z; z < max_z; ++z) {
+    for (i32 y = min_y; y < max_y; ++y) {
+      for (i32 x = min_x; x < max_x; ++x) {
+        const BlockPos pos{{x, y, z}};
+        const voxel::FluidCell fluid = query.fluid_cell(pos);
+        if (fluid.empty()) {
+          continue;
+        }
+
+        const f32 surface_y = fluid_surface_y(pos, fluid);
+        if (bounds.max.y <= static_cast<f32>(y) + collision_epsilon ||
+            bounds.min.y >= surface_y - collision_epsilon) {
+          continue;
+        }
+
+        overlaps_liquid = true;
+        probe.highest_surface_y = std::max(probe.highest_surface_y, surface_y);
+      }
+    }
+  }
+
+  if (!overlaps_liquid) {
+    return probe;
+  }
+
+  if (point_is_under_liquid_surface(query, head_point, collision_epsilon)) {
+    probe.state = LiquidContactState::SwimmingUnderwater;
+  } else if (bounds.min.y < probe.highest_surface_y - collision_epsilon) {
+    probe.state = LiquidContactState::SwimmingAtSurface;
+  } else {
+    probe.state = LiquidContactState::PartiallyInLiquid;
+  }
+  return probe;
+}
+
+[[nodiscard]] bool in_liquid(LiquidContactState state) noexcept {
+  return state != LiquidContactState::NotInLiquid;
+}
+
+[[nodiscard]] bool should_land_sprint(const KinematicInput& input) noexcept {
+  return input.sprint_held && input.move_z > 0 && !input.sneak_held;
+}
+
 } // namespace
 
 Aabb3f make_body_bounds(Vec3f position, const KinematicConfig& config) noexcept {
-  return make_body_bounds(position, config, false);
+  return make_body_bounds(position, config, PlayerCollisionPose::Standing);
 }
 
-Aabb3f make_body_bounds(Vec3f position, const KinematicConfig& config, bool sneaking) noexcept {
-  const f32 half_width = config.body_width * 0.5F;
-  const f32 body_height = sneaking ? config.sneaking_body_height : config.body_height;
+Aabb3f make_body_bounds(
+    Vec3f position,
+    const KinematicConfig& config,
+    PlayerCollisionPose pose) noexcept {
+  const f32 body_width =
+      pose == PlayerCollisionPose::Swimming ? config.swimming_body_width : config.body_width;
+  const f32 half_width = body_width * 0.5F;
+  const f32 body_height =
+      pose == PlayerCollisionPose::Swimming
+          ? config.swimming_body_height
+          : (pose == PlayerCollisionPose::Sneaking ? config.sneaking_body_height
+                                                   : config.body_height);
   return {
       {position.x - half_width, position.y, position.z - half_width},
       {position.x + half_width, position.y + body_height, position.z + half_width}};
+}
+
+Aabb3f make_body_bounds(Vec3f position, const KinematicConfig& config, bool sneaking) noexcept {
+  return make_body_bounds(
+      position,
+      config,
+      sneaking ? PlayerCollisionPose::Sneaking : PlayerCollisionPose::Standing);
 }
 
 MovementResolution resolve_movement(
@@ -319,13 +432,15 @@ KinematicStepResult step_kinematic_body(
     const KinematicInput& input,
     const KinematicConfig& config) {
   KinematicBody next = body;
-  next.sneaking = input.fly_mode ? false : input.sneak_held;
-  if (body.sneaking && !input.fly_mode && !input.sneak_held) {
-    next.sneaking = !is_space_clear(
-        query,
-        make_body_bounds(body.position, config, false),
-        config.collision_epsilon);
-  }
+  PlayerCollisionPose current_pose = pose_from_body(body);
+  const Aabb3f current_bounds = make_body_bounds(body.position, config, current_pose);
+  const Vec3f current_head{
+      body.position.x,
+      body.position.y + config.standing_eye_height,
+      body.position.z};
+  const LiquidContactProbe liquid =
+      probe_liquid_contact(query, current_bounds, current_head, config.collision_epsilon);
+  const bool liquid_movement = !input.fly_mode && in_liquid(liquid.state);
 
   Vec3f move{};
   if (input.move_z != 0) {
@@ -336,7 +451,33 @@ KinematicStepResult step_kinematic_body(
   }
   move = normalize_or_zero(move);
 
+  PlayerCollisionPose requested_pose = PlayerCollisionPose::Standing;
+  if (!input.fly_mode) {
+    const bool swim_fast = liquid_movement && input.sprint_held &&
+                           (input.move_x != 0 || input.move_z != 0) && !input.sneak_held;
+    if (swim_fast) {
+      requested_pose = PlayerCollisionPose::Swimming;
+    } else if (!liquid_movement && input.sneak_held) {
+      requested_pose = PlayerCollisionPose::Sneaking;
+    }
+  }
+
+  PlayerCollisionPose active_pose = requested_pose;
+  if (requested_pose != current_pose &&
+      !is_space_clear(
+          query,
+          make_body_bounds(body.position, config, requested_pose),
+          config.collision_epsilon)) {
+    active_pose = current_pose;
+  }
+  next.swimming = active_pose == PlayerCollisionPose::Swimming;
+  next.sneaking = active_pose == PlayerCollisionPose::Sneaking;
+  bool clamp_surface_float = false;
+  f32 surface_float_y = body.position.y;
+
   if (input.fly_mode) {
+    next.swimming = false;
+    next.sneaking = false;
     next.velocity.x = move.x * config.fly_speed;
     next.velocity.z = move.z * config.fly_speed;
 
@@ -348,15 +489,71 @@ KinematicStepResult step_kinematic_body(
       vertical -= 1.0F;
     }
     next.velocity.y = vertical * config.fly_vertical_speed;
+    next.breath_seconds = config.breath_seconds;
+  } else if (liquid_movement) {
+    const bool underwater = liquid.state == LiquidContactState::SwimmingUnderwater;
+    const bool jump_out_of_surface =
+        !underwater && (input.jump_pressed || input.jump_held);
+    const bool fast_swim = input.sprint_held && (input.move_x != 0 || input.move_z != 0);
+    const f32 swim_speed =
+        underwater
+            ? (fast_swim ? config.fast_underwater_swim_speed : config.underwater_swim_speed)
+            : (fast_swim ? config.fast_surface_swim_speed : config.surface_swim_speed);
+
+    Vec3f swim_move = move;
+    if (underwater && fast_swim && input.move_z > 0) {
+      swim_move = view_forward(yaw_radians, input.pitch_radians) * static_cast<f32>(input.move_z);
+      if (input.move_x != 0) {
+        swim_move = swim_move + horizontal_right(yaw_radians) * static_cast<f32>(input.move_x);
+      }
+      swim_move = normalize_or_zero(swim_move);
+    }
+
+    next.velocity.x = swim_move.x * swim_speed;
+    next.velocity.z = swim_move.z * swim_speed;
+    next.velocity.y = body.velocity.y * std::clamp(config.liquid_drag, 0.0F, 1.0F);
+
+    if (underwater && fast_swim && input.move_z > 0) {
+      next.velocity.y += swim_move.y * swim_speed;
+    }
+    if (jump_out_of_surface) {
+      next.velocity.y = std::max(next.velocity.y, config.jump_velocity);
+    } else if (input.jump_held) {
+      next.velocity.y += config.upward_swim_acceleration * tick_seconds;
+    }
+    if (input.sneak_held) {
+      next.velocity.y -= config.downward_swim_acceleration * tick_seconds;
+    } else if (underwater) {
+      next.velocity.y += config.underwater_buoyancy * tick_seconds;
+    } else {
+      surface_float_y = liquid.highest_surface_y - config.surface_float_depth;
+      clamp_surface_float = !jump_out_of_surface;
+      if (body.position.y < surface_float_y - config.collision_epsilon) {
+        next.velocity.y =
+            std::max(0.0F, next.velocity.y + config.surface_buoyancy * tick_seconds);
+      } else if (body.position.y > surface_float_y + config.collision_epsilon) {
+        next.velocity.y -= config.surface_buoyancy * tick_seconds;
+      }
+    }
+
+    next.velocity.y = std::clamp(
+        next.velocity.y,
+        -config.terminal_velocity,
+        config.terminal_velocity);
+    next.breath_seconds =
+        underwater ? std::max(0.0F, body.breath_seconds - tick_seconds)
+                   : config.breath_seconds;
   } else {
+    next.breath_seconds = config.breath_seconds;
     const f32 horizontal_speed =
         body.grounded ? (next.sneaking ? config.sneak_speed
-                                       : (input.sprint_held ? config.sprint_speed : config.walk_speed))
+                                       : (should_land_sprint(input) ? config.sprint_speed
+                                                                    : config.walk_speed))
                       : config.air_speed;
     next.velocity.x = move.x * horizontal_speed;
     next.velocity.z = move.z * horizontal_speed;
 
-    const bool jumped = input.jump_pressed && body.grounded;
+    const bool jumped = (input.jump_pressed || input.jump_held) && body.grounded;
     if (jumped) {
       next.velocity.y = config.jump_velocity;
     } else if (!body.grounded) {
@@ -368,8 +565,18 @@ KinematicStepResult step_kinematic_body(
   }
 
   Vec3f movement_delta = next.velocity * tick_seconds;
-  const Aabb3f active_bounds = make_body_bounds(body.position, config, next.sneaking);
-  if (!input.fly_mode && body.grounded && next.sneaking) {
+  if (clamp_surface_float && tick_seconds > 0.0F) {
+    const f32 delta_to_float_y = surface_float_y - body.position.y;
+    const bool crosses_float_y =
+        (delta_to_float_y >= 0.0F && movement_delta.y > delta_to_float_y) ||
+        (delta_to_float_y <= 0.0F && movement_delta.y < delta_to_float_y);
+    if (crosses_float_y) {
+      movement_delta.y = delta_to_float_y;
+      next.velocity.y = movement_delta.y / tick_seconds;
+    }
+  }
+  const Aabb3f active_bounds = make_body_bounds(body.position, config, active_pose);
+  if (!input.fly_mode && !liquid_movement && body.grounded && next.sneaking) {
     movement_delta =
         clamp_sneak_horizontal_delta(query, active_bounds, movement_delta, config.sneak_support_probe_depth);
     if (tick_seconds > 0.0F) {
@@ -385,7 +592,7 @@ KinematicStepResult step_kinematic_body(
       config.collision_epsilon);
 
   next.position = body.position + movement.applied_delta;
-  next.grounded = !input.fly_mode && movement.grounded;
+  next.grounded = !input.fly_mode && !liquid_movement && movement.grounded;
   if (movement.hit_x) {
     next.velocity.x = 0.0F;
   }
@@ -399,6 +606,8 @@ KinematicStepResult step_kinematic_body(
   KinematicStepResult result;
   result.body = next;
   result.movement = movement;
+  result.liquid_state = liquid.state;
+  result.pose = active_pose;
   return result;
 }
 

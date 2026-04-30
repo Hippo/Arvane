@@ -24,6 +24,33 @@ struct WindowConfig {
 
 struct SimulationConfig {
   TickRate base_tps{DefaultBaseTps};
+
+  struct TickSystemConfig {
+    u32 interval{1};
+    u32 budget{};
+    u32 samples_per_chunk{};
+  };
+
+  struct TickSystemsConfig {
+    TickSystemConfig physics{1, 0, 0};
+    TickSystemConfig entities{1, 0, 0};
+    TickSystemConfig ai{2, 0, 0};
+    TickSystemConfig block_updates{3, 5000, 0};
+    TickSystemConfig fluids{1, 2000, 0};
+    TickSystemConfig random_ticks{20, 0, 3};
+  };
+
+  struct FluidSpeedConfig {
+    u32 flow_interval_ticks{10};
+  };
+
+  struct FluidsConfig {
+    FluidSpeedConfig water{10};
+    FluidSpeedConfig lava{30};
+  };
+
+  TickSystemsConfig systems{};
+  FluidsConfig fluids{};
 };
 
 struct NetworkConfig {
@@ -45,6 +72,42 @@ struct JobSystemConfig {
   u32 reserved_threads{4};
   u32 min_worker_threads{1};
   u32 max_worker_threads{64};
+};
+
+struct PhysicsConfig {
+  f32 standing_eye_height{1.62F};
+  f32 sneaking_eye_height{1.35F};
+  f32 swimming_eye_height{0.45F};
+  f32 eye_height_lerp_per_second{12.0F};
+  f32 reach_distance{5.0F};
+  f32 mouse_sensitivity_radians{0.0025F};
+  f32 walk_speed{4.5F};
+  f32 sprint_speed{6.0F};
+  f32 sneak_speed{2.25F};
+  f32 air_speed{3.5F};
+  f32 fly_speed{8.0F};
+  f32 fly_vertical_speed{6.0F};
+  f32 jump_velocity{8.5F};
+  f32 gravity_per_second{32.0F};
+  f32 terminal_velocity{55.0F};
+  f32 body_width{0.6F};
+  f32 body_height{1.8F};
+  f32 sneaking_body_height{1.5F};
+  f32 swimming_body_width{0.9F};
+  f32 swimming_body_height{0.6F};
+  f32 sneak_support_probe_depth{0.05F};
+  f32 collision_epsilon{0.001F};
+  f32 surface_swim_speed{2.5F};
+  f32 underwater_swim_speed{2.0F};
+  f32 fast_surface_swim_speed{5.6F};
+  f32 fast_underwater_swim_speed{5.0F};
+  f32 upward_swim_acceleration{18.0F};
+  f32 downward_swim_acceleration{18.0F};
+  f32 liquid_drag{0.8F};
+  f32 surface_float_depth{1.0F};
+  f32 surface_buoyancy{10.0F};
+  f32 underwater_buoyancy{1.0F};
+  f32 breath_seconds{15.0F};
 };
 
 struct RenderConfig {
@@ -115,6 +178,7 @@ struct EngineConfig {
   NetworkConfig network{};
   ChunkDistanceConfig chunks{};
   JobSystemConfig jobs{};
+  PhysicsConfig physics{};
   RenderConfig render{};
   ChunkPipelineConfig chunk_pipeline{};
 };

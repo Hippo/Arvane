@@ -12,9 +12,20 @@ TEST(ClientCameraTests, SnapshotCopiesOwnedCameraState) {
 
   EXPECT_EQ(snapshot.world_id, arv::WorldID{11});
   EXPECT_EQ(snapshot.position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+  EXPECT_FLOAT_EQ(snapshot.fov_y_degrees, arv::client::DefaultCameraFovYDegrees);
   EXPECT_EQ(snapshot.viewport_width, 800U);
   EXPECT_EQ(snapshot.viewport_height, 600U);
   EXPECT_FLOAT_EQ(snapshot.partial_tick_alpha, 0.25F);
+}
+
+TEST(ClientCameraTests, SnapshotUsesConfiguredFov) {
+  arv::client::CameraShell camera;
+  camera.set_fov_y_degrees(82.0F);
+
+  const arv::render::CameraSnapshot snapshot = camera.snapshot(800, 600, 0.0F);
+
+  EXPECT_FLOAT_EQ(camera.fov_y_degrees(), 82.0F);
+  EXPECT_FLOAT_EQ(snapshot.fov_y_degrees, 82.0F);
 }
 
 TEST(ClientCameraTests, PitchIsClamped) {

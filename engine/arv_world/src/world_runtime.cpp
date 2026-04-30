@@ -1,5 +1,6 @@
 #include "arv/world/world_runtime.hpp"
 
+#include <algorithm>
 #include <array>
 #include <utility>
 
@@ -7,6 +8,35 @@ namespace arv::world {
 namespace {
 
 using DependencyMask = std::array<bool, voxel::ChunkSnapshotNeighborhoodVolume>;
+
+[[nodiscard]] u8 fluid_update_priority(FluidUpdateReason reason) noexcept {
+  switch (reason) {
+    case FluidUpdateReason::FluidRemoved:
+    case FluidUpdateReason::BlockChanged:
+      return 2U;
+    case FluidUpdateReason::FluidAdded:
+    case FluidUpdateReason::NeighborChanged:
+    case FluidUpdateReason::ChunkActivated:
+      return 1U;
+  }
+  return 0U;
+}
+
+[[nodiscard]] bool should_replace_pending_fluid_update(
+    const FluidUpdate& current,
+    const FluidUpdate& candidate) noexcept {
+  if (candidate.execute_at != current.execute_at) {
+    return candidate.execute_at < current.execute_at;
+  }
+  return fluid_update_priority(candidate.reason) > fluid_update_priority(current.reason);
+}
+
+[[nodiscard]] bool matches_pending_fluid_update(
+    const FluidUpdate& pending,
+    const FluidUpdate& queued) noexcept {
+  return pending.execute_at == queued.execute_at &&
+         fluid_update_priority(pending.reason) == fluid_update_priority(queued.reason);
+}
 
 [[nodiscard]] SectionLocalPos local_from_index(usize index) noexcept {
   const i32 x = static_cast<i32>(index % voxel::ChunkSide);
@@ -124,7 +154,8 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::get_chunk_snapshot(ChunkCoord 
 void WorldRuntime::apply_chunk_snapshot(
     ChunkCoord coord,
     std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
-    std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights) noexcept {
+    std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights,
+    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids) noexcept {
   const voxel::ChunkSection* existing_chunk = find_chunk(coord);
   const bool first_mesh =
       existing_chunk == nullptr || existing_chunk->mesh_built_from_block_version() == 0U;
@@ -137,6 +168,7 @@ void WorldRuntime::apply_chunk_snapshot(
   DependencyMask light_dependency_offsets{};
   bool blocks_changed = existing_chunk == nullptr;
   bool lights_changed = existing_chunk == nullptr;
+  bool fluids_changed = fluids.has_value() && existing_chunk == nullptr;
 
   std::array<voxel::LightWord, voxel::ChunkVolume> resolved_lights;
   if (lights.has_value()) {
@@ -148,10 +180,12 @@ void WorldRuntime::apply_chunk_snapshot(
   if (existing_chunk != nullptr) {
     blocks_changed = existing_chunk->blocks() != blocks;
     lights_changed = existing_chunk->lights() != resolved_lights;
+    fluids_changed = fluids.has_value() && existing_chunk->fluids() != fluids.value();
 
-    if (blocks_changed) {
+    if (blocks_changed || fluids_changed) {
       for (usize index = 0; index < voxel::ChunkVolume; ++index) {
-        if (existing_chunk->blocks()[index] != blocks[index]) {
+        if (existing_chunk->blocks()[index] != blocks[index] ||
+            (fluids.has_value() && existing_chunk->fluids()[index] != fluids.value()[index])) {
           add_block_dependency_offsets(block_dependency_offsets, local_from_index(index));
         }
       }
@@ -170,13 +204,16 @@ void WorldRuntime::apply_chunk_snapshot(
 
   voxel::ChunkSection& chunk = ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded);
   chunk.set_lifecycle_state(voxel::ChunkLifecycleState::Loaded);
-  chunk.replace_saved_contents(std::move(blocks), std::move(resolved_lights));
+  chunk.replace_saved_contents(
+      std::move(blocks),
+      std::move(resolved_lights),
+      std::move(fluids));
 
-  if (needs_first_mesh_dirty || blocks_changed || lights_changed) {
+  if (needs_first_mesh_dirty || blocks_changed || lights_changed || fluids_changed) {
     mark_mesh_content_dirty();
     enqueue_dirty_mesh_chunk(coord);
   }
-  if (blocks_changed || needs_first_mesh_dirty) {
+  if (blocks_changed || fluids_changed || needs_first_mesh_dirty) {
     for (i32 z = -1; z <= 1; ++z) {
       for (i32 y = -1; y <= 1; ++y) {
         for (i32 x = -1; x <= 1; ++x) {
@@ -294,12 +331,30 @@ bool WorldRuntime::set_chunk_lifecycle_state(ChunkCoord coord, voxel::ChunkLifec
 }
 
 void WorldRuntime::update_simulation_radius(ChunkCoord center, i32 radius) noexcept {
+  const std::array<ChunkCoord, 1> centers{{center}};
+  update_simulation_radii(centers, radius);
+}
+
+void WorldRuntime::update_simulation_radii(std::span<const ChunkCoord> centers, i32 radius) noexcept {
   for (auto& [coord, chunk] : chunks_) {
-    const i32 dx = coord.value.x - center.value.x;
-    const i32 dy = coord.value.y - center.value.y;
-    const i32 dz = coord.value.z - center.value.z;
-    const i32 distance = max_abs3(dx, dy, dz);
-    const bool active = radius >= 0 && distance <= radius;
+    if (chunk.lifecycle_state() != voxel::ChunkLifecycleState::Loaded &&
+        chunk.lifecycle_state() != voxel::ChunkLifecycleState::Active) {
+      continue;
+    }
+
+    bool active = false;
+    if (radius >= 0) {
+      for (const ChunkCoord center : centers) {
+        const i32 dx = coord.value.x - center.value.x;
+        const i32 dy = coord.value.y - center.value.y;
+        const i32 dz = coord.value.z - center.value.z;
+        if (max_abs3(dx, dy, dz) <= radius) {
+          active = true;
+          break;
+        }
+      }
+    }
+
     const voxel::ChunkLifecycleState next_state =
         active ? voxel::ChunkLifecycleState::Active : voxel::ChunkLifecycleState::Loaded;
     const bool became_active = active &&
@@ -365,6 +420,14 @@ bool WorldRuntime::set_fluid(
     BlockPos pos,
     voxel::FluidCell fluid,
     const voxel::FluidDefinition& definition) noexcept {
+  return set_fluid_internal(pos, fluid, definition, true);
+}
+
+bool WorldRuntime::set_fluid_internal(
+    BlockPos pos,
+    voxel::FluidCell fluid,
+    const voxel::FluidDefinition& definition,
+    bool enqueue_updates) noexcept {
   const ChunkCoord chunk_coord = block_to_chunk(pos);
   voxel::ChunkSection* chunk = find_chunk(chunk_coord);
   if (chunk == nullptr) {
@@ -383,10 +446,13 @@ bool WorldRuntime::set_fluid(
   if (affects_lighting) {
     mark_lighting_content_dirty();
   }
-  FluidSolver::enqueue_neighbor_updates(
-      *this,
-      pos,
-      fluid.empty() ? FluidUpdateReason::FluidRemoved : FluidUpdateReason::FluidAdded);
+  if (enqueue_updates) {
+    FluidSolver::enqueue_neighbor_updates(
+        *this,
+        pos,
+        fluid.empty() ? FluidUpdateReason::FluidRemoved : FluidUpdateReason::FluidAdded,
+        definition.flow_interval_ticks);
+  }
   return true;
 }
 
@@ -478,9 +544,13 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
 void WorldRuntime::restore_saved_chunk(
     ChunkCoord coord,
     std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
-    std::array<voxel::LightWord, voxel::ChunkVolume> lights) noexcept {
+    std::array<voxel::LightWord, voxel::ChunkVolume> lights,
+    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids) noexcept {
   voxel::ChunkSection& chunk = ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded);
-  chunk.replace_saved_contents(std::move(blocks), std::move(lights));
+  chunk.replace_saved_contents(
+      std::move(blocks),
+      std::move(lights),
+      std::move(fluids));
   chunk.mark_dirty(voxel::ChunkDirtyFlags::Lighting);
   mark_mesh_content_dirty();
   enqueue_dirty_mesh_chunk(coord);
@@ -541,12 +611,13 @@ void WorldRuntime::schedule_block_update(
 
 void WorldRuntime::enqueue_fluid_update(
     BlockPos pos,
-    FluidUpdateReason reason) {
-  fluid_updates_.push_back({pos, reason});
+    FluidUpdateReason reason,
+    u32 delay_ticks) {
+  enqueue_fluid_update_unique({pos, reason, tick_index_ + delay_ticks});
 }
 
 usize WorldRuntime::pending_fluid_update_count() const noexcept {
-  return fluid_updates_.size();
+  return pending_fluid_updates_by_position_.size();
 }
 
 usize WorldRuntime::deferred_boundary_fluid_event_count(ChunkCoord coord) const noexcept {
@@ -595,6 +666,67 @@ u32 WorldRuntime::process_fluid_updates(
     const voxel::FluidDefinition& definition,
     u32 budget) {
   return FluidSolver::process_updates(*this, registry, definition, budget);
+}
+
+std::optional<FluidSimulationRequest> WorldRuntime::make_fluid_simulation_request(
+    u32 budget) {
+  std::vector<FluidUpdate> due_updates = drain_due_fluid_updates(budget);
+  if (budget == 0U || due_updates.empty()) {
+    return std::nullopt;
+  }
+
+  FluidSimulationRequest request;
+  request.current_tick = tick_index_;
+  request.budget = budget;
+  request.updates = std::move(due_updates);
+
+  request.chunks.reserve(chunks_.size());
+  for (const auto& [coord, chunk] : chunks_) {
+    request.chunks.push_back({
+        coord,
+        chunk.lifecycle_state() == voxel::ChunkLifecycleState::Active,
+        chunk.content_version(),
+        chunk.storage_view()});
+  }
+
+  return request;
+}
+
+u32 WorldRuntime::apply_fluid_simulation_result(
+    FluidSimulationResult result,
+    const voxel::FluidDefinition& definition) {
+  HashMap<ChunkCoord, bool> accepted_chunks;
+  for (const FluidChange& change : result.changes) {
+    const ChunkCoord coord = block_to_chunk(change.pos);
+    auto [accepted, inserted] = accepted_chunks.emplace(coord, false);
+    if (inserted) {
+      const voxel::ChunkSection* chunk = find_chunk(coord);
+      accepted->second =
+          chunk != nullptr && chunk->content_version() == change.source_content_version;
+    }
+
+    if (!accepted->second) {
+      enqueue_fluid_update(change.pos, FluidUpdateReason::NeighborChanged);
+      continue;
+    }
+
+    (void)set_fluid_internal(change.pos, change.fluid, definition, false);
+  }
+
+  for (const FluidUpdate& update : result.followup_updates) {
+    enqueue_fluid_update_unique(update);
+  }
+
+  for (const FluidUpdate& update : result.deferred_updates) {
+    const ChunkCoord coord = block_to_chunk(update.pos);
+    if (is_chunk_active(coord)) {
+      enqueue_fluid_update_unique(update);
+    } else {
+      FluidSolver::store_deferred_boundary_update(*this, coord, update);
+    }
+  }
+
+  return result.processed;
 }
 
 WorldTickStats WorldRuntime::tick(
@@ -671,6 +803,53 @@ void WorldRuntime::enqueue_dirty_mesh_chunk(ChunkCoord coord) {
   if (dirty_mesh_chunk_set_.insert(coord).second) {
     dirty_mesh_chunks_.push_back(coord);
   }
+}
+
+void WorldRuntime::enqueue_fluid_update_unique(FluidUpdate update) {
+  auto [pending, inserted] =
+      pending_fluid_updates_by_position_.try_emplace(update.pos, update);
+  if (inserted) {
+    fluid_updates_.push_back(update);
+    return;
+  }
+
+  if (!should_replace_pending_fluid_update(pending->second, update)) {
+    return;
+  }
+
+  pending->second = update;
+  fluid_updates_.push_back(update);
+}
+
+std::vector<FluidUpdate> WorldRuntime::drain_due_fluid_updates(u32 budget) {
+  std::vector<FluidUpdate> due;
+  if (budget == 0U || fluid_updates_.empty()) {
+    return due;
+  }
+
+  due.reserve(std::min<usize>(budget, fluid_updates_.size()));
+  std::deque<FluidUpdate> remaining;
+  while (!fluid_updates_.empty()) {
+    FluidUpdate update = fluid_updates_.front();
+    fluid_updates_.pop_front();
+
+    auto pending = pending_fluid_updates_by_position_.find(update.pos);
+    if (pending == pending_fluid_updates_by_position_.end() ||
+        !matches_pending_fluid_update(pending->second, update)) {
+      continue;
+    }
+
+    if (update.execute_at > tick_index_ || due.size() >= budget) {
+      remaining.push_back(update);
+      continue;
+    }
+
+    pending_fluid_updates_by_position_.erase(pending);
+    due.push_back(update);
+  }
+
+  fluid_updates_ = std::move(remaining);
+  return due;
 }
 
 void WorldRuntime::recompute_lighting_work_pending() noexcept {

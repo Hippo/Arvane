@@ -39,6 +39,7 @@ struct InputFrame {
 
 class LocalPlayerController {
 public:
+  void set_player_tuning(player::PlayerTuning tuning) noexcept;
   void submit_input(InputFrame input) noexcept;
   [[nodiscard]] player::PlayerCommand consume_command(TickIndex tick_index) noexcept;
   void apply_authoritative_state(const protocol::PlayerCorrection& correction);
@@ -69,6 +70,7 @@ public:
 
 private:
   CameraShell camera_{};
+  player::PlayerTuning tuning_{player::default_player_tuning()};
   u8 selected_hotbar_slot_{};
   bool has_unconfirmed_hotbar_selection_{};
   TickIndex last_authoritative_server_tick_{};

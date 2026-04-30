@@ -558,6 +558,28 @@ namespace {
   return image;
 }
 
+[[nodiscard]] UiImageData with_upright_uv_bounds(UiImageData image) {
+  if (!image.valid) {
+    return image;
+  }
+
+  Vec2f uv_min = image.uvs.front();
+  Vec2f uv_max = image.uvs.front();
+  for (const Vec2f uv : image.uvs) {
+    uv_min.x = std::min(uv_min.x, uv.x);
+    uv_min.y = std::min(uv_min.y, uv.y);
+    uv_max.x = std::max(uv_max.x, uv.x);
+    uv_max.y = std::max(uv_max.y, uv.y);
+  }
+  image.uvs = {{
+      uv_min,
+      {uv_max.x, uv_min.y},
+      uv_max,
+      {uv_min.x, uv_max.y},
+  }};
+  return image;
+}
+
 void add_texture_item_icon(
     UiTree& tree,
     UiNodeID slot_id,
@@ -589,7 +611,7 @@ void add_block_item_icon(
   UiElement left_face = image_element(
       std::string{stable_prefix} + ".block.front",
       with_custom_points(
-          front,
+          with_upright_uv_bounds(front),
           {{{3.0F, 9.0F}, {17.0F, 16.0F}, {17.0F, 30.0F}, {3.0F, 23.0F}}},
           {0.70F, 0.70F, 0.70F, 1.0F}),
       width,
@@ -597,7 +619,7 @@ void add_block_item_icon(
   UiElement right_face = image_element(
       std::string{stable_prefix} + ".block.right",
       with_custom_points(
-          right,
+          with_upright_uv_bounds(right),
           {{{17.0F, 16.0F}, {31.0F, 9.0F}, {31.0F, 23.0F}, {17.0F, 30.0F}}},
           {0.82F, 0.82F, 0.82F, 1.0F}),
       width,
@@ -605,7 +627,7 @@ void add_block_item_icon(
   UiElement top_face = image_element(
       std::string{stable_prefix} + ".block.top",
       with_custom_points(
-          top,
+          with_upright_uv_bounds(top),
           {{{17.0F, 2.0F}, {31.0F, 9.0F}, {17.0F, 16.0F}, {3.0F, 9.0F}}},
           {1.0F, 1.0F, 1.0F, 1.0F}),
       width,

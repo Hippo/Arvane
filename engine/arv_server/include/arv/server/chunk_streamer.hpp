@@ -14,6 +14,7 @@ namespace arv::server {
 
 struct ServerChunkStreamingConfig {
   i32 max_view_distance{4};
+  i32 simulation_distance{1};
   i32 unload_margin{1};
   u32 max_chunks_sent_per_player_tick{4};
   u32 max_unloads_sent_per_player_tick{64};

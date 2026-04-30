@@ -240,7 +240,8 @@ public:
 
   void replace_saved_contents(
       std::array<BlockVariantID, ChunkVolume> blocks,
-      std::array<LightWord, ChunkVolume> lights) noexcept;
+      std::array<LightWord, ChunkVolume> lights,
+      std::optional<std::array<FluidCell, ChunkVolume>> fluids = std::nullopt) noexcept;
 
   bool replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept;
 
@@ -314,6 +315,10 @@ struct ChunkSnapshot {
     return center_storage()->lights;
   }
 
+  [[nodiscard]] const std::array<FluidCell, ChunkVolume>& fluids() const noexcept {
+    return center_storage()->fluids;
+  }
+
   [[nodiscard]] const ChunkStorage* center_storage_identity() const noexcept {
     return center_storage().get();
   }
@@ -326,6 +331,10 @@ struct ChunkSnapshot {
     SectionLocalPos local) noexcept;
 
 [[nodiscard]] LightWord snapshot_light(
+    const ChunkSnapshot& snapshot,
+    SectionLocalPos local) noexcept;
+
+[[nodiscard]] FluidCell snapshot_fluid(
     const ChunkSnapshot& snapshot,
     SectionLocalPos local) noexcept;
 

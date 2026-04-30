@@ -69,6 +69,7 @@ struct FluidDefinition {
   u8 horizontal_decay{1};
   u8 vertical_flow_level{8};
   u8 max_horizontal_distance{7};
+  u32 flow_interval_ticks{5};
   bool can_create_sources{true};
   bool can_flow_down{true};
   bool can_flow_sideways{true};
