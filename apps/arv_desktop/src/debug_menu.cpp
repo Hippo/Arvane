@@ -1,7 +1,12 @@
 #include "debug_menu.hpp"
 
+#include "arv/core/perf_stats.hpp"
+#include "arv/core/profiling.hpp"
+
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstddef>
 #include <optional>
 #include <string_view>
 
@@ -13,11 +18,7 @@ namespace {
 
 [[nodiscard]] const server::ServerSession* local_session(
     const server::ServerRuntime& server) noexcept {
-  const std::vector<SessionID> session_ids = server.sessions().session_ids();
-  if (session_ids.empty()) {
-    return nullptr;
-  }
-  return server.sessions().find(session_ids.front());
+  return server.sessions().first();
 }
 
 [[nodiscard]] player::PlayerState* local_player_state(server::ServerRuntime& server) noexcept {
@@ -55,7 +56,7 @@ namespace {
     }
     if (contains_case_insensitive(item->name, filter) ||
         contains_case_insensitive(item->display_name, filter)) {
-      items.push_back(item);
+      items.emplace_back(item);
     }
   }
   return items;
@@ -66,6 +67,98 @@ namespace {
     std::string_view name) {
   const std::optional<player::ItemID> id = registry.find_item(name);
   return id.has_value() ? registry.item(id.value()) : nullptr;
+}
+
+[[nodiscard]] f32 frame_sample(double milliseconds) noexcept {
+  return static_cast<f32>(std::clamp(milliseconds, 0.0, 60000.0));
+}
+
+void record_profile_frame_sample(DebugMenuState& state, const DebugMenuFrameInfo& frame_info) noexcept {
+  if (!core::profiling_enabled() || state.profile_sampling_paused) {
+    return;
+  }
+
+  constexpr u32 Capacity =
+      static_cast<u32>(DebugMenuState::ProfileFrameHistoryCapacity);
+  const u32 index = state.profile_frame_sample_index % Capacity;
+  state.profile_frame_delta_ms[index] = frame_sample(frame_info.frame_delta_ms);
+  state.profile_frame_work_ms[index] = frame_sample(frame_info.frame_work_ms);
+  state.profile_frame_sample_index = (index + 1U) % Capacity;
+  if (state.profile_frame_sample_count < Capacity) {
+    ++state.profile_frame_sample_count;
+  }
+}
+
+void clear_profile_frame_samples(DebugMenuState& state) noexcept {
+  state.profile_frame_delta_ms.fill(0.0F);
+  state.profile_frame_work_ms.fill(0.0F);
+  state.profile_frame_sample_index = 0;
+  state.profile_frame_sample_count = 0;
+}
+
+[[nodiscard]] core::TimingPercentiles frame_percentiles(
+    const std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity>& samples,
+    u32 sample_count) {
+  core::TimingPercentiles result;
+  result.sample_count = sample_count;
+  if (sample_count == 0U) {
+    return result;
+  }
+
+  std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity> sorted{};
+  for (u32 index = 0; index < sample_count; ++index) {
+    sorted[index] = samples[index];
+  }
+  std::sort(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(sample_count));
+
+  auto percentile_value = [&](u32 percentile) {
+    const u32 rank = static_cast<u32>(
+        (static_cast<u64>(sample_count - 1U) * static_cast<u64>(percentile) + 99ULL) /
+        100ULL);
+    return static_cast<double>(sorted[rank]);
+  };
+
+  result.p50_ms = percentile_value(50);
+  result.p95_ms = percentile_value(95);
+  result.p99_ms = percentile_value(99);
+  return result;
+}
+
+void render_percentile_header(bool include_max) {
+  ImGui::TableSetupColumn("Metric");
+  ImGui::TableSetupColumn("Samples");
+  ImGui::TableSetupColumn("Latest");
+  if (include_max) {
+    ImGui::TableSetupColumn("Max");
+  }
+  ImGui::TableSetupColumn("P50");
+  ImGui::TableSetupColumn("P95");
+  ImGui::TableSetupColumn("P99");
+  ImGui::TableHeadersRow();
+}
+
+void render_percentile_cells(
+    const char* label,
+    const core::TimingPercentiles& percentiles,
+    double latest_ms,
+    std::optional<double> max_ms) {
+  ImGui::TableNextRow();
+  ImGui::TableNextColumn();
+  ImGui::TextUnformatted(label);
+  ImGui::TableNextColumn();
+  ImGui::Text("%u", percentiles.sample_count);
+  ImGui::TableNextColumn();
+  ImGui::Text("%.3f ms", latest_ms);
+  if (max_ms.has_value()) {
+    ImGui::TableNextColumn();
+    ImGui::Text("%.3f ms", max_ms.value());
+  }
+  ImGui::TableNextColumn();
+  ImGui::Text("%.3f ms", percentiles.p50_ms);
+  ImGui::TableNextColumn();
+  ImGui::Text("%.3f ms", percentiles.p95_ms);
+  ImGui::TableNextColumn();
+  ImGui::Text("%.3f ms", percentiles.p99_ms);
 }
 
 void render_player_tab(
@@ -162,7 +255,7 @@ void render_player_tab(
         session->player_id,
         {item->id, static_cast<u16>(state.stack_size)});
     inventory_changed = true;
-    state.console_log.push_back(
+    state.console_log.emplace_back(
         result.complete() ? "Added item stack to inventory."
                           : "Inventory full; item stack was partially added.");
   }
@@ -174,7 +267,7 @@ void render_player_tab(
         player->selected_hotbar_slot,
         state.replace_selected_hotbar_slot);
     inventory_changed = true;
-    state.console_log.push_back(
+    state.console_log.emplace_back(
         result.complete() ? "Added item stack to selected hotbar slot."
                           : "Hotbar/inventory full; item stack was partially added.");
   }
@@ -214,11 +307,144 @@ void render_performance_tab(
   ImGui::Text("Mesh uploads last frame: %u", renderer.mesh_uploads_last_frame());
   ImGui::Text("Mesh upload discards last frame: %u", renderer.mesh_upload_discards_last_frame());
   ImGui::Text("Mesh upload time: %.3f ms", renderer.mesh_upload_time_ms_last_frame());
+  ImGui::Text("Draw calls last frame: %u", renderer.draw_calls_last_frame());
+  ImGui::Text("Chunk draw calls last frame: %u", renderer.chunk_draw_calls_last_frame());
+  ImGui::Text("UI draw calls last frame: %u", renderer.ui_draw_calls_last_frame());
+}
+
+void render_profiling_tab(
+    DebugMenuState& state,
+    const DebugMenuFrameInfo& frame_info,
+    const render::OpenGLRenderer& renderer) {
+  ImGui::SeparatorText("Tracy");
+  ImGui::Text(
+      "Engine profiling: %s",
+      core::profiling_enabled() ? "enabled" : "disabled");
+  ImGui::Text(
+      "CPU zones: %s",
+      core::tracy_profiling_enabled() ? "enabled" : "disabled");
+  ImGui::Text(
+      "GPU zones: %s",
+      core::tracy_profiling_enabled()
+          ? (renderer.gpu_profile_context_initialized() ? "active" : "pending first render")
+          : "disabled");
+
+  if (!core::profiling_enabled()) {
+    ImGui::TextUnformatted("Build with -DARVANE_ENABLE_PROFILING=ON to record profiling data.");
+  } else if (!core::tracy_profiling_enabled()) {
+    ImGui::TextUnformatted(
+        "Build with -DARVANE_ENABLE_TRACY=ON to emit Tracy zones.");
+  }
+
+  ImGui::Checkbox("Pause frame sampling", &state.profile_sampling_paused);
+  ImGui::SameLine();
+  if (ImGui::Button("Reset timing stats")) {
+    core::reset_global_timing_stats();
+    clear_profile_frame_samples(state);
+  }
+
+  ImGui::SeparatorText("Frame timeline");
+  if (state.profile_frame_sample_count == 0U) {
+    ImGui::TextUnformatted("No frame samples recorded yet.");
+  } else {
+    constexpr u32 Capacity =
+        static_cast<u32>(DebugMenuState::ProfileFrameHistoryCapacity);
+    const int sample_count = static_cast<int>(state.profile_frame_sample_count);
+    const int plot_offset = state.profile_frame_sample_count == Capacity
+                                ? static_cast<int>(state.profile_frame_sample_index)
+                                : 0;
+    ImGui::PlotLines(
+        "Frame delta",
+        state.profile_frame_delta_ms.data(),
+        sample_count,
+        plot_offset,
+        nullptr,
+        0.0F,
+        50.0F,
+        ImVec2{0.0F, 58.0F});
+    ImGui::PlotLines(
+        "CPU frame work",
+        state.profile_frame_work_ms.data(),
+        sample_count,
+        plot_offset,
+        nullptr,
+        0.0F,
+        50.0F,
+        ImVec2{0.0F, 58.0F});
+  }
+
+  const core::TimingPercentiles frame_delta =
+      frame_percentiles(state.profile_frame_delta_ms, state.profile_frame_sample_count);
+  const core::TimingPercentiles frame_work =
+      frame_percentiles(state.profile_frame_work_ms, state.profile_frame_sample_count);
+  if (ImGui::BeginTable(
+          "FrameTimingPercentiles",
+          6,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    render_percentile_header(false);
+    render_percentile_cells("Frame delta", frame_delta, frame_info.frame_delta_ms, std::nullopt);
+    render_percentile_cells("CPU frame work", frame_work, frame_info.frame_work_ms, std::nullopt);
+    ImGui::EndTable();
+  }
+
+  ImGui::SeparatorText("Worker timing");
+  if (ImGui::BeginTable(
+          "WorkerTimingPercentiles",
+          7,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    render_percentile_header(true);
+    for (u8 metric_index = 0; metric_index < static_cast<u8>(core::PerfMetric::Count);
+         ++metric_index) {
+      const auto metric = static_cast<core::PerfMetric>(metric_index);
+      const core::TimingMetricSnapshot snapshot = core::global_timing_snapshot(metric);
+      render_percentile_cells(
+          core::perf_metric_name(metric),
+          snapshot.percentiles,
+          snapshot.latest_ms,
+          snapshot.max_ms);
+    }
+    ImGui::EndTable();
+  }
+
+  ImGui::SeparatorText("Zone coverage");
+  struct ZoneLine {
+    const char* zone;
+    const char* lane;
+  };
+  constexpr std::array<ZoneLine, 11> zones{{
+      {"Frame time", "main/render"},
+      {"Simulation tick", "main/world"},
+      {"Render submit", "render"},
+      {"GPU wait time", "main/render"},
+      {"GPU queue timing", "GPU"},
+      {"Chunk generation", "worker/server"},
+      {"Snapshot creation", "main/worker"},
+      {"Chunk lookup / access", "world"},
+      {"Chunk meshing", "worker"},
+      {"Lighting propagation", "worker/server"},
+      {"Job queue latency", "worker"},
+  }};
+  if (ImGui::BeginTable(
+          "TracyZoneCoverage",
+          2,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Zone");
+    ImGui::TableSetupColumn("Timeline");
+    ImGui::TableHeadersRow();
+    for (const ZoneLine& zone : zones) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(zone.zone);
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(zone.lane);
+    }
+    ImGui::EndTable();
+  }
 }
 
 void render_network_tab(const server::ServerRuntime& server, const client::ClientRuntime& client) {
   ImGui::Text("Server mode: %s", server.mode() == server::ServerMode::Integrated ? "integrated" : "dedicated");
-  ImGui::Text("Sessions: %zu", server.sessions().session_ids().size());
+  ImGui::Text("Sessions: %zu", server.sessions().size());
   ImGui::Text("Connection state: %u", static_cast<unsigned>(client.connection_state()));
 }
 
@@ -226,8 +452,8 @@ void render_console_tab(DebugMenuState& state) {
   ImGui::InputText("Command", &state.console_command);
   ImGui::SameLine();
   if (ImGui::Button("Run") && !state.console_command.empty()) {
-    state.console_log.push_back("> " + state.console_command);
-    state.console_log.push_back("Command runner is wired to the menu; command dispatch is pending.");
+    state.console_log.emplace_back("> " + state.console_command);
+    state.console_log.emplace_back("Command runner is wired to the menu; command dispatch is pending.");
     state.console_command.clear();
   }
   ImGui::Separator();
@@ -250,6 +476,7 @@ DebugMenuResult render_debug_menu(
     const sched::Scheduler& world_jobs,
     const render::OpenGLRenderer& renderer) {
   DebugMenuResult result;
+  record_profile_frame_sample(state, frame_info);
   if (!state.open) {
     return result;
   }
@@ -292,6 +519,10 @@ DebugMenuResult render_debug_menu(
     }
     if (ImGui::BeginTabItem("Performance")) {
       render_performance_tab(frame_info, world_jobs, renderer);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Profiling")) {
+      render_profiling_tab(state, frame_info, renderer);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Console")) {

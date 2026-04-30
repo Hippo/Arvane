@@ -32,7 +32,7 @@ std::vector<persistence::SavedChunkSection> capture_saved_chunks(
     saved.lights = chunk->lights();
     saved.fluids = chunk->fluids();
     saved.lighting_valid = !chunk->is_dirty(voxel::ChunkDirtyFlags::NeedsRelight);
-    chunks.push_back(std::move(saved));
+    chunks.emplace_back(std::move(saved));
   }
   return chunks;
 }
@@ -70,7 +70,7 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     save.game_mode_id = player_state->game_mode_id;
     save.selected_hotbar_slot = player_state->selected_hotbar_slot;
     save.inventory = player_state->inventory;
-    players.push_back(std::move(save));
+    players.emplace_back(std::move(save));
   }
 
   return players;

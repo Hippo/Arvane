@@ -7,9 +7,8 @@
 #include "arv/core/types.hpp"
 #include "arv/voxel/block.hpp"
 
-#include <cstddef>
-#include <functional>
 #include <array>
+#include <cstddef>
 #include <string>
 #include <vector>
 

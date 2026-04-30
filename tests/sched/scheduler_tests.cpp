@@ -57,6 +57,21 @@ TEST(SchedulerTests, CompletionQueueDrainsConcurrentWorkerResults) {
   EXPECT_TRUE(completions.empty());
 }
 
+TEST(SchedulerTests, SpscQueueMovesValuesWithoutBlocking) {
+  arv::sched::SpscQueue<int> queue(4);
+
+  EXPECT_TRUE(queue.try_push(11));
+  EXPECT_TRUE(queue.try_push(17));
+  EXPECT_GE(queue.size_approx(), 1U);
+
+  int value = 0;
+  ASSERT_TRUE(queue.try_pop(value));
+  EXPECT_EQ(value, 11);
+  ASSERT_TRUE(queue.try_pop(value));
+  EXPECT_EQ(value, 17);
+  EXPECT_FALSE(queue.try_pop(value));
+}
+
 TEST(SchedulerTests, WorkerThreadPolicyClampsConfiguredCount) {
   arv::sched::WorkerThreadConfig config;
   config.worker_thread_count = 99;

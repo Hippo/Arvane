@@ -72,6 +72,7 @@ NetworkResult InProcessTransport::send(TransportMessage message) {
 
 std::vector<NetworkEvent> InProcessTransport::poll_events() {
   std::vector<NetworkEvent> events;
+  events.reserve(8U);
   NetworkEvent event;
   while (inbound_events().try_dequeue(event)) {
     if (side_ == InProcessEndpointSide::Server &&
@@ -84,7 +85,7 @@ std::vector<NetworkEvent> InProcessTransport::poll_events() {
                                    std::chrono::steady_clock::now()};
       (void)shared_->server_to_client_events.try_enqueue(std::move(client_accepted));
     }
-    events.push_back(std::move(event));
+    events.emplace_back(std::move(event));
     event = {};
   }
   return events;

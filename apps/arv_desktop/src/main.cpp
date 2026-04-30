@@ -13,13 +13,15 @@
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/ui.hpp"
+#include "arv/core/arena.hpp"
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/log.hpp"
+#include "arv/core/profiling.hpp"
 #include "arv/io/config.hpp"
 #include "arv/io/input_bindings.hpp"
 #include "arv/net/in_process_transport.hpp"
-#include "arv/platform/glfw_window.hpp"
 #include "arv/persistence/save.hpp"
+#include "arv/platform/glfw_window.hpp"
 #include "arv/player/item.hpp"
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/sched/scheduler.hpp"
@@ -38,6 +40,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -45,11 +48,7 @@ namespace {
 
 [[nodiscard]] const arv::server::ServerSession* local_session(
     const arv::server::ServerRuntime& server) noexcept {
-  const std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
-  if (session_ids.empty()) {
-    return nullptr;
-  }
-  return server.sessions().find(session_ids.front());
+  return server.sessions().first();
 }
 
 [[nodiscard]] arv::player::PlayerState* local_player_state(
@@ -214,6 +213,32 @@ void route_ui_mouse_focus(
   }
 }
 
+void pace_frame(
+    const arv::io::RenderConfig& render,
+    std::chrono::steady_clock::time_point frame_start) {
+  if (!render.frame_pacing_enabled || render.frame_pacing_target_fps == 0U) {
+    return;
+  }
+
+  ARV_PROFILE_ZONE("GPU wait time");
+  const auto target_frame =
+      std::chrono::duration<double>(1.0 / static_cast<double>(render.frame_pacing_target_fps));
+  const auto target_end =
+      frame_start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(target_frame);
+  const auto spin_margin = std::chrono::microseconds(render.frame_pacing_spin_us);
+
+  while (true) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now + spin_margin >= target_end) {
+      break;
+    }
+    std::this_thread::sleep_until(target_end - spin_margin);
+  }
+
+  while (std::chrono::steady_clock::now() < target_end) {
+  }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -233,20 +258,24 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  auto window_result = arv::platform::OpenGLWindow::create({
-      config.window.width,
-      config.window.height,
-      config.window.title,
-      config.window.vsync});
+  const bool swap_interval_vsync =
+      config.window.vsync && !config.render.frame_pacing_enabled;
+  auto window_result = arv::platform::OpenGLWindow::create({config.window.width,
+                                                            config.window.height,
+                                                            config.window.title,
+                                                            swap_interval_vsync});
   if (!window_result) {
     arv::core::error("platform", window_result.error().message);
     return 1;
   }
   arv::core::info(
       "render",
-      "vsync={}",
-      config.window.vsync ? "enabled" : "disabled");
+      "vsync={} frame_pacing={} target_fps={}",
+      swap_interval_vsync ? "enabled" : "disabled",
+      config.render.frame_pacing_enabled ? "enabled" : "disabled",
+      config.render.frame_pacing_target_fps);
   arv::platform::OpenGLWindow window = std::move(window_result.value());
+  arv::core::set_profile_thread_name("main/render");
   arv::desktop::DebugImGuiLayer debug_imgui;
   if (!debug_imgui.initialize(window.native_handle())) {
     arv::core::error("debug_ui", "failed to initialize ImGui debug UI");
@@ -332,7 +361,7 @@ int main(int argc, char** argv) {
     }
     auto face = font_system.load_face(path, 18, fallback);
     if (face) {
-      ui_faces.push_back(face.value());
+      ui_faces.emplace_back(face.value());
     } else {
       arv::core::warn("assets", face.error().message);
     }
@@ -465,21 +494,20 @@ int main(int argc, char** argv) {
       arv::sched::plan_runtime_thread_budget(thread_budget_config);
 
   arv::server::ServerRuntime integrated_server(std::move(transport_pair.server));
-  auto server_start = integrated_server.start({
-      arv::server::ServerMode::Integrated,
-      config.simulation.base_tps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry,
-      player_tuning,
-      water_fluid,
-      chunk_streaming,
-      chunk_generation,
-      config.chunk_pipeline.max_generation_results_per_tick,
-      config.chunk_pipeline.max_lighting_results_per_tick,
-      config.chunk_pipeline.max_generation_jobs_per_frame,
-      thread_budget.primary_workers,
-      world_tick_policy});
+  auto server_start = integrated_server.start({arv::server::ServerMode::Integrated,
+                                               config.simulation.base_tps,
+                                               {"in-process", 0},
+                                               &block_registry,
+                                               &item_registry,
+                                               player_tuning,
+                                               water_fluid,
+                                               chunk_streaming,
+                                               chunk_generation,
+                                               config.chunk_pipeline.max_generation_results_per_tick,
+                                               config.chunk_pipeline.max_lighting_results_per_tick,
+                                               config.chunk_pipeline.max_generation_jobs_per_frame,
+                                               thread_budget.primary_workers,
+                                               world_tick_policy});
   if (!server_start) {
     arv::core::error("server", server_start.error().message);
     return 1;
@@ -513,13 +541,13 @@ int main(int argc, char** argv) {
     std::vector<arv::protocol::ChunkUnload> drained_unloads =
         client.drain_received_chunk_unloads();
     for (const arv::protocol::ChunkUnload& unload : drained_unloads) {
-      pending_client_chunk_unloads.push_back(unload);
+      pending_client_chunk_unloads.emplace_back(unload);
     }
 
     std::vector<arv::protocol::ChunkData> drained_chunks =
         client.drain_received_chunk_data();
     for (arv::protocol::ChunkData& data : drained_chunks) {
-      pending_client_chunk_data.push_back(std::move(data));
+      pending_client_chunk_data.emplace_back(std::move(data));
     }
   };
   auto apply_pending_client_chunk_stream = [&](arv::u32 chunk_budget, arv::u32 unload_budget) {
@@ -615,6 +643,7 @@ int main(int argc, char** argv) {
   arv::Seconds fps_sample_seconds = 0.0F;
   double last_frame_work_ms = 0.0;
   constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
+  arv::FrameArena frame_arena;
   std::vector<arv::client::UiItemStackView> inventory_slots;
   std::optional<arv::client::UiItemStackView> carried_inventory_stack;
   std::vector<arv::client::PlayerListEntryView> tab_players;
@@ -639,6 +668,8 @@ int main(int argc, char** argv) {
   };
 
   while (!window.should_close()) {
+    ARV_PROFILE_ZONE("Frame time");
+    frame_arena.begin_frame();
     const auto now = std::chrono::steady_clock::now();
     const std::chrono::duration<arv::Seconds> delta = now - previous_time;
     previous_time = now;
@@ -658,7 +689,10 @@ int main(int argc, char** argv) {
       fps_sample_seconds = 0.0F;
     }
 
-    const auto frame_work_start = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point frame_work_start{};
+    if constexpr (arv::core::profiling_enabled()) {
+      frame_work_start = std::chrono::steady_clock::now();
+    }
     arv::platform::OpenGLWindow::poll_events();
     const arv::platform::InputSnapshot platform_input = window.poll_input();
     if (platform_input.debug_menu_toggle_pressed) {
@@ -710,6 +744,7 @@ int main(int argc, char** argv) {
     ticks.add_time(delta.count());
     bool fixed_tick_ran = false;
     while (ticks.consume_tick()) {
+      ARV_PROFILE_ZONE("Simulation tick");
       integrated_server.tick();
       client.fixed_tick(integrated_server.tick_index());
       collect_client_chunk_stream();
@@ -783,7 +818,7 @@ int main(int argc, char** argv) {
     }
     chat_lines.clear();
     for (const std::string& message : client.chat_messages()) {
-      chat_lines.push_back({message, 1.0F});
+      chat_lines.emplace_back(message, 1.0F);
     }
     arv::client::build_gameplay_ui(
         ui_tree,
@@ -851,22 +886,32 @@ int main(int argc, char** argv) {
     renderer.submit_frame(std::move(frame));
     renderer.render();
     debug_imgui.render();
-    const auto frame_work_end = std::chrono::steady_clock::now();
-    const double frame_work_ms =
-        std::chrono::duration<double, std::milli>(
-            frame_work_end - frame_work_start).count();
-    last_frame_work_ms = frame_work_ms;
-    if (frame_work_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
-      arv::core::warn(
-          "frame_profile",
-          "cpu frame work spike {}ms frame_delta={}ms queued_mesh={} pending_uploads={} uploads_last_frame={}",
-          frame_work_ms,
-          frame_delta_ms,
-          chunk_view.pending_meshes.size(),
-          renderer.pending_mesh_upload_count(),
-          renderer.mesh_uploads_last_frame());
+    if constexpr (arv::core::profiling_enabled()) {
+      const auto frame_work_end = std::chrono::steady_clock::now();
+      const double frame_work_ms =
+          std::chrono::duration<double, std::milli>(
+              frame_work_end - frame_work_start)
+              .count();
+      last_frame_work_ms = frame_work_ms;
+      if (frame_work_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
+        arv::core::warn(
+            "frame_profile",
+            "cpu frame work spike {}ms frame_delta={}ms queued_mesh={} pending_uploads={} uploads_last_frame={}",
+            frame_work_ms,
+            frame_delta_ms,
+            chunk_view.pending_meshes.size(),
+            renderer.pending_mesh_upload_count(),
+            renderer.mesh_uploads_last_frame());
+      }
+    } else {
+      last_frame_work_ms = 0.0;
     }
-    window.swap_buffers();
+    {
+      ARV_PROFILE_ZONE("GPU wait time");
+      window.swap_buffers();
+    }
+    pace_frame(config.render, now);
+    ARV_PROFILE_FRAME_MARK("Frame");
   }
 
   if (const arv::server::ServerSession* session = local_session(integrated_server);

@@ -1032,6 +1032,7 @@ Any compliant meshing implementation must satisfy all of the following:
 
 * meshing uses immutable snapshot inputs
 * workers do not access live world state
+* snapshot storage pointers are cached once per mesh build before inner-loop sampling
 * opaque and transparent geometry are emitted separately
 * face visibility is decided using state-driven occlusion rules
 * neighbor sampling works correctly across chunk boundaries
@@ -1042,6 +1043,8 @@ Any compliant meshing implementation must satisfy all of the following:
 * stale light versions may be accepted temporarily and must leave a light-only remesh queued
 * GPU upload occurs through a render-safe handoff
 * chunk mesh state is updated only after successful validation/publish
+* mesh buffers reserve from observed high-water marks and must not grow repeatedly in inner loops
+* meshing tasks are profiled with Tracy zones and per-thread p50/p95/p99 timing histograms
 
 ---
 

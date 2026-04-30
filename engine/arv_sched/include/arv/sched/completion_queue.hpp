@@ -1,6 +1,9 @@
 #pragma once
 
+#include "arv/core/types.hpp"
+
 #include <concurrentqueue.h>
+#include <readerwriterqueue.h>
 
 #include <new>
 #include <optional>
@@ -8,6 +11,28 @@
 #include <vector>
 
 namespace arv::sched {
+
+template<typename T>
+class SpscQueue {
+public:
+  explicit SpscQueue(usize capacity = 1024U) : values_(capacity) {
+  }
+
+  [[nodiscard]] bool try_push(T value) {
+    return values_.try_enqueue(std::move(value));
+  }
+
+  [[nodiscard]] bool try_pop(T& value) {
+    return values_.try_dequeue(value);
+  }
+
+  [[nodiscard]] usize size_approx() const noexcept {
+    return values_.size_approx();
+  }
+
+private:
+  moodycamel::ReaderWriterQueue<T> values_;
+};
 
 template<typename T>
 class CompletionQueue {
@@ -20,16 +45,20 @@ public:
 
   [[nodiscard]] std::vector<T> drain() {
     std::vector<T> drained;
-    drained.reserve(values_.size_approx());
+    drain_into(drained);
+    return drained;
+  }
+
+  void drain_into(std::vector<T>& drained) {
+    drained.reserve(drained.size() + values_.size_approx());
 
     std::optional<T> value;
     while (values_.try_dequeue(value)) {
       if (value.has_value()) {
-        drained.push_back(std::move(value).value());
+        drained.emplace_back(std::move(value).value());
       }
       value.reset();
     }
-    return drained;
   }
 
   [[nodiscard]] bool empty() const {

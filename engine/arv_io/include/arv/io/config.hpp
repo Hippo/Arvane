@@ -72,7 +72,7 @@ struct ChunkDistanceConfig {
 struct JobSystemConfig {
   // 0 means automatic through the engine-owned scheduling policy.
   u32 worker_threads{};
-  u32 reserved_threads{4};
+  u32 reserved_threads{2};
   u32 min_worker_threads{1};
   u32 max_worker_threads{64};
 };
@@ -115,6 +115,9 @@ struct PhysicsConfig {
 
 struct RenderConfig {
   u32 max_chunk_mesh_uploads_per_frame{8};
+  bool frame_pacing_enabled{};
+  u32 frame_pacing_target_fps{60};
+  u32 frame_pacing_spin_us{500};
 };
 
 struct ChunkPipelineConfig {

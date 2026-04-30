@@ -10,3 +10,6 @@ add_library(arv_io STATIC
 target_include_directories(arv_io PUBLIC include)
 target_link_libraries(arv_io PUBLIC arv_core arv_platform)
 target_link_libraries(arv_io PRIVATE yaml-cpp nlohmann_json::nlohmann_json)
+target_compile_definitions(arv_io PRIVATE
+  "ARVANE_PROJECT_ROOT=\"${PROJECT_SOURCE_DIR}\""
+)

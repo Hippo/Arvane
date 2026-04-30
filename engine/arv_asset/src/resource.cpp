@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <fstream>
 #include <utility>
+#include "arv/core/types.hpp"
+#include "arv/core/log.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -134,6 +136,7 @@ TextAssetResult ResourceManager::load_text(const AssetID& asset_id, AssetKind ki
 
   const std::filesystem::path path = resolve_asset_path(asset_id, kind);
   std::ifstream file(path);
+  arv::core::info("assets", "loading text asset '{}' from '{}'", asset_id.value, path);
   if (!file) {
     return TextAssetResult::failure({asset_id.value, path, "read text asset", "file could not be opened"});
   }

@@ -841,6 +841,25 @@ These invariants must hold:
 * render code does not read live simulation state directly
 * simulation code does not perform OpenGL calls
 * locks are not used as a substitute for ownership design
+* fixed worker pools are created up front; runtime work must not spawn ad hoc threads
+* automatic worker counts reserve engine role threads and default toward `hardware_concurrency - 2`
+* one-producer/one-consumer handoffs should use `arv::sched::SpscQueue`
+* completion queues should drain into reusable caller-owned vectors when possible
+* scheduler instrumentation records queue latency per worker thread
+
+---
+
+## Profiling and Timing
+
+The scheduler wraps submitted jobs with Tracy zones named from the job label. Worker threads are named `worker` in Tracy, and each worker keeps thread-local histograms for:
+
+* meshing task duration
+* lighting task duration
+* job queue latency
+
+Histograms are fixed-size ring buffers and expose p50/p95/p99 snapshots without allocating during recording.
+
+The debug menu also shows aggregate atomic timing snapshots for those same metrics. Workers only publish samples at task boundaries, and the UI never locks or reaches into another thread's local histogram while rendering the profiling tab. When `ARVANE_ENABLE_PROFILING=OFF`, scheduler queue-latency clock reads and histogram writes are compiled out.
 
 ---
 

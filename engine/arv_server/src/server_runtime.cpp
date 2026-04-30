@@ -1,12 +1,14 @@
 #include "arv/server/server_runtime.hpp"
 
+#include "arv/core/profiling.hpp"
+
 #include "arv/physics/collision.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/world/world_queries.hpp"
 
 #include <algorithm>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -324,9 +326,8 @@ void step_player_without_collision(
 
 } // namespace
 
-ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport)
-    : transport_(std::move(transport)),
-      world_jobs_(std::make_unique<sched::Scheduler>()) {
+ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)),
+                                                                           world_jobs_(std::make_unique<sched::Scheduler>()) {
 }
 
 net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
@@ -496,10 +497,10 @@ std::optional<player::ItemStack> ServerRuntime::drop_player_inventory_cursor(Pla
   }
 
   std::optional<player::ItemStack> dropped = player_state->inventory_cursor_stack;
-  dropped_item_stacks_.push_back({
+  dropped_item_stacks_.emplace_back(
       player_state->world_id,
       player_state->position,
-      dropped.value()});
+      dropped.value());
   player_state->inventory_cursor_stack.reset();
   return dropped;
 }
@@ -515,10 +516,10 @@ std::optional<player::ItemStack> ServerRuntime::drop_one_from_player_inventory_c
   player::ItemStack dropped{
       player_state->inventory_cursor_stack->item,
       1U};
-  dropped_item_stacks_.push_back({
+  dropped_item_stacks_.emplace_back(
       player_state->world_id,
       player_state->position,
-      dropped});
+      dropped);
   player_state->inventory_cursor_stack->count =
       static_cast<u16>(player_state->inventory_cursor_stack->count - 1U);
   if (player_state->inventory_cursor_stack->count == 0U) {
@@ -703,7 +704,7 @@ void ServerRuntime::update_world_simulation_activity() {
       continue;
     }
 
-    centers.push_back(player_chunk_coord(*player_state));
+    centers.emplace_back(player_chunk_coord(*player_state));
   }
 
   default_world_.update_simulation_radii(centers, simulation_radius_);
@@ -740,6 +741,7 @@ void ServerRuntime::tick_chunk_streaming() {
 }
 
 void ServerRuntime::drain_generation_jobs(bool drain_all) {
+  ARV_PROFILE_ZONE("Chunk generation");
   u32 drained = 0;
   for (usize index = 0;
        index < pending_generation_jobs_.size() &&
@@ -770,6 +772,7 @@ void ServerRuntime::drain_generation_jobs(bool drain_all) {
 }
 
 void ServerRuntime::schedule_generation_jobs() {
+  ARV_PROFILE_ZONE("Chunk generation");
   if (!chunk_generation_.has_value() || !chunk_generation_->enabled) {
     return;
   }
@@ -809,14 +812,15 @@ void ServerRuntime::schedule_generation_jobs() {
     request.coord = coord;
     request.config = chunk_generation_->config;
     request.palette = chunk_generation_->palette;
-    auto job = world_jobs_->submit("server_world_generation", [request] {
+    auto job = world_jobs_->submit("server_world_generation", [request = std::move(request)] {
       return world::generate_chunk(request);
     });
-    pending_generation_jobs_.push_back({coord, std::move(job)});
+    pending_generation_jobs_.emplace_back(coord, std::move(job));
   }
 }
 
 void ServerRuntime::drain_lighting_jobs(bool drain_all) {
+  ARV_PROFILE_ZONE("Lighting propagation");
   u32 drained = 0;
   for (usize index = 0;
        index < pending_lighting_jobs_.size() &&
@@ -882,23 +886,25 @@ void ServerRuntime::schedule_fluid_jobs() {
             *registry,
             definition);
       });
-  pending_fluid_jobs_.push_back({std::move(job)});
+  pending_fluid_jobs_.emplace_back(std::move(job));
 }
 
 void ServerRuntime::schedule_lighting_jobs() {
+  ARV_PROFILE_ZONE("Lighting propagation");
   if (block_registry_ == nullptr || !default_world_.has_lighting_work()) {
     return;
   }
 
-  const world::LightingSnapshot snapshot = default_world_.make_lighting_snapshot();
+  world::LightingSnapshot snapshot = default_world_.make_lighting_snapshot();
   if (snapshot.chunks.empty()) {
     return;
   }
+  const u64 source_revision = snapshot.source_revision;
 
   const bool revision_in_flight = std::any_of(
       pending_lighting_jobs_.begin(),
       pending_lighting_jobs_.end(),
-      [revision = snapshot.source_revision](const PendingLightingJob& pending) {
+      [revision = source_revision](const PendingLightingJob& pending) {
         return pending.source_revision == revision;
       });
   if (revision_in_flight || pending_lighting_jobs_.size() >= max_pending_lighting_jobs_) {
@@ -906,10 +912,10 @@ void ServerRuntime::schedule_lighting_jobs() {
   }
 
   const voxel::BlockRegistry* registry = block_registry_;
-  auto job = world_jobs_->submit("server_world_lighting", [snapshot, registry] {
+  auto job = world_jobs_->submit("server_world_lighting", [snapshot = std::move(snapshot), registry] {
     return world::WorldRuntime::build_lighting_result(snapshot, *registry);
   });
-  pending_lighting_jobs_.push_back({snapshot.source_revision, std::move(job)});
+  pending_lighting_jobs_.emplace_back(source_revision, std::move(job));
 }
 
 void ServerRuntime::refresh_player_permissions(player::PlayerState& player_state) {

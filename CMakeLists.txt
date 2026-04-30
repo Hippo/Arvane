@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ARVANE_BUILD_TESTS "Build Arvane tests" ON)
 option(ARVANE_BUILD_BENCHMARKS "Build Arvane benchmarks" ON)
+option(ARVANE_ENABLE_PROFILING "Enable Arvane profiling instrumentation and timing counters" ON)
+option(ARVANE_ENABLE_TRACY "Enable Tracy profiling zones when profiling is enabled" ON)
 
 if(NOT ARVANE_BUILD_TESTS)
   set(BUILD_TESTING OFF CACHE BOOL "Build tests" FORCE)
@@ -111,6 +113,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(spdlog)
 
+if(ARVANE_ENABLE_PROFILING AND ARVANE_ENABLE_TRACY)
+  FetchContent_Declare(
+    tracy
+    GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+    GIT_TAG v0.13.1
+    UPDATE_DISCONNECTED TRUE
+  )
+  set(TRACY_ENABLE ON CACHE BOOL "Enable Tracy profiling" FORCE)
+  set(TRACY_DELAYED_INIT ON CACHE BOOL "Delay Tracy startup until first profiling call" FORCE)
+  FetchContent_MakeAvailable(tracy)
+endif()
+
 if(ARVANE_BUILD_TESTS)
   include(CTest)
   set(BUILD_TESTING ON CACHE BOOL "Build tests" FORCE)
@@ -140,7 +154,6 @@ if(ARVANE_BUILD_BENCHMARKS)
   set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(benchmark)
 endif()
-
 
 add_subdirectory(engine)
 if(ARVANE_BUILD_BENCHMARKS)

@@ -1,4 +1,5 @@
 #include "arv/core/id.hpp"
+#include "arv/core/perf_stats.hpp"
 #include "arv/core/types.hpp"
 
 #include <gtest/gtest.h>
@@ -124,4 +125,34 @@ TEST(CoreTypesTests, NullFunctionPointerRefIsFalse) {
   const arv::FunctionRef<void()> callback{static_cast<Callback>(nullptr)};
 
   EXPECT_FALSE(callback);
+}
+
+TEST(CoreTypesTests, GlobalTimingStatsExposeRecordedPercentiles) {
+  arv::core::reset_global_timing_stats();
+  if constexpr (!arv::core::perf_stats_enabled()) {
+    const arv::core::TimingMetricSnapshot snapshot =
+        arv::core::global_timing_snapshot(arv::core::PerfMetric::MeshingTask);
+    EXPECT_EQ(snapshot.percentiles.sample_count, 0U);
+    return;
+  }
+
+  arv::core::record_thread_timing(arv::core::PerfMetric::MeshingTask, 1.0);
+  arv::core::record_thread_timing(arv::core::PerfMetric::MeshingTask, 2.0);
+  arv::core::record_thread_timing(arv::core::PerfMetric::MeshingTask, 3.0);
+
+  const arv::core::TimingMetricSnapshot snapshot =
+      arv::core::global_timing_snapshot(arv::core::PerfMetric::MeshingTask);
+
+  EXPECT_STREQ(arv::core::perf_metric_name(arv::core::PerfMetric::MeshingTask), "Meshing tasks");
+  EXPECT_EQ(snapshot.percentiles.sample_count, 3U);
+  EXPECT_DOUBLE_EQ(snapshot.latest_ms, 3.0);
+  EXPECT_DOUBLE_EQ(snapshot.max_ms, 3.0);
+  EXPECT_DOUBLE_EQ(snapshot.percentiles.p50_ms, 2.0);
+  EXPECT_DOUBLE_EQ(snapshot.percentiles.p95_ms, 3.0);
+  EXPECT_DOUBLE_EQ(snapshot.percentiles.p99_ms, 3.0);
+
+  arv::core::reset_global_timing_stats();
+  const arv::core::TimingMetricSnapshot cleared =
+      arv::core::global_timing_snapshot(arv::core::PerfMetric::MeshingTask);
+  EXPECT_EQ(cleared.percentiles.sample_count, 0U);
 }

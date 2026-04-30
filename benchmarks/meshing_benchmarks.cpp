@@ -4,6 +4,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include <array>
+
 namespace {
 
 void consume_mesh(const arv::render::ChunkMeshData& mesh) {
@@ -127,6 +129,60 @@ void BM_RemeshAfterSingleBlockEdit(benchmark::State& state) {
   }
 }
 
+void BM_StableCameraPathMeshing(benchmark::State& state) {
+  const arv::voxel::BlockRegistry registry = arv::bench_support::make_registry();
+  const arv::voxel::BlockVariantID stone =
+      arv::bench_support::find_variant(registry, "arvane:stone");
+  const arv::voxel::BlockVariantID dirt =
+      arv::bench_support::find_variant(registry, "arvane:dirt");
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  for (arv::i32 z = -4; z <= 4; ++z) {
+    for (arv::i32 x = -4; x <= 4; ++x) {
+      arv::voxel::ChunkSection& chunk = world.ensure_chunk({{x, 0, z}});
+      arv::bench_support::fill_noisy_terrain(chunk, stone, dirt);
+    }
+  }
+
+  constexpr std::array<arv::ChunkCoord, 8> CameraPath{{
+      {{-2, 0, -2}},
+      {{-1, 0, -2}},
+      {{0, 0, -1}},
+      {{1, 0, 0}},
+      {{2, 0, 1}},
+      {{1, 0, 2}},
+      {{0, 0, 1}},
+      {{-1, 0, 0}},
+  }};
+
+  arv::usize path_index = 0;
+  arv::u64 total_meshes = 0;
+  arv::u64 total_indices = 0;
+  for (auto _ : state) {
+    const arv::ChunkCoord center = CameraPath[path_index++ % CameraPath.size()];
+    for (arv::i32 z = center.value.z - 1; z <= center.value.z + 1; ++z) {
+      for (arv::i32 x = center.value.x - 1; x <= center.value.x + 1; ++x) {
+        auto snapshot = world.make_meshing_snapshot(
+            {{x, 0, z}},
+            arv::world::MissingNeighborPolicy::TreatMissingAsAir);
+        if (!snapshot.has_value()) {
+          continue;
+        }
+        const arv::render::ChunkMeshData mesh =
+            arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot.value(), registry);
+        total_indices += mesh.opaque.indices.size() + mesh.transparent.indices.size();
+        ++total_meshes;
+        consume_mesh(mesh);
+      }
+    }
+  }
+  state.counters["meshes"] = benchmark::Counter(
+      static_cast<double>(total_meshes),
+      benchmark::Counter::kIsRate);
+  state.counters["indices"] = benchmark::Counter(
+      static_cast<double>(total_indices),
+      benchmark::Counter::kIsRate);
+}
+
 } // namespace
 
 BENCHMARK(BM_EmptySectionMesh);
@@ -135,3 +191,4 @@ BENCHMARK(BM_NoisyTerrainSectionMesh);
 BENCHMARK(BM_AOEnabledMesh);
 BENCHMARK(BM_TransparentMeshPath);
 BENCHMARK(BM_RemeshAfterSingleBlockEdit);
+BENCHMARK(BM_StableCameraPathMeshing);

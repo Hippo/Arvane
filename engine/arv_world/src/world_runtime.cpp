@@ -1,5 +1,7 @@
 #include "arv/world/world_runtime.hpp"
 
+#include "arv/core/profiling.hpp"
+
 #include <algorithm>
 #include <array>
 #include <utility>
@@ -273,7 +275,7 @@ std::vector<ChunkCoord> WorldRuntime::loaded_chunk_coords() const {
   coords.reserve(chunks_.size());
   for (const auto& [coord, chunk] : chunks_) {
     (void)chunk;
-    coords.push_back(coord);
+    coords.emplace_back(coord);
   }
   return coords;
 }
@@ -463,6 +465,7 @@ bool WorldRuntime::place_fluid_source(BlockPos pos, const voxel::FluidDefinition
 std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
     ChunkCoord coord,
     MissingNeighborPolicy missing_neighbor_policy) const {
+  ARV_PROFILE_ZONE("Snapshot creation");
   const voxel::ChunkSection* chunk = find_chunk(coord);
   if (chunk == nullptr) {
     return std::nullopt;
@@ -471,23 +474,26 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
   voxel::ChunkSnapshot snapshot = voxel::make_chunk_snapshot_without_neighbors(*chunk);
   // TODO(arvane): Narrow meshing neighbor inputs to compact immutable boundary/edge views
   // if retaining whole neighboring chunk payload handles becomes a measurable cost.
-  for (i32 oz = -1; oz <= 1; ++oz) {
-    for (i32 oy = -1; oy <= 1; ++oy) {
-      for (i32 ox = -1; ox <= 1; ++ox) {
-        if (ox == 0 && oy == 0 && oz == 0) {
-          continue;
-        }
-        const ChunkCoord neighbor_coord{{
-            coord.value.x + ox,
-            coord.value.y + oy,
-            coord.value.z + oz,
-        }};
-        const voxel::ChunkSection* neighbor = find_chunk(neighbor_coord);
-        if (neighbor == nullptr && missing_neighbor_policy == MissingNeighborPolicy::RequireLoaded) {
-          return std::nullopt;
-        }
-        if (neighbor != nullptr) {
-          snapshot.storages[voxel::snapshot_storage_index(ox, oy, oz)] = neighbor->storage_view();
+  {
+    ARV_PROFILE_ZONE("Chunk lookup / access");
+    for (i32 oz = -1; oz <= 1; ++oz) {
+      for (i32 oy = -1; oy <= 1; ++oy) {
+        for (i32 ox = -1; ox <= 1; ++ox) {
+          if (ox == 0 && oy == 0 && oz == 0) {
+            continue;
+          }
+          const ChunkCoord neighbor_coord{{
+              coord.value.x + ox,
+              coord.value.y + oy,
+              coord.value.z + oz,
+          }};
+          const voxel::ChunkSection* neighbor = find_chunk(neighbor_coord);
+          if (neighbor == nullptr && missing_neighbor_policy == MissingNeighborPolicy::RequireLoaded) {
+            return std::nullopt;
+          }
+          if (neighbor != nullptr) {
+            snapshot.storages[voxel::snapshot_storage_index(ox, oy, oz)] = neighbor->storage_view();
+          }
         }
       }
     }
@@ -585,7 +591,7 @@ std::vector<PlayerID> WorldRuntime::player_ids() const {
   ids.reserve(players_.size());
   for (const auto& [player_id, player] : players_) {
     (void)player;
-    ids.push_back(player_id);
+    ids.emplace_back(player_id);
   }
   return ids;
 }
@@ -606,7 +612,7 @@ void WorldRuntime::schedule_block_update(
     BlockPos pos,
     TickIndex delay_ticks,
     BlockUpdateReason reason) {
-  scheduled_block_updates_.push_back({pos, tick_index_ + delay_ticks, reason});
+  scheduled_block_updates_.emplace_back(pos, tick_index_ + delay_ticks, reason);
 }
 
 void WorldRuntime::enqueue_fluid_update(
@@ -643,6 +649,7 @@ bool WorldRuntime::has_lighting_work() const noexcept {
 }
 
 LightingSnapshot WorldRuntime::make_lighting_snapshot() const {
+  ARV_PROFILE_ZONE("Snapshot creation");
   return WorldLighting::make_snapshot(*this);
 }
 
@@ -682,11 +689,11 @@ std::optional<FluidSimulationRequest> WorldRuntime::make_fluid_simulation_reques
 
   request.chunks.reserve(chunks_.size());
   for (const auto& [coord, chunk] : chunks_) {
-    request.chunks.push_back({
+    request.chunks.emplace_back(
         coord,
         chunk.lifecycle_state() == voxel::ChunkLifecycleState::Active,
         chunk.content_version(),
-        chunk.storage_view()});
+        chunk.storage_view());
   }
 
   return request;
@@ -732,6 +739,7 @@ u32 WorldRuntime::apply_fluid_simulation_result(
 WorldTickStats WorldRuntime::tick(
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& fluid_definition) {
+  ARV_PROFILE_ZONE("Simulation tick");
   ++tick_index_;
 
   WorldTickStats stats;
@@ -754,7 +762,7 @@ std::vector<ChunkCoord> WorldRuntime::dirty_chunks(voxel::ChunkDirtyFlags flag) 
   std::vector<ChunkCoord> coords;
   for (const auto& [coord, chunk] : chunks_) {
     if (chunk.is_dirty(flag)) {
-      coords.push_back(coord);
+      coords.emplace_back(coord);
     }
   }
   return coords;
@@ -771,7 +779,7 @@ std::vector<ChunkCoord> WorldRuntime::consume_dirty_mesh_chunks(
 
     const voxel::ChunkSection* chunk = find_chunk(coord);
     if (chunk != nullptr && chunk->is_dirty(flag)) {
-      coords.push_back(coord);
+      coords.emplace_back(coord);
     }
   }
   return coords;
@@ -801,7 +809,7 @@ void WorldRuntime::mark_mesh_content_dirty() noexcept {
 
 void WorldRuntime::enqueue_dirty_mesh_chunk(ChunkCoord coord) {
   if (dirty_mesh_chunk_set_.insert(coord).second) {
-    dirty_mesh_chunks_.push_back(coord);
+    dirty_mesh_chunks_.emplace_back(coord);
   }
 }
 
@@ -809,7 +817,7 @@ void WorldRuntime::enqueue_fluid_update_unique(FluidUpdate update) {
   auto [pending, inserted] =
       pending_fluid_updates_by_position_.try_emplace(update.pos, update);
   if (inserted) {
-    fluid_updates_.push_back(update);
+    fluid_updates_.emplace_back(update);
     return;
   }
 
@@ -818,7 +826,7 @@ void WorldRuntime::enqueue_fluid_update_unique(FluidUpdate update) {
   }
 
   pending->second = update;
-  fluid_updates_.push_back(update);
+  fluid_updates_.emplace_back(update);
 }
 
 std::vector<FluidUpdate> WorldRuntime::drain_due_fluid_updates(u32 budget) {
@@ -840,12 +848,12 @@ std::vector<FluidUpdate> WorldRuntime::drain_due_fluid_updates(u32 budget) {
     }
 
     if (update.execute_at > tick_index_ || due.size() >= budget) {
-      remaining.push_back(update);
+      remaining.emplace_back(update);
       continue;
     }
 
     pending_fluid_updates_by_position_.erase(pending);
-    due.push_back(update);
+    due.emplace_back(update);
   }
 
   fluid_updates_ = std::move(remaining);
@@ -858,7 +866,7 @@ void WorldRuntime::recompute_lighting_work_pending() noexcept {
 
 void WorldRuntime::enqueue_neighbor_block_updates(BlockPos pos) {
   for (const Vec3i offset : NeighborOffsets) {
-    block_updates_.push_back({offset_block(pos, offset), BlockUpdateReason::NeighborChanged});
+    block_updates_.emplace_back(offset_block(pos, offset), BlockUpdateReason::NeighborChanged);
   }
 }
 
@@ -965,10 +973,10 @@ u32 WorldRuntime::process_due_scheduled_ticks() {
   u32 processed = 0;
   for (const ScheduledBlockUpdate& update : scheduled_block_updates_) {
     if (update.execute_at <= tick_index_) {
-      block_updates_.push_back({update.pos, update.reason});
+      block_updates_.emplace_back(update.pos, update.reason);
       ++processed;
     } else {
-      remaining.push_back(update);
+      remaining.emplace_back(update);
     }
   }
 

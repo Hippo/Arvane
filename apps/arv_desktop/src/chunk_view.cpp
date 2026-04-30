@@ -3,6 +3,8 @@
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/render/opengl_renderer.hpp"
 
+#include "arv/core/profiling.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -121,7 +123,7 @@ void enqueue_mesh_candidate(ChunkViewState& view, ChunkCoord coord) {
     return;
   }
   if (view.mesh_candidate_set.insert(coord).second) {
-    view.mesh_candidates.push_back(coord);
+    view.mesh_candidates.emplace_back(coord);
   }
 }
 
@@ -189,6 +191,7 @@ void drain_mesh_jobs(
     world::WorldRuntime& world,
     render::OpenGLRenderer& renderer,
     ChunkViewState& view) {
+  ARV_PROFILE_ZONE("Chunk meshing drain");
   for (usize index = 0; index < view.pending_meshes.size();) {
     auto& pending = view.pending_meshes[index];
     if (!pending.job.is_complete()) {
@@ -272,6 +275,7 @@ void schedule_mesh_jobs(
     const io::ChunkPipelineConfig& pipeline,
     const voxel::BlockRegistry& block_registry,
     const voxel::BlockRenderData& block_render_data) {
+  ARV_PROFILE_ZONE("Chunk meshing schedule");
   sort_mesh_candidates(world, view);
 
   u32 mesh_jobs_scheduled = 0;
@@ -306,7 +310,7 @@ void schedule_mesh_jobs(
       break;
     }
 
-    const std::optional<voxel::ChunkSnapshot> snapshot =
+    std::optional<voxel::ChunkSnapshot> snapshot =
         world.make_meshing_snapshot(
             coord,
             world::MissingNeighborPolicy::TreatMissingAsAir);
@@ -320,22 +324,35 @@ void schedule_mesh_jobs(
     const u64 source_light_version = snapshot->source_light_version;
     auto job = scheduler.submit(
         "view_chunk_meshing",
-        [world_id, snapshot = snapshot.value(), &block_registry, &block_render_data] {
-      const auto start = std::chrono::steady_clock::now();
-      auto mesh = render::build_chunk_mesh(
-          world_id,
-          snapshot,
-          block_registry,
-          &block_render_data);
-      const auto end = std::chrono::steady_clock::now();
-      return ChunkViewState::TimedChunkMeshResult{
-          std::move(mesh),
-          std::chrono::duration<double, std::milli>(end - start).count()};
-    });
+        [world_id, snapshot = std::move(*snapshot), &block_registry, &block_render_data] {
+          if constexpr (core::profiling_enabled()) {
+            const auto start = std::chrono::steady_clock::now();
+            auto mesh = render::build_chunk_mesh(
+                world_id,
+                snapshot,
+                block_registry,
+                &block_render_data);
+            const auto end = std::chrono::steady_clock::now();
+            return ChunkViewState::TimedChunkMeshResult{
+                std::move(mesh),
+                std::chrono::duration<double, std::milli>(end - start).count()};
+          } else {
+            auto mesh = render::build_chunk_mesh(
+                world_id,
+                snapshot,
+                block_registry,
+                &block_render_data);
+            return ChunkViewState::TimedChunkMeshResult{std::move(mesh), 0.0};
+          }
+        });
     chunk->mark_mesh_queued();
     view.mesh_in_flight.insert(coord);
-    view.pending_meshes.push_back(
-        {coord, source_version, source_content_version, source_light_version, std::move(job)});
+    view.pending_meshes.emplace_back(
+        coord,
+        source_version,
+        source_content_version,
+        source_light_version,
+        std::move(job));
     ++mesh_jobs_scheduled;
   }
 }
@@ -394,10 +411,9 @@ void log_chunk_view_profile(
 } // namespace
 
 ChunkCoord world_position_chunk_coord(Vec3f position) {
-  return block_to_chunk({{
-      static_cast<i32>(std::floor(position.x)),
-      static_cast<i32>(std::floor(position.y)),
-      static_cast<i32>(std::floor(position.z))}});
+  return block_to_chunk({{static_cast<i32>(std::floor(position.x)),
+                          static_cast<i32>(std::floor(position.y)),
+                          static_cast<i32>(std::floor(position.z))}});
 }
 
 ChunkCoord camera_chunk_coord(const client::CameraShell& camera) {
@@ -446,6 +462,7 @@ bool update_chunk_view(
     i32 max_chunk_y,
     const voxel::BlockRegistry& block_registry,
     const voxel::BlockRenderData& block_render_data) {
+  ARV_PROFILE_ZONE("Chunk view update");
   const auto refresh_start = std::chrono::steady_clock::now();
   ++view.frames;
   view.mesh_completed_last_frame = 0;
@@ -487,7 +504,7 @@ const std::vector<render::ChunkDrawItem>& chunk_draw_items(ChunkViewState& view)
   view.cached_draw_items.reserve(view.draw_items.size());
   for (const auto& [coord, item] : view.draw_items) {
     (void)coord;
-    view.cached_draw_items.push_back(item);
+    view.cached_draw_items.emplace_back(item);
   }
   std::sort(
       view.cached_draw_items.begin(),

@@ -29,7 +29,7 @@ chunks:
   unload_margin: 1
 jobs:
   worker_threads: 0
-  reserved_threads: 4
+  reserved_threads: 2
   min_worker_threads: 1
   max_worker_threads: 64
 physics:

@@ -324,18 +324,37 @@ struct ChunkSnapshot {
   }
 };
 
+struct ChunkSnapshotStoragePointers {
+  std::array<const ChunkStorage*, ChunkSnapshotNeighborhoodVolume> storages{};
+};
+
 [[nodiscard]] ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk);
+
+[[nodiscard]] ChunkSnapshotStoragePointers make_chunk_snapshot_storage_pointers(
+    const ChunkSnapshot& snapshot) noexcept;
 
 [[nodiscard]] BlockVariantID snapshot_block(
     const ChunkSnapshot& snapshot,
+    SectionLocalPos local) noexcept;
+
+[[nodiscard]] BlockVariantID snapshot_block(
+    const ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local) noexcept;
 
 [[nodiscard]] LightWord snapshot_light(
     const ChunkSnapshot& snapshot,
     SectionLocalPos local) noexcept;
 
+[[nodiscard]] LightWord snapshot_light(
+    const ChunkSnapshotStoragePointers& snapshot,
+    SectionLocalPos local) noexcept;
+
 [[nodiscard]] FluidCell snapshot_fluid(
     const ChunkSnapshot& snapshot,
+    SectionLocalPos local) noexcept;
+
+[[nodiscard]] FluidCell snapshot_fluid(
+    const ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local) noexcept;
 
 } // namespace arv::voxel

@@ -212,6 +212,19 @@ Arvane supports the following build configurations:
 * optimized build with debug symbols
 * suitable for profiling and performance debugging
 
+### Profiling Options
+
+`ARVANE_ENABLE_PROFILING` controls all built-in profiling instrumentation, including frame sampling, timing histograms, queue-latency recording, and Tracy zone macros. Set it to `OFF` for FPS comparisons where profiling overhead must be removed from the hot path.
+
+`ARVANE_ENABLE_TRACY` controls Tracy integration only when `ARVANE_ENABLE_PROFILING` is also enabled. A profiling build can keep internal timing counters without linking Tracy by setting `ARVANE_ENABLE_PROFILING=ON` and `ARVANE_ENABLE_TRACY=OFF`.
+
+Example comparison builds:
+
+```sh
+cmake -S . -B build-profiled -DARVANE_ENABLE_PROFILING=ON -DARVANE_ENABLE_TRACY=ON
+cmake -S . -B build-noprofile -DARVANE_ENABLE_PROFILING=OFF
+```
+
 ---
 
 ## Assertions and Logging
@@ -346,7 +359,11 @@ If no explicit path is provided, the engine should assume:
 arvane_home/
 ```
 
-relative to the current working directory or resolved project root.
+relative to the resolved project root. Development builds stamp the source
+project root into the runtime path resolver and prefer that root when it
+contains the canonical `arvane_home/config/blocks.json` and shader assets. This
+keeps deleted or stale build directories from becoming the asset root when an
+executable is launched from an unusual working directory.
 
 ## Default Policy
 

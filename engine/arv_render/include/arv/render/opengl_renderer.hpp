@@ -44,6 +44,22 @@ public:
     return mesh_upload_discards_last_frame_;
   }
 
+  [[nodiscard]] u32 draw_calls_last_frame() const noexcept {
+    return draw_calls_last_frame_;
+  }
+
+  [[nodiscard]] u32 chunk_draw_calls_last_frame() const noexcept {
+    return chunk_draw_calls_last_frame_;
+  }
+
+  [[nodiscard]] u32 ui_draw_calls_last_frame() const noexcept {
+    return ui_draw_calls_last_frame_;
+  }
+
+  [[nodiscard]] bool gpu_profile_context_initialized() const noexcept {
+    return gpu_profile_context_initialized_;
+  }
+
   [[nodiscard]] std::vector<ChunkMeshUploadReceipt> drain_chunk_mesh_upload_receipts();
 
   void render() override;
@@ -55,6 +71,8 @@ private:
     GLuint vao{};
     GLuint vertex_buffer{};
     GLuint index_buffer{};
+    GLsizeiptr vertex_capacity_bytes{};
+    GLsizeiptr index_capacity_bytes{};
     GLsizei index_count{};
   };
 
@@ -106,6 +124,9 @@ private:
   u32 max_chunk_mesh_uploads_per_frame_{8};
   u32 mesh_uploads_last_frame_{};
   u32 mesh_upload_discards_last_frame_{};
+  u32 draw_calls_last_frame_{};
+  u32 chunk_draw_calls_last_frame_{};
+  u32 ui_draw_calls_last_frame_{};
   double mesh_upload_time_ms_last_frame_{};
   GLuint chunk_program_{};
   GLint chunk_origin_uniform_{-1};
@@ -139,6 +160,9 @@ private:
   GLuint ui_vao_{};
   GLuint ui_vertex_buffer_{};
   GLuint ui_index_buffer_{};
+  GLsizeiptr ui_vertex_capacity_bytes_{};
+  GLsizeiptr ui_index_capacity_bytes_{};
+  bool gpu_profile_context_initialized_{};
   std::vector<UIVertex> ui_vertices_;
   std::vector<u32> ui_indices_;
 };

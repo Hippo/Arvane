@@ -75,27 +75,27 @@ void validate_document_element(
     UiDocumentValidation& validation) {
   ++count;
   if (count > limits.max_elements) {
-    validation.errors.push_back("UI document exceeds max element count");
+    validation.errors.emplace_back("UI document exceeds max element count");
     return;
   }
   if (depth > limits.max_depth) {
-    validation.errors.push_back("UI document exceeds max tree depth");
+    validation.errors.emplace_back("UI document exceeds max tree depth");
   }
   if (!known_document_type(element.type)) {
-    validation.errors.push_back("unknown UI element type: " + element.type);
+    validation.errors.emplace_back("unknown UI element type: " + element.type);
   }
   if (!element.id.empty() && !ids.insert(element.id).second) {
-    validation.errors.push_back("duplicate UI element id: " + element.id);
+    validation.errors.emplace_back("duplicate UI element id: " + element.id);
   }
   text_total += static_cast<u32>(element.text.size());
   if (element.text.size() > limits.max_text_length || text_total > limits.max_text_length) {
-    validation.errors.push_back("UI document exceeds text length limit");
+    validation.errors.emplace_back("UI document exceeds text length limit");
   }
   if (element.children.size() > limits.max_children_per_element) {
-    validation.errors.push_back("UI element exceeds max child count");
+    validation.errors.emplace_back("UI element exceeds max child count");
   }
   if (!element.children.empty() && !may_have_children(element.type)) {
-    validation.errors.push_back("UI element type cannot have children: " + element.type);
+    validation.errors.emplace_back("UI element type cannot have children: " + element.type);
   }
   for (const UiDocumentElement& child : element.children) {
     validate_document_element(child, limits, depth + 1U, count, text_total, ids, validation);
@@ -106,7 +106,10 @@ void append_rect(render::FramePacket& frame, UiRect rect, Vec4f color) {
   if (rect.width <= 0.0F || rect.height <= 0.0F || color.w <= 0.0F) {
     return;
   }
-  frame.ui_rects.push_back({{rect.x, rect.y}, {rect.x + rect.width, rect.y + rect.height}, color});
+  frame.ui_rects.emplace_back(
+      Vec2f{rect.x, rect.y},
+      Vec2f{rect.x + rect.width, rect.y + rect.height},
+      color);
 }
 
 void append_image(render::FramePacket& frame, UiRect rect, const UiImageData& image) {
@@ -131,13 +134,12 @@ void append_image(render::FramePacket& frame, UiRect rect, const UiImageData& im
   quad.color = image.tint;
   quad.source = image.source;
   quad.page = image.page;
-  frame.ui_textured_quads.push_back(quad);
+  frame.ui_textured_quads.emplace_back(std::move(quad));
 }
 
 } // namespace
 
-FontUiTextMeasurer::FontUiTextMeasurer(const asset::FontSystem& fonts, asset::FontStack stack)
-    : fonts_(&fonts), stack_(std::move(stack)) {
+FontUiTextMeasurer::FontUiTextMeasurer(const asset::FontSystem& fonts, asset::FontStack stack) : fonts_(&fonts), stack_(std::move(stack)) {
 }
 
 Vec2f FontUiTextMeasurer::measure(std::string_view text) const {
@@ -178,7 +180,7 @@ void UiTree::clear() {
   root.layout.width_mode = UiSizeMode::Fill;
   root.layout.height_mode = UiSizeMode::Fill;
   root.hit_test = false;
-  elements_.push_back(std::move(root));
+  elements_.emplace_back(std::move(root));
   stable_ids_["root"] = root_id_;
 }
 
@@ -213,11 +215,11 @@ UiNodeID UiTree::add_child(UiNodeID parent, UiElement element_to_add) {
   }
   element_to_add.node_id = allocate_node();
   const UiNodeID id = element_to_add.node_id;
-  parent_element->children.push_back(id);
+  parent_element->children.emplace_back(id);
   if (!element_to_add.stable_id.empty()) {
     stable_ids_[element_to_add.stable_id] = id;
   }
-  elements_.push_back(std::move(element_to_add));
+  elements_.emplace_back(std::move(element_to_add));
   return id;
 }
 
@@ -480,16 +482,16 @@ std::optional<UiNodeID> UiTree::hit_test_recursive(UiNodeID id, Vec2f point) con
 UiDocumentValidation validate_ui_document(const UiDocument& document, UiDocumentLimits limits) {
   UiDocumentValidation validation;
   if (document.version != 1) {
-    validation.errors.push_back("unsupported UI document version");
+    validation.errors.emplace_back("unsupported UI document version");
   }
   if (document.screen_id.empty()) {
-    validation.errors.push_back("UI document screen_id is required");
+    validation.errors.emplace_back("UI document screen_id is required");
   }
   if (document.owner.empty()) {
-    validation.errors.push_back("UI document owner is required");
+    validation.errors.emplace_back("UI document owner is required");
   }
   if (document.root.type != "root") {
-    validation.errors.push_back("UI document root element must have type root");
+    validation.errors.emplace_back("UI document root element must have type root");
   }
   u32 count = 0;
   u32 text_total = 0;
@@ -1073,13 +1075,13 @@ void append_ui_draw_commands(
         continue;
       }
       for (const asset::GlyphQuad& quad : layout.value().quads) {
-        frame.ui_glyphs.push_back({
+        frame.ui_glyphs.emplace_back(
             quad.min,
             quad.max,
             quad.uv_min,
             quad.uv_max,
             quad.color,
-            quad.page});
+            quad.page);
       }
     }
   }

@@ -1,11 +1,15 @@
 #pragma once
 
+#include "arv/core/arena.hpp"
 #include "arv/core/id.hpp"
+#include "arv/core/perf_stats.hpp"
+#include "arv/core/profiling.hpp"
 #include "arv/core/types.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <string>
 #include <thread>
@@ -29,7 +33,7 @@ enum class JobKind {
 struct WorkerThreadConfig {
   // 0 means automatic: hardware_concurrency minus reserved_thread_count.
   usize worker_thread_count{};
-  usize reserved_thread_count{4};
+  usize reserved_thread_count{2};
   usize min_worker_thread_count{1};
   usize max_worker_thread_count{64};
 };
@@ -100,12 +104,40 @@ public:
   auto submit(std::string name, Fn&& fn) {
     using Result = std::invoke_result_t<std::decay_t<Fn>>;
     const JobID id{next_id_.fetch_add(1, std::memory_order_relaxed)};
+    std::chrono::steady_clock::time_point submitted_at{};
+    if constexpr (core::perf_stats_enabled()) {
+      submitted_at = std::chrono::steady_clock::now();
+    }
+    std::string job_name = std::move(name);
+    auto wrapped = [submitted_at,
+                    job_name,
+                    fn = std::forward<Fn>(fn)]() mutable -> Result {
+      static thread_local bool named_thread = false;
+      if (!named_thread) {
+        core::set_profile_thread_name("worker");
+        named_thread = true;
+      }
+
+      ARV_PROFILE_ZONE_DYNAMIC(job_name.data(), job_name.size());
+      worker_thread_arena().reset();
+      if constexpr (core::perf_stats_enabled()) {
+        const auto started_at = std::chrono::steady_clock::now();
+        core::record_thread_timing(
+            core::PerfMetric::JobQueueLatency,
+            std::chrono::duration<double, std::milli>(started_at - submitted_at).count());
+      }
+      if constexpr (std::is_void_v<Result>) {
+        std::invoke(fn);
+      } else {
+        return std::invoke(fn);
+      }
+    };
 
     std::future<Result> future;
-    if (name.empty()) {
-      future = executor_.async(std::forward<Fn>(fn));
+    if (job_name.empty()) {
+      future = executor_.async(std::move(wrapped));
     } else {
-      future = executor_.async(tf::TaskParams{std::move(name)}, std::forward<Fn>(fn));
+      future = executor_.async(tf::TaskParams{std::move(job_name)}, std::move(wrapped));
     }
 
     return JobHandle<Result>{id, std::move(future)};

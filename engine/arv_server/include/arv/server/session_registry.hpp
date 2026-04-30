@@ -33,10 +33,12 @@ public:
       std::string profile_name);
   [[nodiscard]] ServerSession* find(SessionID session_id) noexcept;
   [[nodiscard]] const ServerSession* find(SessionID session_id) const noexcept;
+  [[nodiscard]] const ServerSession* first() const noexcept;
   [[nodiscard]] ServerSession* find_by_connection(net::ConnectionID connection_id) noexcept;
   [[nodiscard]] const ServerSession* find_by_connection(net::ConnectionID connection_id) const noexcept;
   bool remove_by_connection(net::ConnectionID connection_id);
   [[nodiscard]] usize size() const noexcept;
+  void for_each_session(FunctionRef<void(const ServerSession&)> callback) const;
   [[nodiscard]] std::vector<SessionID> session_ids() const;
 
 private:

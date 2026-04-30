@@ -1,11 +1,29 @@
 #include "arv/core/log.hpp"
 
+#include <spdlog/async.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <atomic>
 #include <memory>
 
 namespace {
+
+constexpr arv::core::LogLevel MinCompiledLogLevel{
+#ifdef NDEBUG
+    arv::core::LogLevel::Info
+#else
+    arv::core::LogLevel::Trace
+#endif
+};
+
+std::atomic<arv::core::LogLevel> g_log_level{
+#ifdef NDEBUG
+    arv::core::LogLevel::Info
+#else
+    arv::core::LogLevel::Trace
+#endif
+};
 
 [[nodiscard]] spdlog::level::level_enum to_spdlog_level(arv::core::LogLevel level) noexcept {
   switch (level) {
@@ -28,9 +46,18 @@ namespace {
     return existing;
   }
 
-  auto logger = spdlog::stdout_color_mt("arvane");
+  constexpr std::size_t QueueSize = 8192;
+  constexpr std::size_t WorkerThreads = 1;
+  spdlog::init_thread_pool(QueueSize, WorkerThreads);
+  auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_st>();
+  auto logger = std::make_shared<spdlog::async_logger>(
+      "arvane",
+      std::move(sink),
+      spdlog::thread_pool(),
+      spdlog::async_overflow_policy::overrun_oldest);
+  spdlog::register_logger(logger);
   logger->set_pattern("[%^%l%$] %v");
-  logger->set_level(spdlog::level::trace);
+  logger->set_level(to_spdlog_level(g_log_level.load(std::memory_order_relaxed)));
   logger->flush_on(spdlog::level::warn);
   return logger;
 }
@@ -45,10 +72,20 @@ namespace {
 namespace arv::core {
 
 void set_log_level(LogLevel level) {
+  g_log_level.store(level, std::memory_order_relaxed);
   global_logger().set_level(to_spdlog_level(level));
 }
 
+bool should_log(LogLevel level) noexcept {
+  return static_cast<int>(level) >= static_cast<int>(MinCompiledLogLevel) &&
+         static_cast<int>(level) >=
+             static_cast<int>(g_log_level.load(std::memory_order_relaxed));
+}
+
 void log(LogLevel level, std::string_view subsystem, std::string_view message) {
+  if (!should_log(level)) {
+    return;
+  }
   global_logger().log(to_spdlog_level(level), "[{}] {}", subsystem, message);
 }
 

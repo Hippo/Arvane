@@ -36,6 +36,12 @@ public:
     const i32 max_x = static_cast<i32>(std::ceil(world_bounds.max.x));
     const i32 max_y = static_cast<i32>(std::ceil(world_bounds.max.y));
     const i32 max_z = static_cast<i32>(std::ceil(world_bounds.max.z));
+    const i32 span_x = max_x > min_x ? max_x - min_x : 0;
+    const i32 span_y = max_y > min_y ? max_y - min_y : 0;
+    const i32 span_z = max_z > min_z ? max_z - min_z : 0;
+    out_boxes.reserve(
+        out_boxes.size() + static_cast<usize>(span_x) * static_cast<usize>(span_y) *
+                               static_cast<usize>(span_z));
 
     for (i32 z = min_z; z < max_z; ++z) {
       for (i32 y = min_y; y < max_y; ++y) {
@@ -50,26 +56,26 @@ public:
     const voxel::ChunkSection* chunk = world_.find_chunk(block_to_chunk(pos));
     if (chunk == nullptr) {
       if (treat_missing_as_solid_) {
-        out_boxes.push_back(
-            {{static_cast<f32>(pos.value.x),
-              static_cast<f32>(pos.value.y),
-              static_cast<f32>(pos.value.z)},
-             {static_cast<f32>(pos.value.x + 1),
-              static_cast<f32>(pos.value.y + 1),
-              static_cast<f32>(pos.value.z + 1)}});
+        out_boxes.emplace_back(Aabb3f{
+            {static_cast<f32>(pos.value.x),
+             static_cast<f32>(pos.value.y),
+             static_cast<f32>(pos.value.z)},
+            {static_cast<f32>(pos.value.x + 1),
+             static_cast<f32>(pos.value.y + 1),
+             static_cast<f32>(pos.value.z + 1)}});
       }
       return;
     }
 
     const voxel::BlockVariantID variant = chunk->block(block_to_local(pos));
     for (const Aabb3f& box : registry_.collision_boxes(variant)) {
-      out_boxes.push_back(
-          {{box.min.x + static_cast<f32>(pos.value.x),
-            box.min.y + static_cast<f32>(pos.value.y),
-            box.min.z + static_cast<f32>(pos.value.z)},
-           {box.max.x + static_cast<f32>(pos.value.x),
-            box.max.y + static_cast<f32>(pos.value.y),
-            box.max.z + static_cast<f32>(pos.value.z)}});
+      out_boxes.emplace_back(Aabb3f{
+          {box.min.x + static_cast<f32>(pos.value.x),
+           box.min.y + static_cast<f32>(pos.value.y),
+           box.min.z + static_cast<f32>(pos.value.z)},
+          {box.max.x + static_cast<f32>(pos.value.x),
+           box.max.y + static_cast<f32>(pos.value.y),
+           box.max.z + static_cast<f32>(pos.value.z)}});
     }
   }
 

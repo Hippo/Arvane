@@ -39,23 +39,31 @@ enum class LogLevel {
 
 void set_log_level(LogLevel level);
 
+[[nodiscard]] bool should_log(LogLevel level) noexcept;
+
 void log(LogLevel level, std::string_view subsystem, std::string_view message);
 
-template <typename... Args>
+template<typename... Args>
 void log(
     LogLevel level,
     std::string_view subsystem,
     fmt::format_string<Args...> format,
     Args&&... args) {
+  if (!should_log(level)) {
+    return;
+  }
   log(level, subsystem, fmt::format(format, std::forward<Args>(args)...));
 }
 
-template <typename... Args>
+template<typename... Args>
 void log_runtime(
     LogLevel level,
     std::string_view subsystem,
     std::string_view format,
     Args&&... args) {
+  if (!should_log(level)) {
+    return;
+  }
   log(
       level,
       subsystem,
@@ -66,60 +74,60 @@ void log_runtime(
 
 void trace(std::string_view subsystem, std::string_view message);
 
-template <typename... Args>
+template<typename... Args>
 void trace(std::string_view subsystem, fmt::format_string<Args...> format, Args&&... args) {
   log(LogLevel::Trace, subsystem, format, std::forward<Args>(args)...);
 }
 
-template <typename... Args>
+template<typename... Args>
 void trace_runtime(std::string_view subsystem, std::string_view format, Args&&... args) {
   log_runtime(LogLevel::Trace, subsystem, format, std::forward<Args>(args)...);
 }
 
 void debug(std::string_view subsystem, std::string_view message);
 
-template <typename... Args>
+template<typename... Args>
 void debug(std::string_view subsystem, fmt::format_string<Args...> format, Args&&... args) {
   log(LogLevel::Debug, subsystem, format, std::forward<Args>(args)...);
 }
 
-template <typename... Args>
+template<typename... Args>
 void debug_runtime(std::string_view subsystem, std::string_view format, Args&&... args) {
   log_runtime(LogLevel::Debug, subsystem, format, std::forward<Args>(args)...);
 }
 
 void info(std::string_view subsystem, std::string_view message);
 
-template <typename... Args>
+template<typename... Args>
 void info(std::string_view subsystem, fmt::format_string<Args...> format, Args&&... args) {
   log(LogLevel::Info, subsystem, format, std::forward<Args>(args)...);
 }
 
-template <typename... Args>
+template<typename... Args>
 void info_runtime(std::string_view subsystem, std::string_view format, Args&&... args) {
   log_runtime(LogLevel::Info, subsystem, format, std::forward<Args>(args)...);
 }
 
 void warn(std::string_view subsystem, std::string_view message);
 
-template <typename... Args>
+template<typename... Args>
 void warn(std::string_view subsystem, fmt::format_string<Args...> format, Args&&... args) {
   log(LogLevel::Warning, subsystem, format, std::forward<Args>(args)...);
 }
 
-template <typename... Args>
+template<typename... Args>
 void warn_runtime(std::string_view subsystem, std::string_view format, Args&&... args) {
   log_runtime(LogLevel::Warning, subsystem, format, std::forward<Args>(args)...);
 }
 
 void error(std::string_view subsystem, std::string_view message);
 
-template <typename... Args>
+template<typename... Args>
 void error(std::string_view subsystem, fmt::format_string<Args...> format, Args&&... args) {
   log(LogLevel::Error, subsystem, format, std::forward<Args>(args)...);
 }
 
-template <typename... Args>
+template<typename... Args>
 void error_runtime(std::string_view subsystem, std::string_view format, Args&&... args) {
   log_runtime(LogLevel::Error, subsystem, format, std::forward<Args>(args)...);
 }

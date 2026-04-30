@@ -96,7 +96,7 @@ std::vector<client::UiItemStackView> inventory_slots_for_ui(
     if (stack.has_value()) {
       view = stack_view_for_ui(*stack, item_registry, item_atlas, block_atlas, missing_icon);
     }
-    slots.push_back(std::move(view));
+    slots.emplace_back(std::move(view));
   }
   return slots;
 }
@@ -124,13 +124,10 @@ std::optional<client::UiItemStackView> item_stack_for_ui(
 std::vector<client::PlayerListEntryView> player_list_for_ui(
     const server::ServerRuntime& server) {
   std::vector<client::PlayerListEntryView> players;
-  for (const SessionID session_id : server.sessions().session_ids()) {
-    const server::ServerSession* session = server.sessions().find(session_id);
-    if (session == nullptr) {
-      continue;
-    }
-    players.push_back({session->profile_name, std::nullopt});
-  }
+  players.reserve(server.sessions().size());
+  server.sessions().for_each_session([&players](const server::ServerSession& session) {
+    players.emplace_back(session.profile_name, std::nullopt);
+  });
   return players;
 }
 

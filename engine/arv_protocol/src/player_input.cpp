@@ -89,13 +89,13 @@ Expected<ClientInputBatch, ProtocolError> deserialize_client_input_batch(std::sp
       return Expected<ClientInputBatch, ProtocolError>::failure(
           ProtocolError{"failed to decode input sample"});
     }
-    batch.inputs.push_back({
+    batch.inputs.emplace_back(
         buttons.value(),
         move_x.value(),
         move_z.value(),
         look_delta_x.value(),
         look_delta_y.value(),
-        slot.value()});
+        slot.value());
   }
 
   return Expected<ClientInputBatch, ProtocolError>::success(std::move(batch));

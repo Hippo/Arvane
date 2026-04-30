@@ -235,6 +235,7 @@ Example tab categories:
 * Entities
 * Networking
 * Performance
+* Profiling
 * Console
 
 ---
@@ -258,6 +259,9 @@ The debug menu should include tools such as:
 * network statistics
 * server tick statistics
 * task/job system statistics
+* Tracy profiling status and zone coverage
+* frame p50/p95/p99 timelines
+* meshing, lighting, and job queue latency percentiles
 * memory/resource counters
 * log viewer
 * command runner

@@ -852,6 +852,31 @@ delete on render thread
 
 Early milestones may use a simpler immediate destruction model if rendering is single-threaded, but the ownership model should still assume render-thread-only deletion.
 
+## Buffer Upload Policy
+
+Chunk mesh uploads must avoid driver-visible allocation churn.
+
+Current rules:
+
+* mesh uploads are queued and budgeted per frame
+* newer uploads replace stale pending uploads for the same chunk
+* GPU buffers keep capacity and grow geometrically instead of reallocating on every upload
+* uploads use sub-data updates after warmup
+* draw submission is profiled with CPU Tracy zones and GPU queue zones when Tracy is enabled
+
+Future persistent-mapped upload arenas should keep the same public handoff model: workers produce CPU mesh data, the render owner performs GPU writes, and publication still validates chunk versions.
+
+## Frame Pacing
+
+The client supports normal swap-interval vsync and manual frame pacing.
+
+When manual pacing is enabled:
+
+* swap interval vsync is disabled
+* the frame sleeps for the bulk of the remaining target interval
+* the final configurable spin window tightens presentation timing
+* the wait is visible in profiling as GPU/frame wait time
+
 ## Shutdown Order
 
 Renderer shutdown must destroy GPU resources before the OpenGL context is destroyed.

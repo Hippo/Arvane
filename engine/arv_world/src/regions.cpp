@@ -77,7 +77,7 @@ ZoneID RegionRegistry::add_zone(Zone zone) {
   if (!zone.name.empty()) {
     zone_names_[zone.name] = zone.id;
   }
-  zones_.push_back(std::move(zone));
+  zones_.emplace_back(std::move(zone));
   return zones_.back().id;
 }
 
@@ -100,7 +100,7 @@ RegionID RegionRegistry::add_region(Region region) {
   if (!region.name.empty()) {
     region_names_[region.name] = region.id;
   }
-  regions_.push_back(std::move(region));
+  regions_.emplace_back(std::move(region));
   return regions_.back().id;
 }
 
@@ -124,7 +124,7 @@ std::vector<RegionID> RegionRegistry::find_regions_at(RegionQuery query) const {
     if (candidate.world != query.world || !contains(candidate.shape, query.position)) {
       continue;
     }
-    matches.push_back(candidate.id);
+    matches.emplace_back(candidate.id);
   }
   return matches;
 }
@@ -146,7 +146,7 @@ player::PermissionLayer RegionRegistry::permission_layer_at(RegionQuery query) c
       const Zone* current_zone = zone(zone_id);
       if (current_zone != nullptr &&
           std::find(matching_zones.begin(), matching_zones.end(), current_zone) == matching_zones.end()) {
-        matching_zones.push_back(current_zone);
+        matching_zones.emplace_back(current_zone);
       }
     }
   }
@@ -171,7 +171,7 @@ player::PermissionLayer RegionRegistry::permission_layer_at(RegionQuery query) c
   for (const RegionID region_id : matching_ids) {
     const Region* current = region(region_id);
     if (current != nullptr) {
-      matching_regions.push_back(current);
+      matching_regions.emplace_back(current);
     }
   }
   std::sort(matching_regions.begin(), matching_regions.end(), [](const Region* lhs, const Region* rhs) {
@@ -203,12 +203,12 @@ RegionMembershipChange RegionRegistry::update_membership(
   RegionMembershipChange change;
   for (const RegionID id : next) {
     if (!contains_region_id(state.active_regions, id)) {
-      change.entered.push_back(id);
+      change.entered.emplace_back(id);
     }
   }
   for (const RegionID id : state.active_regions) {
     if (!contains_region_id(next, id)) {
-      change.exited.push_back(id);
+      change.exited.emplace_back(id);
     }
   }
 

@@ -1,10 +1,16 @@
 #include "arv/render/opengl_renderer.hpp"
 
+#include "arv/core/profiling.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <utility>
+
+#if ARVANE_ENABLE_TRACY
+#include <tracy/TracyOpenGL.hpp>
+#endif
 
 namespace arv::render {
 namespace {
@@ -38,6 +44,30 @@ constexpr f32 UiTextureSlotItem = 3.0F;
   return level;
 }
 
+[[nodiscard]] GLsizeiptr next_buffer_capacity(GLsizeiptr required) noexcept {
+  GLsizeiptr capacity = 4096;
+  while (capacity < required) {
+    capacity *= 2;
+  }
+  return capacity;
+}
+
+void ensure_buffer_capacity(
+    GLenum target,
+    GLuint& buffer,
+    GLsizeiptr& capacity,
+    GLsizeiptr required,
+    GLenum usage) {
+  if (buffer == 0) {
+    glGenBuffers(1, &buffer);
+  }
+  glBindBuffer(target, buffer);
+  if (required > capacity) {
+    capacity = next_buffer_capacity(required);
+    glBufferData(target, capacity, nullptr, usage);
+  }
+}
+
 void append_ui_quad(
     std::vector<UIVertex>& vertices,
     std::vector<u32>& indices,
@@ -46,16 +76,16 @@ void append_ui_quad(
     Vec4f color,
     f32 texture_slot) {
   const u32 base = static_cast<u32>(vertices.size());
-  vertices.push_back({positions[0], uvs[0], color, texture_slot});
-  vertices.push_back({positions[1], uvs[1], color, texture_slot});
-  vertices.push_back({positions[2], uvs[2], color, texture_slot});
-  vertices.push_back({positions[3], uvs[3], color, texture_slot});
-  indices.push_back(base);
-  indices.push_back(base + 1U);
-  indices.push_back(base + 2U);
-  indices.push_back(base + 2U);
-  indices.push_back(base + 3U);
-  indices.push_back(base);
+  vertices.emplace_back(positions[0], uvs[0], color, texture_slot);
+  vertices.emplace_back(positions[1], uvs[1], color, texture_slot);
+  vertices.emplace_back(positions[2], uvs[2], color, texture_slot);
+  vertices.emplace_back(positions[3], uvs[3], color, texture_slot);
+  indices.emplace_back(base);
+  indices.emplace_back(base + 1U);
+  indices.emplace_back(base + 2U);
+  indices.emplace_back(base + 2U);
+  indices.emplace_back(base + 3U);
+  indices.emplace_back(base);
 }
 
 } // namespace
@@ -110,6 +140,7 @@ void OpenGLRenderer::resize(u32 width, u32 height) {
 }
 
 void OpenGLRenderer::submit_frame(FramePacket packet) {
+  ARV_PROFILE_ZONE("Render submit");
   frame_ = std::move(packet);
 }
 
@@ -142,7 +173,7 @@ void OpenGLRenderer::enqueue_chunk_mesh_upload(ChunkMeshUpload upload) {
     pending = pending_chunk_mesh_uploads_.erase(pending);
   }
 
-  pending_chunk_mesh_uploads_.push_back(std::move(upload));
+  pending_chunk_mesh_uploads_.emplace_back(std::move(upload));
 }
 
 void OpenGLRenderer::remove_chunk_mesh(ChunkMeshKey key) {
@@ -165,6 +196,17 @@ void OpenGLRenderer::remove_chunk_mesh(ChunkMeshKey key) {
 }
 
 void OpenGLRenderer::render() {
+  ARV_PROFILE_ZONE("Render submit");
+  draw_calls_last_frame_ = 0;
+  chunk_draw_calls_last_frame_ = 0;
+  ui_draw_calls_last_frame_ = 0;
+#if ARVANE_ENABLE_TRACY
+  if (!gpu_profile_context_initialized_) {
+    TracyGpuContext;
+    gpu_profile_context_initialized_ = true;
+  }
+  TracyGpuZone("GPU queue timing");
+#endif
   process_chunk_mesh_uploads();
   ensure_white_texture();
 
@@ -228,6 +270,9 @@ void OpenGLRenderer::render() {
   glUseProgram(0);
 
   draw_ui();
+#if ARVANE_ENABLE_TRACY
+  TracyGpuCollect;
+#endif
 }
 
 void OpenGLRenderer::begin_shutdown() {
@@ -261,10 +306,14 @@ void OpenGLRenderer::begin_shutdown() {
   ui_index_buffer_ = 0;
   ui_vertex_buffer_ = 0;
   ui_vao_ = 0;
+  ui_vertex_capacity_bytes_ = 0;
+  ui_index_capacity_bytes_ = 0;
+  gpu_profile_context_initialized_ = false;
   frame_ = {};
 }
 
 void OpenGLRenderer::process_chunk_mesh_uploads() {
+  ARV_PROFILE_ZONE("Render mesh uploads");
   const auto start = std::chrono::steady_clock::now();
   mesh_uploads_last_frame_ = 0;
   mesh_upload_discards_last_frame_ = 0;
@@ -283,15 +332,15 @@ void OpenGLRenderer::process_chunk_mesh_uploads() {
         false};
     if (upload_chunk_mesh_now(std::move(upload))) {
       ++mesh_uploads_last_frame_;
-      chunk_mesh_upload_receipts_.push_back({
+      chunk_mesh_upload_receipts_.emplace_back(
           receipt.key,
           receipt.source_version,
           receipt.source_content_version,
           receipt.source_light_version,
-          true});
+          true);
     } else {
       ++mesh_upload_discards_last_frame_;
-      chunk_mesh_upload_receipts_.push_back(receipt);
+      chunk_mesh_upload_receipts_.emplace_back(receipt);
     }
   }
 
@@ -340,6 +389,7 @@ OpenGLRenderer::GpuMesh OpenGLRenderer::create_gpu_mesh(const CpuMeshBuffer& mes
 }
 
 void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& mesh) {
+  ARV_PROFILE_ZONE("Chunk mesh upload");
   if ((mesh.vertex_bytes.empty() || mesh.indices.empty()) && gpu.vao == 0) {
     gpu.index_count = 0;
     return;
@@ -350,24 +400,26 @@ void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& m
   }
   glBindVertexArray(gpu.vao);
 
-  if (gpu.vertex_buffer == 0) {
-    glGenBuffers(1, &gpu.vertex_buffer);
-  }
-  glBindBuffer(GL_ARRAY_BUFFER, gpu.vertex_buffer);
   const GLsizeiptr vertex_bytes =
       static_cast<GLsizeiptr>(mesh.vertex_bytes.size());
-  glBufferData(GL_ARRAY_BUFFER, vertex_bytes, nullptr, GL_STATIC_DRAW);
+  ensure_buffer_capacity(
+      GL_ARRAY_BUFFER,
+      gpu.vertex_buffer,
+      gpu.vertex_capacity_bytes,
+      vertex_bytes,
+      GL_DYNAMIC_DRAW);
   if (vertex_bytes > 0) {
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, mesh.vertex_bytes.data());
   }
 
-  if (gpu.index_buffer == 0) {
-    glGenBuffers(1, &gpu.index_buffer);
-  }
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpu.index_buffer);
   const GLsizeiptr index_bytes =
       static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(u32));
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_STATIC_DRAW);
+  ensure_buffer_capacity(
+      GL_ELEMENT_ARRAY_BUFFER,
+      gpu.index_buffer,
+      gpu.index_capacity_bytes,
+      index_bytes,
+      GL_DYNAMIC_DRAW);
   if (index_bytes > 0) {
     glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, mesh.indices.data());
   }
@@ -570,6 +622,7 @@ bool OpenGLRenderer::ensure_ui_program() {
 }
 
 void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent) {
+  ARV_PROFILE_ZONE("Chunk draw list");
   glUniform1f(chunk_alpha_uniform_, transparent ? 0.55F : 1.0F);
   for (const ChunkDrawItem& item : draw_items) {
     const auto found = chunks_.find(item.key);
@@ -590,6 +643,8 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
         static_cast<f32>(item.key.coord.value.z * ChunkSize));
     glBindVertexArray(mesh.vao);
     glDrawElements(GL_TRIANGLES, mesh.index_count, GL_UNSIGNED_INT, nullptr);
+    ++chunk_draw_calls_last_frame_;
+    ++draw_calls_last_frame_;
   }
 }
 
@@ -693,17 +748,27 @@ void OpenGLRenderer::draw_ui_quads() {
   glBindTexture(GL_TEXTURE_2D, item_atlas_.id == 0 ? white_texture_.id : item_atlas_.id);
 
   glBindVertexArray(ui_vao_);
-  glBindBuffer(GL_ARRAY_BUFFER, ui_vertex_buffer_);
   const GLsizeiptr vertex_bytes =
       static_cast<GLsizeiptr>(ui_vertices_.size() * sizeof(UIVertex));
-  glBufferData(GL_ARRAY_BUFFER, vertex_bytes, nullptr, GL_DYNAMIC_DRAW);
+  ensure_buffer_capacity(
+      GL_ARRAY_BUFFER,
+      ui_vertex_buffer_,
+      ui_vertex_capacity_bytes_,
+      vertex_bytes,
+      GL_DYNAMIC_DRAW);
   glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, ui_vertices_.data());
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_index_buffer_);
   const GLsizeiptr index_bytes =
       static_cast<GLsizeiptr>(ui_indices_.size() * sizeof(u32));
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_bytes, nullptr, GL_DYNAMIC_DRAW);
+  ensure_buffer_capacity(
+      GL_ELEMENT_ARRAY_BUFFER,
+      ui_index_buffer_,
+      ui_index_capacity_bytes_,
+      index_bytes,
+      GL_DYNAMIC_DRAW);
   glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
   glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
+  ++ui_draw_calls_last_frame_;
+  ++draw_calls_last_frame_;
   glActiveTexture(GL_TEXTURE0);
 }
 

@@ -62,7 +62,7 @@ public:
       const ChunkCoord chunk_coord = block_to_chunk(update.pos);
       const SimulationChunkState* chunk = find_chunk(chunk_coord);
       if (!can_process_update(update, chunk)) {
-        result_.deferred_updates.push_back(update);
+        result_.deferred_updates.emplace_back(update);
         ++result_.processed;
         continue;
       }
@@ -72,12 +72,12 @@ public:
     }
 
     while (!updates_.empty()) {
-      result_.followup_updates.push_back(updates_.front());
+      result_.followup_updates.emplace_back(updates_.front());
       updates_.pop_front();
     }
     queued_positions_.clear();
     while (!followup_updates_.empty()) {
-      result_.followup_updates.push_back(followup_updates_.front());
+      result_.followup_updates.emplace_back(followup_updates_.front());
       followup_updates_.pop_front();
     }
     queued_followup_positions_.clear();
@@ -147,20 +147,20 @@ private:
         update.reason == FluidUpdateReason::BlockChanged;
     if (queued_positions_.insert(update.pos).second) {
       if (urgent) {
-        updates_.push_front(update);
+        updates_.emplace_front(update);
       } else {
-        updates_.push_back(update);
+        updates_.emplace_back(update);
       }
       return;
     }
     if (urgent) {
-      updates_.push_front(update);
+      updates_.emplace_front(update);
     }
   }
 
   void enqueue_followup_update(FluidUpdate update) {
     if (queued_followup_positions_.insert(update.pos).second) {
-      followup_updates_.push_back(update);
+      followup_updates_.emplace_back(update);
     }
   }
 
@@ -182,8 +182,10 @@ private:
       if (origin_chunk != neighbor_chunk_coord &&
           !is_active(neighbor_chunk_coord) &&
           !can_process_inactive(reason)) {
-        result_.deferred_updates.push_back(
-            {neighbor, reason, current_tick_ + definition_flow_interval_ticks_});
+        result_.deferred_updates.emplace_back(
+            neighbor,
+            reason,
+            current_tick_ + definition_flow_interval_ticks_);
         continue;
       }
       enqueue_followup_update(neighbor, reason);
@@ -299,7 +301,7 @@ private:
       return;
     }
 
-    result_.changes.push_back({pos, ideal, chunk->source_content_version});
+    result_.changes.emplace_back(pos, ideal, chunk->source_content_version);
     const bool removed_or_decreased =
         ideal.empty() ||
         (!current.empty() &&
@@ -413,7 +415,7 @@ void FluidSolver::store_deferred_boundary_update(
       return;
     }
   }
-  updates.push_back(update);
+  updates.emplace_back(update);
 }
 
 u32 FluidSolver::process_updates(

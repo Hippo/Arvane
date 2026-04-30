@@ -1,9 +1,11 @@
 #include "arv/world/world_lighting.hpp"
 
+#include "arv/core/perf_stats.hpp"
+#include "arv/core/profiling.hpp"
 #include "arv/world/world_runtime.hpp"
 
-#include <queue>
 #include <utility>
+#include <vector>
 
 namespace arv::world {
 namespace {
@@ -36,6 +38,7 @@ bool WorldLighting::has_work(const WorldRuntime& world) noexcept {
 }
 
 LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
+  ARV_PROFILE_ZONE("Snapshot creation");
   LightingSnapshot snapshot;
   snapshot.world_id = world.id_;
   snapshot.source_revision = world.lighting_revision_;
@@ -47,7 +50,7 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
       return;
     }
     if (coord_set.insert(coord).second) {
-      coords.push_back(coord);
+      coords.emplace_back(coord);
     }
   };
 
@@ -71,12 +74,12 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
     if (chunk == nullptr) {
       continue;
     }
-    snapshot.chunks.push_back({
+    snapshot.chunks.emplace_back(
         coord,
         chunk->block_version(),
         chunk->storage_view(),
         chunk->content_version(),
-        chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting)});
+        chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting));
   }
   return snapshot;
 }
@@ -84,16 +87,12 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
 LightingResult WorldLighting::build_result(
     const LightingSnapshot& snapshot,
     const voxel::BlockRegistry& registry) {
+  ARV_PROFILE_ZONE("Lighting propagation");
+  const core::ScopedThreadTiming timing{core::PerfMetric::LightingTask};
   LightingResult result;
   result.world_id = snapshot.world_id;
   result.source_revision = snapshot.source_revision;
-  usize dirty_chunk_count = 0;
-  for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
-    if (chunk.needs_relight) {
-      ++dirty_chunk_count;
-    }
-  }
-  result.chunks.reserve(dirty_chunk_count);
+  result.chunks.reserve(snapshot.chunks.size());
 
   HashMap<ChunkCoord, LightArray> buffers;
   HashMap<ChunkCoord, const ChunkLightingSnapshot*> chunks;
@@ -102,7 +101,7 @@ LightingResult WorldLighting::build_result(
   for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
     LightArray buffer{};
     buffer.fill(voxel::NoLight);
-    buffers.emplace(chunk.coord, buffer);
+    buffers.emplace(chunk.coord, std::move(buffer));
     chunks.emplace(chunk.coord, &chunk);
   }
 
@@ -161,6 +160,8 @@ LightingResult WorldLighting::build_result(
 
   HashMap<ChunkColumnCoord, i32> top_by_column;
   HashMap<ChunkColumnCoord, i32> bottom_by_column;
+  top_by_column.reserve(snapshot.chunks.size() * voxel::ChunkArea);
+  bottom_by_column.reserve(snapshot.chunks.size() * voxel::ChunkArea);
   for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
     for (i32 z = 0; z < ChunkSize; ++z) {
       for (i32 x = 0; x < ChunkSize; ++x) {
@@ -181,7 +182,9 @@ LightingResult WorldLighting::build_result(
     }
   }
 
-  std::queue<std::pair<BlockPos, u8>> sky_queue;
+  std::vector<std::pair<BlockPos, u8>> sky_queue;
+  sky_queue.reserve(snapshot.chunks.size() * voxel::ChunkVolume);
+  usize sky_queue_head = 0;
   for (const auto& [key, top_y] : top_by_column) {
     const i32 world_x = key.x;
     const i32 world_z = key.z;
@@ -192,14 +195,13 @@ LightingResult WorldLighting::build_result(
         break;
       }
       if (set_sky(pos, voxel::MaxLightLevel)) {
-        sky_queue.push({pos, voxel::MaxLightLevel});
+        sky_queue.emplace_back(pos, voxel::MaxLightLevel);
       }
     }
   }
 
-  while (!sky_queue.empty()) {
-    const auto [pos, level] = sky_queue.front();
-    sky_queue.pop();
+  while (sky_queue_head < sky_queue.size()) {
+    const auto [pos, level] = sky_queue[sky_queue_head++];
     if (level <= 1U) {
       continue;
     }
@@ -211,7 +213,7 @@ LightingResult WorldLighting::build_result(
         continue;
       }
       if (set_sky(neighbor, next)) {
-        sky_queue.push({neighbor, next});
+        sky_queue.emplace_back(neighbor, next);
       }
     }
   }
@@ -223,7 +225,9 @@ LightingResult WorldLighting::build_result(
     u8 b{};
   };
 
-  std::queue<RgbNode> rgb_queue;
+  std::vector<RgbNode> rgb_queue;
+  rgb_queue.reserve(snapshot.chunks.size() * voxel::ChunkVolume);
+  usize rgb_queue_head = 0;
   for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
     for (i32 z = 0; z < ChunkSize; ++z) {
       for (i32 y = 0; y < ChunkSize; ++y) {
@@ -240,16 +244,15 @@ LightingResult WorldLighting::build_result(
           const u8 g = voxel::clamp_light_channel(variant->properties.emission_g);
           const u8 b = voxel::clamp_light_channel(variant->properties.emission_b);
           if (set_rgb(pos, r, g, b)) {
-            rgb_queue.push({pos, r, g, b});
+            rgb_queue.emplace_back(pos, r, g, b);
           }
         }
       }
     }
   }
 
-  while (!rgb_queue.empty()) {
-    const RgbNode node = rgb_queue.front();
-    rgb_queue.pop();
+  while (rgb_queue_head < rgb_queue.size()) {
+    const RgbNode node = rgb_queue[rgb_queue_head++];
 
     const u8 next_r = node.r > 0 ? static_cast<u8>(node.r - 1U) : 0;
     const u8 next_g = node.g > 0 ? static_cast<u8>(node.g - 1U) : 0;
@@ -264,7 +267,7 @@ LightingResult WorldLighting::build_result(
         continue;
       }
       if (set_rgb(neighbor, next_r, next_g, next_b)) {
-        rgb_queue.push({neighbor, next_r, next_g, next_b});
+        rgb_queue.emplace_back(neighbor, next_r, next_g, next_b);
       }
     }
   }
@@ -273,12 +276,11 @@ LightingResult WorldLighting::build_result(
     auto found = buffers.find(chunk.coord);
     if (found != buffers.end() &&
         (chunk.needs_relight || found->second != chunk.storage->lights)) {
-      result.chunks.push_back({
+      result.chunks.emplace_back(
           chunk.coord,
           chunk.source_version,
           std::move(found->second),
-          chunk.source_content_version,
-      });
+          chunk.source_content_version);
     }
   }
   return result;

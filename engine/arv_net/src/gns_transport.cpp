@@ -167,7 +167,7 @@ void GameNetworkingSocketsTransport::shutdown() {
   handles.reserve(connections_.size());
   for (auto& [id, handle] : connections_) {
     (void)id;
-    handles.push_back(handle);
+    handles.emplace_back(handle);
   }
   states_.clear();
   connections_.clear();
@@ -423,7 +423,7 @@ void GameNetworkingSocketsTransport::set_state(ConnectionID id, ConnectionState 
 
 void GameNetworkingSocketsTransport::queue_event(NetworkEvent event) {
   assert_owner_thread();
-  queued_events_.push_back(std::move(event));
+  queued_events_.emplace_back(std::move(event));
 }
 
 void GameNetworkingSocketsTransport::assert_owner_thread() const noexcept {

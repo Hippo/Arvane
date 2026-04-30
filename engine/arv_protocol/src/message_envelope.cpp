@@ -7,7 +7,7 @@ namespace arv::protocol {
 std::vector<u8> serialize_envelope(MessageEnvelope envelope, std::span<const u8> payload) {
   envelope.payload_size = static_cast<u32>(payload.size());
 
-  MessageWriter writer;
+  MessageWriter writer{MessageEnvelopeHeaderSize + payload.size()};
   writer.write<u16>(envelope.protocol_version);
   writer.write<MessageType>(envelope.message_type);
   writer.write<u32>(envelope.message_flags);

@@ -1,5 +1,7 @@
 #include "arv/voxel/storage.hpp"
 
+#include "arv/core/profiling.hpp"
+
 #include <utility>
 
 namespace arv::voxel {
@@ -22,7 +24,7 @@ namespace {
 }
 
 [[nodiscard]] const ChunkStorage* snapshot_storage_for_local(
-    const ChunkSnapshot& snapshot,
+    const ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local,
     SectionLocalPos& storage_local) noexcept {
   const i32 offset_x = local.value.x < 0 ? -1 : (local.value.x >= ChunkSize ? 1 : 0);
@@ -33,7 +35,7 @@ namespace {
     return nullptr;
   }
 
-  const ChunkStorageView& storage =
+  const ChunkStorage* storage =
       snapshot.storages[snapshot_storage_index(offset_x, offset_y, offset_z)];
   if (!storage) {
     return nullptr;
@@ -44,7 +46,7 @@ namespace {
       wrapped_snapshot_local(local.value.y),
       wrapped_snapshot_local(local.value.z),
   }};
-  return storage.get();
+  return storage;
 }
 
 } // namespace
@@ -250,6 +252,7 @@ void ChunkSection::mark_mesh_ready(u64 source_block_version, u64 source_light_ve
 }
 
 ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk) {
+  ARV_PROFILE_ZONE("Snapshot creation");
   ChunkSnapshot snapshot;
   snapshot.coord = chunk.coord();
   snapshot.source_version = chunk.block_version();
@@ -259,19 +262,46 @@ ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk) {
   return snapshot;
 }
 
+ChunkSnapshotStoragePointers make_chunk_snapshot_storage_pointers(
+    const ChunkSnapshot& snapshot) noexcept {
+  ChunkSnapshotStoragePointers pointers;
+  for (usize index = 0; index < pointers.storages.size(); ++index) {
+    pointers.storages[index] = snapshot.storages[index].get();
+  }
+  return pointers;
+}
+
 BlockVariantID snapshot_block(const ChunkSnapshot& snapshot, SectionLocalPos local) noexcept {
+  return snapshot_block(make_chunk_snapshot_storage_pointers(snapshot), local);
+}
+
+BlockVariantID snapshot_block(
+    const ChunkSnapshotStoragePointers& snapshot,
+    SectionLocalPos local) noexcept {
   SectionLocalPos storage_local{};
   const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
   return storage != nullptr ? storage->blocks[local_index(storage_local)] : AirBlockVariantID;
 }
 
 LightWord snapshot_light(const ChunkSnapshot& snapshot, SectionLocalPos local) noexcept {
+  return snapshot_light(make_chunk_snapshot_storage_pointers(snapshot), local);
+}
+
+LightWord snapshot_light(
+    const ChunkSnapshotStoragePointers& snapshot,
+    SectionLocalPos local) noexcept {
   SectionLocalPos storage_local{};
   const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
   return storage != nullptr ? storage->lights[local_index(storage_local)] : NoLight;
 }
 
 FluidCell snapshot_fluid(const ChunkSnapshot& snapshot, SectionLocalPos local) noexcept {
+  return snapshot_fluid(make_chunk_snapshot_storage_pointers(snapshot), local);
+}
+
+FluidCell snapshot_fluid(
+    const ChunkSnapshotStoragePointers& snapshot,
+    SectionLocalPos local) noexcept {
   SectionLocalPos storage_local{};
   const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
   return storage != nullptr ? storage->fluids[local_index(storage_local)] : empty_fluid_cell();

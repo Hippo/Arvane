@@ -1,5 +1,7 @@
 #include "arv/world/world_generation.hpp"
 
+#include "arv/core/profiling.hpp"
+
 #include <cmath>
 #include <optional>
 #include <utility>
@@ -187,7 +189,7 @@ WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text) {
             return WorldGenerationConfigResult::failure({"surface layer depth must be positive"});
           }
         }
-        config.surface_layers.push_back(std::move(layer));
+        config.surface_layers.emplace_back(std::move(layer));
       }
     }
 
@@ -221,7 +223,7 @@ WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text) {
           {"unsupported noise.terrain.type: " + config.terrain_noise_type});
     }
     if (config.surface_layers.empty()) {
-      config.surface_layers.push_back({"arvane:stone", 0, true});
+      config.surface_layers.emplace_back("arvane:stone", 0, true);
     }
 
     return WorldGenerationConfigResult::success(std::move(config));
@@ -244,7 +246,7 @@ WorldGenerationPaletteResult resolve_world_generation_palette(
           {"world generation references unknown block variant: " + layer.block_name});
     }
     has_remaining = has_remaining || layer.remaining;
-    palette.surface_layers.push_back({block.value(), layer.depth, layer.remaining});
+    palette.surface_layers.emplace_back(block.value(), layer.depth, layer.remaining);
   }
 
   if (!has_remaining) {
@@ -284,6 +286,7 @@ voxel::BlockVariantID choose_surface_block(
 }
 
 GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
+  ARV_PROFILE_ZONE("Chunk generation");
   if (request.palette.surface_layers.empty()) {
     return GeneratedChunkResult::failure({"chunk generation request has no resolved surface layers"});
   }

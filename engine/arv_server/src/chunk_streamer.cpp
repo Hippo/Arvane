@@ -88,7 +88,7 @@ void ServerChunkStreamer::update_player_interest(
   if (!new_state && state.world_id != authoritative_world) {
     for (const auto& [coord, version] : state.sent_chunk_versions) {
       (void)version;
-      state.unload_queue.push_back(coord);
+      state.unload_queue.emplace_back(coord);
     }
     state.sent_chunk_versions.clear();
     state.pending_chunks.clear();
@@ -142,7 +142,7 @@ std::vector<ChunkCoord> ServerChunkStreamer::pending_generation_requests(
       const i32 priority = generation_priority_distance(coord, state.center_chunk);
       auto [priority_iter, inserted] = request_priorities.try_emplace(coord, priority);
       if (inserted) {
-        requests.push_back(coord);
+        requests.emplace_back(coord);
       } else {
         priority_iter->second = std::min(priority_iter->second, priority);
       }
@@ -202,7 +202,7 @@ void ServerChunkStreamer::compute_streaming_diff(
   for (const auto& [coord, version] : state.sent_chunk_versions) {
     (void)version;
     if (retained_chunks.find(coord) == retained_chunks.end()) {
-      state.unload_queue.push_back(coord);
+      state.unload_queue.emplace_back(coord);
     }
   }
 
@@ -280,11 +280,11 @@ void ServerChunkStreamer::queue_chunk_unloads(
     protocol::ChunkUnload unload;
     unload.world_id = state.world_id;
     unload.coord = coord;
-    out_messages.push_back({
+    out_messages.emplace_back(
         state.connection_id,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::MessageType::ChunkUnload,
-        protocol::serialize_chunk_unload(unload)});
+        protocol::serialize_chunk_unload(unload));
     ++sent;
   }
 }
@@ -351,11 +351,11 @@ void ServerChunkStreamer::queue_chunk_sends(
       data.fluids.fill(voxel::empty_fluid_cell());
     }
 
-    out_messages.push_back({
+    out_messages.emplace_back(
         state.connection_id,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::MessageType::ChunkData,
-        protocol::serialize_chunk_data(data)});
+        protocol::serialize_chunk_data(data));
     state.sent_chunk_versions[coord] = {snapshot->source_version, source_chunk->light_data_version()};
     state.pending_chunks.erase(coord);
     ++sent;

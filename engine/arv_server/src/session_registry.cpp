@@ -33,6 +33,10 @@ const ServerSession* SessionRegistry::find(SessionID session_id) const noexcept 
   return found == sessions_.end() ? nullptr : &found->second;
 }
 
+const ServerSession* SessionRegistry::first() const noexcept {
+  return sessions_.empty() ? nullptr : &sessions_.begin()->second;
+}
+
 ServerSession* SessionRegistry::find_by_connection(net::ConnectionID connection_id) noexcept {
   const auto found_id = connection_index_.find(connection_id);
   if (found_id == connection_index_.end()) {
@@ -64,12 +68,22 @@ usize SessionRegistry::size() const noexcept {
   return sessions_.size();
 }
 
+void SessionRegistry::for_each_session(FunctionRef<void(const ServerSession&)> callback) const {
+  if (!callback) {
+    return;
+  }
+  for (const auto& [session_id, session] : sessions_) {
+    (void)session_id;
+    callback(session);
+  }
+}
+
 std::vector<SessionID> SessionRegistry::session_ids() const {
   std::vector<SessionID> ids;
   ids.reserve(sessions_.size());
   for (const auto& [session_id, session] : sessions_) {
     (void)session;
-    ids.push_back(session_id);
+    ids.emplace_back(session_id);
   }
   return ids;
 }

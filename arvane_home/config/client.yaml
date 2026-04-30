@@ -10,6 +10,9 @@ chunks:
   stream_distance: 2
 render:
   max_chunk_mesh_uploads_per_frame: 8
+  frame_pacing_enabled: false
+  frame_pacing_target_fps: 120
+  frame_pacing_spin_us: 500
 chunk_pipeline:
   max_client_chunk_applies_per_frame: 2
   max_client_chunk_unloads_per_frame: 32

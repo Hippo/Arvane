@@ -52,7 +52,7 @@ asset::TextureAtlasResult build_item_texture_atlas(
   HashSet<std::string> seen;
   const auto add_texture = [&](std::string texture) {
     if (!texture.empty() && seen.insert(texture).second) {
-      texture_ids.push_back({std::move(texture)});
+      texture_ids.emplace_back(std::move(texture));
     }
   };
   add_texture("arvane:texture/missing");
@@ -82,7 +82,7 @@ asset::TextureAtlasResult build_item_texture_atlas(
           "build item texture atlas",
           "loaded texture handle did not resolve"});
     }
-    inputs.push_back({texture_id, resource->image, resource->fallback});
+    inputs.emplace_back(texture_id, resource->image, resource->fallback);
   }
 
   return asset::build_texture_atlas(inputs, {.max_page_size = 1024, .padding = 2});

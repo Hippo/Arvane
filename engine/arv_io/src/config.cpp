@@ -1,7 +1,7 @@
 #include "arv/io/config.hpp"
 
-#include <fstream>
 #include <cmath>
+#include <fstream>
 #include <optional>
 #include <sstream>
 #include <system_error>
@@ -10,6 +10,10 @@
 #include <yaml-cpp/yaml.h>
 
 #include <arv/core/log.hpp>
+
+#ifndef ARVANE_PROJECT_ROOT
+#define ARVANE_PROJECT_ROOT ""
+#endif
 
 namespace arv::io {
 namespace {
@@ -109,7 +113,7 @@ bool has_project_assets(const std::filesystem::path& path) {
              std::filesystem::path{kAssetsDirectoryName} / "shaders" / "world" / "chunk.vert");
 }
 
-std::filesystem::path discover_project_root(std::filesystem::path start) {
+std::filesystem::path normalize_project_search_start(std::filesystem::path start) {
   std::error_code error;
   if (start.empty()) {
     start = std::filesystem::current_path(error);
@@ -118,14 +122,25 @@ std::filesystem::path discover_project_root(std::filesystem::path start) {
     }
   }
 
+  error.clear();
   if (!std::filesystem::is_directory(start, error)) {
-    start = start.parent_path();
+    const std::filesystem::path parent = start.parent_path();
+    if (!parent.empty()) {
+      start = parent;
+    }
   }
 
+  error.clear();
   start = std::filesystem::absolute(start, error).lexically_normal();
   if (error) {
-    start = std::filesystem::path{"."};
+    return std::filesystem::path{"."};
   }
+
+  return start;
+}
+
+std::optional<std::filesystem::path> find_project_root_from(std::filesystem::path start) {
+  start = normalize_project_search_start(std::move(start));
 
   for (std::filesystem::path candidate = start; !candidate.empty(); candidate = candidate.parent_path()) {
     if (has_project_assets(candidate)) {
@@ -135,6 +150,25 @@ std::filesystem::path discover_project_root(std::filesystem::path start) {
     if (candidate == candidate.root_path()) {
       break;
     }
+  }
+
+  return std::nullopt;
+}
+
+std::filesystem::path discover_project_root(std::filesystem::path start) {
+  constexpr std::string_view compiled_project_root = ARVANE_PROJECT_ROOT;
+  if (!compiled_project_root.empty()) {
+    if (std::optional<std::filesystem::path> project_root =
+            find_project_root_from(std::filesystem::path{compiled_project_root});
+        project_root.has_value()) {
+      return normalize_lexical(std::move(project_root.value()));
+    }
+  }
+
+  start = normalize_project_search_start(std::move(start));
+  if (std::optional<std::filesystem::path> project_root = find_project_root_from(start);
+      project_root.has_value()) {
+    return normalize_lexical(std::move(project_root.value()));
   }
 
   return normalize_lexical(start);
@@ -345,6 +379,12 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "render" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "max_chunk_mesh_uploads_per_frame" << YAML::Value
           << config.render.max_chunk_mesh_uploads_per_frame;
+  emitter << YAML::Key << "frame_pacing_enabled" << YAML::Value
+          << config.render.frame_pacing_enabled;
+  emitter << YAML::Key << "frame_pacing_target_fps" << YAML::Value
+          << config.render.frame_pacing_target_fps;
+  emitter << YAML::Key << "frame_pacing_spin_us" << YAML::Value
+          << config.render.frame_pacing_spin_us;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
@@ -568,6 +608,12 @@ ConfigResult save_default_client_config_file(
   emitter << YAML::Key << "render" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "max_chunk_mesh_uploads_per_frame" << YAML::Value
           << config.render.max_chunk_mesh_uploads_per_frame;
+  emitter << YAML::Key << "frame_pacing_enabled" << YAML::Value
+          << config.render.frame_pacing_enabled;
+  emitter << YAML::Key << "frame_pacing_target_fps" << YAML::Value
+          << config.render.frame_pacing_target_fps;
+  emitter << YAML::Key << "frame_pacing_spin_us" << YAML::Value
+          << config.render.frame_pacing_spin_us;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
@@ -670,6 +716,9 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
         render,
         "max_chunk_mesh_uploads_per_frame",
         config.render.max_chunk_mesh_uploads_per_frame);
+    read_scalar(render, "frame_pacing_enabled", config.render.frame_pacing_enabled);
+    read_scalar(render, "frame_pacing_target_fps", config.render.frame_pacing_target_fps);
+    read_scalar(render, "frame_pacing_spin_us", config.render.frame_pacing_spin_us);
   }
 
   const YAML::Node chunk_pipeline = root["chunk_pipeline"];
@@ -829,6 +878,10 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   }
   if (config.render.max_chunk_mesh_uploads_per_frame == 0U) {
     return ConfigError{"render.max_chunk_mesh_uploads_per_frame must be non-zero"};
+  }
+  if (config.render.frame_pacing_enabled &&
+      config.render.frame_pacing_target_fps == 0U) {
+    return ConfigError{"render.frame_pacing_target_fps must be non-zero when frame pacing is enabled"};
   }
   if (config.chunk_pipeline.max_generation_jobs_per_frame == 0U ||
       config.chunk_pipeline.max_generation_results_per_tick == 0U ||

@@ -1622,6 +1622,23 @@ The view-distance system should leave room for:
 * cross-chunk effects are explicit (events/queues)
 * chunk unload respects active work
 * derived work is async, mutation is controlled
+* worker-facing snapshots hold immutable shared storage, not live world references
+* chunk neighbor access for meshing is prefetched into snapshot storage pointers before worker execution
+* full chunk copies are avoided unless copy-on-write detaches a mutating live chunk from an active snapshot
+
+---
+
+## Performance Notes
+
+Chunk storage is optimized for the current world-owned model:
+
+* block, light, and fluid payloads are flat contiguous arrays
+* snapshots capture shared immutable storage handles and source versions
+* live chunk mutation detaches storage only when an active snapshot still references it
+* async results must validate block/content/light versions before publication
+* dirty mesh queues deduplicate chunk coordinates before scheduling
+
+Workers must never call world lookup APIs. The simulation/main thread prepares all chunk and neighbor inputs up front, and workers consume only snapshot data.
 
 ---
 

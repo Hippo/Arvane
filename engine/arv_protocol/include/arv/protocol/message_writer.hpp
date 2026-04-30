@@ -46,8 +46,10 @@ public:
     static_assert(std::is_integral_v<T> || std::is_enum_v<T>);
     using Raw = detail::WireValueTypeT<T>;
     const Raw raw = static_cast<Raw>(value);
+    const usize offset = bytes_.size();
+    bytes_.resize(offset + sizeof(Raw));
     for (usize i = 0; i < sizeof(Raw); ++i) {
-      bytes_.push_back(static_cast<u8>((raw >> (i * 8U)) & 0xFFU));
+      bytes_[offset + i] = static_cast<u8>((raw >> (i * 8U)) & 0xFFU);
     }
   }
 
@@ -80,7 +82,8 @@ private:
 
 class MessageReader {
 public:
-  explicit MessageReader(std::span<const u8> bytes) : bytes_(bytes) {}
+  explicit MessageReader(std::span<const u8> bytes) : bytes_(bytes) {
+  }
 
   template<typename T>
   [[nodiscard]] Expected<T, ProtocolError> read() {

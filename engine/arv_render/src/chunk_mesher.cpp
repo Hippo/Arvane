@@ -1,7 +1,11 @@
 #include "arv/render/chunk_mesher.hpp"
 
+#include "arv/core/perf_stats.hpp"
+#include "arv/core/profiling.hpp"
+
 #include <algorithm>
 #include <array>
+#include <atomic>
 
 namespace arv::render {
 namespace {
@@ -59,6 +63,36 @@ constexpr std::array<ChunkFaceGeometry, voxel::BlockFaceCount> ChunkCubeFaces{{
     },
 }};
 
+constexpr std::array<voxel::BlockFace, 4> HorizontalFluidFaces{{
+    voxel::BlockFace::PositiveX,
+    voxel::BlockFace::NegativeX,
+    voxel::BlockFace::PositiveZ,
+    voxel::BlockFace::NegativeZ,
+}};
+
+struct MeshReserveHints {
+  std::atomic<usize> opaque_vertex_bytes{voxel::ChunkVolume * 3U * sizeof(ChunkVertex)};
+  std::atomic<usize> opaque_indices{voxel::ChunkVolume * 6U};
+  std::atomic<usize> transparent_vertex_bytes{voxel::ChunkVolume * sizeof(ChunkVertex)};
+  std::atomic<usize> transparent_indices{voxel::ChunkVolume * 6U};
+};
+
+MeshReserveHints& mesh_reserve_hints() {
+  static MeshReserveHints hints;
+  return hints;
+}
+
+void update_high_water(std::atomic<usize>& high_water, usize value) noexcept {
+  usize current = high_water.load(std::memory_order_relaxed);
+  while (value > current &&
+         !high_water.compare_exchange_weak(
+             current,
+             value,
+             std::memory_order_relaxed,
+             std::memory_order_relaxed)) {
+  }
+}
+
 [[nodiscard]] const ChunkFaceGeometry& face_geometry(voxel::BlockFace face) noexcept {
   return ChunkCubeFaces[voxel::face_index(face)];
 }
@@ -67,8 +101,10 @@ void ensure_transparent_capacity(CpuMeshBuffer& output) {
   if (!output.vertex_bytes.empty() || !output.indices.empty()) {
     return;
   }
-  output.vertex_bytes.reserve(voxel::ChunkVolume * sizeof(ChunkVertex));
-  output.indices.reserve(voxel::ChunkVolume * 6U);
+  const MeshReserveHints& hints = mesh_reserve_hints();
+  output.vertex_bytes.reserve(
+      hints.transparent_vertex_bytes.load(std::memory_order_relaxed));
+  output.indices.reserve(hints.transparent_indices.load(std::memory_order_relaxed));
 }
 
 void emit_quad(
@@ -103,7 +139,7 @@ void emit_quad(
                                               ? flipped_indices
                                               : indices;
   for (const u8 index : face_indices) {
-    output.indices.push_back(base_index + index);
+    output.indices.emplace_back(base_index + index);
   }
 }
 
@@ -133,7 +169,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] bool is_ao_occluder(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     const voxel::BlockRegistry& registry,
     SectionLocalPos local) noexcept {
   const voxel::BlockVariantRecord* variant = registry.variant(voxel::snapshot_block(snapshot, local));
@@ -175,7 +211,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] u8 corner_ao(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     const voxel::BlockRegistry& registry,
     SectionLocalPos local,
     const ChunkFaceGeometry& face,
@@ -188,7 +224,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] std::array<u8, 4> face_ao(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     const voxel::BlockRegistry& registry,
     SectionLocalPos local,
     const ChunkFaceGeometry& face) noexcept {
@@ -205,7 +241,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] bool block_occludes_fluid_face(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     const voxel::BlockRegistry& registry,
     SectionLocalPos neighbor_local,
     voxel::BlockFace face) noexcept {
@@ -216,7 +252,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] bool current_block_allows_fluid_render(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     const voxel::BlockRegistry& registry,
     SectionLocalPos local) noexcept {
   const voxel::BlockVariantID block = voxel::snapshot_block(snapshot, local);
@@ -233,7 +269,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] u8 fluid_height_with_above(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local,
     voxel::FluidCell fluid) noexcept {
   if (same_fluid_type(fluid, voxel::snapshot_fluid(snapshot, offset_local(local, {0, 1, 0})))) {
@@ -243,7 +279,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] u8 fluid_corner_height(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local,
     voxel::FluidCell self,
     Vec3i corner) noexcept {
@@ -278,7 +314,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] std::array<Vec3i, 4> fluid_top_corners(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local,
     voxel::FluidCell fluid) noexcept {
   const std::array<Vec3i, 4> corners{{
@@ -295,7 +331,7 @@ void emit_cube_face(
 }
 
 [[nodiscard]] std::array<Vec3i, 4> fluid_side_corners(
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local,
     voxel::FluidCell fluid,
     voxel::BlockFace face) noexcept {
@@ -371,7 +407,7 @@ void emit_cube_face(
 
 void emit_fluid_cell(
     CpuMeshBuffer& output,
-    const voxel::ChunkSnapshot& snapshot,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
     const voxel::BlockRegistry& registry,
     const voxel::BlockRenderData* render_data,
     voxel::BlockVariantID water_variant,
@@ -402,12 +438,7 @@ void emit_fluid_cell(
         water_material_hints(fluid, voxel::BlockFace::PositiveY));
   }
 
-  for (const voxel::BlockFace face : {
-           voxel::BlockFace::PositiveX,
-           voxel::BlockFace::NegativeX,
-           voxel::BlockFace::PositiveZ,
-           voxel::BlockFace::NegativeZ,
-       }) {
+  for (const voxel::BlockFace face : HorizontalFluidFaces) {
     const ChunkFaceGeometry& geometry = face_geometry(face);
     const SectionLocalPos neighbor = offset_local(local, geometry.neighbor_offset);
     if (same_fluid_type(fluid, voxel::snapshot_fluid(snapshot, neighbor)) ||
@@ -452,6 +483,11 @@ ChunkMeshData build_chunk_mesh(
     const voxel::ChunkSnapshot& snapshot,
     const voxel::BlockRegistry& registry,
     const voxel::BlockRenderData* render_data) {
+  ARV_PROFILE_ZONE("Chunk meshing");
+  const core::ScopedThreadTiming timing{core::PerfMetric::MeshingTask};
+  const voxel::ChunkSnapshotStoragePointers snapshot_storage =
+      voxel::make_chunk_snapshot_storage_pointers(snapshot);
+
   ChunkMeshData mesh;
   mesh.world_id = world_id;
   mesh.coord = snapshot.coord;
@@ -459,25 +495,30 @@ ChunkMeshData build_chunk_mesh(
   mesh.source_content_version = snapshot.source_content_version;
   mesh.source_light_version = snapshot.source_light_version;
 
-  mesh.opaque.vertex_bytes.reserve(voxel::ChunkVolume * 3U * sizeof(ChunkVertex));
-  mesh.opaque.indices.reserve(voxel::ChunkVolume * 6U);
+  const MeshReserveHints& hints = mesh_reserve_hints();
+  mesh.opaque.vertex_bytes.reserve(
+      hints.opaque_vertex_bytes.load(std::memory_order_relaxed));
+  mesh.opaque.indices.reserve(hints.opaque_indices.load(std::memory_order_relaxed));
   const voxel::BlockVariantID water_variant =
       registry.find_variant("arvane:water").value_or(voxel::AirBlockVariantID);
+  const auto& center_blocks = snapshot.blocks();
+  const auto& center_fluids = snapshot.fluids();
 
   for (i32 z = 0; z < ChunkSize; ++z) {
     for (i32 y = 0; y < ChunkSize; ++y) {
       for (i32 x = 0; x < ChunkSize; ++x) {
         const SectionLocalPos local{{x, y, z}};
+        const usize cell_index = voxel::local_index(local);
         emit_fluid_cell(
             mesh.transparent,
-            snapshot,
+            snapshot_storage,
             registry,
             render_data,
             water_variant,
             local,
-            snapshot.fluids()[voxel::local_index(local)]);
+            center_fluids[cell_index]);
 
-        const voxel::BlockVariantID self_id = snapshot.blocks()[voxel::local_index(local)];
+        const voxel::BlockVariantID self_id = center_blocks[cell_index];
         const voxel::BlockVariantRecord* self = registry.variant(self_id);
         if (self == nullptr || self->render_category == voxel::RenderCategory::None) {
           continue;
@@ -497,15 +538,16 @@ ChunkMeshData build_chunk_mesh(
 
         for (const ChunkFaceGeometry& face : ChunkCubeFaces) {
           const SectionLocalPos neighbor_local = offset_local(local, face.neighbor_offset);
-          const voxel::BlockVariantID neighbor_id = voxel::snapshot_block(snapshot, neighbor_local);
+          const voxel::BlockVariantID neighbor_id =
+              voxel::snapshot_block(snapshot_storage, neighbor_local);
           if (registry.should_emit_face(self_id, neighbor_id, face.face)) {
             emit_cube_face(
                 output,
                 local,
                 face,
                 face_uvs_for(self_id, face.face, render_data),
-                voxel::snapshot_light(snapshot, neighbor_local),
-                face_ao(snapshot, registry, local, face),
+                voxel::snapshot_light(snapshot_storage, neighbor_local),
+                face_ao(snapshot_storage, registry, local, face),
                 material_hints);
           }
         }
@@ -513,6 +555,12 @@ ChunkMeshData build_chunk_mesh(
     }
   }
 
+  update_high_water(mesh_reserve_hints().opaque_vertex_bytes, mesh.opaque.vertex_bytes.size());
+  update_high_water(mesh_reserve_hints().opaque_indices, mesh.opaque.indices.size());
+  update_high_water(
+      mesh_reserve_hints().transparent_vertex_bytes,
+      mesh.transparent.vertex_bytes.size());
+  update_high_water(mesh_reserve_hints().transparent_indices, mesh.transparent.indices.size());
   return mesh;
 }
 

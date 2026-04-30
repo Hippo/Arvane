@@ -560,6 +560,21 @@ callable without changing call sites.
 * Avoid `std::shared_ptr` in hot paths; prefer explicit ownership, handles, indices, or arenas.
 * Prefer `emplace_back` over `push_back` when possible.
 
+## Arena and Profiling Conventions
+
+`arv::Arena` is the default monotonic allocator for short-lived engine scratch memory. `arv::FrameArena` resets once per frame on the main/render thread, and each worker thread owns a reusable arena reset before job execution.
+
+Rules:
+
+* arenas are for temporary trivially destructible data
+* arena allocations must not escape the arena lifetime
+* worker results that cross threads must own their published memory
+* use `ArenaResource` when a PMR container is appropriate for scoped temporary work
+
+Profiling is centralized through `arv/core/profiling.hpp`. Use named Tracy zones for frame, render, simulation, chunk generation, meshing, lighting, snapshots, GPU waits, and expensive chunk access. Timing histograms live in `arv/core/perf_stats.hpp` and record fixed-size per-thread p50/p95/p99 samples without hot-path heap allocation. The desktop debug menu reads aggregate atomic snapshots from the same timing path, so worker timing remains visible without locking or reading thread-local storage from the UI.
+
+`ARVANE_ENABLE_PROFILING=OFF` must compile profiling work out of hot paths: no Tracy zones, no timing clock reads, no queue-latency recording, no histogram atomics, and no debug-menu frame sampling. Use `core::profiling_enabled()` or `core::perf_stats_enabled()` before adding new profiling-only work outside the existing macros/scoped timers.
+
 ---
 
 ## 15. Summary of Critical Rules

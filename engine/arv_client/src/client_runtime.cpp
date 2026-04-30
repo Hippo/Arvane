@@ -176,7 +176,7 @@ void ClientRuntime::handle_chat_input(const InputFrame& input, bool was_chat_ope
   }
   if (was_chat_open && input.text_submit_pressed) {
     if (!chat_draft_.empty()) {
-      chat_messages_.push_back(chat_draft_);
+      chat_messages_.emplace_back(chat_draft_);
       if (chat_messages_.size() > MaxChatMessages) {
         chat_messages_.erase(chat_messages_.begin());
       }
@@ -272,7 +272,7 @@ void ClientRuntime::handle_message(const std::vector<u8>& packet) {
       if (!chunk_data) {
         return;
       }
-      received_chunk_data_.push_back(std::move(chunk_data.value()));
+      received_chunk_data_.emplace_back(std::move(chunk_data.value()));
       return;
     }
     case protocol::MessageType::ChunkUnload: {
@@ -280,7 +280,7 @@ void ClientRuntime::handle_message(const std::vector<u8>& packet) {
       if (!unload) {
         return;
       }
-      received_chunk_unloads_.push_back(unload.value());
+      received_chunk_unloads_.emplace_back(unload.value());
       return;
     }
     default:
@@ -292,10 +292,10 @@ net::NetworkResult ClientRuntime::send_input_batch(TickIndex tick_index) {
   const player::PlayerCommand command = player_controller_.consume_command(tick_index);
   protocol::ClientInputBatch batch;
   batch.first_input_tick = tick_index;
-  batch.inputs.push_back(protocol::input_sample_from_command(command));
+  batch.inputs.emplace_back(protocol::input_sample_from_command(command));
 
   const std::vector<u8> payload = protocol::serialize_client_input_batch(batch);
-  const std::vector<u8> packet = protocol::serialize_envelope(
+  std::vector<u8> packet = protocol::serialize_envelope(
       {protocol::CurrentProtocolVersion, protocol::MessageType::ClientInputBatch, 0, 0, 0, 0},
       payload);
   return transport_->send(

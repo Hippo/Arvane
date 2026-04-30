@@ -11,10 +11,10 @@ namespace arv::render {
     bool side0,
     bool side1,
     bool corner) noexcept {
-  if (side0 && side1) {
-    return 0;
-  }
-  return static_cast<u8>(3U - static_cast<u8>(side0) - static_cast<u8>(side1) - static_cast<u8>(corner));
+  constexpr std::array<u8, 8> AoLut{{3, 2, 2, 0, 2, 1, 1, 0}};
+  return AoLut[static_cast<usize>(side0) |
+               (static_cast<usize>(side1) << 1U) |
+               (static_cast<usize>(corner) << 2U)];
 }
 
 [[nodiscard]] constexpr bool should_flip_voxel_ao_quad(

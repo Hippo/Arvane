@@ -35,3 +35,14 @@ Benchmarks should focus on stable engine hot paths:
 Benchmark inputs must be deterministic. Avoid benchmarking rendering/GPU behavior in Google Benchmark unless the benchmark is explicitly isolated and documented.
 
 Performance benchmarks should not assert exact timings in normal CI. They are used for comparison, regression investigation, and local profiling.
+
+## Stable Scene
+
+`BM_StableCameraPathMeshing` defines the current stable CPU-side scene benchmark:
+
+* fixed 9 x 9 chunk-section terrain field
+* deterministic noisy terrain contents
+* fixed eight-step camera/chunk path
+* 3 x 3 visible meshing workload around each path point
+
+Use it to compare meshing throughput, snapshot overhead, and chunk-access changes before and after performance work.

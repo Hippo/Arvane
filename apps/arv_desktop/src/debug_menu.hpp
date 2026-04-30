@@ -7,12 +7,15 @@
 #include "arv/sched/scheduler.hpp"
 #include "arv/server/server_runtime.hpp"
 
+#include <array>
 #include <string>
 #include <vector>
 
 namespace arv::desktop {
 
 struct DebugMenuState {
+  static constexpr usize ProfileFrameHistoryCapacity = 240;
+
   bool open{};
   std::string item_filter{};
   std::string selected_item_name{};
@@ -23,6 +26,11 @@ struct DebugMenuState {
   bool show_lighting_view{};
   std::string console_command{};
   std::vector<std::string> console_log{};
+  bool profile_sampling_paused{};
+  u32 profile_frame_sample_index{};
+  u32 profile_frame_sample_count{};
+  std::array<f32, ProfileFrameHistoryCapacity> profile_frame_delta_ms{};
+  std::array<f32, ProfileFrameHistoryCapacity> profile_frame_work_ms{};
 };
 
 struct DebugMenuFrameInfo {

@@ -5,7 +5,35 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
+#include <string_view>
+
+namespace {
+
+class ScopedCurrentPath {
+public:
+  explicit ScopedCurrentPath(const std::filesystem::path& next)
+      : previous_(std::filesystem::current_path()) {
+    std::filesystem::current_path(next);
+  }
+
+  ~ScopedCurrentPath() {
+    std::error_code error;
+    std::filesystem::current_path(previous_, error);
+  }
+
+private:
+  std::filesystem::path previous_;
+};
+
+void write_file(const std::filesystem::path& path, std::string_view text) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::trunc);
+  output << text;
+}
+
+} // namespace
 
 TEST(ConfigTests, ParsesYamlConfigWithDefaults) {
   const auto result = arv::io::parse_config_yaml(R"(
@@ -85,6 +113,9 @@ physics:
   breath_seconds: 18.0
 render:
   max_chunk_mesh_uploads_per_frame: 3
+  frame_pacing_enabled: true
+  frame_pacing_target_fps: 120
+  frame_pacing_spin_us: 250
 chunk_pipeline:
   max_generation_jobs_per_frame: 2
   max_generation_results_per_tick: 3
@@ -156,6 +187,9 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().physics.underwater_buoyancy, 1.25F);
   EXPECT_FLOAT_EQ(result.value().physics.breath_seconds, 18.0F);
   EXPECT_EQ(result.value().render.max_chunk_mesh_uploads_per_frame, 3U);
+  EXPECT_TRUE(result.value().render.frame_pacing_enabled);
+  EXPECT_EQ(result.value().render.frame_pacing_target_fps, 120U);
+  EXPECT_EQ(result.value().render.frame_pacing_spin_us, 250U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_jobs_per_frame, 2U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_results_per_tick, 3U);
   EXPECT_EQ(result.value().chunk_pipeline.max_lighting_results_per_tick, 4U);
@@ -300,6 +334,15 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomeAssets) {
   auto result = arv::io::load_config({});
   ASSERT_TRUE(result);
 
+  EXPECT_EQ(
+      result.value().paths.arvane_home_path(),
+      result.value().paths.project_root / "arvane_home");
+  EXPECT_EQ(
+      result.value().paths.assets_path(),
+      result.value().paths.project_root / "arvane_home" / "assets");
+  EXPECT_EQ(
+      result.value().paths.assets_path().string().find("/.local/share/Trash/"),
+      std::string::npos);
   EXPECT_TRUE(std::filesystem::exists(result.value().paths.config_path() / "blocks.json"));
   EXPECT_TRUE(std::filesystem::exists(result.value().paths.assets_path() / "shaders/world/chunk.vert"));
   EXPECT_EQ(
@@ -317,6 +360,33 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomeAssets) {
   EXPECT_EQ(
       result.value().paths.input_bindings_file,
       result.value().paths.config_path() / "input_bindings.yaml");
+}
+
+TEST(ConfigTests, LoadConfigDefaultsPreferProjectRootOverWorkingDirectoryRuntimeHome) {
+  const std::filesystem::path temp_root =
+      std::filesystem::temp_directory_path() /
+      ("arvane_stale_runtime_" +
+       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::error_code error;
+  std::filesystem::remove_all(temp_root, error);
+
+  write_file(temp_root / "arvane_home/config/blocks.json", "{}\n");
+  write_file(temp_root / "arvane_home/assets/shaders/world/chunk.vert", "#version 330 core\n");
+
+  {
+    const ScopedCurrentPath scoped_current_path{temp_root};
+    auto result = arv::io::load_config({});
+    ASSERT_TRUE(result);
+
+    EXPECT_NE(result.value().paths.project_root, temp_root);
+    EXPECT_NE(
+        result.value().paths.assets_path(),
+        temp_root / "arvane_home" / "assets");
+    EXPECT_TRUE(std::filesystem::exists(
+        result.value().paths.assets_path() / "shaders/world/chunk.vert"));
+  }
+
+  std::filesystem::remove_all(temp_root, error);
 }
 
 TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
