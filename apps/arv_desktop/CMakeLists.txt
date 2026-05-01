@@ -3,6 +3,15 @@ set(ARV_CLIENT_SOURCES
   src/app_config.cpp
   src/asset_helpers.cpp
   src/chunk_view.cpp
+  src/desktop_application.cpp
+  src/desktop_assets.cpp
+  src/desktop_frame_pacing.cpp
+  src/desktop_input_routing.cpp
+  src/desktop_menu_state.cpp
+  src/desktop_render_builders.cpp
+  src/desktop_runtime_config.cpp
+  src/desktop_save_helpers.cpp
+  src/desktop_session.cpp
   src/debug_imgui.cpp
   src/debug_menu.cpp
   src/input_adapter.cpp

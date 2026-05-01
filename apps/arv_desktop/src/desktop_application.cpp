@@ -1,0 +1,877 @@
+#include "desktop_application.hpp"
+
+#include "app_config.hpp"
+#include "asset_helpers.hpp"
+#include "debug_imgui.hpp"
+#include "debug_menu.hpp"
+#include "desktop_assets.hpp"
+#include "desktop_frame_pacing.hpp"
+#include "desktop_input_routing.hpp"
+#include "desktop_menu_state.hpp"
+#include "desktop_render_builders.hpp"
+#include "desktop_runtime_config.hpp"
+#include "desktop_save_helpers.hpp"
+#include "desktop_session.hpp"
+#include "input_adapter.hpp"
+#include "renderer_bootstrap.hpp"
+#include "ui_model.hpp"
+
+#include "arv/asset/font.hpp"
+#include "arv/asset/resource.hpp"
+#include "arv/client/client_runtime.hpp"
+#include "arv/core/arena.hpp"
+#include "arv/core/log.hpp"
+#include "arv/core/perf_stats.hpp"
+#include "arv/core/profiling.hpp"
+#include "arv/io/config.hpp"
+#include "arv/io/input_bindings.hpp"
+#include "arv/platform/glfw_window.hpp"
+#include "arv/render/opengl_renderer.hpp"
+#include "arv/sched/scheduler.hpp"
+#include "arv/ui/ui.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <memory>
+#include <optional>
+#include <span>
+#include <utility>
+
+namespace arv::desktop {
+namespace {
+
+struct FrameTiming {
+  std::chrono::steady_clock::time_point now{};
+  std::chrono::duration<Seconds> delta{};
+  double frame_delta_ms{};
+  std::chrono::steady_clock::time_point frame_work_start{};
+};
+
+class DesktopFrameLoop {
+public:
+  DesktopFrameLoop(
+      const io::EngineConfig& config,
+      platform::OpenGLWindow& window,
+      render::OpenGLRenderer& renderer,
+      DebugImGuiLayer& debug_imgui,
+      DebugMenuState& debug_menu,
+      DesktopLoadedAssets& assets,
+      sched::Scheduler& world_jobs,
+      DesktopSessionManager& sessions,
+      ui::UiTree& ui_tree,
+      ui::FontUiTextMeasurer& ui_text_measurer,
+      DesktopMenuState& menu_state,
+      ui::UIScreenManager& screen_manager)
+      : config_(config),
+        window_(window),
+        renderer_(renderer),
+        debug_imgui_(debug_imgui),
+        debug_menu_(debug_menu),
+        assets_(assets),
+        world_jobs_(world_jobs),
+        sessions_(sessions),
+        ui_tree_(ui_tree),
+        ui_text_measurer_(ui_text_measurer),
+        menu_state_(menu_state),
+        screen_manager_(screen_manager),
+        framebuffer_(window.framebuffer_size()) {
+    const auto start = std::chrono::steady_clock::now();
+    previous_time_ = start;
+    app_start_time_ = start;
+    last_fps_display_time_ = start;
+  }
+
+  [[nodiscard]] int run() {
+    while (!window_.should_close()) {
+      ARV_PROFILE_ZONE("Frame time");
+      FrameTiming timing = begin_frame();
+      const platform::InputSnapshot platform_input =
+          poll_platform_input_and_begin_debug_frame(timing);
+
+      DesktopGameSession* active_session = sessions_.active_session();
+      const bool has_session = active_session != nullptr && active_session->client != nullptr;
+      const bool was_inventory_open = has_session && active_session->client->inventory_open();
+
+      ui::UIContext menu_context = make_menu_context();
+      handle_pause_menu_input(platform_input, menu_context, active_session, has_session);
+
+      client::InputFrame client_input =
+          has_session ? to_client_input(platform_input) : client::InputFrame{};
+      bool inventory_changed_by_ui = route_input(
+          platform_input,
+          menu_context,
+          active_session,
+          has_session,
+          client_input);
+
+      if (!process_menu_commands()) {
+        return 1;
+      }
+
+      active_session = sessions_.active_session();
+      const bool has_active_session =
+          active_session != nullptr && active_session->client != nullptr;
+      const bool has_active_integrated_session =
+          has_active_session && active_session->integrated_server != nullptr;
+
+      submit_client_input_and_update_cursor(
+          active_session,
+          has_active_session,
+          was_inventory_open,
+          std::move(client_input),
+          inventory_changed_by_ui);
+
+      bool fixed_tick_ran = false;
+      if (has_active_session &&
+          !update_simulation_and_chunks(*active_session, timing.delta, fixed_tick_ran)) {
+        return 1;
+      }
+
+      update_framebuffer_size();
+
+      render::FramePacket frame;
+      usize visible_chunk_count = build_world_frame(
+          frame,
+          active_session,
+          has_active_session,
+          timing.now);
+
+      render_debug_menu_if_available(
+          active_session,
+          has_active_integrated_session,
+          timing,
+          visible_chunk_count);
+
+      build_ui(
+          frame,
+          platform_input,
+          menu_context,
+          active_session,
+          has_active_session,
+          has_active_integrated_session,
+          fixed_tick_ran);
+
+      submit_render_and_present(
+          std::move(frame),
+          timing,
+          has_active_session,
+          active_session);
+      ARV_PROFILE_FRAME_MARK("Frame");
+    }
+
+    return 0;
+  }
+
+private:
+  [[nodiscard]] ui::UIContext make_menu_context() {
+    return {
+        ui_tree_,
+        {
+            static_cast<f32>(framebuffer_.width),
+            static_cast<f32>(framebuffer_.height),
+        },
+        &menu_state_,
+        &menu_state_,
+        &screen_manager_};
+  }
+
+  [[nodiscard]] FrameTiming begin_frame() {
+    frame_arena_.begin_frame();
+    const auto now = std::chrono::steady_clock::now();
+    const std::chrono::duration<Seconds> delta = now - previous_time_;
+    previous_time_ = now;
+    const double frame_delta_ms =
+        std::chrono::duration<double, std::milli>(delta).count();
+    ++profile_frame_index_;
+    core::set_current_profile_frame_index(profile_frame_index_);
+    core::record_thread_timing(
+        core::PerfMetric::FrameDelta,
+        frame_delta_ms,
+        "main/render");
+
+    update_fps_sample(now, delta.count());
+
+    std::chrono::steady_clock::time_point frame_work_start{};
+    if constexpr (core::profiling_enabled()) {
+      frame_work_start = std::chrono::steady_clock::now();
+    }
+    return {now, delta, frame_delta_ms, frame_work_start};
+  }
+
+  void update_fps_sample(
+      std::chrono::steady_clock::time_point now,
+      Seconds delta_seconds) {
+    ++fps_sample_frames_;
+    fps_sample_seconds_ += delta_seconds;
+    if (displayed_fps_ == 0U ||
+        now - last_fps_display_time_ >= FpsHudRefreshInterval) {
+      displayed_fps_ = fps_sample_seconds_ > 0.0F
+                           ? static_cast<u32>(
+                                 std::round(static_cast<double>(fps_sample_frames_) /
+                                            static_cast<double>(fps_sample_seconds_)))
+                           : 0U;
+      last_fps_display_time_ = now;
+      fps_sample_frames_ = 0;
+      fps_sample_seconds_ = 0.0F;
+    }
+  }
+
+  [[nodiscard]] platform::InputSnapshot poll_platform_input_and_begin_debug_frame(
+      const FrameTiming& timing) {
+    platform::OpenGLWindow::poll_events();
+    platform::InputSnapshot platform_input = window_.poll_input();
+    if (platform_input.debug_menu_toggle_pressed) {
+      debug_menu_.open = !debug_menu_.open;
+    }
+    debug_imgui_.begin_frame(
+        window_.native_handle(),
+        platform_input,
+        framebuffer_,
+        timing.delta.count());
+    return platform_input;
+  }
+
+  void handle_pause_menu_input(
+      const platform::InputSnapshot& platform_input,
+      ui::UIContext& menu_context,
+      DesktopGameSession* active_session,
+      bool has_session) {
+    if (debug_menu_.open || !platform_input.pause_menu_pressed) {
+      return;
+    }
+    if (screen_manager_.has_active_screen()) {
+      (void)screen_manager_.handle_cancel(menu_context);
+    } else if (has_session && !active_session->client->inventory_open() &&
+               !active_session->client->chat_open()) {
+      screen_manager_.push(ui::make_pause_menu_screen());
+    } else if (!has_session) {
+      screen_manager_.push(ui::make_main_menu_screen());
+    }
+  }
+
+  [[nodiscard]] bool route_input(
+      const platform::InputSnapshot& platform_input,
+      ui::UIContext& menu_context,
+      DesktopGameSession* active_session,
+      bool has_session,
+      client::InputFrame& client_input) {
+    const bool menu_screen_open = screen_manager_.has_active_screen();
+    if (debug_menu_.open || menu_screen_open) {
+      client_input = {};
+    }
+
+    bool inventory_changed_by_ui = false;
+    if (!debug_menu_.open && menu_screen_open) {
+      (void)route_screen_mouse_input(screen_manager_, menu_context, platform_input);
+      if (!platform_input.text_input.empty()) {
+        (void)screen_manager_.handle_text_input(platform_input.text_input, menu_context);
+      }
+      if (platform_input.text_backspace_pressed) {
+        (void)screen_manager_.handle_backspace(menu_context);
+      }
+      if (platform_input.text_submit_pressed) {
+        (void)screen_manager_.handle_submit(menu_context);
+      }
+    } else if (!debug_menu_.open && has_session && active_session->client->inventory_open()) {
+      inventory_changed_by_ui = route_inventory_mouse_input(
+          ui_tree_,
+          *active_session->client,
+          platform_input,
+          active_session->client->inventory_cursor_stack().has_value());
+    } else if (!debug_menu_.open && has_session && active_session->client->chat_open()) {
+      route_ui_mouse_focus(ui_tree_, platform_input);
+    }
+    return inventory_changed_by_ui;
+  }
+
+  [[nodiscard]] bool process_menu_commands() {
+    if (menu_state_.take_back_to_main_menu_request()) {
+      if (!sessions_.save_and_shutdown()) {
+        return false;
+      }
+      menu_state_.refresh_worlds();
+    }
+    if (const std::optional<ui::DeleteSinglePlayerSaveCommand> command =
+            menu_state_.take_delete_save_request();
+        command.has_value()) {
+      sessions_.delete_singleplayer_save(command.value());
+      menu_state_.refresh_worlds();
+    }
+    if (const std::optional<ui::JoinServerCommand> command =
+            menu_state_.take_join_server_request();
+        command.has_value()) {
+      if (sessions_.start_remote(command.value())) {
+        screen_manager_.clear();
+      } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
+        screen_manager_.push(ui::make_multi_player_menu_screen());
+      }
+    }
+    if (const std::optional<ui::CreateWorldCommand> command =
+            menu_state_.take_create_world_request();
+        command.has_value()) {
+      const std::string server_save_name =
+          unique_server_save_name(config_, command->name);
+      const u64 seed = parse_or_generate_seed(command->seed);
+      if (sessions_.start_singleplayer(
+              server_save_name,
+              "default",
+              seed,
+              true,
+              command->name)) {
+        menu_state_.refresh_worlds();
+        screen_manager_.clear();
+      } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
+        screen_manager_.push(ui::make_single_player_menu_screen());
+      }
+    }
+    if (const std::optional<ui::StartSinglePlayerCommand> command =
+            menu_state_.take_start_singleplayer_request();
+        command.has_value()) {
+      if (sessions_.start_singleplayer(
+              command->server_save_name,
+              command->world_name,
+              std::nullopt,
+              false,
+              {})) {
+        screen_manager_.clear();
+      } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
+        screen_manager_.push(ui::make_single_player_menu_screen());
+      }
+    }
+    if (menu_state_.quit_requested) {
+      window_.request_close();
+    }
+    return true;
+  }
+
+  void submit_client_input_and_update_cursor(
+      DesktopGameSession* active_session,
+      bool has_active_session,
+      bool was_inventory_open,
+      client::InputFrame client_input,
+      bool inventory_changed_by_ui) {
+    if (has_active_session) {
+      active_session->client->submit_input(std::move(client_input));
+    }
+    if (has_active_session && was_inventory_open && !active_session->client->inventory_open()) {
+      (void)active_session->client->request_inventory_close();
+      inventory_changed_by_ui = true;
+    }
+    if (has_active_session && inventory_changed_by_ui) {
+      sessions_.refresh_inventory_slots(*active_session);
+    }
+    window_.set_cursor_captured(
+        has_active_session &&
+        !(active_session->client->inventory_open() || active_session->client->chat_open() ||
+          debug_menu_.open || screen_manager_.blocks_gameplay_input()));
+  }
+
+  [[nodiscard]] bool update_simulation_and_chunks(
+      DesktopGameSession& active_session,
+      std::chrono::duration<Seconds> delta,
+      bool& fixed_tick_ran) {
+    active_session.ticks.add_time(delta.count());
+    const bool has_active_integrated_session = active_session.integrated_server != nullptr;
+    const bool singleplayer_paused =
+        has_active_integrated_session && screen_manager_.pauses_singleplayer();
+    while (active_session.ticks.consume_tick()) {
+      ARV_PROFILE_ZONE("Simulation tick");
+      if (!singleplayer_paused) {
+        std::chrono::steady_clock::time_point simulation_start{};
+        if constexpr (core::profiling_enabled()) {
+          simulation_start = std::chrono::steady_clock::now();
+        }
+        if (has_active_integrated_session) {
+          active_session.integrated_server->tick();
+          active_session.client->fixed_tick(active_session.integrated_server->tick_index());
+        } else {
+          ++active_session.client_tick_index;
+          active_session.client->fixed_tick(active_session.client_tick_index);
+        }
+        sessions_.collect_client_chunk_stream(active_session);
+        if constexpr (core::profiling_enabled()) {
+          const auto simulation_end = std::chrono::steady_clock::now();
+          core::record_thread_timing(
+              core::PerfMetric::SimulationTick,
+              std::chrono::duration<double, std::milli>(
+                  simulation_end - simulation_start)
+                  .count(),
+              "main/world");
+        }
+        fixed_tick_ran = true;
+      }
+    }
+
+    sessions_.apply_pending_client_chunk_stream(
+        active_session,
+        config_.chunk_pipeline.max_client_chunk_applies_per_frame,
+        config_.chunk_pipeline.max_client_chunk_unloads_per_frame);
+
+    return update_chunk_view(
+        active_session.client_world,
+        renderer_,
+        world_jobs_,
+        active_session.chunk_view,
+        config_.chunks,
+        config_.chunk_pipeline,
+        camera_chunk_coord(active_session.client->camera()),
+        active_session.min_chunk_y,
+        active_session.max_chunk_y,
+        assets_.block_registry,
+        assets_.block_atlas.render_data);
+  }
+
+  void update_framebuffer_size() {
+    const auto next_framebuffer = window_.framebuffer_size();
+    if (next_framebuffer.width != framebuffer_.width ||
+        next_framebuffer.height != framebuffer_.height) {
+      framebuffer_ = next_framebuffer;
+      renderer_.resize(framebuffer_.width, framebuffer_.height);
+    }
+  }
+
+  [[nodiscard]] usize build_world_frame(
+      render::FramePacket& frame,
+      DesktopGameSession* active_session,
+      bool has_active_session,
+      std::chrono::steady_clock::time_point now) {
+    if (!has_active_session) {
+      return 0;
+    }
+
+    const f32 interpolation_alpha = active_session->ticks.interpolation_alpha();
+    frame = active_session->client->build_frame_packet(
+        interpolation_alpha,
+        framebuffer_.width,
+        framebuffer_.height);
+    const usize visible_chunk_count =
+        populate_chunk_draw_lists(frame, active_session->chunk_view);
+    populate_world_frame_draw_items(
+        frame,
+        *active_session,
+        assets_.entity_render_assets,
+        now,
+        app_start_time_,
+        interpolation_alpha);
+    return visible_chunk_count;
+  }
+
+  void render_debug_menu_if_available(
+      DesktopGameSession* active_session,
+      bool has_active_integrated_session,
+      const FrameTiming& timing,
+      usize visible_chunk_count) {
+    if (!has_active_integrated_session) {
+      return;
+    }
+
+    const DebugMenuResult debug_menu_result = render_debug_menu(
+        debug_menu_,
+        {
+            profile_frame_index_,
+            timing.frame_delta_ms,
+            last_frame_work_ms_,
+            displayed_fps_,
+            visible_chunk_count,
+            active_session->pending_client_chunk_data.size(),
+            active_session->pending_client_chunk_unloads.size(),
+        },
+        *active_session->integrated_server,
+        *active_session->client,
+        assets_.item_registry,
+        assets_.entity_registry,
+        world_jobs_,
+        renderer_,
+        active_session->chunk_view);
+    if (debug_menu_result.inventory_changed) {
+      sessions_.refresh_inventory_slots(*active_session);
+    }
+  }
+
+  void build_ui(
+      render::FramePacket& frame,
+      const platform::InputSnapshot& platform_input,
+      ui::UIContext& menu_context,
+      DesktopGameSession* active_session,
+      bool has_active_session,
+      bool has_active_integrated_session,
+      bool fixed_tick_ran) {
+    if (has_active_session) {
+      update_gameplay_ui_snapshots(
+          *active_session,
+          has_active_integrated_session,
+          fixed_tick_ran);
+      build_gameplay_ui(*active_session, platform_input);
+    } else {
+      ui_tree_.clear();
+    }
+
+    menu_context.viewport = {
+        static_cast<f32>(framebuffer_.width),
+        static_cast<f32>(framebuffer_.height),
+    };
+    if (screen_manager_.has_active_screen()) {
+      screen_manager_.append_to(menu_context);
+    }
+    ui_tree_.layout(
+        {
+            static_cast<f32>(framebuffer_.width),
+            static_cast<f32>(framebuffer_.height),
+        },
+        &ui_text_measurer_);
+    ui::append_ui_draw_commands(
+        ui_tree_,
+        assets_.font_system,
+        assets_.ui_font_stack,
+        frame);
+    if (assets_.font_system.atlas_dirty()) {
+      renderer_.set_ui_font_atlas(
+          texture_upload_from_image(assets_.font_system.atlas_image()));
+      assets_.font_system.clear_atlas_dirty();
+    }
+  }
+
+  void update_gameplay_ui_snapshots(
+      DesktopGameSession& active_session,
+      bool has_active_integrated_session,
+      bool fixed_tick_ran) {
+    if (!active_session.ui_snapshot_initialized || fixed_tick_ran) {
+      sessions_.refresh_inventory_slots(active_session);
+      if (has_active_integrated_session && active_session.client->tab_menu_visible()) {
+        active_session.tab_players =
+            player_list_for_ui(*active_session.integrated_server);
+      } else {
+        active_session.tab_players.clear();
+      }
+      active_session.ui_snapshot_initialized = true;
+    } else if (has_active_integrated_session &&
+               active_session.client->tab_menu_visible() &&
+               active_session.tab_players.empty()) {
+      active_session.tab_players =
+          player_list_for_ui(*active_session.integrated_server);
+    } else if (!active_session.client->tab_menu_visible() &&
+               !active_session.tab_players.empty()) {
+      active_session.tab_players.clear();
+    }
+
+    active_session.chat_lines.clear();
+    for (const std::string& message : active_session.client->chat_messages()) {
+      active_session.chat_lines.emplace_back(message, 1.0F);
+    }
+  }
+
+  void build_gameplay_ui(
+      DesktopGameSession& active_session,
+      const platform::InputSnapshot& platform_input) {
+    ui::build_gameplay_ui(
+        ui_tree_,
+        {
+            {
+                active_session.client->selected_hotbar_slot(),
+                player::DefaultHotbarSlotCount,
+                {
+                    static_cast<f32>(framebuffer_.width),
+                    static_cast<f32>(framebuffer_.height),
+                },
+                std::span<const ui::UiItemStackView>{
+                    active_session.inventory_slots.data(),
+                    std::min<usize>(
+                        active_session.inventory_slots.size(),
+                        player::DefaultHotbarSlotCount)},
+            },
+            {
+                active_session.client->inventory_open(),
+                "Inventory",
+                active_session.client->selected_hotbar_slot(),
+                player::DefaultHotbarSlotCount,
+                {
+                    static_cast<f32>(framebuffer_.width),
+                    static_cast<f32>(framebuffer_.height),
+                },
+                std::span<const ui::UiItemStackView>{
+                    active_session.inventory_slots.data(),
+                    active_session.inventory_slots.size()},
+                active_session.carried_inventory_stack,
+                {
+                    platform_input.cursor_x,
+                    platform_input.cursor_y,
+                },
+            },
+            {
+                true,
+                active_session.client->chat_open(),
+                std::span<const ui::ChatLineView>{
+                    active_session.chat_lines.data(),
+                    active_session.chat_lines.size()},
+                active_session.client->chat_draft(),
+            },
+            {
+                active_session.client->tab_menu_visible(),
+                "Players",
+                "",
+                std::span<const ui::PlayerListEntryView>{
+                    active_session.tab_players.data(),
+                    active_session.tab_players.size()},
+            },
+            {},
+            {true, displayed_fps_},
+        });
+  }
+
+  void submit_render_and_present(
+      render::FramePacket frame,
+      const FrameTiming& timing,
+      bool has_active_session,
+      DesktopGameSession* active_session) {
+    std::chrono::steady_clock::time_point render_submit_start{};
+    if constexpr (core::profiling_enabled()) {
+      render_submit_start = std::chrono::steady_clock::now();
+    }
+    renderer_.submit_frame(std::move(frame));
+    renderer_.render();
+    if constexpr (core::profiling_enabled()) {
+      const auto render_submit_end = std::chrono::steady_clock::now();
+      core::record_thread_timing(
+          core::PerfMetric::RenderSubmit,
+          std::chrono::duration<double, std::milli>(
+              render_submit_end - render_submit_start)
+              .count(),
+          "main/render");
+    }
+    debug_imgui_.render();
+    record_frame_work_profile(timing, has_active_session, active_session);
+    swap_buffers();
+    pace_frame(config_.render, timing.now);
+  }
+
+  void record_frame_work_profile(
+      const FrameTiming& timing,
+      bool has_active_session,
+      DesktopGameSession* active_session) {
+    if constexpr (core::profiling_enabled()) {
+      const auto frame_work_end = std::chrono::steady_clock::now();
+      const double frame_work_ms =
+          std::chrono::duration<double, std::milli>(
+              frame_work_end - timing.frame_work_start)
+              .count();
+      core::record_thread_timing(
+          core::PerfMetric::CpuFrameWork,
+          frame_work_ms,
+          "main/render");
+      last_frame_work_ms_ = frame_work_ms;
+      if (frame_work_ms > static_cast<double>(config_.chunk_pipeline.frame_spike_log_ms)) {
+        core::warn(
+            "frame_profile",
+            "cpu frame work spike {}ms frame_delta={}ms queued_mesh={} pending_uploads={} uploads_last_frame={}",
+            frame_work_ms,
+            timing.frame_delta_ms,
+            has_active_session ? active_session->chunk_view.pending_meshes.size() : 0U,
+            renderer_.pending_mesh_upload_count(),
+            renderer_.mesh_uploads_last_frame());
+      }
+    } else {
+      (void)timing;
+      (void)has_active_session;
+      (void)active_session;
+      last_frame_work_ms_ = 0.0;
+    }
+  }
+
+  void swap_buffers() {
+    ARV_PROFILE_ZONE("GPU wait time");
+    std::chrono::steady_clock::time_point gpu_wait_start{};
+    if constexpr (core::profiling_enabled()) {
+      gpu_wait_start = std::chrono::steady_clock::now();
+    }
+    window_.swap_buffers();
+    if constexpr (core::profiling_enabled()) {
+      const auto gpu_wait_end = std::chrono::steady_clock::now();
+      core::record_thread_timing(
+          core::PerfMetric::GpuWaitTime,
+          std::chrono::duration<double, std::milli>(
+              gpu_wait_end - gpu_wait_start)
+              .count(),
+          "main/render");
+    }
+  }
+
+  const io::EngineConfig& config_;
+  platform::OpenGLWindow& window_;
+  render::OpenGLRenderer& renderer_;
+  DebugImGuiLayer& debug_imgui_;
+  DebugMenuState& debug_menu_;
+  DesktopLoadedAssets& assets_;
+  sched::Scheduler& world_jobs_;
+  DesktopSessionManager& sessions_;
+  ui::UiTree& ui_tree_;
+  ui::FontUiTextMeasurer& ui_text_measurer_;
+  DesktopMenuState& menu_state_;
+  ui::UIScreenManager& screen_manager_;
+  platform::FramebufferSize framebuffer_{};
+  FrameArena frame_arena_{};
+  std::chrono::steady_clock::time_point previous_time_{};
+  std::chrono::steady_clock::time_point app_start_time_{};
+  std::chrono::steady_clock::time_point last_fps_display_time_{};
+  u32 displayed_fps_{};
+  u32 fps_sample_frames_{};
+  Seconds fps_sample_seconds_{};
+  double last_frame_work_ms_{};
+  u64 profile_frame_index_{};
+
+  static constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
+};
+
+} // namespace
+
+int DesktopApplication::run(int argc, char** argv) {
+  core::info("desktop", "starting Arvane desktop client");
+
+  auto config_result = io::load_config(parse_config_options(argc, argv));
+  if (!config_result) {
+    core::error("config", config_result.error().message);
+    return 1;
+  }
+  const io::EngineConfig config = config_result.value();
+  asset::ResourceManager resources(config.paths.assets_path());
+
+  platform::GlfwLibrary glfw;
+  if (!glfw.initialized()) {
+    core::error("platform", "failed to initialize GLFW");
+    return 1;
+  }
+
+  const bool swap_interval_vsync =
+      config.window.vsync && !config.render.frame_pacing_enabled;
+  auto window_result = platform::OpenGLWindow::create({config.window.width,
+                                                       config.window.height,
+                                                       config.window.title,
+                                                       swap_interval_vsync});
+  if (!window_result) {
+    core::error("platform", window_result.error().message);
+    return 1;
+  }
+  core::info(
+      "render",
+      "vsync={} frame_pacing={} target_fps={}",
+      swap_interval_vsync ? "enabled" : "disabled",
+      config.render.frame_pacing_enabled ? "enabled" : "disabled",
+      config.render.frame_pacing_target_fps);
+  platform::OpenGLWindow window = std::move(window_result.value());
+  core::set_profile_thread_name("main/render");
+
+  DebugImGuiLayer debug_imgui;
+  if (!debug_imgui.initialize(window.native_handle())) {
+    core::error("debug_ui", "failed to initialize ImGui debug UI");
+    return 1;
+  }
+  DebugMenuState debug_menu;
+
+  const auto input_bindings_result =
+      io::load_input_bindings_file_or_defaults(config.paths.input_bindings_file);
+  if (!input_bindings_result) {
+    core::warn("input", input_bindings_result.error().message);
+  } else {
+    window.set_input_bindings(input_bindings_result.value());
+  }
+
+  render::OpenGLRenderer renderer;
+  if (!configure_renderer(renderer, resources, config)) {
+    debug_imgui.shutdown();
+    return 1;
+  }
+
+  auto framebuffer = window.framebuffer_size();
+  renderer.resize(framebuffer.width, framebuffer.height);
+
+  auto loaded_assets_result = load_desktop_assets(resources, renderer, config);
+  if (!loaded_assets_result) {
+    core::error(
+        loaded_assets_result.error().category,
+        loaded_assets_result.error().message);
+    debug_imgui.shutdown();
+    renderer.begin_shutdown();
+    return 1;
+  }
+  DesktopLoadedAssets assets = std::move(loaded_assets_result.value());
+  ui::FontUiTextMeasurer ui_text_measurer(assets.font_system, assets.ui_font_stack);
+  ui::UiTree ui_tree;
+
+  const server::ServerChunkStreamingConfig chunk_streaming =
+      make_chunk_streaming_config(config);
+  const world::WorldTickPolicy world_tick_policy =
+      make_world_tick_policy(config.simulation);
+  const voxel::FluidDefinition water_fluid =
+      make_water_fluid_definition(config.simulation);
+  const player::PlayerTuning player_tuning =
+      make_player_tuning(config.physics);
+  const sched::RuntimeThreadBudgetPlan thread_budget =
+      make_runtime_thread_budget_plan(config.jobs);
+
+  sched::Scheduler world_jobs{thread_budget.secondary_workers};
+  core::info(
+      "jobs",
+      "hardware_threads={} reserved_threads={} server_workers={} client_workers={}",
+      thread_budget.hardware_thread_count,
+      thread_budget.reserved_thread_count,
+      thread_budget.primary_worker_thread_count,
+      world_jobs.worker_count());
+
+  DesktopSessionManager sessions{
+      {
+          config,
+          renderer,
+          world_jobs,
+          assets.block_registry,
+          assets.block_registry_hash,
+          assets.item_registry,
+          assets.item_registry_hash,
+          assets.entity_registry,
+          assets.block_atlas,
+          assets.item_atlas,
+          player_tuning,
+          water_fluid,
+          chunk_streaming,
+          world_tick_policy,
+          assets.default_generation_config,
+          thread_budget,
+      }};
+
+  DesktopMenuState menu_state{config.paths.saves_path(), config.paths.server_list_file};
+  ui::UIScreenManager screen_manager;
+  screen_manager.push(ui::make_main_menu_screen());
+
+  DesktopFrameLoop frame_loop{
+      config,
+      window,
+      renderer,
+      debug_imgui,
+      debug_menu,
+      assets,
+      world_jobs,
+      sessions,
+      ui_tree,
+      ui_text_measurer,
+      menu_state,
+      screen_manager};
+  const int loop_result = frame_loop.run();
+
+  const bool save_result = sessions.save_and_shutdown();
+  debug_imgui.shutdown();
+  renderer.begin_shutdown();
+  if (loop_result != 0) {
+    return loop_result;
+  }
+  if (!save_result) {
+    return 1;
+  }
+  core::info("desktop", "shutdown complete");
+  return 0;
+}
+
+int run_desktop_client(int argc, char** argv) {
+  DesktopApplication app;
+  return app.run(argc, argv);
+}
+
+} // namespace arv::desktop
