@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -99,4 +100,72 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
       registry.variant(registry.find_variant("arvane:glass").value());
   ASSERT_NE(glass, nullptr);
   EXPECT_EQ(glass->render_category, arv::voxel::RenderCategory::Transparent);
+}
+
+TEST(BlockRegistryTests, ParsesBlockModelReferencesAndInputTextures) {
+  auto definitions = arv::voxel::parse_block_definitions_json(R"json(
+[
+  {
+    "name": "arvane:air",
+    "render_category": "none",
+    "properties": { "replaceable": true }
+  },
+  {
+    "name": "arvane:stone_stairs",
+    "render_category": "opaque",
+    "model": {
+      "path": "arvane:model/block/stairs",
+      "textures": ["arvane:texture/block/cobblestone"]
+    },
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "opaque": true,
+      "blocks_light": true,
+      "ao_occluder": true
+    }
+  }
+]
+)json");
+  ASSERT_TRUE(definitions);
+
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions.value()));
+  ASSERT_TRUE(registry_result);
+  const arv::voxel::BlockRegistry registry = std::move(registry_result.value());
+
+  const auto stairs_variant = registry.find_variant("arvane:stone_stairs");
+  ASSERT_TRUE(stairs_variant.has_value());
+  const arv::voxel::BlockVariantRecord* stairs = registry.variant(stairs_variant.value());
+  ASSERT_NE(stairs, nullptr);
+  EXPECT_EQ(stairs->model.asset, "arvane:model/block/stairs");
+  ASSERT_EQ(stairs->model.texture_inputs.size(), 1U);
+  EXPECT_EQ(stairs->model.texture_inputs.front(), "arvane:texture/block/cobblestone");
+}
+
+TEST(BlockRegistryTests, BlockModelTexturesCanResolveInputsOrSpecificAssets) {
+  const std::string input_texture = "arvane:texture/block/cobblestone";
+  auto model = arv::voxel::parse_block_model_json(R"json(
+{
+  "textures": ["$0", "stone"],
+  "texture_sizes": [[16, 16], [16, 16]],
+  "boxes": [{
+    "min": [0, 0, 0],
+    "max": [16, 8, 16],
+    "up": {"texture": 0, "uv": [0, 0, 16, 16]},
+    "down": {"texture": -1}
+  }]
+}
+)json",
+                                                  std::span<const std::string>{&input_texture, 1});
+
+  ASSERT_TRUE(model) << model.error().message;
+  ASSERT_EQ(model.value().texture_assets.size(), 2U);
+  EXPECT_EQ(model.value().texture_assets[0], "arvane:texture/block/cobblestone");
+  EXPECT_EQ(model.value().texture_assets[1], "arvane:texture/block/stone");
+  ASSERT_EQ(model.value().boxes.size(), 1U);
+  EXPECT_TRUE(model.value().boxes.front().faces[arv::voxel::face_index(arv::voxel::BlockFace::PositiveY)].has_value());
+  EXPECT_TRUE(model.value().boxes.front().faces[arv::voxel::face_index(arv::voxel::BlockFace::NegativeY)].has_value());
+  EXPECT_LT(
+      model.value().boxes.front().faces[arv::voxel::face_index(arv::voxel::BlockFace::NegativeY)]->texture_index,
+      0);
 }

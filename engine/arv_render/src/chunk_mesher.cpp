@@ -166,6 +166,48 @@ void emit_cube_face(
       material_hints);
 }
 
+[[nodiscard]] std::array<Vec3i, 4> box_face_corners(
+    const voxel::BlockModelBoxRenderData& box,
+    voxel::BlockFace face) noexcept {
+  const Vec3i min = box.min;
+  const Vec3i max = box.max;
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return {{{max.x, min.y, max.z}, {max.x, min.y, min.z}, {max.x, max.y, max.z}, {max.x, max.y, min.z}}};
+    case voxel::BlockFace::NegativeX:
+      return {{{min.x, min.y, min.z}, {min.x, min.y, max.z}, {min.x, max.y, min.z}, {min.x, max.y, max.z}}};
+    case voxel::BlockFace::PositiveY:
+      return {{{min.x, max.y, max.z}, {max.x, max.y, max.z}, {min.x, max.y, min.z}, {max.x, max.y, min.z}}};
+    case voxel::BlockFace::NegativeY:
+      return {{{max.x, min.y, max.z}, {min.x, min.y, max.z}, {max.x, min.y, min.z}, {min.x, min.y, min.z}}};
+    case voxel::BlockFace::PositiveZ:
+      return {{{min.x, min.y, max.z}, {max.x, min.y, max.z}, {min.x, max.y, max.z}, {max.x, max.y, max.z}}};
+    case voxel::BlockFace::NegativeZ:
+      return {{{max.x, min.y, min.z}, {min.x, min.y, min.z}, {max.x, max.y, min.z}, {min.x, max.y, min.z}}};
+  }
+  return {};
+}
+
+[[nodiscard]] bool box_face_is_on_block_boundary(
+    const voxel::BlockModelBoxRenderData& box,
+    voxel::BlockFace face) noexcept {
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return box.max.x == 16;
+    case voxel::BlockFace::NegativeX:
+      return box.min.x == 0;
+    case voxel::BlockFace::PositiveY:
+      return box.max.y == 16;
+    case voxel::BlockFace::NegativeY:
+      return box.min.y == 0;
+    case voxel::BlockFace::PositiveZ:
+      return box.max.z == 16;
+    case voxel::BlockFace::NegativeZ:
+      return box.min.z == 0;
+  }
+  return false;
+}
+
 [[nodiscard]] constexpr SectionLocalPos offset_local(SectionLocalPos local, Vec3i offset) noexcept {
   return {{local.value.x + offset.x, local.value.y + offset.y, local.value.z + offset.z}};
 }
@@ -479,6 +521,91 @@ void emit_cube_face(
   return hints;
 }
 
+[[nodiscard]] bool should_emit_model_boundary_face(
+    const voxel::BlockRegistry& registry,
+    const voxel::BlockVariantRecord& self,
+    voxel::BlockVariantID self_id,
+    voxel::BlockVariantID neighbor_id,
+    voxel::BlockFace face) noexcept {
+  if (self.render_category == voxel::RenderCategory::None) {
+    return false;
+  }
+
+  if (self_id == neighbor_id && self.hide_same_variant_faces) {
+    return false;
+  }
+
+  const voxel::BlockVariantRecord* neighbor = registry.variant(neighbor_id);
+  if (neighbor == nullptr) {
+    return true;
+  }
+
+  return !neighbor->occludes_face[voxel::face_index(voxel::opposite_face(face))];
+}
+
+void emit_model_boxes(
+    CpuMeshBuffer& output,
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
+    const voxel::BlockRegistry& registry,
+    const voxel::BlockRenderData& render_data,
+    voxel::BlockVariantID self_id,
+    const voxel::BlockVariantRecord& self,
+    SectionLocalPos local,
+    VertexMaterialHints material_hints) {
+  const std::span<const voxel::BlockModelBoxRenderData> boxes =
+      render_data.model_boxes(self_id);
+  for (const voxel::BlockModelBoxRenderData& box : boxes) {
+    for (const voxel::BlockFace block_face : voxel::AllBlockFaces) {
+      const usize face_slot = voxel::face_index(block_face);
+      if (!box.faces[face_slot].has_value()) {
+        continue;
+      }
+
+      const ChunkFaceGeometry& cube_face = face_geometry(block_face);
+      const bool boundary_face = box_face_is_on_block_boundary(box, block_face);
+      if (boundary_face) {
+        const SectionLocalPos neighbor_local = offset_local(local, cube_face.neighbor_offset);
+        const voxel::BlockVariantID neighbor_id =
+            voxel::snapshot_block(snapshot, neighbor_local);
+        if (!should_emit_model_boundary_face(
+                registry,
+                self,
+                self_id,
+                neighbor_id,
+                block_face)) {
+          continue;
+        }
+      }
+
+      ChunkFaceGeometry model_face = cube_face;
+      model_face.corners = box_face_corners(box, block_face);
+      if (!boundary_face) {
+        model_face.neighbor_offset = {};
+      }
+
+      const SectionLocalPos light_local =
+          boundary_face ? offset_local(local, cube_face.neighbor_offset) : local;
+      const voxel::LightWord face_light = voxel::snapshot_light(snapshot, light_local);
+      emit_quad(
+          output,
+          local,
+          block_face,
+          model_face.corners,
+          model_face.indices,
+          model_face.flipped_indices,
+          box.faces[face_slot]->uvs,
+          smooth_face_lights(
+              snapshot,
+              local,
+              model_face,
+              model_face.corners,
+              face_light),
+          face_ao(snapshot, registry, local, model_face),
+          material_hints);
+    }
+  }
+}
+
 [[nodiscard]] VertexAnimationId water_animation_id(
     voxel::FluidCell fluid,
     voxel::BlockFace face) noexcept {
@@ -637,10 +764,6 @@ ChunkMeshData build_chunk_mesh(
           continue;
         }
 
-        if (!self->properties.full_cube) {
-          continue;
-        }
-
         CpuMeshBuffer& output = self->render_category == voxel::RenderCategory::Transparent
                                     ? mesh.transparent
                                     : mesh.opaque;
@@ -648,6 +771,25 @@ ChunkMeshData build_chunk_mesh(
           ensure_transparent_capacity(output);
         }
         const VertexMaterialHints material_hints = material_hints_for_block(*self);
+
+        if (!self->model.asset.empty()) {
+          if (render_data != nullptr) {
+            emit_model_boxes(
+                output,
+                snapshot_storage,
+                registry,
+                *render_data,
+                self_id,
+                *self,
+                local,
+                material_hints);
+          }
+          continue;
+        }
+
+        if (!self->properties.full_cube) {
+          continue;
+        }
 
         for (const ChunkFaceGeometry& face : ChunkCubeFaces) {
           const SectionLocalPos neighbor_local = offset_local(local, face.neighbor_offset);

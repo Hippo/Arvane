@@ -4,7 +4,7 @@
       "name": "arvane:pig",
       "display_name": "Pig",
       "category": "passive",
-      "model": "pig.json",
+      "model": "arvane:model/entity/pig",
       "spawnable": true,
       "persistent_by_default": true,
       "replicated_by_default": true

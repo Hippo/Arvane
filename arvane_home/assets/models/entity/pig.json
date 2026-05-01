@@ -525,7 +525,7 @@
     }
   ],
   "textures": [
-    "pig.png"
+    "arvane:texture/entity/pig"
   ],
   "texture_sizes": [
     [

@@ -214,6 +214,37 @@ TEST(HotbarHudTests, BlockItemIconsKeepSideTextureTopAtTop) {
   EXPECT_FLOAT_EQ(right->image.uvs[2].y, 1.0F);
 }
 
+TEST(HotbarHudTests, BlockModelIconsUseProjectedModelQuads) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  std::vector<arv::ui::UiItemStackView> slots(9);
+
+  arv::ui::UiBlockModelQuadView quad;
+  quad.image.valid = true;
+  quad.image.source = arv::render::UiTextureSource::TerrainAtlas;
+  quad.image.custom_points = true;
+  quad.image.points = {{
+      {3.0F, 9.0F},
+      {17.0F, 16.0F},
+      {17.0F, 30.0F},
+      {3.0F, 23.0F},
+  }};
+
+  slots[0].item_name = "arvane:stone_stairs";
+  slots[0].display_name = "Stone Stairs";
+  slots[0].count = 1;
+  slots[0].render_type = arv::player::ItemRenderType::Block;
+  slots[0].block_model_quads.push_back(quad);
+
+  arv::ui::build_hotbar_hud(tree, {0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* model_quad = tree.find_by_stable_id("hud.hotbar.slot.0.block_model.0");
+  ASSERT_NE(model_quad, nullptr);
+  EXPECT_EQ(model_quad->type, arv::ui::UiElementType::Image);
+  EXPECT_TRUE(model_quad->image.custom_points);
+}
+
 TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;

@@ -348,7 +348,7 @@ Example:
 ```json
 {
   "name": "arvane:stone",
-  "texture": "stone.png"
+  "texture": "arvane:texture/block/stone"
 }
 ```
 
@@ -421,27 +421,599 @@ These are expanded into concrete runtime variants during registry load.
 
 ---
 
-### Example (authored)
+## Block States
 
-```yaml
-name: arvane:stone_stairs
+Block states describe the concrete runtime variants of a block.
 
-states:
-  facing: [north, south, east, west]
-```
+A block definition represents the logical block type, such as `arvane:stone_stairs`.
+A block state represents one exact placement/configuration of that block, such as:
+
+- `arvane:stone_stairs[facing=north]`
+- `arvane:stone_stairs[facing=east]`
+- `arvane:water[level=0]`
+
+The engine does not simulate vague block definitions in the world. The world stores concrete runtime state IDs.
 
 ---
 
-### Expanded (runtime)
+## Authored State Schema
 
-Variants:
+Block definitions may declare a `states` object.
 
-* stone_stairs[north]
-* stone_stairs[south]
-* stone_stairs[east]
-* stone_stairs[west]
+Each key is a state property name.
+Each value is the list of allowed authored values.
 
-Each variant receives its own `BlockVariantID`.
+Example:
+
+```json
+{
+  "name": "arvane:stone_stairs",
+  "states": {
+    "facing": ["north", "south", "east", "west"],
+    "half": ["bottom", "top"]
+  }
+}
+```
+
+This expands into concrete runtime states:
+
+```text
+arvane:stone_stairs[facing=north,half=bottom]
+arvane:stone_stairs[facing=north,half=top]
+arvane:stone_stairs[facing=south,half=bottom]
+arvane:stone_stairs[facing=south,half=top]
+...
+```
+
+The registry loader computes the Cartesian product of all declared state values.
+
+---
+
+## Runtime Block ID vs Runtime State ID
+
+The engine distinguishes between logical blocks and concrete states.
+
+```text
+BlockID = logical block type
+StateID = concrete block state variant
+```
+
+Example:
+
+```text
+BlockID 0 = arvane:air
+BlockID 1 = arvane:stone
+BlockID 2 = arvane:stone_stairs
+
+StateID 0 = arvane:air
+StateID 1 = arvane:stone
+StateID 2 = arvane:stone_stairs[facing=north,half=bottom]
+StateID 3 = arvane:stone_stairs[facing=north,half=top]
+StateID 4 = arvane:stone_stairs[facing=south,half=bottom]
+...
+```
+
+World block storage uses `StateID`, not `BlockID`.
+
+Systems that only care about logical identity may resolve `StateID -> BlockID`.
+
+---
+
+## Default State
+
+Every block has a default state.
+
+If a block has no explicit state schema, it has exactly one state.
+
+```json
+{
+  "name": "arvane:stone"
+}
+```
+
+Equivalent runtime result:
+
+```text
+arvane:stone
+```
+
+For blocks with state schemas, the default state uses either the explicit `default_state` object or the first value listed for each property.
+
+```json
+{
+  "name": "arvane:stone_stairs",
+  "states": {
+    "facing": ["north", "south", "east", "west"],
+    "half": ["bottom", "top"]
+  },
+  "default_state": {
+    "facing": "north",
+    "half": "bottom"
+  }
+}
+```
+
+If `default_state` is omitted:
+
+```json
+{
+  "facing": "north",
+  "half": "bottom"
+}
+```
+
+is implied because those are the first declared values.
+
+---
+
+## State Property Types
+
+State values are authored as strings, integers, or booleans.
+
+```json
+{
+  "states": {
+    "facing": ["north", "south", "east", "west"],
+    "open": [false, true],
+    "level": [0, 1, 2, 3, 4, 5, 6, 7]
+  }
+}
+```
+
+The registry preserves the authored property names and values for tools, debugging, serialization metadata, and command usage.
+
+Hot runtime systems should not repeatedly perform string lookups. During registry load, states are converted into compact runtime IDs and compact per-state metadata.
+
+---
+
+## Common State Categories
+
+The engine should not hard-code a fixed global list of state names, but common block state categories include:
+
+### Orientation States
+
+Used for blocks whose behavior or model depends on direction.
+
+```json
+{
+  "states": {
+    "facing": ["north", "south", "east", "west"]
+  }
+}
+```
+
+Examples:
+
+* stairs
+* furnaces
+* doors
+* ladders
+* signs
+* directional decorative blocks
+
+### Axis States
+
+Used for blocks aligned to one axis.
+
+```json
+{
+  "states": {
+    "axis": ["x", "y", "z"]
+  }
+}
+```
+
+Examples:
+
+* logs
+* pillars
+* pipes
+* beams
+
+### Shape States
+
+Used for blocks whose geometry changes based on neighbors or placement.
+
+```json
+{
+  "states": {
+    "shape": ["straight", "inner_left", "inner_right", "outer_left", "outer_right"]
+  }
+}
+```
+
+Examples:
+
+* stairs
+* fences
+* walls
+* panes
+* rails
+
+### Half States
+
+Used for blocks occupying the upper or lower half of a block space.
+
+```json
+{
+  "states": {
+    "half": ["bottom", "top"]
+  }
+}
+```
+
+Examples:
+
+* slabs
+* stairs
+* trapdoors
+
+### Connection States
+
+Used for blocks that connect to adjacent blocks.
+
+```json
+{
+  "states": {
+    "north": [false, true],
+    "south": [false, true],
+    "east": [false, true],
+    "west": [false, true],
+    "up": [false, true],
+    "down": [false, true]
+  }
+}
+```
+
+Examples:
+
+* fences
+* glass panes
+* redstone-like wiring
+* pipes
+* cables
+
+Connection states are usually derived from neighboring blocks and updated when neighbors change.
+
+### Open / Powered / Active States
+
+Used for interactive or logic-driven blocks.
+
+```json
+{
+  "states": {
+    "open": [false, true],
+    "powered": [false, true],
+    "active": [false, true]
+  }
+}
+```
+
+Examples:
+
+* doors
+* trapdoors
+* lamps
+* buttons
+* levers
+* machines
+
+### Fluid Level States
+
+Used for liquid depth and flow.
+
+```json
+{
+  "states": {
+    "level": [0, 1, 2, 3, 4, 5, 6, 7]
+  }
+}
+```
+
+### Growth / Age States
+
+Used for blocks that progress over time.
+
+```json
+{
+  "states": {
+    "age": [0, 1, 2, 3, 4, 5, 6, 7]
+  }
+}
+```
+
+Examples:
+
+* crops
+* saplings
+* vines
+* spreading blocks
+
+### Variant States
+
+Used for authored visual or gameplay variants under one logical block.
+
+```json
+{
+  "states": {
+    "variant": ["normal", "mossy", "cracked"]
+  }
+}
+```
+
+Use `variant` only when the variants are still the same logical block. If variants have meaningfully different gameplay behavior, separate block definitions are preferred.
+
+---
+
+## State Explosion
+
+State schemas should be kept compact.
+
+Every combination of state values becomes a concrete runtime state. For example:
+
+```json
+{
+  "states": {
+    "facing": ["north", "south", "east", "west"],
+    "half": ["bottom", "top"],
+    "shape": ["straight", "inner_left", "inner_right", "outer_left", "outer_right"]
+  }
+}
+```
+
+Expands to:
+
+```text
+4 * 2 * 5 = 40 states
+```
+
+Avoid encoding high-cardinality or arbitrary data as block states.
+
+Do not use block states for:
+
+* inventories
+* owner UUIDs
+* custom names
+* large counters
+* arbitrary NBT-like data
+* machine progress timers
+* per-instance metadata
+
+Those belong in block entities or another per-position data system.
+
+---
+
+## State-Driven Engine Behavior
+
+A concrete block state may affect:
+
+* model selection
+* mesh generation
+* collision shape
+* occlusion behavior
+* light emission
+* light opacity
+* fluid behavior
+* interaction behavior
+* neighbor update behavior
+* ticking behavior
+* sound/material behavior
+* item drop behavior
+
+The registry should expose fast lookup tables indexed by `StateID`.
+
+Example conceptual tables:
+
+```text
+state_id -> block_id
+state_id -> model_id
+state_id -> collision_shape_id
+state_id -> occlusion_shape_id
+state_id -> light_emission
+state_id -> light_opacity
+state_id -> material_id
+state_id -> behavior_flags
+```
+
+Hot systems should use direct table lookups, not string comparisons.
+
+---
+
+## State Overrides
+
+Block definitions may provide per-state overrides for model, collision, lighting, or behavior.
+
+Example:
+
+```json
+{
+  "name": "arvane:stone_stairs",
+
+  "states": {
+    "facing": ["north", "south", "east", "west"],
+    "half": ["bottom", "top"]
+  },
+
+  "default_state": {
+    "facing": "north",
+    "half": "bottom"
+  },
+
+  "model": {
+    "path": "arvane:model/block/stairs",
+    "textures": ["arvane:texture/block/cobblestone"]
+  },
+
+  "state_overrides": [
+    {
+      "when": {
+        "facing": "north",
+        "half": "bottom"
+      },
+      "model": "arvane:model/block/stairs_north_bottom"
+    },
+    {
+      "when": {
+        "facing": "north",
+        "half": "top"
+      },
+      "model": "arvane:model/block/stairs_north_top"
+    }
+  ]
+}
+```
+
+Overrides are optional. If no override matches a concrete state, the block-level defaults are used.
+
+The loader must validate that every `when` property exists in the state schema and that every value is legal.
+
+---
+
+## Placement State Resolution
+
+When a player places a block, the engine resolves the logical block into a concrete state.
+
+Example:
+
+```text
+held item: arvane:stone_stairs
+placement context:
+  clicked face = north
+  hit position = upper half
+  player yaw = east
+
+resolved state:
+  arvane:stone_stairs[facing=east,half=top]
+```
+
+Placement state resolution may use:
+
+* player look direction
+* clicked block face
+* hit position inside the target block
+* neighboring blocks
+* water/fluid presence
+* item metadata
+* block-specific placement rules
+
+Placement logic must return a concrete `StateID`.
+
+---
+
+## Neighbor-Derived States
+
+Some states are derived from surrounding blocks.
+
+Examples:
+
+* fence connections
+* pane connections
+* wall height/shape
+* stair corner shape
+* fluid flow level
+* pipe/cable connections
+
+When a block changes, the world should schedule neighbor updates for affected positions. These updates may replace a block state with another state of the same logical block.
+
+Example:
+
+```text
+fence[north=false,south=false,east=false,west=false]
+```
+
+may become:
+
+```text
+fence[north=true,south=false,east=false,west=false]
+```
+
+after a compatible block is placed to the north.
+
+Neighbor-derived state updates must be deterministic for a given local world state.
+
+---
+
+## Serialization
+
+Saves must not persist raw runtime `StateID` values as stable long-term identifiers.
+
+Runtime IDs are session-local and may change when registries are rebuilt.
+
+Chunk/region saves should persist block state references through stable block names plus compact local palettes.
+
+Example conceptual palette:
+
+```json
+{
+  "palette": [
+    {
+      "name": "arvane:air"
+    },
+    {
+      "name": "arvane:stone"
+    },
+    {
+      "name": "arvane:stone_stairs",
+      "properties": {
+        "facing": "north",
+        "half": "bottom"
+      }
+    }
+  ]
+}
+```
+
+Chunk block data then references palette indices, not global runtime IDs.
+
+---
+
+## Network Encoding
+
+Network packets may use runtime state IDs after the client and server have agreed on the same registry/session mapping.
+
+The protocol must not assume runtime IDs are stable across sessions.
+
+---
+
+## Validation Rules
+
+The registry loader must reject invalid state definitions.
+
+Invalid examples:
+
+* duplicate state property names
+* empty state value arrays
+* duplicate values inside one property
+* `default_state` references an unknown property
+* `default_state` uses a value not listed in the schema
+* `state_overrides.when` references an unknown property
+* `state_overrides.when` uses an illegal value
+* generated state count exceeds configured limits
+* duplicate concrete state definitions after normalization
+
+`arvane:air` must always exist and must always resolve to runtime `StateID = 0`.
+
+---
+
+## Recommended Initial State Names
+
+The following names are recommended for consistency:
+
+```text
+facing   = north | south | east | west | up | down
+axis     = x | y | z
+half     = bottom | top
+shape    = straight | inner_left | inner_right | outer_left | outer_right
+open     = false | true
+powered  = false | true
+active   = false | true
+waterlogged = false | true
+level    = integer fluid/growth level
+age      = integer growth level
+variant  = authored visual/gameplay variant
+```
+
+Custom state names are allowed, but common concepts should reuse these names unless there is a strong reason not to.
 
 ---
 
@@ -462,7 +1034,8 @@ This separation allows simple blocks to remain lightweight, while more complex g
 
 ### Model-Based Blocks
 
-A block may specify a `model` component that references a model file located in:
+A block may specify a `model` component that references a model asset ID. The default
+`arvane:model/block/...` namespace resolves under:
 
 ```
 assets/models/block/
@@ -471,8 +1044,20 @@ assets/models/block/
 Example:
 
 ```json
-"model": "stairs.json"
+"model": "arvane:model/block/stairs"
 ```
+
+OR
+
+```json
+"model": {
+  "path": "arvane:model/block/stairs",
+  "textures": ["arvane:texture/block/cobblestone"]
+}
+```
+
+`model.textures` is the input texture array for the model. A model texture entry such as
+`"$0"` resolves to index `0` from this array. See [model format](113_model_format.md).
 
 #### Behavior
 
@@ -482,9 +1067,10 @@ Example:
   * UV mapping
   * textures (via the model’s own texture definitions)
 
-* The block registry does **not** define textures when `model` is used.
+* The block registry does not use top-level `texture` / `textures` fields when `model` is used.
 
-* Models are responsible for being fully self-contained.
+* Models may be fully self-contained with specific texture IDs, or may use `"$0"`, `"$1"`,
+  etc. to receive texture inputs from the block definition.
 
 #### Use Cases
 
@@ -504,7 +1090,7 @@ For simple cube blocks, a `texture` component can be used instead of a model.
 #### Single Texture (All Faces)
 
 ```json
-"texture": "all_sides.png"
+"texture": "arvane:texture/block/stone"
 ```
 
 * Applies the same texture to all six faces.
@@ -516,12 +1102,12 @@ For simple cube blocks, a `texture` component can be used instead of a model.
 
 ```json
 "texture": [
-  "top.png",
-  "bottom.png",
-  "front.png",
-  "back.png",
-  "left.png",
-  "right.png"
+  "arvane:texture/block/grass_top",
+  "arvane:texture/block/dirt",
+  "arvane:texture/block/grass_side",
+  "arvane:texture/block/grass_side",
+  "arvane:texture/block/grass_side",
+  "arvane:texture/block/grass_side"
 ]
 ```
 
@@ -543,19 +1129,20 @@ Face order is strictly defined as:
 
 The following rules must be enforced during block loading:
 
-* A block must define **exactly one** of:
+* A renderable block should define one of:
 
   * `model`
   * `texture`
+  * `textures`
 
 * Defining both is invalid.
 
-* Defining neither is invalid.
+* Defining neither is valid only for non-rendered blocks such as `arvane:air`.
 
 * If `texture` is:
 
   * a string → treated as single-texture mode
-  * an array → must contain exactly 6 entries
+  * an array -> must contain exactly 6 entries
 
 ---
 
@@ -563,8 +1150,8 @@ The following rules must be enforced during block loading:
 
 When loading blocks:
 
-* Resolve `model` paths relative to `assets/models/block/`
-* Resolve `texture` paths through the texture/material system
+* Resolve model IDs such as `arvane:model/block/stairs` through the model asset system
+* Resolve texture IDs such as `arvane:texture/block/stone` through the texture asset system
 * Register all referenced textures for atlas packing
 * Associate the resolved visual data with the block’s **StateID**
 

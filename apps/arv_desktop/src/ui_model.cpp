@@ -3,7 +3,10 @@
 #include "asset_helpers.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <optional>
+#include <span>
 #include <utility>
 
 namespace arv::desktop {
@@ -22,6 +25,119 @@ namespace {
                    item_atlas_width,
                    item_atlas_height,
                    render::UiTextureSource::ItemAtlas);
+}
+
+inline constexpr std::array<voxel::BlockFace, 3> UiBlockModelFaces{{
+    voxel::BlockFace::PositiveZ,
+    voxel::BlockFace::PositiveX,
+    voxel::BlockFace::PositiveY,
+}};
+
+[[nodiscard]] std::array<Vec3i, 4> model_box_face_corners(
+    const voxel::BlockModelBoxRenderData& box,
+    voxel::BlockFace face) noexcept {
+  const Vec3i min = box.min;
+  const Vec3i max = box.max;
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return {{{max.x, min.y, max.z}, {max.x, min.y, min.z}, {max.x, max.y, max.z}, {max.x, max.y, min.z}}};
+    case voxel::BlockFace::NegativeX:
+      return {{{min.x, min.y, min.z}, {min.x, min.y, max.z}, {min.x, max.y, min.z}, {min.x, max.y, max.z}}};
+    case voxel::BlockFace::PositiveY:
+      return {{{min.x, max.y, max.z}, {max.x, max.y, max.z}, {min.x, max.y, min.z}, {max.x, max.y, min.z}}};
+    case voxel::BlockFace::NegativeY:
+      return {{{max.x, min.y, max.z}, {min.x, min.y, max.z}, {max.x, min.y, min.z}, {min.x, min.y, min.z}}};
+    case voxel::BlockFace::PositiveZ:
+      return {{{min.x, min.y, max.z}, {max.x, min.y, max.z}, {min.x, max.y, max.z}, {max.x, max.y, max.z}}};
+    case voxel::BlockFace::NegativeZ:
+      return {{{max.x, min.y, min.z}, {min.x, min.y, min.z}, {max.x, max.y, min.z}, {min.x, max.y, min.z}}};
+  }
+  return {};
+}
+
+[[nodiscard]] Vec2f project_block_model_corner(Vec3i corner) noexcept {
+  return {
+      17.0F + static_cast<f32>(corner.x - corner.z) * (14.0F / 16.0F),
+      16.0F + static_cast<f32>(corner.x + corner.z) * (7.0F / 16.0F) -
+          static_cast<f32>(corner.y) * (14.0F / 16.0F)};
+}
+
+[[nodiscard]] Vec4f block_model_face_tint(voxel::BlockFace face) noexcept {
+  switch (face) {
+    case voxel::BlockFace::PositiveY:
+      return {1.0F, 1.0F, 1.0F, 1.0F};
+    case voxel::BlockFace::PositiveX:
+      return {0.82F, 0.82F, 0.82F, 1.0F};
+    case voxel::BlockFace::PositiveZ:
+      return {0.70F, 0.70F, 0.70F, 1.0F};
+    case voxel::BlockFace::NegativeX:
+    case voxel::BlockFace::NegativeY:
+    case voxel::BlockFace::NegativeZ:
+      break;
+  }
+  return {1.0F, 1.0F, 1.0F, 1.0F};
+}
+
+[[nodiscard]] f32 block_model_face_depth(const std::array<Vec3i, 4>& corners) noexcept {
+  f32 depth = 0.0F;
+  for (const Vec3i corner : corners) {
+    depth += static_cast<f32>(corner.x + corner.y + corner.z);
+  }
+  return depth * 0.25F;
+}
+
+void sort_projected_quad(
+    std::array<Vec2f, 4>& points,
+    std::array<Vec2f, 4>& uvs) {
+  Vec2f center{};
+  for (const Vec2f point : points) {
+    center.x += point.x;
+    center.y += point.y;
+  }
+  center.x *= 0.25F;
+  center.y *= 0.25F;
+
+  std::array<usize, 4> order{{0U, 1U, 2U, 3U}};
+  std::sort(order.begin(), order.end(), [&](usize lhs, usize rhs) {
+    const f32 lhs_angle = std::atan2(points[lhs].y - center.y, points[lhs].x - center.x);
+    const f32 rhs_angle = std::atan2(points[rhs].y - center.y, points[rhs].x - center.x);
+    return lhs_angle < rhs_angle;
+  });
+
+  std::array<Vec2f, 4> sorted_points{};
+  std::array<Vec2f, 4> sorted_uvs{};
+  for (usize index = 0; index < order.size(); ++index) {
+    sorted_points[index] = points[order[index]];
+    sorted_uvs[index] = uvs[order[index]];
+  }
+  points = sorted_points;
+  uvs = sorted_uvs;
+}
+
+[[nodiscard]] ui::UiBlockModelQuadView model_quad_for_ui(
+    const voxel::BlockModelBoxRenderData& box,
+    voxel::BlockFace face,
+    const voxel::BlockModelFaceRenderData& face_data,
+    u32 block_atlas_width,
+    u32 block_atlas_height) {
+  const std::array<Vec3i, 4> corners = model_box_face_corners(box, face);
+  std::array<Vec2f, 4> points{};
+  for (usize index = 0; index < corners.size(); ++index) {
+    points[index] = project_block_model_corner(corners[index]);
+  }
+  std::array<Vec2f, 4> uvs = normalized_uvs(face_data.uvs, block_atlas_width, block_atlas_height);
+  sort_projected_quad(points, uvs);
+
+  ui::UiBlockModelQuadView quad;
+  quad.depth = block_model_face_depth(corners);
+  quad.image.valid = true;
+  quad.image.source = render::UiTextureSource::TerrainAtlas;
+  quad.image.page = face_data.page;
+  quad.image.uvs = uvs;
+  quad.image.custom_points = true;
+  quad.image.points = points;
+  quad.image.tint = block_model_face_tint(face);
+  return quad;
 }
 
 [[nodiscard]] ui::UiItemStackView stack_view_for_ui(
@@ -57,6 +173,34 @@ namespace {
     }
   } else if (item != nullptr && item->render_type == player::ItemRenderType::Block &&
              item->render_block_variant.has_value()) {
+    const std::span<const voxel::BlockModelBoxRenderData> model_boxes =
+        block_atlas.render_data.model_boxes(item->render_block_variant.value());
+    if (!model_boxes.empty()) {
+      for (const voxel::BlockModelBoxRenderData& box : model_boxes) {
+        for (const voxel::BlockFace face : UiBlockModelFaces) {
+          const auto& face_data = box.faces[voxel::face_index(face)];
+          if (!face_data.has_value()) {
+            continue;
+          }
+          view.block_model_quads.push_back(model_quad_for_ui(
+              box,
+              face,
+              face_data.value(),
+              block_atlas_width,
+              block_atlas_height));
+        }
+      }
+      std::stable_sort(
+          view.block_model_quads.begin(),
+          view.block_model_quads.end(),
+          [](const ui::UiBlockModelQuadView& lhs, const ui::UiBlockModelQuadView& rhs) {
+            return lhs.depth < rhs.depth;
+          });
+      if (!view.block_model_quads.empty()) {
+        return view;
+      }
+    }
+
     for (const voxel::BlockFace face : voxel::AllBlockFaces) {
       const voxel::BlockFaceRenderData* face_data =
           block_atlas.render_data.face(item->render_block_variant.value(), face);

@@ -1,6 +1,7 @@
 #include "arv/voxel/block.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <utility>
 
@@ -8,6 +9,8 @@
 
 namespace arv::voxel {
 namespace {
+
+using json = nlohmann::json;
 
 [[nodiscard]] Expected<RenderCategory, BlockRegistryError> parse_render_category(
     const std::string& value) {
@@ -37,7 +40,7 @@ void set_texture_slot(
     std::array<std::string, BlockFaceCount>& textures,
     BlockFace face,
     const std::string& asset_id) {
-  textures[face_index(face)] = asset_id;
+  textures[face_index(face)] = normalize_block_texture_asset(asset_id);
 }
 
 void set_side_textures(
@@ -54,7 +57,7 @@ void set_side_textures(
     BlockDefinition& definition,
     std::string_view field_name) {
   if (textures.is_string()) {
-    definition.texture_assets.fill(textures.get<std::string>());
+    definition.texture_assets.fill(normalize_block_texture_asset(textures.get<std::string>()));
     return std::nullopt;
   }
   if (textures.is_array()) {
@@ -62,12 +65,18 @@ void set_side_textures(
       return BlockRegistryError{
           std::string{field_name} + " array must contain exactly 6 entries for " + definition.name};
     }
-    definition.texture_assets[face_index(BlockFace::PositiveY)] = textures[0].get<std::string>();
-    definition.texture_assets[face_index(BlockFace::NegativeY)] = textures[1].get<std::string>();
-    definition.texture_assets[face_index(BlockFace::PositiveZ)] = textures[2].get<std::string>();
-    definition.texture_assets[face_index(BlockFace::NegativeZ)] = textures[3].get<std::string>();
-    definition.texture_assets[face_index(BlockFace::NegativeX)] = textures[4].get<std::string>();
-    definition.texture_assets[face_index(BlockFace::PositiveX)] = textures[5].get<std::string>();
+    definition.texture_assets[face_index(BlockFace::PositiveY)] =
+        normalize_block_texture_asset(textures[0].get<std::string>());
+    definition.texture_assets[face_index(BlockFace::NegativeY)] =
+        normalize_block_texture_asset(textures[1].get<std::string>());
+    definition.texture_assets[face_index(BlockFace::PositiveZ)] =
+        normalize_block_texture_asset(textures[2].get<std::string>());
+    definition.texture_assets[face_index(BlockFace::NegativeZ)] =
+        normalize_block_texture_asset(textures[3].get<std::string>());
+    definition.texture_assets[face_index(BlockFace::NegativeX)] =
+        normalize_block_texture_asset(textures[4].get<std::string>());
+    definition.texture_assets[face_index(BlockFace::PositiveX)] =
+        normalize_block_texture_asset(textures[5].get<std::string>());
     return std::nullopt;
   }
   if (!textures.is_object()) {
@@ -82,7 +91,7 @@ void set_side_textures(
   };
 
   assign_if_present("all", [&](const std::string& value) {
-    definition.texture_assets.fill(value);
+    definition.texture_assets.fill(normalize_block_texture_asset(value));
   });
   assign_if_present("side", [&](const std::string& value) {
     set_side_textures(definition.texture_assets, value);
@@ -131,6 +140,185 @@ void set_side_textures(
       texture_iter != item.end() ? *texture_iter : *textures_iter,
       definition,
       texture_iter != item.end() ? "texture" : "textures");
+}
+
+[[nodiscard]] std::optional<BlockRegistryError> read_model_reference(
+    const json& model,
+    BlockDefinition& definition) {
+  if (model.is_string()) {
+    definition.model.asset = normalize_block_model_asset(model.get<std::string>());
+    if (definition.model.asset.empty()) {
+      return BlockRegistryError{"model must not be empty for " + definition.name};
+    }
+    return std::nullopt;
+  }
+
+  if (!model.is_object()) {
+    return BlockRegistryError{"model must be a string or object for " + definition.name};
+  }
+
+  const auto path = model.find("path");
+  if (path == model.end() || !path->is_string()) {
+    return BlockRegistryError{"model object requires string path for " + definition.name};
+  }
+  definition.model.asset = normalize_block_model_asset(path->get<std::string>());
+  if (definition.model.asset.empty()) {
+    return BlockRegistryError{"model path must not be empty for " + definition.name};
+  }
+
+  if (const auto textures = model.find("textures"); textures != model.end()) {
+    if (!textures->is_array()) {
+      return BlockRegistryError{"model.textures must be an array for " + definition.name};
+    }
+    definition.model.texture_inputs.reserve(textures->size());
+    for (const json& texture : *textures) {
+      if (!texture.is_string()) {
+        return BlockRegistryError{"model.textures entries must be strings for " + definition.name};
+      }
+      definition.model.texture_inputs.push_back(
+          normalize_block_texture_asset(texture.get<std::string>()));
+    }
+  }
+
+  return std::nullopt;
+}
+
+[[nodiscard]] Expected<Vec3i, BlockRegistryError> read_vec3i(
+    const json& node,
+    std::string_view field) {
+  if (!node.is_array() || node.size() != 3U) {
+    return Expected<Vec3i, BlockRegistryError>::failure(
+        {std::string{field} + " must be a 3-element array"});
+  }
+  return Expected<Vec3i, BlockRegistryError>::success({node.at(0).get<i32>(),
+                                                       node.at(1).get<i32>(),
+                                                       node.at(2).get<i32>()});
+}
+
+[[nodiscard]] Expected<Vec2i, BlockRegistryError> read_vec2i(
+    const json& node,
+    std::string_view field) {
+  if (!node.is_array() || node.size() != 2U) {
+    return Expected<Vec2i, BlockRegistryError>::failure(
+        {std::string{field} + " must be a 2-element array"});
+  }
+  return Expected<Vec2i, BlockRegistryError>::success({node.at(0).get<i32>(),
+                                                       node.at(1).get<i32>()});
+}
+
+[[nodiscard]] Expected<Vec4i, BlockRegistryError> read_vec4i(
+    const json& node,
+    std::string_view field) {
+  if (!node.is_array() || node.size() != 4U) {
+    return Expected<Vec4i, BlockRegistryError>::failure(
+        {std::string{field} + " must be a 4-element array"});
+  }
+  return Expected<Vec4i, BlockRegistryError>::success({node.at(0).get<i32>(),
+                                                       node.at(1).get<i32>(),
+                                                       node.at(2).get<i32>(),
+                                                       node.at(3).get<i32>()});
+}
+
+[[nodiscard]] std::optional<BlockFace> block_face_from_name(std::string_view name) noexcept {
+  if (name == "east") {
+    return BlockFace::PositiveX;
+  }
+  if (name == "west") {
+    return BlockFace::NegativeX;
+  }
+  if (name == "up") {
+    return BlockFace::PositiveY;
+  }
+  if (name == "down") {
+    return BlockFace::NegativeY;
+  }
+  if (name == "south") {
+    return BlockFace::PositiveZ;
+  }
+  if (name == "north") {
+    return BlockFace::NegativeZ;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool is_block_model_input_reference(std::string_view texture) noexcept {
+  if (texture.size() < 2U || texture.front() != '$') {
+    return false;
+  }
+  return std::all_of(texture.begin() + 1, texture.end(), [](char c) {
+    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+  });
+}
+
+[[nodiscard]] Expected<std::string, BlockRegistryError> resolve_block_model_texture(
+    std::string_view texture,
+    std::span<const std::string> texture_inputs) {
+  if (!is_block_model_input_reference(texture)) {
+    if (!texture.empty() && texture.front() == '$') {
+      return Expected<std::string, BlockRegistryError>::failure(
+          {"invalid block model texture input reference: " + std::string{texture}});
+    }
+    return Expected<std::string, BlockRegistryError>::success(
+        normalize_block_texture_asset(texture));
+  }
+
+  usize input_index = 0;
+  for (const char c : texture.substr(1)) {
+    input_index = input_index * 10U + static_cast<usize>(c - '0');
+  }
+  if (input_index >= texture_inputs.size()) {
+    return Expected<std::string, BlockRegistryError>::failure(
+        {"model texture input " + std::string{texture} + " is out of range"});
+  }
+  return Expected<std::string, BlockRegistryError>::success(texture_inputs[input_index]);
+}
+
+[[nodiscard]] Expected<BlockModelFaceDefinition, BlockRegistryError> read_block_model_face(
+    const json& node,
+    usize texture_count) {
+  if (!node.is_object()) {
+    return Expected<BlockModelFaceDefinition, BlockRegistryError>::failure(
+        {"block model face entry must be an object"});
+  }
+
+  BlockModelFaceDefinition face;
+  if (const auto texture = node.find("texture"); texture != node.end()) {
+    face.texture_index = texture->get<i32>();
+  }
+  if (face.texture_index < 0) {
+    return Expected<BlockModelFaceDefinition, BlockRegistryError>::success(face);
+  }
+  if (static_cast<usize>(face.texture_index) >= texture_count) {
+    return Expected<BlockModelFaceDefinition, BlockRegistryError>::failure(
+        {"block model face references missing texture index"});
+  }
+
+  const auto uv = node.find("uv");
+  if (uv == node.end()) {
+    return Expected<BlockModelFaceDefinition, BlockRegistryError>::failure(
+        {"block model face entry is missing uv"});
+  }
+  auto parsed_uv = read_vec4i(*uv, "block model face uv");
+  if (!parsed_uv) {
+    return Expected<BlockModelFaceDefinition, BlockRegistryError>::failure(parsed_uv.error());
+  }
+  face.uv = parsed_uv.value();
+  return Expected<BlockModelFaceDefinition, BlockRegistryError>::success(face);
+}
+
+[[nodiscard]] std::optional<BlockRegistryError> validate_block_model_box(
+    const BlockModelBoxDefinition& box) {
+  const auto in_range = [](i32 value) noexcept {
+    return value >= 0 && value <= 16;
+  };
+  if (!in_range(box.min.x) || !in_range(box.min.y) || !in_range(box.min.z) ||
+      !in_range(box.max.x) || !in_range(box.max.y) || !in_range(box.max.z)) {
+    return BlockRegistryError{"block model box coordinates must be in the range 0..16"};
+  }
+  if (box.min.x > box.max.x || box.min.y > box.max.y || box.min.z > box.max.z) {
+    return BlockRegistryError{"block model box min must be less than or equal to max"};
+  }
+  return std::nullopt;
 }
 
 } // namespace
@@ -211,6 +399,7 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
       variant.render_category = definition.render_category;
       variant.hide_same_variant_faces = definition.hide_same_variant_faces;
       variant.texture_assets = definition.texture_assets;
+      variant.model = definition.model;
       variant.renders_face.fill(definition.render_category != RenderCategory::None && definition.properties.full_cube);
       variant.occludes_face.fill(definition.properties.full_cube && definition.properties.opaque);
       if (definition.properties.collidable && definition.properties.full_cube) {
@@ -295,6 +484,15 @@ std::span<const Aabb3f> BlockRegistry::collision_boxes(BlockVariantID variant_id
   return record->collision_boxes;
 }
 
+void BlockRegistry::set_collision_boxes(
+    BlockVariantID variant_id,
+    std::vector<Aabb3f> boxes) {
+  if (variant_id.value >= variants_.size()) {
+    return;
+  }
+  variants_[variant_id.value].collision_boxes = std::move(boxes);
+}
+
 bool BlockRegistry::is_replaceable(BlockVariantID variant_id) const noexcept {
   const BlockVariantRecord* record = variant(variant_id);
   return record != nullptr && record->properties.replaceable;
@@ -350,6 +548,23 @@ void BlockRenderData::set_face(
     return;
   }
   variants_[variant_id.value].faces[face_index(block_face)] = data;
+}
+
+std::span<const BlockModelBoxRenderData> BlockRenderData::model_boxes(
+    BlockVariantID variant_id) const noexcept {
+  if (variant_id.value >= variants_.size()) {
+    return {};
+  }
+  return variants_[variant_id.value].model_boxes;
+}
+
+void BlockRenderData::set_model_boxes(
+    BlockVariantID variant_id,
+    std::vector<BlockModelBoxRenderData> boxes) {
+  if (variant_id.value >= variants_.size()) {
+    return;
+  }
+  variants_[variant_id.value].model_boxes = std::move(boxes);
 }
 
 std::optional<std::string> BlockRegistry::validate_states(const BlockDefinition& definition) {
@@ -435,6 +650,26 @@ BlockDefinition make_air_definition() {
   definition.render_category = RenderCategory::None;
   definition.is_item = false;
   return definition;
+}
+
+std::string normalize_block_model_asset(std::string_view model) {
+  if (model.empty()) {
+    return {};
+  }
+  if (model.find(':') != std::string_view::npos) {
+    return std::string{model};
+  }
+  return "arvane:model/block/" + std::string{model};
+}
+
+std::string normalize_block_texture_asset(std::string_view texture) {
+  if (texture.empty()) {
+    return {};
+  }
+  if (texture.find(':') != std::string_view::npos) {
+    return std::string{texture};
+  }
+  return "arvane:texture/block/" + std::string{texture};
 }
 
 BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
@@ -528,7 +763,19 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
         definition.is_item = is_item_iter->get<bool>();
       }
 
-      if (auto texture_error = read_texture_references(item, definition); texture_error.has_value()) {
+      const bool has_model = item.find("model") != item.end();
+      const bool has_texture = item.find("texture") != item.end() || item.find("textures") != item.end();
+      if (has_model && has_texture) {
+        return BlockDefinitionsResult::failure(
+            {"block defines both model and texture references for " + definition.name});
+      }
+      if (has_model) {
+        if (auto model_error = read_model_reference(item.at("model"), definition);
+            model_error.has_value()) {
+          return BlockDefinitionsResult::failure(model_error.value());
+        }
+      } else if (auto texture_error = read_texture_references(item, definition);
+                 texture_error.has_value()) {
         return BlockDefinitionsResult::failure(texture_error.value());
       }
 
@@ -557,6 +804,121 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
   } catch (const nlohmann::json::exception& ex) {
     return BlockDefinitionsResult::failure({"failed to parse block definitions JSON: " + std::string{ex.what()}});
   }
+}
+
+BlockModelDefinitionResult parse_block_model_json(
+    std::string_view text,
+    std::span<const std::string> texture_inputs) {
+  try {
+    const json root = json::parse(text.begin(), text.end());
+    if (!root.is_object()) {
+      return BlockModelDefinitionResult::failure({"block model root must be an object"});
+    }
+
+    BlockModelDefinition definition;
+    const auto textures = root.find("textures");
+    if (textures == root.end() || !textures->is_array()) {
+      return BlockModelDefinitionResult::failure({"block model requires textures array"});
+    }
+    definition.texture_assets.reserve(textures->size());
+    for (const json& texture : *textures) {
+      if (!texture.is_string()) {
+        return BlockModelDefinitionResult::failure({"block model texture entries must be strings"});
+      }
+      auto resolved_texture =
+          resolve_block_model_texture(texture.get<std::string>(), texture_inputs);
+      if (!resolved_texture) {
+        return BlockModelDefinitionResult::failure(resolved_texture.error());
+      }
+      definition.texture_assets.push_back(std::move(resolved_texture.value()));
+    }
+
+    const auto texture_sizes = root.find("texture_sizes");
+    if (texture_sizes == root.end() || !texture_sizes->is_array()) {
+      return BlockModelDefinitionResult::failure({"block model requires texture_sizes array"});
+    }
+    definition.texture_sizes.reserve(texture_sizes->size());
+    for (const json& size : *texture_sizes) {
+      auto parsed_size = read_vec2i(size, "block model texture size");
+      if (!parsed_size) {
+        return BlockModelDefinitionResult::failure(parsed_size.error());
+      }
+      if (parsed_size.value().x <= 0 || parsed_size.value().y <= 0) {
+        return BlockModelDefinitionResult::failure({"block model texture sizes must be positive"});
+      }
+      definition.texture_sizes.push_back(parsed_size.value());
+    }
+    if (definition.texture_assets.size() != definition.texture_sizes.size()) {
+      return BlockModelDefinitionResult::failure(
+          {"block model textures and texture_sizes must have the same length"});
+    }
+
+    const auto boxes = root.find("boxes");
+    if (boxes == root.end() || !boxes->is_array()) {
+      return BlockModelDefinitionResult::failure({"block model requires boxes array"});
+    }
+    definition.boxes.reserve(boxes->size());
+    for (const json& box_json : *boxes) {
+      if (!box_json.is_object()) {
+        return BlockModelDefinitionResult::failure({"block model box must be an object"});
+      }
+
+      BlockModelBoxDefinition box;
+      auto min = read_vec3i(box_json.at("min"), "block model box min");
+      auto max = read_vec3i(box_json.at("max"), "block model box max");
+      if (!min) {
+        return BlockModelDefinitionResult::failure(min.error());
+      }
+      if (!max) {
+        return BlockModelDefinitionResult::failure(max.error());
+      }
+      box.min = min.value();
+      box.max = max.value();
+      if (auto box_error = validate_block_model_box(box); box_error.has_value()) {
+        return BlockModelDefinitionResult::failure(box_error.value());
+      }
+
+      for (std::string_view face_name : {"east", "west", "up", "down", "south", "north"}) {
+        const auto face_json = box_json.find(std::string{face_name});
+        if (face_json == box_json.end()) {
+          continue;
+        }
+        auto face = read_block_model_face(*face_json, definition.texture_assets.size());
+        if (!face) {
+          return BlockModelDefinitionResult::failure(face.error());
+        }
+        box.faces[face_index(block_face_from_name(face_name).value())] = face.value();
+      }
+      definition.boxes.push_back(std::move(box));
+    }
+
+    return BlockModelDefinitionResult::success(std::move(definition));
+  } catch (const json::exception& ex) {
+    return BlockModelDefinitionResult::failure(
+        {"failed to parse block model JSON: " + std::string{ex.what()}});
+  }
+}
+
+std::vector<Aabb3f> make_block_model_collision_boxes(
+    const BlockModelDefinition& model) {
+  std::vector<Aabb3f> boxes;
+  boxes.reserve(model.boxes.size());
+  for (const BlockModelBoxDefinition& box : model.boxes) {
+    if (box.min.x >= box.max.x || box.min.y >= box.max.y || box.min.z >= box.max.z) {
+      continue;
+    }
+    boxes.push_back({{
+                         static_cast<f32>(box.min.x) / 16.0F,
+                         static_cast<f32>(box.min.y) / 16.0F,
+                         static_cast<f32>(box.min.z) / 16.0F,
+                     },
+                     {
+                         static_cast<f32>(box.max.x) / 16.0F,
+                         static_cast<f32>(box.max.y) / 16.0F,
+                         static_cast<f32>(box.max.z) / 16.0F,
+                     }});
+  }
+  return boxes;
 }
 
 } // namespace arv::voxel

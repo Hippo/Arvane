@@ -9,6 +9,7 @@
 #include "arv/ui/ui.hpp"
 
 #include <array>
+#include <span>
 #include <vector>
 
 namespace arv::desktop {
@@ -43,6 +44,7 @@ using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>
     asset::ResourceManager& resources,
     const entity::EntityRegistry& entity_registry,
     const player::ItemRegistry& item_registry,
-    const voxel::BlockRegistry& block_registry);
+    const voxel::BlockRegistry& block_registry,
+    std::span<const asset::BlockModelAssetData> block_models = {});
 
 } // namespace arv::desktop

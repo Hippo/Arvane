@@ -45,9 +45,20 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("blocks", block_registry_result.error().message);
   }
   loaded.block_registry = std::move(block_registry_result.value());
+
+  auto block_models_result = asset::load_block_model_definitions(resources, loaded.block_registry);
+  if (!block_models_result) {
+    return asset_failure("assets", block_models_result.error().message);
+  }
+  std::vector<asset::BlockModelAssetData> block_models =
+      std::move(block_models_result.value());
+  asset::apply_block_model_collision_boxes(loaded.block_registry, block_models);
   loaded.block_registry_hash = persistence::hash_block_registry(loaded.block_registry);
 
-  auto block_atlas_result = asset::build_block_texture_atlas(resources, loaded.block_registry);
+  auto block_atlas_result = asset::build_block_texture_atlas(
+      resources,
+      loaded.block_registry,
+      block_models);
   if (!block_atlas_result) {
     return asset_failure("assets", block_atlas_result.error().message);
   }
@@ -140,7 +151,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
       resources,
       loaded.entity_registry,
       loaded.item_registry,
-      loaded.block_registry);
+      loaded.block_registry,
+      block_models);
   if (!entity_render_assets_result) {
     return asset_failure("entities", entity_render_assets_result.error().message);
   }

@@ -102,7 +102,7 @@ The preferred file shape is:
       "name": "arvane:pig",
       "display_name": "Pig",
       "category": "passive",
-      "model": "pig.json",
+      "model": "arvane:model/entity/pig",
       "spawnable": true,
       "persistent_by_default": true,
       "replicated_by_default": true
@@ -124,13 +124,13 @@ Fields:
 - `persistent_by_default`: default persistence flag for newly spawned entities of this type.
 - `replicated_by_default`: default replication flag for newly spawned entities of this type.
 
-Short model filenames, such as `pig.json`, resolve under:
+Short model filenames, such as `pig.json`, remain supported and resolve under:
 
 ```text
 arvane_home/assets/models/entity/
 ```
 
-The equivalent asset ID is `arvane:model/entity/pig.json`. Full model asset IDs may be used
+The preferred asset ID is `arvane:model/entity/pig`. Full model asset IDs may be used
 directly. Entity model definitions are data references for presentation and render extraction; they
 must not be treated as authoritative simulation state.
 
@@ -149,7 +149,8 @@ Model files live under:
 arvane_home/assets/models/entity/
 ```
 
-Texture filenames in a model, such as `pig.png`, resolve under:
+Entity model textures should use texture asset IDs such as `arvane:texture/entity/pig`.
+Short texture filenames such as `pig.png` remain supported and resolve under:
 
 ```text
 arvane_home/assets/textures/entity/

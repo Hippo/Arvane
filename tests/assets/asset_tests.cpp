@@ -2,8 +2,10 @@
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
 
-#include <filesystem>
 #include <array>
+#include <filesystem>
+#include <span>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -16,10 +18,22 @@ arv::asset::Image make_test_image(std::array<arv::u8, 4> a, std::array<arv::u8, 
   image.height = 2;
   image.channels = 4;
   image.pixels = {
-      a[0], a[1], a[2], a[3],
-      b[0], b[1], b[2], b[3],
-      c[0], c[1], c[2], c[3],
-      d[0], d[1], d[2], d[3],
+      a[0],
+      a[1],
+      a[2],
+      a[3],
+      b[0],
+      b[1],
+      b[2],
+      b[3],
+      c[0],
+      c[1],
+      c[2],
+      c[3],
+      d[0],
+      d[1],
+      d[2],
+      d[3],
   };
   return image;
 }
@@ -98,6 +112,104 @@ TEST(TextureAtlasTests, RecordsPaddingSafeMipmapLimit) {
   ASSERT_TRUE(atlas);
   EXPECT_EQ(atlas.value().padding, 4U);
   EXPECT_EQ(atlas.value().mip_safe_max_level, 2U);
+}
+
+TEST(TextureAtlasTests, BuildsBlockAtlasRenderDataForInputTexturedModels) {
+  auto definitions = arv::voxel::parse_block_definitions_json(R"json(
+[
+  {
+    "name": "arvane:air",
+    "render_category": "none",
+    "properties": { "replaceable": true }
+  },
+  {
+    "name": "arvane:stone_stairs",
+    "render_category": "opaque",
+    "model": {
+      "path": "arvane:model/block/stairs",
+      "textures": ["arvane:texture/block/cobblestone"]
+    },
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "opaque": true,
+      "blocks_light": true,
+      "ao_occluder": true
+    }
+  }
+]
+)json");
+  ASSERT_TRUE(definitions) << definitions.error().message;
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+
+  arv::asset::ResourceManager resources(ARVANE_TEST_ASSET_ROOT);
+  auto atlas_result =
+      arv::asset::build_block_texture_atlas(resources, registry_result.value());
+
+  ASSERT_TRUE(atlas_result) << atlas_result.error().message;
+  EXPECT_NE(
+      atlas_result.value().atlas.find("arvane:texture/block/cobblestone"),
+      nullptr);
+
+  const auto stairs_variant =
+      registry_result.value().find_variant("arvane:stone_stairs");
+  ASSERT_TRUE(stairs_variant.has_value());
+  const std::span<const arv::voxel::BlockModelBoxRenderData> boxes =
+      atlas_result.value().render_data.model_boxes(stairs_variant.value());
+  ASSERT_EQ(boxes.size(), 2U);
+  EXPECT_TRUE(
+      boxes.front()
+          .faces[arv::voxel::face_index(arv::voxel::BlockFace::PositiveY)]
+          .has_value());
+}
+
+TEST(TextureAtlasTests, AppliesModelCollisionBoxesPerVariantAtStartup) {
+  auto definitions = arv::voxel::parse_block_definitions_json(R"json(
+[
+  {
+    "name": "arvane:air",
+    "render_category": "none",
+    "properties": { "replaceable": true }
+  },
+  {
+    "name": "arvane:stone_stairs",
+    "render_category": "opaque",
+    "model": {
+      "path": "arvane:model/block/stairs",
+      "textures": ["arvane:texture/block/cobblestone"]
+    },
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "opaque": true,
+      "blocks_light": true,
+      "ao_occluder": true
+    }
+  }
+]
+)json");
+  ASSERT_TRUE(definitions) << definitions.error().message;
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+  arv::voxel::BlockRegistry registry = std::move(registry_result.value());
+
+  const auto stairs_variant = registry.find_variant("arvane:stone_stairs");
+  ASSERT_TRUE(stairs_variant.has_value());
+  EXPECT_TRUE(registry.collision_boxes(stairs_variant.value()).empty());
+
+  arv::asset::ResourceManager resources(ARVANE_TEST_ASSET_ROOT);
+  auto block_models = arv::asset::load_block_model_definitions(resources, registry);
+  ASSERT_TRUE(block_models) << block_models.error().message;
+
+  arv::asset::apply_block_model_collision_boxes(registry, block_models.value());
+
+  const std::span<const arv::Aabb3f> boxes =
+      registry.collision_boxes(stairs_variant.value());
+  ASSERT_EQ(boxes.size(), 2U);
+  EXPECT_FLOAT_EQ(boxes.front().min.y, 0.0F);
+  EXPECT_FLOAT_EQ(boxes.front().max.y, 0.5F);
+  EXPECT_FLOAT_EQ(boxes.back().max.y, 1.0F);
 }
 
 TEST(FontTests, ShapesMeasuresAndCachesGlyphs) {

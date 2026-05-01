@@ -99,6 +99,29 @@ inline void add_block_item_icon(
   tree.add_child(slot_id, std::move(top_face));
 }
 
+inline void add_block_model_item_icon(
+    UiTree& tree,
+    UiNodeID slot_id,
+    std::string_view stable_prefix,
+    const UiItemStackView& stack) {
+  if (stack.block_model_quads.empty()) {
+    add_block_item_icon(tree, slot_id, stable_prefix, stack);
+    return;
+  }
+
+  constexpr f32 width = 34.0F;
+  constexpr f32 height = 30.0F;
+  for (usize index = 0; index < stack.block_model_quads.size(); ++index) {
+    tree.add_child(
+        slot_id,
+        image_element(
+            std::string{stable_prefix} + ".block_model." + std::to_string(index),
+            stack.block_model_quads[index].image,
+            width,
+            height));
+  }
+}
+
 inline void add_item_slot_children(
     UiTree& tree,
     UiNodeID slot_id,
@@ -108,7 +131,7 @@ inline void add_item_slot_children(
     bool show_number) {
   if (stack != nullptr && !stack->empty()) {
     if (stack->render_type == player::ItemRenderType::Block) {
-      add_block_item_icon(tree, slot_id, stable_prefix, *stack);
+      add_block_model_item_icon(tree, slot_id, stable_prefix, *stack);
     } else {
       add_texture_item_icon(tree, slot_id, stable_prefix, stack->texture_icon);
     }

@@ -6,8 +6,14 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 namespace arv::ui {
+
+struct UiBlockModelQuadView {
+  UiImageData image{};
+  f32 depth{};
+};
 
 struct UiItemStackView {
   std::string item_name{};
@@ -18,6 +24,7 @@ struct UiItemStackView {
   player::ItemRenderType render_type{player::ItemRenderType::Texture};
   UiImageData texture_icon{};
   std::array<UiImageData, voxel::BlockFaceCount> block_faces{};
+  std::vector<UiBlockModelQuadView> block_model_quads{};
 
   [[nodiscard]] bool empty() const noexcept {
     return item_name.empty() || count == 0U;

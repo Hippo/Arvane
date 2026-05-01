@@ -29,7 +29,7 @@ TEST(EntityModelTests, ParsesPigSkeletonTexturesAndAnimations) {
   ASSERT_EQ(parsed.value().bones.size(), 6U);
   EXPECT_EQ(parsed.value().bones.front().name, "body");
   ASSERT_EQ(parsed.value().texture_assets.size(), 1U);
-  EXPECT_EQ(parsed.value().texture_assets.front(), "arvane:texture/entity/pig.png");
+  EXPECT_EQ(parsed.value().texture_assets.front(), "arvane:texture/entity/pig");
   ASSERT_EQ(parsed.value().texture_sizes.size(), 1U);
   EXPECT_EQ(parsed.value().texture_sizes.front(), (arv::Vec2i{64, 64}));
   ASSERT_EQ(parsed.value().animations.size(), 1U);
@@ -44,12 +44,11 @@ TEST(EntityModelTests, BuildsPigCubeMeshFromSkeletonBoxes) {
   auto parsed = arv::render::parse_entity_model_json(read_text(pig_path));
   ASSERT_TRUE(parsed) << parsed.error().message;
 
-  const std::vector<arv::render::EntityModelTextureBinding> bindings{{
-      "arvane:texture/entity/pig.png",
-      {2, 2},
-      {130, 130},
-      128,
-      128}};
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/entity/pig",
+                                                                      {2, 2},
+                                                                      {130, 130},
+                                                                      128,
+                                                                      128}};
   auto model = arv::render::build_entity_model_asset(
       arv::render::EntityModelID{7},
       parsed.value(),
@@ -87,12 +86,11 @@ TEST(EntityModelTests, SkipsFacesWithNegativeTextureIndex) {
   auto parsed = arv::render::parse_entity_model_json(text);
   ASSERT_TRUE(parsed) << parsed.error().message;
 
-  const std::vector<arv::render::EntityModelTextureBinding> bindings{{
-      "arvane:texture/entity/pig.png",
-      {0, 0},
-      {128, 128},
-      128,
-      128}};
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/entity/pig",
+                                                                      {0, 0},
+                                                                      {128, 128},
+                                                                      128,
+                                                                      128}};
   auto model = arv::render::build_entity_model_asset(
       arv::render::EntityModelID{9},
       parsed.value(),
@@ -109,12 +107,11 @@ TEST(EntityModelTests, SamplesLoopingWalkingAnimation) {
   auto parsed = arv::render::parse_entity_model_json(read_text(pig_path));
   ASSERT_TRUE(parsed) << parsed.error().message;
 
-  const std::vector<arv::render::EntityModelTextureBinding> bindings{{
-      "arvane:texture/entity/pig.png",
-      {0, 0},
-      {64, 64},
-      64,
-      64}};
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/entity/pig",
+                                                                      {0, 0},
+                                                                      {64, 64},
+                                                                      64,
+                                                                      64}};
   auto model = arv::render::build_entity_model_asset(
       arv::render::EntityModelID{1},
       parsed.value(),

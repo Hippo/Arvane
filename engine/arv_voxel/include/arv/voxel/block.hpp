@@ -74,6 +74,11 @@ struct StatePropertyDefinition {
   std::vector<std::string> values{};
 };
 
+struct BlockModelReference {
+  std::string asset{};
+  std::vector<std::string> texture_inputs{};
+};
+
 struct BlockDefinition {
   std::string name{};
   std::vector<std::string> tags{};
@@ -82,6 +87,7 @@ struct BlockDefinition {
   bool is_item{true};
   bool hide_same_variant_faces{true};
   std::array<std::string, BlockFaceCount> texture_assets{};
+  BlockModelReference model{};
   std::vector<StatePropertyDefinition> states{};
 };
 
@@ -103,9 +109,27 @@ struct BlockVariantRecord {
   RenderCategory render_category{RenderCategory::None};
   bool hide_same_variant_faces{};
   std::array<std::string, BlockFaceCount> texture_assets{};
+  BlockModelReference model{};
   std::array<bool, BlockFaceCount> renders_face{};
   std::array<bool, BlockFaceCount> occludes_face{};
   std::vector<Aabb3f> collision_boxes{};
+};
+
+struct BlockModelFaceDefinition {
+  i32 texture_index{};
+  Vec4i uv{};
+};
+
+struct BlockModelBoxDefinition {
+  Vec3i min{};
+  Vec3i max{};
+  std::array<std::optional<BlockModelFaceDefinition>, BlockFaceCount> faces{};
+};
+
+struct BlockModelDefinition {
+  std::vector<BlockModelBoxDefinition> boxes{};
+  std::vector<std::string> texture_assets{};
+  std::vector<Vec2i> texture_sizes{};
 };
 
 struct BlockFaceRenderData {
@@ -114,11 +138,25 @@ struct BlockFaceRenderData {
   std::array<Vec2i, 4> uvs{};
 };
 
+struct BlockModelFaceRenderData {
+  u32 page{};
+  u32 texture_index{};
+  std::array<Vec2i, 4> uvs{};
+};
+
+struct BlockModelBoxRenderData {
+  Vec3i min{};
+  Vec3i max{};
+  std::array<std::optional<BlockModelFaceRenderData>, BlockFaceCount> faces{};
+};
+
 struct BlockVariantRenderData {
   std::array<BlockFaceRenderData, BlockFaceCount> faces{};
+  std::vector<BlockModelBoxRenderData> model_boxes{};
 };
 
 using BlockDefinitionsResult = Expected<std::vector<BlockDefinition>, BlockRegistryError>;
+using BlockModelDefinitionResult = Expected<BlockModelDefinition, BlockRegistryError>;
 
 [[nodiscard]] constexpr usize face_index(BlockFace face) noexcept {
   return static_cast<usize>(face);
@@ -199,6 +237,8 @@ public:
 
   [[nodiscard]] std::span<const Aabb3f> collision_boxes(BlockVariantID variant_id) const noexcept;
 
+  void set_collision_boxes(BlockVariantID variant_id, std::vector<Aabb3f> boxes);
+
   [[nodiscard]] bool is_replaceable(BlockVariantID variant_id) const noexcept;
 
   [[nodiscard]] bool should_emit_face(
@@ -229,6 +269,13 @@ public:
 
   void set_face(BlockVariantID variant_id, BlockFace block_face, BlockFaceRenderData data);
 
+  [[nodiscard]] std::span<const BlockModelBoxRenderData> model_boxes(
+      BlockVariantID variant_id) const noexcept;
+
+  void set_model_boxes(
+      BlockVariantID variant_id,
+      std::vector<BlockModelBoxRenderData> boxes);
+
   [[nodiscard]] usize variant_count() const noexcept {
     return variants_.size();
   }
@@ -238,6 +285,10 @@ private:
 };
 
 [[nodiscard]] BlockDefinition make_air_definition();
+
+[[nodiscard]] std::string normalize_block_model_asset(std::string_view model);
+
+[[nodiscard]] std::string normalize_block_texture_asset(std::string_view texture);
 
 [[nodiscard]] inline BlockDefinition make_full_cube_definition(
     std::string name,
@@ -255,5 +306,12 @@ private:
 }
 
 [[nodiscard]] BlockDefinitionsResult parse_block_definitions_json(std::string_view text);
+
+[[nodiscard]] BlockModelDefinitionResult parse_block_model_json(
+    std::string_view text,
+    std::span<const std::string> texture_inputs = {});
+
+[[nodiscard]] std::vector<Aabb3f> make_block_model_collision_boxes(
+    const BlockModelDefinition& model);
 
 } // namespace arv::voxel

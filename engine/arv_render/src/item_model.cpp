@@ -91,41 +91,41 @@ void append_texture_pixel(
   append_quad(
       asset,
       Quad{{{{x0, y0, z1}, {x1, y0, z1}, {x0, y1, z1}, {x1, y1, z1}}},
-       uvs,
-       face_color(voxel::BlockFace::PositiveZ)});
+           uvs,
+           face_color(voxel::BlockFace::PositiveZ)});
   append_quad(
       asset,
       Quad{{{{x1, y0, z0}, {x0, y0, z0}, {x1, y1, z0}, {x0, y1, z0}}},
-       std::array<Vec2f, 4>{{uvs[1], uvs[0], uvs[3], uvs[2]}},
-       face_color(voxel::BlockFace::NegativeZ)});
+           std::array<Vec2f, 4>{{uvs[1], uvs[0], uvs[3], uvs[2]}},
+           face_color(voxel::BlockFace::NegativeZ)});
 
   if (!visible_pixel(input, static_cast<i32>(x) - 1, static_cast<i32>(y))) {
     append_quad(
         asset,
         Quad{{{{x0, y0, z0}, {x0, y0, z1}, {x0, y1, z0}, {x0, y1, z1}}},
-         std::array<Vec2f, 4>{{uvs[0], uvs[1], uvs[2], uvs[3]}},
-         face_color(voxel::BlockFace::NegativeX)});
+             std::array<Vec2f, 4>{{uvs[0], uvs[1], uvs[2], uvs[3]}},
+             face_color(voxel::BlockFace::NegativeX)});
   }
   if (!visible_pixel(input, static_cast<i32>(x) + 1, static_cast<i32>(y))) {
     append_quad(
         asset,
         Quad{{{{x1, y0, z1}, {x1, y0, z0}, {x1, y1, z1}, {x1, y1, z0}}},
-         std::array<Vec2f, 4>{{uvs[1], uvs[0], uvs[3], uvs[2]}},
-         face_color(voxel::BlockFace::PositiveX)});
+             std::array<Vec2f, 4>{{uvs[1], uvs[0], uvs[3], uvs[2]}},
+             face_color(voxel::BlockFace::PositiveX)});
   }
   if (!visible_pixel(input, static_cast<i32>(x), static_cast<i32>(y) - 1)) {
     append_quad(
         asset,
         Quad{{{{x0, y1, z1}, {x1, y1, z1}, {x0, y1, z0}, {x1, y1, z0}}},
-         std::array<Vec2f, 4>{{uvs[2], uvs[3], uvs[0], uvs[1]}},
-         face_color(voxel::BlockFace::PositiveY)});
+             std::array<Vec2f, 4>{{uvs[2], uvs[3], uvs[0], uvs[1]}},
+             face_color(voxel::BlockFace::PositiveY)});
   }
   if (!visible_pixel(input, static_cast<i32>(x), static_cast<i32>(y) + 1)) {
     append_quad(
         asset,
         Quad{{{{x0, y0, z0}, {x1, y0, z0}, {x0, y0, z1}, {x1, y0, z1}}},
-         std::array<Vec2f, 4>{{uvs[0], uvs[1], uvs[2], uvs[3]}},
-         face_color(voxel::BlockFace::NegativeY)});
+             std::array<Vec2f, 4>{{uvs[0], uvs[1], uvs[2], uvs[3]}},
+             face_color(voxel::BlockFace::NegativeY)});
   }
 }
 
@@ -168,6 +168,28 @@ constexpr std::array<CubeFaceGeometry, voxel::BlockFaceCount> CubeFaces{{
     },
 }};
 
+[[nodiscard]] std::array<Vec3f, 4> model_box_face_corners(
+    const voxel::BlockModelBoxRenderData& box,
+    voxel::BlockFace face) noexcept {
+  const Vec3i min = box.min;
+  const Vec3i max = box.max;
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return {{centered(max.x, min.y, max.z), centered(max.x, min.y, min.z), centered(max.x, max.y, max.z), centered(max.x, max.y, min.z)}};
+    case voxel::BlockFace::NegativeX:
+      return {{centered(min.x, min.y, min.z), centered(min.x, min.y, max.z), centered(min.x, max.y, min.z), centered(min.x, max.y, max.z)}};
+    case voxel::BlockFace::PositiveY:
+      return {{centered(min.x, max.y, max.z), centered(max.x, max.y, max.z), centered(min.x, max.y, min.z), centered(max.x, max.y, min.z)}};
+    case voxel::BlockFace::NegativeY:
+      return {{centered(max.x, min.y, max.z), centered(min.x, min.y, max.z), centered(max.x, min.y, min.z), centered(min.x, min.y, min.z)}};
+    case voxel::BlockFace::PositiveZ:
+      return {{centered(min.x, min.y, max.z), centered(max.x, min.y, max.z), centered(min.x, max.y, max.z), centered(max.x, max.y, max.z)}};
+    case voxel::BlockFace::NegativeZ:
+      return {{centered(max.x, min.y, min.z), centered(min.x, min.y, min.z), centered(max.x, max.y, min.z), centered(min.x, max.y, min.z)}};
+  }
+  return {};
+}
+
 [[nodiscard]] std::array<Vec2f, 4> to_vec2f(std::array<Vec2i, 4> uvs) noexcept {
   std::array<Vec2f, 4> result{};
   for (usize index = 0; index < uvs.size(); ++index) {
@@ -201,6 +223,21 @@ EntityModelAsset build_block_item_model(const ItemBlockModelInput& input) {
   EntityModelAsset asset;
   asset.id = input.id;
   asset.name = input.name;
+
+  if (!input.model_boxes.empty()) {
+    for (const voxel::BlockModelBoxRenderData& box : input.model_boxes) {
+      for (const voxel::BlockFace face : voxel::AllBlockFaces) {
+        const usize index = voxel::face_index(face);
+        if (!box.faces[index].has_value()) {
+          continue;
+        }
+        append_quad(
+            asset,
+            {model_box_face_corners(box, face), to_vec2f(box.faces[index]->uvs), face_color(face)});
+      }
+    }
+    return asset;
+  }
 
   for (const CubeFaceGeometry& face : CubeFaces) {
     const usize index = voxel::face_index(face.face);

@@ -134,7 +134,7 @@
     }
   ],
   "textures": [
-    "cobblestone.png"
+    "$0"
   ],
   "texture_sizes": [
     [

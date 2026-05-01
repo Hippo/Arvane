@@ -1,5 +1,7 @@
 #include "dedicated_registry_loader.hpp"
 
+#include "arv/asset/resource.hpp"
+#include "arv/asset/texture_atlas.hpp"
 #include "arv/core/log.hpp"
 #include "arv/persistence/save.hpp"
 
@@ -33,6 +35,16 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
 
   DedicatedRegistries registries;
   registries.block_registry = std::move(block_registry_result.value());
+  asset::ResourceManager resources(config.paths.assets_path());
+  auto block_models_result =
+      asset::load_block_model_definitions(resources, registries.block_registry);
+  if (!block_models_result) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("assets", block_models_result.error().message));
+  }
+  asset::apply_block_model_collision_boxes(
+      registries.block_registry,
+      block_models_result.value());
   registries.block_registry_hash =
       persistence::hash_block_registry(registries.block_registry);
   core::info(

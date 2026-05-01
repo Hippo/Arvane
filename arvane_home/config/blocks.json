@@ -40,7 +40,11 @@
         "opaque": true,
         "blocks_light": true,
         "emits_light": true,
-        "emission_rgb": [15, 12, 6],
+        "emission_rgb": [
+          15,
+          12,
+          6
+        ],
         "full_cube": true,
         "ao_occluder": true
       }
@@ -83,6 +87,24 @@
       "properties": {
         "replaceable": true,
         "fluid": true
+      }
+    },
+    {
+      "name": "arvane:stone_stairs",
+      "render_category": "opaque",
+      "model": {
+        "path": "arvane:model/block/stairs",
+        "textures": [
+          "arvane:texture/block/cobblestone"
+        ]
+      },
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": false,
+        "ao_occluder": true
       }
     }
   ]

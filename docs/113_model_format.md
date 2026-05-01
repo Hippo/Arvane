@@ -20,7 +20,10 @@ The format is intentionally simple, deterministic, and independent of Blockbench
 All textures are defined in a top-level array:
 
 ```json
-"textures": ["stone.png", "stone_top.png"]
+"textures": [
+  "arvane:texture/block/stone",
+  "arvane:texture/block/stone_top"
+]
 ```
 
 Faces reference textures by **index** into this array.
@@ -28,6 +31,35 @@ Faces reference textures by **index** into this array.
 * `0` → first texture
 * `1` → second texture
 * `-1` → no texture (face is invisible / skipped)
+
+
+### Input textures
+
+The top level texture array may look like:
+
+```json
+"textures": ["$0"]
+```
+
+This means the model expects an input texture array. `$X` resolves to index `X` from the
+block definition's `model.textures` array.
+
+Example block definition:
+
+```json
+"model": {
+  "path": "arvane:model/block/stairs",
+  "textures": ["arvane:texture/block/cobblestone"]
+}
+```
+
+The model texture list `["$0"]` resolves to:
+
+```json
+["arvane:texture/block/cobblestone"]
+```
+
+Specific texture IDs are still valid directly in the model texture list.
 
 ---
 

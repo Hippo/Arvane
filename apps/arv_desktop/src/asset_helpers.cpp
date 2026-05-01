@@ -135,7 +135,8 @@ EntityRenderAssetsResult build_entity_render_assets(
     asset::ResourceManager& resources,
     const entity::EntityRegistry& entity_registry,
     const player::ItemRegistry& item_registry,
-    const voxel::BlockRegistry& block_registry) {
+    const voxel::BlockRegistry& block_registry,
+    std::span<const asset::BlockModelAssetData> block_models) {
   struct PendingModel {
     EntityTypeID type_id{};
     std::optional<player::ItemID> item_id{};
@@ -151,7 +152,29 @@ EntityRenderAssetsResult build_entity_render_assets(
     player::ItemID item_id{};
     render::EntityModelID model_id{};
     voxel::BlockVariantID variant{};
+    const voxel::BlockModelDefinition* model_definition{};
   };
+
+  std::vector<asset::BlockModelAssetData> loaded_block_models;
+  std::span<const asset::BlockModelAssetData> resolved_block_models = block_models;
+  if (resolved_block_models.empty()) {
+    auto loaded_models = asset::load_block_model_definitions(resources, block_registry);
+    if (!loaded_models) {
+      return EntityRenderAssetsResult::failure(loaded_models.error());
+    }
+    loaded_block_models = std::move(loaded_models.value());
+    resolved_block_models =
+        std::span<const asset::BlockModelAssetData>{loaded_block_models.data(), loaded_block_models.size()};
+  }
+
+  std::vector<const voxel::BlockModelDefinition*> block_model_by_variant(
+      block_registry.variant_count(),
+      nullptr);
+  for (const asset::BlockModelAssetData& block_model : resolved_block_models) {
+    if (block_model.variant_id.value < block_model_by_variant.size()) {
+      block_model_by_variant[block_model.variant_id.value] = &block_model.definition;
+    }
+  }
 
   std::vector<PendingModel> pending_models;
   std::vector<PendingTextureItem> pending_texture_items;
@@ -250,10 +273,26 @@ EntityRenderAssetsResult build_entity_render_assets(
           pending_texture_items.push_back({item_id, model_id, "arvane:texture/missing"});
           break;
         }
-        for (const voxel::BlockFace face : voxel::AllBlockFaces) {
-          add_texture(block_texture_for_face(*variant, face));
+        const voxel::BlockModelDefinition* model_definition =
+            variant->model.asset.empty()
+                ? nullptr
+                : block_model_by_variant[item->render_block_variant.value().value];
+        if (!variant->model.asset.empty() && model_definition == nullptr) {
+          return EntityRenderAssetsResult::failure({variant->model.asset,
+                                                    resources.resolve_asset_path({variant->model.asset}, asset::AssetKind::Model),
+                                                    "build block item model",
+                                                    "block model was not loaded"});
         }
-        pending_block_items.push_back({item_id, model_id, item->render_block_variant.value()});
+        if (model_definition != nullptr) {
+          for (const std::string& texture : model_definition->texture_assets) {
+            add_texture(texture);
+          }
+        } else {
+          for (const voxel::BlockFace face : voxel::AllBlockFaces) {
+            add_texture(block_texture_for_face(*variant, face));
+          }
+        }
+        pending_block_items.push_back({item_id, model_id, item->render_block_variant.value(), model_definition});
         break;
       }
     }
@@ -358,6 +397,22 @@ EntityRenderAssetsResult build_entity_render_assets(
     input.name = item_registry.item(pending.item_id) == nullptr
                      ? std::string{player::MissingItemName}
                      : item_registry.item(pending.item_id)->name;
+    if (pending.model_definition != nullptr) {
+      auto render_boxes = asset::build_block_model_render_boxes(
+          assets.texture_atlas,
+          *pending.model_definition,
+          "build block item model");
+      if (!render_boxes) {
+        return EntityRenderAssetsResult::failure(render_boxes.error());
+      }
+      std::vector<voxel::BlockModelBoxRenderData> model_boxes =
+          std::move(render_boxes.value());
+      input.model_boxes =
+          std::span<const voxel::BlockModelBoxRenderData>{model_boxes.data(), model_boxes.size()};
+      assets.model_by_item[pending.item_id] = pending.model_id;
+      assets.models.push_back(render::build_block_item_model(input));
+      continue;
+    }
     for (const voxel::BlockFace face : voxel::AllBlockFaces) {
       const std::string texture = block_texture_for_face(*variant, face);
       const asset::TextureAtlasEntry* entry = assets.texture_atlas.find(texture);

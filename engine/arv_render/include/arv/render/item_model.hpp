@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/render/entity_model.hpp"
+#include "arv/voxel/block.hpp"
 
 #include <array>
 #include <span>
@@ -23,6 +24,7 @@ struct ItemBlockModelInput {
   std::string name{};
   std::array<std::array<Vec2i, 4>, voxel::BlockFaceCount> face_uvs{};
   std::array<bool, voxel::BlockFaceCount> face_valid{};
+  std::span<const voxel::BlockModelBoxRenderData> model_boxes{};
 };
 
 [[nodiscard]] EntityModelAsset build_extruded_texture_item_model(

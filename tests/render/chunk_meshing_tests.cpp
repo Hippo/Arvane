@@ -34,6 +34,49 @@ arv::voxel::BlockRegistry make_registry() {
   return std::move(registry_result.value());
 }
 
+arv::voxel::BlockRegistry make_model_registry() {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:stone"));
+
+  arv::voxel::BlockDefinition slab;
+  slab.name = "arvane:stone_slab";
+  slab.render_category = arv::voxel::RenderCategory::Opaque;
+  slab.properties.solid = true;
+  slab.properties.collidable = true;
+  slab.properties.opaque = true;
+  slab.properties.blocks_light = true;
+  slab.properties.ao_occluder = true;
+  slab.model.asset = "arvane:model/block/slab";
+  definitions.push_back(std::move(slab));
+
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions));
+  EXPECT_TRUE(registry_result);
+  return std::move(registry_result.value());
+}
+
+arv::voxel::BlockRenderData make_slab_render_data(
+    const arv::voxel::BlockRegistry& registry) {
+  arv::voxel::BlockRenderData render_data =
+      arv::voxel::BlockRenderData::make_empty(registry.variant_count());
+  const arv::voxel::BlockVariantID slab =
+      registry.find_variant("arvane:stone_slab").value();
+
+  arv::voxel::BlockModelBoxRenderData box;
+  box.min = {0, 0, 0};
+  box.max = {16, 8, 16};
+  for (const arv::voxel::BlockFace face : arv::voxel::AllBlockFaces) {
+    const arv::usize index = arv::voxel::face_index(face);
+    arv::voxel::BlockModelFaceRenderData face_data;
+    face_data.uvs = arv::voxel::default_cube_face_uvs(face);
+    box.faces[index] = face_data;
+  }
+  std::vector<arv::voxel::BlockModelBoxRenderData> boxes;
+  boxes.push_back(std::move(box));
+  render_data.set_model_boxes(slab, std::move(boxes));
+  return render_data;
+}
+
 [[nodiscard]] arv::usize face_count(const arv::render::CpuMeshBuffer& mesh) {
   return mesh.indices.size() / 6U;
 }
@@ -167,6 +210,52 @@ TEST(ChunkMeshingTests, CutoutCubeUsesOpaqueMeshWithCutoutMaterialClass) {
   EXPECT_EQ(
       arv::render::unpack_chunk_material_class(vertex.light_face_material_hints),
       arv::render::VertexMaterialClass::Cutout);
+}
+
+TEST(ChunkMeshingTests, CustomBlockModelEmitsBoxFacesForNonFullCubeVariant) {
+  const arv::voxel::BlockRegistry registry = make_model_registry();
+  const arv::voxel::BlockRenderData render_data = make_slab_render_data(registry);
+  const arv::voxel::BlockVariantID slab =
+      registry.find_variant("arvane:stone_slab").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, slab));
+
+  const arv::voxel::ChunkSnapshot snapshot =
+      arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry, &render_data);
+
+  EXPECT_EQ(face_count(mesh.opaque), 6U);
+  EXPECT_EQ(face_count(mesh.transparent), 0U);
+  EXPECT_TRUE(find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {0, 8, 16},
+      arv::voxel::BlockFace::PositiveY));
+}
+
+TEST(ChunkMeshingTests, CustomBlockModelBoundaryFacesRespectNeighborOcclusion) {
+  const arv::voxel::BlockRegistry registry = make_model_registry();
+  const arv::voxel::BlockRenderData render_data = make_slab_render_data(registry);
+  const arv::voxel::BlockVariantID slab =
+      registry.find_variant("arvane:stone_slab").value();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, slab));
+  ASSERT_TRUE(chunk.set_block({{2, 1, 1}}, stone));
+
+  const arv::voxel::ChunkSnapshot snapshot =
+      arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry, &render_data);
+
+  EXPECT_EQ(face_count(mesh.opaque), 11U);
+  EXPECT_FALSE(find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {16, 0, 16},
+      arv::voxel::BlockFace::PositiveX));
 }
 
 TEST(ChunkMeshingTests, FluidCellsEmitIntoTransparentMesh) {

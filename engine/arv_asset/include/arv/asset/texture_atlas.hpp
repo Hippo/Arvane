@@ -6,6 +6,7 @@
 
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::asset {
@@ -57,8 +58,16 @@ struct BlockTextureAtlas {
   voxel::BlockRenderData render_data{};
 };
 
+struct BlockModelAssetData {
+  voxel::BlockVariantID variant_id{};
+  voxel::BlockModelDefinition definition{};
+};
+
 using TextureAtlasResult = Expected<TextureAtlas, AssetError>;
 using BlockTextureAtlasResult = Expected<BlockTextureAtlas, AssetError>;
+using BlockModelAssetDataResult = Expected<std::vector<BlockModelAssetData>, AssetError>;
+using BlockModelRenderBoxesResult =
+    Expected<std::vector<voxel::BlockModelBoxRenderData>, AssetError>;
 
 [[nodiscard]] TextureAtlasResult build_texture_atlas(
     std::span<const TextureAtlasInput> inputs,
@@ -68,5 +77,24 @@ using BlockTextureAtlasResult = Expected<BlockTextureAtlas, AssetError>;
     ResourceManager& resources,
     const voxel::BlockRegistry& registry,
     TextureAtlasBuildOptions options = {});
+
+[[nodiscard]] BlockTextureAtlasResult build_block_texture_atlas(
+    ResourceManager& resources,
+    const voxel::BlockRegistry& registry,
+    std::span<const BlockModelAssetData> block_models,
+    TextureAtlasBuildOptions options = {});
+
+[[nodiscard]] BlockModelAssetDataResult load_block_model_definitions(
+    ResourceManager& resources,
+    const voxel::BlockRegistry& registry);
+
+void apply_block_model_collision_boxes(
+    voxel::BlockRegistry& registry,
+    std::span<const BlockModelAssetData> block_models);
+
+[[nodiscard]] BlockModelRenderBoxesResult build_block_model_render_boxes(
+    const TextureAtlas& atlas,
+    const voxel::BlockModelDefinition& model,
+    std::string_view operation = "build block model render data");
 
 } // namespace arv::asset
