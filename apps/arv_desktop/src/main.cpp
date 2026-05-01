@@ -20,6 +20,7 @@
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/io/input_bindings.hpp"
+#include "arv/net/gns_transport.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/platform/glfw_window.hpp"
@@ -40,6 +41,7 @@
 #include <cstddef>
 #include <deque>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -318,6 +320,38 @@ void route_ui_mouse_focus(
   return seed;
 }
 
+[[nodiscard]] std::optional<arv::net::NetworkAddress>
+parse_server_address(std::string_view address) {
+  const arv::usize colon = address.rfind(':');
+  arv::net::NetworkAddress parsed;
+  if (colon == std::string_view::npos) {
+    if (address.empty()) {
+      return std::nullopt;
+    }
+    parsed.host = std::string{address};
+    return parsed;
+  }
+
+  if (colon == 0U || colon + 1U >= address.size() ||
+      address.find(':') != colon) {
+    return std::nullopt;
+  }
+
+  arv::u32 port = 0;
+  const std::string_view port_text = address.substr(colon + 1U);
+  const char* begin = port_text.data();
+  const char* end = port_text.data() + port_text.size();
+  const auto port_result = std::from_chars(begin, end, port);
+  if (port_result.ec != std::errc{} || port_result.ptr != end || port == 0U ||
+      port > std::numeric_limits<arv::u16>::max()) {
+    return std::nullopt;
+  }
+
+  parsed.host = std::string{address.substr(0U, colon)};
+  parsed.port = static_cast<arv::u16>(port);
+  return parsed;
+}
+
 struct DesktopGameSession {
   explicit DesktopGameSession(arv::TickRate base_tps) : ticks(base_tps) {
   }
@@ -338,6 +372,7 @@ struct DesktopGameSession {
   std::deque<arv::protocol::ChunkData> pending_client_chunk_data{};
   std::deque<arv::protocol::BlockUpdateBatch> pending_client_block_updates{};
   arv::core::FixedTimestepAccumulator ticks;
+  arv::TickIndex client_tick_index{};
   std::vector<arv::ui::UiItemStackView> inventory_slots{};
   std::optional<arv::ui::UiItemStackView> carried_inventory_stack{};
   std::vector<arv::ui::PlayerListEntryView> tab_players{};
@@ -348,8 +383,13 @@ struct DesktopGameSession {
 class DesktopMenuState final : public arv::ui::UIScreenDataSource,
                                public arv::ui::UICommandSink {
 public:
-  explicit DesktopMenuState(std::filesystem::path saves_root) : saves_root_(std::move(saves_root)) {
+  DesktopMenuState(
+      std::filesystem::path saves_root,
+      std::filesystem::path server_list_file)
+      : saves_root_(std::move(saves_root)),
+        server_list_file_(std::move(server_list_file)) {
     refresh_worlds();
+    load_servers();
   }
 
   [[nodiscard]] std::vector<arv::ui::SinglePlayerSaveEntry> singleplayer_saves() const override {
@@ -387,6 +427,11 @@ public:
     return std::exchange(delete_save_request_, std::nullopt);
   }
 
+  [[nodiscard]] std::optional<arv::ui::JoinServerCommand>
+  take_join_server_request() noexcept {
+    return std::exchange(join_server_request_, std::nullopt);
+  }
+
   [[nodiscard]] bool take_back_to_main_menu_request() noexcept {
     return std::exchange(back_to_main_menu_requested_, false);
   }
@@ -408,7 +453,8 @@ private:
     delete_save_request_ = command;
   }
 
-  void handle(const arv::ui::JoinServerCommand&) {
+  void handle(const arv::ui::JoinServerCommand& command) {
+    join_server_request_ = command;
   }
 
   void handle(const arv::ui::SaveServerEntryCommand& command) {
@@ -417,11 +463,13 @@ private:
     } else {
       servers.push_back(command.server);
     }
+    persist_servers();
   }
 
   void handle(const arv::ui::RemoveServerEntryCommand& command) {
     if (command.index < servers.size()) {
       servers.erase(servers.begin() + static_cast<std::ptrdiff_t>(command.index));
+      persist_servers();
     }
   }
 
@@ -435,10 +483,39 @@ private:
     quit_requested = true;
   }
 
+  void load_servers() {
+    servers.clear();
+    auto loaded = arv::io::load_server_list_file(server_list_file_);
+    if (!loaded) {
+      arv::core::warn("config", loaded.error().message);
+      return;
+    }
+
+    servers.reserve(loaded.value().size());
+    for (const arv::io::SavedServerListEntry& server : loaded.value()) {
+      servers.push_back({server.name, server.address});
+    }
+  }
+
+  void persist_servers() const {
+    std::vector<arv::io::SavedServerListEntry> saved_servers;
+    saved_servers.reserve(servers.size());
+    for (const arv::ui::ServerListEntry& server : servers) {
+      saved_servers.push_back({server.name, server.address});
+    }
+
+    auto saved = arv::io::save_server_list_file(server_list_file_, saved_servers);
+    if (!saved) {
+      arv::core::warn("config", saved.error().message);
+    }
+  }
+
   std::filesystem::path saves_root_{};
+  std::filesystem::path server_list_file_{};
   std::optional<arv::ui::StartSinglePlayerCommand> start_singleplayer_request_{};
   std::optional<arv::ui::CreateWorldCommand> create_world_request_{};
   std::optional<arv::ui::DeleteSinglePlayerSaveCommand> delete_save_request_{};
+  std::optional<arv::ui::JoinServerCommand> join_server_request_{};
   bool back_to_main_menu_requested_{};
 };
 
@@ -737,6 +814,7 @@ int main(int argc, char** argv) {
       world_jobs.worker_count());
 
   std::unique_ptr<DesktopGameSession> game_session;
+  std::unique_ptr<arv::net::GameNetworkingSocketsEnvironment> gns_environment;
 
   auto refresh_inventory_slots = [&](DesktopGameSession& session) {
     session.inventory_slots.clear();
@@ -845,6 +923,11 @@ int main(int argc, char** argv) {
 
     DesktopGameSession& session = *game_session;
     if (session.integrated_server == nullptr) {
+      for (const auto& [coord, item] : session.chunk_view.draw_items) {
+        (void)coord;
+        renderer.remove_chunk_mesh(item.key);
+      }
+      world_jobs.wait_for_all();
       game_session.reset();
       return true;
     }
@@ -1076,6 +1159,57 @@ int main(int argc, char** argv) {
     return true;
   };
 
+  auto start_remote_session =
+      [&](const arv::ui::JoinServerCommand& command) -> bool {
+    const std::optional<arv::net::NetworkAddress> address =
+        parse_server_address(command.address);
+    if (!address.has_value()) {
+      arv::core::error("client", "invalid server address '{}'", command.address);
+      return false;
+    }
+
+    if (!save_and_shutdown_session()) {
+      return false;
+    }
+
+    if (gns_environment == nullptr) {
+      gns_environment = std::make_unique<arv::net::GameNetworkingSocketsEnvironment>();
+    }
+    if (!gns_environment->initialized()) {
+      arv::core::error("net", gns_environment->error_message());
+      gns_environment.reset();
+      return false;
+    }
+
+    auto session = std::make_unique<DesktopGameSession>(config.simulation.base_tps);
+    session->server_save_display_name = command.name;
+    session->generation_config = default_generation_config;
+    const std::pair<arv::i32, arv::i32> visible_chunk_y =
+        arv::desktop::visible_worldgen_chunk_y_range(session->generation_config);
+    session->min_chunk_y = visible_chunk_y.first;
+    session->max_chunk_y = visible_chunk_y.second;
+
+    auto client = std::make_unique<arv::client::ClientRuntime>(
+        std::make_unique<arv::net::GameNetworkingSocketsTransport>());
+    client->set_player_tuning(player_tuning);
+    client->set_chunk_view_distance(config.chunks.stream_distance);
+    auto connect_result = client->connect(address.value());
+    if (!connect_result) {
+      arv::core::error("client", connect_result.error().message);
+      return false;
+    }
+
+    session->client = std::move(client);
+    arv::core::info(
+        "desktop",
+        "connecting to server '{}' at {}:{}",
+        command.name,
+        address->host,
+        address->port);
+    game_session = std::move(session);
+    return true;
+  };
+
   auto delete_singleplayer_save = [&](const arv::ui::DeleteSinglePlayerSaveCommand& command) {
     if (command.server_save_name.empty()) {
       return;
@@ -1109,7 +1243,7 @@ int main(int argc, char** argv) {
   arv::u64 profile_frame_index = 0;
   constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
   arv::FrameArena frame_arena;
-  DesktopMenuState menu_state{config.paths.saves_path()};
+  DesktopMenuState menu_state{config.paths.saves_path(), config.paths.server_list_file};
   arv::ui::UIScreenManager screen_manager;
   screen_manager.push(arv::ui::make_main_menu_screen());
 
@@ -1157,8 +1291,7 @@ int main(int argc, char** argv) {
         delta.count());
     DesktopGameSession* active_session = game_session.get();
     const bool has_session =
-        active_session != nullptr && active_session->client != nullptr &&
-        active_session->integrated_server != nullptr;
+        active_session != nullptr && active_session->client != nullptr;
     const bool was_inventory_open = has_session && active_session->client->inventory_open();
     arv::ui::UIContext menu_context{
         ui_tree,
@@ -1224,6 +1357,16 @@ int main(int argc, char** argv) {
       menu_state.refresh_worlds();
       active_session = game_session.get();
     }
+    if (const std::optional<arv::ui::JoinServerCommand> command =
+            menu_state.take_join_server_request();
+        command.has_value()) {
+      if (start_remote_session(command.value())) {
+        screen_manager.clear();
+      } else if (game_session == nullptr && screen_manager.empty()) {
+        screen_manager.push(arv::ui::make_multi_player_menu_screen());
+      }
+      active_session = game_session.get();
+    }
     if (const std::optional<arv::ui::CreateWorldCommand> command =
             menu_state.take_create_world_request();
         command.has_value()) {
@@ -1254,8 +1397,9 @@ int main(int argc, char** argv) {
     }
 
     const bool has_active_session =
-        active_session != nullptr && active_session->client != nullptr &&
-        active_session->integrated_server != nullptr;
+        active_session != nullptr && active_session->client != nullptr;
+    const bool has_active_integrated_session =
+        has_active_session && active_session->integrated_server != nullptr;
     if (menu_state.quit_requested) {
       window.request_close();
     }
@@ -1277,7 +1421,8 @@ int main(int argc, char** argv) {
     bool fixed_tick_ran = false;
     if (has_active_session) {
       active_session->ticks.add_time(delta.count());
-      const bool singleplayer_paused = screen_manager.pauses_singleplayer();
+      const bool singleplayer_paused =
+          has_active_integrated_session && screen_manager.pauses_singleplayer();
       while (active_session->ticks.consume_tick()) {
         ARV_PROFILE_ZONE("Simulation tick");
         if (!singleplayer_paused) {
@@ -1285,8 +1430,13 @@ int main(int argc, char** argv) {
           if constexpr (arv::core::profiling_enabled()) {
             simulation_start = std::chrono::steady_clock::now();
           }
-          active_session->integrated_server->tick();
-          active_session->client->fixed_tick(active_session->integrated_server->tick_index());
+          if (has_active_integrated_session) {
+            active_session->integrated_server->tick();
+            active_session->client->fixed_tick(active_session->integrated_server->tick_index());
+          } else {
+            ++active_session->client_tick_index;
+            active_session->client->fixed_tick(active_session->client_tick_index);
+          }
           collect_client_chunk_stream(*active_session);
           if constexpr (arv::core::profiling_enabled()) {
             const auto simulation_end = std::chrono::steady_clock::now();
@@ -1362,7 +1512,7 @@ int main(int argc, char** argv) {
       }
     }
 
-    if (has_active_session) {
+    if (has_active_integrated_session) {
       const arv::desktop::DebugMenuResult debug_menu_result =
           arv::desktop::render_debug_menu(
               debug_menu,
@@ -1390,14 +1540,15 @@ int main(int argc, char** argv) {
     if (has_active_session) {
       if (!active_session->ui_snapshot_initialized || fixed_tick_ran) {
         refresh_inventory_slots(*active_session);
-        if (active_session->client->tab_menu_visible()) {
+        if (has_active_integrated_session && active_session->client->tab_menu_visible()) {
           active_session->tab_players =
               arv::desktop::player_list_for_ui(*active_session->integrated_server);
         } else {
           active_session->tab_players.clear();
         }
         active_session->ui_snapshot_initialized = true;
-      } else if (active_session->client->tab_menu_visible() &&
+      } else if (has_active_integrated_session &&
+                 active_session->client->tab_menu_visible() &&
                  active_session->tab_players.empty()) {
         active_session->tab_players =
             arv::desktop::player_list_for_ui(*active_session->integrated_server);

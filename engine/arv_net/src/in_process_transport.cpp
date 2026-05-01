@@ -64,6 +64,8 @@ NetworkResult InProcessTransport::send(TransportMessage message) {
                         std::move(message.payload),
                         {},
                         std::chrono::steady_clock::now()};
+  received.message_type = message.message_type;
+  received.lane = message.lane;
   if (!outbound_events().try_enqueue(std::move(received))) {
     return NetworkResult::failure(NetworkError{"in-process peer event queue is full"});
   }

@@ -1,4 +1,5 @@
 #include "arv/client/client_runtime.hpp"
+#include "arv/net/gns_transport.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
@@ -11,7 +12,9 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <memory>
+#include <optional>
 #include <span>
 #include <chrono>
 #include <thread>
@@ -101,6 +104,21 @@ surface:
   return settings;
 }
 
+std::optional<arv::u16> start_gns_server_runtime(
+    arv::server::ServerRuntime& server,
+    arv::server::ServerStartInfo start_info) {
+  const auto seed = static_cast<arv::u16>(
+      std::chrono::steady_clock::now().time_since_epoch().count() % 1000);
+  for (arv::u16 attempt = 0; attempt < 100; ++attempt) {
+    const arv::u16 port = static_cast<arv::u16>(45000U + ((seed + attempt) % 1000U));
+    start_info.listen_address = {"0.0.0.0", port};
+    if (server.start(start_info)) {
+      return port;
+    }
+  }
+  return std::nullopt;
+}
+
 } // namespace
 
 TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshake) {
@@ -132,6 +150,64 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
   EXPECT_NE(server.worlds().find(arv::server::DefaultWorldID), nullptr);
   EXPECT_TRUE(client.has_authoritative_inventory());
   EXPECT_GT(client.replicated_entity_count(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, SavedPlayerStateIsAppliedBeforeWorldJoinResult) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
+  arv::server::ServerRuntime server(std::move(transports.server));
+
+  arv::server::ServerPlayerSaveState saved_player;
+  saved_player.profile_name = "local_player";
+  saved_player.world_name = "default";
+  saved_player.position = {12.0F, 34.0F, -56.0F};
+  saved_player.velocity = {1.0F, 2.0F, 3.0F};
+  saved_player.selected_hotbar_slot = 3;
+  std::array<arv::server::ServerPlayerSaveState, 1> saved_players{saved_player};
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.initial_tick_index = 77;
+  start_info.world_name = "default";
+  start_info.saved_players = saved_players;
+  ASSERT_TRUE(server.start(start_info));
+
+  const auto connect_result = client_transport->connect({"in-process", 0});
+  ASSERT_TRUE(connect_result);
+  send_raw_client_hello(*client_transport, connect_result.value());
+  server.tick();
+
+  const std::vector<arv::net::NetworkEvent> events = client_transport->poll_events();
+  std::optional<arv::protocol::WorldJoinResult> world_join;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    auto envelope = arv::protocol::deserialize_envelope(event.payload);
+    if (!envelope ||
+        envelope.value().envelope.message_type != arv::protocol::MessageType::WorldJoinResult) {
+      continue;
+    }
+    auto decoded = arv::protocol::deserialize_world_join_result(envelope.value().payload);
+    ASSERT_TRUE(decoded);
+    world_join = decoded.value();
+  }
+
+  ASSERT_TRUE(world_join.has_value());
+  EXPECT_TRUE(world_join->accepted);
+  EXPECT_EQ(world_join->initial_tick, 77U);
+  EXPECT_EQ(world_join->spawn_position.x, 12.0F);
+  EXPECT_EQ(world_join->spawn_position.y, 34.0F);
+  EXPECT_EQ(world_join->spawn_position.z, -56.0F);
+  const arv::player::PlayerState& player = connected_player(server);
+  EXPECT_EQ(player.selected_hotbar_slot, 3U);
 }
 
 TEST(IntegratedHandshakeTests, InventoryActionsFlowThroughAuthoritativeProtocolUpdates) {
@@ -411,4 +487,160 @@ TEST(IntegratedHandshakeTests, ClientReceivesGeneratedChunkAfterAsyncGeneration)
 
   ASSERT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
+}
+
+TEST(IntegratedHandshakeTests, RemoteConnectPathReceivesGeneratedChunks) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerChunkStreamingConfig streaming_config;
+  streaming_config.max_view_distance = 0;
+  streaming_config.max_chunks_sent_per_player_tick = 1;
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Dedicated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.player_tuning = arv::player::default_player_tuning();
+  start_info.fluid_definition = arv::voxel::make_water_fluid_definition();
+  start_info.chunk_streaming = streaming_config;
+  start_info.chunk_generation = make_generation_settings(block_registry);
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.set_chunk_view_distance(0);
+  ASSERT_TRUE(client.connect({"localhost", 42069}));
+
+  std::vector<arv::protocol::ChunkData> chunks;
+  for (int attempt = 0; attempt < 100 && chunks.empty(); ++attempt) {
+    server.tick();
+    client.fixed_tick(server.tick_index());
+    chunks = client.drain_received_chunk_data();
+    if (chunks.empty()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  ASSERT_EQ(chunks.size(), 1U);
+  EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
+}
+
+TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackReceivesGeneratedChunks) {
+  arv::net::GameNetworkingSocketsEnvironment environment;
+  if (!environment.initialized()) {
+    GTEST_SKIP() << environment.error_message();
+  }
+
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto server_transport = std::make_unique<arv::net::GameNetworkingSocketsTransport>();
+  arv::net::GameNetworkingSocketsTransport* server_transport_view = server_transport.get();
+  arv::server::ServerRuntime server(std::move(server_transport));
+  arv::server::ServerChunkStreamingConfig streaming_config;
+  streaming_config.max_view_distance = 0;
+  streaming_config.max_chunks_sent_per_player_tick = 1;
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Dedicated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.player_tuning = arv::player::default_player_tuning();
+  start_info.fluid_definition = arv::voxel::make_water_fluid_definition();
+  start_info.chunk_streaming = streaming_config;
+  start_info.chunk_generation = make_generation_settings(block_registry);
+  const std::optional<arv::u16> port = start_gns_server_runtime(server, start_info);
+  if (!port.has_value()) {
+    GTEST_SKIP() << "failed to create GameNetworkingSockets listen socket";
+  }
+  ASSERT_EQ(server_transport_view->bound_port(), port.value());
+
+  arv::client::ClientRuntime client(
+      std::make_unique<arv::net::GameNetworkingSocketsTransport>());
+  client.set_chunk_view_distance(0);
+  const auto connect_result = client.connect({"localhost", port.value()});
+  if (!connect_result) {
+    GTEST_SKIP() << connect_result.error().message;
+  }
+
+  std::vector<arv::protocol::ChunkData> chunks;
+  for (int attempt = 0; attempt < 300 && chunks.empty(); ++attempt) {
+    server.tick();
+    client.fixed_tick(server.tick_index());
+    chunks = client.drain_received_chunk_data();
+    if (chunks.empty()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_EQ(server.sessions().size(), 1U);
+  ASSERT_EQ(chunks.size(), 1U);
+  EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
+  EXPECT_GT(server.voxel_world().loaded_chunk_count(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackStreamsViewDistanceOne) {
+  arv::net::GameNetworkingSocketsEnvironment environment;
+  if (!environment.initialized()) {
+    GTEST_SKIP() << environment.error_message();
+  }
+
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto server_transport = std::make_unique<arv::net::GameNetworkingSocketsTransport>();
+  arv::server::ServerRuntime server(std::move(server_transport));
+  arv::server::ServerChunkStreamingConfig streaming_config;
+  streaming_config.max_view_distance = 1;
+  streaming_config.max_chunks_sent_per_player_tick = 2;
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Dedicated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.player_tuning = arv::player::default_player_tuning();
+  start_info.fluid_definition = arv::voxel::make_water_fluid_definition();
+  start_info.chunk_streaming = streaming_config;
+  start_info.chunk_generation = make_generation_settings(block_registry);
+  start_info.max_generation_results_per_tick = 2;
+  start_info.max_pending_generation_jobs = 4;
+  const std::optional<arv::u16> port = start_gns_server_runtime(server, start_info);
+  if (!port.has_value()) {
+    GTEST_SKIP() << "failed to create GameNetworkingSockets listen socket";
+  }
+
+  arv::client::ClientRuntime client(
+      std::make_unique<arv::net::GameNetworkingSocketsTransport>());
+  client.set_chunk_view_distance(1);
+  const auto connect_result = client.connect({"localhost", port.value()});
+  if (!connect_result) {
+    GTEST_SKIP() << connect_result.error().message;
+  }
+
+  arv::HashSet<arv::ChunkCoord> received_chunks;
+  for (int attempt = 0; attempt < 1500 && received_chunks.size() < 27U; ++attempt) {
+    server.tick();
+    client.fixed_tick(server.tick_index());
+    for (const arv::protocol::ChunkData& chunk : client.drain_received_chunk_data()) {
+      if (chunk.world_id == arv::server::DefaultWorldID) {
+        received_chunks.insert(chunk.coord);
+      }
+    }
+    if (received_chunks.size() < 27U) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_EQ(server.sessions().size(), 1U);
+  EXPECT_EQ(received_chunks.size(), 27U);
+  EXPECT_GE(server.voxel_world().loaded_chunk_count(), 27U);
 }

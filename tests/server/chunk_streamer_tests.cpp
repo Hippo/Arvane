@@ -5,6 +5,27 @@
 
 #include <array>
 
+namespace {
+
+void confirm_chunk_messages(
+    arv::server::ServerChunkStreamer& streamer,
+    const std::vector<arv::server::QueuedChunkStreamMessage>& messages) {
+  for (const arv::server::QueuedChunkStreamMessage& message : messages) {
+    if (!message.tracks_sent_chunk) {
+      continue;
+    }
+    ASSERT_TRUE(streamer.confirm_chunk_sent(
+        message.session_id,
+        message.world_id,
+        message.coord,
+        message.block_version,
+        message.light_version,
+        message.lighting_valid));
+  }
+}
+
+} // namespace
+
 TEST(ServerChunkStreamerTests, UnloadMarginRetainsRecentlySentChunks) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   (void)world.ensure_chunk({{0, 0, 0}});
@@ -33,6 +54,7 @@ TEST(ServerChunkStreamerTests, UnloadMarginRetainsRecentlySentChunks) {
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
   EXPECT_EQ(messages.front().message_type, arv::protocol::MessageType::ChunkData);
+  confirm_chunk_messages(streamer, messages);
   messages.clear();
 
   streamer.update_player_interest(session, {{1, 0, 0}}, interest);
@@ -43,6 +65,7 @@ TEST(ServerChunkStreamerTests, UnloadMarginRetainsRecentlySentChunks) {
       arv::protocol::deserialize_chunk_data(messages.front().payload);
   ASSERT_TRUE(retained_step_data);
   EXPECT_EQ(retained_step_data.value().coord, (arv::ChunkCoord{{1, 0, 0}}));
+  confirm_chunk_messages(streamer, messages);
   messages.clear();
 
   streamer.update_player_interest(session, {{2, 0, 0}}, interest);
@@ -81,6 +104,7 @@ TEST(ServerChunkStreamerTests, LightDependencyVersionDoesNotResendUnchangedNeigh
   streamer.update_player_interest(session, {{0, 0, 0}}, interest);
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 2U);
+  confirm_chunk_messages(streamer, messages);
   messages.clear();
 
   std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights = lit_chunk.lights();
@@ -129,6 +153,7 @@ TEST(ServerChunkStreamerTests, SendsLightingWhenPreviouslyDeferredLightingBecome
   streamer.update_player_interest(session, {{0, 0, 0}}, interest);
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
+  confirm_chunk_messages(streamer, messages);
   auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
   ASSERT_TRUE(data);
   EXPECT_TRUE(data.value().has_lighting);
@@ -180,6 +205,7 @@ TEST(ServerChunkStreamerTests, BlockUpdateAcknowledgementStillRequiresValidLight
   streamer.update_player_interest(session, {{0, 0, 0}}, interest);
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
+  confirm_chunk_messages(streamer, messages);
   messages.clear();
 
   ASSERT_TRUE(world.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{7}));
@@ -203,6 +229,46 @@ TEST(ServerChunkStreamerTests, BlockUpdateAcknowledgementStillRequiresValidLight
   ASSERT_TRUE(data);
   EXPECT_TRUE(data.value().has_lighting);
   EXPECT_TRUE(data.value().lighting_valid);
+}
+
+TEST(ServerChunkStreamerTests, PendingChunkIsRetriedUntilSendConfirmed) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({
+      .max_view_distance = 0,
+      .unload_margin = 1,
+      .max_chunks_sent_per_player_tick = 8,
+      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.client_view_distance = 0;
+
+  std::vector<arv::server::QueuedChunkStreamMessage> messages;
+  streamer.update_player_interest(session, {{0, 0, 0}}, interest);
+  streamer.tick_streaming_budget(world, messages);
+  ASSERT_EQ(messages.size(), 1U);
+  EXPECT_TRUE(messages.front().tracks_sent_chunk);
+  messages.clear();
+
+  streamer.tick_streaming_budget(world, messages);
+  ASSERT_EQ(messages.size(), 1U);
+  const auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  ASSERT_TRUE(data);
+  EXPECT_EQ(data.value().coord, (arv::ChunkCoord{{0, 0, 0}}));
+  confirm_chunk_messages(streamer, messages);
+  messages.clear();
+
+  streamer.tick_streaming_budget(world, messages);
+  EXPECT_TRUE(messages.empty());
 }
 
 TEST(ServerChunkStreamerTests, MissingChunkQueuesGenerationRequestWithoutSynchronousSend) {

@@ -113,6 +113,11 @@ The transport layer is responsible for moving messages between peers.
 
 It should not understand gameplay rules.
 
+The default dedicated-server port is `42069`. Client-entered addresses may omit
+the port; a bare host such as `localhost` resolves to `localhost:42069`.
+The desktop client's saved server entries are persisted in
+`arvane_home/config/server_list.json`.
+
 Transport responsibilities:
 
 - connection management
@@ -586,22 +591,30 @@ Reliable ordered:
 
 - connection setup
 - login/session acceptance
-- inventory transactions
-- chunk metadata
+- registry negotiation/sync
+- world join/leave
+- chunk data and chunk unloads
+- block update batches
+- inventory transactions and revisioned state
 - entity spawn/despawn
-- world switch messages
+- gameplay-affecting requests such as item use or inventory actions
+- chat and commands
 
-Reliable unordered or ordered by key:
+Unreliable latest-wins:
 
-- chunk payloads
-- important block update batches
-- registry/remapping data
-
-Unreliable sequenced:
-
-- entity transform snapshots
 - player input commands where newer input supersedes older input
-- transient visual events
+- entity transform snapshots
+- small player corrections
+- transient physics, look, and movement state
+
+Unreliable event:
+
+- cosmetic particles
+- sound cues
+- temporary visual hints
+
+Hybrid cases, such as large teleports versus small player correction nudges, must choose
+the reliability class by semantic severity.
 
 The protocol should not force all traffic through one reliability mode.
 
@@ -1028,25 +1041,19 @@ The backend maps those handles to transport connection handles.
 
 GameNetworkingSockets supports different send modes. Arvane protocol messages should explicitly choose reliability behavior based on message type.
 
-Examples:
+Arvane currently maps message lanes as:
 
-```text
-Reliable
-    handshake
-    registry sync
-    chat
-    inventory transactions
-    world transfer
-    important entity lifecycle
+| Lane | Reliability            | Message types                                 |
+| ---: | ---------------------- | --------------------------------------------- |
+|  `0` | reliable               | handshake, disconnect, world join/leave       |
+|  `1` | reliable               | gameplay-critical blocks, inventory, entity lifecycle |
+|  `2` | unreliable latest-wins | input, movement snapshots, player corrections |
+|  `3` | reliable bulk          | chunk streaming                               |
+|  `4` | mixed/debug            | ping/pong, diagnostics                        |
 
-Unreliable or unreliable-no-delay
-    frequent input commands
-    movement samples
-    high-frequency state hints
-
-Reliable sequenced / latest-only style behavior
-    selected replication updates if supported by the abstraction
-```
+Chunk streaming must not block lane `2` input/movement traffic. Reliable chunk state
+is confirmed only after the transport accepts the send; otherwise the chunk remains
+pending and can be retried.
 
 The exact transport flags should be hidden behind protocol send policies.
 

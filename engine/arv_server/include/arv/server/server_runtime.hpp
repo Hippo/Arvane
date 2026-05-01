@@ -22,8 +22,10 @@
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/world_runtime.hpp"
 
-#include <optional>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -38,6 +40,20 @@ enum class ServerRuntimeState {
   Stopped,
   Running,
   Stopping,
+};
+
+struct ServerPlayerSaveState {
+  std::string profile_name{"local_player"};
+  std::string world_name{"default"};
+  Vec3f position{};
+  Vec3f velocity{};
+  f32 yaw_radians{};
+  f32 pitch_radians{};
+  bool grounded{};
+  player::MovementMode movement_mode{player::MovementMode::Walking};
+  std::string game_mode_id{std::string{player::SurvivalGameModeID}};
+  u8 selected_hotbar_slot{};
+  player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
 };
 
 struct ServerStartInfo {
@@ -58,6 +74,9 @@ struct ServerStartInfo {
   u32 max_fluid_results_per_tick{1};
   u32 max_pending_fluid_jobs{1};
   const entity::EntityRegistry* entity_registry{};
+  TickIndex initial_tick_index{};
+  std::string world_name{"default"};
+  std::span<const ServerPlayerSaveState> saved_players{};
 };
 
 struct DroppedItemStack {
@@ -102,6 +121,10 @@ public:
 
   [[nodiscard]] const std::vector<DroppedItemStack>& dropped_item_stacks() const noexcept {
     return dropped_item_stacks_;
+  }
+
+  [[nodiscard]] const std::vector<ServerPlayerSaveState>& saved_player_states() const noexcept {
+    return saved_player_states_;
   }
 
   [[nodiscard]] const world::WorldRuntime& voxel_world() const noexcept {
@@ -194,6 +217,8 @@ private:
   void send_block_updates();
   void send_entity_replication();
   void send_inventory_updates();
+  bool apply_saved_player_state(const ServerSession& session, player::PlayerState& player_state);
+  void record_player_save_state(const ServerSession& session, const player::PlayerState& player_state);
   [[nodiscard]] protocol::InventoryUpdate make_inventory_update(
       const player::PlayerState& player_state,
       u32 revision) const;
@@ -205,6 +230,8 @@ private:
   ServerMode mode_{ServerMode::Integrated};
   TickRate base_tps_{DefaultBaseTps};
   TickIndex tick_index_{};
+  i32 max_view_distance_{};
+  std::string world_name_{"default"};
   protocol::HandshakePolicy handshake_policy_{};
   SessionRegistry sessions_;
   WorldRegistry worlds_;
@@ -222,7 +249,10 @@ private:
   player::PermissionGroupRegistry permission_groups_{};
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   HashMap<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
+  HashSet<SessionID> logged_chunk_interest_sessions_;
+  HashSet<SessionID> logged_chunk_delivery_sessions_;
   std::vector<DroppedItemStack> dropped_item_stacks_;
+  std::vector<ServerPlayerSaveState> saved_player_states_;
 
   struct EntityReplicationState {
     HashSet<EntityNetID> known_entities{};

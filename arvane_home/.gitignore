@@ -1,3 +1,5 @@
 /saves/
 /logs/
 /cache/
+/server-save/
+/config/server_list.json

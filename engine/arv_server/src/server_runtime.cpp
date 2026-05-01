@@ -1,5 +1,6 @@
 #include "arv/server/server_runtime.hpp"
 
+#include "arv/core/log.hpp"
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
@@ -338,6 +339,9 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
 
   mode_ = start_info.mode;
   base_tps_ = start_info.base_tps;
+  tick_index_ = start_info.initial_tick_index;
+  world_name_ = start_info.world_name.empty() ? std::string{"default"} : start_info.world_name;
+  saved_player_states_.assign(start_info.saved_players.begin(), start_info.saved_players.end());
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
   entity_registry_ = start_info.entity_registry;
@@ -345,6 +349,7 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
   fluid_definition_ = start_info.fluid_definition;
   chunk_streamer_.configure(start_info.chunk_streaming);
   const i32 max_view_distance = std::max<i32>(start_info.chunk_streaming.max_view_distance, 0);
+  max_view_distance_ = max_view_distance;
   simulation_radius_ = std::clamp(
       start_info.chunk_streaming.simulation_distance,
       0,
@@ -373,6 +378,7 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
                              : start_info.world_tick_policy.fluid_budget;
   world::WorldTickPolicy tick_policy = start_info.world_tick_policy;
   tick_policy.fluid_budget = 0U;
+  default_world_.set_tick_index(tick_index_);
   default_world_.set_tick_policy(tick_policy);
   worlds_.ensure_default_world();
   handshake_policy_.server_name =
@@ -580,6 +586,13 @@ void ServerRuntime::handle_network_event(net::NetworkEvent event) {
         inventory_replication_.erase(session->player_id);
         pending_player_commands_.erase(session->player_id);
         last_sent_player_corrections_.erase(session->player_id);
+        logged_chunk_interest_sessions_.erase(session->session_id);
+        logged_chunk_delivery_sessions_.erase(session->session_id);
+        if (const player::PlayerState* player_state =
+                default_world_.find_player(session->player_id);
+            player_state != nullptr) {
+          record_player_save_state(*session, *player_state);
+        }
         if (const std::optional<EntityID> entity_id =
                 default_world_.entity_for_player(session->player_id);
             entity_id.has_value()) {
@@ -593,6 +606,13 @@ void ServerRuntime::handle_network_event(net::NetworkEvent event) {
       handle_message(event.connection_id, event.payload);
       return;
     case net::NetworkEventType::MessageSendFailed:
+      if (mode_ == ServerMode::Dedicated) {
+        core::warn(
+            "dedicated",
+            "network send failed: connection={} reason='{}'",
+            event.connection_id.value,
+            event.reason);
+      }
       return;
   }
 }
@@ -633,7 +653,9 @@ void ServerRuntime::handle_message(net::ConnectionID connection_id, const std::v
             client_hello.value().requested_username_or_profile_name);
         player::PlayerState& player_state = default_world_.ensure_player(session.player_id);
         player_state.world_id = session.world_id;
-        seed_player_inventory(player_state);
+        if (!apply_saved_player_state(session, player_state)) {
+          seed_player_inventory(player_state);
+        }
         refresh_player_permissions(player_state);
         session.connection_state = net::ConnectionState::WorldJoin;
       }
@@ -642,7 +664,12 @@ void ServerRuntime::handle_message(net::ConnectionID connection_id, const std::v
       std::vector<u8> reply = protocol::serialize_envelope(
           {protocol::CurrentProtocolVersion, protocol::MessageType::ServerHello, 0, 0, 0, 0},
           payload);
-      (void)transport_->send({connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(reply)});
+      (void)transport_->send(
+          {connection_id,
+           protocol::ReliabilityClass::ReliableOrdered,
+           std::move(reply),
+           protocol::MessageType::ServerHello,
+           protocol::NetworkLane::Session});
       if (server_hello.accepted) {
         if (ServerSession* session = sessions_.find_by_connection(connection_id);
             session != nullptr) {
@@ -764,7 +791,22 @@ void ServerRuntime::handle_chunk_interest_update(
     return;
   }
 
-  chunk_streamer_.update_player_interest(*session, player_chunk_coord(*player_state), interest);
+  const ChunkCoord authoritative_center = player_chunk_coord(*player_state);
+  chunk_streamer_.update_player_interest(*session, authoritative_center, interest);
+  if (mode_ == ServerMode::Dedicated &&
+      logged_chunk_interest_sessions_.insert(session->session_id).second) {
+    core::info(
+        "dedicated",
+        "client '{}' requested chunk stream: session={} player={} center=({}, {}, {}) requested_view={} server_max_view={}",
+        session->profile_name,
+        session->session_id.value,
+        session->player_id.value,
+        authoritative_center.value.x,
+        authoritative_center.value.y,
+        authoritative_center.value.z,
+        interest.client_view_distance,
+        max_view_distance_);
+  }
 }
 
 void ServerRuntime::handle_inventory_action_request(
@@ -804,8 +846,42 @@ void ServerRuntime::tick_chunk_streaming() {
     std::vector<u8> packet = protocol::serialize_envelope(
         {protocol::CurrentProtocolVersion, message.message_type, 0, 0, 0, 0},
         message.payload);
-    (void)transport_->send(
-        {message.connection_id, message.reliability, std::move(packet)});
+    const net::NetworkResult send_result = transport_->send(
+        {message.connection_id,
+         message.reliability,
+         std::move(packet),
+         message.message_type,
+         message.lane});
+    if (!send_result && mode_ == ServerMode::Dedicated) {
+      core::warn(
+          "dedicated",
+          "network send failed: connection={} reason='{}'",
+          message.connection_id.value,
+          send_result.error().message);
+    }
+    if (send_result && message.tracks_sent_chunk) {
+      (void)chunk_streamer_.confirm_chunk_sent(
+          message.session_id,
+          message.world_id,
+          message.coord,
+          message.block_version,
+          message.light_version,
+          message.lighting_valid);
+    }
+    if (send_result &&
+        mode_ == ServerMode::Dedicated &&
+        message.message_type == protocol::MessageType::ChunkData) {
+      if (const ServerSession* session = sessions_.find_by_connection(message.connection_id);
+          session != nullptr &&
+          logged_chunk_delivery_sessions_.insert(session->session_id).second) {
+        core::info(
+            "dedicated",
+            "streaming first chunk payload to '{}': session={} player={}",
+            session->profile_name,
+            session->session_id.value,
+            session->player_id.value);
+      }
+    }
   }
 }
 
@@ -1278,7 +1354,11 @@ void ServerRuntime::send_player_corrections() {
         {protocol::CurrentProtocolVersion, protocol::MessageType::PlayerCorrection, 0, 0, 0, 0},
         payload);
     const net::NetworkResult send_result = transport_->send(
-        {session->connection_id, protocol::ReliabilityClass::UnreliableLatestWins, std::move(packet)});
+        {session->connection_id,
+         protocol::ReliabilityClass::UnreliableLatestWins,
+         std::move(packet),
+         protocol::MessageType::PlayerCorrection,
+         protocol::NetworkLane::Movement});
     if (send_result) {
       last_sent_player_corrections_[player_state->player_id] = std::move(correction);
     }
@@ -1295,7 +1375,7 @@ void ServerRuntime::send_world_join_result(
   result.spawn_position = player_state.position;
   result.initial_tick = tick_index_;
   result.tick_rate = base_tps_;
-  result.effective_view_distance = 0;
+  result.effective_view_distance = max_view_distance_;
   if (const std::optional<EntityID> entity_id =
           default_world_.entity_for_player(session.player_id);
       entity_id.has_value()) {
@@ -1307,8 +1387,33 @@ void ServerRuntime::send_world_join_result(
   std::vector<u8> packet = protocol::serialize_envelope(
       {protocol::CurrentProtocolVersion, protocol::MessageType::WorldJoinResult, 0, 0, 0, 0},
       payload);
-  (void)transport_->send(
-      {session.connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+  const net::NetworkResult send_result = transport_->send(
+      {session.connection_id,
+       protocol::ReliabilityClass::ReliableOrdered,
+       std::move(packet),
+       protocol::MessageType::WorldJoinResult,
+       protocol::NetworkLane::Session});
+  if (!send_result && mode_ == ServerMode::Dedicated) {
+    core::warn(
+        "dedicated",
+        "network send failed: connection={} reason='{}'",
+        session.connection_id.value,
+        send_result.error().message);
+  }
+  if (send_result && mode_ == ServerMode::Dedicated) {
+    core::info(
+        "dedicated",
+        "client '{}' joined world '{}': session={} player={} spawn=({}, {}, {}) tick={} view_limit={}",
+        session.profile_name,
+        world_name_,
+        session.session_id.value,
+        session.player_id.value,
+        player_state.position.x,
+        player_state.position.y,
+        player_state.position.z,
+        tick_index_,
+        max_view_distance_);
+  }
 }
 
 void ServerRuntime::send_block_updates() {
@@ -1349,7 +1454,11 @@ void ServerRuntime::send_block_updates() {
         {protocol::CurrentProtocolVersion, protocol::MessageType::BlockUpdateBatch, 0, 0, 0, 0},
         payload);
     const net::NetworkResult send_result = transport_->send(
-        {session->connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+        {session->connection_id,
+         protocol::ReliabilityClass::ReliableOrdered,
+         std::move(packet),
+         protocol::MessageType::BlockUpdateBatch,
+         protocol::NetworkLane::Gameplay});
     if (send_result) {
       for (const protocol::BlockUpdate& update : batch.updates) {
         const ChunkCoord coord = block_to_chunk(update.pos);
@@ -1408,7 +1517,11 @@ void ServerRuntime::send_entity_replication() {
             {protocol::CurrentProtocolVersion, protocol::MessageType::EntitySpawn, 0, 0, 0, 0},
             payload);
         (void)transport_->send(
-            {session->connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+            {session->connection_id,
+             protocol::ReliabilityClass::ReliableOrdered,
+             std::move(packet),
+             protocol::MessageType::EntitySpawn,
+             protocol::NetworkLane::Gameplay});
       }
 
       snapshot_entries.push_back({
@@ -1430,7 +1543,11 @@ void ServerRuntime::send_entity_replication() {
           {protocol::CurrentProtocolVersion, protocol::MessageType::EntityDespawn, 0, 0, 0, 0},
           payload);
       (void)transport_->send(
-          {session->connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+          {session->connection_id,
+           protocol::ReliabilityClass::ReliableOrdered,
+           std::move(packet),
+           protocol::MessageType::EntityDespawn,
+           protocol::NetworkLane::Gameplay});
     }
 
     state.known_entities = std::move(relevant_now);
@@ -1449,7 +1566,11 @@ void ServerRuntime::send_entity_replication() {
         {protocol::CurrentProtocolVersion, protocol::MessageType::EntitySnapshot, 0, 0, 0, 0},
         payload);
     (void)transport_->send(
-        {session->connection_id, protocol::ReliabilityClass::UnreliableLatestWins, std::move(packet)});
+        {session->connection_id,
+         protocol::ReliabilityClass::UnreliableLatestWins,
+         std::move(packet),
+         protocol::MessageType::EntitySnapshot,
+         protocol::NetworkLane::Movement});
   }
 }
 
@@ -1486,7 +1607,66 @@ void ServerRuntime::send_inventory_updates() {
         {protocol::CurrentProtocolVersion, protocol::MessageType::InventoryUpdate, 0, 0, 0, 0},
         payload);
     (void)transport_->send(
-        {session->connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+        {session->connection_id,
+         protocol::ReliabilityClass::ReliableOrdered,
+         std::move(packet),
+         protocol::MessageType::InventoryUpdate,
+         protocol::NetworkLane::Gameplay});
+  }
+}
+
+bool ServerRuntime::apply_saved_player_state(
+    const ServerSession& session,
+    player::PlayerState& player_state) {
+  const auto found = std::find_if(
+      saved_player_states_.begin(),
+      saved_player_states_.end(),
+      [&](const ServerPlayerSaveState& save) {
+        return save.profile_name == session.profile_name && save.world_name == world_name_;
+      });
+  if (found == saved_player_states_.end()) {
+    return false;
+  }
+
+  player_state.position = found->position;
+  player_state.velocity = found->velocity;
+  player_state.yaw_radians = found->yaw_radians;
+  player_state.pitch_radians = found->pitch_radians;
+  player_state.grounded = found->grounded;
+  player_state.movement_mode = found->movement_mode;
+  player_state.game_mode_id = found->game_mode_id;
+  player_state.selected_hotbar_slot = found->selected_hotbar_slot;
+  player_state.inventory = found->inventory;
+  return true;
+}
+
+void ServerRuntime::record_player_save_state(
+    const ServerSession& session,
+    const player::PlayerState& player_state) {
+  ServerPlayerSaveState save;
+  save.profile_name = session.profile_name;
+  save.world_name = world_name_;
+  save.position = player_state.position;
+  save.velocity = player_state.velocity;
+  save.yaw_radians = player_state.yaw_radians;
+  save.pitch_radians = player_state.pitch_radians;
+  save.grounded = player_state.grounded;
+  save.movement_mode = player_state.movement_mode;
+  save.game_mode_id = player_state.game_mode_id;
+  save.selected_hotbar_slot = player_state.selected_hotbar_slot;
+  save.inventory = player_state.inventory;
+
+  const auto found = std::find_if(
+      saved_player_states_.begin(),
+      saved_player_states_.end(),
+      [&](const ServerPlayerSaveState& existing) {
+        return existing.profile_name == save.profile_name &&
+               existing.world_name == save.world_name;
+      });
+  if (found == saved_player_states_.end()) {
+    saved_player_states_.emplace_back(std::move(save));
+  } else {
+    *found = std::move(save);
   }
 }
 

@@ -64,8 +64,10 @@ Examples:
 - inventory updates
 - chat
 - chunk data
+- chunk unloads
 - block changes
 - entity spawn/despawn
+- gameplay-affecting plugin messages
 - plugin-provided reliable commands
 
 ### Unreliable Latest-Wins
@@ -233,6 +235,12 @@ Registry sync may include:
 ### 4. World Join
 
 Client requests entry into a world.
+
+For the current dedicated-server flow, the configured world is server-owned:
+`arv_dedicated` selects the world from `server.yaml`, then advertises the
+assigned `initial_world_id` in `ServerHello` and sends a `WorldJoinResult`
+before the client may enter gameplay. The client must not infer the world from
+local save folders or local config.
 
 Server replies with:
 
@@ -740,19 +748,21 @@ Examples:
 
 ## Lanes and Priorities
 
-GameNetworkingSockets supports multiple message lanes for head-of-line blocking control and bandwidth sharing. Arvane may use lanes to separate critical gameplay traffic from bulk streaming traffic. ([GitHub][1])
+GameNetworkingSockets supports multiple message lanes for head-of-line blocking control and bandwidth sharing. Arvane uses lanes to separate critical gameplay traffic from bulk streaming traffic. ([GitHub][1])
 
-Suggested lanes:
+Current core lanes:
 
-| Lane | Use                                 |
-| ---: | ----------------------------------- |
-|  `0` | control, handshake, disconnect      |
-|  `1` | gameplay-critical reliable messages |
-|  `2` | input and movement snapshots        |
-|  `3` | chunk streaming                     |
-|  `4` | debug/dev traffic                   |
+| Lane | Reliability            | Message types                                 |
+| ---: | ---------------------- | --------------------------------------------- |
+|  `0` | reliable               | `ClientHello`, `ServerHello`, disconnect, world join/leave |
+|  `1` | reliable               | block updates, entity lifecycle, inventory, reliable gameplay actions |
+|  `2` | unreliable latest-wins | `ClientInputBatch`, `PlayerCorrection`, `EntitySnapshot` |
+|  `3` | reliable bulk          | `ChunkData`, `ChunkUnload`                    |
+|  `4` | mixed/debug            | ping/pong, diagnostics, dev traffic           |
 
 Chunk streaming must not starve input, entity snapshots, or critical reliable messages.
+Chunk stream state is only considered sent after the transport accepts the reliable send;
+backpressure or send-buffer failure must leave the chunk pending for a later retry.
 
 ---
 
@@ -1023,6 +1033,9 @@ Possible follow-up phases include:
 The client should not assume it is gameplay-ready immediately after `ServerHello`.
 
 The server must explicitly transition the client into a gameplay-ready state.
+After `WorldJoinResult`, the client sends `ChunkInterestUpdate` from the
+server-assigned spawn/body position. The server then owns chunk generation and
+chunk payload delivery for the joined world.
 
 ---
 

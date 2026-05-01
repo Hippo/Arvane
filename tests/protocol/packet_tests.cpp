@@ -85,6 +85,18 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(entity_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(inventory_action->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_update->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(ping->lane, arv::protocol::NetworkLane::Debug);
+  EXPECT_EQ(input->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(correction->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(chunk_interest->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(chunk_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
+  EXPECT_EQ(chunk_unload->lane, arv::protocol::NetworkLane::ChunkStreaming);
+  EXPECT_EQ(world_join->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(block_updates->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(entity_spawn->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(entity_snapshot->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(inventory_action->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(registry.size(), 18U);
 }
 

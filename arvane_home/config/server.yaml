@@ -1,3 +1,4 @@
+world: default
 network:
   bind_address: 0.0.0.0
-  port: 27020
+  port: 42069

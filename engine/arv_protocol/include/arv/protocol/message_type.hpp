@@ -10,6 +10,14 @@ enum class ReliabilityClass : u8 {
   UnreliableEvent,
 };
 
+enum class NetworkLane : u16 {
+  Session = 0,
+  Gameplay = 1,
+  Movement = 2,
+  ChunkStreaming = 3,
+  Debug = 4,
+};
+
 enum class MessageDirection : u8 {
   ClientToServer,
   ServerToClient,

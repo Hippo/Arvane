@@ -213,7 +213,7 @@ public:
         "menu.server.address",
         "Address",
         address_,
-        "host:port",
+        "host or host:port",
         "server.focus_address",
         active_field_ == TextField::Address);
     add_error_text(ctx.tree, stack, "menu.server.error", error_);
@@ -292,7 +292,7 @@ private:
       return true;
     }
     if (!valid_server_address(address)) {
-      error_ = "Address must include a valid port";
+      error_ = "Address must be a host or host:port";
       return true;
     }
     submit_command(ctx, SaveServerEntryCommand{edit_index_, ServerListEntry{name, address}});

@@ -810,9 +810,9 @@ load configuration
 initialize logging
 load registries and assets needed by server logic
 initialize save system
-load or create server save
+load or create `arvane_home/server-save/`
 initialize world registry
-load configured worlds
+load or create the `server.yaml` `world`
 initialize networking
 start accepting connections
 enter main server loop
@@ -904,7 +904,8 @@ World saves and player saves have separate ownership.
 
 During shutdown:
 
-* player/session data should be saved under `arvane_home/saves/<server-save-name>/players/`
+* dedicated player/session data should be saved under `arvane_home/server-save/players/`
+* singleplayer player/session data should be saved under `arvane_home/saves/<server-save-name>/players/`
 * each world should save its own world/chunk data
 * server-level metadata should be saved separately
 * runtime-only IDs should not be persisted unless explicitly remappable

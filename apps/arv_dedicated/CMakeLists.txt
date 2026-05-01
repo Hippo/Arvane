@@ -7,6 +7,7 @@ target_link_libraries(arv_dedicated PRIVATE
   arv_core
   arv_io
   arv_net
+  arv_persistence
   arv_player
   arv_server
   arv_voxel

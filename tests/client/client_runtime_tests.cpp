@@ -1,5 +1,6 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/net/in_process_transport.hpp"
+#include "arv/player/player_constants.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 
@@ -26,7 +27,8 @@ void send_to_client(
 void enter_in_game(
     arv::client::ClientRuntime& client,
     arv::net::ITransport& server_transport,
-    arv::net::ConnectionID connection_id) {
+    arv::net::ConnectionID connection_id,
+    arv::Vec3f spawn_position = {8.0F, 20.0F, -20.0F}) {
   (void)server_transport.poll_events();
 
   arv::protocol::ServerHello hello;
@@ -45,7 +47,7 @@ void enter_in_game(
   join.world_id = arv::WorldID{1};
   join.player_id = arv::PlayerID{1};
   join.local_entity_id = arv::EntityNetID{1};
-  join.spawn_position = {8.0F, 20.0F, -20.0F};
+  join.spawn_position = spawn_position;
   join.initial_tick = 1;
   join.tick_rate = arv::DefaultBaseTps;
   send_to_client(
@@ -79,6 +81,24 @@ TEST(ClientRuntimeTests, ChatDraftIgnoresOpeningKeyThenAcceptsTextEditingAndSubm
   EXPECT_FALSE(client.chat_open());
   ASSERT_EQ(client.chat_messages().size(), 1U);
   EXPECT_EQ(client.chat_messages().front(), "hell");
+}
+
+TEST(ClientRuntimeTests, WorldJoinKeepsLocalPlayerBodyAtServerSpawn) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+
+  enter_in_game(client, *server_transport, connection_id.value(), {80.0F, 40.0F, -96.0F});
+  client.fixed_tick(2);
+
+  EXPECT_FLOAT_EQ(client.camera().position().x, 80.0F);
+  EXPECT_FLOAT_EQ(
+      client.camera().position().y,
+      40.0F + arv::player::DefaultStandingEyeHeight);
+  EXPECT_FLOAT_EQ(client.camera().position().z, -96.0F);
 }
 
 TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {

@@ -13,6 +13,7 @@ struct MessageDescriptor {
   std::string name{};
   MessageDirection direction{MessageDirection::Bidirectional};
   ReliabilityClass reliability{ReliabilityClass::ReliableOrdered};
+  NetworkLane lane{NetworkLane::Session};
 };
 
 class MessageRegistry {

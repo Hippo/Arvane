@@ -109,6 +109,7 @@ Back
 Behavior:
 
 * The server list displays user-added multiplayer servers.
+* Saved multiplayer servers are loaded from and written to `arvane_home/config/server_list.json`.
 * Selecting a server enables edit/remove/connect actions.
 * Double-clicking or pressing Enter on a selected server may connect to it.
 * `Add Server` opens the add server screen.
@@ -140,13 +141,15 @@ Behavior:
 Fields:
 
 * `Server Name` is user-defined and only affects the local server list.
-* `Address` is entered in `ip:port` or `host:port` format.
+* `Address` is entered in `ip`, `host`, `ip:port`, or `host:port` format.
+* If the address does not include a port, the client uses the default server port `42069`.
+* Example: `localhost` connects to `localhost:42069`.
 
 Validation:
 
 * Server name must not be empty.
 * Address must not be empty.
-* Address must include a port unless a default port is explicitly defined elsewhere.
+* If a port is included, it must be a valid TCP/UDP port from `1` through `65535`.
 * Invalid address text must show a user-facing error.
 
 ## Settings Menu
@@ -221,7 +224,7 @@ Required behavior:
 The following data should be persisted under `arvane_home/config/`:
 
 ```text
-saved multiplayer servers
+server_list.json for saved multiplayer servers
 settings
 key binds
 ```

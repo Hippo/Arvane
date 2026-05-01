@@ -8,6 +8,7 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -39,6 +40,7 @@ TEST(ConfigTests, ParsesYamlConfigWithDefaults) {
   const auto result = arv::io::parse_config_yaml(R"(
 paths:
   arvane_home: custom_home
+world: test-world
 window:
   width: 1920
   title: Test Window
@@ -129,6 +131,7 @@ chunk_pipeline:
 
   ASSERT_TRUE(result);
   EXPECT_EQ(result.value().paths.arvane_home_path(), std::filesystem::path("custom_home"));
+  EXPECT_EQ(result.value().server.world, "test-world");
   EXPECT_EQ(result.value().window.width, 1920U);
   EXPECT_EQ(result.value().window.height, 720U);
   EXPECT_EQ(result.value().window.title, "Test Window");
@@ -251,6 +254,14 @@ chunks:
   EXPECT_FALSE(result);
 }
 
+TEST(ConfigTests, RejectsWorldNamePathTraversal) {
+  const auto result = arv::io::parse_config_yaml(R"(
+world: ../default
+)");
+
+  EXPECT_FALSE(result);
+}
+
 TEST(ConfigTests, ResolvesDefaultRuntimePathsFromProjectRoot) {
   arv::io::EngineConfig config = arv::io::default_config();
   arv::io::ConfigLoadOptions options;
@@ -276,6 +287,12 @@ TEST(ConfigTests, ResolvesDefaultRuntimePathsFromProjectRoot) {
   EXPECT_EQ(
       config.paths.input_bindings_file,
       std::filesystem::path("/tmp/arvane_project/arvane_home/config/input_bindings.yaml"));
+  EXPECT_EQ(
+      config.paths.server_list_file,
+      std::filesystem::path("/tmp/arvane_project/arvane_home/config/server_list.json"));
+  EXPECT_EQ(
+      config.paths.dedicated_server_save_path(),
+      std::filesystem::path("/tmp/arvane_project/arvane_home/server-save"));
 }
 
 TEST(ConfigTests, ResolvesServerRuntimeConfigPathFromProjectRoot) {
@@ -299,6 +316,33 @@ TEST(ConfigTests, ConstructsServerSavePathsUnderArvaneHomeSaves) {
   EXPECT_EQ(
       config.paths.server_save_path("server-save-2"),
       std::filesystem::path("/tmp/arvane_project/arvane_home/saves/server-save-2"));
+}
+
+TEST(ConfigTests, SavesAndLoadsMultiplayerServerList) {
+  const std::filesystem::path temp_root =
+      std::filesystem::temp_directory_path() /
+      ("arvane_server_list_" +
+       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::error_code error;
+  std::filesystem::remove_all(temp_root, error);
+
+  const std::filesystem::path list_file = temp_root / "arvane_home/config/server_list.json";
+  const std::vector<arv::io::SavedServerListEntry> servers{
+      {"Local", "localhost"},
+      {"LAN", "192.168.1.20:42069"}};
+
+  const auto save_result = arv::io::save_server_list_file(list_file, servers);
+  ASSERT_TRUE(save_result);
+
+  const auto load_result = arv::io::load_server_list_file(list_file);
+  ASSERT_TRUE(load_result);
+  ASSERT_EQ(load_result.value().size(), 2U);
+  EXPECT_EQ(load_result.value()[0].name, "Local");
+  EXPECT_EQ(load_result.value()[0].address, "localhost");
+  EXPECT_EQ(load_result.value()[1].name, "LAN");
+  EXPECT_EQ(load_result.value()[1].address, "192.168.1.20:42069");
+
+  std::filesystem::remove_all(temp_root, error);
 }
 
 TEST(ConfigTests, ExplicitConfigPathIsResolvedFromProjectRoot) {
@@ -360,6 +404,9 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomeAssets) {
   EXPECT_EQ(
       result.value().paths.input_bindings_file,
       result.value().paths.config_path() / "input_bindings.yaml");
+  EXPECT_EQ(
+      result.value().paths.server_list_file,
+      result.value().paths.config_path() / "server_list.json");
 }
 
 TEST(ConfigTests, LoadConfigDefaultsPreferProjectRootOverWorkingDirectoryRuntimeHome) {
@@ -426,11 +473,13 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   ASSERT_TRUE(written_client);
   EXPECT_NE(written_client.value().find("window:"), std::string::npos);
   EXPECT_NE(written_client.value().find("input_bindings_file:"), std::string::npos);
+  EXPECT_NE(written_client.value().find("server_list_file:"), std::string::npos);
 
   const auto written_server =
       arv::io::read_text_file(server_config_file, "generated server config");
   ASSERT_TRUE(written_server);
   EXPECT_NE(written_server.value().find("network:"), std::string::npos);
+  EXPECT_NE(written_server.value().find("world: default"), std::string::npos);
 
   std::filesystem::remove_all(temp_root, error);
 }

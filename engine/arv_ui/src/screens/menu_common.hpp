@@ -245,7 +245,11 @@ inline void add_text_box(
 
 [[nodiscard]] inline bool valid_server_address(std::string_view address) noexcept {
   const usize colon = address.rfind(':');
-  if (colon == std::string_view::npos || colon == 0U || colon + 1U >= address.size()) {
+  if (colon == std::string_view::npos) {
+    return !address.empty();
+  }
+  if (colon == 0U || colon + 1U >= address.size() ||
+      address.find(':') != colon) {
     return false;
   }
   const std::string_view port_text = address.substr(colon + 1U);

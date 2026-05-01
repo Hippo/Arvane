@@ -10,6 +10,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <arv/core/log.hpp>
+#include <nlohmann/json.hpp>
 
 #ifndef ARVANE_PROJECT_ROOT
 #define ARVANE_PROJECT_ROOT ""
@@ -203,6 +204,10 @@ std::filesystem::path default_input_bindings_path_from(const std::filesystem::pa
   return normalize_lexical(config_root / std::filesystem::path{DefaultInputBindingsFileName});
 }
 
+std::filesystem::path default_server_list_path_from(const std::filesystem::path& config_root) {
+  return normalize_lexical(config_root / std::filesystem::path{DefaultServerListFileName});
+}
+
 std::filesystem::path default_profile_config_path_from(
     const std::filesystem::path& config_root,
     ConfigProfile profile) {
@@ -253,6 +258,8 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
           << config_path_string(config.paths.project_root, config.paths.arvane_home_path());
   emitter << YAML::Key << "input_bindings_file" << YAML::Value
           << config_path_string(config.paths.project_root, config.paths.input_bindings_file);
+  emitter << YAML::Key << "server_list_file" << YAML::Value
+          << config_path_string(config.paths.project_root, config.paths.server_list_file);
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "window" << YAML::Value << YAML::BeginMap;
@@ -591,6 +598,8 @@ ConfigResult save_default_client_config_file(
   emitter << YAML::Key << "paths" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "input_bindings_file" << YAML::Value
           << config_path_string(config.paths.project_root, config.paths.input_bindings_file);
+  emitter << YAML::Key << "server_list_file" << YAML::Value
+          << config_path_string(config.paths.project_root, config.paths.server_list_file);
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "window" << YAML::Value << YAML::BeginMap;
@@ -638,6 +647,7 @@ ConfigResult save_default_server_config_file(
     const EngineConfig& config) {
   YAML::Emitter emitter;
   emitter << YAML::BeginMap;
+  emitter << YAML::Key << "world" << YAML::Value << config.server.world;
   emitter << YAML::Key << "network" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "bind_address" << YAML::Value << config.network.bind_address;
   emitter << YAML::Key << "port" << YAML::Value << config.network.port;
@@ -648,11 +658,14 @@ ConfigResult save_default_server_config_file(
 }
 
 void read_config_node(const YAML::Node& root, EngineConfig& config) {
+  read_scalar(root, "world", config.server.world);
+
   const YAML::Node paths = root["paths"];
   if (paths) {
     read_path_scalar(paths, "arvane_home", config.paths.arvane_home_root);
     read_path_scalar(paths, "config_file", config.paths.config_file);
     read_path_scalar(paths, "input_bindings_file", config.paths.input_bindings_file);
+    read_path_scalar(paths, "server_list_file", config.paths.server_list_file);
   }
 
   const YAML::Node window = root["window"];
@@ -759,6 +772,13 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
 }
 
 std::optional<ConfigError> validate_config(const EngineConfig& config) {
+  if (config.server.world.empty() || config.server.world == "." ||
+      config.server.world == ".." ||
+      config.server.world.find('/') != std::string::npos ||
+      config.server.world.find('\\') != std::string::npos) {
+    return ConfigError{"world must be a non-empty world name, not a path"};
+  }
+
   if (config.simulation.base_tps != 20 && config.simulation.base_tps != 30 &&
       config.simulation.base_tps != 60) {
     return ConfigError{"simulation.base_tps must be one of 20, 30, or 60"};
@@ -964,6 +984,13 @@ void resolve_runtime_paths(const ConfigLoadOptions& options, EngineConfig& confi
           : config.paths.input_bindings_file;
   config.paths.input_bindings_file =
       resolve_project_relative(config.paths.project_root, input_bindings_file);
+
+  const std::filesystem::path server_list_file =
+      config.paths.server_list_file.empty()
+          ? default_server_list_path_from(config.paths.config_path())
+          : config.paths.server_list_file;
+  config.paths.server_list_file =
+      resolve_project_relative(config.paths.project_root, server_list_file);
 }
 
 ConfigResult parse_config_yaml(std::string_view text) {
@@ -1145,6 +1172,93 @@ TextFileResult read_text_file(const std::filesystem::path& path, std::string_vie
   std::ostringstream buffer;
   buffer << input.rdbuf();
   return TextFileResult::success(buffer.str());
+}
+
+ServerListResult load_server_list_file(const std::filesystem::path& path) {
+  std::error_code file_error;
+  if (!std::filesystem::exists(path, file_error)) {
+    if (file_error) {
+      return ServerListResult::failure(
+          ConfigError{"failed to inspect server list file: " + file_error.message()});
+    }
+    return ServerListResult::success({});
+  }
+
+  std::ifstream input(path);
+  if (!input) {
+    return ServerListResult::failure(
+        ConfigError{"failed to open server list file: " + path.string()});
+  }
+
+  try {
+    const nlohmann::json root = nlohmann::json::parse(input);
+    const nlohmann::json* servers = &root;
+    if (root.is_object()) {
+      const auto found = root.find("servers");
+      if (found == root.end()) {
+        return ServerListResult::success({});
+      }
+      servers = &*found;
+    }
+    if (!servers->is_array()) {
+      return ServerListResult::failure(
+          ConfigError{"server list must be an array or object with a servers array"});
+    }
+
+    std::vector<SavedServerListEntry> entries;
+    entries.reserve(servers->size());
+    for (const nlohmann::json& entry : *servers) {
+      if (!entry.is_object() ||
+          !entry.contains("name") ||
+          !entry.contains("address") ||
+          !entry.at("name").is_string() ||
+          !entry.at("address").is_string()) {
+        return ServerListResult::failure(
+            ConfigError{"server list entries must contain string name and address fields"});
+      }
+
+      entries.push_back({
+          entry.at("name").get<std::string>(),
+          entry.at("address").get<std::string>()});
+    }
+    return ServerListResult::success(std::move(entries));
+  } catch (const nlohmann::json::exception& ex) {
+    return ServerListResult::failure(
+        ConfigError{"failed to parse server list file: " + std::string{ex.what()}});
+  }
+}
+
+ServerListSaveResult save_server_list_file(
+    const std::filesystem::path& path,
+    std::span<const SavedServerListEntry> servers) {
+  std::error_code error;
+  const std::filesystem::path parent = path.parent_path();
+  if (!parent.empty()) {
+    std::filesystem::create_directories(parent, error);
+    if (error) {
+      return ServerListSaveResult::failure(
+          ConfigError{"failed to create server list directory: " + error.message()});
+    }
+  }
+
+  nlohmann::json server_array = nlohmann::json::array();
+  for (const SavedServerListEntry& server : servers) {
+    server_array.push_back({{"name", server.name}, {"address", server.address}});
+  }
+  const nlohmann::json root{{"version", 1}, {"servers", std::move(server_array)}};
+
+  std::ofstream output(path, std::ios::trunc);
+  if (!output) {
+    return ServerListSaveResult::failure(
+        ConfigError{"failed to open server list file for write: " + path.string()});
+  }
+  output << root.dump(2) << '\n';
+  output.flush();
+  if (!output) {
+    return ServerListSaveResult::failure(
+        ConfigError{"failed to write server list file: " + path.string()});
+  }
+  return ServerListSaveResult::success();
 }
 
 } // namespace arv::io

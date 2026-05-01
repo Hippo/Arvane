@@ -3,10 +3,59 @@
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <cstring>
 #include <limits>
+#include <string>
 #include <utility>
 
+#include <steam/isteamnetworkingutils.h>
+
 namespace arv::net {
+namespace {
+
+inline constexpr int GNSLaneCount = 5;
+inline constexpr int GNSConnectionSendBufferBytes = 8 * 1024 * 1024;
+inline constexpr int GNSConnectionReceiveBufferBytes = 8 * 1024 * 1024;
+inline constexpr int GNSConnectionReceiveMaxMessageBytes = 1024 * 1024;
+inline constexpr int GNSConnectionSendRateBytesPerSecond = 4 * 1024 * 1024;
+
+[[nodiscard]] const char* reliability_name(protocol::ReliabilityClass reliability) noexcept {
+  switch (reliability) {
+    case protocol::ReliabilityClass::ReliableOrdered:
+      return "reliable_ordered";
+    case protocol::ReliabilityClass::UnreliableLatestWins:
+      return "unreliable_latest_wins";
+    case protocol::ReliabilityClass::UnreliableEvent:
+      return "unreliable_event";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] std::string send_failure_reason(
+    EResult result,
+    const TransportMessage& message) {
+  return "failed to send GameNetworkingSockets message: result=" +
+         std::to_string(static_cast<int>(result)) +
+         " reliability=" + reliability_name(message.reliability) +
+         " lane=" + std::to_string(detail::gns_lane_index(message.lane)) +
+         " bytes=" + std::to_string(message.payload.size()) +
+         " type=" + std::to_string(static_cast<u16>(message.message_type));
+}
+
+void set_common_connection_options(
+    std::array<SteamNetworkingConfigValue_t, 6>& options,
+    FnSteamNetConnectionStatusChanged callback) {
+  options[0].SetPtr(
+      k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
+      reinterpret_cast<void*>(callback));
+  options[1].SetInt32(k_ESteamNetworkingConfig_SendBufferSize, GNSConnectionSendBufferBytes);
+  options[2].SetInt32(k_ESteamNetworkingConfig_RecvBufferSize, GNSConnectionReceiveBufferBytes);
+  options[3].SetInt32(k_ESteamNetworkingConfig_RecvMaxMessageSize, GNSConnectionReceiveMaxMessageBytes);
+  options[4].SetInt32(k_ESteamNetworkingConfig_SendRateMin, GNSConnectionSendRateBytesPerSecond);
+  options[5].SetInt32(k_ESteamNetworkingConfig_SendRateMax, GNSConnectionSendRateBytesPerSecond);
+}
+
+} // namespace
 
 GameNetworkingSocketsEnvironment::GameNetworkingSocketsEnvironment() {
   SteamNetworkingErrMsg error_message{};
@@ -31,12 +80,10 @@ const std::string& GameNetworkingSocketsEnvironment::error_message() const noexc
 }
 
 GameNetworkingSocketsTransport::GameNetworkingSocketsTransport() : sockets_(SteamNetworkingSockets()) {
-  register_callback_owner();
 }
 
 GameNetworkingSocketsTransport::~GameNetworkingSocketsTransport() {
   shutdown();
-  unregister_callback_owner();
 }
 
 NetworkResult GameNetworkingSocketsTransport::start_listening(const ListenAddress& address) {
@@ -46,11 +93,13 @@ NetworkResult GameNetworkingSocketsTransport::start_listening(const ListenAddres
   }
 
   SteamNetworkingIPAddr local_address;
-  if (address.bind_address.empty() || address.bind_address == "0.0.0.0") {
+  if (address.bind_address.empty()) {
     local_address.Clear();
     local_address.m_port = address.port;
   } else if (address.bind_address == "127.0.0.1" || address.bind_address == "localhost") {
-    local_address.SetIPv6LocalHost(address.port);
+    local_address.SetIPv4(0x7f000001U, address.port);
+  } else if (address.bind_address == "0.0.0.0") {
+    local_address.SetIPv4(0U, address.port);
   } else {
     auto parsed = parse_ipv4(address.bind_address);
     if (!parsed) {
@@ -64,14 +113,23 @@ NetworkResult GameNetworkingSocketsTransport::start_listening(const ListenAddres
     return poll_group_result;
   }
 
-  SteamNetworkingConfigValue_t callback_option;
-  callback_option.SetPtr(
-      k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
-      reinterpret_cast<void*>(connection_status_changed));
+  std::array<SteamNetworkingConfigValue_t, 6> options{};
+  set_common_connection_options(options, connection_status_changed);
 
-  listen_socket_ = sockets_->CreateListenSocketIP(local_address, 1, &callback_option);
+  listen_socket_ = sockets_->CreateListenSocketIP(
+      local_address,
+      static_cast<int>(options.size()),
+      options.data());
   if (listen_socket_ == k_HSteamListenSocket_Invalid) {
     return NetworkResult::failure(NetworkError{"failed to create GameNetworkingSockets listen socket"});
+  }
+  register_listen_socket_owner();
+
+  SteamNetworkingIPAddr bound_address;
+  if (sockets_->GetListenSocketAddress(listen_socket_, &bound_address)) {
+    bound_port_ = bound_address.m_port;
+  } else {
+    bound_port_ = address.port;
   }
 
   return NetworkResult::success();
@@ -85,7 +143,7 @@ ConnectResult GameNetworkingSocketsTransport::connect(const NetworkAddress& addr
 
   SteamNetworkingIPAddr remote_address;
   if (address.host == "localhost") {
-    remote_address.SetIPv6LocalHost(address.port);
+    remote_address.SetIPv4(0x7f000001U, address.port);
   } else {
     auto parsed = parse_ipv4(address.host);
     if (!parsed) {
@@ -99,12 +157,13 @@ ConnectResult GameNetworkingSocketsTransport::connect(const NetworkAddress& addr
     return ConnectResult::failure(NetworkError{poll_group_result.error().message});
   }
 
-  SteamNetworkingConfigValue_t callback_option;
-  callback_option.SetPtr(
-      k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
-      reinterpret_cast<void*>(connection_status_changed));
+  std::array<SteamNetworkingConfigValue_t, 6> options{};
+  set_common_connection_options(options, connection_status_changed);
 
-  const HSteamNetConnection handle = sockets_->ConnectByIPAddress(remote_address, 1, &callback_option);
+  const HSteamNetConnection handle = sockets_->ConnectByIPAddress(
+      remote_address,
+      static_cast<int>(options.size()),
+      options.data());
   if (handle == k_HSteamNetConnection_Invalid) {
     return ConnectResult::failure(NetworkError{"failed to create GameNetworkingSockets connection"});
   }
@@ -117,6 +176,10 @@ ConnectResult GameNetworkingSocketsTransport::connect(const NetworkAddress& addr
 NetworkResult GameNetworkingSocketsTransport::send(TransportMessage message) {
   if (sockets_ == nullptr || !accepting_sends_.load(std::memory_order_acquire)) {
     return NetworkResult::failure(NetworkError{"GameNetworkingSockets transport is not accepting sends"});
+  }
+
+  if (is_owner_thread()) {
+    return send_outbound_command(OutboundSendCommand{std::move(message)});
   }
 
   if (!outbound_sends_.try_enqueue(OutboundSendCommand{std::move(message)})) {
@@ -175,10 +238,12 @@ void GameNetworkingSocketsTransport::shutdown() {
   queued_events_.clear();
 
   for (HSteamNetConnection handle : handles) {
+    unregister_connection_owner(handle);
     sockets_->CloseConnection(handle, k_ESteamNetConnectionEnd_App_Generic, "Arvane shutdown", false);
   }
 
   if (listen_socket_ != k_HSteamListenSocket_Invalid) {
+    unregister_listen_socket_owner();
     sockets_->CloseListenSocket(listen_socket_);
     listen_socket_ = k_HSteamListenSocket_Invalid;
   }
@@ -187,6 +252,7 @@ void GameNetworkingSocketsTransport::shutdown() {
     sockets_->DestroyPollGroup(poll_group_);
     poll_group_ = k_HSteamNetPollGroup_Invalid;
   }
+  bound_port_ = 0;
 }
 
 NetworkResult GameNetworkingSocketsTransport::ensure_poll_group() {
@@ -203,24 +269,113 @@ NetworkResult GameNetworkingSocketsTransport::ensure_poll_group() {
 }
 
 void GameNetworkingSocketsTransport::connection_status_changed(SteamNetConnectionStatusChangedCallback_t* info) {
-  GameNetworkingSocketsTransport* owner = callback_owner_.load(std::memory_order_acquire);
+  GameNetworkingSocketsTransport* owner = info == nullptr ? nullptr : callback_owner_for(*info);
   if (owner != nullptr && info != nullptr) {
     assert(owner->is_owner_thread() && "GNS callbacks must be dispatched by the transport owner thread");
     owner->handle_connection_status_change(*info);
   }
 }
 
-void GameNetworkingSocketsTransport::register_callback_owner() {
-  GameNetworkingSocketsTransport* expected = nullptr;
-  const bool registered =
-      callback_owner_.compare_exchange_strong(expected, this, std::memory_order_acq_rel);
-  assert((registered || expected == this) &&
-         "GameNetworkingSocketsTransport currently supports one active callback owner per process");
+GameNetworkingSocketsTransport* GameNetworkingSocketsTransport::callback_owner_for(
+    const SteamNetConnectionStatusChangedCallback_t& info) {
+  std::scoped_lock lock(callback_owner_mutex_);
+  if (info.m_info.m_hListenSocket != k_HSteamListenSocket_Invalid) {
+    const auto listen_owner = listen_socket_callback_owners_.find(info.m_info.m_hListenSocket);
+    if (listen_owner != listen_socket_callback_owners_.end()) {
+      return listen_owner->second;
+    }
+  }
+
+  const auto connection_owner = connection_callback_owners_.find(info.m_hConn);
+  return connection_owner == connection_callback_owners_.end() ? nullptr : connection_owner->second;
 }
 
-void GameNetworkingSocketsTransport::unregister_callback_owner() {
-  GameNetworkingSocketsTransport* expected = this;
-  (void)callback_owner_.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel);
+void GameNetworkingSocketsTransport::register_listen_socket_owner() {
+  if (listen_socket_ == k_HSteamListenSocket_Invalid) {
+    return;
+  }
+  std::scoped_lock lock(callback_owner_mutex_);
+  listen_socket_callback_owners_[listen_socket_] = this;
+}
+
+void GameNetworkingSocketsTransport::unregister_listen_socket_owner() {
+  if (listen_socket_ == k_HSteamListenSocket_Invalid) {
+    return;
+  }
+  std::scoped_lock lock(callback_owner_mutex_);
+  const auto found = listen_socket_callback_owners_.find(listen_socket_);
+  if (found != listen_socket_callback_owners_.end() && found->second == this) {
+    listen_socket_callback_owners_.erase(found);
+  }
+}
+
+void GameNetworkingSocketsTransport::register_connection_owner(HSteamNetConnection handle) {
+  if (handle == k_HSteamNetConnection_Invalid) {
+    return;
+  }
+  std::scoped_lock lock(callback_owner_mutex_);
+  connection_callback_owners_[handle] = this;
+}
+
+void GameNetworkingSocketsTransport::unregister_connection_owner(HSteamNetConnection handle) {
+  if (handle == k_HSteamNetConnection_Invalid) {
+    return;
+  }
+  std::scoped_lock lock(callback_owner_mutex_);
+  const auto found = connection_callback_owners_.find(handle);
+  if (found != connection_callback_owners_.end() && found->second == this) {
+    connection_callback_owners_.erase(found);
+  }
+}
+
+void GameNetworkingSocketsTransport::configure_connection(HSteamNetConnection handle) {
+  if (sockets_ == nullptr || handle == k_HSteamNetConnection_Invalid) {
+    return;
+  }
+
+  ISteamNetworkingUtils* utils = SteamNetworkingUtils();
+  if (utils != nullptr) {
+    (void)utils->SetConnectionConfigValueInt32(
+        handle,
+        k_ESteamNetworkingConfig_SendBufferSize,
+        GNSConnectionSendBufferBytes);
+    (void)utils->SetConnectionConfigValueInt32(
+        handle,
+        k_ESteamNetworkingConfig_RecvBufferSize,
+        GNSConnectionReceiveBufferBytes);
+    (void)utils->SetConnectionConfigValueInt32(
+        handle,
+        k_ESteamNetworkingConfig_RecvMaxMessageSize,
+        GNSConnectionReceiveMaxMessageBytes);
+    (void)utils->SetConnectionConfigValueInt32(
+        handle,
+        k_ESteamNetworkingConfig_SendRateMin,
+        GNSConnectionSendRateBytesPerSecond);
+    (void)utils->SetConnectionConfigValueInt32(
+        handle,
+        k_ESteamNetworkingConfig_SendRateMax,
+        GNSConnectionSendRateBytesPerSecond);
+  }
+
+  constexpr std::array<int, GNSLaneCount> priorities{{
+      0, // session
+      2, // gameplay
+      1, // movement
+      3, // chunk streaming
+      4, // debug
+  }};
+  constexpr std::array<uint16, GNSLaneCount> weights{{
+      1,
+      4,
+      8,
+      1,
+      1,
+  }};
+  (void)sockets_->ConfigureConnectionLanes(
+      handle,
+      GNSLaneCount,
+      priorities.data(),
+      weights.data());
 }
 
 void GameNetworkingSocketsTransport::handle_connection_status_change(const SteamNetConnectionStatusChangedCallback_t& info) {
@@ -231,11 +386,15 @@ void GameNetworkingSocketsTransport::handle_connection_status_change(const Steam
 
   const auto state = info.m_info.m_eState;
   if (state == k_ESteamNetworkingConnectionState_Connecting &&
+      listen_socket_ != k_HSteamListenSocket_Invalid &&
       info.m_info.m_hListenSocket == listen_socket_) {
     const EResult accepted = sockets_->AcceptConnection(info.m_hConn);
     const ConnectionID id = connection_id_for_handle(info.m_hConn);
     if (accepted == k_EResultOK && poll_group_ != k_HSteamNetPollGroup_Invalid) {
       sockets_->SetConnectionPollGroup(info.m_hConn, poll_group_);
+    }
+    if (accepted == k_EResultOK) {
+      configure_connection(info.m_hConn);
     }
     set_state(id, accepted == k_EResultOK ? ConnectionState::TransportConnected
                                           : ConnectionState::Disconnecting);
@@ -249,7 +408,10 @@ void GameNetworkingSocketsTransport::handle_connection_status_change(const Steam
                  id,
                  protocol::ReliabilityClass::ReliableOrdered,
                  {},
-                 accepted == k_EResultOK ? std::string{} : "failed to accept GameNetworkingSockets connection",
+                 accepted == k_EResultOK
+                     ? std::string{}
+                     : "failed to accept GameNetworkingSockets connection: result=" +
+                           std::to_string(static_cast<int>(accepted)),
                  std::chrono::steady_clock::now()});
     return;
   }
@@ -259,6 +421,7 @@ void GameNetworkingSocketsTransport::handle_connection_status_change(const Steam
     if (poll_group_ != k_HSteamNetPollGroup_Invalid) {
       sockets_->SetConnectionPollGroup(info.m_hConn, poll_group_);
     }
+    configure_connection(info.m_hConn);
     set_state(id, ConnectionState::TransportConnected);
     queue_event({NetworkEventType::ConnectionAccepted,
                  id,
@@ -288,46 +451,67 @@ void GameNetworkingSocketsTransport::drain_outbound_send_commands() {
   usize drained = 0;
   while (drained < MaxOutboundCommandsPerPoll &&
          outbound_sends_.try_dequeue(command)) {
-    send_outbound_command(std::move(command));
+    NetworkResult result = send_outbound_command(command);
+    if (!result) {
+      queue_event({NetworkEventType::MessageSendFailed,
+                   command.message.connection_id,
+                   command.message.reliability,
+                   {},
+                   result.error().message,
+                   std::chrono::steady_clock::now(),
+                   command.message.message_type,
+                   command.message.lane});
+    }
     command = {};
     ++drained;
   }
 }
 
-void GameNetworkingSocketsTransport::send_outbound_command(OutboundSendCommand command) {
+NetworkResult GameNetworkingSocketsTransport::send_outbound_command(const OutboundSendCommand& command) {
   assert_owner_thread();
   if (sockets_ == nullptr) {
-    return;
+    return NetworkResult::failure(NetworkError{"GameNetworkingSockets interface is unavailable"});
   }
 
   const auto found = connections_.find(command.message.connection_id);
   if (found == connections_.end()) {
-    queue_event({NetworkEventType::MessageSendFailed,
-                 command.message.connection_id,
-                 command.message.reliability,
-                 {},
-                 "unknown GameNetworkingSockets connection",
-                 std::chrono::steady_clock::now()});
-    return;
+    return NetworkResult::failure(NetworkError{"unknown GameNetworkingSockets connection"});
   }
 
-  // TODO(net): coalesce UnreliableLatestWins commands per connection/channel before
-  // reaching GNS so superseded snapshots are dropped instead of merely sent unreliably.
-  const EResult result = sockets_->SendMessageToConnection(
-      found->second,
-      command.message.payload.data(),
-      static_cast<u32>(command.message.payload.size()),
-      detail::gns_send_flags(command.message.reliability),
-      nullptr);
-
-  if (result != k_EResultOK) {
-    queue_event({NetworkEventType::MessageSendFailed,
-                 command.message.connection_id,
-                 command.message.reliability,
-                 {},
-                 "failed to send GameNetworkingSockets message",
-                 std::chrono::steady_clock::now()});
+  if (command.message.payload.size() > static_cast<usize>(std::numeric_limits<int>::max())) {
+    return NetworkResult::failure(NetworkError{"GameNetworkingSockets message payload is too large"});
   }
+
+  SteamNetworkingMessage_t* message =
+      SteamNetworkingUtils()->AllocateMessage(static_cast<int>(command.message.payload.size()));
+  if (message == nullptr) {
+    return NetworkResult::failure(NetworkError{"failed to allocate GameNetworkingSockets message"});
+  }
+
+  if (!command.message.payload.empty()) {
+    std::memcpy(
+        message->m_pData,
+        command.message.payload.data(),
+        command.message.payload.size());
+  }
+  message->m_conn = found->second;
+  message->m_nFlags = detail::gns_send_flags(command.message.reliability);
+  message->m_idxLane = detail::gns_lane_index(command.message.lane);
+
+  SteamNetworkingMessage_t* messages[1]{message};
+  int64 result_or_message_number = 0;
+  sockets_->SendMessages(1, messages, &result_or_message_number);
+  if (result_or_message_number < 0) {
+    const EResult result = static_cast<EResult>(-result_or_message_number);
+    if (result == k_EResultIgnored &&
+        command.message.reliability != protocol::ReliabilityClass::ReliableOrdered) {
+      return NetworkResult::success();
+    }
+    return NetworkResult::failure(
+        NetworkError{send_failure_reason(result, command.message)});
+  }
+
+  return NetworkResult::success();
 }
 
 void GameNetworkingSocketsTransport::receive_poll_group_messages() {
@@ -369,10 +553,14 @@ void GameNetworkingSocketsTransport::receive_poll_group_messages() {
         // abstraction that can safely release SteamNetworkingMessage_t after processing.
         queue_event({NetworkEventType::MessageReceived,
                      id.value(),
-                     protocol::ReliabilityClass::ReliableOrdered,
+                     (raw_message->m_nFlags & k_nSteamNetworkingSend_Reliable) != 0
+                         ? protocol::ReliabilityClass::ReliableOrdered
+                         : protocol::ReliabilityClass::UnreliableEvent,
                      std::move(payload),
                      {},
-                     std::chrono::steady_clock::now()});
+                     std::chrono::steady_clock::now(),
+                     protocol::MessageType::Ping,
+                     static_cast<protocol::NetworkLane>(raw_message->m_idxLane)});
       }
       raw_message->Release();
     }
@@ -413,6 +601,8 @@ void GameNetworkingSocketsTransport::register_connection(ConnectionID id, HSteam
   states_[id] = state;
   if (sockets_ != nullptr && handle != k_HSteamNetConnection_Invalid) {
     (void)sockets_->SetConnectionUserData(handle, static_cast<std::int64_t>(id.value));
+    register_connection_owner(handle);
+    configure_connection(handle);
   }
 }
 
@@ -496,10 +686,27 @@ int gns_send_flags(protocol::ReliabilityClass reliability) noexcept {
     case protocol::ReliabilityClass::ReliableOrdered:
       return k_nSteamNetworkingSend_Reliable;
     case protocol::ReliabilityClass::UnreliableLatestWins:
+      return k_nSteamNetworkingSend_UnreliableNoDelay;
     case protocol::ReliabilityClass::UnreliableEvent:
-      return k_nSteamNetworkingSend_Unreliable;
+      return k_nSteamNetworkingSend_UnreliableNoDelay;
   }
   return k_nSteamNetworkingSend_Reliable;
+}
+
+u16 gns_lane_index(protocol::NetworkLane lane) noexcept {
+  switch (lane) {
+    case protocol::NetworkLane::Session:
+      return 0;
+    case protocol::NetworkLane::Gameplay:
+      return 1;
+    case protocol::NetworkLane::Movement:
+      return 2;
+    case protocol::NetworkLane::ChunkStreaming:
+      return 3;
+    case protocol::NetworkLane::Debug:
+      return 4;
+  }
+  return 0;
 }
 
 } // namespace detail

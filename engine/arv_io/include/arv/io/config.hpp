@@ -5,8 +5,10 @@
 #include "arv/core/types.hpp"
 
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace arv::io {
 
@@ -16,7 +18,9 @@ inline constexpr std::string_view DefaultClientConfigFileName = "client.yaml";
 inline constexpr std::string_view DefaultServerConfigFileName = "server.yaml";
 inline constexpr std::string_view DefaultEngineConfigFileName = "engine.yaml";
 inline constexpr std::string_view DefaultInputBindingsFileName = "input_bindings.yaml";
+inline constexpr std::string_view DefaultServerListFileName = "server_list.json";
 inline constexpr std::string_view DefaultServerSaveName = "server-save-1";
+inline constexpr std::string_view DefaultDedicatedServerSaveDirectoryName = "server-save";
 
 struct WindowConfig {
   u32 width{1280};
@@ -58,7 +62,11 @@ struct SimulationConfig {
 
 struct NetworkConfig {
   std::string bind_address{"0.0.0.0"};
-  u16 port{27020};
+  u16 port{42069};
+};
+
+struct DedicatedServerConfig {
+  std::string world{"default"};
 };
 
 struct ChunkDistanceConfig {
@@ -146,6 +154,7 @@ struct PathConfig {
   std::filesystem::path client_config_file{};
   std::filesystem::path server_config_file{};
   std::filesystem::path input_bindings_file{};
+  std::filesystem::path server_list_file{};
 
   [[nodiscard]] const std::filesystem::path& arvane_home_path() const noexcept {
     return arvane_home_root;
@@ -178,6 +187,15 @@ struct PathConfig {
   [[nodiscard]] std::filesystem::path server_save_path(std::string_view save_name) const {
     return saves_root / std::filesystem::path{save_name};
   }
+
+  [[nodiscard]] std::filesystem::path dedicated_server_save_path() const {
+    return arvane_home_root / std::filesystem::path{DefaultDedicatedServerSaveDirectoryName};
+  }
+};
+
+struct SavedServerListEntry {
+  std::string name{};
+  std::string address{};
 };
 
 struct EngineConfig {
@@ -185,6 +203,7 @@ struct EngineConfig {
   WindowConfig window{};
   SimulationConfig simulation{};
   NetworkConfig network{};
+  DedicatedServerConfig server{};
   ChunkDistanceConfig chunks{};
   JobSystemConfig jobs{};
   PhysicsConfig physics{};
@@ -198,6 +217,8 @@ struct ConfigError {
 
 using ConfigResult = Expected<EngineConfig, ConfigError>;
 using TextFileResult = Expected<std::string, ConfigError>;
+using ServerListResult = Expected<std::vector<SavedServerListEntry>, ConfigError>;
+using ServerListSaveResult = Expected<void, ConfigError>;
 
 enum class ConfigProfile {
   Client,
@@ -225,5 +246,10 @@ ConfigResult load_config(const ConfigLoadOptions& options);
 ConfigResult load_config_file_or_defaults(const std::filesystem::path& path);
 
 TextFileResult read_text_file(const std::filesystem::path& path, std::string_view purpose);
+
+ServerListResult load_server_list_file(const std::filesystem::path& path);
+ServerListSaveResult save_server_list_file(
+    const std::filesystem::path& path,
+    std::span<const SavedServerListEntry> servers);
 
 } // namespace arv::io

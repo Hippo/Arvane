@@ -42,6 +42,7 @@ public:
   void set_player_tuning(player::PlayerTuning tuning) noexcept;
   void submit_input(InputFrame input) noexcept;
   [[nodiscard]] player::PlayerCommand consume_command(TickIndex tick_index) noexcept;
+  void enter_world(WorldID world_id, Vec3f body_position) noexcept;
   void apply_authoritative_state(const protocol::PlayerCorrection& correction);
 
   [[nodiscard]] const CameraShell& camera() const noexcept {

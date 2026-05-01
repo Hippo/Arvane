@@ -28,10 +28,18 @@ struct ServerChunkGenerationSettings {
 };
 
 struct QueuedChunkStreamMessage {
+  SessionID session_id{};
   net::ConnectionID connection_id{};
+  WorldID world_id{};
   protocol::ReliabilityClass reliability{protocol::ReliabilityClass::ReliableOrdered};
+  protocol::NetworkLane lane{protocol::NetworkLane::ChunkStreaming};
   protocol::MessageType message_type{protocol::MessageType::ChunkData};
   std::vector<u8> payload{};
+  ChunkCoord coord{};
+  u64 block_version{};
+  u64 light_version{};
+  bool lighting_valid{};
+  bool tracks_sent_chunk{};
 };
 
 class ServerChunkStreamer {
@@ -56,6 +64,13 @@ public:
       WorldID world_id,
       ChunkCoord coord,
       u64 block_version) noexcept;
+  bool confirm_chunk_sent(
+      SessionID session_id,
+      WorldID world_id,
+      ChunkCoord coord,
+      u64 block_version,
+      u64 light_version,
+      bool lighting_valid) noexcept;
 
   [[nodiscard]] usize tracked_player_count() const noexcept {
     return players_.size();

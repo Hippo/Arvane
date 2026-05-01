@@ -4,6 +4,7 @@
 #include "arv/net/transport.hpp"
 
 #include <atomic>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <thread>
@@ -18,6 +19,7 @@ namespace arv::net {
 namespace detail {
 
 [[nodiscard]] int gns_send_flags(protocol::ReliabilityClass reliability) noexcept;
+[[nodiscard]] u16 gns_lane_index(protocol::NetworkLane lane) noexcept;
 
 } // namespace detail
 
@@ -49,6 +51,9 @@ public:
   std::vector<NetworkEvent> poll_events() override;
   ConnectionState state(ConnectionID connection_id) const override;
   void shutdown() override;
+  [[nodiscard]] u16 bound_port() const noexcept {
+    return bound_port_;
+  }
 
 private:
   struct OutboundSendCommand {
@@ -61,11 +66,16 @@ private:
 
   NetworkResult ensure_poll_group();
   static void connection_status_changed(SteamNetConnectionStatusChangedCallback_t* info);
-  void register_callback_owner();
-  void unregister_callback_owner();
+  static GameNetworkingSocketsTransport* callback_owner_for(
+      const SteamNetConnectionStatusChangedCallback_t& info);
+  void register_listen_socket_owner();
+  void unregister_listen_socket_owner();
+  void register_connection_owner(HSteamNetConnection handle);
+  void unregister_connection_owner(HSteamNetConnection handle);
+  void configure_connection(HSteamNetConnection handle);
   void handle_connection_status_change(const SteamNetConnectionStatusChangedCallback_t& info);
   void drain_outbound_send_commands();
-  void send_outbound_command(OutboundSendCommand command);
+  [[nodiscard]] NetworkResult send_outbound_command(const OutboundSendCommand& command);
   void receive_poll_group_messages();
   ConnectionID connection_id_for_handle(HSteamNetConnection handle);
   std::optional<ConnectionID> connection_id_for_message(const ISteamNetworkingMessage& message);
@@ -81,6 +91,7 @@ private:
   ISteamNetworkingSockets* sockets_{};
   HSteamListenSocket listen_socket_{k_HSteamListenSocket_Invalid};
   HSteamNetPollGroup poll_group_{k_HSteamNetPollGroup_Invalid};
+  u16 bound_port_{};
   u32 next_connection_id_{1};
   mutable std::atomic<usize> owner_thread_hash_{0U};
   std::atomic_bool accepting_sends_{true};
@@ -90,7 +101,9 @@ private:
   HashMap<ConnectionID, ConnectionState> states_;
   std::vector<NetworkEvent> queued_events_;
 
-  inline static std::atomic<GameNetworkingSocketsTransport*> callback_owner_{nullptr};
+  inline static std::mutex callback_owner_mutex_;
+  inline static HashMap<HSteamListenSocket, GameNetworkingSocketsTransport*> listen_socket_callback_owners_{};
+  inline static HashMap<HSteamNetConnection, GameNetworkingSocketsTransport*> connection_callback_owners_{};
 };
 
 } // namespace arv::net

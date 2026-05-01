@@ -34,12 +34,24 @@ This applies to:
 - dedicated servers
 - singleplayer (integrated server)
 
-In development, server saves live under `arvane_home/saves/`.
+In development, singleplayer server saves live under `arvane_home/saves/`.
+The dedicated server uses one fixed server save root at
+`arvane_home/server-save/`; its active world is selected by the top-level
+`world` property in `arvane_home/config/server.yaml`.
 
 Example:
 
 ```text
 arvane_home/
+  server-save/
+    save.json
+    players/
+      <player_uuid>.dat
+    worlds/
+      default/
+        world.json
+        regions/
+          r.<x>.<z>.arvr
   saves/
     server-save-1/
       save.json
@@ -63,10 +75,12 @@ arvane_home/
 Notes:
 
 * `arvane_home/saves/<server-save-name>/` is the top-level save boundary
+  for singleplayer server saves
+* `arvane_home/server-save/` is the top-level save boundary for `arv_dedicated`
 * Each world is fully independent
 * A “dimension” is simply another world
 * Worlds do not nest inside each other
-* `saves/` contains server save directories, not worlds directly
+* `saves/` contains singleplayer server save directories, not worlds directly
 * Players exist at the server level (not per-world)
 
 ---

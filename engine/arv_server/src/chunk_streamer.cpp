@@ -197,6 +197,31 @@ bool ServerChunkStreamer::mark_sent_block_version(
   return true;
 }
 
+bool ServerChunkStreamer::confirm_chunk_sent(
+    SessionID session_id,
+    WorldID world_id,
+    ChunkCoord coord,
+    u64 block_version,
+    u64 light_version,
+    bool lighting_valid) noexcept {
+  auto player = players_.find(session_id);
+  if (player == players_.end() || player->second.world_id != world_id) {
+    return false;
+  }
+
+  PlayerChunkStreamState& state = player->second;
+  if (state.desired_chunks.find(coord) == state.desired_chunks.end()) {
+    return false;
+  }
+
+  state.sent_chunk_versions[coord] = {
+      block_version,
+      light_version,
+      lighting_valid};
+  state.pending_chunks.erase(coord);
+  return true;
+}
+
 i32 ServerChunkStreamer::clamp_view_distance(i32 requested_distance) const noexcept {
   if (requested_distance < 0) {
     return 0;
@@ -310,11 +335,16 @@ void ServerChunkStreamer::queue_chunk_unloads(
     protocol::ChunkUnload unload;
     unload.world_id = state.world_id;
     unload.coord = coord;
-    out_messages.emplace_back(
-        state.connection_id,
-        protocol::ReliabilityClass::ReliableOrdered,
-        protocol::MessageType::ChunkUnload,
-        protocol::serialize_chunk_unload(unload));
+    QueuedChunkStreamMessage message;
+    message.session_id = state.session_id;
+    message.connection_id = state.connection_id;
+    message.world_id = state.world_id;
+    message.reliability = protocol::ReliabilityClass::ReliableOrdered;
+    message.lane = protocol::NetworkLane::ChunkStreaming;
+    message.message_type = protocol::MessageType::ChunkUnload;
+    message.payload = protocol::serialize_chunk_unload(unload);
+    message.coord = coord;
+    out_messages.emplace_back(std::move(message));
     ++sent;
   }
 }
@@ -377,16 +407,21 @@ void ServerChunkStreamer::queue_chunk_sends(
       data.fluids.fill(voxel::empty_fluid_cell());
     }
 
-    out_messages.emplace_back(
-        state.connection_id,
-        protocol::ReliabilityClass::ReliableOrdered,
-        protocol::MessageType::ChunkData,
-        protocol::serialize_chunk_data(data));
-    state.sent_chunk_versions[coord] = {
-        snapshot->source_version,
-        source_chunk->light_data_version(),
-        data.lighting_valid};
-    state.pending_chunks.erase(coord);
+    QueuedChunkStreamMessage message;
+    message.session_id = state.session_id;
+    message.connection_id = state.connection_id;
+    message.world_id = state.world_id;
+    message.reliability = protocol::ReliabilityClass::ReliableOrdered;
+    message.lane = protocol::NetworkLane::ChunkStreaming;
+    message.message_type = protocol::MessageType::ChunkData;
+    message.payload = protocol::serialize_chunk_data(data);
+    message.coord = coord;
+    message.block_version = snapshot->source_version;
+    message.light_version = source_chunk->light_data_version();
+    message.lighting_valid = data.lighting_valid;
+    message.tracks_sent_chunk = true;
+    out_messages.emplace_back(std::move(message));
+    deferred_this_tick.insert(coord);
     ++sent;
   }
 }

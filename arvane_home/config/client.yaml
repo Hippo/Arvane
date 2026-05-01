@@ -1,5 +1,6 @@
 paths:
   input_bindings_file: arvane_home/config/input_bindings.yaml
+  server_list_file: arvane_home/config/server_list.json
 window:
   width: 1280
   height: 720

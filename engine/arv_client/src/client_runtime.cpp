@@ -1,5 +1,7 @@
 #include "arv/client/client_runtime.hpp"
 
+#include "arv/core/log.hpp"
+
 #include <utility>
 
 namespace arv::client {
@@ -42,6 +44,18 @@ net::ConnectResult ClientRuntime::connect_integrated() {
       return net::ConnectResult::failure(hello_result.error());
     }
     connection_state_ = net::ConnectionState::ProtocolHandshake;
+  }
+  return result;
+}
+
+net::ConnectResult ClientRuntime::connect(net::NetworkAddress address) {
+  if (!transport_) {
+    return net::ConnectResult::failure(net::NetworkError{"client has no transport"});
+  }
+  auto result = transport_->connect(std::move(address));
+  if (result) {
+    connection_id_ = result.value();
+    connection_state_ = net::ConnectionState::Connecting;
   }
   return result;
 }
@@ -249,7 +263,12 @@ net::NetworkResult ClientRuntime::send_client_hello() {
   std::vector<u8> packet = protocol::serialize_envelope(
       {protocol::CurrentProtocolVersion, protocol::MessageType::ClientHello, 0, 0, 0, 0},
       payload);
-  return transport_->send({connection_id_, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+  return transport_->send(
+      {connection_id_,
+       protocol::ReliabilityClass::ReliableOrdered,
+       std::move(packet),
+       protocol::MessageType::ClientHello,
+       protocol::NetworkLane::Session});
 }
 
 net::NetworkResult ClientRuntime::send_chunk_interest_update() {
@@ -259,7 +278,11 @@ net::NetworkResult ClientRuntime::send_chunk_interest_update() {
       {protocol::CurrentProtocolVersion, protocol::MessageType::ChunkInterestUpdate, 0, 0, 0, 0},
       payload);
   return transport_->send(
-      {connection_id_, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+      {connection_id_,
+       protocol::ReliabilityClass::ReliableOrdered,
+       std::move(packet),
+       protocol::MessageType::ChunkInterestUpdate,
+       protocol::NetworkLane::Gameplay});
 }
 
 net::NetworkResult ClientRuntime::send_inventory_action(protocol::InventoryActionRequest request) {
@@ -271,7 +294,11 @@ net::NetworkResult ClientRuntime::send_inventory_action(protocol::InventoryActio
       {protocol::CurrentProtocolVersion, protocol::MessageType::InventoryActionRequest, 0, 0, 0, 0},
       payload);
   return transport_->send(
-      {connection_id_, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+      {connection_id_,
+       protocol::ReliabilityClass::ReliableOrdered,
+       std::move(packet),
+       protocol::MessageType::InventoryActionRequest,
+       protocol::NetworkLane::Gameplay});
 }
 
 void ClientRuntime::handle_network_event(net::NetworkEvent event) {
@@ -281,10 +308,21 @@ void ClientRuntime::handle_network_event(net::NetworkEvent event) {
     case net::NetworkEventType::ConnectionAccepted:
       if (connection_state_ == net::ConnectionState::Connecting) {
         connection_state_ = net::ConnectionState::TransportConnected;
+        auto hello_result = send_client_hello();
+        if (!hello_result) {
+          connection_state_ = net::ConnectionState::Disconnecting;
+          return;
+        }
+        connection_state_ = net::ConnectionState::ProtocolHandshake;
       }
       return;
     case net::NetworkEventType::ConnectionClosed:
     case net::NetworkEventType::ConnectionFailed:
+      core::warn(
+          "client",
+          "network connection {}: {}",
+          event.type == net::NetworkEventType::ConnectionClosed ? "closed" : "failed",
+          event.reason);
       connection_state_ = net::ConnectionState::Disconnected;
       return;
     case net::NetworkEventType::MessageReceived:
@@ -415,8 +453,7 @@ void ClientRuntime::apply_world_join_result(const protocol::WorldJoinResult& res
     connection_state_ = net::ConnectionState::Disconnecting;
     return;
   }
-  player_controller_.camera().set_world_id(result.world_id);
-  player_controller_.camera().set_position(result.spawn_position);
+  player_controller_.enter_world(result.world_id, result.spawn_position);
   chunk_interest_.set_world_id(result.world_id);
   connection_state_ = net::ConnectionState::InGame;
 }
@@ -512,7 +549,11 @@ net::NetworkResult ClientRuntime::send_input_batch(TickIndex tick_index) {
       {protocol::CurrentProtocolVersion, protocol::MessageType::ClientInputBatch, 0, 0, 0, 0},
       payload);
   return transport_->send(
-      {connection_id_, protocol::ReliabilityClass::UnreliableLatestWins, std::move(packet)});
+      {connection_id_,
+       protocol::ReliabilityClass::UnreliableLatestWins,
+       std::move(packet),
+       protocol::MessageType::ClientInputBatch,
+       protocol::NetworkLane::Movement});
 }
 
 } // namespace arv::client

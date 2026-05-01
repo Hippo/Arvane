@@ -110,6 +110,15 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   return command;
 }
 
+void LocalPlayerController::enter_world(WorldID world_id, Vec3f body_position) noexcept {
+  body_position_ = body_position;
+  camera_.set_world_id(world_id);
+  camera_.set_position(
+      {body_position.x,
+       body_position.y + current_eye_height_,
+       body_position.z});
+}
+
 void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorrection& correction) {
   if (correction.server_tick < last_authoritative_server_tick_) {
     return;

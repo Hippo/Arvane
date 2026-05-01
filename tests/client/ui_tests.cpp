@@ -368,3 +368,40 @@ TEST(MenuScreenTests, CreateWorldValidatesBeforeEmittingCommand) {
   ASSERT_TRUE(std::holds_alternative<arv::ui::CreateWorldCommand>(sink.commands[0]));
   EXPECT_EQ(std::get<arv::ui::CreateWorldCommand>(sink.commands[0]).name, "Fresh");
 }
+
+TEST(MenuScreenTests, AddServerAcceptsAddressWithoutPort) {
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_add_server_screen());
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+
+  EXPECT_TRUE(screens.handle_text_input("Local", ctx));
+  EXPECT_TRUE(screens.route_action({"menu.server.address", "server.focus_address", "click"}, ctx));
+  EXPECT_TRUE(screens.handle_text_input("localhost", ctx));
+  EXPECT_TRUE(screens.handle_submit(ctx));
+
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SaveServerEntryCommand>(sink.commands[0]));
+  const auto& command = std::get<arv::ui::SaveServerEntryCommand>(sink.commands[0]);
+  EXPECT_EQ(command.server.name, "Local");
+  EXPECT_EQ(command.server.address, "localhost");
+}
+
+TEST(MenuScreenTests, AddServerRejectsMalformedExplicitPort) {
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_add_server_screen());
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+
+  EXPECT_TRUE(screens.handle_text_input("Local", ctx));
+  EXPECT_TRUE(screens.route_action({"menu.server.address", "server.focus_address", "click"}, ctx));
+  EXPECT_TRUE(screens.handle_text_input("localhost:nope", ctx));
+  EXPECT_TRUE(screens.handle_submit(ctx));
+
+  EXPECT_TRUE(sink.commands.empty());
+  EXPECT_EQ(screens.depth(), 1U);
+}

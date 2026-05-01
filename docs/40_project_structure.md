@@ -132,16 +132,28 @@ It contains:
 * `assets/`
 * `plugins/`
 * `config/`
+* `server-save/`
 * `saves/`
 * optional `logs/`
 * optional `cache/`
 
-`saves/` contains **server save directories**, not individual world directories.
+`server-save/` is the single dedicated-server save root used by
+`arv_dedicated`. `saves/` contains **singleplayer server save directories**,
+not individual world directories.
+
+`config/server_list.json` stores the desktop client's saved multiplayer server
+entries. It is client UI configuration, not world or server-save data.
 
 Example:
 
 ```text
 arvane_home/
+  config/
+    server_list.json
+  server-save/
+    players/
+    worlds/
+      default/
   saves/
     server-save-1/
       players/
