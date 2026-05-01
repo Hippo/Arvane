@@ -132,6 +132,26 @@ public:
     return permission_groups_;
   }
 
+  [[nodiscard]] const sched::Scheduler* world_scheduler() const noexcept {
+    return world_jobs_.get();
+  }
+
+  [[nodiscard]] sched::Scheduler* world_scheduler() noexcept {
+    return world_jobs_.get();
+  }
+
+  [[nodiscard]] usize pending_generation_job_count() const noexcept {
+    return pending_generation_jobs_.size();
+  }
+
+  [[nodiscard]] usize pending_lighting_job_count() const noexcept {
+    return pending_lighting_jobs_.size();
+  }
+
+  [[nodiscard]] usize pending_fluid_job_count() const noexcept {
+    return pending_fluid_jobs_.size();
+  }
+
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
   [[nodiscard]] player::InventoryInsertResult insert_player_inventory_stack(
       PlayerID player_id,

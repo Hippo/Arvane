@@ -1,5 +1,8 @@
 #pragma once
 
+#include "chunk_view.hpp"
+
+#include "arv/core/perf_stats.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
@@ -16,6 +19,22 @@ namespace arv::desktop {
 
 struct DebugMenuState {
   static constexpr usize ProfileFrameHistoryCapacity = 240;
+
+  struct QueueProfileState {
+    u64 previous_submitted_jobs{};
+    u64 previous_completed_jobs{};
+    u32 current_queued_jobs{};
+    u32 peak_queued_jobs_window{};
+    u32 submitted_jobs_this_frame{};
+    u32 completed_jobs_this_frame{};
+    u32 active_workers{};
+    u32 idle_workers{};
+    double idle_percent{};
+    bool backlog_growing{};
+    u32 queued_history_index{};
+    u32 queued_history_count{};
+    std::array<u32, ProfileFrameHistoryCapacity> queued_history{};
+  };
 
   bool open{};
   std::string item_filter{};
@@ -37,13 +56,30 @@ struct DebugMenuState {
   std::string console_command{};
   std::vector<std::string> console_log{};
   bool profile_sampling_paused{};
+  int profile_frame_window_size{static_cast<int>(ProfileFrameHistoryCapacity)};
+  int profile_max_event_rows{12};
   u32 profile_frame_sample_index{};
   u32 profile_frame_sample_count{};
   std::array<f32, ProfileFrameHistoryCapacity> profile_frame_delta_ms{};
   std::array<f32, ProfileFrameHistoryCapacity> profile_frame_work_ms{};
+  QueueProfileState server_queue_profile{};
+  QueueProfileState client_queue_profile{};
+  u32 snapshot_created_this_frame{};
+  u32 snapshot_reused_this_frame{};
+  u32 snapshot_copies_this_frame{};
+  u64 snapshot_bytes_copied_this_frame{};
+  u64 peak_snapshot_bytes_copied_window{};
+  u64 previous_snapshots_created_total{};
+  u64 previous_snapshots_reused_total{};
+  u64 previous_snapshot_copies_total{};
+  u64 previous_snapshot_bytes_copied_total{};
+  u32 snapshot_bytes_history_index{};
+  u32 snapshot_bytes_history_count{};
+  std::array<u64, ProfileFrameHistoryCapacity> snapshot_bytes_history{};
 };
 
 struct DebugMenuFrameInfo {
+  u64 frame_index{};
   double frame_delta_ms{};
   double frame_work_ms{};
   u32 displayed_fps{};
@@ -63,7 +99,8 @@ struct DebugMenuResult {
     client::ClientRuntime& client,
     const player::ItemRegistry& item_registry,
     const entity::EntityRegistry& entity_registry,
-    const sched::Scheduler& world_jobs,
-    const render::OpenGLRenderer& renderer);
+    sched::Scheduler& world_jobs,
+    const render::OpenGLRenderer& renderer,
+    const ChunkViewState& chunk_view);
 
 } // namespace arv::desktop

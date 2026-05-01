@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdio>
 
 namespace arv::render {
 namespace {
@@ -484,7 +485,20 @@ ChunkMeshData build_chunk_mesh(
     const voxel::BlockRegistry& registry,
     const voxel::BlockRenderData* render_data) {
   ARV_PROFILE_ZONE("Chunk meshing");
-  const core::ScopedThreadTiming timing{core::PerfMetric::MeshingTask};
+  std::array<char, core::PerfEventContextCapacity> profile_context{};
+  if constexpr (core::perf_stats_enabled()) {
+    (void)std::snprintf(
+        profile_context.data(),
+        profile_context.size(),
+        "section=(%d,%d,%d)",
+        snapshot.coord.value.x,
+        snapshot.coord.value.y,
+        snapshot.coord.value.z);
+  }
+  const core::ScopedThreadTiming timing{
+      core::PerfMetric::MeshingTask,
+      "worker/client",
+      profile_context.data()};
   const voxel::ChunkSnapshotStoragePointers snapshot_storage =
       voxel::make_chunk_snapshot_storage_pointers(snapshot);
 

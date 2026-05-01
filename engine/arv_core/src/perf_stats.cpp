@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 
 namespace arv::core {
 namespace {
@@ -38,6 +39,30 @@ void update_maximum(std::atomic<u32>& target, u32 value) noexcept {
              value,
              std::memory_order_relaxed,
              std::memory_order_relaxed)) {
+  }
+}
+
+void update_maximum(std::atomic<u64>& target, u64 value) noexcept {
+  u64 current = target.load(std::memory_order_relaxed);
+  while (current < value &&
+         !target.compare_exchange_weak(
+             current,
+             value,
+             std::memory_order_relaxed,
+             std::memory_order_relaxed)) {
+  }
+}
+
+template<usize Capacity>
+void copy_c_string(std::array<char, Capacity>& target, const char* source) noexcept {
+  target.fill('\0');
+  if (source == nullptr || Capacity == 0U) {
+    return;
+  }
+
+  const usize length = std::min<usize>(std::strlen(source), Capacity - 1U);
+  if (length > 0U) {
+    std::memcpy(target.data(), source, length);
   }
 }
 
@@ -115,16 +140,188 @@ private:
   std::atomic<u32> max_us_{};
 };
 
+class AtomicEventRing {
+public:
+  void record(
+      PerfMetric metric,
+      u32 duration_us,
+      u64 frame_index,
+      u64 timestamp_us,
+      const char* thread_category,
+      const char* context) noexcept {
+    if (duration_us == 0U) {
+      return;
+    }
+
+    const u64 write = write_index_.fetch_add(1U, std::memory_order_relaxed);
+    Slot& slot = samples_[write % WorstEventRingCapacity];
+    const u64 sequence = (write + 1U) * 2U;
+    slot.sequence.store(sequence - 1U, std::memory_order_release);
+    slot.metric.store(static_cast<u8>(metric), std::memory_order_relaxed);
+    slot.duration_us.store(duration_us, std::memory_order_relaxed);
+    slot.frame_index.store(frame_index, std::memory_order_relaxed);
+    slot.timestamp_us.store(timestamp_us, std::memory_order_relaxed);
+    copy_c_string(slot.thread, thread_category);
+    copy_c_string(slot.context, context);
+    slot.sequence.store(sequence, std::memory_order_release);
+
+    u32 sample_count = sample_count_.load(std::memory_order_relaxed);
+    while (sample_count < WorstEventRingCapacity &&
+           !sample_count_.compare_exchange_weak(
+               sample_count,
+               sample_count + 1U,
+               std::memory_order_release,
+               std::memory_order_relaxed)) {
+    }
+  }
+
+  [[nodiscard]] u32 sample_count() const noexcept {
+    return std::min<u32>(
+        sample_count_.load(std::memory_order_acquire),
+        static_cast<u32>(WorstEventRingCapacity));
+  }
+
+  [[nodiscard]] bool sample(usize index, PerfEventSample& out) const noexcept {
+    if (index >= WorstEventRingCapacity) {
+      return false;
+    }
+
+    const Slot& slot = samples_[index];
+    const u64 before = slot.sequence.load(std::memory_order_acquire);
+    if (before == 0U || (before & 1U) != 0U) {
+      return false;
+    }
+
+    PerfEventSample sample;
+    sample.metric = static_cast<PerfMetric>(slot.metric.load(std::memory_order_relaxed));
+    sample.duration_us = slot.duration_us.load(std::memory_order_relaxed);
+    sample.frame_index = slot.frame_index.load(std::memory_order_relaxed);
+    sample.timestamp_us = slot.timestamp_us.load(std::memory_order_relaxed);
+    sample.thread = slot.thread;
+    sample.context = slot.context;
+
+    const u64 after = slot.sequence.load(std::memory_order_acquire);
+    if (before != after || (after & 1U) != 0U || sample.duration_us == 0U) {
+      return false;
+    }
+
+    out = sample;
+    return true;
+  }
+
+  void clear() noexcept {
+    for (Slot& slot : samples_) {
+      slot.sequence.store(0U, std::memory_order_release);
+      slot.metric.store(0U, std::memory_order_relaxed);
+      slot.duration_us.store(0U, std::memory_order_relaxed);
+      slot.frame_index.store(0U, std::memory_order_relaxed);
+      slot.timestamp_us.store(0U, std::memory_order_relaxed);
+      slot.thread.fill('\0');
+      slot.context.fill('\0');
+    }
+    write_index_.store(0U, std::memory_order_relaxed);
+    sample_count_.store(0U, std::memory_order_release);
+  }
+
+private:
+  struct Slot {
+    std::atomic<u64> sequence{};
+    std::atomic<u8> metric{};
+    std::atomic<u32> duration_us{};
+    std::atomic<u64> frame_index{};
+    std::atomic<u64> timestamp_us{};
+    std::array<char, PerfEventThreadCapacity> thread{};
+    std::array<char, PerfEventContextCapacity> context{};
+  };
+
+  std::array<Slot, WorstEventRingCapacity> samples_{};
+  std::atomic<u64> write_index_{};
+  std::atomic<u32> sample_count_{};
+};
+
 using GlobalTimingHistograms =
     std::array<AtomicTimingHistogram, static_cast<usize>(PerfMetric::Count)>;
+
+using GlobalWorstEventRings =
+    std::array<AtomicEventRing, static_cast<usize>(PerfMetric::Count)>;
 
 [[nodiscard]] GlobalTimingHistograms& global_timing_histograms() noexcept {
   static GlobalTimingHistograms histograms;
   return histograms;
 }
 
+[[nodiscard]] GlobalWorstEventRings& global_worst_event_rings() noexcept {
+  static GlobalWorstEventRings rings;
+  return rings;
+}
+
+[[nodiscard]] std::atomic_bool& global_pause_flag() noexcept {
+  static std::atomic_bool paused{false};
+  return paused;
+}
+
+[[nodiscard]] std::atomic<u64>& global_frame_index() noexcept {
+  static std::atomic<u64> frame_index{0U};
+  return frame_index;
+}
+
+[[nodiscard]] std::atomic<u64>& snapshots_created_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& snapshots_reused_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& snapshot_copies_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& snapshot_bytes_copied_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
 [[nodiscard]] bool valid_metric(PerfMetric metric) noexcept {
   return static_cast<usize>(metric) < static_cast<usize>(PerfMetric::Count);
+}
+
+[[nodiscard]] u64 timestamp_microseconds() noexcept {
+  return static_cast<u64>(
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+void insert_worst_sample(std::span<PerfEventSample> out, usize& count, PerfEventSample sample) noexcept {
+  if (out.empty()) {
+    return;
+  }
+
+  if (count < out.size()) {
+    usize position = count;
+    while (position > 0U && out[position - 1U].duration_us < sample.duration_us) {
+      out[position] = out[position - 1U];
+      --position;
+    }
+    out[position] = sample;
+    ++count;
+    return;
+  }
+
+  if (out.back().duration_us >= sample.duration_us) {
+    return;
+  }
+
+  usize position = out.size() - 1U;
+  while (position > 0U && out[position - 1U].duration_us < sample.duration_us) {
+    out[position] = out[position - 1U];
+    --position;
+  }
+  out[position] = sample;
 }
 
 } // namespace
@@ -167,16 +364,34 @@ ThreadTimingHistograms& thread_timing_histograms() noexcept {
 }
 
 void record_thread_timing(PerfMetric metric, double milliseconds) noexcept {
+  record_thread_timing(metric, milliseconds, perf_metric_thread_category(metric), nullptr);
+}
+
+void record_thread_timing(
+    PerfMetric metric,
+    double milliseconds,
+    const char* thread_category,
+    const char* context) noexcept {
 #if !ARVANE_ENABLE_PROFILING
   (void)metric;
   (void)milliseconds;
+  (void)thread_category;
+  (void)context;
   return;
 #else
-  if (!valid_metric(metric)) {
+  if (!valid_metric(metric) || global_timing_paused()) {
     return;
   }
+  const u32 sample_us = clamp_to_microseconds(milliseconds);
   thread_timing_histograms().metrics[static_cast<usize>(metric)].record_ms(milliseconds);
   global_timing_histograms()[static_cast<usize>(metric)].record_ms(milliseconds);
+  global_worst_event_rings()[static_cast<usize>(metric)].record(
+      metric,
+      sample_us,
+      current_profile_frame_index(),
+      timestamp_microseconds(),
+      thread_category == nullptr ? perf_metric_thread_category(metric) : thread_category,
+      context);
 #endif
 }
 
@@ -194,16 +409,89 @@ TimingPercentiles thread_timing_percentiles(PerfMetric metric) noexcept {
 
 const char* perf_metric_name(PerfMetric metric) noexcept {
   switch (metric) {
+    case PerfMetric::FrameDelta:
+      return "Frame delta";
+    case PerfMetric::CpuFrameWork:
+      return "CPU frame work";
+    case PerfMetric::SimulationTick:
+      return "Simulation tick";
+    case PerfMetric::RenderSubmit:
+      return "Render submit";
+    case PerfMetric::GpuWaitTime:
+      return "GPU wait time";
+    case PerfMetric::GpuQueueTiming:
+      return "GPU queue timing";
+    case PerfMetric::SnapshotCreation:
+      return "Snapshot creation";
+    case PerfMetric::ChunkLookupAccess:
+      return "Chunk lookup / access";
     case PerfMetric::MeshingTask:
       return "Meshing tasks";
     case PerfMetric::LightingTask:
       return "Lighting tasks";
+    case PerfMetric::GenerationTask:
+      return "Chunk generation";
+    case PerfMetric::FluidTask:
+      return "Fluid simulation";
     case PerfMetric::JobQueueLatency:
       return "Job queue latency";
     case PerfMetric::Count:
       break;
   }
   return "Unknown";
+}
+
+const char* perf_metric_thread_category(PerfMetric metric) noexcept {
+  switch (metric) {
+    case PerfMetric::FrameDelta:
+    case PerfMetric::CpuFrameWork:
+      return "main/render";
+    case PerfMetric::SimulationTick:
+      return "main/world";
+    case PerfMetric::RenderSubmit:
+    case PerfMetric::GpuWaitTime:
+      return "main/render";
+    case PerfMetric::GpuQueueTiming:
+      return "GPU";
+    case PerfMetric::SnapshotCreation:
+    case PerfMetric::ChunkLookupAccess:
+      return "world";
+    case PerfMetric::MeshingTask:
+      return "worker/client";
+    case PerfMetric::LightingTask:
+    case PerfMetric::GenerationTask:
+    case PerfMetric::FluidTask:
+      return "worker/server";
+    case PerfMetric::JobQueueLatency:
+      return "worker";
+    case PerfMetric::Count:
+      break;
+  }
+  return "-";
+}
+
+PerfEventGroup perf_metric_group(PerfMetric metric) noexcept {
+  switch (metric) {
+    case PerfMetric::FrameDelta:
+    case PerfMetric::CpuFrameWork:
+    case PerfMetric::SimulationTick:
+    case PerfMetric::RenderSubmit:
+    case PerfMetric::GpuWaitTime:
+    case PerfMetric::GpuQueueTiming:
+      return PerfEventGroup::Frame;
+    case PerfMetric::MeshingTask:
+    case PerfMetric::LightingTask:
+    case PerfMetric::GenerationTask:
+    case PerfMetric::FluidTask:
+    case PerfMetric::JobQueueLatency:
+      return PerfEventGroup::Worker;
+    case PerfMetric::SnapshotCreation:
+    case PerfMetric::ChunkLookupAccess:
+      return PerfEventGroup::Zone;
+    case PerfMetric::Count:
+      break;
+  }
+  return PerfEventGroup::All;
 }
 
 TimingMetricSnapshot global_timing_snapshot(PerfMetric metric) noexcept {
@@ -218,16 +506,132 @@ TimingMetricSnapshot global_timing_snapshot(PerfMetric metric) noexcept {
 #endif
 }
 
+usize global_worst_event_samples(std::span<PerfEventSample> out, PerfEventGroup group) noexcept {
+#if !ARVANE_ENABLE_PROFILING
+  (void)out;
+  (void)group;
+  return 0U;
+#else
+  usize count = 0U;
+  for (u8 metric_index = 0; metric_index < static_cast<u8>(PerfMetric::Count); ++metric_index) {
+    const auto metric = static_cast<PerfMetric>(metric_index);
+    if (group != PerfEventGroup::All && perf_metric_group(metric) != group) {
+      continue;
+    }
+
+    const AtomicEventRing& ring = global_worst_event_rings()[metric_index];
+    const u32 sample_count = ring.sample_count();
+    for (u32 sample_index = 0; sample_index < sample_count; ++sample_index) {
+      PerfEventSample sample;
+      if (ring.sample(sample_index, sample)) {
+        insert_worst_sample(out, count, sample);
+      }
+    }
+  }
+  return count;
+#endif
+}
+
+void set_global_timing_paused(bool paused) noexcept {
+#if ARVANE_ENABLE_PROFILING
+  global_pause_flag().store(paused, std::memory_order_release);
+#else
+  (void)paused;
+#endif
+}
+
+bool global_timing_paused() noexcept {
+#if ARVANE_ENABLE_PROFILING
+  return global_pause_flag().load(std::memory_order_acquire);
+#else
+  return false;
+#endif
+}
+
+void set_current_profile_frame_index(u64 frame_index) noexcept {
+#if ARVANE_ENABLE_PROFILING
+  global_frame_index().store(frame_index, std::memory_order_release);
+#else
+  (void)frame_index;
+#endif
+}
+
+u64 current_profile_frame_index() noexcept {
+#if ARVANE_ENABLE_PROFILING
+  return global_frame_index().load(std::memory_order_acquire);
+#else
+  return 0U;
+#endif
+}
+
+void record_snapshot_created() noexcept {
+#if ARVANE_ENABLE_PROFILING
+  if (!global_timing_paused()) {
+    snapshots_created_total().fetch_add(1U, std::memory_order_relaxed);
+  }
+#endif
+}
+
+void record_snapshot_reused() noexcept {
+#if ARVANE_ENABLE_PROFILING
+  if (!global_timing_paused()) {
+    snapshots_reused_total().fetch_add(1U, std::memory_order_relaxed);
+  }
+#endif
+}
+
+void record_snapshot_copy(usize bytes) noexcept {
+#if ARVANE_ENABLE_PROFILING
+  if (!global_timing_paused()) {
+    snapshot_copies_total().fetch_add(1U, std::memory_order_relaxed);
+    snapshot_bytes_copied_total().fetch_add(static_cast<u64>(bytes), std::memory_order_relaxed);
+  }
+#else
+  (void)bytes;
+#endif
+}
+
+SnapshotCostSnapshot global_snapshot_cost_snapshot() noexcept {
+  SnapshotCostSnapshot snapshot;
+#if ARVANE_ENABLE_PROFILING
+  snapshot.snapshots_created_total =
+      snapshots_created_total().load(std::memory_order_relaxed);
+  snapshot.snapshots_reused_total =
+      snapshots_reused_total().load(std::memory_order_relaxed);
+  snapshot.snapshot_copies_total =
+      snapshot_copies_total().load(std::memory_order_relaxed);
+  snapshot.snapshot_bytes_copied_total =
+      snapshot_bytes_copied_total().load(std::memory_order_relaxed);
+#endif
+  return snapshot;
+}
+
 void reset_global_timing_stats() noexcept {
 #if ARVANE_ENABLE_PROFILING
   for (AtomicTimingHistogram& histogram : global_timing_histograms()) {
     histogram.clear();
   }
+  for (AtomicEventRing& ring : global_worst_event_rings()) {
+    ring.clear();
+  }
+  snapshots_created_total().store(0U, std::memory_order_relaxed);
+  snapshots_reused_total().store(0U, std::memory_order_relaxed);
+  snapshot_copies_total().store(0U, std::memory_order_relaxed);
+  snapshot_bytes_copied_total().store(0U, std::memory_order_relaxed);
 #endif
 }
 
 ScopedThreadTiming::ScopedThreadTiming(PerfMetric metric) noexcept
-    : metric_(metric) {
+    : ScopedThreadTiming(metric, perf_metric_thread_category(metric), nullptr) {
+}
+
+ScopedThreadTiming::ScopedThreadTiming(
+    PerfMetric metric,
+    const char* thread_category,
+    const char* context) noexcept
+    : metric_(metric),
+      thread_category_(thread_category),
+      context_(context) {
 #if ARVANE_ENABLE_PROFILING
   start_ = std::chrono::steady_clock::now();
 #endif
@@ -238,7 +642,9 @@ ScopedThreadTiming::~ScopedThreadTiming() {
   const auto end = std::chrono::steady_clock::now();
   record_thread_timing(
       metric_,
-      std::chrono::duration<double, std::milli>(end - start_).count());
+      std::chrono::duration<double, std::milli>(end - start_).count(),
+      thread_category_,
+      context_);
 #endif
 }
 

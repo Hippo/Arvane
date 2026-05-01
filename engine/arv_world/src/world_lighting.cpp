@@ -4,6 +4,8 @@
 #include "arv/core/profiling.hpp"
 #include "arv/world/world_runtime.hpp"
 
+#include <array>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -88,7 +90,18 @@ LightingResult WorldLighting::build_result(
     const LightingSnapshot& snapshot,
     const voxel::BlockRegistry& registry) {
   ARV_PROFILE_ZONE("Lighting propagation");
-  const core::ScopedThreadTiming timing{core::PerfMetric::LightingTask};
+  std::array<char, core::PerfEventContextCapacity> profile_context{};
+  if constexpr (core::perf_stats_enabled()) {
+    (void)std::snprintf(
+        profile_context.data(),
+        profile_context.size(),
+        "chunks=%zu",
+        snapshot.chunks.size());
+  }
+  const core::ScopedThreadTiming timing{
+      core::PerfMetric::LightingTask,
+      "worker/server",
+      profile_context.data()};
   LightingResult result;
   result.world_id = snapshot.world_id;
   result.source_revision = snapshot.source_revision;

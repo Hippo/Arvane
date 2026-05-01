@@ -1,7 +1,9 @@
 #include "arv/voxel/storage.hpp"
 
+#include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
+#include <cstdio>
 #include <utility>
 
 namespace arv::voxel {
@@ -21,6 +23,18 @@ namespace {
 
 [[nodiscard]] constexpr i32 wrapped_snapshot_local(i32 value) noexcept {
   return value < 0 ? ChunkSize - 1 : (value >= ChunkSize ? 0 : value);
+}
+
+void format_chunk_context(
+    std::array<char, core::PerfEventContextCapacity>& context,
+    ChunkCoord coord) noexcept {
+  (void)std::snprintf(
+      context.data(),
+      context.size(),
+      "section=(%d,%d,%d)",
+      coord.value.x,
+      coord.value.y,
+      coord.value.z);
 }
 
 [[nodiscard]] const ChunkStorage* snapshot_storage_for_local(
@@ -59,6 +73,7 @@ void ChunkSection::ensure_detached_storage() {
     return;
   }
 
+  core::record_snapshot_copy(sizeof(ChunkStorage));
   storage_ = clone_chunk_storage(*storage_);
 }
 
@@ -253,6 +268,16 @@ void ChunkSection::mark_mesh_ready(u64 source_block_version, u64 source_light_ve
 
 ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk) {
   ARV_PROFILE_ZONE("Snapshot creation");
+  std::array<char, core::PerfEventContextCapacity> profile_context{};
+  if constexpr (core::perf_stats_enabled()) {
+    format_chunk_context(profile_context, chunk.coord());
+  }
+  const core::ScopedThreadTiming timing{
+      core::PerfMetric::SnapshotCreation,
+      "world",
+      profile_context.data()};
+  core::record_snapshot_created();
+  core::record_snapshot_reused();
   ChunkSnapshot snapshot;
   snapshot.coord = chunk.coord();
   snapshot.source_version = chunk.block_version();

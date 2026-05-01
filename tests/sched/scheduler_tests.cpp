@@ -16,6 +16,26 @@ TEST(SchedulerTests, JobCompletesAndReturnsValue) {
   EXPECT_EQ(job.get(), 42);
 }
 
+TEST(SchedulerTests, PressureSnapshotTracksSubmittedAndCompletedJobs) {
+  arv::sched::Scheduler scheduler(1);
+
+  auto job = scheduler.submit("tracked_job", [] {
+    return 7;
+  });
+
+  EXPECT_EQ(job.get(), 7);
+  scheduler.wait_for_all();
+
+  const arv::sched::SchedulerPressureSnapshot snapshot =
+      scheduler.pressure_snapshot();
+  EXPECT_EQ(snapshot.worker_count, 1U);
+  EXPECT_GE(snapshot.submitted_jobs_total, 1U);
+  EXPECT_GE(snapshot.completed_jobs_total, 1U);
+  EXPECT_EQ(snapshot.current_queued_jobs, 0U);
+  EXPECT_EQ(snapshot.active_workers, 0U);
+  EXPECT_EQ(snapshot.idle_workers, 1U);
+}
+
 TEST(SchedulerTests, CompletionQueuePublishesWorkerResult) {
   arv::sched::Scheduler scheduler(1);
   arv::sched::CompletionQueue<int> completions;

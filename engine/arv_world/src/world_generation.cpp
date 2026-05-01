@@ -1,8 +1,11 @@
 #include "arv/world/world_generation.hpp"
 
+#include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <optional>
 #include <utility>
 
@@ -287,6 +290,20 @@ voxel::BlockVariantID choose_surface_block(
 
 GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
   ARV_PROFILE_ZONE("Chunk generation");
+  std::array<char, core::PerfEventContextCapacity> profile_context{};
+  if constexpr (core::perf_stats_enabled()) {
+    (void)std::snprintf(
+        profile_context.data(),
+        profile_context.size(),
+        "chunk=(%d,%d,%d)",
+        request.coord.value.x,
+        request.coord.value.y,
+        request.coord.value.z);
+  }
+  const core::ScopedThreadTiming timing{
+      core::PerfMetric::GenerationTask,
+      "worker/server",
+      profile_context.data()};
   if (request.palette.surface_layers.empty()) {
     return GeneratedChunkResult::failure({"chunk generation request has no resolved surface layers"});
   }

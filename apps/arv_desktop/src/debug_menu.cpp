@@ -138,24 +138,132 @@ void clear_profile_frame_samples(DebugMenuState& state) noexcept {
   state.profile_frame_sample_count = 0;
 }
 
+void clear_queue_profile(DebugMenuState::QueueProfileState& queue) noexcept {
+  queue.previous_submitted_jobs = 0;
+  queue.previous_completed_jobs = 0;
+  queue.current_queued_jobs = 0;
+  queue.peak_queued_jobs_window = 0;
+  queue.submitted_jobs_this_frame = 0;
+  queue.completed_jobs_this_frame = 0;
+  queue.active_workers = 0;
+  queue.idle_workers = 0;
+  queue.idle_percent = 0.0;
+  queue.backlog_growing = false;
+  queue.queued_history_index = 0;
+  queue.queued_history_count = 0;
+  queue.queued_history.fill(0U);
+}
+
+void clear_snapshot_profile(DebugMenuState& state) noexcept {
+  state.snapshot_created_this_frame = 0;
+  state.snapshot_reused_this_frame = 0;
+  state.snapshot_copies_this_frame = 0;
+  state.snapshot_bytes_copied_this_frame = 0;
+  state.peak_snapshot_bytes_copied_window = 0;
+  state.previous_snapshots_created_total = 0;
+  state.previous_snapshots_reused_total = 0;
+  state.previous_snapshot_copies_total = 0;
+  state.previous_snapshot_bytes_copied_total = 0;
+  state.snapshot_bytes_history_index = 0;
+  state.snapshot_bytes_history_count = 0;
+  state.snapshot_bytes_history.fill(0U);
+}
+
+[[nodiscard]] u32 delta_u64_to_u32(u64 current, u64 previous) noexcept {
+  const u64 delta = current >= previous ? current - previous : current;
+  return delta > static_cast<u64>(~u32{0}) ? ~u32{0} : static_cast<u32>(delta);
+}
+
+void record_queue_profile_sample(
+    DebugMenuState::QueueProfileState& queue,
+    const sched::SchedulerPressureSnapshot& snapshot) noexcept {
+  const u32 previous_queued = queue.current_queued_jobs;
+  queue.current_queued_jobs = snapshot.current_queued_jobs;
+  queue.submitted_jobs_this_frame =
+      delta_u64_to_u32(snapshot.submitted_jobs_total, queue.previous_submitted_jobs);
+  queue.completed_jobs_this_frame =
+      delta_u64_to_u32(snapshot.completed_jobs_total, queue.previous_completed_jobs);
+  queue.previous_submitted_jobs = snapshot.submitted_jobs_total;
+  queue.previous_completed_jobs = snapshot.completed_jobs_total;
+  queue.active_workers = snapshot.active_workers;
+  queue.idle_workers = snapshot.idle_workers;
+  queue.idle_percent = snapshot.idle_percent;
+  queue.backlog_growing = snapshot.current_queued_jobs > previous_queued;
+
+  constexpr u32 Capacity =
+      static_cast<u32>(DebugMenuState::ProfileFrameHistoryCapacity);
+  queue.queued_history[queue.queued_history_index] = snapshot.current_queued_jobs;
+  queue.queued_history_index = (queue.queued_history_index + 1U) % Capacity;
+  if (queue.queued_history_count < Capacity) {
+    ++queue.queued_history_count;
+  }
+  queue.peak_queued_jobs_window = snapshot.current_queued_jobs;
+  for (u32 index = 0; index < queue.queued_history_count; ++index) {
+    queue.peak_queued_jobs_window =
+        std::max(queue.peak_queued_jobs_window, queue.queued_history[index]);
+  }
+}
+
+void record_snapshot_profile_sample(DebugMenuState& state) noexcept {
+  const core::SnapshotCostSnapshot snapshot = core::global_snapshot_cost_snapshot();
+  state.snapshot_created_this_frame =
+      delta_u64_to_u32(snapshot.snapshots_created_total, state.previous_snapshots_created_total);
+  state.snapshot_reused_this_frame =
+      delta_u64_to_u32(snapshot.snapshots_reused_total, state.previous_snapshots_reused_total);
+  state.snapshot_copies_this_frame =
+      delta_u64_to_u32(snapshot.snapshot_copies_total, state.previous_snapshot_copies_total);
+  state.snapshot_bytes_copied_this_frame =
+      snapshot.snapshot_bytes_copied_total >= state.previous_snapshot_bytes_copied_total
+          ? snapshot.snapshot_bytes_copied_total - state.previous_snapshot_bytes_copied_total
+          : snapshot.snapshot_bytes_copied_total;
+  state.previous_snapshots_created_total = snapshot.snapshots_created_total;
+  state.previous_snapshots_reused_total = snapshot.snapshots_reused_total;
+  state.previous_snapshot_copies_total = snapshot.snapshot_copies_total;
+  state.previous_snapshot_bytes_copied_total = snapshot.snapshot_bytes_copied_total;
+
+  constexpr u32 Capacity =
+      static_cast<u32>(DebugMenuState::ProfileFrameHistoryCapacity);
+  state.snapshot_bytes_history[state.snapshot_bytes_history_index] =
+      state.snapshot_bytes_copied_this_frame;
+  state.snapshot_bytes_history_index = (state.snapshot_bytes_history_index + 1U) % Capacity;
+  if (state.snapshot_bytes_history_count < Capacity) {
+    ++state.snapshot_bytes_history_count;
+  }
+  state.peak_snapshot_bytes_copied_window = state.snapshot_bytes_copied_this_frame;
+  for (u32 index = 0; index < state.snapshot_bytes_history_count; ++index) {
+    state.peak_snapshot_bytes_copied_window =
+        std::max(state.peak_snapshot_bytes_copied_window, state.snapshot_bytes_history[index]);
+  }
+}
+
 [[nodiscard]] core::TimingPercentiles frame_percentiles(
     const std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity>& samples,
-    u32 sample_count) {
+    u32 sample_index,
+    u32 sample_count,
+    u32 requested_window) {
   core::TimingPercentiles result;
-  result.sample_count = sample_count;
-  if (sample_count == 0U) {
+  constexpr u32 Capacity =
+      static_cast<u32>(DebugMenuState::ProfileFrameHistoryCapacity);
+  const u32 stored_count = std::min<u32>(sample_count, Capacity);
+  const u32 window_count = std::min<u32>(stored_count, requested_window);
+  result.sample_count = window_count;
+  if (window_count == 0U) {
     return result;
   }
 
   std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity> sorted{};
-  for (u32 index = 0; index < sample_count; ++index) {
-    sorted[index] = samples[index];
+  const u32 oldest = stored_count == Capacity ? sample_index : 0U;
+  const u32 first_recent_offset = stored_count - window_count;
+  for (u32 index = 0; index < window_count; ++index) {
+    const u32 sample_slot =
+        (oldest + first_recent_offset + index) % Capacity;
+    sorted[index] = samples[sample_slot];
   }
-  std::sort(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(sample_count));
+  std::sort(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(window_count));
 
   auto percentile_value = [&](u32 percentile) {
     const u32 rank = static_cast<u32>(
-        (static_cast<u64>(sample_count - 1U) * static_cast<u64>(percentile) + 99ULL) /
+        (static_cast<u64>(window_count - 1U) * static_cast<u64>(percentile) + 99ULL) /
         100ULL);
     return static_cast<double>(sorted[rank]);
   };
@@ -201,6 +309,146 @@ void render_percentile_cells(
   ImGui::Text("%.3f ms", percentiles.p95_ms);
   ImGui::TableNextColumn();
   ImGui::Text("%.3f ms", percentiles.p99_ms);
+}
+
+[[nodiscard]] u32 collect_frame_window(
+    const std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity>& samples,
+    u32 sample_index,
+    u32 sample_count,
+    u32 requested_window,
+    std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity>& out) noexcept {
+  constexpr u32 Capacity =
+      static_cast<u32>(DebugMenuState::ProfileFrameHistoryCapacity);
+  const u32 stored_count = std::min<u32>(sample_count, Capacity);
+  const u32 window_count = std::min<u32>(stored_count, requested_window);
+  if (window_count == 0U) {
+    return 0U;
+  }
+
+  const u32 oldest = stored_count == Capacity ? sample_index : 0U;
+  const u32 first_recent_offset = stored_count - window_count;
+  for (u32 index = 0; index < window_count; ++index) {
+    const u32 sample_slot =
+        (oldest + first_recent_offset + index) % Capacity;
+    out[index] = samples[sample_slot];
+  }
+  return window_count;
+}
+
+[[nodiscard]] ImVec4 severity_color(core::PerfMetric metric, double milliseconds) noexcept {
+  const ImVec4 green{0.45F, 0.86F, 0.52F, 1.0F};
+  const ImVec4 yellow{1.0F, 0.78F, 0.28F, 1.0F};
+  const ImVec4 red{1.0F, 0.36F, 0.32F, 1.0F};
+
+  switch (metric) {
+    case core::PerfMetric::FrameDelta:
+    case core::PerfMetric::CpuFrameWork:
+    case core::PerfMetric::SimulationTick:
+    case core::PerfMetric::RenderSubmit:
+    case core::PerfMetric::GpuWaitTime:
+      if (milliseconds > 16.6) {
+        return red;
+      }
+      if (milliseconds > 8.0) {
+        return yellow;
+      }
+      return green;
+    case core::PerfMetric::JobQueueLatency:
+      if (milliseconds > 4.0) {
+        return red;
+      }
+      if (milliseconds > 1.0) {
+        return yellow;
+      }
+      return green;
+    case core::PerfMetric::MeshingTask:
+    case core::PerfMetric::LightingTask:
+    case core::PerfMetric::GenerationTask:
+    case core::PerfMetric::FluidTask:
+    case core::PerfMetric::SnapshotCreation:
+    case core::PerfMetric::ChunkLookupAccess:
+      if (milliseconds > 8.0) {
+        return red;
+      }
+      if (milliseconds > 2.0) {
+        return yellow;
+      }
+      return green;
+    case core::PerfMetric::GpuQueueTiming:
+    case core::PerfMetric::Count:
+      break;
+  }
+  return green;
+}
+
+void render_ms_cell(core::PerfMetric metric, double milliseconds) {
+  ImGui::TextColored(severity_color(metric, milliseconds), "%.3f ms", milliseconds);
+}
+
+void render_u32_cell(u32 value, bool warning, bool danger = false) {
+  if (danger) {
+    ImGui::TextColored(ImVec4{1.0F, 0.36F, 0.32F, 1.0F}, "%u", value);
+  } else if (warning) {
+    ImGui::TextColored(ImVec4{1.0F, 0.78F, 0.28F, 1.0F}, "%u", value);
+  } else {
+    ImGui::Text("%u", value);
+  }
+}
+
+void render_timing_histogram(
+    const char* label,
+    const std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity>& samples,
+    u32 sample_count) {
+  struct Bucket {
+    const char* label;
+    f32 min_ms;
+    f32 max_ms;
+  };
+  constexpr std::array<Bucket, 7> Buckets{{
+      {"< 0.25 ms", 0.0F, 0.25F},
+      {"0.25 - 0.5 ms", 0.25F, 0.5F},
+      {"0.5 - 1 ms", 0.5F, 1.0F},
+      {"1 - 2 ms", 1.0F, 2.0F},
+      {"2 - 5 ms", 2.0F, 5.0F},
+      {"5 - 10 ms", 5.0F, 10.0F},
+      {"> 10 ms", 10.0F, 60000.0F},
+  }};
+  std::array<u32, Buckets.size()> counts{};
+  for (u32 index = 0; index < sample_count; ++index) {
+    const f32 sample = samples[index];
+    for (usize bucket_index = 0; bucket_index < Buckets.size(); ++bucket_index) {
+      const Bucket& bucket = Buckets[bucket_index];
+      if (sample >= bucket.min_ms && sample < bucket.max_ms) {
+        ++counts[bucket_index];
+        break;
+      }
+    }
+  }
+
+  ImGui::TextUnformatted(label);
+  if (ImGui::BeginTable(
+          label,
+          3,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Bucket", ImGuiTableColumnFlags_WidthFixed, 110.0F);
+    ImGui::TableSetupColumn("Count", ImGuiTableColumnFlags_WidthFixed, 70.0F);
+    ImGui::TableSetupColumn("Share");
+    ImGui::TableHeadersRow();
+    for (usize bucket_index = 0; bucket_index < Buckets.size(); ++bucket_index) {
+      const float fraction = sample_count == 0U
+                                 ? 0.0F
+                                 : static_cast<float>(counts[bucket_index]) /
+                                       static_cast<float>(sample_count);
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(Buckets[bucket_index].label);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", counts[bucket_index]);
+      ImGui::TableNextColumn();
+      ImGui::ProgressBar(fraction, ImVec2{-1.0F, 0.0F});
+    }
+    ImGui::EndTable();
+  }
 }
 
 void render_player_tab(
@@ -586,12 +834,333 @@ void render_performance_tab(
   ImGui::Text("Draw calls last frame: %u", renderer.draw_calls_last_frame());
   ImGui::Text("Chunk draw calls last frame: %u", renderer.chunk_draw_calls_last_frame());
   ImGui::Text("UI draw calls last frame: %u", renderer.ui_draw_calls_last_frame());
+  ImGui::Text(
+      "Submitted: %llu vertices, %llu triangles",
+      static_cast<unsigned long long>(renderer.vertices_submitted_last_frame()),
+      static_cast<unsigned long long>(renderer.triangles_submitted_last_frame()));
+  ImGui::Text(
+      "GPU buffer uploads: %u (%llu bytes)",
+      renderer.gpu_buffer_uploads_last_frame(),
+      static_cast<unsigned long long>(renderer.gpu_buffer_upload_bytes_last_frame()));
+  ImGui::Text(
+      "Texture uploads: %u (%llu bytes)",
+      renderer.texture_uploads_last_frame(),
+      static_cast<unsigned long long>(renderer.texture_upload_bytes_last_frame()));
+}
+
+void render_frame_breakdown(DebugMenuState& state, const DebugMenuFrameInfo& frame_info) {
+  const u32 requested_window = static_cast<u32>(std::clamp(
+      state.profile_frame_window_size,
+      1,
+      static_cast<int>(DebugMenuState::ProfileFrameHistoryCapacity)));
+  const core::TimingPercentiles frame_delta = frame_percentiles(
+      state.profile_frame_delta_ms,
+      state.profile_frame_sample_index,
+      state.profile_frame_sample_count,
+      requested_window);
+  const core::TimingPercentiles frame_work = frame_percentiles(
+      state.profile_frame_work_ms,
+      state.profile_frame_sample_index,
+      state.profile_frame_sample_count,
+      requested_window);
+
+  struct BreakdownLine {
+    core::PerfMetric metric;
+    const core::TimingPercentiles* local_percentiles;
+    double local_latest_ms;
+  };
+  const std::array<BreakdownLine, 8> lines{{
+      {core::PerfMetric::FrameDelta, &frame_delta, frame_info.frame_delta_ms},
+      {core::PerfMetric::CpuFrameWork, &frame_work, frame_info.frame_work_ms},
+      {core::PerfMetric::SimulationTick, nullptr, 0.0},
+      {core::PerfMetric::RenderSubmit, nullptr, 0.0},
+      {core::PerfMetric::GpuWaitTime, nullptr, 0.0},
+      {core::PerfMetric::GpuQueueTiming, nullptr, 0.0},
+      {core::PerfMetric::SnapshotCreation, nullptr, 0.0},
+      {core::PerfMetric::ChunkLookupAccess, nullptr, 0.0},
+  }};
+
+  ImGui::SeparatorText("Frame Breakdown");
+  if (ImGui::BeginTable(
+          "FrameBreakdown",
+          7,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Metric");
+    ImGui::TableSetupColumn("Samples", ImGuiTableColumnFlags_WidthFixed, 70.0F);
+    ImGui::TableSetupColumn("Latest", ImGuiTableColumnFlags_WidthFixed, 90.0F);
+    ImGui::TableSetupColumn("P50", ImGuiTableColumnFlags_WidthFixed, 80.0F);
+    ImGui::TableSetupColumn("P95", ImGuiTableColumnFlags_WidthFixed, 80.0F);
+    ImGui::TableSetupColumn("P99", ImGuiTableColumnFlags_WidthFixed, 80.0F);
+    ImGui::TableSetupColumn("Timeline");
+    ImGui::TableHeadersRow();
+    for (const BreakdownLine& line : lines) {
+      core::TimingMetricSnapshot snapshot{};
+      core::TimingPercentiles percentiles{};
+      double latest_ms = line.local_latest_ms;
+      if (line.local_percentiles != nullptr) {
+        percentiles = *line.local_percentiles;
+      } else {
+        snapshot = core::global_timing_snapshot(line.metric);
+        percentiles = snapshot.percentiles;
+        latest_ms = snapshot.latest_ms;
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(core::perf_metric_name(line.metric));
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", percentiles.sample_count);
+      ImGui::TableNextColumn();
+      render_ms_cell(line.metric, latest_ms);
+      ImGui::TableNextColumn();
+      ImGui::Text("%.3f", percentiles.p50_ms);
+      ImGui::TableNextColumn();
+      ImGui::Text("%.3f", percentiles.p95_ms);
+      ImGui::TableNextColumn();
+      ImGui::Text("%.3f", percentiles.p99_ms);
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(core::perf_metric_thread_category(line.metric));
+    }
+    ImGui::EndTable();
+  }
+}
+
+void render_worst_events(
+    const char* title,
+    core::PerfEventGroup group,
+    int max_rows) {
+  ImGui::SeparatorText(title);
+  std::array<core::PerfEventSample, 64> samples{};
+  const usize count = core::global_worst_event_samples(samples, group);
+  if (count == 0U) {
+    ImGui::TextUnformatted("No samples recorded yet.");
+    return;
+  }
+
+  const usize rows = std::min<usize>(static_cast<usize>(std::max(max_rows, 1)), count);
+  if (ImGui::BeginTable(
+          title,
+          5,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Metric");
+    ImGui::TableSetupColumn("Duration", ImGuiTableColumnFlags_WidthFixed, 96.0F);
+    ImGui::TableSetupColumn("Frame", ImGuiTableColumnFlags_WidthFixed, 74.0F);
+    ImGui::TableSetupColumn("Thread / Timeline", ImGuiTableColumnFlags_WidthFixed, 130.0F);
+    ImGui::TableSetupColumn("Context");
+    ImGui::TableHeadersRow();
+    for (usize index = 0; index < rows; ++index) {
+      const core::PerfEventSample& sample = samples[index];
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(core::perf_metric_name(sample.metric));
+      ImGui::TableNextColumn();
+      render_ms_cell(sample.metric, sample.duration_ms());
+      ImGui::TableNextColumn();
+      ImGui::Text("%llu", static_cast<unsigned long long>(sample.frame_index));
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(sample.thread[0] == '\0' ? "-" : sample.thread.data());
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(sample.context[0] == '\0' ? "-" : sample.context.data());
+    }
+    ImGui::EndTable();
+  }
+}
+
+void render_queue_pressure(
+    const DebugMenuState& state,
+    const sched::Scheduler& client_jobs,
+    const server::ServerRuntime& server) {
+  (void)client_jobs;
+  ImGui::SeparatorText("Queue Pressure");
+  if (ImGui::BeginTable(
+          "QueuePressure",
+          8,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Queue");
+    ImGui::TableSetupColumn("Queued", ImGuiTableColumnFlags_WidthFixed, 70.0F);
+    ImGui::TableSetupColumn("Peak", ImGuiTableColumnFlags_WidthFixed, 70.0F);
+    ImGui::TableSetupColumn("Submitted", ImGuiTableColumnFlags_WidthFixed, 78.0F);
+    ImGui::TableSetupColumn("Completed", ImGuiTableColumnFlags_WidthFixed, 78.0F);
+    ImGui::TableSetupColumn("Active", ImGuiTableColumnFlags_WidthFixed, 64.0F);
+    ImGui::TableSetupColumn("Idle", ImGuiTableColumnFlags_WidthFixed, 64.0F);
+    ImGui::TableSetupColumn("Idle %", ImGuiTableColumnFlags_WidthFixed, 70.0F);
+    ImGui::TableHeadersRow();
+
+    auto row = [](const char* label, const DebugMenuState::QueueProfileState& queue) {
+      const bool warning = queue.peak_queued_jobs_window > 0U;
+      const bool danger = queue.backlog_growing && queue.current_queued_jobs > 0U;
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      render_u32_cell(queue.current_queued_jobs, warning, danger);
+      ImGui::TableNextColumn();
+      render_u32_cell(queue.peak_queued_jobs_window, warning, danger);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", queue.submitted_jobs_this_frame);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", queue.completed_jobs_this_frame);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", queue.active_workers);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", queue.idle_workers);
+      ImGui::TableNextColumn();
+      ImGui::Text("%.0f%%", queue.idle_percent);
+    };
+
+    row("server_world", state.server_queue_profile);
+    row("client_chunk_meshing", state.client_queue_profile);
+    ImGui::EndTable();
+  }
+
+  ImGui::Text(
+      "Server jobs: generation=%zu lighting=%zu fluids=%zu",
+      server.pending_generation_job_count(),
+      server.pending_lighting_job_count(),
+      server.pending_fluid_job_count());
+}
+
+void render_chunk_workload(
+    const DebugMenuFrameInfo& frame_info,
+    const server::ServerRuntime& server,
+    const render::OpenGLRenderer& renderer,
+    const ChunkViewState& chunk_view) {
+  const world::ChunkWorkloadSnapshot workload =
+      server.voxel_world().chunk_workload_snapshot();
+  ImGui::SeparatorText("Chunk Workload");
+  if (ImGui::BeginTable(
+          "ChunkWorkload",
+          3,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Counter");
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 110.0F);
+    ImGui::TableSetupColumn("Source");
+    ImGui::TableHeadersRow();
+    auto row = [](const char* label, usize value, const char* source, bool warn = false) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      if (warn && value > 0U) {
+        ImGui::TextColored(
+            ImVec4{1.0F, 0.78F, 0.28F, 1.0F},
+            "%zu",
+            value);
+      } else {
+        ImGui::Text("%zu", value);
+      }
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(source);
+    };
+    row("Loaded chunks", workload.loaded_chunks, "world lifecycle");
+    row("Active / simulated chunks", workload.active_chunks, "world lifecycle");
+    row("Visible / renderable chunks", frame_info.visible_chunk_count, "client chunk view");
+    row(
+        "Chunks awaiting generation",
+        workload.chunks_awaiting_generation + server.pending_generation_job_count(),
+        "world/server jobs",
+        true);
+    row(
+        "Sections awaiting lighting",
+        workload.chunk_sections_awaiting_lighting + server.pending_lighting_job_count(),
+        "world/server jobs",
+        true);
+    row(
+        "Dirty mesh sections",
+        workload.chunk_sections_awaiting_meshing,
+        "world dirty queue",
+        true);
+    row("Mesh candidates", chunk_view.mesh_candidates.size(), "client chunk view", true);
+    row("Mesh jobs in flight", chunk_view.pending_meshes.size(), "client workers", true);
+    row("Mesh uploads pending", renderer.pending_mesh_upload_count(), "renderer", true);
+    ImGui::EndTable();
+  }
+}
+
+void render_snapshot_costs(const DebugMenuState& state) {
+  ImGui::SeparatorText("Snapshot Costs");
+  if (ImGui::BeginTable(
+          "SnapshotCosts",
+          2,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Counter");
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 150.0F);
+    ImGui::TableHeadersRow();
+    auto row_u32 = [](const char* label, u32 value) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", value);
+    };
+    auto row_u64 = [](const char* label, u64 value, bool warn = false) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      if (warn && value > 0U) {
+        ImGui::TextColored(
+            ImVec4{1.0F, 0.78F, 0.28F, 1.0F},
+            "%llu",
+            static_cast<unsigned long long>(value));
+      } else {
+        ImGui::Text("%llu", static_cast<unsigned long long>(value));
+      }
+    };
+    row_u32("Snapshots created this frame", state.snapshot_created_this_frame);
+    row_u32("Snapshots reused this frame", state.snapshot_reused_this_frame);
+    row_u32("Snapshot copies this frame", state.snapshot_copies_this_frame);
+    row_u64("Snapshot bytes copied this frame", state.snapshot_bytes_copied_this_frame, true);
+    row_u64("Peak bytes copied in window", state.peak_snapshot_bytes_copied_window, true);
+    ImGui::EndTable();
+  }
+}
+
+void render_gpu_render_metrics(const render::OpenGLRenderer& renderer) {
+  ImGui::SeparatorText("GPU / Render Metrics");
+  if (ImGui::BeginTable(
+          "GpuRenderMetrics",
+          2,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Metric");
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 150.0F);
+    ImGui::TableHeadersRow();
+    auto row_u32 = [](const char* label, u32 value) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", value);
+    };
+    auto row_u64 = [](const char* label, u64 value) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      ImGui::Text("%llu", static_cast<unsigned long long>(value));
+    };
+    row_u32("Draw calls", renderer.draw_calls_last_frame());
+    row_u32("Chunk draw calls", renderer.chunk_draw_calls_last_frame());
+    row_u32("UI draw calls", renderer.ui_draw_calls_last_frame());
+    row_u64("Vertices submitted", renderer.vertices_submitted_last_frame());
+    row_u64("Triangles submitted", renderer.triangles_submitted_last_frame());
+    row_u32("GPU buffer uploads", renderer.gpu_buffer_uploads_last_frame());
+    row_u64("GPU buffer upload bytes", renderer.gpu_buffer_upload_bytes_last_frame());
+    row_u32("Texture / atlas uploads", renderer.texture_uploads_last_frame());
+    row_u64("Texture / atlas bytes", renderer.texture_upload_bytes_last_frame());
+    row_u32("Mesh uploads", renderer.mesh_uploads_last_frame());
+    row_u64("Pending mesh uploads", renderer.pending_mesh_upload_count());
+    ImGui::EndTable();
+  }
 }
 
 void render_profiling_tab(
     DebugMenuState& state,
     const DebugMenuFrameInfo& frame_info,
-    const render::OpenGLRenderer& renderer) {
+    server::ServerRuntime& server,
+    sched::Scheduler& world_jobs,
+    const render::OpenGLRenderer& renderer,
+    const ChunkViewState& chunk_view) {
   ImGui::SeparatorText("Tracy");
   ImGui::Text(
       "Engine profiling: %s",
@@ -612,55 +1181,90 @@ void render_profiling_tab(
         "Build with -DARVANE_ENABLE_TRACY=ON to emit Tracy zones.");
   }
 
-  ImGui::Checkbox("Pause frame sampling", &state.profile_sampling_paused);
+  ImGui::Checkbox("Pause sampling", &state.profile_sampling_paused);
   ImGui::SameLine();
   if (ImGui::Button("Reset timing stats")) {
     core::reset_global_timing_stats();
     clear_profile_frame_samples(state);
+    clear_queue_profile(state.server_queue_profile);
+    clear_queue_profile(state.client_queue_profile);
+    clear_snapshot_profile(state);
+    if (sched::Scheduler* scheduler = server.world_scheduler(); scheduler != nullptr) {
+      scheduler->reset_pressure_stats();
+    }
+    world_jobs.reset_pressure_stats();
   }
+  ImGui::SliderInt(
+      "Rolling samples",
+      &state.profile_frame_window_size,
+      30,
+      static_cast<int>(DebugMenuState::ProfileFrameHistoryCapacity));
+  ImGui::SliderInt("Max event rows", &state.profile_max_event_rows, 4, 32);
 
   ImGui::SeparatorText("Frame timeline");
   if (state.profile_frame_sample_count == 0U) {
     ImGui::TextUnformatted("No frame samples recorded yet.");
   } else {
-    constexpr u32 Capacity =
-        static_cast<u32>(DebugMenuState::ProfileFrameHistoryCapacity);
-    const int sample_count = static_cast<int>(state.profile_frame_sample_count);
-    const int plot_offset = state.profile_frame_sample_count == Capacity
-                                ? static_cast<int>(state.profile_frame_sample_index)
-                                : 0;
+    std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity> plot_samples{};
+    const u32 requested_window = static_cast<u32>(std::clamp(
+        state.profile_frame_window_size,
+        1,
+        static_cast<int>(DebugMenuState::ProfileFrameHistoryCapacity)));
+    u32 sample_count = collect_frame_window(
+        state.profile_frame_delta_ms,
+        state.profile_frame_sample_index,
+        state.profile_frame_sample_count,
+        requested_window,
+        plot_samples);
     ImGui::PlotLines(
         "Frame delta",
-        state.profile_frame_delta_ms.data(),
-        sample_count,
-        plot_offset,
+        plot_samples.data(),
+        static_cast<int>(sample_count),
+        0,
         nullptr,
         0.0F,
         50.0F,
         ImVec2{0.0F, 58.0F});
+    sample_count = collect_frame_window(
+        state.profile_frame_work_ms,
+        state.profile_frame_sample_index,
+        state.profile_frame_sample_count,
+        requested_window,
+        plot_samples);
     ImGui::PlotLines(
         "CPU frame work",
-        state.profile_frame_work_ms.data(),
-        sample_count,
-        plot_offset,
+        plot_samples.data(),
+        static_cast<int>(sample_count),
+        0,
         nullptr,
         0.0F,
         50.0F,
         ImVec2{0.0F, 58.0F});
   }
 
-  const core::TimingPercentiles frame_delta =
-      frame_percentiles(state.profile_frame_delta_ms, state.profile_frame_sample_count);
-  const core::TimingPercentiles frame_work =
-      frame_percentiles(state.profile_frame_work_ms, state.profile_frame_sample_count);
-  if (ImGui::BeginTable(
-          "FrameTimingPercentiles",
-          6,
-          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-    render_percentile_header(false);
-    render_percentile_cells("Frame delta", frame_delta, frame_info.frame_delta_ms, std::nullopt);
-    render_percentile_cells("CPU frame work", frame_work, frame_info.frame_work_ms, std::nullopt);
-    ImGui::EndTable();
+  render_frame_breakdown(state, frame_info);
+
+  if (state.profile_frame_sample_count > 0U) {
+    std::array<f32, DebugMenuState::ProfileFrameHistoryCapacity> histogram_samples{};
+    const u32 requested_window = static_cast<u32>(std::clamp(
+        state.profile_frame_window_size,
+        1,
+        static_cast<int>(DebugMenuState::ProfileFrameHistoryCapacity)));
+    u32 histogram_count = collect_frame_window(
+        state.profile_frame_delta_ms,
+        state.profile_frame_sample_index,
+        state.profile_frame_sample_count,
+        requested_window,
+        histogram_samples);
+    ImGui::SeparatorText("Timing Distribution");
+    render_timing_histogram("Frame delta histogram", histogram_samples, histogram_count);
+    histogram_count = collect_frame_window(
+        state.profile_frame_work_ms,
+        state.profile_frame_sample_index,
+        state.profile_frame_sample_count,
+        requested_window,
+        histogram_samples);
+    render_timing_histogram("CPU frame work histogram", histogram_samples, histogram_count);
   }
 
   ImGui::SeparatorText("Worker timing");
@@ -672,6 +1276,9 @@ void render_profiling_tab(
     for (u8 metric_index = 0; metric_index < static_cast<u8>(core::PerfMetric::Count);
          ++metric_index) {
       const auto metric = static_cast<core::PerfMetric>(metric_index);
+      if (core::perf_metric_group(metric) != core::PerfEventGroup::Worker) {
+        continue;
+      }
       const core::TimingMetricSnapshot snapshot = core::global_timing_snapshot(metric);
       render_percentile_cells(
           core::perf_metric_name(metric),
@@ -681,6 +1288,24 @@ void render_profiling_tab(
     }
     ImGui::EndTable();
   }
+
+  render_worst_events(
+      "Worst Frame Samples",
+      core::PerfEventGroup::Frame,
+      state.profile_max_event_rows);
+  render_worst_events(
+      "Worst Worker Jobs",
+      core::PerfEventGroup::Worker,
+      state.profile_max_event_rows);
+  render_worst_events(
+      "Worst Zone Samples",
+      core::PerfEventGroup::Zone,
+      state.profile_max_event_rows);
+
+  render_queue_pressure(state, world_jobs, server);
+  render_chunk_workload(frame_info, server, renderer, chunk_view);
+  render_snapshot_costs(state);
+  render_gpu_render_metrics(renderer);
 
   ImGui::SeparatorText("Zone coverage");
   struct ZoneLine {
@@ -750,10 +1375,23 @@ DebugMenuResult render_debug_menu(
     client::ClientRuntime& client,
     const player::ItemRegistry& item_registry,
     const entity::EntityRegistry& entity_registry,
-    const sched::Scheduler& world_jobs,
-    const render::OpenGLRenderer& renderer) {
+    sched::Scheduler& world_jobs,
+    const render::OpenGLRenderer& renderer,
+    const ChunkViewState& chunk_view) {
   DebugMenuResult result;
+  core::set_global_timing_paused(state.profile_sampling_paused);
   record_profile_frame_sample(state, frame_info);
+  if (core::profiling_enabled() && !state.profile_sampling_paused) {
+    if (const sched::Scheduler* scheduler = server.world_scheduler(); scheduler != nullptr) {
+      record_queue_profile_sample(
+          state.server_queue_profile,
+          scheduler->pressure_snapshot());
+    }
+    record_queue_profile_sample(
+        state.client_queue_profile,
+        world_jobs.pressure_snapshot());
+    record_snapshot_profile_sample(state);
+  }
   if (!state.open) {
     return result;
   }
@@ -799,7 +1437,7 @@ DebugMenuResult render_debug_menu(
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Profiling")) {
-      render_profiling_tab(state, frame_info, renderer);
+      render_profiling_tab(state, frame_info, server, world_jobs, renderer, chunk_view);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Console")) {

@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -155,4 +156,64 @@ TEST(CoreTypesTests, GlobalTimingStatsExposeRecordedPercentiles) {
   const arv::core::TimingMetricSnapshot cleared =
       arv::core::global_timing_snapshot(arv::core::PerfMetric::MeshingTask);
   EXPECT_EQ(cleared.percentiles.sample_count, 0U);
+}
+
+TEST(CoreTypesTests, WorstEventSamplesKeepBoundedSlowestRecentEvents) {
+  arv::core::reset_global_timing_stats();
+  if constexpr (!arv::core::perf_stats_enabled()) {
+    std::array<arv::core::PerfEventSample, 4> samples{};
+    EXPECT_EQ(
+        arv::core::global_worst_event_samples(
+            samples,
+            arv::core::PerfEventGroup::Worker),
+        0U);
+    return;
+  }
+
+  arv::core::set_current_profile_frame_index(42);
+  arv::core::record_thread_timing(
+      arv::core::PerfMetric::MeshingTask,
+      1.0,
+      "worker/client",
+      "section=(1,2,3)");
+  arv::core::record_thread_timing(
+      arv::core::PerfMetric::LightingTask,
+      9.0,
+      "worker/server",
+      "section=(4,5,6)");
+
+  std::array<arv::core::PerfEventSample, 4> samples{};
+  const arv::usize count = arv::core::global_worst_event_samples(
+      samples,
+      arv::core::PerfEventGroup::Worker);
+
+  ASSERT_GE(count, 2U);
+  EXPECT_EQ(samples[0].metric, arv::core::PerfMetric::LightingTask);
+  EXPECT_DOUBLE_EQ(samples[0].duration_ms(), 9.0);
+  EXPECT_EQ(samples[0].frame_index, 42U);
+  EXPECT_STREQ(samples[0].thread.data(), "worker/server");
+  EXPECT_STREQ(samples[0].context.data(), "section=(4,5,6)");
+  arv::core::reset_global_timing_stats();
+}
+
+TEST(CoreTypesTests, SnapshotCostCountersExposeTotals) {
+  arv::core::reset_global_timing_stats();
+  if constexpr (!arv::core::perf_stats_enabled()) {
+    const arv::core::SnapshotCostSnapshot snapshot =
+        arv::core::global_snapshot_cost_snapshot();
+    EXPECT_EQ(snapshot.snapshots_created_total, 0U);
+    return;
+  }
+
+  arv::core::record_snapshot_created();
+  arv::core::record_snapshot_reused();
+  arv::core::record_snapshot_copy(128);
+
+  const arv::core::SnapshotCostSnapshot snapshot =
+      arv::core::global_snapshot_cost_snapshot();
+  EXPECT_EQ(snapshot.snapshots_created_total, 1U);
+  EXPECT_EQ(snapshot.snapshots_reused_total, 1U);
+  EXPECT_EQ(snapshot.snapshot_copies_total, 1U);
+  EXPECT_EQ(snapshot.snapshot_bytes_copied_total, 128U);
+  arv::core::reset_global_timing_stats();
 }

@@ -57,6 +57,17 @@ struct RuntimeThreadBudgetPlan {
   WorkerThreadConfig secondary_workers{};
 };
 
+struct SchedulerPressureSnapshot {
+  usize worker_count{};
+  u32 current_queued_jobs{};
+  u32 peak_queued_jobs{};
+  u32 active_workers{};
+  u32 idle_workers{};
+  double idle_percent{};
+  u64 submitted_jobs_total{};
+  u64 completed_jobs_total{};
+};
+
 [[nodiscard]] usize hardware_thread_count_or_one() noexcept;
 
 [[nodiscard]] usize resolve_worker_thread_count(WorkerThreadConfig config) noexcept;
@@ -100,16 +111,22 @@ public:
 
   [[nodiscard]] usize worker_count() const noexcept;
 
+  [[nodiscard]] SchedulerPressureSnapshot pressure_snapshot() const noexcept;
+
+  void reset_pressure_stats() noexcept;
+
   template<typename Fn>
   auto submit(std::string name, Fn&& fn) {
     using Result = std::invoke_result_t<std::decay_t<Fn>>;
     const JobID id{next_id_.fetch_add(1, std::memory_order_relaxed)};
+    record_job_submitted();
     std::chrono::steady_clock::time_point submitted_at{};
     if constexpr (core::perf_stats_enabled()) {
       submitted_at = std::chrono::steady_clock::now();
     }
     std::string job_name = std::move(name);
-    auto wrapped = [submitted_at,
+    auto wrapped = [this,
+                    submitted_at,
                     job_name,
                     fn = std::forward<Fn>(fn)]() mutable -> Result {
       static thread_local bool named_thread = false;
@@ -120,11 +137,20 @@ public:
 
       ARV_PROFILE_ZONE_DYNAMIC(job_name.data(), job_name.size());
       worker_thread_arena().reset();
+      record_job_started();
+      struct CompletionCounter {
+        Scheduler* scheduler{};
+        ~CompletionCounter() {
+          scheduler->record_job_completed();
+        }
+      } completion_counter{this};
       if constexpr (core::perf_stats_enabled()) {
         const auto started_at = std::chrono::steady_clock::now();
         core::record_thread_timing(
             core::PerfMetric::JobQueueLatency,
-            std::chrono::duration<double, std::milli>(started_at - submitted_at).count());
+            std::chrono::duration<double, std::milli>(started_at - submitted_at).count(),
+            "worker",
+            job_name.empty() ? nullptr : job_name.c_str());
       }
       if constexpr (std::is_void_v<Result>) {
         std::invoke(fn);
@@ -148,8 +174,17 @@ public:
   [[nodiscard]] static usize default_worker_count() noexcept;
 
 private:
+  void record_job_submitted() noexcept;
+  void record_job_started() noexcept;
+  void record_job_completed() noexcept;
+
   tf::Executor executor_;
   std::atomic<u64> next_id_{1};
+  std::atomic<u32> queued_jobs_{};
+  std::atomic<u32> peak_queued_jobs_{};
+  std::atomic<u32> active_workers_{};
+  std::atomic<u64> submitted_jobs_total_{};
+  std::atomic<u64> completed_jobs_total_{};
 };
 
 } // namespace arv::sched

@@ -225,6 +225,29 @@ cmake -S . -B build-profiled -DARVANE_ENABLE_PROFILING=ON -DARVANE_ENABLE_TRACY=
 cmake -S . -B build-noprofile -DARVANE_ENABLE_PROFILING=OFF
 ```
 
+### Debug Profiler Expectations
+
+The in-game Profiling tab is intended for spike diagnosis, not only average timing. Aggregate timing tables report p50, p95, and p99 over the current rolling sample window:
+
+* p50 is the median sampled duration.
+* p95 is the sample at or above 95% of recorded durations.
+* p99 is the sample at or above 99% of recorded durations.
+
+Aggregate timing answers whether a subsystem is usually expensive. Worst-event tracking answers which individual recent sample spiked, on which frame, on which thread/timeline, and with what bounded context string such as a chunk coordinate, job type, queue name, or render pass.
+
+Profiler instrumentation rules:
+
+* No heap allocation per timing sample in hot paths.
+* No unbounded history. Use fixed-size rings, bounded Top-N views, or rolling windows.
+* Avoid locks on worker/job hot paths; prefer atomics, per-thread samples, and end-of-frame aggregation.
+* Context strings must be bounded and copied into fixed storage, or use stable labels.
+* Subsystem counters should be updated at ownership boundaries such as job submit/complete, chunk lifecycle changes, mesh enqueue/upload, and snapshot copy-on-write.
+* Do not scan all chunks every frame just to draw profiling UI. If a value matters every frame, maintain a counter where the state changes.
+
+Chunk workload counters should distinguish loaded chunks, active/simulated chunks, visible/renderable chunks, requested/generating chunks, lighting backlog, meshing backlog, pending mesh uploads, and per-frame snapshot creation/copy cost.
+
+Queue pressure counters should report current queued jobs, rolling peak queued jobs, submitted/completed jobs for the frame, active workers, and idle workers or idle percentage. These counters are separate from queue latency timing: latency shows how long a job waited before starting, while pressure shows whether the queue is keeping up.
+
 ---
 
 ## Assertions and Logging

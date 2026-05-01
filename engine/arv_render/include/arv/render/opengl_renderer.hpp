@@ -62,6 +62,30 @@ public:
     return ui_draw_calls_last_frame_;
   }
 
+  [[nodiscard]] u64 vertices_submitted_last_frame() const noexcept {
+    return vertices_submitted_last_frame_;
+  }
+
+  [[nodiscard]] u64 triangles_submitted_last_frame() const noexcept {
+    return triangles_submitted_last_frame_;
+  }
+
+  [[nodiscard]] u32 gpu_buffer_uploads_last_frame() const noexcept {
+    return gpu_buffer_uploads_last_frame_;
+  }
+
+  [[nodiscard]] u64 gpu_buffer_upload_bytes_last_frame() const noexcept {
+    return gpu_buffer_upload_bytes_last_frame_;
+  }
+
+  [[nodiscard]] u32 texture_uploads_last_frame() const noexcept {
+    return texture_uploads_last_frame_;
+  }
+
+  [[nodiscard]] u64 texture_upload_bytes_last_frame() const noexcept {
+    return texture_upload_bytes_last_frame_;
+  }
+
   [[nodiscard]] bool gpu_profile_context_initialized() const noexcept {
     return gpu_profile_context_initialized_;
   }
@@ -79,6 +103,7 @@ private:
     GLuint index_buffer{};
     GLsizeiptr vertex_capacity_bytes{};
     GLsizeiptr index_capacity_bytes{};
+    GLsizei vertex_count{};
     GLsizei index_count{};
   };
 
@@ -117,9 +142,9 @@ private:
 
   [[nodiscard]] MeshID allocate_mesh_id() noexcept;
 
-  [[nodiscard]] static GpuMesh create_gpu_mesh(const CpuMeshBuffer& mesh);
+  [[nodiscard]] GpuMesh create_gpu_mesh(const CpuMeshBuffer& mesh);
 
-  static void upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& mesh);
+  void upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& mesh);
 
   static void destroy_gpu_mesh(GpuMesh& mesh);
 
@@ -132,6 +157,7 @@ private:
   static void destroy_entity_gpu_model(EntityGpuModel& model);
 
   [[nodiscard]] static GpuTexture create_texture(const TextureUploadData& upload, bool mipmaps);
+  void note_texture_upload(const TextureUploadData& upload) noexcept;
 
   [[nodiscard]] static GLuint compile_shader(GLenum type, const char* source);
 
@@ -156,6 +182,14 @@ private:
   u32 draw_calls_last_frame_{};
   u32 chunk_draw_calls_last_frame_{};
   u32 ui_draw_calls_last_frame_{};
+  u64 vertices_submitted_last_frame_{};
+  u64 triangles_submitted_last_frame_{};
+  u32 gpu_buffer_uploads_last_frame_{};
+  u64 gpu_buffer_upload_bytes_last_frame_{};
+  u32 texture_uploads_last_frame_{};
+  u64 texture_upload_bytes_last_frame_{};
+  u32 pending_texture_uploads_{};
+  u64 pending_texture_upload_bytes_{};
   double mesh_upload_time_ms_last_frame_{};
   GLuint chunk_program_{};
   GLint chunk_origin_uniform_{-1};

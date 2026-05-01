@@ -15,6 +15,7 @@
 #include "arv/core/arena.hpp"
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/log.hpp"
+#include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
@@ -1104,6 +1105,7 @@ int main(int argc, char** argv) {
   arv::u32 fps_sample_frames = 0;
   arv::Seconds fps_sample_seconds = 0.0F;
   double last_frame_work_ms = 0.0;
+  arv::u64 profile_frame_index = 0;
   constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
   arv::FrameArena frame_arena;
   DesktopMenuState menu_state{config.paths.saves_path()};
@@ -1118,6 +1120,12 @@ int main(int argc, char** argv) {
     previous_time = now;
     const double frame_delta_ms =
         std::chrono::duration<double, std::milli>(delta).count();
+    ++profile_frame_index;
+    arv::core::set_current_profile_frame_index(profile_frame_index);
+    arv::core::record_thread_timing(
+        arv::core::PerfMetric::FrameDelta,
+        frame_delta_ms,
+        "main/render");
     ++fps_sample_frames;
     fps_sample_seconds += delta.count();
     if (displayed_fps == 0U ||
@@ -1272,9 +1280,22 @@ int main(int argc, char** argv) {
       while (active_session->ticks.consume_tick()) {
         ARV_PROFILE_ZONE("Simulation tick");
         if (!singleplayer_paused) {
+          std::chrono::steady_clock::time_point simulation_start{};
+          if constexpr (arv::core::profiling_enabled()) {
+            simulation_start = std::chrono::steady_clock::now();
+          }
           active_session->integrated_server->tick();
           active_session->client->fixed_tick(active_session->integrated_server->tick_index());
           collect_client_chunk_stream(*active_session);
+          if constexpr (arv::core::profiling_enabled()) {
+            const auto simulation_end = std::chrono::steady_clock::now();
+            arv::core::record_thread_timing(
+                arv::core::PerfMetric::SimulationTick,
+                std::chrono::duration<double, std::milli>(
+                    simulation_end - simulation_start)
+                    .count(),
+                "main/world");
+          }
           fixed_tick_ran = true;
         }
       }
@@ -1345,6 +1366,7 @@ int main(int argc, char** argv) {
           arv::desktop::render_debug_menu(
               debug_menu,
               {
+                  profile_frame_index,
                   frame_delta_ms,
                   last_frame_work_ms,
                   displayed_fps,
@@ -1357,7 +1379,8 @@ int main(int argc, char** argv) {
               item_registry,
               entity_registry,
               world_jobs,
-              renderer);
+              renderer,
+              active_session->chunk_view);
       if (debug_menu_result.inventory_changed) {
         refresh_inventory_slots(*active_session);
       }
@@ -1460,8 +1483,21 @@ int main(int argc, char** argv) {
           arv::desktop::texture_upload_from_image(font_system.atlas_image()));
       font_system.clear_atlas_dirty();
     }
+    std::chrono::steady_clock::time_point render_submit_start{};
+    if constexpr (arv::core::profiling_enabled()) {
+      render_submit_start = std::chrono::steady_clock::now();
+    }
     renderer.submit_frame(std::move(frame));
     renderer.render();
+    if constexpr (arv::core::profiling_enabled()) {
+      const auto render_submit_end = std::chrono::steady_clock::now();
+      arv::core::record_thread_timing(
+          arv::core::PerfMetric::RenderSubmit,
+          std::chrono::duration<double, std::milli>(
+              render_submit_end - render_submit_start)
+              .count(),
+          "main/render");
+    }
     debug_imgui.render();
     if constexpr (arv::core::profiling_enabled()) {
       const auto frame_work_end = std::chrono::steady_clock::now();
@@ -1469,6 +1505,10 @@ int main(int argc, char** argv) {
           std::chrono::duration<double, std::milli>(
               frame_work_end - frame_work_start)
               .count();
+      arv::core::record_thread_timing(
+          arv::core::PerfMetric::CpuFrameWork,
+          frame_work_ms,
+          "main/render");
       last_frame_work_ms = frame_work_ms;
       if (frame_work_ms > static_cast<double>(config.chunk_pipeline.frame_spike_log_ms)) {
         arv::core::warn(
@@ -1485,7 +1525,20 @@ int main(int argc, char** argv) {
     }
     {
       ARV_PROFILE_ZONE("GPU wait time");
+      std::chrono::steady_clock::time_point gpu_wait_start{};
+      if constexpr (arv::core::profiling_enabled()) {
+        gpu_wait_start = std::chrono::steady_clock::now();
+      }
       window.swap_buffers();
+      if constexpr (arv::core::profiling_enabled()) {
+        const auto gpu_wait_end = std::chrono::steady_clock::now();
+        arv::core::record_thread_timing(
+            arv::core::PerfMetric::GpuWaitTime,
+            std::chrono::duration<double, std::milli>(
+                gpu_wait_end - gpu_wait_start)
+                .count(),
+            "main/render");
+      }
     }
     pace_frame(config.render, now);
     ARV_PROFILE_FRAME_MARK("Frame");

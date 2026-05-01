@@ -1,10 +1,12 @@
 #include "arv/world/world_runtime.hpp"
 
+#include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <utility>
 
@@ -105,6 +107,18 @@ void add_light_dependency_offsets(DependencyMask& mask, SectionLocalPos local) n
   }
 }
 
+void format_chunk_context(
+    std::array<char, core::PerfEventContextCapacity>& context,
+    ChunkCoord coord) noexcept {
+  (void)std::snprintf(
+      context.data(),
+      context.size(),
+      "section=(%d,%d,%d)",
+      coord.value.x,
+      coord.value.y,
+      coord.value.z);
+}
+
 } // namespace
 
 WorldRuntime::WorldRuntime(WorldID id) : id_(id) {
@@ -120,6 +134,10 @@ voxel::ChunkSection& WorldRuntime::ensure_chunk(
   auto [iter, inserted] = chunks_.try_emplace(coord, coord);
   if (inserted) {
     iter->second.set_lifecycle_state(state);
+    ++lifecycle_counts_[lifecycle_index(state)];
+    if (state == voxel::ChunkLifecycleState::Active) {
+      ++active_chunk_count_;
+    }
     enqueue_dirty_mesh_chunk(coord);
   }
   return iter->second;
@@ -207,7 +225,7 @@ void WorldRuntime::apply_chunk_snapshot(
   }
 
   voxel::ChunkSection& chunk = ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded);
-  chunk.set_lifecycle_state(voxel::ChunkLifecycleState::Loaded);
+  set_chunk_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
   chunk.replace_saved_contents(
       std::move(blocks),
       std::move(resolved_lights),
@@ -248,9 +266,19 @@ void WorldRuntime::apply_chunk_snapshot(
 }
 
 bool WorldRuntime::unload_chunk(ChunkCoord coord) noexcept {
-  if (chunks_.erase(coord) == 0U) {
+  const auto found = chunks_.find(coord);
+  if (found == chunks_.end()) {
     return false;
   }
+  const voxel::ChunkLifecycleState state = found->second.lifecycle_state();
+  usize& state_count = lifecycle_counts_[lifecycle_index(state)];
+  if (state_count > 0U) {
+    --state_count;
+  }
+  if (state == voxel::ChunkLifecycleState::Active && active_chunk_count_ > 0U) {
+    --active_chunk_count_;
+  }
+  chunks_.erase(found);
 
   mark_mesh_content_dirty();
   mark_loaded_chunk_neighbors_dirty(coord);
@@ -270,6 +298,21 @@ const voxel::ChunkSection* WorldRuntime::find_chunk(ChunkCoord coord) const noex
 
 usize WorldRuntime::loaded_chunk_count() const noexcept {
   return chunks_.size();
+}
+
+ChunkWorkloadSnapshot WorldRuntime::chunk_workload_snapshot() const noexcept {
+  ChunkWorkloadSnapshot snapshot;
+  snapshot.loaded_chunks = chunks_.size();
+  snapshot.active_chunks = active_chunk_count_;
+  snapshot.chunks_awaiting_generation =
+      lifecycle_count(voxel::ChunkLifecycleState::Requested) +
+      lifecycle_count(voxel::ChunkLifecycleState::Loading) +
+      lifecycle_count(voxel::ChunkLifecycleState::Generating) +
+      lifecycle_count(voxel::ChunkLifecycleState::Populating);
+  snapshot.chunk_sections_awaiting_lighting =
+      lighting_work_pending_ ? std::max<usize>(last_lighting_snapshot_chunk_count_, 1U) : 0U;
+  snapshot.chunk_sections_awaiting_meshing = dirty_mesh_chunk_set_.size();
+  return snapshot;
 }
 
 std::vector<ChunkCoord> WorldRuntime::loaded_chunk_coords() const {
@@ -312,14 +355,7 @@ bool WorldRuntime::is_chunk_active(ChunkCoord coord) const noexcept {
 }
 
 usize WorldRuntime::active_chunk_count() const noexcept {
-  usize count = 0;
-  for (const auto& [coord, chunk] : chunks_) {
-    (void)coord;
-    if (chunk.lifecycle_state() == voxel::ChunkLifecycleState::Active) {
-      ++count;
-    }
-  }
-  return count;
+  return active_chunk_count_;
 }
 
 bool WorldRuntime::set_chunk_lifecycle_state(ChunkCoord coord, voxel::ChunkLifecycleState state) noexcept {
@@ -327,7 +363,7 @@ bool WorldRuntime::set_chunk_lifecycle_state(ChunkCoord coord, voxel::ChunkLifec
   if (chunk == nullptr) {
     return false;
   }
-  chunk->set_lifecycle_state(state);
+  set_chunk_lifecycle_state_internal(*chunk, state);
   if (state == voxel::ChunkLifecycleState::Active) {
     FluidSolver::enqueue_chunk_activation_updates(*this, coord);
   }
@@ -364,7 +400,7 @@ void WorldRuntime::update_simulation_radii(std::span<const ChunkCoord> centers, 
     const bool became_active = active &&
                                chunk.lifecycle_state() != voxel::ChunkLifecycleState::Active;
     if (chunk.lifecycle_state() != next_state) {
-      chunk.set_lifecycle_state(next_state);
+      set_chunk_lifecycle_state_internal(chunk, next_state);
     }
     if (became_active) {
       FluidSolver::enqueue_chunk_activation_updates(*this, coord);
@@ -469,16 +505,35 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
     ChunkCoord coord,
     MissingNeighborPolicy missing_neighbor_policy) const {
   ARV_PROFILE_ZONE("Snapshot creation");
+  std::array<char, core::PerfEventContextCapacity> profile_context{};
+  if constexpr (core::perf_stats_enabled()) {
+    format_chunk_context(profile_context, coord);
+  }
+  const core::ScopedThreadTiming snapshot_timing{
+      core::PerfMetric::SnapshotCreation,
+      "world",
+      profile_context.data()};
   const voxel::ChunkSection* chunk = find_chunk(coord);
   if (chunk == nullptr) {
     return std::nullopt;
   }
 
-  voxel::ChunkSnapshot snapshot = voxel::make_chunk_snapshot_without_neighbors(*chunk);
+  core::record_snapshot_created();
+  core::record_snapshot_reused();
+  voxel::ChunkSnapshot snapshot;
+  snapshot.coord = chunk->coord();
+  snapshot.source_version = chunk->block_version();
+  snapshot.source_content_version = chunk->content_version();
+  snapshot.source_light_version = chunk->light_version();
+  snapshot.storages[voxel::ChunkSnapshotCenterStorageIndex] = chunk->storage_view();
   // TODO(arvane): Narrow meshing neighbor inputs to compact immutable boundary/edge views
   // if retaining whole neighboring chunk payload handles becomes a measurable cost.
   {
     ARV_PROFILE_ZONE("Chunk lookup / access");
+    const core::ScopedThreadTiming lookup_timing{
+        core::PerfMetric::ChunkLookupAccess,
+        "world",
+        profile_context.data()};
     for (i32 oz = -1; oz <= 1; ++oz) {
       for (i32 oy = -1; oy <= 1; ++oy) {
         for (i32 ox = -1; ox <= 1; ++ox) {
@@ -541,7 +596,7 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
   voxel::ChunkSection& chunk = ensure_chunk(
       generated.coord,
       voxel::ChunkLifecycleState::Loaded);
-  chunk.set_lifecycle_state(voxel::ChunkLifecycleState::Loaded);
+  set_chunk_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
   chunk.replace_generated_blocks(std::move(generated.blocks));
   mark_mesh_content_dirty();
   enqueue_dirty_mesh_chunk(generated.coord);
@@ -991,7 +1046,9 @@ bool WorldRuntime::has_lighting_work() const noexcept {
 
 LightingSnapshot WorldRuntime::make_lighting_snapshot() const {
   ARV_PROFILE_ZONE("Snapshot creation");
-  return WorldLighting::make_snapshot(*this);
+  LightingSnapshot snapshot = WorldLighting::make_snapshot(*this);
+  last_lighting_snapshot_chunk_count_ = snapshot.chunks.size();
+  return snapshot;
 }
 
 LightingResult WorldRuntime::build_lighting_result(
@@ -1146,9 +1203,62 @@ BlockPos WorldRuntime::offset_block(BlockPos pos, Vec3i offset) noexcept {
   return {{pos.value.x + offset.x, pos.value.y + offset.y, pos.value.z + offset.z}};
 }
 
+usize WorldRuntime::lifecycle_index(voxel::ChunkLifecycleState state) noexcept {
+  switch (state) {
+    case voxel::ChunkLifecycleState::Unloaded:
+      return 0U;
+    case voxel::ChunkLifecycleState::Requested:
+      return 1U;
+    case voxel::ChunkLifecycleState::Loading:
+      return 2U;
+    case voxel::ChunkLifecycleState::Generating:
+      return 3U;
+    case voxel::ChunkLifecycleState::Populating:
+      return 4U;
+    case voxel::ChunkLifecycleState::Loaded:
+      return 5U;
+    case voxel::ChunkLifecycleState::Active:
+      return 6U;
+    case voxel::ChunkLifecycleState::MarkedForUnload:
+      return 7U;
+    case voxel::ChunkLifecycleState::Saving:
+      return 8U;
+  }
+  return 0U;
+}
+
+usize WorldRuntime::lifecycle_count(voxel::ChunkLifecycleState state) const noexcept {
+  return lifecycle_counts_[lifecycle_index(state)];
+}
+
+void WorldRuntime::set_chunk_lifecycle_state_internal(
+    voxel::ChunkSection& chunk,
+    voxel::ChunkLifecycleState state) noexcept {
+  const voxel::ChunkLifecycleState previous = chunk.lifecycle_state();
+  if (previous == state) {
+    return;
+  }
+
+  usize& previous_count = lifecycle_counts_[lifecycle_index(previous)];
+  if (previous_count > 0U) {
+    --previous_count;
+  }
+  ++lifecycle_counts_[lifecycle_index(state)];
+
+  if (previous == voxel::ChunkLifecycleState::Active && active_chunk_count_ > 0U) {
+    --active_chunk_count_;
+  }
+  if (state == voxel::ChunkLifecycleState::Active) {
+    ++active_chunk_count_;
+  }
+
+  chunk.set_lifecycle_state(state);
+}
+
 void WorldRuntime::mark_lighting_content_dirty() noexcept {
   ++lighting_revision_;
   lighting_work_pending_ = true;
+  last_lighting_snapshot_chunk_count_ = std::max<usize>(last_lighting_snapshot_chunk_count_, 1U);
 }
 
 void WorldRuntime::mark_mesh_content_dirty() noexcept {

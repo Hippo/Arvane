@@ -1,5 +1,6 @@
 #include "arv/world/fluid_solver.hpp"
 
+#include "arv/core/perf_stats.hpp"
 #include "arv/world/world_runtime.hpp"
 
 #include <array>
@@ -445,6 +446,10 @@ FluidSimulationResult FluidSolver::build_simulation_result(
     FluidSimulationRequest request,
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& definition) {
+  const core::ScopedThreadTiming timing{
+      core::PerfMetric::FluidTask,
+      "worker/server",
+      "queue=server_world_fluids"};
   FluidSimulationState state(std::move(request));
   return state.run(registry, definition);
 }

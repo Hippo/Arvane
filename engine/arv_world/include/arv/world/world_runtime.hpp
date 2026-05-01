@@ -59,6 +59,14 @@ struct WorldTickStats {
   u32 entity_updates_processed{};
 };
 
+struct ChunkWorkloadSnapshot {
+  usize loaded_chunks{};
+  usize active_chunks{};
+  usize chunks_awaiting_generation{};
+  usize chunk_sections_awaiting_lighting{};
+  usize chunk_sections_awaiting_meshing{};
+};
+
 enum class EntityDespawnReason : u16 {
   Removed,
   WorldUnload,
@@ -102,6 +110,7 @@ public:
   [[nodiscard]] voxel::ChunkSection* find_chunk(ChunkCoord coord) noexcept;
   [[nodiscard]] const voxel::ChunkSection* find_chunk(ChunkCoord coord) const noexcept;
   [[nodiscard]] usize loaded_chunk_count() const noexcept;
+  [[nodiscard]] ChunkWorkloadSnapshot chunk_workload_snapshot() const noexcept;
   [[nodiscard]] std::vector<ChunkCoord> loaded_chunk_coords() const;
   [[nodiscard]] TickIndex tick_index() const noexcept;
   void set_tick_index(TickIndex tick_index) noexcept;
@@ -236,6 +245,11 @@ private:
   [[nodiscard]] static i32 abs_i32(i32 value) noexcept;
   [[nodiscard]] static i32 max_abs3(i32 x, i32 y, i32 z) noexcept;
   [[nodiscard]] static BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept;
+  [[nodiscard]] static usize lifecycle_index(voxel::ChunkLifecycleState state) noexcept;
+  [[nodiscard]] usize lifecycle_count(voxel::ChunkLifecycleState state) const noexcept;
+  void set_chunk_lifecycle_state_internal(
+      voxel::ChunkSection& chunk,
+      voxel::ChunkLifecycleState state) noexcept;
   void mark_lighting_content_dirty() noexcept;
   void mark_mesh_content_dirty() noexcept;
   bool set_fluid_internal(
@@ -275,6 +289,9 @@ private:
   u64 lighting_revision_{1};
   u64 mesh_revision_{1};
   bool lighting_work_pending_{};
+  std::array<usize, 9> lifecycle_counts_{};
+  usize active_chunk_count_{};
+  mutable usize last_lighting_snapshot_chunk_count_{};
   WorldTickPolicy tick_policy_{};
   std::vector<ScheduledBlockUpdate> scheduled_block_updates_;
   std::deque<BlockUpdate> block_updates_;

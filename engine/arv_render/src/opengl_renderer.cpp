@@ -122,6 +122,7 @@ void OpenGLRenderer::set_ui_shader_sources(std::string vertex_source, std::strin
 void OpenGLRenderer::set_chunk_texture_atlas(TextureUploadData upload) {
   destroy_gpu_texture(terrain_atlas_);
   if (upload.valid()) {
+    note_texture_upload(upload);
     terrain_atlas_ = create_texture(upload, true);
   }
 }
@@ -129,6 +130,7 @@ void OpenGLRenderer::set_chunk_texture_atlas(TextureUploadData upload) {
 void OpenGLRenderer::set_entity_texture_atlas(TextureUploadData upload) {
   destroy_gpu_texture(entity_atlas_);
   if (upload.valid()) {
+    note_texture_upload(upload);
     entity_atlas_ = create_texture(upload, true);
   }
 }
@@ -136,6 +138,7 @@ void OpenGLRenderer::set_entity_texture_atlas(TextureUploadData upload) {
 void OpenGLRenderer::set_ui_font_atlas(TextureUploadData upload) {
   destroy_gpu_texture(font_atlas_);
   if (upload.valid()) {
+    note_texture_upload(upload);
     font_atlas_ = create_texture(upload, false);
   }
 }
@@ -143,6 +146,7 @@ void OpenGLRenderer::set_ui_font_atlas(TextureUploadData upload) {
 void OpenGLRenderer::set_ui_item_atlas(TextureUploadData upload) {
   destroy_gpu_texture(item_atlas_);
   if (upload.valid()) {
+    note_texture_upload(upload);
     item_atlas_ = create_texture(upload, false);
   }
 }
@@ -237,6 +241,14 @@ void OpenGLRenderer::render() {
   draw_calls_last_frame_ = 0;
   chunk_draw_calls_last_frame_ = 0;
   ui_draw_calls_last_frame_ = 0;
+  vertices_submitted_last_frame_ = 0;
+  triangles_submitted_last_frame_ = 0;
+  gpu_buffer_uploads_last_frame_ = 0;
+  gpu_buffer_upload_bytes_last_frame_ = 0;
+  texture_uploads_last_frame_ = pending_texture_uploads_;
+  texture_upload_bytes_last_frame_ = pending_texture_upload_bytes_;
+  pending_texture_uploads_ = 0;
+  pending_texture_upload_bytes_ = 0;
 #if ARVANE_ENABLE_TRACY
   if (!gpu_profile_context_initialized_) {
     TracyGpuContext;
@@ -457,6 +469,8 @@ void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& m
       GL_DYNAMIC_DRAW);
   if (vertex_bytes > 0) {
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, mesh.vertex_bytes.data());
+    ++gpu_buffer_uploads_last_frame_;
+    gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(vertex_bytes);
   }
 
   const GLsizeiptr index_bytes =
@@ -469,6 +483,8 @@ void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& m
       GL_DYNAMIC_DRAW);
   if (index_bytes > 0) {
     glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, mesh.indices.data());
+    ++gpu_buffer_uploads_last_frame_;
+    gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(index_bytes);
   }
 
   glEnableVertexAttribArray(0);
@@ -493,6 +509,7 @@ void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& m
       sizeof(ChunkVertex),
       reinterpret_cast<const void*>(offsetof(ChunkVertex, light_face_material_hints)));
 
+  gpu.vertex_count = static_cast<GLsizei>(mesh.vertex_bytes.size() / sizeof(ChunkVertex));
   gpu.index_count = static_cast<GLsizei>(mesh.indices.size());
   glBindVertexArray(0);
 }
@@ -669,6 +686,11 @@ OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture(const TextureUploadDat
   texture.width = upload.width;
   texture.height = upload.height;
   return texture;
+}
+
+void OpenGLRenderer::note_texture_upload(const TextureUploadData& upload) noexcept {
+  ++pending_texture_uploads_;
+  pending_texture_upload_bytes_ += static_cast<u64>(upload.rgba_pixels.size());
 }
 
 GLuint OpenGLRenderer::compile_shader(GLenum type, const char* source) {
@@ -853,6 +875,8 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
         static_cast<f32>(item.key.coord.value.z * ChunkSize));
     glBindVertexArray(mesh.vao);
     glDrawElements(GL_TRIANGLES, mesh.index_count, GL_UNSIGNED_INT, nullptr);
+    vertices_submitted_last_frame_ += static_cast<u64>(mesh.index_count);
+    triangles_submitted_last_frame_ += static_cast<u64>(mesh.index_count / 3);
     ++chunk_draw_calls_last_frame_;
     ++draw_calls_last_frame_;
   }
@@ -989,12 +1013,18 @@ void OpenGLRenderer::draw_entities() {
         instance_bytes,
         GL_DYNAMIC_DRAW);
     glBufferSubData(GL_ARRAY_BUFFER, 0, instance_bytes, entity_instances_.data());
+    ++gpu_buffer_uploads_last_frame_;
+    gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(instance_bytes);
     glDrawElementsInstanced(
         GL_TRIANGLES,
         gpu.index_count,
         GL_UNSIGNED_INT,
         nullptr,
         static_cast<GLsizei>(entity_instances_.size()));
+    vertices_submitted_last_frame_ +=
+        static_cast<u64>(gpu.index_count) * static_cast<u64>(entity_instances_.size());
+    triangles_submitted_last_frame_ +=
+        static_cast<u64>(gpu.index_count / 3) * static_cast<u64>(entity_instances_.size());
     ++draw_calls_last_frame_;
 
     batch_begin = batch_end;
@@ -1113,6 +1143,8 @@ void OpenGLRenderer::draw_ui_quads() {
       vertex_bytes,
       GL_DYNAMIC_DRAW);
   glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, ui_vertices_.data());
+  ++gpu_buffer_uploads_last_frame_;
+  gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(vertex_bytes);
   const GLsizeiptr index_bytes =
       static_cast<GLsizeiptr>(ui_indices_.size() * sizeof(u32));
   ensure_buffer_capacity(
@@ -1122,7 +1154,11 @@ void OpenGLRenderer::draw_ui_quads() {
       index_bytes,
       GL_DYNAMIC_DRAW);
   glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
+  ++gpu_buffer_uploads_last_frame_;
+  gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(index_bytes);
   glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
+  vertices_submitted_last_frame_ += static_cast<u64>(ui_indices_.size());
+  triangles_submitted_last_frame_ += static_cast<u64>(ui_indices_.size() / 3U);
   ++ui_draw_calls_last_frame_;
   ++draw_calls_last_frame_;
   glActiveTexture(GL_TEXTURE0);

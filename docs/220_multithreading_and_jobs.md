@@ -491,6 +491,21 @@ Completion queues should contain value-like result objects or owning smart point
 
 Avoid queues containing raw pointers into worker-local memory.
 
+### Queue Pressure Profiling
+
+Every runtime worker queue used by chunk generation, lighting, meshing, fluids, or simulation-adjacent work should expose cheap pressure counters:
+
+* current queued job count
+* rolling peak queued job count
+* jobs submitted this frame
+* jobs completed this frame
+* active worker count
+* idle worker count or estimated idle percentage
+
+These counters must be maintained at queue boundaries, not discovered by walking internal task structures during debug UI rendering. Queue pressure complements queue latency timing: pressure shows backlog growth and saturation, while latency shows how long accepted jobs waited before a worker started them.
+
+Chunk and snapshot profiling follows the same rule. Loaded/active/generating chunk counts, lighting backlog, meshing backlog, mesh upload backlog, snapshots created, snapshot copies, and snapshot bytes copied should be incremented or decremented when ownership state changes. Avoid whole-world scans in the frame loop just to populate profiler tables.
+
 ---
 
 ## Versioning and Stale Results
