@@ -339,6 +339,7 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
   base_tps_ = start_info.base_tps;
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
+  entity_registry_ = start_info.entity_registry;
   player_tuning_ = start_info.player_tuning;
   fluid_definition_ = start_info.fluid_definition;
   chunk_streamer_.configure(start_info.chunk_streaming);
@@ -403,6 +404,9 @@ void ServerRuntime::tick() {
   tick_chunk_streaming();
   schedule_generation_jobs();
   send_player_corrections();
+  send_block_updates();
+  send_entity_replication();
+  send_inventory_updates();
   ++tick_index_;
 }
 
@@ -564,8 +568,16 @@ void ServerRuntime::handle_network_event(net::NetworkEvent event) {
       if (const ServerSession* session = sessions_.find_by_connection(event.connection_id);
           session != nullptr) {
         chunk_streamer_.remove_session(session->session_id);
+        entity_replication_.erase(session->session_id);
+        inventory_replication_.erase(session->player_id);
         pending_player_commands_.erase(session->player_id);
         last_sent_player_corrections_.erase(session->player_id);
+        if (const std::optional<EntityID> entity_id =
+                default_world_.entity_for_player(session->player_id);
+            entity_id.has_value()) {
+          (void)default_world_.destroy_entity(entity_id.value(), world::EntityDespawnReason::Removed);
+          default_world_.flush_entity_despawns();
+        }
       }
       sessions_.remove_by_connection(event.connection_id);
       return;
@@ -590,6 +602,8 @@ void ServerRuntime::handle_message(net::ConnectionID connection_id, const std::v
         return;
       }
 
+      // TODO(arvane): Validate real authentication/session tokens once the
+      // account/session authority is specified.
       protocol::HandshakePolicy policy = handshake_policy_;
       if (ServerSession* existing = sessions_.find_by_connection(connection_id); existing != nullptr) {
         policy.assigned_session_id = existing->session_id;
@@ -613,6 +627,7 @@ void ServerRuntime::handle_message(net::ConnectionID connection_id, const std::v
         player_state.world_id = session.world_id;
         seed_player_inventory(player_state);
         refresh_player_permissions(player_state);
+        session.connection_state = net::ConnectionState::WorldJoin;
       }
 
       std::vector<u8> payload = protocol::serialize_server_hello(server_hello);
@@ -620,6 +635,17 @@ void ServerRuntime::handle_message(net::ConnectionID connection_id, const std::v
           {protocol::CurrentProtocolVersion, protocol::MessageType::ServerHello, 0, 0, 0, 0},
           payload);
       (void)transport_->send({connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(reply)});
+      if (server_hello.accepted) {
+        if (ServerSession* session = sessions_.find_by_connection(connection_id);
+            session != nullptr) {
+          if (const player::PlayerState* player_state =
+                  default_world_.find_player(session->player_id);
+              player_state != nullptr) {
+            send_world_join_result(*session, *player_state);
+            session->connection_state = net::ConnectionState::InGame;
+          }
+        }
+      }
       return;
     }
     case protocol::MessageType::ClientInputBatch: {
@@ -636,6 +662,14 @@ void ServerRuntime::handle_message(net::ConnectionID connection_id, const std::v
         return;
       }
       handle_chunk_interest_update(connection_id, interest.value());
+      return;
+    }
+    case protocol::MessageType::InventoryActionRequest: {
+      auto request = protocol::deserialize_inventory_action_request(decoded.value().payload);
+      if (!request) {
+        return;
+      }
+      handle_inventory_action_request(connection_id, request.value());
       return;
     }
     default:
@@ -723,6 +757,33 @@ void ServerRuntime::handle_chunk_interest_update(
   }
 
   chunk_streamer_.update_player_interest(*session, player_chunk_coord(*player_state), interest);
+}
+
+void ServerRuntime::handle_inventory_action_request(
+    net::ConnectionID connection_id,
+    const protocol::InventoryActionRequest& request) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || request.inventory_id != protocol::PlayerInventoryID) {
+    return;
+  }
+
+  switch (request.kind) {
+    case protocol::InventoryActionKind::SlotClick:
+      (void)apply_player_inventory_click(
+          session->player_id,
+          request.slot_index,
+          request.button);
+      return;
+    case protocol::InventoryActionKind::DropCursor:
+      (void)drop_player_inventory_cursor(session->player_id);
+      return;
+    case protocol::InventoryActionKind::DropOneCursor:
+      (void)drop_one_from_player_inventory_cursor(session->player_id);
+      return;
+    case protocol::InventoryActionKind::CloseMenu:
+      (void)close_player_inventory_menu(session->player_id);
+      return;
+  }
 }
 
 void ServerRuntime::tick_chunk_streaming() {
@@ -1213,6 +1274,223 @@ void ServerRuntime::send_player_corrections() {
       last_sent_player_corrections_[player_state->player_id] = std::move(correction);
     }
   }
+}
+
+void ServerRuntime::send_world_join_result(
+    const ServerSession& session,
+    const player::PlayerState& player_state) {
+  protocol::WorldJoinResult result;
+  result.accepted = true;
+  result.world_id = session.world_id;
+  result.player_id = session.player_id;
+  result.spawn_position = player_state.position;
+  result.initial_tick = tick_index_;
+  result.tick_rate = base_tps_;
+  result.effective_view_distance = 0;
+  if (const std::optional<EntityID> entity_id =
+          default_world_.entity_for_player(session.player_id);
+      entity_id.has_value()) {
+    result.local_entity_id =
+        default_world_.network_id_for_entity(entity_id.value()).value_or(EntityNetID{});
+  }
+
+  const std::vector<u8> payload = protocol::serialize_world_join_result(result);
+  std::vector<u8> packet = protocol::serialize_envelope(
+      {protocol::CurrentProtocolVersion, protocol::MessageType::WorldJoinResult, 0, 0, 0, 0},
+      payload);
+  (void)transport_->send(
+      {session.connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+}
+
+void ServerRuntime::send_block_updates() {
+  std::vector<world::ReplicatedBlockUpdate> updates =
+      default_world_.drain_replicated_block_updates();
+  if (updates.empty()) {
+    return;
+  }
+
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr || session->world_id != default_world_.id()) {
+      continue;
+    }
+
+    protocol::BlockUpdateBatch batch;
+    batch.world_id = session->world_id;
+    batch.server_tick = tick_index_;
+    for (const world::ReplicatedBlockUpdate& update : updates) {
+      if (!chunk_streamer_.session_has_sent_chunk(
+              session_id,
+              session->world_id,
+              block_to_chunk(update.pos))) {
+        continue;
+      }
+      batch.updates.push_back({
+          update.pos,
+          update.new_state,
+          0U,
+          update.server_tick});
+    }
+    if (batch.updates.empty()) {
+      continue;
+    }
+
+    const std::vector<u8> payload = protocol::serialize_block_update_batch(batch);
+    std::vector<u8> packet = protocol::serialize_envelope(
+        {protocol::CurrentProtocolVersion, protocol::MessageType::BlockUpdateBatch, 0, 0, 0, 0},
+        payload);
+    const net::NetworkResult send_result = transport_->send(
+        {session->connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+    if (send_result) {
+      for (const protocol::BlockUpdate& update : batch.updates) {
+        const ChunkCoord coord = block_to_chunk(update.pos);
+        if (const voxel::ChunkSection* chunk = default_world_.find_chunk(coord);
+            chunk != nullptr) {
+          (void)chunk_streamer_.mark_sent_block_version(
+              session_id,
+              session->world_id,
+              coord,
+              chunk->block_version());
+        }
+      }
+    }
+  }
+}
+
+void ServerRuntime::send_entity_replication() {
+  const std::vector<entity::EntitySnapshotEntry> snapshots =
+      default_world_.collect_entity_snapshots();
+
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr || session->world_id != default_world_.id()) {
+      continue;
+    }
+
+    EntityReplicationState& state = entity_replication_[session_id];
+    HashSet<EntityNetID> relevant_now;
+    std::vector<protocol::EntitySnapshotEntry> snapshot_entries;
+
+    for (const entity::EntitySnapshotEntry& snapshot : snapshots) {
+      const bool owns_entity =
+          snapshot.owning_player.has_value() &&
+          snapshot.owning_player.value() == session->player_id;
+      const bool chunk_visible = chunk_streamer_.session_has_sent_chunk(
+          session_id,
+          session->world_id,
+          snapshot.chunk);
+      if (!owns_entity && !chunk_visible) {
+        continue;
+      }
+
+      relevant_now.insert(snapshot.net_id);
+      if (state.known_entities.find(snapshot.net_id) == state.known_entities.end()) {
+        protocol::EntitySpawn spawn;
+        spawn.world_id = session->world_id;
+        spawn.entity_id = snapshot.net_id;
+        spawn.entity_type = snapshot.type_id;
+        spawn.entity_type_name = snapshot.type_name;
+        spawn.position = snapshot.position;
+        spawn.velocity = snapshot.velocity;
+        spawn.rotation = snapshot.rotation;
+        spawn.owning_player = snapshot.owning_player;
+        const std::vector<u8> payload = protocol::serialize_entity_spawn(spawn);
+        std::vector<u8> packet = protocol::serialize_envelope(
+            {protocol::CurrentProtocolVersion, protocol::MessageType::EntitySpawn, 0, 0, 0, 0},
+            payload);
+        (void)transport_->send(
+            {session->connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+      }
+
+      snapshot_entries.push_back({
+          snapshot.net_id,
+          snapshot.position,
+          snapshot.velocity,
+          snapshot.rotation,
+          0U});
+    }
+
+    for (const EntityNetID known_entity : state.known_entities) {
+      if (relevant_now.find(known_entity) != relevant_now.end()) {
+        continue;
+      }
+
+      protocol::EntityDespawn despawn{session->world_id, known_entity, 0U};
+      const std::vector<u8> payload = protocol::serialize_entity_despawn(despawn);
+      std::vector<u8> packet = protocol::serialize_envelope(
+          {protocol::CurrentProtocolVersion, protocol::MessageType::EntityDespawn, 0, 0, 0, 0},
+          payload);
+      (void)transport_->send(
+          {session->connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+    }
+
+    state.known_entities = std::move(relevant_now);
+    if (snapshot_entries.empty()) {
+      continue;
+    }
+
+    // TODO(arvane): Replace full snapshot entries with per-component delta
+    // compression once component replication masks are specified.
+    protocol::EntitySnapshot snapshot_message;
+    snapshot_message.world_id = session->world_id;
+    snapshot_message.server_tick = tick_index_;
+    snapshot_message.entities = std::move(snapshot_entries);
+    const std::vector<u8> payload = protocol::serialize_entity_snapshot(snapshot_message);
+    std::vector<u8> packet = protocol::serialize_envelope(
+        {protocol::CurrentProtocolVersion, protocol::MessageType::EntitySnapshot, 0, 0, 0, 0},
+        payload);
+    (void)transport_->send(
+        {session->connection_id, protocol::ReliabilityClass::UnreliableLatestWins, std::move(packet)});
+  }
+}
+
+void ServerRuntime::send_inventory_updates() {
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr) {
+      continue;
+    }
+    const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+    if (player_state == nullptr) {
+      continue;
+    }
+
+    InventoryReplicationState& state = inventory_replication_[session->player_id];
+    const bool changed =
+        !state.initialized ||
+        state.slots != player_state->inventory.slots() ||
+        state.carried_stack != player_state->inventory_cursor_stack ||
+        state.selected_hotbar_slot != player_state->selected_hotbar_slot;
+    if (!changed) {
+      continue;
+    }
+
+    ++state.revision;
+    state.initialized = true;
+    state.slots = player_state->inventory.slots();
+    state.carried_stack = player_state->inventory_cursor_stack;
+    state.selected_hotbar_slot = player_state->selected_hotbar_slot;
+
+    const protocol::InventoryUpdate update = make_inventory_update(*player_state, state.revision);
+    const std::vector<u8> payload = protocol::serialize_inventory_update(update);
+    std::vector<u8> packet = protocol::serialize_envelope(
+        {protocol::CurrentProtocolVersion, protocol::MessageType::InventoryUpdate, 0, 0, 0, 0},
+        payload);
+    (void)transport_->send(
+        {session->connection_id, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+  }
+}
+
+protocol::InventoryUpdate ServerRuntime::make_inventory_update(
+    const player::PlayerState& player_state,
+    u32 revision) const {
+  protocol::InventoryUpdate update;
+  update.inventory_id = protocol::PlayerInventoryID;
+  update.revision = revision;
+  update.selected_hotbar_slot = player_state.selected_hotbar_slot;
+  update.slots = player_state.inventory.slots();
+  update.carried_stack = player_state.inventory_cursor_stack;
+  return update;
 }
 
 void ServerRuntime::seed_player_inventory(player::PlayerState& player_state) {

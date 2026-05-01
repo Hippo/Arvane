@@ -120,6 +120,15 @@ std::filesystem::path ResourceManager::resolve_asset_path(
       }
       extension = ".ttf";
       break;
+    case AssetKind::Model:
+      if (path.starts_with("model/")) {
+        relative = std::filesystem::path{"models"} /
+                   std::filesystem::path{std::string{path.substr(std::string_view{"model/"}.size())}};
+      } else {
+        relative = std::filesystem::path{std::string{path}};
+      }
+      extension = ".json";
+      break;
   }
 
   if (name_space != "arvane") {

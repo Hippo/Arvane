@@ -20,6 +20,8 @@ constexpr f32 UiTextureSlotFont = 1.0F;
 constexpr f32 UiTextureSlotTerrain = 2.0F;
 constexpr f32 UiTextureSlotItem = 3.0F;
 
+static_assert(sizeof(Vec3f) == sizeof(f32) * 3U);
+
 [[nodiscard]] f32 texture_slot_for_ui_source(UiTextureSource source) noexcept {
   switch (source) {
     case UiTextureSource::White:
@@ -99,6 +101,15 @@ void OpenGLRenderer::set_chunk_shader_sources(std::string vertex_source, std::st
   }
 }
 
+void OpenGLRenderer::set_entity_shader_sources(std::string vertex_source, std::string fragment_source) {
+  entity_vertex_shader_source_ = std::move(vertex_source);
+  entity_fragment_shader_source_ = std::move(fragment_source);
+  if (entity_program_ != 0) {
+    glDeleteProgram(entity_program_);
+    entity_program_ = 0;
+  }
+}
+
 void OpenGLRenderer::set_ui_shader_sources(std::string vertex_source, std::string fragment_source) {
   ui_vertex_shader_source_ = std::move(vertex_source);
   ui_fragment_shader_source_ = std::move(fragment_source);
@@ -115,6 +126,13 @@ void OpenGLRenderer::set_chunk_texture_atlas(TextureUploadData upload) {
   }
 }
 
+void OpenGLRenderer::set_entity_texture_atlas(TextureUploadData upload) {
+  destroy_gpu_texture(entity_atlas_);
+  if (upload.valid()) {
+    entity_atlas_ = create_texture(upload, true);
+  }
+}
+
 void OpenGLRenderer::set_ui_font_atlas(TextureUploadData upload) {
   destroy_gpu_texture(font_atlas_);
   if (upload.valid()) {
@@ -127,6 +145,25 @@ void OpenGLRenderer::set_ui_item_atlas(TextureUploadData upload) {
   if (upload.valid()) {
     item_atlas_ = create_texture(upload, false);
   }
+}
+
+void OpenGLRenderer::set_entity_model(EntityModelAsset model) {
+  const EntityModelID id = model.id;
+  if (const auto found = entity_gpu_models_.find(id); found != entity_gpu_models_.end()) {
+    destroy_entity_gpu_model(found->second);
+    entity_gpu_models_.erase(found);
+  }
+  entity_gpu_models_[id] = create_entity_gpu_model(model);
+  entity_models_[id] = std::move(model);
+}
+
+void OpenGLRenderer::clear_entity_models() {
+  for (auto& [id, model] : entity_gpu_models_) {
+    (void)id;
+    destroy_entity_gpu_model(model);
+  }
+  entity_gpu_models_.clear();
+  entity_models_.clear();
 }
 
 void OpenGLRenderer::resize(u32 width, u32 height) {
@@ -259,6 +296,10 @@ void OpenGLRenderer::render() {
   glDisable(GL_BLEND);
   glDepthMask(GL_TRUE);
   draw_chunk_list(frame_.opaque_chunks, false);
+  draw_entities();
+  glUseProgram(chunk_program_);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -282,6 +323,7 @@ void OpenGLRenderer::begin_shutdown() {
     destroy_chunk_gpu_state(chunk);
   }
   chunks_.clear();
+  clear_entity_models();
   if (chunk_program_ != 0) {
     glDeleteProgram(chunk_program_);
     chunk_program_ = 0;
@@ -290,7 +332,12 @@ void OpenGLRenderer::begin_shutdown() {
     glDeleteProgram(ui_program_);
     ui_program_ = 0;
   }
+  if (entity_program_ != 0) {
+    glDeleteProgram(entity_program_);
+    entity_program_ = 0;
+  }
   destroy_gpu_texture(terrain_atlas_);
+  destroy_gpu_texture(entity_atlas_);
   destroy_gpu_texture(font_atlas_);
   destroy_gpu_texture(item_atlas_);
   destroy_gpu_texture(white_texture_);
@@ -476,6 +523,117 @@ void OpenGLRenderer::destroy_gpu_texture(GpuTexture& texture) {
   texture = {};
 }
 
+OpenGLRenderer::EntityGpuModel OpenGLRenderer::create_entity_gpu_model(
+    const EntityModelAsset& model) {
+  EntityGpuModel gpu;
+  glGenVertexArrays(1, &gpu.vao);
+  glBindVertexArray(gpu.vao);
+
+  glGenBuffers(1, &gpu.vertex_buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, gpu.vertex_buffer);
+  const GLsizeiptr vertex_bytes =
+      static_cast<GLsizeiptr>(model.vertices.size() * sizeof(EntityModelMeshVertex));
+  glBufferData(
+      GL_ARRAY_BUFFER,
+      vertex_bytes,
+      model.vertices.empty() ? nullptr : model.vertices.data(),
+      GL_STATIC_DRAW);
+
+  glGenBuffers(1, &gpu.index_buffer);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpu.index_buffer);
+  const GLsizeiptr index_bytes =
+      static_cast<GLsizeiptr>(model.indices.size() * sizeof(u32));
+  glBufferData(
+      GL_ELEMENT_ARRAY_BUFFER,
+      index_bytes,
+      model.indices.empty() ? nullptr : model.indices.data(),
+      GL_STATIC_DRAW);
+  gpu.index_count = static_cast<GLsizei>(model.indices.size());
+
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(
+      0,
+      3,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(EntityModelMeshVertex),
+      reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, position)));
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(
+      1,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(EntityModelMeshVertex),
+      reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, uv)));
+  glEnableVertexAttribArray(2);
+  glVertexAttribPointer(
+      2,
+      3,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(EntityModelMeshVertex),
+      reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, color)));
+  glEnableVertexAttribArray(3);
+  glVertexAttribIPointer(
+      3,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(EntityModelMeshVertex),
+      reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, bone_index)));
+
+  glGenBuffers(1, &gpu.instance_buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, gpu.instance_buffer);
+  glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+
+  glEnableVertexAttribArray(4);
+  glVertexAttribPointer(
+      4,
+      3,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(EntityInstanceData),
+      reinterpret_cast<const void*>(offsetof(EntityInstanceData, position)));
+  glVertexAttribDivisor(4, 1);
+  glEnableVertexAttribArray(5);
+  glVertexAttribPointer(
+      5,
+      4,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(EntityInstanceData),
+      reinterpret_cast<const void*>(offsetof(EntityInstanceData, rotation)));
+  glVertexAttribDivisor(5, 1);
+  glEnableVertexAttribArray(6);
+  glVertexAttribPointer(
+      6,
+      1,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(EntityInstanceData),
+      reinterpret_cast<const void*>(offsetof(EntityInstanceData, scale)));
+  glVertexAttribDivisor(6, 1);
+
+  glBindVertexArray(0);
+  return gpu;
+}
+
+void OpenGLRenderer::destroy_entity_gpu_model(EntityGpuModel& model) {
+  if (model.instance_buffer != 0) {
+    glDeleteBuffers(1, &model.instance_buffer);
+  }
+  if (model.index_buffer != 0) {
+    glDeleteBuffers(1, &model.index_buffer);
+  }
+  if (model.vertex_buffer != 0) {
+    glDeleteBuffers(1, &model.vertex_buffer);
+  }
+  if (model.vao != 0) {
+    glDeleteVertexArrays(1, &model.vao);
+  }
+  model = {};
+}
+
 OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture(const TextureUploadData& upload, bool mipmaps) {
   GpuTexture texture;
   if (!upload.valid()) {
@@ -580,6 +738,58 @@ bool OpenGLRenderer::ensure_chunk_program() {
   return true;
 }
 
+bool OpenGLRenderer::ensure_entity_program() {
+  if (entity_program_ != 0) {
+    return true;
+  }
+
+  if (entity_vertex_shader_source_.empty() || entity_fragment_shader_source_.empty()) {
+    return false;
+  }
+
+  const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, entity_vertex_shader_source_.c_str());
+  const GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, entity_fragment_shader_source_.c_str());
+  if (vertex_shader == 0 || fragment_shader == 0) {
+    if (vertex_shader != 0) {
+      glDeleteShader(vertex_shader);
+    }
+    if (fragment_shader != 0) {
+      glDeleteShader(fragment_shader);
+    }
+    return false;
+  }
+
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vertex_shader);
+  glAttachShader(program, fragment_shader);
+  glLinkProgram(program);
+  glDeleteShader(vertex_shader);
+  glDeleteShader(fragment_shader);
+
+  GLint success = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &success);
+  if (success != GL_TRUE) {
+    glDeleteProgram(program);
+    return false;
+  }
+
+  entity_program_ = program;
+  entity_camera_position_uniform_ = glGetUniformLocation(entity_program_, "u_camera_position");
+  entity_camera_forward_uniform_ = glGetUniformLocation(entity_program_, "u_camera_forward");
+  entity_camera_right_uniform_ = glGetUniformLocation(entity_program_, "u_camera_right");
+  entity_camera_up_uniform_ = glGetUniformLocation(entity_program_, "u_camera_up");
+  entity_camera_aspect_uniform_ = glGetUniformLocation(entity_program_, "u_camera_aspect");
+  entity_camera_fov_y_uniform_ = glGetUniformLocation(entity_program_, "u_camera_fov_y_degrees");
+  entity_camera_near_uniform_ = glGetUniformLocation(entity_program_, "u_camera_near_plane");
+  entity_camera_far_uniform_ = glGetUniformLocation(entity_program_, "u_camera_far_plane");
+  entity_atlas_size_uniform_ = glGetUniformLocation(entity_program_, "u_atlas_size");
+  entity_atlas_uniform_ = glGetUniformLocation(entity_program_, "u_entity_atlas");
+  entity_bone_count_uniform_ = glGetUniformLocation(entity_program_, "u_bone_count");
+  entity_bone_pivots_uniform_ = glGetUniformLocation(entity_program_, "u_bone_pivots[0]");
+  entity_bone_rotations_uniform_ = glGetUniformLocation(entity_program_, "u_bone_rotations[0]");
+  return true;
+}
+
 bool OpenGLRenderer::ensure_ui_program() {
   if (ui_program_ != 0) {
     return true;
@@ -646,6 +856,152 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
     ++chunk_draw_calls_last_frame_;
     ++draw_calls_last_frame_;
   }
+}
+
+void OpenGLRenderer::draw_entities() {
+  ARV_PROFILE_ZONE("Entity draw batch");
+  if (frame_.entities.empty() || entity_models_.empty() || entity_gpu_models_.empty()) {
+    return;
+  }
+  if (!ensure_entity_program()) {
+    return;
+  }
+
+  entity_draw_order_.clear();
+  entity_draw_order_.reserve(frame_.entities.size());
+  for (const EntityDrawItem& draw : frame_.entities) {
+    const auto model = entity_models_.find(draw.model_id);
+    const auto gpu = entity_gpu_models_.find(draw.model_id);
+    if (model == entity_models_.end() || gpu == entity_gpu_models_.end()) {
+      continue;
+    }
+    if (gpu->second.index_count == 0 || model->second.bones.size() > MaxEntityShaderBones) {
+      continue;
+    }
+    entity_draw_order_.push_back(&draw);
+  }
+  if (entity_draw_order_.empty()) {
+    return;
+  }
+
+  std::sort(
+      entity_draw_order_.begin(),
+      entity_draw_order_.end(),
+      [](const EntityDrawItem* lhs, const EntityDrawItem* rhs) {
+        if (lhs->model_id != rhs->model_id) {
+          return lhs->model_id < rhs->model_id;
+        }
+        if (lhs->animation_time_seconds != rhs->animation_time_seconds) {
+          return lhs->animation_time_seconds < rhs->animation_time_seconds;
+        }
+        return lhs->animation_name < rhs->animation_name;
+      });
+
+  const auto same_entity_batch = [](const EntityDrawItem& lhs, const EntityDrawItem& rhs) {
+    return lhs.model_id == rhs.model_id &&
+           lhs.animation_time_seconds == rhs.animation_time_seconds &&
+           lhs.animation_name == rhs.animation_name;
+  };
+
+  glUseProgram(entity_program_);
+  glUniform3f(
+      entity_camera_position_uniform_,
+      frame_.world_view.position.x,
+      frame_.world_view.position.y,
+      frame_.world_view.position.z);
+  glUniform3f(
+      entity_camera_forward_uniform_,
+      frame_.world_view.forward.x,
+      frame_.world_view.forward.y,
+      frame_.world_view.forward.z);
+  glUniform3f(
+      entity_camera_right_uniform_,
+      frame_.world_view.right.x,
+      frame_.world_view.right.y,
+      frame_.world_view.right.z);
+  glUniform3f(
+      entity_camera_up_uniform_,
+      frame_.world_view.up.x,
+      frame_.world_view.up.y,
+      frame_.world_view.up.z);
+  const f32 aspect = height_ == 0 ? 1.0F : static_cast<f32>(width_) / static_cast<f32>(height_);
+  glUniform1f(entity_camera_aspect_uniform_, aspect);
+  glUniform1f(entity_camera_fov_y_uniform_, frame_.world_view.fov_y_degrees);
+  glUniform1f(entity_camera_near_uniform_, frame_.world_view.near_plane);
+  glUniform1f(entity_camera_far_uniform_, frame_.world_view.far_plane);
+  glUniform2f(
+      entity_atlas_size_uniform_,
+      static_cast<f32>(entity_atlas_.width == 0 ? 1U : entity_atlas_.width),
+      static_cast<f32>(entity_atlas_.height == 0 ? 1U : entity_atlas_.height));
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, entity_atlas_.id == 0 ? white_texture_.id : entity_atlas_.id);
+  glUniform1i(entity_atlas_uniform_, 0);
+
+  usize batch_begin = 0;
+  while (batch_begin < entity_draw_order_.size()) {
+    usize batch_end = batch_begin + 1U;
+    while (batch_end < entity_draw_order_.size() &&
+           same_entity_batch(*entity_draw_order_[batch_begin], *entity_draw_order_[batch_end])) {
+      ++batch_end;
+    }
+
+    const EntityDrawItem& first_draw = *entity_draw_order_[batch_begin];
+    const EntityModelAsset& model = entity_models_.find(first_draw.model_id)->second;
+    EntityGpuModel& gpu = entity_gpu_models_.find(first_draw.model_id)->second;
+    const auto bone_count = static_cast<GLsizei>(model.bones.size());
+    for (usize bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
+      entity_bone_pivots_[bone_index] = model.bones[bone_index].pivot;
+    }
+    std::span<Vec3f> bone_rotations{
+        entity_bone_rotations_.data(),
+        model.bones.size()};
+    sample_entity_model_animation(
+        model,
+        first_draw.animation_name,
+        first_draw.animation_time_seconds,
+        bone_rotations);
+    glUniform1i(entity_bone_count_uniform_, bone_count);
+    if (bone_count > 0) {
+      glUniform3fv(
+          entity_bone_pivots_uniform_,
+          bone_count,
+          reinterpret_cast<const GLfloat*>(entity_bone_pivots_.data()));
+      glUniform3fv(
+          entity_bone_rotations_uniform_,
+          bone_count,
+          reinterpret_cast<const GLfloat*>(entity_bone_rotations_.data()));
+    }
+
+    entity_instances_.clear();
+    entity_instances_.reserve(batch_end - batch_begin);
+    for (usize index = batch_begin; index < batch_end; ++index) {
+      const EntityDrawItem& draw = *entity_draw_order_[index];
+      entity_instances_.push_back({draw.position, draw.rotation, draw.scale});
+    }
+
+    glBindVertexArray(gpu.vao);
+    const GLsizeiptr instance_bytes =
+        static_cast<GLsizeiptr>(entity_instances_.size() * sizeof(EntityInstanceData));
+    ensure_buffer_capacity(
+        GL_ARRAY_BUFFER,
+        gpu.instance_buffer,
+        gpu.instance_capacity_bytes,
+        instance_bytes,
+        GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, instance_bytes, entity_instances_.data());
+    glDrawElementsInstanced(
+        GL_TRIANGLES,
+        gpu.index_count,
+        GL_UNSIGNED_INT,
+        nullptr,
+        static_cast<GLsizei>(entity_instances_.size()));
+    ++draw_calls_last_frame_;
+
+    batch_begin = batch_end;
+  }
+
+  glBindVertexArray(0);
+  glUseProgram(0);
 }
 
 void OpenGLRenderer::draw_ui() {

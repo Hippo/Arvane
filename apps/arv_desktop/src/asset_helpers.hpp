@@ -3,12 +3,23 @@
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/client/ui.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
+#include "arv/render/entity_model.hpp"
 #include "arv/render/render_types.hpp"
 
 #include <array>
+#include <vector>
 
 namespace arv::desktop {
+
+struct EntityRenderAssets {
+  asset::TextureAtlas texture_atlas{};
+  std::vector<render::EntityModelAsset> models{};
+  HashMap<EntityTypeID, render::EntityModelID> model_by_type{};
+};
+
+using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>;
 
 [[nodiscard]] render::TextureUploadData texture_upload_from_image(const asset::Image& image);
 
@@ -26,5 +37,9 @@ namespace arv::desktop {
 [[nodiscard]] asset::TextureAtlasResult build_item_texture_atlas(
     asset::ResourceManager& resources,
     const player::ItemRegistry& item_registry);
+
+[[nodiscard]] EntityRenderAssetsResult build_entity_render_assets(
+    asset::ResourceManager& resources,
+    const entity::EntityRegistry& entity_registry);
 
 } // namespace arv::desktop

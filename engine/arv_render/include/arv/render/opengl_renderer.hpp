@@ -1,10 +1,12 @@
 #pragma once
 
 #include "arv/core/types.hpp"
+#include "arv/render/entity_model.hpp"
 #include "arv/render/render_types.hpp"
 
 #include <glad/glad.h>
 
+#include <array>
 #include <deque>
 #include <string>
 #include <vector>
@@ -14,10 +16,14 @@ namespace arv::render {
 class OpenGLRenderer final : public IRenderer {
 public:
   void set_chunk_shader_sources(std::string vertex_source, std::string fragment_source);
+  void set_entity_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_ui_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_chunk_texture_atlas(TextureUploadData upload);
+  void set_entity_texture_atlas(TextureUploadData upload);
   void set_ui_font_atlas(TextureUploadData upload);
   void set_ui_item_atlas(TextureUploadData upload);
+  void set_entity_model(EntityModelAsset model);
+  void clear_entity_models();
 
   void resize(u32 width, u32 height) override;
 
@@ -88,6 +94,23 @@ private:
     u32 height{};
   };
 
+  static constexpr usize MaxEntityShaderBones = 128;
+
+  struct EntityGpuModel {
+    GLuint vao{};
+    GLuint vertex_buffer{};
+    GLuint index_buffer{};
+    GLuint instance_buffer{};
+    GLsizeiptr instance_capacity_bytes{};
+    GLsizei index_count{};
+  };
+
+  struct EntityInstanceData {
+    Vec3f position{};
+    Quatf rotation{};
+    f32 scale{1.0F};
+  };
+
   void process_chunk_mesh_uploads();
 
   [[nodiscard]] bool upload_chunk_mesh_now(ChunkMeshUpload upload);
@@ -104,14 +127,20 @@ private:
 
   static void destroy_gpu_texture(GpuTexture& texture);
 
+  [[nodiscard]] static EntityGpuModel create_entity_gpu_model(const EntityModelAsset& model);
+
+  static void destroy_entity_gpu_model(EntityGpuModel& model);
+
   [[nodiscard]] static GpuTexture create_texture(const TextureUploadData& upload, bool mipmaps);
 
   [[nodiscard]] static GLuint compile_shader(GLenum type, const char* source);
 
   [[nodiscard]] bool ensure_chunk_program();
+  [[nodiscard]] bool ensure_entity_program();
   [[nodiscard]] bool ensure_ui_program();
 
   void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
+  void draw_entities();
   void draw_ui();
   void draw_ui_quads();
   void ensure_ui_buffers();
@@ -142,18 +171,37 @@ private:
   GLint chunk_alpha_uniform_{-1};
   GLint chunk_atlas_size_uniform_{-1};
   GLint chunk_terrain_atlas_uniform_{-1};
+  GLuint entity_program_{};
+  GLint entity_camera_position_uniform_{-1};
+  GLint entity_camera_forward_uniform_{-1};
+  GLint entity_camera_right_uniform_{-1};
+  GLint entity_camera_up_uniform_{-1};
+  GLint entity_camera_aspect_uniform_{-1};
+  GLint entity_camera_fov_y_uniform_{-1};
+  GLint entity_camera_near_uniform_{-1};
+  GLint entity_camera_far_uniform_{-1};
+  GLint entity_atlas_size_uniform_{-1};
+  GLint entity_atlas_uniform_{-1};
+  GLint entity_bone_count_uniform_{-1};
+  GLint entity_bone_pivots_uniform_{-1};
+  GLint entity_bone_rotations_uniform_{-1};
   GLuint ui_program_{};
   GLint ui_viewport_uniform_{-1};
   GLint ui_texture_uniform_{-1};
   std::string chunk_vertex_shader_source_{};
   std::string chunk_fragment_shader_source_{};
+  std::string entity_vertex_shader_source_{};
+  std::string entity_fragment_shader_source_{};
   std::string ui_vertex_shader_source_{};
   std::string ui_fragment_shader_source_{};
   FramePacket frame_{};
   HashMap<ChunkMeshKey, ChunkGpuState> chunks_;
+  HashMap<EntityModelID, EntityModelAsset> entity_models_;
+  HashMap<EntityModelID, EntityGpuModel> entity_gpu_models_;
   std::deque<ChunkMeshUpload> pending_chunk_mesh_uploads_;
   std::vector<ChunkMeshUploadReceipt> chunk_mesh_upload_receipts_;
   GpuTexture terrain_atlas_{};
+  GpuTexture entity_atlas_{};
   GpuTexture font_atlas_{};
   GpuTexture item_atlas_{};
   GpuTexture white_texture_{};
@@ -163,6 +211,10 @@ private:
   GLsizeiptr ui_vertex_capacity_bytes_{};
   GLsizeiptr ui_index_capacity_bytes_{};
   bool gpu_profile_context_initialized_{};
+  std::vector<const EntityDrawItem*> entity_draw_order_;
+  std::vector<EntityInstanceData> entity_instances_;
+  std::array<Vec3f, MaxEntityShaderBones> entity_bone_pivots_{};
+  std::array<Vec3f, MaxEntityShaderBones> entity_bone_rotations_{};
   std::vector<UIVertex> ui_vertices_;
   std::vector<u32> ui_indices_;
 };

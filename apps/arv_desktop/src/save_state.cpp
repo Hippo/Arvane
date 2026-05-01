@@ -76,6 +76,11 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
   return players;
 }
 
+std::vector<entity::PersistentEntityRecord> capture_saved_entities(
+    const world::WorldRuntime& world) {
+  return world.persistent_entity_records();
+}
+
 void apply_loaded_player_saves(
     server::ServerRuntime& server,
     std::string_view world_name,

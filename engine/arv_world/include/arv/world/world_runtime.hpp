@@ -4,6 +4,7 @@
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/voxel/storage.hpp"
 #include "arv/world/fluid_solver.hpp"
@@ -11,10 +12,13 @@
 #include "arv/world/world_lighting.hpp"
 #include "arv/world/world_generation.hpp"
 
+#include <entt/entt.hpp>
+
 #include <array>
 #include <deque>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -52,6 +56,32 @@ struct WorldTickStats {
   u32 scheduled_ticks_processed{};
   u32 block_updates_processed{};
   u32 fluid_updates_processed{};
+  u32 entity_updates_processed{};
+};
+
+enum class EntityDespawnReason : u16 {
+  Removed,
+  WorldUnload,
+  Transfer,
+};
+
+struct EntityCreateInfo {
+  EntityTypeID type_id{};
+  std::string type_name{};
+  Vec3f position{};
+  Quatf rotation{};
+  Vec3f velocity{};
+  bool persistent{};
+  std::string persistent_uuid{};
+  bool replicated{true};
+  std::optional<PlayerID> owning_player{};
+  std::optional<player::PlayerState> player_state{};
+};
+
+struct ReplicatedBlockUpdate {
+  BlockPos pos{};
+  voxel::BlockVariantID new_state{};
+  TickIndex server_tick{};
 };
 
 class WorldRuntime {
@@ -111,6 +141,30 @@ public:
       std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
       std::array<voxel::LightWord, voxel::ChunkVolume> lights,
       std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids = std::nullopt) noexcept;
+  [[nodiscard]] EntityID create_entity(EntityCreateInfo info = {});
+  bool destroy_entity(EntityID entity_id, EntityDespawnReason reason = EntityDespawnReason::Removed);
+  void flush_entity_despawns();
+  [[nodiscard]] bool entity_exists(EntityID entity_id) const noexcept;
+  [[nodiscard]] usize entity_count() const noexcept;
+  [[nodiscard]] std::vector<EntityID> entity_ids() const;
+  [[nodiscard]] std::optional<EntityID> entity_for_player(PlayerID player_id) const noexcept;
+  [[nodiscard]] std::optional<PlayerID> player_for_entity(EntityID entity_id) const noexcept;
+  [[nodiscard]] std::optional<EntityNetID> network_id_for_entity(EntityID entity_id) const noexcept;
+  [[nodiscard]] std::optional<ChunkCoord> entity_chunk(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::EntityTransform* find_entity_transform(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::EntityTransform* find_entity_transform(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::EntityVelocity* find_entity_velocity(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::EntityVelocity* find_entity_velocity(EntityID entity_id) const noexcept;
+  [[nodiscard]] const entity::EntityType* find_entity_type(EntityID entity_id) const noexcept;
+  [[nodiscard]] bool entity_is_persistent(EntityID entity_id) const noexcept;
+  bool set_entity_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept;
+  bool set_entity_position(EntityID entity_id, Vec3f position) noexcept;
+  [[nodiscard]] std::vector<entity::EntitySnapshotEntry> collect_entity_snapshots() const;
+  [[nodiscard]] std::vector<entity::PersistentEntityRecord> persistent_entity_records() const;
+  void restore_persistent_entities(
+      std::span<const entity::PersistentEntityRecord> records,
+      const entity::EntityRegistry* entity_registry = nullptr);
+  u32 tick_entities();
   player::PlayerState& ensure_player(PlayerID player_id);
   [[nodiscard]] player::PlayerState* find_player(PlayerID player_id) noexcept;
   [[nodiscard]] const player::PlayerState* find_player(PlayerID player_id) const noexcept;
@@ -154,6 +208,7 @@ public:
   WorldTickStats tick(
       const voxel::BlockRegistry& registry,
       const voxel::FluidDefinition& fluid_definition);
+  [[nodiscard]] std::vector<ReplicatedBlockUpdate> drain_replicated_block_updates();
   [[nodiscard]] std::vector<ChunkCoord> dirty_chunks(voxel::ChunkDirtyFlags flag) const;
   [[nodiscard]] std::vector<ChunkCoord> consume_dirty_mesh_chunks(
       voxel::ChunkDirtyFlags flag);
@@ -201,10 +256,19 @@ private:
   void mark_neighbor_light_dependency_dirty(ChunkCoord coord) noexcept;
   u32 process_due_scheduled_ticks();
   u32 drain_block_updates(u32 budget);
+  [[nodiscard]] entt::entity entity_handle(EntityID entity_id) const noexcept;
+  [[nodiscard]] ChunkCoord chunk_for_position(Vec3f position) const noexcept;
+  void update_entity_chunk(entt::entity handle) noexcept;
+  void record_replicated_block_update(BlockPos pos, voxel::BlockVariantID new_state);
 
   WorldID id_{};
   StableHashMap<ChunkCoord, voxel::ChunkSection> chunks_;
-  StableHashMap<PlayerID, player::PlayerState> players_;
+  entt::registry entity_registry_;
+  StableHashMap<EntityID, entt::entity> entity_handles_;
+  StableHashMap<PlayerID, EntityID> player_entities_;
+  std::vector<EntityID> pending_entity_despawns_;
+  u64 next_entity_id_{1};
+  u32 next_entity_net_id_{1};
   RegionRegistry regions_{};
   StableHashMap<PlayerID, PlayerRegionState> player_region_states_;
   TickIndex tick_index_{};
@@ -217,6 +281,7 @@ private:
   std::deque<FluidUpdate> fluid_updates_;
   HashMap<BlockPos, FluidUpdate> pending_fluid_updates_by_position_;
   HashMap<ChunkCoord, std::vector<FluidUpdate>> deferred_boundary_fluid_updates_;
+  std::vector<ReplicatedBlockUpdate> replicated_block_updates_;
   std::deque<ChunkCoord> dirty_mesh_chunks_;
   HashSet<ChunkCoord> dirty_mesh_chunk_set_;
 };

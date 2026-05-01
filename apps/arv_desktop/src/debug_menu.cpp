@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cctype>
 #include <cstddef>
 #include <optional>
@@ -67,6 +68,47 @@ namespace {
     std::string_view name) {
   const std::optional<player::ItemID> id = registry.find_item(name);
   return id.has_value() ? registry.item(id.value()) : nullptr;
+}
+
+[[nodiscard]] std::vector<const entity::EntityTypeRecord*> filtered_entity_types(
+    const entity::EntityRegistry& registry,
+    std::string_view filter) {
+  std::vector<const entity::EntityTypeRecord*> types;
+  types.reserve(registry.type_count());
+  for (const entity::EntityTypeRecord& type : registry.records()) {
+    if (!type.spawnable) {
+      continue;
+    }
+    if (contains_case_insensitive(type.name, filter) ||
+        contains_case_insensitive(type.display_name, filter) ||
+        contains_case_insensitive(type.category, filter) ||
+        contains_case_insensitive(type.model_asset, filter)) {
+      types.emplace_back(&type);
+    }
+  }
+  return types;
+}
+
+[[nodiscard]] const entity::EntityTypeRecord* selected_entity_type(
+    const entity::EntityRegistry& registry,
+    std::string_view name) {
+  const std::optional<EntityTypeID> id = registry.find_type(name);
+  return id.has_value() ? registry.type(id.value()) : nullptr;
+}
+
+[[nodiscard]] std::optional<EntityID> parse_entity_id(std::string_view text) noexcept {
+  if (text.empty()) {
+    return std::nullopt;
+  }
+
+  u64 value = 0;
+  const char* begin = text.data();
+  const char* end = begin + text.size();
+  const std::from_chars_result parsed = std::from_chars(begin, end, value);
+  if (parsed.ec != std::errc{} || parsed.ptr != end || value == 0U) {
+    return std::nullopt;
+  }
+  return EntityID{value};
 }
 
 [[nodiscard]] f32 frame_sample(double milliseconds) noexcept {
@@ -278,6 +320,240 @@ void render_player_tab(
   return inventory_changed;
 }
 
+void render_entities_tab(
+    DebugMenuState& state,
+    server::ServerRuntime& server,
+    const entity::EntityRegistry& entity_registry) {
+  world::WorldRuntime& world = server.voxel_world();
+  const std::vector<EntityID> entity_ids = world.entity_ids();
+  ImGui::Text("Runtime entities: %zu", entity_ids.size());
+  ImGui::Text("Dropped item stacks: %zu", server.dropped_item_stacks().size());
+
+  ImGui::SeparatorText("Spawn");
+  ImGui::InputText("Search types", &state.entity_filter);
+  std::vector<const entity::EntityTypeRecord*> types =
+      filtered_entity_types(entity_registry, state.entity_filter);
+  if (state.selected_entity_type_name.empty() && !types.empty()) {
+    const entity::EntityTypeRecord* type = types.front();
+    state.selected_entity_type_name = type->name;
+    state.entity_persistent = type->persistent_by_default;
+    state.entity_replicated = type->replicated_by_default;
+  }
+
+  const char* preview = state.selected_entity_type_name.empty()
+                            ? "Select entity type"
+                            : state.selected_entity_type_name.c_str();
+  if (ImGui::BeginCombo("Entity type", preview)) {
+    for (const entity::EntityTypeRecord* type : types) {
+      const bool selected = type->name == state.selected_entity_type_name;
+      const std::string label = type->display_name.empty()
+                                    ? type->name
+                                    : type->display_name + " (" + type->name + ")";
+      if (ImGui::Selectable(label.c_str(), selected)) {
+        state.selected_entity_type_name = type->name;
+        state.entity_persistent = type->persistent_by_default;
+        state.entity_replicated = type->replicated_by_default;
+      }
+      if (selected) {
+        ImGui::SetItemDefaultFocus();
+      }
+    }
+    ImGui::EndCombo();
+  }
+
+  const entity::EntityTypeRecord* selected_type =
+      selected_entity_type(entity_registry, state.selected_entity_type_name);
+  if (selected_type != nullptr) {
+    ImGui::Text("Display name: %s", selected_type->display_name.c_str());
+    ImGui::Text("Category: %s", selected_type->category.empty() ? "none" : selected_type->category.c_str());
+    ImGui::Text("Model: %s", selected_type->model_asset.empty() ? "none" : selected_type->model_asset.c_str());
+    ImGui::Text("Type ID: %u", selected_type->id.value);
+  }
+
+  ImGui::Checkbox("Spawn at player", &state.entity_spawn_at_player);
+  if (state.entity_spawn_at_player) {
+    ImGui::InputFloat3("Player offset", state.entity_spawn_offset);
+  } else {
+    ImGui::InputFloat3("World position", state.entity_spawn_position);
+  }
+  ImGui::Checkbox("Persistent", &state.entity_persistent);
+  ImGui::SameLine();
+  ImGui::Checkbox("Replicated", &state.entity_replicated);
+  if (state.entity_persistent) {
+    ImGui::InputText("Persistent UUID", &state.entity_persistent_uuid);
+  }
+
+  const player::PlayerState* local_player = local_player_state(server);
+  const bool can_spawn =
+      selected_type != nullptr && (!state.entity_spawn_at_player || local_player != nullptr);
+  if (!can_spawn) {
+    ImGui::BeginDisabled();
+  }
+  if (ImGui::Button("Spawn entity")) {
+    Vec3f position{
+        state.entity_spawn_position[0],
+        state.entity_spawn_position[1],
+        state.entity_spawn_position[2]};
+    if (state.entity_spawn_at_player && local_player != nullptr) {
+      position = {
+          local_player->position.x + state.entity_spawn_offset[0],
+          local_player->position.y + state.entity_spawn_offset[1],
+          local_player->position.z + state.entity_spawn_offset[2]};
+    }
+
+    world::EntityCreateInfo info;
+    info.type_id = selected_type->id;
+    info.type_name = selected_type->name;
+    info.position = position;
+    info.persistent = state.entity_persistent;
+    info.persistent_uuid = state.entity_persistent_uuid;
+    info.replicated = state.entity_replicated;
+    const EntityID spawned = world.create_entity(std::move(info));
+    state.selected_entity_id = std::to_string(spawned.value);
+    state.console_log.emplace_back("Spawned entity " + state.selected_entity_id + " (" +
+                                   selected_type->name + ").");
+  }
+  if (!can_spawn) {
+    ImGui::EndDisabled();
+  }
+  if (state.entity_spawn_at_player && local_player == nullptr) {
+    ImGui::TextUnformatted("No local player is available for player-relative spawning.");
+  }
+
+  ImGui::SeparatorText("Selected Entity");
+  ImGui::InputText("Entity ID", &state.selected_entity_id);
+  const std::optional<EntityID> selected_entity = parse_entity_id(state.selected_entity_id);
+  const bool selected_exists =
+      selected_entity.has_value() && world.entity_exists(selected_entity.value());
+  const bool selected_is_player =
+      selected_entity.has_value() && world.player_for_entity(selected_entity.value()).has_value();
+  if (selected_exists) {
+    const entity::EntityTransform* transform =
+        world.find_entity_transform(selected_entity.value());
+    if (transform != nullptr) {
+      ImGui::Text(
+          "Position: %.2f, %.2f, %.2f",
+          static_cast<double>(transform->position.x),
+          static_cast<double>(transform->position.y),
+          static_cast<double>(transform->position.z));
+    }
+  } else if (!state.selected_entity_id.empty()) {
+    ImGui::TextUnformatted("Selected entity is not loaded.");
+  }
+
+  if (!selected_exists || selected_is_player) {
+    ImGui::BeginDisabled();
+  }
+  if (ImGui::Button("Move selected to spawn position")) {
+    Vec3f position{
+        state.entity_spawn_position[0],
+        state.entity_spawn_position[1],
+        state.entity_spawn_position[2]};
+    if (state.entity_spawn_at_player && local_player != nullptr) {
+      position = {
+          local_player->position.x + state.entity_spawn_offset[0],
+          local_player->position.y + state.entity_spawn_offset[1],
+          local_player->position.z + state.entity_spawn_offset[2]};
+    }
+    if (world.set_entity_position(selected_entity.value(), position)) {
+      state.console_log.emplace_back("Moved entity " + state.selected_entity_id + ".");
+    }
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Destroy selected")) {
+    if (world.destroy_entity(selected_entity.value())) {
+      state.console_log.emplace_back("Queued entity " + state.selected_entity_id + " for despawn.");
+    }
+  }
+  if (!selected_exists || selected_is_player) {
+    ImGui::EndDisabled();
+  }
+
+  if (selected_exists) {
+    const entity::EntityTransform* transform =
+        world.find_entity_transform(selected_entity.value());
+    if (transform != nullptr && ImGui::Button("Use selected position")) {
+      state.entity_spawn_position[0] = transform->position.x;
+      state.entity_spawn_position[1] = transform->position.y;
+      state.entity_spawn_position[2] = transform->position.z;
+      state.entity_spawn_at_player = false;
+    }
+  }
+
+  ImGui::SeparatorText("Loaded Entities");
+  if (ImGui::BeginTable(
+          "LoadedEntities",
+          8,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
+              ImGuiTableFlags_ScrollY,
+          ImVec2{0.0F, 220.0F})) {
+    ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 72.0F);
+    ImGui::TableSetupColumn("Net", ImGuiTableColumnFlags_WidthFixed, 72.0F);
+    ImGui::TableSetupColumn("Type");
+    ImGui::TableSetupColumn("Position");
+    ImGui::TableSetupColumn("Chunk");
+    ImGui::TableSetupColumn("Owner", ImGuiTableColumnFlags_WidthFixed, 72.0F);
+    ImGui::TableSetupColumn("Persistent", ImGuiTableColumnFlags_WidthFixed, 82.0F);
+    ImGui::TableSetupColumn("Replicated", ImGuiTableColumnFlags_WidthFixed, 82.0F);
+    ImGui::TableHeadersRow();
+
+    for (const EntityID entity_id : entity_ids) {
+      const std::string id_label = std::to_string(entity_id.value);
+      const entity::EntityType* type = world.find_entity_type(entity_id);
+      const entity::EntityTransform* transform = world.find_entity_transform(entity_id);
+      const std::optional<EntityNetID> net_id = world.network_id_for_entity(entity_id);
+      const std::optional<ChunkCoord> chunk = world.entity_chunk(entity_id);
+      const std::optional<PlayerID> owner = world.player_for_entity(entity_id);
+      const bool selected = state.selected_entity_id == id_label;
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      if (ImGui::Selectable(id_label.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns)) {
+        state.selected_entity_id = id_label;
+      }
+      ImGui::TableNextColumn();
+      if (net_id.has_value()) {
+        ImGui::Text("%u", net_id->value);
+      } else {
+        ImGui::TextUnformatted("-");
+      }
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(type == nullptr ? "unknown" : type->type_name.c_str());
+      ImGui::TableNextColumn();
+      if (transform != nullptr) {
+        ImGui::Text(
+            "%.1f, %.1f, %.1f",
+            static_cast<double>(transform->position.x),
+            static_cast<double>(transform->position.y),
+            static_cast<double>(transform->position.z));
+      } else {
+        ImGui::TextUnformatted("-");
+      }
+      ImGui::TableNextColumn();
+      if (chunk.has_value()) {
+        ImGui::Text(
+            "%d, %d, %d",
+            chunk->value.x,
+            chunk->value.y,
+            chunk->value.z);
+      } else {
+        ImGui::TextUnformatted("-");
+      }
+      ImGui::TableNextColumn();
+      if (owner.has_value()) {
+        ImGui::Text("%llu", static_cast<unsigned long long>(owner->value));
+      } else {
+        ImGui::TextUnformatted("-");
+      }
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(world.entity_is_persistent(entity_id) ? "yes" : "no");
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(net_id.has_value() ? "yes" : "no");
+    }
+    ImGui::EndTable();
+  }
+}
+
 void render_world_tab(
     const DebugMenuFrameInfo& frame_info,
     const server::ServerRuntime& server) {
@@ -473,6 +749,7 @@ DebugMenuResult render_debug_menu(
     server::ServerRuntime& server,
     client::ClientRuntime& client,
     const player::ItemRegistry& item_registry,
+    const entity::EntityRegistry& entity_registry,
     const sched::Scheduler& world_jobs,
     const render::OpenGLRenderer& renderer) {
   DebugMenuResult result;
@@ -510,7 +787,7 @@ DebugMenuResult render_debug_menu(
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Entities")) {
-      ImGui::Text("Dropped item stacks: %zu", server.dropped_item_stacks().size());
+      render_entities_tab(state, server, entity_registry);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Networking")) {

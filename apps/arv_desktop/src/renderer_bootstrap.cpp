@@ -24,6 +24,22 @@ bool configure_renderer(
       std::move(chunk_vertex_shader.value()),
       std::move(chunk_fragment_shader.value()));
 
+  auto entity_vertex_shader =
+      resources.load_text({"arvane:shader/entity/entity.vert"}, asset::AssetKind::ShaderSource);
+  if (!entity_vertex_shader) {
+    arv::core::error("assets", entity_vertex_shader.error().message);
+    return false;
+  }
+  auto entity_fragment_shader =
+      resources.load_text({"arvane:shader/entity/entity.frag"}, asset::AssetKind::ShaderSource);
+  if (!entity_fragment_shader) {
+    arv::core::error("assets", entity_fragment_shader.error().message);
+    return false;
+  }
+  renderer.set_entity_shader_sources(
+      std::move(entity_vertex_shader.value()),
+      std::move(entity_fragment_shader.value()));
+
   auto ui_vertex_shader =
       resources.load_text({"arvane:shader/ui/ui.vert"}, asset::AssetKind::ShaderSource);
   if (!ui_vertex_shader) {

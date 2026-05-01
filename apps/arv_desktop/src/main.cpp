@@ -17,6 +17,7 @@
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/profiling.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/io/input_bindings.hpp"
 #include "arv/net/in_process_transport.hpp"
@@ -61,6 +62,16 @@ namespace {
     const arv::server::ServerRuntime& server) noexcept {
   const arv::server::ServerSession* session = local_session(server);
   return session == nullptr ? nullptr : server.voxel_world().find_player(session->player_id);
+}
+
+[[nodiscard]] arv::Vec3f interpolate(
+    arv::Vec3f from,
+    arv::Vec3f to,
+    arv::f32 alpha) noexcept {
+  return {
+      from.x + (to.x - from.x) * alpha,
+      from.y + (to.y - from.y) * alpha,
+      from.z + (to.z - from.z) * alpha};
 }
 
 [[nodiscard]] arv::player::PlayerTuning make_player_tuning(
@@ -135,8 +146,7 @@ namespace {
 }
 
 [[nodiscard]] bool apply_inventory_action(
-    arv::server::ServerRuntime& server,
-    arv::PlayerID player_id,
+    arv::client::ClientRuntime& client,
     const std::optional<arv::client::UiAction>& action,
     arv::player::InventoryClickButton button) {
   if (!action.has_value()) {
@@ -144,7 +154,7 @@ namespace {
   }
   if (const std::optional<arv::usize> slot = inventory_slot_from_ui_action(action.value());
       slot.has_value()) {
-    (void)server.apply_player_inventory_click(player_id, slot.value(), button);
+    (void)client.request_inventory_slot_click(slot.value(), button);
     return true;
   }
   return false;
@@ -152,8 +162,7 @@ namespace {
 
 [[nodiscard]] bool route_inventory_mouse_input(
     arv::client::UiTree& ui_tree,
-    arv::server::ServerRuntime& server,
-    arv::PlayerID player_id,
+    arv::client::ClientRuntime& client,
     const arv::platform::InputSnapshot& platform_input,
     bool has_carried_stack) {
   bool changed = false;
@@ -162,26 +171,24 @@ namespace {
   if (platform_input.mouse_left_pressed) {
     const std::optional<arv::client::UiNodeID> hit = ui_tree.hit_test(cursor);
     changed = apply_inventory_action(
-                  server,
-                  player_id,
+                  client,
                   ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Left),
                   arv::player::InventoryClickButton::Primary) ||
               changed;
     if (!changed && !hit.has_value() && has_carried_stack) {
-      (void)server.drop_player_inventory_cursor(player_id);
+      (void)client.request_inventory_drop_cursor(false);
       changed = true;
     }
   }
   if (platform_input.mouse_right_pressed) {
     const std::optional<arv::client::UiNodeID> hit = ui_tree.hit_test(cursor);
     changed = apply_inventory_action(
-                  server,
-                  player_id,
+                  client,
                   ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Right),
                   arv::player::InventoryClickButton::Secondary) ||
               changed;
     if (!changed && !hit.has_value() && has_carried_stack) {
-      (void)server.drop_one_from_player_inventory_cursor(player_id);
+      (void)client.request_inventory_drop_cursor(true);
       changed = true;
     }
   }
@@ -406,6 +413,51 @@ int main(int argc, char** argv) {
   renderer.set_ui_item_atlas(
       arv::desktop::texture_upload_from_image(item_atlas.pages.front().image));
 
+  auto entity_definition_text = arv::io::read_text_file(
+      config.paths.config_path() / "entities.json",
+      "startup entity definitions");
+  if (!entity_definition_text) {
+    arv::core::error("entities", entity_definition_text.error().message);
+    return 1;
+  }
+  auto entity_definitions =
+      arv::entity::parse_entity_definitions_json(entity_definition_text.value());
+  if (!entity_definitions) {
+    arv::core::error("entities", entity_definitions.error().message);
+    return 1;
+  }
+  auto entity_registry_result =
+      arv::entity::EntityRegistry::build_with_builtins(std::move(entity_definitions.value()));
+  if (!entity_registry_result) {
+    arv::core::error("entities", entity_registry_result.error().message);
+    return 1;
+  }
+  const arv::entity::EntityRegistry entity_registry =
+      std::move(entity_registry_result.value());
+
+  auto entity_render_assets_result =
+      arv::desktop::build_entity_render_assets(resources, entity_registry);
+  if (!entity_render_assets_result) {
+    arv::core::error("entities", entity_render_assets_result.error().message);
+    return 1;
+  }
+  const arv::desktop::EntityRenderAssets entity_render_assets =
+      std::move(entity_render_assets_result.value());
+  if (!entity_render_assets.models.empty()) {
+    if (entity_render_assets.texture_atlas.pages.empty()) {
+      arv::core::error("entities", "entity models were loaded without an entity texture atlas");
+      return 1;
+    }
+    arv::render::TextureUploadData entity_atlas_upload =
+        arv::desktop::texture_upload_from_image(entity_render_assets.texture_atlas.pages.front().image);
+    entity_atlas_upload.limit_mipmap_levels = true;
+    entity_atlas_upload.max_mipmap_level = entity_render_assets.texture_atlas.mip_safe_max_level;
+    renderer.set_entity_texture_atlas(std::move(entity_atlas_upload));
+    for (const arv::render::EntityModelAsset& model : entity_render_assets.models) {
+      renderer.set_entity_model(model);
+    }
+  }
+
   const std::filesystem::path save_root = arv::desktop::default_save_root(config);
   auto loaded_save_result =
       arv::persistence::load_server_root(save_root, block_registry, item_registry);
@@ -493,21 +545,28 @@ int main(int argc, char** argv) {
   const arv::sched::RuntimeThreadBudgetPlan thread_budget =
       arv::sched::plan_runtime_thread_budget(thread_budget_config);
 
+  arv::server::ServerStartInfo server_start_info;
+  server_start_info.mode = arv::server::ServerMode::Integrated;
+  server_start_info.base_tps = config.simulation.base_tps;
+  server_start_info.listen_address = {"in-process", 0};
+  server_start_info.block_registry = &block_registry;
+  server_start_info.item_registry = &item_registry;
+  server_start_info.player_tuning = player_tuning;
+  server_start_info.fluid_definition = water_fluid;
+  server_start_info.chunk_streaming = chunk_streaming;
+  server_start_info.chunk_generation = chunk_generation;
+  server_start_info.max_generation_results_per_tick =
+      config.chunk_pipeline.max_generation_results_per_tick;
+  server_start_info.max_lighting_results_per_tick =
+      config.chunk_pipeline.max_lighting_results_per_tick;
+  server_start_info.max_pending_generation_jobs =
+      config.chunk_pipeline.max_generation_jobs_per_frame;
+  server_start_info.worker_threads = thread_budget.primary_workers;
+  server_start_info.world_tick_policy = world_tick_policy;
+  server_start_info.entity_registry = &entity_registry;
+
   arv::server::ServerRuntime integrated_server(std::move(transport_pair.server));
-  auto server_start = integrated_server.start({arv::server::ServerMode::Integrated,
-                                               config.simulation.base_tps,
-                                               {"in-process", 0},
-                                               &block_registry,
-                                               &item_registry,
-                                               player_tuning,
-                                               water_fluid,
-                                               chunk_streaming,
-                                               chunk_generation,
-                                               config.chunk_pipeline.max_generation_results_per_tick,
-                                               config.chunk_pipeline.max_lighting_results_per_tick,
-                                               config.chunk_pipeline.max_generation_jobs_per_frame,
-                                               thread_budget.primary_workers,
-                                               world_tick_policy});
+  auto server_start = integrated_server.start(server_start_info);
   if (!server_start) {
     arv::core::error("server", server_start.error().message);
     return 1;
@@ -523,6 +582,9 @@ int main(int argc, char** argv) {
         chunk.lights,
         chunk.fluids);
   }
+  integrated_server.voxel_world().restore_persistent_entities(
+      loaded_save.entities,
+      &entity_registry);
 
   arv::client::ClientRuntime client(std::move(transport_pair.client));
   client.set_player_tuning(player_tuning);
@@ -537,6 +599,7 @@ int main(int argc, char** argv) {
   arv::desktop::ChunkViewState chunk_view;
   std::deque<arv::protocol::ChunkUnload> pending_client_chunk_unloads;
   std::deque<arv::protocol::ChunkData> pending_client_chunk_data;
+  std::deque<arv::protocol::BlockUpdateBatch> pending_client_block_updates;
   auto collect_client_chunk_stream = [&]() {
     std::vector<arv::protocol::ChunkUnload> drained_unloads =
         client.drain_received_chunk_unloads();
@@ -548,6 +611,12 @@ int main(int argc, char** argv) {
         client.drain_received_chunk_data();
     for (arv::protocol::ChunkData& data : drained_chunks) {
       pending_client_chunk_data.emplace_back(std::move(data));
+    }
+
+    std::vector<arv::protocol::BlockUpdateBatch> drained_block_updates =
+        client.drain_received_block_updates();
+    for (arv::protocol::BlockUpdateBatch& batch : drained_block_updates) {
+      pending_client_block_updates.emplace_back(std::move(batch));
     }
   };
   auto apply_pending_client_chunk_stream = [&](arv::u32 chunk_budget, arv::u32 unload_budget) {
@@ -586,6 +655,23 @@ int main(int argc, char** argv) {
           std::move(lights),
           std::move(data.fluids));
       changed = true;
+    }
+
+    while (!pending_client_block_updates.empty()) {
+      arv::protocol::BlockUpdateBatch batch = std::move(pending_client_block_updates.front());
+      pending_client_block_updates.pop_front();
+      if (batch.world_id != client_world.id()) {
+        continue;
+      }
+      for (const arv::protocol::BlockUpdate& update : batch.updates) {
+        if (client_world.find_chunk(arv::block_to_chunk(update.pos)) == nullptr) {
+          continue;
+        }
+        if (client_world.set_block(update.pos, update.new_state)) {
+          changed = true;
+        }
+      }
+      (void)client_world.drain_replicated_block_updates();
     }
 
     if (changed) {
@@ -637,6 +723,7 @@ int main(int argc, char** argv) {
 
   arv::core::FixedTimestepAccumulator ticks(config.simulation.base_tps);
   auto previous_time = std::chrono::steady_clock::now();
+  const auto app_start_time = previous_time;
   auto last_fps_display_time = previous_time;
   arv::u32 displayed_fps = 0;
   arv::u32 fps_sample_frames = 0;
@@ -652,15 +739,14 @@ int main(int argc, char** argv) {
   auto refresh_inventory_slots = [&]() {
     inventory_slots.clear();
     carried_inventory_stack.reset();
-    if (const arv::player::PlayerState* player_state = local_player_state(integrated_server);
-        player_state != nullptr) {
+    if (client.has_authoritative_inventory()) {
       inventory_slots = arv::desktop::inventory_slots_for_ui(
-          player_state->inventory,
+          client.inventory(),
           item_registry,
           item_atlas,
           block_atlas);
       carried_inventory_stack = arv::desktop::item_stack_for_ui(
-          player_state->inventory_cursor_stack,
+          client.inventory_cursor_stack(),
           item_registry,
           item_atlas,
           block_atlas);
@@ -712,16 +798,11 @@ int main(int argc, char** argv) {
     }
     bool inventory_changed_by_ui = false;
     if (!debug_menu.open && client.inventory_open()) {
-      if (const arv::server::ServerSession* session = local_session(integrated_server);
-          session != nullptr) {
-        const arv::player::PlayerState* player_state = local_player_state(integrated_server);
-        inventory_changed_by_ui = route_inventory_mouse_input(
-            ui_tree,
-            integrated_server,
-            session->player_id,
-            platform_input,
-            player_state != nullptr && player_state->inventory_cursor_stack.has_value());
-      }
+      inventory_changed_by_ui = route_inventory_mouse_input(
+          ui_tree,
+          client,
+          platform_input,
+          client.inventory_cursor_stack().has_value());
     } else if (!debug_menu.open && client.chat_open()) {
       route_ui_mouse_focus(ui_tree, platform_input);
     }
@@ -730,11 +811,8 @@ int main(int argc, char** argv) {
     }
     client.submit_input(std::move(client_input));
     if (was_inventory_open && !client.inventory_open()) {
-      if (const arv::server::ServerSession* session = local_session(integrated_server);
-          session != nullptr) {
-        (void)integrated_server.close_player_inventory_menu(session->player_id);
-        inventory_changed_by_ui = true;
-      }
+      (void)client.request_inventory_close();
+      inventory_changed_by_ui = true;
     }
     if (inventory_changed_by_ui) {
       refresh_inventory_slots();
@@ -775,14 +853,33 @@ int main(int argc, char** argv) {
       framebuffer = next_framebuffer;
       renderer.resize(framebuffer.width, framebuffer.height);
     }
+    const arv::f32 interpolation_alpha = ticks.interpolation_alpha();
     arv::render::FramePacket frame = client.build_frame_packet(
-        ticks.interpolation_alpha(),
+        interpolation_alpha,
         framebuffer.width,
         framebuffer.height);
     const std::vector<arv::render::ChunkDrawItem>& visible_chunks =
         arv::desktop::chunk_draw_items(chunk_view);
     frame.opaque_chunks = visible_chunks;
     frame.transparent_chunks = visible_chunks;
+    const arv::f32 entity_animation_time = std::chrono::duration<arv::f32>(now - app_start_time).count();
+    for (const arv::client::ReplicatedEntityMirror& mirror : client.replicated_entity_mirrors()) {
+      if (mirror.world_id != frame.world_view.world_id) {
+        continue;
+      }
+      const auto model = entity_render_assets.model_by_type.find(mirror.entity_type);
+      if (model == entity_render_assets.model_by_type.end()) {
+        continue;
+      }
+      arv::render::EntityDrawItem item;
+      item.model_id = model->second;
+      item.position = interpolate(mirror.previous_position, mirror.position, interpolation_alpha);
+      item.rotation = mirror.rotation;
+      item.scale = 1.0F;
+      item.animation_name = "walking";
+      item.animation_time_seconds = entity_animation_time;
+      frame.entities.push_back(std::move(item));
+    }
 
     const arv::desktop::DebugMenuResult debug_menu_result = arv::desktop::render_debug_menu(
         debug_menu,
@@ -797,6 +894,7 @@ int main(int argc, char** argv) {
         integrated_server,
         client,
         item_registry,
+        entity_registry,
         world_jobs,
         renderer);
     if (debug_menu_result.inventory_changed) {
@@ -923,6 +1021,8 @@ int main(int argc, char** argv) {
       arv::desktop::capture_saved_chunks(integrated_server.voxel_world());
   const std::vector<arv::persistence::PlayerSaveData> player_saves =
       arv::desktop::capture_player_saves(integrated_server, world_save_name);
+  const std::vector<arv::entity::PersistentEntityRecord> entity_saves =
+      arv::desktop::capture_saved_entities(integrated_server.voxel_world());
   const arv::persistence::SaveMetadata save_metadata{
       arv::persistence::CurrentSaveFormatVersion,
       std::string{arv::persistence::CurrentGameVersion},
@@ -943,6 +1043,7 @@ int main(int argc, char** argv) {
       world_metadata,
       saved_chunks,
       player_saves,
+      entity_saves,
       block_registry,
       item_registry);
 

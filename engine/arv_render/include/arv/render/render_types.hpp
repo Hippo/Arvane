@@ -18,11 +18,13 @@ struct MeshTag {};
 struct TextureTag {};
 struct MaterialTag {};
 struct ShaderTag {};
+struct EntityModelTag {};
 
 using MeshID = ID<MeshTag>;
 using TextureID = ID<TextureTag>;
 using MaterialID = ID<MaterialTag>;
 using ShaderID = ID<ShaderTag>;
+using EntityModelID = ID<EntityModelTag>;
 
 struct FogParams {
   Vec3f color{0.55F, 0.68F, 0.82F};
@@ -379,11 +381,27 @@ struct ChunkDrawItem {
   u64 expected_light_version{};
 };
 
+struct EntityDrawItem {
+  EntityModelID model_id{};
+  Vec3f position{};
+  Quatf rotation{};
+  f32 scale{1.0F};
+  f32 animation_time_seconds{};
+  std::string animation_name{};
+};
+
+struct EntityVertex {
+  Vec3f position{};
+  Vec2f uv{};
+  Vec3f color{1.0F, 1.0F, 1.0F};
+};
+
 struct FramePacket {
   CameraSnapshot camera{};
   RenderView world_view{};
   std::vector<ChunkDrawItem> opaque_chunks{};
   std::vector<ChunkDrawItem> transparent_chunks{};
+  std::vector<EntityDrawItem> entities{};
   std::vector<UIRectDrawItem> ui_rects{};
   std::vector<UITexturedQuadDrawItem> ui_textured_quads{};
   std::vector<UIGlyphDrawItem> ui_glyphs{};

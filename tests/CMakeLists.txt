@@ -24,6 +24,7 @@ add_executable(arv_tests
   protocol/packet_tests.cpp
   player/inventory_tests.cpp
   player/permission_tests.cpp
+  render/entity_model_tests.cpp
   render/mesh_handoff_tests.cpp
   render/chunk_meshing_tests.cpp
   sched/scheduler_tests.cpp
@@ -33,7 +34,9 @@ add_executable(arv_tests
   voxel/block_registry_tests.cpp
   voxel/chunk_storage_tests.cpp
   voxel/light_tests.cpp
+  world/entity_registry_tests.cpp
   world/fluid_tests.cpp
+  world/entity_tests.cpp
   world/lighting_tests.cpp
   world/region_tests.cpp
   world/world_generation_tests.cpp
@@ -49,6 +52,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_asset
   arv_client
   arv_core
+  arv_entity
   arv_io
   arv_net
   arv_persistence

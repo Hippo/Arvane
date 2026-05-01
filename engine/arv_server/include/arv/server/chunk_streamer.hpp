@@ -47,6 +47,15 @@ public:
       std::vector<QueuedChunkStreamMessage>& out_messages);
   [[nodiscard]] std::vector<ChunkCoord> pending_generation_requests(
       const world::WorldRuntime& world) const;
+  [[nodiscard]] bool session_has_sent_chunk(
+      SessionID session_id,
+      WorldID world_id,
+      ChunkCoord coord) const noexcept;
+  bool mark_sent_block_version(
+      SessionID session_id,
+      WorldID world_id,
+      ChunkCoord coord,
+      u64 block_version) noexcept;
 
   [[nodiscard]] usize tracked_player_count() const noexcept {
     return players_.size();

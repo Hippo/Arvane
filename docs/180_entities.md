@@ -85,6 +85,94 @@ Runtime ECS components are instances of those definitions.
 
 ---
 
+## Authored Entity Definitions
+
+Authored entity types are loaded from:
+
+```text
+arvane_home/config/entities.json
+```
+
+The preferred file shape is:
+
+```json
+{
+  "entities": [
+    {
+      "name": "arvane:pig",
+      "display_name": "Pig",
+      "category": "passive",
+      "model": "pig.json",
+      "spawnable": true,
+      "persistent_by_default": true,
+      "replicated_by_default": true
+    }
+  ]
+}
+```
+
+The loader also accepts a root array of entity objects and, for small tests or examples, a single
+root object containing a `name`.
+
+Fields:
+
+- `name`: required stable entity type name, such as `arvane:pig`.
+- `display_name`: user-facing debug/editor label.
+- `category`: optional debug/editor grouping string.
+- `model`: optional model asset reference.
+- `spawnable`: whether debug tools may spawn this type.
+- `persistent_by_default`: default persistence flag for newly spawned entities of this type.
+- `replicated_by_default`: default replication flag for newly spawned entities of this type.
+
+Short model filenames, such as `pig.json`, resolve under:
+
+```text
+arvane_home/assets/models/entity/
+```
+
+The equivalent asset ID is `arvane:model/entity/pig.json`. Full model asset IDs may be used
+directly. Entity model definitions are data references for presentation and render extraction; they
+must not be treated as authoritative simulation state.
+
+`arvane:player` is a built-in entity type. It is reserved, non-spawnable from debug tooling, and
+kept at the stable player entity type ID.
+
+---
+
+## Entity Model Format
+
+Entity model JSON files define a simple textured skeleton made of cuboids.
+
+Model files live under:
+
+```text
+arvane_home/assets/models/entity/
+```
+
+Texture filenames in a model, such as `pig.png`, resolve under:
+
+```text
+arvane_home/assets/textures/entity/
+```
+
+The renderer supports:
+
+- `skeleton`: named bones with a `pivot` and one or more cuboid `boxes`
+- per-face texture index and pixel UV rectangle
+- `textures`: model texture list
+- `texture_sizes`: source texture dimensions
+- `animations`: keyframed bone `rotation_euler` tracks
+
+Skeleton box coordinates and bone pivots are authored in sixteenths of a block. Runtime rendering
+converts them to world units by dividing by 16. Bone rotations are evaluated on the client
+presentation side and never mutate authoritative entity simulation state.
+
+Animation keyframes are sampled linearly by time. Looping animations wrap by their declared
+`length`. The first implemented presentation path plays the `walking` animation for rendered
+entity instances when present.
+
+---
+
 ## Entity Identity
 
 Entities have two identities:
@@ -190,7 +278,37 @@ Entity persistence records should include:
 - inventory state, if relevant
 - custom entity data
 
-Entities should be saved by world region or spatial partition.
+Entities are saved by world region under:
+
+```text
+worlds/<world_name>/entities/r.<region_x>.<region_z>.json
+```
+
+The entity region is derived from the entity's world-space position, converted to a block position,
+then to a chunk column, then to the standard region coordinate.
+
+Example:
+
+```json
+{
+  "entity_version": 1,
+  "region": { "x": 0, "z": 0 },
+  "entities": [
+    {
+      "uuid": "entity:1:42",
+      "type": "arvane:pig",
+      "version": 1,
+      "world_id": 1,
+      "position": [4.0, 20.0, 6.0],
+      "rotation": [0.0, 0.0, 0.0, 1.0],
+      "velocity": [0.0, 0.0, 0.0],
+      "components": {}
+    }
+  ]
+}
+```
+
+Runtime ECS handles and transient network IDs must never be written to these files.
 
 Saving entities inside chunk files is allowed only if the format clearly separates block storage from entity storage.
 
@@ -296,6 +414,20 @@ Networked entities require:
 - interpolation support
 
 Clients must not create authoritative gameplay entities directly.
+
+---
+
+## Debug Spawning
+
+The ImGui debug menu may expose a server-authoritative spawn tool in the `Entities` tab.
+
+Debug spawning must:
+
+- list spawnable authored entity types from the entity registry
+- use the entity type's default persistence and replication flags
+- create entities through the world/server authoritative path
+- keep player entities protected from arbitrary debug despawn
+- remain debug-only and not become user-facing gameplay UI
 
 ---
 

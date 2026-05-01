@@ -126,7 +126,133 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
   EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
   EXPECT_EQ(client.camera().world_id(), arv::server::DefaultWorldID);
   EXPECT_EQ(server.sessions().size(), 1U);
+  const arv::server::ServerSession* session = server.sessions().first();
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->connection_state, arv::net::ConnectionState::InGame);
   EXPECT_NE(server.worlds().find(arv::server::DefaultWorldID), nullptr);
+  EXPECT_TRUE(client.has_authoritative_inventory());
+  EXPECT_GT(client.replicated_entity_count(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, InventoryActionsFlowThroughAuthoritativeProtocolUpdates) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  ASSERT_TRUE(client.has_authoritative_inventory());
+  ASSERT_TRUE(client.inventory().slot(0).has_value());
+
+  ASSERT_TRUE(client.request_inventory_slot_click(
+      0,
+      arv::player::InventoryClickButton::Primary));
+  server.tick();
+  client.fixed_tick(server.tick_index());
+
+  arv::player::PlayerState& player = connected_player(server);
+  ASSERT_TRUE(player.inventory_cursor_stack.has_value());
+  EXPECT_FALSE(player.inventory.slot(0).has_value());
+  ASSERT_TRUE(client.inventory_cursor_stack().has_value());
+  EXPECT_FALSE(client.inventory().slot(0).has_value());
+  EXPECT_GE(client.inventory_revision(), 2U);
+}
+
+TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID dirt =
+      block_registry.find_variant("arvane:dirt").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerChunkStreamingConfig streaming_config;
+  streaming_config.max_view_distance = 0;
+  streaming_config.max_chunks_sent_per_player_tick = 1;
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry,
+      arv::player::default_player_tuning(),
+      arv::voxel::make_water_fluid_definition(),
+      streaming_config}));
+
+  const arv::ChunkCoord expected_chunk{{0, 1, -2}};
+  (void)server.voxel_world().ensure_chunk(expected_chunk);
+  const arv::BlockPos changed_block =
+      arv::chunk_local_to_block(expected_chunk, {{1, 2, 3}});
+  ASSERT_TRUE(server.voxel_world().set_block(changed_block, stone));
+  (void)server.voxel_world().drain_replicated_block_updates();
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.set_chunk_view_distance(0);
+  ASSERT_TRUE(client.connect_integrated());
+
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  EXPECT_TRUE(client.drain_received_chunk_data().empty());
+
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  ASSERT_EQ(client.drain_received_chunk_data().size(), 1U);
+
+  ASSERT_TRUE(server.voxel_world().set_block(changed_block, dirt));
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  std::vector<arv::protocol::BlockUpdateBatch> updates =
+      client.drain_received_block_updates();
+  ASSERT_EQ(updates.size(), 1U);
+  ASSERT_EQ(updates.front().updates.size(), 1U);
+  EXPECT_EQ(updates.front().world_id, arv::server::DefaultWorldID);
+  EXPECT_EQ(updates.front().updates.front().pos, changed_block);
+  EXPECT_EQ(updates.front().updates.front().new_state, dirt);
+}
+
+TEST(IntegratedHandshakeTests, DisconnectCleansSessionAndWorldLocalPlayerEntity) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry}));
+
+  const auto connect_result = client_transport->connect({"in-process", 0});
+  ASSERT_TRUE(connect_result);
+  send_raw_client_hello(*client_transport, connect_result.value());
+
+  server.tick();
+  (void)client_transport->poll_events();
+  ASSERT_EQ(server.sessions().size(), 1U);
+  EXPECT_EQ(server.voxel_world().player_count(), 1U);
+  EXPECT_EQ(server.voxel_world().entity_count(), 1U);
+
+  client_transport->shutdown();
+  server.tick();
+
+  EXPECT_EQ(server.sessions().size(), 0U);
+  EXPECT_EQ(server.voxel_world().player_count(), 0U);
+  EXPECT_EQ(server.voxel_world().entity_count(), 0U);
 }
 
 TEST(IntegratedHandshakeTests, ClientDoesNotOverwriteLoadedHotbarSlotBeforeCorrection) {

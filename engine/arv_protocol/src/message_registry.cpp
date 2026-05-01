@@ -33,11 +33,27 @@ MessageRegistry MessageRegistry::make_core_registry() {
                              MessageDirection::ClientToServer, ReliabilityClass::UnreliableLatestWins});
   registry.register_message({MessageType::PlayerCorrection, "PlayerCorrection",
                              MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins});
+  registry.register_message({MessageType::WorldJoinResult, "WorldJoinResult",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
+  registry.register_message({MessageType::WorldLeave, "WorldLeave",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
   registry.register_message({MessageType::ChunkInterestUpdate, "ChunkInterestUpdate",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered});
   registry.register_message({MessageType::ChunkData, "ChunkData",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
   registry.register_message({MessageType::ChunkUnload, "ChunkUnload",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
+  registry.register_message({MessageType::BlockUpdateBatch, "BlockUpdateBatch",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
+  registry.register_message({MessageType::EntitySpawn, "EntitySpawn",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
+  registry.register_message({MessageType::EntityDespawn, "EntityDespawn",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
+  registry.register_message({MessageType::EntitySnapshot, "EntitySnapshot",
+                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins});
+  registry.register_message({MessageType::InventoryActionRequest, "InventoryActionRequest",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered});
+  registry.register_message({MessageType::InventoryUpdate, "InventoryUpdate",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered});
   return registry;
 }

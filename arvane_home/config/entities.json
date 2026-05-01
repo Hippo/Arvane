@@ -1,0 +1,13 @@
+{
+  "entities": [
+    {
+      "name": "arvane:pig",
+      "display_name": "Pig",
+      "category": "passive",
+      "model": "pig.json",
+      "spawnable": true,
+      "persistent_by_default": true,
+      "replicated_by_default": true
+    }
+  ]
+}

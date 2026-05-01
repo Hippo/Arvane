@@ -1,5 +1,6 @@
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/log.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
 #include "arv/player/item.hpp"
@@ -180,6 +181,33 @@ int main(int argc, char** argv) {
   const arv::player::ItemRegistry item_registry =
       std::move(item_registry_result.value());
 
+  auto entity_definition_text = arv::io::read_text_file(
+      config.paths.config_path() / "entities.json",
+      "dedicated entity definitions");
+  if (!entity_definition_text) {
+    arv::core::error("entities", entity_definition_text.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
+    return 1;
+  }
+
+  auto entity_definitions =
+      arv::entity::parse_entity_definitions_json(entity_definition_text.value());
+  if (!entity_definitions) {
+    arv::core::error("entities", entity_definitions.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
+    return 1;
+  }
+
+  auto entity_registry_result =
+      arv::entity::EntityRegistry::build_with_builtins(std::move(entity_definitions.value()));
+  if (!entity_registry_result) {
+    arv::core::error("entities", entity_registry_result.error().message);
+    transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);
+    return 1;
+  }
+  const arv::entity::EntityRegistry entity_registry =
+      std::move(entity_registry_result.value());
+
   transition(lifetime, arv::server::DedicatedServerLifetimeState::LoadingWorlds);
 
   arv::net::GameNetworkingSocketsEnvironment gns;
@@ -218,22 +246,27 @@ int main(int argc, char** argv) {
       config.simulation.fluids.water.flow_interval_ticks;
   const arv::player::PlayerTuning player_tuning = make_player_tuning(config.physics);
 
+  arv::server::ServerStartInfo server_start_info;
+  server_start_info.mode = arv::server::ServerMode::Dedicated;
+  server_start_info.base_tps = config.simulation.base_tps;
+  server_start_info.listen_address = {config.network.bind_address, config.network.port};
+  server_start_info.block_registry = &block_registry;
+  server_start_info.item_registry = &item_registry;
+  server_start_info.player_tuning = player_tuning;
+  server_start_info.fluid_definition = water_fluid;
+  server_start_info.chunk_streaming = chunk_streaming;
+  server_start_info.max_generation_results_per_tick =
+      config.chunk_pipeline.max_generation_results_per_tick;
+  server_start_info.max_lighting_results_per_tick =
+      config.chunk_pipeline.max_lighting_results_per_tick;
+  server_start_info.max_pending_generation_jobs =
+      config.chunk_pipeline.max_generation_jobs_per_frame;
+  server_start_info.worker_threads = thread_budget.primary_workers;
+  server_start_info.world_tick_policy = world_tick_policy;
+  server_start_info.entity_registry = &entity_registry;
+
   arv::server::ServerRuntime server(std::make_unique<arv::net::GameNetworkingSocketsTransport>());
-  auto start_result = server.start({
-      arv::server::ServerMode::Dedicated,
-      config.simulation.base_tps,
-      {config.network.bind_address, config.network.port},
-      &block_registry,
-      &item_registry,
-      player_tuning,
-      water_fluid,
-      chunk_streaming,
-      std::nullopt,
-      config.chunk_pipeline.max_generation_results_per_tick,
-      config.chunk_pipeline.max_lighting_results_per_tick,
-      config.chunk_pipeline.max_generation_jobs_per_frame,
-      thread_budget.primary_workers,
-      world_tick_policy});
+  auto start_result = server.start(server_start_info);
   if (!start_result) {
     arv::core::error("server", start_result.error().message);
     transition(lifetime, arv::server::DedicatedServerLifetimeState::Failed);

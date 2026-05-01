@@ -1,6 +1,7 @@
 add_subdirectory(arv_core)
 add_subdirectory(arv_io)
 add_subdirectory(arv_sched)
+add_subdirectory(arv_entity)
 add_subdirectory(arv_player)
 add_subdirectory(arv_physics)
 add_subdirectory(arv_protocol)

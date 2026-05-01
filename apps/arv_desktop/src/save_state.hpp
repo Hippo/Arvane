@@ -16,6 +16,9 @@ namespace arv::desktop {
     const server::ServerRuntime& server,
     std::string_view world_name);
 
+[[nodiscard]] std::vector<entity::PersistentEntityRecord> capture_saved_entities(
+    const world::WorldRuntime& world);
+
 void apply_loaded_player_saves(
     server::ServerRuntime& server,
     std::string_view world_name,

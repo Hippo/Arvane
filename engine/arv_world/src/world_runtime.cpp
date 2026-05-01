@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <string>
 #include <utility>
 
 namespace arv::world {
@@ -415,6 +417,7 @@ bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexce
   mark_lighting_content_dirty();
   enqueue_neighbor_block_updates(pos);
   FluidSolver::enqueue_neighbor_updates(*this, pos, FluidUpdateReason::BlockChanged);
+  record_replicated_block_update(pos, variant);
   return true;
 }
 
@@ -563,34 +566,372 @@ void WorldRuntime::restore_saved_chunk(
   mark_lighting_content_dirty();
 }
 
-player::PlayerState& WorldRuntime::ensure_player(PlayerID player_id) {
-  auto [iter, inserted] = players_.try_emplace(player_id);
-  if (inserted) {
-    iter->second.player_id = player_id;
-    iter->second.world_id = id_;
+EntityID WorldRuntime::create_entity(EntityCreateInfo info) {
+  if (info.type_name.empty()) {
+    info.type_name = "arvane:unknown";
   }
-  return iter->second;
+  if (info.type_id.value == 0U && info.type_name == entity::PlayerEntityTypeName) {
+    info.type_id = entity::PlayerEntityTypeID;
+  }
+
+  const EntityID entity_id{next_entity_id_++};
+  const entt::entity handle = entity_registry_.create();
+  entity_handles_[entity_id] = handle;
+
+  entity_registry_.emplace<entity::RuntimeEntity>(handle, entity_id);
+  entity_registry_.emplace<entity::EntityType>(handle, info.type_id, info.type_name);
+  entity_registry_.emplace<entity::EntityTransform>(
+      handle,
+      info.position,
+      info.position,
+      info.rotation,
+      info.rotation,
+      Vec3f{1.0F, 1.0F, 1.0F});
+  entity_registry_.emplace<entity::EntityVelocity>(handle, info.velocity);
+  entity_registry_.emplace<entity::ChunkRelevance>(handle, chunk_for_position(info.position));
+
+  if (info.replicated) {
+    entity_registry_.emplace<entity::NetworkEntity>(handle, EntityNetID{next_entity_net_id_++});
+  }
+
+  if (info.persistent) {
+    if (info.persistent_uuid.empty()) {
+      // TODO(arvane): Replace this deterministic placeholder with real UUID
+      // allocation once the global entity/profile identity policy is specified.
+      info.persistent_uuid =
+          "entity:" + std::to_string(id_.value) + ":" + std::to_string(entity_id.value);
+    }
+    entity_registry_.emplace<entity::PersistentEntity>(
+        handle,
+        std::move(info.persistent_uuid),
+        info.type_id,
+        info.type_name);
+  }
+
+  if (info.owning_player.has_value()) {
+    entity_registry_.emplace<entity::PlayerEntity>(handle, info.owning_player.value());
+    player_entities_[info.owning_player.value()] = entity_id;
+
+    player::PlayerState player_state =
+        info.player_state.has_value() ? std::move(info.player_state.value()) : player::PlayerState{};
+    player_state.player_id = info.owning_player.value();
+    player_state.world_id = id_;
+    player_state.position = info.position;
+    player_state.velocity = info.velocity;
+    entity_registry_.emplace<player::PlayerState>(handle, std::move(player_state));
+  }
+
+  return entity_id;
+}
+
+bool WorldRuntime::destroy_entity(EntityID entity_id, EntityDespawnReason reason) {
+  (void)reason;
+  if (!entity_exists(entity_id)) {
+    return false;
+  }
+  if (std::find(pending_entity_despawns_.begin(), pending_entity_despawns_.end(), entity_id) ==
+      pending_entity_despawns_.end()) {
+    pending_entity_despawns_.push_back(entity_id);
+  }
+  return true;
+}
+
+void WorldRuntime::flush_entity_despawns() {
+  for (const EntityID entity_id : pending_entity_despawns_) {
+    const entt::entity handle = entity_handle(entity_id);
+    if (handle == entt::null || !entity_registry_.valid(handle)) {
+      continue;
+    }
+    if (const auto* player_entity = entity_registry_.try_get<entity::PlayerEntity>(handle);
+        player_entity != nullptr) {
+      player_entities_.erase(player_entity->player_id);
+      player_region_states_.erase(player_entity->player_id);
+    }
+    entity_handles_.erase(entity_id);
+    entity_registry_.destroy(handle);
+  }
+  pending_entity_despawns_.clear();
+}
+
+bool WorldRuntime::entity_exists(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle != entt::null && entity_registry_.valid(handle);
+}
+
+usize WorldRuntime::entity_count() const noexcept {
+  return entity_handles_.size();
+}
+
+std::vector<EntityID> WorldRuntime::entity_ids() const {
+  std::vector<EntityID> ids;
+  ids.reserve(entity_handles_.size());
+  for (const auto& [entity_id, handle] : entity_handles_) {
+    if (handle != entt::null && entity_registry_.valid(handle)) {
+      ids.emplace_back(entity_id);
+    }
+  }
+  return ids;
+}
+
+std::optional<EntityID> WorldRuntime::entity_for_player(PlayerID player_id) const noexcept {
+  const auto found = player_entities_.find(player_id);
+  return found == player_entities_.end() ? std::nullopt : std::optional<EntityID>{found->second};
+}
+
+std::optional<PlayerID> WorldRuntime::player_for_entity(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  if (handle == entt::null || !entity_registry_.valid(handle)) {
+    return std::nullopt;
+  }
+  const auto* player_entity = entity_registry_.try_get<entity::PlayerEntity>(handle);
+  return player_entity == nullptr ? std::nullopt : std::optional<PlayerID>{player_entity->player_id};
+}
+
+std::optional<EntityNetID> WorldRuntime::network_id_for_entity(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  if (handle == entt::null || !entity_registry_.valid(handle)) {
+    return std::nullopt;
+  }
+  const auto* network = entity_registry_.try_get<entity::NetworkEntity>(handle);
+  return network == nullptr ? std::nullopt : std::optional<EntityNetID>{network->net_id};
+}
+
+std::optional<ChunkCoord> WorldRuntime::entity_chunk(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  if (handle == entt::null || !entity_registry_.valid(handle)) {
+    return std::nullopt;
+  }
+  const auto* relevance = entity_registry_.try_get<entity::ChunkRelevance>(handle);
+  return relevance == nullptr ? std::nullopt : std::optional<ChunkCoord>{relevance->current_chunk};
+}
+
+entity::EntityTransform* WorldRuntime::find_entity_transform(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityTransform>(handle);
+}
+
+const entity::EntityTransform* WorldRuntime::find_entity_transform(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityTransform>(handle);
+}
+
+entity::EntityVelocity* WorldRuntime::find_entity_velocity(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityVelocity>(handle);
+}
+
+const entity::EntityVelocity* WorldRuntime::find_entity_velocity(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityVelocity>(handle);
+}
+
+const entity::EntityType* WorldRuntime::find_entity_type(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityType>(handle);
+}
+
+bool WorldRuntime::entity_is_persistent(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle != entt::null && entity_registry_.valid(handle) &&
+         entity_registry_.all_of<entity::PersistentEntity>(handle);
+}
+
+bool WorldRuntime::set_entity_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept {
+  entity::EntityTransform* transform = find_entity_transform(entity_id);
+  if (transform == nullptr) {
+    return false;
+  }
+  transform->previous_position = transform->position;
+  transform->previous_rotation = transform->rotation;
+  transform->position = position;
+  transform->rotation = rotation;
+  update_entity_chunk(entity_handle(entity_id));
+  return true;
+}
+
+bool WorldRuntime::set_entity_position(EntityID entity_id, Vec3f position) noexcept {
+  entity::EntityTransform* transform = find_entity_transform(entity_id);
+  if (transform == nullptr) {
+    return false;
+  }
+  return set_entity_transform(entity_id, position, transform->rotation);
+}
+
+std::vector<entity::EntitySnapshotEntry> WorldRuntime::collect_entity_snapshots() const {
+  std::vector<entity::EntitySnapshotEntry> snapshots;
+  const auto view = entity_registry_.view<
+      entity::RuntimeEntity,
+      entity::EntityType,
+      entity::EntityTransform,
+      entity::EntityVelocity,
+      entity::NetworkEntity,
+      entity::ChunkRelevance>();
+  snapshots.reserve(view.size_hint());
+  for (const entt::entity handle : view) {
+    const auto& runtime = view.get<entity::RuntimeEntity>(handle);
+    const auto& type = view.get<entity::EntityType>(handle);
+    const auto& transform = view.get<entity::EntityTransform>(handle);
+    const auto& velocity = view.get<entity::EntityVelocity>(handle);
+    const auto& network = view.get<entity::NetworkEntity>(handle);
+    const auto& relevance = view.get<entity::ChunkRelevance>(handle);
+
+    entity::EntitySnapshotEntry entry;
+    entry.entity_id = runtime.entity_id;
+    entry.net_id = network.net_id;
+    entry.type_id = type.type_id;
+    entry.type_name = type.type_name;
+    entry.position = transform.position;
+    entry.velocity = velocity.linear;
+    entry.rotation = transform.rotation;
+    entry.chunk = relevance.current_chunk;
+    if (const auto* player_entity = entity_registry_.try_get<entity::PlayerEntity>(handle);
+        player_entity != nullptr) {
+      entry.owning_player = player_entity->player_id;
+    }
+    snapshots.emplace_back(std::move(entry));
+  }
+  return snapshots;
+}
+
+std::vector<entity::PersistentEntityRecord> WorldRuntime::persistent_entity_records() const {
+  std::vector<entity::PersistentEntityRecord> records;
+  const auto view = entity_registry_.view<
+      entity::PersistentEntity,
+      entity::EntityTransform,
+      entity::EntityVelocity>();
+  records.reserve(view.size_hint());
+  for (const entt::entity handle : view) {
+    if (entity_registry_.all_of<entity::PlayerEntity>(handle)) {
+      continue;
+    }
+    const auto& persistent = view.get<entity::PersistentEntity>(handle);
+    const auto& transform = view.get<entity::EntityTransform>(handle);
+    const auto& velocity = view.get<entity::EntityVelocity>(handle);
+    records.push_back({
+        persistent.uuid,
+        persistent.type_name,
+        id_,
+        transform.position,
+        transform.rotation,
+        velocity.linear});
+  }
+  return records;
+}
+
+void WorldRuntime::restore_persistent_entities(
+    std::span<const entity::PersistentEntityRecord> records,
+    const entity::EntityRegistry* entity_registry) {
+  for (const entity::PersistentEntityRecord& record : records) {
+    if (record.world_id != id_) {
+      continue;
+    }
+    EntityCreateInfo info;
+    info.type_name = record.type_name;
+    if (entity_registry != nullptr) {
+      if (const std::optional<EntityTypeID> type_id = entity_registry->find_type(record.type_name);
+          type_id.has_value()) {
+        info.type_id = type_id.value();
+      }
+    }
+    info.position = record.position;
+    info.rotation = record.rotation;
+    info.velocity = record.velocity;
+    info.persistent = true;
+    info.persistent_uuid = record.uuid;
+    info.replicated = true;
+    (void)create_entity(std::move(info));
+  }
+}
+
+u32 WorldRuntime::tick_entities() {
+  flush_entity_despawns();
+  u32 updated = 0;
+  const auto player_view = entity_registry_.view<
+      entity::RuntimeEntity,
+      entity::EntityTransform,
+      entity::EntityVelocity,
+      entity::PlayerEntity,
+      player::PlayerState>();
+  for (const entt::entity handle : player_view) {
+    auto& transform = player_view.get<entity::EntityTransform>(handle);
+    auto& velocity = player_view.get<entity::EntityVelocity>(handle);
+    const auto& player_state = player_view.get<player::PlayerState>(handle);
+    if (transform.position != player_state.position) {
+      transform.previous_position = transform.position;
+      transform.position = player_state.position;
+    }
+    velocity.linear = player_state.velocity;
+    update_entity_chunk(handle);
+    ++updated;
+  }
+
+  const auto transform_view = entity_registry_.view<entity::EntityTransform, entity::ChunkRelevance>();
+  for (const entt::entity handle : transform_view) {
+    update_entity_chunk(handle);
+  }
+  return updated;
+}
+
+player::PlayerState& WorldRuntime::ensure_player(PlayerID player_id) {
+  if (const std::optional<EntityID> existing = entity_for_player(player_id);
+      existing.has_value()) {
+    const entt::entity handle = entity_handle(existing.value());
+    return entity_registry_.get<player::PlayerState>(handle);
+  }
+
+  EntityCreateInfo info;
+  info.type_id = entity::PlayerEntityTypeID;
+  info.type_name = std::string{entity::PlayerEntityTypeName};
+  info.position = {8.0F, 20.0F, -20.0F};
+  info.persistent = true;
+  info.persistent_uuid = "player:" + std::to_string(player_id.value);
+  info.replicated = true;
+  info.owning_player = player_id;
+  const EntityID entity_id = create_entity(std::move(info));
+  return entity_registry_.get<player::PlayerState>(entity_handle(entity_id));
 }
 
 player::PlayerState* WorldRuntime::find_player(PlayerID player_id) noexcept {
-  const auto found = players_.find(player_id);
-  return found == players_.end() ? nullptr : &found->second;
+  const auto found = player_entities_.find(player_id);
+  if (found == player_entities_.end()) {
+    return nullptr;
+  }
+  const entt::entity handle = entity_handle(found->second);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<player::PlayerState>(handle);
 }
 
 const player::PlayerState* WorldRuntime::find_player(PlayerID player_id) const noexcept {
-  const auto found = players_.find(player_id);
-  return found == players_.end() ? nullptr : &found->second;
+  const auto found = player_entities_.find(player_id);
+  if (found == player_entities_.end()) {
+    return nullptr;
+  }
+  const entt::entity handle = entity_handle(found->second);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<player::PlayerState>(handle);
 }
 
 usize WorldRuntime::player_count() const noexcept {
-  return players_.size();
+  return player_entities_.size();
 }
 
 std::vector<PlayerID> WorldRuntime::player_ids() const {
   std::vector<PlayerID> ids;
-  ids.reserve(players_.size());
-  for (const auto& [player_id, player] : players_) {
-    (void)player;
+  ids.reserve(player_entities_.size());
+  for (const auto& [player_id, entity_id] : player_entities_) {
+    (void)entity_id;
     ids.emplace_back(player_id);
   }
   return ids;
@@ -743,6 +1084,7 @@ WorldTickStats WorldRuntime::tick(
   ++tick_index_;
 
   WorldTickStats stats;
+  stats.entity_updates_processed = tick_entities();
   stats.scheduled_ticks_processed = process_due_scheduled_ticks();
 
   if (tick_policy_.block_update_interval == 0U ||
@@ -756,6 +1098,12 @@ WorldTickStats WorldRuntime::tick(
   }
 
   return stats;
+}
+
+std::vector<ReplicatedBlockUpdate> WorldRuntime::drain_replicated_block_updates() {
+  std::vector<ReplicatedBlockUpdate> drained = std::move(replicated_block_updates_);
+  replicated_block_updates_.clear();
+  return drained;
 }
 
 std::vector<ChunkCoord> WorldRuntime::dirty_chunks(voxel::ChunkDirtyFlags flag) const {
@@ -991,6 +1339,37 @@ u32 WorldRuntime::drain_block_updates(u32 budget) {
     ++processed;
   }
   return processed;
+}
+
+entt::entity WorldRuntime::entity_handle(EntityID entity_id) const noexcept {
+  const auto found = entity_handles_.find(entity_id);
+  return found == entity_handles_.end() ? entt::null : found->second;
+}
+
+ChunkCoord WorldRuntime::chunk_for_position(Vec3f position) const noexcept {
+  return block_to_chunk({{
+      static_cast<i32>(std::floor(position.x)),
+      static_cast<i32>(std::floor(position.y)),
+      static_cast<i32>(std::floor(position.z)),
+  }});
+}
+
+void WorldRuntime::update_entity_chunk(entt::entity handle) noexcept {
+  if (handle == entt::null || !entity_registry_.valid(handle)) {
+    return;
+  }
+  auto* transform = entity_registry_.try_get<entity::EntityTransform>(handle);
+  auto* relevance = entity_registry_.try_get<entity::ChunkRelevance>(handle);
+  if (transform == nullptr || relevance == nullptr) {
+    return;
+  }
+  relevance->current_chunk = chunk_for_position(transform->position);
+}
+
+void WorldRuntime::record_replicated_block_update(
+    BlockPos pos,
+    voxel::BlockVariantID new_state) {
+  replicated_block_updates_.push_back({pos, new_state, tick_index_});
 }
 
 } // namespace arv::world

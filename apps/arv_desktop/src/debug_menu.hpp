@@ -2,6 +2,7 @@
 
 #include "arv/client/client_runtime.hpp"
 #include "arv/core/types.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/sched/scheduler.hpp"
@@ -21,6 +22,15 @@ struct DebugMenuState {
   std::string selected_item_name{};
   int stack_size{1};
   bool replace_selected_hotbar_slot{};
+  std::string entity_filter{};
+  std::string selected_entity_type_name{};
+  std::string selected_entity_id{};
+  float entity_spawn_offset[3]{0.0F, 0.0F, 2.0F};
+  float entity_spawn_position[3]{0.0F, 20.0F, 0.0F};
+  std::string entity_persistent_uuid{};
+  bool entity_spawn_at_player{true};
+  bool entity_persistent{true};
+  bool entity_replicated{true};
   bool show_chunk_boundaries{};
   bool show_collision_bounds{};
   bool show_lighting_view{};
@@ -52,6 +62,7 @@ struct DebugMenuResult {
     server::ServerRuntime& server,
     client::ClientRuntime& client,
     const player::ItemRegistry& item_registry,
+    const entity::EntityRegistry& entity_registry,
     const sched::Scheduler& world_jobs,
     const render::OpenGLRenderer& renderer);
 

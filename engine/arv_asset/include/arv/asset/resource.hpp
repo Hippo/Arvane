@@ -45,6 +45,7 @@ enum class AssetKind : u8 {
   Texture,
   ShaderSource,
   Font,
+  Model,
 };
 
 struct AssetError {

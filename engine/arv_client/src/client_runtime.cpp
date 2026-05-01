@@ -161,6 +161,57 @@ std::vector<protocol::ChunkUnload> ClientRuntime::drain_received_chunk_unloads()
   return drained;
 }
 
+std::vector<protocol::BlockUpdateBatch> ClientRuntime::drain_received_block_updates() {
+  std::vector<protocol::BlockUpdateBatch> drained = std::move(received_block_updates_);
+  received_block_updates_.clear();
+  return drained;
+}
+
+net::NetworkResult ClientRuntime::request_inventory_slot_click(
+    usize slot_index,
+    player::InventoryClickButton button) {
+  protocol::InventoryActionRequest request;
+  request.inventory_id = protocol::PlayerInventoryID;
+  request.client_action_id = next_inventory_action_id_++;
+  request.kind = protocol::InventoryActionKind::SlotClick;
+  request.slot_index = static_cast<u32>(slot_index);
+  request.button = button;
+  return send_inventory_action(request);
+}
+
+net::NetworkResult ClientRuntime::request_inventory_drop_cursor(bool one_item) {
+  protocol::InventoryActionRequest request;
+  request.inventory_id = protocol::PlayerInventoryID;
+  request.client_action_id = next_inventory_action_id_++;
+  request.kind = one_item ? protocol::InventoryActionKind::DropOneCursor
+                          : protocol::InventoryActionKind::DropCursor;
+  return send_inventory_action(request);
+}
+
+net::NetworkResult ClientRuntime::request_inventory_close() {
+  protocol::InventoryActionRequest request;
+  request.inventory_id = protocol::PlayerInventoryID;
+  request.client_action_id = next_inventory_action_id_++;
+  request.kind = protocol::InventoryActionKind::CloseMenu;
+  return send_inventory_action(request);
+}
+
+const ReplicatedEntityMirror* ClientRuntime::find_replicated_entity(
+    EntityNetID entity_id) const noexcept {
+  const auto found = replicated_entities_.find(entity_id);
+  return found == replicated_entities_.end() ? nullptr : &found->second;
+}
+
+std::vector<ReplicatedEntityMirror> ClientRuntime::replicated_entity_mirrors() const {
+  std::vector<ReplicatedEntityMirror> mirrors;
+  mirrors.reserve(replicated_entities_.size());
+  for (const auto& [entity_id, mirror] : replicated_entities_) {
+    (void)entity_id;
+    mirrors.push_back(mirror);
+  }
+  return mirrors;
+}
+
 void ClientRuntime::handle_chat_input(const InputFrame& input, bool was_chat_open) {
   if (!chat_open_) {
     return;
@@ -211,6 +262,18 @@ net::NetworkResult ClientRuntime::send_chunk_interest_update() {
       {connection_id_, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
 }
 
+net::NetworkResult ClientRuntime::send_inventory_action(protocol::InventoryActionRequest request) {
+  if (!transport_ || connection_state_ != net::ConnectionState::InGame) {
+    return net::NetworkResult::failure(net::NetworkError{"client is not in game"});
+  }
+  const std::vector<u8> payload = protocol::serialize_inventory_action_request(request);
+  std::vector<u8> packet = protocol::serialize_envelope(
+      {protocol::CurrentProtocolVersion, protocol::MessageType::InventoryActionRequest, 0, 0, 0, 0},
+      payload);
+  return transport_->send(
+      {connection_id_, protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
+}
+
 void ClientRuntime::handle_network_event(net::NetworkEvent event) {
   switch (event.type) {
     case net::NetworkEventType::ConnectionRequested:
@@ -256,7 +319,24 @@ void ClientRuntime::handle_message(const std::vector<u8>& packet) {
       chunk_interest_.set_world_id(server_hello.value().initial_world_id);
       connection_state_ = server_hello.value().required_followup_sync
                               ? net::ConnectionState::RegistrySync
-                              : net::ConnectionState::InGame;
+                              : net::ConnectionState::WorldJoin;
+      return;
+    }
+    case protocol::MessageType::WorldJoinResult: {
+      auto result = protocol::deserialize_world_join_result(decoded.value().payload);
+      if (!result) {
+        connection_state_ = net::ConnectionState::Disconnecting;
+        return;
+      }
+      apply_world_join_result(result.value());
+      return;
+    }
+    case protocol::MessageType::WorldLeave: {
+      auto leave = protocol::deserialize_world_leave(decoded.value().payload);
+      if (!leave) {
+        return;
+      }
+      apply_world_leave(leave.value());
       return;
     }
     case protocol::MessageType::PlayerCorrection: {
@@ -283,9 +363,142 @@ void ClientRuntime::handle_message(const std::vector<u8>& packet) {
       received_chunk_unloads_.emplace_back(unload.value());
       return;
     }
+    case protocol::MessageType::BlockUpdateBatch: {
+      auto updates = protocol::deserialize_block_update_batch(decoded.value().payload);
+      if (!updates) {
+        return;
+      }
+      if (updates.value().world_id == player_controller_.camera().world_id()) {
+        received_block_updates_.emplace_back(std::move(updates.value()));
+      }
+      return;
+    }
+    case protocol::MessageType::EntitySpawn: {
+      auto spawn = protocol::deserialize_entity_spawn(decoded.value().payload);
+      if (!spawn) {
+        return;
+      }
+      apply_entity_spawn(std::move(spawn.value()));
+      return;
+    }
+    case protocol::MessageType::EntityDespawn: {
+      auto despawn = protocol::deserialize_entity_despawn(decoded.value().payload);
+      if (!despawn) {
+        return;
+      }
+      apply_entity_despawn(despawn.value());
+      return;
+    }
+    case protocol::MessageType::EntitySnapshot: {
+      auto snapshot = protocol::deserialize_entity_snapshot(decoded.value().payload);
+      if (!snapshot) {
+        return;
+      }
+      apply_entity_snapshot(snapshot.value());
+      return;
+    }
+    case protocol::MessageType::InventoryUpdate: {
+      auto update = protocol::deserialize_inventory_update(decoded.value().payload);
+      if (!update) {
+        return;
+      }
+      apply_inventory_update(std::move(update.value()));
+      return;
+    }
     default:
       return;
   }
+}
+
+void ClientRuntime::apply_world_join_result(const protocol::WorldJoinResult& result) {
+  if (!result.accepted) {
+    connection_state_ = net::ConnectionState::Disconnecting;
+    return;
+  }
+  player_controller_.camera().set_world_id(result.world_id);
+  player_controller_.camera().set_position(result.spawn_position);
+  chunk_interest_.set_world_id(result.world_id);
+  connection_state_ = net::ConnectionState::InGame;
+}
+
+void ClientRuntime::apply_world_leave(const protocol::WorldLeave& leave) {
+  if (leave.world_id != player_controller_.camera().world_id()) {
+    return;
+  }
+  replicated_entities_.clear();
+  received_chunk_data_.clear();
+  received_chunk_unloads_.clear();
+  received_block_updates_.clear();
+  inventory_ = player::Inventory{player::DefaultPlayerInventorySlotCount};
+  inventory_cursor_stack_.reset();
+  inventory_revision_ = 0;
+  has_authoritative_inventory_ = false;
+  player_controller_.camera().set_world_id(WorldID{});
+  chunk_interest_.set_world_id(WorldID{});
+  connection_state_ = net::ConnectionState::WorldJoin;
+}
+
+void ClientRuntime::apply_entity_spawn(protocol::EntitySpawn spawn) {
+  if (spawn.world_id != player_controller_.camera().world_id()) {
+    return;
+  }
+  ReplicatedEntityMirror& mirror = replicated_entities_[spawn.entity_id];
+  mirror.entity_id = spawn.entity_id;
+  mirror.entity_type = spawn.entity_type;
+  mirror.entity_type_name = std::move(spawn.entity_type_name);
+  mirror.world_id = spawn.world_id;
+  mirror.previous_position = spawn.position;
+  mirror.position = spawn.position;
+  mirror.velocity = spawn.velocity;
+  mirror.previous_rotation = spawn.rotation;
+  mirror.rotation = spawn.rotation;
+  mirror.owning_player = spawn.owning_player;
+}
+
+void ClientRuntime::apply_entity_despawn(const protocol::EntityDespawn& despawn) {
+  if (despawn.world_id != player_controller_.camera().world_id()) {
+    return;
+  }
+  replicated_entities_.erase(despawn.entity_id);
+}
+
+void ClientRuntime::apply_entity_snapshot(const protocol::EntitySnapshot& snapshot) {
+  if (snapshot.world_id != player_controller_.camera().world_id()) {
+    return;
+  }
+  // TODO(arvane): Add client prediction replay/reconciliation history once
+  // predicted entity movement is specified.
+  for (const protocol::EntitySnapshotEntry& entry : snapshot.entities) {
+    auto found = replicated_entities_.find(entry.entity_id);
+    if (found == replicated_entities_.end()) {
+      continue;
+    }
+    ReplicatedEntityMirror& mirror = found->second;
+    if (snapshot.server_tick < mirror.last_server_tick) {
+      continue;
+    }
+    mirror.last_server_tick = snapshot.server_tick;
+    mirror.previous_position = mirror.position;
+    mirror.previous_rotation = mirror.rotation;
+    mirror.position = entry.position;
+    mirror.velocity = entry.velocity;
+    mirror.rotation = entry.rotation;
+  }
+}
+
+void ClientRuntime::apply_inventory_update(protocol::InventoryUpdate update) {
+  if (update.inventory_id != protocol::PlayerInventoryID ||
+      update.revision <= inventory_revision_) {
+    return;
+  }
+
+  inventory_ = player::Inventory{update.slots.size()};
+  for (usize index = 0; index < update.slots.size(); ++index) {
+    (void)inventory_.set_slot(index, update.slots[index]);
+  }
+  inventory_cursor_stack_ = update.carried_stack;
+  inventory_revision_ = update.revision;
+  has_authoritative_inventory_ = true;
 }
 
 net::NetworkResult ClientRuntime::send_input_batch(TickIndex tick_index) {

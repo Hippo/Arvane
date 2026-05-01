@@ -2,13 +2,18 @@
 
 #include "arv/core/types.hpp"
 #include "arv/core/time.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
+#include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/handshake.hpp"
+#include "arv/protocol/inventory_sync.hpp"
+#include "arv/protocol/world_join.hpp"
 #include "arv/sched/scheduler.hpp"
 #include "arv/server/chunk_streamer.hpp"
 #include "arv/server/session_registry.hpp"
@@ -52,6 +57,7 @@ struct ServerStartInfo {
   world::WorldTickPolicy world_tick_policy{};
   u32 max_fluid_results_per_tick{1};
   u32 max_pending_fluid_jobs{1};
+  const entity::EntityRegistry* entity_registry{};
 };
 
 struct DroppedItemStack {
@@ -106,6 +112,10 @@ public:
     return default_world_;
   }
 
+  [[nodiscard]] const entity::EntityRegistry* entity_registry() const noexcept {
+    return entity_registry_;
+  }
+
   [[nodiscard]] const player::GameModeRegistry& game_modes() const noexcept {
     return game_modes_;
   }
@@ -145,6 +155,9 @@ private:
   void handle_chunk_interest_update(
       net::ConnectionID connection_id,
       const protocol::ChunkInterestUpdate& interest);
+  void handle_inventory_action_request(
+      net::ConnectionID connection_id,
+      const protocol::InventoryActionRequest& request);
   void tick_players();
   void update_world_simulation_activity();
   void tick_chunk_streaming();
@@ -157,6 +170,13 @@ private:
   void refresh_player_permissions(player::PlayerState& player_state);
   void apply_player_command(player::PlayerState& player_state, const player::PlayerCommand& command);
   void send_player_corrections();
+  void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
+  void send_block_updates();
+  void send_entity_replication();
+  void send_inventory_updates();
+  [[nodiscard]] protocol::InventoryUpdate make_inventory_update(
+      const player::PlayerState& player_state,
+      u32 revision) const;
   void seed_player_inventory(player::PlayerState& player_state);
   [[nodiscard]] bool inventory_is_empty(const player::Inventory& inventory) const noexcept;
 
@@ -172,6 +192,7 @@ private:
   std::vector<net::NetworkEvent> inbound_events_;
   const voxel::BlockRegistry* block_registry_{};
   const player::ItemRegistry* item_registry_{};
+  const entity::EntityRegistry* entity_registry_{};
   player::PlayerTuning player_tuning_{};
   voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
   ServerChunkStreamer chunk_streamer_{};
@@ -182,6 +203,21 @@ private:
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   HashMap<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
   std::vector<DroppedItemStack> dropped_item_stacks_;
+
+  struct EntityReplicationState {
+    HashSet<EntityNetID> known_entities{};
+  };
+
+  struct InventoryReplicationState {
+    u32 revision{};
+    bool initialized{};
+    std::vector<std::optional<player::ItemStack>> slots{};
+    std::optional<player::ItemStack> carried_stack{};
+    u8 selected_hotbar_slot{};
+  };
+
+  HashMap<SessionID, EntityReplicationState> entity_replication_;
+  HashMap<PlayerID, InventoryReplicationState> inventory_replication_;
 
   struct PendingLightingJob {
     u64 source_revision{};

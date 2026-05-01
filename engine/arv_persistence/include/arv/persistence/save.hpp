@@ -3,6 +3,7 @@
 #include "arv/core/expected.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/persistence/region_file.hpp"
@@ -56,11 +57,21 @@ struct LoadedSaveData {
   WorldMetadata world{};
   std::vector<SavedChunkSection> chunks{};
   std::vector<PlayerSaveData> players{};
+  std::vector<entity::PersistentEntityRecord> entities{};
 };
 
 [[nodiscard]] u64 hash_block_registry(const voxel::BlockRegistry& registry) noexcept;
 [[nodiscard]] u64 hash_item_registry(const player::ItemRegistry& registry) noexcept;
 
+Expected<void, PersistenceError> save_server_root(
+    const std::filesystem::path& root,
+    const SaveMetadata& save,
+    const WorldMetadata& world,
+    std::span<const SavedChunkSection> chunks,
+    std::span<const PlayerSaveData> players,
+    std::span<const entity::PersistentEntityRecord> entities,
+    const voxel::BlockRegistry& block_registry,
+    const player::ItemRegistry& item_registry);
 Expected<void, PersistenceError> save_server_root(
     const std::filesystem::path& root,
     const SaveMetadata& save,

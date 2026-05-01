@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -114,6 +115,21 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   const std::vector<arv::persistence::SavedChunkSection> chunks{
       make_saved_chunk({{0, 0, 0}}, stone)};
   const std::vector<arv::persistence::PlayerSaveData> players{player};
+  const std::vector<arv::entity::PersistentEntityRecord> entities{
+      {
+          "entity-test-uuid-a",
+          "arvane:test_entity",
+          arv::WorldID{1},
+          {4.0F, 5.0F, 6.0F},
+          {0.0F, 0.0F, 0.0F, 1.0F},
+          {0.1F, 0.2F, 0.3F}},
+      {
+          "entity-test-uuid-b",
+          "arvane:test_entity",
+          arv::WorldID{1},
+          {-1.0F, 5.0F, -1.0F},
+          {0.0F, 0.0F, 0.0F, 1.0F},
+          {-0.1F, 0.0F, 0.1F}}};
 
   ASSERT_TRUE(arv::persistence::save_server_root(
       server_save_root,
@@ -121,12 +137,18 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       world_metadata,
       chunks,
       players,
+      entities,
       block_registry,
       item_registry));
 
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "save.json"));
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "players" / "local_player.dat"));
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "worlds" / "default" / "world.json"));
+  EXPECT_FALSE(std::filesystem::exists(server_save_root / "worlds" / "default" / "entities.json"));
+  EXPECT_TRUE(std::filesystem::exists(
+      server_save_root / "worlds" / "default" / "entities" / "r.0.0.json"));
+  EXPECT_TRUE(std::filesystem::exists(
+      server_save_root / "worlds" / "default" / "entities" / "r.-1.-1.json"));
 
   auto loaded = arv::persistence::load_server_root(
       server_save_root,
@@ -150,6 +172,27 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_TRUE(loaded.value().players[0].inventory.slot(0).has_value());
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->item, stone_item);
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->count, 7U);
+  ASSERT_EQ(loaded.value().entities.size(), 2U);
+  const auto entity_a = std::find_if(
+      loaded.value().entities.begin(),
+      loaded.value().entities.end(),
+      [](const arv::entity::PersistentEntityRecord& record) {
+        return record.uuid == "entity-test-uuid-a";
+      });
+  ASSERT_NE(entity_a, loaded.value().entities.end());
+  EXPECT_EQ(entity_a->type_name, "arvane:test_entity");
+  EXPECT_EQ(entity_a->world_id, (arv::WorldID{1}));
+  EXPECT_EQ(entity_a->position, (arv::Vec3f{4.0F, 5.0F, 6.0F}));
+  EXPECT_EQ(entity_a->velocity, (arv::Vec3f{0.1F, 0.2F, 0.3F}));
+  const auto entity_b = std::find_if(
+      loaded.value().entities.begin(),
+      loaded.value().entities.end(),
+      [](const arv::entity::PersistentEntityRecord& record) {
+        return record.uuid == "entity-test-uuid-b";
+      });
+  ASSERT_NE(entity_b, loaded.value().entities.end());
+  EXPECT_EQ(entity_b->position, (arv::Vec3f{-1.0F, 5.0F, -1.0F}));
+  EXPECT_EQ(entity_b->velocity, (arv::Vec3f{-0.1F, 0.0F, 0.1F}));
 }
 
 TEST(SaveTests, CorruptedSaveJsonReturnsFailureInsteadOfSilentlyLoading) {

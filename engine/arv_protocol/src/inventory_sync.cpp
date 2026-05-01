@@ -1,0 +1,169 @@
+#include "arv/protocol/inventory_sync.hpp"
+
+#include <utility>
+
+namespace arv::protocol {
+namespace {
+
+void write_stack(MessageWriter& writer, const player::ItemStack& stack) {
+  writer.write<u32>(stack.item.value);
+  writer.write<u16>(stack.count);
+}
+
+Expected<player::ItemStack, ProtocolError> read_stack(MessageReader& reader) {
+  auto item = reader.read<u32>();
+  auto count = reader.read<u16>();
+  if (!item || !count) {
+    return Expected<player::ItemStack, ProtocolError>::failure(
+        ProtocolError{"failed to decode item stack"});
+  }
+  return Expected<player::ItemStack, ProtocolError>::success(
+      {player::ItemID{item.value()}, count.value()});
+}
+
+Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
+  if (reader.remaining() != 0U) {
+    return Expected<void, ProtocolError>::failure(ProtocolError{"trailing bytes in inventory message"});
+  }
+  return Expected<void, ProtocolError>::success();
+}
+
+[[nodiscard]] bool valid_action_kind(InventoryActionKind kind) noexcept {
+  switch (kind) {
+    case InventoryActionKind::SlotClick:
+    case InventoryActionKind::DropCursor:
+    case InventoryActionKind::DropOneCursor:
+    case InventoryActionKind::CloseMenu:
+      return true;
+  }
+  return false;
+}
+
+[[nodiscard]] bool valid_click_button(player::InventoryClickButton button) noexcept {
+  switch (button) {
+    case player::InventoryClickButton::Primary:
+    case player::InventoryClickButton::Secondary:
+      return true;
+  }
+  return false;
+}
+
+} // namespace
+
+std::vector<u8> serialize_inventory_action_request(const InventoryActionRequest& request) {
+  MessageWriter writer;
+  writer.write<u32>(request.inventory_id.value);
+  writer.write<u32>(request.client_action_id);
+  writer.write<InventoryActionKind>(request.kind);
+  writer.write<u32>(request.slot_index);
+  writer.write<player::InventoryClickButton>(request.button);
+  return std::move(writer).take_bytes();
+}
+
+Expected<InventoryActionRequest, ProtocolError> deserialize_inventory_action_request(
+    std::span<const u8> bytes) {
+  MessageReader reader(bytes);
+  auto inventory_id = reader.read<u32>();
+  auto action_id = reader.read<u32>();
+  auto kind = reader.read<InventoryActionKind>();
+  auto slot = reader.read<u32>();
+  auto button = reader.read<player::InventoryClickButton>();
+  if (!inventory_id || !action_id || !kind || !slot || !button) {
+    return Expected<InventoryActionRequest, ProtocolError>::failure(
+        ProtocolError{"failed to decode inventory action request"});
+  }
+  if (!valid_action_kind(kind.value()) || !valid_click_button(button.value())) {
+    return Expected<InventoryActionRequest, ProtocolError>::failure(
+        ProtocolError{"invalid inventory action enum value"});
+  }
+  auto trailing = require_no_trailing_bytes(reader);
+  if (!trailing) {
+    return Expected<InventoryActionRequest, ProtocolError>::failure(trailing.error());
+  }
+
+  InventoryActionRequest request;
+  request.inventory_id = InventoryID{inventory_id.value()};
+  request.client_action_id = action_id.value();
+  request.kind = kind.value();
+  request.slot_index = slot.value();
+  request.button = button.value();
+  return Expected<InventoryActionRequest, ProtocolError>::success(request);
+}
+
+std::vector<u8> serialize_inventory_update(const InventoryUpdate& update) {
+  MessageWriter writer;
+  writer.write<u32>(update.inventory_id.value);
+  writer.write<u32>(update.revision);
+  writer.write<u8>(update.selected_hotbar_slot);
+  writer.write<u32>(static_cast<u32>(update.slots.size()));
+  for (const std::optional<player::ItemStack>& slot : update.slots) {
+    writer.write_bool(slot.has_value());
+    if (slot.has_value()) {
+      write_stack(writer, slot.value());
+    }
+  }
+  writer.write_bool(update.carried_stack.has_value());
+  if (update.carried_stack.has_value()) {
+    write_stack(writer, update.carried_stack.value());
+  }
+  return std::move(writer).take_bytes();
+}
+
+Expected<InventoryUpdate, ProtocolError> deserialize_inventory_update(std::span<const u8> bytes) {
+  MessageReader reader(bytes);
+  auto inventory_id = reader.read<u32>();
+  auto revision = reader.read<u32>();
+  auto selected_slot = reader.read<u8>();
+  auto slot_count = reader.read<u32>();
+  if (!inventory_id || !revision || !selected_slot || !slot_count) {
+    return Expected<InventoryUpdate, ProtocolError>::failure(
+        ProtocolError{"failed to decode inventory update header"});
+  }
+  if (slot_count.value() > MaxInventorySlots) {
+    return Expected<InventoryUpdate, ProtocolError>::failure(
+        ProtocolError{"too many inventory slots"});
+  }
+
+  InventoryUpdate update;
+  update.inventory_id = InventoryID{inventory_id.value()};
+  update.revision = revision.value();
+  update.selected_hotbar_slot = selected_slot.value();
+  update.slots.reserve(slot_count.value());
+  for (u32 index = 0; index < slot_count.value(); ++index) {
+    auto has_stack = reader.read_bool();
+    if (!has_stack) {
+      return Expected<InventoryUpdate, ProtocolError>::failure(
+          ProtocolError{"failed to decode inventory slot presence"});
+    }
+    if (!has_stack.value()) {
+      update.slots.emplace_back(std::nullopt);
+      continue;
+    }
+    auto stack = read_stack(reader);
+    if (!stack) {
+      return Expected<InventoryUpdate, ProtocolError>::failure(stack.error());
+    }
+    update.slots.emplace_back(stack.value());
+  }
+
+  auto has_carried = reader.read_bool();
+  if (!has_carried) {
+    return Expected<InventoryUpdate, ProtocolError>::failure(
+        ProtocolError{"failed to decode carried inventory stack presence"});
+  }
+  if (has_carried.value()) {
+    auto stack = read_stack(reader);
+    if (!stack) {
+      return Expected<InventoryUpdate, ProtocolError>::failure(stack.error());
+    }
+    update.carried_stack = stack.value();
+  }
+
+  auto trailing = require_no_trailing_bytes(reader);
+  if (!trailing) {
+    return Expected<InventoryUpdate, ProtocolError>::failure(trailing.error());
+  }
+  return Expected<InventoryUpdate, ProtocolError>::success(std::move(update));
+}
+
+} // namespace arv::protocol

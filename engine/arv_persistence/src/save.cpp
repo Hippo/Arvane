@@ -1,6 +1,7 @@
 #include "arv/persistence/save.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <system_error>
@@ -29,6 +30,59 @@ using json = nlohmann::json;
       node.at(0).get<f32>(),
       node.at(1).get<f32>(),
       node.at(2).get<f32>()};
+}
+
+[[nodiscard]] json quat_to_json(Quatf value) {
+  return json::array({value.x, value.y, value.z, value.w});
+}
+
+[[nodiscard]] Quatf json_to_quat(const json& node) {
+  return {
+      node.at(0).get<f32>(),
+      node.at(1).get<f32>(),
+      node.at(2).get<f32>(),
+      node.at(3).get<f32>()};
+}
+
+[[nodiscard]] RegionCoord entity_region_for_position(Vec3f position) noexcept {
+  const BlockPos block_pos{{
+      static_cast<i32>(std::floor(position.x)),
+      static_cast<i32>(std::floor(position.y)),
+      static_cast<i32>(std::floor(position.z)),
+  }};
+  return chunk_column_to_region(chunk_to_column(block_to_chunk(block_pos)));
+}
+
+[[nodiscard]] json entity_record_to_json(const entity::PersistentEntityRecord& entity) {
+  return json{
+      {"uuid", entity.uuid},
+      {"type", entity.type_name},
+      {"version", 1},
+      {"world_id", entity.world_id.value},
+      {"position", vec3_to_json(entity.position)},
+      {"rotation", quat_to_json(entity.rotation)},
+      {"velocity", vec3_to_json(entity.velocity)},
+      {"components", json::object()},
+  };
+}
+
+[[nodiscard]] entity::PersistentEntityRecord entity_record_from_json(const json& entry) {
+  entity::PersistentEntityRecord record;
+  record.uuid = entry.at("uuid").get<std::string>();
+  record.type_name = entry.at("type").get<std::string>();
+  record.world_id = WorldID{entry.at("world_id").get<u32>()};
+  record.position = json_to_vec3(entry.at("position"));
+  record.rotation = json_to_quat(entry.at("rotation"));
+  record.velocity = json_to_vec3(entry.at("velocity"));
+  return record;
+}
+
+[[nodiscard]] std::filesystem::path entity_region_file_path(
+    const std::filesystem::path& root,
+    std::string_view world_name,
+    RegionCoord region) {
+  return root / "worlds" / std::string{world_name} / "entities" /
+         ("r." + std::to_string(region.x) + "." + std::to_string(region.z) + ".json");
 }
 
 [[nodiscard]] json world_generation_to_json(const world::WorldGenerationConfig& config) {
@@ -234,6 +288,7 @@ Expected<void, PersistenceError> save_server_root(
     const WorldMetadata& world,
     std::span<const SavedChunkSection> chunks,
     std::span<const PlayerSaveData> players,
+    std::span<const entity::PersistentEntityRecord> entities,
     const voxel::BlockRegistry& block_registry,
     const player::ItemRegistry& item_registry) {
   const json save_json{
@@ -299,7 +354,60 @@ Expected<void, PersistenceError> save_server_root(
     }
   }
 
+  const std::filesystem::path entity_root = root / "worlds" / world.name / "entities";
+  std::error_code file_error;
+  std::filesystem::remove(root / "worlds" / world.name / "entities.json", file_error);
+  file_error.clear();
+  std::filesystem::remove_all(entity_root, file_error);
+  if (file_error) {
+    return Expected<void, PersistenceError>::failure(
+        PersistenceError{"failed to clear old entity persistence files: " + file_error.message()});
+  }
+
+  HashMap<RegionCoord, std::vector<entity::PersistentEntityRecord>> entity_regions;
+  for (const entity::PersistentEntityRecord& entity : entities) {
+    if (entity.world_id.value == 0U) {
+      continue;
+    }
+    entity_regions[entity_region_for_position(entity.position)].push_back(entity);
+  }
+  for (const auto& [region, region_entities] : entity_regions) {
+    json entity_array = json::array();
+    for (const entity::PersistentEntityRecord& entity : region_entities) {
+      entity_array.push_back(entity_record_to_json(entity));
+    }
+
+    auto entity_result = write_text_atomic(
+        entity_region_file_path(root, world.name, region),
+        json{
+            {"entity_version", 1},
+            {"region", {{"x", region.x}, {"z", region.z}}},
+            {"entities", std::move(entity_array)}}.dump(2));
+    if (!entity_result) {
+      return entity_result;
+    }
+  }
+
   return Expected<void, PersistenceError>::success();
+}
+
+Expected<void, PersistenceError> save_server_root(
+    const std::filesystem::path& root,
+    const SaveMetadata& save,
+    const WorldMetadata& world,
+    std::span<const SavedChunkSection> chunks,
+    std::span<const PlayerSaveData> players,
+    const voxel::BlockRegistry& block_registry,
+    const player::ItemRegistry& item_registry) {
+  return save_server_root(
+      root,
+      save,
+      world,
+      chunks,
+      players,
+      std::span<const entity::PersistentEntityRecord>{},
+      block_registry,
+      item_registry);
 }
 
 Expected<LoadedSaveData, PersistenceError> load_server_root(
@@ -384,6 +492,39 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
         }
         const auto& region_chunks = region_result.value().chunks;
         loaded.chunks.insert(loaded.chunks.end(), region_chunks.begin(), region_chunks.end());
+      }
+    }
+
+    auto load_entities_file = [&](const std::filesystem::path& path) -> Expected<void, PersistenceError> {
+      auto entity_text = read_text_file(path);
+      if (!entity_text) {
+        return Expected<void, PersistenceError>::failure(entity_text.error());
+      }
+      const json entity_json = json::parse(entity_text.value());
+      for (const json& entry : entity_json.at("entities")) {
+        loaded.entities.emplace_back(entity_record_from_json(entry));
+      }
+      return Expected<void, PersistenceError>::success();
+    };
+
+    const std::filesystem::path entities_dir = worlds_root / loaded.world.name / "entities";
+    if (std::filesystem::exists(entities_dir)) {
+      for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(entities_dir)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".json") {
+          continue;
+        }
+        auto entity_result = load_entities_file(entry.path());
+        if (!entity_result) {
+          return Expected<LoadedSaveData, PersistenceError>::failure(entity_result.error());
+        }
+      }
+    } else {
+      const std::filesystem::path entities_file = worlds_root / loaded.world.name / "entities.json";
+      if (std::filesystem::exists(entities_file)) {
+        auto entity_result = load_entities_file(entities_file);
+        if (!entity_result) {
+          return Expected<LoadedSaveData, PersistenceError>::failure(entity_result.error());
+        }
       }
     }
 

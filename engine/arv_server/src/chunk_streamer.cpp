@@ -169,6 +169,33 @@ std::vector<ChunkCoord> ServerChunkStreamer::pending_generation_requests(
   return requests;
 }
 
+bool ServerChunkStreamer::session_has_sent_chunk(
+    SessionID session_id,
+    WorldID world_id,
+    ChunkCoord coord) const noexcept {
+  const auto found = players_.find(session_id);
+  return found != players_.end() &&
+         found->second.world_id == world_id &&
+         found->second.sent_chunk_versions.find(coord) != found->second.sent_chunk_versions.end();
+}
+
+bool ServerChunkStreamer::mark_sent_block_version(
+    SessionID session_id,
+    WorldID world_id,
+    ChunkCoord coord,
+    u64 block_version) noexcept {
+  auto player = players_.find(session_id);
+  if (player == players_.end() || player->second.world_id != world_id) {
+    return false;
+  }
+  auto sent = player->second.sent_chunk_versions.find(coord);
+  if (sent == player->second.sent_chunk_versions.end()) {
+    return false;
+  }
+  sent->second.block_version = block_version;
+  return true;
+}
+
 i32 ServerChunkStreamer::clamp_view_distance(i32 requested_distance) const noexcept {
   if (requested_distance < 0) {
     return 0;
