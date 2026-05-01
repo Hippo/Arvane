@@ -4,10 +4,7 @@
 #include "arv/core/id.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/types.hpp"
-#include "arv/player/item.hpp"
-#include "arv/player/player_constants.hpp"
 #include "arv/render/render_types.hpp"
-#include "arv/voxel/block.hpp"
 
 #include <array>
 #include <optional>
@@ -16,8 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace arv::client {
-
+namespace arv::ui {
 struct UiNodeTag {};
 using UiNodeID = ID<UiNodeTag, u32>;
 
@@ -198,7 +194,6 @@ private:
   UiNodeID keyboard_focus_{};
   UiNodeID mouse_capture_{};
 };
-
 struct UiDocumentElement {
   std::string type{};
   std::string id{};
@@ -229,98 +224,10 @@ struct UiDocumentValidation {
 [[nodiscard]] UiDocumentValidation validate_ui_document(
     const UiDocument& document,
     UiDocumentLimits limits = {});
-
-struct UiItemStackView {
-  std::string item_name{};
-  std::string display_name{};
-  u16 count{};
-  u16 durability{};
-  u16 max_durability{};
-  player::ItemRenderType render_type{player::ItemRenderType::Texture};
-  UiImageData texture_icon{};
-  std::array<UiImageData, voxel::BlockFaceCount> block_faces{};
-
-  [[nodiscard]] bool empty() const noexcept {
-    return item_name.empty() || count == 0U;
-  }
-};
-
-struct HotbarHudModel {
-  u8 selected_slot{};
-  u8 slot_count{player::DefaultHotbarSlotCount};
-  Vec2f viewport{};
-  std::span<const UiItemStackView> slots{};
-};
-
-struct InventoryUiModel {
-  bool visible{};
-  std::string title{"Inventory"};
-  u8 selected_hotbar_slot{};
-  u8 hotbar_slot_count{player::DefaultHotbarSlotCount};
-  Vec2f viewport{};
-  std::span<const UiItemStackView> slots{};
-  std::optional<UiItemStackView> cursor_stack{};
-  Vec2f cursor_position{};
-};
-
-struct ChatLineView {
-  std::string text{};
-  f32 opacity{1.0F};
-};
-
-struct ChatUiModel {
-  bool visible{true};
-  bool input_active{};
-  std::span<const ChatLineView> messages{};
-  std::string draft{};
-};
-
-struct PlayerListEntryView {
-  std::string name{};
-  std::optional<u32> latency_ms{};
-};
-
-struct TabMenuUiModel {
-  bool visible{};
-  std::string header{};
-  std::string footer{};
-  std::span<const PlayerListEntryView> players{};
-};
-
-using ScoreboardVariableMap = HashMap<std::string, std::string>;
-
-struct ScoreboardUiModel {
-  bool visible{};
-  std::string title{};
-  std::span<const std::string> lines{};
-  const ScoreboardVariableMap* variables{};
-};
-
-struct DebugHudModel {
-  bool show_fps{};
-  u32 fps{};
-};
-
-struct GameplayUiModel {
-  HotbarHudModel hotbar{};
-  InventoryUiModel inventory{};
-  ChatUiModel chat{};
-  TabMenuUiModel tab_menu{};
-  ScoreboardUiModel scoreboard{};
-  DebugHudModel debug{};
-};
-
-void build_hotbar_hud(UiTree& tree, HotbarHudModel model);
-void build_inventory_ui(UiTree& tree, InventoryUiModel model);
-void build_chat_ui(UiTree& tree, ChatUiModel model);
-void build_tab_menu_ui(UiTree& tree, TabMenuUiModel model);
-void build_scoreboard_ui(UiTree& tree, ScoreboardUiModel model);
-void build_gameplay_ui(UiTree& tree, GameplayUiModel model);
-
 void append_ui_draw_commands(
     const UiTree& tree,
     asset::FontSystem& fonts,
     const asset::FontStack& font_stack,
     render::FramePacket& frame);
 
-} // namespace arv::client
+} // namespace arv::ui

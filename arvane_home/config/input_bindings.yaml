@@ -72,6 +72,9 @@ bindings:
   ShowTabMenu:
     - device: keyboard
       key: Tab
+  TogglePauseMenu:
+    - device: keyboard
+      key: Escape
   ToggleDebugMenu:
     - device: keyboard
       key: Grave

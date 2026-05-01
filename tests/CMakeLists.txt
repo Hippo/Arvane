@@ -62,6 +62,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_render
   arv_sched
   arv_server
+  arv_ui
   arv_voxel
   arv_world
   GTest::gtest

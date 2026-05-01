@@ -25,7 +25,7 @@ std::array<Vec2f, 4> normalized_uvs(
   return uvs;
 }
 
-client::UiImageData image_data_from_atlas_entry(
+ui::UiImageData image_data_from_atlas_entry(
     const asset::TextureAtlasEntry& entry,
     u32 page_width,
     u32 page_height,
@@ -37,7 +37,7 @@ client::UiImageData image_data_from_atlas_entry(
       {entry.uv_min.x, entry.uv_max.y},
   }};
 
-  client::UiImageData image;
+  ui::UiImageData image;
   image.valid = true;
   image.source = source;
   image.page = entry.page;
@@ -76,11 +76,10 @@ asset::TextureAtlasResult build_item_texture_atlas(
 
     const asset::TextureResource* resource = resources.texture(handle.value());
     if (resource == nullptr) {
-      return asset::TextureAtlasResult::failure({
-          texture_id.value,
-          {},
-          "build item texture atlas",
-          "loaded texture handle did not resolve"});
+      return asset::TextureAtlasResult::failure({texture_id.value,
+                                                 {},
+                                                 "build item texture atlas",
+                                                 "loaded texture handle did not resolve"});
     }
     inputs.emplace_back(texture_id, resource->image, resource->fallback);
   }
@@ -113,11 +112,10 @@ EntityRenderAssetsResult build_entity_render_assets(
 
     auto model_definition = render::parse_entity_model_json(model_text.value());
     if (!model_definition) {
-      return EntityRenderAssetsResult::failure({
-          type.model_asset,
-          resources.resolve_asset_path({type.model_asset}, asset::AssetKind::Model),
-          "parse entity model",
-          model_definition.error().message});
+      return EntityRenderAssetsResult::failure({type.model_asset,
+                                                resources.resolve_asset_path({type.model_asset}, asset::AssetKind::Model),
+                                                "parse entity model",
+                                                model_definition.error().message});
     }
 
     for (const std::string& texture : model_definition.value().texture_assets) {
@@ -126,10 +124,9 @@ EntityRenderAssetsResult build_entity_render_assets(
       }
     }
 
-    pending_models.push_back({
-        type.id,
-        render::EntityModelID{type.id.value},
-        std::move(model_definition.value())});
+    pending_models.push_back({type.id,
+                              render::EntityModelID{type.id.value},
+                              std::move(model_definition.value())});
   }
 
   EntityRenderAssets assets;
@@ -152,11 +149,10 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
     const asset::TextureResource* resource = resources.texture(handle.value());
     if (resource == nullptr) {
-      return EntityRenderAssetsResult::failure({
-          texture_id.value,
-          {},
-          "build entity texture atlas",
-          "loaded texture handle did not resolve"});
+      return EntityRenderAssetsResult::failure({texture_id.value,
+                                                {},
+                                                "build entity texture atlas",
+                                                "loaded texture handle did not resolve"});
     }
     inputs.push_back({texture_id, resource->image, resource->fallback});
   }
@@ -173,28 +169,25 @@ EntityRenderAssetsResult build_entity_render_assets(
     for (const std::string& texture : pending.definition.texture_assets) {
       const asset::TextureAtlasEntry* entry = assets.texture_atlas.find(texture);
       if (entry == nullptr) {
-        return EntityRenderAssetsResult::failure({
-            texture,
-            {},
-            "build entity model",
-            "model texture was not present in final atlas"});
+        return EntityRenderAssetsResult::failure({texture,
+                                                  {},
+                                                  "build entity model",
+                                                  "model texture was not present in final atlas"});
       }
-      bindings.push_back({
-          texture,
-          entry->unpadded_pixel_min,
-          entry->unpadded_pixel_max,
-          entry->width,
-          entry->height});
+      bindings.push_back({texture,
+                          entry->unpadded_pixel_min,
+                          entry->unpadded_pixel_max,
+                          entry->width,
+                          entry->height});
     }
 
     auto model_asset =
         render::build_entity_model_asset(pending.model_id, pending.definition, bindings);
     if (!model_asset) {
-      return EntityRenderAssetsResult::failure({
-          pending.definition.name,
-          {},
-          "build entity model",
-          model_asset.error().message});
+      return EntityRenderAssetsResult::failure({pending.definition.name,
+                                                {},
+                                                "build entity model",
+                                                model_asset.error().message});
     }
     assets.model_by_type[pending.type_id] = pending.model_id;
     assets.models.push_back(std::move(model_asset.value()));

@@ -76,6 +76,7 @@ Notes:
 ### Server Level
 
 * save format version
+* authoritative display name
 * global settings
 * player profiles
 * server configuration
@@ -132,7 +133,8 @@ Every save must declare a version:
 ```json
 {
   "save_format_version": 1,
-  "game_version": "0.1.0"
+  "game_version": "0.1.0",
+  "name": "My World"
 }
 ```
 

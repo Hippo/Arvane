@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <system_error>
 
@@ -131,10 +132,9 @@ using json = nlohmann::json;
   config.terrain_lacunarity = node.at("terrain_lacunarity").get<f32>();
   config.terrain_gain = node.at("terrain_gain").get<f32>();
   for (const json& entry : node.at("surface_layers")) {
-    config.surface_layers.push_back({
-        entry.at("block_name").get<std::string>(),
-        entry.at("depth").get<i32>(),
-        entry.at("remaining").get<bool>()});
+    config.surface_layers.push_back({entry.at("block_name").get<std::string>(),
+                                     entry.at("depth").get<i32>(),
+                                     entry.at("remaining").get<bool>()});
   }
   return config;
 }
@@ -282,6 +282,128 @@ u64 hash_item_registry(const player::ItemRegistry& registry) noexcept {
   return hash;
 }
 
+std::vector<SavedServerSummary> discover_saved_servers(const std::filesystem::path& saves_root) {
+  std::vector<SavedServerSummary> saves;
+  std::error_code error;
+  if (!std::filesystem::exists(saves_root, error) ||
+      !std::filesystem::is_directory(saves_root, error)) {
+    return saves;
+  }
+
+  for (const std::filesystem::directory_entry& server_entry :
+       std::filesystem::directory_iterator(saves_root, error)) {
+    if (error || !server_entry.is_directory()) {
+      error.clear();
+      continue;
+    }
+
+    const std::filesystem::path server_root = server_entry.path();
+    const std::filesystem::path save_file = server_root / "save.json";
+    const std::filesystem::path worlds_root = server_root / "worlds";
+    if (!std::filesystem::exists(save_file, error) ||
+        !std::filesystem::exists(worlds_root, error) ||
+        !std::filesystem::is_directory(worlds_root, error)) {
+      error.clear();
+      continue;
+    }
+
+    std::string save_name = server_root.filename().string();
+    if (auto save_text = read_text_file(save_file); save_text) {
+      try {
+        const json save_json = json::parse(save_text.value());
+        if (save_json.contains("name") && save_json.at("name").is_string()) {
+          const std::string parsed_name = save_json.at("name").get<std::string>();
+          if (!parsed_name.empty()) {
+            save_name = parsed_name;
+          }
+        }
+      } catch (const json::exception&) {
+      }
+    }
+
+    std::string primary_world_name;
+    const std::filesystem::path default_world = worlds_root / "default" / "world.json";
+    if (std::filesystem::exists(default_world, error)) {
+      primary_world_name = "default";
+    } else {
+      error.clear();
+      for (const std::filesystem::directory_entry& world_entry :
+           std::filesystem::directory_iterator(worlds_root, error)) {
+        if (error || !world_entry.is_directory()) {
+          error.clear();
+          continue;
+        }
+        if (std::filesystem::exists(world_entry.path() / "world.json", error)) {
+          primary_world_name = world_entry.path().filename().string();
+          break;
+        }
+        error.clear();
+      }
+    }
+
+    if (primary_world_name.empty()) {
+      continue;
+    }
+
+    saves.push_back({save_name, server_root.filename().string(), primary_world_name, server_root});
+  }
+
+  std::sort(saves.begin(), saves.end(), [](const auto& lhs, const auto& rhs) {
+    if (lhs.name != rhs.name) {
+      return lhs.name < rhs.name;
+    }
+    return lhs.server_save_name < rhs.server_save_name;
+  });
+  return saves;
+}
+
+std::vector<SavedWorldSummary> discover_saved_worlds(const std::filesystem::path& saves_root) {
+  std::vector<SavedWorldSummary> worlds;
+  std::error_code error;
+  if (!std::filesystem::exists(saves_root, error) ||
+      !std::filesystem::is_directory(saves_root, error)) {
+    return worlds;
+  }
+
+  for (const std::filesystem::directory_entry& server_entry :
+       std::filesystem::directory_iterator(saves_root, error)) {
+    if (error || !server_entry.is_directory()) {
+      continue;
+    }
+    const std::filesystem::path server_root = server_entry.path();
+    const std::filesystem::path worlds_root = server_root / "worlds";
+    if (!std::filesystem::exists(worlds_root, error) ||
+        !std::filesystem::is_directory(worlds_root, error)) {
+      error.clear();
+      continue;
+    }
+
+    for (const std::filesystem::directory_entry& world_entry :
+         std::filesystem::directory_iterator(worlds_root, error)) {
+      if (error || !world_entry.is_directory()) {
+        continue;
+      }
+      const std::filesystem::path world_root = world_entry.path();
+      if (!std::filesystem::exists(world_root / "world.json", error)) {
+        error.clear();
+        continue;
+      }
+      worlds.push_back({server_root.filename().string(),
+                        world_root.filename().string(),
+                        server_root,
+                        world_root});
+    }
+  }
+
+  std::sort(worlds.begin(), worlds.end(), [](const auto& lhs, const auto& rhs) {
+    if (lhs.server_save_name != rhs.server_save_name) {
+      return lhs.server_save_name < rhs.server_save_name;
+    }
+    return lhs.world_name < rhs.world_name;
+  });
+  return worlds;
+}
+
 Expected<void, PersistenceError> save_server_root(
     const std::filesystem::path& root,
     const SaveMetadata& save,
@@ -291,7 +413,9 @@ Expected<void, PersistenceError> save_server_root(
     std::span<const entity::PersistentEntityRecord> entities,
     const voxel::BlockRegistry& block_registry,
     const player::ItemRegistry& item_registry) {
+  const std::string save_name = save.name.empty() ? root.filename().string() : save.name;
   const json save_json{
+      {"name", save_name},
       {"save_format_version", save.save_format_version},
       {"game_version", save.game_version},
       {"registry_refs",
@@ -382,7 +506,8 @@ Expected<void, PersistenceError> save_server_root(
         json{
             {"entity_version", 1},
             {"region", {{"x", region.x}, {"z", region.z}}},
-            {"entities", std::move(entity_array)}}.dump(2));
+            {"entities", std::move(entity_array)}}
+            .dump(2));
     if (!entity_result) {
       return entity_result;
     }
@@ -412,6 +537,7 @@ Expected<void, PersistenceError> save_server_root(
 
 Expected<LoadedSaveData, PersistenceError> load_server_root(
     const std::filesystem::path& root,
+    std::optional<std::string_view> requested_world_name,
     const voxel::BlockRegistry& block_registry,
     const player::ItemRegistry& item_registry) {
   LoadedSaveData loaded;
@@ -425,6 +551,14 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
       return Expected<LoadedSaveData, PersistenceError>::failure(save_text.error());
     }
     const json save_json = json::parse(save_text.value());
+    if (save_json.contains("name") && save_json.at("name").is_string()) {
+      loaded.save.name = save_json.at("name").get<std::string>();
+    } else {
+      loaded.save.name = root.filename().string();
+    }
+    if (loaded.save.name.empty()) {
+      loaded.save.name = root.filename().string();
+    }
     loaded.save.save_format_version = save_json.at("save_format_version").get<u32>();
     loaded.save.game_version = save_json.at("game_version").get<std::string>();
     loaded.save.block_registry_hash = save_json.at("registry_refs").at("block_registry_hash").get<u64>();
@@ -438,14 +572,20 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
 
     const std::filesystem::path worlds_root = root / "worlds";
     std::filesystem::path world_file;
-    for (const std::string_view candidate : {std::string_view{"default"}}) {
-      const std::filesystem::path path = worlds_root / candidate / "world.json";
+    if (requested_world_name.has_value() && !requested_world_name->empty()) {
+      const std::filesystem::path path =
+          worlds_root / std::string{requested_world_name.value()} / "world.json";
       if (std::filesystem::exists(path)) {
         world_file = path;
-        break;
+      }
+    } else {
+      const std::filesystem::path default_world = worlds_root / "default" / "world.json";
+      if (std::filesystem::exists(default_world)) {
+        world_file = default_world;
       }
     }
-    if (world_file.empty() && std::filesystem::exists(worlds_root)) {
+    if (world_file.empty() && std::filesystem::exists(worlds_root) &&
+        (!requested_world_name.has_value() || requested_world_name->empty())) {
       for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(worlds_root)) {
         if (!entry.is_directory()) {
           continue;
@@ -570,6 +710,21 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
     return Expected<LoadedSaveData, PersistenceError>::failure(
         PersistenceError{"failed to parse save JSON: " + std::string{ex.what()}});
   }
+}
+
+Expected<LoadedSaveData, PersistenceError> load_server_root(
+    const std::filesystem::path& root,
+    const voxel::BlockRegistry& block_registry,
+    const player::ItemRegistry& item_registry) {
+  return load_server_root(root, std::optional<std::string_view>{}, block_registry, item_registry);
+}
+
+Expected<LoadedSaveData, PersistenceError> load_server_root(
+    const std::filesystem::path& root,
+    std::string_view world_name,
+    const voxel::BlockRegistry& block_registry,
+    const player::ItemRegistry& item_registry) {
+  return load_server_root(root, std::optional<std::string_view>{world_name}, block_registry, item_registry);
 }
 
 } // namespace arv::persistence

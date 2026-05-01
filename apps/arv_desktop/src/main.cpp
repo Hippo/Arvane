@@ -12,7 +12,6 @@
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/client/client_runtime.hpp"
-#include "arv/client/ui.hpp"
 #include "arv/core/arena.hpp"
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/log.hpp"
@@ -27,22 +26,28 @@
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/sched/scheduler.hpp"
 #include "arv/server/server_runtime.hpp"
+#include "arv/ui/ui.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/world_runtime.hpp"
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <deque>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -114,7 +119,7 @@ namespace {
 }
 
 [[nodiscard]] std::optional<arv::usize> inventory_slot_from_ui_action(
-    const arv::client::UiAction& action) noexcept {
+    const arv::ui::UiAction& action) noexcept {
   if (action.action_id != "inventory_slot") {
     return std::nullopt;
   }
@@ -147,7 +152,7 @@ namespace {
 
 [[nodiscard]] bool apply_inventory_action(
     arv::client::ClientRuntime& client,
-    const std::optional<arv::client::UiAction>& action,
+    const std::optional<arv::ui::UiAction>& action,
     arv::player::InventoryClickButton button) {
   if (!action.has_value()) {
     return false;
@@ -161,7 +166,7 @@ namespace {
 }
 
 [[nodiscard]] bool route_inventory_mouse_input(
-    arv::client::UiTree& ui_tree,
+    arv::ui::UiTree& ui_tree,
     arv::client::ClientRuntime& client,
     const arv::platform::InputSnapshot& platform_input,
     bool has_carried_stack) {
@@ -169,10 +174,10 @@ namespace {
   const arv::Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
   (void)ui_tree.route_mouse_move(cursor);
   if (platform_input.mouse_left_pressed) {
-    const std::optional<arv::client::UiNodeID> hit = ui_tree.hit_test(cursor);
+    const std::optional<arv::ui::UiNodeID> hit = ui_tree.hit_test(cursor);
     changed = apply_inventory_action(
                   client,
-                  ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Left),
+                  ui_tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Left),
                   arv::player::InventoryClickButton::Primary) ||
               changed;
     if (!changed && !hit.has_value() && has_carried_stack) {
@@ -181,10 +186,10 @@ namespace {
     }
   }
   if (platform_input.mouse_right_pressed) {
-    const std::optional<arv::client::UiNodeID> hit = ui_tree.hit_test(cursor);
+    const std::optional<arv::ui::UiNodeID> hit = ui_tree.hit_test(cursor);
     changed = apply_inventory_action(
                   client,
-                  ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Right),
+                  ui_tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Right),
                   arv::player::InventoryClickButton::Secondary) ||
               changed;
     if (!changed && !hit.has_value() && has_carried_stack) {
@@ -193,32 +198,248 @@ namespace {
     }
   }
   if (platform_input.mouse_left_released) {
-    (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Left);
+    (void)ui_tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Left);
   }
   if (platform_input.mouse_right_released) {
-    (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Right);
+    (void)ui_tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Right);
   }
   return changed;
 }
 
+[[nodiscard]] bool route_screen_mouse_input(
+    arv::ui::UIScreenManager& screen_manager,
+    arv::ui::UIContext& ui_context,
+    const arv::platform::InputSnapshot& platform_input) {
+  bool handled = false;
+  const arv::Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
+  (void)ui_context.tree.route_mouse_move(cursor);
+  if (platform_input.mouse_left_pressed) {
+    const std::optional<arv::ui::UiAction> action =
+        ui_context.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Left);
+    if (action.has_value()) {
+      handled = screen_manager.route_action(action.value(), ui_context) || handled;
+    }
+  }
+  if (platform_input.mouse_left_released) {
+    (void)ui_context.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Left);
+  }
+  if (platform_input.mouse_right_pressed) {
+    (void)ui_context.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Right);
+  }
+  if (platform_input.mouse_right_released) {
+    (void)ui_context.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Right);
+  }
+  return handled;
+}
+
 void route_ui_mouse_focus(
-    arv::client::UiTree& ui_tree,
+    arv::ui::UiTree& ui_tree,
     const arv::platform::InputSnapshot& platform_input) {
   const arv::Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
   (void)ui_tree.route_mouse_move(cursor);
   if (platform_input.mouse_left_pressed) {
-    (void)ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Left);
+    (void)ui_tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Left);
   }
   if (platform_input.mouse_right_pressed) {
-    (void)ui_tree.route_mouse_down(cursor, arv::client::UiMouseButton::Right);
+    (void)ui_tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Right);
   }
   if (platform_input.mouse_left_released) {
-    (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Left);
+    (void)ui_tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Left);
   }
   if (platform_input.mouse_right_released) {
-    (void)ui_tree.route_mouse_up(cursor, arv::client::UiMouseButton::Right);
+    (void)ui_tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Right);
   }
 }
+
+[[nodiscard]] char lowercase_ascii(char ch) noexcept {
+  return ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch - 'A' + 'a') : ch;
+}
+
+[[nodiscard]] bool is_save_name_character(char ch) noexcept {
+  return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
+}
+
+[[nodiscard]] std::string sanitize_save_name(std::string_view name) {
+  std::string result;
+  result.reserve(name.size());
+  bool previous_separator = false;
+  for (char ch : name) {
+    ch = lowercase_ascii(ch);
+    if (is_save_name_character(ch)) {
+      result.push_back(ch);
+      previous_separator = false;
+      continue;
+    }
+    if ((ch == '-' || ch == '_' || ch == ' ' || ch == '.') && !result.empty() &&
+        !previous_separator) {
+      result.push_back('-');
+      previous_separator = true;
+    }
+  }
+  while (!result.empty() && result.back() == '-') {
+    result.pop_back();
+  }
+  if (result.empty() || result == "." || result == "..") {
+    return "world";
+  }
+  return result;
+}
+
+[[nodiscard]] std::string unique_server_save_name(
+    const arv::io::EngineConfig& config,
+    std::string_view display_name) {
+  const std::string base = sanitize_save_name(display_name);
+  std::string candidate = base;
+  for (arv::u32 suffix = 2; std::filesystem::exists(config.paths.server_save_path(candidate));
+       ++suffix) {
+    candidate = base + "-" + std::to_string(suffix);
+  }
+  return candidate;
+}
+
+[[nodiscard]] arv::u64 generated_world_seed() noexcept {
+  const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+  return static_cast<arv::u64>(now == 0 ? 1 : now);
+}
+
+[[nodiscard]] arv::u64 parse_or_generate_seed(std::string_view seed_text) noexcept {
+  if (seed_text.empty()) {
+    return generated_world_seed();
+  }
+
+  arv::u64 seed = 0;
+  const char* begin = seed_text.data();
+  const char* end = seed_text.data() + seed_text.size();
+  const auto parsed = std::from_chars(begin, end, seed);
+  if (parsed.ec != std::errc{} || parsed.ptr != end) {
+    return generated_world_seed();
+  }
+  return seed;
+}
+
+struct DesktopGameSession {
+  explicit DesktopGameSession(arv::TickRate base_tps) : ticks(base_tps) {
+  }
+
+  std::string server_save_name{};
+  std::string server_save_display_name{};
+  std::filesystem::path server_save_root{};
+  std::string world_save_name{"default"};
+  arv::u64 world_seed{1};
+  arv::world::WorldGenerationConfig generation_config{};
+  arv::i32 min_chunk_y{};
+  arv::i32 max_chunk_y{};
+  std::unique_ptr<arv::server::ServerRuntime> integrated_server{};
+  std::unique_ptr<arv::client::ClientRuntime> client{};
+  arv::world::WorldRuntime client_world{arv::server::DefaultWorldID};
+  arv::desktop::ChunkViewState chunk_view{};
+  std::deque<arv::protocol::ChunkUnload> pending_client_chunk_unloads{};
+  std::deque<arv::protocol::ChunkData> pending_client_chunk_data{};
+  std::deque<arv::protocol::BlockUpdateBatch> pending_client_block_updates{};
+  arv::core::FixedTimestepAccumulator ticks;
+  std::vector<arv::ui::UiItemStackView> inventory_slots{};
+  std::optional<arv::ui::UiItemStackView> carried_inventory_stack{};
+  std::vector<arv::ui::PlayerListEntryView> tab_players{};
+  std::vector<arv::ui::ChatLineView> chat_lines{};
+  bool ui_snapshot_initialized{};
+};
+
+class DesktopMenuState final : public arv::ui::UIScreenDataSource,
+                               public arv::ui::UICommandSink {
+public:
+  explicit DesktopMenuState(std::filesystem::path saves_root) : saves_root_(std::move(saves_root)) {
+    refresh_worlds();
+  }
+
+  [[nodiscard]] std::vector<arv::ui::SinglePlayerSaveEntry> singleplayer_saves() const override {
+    return saves;
+  }
+
+  [[nodiscard]] std::vector<arv::ui::ServerListEntry> multiplayer_servers() const override {
+    return servers;
+  }
+
+  void submit(arv::ui::UICommand command) override {
+    std::visit([this](auto&& concrete) { handle(concrete); }, std::move(command));
+  }
+
+  void refresh_worlds() {
+    saves.clear();
+    for (const arv::persistence::SavedServerSummary& save :
+         arv::persistence::discover_saved_servers(saves_root_)) {
+      saves.push_back({save.name, save.server_save_name, save.primary_world_name, {}});
+    }
+  }
+
+  [[nodiscard]] std::optional<arv::ui::StartSinglePlayerCommand>
+  take_start_singleplayer_request() noexcept {
+    return std::exchange(start_singleplayer_request_, std::nullopt);
+  }
+
+  [[nodiscard]] std::optional<arv::ui::CreateWorldCommand>
+  take_create_world_request() noexcept {
+    return std::exchange(create_world_request_, std::nullopt);
+  }
+
+  [[nodiscard]] std::optional<arv::ui::DeleteSinglePlayerSaveCommand>
+  take_delete_save_request() noexcept {
+    return std::exchange(delete_save_request_, std::nullopt);
+  }
+
+  [[nodiscard]] bool take_back_to_main_menu_request() noexcept {
+    return std::exchange(back_to_main_menu_requested_, false);
+  }
+
+  std::vector<arv::ui::SinglePlayerSaveEntry> saves{};
+  std::vector<arv::ui::ServerListEntry> servers{};
+  bool quit_requested{};
+
+private:
+  void handle(const arv::ui::StartSinglePlayerCommand& command) {
+    start_singleplayer_request_ = command;
+  }
+
+  void handle(const arv::ui::CreateWorldCommand& command) {
+    create_world_request_ = command;
+  }
+
+  void handle(const arv::ui::DeleteSinglePlayerSaveCommand& command) {
+    delete_save_request_ = command;
+  }
+
+  void handle(const arv::ui::JoinServerCommand&) {
+  }
+
+  void handle(const arv::ui::SaveServerEntryCommand& command) {
+    if (command.edit_index.has_value() && command.edit_index.value() < servers.size()) {
+      servers[command.edit_index.value()] = command.server;
+    } else {
+      servers.push_back(command.server);
+    }
+  }
+
+  void handle(const arv::ui::RemoveServerEntryCommand& command) {
+    if (command.index < servers.size()) {
+      servers.erase(servers.begin() + static_cast<std::ptrdiff_t>(command.index));
+    }
+  }
+
+  void handle(const arv::ui::ResumeGameCommand&) {
+  }
+  void handle(const arv::ui::BackToMainMenuCommand&) {
+    back_to_main_menu_requested_ = true;
+  }
+
+  void handle(const arv::ui::QuitGameCommand&) {
+    quit_requested = true;
+  }
+
+  std::filesystem::path saves_root_{};
+  std::optional<arv::ui::StartSinglePlayerCommand> start_singleplayer_request_{};
+  std::optional<arv::ui::CreateWorldCommand> create_world_request_{};
+  std::optional<arv::ui::DeleteSinglePlayerSaveCommand> delete_save_request_{};
+  bool back_to_main_menu_requested_{};
+};
 
 void pace_frame(
     const arv::io::RenderConfig& render,
@@ -297,8 +518,6 @@ int main(int argc, char** argv) {
     window.set_input_bindings(input_bindings_result.value());
   }
 
-  auto transport_pair = arv::net::make_in_process_transport_pair();
-
   arv::render::OpenGLRenderer renderer;
   if (!arv::desktop::configure_renderer(renderer, resources, config)) {
     return 1;
@@ -374,8 +593,8 @@ int main(int argc, char** argv) {
     }
   }
   const arv::asset::FontStack ui_font_stack = font_system.make_stack(ui_faces);
-  arv::client::FontUiTextMeasurer ui_text_measurer(font_system, ui_font_stack);
-  arv::client::UiTree ui_tree;
+  arv::ui::FontUiTextMeasurer ui_text_measurer(font_system, ui_font_stack);
+  arv::ui::UiTree ui_tree;
 
   auto item_definition_text = arv::io::read_text_file(
       config.paths.config_path() / "items.json",
@@ -458,16 +677,6 @@ int main(int argc, char** argv) {
     }
   }
 
-  const std::filesystem::path save_root = arv::desktop::default_save_root(config);
-  auto loaded_save_result =
-      arv::persistence::load_server_root(save_root, block_registry, item_registry);
-  if (!loaded_save_result) {
-    arv::core::error("save", loaded_save_result.error().message);
-    return 1;
-  }
-  const arv::persistence::LoadedSaveData loaded_save =
-      std::move(loaded_save_result.value());
-
   auto worldgen_text = arv::io::read_text_file(
       config.paths.config_path() / "worldgen/overworld.yaml",
       "overworld generator definition");
@@ -481,30 +690,8 @@ int main(int argc, char** argv) {
     arv::core::error("worldgen", worldgen_config.error().message);
     return 1;
   }
-
-  arv::world::WorldGenerationConfig generation_config = std::move(worldgen_config.value());
-  arv::u64 world_seed = 1;
-  std::string world_save_name{"default"};
-  std::pair<arv::i32, arv::i32> visible_chunk_y =
-      arv::desktop::visible_worldgen_chunk_y_range(generation_config);
-  if (loaded_save.has_world_metadata) {
-    generation_config = loaded_save.world.generation_config;
-    world_seed = loaded_save.world.seed;
-    world_save_name = loaded_save.world.name;
-    visible_chunk_y = {loaded_save.world.min_chunk_y, loaded_save.world.max_chunk_y};
-  }
-
-  auto worldgen_palette = arv::world::resolve_world_generation_palette(
-      generation_config,
-      block_registry);
-  if (!worldgen_palette) {
-    arv::core::error("worldgen", worldgen_palette.error().message);
-    return 1;
-  }
-
-  const arv::world::WorldGenerationPalette generation_palette =
-      std::move(worldgen_palette.value());
-  const auto [min_chunk_y, max_chunk_y] = visible_chunk_y;
+  const arv::world::WorldGenerationConfig default_generation_config =
+      std::move(worldgen_config.value());
 
   arv::server::ServerChunkStreamingConfig chunk_streaming;
   chunk_streaming.max_view_distance = config.chunks.load_distance;
@@ -513,12 +700,6 @@ int main(int argc, char** argv) {
   chunk_streaming.max_chunks_sent_per_player_tick =
       std::max<arv::u32>(config.chunk_pipeline.max_client_chunk_applies_per_frame, 1U);
   chunk_streaming.max_unloads_sent_per_player_tick = 64;
-
-  arv::server::ServerChunkGenerationSettings chunk_generation;
-  chunk_generation.enabled = true;
-  chunk_generation.seed = world_seed;
-  chunk_generation.config = generation_config;
-  chunk_generation.palette = generation_palette;
 
   arv::world::WorldTickPolicy world_tick_policy;
   world_tick_policy.block_update_interval =
@@ -545,159 +726,6 @@ int main(int argc, char** argv) {
   const arv::sched::RuntimeThreadBudgetPlan thread_budget =
       arv::sched::plan_runtime_thread_budget(thread_budget_config);
 
-  arv::server::ServerStartInfo server_start_info;
-  server_start_info.mode = arv::server::ServerMode::Integrated;
-  server_start_info.base_tps = config.simulation.base_tps;
-  server_start_info.listen_address = {"in-process", 0};
-  server_start_info.block_registry = &block_registry;
-  server_start_info.item_registry = &item_registry;
-  server_start_info.player_tuning = player_tuning;
-  server_start_info.fluid_definition = water_fluid;
-  server_start_info.chunk_streaming = chunk_streaming;
-  server_start_info.chunk_generation = chunk_generation;
-  server_start_info.max_generation_results_per_tick =
-      config.chunk_pipeline.max_generation_results_per_tick;
-  server_start_info.max_lighting_results_per_tick =
-      config.chunk_pipeline.max_lighting_results_per_tick;
-  server_start_info.max_pending_generation_jobs =
-      config.chunk_pipeline.max_generation_jobs_per_frame;
-  server_start_info.worker_threads = thread_budget.primary_workers;
-  server_start_info.world_tick_policy = world_tick_policy;
-  server_start_info.entity_registry = &entity_registry;
-
-  arv::server::ServerRuntime integrated_server(std::move(transport_pair.server));
-  auto server_start = integrated_server.start(server_start_info);
-  if (!server_start) {
-    arv::core::error("server", server_start.error().message);
-    return 1;
-  }
-
-  if (loaded_save.has_world_metadata) {
-    integrated_server.voxel_world().set_tick_index(loaded_save.world.tick_index);
-  }
-  for (const arv::persistence::SavedChunkSection& chunk : loaded_save.chunks) {
-    integrated_server.voxel_world().restore_saved_chunk(
-        chunk.coord,
-        chunk.blocks,
-        chunk.lights,
-        chunk.fluids);
-  }
-  integrated_server.voxel_world().restore_persistent_entities(
-      loaded_save.entities,
-      &entity_registry);
-
-  arv::client::ClientRuntime client(std::move(transport_pair.client));
-  client.set_player_tuning(player_tuning);
-  client.set_chunk_view_distance(config.chunks.stream_distance);
-  auto connect_result = client.connect_integrated();
-  if (!connect_result) {
-    arv::core::error("client", connect_result.error().message);
-    return 1;
-  }
-
-  arv::world::WorldRuntime client_world{arv::server::DefaultWorldID};
-  arv::desktop::ChunkViewState chunk_view;
-  std::deque<arv::protocol::ChunkUnload> pending_client_chunk_unloads;
-  std::deque<arv::protocol::ChunkData> pending_client_chunk_data;
-  std::deque<arv::protocol::BlockUpdateBatch> pending_client_block_updates;
-  auto collect_client_chunk_stream = [&]() {
-    std::vector<arv::protocol::ChunkUnload> drained_unloads =
-        client.drain_received_chunk_unloads();
-    for (const arv::protocol::ChunkUnload& unload : drained_unloads) {
-      pending_client_chunk_unloads.emplace_back(unload);
-    }
-
-    std::vector<arv::protocol::ChunkData> drained_chunks =
-        client.drain_received_chunk_data();
-    for (arv::protocol::ChunkData& data : drained_chunks) {
-      pending_client_chunk_data.emplace_back(std::move(data));
-    }
-
-    std::vector<arv::protocol::BlockUpdateBatch> drained_block_updates =
-        client.drain_received_block_updates();
-    for (arv::protocol::BlockUpdateBatch& batch : drained_block_updates) {
-      pending_client_block_updates.emplace_back(std::move(batch));
-    }
-  };
-  auto apply_pending_client_chunk_stream = [&](arv::u32 chunk_budget, arv::u32 unload_budget) {
-    bool changed = false;
-    arv::u32 unloads_applied = 0;
-    while (unloads_applied < unload_budget && !pending_client_chunk_unloads.empty()) {
-      const arv::protocol::ChunkUnload unload = pending_client_chunk_unloads.front();
-      pending_client_chunk_unloads.pop_front();
-      ++unloads_applied;
-      if (unload.world_id != client_world.id()) {
-        continue;
-      }
-      if (client_world.unload_chunk(unload.coord)) {
-        renderer.remove_chunk_mesh({unload.world_id, unload.coord});
-        arv::desktop::remove_chunk_view_chunk(chunk_view, unload.coord);
-        changed = true;
-      }
-    }
-
-    arv::u32 chunks_applied = 0;
-    while (chunks_applied < chunk_budget && !pending_client_chunk_data.empty()) {
-      arv::protocol::ChunkData data = std::move(pending_client_chunk_data.front());
-      pending_client_chunk_data.pop_front();
-      ++chunks_applied;
-      if (data.world_id != client_world.id()) {
-        continue;
-      }
-
-      std::optional<std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume>> lights;
-      if (data.has_lighting) {
-        lights = std::move(data.lights);
-      }
-      client_world.apply_chunk_snapshot(
-          data.coord,
-          std::move(data.blocks),
-          std::move(lights),
-          std::move(data.fluids));
-      changed = true;
-    }
-
-    while (!pending_client_block_updates.empty()) {
-      arv::protocol::BlockUpdateBatch batch = std::move(pending_client_block_updates.front());
-      pending_client_block_updates.pop_front();
-      if (batch.world_id != client_world.id()) {
-        continue;
-      }
-      for (const arv::protocol::BlockUpdate& update : batch.updates) {
-        if (client_world.find_chunk(arv::block_to_chunk(update.pos)) == nullptr) {
-          continue;
-        }
-        if (client_world.set_block(update.pos, update.new_state)) {
-          changed = true;
-        }
-      }
-      (void)client_world.drain_replicated_block_updates();
-    }
-
-    if (changed) {
-      arv::desktop::request_chunk_view_mesh_rescan(chunk_view);
-    }
-  };
-
-  integrated_server.tick();
-  client.fixed_tick(integrated_server.tick_index());
-  collect_client_chunk_stream();
-  apply_pending_client_chunk_stream(
-      config.chunk_pipeline.max_client_chunk_applies_per_frame,
-      config.chunk_pipeline.max_client_chunk_unloads_per_frame);
-  arv::desktop::apply_loaded_player_saves(
-      integrated_server,
-      world_save_name,
-      loaded_save.players);
-  if (!loaded_save.players.empty()) {
-    integrated_server.tick();
-    client.fixed_tick(integrated_server.tick_index());
-    collect_client_chunk_stream();
-    apply_pending_client_chunk_stream(
-        config.chunk_pipeline.max_client_chunk_applies_per_frame,
-        config.chunk_pipeline.max_client_chunk_unloads_per_frame);
-  }
-
   arv::sched::Scheduler world_jobs{thread_budget.secondary_workers};
   arv::core::info(
       "jobs",
@@ -706,22 +734,369 @@ int main(int argc, char** argv) {
       thread_budget.reserved_thread_count,
       thread_budget.primary_worker_thread_count,
       world_jobs.worker_count());
-  if (!arv::desktop::update_chunk_view(
-          client_world,
-          renderer,
-          world_jobs,
-          chunk_view,
-          config.chunks,
-          config.chunk_pipeline,
-          arv::desktop::camera_chunk_coord(client.camera()),
-          min_chunk_y,
-          max_chunk_y,
-          block_registry,
-          block_atlas.render_data)) {
-    return 1;
-  }
 
-  arv::core::FixedTimestepAccumulator ticks(config.simulation.base_tps);
+  std::unique_ptr<DesktopGameSession> game_session;
+
+  auto refresh_inventory_slots = [&](DesktopGameSession& session) {
+    session.inventory_slots.clear();
+    session.carried_inventory_stack.reset();
+    if (session.client != nullptr && session.client->has_authoritative_inventory()) {
+      session.inventory_slots = arv::desktop::inventory_slots_for_ui(
+          session.client->inventory(),
+          item_registry,
+          item_atlas,
+          block_atlas);
+      session.carried_inventory_stack = arv::desktop::item_stack_for_ui(
+          session.client->inventory_cursor_stack(),
+          item_registry,
+          item_atlas,
+          block_atlas);
+    }
+  };
+
+  auto collect_client_chunk_stream = [](DesktopGameSession& session) {
+    std::vector<arv::protocol::ChunkUnload> drained_unloads =
+        session.client->drain_received_chunk_unloads();
+    for (const arv::protocol::ChunkUnload& unload : drained_unloads) {
+      session.pending_client_chunk_unloads.emplace_back(unload);
+    }
+
+    std::vector<arv::protocol::ChunkData> drained_chunks =
+        session.client->drain_received_chunk_data();
+    for (arv::protocol::ChunkData& data : drained_chunks) {
+      session.pending_client_chunk_data.emplace_back(std::move(data));
+    }
+
+    std::vector<arv::protocol::BlockUpdateBatch> drained_block_updates =
+        session.client->drain_received_block_updates();
+    for (arv::protocol::BlockUpdateBatch& batch : drained_block_updates) {
+      session.pending_client_block_updates.emplace_back(std::move(batch));
+    }
+  };
+
+  auto apply_pending_client_chunk_stream =
+      [&](DesktopGameSession& session, arv::u32 chunk_budget, arv::u32 unload_budget) {
+        bool changed = false;
+        arv::u32 unloads_applied = 0;
+        while (unloads_applied < unload_budget && !session.pending_client_chunk_unloads.empty()) {
+          const arv::protocol::ChunkUnload unload = session.pending_client_chunk_unloads.front();
+          session.pending_client_chunk_unloads.pop_front();
+          ++unloads_applied;
+          if (unload.world_id != session.client_world.id()) {
+            continue;
+          }
+          if (session.client_world.unload_chunk(unload.coord)) {
+            renderer.remove_chunk_mesh({unload.world_id, unload.coord});
+            arv::desktop::remove_chunk_view_chunk(session.chunk_view, unload.coord);
+            changed = true;
+          }
+        }
+
+        arv::u32 chunks_applied = 0;
+        while (chunks_applied < chunk_budget && !session.pending_client_chunk_data.empty()) {
+          arv::protocol::ChunkData data = std::move(session.pending_client_chunk_data.front());
+          session.pending_client_chunk_data.pop_front();
+          ++chunks_applied;
+          if (data.world_id != session.client_world.id()) {
+            continue;
+          }
+
+          std::optional<std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume>> lights;
+          if (data.has_lighting) {
+            lights = std::move(data.lights);
+          }
+          session.client_world.apply_chunk_snapshot(
+              data.coord,
+              std::move(data.blocks),
+              std::move(lights),
+              std::move(data.fluids));
+          changed = true;
+        }
+
+        while (!session.pending_client_block_updates.empty()) {
+          arv::protocol::BlockUpdateBatch batch =
+              std::move(session.pending_client_block_updates.front());
+          session.pending_client_block_updates.pop_front();
+          if (batch.world_id != session.client_world.id()) {
+            continue;
+          }
+          for (const arv::protocol::BlockUpdate& update : batch.updates) {
+            if (session.client_world.find_chunk(arv::block_to_chunk(update.pos)) == nullptr) {
+              continue;
+            }
+            if (session.client_world.set_block(update.pos, update.new_state)) {
+              changed = true;
+            }
+          }
+          (void)session.client_world.drain_replicated_block_updates();
+        }
+
+        if (changed) {
+          arv::desktop::request_chunk_view_mesh_rescan(session.chunk_view);
+        }
+      };
+
+  auto save_and_shutdown_session = [&]() -> bool {
+    if (!game_session) {
+      return true;
+    }
+
+    DesktopGameSession& session = *game_session;
+    if (session.integrated_server == nullptr) {
+      game_session.reset();
+      return true;
+    }
+
+    if (const arv::server::ServerSession* server_session =
+            local_session(*session.integrated_server);
+        server_session != nullptr) {
+      (void)session.integrated_server->close_player_inventory_menu(server_session->player_id);
+    }
+
+    const std::vector<arv::persistence::SavedChunkSection> saved_chunks =
+        arv::desktop::capture_saved_chunks(session.integrated_server->voxel_world());
+    const std::vector<arv::persistence::PlayerSaveData> player_saves =
+        arv::desktop::capture_player_saves(*session.integrated_server, session.world_save_name);
+    const std::vector<arv::entity::PersistentEntityRecord> entity_saves =
+        arv::desktop::capture_saved_entities(session.integrated_server->voxel_world());
+    const arv::persistence::SaveMetadata save_metadata{
+        arv::persistence::CurrentSaveFormatVersion,
+        std::string{arv::persistence::CurrentGameVersion},
+        block_registry_hash,
+        item_registry_hash,
+        session.server_save_display_name};
+    const arv::persistence::WorldMetadata world_metadata{
+        session.world_save_name,
+        session.world_seed,
+        session.integrated_server->voxel_world().tick_index(),
+        session.generation_config,
+        session.min_chunk_y,
+        session.max_chunk_y,
+        block_registry_hash,
+        item_registry_hash};
+    auto save_result = arv::persistence::save_server_root(
+        session.server_save_root,
+        save_metadata,
+        world_metadata,
+        saved_chunks,
+        player_saves,
+        entity_saves,
+        block_registry,
+        item_registry);
+    if (!save_result) {
+      arv::core::error("save", save_result.error().message);
+      return false;
+    }
+
+    for (const auto& [coord, item] : session.chunk_view.draw_items) {
+      (void)coord;
+      renderer.remove_chunk_mesh(item.key);
+    }
+    world_jobs.wait_for_all();
+    session.integrated_server->shutdown();
+    game_session.reset();
+    return true;
+  };
+
+  auto start_singleplayer_session =
+      [&](std::string server_save_name,
+          std::string world_name,
+          std::optional<arv::u64> create_seed,
+          bool create_new,
+          std::string save_display_name) -> bool {
+    if (server_save_name.empty()) {
+      arv::core::error("save", "cannot start a singleplayer world without a server save name");
+      return false;
+    }
+    if (world_name.empty()) {
+      world_name = "default";
+    }
+    if (!save_and_shutdown_session()) {
+      return false;
+    }
+
+    const std::filesystem::path server_save_root = config.paths.server_save_path(server_save_name);
+    auto loaded_save_result = arv::persistence::load_server_root(
+        server_save_root,
+        world_name,
+        block_registry,
+        item_registry);
+    if (!loaded_save_result) {
+      arv::core::error("save", loaded_save_result.error().message);
+      return false;
+    }
+    const arv::persistence::LoadedSaveData loaded_save =
+        std::move(loaded_save_result.value());
+    if (!create_new && !loaded_save.has_world_metadata) {
+      arv::core::error(
+          "save",
+          "world '{}' was not found in server save '{}'",
+          world_name,
+          server_save_name);
+      return false;
+    }
+
+    auto session = std::make_unique<DesktopGameSession>(config.simulation.base_tps);
+    session->server_save_name = std::move(server_save_name);
+    session->server_save_display_name = save_display_name.empty()
+                                            ? loaded_save.save.name
+                                            : std::move(save_display_name);
+    if (session->server_save_display_name.empty()) {
+      session->server_save_display_name = session->server_save_name;
+    }
+    session->server_save_root = server_save_root;
+    session->world_save_name = std::move(world_name);
+    session->world_seed = create_seed.value_or(generated_world_seed());
+    session->generation_config = default_generation_config;
+    std::pair<arv::i32, arv::i32> visible_chunk_y =
+        arv::desktop::visible_worldgen_chunk_y_range(session->generation_config);
+    if (loaded_save.has_world_metadata) {
+      session->generation_config = loaded_save.world.generation_config;
+      session->world_seed = loaded_save.world.seed;
+      session->world_save_name = loaded_save.world.name;
+      visible_chunk_y = {loaded_save.world.min_chunk_y, loaded_save.world.max_chunk_y};
+    }
+    session->min_chunk_y = visible_chunk_y.first;
+    session->max_chunk_y = visible_chunk_y.second;
+
+    auto worldgen_palette = arv::world::resolve_world_generation_palette(
+        session->generation_config,
+        block_registry);
+    if (!worldgen_palette) {
+      arv::core::error("worldgen", worldgen_palette.error().message);
+      return false;
+    }
+
+    arv::server::ServerChunkGenerationSettings chunk_generation;
+    chunk_generation.enabled = true;
+    chunk_generation.seed = session->world_seed;
+    chunk_generation.config = session->generation_config;
+    chunk_generation.palette = std::move(worldgen_palette.value());
+
+    arv::server::ServerStartInfo server_start_info;
+    server_start_info.mode = arv::server::ServerMode::Integrated;
+    server_start_info.base_tps = config.simulation.base_tps;
+    server_start_info.listen_address = {"in-process", 0};
+    server_start_info.block_registry = &block_registry;
+    server_start_info.item_registry = &item_registry;
+    server_start_info.player_tuning = player_tuning;
+    server_start_info.fluid_definition = water_fluid;
+    server_start_info.chunk_streaming = chunk_streaming;
+    server_start_info.chunk_generation = std::move(chunk_generation);
+    server_start_info.max_generation_results_per_tick =
+        config.chunk_pipeline.max_generation_results_per_tick;
+    server_start_info.max_lighting_results_per_tick =
+        config.chunk_pipeline.max_lighting_results_per_tick;
+    server_start_info.max_pending_generation_jobs =
+        config.chunk_pipeline.max_generation_jobs_per_frame;
+    server_start_info.worker_threads = thread_budget.primary_workers;
+    server_start_info.world_tick_policy = world_tick_policy;
+    server_start_info.entity_registry = &entity_registry;
+
+    auto transport_pair = arv::net::make_in_process_transport_pair();
+    auto integrated_server =
+        std::make_unique<arv::server::ServerRuntime>(std::move(transport_pair.server));
+    auto server_start = integrated_server->start(server_start_info);
+    if (!server_start) {
+      arv::core::error("server", server_start.error().message);
+      return false;
+    }
+
+    if (loaded_save.has_world_metadata) {
+      integrated_server->voxel_world().set_tick_index(loaded_save.world.tick_index);
+    }
+    for (const arv::persistence::SavedChunkSection& chunk : loaded_save.chunks) {
+      integrated_server->voxel_world().restore_saved_chunk(
+          chunk.coord,
+          chunk.blocks,
+          chunk.lights,
+          chunk.fluids);
+    }
+    integrated_server->voxel_world().restore_persistent_entities(
+        loaded_save.entities,
+        &entity_registry);
+
+    auto client = std::make_unique<arv::client::ClientRuntime>(std::move(transport_pair.client));
+    client->set_player_tuning(player_tuning);
+    client->set_chunk_view_distance(config.chunks.stream_distance);
+    auto connect_result = client->connect_integrated();
+    if (!connect_result) {
+      arv::core::error("client", connect_result.error().message);
+      integrated_server->shutdown();
+      return false;
+    }
+
+    session->integrated_server = std::move(integrated_server);
+    session->client = std::move(client);
+    session->integrated_server->tick();
+    session->client->fixed_tick(session->integrated_server->tick_index());
+    collect_client_chunk_stream(*session);
+    apply_pending_client_chunk_stream(
+        *session,
+        config.chunk_pipeline.max_client_chunk_applies_per_frame,
+        config.chunk_pipeline.max_client_chunk_unloads_per_frame);
+    arv::desktop::apply_loaded_player_saves(
+        *session->integrated_server,
+        session->world_save_name,
+        loaded_save.players);
+    if (!loaded_save.players.empty()) {
+      session->integrated_server->tick();
+      session->client->fixed_tick(session->integrated_server->tick_index());
+      collect_client_chunk_stream(*session);
+      apply_pending_client_chunk_stream(
+          *session,
+          config.chunk_pipeline.max_client_chunk_applies_per_frame,
+          config.chunk_pipeline.max_client_chunk_unloads_per_frame);
+    }
+
+    if (!arv::desktop::update_chunk_view(
+            session->client_world,
+            renderer,
+            world_jobs,
+            session->chunk_view,
+            config.chunks,
+            config.chunk_pipeline,
+            arv::desktop::camera_chunk_coord(session->client->camera()),
+            session->min_chunk_y,
+            session->max_chunk_y,
+            block_registry,
+            block_atlas.render_data)) {
+      session->integrated_server->shutdown();
+      return false;
+    }
+    refresh_inventory_slots(*session);
+    arv::core::info(
+        "desktop",
+        "entered singleplayer world '{}' from server save '{}'",
+        session->world_save_name,
+        session->server_save_name);
+    game_session = std::move(session);
+    return true;
+  };
+
+  auto delete_singleplayer_save = [&](const arv::ui::DeleteSinglePlayerSaveCommand& command) {
+    if (command.server_save_name.empty()) {
+      return;
+    }
+    if (game_session != nullptr && game_session->server_save_name == command.server_save_name &&
+        !save_and_shutdown_session()) {
+      return;
+    }
+
+    const std::filesystem::path save_root = config.paths.server_save_path(command.server_save_name);
+    std::error_code error;
+    const std::uintmax_t removed = std::filesystem::remove_all(save_root, error);
+    if (error) {
+      arv::core::warn(
+          "save",
+          "failed to delete save '{}': {}",
+          command.server_save_name,
+          error.message());
+    } else if (removed > 0) {
+      arv::core::info("save", "deleted server save '{}'", command.server_save_name);
+    }
+  };
+
   auto previous_time = std::chrono::steady_clock::now();
   const auto app_start_time = previous_time;
   auto last_fps_display_time = previous_time;
@@ -731,27 +1106,9 @@ int main(int argc, char** argv) {
   double last_frame_work_ms = 0.0;
   constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
   arv::FrameArena frame_arena;
-  std::vector<arv::client::UiItemStackView> inventory_slots;
-  std::optional<arv::client::UiItemStackView> carried_inventory_stack;
-  std::vector<arv::client::PlayerListEntryView> tab_players;
-  std::vector<arv::client::ChatLineView> chat_lines;
-  bool ui_snapshot_initialized = false;
-  auto refresh_inventory_slots = [&]() {
-    inventory_slots.clear();
-    carried_inventory_stack.reset();
-    if (client.has_authoritative_inventory()) {
-      inventory_slots = arv::desktop::inventory_slots_for_ui(
-          client.inventory(),
-          item_registry,
-          item_atlas,
-          block_atlas);
-      carried_inventory_stack = arv::desktop::item_stack_for_ui(
-          client.inventory_cursor_stack(),
-          item_registry,
-          item_atlas,
-          block_atlas);
-    }
-  };
+  DesktopMenuState menu_state{config.paths.saves_path()};
+  arv::ui::UIScreenManager screen_manager;
+  screen_manager.push(arv::ui::make_main_menu_screen());
 
   while (!window.should_close()) {
     ARV_PROFILE_ZONE("Frame time");
@@ -789,62 +1146,157 @@ int main(int argc, char** argv) {
         platform_input,
         window.framebuffer_size(),
         delta.count());
-    const bool was_inventory_open = client.inventory_open();
-    const bool ui_accepts_pointer =
-        client.inventory_open() || client.chat_open() || debug_menu.open;
-    arv::client::InputFrame client_input = arv::desktop::to_client_input(platform_input);
-    if (debug_menu.open) {
+    DesktopGameSession* active_session = game_session.get();
+    const bool has_session =
+        active_session != nullptr && active_session->client != nullptr &&
+        active_session->integrated_server != nullptr;
+    const bool was_inventory_open = has_session && active_session->client->inventory_open();
+    arv::ui::UIContext menu_context{
+        ui_tree,
+        {
+            static_cast<arv::f32>(framebuffer.width),
+            static_cast<arv::f32>(framebuffer.height),
+        },
+        &menu_state,
+        &menu_state,
+        &screen_manager};
+    if (!debug_menu.open && platform_input.pause_menu_pressed) {
+      if (screen_manager.has_active_screen()) {
+        (void)screen_manager.handle_cancel(menu_context);
+      } else if (has_session && !active_session->client->inventory_open() &&
+                 !active_session->client->chat_open()) {
+        screen_manager.push(arv::ui::make_pause_menu_screen());
+      } else if (!has_session) {
+        screen_manager.push(arv::ui::make_main_menu_screen());
+      }
+    }
+
+    const bool menu_screen_open = screen_manager.has_active_screen();
+    arv::client::InputFrame client_input =
+        has_session ? arv::desktop::to_client_input(platform_input)
+                    : arv::client::InputFrame{};
+    if (debug_menu.open || menu_screen_open) {
       client_input = {};
     }
     bool inventory_changed_by_ui = false;
-    if (!debug_menu.open && client.inventory_open()) {
+    if (!debug_menu.open && menu_screen_open) {
+      (void)route_screen_mouse_input(screen_manager, menu_context, platform_input);
+      if (!platform_input.text_input.empty()) {
+        (void)screen_manager.handle_text_input(platform_input.text_input, menu_context);
+      }
+      if (platform_input.text_backspace_pressed) {
+        (void)screen_manager.handle_backspace(menu_context);
+      }
+      if (platform_input.text_submit_pressed) {
+        (void)screen_manager.handle_submit(menu_context);
+      }
+    } else if (!debug_menu.open && has_session && active_session->client->inventory_open()) {
       inventory_changed_by_ui = route_inventory_mouse_input(
           ui_tree,
-          client,
+          *active_session->client,
           platform_input,
-          client.inventory_cursor_stack().has_value());
-    } else if (!debug_menu.open && client.chat_open()) {
+          active_session->client->inventory_cursor_stack().has_value());
+    } else if (!debug_menu.open && has_session && active_session->client->chat_open()) {
       route_ui_mouse_focus(ui_tree, platform_input);
     }
-    if (platform_input.close_requested && !ui_accepts_pointer) {
+
+    if (const auto back_to_main_menu = menu_state.take_back_to_main_menu_request();
+        back_to_main_menu) {
+      if (!save_and_shutdown_session()) {
+        return 1;
+      }
+      menu_state.refresh_worlds();
+      active_session = game_session.get();
+    }
+    if (const std::optional<arv::ui::DeleteSinglePlayerSaveCommand> command =
+            menu_state.take_delete_save_request();
+        command.has_value()) {
+      delete_singleplayer_save(command.value());
+      menu_state.refresh_worlds();
+      active_session = game_session.get();
+    }
+    if (const std::optional<arv::ui::CreateWorldCommand> command =
+            menu_state.take_create_world_request();
+        command.has_value()) {
+      const std::string server_save_name = unique_server_save_name(config, command->name);
+      const arv::u64 seed = parse_or_generate_seed(command->seed);
+      if (start_singleplayer_session(server_save_name, "default", seed, true, command->name)) {
+        menu_state.refresh_worlds();
+        screen_manager.clear();
+      } else if (game_session == nullptr && screen_manager.empty()) {
+        screen_manager.push(arv::ui::make_single_player_menu_screen());
+      }
+      active_session = game_session.get();
+    }
+    if (const std::optional<arv::ui::StartSinglePlayerCommand> command =
+            menu_state.take_start_singleplayer_request();
+        command.has_value()) {
+      if (start_singleplayer_session(
+              command->server_save_name,
+              command->world_name,
+              std::nullopt,
+              false,
+              {})) {
+        screen_manager.clear();
+      } else if (game_session == nullptr && screen_manager.empty()) {
+        screen_manager.push(arv::ui::make_single_player_menu_screen());
+      }
+      active_session = game_session.get();
+    }
+
+    const bool has_active_session =
+        active_session != nullptr && active_session->client != nullptr &&
+        active_session->integrated_server != nullptr;
+    if (menu_state.quit_requested) {
       window.request_close();
     }
-    client.submit_input(std::move(client_input));
-    if (was_inventory_open && !client.inventory_open()) {
-      (void)client.request_inventory_close();
+    if (has_active_session) {
+      active_session->client->submit_input(std::move(client_input));
+    }
+    if (has_active_session && was_inventory_open && !active_session->client->inventory_open()) {
+      (void)active_session->client->request_inventory_close();
       inventory_changed_by_ui = true;
     }
-    if (inventory_changed_by_ui) {
-      refresh_inventory_slots();
+    if (has_active_session && inventory_changed_by_ui) {
+      refresh_inventory_slots(*active_session);
     }
-    window.set_cursor_captured(!(client.inventory_open() || client.chat_open() || debug_menu.open));
+    window.set_cursor_captured(
+        has_active_session &&
+        !(active_session->client->inventory_open() || active_session->client->chat_open() ||
+          debug_menu.open || screen_manager.blocks_gameplay_input()));
 
-    ticks.add_time(delta.count());
     bool fixed_tick_ran = false;
-    while (ticks.consume_tick()) {
-      ARV_PROFILE_ZONE("Simulation tick");
-      integrated_server.tick();
-      client.fixed_tick(integrated_server.tick_index());
-      collect_client_chunk_stream();
-      fixed_tick_ran = true;
-    }
-    apply_pending_client_chunk_stream(
-        config.chunk_pipeline.max_client_chunk_applies_per_frame,
-        config.chunk_pipeline.max_client_chunk_unloads_per_frame);
+    if (has_active_session) {
+      active_session->ticks.add_time(delta.count());
+      const bool singleplayer_paused = screen_manager.pauses_singleplayer();
+      while (active_session->ticks.consume_tick()) {
+        ARV_PROFILE_ZONE("Simulation tick");
+        if (!singleplayer_paused) {
+          active_session->integrated_server->tick();
+          active_session->client->fixed_tick(active_session->integrated_server->tick_index());
+          collect_client_chunk_stream(*active_session);
+          fixed_tick_ran = true;
+        }
+      }
+      apply_pending_client_chunk_stream(
+          *active_session,
+          config.chunk_pipeline.max_client_chunk_applies_per_frame,
+          config.chunk_pipeline.max_client_chunk_unloads_per_frame);
 
-    if (!arv::desktop::update_chunk_view(
-            client_world,
-            renderer,
-            world_jobs,
-            chunk_view,
-            config.chunks,
-            config.chunk_pipeline,
-            arv::desktop::camera_chunk_coord(client.camera()),
-            min_chunk_y,
-            max_chunk_y,
-            block_registry,
-            block_atlas.render_data)) {
-      return 1;
+      if (!arv::desktop::update_chunk_view(
+              active_session->client_world,
+              renderer,
+              world_jobs,
+              active_session->chunk_view,
+              config.chunks,
+              config.chunk_pipeline,
+              arv::desktop::camera_chunk_coord(active_session->client->camera()),
+              active_session->min_chunk_y,
+              active_session->max_chunk_y,
+              block_registry,
+              block_atlas.render_data)) {
+        return 1;
+      }
     }
 
     const auto next_framebuffer = window.framebuffer_size();
@@ -853,129 +1305,156 @@ int main(int argc, char** argv) {
       framebuffer = next_framebuffer;
       renderer.resize(framebuffer.width, framebuffer.height);
     }
-    const arv::f32 interpolation_alpha = ticks.interpolation_alpha();
-    arv::render::FramePacket frame = client.build_frame_packet(
-        interpolation_alpha,
-        framebuffer.width,
-        framebuffer.height);
-    const std::vector<arv::render::ChunkDrawItem>& visible_chunks =
-        arv::desktop::chunk_draw_items(chunk_view);
-    frame.opaque_chunks = visible_chunks;
-    frame.transparent_chunks = visible_chunks;
-    const arv::f32 entity_animation_time = std::chrono::duration<arv::f32>(now - app_start_time).count();
-    for (const arv::client::ReplicatedEntityMirror& mirror : client.replicated_entity_mirrors()) {
-      if (mirror.world_id != frame.world_view.world_id) {
-        continue;
+    arv::render::FramePacket frame;
+    arv::usize visible_chunk_count = 0;
+    if (has_active_session) {
+      const arv::f32 interpolation_alpha = active_session->ticks.interpolation_alpha();
+      frame = active_session->client->build_frame_packet(
+          interpolation_alpha,
+          framebuffer.width,
+          framebuffer.height);
+      const std::vector<arv::render::ChunkDrawItem>& visible_chunks =
+          arv::desktop::chunk_draw_items(active_session->chunk_view);
+      visible_chunk_count = visible_chunks.size();
+      frame.opaque_chunks = visible_chunks;
+      frame.transparent_chunks = visible_chunks;
+      const arv::f32 entity_animation_time =
+          std::chrono::duration<arv::f32>(now - app_start_time).count();
+      for (const arv::client::ReplicatedEntityMirror& mirror :
+           active_session->client->replicated_entity_mirrors()) {
+        if (mirror.world_id != frame.world_view.world_id) {
+          continue;
+        }
+        const auto model = entity_render_assets.model_by_type.find(mirror.entity_type);
+        if (model == entity_render_assets.model_by_type.end()) {
+          continue;
+        }
+        arv::render::EntityDrawItem item;
+        item.model_id = model->second;
+        item.position = interpolate(mirror.previous_position, mirror.position, interpolation_alpha);
+        item.rotation = mirror.rotation;
+        item.scale = 1.0F;
+        item.animation_name = "walking";
+        item.animation_time_seconds = entity_animation_time;
+        frame.entities.push_back(std::move(item));
       }
-      const auto model = entity_render_assets.model_by_type.find(mirror.entity_type);
-      if (model == entity_render_assets.model_by_type.end()) {
-        continue;
-      }
-      arv::render::EntityDrawItem item;
-      item.model_id = model->second;
-      item.position = interpolate(mirror.previous_position, mirror.position, interpolation_alpha);
-      item.rotation = mirror.rotation;
-      item.scale = 1.0F;
-      item.animation_name = "walking";
-      item.animation_time_seconds = entity_animation_time;
-      frame.entities.push_back(std::move(item));
     }
 
-    const arv::desktop::DebugMenuResult debug_menu_result = arv::desktop::render_debug_menu(
-        debug_menu,
-        {
-            frame_delta_ms,
-            last_frame_work_ms,
-            displayed_fps,
-            visible_chunks.size(),
-            pending_client_chunk_data.size(),
-            pending_client_chunk_unloads.size(),
-        },
-        integrated_server,
-        client,
-        item_registry,
-        entity_registry,
-        world_jobs,
-        renderer);
-    if (debug_menu_result.inventory_changed) {
-      refresh_inventory_slots();
+    if (has_active_session) {
+      const arv::desktop::DebugMenuResult debug_menu_result =
+          arv::desktop::render_debug_menu(
+              debug_menu,
+              {
+                  frame_delta_ms,
+                  last_frame_work_ms,
+                  displayed_fps,
+                  visible_chunk_count,
+                  active_session->pending_client_chunk_data.size(),
+                  active_session->pending_client_chunk_unloads.size(),
+              },
+              *active_session->integrated_server,
+              *active_session->client,
+              item_registry,
+              entity_registry,
+              world_jobs,
+              renderer);
+      if (debug_menu_result.inventory_changed) {
+        refresh_inventory_slots(*active_session);
+      }
     }
 
-    if (!ui_snapshot_initialized || fixed_tick_ran) {
-      refresh_inventory_slots();
-      if (client.tab_menu_visible()) {
-        tab_players = arv::desktop::player_list_for_ui(integrated_server);
-      } else {
-        tab_players.clear();
+    if (has_active_session) {
+      if (!active_session->ui_snapshot_initialized || fixed_tick_ran) {
+        refresh_inventory_slots(*active_session);
+        if (active_session->client->tab_menu_visible()) {
+          active_session->tab_players =
+              arv::desktop::player_list_for_ui(*active_session->integrated_server);
+        } else {
+          active_session->tab_players.clear();
+        }
+        active_session->ui_snapshot_initialized = true;
+      } else if (active_session->client->tab_menu_visible() &&
+                 active_session->tab_players.empty()) {
+        active_session->tab_players =
+            arv::desktop::player_list_for_ui(*active_session->integrated_server);
+      } else if (!active_session->client->tab_menu_visible() &&
+                 !active_session->tab_players.empty()) {
+        active_session->tab_players.clear();
       }
-      ui_snapshot_initialized = true;
-    } else if (client.tab_menu_visible() && tab_players.empty()) {
-      tab_players = arv::desktop::player_list_for_ui(integrated_server);
-    } else if (!client.tab_menu_visible() && !tab_players.empty()) {
-      tab_players.clear();
+      active_session->chat_lines.clear();
+      for (const std::string& message : active_session->client->chat_messages()) {
+        active_session->chat_lines.emplace_back(message, 1.0F);
+      }
+      arv::ui::build_gameplay_ui(
+          ui_tree,
+          {
+              {
+                  active_session->client->selected_hotbar_slot(),
+                  arv::player::DefaultHotbarSlotCount,
+                  {
+                      static_cast<arv::f32>(framebuffer.width),
+                      static_cast<arv::f32>(framebuffer.height),
+                  },
+                  std::span<const arv::ui::UiItemStackView>{
+                      active_session->inventory_slots.data(),
+                      std::min<arv::usize>(
+                          active_session->inventory_slots.size(),
+                          arv::player::DefaultHotbarSlotCount)},
+              },
+              {
+                  active_session->client->inventory_open(),
+                  "Inventory",
+                  active_session->client->selected_hotbar_slot(),
+                  arv::player::DefaultHotbarSlotCount,
+                  {
+                      static_cast<arv::f32>(framebuffer.width),
+                      static_cast<arv::f32>(framebuffer.height),
+                  },
+                  std::span<const arv::ui::UiItemStackView>{
+                      active_session->inventory_slots.data(),
+                      active_session->inventory_slots.size()},
+                  active_session->carried_inventory_stack,
+                  {
+                      platform_input.cursor_x,
+                      platform_input.cursor_y,
+                  },
+              },
+              {
+                  true,
+                  active_session->client->chat_open(),
+                  std::span<const arv::ui::ChatLineView>{
+                      active_session->chat_lines.data(),
+                      active_session->chat_lines.size()},
+                  active_session->client->chat_draft(),
+              },
+              {
+                  active_session->client->tab_menu_visible(),
+                  "Players",
+                  "",
+                  std::span<const arv::ui::PlayerListEntryView>{
+                      active_session->tab_players.data(),
+                      active_session->tab_players.size()},
+              },
+              {},
+              {true, displayed_fps},
+          });
+    } else {
+      ui_tree.clear();
     }
-    chat_lines.clear();
-    for (const std::string& message : client.chat_messages()) {
-      chat_lines.emplace_back(message, 1.0F);
+    menu_context.viewport = {
+        static_cast<arv::f32>(framebuffer.width),
+        static_cast<arv::f32>(framebuffer.height),
+    };
+    if (screen_manager.has_active_screen()) {
+      screen_manager.append_to(menu_context);
     }
-    arv::client::build_gameplay_ui(
-        ui_tree,
-        {
-            {
-                client.selected_hotbar_slot(),
-                arv::player::DefaultHotbarSlotCount,
-                {
-                    static_cast<arv::f32>(framebuffer.width),
-                    static_cast<arv::f32>(framebuffer.height),
-                },
-                std::span<const arv::client::UiItemStackView>{
-                    inventory_slots.data(),
-                    std::min<arv::usize>(
-                        inventory_slots.size(),
-                        arv::player::DefaultHotbarSlotCount)},
-            },
-            {
-                client.inventory_open(),
-                "Inventory",
-                client.selected_hotbar_slot(),
-                arv::player::DefaultHotbarSlotCount,
-                {
-                    static_cast<arv::f32>(framebuffer.width),
-                    static_cast<arv::f32>(framebuffer.height),
-                },
-                std::span<const arv::client::UiItemStackView>{
-                    inventory_slots.data(),
-                    inventory_slots.size()},
-                carried_inventory_stack,
-                {
-                    platform_input.cursor_x,
-                    platform_input.cursor_y,
-                },
-            },
-            {
-                true,
-                client.chat_open(),
-                std::span<const arv::client::ChatLineView>{chat_lines.data(), chat_lines.size()},
-                client.chat_draft(),
-            },
-            {
-                client.tab_menu_visible(),
-                "Players",
-                "",
-                std::span<const arv::client::PlayerListEntryView>{
-                    tab_players.data(),
-                    tab_players.size()},
-            },
-            {},
-            {true, displayed_fps},
-        });
     ui_tree.layout(
         {
             static_cast<arv::f32>(framebuffer.width),
             static_cast<arv::f32>(framebuffer.height),
         },
         &ui_text_measurer);
-    arv::client::append_ui_draw_commands(ui_tree, font_system, ui_font_stack, frame);
+    arv::ui::append_ui_draw_commands(ui_tree, font_system, ui_font_stack, frame);
     if (font_system.atlas_dirty()) {
       renderer.set_ui_font_atlas(
           arv::desktop::texture_upload_from_image(font_system.atlas_image()));
@@ -997,7 +1476,7 @@ int main(int argc, char** argv) {
             "cpu frame work spike {}ms frame_delta={}ms queued_mesh={} pending_uploads={} uploads_last_frame={}",
             frame_work_ms,
             frame_delta_ms,
-            chunk_view.pending_meshes.size(),
+            has_active_session ? active_session->chunk_view.pending_meshes.size() : 0U,
             renderer.pending_mesh_upload_count(),
             renderer.mesh_uploads_last_frame());
       }
@@ -1012,46 +1491,10 @@ int main(int argc, char** argv) {
     ARV_PROFILE_FRAME_MARK("Frame");
   }
 
-  if (const arv::server::ServerSession* session = local_session(integrated_server);
-      session != nullptr) {
-    (void)integrated_server.close_player_inventory_menu(session->player_id);
-  }
-
-  const std::vector<arv::persistence::SavedChunkSection> saved_chunks =
-      arv::desktop::capture_saved_chunks(integrated_server.voxel_world());
-  const std::vector<arv::persistence::PlayerSaveData> player_saves =
-      arv::desktop::capture_player_saves(integrated_server, world_save_name);
-  const std::vector<arv::entity::PersistentEntityRecord> entity_saves =
-      arv::desktop::capture_saved_entities(integrated_server.voxel_world());
-  const arv::persistence::SaveMetadata save_metadata{
-      arv::persistence::CurrentSaveFormatVersion,
-      std::string{arv::persistence::CurrentGameVersion},
-      block_registry_hash,
-      item_registry_hash};
-  const arv::persistence::WorldMetadata world_metadata{
-      world_save_name,
-      world_seed,
-      integrated_server.voxel_world().tick_index(),
-      generation_config,
-      min_chunk_y,
-      max_chunk_y,
-      block_registry_hash,
-      item_registry_hash};
-  auto save_result = arv::persistence::save_server_root(
-      save_root,
-      save_metadata,
-      world_metadata,
-      saved_chunks,
-      player_saves,
-      entity_saves,
-      block_registry,
-      item_registry);
-
+  const bool save_result = save_and_shutdown_session();
   debug_imgui.shutdown();
   renderer.begin_shutdown();
-  integrated_server.shutdown();
   if (!save_result) {
-    arv::core::error("save", save_result.error().message);
     return 1;
   }
   arv::core::info("desktop", "shutdown complete");

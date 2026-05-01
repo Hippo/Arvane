@@ -35,18 +35,18 @@ constexpr std::array<ActionNameEntry, static_cast<usize>(LogicalAction::Count)> 
     {LogicalAction::OpenInventory, "OpenInventory"},
     {LogicalAction::OpenChat, "OpenChat"},
     {LogicalAction::ShowTabMenu, "ShowTabMenu"},
+    {LogicalAction::TogglePauseMenu, "TogglePauseMenu"},
     {LogicalAction::ToggleDebugMenu, "ToggleDebugMenu"},
 }};
 
-constexpr std::array<std::string_view, 50> kKeyboardCodes{{
-    "A",         "B",         "C",         "D",         "E",        "F",         "G",
-    "H",         "I",         "J",         "K",         "L",        "M",         "N",
-    "O",         "P",         "Q",         "R",         "S",        "T",         "U",
-    "V",         "W",         "X",         "Y",         "Z",        "0",         "1",
-    "2",         "3",         "4",         "5",         "6",        "7",         "8",
-    "9",         "Space",     "Tab",       "Enter",     "Escape",   "Backspace", "Minus",
-    "Equal",     "LeftBracket", "RightBracket", "Semicolon", "Apostrophe", "Comma", "Period",
-    "Grave"}};
+constexpr std::array<std::string_view, 50> kKeyboardCodes{{"A", "B", "C", "D", "E", "F", "G",
+                                                           "H", "I", "J", "K", "L", "M", "N",
+                                                           "O", "P", "Q", "R", "S", "T", "U",
+                                                           "V", "W", "X", "Y", "Z", "0", "1",
+                                                           "2", "3", "4", "5", "6", "7", "8",
+                                                           "9", "Space", "Tab", "Enter", "Escape", "Backspace", "Minus",
+                                                           "Equal", "LeftBracket", "RightBracket", "Semicolon", "Apostrophe", "Comma", "Period",
+                                                           "Grave"}};
 
 constexpr std::array<std::pair<std::string_view, std::string_view>, 12> kKeyboardAliases{{
     {"LShift", "LShift"},
@@ -136,10 +136,7 @@ void set_default_binding(
     InputDeviceType device_type,
     std::string_view input_code,
     u8 modifiers = 0U) {
-  bindings_for_action(bindings, action).push_back(InputBinding{
-      device_type,
-      std::string{input_code},
-      modifiers});
+  bindings_for_action(bindings, action).push_back(InputBinding{device_type, std::string{input_code}, modifiers});
 }
 
 } // namespace
@@ -277,6 +274,7 @@ InputBindings default_input_bindings() {
   set_default_binding(bindings, LogicalAction::OpenInventory, InputDeviceType::Keyboard, "E");
   set_default_binding(bindings, LogicalAction::OpenChat, InputDeviceType::Keyboard, "T");
   set_default_binding(bindings, LogicalAction::ShowTabMenu, InputDeviceType::Keyboard, "Tab");
+  set_default_binding(bindings, LogicalAction::TogglePauseMenu, InputDeviceType::Keyboard, "Escape");
   set_default_binding(bindings, LogicalAction::ToggleDebugMenu, InputDeviceType::Keyboard, "Grave");
   return bindings;
 }

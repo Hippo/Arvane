@@ -110,6 +110,7 @@ arvane/
 │  ├─ arv_persistence/
 │  ├─ arv_plugin/
 │  ├─ arv_render/
+│  ├─ arv_ui/
 │  ├─ arv_client/
 │  └─ arv_server/
 ├─ game/
@@ -424,6 +425,34 @@ Rendering systems.
 
 ---
 
+## `arv_ui`
+
+Player-facing UI framework and screens.
+
+### Responsibilities
+
+* retained UI tree, layout, input routing, and draw extraction
+* reusable gameplay widgets
+* full screen/menu flows
+* command/data-source interfaces for app/runtime integration
+
+### Internal Structure
+
+```text
+arv_ui/
+  core/      → framework primitives
+  screens/   → full menu/screen flows
+  widgets/   → reusable HUD and gameplay UI components
+```
+
+### Constraints
+
+* does not own gameplay/runtime state
+* emits commands instead of starting servers or mutating saves directly
+* app/runtime code supplies data sources and handles commands
+
+---
+
 ## `arv_client`
 
 Client runtime library.
@@ -432,7 +461,6 @@ Client runtime library.
 
 * input handling
 * camera
-* UI/HUD hooks
 * interpolation/prediction
 * client networking integration
 * render coordination

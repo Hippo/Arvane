@@ -9,14 +9,14 @@
 namespace arv::desktop {
 namespace {
 
-[[nodiscard]] client::UiImageData missing_icon_for(
+[[nodiscard]] ui::UiImageData missing_icon_for(
     const asset::TextureAtlas& item_atlas,
     u32 item_atlas_width,
     u32 item_atlas_height) {
   const asset::TextureAtlasEntry* missing_entry =
       item_atlas.find("arvane:texture/missing");
   return missing_entry == nullptr
-             ? client::UiImageData{}
+             ? ui::UiImageData{}
              : image_data_from_atlas_entry(
                    *missing_entry,
                    item_atlas_width,
@@ -24,12 +24,12 @@ namespace {
                    render::UiTextureSource::ItemAtlas);
 }
 
-[[nodiscard]] client::UiItemStackView stack_view_for_ui(
+[[nodiscard]] ui::UiItemStackView stack_view_for_ui(
     const player::ItemStack& stack,
     const player::ItemRegistry& item_registry,
     const asset::TextureAtlas& item_atlas,
     const asset::BlockTextureAtlas& block_atlas,
-    client::UiImageData missing_icon) {
+    ui::UiImageData missing_icon) {
   const u32 item_atlas_width =
       item_atlas.pages.empty() ? 1U : item_atlas.pages.front().image.width;
   const u32 item_atlas_height =
@@ -39,7 +39,7 @@ namespace {
   const u32 block_atlas_height =
       block_atlas.atlas.pages.empty() ? 1U : block_atlas.atlas.pages.front().image.height;
 
-  client::UiItemStackView view;
+  ui::UiItemStackView view;
   const player::ItemRecord* item = item_registry.item(stack.item);
   view.item_name = item == nullptr ? std::string{player::MissingItemName} : item->name;
   view.display_name = item == nullptr ? view.item_name : item->display_name;
@@ -63,7 +63,7 @@ namespace {
       if (face_data == nullptr) {
         continue;
       }
-      client::UiImageData face_image;
+      ui::UiImageData face_image;
       face_image.valid = true;
       face_image.source = render::UiTextureSource::TerrainAtlas;
       face_image.page = face_data->page;
@@ -76,7 +76,7 @@ namespace {
 
 } // namespace
 
-std::vector<client::UiItemStackView> inventory_slots_for_ui(
+std::vector<ui::UiItemStackView> inventory_slots_for_ui(
     const player::Inventory& inventory,
     const player::ItemRegistry& item_registry,
     const asset::TextureAtlas& item_atlas,
@@ -85,13 +85,13 @@ std::vector<client::UiItemStackView> inventory_slots_for_ui(
       item_atlas.pages.empty() ? 1U : item_atlas.pages.front().image.width;
   const u32 item_atlas_height =
       item_atlas.pages.empty() ? 1U : item_atlas.pages.front().image.height;
-  const client::UiImageData missing_icon =
+  const ui::UiImageData missing_icon =
       missing_icon_for(item_atlas, item_atlas_width, item_atlas_height);
 
-  std::vector<client::UiItemStackView> slots;
+  std::vector<ui::UiItemStackView> slots;
   slots.reserve(inventory.slot_count());
   for (usize index = 0; index < inventory.slot_count(); ++index) {
-    client::UiItemStackView view;
+    ui::UiItemStackView view;
     const std::optional<player::ItemStack>& stack = inventory.slot(index);
     if (stack.has_value()) {
       view = stack_view_for_ui(*stack, item_registry, item_atlas, block_atlas, missing_icon);
@@ -101,7 +101,7 @@ std::vector<client::UiItemStackView> inventory_slots_for_ui(
   return slots;
 }
 
-std::optional<client::UiItemStackView> item_stack_for_ui(
+std::optional<ui::UiItemStackView> item_stack_for_ui(
     const std::optional<player::ItemStack>& stack,
     const player::ItemRegistry& item_registry,
     const asset::TextureAtlas& item_atlas,
@@ -121,9 +121,9 @@ std::optional<client::UiItemStackView> item_stack_for_ui(
       missing_icon_for(item_atlas, item_atlas_width, item_atlas_height));
 }
 
-std::vector<client::PlayerListEntryView> player_list_for_ui(
+std::vector<ui::PlayerListEntryView> player_list_for_ui(
     const server::ServerRuntime& server) {
-  std::vector<client::PlayerListEntryView> players;
+  std::vector<ui::PlayerListEntryView> players;
   players.reserve(server.sessions().size());
   server.sessions().for_each_session([&players](const server::ServerSession& session) {
     players.emplace_back(session.profile_name, std::nullopt);

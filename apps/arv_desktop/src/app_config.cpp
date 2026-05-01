@@ -25,8 +25,4 @@ io::ConfigLoadOptions parse_config_options(int argc, char** argv) {
   return options;
 }
 
-std::filesystem::path default_save_root(const io::EngineConfig& config) {
-  return config.paths.server_save_path(io::DefaultServerSaveName);
-}
-
 } // namespace arv::desktop

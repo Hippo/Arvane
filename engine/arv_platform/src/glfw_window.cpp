@@ -246,7 +246,6 @@ OpenGLWindow::OpenGLWindow(OpenGLWindow&& other) noexcept
       previous_right_mouse_down_(std::exchange(other.previous_right_mouse_down_, false)),
       previous_backspace_down_(std::exchange(other.previous_backspace_down_, false)),
       previous_enter_down_(std::exchange(other.previous_enter_down_, false)),
-      previous_escape_down_(std::exchange(other.previous_escape_down_, false)),
       pending_text_input_(std::move(other.pending_text_input_)),
       input_bindings_(std::move(other.input_bindings_)),
       previous_action_active_(other.previous_action_active_) {
@@ -269,7 +268,6 @@ OpenGLWindow& OpenGLWindow::operator=(OpenGLWindow&& other) noexcept {
     previous_right_mouse_down_ = std::exchange(other.previous_right_mouse_down_, false);
     previous_backspace_down_ = std::exchange(other.previous_backspace_down_, false);
     previous_enter_down_ = std::exchange(other.previous_enter_down_, false);
-    previous_escape_down_ = std::exchange(other.previous_escape_down_, false);
     pending_text_input_ = std::move(other.pending_text_input_);
     input_bindings_ = std::move(other.input_bindings_);
     previous_action_active_ = other.previous_action_active_;
@@ -334,13 +332,10 @@ void OpenGLWindow::request_close() {
 
 InputSnapshot OpenGLWindow::poll_input() {
   InputSnapshot input;
-  const bool escape_down = glfwGetKey(window_, GLFW_KEY_ESCAPE) == GLFW_PRESS;
   const bool backspace_down = glfwGetKey(window_, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
   const bool enter_down = glfwGetKey(window_, GLFW_KEY_ENTER) == GLFW_PRESS;
   const bool left_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
   const bool right_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
-  input.close_requested = escape_down && !previous_escape_down_;
-  input.text_cancel_pressed = input.close_requested;
   input.text_backspace_pressed = backspace_down && !previous_backspace_down_;
   input.text_submit_pressed = enter_down && !previous_enter_down_;
   input.mouse_left_pressed = left_mouse_down && !previous_left_mouse_down_;
@@ -407,6 +402,15 @@ InputSnapshot OpenGLWindow::poll_input() {
                                 wheel_up_steps,
                                 wheel_down_steps) > 0;
   input.tab_menu_held = action_hold_active(window_, input_bindings_, LogicalAction::ShowTabMenu);
+  input.pause_menu_pressed =
+      action_press_count(
+          window_,
+          input_bindings_,
+          LogicalAction::TogglePauseMenu,
+          previous_action_active_[logical_action_index(LogicalAction::TogglePauseMenu)],
+          wheel_up_steps,
+          wheel_down_steps) > 0;
+  input.text_cancel_pressed = input.pause_menu_pressed;
   input.debug_menu_toggle_pressed =
       action_press_count(
           window_,
@@ -472,7 +476,6 @@ InputSnapshot OpenGLWindow::poll_input() {
   previous_right_mouse_down_ = right_mouse_down;
   previous_backspace_down_ = backspace_down;
   previous_enter_down_ = enter_down;
-  previous_escape_down_ = escape_down;
   return input;
 }
 

@@ -102,7 +102,8 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       arv::persistence::CurrentSaveFormatVersion,
       std::string{arv::persistence::CurrentGameVersion},
       arv::persistence::hash_block_registry(block_registry),
-      arv::persistence::hash_item_registry(item_registry)};
+      arv::persistence::hash_item_registry(item_registry),
+      "Test Save"};
   const arv::persistence::WorldMetadata world_metadata{
       "default",
       42,
@@ -116,20 +117,18 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       make_saved_chunk({{0, 0, 0}}, stone)};
   const std::vector<arv::persistence::PlayerSaveData> players{player};
   const std::vector<arv::entity::PersistentEntityRecord> entities{
-      {
-          "entity-test-uuid-a",
-          "arvane:test_entity",
-          arv::WorldID{1},
-          {4.0F, 5.0F, 6.0F},
-          {0.0F, 0.0F, 0.0F, 1.0F},
-          {0.1F, 0.2F, 0.3F}},
-      {
-          "entity-test-uuid-b",
-          "arvane:test_entity",
-          arv::WorldID{1},
-          {-1.0F, 5.0F, -1.0F},
-          {0.0F, 0.0F, 0.0F, 1.0F},
-          {-0.1F, 0.0F, 0.1F}}};
+      {"entity-test-uuid-a",
+       "arvane:test_entity",
+       arv::WorldID{1},
+       {4.0F, 5.0F, 6.0F},
+       {0.0F, 0.0F, 0.0F, 1.0F},
+       {0.1F, 0.2F, 0.3F}},
+      {"entity-test-uuid-b",
+       "arvane:test_entity",
+       arv::WorldID{1},
+       {-1.0F, 5.0F, -1.0F},
+       {0.0F, 0.0F, 0.0F, 1.0F},
+       {-0.1F, 0.0F, 0.1F}}};
 
   ASSERT_TRUE(arv::persistence::save_server_root(
       server_save_root,
@@ -158,6 +157,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_TRUE(loaded);
   EXPECT_TRUE(loaded.value().has_save_metadata);
   EXPECT_TRUE(loaded.value().has_world_metadata);
+  EXPECT_EQ(loaded.value().save.name, "Test Save");
   EXPECT_EQ(loaded.value().save.save_format_version, arv::persistence::CurrentSaveFormatVersion);
   EXPECT_EQ(loaded.value().world.seed, 42U);
   EXPECT_EQ(loaded.value().world.tick_index, 99U);
@@ -193,6 +193,89 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_NE(entity_b, loaded.value().entities.end());
   EXPECT_EQ(entity_b->position, (arv::Vec3f{-1.0F, 5.0F, -1.0F}));
   EXPECT_EQ(entity_b->velocity, (arv::Vec3f{-0.1F, 0.0F, 0.1F}));
+}
+
+TEST(SaveTests, DiscoversServerSavesSeparatelyFromWorldsAndLoadsRequestedWorld) {
+  TempDir temp_dir;
+  const std::filesystem::path saves_root = temp_dir.path / "arvane_home" / "saves";
+  const std::filesystem::path server_save_root = saves_root / "server-save-1";
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+
+  const arv::persistence::SaveMetadata save_metadata{
+      arv::persistence::CurrentSaveFormatVersion,
+      std::string{arv::persistence::CurrentGameVersion},
+      arv::persistence::hash_block_registry(block_registry),
+      arv::persistence::hash_item_registry(item_registry)};
+  auto save_metadata_one = save_metadata;
+  save_metadata_one.name = "Server One";
+  auto save_metadata_two = save_metadata;
+  save_metadata_two.name = "Server Two";
+  const arv::world::WorldGenerationConfig config = make_worldgen_config();
+  const std::vector<arv::persistence::SavedChunkSection> chunks{};
+  const std::vector<arv::persistence::PlayerSaveData> players{};
+  const std::vector<arv::entity::PersistentEntityRecord> entities{};
+
+  ASSERT_TRUE(arv::persistence::save_server_root(
+      server_save_root,
+      save_metadata_one,
+      {"default", 11, 1, config, 0, 3, save_metadata.block_registry_hash, save_metadata.item_registry_hash},
+      chunks,
+      players,
+      entities,
+      block_registry,
+      item_registry));
+  ASSERT_TRUE(arv::persistence::save_server_root(
+      server_save_root,
+      save_metadata_one,
+      {"sky", 22, 2, config, 0, 4, save_metadata.block_registry_hash, save_metadata.item_registry_hash},
+      chunks,
+      players,
+      entities,
+      block_registry,
+      item_registry));
+  ASSERT_TRUE(arv::persistence::save_server_root(
+      saves_root / "server-save-2",
+      save_metadata_two,
+      {"default", 33, 3, config, 0, 5, save_metadata.block_registry_hash, save_metadata.item_registry_hash},
+      chunks,
+      players,
+      entities,
+      block_registry,
+      item_registry));
+
+  const std::vector<arv::persistence::SavedServerSummary> servers =
+      arv::persistence::discover_saved_servers(saves_root);
+  ASSERT_EQ(servers.size(), 2U);
+  EXPECT_EQ(servers[0].name, "Server One");
+  EXPECT_EQ(servers[0].server_save_name, "server-save-1");
+  EXPECT_EQ(servers[0].primary_world_name, "default");
+  EXPECT_EQ(servers[1].name, "Server Two");
+  EXPECT_EQ(servers[1].server_save_name, "server-save-2");
+  EXPECT_EQ(servers[1].primary_world_name, "default");
+
+  const std::vector<arv::persistence::SavedWorldSummary> worlds =
+      arv::persistence::discover_saved_worlds(saves_root);
+  ASSERT_EQ(worlds.size(), 3U);
+  EXPECT_EQ(worlds[0].server_save_name, "server-save-1");
+  EXPECT_EQ(worlds[0].world_name, "default");
+  EXPECT_EQ(worlds[1].server_save_name, "server-save-1");
+  EXPECT_EQ(worlds[1].world_name, "sky");
+  EXPECT_EQ(worlds[2].server_save_name, "server-save-2");
+  EXPECT_EQ(worlds[2].world_name, "default");
+
+  auto loaded = arv::persistence::load_server_root(
+      server_save_root,
+      "sky",
+      block_registry,
+      item_registry);
+  ASSERT_TRUE(loaded);
+  EXPECT_EQ(loaded.value().save.name, "Server One");
+  ASSERT_TRUE(loaded.value().has_world_metadata);
+  EXPECT_EQ(loaded.value().world.name, "sky");
+  EXPECT_EQ(loaded.value().world.seed, 22U);
+  EXPECT_EQ(loaded.value().world.max_chunk_y, 4);
 }
 
 TEST(SaveTests, CorruptedSaveJsonReturnsFailureInsteadOfSilentlyLoading) {

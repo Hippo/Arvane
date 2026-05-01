@@ -47,6 +47,7 @@ struct InputSnapshot {
   bool open_inventory_pressed{};
   bool open_chat_pressed{};
   bool tab_menu_held{};
+  bool pause_menu_pressed{};
   bool debug_menu_toggle_pressed{};
   std::optional<u8> hotbar_select{};
   i8 hotbar_scroll_steps{};
@@ -137,7 +138,6 @@ private:
   bool previous_right_mouse_down_{};
   bool previous_backspace_down_{};
   bool previous_enter_down_{};
-  bool previous_escape_down_{};
   std::string pending_text_input_{};
   InputBindings input_bindings_{default_input_bindings()};
   std::array<bool, static_cast<usize>(LogicalAction::Count)> previous_action_active_{};

@@ -2,11 +2,11 @@
 
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
-#include "arv/client/ui.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
 #include "arv/render/entity_model.hpp"
 #include "arv/render/render_types.hpp"
+#include "arv/ui/ui.hpp"
 
 #include <array>
 #include <vector>
@@ -28,7 +28,7 @@ using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>
     u32 width,
     u32 height);
 
-[[nodiscard]] client::UiImageData image_data_from_atlas_entry(
+[[nodiscard]] ui::UiImageData image_data_from_atlas_entry(
     const asset::TextureAtlasEntry& entry,
     u32 page_width,
     u32 page_height,

@@ -4,13 +4,14 @@
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
 #include "arv/entity/components.hpp"
+#include "arv/persistence/region_file.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
-#include "arv/persistence/region_file.hpp"
 #include "arv/world/world_generation.hpp"
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::persistence {
@@ -23,6 +24,7 @@ struct SaveMetadata {
   std::string game_version{std::string{CurrentGameVersion}};
   u64 block_registry_hash{};
   u64 item_registry_hash{};
+  std::string name{};
 };
 
 struct WorldMetadata {
@@ -60,8 +62,26 @@ struct LoadedSaveData {
   std::vector<entity::PersistentEntityRecord> entities{};
 };
 
+struct SavedWorldSummary {
+  std::string server_save_name{};
+  std::string world_name{};
+  std::filesystem::path server_save_root{};
+  std::filesystem::path world_root{};
+};
+
+struct SavedServerSummary {
+  std::string name{};
+  std::string server_save_name{};
+  std::string primary_world_name{};
+  std::filesystem::path server_save_root{};
+};
+
 [[nodiscard]] u64 hash_block_registry(const voxel::BlockRegistry& registry) noexcept;
 [[nodiscard]] u64 hash_item_registry(const player::ItemRegistry& registry) noexcept;
+[[nodiscard]] std::vector<SavedServerSummary> discover_saved_servers(
+    const std::filesystem::path& saves_root);
+[[nodiscard]] std::vector<SavedWorldSummary> discover_saved_worlds(
+    const std::filesystem::path& saves_root);
 
 Expected<void, PersistenceError> save_server_root(
     const std::filesystem::path& root,
@@ -82,6 +102,11 @@ Expected<void, PersistenceError> save_server_root(
     const player::ItemRegistry& item_registry);
 [[nodiscard]] Expected<LoadedSaveData, PersistenceError> load_server_root(
     const std::filesystem::path& root,
+    const voxel::BlockRegistry& block_registry,
+    const player::ItemRegistry& item_registry);
+[[nodiscard]] Expected<LoadedSaveData, PersistenceError> load_server_root(
+    const std::filesystem::path& root,
+    std::string_view world_name,
     const voxel::BlockRegistry& block_registry,
     const player::ItemRegistry& item_registry);
 
