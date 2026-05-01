@@ -1,10 +1,54 @@
 #include "asset_helpers.hpp"
 
+#include "arv/render/item_model.hpp"
+
+#include <array>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace arv::desktop {
+namespace {
+
+constexpr u32 ItemEntityModelIDBase = 1'000'000U;
+
+[[nodiscard]] render::EntityModelID item_entity_model_id(player::ItemID item_id) noexcept {
+  return render::EntityModelID{ItemEntityModelIDBase + item_id.value};
+}
+
+[[nodiscard]] std::string normalize_item_model_asset(std::string_view model) {
+  if (model.empty()) {
+    return {};
+  }
+  if (model.find(':') != std::string_view::npos) {
+    return std::string{model};
+  }
+  return "arvane:model/item/" + std::string{model};
+}
+
+[[nodiscard]] std::string block_texture_for_face(
+    const voxel::BlockVariantRecord& variant,
+    voxel::BlockFace face) {
+  std::string texture = variant.texture_assets[voxel::face_index(face)];
+  return texture.empty() ? "arvane:texture/missing" : texture;
+}
+
+[[nodiscard]] std::array<Vec2i, 4> atlas_face_uvs(
+    const asset::TextureAtlasEntry& entry,
+    const std::array<Vec2i, 4>& logical_uvs) {
+  std::array<Vec2i, 4> uvs{};
+  for (usize index = 0; index < uvs.size(); ++index) {
+    const f32 u = static_cast<f32>(logical_uvs[index].x) / 16.0F;
+    const f32 v = static_cast<f32>(logical_uvs[index].y) / 16.0F;
+    uvs[index] = {
+        entry.unpadded_pixel_min.x + static_cast<i32>(u * static_cast<f32>(entry.width)),
+        entry.unpadded_pixel_min.y + static_cast<i32>(v * static_cast<f32>(entry.height))};
+  }
+  return uvs;
+}
+
+} // namespace
 
 render::TextureUploadData texture_upload_from_image(const asset::Image& image) {
   return {image.width, image.height, image.pixels};
@@ -89,16 +133,39 @@ asset::TextureAtlasResult build_item_texture_atlas(
 
 EntityRenderAssetsResult build_entity_render_assets(
     asset::ResourceManager& resources,
-    const entity::EntityRegistry& entity_registry) {
+    const entity::EntityRegistry& entity_registry,
+    const player::ItemRegistry& item_registry,
+    const voxel::BlockRegistry& block_registry) {
   struct PendingModel {
     EntityTypeID type_id{};
+    std::optional<player::ItemID> item_id{};
     render::EntityModelID model_id{};
     render::EntityModelDefinition definition{};
   };
+  struct PendingTextureItem {
+    player::ItemID item_id{};
+    render::EntityModelID model_id{};
+    std::string texture_asset{};
+  };
+  struct PendingBlockItem {
+    player::ItemID item_id{};
+    render::EntityModelID model_id{};
+    voxel::BlockVariantID variant{};
+  };
 
   std::vector<PendingModel> pending_models;
+  std::vector<PendingTextureItem> pending_texture_items;
+  std::vector<PendingBlockItem> pending_block_items;
   std::vector<asset::AssetID> texture_ids;
   HashSet<std::string> seen_textures;
+  const auto add_texture = [&](std::string texture) {
+    if (texture.empty()) {
+      texture = "arvane:texture/missing";
+    }
+    if (seen_textures.insert(texture).second) {
+      texture_ids.push_back({std::move(texture)});
+    }
+  };
 
   for (const entity::EntityTypeRecord& type : entity_registry.records()) {
     if (type.model_asset.empty()) {
@@ -119,26 +186,83 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
 
     for (const std::string& texture : model_definition.value().texture_assets) {
-      if (!texture.empty() && seen_textures.insert(texture).second) {
-        texture_ids.push_back({texture});
-      }
+      add_texture(texture);
     }
 
     pending_models.push_back({type.id,
+                              std::nullopt,
                               render::EntityModelID{type.id.value},
                               std::move(model_definition.value())});
   }
 
-  EntityRenderAssets assets;
-  if (pending_models.empty()) {
-    return EntityRenderAssetsResult::success(std::move(assets));
+  for (u32 item_value = 0; item_value < item_registry.item_count(); ++item_value) {
+    const player::ItemID item_id{item_value};
+    if (item_registry.is_air(item_id)) {
+      continue;
+    }
+    const player::ItemRecord* item = item_registry.item(item_id);
+    if (item == nullptr) {
+      continue;
+    }
+
+    const render::EntityModelID model_id = item_entity_model_id(item_id);
+    switch (item->render_type) {
+      case player::ItemRenderType::Texture: {
+        std::string texture = item->texture_asset.empty()
+                                  ? std::string{"arvane:texture/missing"}
+                                  : item->texture_asset;
+        add_texture(texture);
+        pending_texture_items.push_back({item_id, model_id, std::move(texture)});
+        break;
+      }
+      case player::ItemRenderType::Model: {
+        const std::string model_asset = normalize_item_model_asset(item->model_asset);
+        auto model_text = resources.load_text({model_asset}, asset::AssetKind::Model);
+        if (!model_text) {
+          return EntityRenderAssetsResult::failure(model_text.error());
+        }
+        auto model_definition = render::parse_entity_model_json(model_text.value());
+        if (!model_definition) {
+          return EntityRenderAssetsResult::failure({model_asset,
+                                                    resources.resolve_asset_path({model_asset}, asset::AssetKind::Model),
+                                                    "parse item model",
+                                                    model_definition.error().message});
+        }
+        for (const std::string& texture : model_definition.value().texture_assets) {
+          add_texture(texture);
+        }
+        pending_models.push_back({EntityTypeID{},
+                                  item_id,
+                                  model_id,
+                                  std::move(model_definition.value())});
+        break;
+      }
+      case player::ItemRenderType::Block: {
+        if (!item->render_block_variant.has_value()) {
+          add_texture("arvane:texture/missing");
+          pending_texture_items.push_back({item_id, model_id, "arvane:texture/missing"});
+          break;
+        }
+        const voxel::BlockVariantRecord* variant =
+            block_registry.variant(item->render_block_variant.value());
+        if (variant == nullptr) {
+          add_texture("arvane:texture/missing");
+          pending_texture_items.push_back({item_id, model_id, "arvane:texture/missing"});
+          break;
+        }
+        for (const voxel::BlockFace face : voxel::AllBlockFaces) {
+          add_texture(block_texture_for_face(*variant, face));
+        }
+        pending_block_items.push_back({item_id, model_id, item->render_block_variant.value()});
+        break;
+      }
+    }
   }
 
-  if (texture_ids.empty()) {
-    texture_ids.push_back({"arvane:texture/missing"});
-  }
+  add_texture("arvane:texture/missing");
 
   std::vector<asset::TextureAtlasInput> inputs;
+  HashMap<std::string, asset::Image> source_images;
   inputs.reserve(texture_ids.size());
   for (const asset::AssetID& texture_id : texture_ids) {
     auto handle = texture_id.value == "arvane:texture/missing"
@@ -155,12 +279,16 @@ EntityRenderAssetsResult build_entity_render_assets(
                                                 "loaded texture handle did not resolve"});
     }
     inputs.push_back({texture_id, resource->image, resource->fallback});
+    source_images[texture_id.value] = resource->image;
   }
 
-  auto atlas_result = asset::build_texture_atlas(inputs, {.max_page_size = 1024, .padding = 2});
+  auto atlas_result = asset::build_texture_atlas(
+      inputs,
+      {.max_page_size = 1024, .padding = 2, .require_uniform_non_fallback_size = false});
   if (!atlas_result) {
     return EntityRenderAssetsResult::failure(atlas_result.error());
   }
+  EntityRenderAssets assets;
   assets.texture_atlas = std::move(atlas_result.value());
 
   for (const PendingModel& pending : pending_models) {
@@ -189,8 +317,62 @@ EntityRenderAssetsResult build_entity_render_assets(
                                                 "build entity model",
                                                 model_asset.error().message});
     }
-    assets.model_by_type[pending.type_id] = pending.model_id;
+    if (pending.item_id.has_value()) {
+      assets.model_by_item[pending.item_id.value()] = pending.model_id;
+    } else {
+      assets.model_by_type[pending.type_id] = pending.model_id;
+    }
     assets.models.push_back(std::move(model_asset.value()));
+  }
+
+  for (const PendingTextureItem& pending : pending_texture_items) {
+    const asset::TextureAtlasEntry* entry = assets.texture_atlas.find(pending.texture_asset);
+    const auto image = source_images.find(pending.texture_asset);
+    if (entry == nullptr || image == source_images.end()) {
+      return EntityRenderAssetsResult::failure({pending.texture_asset,
+                                                {},
+                                                "build item model",
+                                                "item texture was not present in final atlas"});
+    }
+    render::ItemTextureMeshInput input;
+    input.id = pending.model_id;
+    input.name = item_registry.item(pending.item_id) == nullptr
+                     ? std::string{player::MissingItemName}
+                     : item_registry.item(pending.item_id)->name;
+    input.width = image->second.width;
+    input.height = image->second.height;
+    input.rgba_pixels = std::span<const u8>{image->second.pixels.data(), image->second.pixels.size()};
+    input.atlas_pixel_min = entry->unpadded_pixel_min;
+    assets.model_by_item[pending.item_id] = pending.model_id;
+    assets.models.push_back(render::build_extruded_texture_item_model(input));
+  }
+
+  for (const PendingBlockItem& pending : pending_block_items) {
+    const voxel::BlockVariantRecord* variant = block_registry.variant(pending.variant);
+    if (variant == nullptr) {
+      continue;
+    }
+
+    render::ItemBlockModelInput input;
+    input.id = pending.model_id;
+    input.name = item_registry.item(pending.item_id) == nullptr
+                     ? std::string{player::MissingItemName}
+                     : item_registry.item(pending.item_id)->name;
+    for (const voxel::BlockFace face : voxel::AllBlockFaces) {
+      const std::string texture = block_texture_for_face(*variant, face);
+      const asset::TextureAtlasEntry* entry = assets.texture_atlas.find(texture);
+      if (entry == nullptr) {
+        return EntityRenderAssetsResult::failure({texture,
+                                                  {},
+                                                  "build block item model",
+                                                  "block item texture was not present in final atlas"});
+      }
+      const usize face_index = voxel::face_index(face);
+      input.face_valid[face_index] = true;
+      input.face_uvs[face_index] = atlas_face_uvs(*entry, voxel::default_cube_face_uvs(face));
+    }
+    assets.model_by_item[pending.item_id] = pending.model_id;
+    assets.models.push_back(render::build_block_item_model(input));
   }
 
   return EntityRenderAssetsResult::success(std::move(assets));

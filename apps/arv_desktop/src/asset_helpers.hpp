@@ -17,6 +17,7 @@ struct EntityRenderAssets {
   asset::TextureAtlas texture_atlas{};
   std::vector<render::EntityModelAsset> models{};
   HashMap<EntityTypeID, render::EntityModelID> model_by_type{};
+  HashMap<player::ItemID, render::EntityModelID> model_by_item{};
 };
 
 using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>;
@@ -40,6 +41,8 @@ using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>
 
 [[nodiscard]] EntityRenderAssetsResult build_entity_render_assets(
     asset::ResourceManager& resources,
-    const entity::EntityRegistry& entity_registry);
+    const entity::EntityRegistry& entity_registry,
+    const player::ItemRegistry& item_registry,
+    const voxel::BlockRegistry& block_registry);
 
 } // namespace arv::desktop

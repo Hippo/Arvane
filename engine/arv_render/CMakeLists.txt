@@ -1,6 +1,7 @@
 set(ARV_RENDER_HEADERS
   include/arv/render/chunk_mesher.hpp
   include/arv/render/entity_model.hpp
+  include/arv/render/item_model.hpp
   include/arv/render/opengl_renderer.hpp
   include/arv/render/render_types.hpp
 )
@@ -8,6 +9,7 @@ set(ARV_RENDER_HEADERS
 add_library(arv_render STATIC
   src/chunk_mesher.cpp
   src/entity_model.cpp
+  src/item_model.cpp
   src/opengl_renderer.cpp
   src/render_types.cpp
 )

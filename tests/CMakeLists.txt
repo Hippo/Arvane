@@ -25,6 +25,7 @@ add_executable(arv_tests
   player/inventory_tests.cpp
   player/permission_tests.cpp
   render/entity_model_tests.cpp
+  render/item_model_tests.cpp
   render/mesh_handoff_tests.cpp
   render/chunk_meshing_tests.cpp
   sched/scheduler_tests.cpp

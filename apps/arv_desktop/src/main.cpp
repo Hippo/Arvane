@@ -43,6 +43,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <string>
@@ -80,6 +81,72 @@ namespace {
       from.x + (to.x - from.x) * alpha,
       from.y + (to.y - from.y) * alpha,
       from.z + (to.z - from.z) * alpha};
+}
+
+[[nodiscard]] arv::Quatf multiply_quat(arv::Quatf lhs, arv::Quatf rhs) noexcept {
+  return {
+      lhs.w * rhs.x + lhs.x * rhs.w + lhs.y * rhs.z - lhs.z * rhs.y,
+      lhs.w * rhs.y - lhs.x * rhs.z + lhs.y * rhs.w + lhs.z * rhs.x,
+      lhs.w * rhs.z + lhs.x * rhs.y - lhs.y * rhs.x + lhs.z * rhs.w,
+      lhs.w * rhs.w - lhs.x * rhs.x - lhs.y * rhs.y - lhs.z * rhs.z};
+}
+
+[[nodiscard]] arv::Quatf normalize_quat(arv::Quatf value) noexcept {
+  const arv::f32 length = std::sqrt(
+      value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w);
+  if (length <= 0.0F) {
+    return {};
+  }
+  return {value.x / length, value.y / length, value.z / length, value.w / length};
+}
+
+[[nodiscard]] arv::Quatf yaw_rotation(arv::f32 radians) noexcept {
+  const arv::f32 half = radians * 0.5F;
+  return {0.0F, std::sin(half), 0.0F, std::cos(half)};
+}
+
+[[nodiscard]] arv::Quatf camera_basis_rotation(
+    arv::Vec3f right,
+    arv::Vec3f up,
+    arv::Vec3f forward) noexcept {
+  const arv::f32 m00 = right.x;
+  const arv::f32 m01 = up.x;
+  const arv::f32 m02 = forward.x;
+  const arv::f32 m10 = right.y;
+  const arv::f32 m11 = up.y;
+  const arv::f32 m12 = forward.y;
+  const arv::f32 m20 = right.z;
+  const arv::f32 m21 = up.z;
+  const arv::f32 m22 = forward.z;
+  const arv::f32 trace = m00 + m11 + m22;
+
+  if (trace > 0.0F) {
+    const arv::f32 scale = std::sqrt(trace + 1.0F) * 2.0F;
+    return normalize_quat({(m21 - m12) / scale,
+                           (m02 - m20) / scale,
+                           (m10 - m01) / scale,
+                           0.25F * scale});
+  }
+  if (m00 > m11 && m00 > m22) {
+    const arv::f32 scale = std::sqrt(1.0F + m00 - m11 - m22) * 2.0F;
+    return normalize_quat({0.25F * scale,
+                           (m01 + m10) / scale,
+                           (m02 + m20) / scale,
+                           (m21 - m12) / scale});
+  }
+  if (m11 > m22) {
+    const arv::f32 scale = std::sqrt(1.0F + m11 - m00 - m22) * 2.0F;
+    return normalize_quat({(m01 + m10) / scale,
+                           0.25F * scale,
+                           (m12 + m21) / scale,
+                           (m02 - m20) / scale});
+  }
+
+  const arv::f32 scale = std::sqrt(1.0F + m22 - m00 - m11) * 2.0F;
+  return normalize_quat({(m02 + m20) / scale,
+                         (m12 + m21) / scale,
+                         0.25F * scale,
+                         (m10 - m01) / scale});
 }
 
 [[nodiscard]] arv::player::PlayerTuning make_player_tuning(
@@ -385,9 +452,8 @@ class DesktopMenuState final : public arv::ui::UIScreenDataSource,
 public:
   DesktopMenuState(
       std::filesystem::path saves_root,
-      std::filesystem::path server_list_file)
-      : saves_root_(std::move(saves_root)),
-        server_list_file_(std::move(server_list_file)) {
+      std::filesystem::path server_list_file) : saves_root_(std::move(saves_root)),
+                                                server_list_file_(std::move(server_list_file)) {
     refresh_worlds();
     load_servers();
   }
@@ -733,7 +799,11 @@ int main(int argc, char** argv) {
       std::move(entity_registry_result.value());
 
   auto entity_render_assets_result =
-      arv::desktop::build_entity_render_assets(resources, entity_registry);
+      arv::desktop::build_entity_render_assets(
+          resources,
+          entity_registry,
+          item_registry,
+          block_registry);
   if (!entity_render_assets_result) {
     arv::core::error("entities", entity_render_assets_result.error().message);
     return 1;
@@ -1492,6 +1562,22 @@ int main(int argc, char** argv) {
       frame.transparent_chunks = visible_chunks;
       const arv::f32 entity_animation_time =
           std::chrono::duration<arv::f32>(now - app_start_time).count();
+      const auto append_item_draw =
+          [&](arv::player::ItemStack stack,
+              arv::Vec3f position,
+              arv::Quatf rotation,
+              arv::f32 scale) {
+            const auto model = entity_render_assets.model_by_item.find(stack.item);
+            if (model == entity_render_assets.model_by_item.end()) {
+              return;
+            }
+            arv::render::EntityDrawItem item;
+            item.model_id = model->second;
+            item.position = position;
+            item.rotation = rotation;
+            item.scale = scale;
+            frame.entities.push_back(std::move(item));
+          };
       for (const arv::client::ReplicatedEntityMirror& mirror :
            active_session->client->replicated_entity_mirrors()) {
         if (mirror.world_id != frame.world_view.world_id) {
@@ -1509,6 +1595,44 @@ int main(int argc, char** argv) {
         item.animation_name = "walking";
         item.animation_time_seconds = entity_animation_time;
         frame.entities.push_back(std::move(item));
+      }
+      if (has_active_integrated_session) {
+        const std::vector<arv::server::DroppedItemStack>& dropped_items =
+            active_session->integrated_server->dropped_item_stacks();
+        for (arv::usize dropped_index = 0; dropped_index < dropped_items.size(); ++dropped_index) {
+          const arv::server::DroppedItemStack& dropped = dropped_items[dropped_index];
+          if (dropped.world_id != frame.world_view.world_id || dropped.stack.count == 0U) {
+            continue;
+          }
+          const arv::f32 phase =
+              entity_animation_time * 2.75F + static_cast<arv::f32>(dropped_index) * 0.37F;
+          append_item_draw(
+              dropped.stack,
+              {dropped.position.x,
+               dropped.position.y + 0.42F + std::sin(phase) * 0.055F,
+               dropped.position.z},
+              yaw_rotation(entity_animation_time * 1.8F + static_cast<arv::f32>(dropped_index)),
+              0.42F);
+        }
+      }
+      if (active_session->client->has_authoritative_inventory()) {
+        const arv::usize selected_slot = active_session->client->selected_hotbar_slot();
+        const arv::player::Inventory& inventory = active_session->client->inventory();
+        const std::optional<arv::player::ItemStack>& held_stack =
+            selected_slot < inventory.slot_count() ? inventory.slot(selected_slot)
+                                                   : std::optional<arv::player::ItemStack>{};
+        if (held_stack.has_value() && held_stack->count > 0U) {
+          const arv::render::CameraSnapshot& camera = frame.camera;
+          constexpr arv::f32 HalfPi = std::numbers::pi_v<arv::f32> * 0.5F;
+          append_item_draw(
+              held_stack.value(),
+              camera.position + camera.forward * 0.70F + camera.right * 0.34F -
+                  camera.up * 0.30F,
+              multiply_quat(
+                  camera_basis_rotation(camera.right, camera.up, camera.forward),
+                  yaw_rotation(-HalfPi)),
+              0.42F);
+        }
       }
     }
 

@@ -152,7 +152,7 @@ TextureAtlasResult build_texture_atlas(
           "build texture atlas",
           "block texture dimensions must be power-of-two"});
     }
-    if (!input.fallback) {
+    if (options.require_uniform_non_fallback_size && !input.fallback) {
       if (base_width == 0 && base_height == 0) {
         base_width = input.image.width;
         base_height = input.image.height;
