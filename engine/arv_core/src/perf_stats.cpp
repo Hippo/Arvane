@@ -285,6 +285,61 @@ using GlobalWorstEventRings =
   return value;
 }
 
+[[nodiscard]] std::atomic<u64>& lighting_jobs_submitted_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_jobs_completed_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_jobs_continued_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_nodes_processed_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_add_nodes_processed_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_remove_nodes_processed_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_boundary_deferrals_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_sections_touched_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_sections_published_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u64>& lighting_remeshes_triggered_total() noexcept {
+  static std::atomic<u64> value{0U};
+  return value;
+}
+
+[[nodiscard]] std::atomic<u32>& lighting_max_queue_depth() noexcept {
+  static std::atomic<u32> value{0U};
+  return value;
+}
+
 [[nodiscard]] bool valid_metric(PerfMetric metric) noexcept {
   return static_cast<usize>(metric) < static_cast<usize>(PerfMetric::Count);
 }
@@ -606,6 +661,95 @@ SnapshotCostSnapshot global_snapshot_cost_snapshot() noexcept {
   return snapshot;
 }
 
+void record_lighting_job_submitted() noexcept {
+#if ARVANE_ENABLE_PROFILING
+  if (!global_timing_paused()) {
+    lighting_jobs_submitted_total().fetch_add(1U, std::memory_order_relaxed);
+  }
+#endif
+}
+
+void record_lighting_job_completed(const LightingStatsUpdate& update) noexcept {
+#if ARVANE_ENABLE_PROFILING
+  if (global_timing_paused()) {
+    return;
+  }
+  lighting_jobs_completed_total().fetch_add(1U, std::memory_order_relaxed);
+  if (update.continued) {
+    lighting_jobs_continued_total().fetch_add(1U, std::memory_order_relaxed);
+  }
+  lighting_nodes_processed_total().fetch_add(update.nodes_processed, std::memory_order_relaxed);
+  lighting_add_nodes_processed_total().fetch_add(update.add_nodes_processed, std::memory_order_relaxed);
+  lighting_remove_nodes_processed_total().fetch_add(update.remove_nodes_processed, std::memory_order_relaxed);
+  lighting_boundary_deferrals_total().fetch_add(update.boundary_deferrals, std::memory_order_relaxed);
+  lighting_sections_touched_total().fetch_add(update.sections_touched, std::memory_order_relaxed);
+  lighting_sections_published_total().fetch_add(update.sections_published, std::memory_order_relaxed);
+  lighting_remeshes_triggered_total().fetch_add(update.remeshes_triggered, std::memory_order_relaxed);
+  update_maximum(lighting_max_queue_depth(), update.max_queue_depth);
+#else
+  (void)update;
+#endif
+}
+
+void record_lighting_sections_published(u32 count) noexcept {
+#if ARVANE_ENABLE_PROFILING
+  if (!global_timing_paused()) {
+    lighting_sections_published_total().fetch_add(count, std::memory_order_relaxed);
+  }
+#else
+  (void)count;
+#endif
+}
+
+void record_lighting_remeshes_triggered(u32 count) noexcept {
+#if ARVANE_ENABLE_PROFILING
+  if (!global_timing_paused()) {
+    lighting_remeshes_triggered_total().fetch_add(count, std::memory_order_relaxed);
+  }
+#else
+  (void)count;
+#endif
+}
+
+void record_lighting_boundary_deferrals(u32 count) noexcept {
+#if ARVANE_ENABLE_PROFILING
+  if (!global_timing_paused()) {
+    lighting_boundary_deferrals_total().fetch_add(count, std::memory_order_relaxed);
+  }
+#else
+  (void)count;
+#endif
+}
+
+LightingStatsSnapshot global_lighting_stats_snapshot() noexcept {
+  LightingStatsSnapshot snapshot;
+#if ARVANE_ENABLE_PROFILING
+  snapshot.jobs_submitted_total =
+      lighting_jobs_submitted_total().load(std::memory_order_relaxed);
+  snapshot.jobs_completed_total =
+      lighting_jobs_completed_total().load(std::memory_order_relaxed);
+  snapshot.jobs_continued_total =
+      lighting_jobs_continued_total().load(std::memory_order_relaxed);
+  snapshot.nodes_processed_total =
+      lighting_nodes_processed_total().load(std::memory_order_relaxed);
+  snapshot.add_nodes_processed_total =
+      lighting_add_nodes_processed_total().load(std::memory_order_relaxed);
+  snapshot.remove_nodes_processed_total =
+      lighting_remove_nodes_processed_total().load(std::memory_order_relaxed);
+  snapshot.boundary_deferrals_total =
+      lighting_boundary_deferrals_total().load(std::memory_order_relaxed);
+  snapshot.sections_touched_total =
+      lighting_sections_touched_total().load(std::memory_order_relaxed);
+  snapshot.sections_published_total =
+      lighting_sections_published_total().load(std::memory_order_relaxed);
+  snapshot.remeshes_triggered_total =
+      lighting_remeshes_triggered_total().load(std::memory_order_relaxed);
+  snapshot.max_queue_depth =
+      lighting_max_queue_depth().load(std::memory_order_relaxed);
+#endif
+  return snapshot;
+}
+
 void reset_global_timing_stats() noexcept {
 #if ARVANE_ENABLE_PROFILING
   for (AtomicTimingHistogram& histogram : global_timing_histograms()) {
@@ -618,6 +762,17 @@ void reset_global_timing_stats() noexcept {
   snapshots_reused_total().store(0U, std::memory_order_relaxed);
   snapshot_copies_total().store(0U, std::memory_order_relaxed);
   snapshot_bytes_copied_total().store(0U, std::memory_order_relaxed);
+  lighting_jobs_submitted_total().store(0U, std::memory_order_relaxed);
+  lighting_jobs_completed_total().store(0U, std::memory_order_relaxed);
+  lighting_jobs_continued_total().store(0U, std::memory_order_relaxed);
+  lighting_nodes_processed_total().store(0U, std::memory_order_relaxed);
+  lighting_add_nodes_processed_total().store(0U, std::memory_order_relaxed);
+  lighting_remove_nodes_processed_total().store(0U, std::memory_order_relaxed);
+  lighting_boundary_deferrals_total().store(0U, std::memory_order_relaxed);
+  lighting_sections_touched_total().store(0U, std::memory_order_relaxed);
+  lighting_sections_published_total().store(0U, std::memory_order_relaxed);
+  lighting_remeshes_triggered_total().store(0U, std::memory_order_relaxed);
+  lighting_max_queue_depth().store(0U, std::memory_order_relaxed);
 #endif
 }
 

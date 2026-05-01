@@ -1,5 +1,6 @@
 #include "arv/server/server_runtime.hpp"
 
+#include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
 #include "arv/physics/collision.hpp"
@@ -349,6 +350,13 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
       0,
       max_view_distance);
   chunk_generation_ = start_info.chunk_generation;
+  if (chunk_generation_.has_value() && chunk_generation_->enabled) {
+    default_world_.set_generation_context(
+        chunk_generation_->seed,
+        chunk_generation_->config);
+  } else {
+    default_world_.clear_generation_context();
+  }
   max_pending_generation_jobs_ =
       std::max<u32>(start_info.max_pending_generation_jobs, 1U);
   max_generation_results_per_tick_ =
@@ -973,6 +981,7 @@ void ServerRuntime::schedule_lighting_jobs() {
   }
 
   const voxel::BlockRegistry* registry = block_registry_;
+  core::record_lighting_job_submitted();
   auto job = world_jobs_->submit("server_world_lighting", [snapshot = std::move(snapshot), registry] {
     return world::WorldRuntime::build_lighting_result(snapshot, *registry);
   });

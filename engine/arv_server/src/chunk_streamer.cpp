@@ -193,6 +193,7 @@ bool ServerChunkStreamer::mark_sent_block_version(
     return false;
   }
   sent->second.block_version = block_version;
+  sent->second.lighting_valid_sent = false;
   return true;
 }
 
@@ -277,8 +278,10 @@ void ServerChunkStreamer::queue_dirty_sent_chunks(
     if (chunk == nullptr) {
       continue;
     }
+    const bool lighting_current = !chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting);
     if (snapshot->source_version != sent_version.block_version ||
-        chunk->light_data_version() != sent_version.light_version) {
+        chunk->light_data_version() != sent_version.light_version ||
+        (lighting_current && !sent_version.lighting_valid_sent)) {
       state.pending_chunks.insert(coord);
     }
   }
@@ -363,15 +366,11 @@ void ServerChunkStreamer::queue_chunk_sends(
     data.chunk_version = snapshot->source_version;
     data.chunk_content_version = snapshot->source_content_version;
     data.chunk_light_version = source_chunk->light_data_version();
-    data.has_lighting =
-        !source_chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting);
+    data.has_lighting = true;
+    data.lighting_valid = !source_chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting);
     data.has_fluids = has_any_fluid(*source_chunk);
     data.blocks = snapshot->blocks();
-    if (data.has_lighting) {
-      data.lights = snapshot->lights();
-    } else {
-      data.lights.fill(voxel::NoLight);
-    }
+    data.lights = snapshot->lights();
     if (data.has_fluids) {
       data.fluids = snapshot->fluids();
     } else {
@@ -383,7 +382,10 @@ void ServerChunkStreamer::queue_chunk_sends(
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::MessageType::ChunkData,
         protocol::serialize_chunk_data(data));
-    state.sent_chunk_versions[coord] = {snapshot->source_version, source_chunk->light_data_version()};
+    state.sent_chunk_versions[coord] = {
+        snapshot->source_version,
+        source_chunk->light_data_version(),
+        data.lighting_valid};
     state.pending_chunks.erase(coord);
     ++sent;
   }

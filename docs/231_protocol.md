@@ -431,12 +431,15 @@ ChunkData
     u64 chunk_content_version;  // mesh-relevant content/boundary version
     u64 chunk_light_version;    // serialized section light-buffer version
     bool has_lighting;
+    bool lighting_valid;
     BlockStateID blocks[4096];
     LightWord lighting[4096] if has_lighting;
 }
 ```
 
 `chunk_light_version` describes the section's own light buffer. It does not advance for dependency-only neighbor `LightMesh` invalidations; those are derived by the receiver when changed boundary light data arrives.
+
+`has_lighting` describes whether a light buffer is present in the payload. `lighting_valid` describes whether that buffer is current authoritative lighting. A dirty-light chunk may still include its previous light buffer with `has_lighting=true` and `lighting_valid=false` so clients can mesh with old lighting instead of inventing full sky or full darkness. When the relight finishes, the server must send a later payload with `lighting_valid=true`, even if the numeric light values did not change.
 
 Chunk payload may contain:
 
@@ -454,7 +457,7 @@ The client must discard chunk data if:
 * the block/geometry version and light version are older than already-applied data
 * registry compatibility is missing
 
-Lighting data is server-authoritative. Clients may render and remesh from received lighting, including temporary placeholder/stale lighting, but must not generate authoritative light propagation.
+Lighting data is server-authoritative. Clients may render and remesh from received lighting, including temporary placeholder/stale lighting, but must not generate authoritative light propagation. If a chunk payload has `has_lighting=false`, the receiver preserves any existing light buffer for that section; only a brand-new section without prior lighting uses a conservative dark placeholder until a later light payload arrives.
 
 ### Chunk Unload
 

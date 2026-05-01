@@ -65,6 +65,7 @@ private:
   struct SentChunkVersions {
     u64 block_version{};
     u64 light_version{};
+    bool lighting_valid_sent{};
   };
 
   struct PlayerChunkStreamState {

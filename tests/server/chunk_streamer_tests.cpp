@@ -85,9 +85,11 @@ TEST(ServerChunkStreamerTests, LightDependencyVersionDoesNotResendUnchangedNeigh
 
   std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights = lit_chunk.lights();
   lights[arv::voxel::local_index({{0, 4, 5}})] = arv::voxel::pack_light(7, 6, 5, 4);
+  const arv::u8 negative_x_boundary =
+      static_cast<arv::u8>(1U << arv::voxel::face_index(arv::voxel::BlockFace::NegativeX));
   arv::world::LightingResult result;
   result.world_id = world.id();
-  result.chunks.push_back({{{1, 0, 0}}, lit_chunk.block_version(), lights});
+  result.chunks.push_back({{{1, 0, 0}}, lit_chunk.block_version(), lights, 0U, negative_x_boundary});
   const arv::world::LightingPublishStats stats = world.publish_lighting_result(std::move(result));
   ASSERT_EQ(stats.changed_chunks, 1U);
   ASSERT_TRUE(target.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
@@ -98,6 +100,109 @@ TEST(ServerChunkStreamerTests, LightDependencyVersionDoesNotResendUnchangedNeigh
   const auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
   ASSERT_TRUE(data);
   EXPECT_EQ(data.value().coord, (arv::ChunkCoord{{1, 0, 0}}));
+}
+
+TEST(ServerChunkStreamerTests, SendsLightingWhenPreviouslyDeferredLightingBecomesValid) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(chunk.set_light({{4, 5, 6}}, arv::voxel::pack_light(1, 2, 3, 4)));
+  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({
+      .max_view_distance = 0,
+      .unload_margin = 1,
+      .max_chunks_sent_per_player_tick = 8,
+      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.client_view_distance = 0;
+
+  std::vector<arv::server::QueuedChunkStreamMessage> messages;
+  streamer.update_player_interest(session, {{0, 0, 0}}, interest);
+  streamer.tick_streaming_budget(world, messages);
+  ASSERT_EQ(messages.size(), 1U);
+  auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  ASSERT_TRUE(data);
+  EXPECT_TRUE(data.value().has_lighting);
+  EXPECT_FALSE(data.value().lighting_valid);
+  EXPECT_EQ(
+      data.value().lights[arv::voxel::local_index({{4, 5, 6}})],
+      arv::voxel::pack_light(1, 2, 3, 4));
+  messages.clear();
+
+  arv::world::LightingResult result;
+  result.world_id = world.id();
+  result.chunks.push_back(
+      {{{0, 0, 0}}, chunk.block_version(), chunk.lights(), chunk.content_version(), 0U});
+  const arv::world::LightingPublishStats stats =
+      world.publish_lighting_result(std::move(result));
+  ASSERT_EQ(stats.accepted_chunks, 1U);
+  ASSERT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+
+  streamer.tick_streaming_budget(world, messages);
+  ASSERT_EQ(messages.size(), 1U);
+  data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  ASSERT_TRUE(data);
+  EXPECT_TRUE(data.value().has_lighting);
+  EXPECT_TRUE(data.value().lighting_valid);
+}
+
+TEST(ServerChunkStreamerTests, BlockUpdateAcknowledgementStillRequiresValidLightingConfirmation) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({
+      .max_view_distance = 0,
+      .unload_margin = 1,
+      .max_chunks_sent_per_player_tick = 8,
+      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.client_view_distance = 0;
+
+  std::vector<arv::server::QueuedChunkStreamMessage> messages;
+  streamer.update_player_interest(session, {{0, 0, 0}}, interest);
+  streamer.tick_streaming_budget(world, messages);
+  ASSERT_EQ(messages.size(), 1U);
+  messages.clear();
+
+  ASSERT_TRUE(world.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{7}));
+  ASSERT_TRUE(streamer.mark_sent_block_version(
+      session.session_id,
+      session.world_id,
+      {{0, 0, 0}},
+      chunk.block_version()));
+
+  arv::world::LightingResult result;
+  result.world_id = world.id();
+  result.chunks.push_back(
+      {{{0, 0, 0}}, chunk.block_version(), chunk.lights(), chunk.content_version(), 0U});
+  const arv::world::LightingPublishStats stats =
+      world.publish_lighting_result(std::move(result));
+  ASSERT_EQ(stats.accepted_chunks, 1U);
+
+  streamer.tick_streaming_budget(world, messages);
+  ASSERT_EQ(messages.size(), 1U);
+  const auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  ASSERT_TRUE(data);
+  EXPECT_TRUE(data.value().has_lighting);
+  EXPECT_TRUE(data.value().lighting_valid);
 }
 
 TEST(ServerChunkStreamerTests, MissingChunkQueuesGenerationRequestWithoutSynchronousSend) {

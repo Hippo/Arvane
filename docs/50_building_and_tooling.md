@@ -248,6 +248,8 @@ Chunk workload counters should distinguish loaded chunks, active/simulated chunk
 
 Queue pressure counters should report current queued jobs, rolling peak queued jobs, submitted/completed jobs for the frame, active workers, and idle workers or idle percentage. These counters are separate from queue latency timing: latency shows how long a job waited before starting, while pressure shows whether the queue is keeping up.
 
+Lighting profiling should make tail spikes obvious. Track lighting jobs submitted/completed/continued, processed nodes, add/remove nodes, boundary deferrals, sections touched/published, lighting-triggered remeshes, max queue depth, p50/p95/p99 job timing, and worst-event context. A lighting job over roughly 2 ms, repeated continuations for the same section, repeated missing-neighbor deferrals, or a lighting backlog that grows for multiple frames should be treated as a debugging signal.
+
 ---
 
 ## Assertions and Logging

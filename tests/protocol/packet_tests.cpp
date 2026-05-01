@@ -188,6 +188,7 @@ TEST(ProtocolTests, ChunkDataRoundTripsThroughSerialization) {
   data.chunk_content_version = 9;
   data.chunk_light_version = 14;
   data.has_lighting = true;
+  data.lighting_valid = true;
   data.has_fluids = true;
   data.blocks.fill(arv::voxel::AirBlockVariantID);
   data.lights.fill(arv::voxel::NoLight);
@@ -207,6 +208,7 @@ TEST(ProtocolTests, ChunkDataRoundTripsThroughSerialization) {
   EXPECT_EQ(decoded.value().chunk_content_version, 9U);
   EXPECT_EQ(decoded.value().chunk_light_version, 14U);
   EXPECT_TRUE(decoded.value().has_lighting);
+  EXPECT_TRUE(decoded.value().lighting_valid);
   EXPECT_TRUE(decoded.value().has_fluids);
   EXPECT_EQ(
       decoded.value().blocks[arv::voxel::local_index({{1, 2, 3}})],

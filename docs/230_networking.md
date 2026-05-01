@@ -355,6 +355,8 @@ If the server sends a chunk snapshot, later block updates must either:
 
 Chunk lighting changes are authoritative server/world updates. They may be streamed as part of a newer section snapshot or a future light-delta message. Clients may remesh received sections using that data, but they do not decide lighting propagation.
 
+Because server lighting is section-oriented and asynchronous, a streamed chunk may contain the best currently published lighting rather than final lighting for all pending continuations. Later authoritative section snapshots or future light deltas are allowed to refine visible lighting. Clients must treat those updates as remesh triggers, not as permission to run authoritative propagation locally.
+
 ---
 
 ## Chunk Data Messages

@@ -401,6 +401,79 @@ TEST(ChunkMeshingTests, MeshVerticesUseExposedNeighborLighting) {
   EXPECT_EQ(arv::render::unpack_chunk_sky_light(top_face_vertex->light_face_material_hints), 6U);
 }
 
+TEST(ChunkMeshingTests, MeshVerticesAverageFaceSideAndCornerLighting) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_light({{1, 2, 1}}, arv::voxel::pack_light(8, 8, 8, 8)));
+  ASSERT_TRUE(chunk.set_light({{0, 2, 1}}, arv::voxel::pack_light(4, 0, 0, 4)));
+  ASSERT_TRUE(chunk.set_light({{1, 2, 2}}, arv::voxel::pack_light(0, 6, 0, 6)));
+  ASSERT_TRUE(chunk.set_light({{0, 2, 2}}, arv::voxel::pack_light(0, 0, 2, 2)));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {0, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(arv::render::unpack_chunk_block_light_r(vertex->light_face_material_hints), 3U);
+  EXPECT_EQ(arv::render::unpack_chunk_block_light_g(vertex->light_face_material_hints), 3U);
+  EXPECT_EQ(arv::render::unpack_chunk_block_light_b(vertex->light_face_material_hints), 2U);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 5U);
+}
+
+TEST(ChunkMeshingTests, MeshVerticesIgnoreZeroSmoothLightSamplesInDivisor) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+  ASSERT_TRUE(chunk.set_light({{1, 2, 1}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 8)));
+  ASSERT_TRUE(chunk.set_light({{1, 2, 2}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 4)));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {0, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 6U);
+}
+
+TEST(ChunkMeshingTests, PartialHeightFluidSmoothLightingDoesNotOffsetVerticalSamples) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_fluid({{1, 1, 1}}, arv::voxel::make_fluid_source(water)));
+  ASSERT_TRUE(chunk.set_light({{1, 2, 1}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 8)));
+  ASSERT_TRUE(chunk.set_light({{0, 1, 1}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 4)));
+  ASSERT_TRUE(chunk.set_light({{1, 1, 2}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 6)));
+  ASSERT_TRUE(chunk.set_light({{0, 1, 2}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 2)));
+  ASSERT_TRUE(chunk.set_light({{0, 2, 1}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 15)));
+  ASSERT_TRUE(chunk.set_light({{1, 2, 2}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 15)));
+  ASSERT_TRUE(chunk.set_light({{0, 2, 2}}, arv::voxel::with_sky_light(arv::voxel::NoLight, 15)));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.transparent,
+      {{1, 1, 1}},
+      {0, 14, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 5U);
+}
+
 TEST(ChunkMeshingTests, WorkerMeshResultUsesSnapshotVersionAndStaleResultsAreRejected) {
   const arv::voxel::BlockRegistry registry = make_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();

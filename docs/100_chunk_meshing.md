@@ -74,6 +74,8 @@ The meshing unit must have access to:
 
 Meshing must not wait for lighting propagation to finish. A section should remesh immediately from the best currently available light data. If that light data is stale, the mesh may be shown temporarily and replaced by a light-only remesh after authoritative lighting updates publish.
 
+The current lighting pipeline reinforces this rule by solving one lighting section per worker job. Cross-section lighting appears through later continuation jobs, so the first geometry mesh should be produced from the current published light data and refined by queued `LightMesh` remeshes as lighting converges.
+
 ---
 
 ## Mesh Categories
@@ -572,14 +574,13 @@ Lighting is separate from AO.
 
 The mesher must sample lighting data from the provided lighting snapshot and bake the needed light values into vertices.
 
-Lighting policy may include:
+Arvane uses per-vertex smooth lighting. Each emitted vertex starts with the light from the exposed face neighbor, then samples the two side cells and the diagonal corner cell around that vertex. Sky and RGB block-light channels are averaged independently.
 
-- per-face light
-- per-vertex light
-- packed sky/block light
-- smoothed corner sampling
+`NoLight` samples contribute zero channel values but do not increase the divisor. This keeps missing or truly dark samples from washing out valid nearby light.
 
-The exact interpolation strategy belongs to the rendering/lighting design, but the meshing system must use only snapshot-provided lighting inputs and must not query live world state.
+For custom-height model parts, the vertical side/corner sample offset is applied only when the emitted vertex reaches `y = 0` or `y = 16`. Partial-height surfaces, such as fluid tops, sample side/corner light from their own layer instead of jumping to the full block above or below.
+
+The meshing system must use only snapshot-provided lighting inputs and must not query live world state.
 
 ---
 
@@ -664,6 +665,14 @@ If lighting data used by the mesher changes for a section, that section must be 
 If the lighting change affects border samples used by a neighbor, that neighbor must also be marked `LightMesh`.
 
 Received light snapshots are compared before invalidation. Interior light-only changes remesh only the owning section; boundary light-only changes remesh only face neighbors that sample the changed boundary light. They must not be promoted into geometry dirtiness.
+
+Lighting publication follows this flow:
+
+1. validate the lighting result against the target section's source versions
+2. replace the target section light array only if values changed
+3. enqueue a light-only remesh for the target section
+4. if changed values touch a boundary face, mark the face neighbor `Lighting` for continuation and `LightMesh` for a later remesh
+5. never block meshing on the continuation job
 
 ---
 
@@ -891,7 +900,7 @@ At minimum this means:
 * a current or stale lighting snapshot exists
 * required neighbor boundaries are obtainable under current policy
 
-Readiness must not require pending authoritative lighting propagation to finish. Meshing should use the best published light data currently available.
+Readiness must not require pending authoritative lighting propagation to finish. Meshing should use the best published light data currently available. If an update arrives before authoritative lighting is current, use the included stale light buffer or preserve the previous light buffer for that section; do not substitute full skylight before the later light-only remesh.
 
 If neighbor availability is a hard requirement, the chunk remains dirty but unscheduled until the inputs are ready.
 

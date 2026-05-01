@@ -1160,7 +1160,7 @@ World update loop:
 
 * gathers dirty chunks
 * schedules section mesh tasks for `Geometry` and `LightMesh`
-* schedules section-local lighting tasks for `Lighting`
+* schedules one-section lighting tasks for `Lighting`
 * processes results
 
 `Geometry` means block shape, opacity, model, texture, fluid geometry, or boundary geometry input changed.
@@ -1168,6 +1168,8 @@ World update loop:
 `Lighting` means authoritative lighting propagation/update work is required.
 
 `LightMesh` means lighting changed and vertex lighting should be remeshed, without implying block geometry changed.
+
+Lighting jobs are intentionally bounded. A lighting snapshot targets one dirty section and includes currently loaded face neighbors as immutable boundary inputs. Dirty face neighbors are skipped as seeds because their light buffers may still contain stale pre-repair values. For generated-world skylight, the snapshot may also include loaded sections in the same chunk column from the target upward toward the generated surface section; these are read-only context used to decide whether sunlight can reach the target top. If publication changes a boundary, the world marks the face neighbor `Lighting` so propagation continues in a later worker job. Dirty sections in a column are selected top-down so surface skylight repairs feed lower continuations. Missing neighbors are recorded as deferred boundary work; they are not loaded synchronously. Missing-above skylight is represented explicitly per column so unloaded upper terrain does not turn underground edits into open-sky columns.
 
 ---
 

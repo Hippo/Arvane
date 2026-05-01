@@ -28,6 +28,7 @@ struct ChunkData {
   u64 chunk_content_version{};
   u64 chunk_light_version{};
   bool has_lighting{};
+  bool lighting_valid{};
   bool has_fluids{};
   std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks{};
   std::array<voxel::LightWord, voxel::ChunkVolume> lights{};

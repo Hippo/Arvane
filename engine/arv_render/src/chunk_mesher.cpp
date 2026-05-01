@@ -116,12 +116,13 @@ void emit_quad(
     const std::array<u8, 6>& indices,
     const std::array<u8, 6>& flipped_indices,
     std::array<Vec2i, 4> uvs,
-    voxel::LightWord light,
+    std::array<voxel::LightWord, 4> lights,
     std::array<u8, 4> ao,
     VertexMaterialHints material_hints) {
   const u32 base_index = static_cast<u32>(chunk_vertex_count(output));
 
   for (usize index = 0; index < corners.size(); ++index) {
+    const voxel::LightWord light = lights[index];
     append_chunk_vertex(output, make_chunk_vertex(
                                     local,
                                     corners[index],
@@ -149,7 +150,7 @@ void emit_cube_face(
     SectionLocalPos local,
     const ChunkFaceGeometry& face,
     std::array<Vec2i, 4> uvs,
-    voxel::LightWord light,
+    std::array<voxel::LightWord, 4> lights,
     std::array<u8, 4> ao,
     VertexMaterialHints material_hints) {
   emit_quad(
@@ -160,7 +161,7 @@ void emit_cube_face(
       face.indices,
       face.flipped_indices,
       uvs,
-      light,
+      lights,
       ao,
       material_hints);
 }
@@ -209,6 +210,99 @@ void emit_cube_face(
   }
 
   return {{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}};
+}
+
+[[nodiscard]] i32 horizontal_model_light_offset(i32 value) noexcept {
+  return value == 0 ? -1 : 1;
+}
+
+[[nodiscard]] i32 vertical_model_light_offset(i32 value) noexcept {
+  if (value == 0) {
+    return -1;
+  }
+  if (value == 16) {
+    return 1;
+  }
+  return 0;
+}
+
+[[nodiscard]] std::array<Vec3i, 3> corner_light_offsets(
+    const ChunkFaceGeometry& face,
+    Vec3i corner) noexcept {
+  const i32 x_offset = horizontal_model_light_offset(corner.x);
+  const i32 y_offset = vertical_model_light_offset(corner.y);
+  const i32 z_offset = horizontal_model_light_offset(corner.z);
+
+  switch (face.face) {
+    case voxel::BlockFace::PositiveX:
+    case voxel::BlockFace::NegativeX:
+      return {{
+          {face.neighbor_offset.x, y_offset, 0},
+          {face.neighbor_offset.x, 0, z_offset},
+          {face.neighbor_offset.x, y_offset, z_offset},
+      }};
+    case voxel::BlockFace::PositiveY:
+    case voxel::BlockFace::NegativeY:
+      return {{
+          {x_offset, y_offset, 0},
+          {0, y_offset, z_offset},
+          {x_offset, y_offset, z_offset},
+      }};
+    case voxel::BlockFace::PositiveZ:
+    case voxel::BlockFace::NegativeZ:
+      return {{
+          {x_offset, 0, face.neighbor_offset.z},
+          {0, y_offset, face.neighbor_offset.z},
+          {x_offset, y_offset, face.neighbor_offset.z},
+      }};
+  }
+
+  return {{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}};
+}
+
+[[nodiscard]] voxel::LightWord average_corner_light(
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
+    SectionLocalPos local,
+    const ChunkFaceGeometry& face,
+    Vec3i corner,
+    voxel::LightWord face_light) noexcept {
+  u32 r = voxel::light_r(face_light);
+  u32 g = voxel::light_g(face_light);
+  u32 b = voxel::light_b(face_light);
+  u32 sky = voxel::light_sky(face_light);
+  u32 count = 1U;
+
+  for (const Vec3i offset : corner_light_offsets(face, corner)) {
+    const voxel::LightWord sample =
+        voxel::snapshot_light(snapshot, offset_local(local, offset));
+    r += voxel::light_r(sample);
+    g += voxel::light_g(sample);
+    b += voxel::light_b(sample);
+    sky += voxel::light_sky(sample);
+    if (sample != voxel::NoLight) {
+      ++count;
+    }
+  }
+
+  return voxel::pack_light(
+      static_cast<u8>(r / count),
+      static_cast<u8>(g / count),
+      static_cast<u8>(b / count),
+      static_cast<u8>(sky / count));
+}
+
+[[nodiscard]] std::array<voxel::LightWord, 4> smooth_face_lights(
+    const voxel::ChunkSnapshotStoragePointers& snapshot,
+    SectionLocalPos local,
+    const ChunkFaceGeometry& face,
+    const std::array<Vec3i, 4>& corners,
+    voxel::LightWord face_light) noexcept {
+  return {{
+      average_corner_light(snapshot, local, face, corners[0], face_light),
+      average_corner_light(snapshot, local, face, corners[1], face_light),
+      average_corner_light(snapshot, local, face, corners[2], face_light),
+      average_corner_light(snapshot, local, face, corners[3], face_light),
+  }};
 }
 
 [[nodiscard]] u8 corner_ao(
@@ -426,15 +520,17 @@ void emit_fluid_cell(
   if (!same_fluid_type(fluid, voxel::snapshot_fluid(snapshot, above)) &&
       !block_occludes_fluid_face(snapshot, registry, above, voxel::BlockFace::PositiveY)) {
     const ChunkFaceGeometry& top_face = face_geometry(voxel::BlockFace::PositiveY);
+    const std::array<Vec3i, 4> top_corners = fluid_top_corners(snapshot, local, fluid);
+    const voxel::LightWord face_light = voxel::snapshot_light(snapshot, above);
     emit_quad(
         output,
         local,
         voxel::BlockFace::PositiveY,
-        fluid_top_corners(snapshot, local, fluid),
+        top_corners,
         top_face.indices,
         top_face.flipped_indices,
         face_uvs_for(water_variant, voxel::BlockFace::PositiveY, render_data),
-        voxel::snapshot_light(snapshot, above),
+        smooth_face_lights(snapshot, local, top_face, top_corners, face_light),
         FluidAo,
         water_material_hints(fluid, voxel::BlockFace::PositiveY));
   }
@@ -446,15 +542,17 @@ void emit_fluid_cell(
         block_occludes_fluid_face(snapshot, registry, neighbor, face)) {
       continue;
     }
+    const std::array<Vec3i, 4> corners = fluid_side_corners(snapshot, local, fluid, face);
+    const voxel::LightWord face_light = voxel::snapshot_light(snapshot, neighbor);
     emit_quad(
         output,
         local,
         face,
-        fluid_side_corners(snapshot, local, fluid, face),
+        corners,
         geometry.indices,
         geometry.flipped_indices,
         face_uvs_for(water_variant, face, render_data),
-        voxel::snapshot_light(snapshot, neighbor),
+        smooth_face_lights(snapshot, local, geometry, corners, face_light),
         FluidAo,
         water_material_hints(fluid, face));
   }
@@ -463,6 +561,7 @@ void emit_fluid_cell(
   if (!same_fluid_type(fluid, voxel::snapshot_fluid(snapshot, below)) &&
       !block_occludes_fluid_face(snapshot, registry, below, voxel::BlockFace::NegativeY)) {
     const ChunkFaceGeometry& bottom_face = face_geometry(voxel::BlockFace::NegativeY);
+    const voxel::LightWord face_light = voxel::snapshot_light(snapshot, below);
     emit_quad(
         output,
         local,
@@ -471,7 +570,7 @@ void emit_fluid_cell(
         bottom_face.indices,
         bottom_face.flipped_indices,
         face_uvs_for(water_variant, voxel::BlockFace::NegativeY, render_data),
-        voxel::snapshot_light(snapshot, below),
+        smooth_face_lights(snapshot, local, bottom_face, bottom_face.corners, face_light),
         FluidAo,
         water_material_hints(fluid, voxel::BlockFace::NegativeY));
   }
@@ -555,12 +654,19 @@ ChunkMeshData build_chunk_mesh(
           const voxel::BlockVariantID neighbor_id =
               voxel::snapshot_block(snapshot_storage, neighbor_local);
           if (registry.should_emit_face(self_id, neighbor_id, face.face)) {
+            const voxel::LightWord face_light =
+                voxel::snapshot_light(snapshot_storage, neighbor_local);
             emit_cube_face(
                 output,
                 local,
                 face,
                 face_uvs_for(self_id, face.face, render_data),
-                voxel::snapshot_light(snapshot_storage, neighbor_local),
+                smooth_face_lights(
+                    snapshot_storage,
+                    local,
+                    face,
+                    face.corners,
+                    face_light),
                 face_ao(snapshot_storage, registry, local, face),
                 material_hints);
           }

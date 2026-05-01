@@ -810,7 +810,8 @@ int main(int argc, char** argv) {
               data.coord,
               std::move(data.blocks),
               std::move(lights),
-              std::move(data.fluids));
+              std::move(data.fluids),
+              data.has_lighting && data.lighting_valid);
           changed = true;
         }
 

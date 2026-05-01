@@ -177,7 +177,8 @@ void WorldRuntime::apply_chunk_snapshot(
     ChunkCoord coord,
     std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
     std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights,
-    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids) noexcept {
+    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids,
+    bool lighting_authoritative) noexcept {
   const voxel::ChunkSection* existing_chunk = find_chunk(coord);
   const bool first_mesh =
       existing_chunk == nullptr || existing_chunk->mesh_built_from_block_version() == 0U;
@@ -191,12 +192,15 @@ void WorldRuntime::apply_chunk_snapshot(
   bool blocks_changed = existing_chunk == nullptr;
   bool lights_changed = existing_chunk == nullptr;
   bool fluids_changed = fluids.has_value() && existing_chunk == nullptr;
+  const bool has_lighting_payload = lights.has_value();
 
   std::array<voxel::LightWord, voxel::ChunkVolume> resolved_lights;
-  if (lights.has_value()) {
+  if (has_lighting_payload) {
     resolved_lights = std::move(lights.value());
+  } else if (existing_chunk != nullptr) {
+    resolved_lights = existing_chunk->lights();
   } else {
-    resolved_lights.fill(voxel::pack_light(0, 0, 0, voxel::MaxLightLevel));
+    resolved_lights.fill(voxel::NoLight);
   }
 
   if (existing_chunk != nullptr) {
@@ -230,6 +234,11 @@ void WorldRuntime::apply_chunk_snapshot(
       std::move(blocks),
       std::move(resolved_lights),
       std::move(fluids));
+  if (has_lighting_payload && lighting_authoritative) {
+    chunk.clear_dirty(voxel::ChunkDirtyFlags::Lighting);
+  } else {
+    chunk.mark_dirty(voxel::ChunkDirtyFlags::Lighting);
+  }
 
   if (needs_first_mesh_dirty || blocks_changed || lights_changed || fluids_changed) {
     mark_mesh_content_dirty();
@@ -339,6 +348,16 @@ u64 WorldRuntime::lighting_revision() const noexcept {
 
 u64 WorldRuntime::mesh_revision() const noexcept {
   return mesh_revision_;
+}
+
+void WorldRuntime::set_generation_context(u64 seed, WorldGenerationConfig config) {
+  generation_seed_ = seed;
+  generation_config_ = std::move(config);
+}
+
+void WorldRuntime::clear_generation_context() noexcept {
+  generation_config_.reset();
+  generation_seed_ = 0U;
 }
 
 void WorldRuntime::set_tick_policy(WorldTickPolicy policy) noexcept {
@@ -1047,7 +1066,7 @@ bool WorldRuntime::has_lighting_work() const noexcept {
 LightingSnapshot WorldRuntime::make_lighting_snapshot() const {
   ARV_PROFILE_ZONE("Snapshot creation");
   LightingSnapshot snapshot = WorldLighting::make_snapshot(*this);
-  last_lighting_snapshot_chunk_count_ = snapshot.chunks.size();
+  last_lighting_snapshot_chunk_count_ = snapshot.pending_dirty_sections;
   return snapshot;
 }
 
@@ -1059,7 +1078,7 @@ LightingResult WorldRuntime::build_lighting_result(
 
 LightingPublishStats WorldRuntime::publish_lighting_result(LightingResult result) noexcept {
   const LightingPublishStats stats = WorldLighting::publish_result(*this, std::move(result));
-  if (stats.changed_chunks > 0U) {
+  if (stats.changed_chunks > 0U || stats.remeshes_triggered > 0U) {
     mark_mesh_content_dirty();
   }
   recompute_lighting_work_pending();

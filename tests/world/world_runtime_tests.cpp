@@ -196,18 +196,21 @@ TEST(WorldRuntimeTests, LightingPublicationInvalidatesDirectNeighborMeshesWhenBo
 
   std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights = lit_chunk.lights();
   lights[arv::voxel::local_index({{0, 4, 5}})] = arv::voxel::pack_light(7, 6, 5, 4);
+  const arv::u8 negative_x_boundary =
+      static_cast<arv::u8>(1U << arv::voxel::face_index(arv::voxel::BlockFace::NegativeX));
 
   arv::world::LightingResult result;
   result.world_id = arv::WorldID{1};
-  result.chunks.push_back({{{1, 0, 0}}, lit_chunk.version(), lights});
+  result.chunks.push_back({{{1, 0, 0}}, lit_chunk.version(), lights, 0U, negative_x_boundary});
 
   const arv::world::LightingPublishStats stats = world.publish_lighting_result(std::move(result));
 
   EXPECT_EQ(stats.accepted_chunks, 1U);
   EXPECT_EQ(stats.changed_chunks, 1U);
+  EXPECT_EQ(stats.boundary_continuations, 1U);
   EXPECT_TRUE(lit_chunk.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
   EXPECT_TRUE(target.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
-  EXPECT_FALSE(target.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_TRUE(target.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
   EXPECT_EQ(target.light_version(), target_light_version + 1);
 }
 
@@ -346,10 +349,10 @@ TEST(WorldRuntimeTests, ApplyingChunkSnapshotWithoutLightingKeepsChunkMeshable) 
   const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
   ASSERT_NE(chunk, nullptr);
   EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
-  EXPECT_FALSE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
   EXPECT_EQ(
       arv::voxel::light_sky(chunk->light({{1, 2, 3}})),
-      arv::voxel::MaxLightLevel);
+      0);
   const auto snapshot = world.make_meshing_snapshot(
       {{0, 0, 0}},
       arv::world::MissingNeighborPolicy::TreatMissingAsAir);
@@ -357,6 +360,65 @@ TEST(WorldRuntimeTests, ApplyingChunkSnapshotWithoutLightingKeepsChunkMeshable) 
   EXPECT_EQ(
       snapshot->blocks()[arv::voxel::local_index({{1, 2, 3}})],
       (arv::voxel::BlockVariantID{7}));
+}
+
+TEST(WorldRuntimeTests, ApplyingChunkSnapshotWithoutLightingPreservesExistingLight) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks;
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights;
+  lights.fill(arv::voxel::NoLight);
+  lights[arv::voxel::local_index({{4, 5, 6}})] = arv::voxel::pack_light(1, 2, 3, 4);
+  world.apply_chunk_snapshot({{0, 0, 0}}, blocks, lights);
+
+  blocks[arv::voxel::local_index({{1, 2, 3}})] = arv::voxel::BlockVariantID{7};
+  world.apply_chunk_snapshot({{0, 0, 0}}, std::move(blocks), std::nullopt);
+
+  const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(chunk, nullptr);
+  EXPECT_EQ(chunk->light({{4, 5, 6}}), arv::voxel::pack_light(1, 2, 3, 4));
+  EXPECT_EQ(chunk->block({{1, 2, 3}}), (arv::voxel::BlockVariantID{7}));
+  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+}
+
+TEST(WorldRuntimeTests, ApplyingStaleLightingPayloadUsesValuesButKeepsLightingDirty) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks;
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights;
+  lights.fill(arv::voxel::NoLight);
+  lights[arv::voxel::local_index({{4, 5, 6}})] = arv::voxel::pack_light(1, 2, 3, 4);
+
+  world.apply_chunk_snapshot(
+      {{0, 0, 0}},
+      blocks,
+      lights,
+      std::nullopt,
+      false);
+
+  const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(chunk, nullptr);
+  EXPECT_EQ(chunk->light({{4, 5, 6}}), arv::voxel::pack_light(1, 2, 3, 4));
+  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+}
+
+TEST(WorldRuntimeTests, ApplyingAuthoritativeChunkSnapshotClearsLightingDirtyWhenLightValuesMatch) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks;
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights;
+  lights.fill(arv::voxel::NoLight);
+  lights[arv::voxel::local_index({{4, 5, 6}})] = arv::voxel::pack_light(1, 2, 3, 4);
+  world.apply_chunk_snapshot({{0, 0, 0}}, blocks, lights);
+
+  arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(chunk, nullptr);
+  chunk->mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+
+  world.apply_chunk_snapshot({{0, 0, 0}}, std::move(blocks), std::move(lights));
+
+  EXPECT_FALSE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+  EXPECT_EQ(chunk->light({{4, 5, 6}}), arv::voxel::pack_light(1, 2, 3, 4));
 }
 
 TEST(WorldRuntimeTests, ApplyingChunkSnapshotCarriesFluidCells) {

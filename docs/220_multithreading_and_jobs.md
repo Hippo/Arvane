@@ -202,6 +202,8 @@ The scheduler provides execution primitives.
 
 Ownership remains with the systems that submit and consume jobs.
 
+Lighting jobs are a bounded-job example. A lighting task solves one chunk section from immutable section and face-neighbor snapshots, records node/queue metrics, and returns a publishable result. If more lighting work remains, the world queues continuation sections instead of allowing the worker to expand into a whole-region flood fill. Simulation, render, and meshing code may enqueue or publish lighting work, but must not wait for propagation to finish.
+
 ---
 
 ## Job Graph Stages

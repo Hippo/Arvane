@@ -105,7 +105,8 @@ public:
       ChunkCoord coord,
       std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
       std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights,
-      std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids = std::nullopt) noexcept;
+      std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids = std::nullopt,
+      bool lighting_authoritative = true) noexcept;
   bool unload_chunk(ChunkCoord coord) noexcept;
   [[nodiscard]] voxel::ChunkSection* find_chunk(ChunkCoord coord) noexcept;
   [[nodiscard]] const voxel::ChunkSection* find_chunk(ChunkCoord coord) const noexcept;
@@ -116,6 +117,8 @@ public:
   void set_tick_index(TickIndex tick_index) noexcept;
   [[nodiscard]] u64 lighting_revision() const noexcept;
   [[nodiscard]] u64 mesh_revision() const noexcept;
+  void set_generation_context(u64 seed, WorldGenerationConfig config);
+  void clear_generation_context() noexcept;
   void set_tick_policy(WorldTickPolicy policy) noexcept;
   [[nodiscard]] WorldTickPolicy tick_policy() const noexcept;
   [[nodiscard]] bool is_chunk_active(ChunkCoord coord) const noexcept;
@@ -288,6 +291,8 @@ private:
   TickIndex tick_index_{};
   u64 lighting_revision_{1};
   u64 mesh_revision_{1};
+  std::optional<WorldGenerationConfig> generation_config_{};
+  u64 generation_seed_{};
   bool lighting_work_pending_{};
   std::array<usize, 9> lifecycle_counts_{};
   usize active_chunk_count_{};

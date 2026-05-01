@@ -34,7 +34,7 @@ Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
 }
 
 [[nodiscard]] constexpr usize chunk_data_wire_size(bool has_lighting, bool has_fluids) noexcept {
-  return sizeof(u32) + sizeof(i32) * 3U + sizeof(u64) * 3U + sizeof(u8) * 2U +
+  return sizeof(u32) + sizeof(i32) * 3U + sizeof(u64) * 3U + sizeof(u8) * 3U +
          voxel::ChunkVolume * sizeof(u32) +
          (has_lighting ? voxel::ChunkVolume * sizeof(voxel::LightWord) : 0U) +
          (has_fluids ? voxel::ChunkVolume * fluid_wire_size() : 0U);
@@ -103,6 +103,7 @@ std::vector<u8> serialize_chunk_data(const ChunkData& data) {
   writer.write<u64>(data.chunk_content_version);
   writer.write<u64>(data.chunk_light_version);
   writer.write_bool(data.has_lighting);
+  writer.write_bool(data.lighting_valid);
   writer.write_bool(data.has_fluids);
   for (const voxel::BlockVariantID block : data.blocks) {
     writer.write<u32>(block.value);
@@ -130,9 +131,10 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
   auto chunk_content_version = reader.read<u64>();
   auto chunk_light_version = reader.read<u64>();
   auto has_lighting = reader.read_bool();
+  auto lighting_valid = reader.read_bool();
   auto has_fluids = reader.read_bool();
   if (!world_id || !coord || !chunk_version || !chunk_content_version ||
-      !chunk_light_version || !has_lighting || !has_fluids) {
+      !chunk_light_version || !has_lighting || !lighting_valid || !has_fluids) {
     return Expected<ChunkData, ProtocolError>::failure(
         ProtocolError{"failed to decode chunk data header"});
   }
@@ -144,6 +146,7 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
   data.chunk_content_version = chunk_content_version.value();
   data.chunk_light_version = chunk_light_version.value();
   data.has_lighting = has_lighting.value();
+  data.lighting_valid = lighting_valid.value();
   data.has_fluids = has_fluids.value();
   data.blocks.fill(voxel::AirBlockVariantID);
   data.lights.fill(voxel::NoLight);

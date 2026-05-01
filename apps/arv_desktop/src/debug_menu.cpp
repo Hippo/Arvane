@@ -1116,6 +1116,56 @@ void render_snapshot_costs(const DebugMenuState& state) {
   }
 }
 
+void render_lighting_profile() {
+  const core::LightingStatsSnapshot lighting = core::global_lighting_stats_snapshot();
+  ImGui::SeparatorText("Lighting Jobs");
+  if (ImGui::BeginTable(
+          "LightingProfile",
+          2,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Counter");
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 150.0F);
+    ImGui::TableHeadersRow();
+    auto row_u32 = [](const char* label, u32 value, bool warn = false) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      render_u32_cell(value, warn, warn && value > 8192U);
+    };
+    auto row_u64 = [](const char* label, u64 value, bool warn = false) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      if (warn && value > 0U) {
+        ImGui::TextColored(
+            ImVec4{1.0F, 0.78F, 0.28F, 1.0F},
+            "%llu",
+            static_cast<unsigned long long>(value));
+      } else {
+        ImGui::Text("%llu", static_cast<unsigned long long>(value));
+      }
+    };
+
+    row_u64("Jobs submitted", lighting.jobs_submitted_total);
+    row_u64("Jobs completed", lighting.jobs_completed_total);
+    row_u64("Jobs continued / rescheduled", lighting.jobs_continued_total, true);
+    row_u64("Nodes processed", lighting.nodes_processed_total);
+    row_u64("Add nodes processed", lighting.add_nodes_processed_total);
+    row_u64("Remove nodes processed", lighting.remove_nodes_processed_total);
+    row_u64("Boundary deferrals", lighting.boundary_deferrals_total, true);
+    row_u64("Sections touched", lighting.sections_touched_total);
+    row_u64("Sections published", lighting.sections_published_total);
+    row_u64("Lighting remeshes triggered", lighting.remeshes_triggered_total);
+    row_u32(
+        "Max queue depth",
+        lighting.max_queue_depth,
+        lighting.max_queue_depth > world::DefaultLightingWorkBudgetNodes);
+    ImGui::EndTable();
+  }
+}
+
 void render_gpu_render_metrics(const render::OpenGLRenderer& renderer) {
   ImGui::SeparatorText("GPU / Render Metrics");
   if (ImGui::BeginTable(
@@ -1305,6 +1355,7 @@ void render_profiling_tab(
   render_queue_pressure(state, world_jobs, server);
   render_chunk_workload(frame_info, server, renderer, chunk_view);
   render_snapshot_costs(state);
+  render_lighting_profile();
   render_gpu_render_metrics(renderer);
 
   ImGui::SeparatorText("Zone coverage");

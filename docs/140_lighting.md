@@ -337,6 +337,33 @@ Use queued lighting jobs:
 
 This matches the same general safety model used for meshing.
 
+### Current Section Job Model
+
+Arvane lighting jobs are bounded to one dirty 16 x 16 x 16 section at a time.
+
+Each job receives immutable storage handles for:
+
+* the target section
+* the six direct face-neighbor sections that are currently loaded
+
+The target section is rebuilt from scratch inside a job-local dense light buffer. Neighbor sections are read only as boundary seeds:
+
+* sky light from the section above can seed vertical columns without attenuation
+* if the section above is missing, open-sky seeding is allowed only from explicit per-column snapshot metadata
+* side and lower sky boundaries seed with normal one-step attenuation
+* RGB block light boundaries seed with one-step attenuation
+* local emissive blocks seed the add queue directly
+
+Dirty neighbor sections are not valid boundary seeds. Their light buffers may contain pre-repair values from an older lighting state, so the worker does not import arbitrary dirty-neighbor light. If the target section already had light on the shared boundary, the worker may preserve that target-owned boundary light as a temporary seed while the neighbor relights. This prevents an intermediate one-section solve from publishing an all-dark section just because a required boundary is still in flight; later boundary continuation still replaces the preserved value with authoritative light.
+
+For generated worlds, the server installs the world seed and generation config into the world runtime so snapshots can classify missing-above columns against terrain height. The snapshot also carries loaded column context from the target section up toward the generated surface section. A worker can therefore seed skylight by checking the actual loaded blocks from the surface down to the target top, instead of trusting stale light values from the immediate upper section. If the target section top is still below generated terrain and the surface-to-target path is blocked or unavailable, digging inside that section must not fabricate skylight just because the section above is not currently loaded. If no generation context exists, the fallback open-sky rule applies only to nonnegative vertical sections with no loaded section above.
+
+Dirty lighting sections in a column are selected top-down. Surface or upper-section skylight repairs should publish before lower continuation jobs consume that boundary, which keeps block breaks from flipping lower caves through stale upper light data.
+
+Workers publish at most the target section's light array. They do not mutate neighboring sections and they do not complete cross-section propagation inline. If a published result changes a boundary face, the world thread marks that face neighbor for lighting continuation and `LightMesh` remeshing. Missing neighbors are recorded as boundary deferrals; when those sections later load, normal load-neighbor dirtying repairs the boundary.
+
+This model intentionally turns large relights into multiple small jobs. The soft work budget is tracked per job; a section job that exceeds the configured node budget is suspicious and visible in profiling, while remaining dirty sections or changed boundaries are handled as continuation jobs.
+
 ---
 
 ## Asynchronous-Only Behavior
@@ -418,6 +445,8 @@ In practice, the relight job may begin from a seed set and expand until converge
 Whenever lighting changes are published, all touched chunk sections must increment `light_version` and be marked `LightMesh` dirty.
 
 A mesh must be rebuilt if any voxel affecting its visible faces had light changes.
+
+Lighting publication must only enqueue remesh work. It must not rebuild meshes inline and must not wait for continuation lighting jobs to drain.
 
 ---
 
@@ -527,6 +556,8 @@ So the required contract is:
 * border propagation must be reliable
 * stale or missing neighbor updates are not allowed to persist
 
+In the current implementation, a changed boundary face queues a face-neighbor section continuation. If the neighbor is unloaded, the event is counted as a boundary deferral rather than forcing a synchronous load.
+
 ---
 
 ## Chunk Load and Unload Interaction
@@ -561,8 +592,12 @@ Recommended rule:
 * unloaded chunks are not simulated
 * lighting at loaded chunk borders is only guaranteed correct relative to currently loaded authoritative neighborhood
 * when neighbors load, border lighting may be repaired
+* skylight from a missing `+Y` neighbor may be seeded only when the lighting snapshot marks that x/z column as sky-exposed
+* for generated terrain, loaded surface-to-target column sections may be used as read-only context to prove that sunlight can reach a lower section
 
 For active simulation/view regions, chunks relevant to lighting propagation should generally remain loaded long enough to avoid visible inconsistencies.
+
+In generated worlds, this sky-exposure metadata is derived from the configured terrain height and the loaded column blocks above the target. A lower, dug-out section beneath generated terrain remains dark if the surface path is blocked, and becomes sunlit when a loaded shaft is actually open from the surface section down.
 
 ---
 
@@ -578,12 +613,12 @@ Recommended pipeline:
 1. generate chunk blocks
 2. ensure required neighbors or border snapshots exist
 3. publish chunk blocks
-4. queue initial section meshing using current or placeholder light data
+4. queue initial section meshing using current, preserved, or conservative placeholder light data
 5. queue initial lighting solve asynchronously
 6. publish finalized lighting
 7. queue light-only remeshing for affected sections
 
-A chunk section may be meshed before its initial lighting solve has completed. Stale or placeholder lighting is temporarily acceptable; stale geometry is not.
+A chunk section may be meshed before its initial lighting solve has completed. Stale or placeholder lighting is temporarily acceptable; stale geometry is not. When a streamed chunk update is sent while authoritative lighting is still dirty, the server should include the previous light buffer as stale lighting where possible. Clients may mesh from that stale buffer and must treat it as non-final until a later valid-light payload arrives. They should not replace missing lighting with full skylight.
 
 ---
 
@@ -724,6 +759,19 @@ The engine should support debug views for at least:
 * lighting dirty regions / queued jobs
 
 These tools are strongly recommended during development.
+
+The profiling/debug UI must expose lighting-specific counters:
+
+* jobs submitted, completed, and continued/rescheduled
+* total processed nodes, add nodes, and remove nodes
+* boundary deferrals
+* sections touched and sections published
+* lighting-triggered remeshes
+* max queue depth
+* p50/p95/p99 lighting job time
+* worst lighting event context with section coordinate, job type, nodes processed, continuation count, and neighbor-touch state
+
+Lighting jobs above the soft budget, repeated section continuations, persistent missing-neighbor deferrals, or a steadily growing lighting queue should be treated as suspicious profiler signals.
 
 ---
 

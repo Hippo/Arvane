@@ -77,6 +77,32 @@ struct SnapshotCostSnapshot {
   u64 snapshot_bytes_copied_total{};
 };
 
+struct LightingStatsUpdate {
+  u32 nodes_processed{};
+  u32 add_nodes_processed{};
+  u32 remove_nodes_processed{};
+  u32 boundary_deferrals{};
+  u32 sections_touched{};
+  u32 sections_published{};
+  u32 max_queue_depth{};
+  u32 remeshes_triggered{};
+  bool continued{};
+};
+
+struct LightingStatsSnapshot {
+  u64 jobs_submitted_total{};
+  u64 jobs_completed_total{};
+  u64 jobs_continued_total{};
+  u64 nodes_processed_total{};
+  u64 add_nodes_processed_total{};
+  u64 remove_nodes_processed_total{};
+  u64 boundary_deferrals_total{};
+  u64 sections_touched_total{};
+  u64 sections_published_total{};
+  u64 remeshes_triggered_total{};
+  u32 max_queue_depth{};
+};
+
 class TimingHistogram {
 public:
   static constexpr usize Capacity = 512;
@@ -128,6 +154,13 @@ void record_snapshot_created() noexcept;
 void record_snapshot_reused() noexcept;
 void record_snapshot_copy(usize bytes) noexcept;
 [[nodiscard]] SnapshotCostSnapshot global_snapshot_cost_snapshot() noexcept;
+
+void record_lighting_job_submitted() noexcept;
+void record_lighting_job_completed(const LightingStatsUpdate& update) noexcept;
+void record_lighting_sections_published(u32 count) noexcept;
+void record_lighting_remeshes_triggered(u32 count) noexcept;
+void record_lighting_boundary_deferrals(u32 count) noexcept;
+[[nodiscard]] LightingStatsSnapshot global_lighting_stats_snapshot() noexcept;
 
 void reset_global_timing_stats() noexcept;
 
