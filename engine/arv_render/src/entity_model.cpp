@@ -197,14 +197,15 @@ void append_face(
 [[nodiscard]] const EntityModelAnimation* find_animation(
     const EntityModelAsset& model,
     std::string_view name) noexcept {
-  if (!name.empty()) {
-    for (const EntityModelAnimation& animation : model.animations) {
-      if (animation.name == name) {
-        return &animation;
-      }
+  if (name.empty()) {
+    return nullptr;
+  }
+  for (const EntityModelAnimation& animation : model.animations) {
+    if (animation.name == name) {
+      return &animation;
     }
   }
-  return model.animations.empty() ? nullptr : &model.animations.front();
+  return nullptr;
 }
 
 [[nodiscard]] std::optional<Vec3f> keyframe_rotation_for_bone(

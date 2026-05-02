@@ -94,13 +94,25 @@ server-only dropped-stack list.
 
 ## Authored Entity Definitions
 
-Authored entity types are loaded from:
+Authored entities are **pure data definitions** describing how an entity is constructed at spawn time.
+
+They do not contain logic. All runtime behavior is derived from:
+
+* ECS components
+* behavior configuration (see Entity Behavior)
+* engine systems
+
+Entity definitions are loaded from:
 
 ```text
 arvane_home/config/entities.json
 ```
 
-The preferred file shape is:
+---
+
+## File Shape
+
+Preferred format:
 
 ```json
 {
@@ -109,7 +121,22 @@ The preferred file shape is:
       "name": "arvane:pig",
       "display_name": "Pig",
       "category": "passive",
-      "model": "arvane:model/entity/pig",
+
+      "components": {
+        "arvane:transform": {},
+        "arvane:collision": { "box": [0.9, 0.9, 0.9] },
+        "arvane:movement": { "walk_speed": 0.2 },
+        "arvane:health": { "max": 10 },
+
+        "arvane:brain": {
+          "behavior": "arvane:pig_behavior"
+        }
+      },
+
+      "presentation": {
+        "model": "arvane:model/entity/pig"
+      },
+
       "spawnable": true,
       "persistent_by_default": true,
       "replicated_by_default": true
@@ -118,31 +145,312 @@ The preferred file shape is:
 }
 ```
 
-The loader also accepts a root array of entity objects and, for small tests or examples, a single
-root object containing a `name`.
+The loader also accepts:
 
-Fields:
+* a root array of entity objects
+* a single root object (for small tests) containing a `name`
 
-- `name`: required stable entity type name, such as `arvane:pig`.
-- `display_name`: user-facing debug/editor label.
-- `category`: optional debug/editor grouping string.
-- `model`: optional model asset reference.
-- `spawnable`: whether debug tools may spawn this type.
-- `persistent_by_default`: default persistence flag for newly spawned entities of this type.
-- `replicated_by_default`: default replication flag for newly spawned entities of this type.
+---
 
-Short model filenames, such as `pig.json`, remain supported and resolve under:
+## Core Fields
+
+### `name`
+
+Required stable identifier:
+
+```text
+namespace:name
+```
+
+Examples:
+
+```text
+arvane:pig
+arvane:zombie
+plugin:custom_npc
+```
+
+Rules:
+
+* Must be globally unique
+* Must be stable across versions for save compatibility
+* Used for serialization and networking
+
+---
+
+### `display_name`
+
+Optional user-facing label for debug tools and UI.
+
+Not used in simulation.
+
+---
+
+### `category`
+
+Optional grouping string for debug/editor tooling.
+
+Examples:
+
+```text
+passive
+hostile
+ambient
+utility
+```
+
+No gameplay meaning.
+
+---
+
+## Components
+
+### `components`
+
+Defines the ECS component set applied when the entity is spawned.
+
+```json
+"components": {
+  "arvane:transform": {},
+  "arvane:movement": { "walk_speed": 0.2 },
+  "arvane:health": { "max": 10 }
+}
+```
+
+Rules:
+
+* Keys are **component type IDs**
+* Values are **component initialization data**
+* Missing components are not added implicitly
+* Systems operate purely on component presence and data
+* No component implies no participation in that system
+
+### Component Principles
+
+* Components define **state**, not behavior logic
+* Components must be **data-only**
+* Components must be serializable where applicable
+* Component schemas are owned by their respective modules
+
+Examples:
+
+```text
+arvane:transform
+arvane:velocity
+arvane:collision
+arvane:movement
+arvane:health
+arvane:brain
+arvane:inventory
+```
+
+---
+
+## Behavior Binding
+
+Behavior is attached via components, not via entity types.
+
+Example:
+
+```json
+"arvane:brain": {
+  "behavior": "arvane:pig_behavior"
+}
+```
+
+This links the entity to a data-defined behavior (see Entity Behavior document).
+
+Rules:
+
+* Entity definitions do not define behavior logic inline
+* Behavior is referenced by ID
+* Behavior execution is handled by ECS systems
+* Multiple entities may share the same behavior definition
+
+---
+
+## Presentation
+
+### `presentation`
+
+Defines non-simulation data used for rendering and client extraction.
+
+```json
+"presentation": {
+  "model": "arvane:model/entity/pig"
+}
+```
+
+Rules:
+
+* Presentation data must not affect simulation
+* Safe to change without breaking gameplay logic
+* Extracted by render systems, not simulation systems
+
+---
+
+### `model`
+
+Model asset reference.
+
+Supported forms:
+
+```json
+"model": "pig.json"
+```
+
+or:
+
+```json
+"model": "arvane:model/entity/pig"
+```
+
+Short names resolve under:
 
 ```text
 arvane_home/assets/models/entity/
 ```
 
-The preferred asset ID is `arvane:model/entity/pig`. Full model asset IDs may be used
-directly. Entity model definitions are data references for presentation and render extraction; they
-must not be treated as authoritative simulation state.
+Preferred format is full asset ID.
 
-`arvane:player` is a built-in entity type. It is reserved, non-spawnable from debug tooling, and
-kept at the stable player entity type ID.
+---
+
+## Spawn / Lifecycle Flags
+
+### `spawnable`
+
+Whether debug tools or commands may spawn this entity type.
+
+Does not affect gameplay spawning systems.
+
+---
+
+### `persistent_by_default`
+
+Default persistence flag for newly spawned entities.
+
+Controls whether the entity is saved to disk unless overridden.
+
+---
+
+### `replicated_by_default`
+
+Default replication flag.
+
+Controls whether the entity is replicated to clients unless overridden.
+
+---
+
+## Design Constraints
+
+### No Entity Classes
+
+The engine must not implement:
+
+```text
+class Zombie : public Entity
+class Pig : public Entity
+```
+
+There is no per-entity-type logic class.
+
+---
+
+### No Per-Entity Tick Methods
+
+Entities must not define:
+
+```cpp
+void Zombie::tick()
+```
+
+All logic is executed by systems operating on components and behavior data.
+
+---
+
+### Composition Over Inheritance
+
+Entities are defined by composition:
+
+```text
+Entity = Components + Behavior + Data
+```
+
+Not:
+
+```text
+Entity = Subclass hierarchy
+```
+
+---
+
+### Data Ownership
+
+* Entity definitions define **initial state**
+* ECS owns **runtime state**
+* Systems own **execution**
+* Behavior definitions own **decision logic structure**
+
+---
+
+## Built-In Entities
+
+### `arvane:player`
+
+Reserved entity type.
+
+Rules:
+
+* Always present
+* Stable entity type ID
+* Not spawnable via debug tools
+* May have additional engine-managed components
+* Still follows ECS + component rules
+
+---
+
+## Validation
+
+Entity loading must validate:
+
+* required fields (`name`)
+* component IDs exist
+* component data schema is valid
+* behavior references exist
+* asset references resolve
+
+Invalid definitions must fail fast with clear diagnostics.
+
+---
+
+## Summary
+
+Entity definitions are:
+
+```text
+data-only
+component-driven
+behavior-referenced
+render-separated
+fully ECS-compatible
+```
+
+They do not contain:
+
+```text
+logic
+tick functions
+hardcoded behavior
+engine-side subclasses
+```
+
+This ensures:
+
+* consistency with ECS architecture
+* strong data-driven workflows
+* easy modding and extension
+* clean separation between data and execution
+
 
 ---
 

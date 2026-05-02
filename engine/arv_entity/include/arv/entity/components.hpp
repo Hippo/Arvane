@@ -19,9 +19,61 @@ namespace arv::entity {
 inline constexpr EntityTypeID PlayerEntityTypeID{1};
 inline constexpr std::string_view PlayerEntityTypeName = "arvane:player";
 inline constexpr std::string_view DroppedItemEntityTypeName = "arvane:dropped_item";
+inline constexpr std::string_view TransformComponentID = "arvane:transform";
+inline constexpr std::string_view VelocityComponentID = "arvane:velocity";
+inline constexpr std::string_view CollisionComponentID = "arvane:collision";
+inline constexpr std::string_view MovementComponentID = "arvane:movement";
+inline constexpr std::string_view HealthComponentID = "arvane:health";
+inline constexpr std::string_view BrainComponentID = "arvane:brain";
+inline constexpr std::string_view AnimationComponentID = "arvane:animation";
 
 struct EntityRegistryError {
   std::string message{};
+};
+
+struct AuthoredCollisionComponent {
+  Vec3f box{1.0F, 1.0F, 1.0F};
+};
+
+struct AuthoredMovementComponent {
+  f32 walk_speed{};
+};
+
+struct AuthoredHealthComponent {
+  f32 max{1.0F};
+};
+
+struct AuthoredGoalDefinition {
+  std::string type{};
+  i32 priority{};
+  f32 radius{};
+  f32 speed_multiplier{1.0F};
+  u32 duration_ticks{60};
+  u32 cooldown_ticks{};
+  f32 range{};
+  std::string target{};
+  std::string animation{};
+};
+
+struct AuthoredBrainComponent {
+  std::string behavior{};
+  u32 tick_interval{1};
+  std::vector<AuthoredGoalDefinition> goals{};
+};
+
+struct AuthoredAnimationComponent {
+  std::string initial{};
+};
+
+struct EntityComponentSet {
+  bool transform{};
+  bool velocity{};
+  std::optional<AuthoredCollisionComponent> collision{};
+  std::optional<AuthoredMovementComponent> movement{};
+  std::optional<AuthoredHealthComponent> health{};
+  std::optional<AuthoredBrainComponent> brain{};
+  std::optional<AuthoredAnimationComponent> animation{};
+  std::vector<std::string> component_ids{};
 };
 
 struct EntityDefinition {
@@ -29,6 +81,7 @@ struct EntityDefinition {
   std::string display_name{};
   std::string category{};
   std::string model_asset{};
+  EntityComponentSet components{};
   bool spawnable{true};
   bool persistent_by_default{};
   bool replicated_by_default{true};
@@ -40,6 +93,7 @@ struct EntityTypeRecord {
   std::string display_name{};
   std::string category{};
   std::string model_asset{};
+  EntityComponentSet components{};
   bool spawnable{true};
   bool persistent_by_default{};
   bool replicated_by_default{true};
@@ -88,6 +142,71 @@ struct EntityVelocity {
   Vec3f linear{};
 };
 
+struct EntityCollision {
+  Vec3f box{1.0F, 1.0F, 1.0F};
+};
+
+struct EntityMovement {
+  f32 walk_speed{};
+};
+
+struct EntityHealth {
+  f32 max{1.0F};
+  f32 current{1.0F};
+};
+
+struct MovementIntent {
+  Vec3f desired_direction{};
+  f32 speed_multiplier{1.0F};
+  bool jump{};
+  bool sprint{};
+};
+
+enum class GoalStopReason : u8 {
+  Completed,
+  Interrupted,
+  Invalid,
+};
+
+struct GoalRuntimeState {
+  u32 remaining_ticks{};
+  TickIndex cooldown_until{};
+  Vec3f movement_direction{};
+};
+
+struct GoalSlot {
+  std::string type{};
+  i32 priority{};
+  f32 radius{};
+  f32 speed_multiplier{1.0F};
+  u32 duration_ticks{60};
+  u32 cooldown_ticks{};
+  f32 range{};
+  std::string target{};
+  std::string animation{};
+  GoalRuntimeState state{};
+};
+
+struct GoalBlackboard {
+  std::optional<EntityID> target_entity{};
+  Vec3f home_position{};
+  Vec3f wander_destination{};
+};
+
+struct BrainComponent {
+  std::string behavior{};
+  u32 tick_interval{1};
+  TickIndex next_tick{};
+  std::vector<GoalSlot> goals{};
+  std::optional<usize> active_goal{};
+  GoalBlackboard blackboard{};
+};
+
+struct EntityAnimationState {
+  std::string name{};
+  Seconds time_seconds{};
+};
+
 struct EntityType {
   EntityTypeID type_id{};
   std::string type_name{};
@@ -126,6 +245,8 @@ struct EntitySnapshotEntry {
   Quatf rotation{};
   ChunkCoord chunk{};
   std::optional<PlayerID> owning_player{};
+  std::string animation_name{};
+  Seconds animation_time_seconds{};
 };
 
 struct PersistentEntityRecord {

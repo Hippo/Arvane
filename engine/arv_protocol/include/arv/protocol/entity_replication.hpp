@@ -3,6 +3,7 @@
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/math.hpp"
+#include "arv/core/time.hpp"
 #include "arv/player/item.hpp"
 #include "arv/protocol/message_writer.hpp"
 
@@ -37,6 +38,8 @@ struct EntitySnapshotEntry {
   Vec3f velocity{};
   Quatf rotation{};
   u32 state_flags{};
+  std::string animation_name{};
+  Seconds animation_time_seconds{};
 };
 
 struct EntitySnapshot {

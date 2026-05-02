@@ -158,6 +158,8 @@ std::vector<u8> serialize_entity_snapshot(const EntitySnapshot& snapshot) {
     write_vec3(writer, entry.velocity);
     write_quat(writer, entry.rotation);
     writer.write<u32>(entry.state_flags);
+    writer.write_string(entry.animation_name);
+    write_f32(writer, entry.animation_time_seconds);
   }
   return std::move(writer).take_bytes();
 }
@@ -201,7 +203,10 @@ Expected<EntitySnapshot, ProtocolError> deserialize_entity_snapshot(std::span<co
     auto velocity = read_vec3(reader);
     auto rotation = read_quat(reader);
     auto flags = reader.read<u32>();
-    if (!entity_id || !position || !velocity || !rotation || !flags) {
+    auto animation_name = reader.read_string();
+    auto animation_time = read_f32(reader);
+    if (!entity_id || !position || !velocity || !rotation || !flags ||
+        !animation_name || !animation_time) {
       return Expected<EntitySnapshot, ProtocolError>::failure(
           ProtocolError{"failed to decode entity snapshot entry"});
     }
@@ -210,7 +215,9 @@ Expected<EntitySnapshot, ProtocolError> deserialize_entity_snapshot(std::span<co
         position.value(),
         velocity.value(),
         rotation.value(),
-        flags.value()});
+        flags.value(),
+        std::move(animation_name.value()),
+        animation_time.value()});
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {

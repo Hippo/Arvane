@@ -199,12 +199,15 @@ void ServerRuntimeImpl::send_entity_replication() {
             protocol::serialize_entity_spawn(spawn));
       }
 
-      snapshot_entries.push_back({
-          snapshot.net_id,
-          snapshot.position,
-          snapshot.velocity,
-          snapshot.rotation,
-          0U});
+      protocol::EntitySnapshotEntry entry;
+      entry.entity_id = snapshot.net_id;
+      entry.position = snapshot.position;
+      entry.velocity = snapshot.velocity;
+      entry.rotation = snapshot.rotation;
+      entry.state_flags = 0U;
+      entry.animation_name = snapshot.animation_name;
+      entry.animation_time_seconds = snapshot.animation_time_seconds;
+      snapshot_entries.push_back(std::move(entry));
     }
 
     for (const EntityNetID known_entity : state.known_entities) {

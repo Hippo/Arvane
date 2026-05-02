@@ -86,6 +86,7 @@ struct EntityCreateInfo {
   std::optional<player::PlayerState> player_state{};
   std::optional<player::ItemStack> dropped_item_stack{};
   Seconds dropped_item_pickup_delay_seconds{};
+  std::optional<entity::EntityComponentSet> authored_components{};
 };
 
 struct ReplicatedBlockUpdate {
@@ -176,8 +177,21 @@ public:
   [[nodiscard]] entity::EntityVelocity* find_entity_velocity(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityVelocity* find_entity_velocity(EntityID entity_id) const noexcept;
   [[nodiscard]] const entity::EntityType* find_entity_type(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::EntityCollision* find_entity_collision(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::EntityCollision* find_entity_collision(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::EntityMovement* find_entity_movement(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::EntityMovement* find_entity_movement(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::EntityHealth* find_entity_health(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::EntityHealth* find_entity_health(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::BrainComponent* find_entity_brain(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::BrainComponent* find_entity_brain(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::MovementIntent* find_entity_movement_intent(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::MovementIntent* find_entity_movement_intent(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::EntityAnimationState* find_entity_animation_state(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::EntityAnimationState* find_entity_animation_state(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::DroppedItem* find_dropped_item(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::DroppedItem* find_dropped_item(EntityID entity_id) const noexcept;
+  bool set_entity_animation(EntityID entity_id, std::string animation_name) noexcept;
   bool set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept;
   [[nodiscard]] bool entity_is_persistent(EntityID entity_id) const noexcept;
   bool set_entity_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept;
@@ -188,7 +202,7 @@ public:
   void restore_persistent_entities(
       std::span<const entity::PersistentEntityRecord> records,
       const entity::EntityRegistry* entity_registry = nullptr);
-  u32 tick_entities();
+  u32 tick_entities(const voxel::BlockRegistry* block_registry = nullptr);
   u32 tick_dropped_items(Seconds tick_seconds);
   player::PlayerState& ensure_player(PlayerID player_id);
   [[nodiscard]] player::PlayerState* find_player(PlayerID player_id) noexcept;
@@ -288,6 +302,14 @@ private:
   u32 drain_block_updates(u32 budget);
   [[nodiscard]] entt::entity entity_handle(EntityID entity_id) const noexcept;
   [[nodiscard]] ChunkCoord chunk_for_position(Vec3f position) const noexcept;
+  void apply_authored_components(
+      entt::entity handle,
+      const entity::EntityComponentSet& components);
+  u32 tick_brains();
+  u32 tick_entity_physics(
+      const voxel::BlockRegistry* block_registry,
+      Seconds tick_seconds);
+  u32 tick_entity_animations(Seconds tick_seconds);
   void update_entity_chunk(entt::entity handle) noexcept;
   void record_replicated_block_update(BlockPos pos, voxel::BlockVariantID new_state);
 

@@ -17,7 +17,32 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
       "name": "arvane:pig",
       "display_name": "Pig",
       "category": "passive",
-      "model": "pig.json",
+      "components": {
+        "arvane:transform": {},
+        "arvane:collision": { "box": [0.9, 0.9, 0.9] },
+        "arvane:movement": { "walk_speed": 1.2 },
+        "arvane:health": { "max": 10 },
+        "arvane:brain": {
+          "behavior": "arvane:pig_behavior",
+          "tick_rate": 5,
+          "goals": [
+            {
+              "type": "arvane:wander",
+              "priority": 8,
+              "radius": 12,
+              "speed_multiplier": 0.8,
+              "animation": "walking"
+            },
+            {
+              "type": "arvane:idle",
+              "priority": 10
+            }
+          ]
+        }
+      },
+      "presentation": {
+        "model": "pig.json"
+      },
       "spawnable": true,
       "persistent_by_default": true,
       "replicated_by_default": true
@@ -45,6 +70,18 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
   EXPECT_EQ(pig->display_name, "Pig");
   EXPECT_EQ(pig->category, "passive");
   EXPECT_EQ(pig->model_asset, "arvane:model/entity/pig.json");
+  ASSERT_TRUE(pig->components.collision.has_value());
+  EXPECT_EQ(pig->components.collision->box, (arv::Vec3f{0.9F, 0.9F, 0.9F}));
+  ASSERT_TRUE(pig->components.movement.has_value());
+  EXPECT_FLOAT_EQ(pig->components.movement->walk_speed, 1.2F);
+  ASSERT_TRUE(pig->components.health.has_value());
+  EXPECT_FLOAT_EQ(pig->components.health->max, 10.0F);
+  ASSERT_TRUE(pig->components.brain.has_value());
+  EXPECT_EQ(pig->components.brain->behavior, "arvane:pig_behavior");
+  EXPECT_EQ(pig->components.brain->tick_interval, 5U);
+  ASSERT_EQ(pig->components.brain->goals.size(), 2U);
+  EXPECT_EQ(pig->components.brain->goals.front().type, "arvane:wander");
+  EXPECT_EQ(pig->components.brain->goals.front().animation, "walking");
   EXPECT_TRUE(pig->spawnable);
   EXPECT_TRUE(pig->persistent_by_default);
   EXPECT_TRUE(pig->replicated_by_default);
@@ -60,13 +97,47 @@ TEST(EntityRegistryTests, AcceptsSingleEntityDefinitionObject) {
 {
   "name": "arvane:pig",
   "display_name": "Pig",
-  "model": "pig.json"
+  "presentation": {
+    "model": "pig.json"
+  }
 }
 )json");
   ASSERT_TRUE(parsed) << parsed.error().message;
   ASSERT_EQ(parsed.value().size(), 1U);
   EXPECT_EQ(parsed.value().front().name, "arvane:pig");
   EXPECT_EQ(parsed.value().front().model_asset, "pig.json");
+}
+
+TEST(EntityRegistryTests, RejectsUnknownAuthoredComponentIDs) {
+  auto parsed = arv::entity::parse_entity_definitions_json(R"json(
+{
+  "name": "arvane:pig",
+  "components": {
+    "arvane:not_a_component": {}
+  }
+}
+)json");
+
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("unknown entity component ID"), std::string::npos);
+}
+
+TEST(EntityRegistryTests, RejectsUnknownBehaviorGoalIDs) {
+  auto parsed = arv::entity::parse_entity_definitions_json(R"json(
+{
+  "name": "arvane:pig",
+  "components": {
+    "arvane:brain": {
+      "goals": [
+        { "type": "arvane:does_not_exist", "priority": 1 }
+      ]
+    }
+  }
+}
+)json");
+
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("unknown behavior goal ID"), std::string::npos);
 }
 
 TEST(EntityRegistryTests, RejectsDuplicateExplicitEntityNames) {

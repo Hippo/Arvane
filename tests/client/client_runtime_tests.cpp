@@ -152,7 +152,9 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
                                      {10.0F, 11.0F, 12.0F},
                                      {1.0F, 0.0F, 0.0F},
                                      {0.0F, 0.0F, 0.0F, 1.0F},
-                                     0});
+                                     0,
+                                     "walking",
+                                     0.5F});
   send_to_client(
       *server_transport,
       connection_id.value(),
@@ -165,6 +167,8 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   ASSERT_NE(mirror, nullptr);
   EXPECT_EQ(mirror->position, (arv::Vec3f{10.0F, 11.0F, 12.0F}));
   EXPECT_EQ(mirror->last_server_tick, 20U);
+  EXPECT_EQ(mirror->animation_name, "walking");
+  EXPECT_FLOAT_EQ(mirror->animation_time_seconds, 0.5F);
 
   fresh_snapshot.server_tick = 19;
   fresh_snapshot.entities[0].position = {30.0F, 31.0F, 32.0F};

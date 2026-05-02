@@ -135,4 +135,11 @@ TEST(EntityModelTests, SamplesLoopingWalkingAnimation) {
       2.0F,
       std::span<arv::Vec3f>{rotations});
   EXPECT_EQ(rotations[2], (arv::Vec3f{45.0F, 0.0F, 0.0F}));
+
+  arv::render::sample_entity_model_animation(
+      model.value(),
+      "",
+      0.5F,
+      std::span<arv::Vec3f>{rotations});
+  EXPECT_EQ(rotations[2], (arv::Vec3f{}));
 }

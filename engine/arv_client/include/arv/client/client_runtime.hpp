@@ -2,6 +2,7 @@
 
 #include "arv/client/camera_shell.hpp"
 #include "arv/client/local_player_controller.hpp"
+#include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
@@ -27,6 +28,8 @@ struct ReplicatedEntityMirror {
   Quatf rotation{};
   u64 last_server_tick{};
   std::optional<PlayerID> owning_player{};
+  std::string animation_name{};
+  Seconds animation_time_seconds{};
 };
 
 struct DroppedItemMirror {

@@ -2,12 +2,14 @@
 
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
+#include "arv/world/world_queries.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace arv::world {
@@ -117,6 +119,60 @@ void format_chunk_context(
       coord.value.x,
       coord.value.y,
       coord.value.z);
+}
+
+[[nodiscard]] bool is_idle_goal(std::string_view type) noexcept {
+  return type == "arvane:idle";
+}
+
+[[nodiscard]] bool is_wander_goal(std::string_view type) noexcept {
+  return type == "arvane:wander";
+}
+
+[[nodiscard]] bool is_float_in_fluid_goal(std::string_view type) noexcept {
+  return type == "arvane:float_in_fluid";
+}
+
+[[nodiscard]] f32 positive_fraction(f32 value) noexcept {
+  const f32 whole = std::floor(value);
+  return value - whole;
+}
+
+[[nodiscard]] Vec3f deterministic_wander_direction(
+    EntityID entity_id,
+    TickIndex tick,
+    usize goal_index) noexcept {
+  const f32 seed =
+      static_cast<f32>(entity_id.value * 37U + static_cast<u32>(goal_index) * 101U) +
+      static_cast<f32>(tick % 100000U) * 0.173F;
+  const f32 angle = positive_fraction(std::sin(seed) * 43758.5453F) * 6.28318530718F;
+  return {std::cos(angle), 0.0F, std::sin(angle)};
+}
+
+[[nodiscard]] Aabb3f entity_body_bounds(Vec3f position, Vec3f box) noexcept {
+  const Vec3f size{
+      std::max(0.0F, box.x),
+      std::max(0.0F, box.y),
+      std::max(0.0F, box.z)};
+  const f32 half_x = size.x * 0.5F;
+  const f32 half_z = size.z * 0.5F;
+  return {
+      {position.x - half_x, position.y, position.z - half_z},
+      {position.x + half_x, position.y + size.y, position.z + half_z}};
+}
+
+[[nodiscard]] Quatf yaw_rotation(f32 radians) noexcept {
+  const f32 half = radians * 0.5F;
+  return {0.0F, std::sin(half), 0.0F, std::cos(half)};
+}
+
+[[nodiscard]] bool has_horizontal_motion(Vec3f value) noexcept {
+  return value.x * value.x + value.z * value.z > 0.000001F;
+}
+
+[[nodiscard]] f32 yaw_from_horizontal_direction(Vec3f direction) noexcept {
+  constexpr f32 ModelForwardYawOffset = 3.14159265358979323846F;
+  return std::atan2(direction.x, direction.z) + ModelForwardYawOffset;
 }
 
 } // namespace
@@ -702,6 +758,10 @@ EntityID WorldRuntime::create_entity(EntityCreateInfo info) {
         info.dropped_item_pickup_delay_seconds);
   }
 
+  if (info.authored_components.has_value()) {
+    apply_authored_components(handle, info.authored_components.value());
+  }
+
   return entity_id;
 }
 
@@ -838,6 +898,90 @@ const entity::EntityType* WorldRuntime::find_entity_type(EntityID entity_id) con
              : entity_registry_.try_get<entity::EntityType>(handle);
 }
 
+entity::EntityCollision* WorldRuntime::find_entity_collision(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityCollision>(handle);
+}
+
+const entity::EntityCollision* WorldRuntime::find_entity_collision(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityCollision>(handle);
+}
+
+entity::EntityMovement* WorldRuntime::find_entity_movement(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityMovement>(handle);
+}
+
+const entity::EntityMovement* WorldRuntime::find_entity_movement(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityMovement>(handle);
+}
+
+entity::EntityHealth* WorldRuntime::find_entity_health(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityHealth>(handle);
+}
+
+const entity::EntityHealth* WorldRuntime::find_entity_health(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityHealth>(handle);
+}
+
+entity::BrainComponent* WorldRuntime::find_entity_brain(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::BrainComponent>(handle);
+}
+
+const entity::BrainComponent* WorldRuntime::find_entity_brain(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::BrainComponent>(handle);
+}
+
+entity::MovementIntent* WorldRuntime::find_entity_movement_intent(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::MovementIntent>(handle);
+}
+
+const entity::MovementIntent* WorldRuntime::find_entity_movement_intent(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::MovementIntent>(handle);
+}
+
+entity::EntityAnimationState* WorldRuntime::find_entity_animation_state(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityAnimationState>(handle);
+}
+
+const entity::EntityAnimationState* WorldRuntime::find_entity_animation_state(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::EntityAnimationState>(handle);
+}
+
 entity::DroppedItem* WorldRuntime::find_dropped_item(EntityID entity_id) noexcept {
   const entt::entity handle = entity_handle(entity_id);
   return handle == entt::null || !entity_registry_.valid(handle)
@@ -850,6 +994,19 @@ const entity::DroppedItem* WorldRuntime::find_dropped_item(EntityID entity_id) c
   return handle == entt::null || !entity_registry_.valid(handle)
              ? nullptr
              : entity_registry_.try_get<entity::DroppedItem>(handle);
+}
+
+bool WorldRuntime::set_entity_animation(EntityID entity_id, std::string animation_name) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  if (handle == entt::null || !entity_registry_.valid(handle)) {
+    return false;
+  }
+  auto& animation = entity_registry_.get_or_emplace<entity::EntityAnimationState>(handle);
+  if (animation.name != animation_name) {
+    animation.name = std::move(animation_name);
+    animation.time_seconds = 0.0F;
+  }
+  return true;
 }
 
 bool WorldRuntime::set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept {
@@ -921,6 +1078,11 @@ std::vector<entity::EntitySnapshotEntry> WorldRuntime::collect_entity_snapshots(
     if (const auto* player_entity = entity_registry_.try_get<entity::PlayerEntity>(handle);
         player_entity != nullptr) {
       entry.owning_player = player_entity->player_id;
+    }
+    if (const auto* animation = entity_registry_.try_get<entity::EntityAnimationState>(handle);
+        animation != nullptr) {
+      entry.animation_name = animation->name;
+      entry.animation_time_seconds = animation->time_seconds;
     }
     snapshots.emplace_back(std::move(entry));
   }
@@ -1005,6 +1167,10 @@ void WorldRuntime::restore_persistent_entities(
       if (const std::optional<EntityTypeID> type_id = entity_registry->find_type(record.type_name);
           type_id.has_value()) {
         info.type_id = type_id.value();
+        if (const entity::EntityTypeRecord* type = entity_registry->type(type_id.value());
+            type != nullptr) {
+          info.authored_components = type->components;
+        }
       }
     }
     info.position = record.position;
@@ -1019,9 +1185,345 @@ void WorldRuntime::restore_persistent_entities(
   }
 }
 
-u32 WorldRuntime::tick_entities() {
+void WorldRuntime::apply_authored_components(
+    entt::entity handle,
+    const entity::EntityComponentSet& components) {
+  if (handle == entt::null || !entity_registry_.valid(handle)) {
+    return;
+  }
+
+  if (components.collision.has_value()) {
+    entity_registry_.emplace_or_replace<entity::EntityCollision>(
+        handle,
+        components.collision->box);
+  }
+  if (components.movement.has_value()) {
+    entity_registry_.emplace_or_replace<entity::EntityMovement>(
+        handle,
+        components.movement->walk_speed);
+  }
+  if (components.health.has_value()) {
+    const f32 max_health = std::max(0.0F, components.health->max);
+    entity_registry_.emplace_or_replace<entity::EntityHealth>(
+        handle,
+        max_health,
+        max_health);
+  }
+  if (components.animation.has_value()) {
+    entity_registry_.emplace_or_replace<entity::EntityAnimationState>(
+        handle,
+        components.animation->initial,
+        0.0F);
+  }
+  if (components.brain.has_value()) {
+    entity::BrainComponent brain;
+    brain.behavior = components.brain->behavior;
+    brain.tick_interval = std::max<u32>(1U, components.brain->tick_interval);
+    brain.goals.reserve(components.brain->goals.size());
+    for (const entity::AuthoredGoalDefinition& source : components.brain->goals) {
+      entity::GoalSlot goal;
+      goal.type = source.type;
+      goal.priority = source.priority;
+      goal.radius = source.radius;
+      goal.speed_multiplier = source.speed_multiplier;
+      goal.duration_ticks = std::max<u32>(1U, source.duration_ticks);
+      goal.cooldown_ticks = source.cooldown_ticks;
+      goal.range = source.range;
+      goal.target = source.target;
+      goal.animation = source.animation;
+      brain.goals.push_back(std::move(goal));
+    }
+    std::stable_sort(
+        brain.goals.begin(),
+        brain.goals.end(),
+        [](const entity::GoalSlot& lhs, const entity::GoalSlot& rhs) {
+          return lhs.priority < rhs.priority;
+        });
+    if (!brain.goals.empty()) {
+      entity_registry_.emplace_or_replace<entity::BrainComponent>(handle, std::move(brain));
+      (void)entity_registry_.get_or_emplace<entity::EntityAnimationState>(handle);
+    }
+  }
+}
+
+u32 WorldRuntime::tick_brains() {
+  u32 updated = 0;
+  const auto view = entity_registry_.view<
+      entity::RuntimeEntity,
+      entity::EntityTransform,
+      entity::BrainComponent>();
+  for (const entt::entity handle : view) {
+    const auto& runtime = view.get<entity::RuntimeEntity>(handle);
+    const auto& transform = view.get<entity::EntityTransform>(handle);
+    auto& brain = view.get<entity::BrainComponent>(handle);
+    if (brain.goals.empty() || tick_index_ < brain.next_tick) {
+      continue;
+    }
+    brain.next_tick = tick_index_ + std::max<u32>(1U, brain.tick_interval);
+
+    const auto set_animation = [&](std::string_view animation_name) {
+      auto& animation =
+          entity_registry_.get_or_emplace<entity::EntityAnimationState>(handle);
+      if (animation.name != animation_name) {
+        animation.name = std::string{animation_name};
+        animation.time_seconds = 0.0F;
+      }
+    };
+    const auto clear_movement_intent = [&]() {
+      if (auto* intent = entity_registry_.try_get<entity::MovementIntent>(handle);
+          intent != nullptr) {
+        intent->desired_direction = {};
+        intent->speed_multiplier = 1.0F;
+        intent->jump = false;
+        intent->sprint = false;
+      }
+    };
+    const auto goal_can_start = [&](const entity::GoalSlot& goal) {
+      if (goal.state.cooldown_until > tick_index_) {
+        return false;
+      }
+      if (is_float_in_fluid_goal(goal.type)) {
+        const BlockPos pos{{
+            static_cast<i32>(std::floor(transform.position.x)),
+            static_cast<i32>(std::floor(transform.position.y)),
+            static_cast<i32>(std::floor(transform.position.z)),
+        }};
+        return !get_fluid(pos).empty();
+      }
+      return is_idle_goal(goal.type) || is_wander_goal(goal.type);
+    };
+    const auto goal_can_continue = [&](const entity::GoalSlot& goal) {
+      if (is_float_in_fluid_goal(goal.type)) {
+        const BlockPos pos{{
+            static_cast<i32>(std::floor(transform.position.x)),
+            static_cast<i32>(std::floor(transform.position.y)),
+            static_cast<i32>(std::floor(transform.position.z)),
+        }};
+        return !get_fluid(pos).empty();
+      }
+      return goal.state.remaining_ticks > 0U;
+    };
+    const auto start_goal = [&](usize index) {
+      entity::GoalSlot& goal = brain.goals[index];
+      goal.state.remaining_ticks = std::max<u32>(1U, goal.duration_ticks);
+      if (brain.blackboard.home_position == Vec3f{}) {
+        brain.blackboard.home_position = transform.position;
+      }
+      if (is_wander_goal(goal.type)) {
+        goal.state.movement_direction =
+            deterministic_wander_direction(runtime.entity_id, tick_index_, index);
+      } else if (is_float_in_fluid_goal(goal.type)) {
+        goal.state.movement_direction = {0.0F, 1.0F, 0.0F};
+      } else {
+        goal.state.movement_direction = {};
+      }
+      set_animation(goal.animation);
+      brain.active_goal = index;
+    };
+    const auto stop_goal = [&](usize index, entity::GoalStopReason reason) {
+      entity::GoalSlot& goal = brain.goals[index];
+      clear_movement_intent();
+      if (reason == entity::GoalStopReason::Completed && goal.cooldown_ticks > 0U) {
+        goal.state.cooldown_until = tick_index_ + goal.cooldown_ticks;
+      }
+      goal.state.remaining_ticks = 0U;
+      if (brain.active_goal.has_value() && brain.active_goal.value() == index) {
+        brain.active_goal = std::nullopt;
+      }
+    };
+    const auto tick_goal = [&](entity::GoalSlot& goal) {
+      if (goal.state.remaining_ticks > 0U) {
+        --goal.state.remaining_ticks;
+      }
+      if (is_wander_goal(goal.type) || is_float_in_fluid_goal(goal.type)) {
+        auto& intent = entity_registry_.get_or_emplace<entity::MovementIntent>(handle);
+        intent.desired_direction = goal.state.movement_direction;
+        intent.speed_multiplier = std::max(0.0F, goal.speed_multiplier);
+        intent.jump = is_float_in_fluid_goal(goal.type);
+        intent.sprint = false;
+      } else {
+        clear_movement_intent();
+      }
+      set_animation(goal.animation);
+    };
+
+    if (brain.active_goal.has_value()) {
+      const usize active = brain.active_goal.value();
+      if (active >= brain.goals.size() || !goal_can_continue(brain.goals[active])) {
+        if (active < brain.goals.size()) {
+          stop_goal(active, entity::GoalStopReason::Completed);
+        } else {
+          brain.active_goal = std::nullopt;
+        }
+      }
+    }
+
+    std::optional<usize> candidate;
+    for (usize index = 0; index < brain.goals.size(); ++index) {
+      if (goal_can_start(brain.goals[index])) {
+        candidate = index;
+        break;
+      }
+    }
+    if (!brain.active_goal.has_value() && candidate.has_value()) {
+      start_goal(candidate.value());
+    } else if (brain.active_goal.has_value() && candidate.has_value()) {
+      const usize active = brain.active_goal.value();
+      if (brain.goals[candidate.value()].priority < brain.goals[active].priority) {
+        stop_goal(active, entity::GoalStopReason::Interrupted);
+        start_goal(candidate.value());
+      }
+    }
+
+    if (brain.active_goal.has_value()) {
+      tick_goal(brain.goals[brain.active_goal.value()]);
+    } else {
+      clear_movement_intent();
+      set_animation({});
+    }
+    ++updated;
+  }
+  return updated;
+}
+
+u32 WorldRuntime::tick_entity_physics(
+    const voxel::BlockRegistry* block_registry,
+    Seconds tick_seconds) {
+  if (tick_seconds <= 0.0F) {
+    return 0;
+  }
+
+  u32 updated = 0;
+  if (block_registry == nullptr) {
+    const auto view = entity_registry_.view<
+        entity::EntityTransform,
+        entity::EntityVelocity,
+        entity::EntityMovement,
+        entity::MovementIntent>();
+    for (const entt::entity handle : view) {
+      if (entity_registry_.all_of<entity::PlayerEntity>(handle)) {
+        continue;
+      }
+      auto& transform = view.get<entity::EntityTransform>(handle);
+      auto& velocity = view.get<entity::EntityVelocity>(handle);
+      const auto& movement = view.get<entity::EntityMovement>(handle);
+      const auto& intent = view.get<entity::MovementIntent>(handle);
+      const Vec3f direction = normalize_or_zero(intent.desired_direction);
+      const f32 speed = std::max(0.0F, movement.walk_speed) *
+                        std::max(0.0F, intent.speed_multiplier);
+      velocity.linear = direction * speed;
+      if (length(velocity.linear) <= 0.0F) {
+        continue;
+      }
+      transform.previous_position = transform.position;
+      transform.previous_rotation = transform.rotation;
+      transform.position = transform.position + velocity.linear * tick_seconds;
+      if (has_horizontal_motion(velocity.linear)) {
+        transform.rotation = yaw_rotation(yaw_from_horizontal_direction(velocity.linear));
+      }
+      update_entity_chunk(handle);
+      ++updated;
+    }
+    return updated;
+  }
+
+  const WorldCollisionQuery collision_query(*this, *block_registry, true);
+  const physics::KinematicConfig physics_config;
+  const auto view = entity_registry_.view<
+      entity::EntityTransform,
+      entity::EntityVelocity,
+      entity::EntityCollision>();
+  for (const entt::entity handle : view) {
+    if (entity_registry_.all_of<entity::PlayerEntity>(handle)) {
+      continue;
+    }
+    auto& transform = view.get<entity::EntityTransform>(handle);
+    auto& velocity = view.get<entity::EntityVelocity>(handle);
+    const auto& collision = view.get<entity::EntityCollision>(handle);
+    const entity::MovementIntent* intent =
+        entity_registry_.try_get<entity::MovementIntent>(handle);
+    const entity::EntityMovement* movement =
+        entity_registry_.try_get<entity::EntityMovement>(handle);
+
+    if (intent != nullptr && movement != nullptr) {
+      const Vec3f direction = normalize_or_zero(intent->desired_direction);
+      const f32 speed = std::max(0.0F, movement->walk_speed) *
+                        std::max(0.0F, intent->speed_multiplier);
+      velocity.linear.x = direction.x * speed;
+      velocity.linear.z = direction.z * speed;
+      if (direction.y > 0.0F) {
+        velocity.linear.y = std::max(velocity.linear.y, direction.y * speed);
+      }
+    }
+
+    const Aabb3f bounds = entity_body_bounds(transform.position, collision.box);
+    const bool grounded = physics::has_support_below(
+        collision_query,
+        bounds,
+        physics_config.collision_epsilon * 2.0F);
+    if (!grounded) {
+      velocity.linear.y = std::max(
+          velocity.linear.y - physics_config.gravity_per_second * tick_seconds,
+          -physics_config.terminal_velocity);
+    } else if (velocity.linear.y < 0.0F) {
+      velocity.linear.y = 0.0F;
+    }
+
+    const Vec3f movement_delta = velocity.linear * tick_seconds;
+    const physics::MovementResolution resolved = physics::resolve_movement(
+        collision_query,
+        bounds,
+        movement_delta,
+        physics_config.collision_epsilon);
+
+    transform.previous_position = transform.position;
+    transform.previous_rotation = transform.rotation;
+    transform.position = transform.position + resolved.applied_delta;
+    if (resolved.hit_x) {
+      velocity.linear.x = 0.0F;
+    }
+    if (resolved.hit_y) {
+      velocity.linear.y = 0.0F;
+    }
+    if (resolved.hit_z) {
+      velocity.linear.z = 0.0F;
+    }
+
+    const Vec3f facing_direction =
+        has_horizontal_motion(resolved.applied_delta) ? resolved.applied_delta : velocity.linear;
+    if (has_horizontal_motion(facing_direction)) {
+      transform.rotation = yaw_rotation(yaw_from_horizontal_direction(facing_direction));
+    }
+
+    update_entity_chunk(handle);
+    ++updated;
+  }
+  return updated;
+}
+
+u32 WorldRuntime::tick_entity_animations(Seconds tick_seconds) {
+  if (tick_seconds <= 0.0F) {
+    return 0;
+  }
+
+  u32 updated = 0;
+  const auto view = entity_registry_.view<entity::EntityAnimationState>();
+  for (const entt::entity handle : view) {
+    auto& animation = view.get<entity::EntityAnimationState>(handle);
+    if (animation.name.empty()) {
+      animation.time_seconds = 0.0F;
+      continue;
+    }
+    animation.time_seconds += tick_seconds;
+    ++updated;
+  }
+  return updated;
+}
+
+u32 WorldRuntime::tick_entities(const voxel::BlockRegistry* block_registry) {
   flush_entity_despawns();
   u32 updated = 0;
+  const Seconds tick_seconds = tick_duration_seconds(DefaultBaseTps);
   const auto player_view = entity_registry_.view<
       entity::RuntimeEntity,
       entity::EntityTransform,
@@ -1040,6 +1542,10 @@ u32 WorldRuntime::tick_entities() {
     update_entity_chunk(handle);
     ++updated;
   }
+
+  updated += tick_brains();
+  updated += tick_entity_physics(block_registry, tick_seconds);
+  updated += tick_entity_animations(tick_seconds);
 
   const auto transform_view = entity_registry_.view<entity::EntityTransform, entity::ChunkRelevance>();
   for (const entt::entity handle : transform_view) {
@@ -1271,7 +1777,7 @@ WorldTickStats WorldRuntime::tick(
   ++tick_index_;
 
   WorldTickStats stats;
-  stats.entity_updates_processed = tick_entities();
+  stats.entity_updates_processed = tick_entities(&registry);
   stats.scheduled_ticks_processed = process_due_scheduled_ticks();
 
   if (tick_policy_.block_update_interval == 0U ||

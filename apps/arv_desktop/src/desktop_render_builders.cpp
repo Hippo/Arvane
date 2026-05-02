@@ -132,8 +132,8 @@ void populate_world_frame_draw_items(
     item.position = interpolate(mirror.previous_position, mirror.position, interpolation_alpha);
     item.rotation = mirror.rotation;
     item.scale = 1.0F;
-    item.animation_name = "walking";
-    item.animation_time_seconds = entity_animation_time;
+    item.animation_name = mirror.animation_name;
+    item.animation_time_seconds = mirror.animation_time_seconds;
     frame.entities.push_back(std::move(item));
   }
 

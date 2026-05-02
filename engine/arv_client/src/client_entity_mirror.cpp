@@ -55,6 +55,8 @@ void ClientEntityMirrorStore::apply_snapshot(
     mirror.position = entry.position;
     mirror.velocity = entry.velocity;
     mirror.rotation = entry.rotation;
+    mirror.animation_name = entry.animation_name;
+    mirror.animation_time_seconds = entry.animation_time_seconds;
   }
 }
 
