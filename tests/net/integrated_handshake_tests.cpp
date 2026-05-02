@@ -299,6 +299,61 @@ TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
   EXPECT_EQ(updates.front().updates.front().new_state, dirt);
 }
 
+TEST(IntegratedHandshakeTests, DroppedItemsReplicateAfterRelevantChunkStreaming) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID stone_item = item_registry.find_item("arvane:stone").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerChunkStreamingConfig streaming_config;
+  streaming_config.max_view_distance = 0;
+  streaming_config.max_chunks_sent_per_player_tick = 1;
+  ASSERT_TRUE(server.start({
+      arv::server::ServerMode::Integrated,
+      arv::DefaultBaseTps,
+      {"in-process", 0},
+      &block_registry,
+      &item_registry,
+      arv::player::default_player_tuning(),
+      arv::voxel::make_water_fluid_definition(),
+      streaming_config}));
+
+  const arv::ChunkCoord spawn_chunk{{0, 1, -2}};
+  (void)server.voxel_world().ensure_chunk(spawn_chunk);
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.set_chunk_view_distance(0);
+  ASSERT_TRUE(client.connect_integrated());
+
+  for (int tick = 0; tick < 4 && client.dropped_item_count() == 0U; ++tick) {
+    server.tick();
+    client.fixed_tick(server.tick_index());
+    (void)client.drain_received_chunk_data();
+  }
+
+  arv::player::PlayerState& player = connected_player(server);
+  player.inventory_cursor_stack = arv::player::ItemStack{stone_item, 2};
+  ASSERT_TRUE(server.drop_player_inventory_cursor(player.player_id).has_value());
+
+  server.tick();
+  client.fixed_tick(server.tick_index());
+
+  ASSERT_EQ(client.dropped_item_count(), 1U);
+  const std::vector<arv::client::DroppedItemMirror> drops = client.dropped_item_mirrors();
+  ASSERT_EQ(drops.size(), 1U);
+  EXPECT_EQ(drops.front().stack, (arv::player::ItemStack{stone_item, 2}));
+
+  const std::vector<arv::entity::DroppedItemEntitySnapshot> server_drops =
+      server.voxel_world().collect_dropped_item_snapshots();
+  ASSERT_EQ(server_drops.size(), 1U);
+  ASSERT_TRUE(server.voxel_world().destroy_entity(server_drops.front().entity_id));
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  EXPECT_TRUE(server.dropped_item_stacks().empty());
+  EXPECT_EQ(client.dropped_item_count(), 0U);
+}
+
 TEST(IntegratedHandshakeTests, DisconnectCleansSessionAndWorldLocalPlayerEntity) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
@@ -584,6 +639,22 @@ TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackReceivesGeneratedChu
   ASSERT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
   EXPECT_GT(server.voxel_world().loaded_chunk_count(), 0U);
+
+  arv::player::PlayerState& player = connected_player(server);
+  const arv::player::ItemID stone_item = item_registry.find_item("arvane:stone").value();
+  player.inventory_cursor_stack = arv::player::ItemStack{stone_item, 1};
+  ASSERT_TRUE(server.drop_player_inventory_cursor(player.player_id).has_value());
+
+  for (int attempt = 0; attempt < 300 && client.dropped_item_count() == 0U; ++attempt) {
+    server.tick();
+    client.fixed_tick(server.tick_index());
+    if (client.dropped_item_count() == 0U) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  ASSERT_EQ(client.dropped_item_count(), 1U);
+  EXPECT_EQ(client.dropped_item_mirrors().front().stack.item, stone_item);
 }
 
 TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackStreamsViewDistanceOne) {

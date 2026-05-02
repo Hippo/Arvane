@@ -14,11 +14,20 @@
 
 namespace arv::desktop {
 
+inline constexpr usize BreakStageTextureCount = 10;
+
+struct BlockOutlineRenderConfig {
+  Vec3f color{0.02F, 0.02F, 0.02F};
+  f32 thickness{0.55F};
+};
+
 struct EntityRenderAssets {
   asset::TextureAtlas texture_atlas{};
   std::vector<render::EntityModelAsset> models{};
   HashMap<EntityTypeID, render::EntityModelID> model_by_type{};
   HashMap<player::ItemID, render::EntityModelID> model_by_item{};
+  std::vector<std::array<render::EntityModelID, BreakStageTextureCount>> break_overlay_model_by_variant{};
+  std::vector<render::EntityModelID> outline_model_by_variant{};
 };
 
 using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>;
@@ -45,6 +54,7 @@ using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>
     const entity::EntityRegistry& entity_registry,
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
-    std::span<const asset::BlockModelAssetData> block_models = {});
+    std::span<const asset::BlockModelAssetData> block_models = {},
+    BlockOutlineRenderConfig outline_config = {});
 
 } // namespace arv::desktop

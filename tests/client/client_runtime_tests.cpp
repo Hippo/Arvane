@@ -188,6 +188,50 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   EXPECT_EQ(client.replicated_entity_count(), 0U);
 }
 
+TEST(ClientRuntimeTests, DroppedItemSnapshotsCreateUpdateAndRemoveMirrors) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  arv::protocol::DroppedItemSnapshot snapshot;
+  snapshot.world_id = arv::WorldID{1};
+  snapshot.server_tick = 10;
+  snapshot.drops.push_back({
+      arv::EntityNetID{7},
+      arv::player::ItemStack{arv::player::ItemID{8}, 2},
+      {1.0F, 2.0F, 3.0F},
+      {}});
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::DroppedItemSnapshot,
+      arv::protocol::serialize_dropped_item_snapshot(snapshot),
+      arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  client.fixed_tick(2);
+
+  ASSERT_EQ(client.dropped_item_count(), 1U);
+  const arv::client::DroppedItemMirror* mirror =
+      client.find_dropped_item(arv::EntityNetID{7});
+  ASSERT_NE(mirror, nullptr);
+  EXPECT_EQ(mirror->stack, (arv::player::ItemStack{arv::player::ItemID{8}, 2}));
+  EXPECT_EQ(mirror->position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+
+  snapshot.server_tick = 11;
+  snapshot.drops.clear();
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::DroppedItemSnapshot,
+      arv::protocol::serialize_dropped_item_snapshot(snapshot),
+      arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  client.fixed_tick(3);
+  EXPECT_EQ(client.dropped_item_count(), 0U);
+}
+
 TEST(ClientRuntimeTests, InventoryAndBlockUpdatesRejectInactiveOrStaleState) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);

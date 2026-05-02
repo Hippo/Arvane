@@ -4,7 +4,9 @@
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/math.hpp"
+#include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
+#include "arv/player/item.hpp"
 
 #include <optional>
 #include <span>
@@ -16,6 +18,7 @@ namespace arv::entity {
 
 inline constexpr EntityTypeID PlayerEntityTypeID{1};
 inline constexpr std::string_view PlayerEntityTypeName = "arvane:player";
+inline constexpr std::string_view DroppedItemEntityTypeName = "arvane:dropped_item";
 
 struct EntityRegistryError {
   std::string message{};
@@ -104,6 +107,11 @@ struct NetworkEntity {
   EntityNetID net_id{};
 };
 
+struct DroppedItem {
+  player::ItemStack stack{};
+  Seconds pickup_delay_seconds{};
+};
+
 struct ChunkRelevance {
   ChunkCoord current_chunk{};
 };
@@ -127,6 +135,19 @@ struct PersistentEntityRecord {
   Vec3f position{};
   Quatf rotation{};
   Vec3f velocity{};
+  std::optional<player::ItemStack> dropped_item_stack{};
+  Seconds dropped_item_pickup_delay_seconds{};
+};
+
+struct DroppedItemEntitySnapshot {
+  EntityID entity_id{};
+  EntityNetID net_id{};
+  WorldID world_id{};
+  Vec3f position{};
+  Vec3f velocity{};
+  ChunkCoord chunk{};
+  player::ItemStack stack{};
+  Seconds pickup_delay_seconds{};
 };
 
 } // namespace arv::entity

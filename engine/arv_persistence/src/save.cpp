@@ -45,6 +45,28 @@ using json = nlohmann::json;
       node.at(3).get<f32>()};
 }
 
+[[nodiscard]] json item_stack_to_json(
+    player::ItemStack stack,
+    const player::ItemRegistry& registry) {
+  const player::ItemRecord* item = registry.item(stack.item);
+  return json{
+      {"item", item == nullptr ? std::string{player::MissingItemName} : item->name},
+      {"count", stack.count},
+  };
+}
+
+[[nodiscard]] player::ItemStack item_stack_from_json(
+    const json& node,
+    const player::ItemRegistry& registry) {
+  const player::ItemRecord* missing_item = registry.missing_item();
+  const player::ItemID fallback = missing_item == nullptr ? player::AirItemID : missing_item->id;
+  const std::optional<player::ItemID> item =
+      registry.find_item(node.at("item").get<std::string>());
+  return {
+      item.value_or(fallback),
+      node.at("count").get<u16>()};
+}
+
 [[nodiscard]] RegionCoord entity_region_for_position(Vec3f position) noexcept {
   const BlockPos block_pos{{
       static_cast<i32>(std::floor(position.x)),
@@ -54,7 +76,17 @@ using json = nlohmann::json;
   return chunk_column_to_region(chunk_to_column(block_to_chunk(block_pos)));
 }
 
-[[nodiscard]] json entity_record_to_json(const entity::PersistentEntityRecord& entity) {
+[[nodiscard]] json entity_record_to_json(
+    const entity::PersistentEntityRecord& entity,
+    const player::ItemRegistry& item_registry) {
+  json components = json::object();
+  if (entity.dropped_item_stack.has_value()) {
+    components["dropped_item"] = {
+        {"stack", item_stack_to_json(entity.dropped_item_stack.value(), item_registry)},
+        {"pickup_delay_seconds", entity.dropped_item_pickup_delay_seconds},
+    };
+  }
+
   return json{
       {"uuid", entity.uuid},
       {"type", entity.type_name},
@@ -63,11 +95,13 @@ using json = nlohmann::json;
       {"position", vec3_to_json(entity.position)},
       {"rotation", quat_to_json(entity.rotation)},
       {"velocity", vec3_to_json(entity.velocity)},
-      {"components", json::object()},
+      {"components", std::move(components)},
   };
 }
 
-[[nodiscard]] entity::PersistentEntityRecord entity_record_from_json(const json& entry) {
+[[nodiscard]] entity::PersistentEntityRecord entity_record_from_json(
+    const json& entry,
+    const player::ItemRegistry& item_registry) {
   entity::PersistentEntityRecord record;
   record.uuid = entry.at("uuid").get<std::string>();
   record.type_name = entry.at("type").get<std::string>();
@@ -75,6 +109,17 @@ using json = nlohmann::json;
   record.position = json_to_vec3(entry.at("position"));
   record.rotation = json_to_quat(entry.at("rotation"));
   record.velocity = json_to_vec3(entry.at("velocity"));
+  if (const auto components = entry.find("components");
+      components != entry.end() && components->is_object()) {
+    if (const auto dropped_item = components->find("dropped_item");
+        dropped_item != components->end() && dropped_item->is_object()) {
+      record.dropped_item_stack = item_stack_from_json(dropped_item->at("stack"), item_registry);
+      if (const auto delay = dropped_item->find("pickup_delay_seconds");
+          delay != dropped_item->end()) {
+        record.dropped_item_pickup_delay_seconds = delay->get<Seconds>();
+      }
+    }
+  }
   return record;
 }
 
@@ -498,7 +543,7 @@ Expected<void, PersistenceError> save_server_root(
   for (const auto& [region, region_entities] : entity_regions) {
     json entity_array = json::array();
     for (const entity::PersistentEntityRecord& entity : region_entities) {
-      entity_array.push_back(entity_record_to_json(entity));
+      entity_array.push_back(entity_record_to_json(entity, item_registry));
     }
 
     auto entity_result = write_text_atomic(
@@ -642,7 +687,7 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
       }
       const json entity_json = json::parse(entity_text.value());
       for (const json& entry : entity_json.at("entities")) {
-        loaded.entities.emplace_back(entity_record_from_json(entry));
+        loaded.entities.emplace_back(entity_record_from_json(entry, item_registry));
       }
       return Expected<void, PersistenceError>::success();
     };

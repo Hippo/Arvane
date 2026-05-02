@@ -14,7 +14,23 @@
       "category": "tools",
       "max_stack_size": 1,
       "render_type": "texture",
-      "texture": "arvane:texture/item/pickaxe"
+      "texture": "arvane:texture/item/pickaxe",
+      "tool": {
+        "category": "pickaxe",
+        "break_speed_multiplier": 4.0
+      }
+    },
+    {
+      "name": "arvane:wood_shovel",
+      "display_name": "Wood Shovel",
+      "category": "tools",
+      "max_stack_size": 1,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/pickaxe",
+      "tool": {
+        "category": "shovel",
+        "break_speed_multiplier": 4.0
+      }
     },
     {
       "name": "arvane:bucket",

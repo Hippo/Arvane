@@ -65,6 +65,22 @@ void read_fluid_speed_config(
   read_scalar(fluid, "flow_interval_ticks", config.flow_interval_ticks);
 }
 
+void read_block_outline_config(
+    const YAML::Node& render,
+    RenderConfig::BlockOutlineConfig& config) {
+  const YAML::Node outline = render["block_outline"];
+  if (!outline) {
+    return;
+  }
+  const YAML::Node color = outline["color"];
+  if (color && color.IsSequence() && color.size() == 3U) {
+    config.color_r = color[0].as<f32>();
+    config.color_g = color[1].as<f32>();
+    config.color_b = color[2].as<f32>();
+  }
+  read_scalar(outline, "thickness", config.thickness);
+}
+
 void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
   read_scalar(physics, "standing_eye_height", config.standing_eye_height);
   read_scalar(physics, "sneaking_eye_height", config.sneaking_eye_height);
@@ -99,6 +115,37 @@ void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
   read_scalar(physics, "surface_buoyancy", config.surface_buoyancy);
   read_scalar(physics, "underwater_buoyancy", config.underwater_buoyancy);
   read_scalar(physics, "breath_seconds", config.breath_seconds);
+}
+
+void read_gameplay_config(const YAML::Node& gameplay, GameplayConfig& config) {
+  const YAML::Node block_breaking = gameplay["block_breaking"];
+  if (block_breaking) {
+    read_scalar(
+        block_breaking,
+        "base_seconds_per_hardness",
+        config.block_breaking.base_seconds_per_hardness);
+    read_scalar(
+        block_breaking,
+        "creative_inventory_multiplier",
+        config.block_breaking.creative_inventory_multiplier);
+    read_scalar(
+        block_breaking,
+        "hand_speed_multiplier",
+        config.block_breaking.hand_speed_multiplier);
+    read_scalar(
+        block_breaking,
+        "wrong_tool_speed_multiplier",
+        config.block_breaking.wrong_tool_speed_multiplier);
+  }
+
+  const YAML::Node dropped_items = gameplay["dropped_items"];
+  if (dropped_items) {
+    read_scalar(dropped_items, "pickup_radius", config.dropped_items.pickup_radius);
+    read_scalar(
+        dropped_items,
+        "pickup_delay_seconds",
+        config.dropped_items.pickup_delay_seconds);
+  }
 }
 
 std::filesystem::path normalize_lexical(std::filesystem::path path) {
@@ -383,6 +430,25 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "breath_seconds" << YAML::Value << config.physics.breath_seconds;
   emitter << YAML::EndMap;
 
+  emitter << YAML::Key << "gameplay" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "block_breaking" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "base_seconds_per_hardness" << YAML::Value
+          << config.gameplay.block_breaking.base_seconds_per_hardness;
+  emitter << YAML::Key << "creative_inventory_multiplier" << YAML::Value
+          << config.gameplay.block_breaking.creative_inventory_multiplier;
+  emitter << YAML::Key << "hand_speed_multiplier" << YAML::Value
+          << config.gameplay.block_breaking.hand_speed_multiplier;
+  emitter << YAML::Key << "wrong_tool_speed_multiplier" << YAML::Value
+          << config.gameplay.block_breaking.wrong_tool_speed_multiplier;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "dropped_items" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "pickup_radius" << YAML::Value
+          << config.gameplay.dropped_items.pickup_radius;
+  emitter << YAML::Key << "pickup_delay_seconds" << YAML::Value
+          << config.gameplay.dropped_items.pickup_delay_seconds;
+  emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
+
   emitter << YAML::Key << "render" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "max_chunk_mesh_uploads_per_frame" << YAML::Value
           << config.render.max_chunk_mesh_uploads_per_frame;
@@ -392,6 +458,16 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
           << config.render.frame_pacing_target_fps;
   emitter << YAML::Key << "frame_pacing_spin_us" << YAML::Value
           << config.render.frame_pacing_spin_us;
+  emitter << YAML::Key << "block_outline" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "color" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq
+          << config.render.block_outline.color_r
+          << config.render.block_outline.color_g
+          << config.render.block_outline.color_b
+          << YAML::EndSeq;
+  emitter << YAML::Key << "thickness" << YAML::Value
+          << config.render.block_outline.thickness;
+  emitter << YAML::EndMap;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
@@ -577,6 +653,25 @@ ConfigResult save_default_shared_config_file(
   emitter << YAML::Key << "breath_seconds" << YAML::Value << config.physics.breath_seconds;
   emitter << YAML::EndMap;
 
+  emitter << YAML::Key << "gameplay" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "block_breaking" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "base_seconds_per_hardness" << YAML::Value
+          << config.gameplay.block_breaking.base_seconds_per_hardness;
+  emitter << YAML::Key << "creative_inventory_multiplier" << YAML::Value
+          << config.gameplay.block_breaking.creative_inventory_multiplier;
+  emitter << YAML::Key << "hand_speed_multiplier" << YAML::Value
+          << config.gameplay.block_breaking.hand_speed_multiplier;
+  emitter << YAML::Key << "wrong_tool_speed_multiplier" << YAML::Value
+          << config.gameplay.block_breaking.wrong_tool_speed_multiplier;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "dropped_items" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "pickup_radius" << YAML::Value
+          << config.gameplay.dropped_items.pickup_radius;
+  emitter << YAML::Key << "pickup_delay_seconds" << YAML::Value
+          << config.gameplay.dropped_items.pickup_delay_seconds;
+  emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
+
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "max_generation_jobs_per_frame" << YAML::Value
           << config.chunk_pipeline.max_generation_jobs_per_frame;
@@ -623,6 +718,16 @@ ConfigResult save_default_client_config_file(
           << config.render.frame_pacing_target_fps;
   emitter << YAML::Key << "frame_pacing_spin_us" << YAML::Value
           << config.render.frame_pacing_spin_us;
+  emitter << YAML::Key << "block_outline" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "color" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq
+          << config.render.block_outline.color_r
+          << config.render.block_outline.color_g
+          << config.render.block_outline.color_b
+          << YAML::EndSeq;
+  emitter << YAML::Key << "thickness" << YAML::Value
+          << config.render.block_outline.thickness;
+  emitter << YAML::EndMap;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
@@ -723,6 +828,11 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_physics_config(physics, config.physics);
   }
 
+  const YAML::Node gameplay = root["gameplay"];
+  if (gameplay) {
+    read_gameplay_config(gameplay, config.gameplay);
+  }
+
   const YAML::Node render = root["render"];
   if (render) {
     read_scalar(
@@ -732,6 +842,7 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_scalar(render, "frame_pacing_enabled", config.render.frame_pacing_enabled);
     read_scalar(render, "frame_pacing_target_fps", config.render.frame_pacing_target_fps);
     read_scalar(render, "frame_pacing_spin_us", config.render.frame_pacing_spin_us);
+    read_block_outline_config(render, config.render.block_outline);
   }
 
   const YAML::Node chunk_pipeline = root["chunk_pipeline"];
@@ -896,12 +1007,51 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
       config.physics.sneaking_body_height > config.physics.body_height) {
     return ConfigError{"physics swimming/sneaking body heights must be <= body_height"};
   }
+  if (!std::isfinite(config.gameplay.block_breaking.base_seconds_per_hardness) ||
+      config.gameplay.block_breaking.base_seconds_per_hardness < 0.0F) {
+    return ConfigError{"gameplay.block_breaking.base_seconds_per_hardness must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.block_breaking.creative_inventory_multiplier) ||
+      config.gameplay.block_breaking.creative_inventory_multiplier < 0.0F) {
+    return ConfigError{"gameplay.block_breaking.creative_inventory_multiplier must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.block_breaking.hand_speed_multiplier) ||
+      config.gameplay.block_breaking.hand_speed_multiplier < 0.0F) {
+    return ConfigError{"gameplay.block_breaking.hand_speed_multiplier must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.block_breaking.wrong_tool_speed_multiplier) ||
+      config.gameplay.block_breaking.wrong_tool_speed_multiplier < 0.0F) {
+    return ConfigError{"gameplay.block_breaking.wrong_tool_speed_multiplier must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.dropped_items.pickup_radius) ||
+      config.gameplay.dropped_items.pickup_radius < 0.0F) {
+    return ConfigError{"gameplay.dropped_items.pickup_radius must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.dropped_items.pickup_delay_seconds) ||
+      config.gameplay.dropped_items.pickup_delay_seconds < 0.0F) {
+    return ConfigError{"gameplay.dropped_items.pickup_delay_seconds must be finite and >= 0"};
+  }
   if (config.render.max_chunk_mesh_uploads_per_frame == 0U) {
     return ConfigError{"render.max_chunk_mesh_uploads_per_frame must be non-zero"};
   }
   if (config.render.frame_pacing_enabled &&
       config.render.frame_pacing_target_fps == 0U) {
     return ConfigError{"render.frame_pacing_target_fps must be non-zero when frame pacing is enabled"};
+  }
+  if (!std::isfinite(config.render.block_outline.color_r) ||
+      !std::isfinite(config.render.block_outline.color_g) ||
+      !std::isfinite(config.render.block_outline.color_b) ||
+      config.render.block_outline.color_r < 0.0F ||
+      config.render.block_outline.color_g < 0.0F ||
+      config.render.block_outline.color_b < 0.0F ||
+      config.render.block_outline.color_r > 1.0F ||
+      config.render.block_outline.color_g > 1.0F ||
+      config.render.block_outline.color_b > 1.0F) {
+    return ConfigError{"render.block_outline.color must contain finite values between 0 and 1"};
+  }
+  if (!std::isfinite(config.render.block_outline.thickness) ||
+      config.render.block_outline.thickness <= 0.0F) {
+    return ConfigError{"render.block_outline.thickness must be finite and > 0"};
   }
   if (config.chunk_pipeline.max_generation_jobs_per_frame == 0U ||
       config.chunk_pipeline.max_generation_results_per_tick == 0U ||

@@ -4,6 +4,7 @@
 #include "arv/core/time.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/net/transport.hpp"
+#include "arv/physics/collision.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
@@ -56,6 +57,18 @@ struct ServerPlayerSaveState {
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
 };
 
+struct BlockBreakingConfig {
+  f32 base_seconds_per_hardness{1.0F};
+  f32 creative_inventory_multiplier{0.0F};
+  f32 hand_speed_multiplier{0.2F};
+  f32 wrong_tool_speed_multiplier{0.2F};
+};
+
+struct DroppedItemsConfig {
+  f32 pickup_radius{1.25F};
+  f32 pickup_delay_seconds{0.5F};
+};
+
 struct ServerStartInfo {
   ServerMode mode{ServerMode::Integrated};
   TickRate base_tps{DefaultBaseTps};
@@ -77,11 +90,15 @@ struct ServerStartInfo {
   TickIndex initial_tick_index{};
   std::string world_name{"default"};
   std::span<const ServerPlayerSaveState> saved_players{};
+  BlockBreakingConfig block_breaking{};
+  DroppedItemsConfig dropped_items{};
 };
 
 struct DroppedItemStack {
+  EntityNetID drop_id{};
   WorldID world_id{};
   Vec3f position{};
+  Vec3f velocity{};
   player::ItemStack stack{};
 };
 
@@ -119,9 +136,7 @@ public:
     return worlds_;
   }
 
-  [[nodiscard]] const std::vector<DroppedItemStack>& dropped_item_stacks() const noexcept {
-    return dropped_item_stacks_;
-  }
+  [[nodiscard]] std::vector<DroppedItemStack> dropped_item_stacks() const;
 
   [[nodiscard]] const std::vector<ServerPlayerSaveState>& saved_player_states() const noexcept {
     return saved_player_states_;
@@ -202,6 +217,7 @@ private:
       net::ConnectionID connection_id,
       const protocol::InventoryActionRequest& request);
   void tick_players();
+  void tick_dropped_item_pickups(Seconds tick_seconds);
   void update_world_simulation_activity();
   void tick_chunk_streaming();
   void drain_generation_jobs(bool drain_all);
@@ -212,11 +228,21 @@ private:
   void schedule_fluid_jobs();
   void refresh_player_permissions(player::PlayerState& player_state);
   void apply_player_command(player::PlayerState& player_state, const player::PlayerCommand& command);
+  void clear_block_break_attempt(PlayerID player_id);
+  void tick_block_break_attempt(
+      player::PlayerState& player_state,
+      const player::PlayerCommand& command,
+      const physics::ICollisionQuery& interaction_query,
+      Vec3f eye_position,
+      Vec3f look_direction,
+      Seconds tick_seconds);
   void send_player_corrections();
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
   void send_block_updates();
   void send_entity_replication();
+  void send_dropped_item_replication();
   void send_inventory_updates();
+  void spawn_dropped_item_stack(WorldID world_id, Vec3f position, player::ItemStack stack);
   bool apply_saved_player_state(const ServerSession& session, player::PlayerState& player_state);
   void record_player_save_state(const ServerSession& session, const player::PlayerState& player_state);
   [[nodiscard]] protocol::InventoryUpdate make_inventory_update(
@@ -241,6 +267,8 @@ private:
   const player::ItemRegistry* item_registry_{};
   const entity::EntityRegistry* entity_registry_{};
   player::PlayerTuning player_tuning_{};
+  BlockBreakingConfig block_breaking_{};
+  DroppedItemsConfig dropped_items_{};
   voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
   ServerChunkStreamer chunk_streamer_{};
   std::optional<ServerChunkGenerationSettings> chunk_generation_{};
@@ -249,13 +277,25 @@ private:
   player::PermissionGroupRegistry permission_groups_{};
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   HashMap<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
+
+  struct BlockBreakAttempt {
+    BlockPos block{};
+    voxel::BlockVariantID variant{};
+    player::ItemID held_item{};
+    f32 elapsed_seconds{};
+    f32 required_seconds{};
+    f32 progress{};
+    u8 stage{};
+  };
+
+  HashMap<PlayerID, BlockBreakAttempt> block_break_attempts_;
   HashSet<SessionID> logged_chunk_interest_sessions_;
   HashSet<SessionID> logged_chunk_delivery_sessions_;
-  std::vector<DroppedItemStack> dropped_item_stacks_;
   std::vector<ServerPlayerSaveState> saved_player_states_;
 
   struct EntityReplicationState {
     HashSet<EntityNetID> known_entities{};
+    HashSet<EntityNetID> known_dropped_items{};
   };
 
   struct InventoryReplicationState {

@@ -41,6 +41,7 @@ enum class MessageType : u16 {
   EntitySpawn = 0x0600,
   EntityDespawn = 0x0601,
   EntitySnapshot = 0x0602,
+  DroppedItemSnapshot = 0x0603,
   InventoryActionRequest = 0x0800,
   InventoryUpdate = 0x0801,
 };

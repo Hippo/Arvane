@@ -156,7 +156,11 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
       "display_name": "Coal",
       "max_stack_size": 64,
       "render_type": "texture",
-      "texture": "arvane:texture/item/coal"
+      "texture": "arvane:texture/item/coal",
+      "tool": {
+        "category": "pickaxe",
+        "break_speed_multiplier": 3.5
+      }
     }
   ]
 }
@@ -175,6 +179,8 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
   ASSERT_NE(coal, nullptr);
   EXPECT_EQ(coal->render_type, arv::player::ItemRenderType::Texture);
   EXPECT_EQ(coal->texture_asset, "arvane:texture/item/coal");
+  EXPECT_EQ(coal->tool_category, "pickaxe");
+  EXPECT_FLOAT_EQ(coal->tool_break_speed_multiplier, 3.5F);
   EXPECT_FALSE(coal->placement_variant.has_value());
 }
 

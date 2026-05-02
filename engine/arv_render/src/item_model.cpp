@@ -1,6 +1,9 @@
 #include "arv/render/item_model.hpp"
 
 #include <algorithm>
+#include <array>
+#include <tuple>
+#include <vector>
 
 namespace arv::render {
 namespace {
@@ -10,6 +13,22 @@ struct Quad {
   std::array<Vec2f, 4> uvs{};
   Vec3f color{1.0F, 1.0F, 1.0F};
 };
+
+enum class EdgeAxis : u8 {
+  X,
+  Y,
+  Z,
+};
+
+struct EdgeSegment {
+  EdgeAxis axis{};
+  i32 a{};
+  i32 b{};
+  i32 start{};
+  i32 end{};
+};
+
+using OccupancyGrid = std::array<bool, 16U * 16U * 16U>;
 
 [[nodiscard]] bool valid_texture_input(const ItemTextureMeshInput& input) noexcept {
   return input.width > 0U && input.height > 0U &&
@@ -141,6 +160,10 @@ struct CubeFaceGeometry {
       static_cast<f32>(z) - 8.0F};
 }
 
+[[nodiscard]] constexpr Vec3f centered(f32 x, f32 y, f32 z) noexcept {
+  return {x - 8.0F, y - 8.0F, z - 8.0F};
+}
+
 constexpr std::array<CubeFaceGeometry, voxel::BlockFaceCount> CubeFaces{{
     {
         voxel::BlockFace::PositiveX,
@@ -190,12 +213,443 @@ constexpr std::array<CubeFaceGeometry, voxel::BlockFaceCount> CubeFaces{{
   return {};
 }
 
+[[nodiscard]] std::array<Vec3f, 4> model_box_face_corners_inflated(
+    const voxel::BlockModelBoxRenderData& box,
+    voxel::BlockFace face,
+    f32 inflate) noexcept {
+  const Vec3f min{
+      static_cast<f32>(box.min.x) - inflate,
+      static_cast<f32>(box.min.y) - inflate,
+      static_cast<f32>(box.min.z) - inflate};
+  const Vec3f max{
+      static_cast<f32>(box.max.x) + inflate,
+      static_cast<f32>(box.max.y) + inflate,
+      static_cast<f32>(box.max.z) + inflate};
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return {{centered(max.x, min.y, max.z), centered(max.x, min.y, min.z), centered(max.x, max.y, max.z), centered(max.x, max.y, min.z)}};
+    case voxel::BlockFace::NegativeX:
+      return {{centered(min.x, min.y, min.z), centered(min.x, min.y, max.z), centered(min.x, max.y, min.z), centered(min.x, max.y, max.z)}};
+    case voxel::BlockFace::PositiveY:
+      return {{centered(min.x, max.y, max.z), centered(max.x, max.y, max.z), centered(min.x, max.y, min.z), centered(max.x, max.y, min.z)}};
+    case voxel::BlockFace::NegativeY:
+      return {{centered(max.x, min.y, max.z), centered(min.x, min.y, max.z), centered(max.x, min.y, min.z), centered(min.x, min.y, min.z)}};
+    case voxel::BlockFace::PositiveZ:
+      return {{centered(min.x, min.y, max.z), centered(max.x, min.y, max.z), centered(min.x, max.y, max.z), centered(max.x, max.y, max.z)}};
+    case voxel::BlockFace::NegativeZ:
+      return {{centered(max.x, min.y, min.z), centered(min.x, min.y, min.z), centered(max.x, max.y, min.z), centered(min.x, max.y, min.z)}};
+  }
+  return {};
+}
+
+[[nodiscard]] std::array<Vec3f, 4> cube_face_corners_inflated(
+    voxel::BlockFace face,
+    f32 inflate) noexcept {
+  const f32 min = -inflate;
+  const f32 max = 16.0F + inflate;
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return {{centered(max, min, max), centered(max, min, min), centered(max, max, max), centered(max, max, min)}};
+    case voxel::BlockFace::NegativeX:
+      return {{centered(min, min, min), centered(min, min, max), centered(min, max, min), centered(min, max, max)}};
+    case voxel::BlockFace::PositiveY:
+      return {{centered(min, max, max), centered(max, max, max), centered(min, max, min), centered(max, max, min)}};
+    case voxel::BlockFace::NegativeY:
+      return {{centered(max, min, max), centered(min, min, max), centered(max, min, min), centered(min, min, min)}};
+    case voxel::BlockFace::PositiveZ:
+      return {{centered(min, min, max), centered(max, min, max), centered(min, max, max), centered(max, max, max)}};
+    case voxel::BlockFace::NegativeZ:
+      return {{centered(max, min, min), centered(min, min, min), centered(max, max, min), centered(min, max, min)}};
+  }
+  return {};
+}
+
 [[nodiscard]] std::array<Vec2f, 4> to_vec2f(std::array<Vec2i, 4> uvs) noexcept {
   std::array<Vec2f, 4> result{};
   for (usize index = 0; index < uvs.size(); ++index) {
     result[index] = {static_cast<f32>(uvs[index].x), static_cast<f32>(uvs[index].y)};
   }
   return result;
+}
+
+[[nodiscard]] constexpr usize grid_index(i32 x, i32 y, i32 z) noexcept {
+  return static_cast<usize>(x) +
+         16U * (static_cast<usize>(y) + 16U * static_cast<usize>(z));
+}
+
+[[nodiscard]] bool occupied(const OccupancyGrid& grid, i32 x, i32 y, i32 z) noexcept {
+  if (x < 0 || y < 0 || z < 0 || x >= 16 || y >= 16 || z >= 16) {
+    return false;
+  }
+  return grid[grid_index(x, y, z)];
+}
+
+[[nodiscard]] OccupancyGrid make_occupancy_grid(
+    std::span<const voxel::BlockModelBoxRenderData> model_boxes) {
+  OccupancyGrid grid{};
+  if (model_boxes.empty()) {
+    grid.fill(true);
+    return grid;
+  }
+
+  for (const voxel::BlockModelBoxRenderData& box : model_boxes) {
+    const i32 min_x = std::clamp(box.min.x, 0, 16);
+    const i32 min_y = std::clamp(box.min.y, 0, 16);
+    const i32 min_z = std::clamp(box.min.z, 0, 16);
+    const i32 max_x = std::clamp(box.max.x, 0, 16);
+    const i32 max_y = std::clamp(box.max.y, 0, 16);
+    const i32 max_z = std::clamp(box.max.z, 0, 16);
+    for (i32 z = min_z; z < max_z; ++z) {
+      for (i32 y = min_y; y < max_y; ++y) {
+        for (i32 x = min_x; x < max_x; ++x) {
+          grid[grid_index(x, y, z)] = true;
+        }
+      }
+    }
+  }
+  return grid;
+}
+
+[[nodiscard]] bool exposed_face(
+    const OccupancyGrid& grid,
+    i32 x,
+    i32 y,
+    i32 z,
+    voxel::BlockFace face) noexcept {
+  if (!occupied(grid, x, y, z)) {
+    return false;
+  }
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return !occupied(grid, x + 1, y, z);
+    case voxel::BlockFace::NegativeX:
+      return !occupied(grid, x - 1, y, z);
+    case voxel::BlockFace::PositiveY:
+      return !occupied(grid, x, y + 1, z);
+    case voxel::BlockFace::NegativeY:
+      return !occupied(grid, x, y - 1, z);
+    case voxel::BlockFace::PositiveZ:
+      return !occupied(grid, x, y, z + 1);
+    case voxel::BlockFace::NegativeZ:
+      return !occupied(grid, x, y, z - 1);
+  }
+  return false;
+}
+
+[[nodiscard]] Vec2f bilinear_uv(
+    const std::array<std::array<Vec2i, 4>, voxel::BlockFaceCount>& face_uvs,
+    voxel::BlockFace face,
+    f32 s,
+    f32 t) noexcept {
+  const std::array<Vec2i, 4>& uvs = face_uvs[voxel::face_index(face)];
+  const f32 u0 = static_cast<f32>(uvs[0].x);
+  const f32 v0 = static_cast<f32>(uvs[0].y);
+  const f32 u1 = static_cast<f32>(uvs[1].x);
+  const f32 v1 = static_cast<f32>(uvs[1].y);
+  const f32 u2 = static_cast<f32>(uvs[2].x);
+  const f32 v2 = static_cast<f32>(uvs[2].y);
+  const f32 u3 = static_cast<f32>(uvs[3].x);
+  const f32 v3 = static_cast<f32>(uvs[3].y);
+  const f32 a = (1.0F - s) * (1.0F - t);
+  const f32 b = s * (1.0F - t);
+  const f32 c = (1.0F - s) * t;
+  const f32 d = s * t;
+  return {
+      u0 * a + u1 * b + u2 * c + u3 * d,
+      v0 * a + v1 * b + v2 * c + v3 * d};
+}
+
+[[nodiscard]] std::pair<f32, f32> face_st(voxel::BlockFace face, Vec3f p) noexcept {
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return {(16.0F - p.z) / 16.0F, p.y / 16.0F};
+    case voxel::BlockFace::NegativeX:
+      return {p.z / 16.0F, p.y / 16.0F};
+    case voxel::BlockFace::PositiveY:
+      return {p.x / 16.0F, (16.0F - p.z) / 16.0F};
+    case voxel::BlockFace::NegativeY:
+      return {(16.0F - p.x) / 16.0F, (16.0F - p.z) / 16.0F};
+    case voxel::BlockFace::PositiveZ:
+      return {p.x / 16.0F, p.y / 16.0F};
+    case voxel::BlockFace::NegativeZ:
+      return {(16.0F - p.x) / 16.0F, p.y / 16.0F};
+  }
+  return {};
+}
+
+[[nodiscard]] Vec2f projected_uv(
+    const std::array<std::array<Vec2i, 4>, voxel::BlockFaceCount>& face_uvs,
+    voxel::BlockFace face,
+    Vec3f p) noexcept {
+  const auto [s, t] = face_st(face, p);
+  return bilinear_uv(face_uvs, face, std::clamp(s, 0.0F, 1.0F), std::clamp(t, 0.0F, 1.0F));
+}
+
+void append_projected_cell_face(
+    EntityModelAsset& asset,
+    const std::array<std::array<Vec2i, 4>, voxel::BlockFaceCount>& face_uvs,
+    i32 x,
+    i32 y,
+    i32 z,
+    voxel::BlockFace face,
+    f32 inflate,
+    Vec3f color) {
+  const f32 x0 = static_cast<f32>(x);
+  const f32 x1 = static_cast<f32>(x + 1);
+  const f32 y0 = static_cast<f32>(y);
+  const f32 y1 = static_cast<f32>(y + 1);
+  const f32 z0 = static_cast<f32>(z);
+  const f32 z1 = static_cast<f32>(z + 1);
+  std::array<Vec3f, 4> p{};
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      p = {{{x1 + inflate, y0, z1}, {x1 + inflate, y0, z0}, {x1 + inflate, y1, z1}, {x1 + inflate, y1, z0}}};
+      break;
+    case voxel::BlockFace::NegativeX:
+      p = {{{x0 - inflate, y0, z0}, {x0 - inflate, y0, z1}, {x0 - inflate, y1, z0}, {x0 - inflate, y1, z1}}};
+      break;
+    case voxel::BlockFace::PositiveY:
+      p = {{{x0, y1 + inflate, z1}, {x1, y1 + inflate, z1}, {x0, y1 + inflate, z0}, {x1, y1 + inflate, z0}}};
+      break;
+    case voxel::BlockFace::NegativeY:
+      p = {{{x1, y0 - inflate, z1}, {x0, y0 - inflate, z1}, {x1, y0 - inflate, z0}, {x0, y0 - inflate, z0}}};
+      break;
+    case voxel::BlockFace::PositiveZ:
+      p = {{{x0, y0, z1 + inflate}, {x1, y0, z1 + inflate}, {x0, y1, z1 + inflate}, {x1, y1, z1 + inflate}}};
+      break;
+    case voxel::BlockFace::NegativeZ:
+      p = {{{x1, y0, z0 - inflate}, {x0, y0, z0 - inflate}, {x1, y1, z0 - inflate}, {x0, y1, z0 - inflate}}};
+      break;
+  }
+
+  append_quad(
+      asset,
+      {{centered(p[0].x, p[0].y, p[0].z),
+        centered(p[1].x, p[1].y, p[1].z),
+        centered(p[2].x, p[2].y, p[2].z),
+        centered(p[3].x, p[3].y, p[3].z)},
+       {projected_uv(face_uvs, face, p[0]),
+        projected_uv(face_uvs, face, p[1]),
+        projected_uv(face_uvs, face, p[2]),
+        projected_uv(face_uvs, face, p[3])},
+       color});
+}
+
+void append_box(
+    EntityModelAsset& asset,
+    Vec3f min,
+    Vec3f max,
+    const std::array<Vec2f, 4>& uvs,
+    Vec3f color) {
+  if (max.x <= min.x || max.y <= min.y || max.z <= min.z) {
+    return;
+  }
+  const Vec3f p000 = centered(min.x, min.y, min.z);
+  const Vec3f p001 = centered(min.x, min.y, max.z);
+  const Vec3f p010 = centered(min.x, max.y, min.z);
+  const Vec3f p011 = centered(min.x, max.y, max.z);
+  const Vec3f p100 = centered(max.x, min.y, min.z);
+  const Vec3f p101 = centered(max.x, min.y, max.z);
+  const Vec3f p110 = centered(max.x, max.y, min.z);
+  const Vec3f p111 = centered(max.x, max.y, max.z);
+
+  append_quad(asset, {{{p101, p100, p111, p110}}, uvs, color});
+  append_quad(asset, {{{p000, p001, p010, p011}}, uvs, color});
+  append_quad(asset, {{{p011, p111, p010, p110}}, uvs, color});
+  append_quad(asset, {{{p100, p000, p110, p010}}, uvs, color});
+  append_quad(asset, {{{p001, p101, p011, p111}}, uvs, color});
+  append_quad(asset, {{{p100, p000, p101, p001}}, uvs, color});
+}
+
+void add_edge_segment(
+    std::vector<EdgeSegment>& edges,
+    EdgeAxis axis,
+    i32 a,
+    i32 b,
+    i32 start,
+    i32 end) {
+  if (start == end) {
+    return;
+  }
+  if (end < start) {
+    std::swap(start, end);
+  }
+  EdgeSegment edge{axis, a, b, start, end};
+  const auto found = std::find_if(edges.begin(), edges.end(), [&](const EdgeSegment& existing) {
+    return existing.axis == edge.axis && existing.a == edge.a && existing.b == edge.b &&
+           existing.start == edge.start && existing.end == edge.end;
+  });
+  if (found == edges.end()) {
+    edges.push_back(edge);
+  }
+}
+
+void add_exposed_face_edges(
+    const OccupancyGrid& grid,
+    std::vector<EdgeSegment>& edges,
+    i32 x,
+    i32 y,
+    i32 z,
+    voxel::BlockFace face) {
+  switch (face) {
+    case voxel::BlockFace::PositiveX: {
+      const i32 plane = x + 1;
+      if (!exposed_face(grid, x, y - 1, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Z, plane, y, z, z + 1);
+      }
+      if (!exposed_face(grid, x, y + 1, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Z, plane, y + 1, z, z + 1);
+      }
+      if (!exposed_face(grid, x, y, z - 1, face)) {
+        add_edge_segment(edges, EdgeAxis::Y, plane, z, y, y + 1);
+      }
+      if (!exposed_face(grid, x, y, z + 1, face)) {
+        add_edge_segment(edges, EdgeAxis::Y, plane, z + 1, y, y + 1);
+      }
+      break;
+    }
+    case voxel::BlockFace::NegativeX: {
+      const i32 plane = x;
+      if (!exposed_face(grid, x, y - 1, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Z, plane, y, z, z + 1);
+      }
+      if (!exposed_face(grid, x, y + 1, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Z, plane, y + 1, z, z + 1);
+      }
+      if (!exposed_face(grid, x, y, z - 1, face)) {
+        add_edge_segment(edges, EdgeAxis::Y, plane, z, y, y + 1);
+      }
+      if (!exposed_face(grid, x, y, z + 1, face)) {
+        add_edge_segment(edges, EdgeAxis::Y, plane, z + 1, y, y + 1);
+      }
+      break;
+    }
+    case voxel::BlockFace::PositiveY: {
+      const i32 plane = y + 1;
+      if (!exposed_face(grid, x - 1, y, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Z, x, plane, z, z + 1);
+      }
+      if (!exposed_face(grid, x + 1, y, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Z, x + 1, plane, z, z + 1);
+      }
+      if (!exposed_face(grid, x, y, z - 1, face)) {
+        add_edge_segment(edges, EdgeAxis::X, plane, z, x, x + 1);
+      }
+      if (!exposed_face(grid, x, y, z + 1, face)) {
+        add_edge_segment(edges, EdgeAxis::X, plane, z + 1, x, x + 1);
+      }
+      break;
+    }
+    case voxel::BlockFace::NegativeY: {
+      const i32 plane = y;
+      if (!exposed_face(grid, x - 1, y, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Z, x, plane, z, z + 1);
+      }
+      if (!exposed_face(grid, x + 1, y, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Z, x + 1, plane, z, z + 1);
+      }
+      if (!exposed_face(grid, x, y, z - 1, face)) {
+        add_edge_segment(edges, EdgeAxis::X, plane, z, x, x + 1);
+      }
+      if (!exposed_face(grid, x, y, z + 1, face)) {
+        add_edge_segment(edges, EdgeAxis::X, plane, z + 1, x, x + 1);
+      }
+      break;
+    }
+    case voxel::BlockFace::PositiveZ: {
+      const i32 plane = z + 1;
+      if (!exposed_face(grid, x - 1, y, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Y, x, plane, y, y + 1);
+      }
+      if (!exposed_face(grid, x + 1, y, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Y, x + 1, plane, y, y + 1);
+      }
+      if (!exposed_face(grid, x, y - 1, z, face)) {
+        add_edge_segment(edges, EdgeAxis::X, y, plane, x, x + 1);
+      }
+      if (!exposed_face(grid, x, y + 1, z, face)) {
+        add_edge_segment(edges, EdgeAxis::X, y + 1, plane, x, x + 1);
+      }
+      break;
+    }
+    case voxel::BlockFace::NegativeZ: {
+      const i32 plane = z;
+      if (!exposed_face(grid, x - 1, y, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Y, x, plane, y, y + 1);
+      }
+      if (!exposed_face(grid, x + 1, y, z, face)) {
+        add_edge_segment(edges, EdgeAxis::Y, x + 1, plane, y, y + 1);
+      }
+      if (!exposed_face(grid, x, y - 1, z, face)) {
+        add_edge_segment(edges, EdgeAxis::X, y, plane, x, x + 1);
+      }
+      if (!exposed_face(grid, x, y + 1, z, face)) {
+        add_edge_segment(edges, EdgeAxis::X, y + 1, plane, x, x + 1);
+      }
+      break;
+    }
+  }
+}
+
+[[nodiscard]] std::vector<EdgeSegment> merged_edges(std::vector<EdgeSegment> edges) {
+  std::sort(edges.begin(), edges.end(), [](const EdgeSegment& lhs, const EdgeSegment& rhs) {
+    return std::tuple{lhs.axis, lhs.a, lhs.b, lhs.start, lhs.end} <
+           std::tuple{rhs.axis, rhs.a, rhs.b, rhs.start, rhs.end};
+  });
+
+  std::vector<EdgeSegment> merged;
+  for (const EdgeSegment& edge : edges) {
+    if (!merged.empty()) {
+      EdgeSegment& last = merged.back();
+      if (last.axis == edge.axis && last.a == edge.a && last.b == edge.b &&
+          edge.start <= last.end) {
+        last.end = std::max(last.end, edge.end);
+        continue;
+      }
+    }
+    merged.push_back(edge);
+  }
+  return merged;
+}
+
+void append_edge_box(
+    EntityModelAsset& asset,
+    const EdgeSegment& edge,
+    f32 thickness,
+    f32 inflate,
+    const std::array<Vec2f, 4>& uvs,
+    Vec3f color) {
+  const f32 t = std::max(thickness, 0.01F) * 0.5F;
+  const f32 a = static_cast<f32>(edge.a);
+  const f32 b = static_cast<f32>(edge.b);
+  const f32 start = static_cast<f32>(edge.start);
+  const f32 end = static_cast<f32>(edge.end);
+  switch (edge.axis) {
+    case EdgeAxis::X:
+      append_box(
+          asset,
+          {start - inflate, a - t, b - t},
+          {end + inflate, a + t, b + t},
+          uvs,
+          color);
+      break;
+    case EdgeAxis::Y:
+      append_box(
+          asset,
+          {a - t, start - inflate, b - t},
+          {a + t, end + inflate, b + t},
+          uvs,
+          color);
+      break;
+    case EdgeAxis::Z:
+      append_box(
+          asset,
+          {a - t, b - t, start - inflate},
+          {a + t, b + t, end + inflate},
+          uvs,
+          color);
+      break;
+  }
 }
 
 } // namespace
@@ -249,6 +703,72 @@ EntityModelAsset build_block_item_model(const ItemBlockModelInput& input) {
         {face.corners, to_vec2f(input.face_uvs[index]), face_color(face.face)});
   }
 
+  return asset;
+}
+
+EntityModelAsset build_block_break_overlay_model(const BlockBreakOverlayModelInput& input) {
+  EntityModelAsset asset;
+  asset.id = input.id;
+  asset.name = input.name;
+
+  const f32 inflate = std::max(input.inflate_sixteenths, 0.0F);
+  const OccupancyGrid grid = make_occupancy_grid(input.model_boxes);
+  for (i32 z = 0; z < 16; ++z) {
+    for (i32 y = 0; y < 16; ++y) {
+      for (i32 x = 0; x < 16; ++x) {
+        if (!occupied(grid, x, y, z)) {
+          continue;
+        }
+        for (const voxel::BlockFace face : voxel::AllBlockFaces) {
+          if (!input.model_boxes.empty() || input.face_valid[voxel::face_index(face)]) {
+            if (exposed_face(grid, x, y, z, face)) {
+              append_projected_cell_face(
+                  asset,
+                  input.face_uvs,
+                  x,
+                  y,
+                  z,
+                  face,
+                  inflate,
+                  {1.0F, 1.0F, 1.0F});
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return asset;
+}
+
+EntityModelAsset build_block_outline_model(const BlockOutlineModelInput& input) {
+  EntityModelAsset asset;
+  asset.id = input.id;
+  asset.name = input.name;
+
+  const std::array<Vec2f, 4> uvs = to_vec2f(input.uvs);
+  const f32 thickness = std::max(input.thickness_sixteenths, 0.01F);
+  const f32 inflate = std::max(input.inflate_sixteenths, 0.0F);
+  const OccupancyGrid grid = make_occupancy_grid(input.model_boxes);
+  std::vector<EdgeSegment> edge_segments;
+  edge_segments.reserve(256);
+  for (i32 z = 0; z < 16; ++z) {
+    for (i32 y = 0; y < 16; ++y) {
+      for (i32 x = 0; x < 16; ++x) {
+        if (!occupied(grid, x, y, z)) {
+          continue;
+        }
+        for (const voxel::BlockFace face : voxel::AllBlockFaces) {
+          if (exposed_face(grid, x, y, z, face)) {
+            add_exposed_face_edges(grid, edge_segments, x, y, z, face);
+          }
+        }
+      }
+    }
+  }
+  for (const EdgeSegment& edge : merged_edges(std::move(edge_segments))) {
+    append_edge_box(asset, edge, thickness, inflate, uvs, input.color);
+  }
   return asset;
 }
 

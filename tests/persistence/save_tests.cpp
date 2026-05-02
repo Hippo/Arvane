@@ -128,7 +128,15 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
        arv::WorldID{1},
        {-1.0F, 5.0F, -1.0F},
        {0.0F, 0.0F, 0.0F, 1.0F},
-       {-0.1F, 0.0F, 0.1F}}};
+       {-0.1F, 0.0F, 0.1F}},
+      {"dropped-item-uuid",
+       std::string{arv::entity::DroppedItemEntityTypeName},
+       arv::WorldID{1},
+       {2.0F, 5.0F, 2.0F},
+       {0.0F, 0.0F, 0.0F, 1.0F},
+       {0.0F, 0.05F, 0.0F},
+       arv::player::ItemStack{stone_item, 4},
+       0.25F}};
 
   ASSERT_TRUE(arv::persistence::save_server_root(
       server_save_root,
@@ -172,7 +180,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_TRUE(loaded.value().players[0].inventory.slot(0).has_value());
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->item, stone_item);
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->count, 7U);
-  ASSERT_EQ(loaded.value().entities.size(), 2U);
+  ASSERT_EQ(loaded.value().entities.size(), 3U);
   const auto entity_a = std::find_if(
       loaded.value().entities.begin(),
       loaded.value().entities.end(),
@@ -193,6 +201,18 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_NE(entity_b, loaded.value().entities.end());
   EXPECT_EQ(entity_b->position, (arv::Vec3f{-1.0F, 5.0F, -1.0F}));
   EXPECT_EQ(entity_b->velocity, (arv::Vec3f{-0.1F, 0.0F, 0.1F}));
+  const auto dropped_item = std::find_if(
+      loaded.value().entities.begin(),
+      loaded.value().entities.end(),
+      [](const arv::entity::PersistentEntityRecord& record) {
+        return record.uuid == "dropped-item-uuid";
+      });
+  ASSERT_NE(dropped_item, loaded.value().entities.end());
+  EXPECT_EQ(dropped_item->type_name, arv::entity::DroppedItemEntityTypeName);
+  ASSERT_TRUE(dropped_item->dropped_item_stack.has_value());
+  EXPECT_EQ(dropped_item->dropped_item_stack->item, stone_item);
+  EXPECT_EQ(dropped_item->dropped_item_stack->count, 4U);
+  EXPECT_FLOAT_EQ(dropped_item->dropped_item_pickup_delay_seconds, 0.25F);
 }
 
 TEST(SaveTests, DiscoversServerSavesSeparatelyFromWorldsAndLoadsRequestedWorld) {

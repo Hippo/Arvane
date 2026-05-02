@@ -10,6 +10,12 @@ void write_f32(MessageWriter& writer, f32 value) {
   writer.write<u32>(std::bit_cast<u32>(value));
 }
 
+void write_block_pos(MessageWriter& writer, BlockPos pos) {
+  writer.write<i32>(pos.value.x);
+  writer.write<i32>(pos.value.y);
+  writer.write<i32>(pos.value.z);
+}
+
 [[nodiscard]] u16 pack_core_permissions(
     const player::ResolvedCorePermissions& permissions) noexcept {
   u16 flags = 0;
@@ -48,6 +54,17 @@ Expected<f32, ProtocolError> read_f32(MessageReader& reader) {
     return Expected<f32, ProtocolError>::failure(value.error());
   }
   return Expected<f32, ProtocolError>::success(std::bit_cast<f32>(value.value()));
+}
+
+Expected<BlockPos, ProtocolError> read_block_pos(MessageReader& reader) {
+  auto x = reader.read<i32>();
+  auto y = reader.read<i32>();
+  auto z = reader.read<i32>();
+  if (!x || !y || !z) {
+    return Expected<BlockPos, ProtocolError>::failure(
+        ProtocolError{"failed to decode block position"});
+  }
+  return Expected<BlockPos, ProtocolError>::success({{x.value(), y.value(), z.value()}});
 }
 
 } // namespace
@@ -122,6 +139,13 @@ std::vector<u8> serialize_player_correction(const PlayerCorrection& correction) 
   writer.write_bool(correction.swimming);
   write_f32(writer, correction.breath_seconds);
   writer.write<u8>(correction.selected_hotbar_slot);
+  writer.write_bool(correction.block_break.active);
+  if (correction.block_break.active) {
+    write_block_pos(writer, correction.block_break.block);
+    writer.write<u32>(correction.block_break.variant.value);
+    write_f32(writer, correction.block_break.progress);
+    writer.write<u8>(correction.block_break.stage);
+  }
   return std::move(writer).take_bytes();
 }
 
@@ -146,11 +170,12 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
   auto swimming = reader.read_bool();
   auto breath_seconds = read_f32(reader);
   auto selected_hotbar_slot = reader.read<u8>();
+  auto block_break_active = reader.read_bool();
 
   if (!server_tick || !player_id || !world_id || !pos_x || !pos_y || !pos_z || !vel_x ||
       !vel_y || !vel_z || !yaw || !pitch || !movement_mode || !game_mode_id ||
       !resolved_core_permissions || !grounded || !sneaking || !swimming ||
-      !breath_seconds || !selected_hotbar_slot) {
+      !breath_seconds || !selected_hotbar_slot || !block_break_active) {
     return Expected<PlayerCorrection, ProtocolError>::failure(
         ProtocolError{"failed to decode player correction"});
   }
@@ -171,6 +196,21 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
   correction.swimming = swimming.value();
   correction.breath_seconds = breath_seconds.value();
   correction.selected_hotbar_slot = selected_hotbar_slot.value();
+  correction.block_break.active = block_break_active.value();
+  if (correction.block_break.active) {
+    auto break_block = read_block_pos(reader);
+    auto break_variant = reader.read<u32>();
+    auto break_progress = read_f32(reader);
+    auto break_stage = reader.read<u8>();
+    if (!break_block || !break_variant || !break_progress || !break_stage) {
+      return Expected<PlayerCorrection, ProtocolError>::failure(
+          ProtocolError{"failed to decode block break progress"});
+    }
+    correction.block_break.block = break_block.value();
+    correction.block_break.variant = voxel::BlockVariantID{break_variant.value()};
+    correction.block_break.progress = break_progress.value();
+    correction.block_break.stage = break_stage.value();
+  }
   return Expected<PlayerCorrection, ProtocolError>::success(std::move(correction));
 }
 

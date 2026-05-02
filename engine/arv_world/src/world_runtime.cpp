@@ -695,7 +695,31 @@ EntityID WorldRuntime::create_entity(EntityCreateInfo info) {
     entity_registry_.emplace<player::PlayerState>(handle, std::move(player_state));
   }
 
+  if (info.dropped_item_stack.has_value()) {
+    entity_registry_.emplace<entity::DroppedItem>(
+        handle,
+        info.dropped_item_stack.value(),
+        info.dropped_item_pickup_delay_seconds);
+  }
+
   return entity_id;
+}
+
+EntityID WorldRuntime::create_dropped_item(
+    player::ItemStack stack,
+    Vec3f position,
+    Vec3f velocity,
+    Seconds pickup_delay_seconds,
+    bool persistent) {
+  EntityCreateInfo info;
+  info.type_name = std::string{entity::DroppedItemEntityTypeName};
+  info.position = position;
+  info.velocity = velocity;
+  info.persistent = persistent;
+  info.replicated = true;
+  info.dropped_item_stack = stack;
+  info.dropped_item_pickup_delay_seconds = std::max<Seconds>(pickup_delay_seconds, 0.0F);
+  return create_entity(std::move(info));
 }
 
 bool WorldRuntime::destroy_entity(EntityID entity_id, EntityDespawnReason reason) {
@@ -814,6 +838,29 @@ const entity::EntityType* WorldRuntime::find_entity_type(EntityID entity_id) con
              : entity_registry_.try_get<entity::EntityType>(handle);
 }
 
+entity::DroppedItem* WorldRuntime::find_dropped_item(EntityID entity_id) noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::DroppedItem>(handle);
+}
+
+const entity::DroppedItem* WorldRuntime::find_dropped_item(EntityID entity_id) const noexcept {
+  const entt::entity handle = entity_handle(entity_id);
+  return handle == entt::null || !entity_registry_.valid(handle)
+             ? nullptr
+             : entity_registry_.try_get<entity::DroppedItem>(handle);
+}
+
+bool WorldRuntime::set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept {
+  entity::DroppedItem* dropped = find_dropped_item(entity_id);
+  if (dropped == nullptr) {
+    return false;
+  }
+  dropped->stack = stack;
+  return true;
+}
+
 bool WorldRuntime::entity_is_persistent(EntityID entity_id) const noexcept {
   const entt::entity handle = entity_handle(entity_id);
   return handle != entt::null && entity_registry_.valid(handle) &&
@@ -852,6 +899,9 @@ std::vector<entity::EntitySnapshotEntry> WorldRuntime::collect_entity_snapshots(
       entity::ChunkRelevance>();
   snapshots.reserve(view.size_hint());
   for (const entt::entity handle : view) {
+    if (entity_registry_.all_of<entity::DroppedItem>(handle)) {
+      continue;
+    }
     const auto& runtime = view.get<entity::RuntimeEntity>(handle);
     const auto& type = view.get<entity::EntityType>(handle);
     const auto& transform = view.get<entity::EntityTransform>(handle);
@@ -877,6 +927,40 @@ std::vector<entity::EntitySnapshotEntry> WorldRuntime::collect_entity_snapshots(
   return snapshots;
 }
 
+std::vector<entity::DroppedItemEntitySnapshot> WorldRuntime::collect_dropped_item_snapshots() const {
+  std::vector<entity::DroppedItemEntitySnapshot> snapshots;
+  const auto view = entity_registry_.view<
+      entity::RuntimeEntity,
+      entity::EntityTransform,
+      entity::EntityVelocity,
+      entity::NetworkEntity,
+      entity::ChunkRelevance,
+      entity::DroppedItem>();
+  snapshots.reserve(view.size_hint());
+  for (const entt::entity handle : view) {
+    const auto& runtime = view.get<entity::RuntimeEntity>(handle);
+    const auto& transform = view.get<entity::EntityTransform>(handle);
+    const auto& velocity = view.get<entity::EntityVelocity>(handle);
+    const auto& network = view.get<entity::NetworkEntity>(handle);
+    const auto& relevance = view.get<entity::ChunkRelevance>(handle);
+    const auto& dropped = view.get<entity::DroppedItem>(handle);
+    if (dropped.stack.count == 0U) {
+      continue;
+    }
+
+    snapshots.push_back({
+        runtime.entity_id,
+        network.net_id,
+        id_,
+        transform.position,
+        velocity.linear,
+        relevance.current_chunk,
+        dropped.stack,
+        dropped.pickup_delay_seconds});
+  }
+  return snapshots;
+}
+
 std::vector<entity::PersistentEntityRecord> WorldRuntime::persistent_entity_records() const {
   std::vector<entity::PersistentEntityRecord> records;
   const auto view = entity_registry_.view<
@@ -891,13 +975,19 @@ std::vector<entity::PersistentEntityRecord> WorldRuntime::persistent_entity_reco
     const auto& persistent = view.get<entity::PersistentEntity>(handle);
     const auto& transform = view.get<entity::EntityTransform>(handle);
     const auto& velocity = view.get<entity::EntityVelocity>(handle);
-    records.push_back({
+    entity::PersistentEntityRecord record{
         persistent.uuid,
         persistent.type_name,
         id_,
         transform.position,
         transform.rotation,
-        velocity.linear});
+        velocity.linear};
+    if (const auto* dropped = entity_registry_.try_get<entity::DroppedItem>(handle);
+        dropped != nullptr) {
+      record.dropped_item_stack = dropped->stack;
+      record.dropped_item_pickup_delay_seconds = dropped->pickup_delay_seconds;
+    }
+    records.push_back(std::move(record));
   }
   return records;
 }
@@ -923,6 +1013,8 @@ void WorldRuntime::restore_persistent_entities(
     info.persistent = true;
     info.persistent_uuid = record.uuid;
     info.replicated = true;
+    info.dropped_item_stack = record.dropped_item_stack;
+    info.dropped_item_pickup_delay_seconds = record.dropped_item_pickup_delay_seconds;
     (void)create_entity(std::move(info));
   }
 }
@@ -952,6 +1044,25 @@ u32 WorldRuntime::tick_entities() {
   const auto transform_view = entity_registry_.view<entity::EntityTransform, entity::ChunkRelevance>();
   for (const entt::entity handle : transform_view) {
     update_entity_chunk(handle);
+  }
+  return updated;
+}
+
+u32 WorldRuntime::tick_dropped_items(Seconds tick_seconds) {
+  u32 updated = 0;
+  if (tick_seconds <= 0.0F) {
+    return updated;
+  }
+
+  const auto view = entity_registry_.view<entity::DroppedItem>();
+  for (const entt::entity handle : view) {
+    auto& dropped = view.get<entity::DroppedItem>(handle);
+    if (dropped.pickup_delay_seconds <= 0.0F) {
+      continue;
+    }
+    dropped.pickup_delay_seconds =
+        std::max<Seconds>(0.0F, dropped.pickup_delay_seconds - tick_seconds);
+    ++updated;
   }
   return updated;
 }

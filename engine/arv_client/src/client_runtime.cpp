@@ -163,6 +163,10 @@ const player::ResolvedPermissions& ClientRuntime::resolved_permissions() const n
   return player_controller_.resolved_permissions();
 }
 
+const protocol::BlockBreakProgress& ClientRuntime::block_break_progress() const noexcept {
+  return player_controller_.block_break_progress();
+}
+
 std::vector<protocol::ChunkData> ClientRuntime::drain_received_chunk_data() {
   std::vector<protocol::ChunkData> drained = std::move(received_chunk_data_);
   received_chunk_data_.clear();
@@ -221,6 +225,22 @@ std::vector<ReplicatedEntityMirror> ClientRuntime::replicated_entity_mirrors() c
   mirrors.reserve(replicated_entities_.size());
   for (const auto& [entity_id, mirror] : replicated_entities_) {
     (void)entity_id;
+    mirrors.push_back(mirror);
+  }
+  return mirrors;
+}
+
+const DroppedItemMirror* ClientRuntime::find_dropped_item(
+    EntityNetID drop_id) const noexcept {
+  const auto found = dropped_items_.find(drop_id);
+  return found == dropped_items_.end() ? nullptr : &found->second;
+}
+
+std::vector<DroppedItemMirror> ClientRuntime::dropped_item_mirrors() const {
+  std::vector<DroppedItemMirror> mirrors;
+  mirrors.reserve(dropped_items_.size());
+  for (const auto& [drop_id, mirror] : dropped_items_) {
+    (void)drop_id;
     mirrors.push_back(mirror);
   }
   return mirrors;
@@ -435,6 +455,14 @@ void ClientRuntime::handle_message(const std::vector<u8>& packet) {
       apply_entity_snapshot(snapshot.value());
       return;
     }
+    case protocol::MessageType::DroppedItemSnapshot: {
+      auto snapshot = protocol::deserialize_dropped_item_snapshot(decoded.value().payload);
+      if (!snapshot) {
+        return;
+      }
+      apply_dropped_item_snapshot(snapshot.value());
+      return;
+    }
     case protocol::MessageType::InventoryUpdate: {
       auto update = protocol::deserialize_inventory_update(decoded.value().payload);
       if (!update) {
@@ -463,6 +491,7 @@ void ClientRuntime::apply_world_leave(const protocol::WorldLeave& leave) {
     return;
   }
   replicated_entities_.clear();
+  dropped_items_.clear();
   received_chunk_data_.clear();
   received_chunk_unloads_.clear();
   received_block_updates_.clear();
@@ -520,6 +549,44 @@ void ClientRuntime::apply_entity_snapshot(const protocol::EntitySnapshot& snapsh
     mirror.position = entry.position;
     mirror.velocity = entry.velocity;
     mirror.rotation = entry.rotation;
+  }
+}
+
+void ClientRuntime::apply_dropped_item_snapshot(
+    const protocol::DroppedItemSnapshot& snapshot) {
+  if (snapshot.world_id != player_controller_.camera().world_id()) {
+    return;
+  }
+
+  HashSet<EntityNetID> seen;
+  seen.reserve(snapshot.drops.size());
+  for (const protocol::DroppedItemSnapshotEntry& entry : snapshot.drops) {
+    if (entry.stack.count == 0U) {
+      continue;
+    }
+    seen.insert(entry.drop_id);
+    DroppedItemMirror& mirror = dropped_items_[entry.drop_id];
+    if (snapshot.server_tick < mirror.last_server_tick) {
+      continue;
+    }
+    const bool first_update = mirror.drop_id.value == 0U;
+    mirror.drop_id = entry.drop_id;
+    mirror.world_id = snapshot.world_id;
+    mirror.previous_position = first_update ? entry.position : mirror.position;
+    mirror.position = entry.position;
+    mirror.velocity = entry.velocity;
+    mirror.stack = entry.stack;
+    mirror.last_server_tick = snapshot.server_tick;
+  }
+
+  for (auto iter = dropped_items_.begin(); iter != dropped_items_.end();) {
+    if (iter->second.world_id == snapshot.world_id &&
+        snapshot.server_tick >= iter->second.last_server_tick &&
+        seen.find(iter->first) == seen.end()) {
+      iter = dropped_items_.erase(iter);
+    } else {
+      ++iter;
+    }
   }
 }
 

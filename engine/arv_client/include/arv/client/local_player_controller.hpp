@@ -69,6 +69,10 @@ public:
     return body_position_;
   }
 
+  [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept {
+    return block_break_progress_;
+  }
+
 private:
   CameraShell camera_{};
   player::PlayerTuning tuning_{player::default_player_tuning()};
@@ -77,6 +81,7 @@ private:
   TickIndex last_authoritative_server_tick_{};
   std::string game_mode_id_{std::string{player::SurvivalGameModeID}};
   player::ResolvedPermissions resolved_permissions_{};
+  protocol::BlockBreakProgress block_break_progress_{};
   bool move_forward_{};
   bool move_backward_{};
   bool move_left_{};

@@ -162,6 +162,21 @@ std::vector<u8> serialize_entity_snapshot(const EntitySnapshot& snapshot) {
   return std::move(writer).take_bytes();
 }
 
+std::vector<u8> serialize_dropped_item_snapshot(const DroppedItemSnapshot& snapshot) {
+  MessageWriter writer;
+  writer.write<u32>(snapshot.world_id.value);
+  writer.write<u64>(snapshot.server_tick);
+  writer.write<u32>(static_cast<u32>(snapshot.drops.size()));
+  for (const DroppedItemSnapshotEntry& entry : snapshot.drops) {
+    writer.write<u32>(entry.drop_id.value);
+    writer.write<u32>(entry.stack.item.value);
+    writer.write<u16>(entry.stack.count);
+    write_vec3(writer, entry.position);
+    write_vec3(writer, entry.velocity);
+  }
+  return std::move(writer).take_bytes();
+}
+
 Expected<EntitySnapshot, ProtocolError> deserialize_entity_snapshot(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
@@ -202,6 +217,48 @@ Expected<EntitySnapshot, ProtocolError> deserialize_entity_snapshot(std::span<co
     return Expected<EntitySnapshot, ProtocolError>::failure(trailing.error());
   }
   return Expected<EntitySnapshot, ProtocolError>::success(std::move(snapshot));
+}
+
+Expected<DroppedItemSnapshot, ProtocolError> deserialize_dropped_item_snapshot(
+    std::span<const u8> bytes) {
+  MessageReader reader(bytes);
+  auto world_id = reader.read<u32>();
+  auto server_tick = reader.read<u64>();
+  auto count = reader.read<u32>();
+  if (!world_id || !server_tick || !count) {
+    return Expected<DroppedItemSnapshot, ProtocolError>::failure(
+        ProtocolError{"failed to decode dropped item snapshot header"});
+  }
+  if (count.value() > MaxDroppedItemsPerSnapshot) {
+    return Expected<DroppedItemSnapshot, ProtocolError>::failure(
+        ProtocolError{"too many dropped items in snapshot"});
+  }
+
+  DroppedItemSnapshot snapshot;
+  snapshot.world_id = WorldID{world_id.value()};
+  snapshot.server_tick = server_tick.value();
+  snapshot.drops.reserve(count.value());
+  for (u32 index = 0; index < count.value(); ++index) {
+    auto drop_id = reader.read<u32>();
+    auto item = reader.read<u32>();
+    auto count_value = reader.read<u16>();
+    auto position = read_vec3(reader);
+    auto velocity = read_vec3(reader);
+    if (!drop_id || !item || !count_value || !position || !velocity) {
+      return Expected<DroppedItemSnapshot, ProtocolError>::failure(
+          ProtocolError{"failed to decode dropped item snapshot entry"});
+    }
+    snapshot.drops.push_back({
+        EntityNetID{drop_id.value()},
+        player::ItemStack{player::ItemID{item.value()}, count_value.value()},
+        position.value(),
+        velocity.value()});
+  }
+  auto trailing = require_no_trailing_bytes(reader);
+  if (!trailing) {
+    return Expected<DroppedItemSnapshot, ProtocolError>::failure(trailing.error());
+  }
+  return Expected<DroppedItemSnapshot, ProtocolError>::success(std::move(snapshot));
 }
 
 } // namespace arv::protocol

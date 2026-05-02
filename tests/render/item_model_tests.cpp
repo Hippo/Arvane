@@ -93,3 +93,33 @@ TEST(ItemModelTests, BuildsBlockItemFromModelBoxes) {
     EXPECT_LE(vertex.position.y, 0.0F);
   }
 }
+
+TEST(ItemModelTests, BlockOutlineUsesUnionOfTouchingModelBoxes) {
+  arv::voxel::BlockModelBoxRenderData left;
+  left.min = {0, 0, 0};
+  left.max = {8, 16, 16};
+  arv::voxel::BlockModelBoxRenderData right;
+  right.min = {8, 0, 0};
+  right.max = {16, 16, 16};
+  const std::array<arv::voxel::BlockModelBoxRenderData, 2> split_cube{{left, right}};
+
+  arv::render::BlockOutlineModelInput split_input;
+  split_input.id = arv::render::EntityModelID{46};
+  split_input.name = "split_outline";
+  split_input.uvs = {{{0, 1}, {1, 1}, {0, 0}, {1, 0}}};
+  split_input.model_boxes =
+      std::span<const arv::voxel::BlockModelBoxRenderData>{split_cube.data(), split_cube.size()};
+
+  arv::render::BlockOutlineModelInput cube_input;
+  cube_input.id = arv::render::EntityModelID{47};
+  cube_input.name = "cube_outline";
+  cube_input.uvs = split_input.uvs;
+
+  const arv::render::EntityModelAsset split_model =
+      arv::render::build_block_outline_model(split_input);
+  const arv::render::EntityModelAsset cube_model =
+      arv::render::build_block_outline_model(cube_input);
+
+  EXPECT_EQ(split_model.vertices.size(), cube_model.vertices.size());
+  EXPECT_EQ(split_model.indices.size(), cube_model.indices.size());
+}

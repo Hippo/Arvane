@@ -36,6 +36,13 @@ void read_bool_property(const nlohmann::json& object, const char* key, bool& val
   }
 }
 
+void read_f32_property(const nlohmann::json& object, const char* key, f32& value) {
+  const auto found = object.find(key);
+  if (found != object.end()) {
+    value = found->get<f32>();
+  }
+}
+
 void set_texture_slot(
     std::array<std::string, BlockFaceCount>& textures,
     BlockFace face,
@@ -738,6 +745,11 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
         read_bool_property(*properties_iter, "fluid", definition.properties.fluid);
         read_bool_property(*properties_iter, "full_cube", definition.properties.full_cube);
         read_bool_property(*properties_iter, "ao_occluder", definition.properties.ao_occluder);
+        read_bool_property(
+            *properties_iter,
+            "drops_with_wrong_tool",
+            definition.properties.drops_with_wrong_tool);
+        read_f32_property(*properties_iter, "hardness", definition.properties.hardness);
         const auto emission_iter = properties_iter->find("emission_rgb");
         if (emission_iter != properties_iter->end()) {
           if (!emission_iter->is_array() || emission_iter->size() != 3U) {

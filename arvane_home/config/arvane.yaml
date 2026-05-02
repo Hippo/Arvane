@@ -66,6 +66,15 @@ physics:
   surface_buoyancy: 10.0
   underwater_buoyancy: 1.0
   breath_seconds: 15.0
+gameplay:
+  block_breaking:
+    base_seconds_per_hardness: 1.0
+    creative_inventory_multiplier: 0.0
+    hand_speed_multiplier: 0.2
+    wrong_tool_speed_multiplier: 0.2
+  dropped_items:
+    pickup_radius: 1.25
+    pickup_delay_seconds: 0.5
 chunk_pipeline:
   max_generation_jobs_per_frame: 4
   max_generation_results_per_tick: 2

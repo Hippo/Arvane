@@ -12,9 +12,30 @@ namespace arv::desktop {
 namespace {
 
 constexpr u32 ItemEntityModelIDBase = 1'000'000U;
+constexpr u32 BreakOverlayEntityModelIDBase = 2'000'000U;
+constexpr u32 BlockOutlineEntityModelIDBase = 3'000'000U;
+constexpr std::string_view WhiteTextureAsset = "arvane:texture/generated_white";
 
 [[nodiscard]] render::EntityModelID item_entity_model_id(player::ItemID item_id) noexcept {
   return render::EntityModelID{ItemEntityModelIDBase + item_id.value};
+}
+
+[[nodiscard]] render::EntityModelID break_overlay_model_id(
+    voxel::BlockVariantID variant,
+    usize stage) noexcept {
+  return render::EntityModelID{
+      BreakOverlayEntityModelIDBase +
+      variant.value * static_cast<u32>(BreakStageTextureCount) +
+      static_cast<u32>(stage)};
+}
+
+[[nodiscard]] std::string break_stage_texture_asset(usize stage) {
+  return "arvane:texture/break_stage/stage" + std::to_string(stage);
+}
+
+[[nodiscard]] render::EntityModelID block_outline_model_id(
+    voxel::BlockVariantID variant) noexcept {
+  return render::EntityModelID{BlockOutlineEntityModelIDBase + variant.value};
 }
 
 [[nodiscard]] std::string normalize_item_model_asset(std::string_view model) {
@@ -46,6 +67,26 @@ constexpr u32 ItemEntityModelIDBase = 1'000'000U;
         entry.unpadded_pixel_min.y + static_cast<i32>(v * static_cast<f32>(entry.height))};
   }
   return uvs;
+}
+
+[[nodiscard]] std::vector<voxel::BlockModelBoxRenderData> make_break_overlay_boxes(
+    const voxel::BlockModelDefinition& model) {
+  std::vector<voxel::BlockModelBoxRenderData> boxes;
+  boxes.reserve(model.boxes.size());
+  for (const voxel::BlockModelBoxDefinition& source : model.boxes) {
+    voxel::BlockModelBoxRenderData box;
+    box.min = source.min;
+    box.max = source.max;
+    for (const voxel::BlockFace face : voxel::AllBlockFaces) {
+      const usize index = voxel::face_index(face);
+      if (!source.faces[index].has_value() || source.faces[index]->texture_index < 0) {
+        continue;
+      }
+      box.faces[index] = voxel::BlockModelFaceRenderData{};
+    }
+    boxes.push_back(std::move(box));
+  }
+  return boxes;
 }
 
 } // namespace
@@ -136,7 +177,8 @@ EntityRenderAssetsResult build_entity_render_assets(
     const entity::EntityRegistry& entity_registry,
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
-    std::span<const asset::BlockModelAssetData> block_models) {
+    std::span<const asset::BlockModelAssetData> block_models,
+    BlockOutlineRenderConfig outline_config) {
   struct PendingModel {
     EntityTypeID type_id{};
     std::optional<player::ItemID> item_id{};
@@ -298,27 +340,41 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
   }
 
+  for (usize stage = 0; stage < BreakStageTextureCount; ++stage) {
+    add_texture(break_stage_texture_asset(stage));
+  }
+  add_texture(std::string{WhiteTextureAsset});
   add_texture("arvane:texture/missing");
 
   std::vector<asset::TextureAtlasInput> inputs;
   HashMap<std::string, asset::Image> source_images;
   inputs.reserve(texture_ids.size());
   for (const asset::AssetID& texture_id : texture_ids) {
-    auto handle = texture_id.value == "arvane:texture/missing"
-                      ? asset::TextureLoadResult::success(resources.missing_texture())
-                      : resources.load_texture(texture_id);
-    if (!handle) {
-      return EntityRenderAssetsResult::failure(handle.error());
+    if (texture_id.value == WhiteTextureAsset) {
+      asset::Image white;
+      white.width = 1;
+      white.height = 1;
+      white.channels = 4;
+      white.pixels = {255, 255, 255, 255};
+      inputs.push_back({texture_id, white, false});
+      source_images[texture_id.value] = std::move(white);
+    } else {
+      auto handle = texture_id.value == "arvane:texture/missing"
+                        ? asset::TextureLoadResult::success(resources.missing_texture())
+                        : resources.load_texture(texture_id);
+      if (!handle) {
+        return EntityRenderAssetsResult::failure(handle.error());
+      }
+      const asset::TextureResource* resource = resources.texture(handle.value());
+      if (resource == nullptr) {
+        return EntityRenderAssetsResult::failure({texture_id.value,
+                                                  {},
+                                                  "build entity texture atlas",
+                                                  "loaded texture handle did not resolve"});
+      }
+      inputs.push_back({texture_id, resource->image, resource->fallback});
+      source_images[texture_id.value] = resource->image;
     }
-    const asset::TextureResource* resource = resources.texture(handle.value());
-    if (resource == nullptr) {
-      return EntityRenderAssetsResult::failure({texture_id.value,
-                                                {},
-                                                "build entity texture atlas",
-                                                "loaded texture handle did not resolve"});
-    }
-    inputs.push_back({texture_id, resource->image, resource->fallback});
-    source_images[texture_id.value] = resource->image;
   }
 
   auto atlas_result = asset::build_texture_atlas(
@@ -428,6 +484,73 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
     assets.model_by_item[pending.item_id] = pending.model_id;
     assets.models.push_back(render::build_block_item_model(input));
+  }
+
+  assets.break_overlay_model_by_variant.resize(block_registry.variant_count());
+  assets.outline_model_by_variant.resize(block_registry.variant_count());
+  for (u32 variant_value = 0; variant_value < block_registry.variant_count(); ++variant_value) {
+    const voxel::BlockVariantID variant_id{variant_value};
+    const voxel::BlockVariantRecord* variant = block_registry.variant(variant_id);
+    if (variant == nullptr || variant->render_category == voxel::RenderCategory::None) {
+      continue;
+    }
+
+    const voxel::BlockModelDefinition* model_definition =
+        variant->model.asset.empty() ? nullptr : block_model_by_variant[variant_value];
+    std::vector<voxel::BlockModelBoxRenderData> model_boxes;
+    if (!variant->model.asset.empty()) {
+      if (model_definition == nullptr) {
+        return EntityRenderAssetsResult::failure({variant->model.asset,
+                                                  resources.resolve_asset_path({variant->model.asset}, asset::AssetKind::Model),
+                                                  "build break overlay model",
+                                                  "block model was not loaded"});
+      }
+      model_boxes = make_break_overlay_boxes(*model_definition);
+    }
+
+    for (usize stage = 0; stage < BreakStageTextureCount; ++stage) {
+      const std::string texture = break_stage_texture_asset(stage);
+      const asset::TextureAtlasEntry* entry = assets.texture_atlas.find(texture);
+      if (entry == nullptr) {
+        return EntityRenderAssetsResult::failure({texture,
+                                                  {},
+                                                  "build break overlay model",
+                                                  "break stage texture was not present in final atlas"});
+      }
+
+      render::BlockBreakOverlayModelInput input;
+      input.id = break_overlay_model_id(variant_id, stage);
+      input.name = variant->debug_name + "#break_stage_" + std::to_string(stage);
+      input.model_boxes =
+          std::span<const voxel::BlockModelBoxRenderData>{model_boxes.data(), model_boxes.size()};
+      for (const voxel::BlockFace face : voxel::AllBlockFaces) {
+        const usize face_index = voxel::face_index(face);
+        input.face_valid[face_index] = variant->renders_face[face_index];
+        input.face_uvs[face_index] = atlas_face_uvs(*entry, voxel::default_cube_face_uvs(face));
+      }
+      assets.break_overlay_model_by_variant[variant_value][stage] = input.id;
+      assets.models.push_back(render::build_block_break_overlay_model(input));
+    }
+
+    const asset::TextureAtlasEntry* white_entry =
+        assets.texture_atlas.find(std::string{WhiteTextureAsset});
+    if (white_entry == nullptr) {
+      return EntityRenderAssetsResult::failure({std::string{WhiteTextureAsset},
+                                                {},
+                                                "build block outline model",
+                                                "white texture was not present in final atlas"});
+    }
+
+    render::BlockOutlineModelInput outline_input;
+    outline_input.id = block_outline_model_id(variant_id);
+    outline_input.name = variant->debug_name + "#outline";
+    outline_input.uvs = atlas_face_uvs(*white_entry, voxel::default_cube_face_uvs(voxel::BlockFace::PositiveY));
+    outline_input.color = outline_config.color;
+    outline_input.thickness_sixteenths = outline_config.thickness;
+    outline_input.model_boxes =
+        std::span<const voxel::BlockModelBoxRenderData>{model_boxes.data(), model_boxes.size()};
+    assets.outline_model_by_variant[variant_value] = outline_input.id;
+    assets.models.push_back(render::build_block_outline_model(outline_input));
   }
 
   return EntityRenderAssetsResult::success(std::move(assets));

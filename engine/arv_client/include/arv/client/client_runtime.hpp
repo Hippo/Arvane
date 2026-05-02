@@ -36,6 +36,16 @@ struct ReplicatedEntityMirror {
   std::optional<PlayerID> owning_player{};
 };
 
+struct DroppedItemMirror {
+  EntityNetID drop_id{};
+  WorldID world_id{};
+  Vec3f previous_position{};
+  Vec3f position{};
+  Vec3f velocity{};
+  player::ItemStack stack{};
+  u64 last_server_tick{};
+};
+
 class ClientRuntime {
 public:
   explicit ClientRuntime(std::unique_ptr<net::ITransport> transport);
@@ -55,6 +65,7 @@ public:
   [[nodiscard]] u8 selected_hotbar_slot() const noexcept;
   [[nodiscard]] const std::string& game_mode_id() const noexcept;
   [[nodiscard]] const player::ResolvedPermissions& resolved_permissions() const noexcept;
+  [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept;
   [[nodiscard]] bool inventory_open() const noexcept {
     return inventory_open_;
   }
@@ -96,6 +107,12 @@ public:
   [[nodiscard]] const ReplicatedEntityMirror* find_replicated_entity(
       EntityNetID entity_id) const noexcept;
   [[nodiscard]] std::vector<ReplicatedEntityMirror> replicated_entity_mirrors() const;
+  [[nodiscard]] usize dropped_item_count() const noexcept {
+    return dropped_items_.size();
+  }
+  [[nodiscard]] const DroppedItemMirror* find_dropped_item(
+      EntityNetID drop_id) const noexcept;
+  [[nodiscard]] std::vector<DroppedItemMirror> dropped_item_mirrors() const;
 
 private:
   net::NetworkResult send_client_hello();
@@ -109,6 +126,7 @@ private:
   void apply_entity_spawn(protocol::EntitySpawn spawn);
   void apply_entity_despawn(const protocol::EntityDespawn& despawn);
   void apply_entity_snapshot(const protocol::EntitySnapshot& snapshot);
+  void apply_dropped_item_snapshot(const protocol::DroppedItemSnapshot& snapshot);
   void apply_inventory_update(protocol::InventoryUpdate update);
   void handle_chat_input(const InputFrame& input, bool was_chat_open);
   void close_ui() noexcept;
@@ -123,6 +141,7 @@ private:
   std::vector<protocol::ChunkUnload> received_chunk_unloads_;
   std::vector<protocol::BlockUpdateBatch> received_block_updates_;
   HashMap<EntityNetID, ReplicatedEntityMirror> replicated_entities_;
+  HashMap<EntityNetID, DroppedItemMirror> dropped_items_;
   player::Inventory inventory_{player::DefaultPlayerInventorySlotCount};
   std::optional<player::ItemStack> inventory_cursor_stack_{};
   u32 inventory_revision_{};

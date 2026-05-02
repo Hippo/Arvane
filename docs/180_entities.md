@@ -63,6 +63,7 @@ The ECS should store runtime simulation data such as:
 
 - transform
 - velocity
+- item stack payload for dropped item entities
 - physics body
 - inventory reference
 - health
@@ -82,6 +83,12 @@ The ECS should not store:
 Entity definitions should come from registries or authored data.
 
 Runtime ECS components are instances of those definitions.
+
+Dropped items use the stable entity type name `arvane:dropped_item` and keep
+their item stack, pickup delay, transform, velocity, network identity, and
+persistence identity on the same world entity. The server should replicate and
+persist dropped items from this entity state rather than maintaining a separate
+server-only dropped-stack list.
 
 ---
 

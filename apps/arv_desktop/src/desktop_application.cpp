@@ -26,9 +26,11 @@
 #include "arv/io/config.hpp"
 #include "arv/io/input_bindings.hpp"
 #include "arv/platform/glfw_window.hpp"
+#include "arv/physics/collision.hpp"
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/sched/scheduler.hpp"
 #include "arv/ui/ui.hpp"
+#include "arv/world/world_queries.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -389,6 +391,7 @@ private:
           ++active_session.client_tick_index;
           active_session.client->fixed_tick(active_session.client_tick_index);
         }
+        update_block_outline_target(active_session);
         sessions_.collect_client_chunk_stream(active_session);
         if constexpr (core::profiling_enabled()) {
           const auto simulation_end = std::chrono::steady_clock::now();
@@ -429,6 +432,24 @@ private:
       framebuffer_ = next_framebuffer;
       renderer_.resize(framebuffer_.width, framebuffer_.height);
     }
+  }
+
+  void update_block_outline_target(DesktopGameSession& active_session) {
+    active_session.block_outline_target.reset();
+    world::WorldCollisionQuery query(
+        active_session.client_world,
+        assets_.block_registry,
+        false);
+    const client::CameraShell& camera = active_session.client->camera();
+    const std::optional<physics::BlockRaycastHit> hit = physics::raycast_blocks(
+        query,
+        camera.position(),
+        camera.forward_vector(),
+        config_.physics.reach_distance);
+    if (!hit.has_value() || assets_.block_registry.is_air(hit->variant)) {
+      return;
+    }
+    active_session.block_outline_target = BlockOutlineTarget{hit->block, hit->variant};
   }
 
   [[nodiscard]] usize build_world_frame(

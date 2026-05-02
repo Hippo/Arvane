@@ -84,6 +84,8 @@ struct EntityCreateInfo {
   bool replicated{true};
   std::optional<PlayerID> owning_player{};
   std::optional<player::PlayerState> player_state{};
+  std::optional<player::ItemStack> dropped_item_stack{};
+  Seconds dropped_item_pickup_delay_seconds{};
 };
 
 struct ReplicatedBlockUpdate {
@@ -154,6 +156,12 @@ public:
       std::array<voxel::LightWord, voxel::ChunkVolume> lights,
       std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids = std::nullopt) noexcept;
   [[nodiscard]] EntityID create_entity(EntityCreateInfo info = {});
+  [[nodiscard]] EntityID create_dropped_item(
+      player::ItemStack stack,
+      Vec3f position,
+      Vec3f velocity = {},
+      Seconds pickup_delay_seconds = 0.0F,
+      bool persistent = true);
   bool destroy_entity(EntityID entity_id, EntityDespawnReason reason = EntityDespawnReason::Removed);
   void flush_entity_despawns();
   [[nodiscard]] bool entity_exists(EntityID entity_id) const noexcept;
@@ -168,15 +176,20 @@ public:
   [[nodiscard]] entity::EntityVelocity* find_entity_velocity(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityVelocity* find_entity_velocity(EntityID entity_id) const noexcept;
   [[nodiscard]] const entity::EntityType* find_entity_type(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::DroppedItem* find_dropped_item(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::DroppedItem* find_dropped_item(EntityID entity_id) const noexcept;
+  bool set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept;
   [[nodiscard]] bool entity_is_persistent(EntityID entity_id) const noexcept;
   bool set_entity_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept;
   bool set_entity_position(EntityID entity_id, Vec3f position) noexcept;
   [[nodiscard]] std::vector<entity::EntitySnapshotEntry> collect_entity_snapshots() const;
+  [[nodiscard]] std::vector<entity::DroppedItemEntitySnapshot> collect_dropped_item_snapshots() const;
   [[nodiscard]] std::vector<entity::PersistentEntityRecord> persistent_entity_records() const;
   void restore_persistent_entities(
       std::span<const entity::PersistentEntityRecord> records,
       const entity::EntityRegistry* entity_registry = nullptr);
   u32 tick_entities();
+  u32 tick_dropped_items(Seconds tick_seconds);
   player::PlayerState& ensure_player(PlayerID player_id);
   [[nodiscard]] player::PlayerState* find_player(PlayerID player_id) noexcept;
   [[nodiscard]] const player::PlayerState* find_player(PlayerID player_id) const noexcept;

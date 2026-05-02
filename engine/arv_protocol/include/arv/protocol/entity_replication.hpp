@@ -3,6 +3,7 @@
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/math.hpp"
+#include "arv/player/item.hpp"
 #include "arv/protocol/message_writer.hpp"
 
 #include <optional>
@@ -44,7 +45,21 @@ struct EntitySnapshot {
   std::vector<EntitySnapshotEntry> entities{};
 };
 
+struct DroppedItemSnapshotEntry {
+  EntityNetID drop_id{};
+  player::ItemStack stack{};
+  Vec3f position{};
+  Vec3f velocity{};
+};
+
+struct DroppedItemSnapshot {
+  WorldID world_id{};
+  u64 server_tick{};
+  std::vector<DroppedItemSnapshotEntry> drops{};
+};
+
 inline constexpr u32 MaxEntitiesPerSnapshot = 4096;
+inline constexpr u32 MaxDroppedItemsPerSnapshot = 4096;
 
 std::vector<u8> serialize_entity_spawn(const EntitySpawn& spawn);
 Expected<EntitySpawn, ProtocolError> deserialize_entity_spawn(std::span<const u8> bytes);
@@ -54,5 +69,9 @@ Expected<EntityDespawn, ProtocolError> deserialize_entity_despawn(std::span<cons
 
 std::vector<u8> serialize_entity_snapshot(const EntitySnapshot& snapshot);
 Expected<EntitySnapshot, ProtocolError> deserialize_entity_snapshot(std::span<const u8> bytes);
+
+std::vector<u8> serialize_dropped_item_snapshot(const DroppedItemSnapshot& snapshot);
+Expected<DroppedItemSnapshot, ProtocolError> deserialize_dropped_item_snapshot(
+    std::span<const u8> bytes);
 
 } // namespace arv::protocol

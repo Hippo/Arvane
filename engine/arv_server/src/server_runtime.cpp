@@ -287,7 +287,8 @@ void step_player_without_collision(
 
 [[nodiscard]] protocol::PlayerCorrection make_player_correction(
     TickIndex server_tick,
-    const player::PlayerState& player_state) {
+    const player::PlayerState& player_state,
+    const protocol::BlockBreakProgress* block_break = nullptr) {
   protocol::PlayerCorrection correction;
   correction.server_tick = server_tick;
   correction.player_id = player_state.player_id;
@@ -304,6 +305,9 @@ void step_player_without_collision(
   correction.swimming = player_state.swimming;
   correction.breath_seconds = player_state.breath_seconds;
   correction.selected_hotbar_slot = player_state.selected_hotbar_slot;
+  if (block_break != nullptr) {
+    correction.block_break = *block_break;
+  }
   return correction;
 }
 
@@ -323,7 +327,84 @@ void step_player_without_collision(
          lhs.sneaking == rhs.sneaking &&
          lhs.swimming == rhs.swimming &&
          lhs.breath_seconds == rhs.breath_seconds &&
-         lhs.selected_hotbar_slot == rhs.selected_hotbar_slot;
+         lhs.selected_hotbar_slot == rhs.selected_hotbar_slot &&
+         lhs.block_break == rhs.block_break;
+}
+
+[[nodiscard]] u8 break_stage_for_progress(f32 progress) noexcept {
+  if (progress <= 0.0F) {
+    return 0;
+  }
+  return static_cast<u8>(std::clamp(static_cast<i32>(progress * 10.0F), 0, 9));
+}
+
+[[nodiscard]] bool block_has_mineable_tool_tag(
+    const voxel::BlockRegistry& registry,
+    voxel::BlockID block_id) {
+  const voxel::BlockRecord* block = registry.block(block_id);
+  if (block == nullptr) {
+    return false;
+  }
+  return std::any_of(block->tags.begin(), block->tags.end(), [](const std::string& tag) {
+    return std::string_view{tag}.starts_with("arvane:mineable/");
+  });
+}
+
+[[nodiscard]] bool held_item_matches_block_tool(
+    const player::PlayerState& player_state,
+    const player::ItemRegistry& item_registry,
+    const voxel::BlockRegistry& block_registry,
+    const voxel::BlockVariantRecord& target) {
+  if (!block_has_mineable_tool_tag(block_registry, target.block_id)) {
+    return true;
+  }
+
+  const std::optional<player::ItemStack>& held =
+      player_state.inventory.slot(player_state.selected_hotbar_slot);
+  if (!held.has_value()) {
+    return block_registry.has_tag(target.block_id, "arvane:mineable/hand");
+  }
+
+  const player::ItemRecord* item = item_registry.item(held->item);
+  if (item == nullptr || item->tool_category.empty()) {
+    return block_registry.has_tag(target.block_id, "arvane:mineable/hand");
+  }
+
+  return block_registry.has_tag(target.block_id, "arvane:mineable/" + item->tool_category);
+}
+
+[[nodiscard]] f32 held_tool_break_speed_multiplier(
+    const player::PlayerState& player_state,
+    const player::ItemRegistry& item_registry,
+    const voxel::BlockRegistry& block_registry,
+    const voxel::BlockVariantRecord& target,
+    const BlockBreakingConfig& config) {
+  if (!block_has_mineable_tool_tag(block_registry, target.block_id)) {
+    return 1.0F;
+  }
+
+  const std::optional<player::ItemStack>& held =
+      player_state.inventory.slot(player_state.selected_hotbar_slot);
+  if (!held.has_value()) {
+    return config.hand_speed_multiplier;
+  }
+
+  const player::ItemRecord* item = item_registry.item(held->item);
+  if (item == nullptr || item->tool_category.empty()) {
+    return config.hand_speed_multiplier;
+  }
+
+  if (!held_item_matches_block_tool(player_state, item_registry, block_registry, target)) {
+    return config.wrong_tool_speed_multiplier;
+  }
+
+  return item->tool_break_speed_multiplier;
+}
+
+[[nodiscard]] player::ItemID held_item_id(const player::PlayerState& player_state) noexcept {
+  const std::optional<player::ItemStack>& held =
+      player_state.inventory.slot(player_state.selected_hotbar_slot);
+  return held.has_value() ? held->item : player::AirItemID;
 }
 
 } // namespace
@@ -346,6 +427,8 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
   item_registry_ = start_info.item_registry;
   entity_registry_ = start_info.entity_registry;
   player_tuning_ = start_info.player_tuning;
+  block_breaking_ = start_info.block_breaking;
+  dropped_items_ = start_info.dropped_items;
   fluid_definition_ = start_info.fluid_definition;
   chunk_streamer_.configure(start_info.chunk_streaming);
   const i32 max_view_distance = std::max<i32>(start_info.chunk_streaming.max_view_distance, 0);
@@ -398,6 +481,22 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
   return net::NetworkResult::success();
 }
 
+std::vector<DroppedItemStack> ServerRuntime::dropped_item_stacks() const {
+  std::vector<DroppedItemStack> drops;
+  const std::vector<entity::DroppedItemEntitySnapshot> snapshots =
+      default_world_.collect_dropped_item_snapshots();
+  drops.reserve(snapshots.size());
+  for (const entity::DroppedItemEntitySnapshot& snapshot : snapshots) {
+    drops.push_back({
+        snapshot.net_id,
+        snapshot.world_id,
+        snapshot.position,
+        snapshot.velocity,
+        snapshot.stack});
+  }
+  return drops;
+}
+
 void ServerRuntime::tick() {
   if (state_ != ServerRuntimeState::Running || !transport_) {
     return;
@@ -411,6 +510,9 @@ void ServerRuntime::tick() {
     handle_network_event(std::move(event));
   }
   tick_players();
+  const Seconds tick_seconds = tick_duration_seconds(base_tps_);
+  default_world_.tick_dropped_items(tick_seconds);
+  tick_dropped_item_pickups(tick_seconds);
   update_world_simulation_activity();
   (void)default_world_.tick(*block_registry_, fluid_definition_);
   schedule_fluid_jobs();
@@ -420,6 +522,7 @@ void ServerRuntime::tick() {
   send_player_corrections();
   send_block_updates();
   send_entity_replication();
+  send_dropped_item_replication();
   send_inventory_updates();
   ++tick_index_;
 }
@@ -515,7 +618,7 @@ std::optional<player::ItemStack> ServerRuntime::drop_player_inventory_cursor(Pla
   }
 
   std::optional<player::ItemStack> dropped = player_state->inventory_cursor_stack;
-  dropped_item_stacks_.emplace_back(
+  spawn_dropped_item_stack(
       player_state->world_id,
       player_state->position,
       dropped.value());
@@ -534,7 +637,7 @@ std::optional<player::ItemStack> ServerRuntime::drop_one_from_player_inventory_c
   player::ItemStack dropped{
       player_state->inventory_cursor_stack->item,
       1U};
-  dropped_item_stacks_.emplace_back(
+  spawn_dropped_item_stack(
       player_state->world_id,
       player_state->position,
       dropped);
@@ -544,6 +647,25 @@ std::optional<player::ItemStack> ServerRuntime::drop_one_from_player_inventory_c
     player_state->inventory_cursor_stack.reset();
   }
   return dropped;
+}
+
+void ServerRuntime::spawn_dropped_item_stack(
+    WorldID world_id,
+    Vec3f position,
+    player::ItemStack stack) {
+  if (stack.count == 0U || item_registry_ == nullptr ||
+      item_registry_->item(stack.item) == nullptr) {
+    return;
+  }
+  if (world_id != default_world_.id()) {
+    return;
+  }
+  (void)default_world_.create_dropped_item(
+      stack,
+      position,
+      {},
+      dropped_items_.pickup_delay_seconds,
+      true);
 }
 
 player::InventoryOperationResult ServerRuntime::close_player_inventory_menu(PlayerID player_id) {
@@ -586,6 +708,7 @@ void ServerRuntime::handle_network_event(net::NetworkEvent event) {
         inventory_replication_.erase(session->player_id);
         pending_player_commands_.erase(session->player_id);
         last_sent_player_corrections_.erase(session->player_id);
+        block_break_attempts_.erase(session->player_id);
         logged_chunk_interest_sessions_.erase(session->session_id);
         logged_chunk_delivery_sessions_.erase(session->session_id);
         if (const player::PlayerState* player_state =
@@ -755,6 +878,55 @@ void ServerRuntime::tick_players() {
 
     apply_player_command(*player_state, command);
     player_state->last_processed_input_tick = command.client_tick;
+  }
+}
+
+void ServerRuntime::tick_dropped_item_pickups(Seconds tick_seconds) {
+  (void)tick_seconds;
+  if (item_registry_ == nullptr || dropped_items_.pickup_radius <= 0.0F) {
+    return;
+  }
+
+  const f32 radius_sq = dropped_items_.pickup_radius * dropped_items_.pickup_radius;
+  const std::vector<entity::DroppedItemEntitySnapshot> drops =
+      default_world_.collect_dropped_item_snapshots();
+  for (const entity::DroppedItemEntitySnapshot& drop : drops) {
+    if (drop.pickup_delay_seconds > 0.0F || drop.stack.count == 0U) {
+      continue;
+    }
+
+    entity::DroppedItem* live_drop = default_world_.find_dropped_item(drop.entity_id);
+    if (live_drop == nullptr || live_drop->stack.count == 0U ||
+        live_drop->pickup_delay_seconds > 0.0F) {
+      continue;
+    }
+
+    for (const PlayerID player_id : default_world_.player_ids()) {
+      player::PlayerState* player_state = default_world_.find_player(player_id);
+      if (player_state == nullptr || player_state->world_id != drop.world_id) {
+        continue;
+      }
+
+      const Vec3f delta = player_state->position - drop.position;
+      if (dot(delta, delta) > radius_sq) {
+        continue;
+      }
+
+      const player::InventoryInsertResult insert_result =
+          player_state->inventory.insert_stack(live_drop->stack, *item_registry_);
+      const u16 leftover_count =
+          insert_result.leftover.has_value() ? insert_result.leftover->count : 0U;
+      if (leftover_count == live_drop->stack.count) {
+        continue;
+      }
+
+      if (insert_result.complete()) {
+        (void)default_world_.destroy_entity(drop.entity_id, world::EntityDespawnReason::Removed);
+      } else {
+        live_drop->stack = insert_result.leftover.value();
+      }
+      break;
+    }
   }
 }
 
@@ -1185,20 +1357,13 @@ void ServerRuntime::apply_player_command(
   const Vec3f eye_position = player_eye_position(player_state, player_tuning_);
   const Vec3f look_direction = player_look_direction(player_state);
 
-  if (command.primary_pressed && player_state.resolved_permissions.core.can_modify_world) {
-    auto hit = physics::raycast_blocks(
-        interaction_query,
-        eye_position,
-        look_direction,
-        player_tuning_.reach_distance);
-    if (hit.has_value()) {
-      // TODO(arvane): Replace instant-break interaction with documented timed
-      // break progress once block hardness and tool rules are specified.
-      if (!block_registry_->is_air(default_world_.get_block(hit->block))) {
-        (void)default_world_.set_block(hit->block, voxel::AirBlockVariantID);
-      }
-    }
-  }
+  tick_block_break_attempt(
+      player_state,
+      command,
+      interaction_query,
+      eye_position,
+      look_direction,
+      tick_seconds);
 
   if (command.secondary_pressed && player_state.resolved_permissions.core.can_modify_world) {
     const std::optional<player::ItemStack>& held_slot =
@@ -1330,6 +1495,154 @@ void ServerRuntime::apply_player_command(
   }
 }
 
+void ServerRuntime::clear_block_break_attempt(PlayerID player_id) {
+  block_break_attempts_.erase(player_id);
+}
+
+void ServerRuntime::tick_block_break_attempt(
+    player::PlayerState& player_state,
+    const player::PlayerCommand& command,
+    const physics::ICollisionQuery& interaction_query,
+    Vec3f eye_position,
+    Vec3f look_direction,
+    Seconds tick_seconds) {
+  if (command.secondary_pressed) {
+    clear_block_break_attempt(player_state.player_id);
+  }
+
+  const bool wants_break = command.primary_pressed || command.primary_held;
+  if (!wants_break) {
+    clear_block_break_attempt(player_state.player_id);
+    return;
+  }
+
+  if (!player_state.resolved_permissions.core.can_modify_world) {
+    clear_block_break_attempt(player_state.player_id);
+    return;
+  }
+
+  auto hit = physics::raycast_blocks(
+      interaction_query,
+      eye_position,
+      look_direction,
+      player_tuning_.reach_distance);
+  if (!hit.has_value()) {
+    clear_block_break_attempt(player_state.player_id);
+    return;
+  }
+
+  const voxel::BlockVariantID target_variant = default_world_.get_block(hit->block);
+  const voxel::BlockVariantRecord* target = block_registry_->variant(target_variant);
+  if (target == nullptr || block_registry_->is_air(target_variant)) {
+    clear_block_break_attempt(player_state.player_id);
+    return;
+  }
+
+  const f32 hardness = target->properties.hardness;
+  if (!std::isfinite(hardness) || hardness < 0.0F) {
+    clear_block_break_attempt(player_state.player_id);
+    return;
+  }
+
+  f32 required_seconds = hardness * block_breaking_.base_seconds_per_hardness;
+  if (player_state.resolved_permissions.core.has_creative_inventory) {
+    required_seconds *= block_breaking_.creative_inventory_multiplier;
+  } else {
+    const f32 speed_multiplier = held_tool_break_speed_multiplier(
+        player_state,
+        *item_registry_,
+        *block_registry_,
+        *target,
+        block_breaking_);
+    if (!std::isfinite(speed_multiplier) || speed_multiplier <= 0.0F) {
+      clear_block_break_attempt(player_state.player_id);
+      return;
+    }
+    required_seconds /= speed_multiplier;
+  }
+
+  if (!std::isfinite(required_seconds) || required_seconds <= 0.0F) {
+    if (default_world_.set_block(hit->block, voxel::AirBlockVariantID)) {
+      if (!player_state.resolved_permissions.core.has_creative_inventory) {
+        const voxel::BlockRecord* block = block_registry_->block(target->block_id);
+        const bool can_drop =
+            block != nullptr && block->is_item &&
+            (!block_has_mineable_tool_tag(*block_registry_, target->block_id) ||
+             target->properties.drops_with_wrong_tool ||
+             held_item_matches_block_tool(
+                 player_state,
+                 *item_registry_,
+                 *block_registry_,
+                 *target));
+        const std::optional<player::ItemID> drop_item =
+            can_drop && item_registry_ != nullptr
+                ? item_registry_->find_item(block->name)
+                : std::nullopt;
+        if (drop_item.has_value()) {
+          spawn_dropped_item_stack(
+              player_state.world_id,
+              {static_cast<f32>(hit->block.value.x) + 0.5F,
+               static_cast<f32>(hit->block.value.y) + 0.5F,
+               static_cast<f32>(hit->block.value.z) + 0.5F},
+              player::ItemStack{drop_item.value(), 1U});
+        }
+      }
+      clear_block_break_attempt(player_state.player_id);
+    }
+    return;
+  }
+
+  BlockBreakAttempt& attempt = block_break_attempts_[player_state.player_id];
+  const player::ItemID held_item = held_item_id(player_state);
+  if (!(attempt.block == hit->block) ||
+      attempt.variant != target_variant ||
+      attempt.held_item != held_item) {
+    attempt = {};
+    attempt.block = hit->block;
+    attempt.variant = target_variant;
+    attempt.held_item = held_item;
+    attempt.required_seconds = required_seconds;
+  } else {
+    attempt.required_seconds = required_seconds;
+  }
+
+  attempt.elapsed_seconds += std::max(tick_seconds, 0.0F);
+  attempt.progress = std::clamp(
+      attempt.elapsed_seconds / std::max(attempt.required_seconds, 0.0001F),
+      0.0F,
+      1.0F);
+  attempt.stage = break_stage_for_progress(attempt.progress);
+
+  if (attempt.elapsed_seconds >= attempt.required_seconds &&
+      default_world_.set_block(hit->block, voxel::AirBlockVariantID)) {
+    if (!player_state.resolved_permissions.core.has_creative_inventory) {
+      const voxel::BlockRecord* block = block_registry_->block(target->block_id);
+      const bool can_drop =
+          block != nullptr && block->is_item &&
+          (!block_has_mineable_tool_tag(*block_registry_, target->block_id) ||
+           target->properties.drops_with_wrong_tool ||
+           held_item_matches_block_tool(
+               player_state,
+               *item_registry_,
+               *block_registry_,
+               *target));
+      const std::optional<player::ItemID> drop_item =
+          can_drop && item_registry_ != nullptr
+              ? item_registry_->find_item(block->name)
+              : std::nullopt;
+      if (drop_item.has_value()) {
+        spawn_dropped_item_stack(
+            player_state.world_id,
+            {static_cast<f32>(hit->block.value.x) + 0.5F,
+             static_cast<f32>(hit->block.value.y) + 0.5F,
+             static_cast<f32>(hit->block.value.z) + 0.5F},
+            player::ItemStack{drop_item.value(), 1U});
+      }
+    }
+    clear_block_break_attempt(player_state.player_id);
+  }
+}
+
 void ServerRuntime::send_player_corrections() {
   for (const SessionID session_id : sessions_.session_ids()) {
     ServerSession* session = sessions_.find(session_id);
@@ -1342,7 +1655,19 @@ void ServerRuntime::send_player_corrections() {
       continue;
     }
 
-    protocol::PlayerCorrection correction = make_player_correction(tick_index_, *player_state);
+    protocol::BlockBreakProgress block_break;
+    if (const auto found = block_break_attempts_.find(player_state->player_id);
+        found != block_break_attempts_.end()) {
+      block_break.active = true;
+      block_break.block = found->second.block;
+      block_break.variant = found->second.variant;
+      block_break.progress = found->second.progress;
+      block_break.stage = found->second.stage;
+    }
+    protocol::PlayerCorrection correction = make_player_correction(
+        tick_index_,
+        *player_state,
+        block_break.active ? &block_break : nullptr);
     if (const auto found = last_sent_player_corrections_.find(player_state->player_id);
         found != last_sent_player_corrections_.end() &&
         same_correction_payload(found->second, correction)) {
@@ -1571,6 +1896,56 @@ void ServerRuntime::send_entity_replication() {
          std::move(packet),
          protocol::MessageType::EntitySnapshot,
          protocol::NetworkLane::Movement});
+  }
+}
+
+void ServerRuntime::send_dropped_item_replication() {
+  const std::vector<entity::DroppedItemEntitySnapshot> drops =
+      default_world_.collect_dropped_item_snapshots();
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr || session->world_id != default_world_.id()) {
+      continue;
+    }
+
+    EntityReplicationState& state = entity_replication_[session_id];
+    HashSet<EntityNetID> relevant_now;
+    protocol::DroppedItemSnapshot snapshot;
+    snapshot.world_id = session->world_id;
+    snapshot.server_tick = tick_index_;
+
+    for (const entity::DroppedItemEntitySnapshot& dropped : drops) {
+      if (dropped.world_id != session->world_id || dropped.stack.count == 0U) {
+        continue;
+      }
+
+      if (!chunk_streamer_.session_has_sent_chunk(session_id, session->world_id, dropped.chunk)) {
+        continue;
+      }
+
+      relevant_now.insert(dropped.net_id);
+      snapshot.drops.push_back({
+          dropped.net_id,
+          dropped.stack,
+          dropped.position,
+          dropped.velocity});
+    }
+
+    if (snapshot.drops.empty() && state.known_dropped_items.empty()) {
+      continue;
+    }
+
+    state.known_dropped_items = std::move(relevant_now);
+    const std::vector<u8> payload = protocol::serialize_dropped_item_snapshot(snapshot);
+    std::vector<u8> packet = protocol::serialize_envelope(
+        {protocol::CurrentProtocolVersion, protocol::MessageType::DroppedItemSnapshot, 0, 0, 0, 0},
+        payload);
+    (void)transport_->send(
+        {session->connection_id,
+         protocol::ReliabilityClass::UnreliableLatestWins,
+         std::move(packet),
+         protocol::MessageType::DroppedItemSnapshot,
+         protocol::NetworkLane::Gameplay});
   }
 }
 

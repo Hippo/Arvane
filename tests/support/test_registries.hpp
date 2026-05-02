@@ -41,6 +41,28 @@ inline player::ItemRegistry make_test_item_registry(const voxel::BlockRegistry& 
   bucket.texture_asset = "arvane:texture/item/bucket";
   items.push_back(std::move(bucket));
 
+  player::ItemDefinition pickaxe;
+  pickaxe.name = "arvane:wood_pickaxe";
+  pickaxe.display_name = "Wood Pickaxe";
+  pickaxe.category = "tools";
+  pickaxe.max_stack_size = 1;
+  pickaxe.explicit_render_type = player::ItemRenderType::Texture;
+  pickaxe.texture_asset = "arvane:texture/item/pickaxe";
+  pickaxe.tool_category = "pickaxe";
+  pickaxe.tool_break_speed_multiplier = 4.0F;
+  items.push_back(std::move(pickaxe));
+
+  player::ItemDefinition shovel;
+  shovel.name = "arvane:wood_shovel";
+  shovel.display_name = "Wood Shovel";
+  shovel.category = "tools";
+  shovel.max_stack_size = 1;
+  shovel.explicit_render_type = player::ItemRenderType::Texture;
+  shovel.texture_asset = "arvane:texture/item/pickaxe";
+  shovel.tool_category = "shovel";
+  shovel.tool_break_speed_multiplier = 4.0F;
+  items.push_back(std::move(shovel));
+
   player::ItemDefinition water_bucket;
   water_bucket.name = "arvane:water_bucket";
   water_bucket.display_name = "Water Bucket";

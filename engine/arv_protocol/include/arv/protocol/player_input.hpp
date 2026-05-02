@@ -1,10 +1,12 @@
 #pragma once
 
 #include "arv/core/expected.hpp"
+#include "arv/core/coordinates.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/types.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/protocol/message_writer.hpp"
+#include "arv/voxel/block.hpp"
 
 #include <string>
 #include <vector>
@@ -46,6 +48,16 @@ struct ClientInputBatch {
   std::vector<InputSample> inputs{};
 };
 
+struct BlockBreakProgress {
+  bool active{};
+  BlockPos block{};
+  voxel::BlockVariantID variant{};
+  f32 progress{};
+  u8 stage{};
+
+  constexpr bool operator==(const BlockBreakProgress&) const = default;
+};
+
 struct PlayerCorrection {
   u64 server_tick{};
   PlayerID player_id{};
@@ -62,6 +74,7 @@ struct PlayerCorrection {
   bool swimming{};
   f32 breath_seconds{player::DefaultBreathSeconds};
   u8 selected_hotbar_slot{};
+  BlockBreakProgress block_break{};
 };
 
 std::vector<u8> serialize_client_input_batch(const ClientInputBatch& batch);

@@ -911,6 +911,10 @@ current world ID
 ```
 
 Client-side targeting may be used for responsiveness and preview rendering.
+For block selection outlines, the client may cast one ray per tick against its local
+world mirror and cache the current block hit. Rendering may use that cached hit to draw
+a model-matched outline, but server-side validation remains the source of truth for
+breaking, placing, and drops.
 
 Server-side validation must still confirm that interactions are legal.
 

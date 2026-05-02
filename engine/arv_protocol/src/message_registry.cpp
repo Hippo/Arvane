@@ -67,6 +67,9 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::EntitySnapshot, "EntitySnapshot",
                              MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
                              NetworkLane::Movement});
+  registry.register_message({MessageType::DroppedItemSnapshot, "DroppedItemSnapshot",
+                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
+                             NetworkLane::Gameplay});
   registry.register_message({MessageType::InventoryActionRequest, "InventoryActionRequest",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});

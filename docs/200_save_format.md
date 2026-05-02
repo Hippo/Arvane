@@ -372,10 +372,18 @@ Example:
 ```json
 {
   "uuid": "...",
-  "type": "arvane:item_entity",
+  "type": "arvane:dropped_item",
   "version": 1,
+  "world_id": 1,
   "position": [x, y, z],
-  "components": {}
+  "rotation": [0, 0, 0, 1],
+  "velocity": [0, 0, 0],
+  "components": {
+    "dropped_item": {
+      "stack": { "item": "arvane:stone", "count": 4 },
+      "pickup_delay_seconds": 0.5
+    }
+  }
 }
 ```
 
@@ -383,6 +391,7 @@ Rules:
 
 * ECS IDs are never saved
 * UUID is the persistent identity
+* component payloads use stable registry names, not runtime item/entity IDs
 
 ---
 

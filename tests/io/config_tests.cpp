@@ -113,11 +113,23 @@ physics:
   surface_buoyancy: 11.0
   underwater_buoyancy: 1.25
   breath_seconds: 18.0
+gameplay:
+  block_breaking:
+    base_seconds_per_hardness: 1.5
+    creative_inventory_multiplier: 0.05
+    hand_speed_multiplier: 0.25
+    wrong_tool_speed_multiplier: 0.1
+  dropped_items:
+    pickup_radius: 1.75
+    pickup_delay_seconds: 0.2
 render:
   max_chunk_mesh_uploads_per_frame: 3
   frame_pacing_enabled: true
   frame_pacing_target_fps: 120
   frame_pacing_spin_us: 250
+  block_outline:
+    color: [0.1, 0.2, 0.3]
+    thickness: 0.75
 chunk_pipeline:
   max_generation_jobs_per_frame: 2
   max_generation_results_per_tick: 3
@@ -189,10 +201,20 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().physics.surface_buoyancy, 11.0F);
   EXPECT_FLOAT_EQ(result.value().physics.underwater_buoyancy, 1.25F);
   EXPECT_FLOAT_EQ(result.value().physics.breath_seconds, 18.0F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.block_breaking.base_seconds_per_hardness, 1.5F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.block_breaking.creative_inventory_multiplier, 0.05F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.block_breaking.hand_speed_multiplier, 0.25F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.block_breaking.wrong_tool_speed_multiplier, 0.1F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.dropped_items.pickup_radius, 1.75F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.dropped_items.pickup_delay_seconds, 0.2F);
   EXPECT_EQ(result.value().render.max_chunk_mesh_uploads_per_frame, 3U);
   EXPECT_TRUE(result.value().render.frame_pacing_enabled);
   EXPECT_EQ(result.value().render.frame_pacing_target_fps, 120U);
   EXPECT_EQ(result.value().render.frame_pacing_spin_us, 250U);
+  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_r, 0.1F);
+  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_g, 0.2F);
+  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_b, 0.3F);
+  EXPECT_FLOAT_EQ(result.value().render.block_outline.thickness, 0.75F);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_jobs_per_frame, 2U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_results_per_tick, 3U);
   EXPECT_EQ(result.value().chunk_pipeline.max_lighting_results_per_tick, 4U);
@@ -466,6 +488,7 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   ASSERT_TRUE(written_shared);
   EXPECT_NE(written_shared.value().find("arvane_home: arvane_home"), std::string::npos);
   EXPECT_NE(written_shared.value().find("simulation:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("gameplay:"), std::string::npos);
   EXPECT_EQ(written_shared.value().find(temp_root.string()), std::string::npos);
 
   const auto written_client =

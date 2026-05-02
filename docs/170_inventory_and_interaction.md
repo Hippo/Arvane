@@ -716,6 +716,10 @@ The client may compute raycasts for responsiveness, but the server must verify:
 * target is interactable
 * action is legal
 
+The client may also store the current block raycast hit for preview-only rendering such
+as a block selection outline. This cached hit is not authoritative and must not be used
+to decide world mutations.
+
 ## Hit Types
 
 The interaction raycast should support:
@@ -851,11 +855,14 @@ When a block is successfully broken:
 
 * world block is changed, usually to air
 * drops are generated according to block/item rules
+* blocks with `arvane:mineable/<tool>` tags require a matching held tool to drop unless the block allows wrong-tool drops
 * held item durability may be reduced
 * lighting/meshing/world updates are triggered
 * inventory pickup may occur if drops are directly collected
 
-The exact drop model may evolve, but the interaction system must emit the necessary world mutation.
+Dropped item stacks are server-authoritative world objects. They must be replicated to
+clients over the network, including dedicated/GameNetworkingSockets sessions, instead of
+being read from integrated-server memory by the renderer.
 
 ## Failed Break
 
@@ -1018,7 +1025,8 @@ Baseline rules:
 * picked-up amount is inserted into inventory
 * leftover amount remains in world if inventory is full
 
-Pickup radius and delay must be centralized constants.
+Pickup radius and delay are gameplay config values under
+`gameplay.dropped_items` in `arvane.yaml`.
 
 ## Manual Pickup
 
@@ -1145,6 +1153,15 @@ Examples:
 * creative/admin reach distance, if used
 
 Do not scatter magic numbers throughout item, inventory, or interaction code.
+
+Current dropped-item pickup tuning lives in `arvane.yaml`:
+
+```yaml
+gameplay:
+  dropped_items:
+    pickup_radius: 1.25
+    pickup_delay_seconds: 0.5
+```
 
 ---
 

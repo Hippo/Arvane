@@ -137,25 +137,61 @@ void populate_world_frame_draw_items(
     frame.entities.push_back(std::move(item));
   }
 
-  if (session.integrated_server != nullptr) {
-    const std::vector<server::DroppedItemStack>& dropped_items =
-        session.integrated_server->dropped_item_stacks();
-    for (usize dropped_index = 0; dropped_index < dropped_items.size(); ++dropped_index) {
-      const server::DroppedItemStack& dropped = dropped_items[dropped_index];
-      if (dropped.world_id != frame.world_view.world_id || dropped.stack.count == 0U) {
-        continue;
+  const std::vector<client::DroppedItemMirror> dropped_items =
+      session.client->dropped_item_mirrors();
+  for (usize dropped_index = 0; dropped_index < dropped_items.size(); ++dropped_index) {
+    const client::DroppedItemMirror& dropped = dropped_items[dropped_index];
+    if (dropped.world_id != frame.world_view.world_id || dropped.stack.count == 0U) {
+      continue;
+    }
+    const f32 phase =
+        entity_animation_time * 2.75F + static_cast<f32>(dropped_index) * 0.37F;
+    append_item_draw(
+        frame,
+        entity_render_assets,
+        dropped.stack,
+        {dropped.position.x,
+         dropped.position.y + 0.42F + std::sin(phase) * 0.055F,
+         dropped.position.z},
+        yaw_rotation(entity_animation_time * 1.8F + static_cast<f32>(dropped_index)),
+        0.42F);
+  }
+
+  const protocol::BlockBreakProgress& block_break =
+      session.client->block_break_progress();
+  if (session.block_outline_target.has_value()) {
+    const BlockOutlineTarget& target = session.block_outline_target.value();
+    if (target.variant.value < entity_render_assets.outline_model_by_variant.size()) {
+      const render::EntityModelID model_id =
+          entity_render_assets.outline_model_by_variant[target.variant.value];
+      if (model_id.value != 0U) {
+        render::EntityDrawItem item;
+        item.model_id = model_id;
+        item.position = {
+            static_cast<f32>(target.block.value.x) + 0.5F,
+            static_cast<f32>(target.block.value.y) + 0.5F,
+            static_cast<f32>(target.block.value.z) + 0.5F};
+        item.scale = 1.0F;
+        frame.entities.push_back(std::move(item));
       }
-      const f32 phase =
-          entity_animation_time * 2.75F + static_cast<f32>(dropped_index) * 0.37F;
-      append_item_draw(
-          frame,
-          entity_render_assets,
-          dropped.stack,
-          {dropped.position.x,
-           dropped.position.y + 0.42F + std::sin(phase) * 0.055F,
-           dropped.position.z},
-          yaw_rotation(entity_animation_time * 1.8F + static_cast<f32>(dropped_index)),
-          0.42F);
+    }
+  }
+
+  if (block_break.active &&
+      block_break.variant.value < entity_render_assets.break_overlay_model_by_variant.size() &&
+      block_break.stage < BreakStageTextureCount) {
+    const render::EntityModelID model_id =
+        entity_render_assets
+            .break_overlay_model_by_variant[block_break.variant.value][block_break.stage];
+    if (model_id.value != 0U) {
+      render::EntityDrawItem item;
+      item.model_id = model_id;
+      item.position = {
+          static_cast<f32>(block_break.block.value.x) + 0.5F,
+          static_cast<f32>(block_break.block.value.y) + 0.5F,
+          static_cast<f32>(block_break.block.value.z) + 0.5F};
+      item.scale = 1.0F;
+      frame.entities.push_back(std::move(item));
     }
   }
 

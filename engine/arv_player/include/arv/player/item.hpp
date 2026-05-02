@@ -41,6 +41,8 @@ struct ItemDefinition {
   bool generated_from_block{};
   std::optional<voxel::BlockVariantID> placement_variant{};
   std::optional<voxel::BlockID> source_block{};
+  std::string tool_category{};
+  f32 tool_break_speed_multiplier{1.0F};
 };
 
 struct ItemRecord {
@@ -55,6 +57,8 @@ struct ItemRecord {
   std::optional<voxel::BlockVariantID> placement_variant{};
   std::optional<voxel::BlockVariantID> render_block_variant{};
   std::optional<voxel::BlockID> source_block{};
+  std::string tool_category{};
+  f32 tool_break_speed_multiplier{1.0F};
 };
 
 struct ItemStack {

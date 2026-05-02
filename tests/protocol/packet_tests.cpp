@@ -57,6 +57,8 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto block_updates = registry.lookup(arv::protocol::MessageType::BlockUpdateBatch);
   const auto entity_spawn = registry.lookup(arv::protocol::MessageType::EntitySpawn);
   const auto entity_snapshot = registry.lookup(arv::protocol::MessageType::EntitySnapshot);
+  const auto dropped_item_snapshot =
+      registry.lookup(arv::protocol::MessageType::DroppedItemSnapshot);
   const auto inventory_action =
       registry.lookup(arv::protocol::MessageType::InventoryActionRequest);
   const auto inventory_update = registry.lookup(arv::protocol::MessageType::InventoryUpdate);
@@ -71,6 +73,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(block_updates.has_value());
   ASSERT_TRUE(entity_spawn.has_value());
   ASSERT_TRUE(entity_snapshot.has_value());
+  ASSERT_TRUE(dropped_item_snapshot.has_value());
   ASSERT_TRUE(inventory_action.has_value());
   ASSERT_TRUE(inventory_update.has_value());
   EXPECT_EQ(ping->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
@@ -83,6 +86,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(block_updates->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(entity_spawn->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(entity_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  EXPECT_EQ(dropped_item_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(inventory_action->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_update->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(ping->lane, arv::protocol::NetworkLane::Debug);
@@ -95,9 +99,10 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(block_updates->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(entity_spawn->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(entity_snapshot->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(dropped_item_snapshot->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_action->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
-  EXPECT_EQ(registry.size(), 18U);
+  EXPECT_EQ(registry.size(), 19U);
 }
 
 TEST(ProtocolTests, ClientInputBatchRoundTripsThroughSerialization) {
@@ -149,6 +154,11 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   correction.swimming = true;
   correction.breath_seconds = 12.5F;
   correction.selected_hotbar_slot = 6;
+  correction.block_break.active = true;
+  correction.block_break.block = {{4, 5, 6}};
+  correction.block_break.variant = arv::voxel::BlockVariantID{3};
+  correction.block_break.progress = 0.42F;
+  correction.block_break.stage = 4;
 
   const std::vector<arv::u8> bytes = arv::protocol::serialize_player_correction(correction);
   const auto decoded = arv::protocol::deserialize_player_correction(bytes);
@@ -170,6 +180,11 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   EXPECT_TRUE(decoded.value().swimming);
   EXPECT_FLOAT_EQ(decoded.value().breath_seconds, 12.5F);
   EXPECT_EQ(decoded.value().selected_hotbar_slot, 6U);
+  EXPECT_TRUE(decoded.value().block_break.active);
+  EXPECT_EQ(decoded.value().block_break.block, (arv::BlockPos{{4, 5, 6}}));
+  EXPECT_EQ(decoded.value().block_break.variant, (arv::voxel::BlockVariantID{3}));
+  EXPECT_FLOAT_EQ(decoded.value().block_break.progress, 0.42F);
+  EXPECT_EQ(decoded.value().block_break.stage, 4U);
 }
 
 TEST(ProtocolTests, ChunkInterestUpdateRoundTripsThroughSerialization) {
@@ -360,6 +375,23 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
   malformed.write<arv::u32>(arv::protocol::MaxEntitiesPerSnapshot + 1U);
   EXPECT_FALSE(arv::protocol::deserialize_entity_snapshot(
       std::move(malformed).take_bytes()));
+
+  arv::protocol::DroppedItemSnapshot dropped;
+  dropped.world_id = arv::WorldID{6};
+  dropped.server_tick = 88;
+  dropped.drops.push_back({
+      arv::EntityNetID{33},
+      arv::player::ItemStack{arv::player::ItemID{44}, 3},
+      {1.0F, 2.0F, 3.0F},
+      {0.1F, 0.2F, 0.3F}});
+  const auto decoded_dropped = arv::protocol::deserialize_dropped_item_snapshot(
+      arv::protocol::serialize_dropped_item_snapshot(dropped));
+  ASSERT_TRUE(decoded_dropped);
+  ASSERT_EQ(decoded_dropped.value().drops.size(), 1U);
+  EXPECT_EQ(decoded_dropped.value().server_tick, 88U);
+  EXPECT_EQ(decoded_dropped.value().drops.front().drop_id, (arv::EntityNetID{33}));
+  EXPECT_EQ(decoded_dropped.value().drops.front().stack, (arv::player::ItemStack{arv::player::ItemID{44}, 3}));
+  EXPECT_EQ(decoded_dropped.value().drops.front().position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
 }
 
 TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {

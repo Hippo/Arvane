@@ -83,3 +83,38 @@ TEST(WorldEntityTests, PersistentEntityRecordsRoundTripThroughWorldRuntime) {
   EXPECT_EQ(loaded_records.front().uuid, "entity-test-uuid");
   EXPECT_EQ(loaded_records.front().position, (arv::Vec3f{4.0F, 5.0F, 6.0F}));
 }
+
+TEST(WorldEntityTests, DroppedItemsArePersistentEntitiesWithStackPayloads) {
+  arv::world::WorldRuntime world{arv::WorldID{3}};
+  const arv::EntityID drop = world.create_dropped_item(
+      {arv::player::ItemID{4}, 5},
+      {1.0F, 2.0F, 3.0F},
+      {0.0F, 0.1F, 0.0F},
+      0.25F);
+
+  const std::vector<arv::entity::EntitySnapshotEntry> entity_snapshots =
+      world.collect_entity_snapshots();
+  EXPECT_TRUE(entity_snapshots.empty());
+
+  const std::vector<arv::entity::DroppedItemEntitySnapshot> drop_snapshots =
+      world.collect_dropped_item_snapshots();
+  ASSERT_EQ(drop_snapshots.size(), 1U);
+  EXPECT_EQ(drop_snapshots.front().entity_id, drop);
+  EXPECT_EQ(drop_snapshots.front().stack, (arv::player::ItemStack{arv::player::ItemID{4}, 5}));
+
+  const std::vector<arv::entity::PersistentEntityRecord> records =
+      world.persistent_entity_records();
+  ASSERT_EQ(records.size(), 1U);
+  EXPECT_EQ(records.front().type_name, arv::entity::DroppedItemEntityTypeName);
+  ASSERT_TRUE(records.front().dropped_item_stack.has_value());
+  EXPECT_EQ(records.front().dropped_item_stack.value(),
+            (arv::player::ItemStack{arv::player::ItemID{4}, 5}));
+
+  arv::world::WorldRuntime loaded{arv::WorldID{3}};
+  loaded.restore_persistent_entities(records);
+  const std::vector<arv::entity::DroppedItemEntitySnapshot> loaded_drops =
+      loaded.collect_dropped_item_snapshots();
+  ASSERT_EQ(loaded_drops.size(), 1U);
+  EXPECT_EQ(loaded_drops.front().stack, (arv::player::ItemStack{arv::player::ItemID{4}, 5}));
+  EXPECT_FLOAT_EQ(loaded_drops.front().pickup_delay_seconds, 0.25F);
+}

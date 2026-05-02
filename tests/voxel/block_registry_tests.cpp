@@ -82,7 +82,9 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
     "properties": {
       "solid": true,
       "collidable": true,
-      "full_cube": true
+      "full_cube": true,
+      "drops_with_wrong_tool": true,
+      "hardness": 0.3
     }
   }
 ]
@@ -100,6 +102,8 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
       registry.variant(registry.find_variant("arvane:glass").value());
   ASSERT_NE(glass, nullptr);
   EXPECT_EQ(glass->render_category, arv::voxel::RenderCategory::Transparent);
+  EXPECT_FLOAT_EQ(glass->properties.hardness, 0.3F);
+  EXPECT_TRUE(glass->properties.drops_with_wrong_tool);
 }
 
 TEST(BlockRegistryTests, ParsesBlockModelReferencesAndInputTextures) {

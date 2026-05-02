@@ -203,6 +203,18 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.worker_threads = dependencies_.thread_budget.primary_workers;
   server_start_info.world_tick_policy = dependencies_.world_tick_policy;
   server_start_info.entity_registry = &dependencies_.entity_registry;
+  server_start_info.block_breaking.base_seconds_per_hardness =
+      dependencies_.config.gameplay.block_breaking.base_seconds_per_hardness;
+  server_start_info.block_breaking.creative_inventory_multiplier =
+      dependencies_.config.gameplay.block_breaking.creative_inventory_multiplier;
+  server_start_info.block_breaking.hand_speed_multiplier =
+      dependencies_.config.gameplay.block_breaking.hand_speed_multiplier;
+  server_start_info.block_breaking.wrong_tool_speed_multiplier =
+      dependencies_.config.gameplay.block_breaking.wrong_tool_speed_multiplier;
+  server_start_info.dropped_items.pickup_radius =
+      dependencies_.config.gameplay.dropped_items.pickup_radius;
+  server_start_info.dropped_items.pickup_delay_seconds =
+      dependencies_.config.gameplay.dropped_items.pickup_delay_seconds;
 
   auto transport_pair = net::make_in_process_transport_pair();
   auto integrated_server =

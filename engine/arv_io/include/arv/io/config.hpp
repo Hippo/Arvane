@@ -121,11 +121,36 @@ struct PhysicsConfig {
   f32 breath_seconds{15.0F};
 };
 
+struct GameplayConfig {
+  struct BlockBreakingConfig {
+    f32 base_seconds_per_hardness{1.0F};
+    f32 creative_inventory_multiplier{0.0F};
+    f32 hand_speed_multiplier{0.2F};
+    f32 wrong_tool_speed_multiplier{0.2F};
+  };
+
+  struct DroppedItemsConfig {
+    f32 pickup_radius{1.25F};
+    f32 pickup_delay_seconds{0.5F};
+  };
+
+  BlockBreakingConfig block_breaking{};
+  DroppedItemsConfig dropped_items{};
+};
+
 struct RenderConfig {
+  struct BlockOutlineConfig {
+    f32 color_r{0.02F};
+    f32 color_g{0.02F};
+    f32 color_b{0.02F};
+    f32 thickness{0.55F};
+  };
+
   u32 max_chunk_mesh_uploads_per_frame{8};
   bool frame_pacing_enabled{};
   u32 frame_pacing_target_fps{60};
   u32 frame_pacing_spin_us{500};
+  BlockOutlineConfig block_outline{};
 };
 
 struct ChunkPipelineConfig {
@@ -207,6 +232,7 @@ struct EngineConfig {
   ChunkDistanceConfig chunks{};
   JobSystemConfig jobs{};
   PhysicsConfig physics{};
+  GameplayConfig gameplay{};
   RenderConfig render{};
   ChunkPipelineConfig chunk_pipeline{};
 };

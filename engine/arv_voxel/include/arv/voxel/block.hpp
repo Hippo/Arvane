@@ -64,6 +64,8 @@ struct BlockProperties {
   bool fluid{};
   bool full_cube{};
   bool ao_occluder{};
+  bool drops_with_wrong_tool{};
+  f32 hardness{};
   u8 emission_r{};
   u8 emission_g{};
   u8 emission_b{};

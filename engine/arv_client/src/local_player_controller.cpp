@@ -131,6 +131,7 @@ void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorr
   body_position_ = correction.position;
   game_mode_id_ = correction.game_mode_id;
   resolved_permissions_.core = correction.resolved_core_permissions;
+  block_break_progress_ = correction.block_break;
   target_eye_height_ =
       correction.swimming
           ? tuning_.swimming_eye_height

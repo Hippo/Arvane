@@ -32,6 +32,11 @@ class OpenGLRenderer;
 
 namespace arv::desktop {
 
+struct BlockOutlineTarget {
+  BlockPos block{};
+  voxel::BlockVariantID variant{};
+};
+
 struct DesktopGameSession {
   explicit DesktopGameSession(TickRate base_tps);
 
@@ -50,6 +55,7 @@ struct DesktopGameSession {
   std::deque<protocol::ChunkUnload> pending_client_chunk_unloads{};
   std::deque<protocol::ChunkData> pending_client_chunk_data{};
   std::deque<protocol::BlockUpdateBatch> pending_client_block_updates{};
+  std::optional<BlockOutlineTarget> block_outline_target{};
   core::FixedTimestepAccumulator ticks;
   TickIndex client_tick_index{};
   std::vector<ui::UiItemStackView> inventory_slots{};

@@ -234,6 +234,8 @@ Definitions should support:
 * `replaceable`
 * `fluid`
 * `full_cube`
+* `hardness`
+* `drops_with_wrong_tool`
 
 These may be defined at the block level or overridden per variant if necessary.
 
@@ -247,6 +249,7 @@ Examples:
 
 * `arvane:mineable/pickaxe`
 * `arvane:mineable/shovel`
+* `arvane:mineable/hand`
 * `arvane:transparent`
 * `arvane:logs`
 * `arvane:leaves`
@@ -258,6 +261,11 @@ Tags must be:
 * data-driven
 * efficiently queryable
 * usable in both engine and gameplay code
+
+`arvane:mineable/<tool>` tags declare which tool categories are correct for mining speed
+and drop eligibility. Blocks with mineable tags only drop when broken with a matching
+tool unless `drops_with_wrong_tool` is enabled, which is useful for blocks such as dirt
+that can be collected by hand but break faster with a shovel.
 
 ---
 

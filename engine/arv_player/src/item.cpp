@@ -1,6 +1,7 @@
 #include "arv/player/item.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -106,6 +107,10 @@ void merge_explicit_definition(ItemDefinition& target, ItemDefinition source) {
     target.placement_variant = source.placement_variant;
     target.source_block = source.source_block;
   }
+  if (!source.tool_category.empty()) {
+    target.tool_category = std::move(source.tool_category);
+    target.tool_break_speed_multiplier = source.tool_break_speed_multiplier;
+  }
   target.generated_from_block = target.generated_from_block || source.generated_from_block;
 }
 
@@ -138,6 +143,10 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     }
     if (definition.max_stack_size == 0U) {
       return Result::failure({"item max_stack_size must be non-zero for " + definition.name});
+    }
+    if (!std::isfinite(definition.tool_break_speed_multiplier) ||
+        definition.tool_break_speed_multiplier < 0.0F) {
+      return Result::failure({"item tool break speed multiplier must be finite and >= 0 for " + definition.name});
     }
     auto resolved_type = resolve_render_type(definition);
     if (!resolved_type) {
@@ -177,6 +186,8 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     record.render_block_variant =
         record.render_type == ItemRenderType::Block ? definition.placement_variant : std::nullopt;
     record.source_block = definition.source_block;
+    record.tool_category = std::move(definition.tool_category);
+    record.tool_break_speed_multiplier = definition.tool_break_speed_multiplier;
 
     if (record.render_type == ItemRenderType::Texture && record.texture_asset.empty()) {
       record.texture_asset = std::string{MissingTextureAsset};
@@ -247,6 +258,10 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
     }
     if (definition.max_stack_size == 0U) {
       return Result::failure({"item max_stack_size must be non-zero for " + definition.name});
+    }
+    if (!std::isfinite(definition.tool_break_speed_multiplier) ||
+        definition.tool_break_speed_multiplier < 0.0F) {
+      return Result::failure({"item tool break speed multiplier must be finite and >= 0 for " + definition.name});
     }
     if (const auto block_id = registry.find_block(definition.name);
         block_id.has_value() && definition.name != AirItemName) {
@@ -381,6 +396,25 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
       const auto places_block_iter = item.find("places_block");
       if (places_block_iter != item.end()) {
         definition.places_block = places_block_iter->get<std::string>();
+      }
+      const auto tool_iter = item.find("tool");
+      if (tool_iter != item.end()) {
+        if (!tool_iter->is_object()) {
+          return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+              {"tool must be an object for " + definition.name});
+        }
+        const auto category_iter = tool_iter->find("category");
+        if (category_iter != tool_iter->end()) {
+          if (!category_iter->is_string()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                {"tool.category must be a string for " + definition.name});
+          }
+          definition.tool_category = category_iter->get<std::string>();
+        }
+        const auto speed_iter = tool_iter->find("break_speed_multiplier");
+        if (speed_iter != tool_iter->end()) {
+          definition.tool_break_speed_multiplier = speed_iter->get<f32>();
+        }
       }
 
       definitions.push_back(std::move(definition));
