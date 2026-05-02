@@ -1,10 +1,11 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/net/gns_transport.hpp"
 #include "arv/net/in_process_transport.hpp"
-#include "arv/protocol/handshake.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/message_type.hpp"
+#include "arv/protocol/world_join.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/server/world_registry.hpp"
 #include "arv/world/world_generation.hpp"
@@ -13,10 +14,10 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <span>
-#include <chrono>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -127,12 +128,11 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
       arv::testsupport::make_test_item_registry(block_registry);
   auto transports = arv::net::make_in_process_transport_pair();
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
 
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
@@ -216,12 +216,11 @@ TEST(IntegratedHandshakeTests, InventoryActionsFlowThroughAuthoritativeProtocolU
       arv::testsupport::make_test_item_registry(block_registry);
   auto transports = arv::net::make_in_process_transport_pair();
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
 
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
@@ -258,15 +257,14 @@ TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
   arv::server::ServerChunkStreamingConfig streaming_config;
   streaming_config.max_view_distance = 0;
   streaming_config.max_chunks_sent_per_player_tick = 1;
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry,
-      arv::player::default_player_tuning(),
-      arv::voxel::make_water_fluid_definition(),
-      streaming_config}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry,
+                            arv::player::default_player_tuning(),
+                            arv::voxel::make_water_fluid_definition(),
+                            streaming_config}));
 
   const arv::ChunkCoord expected_chunk{{0, 1, -2}};
   (void)server.voxel_world().ensure_chunk(expected_chunk);
@@ -309,15 +307,14 @@ TEST(IntegratedHandshakeTests, DroppedItemsReplicateAfterRelevantChunkStreaming)
   arv::server::ServerChunkStreamingConfig streaming_config;
   streaming_config.max_view_distance = 0;
   streaming_config.max_chunks_sent_per_player_tick = 1;
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry,
-      arv::player::default_player_tuning(),
-      arv::voxel::make_water_fluid_definition(),
-      streaming_config}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry,
+                            arv::player::default_player_tuning(),
+                            arv::voxel::make_water_fluid_definition(),
+                            streaming_config}));
 
   const arv::ChunkCoord spawn_chunk{{0, 1, -2}};
   (void)server.voxel_world().ensure_chunk(spawn_chunk);
@@ -361,12 +358,11 @@ TEST(IntegratedHandshakeTests, DisconnectCleansSessionAndWorldLocalPlayerEntity)
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
 
   const auto connect_result = client_transport->connect({"in-process", 0});
   ASSERT_TRUE(connect_result);
@@ -392,12 +388,11 @@ TEST(IntegratedHandshakeTests, ClientDoesNotOverwriteLoadedHotbarSlotBeforeCorre
       arv::testsupport::make_test_item_registry(block_registry);
   auto transports = arv::net::make_in_process_transport_pair();
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
 
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
@@ -423,12 +418,11 @@ TEST(IntegratedHandshakeTests, ServerSkipsUnchangedPlayerCorrections) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
 
   const auto connect_result = client_transport->connect({"in-process", 0});
   ASSERT_TRUE(connect_result);
@@ -459,15 +453,14 @@ TEST(IntegratedHandshakeTests, ClientReceivesChunkDataOnlyAfterInterestUpdate) {
   arv::server::ServerChunkStreamingConfig streaming_config;
   streaming_config.max_view_distance = 0;
   streaming_config.max_chunks_sent_per_player_tick = 1;
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry,
-      arv::player::default_player_tuning(),
-      arv::voxel::make_water_fluid_definition(),
-      streaming_config}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry,
+                            arv::player::default_player_tuning(),
+                            arv::voxel::make_water_fluid_definition(),
+                            streaming_config}));
 
   const arv::ChunkCoord expected_chunk{{0, 1, -2}};
   (void)server.voxel_world().ensure_chunk(expected_chunk);
@@ -507,16 +500,15 @@ TEST(IntegratedHandshakeTests, ClientReceivesGeneratedChunkAfterAsyncGeneration)
   arv::server::ServerChunkStreamingConfig streaming_config;
   streaming_config.max_view_distance = 0;
   streaming_config.max_chunks_sent_per_player_tick = 1;
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry,
-      arv::player::default_player_tuning(),
-      arv::voxel::make_water_fluid_definition(),
-      streaming_config,
-      make_generation_settings(block_registry)}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry,
+                            arv::player::default_player_tuning(),
+                            arv::voxel::make_water_fluid_definition(),
+                            streaming_config,
+                            make_generation_settings(block_registry)}));
 
   arv::client::ClientRuntime client(std::move(transports.client));
   client.set_chunk_view_distance(0);

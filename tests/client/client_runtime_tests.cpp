@@ -1,8 +1,11 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/player_constants.hpp"
+#include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
+#include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
+#include "arv/protocol/world_join.hpp"
 
 #include <gtest/gtest.h>
 
@@ -113,12 +116,11 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   arv::protocol::EntitySnapshot unknown_snapshot;
   unknown_snapshot.world_id = arv::WorldID{1};
   unknown_snapshot.server_tick = 10;
-  unknown_snapshot.entities.push_back({
-      arv::EntityNetID{99},
-      {1.0F, 2.0F, 3.0F},
-      {},
-      {},
-      0});
+  unknown_snapshot.entities.push_back({arv::EntityNetID{99},
+                                       {1.0F, 2.0F, 3.0F},
+                                       {},
+                                       {},
+                                       0});
   send_to_client(
       *server_transport,
       connection_id.value(),
@@ -146,12 +148,11 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   arv::protocol::EntitySnapshot fresh_snapshot;
   fresh_snapshot.world_id = arv::WorldID{1};
   fresh_snapshot.server_tick = 20;
-  fresh_snapshot.entities.push_back({
-      arv::EntityNetID{5},
-      {10.0F, 11.0F, 12.0F},
-      {1.0F, 0.0F, 0.0F},
-      {0.0F, 0.0F, 0.0F, 1.0F},
-      0});
+  fresh_snapshot.entities.push_back({arv::EntityNetID{5},
+                                     {10.0F, 11.0F, 12.0F},
+                                     {1.0F, 0.0F, 0.0F},
+                                     {0.0F, 0.0F, 0.0F, 1.0F},
+                                     0});
   send_to_client(
       *server_transport,
       connection_id.value(),
@@ -200,11 +201,10 @@ TEST(ClientRuntimeTests, DroppedItemSnapshotsCreateUpdateAndRemoveMirrors) {
   arv::protocol::DroppedItemSnapshot snapshot;
   snapshot.world_id = arv::WorldID{1};
   snapshot.server_tick = 10;
-  snapshot.drops.push_back({
-      arv::EntityNetID{7},
-      arv::player::ItemStack{arv::player::ItemID{8}, 2},
-      {1.0F, 2.0F, 3.0F},
-      {}});
+  snapshot.drops.push_back({arv::EntityNetID{7},
+                            arv::player::ItemStack{arv::player::ItemID{8}, 2},
+                            {1.0F, 2.0F, 3.0F},
+                            {}});
   send_to_client(
       *server_transport,
       connection_id.value(),
