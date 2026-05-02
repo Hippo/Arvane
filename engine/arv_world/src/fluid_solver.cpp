@@ -1,7 +1,7 @@
 #include "arv/world/fluid_solver.hpp"
 
 #include "arv/core/perf_stats.hpp"
-#include "arv/world/world_runtime.hpp"
+#include "world_runtime_internal.hpp"
 
 #include <array>
 #include <deque>
@@ -331,28 +331,6 @@ private:
          reason == FluidUpdateReason::BlockChanged;
 }
 
-[[nodiscard]] u8 fluid_update_priority(FluidUpdateReason reason) noexcept {
-  switch (reason) {
-    case FluidUpdateReason::FluidRemoved:
-    case FluidUpdateReason::BlockChanged:
-      return 2U;
-    case FluidUpdateReason::FluidAdded:
-    case FluidUpdateReason::NeighborChanged:
-    case FluidUpdateReason::ChunkActivated:
-      return 1U;
-  }
-  return 0U;
-}
-
-[[nodiscard]] bool should_replace_deferred_update(
-    const FluidUpdate& current,
-    const FluidUpdate& candidate) noexcept {
-  if (candidate.execute_at != current.execute_at) {
-    return candidate.execute_at < current.execute_at;
-  }
-  return fluid_update_priority(candidate.reason) > fluid_update_priority(current.reason);
-}
-
 } // namespace
 
 void FluidSolver::enqueue_neighbor_updates(
@@ -361,9 +339,9 @@ void FluidSolver::enqueue_neighbor_updates(
     FluidUpdateReason reason,
     u32 delay_ticks) {
   const TickIndex execute_at = world.tick_index() + delay_ticks;
-  world.enqueue_fluid_update_unique({pos, reason, execute_at});
-  for (const Vec3i offset : WorldRuntime::NeighborOffsets) {
-    const BlockPos neighbor = WorldRuntime::offset_block(pos, offset);
+  world.impl_->fluid.enqueue_update_unique({pos, reason, execute_at});
+  for (const Vec3i offset : detail::NeighborOffsets) {
+    const BlockPos neighbor = detail::offset_block(pos, offset);
     const ChunkCoord origin_chunk = block_to_chunk(pos);
     const ChunkCoord neighbor_chunk_coord = block_to_chunk(neighbor);
     if (origin_chunk != neighbor_chunk_coord &&
@@ -372,51 +350,19 @@ void FluidSolver::enqueue_neighbor_updates(
       store_deferred_boundary_update(world, neighbor_chunk_coord, {neighbor, reason, execute_at});
       continue;
     }
-    world.enqueue_fluid_update_unique({neighbor, reason, execute_at});
+    world.impl_->fluid.enqueue_update_unique({neighbor, reason, execute_at});
   }
 }
 
 void FluidSolver::enqueue_chunk_activation_updates(WorldRuntime& world, ChunkCoord coord) {
-  const voxel::ChunkSection* chunk = world.find_chunk(coord);
-  if (chunk == nullptr) {
-    return;
-  }
-
-  auto deferred = world.deferred_boundary_fluid_updates_.find(coord);
-  if (deferred != world.deferred_boundary_fluid_updates_.end()) {
-    for (const FluidUpdate& update : deferred->second) {
-      world.enqueue_fluid_update_unique(update);
-    }
-    world.deferred_boundary_fluid_updates_.erase(deferred);
-  }
-
-  for (i32 z = 0; z < ChunkSize; ++z) {
-    for (i32 y = 0; y < ChunkSize; ++y) {
-      for (i32 x = 0; x < ChunkSize; ++x) {
-        const SectionLocalPos local{{x, y, z}};
-        if (!chunk->fluid(local).empty()) {
-          world.enqueue_fluid_update_unique(
-              {chunk_local_to_block(coord, local), FluidUpdateReason::ChunkActivated, world.tick_index()});
-        }
-      }
-    }
-  }
+  world.impl_->fluid.enqueue_chunk_activation_updates(world, coord);
 }
 
 void FluidSolver::store_deferred_boundary_update(
     WorldRuntime& world,
     ChunkCoord target,
     FluidUpdate update) {
-  auto& updates = world.deferred_boundary_fluid_updates_[target];
-  for (FluidUpdate& existing : updates) {
-    if (existing.pos == update.pos) {
-      if (should_replace_deferred_update(existing, update)) {
-        existing = update;
-      }
-      return;
-    }
-  }
-  updates.emplace_back(update);
+  world.impl_->fluid.store_deferred_boundary_update(target, update);
 }
 
 u32 FluidSolver::process_updates(
@@ -424,7 +370,8 @@ u32 FluidSolver::process_updates(
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& definition,
     u32 budget) {
-  std::vector<FluidUpdate> batch = world.drain_due_fluid_updates(budget);
+  std::vector<FluidUpdate> batch =
+      world.impl_->fluid.drain_due_updates(world.tick_index(), budget);
 
   u32 processed = 0;
   for (const FluidUpdate& update : batch) {
@@ -483,7 +430,7 @@ bool FluidSolver::can_flow_down_from(
              world,
              registry,
              definition,
-             WorldRuntime::offset_block(pos, {0, -1, 0}));
+             detail::offset_block(pos, {0, -1, 0}));
 }
 
 void FluidSolver::enqueue_adjacent_updates(
@@ -492,8 +439,8 @@ void FluidSolver::enqueue_adjacent_updates(
     FluidUpdateReason reason,
     u32 delay_ticks) {
   const TickIndex execute_at = world.tick_index() + delay_ticks;
-  for (const Vec3i offset : WorldRuntime::NeighborOffsets) {
-    const BlockPos neighbor = WorldRuntime::offset_block(pos, offset);
+  for (const Vec3i offset : detail::NeighborOffsets) {
+    const BlockPos neighbor = detail::offset_block(pos, offset);
     const ChunkCoord origin_chunk = block_to_chunk(pos);
     const ChunkCoord neighbor_chunk_coord = block_to_chunk(neighbor);
     if (origin_chunk != neighbor_chunk_coord &&
@@ -502,7 +449,7 @@ void FluidSolver::enqueue_adjacent_updates(
       store_deferred_boundary_update(world, neighbor_chunk_coord, {neighbor, reason, execute_at});
       continue;
     }
-    world.enqueue_fluid_update_unique({neighbor, reason, execute_at});
+    world.impl_->fluid.enqueue_update_unique({neighbor, reason, execute_at});
   }
 }
 
@@ -520,7 +467,7 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
     return voxel::make_fluid_source(definition);
   }
 
-  const BlockPos above = WorldRuntime::offset_block(pos, {0, 1, 0});
+  const BlockPos above = detail::offset_block(pos, {0, 1, 0});
   const voxel::FluidCell above_fluid = world.get_fluid(above);
   if (definition.can_flow_down && above_fluid.type == definition.type && !above_fluid.empty()) {
     return voxel::make_flowing_fluid(
@@ -529,15 +476,15 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
         voxel::FluidFlags::Falling);
   }
 
-  const BlockPos below = WorldRuntime::offset_block(pos, {0, -1, 0});
+  const BlockPos below = detail::offset_block(pos, {0, -1, 0});
   const voxel::FluidCell below_fluid = world.get_fluid(below);
   if (definition.can_create_sources &&
       (!can_fluid_occupy(world, registry, definition, below) ||
        (below_fluid.type == definition.type && below_fluid.source()))) {
     u32 adjacent_sources = 0;
-    for (const Vec3i offset : HorizontalOffsets) {
-      const voxel::FluidCell neighbor =
-          world.get_fluid(WorldRuntime::offset_block(pos, offset));
+      for (const Vec3i offset : HorizontalOffsets) {
+        const voxel::FluidCell neighbor =
+          world.get_fluid(detail::offset_block(pos, offset));
       if (neighbor.type == definition.type && neighbor.source()) {
         ++adjacent_sources;
       }
@@ -553,7 +500,7 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
 
   u8 best_level = 0;
   for (const Vec3i offset : HorizontalOffsets) {
-    const BlockPos neighbor_pos = WorldRuntime::offset_block(pos, offset);
+    const BlockPos neighbor_pos = detail::offset_block(pos, offset);
     if (can_flow_down_from(world, registry, definition, neighbor_pos)) {
       continue;
     }
@@ -601,12 +548,12 @@ void FluidSolver::process_single_update(
   if (!chunk->set_fluid(local, ideal, affects_lighting)) {
     return;
   }
-  world.mark_mesh_content_dirty();
+  world.impl_->dirty.mark_mesh_content_dirty();
   if (affects_lighting) {
-    world.mark_lighting_content_dirty();
+    world.impl_->dirty.mark_lighting_content_dirty();
   }
 
-  world.mark_boundary_neighbors_dirty(block_to_chunk(pos), local);
+  world.impl_->dirty.mark_boundary_neighbors_dirty(world, block_to_chunk(pos), local);
   const bool removed_or_decreased =
       ideal.empty() ||
       (!current.empty() &&

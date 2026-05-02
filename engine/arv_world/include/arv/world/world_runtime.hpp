@@ -12,14 +12,11 @@
 #include "arv/world/world_lighting.hpp"
 #include "arv/world/world_generation.hpp"
 
-#include <entt/entt.hpp>
-
 #include <array>
-#include <deque>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace arv::world {
@@ -98,6 +95,14 @@ struct ReplicatedBlockUpdate {
 class WorldRuntime {
 public:
   explicit WorldRuntime(WorldID id);
+  ~WorldRuntime();
+
+  WorldRuntime(WorldRuntime&&) noexcept;
+  WorldRuntime& operator=(WorldRuntime&&) noexcept;
+
+  WorldRuntime(const WorldRuntime&) = delete;
+  WorldRuntime& operator=(const WorldRuntime&) = delete;
+
   [[nodiscard]] WorldID id() const noexcept;
   voxel::ChunkSection& ensure_chunk(
       ChunkCoord coord,
@@ -209,12 +214,8 @@ public:
   [[nodiscard]] const player::PlayerState* find_player(PlayerID player_id) const noexcept;
   [[nodiscard]] usize player_count() const noexcept;
   [[nodiscard]] std::vector<PlayerID> player_ids() const;
-  [[nodiscard]] const RegionRegistry& regions() const noexcept {
-    return regions_;
-  }
-  [[nodiscard]] RegionRegistry& regions() noexcept {
-    return regions_;
-  }
+  [[nodiscard]] const RegionRegistry& regions() const noexcept;
+  [[nodiscard]] RegionRegistry& regions() noexcept;
   [[nodiscard]] const PlayerRegionState* player_region_state(PlayerID player_id) const noexcept;
   RegionMembershipChange update_player_region_state(PlayerID player_id, RegionQuery query);
   void schedule_block_update(
@@ -256,91 +257,8 @@ private:
   friend class FluidSolver;
   friend class WorldLighting;
 
-  inline static constexpr std::array<voxel::BlockFace, voxel::BlockFaceCount> AllFaces{
-      voxel::BlockFace::PositiveX,
-      voxel::BlockFace::NegativeX,
-      voxel::BlockFace::PositiveY,
-      voxel::BlockFace::NegativeY,
-      voxel::BlockFace::PositiveZ,
-      voxel::BlockFace::NegativeZ};
-
-  inline static constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
-      {1, 0, 0},
-      {-1, 0, 0},
-      {0, 1, 0},
-      {0, -1, 0},
-      {0, 0, 1},
-      {0, 0, -1},
-  }};
-  [[nodiscard]] static i32 abs_i32(i32 value) noexcept;
-  [[nodiscard]] static i32 max_abs3(i32 x, i32 y, i32 z) noexcept;
-  [[nodiscard]] static BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept;
-  [[nodiscard]] static usize lifecycle_index(voxel::ChunkLifecycleState state) noexcept;
-  [[nodiscard]] usize lifecycle_count(voxel::ChunkLifecycleState state) const noexcept;
-  void set_chunk_lifecycle_state_internal(
-      voxel::ChunkSection& chunk,
-      voxel::ChunkLifecycleState state) noexcept;
-  void mark_lighting_content_dirty() noexcept;
-  void mark_mesh_content_dirty() noexcept;
-  bool set_fluid_internal(
-      BlockPos pos,
-      voxel::FluidCell fluid,
-      const voxel::FluidDefinition& definition,
-      bool enqueue_updates) noexcept;
-  void enqueue_fluid_update_unique(FluidUpdate update);
-  [[nodiscard]] std::vector<FluidUpdate> drain_due_fluid_updates(u32 budget);
-  void enqueue_dirty_mesh_chunk(ChunkCoord coord);
-  void recompute_lighting_work_pending() noexcept;
-  void enqueue_neighbor_block_updates(BlockPos pos);
-  void mark_boundary_neighbors_dirty(ChunkCoord coord, SectionLocalPos local) noexcept;
-  void mark_loaded_chunk_neighbors_dirty(ChunkCoord coord) noexcept;
-  void mark_light_dependency_neighbors_dirty(ChunkCoord coord) noexcept;
-  void mark_neighbor_mesh_dependency_dirty(ChunkCoord coord) noexcept;
-  void mark_neighbor_mesh_only_dependency_dirty(ChunkCoord coord) noexcept;
-  void mark_neighbor_light_dependency_dirty(ChunkCoord coord) noexcept;
-  u32 process_due_scheduled_ticks();
-  u32 drain_block_updates(u32 budget);
-  [[nodiscard]] entt::entity entity_handle(EntityID entity_id) const noexcept;
-  [[nodiscard]] ChunkCoord chunk_for_position(Vec3f position) const noexcept;
-  void apply_authored_components(
-      entt::entity handle,
-      const entity::EntityComponentSet& components);
-  u32 tick_brains();
-  u32 tick_entity_physics(
-      const voxel::BlockRegistry* block_registry,
-      Seconds tick_seconds);
-  u32 tick_entity_animations(Seconds tick_seconds);
-  void update_entity_chunk(entt::entity handle) noexcept;
-  void record_replicated_block_update(BlockPos pos, voxel::BlockVariantID new_state);
-
-  WorldID id_{};
-  StableHashMap<ChunkCoord, voxel::ChunkSection> chunks_;
-  entt::registry entity_registry_;
-  StableHashMap<EntityID, entt::entity> entity_handles_;
-  StableHashMap<PlayerID, EntityID> player_entities_;
-  std::vector<EntityID> pending_entity_despawns_;
-  u64 next_entity_id_{1};
-  u32 next_entity_net_id_{1};
-  RegionRegistry regions_{};
-  StableHashMap<PlayerID, PlayerRegionState> player_region_states_;
-  TickIndex tick_index_{};
-  u64 lighting_revision_{1};
-  u64 mesh_revision_{1};
-  std::optional<WorldGenerationConfig> generation_config_{};
-  u64 generation_seed_{};
-  bool lighting_work_pending_{};
-  std::array<usize, 9> lifecycle_counts_{};
-  usize active_chunk_count_{};
-  mutable usize last_lighting_snapshot_chunk_count_{};
-  WorldTickPolicy tick_policy_{};
-  std::vector<ScheduledBlockUpdate> scheduled_block_updates_;
-  std::deque<BlockUpdate> block_updates_;
-  std::deque<FluidUpdate> fluid_updates_;
-  HashMap<BlockPos, FluidUpdate> pending_fluid_updates_by_position_;
-  HashMap<ChunkCoord, std::vector<FluidUpdate>> deferred_boundary_fluid_updates_;
-  std::vector<ReplicatedBlockUpdate> replicated_block_updates_;
-  std::deque<ChunkCoord> dirty_mesh_chunks_;
-  HashSet<ChunkCoord> dirty_mesh_chunk_set_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace arv::world
