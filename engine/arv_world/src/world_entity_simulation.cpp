@@ -58,6 +58,169 @@ namespace {
   return value.x * value.x + value.z * value.z > 0.000001F;
 }
 
+[[nodiscard]] f32 horizontal_length_squared(Vec3f value) noexcept {
+  return value.x * value.x + value.z * value.z;
+}
+
+[[nodiscard]] bool can_jump_up_one_block(
+    const physics::ICollisionQuery& query,
+    const Aabb3f& bounds,
+    Vec3f delta,
+    f32 collision_epsilon) {
+  Vec3f horizontal_delta{delta.x, 0.0F, delta.z};
+  if (!has_horizontal_motion(horizontal_delta)) {
+    return false;
+  }
+
+  constexpr f32 OneBlock = 1.0F;
+  const physics::MovementResolution raised = physics::resolve_movement(
+      query,
+      bounds,
+      {0.0F, OneBlock, 0.0F},
+      collision_epsilon);
+  if (raised.hit_y || raised.applied_delta.y < OneBlock - collision_epsilon * 2.0F) {
+    return false;
+  }
+
+  const physics::MovementResolution crossed = physics::resolve_movement(
+      query,
+      raised.resolved_bounds,
+      horizontal_delta,
+      collision_epsilon);
+  if (crossed.hit_x || crossed.hit_z) {
+    return false;
+  }
+
+  return physics::has_support_below(
+      query,
+      crossed.resolved_bounds,
+      collision_epsilon * 2.0F);
+}
+
+[[nodiscard]] f32 horizontal_progress_squared(
+    const physics::ICollisionQuery& query,
+    const Aabb3f& bounds,
+    Vec3f direction,
+    f32 probe_distance,
+    f32 collision_epsilon) {
+  const Vec3f horizontal_direction = normalize_or_zero({direction.x, 0.0F, direction.z});
+  if (!has_horizontal_motion(horizontal_direction)) {
+    return false;
+  }
+
+  const physics::MovementResolution resolved = physics::resolve_movement(
+      query,
+      bounds,
+      horizontal_direction * std::max(probe_distance, collision_epsilon * 4.0F),
+      collision_epsilon);
+  return horizontal_length_squared(resolved.applied_delta);
+}
+
+[[nodiscard]] Vec3f cardinal_horizontal_direction(usize index) noexcept {
+  switch (index % 4U) {
+    case 0U:
+      return {1.0F, 0.0F, 0.0F};
+    case 1U:
+      return {-1.0F, 0.0F, 0.0F};
+    case 2U:
+      return {0.0F, 0.0F, 1.0F};
+    default:
+      return {0.0F, 0.0F, -1.0F};
+  }
+}
+
+[[nodiscard]] Vec3f random_clear_wander_direction(
+    EntityID entity_id,
+    TickIndex tick,
+    usize goal_index,
+    const physics::ICollisionQuery& query,
+    const Aabb3f& bounds,
+    Vec3f blocked_delta,
+    f32 collision_epsilon) {
+  const f32 probe_distance = std::sqrt(horizontal_length_squared(blocked_delta));
+  Vec3f fallback{};
+  Vec3f best{};
+  f32 best_score{};
+
+  const auto consider = [&](Vec3f candidate) {
+    candidate.y = 0.0F;
+    candidate = normalize_or_zero(candidate);
+    if (!has_horizontal_motion(candidate)) {
+      return;
+    }
+    if (!has_horizontal_motion(fallback)) {
+      fallback = candidate;
+    }
+
+    const f32 score = horizontal_progress_squared(
+        query,
+        bounds,
+        candidate,
+        probe_distance,
+        collision_epsilon);
+    if (score > best_score) {
+      best_score = score;
+      best = candidate;
+    }
+  };
+
+  constexpr usize MaxAttempts = 12;
+  for (usize attempt = 0; attempt < MaxAttempts; ++attempt) {
+    consider(deterministic_wander_direction(
+        entity_id,
+        tick + static_cast<TickIndex>(attempt + 1U),
+        goal_index + attempt + 1U));
+  }
+
+  const usize cardinal_start =
+      static_cast<usize>(entity_id.value + static_cast<u64>(tick) + goal_index);
+  for (usize attempt = 0; attempt < 4U; ++attempt) {
+    consider(cardinal_horizontal_direction(cardinal_start + attempt));
+  }
+
+  if (best_score > collision_epsilon * collision_epsilon) {
+    return best;
+  }
+  return fallback;
+}
+
+void redirect_wander_after_horizontal_block(
+    EntityID entity_id,
+    TickIndex tick,
+    const physics::ICollisionQuery& query,
+    const Aabb3f& bounds,
+    entity::BrainComponent& brain,
+    entity::MovementIntent* intent,
+    Vec3f blocked_delta,
+    f32 collision_epsilon) {
+  if (!brain.active_goal.has_value() || brain.active_goal.value() >= brain.goals.size()) {
+    return;
+  }
+
+  const usize goal_index = brain.active_goal.value();
+  entity::GoalSlot& goal = brain.goals[goal_index];
+  if (!is_wander_goal(goal.type) || !has_horizontal_motion(goal.state.movement_direction)) {
+    return;
+  }
+
+  const Vec3f redirected = random_clear_wander_direction(
+      entity_id,
+      tick,
+      goal_index,
+      query,
+      bounds,
+      blocked_delta,
+      collision_epsilon);
+  if (!has_horizontal_motion(redirected)) {
+    return;
+  }
+
+  goal.state.movement_direction = redirected;
+  if (intent != nullptr) {
+    intent->desired_direction = redirected;
+  }
+}
+
 [[nodiscard]] f32 yaw_from_horizontal_direction(Vec3f direction) noexcept {
   constexpr f32 ModelForwardYawOffset = 3.14159265358979323846F;
   return std::atan2(direction.x, direction.z) + ModelForwardYawOffset;
@@ -255,6 +418,7 @@ u32 WorldEntitySimulation::tick_entity_physics(
   const WorldCollisionQuery collision_query(world, *block_registry, true);
   const physics::KinematicConfig physics_config;
   const auto view = registry.view<
+      entity::RuntimeEntity,
       entity::EntityTransform,
       entity::EntityVelocity,
       entity::EntityCollision>();
@@ -262,10 +426,11 @@ u32 WorldEntitySimulation::tick_entity_physics(
     if (registry.all_of<entity::PlayerEntity>(handle)) {
       continue;
     }
+    const auto& runtime = view.get<entity::RuntimeEntity>(handle);
     auto& transform = view.get<entity::EntityTransform>(handle);
     auto& velocity = view.get<entity::EntityVelocity>(handle);
     const auto& collision = view.get<entity::EntityCollision>(handle);
-    const entity::MovementIntent* intent = registry.try_get<entity::MovementIntent>(handle);
+    entity::MovementIntent* intent = registry.try_get<entity::MovementIntent>(handle);
     const entity::EntityMovement* movement = registry.try_get<entity::EntityMovement>(handle);
 
     if (intent != nullptr && movement != nullptr) {
@@ -310,6 +475,27 @@ u32 WorldEntitySimulation::tick_entity_physics(
     }
     if (resolved.hit_z) {
       velocity.linear.z = 0.0F;
+    }
+    if (intent != nullptr && movement != nullptr && grounded &&
+        (resolved.hit_x || resolved.hit_z)) {
+      if (can_jump_up_one_block(
+              collision_query,
+              bounds,
+              movement_delta,
+              physics_config.collision_epsilon)) {
+        velocity.linear.y = std::max(velocity.linear.y, physics_config.jump_velocity);
+      } else if (auto* brain = registry.try_get<entity::BrainComponent>(handle);
+                 brain != nullptr) {
+        redirect_wander_after_horizontal_block(
+            runtime.entity_id,
+            world.tick_index(),
+            collision_query,
+            bounds,
+            *brain,
+            intent,
+            movement_delta,
+            physics_config.collision_epsilon);
+      }
     }
 
     const Vec3f facing_direction =

@@ -6,6 +6,40 @@
 #include <cmath>
 #include <utility>
 
+namespace {
+
+arv::EntityID create_goal_driven_entity(
+    arv::world::WorldRuntime& world,
+    arv::Vec3f position) {
+  arv::world::EntityCreateInfo info;
+  info.type_name = "arvane:test_goal_jumper";
+  info.position = position;
+
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{0.9F, 0.9F, 0.9F}};
+  components.movement = arv::entity::AuthoredMovementComponent{4.5F};
+  components.brain = arv::entity::AuthoredBrainComponent{};
+  components.brain->tick_interval = 1U;
+  components.brain->goals.push_back({
+      .type = "arvane:wander",
+      .priority = 1,
+      .duration_ticks = 20U,
+      .animation = "walking"});
+  info.authored_components = components;
+
+  const arv::EntityID entity = world.create_entity(std::move(info));
+  arv::entity::BrainComponent* brain = world.find_entity_brain(entity);
+  EXPECT_NE(brain, nullptr);
+  if (brain != nullptr && !brain->goals.empty()) {
+    brain->active_goal = 0U;
+    brain->goals[0].state.remaining_ticks = 20U;
+    brain->goals[0].state.movement_direction = {1.0F, 0.0F, 0.0F};
+  }
+  return entity;
+}
+
+} // namespace
+
 TEST(WorldEntityTests, EntityLifecycleQueuesDespawnAndFlushes) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
 
@@ -161,6 +195,90 @@ TEST(WorldEntityTests, PhysicsEntitiesCollideWithWallsAndFaceMovementDirection) 
   EXPECT_FLOAT_EQ(velocity->linear.x, 0.0F);
   EXPECT_NEAR(transform->rotation.y, std::sin(3.14159265358979323846F * 0.75F), 0.001F);
   EXPECT_NEAR(transform->rotation.w, std::cos(3.14159265358979323846F * 0.75F), 0.001F);
+}
+
+TEST(WorldEntityTests, GoalDrivenEntitiesJumpWhenBlockedByOneBlockLedge) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 1, 0}}, stone));
+
+  const arv::EntityID entity = create_goal_driven_entity(world, {0.5F, 1.001F, 0.5F});
+
+  (void)world.tick_entities(&registry);
+
+  const arv::entity::EntityVelocity* velocity = world.find_entity_velocity(entity);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_GT(velocity->linear.y, 0.0F);
+}
+
+TEST(WorldEntityTests, GoalDrivenEntitiesDoNotJumpIntoTallWalls) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 1, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 2, 0}}, stone));
+
+  const arv::EntityID entity = create_goal_driven_entity(world, {0.5F, 1.001F, 0.5F});
+
+  (void)world.tick_entities(&registry);
+
+  const arv::entity::EntityVelocity* velocity = world.find_entity_velocity(entity);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_FLOAT_EQ(velocity->linear.y, 0.0F);
+
+  const arv::entity::BrainComponent* brain = world.find_entity_brain(entity);
+  ASSERT_NE(brain, nullptr);
+  ASSERT_TRUE(brain->active_goal.has_value());
+  ASSERT_LT(brain->active_goal.value(), brain->goals.size());
+  const arv::Vec3f direction =
+      brain->goals[brain->active_goal.value()].state.movement_direction;
+  EXPECT_GT(direction.x * direction.x + direction.z * direction.z, 0.0F);
+  EXPECT_NE(direction, (arv::Vec3f{1.0F, 0.0F, 0.0F}));
+
+  const arv::entity::MovementIntent* intent = world.find_entity_movement_intent(entity);
+  ASSERT_NE(intent, nullptr);
+  EXPECT_EQ(intent->desired_direction, direction);
+}
+
+TEST(WorldEntityTests, GoalDrivenEntitiesPickOpenDirectionWhenOppositeWallIsBlocked) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  (void)world.ensure_chunk({{-1, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 1, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 2, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{-1, 1, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{-1, 2, 0}}, stone));
+
+  const arv::EntityID entity = create_goal_driven_entity(world, {0.5F, 1.001F, 0.5F});
+
+  (void)world.tick_entities(&registry);
+
+  const arv::entity::BrainComponent* brain = world.find_entity_brain(entity);
+  ASSERT_NE(brain, nullptr);
+  ASSERT_TRUE(brain->active_goal.has_value());
+  ASSERT_LT(brain->active_goal.value(), brain->goals.size());
+  EXPECT_NEAR(
+      std::abs(brain->goals[brain->active_goal.value()].state.movement_direction.z),
+      1.0F,
+      0.15F);
+
+  const arv::entity::EntityTransform* before = world.find_entity_transform(entity);
+  ASSERT_NE(before, nullptr);
+  const arv::f32 z_before = before->position.z;
+
+  (void)world.tick_entities(&registry);
+
+  const arv::entity::EntityTransform* after = world.find_entity_transform(entity);
+  ASSERT_NE(after, nullptr);
+  EXPECT_NE(after->position.z, z_before);
 }
 
 TEST(WorldEntityTests, PlayerProfileMapsToWorldLocalEntity) {
