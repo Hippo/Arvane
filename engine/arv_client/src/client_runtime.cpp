@@ -117,6 +117,10 @@ CameraShell& ClientRuntime::camera() noexcept {
   return impl_->player_controller.camera();
 }
 
+const Vec3f& ClientRuntime::player_position() const noexcept {
+  return impl_->player_controller.player_position();
+}
+
 u8 ClientRuntime::selected_hotbar_slot() const noexcept {
   return impl_->player_controller.selected_hotbar_slot();
 }

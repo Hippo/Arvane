@@ -52,6 +52,41 @@ struct FrameTiming {
   std::chrono::steady_clock::time_point frame_work_start{};
 };
 
+enum class HeldItemActionPlayResult : u8 {
+  NoAnimation,
+  Suppressed,
+  Played,
+};
+
+[[nodiscard]] BlockPos offset_block(BlockPos pos, voxel::BlockFace face) noexcept {
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return {{pos.value.x + 1, pos.value.y, pos.value.z}};
+    case voxel::BlockFace::NegativeX:
+      return {{pos.value.x - 1, pos.value.y, pos.value.z}};
+    case voxel::BlockFace::PositiveY:
+      return {{pos.value.x, pos.value.y + 1, pos.value.z}};
+    case voxel::BlockFace::NegativeY:
+      return {{pos.value.x, pos.value.y - 1, pos.value.z}};
+    case voxel::BlockFace::PositiveZ:
+      return {{pos.value.x, pos.value.y, pos.value.z + 1}};
+    case voxel::BlockFace::NegativeZ:
+      return {{pos.value.x, pos.value.y, pos.value.z - 1}};
+  }
+  return pos;
+}
+
+[[nodiscard]] physics::KinematicConfig make_prediction_kinematic_config(
+    const io::PhysicsConfig& physics) noexcept {
+  physics::KinematicConfig config;
+  config.body_width = physics.body_width;
+  config.body_height = physics.body_height;
+  config.sneaking_body_height = physics.sneaking_body_height;
+  config.swimming_body_width = physics.swimming_body_width;
+  config.swimming_body_height = physics.swimming_body_height;
+  return config;
+}
+
 class DesktopFrameLoop {
 public:
   DesktopFrameLoop(
@@ -65,6 +100,7 @@ public:
       DesktopSessionManager& sessions,
       ui::UiTree& ui_tree,
       ui::FontUiTextMeasurer& ui_text_measurer,
+      const voxel::FluidDefinition& water_fluid,
       DesktopMenuState& menu_state,
       ui::UIScreenManager& screen_manager)
       : config_(config),
@@ -77,6 +113,7 @@ public:
         sessions_(sessions),
         ui_tree_(ui_tree),
         ui_text_measurer_(ui_text_measurer),
+        water_fluid_(water_fluid),
         menu_state_(menu_state),
         screen_manager_(screen_manager),
         framebuffer_(window.framebuffer_size()) {
@@ -367,20 +404,188 @@ private:
     return assets_.item_registry.item(stack->item);
   }
 
-  [[nodiscard]] bool play_held_item_action(
+  [[nodiscard]] bool selected_water_bucket_can_leave_empty_bucket(
+      const DesktopGameSession& session) const noexcept {
+    if (session.client == nullptr || !session.client->has_authoritative_inventory()) {
+      return false;
+    }
+    const std::optional<player::ItemID> bucket_id =
+        assets_.item_registry.find_item("arvane:bucket");
+    if (!bucket_id.has_value()) {
+      return false;
+    }
+    const player::ItemRecord* bucket = assets_.item_registry.item(bucket_id.value());
+    if (bucket == nullptr) {
+      return false;
+    }
+
+    const usize selected_slot = session.client->selected_hotbar_slot();
+    const player::Inventory& inventory = session.client->inventory();
+    if (selected_slot >= inventory.slot_count()) {
+      return false;
+    }
+    const std::optional<player::ItemStack>& held = inventory.slot(selected_slot);
+    if (!held.has_value() || held->count == 0U) {
+      return false;
+    }
+    if (held->count == 1U) {
+      return true;
+    }
+
+    for (usize slot_index = 0; slot_index < inventory.slot_count(); ++slot_index) {
+      if (slot_index == selected_slot) {
+        continue;
+      }
+      const std::optional<player::ItemStack>& slot = inventory.slot(slot_index);
+      if (!slot.has_value()) {
+        return true;
+      }
+      if (slot->item == bucket_id.value() && slot->count < bucket->max_stack_size) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  [[nodiscard]] std::optional<BlockPos> predicted_secondary_place_pos(
+      const DesktopGameSession& session,
+      const physics::ICollisionQuery& query) const {
+    if (session.client == nullptr) {
+      return std::nullopt;
+    }
+    auto hit = physics::raycast_blocks(
+        query,
+        session.client->camera().position(),
+        session.client->camera().forward_vector(),
+        config_.physics.reach_distance);
+    if (!hit.has_value()) {
+      return std::nullopt;
+    }
+
+    BlockPos place_pos = hit->block;
+    if (!assets_.block_registry.is_replaceable(hit->variant)) {
+      place_pos = offset_block(place_pos, hit->face);
+    }
+    if (!query.is_block_loaded(place_pos)) {
+      return std::nullopt;
+    }
+    return place_pos;
+  }
+
+  [[nodiscard]] bool predict_block_placement_succeeds(
+      const DesktopGameSession& session,
+      const player::ItemRecord& item,
+      const physics::ICollisionQuery& query) const {
+    if (session.client == nullptr || !item.placement_variant.has_value()) {
+      return false;
+    }
+    const std::optional<BlockPos> place_pos = predicted_secondary_place_pos(session, query);
+    if (!place_pos.has_value()) {
+      return false;
+    }
+
+    const voxel::BlockVariantID existing = session.client_world.get_block(place_pos.value());
+    if (!(assets_.block_registry.is_air(existing) ||
+          assets_.block_registry.is_replaceable(existing))) {
+      return false;
+    }
+
+    const physics::KinematicConfig physics_config =
+        make_prediction_kinematic_config(config_.physics);
+    const Aabb3f player_bounds = physics::make_body_bounds(
+        session.client->player_position(),
+        physics_config,
+        physics::PlayerCollisionPose::Standing);
+    for (const Aabb3f& local_box : assets_.block_registry.collision_boxes(
+             item.placement_variant.value())) {
+      Aabb3f world_box{
+          {local_box.min.x + static_cast<f32>(place_pos->value.x),
+           local_box.min.y + static_cast<f32>(place_pos->value.y),
+           local_box.min.z + static_cast<f32>(place_pos->value.z)},
+          {local_box.max.x + static_cast<f32>(place_pos->value.x),
+           local_box.max.y + static_cast<f32>(place_pos->value.y),
+           local_box.max.z + static_cast<f32>(place_pos->value.z)}};
+      if (player_bounds.overlaps(world_box)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  [[nodiscard]] bool predict_water_bucket_placement_succeeds(
+      const DesktopGameSession& session,
+      const physics::ICollisionQuery& query) const {
+    if (!selected_water_bucket_can_leave_empty_bucket(session)) {
+      return false;
+    }
+    const std::optional<BlockPos> place_pos = predicted_secondary_place_pos(session, query);
+    if (!place_pos.has_value()) {
+      return false;
+    }
+
+    const voxel::BlockVariantID existing_block =
+        session.client_world.get_block(place_pos.value());
+    if (!(assets_.block_registry.is_air(existing_block) ||
+          assets_.block_registry.is_replaceable(existing_block))) {
+      return false;
+    }
+
+    const voxel::FluidCell existing_fluid = session.client_world.get_fluid(place_pos.value());
+    return existing_fluid.empty() ||
+           (existing_fluid.type == water_fluid_.type && !existing_fluid.source());
+  }
+
+  [[nodiscard]] bool predict_held_item_placement_succeeds(
+      const DesktopGameSession& session,
+      const player::ItemRecord* item) const {
+    if (session.client == nullptr || item == nullptr ||
+        !session.client->resolved_permissions().core.can_modify_world) {
+      return false;
+    }
+
+    world::WorldCollisionQuery query(session.client_world, assets_.block_registry, false);
+    if (item->placement_variant.has_value()) {
+      return predict_block_placement_succeeds(session, *item, query);
+    }
+    if (item->name == "arvane:water_bucket") {
+      return predict_water_bucket_placement_succeeds(session, query);
+    }
+    return false;
+  }
+
+  [[nodiscard]] bool held_item_animation_condition_passes(
+      const DesktopGameSession& session,
+      const player::ItemRecord* item,
+      player::HeldItemAnimationPlayCondition condition) const {
+    switch (condition) {
+      case player::HeldItemAnimationPlayCondition::Always:
+        return true;
+      case player::HeldItemAnimationPlayCondition::PlacementSucceeds:
+        return predict_held_item_placement_succeeds(session, item);
+    }
+    return false;
+  }
+
+  [[nodiscard]] HeldItemActionPlayResult play_held_item_action(
       DesktopGameSession& session,
       const player::ItemRecord* item,
       std::string_view action,
       Seconds now_seconds) const noexcept {
-    const client::ItemAnimationClip* clip = client::resolve_held_item_animation(
-        item,
-        action,
-        assets_.item_animation_library);
-    if (clip == nullptr) {
-      return false;
+    const client::HeldItemAnimationResolution animation =
+        client::resolve_held_item_animation_binding(
+            item,
+            action,
+            assets_.item_animation_library);
+    if (animation.clip == nullptr) {
+      return animation.disabled
+                 ? HeldItemActionPlayResult::Suppressed
+                 : HeldItemActionPlayResult::NoAnimation;
     }
-    session.held_item_animation.play(*clip, now_seconds);
-    return true;
+    if (!held_item_animation_condition_passes(session, item, animation.play_condition)) {
+      return HeldItemActionPlayResult::Suppressed;
+    }
+    session.held_item_animation.play(*animation.clip, now_seconds);
+    return HeldItemActionPlayResult::Played;
   }
 
   void update_held_item_animation_from_input(
@@ -409,40 +614,54 @@ private:
           now_seconds);
     }
 
+    if (client_input.primary_held &&
+        session.client->block_break_progress().active &&
+        session.held_item_animation.finished(now_seconds)) {
+      (void)play_held_item_action(
+          session,
+          held_item,
+          client::HeldItemActionPrimaryUse,
+          now_seconds);
+    }
+
     if (client_input.secondary_pressed) {
-      session.held_item_secondary_use_active = true;
-      if (!play_held_item_action(
-              session,
-              held_item,
-              client::HeldItemActionSecondaryUseStart,
-              now_seconds)) {
-        (void)play_held_item_action(
+      HeldItemActionPlayResult result = play_held_item_action(
+          session,
+          held_item,
+          client::HeldItemActionSecondaryUseStart,
+          now_seconds);
+      if (result == HeldItemActionPlayResult::NoAnimation) {
+        result = play_held_item_action(
             session,
             held_item,
             client::HeldItemActionSecondaryUseHold,
             now_seconds);
       }
+      session.held_item_secondary_use_active =
+          result != HeldItemActionPlayResult::Suppressed;
     }
 
     if (client_input.secondary_held && session.held_item_secondary_use_active &&
         session.held_item_animation.finished(now_seconds)) {
-      const client::ItemAnimationClip* hold_clip = client::resolve_held_item_animation(
-          held_item,
-          client::HeldItemActionSecondaryUseHold,
-          assets_.item_animation_library);
-      if (hold_clip != nullptr &&
-          session.held_item_animation.active_clip() != hold_clip) {
-        session.held_item_animation.play(*hold_clip, now_seconds);
+      const client::HeldItemAnimationResolution hold_animation =
+          client::resolve_held_item_animation_binding(
+              held_item,
+              client::HeldItemActionSecondaryUseHold,
+              assets_.item_animation_library);
+      if (hold_animation.clip != nullptr &&
+          held_item_animation_condition_passes(session, held_item, hold_animation.play_condition) &&
+          session.held_item_animation.active_clip() != hold_animation.clip) {
+        session.held_item_animation.play(*hold_animation.clip, now_seconds);
       }
     }
 
     if (!client_input.secondary_held && session.held_item_secondary_use_active) {
       session.held_item_secondary_use_active = false;
-      if (!play_held_item_action(
+      if (play_held_item_action(
               session,
               held_item,
               client::HeldItemActionSecondaryUseEnd,
-              now_seconds)) {
+              now_seconds) != HeldItemActionPlayResult::Played) {
         session.held_item_animation.stop(now_seconds);
       }
     }
@@ -837,6 +1056,7 @@ private:
   DesktopSessionManager& sessions_;
   ui::UiTree& ui_tree_;
   ui::FontUiTextMeasurer& ui_text_measurer_;
+  const voxel::FluidDefinition& water_fluid_;
   DesktopMenuState& menu_state_;
   ui::UIScreenManager& screen_manager_;
   platform::FramebufferSize framebuffer_{};
@@ -983,6 +1203,7 @@ int DesktopApplication::run(int argc, char** argv) {
       sessions,
       ui_tree,
       ui_text_measurer,
+      water_fluid,
       menu_state,
       screen_manager};
   const int loop_result = frame_loop.run();

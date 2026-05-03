@@ -371,6 +371,27 @@ This will produce an item equivalent to:
 }
 ```
 
+Generated block items also inherit the default held-item presentation behavior:
+
+* primary use uses `arvane:swing/default` and plays immediately
+* secondary use uses `arvane:swing/default` only when placement is predicted to
+  succeed
+
+If a block item needs custom animation behavior, define an explicit item with the
+same logical name and override its `held_animations` binding. For example:
+
+```json
+{
+  "name": "arvane:stone",
+  "held_animations": {
+    "secondary_use_start": {
+      "animation": "arvane:swing/heavy",
+      "play_when": "placement_succeeds"
+    }
+  }
+}
+```
+
 ---
 
 ### Override Rule

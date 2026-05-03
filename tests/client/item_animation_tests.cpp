@@ -74,15 +74,100 @@ TEST(ItemAnimationTests, ResolvesDefaultSwingAndExplicitDisable) {
           library),
       library.find(arv::client::DefaultHeldItemSwingAnimationName));
 
+  item.placement_variant = arv::voxel::BlockVariantID{1};
+  const arv::client::HeldItemAnimationResolution block_secondary =
+      arv::client::resolve_held_item_animation_binding(
+          &item,
+          arv::client::HeldItemActionSecondaryUseStart,
+          library);
+  EXPECT_EQ(block_secondary.clip, library.find(arv::client::DefaultHeldItemSwingAnimationName));
+  EXPECT_EQ(
+      block_secondary.play_condition,
+      arv::player::HeldItemAnimationPlayCondition::PlacementSucceeds);
+
+  item.placement_variant.reset();
+  arv::player::HeldItemAnimationBinding filtered_default;
+  filtered_default.selection = arv::player::HeldItemAnimationSelection::Default;
+  filtered_default.play_condition = arv::player::HeldItemAnimationPlayCondition::PlacementSucceeds;
+  item.held_animations.insert_or_assign(
+      std::string{arv::client::HeldItemActionSecondaryUseStart},
+      filtered_default);
+  const arv::client::HeldItemAnimationResolution filtered_secondary =
+      arv::client::resolve_held_item_animation_binding(
+          &item,
+          arv::client::HeldItemActionSecondaryUseStart,
+          library);
+  EXPECT_EQ(filtered_secondary.clip, library.find(arv::client::DefaultHeldItemSwingAnimationName));
+  EXPECT_EQ(
+      filtered_secondary.play_condition,
+      arv::player::HeldItemAnimationPlayCondition::PlacementSucceeds);
+
+  arv::player::HeldItemAnimationBinding disabled;
+  disabled.selection = arv::player::HeldItemAnimationSelection::Disabled;
   item.held_animations.insert_or_assign(
       std::string{arv::client::HeldItemActionPrimaryUse},
-      std::nullopt);
+      disabled);
+  item.held_animations.insert_or_assign(
+      std::string{arv::client::HeldItemActionSecondaryUseStart},
+      disabled);
   EXPECT_EQ(
       arv::client::resolve_held_item_animation(
           &item,
           arv::client::HeldItemActionPrimaryUse,
           library),
       nullptr);
+  EXPECT_EQ(
+      arv::client::resolve_held_item_animation(
+          &item,
+          arv::client::HeldItemActionSecondaryUseStart,
+          library),
+      nullptr);
+}
+
+TEST(ItemAnimationTests, ParsesHeldAnimationBindingObjects) {
+  auto definitions = arv::player::parse_item_definitions_json(R"json(
+{
+  "items": [
+    {
+      "name": "arvane:water_bucket",
+      "display_name": "Water Bucket",
+      "render_type": "texture",
+      "texture": "arvane:texture/item/water_bucket",
+      "held_animations": {
+        "primary_use": null,
+        "secondary_use_start": {
+          "play_when": "placement_succeeds"
+        },
+        "inspect": {
+          "animation": "arvane:swing/default",
+          "play_when": "always"
+        }
+      }
+    }
+  ]
+}
+)json");
+  ASSERT_TRUE(definitions) << definitions.error().message;
+  ASSERT_EQ(definitions.value().size(), 1U);
+
+  const auto& bindings = definitions.value().front().held_animations;
+  ASSERT_EQ(bindings.size(), 3U);
+
+  const auto primary = bindings.find("primary_use");
+  ASSERT_NE(primary, bindings.end());
+  EXPECT_EQ(primary->second.selection, arv::player::HeldItemAnimationSelection::Disabled);
+
+  const auto secondary = bindings.find("secondary_use_start");
+  ASSERT_NE(secondary, bindings.end());
+  EXPECT_EQ(secondary->second.selection, arv::player::HeldItemAnimationSelection::Default);
+  EXPECT_EQ(
+      secondary->second.play_condition,
+      arv::player::HeldItemAnimationPlayCondition::PlacementSucceeds);
+
+  const auto inspect = bindings.find("inspect");
+  ASSERT_NE(inspect, bindings.end());
+  EXPECT_EQ(inspect->second.selection, arv::player::HeldItemAnimationSelection::Named);
+  EXPECT_EQ(inspect->second.animation, "arvane:swing/default");
 }
 
 TEST(ItemAnimationTests, ValidatesItemAnimationReferences) {

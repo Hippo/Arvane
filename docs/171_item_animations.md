@@ -118,6 +118,41 @@ Example:
 }
 ```
 
+For simple bindings, the value may be:
+
+* a string animation id, which plays whenever that action is triggered
+* `null`, which explicitly disables animation for that action
+* an object with `animation` and `play_when` fields
+
+If `animation` is omitted from an object binding, the engine uses the default held
+item swing animation for that action. If `animation` is `null`, the action is
+disabled even if a default would otherwise exist.
+
+```json
+{
+  "name": "arvane:water_bucket",
+  "held_animations": {
+    "secondary_use_start": {
+      "play_when": "placement_succeeds"
+    }
+  }
+}
+```
+
+Supported `play_when` values:
+
+* `always`: play as soon as the action is triggered
+* `placement_succeeds`: play only when the client predicts that the secondary use
+  will place a block or place source fluid
+
+The current engine defaults are:
+
+* `primary_use`: `arvane:swing/default`, `play_when: "always"`
+* `secondary_use_start` for block items: `arvane:swing/default`,
+  `play_when: "placement_succeeds"`
+* `secondary_use_start` for other items: `arvane:swing/default`,
+  `play_when: "always"`
+
 Recommended action keys:
 
 ```text
@@ -432,4 +467,3 @@ This system does not make gameplay timing client-authoritative.
 This system does not require a full animation graph.
 
 The goal is a small, deterministic, data-driven transform animation layer for held items.
-

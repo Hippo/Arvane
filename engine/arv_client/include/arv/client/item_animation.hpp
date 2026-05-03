@@ -58,6 +58,13 @@ struct HeldItemAnimationPose {
   Vec3f scale{1.0F, 1.0F, 1.0F};
 };
 
+struct HeldItemAnimationResolution {
+  const ItemAnimationClip* clip{};
+  player::HeldItemAnimationPlayCondition play_condition{
+      player::HeldItemAnimationPlayCondition::Always};
+  bool disabled{};
+};
+
 class ItemAnimationLibrary {
 public:
   using Result = Expected<ItemAnimationLibrary, ItemAnimationError>;
@@ -111,6 +118,11 @@ parse_item_animation_library_json(std::string_view text);
     const ItemAnimationLibrary& library);
 
 [[nodiscard]] const ItemAnimationClip* resolve_held_item_animation(
+    const player::ItemRecord* item,
+    std::string_view action,
+    const ItemAnimationLibrary& library) noexcept;
+
+[[nodiscard]] HeldItemAnimationResolution resolve_held_item_animation_binding(
     const player::ItemRecord* item,
     std::string_view action,
     const ItemAnimationLibrary& library) noexcept;

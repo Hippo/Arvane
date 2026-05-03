@@ -427,20 +427,20 @@ Expected<void, ItemAnimationError> validate_item_animation_references(
       continue;
     }
     for (const auto& [action, animation] : item->held_animations) {
-      if (!animation.has_value()) {
+      if (animation.selection != player::HeldItemAnimationSelection::Named) {
         continue;
       }
-      if (!valid_stable_name(animation.value())) {
+      if (!valid_stable_name(animation.animation)) {
         return Expected<void, ItemAnimationError>::failure(
             animation_error(
                 "item " + item->name + " held animation " + action +
-                " must be namespaced: " + animation.value()));
+                " must be namespaced: " + animation.animation));
       }
-      if (library.find(animation.value()) == nullptr) {
+      if (library.find(animation.animation) == nullptr) {
         return Expected<void, ItemAnimationError>::failure(
             animation_error(
                 "item " + item->name + " references missing held animation " +
-                animation.value() + " for " + action));
+                animation.animation + " for " + action));
       }
     }
   }
@@ -452,18 +452,40 @@ const ItemAnimationClip* resolve_held_item_animation(
     const player::ItemRecord* item,
     std::string_view action,
     const ItemAnimationLibrary& library) noexcept {
+  return resolve_held_item_animation_binding(item, action, library).clip;
+}
+
+HeldItemAnimationResolution resolve_held_item_animation_binding(
+    const player::ItemRecord* item,
+    std::string_view action,
+    const ItemAnimationLibrary& library) noexcept {
   if (item != nullptr) {
     const auto found = item->held_animations.find(std::string{action});
     if (found != item->held_animations.end()) {
-      return found->second.has_value() ? library.find(found->second.value()) : nullptr;
+      switch (found->second.selection) {
+        case player::HeldItemAnimationSelection::Default:
+          return {
+              library.find(DefaultHeldItemSwingAnimationName),
+              found->second.play_condition};
+        case player::HeldItemAnimationSelection::Named:
+          return {library.find(found->second.animation), found->second.play_condition};
+        case player::HeldItemAnimationSelection::Disabled:
+          return {nullptr, found->second.play_condition, true};
+      }
     }
   }
 
   if (action == HeldItemActionPrimaryUse ||
       action == HeldItemActionSecondaryUseStart) {
-    return library.find(DefaultHeldItemSwingAnimationName);
+    player::HeldItemAnimationPlayCondition play_condition =
+        player::HeldItemAnimationPlayCondition::Always;
+    if (item != nullptr && item->placement_variant.has_value() &&
+        action == HeldItemActionSecondaryUseStart) {
+      play_condition = player::HeldItemAnimationPlayCondition::PlacementSucceeds;
+    }
+    return {library.find(DefaultHeldItemSwingAnimationName), play_condition};
   }
-  return nullptr;
+  return {};
 }
 
 } // namespace arv::client

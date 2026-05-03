@@ -133,6 +133,83 @@ Expected<ItemRenderType, ItemRegistryError> parse_item_render_type(std::string_v
       {"invalid item render_type: " + std::string{value}});
 }
 
+Expected<HeldItemAnimationPlayCondition, ItemRegistryError> parse_held_item_animation_play_condition(
+    std::string_view value,
+    std::string_view context) {
+  if (value == "always") {
+    return Expected<HeldItemAnimationPlayCondition, ItemRegistryError>::success(
+        HeldItemAnimationPlayCondition::Always);
+  }
+  if (value == "placement_succeeds" || value == "placement_predicted") {
+    return Expected<HeldItemAnimationPlayCondition, ItemRegistryError>::success(
+        HeldItemAnimationPlayCondition::PlacementSucceeds);
+  }
+  return Expected<HeldItemAnimationPlayCondition, ItemRegistryError>::failure(
+      {"invalid held animation play_when '" + std::string{value} + "' for " +
+       std::string{context}});
+}
+
+Expected<HeldItemAnimationBinding, ItemRegistryError> parse_held_item_animation_binding(
+    const nlohmann::json& animation,
+    std::string_view item_name,
+    std::string_view action) {
+  const std::string context =
+      "held_animations." + std::string{action} + " for " + std::string{item_name};
+  HeldItemAnimationBinding binding;
+
+  if (animation.is_null()) {
+    binding.selection = HeldItemAnimationSelection::Disabled;
+    return Expected<HeldItemAnimationBinding, ItemRegistryError>::success(std::move(binding));
+  }
+  if (animation.is_string()) {
+    binding.selection = HeldItemAnimationSelection::Named;
+    binding.animation = animation.get<std::string>();
+    if (binding.animation.empty()) {
+      return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
+          {context + " animation must be non-empty"});
+    }
+    return Expected<HeldItemAnimationBinding, ItemRegistryError>::success(std::move(binding));
+  }
+  if (!animation.is_object()) {
+    return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
+        {context + " must be a string, null, or object"});
+  }
+
+  if (const auto animation_iter = animation.find("animation");
+      animation_iter != animation.end()) {
+    if (animation_iter->is_null()) {
+      binding.selection = HeldItemAnimationSelection::Disabled;
+    } else if (animation_iter->is_string()) {
+      binding.selection = HeldItemAnimationSelection::Named;
+      binding.animation = animation_iter->get<std::string>();
+      if (binding.animation.empty()) {
+        return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
+            {context + ".animation must be non-empty"});
+      }
+    } else {
+      return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
+          {context + ".animation must be a string or null"});
+    }
+  }
+
+  if (const auto play_when_iter = animation.find("play_when");
+      play_when_iter != animation.end()) {
+    if (!play_when_iter->is_string()) {
+      return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
+          {context + ".play_when must be a string"});
+    }
+    auto condition = parse_held_item_animation_play_condition(
+        play_when_iter->get<std::string>(),
+        context);
+    if (!condition) {
+      return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(condition.error());
+    }
+    binding.play_condition = condition.value();
+  }
+
+  return Expected<HeldItemAnimationBinding, ItemRegistryError>::success(std::move(binding));
+}
+
 ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions) {
   if (definitions.empty()) {
     return Result::failure({"item registry is empty; required item arvane:air is missing"});
@@ -431,16 +508,15 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 {"held_animations action key must be non-empty for " + definition.name});
           }
-          if (animation.is_null()) {
-            definition.held_animations.insert_or_assign(action, std::nullopt);
-          } else if (animation.is_string()) {
-            definition.held_animations.insert_or_assign(
-                action,
-                animation.get<std::string>());
-          } else {
+          auto binding = parse_held_item_animation_binding(
+              animation,
+              definition.name,
+              action);
+          if (!binding) {
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
-                {"held_animations." + action + " must be a string or null for " + definition.name});
+                binding.error());
           }
+          definition.held_animations.insert_or_assign(action, std::move(binding.value()));
         }
       }
 

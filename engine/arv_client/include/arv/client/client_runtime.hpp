@@ -66,6 +66,7 @@ public:
   [[nodiscard]] net::ConnectionState connection_state() const noexcept;
   [[nodiscard]] const CameraShell& camera() const noexcept;
   CameraShell& camera() noexcept;
+  [[nodiscard]] const Vec3f& player_position() const noexcept;
   [[nodiscard]] u8 selected_hotbar_slot() const noexcept;
   [[nodiscard]] const std::string& game_mode_id() const noexcept;
   [[nodiscard]] const player::ResolvedPermissions& resolved_permissions() const noexcept;
