@@ -1,0 +1,32 @@
+{
+  "animations": [
+    {
+      "name": "arvane:swing/default",
+      "duration_seconds": 0.280,
+      "loop": false,
+      "blend_in_seconds": 0.000,
+      "blend_out_seconds": 0.060,
+      "channels": {
+        "first_person": {
+          "position": [
+            { "time": 0.000, "value": [0.000, 0.000, 0.000] },
+            { "time": 0.050, "value": [0.030, 0.120, 0.100], "easing": "ease_out" },
+            { "time": 0.130, "value": [-0.040, -0.200, 0.360], "easing": "ease_out" },
+            { "time": 0.210, "value": [-0.020, -0.300, 0.200], "easing": "ease_in_out" },
+            { "time": 0.280, "value": [0.000, 0.000, 0.000] }
+          ],
+          "rotation_degrees": [
+            { "time": 0.000, "value": [0.000, 0.000, 0.000] },
+            { "time": 0.050, "value": [-12.000, -6.000, -45.000], "easing": "ease_out" },
+            { "time": 0.130, "value": [-34.000, 0.000, -60.000], "easing": "ease_out" },
+            { "time": 0.210, "value": [10.000, 8.000, -45.000], "easing": "ease_in_out" },
+            { "time": 0.280, "value": [0.000, 0.000, 0.000] }
+          ],
+          "scale": [
+            { "time": 0.000, "value": [1.000, 1.000, 1.000] }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -119,6 +119,25 @@ DesktopLoadedAssetsResult load_desktop_assets(
   loaded.item_registry = std::move(item_registry_result.value());
   loaded.item_registry_hash = persistence::hash_item_registry(loaded.item_registry);
 
+  auto item_animation_text = io::read_text_file(
+      config.paths.config_path() / "item_animations.json",
+      "startup item animation definitions");
+  if (!item_animation_text) {
+    return asset_failure("item_animations", item_animation_text.error().message);
+  }
+  auto item_animation_library = client::parse_item_animation_library_json(
+      item_animation_text.value());
+  if (!item_animation_library) {
+    return asset_failure("item_animations", item_animation_library.error().message);
+  }
+  loaded.item_animation_library = std::move(item_animation_library.value());
+  auto item_animation_references = client::validate_item_animation_references(
+      loaded.item_registry,
+      loaded.item_animation_library);
+  if (!item_animation_references) {
+    return asset_failure("item_animations", item_animation_references.error().message);
+  }
+
   auto item_atlas_result = build_item_texture_atlas(resources, loaded.item_registry);
   if (!item_atlas_result) {
     return asset_failure("assets", item_atlas_result.error().message);

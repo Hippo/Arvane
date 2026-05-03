@@ -10,7 +10,7 @@
 namespace arv::client {
 
 inline constexpr f32 DefaultCameraFovYDegrees = 70.0F;
-inline constexpr f32 DefaultSprintCameraFovBoostDegrees = 5.0F;
+inline constexpr f32 DefaultSprintCameraFovBoostDegrees = 2.5F;
 inline constexpr f32 DefaultCameraNearPlane = 0.05F;
 inline constexpr f32 DefaultCameraFarPlane = 1000.0F;
 inline constexpr f32 MaxCameraPitchRadians = 1.55334306F;

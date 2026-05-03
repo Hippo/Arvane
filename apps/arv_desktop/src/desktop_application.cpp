@@ -18,6 +18,7 @@
 
 #include "arv/asset/font.hpp"
 #include "arv/asset/resource.hpp"
+#include "arv/client/item_animation.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/core/arena.hpp"
 #include "arv/core/log.hpp"
@@ -38,6 +39,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <utility>
 
 namespace arv::desktop {
@@ -122,7 +124,8 @@ public:
           has_active_session,
           was_inventory_open,
           std::move(client_input),
-          inventory_changed_by_ui);
+          inventory_changed_by_ui,
+          timing.now);
 
       bool fixed_tick_ran = false;
       if (has_active_session &&
@@ -347,13 +350,116 @@ private:
     return true;
   }
 
+  [[nodiscard]] const player::ItemRecord* selected_held_item(
+      const DesktopGameSession& session) const noexcept {
+    if (session.client == nullptr || !session.client->has_authoritative_inventory()) {
+      return nullptr;
+    }
+    const usize selected_slot = session.client->selected_hotbar_slot();
+    const player::Inventory& inventory = session.client->inventory();
+    if (selected_slot >= inventory.slot_count()) {
+      return nullptr;
+    }
+    const std::optional<player::ItemStack>& stack = inventory.slot(selected_slot);
+    if (!stack.has_value() || stack->count == 0U) {
+      return nullptr;
+    }
+    return assets_.item_registry.item(stack->item);
+  }
+
+  [[nodiscard]] bool play_held_item_action(
+      DesktopGameSession& session,
+      const player::ItemRecord* item,
+      std::string_view action,
+      Seconds now_seconds) const noexcept {
+    const client::ItemAnimationClip* clip = client::resolve_held_item_animation(
+        item,
+        action,
+        assets_.item_animation_library);
+    if (clip == nullptr) {
+      return false;
+    }
+    session.held_item_animation.play(*clip, now_seconds);
+    return true;
+  }
+
+  void update_held_item_animation_from_input(
+      DesktopGameSession& session,
+      const client::InputFrame& client_input,
+      Seconds now_seconds) const noexcept {
+    if (session.client == nullptr ||
+        session.client->inventory_open() ||
+        session.client->chat_open()) {
+      session.held_item_secondary_use_active = false;
+      return;
+    }
+
+    const player::ItemRecord* held_item = selected_held_item(session);
+    if (held_item == nullptr) {
+      session.held_item_secondary_use_active = false;
+      session.held_item_animation.stop(now_seconds);
+      return;
+    }
+
+    if (client_input.primary_pressed) {
+      (void)play_held_item_action(
+          session,
+          held_item,
+          client::HeldItemActionPrimaryUse,
+          now_seconds);
+    }
+
+    if (client_input.secondary_pressed) {
+      session.held_item_secondary_use_active = true;
+      if (!play_held_item_action(
+              session,
+              held_item,
+              client::HeldItemActionSecondaryUseStart,
+              now_seconds)) {
+        (void)play_held_item_action(
+            session,
+            held_item,
+            client::HeldItemActionSecondaryUseHold,
+            now_seconds);
+      }
+    }
+
+    if (client_input.secondary_held && session.held_item_secondary_use_active &&
+        session.held_item_animation.finished(now_seconds)) {
+      const client::ItemAnimationClip* hold_clip = client::resolve_held_item_animation(
+          held_item,
+          client::HeldItemActionSecondaryUseHold,
+          assets_.item_animation_library);
+      if (hold_clip != nullptr &&
+          session.held_item_animation.active_clip() != hold_clip) {
+        session.held_item_animation.play(*hold_clip, now_seconds);
+      }
+    }
+
+    if (!client_input.secondary_held && session.held_item_secondary_use_active) {
+      session.held_item_secondary_use_active = false;
+      if (!play_held_item_action(
+              session,
+              held_item,
+              client::HeldItemActionSecondaryUseEnd,
+              now_seconds)) {
+        session.held_item_animation.stop(now_seconds);
+      }
+    }
+  }
+
   void submit_client_input_and_update_cursor(
       DesktopGameSession* active_session,
       bool has_active_session,
       bool was_inventory_open,
       client::InputFrame client_input,
-      bool inventory_changed_by_ui) {
+      bool inventory_changed_by_ui,
+      std::chrono::steady_clock::time_point now) {
     if (has_active_session) {
+      update_held_item_animation_from_input(
+          *active_session,
+          client_input,
+          std::chrono::duration<Seconds>(now - app_start_time_).count());
       active_session->client->submit_input(std::move(client_input));
     }
     if (has_active_session && was_inventory_open && !active_session->client->inventory_open()) {
@@ -501,6 +607,10 @@ private:
         *active_session->integrated_server,
         *active_session->client,
         assets_.item_registry,
+        assets_.item_animation_library,
+        active_session->held_item_animation,
+        std::chrono::duration<Seconds>(timing.now - app_start_time_).count(),
+        config_.paths.config_path() / "item_animations.json",
         assets_.entity_registry,
         world_jobs_,
         renderer_,

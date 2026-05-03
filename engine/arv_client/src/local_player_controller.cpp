@@ -53,7 +53,7 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
   }
   if (input.hotbar_scroll_steps != 0) {
     const u8 next_slot = wrap_hotbar_slot(
-        static_cast<i32>(selected_hotbar_slot_) + static_cast<i32>(input.hotbar_scroll_steps));
+        static_cast<i32>(selected_hotbar_slot_) - static_cast<i32>(input.hotbar_scroll_steps));
     if (selected_hotbar_slot_ != next_slot) {
       selected_hotbar_slot_ = next_slot;
       has_unconfirmed_hotbar_selection_ = true;

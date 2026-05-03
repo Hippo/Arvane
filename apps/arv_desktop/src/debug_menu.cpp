@@ -8,7 +8,10 @@
 #include <charconv>
 #include <cctype>
 #include <cstddef>
+#include <fstream>
+#include <iomanip>
 #include <optional>
+#include <sstream>
 #include <string_view>
 
 #include <imgui.h>
@@ -109,6 +112,176 @@ namespace {
     return std::nullopt;
   }
   return EntityID{value};
+}
+
+[[nodiscard]] const char* easing_label(client::ItemAnimationEasing easing) noexcept {
+  switch (easing) {
+    case client::ItemAnimationEasing::Linear:
+      return "linear";
+    case client::ItemAnimationEasing::Step:
+      return "step";
+    case client::ItemAnimationEasing::EaseIn:
+      return "ease_in";
+    case client::ItemAnimationEasing::EaseOut:
+      return "ease_out";
+    case client::ItemAnimationEasing::EaseInOut:
+      return "ease_in_out";
+  }
+  return "linear";
+}
+
+[[nodiscard]] client::ItemAnimationEasing easing_from_index(int index) noexcept {
+  switch (index) {
+    case 1:
+      return client::ItemAnimationEasing::Step;
+    case 2:
+      return client::ItemAnimationEasing::EaseIn;
+    case 3:
+      return client::ItemAnimationEasing::EaseOut;
+    case 4:
+      return client::ItemAnimationEasing::EaseInOut;
+    default:
+      return client::ItemAnimationEasing::Linear;
+  }
+}
+
+[[nodiscard]] int easing_index(client::ItemAnimationEasing easing) noexcept {
+  switch (easing) {
+    case client::ItemAnimationEasing::Linear:
+      return 0;
+    case client::ItemAnimationEasing::Step:
+      return 1;
+    case client::ItemAnimationEasing::EaseIn:
+      return 2;
+    case client::ItemAnimationEasing::EaseOut:
+      return 3;
+    case client::ItemAnimationEasing::EaseInOut:
+      return 4;
+  }
+  return 0;
+}
+
+void sort_item_animation_keyframes(
+    std::vector<client::ItemAnimationKeyframeVec3>& frames) {
+  std::sort(
+      frames.begin(),
+      frames.end(),
+      [](const client::ItemAnimationKeyframeVec3& lhs,
+         const client::ItemAnimationKeyframeVec3& rhs) {
+        return lhs.time_seconds < rhs.time_seconds;
+      });
+}
+
+void append_json_string(std::ostringstream& output, std::string_view value) {
+  output << '"';
+  for (const char ch : value) {
+    switch (ch) {
+      case '"':
+        output << "\\\"";
+        break;
+      case '\\':
+        output << "\\\\";
+        break;
+      case '\n':
+        output << "\\n";
+        break;
+      case '\r':
+        output << "\\r";
+        break;
+      case '\t':
+        output << "\\t";
+        break;
+      default:
+        output << ch;
+        break;
+    }
+  }
+  output << '"';
+}
+
+void append_vec3_json(std::ostringstream& output, Vec3f value) {
+  output << '['
+         << value.x << ", "
+         << value.y << ", "
+         << value.z << ']';
+}
+
+void append_keyframes_json(
+    std::ostringstream& output,
+    const std::vector<client::ItemAnimationKeyframeVec3>& frames,
+    int indent) {
+  const std::string base(static_cast<usize>(indent), ' ');
+  const std::string row(static_cast<usize>(indent + 2), ' ');
+  output << "[\n";
+  for (usize index = 0; index < frames.size(); ++index) {
+    const client::ItemAnimationKeyframeVec3& frame = frames[index];
+    output << row << "{ \"time\": " << frame.time_seconds << ", \"value\": ";
+    append_vec3_json(output, frame.value);
+    if (frame.easing != client::ItemAnimationEasing::Linear) {
+      output << ", \"easing\": ";
+      append_json_string(output, easing_label(frame.easing));
+    }
+    output << " }";
+    if (index + 1U < frames.size()) {
+      output << ',';
+    }
+    output << '\n';
+  }
+  output << base << ']';
+}
+
+void append_channel_json(
+    std::ostringstream& output,
+    const client::ItemAnimationTransformChannel& channel) {
+  output << "{\n";
+  output << "          \"position\": ";
+  append_keyframes_json(output, channel.position, 10);
+  output << ",\n          \"rotation_degrees\": ";
+  append_keyframes_json(output, channel.rotation_degrees, 10);
+  output << ",\n          \"scale\": ";
+  append_keyframes_json(output, channel.scale, 10);
+  output << "\n        }";
+}
+
+[[nodiscard]] std::string serialize_item_animation_library_json(
+    const client::ItemAnimationLibrary& library) {
+  std::ostringstream output;
+  output << std::fixed << std::setprecision(3);
+  output << "{\n  \"animations\": [\n";
+  const std::span<const client::ItemAnimationClip> clips = library.clips();
+  for (usize index = 0; index < clips.size(); ++index) {
+    const client::ItemAnimationClip& clip = clips[index];
+    output << "    {\n      \"name\": ";
+    append_json_string(output, clip.name);
+    output << ",\n      \"duration_seconds\": " << clip.duration_seconds
+           << ",\n      \"loop\": " << (clip.loop ? "true" : "false")
+           << ",\n      \"blend_in_seconds\": " << clip.blend_in_seconds
+           << ",\n      \"blend_out_seconds\": " << clip.blend_out_seconds
+           << ",\n      \"channels\": {\n        \"first_person\": ";
+    append_channel_json(output, clip.first_person);
+    output << "\n      }\n    }";
+    if (index + 1U < clips.size()) {
+      output << ',';
+    }
+    output << '\n';
+  }
+  output << "  ]\n}\n";
+  return output.str();
+}
+
+[[nodiscard]] client::ItemAnimationClip* selected_item_animation_clip(
+    DebugMenuState& state,
+    client::ItemAnimationLibrary& library) noexcept {
+  if (library.clip_count() == 0U) {
+    return nullptr;
+  }
+  client::ItemAnimationClip* clip = library.find(state.selected_item_animation_name);
+  if (clip != nullptr) {
+    return clip;
+  }
+  clip = &library.clips().front();
+  state.selected_item_animation_name = clip->name;
+  return clip;
 }
 
 [[nodiscard]] f32 frame_sample(double milliseconds) noexcept {
@@ -566,6 +739,197 @@ void render_player_tab(
     ImGui::EndDisabled();
   }
   return inventory_changed;
+}
+
+void render_item_animation_keyframes(
+    const char* label,
+    std::vector<client::ItemAnimationKeyframeVec3>& frames,
+    Vec3f default_value,
+    Seconds duration_seconds) {
+  ImGui::PushID(label);
+  ImGui::SeparatorText(label);
+  bool changed = false;
+  int remove_index = -1;
+  if (ImGui::BeginTable(
+          "Keyframes",
+          6,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 82.0F);
+    ImGui::TableSetupColumn("X", ImGuiTableColumnFlags_WidthFixed, 86.0F);
+    ImGui::TableSetupColumn("Y", ImGuiTableColumnFlags_WidthFixed, 86.0F);
+    ImGui::TableSetupColumn("Z", ImGuiTableColumnFlags_WidthFixed, 86.0F);
+    ImGui::TableSetupColumn("Ease", ImGuiTableColumnFlags_WidthFixed, 116.0F);
+    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 52.0F);
+    ImGui::TableHeadersRow();
+    for (usize index = 0; index < frames.size(); ++index) {
+      client::ItemAnimationKeyframeVec3& frame = frames[index];
+      ImGui::PushID(static_cast<int>(index));
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      float time = frame.time_seconds;
+      if (ImGui::DragFloat("##time", &time, 0.005F, 0.0F, duration_seconds, "%.3f")) {
+        frame.time_seconds = std::clamp(time, 0.0F, duration_seconds);
+        changed = true;
+      }
+      ImGui::TableNextColumn();
+      changed = ImGui::DragFloat("##x", &frame.value.x, 0.01F, -2.0F, 2.0F, "%.3f") || changed;
+      ImGui::TableNextColumn();
+      changed = ImGui::DragFloat("##y", &frame.value.y, 0.01F, -2.0F, 2.0F, "%.3f") || changed;
+      ImGui::TableNextColumn();
+      changed = ImGui::DragFloat("##z", &frame.value.z, 0.01F, -2.0F, 2.0F, "%.3f") || changed;
+      ImGui::TableNextColumn();
+      int ease = easing_index(frame.easing);
+      if (ImGui::Combo("##ease", &ease, "linear\0step\0ease_in\0ease_out\0ease_in_out\0")) {
+        frame.easing = easing_from_index(ease);
+        changed = true;
+      }
+      ImGui::TableNextColumn();
+      if (ImGui::SmallButton("Del")) {
+        remove_index = static_cast<int>(index);
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+
+  if (remove_index >= 0) {
+    frames.erase(frames.begin() + remove_index);
+    changed = true;
+  }
+
+  if (ImGui::Button("Add keyframe")) {
+    const Seconds next_time =
+        frames.empty()
+            ? 0.0F
+            : std::min(frames.back().time_seconds + 0.05F, duration_seconds);
+    frames.push_back({next_time, default_value, client::ItemAnimationEasing::Linear});
+    changed = true;
+  }
+
+  if (changed) {
+    sort_item_animation_keyframes(frames);
+  }
+  ImGui::PopID();
+}
+
+void render_item_animations_tab(
+    DebugMenuState& state,
+    client::ItemAnimationLibrary& library,
+    client::HeldItemAnimationPlayer& player,
+    Seconds now_seconds,
+    const std::filesystem::path& export_path) {
+  if (library.clip_count() == 0U) {
+    ImGui::TextUnformatted("No item animations are loaded.");
+    return;
+  }
+
+  client::ItemAnimationClip* clip = selected_item_animation_clip(state, library);
+  if (clip == nullptr) {
+    ImGui::TextUnformatted("No item animation is selected.");
+    return;
+  }
+
+  const char* preview = state.selected_item_animation_name.empty()
+                            ? "Select animation"
+                            : state.selected_item_animation_name.c_str();
+  if (ImGui::BeginCombo("Animation", preview)) {
+    for (client::ItemAnimationClip& candidate : library.clips()) {
+      const bool selected = candidate.name == state.selected_item_animation_name;
+      if (ImGui::Selectable(candidate.name.c_str(), selected)) {
+        state.selected_item_animation_name = candidate.name;
+        clip = &candidate;
+      }
+      if (selected) {
+        ImGui::SetItemDefaultFocus();
+      }
+    }
+    ImGui::EndCombo();
+  }
+
+  ImGui::SeparatorText("Clip");
+  float duration = clip->duration_seconds;
+  if (ImGui::DragFloat("Duration", &duration, 0.005F, 0.01F, 5.0F, "%.3f")) {
+    clip->duration_seconds = std::max(duration, 0.01F);
+    for (auto* frames : {
+             &clip->first_person.position,
+             &clip->first_person.rotation_degrees,
+             &clip->first_person.scale,
+         }) {
+      for (client::ItemAnimationKeyframeVec3& frame : *frames) {
+        frame.time_seconds = std::min(frame.time_seconds, clip->duration_seconds);
+      }
+    }
+  }
+  ImGui::Checkbox("Loop", &clip->loop);
+  float blend_in = clip->blend_in_seconds;
+  float blend_out = clip->blend_out_seconds;
+  if (ImGui::DragFloat("Blend in", &blend_in, 0.005F, 0.0F, 1.0F, "%.3f")) {
+    clip->blend_in_seconds = std::max(blend_in, 0.0F);
+  }
+  if (ImGui::DragFloat("Blend out", &blend_out, 0.005F, 0.0F, 1.0F, "%.3f")) {
+    clip->blend_out_seconds = std::max(blend_out, 0.0F);
+  }
+
+  if (ImGui::Button("Preview")) {
+    player.play(*clip, now_seconds);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Stop")) {
+    player.stop(now_seconds);
+  }
+  ImGui::SameLine();
+  ImGui::Text(
+      "Active: %s",
+      player.active_clip() == nullptr ? "none" : player.active_clip()->name.c_str());
+
+  render_item_animation_keyframes(
+      "Position (X right, Y up, Z forward)",
+      clip->first_person.position,
+      {},
+      clip->duration_seconds);
+  render_item_animation_keyframes(
+      "Rotation Degrees (pitch, yaw, roll)",
+      clip->first_person.rotation_degrees,
+      {},
+      clip->duration_seconds);
+  render_item_animation_keyframes(
+      "Scale",
+      clip->first_person.scale,
+      {1.0F, 1.0F, 1.0F},
+      clip->duration_seconds);
+
+  ImGui::SeparatorText("Export");
+  if (ImGui::Button("Generate JSON")) {
+    state.item_animation_export_text = serialize_item_animation_library_json(library);
+    state.item_animation_status = "Generated item animation JSON.";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Copy")) {
+    if (state.item_animation_export_text.empty()) {
+      state.item_animation_export_text = serialize_item_animation_library_json(library);
+    }
+    ImGui::SetClipboardText(state.item_animation_export_text.c_str());
+    state.item_animation_status = "Copied item animation JSON to clipboard.";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Export file")) {
+    state.item_animation_export_text = serialize_item_animation_library_json(library);
+    std::ofstream output(export_path);
+    if (output) {
+      output << state.item_animation_export_text;
+      state.item_animation_status = "Exported " + export_path.string();
+    } else {
+      state.item_animation_status = "Failed to write " + export_path.string();
+    }
+  }
+  if (!state.item_animation_status.empty()) {
+    ImGui::TextUnformatted(state.item_animation_status.c_str());
+  }
+  ImGui::InputTextMultiline(
+      "JSON",
+      &state.item_animation_export_text,
+      ImVec2{0.0F, 180.0F},
+      ImGuiInputTextFlags_ReadOnly);
 }
 
 void render_entities_tab(
@@ -1426,6 +1790,10 @@ DebugMenuResult render_debug_menu(
     server::ServerRuntime& server,
     client::ClientRuntime& client,
     const player::ItemRegistry& item_registry,
+    client::ItemAnimationLibrary& item_animation_library,
+    client::HeldItemAnimationPlayer& held_item_animation_player,
+    Seconds now_seconds,
+    const std::filesystem::path& item_animation_export_path,
     const entity::EntityRegistry& entity_registry,
     sched::Scheduler& world_jobs,
     const render::OpenGLRenderer& renderer,
@@ -1474,6 +1842,15 @@ DebugMenuResult render_debug_menu(
     if (ImGui::BeginTabItem("Items")) {
       result.inventory_changed =
           render_items_tab(state, server, item_registry) || result.inventory_changed;
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Item Animations")) {
+      render_item_animations_tab(
+          state,
+          item_animation_library,
+          held_item_animation_player,
+          now_seconds,
+          item_animation_export_path);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Entities")) {

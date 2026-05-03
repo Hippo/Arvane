@@ -7,6 +7,7 @@ add_executable(arv_tests
   client/chunk_interest_tests.cpp
   client/client_runtime_tests.cpp
   client/camera_tests.cpp
+  client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp
   client/ui_tests.cpp
   core/coordinate_tests.cpp

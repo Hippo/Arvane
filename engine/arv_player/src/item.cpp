@@ -111,6 +111,9 @@ void merge_explicit_definition(ItemDefinition& target, ItemDefinition source) {
     target.tool_category = std::move(source.tool_category);
     target.tool_break_speed_multiplier = source.tool_break_speed_multiplier;
   }
+  for (auto& [action, animation] : source.held_animations) {
+    target.held_animations.insert_or_assign(std::move(action), std::move(animation));
+  }
   target.generated_from_block = target.generated_from_block || source.generated_from_block;
 }
 
@@ -188,6 +191,7 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     record.source_block = definition.source_block;
     record.tool_category = std::move(definition.tool_category);
     record.tool_break_speed_multiplier = definition.tool_break_speed_multiplier;
+    record.held_animations = std::move(definition.held_animations);
 
     if (record.render_type == ItemRenderType::Texture && record.texture_asset.empty()) {
       record.texture_asset = std::string{MissingTextureAsset};
@@ -414,6 +418,29 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
         const auto speed_iter = tool_iter->find("break_speed_multiplier");
         if (speed_iter != tool_iter->end()) {
           definition.tool_break_speed_multiplier = speed_iter->get<f32>();
+        }
+      }
+      const auto held_animations_iter = item.find("held_animations");
+      if (held_animations_iter != item.end()) {
+        if (!held_animations_iter->is_object()) {
+          return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+              {"held_animations must be an object for " + definition.name});
+        }
+        for (const auto& [action, animation] : held_animations_iter->items()) {
+          if (action.empty()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                {"held_animations action key must be non-empty for " + definition.name});
+          }
+          if (animation.is_null()) {
+            definition.held_animations.insert_or_assign(action, std::nullopt);
+          } else if (animation.is_string()) {
+            definition.held_animations.insert_or_assign(
+                action,
+                animation.get<std::string>());
+          } else {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                {"held_animations." + action + " must be a string or null for " + definition.name});
+          }
         }
       }
 

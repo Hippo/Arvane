@@ -36,6 +36,28 @@ namespace {
   return {0.0F, std::sin(half), 0.0F, std::cos(half)};
 }
 
+[[nodiscard]] Quatf pitch_rotation(f32 radians) noexcept {
+  const f32 half = radians * 0.5F;
+  return {std::sin(half), 0.0F, 0.0F, std::cos(half)};
+}
+
+[[nodiscard]] Quatf roll_rotation(f32 radians) noexcept {
+  const f32 half = radians * 0.5F;
+  return {0.0F, 0.0F, std::sin(half), std::cos(half)};
+}
+
+[[nodiscard]] f32 degrees_to_radians(f32 degrees) noexcept {
+  return degrees * std::numbers::pi_v<f32> / 180.0F;
+}
+
+[[nodiscard]] Quatf euler_degrees_rotation(Vec3f degrees) noexcept {
+  return multiply_quat(
+      pitch_rotation(degrees_to_radians(degrees.x)),
+      multiply_quat(
+          yaw_rotation(degrees_to_radians(degrees.y)),
+          roll_rotation(degrees_to_radians(degrees.z))));
+}
+
 [[nodiscard]] Quatf camera_basis_rotation(
     Vec3f right,
     Vec3f up,
@@ -209,16 +231,31 @@ void populate_world_frame_draw_items(
 
   const render::CameraSnapshot& camera = frame.camera;
   constexpr f32 HalfPi = std::numbers::pi_v<f32> * 0.5F;
+  const f32 animation_time_seconds =
+      std::chrono::duration<f32>(now - app_start_time).count();
+  const client::HeldItemAnimationPose animation_pose =
+      session.held_item_animation.sample(animation_time_seconds);
+  // Animation position is local held-item space: X right, Y up, Z forward.
+  const Vec3f held_position =
+      camera.position + camera.forward * (0.70F + animation_pose.position.z) +
+      camera.right * (0.34F + animation_pose.position.x) -
+      camera.up * (0.30F - animation_pose.position.y);
+  const Quatf base_rotation = multiply_quat(
+      camera_basis_rotation(camera.right, camera.up, camera.forward),
+      yaw_rotation(-HalfPi));
+  const Quatf held_rotation = multiply_quat(
+      base_rotation,
+      euler_degrees_rotation(animation_pose.rotation_degrees));
+  const f32 animation_scale = std::max(
+      (animation_pose.scale.x + animation_pose.scale.y + animation_pose.scale.z) / 3.0F,
+      0.0F);
   append_item_draw(
       frame,
       entity_render_assets,
       held_stack.value(),
-      camera.position + camera.forward * 0.70F + camera.right * 0.34F -
-          camera.up * 0.30F,
-      multiply_quat(
-          camera_basis_rotation(camera.right, camera.up, camera.forward),
-          yaw_rotation(-HalfPi)),
-      0.42F);
+      held_position,
+      held_rotation,
+      0.42F * animation_scale);
 }
 
 } // namespace arv::desktop

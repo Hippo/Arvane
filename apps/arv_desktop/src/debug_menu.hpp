@@ -4,6 +4,7 @@
 
 #include "arv/core/perf_stats.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/item_animation.hpp"
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
@@ -12,6 +13,7 @@
 #include "arv/server/server_runtime.hpp"
 
 #include <array>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -41,6 +43,9 @@ struct DebugMenuState {
   std::string selected_item_name{};
   int stack_size{1};
   bool replace_selected_hotbar_slot{};
+  std::string selected_item_animation_name{std::string{client::DefaultHeldItemSwingAnimationName}};
+  std::string item_animation_export_text{};
+  std::string item_animation_status{};
   std::string entity_filter{};
   std::string selected_entity_type_name{};
   std::string selected_entity_id{};
@@ -98,6 +103,10 @@ struct DebugMenuResult {
     server::ServerRuntime& server,
     client::ClientRuntime& client,
     const player::ItemRegistry& item_registry,
+    client::ItemAnimationLibrary& item_animation_library,
+    client::HeldItemAnimationPlayer& held_item_animation_player,
+    Seconds now_seconds,
+    const std::filesystem::path& item_animation_export_path,
     const entity::EntityRegistry& entity_registry,
     sched::Scheduler& world_jobs,
     const render::OpenGLRenderer& renderer,

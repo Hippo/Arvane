@@ -4,6 +4,7 @@
 
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/item_animation.hpp"
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
@@ -62,6 +63,8 @@ struct DesktopGameSession {
   std::optional<ui::UiItemStackView> carried_inventory_stack{};
   std::vector<ui::PlayerListEntryView> tab_players{};
   std::vector<ui::ChatLineView> chat_lines{};
+  client::HeldItemAnimationPlayer held_item_animation{};
+  bool held_item_secondary_use_active{};
   bool ui_snapshot_initialized{};
 };
 

@@ -43,6 +43,7 @@ struct ItemDefinition {
   std::optional<voxel::BlockID> source_block{};
   std::string tool_category{};
   f32 tool_break_speed_multiplier{1.0F};
+  HashMap<std::string, std::optional<std::string>> held_animations{};
 };
 
 struct ItemRecord {
@@ -59,6 +60,7 @@ struct ItemRecord {
   std::optional<voxel::BlockID> source_block{};
   std::string tool_category{};
   f32 tool_break_speed_multiplier{1.0F};
+  HashMap<std::string, std::optional<std::string>> held_animations{};
 };
 
 struct ItemStack {

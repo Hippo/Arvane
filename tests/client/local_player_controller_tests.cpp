@@ -13,7 +13,7 @@ TEST(LocalPlayerControllerTests, HotbarSelectionAndScrollWrapProduceStableComman
   controller.submit_input(arv::client::InputFrame{.hotbar_scroll_steps = 3});
   const arv::player::PlayerCommand wrapped = controller.consume_command(11);
   EXPECT_EQ(wrapped.client_tick, 11U);
-  EXPECT_EQ(wrapped.selected_hotbar_slot, 1U);
+  EXPECT_EQ(wrapped.selected_hotbar_slot, 4U);
 }
 
 TEST(LocalPlayerControllerTests, StaleCorrectionDoesNotOverrideUnconfirmedHotbarSelection) {
