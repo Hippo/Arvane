@@ -299,6 +299,59 @@ TEST(LightingTests, BlockLightCrossesLoadedChunkBorders) {
   EXPECT_EQ(arv::voxel::light_r(world.get_light({{16, 1, 1}})), 14);
 }
 
+TEST(LightingTests, BoundaryEmitterRemovalClearsNeighborLight) {
+  const arv::voxel::BlockRegistry registry = make_lighting_registry();
+  const arv::voxel::BlockVariantID glowstone = registry.find_variant("arvane:glowstone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  world.ensure_chunk({{1, 0, 0}});
+  ASSERT_TRUE(world.set_block({{15, 1, 1}}, glowstone));
+  ASSERT_TRUE(run_lighting_worker_round(world, registry));
+  ASSERT_EQ(arv::voxel::light_r(world.get_light({{15, 1, 1}})), 15);
+  ASSERT_EQ(arv::voxel::light_r(world.get_light({{16, 1, 1}})), 14);
+
+  ASSERT_TRUE(world.set_block({{15, 1, 1}}, arv::voxel::AirBlockVariantID));
+  EXPECT_TRUE(run_lighting_worker_round(world, registry));
+
+  EXPECT_EQ(arv::voxel::light_r(world.get_light({{15, 1, 1}})), 0);
+  EXPECT_EQ(arv::voxel::light_r(world.get_light({{16, 1, 1}})), 0);
+  EXPECT_EQ(arv::voxel::light_r(world.get_light({{17, 1, 1}})), 0);
+}
+
+TEST(LightingTests, InteriorEmitterRemovalClearsLightSeededBackFromNeighbors) {
+  const arv::voxel::BlockRegistry registry = make_lighting_registry();
+  const arv::voxel::BlockVariantID glowstone = registry.find_variant("arvane:glowstone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  for (arv::i32 z = -1; z <= 1; ++z) {
+    for (arv::i32 x = -1; x <= 1; ++x) {
+      world.ensure_chunk({{x, 0, z}});
+    }
+  }
+  ASSERT_TRUE(world.set_block({{14, 8, 8}}, glowstone));
+  ASSERT_TRUE(run_lighting_worker_round(world, registry));
+  ASSERT_GT(arv::voxel::light_r(world.get_light({{16, 8, 8}})), 0);
+
+  ASSERT_TRUE(world.set_block({{14, 8, 8}}, arv::voxel::AirBlockVariantID));
+  arv::world::LightingResult first_result = build_single_lighting_result(world, registry);
+  ASSERT_EQ(first_result.chunks.size(), 1U);
+  EXPECT_EQ(
+      arv::voxel::light_r(first_result.chunks.front().lights[
+          arv::voxel::local_index({{14, 8, 8}})]),
+      0);
+  EXPECT_EQ(
+      arv::voxel::light_r(first_result.chunks.front().lights[
+          arv::voxel::local_index({{15, 8, 8}})]),
+      0);
+  EXPECT_EQ(
+      world.publish_lighting_result(std::move(first_result)).accepted_chunks,
+      1U);
+  EXPECT_TRUE(run_lighting_worker_round(world, registry));
+
+  EXPECT_EQ(arv::voxel::light_r(world.get_light({{14, 8, 8}})), 0);
+  EXPECT_EQ(arv::voxel::light_r(world.get_light({{15, 8, 8}})), 0);
+  EXPECT_EQ(arv::voxel::light_r(world.get_light({{16, 8, 8}})), 0);
+}
+
 TEST(LightingTests, SingleLightingJobPublishesOnlyOneSection) {
   const arv::voxel::BlockRegistry registry = make_lighting_registry();
   arv::world::WorldRuntime world{arv::WorldID{1}};

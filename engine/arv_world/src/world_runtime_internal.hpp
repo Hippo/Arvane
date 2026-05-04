@@ -115,10 +115,14 @@ public:
       ChunkCoord coord,
       SectionLocalPos local) noexcept;
   void mark_loaded_chunk_neighbors_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
+  void mark_loaded_chunk_lighting_dependencies_dirty(
+      WorldRuntime& world,
+      ChunkCoord coord) noexcept;
   void mark_light_dependency_neighbors_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
   void mark_neighbor_mesh_dependency_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
   void mark_neighbor_mesh_only_dependency_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
   void mark_neighbor_light_dependency_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
+  void mark_neighbor_lighting_dependency_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
 
 private:
   u64 lighting_revision_{1};

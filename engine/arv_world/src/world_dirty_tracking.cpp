@@ -147,6 +147,28 @@ void WorldDirtyTracker::mark_loaded_chunk_neighbors_dirty(
   }
 }
 
+void WorldDirtyTracker::mark_loaded_chunk_lighting_dependencies_dirty(
+    WorldRuntime& world,
+    ChunkCoord coord) noexcept {
+  for (i32 z = -1; z <= 1; ++z) {
+    for (i32 y = -1; y <= 1; ++y) {
+      for (i32 x = -1; x <= 1; ++x) {
+        if (x == 0 && y == 0 && z == 0) {
+          continue;
+        }
+
+        mark_neighbor_lighting_dependency_dirty(
+            world,
+            {{
+                coord.value.x + x,
+                coord.value.y + y,
+                coord.value.z + z,
+            }});
+      }
+    }
+  }
+}
+
 void WorldDirtyTracker::mark_light_dependency_neighbors_dirty(
     WorldRuntime& world,
     ChunkCoord coord) noexcept {
@@ -168,7 +190,8 @@ void WorldDirtyTracker::mark_neighbor_mesh_dependency_dirty(
   if (neighbor != nullptr) {
     neighbor->mark_mesh_dependency_dirty();
     enqueue_dirty_mesh_chunk(coord);
-    neighbor->mark_dirty(voxel::ChunkDirtyFlags::Lighting | voxel::ChunkDirtyFlags::NeedsFluidStep);
+    neighbor->mark_lighting_dependency_dirty();
+    neighbor->mark_dirty(voxel::ChunkDirtyFlags::NeedsFluidStep);
     mark_mesh_content_dirty();
     lighting_work_pending_ = true;
   }
@@ -193,6 +216,16 @@ void WorldDirtyTracker::mark_neighbor_light_dependency_dirty(
     neighbor->mark_light_dependency_dirty();
     enqueue_dirty_mesh_chunk(coord);
     mark_mesh_content_dirty();
+  }
+}
+
+void WorldDirtyTracker::mark_neighbor_lighting_dependency_dirty(
+    WorldRuntime& world,
+    ChunkCoord coord) noexcept {
+  voxel::ChunkSection* neighbor = world.find_chunk(coord);
+  if (neighbor != nullptr) {
+    neighbor->mark_lighting_dependency_dirty();
+    lighting_work_pending_ = true;
   }
 }
 

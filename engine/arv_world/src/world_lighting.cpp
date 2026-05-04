@@ -16,6 +16,7 @@ namespace arv::world {
 namespace {
 
 using LightArray = std::array<voxel::LightWord, voxel::ChunkVolume>;
+using DependencyMask = std::array<bool, voxel::ChunkSnapshotNeighborhoodVolume>;
 
 inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
     {1, 0, 0},
@@ -129,6 +130,34 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
     mask |= boundary_bit(voxel::face_index(voxel::BlockFace::NegativeZ));
   }
   return mask;
+}
+
+void add_dependency_offset(DependencyMask& mask, i32 x, i32 y, i32 z) noexcept {
+  if (x == 0 && y == 0 && z == 0) {
+    return;
+  }
+  mask[voxel::snapshot_storage_index(x, y, z)] = true;
+}
+
+void add_light_dependency_offsets(
+    DependencyMask& mask,
+    i32 x,
+    i32 y,
+    i32 z) noexcept {
+  const i32 min_x = x == 0 ? -1 : 0;
+  const i32 max_x = x == ChunkSize - 1 ? 1 : 0;
+  const i32 min_y = y == 0 ? -1 : 0;
+  const i32 max_y = y == ChunkSize - 1 ? 1 : 0;
+  const i32 min_z = z == 0 ? -1 : 0;
+  const i32 max_z = z == ChunkSize - 1 ? 1 : 0;
+
+  for (i32 oz = min_z; oz <= max_z; ++oz) {
+    for (i32 oy = min_y; oy <= max_y; ++oy) {
+      for (i32 ox = min_x; ox <= max_x; ++ox) {
+        add_dependency_offset(mask, ox, oy, oz);
+      }
+    }
+  }
 }
 
 [[nodiscard]] ChunkCoord offset_chunk(ChunkCoord coord, Vec3i offset) noexcept {
@@ -388,6 +417,9 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
     chunk_snapshot.source_version = chunk->block_version();
     chunk_snapshot.storage = chunk->storage_view();
     chunk_snapshot.source_content_version = chunk->content_version();
+    chunk_snapshot.lights_match_content =
+        chunk->light_content_version() == chunk->content_version() &&
+        !chunk->light_dependencies_stale();
     chunk_snapshot.needs_relight = chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting);
     chunk_snapshot.is_target = coord == snapshot.target_coord;
     if (chunk_snapshot.is_target) {
@@ -553,6 +585,7 @@ LightingResult WorldLighting::build_result(
     return true;
   };
 
+  const bool preserve_dirty_neighbor_boundary_light = target->lights_match_content;
   const usize positive_y = voxel::face_index(voxel::BlockFace::PositiveY);
   const ChunkLightingSnapshot* above = face_neighbors[positive_y];
   for (i32 z = 0; z < ChunkSize; ++z) {
@@ -610,29 +643,31 @@ LightingResult WorldLighting::build_result(
     }
   }
 
-  for (usize face_index = 0; face_index < face_neighbors.size(); ++face_index) {
-    const ChunkLightingSnapshot* neighbor = face_neighbors[face_index];
-    if (neighbor == nullptr || !neighbor->needs_relight) {
-      continue;
-    }
-    if (face_index == positive_y && target->has_generation_surface) {
-      continue;
-    }
-    for (i32 b = 0; b < ChunkSize; ++b) {
-      for (i32 a = 0; a < ChunkSize; ++a) {
-        const SectionLocalPos target_local = target_boundary_local(face_index, a, b);
-        const usize target_index = voxel::local_index(target_local);
-        if (!can_light_enter_index(target_index)) {
-          continue;
-        }
+  if (preserve_dirty_neighbor_boundary_light) {
+    for (usize face_index = 0; face_index < face_neighbors.size(); ++face_index) {
+      const ChunkLightingSnapshot* neighbor = face_neighbors[face_index];
+      if (neighbor == nullptr || !neighbor->needs_relight) {
+        continue;
+      }
+      if (face_index == positive_y && target->has_generation_surface) {
+        continue;
+      }
+      for (i32 b = 0; b < ChunkSize; ++b) {
+        for (i32 a = 0; a < ChunkSize; ++a) {
+          const SectionLocalPos target_local = target_boundary_local(face_index, a, b);
+          const usize target_index = voxel::local_index(target_local);
+          if (!can_light_enter_index(target_index)) {
+            continue;
+          }
 
-        const u8 previous = voxel::light_sky(target->storage->lights[target_index]);
-        if (previous != 0U) {
-          (void)set_sky(
-              target_local.value.x,
-              target_local.value.y,
-              target_local.value.z,
-              previous);
+          const u8 previous = voxel::light_sky(target->storage->lights[target_index]);
+          if (previous != 0U) {
+            (void)set_sky(
+                target_local.value.x,
+                target_local.value.y,
+                target_local.value.z,
+                previous);
+          }
         }
       }
     }
@@ -698,31 +733,33 @@ LightingResult WorldLighting::build_result(
     }
   }
 
-  for (usize face_index = 0; face_index < face_neighbors.size(); ++face_index) {
-    const ChunkLightingSnapshot* neighbor = face_neighbors[face_index];
-    if (neighbor == nullptr || !neighbor->needs_relight) {
-      continue;
-    }
-    for (i32 b = 0; b < ChunkSize; ++b) {
-      for (i32 a = 0; a < ChunkSize; ++a) {
-        const SectionLocalPos target_local = target_boundary_local(face_index, a, b);
-        const usize target_index = voxel::local_index(target_local);
-        if (!can_light_enter_index(target_index)) {
-          continue;
-        }
+  if (preserve_dirty_neighbor_boundary_light) {
+    for (usize face_index = 0; face_index < face_neighbors.size(); ++face_index) {
+      const ChunkLightingSnapshot* neighbor = face_neighbors[face_index];
+      if (neighbor == nullptr || !neighbor->needs_relight) {
+        continue;
+      }
+      for (i32 b = 0; b < ChunkSize; ++b) {
+        for (i32 a = 0; a < ChunkSize; ++a) {
+          const SectionLocalPos target_local = target_boundary_local(face_index, a, b);
+          const usize target_index = voxel::local_index(target_local);
+          if (!can_light_enter_index(target_index)) {
+            continue;
+          }
 
-        const voxel::LightWord previous_light = target->storage->lights[target_index];
-        const u8 r = voxel::light_r(previous_light);
-        const u8 g = voxel::light_g(previous_light);
-        const u8 b_light = voxel::light_b(previous_light);
-        if (r != 0U || g != 0U || b_light != 0U) {
-          (void)set_rgb(
-              target_local.value.x,
-              target_local.value.y,
-              target_local.value.z,
-              r,
-              g,
-              b_light);
+          const voxel::LightWord previous_light = target->storage->lights[target_index];
+          const u8 r = voxel::light_r(previous_light);
+          const u8 g = voxel::light_g(previous_light);
+          const u8 b_light = voxel::light_b(previous_light);
+          if (r != 0U || g != 0U || b_light != 0U) {
+            (void)set_rgb(
+                target_local.value.x,
+                target_local.value.y,
+                target_local.value.z,
+                r,
+                g,
+                b_light);
+          }
         }
       }
     }
@@ -773,6 +810,7 @@ LightingResult WorldLighting::build_result(
   }
 
   u8 changed_boundary_mask = 0;
+  DependencyMask changed_light_dependency_mask{};
   for (i32 z = 0; z < ChunkSize; ++z) {
     for (i32 y = 0; y < ChunkSize; ++y) {
       for (i32 x = 0; x < ChunkSize; ++x) {
@@ -788,6 +826,7 @@ LightingResult WorldLighting::build_result(
             result.stats.add_nodes_processed,
             result.stats.remove_nodes_processed);
         changed_boundary_mask |= boundary_mask_for_local(x, y, z);
+        add_light_dependency_offsets(changed_light_dependency_mask, x, y, z);
       }
     }
   }
@@ -816,7 +855,8 @@ LightingResult WorldLighting::build_result(
         target->source_version,
         std::move(lights),
         target->source_content_version,
-        changed_boundary_mask);
+        changed_boundary_mask,
+        changed_light_dependency_mask);
   }
   result.stats.sections_published = static_cast<u32>(result.chunks.size());
   record_lighting_job_finished(result, timing_start);
@@ -871,6 +911,41 @@ LightingPublishStats WorldLighting::publish_result(
         ++stats.boundary_continuations;
         ++stats.remeshes_triggered;
         world.impl_->dirty.set_lighting_work_pending(true);
+      }
+      for (i32 oz = -1; oz <= 1; ++oz) {
+        for (i32 oy = -1; oy <= 1; ++oy) {
+          for (i32 ox = -1; ox <= 1; ++ox) {
+            if (ox == 0 && oy == 0 && oz == 0) {
+              continue;
+            }
+            if (!chunk_result.changed_light_dependency_mask[voxel::snapshot_storage_index(
+                    ox,
+                    oy,
+                    oz)]) {
+              continue;
+            }
+
+            const int axis_count = static_cast<int>(ox != 0) +
+                                   static_cast<int>(oy != 0) +
+                                   static_cast<int>(oz != 0);
+            if (axis_count == 1) {
+              continue;
+            }
+
+            const ChunkCoord dependency_coord{{
+                chunk_result.coord.value.x + ox,
+                chunk_result.coord.value.y + oy,
+                chunk_result.coord.value.z + oz,
+            }};
+            if (search.find_mutable_chunk(dependency_coord) == nullptr) {
+              continue;
+            }
+            world.impl_->dirty.mark_neighbor_light_dependency_dirty(
+                world,
+                dependency_coord);
+            ++stats.remeshes_triggered;
+          }
+        }
       }
     }
     chunk->clear_dirty(voxel::ChunkDirtyFlags::Lighting);

@@ -215,6 +215,59 @@ TEST(WorldRuntimeTests, LightingPublicationInvalidatesDirectNeighborMeshesWhenBo
   EXPECT_EQ(target.light_version(), target_light_version + 1);
 }
 
+TEST(WorldRuntimeTests, LightingPublicationInvalidatesDiagonalNeighborMeshesWhenCornerLightChanges) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::voxel::ChunkSection& lit_chunk = world.ensure_chunk({{0, 0, 0}});
+  arv::voxel::ChunkSection& x_neighbor = world.ensure_chunk({{1, 0, 0}});
+  arv::voxel::ChunkSection& z_neighbor = world.ensure_chunk({{0, 0, 1}});
+  arv::voxel::ChunkSection& diagonal = world.ensure_chunk({{1, 0, 1}});
+  lit_chunk.clear_dirty(
+      arv::voxel::ChunkDirtyFlags::Geometry |
+      arv::voxel::ChunkDirtyFlags::Lighting |
+      arv::voxel::ChunkDirtyFlags::LightMesh);
+  x_neighbor.clear_dirty(
+      arv::voxel::ChunkDirtyFlags::Geometry |
+      arv::voxel::ChunkDirtyFlags::Lighting |
+      arv::voxel::ChunkDirtyFlags::LightMesh);
+  z_neighbor.clear_dirty(
+      arv::voxel::ChunkDirtyFlags::Geometry |
+      arv::voxel::ChunkDirtyFlags::Lighting |
+      arv::voxel::ChunkDirtyFlags::LightMesh);
+  diagonal.clear_dirty(
+      arv::voxel::ChunkDirtyFlags::Geometry |
+      arv::voxel::ChunkDirtyFlags::Lighting |
+      arv::voxel::ChunkDirtyFlags::LightMesh);
+  const arv::u64 diagonal_light_version = diagonal.light_version();
+
+  std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights = lit_chunk.lights();
+  lights[arv::voxel::local_index({{15, 4, 15}})] = arv::voxel::pack_light(7, 6, 5, 4);
+  const arv::u8 positive_x_boundary =
+      static_cast<arv::u8>(1U << arv::voxel::face_index(arv::voxel::BlockFace::PositiveX));
+  const arv::u8 positive_z_boundary =
+      static_cast<arv::u8>(1U << arv::voxel::face_index(arv::voxel::BlockFace::PositiveZ));
+
+  arv::world::LightingResult result;
+  result.world_id = arv::WorldID{1};
+  result.chunks.push_back(
+      {{{0, 0, 0}},
+       lit_chunk.version(),
+       lights,
+       0U,
+       static_cast<arv::u8>(positive_x_boundary | positive_z_boundary)});
+  result.chunks.back().changed_light_dependency_mask
+      [arv::voxel::snapshot_storage_index(1, 0, 1)] = true;
+
+  const arv::world::LightingPublishStats stats =
+      world.publish_lighting_result(std::move(result));
+
+  EXPECT_EQ(stats.accepted_chunks, 1U);
+  EXPECT_TRUE(x_neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+  EXPECT_TRUE(z_neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+  EXPECT_TRUE(diagonal.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
+  EXPECT_FALSE(diagonal.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+  EXPECT_EQ(diagonal.light_version(), diagonal_light_version + 1);
+}
+
 TEST(WorldRuntimeTests, LightingPublicationAcceptsChunksDirtiedBySameLightingSolve) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& target = world.ensure_chunk({{0, 0, 0}});
@@ -489,6 +542,34 @@ TEST(WorldRuntimeTests, LightOnlyChunkSnapshotOnlyDirtiesBoundaryLightMeshNeighb
   EXPECT_FALSE(x_neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
   EXPECT_FALSE(z_neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
   EXPECT_FALSE(z_neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
+}
+
+TEST(WorldRuntimeTests, LightOnlyChunkSnapshotDirtiesDiagonalMeshNeighborAtCorner) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::voxel::ChunkSection& center = world.ensure_chunk({{0, 0, 0}});
+  arv::voxel::ChunkSection& diagonal = world.ensure_chunk({{1, 0, 1}});
+
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks;
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights = center.lights();
+  world.apply_chunk_snapshot({{0, 0, 0}}, blocks, lights);
+  ASSERT_TRUE(world.publish_mesh_result(
+      {{0, 0, 0}},
+      center.block_version(),
+      center.light_version()));
+  center.clear_dirty(
+      arv::voxel::ChunkDirtyFlags::Geometry |
+      arv::voxel::ChunkDirtyFlags::LightMesh);
+  diagonal.clear_dirty(
+      arv::voxel::ChunkDirtyFlags::Geometry |
+      arv::voxel::ChunkDirtyFlags::LightMesh);
+
+  lights[arv::voxel::local_index({{15, 2, 15}})] = arv::voxel::pack_light(1, 2, 3, 4);
+  world.apply_chunk_snapshot({{0, 0, 0}}, std::move(blocks), std::move(lights));
+
+  EXPECT_TRUE(center.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
+  EXPECT_TRUE(diagonal.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
+  EXPECT_FALSE(diagonal.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
 }
 
 TEST(WorldRuntimeTests, InteriorLightOnlyChunkSnapshotDoesNotDirtyNeighbors) {

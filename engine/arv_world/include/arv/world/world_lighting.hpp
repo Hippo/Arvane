@@ -49,6 +49,7 @@ struct ChunkLightingSnapshot {
   bool needs_relight{};
   bool is_target{};
   bool has_generation_surface{};
+  bool lights_match_content{};
 
   [[nodiscard]] const std::array<voxel::BlockVariantID, voxel::ChunkVolume>& blocks() const noexcept {
     return storage->blocks;
@@ -71,6 +72,7 @@ struct ChunkLightingResult {
   std::array<voxel::LightWord, voxel::ChunkVolume> lights{};
   u64 source_content_version{};
   u8 changed_boundary_mask{};
+  std::array<bool, voxel::ChunkSnapshotNeighborhoodVolume> changed_light_dependency_mask{};
 };
 
 struct LightingResult {

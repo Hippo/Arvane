@@ -46,23 +46,19 @@ void add_block_dependency_offsets(DependencyMask& mask, SectionLocalPos local) n
 }
 
 void add_light_dependency_offsets(DependencyMask& mask, SectionLocalPos local) noexcept {
-  if (local.value.x == 0) {
-    add_dependency_offset(mask, -1, 0, 0);
-  }
-  if (local.value.x == ChunkSize - 1) {
-    add_dependency_offset(mask, 1, 0, 0);
-  }
-  if (local.value.y == 0) {
-    add_dependency_offset(mask, 0, -1, 0);
-  }
-  if (local.value.y == ChunkSize - 1) {
-    add_dependency_offset(mask, 0, 1, 0);
-  }
-  if (local.value.z == 0) {
-    add_dependency_offset(mask, 0, 0, -1);
-  }
-  if (local.value.z == ChunkSize - 1) {
-    add_dependency_offset(mask, 0, 0, 1);
+  const i32 min_x = local.value.x == 0 ? -1 : 0;
+  const i32 max_x = local.value.x == ChunkSize - 1 ? 1 : 0;
+  const i32 min_y = local.value.y == 0 ? -1 : 0;
+  const i32 max_y = local.value.y == ChunkSize - 1 ? 1 : 0;
+  const i32 min_z = local.value.z == 0 ? -1 : 0;
+  const i32 max_z = local.value.z == ChunkSize - 1 ? 1 : 0;
+
+  for (i32 z = min_z; z <= max_z; ++z) {
+    for (i32 y = min_y; y <= max_y; ++y) {
+      for (i32 x = min_x; x <= max_x; ++x) {
+        add_dependency_offset(mask, x, y, z);
+      }
+    }
   }
 }
 
@@ -164,7 +160,8 @@ void WorldRuntime::apply_chunk_snapshot(
   chunk.replace_saved_contents(
       std::move(blocks),
       std::move(resolved_lights),
-      std::move(fluids));
+      std::move(fluids),
+      has_lighting_payload && lighting_authoritative);
   if (has_lighting_payload && lighting_authoritative) {
     chunk.clear_dirty(voxel::ChunkDirtyFlags::Lighting);
   } else {
@@ -194,17 +191,21 @@ void WorldRuntime::apply_chunk_snapshot(
     }
   }
   if (lights_changed) {
-    for (const Vec3i& offset : detail::NeighborOffsets) {
-      if (!light_dependency_offsets[voxel::snapshot_storage_index(offset.x, offset.y, offset.z)]) {
-        continue;
+    for (i32 z = -1; z <= 1; ++z) {
+      for (i32 y = -1; y <= 1; ++y) {
+        for (i32 x = -1; x <= 1; ++x) {
+          if (!light_dependency_offsets[voxel::snapshot_storage_index(x, y, z)]) {
+            continue;
+          }
+          impl_->dirty.mark_neighbor_light_dependency_dirty(
+              *this,
+              {{
+                  coord.value.x + x,
+                  coord.value.y + y,
+                  coord.value.z + z,
+              }});
+        }
       }
-      impl_->dirty.mark_neighbor_light_dependency_dirty(
-          *this,
-          {{
-              coord.value.x + offset.x,
-              coord.value.y + offset.y,
-              coord.value.z + offset.z,
-          }});
     }
   }
 }
@@ -325,7 +326,8 @@ void WorldRuntime::restore_saved_chunk(
   chunk.replace_saved_contents(
       std::move(blocks),
       std::move(lights),
-      std::move(fluids));
+      std::move(fluids),
+      false);
   chunk.mark_dirty(voxel::ChunkDirtyFlags::Lighting);
   impl_->dirty.mark_mesh_content_dirty();
   impl_->dirty.enqueue_dirty_mesh_chunk(coord);

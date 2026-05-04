@@ -177,6 +177,14 @@ public:
     return light_data_version_;
   }
 
+  [[nodiscard]] u64 light_content_version() const noexcept {
+    return light_content_version_;
+  }
+
+  [[nodiscard]] bool light_dependencies_stale() const noexcept {
+    return light_dependencies_stale_;
+  }
+
   [[nodiscard]] u64 content_version() const noexcept {
     return content_version_;
   }
@@ -236,7 +244,8 @@ public:
   void replace_saved_contents(
       std::array<BlockVariantID, ChunkVolume> blocks,
       std::array<LightWord, ChunkVolume> lights,
-      std::optional<std::array<FluidCell, ChunkVolume>> fluids = std::nullopt) noexcept;
+      std::optional<std::array<FluidCell, ChunkVolume>> fluids = std::nullopt,
+      bool lights_match_content = true) noexcept;
 
   bool replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept;
 
@@ -245,6 +254,8 @@ public:
   void mark_mesh_dependency_dirty() noexcept;
 
   void mark_light_dependency_dirty() noexcept;
+
+  void mark_lighting_dependency_dirty() noexcept;
 
   void clear_dirty(ChunkDirtyFlags flags) noexcept;
 
@@ -283,7 +294,9 @@ private:
   u64 block_version_{1};
   u64 light_version_{1};
   u64 light_data_version_{1};
+  u64 light_content_version_{1};
   u64 content_version_{1};
+  bool light_dependencies_stale_{};
   u64 mesh_built_from_block_version_{};
   u64 mesh_built_from_light_version_{};
   ChunkDirtyFlags dirty_flags_{ChunkDirtyFlags::Geometry};
