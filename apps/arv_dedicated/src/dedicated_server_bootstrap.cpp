@@ -35,6 +35,11 @@ void restore_loaded_world_into_server(
     server::ServerRuntime& server,
     const persistence::LoadedSaveData& loaded_save,
     const entity::EntityRegistry& entity_registry) {
+  if (loaded_save.has_world_metadata) {
+    server.voxel_world().set_clock(
+        loaded_save.world.clock,
+        server.base_tps());
+  }
   for (const persistence::SavedChunkSection& chunk : loaded_save.chunks) {
     server.voxel_world().restore_saved_chunk(
         chunk.coord,

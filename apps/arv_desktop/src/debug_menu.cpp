@@ -1169,17 +1169,98 @@ void render_entities_tab(
 
 void render_world_tab(
     const DebugMenuFrameInfo& frame_info,
-    const server::ServerRuntime& server) {
+    server::ServerRuntime& server) {
+  world::WorldRuntime& world_runtime = server.voxel_world();
+  const world::WorldClock& clock = world_runtime.clock();
+  const world::CelestialState celestial = world::build_celestial_state(clock);
+  const world::ClockTime24 time_24 = world::to_clock_time_24(celestial.day_fraction);
+
   ImGui::Text("Server tick: %llu", static_cast<unsigned long long>(server.tick_index()));
+  ImGui::Text("World tick: %llu", static_cast<unsigned long long>(clock.world_tick));
   ImGui::Text("Base TPS: %u", server.base_tps());
   ImGui::Text("Visible chunks: %zu", frame_info.visible_chunk_count);
   ImGui::Text("Pending client chunks: %zu", frame_info.pending_client_chunk_count);
   ImGui::Text("Pending client unloads: %zu", frame_info.pending_client_unload_count);
+
+  ImGui::SeparatorText("Time");
+  ImGui::Text("Day time: %02u:%02u", time_24.hour, time_24.minute);
+  ImGui::Text("Day fraction: %.3f", static_cast<double>(celestial.day_fraction));
+  ImGui::Text(
+      "Day tick: %u / %u",
+      clock.day_time_tick,
+      clock.day_length_ticks);
+  ImGui::Text(
+      "Sun direction: %.2f, %.2f, %.2f",
+      static_cast<double>(celestial.sun_direction.x),
+      static_cast<double>(celestial.sun_direction.y),
+      static_cast<double>(celestial.sun_direction.z));
+  ImGui::Text(
+      "Daylight strength: %.2f",
+      static_cast<double>(celestial.daylight_strength));
+  ImGui::Text(
+      "Star visibility: %.2f",
+      static_cast<double>(celestial.star_visibility));
+
+  float day_fraction_value = celestial.day_fraction;
+  if (ImGui::SliderFloat("Time of day", &day_fraction_value, 0.0F, 0.999F, "%.3f")) {
+    world_runtime.set_day_fraction(day_fraction_value);
+  }
+
+  int hour = static_cast<int>(time_24.hour);
+  int minute = static_cast<int>(time_24.minute);
+  bool time_input_changed = ImGui::InputInt("Hour", &hour);
+  ImGui::SameLine();
+  time_input_changed = ImGui::InputInt("Minute", &minute) || time_input_changed;
+  if (time_input_changed) {
+    hour = std::clamp(hour, 0, 23);
+    minute = std::clamp(minute, 0, 59);
+    world_runtime.set_day_time_tick(world::day_tick_from_hour_minute(
+        static_cast<u32>(hour),
+        static_cast<u32>(minute),
+        clock.day_length_ticks));
+  }
+
+  bool daylight_cycle = clock.daylight_cycle;
+  if (ImGui::Checkbox("Daylight cycle", &daylight_cycle)) {
+    world_runtime.set_daylight_cycle(daylight_cycle);
+  }
+  float time_scale = clock.time_scale;
+  if (ImGui::DragFloat("Time scale", &time_scale, 0.05F, 0.0F, 64.0F, "%.2f")) {
+    world_runtime.set_time_scale(std::max(time_scale, 0.0F));
+  }
+  float day_length_seconds = clock.day_length_seconds;
+  if (ImGui::DragFloat(
+          "Day length seconds",
+          &day_length_seconds,
+          5.0F,
+          1.0F,
+          86400.0F,
+          "%.0f")) {
+    world_runtime.set_day_length_seconds(
+        std::max(day_length_seconds, 1.0F),
+        server.base_tps());
+  }
+
+  if (ImGui::Button("Midnight")) {
+    world_runtime.set_day_fraction(0.0F);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Sunrise")) {
+    world_runtime.set_day_fraction(0.25F);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Noon")) {
+    world_runtime.set_day_fraction(0.5F);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Sunset")) {
+    world_runtime.set_day_fraction(0.75F);
+  }
+
   ImGui::SeparatorText("Controls");
   ImGui::BeginDisabled();
   ImGui::Button("Reload chunks");
   ImGui::Button("Teleport");
-  ImGui::Button("Set time");
   ImGui::EndDisabled();
 }
 

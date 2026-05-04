@@ -291,7 +291,8 @@ Expected<void, DedicatedError> save_dedicated_world(
       visible_chunk_y.first,
       visible_chunk_y.second,
       block_registry_hash,
-      item_registry_hash};
+      item_registry_hash,
+      server.voxel_world().clock()};
   auto save_result = persistence::save_server_root(
       server_save_root,
       save_metadata,

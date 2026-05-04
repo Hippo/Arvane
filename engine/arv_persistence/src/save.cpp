@@ -184,6 +184,43 @@ using json = nlohmann::json;
   return config;
 }
 
+[[nodiscard]] json world_clock_to_json(const world::WorldClock& clock) {
+  return json{
+      {"world_tick", clock.world_tick},
+      {"day_time_tick", clock.day_time_tick},
+      {"day_length_seconds", clock.day_length_seconds},
+      {"daylight_cycle", clock.daylight_cycle},
+      {"time_scale", clock.time_scale},
+  };
+}
+
+[[nodiscard]] world::WorldClock world_clock_from_json(
+    const json& node,
+    TickIndex fallback_world_tick) {
+  world::WorldClock clock = world::make_world_clock();
+  clock.world_tick = fallback_world_tick;
+  if (!node.is_object()) {
+    return clock;
+  }
+  if (const auto value = node.find("world_tick"); value != node.end()) {
+    clock.world_tick = value->get<TickIndex>();
+  }
+  if (const auto value = node.find("day_length_seconds"); value != node.end()) {
+    clock.day_length_seconds = value->get<Seconds>();
+  }
+  if (const auto value = node.find("daylight_cycle"); value != node.end()) {
+    clock.daylight_cycle = value->get<bool>();
+  }
+  if (const auto value = node.find("time_scale"); value != node.end()) {
+    clock.time_scale = value->get<f32>();
+  }
+  world::retime_world_clock(clock, DefaultBaseTps);
+  if (const auto value = node.find("day_time_tick"); value != node.end()) {
+    world::set_day_time_tick(clock, value->get<u32>());
+  }
+  return clock;
+}
+
 [[nodiscard]] std::filesystem::path temporary_path_for(const std::filesystem::path& path) {
   return path.parent_path() / (path.filename().string() + ".tmp");
 }
@@ -472,6 +509,8 @@ Expected<void, PersistenceError> save_server_root(
     return save_result;
   }
 
+  world::WorldClock saved_clock = world.clock;
+  saved_clock.world_tick = world.tick_index;
   const json world_json{
       {"name", world.name},
       {"seed", world.seed},
@@ -482,6 +521,7 @@ Expected<void, PersistenceError> save_server_root(
        {{"block_registry_hash", world.block_registry_hash},
         {"item_registry_hash", world.item_registry_hash}}},
       {"generation_config", world_generation_to_json(world.generation_config)},
+      {"time", world_clock_to_json(saved_clock)},
   };
   save_result = write_text_atomic(root / "worlds" / world.name / "world.json", world_json.dump(2));
   if (!save_result) {
@@ -654,6 +694,7 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
     loaded.world.name = world_json.at("name").get<std::string>();
     loaded.world.seed = world_json.at("seed").get<u64>();
     loaded.world.tick_index = world_json.at("tick_index").get<TickIndex>();
+    loaded.world.clock.world_tick = loaded.world.tick_index;
     loaded.world.min_chunk_y = world_json.at("min_chunk_y").get<i32>();
     loaded.world.max_chunk_y = world_json.at("max_chunk_y").get<i32>();
     loaded.world.block_registry_hash =
@@ -662,6 +703,10 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
         world_json.at("registry_refs").at("item_registry_hash").get<u64>();
     loaded.world.generation_config =
         world_generation_from_json(world_json.at("generation_config"));
+    if (const auto time = world_json.find("time"); time != world_json.end()) {
+      loaded.world.clock = world_clock_from_json(*time, loaded.world.tick_index);
+      loaded.world.tick_index = loaded.world.clock.world_tick;
+    }
     loaded.has_world_metadata = true;
 
     const std::filesystem::path regions_dir = worlds_root / loaded.world.name / "regions";

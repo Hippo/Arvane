@@ -13,6 +13,9 @@ uniform float u_camera_fov_y_degrees;
 uniform float u_camera_near_plane;
 uniform float u_camera_far_plane;
 uniform float u_animation_time_seconds;
+uniform vec3 u_daylight_color;
+uniform float u_daylight_strength;
+uniform vec3 u_ambient_color;
 
 out vec3 v_color;
 out vec2 v_uv;
@@ -88,10 +91,10 @@ void main() {
   float min_ao_shade = face == 2u ? 0.86 : 0.70;
   bool disable_ao = (material_flags & VertexMaterialFlagDisableAo) != 0u;
   float ao_shade = disable_ao ? 1.0 : min_ao_shade + float(ao) / 3.0 * (1.0 - min_ao_shade);
-  float sky_shade = 0.2 + float(sky) / 15.0 * 0.8;
+  float sky_access = float(sky) / 15.0;
   vec3 block_light = vec3(red, green, blue) / 15.0;
-  vec3 sky_light = vec3(sky_shade);
-  v_color = clamp(sky_light + block_light * 0.35, vec3(0.0), vec3(1.0)) * face_shade * ao_shade;
+  vec3 sky_light = u_ambient_color + sky_access * u_daylight_color * u_daylight_strength;
+  v_color = clamp(sky_light + block_light * 0.55, vec3(0.0), vec3(1.0)) * face_shade * ao_shade;
   v_uv = vec2(float(atlas_u), float(atlas_v));
   v_material_class = material_class;
   v_animation_id = animation_id;

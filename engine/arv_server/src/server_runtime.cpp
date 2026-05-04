@@ -185,6 +185,10 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   world_jobs_.configure(start_info);
   world::WorldTickPolicy tick_policy = start_info.world_tick_policy;
   tick_policy.fluid_budget = 0U;
+  default_world_.configure_clock(
+      world::DefaultDayLengthSeconds,
+      world::DefaultStartDayFraction,
+      base_tps_);
   default_world_.set_tick_index(tick_index_);
   default_world_.set_tick_policy(tick_policy);
   worlds_.ensure_default_world();

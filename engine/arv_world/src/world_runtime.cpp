@@ -26,6 +26,58 @@ TickIndex WorldRuntime::tick_index() const noexcept {
 
 void WorldRuntime::set_tick_index(TickIndex tick_index) noexcept {
   impl_->tick_index = tick_index;
+  impl_->clock.world_tick = tick_index;
+}
+
+const WorldClock& WorldRuntime::clock() const noexcept {
+  return impl_->clock;
+}
+
+void WorldRuntime::configure_clock(
+    Seconds day_length_seconds,
+    f32 start_day_fraction,
+    TickRate fixed_tick_rate,
+    bool daylight_cycle,
+    f32 time_scale) noexcept {
+  const TickIndex world_tick = impl_->tick_index;
+  impl_->clock = make_world_clock(
+      fixed_tick_rate,
+      day_length_seconds,
+      start_day_fraction,
+      daylight_cycle,
+      time_scale);
+  impl_->clock.world_tick = world_tick;
+}
+
+void WorldRuntime::set_clock(WorldClock clock, TickRate fixed_tick_rate) noexcept {
+  retime_world_clock(clock, fixed_tick_rate);
+  impl_->clock = clock;
+  impl_->tick_index = impl_->clock.world_tick;
+}
+
+void WorldRuntime::set_day_time_tick(u32 day_time_tick) noexcept {
+  world::set_day_time_tick(impl_->clock, day_time_tick);
+}
+
+void WorldRuntime::set_day_fraction(f32 day_fraction) noexcept {
+  world::set_day_fraction(impl_->clock, day_fraction);
+}
+
+void WorldRuntime::set_daylight_cycle(bool daylight_cycle) noexcept {
+  impl_->clock.daylight_cycle = daylight_cycle;
+}
+
+void WorldRuntime::set_time_scale(f32 time_scale) noexcept {
+  impl_->clock.time_scale = time_scale;
+}
+
+void WorldRuntime::set_day_length_seconds(
+    Seconds day_length_seconds,
+    TickRate fixed_tick_rate) noexcept {
+  const f32 fraction = day_fraction(impl_->clock);
+  impl_->clock.day_length_seconds = day_length_seconds;
+  retime_world_clock(impl_->clock, fixed_tick_rate);
+  set_day_fraction(fraction);
 }
 
 void WorldRuntime::set_generation_context(u64 seed, WorldGenerationConfig config) {
@@ -42,7 +94,8 @@ WorldTickStats WorldRuntime::tick(
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& fluid_definition) {
   ARV_PROFILE_ZONE("Simulation tick");
-  ++impl_->tick_index;
+  tick_world_clock(impl_->clock);
+  impl_->tick_index = impl_->clock.world_tick;
 
   WorldTickStats stats;
   stats.entity_updates_processed =

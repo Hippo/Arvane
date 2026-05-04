@@ -22,6 +22,177 @@ constexpr f32 UiTextureSlotItem = 3.0F;
 
 static_assert(sizeof(Vec3f) == sizeof(f32) * 3U);
 
+constexpr const char* SkyVertexShaderSource = R"glsl(
+#version 330 core
+out vec2 v_ndc;
+
+const vec2 kQuad[4] = vec2[](
+  vec2(-1.0,  1.0),
+  vec2(-1.0, -1.0),
+  vec2( 1.0,  1.0),
+  vec2( 1.0, -1.0)
+);
+
+void main() {
+  v_ndc = kQuad[gl_VertexID];
+  gl_Position = vec4(v_ndc, 0.0, 1.0);
+}
+)glsl";
+
+constexpr const char* SkyFragmentShaderSource = R"glsl(
+#version 330 core
+in vec2 v_ndc;
+out vec4 frag_color;
+
+uniform vec3 u_camera_forward;
+uniform vec3 u_camera_right;
+uniform vec3 u_camera_up;
+uniform float u_camera_aspect;
+uniform float u_camera_fov_y_degrees;
+
+uniform vec3 u_sun_direction;
+uniform vec3 u_moon_direction;
+uniform vec3 u_daylight_color;
+uniform vec3 u_ambient_color;
+uniform vec3 u_fog_color;
+uniform float u_daylight_strength;
+uniform float u_moonlight_strength;
+uniform float u_star_visibility;
+uniform float u_day_fraction;
+uniform float u_cloud_time_seconds;
+uniform float u_cirrus_amount;
+uniform float u_cumulus_amount;
+uniform float u_exposure;
+
+const float PI = 3.14159265359;
+const float Br = 0.0025;
+const float Bm = 0.0003;
+const float MieG = 0.9800;
+const vec3 Wavelength = vec3(0.650, 0.570, 0.475);
+const vec3 Kr = Br / pow(Wavelength, vec3(4.0));
+const vec3 Km = Bm / pow(Wavelength, vec3(0.84));
+
+float hash(float n) {
+  return fract(sin(n) * 43758.5453123);
+}
+
+float noise(vec3 x) {
+  vec3 f = fract(x);
+  vec3 p = floor(x);
+  float n = dot(p, vec3(1.0, 157.0, 113.0));
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(n +   0.0), hash(n +   1.0), f.x),
+                 mix(hash(n + 157.0), hash(n + 158.0), f.x), f.y),
+             mix(mix(hash(n + 113.0), hash(n + 114.0), f.x),
+                 mix(hash(n + 270.0), hash(n + 271.0), f.x), f.y), f.z);
+}
+
+const mat3 FbmMatrix = mat3(
+   0.00,  1.60,  1.20,
+  -1.60,  0.72, -0.96,
+  -1.20, -0.96,  1.28
+);
+
+float fbm(vec3 p) {
+  float f = 0.0;
+  f += noise(p) * 0.500; p = FbmMatrix * p * 1.10;
+  f += noise(p) * 0.250; p = FbmMatrix * p * 1.20;
+  f += noise(p) * 0.166; p = FbmMatrix * p * 1.30;
+  f += noise(p) * 0.083; p = FbmMatrix * p * 1.40;
+  f += noise(p) * 0.042;
+  return f;
+}
+
+vec3 view_direction() {
+  float focal_spread = tan(radians(u_camera_fov_y_degrees) * 0.5);
+  return normalize(
+      u_camera_forward +
+      u_camera_right * (v_ndc.x * max(u_camera_aspect, 0.01) * focal_spread) +
+      u_camera_up * (v_ndc.y * focal_spread));
+}
+
+vec3 scattering_color(vec3 view_dir, float sun_height, float day_amount) {
+  float horizon = max(view_dir.y, 0.0);
+  float mu = dot(normalize(view_dir), normalize(u_sun_direction));
+  float rayleigh = 3.0 / (8.0 * PI) * (1.0 + mu * mu);
+  vec3 mie = (Kr + Km * (1.0 - MieG * MieG) /
+      (2.0 + MieG * MieG) /
+      pow(max(1.0 + MieG * MieG - 2.0 * MieG * mu, 0.001), 1.5)) / (Br + Bm);
+
+  vec3 day_extinction =
+      exp(-exp(-((horizon + sun_height * 4.0) *
+                  (exp(-horizon * 16.0) + 0.1) / 80.0) / Br) *
+          (exp(-horizon * 16.0) + 0.1) * Kr / Br) *
+      exp(-horizon * exp(-horizon * 8.0) * 4.0) *
+      exp(-horizon * 2.0) * 4.0;
+
+  vec3 sky = rayleigh * mie * day_extinction * u_daylight_color;
+  vec3 zenith_tint = mix(u_fog_color, vec3(0.11, 0.34, 0.90) * u_daylight_color,
+                         pow(clamp(horizon, 0.0, 1.0), 0.35));
+  sky = mix(zenith_tint * u_daylight_strength, sky, 0.65);
+
+  vec3 night = vec3(0.010, 0.016, 0.045) +
+      u_ambient_color * 0.55 +
+      vec3(0.08, 0.10, 0.15) * u_moonlight_strength *
+          smoothstep(-0.08, 0.45, u_moon_direction.y);
+  return mix(night, sky, day_amount);
+}
+
+float star_field(vec3 view_dir) {
+  vec3 cell = floor(normalize(view_dir) * 220.0);
+  float seed = dot(cell, vec3(17.0, 59.0, 113.0));
+  float star = smoothstep(0.9965, 1.0, hash(seed));
+  float sparkle = 0.78 + 0.22 * sin(u_cloud_time_seconds * 0.45 + hash(seed + 19.0) * 6.28318);
+  return star * sparkle;
+}
+
+vec3 apply_clouds(vec3 color, vec3 view_dir, float day_amount) {
+  float height_mask = smoothstep(0.02, 0.28, view_dir.y);
+  if (height_mask <= 0.0) {
+    return color;
+  }
+
+  vec3 plane = view_dir / max(view_dir.y, 0.055);
+  float cirrus_amount = clamp(u_cirrus_amount, 0.0, 1.0);
+  float cumulus_amount = clamp(u_cumulus_amount, 0.0, 1.0);
+  float cirrus = smoothstep(
+      0.999 - cirrus_amount * 0.54,
+      1.0,
+      fbm(plane * 1.70 + vec3(u_cloud_time_seconds * 0.010, 0.0, u_cloud_time_seconds * 0.004))) *
+      cirrus_amount * 0.35;
+  float cumulus = smoothstep(
+      0.999 - cumulus_amount * 0.62,
+      1.0,
+      fbm(plane * 0.82 + vec3(u_cloud_time_seconds * 0.030, 4.2, u_cloud_time_seconds * 0.018))) *
+      cumulus_amount;
+
+  float density = clamp(cirrus + cumulus, 0.0, 1.0) * height_mask;
+  vec3 cloud_light = mix(
+      vec3(0.07, 0.08, 0.12) + u_ambient_color,
+      u_fog_color * 1.55 + u_daylight_color * 0.28,
+      day_amount);
+  return mix(color, cloud_light, density * (0.32 + 0.42 * day_amount));
+}
+
+void main() {
+  vec3 view_dir = view_direction();
+  float sun_height = u_sun_direction.y;
+  float day_amount = smoothstep(-0.08, 0.16, sun_height);
+
+  vec3 color = scattering_color(view_dir, sun_height, day_amount);
+  color = apply_clouds(color, view_dir, day_amount);
+
+  float above_horizon = smoothstep(-0.02, 0.10, view_dir.y);
+  color += vec3(0.70, 0.78, 1.0) *
+      star_field(view_dir) * u_star_visibility * above_horizon;
+
+  color = mix(u_fog_color * 0.75, color, smoothstep(-0.10, 0.18, view_dir.y));
+  color += noise(view_dir * 1000.0 + vec3(u_day_fraction * 31.0)) * 0.008;
+  color = vec3(1.0) - exp(-max(color, vec3(0.0)) * max(u_exposure, 0.01));
+  frag_color = vec4(clamp(color, 0.0, 1.0), 1.0);
+}
+)glsl";
+
 [[nodiscard]] f32 texture_slot_for_ui_source(UiTextureSource source) noexcept {
   switch (source) {
     case UiTextureSource::White:
@@ -262,6 +433,7 @@ void OpenGLRenderer::render() {
   glEnable(GL_DEPTH_TEST);
   glClearColor(0.08F, 0.10F, 0.12F, 1.0F);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  draw_sky();
 
   if (!ensure_chunk_program()) {
     return;
@@ -304,6 +476,17 @@ void OpenGLRenderer::render() {
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
   glUniform1i(chunk_terrain_atlas_uniform_, 0);
+  glUniform3f(
+      chunk_daylight_color_uniform_,
+      frame_.sky.daylight_color.x,
+      frame_.sky.daylight_color.y,
+      frame_.sky.daylight_color.z);
+  glUniform1f(chunk_daylight_strength_uniform_, frame_.sky.daylight_strength);
+  glUniform3f(
+      chunk_ambient_color_uniform_,
+      frame_.sky.ambient_color.x,
+      frame_.sky.ambient_color.y,
+      frame_.sky.ambient_color.z);
 
   glDisable(GL_BLEND);
   glDepthMask(GL_TRUE);
@@ -347,6 +530,14 @@ void OpenGLRenderer::begin_shutdown() {
   if (entity_program_ != 0) {
     glDeleteProgram(entity_program_);
     entity_program_ = 0;
+  }
+  if (sky_program_ != 0) {
+    glDeleteProgram(sky_program_);
+    sky_program_ = 0;
+  }
+  if (sky_vao_ != 0) {
+    glDeleteVertexArrays(1, &sky_vao_);
+    sky_vao_ = 0;
   }
   destroy_gpu_texture(terrain_atlas_);
   destroy_gpu_texture(entity_atlas_);
@@ -757,6 +948,9 @@ bool OpenGLRenderer::ensure_chunk_program() {
   chunk_alpha_uniform_ = glGetUniformLocation(chunk_program_, "u_alpha");
   chunk_atlas_size_uniform_ = glGetUniformLocation(chunk_program_, "u_atlas_size");
   chunk_terrain_atlas_uniform_ = glGetUniformLocation(chunk_program_, "u_terrain_atlas");
+  chunk_daylight_color_uniform_ = glGetUniformLocation(chunk_program_, "u_daylight_color");
+  chunk_daylight_strength_uniform_ = glGetUniformLocation(chunk_program_, "u_daylight_strength");
+  chunk_ambient_color_uniform_ = glGetUniformLocation(chunk_program_, "u_ambient_color");
   return true;
 }
 
@@ -806,6 +1000,9 @@ bool OpenGLRenderer::ensure_entity_program() {
   entity_camera_far_uniform_ = glGetUniformLocation(entity_program_, "u_camera_far_plane");
   entity_atlas_size_uniform_ = glGetUniformLocation(entity_program_, "u_atlas_size");
   entity_atlas_uniform_ = glGetUniformLocation(entity_program_, "u_entity_atlas");
+  entity_daylight_color_uniform_ = glGetUniformLocation(entity_program_, "u_daylight_color");
+  entity_daylight_strength_uniform_ = glGetUniformLocation(entity_program_, "u_daylight_strength");
+  entity_ambient_color_uniform_ = glGetUniformLocation(entity_program_, "u_ambient_color");
   entity_bone_count_uniform_ = glGetUniformLocation(entity_program_, "u_bone_count");
   entity_bone_pivots_uniform_ = glGetUniformLocation(entity_program_, "u_bone_pivots[0]");
   entity_bone_rotations_uniform_ = glGetUniformLocation(entity_program_, "u_bone_rotations[0]");
@@ -851,6 +1048,150 @@ bool OpenGLRenderer::ensure_ui_program() {
   ui_viewport_uniform_ = glGetUniformLocation(ui_program_, "u_viewport_size");
   ui_texture_uniform_ = glGetUniformLocation(ui_program_, "u_textures");
   return true;
+}
+
+bool OpenGLRenderer::ensure_sky_program() {
+  if (sky_program_ != 0) {
+    return true;
+  }
+
+  const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, SkyVertexShaderSource);
+  const GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, SkyFragmentShaderSource);
+  if (vertex_shader == 0 || fragment_shader == 0) {
+    if (vertex_shader != 0) {
+      glDeleteShader(vertex_shader);
+    }
+    if (fragment_shader != 0) {
+      glDeleteShader(fragment_shader);
+    }
+    return false;
+  }
+
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vertex_shader);
+  glAttachShader(program, fragment_shader);
+  glLinkProgram(program);
+  glDeleteShader(vertex_shader);
+  glDeleteShader(fragment_shader);
+
+  GLint success = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &success);
+  if (success != GL_TRUE) {
+    glDeleteProgram(program);
+    return false;
+  }
+
+  sky_program_ = program;
+  sky_camera_forward_uniform_ = glGetUniformLocation(sky_program_, "u_camera_forward");
+  sky_camera_right_uniform_ = glGetUniformLocation(sky_program_, "u_camera_right");
+  sky_camera_up_uniform_ = glGetUniformLocation(sky_program_, "u_camera_up");
+  sky_camera_aspect_uniform_ = glGetUniformLocation(sky_program_, "u_camera_aspect");
+  sky_camera_fov_y_uniform_ = glGetUniformLocation(sky_program_, "u_camera_fov_y_degrees");
+  sky_sun_direction_uniform_ = glGetUniformLocation(sky_program_, "u_sun_direction");
+  sky_moon_direction_uniform_ = glGetUniformLocation(sky_program_, "u_moon_direction");
+  sky_daylight_color_uniform_ = glGetUniformLocation(sky_program_, "u_daylight_color");
+  sky_ambient_color_uniform_ = glGetUniformLocation(sky_program_, "u_ambient_color");
+  sky_fog_color_uniform_ = glGetUniformLocation(sky_program_, "u_fog_color");
+  sky_daylight_strength_uniform_ = glGetUniformLocation(sky_program_, "u_daylight_strength");
+  sky_moonlight_strength_uniform_ = glGetUniformLocation(sky_program_, "u_moonlight_strength");
+  sky_star_visibility_uniform_ = glGetUniformLocation(sky_program_, "u_star_visibility");
+  sky_day_fraction_uniform_ = glGetUniformLocation(sky_program_, "u_day_fraction");
+  sky_cloud_time_uniform_ = glGetUniformLocation(sky_program_, "u_cloud_time_seconds");
+  sky_cirrus_amount_uniform_ = glGetUniformLocation(sky_program_, "u_cirrus_amount");
+  sky_cumulus_amount_uniform_ = glGetUniformLocation(sky_program_, "u_cumulus_amount");
+  sky_exposure_uniform_ = glGetUniformLocation(sky_program_, "u_exposure");
+  return true;
+}
+
+void OpenGLRenderer::draw_sky() {
+  ARV_PROFILE_ZONE("Sky draw");
+  if (!frame_.sky.enabled || !ensure_sky_program()) {
+    return;
+  }
+
+  if (sky_vao_ == 0) {
+    glGenVertexArrays(1, &sky_vao_);
+  }
+
+  const GLboolean depth_enabled = glIsEnabled(GL_DEPTH_TEST);
+  const GLboolean blend_enabled = glIsEnabled(GL_BLEND);
+  const GLboolean cull_enabled = glIsEnabled(GL_CULL_FACE);
+
+  glDepthMask(GL_FALSE);
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
+  glDisable(GL_CULL_FACE);
+
+  glUseProgram(sky_program_);
+  glUniform3f(
+      sky_camera_forward_uniform_,
+      frame_.world_view.forward.x,
+      frame_.world_view.forward.y,
+      frame_.world_view.forward.z);
+  glUniform3f(
+      sky_camera_right_uniform_,
+      frame_.world_view.right.x,
+      frame_.world_view.right.y,
+      frame_.world_view.right.z);
+  glUniform3f(
+      sky_camera_up_uniform_,
+      frame_.world_view.up.x,
+      frame_.world_view.up.y,
+      frame_.world_view.up.z);
+  const f32 aspect = height_ == 0 ? 1.0F : static_cast<f32>(width_) / static_cast<f32>(height_);
+  glUniform1f(sky_camera_aspect_uniform_, aspect);
+  glUniform1f(sky_camera_fov_y_uniform_, frame_.world_view.fov_y_degrees);
+  glUniform3f(
+      sky_sun_direction_uniform_,
+      frame_.sky.sun_direction.x,
+      frame_.sky.sun_direction.y,
+      frame_.sky.sun_direction.z);
+  glUniform3f(
+      sky_moon_direction_uniform_,
+      frame_.sky.moon_direction.x,
+      frame_.sky.moon_direction.y,
+      frame_.sky.moon_direction.z);
+  glUniform3f(
+      sky_daylight_color_uniform_,
+      frame_.sky.daylight_color.x,
+      frame_.sky.daylight_color.y,
+      frame_.sky.daylight_color.z);
+  glUniform3f(
+      sky_ambient_color_uniform_,
+      frame_.sky.ambient_color.x,
+      frame_.sky.ambient_color.y,
+      frame_.sky.ambient_color.z);
+  glUniform3f(
+      sky_fog_color_uniform_,
+      frame_.sky.fog_color.x,
+      frame_.sky.fog_color.y,
+      frame_.sky.fog_color.z);
+  glUniform1f(sky_daylight_strength_uniform_, frame_.sky.daylight_strength);
+  glUniform1f(sky_moonlight_strength_uniform_, frame_.sky.moonlight_strength);
+  glUniform1f(sky_star_visibility_uniform_, frame_.sky.star_visibility);
+  glUniform1f(sky_day_fraction_uniform_, frame_.sky.day_fraction);
+  glUniform1f(sky_cloud_time_uniform_, frame_.sky.cloud_time_seconds);
+  glUniform1f(sky_cirrus_amount_uniform_, frame_.sky.cirrus_amount);
+  glUniform1f(sky_cumulus_amount_uniform_, frame_.sky.cumulus_amount);
+  glUniform1f(sky_exposure_uniform_, frame_.sky.exposure);
+
+  glBindVertexArray(sky_vao_);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glBindVertexArray(0);
+  ++draw_calls_last_frame_;
+  vertices_submitted_last_frame_ += 4U;
+  triangles_submitted_last_frame_ += 2U;
+
+  if (cull_enabled) {
+    glEnable(GL_CULL_FACE);
+  }
+  if (blend_enabled) {
+    glEnable(GL_BLEND);
+  }
+  if (depth_enabled) {
+    glEnable(GL_DEPTH_TEST);
+  }
+  glDepthMask(GL_TRUE);
 }
 
 void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent) {
@@ -960,6 +1301,17 @@ void OpenGLRenderer::draw_entities() {
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, entity_atlas_.id == 0 ? white_texture_.id : entity_atlas_.id);
   glUniform1i(entity_atlas_uniform_, 0);
+  glUniform3f(
+      entity_daylight_color_uniform_,
+      frame_.sky.daylight_color.x,
+      frame_.sky.daylight_color.y,
+      frame_.sky.daylight_color.z);
+  glUniform1f(entity_daylight_strength_uniform_, frame_.sky.daylight_strength);
+  glUniform3f(
+      entity_ambient_color_uniform_,
+      frame_.sky.ambient_color.x,
+      frame_.sky.ambient_color.y,
+      frame_.sky.ambient_color.z);
 
   usize batch_begin = 0;
   while (batch_begin < entity_draw_order_.size()) {

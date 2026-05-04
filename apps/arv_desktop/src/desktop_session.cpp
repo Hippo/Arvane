@@ -86,7 +86,8 @@ bool DesktopSessionManager::save_and_shutdown() {
       session.min_chunk_y,
       session.max_chunk_y,
       dependencies_.block_registry_hash,
-      dependencies_.item_registry_hash};
+      dependencies_.item_registry_hash,
+      session.integrated_server->voxel_world().clock()};
   auto save_result = persistence::save_server_root(
       session.server_save_root,
       save_metadata,
@@ -203,6 +204,9 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.worker_threads = dependencies_.thread_budget.primary_workers;
   server_start_info.world_tick_policy = dependencies_.world_tick_policy;
   server_start_info.entity_registry = &dependencies_.entity_registry;
+  if (loaded_save.has_world_metadata) {
+    server_start_info.initial_tick_index = loaded_save.world.tick_index;
+  }
   server_start_info.block_breaking.base_seconds_per_hardness =
       dependencies_.config.gameplay.block_breaking.base_seconds_per_hardness;
   server_start_info.block_breaking.creative_inventory_multiplier =
@@ -226,7 +230,9 @@ bool DesktopSessionManager::start_singleplayer(
   }
 
   if (loaded_save.has_world_metadata) {
-    integrated_server->voxel_world().set_tick_index(loaded_save.world.tick_index);
+    integrated_server->voxel_world().set_clock(
+        loaded_save.world.clock,
+        dependencies_.config.simulation.base_tps);
   }
   for (const persistence::SavedChunkSection& chunk : loaded_save.chunks) {
     integrated_server->voxel_world().restore_saved_chunk(

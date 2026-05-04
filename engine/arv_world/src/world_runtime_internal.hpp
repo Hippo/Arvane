@@ -358,6 +358,7 @@ struct WorldRuntime::Impl {
   detail::WorldPlayerStore players;
   detail::WorldRegionRuntime regions;
   TickIndex tick_index{};
+  WorldClock clock{make_world_clock()};
   std::optional<WorldGenerationConfig> generation_config{};
   u64 generation_seed{};
   std::vector<ReplicatedBlockUpdate> replicated_block_updates;

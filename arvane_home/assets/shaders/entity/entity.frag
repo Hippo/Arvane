@@ -4,6 +4,9 @@ in vec3 v_color;
 
 uniform sampler2D u_entity_atlas;
 uniform vec2 u_atlas_size;
+uniform vec3 u_daylight_color;
+uniform float u_daylight_strength;
+uniform vec3 u_ambient_color;
 
 out vec4 frag_color;
 
@@ -13,5 +16,10 @@ void main() {
   if (texel.a < 0.1) {
     discard;
   }
-  frag_color = vec4(texel.rgb * v_color, texel.a);
+  vec3 world_light = clamp(
+      u_ambient_color + u_daylight_color * u_daylight_strength,
+      vec3(0.36),
+      vec3(1.0));
+  vec3 soft_entity_light = mix(vec3(1.0), world_light, 0.45);
+  frag_color = vec4(texel.rgb * v_color * soft_entity_light, texel.a);
 }

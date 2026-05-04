@@ -43,6 +43,7 @@ add_executable(arv_tests
   world/region_tests.cpp
   world/world_generation_tests.cpp
   world/world_runtime_tests.cpp
+  world/world_time_tests.cpp
 )
 
 target_include_directories(arv_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

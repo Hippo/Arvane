@@ -33,6 +33,23 @@ struct FogParams {
   f32 end{};
 };
 
+struct SkyUniforms {
+  bool enabled{};
+  Vec3f sun_direction{0.0F, 1.0F, 0.0F};
+  f32 daylight_strength{1.0F};
+  Vec3f moon_direction{0.0F, -1.0F, 0.0F};
+  f32 moonlight_strength{};
+  Vec3f daylight_color{1.0F, 0.96F, 0.88F};
+  f32 star_visibility{};
+  Vec3f ambient_color{0.20F, 0.24F, 0.30F};
+  f32 day_fraction{0.5F};
+  Vec3f fog_color{0.55F, 0.68F, 0.86F};
+  f32 cloud_time_seconds{};
+  f32 cirrus_amount{0.35F};
+  f32 cumulus_amount{0.60F};
+  f32 exposure{1.0F};
+};
+
 struct RenderView {
   WorldID world_id{};
   Vec3f position{};
@@ -399,6 +416,7 @@ struct EntityVertex {
 struct FramePacket {
   CameraSnapshot camera{};
   RenderView world_view{};
+  SkyUniforms sky{};
   std::vector<ChunkDrawItem> opaque_chunks{};
   std::vector<ChunkDrawItem> transparent_chunks{};
   std::vector<EntityDrawItem> entities{};

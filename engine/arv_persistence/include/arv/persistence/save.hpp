@@ -8,6 +8,7 @@
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/world/world_generation.hpp"
+#include "arv/world/world_time.hpp"
 
 #include <filesystem>
 #include <string>
@@ -36,6 +37,7 @@ struct WorldMetadata {
   i32 max_chunk_y{};
   u64 block_registry_hash{};
   u64 item_registry_hash{};
+  world::WorldClock clock{world::make_world_clock()};
 };
 
 struct PlayerSaveData {

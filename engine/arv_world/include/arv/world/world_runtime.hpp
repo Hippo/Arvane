@@ -11,6 +11,7 @@
 #include "arv/world/regions.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
+#include "arv/world/world_time.hpp"
 
 #include <array>
 #include <memory>
@@ -123,6 +124,19 @@ public:
   [[nodiscard]] std::vector<ChunkCoord> loaded_chunk_coords() const;
   [[nodiscard]] TickIndex tick_index() const noexcept;
   void set_tick_index(TickIndex tick_index) noexcept;
+  [[nodiscard]] const WorldClock& clock() const noexcept;
+  void configure_clock(
+      Seconds day_length_seconds,
+      f32 start_day_fraction,
+      TickRate fixed_tick_rate,
+      bool daylight_cycle = true,
+      f32 time_scale = 1.0F) noexcept;
+  void set_clock(WorldClock clock, TickRate fixed_tick_rate) noexcept;
+  void set_day_time_tick(u32 day_time_tick) noexcept;
+  void set_day_fraction(f32 day_fraction) noexcept;
+  void set_daylight_cycle(bool daylight_cycle) noexcept;
+  void set_time_scale(f32 time_scale) noexcept;
+  void set_day_length_seconds(Seconds day_length_seconds, TickRate fixed_tick_rate) noexcept;
   [[nodiscard]] u64 lighting_revision() const noexcept;
   [[nodiscard]] u64 mesh_revision() const noexcept;
   void set_generation_context(u64 seed, WorldGenerationConfig config);
