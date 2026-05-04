@@ -337,10 +337,12 @@ Expected<void, PersistenceError> write_text_atomic(
 
 [[nodiscard]] std::filesystem::path player_file_path(
     const std::filesystem::path& root,
-    std::string_view profile_name) {
-  // TODO(arvane): Replace profile-name filenames with stable player UUID files
-  // once the documented global profile model exists.
-  return root / "players" / (std::string{profile_name} + ".dat");
+    const PlayerSaveData& player) {
+  const std::string filename =
+      !player.profile_id.empty()
+          ? player.profile_id.string() + ".json"
+          : player.profile_name + ".dat";
+  return root / "players" / filename;
 }
 
 } // namespace
@@ -544,7 +546,9 @@ Expected<void, PersistenceError> save_server_root(
 
   for (const PlayerSaveData& player : players) {
     const json player_json{
+        {"profile_id", player.profile_id.string()},
         {"profile_name", player.profile_name},
+        {"display_name", player.display_name},
         {"world_name", player.world_name},
         {"position", vec3_to_json(player.position)},
         {"velocity", vec3_to_json(player.velocity)},
@@ -557,7 +561,7 @@ Expected<void, PersistenceError> save_server_root(
         {"inventory_version", 1},
         {"inventory", inventory_to_json(player.inventory, item_registry)},
     };
-    auto player_result = write_text_atomic(player_file_path(root, player.profile_name), player_json.dump(2));
+    auto player_result = write_text_atomic(player_file_path(root, player), player_json.dump(2));
     if (!player_result) {
       return player_result;
     }
@@ -772,7 +776,17 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
         const json player_json = json::parse(player_text.value());
 
         PlayerSaveData player_save;
-        player_save.profile_name = player_json.at("profile_name").get<std::string>();
+        const std::string profile_id_text = player_json.value("profile_id", std::string{});
+        if (!profile_id_text.empty()) {
+          auto profile_id = crypto::parse_player_profile_id(profile_id_text);
+          if (!profile_id) {
+            return Expected<LoadedSaveData, PersistenceError>::failure(
+                PersistenceError{profile_id.error().message});
+          }
+          player_save.profile_id = profile_id.value();
+        }
+        player_save.profile_name = player_json.value("profile_name", std::string{"local_player"});
+        player_save.display_name = player_json.value("display_name", player_save.profile_name);
         player_save.world_name = player_json.at("world_name").get<std::string>();
         player_save.position = json_to_vec3(player_json.at("position"));
         player_save.velocity = json_to_vec3(player_json.at("velocity"));

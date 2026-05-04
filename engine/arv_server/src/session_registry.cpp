@@ -9,13 +9,31 @@ ReservedSessionIdentity SessionRegistry::reserve_identity() noexcept {
 }
 
 ServerSession& SessionRegistry::create(net::ConnectionID connection_id, ReservedSessionIdentity identity, WorldID world_id, std::string profile_name) {
+  SessionProfileIdentity profile;
+  profile.display_name = profile_name;
+  return create(connection_id, identity, world_id, std::move(profile), true);
+}
+
+ServerSession& SessionRegistry::create(
+    net::ConnectionID connection_id,
+    ReservedSessionIdentity identity,
+    WorldID world_id,
+    SessionProfileIdentity profile,
+    bool authenticated) {
   ServerSession session;
   session.session_id = identity.session_id;
   session.player_id = identity.player_id;
   session.connection_id = connection_id;
-  session.connection_state = net::ConnectionState::InGame;
+  session.connection_state =
+      authenticated ? net::ConnectionState::InGame : net::ConnectionState::ProtocolHandshake;
   session.world_id = world_id;
-  session.profile_name = std::move(profile_name);
+  session.profile_id = profile.profile_id;
+  session.display_name = profile.display_name.empty() ? "local_player" : std::move(profile.display_name);
+  session.profile_name = session.display_name;
+  session.public_key = profile.public_key;
+  session.has_public_key = profile.has_public_key;
+  session.authenticated = authenticated;
+  session.pending_auth = !authenticated;
 
   auto [it, inserted] = sessions_.insert_or_assign(session.session_id, std::move(session));
   (void)inserted;

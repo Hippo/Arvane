@@ -2,6 +2,7 @@
 
 #include "arv/client/camera_shell.hpp"
 #include "arv/client/local_player_controller.hpp"
+#include "arv/client/local_identity.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/protocol/block_updates.hpp"
@@ -54,6 +55,8 @@ public:
   ClientRuntime& operator=(const ClientRuntime&) = delete;
 
   void set_player_tuning(player::PlayerTuning tuning) noexcept;
+  void set_local_identity(LocalPlayerIdentity identity);
+  [[nodiscard]] const LocalPlayerIdentity& local_identity() const noexcept;
   net::ConnectResult connect_integrated();
   net::ConnectResult connect(net::NetworkAddress address);
   void submit_input(InputFrame input);

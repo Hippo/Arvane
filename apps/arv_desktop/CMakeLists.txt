@@ -25,6 +25,7 @@ add_executable(arv_desktop ${ARV_CLIENT_SOURCES})
 target_link_libraries(arv_desktop PRIVATE
   arv_client
   arv_core
+  arv_crypto
   arv_io
   arv_net
   arv_platform

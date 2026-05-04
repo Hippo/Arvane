@@ -1,11 +1,66 @@
 #include "server_runtime_internal.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/crypto/random.hpp"
 
 #include <string_view>
 #include <utility>
 
 namespace arv::server::detail {
+
+void ServerRuntimeImpl::send_auth_result(
+    const ServerSession& session,
+    bool accepted,
+    std::string_view reason_if_rejected) {
+  protocol::ClientboundAuthResult result;
+  result.accepted = accepted;
+  result.profile_id = session.profile_id;
+  result.reason_if_rejected = accepted ? std::string{} : std::string{reason_if_rejected};
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::AuthResult,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_auth_result(result));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::send_auth_challenge(ServerSession& session) {
+  PendingAuthChallenge challenge;
+  challenge.issued_server_tick = tick_index_;
+  challenge.expires_server_tick = tick_index_ + 200U;
+  challenge.server_instance_id = server_instance_id_;
+  crypto::fill_random(challenge.nonce);
+  session.challenge = challenge;
+
+  protocol::ClientboundAuthChallenge packet;
+  packet.session_id = session.session_id;
+  packet.nonce = challenge.nonce;
+  packet.expires_server_tick = challenge.expires_server_tick;
+  packet.server_instance_id = challenge.server_instance_id;
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::AuthChallenge,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_auth_challenge(packet));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
+  session.authenticated = true;
+  session.pending_auth = false;
+  session.challenge.reset();
+  player::PlayerState& player_state = default_world_.ensure_player(session.player_id);
+  player_state.world_id = session.world_id;
+  if (!apply_saved_player_state(session, player_state)) {
+    seed_player_inventory(player_state);
+  }
+  refresh_player_permissions(player_state);
+  session.connection_state = net::ConnectionState::WorldJoin;
+}
 
 void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) {
   if (const ServerSession* session = sessions_.find_by_connection(connection_id);

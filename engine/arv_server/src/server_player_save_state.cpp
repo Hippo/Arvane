@@ -17,7 +17,11 @@ bool ServerPlayerSaveCache::apply_to_player(
       states_.begin(),
       states_.end(),
       [&](const ServerPlayerSaveState& save) {
-        return save.profile_name == session.profile_name && save.world_name == world_name;
+        const bool profile_matches =
+            !session.profile_id.empty()
+                ? save.profile_id == session.profile_id
+                : save.profile_name == session.profile_name;
+        return profile_matches && save.world_name == world_name;
       });
   if (found == states_.end()) {
     return false;
@@ -40,7 +44,9 @@ void ServerPlayerSaveCache::record(
     const ServerSession& session,
     const player::PlayerState& player_state) {
   ServerPlayerSaveState save;
+  save.profile_id = session.profile_id;
   save.profile_name = session.profile_name;
+  save.display_name = session.display_name;
   save.world_name = world_name;
   save.position = player_state.position;
   save.velocity = player_state.velocity;
@@ -56,8 +62,11 @@ void ServerPlayerSaveCache::record(
       states_.begin(),
       states_.end(),
       [&](const ServerPlayerSaveState& existing) {
-        return existing.profile_name == save.profile_name &&
-               existing.world_name == save.world_name;
+        const bool profile_matches =
+            !save.profile_id.empty()
+                ? existing.profile_id == save.profile_id
+                : existing.profile_name == save.profile_name;
+        return profile_matches && existing.world_name == save.world_name;
       });
   if (found == states_.end()) {
     states_.emplace_back(std::move(save));

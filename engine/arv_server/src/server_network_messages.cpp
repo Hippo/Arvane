@@ -1,8 +1,12 @@
 #include "server_runtime_internal.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/crypto/hash.hpp"
+#include "arv/protocol/auth.hpp"
 #include "arv/protocol/message_envelope.hpp"
 
+#include <cstddef>
+#include <span>
 #include <utility>
 
 namespace arv::server::detail {
@@ -81,6 +85,14 @@ void ServerRuntimeImpl::handle_message(
       handle_client_hello(connection_id, client_hello.value());
       return;
     }
+    case protocol::MessageType::AuthResponse: {
+      auto response = protocol::deserialize_auth_response(decoded.value().payload);
+      if (!response) {
+        return;
+      }
+      handle_auth_response(connection_id, response.value());
+      return;
+    }
     case protocol::MessageType::ClientInputBatch: {
       auto batch = protocol::deserialize_client_input_batch(decoded.value().payload);
       if (!batch) {
@@ -113,9 +125,48 @@ void ServerRuntimeImpl::handle_message(
 void ServerRuntimeImpl::handle_client_hello(
     net::ConnectionID connection_id,
     const protocol::ClientHello& client_hello) {
-  // TODO(arvane): Validate real authentication/session tokens once the
-  // account/session authority is specified.
   protocol::HandshakePolicy policy = handshake_policy_;
+  if (!client_hello.auth_begin.has_value()) {
+    protocol::ServerHello rejected = protocol::make_server_hello(client_hello, policy);
+    rejected.accepted = false;
+    rejected.reject_reason = "authentication required";
+    (void)send_protocol_message(
+        *transport_,
+        connection_id,
+        protocol::MessageType::ServerHello,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Session,
+        protocol::serialize_server_hello(rejected));
+    return;
+  }
+
+  const protocol::ServerboundAuthBegin& auth_begin = client_hello.auth_begin.value();
+  PlayerProfileOpenResult profile_result = profiles_.open_or_create(
+      auth_begin.public_key,
+      auth_begin.display_name,
+      auth_begin.claimed_profile_id);
+  if (profile_result.status == PlayerProfileOpenStatus::InvalidClaimedProfileID ||
+      profile_result.status == PlayerProfileOpenStatus::PublicKeyMismatch ||
+      profile_result.profile == nullptr) {
+    protocol::ServerHello rejected = protocol::make_server_hello(client_hello, policy);
+    rejected.accepted = false;
+    rejected.reject_reason = "authentication failed";
+    (void)send_protocol_message(
+        *transport_,
+        connection_id,
+        protocol::MessageType::ServerHello,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Session,
+        protocol::serialize_server_hello(rejected));
+    return;
+  }
+
+  SessionProfileIdentity profile_identity;
+  profile_identity.profile_id = profile_result.profile->profile_id;
+  profile_identity.display_name = profile_result.profile->display_name;
+  profile_identity.public_key = profile_result.profile->public_key;
+  profile_identity.has_public_key = true;
+
   if (ServerSession* existing = sessions_.find_by_connection(connection_id); existing != nullptr) {
     policy.assigned_session_id = existing->session_id;
     policy.assigned_player_id = existing->player_id;
@@ -133,14 +184,11 @@ void ServerRuntimeImpl::handle_client_hello(
         connection_id,
         {server_hello.assigned_session_id, server_hello.assigned_player_id},
         server_hello.initial_world_id,
-        client_hello.requested_username_or_profile_name);
-    player::PlayerState& player_state = default_world_.ensure_player(session.player_id);
-    player_state.world_id = session.world_id;
-    if (!apply_saved_player_state(session, player_state)) {
-      seed_player_inventory(player_state);
+        std::move(profile_identity),
+        mode_ == ServerMode::Integrated);
+    if (mode_ == ServerMode::Integrated) {
+      complete_authenticated_session(session);
     }
-    refresh_player_permissions(player_state);
-    session.connection_state = net::ConnectionState::WorldJoin;
   }
 
   (void)send_protocol_message(
@@ -153,13 +201,61 @@ void ServerRuntimeImpl::handle_client_hello(
   if (server_hello.accepted) {
     if (ServerSession* session = sessions_.find_by_connection(connection_id);
         session != nullptr) {
-      if (const player::PlayerState* player_state =
-              default_world_.find_player(session->player_id);
-          player_state != nullptr) {
-        send_world_join_result(*session, *player_state);
-        session->connection_state = net::ConnectionState::InGame;
+      if (mode_ == ServerMode::Integrated) {
+        send_auth_result(*session, true);
+        if (const player::PlayerState* player_state =
+                default_world_.find_player(session->player_id);
+            player_state != nullptr) {
+          send_world_join_result(*session, *player_state);
+          session->connection_state = net::ConnectionState::InGame;
+        }
+      } else if (!session->authenticated) {
+        send_auth_challenge(*session);
       }
     }
+  }
+}
+
+void ServerRuntimeImpl::handle_auth_response(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundAuthResponse& response) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || session->authenticated || !session->challenge.has_value() ||
+      !session->has_public_key) {
+    return;
+  }
+
+  const PendingAuthChallenge challenge = session->challenge.value();
+  session->challenge.reset();
+  if (tick_index_ > challenge.expires_server_tick) {
+    send_auth_result(*session, false, "authentication failed");
+    return;
+  }
+
+  const std::vector<u8> payload_bytes = protocol::build_auth_signed_payload(
+      {protocol::CurrentProtocolVersion,
+       challenge.server_instance_id,
+       session->session_id,
+       session->profile_id,
+       session->public_key,
+       challenge.nonce,
+       challenge.expires_server_tick});
+  const auto* first = reinterpret_cast<const std::byte*>(payload_bytes.data());
+  const bool verified = crypto::verify_ed25519(
+      std::span<const std::byte>{first, payload_bytes.size()},
+      response.signature,
+      session->public_key);
+  if (!verified) {
+    send_auth_result(*session, false, "authentication failed");
+    return;
+  }
+
+  complete_authenticated_session(*session);
+  send_auth_result(*session, true);
+  if (const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+      player_state != nullptr) {
+    send_world_join_result(*session, *player_state);
+    session->connection_state = net::ConnectionState::InGame;
   }
 }
 
@@ -167,7 +263,7 @@ void ServerRuntimeImpl::handle_input_batch(
     net::ConnectionID connection_id,
     const protocol::ClientInputBatch& batch) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
-  if (session == nullptr) {
+  if (session == nullptr || !session->authenticated) {
     return;
   }
 
@@ -186,7 +282,7 @@ void ServerRuntimeImpl::handle_chunk_interest_update(
     net::ConnectionID connection_id,
     const protocol::ChunkInterestUpdate& interest) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
-  if (session == nullptr) {
+  if (session == nullptr || !session->authenticated) {
     return;
   }
   const player::PlayerState* player_state = default_world_.find_player(session->player_id);
@@ -216,7 +312,8 @@ void ServerRuntimeImpl::handle_inventory_action_request(
     net::ConnectionID connection_id,
     const protocol::InventoryActionRequest& request) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
-  if (session == nullptr || request.inventory_id != protocol::PlayerInventoryID) {
+  if (session == nullptr || !session->authenticated ||
+      request.inventory_id != protocol::PlayerInventoryID) {
     return;
   }
 

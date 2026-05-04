@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/client/local_identity.hpp"
 #include "arv/net/transport.hpp"
 
 #include <memory>
@@ -13,12 +14,16 @@ class ClientConnectionRuntime {
 public:
   explicit ClientConnectionRuntime(std::unique_ptr<net::ITransport> transport);
 
-  net::ConnectResult connect_integrated(ClientProtocolSender& sender);
+  net::ConnectResult connect_integrated(
+      ClientProtocolSender& sender,
+      const LocalPlayerIdentity& identity);
   net::ConnectResult connect_remote(net::NetworkAddress address);
 
   std::vector<net::NetworkEvent> poll_events();
 
-  void handle_connection_accepted(ClientProtocolSender& sender);
+  void handle_connection_accepted(
+      ClientProtocolSender& sender,
+      const LocalPlayerIdentity& identity);
   void handle_connection_closed_or_failed(const net::NetworkEvent& event);
   void handle_message_send_failed() noexcept;
 

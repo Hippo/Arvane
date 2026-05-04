@@ -1,8 +1,10 @@
 #pragma once
 
+#include "arv/client/local_identity.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/player/player_state.hpp"
+#include "arv/protocol/auth.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_type.hpp"
@@ -17,7 +19,8 @@ class ClientProtocolSender {
 public:
   explicit ClientProtocolSender(ClientConnectionRuntime& connection);
 
-  net::NetworkResult send_client_hello();
+  net::NetworkResult send_client_hello(const LocalPlayerIdentity& identity);
+  net::NetworkResult send_auth_response(const protocol::ServerboundAuthResponse& response);
 
   net::NetworkResult send_chunk_interest_update(
       const protocol::ChunkInterestUpdate& update);

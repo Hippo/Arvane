@@ -1,6 +1,7 @@
 set(ARV_SERVER_HEADERS
   include/arv/server/chunk_streamer.hpp
   include/arv/server/dedicated_lifetime.hpp
+  include/arv/server/player_profile.hpp
   include/arv/server/session_registry.hpp
   include/arv/server/server_runtime.hpp
   include/arv/server/world_registry.hpp
@@ -8,6 +9,7 @@ set(ARV_SERVER_HEADERS
 
 add_library(arv_server STATIC
   src/chunk_streamer.cpp
+  src/player_profile.cpp
   src/server_chunk_jobs.cpp
   src/server_chunk_streaming_runtime.cpp
   src/server_dropped_items.cpp
@@ -23,4 +25,5 @@ add_library(arv_server STATIC
   src/world_registry.cpp
 )
 target_include_directories(arv_server PUBLIC include)
-target_link_libraries(arv_server PUBLIC arv_core arv_net arv_protocol arv_sched arv_world)
+target_link_libraries(arv_server PUBLIC arv_core arv_crypto arv_net arv_protocol arv_sched arv_world)
+target_link_libraries(arv_server PRIVATE nlohmann_json::nlohmann_json)

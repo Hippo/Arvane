@@ -2,8 +2,11 @@
 
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/types.hpp"
+#include "arv/crypto/ed25519.hpp"
 #include "arv/net/connection_state.hpp"
+#include "arv/protocol/auth.hpp"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,6 +17,20 @@ struct ReservedSessionIdentity {
   PlayerID player_id{};
 };
 
+struct PendingAuthChallenge {
+  protocol::AuthChallengeNonce nonce{};
+  u64 issued_server_tick{};
+  u64 expires_server_tick{};
+  protocol::AuthServerInstanceID server_instance_id{};
+};
+
+struct SessionProfileIdentity {
+  crypto::PlayerProfileID profile_id{};
+  std::string display_name{"local_player"};
+  crypto::Ed25519PublicKey public_key{};
+  bool has_public_key{};
+};
+
 struct ServerSession {
   SessionID session_id{};
   PlayerID player_id{};
@@ -21,6 +38,13 @@ struct ServerSession {
   net::ConnectionState connection_state{net::ConnectionState::ProtocolHandshake};
   WorldID world_id{};
   std::string profile_name{};
+  crypto::PlayerProfileID profile_id{};
+  std::string display_name{"local_player"};
+  crypto::Ed25519PublicKey public_key{};
+  bool has_public_key{};
+  bool authenticated{};
+  bool pending_auth{true};
+  std::optional<PendingAuthChallenge> challenge{};
 };
 
 class SessionRegistry {
@@ -31,6 +55,12 @@ public:
       ReservedSessionIdentity identity,
       WorldID world_id,
       std::string profile_name);
+  ServerSession& create(
+      net::ConnectionID connection_id,
+      ReservedSessionIdentity identity,
+      WorldID world_id,
+      SessionProfileIdentity profile,
+      bool authenticated);
   [[nodiscard]] ServerSession* find(SessionID session_id) noexcept;
   [[nodiscard]] const ServerSession* find(SessionID session_id) const noexcept;
   [[nodiscard]] const ServerSession* first() const noexcept;

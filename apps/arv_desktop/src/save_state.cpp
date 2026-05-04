@@ -59,7 +59,9 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     }
 
     persistence::PlayerSaveData save;
+    save.profile_id = session->profile_id;
     save.profile_name = session->profile_name;
+    save.display_name = session->display_name;
     save.world_name = std::string{world_name};
     save.position = player_state->position;
     save.velocity = player_state->velocity;
@@ -95,8 +97,11 @@ void apply_loaded_player_saves(
         loaded_players.begin(),
         loaded_players.end(),
         [&](const persistence::PlayerSaveData& player) {
-          return player.profile_name == session->profile_name &&
-                 player.world_name == world_name;
+          const bool profile_matches =
+              !session->profile_id.empty()
+                  ? player.profile_id == session->profile_id
+                  : player.profile_name == session->profile_name;
+          return profile_matches && player.world_name == world_name;
         });
     if (found == loaded_players.end()) {
       continue;

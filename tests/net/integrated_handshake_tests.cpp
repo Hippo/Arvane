@@ -1,4 +1,5 @@
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/local_identity.hpp"
 #include "arv/net/gns_transport.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
@@ -36,8 +37,14 @@ arv::player::PlayerState& connected_player(arv::server::ServerRuntime& server) {
 
 void send_raw_client_hello(
     arv::net::ITransport& client_transport,
-    arv::net::ConnectionID connection_id) {
-  const arv::protocol::ClientHello hello;
+    arv::net::ConnectionID connection_id,
+    const arv::client::LocalPlayerIdentity& identity) {
+  arv::protocol::ClientHello hello;
+  hello.requested_username_or_profile_name = identity.display_name;
+  hello.auth_begin = arv::protocol::ServerboundAuthBegin{
+      identity.key_pair.public_key,
+      identity.display_name,
+      identity.profile_id};
   const std::vector<arv::u8> payload = arv::protocol::serialize_client_hello(hello);
   std::vector<arv::u8> packet = arv::protocol::serialize_envelope(
       {arv::protocol::CurrentProtocolVersion,
@@ -161,6 +168,9 @@ TEST(IntegratedHandshakeTests, SavedPlayerStateIsAppliedBeforeWorldJoinResult) {
   arv::server::ServerRuntime server(std::move(transports.server));
 
   arv::server::ServerPlayerSaveState saved_player;
+  const arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity();
+  saved_player.profile_id = identity.profile_id;
   saved_player.profile_name = "local_player";
   saved_player.world_name = "default";
   saved_player.position = {12.0F, 34.0F, -56.0F};
@@ -181,7 +191,7 @@ TEST(IntegratedHandshakeTests, SavedPlayerStateIsAppliedBeforeWorldJoinResult) {
 
   const auto connect_result = client_transport->connect({"in-process", 0});
   ASSERT_TRUE(connect_result);
-  send_raw_client_hello(*client_transport, connect_result.value());
+  send_raw_client_hello(*client_transport, connect_result.value(), identity);
   server.tick();
 
   const std::vector<arv::net::NetworkEvent> events = client_transport->poll_events();
@@ -366,7 +376,10 @@ TEST(IntegratedHandshakeTests, DisconnectCleansSessionAndWorldLocalPlayerEntity)
 
   const auto connect_result = client_transport->connect({"in-process", 0});
   ASSERT_TRUE(connect_result);
-  send_raw_client_hello(*client_transport, connect_result.value());
+  send_raw_client_hello(
+      *client_transport,
+      connect_result.value(),
+      arv::client::make_ephemeral_local_identity());
 
   server.tick();
   (void)client_transport->poll_events();
@@ -426,7 +439,10 @@ TEST(IntegratedHandshakeTests, ServerSkipsUnchangedPlayerCorrections) {
 
   const auto connect_result = client_transport->connect({"in-process", 0});
   ASSERT_TRUE(connect_result);
-  send_raw_client_hello(*client_transport, connect_result.value());
+  send_raw_client_hello(
+      *client_transport,
+      connect_result.value(),
+      arv::client::make_ephemeral_local_identity());
 
   server.tick();
   (void)client_transport->poll_events();

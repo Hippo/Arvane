@@ -5,6 +5,7 @@
 #include "ui_model.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/client/local_identity.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/render/opengl_renderer.hpp"
@@ -246,6 +247,14 @@ bool DesktopSessionManager::start_singleplayer(
       &dependencies_.entity_registry);
 
   auto client = std::make_unique<client::ClientRuntime>(std::move(transport_pair.client));
+  auto identity = client::load_or_create_local_identity(
+      dependencies_.config.paths.arvane_home_path() / "identity");
+  if (!identity) {
+    core::error("identity", identity.error().message);
+    integrated_server->shutdown();
+    return false;
+  }
+  client->set_local_identity(std::move(identity.value()));
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);
   auto connect_result = client->connect_integrated();
@@ -334,6 +343,13 @@ bool DesktopSessionManager::start_remote(const ui::JoinServerCommand& command) {
 
   auto client = std::make_unique<client::ClientRuntime>(
       std::make_unique<net::GameNetworkingSocketsTransport>());
+  auto identity = client::load_or_create_local_identity(
+      dependencies_.config.paths.arvane_home_path() / "identity");
+  if (!identity) {
+    core::error("identity", identity.error().message);
+    return false;
+  }
+  client->set_local_identity(std::move(identity.value()));
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);
   auto connect_result = client->connect(address.value());

@@ -113,14 +113,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(spdlog)
 
-FetchContent_Declare(
-  libsodium
-  GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
-  GIT_TAG 1.0.22-RELEASE
-  UPDATE_DISCONNECTED TRUE
-)
-FetchContent_MakeAvailable(libsodium)
-
 if(ARVANE_ENABLE_PROFILING AND ARVANE_ENABLE_TRACY)
   FetchContent_Declare(
     tracy

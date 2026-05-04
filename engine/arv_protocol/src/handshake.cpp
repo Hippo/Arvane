@@ -77,6 +77,12 @@ std::vector<u8> serialize_client_hello(const ClientHello& hello) {
   write_named_hashes(writer, hello.asset_pack_hashes_known_by_client);
   writer.write_string(hello.requested_username_or_profile_name);
   writer.write_string(hello.session_token_or_placeholder);
+  writer.write_bool(hello.auth_begin.has_value());
+  if (hello.auth_begin.has_value()) {
+    writer.write_bytes(hello.auth_begin->public_key.bytes);
+    writer.write_string(hello.auth_begin->display_name);
+    writer.write_string(hello.auth_begin->claimed_profile_id.string());
+  }
   return std::move(writer).take_bytes();
 }
 
@@ -126,6 +132,34 @@ Expected<ClientHello, ProtocolError> deserialize_client_hello(std::span<const u8
   hello.asset_pack_hashes_known_by_client = std::move(asset_hashes.value());
   hello.requested_username_or_profile_name = std::move(username.value());
   hello.session_token_or_placeholder = std::move(token.value());
+
+  if (reader.remaining() != 0) {
+    auto has_auth = reader.read_bool();
+    if (!has_auth) {
+      return Expected<ClientHello, ProtocolError>::failure(
+          ProtocolError{"failed to read client auth flag"});
+    }
+    if (has_auth.value()) {
+      ServerboundAuthBegin auth;
+      if (auto result = reader.read_bytes(auth.public_key.bytes); !result) {
+        return Expected<ClientHello, ProtocolError>::failure(result.error());
+      }
+      auto display_name = reader.read_string();
+      auto claimed_profile_id = reader.read_string();
+      if (!display_name || !claimed_profile_id) {
+        return Expected<ClientHello, ProtocolError>::failure(
+            ProtocolError{"failed to read client auth begin"});
+      }
+      auth.display_name = std::move(display_name.value());
+      auto parsed_profile_id = crypto::parse_player_profile_id(claimed_profile_id.value());
+      if (!parsed_profile_id) {
+        return Expected<ClientHello, ProtocolError>::failure(
+            ProtocolError{parsed_profile_id.error().message});
+      }
+      auth.claimed_profile_id = parsed_profile_id.value();
+      hello.auth_begin = std::move(auth);
+    }
+  }
 
   if (reader.remaining() != 0) {
     return Expected<ClientHello, ProtocolError>::failure(ProtocolError{"trailing bytes in client hello"});

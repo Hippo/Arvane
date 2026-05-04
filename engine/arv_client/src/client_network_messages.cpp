@@ -1,5 +1,7 @@
 #include "client_network_messages.hpp"
 
+#include "arv/crypto/hash.hpp"
+#include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_replication.hpp"
@@ -10,6 +12,8 @@
 
 #include "client_runtime_internal.hpp"
 
+#include <cstddef>
+#include <span>
 #include <utility>
 
 namespace arv::client::detail {
@@ -58,7 +62,7 @@ void ClientNetworkRouter::handle_event(
     case net::NetworkEventType::ConnectionRequested:
       return;
     case net::NetworkEventType::ConnectionAccepted:
-      runtime.connection.handle_connection_accepted(runtime.sender);
+      runtime.connection.handle_connection_accepted(runtime.sender, runtime.identity);
       return;
     case net::NetworkEventType::ConnectionClosed:
     case net::NetworkEventType::ConnectionFailed:
@@ -100,6 +104,42 @@ void ClientNetworkRouter::handle_message(
           server_hello.value().required_followup_sync
               ? net::ConnectionState::RegistrySync
               : net::ConnectionState::WorldJoin);
+      return;
+    }
+    case protocol::MessageType::AuthChallenge: {
+      auto challenge = protocol::deserialize_auth_challenge(decoded.value().payload);
+      if (!challenge) {
+        runtime.connection.set_state(net::ConnectionState::Disconnecting);
+        return;
+      }
+
+      const crypto::PlayerProfileID profile_id =
+          runtime.identity.profile_id.empty()
+              ? crypto::derive_profile_id_from_public_key(runtime.identity.key_pair.public_key)
+              : runtime.identity.profile_id;
+      const std::vector<u8> payload_bytes = protocol::build_auth_signed_payload(
+          {protocol::CurrentProtocolVersion,
+           challenge.value().server_instance_id,
+           challenge.value().session_id,
+           profile_id,
+           runtime.identity.key_pair.public_key,
+           challenge.value().nonce,
+           challenge.value().expires_server_tick});
+      const auto* first = reinterpret_cast<const std::byte*>(payload_bytes.data());
+      protocol::ServerboundAuthResponse response;
+      response.signature = crypto::sign_ed25519(
+          std::span<const std::byte>{first, payload_bytes.size()},
+          runtime.identity.key_pair.private_key);
+      if (!runtime.sender.send_auth_response(response)) {
+        runtime.connection.set_state(net::ConnectionState::Disconnecting);
+      }
+      return;
+    }
+    case protocol::MessageType::AuthResult: {
+      auto result = protocol::deserialize_auth_result(decoded.value().payload);
+      if (!result || !result.value().accepted) {
+        runtime.connection.set_state(net::ConnectionState::Disconnecting);
+      }
       return;
     }
     case protocol::MessageType::WorldJoinResult: {

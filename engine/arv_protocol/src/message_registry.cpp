@@ -34,6 +34,15 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::Pong, "Pong",
                              MessageDirection::Bidirectional, ReliabilityClass::UnreliableEvent,
                              NetworkLane::Debug});
+  registry.register_message({MessageType::AuthChallenge, "AuthChallenge",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::AuthResponse, "AuthResponse",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::AuthResult, "AuthResult",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
   registry.register_message({MessageType::ClientInputBatch, "ClientInputBatch",
                              MessageDirection::ClientToServer, ReliabilityClass::UnreliableLatestWins,
                              NetworkLane::Movement});

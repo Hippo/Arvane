@@ -3,6 +3,8 @@
 #include "arv/server/server_runtime.hpp"
 
 #include "arv/physics/collision.hpp"
+#include "arv/server/player_profile.hpp"
+#include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_replication.hpp"
@@ -169,6 +171,9 @@ struct ServerRuntimeImpl {
   void handle_connection_lost(net::ConnectionID connection_id);
   void handle_message(net::ConnectionID connection_id, const std::vector<u8>& packet);
   void handle_client_hello(net::ConnectionID connection_id, const protocol::ClientHello& client_hello);
+  void handle_auth_response(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundAuthResponse& response);
   void handle_input_batch(net::ConnectionID connection_id, const protocol::ClientInputBatch& batch);
   void handle_chunk_interest_update(
       net::ConnectionID connection_id,
@@ -205,6 +210,12 @@ struct ServerRuntimeImpl {
   void tick_chunk_streaming();
 
   void send_player_corrections();
+  void send_auth_result(
+      const ServerSession& session,
+      bool accepted,
+      std::string_view reason_if_rejected = {});
+  void send_auth_challenge(ServerSession& session);
+  void complete_authenticated_session(ServerSession& session);
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
   void send_block_updates();
   void send_entity_replication();
@@ -227,7 +238,9 @@ struct ServerRuntimeImpl {
   i32 max_view_distance_{};
   std::string world_name_{"default"};
   protocol::HandshakePolicy handshake_policy_{};
+  protocol::AuthServerInstanceID server_instance_id_{};
   SessionRegistry sessions_;
+  PlayerProfileStore profiles_;
   WorldRegistry worlds_;
   world::WorldRuntime default_world_{DefaultWorldID};
   std::vector<net::NetworkEvent> inbound_events_;

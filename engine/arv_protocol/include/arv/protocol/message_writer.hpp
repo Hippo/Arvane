@@ -3,6 +3,7 @@
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
 
+#include <cstddef>
 #include <cstring>
 #include <span>
 #include <string>
@@ -59,6 +60,11 @@ public:
 
   void write_bytes(std::span<const u8> bytes) {
     bytes_.insert(bytes_.end(), bytes.begin(), bytes.end());
+  }
+
+  void write_bytes(std::span<const std::byte> bytes) {
+    const auto* first = reinterpret_cast<const u8*>(bytes.data());
+    bytes_.insert(bytes_.end(), first, first + bytes.size());
   }
 
   void write_string(std::string_view value) {
@@ -125,6 +131,26 @@ public:
     std::string value(first, first + length.value());
     offset_ += length.value();
     return Expected<std::string, ProtocolError>::success(std::move(value));
+  }
+
+  [[nodiscard]] Expected<void, ProtocolError> read_bytes(std::span<u8> out) {
+    if (remaining() < out.size()) {
+      return Expected<void, ProtocolError>::failure(ProtocolError{"not enough bytes"});
+    }
+
+    std::memcpy(out.data(), bytes_.data() + offset_, out.size());
+    offset_ += out.size();
+    return Expected<void, ProtocolError>::success();
+  }
+
+  [[nodiscard]] Expected<void, ProtocolError> read_bytes(std::span<std::byte> out) {
+    if (remaining() < out.size()) {
+      return Expected<void, ProtocolError>::failure(ProtocolError{"not enough bytes"});
+    }
+
+    std::memcpy(out.data(), bytes_.data() + offset_, out.size());
+    offset_ += out.size();
+    return Expected<void, ProtocolError>::success();
   }
 
   [[nodiscard]] usize remaining() const noexcept {

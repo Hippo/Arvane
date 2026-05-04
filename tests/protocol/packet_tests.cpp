@@ -50,6 +50,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto ping = registry.lookup(arv::protocol::MessageType::Ping);
   const auto input = registry.lookup(arv::protocol::MessageType::ClientInputBatch);
   const auto correction = registry.lookup(arv::protocol::MessageType::PlayerCorrection);
+  const auto auth_challenge = registry.lookup(arv::protocol::MessageType::AuthChallenge);
+  const auto auth_response = registry.lookup(arv::protocol::MessageType::AuthResponse);
+  const auto auth_result = registry.lookup(arv::protocol::MessageType::AuthResult);
   const auto chunk_interest = registry.lookup(arv::protocol::MessageType::ChunkInterestUpdate);
   const auto chunk_data = registry.lookup(arv::protocol::MessageType::ChunkData);
   const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ChunkUnload);
@@ -66,6 +69,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(ping.has_value());
   ASSERT_TRUE(input.has_value());
   ASSERT_TRUE(correction.has_value());
+  ASSERT_TRUE(auth_challenge.has_value());
+  ASSERT_TRUE(auth_response.has_value());
+  ASSERT_TRUE(auth_result.has_value());
   ASSERT_TRUE(chunk_interest.has_value());
   ASSERT_TRUE(chunk_data.has_value());
   ASSERT_TRUE(chunk_unload.has_value());
@@ -79,6 +85,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(ping->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
   EXPECT_EQ(input->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(correction->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  EXPECT_EQ(auth_challenge->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(auth_response->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(auth_result->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(chunk_interest->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(chunk_data->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(chunk_unload->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
@@ -102,7 +111,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(dropped_item_snapshot->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_action->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
-  EXPECT_EQ(registry.size(), 19U);
+  EXPECT_EQ(registry.size(), 22U);
 }
 
 TEST(ProtocolTests, ClientInputBatchRoundTripsThroughSerialization) {

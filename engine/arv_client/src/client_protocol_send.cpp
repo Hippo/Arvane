@@ -1,5 +1,7 @@
 #include "client_protocol_send.hpp"
 
+#include "arv/crypto/hash.hpp"
+#include "arv/protocol/auth.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/player_input.hpp"
@@ -31,12 +33,19 @@ net::NetworkResult send_protocol_message(
        lane});
 }
 
-net::NetworkResult ClientProtocolSender::send_client_hello() {
+net::NetworkResult ClientProtocolSender::send_client_hello(const LocalPlayerIdentity& identity) {
   net::ITransport* transport = connection_.transport();
   if (!transport) {
     return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
   }
   protocol::ClientHello hello;
+  hello.requested_username_or_profile_name = identity.display_name;
+  hello.auth_begin = protocol::ServerboundAuthBegin{
+      identity.key_pair.public_key,
+      identity.display_name,
+      identity.profile_id.empty()
+          ? crypto::derive_profile_id_from_public_key(identity.key_pair.public_key)
+          : identity.profile_id};
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
@@ -44,6 +53,21 @@ net::NetworkResult ClientProtocolSender::send_client_hello() {
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_client_hello(hello));
+}
+
+net::NetworkResult ClientProtocolSender::send_auth_response(
+    const protocol::ServerboundAuthResponse& response) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::AuthResponse,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_auth_response(response));
 }
 
 net::NetworkResult ClientProtocolSender::send_chunk_interest_update(

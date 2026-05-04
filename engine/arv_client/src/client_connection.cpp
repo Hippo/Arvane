@@ -11,7 +11,9 @@ namespace arv::client::detail {
 ClientConnectionRuntime::ClientConnectionRuntime(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
 }
 
-net::ConnectResult ClientConnectionRuntime::connect_integrated(ClientProtocolSender& sender) {
+net::ConnectResult ClientConnectionRuntime::connect_integrated(
+    ClientProtocolSender& sender,
+    const LocalPlayerIdentity& identity) {
   if (!transport_) {
     return net::ConnectResult::failure(net::NetworkError{"client has no transport"});
   }
@@ -19,7 +21,7 @@ net::ConnectResult ClientConnectionRuntime::connect_integrated(ClientProtocolSen
   if (result) {
     connection_id_ = result.value();
     connection_state_ = net::ConnectionState::TransportConnected;
-    auto hello_result = sender.send_client_hello();
+    auto hello_result = sender.send_client_hello(identity);
     if (!hello_result) {
       return net::ConnectResult::failure(hello_result.error());
     }
@@ -47,12 +49,14 @@ std::vector<net::NetworkEvent> ClientConnectionRuntime::poll_events() {
   return transport_->poll_events();
 }
 
-void ClientConnectionRuntime::handle_connection_accepted(ClientProtocolSender& sender) {
+void ClientConnectionRuntime::handle_connection_accepted(
+    ClientProtocolSender& sender,
+    const LocalPlayerIdentity& identity) {
   if (connection_state_ != net::ConnectionState::Connecting) {
     return;
   }
   connection_state_ = net::ConnectionState::TransportConnected;
-  auto hello_result = sender.send_client_hello();
+  auto hello_result = sender.send_client_hello(identity);
   if (!hello_result) {
     connection_state_ = net::ConnectionState::Disconnecting;
     return;

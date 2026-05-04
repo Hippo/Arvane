@@ -8,5 +8,5 @@ add_library(arv_persistence STATIC
   src/save.cpp
 )
 target_include_directories(arv_persistence PUBLIC include)
-target_link_libraries(arv_persistence PUBLIC arv_core arv_player arv_voxel arv_world)
+target_link_libraries(arv_persistence PUBLIC arv_core arv_crypto arv_player arv_voxel arv_world)
 target_link_libraries(arv_persistence PRIVATE nlohmann_json::nlohmann_json)

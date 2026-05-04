@@ -1,5 +1,7 @@
 #include "server_runtime_internal.hpp"
 
+#include "arv/crypto/random.hpp"
+
 #include <algorithm>
 #include <memory>
 #include <utility>
@@ -195,6 +197,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   handshake_policy_.server_name =
       mode_ == ServerMode::Dedicated ? "Arvane Dedicated Server" : "Arvane Integrated Server";
   handshake_policy_.initial_world_id = DefaultWorldID;
+  crypto::fill_random(server_instance_id_);
 
   if (block_registry_ == nullptr || item_registry_ == nullptr) {
     return net::NetworkResult::failure(net::NetworkError{"server start requires block and item registries"});

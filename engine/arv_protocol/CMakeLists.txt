@@ -1,4 +1,5 @@
 set(ARV_PROTOCOL_HEADERS
+  include/arv/protocol/auth.hpp
   include/arv/protocol/block_updates.hpp
   include/arv/protocol/chunk_streaming.hpp
   include/arv/protocol/entity_replication.hpp
@@ -14,6 +15,7 @@ set(ARV_PROTOCOL_HEADERS
 )
 
 add_library(arv_protocol STATIC
+  src/auth.cpp
   src/block_updates.cpp
   src/chunk_streaming.cpp
   src/entity_replication.cpp
@@ -25,4 +27,4 @@ add_library(arv_protocol STATIC
   src/world_join.cpp
 )
 target_include_directories(arv_protocol PUBLIC include)
-target_link_libraries(arv_protocol PUBLIC arv_core arv_player arv_voxel)
+target_link_libraries(arv_protocol PUBLIC arv_core arv_crypto arv_player arv_voxel)

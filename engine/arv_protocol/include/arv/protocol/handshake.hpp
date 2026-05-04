@@ -3,9 +3,11 @@
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
+#include "arv/protocol/auth.hpp"
 #include "arv/protocol/message_writer.hpp"
 #include "arv/protocol/protocol_version.hpp"
 
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -36,6 +38,7 @@ struct ClientHello {
   std::vector<NamedHash> asset_pack_hashes_known_by_client{};
   std::string requested_username_or_profile_name{"local_player"};
   std::string session_token_or_placeholder{"local"};
+  std::optional<ServerboundAuthBegin> auth_begin{};
 };
 
 struct ServerHello {

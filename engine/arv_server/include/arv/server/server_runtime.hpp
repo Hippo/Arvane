@@ -2,6 +2,7 @@
 
 #include "arv/core/types.hpp"
 #include "arv/core/time.hpp"
+#include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/player/item.hpp"
@@ -39,7 +40,9 @@ enum class ServerRuntimeState {
 };
 
 struct ServerPlayerSaveState {
+  crypto::PlayerProfileID profile_id{};
   std::string profile_name{"local_player"};
+  std::string display_name{"local_player"};
   std::string world_name{"default"};
   Vec3f position{};
   Vec3f velocity{};

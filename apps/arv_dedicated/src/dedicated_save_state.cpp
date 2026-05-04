@@ -21,7 +21,9 @@ namespace {
 [[nodiscard]] server::ServerPlayerSaveState to_server_player_save(
     const persistence::PlayerSaveData& player) {
   server::ServerPlayerSaveState save;
+  save.profile_id = player.profile_id;
   save.profile_name = player.profile_name;
+  save.display_name = player.display_name;
   save.world_name = player.world_name;
   save.position = player.position;
   save.velocity = player.velocity;
@@ -38,7 +40,9 @@ namespace {
 [[nodiscard]] persistence::PlayerSaveData to_persistence_player_save(
     const server::ServerPlayerSaveState& player) {
   persistence::PlayerSaveData save;
+  save.profile_id = player.profile_id;
   save.profile_name = player.profile_name;
+  save.display_name = player.display_name;
   save.world_name = player.world_name;
   save.position = player.position;
   save.velocity = player.velocity;
@@ -59,8 +63,11 @@ void upsert_player_save(
       players.begin(),
       players.end(),
       [&](const persistence::PlayerSaveData& existing) {
-        return existing.profile_name == save.profile_name &&
-               existing.world_name == save.world_name;
+        const bool profile_matches =
+            !save.profile_id.empty()
+                ? existing.profile_id == save.profile_id
+                : existing.profile_name == save.profile_name;
+        return profile_matches && existing.world_name == save.world_name;
       });
   if (found == players.end()) {
     players.emplace_back(std::move(save));
@@ -124,7 +131,9 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     }
 
     persistence::PlayerSaveData save;
+    save.profile_id = session->profile_id;
     save.profile_name = session->profile_name;
+    save.display_name = session->display_name;
     save.world_name = std::string{world_name};
     save.position = player_state->position;
     save.velocity = player_state->velocity;
@@ -141,6 +150,9 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
   std::sort(players.begin(), players.end(), [](const auto& lhs, const auto& rhs) {
     if (lhs.world_name != rhs.world_name) {
       return lhs.world_name < rhs.world_name;
+    }
+    if (lhs.profile_id != rhs.profile_id) {
+      return lhs.profile_id < rhs.profile_id;
     }
     return lhs.profile_name < rhs.profile_name;
   });

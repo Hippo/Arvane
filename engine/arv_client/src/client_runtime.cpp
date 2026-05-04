@@ -8,14 +8,17 @@
 namespace arv::client {
 
 struct ClientRuntime::Impl {
-  explicit Impl(std::unique_ptr<net::ITransport> transport) : connection(std::move(transport)),
-                                                              sender(connection) {
+  explicit Impl(std::unique_ptr<net::ITransport> transport)
+      : connection(std::move(transport)),
+        sender(connection),
+        identity(make_ephemeral_local_identity()) {
   }
 
   [[nodiscard]] detail::ClientRuntimeContext context() noexcept {
     return {
         connection,
         sender,
+        identity,
         player_controller,
         chunk_interest,
         ui,
@@ -50,6 +53,7 @@ struct ClientRuntime::Impl {
 
   detail::ClientConnectionRuntime connection;
   detail::ClientProtocolSender sender;
+  LocalPlayerIdentity identity{};
   detail::ClientNetworkRouter network{};
   detail::ClientInputRuntime input{};
   LocalPlayerController player_controller{};
@@ -74,8 +78,16 @@ void ClientRuntime::set_player_tuning(player::PlayerTuning tuning) noexcept {
   impl_->player_controller.set_player_tuning(tuning);
 }
 
+void ClientRuntime::set_local_identity(LocalPlayerIdentity identity) {
+  impl_->identity = std::move(identity);
+}
+
+const LocalPlayerIdentity& ClientRuntime::local_identity() const noexcept {
+  return impl_->identity;
+}
+
 net::ConnectResult ClientRuntime::connect_integrated() {
-  return impl_->connection.connect_integrated(impl_->sender);
+  return impl_->connection.connect_integrated(impl_->sender, impl_->identity);
 }
 
 net::ConnectResult ClientRuntime::connect(net::NetworkAddress address) {
