@@ -21,13 +21,13 @@ TEST(ChunkStorageTests, SetBlockIncrementsVersionAndMarksDirty) {
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
   const arv::u64 initial_version = chunk.version();
   const arv::u64 initial_light_version = chunk.light_version();
-  chunk.clear_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh);
+  chunk.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry);
 
   EXPECT_TRUE(chunk.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{4}));
   EXPECT_EQ(chunk.block({{1, 2, 3}}), arv::voxel::BlockVariantID{4});
   EXPECT_EQ(chunk.version(), initial_version + 1);
   EXPECT_EQ(chunk.light_version(), initial_light_version);
-  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
+  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
   EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
   EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsSave));
 

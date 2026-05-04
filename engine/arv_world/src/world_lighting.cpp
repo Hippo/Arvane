@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <optional>
 #include <cstdio>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -286,7 +286,8 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
   snapshot.target_coord = dirty_coords.front();
   snapshot.pending_dirty_sections = static_cast<u32>(
       std::min<usize>(dirty_coords.size(), static_cast<usize>(~u32{0})));
-  if (const voxel::ChunkSection* target = world.find_chunk(snapshot.target_coord);
+  const WorldSearch search{world};
+  if (const voxel::ChunkSection* target = search.find_chunk(snapshot.target_coord);
       target != nullptr && !target->is_dirty(voxel::ChunkDirtyFlags::Geometry)) {
     snapshot.job_type = LightingJobType::BoundaryContinuation;
   }
@@ -353,8 +354,8 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
 
   std::vector<ChunkCoord> coords;
   coords.reserve(voxel::BlockFaceCount + 1U);
-  auto add_if_loaded = [&world, &coords](ChunkCoord coord) {
-    if (world.find_chunk(coord) == nullptr) {
+  auto add_if_loaded = [&search, &coords](ChunkCoord coord) {
+    if (search.find_chunk(coord) == nullptr) {
       return;
     }
     if (std::find(coords.begin(), coords.end(), coord) == coords.end()) {
@@ -378,7 +379,7 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
 
   snapshot.chunks.reserve(coords.size());
   for (const ChunkCoord coord : coords) {
-    const voxel::ChunkSection* chunk = world.find_chunk(coord);
+    const voxel::ChunkSection* chunk = search.find_chunk(coord);
     if (chunk == nullptr) {
       continue;
     }
@@ -833,8 +834,9 @@ LightingPublishStats WorldLighting::publish_result(
     return stats;
   }
 
+  WorldSearch search{world};
   for (ChunkLightingResult& chunk_result : result.chunks) {
-    voxel::ChunkSection* chunk = world.find_chunk(chunk_result.coord);
+    voxel::ChunkSection* chunk = search.find_mutable_chunk(chunk_result.coord);
     const bool chunk_matches_source =
         chunk != nullptr &&
         (chunk->block_version() == chunk_result.source_version ||
@@ -857,7 +859,7 @@ LightingPublishStats WorldLighting::publish_result(
 
         const ChunkCoord neighbor_coord =
             offset_chunk(chunk_result.coord, NeighborOffsets[face_index]);
-        voxel::ChunkSection* neighbor = world.find_chunk(neighbor_coord);
+        voxel::ChunkSection* neighbor = search.find_mutable_chunk(neighbor_coord);
         if (neighbor == nullptr) {
           ++stats.boundary_deferrals;
           continue;

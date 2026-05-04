@@ -240,11 +240,12 @@ u32 WorldRuntime::apply_fluid_simulation_result(
     FluidSimulationResult result,
     const voxel::FluidDefinition& definition) {
   HashMap<ChunkCoord, bool> accepted_chunks;
+  WorldSearch search{*this};
   for (const FluidChange& change : result.changes) {
     const ChunkCoord coord = block_to_chunk(change.pos);
     auto [accepted, inserted] = accepted_chunks.emplace(coord, false);
     if (inserted) {
-      const voxel::ChunkSection* chunk = find_chunk(coord);
+      const voxel::ChunkSection* chunk = search.find_chunk(coord);
       accepted->second =
           chunk != nullptr && chunk->content_version() == change.source_content_version;
     }
@@ -267,7 +268,7 @@ u32 WorldRuntime::apply_fluid_simulation_result(
 
   for (const FluidUpdate& update : result.deferred_updates) {
     const ChunkCoord coord = block_to_chunk(update.pos);
-    if (is_chunk_active(coord)) {
+    if (search.is_chunk_active(coord)) {
       impl_->fluid.enqueue_update_unique(update);
     } else {
       impl_->fluid.store_deferred_boundary_update(coord, update);

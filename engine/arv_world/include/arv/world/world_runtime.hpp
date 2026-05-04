@@ -9,8 +9,8 @@
 #include "arv/voxel/storage.hpp"
 #include "arv/world/fluid_solver.hpp"
 #include "arv/world/regions.hpp"
-#include "arv/world/world_lighting.hpp"
 #include "arv/world/world_generation.hpp"
+#include "arv/world/world_lighting.hpp"
 
 #include <array>
 #include <memory>
@@ -259,6 +259,84 @@ private:
 
   struct Impl;
   std::unique_ptr<Impl> impl_;
+};
+
+// Short-lived cursor for repeated nearby lookups. Recreate or reset it after
+// chunk load/unload operations so the cached pointer cannot outlive a section.
+class WorldSearch final {
+public:
+  explicit WorldSearch(WorldRuntime& world) noexcept
+      : mutable_world_(&world),
+        world_(&world) {
+  }
+
+  explicit WorldSearch(const WorldRuntime& world) noexcept
+      : world_(&world) {
+  }
+
+  void reset() const noexcept {
+    cached_coord_.reset();
+    cached_chunk_ = nullptr;
+    cached_mutable_chunk_ = nullptr;
+  }
+
+  [[nodiscard]] const voxel::ChunkSection* find_chunk(ChunkCoord coord) const noexcept {
+    if (cached_coord_.has_value() && cached_coord_.value() == coord) {
+      return cached_chunk_;
+    }
+
+    cached_coord_ = coord;
+    cached_chunk_ = world_->find_chunk(coord);
+    cached_mutable_chunk_ = nullptr;
+    return cached_chunk_;
+  }
+
+  [[nodiscard]] voxel::ChunkSection* find_mutable_chunk(ChunkCoord coord) noexcept {
+    if (mutable_world_ == nullptr) {
+      return nullptr;
+    }
+    if (cached_coord_.has_value() && cached_coord_.value() == coord &&
+        (cached_mutable_chunk_ != nullptr || cached_chunk_ == nullptr)) {
+      return cached_mutable_chunk_;
+    }
+
+    cached_coord_ = coord;
+    voxel::ChunkSection* chunk = mutable_world_->find_chunk(coord);
+    cached_chunk_ = chunk;
+    cached_mutable_chunk_ = chunk;
+    return chunk;
+  }
+
+  [[nodiscard]] bool is_chunk_loaded(BlockPos pos) const noexcept {
+    return find_chunk(block_to_chunk(pos)) != nullptr;
+  }
+
+  [[nodiscard]] bool is_chunk_active(ChunkCoord coord) const noexcept {
+    const voxel::ChunkSection* chunk = find_chunk(coord);
+    return chunk != nullptr && chunk->lifecycle_state() == voxel::ChunkLifecycleState::Active;
+  }
+
+  [[nodiscard]] voxel::BlockVariantID block_at(BlockPos pos) const noexcept {
+    const voxel::ChunkSection* chunk = find_chunk(block_to_chunk(pos));
+    return chunk == nullptr ? voxel::AirBlockVariantID : chunk->block(block_to_local(pos));
+  }
+
+  [[nodiscard]] voxel::LightWord light_at(BlockPos pos) const noexcept {
+    const voxel::ChunkSection* chunk = find_chunk(block_to_chunk(pos));
+    return chunk == nullptr ? voxel::NoLight : chunk->light(block_to_local(pos));
+  }
+
+  [[nodiscard]] voxel::FluidCell fluid_at(BlockPos pos) const noexcept {
+    const voxel::ChunkSection* chunk = find_chunk(block_to_chunk(pos));
+    return chunk == nullptr ? voxel::empty_fluid_cell() : chunk->fluid(block_to_local(pos));
+  }
+
+private:
+  WorldRuntime* mutable_world_{};
+  const WorldRuntime* world_{};
+  mutable std::optional<ChunkCoord> cached_coord_{};
+  mutable const voxel::ChunkSection* cached_chunk_{};
+  mutable voxel::ChunkSection* cached_mutable_chunk_{};
 };
 
 } // namespace arv::world

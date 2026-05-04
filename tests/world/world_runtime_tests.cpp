@@ -22,14 +22,14 @@ TEST(WorldRuntimeTests, BoundaryBlockChangeInvalidatesLoadedNeighborMeshVersion)
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& target = world.ensure_chunk({{0, 0, 0}});
   arv::voxel::ChunkSection& neighbor = world.ensure_chunk({{1, 0, 0}});
-  target.clear_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh);
-  neighbor.clear_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh);
+  target.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry);
+  neighbor.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry);
   const arv::u64 neighbor_version = neighbor.version();
 
   EXPECT_TRUE(world.set_block({{15, 2, 3}}, arv::voxel::BlockVariantID{3}));
 
-  EXPECT_TRUE(target.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
-  EXPECT_TRUE(neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
+  EXPECT_TRUE(target.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
+  EXPECT_TRUE(neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
   EXPECT_EQ(neighbor.version(), neighbor_version + 1);
 }
 
@@ -48,8 +48,9 @@ TEST(WorldRuntimeTests, BlockEditQueuesGeometryAndLightingSeparately) {
   EXPECT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
   EXPECT_TRUE(world.has_lighting_work());
   EXPECT_TRUE(world.make_meshing_snapshot(
-      {{0, 0, 0}},
-      arv::world::MissingNeighborPolicy::TreatMissingAsAir).has_value());
+                       {{0, 0, 0}},
+                       arv::world::MissingNeighborPolicy::TreatMissingAsAir)
+                  .has_value());
 }
 
 TEST(WorldRuntimeTests, InteriorBlockEditDoesNotDirtyEveryLoadedSection) {
@@ -153,7 +154,7 @@ TEST(WorldRuntimeTests, LightingSnapshotSharesChunkStorage) {
 TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDirectNeighborsForRelightAndRemesh) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& neighbor = world.ensure_chunk({{0, 0, 0}});
-  neighbor.clear_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh | arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  neighbor.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry | arv::voxel::ChunkDirtyFlags::Lighting);
   const arv::u64 neighbor_version = neighbor.version();
 
   arv::world::GeneratedChunk generated;
@@ -163,15 +164,15 @@ TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDirectNeighborsForRel
 
   EXPECT_TRUE(world.publish_generated_chunk(std::move(generated)));
 
-  EXPECT_TRUE(neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
-  EXPECT_TRUE(neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_TRUE(neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
+  EXPECT_TRUE(neighbor.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
   EXPECT_EQ(neighbor.version(), neighbor_version + 1);
 }
 
 TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDiagonalNeighborsForRemesh) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& diagonal = world.ensure_chunk({{0, 0, 0}});
-  diagonal.clear_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh | arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  diagonal.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry | arv::voxel::ChunkDirtyFlags::Lighting);
   const arv::u64 diagonal_version = diagonal.version();
 
   arv::world::GeneratedChunk generated;
@@ -181,8 +182,8 @@ TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDiagonalNeighborsForR
 
   EXPECT_TRUE(world.publish_generated_chunk(std::move(generated)));
 
-  EXPECT_TRUE(diagonal.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
-  EXPECT_FALSE(diagonal.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_TRUE(diagonal.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
+  EXPECT_FALSE(diagonal.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
   EXPECT_EQ(diagonal.version(), diagonal_version + 1);
 }
 
@@ -190,8 +191,8 @@ TEST(WorldRuntimeTests, LightingPublicationInvalidatesDirectNeighborMeshesWhenBo
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& target = world.ensure_chunk({{0, 0, 0}});
   arv::voxel::ChunkSection& lit_chunk = world.ensure_chunk({{1, 0, 0}});
-  target.clear_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh | arv::voxel::ChunkDirtyFlags::NeedsRelight);
-  lit_chunk.clear_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh | arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  target.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry | arv::voxel::ChunkDirtyFlags::Lighting);
+  lit_chunk.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry | arv::voxel::ChunkDirtyFlags::Lighting);
   const arv::u64 target_light_version = target.light_version();
 
   std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights = lit_chunk.lights();
@@ -210,7 +211,7 @@ TEST(WorldRuntimeTests, LightingPublicationInvalidatesDirectNeighborMeshesWhenBo
   EXPECT_EQ(stats.boundary_continuations, 1U);
   EXPECT_TRUE(lit_chunk.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
   EXPECT_TRUE(target.is_dirty(arv::voxel::ChunkDirtyFlags::LightMesh));
-  EXPECT_TRUE(target.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_TRUE(target.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
   EXPECT_EQ(target.light_version(), target_light_version + 1);
 }
 
@@ -218,8 +219,8 @@ TEST(WorldRuntimeTests, LightingPublicationAcceptsChunksDirtiedBySameLightingSol
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& target = world.ensure_chunk({{0, 0, 0}});
   arv::voxel::ChunkSection& lit_chunk = world.ensure_chunk({{1, 0, 0}});
-  target.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
-  lit_chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  target.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+  lit_chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
 
   std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lit_chunk_lights =
       lit_chunk.lights();
@@ -243,7 +244,7 @@ TEST(WorldRuntimeTests, LightingPublicationAcceptsChunksDirtiedBySameLightingSol
   EXPECT_EQ(stats.accepted_chunks, 2U);
   EXPECT_EQ(stats.stale_chunks, 0U);
   EXPECT_EQ(stats.changed_chunks, 2U);
-  EXPECT_FALSE(target.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_FALSE(target.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
   EXPECT_EQ(
       arv::voxel::light_sky(target.light({{15, 4, 5}})),
       3);
@@ -268,7 +269,7 @@ TEST(WorldRuntimeTests, LightingPublicationRejectsStaleWorldRevision) {
 
   EXPECT_EQ(stats.accepted_chunks, 0U);
   EXPECT_EQ(stats.stale_chunks, 1U);
-  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
 }
 
 TEST(WorldRuntimeTests, RejectsStaleMeshPublicationAndAcceptsCurrentVersion) {
@@ -278,10 +279,10 @@ TEST(WorldRuntimeTests, RejectsStaleMeshPublicationAndAcceptsCurrentVersion) {
 
   EXPECT_TRUE(world.set_block({{1, 1, 1}}, arv::voxel::BlockVariantID{2}));
   EXPECT_FALSE(world.publish_mesh_result({{0, 0, 0}}, stale_version, chunk.light_version()));
-  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
+  EXPECT_TRUE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
 
   EXPECT_TRUE(world.publish_mesh_result({{0, 0, 0}}, chunk.version(), chunk.light_version()));
-  EXPECT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
+  EXPECT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
   EXPECT_EQ(chunk.mesh_state(), arv::voxel::ChunkMeshState::Ready);
 }
 
@@ -326,16 +327,17 @@ TEST(WorldRuntimeTests, MeshPublicationRejectsStaleContentVersion) {
 TEST(WorldRuntimeTests, DirtyMeshQueueReportsEditedSectionsWithoutFullScan) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   world.ensure_chunk({{0, 0, 0}});
-  (void)world.consume_dirty_mesh_chunks(arv::voxel::ChunkDirtyFlags::NeedsMesh);
+  (void)world.consume_dirty_mesh_chunks(arv::voxel::ChunkDirtyFlags::Geometry);
 
   ASSERT_TRUE(world.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{7}));
   const std::vector<arv::ChunkCoord> dirty =
-      world.consume_dirty_mesh_chunks(arv::voxel::ChunkDirtyFlags::NeedsMesh);
+      world.consume_dirty_mesh_chunks(arv::voxel::ChunkDirtyFlags::Geometry);
 
   ASSERT_EQ(dirty.size(), 1U);
   EXPECT_EQ(dirty.front(), (arv::ChunkCoord{{0, 0, 0}}));
   EXPECT_TRUE(world.consume_dirty_mesh_chunks(
-      arv::voxel::ChunkDirtyFlags::NeedsMesh).empty());
+                       arv::voxel::ChunkDirtyFlags::Geometry)
+                  .empty());
 }
 
 TEST(WorldRuntimeTests, ApplyingChunkSnapshotWithoutLightingKeepsChunkMeshable) {
@@ -348,8 +350,8 @@ TEST(WorldRuntimeTests, ApplyingChunkSnapshotWithoutLightingKeepsChunkMeshable) 
 
   const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
   ASSERT_NE(chunk, nullptr);
-  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
-  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
+  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
   EXPECT_EQ(
       arv::voxel::light_sky(chunk->light({{1, 2, 3}})),
       0);
@@ -439,7 +441,7 @@ TEST(WorldRuntimeTests, ApplyingChunkSnapshotCarriesFluidCells) {
   const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
   ASSERT_NE(chunk, nullptr);
   EXPECT_TRUE(chunk->fluid({{1, 2, 3}}).source());
-  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::NeedsMesh));
+  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::Geometry));
 }
 
 TEST(WorldRuntimeTests, DuplicateChunkSnapshotDoesNotAdvanceMeshRevisionAgain) {

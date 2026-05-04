@@ -15,6 +15,7 @@ class BlockRegistry;
 namespace arv::world {
 
 class WorldRuntime;
+class WorldSearch;
 
 enum class FluidUpdateReason : u8 {
   FluidAdded,
@@ -81,28 +82,30 @@ public:
 
 private:
   [[nodiscard]] static bool can_fluid_occupy(
-      const WorldRuntime& world,
+      const WorldSearch& search,
       const voxel::BlockRegistry& registry,
       const voxel::FluidDefinition& definition,
       BlockPos pos) noexcept;
   [[nodiscard]] static bool can_flow_down_from(
-      const WorldRuntime& world,
+      const WorldSearch& search,
       const voxel::BlockRegistry& registry,
       const voxel::FluidDefinition& definition,
       BlockPos pos) noexcept;
   [[nodiscard]] static voxel::FluidCell ideal_fluid_at(
-      const WorldRuntime& world,
+      const WorldSearch& search,
       const voxel::BlockRegistry& registry,
       const voxel::FluidDefinition& definition,
       BlockPos pos,
       voxel::FluidCell current) noexcept;
   static void enqueue_adjacent_updates(
       WorldRuntime& world,
+      const WorldSearch& search,
       BlockPos pos,
       FluidUpdateReason reason,
       u32 delay_ticks = 0U);
   static void process_single_update(
       WorldRuntime& world,
+      WorldSearch& search,
       const voxel::BlockRegistry& registry,
       const voxel::FluidDefinition& definition,
       BlockPos pos);

@@ -40,11 +40,6 @@ enum class ChunkDirtyFlags : u32 {
   Lighting = 1U << 2U,
   LightMesh = 1U << 3U,
   NeedsFluidStep = 1U << 4U,
-
-  // Compatibility names for older call sites. New code should prefer the
-  // geometry/lighting/light-mesh split above.
-  NeedsMesh = Geometry,
-  NeedsRelight = Lighting,
 };
 
 enum class ChunkMeshState {

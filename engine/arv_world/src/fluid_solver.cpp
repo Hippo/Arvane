@@ -35,9 +35,8 @@ struct SimulationChunkState {
 
 class FluidSimulationState {
 public:
-  explicit FluidSimulationState(FluidSimulationRequest request)
-      : current_tick_(request.current_tick),
-        budget_(request.budget) {
+  explicit FluidSimulationState(FluidSimulationRequest request) : current_tick_(request.current_tick),
+                                                                  budget_(request.budget) {
     for (FluidSimulationChunk& chunk : request.chunks) {
       chunks_.emplace(
           chunk.coord,
@@ -104,13 +103,30 @@ private:
   }
 
   [[nodiscard]] SimulationChunkState* find_chunk(ChunkCoord coord) noexcept {
+    if (cached_chunk_coord_.has_value() && cached_chunk_coord_.value() == coord &&
+        (cached_mutable_chunk_ != nullptr || cached_chunk_ == nullptr)) {
+      return cached_mutable_chunk_;
+    }
+
     const auto found = chunks_.find(coord);
-    return found == chunks_.end() ? nullptr : &found->second;
+    SimulationChunkState* chunk = found == chunks_.end() ? nullptr : &found->second;
+    cached_chunk_coord_ = coord;
+    cached_chunk_ = chunk;
+    cached_mutable_chunk_ = chunk;
+    return chunk;
   }
 
   [[nodiscard]] const SimulationChunkState* find_chunk(ChunkCoord coord) const noexcept {
+    if (cached_chunk_coord_.has_value() && cached_chunk_coord_.value() == coord) {
+      return cached_chunk_;
+    }
+
     const auto found = chunks_.find(coord);
-    return found == chunks_.end() ? nullptr : &found->second;
+    const SimulationChunkState* chunk = found == chunks_.end() ? nullptr : &found->second;
+    cached_chunk_coord_ = coord;
+    cached_chunk_ = chunk;
+    cached_mutable_chunk_ = nullptr;
+    return chunk;
   }
 
   [[nodiscard]] const std::array<voxel::FluidCell, voxel::ChunkVolume>* fluids_for(
@@ -323,6 +339,9 @@ private:
   HashSet<BlockPos> queued_positions_;
   HashSet<BlockPos> queued_followup_positions_;
   HashMap<ChunkCoord, SimulationChunkState> chunks_;
+  mutable std::optional<ChunkCoord> cached_chunk_coord_;
+  mutable const SimulationChunkState* cached_chunk_{};
+  mutable SimulationChunkState* cached_mutable_chunk_{};
   FluidSimulationResult result_;
 };
 
@@ -340,12 +359,13 @@ void FluidSolver::enqueue_neighbor_updates(
     u32 delay_ticks) {
   const TickIndex execute_at = world.tick_index() + delay_ticks;
   world.impl_->fluid.enqueue_update_unique({pos, reason, execute_at});
+  const WorldSearch search{world};
   for (const Vec3i offset : detail::NeighborOffsets) {
     const BlockPos neighbor = detail::offset_block(pos, offset);
     const ChunkCoord origin_chunk = block_to_chunk(pos);
     const ChunkCoord neighbor_chunk_coord = block_to_chunk(neighbor);
     if (origin_chunk != neighbor_chunk_coord &&
-        !world.is_chunk_active(neighbor_chunk_coord) &&
+        !search.is_chunk_active(neighbor_chunk_coord) &&
         !can_process_inactive(reason)) {
       store_deferred_boundary_update(world, neighbor_chunk_coord, {neighbor, reason, execute_at});
       continue;
@@ -374,16 +394,17 @@ u32 FluidSolver::process_updates(
       world.impl_->fluid.drain_due_updates(world.tick_index(), budget);
 
   u32 processed = 0;
+  WorldSearch search{world};
   for (const FluidUpdate& update : batch) {
     const ChunkCoord chunk_coord = block_to_chunk(update.pos);
-    if (!world.is_chunk_active(chunk_coord) &&
+    if (!search.is_chunk_active(chunk_coord) &&
         !can_process_inactive(update.reason)) {
       store_deferred_boundary_update(world, chunk_coord, update);
       ++processed;
       continue;
     }
 
-    process_single_update(world, registry, definition, update.pos);
+    process_single_update(world, search, registry, definition, update.pos);
     ++processed;
   }
   return processed;
@@ -402,7 +423,7 @@ FluidSimulationResult FluidSolver::build_simulation_result(
 }
 
 bool FluidSolver::can_fluid_occupy(
-    const WorldRuntime& world,
+    const WorldSearch& search,
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& definition,
     BlockPos pos) noexcept {
@@ -410,7 +431,7 @@ bool FluidSolver::can_fluid_occupy(
     return false;
   }
 
-  const voxel::ChunkSection* chunk = world.find_chunk(block_to_chunk(pos));
+  const voxel::ChunkSection* chunk = search.find_chunk(block_to_chunk(pos));
   if (chunk == nullptr) {
     return false;
   }
@@ -421,13 +442,13 @@ bool FluidSolver::can_fluid_occupy(
 }
 
 bool FluidSolver::can_flow_down_from(
-    const WorldRuntime& world,
+    const WorldSearch& search,
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& definition,
     BlockPos pos) noexcept {
   return definition.can_flow_down &&
          can_fluid_occupy(
-             world,
+             search,
              registry,
              definition,
              detail::offset_block(pos, {0, -1, 0}));
@@ -435,6 +456,7 @@ bool FluidSolver::can_flow_down_from(
 
 void FluidSolver::enqueue_adjacent_updates(
     WorldRuntime& world,
+    const WorldSearch& search,
     BlockPos pos,
     FluidUpdateReason reason,
     u32 delay_ticks) {
@@ -444,7 +466,7 @@ void FluidSolver::enqueue_adjacent_updates(
     const ChunkCoord origin_chunk = block_to_chunk(pos);
     const ChunkCoord neighbor_chunk_coord = block_to_chunk(neighbor);
     if (origin_chunk != neighbor_chunk_coord &&
-        !world.is_chunk_active(neighbor_chunk_coord) &&
+        !search.is_chunk_active(neighbor_chunk_coord) &&
         !can_process_inactive(reason)) {
       store_deferred_boundary_update(world, neighbor_chunk_coord, {neighbor, reason, execute_at});
       continue;
@@ -454,12 +476,12 @@ void FluidSolver::enqueue_adjacent_updates(
 }
 
 voxel::FluidCell FluidSolver::ideal_fluid_at(
-    const WorldRuntime& world,
+    const WorldSearch& search,
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& definition,
     BlockPos pos,
     voxel::FluidCell current) noexcept {
-  if (!can_fluid_occupy(world, registry, definition, pos)) {
+  if (!can_fluid_occupy(search, registry, definition, pos)) {
     return voxel::empty_fluid_cell();
   }
 
@@ -468,7 +490,7 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
   }
 
   const BlockPos above = detail::offset_block(pos, {0, 1, 0});
-  const voxel::FluidCell above_fluid = world.get_fluid(above);
+  const voxel::FluidCell above_fluid = search.fluid_at(above);
   if (definition.can_flow_down && above_fluid.type == definition.type && !above_fluid.empty()) {
     return voxel::make_flowing_fluid(
         definition,
@@ -477,14 +499,13 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
   }
 
   const BlockPos below = detail::offset_block(pos, {0, -1, 0});
-  const voxel::FluidCell below_fluid = world.get_fluid(below);
+  const voxel::FluidCell below_fluid = search.fluid_at(below);
   if (definition.can_create_sources &&
-      (!can_fluid_occupy(world, registry, definition, below) ||
+      (!can_fluid_occupy(search, registry, definition, below) ||
        (below_fluid.type == definition.type && below_fluid.source()))) {
     u32 adjacent_sources = 0;
-      for (const Vec3i offset : HorizontalOffsets) {
-        const voxel::FluidCell neighbor =
-          world.get_fluid(detail::offset_block(pos, offset));
+    for (const Vec3i offset : HorizontalOffsets) {
+      const voxel::FluidCell neighbor = search.fluid_at(detail::offset_block(pos, offset));
       if (neighbor.type == definition.type && neighbor.source()) {
         ++adjacent_sources;
       }
@@ -501,11 +522,11 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
   u8 best_level = 0;
   for (const Vec3i offset : HorizontalOffsets) {
     const BlockPos neighbor_pos = detail::offset_block(pos, offset);
-    if (can_flow_down_from(world, registry, definition, neighbor_pos)) {
+    if (can_flow_down_from(search, registry, definition, neighbor_pos)) {
       continue;
     }
 
-    const voxel::FluidCell neighbor = world.get_fluid(neighbor_pos);
+    const voxel::FluidCell neighbor = search.fluid_at(neighbor_pos);
     if (neighbor.type != definition.type || neighbor.empty()) {
       continue;
     }
@@ -529,17 +550,18 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
 
 void FluidSolver::process_single_update(
     WorldRuntime& world,
+    WorldSearch& search,
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& definition,
     BlockPos pos) {
-  voxel::ChunkSection* chunk = world.find_chunk(block_to_chunk(pos));
+  voxel::ChunkSection* chunk = search.find_mutable_chunk(block_to_chunk(pos));
   if (chunk == nullptr) {
     return;
   }
 
   const SectionLocalPos local = block_to_local(pos);
   const voxel::FluidCell current = chunk->fluid(local);
-  const voxel::FluidCell ideal = ideal_fluid_at(world, registry, definition, pos, current);
+  const voxel::FluidCell ideal = ideal_fluid_at(search, registry, definition, pos, current);
   if (current == ideal) {
     return;
   }
@@ -566,6 +588,7 @@ void FluidSolver::process_single_update(
   }
   enqueue_adjacent_updates(
       world,
+      search,
       pos,
       removed_or_decreased ? FluidUpdateReason::FluidRemoved : FluidUpdateReason::FluidAdded,
       definition.flow_interval_ticks);

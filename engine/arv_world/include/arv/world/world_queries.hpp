@@ -14,19 +14,21 @@ public:
       const WorldRuntime& world,
       const voxel::BlockRegistry& registry,
       bool treat_missing_as_solid = true) noexcept
-      : world_(world), registry_(registry), treat_missing_as_solid_(treat_missing_as_solid) {
+      : registry_(registry),
+        search_(world),
+        treat_missing_as_solid_(treat_missing_as_solid) {
   }
 
   [[nodiscard]] bool is_block_loaded(BlockPos pos) const noexcept override {
-    return world_.find_chunk(block_to_chunk(pos)) != nullptr;
+    return search_.is_chunk_loaded(pos);
   }
 
   [[nodiscard]] voxel::BlockVariantID block_variant(BlockPos pos) const noexcept override {
-    return world_.get_block(pos);
+    return search_.block_at(pos);
   }
 
   [[nodiscard]] voxel::FluidCell fluid_cell(BlockPos pos) const noexcept override {
-    return world_.get_fluid(pos);
+    return search_.fluid_at(pos);
   }
 
   void gather_collision_boxes(const Aabb3f& world_bounds, std::vector<Aabb3f>& out_boxes) const override {
@@ -53,7 +55,7 @@ public:
   }
 
   void gather_block_collision_boxes(BlockPos pos, std::vector<Aabb3f>& out_boxes) const override {
-    const voxel::ChunkSection* chunk = world_.find_chunk(block_to_chunk(pos));
+    const voxel::ChunkSection* chunk = search_.find_chunk(block_to_chunk(pos));
     if (chunk == nullptr) {
       if (treat_missing_as_solid_) {
         out_boxes.emplace_back(Aabb3f{
@@ -80,8 +82,8 @@ public:
   }
 
 private:
-  const WorldRuntime& world_;
   const voxel::BlockRegistry& registry_;
+  mutable WorldSearch search_;
   bool treat_missing_as_solid_{true};
 };
 

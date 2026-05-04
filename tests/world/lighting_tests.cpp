@@ -95,7 +95,7 @@ TEST(LightingTests, SunlightPropagatesDownOpenLoadedColumns) {
   const arv::voxel::BlockRegistry registry = make_lighting_registry();
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
 
   EXPECT_TRUE(run_lighting_worker_round(world, registry));
 
@@ -108,7 +108,7 @@ TEST(LightingTests, MissingAboveUnderGeneratedTerrainDoesNotSeedSkyLight) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   world.set_generation_context(123U, flat_generation_config(32));
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
 
   EXPECT_TRUE(run_lighting_worker_round(world, registry));
 
@@ -121,7 +121,7 @@ TEST(LightingTests, MissingAboveAtGeneratedSurfaceSeedsSkyLight) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   world.set_generation_context(123U, flat_generation_config(8));
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
 
   EXPECT_TRUE(run_lighting_worker_round(world, registry));
 
@@ -175,8 +175,7 @@ TEST(LightingTests, DirtyNeighborLightDoesNotSeedSectionRelight) {
   ASSERT_EQ(result.chunks.size(), 1U);
   EXPECT_EQ(result.chunks.front().coord, arv::ChunkCoord({{0, 0, 0}}));
   EXPECT_EQ(
-      arv::voxel::light_sky(result.chunks.front().lights[
-          arv::voxel::local_index({{15, 1, 1}})]),
+      arv::voxel::light_sky(result.chunks.front().lights[arv::voxel::local_index({{15, 1, 1}})]),
       0);
 }
 
@@ -196,12 +195,10 @@ TEST(LightingTests, DirtyNeighborPreservesPreviousTargetBoundaryLightDuringRelig
 
   ASSERT_EQ(result.chunks.size(), 1U);
   EXPECT_EQ(
-      arv::voxel::light_sky(result.chunks.front().lights[
-          arv::voxel::local_index({{15, 1, 1}})]),
+      arv::voxel::light_sky(result.chunks.front().lights[arv::voxel::local_index({{15, 1, 1}})]),
       8);
   EXPECT_GT(
-      arv::voxel::light_sky(result.chunks.front().lights[
-          arv::voxel::local_index({{14, 1, 1}})]),
+      arv::voxel::light_sky(result.chunks.front().lights[arv::voxel::local_index({{14, 1, 1}})]),
       0);
 }
 
@@ -275,7 +272,7 @@ TEST(LightingTests, SkyLightUpdatesAfterColumnBlockChanges) {
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
   ASSERT_TRUE(run_lighting_worker_round(world, registry));
   ASSERT_EQ(arv::voxel::light_sky(world.get_light({{1, 14, 1}})), 15);
 
@@ -305,8 +302,8 @@ TEST(LightingTests, BlockLightCrossesLoadedChunkBorders) {
 TEST(LightingTests, SingleLightingJobPublishesOnlyOneSection) {
   const arv::voxel::BlockRegistry registry = make_lighting_registry();
   arv::world::WorldRuntime world{arv::WorldID{1}};
-  world.ensure_chunk({{0, 0, 0}}).mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
-  world.ensure_chunk({{1, 0, 0}}).mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  world.ensure_chunk({{0, 0, 0}}).mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+  world.ensure_chunk({{1, 0, 0}}).mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
 
   arv::world::LightingResult result = build_single_lighting_result(world, registry);
 
@@ -348,9 +345,9 @@ TEST(LightingTests, BuildResultOmitsUnchangedCleanChunks) {
   const arv::voxel::BlockRegistry registry = make_lighting_registry();
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
   ASSERT_TRUE(run_lighting_worker_round(world, registry));
-  ASSERT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  ASSERT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
 
   const arv::world::LightingSnapshot snapshot = world.make_lighting_snapshot();
   const arv::world::LightingResult result =
@@ -363,10 +360,10 @@ TEST(LightingTests, BuildResultKeepsDirtyChunksEvenWhenLightValuesMatch) {
   const arv::voxel::BlockRegistry registry = make_lighting_registry();
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
   ASSERT_TRUE(run_lighting_worker_round(world, registry));
 
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight);
+  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
   const arv::world::LightingSnapshot snapshot = world.make_lighting_snapshot();
   arv::world::LightingResult result =
       arv::world::WorldRuntime::build_lighting_result(snapshot, registry);
@@ -377,5 +374,5 @@ TEST(LightingTests, BuildResultKeepsDirtyChunksEvenWhenLightValuesMatch) {
 
   EXPECT_EQ(stats.accepted_chunks, 1U);
   EXPECT_EQ(stats.changed_chunks, 0U);
-  EXPECT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::NeedsRelight));
+  EXPECT_FALSE(chunk.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
 }

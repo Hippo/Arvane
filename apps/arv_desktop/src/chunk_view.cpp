@@ -86,12 +86,13 @@ void sort_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
   }
 
   const ChunkCoord center = view.target_center.value();
+  const world::WorldSearch search{world};
   std::stable_sort(
       view.mesh_candidates.begin(),
       view.mesh_candidates.end(),
-      [&world, &view, center](ChunkCoord lhs, ChunkCoord rhs) {
-        const voxel::ChunkSection* lhs_chunk = world.find_chunk(lhs);
-        const voxel::ChunkSection* rhs_chunk = world.find_chunk(rhs);
+      [&search, &view, center](ChunkCoord lhs, ChunkCoord rhs) {
+        const voxel::ChunkSection* lhs_chunk = search.find_chunk(lhs);
+        const voxel::ChunkSection* rhs_chunk = search.find_chunk(rhs);
         const i32 lhs_distance = chunk_priority_distance(lhs, center);
         const i32 rhs_distance = chunk_priority_distance(rhs, center);
         if (lhs_distance != rhs_distance) {
@@ -148,11 +149,12 @@ void rebuild_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
 
   const ChunkCoord center = view.target_center.value();
   const i32 render_distance = view.target_render_distance;
+  const world::WorldSearch search{world};
   for (i32 z = center.value.z - render_distance; z <= center.value.z + render_distance; ++z) {
     for (i32 x = center.value.x - render_distance; x <= center.value.x + render_distance; ++x) {
       for (i32 y = view.target_min_chunk_y; y <= view.target_max_chunk_y; ++y) {
         const ChunkCoord coord{{x, y, z}};
-        if (world.find_chunk(coord) != nullptr) {
+        if (search.find_chunk(coord) != nullptr) {
           enqueue_mesh_candidate(view, coord);
         }
       }
@@ -192,6 +194,7 @@ void drain_mesh_jobs(
     render::OpenGLRenderer& renderer,
     ChunkViewState& view) {
   ARV_PROFILE_ZONE("Chunk meshing drain");
+  world::WorldSearch search{world};
   for (usize index = 0; index < view.pending_meshes.size();) {
     auto& pending = view.pending_meshes[index];
     if (!pending.job.is_complete()) {
@@ -216,7 +219,7 @@ void drain_mesh_jobs(
       render::ChunkMeshUpload upload;
       upload.mesh = std::move(timed.mesh);
       renderer.enqueue_chunk_mesh_upload(std::move(upload));
-      if (voxel::ChunkSection* upload_chunk = world.find_chunk(draw_item.key.coord);
+      if (voxel::ChunkSection* upload_chunk = search.find_mutable_chunk(draw_item.key.coord);
           upload_chunk != nullptr) {
         upload_chunk->mark_mesh_waiting_for_upload();
       }
@@ -230,7 +233,7 @@ void drain_mesh_jobs(
         view.draw_items[draw_item.key.coord] = draw_item;
         set_draw_items_dirty(view);
       }
-      if (const voxel::ChunkSection* chunk = world.find_chunk(draw_item.key.coord);
+      if (const voxel::ChunkSection* chunk = search.find_chunk(draw_item.key.coord);
           chunk != nullptr && chunk->is_dirty(voxel::ChunkDirtyFlags::LightMesh)) {
         enqueue_mesh_candidate(view, draw_item.key.coord);
       }
@@ -282,6 +285,7 @@ void schedule_mesh_jobs(
   const usize soft_upload_backlog =
       std::max<usize>(static_cast<usize>(pipeline.max_mesh_jobs_per_frame) * 4U, 16U);
   const bool upload_backlog_high = renderer.pending_mesh_upload_count() >= soft_upload_backlog;
+  world::WorldSearch search{world};
   while (!view.mesh_candidates.empty() &&
          mesh_jobs_scheduled < pipeline.max_mesh_jobs_per_frame &&
          view.pending_meshes.size() < pipeline.max_mesh_jobs_per_frame) {
@@ -294,7 +298,7 @@ void schedule_mesh_jobs(
       continue;
     }
 
-    voxel::ChunkSection* chunk = world.find_chunk(coord);
+    voxel::ChunkSection* chunk = search.find_mutable_chunk(coord);
     if (chunk == nullptr) {
       continue;
     }

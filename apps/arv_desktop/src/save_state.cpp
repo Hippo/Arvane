@@ -31,7 +31,7 @@ std::vector<persistence::SavedChunkSection> capture_saved_chunks(
     saved.blocks = chunk->blocks();
     saved.lights = chunk->lights();
     saved.fluids = chunk->fluids();
-    saved.lighting_valid = !chunk->is_dirty(voxel::ChunkDirtyFlags::NeedsRelight);
+    saved.lighting_valid = !chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting);
     chunks.emplace_back(std::move(saved));
   }
   return chunks;
