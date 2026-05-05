@@ -86,6 +86,16 @@ TEST(ClientRuntimeTests, ChatDraftIgnoresOpeningKeyThenAcceptsTextEditingAndSubm
   EXPECT_EQ(client.chat_messages().front(), "hell");
 }
 
+TEST(ClientRuntimeTests, SlashTextOpensChatWithCommandPrefix) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+
+  client.submit_input(arv::client::InputFrame{.text_input = "/"});
+
+  EXPECT_TRUE(client.chat_open());
+  EXPECT_EQ(client.chat_draft(), "/");
+  EXPECT_TRUE(client.chat_messages().empty());
+}
+
 TEST(ClientRuntimeTests, WorldJoinKeepsLocalPlayerBodyAtServerSpawn) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);

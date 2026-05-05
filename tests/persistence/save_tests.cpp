@@ -9,6 +9,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -95,6 +96,10 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   player.pitch_radians = -0.5F;
   player.grounded = true;
   player.game_mode_id = std::string{arv::player::CreativeGameModeID};
+  player.permission_overrides.groups = {"admin", "builder"};
+  player.permission_overrides.overrides.can_fly = arv::player::TriState::Allow;
+  player.permission_overrides.custom_overrides["arvane.command.test"] =
+      arv::player::TriState::Deny;
   player.selected_hotbar_slot = 3;
   ASSERT_TRUE(player.inventory.set_slot(0, arv::player::ItemStack{stone_item, 7}));
 
@@ -149,6 +154,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       item_registry));
 
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "save.json"));
+  EXPECT_TRUE(std::filesystem::exists(server_save_root / "permissions.yaml"));
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "players" / "local_player.dat"));
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "worlds" / "default" / "world.json"));
   EXPECT_FALSE(std::filesystem::exists(server_save_root / "worlds" / "default" / "entities.json"));
@@ -176,6 +182,14 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_EQ(loaded.value().players.size(), 1U);
   EXPECT_EQ(loaded.value().players[0].profile_name, "local_player");
   EXPECT_EQ(loaded.value().players[0].game_mode_id, arv::player::CreativeGameModeID);
+  EXPECT_EQ(loaded.value().players[0].permission_overrides.groups,
+            (std::vector<std::string>{"admin", "builder"}));
+  EXPECT_EQ(loaded.value().players[0].permission_overrides.overrides.can_fly,
+            arv::player::TriState::Allow);
+  EXPECT_EQ(
+      loaded.value().players[0]
+          .permission_overrides.custom_overrides.at("arvane.command.test"),
+      arv::player::TriState::Deny);
   EXPECT_EQ(loaded.value().players[0].selected_hotbar_slot, 3U);
   ASSERT_TRUE(loaded.value().players[0].inventory.slot(0).has_value());
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->item, stone_item);
@@ -213,6 +227,64 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(dropped_item->dropped_item_stack->item, stone_item);
   EXPECT_EQ(dropped_item->dropped_item_stack->count, 4U);
   EXPECT_FLOAT_EQ(dropped_item->dropped_item_pickup_delay_seconds, 0.25F);
+}
+
+TEST(SaveTests, PlayerPermissionsAreWrittenEvenWhenEmpty) {
+  TempDir temp_dir;
+  const std::filesystem::path server_save_root =
+      temp_dir.path / "arvane_home" / "saves" / "server-save-1";
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+
+  arv::persistence::PlayerSaveData player;
+  player.profile_name = "local_player";
+  player.world_name = "default";
+  player.position = {1.0F, 2.0F, 3.0F};
+
+  const arv::persistence::SaveMetadata save_metadata{
+      arv::persistence::CurrentSaveFormatVersion,
+      std::string{arv::persistence::CurrentGameVersion},
+      arv::persistence::hash_block_registry(block_registry),
+      arv::persistence::hash_item_registry(item_registry),
+      "Test Save"};
+  const arv::persistence::WorldMetadata world_metadata{
+      "default",
+      42,
+      99,
+      make_worldgen_config(),
+      0,
+      3,
+      save_metadata.block_registry_hash,
+      save_metadata.item_registry_hash};
+  const std::vector<arv::persistence::PlayerSaveData> players{player};
+
+  ASSERT_TRUE(arv::persistence::save_server_root(
+      server_save_root,
+      save_metadata,
+      world_metadata,
+      std::span<const arv::persistence::SavedChunkSection>{},
+      players,
+      std::span<const arv::entity::PersistentEntityRecord>{},
+      block_registry,
+      item_registry));
+
+  std::ifstream input(server_save_root / "players" / "local_player.dat");
+  ASSERT_TRUE(input.is_open());
+  const std::string text{
+      std::istreambuf_iterator<char>{input},
+      std::istreambuf_iterator<char>{}};
+  EXPECT_NE(text.find("\"groups\": []"), std::string::npos);
+  EXPECT_NE(text.find("\"permission_overrides\""), std::string::npos);
+  EXPECT_NE(text.find("\"core\": {}"), std::string::npos);
+  EXPECT_NE(text.find("\"permissions\": {}"), std::string::npos);
+
+  std::ifstream permissions_input(server_save_root / "permissions.yaml");
+  ASSERT_TRUE(permissions_input.is_open());
+  const std::string permissions_text{
+      std::istreambuf_iterator<char>{permissions_input},
+      std::istreambuf_iterator<char>{}};
+  EXPECT_NE(permissions_text.find("groups: {}"), std::string::npos);
 }
 
 TEST(SaveTests, DiscoversServerSavesSeparatelyFromWorldsAndLoadsRequestedWorld) {

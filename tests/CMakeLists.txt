@@ -10,6 +10,7 @@ add_executable(arv_tests
   client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp
   client/ui_tests.cpp
+  command/command_tests.cpp
   crypto/crypto_tests.cpp
   core/coordinate_tests.cpp
   core/fixed_timestep_tests.cpp
@@ -33,6 +34,7 @@ add_executable(arv_tests
   render/chunk_meshing_tests.cpp
   sched/scheduler_tests.cpp
   server/chunk_streamer_tests.cpp
+  server/permission_config_tests.cpp
   server/player_profile_tests.cpp
   server/player_interaction_tests.cpp
   server/registry_tests.cpp
@@ -57,6 +59,7 @@ target_compile_definitions(arv_tests PRIVATE
 target_link_libraries(arv_tests PRIVATE
   arv_asset
   arv_client
+  arv_command
   arv_core
   arv_crypto
   arv_entity

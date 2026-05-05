@@ -70,7 +70,10 @@ public:
   [[nodiscard]] const Zone* zone(ZoneID id) const noexcept;
   [[nodiscard]] const Region* region(RegionID id) const noexcept;
   [[nodiscard]] std::vector<RegionID> find_regions_at(RegionQuery query) const;
+  [[nodiscard]] player::PermissionLayer permission_layer_for_regions(
+      std::span<const RegionID> region_ids) const;
   [[nodiscard]] player::PermissionLayer permission_layer_at(RegionQuery query) const;
+  [[nodiscard]] u64 revision() const noexcept;
 
   [[nodiscard]] RegionMembershipChange update_membership(
       PlayerRegionState& state,
@@ -88,6 +91,7 @@ private:
   std::vector<Region> regions_{};
   HashMap<std::string, ZoneID> zone_names_{};
   HashMap<std::string, RegionID> region_names_{};
+  u64 revision_{};
 };
 
 } // namespace arv::world

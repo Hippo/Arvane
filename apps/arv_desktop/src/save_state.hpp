@@ -24,4 +24,7 @@ void apply_loaded_player_saves(
     std::string_view world_name,
     const std::vector<persistence::PlayerSaveData>& loaded_players);
 
+[[nodiscard]] std::vector<server::ServerPlayerSaveState> to_server_player_saves(
+    const std::vector<persistence::PlayerSaveData>& players);
+
 } // namespace arv::desktop

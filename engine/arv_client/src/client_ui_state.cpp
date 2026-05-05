@@ -1,5 +1,7 @@
 #include "client_ui_state.hpp"
 
+#include <utility>
+
 namespace arv::client {
 namespace {
 
@@ -52,10 +54,31 @@ void ClientUiState::open_chat() {
   inventory_open_ = false;
 }
 
+void ClientUiState::open_chat_with_draft(std::string draft) {
+  chat_open_ = true;
+  inventory_open_ = false;
+  chat_draft_ = std::move(draft);
+}
+
+void ClientUiState::close_chat() noexcept {
+  chat_open_ = false;
+  chat_draft_.clear();
+}
+
 void ClientUiState::close_ui() noexcept {
   inventory_open_ = false;
   chat_open_ = false;
   chat_draft_.clear();
+}
+
+void ClientUiState::add_chat_message(std::string message) {
+  if (message.empty()) {
+    return;
+  }
+  chat_messages_.emplace_back(std::move(message));
+  if (chat_messages_.size() > MaxChatMessages) {
+    chat_messages_.erase(chat_messages_.begin());
+  }
 }
 
 void ClientUiState::handle_chat_input(const InputFrame& input, bool was_chat_open) {
@@ -73,10 +96,7 @@ void ClientUiState::handle_chat_input(const InputFrame& input, bool was_chat_ope
   }
   if (was_chat_open && input.text_submit_pressed) {
     if (!chat_draft_.empty()) {
-      chat_messages_.emplace_back(chat_draft_);
-      if (chat_messages_.size() > MaxChatMessages) {
-        chat_messages_.erase(chat_messages_.begin());
-      }
+      add_chat_message(chat_draft_);
       chat_draft_.clear();
     }
     chat_open_ = false;

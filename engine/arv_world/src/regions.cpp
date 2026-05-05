@@ -78,6 +78,7 @@ ZoneID RegionRegistry::add_zone(Zone zone) {
     zone_names_[zone.name] = zone.id;
   }
   zones_.emplace_back(std::move(zone));
+  ++revision_;
   return zones_.back().id;
 }
 
@@ -101,6 +102,7 @@ RegionID RegionRegistry::add_region(Region region) {
     region_names_[region.name] = region.id;
   }
   regions_.emplace_back(std::move(region));
+  ++revision_;
   return regions_.back().id;
 }
 
@@ -129,8 +131,8 @@ std::vector<RegionID> RegionRegistry::find_regions_at(RegionQuery query) const {
   return matches;
 }
 
-player::PermissionLayer RegionRegistry::permission_layer_at(RegionQuery query) const {
-  const std::vector<RegionID> matching_ids = find_regions_at(query);
+player::PermissionLayer RegionRegistry::permission_layer_for_regions(
+    std::span<const RegionID> matching_ids) const {
   player::PermissionLayer layer;
   if (matching_ids.empty()) {
     return layer;
@@ -191,6 +193,15 @@ player::PermissionLayer RegionRegistry::permission_layer_at(RegionQuery query) c
   }
 
   return layer;
+}
+
+player::PermissionLayer RegionRegistry::permission_layer_at(RegionQuery query) const {
+  const std::vector<RegionID> matching_ids = find_regions_at(query);
+  return permission_layer_for_regions(matching_ids);
+}
+
+u64 RegionRegistry::revision() const noexcept {
+  return revision_;
 }
 
 RegionMembershipChange RegionRegistry::update_membership(

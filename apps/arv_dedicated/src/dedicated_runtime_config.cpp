@@ -99,6 +99,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.base_tps = config.simulation.base_tps;
   server_start_info.initial_tick_index = loaded_world.initial_tick_index;
   server_start_info.world_name = config.server.world;
+  server_start_info.server_save_root = loaded_world.server_save_root;
   server_start_info.listen_address = {config.network.bind_address, config.network.port};
   server_start_info.block_registry = &registries.block_registry;
   server_start_info.item_registry = &registries.item_registry;

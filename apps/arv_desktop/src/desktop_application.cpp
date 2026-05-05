@@ -18,6 +18,7 @@
 
 #include "arv/asset/font.hpp"
 #include "arv/asset/resource.hpp"
+#include "arv/command/command.hpp"
 #include "arv/client/item_animation.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/core/arena.hpp"
@@ -39,6 +40,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -57,6 +59,46 @@ enum class HeldItemActionPlayResult : u8 {
   Suppressed,
   Played,
 };
+
+[[nodiscard]] bool is_command_chat_draft(std::string_view draft) noexcept {
+  return !draft.empty() && draft.front() == '/';
+}
+
+[[nodiscard]] std::string fallback_command_result_message(command::CommandStatus status) {
+  switch (status) {
+    case command::CommandStatus::Success:
+      return "Command succeeded.";
+    case command::CommandStatus::Failure:
+      return "Command failed.";
+    case command::CommandStatus::UsageError:
+      return "Invalid command usage.";
+    case command::CommandStatus::PermissionDenied:
+      return "Permission denied.";
+    case command::CommandStatus::UnknownCommand:
+      return "Unknown command.";
+    case command::CommandStatus::InvalidSource:
+      return "Command cannot be used from here.";
+    case command::CommandStatus::InternalError:
+      return "Command failed internally.";
+  }
+  return "Command failed.";
+}
+
+void append_command_result_to_chat(
+    client::ClientRuntime& client,
+    const command::CommandResult& result) {
+  bool wrote_message = false;
+  for (const command::CommandMessage& message : result.messages) {
+    if (message.text.empty()) {
+      continue;
+    }
+    client.add_chat_message(message.text);
+    wrote_message = true;
+  }
+  if (!wrote_message) {
+    client.add_chat_message(fallback_command_result_message(result.status));
+  }
+}
 
 [[nodiscard]] BlockPos offset_block(BlockPos pos, voxel::BlockFace face) noexcept {
   switch (face) {
@@ -127,11 +169,11 @@ public:
     while (!window_.should_close()) {
       ARV_PROFILE_ZONE("Frame time");
       FrameTiming timing = begin_frame();
-      const platform::InputSnapshot platform_input =
-          poll_platform_input_and_begin_debug_frame(timing);
-
+      platform::InputSnapshot platform_input = poll_platform_input();
       DesktopGameSession* active_session = sessions_.active_session();
       const bool has_session = active_session != nullptr && active_session->client != nullptr;
+      handle_debug_menu_input(platform_input, active_session, has_session);
+      begin_debug_frame(platform_input, timing);
       const bool was_inventory_open = has_session && active_session->client->inventory_open();
 
       ui::UIContext menu_context = make_menu_context();
@@ -155,6 +197,8 @@ public:
           active_session != nullptr && active_session->client != nullptr;
       const bool has_active_integrated_session =
           has_active_session && active_session->integrated_server != nullptr;
+
+      handle_chat_command_submit(active_session, has_active_session, client_input);
 
       submit_client_input_and_update_cursor(
           active_session,
@@ -259,19 +303,41 @@ private:
     }
   }
 
-  [[nodiscard]] platform::InputSnapshot poll_platform_input_and_begin_debug_frame(
-      const FrameTiming& timing) {
+  [[nodiscard]] platform::InputSnapshot poll_platform_input() {
     platform::OpenGLWindow::poll_events();
-    platform::InputSnapshot platform_input = window_.poll_input();
-    if (platform_input.debug_menu_toggle_pressed) {
+    return window_.poll_input();
+  }
+
+  void handle_debug_menu_input(
+      platform::InputSnapshot& platform_input,
+      DesktopGameSession* active_session,
+      bool has_session) {
+    const bool chat_has_focus =
+        has_session && active_session != nullptr && active_session->client->chat_open();
+    if (debug_menu_.open && platform_input.text_cancel_pressed) {
+      debug_menu_.open = false;
+      platform_input.pause_menu_pressed = false;
+      platform_input.text_cancel_pressed = false;
+      platform_input.debug_menu_toggle_pressed = false;
+      return;
+    }
+
+    if (platform_input.debug_menu_toggle_pressed && !chat_has_focus) {
       debug_menu_.open = !debug_menu_.open;
     }
+    if (chat_has_focus) {
+      platform_input.debug_menu_toggle_pressed = false;
+    }
+  }
+
+  void begin_debug_frame(
+      const platform::InputSnapshot& platform_input,
+      const FrameTiming& timing) {
     debug_imgui_.begin_frame(
         window_.native_handle(),
         platform_input,
         framebuffer_,
         timing.delta.count());
-    return platform_input;
   }
 
   void handle_pause_menu_input(
@@ -665,6 +731,55 @@ private:
         session.held_item_animation.stop(now_seconds);
       }
     }
+  }
+
+  [[nodiscard]] command::CommandResult execute_chat_command(
+      DesktopGameSession& session,
+      std::string_view command_text) {
+    if (session.integrated_server == nullptr) {
+      return command::CommandResult::invalid_source(
+          "Server command networking is not available for remote sessions yet.");
+    }
+
+    const server::ServerSession* server_session =
+        session.integrated_server->sessions().first();
+    if (server_session == nullptr) {
+      return command::CommandResult::invalid_source(
+          "No player session is available for command execution.");
+    }
+
+    std::optional<command::CommandSender> sender =
+        session.integrated_server->command_sender_for_session(server_session->session_id);
+    if (!sender.has_value()) {
+      return command::CommandResult::invalid_source(
+          "No player command sender is available.");
+    }
+
+    return session.integrated_server->execute_command(sender.value(), command_text);
+  }
+
+  void handle_chat_command_submit(
+      DesktopGameSession* active_session,
+      bool has_active_session,
+      client::InputFrame& client_input) {
+    if (!has_active_session ||
+        active_session == nullptr ||
+        active_session->client == nullptr ||
+        !active_session->client->chat_open() ||
+        !client_input.text_submit_pressed) {
+      return;
+    }
+
+    const std::string command_text = active_session->client->chat_draft();
+    if (!is_command_chat_draft(command_text)) {
+      return;
+    }
+
+    client_input.text_submit_pressed = false;
+    active_session->client->close_chat();
+    append_command_result_to_chat(
+        *active_session->client,
+        execute_chat_command(*active_session, command_text));
   }
 
   void submit_client_input_and_update_cursor(

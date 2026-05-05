@@ -6,6 +6,13 @@
 #include <utility>
 
 namespace arv::client::detail {
+namespace {
+
+[[nodiscard]] bool command_chat_shortcut_requested(const InputFrame& input) noexcept {
+  return !input.text_input.empty() && input.text_input.front() == '/';
+}
+
+} // namespace
 
 void ClientInputRuntime::submit_input(
     InputFrame input,
@@ -21,6 +28,8 @@ void ClientInputRuntime::submit_input(
   }
   if (!was_chat_open && input.open_chat_pressed) {
     ui.open_chat();
+  } else if (!was_chat_open && command_chat_shortcut_requested(input)) {
+    ui.open_chat_with_draft("/");
   }
 
   ui.handle_chat_input(input, was_chat_open);

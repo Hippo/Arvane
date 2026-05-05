@@ -165,6 +165,14 @@ std::span<const std::string> ClientRuntime::chat_messages() const noexcept {
   return impl_->ui.chat_messages();
 }
 
+void ClientRuntime::close_chat() noexcept {
+  impl_->ui.close_chat();
+}
+
+void ClientRuntime::add_chat_message(std::string message) {
+  impl_->ui.add_chat_message(std::move(message));
+}
+
 bool ClientRuntime::tab_menu_visible() const noexcept {
   return impl_->ui.tab_menu_visible();
 }

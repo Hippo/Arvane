@@ -1,6 +1,7 @@
 #include "arv/persistence/save.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <optional>
@@ -335,6 +336,161 @@ Expected<void, PersistenceError> write_text_atomic(
   return inventory;
 }
 
+[[nodiscard]] const char* tri_state_name(player::TriState value) noexcept {
+  switch (value) {
+    case player::TriState::Allow:
+      return "ALLOW";
+    case player::TriState::Deny:
+      return "DENY";
+    case player::TriState::Unset:
+      return "UNSET";
+  }
+  return "UNSET";
+}
+
+[[nodiscard]] std::optional<player::TriState> tri_state_from_json(const json& node) {
+  if (node.is_boolean()) {
+    return node.get<bool>() ? player::TriState::Allow : player::TriState::Deny;
+  }
+  if (!node.is_string()) {
+    return std::nullopt;
+  }
+
+  std::string text = node.get<std::string>();
+  std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  if (text == "allow" || text == "allowed" || text == "true" || text == "yes") {
+    return player::TriState::Allow;
+  }
+  if (text == "deny" || text == "denied" || text == "false" || text == "no") {
+    return player::TriState::Deny;
+  }
+  if (text == "unset" || text == "none" || text == "null") {
+    return player::TriState::Unset;
+  }
+  return std::nullopt;
+}
+
+void write_core_value(json& node, std::string_view name, player::TriState value) {
+  if (value != player::TriState::Unset) {
+    node[std::string{name}] = tri_state_name(value);
+  }
+}
+
+[[nodiscard]] json core_permissions_to_json(const player::CorePermissionSet& core) {
+  json node = json::object();
+  write_core_value(node, "can_take_damage", core.can_take_damage);
+  write_core_value(node, "can_modify_world", core.can_modify_world);
+  write_core_value(node, "can_interact", core.can_interact);
+  write_core_value(node, "can_open_inventory", core.can_open_inventory);
+  write_core_value(node, "has_creative_inventory", core.has_creative_inventory);
+  write_core_value(node, "can_fly", core.can_fly);
+  write_core_value(node, "has_collision", core.has_collision);
+  write_core_value(node, "is_visible_to_others", core.is_visible_to_others);
+  return node;
+}
+
+[[nodiscard]] json custom_permissions_to_json(const player::CustomPermissionMap& custom) {
+  json node = json::object();
+  for (const auto& [permission, value] : custom) {
+    if (value != player::TriState::Unset) {
+      node[permission] = tri_state_name(value);
+    }
+  }
+  return node;
+}
+
+[[nodiscard]] json player_permissions_to_json(
+    const player::PlayerPermissions& permissions) {
+  return json{
+      {"core", core_permissions_to_json(permissions.overrides)},
+      {"permissions", custom_permissions_to_json(permissions.custom_overrides)},
+  };
+}
+
+bool set_core_permission(
+    player::CorePermissionSet& core,
+    std::string_view name,
+    player::TriState value) {
+  if (name == "can_take_damage") {
+    core.can_take_damage = value;
+  } else if (name == "can_modify_world") {
+    core.can_modify_world = value;
+  } else if (name == "can_interact") {
+    core.can_interact = value;
+  } else if (name == "can_open_inventory") {
+    core.can_open_inventory = value;
+  } else if (name == "has_creative_inventory") {
+    core.has_creative_inventory = value;
+  } else if (name == "can_fly") {
+    core.can_fly = value;
+  } else if (name == "has_collision") {
+    core.has_collision = value;
+  } else if (name == "is_visible_to_others") {
+    core.is_visible_to_others = value;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+void read_group_list(player::PlayerPermissions& permissions, const json& node) {
+  if (!node.is_array()) {
+    return;
+  }
+  for (const json& entry : node) {
+    if (entry.is_string()) {
+      permissions.groups.push_back(entry.get<std::string>());
+    }
+  }
+}
+
+void read_core_permissions(player::PlayerPermissions& permissions, const json& node) {
+  if (!node.is_object()) {
+    return;
+  }
+  for (auto iter = node.begin(); iter != node.end(); ++iter) {
+    const std::optional<player::TriState> value = tri_state_from_json(iter.value());
+    if (value.has_value()) {
+      (void)set_core_permission(permissions.overrides, iter.key(), value.value());
+    }
+  }
+}
+
+void read_custom_permissions(player::PlayerPermissions& permissions, const json& node) {
+  if (!node.is_object()) {
+    return;
+  }
+  for (auto iter = node.begin(); iter != node.end(); ++iter) {
+    const std::optional<player::TriState> value = tri_state_from_json(iter.value());
+    if (value.has_value() && player::is_valid_custom_permission_node(iter.key())) {
+      permissions.custom_overrides[iter.key()] = value.value();
+    }
+  }
+}
+
+[[nodiscard]] player::PlayerPermissions player_permissions_from_json(const json& player_json) {
+  player::PlayerPermissions permissions;
+  if (const auto groups = player_json.find("groups"); groups != player_json.end()) {
+    read_group_list(permissions, *groups);
+  }
+
+  if (const auto overrides = player_json.find("permission_overrides");
+      overrides != player_json.end() && overrides->is_object()) {
+    if (const auto groups = overrides->find("groups"); groups != overrides->end()) {
+      read_group_list(permissions, *groups);
+    }
+    if (const auto core = overrides->find("core"); core != overrides->end()) {
+      read_core_permissions(permissions, *core);
+    }
+    if (const auto custom = overrides->find("permissions"); custom != overrides->end()) {
+      read_custom_permissions(permissions, *custom);
+    }
+  }
+  return permissions;
+}
+
 [[nodiscard]] std::filesystem::path player_file_path(
     const std::filesystem::path& root,
     const PlayerSaveData& player) {
@@ -343,6 +499,24 @@ Expected<void, PersistenceError> write_text_atomic(
           ? player.profile_id.string() + ".json"
           : player.profile_name + ".dat";
   return root / "players" / filename;
+}
+
+Expected<void, PersistenceError> ensure_permission_config_file(
+    const std::filesystem::path& root) {
+  const std::filesystem::path path = root / "permissions.yaml";
+  std::error_code error;
+  if (std::filesystem::exists(path, error)) {
+    return Expected<void, PersistenceError>::success();
+  }
+  if (error) {
+    return Expected<void, PersistenceError>::failure(
+        PersistenceError{"failed to inspect permission config file: " + error.message()});
+  }
+
+  return write_text_atomic(
+      path,
+      "# Permission groups for this server save.\n"
+      "groups: {}\n");
 }
 
 } // namespace
@@ -511,6 +685,11 @@ Expected<void, PersistenceError> save_server_root(
     return save_result;
   }
 
+  save_result = ensure_permission_config_file(root);
+  if (!save_result) {
+    return save_result;
+  }
+
   world::WorldClock saved_clock = world.clock;
   saved_clock.world_tick = world.tick_index;
   const json world_json{
@@ -545,7 +724,7 @@ Expected<void, PersistenceError> save_server_root(
   }
 
   for (const PlayerSaveData& player : players) {
-    const json player_json{
+    json player_json{
         {"profile_id", player.profile_id.string()},
         {"profile_name", player.profile_name},
         {"display_name", player.display_name},
@@ -561,6 +740,9 @@ Expected<void, PersistenceError> save_server_root(
         {"inventory_version", 1},
         {"inventory", inventory_to_json(player.inventory, item_registry)},
     };
+    player_json["groups"] = player.permission_overrides.groups;
+    player_json["permission_overrides"] =
+        player_permissions_to_json(player.permission_overrides);
     auto player_result = write_text_atomic(player_file_path(root, player), player_json.dump(2));
     if (!player_result) {
       return player_result;
@@ -800,6 +982,7 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
         if (player_json.contains("game_mode")) {
           player_save.game_mode_id = player_json.at("game_mode").get<std::string>();
         }
+        player_save.permission_overrides = player_permissions_from_json(player_json);
         player_save.selected_hotbar_slot = player_json.at("selected_hotbar_slot").get<u8>();
         player_save.inventory = inventory_from_json(
             player_json.at("inventory"),

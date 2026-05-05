@@ -1,6 +1,7 @@
 #include "server_runtime_internal.hpp"
 
 #include "arv/crypto/random.hpp"
+#include "arv/server/server_commands.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -52,6 +53,10 @@ const SessionRegistry& ServerRuntime::sessions() const noexcept {
 
 const WorldRegistry& ServerRuntime::worlds() const noexcept {
   return impl_->worlds();
+}
+
+const command::CommandRegistry& ServerRuntime::command_registry() const noexcept {
+  return impl_->command_registry();
 }
 
 std::vector<DroppedItemStack> ServerRuntime::dropped_item_stacks() const {
@@ -146,10 +151,22 @@ player::InventoryOperationResult ServerRuntime::close_player_inventory_menu(Play
   return impl_->close_player_inventory_menu(player_id);
 }
 
+command::CommandResult ServerRuntime::execute_command(
+    command::CommandSender sender,
+    std::string_view command_text) {
+  return impl_->execute_command(std::move(sender), command_text);
+}
+
+std::optional<command::CommandSender> ServerRuntime::command_sender_for_session(
+    SessionID session_id) const {
+  return impl_->command_sender_for_session(session_id);
+}
+
 namespace detail {
 
 ServerRuntimeImpl::ServerRuntimeImpl(std::unique_ptr<net::ITransport> transport)
     : transport_(std::move(transport)) {
+  register_server_commands(command_registry_);
 }
 
 net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
@@ -161,6 +178,8 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   base_tps_ = start_info.base_tps;
   tick_index_ = start_info.initial_tick_index;
   world_name_ = start_info.world_name.empty() ? std::string{"default"} : start_info.world_name;
+  server_save_root_ = start_info.server_save_root;
+  permission_caches_.clear();
   player_saves_.load(start_info.saved_players);
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
@@ -198,6 +217,16 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
       mode_ == ServerMode::Dedicated ? "Arvane Dedicated Server" : "Arvane Integrated Server";
   handshake_policy_.initial_world_id = DefaultWorldID;
   crypto::fill_random(server_instance_id_);
+
+  if (!server_save_root_.empty()) {
+    auto loaded_permissions = load_server_permission_groups(server_save_root_);
+    if (!loaded_permissions) {
+      return net::NetworkResult::failure(
+          net::NetworkError{loaded_permissions.error().message});
+    }
+    permission_groups_ = std::move(loaded_permissions.value());
+    ++permission_config_revision_;
+  }
 
   if (block_registry_ == nullptr || item_registry_ == nullptr) {
     return net::NetworkResult::failure(net::NetworkError{"server start requires block and item registries"});
@@ -282,6 +311,10 @@ const WorldRegistry& ServerRuntimeImpl::worlds() const noexcept {
   return worlds_;
 }
 
+const command::CommandRegistry& ServerRuntimeImpl::command_registry() const noexcept {
+  return command_registry_;
+}
+
 const std::vector<ServerPlayerSaveState>& ServerRuntimeImpl::saved_player_states() const noexcept {
   return player_saves_.states();
 }
@@ -303,6 +336,7 @@ const player::GameModeRegistry& ServerRuntimeImpl::game_modes() const noexcept {
 }
 
 player::GameModeRegistry& ServerRuntimeImpl::game_modes() noexcept {
+  ++permission_config_revision_;
   return game_modes_;
 }
 
@@ -311,6 +345,7 @@ const player::PermissionGroupRegistry& ServerRuntimeImpl::permission_groups() co
 }
 
 player::PermissionGroupRegistry& ServerRuntimeImpl::permission_groups() noexcept {
+  ++permission_config_revision_;
   return permission_groups_;
 }
 
@@ -332,6 +367,85 @@ usize ServerRuntimeImpl::pending_lighting_job_count() const noexcept {
 
 usize ServerRuntimeImpl::pending_fluid_job_count() const noexcept {
   return world_jobs_.pending_fluid_job_count();
+}
+
+command::CommandResult ServerRuntimeImpl::execute_command(
+    command::CommandSender sender,
+    std::string_view command_text) {
+  ServerCommandServices domain_services{&sessions_, &default_world_};
+  auto permission_check =
+      [this](const command::CommandSender& checked_sender, const command::Command& checked_command) {
+        return check_command_permission(checked_sender, checked_command);
+      };
+  command::CommandServices services{
+      &domain_services,
+      command::CommandPermissionCheckFn{permission_check},
+  };
+  return command::dispatch_command(
+      command_registry_,
+      command::CommandDomain::ServerBound,
+      sender,
+      services,
+      command_text);
+}
+
+std::optional<command::CommandSender> ServerRuntimeImpl::command_sender_for_session(
+    SessionID session_id) const {
+  const ServerSession* session = sessions_.find(session_id);
+  if (session == nullptr) {
+    return std::nullopt;
+  }
+
+  command::CommandSender sender;
+  sender.kind = command::CommandSourceKind::Player;
+  if (!session->profile_id.empty()) {
+    sender.player_profile_id = session->profile_id;
+  }
+  sender.session_id = session->session_id;
+  sender.player_id = session->player_id;
+  sender.world_id = session->world_id;
+  sender.display_name = session->display_name;
+
+  if (const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+      player_state != nullptr) {
+    sender.position = player_state->position;
+  }
+  if (const std::optional<EntityID> entity_id =
+          default_world_.entity_for_player(session->player_id);
+      entity_id.has_value()) {
+    sender.entity_id = entity_id.value();
+  }
+
+  return sender;
+}
+
+command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
+    const command::CommandSender& sender,
+    const command::Command& command_def) {
+  if (sender.kind == command::CommandSourceKind::ServerConsole) {
+    return command::CommandPermissionResult::allow();
+  }
+  if (command_def.permission.empty()) {
+    return command::CommandPermissionResult::allow();
+  }
+  if (!sender.player_id.has_value()) {
+    return command::CommandPermissionResult::deny("Permission denied: missing player context.");
+  }
+
+  player::PlayerState* player_state = default_world_.find_player(sender.player_id.value());
+  if (player_state == nullptr) {
+    return command::CommandPermissionResult::deny("Permission denied: player is not online.");
+  }
+
+  refresh_player_permissions(*player_state);
+  if (player_state->resolved_permissions.has(command_def.permission)) {
+    return command::CommandPermissionResult::allow();
+  }
+
+  std::string text{"Permission denied: "};
+  text.append(command_def.permission);
+  text.push_back('.');
+  return command::CommandPermissionResult::deny(std::move(text));
 }
 
 } // namespace detail

@@ -32,6 +32,7 @@ namespace {
   save.grounded = player.grounded;
   save.movement_mode = player.movement_mode;
   save.game_mode_id = player.game_mode_id;
+  save.permission_overrides = player.permission_overrides;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
   return save;
@@ -51,6 +52,7 @@ namespace {
   save.grounded = player.grounded;
   save.movement_mode = player.movement_mode;
   save.game_mode_id = player.game_mode_id;
+  save.permission_overrides = player.permission_overrides;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
   return save;
@@ -142,6 +144,7 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     save.grounded = player_state->grounded;
     save.movement_mode = player_state->movement_mode;
     save.game_mode_id = player_state->game_mode_id;
+    save.permission_overrides = player_state->permission_overrides;
     save.selected_hotbar_slot = player_state->selected_hotbar_slot;
     save.inventory = player_state->inventory;
     upsert_player_save(players, std::move(save));

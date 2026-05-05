@@ -1,5 +1,7 @@
 #pragma once
 
+#include "arv/command/command.hpp"
+#include "arv/command/command_registry.hpp"
 #include "arv/core/types.hpp"
 #include "arv/core/time.hpp"
 #include "arv/crypto/hash.hpp"
@@ -15,6 +17,7 @@
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/world_runtime.hpp"
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
@@ -51,6 +54,7 @@ struct ServerPlayerSaveState {
   bool grounded{};
   player::MovementMode movement_mode{player::MovementMode::Walking};
   std::string game_mode_id{std::string{player::SurvivalGameModeID}};
+  player::PlayerPermissions permission_overrides{};
   u8 selected_hotbar_slot{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
 };
@@ -87,6 +91,7 @@ struct ServerStartInfo {
   const entity::EntityRegistry* entity_registry{};
   TickIndex initial_tick_index{};
   std::string world_name{"default"};
+  std::filesystem::path server_save_root{};
   std::span<const ServerPlayerSaveState> saved_players{};
   BlockBreakingConfig block_breaking{};
   DroppedItemsConfig dropped_items{};
@@ -123,6 +128,7 @@ public:
   [[nodiscard]] ServerMode mode() const noexcept;
   [[nodiscard]] const SessionRegistry& sessions() const noexcept;
   [[nodiscard]] const WorldRegistry& worlds() const noexcept;
+  [[nodiscard]] const command::CommandRegistry& command_registry() const noexcept;
 
   [[nodiscard]] std::vector<DroppedItemStack> dropped_item_stacks() const;
 
@@ -154,6 +160,11 @@ public:
   [[nodiscard]] std::optional<player::ItemStack> drop_one_from_player_inventory_cursor(
       PlayerID player_id);
   [[nodiscard]] player::InventoryOperationResult close_player_inventory_menu(PlayerID player_id);
+  [[nodiscard]] command::CommandResult execute_command(
+      command::CommandSender sender,
+      std::string_view command_text);
+  [[nodiscard]] std::optional<command::CommandSender> command_sender_for_session(
+      SessionID session_id) const;
 
 private:
   std::unique_ptr<detail::ServerRuntimeImpl> impl_;

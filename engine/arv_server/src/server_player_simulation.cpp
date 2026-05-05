@@ -16,6 +16,62 @@ namespace {
   return normalize_or_zero({std::cos(yaw_radians), 0.0F, -std::sin(yaw_radians)});
 }
 
+[[nodiscard]] u64 hash_append_byte(u64 hash, u8 value) noexcept {
+  hash ^= value;
+  hash *= 1099511628211ULL;
+  return hash;
+}
+
+[[nodiscard]] u64 hash_append_u64(u64 hash, u64 value) noexcept {
+  for (u32 index = 0; index < 8U; ++index) {
+    hash = hash_append_byte(hash, static_cast<u8>((value >> (index * 8U)) & 0xFFU));
+  }
+  return hash;
+}
+
+[[nodiscard]] u64 hash_append_string(u64 hash, std::string_view value) noexcept {
+  hash = hash_append_u64(hash, value.size());
+  for (const char ch : value) {
+    hash = hash_append_byte(hash, static_cast<u8>(ch));
+  }
+  return hash;
+}
+
+[[nodiscard]] u64 hash_append_tri_state(u64 hash, player::TriState value) noexcept {
+  return hash_append_byte(hash, static_cast<u8>(value));
+}
+
+[[nodiscard]] u64 hash_append_core_permissions(
+    u64 hash,
+    const player::CorePermissionSet& core) noexcept {
+  hash = hash_append_tri_state(hash, core.can_take_damage);
+  hash = hash_append_tri_state(hash, core.can_modify_world);
+  hash = hash_append_tri_state(hash, core.can_interact);
+  hash = hash_append_tri_state(hash, core.can_open_inventory);
+  hash = hash_append_tri_state(hash, core.has_creative_inventory);
+  hash = hash_append_tri_state(hash, core.can_fly);
+  hash = hash_append_tri_state(hash, core.has_collision);
+  hash = hash_append_tri_state(hash, core.is_visible_to_others);
+  return hash;
+}
+
+[[nodiscard]] u64 permission_source_fingerprint(
+    const player::PlayerState& player_state) noexcept {
+  u64 hash = 14695981039346656037ULL;
+  hash = hash_append_string(hash, player_state.game_mode_id);
+  hash = hash_append_u64(hash, player_state.permission_overrides.groups.size());
+  for (const std::string& group : player_state.permission_overrides.groups) {
+    hash = hash_append_string(hash, group);
+  }
+  hash = hash_append_core_permissions(hash, player_state.permission_overrides.overrides);
+  hash = hash_append_u64(hash, player_state.permission_overrides.custom_overrides.size());
+  for (const auto& [node, value] : player_state.permission_overrides.custom_overrides) {
+    hash = hash_append_string(hash, node);
+    hash = hash_append_tri_state(hash, value);
+  }
+  return hash;
+}
+
 } // namespace
 
 Vec3f player_look_direction(const player::PlayerState& player_state) noexcept {
@@ -140,10 +196,61 @@ void ServerRuntimeImpl::update_world_simulation_activity() {
 }
 
 void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_state) {
-  const world::RegionQuery query{player_state.world_id, player_state.position};
-  (void)default_world_.update_player_region_state(player_state.player_id, query);
-  const player::PermissionLayer region_layer =
-      default_world_.regions().permission_layer_at(query);
+  PlayerPermissionCache& cache = permission_caches_[player_state.player_id];
+  const u64 source_fingerprint = permission_source_fingerprint(player_state);
+  const u64 region_revision = default_world_.regions().revision();
+  bool region_layer_changed = false;
+
+  if (default_world_.regions().empty()) {
+    const bool had_region_permissions =
+        !cache.active_regions.empty() ||
+        cache.region_layer.core != player::CorePermissionSet{} ||
+        !cache.region_layer.custom.empty();
+    cache.active_regions.clear();
+    cache.region_layer = {};
+    cache.region_registry_revision = region_revision;
+    cache.has_last_region_query = true;
+    cache.last_region_world = player_state.world_id;
+    cache.last_region_position = player_state.position;
+    region_layer_changed = had_region_permissions;
+  } else {
+    const bool query_changed =
+        !cache.has_last_region_query ||
+        cache.last_region_world != player_state.world_id ||
+        cache.last_region_position != player_state.position ||
+        cache.region_registry_revision != region_revision;
+    if (query_changed) {
+      const world::RegionQuery query{player_state.world_id, player_state.position};
+      (void)default_world_.update_player_region_state(player_state.player_id, query);
+      std::vector<world::RegionID> active_regions;
+      if (const world::PlayerRegionState* region_state =
+              default_world_.player_region_state(player_state.player_id);
+          region_state != nullptr) {
+        active_regions = region_state->active_regions;
+      }
+
+      if (!cache.initialized ||
+          cache.region_registry_revision != region_revision ||
+          cache.active_regions != active_regions) {
+        cache.region_layer =
+            default_world_.regions().permission_layer_for_regions(active_regions);
+        cache.active_regions = std::move(active_regions);
+        region_layer_changed = true;
+      }
+      cache.region_registry_revision = region_revision;
+      cache.has_last_region_query = true;
+      cache.last_region_world = player_state.world_id;
+      cache.last_region_position = player_state.position;
+    }
+  }
+
+  if (cache.initialized &&
+      cache.source_fingerprint == source_fingerprint &&
+      cache.permission_config_revision == permission_config_revision_ &&
+      cache.region_registry_revision == region_revision &&
+      !region_layer_changed) {
+    return;
+  }
 
   player_state.resolved_permissions = player::resolve_permissions(
       game_modes_,
@@ -152,9 +259,13 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
           player_state.game_mode_id,
           &player_state.permission_overrides,
           {},
-          &region_layer,
+          &cache.region_layer,
           {},
       });
+  cache.source_fingerprint = source_fingerprint;
+  cache.permission_config_revision = permission_config_revision_;
+  cache.region_registry_revision = region_revision;
+  cache.initialized = true;
 }
 
 void ServerRuntimeImpl::apply_player_command(

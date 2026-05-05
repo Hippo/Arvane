@@ -1,0 +1,255 @@
+#include "arv/client/client_runtime.hpp"
+#include "arv/command/command_system.hpp"
+#include "arv/net/in_process_transport.hpp"
+#include "arv/player/permissions.hpp"
+#include "arv/server/server_commands.hpp"
+#include "arv/server/server_runtime.hpp"
+#include "support/test_registries.hpp"
+
+#include <gtest/gtest.h>
+
+#include <string>
+
+namespace {
+
+void complete_integrated_handshake(
+    arv::server::ServerRuntime& server,
+    arv::client::ClientRuntime& client) {
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+}
+
+arv::player::PlayerState& connected_player(arv::server::ServerRuntime& server) {
+  const std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
+  EXPECT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session = server.sessions().find(session_ids.front());
+  EXPECT_NE(session, nullptr);
+  arv::player::PlayerState* player_state = server.voxel_world().find_player(session->player_id);
+  EXPECT_NE(player_state, nullptr);
+  return *player_state;
+}
+
+struct RunningServerHarness {
+  arv::voxel::BlockRegistry block_registry;
+  arv::player::ItemRegistry item_registry;
+  arv::net::InProcessTransportPair transports;
+  arv::server::ServerRuntime server;
+  arv::client::ClientRuntime client;
+
+  RunningServerHarness()
+      : block_registry(arv::testsupport::make_test_block_registry()),
+        item_registry(arv::testsupport::make_test_item_registry(block_registry)),
+        transports(arv::net::make_in_process_transport_pair()),
+        server(std::move(transports.server)),
+        client(std::move(transports.client)) {
+    arv::server::ServerStartInfo start_info;
+    start_info.mode = arv::server::ServerMode::Integrated;
+    start_info.base_tps = arv::DefaultBaseTps;
+    start_info.listen_address = {"in-process", 0};
+    start_info.block_registry = &block_registry;
+    start_info.item_registry = &item_registry;
+    EXPECT_TRUE(server.start(start_info));
+
+    EXPECT_TRUE(client.connect_integrated());
+    complete_integrated_handshake(server, client);
+  }
+};
+
+} // namespace
+
+TEST(CommandTests, RegistryRejectsDuplicateCommandNames) {
+  arv::command::CommandRegistry registry;
+  arv::command::Command command;
+  command.name = "test.echo";
+  command.domain = arv::command::CommandDomain::ClientBound;
+  command.execute = [](arv::command::CommandCtx&) {
+    return arv::command::CommandResult::success();
+  };
+
+  EXPECT_TRUE(registry.register_command(std::move(command)));
+
+  arv::command::Command duplicate;
+  duplicate.name = "test.echo";
+  duplicate.domain = arv::command::CommandDomain::ClientBound;
+  duplicate.execute = [](arv::command::CommandCtx&) {
+    return arv::command::CommandResult::success();
+  };
+  EXPECT_FALSE(registry.register_command(std::move(duplicate)));
+}
+
+TEST(CommandTests, DispatcherNormalizesSlashAndResolvesAliases) {
+  arv::command::CommandRegistry registry;
+  arv::command::Command command;
+  command.name = "test.echo";
+  command.domain = arv::command::CommandDomain::ClientBound;
+  command.execute = [](arv::command::CommandCtx& ctx) {
+    auto args = ctx.reader();
+    auto value = args.read_token("value");
+    if (!value) {
+      return value.error();
+    }
+    return arv::command::CommandResult::success(std::string{value.value()});
+  };
+  ASSERT_TRUE(registry.register_command(std::move(command)));
+  ASSERT_TRUE(registry.register_alias("echo", "test.echo", true));
+
+  arv::command::CommandSender sender;
+  sender.kind = arv::command::CommandSourceKind::Player;
+  arv::command::CommandServices services;
+
+  const arv::command::CommandResult result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ClientBound,
+      sender,
+      services,
+      " /echo hello ");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  ASSERT_EQ(result.messages.size(), 1U);
+  EXPECT_EQ(result.messages.front().text, "hello");
+}
+
+TEST(CommandTests, RelativePositionResolutionUsesAnchor) {
+  std::string input{"~ ~5 -3.5"};
+  arv::command::CommandArgs args{arv::command::tokenize_command_text(input)};
+  arv::command::CommandArgReader reader(args);
+
+  auto position = reader.read_position();
+  ASSERT_TRUE(position);
+  auto resolved = arv::command::resolve_position(position.value(), arv::Vec3f{1.0F, 2.0F, 3.0F});
+  ASSERT_TRUE(resolved);
+
+  EXPECT_FLOAT_EQ(resolved.value().x, 1.0F);
+  EXPECT_FLOAT_EQ(resolved.value().y, 7.0F);
+  EXPECT_FLOAT_EQ(resolved.value().z, -3.5F);
+}
+
+TEST(CommandTests, ServerBoundPlayerCommandRequiresPermission) {
+  arv::command::CommandRegistry registry;
+  bool executed = false;
+  arv::command::Command command;
+  command.name = "test.secure";
+  command.domain = arv::command::CommandDomain::ServerBound;
+  command.permission = "arvane.command.secure";
+  command.execute = [&executed](arv::command::CommandCtx&) {
+    executed = true;
+    return arv::command::CommandResult::success();
+  };
+  ASSERT_TRUE(registry.register_command(std::move(command)));
+
+  arv::command::CommandSender sender;
+  sender.kind = arv::command::CommandSourceKind::Player;
+  sender.player_id = arv::PlayerID{1};
+  auto permission_check =
+      [](const arv::command::CommandSender&, const arv::command::Command& checked_command) {
+        return arv::command::CommandPermissionResult::deny(
+            "Permission denied: " + checked_command.permission + ".");
+      };
+  arv::command::CommandServices services{
+      nullptr,
+      arv::command::CommandPermissionCheckFn{permission_check},
+  };
+
+  const arv::command::CommandResult result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      sender,
+      services,
+      "/test.secure");
+
+  EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_FALSE(executed);
+}
+
+TEST(CommandTests, ServerBoundPlayerCommandWithEmptyPermissionRunsWithoutPermissionCheck) {
+  arv::command::CommandRegistry registry;
+  bool executed = false;
+  bool checked = false;
+  arv::command::Command command;
+  command.name = "test.open";
+  command.domain = arv::command::CommandDomain::ServerBound;
+  command.permission = "";
+  command.execute = [&executed](arv::command::CommandCtx&) {
+    executed = true;
+    return arv::command::CommandResult::success("opened");
+  };
+  ASSERT_TRUE(registry.register_command(std::move(command)));
+
+  arv::command::CommandSender sender;
+  sender.kind = arv::command::CommandSourceKind::Player;
+  sender.player_id = arv::PlayerID{1};
+  auto permission_check =
+      [&checked](const arv::command::CommandSender&, const arv::command::Command&) {
+        checked = true;
+        return arv::command::CommandPermissionResult::deny("should not be checked");
+      };
+  arv::command::CommandServices services{
+      nullptr,
+      arv::command::CommandPermissionCheckFn{permission_check},
+  };
+
+  const arv::command::CommandResult result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      sender,
+      services,
+      "/test.open");
+
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(executed);
+  EXPECT_FALSE(checked);
+}
+
+TEST(CommandTests, ConsoleTeleportMovesNamedOnlinePlayer) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.position = {0.5F, 4.0F, -2.0F};
+
+  const arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/tp local_player 10 20 -30");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(player.position, (arv::Vec3f{10.0F, 20.0F, -30.0F}));
+  EXPECT_EQ(player.velocity, (arv::Vec3f{}));
+  EXPECT_FALSE(player.grounded);
+}
+
+TEST(CommandTests, PlayerTeleportUsesPermissionAndRelativeCoordinates) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.position = {1.0F, 2.0F, 3.0F};
+  player.permission_overrides.custom_overrides["arvane.command.teleport"] =
+      arv::player::TriState::Allow;
+
+  const std::vector<arv::SessionID> session_ids = harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  std::optional<arv::command::CommandSender> sender =
+      harness.server.command_sender_for_session(session_ids.front());
+  ASSERT_TRUE(sender.has_value());
+
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/tp ~ ~5 -4");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(player.position, (arv::Vec3f{1.0F, 7.0F, -4.0F}));
+}
+
+TEST(CommandTests, PlayerTeleportIsDeniedWithoutPermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.position = {1.0F, 2.0F, 3.0F};
+
+  const std::vector<arv::SessionID> session_ids = harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  std::optional<arv::command::CommandSender> sender =
+      harness.server.command_sender_for_session(session_ids.front());
+  ASSERT_TRUE(sender.has_value());
+
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/tp 10 20 30");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_EQ(player.position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+}

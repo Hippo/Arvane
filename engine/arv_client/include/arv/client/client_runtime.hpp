@@ -78,6 +78,8 @@ public:
   [[nodiscard]] bool chat_open() const noexcept;
   [[nodiscard]] const std::string& chat_draft() const noexcept;
   [[nodiscard]] std::span<const std::string> chat_messages() const noexcept;
+  void close_chat() noexcept;
+  void add_chat_message(std::string message);
   [[nodiscard]] bool tab_menu_visible() const noexcept;
   [[nodiscard]] std::vector<protocol::ChunkData> drain_received_chunk_data();
   [[nodiscard]] std::vector<protocol::ChunkUnload> drain_received_chunk_unloads();

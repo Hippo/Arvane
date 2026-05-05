@@ -205,6 +205,10 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.worker_threads = dependencies_.thread_budget.primary_workers;
   server_start_info.world_tick_policy = dependencies_.world_tick_policy;
   server_start_info.entity_registry = &dependencies_.entity_registry;
+  server_start_info.server_save_root = server_save_root;
+  const std::vector<server::ServerPlayerSaveState> saved_players =
+      to_server_player_saves(loaded_save.players);
+  server_start_info.saved_players = saved_players;
   if (loaded_save.has_world_metadata) {
     server_start_info.initial_tick_index = loaded_save.world.tick_index;
   }

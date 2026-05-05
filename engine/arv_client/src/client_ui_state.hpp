@@ -19,7 +19,10 @@ public:
 
   void toggle_inventory_if_allowed(const player::ResolvedPermissions& permissions);
   void open_chat();
+  void open_chat_with_draft(std::string draft);
+  void close_chat() noexcept;
   void close_ui() noexcept;
+  void add_chat_message(std::string message);
 
   void handle_chat_input(const InputFrame& input, bool was_chat_open);
 

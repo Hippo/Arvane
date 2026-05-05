@@ -2,7 +2,10 @@
 
 #include "arv/server/server_runtime.hpp"
 
+#include "arv/command/command_dispatcher.hpp"
 #include "arv/physics/collision.hpp"
+#include "arv/server/command_services.hpp"
+#include "arv/server/permission_config.hpp"
 #include "arv/server/player_profile.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
@@ -59,6 +62,18 @@ struct PendingFluidJob {
 struct PendingGenerationJob {
   ChunkCoord coord{};
   sched::JobHandle<world::GeneratedChunkResult> job;
+};
+
+struct PlayerPermissionCache {
+  u64 source_fingerprint{};
+  u64 permission_config_revision{};
+  u64 region_registry_revision{};
+  bool initialized{};
+  bool has_last_region_query{};
+  WorldID last_region_world{};
+  Vec3f last_region_position{};
+  std::vector<world::RegionID> active_regions{};
+  player::PermissionLayer region_layer{};
 };
 
 class ServerWorldJobRuntime {
@@ -137,6 +152,7 @@ struct ServerRuntimeImpl {
   [[nodiscard]] ServerMode mode() const noexcept;
   [[nodiscard]] const SessionRegistry& sessions() const noexcept;
   [[nodiscard]] const WorldRegistry& worlds() const noexcept;
+  [[nodiscard]] const command::CommandRegistry& command_registry() const noexcept;
   [[nodiscard]] std::vector<DroppedItemStack> dropped_item_stacks() const;
   [[nodiscard]] const std::vector<ServerPlayerSaveState>& saved_player_states() const noexcept;
   [[nodiscard]] const world::WorldRuntime& voxel_world() const noexcept;
@@ -166,6 +182,14 @@ struct ServerRuntimeImpl {
   [[nodiscard]] std::optional<player::ItemStack> drop_one_from_player_inventory_cursor(
       PlayerID player_id);
   [[nodiscard]] player::InventoryOperationResult close_player_inventory_menu(PlayerID player_id);
+  [[nodiscard]] command::CommandResult execute_command(
+      command::CommandSender sender,
+      std::string_view command_text);
+  [[nodiscard]] std::optional<command::CommandSender> command_sender_for_session(
+      SessionID session_id) const;
+  [[nodiscard]] command::CommandPermissionResult check_command_permission(
+      const command::CommandSender& sender,
+      const command::Command& command_def);
 
   void handle_network_event(net::NetworkEvent event);
   void handle_connection_lost(net::ConnectionID connection_id);
@@ -240,6 +264,7 @@ struct ServerRuntimeImpl {
   protocol::HandshakePolicy handshake_policy_{};
   protocol::AuthServerInstanceID server_instance_id_{};
   SessionRegistry sessions_;
+  command::CommandRegistry command_registry_;
   PlayerProfileStore profiles_;
   WorldRegistry worlds_;
   world::WorldRuntime default_world_{DefaultWorldID};
@@ -256,6 +281,9 @@ struct ServerRuntimeImpl {
   std::vector<QueuedChunkStreamMessage> queued_chunk_stream_messages_;
   player::GameModeRegistry game_modes_{player::GameModeRegistry::with_builtins()};
   player::PermissionGroupRegistry permission_groups_{};
+  std::filesystem::path server_save_root_{};
+  u64 permission_config_revision_{};
+  HashMap<PlayerID, PlayerPermissionCache> permission_caches_;
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   HashMap<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
   HashMap<PlayerID, BlockBreakAttempt> block_break_attempts_;
