@@ -9,7 +9,7 @@
 namespace {
 
 arv::persistence::SavedChunkSection make_saved_chunk(
-    arv::ChunkCoord coord,
+    arv::ChunkSectionCoord coord,
     arv::voxel::BlockVariantID fill_variant,
     bool lighting_valid) {
   arv::persistence::SavedChunkSection chunk;
@@ -25,7 +25,7 @@ arv::persistence::SavedChunkSection make_saved_chunk(
 
 const arv::persistence::SavedChunkSection* find_chunk(
     const std::vector<arv::persistence::SavedChunkSection>& chunks,
-    arv::ChunkCoord coord) {
+    arv::ChunkSectionCoord coord) {
   const auto found = std::find_if(
       chunks.begin(),
       chunks.end(),

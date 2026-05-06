@@ -123,7 +123,7 @@ int DedicatedApplication::run(int argc, char** argv) {
       server_runtime,
       loaded_world.active_generation_config,
       loaded_world.world_seed,
-      loaded_world.visible_chunk_y,
+      loaded_world.world_height,
       registries.block_registry,
       registries.block_registry_hash,
       registries.item_registry,

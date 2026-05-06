@@ -275,8 +275,9 @@ TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
                             arv::player::default_player_tuning(),
                             arv::voxel::make_water_fluid_definition(),
                             streaming_config}));
+  server.voxel_world().configure_height({1, 1});
 
-  const arv::ChunkCoord expected_chunk{{0, 1, -2}};
+  const arv::ChunkSectionCoord expected_chunk{{0, 1, -2}};
   (void)server.voxel_world().ensure_chunk(expected_chunk);
   const arv::BlockPos changed_block =
       arv::chunk_local_to_block(expected_chunk, {{1, 2, 3}});
@@ -289,11 +290,11 @@ TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
 
   server.tick();
   client.fixed_tick(server.tick_index());
-  EXPECT_TRUE(client.drain_received_chunk_data().empty());
+  EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
 
   server.tick();
   client.fixed_tick(server.tick_index());
-  ASSERT_EQ(client.drain_received_chunk_data().size(), 1U);
+  ASSERT_EQ(client.drain_received_chunk_section_data().size(), 1U);
 
   ASSERT_TRUE(server.voxel_world().set_block(changed_block, dirt));
   server.tick();
@@ -325,8 +326,9 @@ TEST(IntegratedHandshakeTests, DroppedItemsReplicateAfterRelevantChunkStreaming)
                             arv::player::default_player_tuning(),
                             arv::voxel::make_water_fluid_definition(),
                             streaming_config}));
+  server.voxel_world().configure_height({1, 1});
 
-  const arv::ChunkCoord spawn_chunk{{0, 1, -2}};
+  const arv::ChunkSectionCoord spawn_chunk{{0, 1, -2}};
   (void)server.voxel_world().ensure_chunk(spawn_chunk);
 
   arv::client::ClientRuntime client(std::move(transports.client));
@@ -336,7 +338,7 @@ TEST(IntegratedHandshakeTests, DroppedItemsReplicateAfterRelevantChunkStreaming)
   for (int tick = 0; tick < 4 && client.dropped_item_count() == 0U; ++tick) {
     server.tick();
     client.fixed_tick(server.tick_index());
-    (void)client.drain_received_chunk_data();
+    (void)client.drain_received_chunk_section_data();
   }
 
   arv::player::PlayerState& player = connected_player(server);
@@ -477,8 +479,9 @@ TEST(IntegratedHandshakeTests, ClientReceivesChunkDataOnlyAfterInterestUpdate) {
                             arv::player::default_player_tuning(),
                             arv::voxel::make_water_fluid_definition(),
                             streaming_config}));
+  server.voxel_world().configure_height({1, 1});
 
-  const arv::ChunkCoord expected_chunk{{0, 1, -2}};
+  const arv::ChunkSectionCoord expected_chunk{{0, 1, -2}};
   (void)server.voxel_world().ensure_chunk(expected_chunk);
   ASSERT_TRUE(server.voxel_world().set_block(
       arv::chunk_local_to_block(expected_chunk, {{1, 2, 3}}),
@@ -490,11 +493,12 @@ TEST(IntegratedHandshakeTests, ClientReceivesChunkDataOnlyAfterInterestUpdate) {
 
   server.tick();
   client.fixed_tick(server.tick_index());
-  EXPECT_TRUE(client.drain_received_chunk_data().empty());
+  EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
 
   server.tick();
   client.fixed_tick(server.tick_index());
-  std::vector<arv::protocol::ChunkData> chunks = client.drain_received_chunk_data();
+  std::vector<arv::protocol::ChunkSectionData> chunks =
+      client.drain_received_chunk_section_data();
   ASSERT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
   EXPECT_EQ(chunks.front().coord, expected_chunk);
@@ -504,7 +508,7 @@ TEST(IntegratedHandshakeTests, ClientReceivesChunkDataOnlyAfterInterestUpdate) {
 
   server.tick();
   client.fixed_tick(server.tick_index());
-  EXPECT_TRUE(client.drain_received_chunk_data().empty());
+  EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
 }
 
 TEST(IntegratedHandshakeTests, ClientReceivesGeneratedChunkAfterAsyncGeneration) {
@@ -532,17 +536,17 @@ TEST(IntegratedHandshakeTests, ClientReceivesGeneratedChunkAfterAsyncGeneration)
 
   server.tick();
   client.fixed_tick(server.tick_index());
-  EXPECT_TRUE(client.drain_received_chunk_data().empty());
+  EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
 
   server.tick();
   client.fixed_tick(server.tick_index());
-  EXPECT_TRUE(client.drain_received_chunk_data().empty());
+  EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
 
-  std::vector<arv::protocol::ChunkData> chunks;
+  std::vector<arv::protocol::ChunkSectionData> chunks;
   for (int attempt = 0; attempt < 100 && chunks.empty(); ++attempt) {
     server.tick();
     client.fixed_tick(server.tick_index());
-    chunks = client.drain_received_chunk_data();
+    chunks = client.drain_received_chunk_section_data();
     if (chunks.empty()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -578,11 +582,11 @@ TEST(IntegratedHandshakeTests, RemoteConnectPathReceivesGeneratedChunks) {
   client.set_chunk_view_distance(0);
   ASSERT_TRUE(client.connect({"localhost", 42069}));
 
-  std::vector<arv::protocol::ChunkData> chunks;
+  std::vector<arv::protocol::ChunkSectionData> chunks;
   for (int attempt = 0; attempt < 100 && chunks.empty(); ++attempt) {
     server.tick();
     client.fixed_tick(server.tick_index());
-    chunks = client.drain_received_chunk_data();
+    chunks = client.drain_received_chunk_section_data();
     if (chunks.empty()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -632,11 +636,11 @@ TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackReceivesGeneratedChu
     GTEST_SKIP() << connect_result.error().message;
   }
 
-  std::vector<arv::protocol::ChunkData> chunks;
+  std::vector<arv::protocol::ChunkSectionData> chunks;
   for (int attempt = 0; attempt < 300 && chunks.empty(); ++attempt) {
     server.tick();
     client.fixed_tick(server.tick_index());
-    chunks = client.drain_received_chunk_data();
+    chunks = client.drain_received_chunk_section_data();
     if (chunks.empty()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -704,11 +708,12 @@ TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackStreamsViewDistanceO
     GTEST_SKIP() << connect_result.error().message;
   }
 
-  arv::HashSet<arv::ChunkCoord> received_chunks;
+  arv::HashSet<arv::ChunkSectionCoord> received_chunks;
   for (int attempt = 0; attempt < 1500 && received_chunks.size() < 27U; ++attempt) {
     server.tick();
     client.fixed_tick(server.tick_index());
-    for (const arv::protocol::ChunkData& chunk : client.drain_received_chunk_data()) {
+    for (const arv::protocol::ChunkSectionData& chunk :
+         client.drain_received_chunk_section_data()) {
       if (chunk.world_id == arv::server::DefaultWorldID) {
         received_chunks.insert(chunk.coord);
       }

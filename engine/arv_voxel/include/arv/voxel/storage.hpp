@@ -147,9 +147,9 @@ using ChunkStorageView = std::shared_ptr<const ChunkStorage>;
 
 class ChunkSection {
 public:
-  explicit ChunkSection(ChunkCoord coord = {});
+  explicit ChunkSection(ChunkSectionCoord coord = {});
 
-  [[nodiscard]] ChunkCoord coord() const noexcept {
+  [[nodiscard]] ChunkSectionCoord coord() const noexcept {
     return coord_;
   }
 
@@ -288,7 +288,7 @@ public:
 private:
   void ensure_detached_storage();
 
-  ChunkCoord coord_{};
+  ChunkSectionCoord coord_{};
   ChunkLifecycleState lifecycle_state_{ChunkLifecycleState::Loaded};
   ChunkStorageHandle storage_{};
   u64 block_version_{1};
@@ -304,7 +304,7 @@ private:
 };
 
 struct ChunkSnapshot {
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
   u64 source_version{};
   u64 source_content_version{};
   u64 source_light_version{};

@@ -188,13 +188,13 @@ std::optional<EntityNetID> WorldEntityStore::network_id_for_entity(EntityID enti
   return network == nullptr ? std::nullopt : std::optional<EntityNetID>{network->net_id};
 }
 
-std::optional<ChunkCoord> WorldEntityStore::entity_chunk(EntityID entity_id) const noexcept {
+std::optional<ChunkSectionCoord> WorldEntityStore::entity_chunk(EntityID entity_id) const noexcept {
   const entt::entity entity_handle = handle(entity_id);
   if (entity_handle == entt::null || !registry_.valid(entity_handle)) {
     return std::nullopt;
   }
   const auto* relevance = registry_.try_get<entity::ChunkRelevance>(entity_handle);
-  return relevance == nullptr ? std::nullopt : std::optional<ChunkCoord>{relevance->current_chunk};
+  return relevance == nullptr ? std::nullopt : std::optional<ChunkSectionCoord>{relevance->current_chunk};
 }
 
 usize WorldEntityStore::player_count() const noexcept {
@@ -550,7 +550,7 @@ std::optional<EntityNetID> WorldRuntime::network_id_for_entity(EntityID entity_i
   return impl_->entities.network_id_for_entity(entity_id);
 }
 
-std::optional<ChunkCoord> WorldRuntime::entity_chunk(EntityID entity_id) const noexcept {
+std::optional<ChunkSectionCoord> WorldRuntime::entity_chunk(EntityID entity_id) const noexcept {
   return impl_->entities.entity_chunk(entity_id);
 }
 

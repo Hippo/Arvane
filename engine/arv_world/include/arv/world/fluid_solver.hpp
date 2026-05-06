@@ -32,7 +32,7 @@ struct FluidUpdate {
 };
 
 struct FluidSimulationChunk {
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
   bool active{};
   u64 source_content_version{};
   voxel::ChunkStorageView storage{};
@@ -65,10 +65,10 @@ public:
       BlockPos pos,
       FluidUpdateReason reason,
       u32 delay_ticks = 0U);
-  static void enqueue_chunk_activation_updates(WorldRuntime& world, ChunkCoord coord);
+  static void enqueue_chunk_activation_updates(WorldRuntime& world, ChunkSectionCoord coord);
   static void store_deferred_boundary_update(
       WorldRuntime& world,
-      ChunkCoord target,
+      ChunkSectionCoord target,
       FluidUpdate update);
   static u32 process_updates(
       WorldRuntime& world,

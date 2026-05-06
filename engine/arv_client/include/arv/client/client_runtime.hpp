@@ -81,8 +81,8 @@ public:
   void close_chat() noexcept;
   void add_chat_message(std::string message);
   [[nodiscard]] bool tab_menu_visible() const noexcept;
-  [[nodiscard]] std::vector<protocol::ChunkData> drain_received_chunk_data();
-  [[nodiscard]] std::vector<protocol::ChunkUnload> drain_received_chunk_unloads();
+  [[nodiscard]] std::vector<protocol::ChunkSectionData> drain_received_chunk_section_data();
+  [[nodiscard]] std::vector<protocol::ChunkSectionUnload> drain_received_chunk_section_unloads();
   [[nodiscard]] std::vector<protocol::BlockUpdateBatch> drain_received_block_updates();
   [[nodiscard]] const player::Inventory& inventory() const noexcept;
   [[nodiscard]] const std::optional<player::ItemStack>& inventory_cursor_stack() const noexcept;

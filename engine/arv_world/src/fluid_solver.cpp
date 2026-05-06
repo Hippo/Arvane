@@ -59,7 +59,7 @@ public:
       updates_.pop_front();
       queued_positions_.erase(update.pos);
 
-      const ChunkCoord chunk_coord = block_to_chunk(update.pos);
+      const ChunkSectionCoord chunk_coord = block_to_chunk(update.pos);
       const SimulationChunkState* chunk = find_chunk(chunk_coord);
       if (!can_process_update(update, chunk)) {
         result_.deferred_updates.emplace_back(update);
@@ -102,7 +102,7 @@ private:
     return {{pos.value.x + offset.x, pos.value.y + offset.y, pos.value.z + offset.z}};
   }
 
-  [[nodiscard]] SimulationChunkState* find_chunk(ChunkCoord coord) noexcept {
+  [[nodiscard]] SimulationChunkState* find_chunk(ChunkSectionCoord coord) noexcept {
     if (cached_chunk_coord_.has_value() && cached_chunk_coord_.value() == coord &&
         (cached_mutable_chunk_ != nullptr || cached_chunk_ == nullptr)) {
       return cached_mutable_chunk_;
@@ -116,7 +116,7 @@ private:
     return chunk;
   }
 
-  [[nodiscard]] const SimulationChunkState* find_chunk(ChunkCoord coord) const noexcept {
+  [[nodiscard]] const SimulationChunkState* find_chunk(ChunkSectionCoord coord) const noexcept {
     if (cached_chunk_coord_.has_value() && cached_chunk_coord_.value() == coord) {
       return cached_chunk_;
     }
@@ -153,7 +153,7 @@ private:
                : (*fluids)[voxel::local_index(block_to_local(pos))];
   }
 
-  [[nodiscard]] bool is_active(ChunkCoord coord) const noexcept {
+  [[nodiscard]] bool is_active(ChunkSectionCoord coord) const noexcept {
     const SimulationChunkState* chunk = find_chunk(coord);
     return chunk != nullptr && chunk->active;
   }
@@ -194,8 +194,8 @@ private:
   void enqueue_adjacent_updates(BlockPos pos, FluidUpdateReason reason) {
     for (const Vec3i offset : NeighborOffsets) {
       const BlockPos neighbor = offset_block(pos, offset);
-      const ChunkCoord origin_chunk = block_to_chunk(pos);
-      const ChunkCoord neighbor_chunk_coord = block_to_chunk(neighbor);
+      const ChunkSectionCoord origin_chunk = block_to_chunk(pos);
+      const ChunkSectionCoord neighbor_chunk_coord = block_to_chunk(neighbor);
       if (origin_chunk != neighbor_chunk_coord &&
           !is_active(neighbor_chunk_coord) &&
           !can_process_inactive(reason)) {
@@ -338,8 +338,8 @@ private:
   std::deque<FluidUpdate> followup_updates_;
   HashSet<BlockPos> queued_positions_;
   HashSet<BlockPos> queued_followup_positions_;
-  HashMap<ChunkCoord, SimulationChunkState> chunks_;
-  mutable std::optional<ChunkCoord> cached_chunk_coord_;
+  HashMap<ChunkSectionCoord, SimulationChunkState> chunks_;
+  mutable std::optional<ChunkSectionCoord> cached_chunk_coord_;
   mutable const SimulationChunkState* cached_chunk_{};
   mutable SimulationChunkState* cached_mutable_chunk_{};
   FluidSimulationResult result_;
@@ -362,8 +362,8 @@ void FluidSolver::enqueue_neighbor_updates(
   const WorldSearch search{world};
   for (const Vec3i offset : detail::NeighborOffsets) {
     const BlockPos neighbor = detail::offset_block(pos, offset);
-    const ChunkCoord origin_chunk = block_to_chunk(pos);
-    const ChunkCoord neighbor_chunk_coord = block_to_chunk(neighbor);
+    const ChunkSectionCoord origin_chunk = block_to_chunk(pos);
+    const ChunkSectionCoord neighbor_chunk_coord = block_to_chunk(neighbor);
     if (origin_chunk != neighbor_chunk_coord &&
         !search.is_chunk_active(neighbor_chunk_coord) &&
         !can_process_inactive(reason)) {
@@ -374,13 +374,13 @@ void FluidSolver::enqueue_neighbor_updates(
   }
 }
 
-void FluidSolver::enqueue_chunk_activation_updates(WorldRuntime& world, ChunkCoord coord) {
+void FluidSolver::enqueue_chunk_activation_updates(WorldRuntime& world, ChunkSectionCoord coord) {
   world.impl_->fluid.enqueue_chunk_activation_updates(world, coord);
 }
 
 void FluidSolver::store_deferred_boundary_update(
     WorldRuntime& world,
-    ChunkCoord target,
+    ChunkSectionCoord target,
     FluidUpdate update) {
   world.impl_->fluid.store_deferred_boundary_update(target, update);
 }
@@ -396,7 +396,7 @@ u32 FluidSolver::process_updates(
   u32 processed = 0;
   WorldSearch search{world};
   for (const FluidUpdate& update : batch) {
-    const ChunkCoord chunk_coord = block_to_chunk(update.pos);
+    const ChunkSectionCoord chunk_coord = block_to_chunk(update.pos);
     if (!search.is_chunk_active(chunk_coord) &&
         !can_process_inactive(update.reason)) {
       store_deferred_boundary_update(world, chunk_coord, update);
@@ -463,8 +463,8 @@ void FluidSolver::enqueue_adjacent_updates(
   const TickIndex execute_at = world.tick_index() + delay_ticks;
   for (const Vec3i offset : detail::NeighborOffsets) {
     const BlockPos neighbor = detail::offset_block(pos, offset);
-    const ChunkCoord origin_chunk = block_to_chunk(pos);
-    const ChunkCoord neighbor_chunk_coord = block_to_chunk(neighbor);
+    const ChunkSectionCoord origin_chunk = block_to_chunk(pos);
+    const ChunkSectionCoord neighbor_chunk_coord = block_to_chunk(neighbor);
     if (origin_chunk != neighbor_chunk_coord &&
         !search.is_chunk_active(neighbor_chunk_coord) &&
         !can_process_inactive(reason)) {

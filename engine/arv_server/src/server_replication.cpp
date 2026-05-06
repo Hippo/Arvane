@@ -139,7 +139,7 @@ void ServerRuntimeImpl::send_block_updates() {
         protocol::serialize_block_update_batch(batch));
     if (send_result) {
       for (const protocol::BlockUpdate& update : batch.updates) {
-        const ChunkCoord coord = block_to_chunk(update.pos);
+        const ChunkSectionCoord coord = block_to_chunk(update.pos);
         if (const voxel::ChunkSection* chunk = default_world_.find_chunk(coord);
             chunk != nullptr) {
           (void)chunk_streamer_.mark_sent_block_version(

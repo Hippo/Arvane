@@ -27,23 +27,23 @@ struct ChunkViewState {
   };
 
   struct PendingMesh {
-    ChunkCoord coord{};
+    ChunkSectionCoord coord{};
     u64 source_version{};
     u64 source_content_version{};
     u64 source_light_version{};
     sched::JobHandle<TimedChunkMeshResult> job;
   };
 
-  HashMap<ChunkCoord, render::ChunkDrawItem> draw_items;
+  HashMap<ChunkSectionCoord, render::ChunkDrawItem> draw_items;
   std::vector<PendingMesh> pending_meshes;
-  HashSet<ChunkCoord> mesh_in_flight;
+  HashSet<ChunkSectionCoord> mesh_in_flight;
 
-  std::optional<ChunkCoord> target_center;
+  std::optional<ChunkSectionCoord> target_center;
   i32 target_min_chunk_y{};
   i32 target_max_chunk_y{};
   i32 target_render_distance{};
-  std::deque<ChunkCoord> mesh_candidates;
-  HashSet<ChunkCoord> mesh_candidate_set;
+  std::deque<ChunkSectionCoord> mesh_candidates;
+  HashSet<ChunkSectionCoord> mesh_candidate_set;
   u64 observed_mesh_revision{};
   bool mesh_rescan_requested{true};
   bool draw_items_dirty{true};
@@ -55,15 +55,12 @@ struct ChunkViewState {
   double mesh_ms_last_frame{};
 };
 
-[[nodiscard]] ChunkCoord world_position_chunk_coord(Vec3f position);
+[[nodiscard]] ChunkSectionCoord world_position_chunk_section_coord(Vec3f position);
 
-[[nodiscard]] ChunkCoord camera_chunk_coord(const client::CameraShell& camera);
-
-[[nodiscard]] std::pair<i32, i32> visible_worldgen_chunk_y_range(
-    const world::WorldGenerationConfig& config);
+[[nodiscard]] ChunkSectionCoord camera_chunk_section_coord(const client::CameraShell& camera);
 
 void request_chunk_view_mesh_rescan(ChunkViewState& view) noexcept;
-void remove_chunk_view_chunk(ChunkViewState& view, ChunkCoord coord);
+void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord);
 
 [[nodiscard]] bool update_chunk_view(
     world::WorldRuntime& world,
@@ -72,7 +69,7 @@ void remove_chunk_view_chunk(ChunkViewState& view, ChunkCoord coord);
     ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
     const io::ChunkPipelineConfig& pipeline,
-    ChunkCoord center,
+    ChunkSectionCoord center,
     i32 min_chunk_y,
     i32 max_chunk_y,
     const voxel::BlockRegistry& block_registry,

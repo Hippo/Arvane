@@ -63,8 +63,8 @@ void log_dedicated_server_ready(
       server.voxel_world().loaded_chunk_count(),
       server.voxel_world().entity_count(),
       loaded_world.saved_players.size(),
-      loaded_world.visible_chunk_y.first,
-      loaded_world.visible_chunk_y.second);
+      loaded_world.world_height.min_chunk_y,
+      loaded_world.world_height.max_chunk_y);
   core::info(
       "dedicated",
       "listening on {}:{} at {} TPS",

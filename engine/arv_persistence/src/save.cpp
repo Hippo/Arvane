@@ -1,5 +1,7 @@
 #include "arv/persistence/save.hpp"
 
+#include "arv/world/world_runtime.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -690,14 +692,16 @@ Expected<void, PersistenceError> save_server_root(
     return save_result;
   }
 
+  const world::WorldHeightSettings world_height =
+      world::world_height_settings_from_generation_config(world.generation_config);
   world::WorldClock saved_clock = world.clock;
   saved_clock.world_tick = world.tick_index;
   const json world_json{
       {"name", world.name},
       {"seed", world.seed},
       {"tick_index", world.tick_index},
-      {"min_chunk_y", world.min_chunk_y},
-      {"max_chunk_y", world.max_chunk_y},
+      {"min_chunk_y", world_height.min_chunk_y},
+      {"max_chunk_y", world_height.max_chunk_y},
       {"registry_refs",
        {{"block_registry_hash", world.block_registry_hash},
         {"item_registry_hash", world.item_registry_hash}}},
@@ -717,7 +721,8 @@ Expected<void, PersistenceError> save_server_root(
     const std::filesystem::path region_path =
         root / "worlds" / world.name / "regions" /
         ("r." + std::to_string(region.x) + "." + std::to_string(region.z) + ".arvr");
-    auto region_result = write_region_file(region_path, region, region_chunks, block_registry, world.min_chunk_y);
+    auto region_result =
+        write_region_file(region_path, region, region_chunks, block_registry, world_height.min_chunk_y);
     if (!region_result) {
       return region_result;
     }
@@ -881,14 +886,20 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
     loaded.world.seed = world_json.at("seed").get<u64>();
     loaded.world.tick_index = world_json.at("tick_index").get<TickIndex>();
     loaded.world.clock.world_tick = loaded.world.tick_index;
-    loaded.world.min_chunk_y = world_json.at("min_chunk_y").get<i32>();
-    loaded.world.max_chunk_y = world_json.at("max_chunk_y").get<i32>();
     loaded.world.block_registry_hash =
         world_json.at("registry_refs").at("block_registry_hash").get<u64>();
     loaded.world.item_registry_hash =
         world_json.at("registry_refs").at("item_registry_hash").get<u64>();
     loaded.world.generation_config =
         world_generation_from_json(world_json.at("generation_config"));
+    const world::WorldHeightSettings loaded_world_height =
+        world::world_height_settings_from_generation_config(loaded.world.generation_config);
+    const i32 saved_region_min_chunk_y =
+        world_json.contains("min_chunk_y")
+            ? world_json.at("min_chunk_y").get<i32>()
+            : loaded_world_height.min_chunk_y;
+    loaded.world.min_chunk_y = loaded_world_height.min_chunk_y;
+    loaded.world.max_chunk_y = loaded_world_height.max_chunk_y;
     if (const auto time = world_json.find("time"); time != world_json.end()) {
       loaded.world.clock = world_clock_from_json(*time, loaded.world.tick_index);
       loaded.world.tick_index = loaded.world.clock.world_tick;
@@ -902,7 +913,7 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
           continue;
         }
 
-        auto region_result = read_region_file(entry.path(), block_registry, loaded.world.min_chunk_y);
+        auto region_result = read_region_file(entry.path(), block_registry, saved_region_min_chunk_y);
         if (!region_result) {
           return Expected<LoadedSaveData, PersistenceError>::failure(region_result.error());
         }

@@ -9,19 +9,19 @@ namespace arv::client {
 
 class ClientChunkInbox {
 public:
-  void push_chunk_data(protocol::ChunkData data);
-  void push_chunk_unload(protocol::ChunkUnload unload);
+  void push_chunk_section_data(protocol::ChunkSectionData data);
+  void push_chunk_section_unload(protocol::ChunkSectionUnload unload);
   void push_block_updates(protocol::BlockUpdateBatch updates);
 
-  [[nodiscard]] std::vector<protocol::ChunkData> drain_chunk_data();
-  [[nodiscard]] std::vector<protocol::ChunkUnload> drain_chunk_unloads();
+  [[nodiscard]] std::vector<protocol::ChunkSectionData> drain_chunk_section_data();
+  [[nodiscard]] std::vector<protocol::ChunkSectionUnload> drain_chunk_section_unloads();
   [[nodiscard]] std::vector<protocol::BlockUpdateBatch> drain_block_updates();
 
   void clear() noexcept;
 
 private:
-  std::vector<protocol::ChunkData> received_chunk_data_{};
-  std::vector<protocol::ChunkUnload> received_chunk_unloads_{};
+  std::vector<protocol::ChunkSectionData> received_chunk_section_data_{};
+  std::vector<protocol::ChunkSectionUnload> received_chunk_section_unloads_{};
   std::vector<protocol::BlockUpdateBatch> received_block_updates_{};
 };
 

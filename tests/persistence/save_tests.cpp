@@ -1,6 +1,7 @@
 #include "arv/persistence/save.hpp"
 
 #include "arv/world/world_generation.hpp"
+#include "arv/world/world_runtime.hpp"
 #include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -63,7 +65,7 @@ surface:
 }
 
 arv::persistence::SavedChunkSection make_saved_chunk(
-    arv::ChunkCoord coord,
+    arv::ChunkSectionCoord coord,
     arv::voxel::BlockVariantID fill_variant) {
   arv::persistence::SavedChunkSection chunk;
   chunk.coord = coord;
@@ -175,8 +177,10 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(loaded.value().save.save_format_version, arv::persistence::CurrentSaveFormatVersion);
   EXPECT_EQ(loaded.value().world.seed, 42U);
   EXPECT_EQ(loaded.value().world.tick_index, 99U);
+  EXPECT_EQ(loaded.value().world.min_chunk_y, 0);
+  EXPECT_EQ(loaded.value().world.max_chunk_y, 4);
   ASSERT_EQ(loaded.value().chunks.size(), 1U);
-  EXPECT_EQ(loaded.value().chunks[0].coord, (arv::ChunkCoord{{0, 0, 0}}));
+  EXPECT_EQ(loaded.value().chunks[0].coord, (arv::ChunkSectionCoord{{0, 0, 0}}));
   EXPECT_EQ(loaded.value().chunks[0].blocks[0], stone);
   EXPECT_TRUE(loaded.value().chunks[0].fluids[0].source());
   ASSERT_EQ(loaded.value().players.size(), 1U);
@@ -227,6 +231,102 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(dropped_item->dropped_item_stack->item, stone_item);
   EXPECT_EQ(dropped_item->dropped_item_stack->count, 4U);
   EXPECT_FLOAT_EQ(dropped_item->dropped_item_pickup_delay_seconds, 0.25F);
+}
+
+TEST(SaveTests, WorldHeightLoadsFromGenerationBoundsWhenChunkBoundsAreStale) {
+  TempDir temp_dir;
+  const std::filesystem::path server_save_root =
+      temp_dir.path / "arvane_home" / "saves" / "server-save-1";
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone = block_registry.find_variant("arvane:stone").value();
+
+  arv::world::WorldGenerationConfig generation_config = make_worldgen_config();
+  generation_config.min_y = -32;
+  generation_config.max_y = 96;
+
+  const arv::persistence::SaveMetadata save_metadata{
+      arv::persistence::CurrentSaveFormatVersion,
+      std::string{arv::persistence::CurrentGameVersion},
+      arv::persistence::hash_block_registry(block_registry),
+      arv::persistence::hash_item_registry(item_registry),
+      "Test Save"};
+  const arv::persistence::WorldMetadata world_metadata{
+      "default",
+      42,
+      99,
+      generation_config,
+      -2,
+      1,
+      save_metadata.block_registry_hash,
+      save_metadata.item_registry_hash};
+  const std::vector<arv::persistence::SavedChunkSection> chunks{
+      make_saved_chunk({{0, 6, 0}}, stone)};
+
+  ASSERT_TRUE(arv::persistence::save_server_root(
+      server_save_root,
+      save_metadata,
+      world_metadata,
+      chunks,
+      std::span<const arv::persistence::PlayerSaveData>{},
+      std::span<const arv::entity::PersistentEntityRecord>{},
+      block_registry,
+      item_registry));
+
+  const std::filesystem::path region_file =
+      server_save_root / "worlds" / "default" / "regions" / "r.0.0.arvr";
+  ASSERT_TRUE(arv::persistence::write_region_file(
+      region_file,
+      arv::RegionCoord{0, 0},
+      chunks,
+      block_registry,
+      -1));
+
+  const std::filesystem::path world_file =
+      server_save_root / "worlds" / "default" / "world.json";
+  std::string world_text;
+  {
+    std::ifstream input(world_file);
+    ASSERT_TRUE(input);
+    world_text.assign(
+        std::istreambuf_iterator<char>{input},
+        std::istreambuf_iterator<char>{});
+  }
+  const std::string saved_min_chunk_y = "\"min_chunk_y\": -2";
+  const std::string saved_max_chunk_y = "\"max_chunk_y\": 6";
+  const std::string::size_type min_chunk_y_pos = world_text.find(saved_min_chunk_y);
+  const std::string::size_type max_chunk_y_pos = world_text.find(saved_max_chunk_y);
+  ASSERT_NE(min_chunk_y_pos, std::string::npos);
+  ASSERT_NE(max_chunk_y_pos, std::string::npos);
+  world_text.replace(min_chunk_y_pos, saved_min_chunk_y.size(), "\"min_chunk_y\": -1");
+  world_text.replace(max_chunk_y_pos, saved_max_chunk_y.size(), "\"max_chunk_y\": 1");
+  {
+    std::ofstream output(world_file, std::ios::trunc);
+    ASSERT_TRUE(output);
+    output << world_text;
+  }
+
+  auto loaded = arv::persistence::load_server_root(
+      server_save_root,
+      block_registry,
+      item_registry);
+
+  ASSERT_TRUE(loaded);
+  ASSERT_TRUE(loaded.value().has_world_metadata);
+  EXPECT_EQ(loaded.value().world.min_chunk_y, -2);
+  EXPECT_EQ(loaded.value().world.max_chunk_y, 6);
+  ASSERT_EQ(loaded.value().chunks.size(), 1U);
+  EXPECT_EQ(loaded.value().chunks[0].coord, (arv::ChunkSectionCoord{{0, 6, 0}}));
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({loaded.value().world.min_chunk_y, loaded.value().world.max_chunk_y});
+  world.restore_saved_chunk(
+      loaded.value().chunks[0].coord,
+      loaded.value().chunks[0].blocks,
+      loaded.value().chunks[0].lights,
+      loaded.value().chunks[0].fluids);
+  EXPECT_NE(world.find_chunk({{0, 6, 0}}), nullptr);
 }
 
 TEST(SaveTests, PlayerPermissionsAreWrittenEvenWhenEmpty) {

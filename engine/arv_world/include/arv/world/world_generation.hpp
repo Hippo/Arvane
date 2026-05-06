@@ -56,8 +56,17 @@ struct ChunkGenerationRequest {
   WorldID world_id{};
   u64 seed{};
   ChunkCoord coord{};
+  i32 min_chunk_y{};
+  i32 max_chunk_y{};
   WorldGenerationConfig config{};
   WorldGenerationPalette palette{};
+};
+
+struct GeneratedChunkSection {
+  ChunkSectionCoord coord{};
+  std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks{};
+
+  constexpr bool operator==(const GeneratedChunkSection&) const = default;
 };
 
 struct GeneratedChunk {
@@ -65,7 +74,7 @@ struct GeneratedChunk {
   u64 seed{};
   u32 generator_version{};
   ChunkCoord coord{};
-  std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks{};
+  std::vector<GeneratedChunkSection> sections{};
 };
 
 using WorldGenerationConfigResult = Expected<WorldGenerationConfig, WorldGenerationError>;

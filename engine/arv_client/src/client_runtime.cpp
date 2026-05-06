@@ -177,12 +177,12 @@ bool ClientRuntime::tab_menu_visible() const noexcept {
   return impl_->ui.tab_menu_visible();
 }
 
-std::vector<protocol::ChunkData> ClientRuntime::drain_received_chunk_data() {
-  return impl_->chunks.drain_chunk_data();
+std::vector<protocol::ChunkSectionData> ClientRuntime::drain_received_chunk_section_data() {
+  return impl_->chunks.drain_chunk_section_data();
 }
 
-std::vector<protocol::ChunkUnload> ClientRuntime::drain_received_chunk_unloads() {
-  return impl_->chunks.drain_chunk_unloads();
+std::vector<protocol::ChunkSectionUnload> ClientRuntime::drain_received_chunk_section_unloads() {
+  return impl_->chunks.drain_chunk_section_unloads();
 }
 
 std::vector<protocol::BlockUpdateBatch> ClientRuntime::drain_received_block_updates() {

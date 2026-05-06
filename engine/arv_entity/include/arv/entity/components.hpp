@@ -232,7 +232,7 @@ struct DroppedItem {
 };
 
 struct ChunkRelevance {
-  ChunkCoord current_chunk{};
+  ChunkSectionCoord current_chunk{};
 };
 
 struct EntitySnapshotEntry {
@@ -243,7 +243,7 @@ struct EntitySnapshotEntry {
   Vec3f position{};
   Vec3f velocity{};
   Quatf rotation{};
-  ChunkCoord chunk{};
+  ChunkSectionCoord chunk{};
   std::optional<PlayerID> owning_player{};
   std::string animation_name{};
   Seconds animation_time_seconds{};
@@ -266,7 +266,7 @@ struct DroppedItemEntitySnapshot {
   WorldID world_id{};
   Vec3f position{};
   Vec3f velocity{};
-  ChunkCoord chunk{};
+  ChunkSectionCoord chunk{};
   player::ItemStack stack{};
   Seconds pickup_delay_seconds{};
 };

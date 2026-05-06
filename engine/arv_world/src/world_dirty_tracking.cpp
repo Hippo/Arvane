@@ -44,7 +44,7 @@ void WorldDirtyTracker::set_last_lighting_snapshot_chunk_count(usize count) cons
   last_lighting_snapshot_chunk_count_ = count;
 }
 
-void WorldDirtyTracker::enqueue_dirty_mesh_chunk(ChunkCoord coord) {
+void WorldDirtyTracker::enqueue_dirty_mesh_chunk(ChunkSectionCoord coord) {
   if (dirty_mesh_chunk_set_.insert(coord).second) {
     dirty_mesh_chunks_.emplace_back(coord);
   }
@@ -54,11 +54,11 @@ usize WorldDirtyTracker::dirty_mesh_chunk_count() const noexcept {
   return dirty_mesh_chunk_set_.size();
 }
 
-std::vector<ChunkCoord> WorldDirtyTracker::dirty_chunks(
+std::vector<ChunkSectionCoord> WorldDirtyTracker::dirty_chunks(
     const WorldRuntime& world,
     voxel::ChunkDirtyFlags flag) const {
-  std::vector<ChunkCoord> coords;
-  for (const ChunkCoord coord : world.loaded_chunk_coords()) {
+  std::vector<ChunkSectionCoord> coords;
+  for (const ChunkSectionCoord coord : world.loaded_chunk_coords()) {
     const voxel::ChunkSection* chunk = world.find_chunk(coord);
     if (chunk != nullptr && chunk->is_dirty(flag)) {
       coords.emplace_back(coord);
@@ -67,13 +67,13 @@ std::vector<ChunkCoord> WorldDirtyTracker::dirty_chunks(
   return coords;
 }
 
-std::vector<ChunkCoord> WorldDirtyTracker::consume_dirty_mesh_chunks(
+std::vector<ChunkSectionCoord> WorldDirtyTracker::consume_dirty_mesh_chunks(
     const WorldRuntime& world,
     voxel::ChunkDirtyFlags flag) {
-  std::vector<ChunkCoord> coords;
+  std::vector<ChunkSectionCoord> coords;
   coords.reserve(dirty_mesh_chunks_.size());
   while (!dirty_mesh_chunks_.empty()) {
-    const ChunkCoord coord = dirty_mesh_chunks_.front();
+    const ChunkSectionCoord coord = dirty_mesh_chunks_.front();
     dirty_mesh_chunks_.pop_front();
     dirty_mesh_chunk_set_.erase(coord);
 
@@ -87,7 +87,7 @@ std::vector<ChunkCoord> WorldDirtyTracker::consume_dirty_mesh_chunks(
 
 void WorldDirtyTracker::mark_boundary_neighbors_dirty(
     WorldRuntime& world,
-    ChunkCoord coord,
+    ChunkSectionCoord coord,
     SectionLocalPos local) noexcept {
   const i32 min_x = local.value.x == 0 ? -1 : 0;
   const i32 max_x = local.value.x == ChunkSize - 1 ? 1 : 0;
@@ -103,7 +103,7 @@ void WorldDirtyTracker::mark_boundary_neighbors_dirty(
           continue;
         }
 
-        const ChunkCoord neighbor{{
+        const ChunkSectionCoord neighbor{{
             coord.value.x + x,
             coord.value.y + y,
             coord.value.z + z,
@@ -122,7 +122,7 @@ void WorldDirtyTracker::mark_boundary_neighbors_dirty(
 
 void WorldDirtyTracker::mark_loaded_chunk_neighbors_dirty(
     WorldRuntime& world,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   for (i32 z = -1; z <= 1; ++z) {
     for (i32 y = -1; y <= 1; ++y) {
       for (i32 x = -1; x <= 1; ++x) {
@@ -130,7 +130,7 @@ void WorldDirtyTracker::mark_loaded_chunk_neighbors_dirty(
           continue;
         }
 
-        const ChunkCoord neighbor{{
+        const ChunkSectionCoord neighbor{{
             coord.value.x + x,
             coord.value.y + y,
             coord.value.z + z,
@@ -149,7 +149,7 @@ void WorldDirtyTracker::mark_loaded_chunk_neighbors_dirty(
 
 void WorldDirtyTracker::mark_loaded_chunk_lighting_dependencies_dirty(
     WorldRuntime& world,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   for (i32 z = -1; z <= 1; ++z) {
     for (i32 y = -1; y <= 1; ++y) {
       for (i32 x = -1; x <= 1; ++x) {
@@ -171,7 +171,7 @@ void WorldDirtyTracker::mark_loaded_chunk_lighting_dependencies_dirty(
 
 void WorldDirtyTracker::mark_light_dependency_neighbors_dirty(
     WorldRuntime& world,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   for (const Vec3i& offset : NeighborOffsets) {
     mark_neighbor_light_dependency_dirty(
         world,
@@ -185,7 +185,7 @@ void WorldDirtyTracker::mark_light_dependency_neighbors_dirty(
 
 void WorldDirtyTracker::mark_neighbor_mesh_dependency_dirty(
     WorldRuntime& world,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   voxel::ChunkSection* neighbor = world.find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_mesh_dependency_dirty();
@@ -199,7 +199,7 @@ void WorldDirtyTracker::mark_neighbor_mesh_dependency_dirty(
 
 void WorldDirtyTracker::mark_neighbor_mesh_only_dependency_dirty(
     WorldRuntime& world,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   voxel::ChunkSection* neighbor = world.find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_mesh_dependency_dirty();
@@ -210,7 +210,7 @@ void WorldDirtyTracker::mark_neighbor_mesh_only_dependency_dirty(
 
 void WorldDirtyTracker::mark_neighbor_light_dependency_dirty(
     WorldRuntime& world,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   voxel::ChunkSection* neighbor = world.find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_light_dependency_dirty();
@@ -221,7 +221,7 @@ void WorldDirtyTracker::mark_neighbor_light_dependency_dirty(
 
 void WorldDirtyTracker::mark_neighbor_lighting_dependency_dirty(
     WorldRuntime& world,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   voxel::ChunkSection* neighbor = world.find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_lighting_dependency_dirty();
@@ -241,11 +241,11 @@ u64 WorldRuntime::mesh_revision() const noexcept {
   return impl_->dirty.mesh_revision();
 }
 
-std::vector<ChunkCoord> WorldRuntime::dirty_chunks(voxel::ChunkDirtyFlags flag) const {
+std::vector<ChunkSectionCoord> WorldRuntime::dirty_chunks(voxel::ChunkDirtyFlags flag) const {
   return impl_->dirty.dirty_chunks(*this, flag);
 }
 
-std::vector<ChunkCoord> WorldRuntime::consume_dirty_mesh_chunks(
+std::vector<ChunkSectionCoord> WorldRuntime::consume_dirty_mesh_chunks(
     voxel::ChunkDirtyFlags flag) {
   return impl_->dirty.consume_dirty_mesh_chunks(*this, flag);
 }

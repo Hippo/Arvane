@@ -203,6 +203,12 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   } else {
     default_world_.clear_generation_context();
   }
+  if (start_info.world_height.has_value()) {
+    default_world_.configure_height(start_info.world_height.value());
+  } else if (chunk_generation_.has_value() && chunk_generation_->enabled) {
+    default_world_.configure_height(
+        world::world_height_settings_from_generation_config(chunk_generation_->config));
+  }
   world_jobs_.configure(start_info);
   world::WorldTickPolicy tick_policy = start_info.world_tick_policy;
   tick_policy.fluid_budget = 0U;

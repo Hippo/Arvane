@@ -33,7 +33,7 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
 [[nodiscard]] i32 abs_i32(i32 value) noexcept;
 [[nodiscard]] i32 max_abs3(i32 x, i32 y, i32 z) noexcept;
 [[nodiscard]] BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept;
-[[nodiscard]] ChunkCoord chunk_for_position(Vec3f position) noexcept;
+[[nodiscard]] ChunkSectionCoord chunk_for_position(Vec3f position) noexcept;
 [[nodiscard]] SectionLocalPos local_from_index(usize index) noexcept;
 [[nodiscard]] usize lifecycle_index(voxel::ChunkLifecycleState state) noexcept;
 
@@ -42,46 +42,68 @@ class WorldRegionRuntime;
 
 class WorldChunkStore {
 public:
+  void configure_height(WorldHeightSettings settings);
+  [[nodiscard]] WorldHeightSettings height_settings() const noexcept;
+  [[nodiscard]] Chunk& ensure_column(ChunkCoord coord);
+  [[nodiscard]] Chunk* find_column(ChunkCoord coord) noexcept;
+  [[nodiscard]] const Chunk* find_column(ChunkCoord coord) const noexcept;
   [[nodiscard]] voxel::ChunkSection& ensure_chunk(
-      ChunkCoord coord,
+      ChunkSectionCoord coord,
       voxel::ChunkLifecycleState state,
       WorldDirtyTracker& dirty);
-  void request_chunk_load(ChunkCoord coord, WorldDirtyTracker& dirty);
-  bool unload_chunk(ChunkCoord coord) noexcept;
+  void request_chunk_load(ChunkSectionCoord coord, WorldDirtyTracker& dirty);
+  bool unload_chunk(ChunkSectionCoord coord) noexcept;
 
-  [[nodiscard]] voxel::ChunkSection* find_chunk(ChunkCoord coord) noexcept;
-  [[nodiscard]] const voxel::ChunkSection* find_chunk(ChunkCoord coord) const noexcept;
+  [[nodiscard]] voxel::ChunkSection* find_chunk(ChunkSectionCoord coord) noexcept;
+  [[nodiscard]] const voxel::ChunkSection* find_chunk(ChunkSectionCoord coord) const noexcept;
 
   [[nodiscard]] usize loaded_count() const noexcept;
   [[nodiscard]] usize active_count() const noexcept;
-  [[nodiscard]] bool is_active(ChunkCoord coord) const noexcept;
+  [[nodiscard]] bool is_active(ChunkSectionCoord coord) const noexcept;
   [[nodiscard]] usize lifecycle_count(voxel::ChunkLifecycleState state) const noexcept;
-  [[nodiscard]] std::vector<ChunkCoord> loaded_coords() const;
+  [[nodiscard]] std::vector<ChunkSectionCoord> loaded_coords() const;
   [[nodiscard]] ChunkWorkloadSnapshot workload_snapshot(
       bool lighting_work_pending,
       usize last_lighting_snapshot_chunk_count,
       usize dirty_mesh_chunk_count) const noexcept;
 
-  bool set_lifecycle_state(ChunkCoord coord, voxel::ChunkLifecycleState state) noexcept;
+  bool set_lifecycle_state(ChunkSectionCoord coord, voxel::ChunkLifecycleState state) noexcept;
   void set_lifecycle_state_internal(
       voxel::ChunkSection& chunk,
       voxel::ChunkLifecycleState state) noexcept;
-  void update_simulation_radius(WorldRuntime& world, ChunkCoord center, i32 radius) noexcept;
+  void update_simulation_radius(WorldRuntime& world, ChunkSectionCoord center, i32 radius) noexcept;
   void update_simulation_radii(
       WorldRuntime& world,
-      std::span<const ChunkCoord> centers,
+      std::span<const ChunkSectionCoord> centers,
       i32 radius) noexcept;
 
-  [[nodiscard]] StableHashMap<ChunkCoord, voxel::ChunkSection>& chunks() noexcept {
+  template<typename Fn>
+  void for_each_loaded_section(Fn&& fn) {
+    for (auto& [coord, chunk] : chunks_) {
+      (void)coord;
+      chunk.for_each_loaded_section(fn);
+    }
+  }
+
+  template<typename Fn>
+  void for_each_loaded_section(Fn&& fn) const {
+    for (const auto& [coord, chunk] : chunks_) {
+      (void)coord;
+      chunk.for_each_loaded_section(fn);
+    }
+  }
+
+  [[nodiscard]] StableHashMap<ChunkCoord, Chunk>& chunks() noexcept {
     return chunks_;
   }
 
-  [[nodiscard]] const StableHashMap<ChunkCoord, voxel::ChunkSection>& chunks() const noexcept {
+  [[nodiscard]] const StableHashMap<ChunkCoord, Chunk>& chunks() const noexcept {
     return chunks_;
   }
 
 private:
-  StableHashMap<ChunkCoord, voxel::ChunkSection> chunks_;
+  WorldHeightSettings height_{};
+  StableHashMap<ChunkCoord, Chunk> chunks_;
   std::array<usize, 9> lifecycle_counts_{};
   usize active_chunk_count_{};
 };
@@ -100,37 +122,37 @@ public:
   [[nodiscard]] usize last_lighting_snapshot_chunk_count() const noexcept;
   void set_last_lighting_snapshot_chunk_count(usize count) const noexcept;
 
-  void enqueue_dirty_mesh_chunk(ChunkCoord coord);
+  void enqueue_dirty_mesh_chunk(ChunkSectionCoord coord);
   [[nodiscard]] usize dirty_mesh_chunk_count() const noexcept;
 
-  [[nodiscard]] std::vector<ChunkCoord> dirty_chunks(
+  [[nodiscard]] std::vector<ChunkSectionCoord> dirty_chunks(
       const WorldRuntime& world,
       voxel::ChunkDirtyFlags flag) const;
-  [[nodiscard]] std::vector<ChunkCoord> consume_dirty_mesh_chunks(
+  [[nodiscard]] std::vector<ChunkSectionCoord> consume_dirty_mesh_chunks(
       const WorldRuntime& world,
       voxel::ChunkDirtyFlags flag);
 
   void mark_boundary_neighbors_dirty(
       WorldRuntime& world,
-      ChunkCoord coord,
+      ChunkSectionCoord coord,
       SectionLocalPos local) noexcept;
-  void mark_loaded_chunk_neighbors_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
+  void mark_loaded_chunk_neighbors_dirty(WorldRuntime& world, ChunkSectionCoord coord) noexcept;
   void mark_loaded_chunk_lighting_dependencies_dirty(
       WorldRuntime& world,
-      ChunkCoord coord) noexcept;
-  void mark_light_dependency_neighbors_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
-  void mark_neighbor_mesh_dependency_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
-  void mark_neighbor_mesh_only_dependency_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
-  void mark_neighbor_light_dependency_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
-  void mark_neighbor_lighting_dependency_dirty(WorldRuntime& world, ChunkCoord coord) noexcept;
+      ChunkSectionCoord coord) noexcept;
+  void mark_light_dependency_neighbors_dirty(WorldRuntime& world, ChunkSectionCoord coord) noexcept;
+  void mark_neighbor_mesh_dependency_dirty(WorldRuntime& world, ChunkSectionCoord coord) noexcept;
+  void mark_neighbor_mesh_only_dependency_dirty(WorldRuntime& world, ChunkSectionCoord coord) noexcept;
+  void mark_neighbor_light_dependency_dirty(WorldRuntime& world, ChunkSectionCoord coord) noexcept;
+  void mark_neighbor_lighting_dependency_dirty(WorldRuntime& world, ChunkSectionCoord coord) noexcept;
 
 private:
   u64 lighting_revision_{1};
   u64 mesh_revision_{1};
   bool lighting_work_pending_{};
   mutable usize last_lighting_snapshot_chunk_count_{};
-  std::deque<ChunkCoord> dirty_mesh_chunks_;
-  HashSet<ChunkCoord> dirty_mesh_chunk_set_;
+  std::deque<ChunkSectionCoord> dirty_mesh_chunks_;
+  HashSet<ChunkSectionCoord> dirty_mesh_chunk_set_;
 };
 
 class WorldTickQueues {
@@ -169,11 +191,11 @@ public:
       TickIndex current_tick,
       u32 budget);
 
-  void store_deferred_boundary_update(ChunkCoord target, FluidUpdate update);
-  void enqueue_chunk_activation_updates(WorldRuntime& world, ChunkCoord coord);
+  void store_deferred_boundary_update(ChunkSectionCoord target, FluidUpdate update);
+  void enqueue_chunk_activation_updates(WorldRuntime& world, ChunkSectionCoord coord);
 
   [[nodiscard]] usize pending_update_count() const noexcept;
-  [[nodiscard]] usize deferred_boundary_event_count(ChunkCoord coord) const noexcept;
+  [[nodiscard]] usize deferred_boundary_event_count(ChunkSectionCoord coord) const noexcept;
   [[nodiscard]] usize total_deferred_boundary_event_count() const noexcept;
 
   [[nodiscard]] u32 process_updates(
@@ -189,7 +211,7 @@ public:
 private:
   std::deque<FluidUpdate> fluid_updates_;
   HashMap<BlockPos, FluidUpdate> pending_fluid_updates_by_position_;
-  HashMap<ChunkCoord, std::vector<FluidUpdate>> deferred_boundary_fluid_updates_;
+  HashMap<ChunkSectionCoord, std::vector<FluidUpdate>> deferred_boundary_fluid_updates_;
 };
 
 class WorldLightingRuntime {
@@ -229,7 +251,7 @@ public:
   [[nodiscard]] std::optional<EntityID> entity_for_player(PlayerID player_id) const noexcept;
   [[nodiscard]] std::optional<PlayerID> player_for_entity(EntityID entity_id) const noexcept;
   [[nodiscard]] std::optional<EntityNetID> network_id_for_entity(EntityID entity_id) const noexcept;
-  [[nodiscard]] std::optional<ChunkCoord> entity_chunk(EntityID entity_id) const noexcept;
+  [[nodiscard]] std::optional<ChunkSectionCoord> entity_chunk(EntityID entity_id) const noexcept;
   [[nodiscard]] usize player_count() const noexcept;
   [[nodiscard]] std::vector<PlayerID> player_ids() const;
 

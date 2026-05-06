@@ -23,11 +23,13 @@ The world and chunk model should provide:
 
 ## Core World Model
 
-The world is divided into fixed-size voxel chunks.
+The world is divided into horizontal chunk columns, and each column contains fixed-size vertical chunk sections.
 
-A **chunk** is the primary unit of world storage, streaming, generation, meshing, and simulation coordination.
+A **chunk** is a horizontal `(cx, cz)` column. It is the primary residency, streaming-interest, and generation coordination unit.
 
-Chunks are addressed in **chunk space**, while blocks and entities may exist in **world space**.
+A **chunk section** is a 16 x 16 x 16 voxel storage and processing unit addressed by `(cx, cy, cz)`.
+
+Chunks and chunk sections are addressed in chunk space, while blocks and entities may exist in world space.
 
 The world is conceptually infinite in horizontal extent. Vertical behavior may be configurable at the game layer, but the engine world model should not assume a small hardcoded height limit.
 
@@ -48,26 +50,47 @@ This is the fundamental storage and processing unit.
 Reasoning:
 
 - 16-wide horizontal dimensions are familiar and practical
-- 16³ is small enough for efficient meshing, lighting, and generation jobs
+- 16³ is small enough for efficient meshing, lighting, and simulation jobs
 - vertical sectioning avoids the cost of treating an entire tall column as one allocation/update unit
 
 ### Chunk columns
 
 A **chunk column** is the set of vertically stacked chunk sections sharing the same `(cx, cz)` coordinates.
 
-A column is not itself the fundamental storage unit. It is a logical grouping used for:
+A column owns the vertical section slots for one `(cx, cz)` coordinate and is used for:
 
 - streaming coordination
-- world generation coordination
+- world generation jobs
 - high-level visibility/load tracking
 - biome and heightmap style data that is naturally column-oriented
 
 The engine should distinguish between:
 
 - **chunk section**: one 16 x 16 x 16 voxel storage unit
-- **chunk column**: all chunk sections at a given horizontal chunk coordinate
+- **chunk / chunk column**: all chunk sections at a given horizontal chunk coordinate
 
-Unless otherwise stated, “chunk” in most engine code should refer to a **chunk section**.
+Engine code should use `ChunkSection` or section-explicit names for section-sized work and reserve `Chunk` for the column object.
+
+---
+
+## World Height Settings
+
+Each world owns explicit vertical chunk-section bounds:
+
+- `min_chunk_y`
+- `max_chunk_y`
+
+Both bounds are inclusive, and negative chunk-section Y values are valid.
+
+The section count for a world is:
+
+- `section_count = max_chunk_y - min_chunk_y + 1`
+
+The O(1) index for a section inside a chunk column is:
+
+- `section_index = section_y - min_chunk_y`
+
+A section Y outside the configured bounds is outside that world's live chunk-column storage. Generated worlds derive these bounds from their configured vertical block range unless the server/world provides explicit height settings. Save files may retain `min_chunk_y` / `max_chunk_y` as compatibility mirrors, but generated-world load/save paths treat `generation_config.min_y` / `generation_config.max_y` as the authoritative source and recompute the chunk-section bounds from those block-Y values. Non-generated worlds may use a narrow default, such as section `0..0`, until configured otherwise.
 
 ---
 
@@ -136,7 +159,15 @@ These identify a specific block position in the world.
 
 ### Chunk coordinates
 
-Chunk coordinates identify the chunk section containing a block.
+Chunk coordinates identify a horizontal chunk column.
+
+Example:
+
+- `(cx, cz)`
+
+### Chunk section coordinates
+
+Chunk section coordinates identify the 16 x 16 x 16 section containing a block.
 
 Example:
 
@@ -156,12 +187,6 @@ Each local coordinate is in the range:
 
 - `0..15`
 
-### Column coordinates
-
-A chunk column is addressed by:
-
-- `(cx, cz)`
-
 ### Region coordinates
 
 A region is addressed by:
@@ -178,7 +203,7 @@ This is especially important for negative coordinates.
 
 The engine must never rely on truncating integer division semantics when converting world coordinates to chunk coordinates.
 
-### World block to chunk coordinate
+### World block to chunk section coordinate
 
 For a chunk size of 16:
 
@@ -196,7 +221,7 @@ Result is always in:
 
 - `0..15`
 
-### Chunk and local back to world
+### Chunk section and local back to world
 
 - `wx = cx * 16 + lx`
 - `wy = cy * 16 + ly`
@@ -216,7 +241,8 @@ Result is always in:
 
 The engine should provide canonical helpers for:
 
-- world block -> chunk position
+- world block -> chunk section position
+- chunk section -> chunk column position
 - world block -> local block position
 - chunk + local -> world block
 - chunk column -> region
@@ -240,8 +266,8 @@ A chunk section should own:
 - block state/storage metadata for those voxels
 - local lighting data for those voxels
 - local dirty flags related to remeshing, relighting, serialization, and generation stages
-- per-chunk caches that are derived only from that chunk’s voxel contents and immediate neighbor observations
-- chunk-local bookkeeping needed for thread-safe state transitions
+- per-section caches that are derived only from that section's voxel contents and immediate neighbor observations
+- section-local bookkeeping needed for thread-safe state transitions
 
 Examples:
 
@@ -275,7 +301,7 @@ A chunk section should not directly own:
 - cross-world systems
 - persistence backends
 - renderer-owned GPU resources as authoritative state
-- long-lived references to arbitrary other chunks
+- long-lived references to arbitrary other chunk columns or sections
 - large global caches that span many chunks
 
 A chunk section may be associated with render resources, but authoritative ownership of GPU objects should live in rendering systems, not inside the chunk’s core world state object.
@@ -299,13 +325,31 @@ Column-level data should not replace chunk-section ownership for actual voxel co
 
 ---
 
+## Live Chunk Storage
+
+The live world store is organized as:
+
+```text
+ChunkCoord (cx, cz) -> Chunk column -> vector slots of ChunkSection
+```
+
+The column vector is sized from the world's height settings. Looking up a loaded section is:
+
+1. map lookup by `(cx, cz)`
+2. bounds check for `cy`
+3. vector index `cy - min_chunk_y`
+
+This avoids treating section lookup as a three-dimensional map search while preserving section-sized ownership for block, light, fluid, dirty, lifecycle, and version data.
+
+---
+
 ## Neighbor Access
 
 Neighbor access is critical and must be tightly defined.
 
 ### Principle
 
-Chunks do not permanently own neighboring chunks.
+Chunk sections do not permanently own neighboring sections, and chunk columns do not permanently own neighboring columns.
 
 Instead, neighboring data is accessed through world-level query interfaces or short-lived views.
 
@@ -346,7 +390,7 @@ Use world or chunk-manager APIs such as:
 
 The exact API may vary, but the ownership model should remain the same:
 
-- the world/chunk manager owns live chunk instances
+- the world/chunk manager owns live chunk-column and chunk-section instances
 - systems obtain temporary access
 - neighbor references are not stored long-term unless they are weak handles or revalidated handles
 
@@ -539,7 +583,7 @@ These are not the same thing.
 
 ### Loaded radius
 
-The loaded radius controls which chunks are resident in memory.
+The loaded radius controls which chunk columns are resident in memory.
 
 This is primarily for:
 
@@ -551,7 +595,7 @@ This is primarily for:
 
 ### Simulation radius
 
-The simulation radius controls which chunks actively run world simulation.
+The simulation radius controls which chunk columns are eligible for active world simulation. Section-oriented systems still process individual chunk sections inside those columns.
 
 This includes:
 
@@ -563,9 +607,9 @@ This includes:
 
 ### Rule
 
-Simulation should only run for chunks inside the active simulation set.
+Simulation should only run for chunk sections inside the active simulation set.
 
-Chunks may be loaded but not simulated.
+Chunk columns may be loaded while some or all of their sections are not actively simulated.
 
 This separation is important for performance.
 
@@ -583,7 +627,7 @@ Systems that depend on neighbors near the simulation edge must define graceful b
 
 Examples:
 
-- boundary chunks may still sample loaded non-simulating neighbors
+- boundary chunk sections may still sample loaded non-simulating neighbors
 - updates that would push beyond the active simulation set may be deferred, clamped, or propagated only when neighbors activate
 
 The policy should be system-specific, but the world model must allow the distinction.
@@ -598,9 +642,9 @@ The world model supports procedural generation beyond currently loaded areas, bu
 
 The engine does not eagerly generate the infinite world.
 
-Chunks are generated when required by load or explicit generation requests.
+Chunk columns are generated when required by load or explicit generation requests.
 
-Generation is asynchronous. A streaming or gameplay caller may mark a section `Requested`, but it must not run terrain generation inline on the caller path. The authoritative server/world scheduler owns generation jobs, workers compute generated block data from immutable seed/config inputs, and the world thread publishes accepted results by transitioning the section to `Loaded`.
+Generation is asynchronous. A streaming or gameplay caller may mark sections in a column `Requested`, but it must not run terrain generation inline on the caller path. The authoritative server/world scheduler owns column generation jobs, workers compute generated block data for the whole configured vertical column from immutable seed/config inputs, and the world thread publishes accepted section results by transitioning sections to `Loaded`.
 
 Publication of completed generation jobs is budgeted independently from job
 submission. If several workers finish at once, the world/server publishes a
@@ -611,7 +655,7 @@ client application, meshing, and upload work from collapsing onto one frame.
 
 Generation may occur when:
 
-- a chunk is requested and no persisted data exists
+- a chunk column is requested and no persisted data exists
 - neighboring generation dependencies require it
 - pregeneration tools request it
 - editor or server workflows explicitly force it
@@ -620,11 +664,11 @@ All of these triggers enqueue generation work. They do not synchronously fill li
 
 ### Boundary rules
 
-Generation logic must define what neighborhood is required to finalize a chunk.
+Generation logic must define what neighborhood is required to finalize a chunk column.
 
 For example:
 
-- base terrain may generate from world seed and chunk coordinate alone
+- base terrain may generate from world seed and chunk-column coordinate alone
 - feature placement may require neighboring column context
 - lighting initialization may require adjacent chunk data
 - biome transitions may require region- or neighborhood-level sampling
@@ -750,15 +794,17 @@ Persistence format details belong in another document, but the world model assum
 
 ## Networking Implications
 
-The world/chunk model should naturally support streaming chunk data to clients.
+The world/chunk model should naturally support streaming section-sized chunk data to clients.
 
 This document does not define the protocol, but it assumes:
 
-- chunk sections are reasonable network payload units
-- chunk columns may be useful as higher-level streaming groupings
+- chunk interest is selected horizontally by chunk column
+- the server streams every configured vertical chunk section for each selected column
+- chunk sections remain the network payload unit
+- chunk columns remain the higher-level streaming, residency, and generation grouping
 - loaded radius and sent-to-client radius are related but not necessarily identical
-- server authority decides which chunks are relevant to a client
-- inactive or far-away chunks do not need full simulation or streaming
+- server authority decides which chunk columns are relevant to a client
+- inactive or far-away columns do not need full simulation or streaming
 
 ---
 
@@ -768,8 +814,8 @@ The following invariants should hold across the engine:
 
 - chunk section size is always 16 x 16 x 16
 - coordinate conversions always use floor division/modulo semantics
-- live chunk ownership belongs to the world/chunk manager, not neighboring chunks
-- neighboring chunk access is temporary and validated
+- live chunk-column and chunk-section ownership belongs to the world/chunk manager, not neighboring chunks
+- neighboring chunk-section access is temporary and validated
 - loaded does not automatically mean simulated
 - off-thread work publishes results through controlled handoff
 - chunk unload is ticket-driven and job-aware
@@ -1470,33 +1516,34 @@ Background jobs should use immutable snapshots, handles, or explicit command que
 
 ## Chunk View Distance
 
-Chunk view distance defines how far chunks are loaded, simulated, streamed, and rendered around a player or camera.
+Chunk view distance defines how far chunk columns are loaded, simulated, streamed, and rendered around a player or camera.
 
-View distance is not a single value. Arvane separates chunk distance into several related ranges so that loading, simulation, networking, and rendering can be tuned independently.
+View distance is not a single value. Arvane separates horizontal chunk-column distance into several related ranges so that loading, simulation, networking, and rendering can be tuned independently.
 
 ### Distance Types
 
 The engine should distinguish between:
 
 - **Load distance**
-  - Chunks that should exist in memory.
-  - Includes chunks needed for rendering, simulation borders, neighbor sampling, and streaming stability.
+  - Chunk columns that should exist in memory.
+  - Includes columns and their configured section slots needed for rendering, simulation borders, neighbor sampling, and streaming stability.
 
 - **Simulation distance**
-  - Chunks that receive active world ticks.
-  - Fluids, block updates, entities, and scheduled simulation events only run inside this range unless explicitly forced.
+  - Chunk columns whose sections may receive active world ticks.
+  - Fluids, block updates, entities, and scheduled simulation events only run on sections inside this range unless explicitly forced.
 
 - **Render distance**
-  - Chunks that are eligible to be drawn by the client renderer.
-  - Render distance must never require chunks that are not loaded.
+  - Chunk columns whose received sections are eligible to be drawn by the client renderer.
+  - Render distance must never require sections that are not loaded or received.
 
 - **Network stream distance**
-  - Chunks the server should send to a client.
-  - Usually matches or slightly exceeds render distance so the client can receive chunks before they become visible.
+  - Chunk columns the server should send to a client.
+  - For each selected column, the server streams the full configured vertical section range as section-sized payloads.
+  - Usually matches or slightly exceeds render distance so the client can receive sections before they become visible.
 
 ### Ownership
 
-The server is authoritative over chunk loading and simulation.
+The server is authoritative over chunk-column loading and section simulation.
 
 Clients may request or configure a preferred render/view distance, but the server decides the effective stream and simulation ranges based on:
 
@@ -1506,13 +1553,13 @@ Clients may request or configure a preferred render/view distance, but the serve
 - world rules
 - maximum allowed client view distance
 
-The client renderer may maintain its own local render distance, but it must only render chunks that have been received and validated.
+The client renderer may maintain its own local render distance, but it must only render chunk sections that have been received and validated.
 
 ### Distance Shape
 
-Chunk distance should be based on chunk coordinates, not block coordinates.
+Chunk distance should be based on horizontal chunk-column coordinates, not block coordinates or section Y.
 
-The default view area should use a square or rectangular chunk region around the player for simplicity and predictable streaming behavior.
+The default view area should use a square or rectangular chunk-column region around the player for simplicity and predictable streaming behavior.
 
 Radial or frustum-based refinement may be added later, but core chunk ownership, loading, and save logic should not depend on camera frustum visibility.
 
@@ -1520,14 +1567,14 @@ Radial or frustum-based refinement may be added later, but core chunk ownership,
 
 As the player moves, the world should:
 
-1. Determine the target chunk position of the player.
-2. Compute desired chunk ranges for loading, simulation, rendering, and streaming.
-3. Schedule missing chunks for load or generation.
-4. Keep existing chunks alive while they remain inside the relevant distance.
-5. Mark chunks outside all required ranges as candidates for unload.
-6. Delay unloading if pending jobs, mesh uploads, lighting updates, saves, or network sends still reference the chunk.
+1. Determine the target chunk-column position of the player.
+2. Compute desired chunk-column ranges for loading, simulation, rendering, and streaming.
+3. Schedule missing columns for load or generation; generation jobs compute the whole configured vertical column.
+4. Keep existing columns and their sections alive while they remain inside the relevant distance.
+5. Mark sections outside all required ranges as candidates for unload, and unload empty columns when no sections remain.
+6. Delay unloading if pending jobs, mesh uploads, lighting updates, saves, or network sends still reference the section or column.
 
-Chunks must not be unloaded immediately just because they leave render distance. Render distance is only one part of the chunk lifecycle.
+Chunk sections must not be unloaded immediately just because their column leaves render distance. Render distance is only one part of the chunk lifecycle.
 
 ### Hysteresis
 
@@ -1535,23 +1582,23 @@ Chunk loading should use hysteresis to avoid constant load/unload churn when a p
 
 For example:
 
-- load chunks when they enter the load radius
-- unload chunks only after they exceed the load radius plus an unload margin
+- load chunk columns when they enter the load radius
+- unload chunk columns only after they exceed the load radius plus an unload margin
 
 This margin should be configurable.
 
 ### Interaction With Meshing
 
-Meshing may require neighbor chunk data, especially for:
+Meshing may require neighboring chunk-section data, especially for:
 
 - face culling
 - ambient occlusion
 - lighting
 - transparent boundary behavior
 
-For this reason, the load distance should usually be at least one chunk larger than the render distance.
+For this reason, the load distance should usually be at least one chunk column larger than the render distance.
 
-A chunk should not be considered fully meshable unless its required neighbor boundary data is available or explicitly represented as missing/empty according to the meshing rules.
+A chunk section should not be considered fully meshable unless its required neighbor boundary data is available or explicitly represented as missing/empty according to the meshing rules.
 
 ### Interaction With Simulation
 
@@ -1566,12 +1613,12 @@ Inside simulation distance:
 
 Outside simulation distance:
 
-- chunks may remain loaded
-- chunks may remain renderable
+- chunk columns may remain loaded
+- received chunk sections may remain renderable
 - most active simulation should pause
 - deferred updates may be stored for later activation
 
-When a chunk enters simulation distance, it should process activation logic before normal ticking. This allows deferred fluid, lighting, and block update events to be restored safely.
+When a chunk column enters simulation distance, its sections should process activation logic before normal ticking. This allows deferred fluid, lighting, and block update events to be restored safely.
 
 ### Configuration
 
@@ -1618,27 +1665,27 @@ The view-distance system should leave room for:
 
 ## Key Invariants
 
-* world owns chunk state
+* world owns chunk-column and chunk-section state
 * workers compute, world commits
-* chunk results are version-validated
+* section results are version-validated
 * cross-chunk effects are explicit (events/queues)
-* chunk unload respects active work
+* chunk-section unload respects active work
 * derived work is async, mutation is controlled
 * worker-facing snapshots hold immutable shared storage, not live world references
-* chunk neighbor access for meshing is prefetched into snapshot storage pointers before worker execution
-* full chunk copies are avoided unless copy-on-write detaches a mutating live chunk from an active snapshot
+* chunk-section neighbor access for meshing is prefetched into snapshot storage pointers before worker execution
+* full section copies are avoided unless copy-on-write detaches a mutating live section from an active snapshot
 
 ---
 
 ## Performance Notes
 
-Chunk storage is optimized for the current world-owned model:
+Chunk-section storage is optimized for the current world-owned model:
 
 * block, light, and fluid payloads are flat contiguous arrays
 * snapshots capture shared immutable storage handles and source versions
-* live chunk mutation detaches storage only when an active snapshot still references it
+* live chunk-section mutation detaches storage only when an active snapshot still references it
 * async results must validate block/content/light versions before publication
-* dirty mesh queues deduplicate chunk coordinates before scheduling
+* dirty mesh queues deduplicate chunk-section coordinates before scheduling
 
 Workers must never call world lookup APIs. The simulation/main thread prepares all chunk and neighbor inputs up front, and workers consume only snapshot data.
 
@@ -1649,12 +1696,14 @@ Workers must never call world lookup APIs. The simulation/main thread prepares a
 The engine world model is based on:
 
 - **16 x 16 x 16 chunk sections**
-- **chunk columns** as vertical groupings
+- **chunk columns** as horizontal residency, streaming-interest, and generation units
+- per-world **height settings** that define the inclusive vertical chunk-section range
 - **32 x 32 chunk-column regions** for persistence/indexing
 - clear separation between **loaded** and **simulated**
 - explicit chunk ownership by the **world/chunk manager**
 - temporary, validated neighbor access instead of permanent neighbor ownership
+- section-sized networking, meshing, lighting, and simulation work
 - safe off-thread work through snapshots, guards, pinning, and controlled publication
-- demand-driven generation for an effectively unbounded world
+- demand-driven whole-column generation for an effectively unbounded world
 
- This model is intended to remain stable even as higher-level game rules evolve.
+This model is intended to remain stable even as higher-level game rules evolve.

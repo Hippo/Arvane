@@ -17,16 +17,16 @@ public:
   [[nodiscard]] bool consume_interest_changed() noexcept;
   [[nodiscard]] protocol::ChunkInterestUpdate build_interest_update() const noexcept;
 
-  [[nodiscard]] ChunkCoord current_chunk() const noexcept {
+  [[nodiscard]] ChunkSectionCoord current_chunk() const noexcept {
     return current_chunk_;
   }
 
 private:
-  [[nodiscard]] static ChunkCoord position_to_chunk(Vec3f position) noexcept;
+  [[nodiscard]] static ChunkSectionCoord position_to_chunk(Vec3f position) noexcept;
 
   WorldID world_id_{};
-  ChunkCoord current_chunk_{};
-  std::optional<ChunkCoord> previous_chunk_{};
+  ChunkSectionCoord current_chunk_{};
+  std::optional<ChunkSectionCoord> previous_chunk_{};
   i32 view_distance_{2};
   u32 next_sequence_id_{1};
   bool has_current_chunk_{};

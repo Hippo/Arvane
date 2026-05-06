@@ -34,6 +34,7 @@ struct WorldMetadata {
   u64 seed{1};
   TickIndex tick_index{};
   world::WorldGenerationConfig generation_config{};
+  // Compatibility mirror; generated-world height is derived from generation_config.
   i32 min_chunk_y{};
   i32 max_chunk_y{};
   u64 block_registry_hash{};

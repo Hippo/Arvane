@@ -5,21 +5,21 @@
 namespace arv::protocol {
 namespace {
 
-void write_chunk_coord(MessageWriter& writer, ChunkCoord coord) {
+void write_chunk_coord(MessageWriter& writer, ChunkSectionCoord coord) {
   writer.write<i32>(coord.value.x);
   writer.write<i32>(coord.value.y);
   writer.write<i32>(coord.value.z);
 }
 
-Expected<ChunkCoord, ProtocolError> read_chunk_coord(MessageReader& reader) {
+Expected<ChunkSectionCoord, ProtocolError> read_chunk_coord(MessageReader& reader) {
   auto x = reader.read<i32>();
   auto y = reader.read<i32>();
   auto z = reader.read<i32>();
   if (!x || !y || !z) {
-    return Expected<ChunkCoord, ProtocolError>::failure(
+    return Expected<ChunkSectionCoord, ProtocolError>::failure(
         ProtocolError{"failed to decode chunk coordinate"});
   }
-  return Expected<ChunkCoord, ProtocolError>::success({{x.value(), y.value(), z.value()}});
+  return Expected<ChunkSectionCoord, ProtocolError>::success({{x.value(), y.value(), z.value()}});
 }
 
 Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
@@ -67,7 +67,7 @@ Expected<ChunkInterestUpdate, ProtocolError> deserialize_chunk_interest_update(
         ProtocolError{"failed to decode chunk interest update header"});
   }
 
-  std::optional<ChunkCoord> previous;
+  std::optional<ChunkSectionCoord> previous;
   if (has_previous.value()) {
     auto previous_coord = read_chunk_coord(reader);
     if (!previous_coord) {
@@ -95,7 +95,7 @@ Expected<ChunkInterestUpdate, ProtocolError> deserialize_chunk_interest_update(
   return Expected<ChunkInterestUpdate, ProtocolError>::success(update);
 }
 
-std::vector<u8> serialize_chunk_data(const ChunkData& data) {
+std::vector<u8> serialize_chunk_section_data(const ChunkSectionData& data) {
   MessageWriter writer(chunk_data_wire_size(data.has_lighting, data.has_fluids));
   writer.write<u32>(data.world_id.value);
   write_chunk_coord(writer, data.coord);
@@ -123,7 +123,7 @@ std::vector<u8> serialize_chunk_data(const ChunkData& data) {
   return std::move(writer).take_bytes();
 }
 
-Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> bytes) {
+Expected<ChunkSectionData, ProtocolError> deserialize_chunk_section_data(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
   auto coord = read_chunk_coord(reader);
@@ -135,11 +135,11 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
   auto has_fluids = reader.read_bool();
   if (!world_id || !coord || !chunk_version || !chunk_content_version ||
       !chunk_light_version || !has_lighting || !lighting_valid || !has_fluids) {
-    return Expected<ChunkData, ProtocolError>::failure(
-        ProtocolError{"failed to decode chunk data header"});
+    return Expected<ChunkSectionData, ProtocolError>::failure(
+        ProtocolError{"failed to decode chunk section data header"});
   }
 
-  ChunkData data;
+  ChunkSectionData data;
   data.world_id = WorldID{world_id.value()};
   data.coord = coord.value();
   data.chunk_version = chunk_version.value();
@@ -155,8 +155,8 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
   for (voxel::BlockVariantID& block : data.blocks) {
     auto value = reader.read<u32>();
     if (!value) {
-      return Expected<ChunkData, ProtocolError>::failure(
-          ProtocolError{"failed to decode chunk block data"});
+      return Expected<ChunkSectionData, ProtocolError>::failure(
+          ProtocolError{"failed to decode chunk section block data"});
     }
     block = voxel::BlockVariantID{value.value()};
   }
@@ -165,8 +165,8 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
     for (voxel::LightWord& light : data.lights) {
       auto value = reader.read<voxel::LightWord>();
       if (!value) {
-        return Expected<ChunkData, ProtocolError>::failure(
-            ProtocolError{"failed to decode chunk lighting data"});
+        return Expected<ChunkSectionData, ProtocolError>::failure(
+            ProtocolError{"failed to decode chunk section lighting data"});
       }
       light = value.value();
     }
@@ -177,8 +177,8 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
       auto level = reader.read<u8>();
       auto flags = reader.read<u8>();
       if (!type || !level || !flags) {
-        return Expected<ChunkData, ProtocolError>::failure(
-            ProtocolError{"failed to decode chunk fluid data"});
+        return Expected<ChunkSectionData, ProtocolError>::failure(
+            ProtocolError{"failed to decode chunk section fluid data"});
       }
       fluid = {
           voxel::FluidTypeID{type.value()},
@@ -189,32 +189,34 @@ Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> by
 
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<ChunkData, ProtocolError>::failure(trailing.error());
+    return Expected<ChunkSectionData, ProtocolError>::failure(trailing.error());
   }
-  return Expected<ChunkData, ProtocolError>::success(std::move(data));
+  return Expected<ChunkSectionData, ProtocolError>::success(std::move(data));
 }
 
-std::vector<u8> serialize_chunk_unload(const ChunkUnload& unload) {
+std::vector<u8> serialize_chunk_section_unload(const ChunkSectionUnload& unload) {
   MessageWriter writer;
   writer.write<u32>(unload.world_id.value);
   write_chunk_coord(writer, unload.coord);
   return std::move(writer).take_bytes();
 }
 
-Expected<ChunkUnload, ProtocolError> deserialize_chunk_unload(std::span<const u8> bytes) {
+Expected<ChunkSectionUnload, ProtocolError> deserialize_chunk_section_unload(
+    std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
   auto coord = read_chunk_coord(reader);
   if (!world_id || !coord) {
-    return Expected<ChunkUnload, ProtocolError>::failure(
-        ProtocolError{"failed to decode chunk unload"});
+    return Expected<ChunkSectionUnload, ProtocolError>::failure(
+        ProtocolError{"failed to decode chunk section unload"});
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<ChunkUnload, ProtocolError>::failure(trailing.error());
+    return Expected<ChunkSectionUnload, ProtocolError>::failure(trailing.error());
   }
 
-  return Expected<ChunkUnload, ProtocolError>::success({WorldID{world_id.value()}, coord.value()});
+  return Expected<ChunkSectionUnload, ProtocolError>::success(
+      {WorldID{world_id.value()}, coord.value()});
 }
 
 } // namespace arv::protocol

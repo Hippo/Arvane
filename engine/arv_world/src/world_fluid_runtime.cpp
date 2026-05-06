@@ -106,7 +106,7 @@ std::vector<FluidUpdate> WorldFluidRuntime::drain_due_updates(
 }
 
 void WorldFluidRuntime::store_deferred_boundary_update(
-    ChunkCoord target,
+    ChunkSectionCoord target,
     FluidUpdate update) {
   auto& updates = deferred_boundary_fluid_updates_[target];
   for (FluidUpdate& existing : updates) {
@@ -122,7 +122,7 @@ void WorldFluidRuntime::store_deferred_boundary_update(
 
 void WorldFluidRuntime::enqueue_chunk_activation_updates(
     WorldRuntime& world,
-    ChunkCoord coord) {
+    ChunkSectionCoord coord) {
   const voxel::ChunkSection* chunk = world.find_chunk(coord);
   if (chunk == nullptr) {
     return;
@@ -153,7 +153,7 @@ usize WorldFluidRuntime::pending_update_count() const noexcept {
   return pending_fluid_updates_by_position_.size();
 }
 
-usize WorldFluidRuntime::deferred_boundary_event_count(ChunkCoord coord) const noexcept {
+usize WorldFluidRuntime::deferred_boundary_event_count(ChunkSectionCoord coord) const noexcept {
   const auto found = deferred_boundary_fluid_updates_.find(coord);
   return found == deferred_boundary_fluid_updates_.end() ? 0U : found->second.size();
 }
@@ -189,14 +189,14 @@ std::optional<FluidSimulationRequest> WorldFluidRuntime::make_simulation_request
   request.budget = budget;
   request.updates = std::move(due_updates);
 
-  request.chunks.reserve(chunks.chunks().size());
-  for (const auto& [coord, chunk] : chunks.chunks()) {
+  request.chunks.reserve(chunks.loaded_count());
+  chunks.for_each_loaded_section([&](const voxel::ChunkSection& chunk) {
     request.chunks.emplace_back(
-        coord,
+        chunk.coord(),
         chunk.lifecycle_state() == voxel::ChunkLifecycleState::Active,
         chunk.content_version(),
         chunk.storage_view());
-  }
+  });
 
   return request;
 }
@@ -216,7 +216,7 @@ usize WorldRuntime::pending_fluid_update_count() const noexcept {
   return impl_->fluid.pending_update_count();
 }
 
-usize WorldRuntime::deferred_boundary_fluid_event_count(ChunkCoord coord) const noexcept {
+usize WorldRuntime::deferred_boundary_fluid_event_count(ChunkSectionCoord coord) const noexcept {
   return impl_->fluid.deferred_boundary_event_count(coord);
 }
 
@@ -239,10 +239,10 @@ std::optional<FluidSimulationRequest> WorldRuntime::make_fluid_simulation_reques
 u32 WorldRuntime::apply_fluid_simulation_result(
     FluidSimulationResult result,
     const voxel::FluidDefinition& definition) {
-  HashMap<ChunkCoord, bool> accepted_chunks;
+  HashMap<ChunkSectionCoord, bool> accepted_chunks;
   WorldSearch search{*this};
   for (const FluidChange& change : result.changes) {
-    const ChunkCoord coord = block_to_chunk(change.pos);
+    const ChunkSectionCoord coord = block_to_chunk(change.pos);
     auto [accepted, inserted] = accepted_chunks.emplace(coord, false);
     if (inserted) {
       const voxel::ChunkSection* chunk = search.find_chunk(coord);
@@ -267,7 +267,7 @@ u32 WorldRuntime::apply_fluid_simulation_result(
   }
 
   for (const FluidUpdate& update : result.deferred_updates) {
-    const ChunkCoord coord = block_to_chunk(update.pos);
+    const ChunkSectionCoord coord = block_to_chunk(update.pos);
     if (search.is_chunk_active(coord)) {
       impl_->fluid.enqueue_update_unique(update);
     } else {

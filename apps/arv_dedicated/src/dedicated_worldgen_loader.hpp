@@ -8,8 +8,6 @@
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_generation.hpp"
 
-#include <utility>
-
 namespace arv::dedicated {
 
 struct DedicatedWorldgen {
@@ -23,8 +21,5 @@ struct DedicatedWorldgen {
 resolve_dedicated_worldgen_palette(
     const world::WorldGenerationConfig& config,
     const voxel::BlockRegistry& block_registry);
-
-[[nodiscard]] std::pair<i32, i32> visible_worldgen_chunk_y_range(
-    const world::WorldGenerationConfig& config);
 
 } // namespace arv::dedicated

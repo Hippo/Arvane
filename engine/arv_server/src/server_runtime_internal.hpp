@@ -297,7 +297,7 @@ struct ServerRuntimeImpl {
 };
 
 [[nodiscard]] Vec3f player_look_direction(const player::PlayerState& player_state) noexcept;
-[[nodiscard]] ChunkCoord player_chunk_coord(const player::PlayerState& player_state) noexcept;
+[[nodiscard]] ChunkSectionCoord player_chunk_coord(const player::PlayerState& player_state) noexcept;
 [[nodiscard]] Vec3f player_eye_position(
     const player::PlayerState& player_state,
     const player::PlayerTuning& tuning) noexcept;

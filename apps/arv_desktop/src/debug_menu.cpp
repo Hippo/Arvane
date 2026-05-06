@@ -1115,7 +1115,7 @@ void render_entities_tab(
       const entity::EntityType* type = world.find_entity_type(entity_id);
       const entity::EntityTransform* transform = world.find_entity_transform(entity_id);
       const std::optional<EntityNetID> net_id = world.network_id_for_entity(entity_id);
-      const std::optional<ChunkCoord> chunk = world.entity_chunk(entity_id);
+      const std::optional<ChunkSectionCoord> chunk = world.entity_chunk(entity_id);
       const std::optional<PlayerID> owner = world.player_for_entity(entity_id);
       const bool selected = state.selected_entity_id == id_label;
 

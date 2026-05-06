@@ -38,7 +38,7 @@ arv::world::WorldGenerationConfig flat_generation_config(arv::i32 surface_y) {
 
 void replace_flat_terrain_chunk(
     arv::world::WorldRuntime& world,
-    arv::ChunkCoord coord,
+    arv::ChunkSectionCoord coord,
     arv::voxel::BlockVariantID stone,
     arv::i32 surface_y,
     bool open_test_shaft) {
@@ -173,7 +173,7 @@ TEST(LightingTests, DirtyNeighborLightDoesNotSeedSectionRelight) {
   const arv::world::LightingResult result = build_single_lighting_result(world, registry);
 
   ASSERT_EQ(result.chunks.size(), 1U);
-  EXPECT_EQ(result.chunks.front().coord, arv::ChunkCoord({{0, 0, 0}}));
+  EXPECT_EQ(result.chunks.front().coord, arv::ChunkSectionCoord({{0, 0, 0}}));
   EXPECT_EQ(
       arv::voxel::light_sky(result.chunks.front().lights[arv::voxel::local_index({{15, 1, 1}})]),
       0);

@@ -170,7 +170,7 @@ private:
   return PersistenceError{std::move(message)};
 }
 
-[[nodiscard]] u32 region_slot_index(ChunkCoord coord) noexcept {
+[[nodiscard]] u32 region_slot_index(ChunkSectionCoord coord) noexcept {
   const RegionLocalChunkCoord local = chunk_column_to_region_local(chunk_to_column(coord));
   return static_cast<u32>(local.x + local.z * RegionSizeInChunks);
 }

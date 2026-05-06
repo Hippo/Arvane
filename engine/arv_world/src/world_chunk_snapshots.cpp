@@ -64,7 +64,7 @@ void add_light_dependency_offsets(DependencyMask& mask, SectionLocalPos local) n
 
 void format_chunk_context(
     std::array<char, core::PerfEventContextCapacity>& context,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   (void)std::snprintf(
       context.data(),
       context.size(),
@@ -76,7 +76,7 @@ void format_chunk_context(
 
 } // namespace
 
-std::optional<voxel::ChunkSnapshot> WorldRuntime::get_chunk_snapshot(ChunkCoord coord) const {
+std::optional<voxel::ChunkSnapshot> WorldRuntime::get_chunk_snapshot(ChunkSectionCoord coord) const {
   const voxel::ChunkSection* chunk = find_chunk(coord);
   if (chunk == nullptr) {
     return std::nullopt;
@@ -100,7 +100,7 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::get_chunk_snapshot(ChunkCoord 
 }
 
 void WorldRuntime::apply_chunk_snapshot(
-    ChunkCoord coord,
+    ChunkSectionCoord coord,
     std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
     std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights,
     std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids,
@@ -211,7 +211,7 @@ void WorldRuntime::apply_chunk_snapshot(
 }
 
 std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
-    ChunkCoord coord,
+    ChunkSectionCoord coord,
     MissingNeighborPolicy missing_neighbor_policy) const {
   ARV_PROFILE_ZONE("Snapshot creation");
   std::array<char, core::PerfEventContextCapacity> profile_context{};
@@ -249,7 +249,7 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
           if (ox == 0 && oy == 0 && oz == 0) {
             continue;
           }
-          const ChunkCoord neighbor_coord{{
+          const ChunkSectionCoord neighbor_coord{{
               coord.value.x + ox,
               coord.value.y + oy,
               coord.value.z + oz,
@@ -270,20 +270,20 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
   return snapshot;
 }
 
-bool WorldRuntime::validate_mesh_result(ChunkCoord coord, u64 source_version) const noexcept {
+bool WorldRuntime::validate_mesh_result(ChunkSectionCoord coord, u64 source_version) const noexcept {
   const voxel::ChunkSection* chunk = find_chunk(coord);
   return chunk != nullptr && chunk->version() == source_version;
 }
 
 bool WorldRuntime::validate_mesh_content_result(
-    ChunkCoord coord,
+    ChunkSectionCoord coord,
     u64 source_content_version) const noexcept {
   const voxel::ChunkSection* chunk = find_chunk(coord);
   return chunk != nullptr && chunk->content_version() == source_content_version;
 }
 
 bool WorldRuntime::publish_mesh_result(
-    ChunkCoord coord,
+    ChunkSectionCoord coord,
     u64 source_block_version,
     u64 source_light_version,
     u64 source_content_version) noexcept {
@@ -303,21 +303,32 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
     return false;
   }
 
-  voxel::ChunkSection& chunk = impl_->chunks.ensure_chunk(
-      generated.coord,
-      voxel::ChunkLifecycleState::Loaded,
-      impl_->dirty);
-  impl_->chunks.set_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
-  chunk.replace_generated_blocks(std::move(generated.blocks));
-  impl_->dirty.mark_mesh_content_dirty();
-  impl_->dirty.enqueue_dirty_mesh_chunk(generated.coord);
-  impl_->dirty.mark_lighting_content_dirty();
-  impl_->dirty.mark_loaded_chunk_neighbors_dirty(*this, generated.coord);
-  return true;
+  bool published_any = false;
+  for (GeneratedChunkSection& generated_section : generated.sections) {
+    voxel::ChunkSection* existing = impl_->chunks.find_chunk(generated_section.coord);
+    if (existing != nullptr &&
+        existing->lifecycle_state() != voxel::ChunkLifecycleState::Requested &&
+        existing->lifecycle_state() != voxel::ChunkLifecycleState::Generating) {
+      continue;
+    }
+
+    voxel::ChunkSection& chunk = impl_->chunks.ensure_chunk(
+        generated_section.coord,
+        voxel::ChunkLifecycleState::Loaded,
+        impl_->dirty);
+    impl_->chunks.set_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
+    chunk.replace_generated_blocks(std::move(generated_section.blocks));
+    impl_->dirty.mark_mesh_content_dirty();
+    impl_->dirty.enqueue_dirty_mesh_chunk(generated_section.coord);
+    impl_->dirty.mark_lighting_content_dirty();
+    impl_->dirty.mark_loaded_chunk_neighbors_dirty(*this, generated_section.coord);
+    published_any = true;
+  }
+  return published_any;
 }
 
 void WorldRuntime::restore_saved_chunk(
-    ChunkCoord coord,
+    ChunkSectionCoord coord,
     std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
     std::array<voxel::LightWord, voxel::ChunkVolume> lights,
     std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids) noexcept {

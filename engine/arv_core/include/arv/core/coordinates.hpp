@@ -17,16 +17,16 @@ struct BlockPos {
 };
 
 struct ChunkCoord {
-  Vec3i value{};
+  i32 x{};
+  i32 z{};
 
   constexpr bool operator==(const ChunkCoord&) const = default;
 };
 
-struct ChunkColumnCoord {
-  i32 x{};
-  i32 z{};
+struct ChunkSectionCoord {
+  Vec3i value{};
 
-  constexpr bool operator==(const ChunkColumnCoord&) const = default;
+  constexpr bool operator==(const ChunkSectionCoord&) const = default;
 };
 
 struct RegionCoord {
@@ -69,7 +69,7 @@ enum class AxisDirection {
   return remainder < 0 ? remainder + (divisor < 0 ? -divisor : divisor) : remainder;
 }
 
-[[nodiscard]] constexpr ChunkCoord block_to_chunk(BlockPos pos) noexcept {
+[[nodiscard]] constexpr ChunkSectionCoord block_to_chunk(BlockPos pos) noexcept {
   return {{
       floor_div(pos.value.x, ChunkSize),
       floor_div(pos.value.y, ChunkSize),
@@ -83,30 +83,34 @@ enum class AxisDirection {
       floor_mod(pos.value.z, ChunkSize)}};
 }
 
-[[nodiscard]] constexpr BlockPos chunk_local_to_block(ChunkCoord chunk, SectionLocalPos local) noexcept {
+[[nodiscard]] constexpr BlockPos chunk_local_to_block(ChunkSectionCoord chunk, SectionLocalPos local) noexcept {
   return {{
       chunk.value.x * ChunkSize + local.value.x,
       chunk.value.y * ChunkSize + local.value.y,
       chunk.value.z * ChunkSize + local.value.z}};
 }
 
-[[nodiscard]] constexpr ChunkColumnCoord chunk_to_column(ChunkCoord chunk) noexcept {
+[[nodiscard]] constexpr ChunkCoord chunk_to_column(ChunkSectionCoord chunk) noexcept {
   return {chunk.value.x, chunk.value.z};
 }
 
-[[nodiscard]] constexpr RegionCoord chunk_column_to_region(ChunkColumnCoord column) noexcept {
+[[nodiscard]] constexpr ChunkSectionCoord chunk_section(ChunkCoord chunk, i32 section_y) noexcept {
+  return {{chunk.x, section_y, chunk.z}};
+}
+
+[[nodiscard]] constexpr RegionCoord chunk_column_to_region(ChunkCoord column) noexcept {
   return {
       floor_div(column.x, RegionSizeInChunks),
       floor_div(column.z, RegionSizeInChunks)};
 }
 
-[[nodiscard]] constexpr RegionLocalChunkCoord chunk_column_to_region_local(ChunkColumnCoord column) noexcept {
+[[nodiscard]] constexpr RegionLocalChunkCoord chunk_column_to_region_local(ChunkCoord column) noexcept {
   return {
       floor_mod(column.x, RegionSizeInChunks),
       floor_mod(column.z, RegionSizeInChunks)};
 }
 
-[[nodiscard]] constexpr ChunkCoord neighbor_chunk(ChunkCoord chunk, AxisDirection direction) noexcept {
+[[nodiscard]] constexpr ChunkSectionCoord neighbor_chunk(ChunkSectionCoord chunk, AxisDirection direction) noexcept {
   switch (direction) {
   case AxisDirection::NegativeX:
     --chunk.value.x;
@@ -133,8 +137,8 @@ enum class AxisDirection {
 } // namespace arv
 
 template<>
-struct std::hash<arv::ChunkCoord> {
-  arv::usize operator()(const arv::ChunkCoord& coord) const noexcept {
+struct std::hash<arv::ChunkSectionCoord> {
+  arv::usize operator()(const arv::ChunkSectionCoord& coord) const noexcept {
     const arv::usize x = std::hash<arv::i32>{}(coord.value.x);
     const arv::usize y = std::hash<arv::i32>{}(coord.value.y);
     const arv::usize z = std::hash<arv::i32>{}(coord.value.z);
@@ -153,8 +157,8 @@ struct std::hash<arv::BlockPos> {
 };
 
 template<>
-struct std::hash<arv::ChunkColumnCoord> {
-  arv::usize operator()(const arv::ChunkColumnCoord& coord) const noexcept {
+struct std::hash<arv::ChunkCoord> {
+  arv::usize operator()(const arv::ChunkCoord& coord) const noexcept {
     const arv::usize x = std::hash<arv::i32>{}(coord.x);
     const arv::usize z = std::hash<arv::i32>{}(coord.z);
     return (x * 16777619U) ^ z;

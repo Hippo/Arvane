@@ -858,7 +858,7 @@ private:
         active_session.chunk_view,
         config_.chunks,
         config_.chunk_pipeline,
-        camera_chunk_coord(active_session.client->camera()),
+        camera_chunk_section_coord(active_session.client->camera()),
         active_session.min_chunk_y,
         active_session.max_chunk_y,
         assets_.block_registry,

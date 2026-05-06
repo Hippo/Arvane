@@ -38,7 +38,7 @@ struct RegionFileHeader {
 };
 
 struct SavedChunkSection {
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
   std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks{};
   std::array<voxel::LightWord, voxel::ChunkVolume> lights{};
   std::array<voxel::FluidCell, voxel::ChunkVolume> fluids{};

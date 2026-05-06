@@ -10,8 +10,8 @@
 
 namespace {
 
-[[nodiscard]] std::vector<arv::ChunkCoord> make_lookup_keys() {
-  std::vector<arv::ChunkCoord> keys;
+[[nodiscard]] std::vector<arv::ChunkSectionCoord> make_lookup_keys() {
+  std::vector<arv::ChunkSectionCoord> keys;
   keys.reserve(4096U);
   for (arv::i32 z = 0; z < 16; ++z) {
     for (arv::i32 y = 0; y < 16; ++y) {
@@ -24,8 +24,8 @@ namespace {
 }
 
 void BM_HashMapRegistryLookup(benchmark::State& state) {
-  const std::vector<arv::ChunkCoord> keys = make_lookup_keys();
-  arv::HashMap<arv::ChunkCoord, arv::u32> map;
+  const std::vector<arv::ChunkSectionCoord> keys = make_lookup_keys();
+  arv::HashMap<arv::ChunkSectionCoord, arv::u32> map;
   map.reserve(keys.size());
   for (arv::usize index = 0; index < keys.size(); ++index) {
     map.emplace(keys[index], static_cast<arv::u32>(index));
@@ -42,8 +42,8 @@ void BM_HashMapRegistryLookup(benchmark::State& state) {
 }
 
 void BM_UnorderedMapRegistryLookup(benchmark::State& state) {
-  const std::vector<arv::ChunkCoord> keys = make_lookup_keys();
-  std::unordered_map<arv::ChunkCoord, arv::u32> map;
+  const std::vector<arv::ChunkSectionCoord> keys = make_lookup_keys();
+  std::unordered_map<arv::ChunkSectionCoord, arv::u32> map;
   map.reserve(keys.size());
   for (arv::usize index = 0; index < keys.size(); ++index) {
     map.emplace(keys[index], static_cast<arv::u32>(index));
@@ -59,9 +59,9 @@ void BM_UnorderedMapRegistryLookup(benchmark::State& state) {
   benchmark::DoNotOptimize(sum);
 }
 
-void BM_ChunkCoordHash(benchmark::State& state) {
-  const std::vector<arv::ChunkCoord> keys = make_lookup_keys();
-  std::hash<arv::ChunkCoord> hasher;
+void BM_ChunkSectionCoordHash(benchmark::State& state) {
+  const std::vector<arv::ChunkSectionCoord> keys = make_lookup_keys();
+  std::hash<arv::ChunkSectionCoord> hasher;
   arv::usize sum = 0;
   arv::usize index = 0;
   for (auto _ : state) {
@@ -73,6 +73,7 @@ void BM_ChunkCoordHash(benchmark::State& state) {
 
 void BM_NearbyChunkLookup(benchmark::State& state) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({-2, 2});
   for (arv::i32 z = -8; z <= 8; ++z) {
     for (arv::i32 y = -2; y <= 2; ++y) {
       for (arv::i32 x = -8; x <= 8; ++x) {
@@ -81,18 +82,18 @@ void BM_NearbyChunkLookup(benchmark::State& state) {
     }
   }
 
-  const std::vector<arv::ChunkCoord> centers = make_lookup_keys();
+  const std::vector<arv::ChunkSectionCoord> centers = make_lookup_keys();
   arv::usize index = 0;
   arv::usize hits = 0;
   for (auto _ : state) {
-    const arv::ChunkCoord center = centers[index & (centers.size() - 1U)];
+    const arv::ChunkSectionCoord center = centers[index & (centers.size() - 1U)];
     for (arv::i32 z = -1; z <= 1; ++z) {
       for (arv::i32 y = -1; y <= 1; ++y) {
         for (arv::i32 x = -1; x <= 1; ++x) {
           if (x == 0 && y == 0 && z == 0) {
             continue;
           }
-          const arv::ChunkCoord coord{{
+          const arv::ChunkSectionCoord coord{{
               center.value.x + x,
               center.value.y + y,
               center.value.z + z,
@@ -184,7 +185,7 @@ void BM_BlockVariantPaletteLookup(benchmark::State& state) {
 
 BENCHMARK(BM_HashMapRegistryLookup);
 BENCHMARK(BM_UnorderedMapRegistryLookup);
-BENCHMARK(BM_ChunkCoordHash);
+BENCHMARK(BM_ChunkSectionCoordHash);
 BENCHMARK(BM_NearbyChunkLookup);
 BENCHMARK(BM_BlockRegistryStableNameLookup);
 BENCHMARK(BM_PackedVertexGeneration);

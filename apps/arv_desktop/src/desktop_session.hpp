@@ -53,8 +53,8 @@ struct DesktopGameSession {
   std::unique_ptr<client::ClientRuntime> client{};
   world::WorldRuntime client_world{server::DefaultWorldID};
   ChunkViewState chunk_view{};
-  std::deque<protocol::ChunkUnload> pending_client_chunk_unloads{};
-  std::deque<protocol::ChunkData> pending_client_chunk_data{};
+  std::deque<protocol::ChunkSectionUnload> pending_client_chunk_unloads{};
+  std::deque<protocol::ChunkSectionData> pending_client_chunk_data{};
   std::deque<protocol::BlockUpdateBatch> pending_client_block_updates{};
   std::optional<BlockOutlineTarget> block_outline_target{};
   core::FixedTimestepAccumulator ticks;

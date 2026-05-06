@@ -139,6 +139,7 @@ inline void fill_noisy_terrain(
     voxel::BlockVariantID center_fill = voxel::AirBlockVariantID) {
   (void)registry;
   world::WorldRuntime world{WorldID{1}};
+  world.configure_height({-1, 1});
   for (i32 z = -1; z <= 1; ++z) {
     for (i32 y = -1; y <= 1; ++y) {
       for (i32 x = -1; x <= 1; ++x) {
@@ -152,8 +153,8 @@ inline void fill_noisy_terrain(
   return world;
 }
 
-inline void make_active_chunk(world::WorldRuntime& world, ChunkCoord coord) {
-  world.ensure_chunk(coord);
+inline void make_active_chunk(world::WorldRuntime& world, ChunkSectionCoord coord) {
+  (void)world.ensure_chunk_section(coord);
   if (!world.set_chunk_lifecycle_state(coord, voxel::ChunkLifecycleState::Active)) {
     std::abort();
   }

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <optional>
+#include <utility>
 #include <vector>
 
 TEST(WorldRuntimeTests, SetAndGetBlockUseFloorBasedNegativeCoordinates) {
@@ -16,6 +17,63 @@ TEST(WorldRuntimeTests, SetAndGetBlockUseFloorBasedNegativeCoordinates) {
   const arv::voxel::ChunkSection* chunk = world.find_chunk({{-1, 0, 0}});
   ASSERT_NE(chunk, nullptr);
   EXPECT_EQ(chunk->block({{15, 0, 0}}), arv::voxel::BlockVariantID{2});
+}
+
+TEST(WorldRuntimeTests, ChunkColumnsUseConfiguredHeightForSectionLookup) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({-2, 1});
+
+  arv::voxel::ChunkSection& low = world.ensure_chunk_section({{4, -2, -7}});
+  arv::voxel::ChunkSection& high = world.ensure_chunk_section({{4, 1, -7}});
+  arv::world::Chunk* column = world.find_chunk(arv::ChunkCoord{4, -7});
+
+  ASSERT_NE(column, nullptr);
+  EXPECT_EQ(column->loaded_section_count(), 2U);
+  EXPECT_EQ(column->find_section(-2), &low);
+  EXPECT_EQ(column->find_section(1), &high);
+  EXPECT_EQ(column->find_section(-3), nullptr);
+  EXPECT_EQ(world.loaded_chunk_count(), 2U);
+}
+
+TEST(WorldRuntimeTests, ConfiguringHeightAfterColumnCreationResizesExistingColumns) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+
+  arv::voxel::ChunkSection& middle = world.ensure_chunk({{4, 0, -7}});
+  ASSERT_TRUE(world.find_chunk(arv::ChunkCoord{4, -7}) != nullptr);
+
+  world.configure_height({-1, 1});
+  arv::voxel::ChunkSection& low = world.ensure_chunk_section({{4, -1, -7}});
+  arv::voxel::ChunkSection& high = world.ensure_chunk_section({{4, 1, -7}});
+  arv::world::Chunk* column = world.find_chunk(arv::ChunkCoord{4, -7});
+
+  ASSERT_NE(column, nullptr);
+  EXPECT_EQ(column->height_settings().min_chunk_y, -1);
+  EXPECT_EQ(column->height_settings().max_chunk_y, 1);
+  EXPECT_EQ(column->loaded_section_count(), 3U);
+  EXPECT_EQ(column->find_section(-1), &low);
+  EXPECT_EQ(column->find_section(0), &middle);
+  EXPECT_EQ(column->find_section(1), &high);
+  EXPECT_EQ(world.loaded_chunk_count(), 3U);
+}
+
+TEST(WorldRuntimeTests, ShrinkingHeightDropsOutOfRangeSectionsAndUpdatesCounts) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({-1, 1});
+  (void)world.ensure_chunk_section({{0, -1, 0}});
+  arv::voxel::ChunkSection& kept = world.ensure_chunk_section({{0, 0, 0}});
+  ASSERT_TRUE(world.set_chunk_lifecycle_state({{0, -1, 0}}, arv::voxel::ChunkLifecycleState::Active));
+  ASSERT_EQ(world.loaded_chunk_count(), 2U);
+  ASSERT_EQ(world.active_chunk_count(), 1U);
+
+  world.configure_height({0, 0});
+  arv::world::Chunk* column = world.find_chunk(arv::ChunkCoord{0, 0});
+
+  ASSERT_NE(column, nullptr);
+  EXPECT_EQ(column->loaded_section_count(), 1U);
+  EXPECT_EQ(column->find_section(0), &kept);
+  EXPECT_EQ(world.find_chunk({{0, -1, 0}}), nullptr);
+  EXPECT_EQ(world.loaded_chunk_count(), 1U);
+  EXPECT_EQ(world.active_chunk_count(), 0U);
 }
 
 TEST(WorldRuntimeTests, BoundaryBlockChangeInvalidatesLoadedNeighborMeshVersion) {
@@ -147,7 +205,7 @@ TEST(WorldRuntimeTests, LightingSnapshotSharesChunkStorage) {
   const arv::world::LightingSnapshot snapshot = world.make_lighting_snapshot();
 
   ASSERT_EQ(snapshot.chunks.size(), 1U);
-  EXPECT_EQ(snapshot.chunks[0].coord, arv::ChunkCoord({{0, 0, 0}}));
+  EXPECT_EQ(snapshot.chunks[0].coord, arv::ChunkSectionCoord({{0, 0, 0}}));
   EXPECT_EQ(snapshot.chunks[0].storage.get(), chunk.storage_identity());
 }
 
@@ -159,8 +217,11 @@ TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDirectNeighborsForRel
 
   arv::world::GeneratedChunk generated;
   generated.world_id = arv::WorldID{1};
-  generated.coord = {{1, 0, 0}};
-  generated.blocks.fill(arv::voxel::AirBlockVariantID);
+  generated.coord = {1, 0};
+  arv::world::GeneratedChunkSection generated_section;
+  generated_section.coord = {{1, 0, 0}};
+  generated_section.blocks.fill(arv::voxel::AirBlockVariantID);
+  generated.sections.emplace_back(std::move(generated_section));
 
   EXPECT_TRUE(world.publish_generated_chunk(std::move(generated)));
 
@@ -171,14 +232,18 @@ TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDirectNeighborsForRel
 
 TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDiagonalNeighborsForRemesh) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({0, 1});
   arv::voxel::ChunkSection& diagonal = world.ensure_chunk({{0, 0, 0}});
   diagonal.clear_dirty(arv::voxel::ChunkDirtyFlags::Geometry | arv::voxel::ChunkDirtyFlags::Lighting);
   const arv::u64 diagonal_version = diagonal.version();
 
   arv::world::GeneratedChunk generated;
   generated.world_id = arv::WorldID{1};
-  generated.coord = {{1, 1, 1}};
-  generated.blocks.fill(arv::voxel::AirBlockVariantID);
+  generated.coord = {1, 1};
+  arv::world::GeneratedChunkSection generated_section;
+  generated_section.coord = {{1, 1, 1}};
+  generated_section.blocks.fill(arv::voxel::AirBlockVariantID);
+  generated.sections.emplace_back(std::move(generated_section));
 
   EXPECT_TRUE(world.publish_generated_chunk(std::move(generated)));
 
@@ -383,11 +448,11 @@ TEST(WorldRuntimeTests, DirtyMeshQueueReportsEditedSectionsWithoutFullScan) {
   (void)world.consume_dirty_mesh_chunks(arv::voxel::ChunkDirtyFlags::Geometry);
 
   ASSERT_TRUE(world.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{7}));
-  const std::vector<arv::ChunkCoord> dirty =
+  const std::vector<arv::ChunkSectionCoord> dirty =
       world.consume_dirty_mesh_chunks(arv::voxel::ChunkDirtyFlags::Geometry);
 
   ASSERT_EQ(dirty.size(), 1U);
-  EXPECT_EQ(dirty.front(), (arv::ChunkCoord{{0, 0, 0}}));
+  EXPECT_EQ(dirty.front(), (arv::ChunkSectionCoord{{0, 0, 0}}));
   EXPECT_TRUE(world.consume_dirty_mesh_chunks(
                        arv::voxel::ChunkDirtyFlags::Geometry)
                   .empty());

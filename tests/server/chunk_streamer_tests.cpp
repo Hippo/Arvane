@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <utility>
 
 namespace {
 
@@ -53,29 +54,29 @@ TEST(ServerChunkStreamerTests, UnloadMarginRetainsRecentlySentChunks) {
   streamer.update_player_interest(session, {{0, 0, 0}}, interest);
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
-  EXPECT_EQ(messages.front().message_type, arv::protocol::MessageType::ChunkData);
+  EXPECT_EQ(messages.front().message_type, arv::protocol::MessageType::ChunkSectionData);
   confirm_chunk_messages(streamer, messages);
   messages.clear();
 
   streamer.update_player_interest(session, {{1, 0, 0}}, interest);
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
-  EXPECT_EQ(messages.front().message_type, arv::protocol::MessageType::ChunkData);
+  EXPECT_EQ(messages.front().message_type, arv::protocol::MessageType::ChunkSectionData);
   const auto retained_step_data =
-      arv::protocol::deserialize_chunk_data(messages.front().payload);
+      arv::protocol::deserialize_chunk_section_data(messages.front().payload);
   ASSERT_TRUE(retained_step_data);
-  EXPECT_EQ(retained_step_data.value().coord, (arv::ChunkCoord{{1, 0, 0}}));
+  EXPECT_EQ(retained_step_data.value().coord, (arv::ChunkSectionCoord{{1, 0, 0}}));
   confirm_chunk_messages(streamer, messages);
   messages.clear();
 
   streamer.update_player_interest(session, {{2, 0, 0}}, interest);
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 2U);
-  EXPECT_EQ(messages[0].message_type, arv::protocol::MessageType::ChunkUnload);
-  const auto unload = arv::protocol::deserialize_chunk_unload(messages[0].payload);
+  EXPECT_EQ(messages[0].message_type, arv::protocol::MessageType::ChunkSectionUnload);
+  const auto unload = arv::protocol::deserialize_chunk_section_unload(messages[0].payload);
   ASSERT_TRUE(unload);
-  EXPECT_EQ(unload.value().coord, (arv::ChunkCoord{{0, 0, 0}}));
-  EXPECT_EQ(messages[1].message_type, arv::protocol::MessageType::ChunkData);
+  EXPECT_EQ(unload.value().coord, (arv::ChunkSectionCoord{{0, 0, 0}}));
+  EXPECT_EQ(messages[1].message_type, arv::protocol::MessageType::ChunkSectionData);
 }
 
 TEST(ServerChunkStreamerTests, LightDependencyVersionDoesNotResendUnchangedNeighborChunk) {
@@ -121,9 +122,9 @@ TEST(ServerChunkStreamerTests, LightDependencyVersionDoesNotResendUnchangedNeigh
   streamer.tick_streaming_budget(world, messages);
 
   ASSERT_EQ(messages.size(), 1U);
-  const auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  const auto data = arv::protocol::deserialize_chunk_section_data(messages.front().payload);
   ASSERT_TRUE(data);
-  EXPECT_EQ(data.value().coord, (arv::ChunkCoord{{1, 0, 0}}));
+  EXPECT_EQ(data.value().coord, (arv::ChunkSectionCoord{{1, 0, 0}}));
 }
 
 TEST(ServerChunkStreamerTests, SendsLightingWhenPreviouslyDeferredLightingBecomesValid) {
@@ -154,7 +155,7 @@ TEST(ServerChunkStreamerTests, SendsLightingWhenPreviouslyDeferredLightingBecome
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
   confirm_chunk_messages(streamer, messages);
-  auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  auto data = arv::protocol::deserialize_chunk_section_data(messages.front().payload);
   ASSERT_TRUE(data);
   EXPECT_TRUE(data.value().has_lighting);
   EXPECT_FALSE(data.value().lighting_valid);
@@ -174,7 +175,7 @@ TEST(ServerChunkStreamerTests, SendsLightingWhenPreviouslyDeferredLightingBecome
 
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
-  data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  data = arv::protocol::deserialize_chunk_section_data(messages.front().payload);
   ASSERT_TRUE(data);
   EXPECT_TRUE(data.value().has_lighting);
   EXPECT_TRUE(data.value().lighting_valid);
@@ -225,7 +226,7 @@ TEST(ServerChunkStreamerTests, BlockUpdateAcknowledgementStillRequiresValidLight
 
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
-  const auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  const auto data = arv::protocol::deserialize_chunk_section_data(messages.front().payload);
   ASSERT_TRUE(data);
   EXPECT_TRUE(data.value().has_lighting);
   EXPECT_TRUE(data.value().lighting_valid);
@@ -261,9 +262,9 @@ TEST(ServerChunkStreamerTests, PendingChunkIsRetriedUntilSendConfirmed) {
 
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
-  const auto data = arv::protocol::deserialize_chunk_data(messages.front().payload);
+  const auto data = arv::protocol::deserialize_chunk_section_data(messages.front().payload);
   ASSERT_TRUE(data);
-  EXPECT_EQ(data.value().coord, (arv::ChunkCoord{{0, 0, 0}}));
+  EXPECT_EQ(data.value().coord, (arv::ChunkSectionCoord{{0, 0, 0}}));
   confirm_chunk_messages(streamer, messages);
   messages.clear();
 
@@ -304,15 +305,55 @@ TEST(ServerChunkStreamerTests, MissingChunkQueuesGenerationRequestWithoutSynchro
   const std::vector<arv::ChunkCoord> generation_requests =
       streamer.pending_generation_requests(world);
   ASSERT_EQ(generation_requests.size(), 1U);
-  EXPECT_EQ(generation_requests.front(), (arv::ChunkCoord{{0, 0, 0}}));
+  EXPECT_EQ(generation_requests.front(), (arv::ChunkCoord{0, 0}));
 
   arv::world::GeneratedChunk generated;
   generated.world_id = world.id();
-  generated.coord = {{0, 0, 0}};
-  generated.blocks.fill(arv::voxel::AirBlockVariantID);
+  generated.coord = {0, 0};
+  arv::world::GeneratedChunkSection section;
+  section.coord = {{0, 0, 0}};
+  section.blocks.fill(arv::voxel::AirBlockVariantID);
+  generated.sections.emplace_back(std::move(section));
   ASSERT_TRUE(world.publish_generated_chunk(std::move(generated)));
 
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
-  EXPECT_EQ(messages.front().message_type, arv::protocol::MessageType::ChunkData);
+  EXPECT_EQ(messages.front().message_type, arv::protocol::MessageType::ChunkSectionData);
+}
+
+TEST(ServerChunkStreamerTests, StreamingRequestsFullConfiguredColumnHeightButOneGenerationColumn) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({-1, 1});
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({
+      .max_view_distance = 0,
+      .unload_margin = 1,
+      .max_chunks_sent_per_player_tick = 8,
+      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.client_view_distance = 0;
+
+  std::vector<arv::server::QueuedChunkStreamMessage> messages;
+  streamer.update_player_interest(session, {{0, 0, 0}}, world.height_settings(), interest);
+  streamer.tick_streaming_budget(world, messages);
+
+  EXPECT_TRUE(messages.empty());
+  for (arv::i32 y = -1; y <= 1; ++y) {
+    const arv::voxel::ChunkSection* requested = world.find_chunk({{0, y, 0}});
+    ASSERT_NE(requested, nullptr);
+    EXPECT_EQ(requested->lifecycle_state(), arv::voxel::ChunkLifecycleState::Requested);
+  }
+  const std::vector<arv::ChunkCoord> generation_requests =
+      streamer.pending_generation_requests(world);
+  ASSERT_EQ(generation_requests.size(), 1U);
+  EXPECT_EQ(generation_requests.front(), (arv::ChunkCoord{0, 0}));
 }

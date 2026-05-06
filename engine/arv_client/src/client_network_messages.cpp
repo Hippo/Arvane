@@ -167,20 +167,20 @@ void ClientNetworkRouter::handle_message(
       runtime.player_controller.apply_authoritative_state(correction.value());
       return;
     }
-    case protocol::MessageType::ChunkData: {
-      auto chunk_data = protocol::deserialize_chunk_data(decoded.value().payload);
+    case protocol::MessageType::ChunkSectionData: {
+      auto chunk_data = protocol::deserialize_chunk_section_data(decoded.value().payload);
       if (!chunk_data) {
         return;
       }
-      runtime.chunks.push_chunk_data(std::move(chunk_data.value()));
+      runtime.chunks.push_chunk_section_data(std::move(chunk_data.value()));
       return;
     }
-    case protocol::MessageType::ChunkUnload: {
-      auto unload = protocol::deserialize_chunk_unload(decoded.value().payload);
+    case protocol::MessageType::ChunkSectionUnload: {
+      auto unload = protocol::deserialize_chunk_section_unload(decoded.value().payload);
       if (!unload) {
         return;
       }
-      runtime.chunks.push_chunk_unload(unload.value());
+      runtime.chunks.push_chunk_section_unload(unload.value());
       return;
     }
     case protocol::MessageType::BlockUpdateBatch: {

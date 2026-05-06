@@ -10,7 +10,7 @@ bool WorldRuntime::Impl::set_fluid_cell(
     voxel::FluidCell fluid,
     const voxel::FluidDefinition& definition,
     bool enqueue_updates) noexcept {
-  const ChunkCoord chunk_coord = block_to_chunk(pos);
+  const ChunkSectionCoord chunk_coord = block_to_chunk(pos);
   voxel::ChunkSection* chunk = world.find_chunk(chunk_coord);
   if (chunk == nullptr) {
     return false;
@@ -40,7 +40,7 @@ bool WorldRuntime::Impl::set_fluid_cell(
 }
 
 voxel::BlockVariantID WorldRuntime::get_block(BlockPos pos) const noexcept {
-  const ChunkCoord chunk_coord = block_to_chunk(pos);
+  const ChunkSectionCoord chunk_coord = block_to_chunk(pos);
   const voxel::ChunkSection* chunk = find_chunk(chunk_coord);
   if (chunk == nullptr) {
     return voxel::AirBlockVariantID;
@@ -49,7 +49,7 @@ voxel::BlockVariantID WorldRuntime::get_block(BlockPos pos) const noexcept {
 }
 
 voxel::LightWord WorldRuntime::get_light(BlockPos pos) const noexcept {
-  const ChunkCoord chunk_coord = block_to_chunk(pos);
+  const ChunkSectionCoord chunk_coord = block_to_chunk(pos);
   const voxel::ChunkSection* chunk = find_chunk(chunk_coord);
   if (chunk == nullptr) {
     return voxel::NoLight;
@@ -58,7 +58,7 @@ voxel::LightWord WorldRuntime::get_light(BlockPos pos) const noexcept {
 }
 
 voxel::FluidCell WorldRuntime::get_fluid(BlockPos pos) const noexcept {
-  const ChunkCoord chunk_coord = block_to_chunk(pos);
+  const ChunkSectionCoord chunk_coord = block_to_chunk(pos);
   const voxel::ChunkSection* chunk = find_chunk(chunk_coord);
   if (chunk == nullptr) {
     return voxel::empty_fluid_cell();
@@ -67,7 +67,7 @@ voxel::FluidCell WorldRuntime::get_fluid(BlockPos pos) const noexcept {
 }
 
 bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexcept {
-  const ChunkCoord chunk_coord = block_to_chunk(pos);
+  const ChunkSectionCoord chunk_coord = block_to_chunk(pos);
   voxel::ChunkSection* chunk = find_chunk(chunk_coord);
   if (chunk == nullptr) {
     return false;

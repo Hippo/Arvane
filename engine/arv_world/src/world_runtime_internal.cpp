@@ -17,7 +17,7 @@ BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept {
   return {{pos.value.x + offset.x, pos.value.y + offset.y, pos.value.z + offset.z}};
 }
 
-ChunkCoord chunk_for_position(Vec3f position) noexcept {
+ChunkSectionCoord chunk_for_position(Vec3f position) noexcept {
   return block_to_chunk({{
       static_cast<i32>(std::floor(position.x)),
       static_cast<i32>(std::floor(position.y)),

@@ -3,6 +3,7 @@
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -295,10 +296,11 @@ GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
     (void)std::snprintf(
         profile_context.data(),
         profile_context.size(),
-        "chunk=(%d,%d,%d)",
-        request.coord.value.x,
-        request.coord.value.y,
-        request.coord.value.z);
+        "column=(%d,%d) y=%d..%d",
+        request.coord.x,
+        request.coord.z,
+        request.min_chunk_y,
+        request.max_chunk_y);
   }
   const core::ScopedThreadTiming timing{
       core::PerfMetric::GenerationTask,
@@ -313,13 +315,17 @@ GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
   chunk.seed = request.seed;
   chunk.generator_version = request.config.version;
   chunk.coord = request.coord;
-  chunk.blocks.fill(voxel::AirBlockVariantID);
   const TerrainNoiseSampler terrain_sampler{request.config, request.seed};
+  const i32 min_chunk_y = std::min(request.min_chunk_y, request.max_chunk_y);
+  const i32 max_chunk_y = std::max(request.min_chunk_y, request.max_chunk_y);
+  chunk.sections.reserve(static_cast<usize>(max_chunk_y - min_chunk_y + 1));
+
+  std::array<i32, voxel::ChunkArea> surface_y_by_column{};
 
   for (i32 z = 0; z < ChunkSize; ++z) {
     for (i32 x = 0; x < ChunkSize; ++x) {
-      const i32 world_x = request.coord.value.x * ChunkSize + x;
-      const i32 world_z = request.coord.value.z * ChunkSize + z;
+      const i32 world_x = request.coord.x * ChunkSize + x;
+      const i32 world_z = request.coord.z * ChunkSize + z;
       const f32 terrain = terrain_sampler.terrain(world_x, world_z);
       const f32 height = static_cast<f32>(request.config.base_height) +
                          terrain * static_cast<f32>(request.config.height_scale);
@@ -327,19 +333,35 @@ GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
       const i32 surface_y = rounded < request.config.min_y
                                 ? request.config.min_y
                                 : (rounded > request.config.max_y ? request.config.max_y : rounded);
+      surface_y_by_column[static_cast<usize>(x) + voxel::ChunkSide * static_cast<usize>(z)] =
+          surface_y;
+    }
+  }
 
-      for (i32 y = 0; y < ChunkSize; ++y) {
-        const SectionLocalPos local{{x, y, z}};
-        const i32 world_y = request.coord.value.y * ChunkSize + y;
-        if (world_y < request.config.min_y || world_y > request.config.max_y || world_y > surface_y) {
-          continue;
+  for (i32 chunk_y = min_chunk_y; chunk_y <= max_chunk_y; ++chunk_y) {
+    GeneratedChunkSection section;
+    section.coord = chunk_section(request.coord, chunk_y);
+    section.blocks.fill(voxel::AirBlockVariantID);
+    for (i32 z = 0; z < ChunkSize; ++z) {
+      for (i32 x = 0; x < ChunkSize; ++x) {
+        const i32 surface_y =
+            surface_y_by_column[static_cast<usize>(x) + voxel::ChunkSide * static_cast<usize>(z)];
+        for (i32 y = 0; y < ChunkSize; ++y) {
+          const SectionLocalPos local{{x, y, z}};
+          const i32 world_y = chunk_y * ChunkSize + y;
+          if (world_y < request.config.min_y ||
+              world_y > request.config.max_y ||
+              world_y > surface_y) {
+            continue;
+          }
+
+          const i32 depth_from_surface = surface_y - world_y;
+          section.blocks[voxel::local_index(local)] =
+              choose_surface_block(request.palette, depth_from_surface);
         }
-
-        const i32 depth_from_surface = surface_y - world_y;
-        chunk.blocks[voxel::local_index(local)] =
-            choose_surface_block(request.palette, depth_from_surface);
       }
     }
+    chunk.sections.emplace_back(std::move(section));
   }
 
   return GeneratedChunkResult::success(std::move(chunk));

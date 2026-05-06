@@ -54,8 +54,8 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto auth_response = registry.lookup(arv::protocol::MessageType::AuthResponse);
   const auto auth_result = registry.lookup(arv::protocol::MessageType::AuthResult);
   const auto chunk_interest = registry.lookup(arv::protocol::MessageType::ChunkInterestUpdate);
-  const auto chunk_data = registry.lookup(arv::protocol::MessageType::ChunkData);
-  const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ChunkUnload);
+  const auto chunk_data = registry.lookup(arv::protocol::MessageType::ChunkSectionData);
+  const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ChunkSectionUnload);
   const auto world_join = registry.lookup(arv::protocol::MessageType::WorldJoinResult);
   const auto block_updates = registry.lookup(arv::protocol::MessageType::BlockUpdateBatch);
   const auto entity_spawn = registry.lookup(arv::protocol::MessageType::EntitySpawn);
@@ -201,7 +201,7 @@ TEST(ProtocolTests, ChunkInterestUpdateRoundTripsThroughSerialization) {
   update.world_id = arv::WorldID{3};
   update.center_chunk = {{4, 5, -6}};
   update.client_view_distance = 7;
-  update.previous_center_chunk = arv::ChunkCoord{{3, 5, -6}};
+  update.previous_center_chunk = arv::ChunkSectionCoord{{3, 5, -6}};
   update.sequence_id = 42;
 
   const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_interest_update(update);
@@ -209,15 +209,15 @@ TEST(ProtocolTests, ChunkInterestUpdateRoundTripsThroughSerialization) {
 
   ASSERT_TRUE(decoded);
   EXPECT_EQ(decoded.value().world_id, (arv::WorldID{3}));
-  EXPECT_EQ(decoded.value().center_chunk, (arv::ChunkCoord{{4, 5, -6}}));
+  EXPECT_EQ(decoded.value().center_chunk, (arv::ChunkSectionCoord{{4, 5, -6}}));
   EXPECT_EQ(decoded.value().client_view_distance, 7);
   ASSERT_TRUE(decoded.value().previous_center_chunk.has_value());
-  EXPECT_EQ(decoded.value().previous_center_chunk.value(), (arv::ChunkCoord{{3, 5, -6}}));
+  EXPECT_EQ(decoded.value().previous_center_chunk.value(), (arv::ChunkSectionCoord{{3, 5, -6}}));
   EXPECT_EQ(decoded.value().sequence_id, 42U);
 }
 
-TEST(ProtocolTests, ChunkDataRoundTripsThroughSerialization) {
-  arv::protocol::ChunkData data;
+TEST(ProtocolTests, ChunkSectionDataRoundTripsThroughSerialization) {
+  arv::protocol::ChunkSectionData data;
   data.world_id = arv::WorldID{5};
   data.coord = {{1, -2, 3}};
   data.chunk_version = 12;
@@ -234,12 +234,12 @@ TEST(ProtocolTests, ChunkDataRoundTripsThroughSerialization) {
   data.fluids[arv::voxel::local_index({{1, 2, 3}})] =
       arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_data(data);
-  const auto decoded = arv::protocol::deserialize_chunk_data(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_section_data(data);
+  const auto decoded = arv::protocol::deserialize_chunk_section_data(bytes);
 
   ASSERT_TRUE(decoded);
   EXPECT_EQ(decoded.value().world_id, (arv::WorldID{5}));
-  EXPECT_EQ(decoded.value().coord, (arv::ChunkCoord{{1, -2, 3}}));
+  EXPECT_EQ(decoded.value().coord, (arv::ChunkSectionCoord{{1, -2, 3}}));
   EXPECT_EQ(decoded.value().chunk_version, 12U);
   EXPECT_EQ(decoded.value().chunk_content_version, 9U);
   EXPECT_EQ(decoded.value().chunk_light_version, 14U);
@@ -255,15 +255,15 @@ TEST(ProtocolTests, ChunkDataRoundTripsThroughSerialization) {
   EXPECT_TRUE(decoded.value().fluids[arv::voxel::local_index({{1, 2, 3}})].source());
 }
 
-TEST(ProtocolTests, ChunkUnloadRoundTripsThroughSerialization) {
-  const arv::protocol::ChunkUnload unload{arv::WorldID{2}, {{-1, 0, 1}}};
+TEST(ProtocolTests, ChunkSectionUnloadRoundTripsThroughSerialization) {
+  const arv::protocol::ChunkSectionUnload unload{arv::WorldID{2}, {{-1, 0, 1}}};
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_unload(unload);
-  const auto decoded = arv::protocol::deserialize_chunk_unload(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_section_unload(unload);
+  const auto decoded = arv::protocol::deserialize_chunk_section_unload(bytes);
 
   ASSERT_TRUE(decoded);
   EXPECT_EQ(decoded.value().world_id, (arv::WorldID{2}));
-  EXPECT_EQ(decoded.value().coord, (arv::ChunkCoord{{-1, 0, 1}}));
+  EXPECT_EQ(decoded.value().coord, (arv::ChunkSectionCoord{{-1, 0, 1}}));
 }
 
 TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {

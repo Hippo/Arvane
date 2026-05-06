@@ -70,16 +70,29 @@ void ServerWorldJobRuntime::drain_generation_jobs(world::WorldRuntime& world, bo
     }
 
     world::GeneratedChunkResult generated = pending.job.get();
-    voxel::ChunkSection* chunk = world.find_chunk(pending.coord);
-    if (generated &&
-        chunk != nullptr &&
-        chunk->lifecycle_state() == voxel::ChunkLifecycleState::Generating) {
+    bool column_still_generating = false;
+    const world::WorldHeightSettings height = world.height_settings();
+    for (i32 y = height.min_chunk_y; y <= height.max_chunk_y; ++y) {
+      const ChunkSectionCoord section_coord = chunk_section(pending.coord, y);
+      const voxel::ChunkSection* section = world.find_chunk(section_coord);
+      column_still_generating =
+          column_still_generating ||
+          (section != nullptr &&
+           section->lifecycle_state() == voxel::ChunkLifecycleState::Generating);
+    }
+    if (generated && column_still_generating) {
       (void)world.publish_generated_chunk(std::move(generated.value()));
-    } else if (chunk != nullptr &&
-               chunk->lifecycle_state() == voxel::ChunkLifecycleState::Generating) {
-      (void)world.set_chunk_lifecycle_state(
-          pending.coord,
-          voxel::ChunkLifecycleState::Requested);
+    } else if (column_still_generating) {
+      for (i32 y = height.min_chunk_y; y <= height.max_chunk_y; ++y) {
+        const ChunkSectionCoord section_coord = chunk_section(pending.coord, y);
+        const voxel::ChunkSection* section = world.find_chunk(section_coord);
+        if (section != nullptr &&
+            section->lifecycle_state() == voxel::ChunkLifecycleState::Generating) {
+          (void)world.set_chunk_lifecycle_state(
+              section_coord,
+              voxel::ChunkLifecycleState::Requested);
+        }
+      }
     }
 
     pending_generation_jobs_.erase(
@@ -114,15 +127,28 @@ void ServerWorldJobRuntime::schedule_generation_jobs(
       continue;
     }
 
-    voxel::ChunkSection* chunk = world.find_chunk(coord);
-    if (chunk == nullptr ||
-        chunk->lifecycle_state() != voxel::ChunkLifecycleState::Requested) {
-      continue;
+    const world::WorldHeightSettings height = world.height_settings();
+    bool marked_any = false;
+    for (i32 y = height.min_chunk_y; y <= height.max_chunk_y; ++y) {
+      const ChunkSectionCoord section_coord = chunk_section(coord, y);
+      voxel::ChunkSection* section = world.find_chunk(section_coord);
+      if (section == nullptr) {
+        (void)world.ensure_chunk_section(
+            section_coord,
+            voxel::ChunkLifecycleState::Generating);
+        marked_any = true;
+        continue;
+      }
+      if (section->lifecycle_state() != voxel::ChunkLifecycleState::Requested) {
+        continue;
+      }
+      if (world.set_chunk_lifecycle_state(
+              section_coord,
+              voxel::ChunkLifecycleState::Generating)) {
+        marked_any = true;
+      }
     }
-
-    if (!world.set_chunk_lifecycle_state(
-            coord,
-            voxel::ChunkLifecycleState::Generating)) {
+    if (!marked_any) {
       continue;
     }
 
@@ -130,6 +156,8 @@ void ServerWorldJobRuntime::schedule_generation_jobs(
     request.world_id = world.id();
     request.seed = chunk_generation->seed;
     request.coord = coord;
+    request.min_chunk_y = height.min_chunk_y;
+    request.max_chunk_y = height.max_chunk_y;
     request.config = chunk_generation->config;
     request.palette = chunk_generation->palette;
     auto job = scheduler_->submit("server_world_generation", [request = std::move(request)] {

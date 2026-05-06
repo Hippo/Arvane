@@ -427,6 +427,7 @@ TEST(ChunkMeshingTests, AmbientOcclusionSamplesChunkHaloCorners) {
   const arv::voxel::BlockRegistry registry = make_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
   arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({0, 1});
   world.ensure_chunk({{0, 0, 0}});
   world.ensure_chunk({{1, 1, 1}});
   ASSERT_TRUE(world.set_block({{15, 15, 15}}, stone));

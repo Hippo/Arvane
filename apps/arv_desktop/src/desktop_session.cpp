@@ -161,16 +161,16 @@ bool DesktopSessionManager::start_singleplayer(
   session->world_save_name = std::move(world_name);
   session->world_seed = create_seed.value_or(generated_world_seed());
   session->generation_config = dependencies_.default_generation_config;
-  std::pair<i32, i32> visible_chunk_y =
-      visible_worldgen_chunk_y_range(session->generation_config);
   if (loaded_save.has_world_metadata) {
     session->generation_config = loaded_save.world.generation_config;
     session->world_seed = loaded_save.world.seed;
     session->world_save_name = loaded_save.world.name;
-    visible_chunk_y = {loaded_save.world.min_chunk_y, loaded_save.world.max_chunk_y};
   }
-  session->min_chunk_y = visible_chunk_y.first;
-  session->max_chunk_y = visible_chunk_y.second;
+  const world::WorldHeightSettings session_world_height =
+      world::world_height_settings_from_generation_config(session->generation_config);
+  session->min_chunk_y = session_world_height.min_chunk_y;
+  session->max_chunk_y = session_world_height.max_chunk_y;
+  session->client_world.configure_height(session_world_height);
 
   auto worldgen_palette = world::resolve_world_generation_palette(
       session->generation_config,
@@ -196,6 +196,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.fluid_definition = dependencies_.water_fluid;
   server_start_info.chunk_streaming = dependencies_.chunk_streaming;
   server_start_info.chunk_generation = std::move(chunk_generation);
+  server_start_info.world_height = session_world_height;
   server_start_info.max_generation_results_per_tick =
       dependencies_.config.chunk_pipeline.max_generation_results_per_tick;
   server_start_info.max_lighting_results_per_tick =
@@ -298,7 +299,7 @@ bool DesktopSessionManager::start_singleplayer(
           session->chunk_view,
           dependencies_.config.chunks,
           dependencies_.config.chunk_pipeline,
-          camera_chunk_coord(session->client->camera()),
+          camera_chunk_section_coord(session->client->camera()),
           session->min_chunk_y,
           session->max_chunk_y,
           dependencies_.block_registry,
@@ -340,10 +341,11 @@ bool DesktopSessionManager::start_remote(const ui::JoinServerCommand& command) {
   auto session = std::make_unique<DesktopGameSession>(dependencies_.config.simulation.base_tps);
   session->server_save_display_name = command.name;
   session->generation_config = dependencies_.default_generation_config;
-  const std::pair<i32, i32> visible_chunk_y =
-      visible_worldgen_chunk_y_range(session->generation_config);
-  session->min_chunk_y = visible_chunk_y.first;
-  session->max_chunk_y = visible_chunk_y.second;
+  const world::WorldHeightSettings session_world_height =
+      world::world_height_settings_from_generation_config(session->generation_config);
+  session->min_chunk_y = session_world_height.min_chunk_y;
+  session->max_chunk_y = session_world_height.max_chunk_y;
+  session->client_world.configure_height(session_world_height);
 
   auto client = std::make_unique<client::ClientRuntime>(
       std::make_unique<net::GameNetworkingSocketsTransport>());
@@ -416,15 +418,15 @@ void DesktopSessionManager::refresh_inventory_slots(DesktopGameSession& session)
 }
 
 void DesktopSessionManager::collect_client_chunk_stream(DesktopGameSession& session) const {
-  std::vector<protocol::ChunkUnload> drained_unloads =
-      session.client->drain_received_chunk_unloads();
-  for (const protocol::ChunkUnload& unload : drained_unloads) {
+  std::vector<protocol::ChunkSectionUnload> drained_unloads =
+      session.client->drain_received_chunk_section_unloads();
+  for (const protocol::ChunkSectionUnload& unload : drained_unloads) {
     session.pending_client_chunk_unloads.emplace_back(unload);
   }
 
-  std::vector<protocol::ChunkData> drained_chunks =
-      session.client->drain_received_chunk_data();
-  for (protocol::ChunkData& data : drained_chunks) {
+  std::vector<protocol::ChunkSectionData> drained_chunks =
+      session.client->drain_received_chunk_section_data();
+  for (protocol::ChunkSectionData& data : drained_chunks) {
     session.pending_client_chunk_data.emplace_back(std::move(data));
   }
 
@@ -442,7 +444,7 @@ void DesktopSessionManager::apply_pending_client_chunk_stream(
   bool changed = false;
   u32 unloads_applied = 0;
   while (unloads_applied < unload_budget && !session.pending_client_chunk_unloads.empty()) {
-    const protocol::ChunkUnload unload = session.pending_client_chunk_unloads.front();
+    const protocol::ChunkSectionUnload unload = session.pending_client_chunk_unloads.front();
     session.pending_client_chunk_unloads.pop_front();
     ++unloads_applied;
     if (unload.world_id != session.client_world.id()) {
@@ -457,7 +459,7 @@ void DesktopSessionManager::apply_pending_client_chunk_stream(
 
   u32 chunks_applied = 0;
   while (chunks_applied < chunk_budget && !session.pending_client_chunk_data.empty()) {
-    protocol::ChunkData data = std::move(session.pending_client_chunk_data.front());
+    protocol::ChunkSectionData data = std::move(session.pending_client_chunk_data.front());
     session.pending_client_chunk_data.pop_front();
     ++chunks_applied;
     if (data.world_id != session.client_world.id()) {

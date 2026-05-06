@@ -15,15 +15,15 @@ namespace arv::protocol {
 
 struct ChunkInterestUpdate {
   WorldID world_id{};
-  ChunkCoord center_chunk{};
+  ChunkSectionCoord center_chunk{};
   i32 client_view_distance{};
-  std::optional<ChunkCoord> previous_center_chunk{};
+  std::optional<ChunkSectionCoord> previous_center_chunk{};
   u32 sequence_id{};
 };
 
-struct ChunkData {
+struct ChunkSectionData {
   WorldID world_id{};
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
   u64 chunk_version{};
   u64 chunk_content_version{};
   u64 chunk_light_version{};
@@ -35,19 +35,39 @@ struct ChunkData {
   std::array<voxel::FluidCell, voxel::ChunkVolume> fluids{};
 };
 
-struct ChunkUnload {
+struct ChunkSectionUnload {
   WorldID world_id{};
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
 };
 
 std::vector<u8> serialize_chunk_interest_update(const ChunkInterestUpdate& update);
 Expected<ChunkInterestUpdate, ProtocolError> deserialize_chunk_interest_update(
     std::span<const u8> bytes);
 
-std::vector<u8> serialize_chunk_data(const ChunkData& data);
-Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> bytes);
+std::vector<u8> serialize_chunk_section_data(const ChunkSectionData& data);
+Expected<ChunkSectionData, ProtocolError> deserialize_chunk_section_data(std::span<const u8> bytes);
 
-std::vector<u8> serialize_chunk_unload(const ChunkUnload& unload);
-Expected<ChunkUnload, ProtocolError> deserialize_chunk_unload(std::span<const u8> bytes);
+std::vector<u8> serialize_chunk_section_unload(const ChunkSectionUnload& unload);
+Expected<ChunkSectionUnload, ProtocolError> deserialize_chunk_section_unload(
+    std::span<const u8> bytes);
+
+using ChunkData = ChunkSectionData;
+using ChunkUnload = ChunkSectionUnload;
+
+inline std::vector<u8> serialize_chunk_data(const ChunkData& data) {
+  return serialize_chunk_section_data(data);
+}
+
+inline Expected<ChunkData, ProtocolError> deserialize_chunk_data(std::span<const u8> bytes) {
+  return deserialize_chunk_section_data(bytes);
+}
+
+inline std::vector<u8> serialize_chunk_unload(const ChunkUnload& unload) {
+  return serialize_chunk_section_unload(unload);
+}
+
+inline Expected<ChunkUnload, ProtocolError> deserialize_chunk_unload(std::span<const u8> bytes) {
+  return deserialize_chunk_section_unload(bytes);
+}
 
 } // namespace arv::protocol

@@ -290,8 +290,12 @@ void ServerRuntimeImpl::handle_chunk_interest_update(
     return;
   }
 
-  const ChunkCoord authoritative_center = player_chunk_coord(*player_state);
-  chunk_streamer_.update_player_interest(*session, authoritative_center, interest);
+  const ChunkSectionCoord authoritative_center = player_chunk_coord(*player_state);
+  chunk_streamer_.update_player_interest(
+      *session,
+      authoritative_center,
+      default_world_.height_settings(),
+      interest);
   if (mode_ == ServerMode::Dedicated &&
       logged_chunk_interest_sessions_.insert(session->session_id).second) {
     core::info(

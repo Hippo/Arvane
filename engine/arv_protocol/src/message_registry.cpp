@@ -58,10 +58,10 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ChunkInterestUpdate, "ChunkInterestUpdate",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});
-  registry.register_message({MessageType::ChunkData, "ChunkData",
+  registry.register_message({MessageType::ChunkSectionData, "ChunkSectionData",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::ChunkStreaming});
-  registry.register_message({MessageType::ChunkUnload, "ChunkUnload",
+  registry.register_message({MessageType::ChunkSectionUnload, "ChunkSectionUnload",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::ChunkStreaming});
   registry.register_message({MessageType::BlockUpdateBatch, "BlockUpdateBatch",

@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -53,12 +55,14 @@ surface:
 arv::world::ChunkGenerationRequest make_request(
     const arv::voxel::BlockRegistry& registry,
     arv::u64 seed,
-    arv::ChunkCoord coord = {{0, 0, 0}}) {
+    arv::ChunkSectionCoord coord = {{0, 0, 0}}) {
   arv::world::ChunkGenerationRequest request;
   request.world_id = arv::WorldID{1};
   request.seed = seed;
-  request.coord = coord;
+  request.coord = arv::chunk_to_column(coord);
   request.config = make_worldgen_config();
+  request.min_chunk_y = arv::floor_div(request.config.min_y, arv::ChunkSize);
+  request.max_chunk_y = arv::floor_div(request.config.max_y, arv::ChunkSize);
 
   auto palette = arv::world::resolve_world_generation_palette(request.config, registry);
   EXPECT_TRUE(palette);
@@ -85,7 +89,7 @@ TEST(WorldGenerationTests, SameSeedAndChunkProduceSameOutputThroughAJob) {
 
   ASSERT_TRUE(first);
   ASSERT_TRUE(second);
-  EXPECT_EQ(first.value().blocks, second.value().blocks);
+  EXPECT_EQ(first.value().sections, second.value().sections);
 }
 
 TEST(WorldGenerationTests, DifferentSeedsCanChangeChunkOutput) {
@@ -96,7 +100,7 @@ TEST(WorldGenerationTests, DifferentSeedsCanChangeChunkOutput) {
 
   ASSERT_TRUE(first);
   ASSERT_TRUE(second);
-  EXPECT_NE(first.value().blocks, second.value().blocks);
+  EXPECT_NE(first.value().sections, second.value().sections);
 }
 
 TEST(WorldGenerationTests, NoiseVariesTerrainHeightAcrossWorldSpace) {
@@ -120,9 +124,25 @@ TEST(WorldGenerationTests, GeneratedBlocksAreValidRegistryVariants) {
   auto generated = arv::world::generate_chunk(make_request(registry, 99, {{-1, 0, 1}}));
 
   ASSERT_TRUE(generated);
-  for (const arv::voxel::BlockVariantID variant : generated.value().blocks) {
-    EXPECT_LT(variant.value, registry.variant_count());
+  for (const arv::world::GeneratedChunkSection& section : generated.value().sections) {
+    for (const arv::voxel::BlockVariantID variant : section.blocks) {
+      EXPECT_LT(variant.value, registry.variant_count());
+    }
   }
+}
+
+TEST(WorldGenerationTests, ColumnGenerationIncludesNegativeConfiguredSections) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  arv::world::ChunkGenerationRequest request = make_request(registry, 99, {{-1, 0, 1}});
+  request.min_chunk_y = -2;
+  request.max_chunk_y = 1;
+
+  auto generated = arv::world::generate_chunk(request);
+
+  ASSERT_TRUE(generated);
+  ASSERT_EQ(generated.value().sections.size(), 4U);
+  EXPECT_EQ(generated.value().sections.front().coord, (arv::ChunkSectionCoord{{-1, -2, 1}}));
+  EXPECT_EQ(generated.value().sections.back().coord, (arv::ChunkSectionCoord{{-1, 1, 1}}));
 }
 
 TEST(WorldGenerationTests, WorldPublishesGeneratedChunksOnlyForItsWorldId) {
@@ -131,6 +151,11 @@ TEST(WorldGenerationTests, WorldPublishesGeneratedChunksOnlyForItsWorldId) {
   ASSERT_TRUE(generated);
 
   arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height(
+      {
+          generated.value().sections.front().coord.value.y,
+          generated.value().sections.back().coord.value.y,
+      });
   world.request_chunk_load({{0, 0, 0}});
   EXPECT_TRUE(world.publish_generated_chunk(generated.value()));
   const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
@@ -139,4 +164,37 @@ TEST(WorldGenerationTests, WorldPublishesGeneratedChunksOnlyForItsWorldId) {
 
   generated.value().world_id = arv::WorldID{2};
   EXPECT_FALSE(world.publish_generated_chunk(generated.value()));
+}
+
+TEST(WorldGenerationTests, ColumnGenerationPreservesLoadedSavedSections) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  auto generated = arv::world::generate_chunk(make_request(registry, 99));
+  ASSERT_TRUE(generated);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height(
+      {
+          generated.value().sections.front().coord.value.y,
+          generated.value().sections.back().coord.value.y,
+      });
+
+  const arv::voxel::BlockVariantID dirt = registry.find_variant("arvane:dirt").value();
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> saved_blocks{};
+  saved_blocks.fill(dirt);
+  world.apply_chunk_snapshot({{0, 0, 0}}, saved_blocks, std::nullopt);
+  world.request_chunk_load(generated.value().sections.back().coord);
+
+  ASSERT_TRUE(world.publish_generated_chunk(generated.value()));
+
+  const arv::voxel::ChunkSection* saved_section = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(saved_section, nullptr);
+  EXPECT_EQ(saved_section->lifecycle_state(), arv::voxel::ChunkLifecycleState::Loaded);
+  EXPECT_EQ(saved_section->blocks(), saved_blocks);
+
+  const arv::voxel::ChunkSection* filled_missing_section =
+      world.find_chunk(generated.value().sections.back().coord);
+  ASSERT_NE(filled_missing_section, nullptr);
+  EXPECT_EQ(
+      filled_missing_section->lifecycle_state(),
+      arv::voxel::ChunkLifecycleState::Loaded);
 }

@@ -27,7 +27,7 @@ namespace {
 
 void format_chunk_context(
     std::array<char, core::PerfEventContextCapacity>& context,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   (void)std::snprintf(
       context.data(),
       context.size(),
@@ -65,7 +65,7 @@ void format_chunk_context(
 
 } // namespace
 
-ChunkSection::ChunkSection(ChunkCoord coord) : coord_(coord), storage_(make_chunk_storage()) {
+ChunkSection::ChunkSection(ChunkSectionCoord coord) : coord_(coord), storage_(make_chunk_storage()) {
 }
 
 void ChunkSection::ensure_detached_storage() {

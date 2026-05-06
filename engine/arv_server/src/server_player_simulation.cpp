@@ -82,7 +82,7 @@ Vec3f player_look_direction(const player::PlayerState& player_state) noexcept {
        std::cos(player_state.yaw_radians) * cos_pitch});
 }
 
-ChunkCoord player_chunk_coord(const player::PlayerState& player_state) noexcept {
+ChunkSectionCoord player_chunk_coord(const player::PlayerState& player_state) noexcept {
   return block_to_chunk({{
       static_cast<i32>(std::floor(player_state.position.x)),
       static_cast<i32>(std::floor(player_state.position.y)),
@@ -175,7 +175,7 @@ void ServerRuntimeImpl::tick_players() {
 }
 
 void ServerRuntimeImpl::update_world_simulation_activity() {
-  std::vector<ChunkCoord> centers;
+  std::vector<ChunkSectionCoord> centers;
   centers.reserve(sessions_.size());
   for (const SessionID session_id : sessions_.session_ids()) {
     const ServerSession* session = sessions_.find(session_id);

@@ -25,7 +25,7 @@ arv::voxel::FluidDefinition make_immediate_water(
   return water;
 }
 
-void make_active_chunk(arv::world::WorldRuntime& world, arv::ChunkCoord coord) {
+void make_active_chunk(arv::world::WorldRuntime& world, arv::ChunkSectionCoord coord) {
   world.ensure_chunk(coord);
   ASSERT_TRUE(world.set_chunk_lifecycle_state(coord, arv::voxel::ChunkLifecycleState::Active));
 }

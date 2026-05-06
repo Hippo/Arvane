@@ -81,6 +81,7 @@ struct ServerStartInfo {
   voxel::FluidDefinition fluid_definition{voxel::make_water_fluid_definition()};
   ServerChunkStreamingConfig chunk_streaming{};
   std::optional<ServerChunkGenerationSettings> chunk_generation{};
+  std::optional<world::WorldHeightSettings> world_height{};
   u32 max_generation_results_per_tick{2};
   u32 max_lighting_results_per_tick{1};
   u32 max_pending_generation_jobs{4};

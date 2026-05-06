@@ -19,8 +19,8 @@ namespace {
 }
 
 [[nodiscard]] bool is_inside_horizontal_distance(
-    ChunkCoord coord,
-    ChunkCoord center,
+    ChunkSectionCoord coord,
+    ChunkSectionCoord center,
     i32 radius) noexcept {
   return abs_i32(coord.value.x - center.value.x) <= radius &&
          abs_i32(coord.value.z - center.value.z) <= radius;
@@ -29,7 +29,7 @@ namespace {
 [[nodiscard]] bool target_matches(
     const ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
-    ChunkCoord center,
+    ChunkSectionCoord center,
     i32 min_chunk_y,
     i32 max_chunk_y) noexcept {
   return view.target_center.has_value() &&
@@ -39,12 +39,12 @@ namespace {
          view.target_render_distance == distances.render_distance;
 }
 
-[[nodiscard]] bool is_inside_target_y(const ChunkViewState& view, ChunkCoord coord) noexcept {
+[[nodiscard]] bool is_inside_target_y(const ChunkViewState& view, ChunkSectionCoord coord) noexcept {
   return coord.value.y >= view.target_min_chunk_y &&
          coord.value.y <= view.target_max_chunk_y;
 }
 
-[[nodiscard]] bool is_inside_render_view(const ChunkViewState& view, ChunkCoord coord) noexcept {
+[[nodiscard]] bool is_inside_render_view(const ChunkViewState& view, ChunkSectionCoord coord) noexcept {
   return view.target_center.has_value() &&
          is_inside_target_y(view, coord) &&
          is_inside_horizontal_distance(
@@ -53,7 +53,7 @@ namespace {
              view.target_render_distance);
 }
 
-[[nodiscard]] i32 chunk_priority_distance(ChunkCoord coord, ChunkCoord center) noexcept {
+[[nodiscard]] i32 chunk_priority_distance(ChunkSectionCoord coord, ChunkSectionCoord center) noexcept {
   const i32 horizontal = std::max(
       abs_i32(coord.value.x - center.value.x),
       abs_i32(coord.value.z - center.value.z));
@@ -64,7 +64,7 @@ namespace {
 [[nodiscard]] u32 mesh_candidate_rank(
     const ChunkViewState& view,
     const voxel::ChunkSection* chunk,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   if (chunk == nullptr) {
     return 4U;
   }
@@ -85,12 +85,12 @@ void sort_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
     return;
   }
 
-  const ChunkCoord center = view.target_center.value();
+  const ChunkSectionCoord center = view.target_center.value();
   const world::WorldSearch search{world};
   std::stable_sort(
       view.mesh_candidates.begin(),
       view.mesh_candidates.end(),
-      [&search, &view, center](ChunkCoord lhs, ChunkCoord rhs) {
+      [&search, &view, center](ChunkSectionCoord lhs, ChunkSectionCoord rhs) {
         const voxel::ChunkSection* lhs_chunk = search.find_chunk(lhs);
         const voxel::ChunkSection* rhs_chunk = search.find_chunk(rhs);
         const i32 lhs_distance = chunk_priority_distance(lhs, center);
@@ -119,7 +119,7 @@ void set_draw_items_dirty(ChunkViewState& view) noexcept {
   view.draw_items_dirty = true;
 }
 
-void enqueue_mesh_candidate(ChunkViewState& view, ChunkCoord coord) {
+void enqueue_mesh_candidate(ChunkViewState& view, ChunkSectionCoord coord) {
   if (!is_inside_render_view(view, coord)) {
     return;
   }
@@ -147,13 +147,13 @@ void clear_mesh_candidates(ChunkViewState& view) {
 void rebuild_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
   clear_mesh_candidates(view);
 
-  const ChunkCoord center = view.target_center.value();
+  const ChunkSectionCoord center = view.target_center.value();
   const i32 render_distance = view.target_render_distance;
   const world::WorldSearch search{world};
   for (i32 z = center.value.z - render_distance; z <= center.value.z + render_distance; ++z) {
     for (i32 x = center.value.x - render_distance; x <= center.value.x + render_distance; ++x) {
       for (i32 y = view.target_min_chunk_y; y <= view.target_max_chunk_y; ++y) {
-        const ChunkCoord coord{{x, y, z}};
+        const ChunkSectionCoord coord{{x, y, z}};
         if (search.find_chunk(coord) != nullptr) {
           enqueue_mesh_candidate(view, coord);
         }
@@ -163,7 +163,7 @@ void rebuild_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
 }
 
 void enqueue_dirty_mesh_chunks_in_view(world::WorldRuntime& world, ChunkViewState& view) {
-  for (const ChunkCoord coord : world.consume_dirty_mesh_chunks(
+  for (const ChunkSectionCoord coord : world.consume_dirty_mesh_chunks(
            voxel::ChunkDirtyFlags::Geometry | voxel::ChunkDirtyFlags::LightMesh)) {
     enqueue_mesh_candidate(view, coord);
   }
@@ -174,7 +174,7 @@ void retarget_chunk_view(
     world::WorldRuntime& world,
     ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
-    ChunkCoord center,
+    ChunkSectionCoord center,
     i32 min_chunk_y,
     i32 max_chunk_y) {
   view.target_center = center;
@@ -289,7 +289,7 @@ void schedule_mesh_jobs(
   while (!view.mesh_candidates.empty() &&
          mesh_jobs_scheduled < pipeline.max_mesh_jobs_per_frame &&
          view.pending_meshes.size() < pipeline.max_mesh_jobs_per_frame) {
-    const ChunkCoord coord = view.mesh_candidates.front();
+    const ChunkSectionCoord coord = view.mesh_candidates.front();
     view.mesh_candidates.pop_front();
     view.mesh_candidate_set.erase(coord);
 
@@ -414,34 +414,21 @@ void log_chunk_view_profile(
 
 } // namespace
 
-ChunkCoord world_position_chunk_coord(Vec3f position) {
+ChunkSectionCoord world_position_chunk_section_coord(Vec3f position) {
   return block_to_chunk({{static_cast<i32>(std::floor(position.x)),
                           static_cast<i32>(std::floor(position.y)),
                           static_cast<i32>(std::floor(position.z))}});
 }
 
-ChunkCoord camera_chunk_coord(const client::CameraShell& camera) {
-  return world_position_chunk_coord(camera.position());
-}
-
-std::pair<i32, i32> visible_worldgen_chunk_y_range(
-    const world::WorldGenerationConfig& config) {
-  const f32 height_extent =
-      std::abs(static_cast<f32>(config.height_scale)) * config.terrain_amplitude + 4.0F;
-  const i32 surface_min =
-      static_cast<i32>(std::floor(static_cast<f32>(config.base_height) - height_extent));
-  const i32 surface_max =
-      static_cast<i32>(std::ceil(static_cast<f32>(config.base_height) + height_extent));
-  const i32 min_y = std::max(config.min_y, surface_min - ChunkSize);
-  const i32 max_y = std::min(config.max_y, surface_max);
-  return {floor_div(min_y, ChunkSize), floor_div(max_y, ChunkSize)};
+ChunkSectionCoord camera_chunk_section_coord(const client::CameraShell& camera) {
+  return world_position_chunk_section_coord(camera.position());
 }
 
 void request_chunk_view_mesh_rescan(ChunkViewState& view) noexcept {
   view.mesh_rescan_requested = true;
 }
 
-void remove_chunk_view_chunk(ChunkViewState& view, ChunkCoord coord) {
+void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord) {
   view.draw_items.erase(coord);
   view.mesh_candidate_set.erase(coord);
   for (auto iter = view.mesh_candidates.begin(); iter != view.mesh_candidates.end();) {
@@ -461,7 +448,7 @@ bool update_chunk_view(
     ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
     const io::ChunkPipelineConfig& pipeline,
-    ChunkCoord center,
+    ChunkSectionCoord center,
     i32 min_chunk_y,
     i32 max_chunk_y,
     const voxel::BlockRegistry& block_registry,

@@ -50,7 +50,7 @@ void upsert_player_save(
 
 std::vector<persistence::SavedChunkSection> capture_saved_chunks(
     const world::WorldRuntime& world) {
-  std::vector<ChunkCoord> coords = world.loaded_chunk_coords();
+  std::vector<ChunkSectionCoord> coords = world.loaded_chunk_coords();
   std::sort(coords.begin(), coords.end(), [](const auto& lhs, const auto& rhs) {
     if (lhs.value.x != rhs.value.x) {
       return lhs.value.x < rhs.value.x;
@@ -63,7 +63,7 @@ std::vector<persistence::SavedChunkSection> capture_saved_chunks(
 
   std::vector<persistence::SavedChunkSection> chunks;
   chunks.reserve(coords.size());
-  for (const ChunkCoord coord : coords) {
+  for (const ChunkSectionCoord coord : coords) {
     const voxel::ChunkSection* chunk = world.find_chunk(coord);
     if (chunk == nullptr) {
       continue;

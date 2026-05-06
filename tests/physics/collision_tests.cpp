@@ -8,7 +8,7 @@
 
 namespace {
 
-void ensure_loaded_chunk(arv::world::WorldRuntime& world, arv::ChunkCoord coord) {
+void ensure_loaded_chunk(arv::world::WorldRuntime& world, arv::ChunkSectionCoord coord) {
   (void)world.ensure_chunk(coord);
 }
 

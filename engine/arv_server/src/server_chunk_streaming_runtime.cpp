@@ -32,7 +32,7 @@ void ServerRuntimeImpl::tick_chunk_streaming() {
     }
     if (send_result &&
         mode_ == ServerMode::Dedicated &&
-        message.message_type == protocol::MessageType::ChunkData) {
+        message.message_type == protocol::MessageType::ChunkSectionData) {
       if (const ServerSession* session = sessions_.find_by_connection(message.connection_id);
           session != nullptr &&
           logged_chunk_delivery_sessions_.insert(session->session_id).second) {

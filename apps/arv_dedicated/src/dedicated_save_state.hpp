@@ -26,7 +26,7 @@ struct DedicatedLoadedWorld {
 
   world::WorldGenerationConfig active_generation_config;
   u64 world_seed{};
-  std::pair<i32, i32> visible_chunk_y{};
+  world::WorldHeightSettings world_height{};
   TickIndex initial_tick_index{};
 
   std::vector<server::ServerPlayerSaveState> saved_players;
@@ -47,7 +47,7 @@ struct DedicatedLoadedWorld {
     const server::ServerRuntime& server,
     const world::WorldGenerationConfig& active_generation_config,
     u64 world_seed,
-    std::pair<i32, i32> visible_chunk_y,
+    world::WorldHeightSettings world_height,
     const voxel::BlockRegistry& block_registry,
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,

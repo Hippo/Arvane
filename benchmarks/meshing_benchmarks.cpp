@@ -143,7 +143,7 @@ void BM_StableCameraPathMeshing(benchmark::State& state) {
     }
   }
 
-  constexpr std::array<arv::ChunkCoord, 8> CameraPath{{
+  constexpr std::array<arv::ChunkSectionCoord, 8> CameraPath{{
       {{-2, 0, -2}},
       {{-1, 0, -2}},
       {{0, 0, -1}},
@@ -158,7 +158,7 @@ void BM_StableCameraPathMeshing(benchmark::State& state) {
   arv::u64 total_meshes = 0;
   arv::u64 total_indices = 0;
   for (auto _ : state) {
-    const arv::ChunkCoord center = CameraPath[path_index++ % CameraPath.size()];
+    const arv::ChunkSectionCoord center = CameraPath[path_index++ % CameraPath.size()];
     for (arv::i32 z = center.value.z - 1; z <= center.value.z + 1; ++z) {
       for (arv::i32 x = center.value.x - 1; x <= center.value.x + 1; ++x) {
         auto snapshot = world.make_meshing_snapshot(

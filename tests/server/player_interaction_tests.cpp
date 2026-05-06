@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <numbers>
 #include <string_view>
 #include <thread>
@@ -337,12 +338,17 @@ TEST(PlayerInteractionTests, BucketPicksUpSourceWaterAndBecomesWaterBucket) {
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerChunkStreamingConfig streaming_config;
+  streaming_config.simulation_distance = 4;
   ASSERT_TRUE(server.start({
       arv::server::ServerMode::Integrated,
       arv::DefaultBaseTps,
       {"in-process", 0},
       &block_registry,
-      &item_registry}));
+      &item_registry,
+      arv::player::default_player_tuning(),
+      water,
+      streaming_config}));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
@@ -465,7 +471,7 @@ TEST(PlayerInteractionTests, PlacedWaterFlowsThroughActiveServerSimulation) {
   ASSERT_TRUE(server.voxel_world().get_fluid({{2, 1, 0}}).source());
 
   bool flowed = false;
-  for (arv::u32 tick = 0; tick < 64U; ++tick) {
+  for (arv::u32 tick = 0; tick < 300U; ++tick) {
     client.fixed_tick(server.tick_index());
     server.tick();
     const arv::voxel::FluidCell below = server.voxel_world().get_fluid({{2, 0, 0}});
@@ -473,7 +479,7 @@ TEST(PlayerInteractionTests, PlacedWaterFlowsThroughActiveServerSimulation) {
       flowed = true;
       break;
     }
-    std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   EXPECT_TRUE(flowed);

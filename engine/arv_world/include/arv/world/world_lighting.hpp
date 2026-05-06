@@ -25,7 +25,7 @@ inline constexpr u32 DefaultLightingWorkBudgetNodes =
     static_cast<u32>(voxel::ChunkVolume * 8U);
 
 struct LightingJobStats {
-  ChunkCoord section_coord{};
+  ChunkSectionCoord section_coord{};
   LightingJobType job_type{LightingJobType::SectionRelight};
   u32 nodes_processed{};
   u32 add_nodes_processed{};
@@ -40,7 +40,7 @@ struct LightingJobStats {
 };
 
 struct ChunkLightingSnapshot {
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
   u64 source_version{};
   voxel::ChunkStorageView storage{};
   u64 source_content_version{};
@@ -59,7 +59,7 @@ struct ChunkLightingSnapshot {
 struct LightingSnapshot {
   WorldID world_id{};
   u64 source_revision{};
-  ChunkCoord target_coord{};
+  ChunkSectionCoord target_coord{};
   u32 pending_dirty_sections{};
   u32 work_budget_nodes{DefaultLightingWorkBudgetNodes};
   LightingJobType job_type{LightingJobType::SectionRelight};
@@ -67,7 +67,7 @@ struct LightingSnapshot {
 };
 
 struct ChunkLightingResult {
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
   u64 source_version{};
   std::array<voxel::LightWord, voxel::ChunkVolume> lights{};
   u64 source_content_version{};

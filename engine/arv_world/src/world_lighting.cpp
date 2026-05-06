@@ -40,7 +40,7 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
   return {{x, y, z}};
 }
 
-[[nodiscard]] bool chunk_coord_less(ChunkCoord lhs, ChunkCoord rhs) noexcept {
+[[nodiscard]] bool chunk_coord_less(ChunkSectionCoord lhs, ChunkSectionCoord rhs) noexcept {
   if (lhs.value.x != rhs.value.x) {
     return lhs.value.x < rhs.value.x;
   }
@@ -160,7 +160,7 @@ void add_light_dependency_offsets(
   }
 }
 
-[[nodiscard]] ChunkCoord offset_chunk(ChunkCoord coord, Vec3i offset) noexcept {
+[[nodiscard]] ChunkSectionCoord offset_chunk(ChunkSectionCoord coord, Vec3i offset) noexcept {
   return {{
       coord.value.x + offset.x,
       coord.value.y + offset.y,
@@ -170,7 +170,7 @@ void add_light_dependency_offsets(
 
 [[nodiscard]] const ChunkLightingSnapshot* find_snapshot_chunk(
     const LightingSnapshot& snapshot,
-    ChunkCoord coord) noexcept {
+    ChunkSectionCoord coord) noexcept {
   for (const ChunkLightingSnapshot& chunk : snapshot.chunks) {
     if (chunk.coord == coord) {
       return &chunk;
@@ -284,13 +284,13 @@ void record_lighting_job_finished(
 } // namespace
 
 bool WorldLighting::has_work(const WorldRuntime& world) noexcept {
-  for (const auto& [coord, chunk] : world.impl_->chunks.chunks()) {
-    (void)coord;
+  bool has_dirty_section = false;
+  world.impl_->chunks.for_each_loaded_section([&](const voxel::ChunkSection& chunk) {
     if (chunk.is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
-      return true;
+      has_dirty_section = true;
     }
-  }
-  return false;
+  });
+  return has_dirty_section;
 }
 
 LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
@@ -299,13 +299,13 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
   snapshot.world_id = world.impl_->id;
   snapshot.source_revision = world.impl_->dirty.lighting_revision();
 
-  std::vector<ChunkCoord> dirty_coords;
-  dirty_coords.reserve(world.impl_->chunks.chunks().size());
-  for (const auto& [coord, chunk] : world.impl_->chunks.chunks()) {
+  std::vector<ChunkSectionCoord> dirty_coords;
+  dirty_coords.reserve(world.impl_->chunks.loaded_count());
+  world.impl_->chunks.for_each_loaded_section([&](const voxel::ChunkSection& chunk) {
     if (chunk.is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
-      dirty_coords.emplace_back(coord);
+      dirty_coords.emplace_back(chunk.coord());
     }
-  }
+  });
 
   if (dirty_coords.empty()) {
     return snapshot;
@@ -343,12 +343,13 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
     }
   }
 
-  auto has_loaded_section_above = [&world](ChunkCoord coord) noexcept {
-    for (const auto& [loaded_coord, chunk] : world.impl_->chunks.chunks()) {
-      (void)chunk;
-      if (loaded_coord.value.x == coord.value.x &&
-          loaded_coord.value.z == coord.value.z &&
-          loaded_coord.value.y > coord.value.y) {
+  auto has_loaded_section_above = [&world](ChunkSectionCoord coord) noexcept {
+    const Chunk* column = world.impl_->chunks.find_column(chunk_to_column(coord));
+    if (column == nullptr) {
+      return false;
+    }
+    for (i32 y = coord.value.y + 1; y <= world.impl_->chunks.height_settings().max_chunk_y; ++y) {
+      if (column->find_section(y) != nullptr) {
         return true;
       }
     }
@@ -356,7 +357,7 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
   };
 
   auto make_missing_above_sky = [&world, &has_loaded_section_above, &target_surface_y](
-                                    ChunkCoord coord) noexcept {
+                                    ChunkSectionCoord coord) noexcept {
     std::array<u8, voxel::ChunkArea> sky{};
     if (has_loaded_section_above(coord)) {
       return sky;
@@ -381,9 +382,9 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
     return sky;
   };
 
-  std::vector<ChunkCoord> coords;
+  std::vector<ChunkSectionCoord> coords;
   coords.reserve(voxel::BlockFaceCount + 1U);
-  auto add_if_loaded = [&search, &coords](ChunkCoord coord) {
+  auto add_if_loaded = [&search, &coords](ChunkSectionCoord coord) {
     if (search.find_chunk(coord) == nullptr) {
       return;
     }
@@ -407,7 +408,7 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
   }
 
   snapshot.chunks.reserve(coords.size());
-  for (const ChunkCoord coord : coords) {
+  for (const ChunkSectionCoord coord : coords) {
     const voxel::ChunkSection* chunk = search.find_chunk(coord);
     if (chunk == nullptr) {
       continue;
@@ -897,7 +898,7 @@ LightingPublishStats WorldLighting::publish_result(
           continue;
         }
 
-        const ChunkCoord neighbor_coord =
+        const ChunkSectionCoord neighbor_coord =
             offset_chunk(chunk_result.coord, NeighborOffsets[face_index]);
         voxel::ChunkSection* neighbor = search.find_mutable_chunk(neighbor_coord);
         if (neighbor == nullptr) {
@@ -932,7 +933,7 @@ LightingPublishStats WorldLighting::publish_result(
               continue;
             }
 
-            const ChunkCoord dependency_coord{{
+            const ChunkSectionCoord dependency_coord{{
                 chunk_result.coord.value.x + ox,
                 chunk_result.coord.value.y + oy,
                 chunk_result.coord.value.z + oz,

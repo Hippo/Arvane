@@ -82,7 +82,7 @@ void upsert_player_save(
 
 std::vector<persistence::SavedChunkSection> capture_saved_chunks(
     const world::WorldRuntime& world) {
-  std::vector<ChunkCoord> coords = world.loaded_chunk_coords();
+  std::vector<ChunkSectionCoord> coords = world.loaded_chunk_coords();
   std::sort(coords.begin(), coords.end(), [](const auto& lhs, const auto& rhs) {
     if (lhs.value.x != rhs.value.x) {
       return lhs.value.x < rhs.value.x;
@@ -95,7 +95,7 @@ std::vector<persistence::SavedChunkSection> capture_saved_chunks(
 
   std::vector<persistence::SavedChunkSection> chunks;
   chunks.reserve(coords.size());
-  for (const ChunkCoord coord : coords) {
+  for (const ChunkSectionCoord coord : coords) {
     const voxel::ChunkSection* chunk = world.find_chunk(coord);
     if (chunk == nullptr) {
       continue;
@@ -184,16 +184,15 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
   loaded_world.loaded_save = std::move(loaded_save_result.value());
   loaded_world.active_generation_config = default_generation_config;
   loaded_world.world_seed = generated_world_seed();
-  loaded_world.visible_chunk_y =
-      visible_worldgen_chunk_y_range(loaded_world.active_generation_config);
+  loaded_world.world_height =
+      world::world_height_settings_from_generation_config(loaded_world.active_generation_config);
 
   if (loaded_world.loaded_save.has_world_metadata) {
     loaded_world.active_generation_config =
         loaded_world.loaded_save.world.generation_config;
     loaded_world.world_seed = loaded_world.loaded_save.world.seed;
-    loaded_world.visible_chunk_y = {
-        loaded_world.loaded_save.world.min_chunk_y,
-        loaded_world.loaded_save.world.max_chunk_y};
+    loaded_world.world_height =
+        world::world_height_settings_from_generation_config(loaded_world.active_generation_config);
     loaded_world.initial_tick_index = loaded_world.loaded_save.world.tick_index;
     core::info(
         "dedicated",
@@ -218,8 +217,8 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     world_metadata.name = config.server.world;
     world_metadata.seed = loaded_world.world_seed;
     world_metadata.generation_config = loaded_world.active_generation_config;
-    world_metadata.min_chunk_y = loaded_world.visible_chunk_y.first;
-    world_metadata.max_chunk_y = loaded_world.visible_chunk_y.second;
+    world_metadata.min_chunk_y = loaded_world.world_height.min_chunk_y;
+    world_metadata.max_chunk_y = loaded_world.world_height.max_chunk_y;
     world_metadata.block_registry_hash = block_registry_hash;
     world_metadata.item_registry_hash = item_registry_hash;
 
@@ -281,7 +280,7 @@ Expected<void, DedicatedError> save_dedicated_world(
     const server::ServerRuntime& server,
     const world::WorldGenerationConfig& active_generation_config,
     u64 world_seed,
-    std::pair<i32, i32> visible_chunk_y,
+    world::WorldHeightSettings world_height,
     const voxel::BlockRegistry& block_registry,
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
@@ -303,8 +302,8 @@ Expected<void, DedicatedError> save_dedicated_world(
       world_seed,
       server.voxel_world().tick_index(),
       active_generation_config,
-      visible_chunk_y.first,
-      visible_chunk_y.second,
+      world_height.min_chunk_y,
+      world_height.max_chunk_y,
       block_registry_hash,
       item_registry_hash,
       server.voxel_world().clock()};

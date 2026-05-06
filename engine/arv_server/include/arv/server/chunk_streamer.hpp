@@ -33,9 +33,9 @@ struct QueuedChunkStreamMessage {
   WorldID world_id{};
   protocol::ReliabilityClass reliability{protocol::ReliabilityClass::ReliableOrdered};
   protocol::NetworkLane lane{protocol::NetworkLane::ChunkStreaming};
-  protocol::MessageType message_type{protocol::MessageType::ChunkData};
+  protocol::MessageType message_type{protocol::MessageType::ChunkSectionData};
   std::vector<u8> payload{};
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
   u64 block_version{};
   u64 light_version{};
   bool lighting_valid{};
@@ -47,8 +47,15 @@ public:
   void configure(ServerChunkStreamingConfig config) noexcept;
   void update_player_interest(
       const ServerSession& session,
-      ChunkCoord authoritative_center,
+      ChunkSectionCoord authoritative_center,
+      world::WorldHeightSettings height,
       const protocol::ChunkInterestUpdate& interest);
+  void update_player_interest(
+      const ServerSession& session,
+      ChunkSectionCoord authoritative_center,
+      const protocol::ChunkInterestUpdate& interest) {
+    update_player_interest(session, authoritative_center, {}, interest);
+  }
   void remove_session(SessionID session_id);
   void tick_streaming_budget(
       world::WorldRuntime& world,
@@ -58,16 +65,16 @@ public:
   [[nodiscard]] bool session_has_sent_chunk(
       SessionID session_id,
       WorldID world_id,
-      ChunkCoord coord) const noexcept;
+      ChunkSectionCoord coord) const noexcept;
   bool mark_sent_block_version(
       SessionID session_id,
       WorldID world_id,
-      ChunkCoord coord,
+      ChunkSectionCoord coord,
       u64 block_version) noexcept;
   bool confirm_chunk_sent(
       SessionID session_id,
       WorldID world_id,
-      ChunkCoord coord,
+      ChunkSectionCoord coord,
       u64 block_version,
       u64 light_version,
       bool lighting_valid) noexcept;
@@ -88,25 +95,27 @@ private:
     PlayerID player_id{};
     net::ConnectionID connection_id{};
     WorldID world_id{};
-    ChunkCoord center_chunk{};
+    ChunkSectionCoord center_chunk{};
     i32 view_distance{};
-    HashSet<ChunkCoord> desired_chunks{};
-    HashMap<ChunkCoord, SentChunkVersions> sent_chunk_versions{};
-    HashSet<ChunkCoord> pending_chunks{};
-    std::vector<ChunkCoord> unload_queue{};
+    HashSet<ChunkSectionCoord> desired_chunks{};
+    HashMap<ChunkSectionCoord, SentChunkVersions> sent_chunk_versions{};
+    HashSet<ChunkSectionCoord> pending_chunks{};
+    std::vector<ChunkSectionCoord> unload_queue{};
   };
 
   [[nodiscard]] i32 clamp_view_distance(i32 requested_distance) const noexcept;
-  [[nodiscard]] HashSet<ChunkCoord> compute_streaming_set(
-      ChunkCoord center,
+  [[nodiscard]] HashSet<ChunkSectionCoord> compute_streaming_set(
+      ChunkSectionCoord center,
+      world::WorldHeightSettings height,
       i32 radius) const;
   void compute_streaming_diff(
       PlayerChunkStreamState& state,
-      HashSet<ChunkCoord> next_desired);
+      world::WorldHeightSettings height,
+      HashSet<ChunkSectionCoord> next_desired);
   void queue_dirty_sent_chunks(PlayerChunkStreamState& state, const world::WorldRuntime& world);
   [[nodiscard]] std::optional<voxel::ChunkSnapshot> prepare_chunk_snapshot(
       world::WorldRuntime& world,
-      ChunkCoord coord) const;
+      ChunkSectionCoord coord) const;
   void queue_chunk_unloads(
       PlayerChunkStreamState& state,
       std::vector<QueuedChunkStreamMessage>& out_messages);

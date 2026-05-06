@@ -25,7 +25,7 @@ void ClientChunkInterest::set_view_distance(i32 view_distance) noexcept {
 }
 
 void ClientChunkInterest::update_player_position(Vec3f position) noexcept {
-  const ChunkCoord next_chunk = position_to_chunk(position);
+  const ChunkSectionCoord next_chunk = position_to_chunk(position);
   if (!has_current_chunk_) {
     current_chunk_ = next_chunk;
     has_current_chunk_ = true;
@@ -61,7 +61,7 @@ protocol::ChunkInterestUpdate ClientChunkInterest::build_interest_update() const
   return update;
 }
 
-ChunkCoord ClientChunkInterest::position_to_chunk(Vec3f position) noexcept {
+ChunkSectionCoord ClientChunkInterest::position_to_chunk(Vec3f position) noexcept {
   return block_to_chunk({{
       static_cast<i32>(std::floor(position.x)),
       static_cast<i32>(std::floor(position.y)),

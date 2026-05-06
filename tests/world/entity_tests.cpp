@@ -72,7 +72,7 @@ TEST(WorldEntityTests, TransformUpdatesPreviousStateAndChunkRelevance) {
   EXPECT_EQ(transform->position, (arv::Vec3f{17.0F, 2.0F, -1.0F}));
 
   ASSERT_TRUE(world.entity_chunk(entity).has_value());
-  EXPECT_EQ(world.entity_chunk(entity).value(), (arv::ChunkCoord{{1, 0, -1}}));
+  EXPECT_EQ(world.entity_chunk(entity).value(), (arv::ChunkSectionCoord{{1, 0, -1}}));
 }
 
 TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {

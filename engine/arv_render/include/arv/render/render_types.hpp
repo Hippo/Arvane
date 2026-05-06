@@ -357,7 +357,7 @@ void append_chunk_vertex(CpuMeshBuffer& buffer, ChunkVertex vertex);
 
 struct ChunkMeshData {
   WorldID world_id{};
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
   u64 source_version{};
   u64 source_content_version{};
   u64 source_light_version{};
@@ -371,7 +371,7 @@ struct ChunkMeshUpload {
 
 struct ChunkMeshKey {
   WorldID world_id{};
-  ChunkCoord coord{};
+  ChunkSectionCoord coord{};
 
   constexpr bool operator==(const ChunkMeshKey&) const = default;
 };
