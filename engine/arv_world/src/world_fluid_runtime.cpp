@@ -46,6 +46,52 @@ namespace {
   return fluid_update_priority(candidate.reason) > fluid_update_priority(current.reason);
 }
 
+[[nodiscard]] BlockPos offset_fluid_probe(BlockPos pos, Vec3i offset) noexcept {
+  return {{pos.value.x + offset.x, pos.value.y + offset.y, pos.value.z + offset.z}};
+}
+
+void add_required_fluid_chunk(HashSet<ChunkSectionCoord>& chunks, BlockPos pos) {
+  chunks.insert(block_to_chunk(pos));
+}
+
+void add_required_fluid_chunks(HashSet<ChunkSectionCoord>& chunks, BlockPos pos) {
+  static constexpr std::array<Vec3i, 4> HorizontalOffsets{{
+      {1, 0, 0},
+      {-1, 0, 0},
+      {0, 0, 1},
+      {0, 0, -1},
+  }};
+  static constexpr std::array<Vec3i, 6> NeighborOffsets{{
+      {1, 0, 0},
+      {-1, 0, 0},
+      {0, 1, 0},
+      {0, -1, 0},
+      {0, 0, 1},
+      {0, 0, -1},
+  }};
+
+  add_required_fluid_chunk(chunks, pos);
+  for (const Vec3i offset : NeighborOffsets) {
+    add_required_fluid_chunk(chunks, offset_fluid_probe(pos, offset));
+  }
+  for (const Vec3i offset : HorizontalOffsets) {
+    const BlockPos neighbor = offset_fluid_probe(pos, offset);
+    add_required_fluid_chunk(chunks, offset_fluid_probe(neighbor, {0, -1, 0}));
+  }
+}
+
+[[nodiscard]] bool chunk_section_less(
+    ChunkSectionCoord lhs,
+    ChunkSectionCoord rhs) noexcept {
+  if (lhs.value.x != rhs.value.x) {
+    return lhs.value.x < rhs.value.x;
+  }
+  if (lhs.value.y != rhs.value.y) {
+    return lhs.value.y < rhs.value.y;
+  }
+  return lhs.value.z < rhs.value.z;
+}
+
 } // namespace
 
 void WorldFluidRuntime::enqueue_update(
@@ -189,14 +235,30 @@ std::optional<FluidSimulationRequest> WorldFluidRuntime::make_simulation_request
   request.budget = budget;
   request.updates = std::move(due_updates);
 
-  request.chunks.reserve(chunks.loaded_count());
-  chunks.for_each_loaded_section([&](const voxel::ChunkSection& chunk) {
+  HashSet<ChunkSectionCoord> required_chunks;
+  for (const FluidUpdate& update : request.updates) {
+    add_required_fluid_chunks(required_chunks, update.pos);
+  }
+
+  std::vector<ChunkSectionCoord> required_coords;
+  required_coords.reserve(required_chunks.size());
+  for (const ChunkSectionCoord coord : required_chunks) {
+    required_coords.emplace_back(coord);
+  }
+  std::sort(required_coords.begin(), required_coords.end(), chunk_section_less);
+
+  request.chunks.reserve(required_coords.size());
+  for (const ChunkSectionCoord coord : required_coords) {
+    const voxel::ChunkSection* chunk = chunks.find_chunk(coord);
+    if (chunk == nullptr) {
+      continue;
+    }
     request.chunks.emplace_back(
-        chunk.coord(),
-        chunk.lifecycle_state() == voxel::ChunkLifecycleState::Active,
-        chunk.content_version(),
-        chunk.storage_view());
-  });
+        coord,
+        chunk->lifecycle_state() == voxel::ChunkLifecycleState::Active,
+        chunk->content_version(),
+        chunk->storage_view());
+  }
 
   return request;
 }

@@ -131,7 +131,7 @@ TEST(ServerChunkStreamerTests, SendsLightingWhenPreviouslyDeferredLightingBecome
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
   ASSERT_TRUE(chunk.set_light({{4, 5, 6}}, arv::voxel::pack_light(1, 2, 3, 4)));
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+  world.mark_chunk_lighting_dirty({{0, 0, 0}});
 
   arv::server::ServerChunkStreamer streamer;
   streamer.configure({

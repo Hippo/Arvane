@@ -273,6 +273,30 @@ i32 terrain_height_at(
   return rounded < config.min_y ? config.min_y : (rounded > config.max_y ? config.max_y : rounded);
 }
 
+GenerationSurfaceProfile terrain_height_profile_at(
+    const WorldGenerationConfig& config,
+    u64 seed,
+    ChunkCoord coord) noexcept {
+  const TerrainNoiseSampler terrain_sampler{config, seed};
+  GenerationSurfaceProfile surface_y_by_column{};
+  for (i32 z = 0; z < ChunkSize; ++z) {
+    for (i32 x = 0; x < ChunkSize; ++x) {
+      const i32 world_x = coord.x * ChunkSize + x;
+      const i32 world_z = coord.z * ChunkSize + z;
+      const f32 terrain = terrain_sampler.terrain(world_x, world_z);
+      const f32 height = static_cast<f32>(config.base_height) +
+                         terrain * static_cast<f32>(config.height_scale);
+      const i32 rounded = static_cast<i32>(std::floor(height + 0.5F));
+      const i32 surface_y = rounded < config.min_y
+                                ? config.min_y
+                                : (rounded > config.max_y ? config.max_y : rounded);
+      surface_y_by_column[static_cast<usize>(x) + voxel::ChunkSide * static_cast<usize>(z)] =
+          surface_y;
+    }
+  }
+  return surface_y_by_column;
+}
+
 voxel::BlockVariantID choose_surface_block(
     const WorldGenerationPalette& palette,
     i32 depth_from_surface) noexcept {
@@ -315,28 +339,13 @@ GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
   chunk.seed = request.seed;
   chunk.generator_version = request.config.version;
   chunk.coord = request.coord;
-  const TerrainNoiseSampler terrain_sampler{request.config, request.seed};
   const i32 min_chunk_y = std::min(request.min_chunk_y, request.max_chunk_y);
   const i32 max_chunk_y = std::max(request.min_chunk_y, request.max_chunk_y);
   chunk.sections.reserve(static_cast<usize>(max_chunk_y - min_chunk_y + 1));
 
-  std::array<i32, voxel::ChunkArea> surface_y_by_column{};
-
-  for (i32 z = 0; z < ChunkSize; ++z) {
-    for (i32 x = 0; x < ChunkSize; ++x) {
-      const i32 world_x = request.coord.x * ChunkSize + x;
-      const i32 world_z = request.coord.z * ChunkSize + z;
-      const f32 terrain = terrain_sampler.terrain(world_x, world_z);
-      const f32 height = static_cast<f32>(request.config.base_height) +
-                         terrain * static_cast<f32>(request.config.height_scale);
-      const i32 rounded = static_cast<i32>(std::floor(height + 0.5F));
-      const i32 surface_y = rounded < request.config.min_y
-                                ? request.config.min_y
-                                : (rounded > request.config.max_y ? request.config.max_y : rounded);
-      surface_y_by_column[static_cast<usize>(x) + voxel::ChunkSide * static_cast<usize>(z)] =
-          surface_y;
-    }
-  }
+  const GenerationSurfaceProfile surface_y_by_column =
+      terrain_height_profile_at(request.config, request.seed, request.coord);
+  chunk.surface_y_by_column = surface_y_by_column;
 
   for (i32 chunk_y = min_chunk_y; chunk_y <= max_chunk_y; ++chunk_y) {
     GeneratedChunkSection section;

@@ -40,10 +40,6 @@ struct WorkerThreadConfig {
 
 struct RuntimeThreadBudgetConfig {
   WorkerThreadConfig workers{};
-  usize main_thread_count{1};
-  usize simulation_thread_count{1};
-  usize render_thread_count{1};
-  usize network_thread_count{1};
   bool split_primary_secondary_pools{};
 };
 

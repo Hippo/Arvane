@@ -71,11 +71,11 @@ public:
   void set_lifecycle_state_internal(
       voxel::ChunkSection& chunk,
       voxel::ChunkLifecycleState state) noexcept;
-  void update_simulation_radius(WorldRuntime& world, ChunkSectionCoord center, i32 radius) noexcept;
+  void update_simulation_radius(WorldRuntime& world, ChunkSectionCoord center, i32 radius);
   void update_simulation_radii(
       WorldRuntime& world,
       std::span<const ChunkSectionCoord> centers,
-      i32 radius) noexcept;
+      i32 radius);
 
   template<typename Fn>
   void for_each_loaded_section(Fn&& fn) {
@@ -102,10 +102,17 @@ public:
   }
 
 private:
+  void note_simulation_topology_changed() noexcept;
+
   WorldHeightSettings height_{};
   StableHashMap<ChunkCoord, Chunk> chunks_;
   std::array<usize, 9> lifecycle_counts_{};
   usize active_chunk_count_{};
+  u64 simulation_topology_revision_{};
+  std::vector<ChunkSectionCoord> cached_simulation_centers_;
+  i32 cached_simulation_radius_{};
+  u64 cached_simulation_topology_revision_{};
+  bool has_cached_simulation_activity_{};
 };
 
 class WorldDirtyTracker {
@@ -117,10 +124,14 @@ public:
   void mark_mesh_content_dirty() noexcept;
 
   [[nodiscard]] bool has_lighting_work() const noexcept;
-  void set_lighting_work_pending(bool pending) noexcept;
-  void recompute_lighting_work_pending(const WorldRuntime& world) noexcept;
+  void recompute_lighting_work_pending(const WorldRuntime& world);
   [[nodiscard]] usize last_lighting_snapshot_chunk_count() const noexcept;
   void set_last_lighting_snapshot_chunk_count(usize count) const noexcept;
+  [[nodiscard]] std::vector<ChunkSectionCoord> dirty_lighting_chunks(
+      const WorldRuntime& world);
+  [[nodiscard]] usize dirty_lighting_chunk_count() const noexcept;
+  void mark_chunk_lighting_dirty(WorldRuntime& world, ChunkSectionCoord coord) noexcept;
+  void forget_lighting_chunk(ChunkSectionCoord coord) noexcept;
 
   void enqueue_dirty_mesh_chunk(ChunkSectionCoord coord);
   [[nodiscard]] usize dirty_mesh_chunk_count() const noexcept;
@@ -151,6 +162,7 @@ private:
   u64 mesh_revision_{1};
   bool lighting_work_pending_{};
   mutable usize last_lighting_snapshot_chunk_count_{};
+  HashSet<ChunkSectionCoord> dirty_lighting_chunks_;
   std::deque<ChunkSectionCoord> dirty_mesh_chunks_;
   HashSet<ChunkSectionCoord> dirty_mesh_chunk_set_;
 };

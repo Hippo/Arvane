@@ -9,7 +9,6 @@ set(ARV_CORE_HEADERS
   include/arv/core/math.hpp
   include/arv/core/perf_stats.hpp
   include/arv/core/profiling.hpp
-  include/arv/core/thread_roles.hpp
   include/arv/core/time.hpp
   include/arv/core/types.hpp
 )
@@ -17,7 +16,6 @@ set(ARV_CORE_HEADERS
 add_library(arv_core STATIC
   src/log.cpp
   src/perf_stats.cpp
-  src/thread_roles.cpp
 )
 target_include_directories(arv_core PUBLIC include)
 target_link_libraries(arv_core PUBLIC unordered_dense spdlog::spdlog)

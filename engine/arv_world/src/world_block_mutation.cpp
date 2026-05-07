@@ -26,6 +26,7 @@ bool WorldRuntime::Impl::set_fluid_cell(
   dirty.enqueue_dirty_mesh_chunk(chunk_coord);
   dirty.mark_boundary_neighbors_dirty(world, chunk_coord, local);
   if (affects_lighting) {
+    dirty.mark_chunk_lighting_dirty(world, chunk_coord);
     dirty.mark_loaded_chunk_lighting_dependencies_dirty(world, chunk_coord);
     dirty.mark_lighting_content_dirty();
   }
@@ -81,6 +82,7 @@ bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexce
   impl_->dirty.mark_mesh_content_dirty();
   impl_->dirty.enqueue_dirty_mesh_chunk(chunk_coord);
   impl_->dirty.mark_boundary_neighbors_dirty(*this, chunk_coord, local);
+  impl_->dirty.mark_chunk_lighting_dirty(*this, chunk_coord);
   impl_->dirty.mark_loaded_chunk_lighting_dependencies_dirty(*this, chunk_coord);
   impl_->dirty.mark_lighting_content_dirty();
   impl_->tick_queues.enqueue_neighbor_block_updates(pos);

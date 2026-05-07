@@ -181,6 +181,8 @@ Plugin.register('arvane_blockbench_plugin', {
         data[faceName] = extractFace(cube.faces?.[faceName], textureInfo);
       }
 
+      data['inflate'] = round3(cube.inflate);
+
       return data;
     }
 

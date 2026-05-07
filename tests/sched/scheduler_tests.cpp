@@ -111,7 +111,7 @@ TEST(SchedulerTests, WorkerThreadPolicyReservesEngineThreadsForAutomaticCount) {
   EXPECT_EQ(arv::sched::resolve_worker_thread_count(config), 1U);
 }
 
-TEST(SchedulerTests, RuntimeThreadBudgetReservesNamedRolesAndSplitsPools) {
+TEST(SchedulerTests, RuntimeThreadBudgetUsesGenericReservationAndSplitsPools) {
   arv::sched::RuntimeThreadBudgetConfig config;
   config.workers.worker_thread_count = 6;
   config.workers.reserved_thread_count = 1;
@@ -122,7 +122,7 @@ TEST(SchedulerTests, RuntimeThreadBudgetReservesNamedRolesAndSplitsPools) {
   const arv::sched::RuntimeThreadBudgetPlan plan =
       arv::sched::plan_runtime_thread_budget(config);
 
-  EXPECT_GE(plan.reserved_thread_count, 4U);
+  EXPECT_EQ(plan.reserved_thread_count, 1U);
   EXPECT_EQ(plan.total_worker_thread_count, 6U);
   EXPECT_EQ(
       plan.primary_worker_thread_count + plan.secondary_worker_thread_count,

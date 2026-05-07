@@ -28,12 +28,8 @@ bool WorldDirtyTracker::has_lighting_work() const noexcept {
   return lighting_work_pending_;
 }
 
-void WorldDirtyTracker::set_lighting_work_pending(bool pending) noexcept {
-  lighting_work_pending_ = pending;
-}
-
-void WorldDirtyTracker::recompute_lighting_work_pending(const WorldRuntime& world) noexcept {
-  lighting_work_pending_ = WorldLighting::has_work(world);
+void WorldDirtyTracker::recompute_lighting_work_pending(const WorldRuntime& world) {
+  (void)dirty_lighting_chunks(world);
 }
 
 usize WorldDirtyTracker::last_lighting_snapshot_chunk_count() const noexcept {
@@ -42,6 +38,48 @@ usize WorldDirtyTracker::last_lighting_snapshot_chunk_count() const noexcept {
 
 void WorldDirtyTracker::set_last_lighting_snapshot_chunk_count(usize count) const noexcept {
   last_lighting_snapshot_chunk_count_ = count;
+}
+
+std::vector<ChunkSectionCoord> WorldDirtyTracker::dirty_lighting_chunks(
+    const WorldRuntime& world) {
+  std::vector<ChunkSectionCoord> coords;
+  coords.reserve(dirty_lighting_chunks_.size());
+  for (auto iter = dirty_lighting_chunks_.begin(); iter != dirty_lighting_chunks_.end();) {
+    const voxel::ChunkSection* chunk = world.find_chunk(*iter);
+    if (chunk == nullptr || !chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
+      iter = dirty_lighting_chunks_.erase(iter);
+      continue;
+    }
+    coords.emplace_back(*iter);
+    ++iter;
+  }
+  lighting_work_pending_ = !dirty_lighting_chunks_.empty();
+  last_lighting_snapshot_chunk_count_ = dirty_lighting_chunks_.size();
+  return coords;
+}
+
+usize WorldDirtyTracker::dirty_lighting_chunk_count() const noexcept {
+  return dirty_lighting_chunks_.size();
+}
+
+void WorldDirtyTracker::mark_chunk_lighting_dirty(
+    WorldRuntime& world,
+    ChunkSectionCoord coord) noexcept {
+  voxel::ChunkSection* chunk = world.find_chunk(coord);
+  if (chunk == nullptr) {
+    return;
+  }
+  chunk->mark_dirty(voxel::ChunkDirtyFlags::Lighting);
+  dirty_lighting_chunks_.insert(coord);
+  lighting_work_pending_ = true;
+  last_lighting_snapshot_chunk_count_ =
+      std::max<usize>(last_lighting_snapshot_chunk_count_, dirty_lighting_chunks_.size());
+}
+
+void WorldDirtyTracker::forget_lighting_chunk(ChunkSectionCoord coord) noexcept {
+  dirty_lighting_chunks_.erase(coord);
+  lighting_work_pending_ = !dirty_lighting_chunks_.empty();
+  last_lighting_snapshot_chunk_count_ = dirty_lighting_chunks_.size();
 }
 
 void WorldDirtyTracker::enqueue_dirty_mesh_chunk(ChunkSectionCoord coord) {
@@ -191,9 +229,12 @@ void WorldDirtyTracker::mark_neighbor_mesh_dependency_dirty(
     neighbor->mark_mesh_dependency_dirty();
     enqueue_dirty_mesh_chunk(coord);
     neighbor->mark_lighting_dependency_dirty();
+    dirty_lighting_chunks_.insert(coord);
     neighbor->mark_dirty(voxel::ChunkDirtyFlags::NeedsFluidStep);
     mark_mesh_content_dirty();
     lighting_work_pending_ = true;
+    last_lighting_snapshot_chunk_count_ =
+        std::max<usize>(last_lighting_snapshot_chunk_count_, dirty_lighting_chunks_.size());
   }
 }
 
@@ -225,7 +266,10 @@ void WorldDirtyTracker::mark_neighbor_lighting_dependency_dirty(
   voxel::ChunkSection* neighbor = world.find_chunk(coord);
   if (neighbor != nullptr) {
     neighbor->mark_lighting_dependency_dirty();
+    dirty_lighting_chunks_.insert(coord);
     lighting_work_pending_ = true;
+    last_lighting_snapshot_chunk_count_ =
+        std::max<usize>(last_lighting_snapshot_chunk_count_, dirty_lighting_chunks_.size());
   }
 }
 
@@ -239,6 +283,10 @@ u64 WorldRuntime::lighting_revision() const noexcept {
 
 u64 WorldRuntime::mesh_revision() const noexcept {
   return impl_->dirty.mesh_revision();
+}
+
+void WorldRuntime::mark_chunk_lighting_dirty(ChunkSectionCoord coord) noexcept {
+  impl_->dirty.mark_chunk_lighting_dirty(*this, coord);
 }
 
 std::vector<ChunkSectionCoord> WorldRuntime::dirty_chunks(voxel::ChunkDirtyFlags flag) const {

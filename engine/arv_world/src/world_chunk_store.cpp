@@ -128,17 +128,57 @@ std::vector<ChunkSectionCoord> Chunk::loaded_section_coords() const {
   return coords;
 }
 
+void Chunk::set_generation_surface_profile(GenerationSurfaceProfile profile) {
+  generation_surface_profile_ = profile;
+}
+
+void Chunk::clear_generation_surface_profile() noexcept {
+  generation_surface_profile_.reset();
+}
+
+const GenerationSurfaceProfile* Chunk::generation_surface_profile() const noexcept {
+  return generation_surface_profile_ ? &generation_surface_profile_.value() : nullptr;
+}
+
 } // namespace arv::world
 
 namespace arv::world::detail {
+namespace {
+
+[[nodiscard]] bool simulation_center_less(
+    ChunkSectionCoord lhs,
+    ChunkSectionCoord rhs) noexcept {
+  if (lhs.value.x != rhs.value.x) {
+    return lhs.value.x < rhs.value.x;
+  }
+  if (lhs.value.y != rhs.value.y) {
+    return lhs.value.y < rhs.value.y;
+  }
+  return lhs.value.z < rhs.value.z;
+}
+
+[[nodiscard]] bool simulation_membership_state(
+    voxel::ChunkLifecycleState state) noexcept {
+  return state == voxel::ChunkLifecycleState::Loaded ||
+         state == voxel::ChunkLifecycleState::Active;
+}
+
+} // namespace
+
+void WorldChunkStore::note_simulation_topology_changed() noexcept {
+  ++simulation_topology_revision_;
+  has_cached_simulation_activity_ = false;
+}
 
 void WorldChunkStore::configure_height(WorldHeightSettings settings) {
   height_ = normalize_world_height_settings(settings);
 
   std::vector<ChunkCoord> empty_columns;
+  bool removed_any = false;
   for (auto& [coord, chunk] : chunks_) {
     const std::vector<voxel::ChunkLifecycleState> removed_states =
         chunk.configure_height(height_);
+    removed_any = removed_any || !removed_states.empty();
     for (const voxel::ChunkLifecycleState state : removed_states) {
       usize& state_count = lifecycle_counts_[lifecycle_index(state)];
       if (state_count > 0U) {
@@ -154,6 +194,9 @@ void WorldChunkStore::configure_height(WorldHeightSettings settings) {
   }
   for (const ChunkCoord coord : empty_columns) {
     chunks_.erase(coord);
+  }
+  if (removed_any) {
+    note_simulation_topology_changed();
   }
 }
 
@@ -189,6 +232,7 @@ voxel::ChunkSection& WorldChunkStore::ensure_chunk(
     if (state == voxel::ChunkLifecycleState::Active) {
       ++active_chunk_count_;
     }
+    note_simulation_topology_changed();
     dirty.enqueue_dirty_mesh_chunk(coord);
   }
   return section;
@@ -223,6 +267,7 @@ bool WorldChunkStore::unload_chunk(ChunkSectionCoord coord) noexcept {
   if (column->loaded_section_count() == 0U) {
     chunks_.erase(chunk_to_column(coord));
   }
+  note_simulation_topology_changed();
   return true;
 }
 
@@ -319,12 +364,15 @@ void WorldChunkStore::set_lifecycle_state_internal(
   }
 
   chunk.set_lifecycle_state(state);
+  if (!(simulation_membership_state(previous) && simulation_membership_state(state))) {
+    note_simulation_topology_changed();
+  }
 }
 
 void WorldChunkStore::update_simulation_radius(
     WorldRuntime& world,
     ChunkSectionCoord center,
-    i32 radius) noexcept {
+    i32 radius) {
   const std::array<ChunkSectionCoord, 1> centers{{center}};
   update_simulation_radii(world, centers, radius);
 }
@@ -332,7 +380,22 @@ void WorldChunkStore::update_simulation_radius(
 void WorldChunkStore::update_simulation_radii(
     WorldRuntime& world,
     std::span<const ChunkSectionCoord> centers,
-    i32 radius) noexcept {
+    i32 radius) {
+  std::vector<ChunkSectionCoord> normalized_centers{centers.begin(), centers.end()};
+  std::sort(
+      normalized_centers.begin(),
+      normalized_centers.end(),
+      simulation_center_less);
+  normalized_centers.erase(
+      std::unique(normalized_centers.begin(), normalized_centers.end()),
+      normalized_centers.end());
+  if (has_cached_simulation_activity_ &&
+      cached_simulation_radius_ == radius &&
+      cached_simulation_topology_revision_ == simulation_topology_revision_ &&
+      cached_simulation_centers_ == normalized_centers) {
+    return;
+  }
+
   for_each_loaded_section([&](voxel::ChunkSection& chunk) {
     const ChunkSectionCoord coord = chunk.coord();
     if (chunk.lifecycle_state() != voxel::ChunkLifecycleState::Loaded &&
@@ -342,7 +405,7 @@ void WorldChunkStore::update_simulation_radii(
 
     bool active = false;
     if (radius >= 0) {
-      for (const ChunkSectionCoord center : centers) {
+      for (const ChunkSectionCoord center : normalized_centers) {
         const i32 dx = coord.value.x - center.value.x;
         const i32 dy = coord.value.y - center.value.y;
         const i32 dz = coord.value.z - center.value.z;
@@ -364,6 +427,10 @@ void WorldChunkStore::update_simulation_radii(
       FluidSolver::enqueue_chunk_activation_updates(world, coord);
     }
   });
+  cached_simulation_centers_ = std::move(normalized_centers);
+  cached_simulation_radius_ = radius;
+  cached_simulation_topology_revision_ = simulation_topology_revision_;
+  has_cached_simulation_activity_ = true;
 }
 
 } // namespace arv::world::detail
@@ -474,13 +541,13 @@ bool WorldRuntime::set_chunk_lifecycle_state(
   return changed;
 }
 
-void WorldRuntime::update_simulation_radius(ChunkSectionCoord center, i32 radius) noexcept {
+void WorldRuntime::update_simulation_radius(ChunkSectionCoord center, i32 radius) {
   impl_->chunks.update_simulation_radius(*this, center, radius);
 }
 
 void WorldRuntime::update_simulation_radii(
     std::span<const ChunkSectionCoord> centers,
-    i32 radius) noexcept {
+    i32 radius) {
   impl_->chunks.update_simulation_radii(*this, centers, radius);
 }
 

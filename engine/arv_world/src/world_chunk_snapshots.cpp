@@ -164,8 +164,9 @@ void WorldRuntime::apply_chunk_snapshot(
       has_lighting_payload && lighting_authoritative);
   if (has_lighting_payload && lighting_authoritative) {
     chunk.clear_dirty(voxel::ChunkDirtyFlags::Lighting);
+    impl_->dirty.forget_lighting_chunk(coord);
   } else {
-    chunk.mark_dirty(voxel::ChunkDirtyFlags::Lighting);
+    impl_->dirty.mark_chunk_lighting_dirty(*this, coord);
   }
 
   if (needs_first_mesh_dirty || blocks_changed || lights_changed || fluids_changed) {
@@ -318,8 +319,12 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
         impl_->dirty);
     impl_->chunks.set_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
     chunk.replace_generated_blocks(std::move(generated_section.blocks));
+    if (Chunk* column = impl_->chunks.find_column(generated.coord); column != nullptr) {
+      column->set_generation_surface_profile(generated.surface_y_by_column);
+    }
     impl_->dirty.mark_mesh_content_dirty();
     impl_->dirty.enqueue_dirty_mesh_chunk(generated_section.coord);
+    impl_->dirty.mark_chunk_lighting_dirty(*this, generated_section.coord);
     impl_->dirty.mark_lighting_content_dirty();
     impl_->dirty.mark_loaded_chunk_neighbors_dirty(*this, generated_section.coord);
     published_any = true;
@@ -339,7 +344,7 @@ void WorldRuntime::restore_saved_chunk(
       std::move(lights),
       std::move(fluids),
       false);
-  chunk.mark_dirty(voxel::ChunkDirtyFlags::Lighting);
+  impl_->dirty.mark_chunk_lighting_dirty(*this, coord);
   impl_->dirty.mark_mesh_content_dirty();
   impl_->dirty.enqueue_dirty_mesh_chunk(coord);
   impl_->dirty.mark_lighting_content_dirty();

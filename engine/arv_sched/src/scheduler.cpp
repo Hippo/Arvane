@@ -40,13 +40,7 @@ RuntimeThreadBudgetPlan plan_runtime_thread_budget(
     RuntimeThreadBudgetConfig config) noexcept {
   RuntimeThreadBudgetPlan plan;
   plan.hardware_thread_count = hardware_thread_count_or_one();
-  const usize named_role_threads =
-      config.main_thread_count +
-      config.simulation_thread_count +
-      config.render_thread_count +
-      config.network_thread_count;
-  plan.reserved_thread_count =
-      std::max(config.workers.reserved_thread_count, named_role_threads);
+  plan.reserved_thread_count = config.workers.reserved_thread_count;
 
   WorkerThreadConfig total_config = config.workers;
   total_config.reserved_thread_count = plan.reserved_thread_count;

@@ -572,6 +572,7 @@ void FluidSolver::process_single_update(
   }
   world.impl_->dirty.mark_mesh_content_dirty();
   if (affects_lighting) {
+    world.impl_->dirty.mark_chunk_lighting_dirty(world, block_to_chunk(pos));
     world.impl_->dirty.mark_lighting_content_dirty();
   }
 

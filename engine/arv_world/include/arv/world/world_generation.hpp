@@ -52,6 +52,8 @@ struct WorldGenerationPalette {
   std::vector<ResolvedSurfaceLayer> surface_layers{};
 };
 
+using GenerationSurfaceProfile = std::array<i32, voxel::ChunkArea>;
+
 struct ChunkGenerationRequest {
   WorldID world_id{};
   u64 seed{};
@@ -74,6 +76,7 @@ struct GeneratedChunk {
   u64 seed{};
   u32 generator_version{};
   ChunkCoord coord{};
+  GenerationSurfaceProfile surface_y_by_column{};
   std::vector<GeneratedChunkSection> sections{};
 };
 
@@ -92,6 +95,11 @@ using GeneratedChunkResult = Expected<GeneratedChunk, WorldGenerationError>;
     u64 seed,
     i32 world_x,
     i32 world_z) noexcept;
+
+[[nodiscard]] GenerationSurfaceProfile terrain_height_profile_at(
+    const WorldGenerationConfig& config,
+    u64 seed,
+    ChunkCoord coord) noexcept;
 
 [[nodiscard]] voxel::BlockVariantID choose_surface_block(
     const WorldGenerationPalette& palette,

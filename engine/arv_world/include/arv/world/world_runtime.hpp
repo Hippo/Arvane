@@ -159,6 +159,9 @@ public:
   [[nodiscard]] bool unload_section(i32 chunk_y) noexcept;
   [[nodiscard]] usize loaded_section_count() const noexcept;
   [[nodiscard]] std::vector<ChunkSectionCoord> loaded_section_coords() const;
+  void set_generation_surface_profile(GenerationSurfaceProfile profile);
+  void clear_generation_surface_profile() noexcept;
+  [[nodiscard]] const GenerationSurfaceProfile* generation_surface_profile() const noexcept;
   template<typename Fn>
   void for_each_loaded_section(Fn&& fn) {
     for (const auto& section : sections_) {
@@ -184,6 +187,7 @@ private:
   ChunkCoord coord_{};
   WorldHeightSettings height_{};
   std::vector<std::unique_ptr<voxel::ChunkSection>> sections_{};
+  std::optional<GenerationSurfaceProfile> generation_surface_profile_{};
 };
 
 class WorldRuntime {
@@ -244,6 +248,7 @@ public:
   void set_day_length_seconds(Seconds day_length_seconds, TickRate fixed_tick_rate) noexcept;
   [[nodiscard]] u64 lighting_revision() const noexcept;
   [[nodiscard]] u64 mesh_revision() const noexcept;
+  void mark_chunk_lighting_dirty(ChunkSectionCoord coord) noexcept;
   void set_generation_context(u64 seed, WorldGenerationConfig config);
   void clear_generation_context() noexcept;
   void set_tick_policy(WorldTickPolicy policy) noexcept;
@@ -251,8 +256,8 @@ public:
   [[nodiscard]] bool is_chunk_active(ChunkSectionCoord coord) const noexcept;
   [[nodiscard]] usize active_chunk_count() const noexcept;
   bool set_chunk_lifecycle_state(ChunkSectionCoord coord, voxel::ChunkLifecycleState state) noexcept;
-  void update_simulation_radius(ChunkSectionCoord center, i32 radius) noexcept;
-  void update_simulation_radii(std::span<const ChunkSectionCoord> centers, i32 radius) noexcept;
+  void update_simulation_radius(ChunkSectionCoord center, i32 radius);
+  void update_simulation_radii(std::span<const ChunkSectionCoord> centers, i32 radius);
   [[nodiscard]] voxel::BlockVariantID get_block(BlockPos pos) const noexcept;
   [[nodiscard]] voxel::LightWord get_light(BlockPos pos) const noexcept;
   [[nodiscard]] voxel::FluidCell get_fluid(BlockPos pos) const noexcept;

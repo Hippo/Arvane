@@ -65,6 +65,17 @@ void drain_fluid_updates(
   }
 }
 
+bool request_contains_chunk(
+    const arv::world::FluidSimulationRequest& request,
+    arv::ChunkSectionCoord coord) {
+  for (const arv::world::FluidSimulationChunk& chunk : request.chunks) {
+    if (chunk.coord == coord) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace
 
 TEST(FluidTests, LiquidFlowsDownBeforeSidewaysSpread) {
@@ -270,6 +281,45 @@ TEST(FluidTests, SnapshotFluidSimulationBuildsOffThreadApplyResult) {
   const arv::voxel::FluidCell below = world.get_fluid({{1, 1, 1}});
   EXPECT_EQ(below.type, water.type);
   EXPECT_TRUE(below.falling());
+}
+
+TEST(FluidTests, SnapshotFluidSimulationExcludesUnrelatedLoadedChunks) {
+  const arv::voxel::FluidDefinition water = make_immediate_water();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  make_active_chunk(world, {{0, 0, 0}});
+  make_active_chunk(world, {{5, 0, 5}});
+
+  ASSERT_TRUE(world.place_fluid_source({{1, 2, 1}}, water));
+  std::optional<arv::world::FluidSimulationRequest> request =
+      world.make_fluid_simulation_request(64);
+  ASSERT_TRUE(request.has_value());
+
+  EXPECT_TRUE(request_contains_chunk(request.value(), {{0, 0, 0}}));
+  EXPECT_FALSE(request_contains_chunk(request.value(), {{5, 0, 5}}));
+  EXPECT_LT(request->chunks.size(), world.loaded_chunk_count());
+}
+
+TEST(FluidTests, SnapshotFluidSimulationIncludesLoadedInactiveBoundaryNeighbor) {
+  const arv::voxel::BlockRegistry registry = make_fluid_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  const arv::voxel::FluidDefinition water = make_immediate_water();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  make_active_chunk(world, {{0, 0, 0}});
+  make_active_chunk(world, {{1, 0, 0}});
+  place_floor(world, stone, 15, 16, 1);
+
+  ASSERT_TRUE(world.place_fluid_source({{15, 1, 1}}, water));
+  drain_fluid_updates(world, registry, water);
+  ASSERT_FALSE(world.get_fluid({{16, 1, 1}}).empty());
+  ASSERT_TRUE(world.set_chunk_lifecycle_state({{1, 0, 0}}, arv::voxel::ChunkLifecycleState::Loaded));
+
+  ASSERT_TRUE(world.set_fluid({{15, 1, 1}}, arv::voxel::empty_fluid_cell(), water));
+  std::optional<arv::world::FluidSimulationRequest> request =
+      world.make_fluid_simulation_request(512);
+  ASSERT_TRUE(request.has_value());
+
+  EXPECT_TRUE(request_contains_chunk(request.value(), {{0, 0, 0}}));
+  EXPECT_TRUE(request_contains_chunk(request.value(), {{1, 0, 0}}));
 }
 
 TEST(FluidTests, SnapshotFluidSimulationDoesNotCascadeWithinSingleRequest) {

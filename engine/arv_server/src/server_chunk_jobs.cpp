@@ -250,22 +250,26 @@ void ServerWorldJobRuntime::schedule_lighting_jobs(
   if (block_registry == nullptr || !world.has_lighting_work()) {
     return;
   }
+  if (pending_lighting_jobs_.size() >= max_pending_lighting_jobs_) {
+    return;
+  }
+
+  const u64 current_revision = world.lighting_revision();
+  const bool revision_in_flight = std::any_of(
+      pending_lighting_jobs_.begin(),
+      pending_lighting_jobs_.end(),
+      [revision = current_revision](const PendingLightingJob& pending) {
+        return pending.source_revision == revision;
+      });
+  if (revision_in_flight) {
+    return;
+  }
 
   world::LightingSnapshot snapshot = world.make_lighting_snapshot();
   if (snapshot.chunks.empty()) {
     return;
   }
   const u64 source_revision = snapshot.source_revision;
-
-  const bool revision_in_flight = std::any_of(
-      pending_lighting_jobs_.begin(),
-      pending_lighting_jobs_.end(),
-      [revision = source_revision](const PendingLightingJob& pending) {
-        return pending.source_revision == revision;
-      });
-  if (revision_in_flight || pending_lighting_jobs_.size() >= max_pending_lighting_jobs_) {
-    return;
-  }
 
   const voxel::BlockRegistry* registry = block_registry;
   core::record_lighting_job_submitted();

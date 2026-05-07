@@ -119,6 +119,41 @@ TEST(WorldGenerationTests, NoiseVariesTerrainHeightAcrossWorldSpace) {
   EXPECT_TRUE(varied);
 }
 
+TEST(WorldGenerationTests, SurfaceProfileMatchesScalarTerrainHeights) {
+  arv::world::WorldGenerationConfig config = make_worldgen_config();
+  config.terrain_frequency = 0.035F;
+  config.height_scale = 18;
+  const arv::ChunkCoord coord{-2, 3};
+
+  const arv::world::GenerationSurfaceProfile profile =
+      arv::world::terrain_height_profile_at(config, 77, coord);
+
+  for (arv::i32 z = 0; z < arv::ChunkSize; ++z) {
+    for (arv::i32 x = 0; x < arv::ChunkSize; ++x) {
+      EXPECT_EQ(
+          profile[static_cast<arv::usize>(x) +
+                  arv::voxel::ChunkSide * static_cast<arv::usize>(z)],
+          arv::world::terrain_height_at(
+              config,
+              77,
+              coord.x * arv::ChunkSize + x,
+              coord.z * arv::ChunkSize + z));
+    }
+  }
+}
+
+TEST(WorldGenerationTests, GeneratedChunkCarriesSurfaceProfile) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  arv::world::ChunkGenerationRequest request = make_request(registry, 99, {{-1, 0, 1}});
+
+  auto generated = arv::world::generate_chunk(request);
+
+  ASSERT_TRUE(generated);
+  EXPECT_EQ(
+      generated.value().surface_y_by_column,
+      arv::world::terrain_height_profile_at(request.config, request.seed, request.coord));
+}
+
 TEST(WorldGenerationTests, GeneratedBlocksAreValidRegistryVariants) {
   const arv::voxel::BlockRegistry registry = make_worldgen_registry();
   auto generated = arv::world::generate_chunk(make_request(registry, 99, {{-1, 0, 1}}));

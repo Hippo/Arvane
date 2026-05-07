@@ -82,11 +82,19 @@ void WorldRuntime::set_day_length_seconds(
 
 void WorldRuntime::set_generation_context(u64 seed, WorldGenerationConfig config) {
   configure_height(world_height_settings_from_generation_config(config));
+  for (auto& [coord, chunk] : impl_->chunks.chunks()) {
+    (void)coord;
+    chunk.clear_generation_surface_profile();
+  }
   impl_->generation_seed = seed;
   impl_->generation_config = std::move(config);
 }
 
 void WorldRuntime::clear_generation_context() noexcept {
+  for (auto& [coord, chunk] : impl_->chunks.chunks()) {
+    (void)coord;
+    chunk.clear_generation_surface_profile();
+  }
   impl_->generation_config.reset();
   impl_->generation_seed = 0U;
 }

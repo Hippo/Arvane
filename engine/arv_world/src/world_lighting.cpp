@@ -284,13 +284,7 @@ void record_lighting_job_finished(
 } // namespace
 
 bool WorldLighting::has_work(const WorldRuntime& world) noexcept {
-  bool has_dirty_section = false;
-  world.impl_->chunks.for_each_loaded_section([&](const voxel::ChunkSection& chunk) {
-    if (chunk.is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
-      has_dirty_section = true;
-    }
-  });
-  return has_dirty_section;
+  return world.impl_->dirty.has_lighting_work();
 }
 
 LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
@@ -299,13 +293,8 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
   snapshot.world_id = world.impl_->id;
   snapshot.source_revision = world.impl_->dirty.lighting_revision();
 
-  std::vector<ChunkSectionCoord> dirty_coords;
-  dirty_coords.reserve(world.impl_->chunks.loaded_count());
-  world.impl_->chunks.for_each_loaded_section([&](const voxel::ChunkSection& chunk) {
-    if (chunk.is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
-      dirty_coords.emplace_back(chunk.coord());
-    }
-  });
+  std::vector<ChunkSectionCoord> dirty_coords =
+      world.impl_->dirty.dirty_lighting_chunks(world);
 
   if (dirty_coords.empty()) {
     return snapshot;
@@ -326,20 +315,19 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
   i32 max_surface_section_y = snapshot.target_coord.value.y;
   if (world.impl_->generation_config.has_value()) {
     has_generation_surface = true;
-    const WorldGenerationConfig& generation_config = world.impl_->generation_config.value();
-    for (i32 z = 0; z < ChunkSize; ++z) {
-      for (i32 x = 0; x < ChunkSize; ++x) {
-        const i32 world_x = snapshot.target_coord.value.x * ChunkSize + x;
-        const i32 world_z = snapshot.target_coord.value.z * ChunkSize + z;
-        const i32 surface_y = terrain_height_at(
-            generation_config,
-            world.impl_->generation_seed,
-            world_x,
-            world_z);
-        target_surface_y[column_index(x, z)] = surface_y;
-        max_surface_section_y =
-            std::max(max_surface_section_y, floor_div(surface_y, ChunkSize));
-      }
+    const ChunkCoord target_column_coord = chunk_to_column(snapshot.target_coord);
+    const Chunk* target_column = world.impl_->chunks.find_column(target_column_coord);
+    const GenerationSurfaceProfile* cached_surface =
+        target_column == nullptr ? nullptr : target_column->generation_surface_profile();
+    target_surface_y = cached_surface == nullptr
+                           ? terrain_height_profile_at(
+                                 world.impl_->generation_config.value(),
+                                 world.impl_->generation_seed,
+                                 target_column_coord)
+                           : *cached_surface;
+    for (const i32 surface_y : target_surface_y) {
+      max_surface_section_y =
+          std::max(max_surface_section_y, floor_div(surface_y, ChunkSize));
     }
   }
 
@@ -907,11 +895,10 @@ LightingPublishStats WorldLighting::publish_result(
         }
 
         neighbor->mark_light_dependency_dirty();
-        neighbor->mark_dirty(voxel::ChunkDirtyFlags::Lighting);
+        world.impl_->dirty.mark_chunk_lighting_dirty(world, neighbor_coord);
         world.impl_->dirty.enqueue_dirty_mesh_chunk(neighbor_coord);
         ++stats.boundary_continuations;
         ++stats.remeshes_triggered;
-        world.impl_->dirty.set_lighting_work_pending(true);
       }
       for (i32 oz = -1; oz <= 1; ++oz) {
         for (i32 oy = -1; oy <= 1; ++oy) {
@@ -950,6 +937,7 @@ LightingPublishStats WorldLighting::publish_result(
       }
     }
     chunk->clear_dirty(voxel::ChunkDirtyFlags::Lighting);
+    world.impl_->dirty.forget_lighting_chunk(chunk_result.coord);
     ++stats.accepted_chunks;
   }
   if (stats.accepted_chunks > 0U) {

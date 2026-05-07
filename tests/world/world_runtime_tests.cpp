@@ -200,7 +200,7 @@ TEST(WorldRuntimeTests, BoundaryBlockChangesInvalidateNeighborMeshingContentVers
 TEST(WorldRuntimeTests, LightingSnapshotSharesChunkStorage) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+  world.mark_chunk_lighting_dirty({{0, 0, 0}});
 
   const arv::world::LightingSnapshot snapshot = world.make_lighting_snapshot();
 
@@ -337,8 +337,8 @@ TEST(WorldRuntimeTests, LightingPublicationAcceptsChunksDirtiedBySameLightingSol
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& target = world.ensure_chunk({{0, 0, 0}});
   arv::voxel::ChunkSection& lit_chunk = world.ensure_chunk({{1, 0, 0}});
-  target.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
-  lit_chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+  world.mark_chunk_lighting_dirty({{0, 0, 0}});
+  world.mark_chunk_lighting_dirty({{1, 0, 0}});
 
   std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lit_chunk_lights =
       lit_chunk.lights();
@@ -371,7 +371,7 @@ TEST(WorldRuntimeTests, LightingPublicationAcceptsChunksDirtiedBySameLightingSol
 TEST(WorldRuntimeTests, LightingPublicationRejectsStaleWorldRevision) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});
-  chunk.mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+  world.mark_chunk_lighting_dirty({{0, 0, 0}});
   const arv::world::LightingSnapshot snapshot = world.make_lighting_snapshot();
 
   ASSERT_TRUE(world.set_block({{1, 2, 3}}, arv::voxel::BlockVariantID{7}));
@@ -533,7 +533,7 @@ TEST(WorldRuntimeTests, ApplyingAuthoritativeChunkSnapshotClearsLightingDirtyWhe
 
   arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
   ASSERT_NE(chunk, nullptr);
-  chunk->mark_dirty(arv::voxel::ChunkDirtyFlags::Lighting);
+  world.mark_chunk_lighting_dirty({{0, 0, 0}});
 
   world.apply_chunk_snapshot({{0, 0, 0}}, std::move(blocks), std::move(lights));
 
