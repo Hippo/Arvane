@@ -74,6 +74,17 @@ EntityID WorldEntityStore::create_entity(EntityCreateInfo info) {
 
   if (info.owning_player.has_value()) {
     registry_.emplace<entity::PlayerEntity>(handle, info.owning_player.value());
+    const f32 initial_body_yaw =
+        info.player_state.has_value() ? info.player_state->yaw_radians : 0.0F;
+    registry_.emplace<entity::PlayerVisualPose>(
+        handle,
+        initial_body_yaw,
+        0.0F,
+        info.player_state.has_value() ? info.player_state->pitch_radians : 0.0F,
+        true);
+    auto& transform = registry_.get<entity::EntityTransform>(handle);
+    transform.previous_rotation = model_forward_yaw_rotation(initial_body_yaw);
+    transform.rotation = transform.previous_rotation;
     player_entities_[info.owning_player.value()] = entity_id;
 
     player::PlayerState player_state =
@@ -300,6 +311,50 @@ bool WorldEntityStore::set_animation(EntityID entity_id, std::string animation_n
   return true;
 }
 
+bool WorldEntityStore::set_player_visual_pose(
+    PlayerID player_id,
+    f32 look_yaw_radians,
+    f32 look_pitch_radians,
+    f32 max_head_body_yaw_radians) noexcept {
+  const std::optional<EntityID> entity_id = entity_for_player(player_id);
+  if (!entity_id.has_value()) {
+    return false;
+  }
+  const entt::entity entity_handle = handle(entity_id.value());
+  if (entity_handle == entt::null || !registry_.valid(entity_handle)) {
+    return false;
+  }
+  auto* transform = registry_.try_get<entity::EntityTransform>(entity_handle);
+  if (transform == nullptr) {
+    return false;
+  }
+  auto& pose = registry_.get_or_emplace<entity::PlayerVisualPose>(entity_handle);
+  if (!pose.initialized) {
+    pose.body_yaw_radians = look_yaw_radians;
+    pose.initialized = true;
+  }
+
+  const f32 max_yaw = std::max(0.0F, max_head_body_yaw_radians);
+  f32 head_yaw = wrap_radians(look_yaw_radians - pose.body_yaw_radians);
+  if (max_yaw <= 0.0F) {
+    pose.body_yaw_radians = look_yaw_radians;
+    head_yaw = 0.0F;
+  } else if (head_yaw > max_yaw) {
+    pose.body_yaw_radians = look_yaw_radians - max_yaw;
+    head_yaw = max_yaw;
+  } else if (head_yaw < -max_yaw) {
+    pose.body_yaw_radians = look_yaw_radians + max_yaw;
+    head_yaw = -max_yaw;
+  }
+
+  pose.body_yaw_radians = wrap_radians(pose.body_yaw_radians);
+  pose.head_yaw_radians = head_yaw;
+  pose.head_pitch_radians = look_pitch_radians;
+  transform->previous_rotation = transform->rotation;
+  transform->rotation = model_forward_yaw_rotation(pose.body_yaw_radians);
+  return true;
+}
+
 bool WorldEntityStore::set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept {
   entity::DroppedItem* dropped = find_dropped_item(entity_id);
   if (dropped == nullptr) {
@@ -377,6 +432,13 @@ std::vector<entity::EntitySnapshotEntry> WorldEntityStore::collect_entity_snapsh
         animation != nullptr) {
       entry.animation_name = animation->name;
       entry.animation_time_seconds = animation->time_seconds;
+    }
+    if (const auto* pose = registry_.try_get<entity::PlayerVisualPose>(entity_handle);
+        pose != nullptr) {
+      entry.head_rotation_degrees = {
+          radians_to_degrees(pose->head_pitch_radians),
+          radians_to_degrees(pose->head_yaw_radians),
+          0.0F};
     }
     snapshots.emplace_back(std::move(entry));
   }
@@ -632,6 +694,18 @@ const entity::DroppedItem* WorldRuntime::find_dropped_item(EntityID entity_id) c
 
 bool WorldRuntime::set_entity_animation(EntityID entity_id, std::string animation_name) noexcept {
   return impl_->entities.set_animation(entity_id, std::move(animation_name));
+}
+
+bool WorldRuntime::set_player_visual_pose(
+    PlayerID player_id,
+    f32 look_yaw_radians,
+    f32 look_pitch_radians,
+    f32 max_head_body_yaw_radians) noexcept {
+  return impl_->entities.set_player_visual_pose(
+      player_id,
+      look_yaw_radians,
+      look_pitch_radians,
+      max_head_body_yaw_radians);
 }
 
 bool WorldRuntime::set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept {

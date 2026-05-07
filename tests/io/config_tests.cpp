@@ -113,6 +113,7 @@ physics:
   surface_buoyancy: 11.0
   underwater_buoyancy: 1.25
   breath_seconds: 18.0
+  max_head_body_yaw_radians: 1.1
 gameplay:
   block_breaking:
     base_seconds_per_hardness: 1.5
@@ -202,6 +203,7 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().physics.surface_buoyancy, 11.0F);
   EXPECT_FLOAT_EQ(result.value().physics.underwater_buoyancy, 1.25F);
   EXPECT_FLOAT_EQ(result.value().physics.breath_seconds, 18.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.max_head_body_yaw_radians, 1.1F);
   EXPECT_FLOAT_EQ(result.value().gameplay.block_breaking.base_seconds_per_hardness, 1.5F);
   EXPECT_FLOAT_EQ(result.value().gameplay.block_breaking.creative_inventory_multiplier, 0.05F);
   EXPECT_FLOAT_EQ(result.value().gameplay.block_breaking.hand_speed_multiplier, 0.25F);

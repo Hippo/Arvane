@@ -66,6 +66,7 @@ physics:
   surface_buoyancy: 10.0
   underwater_buoyancy: 1.0
   breath_seconds: 15.0
+  max_head_body_yaw_radians: 1.309
 gameplay:
   block_breaking:
     base_seconds_per_hardness: 1.0

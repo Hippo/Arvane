@@ -4,16 +4,30 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <string>
 
 namespace arv::server::detail {
 namespace {
 
-[[nodiscard]] Vec3f horizontal_forward(f32 yaw_radians) noexcept {
-  return normalize_or_zero({std::sin(yaw_radians), 0.0F, std::cos(yaw_radians)});
-}
-
-[[nodiscard]] Vec3f horizontal_right(f32 yaw_radians) noexcept {
-  return normalize_or_zero({std::cos(yaw_radians), 0.0F, -std::sin(yaw_radians)});
+void restart_player_entity_animation(
+    world::WorldRuntime& world,
+    PlayerID player_id,
+    std::string_view animation_name) {
+  const std::optional<EntityID> entity_id = world.entity_for_player(player_id);
+  if (!entity_id.has_value()) {
+    return;
+  }
+  entity::EntityAnimationState* animation =
+      world.find_entity_animation_state(entity_id.value());
+  if (animation == nullptr) {
+    (void)world.set_entity_animation(
+        entity_id.value(),
+        std::string{animation_name});
+    return;
+  }
+  animation->name = std::string{animation_name};
+  animation->time_seconds = 0.0F;
 }
 
 [[nodiscard]] u64 hash_append_byte(u64 hash, u8 value) noexcept {
@@ -75,11 +89,7 @@ namespace {
 } // namespace
 
 Vec3f player_look_direction(const player::PlayerState& player_state) noexcept {
-  const f32 cos_pitch = std::cos(player_state.pitch_radians);
-  return normalize_or_zero(
-      {std::sin(player_state.yaw_radians) * cos_pitch,
-       std::sin(player_state.pitch_radians),
-       std::cos(player_state.yaw_radians) * cos_pitch});
+  return look_direction(player_state.yaw_radians, player_state.pitch_radians);
 }
 
 ChunkSectionCoord player_chunk_coord(const player::PlayerState& player_state) noexcept {
@@ -278,6 +288,10 @@ void ServerRuntimeImpl::apply_player_command(
           ? command.selected_hotbar_slot
           : player_state.selected_hotbar_slot;
 
+  if (command.primary_pressed) {
+    restart_player_entity_animation(default_world_, player_state.player_id, "hit_right");
+  }
+
   player_state.yaw_radians +=
       static_cast<f32>(command.look_delta_x) * player_tuning_.mouse_sensitivity_radians;
   player_state.pitch_radians = std::clamp(
@@ -366,6 +380,12 @@ void ServerRuntimeImpl::apply_player_command(
   } else {
     step_player_without_collision(player_state, command, player_tuning_, tick_seconds);
   }
+
+  (void)default_world_.set_player_visual_pose(
+      player_state.player_id,
+      player_state.yaw_radians,
+      player_state.pitch_radians,
+      player_tuning_.max_head_body_yaw_radians);
 
   refresh_player_permissions(player_state);
 

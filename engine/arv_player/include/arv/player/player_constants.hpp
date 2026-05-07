@@ -40,6 +40,7 @@ inline constexpr f32 DefaultSurfaceFloatDepth = 1.0F;
 inline constexpr f32 DefaultSurfaceBuoyancy = 10.0F;
 inline constexpr f32 DefaultUnderwaterBuoyancy = 1.0F;
 inline constexpr f32 DefaultBreathSeconds = 15.0F;
+inline constexpr f32 DefaultMaxHeadBodyYawRadians = 1.309F;
 
 struct PlayerTuning {
   f32 standing_eye_height{DefaultStandingEyeHeight};
@@ -75,6 +76,7 @@ struct PlayerTuning {
   f32 surface_buoyancy{DefaultSurfaceBuoyancy};
   f32 underwater_buoyancy{DefaultUnderwaterBuoyancy};
   f32 breath_seconds{DefaultBreathSeconds};
+  f32 max_head_body_yaw_radians{DefaultMaxHeadBodyYawRadians};
   u8 hotbar_slot_count{DefaultHotbarSlotCount};
   u8 inventory_slot_count{DefaultPlayerInventorySlotCount};
 };

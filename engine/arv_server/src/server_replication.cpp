@@ -207,6 +207,7 @@ void ServerRuntimeImpl::send_entity_replication() {
       entry.state_flags = 0U;
       entry.animation_name = snapshot.animation_name;
       entry.animation_time_seconds = snapshot.animation_time_seconds;
+      entry.head_rotation_degrees = snapshot.head_rotation_degrees;
       snapshot_entries.push_back(std::move(entry));
     }
 

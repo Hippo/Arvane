@@ -33,7 +33,7 @@ namespace {
   const f32 seed =
       static_cast<f32>(entity_id.value * 37U + static_cast<u32>(goal_index) * 101U) +
       static_cast<f32>(tick % 100000U) * 0.173F;
-  const f32 angle = positive_fraction(std::sin(seed) * 43758.5453F) * 6.28318530718F;
+  const f32 angle = positive_fraction(std::sin(seed) * 43758.5453F) * TauRadians;
   return {std::cos(angle), 0.0F, std::sin(angle)};
 }
 
@@ -49,13 +49,55 @@ namespace {
       {position.x + half_x, position.y + size.y, position.z + half_z}};
 }
 
-[[nodiscard]] Quatf yaw_rotation(f32 radians) noexcept {
-  const f32 half = radians * 0.5F;
-  return {0.0F, std::sin(half), 0.0F, std::cos(half)};
-}
-
 [[nodiscard]] bool has_horizontal_motion(Vec3f value) noexcept {
   return value.x * value.x + value.z * value.z > 0.000001F;
+}
+
+[[nodiscard]] bool player_animation_is_sneaking(std::string_view animation_name) noexcept {
+  return animation_name == "sneak" ||
+         animation_name == "sneak_idle" ||
+         animation_name == "sneak_walk";
+}
+
+[[nodiscard]] bool player_animation_is_active_once(
+    const entity::EntityAnimationState& animation) noexcept {
+  if (animation.name == "hit_right") {
+    return animation.time_seconds < 0.458F;
+  }
+  return false;
+}
+
+void set_animation_if_changed(
+    entity::EntityAnimationState& animation,
+    std::string_view name) {
+  if (animation.name == name) {
+    return;
+  }
+  animation.name = std::string{name};
+  animation.time_seconds = 0.0F;
+}
+
+void update_player_animation_state(
+    entity::EntityAnimationState& animation,
+    const player::PlayerState& player_state) {
+  if (player_animation_is_active_once(animation)) {
+    return;
+  }
+
+  const bool moving = has_horizontal_motion(player_state.velocity);
+  if (player_state.sneaking) {
+    if (!player_animation_is_sneaking(animation.name)) {
+      set_animation_if_changed(animation, "sneak");
+      return;
+    }
+    if (animation.name == "sneak" && animation.time_seconds < 0.25F) {
+      return;
+    }
+    set_animation_if_changed(animation, moving ? "sneak_walk" : "sneak_idle");
+    return;
+  }
+
+  set_animation_if_changed(animation, moving ? "walking" : "idle");
 }
 
 [[nodiscard]] f32 horizontal_length_squared(Vec3f value) noexcept {
@@ -219,11 +261,6 @@ void redirect_wander_after_horizontal_block(
   if (intent != nullptr) {
     intent->desired_direction = redirected;
   }
-}
-
-[[nodiscard]] f32 yaw_from_horizontal_direction(Vec3f direction) noexcept {
-  constexpr f32 ModelForwardYawOffset = 3.14159265358979323846F;
-  return std::atan2(direction.x, direction.z) + ModelForwardYawOffset;
 }
 
 } // namespace
@@ -407,7 +444,7 @@ u32 WorldEntitySimulation::tick_entity_physics(
       transform.previous_rotation = transform.rotation;
       transform.position = transform.position + velocity.linear * tick_seconds;
       if (has_horizontal_motion(velocity.linear)) {
-        transform.rotation = yaw_rotation(yaw_from_horizontal_direction(velocity.linear));
+        transform.rotation = yaw_rotation(model_yaw_from_horizontal_direction(velocity.linear));
       }
       entities.update_chunk(handle);
       ++updated;
@@ -501,7 +538,7 @@ u32 WorldEntitySimulation::tick_entity_physics(
     const Vec3f facing_direction =
         has_horizontal_motion(resolved.applied_delta) ? resolved.applied_delta : velocity.linear;
     if (has_horizontal_motion(facing_direction)) {
-      transform.rotation = yaw_rotation(yaw_from_horizontal_direction(facing_direction));
+      transform.rotation = yaw_rotation(model_yaw_from_horizontal_direction(facing_direction));
     }
 
     entities.update_chunk(handle);
@@ -556,6 +593,9 @@ u32 WorldEntitySimulation::tick_entities(
       transform.position = player_state.position;
     }
     velocity.linear = player_state.velocity;
+    update_player_animation_state(
+        registry.get_or_emplace<entity::EntityAnimationState>(handle),
+        player_state);
     entities.update_chunk(handle);
     ++updated;
   }

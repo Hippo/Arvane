@@ -424,7 +424,8 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
       {0.0F, 0.0F, 0.0F, 1.0F},
       5,
       "walking",
-      1.25F});
+      1.25F,
+      {10.0F, 20.0F, 0.0F}});
   const auto decoded_snapshot = arv::protocol::deserialize_entity_snapshot(
       arv::protocol::serialize_entity_snapshot(snapshot));
   ASSERT_TRUE(decoded_snapshot);
@@ -435,6 +436,9 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
   EXPECT_EQ(decoded_snapshot.value().entities.front().state_flags, 5U);
   EXPECT_EQ(decoded_snapshot.value().entities.front().animation_name, "walking");
   EXPECT_FLOAT_EQ(decoded_snapshot.value().entities.front().animation_time_seconds, 1.25F);
+  EXPECT_EQ(
+      decoded_snapshot.value().entities.front().head_rotation_degrees,
+      (arv::Vec3f{10.0F, 20.0F, 0.0F}));
 
   arv::protocol::MessageWriter malformed;
   malformed.write<arv::u32>(6);

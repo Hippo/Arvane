@@ -19,6 +19,7 @@ uniform float u_camera_far_plane;
 uniform int u_bone_count;
 uniform vec3 u_bone_pivots[128];
 uniform vec3 u_bone_rotations[128];
+uniform vec3 u_bone_positions[128];
 
 out vec2 v_uv;
 out vec3 v_color;
@@ -51,7 +52,9 @@ void main() {
   if (bone_index >= 0 && bone_index < u_bone_count) {
     vec3 pivot = u_bone_pivots[bone_index];
     model_position =
-        pivot + rotate_euler_degrees(model_position - pivot, u_bone_rotations[bone_index]);
+        pivot +
+        rotate_euler_degrees(model_position - pivot, u_bone_rotations[bone_index]) +
+        u_bone_positions[bone_index];
   }
 
   vec3 scaled = model_position * (a_instance_scale / 16.0);

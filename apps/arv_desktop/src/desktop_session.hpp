@@ -20,6 +20,7 @@
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
 
+#include <chrono>
 #include <deque>
 #include <filesystem>
 #include <memory>
@@ -64,6 +65,8 @@ struct DesktopGameSession {
   std::vector<ui::PlayerListEntryView> tab_players{};
   std::vector<ui::ChatLineView> chat_lines{};
   client::HeldItemAnimationPlayer held_item_animation{};
+  std::optional<std::chrono::steady_clock::time_point> first_person_sneak_visual_updated_at{};
+  f32 first_person_sneak_visual_progress{};
   bool held_item_secondary_use_active{};
   bool ui_snapshot_initialized{};
 };

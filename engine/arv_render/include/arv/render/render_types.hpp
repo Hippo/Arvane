@@ -398,6 +398,13 @@ struct ChunkDrawItem {
   u64 expected_light_version{};
 };
 
+struct EntityBoneRotationOverride {
+  std::string bone_name{};
+  Vec3f rotation_degrees{};
+
+  bool operator==(const EntityBoneRotationOverride&) const = default;
+};
+
 struct EntityDrawItem {
   EntityModelID model_id{};
   Vec3f position{};
@@ -405,6 +412,7 @@ struct EntityDrawItem {
   f32 scale{1.0F};
   f32 animation_time_seconds{};
   std::string animation_name{};
+  std::vector<EntityBoneRotationOverride> bone_rotation_overrides{};
 };
 
 struct EntityVertex {

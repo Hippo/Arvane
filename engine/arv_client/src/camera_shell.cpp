@@ -1,7 +1,6 @@
 #include "arv/client/camera_shell.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace arv::client {
 
@@ -80,14 +79,11 @@ void CameraShell::apply_freecam_input(FreecamInput input) noexcept {
 }
 
 Vec3f CameraShell::forward_vector() const noexcept {
-  const f32 cos_pitch = std::cos(pitch_radians_);
-  return normalize_or_zero({std::sin(yaw_radians_) * cos_pitch,
-                            std::sin(pitch_radians_),
-                            std::cos(yaw_radians_) * cos_pitch});
+  return look_direction(yaw_radians_, pitch_radians_);
 }
 
 Vec3f CameraShell::right_vector() const noexcept {
-  return normalize_or_zero({std::cos(yaw_radians_), 0.0F, -std::sin(yaw_radians_)});
+  return horizontal_right(yaw_radians_);
 }
 
 Vec3f CameraShell::up_vector() const noexcept {
@@ -119,19 +115,7 @@ render::RenderView CameraShell::render_view() const noexcept {
 }
 
 Quatf CameraShell::orientation() const noexcept {
-  const f32 half_yaw = yaw_radians_ * 0.5F;
-  const f32 half_pitch = pitch_radians_ * 0.5F;
-  const f32 cy = std::cos(half_yaw);
-  const f32 sy = std::sin(half_yaw);
-  const f32 cp = std::cos(half_pitch);
-  const f32 sp = std::sin(half_pitch);
-
-  Quatf rotation;
-  rotation.x = sp * cy;
-  rotation.y = cp * sy;
-  rotation.z = -sp * sy;
-  rotation.w = cp * cy;
-  return rotation;
+  return yaw_pitch_rotation(yaw_radians_, pitch_radians_);
 }
 
 } // namespace arv::client

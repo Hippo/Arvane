@@ -222,6 +222,13 @@ struct PlayerEntity {
   PlayerID player_id{};
 };
 
+struct PlayerVisualPose {
+  f32 body_yaw_radians{};
+  f32 head_yaw_radians{};
+  f32 head_pitch_radians{};
+  bool initialized{};
+};
+
 struct NetworkEntity {
   EntityNetID net_id{};
 };
@@ -247,6 +254,7 @@ struct EntitySnapshotEntry {
   std::optional<PlayerID> owning_player{};
   std::string animation_name{};
   Seconds animation_time_seconds{};
+  Vec3f head_rotation_degrees{};
 };
 
 struct PersistentEntityRecord {

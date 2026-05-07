@@ -288,6 +288,11 @@ public:
   [[nodiscard]] const entity::DroppedItem* find_dropped_item(EntityID entity_id) const noexcept;
 
   bool set_animation(EntityID entity_id, std::string animation_name) noexcept;
+  bool set_player_visual_pose(
+      PlayerID player_id,
+      f32 look_yaw_radians,
+      f32 look_pitch_radians,
+      f32 max_head_body_yaw_radians) noexcept;
   bool set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept;
   [[nodiscard]] bool is_persistent(EntityID entity_id) const noexcept;
   bool set_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept;

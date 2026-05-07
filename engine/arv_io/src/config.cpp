@@ -116,6 +116,7 @@ void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
   read_scalar(physics, "surface_buoyancy", config.surface_buoyancy);
   read_scalar(physics, "underwater_buoyancy", config.underwater_buoyancy);
   read_scalar(physics, "breath_seconds", config.breath_seconds);
+  read_scalar(physics, "max_head_body_yaw_radians", config.max_head_body_yaw_radians);
 }
 
 void read_gameplay_config(const YAML::Node& gameplay, GameplayConfig& config) {
@@ -520,6 +521,8 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "underwater_buoyancy" << YAML::Value
           << config.physics.underwater_buoyancy;
   emitter << YAML::Key << "breath_seconds" << YAML::Value << config.physics.breath_seconds;
+  emitter << YAML::Key << "max_head_body_yaw_radians" << YAML::Value
+          << config.physics.max_head_body_yaw_radians;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "gameplay" << YAML::Value << YAML::BeginMap;
@@ -821,6 +824,8 @@ ConfigResult save_default_shared_config_file(
   emitter << YAML::Key << "underwater_buoyancy" << YAML::Value
           << config.physics.underwater_buoyancy;
   emitter << YAML::Key << "breath_seconds" << YAML::Value << config.physics.breath_seconds;
+  emitter << YAML::Key << "max_head_body_yaw_radians" << YAML::Value
+          << config.physics.max_head_body_yaw_radians;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "gameplay" << YAML::Value << YAML::BeginMap;
@@ -1215,6 +1220,7 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
            std::pair{std::string_view{"physics.surface_float_depth"}, config.physics.surface_float_depth},
            std::pair{std::string_view{"physics.surface_buoyancy"}, config.physics.surface_buoyancy},
            std::pair{std::string_view{"physics.breath_seconds"}, config.physics.breath_seconds},
+           std::pair{std::string_view{"physics.max_head_body_yaw_radians"}, config.physics.max_head_body_yaw_radians},
        }) {
     if (std::optional<ConfigError> error = validate_positive_f32(value, name);
         error.has_value()) {

@@ -193,8 +193,8 @@ TEST(WorldEntityTests, PhysicsEntitiesCollideWithWallsAndFaceMovementDirection) 
   ASSERT_NE(velocity, nullptr);
   EXPECT_LT(transform->position.x, 0.56F);
   EXPECT_FLOAT_EQ(velocity->linear.x, 0.0F);
-  EXPECT_NEAR(transform->rotation.y, std::sin(3.14159265358979323846F * 0.75F), 0.001F);
-  EXPECT_NEAR(transform->rotation.w, std::cos(3.14159265358979323846F * 0.75F), 0.001F);
+  EXPECT_NEAR(transform->rotation.y, std::sin(arv::PiRadians * 0.75F), 0.001F);
+  EXPECT_NEAR(transform->rotation.w, std::cos(arv::PiRadians * 0.75F), 0.001F);
 }
 
 TEST(WorldEntityTests, GoalDrivenEntitiesJumpWhenBlockedByOneBlockLedge) {
@@ -300,6 +300,75 @@ TEST(WorldEntityTests, PlayerProfileMapsToWorldLocalEntity) {
   EXPECT_EQ(other_player.world_id, (arv::WorldID{2}));
   ASSERT_TRUE(other_world.entity_for_player(arv::PlayerID{7}).has_value());
   EXPECT_EQ(other_world.player_count(), 1U);
+}
+
+TEST(WorldEntityTests, PlayerVisualPoseClampsHeadYawAndReplicatesHeadRotation) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_player(arv::PlayerID{7});
+
+  ASSERT_TRUE(world.set_player_visual_pose(arv::PlayerID{7}, 1.0F, -0.25F, 0.5F));
+
+  const std::optional<arv::EntityID> entity = world.entity_for_player(arv::PlayerID{7});
+  ASSERT_TRUE(entity.has_value());
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(entity.value());
+  ASSERT_NE(transform, nullptr);
+  const float model_yaw_half = (0.5F + arv::ModelForwardYawOffsetRadians) * 0.5F;
+  EXPECT_NEAR(transform->rotation.y, std::sin(model_yaw_half), 0.0001F);
+  EXPECT_NEAR(transform->rotation.w, std::cos(model_yaw_half), 0.0001F);
+
+  const std::vector<arv::entity::EntitySnapshotEntry> snapshots =
+      world.collect_entity_snapshots();
+  ASSERT_EQ(snapshots.size(), 1U);
+  EXPECT_NEAR(snapshots.front().head_rotation_degrees.x, -14.3239F, 0.001F);
+  EXPECT_NEAR(snapshots.front().head_rotation_degrees.y, 28.6479F, 0.001F);
+}
+
+TEST(WorldEntityTests, PlayerAnimationStateSelectsLocomotionAndSneakTransitions) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{7});
+  const std::optional<arv::EntityID> entity = world.entity_for_player(arv::PlayerID{7});
+  ASSERT_TRUE(entity.has_value());
+
+  player.velocity = {1.0F, 0.0F, 0.0F};
+  (void)world.tick_entities();
+  arv::entity::EntityAnimationState* animation =
+      world.find_entity_animation_state(entity.value());
+  ASSERT_NE(animation, nullptr);
+  EXPECT_EQ(animation->name, "walking");
+
+  player.velocity = {};
+  player.sneaking = true;
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "sneak");
+
+  animation->time_seconds = 0.25F;
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "sneak_idle");
+
+  player.velocity = {0.0F, 0.0F, 1.0F};
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "sneak_walk");
+}
+
+TEST(WorldEntityTests, PlayerHitRightAnimationPlaysOnceBeforeLocomotionResumes) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{7});
+  const std::optional<arv::EntityID> entity = world.entity_for_player(arv::PlayerID{7});
+  ASSERT_TRUE(entity.has_value());
+
+  player.velocity = {1.0F, 0.0F, 0.0F};
+  ASSERT_TRUE(world.set_entity_animation(entity.value(), "hit_right"));
+  arv::entity::EntityAnimationState* animation =
+      world.find_entity_animation_state(entity.value());
+  ASSERT_NE(animation, nullptr);
+  animation->time_seconds = 0.10F;
+
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "hit_right");
+
+  animation->time_seconds = 0.458F;
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "walking");
 }
 
 TEST(WorldEntityTests, PersistentEntityRecordsRoundTripThroughWorldRuntime) {

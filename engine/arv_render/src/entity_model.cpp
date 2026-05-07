@@ -142,6 +142,33 @@ using json = nlohmann::json;
   return {{{u0, v1}, {u1, v1}, {u0, v0}, {u1, v0}}};
 }
 
+[[nodiscard]] Vec3f blockbench_position_to_engine(Vec3f position) noexcept {
+  return {-position.x, position.y, position.z};
+}
+
+[[nodiscard]] Vec3f blockbench_rotation_to_engine(Vec3f rotation_degrees) noexcept {
+  return {rotation_degrees.x, -rotation_degrees.y, -rotation_degrees.z};
+}
+
+[[nodiscard]] EntityModelBoxDefinition blockbench_box_to_engine(
+    const EntityModelBoxDefinition& source) {
+  EntityModelBoxDefinition box = source;
+  const Vec3f inflated_min{
+      source.min.x - source.inflate,
+      source.min.y - source.inflate,
+      source.min.z - source.inflate};
+  const Vec3f inflated_max{
+      source.max.x + source.inflate,
+      source.max.y + source.inflate,
+      source.max.z + source.inflate};
+
+  box.min = {-inflated_max.x, inflated_min.y, inflated_min.z};
+  box.max = {-inflated_min.x, inflated_max.y, inflated_max.z};
+  std::swap(box.faces[face_index(EntityModelFace::PositiveX)],
+            box.faces[face_index(EntityModelFace::NegativeX)]);
+  return box;
+}
+
 [[nodiscard]] Expected<EntityModelFaceDefinition, EntityModelError> read_face(const json& node) {
   if (!node.is_object()) {
     return Expected<EntityModelFaceDefinition, EntityModelError>::failure(
@@ -220,6 +247,108 @@ void append_face(
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<Vec3f> keyframe_position_for_bone(
+    const EntityModelAnimationKeyframe& keyframe,
+    u32 bone_index) noexcept {
+  for (const EntityModelAnimationBoneKey& bone : keyframe.bones) {
+    if (bone.bone_index == bone_index) {
+      return bone.position_offset;
+    }
+  }
+  return std::nullopt;
+}
+
+template <typename ChannelForBone>
+[[nodiscard]] Vec3f sample_animation_bone_channel(
+    const EntityModelAnimation& animation,
+    u32 bone_index,
+    f32 sample_time,
+    ChannelForBone channel_for_bone) noexcept {
+  const bool looping = animation.loop && animation.length_seconds > 0.0F;
+  const EntityModelAnimationKeyframe* first = nullptr;
+  const EntityModelAnimationKeyframe* last = nullptr;
+  const EntityModelAnimationKeyframe* previous = nullptr;
+  const EntityModelAnimationKeyframe* next = nullptr;
+  f32 first_time = 0.0F;
+  f32 last_time = 0.0F;
+  f32 previous_time = 0.0F;
+  f32 next_time = 0.0F;
+
+  for (const EntityModelAnimationKeyframe& keyframe : animation.keyframes) {
+    const std::optional<Vec3f> value = channel_for_bone(keyframe, bone_index);
+    if (!value.has_value()) {
+      continue;
+    }
+    if (first == nullptr) {
+      first = &keyframe;
+      first_time = keyframe.time_seconds;
+    }
+    last = &keyframe;
+    last_time = keyframe.time_seconds;
+    if (keyframe.time_seconds <= sample_time) {
+      previous = &keyframe;
+      previous_time = keyframe.time_seconds;
+    }
+    if (keyframe.time_seconds >= sample_time && next == nullptr) {
+      next = &keyframe;
+      next_time = keyframe.time_seconds;
+    }
+  }
+
+  if (first == nullptr) {
+    return {};
+  }
+
+  if (looping) {
+    if (previous == nullptr) {
+      previous = last;
+      previous_time = last_time - animation.length_seconds;
+    }
+    if (next == nullptr) {
+      next = first;
+      next_time = first_time + animation.length_seconds;
+    }
+  }
+
+  if (previous == nullptr) {
+    return {};
+  }
+  const Vec3f from = channel_for_bone(*previous, bone_index).value_or(Vec3f{});
+  if (next == nullptr) {
+    return from;
+  }
+
+  const Vec3f to = channel_for_bone(*next, bone_index).value_or(from);
+  const f32 span = next_time - previous_time;
+  if (span <= 0.0001F) {
+    return from;
+  }
+  const f32 alpha = std::clamp((sample_time - previous_time) / span, 0.0F, 1.0F);
+  return lerp(from, to, alpha);
+}
+
+[[nodiscard]] Vec3f sample_animation_bone_rotation(
+    const EntityModelAnimation& animation,
+    u32 bone_index,
+    f32 sample_time) noexcept {
+  return sample_animation_bone_channel(
+      animation,
+      bone_index,
+      sample_time,
+      keyframe_rotation_for_bone);
+}
+
+[[nodiscard]] Vec3f sample_animation_bone_position(
+    const EntityModelAnimation& animation,
+    u32 bone_index,
+    f32 sample_time) noexcept {
+  return sample_animation_bone_channel(
+      animation,
+      bone_index,
+      sample_time,
+      keyframe_position_for_bone);
+}
+
 } // namespace
 
 std::string normalize_entity_texture_asset(std::string_view texture) {
@@ -280,6 +409,7 @@ EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
           }
           box.min = min.value();
           box.max = max.value();
+          box.inflate = box_json.value("inflate", 0.0F);
           for (std::string_view face_name : {"east", "west", "up", "down", "south", "north"}) {
             const auto face_json = box_json.find(std::string{face_name});
             if (face_json == box_json.end()) {
@@ -345,11 +475,27 @@ EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
               for (const json& bone_json : *bones) {
                 EntityModelAnimationBoneDefinition bone;
                 bone.bone_name = bone_json.at("name").get<std::string>();
-                auto rotation = read_vec3(bone_json.at("rotation_euler"), "bone rotation_euler");
-                if (!rotation) {
-                  return EntityModelDefinitionResult::failure(rotation.error());
+                if (const auto rotation_json = bone_json.find("rotation_euler");
+                    rotation_json != bone_json.end()) {
+                  auto rotation = read_vec3(*rotation_json, "bone rotation_euler");
+                  if (!rotation) {
+                    return EntityModelDefinitionResult::failure(rotation.error());
+                  }
+                  bone.rotation_euler_degrees = rotation.value();
                 }
-                bone.rotation_euler_degrees = rotation.value();
+                if (const auto position_json = bone_json.find("position");
+                    position_json != bone_json.end()) {
+                  auto position = read_vec3(*position_json, "bone position");
+                  if (!position) {
+                    return EntityModelDefinitionResult::failure(position.error());
+                  }
+                  bone.position_offset = position.value();
+                }
+                if (!bone.rotation_euler_degrees.has_value() &&
+                    !bone.position_offset.has_value()) {
+                  return EntityModelDefinitionResult::failure(
+                      {"animation bone must include rotation_euler or position"});
+                }
                 keyframe.bones.push_back(std::move(bone));
               }
             }
@@ -392,13 +538,13 @@ EntityModelAssetResult build_entity_model_asset(
     if (!bone_indices.emplace(bone.name, bone_index).second) {
       return EntityModelAssetResult::failure({"duplicate entity model bone: " + bone.name});
     }
-    asset.bones.push_back({bone.name, bone.pivot});
+    asset.bones.push_back({bone.name, blockbench_position_to_engine(bone.pivot)});
   }
 
   for (u32 bone_index = 0; bone_index < definition.bones.size(); ++bone_index) {
     const EntityModelBoneDefinition& bone = definition.bones[bone_index];
     for (usize box_index = 0; box_index < bone.boxes.size(); ++box_index) {
-      const EntityModelBoxDefinition& box = bone.boxes[box_index];
+      const EntityModelBoxDefinition box = blockbench_box_to_engine(bone.boxes[box_index]);
       u32 flags = 0U;
       if (is_player_entity_model_name(definition.name)) {
         flags = (box_index % 2U) == 0U
@@ -457,7 +603,17 @@ EntityModelAssetResult build_entity_model_asset(
           return EntityModelAssetResult::failure(
               {"animation references unknown bone: " + source_bone.bone_name});
         }
-        keyframe.bones.push_back({found->second, source_bone.rotation_euler_degrees});
+        EntityModelAnimationBoneKey bone_key;
+        bone_key.bone_index = found->second;
+        if (source_bone.rotation_euler_degrees.has_value()) {
+          bone_key.rotation_euler_degrees =
+              blockbench_rotation_to_engine(source_bone.rotation_euler_degrees.value());
+        }
+        if (source_bone.position_offset.has_value()) {
+          bone_key.position_offset =
+              blockbench_position_to_engine(source_bone.position_offset.value());
+        }
+        keyframe.bones.push_back(bone_key);
       }
       animation.keyframes.push_back(std::move(keyframe));
     }
@@ -491,24 +647,46 @@ void sample_entity_model_animation(
     sample_time = std::clamp(sample_time, 0.0F, animation->length_seconds);
   }
 
-  const EntityModelAnimationKeyframe* previous = &animation->keyframes.front();
-  const EntityModelAnimationKeyframe* next = &animation->keyframes.back();
-  for (const EntityModelAnimationKeyframe& keyframe : animation->keyframes) {
-    if (keyframe.time_seconds <= sample_time) {
-      previous = &keyframe;
-    }
-    if (keyframe.time_seconds >= sample_time) {
-      next = &keyframe;
-      break;
-    }
+  for (u32 bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
+    output_rotations[bone_index] =
+        sample_animation_bone_rotation(*animation, bone_index, sample_time);
+  }
+}
+
+void sample_entity_model_animation(
+    const EntityModelAsset& model,
+    std::string_view animation_name,
+    f32 time_seconds,
+    std::span<Vec3f> output_rotations,
+    std::span<Vec3f> output_positions) {
+  for (Vec3f& rotation : output_rotations) {
+    rotation = {};
+  }
+  for (Vec3f& position : output_positions) {
+    position = {};
+  }
+  if (output_rotations.size() < model.bones.size() ||
+      output_positions.size() < model.bones.size()) {
+    return;
   }
 
-  const f32 span = std::max(next->time_seconds - previous->time_seconds, 0.0001F);
-  const f32 alpha = std::clamp((sample_time - previous->time_seconds) / span, 0.0F, 1.0F);
+  const EntityModelAnimation* animation = find_animation(model, animation_name);
+  if (animation == nullptr || animation->keyframes.empty()) {
+    return;
+  }
+
+  f32 sample_time = time_seconds;
+  if (animation->loop && animation->length_seconds > 0.0F) {
+    sample_time = std::fmod(std::max(sample_time, 0.0F), animation->length_seconds);
+  } else {
+    sample_time = std::clamp(sample_time, 0.0F, animation->length_seconds);
+  }
+
   for (u32 bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
-    const Vec3f from = keyframe_rotation_for_bone(*previous, bone_index).value_or(Vec3f{});
-    const Vec3f to = keyframe_rotation_for_bone(*next, bone_index).value_or(Vec3f{});
-    output_rotations[bone_index] = lerp(from, to, alpha);
+    output_rotations[bone_index] =
+        sample_animation_bone_rotation(*animation, bone_index, sample_time);
+    output_positions[bone_index] =
+        sample_animation_bone_position(*animation, bone_index, sample_time);
   }
 }
 

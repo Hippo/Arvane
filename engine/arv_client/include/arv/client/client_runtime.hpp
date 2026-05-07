@@ -32,6 +32,7 @@ struct ReplicatedEntityMirror {
   std::optional<PlayerID> owning_player{};
   std::string animation_name{};
   Seconds animation_time_seconds{};
+  Vec3f head_rotation_degrees{};
 };
 
 struct DroppedItemMirror {

@@ -39,6 +39,7 @@ player::PlayerTuning make_player_tuning(const io::PhysicsConfig& physics) noexce
   tuning.surface_buoyancy = physics.surface_buoyancy;
   tuning.underwater_buoyancy = physics.underwater_buoyancy;
   tuning.breath_seconds = physics.breath_seconds;
+  tuning.max_head_body_yaw_radians = physics.max_head_body_yaw_radians;
   return tuning;
 }
 

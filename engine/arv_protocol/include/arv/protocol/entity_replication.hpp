@@ -40,6 +40,7 @@ struct EntitySnapshotEntry {
   u32 state_flags{};
   std::string animation_name{};
   Seconds animation_time_seconds{};
+  Vec3f head_rotation_degrees{};
 };
 
 struct EntitySnapshot {

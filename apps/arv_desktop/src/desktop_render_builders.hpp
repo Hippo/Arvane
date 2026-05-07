@@ -16,7 +16,7 @@ namespace arv::desktop {
 
 void populate_world_frame_draw_items(
     render::FramePacket& frame,
-    const DesktopGameSession& session,
+    DesktopGameSession& session,
     const EntityRenderAssets& entity_render_assets,
     bool show_local_player_body,
     std::chrono::steady_clock::time_point now,

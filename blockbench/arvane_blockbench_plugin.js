@@ -234,6 +234,26 @@ Plugin.register('arvane_blockbench_plugin', {
               boneData.rotation_euler = rotation.map(n => round3(parseFloat(n)));
             }
 
+            if (keyframe.channel === 'position') {
+              const position = [
+                keyframe.get('x'),
+                keyframe.get('y'),
+                keyframe.get('z')
+              ];
+
+              boneData.position = position.map(n => round3(parseFloat(n)));
+            }
+
+            if (keyframe.channel === 'scale') {
+              const scale = [
+                keyframe.get('x'),
+                keyframe.get('y'),
+                keyframe.get('z')
+              ];
+
+              boneData.scale = scale.map(n => round3(parseFloat(n)));
+            }
+
             if (Object.keys(boneData).length > 0) {
               if (!keyframes[time][bone_name]) {
                 keyframes[time][bone_name] = {};

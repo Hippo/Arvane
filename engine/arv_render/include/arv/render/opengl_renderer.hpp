@@ -227,6 +227,7 @@ private:
   GLint entity_bone_count_uniform_{-1};
   GLint entity_bone_pivots_uniform_{-1};
   GLint entity_bone_rotations_uniform_{-1};
+  GLint entity_bone_positions_uniform_{-1};
   GLuint ui_program_{};
   GLint ui_viewport_uniform_{-1};
   GLint ui_texture_uniform_{-1};
@@ -277,6 +278,7 @@ private:
   std::vector<EntityInstanceData> entity_instances_;
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_pivots_{};
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_rotations_{};
+  std::array<Vec3f, MaxEntityShaderBones> entity_bone_positions_{};
   std::vector<UIVertex> ui_vertices_;
   std::vector<u32> ui_indices_;
 };

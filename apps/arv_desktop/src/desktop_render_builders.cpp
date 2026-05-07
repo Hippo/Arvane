@@ -1,8 +1,9 @@
 #include "desktop_render_builders.hpp"
 
+#include <algorithm>
 #include <cmath>
-#include <numbers>
 #include <optional>
+#include <string_view>
 
 namespace arv::desktop {
 namespace {
@@ -12,50 +13,6 @@ namespace {
       from.x + (to.x - from.x) * alpha,
       from.y + (to.y - from.y) * alpha,
       from.z + (to.z - from.z) * alpha};
-}
-
-[[nodiscard]] Quatf multiply_quat(Quatf lhs, Quatf rhs) noexcept {
-  return {
-      lhs.w * rhs.x + lhs.x * rhs.w + lhs.y * rhs.z - lhs.z * rhs.y,
-      lhs.w * rhs.y - lhs.x * rhs.z + lhs.y * rhs.w + lhs.z * rhs.x,
-      lhs.w * rhs.z + lhs.x * rhs.y - lhs.y * rhs.x + lhs.z * rhs.w,
-      lhs.w * rhs.w - lhs.x * rhs.x - lhs.y * rhs.y - lhs.z * rhs.z};
-}
-
-[[nodiscard]] Quatf normalize_quat(Quatf value) noexcept {
-  const f32 length = std::sqrt(
-      value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w);
-  if (length <= 0.0F) {
-    return {};
-  }
-  return {value.x / length, value.y / length, value.z / length, value.w / length};
-}
-
-[[nodiscard]] Quatf yaw_rotation(f32 radians) noexcept {
-  const f32 half = radians * 0.5F;
-  return {0.0F, std::sin(half), 0.0F, std::cos(half)};
-}
-
-[[nodiscard]] Quatf pitch_rotation(f32 radians) noexcept {
-  const f32 half = radians * 0.5F;
-  return {std::sin(half), 0.0F, 0.0F, std::cos(half)};
-}
-
-[[nodiscard]] Quatf roll_rotation(f32 radians) noexcept {
-  const f32 half = radians * 0.5F;
-  return {0.0F, 0.0F, std::sin(half), std::cos(half)};
-}
-
-[[nodiscard]] f32 degrees_to_radians(f32 degrees) noexcept {
-  return degrees * std::numbers::pi_v<f32> / 180.0F;
-}
-
-[[nodiscard]] Quatf euler_degrees_rotation(Vec3f degrees) noexcept {
-  return multiply_quat(
-      pitch_rotation(degrees_to_radians(degrees.x)),
-      multiply_quat(
-          yaw_rotation(degrees_to_radians(degrees.y)),
-          roll_rotation(degrees_to_radians(degrees.z))));
 }
 
 [[nodiscard]] Quatf camera_basis_rotation(
@@ -100,6 +57,53 @@ namespace {
                          (m12 + m21) / scale,
                          0.25F * scale,
                          (m10 - m01) / scale});
+}
+
+[[nodiscard]] f32 approach(f32 current, f32 target, f32 step) noexcept {
+  if (current < target) {
+    return std::min(current + step, target);
+  }
+  return std::max(current - step, target);
+}
+
+[[nodiscard]] f32 first_person_sneak_target_progress(
+    std::string_view animation_name,
+    f32 animation_time_seconds) noexcept {
+  if (animation_name == "sneak") {
+    return std::clamp(animation_time_seconds / 0.25F, 0.0F, 1.0F);
+  }
+  if (animation_name == "sneak_idle" || animation_name == "sneak_walk") {
+    return 1.0F;
+  }
+  return 0.0F;
+}
+
+[[nodiscard]] f32 update_first_person_sneak_visual_progress(
+    DesktopGameSession& session,
+    std::string_view animation_name,
+    f32 animation_time_seconds,
+    std::chrono::steady_clock::time_point now) noexcept {
+  const f32 target = first_person_sneak_target_progress(
+      animation_name,
+      animation_time_seconds);
+  if (!session.first_person_sneak_visual_updated_at.has_value()) {
+    session.first_person_sneak_visual_updated_at = now;
+    session.first_person_sneak_visual_progress = target;
+    return session.first_person_sneak_visual_progress;
+  }
+
+  const f32 delta_seconds = std::max(
+      std::chrono::duration<f32>(
+          now - session.first_person_sneak_visual_updated_at.value())
+          .count(),
+      0.0F);
+  session.first_person_sneak_visual_updated_at = now;
+  const f32 speed = target > session.first_person_sneak_visual_progress ? 4.0F : 5.0F;
+  session.first_person_sneak_visual_progress = approach(
+      session.first_person_sneak_visual_progress,
+      target,
+      delta_seconds * speed);
+  return session.first_person_sneak_visual_progress;
 }
 
 void append_item_draw(
@@ -153,7 +157,7 @@ usize populate_chunk_draw_lists(render::FramePacket& frame, ChunkViewState& chun
 
 void populate_world_frame_draw_items(
     render::FramePacket& frame,
-    const DesktopGameSession& session,
+    DesktopGameSession& session,
     const EntityRenderAssets& entity_render_assets,
     bool show_local_player_body,
     std::chrono::steady_clock::time_point now,
@@ -220,17 +224,27 @@ void populate_world_frame_draw_items(
       const Vec3f camera_forward = session.client->camera().forward_vector();
       const Vec3f horizontal_forward =
           normalize_or_zero({camera_forward.x, 0.0F, camera_forward.z});
-      position = position - horizontal_forward * 0.38F;
+      const f32 sneak_progress = update_first_person_sneak_visual_progress(
+          session,
+          mirror.animation_name,
+          mirror.animation_time_seconds,
+          now);
+      position = position - horizontal_forward * (0.38F + sneak_progress * 0.32F);
       position.y -= 0.18F;
     }
     render::EntityDrawItem item;
     item.model_id = model_id;
     item.position = position;
     item.rotation =
-        is_local_player ? yaw_rotation(session.client->camera().yaw_radians()) : mirror.rotation;
+        is_local_player
+            ? model_forward_yaw_rotation(session.client->camera().yaw_radians())
+            : mirror.rotation;
     item.scale = 1.0F;
     item.animation_name = mirror.animation_name;
     item.animation_time_seconds = mirror.animation_time_seconds;
+    if (mirror.owning_player.has_value()) {
+      item.bone_rotation_overrides.push_back({"head", mirror.head_rotation_degrees});
+    }
     frame.entities.push_back(std::move(item));
   }
 
@@ -305,7 +319,7 @@ void populate_world_frame_draw_items(
   }
 
   const render::CameraSnapshot& camera = frame.camera;
-  constexpr f32 HalfPi = std::numbers::pi_v<f32> * 0.5F;
+  constexpr f32 HalfPi = PiRadians * 0.5F;
   const f32 animation_time_seconds =
       std::chrono::duration<f32>(now - app_start_time).count();
   const client::HeldItemAnimationPose animation_pose =

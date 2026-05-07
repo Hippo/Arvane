@@ -198,6 +198,7 @@ struct PhysicsConfig {
   f32 surface_buoyancy{10.0F};
   f32 underwater_buoyancy{1.0F};
   f32 breath_seconds{15.0F};
+  f32 max_head_body_yaw_radians{1.309F};
 };
 
 struct GameplayConfig {

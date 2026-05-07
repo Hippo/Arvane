@@ -261,6 +261,72 @@ void append_ui_quad(
   indices.emplace_back(base);
 }
 
+[[nodiscard]] i32 compare_f32(f32 lhs, f32 rhs) noexcept {
+  if (lhs < rhs) {
+    return -1;
+  }
+  if (lhs > rhs) {
+    return 1;
+  }
+  return 0;
+}
+
+[[nodiscard]] i32 compare_vec3(Vec3f lhs, Vec3f rhs) noexcept {
+  if (const i32 x = compare_f32(lhs.x, rhs.x); x != 0) {
+    return x;
+  }
+  if (const i32 y = compare_f32(lhs.y, rhs.y); y != 0) {
+    return y;
+  }
+  return compare_f32(lhs.z, rhs.z);
+}
+
+[[nodiscard]] i32 compare_bone_rotation_overrides(
+    const std::vector<EntityBoneRotationOverride>& lhs,
+    const std::vector<EntityBoneRotationOverride>& rhs) noexcept {
+  const usize count = std::min(lhs.size(), rhs.size());
+  for (usize index = 0; index < count; ++index) {
+    if (lhs[index].bone_name < rhs[index].bone_name) {
+      return -1;
+    }
+    if (rhs[index].bone_name < lhs[index].bone_name) {
+      return 1;
+    }
+    if (const i32 rotation = compare_vec3(lhs[index].rotation_degrees, rhs[index].rotation_degrees);
+        rotation != 0) {
+      return rotation;
+    }
+  }
+  if (lhs.size() < rhs.size()) {
+    return -1;
+  }
+  if (lhs.size() > rhs.size()) {
+    return 1;
+  }
+  return 0;
+}
+
+void apply_bone_rotation_overrides(
+    const EntityModelAsset& model,
+    std::span<Vec3f> bone_rotations,
+    const std::vector<EntityBoneRotationOverride>& overrides) noexcept {
+  for (const EntityBoneRotationOverride& bone_override : overrides) {
+    if (bone_override.bone_name.empty()) {
+      continue;
+    }
+    for (usize bone_index = 0; bone_index < model.bones.size() &&
+                               bone_index < bone_rotations.size();
+         ++bone_index) {
+      if (model.bones[bone_index].name != bone_override.bone_name) {
+        continue;
+      }
+      bone_rotations[bone_index] =
+          bone_rotations[bone_index] + bone_override.rotation_degrees;
+      break;
+    }
+  }
+}
+
 } // namespace
 
 void OpenGLRenderer::set_chunk_shader_sources(std::string vertex_source, std::string fragment_source) {
@@ -1013,6 +1079,7 @@ bool OpenGLRenderer::ensure_entity_program() {
   entity_bone_count_uniform_ = glGetUniformLocation(entity_program_, "u_bone_count");
   entity_bone_pivots_uniform_ = glGetUniformLocation(entity_program_, "u_bone_pivots[0]");
   entity_bone_rotations_uniform_ = glGetUniformLocation(entity_program_, "u_bone_rotations[0]");
+  entity_bone_positions_uniform_ = glGetUniformLocation(entity_program_, "u_bone_positions[0]");
   return true;
 }
 
@@ -1266,13 +1333,19 @@ void OpenGLRenderer::draw_entities() {
         if (lhs->animation_time_seconds != rhs->animation_time_seconds) {
           return lhs->animation_time_seconds < rhs->animation_time_seconds;
         }
-        return lhs->animation_name < rhs->animation_name;
+        if (lhs->animation_name != rhs->animation_name) {
+          return lhs->animation_name < rhs->animation_name;
+        }
+        return compare_bone_rotation_overrides(
+                   lhs->bone_rotation_overrides,
+                   rhs->bone_rotation_overrides) < 0;
       });
 
   const auto same_entity_batch = [](const EntityDrawItem& lhs, const EntityDrawItem& rhs) {
     return lhs.model_id == rhs.model_id &&
            lhs.animation_time_seconds == rhs.animation_time_seconds &&
-           lhs.animation_name == rhs.animation_name;
+           lhs.animation_name == rhs.animation_name &&
+           lhs.bone_rotation_overrides == rhs.bone_rotation_overrides;
   };
 
   glUseProgram(entity_program_);
@@ -1338,11 +1411,19 @@ void OpenGLRenderer::draw_entities() {
     std::span<Vec3f> bone_rotations{
         entity_bone_rotations_.data(),
         model.bones.size()};
+    std::span<Vec3f> bone_positions{
+        entity_bone_positions_.data(),
+        model.bones.size()};
     sample_entity_model_animation(
         model,
         first_draw.animation_name,
         first_draw.animation_time_seconds,
-        bone_rotations);
+        bone_rotations,
+        bone_positions);
+    apply_bone_rotation_overrides(
+        model,
+        bone_rotations,
+        first_draw.bone_rotation_overrides);
     glUniform1i(entity_bone_count_uniform_, bone_count);
     if (bone_count > 0) {
       glUniform3fv(
@@ -1353,6 +1434,10 @@ void OpenGLRenderer::draw_entities() {
           entity_bone_rotations_uniform_,
           bone_count,
           reinterpret_cast<const GLfloat*>(entity_bone_rotations_.data()));
+      glUniform3fv(
+          entity_bone_positions_uniform_,
+          bone_count,
+          reinterpret_cast<const GLfloat*>(entity_bone_positions_.data()));
     }
 
     entity_instances_.clear();

@@ -33,6 +33,7 @@ struct EntityModelFaceDefinition {
 struct EntityModelBoxDefinition {
   Vec3f min{};
   Vec3f max{};
+  f32 inflate{};
   std::array<std::optional<EntityModelFaceDefinition>, 6> faces{};
 };
 
@@ -44,7 +45,8 @@ struct EntityModelBoneDefinition {
 
 struct EntityModelAnimationBoneDefinition {
   std::string bone_name{};
-  Vec3f rotation_euler_degrees{};
+  std::optional<Vec3f> rotation_euler_degrees{};
+  std::optional<Vec3f> position_offset{};
 };
 
 struct EntityModelAnimationKeyframeDefinition {
@@ -95,7 +97,8 @@ struct EntityModelMeshVertex {
 
 struct EntityModelAnimationBoneKey {
   u32 bone_index{};
-  Vec3f rotation_euler_degrees{};
+  std::optional<Vec3f> rotation_euler_degrees{};
+  std::optional<Vec3f> position_offset{};
 };
 
 struct EntityModelAnimationKeyframe {
@@ -133,5 +136,11 @@ void sample_entity_model_animation(
     std::string_view animation_name,
     f32 time_seconds,
     std::span<Vec3f> output_rotations);
+void sample_entity_model_animation(
+    const EntityModelAsset& model,
+    std::string_view animation_name,
+    f32 time_seconds,
+    std::span<Vec3f> output_rotations,
+    std::span<Vec3f> output_positions);
 
 } // namespace arv::render
