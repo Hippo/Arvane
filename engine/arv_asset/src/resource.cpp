@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <utility>
 #include "arv/core/types.hpp"
 #include "arv/core/log.hpp"
@@ -234,6 +235,49 @@ ImageResult load_png_image(const std::filesystem::path& path, const AssetID& ass
   if (width <= 0 || height <= 0) {
     stbi_image_free(loaded);
     return ImageResult::failure({asset_id.value, path, "decode PNG texture", "image has invalid dimensions"});
+  }
+
+  Image image;
+  image.width = static_cast<u32>(width);
+  image.height = static_cast<u32>(height);
+  image.channels = 4;
+  image.pixels.assign(loaded, loaded + static_cast<usize>(width) * static_cast<usize>(height) * 4U);
+  stbi_image_free(loaded);
+  return ImageResult::success(std::move(image));
+}
+
+ImageResult decode_png_image_bytes(std::span<const u8> bytes, const AssetID& asset_id) {
+  int width = 0;
+  int height = 0;
+  int channels = 0;
+  const int byte_count = static_cast<int>(std::min<usize>(
+      bytes.size(),
+      static_cast<usize>(std::numeric_limits<int>::max())));
+  if (static_cast<usize>(byte_count) != bytes.size()) {
+    return ImageResult::failure({
+        asset_id.value,
+        {},
+        "decode PNG bytes",
+        "image payload is too large for stb_image"});
+  }
+  stbi_uc* loaded = stbi_load_from_memory(
+      bytes.data(),
+      byte_count,
+      &width,
+      &height,
+      &channels,
+      4);
+  if (loaded == nullptr) {
+    const char* reason = stbi_failure_reason();
+    return ImageResult::failure({
+        asset_id.value,
+        {},
+        "decode PNG bytes",
+        reason == nullptr ? "unknown stb_image decode failure" : std::string{reason}});
+  }
+  if (width <= 0 || height <= 0) {
+    stbi_image_free(loaded);
+    return ImageResult::failure({asset_id.value, {}, "decode PNG bytes", "image has invalid dimensions"});
   }
 
   Image image;

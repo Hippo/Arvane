@@ -5,6 +5,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/skins.hpp"
 
 #include "client_connection.hpp"
 
@@ -119,6 +120,81 @@ net::NetworkResult ClientProtocolSender::send_inventory_action(
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Gameplay,
       protocol::serialize_inventory_action_request(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_skin_request(
+    const protocol::ServerboundSkinRequest& request) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::SkinRequest,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_skin_request(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_skin_upload_begin(
+    const protocol::ServerboundSkinUploadBegin& begin) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::SkinUploadBegin,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_skin_upload_begin(begin));
+}
+
+net::NetworkResult ClientProtocolSender::send_skin_upload_data(
+    const protocol::ServerboundSkinUploadData& data) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::SkinUploadData,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::ChunkStreaming,
+      protocol::serialize_skin_upload_data(data));
+}
+
+net::NetworkResult ClientProtocolSender::send_skin_upload_chunk(
+    const protocol::ServerboundSkinUploadChunk& chunk) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::SkinUploadChunk,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::ChunkStreaming,
+      protocol::serialize_skin_upload_chunk(chunk));
+}
+
+net::NetworkResult ClientProtocolSender::send_skin_upload_end(
+    const protocol::ServerboundSkinUploadEnd& end) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::SkinUploadEnd,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::ChunkStreaming,
+      protocol::serialize_skin_upload_end(end));
 }
 
 } // namespace arv::client::detail

@@ -20,6 +20,7 @@ add_library(arv_client STATIC
   src/client_network_messages.cpp
   src/client_protocol_send.cpp
   src/client_runtime.cpp
+  src/client_skin_runtime.cpp
   src/client_ui_state.cpp
   src/item_animation.cpp
   src/local_identity.cpp
@@ -27,4 +28,5 @@ add_library(arv_client STATIC
 )
 target_include_directories(arv_client PUBLIC include)
 target_link_libraries(arv_client PUBLIC arv_core arv_crypto arv_net arv_player arv_protocol arv_render)
+target_link_libraries(arv_client PRIVATE arv_asset)
 target_link_libraries(arv_client PRIVATE nlohmann_json::nlohmann_json)

@@ -12,6 +12,7 @@
 #include "client_inventory_runtime.hpp"
 #include "client_network_messages.hpp"
 #include "client_protocol_send.hpp"
+#include "client_skin_runtime.hpp"
 #include "client_ui_state.hpp"
 
 namespace arv::client::detail {
@@ -29,6 +30,7 @@ struct ClientRuntimeContext {
   ClientInventoryRuntime& inventory;
   ClientEntityMirrorStore& entities;
   ClientDroppedItemMirrorStore& dropped_items;
+  ClientSkinRuntime& skins;
 };
 
 } // namespace arv::client::detail

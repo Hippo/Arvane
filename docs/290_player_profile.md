@@ -1196,3 +1196,83 @@ The profile id must always be represented as:
 ```
 
 Username/display name must never be used as the authoritative identity.
+
+---
+
+## Local Profile Storage
+
+Local installations store profiles at the `arvane_home` root, not inside the old
+`identity/` directory:
+
+```text
+arvane_home/
+  profiles.json
+  keys/
+    <profile_id>.pk
+  skins/
+    <skin_hash>.png
+  cache/
+    skins/
+      <skin_hash>.png
+```
+
+`profiles.json` is a JSON array. The first entry is the active local profile
+until a profile-selection UI exists. Each entry stores metadata, public key, the
+private key filename, and the profile-owned local skin list. Private key bytes
+must never be written into `profiles.json`; they are loaded from
+`keys/<private_key_file>`.
+
+Local skin files in `skins/` are user-owned. Server-downloaded skin files are
+cached only in `cache/skins/` and must not be copied into `skins/` unless the
+user explicitly imports them as a local skin.
+
+When `profiles.json` is missing, the client may migrate the legacy
+`identity/local_identity.json` plus `identity/local_private_key.bin` into the
+new layout. Migration writes the new files and leaves the old files in place.
+
+All profile ids, public keys, and skin hashes are lowercase `0x`-prefixed
+hexadecimal strings.
+
+---
+
+## Player Skins
+
+The default fallback skin is:
+
+```text
+arvane_home/assets/textures/default_skin/default.png
+arvane:texture/default_skin/default
+```
+
+The default skin is used when a profile has no applicable local skin, when
+server skins are disabled, while remote skins download, or when validation
+fails. It is not uploaded as a custom skin unless the user imports/selects it as
+a normal local skin.
+
+Skin hashes are content hashes of the original accepted PNG bytes:
+
+```text
+skin_hash = "0x" + lowercase_hex(hash(original_png_bytes))
+```
+
+The client may compute hashes for cache lookup and upload hints. The server is
+authoritative: it computes the final hash from uploaded bytes, stores by that
+hash only, and never trusts client filenames or client-supplied hashes.
+
+Dedicated servers persist a per-profile `selected_skin_hash`. Empty string means
+no custom skin. Uploaded skin files live under:
+
+```text
+server-save/player_assets/skins/<skin_hash>.png
+```
+
+Profile metadata replication sends only:
+
+```text
+player_id
+profile_id
+display_name
+SkinDescriptor
+```
+
+Image bytes are transferred on demand with skin request/upload packets.

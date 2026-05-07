@@ -69,6 +69,61 @@ struct DedicatedServerConfig {
   std::string world{"default"};
 };
 
+struct SkinResolutionConfig {
+  u16 size{64};
+  bool enabled{true};
+  std::string permission{};
+  u32 max_upload_bytes{};
+  u32 max_decoded_bytes{};
+};
+
+struct SkinUploadsConfig {
+  u32 max_chunk_bytes{32U * 1024U};
+  u32 chunk_threshold_bytes{1024U * 1024U};
+  u32 max_active_per_connection{1U};
+};
+
+[[nodiscard]] constexpr u32 default_skin_max_upload_bytes(u16 size) noexcept {
+  switch (size) {
+    case 64:
+      return 32U * 1024U;
+    case 128:
+      return 64U * 1024U;
+    case 256:
+      return 256U * 1024U;
+    case 512:
+      return 1024U * 1024U;
+    case 1024:
+      return 4U * 1024U * 1024U;
+    case 2048:
+      return 16U * 1024U * 1024U;
+    default:
+      return 0U;
+  }
+}
+
+[[nodiscard]] constexpr u32 default_skin_max_decoded_bytes(u16 size) noexcept {
+  return static_cast<u32>(size) * static_cast<u32>(size) * 4U;
+}
+
+[[nodiscard]] inline std::vector<SkinResolutionConfig> default_skin_resolutions() {
+  return {
+      {64, true, {}, default_skin_max_upload_bytes(64), default_skin_max_decoded_bytes(64)},
+      {128, false, {}, default_skin_max_upload_bytes(128), default_skin_max_decoded_bytes(128)},
+      {256, false, {}, default_skin_max_upload_bytes(256), default_skin_max_decoded_bytes(256)},
+      {512, false, {}, default_skin_max_upload_bytes(512), default_skin_max_decoded_bytes(512)},
+      {1024, false, {}, default_skin_max_upload_bytes(1024), default_skin_max_decoded_bytes(1024)},
+      {2048, false, {}, default_skin_max_upload_bytes(2048), default_skin_max_decoded_bytes(2048)},
+  };
+}
+
+struct SkinConfig {
+  bool enabled{true};
+  bool allow_uploads{true};
+  std::vector<SkinResolutionConfig> resolutions{default_skin_resolutions()};
+  SkinUploadsConfig uploads{};
+};
+
 struct ChunkDistanceConfig {
   i32 load_distance{3};
   i32 simulation_distance{1};
@@ -150,6 +205,7 @@ struct RenderConfig {
   bool frame_pacing_enabled{};
   u32 frame_pacing_target_fps{60};
   u32 frame_pacing_spin_us{500};
+  bool show_local_player_body{true};
   BlockOutlineConfig block_outline{};
 };
 
@@ -229,6 +285,7 @@ struct EngineConfig {
   SimulationConfig simulation{};
   NetworkConfig network{};
   DedicatedServerConfig server{};
+  SkinConfig skins{};
   ChunkDistanceConfig chunks{};
   JobSystemConfig jobs{};
   PhysicsConfig physics{};

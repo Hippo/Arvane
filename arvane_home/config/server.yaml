@@ -2,3 +2,25 @@ world: default
 network:
   bind_address: 0.0.0.0
   port: 42069
+skins:
+  enabled: true
+  allow_uploads: true
+  resolutions:
+    - size: 64
+      enabled: true
+      max_upload_bytes: 32768
+      max_decoded_bytes: 16384
+    - size: 128
+      enabled: false
+    - size: 256
+      enabled: false
+    - size: 512
+      enabled: false
+    - size: 1024
+      enabled: false
+    - size: 2048
+      enabled: false
+  uploads:
+    max_chunk_bytes: 32768
+    chunk_threshold_bytes: 1048576
+    max_active_per_connection: 1

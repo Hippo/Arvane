@@ -42,7 +42,12 @@ public:
   void set_player_tuning(player::PlayerTuning tuning) noexcept;
   void submit_input(InputFrame input) noexcept;
   [[nodiscard]] player::PlayerCommand consume_command(TickIndex tick_index) noexcept;
-  void enter_world(WorldID world_id, Vec3f body_position) noexcept;
+  void enter_world(
+      WorldID world_id,
+      PlayerID player_id,
+      EntityNetID local_entity_id,
+      Vec3f body_position) noexcept;
+  void leave_world() noexcept;
   void apply_authoritative_state(const protocol::PlayerCorrection& correction);
 
   [[nodiscard]] const CameraShell& camera() const noexcept {
@@ -69,12 +74,22 @@ public:
     return body_position_;
   }
 
+  [[nodiscard]] std::optional<PlayerID> player_id() const noexcept {
+    return player_id_;
+  }
+
+  [[nodiscard]] std::optional<EntityNetID> local_entity_id() const noexcept {
+    return local_entity_id_;
+  }
+
   [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept {
     return block_break_progress_;
   }
 
 private:
   CameraShell camera_{};
+  std::optional<PlayerID> player_id_{};
+  std::optional<EntityNetID> local_entity_id_{};
   player::PlayerTuning tuning_{player::default_player_tuning()};
   u8 selected_hotbar_slot_{};
   bool has_unconfirmed_hotbar_selection_{};

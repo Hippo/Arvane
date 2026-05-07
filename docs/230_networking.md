@@ -1059,6 +1059,19 @@ The exact transport flags should be hidden behind protocol send policies.
 
 Gameplay systems should choose semantic send policies, not raw GameNetworkingSockets flags.
 
+## Profile Metadata And Skin Bytes
+
+Player profile metadata is session-scoped replicated data. Servers send
+`PlayerProfileInfo` for authenticated, relevant players. The packet contains
+`player_id`, `profile_id`, display name, and a `SkinDescriptor`; the client uses
+`player_id` to associate metadata with `EntitySpawn.owning_player`.
+
+Custom skin image bytes are bulk data. They are never broadcast automatically
+with entity replication. Clients request missing advertised hashes on demand,
+and upload/download image data uses the reliable ordered bulk lane shared with
+chunk streaming. Clients render fallback/default skins until a requested skin is
+validated and cached.
+
 ## Shutdown Routing
 
 During shutdown, the networking layer should:

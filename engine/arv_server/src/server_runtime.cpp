@@ -187,6 +187,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   player_tuning_ = start_info.player_tuning;
   block_breaking_ = start_info.block_breaking;
   dropped_items_ = start_info.dropped_items;
+  skins_ = start_info.skins;
   fluid_definition_ = start_info.fluid_definition;
   chunk_streamer_.configure(start_info.chunk_streaming);
   const i32 max_view_distance = std::max<i32>(start_info.chunk_streaming.max_view_distance, 0);

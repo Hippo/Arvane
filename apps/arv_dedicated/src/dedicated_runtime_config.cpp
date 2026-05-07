@@ -117,6 +117,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.worker_threads = runtime_config.thread_budget.primary_workers;
   server_start_info.world_tick_policy = runtime_config.world_tick_policy;
   server_start_info.entity_registry = &registries.entity_registry;
+  server_start_info.skins = config.skins;
   server_start_info.block_breaking.base_seconds_per_hardness =
       config.gameplay.block_breaking.base_seconds_per_hardness;
   server_start_info.block_breaking.creative_inventory_multiplier =

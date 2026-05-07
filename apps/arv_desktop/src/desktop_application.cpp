@@ -21,6 +21,7 @@
 #include "arv/command/command.hpp"
 #include "arv/client/item_animation.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/local_identity.hpp"
 #include "arv/core/arena.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/perf_stats.hpp"
@@ -29,6 +30,7 @@
 #include "arv/io/input_bindings.hpp"
 #include "arv/platform/glfw_window.hpp"
 #include "arv/physics/collision.hpp"
+#include "arv/protocol/skins.hpp"
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/sched/scheduler.hpp"
 #include "arv/ui/ui.hpp"
@@ -37,6 +39,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
@@ -129,10 +134,59 @@ void append_command_result_to_chat(
   return config;
 }
 
+[[nodiscard]] std::optional<std::vector<u8>> read_binary_file(
+    const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    return std::nullopt;
+  }
+  return std::vector<u8>{
+      std::istreambuf_iterator<char>{input},
+      std::istreambuf_iterator<char>{}};
+}
+
+[[nodiscard]] std::filesystem::path player_skin_render_path(
+    const client::LocalPlayerIdentity& identity,
+    std::string_view skin_hash) {
+  for (const client::LocalProfileSkin& local_skin : identity.skins) {
+    if (local_skin.skin_hash == skin_hash) {
+      return client::local_skin_path(identity.arvane_home, local_skin);
+    }
+  }
+  return client::cached_skin_path(identity.arvane_home, skin_hash);
+}
+
+[[nodiscard]] std::optional<asset::Image> load_valid_player_skin_render_image(
+    const client::LocalPlayerIdentity& identity,
+    const protocol::SkinDescriptor& skin) {
+  if (identity.arvane_home.empty() || skin.skin_hash.empty() ||
+      !protocol::is_valid_skin_hash(skin.skin_hash)) {
+    return std::nullopt;
+  }
+  std::optional<std::vector<u8>> bytes =
+      read_binary_file(player_skin_render_path(identity, skin.skin_hash));
+  if (!bytes.has_value() ||
+      protocol::skin_hash_for_bytes(*bytes) != skin.skin_hash) {
+    return std::nullopt;
+  }
+
+  auto image = asset::decode_png_image_bytes(
+      *bytes,
+      {"arvane:texture/player_skin/" + skin.skin_hash});
+  if (!image || image.value().width != skin.width ||
+      image.value().height != skin.height ||
+      image.value().pixels.size() !=
+          static_cast<usize>(skin.width) * static_cast<usize>(skin.height) * 4U) {
+    return std::nullopt;
+  }
+  return std::move(image.value());
+}
+
 class DesktopFrameLoop {
 public:
   DesktopFrameLoop(
       const io::EngineConfig& config,
+      asset::ResourceManager& resources,
       platform::OpenGLWindow& window,
       render::OpenGLRenderer& renderer,
       DebugImGuiLayer& debug_imgui,
@@ -146,6 +200,7 @@ public:
       DesktopMenuState& menu_state,
       ui::UIScreenManager& screen_manager)
       : config_(config),
+        resources_(resources),
         window_(window),
         renderer_(renderer),
         debug_imgui_(debug_imgui),
@@ -215,6 +270,9 @@ public:
       }
 
       update_framebuffer_size();
+      if (has_active_session) {
+        refresh_player_skin_render_assets(*active_session);
+      }
 
       render::FramePacket frame;
       usize visible_chunk_count = build_world_frame(
@@ -892,6 +950,90 @@ private:
     active_session.block_outline_target = BlockOutlineTarget{hit->block, hit->variant};
   }
 
+  [[nodiscard]] bool install_entity_render_assets(EntityRenderAssets assets) {
+    if (!assets.models.empty() && assets.texture_atlas.pages.empty()) {
+      core::warn(
+          "entities",
+          "entity models were rebuilt without an entity texture atlas");
+      return false;
+    }
+
+    renderer_.clear_entity_models();
+    if (!assets.models.empty()) {
+      render::TextureUploadData entity_atlas_upload =
+          texture_upload_from_image(assets.texture_atlas.pages.front().image);
+      entity_atlas_upload.limit_mipmap_levels = true;
+      entity_atlas_upload.max_mipmap_level = assets.texture_atlas.mip_safe_max_level;
+      renderer_.set_entity_texture_atlas(std::move(entity_atlas_upload));
+      for (const render::EntityModelAsset& model : assets.models) {
+        renderer_.set_entity_model(model);
+      }
+    }
+    assets_.entity_render_assets = std::move(assets);
+    return true;
+  }
+
+  void refresh_player_skin_render_assets(DesktopGameSession& active_session) {
+    if (active_session.client == nullptr) {
+      return;
+    }
+
+    HashMap<std::string, asset::Image> new_images;
+    const client::LocalPlayerIdentity& identity =
+        active_session.client->local_identity();
+    for (const protocol::PlayerProfileInfo& profile :
+         active_session.client->player_profile_infos()) {
+      const std::string& skin_hash = profile.skin.skin_hash;
+      if (skin_hash.empty() ||
+          assets_.entity_render_assets.player_model_by_skin_hash.find(skin_hash) !=
+              assets_.entity_render_assets.player_model_by_skin_hash.end() ||
+          new_images.find(skin_hash) != new_images.end()) {
+        continue;
+      }
+      std::optional<asset::Image> image =
+          load_valid_player_skin_render_image(identity, profile.skin);
+      if (image.has_value()) {
+        new_images[skin_hash] = std::move(image.value());
+      }
+    }
+    if (new_images.empty()) {
+      return;
+    }
+
+    std::vector<PlayerSkinTextureInput> skin_inputs;
+    skin_inputs.reserve(
+        player_skin_images_.size() + new_images.size());
+    for (const auto& [skin_hash, image] : player_skin_images_) {
+      skin_inputs.push_back({skin_hash, image});
+    }
+    for (const auto& [skin_hash, image] : new_images) {
+      skin_inputs.push_back({skin_hash, image});
+    }
+
+    auto rebuilt = build_entity_render_assets(
+        resources_,
+        assets_.entity_registry,
+        assets_.item_registry,
+        assets_.block_registry,
+        std::span<const asset::BlockModelAssetData>{},
+        BlockOutlineRenderConfig{
+            {config_.render.block_outline.color_r,
+             config_.render.block_outline.color_g,
+             config_.render.block_outline.color_b},
+            config_.render.block_outline.thickness},
+        skin_inputs);
+    if (!rebuilt) {
+      core::warn("entities", rebuilt.error().message);
+      return;
+    }
+    if (!install_entity_render_assets(std::move(rebuilt.value()))) {
+      return;
+    }
+    for (auto& [skin_hash, image] : new_images) {
+      player_skin_images_[skin_hash] = std::move(image);
+    }
+  }
+
   [[nodiscard]] usize build_world_frame(
       render::FramePacket& frame,
       DesktopGameSession* active_session,
@@ -912,6 +1054,7 @@ private:
         frame,
         *active_session,
         assets_.entity_render_assets,
+        config_.render.show_local_player_body,
         now,
         app_start_time_,
         interpolation_alpha);
@@ -1162,6 +1305,7 @@ private:
   }
 
   const io::EngineConfig& config_;
+  asset::ResourceManager& resources_;
   platform::OpenGLWindow& window_;
   render::OpenGLRenderer& renderer_;
   DebugImGuiLayer& debug_imgui_;
@@ -1184,6 +1328,7 @@ private:
   Seconds fps_sample_seconds_{};
   double last_frame_work_ms_{};
   u64 profile_frame_index_{};
+  HashMap<std::string, asset::Image> player_skin_images_{};
 
   static constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
 };
@@ -1309,6 +1454,7 @@ int DesktopApplication::run(int argc, char** argv) {
 
   DesktopFrameLoop frame_loop{
       config,
+      resources,
       window,
       renderer,
       debug_imgui,

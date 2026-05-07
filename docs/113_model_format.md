@@ -42,7 +42,9 @@ The top level texture array may look like:
 ```
 
 This means the model expects an input texture array. `$X` resolves to index `X` from the
-block definition's `model.textures` array.
+owning model input texture list. Blocks use the block definition's
+`model.textures` array. Entity models may also use input textures; the built-in
+player model uses `$0` for the selected player skin texture.
 
 Example block definition:
 
@@ -173,6 +175,8 @@ A block model is composed of one or more axis-aligned boxes.
 ## Entity Model Format
 
 Example: [pig.json](../arvane_home/assets/models/entity/pig.json)
+The player model is [player.json](../arvane_home/assets/models/entity/player.json)
+and uses `["$0"]` as its skin input texture.
 
 ### Structure
 
@@ -207,6 +211,16 @@ Entities are composed of bones.
 * `pivot` is the rotation origin
 * Boxes are defined in model space (same as blocks)
 * No implicit hierarchy transformation is assumed in this format
+
+### Player Skin Layers
+
+For the built-in `player` entity model, each bone has two boxes. The first box
+is the base skin layer and the second box is the decor/overlay layer. The entity
+model builder marks these boxes with vertex flags so the shader can apply the
+player-specific alpha rules:
+
+* base layer transparent pixels become opaque black
+* decor layer transparent pixels are discarded
 
   * hierarchy is structural, not pre-transformed
 

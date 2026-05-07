@@ -6,6 +6,7 @@
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/inventory_sync.hpp"
+#include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
 
 #include <gtest/gtest.h>
@@ -65,6 +66,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto inventory_action =
       registry.lookup(arv::protocol::MessageType::InventoryActionRequest);
   const auto inventory_update = registry.lookup(arv::protocol::MessageType::InventoryUpdate);
+  const auto skin_rules = registry.lookup(arv::protocol::MessageType::SkinRules);
+  const auto skin_data = registry.lookup(arv::protocol::MessageType::SkinData);
+  const auto skin_upload_data = registry.lookup(arv::protocol::MessageType::SkinUploadData);
 
   ASSERT_TRUE(ping.has_value());
   ASSERT_TRUE(input.has_value());
@@ -82,6 +86,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(dropped_item_snapshot.has_value());
   ASSERT_TRUE(inventory_action.has_value());
   ASSERT_TRUE(inventory_update.has_value());
+  ASSERT_TRUE(skin_rules.has_value());
+  ASSERT_TRUE(skin_data.has_value());
+  ASSERT_TRUE(skin_upload_data.has_value());
   EXPECT_EQ(ping->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
   EXPECT_EQ(input->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(correction->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
@@ -111,7 +118,54 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(dropped_item_snapshot->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_action->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
-  EXPECT_EQ(registry.size(), 22U);
+  EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
+  EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
+  EXPECT_EQ(registry.size(), 40U);
+}
+
+TEST(ProtocolTests, SkinPacketsRoundTripThroughSerialization) {
+  const std::string hash =
+      "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d";
+  arv::protocol::ClientboundSkinRules rules{true, true, 128, hash};
+  auto decoded_rules = arv::protocol::deserialize_skin_rules(
+      arv::protocol::serialize_skin_rules(rules));
+  ASSERT_TRUE(decoded_rules);
+  EXPECT_EQ(decoded_rules.value().max_res, 128U);
+  EXPECT_EQ(decoded_rules.value().selected_skin_hash, hash);
+
+  arv::protocol::ClientboundPlayerProfileInfo info;
+  info.player_id = arv::PlayerID{7};
+  info.profile_id = hash;
+  info.display_name = "Hippo";
+  info.skin = {hash, arv::protocol::SkinImageFormat::Png, 64, 64};
+  auto decoded_info = arv::protocol::deserialize_player_profile_info(
+      arv::protocol::serialize_player_profile_info(info));
+  ASSERT_TRUE(decoded_info);
+  EXPECT_EQ(decoded_info.value().player_id, (arv::PlayerID{7}));
+  EXPECT_EQ(decoded_info.value().skin.width, 64U);
+
+  arv::protocol::ClientboundSkinData data;
+  data.request_id = 42;
+  data.skin_hash = hash;
+  data.format = arv::protocol::SkinImageFormat::Png;
+  data.width = 64;
+  data.height = 64;
+  data.compressed_image_bytes = {1, 2, 3, 4};
+  auto decoded_data = arv::protocol::deserialize_skin_data(
+      arv::protocol::serialize_skin_data(data));
+  ASSERT_TRUE(decoded_data);
+  EXPECT_EQ(decoded_data.value().request_id, 42U);
+  EXPECT_EQ(decoded_data.value().compressed_image_bytes, data.compressed_image_bytes);
+
+  arv::protocol::ClientboundSkinUploadAccept accept{
+      9,
+      arv::protocol::SkinUploadMode::Chunked,
+      32768};
+  auto decoded_accept = arv::protocol::deserialize_skin_upload_accept(
+      arv::protocol::serialize_skin_upload_accept(accept));
+  ASSERT_TRUE(decoded_accept);
+  EXPECT_EQ(decoded_accept.value().upload_mode, arv::protocol::SkinUploadMode::Chunked);
 }
 
 TEST(ProtocolTests, ClientInputBatchRoundTripsThroughSerialization) {

@@ -36,3 +36,4 @@ compile_commands.json
 *.ini
 .DS_Store
 .codex
+*.pk

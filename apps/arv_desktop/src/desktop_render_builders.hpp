@@ -18,6 +18,7 @@ void populate_world_frame_draw_items(
     render::FramePacket& frame,
     const DesktopGameSession& session,
     const EntityRenderAssets& entity_render_assets,
+    bool show_local_player_body,
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point app_start_time,
     f32 interpolation_alpha);

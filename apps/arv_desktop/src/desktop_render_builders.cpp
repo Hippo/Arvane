@@ -155,6 +155,7 @@ void populate_world_frame_draw_items(
     render::FramePacket& frame,
     const DesktopGameSession& session,
     const EntityRenderAssets& entity_render_assets,
+    bool show_local_player_body,
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point app_start_time,
     f32 interpolation_alpha) {
@@ -165,6 +166,8 @@ void populate_world_frame_draw_items(
           ? session.client_world
           : session.integrated_server->voxel_world();
   frame.sky = sky_uniforms_from_clock(sky_world.clock());
+  const std::optional<PlayerID> local_player_id = session.client->local_player_id();
+  const std::optional<EntityNetID> local_entity_id = session.client->local_entity_id();
 
   for (const client::ReplicatedEntityMirror& mirror :
        session.client->replicated_entity_mirrors()) {
@@ -175,10 +178,56 @@ void populate_world_frame_draw_items(
     if (model == entity_render_assets.model_by_type.end()) {
       continue;
     }
+    render::EntityModelID model_id = model->second;
+    const bool is_local_player =
+        (local_entity_id.has_value() && mirror.entity_id == local_entity_id.value()) ||
+        (local_player_id.has_value() && mirror.owning_player == local_player_id.value());
+    if (is_local_player && !show_local_player_body) {
+      continue;
+    }
+    const protocol::PlayerProfileInfo* profile =
+        mirror.owning_player.has_value()
+            ? session.client->profile_info_for_player(mirror.owning_player.value())
+            : nullptr;
+    bool using_first_person_skin = false;
+    if (profile != nullptr && !profile->skin.skin_hash.empty()) {
+      if (const auto skinned =
+              entity_render_assets.player_model_by_skin_hash.find(profile->skin.skin_hash);
+          skinned != entity_render_assets.player_model_by_skin_hash.end()) {
+        model_id = skinned->second;
+      }
+      if (is_local_player) {
+        if (const auto first_person_skinned =
+                entity_render_assets.first_person_player_model_by_skin_hash.find(
+                    profile->skin.skin_hash);
+            first_person_skinned !=
+            entity_render_assets.first_person_player_model_by_skin_hash.end()) {
+          model_id = first_person_skinned->second;
+          using_first_person_skin = true;
+        }
+      }
+    }
+    if (is_local_player && entity_render_assets.first_person_player_model.value != 0U) {
+      if (!using_first_person_skin) {
+        model_id = entity_render_assets.first_person_player_model;
+      }
+    }
+    Vec3f position =
+        is_local_player
+            ? session.client->player_position()
+            : interpolate(mirror.previous_position, mirror.position, interpolation_alpha);
+    if (is_local_player) {
+      const Vec3f camera_forward = session.client->camera().forward_vector();
+      const Vec3f horizontal_forward =
+          normalize_or_zero({camera_forward.x, 0.0F, camera_forward.z});
+      position = position - horizontal_forward * 0.38F;
+      position.y -= 0.18F;
+    }
     render::EntityDrawItem item;
-    item.model_id = model->second;
-    item.position = interpolate(mirror.previous_position, mirror.position, interpolation_alpha);
-    item.rotation = mirror.rotation;
+    item.model_id = model_id;
+    item.position = position;
+    item.rotation =
+        is_local_player ? yaw_rotation(session.client->camera().yaw_radians()) : mirror.rotation;
     item.scale = 1.0F;
     item.animation_name = mirror.animation_name;
     item.animation_time_seconds = mirror.animation_time_seconds;

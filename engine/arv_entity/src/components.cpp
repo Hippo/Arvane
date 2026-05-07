@@ -265,6 +265,7 @@ EntityDefinition make_player_entity_definition() {
   definition.name = std::string{PlayerEntityTypeName};
   definition.display_name = "Player";
   definition.category = "builtin";
+  definition.model_asset = "arvane:model/entity/player";
   definition.spawnable = false;
   definition.persistent_by_default = true;
   definition.replicated_by_default = true;

@@ -789,38 +789,45 @@ OpenGLRenderer::EntityGpuModel OpenGLRenderer::create_entity_gpu_model(
       GL_UNSIGNED_INT,
       sizeof(EntityModelMeshVertex),
       reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, bone_index)));
+  glEnableVertexAttribArray(4);
+  glVertexAttribIPointer(
+      4,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(EntityModelMeshVertex),
+      reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, flags)));
 
   glGenBuffers(1, &gpu.instance_buffer);
   glBindBuffer(GL_ARRAY_BUFFER, gpu.instance_buffer);
   glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
 
-  glEnableVertexAttribArray(4);
+  glEnableVertexAttribArray(5);
   glVertexAttribPointer(
-      4,
+      5,
       3,
       GL_FLOAT,
       GL_FALSE,
       sizeof(EntityInstanceData),
       reinterpret_cast<const void*>(offsetof(EntityInstanceData, position)));
-  glVertexAttribDivisor(4, 1);
-  glEnableVertexAttribArray(5);
+  glVertexAttribDivisor(5, 1);
+  glEnableVertexAttribArray(6);
   glVertexAttribPointer(
-      5,
+      6,
       4,
       GL_FLOAT,
       GL_FALSE,
       sizeof(EntityInstanceData),
       reinterpret_cast<const void*>(offsetof(EntityInstanceData, rotation)));
-  glVertexAttribDivisor(5, 1);
-  glEnableVertexAttribArray(6);
+  glVertexAttribDivisor(6, 1);
+  glEnableVertexAttribArray(7);
   glVertexAttribPointer(
-      6,
+      7,
       1,
       GL_FLOAT,
       GL_FALSE,
       sizeof(EntityInstanceData),
       reinterpret_cast<const void*>(offsetof(EntityInstanceData, scale)));
-  glVertexAttribDivisor(6, 1);
+  glVertexAttribDivisor(7, 1);
 
   glBindVertexArray(0);
   return gpu;

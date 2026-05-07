@@ -6,6 +6,7 @@
 #include "arv/core/time.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
+#include "arv/io/config.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
@@ -54,6 +55,7 @@ struct ServerPlayerSaveState {
   bool grounded{};
   player::MovementMode movement_mode{player::MovementMode::Walking};
   std::string game_mode_id{std::string{player::SurvivalGameModeID}};
+  std::string selected_skin_hash{};
   player::PlayerPermissions permission_overrides{};
   u8 selected_hotbar_slot{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
@@ -96,6 +98,7 @@ struct ServerStartInfo {
   std::span<const ServerPlayerSaveState> saved_players{};
   BlockBreakingConfig block_breaking{};
   DroppedItemsConfig dropped_items{};
+  io::SkinConfig skins{};
 };
 
 struct DroppedItemStack {

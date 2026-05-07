@@ -14,6 +14,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
@@ -48,6 +49,25 @@ struct InventoryReplicationState {
   std::vector<std::optional<player::ItemStack>> slots{};
   std::optional<player::ItemStack> carried_stack{};
   u8 selected_hotbar_slot{};
+};
+
+struct ActiveSkinUpload {
+  u32 upload_id{};
+  protocol::ServerboundSkinUploadBegin begin{};
+  protocol::SkinUploadMode mode{protocol::SkinUploadMode::Full};
+  u32 max_chunk_bytes{};
+  TickIndex expires_tick{};
+  std::vector<u8> bytes{};
+};
+
+struct SkinTransferSessionState {
+  u32 next_upload_id{1};
+  std::optional<ActiveSkinUpload> active_upload{};
+  HashSet<std::string> advertised_skin_hashes{};
+  HashSet<u32> in_flight_request_ids{};
+  TickIndex rate_window_start{};
+  u32 upload_begin_count{};
+  u32 request_count{};
 };
 
 struct PendingLightingJob {
@@ -133,6 +153,13 @@ public:
       std::string_view world_name,
       const ServerSession& session,
       const player::PlayerState& player_state);
+  [[nodiscard]] std::string selected_skin_hash_for(
+      std::string_view world_name,
+      const ServerSession& session) const;
+  void set_selected_skin_hash_for(
+      std::string_view world_name,
+      const ServerSession& session,
+      std::string skin_hash);
   [[nodiscard]] const std::vector<ServerPlayerSaveState>& states() const noexcept;
 
 private:
@@ -205,6 +232,21 @@ struct ServerRuntimeImpl {
   void handle_inventory_action_request(
       net::ConnectionID connection_id,
       const protocol::InventoryActionRequest& request);
+  void handle_skin_request(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundSkinRequest& request);
+  void handle_skin_upload_begin(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundSkinUploadBegin& begin);
+  void handle_skin_upload_data(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundSkinUploadData& data);
+  void handle_skin_upload_chunk(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundSkinUploadChunk& chunk);
+  void handle_skin_upload_end(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundSkinUploadEnd& end);
 
   void tick_players();
   void update_world_simulation_activity();
@@ -241,6 +283,11 @@ struct ServerRuntimeImpl {
   void send_auth_challenge(ServerSession& session);
   void complete_authenticated_session(ServerSession& session);
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
+  void send_skin_rules(const ServerSession& session, const player::PlayerState& player_state);
+  void send_player_profile_info_to(
+      const ServerSession& receiver,
+      const ServerSession& subject);
+  void broadcast_player_profile_info(const ServerSession& subject);
   void send_block_updates();
   void send_entity_replication();
   void send_dropped_item_replication();
@@ -251,6 +298,8 @@ struct ServerRuntimeImpl {
 
   bool apply_saved_player_state(const ServerSession& session, player::PlayerState& player_state);
   void record_player_save_state(const ServerSession& session, const player::PlayerState& player_state);
+  [[nodiscard]] std::string selected_skin_hash_for_session(const ServerSession& session) const;
+  void set_selected_skin_hash_for_session(const ServerSession& session, std::string skin_hash);
   void seed_player_inventory(player::PlayerState& player_state);
   [[nodiscard]] bool inventory_is_empty(const player::Inventory& inventory) const noexcept;
 
@@ -275,6 +324,7 @@ struct ServerRuntimeImpl {
   player::PlayerTuning player_tuning_{};
   BlockBreakingConfig block_breaking_{};
   DroppedItemsConfig dropped_items_{};
+  io::SkinConfig skins_{};
   voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
   ServerChunkStreamer chunk_streamer_{};
   std::optional<ServerChunkGenerationSettings> chunk_generation_{};
@@ -292,6 +342,7 @@ struct ServerRuntimeImpl {
   ServerPlayerSaveCache player_saves_;
   HashMap<SessionID, EntityReplicationState> entity_replication_;
   HashMap<PlayerID, InventoryReplicationState> inventory_replication_;
+  HashMap<SessionID, SkinTransferSessionState> skin_transfers_;
   ServerWorldJobRuntime world_jobs_;
   i32 simulation_radius_{1};
 };

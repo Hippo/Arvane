@@ -75,10 +75,11 @@ assets/
 Contains all image-based assets used for rendering.
 
 ```
-textures/
-  block/    # terrain/block textures used in atlas generation
-  entity/   # entity textures (players, mobs, etc.)
-  ui/       # UI textures (icons, panels, etc.)
+  textures/
+    block/    # terrain/block textures used in atlas generation
+    entity/   # entity textures (players, mobs, etc.)
+    default_skin/ # fallback player skin texture
+    ui/       # UI textures (icons, panels, etc.)
   font/     # bitmap font atlases (if generated or cached)
 ```
 
@@ -87,6 +88,15 @@ textures/
 * Block textures are typically packed into a **runtime atlas**
 * Texture resolution does not need to match logical UV size
 * Mip padding rules must be respected (see material/atlas section)
+* The default player skin asset is
+  `arvane:texture/default_skin/default`
+
+User-provided skins are untrusted binary assets. Local profile-owned skins live
+in `arvane_home/skins/`; server-downloaded skins live in
+`arvane_home/cache/skins/`. They are decoded and validated through the asset
+PNG loader, but they are not authored assets under `arvane_home/assets/`.
+Servers store accepted uploads under `server-save/player_assets/skins/` by
+server-computed content hash.
 
 ---
 

@@ -170,6 +170,7 @@ using json = nlohmann::json;
 void append_face(
     EntityModelAsset& asset,
     u32 bone_index,
+    u32 flags,
     const EntityModelBoxDefinition& box,
     EntityModelFace face,
     const EntityModelFaceDefinition& face_definition,
@@ -180,7 +181,7 @@ void append_face(
   const std::array<Vec2f, 4> uvs = face_uvs(face, face_definition, binding, texture_size);
   const Vec3f color = face_color(face);
   for (usize index = 0; index < corners.size(); ++index) {
-    asset.vertices.push_back({corners[index], uvs[index], color, bone_index});
+    asset.vertices.push_back({corners[index], uvs[index], color, bone_index, flags});
   }
   asset.indices.insert(
       asset.indices.end(),
@@ -224,6 +225,9 @@ void append_face(
 std::string normalize_entity_texture_asset(std::string_view texture) {
   if (texture.empty()) {
     return {};
+  }
+  if (texture.front() == '$') {
+    return std::string{texture};
   }
   if (texture.find(':') != std::string_view::npos) {
     return std::string{texture};
@@ -369,6 +373,10 @@ EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
   }
 }
 
+[[nodiscard]] bool is_player_entity_model_name(const std::string& name) noexcept {
+  return name == "player" || name.rfind("player#", 0) == 0;
+}
+
 EntityModelAssetResult build_entity_model_asset(
     EntityModelID id,
     const EntityModelDefinition& definition,
@@ -389,7 +397,14 @@ EntityModelAssetResult build_entity_model_asset(
 
   for (u32 bone_index = 0; bone_index < definition.bones.size(); ++bone_index) {
     const EntityModelBoneDefinition& bone = definition.bones[bone_index];
-    for (const EntityModelBoxDefinition& box : bone.boxes) {
+    for (usize box_index = 0; box_index < bone.boxes.size(); ++box_index) {
+      const EntityModelBoxDefinition& box = bone.boxes[box_index];
+      u32 flags = 0U;
+      if (is_player_entity_model_name(definition.name)) {
+        flags = (box_index % 2U) == 0U
+                    ? EntityModelMeshVertexFlagSkinBaseLayer
+                    : EntityModelMeshVertexFlagSkinDecorLayer;
+      }
       for (usize face_value = 0; face_value < box.faces.size(); ++face_value) {
         if (!box.faces[face_value].has_value()) {
           continue;
@@ -416,6 +431,7 @@ EntityModelAssetResult build_entity_model_asset(
         append_face(
             asset,
             bone_index,
+            flags,
             box,
             static_cast<EntityModelFace>(face_value),
             face,

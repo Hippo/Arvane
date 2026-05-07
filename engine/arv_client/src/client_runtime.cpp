@@ -25,7 +25,8 @@ struct ClientRuntime::Impl {
         chunks,
         inventory,
         entities,
-        dropped_items};
+        dropped_items,
+        skins};
   }
 
   void fixed_tick(TickIndex tick_index) {
@@ -63,6 +64,7 @@ struct ClientRuntime::Impl {
   ClientInventoryRuntime inventory{};
   ClientEntityMirrorStore entities{};
   ClientDroppedItemMirrorStore dropped_items{};
+  detail::ClientSkinRuntime skins{};
 };
 
 ClientRuntime::ClientRuntime(std::unique_ptr<net::ITransport> transport) : impl_(std::make_unique<Impl>(std::move(transport))) {
@@ -143,6 +145,14 @@ const std::string& ClientRuntime::game_mode_id() const noexcept {
 
 const player::ResolvedPermissions& ClientRuntime::resolved_permissions() const noexcept {
   return impl_->player_controller.resolved_permissions();
+}
+
+std::optional<PlayerID> ClientRuntime::local_player_id() const noexcept {
+  return impl_->player_controller.player_id();
+}
+
+std::optional<EntityNetID> ClientRuntime::local_entity_id() const noexcept {
+  return impl_->player_controller.local_entity_id();
 }
 
 const protocol::BlockBreakProgress& ClientRuntime::block_break_progress() const noexcept {
@@ -252,6 +262,15 @@ const DroppedItemMirror* ClientRuntime::find_dropped_item(
 
 std::vector<DroppedItemMirror> ClientRuntime::dropped_item_mirrors() const {
   return impl_->dropped_items.mirrors();
+}
+
+const protocol::PlayerProfileInfo* ClientRuntime::profile_info_for_player(
+    PlayerID player_id) const noexcept {
+  return impl_->skins.profile_for_player(player_id);
+}
+
+std::vector<protocol::PlayerProfileInfo> ClientRuntime::player_profile_infos() const {
+  return impl_->skins.profiles();
 }
 
 } // namespace arv::client

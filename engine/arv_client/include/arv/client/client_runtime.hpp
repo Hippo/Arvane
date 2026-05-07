@@ -8,6 +8,7 @@
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/skins.hpp"
 
 #include <memory>
 #include <optional>
@@ -73,6 +74,8 @@ public:
   [[nodiscard]] u8 selected_hotbar_slot() const noexcept;
   [[nodiscard]] const std::string& game_mode_id() const noexcept;
   [[nodiscard]] const player::ResolvedPermissions& resolved_permissions() const noexcept;
+  [[nodiscard]] std::optional<PlayerID> local_player_id() const noexcept;
+  [[nodiscard]] std::optional<EntityNetID> local_entity_id() const noexcept;
   [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept;
   [[nodiscard]] bool inventory_open() const noexcept;
   [[nodiscard]] bool chat_open() const noexcept;
@@ -101,6 +104,9 @@ public:
   [[nodiscard]] const DroppedItemMirror* find_dropped_item(
       EntityNetID drop_id) const noexcept;
   [[nodiscard]] std::vector<DroppedItemMirror> dropped_item_mirrors() const;
+  [[nodiscard]] const protocol::PlayerProfileInfo* profile_info_for_player(
+      PlayerID player_id) const noexcept;
+  [[nodiscard]] std::vector<protocol::PlayerProfileInfo> player_profile_infos() const;
 
 private:
   struct Impl;

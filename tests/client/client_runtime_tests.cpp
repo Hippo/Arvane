@@ -112,6 +112,10 @@ TEST(ClientRuntimeTests, WorldJoinKeepsLocalPlayerBodyAtServerSpawn) {
       client.camera().position().y,
       40.0F + arv::player::DefaultStandingEyeHeight);
   EXPECT_FLOAT_EQ(client.camera().position().z, -96.0F);
+  ASSERT_TRUE(client.local_player_id().has_value());
+  EXPECT_EQ(client.local_player_id().value(), (arv::PlayerID{1}));
+  ASSERT_TRUE(client.local_entity_id().has_value());
+  EXPECT_EQ(client.local_entity_id().value(), (arv::EntityNetID{1}));
 }
 
 TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
@@ -351,5 +355,7 @@ TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {
   EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::WorldJoin);
   EXPECT_EQ(client.replicated_entity_count(), 0U);
   EXPECT_FALSE(client.has_authoritative_inventory());
+  EXPECT_FALSE(client.local_player_id().has_value());
+  EXPECT_FALSE(client.local_entity_id().has_value());
   EXPECT_TRUE(client.drain_received_block_updates().empty());
 }

@@ -8,6 +8,7 @@
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_type.hpp"
+#include "arv/protocol/skins.hpp"
 
 #include <vector>
 
@@ -31,6 +32,16 @@ public:
 
   net::NetworkResult send_inventory_action(
       protocol::InventoryActionRequest request);
+
+  net::NetworkResult send_skin_request(const protocol::ServerboundSkinRequest& request);
+  net::NetworkResult send_skin_upload_begin(
+      const protocol::ServerboundSkinUploadBegin& begin);
+  net::NetworkResult send_skin_upload_data(
+      const protocol::ServerboundSkinUploadData& data);
+  net::NetworkResult send_skin_upload_chunk(
+      const protocol::ServerboundSkinUploadChunk& chunk);
+  net::NetworkResult send_skin_upload_end(
+      const protocol::ServerboundSkinUploadEnd& end);
 
 private:
   ClientConnectionRuntime& connection_;

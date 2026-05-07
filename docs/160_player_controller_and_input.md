@@ -949,6 +949,16 @@ Debug/free cameras should be clearly separated from player-owned gameplay camera
 
 A debug camera may bypass normal player movement, but it must not accidentally become the authoritative player transform.
 
+First-person rendering may draw a local player body using the selected player
+skin, but the head is omitted and the model is offset behind and below the
+camera so it is mainly visible while looking down. `client.yaml` controls this
+with:
+
+```yaml
+render:
+  show_local_player_body: true
+```
+
 ## Prediction and Reconciliation
 
 The camera should follow predicted or interpolated local player state to avoid visible latency.

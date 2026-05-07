@@ -8,6 +8,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
 
 #include "client_runtime_internal.hpp"
@@ -26,7 +27,11 @@ void apply_world_join_result(
     runtime.connection.set_state(net::ConnectionState::Disconnecting);
     return;
   }
-  runtime.player_controller.enter_world(result.world_id, result.spawn_position);
+  runtime.player_controller.enter_world(
+      result.world_id,
+      result.player_id,
+      result.local_entity_id,
+      result.spawn_position);
   runtime.chunk_interest.set_world_id(result.world_id);
   runtime.connection.set_state(net::ConnectionState::InGame);
 }
@@ -41,7 +46,7 @@ void apply_world_leave(
   runtime.dropped_items.clear();
   runtime.chunks.clear();
   runtime.inventory.reset();
-  runtime.player_controller.camera().set_world_id(WorldID{});
+  runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
   runtime.connection.set_state(net::ConnectionState::WorldJoin);
 }
@@ -140,6 +145,111 @@ void ClientNetworkRouter::handle_message(
       if (!result || !result.value().accepted) {
         runtime.connection.set_state(net::ConnectionState::Disconnecting);
       }
+      return;
+    }
+    case protocol::MessageType::SkinRules: {
+      auto rules = protocol::deserialize_skin_rules(decoded.value().payload);
+      if (!rules) {
+        return;
+      }
+      runtime.skins.handle_skin_rules(
+          runtime.identity,
+          runtime.sender,
+          std::move(rules.value()));
+      return;
+    }
+    case protocol::MessageType::PlayerProfileInfo: {
+      auto info = protocol::deserialize_player_profile_info(decoded.value().payload);
+      if (!info) {
+        return;
+      }
+      runtime.skins.handle_profile_info(
+          runtime.identity,
+          runtime.sender,
+          std::move(info.value()));
+      return;
+    }
+    case protocol::MessageType::PlayerProfileInfoBatch: {
+      auto batch = protocol::deserialize_player_profile_info_batch(decoded.value().payload);
+      if (!batch) {
+        return;
+      }
+      runtime.skins.handle_profile_info_batch(
+          runtime.identity,
+          runtime.sender,
+          std::move(batch.value()));
+      return;
+    }
+    case protocol::MessageType::SkinData: {
+      auto data = protocol::deserialize_skin_data(decoded.value().payload);
+      if (!data) {
+        return;
+      }
+      runtime.skins.handle_skin_data(runtime.identity, std::move(data.value()));
+      return;
+    }
+    case protocol::MessageType::SkinDataBeginChunked: {
+      auto begin = protocol::deserialize_skin_data_begin_chunked(decoded.value().payload);
+      if (!begin) {
+        return;
+      }
+      runtime.skins.handle_skin_data_begin_chunked(std::move(begin.value()));
+      return;
+    }
+    case protocol::MessageType::SkinDataChunk: {
+      auto chunk = protocol::deserialize_skin_data_chunk(decoded.value().payload);
+      if (!chunk) {
+        return;
+      }
+      runtime.skins.handle_skin_data_chunk(std::move(chunk.value()));
+      return;
+    }
+    case protocol::MessageType::SkinDataEndChunked: {
+      auto end = protocol::deserialize_skin_data_end_chunked(decoded.value().payload);
+      if (!end) {
+        return;
+      }
+      runtime.skins.handle_skin_data_end_chunked(runtime.identity, end.value());
+      return;
+    }
+    case protocol::MessageType::SkinRequestDeny: {
+      auto deny = protocol::deserialize_skin_request_deny(decoded.value().payload);
+      if (!deny) {
+        return;
+      }
+      runtime.skins.handle_skin_request_deny(std::move(deny.value()));
+      return;
+    }
+    case protocol::MessageType::SkinUploadAccept: {
+      auto accept = protocol::deserialize_skin_upload_accept(decoded.value().payload);
+      if (!accept) {
+        return;
+      }
+      runtime.skins.handle_skin_upload_accept(runtime.sender, accept.value());
+      return;
+    }
+    case protocol::MessageType::SkinUploadDeny: {
+      auto deny = protocol::deserialize_skin_upload_deny(decoded.value().payload);
+      if (!deny) {
+        return;
+      }
+      runtime.skins.handle_skin_upload_deny(deny.value());
+      return;
+    }
+    case protocol::MessageType::SkinUploadComplete: {
+      auto complete = protocol::deserialize_skin_upload_complete(decoded.value().payload);
+      if (!complete) {
+        return;
+      }
+      runtime.skins.handle_skin_upload_complete(std::move(complete.value()));
+      return;
+    }
+    case protocol::MessageType::SkinUploadFailed: {
+      auto failed = protocol::deserialize_skin_upload_failed(decoded.value().payload);
+      if (!failed) {
+        return;
+      }
+      runtime.skins.handle_skin_upload_failed(failed.value());
       return;
     }
     case protocol::MessageType::WorldJoinResult: {

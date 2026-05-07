@@ -2,6 +2,7 @@
 
 #include "arv/crypto/hash.hpp"
 #include "arv/crypto/hex.hpp"
+#include "arv/protocol/skins.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -157,6 +158,7 @@ Expected<void, PlayerProfileError> save_player_profile(
       {"spawn_world", profile.spawn_world},
       {"spawn_position", vec3_to_json(profile.spawn_position)},
       {"game_mode", profile.game_mode_id},
+      {"selected_skin_hash", profile.selected_skin_hash},
       {"permission_level", profile.permission_level},
       {"inventory", json::object()},
       {"stats", json::object()},
@@ -225,6 +227,11 @@ Expected<PlayerProfile, PlayerProfileError> load_player_profile(
       profile.spawn_position = json_to_vec3(*value);
     }
     profile.game_mode_id = node.value("game_mode", std::string{player::SurvivalGameModeID});
+    profile.selected_skin_hash = node.value("selected_skin_hash", std::string{});
+    if (!profile.selected_skin_hash.empty() &&
+        !protocol::is_valid_skin_hash(profile.selected_skin_hash)) {
+      profile.selected_skin_hash.clear();
+    }
     profile.permission_level = node.value("permission_level", 0);
 
     const crypto::PlayerProfileID derived_profile_id =

@@ -207,6 +207,13 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.world_tick_policy = dependencies_.world_tick_policy;
   server_start_info.entity_registry = &dependencies_.entity_registry;
   server_start_info.server_save_root = server_save_root;
+  server_start_info.skins = dependencies_.config.skins;
+  server_start_info.skins.enabled = true;
+  server_start_info.skins.allow_uploads = true;
+  for (io::SkinResolutionConfig& resolution : server_start_info.skins.resolutions) {
+    resolution.enabled = true;
+    resolution.permission.clear();
+  }
   const std::vector<server::ServerPlayerSaveState> saved_players =
       to_server_player_saves(loaded_save.players);
   server_start_info.saved_players = saved_players;
@@ -253,7 +260,7 @@ bool DesktopSessionManager::start_singleplayer(
 
   auto client = std::make_unique<client::ClientRuntime>(std::move(transport_pair.client));
   auto identity = client::load_or_create_local_identity(
-      dependencies_.config.paths.arvane_home_path() / "identity");
+      dependencies_.config.paths.arvane_home_path());
   if (!identity) {
     core::error("identity", identity.error().message);
     integrated_server->shutdown();
@@ -350,7 +357,7 @@ bool DesktopSessionManager::start_remote(const ui::JoinServerCommand& command) {
   auto client = std::make_unique<client::ClientRuntime>(
       std::make_unique<net::GameNetworkingSocketsTransport>());
   auto identity = client::load_or_create_local_identity(
-      dependencies_.config.paths.arvane_home_path() / "identity");
+      dependencies_.config.paths.arvane_home_path());
   if (!identity) {
     core::error("identity", identity.error().message);
     return false;

@@ -321,9 +321,10 @@ Water vertices should use:
 ```cpp
 struct EntityVertex {
     Vec3f position;
-    Vec3f normal;
     Vec2f uv;
-    Vec4f color;
+    Vec3f color;
+    u32 bone_index;
+    u32 flags;
 };
 ```
 
@@ -332,6 +333,14 @@ Supports:
 * lit/unlit rendering
 * textured meshes
 * tinting
+* entity bone animation
+* player skin base/decor alpha behavior
+
+`flags` is currently used by the player skin path:
+
+* `SkinBaseLayer`: transparent texels are rendered as opaque black
+* `SkinDecorLayer`: transparent texels are discarded
+* no flag: existing entity cutout behavior is used
 
 ---
 

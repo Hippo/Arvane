@@ -75,6 +75,11 @@ struct EntityModelTextureBinding {
   u32 source_height{};
 };
 
+enum EntityModelMeshVertexFlags : u32 {
+  EntityModelMeshVertexFlagSkinBaseLayer = 1U << 0U,
+  EntityModelMeshVertexFlagSkinDecorLayer = 1U << 1U,
+};
+
 struct EntityModelBone {
   std::string name{};
   Vec3f pivot{};
@@ -85,6 +90,7 @@ struct EntityModelMeshVertex {
   Vec2f uv{};
   Vec3f color{1.0F, 1.0F, 1.0F};
   u32 bone_index{};
+  u32 flags{};
 };
 
 struct EntityModelAnimationBoneKey {

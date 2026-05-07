@@ -47,6 +47,9 @@ arvane_home/
     save.json
     players/
       <player_uuid>.dat
+    player_assets/
+      skins/
+        <skin_hash>.png
     worlds/
       default/
         world.json
@@ -82,6 +85,8 @@ Notes:
 * Worlds do not nest inside each other
 * `saves/` contains singleplayer server save directories, not worlds directly
 * Players exist at the server level (not per-world)
+* Uploaded player skin assets are stored at the server-save level under
+  `player_assets/skins/` by server-computed content hash
 
 ---
 
@@ -124,6 +129,20 @@ Each world stores:
 * item stacks
 * item metadata
 
+### Player Skin State
+
+Player save/profile JSON may contain:
+
+```json
+{
+  "selected_skin_hash": "0x..."
+}
+```
+
+An empty string means no custom skin. The hash points to
+`player_assets/skins/<selected_skin_hash>.png`. The hash is lowercase
+`0x`-prefixed hex and is computed from the original accepted PNG bytes.
+
 ---
 
 ## What Is NOT Persisted
@@ -135,6 +154,7 @@ Each world stores:
 * chunk meshes
 * temporary simulation queues
 * derived caches
+* client-downloaded remote skin caches
 
 All derived data must be rebuilt on load.
 

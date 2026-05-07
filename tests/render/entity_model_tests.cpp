@@ -143,3 +143,66 @@ TEST(EntityModelTests, SamplesLoopingWalkingAnimation) {
       std::span<arv::Vec3f>{rotations});
   EXPECT_EQ(rotations[2], (arv::Vec3f{}));
 }
+
+TEST(EntityModelTests, PlayerModelPreservesInputTextureAndMarksSkinLayers) {
+  const std::filesystem::path player_path =
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "models" / "entity" / "player.json";
+  auto parsed = arv::render::parse_entity_model_json(read_text(player_path));
+  ASSERT_TRUE(parsed) << parsed.error().message;
+
+  ASSERT_EQ(parsed.value().texture_assets.size(), 1U);
+  EXPECT_EQ(parsed.value().texture_assets.front(), "$0");
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{
+      "arvane:texture/default_skin/default",
+      {0, 0},
+      {64, 64},
+      64,
+      64}};
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{11},
+      parsed.value(),
+      bindings);
+
+  ASSERT_TRUE(model) << model.error().message;
+  ASSERT_FALSE(model.value().vertices.empty());
+  EXPECT_EQ(
+      model.value().vertices.front().flags,
+      arv::render::EntityModelMeshVertexFlagSkinBaseLayer);
+  bool saw_decor = false;
+  for (const arv::render::EntityModelMeshVertex& vertex : model.value().vertices) {
+    saw_decor = saw_decor ||
+                vertex.flags == arv::render::EntityModelMeshVertexFlagSkinDecorLayer;
+  }
+  EXPECT_TRUE(saw_decor);
+}
+
+TEST(EntityModelTests, PlayerModelSkinVariantsKeepSkinLayerFlags) {
+  const std::filesystem::path player_path =
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "models" / "entity" / "player.json";
+  auto parsed = arv::render::parse_entity_model_json(read_text(player_path));
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  parsed.value().name = "player#first_person";
+
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{
+      "arvane:texture/default_skin/default",
+      {0, 0},
+      {64, 64},
+      64,
+      64}};
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{12},
+      parsed.value(),
+      bindings);
+
+  ASSERT_TRUE(model) << model.error().message;
+  ASSERT_FALSE(model.value().vertices.empty());
+  EXPECT_EQ(
+      model.value().vertices.front().flags,
+      arv::render::EntityModelMeshVertexFlagSkinBaseLayer);
+  bool saw_decor = false;
+  for (const arv::render::EntityModelMeshVertex& vertex : model.value().vertices) {
+    saw_decor = saw_decor ||
+                vertex.flags == arv::render::EntityModelMeshVertexFlagSkinDecorLayer;
+  }
+  EXPECT_TRUE(saw_decor);
+}

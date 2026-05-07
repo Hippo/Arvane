@@ -127,6 +127,8 @@ TEST(ServerPlayerProfileTests, ProfileSaveLoadRoundTripsWithoutPrivateKey) {
   profile.spawn_world = "arvane:overworld";
   profile.spawn_position = {0.5F, 70.0F, 0.5F};
   profile.game_mode_id = std::string{arv::player::CreativeGameModeID};
+  profile.selected_skin_hash =
+      "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d";
   profile.permission_level = 2;
 
   ASSERT_TRUE(arv::server::save_player_profile(temp_dir.path, profile));
@@ -142,5 +144,6 @@ TEST(ServerPlayerProfileTests, ProfileSaveLoadRoundTripsWithoutPrivateKey) {
   EXPECT_EQ(loaded.value().last_world, "arvane:overworld");
   EXPECT_EQ(loaded.value().last_position, profile.last_position);
   EXPECT_EQ(loaded.value().game_mode_id, arv::player::CreativeGameModeID);
+  EXPECT_EQ(loaded.value().selected_skin_hash, profile.selected_skin_hash);
   EXPECT_EQ(loaded.value().permission_level, 2);
 }

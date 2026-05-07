@@ -49,6 +49,60 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::PlayerCorrection, "PlayerCorrection",
                              MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
                              NetworkLane::Movement});
+  registry.register_message({MessageType::SkinRules, "ClientboundSkinRules",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::PlayerProfileInfo, "ClientboundPlayerProfileInfo",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::PlayerProfileInfoBatch, "ClientboundPlayerProfileInfoBatch",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::SkinRequest, "ServerboundSkinRequest",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::SkinRequestBatch, "ServerboundSkinRequestBatch",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::SkinData, "ClientboundSkinData",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::ChunkStreaming});
+  registry.register_message({MessageType::SkinDataBeginChunked, "ClientboundSkinDataBeginChunked",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::ChunkStreaming});
+  registry.register_message({MessageType::SkinDataChunk, "ClientboundSkinDataChunk",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::ChunkStreaming});
+  registry.register_message({MessageType::SkinDataEndChunked, "ClientboundSkinDataEndChunked",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::ChunkStreaming});
+  registry.register_message({MessageType::SkinRequestDeny, "ClientboundSkinRequestDeny",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::SkinUploadBegin, "ServerboundSkinUploadBegin",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::SkinUploadAccept, "ClientboundSkinUploadAccept",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::SkinUploadDeny, "ClientboundSkinUploadDeny",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::SkinUploadData, "ServerboundSkinUploadData",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::ChunkStreaming});
+  registry.register_message({MessageType::SkinUploadChunk, "ServerboundSkinUploadChunk",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::ChunkStreaming});
+  registry.register_message({MessageType::SkinUploadEnd, "ServerboundSkinUploadEnd",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::ChunkStreaming});
+  registry.register_message({MessageType::SkinUploadComplete, "ClientboundSkinUploadComplete",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::SkinUploadFailed, "ClientboundSkinUploadFailed",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
   registry.register_message({MessageType::WorldJoinResult, "WorldJoinResult",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});

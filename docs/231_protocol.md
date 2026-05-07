@@ -279,6 +279,10 @@ Message types are grouped by range.
 | `0x0B00 - 0x0BFF` | Debug/dev tools                         |
 | `0x8000 - 0xFFFF` | Reserved for negotiated plugin messages |
 
+Skin/profile messages currently occupy `0x0120 - 0x0131` inside the
+login/session range. Metadata/control packets use the session lane; image byte
+payloads and chunks use the chunk-streaming bulk lane.
+
 ---
 
 ## Core Messages
@@ -626,6 +630,108 @@ InventoryUpdate
 
 Inventory revisions must be monotonic.
 
+---
+
+## Player Profile And Skin Packets
+
+Skin/profile packets are explicit protocol messages. They never transfer base64
+data and never identify skins by filename.
+
+### Types
+
+```cpp
+enum class SkinImageFormat : u8 { Png = 0 };
+enum class SkinUploadMode : u8 { Full = 0, Chunked = 1 };
+
+struct SkinDescriptor {
+    string skin_hash; // empty means fallback/default
+    SkinImageFormat format;
+    u16 width;
+    u16 height;
+};
+
+struct PlayerProfileInfo {
+    PlayerID player_id;
+    string profile_id;
+    string display_name;
+    SkinDescriptor skin;
+};
+```
+
+### Message IDs
+
+| ID       | Packet                                  | Lane              |
+| -------: | --------------------------------------- | ----------------- |
+| `0x0120` | `ClientboundSkinRules`                  | Session           |
+| `0x0121` | `ClientboundPlayerProfileInfo`          | Session           |
+| `0x0122` | `ClientboundPlayerProfileInfoBatch`     | Session           |
+| `0x0123` | `ServerboundSkinRequest`                | Session           |
+| `0x0124` | `ServerboundSkinRequestBatch`           | Session           |
+| `0x0125` | `ClientboundSkinData`                   | ChunkStreaming    |
+| `0x0126` | `ClientboundSkinDataBeginChunked`       | ChunkStreaming    |
+| `0x0127` | `ClientboundSkinDataChunk`              | ChunkStreaming    |
+| `0x0128` | `ClientboundSkinDataEndChunked`         | ChunkStreaming    |
+| `0x0129` | `ClientboundSkinRequestDeny`            | Session           |
+| `0x012A` | `ServerboundSkinUploadBegin`            | Session           |
+| `0x012B` | `ClientboundSkinUploadAccept`           | Session           |
+| `0x012C` | `ClientboundSkinUploadDeny`             | Session           |
+| `0x012D` | `ServerboundSkinUploadData`             | ChunkStreaming    |
+| `0x012E` | `ServerboundSkinUploadChunk`            | ChunkStreaming    |
+| `0x012F` | `ServerboundSkinUploadEnd`              | ChunkStreaming    |
+| `0x0130` | `ClientboundSkinUploadComplete`         | Session           |
+| `0x0131` | `ClientboundSkinUploadFailed`           | Session           |
+
+### Login Flow
+
+After authentication succeeds, the server sends `ClientboundSkinRules` near
+`ClientboundAuthResult`. The packet contains whether skins are enabled, whether
+uploads are allowed, the maximum allowed resolution for the authenticated
+player, and the server-selected skin hash.
+
+Dedicated clients choose the first local profile skin whose width and height are
+`<= max_res`. If that skin differs from `selected_skin_hash` and uploads are
+allowed, the client sends `ServerboundSkinUploadBegin`. Integrated singleplayer
+uses the first local skin with no effective local restriction.
+
+### Upload Flow
+
+The server validates upload begin before accepting:
+
+* authenticated session
+* skins enabled and uploads allowed
+* PNG format
+* square supported resolution
+* resolution enabled and permission-allowed
+* upload byte limit
+* one active upload per connection
+* simple rate limits
+
+The server selects `Full` for small uploads and `Chunked` for large uploads.
+Chunked uploads send `ServerboundSkinUploadChunk*` followed by
+`ServerboundSkinUploadEnd`; full uploads send exactly one
+`ServerboundSkinUploadData`.
+
+Final validation decodes PNG bytes, checks dimensions and decoded RGBA8 size,
+computes the authoritative hash from the original compressed bytes, stores the
+file by that hash, updates `selected_skin_hash`, sends upload complete/failed,
+and broadcasts updated profile metadata.
+
+### Download Flow
+
+Profile info advertises `SkinDescriptor`; it does not include image bytes. A
+client missing a validated cached file sends `ServerboundSkinRequest`. Servers
+should only honor hashes previously advertised to that client. Small files may
+use `ClientboundSkinData`; large files use:
+
+```text
+ClientboundSkinDataBeginChunked
+ClientboundSkinDataChunk*
+ClientboundSkinDataEndChunked
+```
+
+Clients cache downloaded bytes only after request id, hash, PNG decode, and
+dimension validation succeed.
+
 The client must discard stale inventory revisions.
 
 ---
@@ -757,7 +863,7 @@ Current core lanes:
 |  `0` | reliable               | `ClientHello`, `ServerHello`, disconnect, world join/leave |
 |  `1` | reliable               | block updates, entity lifecycle, inventory, reliable gameplay actions |
 |  `2` | unreliable latest-wins | `ClientInputBatch`, `PlayerCorrection`, `EntitySnapshot` |
-|  `3` | reliable bulk          | `ChunkData`, `ChunkUnload`                    |
+|  `3` | reliable bulk          | `ChunkData`, `ChunkUnload`, skin image upload/download chunks |
 |  `4` | mixed/debug            | ping/pong, diagnostics, dev traffic           |
 
 Chunk streaming must not starve input, entity snapshots, or critical reliable messages.

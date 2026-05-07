@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -118,6 +119,9 @@ private:
 
 [[nodiscard]] ImageResult load_png_image(
     const std::filesystem::path& path,
+    const AssetID& asset_id);
+[[nodiscard]] ImageResult decode_png_image_bytes(
+    std::span<const u8> bytes,
     const AssetID& asset_id);
 
 } // namespace arv::asset

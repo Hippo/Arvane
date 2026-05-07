@@ -2,6 +2,7 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/random.hpp"
+#include "arv/server/skin_runtime.hpp"
 
 #include <string_view>
 #include <utility>
@@ -49,6 +50,65 @@ void ServerRuntimeImpl::send_auth_challenge(ServerSession& session) {
   log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
 }
 
+void ServerRuntimeImpl::send_skin_rules(
+    const ServerSession& session,
+    const player::PlayerState& player_state) {
+  protocol::ClientboundSkinRules rules;
+  rules.enabled = skins_.enabled;
+  rules.allow_uploads = skins_.enabled && skins_.allow_uploads;
+  rules.max_res = max_allowed_skin_resolution(skins_, player_state.resolved_permissions);
+  rules.selected_skin_hash = selected_skin_hash_for_session(session);
+  if (!rules.selected_skin_hash.empty() &&
+      !protocol::is_valid_skin_hash(rules.selected_skin_hash)) {
+    rules.selected_skin_hash.clear();
+  }
+  if (!rules.selected_skin_hash.empty()) {
+    skin_transfers_[session.session_id].advertised_skin_hashes.insert(rules.selected_skin_hash);
+  }
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::SkinRules,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_skin_rules(rules));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::send_player_profile_info_to(
+    const ServerSession& receiver,
+    const ServerSession& subject) {
+  protocol::ClientboundPlayerProfileInfo info;
+  info.player_id = subject.player_id;
+  info.profile_id = subject.profile_id.string();
+  info.display_name = subject.display_name;
+  const std::string skin_hash = selected_skin_hash_for_session(subject);
+  if (skins_.enabled && protocol::is_valid_skin_hash(skin_hash)) {
+    auto descriptor = load_stored_skin_descriptor(server_save_root_, skin_hash);
+    if (descriptor) {
+      info.skin = std::move(descriptor.value());
+      skin_transfers_[receiver.session_id].advertised_skin_hashes.insert(info.skin.skin_hash);
+    }
+  }
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      receiver.connection_id,
+      protocol::MessageType::PlayerProfileInfo,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_player_profile_info(info));
+  log_send_failure_if_dedicated(mode_, receiver.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::broadcast_player_profile_info(const ServerSession& subject) {
+  sessions_.for_each_session([&](const ServerSession& receiver) {
+    if (!receiver.authenticated || receiver.world_id != subject.world_id) {
+      return;
+    }
+    send_player_profile_info_to(receiver, subject);
+  });
+}
+
 void ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
   session.authenticated = true;
   session.pending_auth = false;
@@ -74,6 +134,7 @@ void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) 
     block_break_attempts_.erase(session->player_id);
     logged_chunk_interest_sessions_.erase(session->session_id);
     logged_chunk_delivery_sessions_.erase(session->session_id);
+    skin_transfers_.erase(session->session_id);
     if (const player::PlayerState* player_state =
             default_world_.find_player(session->player_id);
         player_state != nullptr) {

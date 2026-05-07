@@ -54,6 +54,7 @@ struct PlayerSaveData {
   bool grounded{};
   player::MovementMode movement_mode{player::MovementMode::Walking};
   std::string game_mode_id{std::string{player::SurvivalGameModeID}};
+  std::string selected_skin_hash{};
   player::PlayerPermissions permission_overrides{};
   u8 selected_hotbar_slot{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};

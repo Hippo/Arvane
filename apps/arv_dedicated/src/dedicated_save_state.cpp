@@ -32,6 +32,7 @@ namespace {
   save.grounded = player.grounded;
   save.movement_mode = player.movement_mode;
   save.game_mode_id = player.game_mode_id;
+  save.selected_skin_hash = player.selected_skin_hash;
   save.permission_overrides = player.permission_overrides;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
@@ -52,6 +53,7 @@ namespace {
   save.grounded = player.grounded;
   save.movement_mode = player.movement_mode;
   save.game_mode_id = player.game_mode_id;
+  save.selected_skin_hash = player.selected_skin_hash;
   save.permission_overrides = player.permission_overrides;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
@@ -144,6 +146,19 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     save.grounded = player_state->grounded;
     save.movement_mode = player_state->movement_mode;
     save.game_mode_id = player_state->game_mode_id;
+    const auto previous = std::find_if(
+        server.saved_player_states().begin(),
+        server.saved_player_states().end(),
+        [&](const server::ServerPlayerSaveState& existing) {
+          const bool profile_matches =
+              !save.profile_id.empty()
+                  ? existing.profile_id == save.profile_id
+                  : existing.profile_name == save.profile_name;
+          return profile_matches && existing.world_name == save.world_name;
+        });
+    if (previous != server.saved_player_states().end()) {
+      save.selected_skin_hash = previous->selected_skin_hash;
+    }
     save.permission_overrides = player_state->permission_overrides;
     save.selected_hotbar_slot = player_state->selected_hotbar_slot;
     save.inventory = player_state->inventory;

@@ -1,5 +1,6 @@
 #include "arv/io/config.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <optional>
@@ -145,6 +146,43 @@ void read_gameplay_config(const YAML::Node& gameplay, GameplayConfig& config) {
         dropped_items,
         "pickup_delay_seconds",
         config.dropped_items.pickup_delay_seconds);
+  }
+}
+
+[[nodiscard]] bool is_supported_skin_resolution(u16 size) noexcept {
+  return size == 64U || size == 128U || size == 256U || size == 512U ||
+         size == 1024U || size == 2048U;
+}
+
+void read_skins_config(const YAML::Node& skins, SkinConfig& config) {
+  read_scalar(skins, "enabled", config.enabled);
+  read_scalar(skins, "allow_uploads", config.allow_uploads);
+
+  const YAML::Node resolutions = skins["resolutions"];
+  if (resolutions) {
+    config.resolutions.clear();
+    if (resolutions.IsSequence()) {
+      config.resolutions.reserve(resolutions.size());
+      for (const YAML::Node& node : resolutions) {
+        SkinResolutionConfig resolution;
+        resolution.size = node["size"].as<u16>();
+        resolution.enabled = true;
+        read_scalar(node, "enabled", resolution.enabled);
+        read_scalar(node, "permission", resolution.permission);
+        resolution.max_upload_bytes = default_skin_max_upload_bytes(resolution.size);
+        resolution.max_decoded_bytes = default_skin_max_decoded_bytes(resolution.size);
+        read_scalar(node, "max_upload_bytes", resolution.max_upload_bytes);
+        read_scalar(node, "max_decoded_bytes", resolution.max_decoded_bytes);
+        config.resolutions.push_back(std::move(resolution));
+      }
+    }
+  }
+
+  const YAML::Node uploads = skins["uploads"];
+  if (uploads) {
+    read_scalar(uploads, "max_chunk_bytes", config.uploads.max_chunk_bytes);
+    read_scalar(uploads, "chunk_threshold_bytes", config.uploads.chunk_threshold_bytes);
+    read_scalar(uploads, "max_active_per_connection", config.uploads.max_active_per_connection);
   }
 }
 
@@ -458,6 +496,8 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
           << config.render.frame_pacing_target_fps;
   emitter << YAML::Key << "frame_pacing_spin_us" << YAML::Value
           << config.render.frame_pacing_spin_us;
+  emitter << YAML::Key << "show_local_player_body" << YAML::Value
+          << config.render.show_local_player_body;
   emitter << YAML::Key << "block_outline" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "color" << YAML::Value << YAML::Flow
           << YAML::BeginSeq
@@ -504,6 +544,46 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   }
 
   return ConfigResult::success(config);
+}
+
+void emit_skins_config(YAML::Emitter& emitter, const SkinConfig& skins) {
+  emitter << YAML::Key << "skins" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "enabled" << YAML::Value << skins.enabled;
+  emitter << YAML::Key << "allow_uploads" << YAML::Value << skins.allow_uploads;
+  emitter << YAML::Key << "resolutions" << YAML::Value << YAML::BeginSeq;
+  for (const SkinResolutionConfig& resolution : skins.resolutions) {
+    emitter << YAML::BeginMap;
+    emitter << YAML::Key << "size" << YAML::Value << resolution.size;
+    emitter << YAML::Key << "enabled" << YAML::Value << resolution.enabled;
+    if (!resolution.permission.empty()) {
+      emitter << YAML::Key << "permission" << YAML::Value << resolution.permission;
+    }
+    if (resolution.max_upload_bytes != default_skin_max_upload_bytes(resolution.size)) {
+      emitter << YAML::Key << "max_upload_bytes" << YAML::Value
+              << resolution.max_upload_bytes;
+    } else if (resolution.size == 64U) {
+      emitter << YAML::Key << "max_upload_bytes" << YAML::Value
+              << resolution.max_upload_bytes;
+    }
+    if (resolution.max_decoded_bytes != default_skin_max_decoded_bytes(resolution.size)) {
+      emitter << YAML::Key << "max_decoded_bytes" << YAML::Value
+              << resolution.max_decoded_bytes;
+    } else if (resolution.size == 64U) {
+      emitter << YAML::Key << "max_decoded_bytes" << YAML::Value
+              << resolution.max_decoded_bytes;
+    }
+    emitter << YAML::EndMap;
+  }
+  emitter << YAML::EndSeq;
+  emitter << YAML::Key << "uploads" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "max_chunk_bytes" << YAML::Value
+          << skins.uploads.max_chunk_bytes;
+  emitter << YAML::Key << "chunk_threshold_bytes" << YAML::Value
+          << skins.uploads.chunk_threshold_bytes;
+  emitter << YAML::Key << "max_active_per_connection" << YAML::Value
+          << skins.uploads.max_active_per_connection;
+  emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
 }
 
 ConfigResult write_emitted_config_file(
@@ -757,6 +837,7 @@ ConfigResult save_default_server_config_file(
   emitter << YAML::Key << "bind_address" << YAML::Value << config.network.bind_address;
   emitter << YAML::Key << "port" << YAML::Value << config.network.port;
   emitter << YAML::EndMap;
+  emit_skins_config(emitter, config.skins);
   emitter << YAML::EndMap;
 
   return write_emitted_config_file(path, emitter, config);
@@ -806,6 +887,11 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_scalar(network, "port", config.network.port);
   }
 
+  const YAML::Node skins = root["skins"];
+  if (skins) {
+    read_skins_config(skins, config.skins);
+  }
+
   const YAML::Node chunks = root["chunks"];
   if (chunks) {
     read_scalar(chunks, "load_distance", config.chunks.load_distance);
@@ -842,6 +928,7 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_scalar(render, "frame_pacing_enabled", config.render.frame_pacing_enabled);
     read_scalar(render, "frame_pacing_target_fps", config.render.frame_pacing_target_fps);
     read_scalar(render, "frame_pacing_spin_us", config.render.frame_pacing_spin_us);
+    read_scalar(render, "show_local_player_body", config.render.show_local_player_body);
     read_block_outline_config(render, config.render.block_outline);
   }
 
@@ -927,6 +1014,33 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
 
   if (config.window.width == 0 || config.window.height == 0) {
     return ConfigError{"window dimensions must be non-zero"};
+  }
+
+  if (config.skins.uploads.max_chunk_bytes == 0U ||
+      config.skins.uploads.chunk_threshold_bytes == 0U ||
+      config.skins.uploads.max_active_per_connection == 0U) {
+    return ConfigError{"skins.uploads limits must be non-zero"};
+  }
+  if (config.skins.resolutions.empty()) {
+    return ConfigError{"skins.resolutions must list at least one resolution"};
+  }
+  std::vector<u16> seen_skin_sizes;
+  seen_skin_sizes.reserve(config.skins.resolutions.size());
+  for (const SkinResolutionConfig& resolution : config.skins.resolutions) {
+    if (!is_supported_skin_resolution(resolution.size)) {
+      return ConfigError{"skins.resolutions.size must be one of 64, 128, 256, 512, 1024, or 2048"};
+    }
+    if (std::find(seen_skin_sizes.begin(), seen_skin_sizes.end(), resolution.size) !=
+        seen_skin_sizes.end()) {
+      return ConfigError{"skins.resolutions may not contain duplicate sizes"};
+    }
+    seen_skin_sizes.push_back(resolution.size);
+    if (resolution.max_upload_bytes == 0U) {
+      return ConfigError{"skins.resolutions.max_upload_bytes must be non-zero"};
+    }
+    if (resolution.max_decoded_bytes == 0U) {
+      return ConfigError{"skins.resolutions.max_decoded_bytes must be non-zero"};
+    }
   }
 
   if (config.chunks.load_distance < 0 || config.chunks.simulation_distance < 0 ||

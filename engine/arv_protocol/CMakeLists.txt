@@ -11,6 +11,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/message_writer.hpp
   include/arv/protocol/player_input.hpp
   include/arv/protocol/protocol_version.hpp
+  include/arv/protocol/skins.hpp
   include/arv/protocol/world_join.hpp
 )
 
@@ -24,6 +25,7 @@ add_library(arv_protocol STATIC
   src/message_envelope.cpp
   src/message_registry.cpp
   src/player_input.cpp
+  src/skins.cpp
   src/world_join.cpp
 )
 target_include_directories(arv_protocol PUBLIC include)

@@ -741,6 +741,7 @@ Expected<void, PersistenceError> save_server_root(
         {"grounded", player.grounded},
         {"movement_mode", player.movement_mode == player::MovementMode::Flying ? "flying" : "walking"},
         {"game_mode", player.game_mode_id},
+        {"selected_skin_hash", player.selected_skin_hash},
         {"selected_hotbar_slot", player.selected_hotbar_slot},
         {"inventory_version", 1},
         {"inventory", inventory_to_json(player.inventory, item_registry)},
@@ -993,6 +994,8 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
         if (player_json.contains("game_mode")) {
           player_save.game_mode_id = player_json.at("game_mode").get<std::string>();
         }
+        player_save.selected_skin_hash =
+            player_json.value("selected_skin_hash", std::string{});
         player_save.permission_overrides = player_permissions_from_json(player_json);
         player_save.selected_hotbar_slot = player_json.at("selected_hotbar_slot").get<u8>();
         player_save.inventory = inventory_from_json(

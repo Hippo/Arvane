@@ -127,6 +127,7 @@ render:
   frame_pacing_enabled: true
   frame_pacing_target_fps: 120
   frame_pacing_spin_us: 250
+  show_local_player_body: false
   block_outline:
     color: [0.1, 0.2, 0.3]
     thickness: 0.75
@@ -211,6 +212,7 @@ chunk_pipeline:
   EXPECT_TRUE(result.value().render.frame_pacing_enabled);
   EXPECT_EQ(result.value().render.frame_pacing_target_fps, 120U);
   EXPECT_EQ(result.value().render.frame_pacing_spin_us, 250U);
+  EXPECT_FALSE(result.value().render.show_local_player_body);
   EXPECT_FLOAT_EQ(result.value().render.block_outline.color_r, 0.1F);
   EXPECT_FLOAT_EQ(result.value().render.block_outline.color_g, 0.2F);
   EXPECT_FLOAT_EQ(result.value().render.block_outline.color_b, 0.3F);
@@ -223,6 +225,45 @@ chunk_pipeline:
   EXPECT_EQ(result.value().chunk_pipeline.max_mesh_jobs_per_frame, 5U);
   EXPECT_EQ(result.value().chunk_pipeline.frame_spike_log_ms, 25U);
   EXPECT_EQ(result.value().chunk_pipeline.profile_log_interval_ms, 750U);
+}
+
+TEST(ConfigTests, ParsesSkinConfigAndDefaultsResolutionLimits) {
+  const auto result = arv::io::parse_config_yaml(R"(
+skins:
+  enabled: true
+  allow_uploads: false
+  resolutions:
+    - size: 64
+      enabled: true
+    - size: 128
+      enabled: true
+      permission: example.perm.128skin
+  uploads:
+    max_chunk_bytes: 16384
+    chunk_threshold_bytes: 65536
+    max_active_per_connection: 1
+)");
+
+  ASSERT_TRUE(result);
+  EXPECT_TRUE(result.value().skins.enabled);
+  EXPECT_FALSE(result.value().skins.allow_uploads);
+  ASSERT_EQ(result.value().skins.resolutions.size(), 2U);
+  EXPECT_EQ(result.value().skins.resolutions[0].max_upload_bytes, 32768U);
+  EXPECT_EQ(result.value().skins.resolutions[0].max_decoded_bytes, 64U * 64U * 4U);
+  EXPECT_EQ(result.value().skins.resolutions[1].max_upload_bytes, 65536U);
+  EXPECT_EQ(result.value().skins.resolutions[1].permission, "example.perm.128skin");
+  EXPECT_EQ(result.value().skins.uploads.max_chunk_bytes, 16384U);
+  EXPECT_EQ(arv::io::default_skin_max_upload_bytes(2048), 16U * 1024U * 1024U);
+}
+
+TEST(ConfigTests, RejectsInvalidSkinResolution) {
+  const auto result = arv::io::parse_config_yaml(R"(
+skins:
+  resolutions:
+    - size: 96
+)");
+
+  EXPECT_FALSE(result);
 }
 
 TEST(ConfigTests, RejectsUnsupportedBaseTps) {

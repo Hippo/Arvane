@@ -38,6 +38,7 @@ struct PlayerProfile {
   std::string spawn_world{"default"};
   Vec3f spawn_position{8.0F, 20.0F, -20.0F};
   std::string game_mode_id{std::string{player::SurvivalGameModeID}};
+  std::string selected_skin_hash{};
   i32 permission_level{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
   bool dirty{};

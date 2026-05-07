@@ -110,13 +110,25 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   return command;
 }
 
-void LocalPlayerController::enter_world(WorldID world_id, Vec3f body_position) noexcept {
+void LocalPlayerController::enter_world(
+    WorldID world_id,
+    PlayerID player_id,
+    EntityNetID local_entity_id,
+    Vec3f body_position) noexcept {
+  player_id_ = player_id;
+  local_entity_id_ = local_entity_id;
   body_position_ = body_position;
   camera_.set_world_id(world_id);
   camera_.set_position(
       {body_position.x,
        body_position.y + current_eye_height_,
        body_position.z});
+}
+
+void LocalPlayerController::leave_world() noexcept {
+  player_id_.reset();
+  local_entity_id_.reset();
+  camera_.set_world_id(WorldID{});
 }
 
 void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorrection& correction) {

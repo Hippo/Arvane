@@ -10,6 +10,7 @@
 
 #include <array>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace arv::desktop {
@@ -25,12 +26,20 @@ struct EntityRenderAssets {
   asset::TextureAtlas texture_atlas{};
   std::vector<render::EntityModelAsset> models{};
   HashMap<EntityTypeID, render::EntityModelID> model_by_type{};
+  HashMap<std::string, render::EntityModelID> player_model_by_skin_hash{};
+  render::EntityModelID first_person_player_model{};
+  HashMap<std::string, render::EntityModelID> first_person_player_model_by_skin_hash{};
   HashMap<player::ItemID, render::EntityModelID> model_by_item{};
   std::vector<std::array<render::EntityModelID, BreakStageTextureCount>> break_overlay_model_by_variant{};
   std::vector<render::EntityModelID> outline_model_by_variant{};
 };
 
 using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>;
+
+struct PlayerSkinTextureInput {
+  std::string skin_hash{};
+  asset::Image image{};
+};
 
 [[nodiscard]] render::TextureUploadData texture_upload_from_image(const asset::Image& image);
 
@@ -55,6 +64,7 @@ using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
     std::span<const asset::BlockModelAssetData> block_models = {},
-    BlockOutlineRenderConfig outline_config = {});
+    BlockOutlineRenderConfig outline_config = {},
+    std::span<const PlayerSkinTextureInput> player_skin_textures = {});
 
 } // namespace arv::desktop

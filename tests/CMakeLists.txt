@@ -9,6 +9,7 @@ add_executable(arv_tests
   client/camera_tests.cpp
   client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp
+  client/local_profile_tests.cpp
   client/ui_tests.cpp
   command/command_tests.cpp
   crypto/crypto_tests.cpp
@@ -38,6 +39,7 @@ add_executable(arv_tests
   server/player_profile_tests.cpp
   server/player_interaction_tests.cpp
   server/registry_tests.cpp
+  server/skin_runtime_tests.cpp
   voxel/block_registry_tests.cpp
   voxel/chunk_storage_tests.cpp
   voxel/light_tests.cpp
