@@ -3,6 +3,7 @@
 #include "arv/server/server_runtime.hpp"
 
 #include "arv/command/command_dispatcher.hpp"
+#include "arv/core/rate_limiter.hpp"
 #include "arv/physics/collision.hpp"
 #include "arv/server/command_services.hpp"
 #include "arv/server/permission_config.hpp"
@@ -56,7 +57,9 @@ struct ActiveSkinUpload {
   protocol::ServerboundSkinUploadBegin begin{};
   protocol::SkinUploadMode mode{protocol::SkinUploadMode::Full};
   u32 max_chunk_bytes{};
-  TickIndex expires_tick{};
+  TickIndex started_tick{};
+  TickIndex last_packet_tick{};
+  SessionID session_id{};
   std::vector<u8> bytes{};
 };
 
@@ -65,9 +68,16 @@ struct SkinTransferSessionState {
   std::optional<ActiveSkinUpload> active_upload{};
   HashSet<std::string> advertised_skin_hashes{};
   HashSet<u32> in_flight_request_ids{};
-  TickIndex rate_window_start{};
-  u32 upload_begin_count{};
-  u32 request_count{};
+  HashSet<std::string> in_flight_skin_hashes{};
+  core::TokenBucket upload_begin_limiter{};
+  core::TokenBucket completed_upload_minute_limiter{};
+  core::TokenBucket completed_upload_hour_limiter{};
+  core::TokenBucket upload_byte_limiter{};
+  core::TokenBucket failed_decode_limiter{};
+  core::TokenBucket request_second_limiter{};
+  core::TokenBucket request_minute_limiter{};
+  core::TokenBucket download_byte_limiter{};
+  bool limiters_initialized{};
 };
 
 struct PendingLightingJob {
@@ -235,6 +245,9 @@ struct ServerRuntimeImpl {
   void handle_skin_request(
       net::ConnectionID connection_id,
       const protocol::ServerboundSkinRequest& request);
+  void handle_skin_request_batch(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundSkinRequestBatch& batch);
   void handle_skin_upload_begin(
       net::ConnectionID connection_id,
       const protocol::ServerboundSkinUploadBegin& begin);
@@ -272,6 +285,7 @@ struct ServerRuntimeImpl {
 
   void tick_dropped_item_pickups(Seconds tick_seconds);
   void spawn_dropped_item_stack(WorldID world_id, Vec3f position, player::ItemStack stack);
+  void expire_timed_out_skin_uploads();
 
   void tick_chunk_streaming();
 
@@ -343,6 +357,8 @@ struct ServerRuntimeImpl {
   HashMap<SessionID, EntityReplicationState> entity_replication_;
   HashMap<PlayerID, InventoryReplicationState> inventory_replication_;
   HashMap<SessionID, SkinTransferSessionState> skin_transfers_;
+  u32 active_skin_uploads_global_{};
+  u64 skin_storage_bytes_{};
   ServerWorldJobRuntime world_jobs_;
   i32 simulation_radius_{1};
 };

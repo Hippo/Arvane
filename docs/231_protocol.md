@@ -699,29 +699,45 @@ The server validates upload begin before accepting:
 
 * authenticated session
 * skins enabled and uploads allowed
+* upload-begin and failed-decode rate limits
+* no active pending upload for the connection
+* global active upload capacity
 * PNG format
 * square supported resolution
 * resolution enabled and permission-allowed
-* upload byte limit
-* one active upload per connection
-* simple rate limits
+* non-zero compressed byte count within the resolution upload limit
+* per-connection upload byte budget
 
 The server selects `Full` for small uploads and `Chunked` for large uploads.
 Chunked uploads send `ServerboundSkinUploadChunk*` followed by
 `ServerboundSkinUploadEnd`; full uploads send exactly one
 `ServerboundSkinUploadData`.
 
-Final validation decodes PNG bytes, checks dimensions and decoded RGBA8 size,
-computes the authoritative hash from the original compressed bytes, stores the
-file by that hash, updates `selected_skin_hash`, sends upload complete/failed,
-and broadcasts updated profile metadata.
+Accepted uploads carry a server-issued `upload_id`. Data/chunk/end packets are
+valid only for the owning authenticated session, the matching upload id, and the
+accepted upload mode. Pending uploads track start time, last packet time,
+expected byte count, received byte count, and mode. The server clears the
+pending buffer on timeout, idle timeout, disconnect, mode mismatch, chunk
+overflow, byte-count mismatch, or other invalid upload data.
+
+Final validation requires exact compressed byte count, PNG decode success,
+claimed dimensions matching decoded dimensions, enabled resolution match,
+decoded RGBA8 size within the resolution limit, and an authoritative hash
+computed from the original compressed bytes. The server stores files only as
+`player_assets/skins/<skin_hash>.png`, writes through a temporary file, atomically
+renames into place, updates `selected_skin_hash` only after validation succeeds,
+sends upload complete/failed, and broadcasts updated profile metadata. Repeated
+failed decodes rate-limit future upload begins.
 
 ### Download Flow
 
 Profile info advertises `SkinDescriptor`; it does not include image bytes. A
 client missing a validated cached file sends `ServerboundSkinRequest`. Servers
-should only honor hashes previously advertised to that client. Small files may
-use `ClientboundSkinData`; large files use:
+only honor hashes previously advertised to that client by profile metadata when
+`require_advertised_hash` is enabled. Requests are per-session rate-limited,
+batch size is capped, duplicate in-flight skin requests are rejected or ignored,
+and each connection has an in-flight request limit plus a skin-download byte
+budget. Small files may use `ClientboundSkinData`; large files use:
 
 ```text
 ClientboundSkinDataBeginChunked
@@ -729,8 +745,10 @@ ClientboundSkinDataChunk*
 ClientboundSkinDataEndChunked
 ```
 
-Clients cache downloaded bytes only after request id, hash, PNG decode, and
-dimension validation succeed.
+Clients treat server skin bytes as untrusted. They cache downloaded bytes only
+after request id, requested hash, computed hash, PNG decode, dimensions, and
+byte counts validate. Cache files are written by hash only, through a temporary
+file, and invalid transfers are discarded in favor of the fallback/default skin.
 
 The client must discard stale inventory revisions.
 

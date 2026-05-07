@@ -1072,6 +1072,15 @@ and upload/download image data uses the reliable ordered bulk lane shared with
 chunk streaming. Clients render fallback/default skins until a requested skin is
 validated and cached.
 
+Skin transfers must not become an unbounded side channel on the session lane or
+bulk lane. Servers keep per-connection skin request rate limits, download byte
+budgets, in-flight request sets, and advertised-hash allow lists. Uploads keep a
+single pending buffer per connection by default, enforce a global active upload
+cap, time out stale or idle upload ids, and reject chunks that exceed configured
+chunk size or expected total bytes. The normal gameplay lanes remain available
+because skin image data stays on the bulk lane and request/upload negotiation is
+small, bounded, and rate-limited.
+
 ## Shutdown Routing
 
 During shutdown, the networking layer should:

@@ -60,7 +60,7 @@ namespace {
     const LocalPlayerIdentity& identity,
     std::string_view skin_hash,
     std::span<const u8> bytes) {
-  if (identity.arvane_home.empty()) {
+  if (identity.arvane_home.empty() || !protocol::is_valid_skin_hash(skin_hash)) {
     return false;
   }
   const std::filesystem::path path = cached_skin_path(identity.arvane_home, skin_hash);
@@ -69,20 +69,44 @@ namespace {
   if (error) {
     return false;
   }
-  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  const std::filesystem::path temp_path = path.string() + ".tmp";
+  std::filesystem::remove(temp_path, error);
+  error.clear();
+  std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
   if (!output) {
     return false;
   }
   output.write(
       reinterpret_cast<const char*>(bytes.data()),
       static_cast<std::streamsize>(bytes.size()));
-  return static_cast<bool>(output);
+  if (!output) {
+    return false;
+  }
+  output.close();
+  if (!output) {
+    return false;
+  }
+  std::filesystem::rename(temp_path, path, error);
+  if (error) {
+    std::filesystem::remove(temp_path, error);
+    return false;
+  }
+  return true;
 }
 
 } // namespace
 
 u32 ClientSkinRuntime::next_request_id() noexcept {
   return next_request_id_++;
+}
+
+void ClientSkinRuntime::clear_request(u32 request_id) {
+  if (const auto request = requested_hash_by_id_.find(request_id);
+      request != requested_hash_by_id_.end()) {
+    requested_hashes_.erase(request->second);
+    requested_hash_by_id_.erase(request);
+  }
+  downloads_.erase(request_id);
 }
 
 void ClientSkinRuntime::handle_skin_rules(
@@ -170,7 +194,13 @@ void ClientSkinRuntime::handle_skin_data(
     const LocalPlayerIdentity& identity,
     protocol::ClientboundSkinData data) {
   const auto request = requested_hash_by_id_.find(data.request_id);
-  if (request == requested_hash_by_id_.end() || request->second != data.skin_hash) {
+  if (request == requested_hash_by_id_.end()) {
+    return;
+  }
+  if (request->second != data.skin_hash ||
+      data.format != protocol::SkinImageFormat::Png ||
+      data.compressed_image_bytes.empty()) {
+    clear_request(data.request_id);
     return;
   }
   if (protocol::skin_hash_for_bytes(data.compressed_image_bytes) == data.skin_hash &&
@@ -181,15 +211,22 @@ void ClientSkinRuntime::handle_skin_data(
           data.skin_hash)) {
     (void)write_cached_skin(identity, data.skin_hash, data.compressed_image_bytes);
   }
-  requested_hashes_.erase(request->second);
-  requested_hash_by_id_.erase(request);
+  clear_request(data.request_id);
 }
 
 void ClientSkinRuntime::handle_skin_data_begin_chunked(
     protocol::ClientboundSkinDataBeginChunked begin) {
   const auto request = requested_hash_by_id_.find(begin.request_id);
-  if (request == requested_hash_by_id_.end() || request->second != begin.skin_hash ||
+  if (request == requested_hash_by_id_.end()) {
+    return;
+  }
+  if (request->second != begin.skin_hash ||
+      begin.format != protocol::SkinImageFormat::Png ||
+      begin.width == 0U ||
+      begin.height == 0U ||
+      begin.total_bytes == 0U ||
       begin.total_bytes > protocol::MaxSkinImagePayloadBytes) {
+    clear_request(begin.request_id);
     return;
   }
   PendingDownload download;
@@ -209,7 +246,7 @@ void ClientSkinRuntime::handle_skin_data_chunk(protocol::ClientboundSkinDataChun
   }
   if (chunk.chunk.empty() ||
       download->second.bytes.size() + chunk.chunk.size() > download->second.total_bytes) {
-    downloads_.erase(download);
+    clear_request(chunk.request_id);
     return;
   }
   download->second.bytes.insert(
@@ -223,10 +260,16 @@ void ClientSkinRuntime::handle_skin_data_end_chunked(
     protocol::ClientboundSkinDataEndChunked end) {
   auto download = downloads_.find(end.request_id);
   auto request = requested_hash_by_id_.find(end.request_id);
-  if (download == downloads_.end() || request == requested_hash_by_id_.end()) {
+  if (request == requested_hash_by_id_.end()) {
+    downloads_.erase(end.request_id);
     return;
   }
-  if (download->second.bytes.size() == download->second.total_bytes &&
+  if (download == downloads_.end()) {
+    clear_request(end.request_id);
+    return;
+  }
+  if (request->second == download->second.skin_hash &&
+      download->second.bytes.size() == download->second.total_bytes &&
       protocol::skin_hash_for_bytes(download->second.bytes) == download->second.skin_hash &&
       decoded_png_matches(
           download->second.bytes,
@@ -235,18 +278,11 @@ void ClientSkinRuntime::handle_skin_data_end_chunked(
           download->second.skin_hash)) {
     (void)write_cached_skin(identity, download->second.skin_hash, download->second.bytes);
   }
-  requested_hashes_.erase(request->second);
-  requested_hash_by_id_.erase(request);
-  downloads_.erase(download);
+  clear_request(end.request_id);
 }
 
 void ClientSkinRuntime::handle_skin_request_deny(protocol::ClientboundSkinRequestDeny deny) {
-  const auto request = requested_hash_by_id_.find(deny.request_id);
-  if (request != requested_hash_by_id_.end()) {
-    requested_hashes_.erase(request->second);
-    requested_hash_by_id_.erase(request);
-  }
-  downloads_.erase(deny.request_id);
+  clear_request(deny.request_id);
 }
 
 void ClientSkinRuntime::handle_skin_upload_accept(

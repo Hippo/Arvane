@@ -40,14 +40,21 @@ validate_skin_upload_begin(
     bool authenticated,
     bool has_active_upload,
     bool rate_limited,
+    bool active_upload_limit_reached,
     const protocol::ServerboundSkinUploadBegin& begin) noexcept;
+
+[[nodiscard]] u64 current_skin_storage_bytes(
+    const std::filesystem::path& server_save_root);
 
 [[nodiscard]] Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>
 validate_and_store_uploaded_skin(
     const std::filesystem::path& server_save_root,
     const io::SkinResolutionConfig& resolution,
     const protocol::ServerboundSkinUploadBegin& begin,
-    std::span<const u8> compressed_image_bytes);
+    std::span<const u8> compressed_image_bytes,
+    u64 current_storage_bytes,
+    u64 max_total_storage_bytes,
+    u64* added_storage_bytes = nullptr);
 
 [[nodiscard]] Expected<protocol::SkinDescriptor, protocol::SkinRequestDenyReason>
 load_stored_skin_descriptor(

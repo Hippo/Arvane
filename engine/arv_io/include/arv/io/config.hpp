@@ -81,6 +81,28 @@ struct SkinUploadsConfig {
   u32 max_chunk_bytes{32U * 1024U};
   u32 chunk_threshold_bytes{1024U * 1024U};
   u32 max_active_per_connection{1U};
+  u32 max_active_global{32U};
+  u32 timeout_seconds{15U};
+  u32 idle_timeout_seconds{5U};
+  u32 max_begin_attempts_per_minute{6U};
+  u32 max_completed_uploads_per_minute{2U};
+  u32 max_completed_uploads_per_hour{10U};
+  u64 max_upload_bytes_per_hour{5ULL * 1024ULL * 1024ULL};
+  u32 max_failed_decodes_per_minute{3U};
+};
+
+struct SkinDownloadsConfig {
+  u32 max_requests_per_second{8U};
+  u32 max_requests_per_minute{120U};
+  u64 max_bytes_per_minute{8ULL * 1024ULL * 1024ULL};
+  u32 max_in_flight_per_connection{4U};
+  bool require_advertised_hash{true};
+  u32 max_batch_size{16U};
+};
+
+struct SkinStorageConfig {
+  u64 max_total_skin_bytes{1024ULL * 1024ULL * 1024ULL};
+  u32 max_skins_per_profile{16U};
 };
 
 [[nodiscard]] constexpr u32 default_skin_max_upload_bytes(u16 size) noexcept {
@@ -122,6 +144,8 @@ struct SkinConfig {
   bool allow_uploads{true};
   std::vector<SkinResolutionConfig> resolutions{default_skin_resolutions()};
   SkinUploadsConfig uploads{};
+  SkinDownloadsConfig downloads{};
+  SkinStorageConfig storage{};
 };
 
 struct ChunkDistanceConfig {

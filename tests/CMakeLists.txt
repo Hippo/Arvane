@@ -17,6 +17,7 @@ add_executable(arv_tests
   core/fixed_timestep_tests.cpp
   core/id_tests.cpp
   core/math_tests.cpp
+  core/rate_limiter_tests.cpp
   core/types_tests.cpp
   io/config_tests.cpp
   net/in_process_transport_tests.cpp

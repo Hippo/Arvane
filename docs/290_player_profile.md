@@ -1276,3 +1276,31 @@ SkinDescriptor
 ```
 
 Image bytes are transferred on demand with skin request/upload packets.
+
+Skin transfer hardening is part of the profile system contract:
+
+* uploads require an authenticated session, configured skin support, an enabled
+  resolution, matching width/height, byte limits, active upload capacity, and
+  per-session rate/byte budgets
+* upload ids are server-issued, session-owned, mode-specific, and expire after
+  the configured total or idle timeout
+* full uploads must provide exactly the negotiated byte count; chunked uploads
+  must use non-empty chunks no larger than the configured chunk size and may not
+  overflow the negotiated total
+* final upload validation decodes the PNG, checks decoded dimensions and RGBA8
+  byte count, computes the authoritative hash from compressed bytes, and updates
+  `selected_skin_hash` only after storage succeeds
+* downloaded skins are request-scoped and may be requested only after the server
+  advertises the hash to that client
+* clients validate request id, hash, byte count, PNG decode, and dimensions
+  before writing `cache/skins/<skin_hash>.png`
+
+Server and client skin writes use hash-derived filenames only and write through
+temporary files before renaming into place. Server storage has a configurable
+total byte quota. Per-profile skin history is currently limited to the selected
+hash; if profile-owned skin history is added later, it must enforce
+`skins.storage.max_skins_per_profile`.
+
+Future cleanup should add garbage collection for unreferenced skin blobs, such
+as skins not selected by any profile, skins not recently used, or skins older
+than a server-defined threshold.

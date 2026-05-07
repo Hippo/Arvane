@@ -86,7 +86,9 @@ Notes:
 * `saves/` contains singleplayer server save directories, not worlds directly
 * Players exist at the server level (not per-world)
 * Uploaded player skin assets are stored at the server-save level under
-  `player_assets/skins/` by server-computed content hash
+  `player_assets/skins/` by server-computed content hash; writes use temporary
+  files and atomic rename, and servers enforce the configured total skin storage
+  quota before adding new blobs
 
 ---
 
@@ -142,6 +144,10 @@ Player save/profile JSON may contain:
 An empty string means no custom skin. The hash points to
 `player_assets/skins/<selected_skin_hash>.png`. The hash is lowercase
 `0x`-prefixed hex and is computed from the original accepted PNG bytes.
+The filename is always derived from this hash; profile ids, display names,
+client filenames, and packet-provided paths are never used as skin asset paths.
+Future save maintenance should garbage-collect unreferenced skin files according
+to server policy.
 
 ---
 

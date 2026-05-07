@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <system_error>
 #include <vector>
 
@@ -64,6 +65,7 @@ Expected<SkinUploadBeginAccepted, protocol::SkinUploadDenyReason> validate_skin_
     bool authenticated,
     bool has_active_upload,
     bool rate_limited,
+    bool active_upload_limit_reached,
     const protocol::ServerboundSkinUploadBegin& begin) noexcept {
   if (!authenticated) {
     return Expected<SkinUploadBeginAccepted, protocol::SkinUploadDenyReason>::failure(
@@ -77,11 +79,15 @@ Expected<SkinUploadBeginAccepted, protocol::SkinUploadDenyReason> validate_skin_
     return Expected<SkinUploadBeginAccepted, protocol::SkinUploadDenyReason>::failure(
         protocol::SkinUploadDenyReason::UploadsDisabled);
   }
+  if (rate_limited) {
+    return Expected<SkinUploadBeginAccepted, protocol::SkinUploadDenyReason>::failure(
+        protocol::SkinUploadDenyReason::RateLimited);
+  }
   if (has_active_upload) {
     return Expected<SkinUploadBeginAccepted, protocol::SkinUploadDenyReason>::failure(
         protocol::SkinUploadDenyReason::UploadAlreadyPending);
   }
-  if (rate_limited) {
+  if (active_upload_limit_reached) {
     return Expected<SkinUploadBeginAccepted, protocol::SkinUploadDenyReason>::failure(
         protocol::SkinUploadDenyReason::RateLimited);
   }
@@ -118,12 +124,48 @@ Expected<SkinUploadBeginAccepted, protocol::SkinUploadDenyReason> validate_skin_
        choose_skin_upload_mode(config, begin.width, begin.height, begin.total_upload_bytes)});
 }
 
+u64 current_skin_storage_bytes(const std::filesystem::path& server_save_root) {
+  const std::filesystem::path root = server_save_root / "player_assets" / "skins";
+  std::error_code error;
+  if (!std::filesystem::exists(root, error)) {
+    return 0U;
+  }
+
+  u64 total = 0U;
+  for (std::filesystem::recursive_directory_iterator iter{
+           root,
+           std::filesystem::directory_options::skip_permission_denied,
+           error};
+       !error && iter != std::filesystem::recursive_directory_iterator{};
+       iter.increment(error)) {
+    if (!iter->is_regular_file(error)) {
+      continue;
+    }
+    const std::filesystem::path path = iter->path();
+    if (path.extension() != ".png") {
+      continue;
+    }
+    error.clear();
+    const u64 size = static_cast<u64>(iter->file_size(error));
+    if (!error) {
+      total += size;
+    }
+  }
+  return total;
+}
+
 Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>
 validate_and_store_uploaded_skin(
     const std::filesystem::path& server_save_root,
     const io::SkinResolutionConfig& resolution,
     const protocol::ServerboundSkinUploadBegin& begin,
-    std::span<const u8> compressed_image_bytes) {
+    std::span<const u8> compressed_image_bytes,
+    u64 current_storage_bytes,
+    u64 max_total_storage_bytes,
+    u64* added_storage_bytes) {
+  if (added_storage_bytes != nullptr) {
+    *added_storage_bytes = 0U;
+  }
   if (compressed_image_bytes.size() != begin.total_upload_bytes ||
       compressed_image_bytes.empty() ||
       compressed_image_bytes.size() > resolution.max_upload_bytes) {
@@ -160,8 +202,23 @@ validate_and_store_uploaded_skin(
     return Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>::failure(
         protocol::SkinUploadDenyReason::ServerStorageFull);
   }
-  if (!std::filesystem::exists(output_path, error)) {
-    std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+  const bool output_exists = std::filesystem::exists(output_path, error);
+  if (error) {
+    return Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>::failure(
+        protocol::SkinUploadDenyReason::ServerStorageFull);
+  }
+  if (!output_exists) {
+    if (current_storage_bytes > max_total_storage_bytes ||
+        static_cast<u64>(compressed_image_bytes.size()) >
+            max_total_storage_bytes - current_storage_bytes) {
+      return Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>::failure(
+          protocol::SkinUploadDenyReason::ServerStorageFull);
+    }
+
+    const std::filesystem::path temp_path = output_path.string() + ".tmp";
+    std::filesystem::remove(temp_path, error);
+    error.clear();
+    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
     if (!output) {
       return Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>::failure(
           protocol::SkinUploadDenyReason::ServerStorageFull);
@@ -172,6 +229,20 @@ validate_and_store_uploaded_skin(
     if (!output) {
       return Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>::failure(
           protocol::SkinUploadDenyReason::ServerStorageFull);
+    }
+    output.close();
+    if (!output) {
+      return Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>::failure(
+          protocol::SkinUploadDenyReason::ServerStorageFull);
+    }
+    std::filesystem::rename(temp_path, output_path, error);
+    if (error) {
+      std::filesystem::remove(temp_path, error);
+      return Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>::failure(
+          protocol::SkinUploadDenyReason::ServerStorageFull);
+    }
+    if (added_storage_bytes != nullptr) {
+      *added_storage_bytes = static_cast<u64>(compressed_image_bytes.size());
     }
   }
 
@@ -192,10 +263,17 @@ load_stored_skin_descriptor(
     return Expected<protocol::SkinDescriptor, protocol::SkinRequestDenyReason>::failure(
         protocol::SkinRequestDenyReason::InvalidHash);
   }
-  std::ifstream input(server_skin_storage_path(server_save_root, skin_hash), std::ios::binary);
+  const std::filesystem::path path = server_skin_storage_path(server_save_root, skin_hash);
+  std::ifstream input(path, std::ios::binary);
   if (!input) {
     return Expected<protocol::SkinDescriptor, protocol::SkinRequestDenyReason>::failure(
         protocol::SkinRequestDenyReason::NotFound);
+  }
+  std::error_code error;
+  const u64 file_size = std::filesystem::file_size(path, error);
+  if (error || file_size == 0U || file_size > protocol::MaxSkinImagePayloadBytes) {
+    return Expected<protocol::SkinDescriptor, protocol::SkinRequestDenyReason>::failure(
+        protocol::SkinRequestDenyReason::TooLarge);
   }
   std::vector<u8> bytes{
       std::istreambuf_iterator<char>{input},
@@ -208,6 +286,12 @@ load_stored_skin_descriptor(
       bytes,
       {"arvane:texture/skin/" + std::string{skin_hash}});
   if (!image) {
+    return Expected<protocol::SkinDescriptor, protocol::SkinRequestDenyReason>::failure(
+        protocol::SkinRequestDenyReason::InternalError);
+  }
+  if (image.value().width <= 0 || image.value().height <= 0 ||
+      image.value().width > std::numeric_limits<u16>::max() ||
+      image.value().height > std::numeric_limits<u16>::max()) {
     return Expected<protocol::SkinDescriptor, protocol::SkinRequestDenyReason>::failure(
         protocol::SkinRequestDenyReason::InternalError);
   }

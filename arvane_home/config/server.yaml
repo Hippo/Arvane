@@ -24,3 +24,21 @@ skins:
     max_chunk_bytes: 32768
     chunk_threshold_bytes: 1048576
     max_active_per_connection: 1
+    max_active_global: 32
+    timeout_seconds: 15
+    idle_timeout_seconds: 5
+    max_begin_attempts_per_minute: 6
+    max_completed_uploads_per_minute: 2
+    max_completed_uploads_per_hour: 10
+    max_upload_bytes_per_hour: 5242880
+    max_failed_decodes_per_minute: 3
+  downloads:
+    max_requests_per_second: 8
+    max_requests_per_minute: 120
+    max_bytes_per_minute: 8388608
+    max_in_flight_per_connection: 4
+    require_advertised_hash: true
+    max_batch_size: 16
+  storage:
+    max_total_skin_bytes: 1073741824
+    max_skins_per_profile: 16

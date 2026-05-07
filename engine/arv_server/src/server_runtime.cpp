@@ -2,6 +2,7 @@
 
 #include "arv/crypto/random.hpp"
 #include "arv/server/server_commands.hpp"
+#include "arv/server/skin_runtime.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -188,6 +189,9 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   block_breaking_ = start_info.block_breaking;
   dropped_items_ = start_info.dropped_items;
   skins_ = start_info.skins;
+  skin_transfers_.clear();
+  active_skin_uploads_global_ = 0U;
+  skin_storage_bytes_ = current_skin_storage_bytes(server_save_root_);
   fluid_definition_ = start_info.fluid_definition;
   chunk_streamer_.configure(start_info.chunk_streaming);
   const i32 max_view_distance = std::max<i32>(start_info.chunk_streaming.max_view_distance, 0);
@@ -260,6 +264,7 @@ void ServerRuntimeImpl::tick() {
   for (net::NetworkEvent& event : inbound_events_) {
     handle_network_event(std::move(event));
   }
+  expire_timed_out_skin_uploads();
   tick_players();
   const Seconds tick_seconds = tick_duration_seconds(base_tps_);
   default_world_.tick_dropped_items(tick_seconds);

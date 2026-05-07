@@ -242,6 +242,24 @@ skins:
     max_chunk_bytes: 16384
     chunk_threshold_bytes: 65536
     max_active_per_connection: 1
+    max_active_global: 12
+    timeout_seconds: 20
+    idle_timeout_seconds: 4
+    max_begin_attempts_per_minute: 5
+    max_completed_uploads_per_minute: 3
+    max_completed_uploads_per_hour: 11
+    max_upload_bytes_per_hour: 123456
+    max_failed_decodes_per_minute: 2
+  downloads:
+    max_requests_per_second: 7
+    max_requests_per_minute: 70
+    max_bytes_per_minute: 7654321
+    max_in_flight_per_connection: 3
+    require_advertised_hash: false
+    max_batch_size: 8
+  storage:
+    max_total_skin_bytes: 999999
+    max_skins_per_profile: 9
 )");
 
   ASSERT_TRUE(result);
@@ -253,7 +271,61 @@ skins:
   EXPECT_EQ(result.value().skins.resolutions[1].max_upload_bytes, 65536U);
   EXPECT_EQ(result.value().skins.resolutions[1].permission, "example.perm.128skin");
   EXPECT_EQ(result.value().skins.uploads.max_chunk_bytes, 16384U);
+  EXPECT_EQ(result.value().skins.uploads.max_active_global, 12U);
+  EXPECT_EQ(result.value().skins.uploads.timeout_seconds, 20U);
+  EXPECT_EQ(result.value().skins.uploads.idle_timeout_seconds, 4U);
+  EXPECT_EQ(result.value().skins.uploads.max_begin_attempts_per_minute, 5U);
+  EXPECT_EQ(result.value().skins.uploads.max_completed_uploads_per_minute, 3U);
+  EXPECT_EQ(result.value().skins.uploads.max_completed_uploads_per_hour, 11U);
+  EXPECT_EQ(result.value().skins.uploads.max_upload_bytes_per_hour, 123456U);
+  EXPECT_EQ(result.value().skins.uploads.max_failed_decodes_per_minute, 2U);
+  EXPECT_EQ(result.value().skins.downloads.max_requests_per_second, 7U);
+  EXPECT_EQ(result.value().skins.downloads.max_requests_per_minute, 70U);
+  EXPECT_EQ(result.value().skins.downloads.max_bytes_per_minute, 7654321U);
+  EXPECT_EQ(result.value().skins.downloads.max_in_flight_per_connection, 3U);
+  EXPECT_FALSE(result.value().skins.downloads.require_advertised_hash);
+  EXPECT_EQ(result.value().skins.downloads.max_batch_size, 8U);
+  EXPECT_EQ(result.value().skins.storage.max_total_skin_bytes, 999999U);
+  EXPECT_EQ(result.value().skins.storage.max_skins_per_profile, 9U);
   EXPECT_EQ(arv::io::default_skin_max_upload_bytes(2048), 16U * 1024U * 1024U);
+}
+
+TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
+  const arv::io::EngineConfig config = arv::io::default_config();
+
+  EXPECT_EQ(arv::io::default_skin_max_upload_bytes(64), 32U * 1024U);
+  EXPECT_EQ(arv::io::default_skin_max_upload_bytes(128), 64U * 1024U);
+  EXPECT_EQ(arv::io::default_skin_max_upload_bytes(256), 256U * 1024U);
+  EXPECT_EQ(arv::io::default_skin_max_upload_bytes(512), 1024U * 1024U);
+  EXPECT_EQ(arv::io::default_skin_max_upload_bytes(1024), 4U * 1024U * 1024U);
+  EXPECT_EQ(arv::io::default_skin_max_upload_bytes(2048), 16U * 1024U * 1024U);
+  EXPECT_EQ(arv::io::default_skin_max_decoded_bytes(64), 64U * 64U * 4U);
+  ASSERT_FALSE(config.skins.resolutions.empty());
+  for (const arv::io::SkinResolutionConfig& resolution : config.skins.resolutions) {
+    EXPECT_EQ(
+        resolution.max_decoded_bytes,
+        arv::io::default_skin_max_decoded_bytes(resolution.size));
+    EXPECT_EQ(resolution.enabled, resolution.size == 64U);
+  }
+
+  EXPECT_EQ(config.skins.uploads.max_chunk_bytes, 32768U);
+  EXPECT_EQ(config.skins.uploads.max_active_per_connection, 1U);
+  EXPECT_EQ(config.skins.uploads.max_active_global, 32U);
+  EXPECT_EQ(config.skins.uploads.timeout_seconds, 15U);
+  EXPECT_EQ(config.skins.uploads.idle_timeout_seconds, 5U);
+  EXPECT_EQ(config.skins.uploads.max_begin_attempts_per_minute, 6U);
+  EXPECT_EQ(config.skins.uploads.max_completed_uploads_per_minute, 2U);
+  EXPECT_EQ(config.skins.uploads.max_completed_uploads_per_hour, 10U);
+  EXPECT_EQ(config.skins.uploads.max_upload_bytes_per_hour, 5ULL * 1024ULL * 1024ULL);
+  EXPECT_EQ(config.skins.uploads.max_failed_decodes_per_minute, 3U);
+  EXPECT_EQ(config.skins.downloads.max_requests_per_second, 8U);
+  EXPECT_EQ(config.skins.downloads.max_requests_per_minute, 120U);
+  EXPECT_EQ(config.skins.downloads.max_bytes_per_minute, 8ULL * 1024ULL * 1024ULL);
+  EXPECT_EQ(config.skins.downloads.max_in_flight_per_connection, 4U);
+  EXPECT_TRUE(config.skins.downloads.require_advertised_hash);
+  EXPECT_EQ(config.skins.downloads.max_batch_size, 16U);
+  EXPECT_EQ(config.skins.storage.max_total_skin_bytes, 1024ULL * 1024ULL * 1024ULL);
+  EXPECT_EQ(config.skins.storage.max_skins_per_profile, 16U);
 }
 
 TEST(ConfigTests, RejectsInvalidSkinResolution) {

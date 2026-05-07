@@ -134,6 +134,11 @@ void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) 
     block_break_attempts_.erase(session->player_id);
     logged_chunk_interest_sessions_.erase(session->session_id);
     logged_chunk_delivery_sessions_.erase(session->session_id);
+    if (auto transfer = skin_transfers_.find(session->session_id);
+        transfer != skin_transfers_.end() && transfer->second.active_upload.has_value() &&
+        active_skin_uploads_global_ > 0U) {
+      --active_skin_uploads_global_;
+    }
     skin_transfers_.erase(session->session_id);
     if (const player::PlayerState* player_state =
             default_world_.find_player(session->player_id);

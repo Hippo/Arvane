@@ -183,6 +183,60 @@ void read_skins_config(const YAML::Node& skins, SkinConfig& config) {
     read_scalar(uploads, "max_chunk_bytes", config.uploads.max_chunk_bytes);
     read_scalar(uploads, "chunk_threshold_bytes", config.uploads.chunk_threshold_bytes);
     read_scalar(uploads, "max_active_per_connection", config.uploads.max_active_per_connection);
+    read_scalar(uploads, "max_active_global", config.uploads.max_active_global);
+    read_scalar(uploads, "timeout_seconds", config.uploads.timeout_seconds);
+    read_scalar(uploads, "idle_timeout_seconds", config.uploads.idle_timeout_seconds);
+    read_scalar(
+        uploads,
+        "max_begin_attempts_per_minute",
+        config.uploads.max_begin_attempts_per_minute);
+    read_scalar(
+        uploads,
+        "max_completed_uploads_per_minute",
+        config.uploads.max_completed_uploads_per_minute);
+    read_scalar(
+        uploads,
+        "max_completed_uploads_per_hour",
+        config.uploads.max_completed_uploads_per_hour);
+    read_scalar(
+        uploads,
+        "max_upload_bytes_per_hour",
+        config.uploads.max_upload_bytes_per_hour);
+    read_scalar(
+        uploads,
+        "max_failed_decodes_per_minute",
+        config.uploads.max_failed_decodes_per_minute);
+  }
+
+  const YAML::Node downloads = skins["downloads"];
+  if (downloads) {
+    read_scalar(
+        downloads,
+        "max_requests_per_second",
+        config.downloads.max_requests_per_second);
+    read_scalar(
+        downloads,
+        "max_requests_per_minute",
+        config.downloads.max_requests_per_minute);
+    read_scalar(
+        downloads,
+        "max_bytes_per_minute",
+        config.downloads.max_bytes_per_minute);
+    read_scalar(
+        downloads,
+        "max_in_flight_per_connection",
+        config.downloads.max_in_flight_per_connection);
+    read_scalar(
+        downloads,
+        "require_advertised_hash",
+        config.downloads.require_advertised_hash);
+    read_scalar(downloads, "max_batch_size", config.downloads.max_batch_size);
+  }
+
+  const YAML::Node storage = skins["storage"];
+  if (storage) {
+    read_scalar(storage, "max_total_skin_bytes", config.storage.max_total_skin_bytes);
+    read_scalar(storage, "max_skins_per_profile", config.storage.max_skins_per_profile);
   }
 }
 
@@ -582,6 +636,42 @@ void emit_skins_config(YAML::Emitter& emitter, const SkinConfig& skins) {
           << skins.uploads.chunk_threshold_bytes;
   emitter << YAML::Key << "max_active_per_connection" << YAML::Value
           << skins.uploads.max_active_per_connection;
+  emitter << YAML::Key << "max_active_global" << YAML::Value
+          << skins.uploads.max_active_global;
+  emitter << YAML::Key << "timeout_seconds" << YAML::Value
+          << skins.uploads.timeout_seconds;
+  emitter << YAML::Key << "idle_timeout_seconds" << YAML::Value
+          << skins.uploads.idle_timeout_seconds;
+  emitter << YAML::Key << "max_begin_attempts_per_minute" << YAML::Value
+          << skins.uploads.max_begin_attempts_per_minute;
+  emitter << YAML::Key << "max_completed_uploads_per_minute" << YAML::Value
+          << skins.uploads.max_completed_uploads_per_minute;
+  emitter << YAML::Key << "max_completed_uploads_per_hour" << YAML::Value
+          << skins.uploads.max_completed_uploads_per_hour;
+  emitter << YAML::Key << "max_upload_bytes_per_hour" << YAML::Value
+          << skins.uploads.max_upload_bytes_per_hour;
+  emitter << YAML::Key << "max_failed_decodes_per_minute" << YAML::Value
+          << skins.uploads.max_failed_decodes_per_minute;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "downloads" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "max_requests_per_second" << YAML::Value
+          << skins.downloads.max_requests_per_second;
+  emitter << YAML::Key << "max_requests_per_minute" << YAML::Value
+          << skins.downloads.max_requests_per_minute;
+  emitter << YAML::Key << "max_bytes_per_minute" << YAML::Value
+          << skins.downloads.max_bytes_per_minute;
+  emitter << YAML::Key << "max_in_flight_per_connection" << YAML::Value
+          << skins.downloads.max_in_flight_per_connection;
+  emitter << YAML::Key << "require_advertised_hash" << YAML::Value
+          << skins.downloads.require_advertised_hash;
+  emitter << YAML::Key << "max_batch_size" << YAML::Value
+          << skins.downloads.max_batch_size;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "storage" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "max_total_skin_bytes" << YAML::Value
+          << skins.storage.max_total_skin_bytes;
+  emitter << YAML::Key << "max_skins_per_profile" << YAML::Value
+          << skins.storage.max_skins_per_profile;
   emitter << YAML::EndMap;
   emitter << YAML::EndMap;
 }
@@ -1018,8 +1108,30 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
 
   if (config.skins.uploads.max_chunk_bytes == 0U ||
       config.skins.uploads.chunk_threshold_bytes == 0U ||
-      config.skins.uploads.max_active_per_connection == 0U) {
+      config.skins.uploads.max_active_per_connection == 0U ||
+      config.skins.uploads.max_active_global == 0U ||
+      config.skins.uploads.timeout_seconds == 0U ||
+      config.skins.uploads.idle_timeout_seconds == 0U ||
+      config.skins.uploads.max_begin_attempts_per_minute == 0U ||
+      config.skins.uploads.max_completed_uploads_per_minute == 0U ||
+      config.skins.uploads.max_completed_uploads_per_hour == 0U ||
+      config.skins.uploads.max_upload_bytes_per_hour == 0U ||
+      config.skins.uploads.max_failed_decodes_per_minute == 0U) {
     return ConfigError{"skins.uploads limits must be non-zero"};
+  }
+  if (config.skins.uploads.idle_timeout_seconds > config.skins.uploads.timeout_seconds) {
+    return ConfigError{"skins.uploads.idle_timeout_seconds must be <= timeout_seconds"};
+  }
+  if (config.skins.downloads.max_requests_per_second == 0U ||
+      config.skins.downloads.max_requests_per_minute == 0U ||
+      config.skins.downloads.max_bytes_per_minute == 0U ||
+      config.skins.downloads.max_in_flight_per_connection == 0U ||
+      config.skins.downloads.max_batch_size == 0U) {
+    return ConfigError{"skins.downloads limits must be non-zero"};
+  }
+  if (config.skins.storage.max_total_skin_bytes == 0U ||
+      config.skins.storage.max_skins_per_profile == 0U) {
+    return ConfigError{"skins.storage limits must be non-zero"};
   }
   if (config.skins.resolutions.empty()) {
     return ConfigError{"skins.resolutions must list at least one resolution"};

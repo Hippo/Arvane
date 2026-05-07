@@ -64,6 +64,7 @@ private:
       ClientProtocolSender& sender,
       const protocol::SkinDescriptor& skin);
   [[nodiscard]] u32 next_request_id() noexcept;
+  void clear_request(u32 request_id);
 
   protocol::ClientboundSkinRules rules_{};
   bool has_rules_{};

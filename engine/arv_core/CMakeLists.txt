@@ -9,6 +9,7 @@ set(ARV_CORE_HEADERS
   include/arv/core/math.hpp
   include/arv/core/perf_stats.hpp
   include/arv/core/profiling.hpp
+  include/arv/core/rate_limiter.hpp
   include/arv/core/time.hpp
   include/arv/core/types.hpp
 )

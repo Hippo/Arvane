@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <span>
 #include <utility>
@@ -18,20 +19,146 @@
 namespace arv::server::detail {
 namespace {
 
-inline constexpr u32 MaxSkinUploadBeginsPerWindow = 4U;
-inline constexpr u32 MaxSkinRequestsPerWindow = 64U;
-inline constexpr TickIndex SkinRateWindowTicks = 1200U;
-inline constexpr TickIndex SkinUploadTimeoutTicks = 400U;
-
-void reset_skin_rate_window_if_needed(
+void configure_skin_transfer_state(
     SkinTransferSessionState& state,
-    TickIndex tick_index) {
-  if (tick_index < state.rate_window_start ||
-      tick_index - state.rate_window_start > SkinRateWindowTicks) {
-    state.rate_window_start = tick_index;
-    state.upload_begin_count = 0;
-    state.request_count = 0;
+    const io::SkinConfig& skins) {
+  if (state.limiters_initialized) {
+    return;
   }
+  state.upload_begin_limiter = core::TokenBucket{
+      static_cast<double>(skins.uploads.max_begin_attempts_per_minute),
+      static_cast<double>(skins.uploads.max_begin_attempts_per_minute) / 60.0};
+  state.completed_upload_minute_limiter = core::TokenBucket{
+      static_cast<double>(skins.uploads.max_completed_uploads_per_minute),
+      static_cast<double>(skins.uploads.max_completed_uploads_per_minute) / 60.0};
+  state.completed_upload_hour_limiter = core::TokenBucket{
+      static_cast<double>(skins.uploads.max_completed_uploads_per_hour),
+      static_cast<double>(skins.uploads.max_completed_uploads_per_hour) / 3600.0};
+  state.upload_byte_limiter = core::TokenBucket{
+      static_cast<double>(skins.uploads.max_upload_bytes_per_hour),
+      static_cast<double>(skins.uploads.max_upload_bytes_per_hour) / 3600.0};
+  state.failed_decode_limiter = core::TokenBucket{
+      static_cast<double>(skins.uploads.max_failed_decodes_per_minute),
+      static_cast<double>(skins.uploads.max_failed_decodes_per_minute) / 60.0};
+  state.request_second_limiter = core::TokenBucket{
+      static_cast<double>(skins.downloads.max_requests_per_second),
+      static_cast<double>(skins.downloads.max_requests_per_second)};
+  state.request_minute_limiter = core::TokenBucket{
+      static_cast<double>(skins.downloads.max_requests_per_minute),
+      static_cast<double>(skins.downloads.max_requests_per_minute) / 60.0};
+  state.download_byte_limiter = core::TokenBucket{
+      static_cast<double>(skins.downloads.max_bytes_per_minute),
+      static_cast<double>(skins.downloads.max_bytes_per_minute) / 60.0};
+  state.limiters_initialized = true;
+}
+
+[[nodiscard]] TickIndex seconds_to_ticks(u32 seconds, TickRate tick_rate) noexcept {
+  const TickIndex ticks_per_second = std::max<TickIndex>(1U, tick_rate);
+  if (seconds > std::numeric_limits<TickIndex>::max() / ticks_per_second) {
+    return std::numeric_limits<TickIndex>::max();
+  }
+  return std::max<TickIndex>(1U, static_cast<TickIndex>(seconds) * ticks_per_second);
+}
+
+[[nodiscard]] bool elapsed_ticks_exceeds(
+    TickIndex now,
+    TickIndex then,
+    TickIndex limit) noexcept {
+  return now < then || now - then > limit;
+}
+
+[[nodiscard]] bool skin_upload_timed_out(
+    const ActiveSkinUpload& upload,
+    TickIndex tick_index,
+    const io::SkinConfig& skins,
+    TickRate tick_rate) noexcept {
+  return elapsed_ticks_exceeds(
+             tick_index,
+             upload.started_tick,
+             seconds_to_ticks(skins.uploads.timeout_seconds, tick_rate)) ||
+         elapsed_ticks_exceeds(
+             tick_index,
+             upload.last_packet_tick,
+             seconds_to_ticks(skins.uploads.idle_timeout_seconds, tick_rate));
+}
+
+void clear_active_skin_upload(
+    SkinTransferSessionState& state,
+    u32& active_skin_uploads_global) noexcept {
+  if (!state.active_upload.has_value()) {
+    return;
+  }
+  state.active_upload.reset();
+  if (active_skin_uploads_global > 0U) {
+    --active_skin_uploads_global;
+  }
+}
+
+[[nodiscard]] std::optional<u64> regular_file_size(const std::filesystem::path& path) {
+  std::error_code error;
+  if (!std::filesystem::is_regular_file(path, error)) {
+    return std::nullopt;
+  }
+  error.clear();
+  const u64 size = std::filesystem::file_size(path, error);
+  if (error) {
+    return std::nullopt;
+  }
+  return size;
+}
+
+[[nodiscard]] std::string_view skin_request_deny_reason_name(
+    protocol::SkinRequestDenyReason reason) noexcept {
+  switch (reason) {
+    case protocol::SkinRequestDenyReason::SkinsDisabled:
+      return "SkinsDisabled";
+    case protocol::SkinRequestDenyReason::InvalidHash:
+      return "InvalidHash";
+    case protocol::SkinRequestDenyReason::NotFound:
+      return "NotFound";
+    case protocol::SkinRequestDenyReason::NotAdvertisedToClient:
+      return "NotAdvertisedToClient";
+    case protocol::SkinRequestDenyReason::RateLimited:
+      return "RateLimited";
+    case protocol::SkinRequestDenyReason::TooLarge:
+      return "TooLarge";
+    case protocol::SkinRequestDenyReason::InternalError:
+      return "InternalError";
+  }
+  return "Unknown";
+}
+
+[[nodiscard]] std::string_view skin_upload_deny_reason_name(
+    protocol::SkinUploadDenyReason reason) noexcept {
+  switch (reason) {
+    case protocol::SkinUploadDenyReason::SkinsDisabled:
+      return "SkinsDisabled";
+    case protocol::SkinUploadDenyReason::UploadsDisabled:
+      return "UploadsDisabled";
+    case protocol::SkinUploadDenyReason::NotAuthenticated:
+      return "NotAuthenticated";
+    case protocol::SkinUploadDenyReason::InvalidFormat:
+      return "InvalidFormat";
+    case protocol::SkinUploadDenyReason::InvalidResolution:
+      return "InvalidResolution";
+    case protocol::SkinUploadDenyReason::ResolutionNotAllowed:
+      return "ResolutionNotAllowed";
+    case protocol::SkinUploadDenyReason::UploadTooLarge:
+      return "UploadTooLarge";
+    case protocol::SkinUploadDenyReason::RateLimited:
+      return "RateLimited";
+    case protocol::SkinUploadDenyReason::UploadAlreadyPending:
+      return "UploadAlreadyPending";
+    case protocol::SkinUploadDenyReason::ServerStorageFull:
+      return "ServerStorageFull";
+    case protocol::SkinUploadDenyReason::DecodeFailed:
+      return "DecodeFailed";
+    case protocol::SkinUploadDenyReason::HashMismatch:
+      return "HashMismatch";
+    case protocol::SkinUploadDenyReason::InternalError:
+      return "InternalError";
+  }
+  return "Unknown";
 }
 
 [[nodiscard]] std::optional<std::vector<u8>> read_binary_file(
@@ -78,6 +205,16 @@ void log_send_failure_if_dedicated(
       "network send failed: connection={} reason='{}'",
       connection_id.value,
       send_result.error().message);
+}
+
+void ServerRuntimeImpl::expire_timed_out_skin_uploads() {
+  for (auto& [session_id, transfer] : skin_transfers_) {
+    (void)session_id;
+    if (transfer.active_upload.has_value() &&
+        skin_upload_timed_out(*transfer.active_upload, tick_index_, skins_, base_tps_)) {
+      clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    }
+  }
 }
 
 void ServerRuntimeImpl::handle_network_event(net::NetworkEvent event) {
@@ -166,9 +303,7 @@ void ServerRuntimeImpl::handle_message(
       if (!batch) {
         return;
       }
-      for (const protocol::SkinRequestEntry& entry : batch.value().requests) {
-        handle_skin_request(connection_id, {entry.request_id, entry.skin_hash});
-      }
+      handle_skin_request_batch(connection_id, std::move(batch.value()));
       return;
     }
     case protocol::MessageType::SkinUploadBegin: {
@@ -383,6 +518,13 @@ void ServerRuntimeImpl::handle_skin_request(
     const protocol::ServerboundSkinRequest& request) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
   auto send_deny = [&](protocol::SkinRequestDenyReason reason) {
+    core::debug(
+        "skin",
+        "skin request denied: connection={} request={} skin={} reason={}",
+        connection_id.value,
+        request.request_id,
+        request.skin_hash,
+        skin_request_deny_reason_name(reason));
     const protocol::ClientboundSkinRequestDeny deny{
         request.request_id,
         request.skin_hash,
@@ -397,7 +539,6 @@ void ServerRuntimeImpl::handle_skin_request(
   };
 
   if (session == nullptr || !session->authenticated) {
-    send_deny(protocol::SkinRequestDenyReason::InternalError);
     return;
   }
   if (!skins_.enabled) {
@@ -410,18 +551,26 @@ void ServerRuntimeImpl::handle_skin_request(
   }
 
   SkinTransferSessionState& transfer = skin_transfers_[session->session_id];
-  reset_skin_rate_window_if_needed(transfer, tick_index_);
-  if (++transfer.request_count > MaxSkinRequestsPerWindow) {
+  configure_skin_transfer_state(transfer, skins_);
+  const double now_seconds =
+      static_cast<double>(tick_index_) / static_cast<double>(std::max<TickRate>(1U, base_tps_));
+  if (!transfer.request_second_limiter.try_consume(1.0, now_seconds) ||
+      !transfer.request_minute_limiter.try_consume(1.0, now_seconds)) {
     send_deny(protocol::SkinRequestDenyReason::RateLimited);
     return;
   }
   if (transfer.in_flight_request_ids.find(request.request_id) !=
-      transfer.in_flight_request_ids.end()) {
+          transfer.in_flight_request_ids.end() ||
+      transfer.in_flight_skin_hashes.find(request.skin_hash) !=
+          transfer.in_flight_skin_hashes.end() ||
+      transfer.in_flight_request_ids.size() >=
+          skins_.downloads.max_in_flight_per_connection) {
     send_deny(protocol::SkinRequestDenyReason::RateLimited);
     return;
   }
-  if (transfer.advertised_skin_hashes.find(request.skin_hash) ==
-      transfer.advertised_skin_hashes.end()) {
+  if (skins_.downloads.require_advertised_hash &&
+      transfer.advertised_skin_hashes.find(request.skin_hash) ==
+          transfer.advertised_skin_hashes.end()) {
     send_deny(protocol::SkinRequestDenyReason::NotAdvertisedToClient);
     return;
   }
@@ -430,14 +579,51 @@ void ServerRuntimeImpl::handle_skin_request(
     send_deny(descriptor_result.error());
     return;
   }
-  std::optional<std::vector<u8>> bytes =
-      read_binary_file(server_skin_storage_path(server_save_root_, request.skin_hash));
+  const protocol::SkinDescriptor descriptor = descriptor_result.value();
+  const io::SkinResolutionConfig* resolution =
+      descriptor.width == descriptor.height
+          ? find_skin_resolution_rule(skins_, descriptor.width)
+          : nullptr;
+  if (resolution == nullptr || descriptor.width == 0U || descriptor.height == 0U) {
+    send_deny(protocol::SkinRequestDenyReason::InternalError);
+    return;
+  }
+  const std::filesystem::path path =
+      server_skin_storage_path(server_save_root_, request.skin_hash);
+  const std::optional<u64> file_size = regular_file_size(path);
+  if (!file_size.has_value()) {
+    send_deny(protocol::SkinRequestDenyReason::NotFound);
+    return;
+  }
+  if (file_size.value() == 0U ||
+      file_size.value() > resolution->max_upload_bytes ||
+      file_size.value() > protocol::MaxSkinImagePayloadBytes) {
+    send_deny(protocol::SkinRequestDenyReason::TooLarge);
+    return;
+  }
+  if (!transfer.download_byte_limiter.try_consume(
+          static_cast<double>(file_size.value()),
+          now_seconds)) {
+    send_deny(protocol::SkinRequestDenyReason::RateLimited);
+    return;
+  }
+
+  std::optional<std::vector<u8>> bytes = read_binary_file(path);
   if (!bytes.has_value()) {
     send_deny(protocol::SkinRequestDenyReason::NotFound);
     return;
   }
+  if (bytes->size() != file_size.value()) {
+    send_deny(protocol::SkinRequestDenyReason::InternalError);
+    return;
+  }
+
   transfer.in_flight_request_ids.insert(request.request_id);
-  const protocol::SkinDescriptor descriptor = descriptor_result.value();
+  transfer.in_flight_skin_hashes.insert(request.skin_hash);
+  auto finish_request = [&]() {
+    transfer.in_flight_request_ids.erase(request.request_id);
+    transfer.in_flight_skin_hashes.erase(request.skin_hash);
+  };
   const bool chunked =
       bytes->size() >= skins_.uploads.chunk_threshold_bytes ||
       descriptor.width >= 512U ||
@@ -457,7 +643,7 @@ void ServerRuntimeImpl::handle_skin_request(
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::ChunkStreaming,
         protocol::serialize_skin_data(data));
-    transfer.in_flight_request_ids.erase(request.request_id);
+    finish_request();
     return;
   }
 
@@ -502,7 +688,48 @@ void ServerRuntimeImpl::handle_skin_request(
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::ChunkStreaming,
       protocol::serialize_skin_data_end_chunked({request.request_id}));
-  transfer.in_flight_request_ids.erase(request.request_id);
+  finish_request();
+}
+
+void ServerRuntimeImpl::handle_skin_request_batch(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundSkinRequestBatch& batch) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated) {
+    return;
+  }
+
+  auto send_deny = [&](const protocol::SkinRequestEntry& request) {
+    core::debug(
+        "skin",
+        "skin request denied: connection={} request={} skin={} reason={}",
+        connection_id.value,
+        request.request_id,
+        request.skin_hash,
+        skin_request_deny_reason_name(protocol::SkinRequestDenyReason::RateLimited));
+    const protocol::ClientboundSkinRequestDeny deny{
+        request.request_id,
+        request.skin_hash,
+        protocol::SkinRequestDenyReason::RateLimited};
+    (void)send_protocol_message(
+        *transport_,
+        connection_id,
+        protocol::MessageType::SkinRequestDeny,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Session,
+        protocol::serialize_skin_request_deny(deny));
+  };
+
+  if (batch.requests.size() > skins_.downloads.max_batch_size) {
+    for (const protocol::SkinRequestEntry& request : batch.requests) {
+      send_deny(request);
+    }
+    return;
+  }
+
+  for (const protocol::SkinRequestEntry& entry : batch.requests) {
+    handle_skin_request(connection_id, {entry.request_id, entry.skin_hash});
+  }
 }
 
 void ServerRuntimeImpl::handle_skin_upload_begin(
@@ -510,6 +737,14 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
     const protocol::ServerboundSkinUploadBegin& begin) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
   auto send_deny = [&](protocol::SkinUploadDenyReason reason) {
+    core::debug(
+        "skin",
+        "skin upload denied: connection={} reason={} width={} height={} bytes={}",
+        connection_id.value,
+        skin_upload_deny_reason_name(reason),
+        begin.width,
+        begin.height,
+        begin.total_upload_bytes);
     (void)send_protocol_message(
         *transport_,
         connection_id,
@@ -522,20 +757,33 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
     send_deny(protocol::SkinUploadDenyReason::NotAuthenticated);
     return;
   }
+  if (!session->authenticated) {
+    send_deny(protocol::SkinUploadDenyReason::NotAuthenticated);
+    return;
+  }
   player::PlayerState* player_state = default_world_.find_player(session->player_id);
   if (player_state == nullptr) {
     send_deny(protocol::SkinUploadDenyReason::NotAuthenticated);
     return;
   }
   SkinTransferSessionState& transfer = skin_transfers_[session->session_id];
-  reset_skin_rate_window_if_needed(transfer, tick_index_);
-  const bool rate_limited = ++transfer.upload_begin_count > MaxSkinUploadBeginsPerWindow;
+  configure_skin_transfer_state(transfer, skins_);
+  if (transfer.active_upload.has_value() &&
+      skin_upload_timed_out(*transfer.active_upload, tick_index_, skins_, base_tps_)) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+  }
+  const double now_seconds =
+      static_cast<double>(tick_index_) / static_cast<double>(std::max<TickRate>(1U, base_tps_));
+  const bool rate_limited =
+      !transfer.upload_begin_limiter.try_consume(1.0, now_seconds) ||
+      transfer.failed_decode_limiter.available(now_seconds) < 1.0;
   const auto accepted = validate_skin_upload_begin(
       skins_,
       player_state->resolved_permissions,
       session->authenticated,
       transfer.active_upload.has_value(),
       rate_limited,
+      active_skin_uploads_global_ >= skins_.uploads.max_active_global,
       begin);
   if (!accepted) {
     send_deny(accepted.error());
@@ -550,6 +798,11 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
         existing_descriptor.value().width == begin.width &&
         existing_descriptor.value().height == begin.height) {
       set_selected_skin_hash_for_session(*session, existing_descriptor.value().skin_hash);
+      core::info(
+          "skin",
+          "skin upload complete: profile={} skin={} bytes=0",
+          session->profile_id.string(),
+          existing_descriptor.value().skin_hash);
       (void)send_protocol_message(
           *transport_,
           connection_id,
@@ -563,14 +816,24 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
     }
   }
 
+  if (!transfer.upload_byte_limiter.try_consume(
+          static_cast<double>(begin.total_upload_bytes),
+          now_seconds)) {
+    send_deny(protocol::SkinUploadDenyReason::RateLimited);
+    return;
+  }
+
   ActiveSkinUpload upload;
   upload.upload_id = upload_id;
   upload.begin = begin;
   upload.mode = accepted.value().upload_mode;
   upload.max_chunk_bytes = skins_.uploads.max_chunk_bytes;
-  upload.expires_tick = tick_index_ + SkinUploadTimeoutTicks;
+  upload.started_tick = tick_index_;
+  upload.last_packet_tick = tick_index_;
+  upload.session_id = session->session_id;
   upload.bytes.reserve(begin.total_upload_bytes);
   transfer.active_upload = std::move(upload);
+  ++active_skin_uploads_global_;
 
   protocol::ClientboundSkinUploadAccept packet;
   packet.upload_id = upload_id;
@@ -589,35 +852,90 @@ void ServerRuntimeImpl::handle_skin_upload_data(
     net::ConnectionID connection_id,
     const protocol::ServerboundSkinUploadData& data) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
-  if (session == nullptr) {
+  if (session == nullptr || !session->authenticated) {
     return;
   }
   SkinTransferSessionState& transfer = skin_transfers_[session->session_id];
-  if (!transfer.active_upload.has_value() ||
-      transfer.active_upload->upload_id != data.upload_id ||
-      transfer.active_upload->mode != protocol::SkinUploadMode::Full ||
-      tick_index_ > transfer.active_upload->expires_tick) {
-    return;
-  }
-
-  ActiveSkinUpload upload = std::move(*transfer.active_upload);
-  transfer.active_upload.reset();
-  auto descriptor = validate_and_store_uploaded_skin(
-      server_save_root_,
-      *find_skin_resolution_rule(skins_, upload.begin.width),
-      upload.begin,
-      data.compressed_image_bytes);
-  if (!descriptor) {
+  configure_skin_transfer_state(transfer, skins_);
+  auto send_failed = [&](protocol::SkinUploadDenyReason reason) {
+    core::debug(
+        "skin",
+        "skin upload failed: profile={} upload={} reason={}",
+        session->profile_id.string(),
+        data.upload_id,
+        skin_upload_deny_reason_name(reason));
     (void)send_protocol_message(
         *transport_,
         connection_id,
         protocol::MessageType::SkinUploadFailed,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
-        protocol::serialize_skin_upload_failed({data.upload_id, descriptor.error()}));
+        protocol::serialize_skin_upload_failed({data.upload_id, reason}));
+  };
+  if (!transfer.active_upload.has_value() ||
+      transfer.active_upload->upload_id != data.upload_id) {
     return;
   }
+  if (skin_upload_timed_out(*transfer.active_upload, tick_index_, skins_, base_tps_)) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    return;
+  }
+  if (transfer.active_upload->mode != protocol::SkinUploadMode::Full) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::InternalError);
+    return;
+  }
+  if (data.compressed_image_bytes.size() !=
+          transfer.active_upload->begin.total_upload_bytes ||
+      data.compressed_image_bytes.size() >
+          transfer.active_upload->begin.total_upload_bytes) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::UploadTooLarge);
+    return;
+  }
+  const double now_seconds =
+      static_cast<double>(tick_index_) / static_cast<double>(std::max<TickRate>(1U, base_tps_));
+  if (transfer.completed_upload_minute_limiter.available(now_seconds) < 1.0 ||
+      transfer.completed_upload_hour_limiter.available(now_seconds) < 1.0) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::RateLimited);
+    return;
+  }
+
+  ActiveSkinUpload upload = std::move(*transfer.active_upload);
+  clear_active_skin_upload(transfer, active_skin_uploads_global_);
+  const io::SkinResolutionConfig* resolution =
+      find_skin_resolution_rule(skins_, upload.begin.width);
+  if (resolution == nullptr) {
+    send_failed(protocol::SkinUploadDenyReason::InvalidResolution);
+    return;
+  }
+  u64 added_storage_bytes = 0U;
+  auto descriptor = validate_and_store_uploaded_skin(
+      server_save_root_,
+      *resolution,
+      upload.begin,
+      data.compressed_image_bytes,
+      skin_storage_bytes_,
+      skins_.storage.max_total_skin_bytes,
+      &added_storage_bytes);
+  if (!descriptor) {
+    if (descriptor.error() == protocol::SkinUploadDenyReason::DecodeFailed) {
+      (void)transfer.failed_decode_limiter.try_consume(1.0, now_seconds);
+    }
+    send_failed(descriptor.error());
+    return;
+  }
+  (void)transfer.completed_upload_minute_limiter.try_consume(1.0, now_seconds);
+  (void)transfer.completed_upload_hour_limiter.try_consume(1.0, now_seconds);
+  skin_storage_bytes_ += added_storage_bytes;
   set_selected_skin_hash_for_session(*session, descriptor.value().skin_hash);
+  core::info(
+      "skin",
+      "skin upload complete: profile={} skin={} bytes={}",
+      session->profile_id.string(),
+      descriptor.value().skin_hash,
+      data.compressed_image_bytes.size());
   (void)send_protocol_message(
       *transport_,
       connection_id,
@@ -632,63 +950,142 @@ void ServerRuntimeImpl::handle_skin_upload_chunk(
     net::ConnectionID connection_id,
     const protocol::ServerboundSkinUploadChunk& chunk) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
-  if (session == nullptr) {
+  if (session == nullptr || !session->authenticated) {
     return;
   }
   SkinTransferSessionState& transfer = skin_transfers_[session->session_id];
-  if (!transfer.active_upload.has_value() ||
-      transfer.active_upload->upload_id != chunk.upload_id ||
-      transfer.active_upload->mode != protocol::SkinUploadMode::Chunked ||
-      tick_index_ > transfer.active_upload->expires_tick ||
-      chunk.image_chunk_bytes.empty() ||
-      chunk.image_chunk_bytes.size() > transfer.active_upload->max_chunk_bytes) {
-    transfer.active_upload.reset();
-    return;
-  }
-  if (transfer.active_upload->bytes.size() + chunk.image_chunk_bytes.size() >
-      transfer.active_upload->begin.total_upload_bytes) {
-    transfer.active_upload.reset();
-    return;
-  }
-  transfer.active_upload->bytes.insert(
-      transfer.active_upload->bytes.end(),
-      chunk.image_chunk_bytes.begin(),
-      chunk.image_chunk_bytes.end());
-}
-
-void ServerRuntimeImpl::handle_skin_upload_end(
-    net::ConnectionID connection_id,
-    const protocol::ServerboundSkinUploadEnd& end) {
-  ServerSession* session = sessions_.find_by_connection(connection_id);
-  if (session == nullptr) {
-    return;
-  }
-  SkinTransferSessionState& transfer = skin_transfers_[session->session_id];
-  if (!transfer.active_upload.has_value() ||
-      transfer.active_upload->upload_id != end.upload_id ||
-      transfer.active_upload->mode != protocol::SkinUploadMode::Chunked ||
-      tick_index_ > transfer.active_upload->expires_tick) {
-    transfer.active_upload.reset();
-    return;
-  }
-  ActiveSkinUpload upload = std::move(*transfer.active_upload);
-  transfer.active_upload.reset();
-  auto descriptor = validate_and_store_uploaded_skin(
-      server_save_root_,
-      *find_skin_resolution_rule(skins_, upload.begin.width),
-      upload.begin,
-      upload.bytes);
-  if (!descriptor) {
+  auto send_failed = [&](protocol::SkinUploadDenyReason reason) {
+    core::debug(
+        "skin",
+        "skin upload failed: profile={} upload={} reason={}",
+        session->profile_id.string(),
+        chunk.upload_id,
+        skin_upload_deny_reason_name(reason));
     (void)send_protocol_message(
         *transport_,
         connection_id,
         protocol::MessageType::SkinUploadFailed,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
-        protocol::serialize_skin_upload_failed({end.upload_id, descriptor.error()}));
+        protocol::serialize_skin_upload_failed({chunk.upload_id, reason}));
+  };
+  if (!transfer.active_upload.has_value() ||
+      transfer.active_upload->upload_id != chunk.upload_id) {
     return;
   }
+  if (skin_upload_timed_out(*transfer.active_upload, tick_index_, skins_, base_tps_)) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    return;
+  }
+  if (transfer.active_upload->mode != protocol::SkinUploadMode::Chunked) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::InternalError);
+    return;
+  }
+  if (chunk.image_chunk_bytes.empty() ||
+      chunk.image_chunk_bytes.size() > transfer.active_upload->max_chunk_bytes) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::UploadTooLarge);
+    return;
+  }
+  if (transfer.active_upload->bytes.size() + chunk.image_chunk_bytes.size() >
+      transfer.active_upload->begin.total_upload_bytes) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::UploadTooLarge);
+    return;
+  }
+  transfer.active_upload->bytes.insert(
+      transfer.active_upload->bytes.end(),
+      chunk.image_chunk_bytes.begin(),
+      chunk.image_chunk_bytes.end());
+  transfer.active_upload->last_packet_tick = tick_index_;
+}
+
+void ServerRuntimeImpl::handle_skin_upload_end(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundSkinUploadEnd& end) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated) {
+    return;
+  }
+  SkinTransferSessionState& transfer = skin_transfers_[session->session_id];
+  configure_skin_transfer_state(transfer, skins_);
+  auto send_failed = [&](protocol::SkinUploadDenyReason reason) {
+    core::debug(
+        "skin",
+        "skin upload failed: profile={} upload={} reason={}",
+        session->profile_id.string(),
+        end.upload_id,
+        skin_upload_deny_reason_name(reason));
+    (void)send_protocol_message(
+        *transport_,
+        connection_id,
+        protocol::MessageType::SkinUploadFailed,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Session,
+        protocol::serialize_skin_upload_failed({end.upload_id, reason}));
+  };
+  if (!transfer.active_upload.has_value() ||
+      transfer.active_upload->upload_id != end.upload_id) {
+    return;
+  }
+  if (skin_upload_timed_out(*transfer.active_upload, tick_index_, skins_, base_tps_)) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    return;
+  }
+  if (transfer.active_upload->mode != protocol::SkinUploadMode::Chunked) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::InternalError);
+    return;
+  }
+  if (transfer.active_upload->bytes.size() !=
+      transfer.active_upload->begin.total_upload_bytes) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::UploadTooLarge);
+    return;
+  }
+  const double now_seconds =
+      static_cast<double>(tick_index_) / static_cast<double>(std::max<TickRate>(1U, base_tps_));
+  if (transfer.completed_upload_minute_limiter.available(now_seconds) < 1.0 ||
+      transfer.completed_upload_hour_limiter.available(now_seconds) < 1.0) {
+    clear_active_skin_upload(transfer, active_skin_uploads_global_);
+    send_failed(protocol::SkinUploadDenyReason::RateLimited);
+    return;
+  }
+  ActiveSkinUpload upload = std::move(*transfer.active_upload);
+  clear_active_skin_upload(transfer, active_skin_uploads_global_);
+  const io::SkinResolutionConfig* resolution =
+      find_skin_resolution_rule(skins_, upload.begin.width);
+  if (resolution == nullptr) {
+    send_failed(protocol::SkinUploadDenyReason::InvalidResolution);
+    return;
+  }
+  u64 added_storage_bytes = 0U;
+  auto descriptor = validate_and_store_uploaded_skin(
+      server_save_root_,
+      *resolution,
+      upload.begin,
+      upload.bytes,
+      skin_storage_bytes_,
+      skins_.storage.max_total_skin_bytes,
+      &added_storage_bytes);
+  if (!descriptor) {
+    if (descriptor.error() == protocol::SkinUploadDenyReason::DecodeFailed) {
+      (void)transfer.failed_decode_limiter.try_consume(1.0, now_seconds);
+    }
+    send_failed(descriptor.error());
+    return;
+  }
+  (void)transfer.completed_upload_minute_limiter.try_consume(1.0, now_seconds);
+  (void)transfer.completed_upload_hour_limiter.try_consume(1.0, now_seconds);
+  skin_storage_bytes_ += added_storage_bytes;
   set_selected_skin_hash_for_session(*session, descriptor.value().skin_hash);
+  core::info(
+      "skin",
+      "skin upload complete: profile={} skin={} bytes={}",
+      session->profile_id.string(),
+      descriptor.value().skin_hash,
+      upload.bytes.size());
   (void)send_protocol_message(
       *transport_,
       connection_id,
