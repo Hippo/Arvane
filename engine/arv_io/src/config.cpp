@@ -27,6 +27,10 @@ constexpr std::string_view kSavesDirectoryName = "saves";
 constexpr std::string_view kLogsDirectoryName = "logs";
 constexpr std::string_view kCacheDirectoryName = "cache";
 
+void emit_render_atlases_config(
+    YAML::Emitter& emitter,
+    const RenderConfig::AtlasesConfig& atlases);
+
 template<typename T>
 void read_scalar(const YAML::Node& parent, const char* key, T& value) {
   const YAML::Node child = parent[key];
@@ -80,6 +84,51 @@ void read_block_outline_config(
     config.color_b = color[2].as<f32>();
   }
   read_scalar(outline, "thickness", config.thickness);
+}
+
+void read_render_atlases_config(
+    const YAML::Node& render,
+    RenderConfig::AtlasesConfig& config) {
+  const YAML::Node atlases = render["atlases"];
+  if (!atlases) {
+    return;
+  }
+  const auto read_static_atlas = [&](const char* key, RenderConfig::StaticAtlasConfig& atlas_config) {
+    const YAML::Node atlas = atlases[key];
+    if (!atlas) {
+      return;
+    }
+    read_scalar(atlas, "page_size", atlas_config.page_size);
+    read_scalar(atlas, "max_pages", atlas_config.max_pages);
+  };
+  read_static_atlas("blocks", config.blocks);
+  read_static_atlas("entities", config.entities);
+  read_static_atlas("ui", config.ui);
+  read_static_atlas("fonts", config.fonts);
+  read_static_atlas("particles", config.particles);
+
+  const YAML::Node player_skins = atlases["player_skins"];
+  if (!player_skins) {
+    return;
+  }
+  read_scalar(player_skins, "page_size", config.player_skins.page_size);
+  read_scalar(player_skins, "max_pages", config.player_skins.max_pages);
+
+  const YAML::Node cleanup = player_skins["cleanup"];
+  if (cleanup) {
+    read_scalar(cleanup, "interval_seconds", config.player_skins.cleanup.interval_seconds);
+    read_scalar(
+        cleanup,
+        "evict_after_unused_seconds",
+        config.player_skins.cleanup.evict_after_unused_seconds);
+  }
+
+  const YAML::Node pressure = player_skins["pressure_cleanup"];
+  if (pressure) {
+    read_scalar(pressure, "enabled", config.player_skins.pressure_cleanup.enabled);
+    read_scalar(pressure, "usage_threshold", config.player_skins.pressure_cleanup.usage_threshold);
+    read_scalar(pressure, "target_usage", config.player_skins.pressure_cleanup.target_usage);
+  }
 }
 
 void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
@@ -565,6 +614,7 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "thickness" << YAML::Value
           << config.render.block_outline.thickness;
   emitter << YAML::EndMap;
+  emit_render_atlases_config(emitter, config.render.atlases);
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
@@ -676,6 +726,44 @@ void emit_skins_config(YAML::Emitter& emitter, const SkinConfig& skins) {
   emitter << YAML::Key << "max_skins_per_profile" << YAML::Value
           << skins.storage.max_skins_per_profile;
   emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
+}
+
+void emit_render_atlases_config(
+    YAML::Emitter& emitter,
+    const RenderConfig::AtlasesConfig& atlases) {
+  emitter << YAML::Key << "atlases" << YAML::Value << YAML::BeginMap;
+  const auto emit_static_atlas = [&emitter](
+                                     std::string_view name,
+                                     const RenderConfig::StaticAtlasConfig& atlas) {
+    emitter << YAML::Key << std::string{name} << YAML::Value << YAML::BeginMap;
+    emitter << YAML::Key << "page_size" << YAML::Value << atlas.page_size;
+    emitter << YAML::Key << "max_pages" << YAML::Value << atlas.max_pages;
+    emitter << YAML::EndMap;
+  };
+  emit_static_atlas("blocks", atlases.blocks);
+  emit_static_atlas("entities", atlases.entities);
+  emit_static_atlas("ui", atlases.ui);
+  emit_static_atlas("fonts", atlases.fonts);
+  emitter << YAML::Key << "player_skins" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "page_size" << YAML::Value << atlases.player_skins.page_size;
+  emitter << YAML::Key << "max_pages" << YAML::Value << atlases.player_skins.max_pages;
+  emitter << YAML::Key << "cleanup" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "interval_seconds" << YAML::Value
+          << atlases.player_skins.cleanup.interval_seconds;
+  emitter << YAML::Key << "evict_after_unused_seconds" << YAML::Value
+          << atlases.player_skins.cleanup.evict_after_unused_seconds;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "pressure_cleanup" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "enabled" << YAML::Value
+          << atlases.player_skins.pressure_cleanup.enabled;
+  emitter << YAML::Key << "usage_threshold" << YAML::Value
+          << atlases.player_skins.pressure_cleanup.usage_threshold;
+  emitter << YAML::Key << "target_usage" << YAML::Value
+          << atlases.player_skins.pressure_cleanup.target_usage;
+  emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
+  emit_static_atlas("particles", atlases.particles);
   emitter << YAML::EndMap;
 }
 
@@ -903,6 +991,7 @@ ConfigResult save_default_client_config_file(
   emitter << YAML::Key << "thickness" << YAML::Value
           << config.render.block_outline.thickness;
   emitter << YAML::EndMap;
+  emit_render_atlases_config(emitter, config.render.atlases);
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
@@ -1025,6 +1114,7 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_scalar(render, "frame_pacing_spin_us", config.render.frame_pacing_spin_us);
     read_scalar(render, "show_local_player_body", config.render.show_local_player_body);
     read_block_outline_config(render, config.render.block_outline);
+    read_render_atlases_config(render, config.render.atlases);
   }
 
   const YAML::Node chunk_pipeline = root["chunk_pipeline"];
@@ -1284,6 +1374,25 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   if (!std::isfinite(config.render.block_outline.thickness) ||
       config.render.block_outline.thickness <= 0.0F) {
     return ConfigError{"render.block_outline.thickness must be finite and > 0"};
+  }
+  if (config.render.atlases.player_skins.page_size == 0U ||
+      config.render.atlases.player_skins.max_pages == 0U) {
+    return ConfigError{"render.atlases.player_skins page_size and max_pages must be non-zero"};
+  }
+  if (config.render.atlases.player_skins.cleanup.interval_seconds == 0U ||
+      config.render.atlases.player_skins.cleanup.evict_after_unused_seconds == 0U) {
+    return ConfigError{"render.atlases.player_skins cleanup intervals must be non-zero"};
+  }
+  if (!std::isfinite(config.render.atlases.player_skins.pressure_cleanup.usage_threshold) ||
+      !std::isfinite(config.render.atlases.player_skins.pressure_cleanup.target_usage) ||
+      config.render.atlases.player_skins.pressure_cleanup.usage_threshold <= 0.0F ||
+      config.render.atlases.player_skins.pressure_cleanup.usage_threshold > 1.0F ||
+      config.render.atlases.player_skins.pressure_cleanup.target_usage <= 0.0F ||
+      config.render.atlases.player_skins.pressure_cleanup.target_usage > 1.0F ||
+      config.render.atlases.player_skins.pressure_cleanup.target_usage >
+          config.render.atlases.player_skins.pressure_cleanup.usage_threshold) {
+    return ConfigError{
+        "render.atlases.player_skins pressure thresholds must be finite in (0, 1] and target <= usage"};
   }
   if (config.chunk_pipeline.max_generation_jobs_per_frame == 0U ||
       config.chunk_pipeline.max_generation_results_per_tick == 0U ||

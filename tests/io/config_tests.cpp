@@ -132,6 +132,32 @@ render:
   block_outline:
     color: [0.1, 0.2, 0.3]
     thickness: 0.75
+  atlases:
+    blocks:
+      page_size: 1024
+      max_pages: 2
+    entities:
+      page_size: 1536
+      max_pages: 5
+    ui:
+      page_size: 512
+      max_pages: 6
+    fonts:
+      page_size: 1024
+      max_pages: 7
+    player_skins:
+      page_size: 1024
+      max_pages: 3
+      cleanup:
+        interval_seconds: 30
+        evict_after_unused_seconds: 120
+      pressure_cleanup:
+        enabled: false
+        usage_threshold: 0.9
+        target_usage: 0.5
+    particles:
+      page_size: 256
+      max_pages: 2
 chunk_pipeline:
   max_generation_jobs_per_frame: 2
   max_generation_results_per_tick: 3
@@ -219,6 +245,29 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().render.block_outline.color_g, 0.2F);
   EXPECT_FLOAT_EQ(result.value().render.block_outline.color_b, 0.3F);
   EXPECT_FLOAT_EQ(result.value().render.block_outline.thickness, 0.75F);
+  EXPECT_EQ(result.value().render.atlases.blocks.page_size, 1024U);
+  EXPECT_EQ(result.value().render.atlases.blocks.max_pages, 2U);
+  EXPECT_EQ(result.value().render.atlases.entities.page_size, 1536U);
+  EXPECT_EQ(result.value().render.atlases.entities.max_pages, 5U);
+  EXPECT_EQ(result.value().render.atlases.ui.page_size, 512U);
+  EXPECT_EQ(result.value().render.atlases.ui.max_pages, 6U);
+  EXPECT_EQ(result.value().render.atlases.fonts.page_size, 1024U);
+  EXPECT_EQ(result.value().render.atlases.fonts.max_pages, 7U);
+  EXPECT_EQ(result.value().render.atlases.player_skins.page_size, 1024U);
+  EXPECT_EQ(result.value().render.atlases.player_skins.max_pages, 3U);
+  EXPECT_EQ(result.value().render.atlases.player_skins.cleanup.interval_seconds, 30U);
+  EXPECT_EQ(
+      result.value().render.atlases.player_skins.cleanup.evict_after_unused_seconds,
+      120U);
+  EXPECT_FALSE(result.value().render.atlases.player_skins.pressure_cleanup.enabled);
+  EXPECT_FLOAT_EQ(
+      result.value().render.atlases.player_skins.pressure_cleanup.usage_threshold,
+      0.9F);
+  EXPECT_FLOAT_EQ(
+      result.value().render.atlases.player_skins.pressure_cleanup.target_usage,
+      0.5F);
+  EXPECT_EQ(result.value().render.atlases.particles.page_size, 256U);
+  EXPECT_EQ(result.value().render.atlases.particles.max_pages, 2U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_jobs_per_frame, 2U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_results_per_tick, 3U);
   EXPECT_EQ(result.value().chunk_pipeline.max_lighting_results_per_tick, 4U);
@@ -328,6 +377,29 @@ TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
   EXPECT_EQ(config.skins.downloads.max_batch_size, 16U);
   EXPECT_EQ(config.skins.storage.max_total_skin_bytes, 1024ULL * 1024ULL * 1024ULL);
   EXPECT_EQ(config.skins.storage.max_skins_per_profile, 16U);
+  EXPECT_EQ(config.render.atlases.blocks.page_size, 4096U);
+  EXPECT_EQ(config.render.atlases.blocks.max_pages, 8U);
+  EXPECT_EQ(config.render.atlases.entities.page_size, 2048U);
+  EXPECT_EQ(config.render.atlases.entities.max_pages, 8U);
+  EXPECT_EQ(config.render.atlases.ui.page_size, 2048U);
+  EXPECT_EQ(config.render.atlases.ui.max_pages, 4U);
+  EXPECT_EQ(config.render.atlases.fonts.page_size, 2048U);
+  EXPECT_EQ(config.render.atlases.fonts.max_pages, 4U);
+  EXPECT_EQ(config.render.atlases.player_skins.page_size, 2048U);
+  EXPECT_EQ(config.render.atlases.player_skins.max_pages, 8U);
+  EXPECT_EQ(config.render.atlases.player_skins.cleanup.interval_seconds, 60U);
+  EXPECT_EQ(
+      config.render.atlases.player_skins.cleanup.evict_after_unused_seconds,
+      300U);
+  EXPECT_TRUE(config.render.atlases.player_skins.pressure_cleanup.enabled);
+  EXPECT_FLOAT_EQ(
+      config.render.atlases.player_skins.pressure_cleanup.usage_threshold,
+      0.85F);
+  EXPECT_FLOAT_EQ(
+      config.render.atlases.player_skins.pressure_cleanup.target_usage,
+      0.65F);
+  EXPECT_EQ(config.render.atlases.particles.page_size, 2048U);
+  EXPECT_EQ(config.render.atlases.particles.max_pages, 4U);
 }
 
 TEST(ConfigTests, RejectsInvalidSkinResolution) {

@@ -960,10 +960,8 @@ private:
 
     renderer_.clear_entity_models();
     if (!assets.models.empty()) {
-      render::TextureUploadData entity_atlas_upload =
-          texture_upload_from_image(assets.texture_atlas.pages.front().image);
-      entity_atlas_upload.limit_mipmap_levels = true;
-      entity_atlas_upload.max_mipmap_level = assets.texture_atlas.mip_safe_max_level;
+      render::TextureArrayUploadData entity_atlas_upload =
+          texture_array_upload_from_atlas(assets.texture_atlas);
       renderer_.set_entity_texture_atlas(std::move(entity_atlas_upload));
       for (const render::EntityModelAsset& model : assets.models) {
         renderer_.set_entity_model(model);
@@ -985,8 +983,7 @@ private:
          active_session.client->player_profile_infos()) {
       const std::string& skin_hash = profile.skin.skin_hash;
       if (skin_hash.empty() ||
-          assets_.entity_render_assets.player_model_by_skin_hash.find(skin_hash) !=
-              assets_.entity_render_assets.player_model_by_skin_hash.end() ||
+          player_skin_regions_.find(skin_hash) != player_skin_regions_.end() ||
           new_images.find(skin_hash) != new_images.end()) {
         continue;
       }
@@ -1000,37 +997,12 @@ private:
       return;
     }
 
-    std::vector<PlayerSkinTextureInput> skin_inputs;
-    skin_inputs.reserve(
-        player_skin_images_.size() + new_images.size());
-    for (const auto& [skin_hash, image] : player_skin_images_) {
-      skin_inputs.push_back({skin_hash, image});
-    }
     for (const auto& [skin_hash, image] : new_images) {
-      skin_inputs.push_back({skin_hash, image});
-    }
-
-    auto rebuilt = build_entity_render_assets(
-        resources_,
-        assets_.entity_registry,
-        assets_.item_registry,
-        assets_.block_registry,
-        std::span<const asset::BlockModelAssetData>{},
-        BlockOutlineRenderConfig{
-            {config_.render.block_outline.color_r,
-             config_.render.block_outline.color_g,
-             config_.render.block_outline.color_b},
-            config_.render.block_outline.thickness},
-        skin_inputs);
-    if (!rebuilt) {
-      core::warn("entities", rebuilt.error().message);
-      return;
-    }
-    if (!install_entity_render_assets(std::move(rebuilt.value()))) {
-      return;
-    }
-    for (auto& [skin_hash, image] : new_images) {
-      player_skin_images_[skin_hash] = std::move(image);
+      std::optional<render::TextureRegionHandle> handle =
+          renderer_.upload_player_skin_texture(skin_hash, texture_upload_from_image(image));
+      if (handle.has_value()) {
+        player_skin_regions_[skin_hash] = handle.value();
+      }
     }
   }
 
@@ -1054,6 +1026,7 @@ private:
         frame,
         *active_session,
         assets_.entity_render_assets,
+        player_skin_regions_,
         config_.render.show_local_player_body,
         now,
         app_start_time_,
@@ -1135,7 +1108,7 @@ private:
         frame);
     if (assets_.font_system.atlas_dirty()) {
       renderer_.set_ui_font_atlas(
-          texture_upload_from_image(assets_.font_system.atlas_image()));
+          texture_array_upload_from_image(assets_.font_system.atlas_image()));
       assets_.font_system.clear_atlas_dirty();
     }
   }
@@ -1328,7 +1301,7 @@ private:
   Seconds fps_sample_seconds_{};
   double last_frame_work_ms_{};
   u64 profile_frame_index_{};
-  HashMap<std::string, asset::Image> player_skin_images_{};
+  HashMap<std::string, render::TextureRegionHandle> player_skin_regions_{};
 
   static constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
 };

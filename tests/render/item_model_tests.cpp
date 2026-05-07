@@ -15,6 +15,7 @@ TEST(ItemModelTests, ExtrudesOnlyVisibleTexturePixels) {
                                                                                               2U,
                                                                                               std::span<const arv::u8>{pixels.data(), pixels.size()},
                                                                                               {10, 20},
+                                                                                              0,
                                                                                               2.0F});
 
   EXPECT_EQ(model.id, (arv::render::EntityModelID{42}));
@@ -43,6 +44,7 @@ TEST(ItemModelTests, DoesNotEmitInteriorSideFacesBetweenVisiblePixels) {
                                                                                               1U,
                                                                                               std::span<const arv::u8>{pixels.data(), pixels.size()},
                                                                                               {0, 0},
+                                                                                              0,
                                                                                               2.0F});
 
   EXPECT_EQ(model.vertices.size(), 40U);
@@ -56,6 +58,7 @@ TEST(ItemModelTests, BuildsBlockItemCubeFromFaceUvs) {
   for (const arv::voxel::BlockFace face : arv::voxel::AllBlockFaces) {
     const arv::usize index = arv::voxel::face_index(face);
     input.face_valid[index] = true;
+    input.face_pages[index] = 4;
     input.face_uvs[index] = {{{0, 16}, {16, 16}, {0, 0}, {16, 0}}};
   }
 
@@ -64,6 +67,8 @@ TEST(ItemModelTests, BuildsBlockItemCubeFromFaceUvs) {
   EXPECT_EQ(model.id, (arv::render::EntityModelID{44}));
   EXPECT_EQ(model.vertices.size(), 24U);
   EXPECT_EQ(model.indices.size(), 36U);
+  ASSERT_FALSE(model.vertices.empty());
+  EXPECT_EQ(model.vertices.front().atlas_page, 4U);
 }
 
 TEST(ItemModelTests, BuildsBlockItemFromModelBoxes) {

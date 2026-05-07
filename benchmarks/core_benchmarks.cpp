@@ -150,6 +150,7 @@ void BM_PackedVertexGeneration(benchmark::State& state) {
         model_position,
         static_cast<arv::u16>(index & 0xFFFFU),
         static_cast<arv::u16>((index * 3U) & 0xFFFFU),
+        static_cast<arv::u16>((index >> 16U) & 0xFFFFU),
         arv::voxel::BlockFace::PositiveY,
         static_cast<arv::u8>(index & 3U),
         static_cast<arv::u8>(index & 15U),

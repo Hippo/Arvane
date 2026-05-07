@@ -1151,6 +1151,11 @@ Text length must be limited by document validation.
 
 Image/icon display element.
 
+Resolved images use renderer-owned atlas metadata: source binding, normalized
+UVs, and page/layer index. The UI renderer samples image and font bindings as
+texture arrays, so UI batches do not need to split only because two icons or
+glyphs live on different pages of the same domain.
+
 Allowed children:
 
 ```text

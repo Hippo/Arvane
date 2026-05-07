@@ -2,12 +2,14 @@
 
 #include "arv/core/types.hpp"
 #include "arv/render/entity_model.hpp"
+#include "arv/render/paged_texture_atlas.hpp"
 #include "arv/render/render_types.hpp"
 
 #include <glad/glad.h>
 
 #include <array>
 #include <deque>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,10 +20,14 @@ public:
   void set_chunk_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_entity_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_ui_shader_sources(std::string vertex_source, std::string fragment_source);
-  void set_chunk_texture_atlas(TextureUploadData upload);
-  void set_entity_texture_atlas(TextureUploadData upload);
-  void set_ui_font_atlas(TextureUploadData upload);
-  void set_ui_item_atlas(TextureUploadData upload);
+  void set_chunk_texture_atlas(TextureArrayUploadData upload);
+  void set_entity_texture_atlas(TextureArrayUploadData upload);
+  void set_ui_font_atlas(TextureArrayUploadData upload);
+  void set_ui_item_atlas(TextureArrayUploadData upload);
+  void configure_player_skin_atlas(PlayerSkinAtlasConfig config);
+  [[nodiscard]] std::optional<TextureRegionHandle> upload_player_skin_texture(
+      std::string skin_hash,
+      TextureUploadData upload);
   void set_entity_model(EntityModelAsset model);
   void clear_entity_models();
 
@@ -117,6 +123,7 @@ private:
     GLuint id{};
     u32 width{};
     u32 height{};
+    u32 layers{};
   };
 
   static constexpr usize MaxEntityShaderBones = 128;
@@ -134,6 +141,8 @@ private:
     Vec3f position{};
     Quatf rotation{};
     f32 scale{1.0F};
+    Vec4f player_skin_region{};
+    u32 player_skin_page{};
   };
 
   void process_chunk_mesh_uploads();
@@ -156,8 +165,11 @@ private:
 
   static void destroy_entity_gpu_model(EntityGpuModel& model);
 
-  [[nodiscard]] static GpuTexture create_texture(const TextureUploadData& upload, bool mipmaps);
+  [[nodiscard]] static GpuTexture create_texture_array(
+      const TextureArrayUploadData& upload,
+      bool mipmaps);
   void note_texture_upload(const TextureUploadData& upload) noexcept;
+  void note_texture_upload(const TextureArrayUploadData& upload) noexcept;
 
   [[nodiscard]] static GLuint compile_shader(GLenum type, const char* source);
 
@@ -221,6 +233,8 @@ private:
   GLint entity_camera_far_uniform_{-1};
   GLint entity_atlas_size_uniform_{-1};
   GLint entity_atlas_uniform_{-1};
+  GLint entity_player_skin_atlas_size_uniform_{-1};
+  GLint entity_player_skin_atlas_uniform_{-1};
   GLint entity_daylight_color_uniform_{-1};
   GLint entity_daylight_strength_uniform_{-1};
   GLint entity_ambient_color_uniform_{-1};
@@ -268,6 +282,8 @@ private:
   GpuTexture font_atlas_{};
   GpuTexture item_atlas_{};
   GpuTexture white_texture_{};
+  PlayerSkinAtlas player_skin_atlas_{};
+  u64 render_frame_index_{};
   GLuint ui_vao_{};
   GLuint ui_vertex_buffer_{};
   GLuint ui_index_buffer_{};

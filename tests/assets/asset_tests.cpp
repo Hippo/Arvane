@@ -38,6 +38,24 @@ arv::asset::Image make_test_image(std::array<arv::u8, 4> a, std::array<arv::u8, 
   return image;
 }
 
+arv::asset::Image make_solid_image(
+    arv::u32 width,
+    arv::u32 height,
+    std::array<arv::u8, 4> color) {
+  arv::asset::Image image;
+  image.width = width;
+  image.height = height;
+  image.channels = 4;
+  image.pixels.resize(static_cast<arv::usize>(width) * height * 4U);
+  for (arv::usize offset = 0; offset < image.pixels.size(); offset += 4U) {
+    image.pixels[offset + 0U] = color[0];
+    image.pixels[offset + 1U] = color[1];
+    image.pixels[offset + 2U] = color[2];
+    image.pixels[offset + 3U] = color[3];
+  }
+  return image;
+}
+
 std::array<arv::u8, 4> pixel_at(const arv::asset::Image& image, arv::u32 x, arv::u32 y) {
   const arv::usize offset = (static_cast<arv::usize>(y) * image.width + x) * 4U;
   return {{
@@ -112,6 +130,37 @@ TEST(TextureAtlasTests, RecordsPaddingSafeMipmapLimit) {
   ASSERT_TRUE(atlas);
   EXPECT_EQ(atlas.value().padding, 4U);
   EXPECT_EQ(atlas.value().mip_safe_max_level, 2U);
+}
+
+TEST(TextureAtlasTests, SpillsAcrossConfiguredPages) {
+  const std::array<arv::asset::TextureAtlasInput, 2> inputs{{
+      {{"arvane:texture/block/one"}, make_solid_image(4, 4, {1, 2, 3, 255}), false},
+      {{"arvane:texture/block/two"}, make_solid_image(4, 4, {4, 5, 6, 255}), false},
+  }};
+
+  auto atlas = arv::asset::build_texture_atlas(
+      inputs,
+      {.max_page_size = 4, .max_pages = 2, .padding = 0});
+
+  ASSERT_TRUE(atlas);
+  ASSERT_EQ(atlas.value().pages.size(), 2U);
+  ASSERT_NE(atlas.value().find("arvane:texture/block/one"), nullptr);
+  ASSERT_NE(atlas.value().find("arvane:texture/block/two"), nullptr);
+  EXPECT_EQ(atlas.value().find("arvane:texture/block/one")->page, 0U);
+  EXPECT_EQ(atlas.value().find("arvane:texture/block/two")->page, 1U);
+}
+
+TEST(TextureAtlasTests, FailsWhenConfiguredPagesAreFull) {
+  const std::array<arv::asset::TextureAtlasInput, 2> inputs{{
+      {{"arvane:texture/block/one"}, make_solid_image(4, 4, {1, 2, 3, 255}), false},
+      {{"arvane:texture/block/two"}, make_solid_image(4, 4, {4, 5, 6, 255}), false},
+  }};
+
+  auto atlas = arv::asset::build_texture_atlas(
+      inputs,
+      {.max_page_size = 4, .max_pages = 1, .padding = 0});
+
+  EXPECT_FALSE(atlas);
 }
 
 TEST(TextureAtlasTests, BuildsBlockAtlasRenderDataForInputTexturedModels) {

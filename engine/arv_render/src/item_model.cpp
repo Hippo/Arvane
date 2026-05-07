@@ -12,6 +12,7 @@ struct Quad {
   std::array<Vec3f, 4> positions{};
   std::array<Vec2f, 4> uvs{};
   Vec3f color{1.0F, 1.0F, 1.0F};
+  u32 atlas_page{};
 };
 
 enum class EdgeAxis : u8 {
@@ -52,7 +53,14 @@ using OccupancyGrid = std::array<bool, 16U * 16U * 16U>;
 void append_quad(EntityModelAsset& asset, const Quad& quad) {
   const u32 base = static_cast<u32>(asset.vertices.size());
   for (usize index = 0; index < quad.positions.size(); ++index) {
-    asset.vertices.push_back({quad.positions[index], quad.uvs[index], quad.color, 0U});
+    asset.vertices.push_back({
+        quad.positions[index],
+        quad.uvs[index],
+        quad.color,
+        0U,
+        0U,
+        static_cast<u32>(TextureAtlasDomain::Entities),
+        quad.atlas_page});
   }
   asset.indices.insert(
       asset.indices.end(),
@@ -111,40 +119,46 @@ void append_texture_pixel(
       asset,
       Quad{{{{x0, y0, z1}, {x1, y0, z1}, {x0, y1, z1}, {x1, y1, z1}}},
            uvs,
-           face_color(voxel::BlockFace::PositiveZ)});
+           face_color(voxel::BlockFace::PositiveZ),
+           input.atlas_page});
   append_quad(
       asset,
       Quad{{{{x1, y0, z0}, {x0, y0, z0}, {x1, y1, z0}, {x0, y1, z0}}},
            std::array<Vec2f, 4>{{uvs[1], uvs[0], uvs[3], uvs[2]}},
-           face_color(voxel::BlockFace::NegativeZ)});
+           face_color(voxel::BlockFace::NegativeZ),
+           input.atlas_page});
 
   if (!visible_pixel(input, static_cast<i32>(x) - 1, static_cast<i32>(y))) {
     append_quad(
         asset,
         Quad{{{{x0, y0, z0}, {x0, y0, z1}, {x0, y1, z0}, {x0, y1, z1}}},
              std::array<Vec2f, 4>{{uvs[0], uvs[1], uvs[2], uvs[3]}},
-             face_color(voxel::BlockFace::NegativeX)});
+             face_color(voxel::BlockFace::NegativeX),
+             input.atlas_page});
   }
   if (!visible_pixel(input, static_cast<i32>(x) + 1, static_cast<i32>(y))) {
     append_quad(
         asset,
         Quad{{{{x1, y0, z1}, {x1, y0, z0}, {x1, y1, z1}, {x1, y1, z0}}},
              std::array<Vec2f, 4>{{uvs[1], uvs[0], uvs[3], uvs[2]}},
-             face_color(voxel::BlockFace::PositiveX)});
+             face_color(voxel::BlockFace::PositiveX),
+             input.atlas_page});
   }
   if (!visible_pixel(input, static_cast<i32>(x), static_cast<i32>(y) - 1)) {
     append_quad(
         asset,
         Quad{{{{x0, y1, z1}, {x1, y1, z1}, {x0, y1, z0}, {x1, y1, z0}}},
              std::array<Vec2f, 4>{{uvs[2], uvs[3], uvs[0], uvs[1]}},
-             face_color(voxel::BlockFace::PositiveY)});
+             face_color(voxel::BlockFace::PositiveY),
+             input.atlas_page});
   }
   if (!visible_pixel(input, static_cast<i32>(x), static_cast<i32>(y) + 1)) {
     append_quad(
         asset,
         Quad{{{{x0, y0, z0}, {x1, y0, z0}, {x0, y0, z1}, {x1, y0, z1}}},
              std::array<Vec2f, 4>{{uvs[0], uvs[1], uvs[2], uvs[3]}},
-             face_color(voxel::BlockFace::NegativeY)});
+             face_color(voxel::BlockFace::NegativeY),
+             input.atlas_page});
   }
 }
 
@@ -388,6 +402,7 @@ constexpr std::array<CubeFaceGeometry, voxel::BlockFaceCount> CubeFaces{{
 void append_projected_cell_face(
     EntityModelAsset& asset,
     const std::array<std::array<Vec2i, 4>, voxel::BlockFaceCount>& face_uvs,
+    const std::array<u16, voxel::BlockFaceCount>& face_pages,
     i32 x,
     i32 y,
     i32 z,
@@ -432,7 +447,8 @@ void append_projected_cell_face(
         projected_uv(face_uvs, face, p[1]),
         projected_uv(face_uvs, face, p[2]),
         projected_uv(face_uvs, face, p[3])},
-       color});
+       color,
+       face_pages[voxel::face_index(face)]});
 }
 
 void append_box(
@@ -440,7 +456,8 @@ void append_box(
     Vec3f min,
     Vec3f max,
     const std::array<Vec2f, 4>& uvs,
-    Vec3f color) {
+    Vec3f color,
+    u16 atlas_page) {
   if (max.x <= min.x || max.y <= min.y || max.z <= min.z) {
     return;
   }
@@ -453,12 +470,12 @@ void append_box(
   const Vec3f p110 = centered(max.x, max.y, min.z);
   const Vec3f p111 = centered(max.x, max.y, max.z);
 
-  append_quad(asset, {{{p101, p100, p111, p110}}, uvs, color});
-  append_quad(asset, {{{p000, p001, p010, p011}}, uvs, color});
-  append_quad(asset, {{{p011, p111, p010, p110}}, uvs, color});
-  append_quad(asset, {{{p100, p000, p110, p010}}, uvs, color});
-  append_quad(asset, {{{p001, p101, p011, p111}}, uvs, color});
-  append_quad(asset, {{{p100, p000, p101, p001}}, uvs, color});
+  append_quad(asset, {{{p101, p100, p111, p110}}, uvs, color, atlas_page});
+  append_quad(asset, {{{p000, p001, p010, p011}}, uvs, color, atlas_page});
+  append_quad(asset, {{{p011, p111, p010, p110}}, uvs, color, atlas_page});
+  append_quad(asset, {{{p100, p000, p110, p010}}, uvs, color, atlas_page});
+  append_quad(asset, {{{p001, p101, p011, p111}}, uvs, color, atlas_page});
+  append_quad(asset, {{{p100, p000, p101, p001}}, uvs, color, atlas_page});
 }
 
 void add_edge_segment(
@@ -618,7 +635,8 @@ void append_edge_box(
     f32 thickness,
     f32 inflate,
     const std::array<Vec2f, 4>& uvs,
-    Vec3f color) {
+    Vec3f color,
+    u16 atlas_page) {
   const f32 t = std::max(thickness, 0.01F) * 0.5F;
   const f32 a = static_cast<f32>(edge.a);
   const f32 b = static_cast<f32>(edge.b);
@@ -631,7 +649,8 @@ void append_edge_box(
           {start - inflate, a - t, b - t},
           {end + inflate, a + t, b + t},
           uvs,
-          color);
+          color,
+          atlas_page);
       break;
     case EdgeAxis::Y:
       append_box(
@@ -639,7 +658,8 @@ void append_edge_box(
           {a - t, start - inflate, b - t},
           {a + t, end + inflate, b + t},
           uvs,
-          color);
+          color,
+          atlas_page);
       break;
     case EdgeAxis::Z:
       append_box(
@@ -647,7 +667,8 @@ void append_edge_box(
           {a - t, b - t, start - inflate},
           {a + t, b + t, end + inflate},
           uvs,
-          color);
+          color,
+          atlas_page);
       break;
   }
 }
@@ -687,7 +708,10 @@ EntityModelAsset build_block_item_model(const ItemBlockModelInput& input) {
         }
         append_quad(
             asset,
-            {model_box_face_corners(box, face), to_vec2f(box.faces[index]->uvs), face_color(face)});
+            {model_box_face_corners(box, face),
+             to_vec2f(box.faces[index]->uvs),
+             face_color(face),
+             box.faces[index]->page});
       }
     }
     return asset;
@@ -700,7 +724,10 @@ EntityModelAsset build_block_item_model(const ItemBlockModelInput& input) {
     }
     append_quad(
         asset,
-        {face.corners, to_vec2f(input.face_uvs[index]), face_color(face.face)});
+        {face.corners,
+         to_vec2f(input.face_uvs[index]),
+         face_color(face.face),
+         input.face_pages[index]});
   }
 
   return asset;
@@ -725,6 +752,7 @@ EntityModelAsset build_block_break_overlay_model(const BlockBreakOverlayModelInp
               append_projected_cell_face(
                   asset,
                   input.face_uvs,
+                  input.face_pages,
                   x,
                   y,
                   z,
@@ -767,7 +795,7 @@ EntityModelAsset build_block_outline_model(const BlockOutlineModelInput& input) 
     }
   }
   for (const EdgeSegment& edge : merged_edges(std::move(edge_segments))) {
-    append_edge_box(asset, edge, thickness, inflate, uvs, input.color);
+    append_edge_box(asset, edge, thickness, inflate, uvs, input.color, input.atlas_page);
   }
   return asset;
 }

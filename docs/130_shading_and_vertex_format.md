@@ -70,10 +70,15 @@ struct ChunkVertex {
     u32 pos_ao;
     u32 uv;
     u32 light_face_material_hints;
+    u32 atlas_page;
 };
 ```
 
-Total size: **12 bytes per vertex**
+Total size: **16 bytes per vertex**
+
+`atlas_page` is a flat texture-array layer index for the block atlas. It is kept
+outside the packed lighting/material word so chunk lighting, face, material
+class, animation, and material flags keep their documented bit layout.
 
 ---
 
@@ -140,6 +145,7 @@ Shader reconstruction:
 
 ```text
 uv = vec2(atlas_u, atlas_v) / vec2(atlas_width, atlas_height)
+texel = texture(block_atlas, vec3(uv, atlas_page))
 ```
 
 ---
@@ -325,6 +331,8 @@ struct EntityVertex {
     Vec3f color;
     u32 bone_index;
     u32 flags;
+    u32 texture_domain;
+    u32 atlas_page;
 };
 ```
 
@@ -342,6 +350,15 @@ Supports:
 * `SkinDecorLayer`: transparent texels are discarded
 * no flag: existing entity cutout behavior is used
 
+`texture_domain` selects the atlas domain for the face. Authored entity, item,
+outline, and overlay geometry uses `TextureAtlasDomain::Entities`. Dynamic
+player skin geometry uses `TextureAtlasDomain::PlayerSkins`.
+
+`atlas_page` is flat page/layer data for domains where the page is static per
+vertex. Player skins currently carry page and region through instance data so
+multiple players with different skins can share the same dynamic player model
+and draw batch.
+
 ---
 
 ## UI Vertex Layout
@@ -351,6 +368,8 @@ struct UIVertex {
     Vec2f position;
     Vec2f uv;
     Vec4f color;
+    f32 texture_slot;
+    u32 atlas_page;
 };
 ```
 
@@ -358,7 +377,11 @@ Supports:
 
 * quads
 * text
-* batching
+* batching across pages within the selected UI texture-array binding
+
+`texture_slot` selects the UI binding (`White`, `Fonts`, `Blocks`/terrain
+icons, or `UiImages`/item icons). `atlas_page` is flat layer data for that
+binding.
 
 ---
 
@@ -585,10 +608,22 @@ material/fluid/biome tint path rather than the packed vertex.
 
 Textures are resolved via **material bindings**.
 
-* chunk → `terrain_atlas`
-* UI → `ui_atlas`
+* chunk → `terrain_atlas` (`sampler2DArray`)
+* entity → `entity_atlas` and `player_skin_atlas` (`sampler2DArray`)
+* UI → texture-array slots for white, fonts, terrain icons, and UI/item images
 
 Shaders never care about texture origin.
+They do care about texture domain. Paged atlas domains are sampled through
+`sampler2DArray`, where the page index is the texture-array layer:
+
+```glsl
+flat in uint vAtlasPage;
+vec4 texel = texture(uAtlasArray, vec3(uv, float(vAtlasPage)));
+```
+
+The page value must be flat/non-interpolated. For player skins, the entity shader
+receives a per-instance resident region and layer, then transforms normalized
+model UVs into the `PlayerSkins` texture-array page.
 
 ---
 
@@ -652,7 +687,7 @@ System is correct if:
 The rendering pipeline uses:
 
 * strict vertex layouts per domain
-* a packed 12-byte chunk vertex
+* a packed 16-byte chunk vertex
 * runtime-resolved atlas UVs
 * precomputed AO and lighting
 * compact render-facing material hints

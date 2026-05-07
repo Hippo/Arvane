@@ -159,6 +159,7 @@ void populate_world_frame_draw_items(
     render::FramePacket& frame,
     DesktopGameSession& session,
     const EntityRenderAssets& entity_render_assets,
+    const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
     bool show_local_player_body,
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point app_start_time,
@@ -194,19 +195,17 @@ void populate_world_frame_draw_items(
             ? session.client->profile_info_for_player(mirror.owning_player.value())
             : nullptr;
     bool using_first_person_skin = false;
+    render::TextureRegionHandle player_skin_region;
     if (profile != nullptr && !profile->skin.skin_hash.empty()) {
-      if (const auto skinned =
-              entity_render_assets.player_model_by_skin_hash.find(profile->skin.skin_hash);
-          skinned != entity_render_assets.player_model_by_skin_hash.end()) {
-        model_id = skinned->second;
-      }
-      if (is_local_player) {
-        if (const auto first_person_skinned =
-                entity_render_assets.first_person_player_model_by_skin_hash.find(
-                    profile->skin.skin_hash);
-            first_person_skinned !=
-            entity_render_assets.first_person_player_model_by_skin_hash.end()) {
-          model_id = first_person_skinned->second;
+      if (const auto region = player_skin_regions.find(profile->skin.skin_hash);
+          region != player_skin_regions.end() && region->second.valid()) {
+        player_skin_region = region->second;
+        if (entity_render_assets.player_skin_model.value != 0U) {
+          model_id = entity_render_assets.player_skin_model;
+        }
+        if (is_local_player &&
+            entity_render_assets.first_person_player_skin_model.value != 0U) {
+          model_id = entity_render_assets.first_person_player_skin_model;
           using_first_person_skin = true;
         }
       }
@@ -242,6 +241,7 @@ void populate_world_frame_draw_items(
     item.scale = 1.0F;
     item.animation_name = mirror.animation_name;
     item.animation_time_seconds = mirror.animation_time_seconds;
+    item.player_skin_region = player_skin_region;
     if (mirror.owning_player.has_value()) {
       item.bone_rotation_overrides.push_back({"head", mirror.head_rotation_degrees});
     }

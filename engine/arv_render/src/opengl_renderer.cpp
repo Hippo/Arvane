@@ -1,11 +1,13 @@
 #include "arv/render/opengl_renderer.hpp"
 
+#include "arv/core/log.hpp"
 #include "arv/core/profiling.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <limits>
 #include <utility>
 
 #if ARVANE_ENABLE_TRACY
@@ -247,12 +249,13 @@ void append_ui_quad(
     const std::array<Vec2f, 4>& positions,
     const std::array<Vec2f, 4>& uvs,
     Vec4f color,
-    f32 texture_slot) {
+    f32 texture_slot,
+    u32 atlas_page) {
   const u32 base = static_cast<u32>(vertices.size());
-  vertices.emplace_back(positions[0], uvs[0], color, texture_slot);
-  vertices.emplace_back(positions[1], uvs[1], color, texture_slot);
-  vertices.emplace_back(positions[2], uvs[2], color, texture_slot);
-  vertices.emplace_back(positions[3], uvs[3], color, texture_slot);
+  vertices.emplace_back(positions[0], uvs[0], color, texture_slot, atlas_page);
+  vertices.emplace_back(positions[1], uvs[1], color, texture_slot, atlas_page);
+  vertices.emplace_back(positions[2], uvs[2], color, texture_slot, atlas_page);
+  vertices.emplace_back(positions[3], uvs[3], color, texture_slot, atlas_page);
   indices.emplace_back(base);
   indices.emplace_back(base + 1U);
   indices.emplace_back(base + 2U);
@@ -356,36 +359,62 @@ void OpenGLRenderer::set_ui_shader_sources(std::string vertex_source, std::strin
   }
 }
 
-void OpenGLRenderer::set_chunk_texture_atlas(TextureUploadData upload) {
+void OpenGLRenderer::set_chunk_texture_atlas(TextureArrayUploadData upload) {
   destroy_gpu_texture(terrain_atlas_);
   if (upload.valid()) {
     note_texture_upload(upload);
-    terrain_atlas_ = create_texture(upload, true);
+    terrain_atlas_ = create_texture_array(upload, true);
   }
 }
 
-void OpenGLRenderer::set_entity_texture_atlas(TextureUploadData upload) {
+void OpenGLRenderer::set_entity_texture_atlas(TextureArrayUploadData upload) {
   destroy_gpu_texture(entity_atlas_);
   if (upload.valid()) {
     note_texture_upload(upload);
-    entity_atlas_ = create_texture(upload, true);
+    entity_atlas_ = create_texture_array(upload, true);
   }
 }
 
-void OpenGLRenderer::set_ui_font_atlas(TextureUploadData upload) {
+void OpenGLRenderer::set_ui_font_atlas(TextureArrayUploadData upload) {
   destroy_gpu_texture(font_atlas_);
   if (upload.valid()) {
     note_texture_upload(upload);
-    font_atlas_ = create_texture(upload, false);
+    font_atlas_ = create_texture_array(upload, false);
   }
 }
 
-void OpenGLRenderer::set_ui_item_atlas(TextureUploadData upload) {
+void OpenGLRenderer::set_ui_item_atlas(TextureArrayUploadData upload) {
   destroy_gpu_texture(item_atlas_);
   if (upload.valid()) {
     note_texture_upload(upload);
-    item_atlas_ = create_texture(upload, false);
+    item_atlas_ = create_texture_array(upload, false);
   }
+}
+
+void OpenGLRenderer::configure_player_skin_atlas(PlayerSkinAtlasConfig config) {
+  player_skin_atlas_.destroy_on_render_thread();
+  player_skin_atlas_.configure(config);
+}
+
+std::optional<TextureRegionHandle> OpenGLRenderer::upload_player_skin_texture(
+    std::string skin_hash,
+    TextureUploadData upload) {
+  if (!upload.valid() ||
+      upload.width > std::numeric_limits<u16>::max() ||
+      upload.height > std::numeric_limits<u16>::max()) {
+    return std::nullopt;
+  }
+  note_texture_upload(upload);
+  const std::span<const std::byte> bytes{
+      reinterpret_cast<const std::byte*>(upload.rgba_pixels.data()),
+      upload.rgba_pixels.size()};
+  return player_skin_atlas_.upload_skin_rgba8_on_render_thread(
+      std::move(skin_hash),
+      bytes,
+      static_cast<u16>(upload.width),
+      static_cast<u16>(upload.height),
+      render_frame_index_,
+      std::chrono::steady_clock::now());
 }
 
 void OpenGLRenderer::set_entity_model(EntityModelAsset model) {
@@ -475,6 +504,7 @@ void OpenGLRenderer::remove_chunk_mesh(ChunkMeshKey key) {
 
 void OpenGLRenderer::render() {
   ARV_PROFILE_ZONE("Render submit");
+  ++render_frame_index_;
   draw_calls_last_frame_ = 0;
   chunk_draw_calls_last_frame_ = 0;
   ui_draw_calls_last_frame_ = 0;
@@ -540,7 +570,9 @@ void OpenGLRenderer::render() {
       static_cast<f32>(terrain_atlas_.width == 0 ? 1U : terrain_atlas_.width),
       static_cast<f32>(terrain_atlas_.height == 0 ? 1U : terrain_atlas_.height));
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
+  glBindTexture(
+      GL_TEXTURE_2D_ARRAY,
+      terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
   glUniform1i(chunk_terrain_atlas_uniform_, 0);
   glUniform3f(
       chunk_daylight_color_uniform_,
@@ -560,7 +592,9 @@ void OpenGLRenderer::render() {
   draw_entities();
   glUseProgram(chunk_program_);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
+  glBindTexture(
+      GL_TEXTURE_2D_ARRAY,
+      terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -572,6 +606,7 @@ void OpenGLRenderer::render() {
   glUseProgram(0);
 
   draw_ui();
+  player_skin_atlas_.run_periodic_cleanup(render_frame_index_, std::chrono::steady_clock::now());
 #if ARVANE_ENABLE_TRACY
   TracyGpuCollect;
 #endif
@@ -610,6 +645,7 @@ void OpenGLRenderer::begin_shutdown() {
   destroy_gpu_texture(font_atlas_);
   destroy_gpu_texture(item_atlas_);
   destroy_gpu_texture(white_texture_);
+  player_skin_atlas_.destroy_on_render_thread();
   if (ui_index_buffer_ != 0) {
     glDeleteBuffers(1, &ui_index_buffer_);
   }
@@ -625,6 +661,7 @@ void OpenGLRenderer::begin_shutdown() {
   ui_vertex_capacity_bytes_ = 0;
   ui_index_capacity_bytes_ = 0;
   gpu_profile_context_initialized_ = false;
+  render_frame_index_ = 0;
   frame_ = {};
 }
 
@@ -765,6 +802,13 @@ void OpenGLRenderer::upload_cpu_mesh_to_gpu(GpuMesh& gpu, const CpuMeshBuffer& m
       GL_UNSIGNED_INT,
       sizeof(ChunkVertex),
       reinterpret_cast<const void*>(offsetof(ChunkVertex, light_face_material_hints)));
+  glEnableVertexAttribArray(3);
+  glVertexAttribIPointer(
+      3,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(ChunkVertex),
+      reinterpret_cast<const void*>(offsetof(ChunkVertex, atlas_page)));
 
   gpu.vertex_count = static_cast<GLsizei>(mesh.vertex_bytes.size() / sizeof(ChunkVertex));
   gpu.index_count = static_cast<GLsizei>(mesh.indices.size());
@@ -862,38 +906,69 @@ OpenGLRenderer::EntityGpuModel OpenGLRenderer::create_entity_gpu_model(
       GL_UNSIGNED_INT,
       sizeof(EntityModelMeshVertex),
       reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, flags)));
+  glEnableVertexAttribArray(5);
+  glVertexAttribIPointer(
+      5,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(EntityModelMeshVertex),
+      reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, texture_domain)));
+  glEnableVertexAttribArray(6);
+  glVertexAttribIPointer(
+      6,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(EntityModelMeshVertex),
+      reinterpret_cast<const void*>(offsetof(EntityModelMeshVertex, atlas_page)));
 
   glGenBuffers(1, &gpu.instance_buffer);
   glBindBuffer(GL_ARRAY_BUFFER, gpu.instance_buffer);
   glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
 
-  glEnableVertexAttribArray(5);
+  glEnableVertexAttribArray(7);
   glVertexAttribPointer(
-      5,
+      7,
       3,
       GL_FLOAT,
       GL_FALSE,
       sizeof(EntityInstanceData),
       reinterpret_cast<const void*>(offsetof(EntityInstanceData, position)));
-  glVertexAttribDivisor(5, 1);
-  glEnableVertexAttribArray(6);
+  glVertexAttribDivisor(7, 1);
+  glEnableVertexAttribArray(8);
   glVertexAttribPointer(
-      6,
+      8,
       4,
       GL_FLOAT,
       GL_FALSE,
       sizeof(EntityInstanceData),
       reinterpret_cast<const void*>(offsetof(EntityInstanceData, rotation)));
-  glVertexAttribDivisor(6, 1);
-  glEnableVertexAttribArray(7);
+  glVertexAttribDivisor(8, 1);
+  glEnableVertexAttribArray(9);
   glVertexAttribPointer(
-      7,
+      9,
       1,
       GL_FLOAT,
       GL_FALSE,
       sizeof(EntityInstanceData),
       reinterpret_cast<const void*>(offsetof(EntityInstanceData, scale)));
-  glVertexAttribDivisor(7, 1);
+  glVertexAttribDivisor(9, 1);
+  glEnableVertexAttribArray(10);
+  glVertexAttribPointer(
+      10,
+      4,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(EntityInstanceData),
+      reinterpret_cast<const void*>(offsetof(EntityInstanceData, player_skin_region)));
+  glVertexAttribDivisor(10, 1);
+  glEnableVertexAttribArray(11);
+  glVertexAttribIPointer(
+      11,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(EntityInstanceData),
+      reinterpret_cast<const void*>(offsetof(EntityInstanceData, player_skin_page)));
+  glVertexAttribDivisor(11, 1);
 
   glBindVertexArray(0);
   return gpu;
@@ -915,44 +990,72 @@ void OpenGLRenderer::destroy_entity_gpu_model(EntityGpuModel& model) {
   model = {};
 }
 
-OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture(const TextureUploadData& upload, bool mipmaps) {
+OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture_array(
+    const TextureArrayUploadData& upload,
+    bool mipmaps) {
   GpuTexture texture;
   if (!upload.valid()) {
     return texture;
   }
+  GLint max_texture_size = 0;
+  GLint max_array_layers = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+  glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &max_array_layers);
+  if ((max_texture_size > 0 &&
+       (upload.width > static_cast<u32>(max_texture_size) ||
+        upload.height > static_cast<u32>(max_texture_size))) ||
+      (max_array_layers > 0 && upload.layers > static_cast<u32>(max_array_layers))) {
+    core::warn(
+        "render",
+        "texture array upload {}x{}x{} exceeds GL limits {}x{} layers",
+        upload.width,
+        upload.height,
+        upload.layers,
+        max_texture_size,
+        max_array_layers);
+    return texture;
+  }
   glGenTextures(1, &texture.id);
-  glBindTexture(GL_TEXTURE_2D, texture.id);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, texture.id);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   const u32 full_max_level = mipmaps ? full_mipmap_max_level(upload.width, upload.height) : 0U;
   const u32 max_level = mipmaps && upload.limit_mipmap_levels
                             ? std::min(upload.max_mipmap_level, full_max_level)
                             : full_max_level;
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(max_level));
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(max_level));
   glTexParameteri(
-      GL_TEXTURE_2D,
+      GL_TEXTURE_2D_ARRAY,
       GL_TEXTURE_MIN_FILTER,
       mipmaps ? GL_NEAREST_MIPMAP_NEAREST : GL_NEAREST);
-  glTexImage2D(
-      GL_TEXTURE_2D,
+  glTexImage3D(
+      GL_TEXTURE_2D_ARRAY,
       0,
       GL_RGBA8,
       static_cast<GLsizei>(upload.width),
       static_cast<GLsizei>(upload.height),
+      static_cast<GLsizei>(upload.layers),
       0,
       GL_RGBA,
       GL_UNSIGNED_BYTE,
       upload.rgba_pixels.data());
   if (mipmaps) {
-    glGenerateMipmap(GL_TEXTURE_2D);
+    glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
   }
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
   texture.width = upload.width;
   texture.height = upload.height;
+  texture.layers = upload.layers;
   return texture;
 }
 
 void OpenGLRenderer::note_texture_upload(const TextureUploadData& upload) noexcept {
+  ++pending_texture_uploads_;
+  pending_texture_upload_bytes_ += static_cast<u64>(upload.rgba_pixels.size());
+}
+
+void OpenGLRenderer::note_texture_upload(const TextureArrayUploadData& upload) noexcept {
   ++pending_texture_uploads_;
   pending_texture_upload_bytes_ += static_cast<u64>(upload.rgba_pixels.size());
 }
@@ -1073,6 +1176,10 @@ bool OpenGLRenderer::ensure_entity_program() {
   entity_camera_far_uniform_ = glGetUniformLocation(entity_program_, "u_camera_far_plane");
   entity_atlas_size_uniform_ = glGetUniformLocation(entity_program_, "u_atlas_size");
   entity_atlas_uniform_ = glGetUniformLocation(entity_program_, "u_entity_atlas");
+  entity_player_skin_atlas_size_uniform_ =
+      glGetUniformLocation(entity_program_, "u_player_skin_atlas_size");
+  entity_player_skin_atlas_uniform_ =
+      glGetUniformLocation(entity_program_, "u_player_skin_atlas");
   entity_daylight_color_uniform_ = glGetUniformLocation(entity_program_, "u_daylight_color");
   entity_daylight_strength_uniform_ = glGetUniformLocation(entity_program_, "u_daylight_strength");
   entity_ambient_color_uniform_ = glGetUniformLocation(entity_program_, "u_ambient_color");
@@ -1379,8 +1486,17 @@ void OpenGLRenderer::draw_entities() {
       static_cast<f32>(entity_atlas_.width == 0 ? 1U : entity_atlas_.width),
       static_cast<f32>(entity_atlas_.height == 0 ? 1U : entity_atlas_.height));
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, entity_atlas_.id == 0 ? white_texture_.id : entity_atlas_.id);
+  glBindTexture(
+      GL_TEXTURE_2D_ARRAY,
+      entity_atlas_.id == 0 ? white_texture_.id : entity_atlas_.id);
   glUniform1i(entity_atlas_uniform_, 0);
+  glUniform2f(
+      entity_player_skin_atlas_size_uniform_,
+      static_cast<f32>(player_skin_atlas_.page_width() == 0U ? 1U : player_skin_atlas_.page_width()),
+      static_cast<f32>(player_skin_atlas_.page_height() == 0U ? 1U : player_skin_atlas_.page_height()));
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, player_skin_atlas_.gl_texture_array());
+  glUniform1i(entity_player_skin_atlas_uniform_, 1);
   glUniform3f(
       entity_daylight_color_uniform_,
       frame_.sky.daylight_color.x,
@@ -1444,7 +1560,28 @@ void OpenGLRenderer::draw_entities() {
     entity_instances_.reserve(batch_end - batch_begin);
     for (usize index = batch_begin; index < batch_end; ++index) {
       const EntityDrawItem& draw = *entity_draw_order_[index];
-      entity_instances_.push_back({draw.position, draw.rotation, draw.scale});
+      EntityInstanceData instance;
+      instance.position = draw.position;
+      instance.rotation = draw.rotation;
+      instance.scale = draw.scale;
+      if (draw.player_skin_region.valid()) {
+        const std::optional<AtlasRegion> skin_region =
+            player_skin_atlas_.resolve(draw.player_skin_region);
+        if (skin_region.has_value() &&
+            player_skin_atlas_.mark_used(
+                draw.player_skin_region,
+                render_frame_index_,
+                std::chrono::steady_clock::now(),
+                true)) {
+          instance.player_skin_region = {
+              static_cast<f32>(skin_region->x),
+              static_cast<f32>(skin_region->y),
+              static_cast<f32>(skin_region->width),
+              static_cast<f32>(skin_region->height)};
+          instance.player_skin_page = skin_region->page_index;
+        }
+      }
+      entity_instances_.push_back(instance);
     }
 
     glBindVertexArray(gpu.vao);
@@ -1528,27 +1665,23 @@ void OpenGLRenderer::draw_ui_quads() {
           {rect.min.x, rect.max.y}}},
         {{{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}}},
         rect.color,
-        UiTextureSlotWhite);
+        UiTextureSlotWhite,
+        0U);
   }
 
   for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
-    if (quad.page != 0) {
-      continue;
-    }
     append_ui_quad(
         ui_vertices_,
         ui_indices_,
         quad.positions,
         quad.uvs,
         quad.color,
-        texture_slot_for_ui_source(quad.source));
+        texture_slot_for_ui_source(quad.source),
+        quad.page);
   }
 
   if (font_atlas_.id != 0) {
     for (const UIGlyphDrawItem& glyph : frame_.ui_glyphs) {
-      if (glyph.page != 0) {
-        continue;
-      }
       append_ui_quad(
           ui_vertices_,
           ui_indices_,
@@ -1561,7 +1694,8 @@ void OpenGLRenderer::draw_ui_quads() {
             {glyph.uv_max.x, glyph.uv_max.y},
             {glyph.uv_min.x, glyph.uv_max.y}}},
           glyph.color,
-          UiTextureSlotFont);
+          UiTextureSlotFont,
+          glyph.page);
     }
   }
   if (ui_vertices_.empty()) {
@@ -1569,13 +1703,13 @@ void OpenGLRenderer::draw_ui_quads() {
   }
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, white_texture_.id);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, white_texture_.id);
   glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_2D, font_atlas_.id == 0 ? white_texture_.id : font_atlas_.id);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, font_atlas_.id == 0 ? white_texture_.id : font_atlas_.id);
   glActiveTexture(GL_TEXTURE2);
-  glBindTexture(GL_TEXTURE_2D, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
   glActiveTexture(GL_TEXTURE3);
-  glBindTexture(GL_TEXTURE_2D, item_atlas_.id == 0 ? white_texture_.id : item_atlas_.id);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, item_atlas_.id == 0 ? white_texture_.id : item_atlas_.id);
 
   glBindVertexArray(ui_vao_);
   const GLsizeiptr vertex_bytes =
@@ -1652,6 +1786,13 @@ void OpenGLRenderer::ensure_ui_buffers() {
       GL_FALSE,
       sizeof(UIVertex),
       reinterpret_cast<const void*>(offsetof(UIVertex, texture_slot)));
+  glEnableVertexAttribArray(4);
+  glVertexAttribIPointer(
+      4,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(UIVertex),
+      reinterpret_cast<const void*>(offsetof(UIVertex, atlas_page)));
   glBindVertexArray(0);
 }
 
@@ -1659,11 +1800,12 @@ void OpenGLRenderer::ensure_white_texture() {
   if (white_texture_.id != 0) {
     return;
   }
-  TextureUploadData upload;
+  TextureArrayUploadData upload;
   upload.width = 1;
   upload.height = 1;
+  upload.layers = 1;
   upload.rgba_pixels = {255U, 255U, 255U, 255U};
-  white_texture_ = create_texture(upload, false);
+  white_texture_ = create_texture_array(upload, false);
 }
 
 } // namespace arv::render

@@ -208,7 +208,14 @@ void append_face(
   const std::array<Vec2f, 4> uvs = face_uvs(face, face_definition, binding, texture_size);
   const Vec3f color = face_color(face);
   for (usize index = 0; index < corners.size(); ++index) {
-    asset.vertices.push_back({corners[index], uvs[index], color, bone_index, flags});
+    asset.vertices.push_back({
+        corners[index],
+        uvs[index],
+        color,
+        bone_index,
+        flags,
+        static_cast<u32>(binding.atlas_domain),
+        binding.atlas_page});
   }
   asset.indices.insert(
       asset.indices.end(),

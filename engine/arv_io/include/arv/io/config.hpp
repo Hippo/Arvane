@@ -226,12 +226,45 @@ struct RenderConfig {
     f32 thickness{0.55F};
   };
 
+  struct AtlasCleanupConfig {
+    u32 interval_seconds{60};
+    u32 evict_after_unused_seconds{300};
+  };
+
+  struct AtlasPressureCleanupConfig {
+    bool enabled{true};
+    f32 usage_threshold{0.85F};
+    f32 target_usage{0.65F};
+  };
+
+  struct PlayerSkinAtlasConfig {
+    u16 page_size{2048};
+    u16 max_pages{8};
+    AtlasCleanupConfig cleanup{};
+    AtlasPressureCleanupConfig pressure_cleanup{};
+  };
+
+  struct StaticAtlasConfig {
+    u16 page_size{2048};
+    u16 max_pages{4};
+  };
+
+  struct AtlasesConfig {
+    StaticAtlasConfig blocks{4096, 8};
+    StaticAtlasConfig entities{2048, 8};
+    StaticAtlasConfig ui{2048, 4};
+    StaticAtlasConfig fonts{2048, 4};
+    PlayerSkinAtlasConfig player_skins{};
+    StaticAtlasConfig particles{2048, 4};
+  };
+
   u32 max_chunk_mesh_uploads_per_frame{8};
   bool frame_pacing_enabled{};
   u32 frame_pacing_target_fps{60};
   u32 frame_pacing_spin_us{500};
   bool show_local_player_body{true};
   BlockOutlineConfig block_outline{};
+  AtlasesConfig atlases{};
 };
 
 struct ChunkPipelineConfig {

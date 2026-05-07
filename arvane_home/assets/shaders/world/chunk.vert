@@ -2,6 +2,7 @@
 layout(location = 0) in uint a_pos_ao;
 layout(location = 1) in uint a_uv;
 layout(location = 2) in uint a_light_face_material_hints;
+layout(location = 3) in uint a_atlas_page;
 
 uniform vec3 u_chunk_origin;
 uniform vec3 u_camera_position;
@@ -19,6 +20,7 @@ uniform vec3 u_ambient_color;
 
 out vec3 v_color;
 out vec2 v_uv;
+flat out uint v_atlas_page;
 flat out uint v_material_class;
 flat out uint v_animation_id;
 flat out uint v_material_flags;
@@ -96,6 +98,7 @@ void main() {
   vec3 sky_light = u_ambient_color + sky_access * u_daylight_color * u_daylight_strength;
   v_color = clamp(sky_light + block_light * 0.55, vec3(0.0), vec3(1.0)) * face_shade * ao_shade;
   v_uv = vec2(float(atlas_u), float(atlas_v));
+  v_atlas_page = a_atlas_page;
   v_material_class = material_class;
   v_animation_id = animation_id;
   v_material_flags = material_flags;

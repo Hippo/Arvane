@@ -33,6 +33,7 @@ add_executable(arv_tests
   render/entity_model_tests.cpp
   render/item_model_tests.cpp
   render/mesh_handoff_tests.cpp
+  render/paged_texture_atlas_tests.cpp
   render/chunk_meshing_tests.cpp
   sched/scheduler_tests.cpp
   server/chunk_streamer_tests.cpp

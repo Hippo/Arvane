@@ -235,6 +235,14 @@ A default page size of `1024x1024` is reasonable, but this should be configurabl
 
 Glyphs should be padded by at least one pixel to avoid sampling bleed.
 
+The general renderer atlas model is described in
+[Paged Texture Atlases](114_paged_texture_atlases.md). Font metadata already
+tracks glyph page indices, and the UI renderer samples the font binding as a
+`GL_TEXTURE_2D_ARRAY`. Glyph page indices must be passed flat to the UI/text
+shader and sampled as the array layer. The font allocator may still choose to
+stay on one CPU page until multi-page glyph allocation is expanded, but the
+rendering contract is page-aware.
+
 ---
 
 ## Glyph Bitmap Formats
@@ -350,11 +358,14 @@ The font renderer is responsible for:
 
 ## Texture Binding Model
 
-Because each font face can have multiple atlas pages, text rendering must support multiple texture pages.
+Because each font face can have multiple atlas pages, text rendering must
+support multiple texture-array layers.
 
 The UI renderer may batch glyphs with other UI quads as long as texture binding limits are respected.
 
-When a new glyph atlas page texture is needed and no texture slot is available, the UI renderer must flush the current batch.
+The page index is vertex data, not a separate texture binding. A batch only
+needs to split when the font atlas domain binding, shader, or sampler state
+changes.
 
 ---
 

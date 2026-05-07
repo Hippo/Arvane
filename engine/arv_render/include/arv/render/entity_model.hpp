@@ -75,6 +75,8 @@ struct EntityModelTextureBinding {
   Vec2i atlas_pixel_max{};
   u32 source_width{};
   u32 source_height{};
+  TextureAtlasDomain atlas_domain{TextureAtlasDomain::Entities};
+  u16 atlas_page{};
 };
 
 enum EntityModelMeshVertexFlags : u32 {
@@ -93,6 +95,8 @@ struct EntityModelMeshVertex {
   Vec3f color{1.0F, 1.0F, 1.0F};
   u32 bone_index{};
   u32 flags{};
+  u32 texture_domain{static_cast<u32>(TextureAtlasDomain::Entities)};
+  u32 atlas_page{};
 };
 
 struct EntityModelAnimationBoneKey {

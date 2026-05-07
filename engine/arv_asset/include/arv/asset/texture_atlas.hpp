@@ -49,6 +49,7 @@ struct TextureAtlasInput {
 
 struct TextureAtlasBuildOptions {
   u32 max_page_size{1024};
+  u32 max_pages{1};
   u32 padding{4};
   bool require_uniform_non_fallback_size{true};
 };

@@ -177,6 +177,7 @@ Example bindings:
 * `"terrain_atlas"`
 * `"ui_atlas"`
 * `"font_atlas"`
+* `"player_skin_atlas"`
 
 ---
 
@@ -213,6 +214,25 @@ Example:
 ```cpp
 texture_bindings.terrain_atlas = create_terrain_atlas(...);
 ```
+
+Atlases are domain-specific. Blocks, authored entities, UI images, fonts, and
+player skins use texture-array-backed atlas bindings. Each binding is one
+`GL_TEXTURE_2D_ARRAY`, and the region page index maps directly to the
+texture-array layer.
+
+Player skins are a separate dynamic binding from authored entity textures:
+
+```text
+entity_atlas       -> authored entity, item, outline, overlay textures
+terrain_atlas      -> block textures
+ui/item atlases    -> UI image and item icon textures
+font_atlas         -> glyph textures
+player_skin_atlas  -> dynamic player skin residency
+```
+
+The renderer must not insert downloaded or local player skins into the authored
+entity atlas. Player skin materials use the same entity shader family, but sample
+from the player skin texture array using per-instance region/page data.
 
 ---
 

@@ -22,6 +22,10 @@ The rendering system depends on the following documents for core behavior and da
 * [Material System](120_material_system.md)
   Defines how materials describe surface properties, texture bindings, and how they are resolved by the renderer.
 
+* [Paged Texture Atlases](114_paged_texture_atlases.md)
+  Defines the texture-array-backed atlas model, atlas domains, and dynamic
+  player skin residency rules.
+
 * [Shading and Vertex Format](130_shading_and_vertex_format.md)
   Defines vertex layouts, packed formats, and the shader interface contract used by all rendering paths.
 
@@ -42,6 +46,11 @@ This includes:
 * draw calls
 
 Other threads must never directly interact with GPU resources.
+
+Dynamic texture residency follows the same rule. Disk reads and PNG decoding may
+produce CPU-side image data outside the renderer, but `GL_TEXTURE_2D_ARRAY`
+creation, sub-image uploads, mipmap generation, and atlas destruction are render
+thread work.
 
 ---
 
@@ -86,6 +95,15 @@ Renders:
 * solid terrain
 * opaque entities
 
+Block and authored entity atlases are texture arrays. Block chunk vertices carry
+a flat page/layer value beside packed UVs. Authored entity geometry carries
+domain and page/layer data per vertex.
+
+Dynamic player skins render through the `PlayerSkins` atlas domain. The player
+skin atlas is a texture array, so visible players using different skin atlas
+pages remain batchable as long as they share the same entity shader, sampler
+state, and material pipeline.
+
 This pass establishes the **depth buffer**.
 
 ---
@@ -123,6 +141,10 @@ Renders:
 * HUD
 * menus
 * debug overlays
+
+UI draw vertices carry a texture slot and a flat atlas page. The slot selects
+the bound texture-array domain, and the page selects the layer inside that
+domain.
 
 ---
 

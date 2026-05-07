@@ -16,6 +16,7 @@ struct ItemTextureMeshInput {
   u32 height{};
   std::span<const u8> rgba_pixels{};
   Vec2i atlas_pixel_min{};
+  u16 atlas_page{};
   f32 thickness{2.0F};
 };
 
@@ -23,6 +24,7 @@ struct ItemBlockModelInput {
   EntityModelID id{};
   std::string name{};
   std::array<std::array<Vec2i, 4>, voxel::BlockFaceCount> face_uvs{};
+  std::array<u16, voxel::BlockFaceCount> face_pages{};
   std::array<bool, voxel::BlockFaceCount> face_valid{};
   std::span<const voxel::BlockModelBoxRenderData> model_boxes{};
 };
@@ -31,6 +33,7 @@ struct BlockBreakOverlayModelInput {
   EntityModelID id{};
   std::string name{};
   std::array<std::array<Vec2i, 4>, voxel::BlockFaceCount> face_uvs{};
+  std::array<u16, voxel::BlockFaceCount> face_pages{};
   std::array<bool, voxel::BlockFaceCount> face_valid{};
   std::span<const voxel::BlockModelBoxRenderData> model_boxes{};
   f32 inflate_sixteenths{0.08F};
@@ -40,6 +43,7 @@ struct BlockOutlineModelInput {
   EntityModelID id{};
   std::string name{};
   std::array<Vec2i, 4> uvs{};
+  u16 atlas_page{};
   Vec3f color{0.02F, 0.02F, 0.02F};
   std::span<const voxel::BlockModelBoxRenderData> model_boxes{};
   f32 thickness_sixteenths{0.55F};

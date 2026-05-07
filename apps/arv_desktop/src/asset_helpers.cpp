@@ -2,7 +2,9 @@
 
 #include "arv/render/item_model.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <utility>
@@ -14,30 +16,30 @@ namespace {
 constexpr u32 ItemEntityModelIDBase = 1'000'000U;
 constexpr u32 BreakOverlayEntityModelIDBase = 2'000'000U;
 constexpr u32 BlockOutlineEntityModelIDBase = 3'000'000U;
-constexpr u32 PlayerSkinEntityModelIDBase = 4'000'000U;
+constexpr u32 PlayerSkinEntityModelID = 4'000'000U;
 constexpr u32 FirstPersonPlayerEntityModelID = 5'000'000U;
-constexpr u32 FirstPersonPlayerSkinEntityModelIDBase = 5'000'001U;
+constexpr u32 FirstPersonPlayerSkinEntityModelID = 5'000'001U;
 constexpr std::string_view WhiteTextureAsset = "arvane:texture/generated_white";
 constexpr std::string_view DefaultPlayerSkinTextureAsset =
     "arvane:texture/default_skin/default";
 constexpr std::string_view PlayerEntityModelAsset = "arvane:model/entity/player";
+constexpr std::string_view DynamicPlayerSkinTextureAsset =
+    "arvane:texture/player_skin/dynamic";
 
 [[nodiscard]] render::EntityModelID item_entity_model_id(player::ItemID item_id) noexcept {
   return render::EntityModelID{ItemEntityModelIDBase + item_id.value};
 }
 
-[[nodiscard]] render::EntityModelID player_skin_model_id(usize index) noexcept {
-  return render::EntityModelID{
-      PlayerSkinEntityModelIDBase + static_cast<u32>(index)};
+[[nodiscard]] render::EntityModelID player_skin_model_id() noexcept {
+  return render::EntityModelID{PlayerSkinEntityModelID};
 }
 
 [[nodiscard]] render::EntityModelID first_person_player_model_id() noexcept {
   return render::EntityModelID{FirstPersonPlayerEntityModelID};
 }
 
-[[nodiscard]] render::EntityModelID first_person_player_skin_model_id(usize index) noexcept {
-  return render::EntityModelID{
-      FirstPersonPlayerSkinEntityModelIDBase + static_cast<u32>(index)};
+[[nodiscard]] render::EntityModelID first_person_player_skin_model_id() noexcept {
+  return render::EntityModelID{FirstPersonPlayerSkinEntityModelID};
 }
 
 [[nodiscard]] render::EntityModelID break_overlay_model_id(
@@ -73,10 +75,6 @@ constexpr std::string_view PlayerEntityModelAsset = "arvane:model/entity/player"
     return std::string{DefaultPlayerSkinTextureAsset};
   }
   return std::string{texture};
-}
-
-[[nodiscard]] std::string player_skin_texture_asset(std::string_view skin_hash) {
-  return "arvane:texture/player_skin/" + std::string{skin_hash};
 }
 
 [[nodiscard]] render::EntityModelDefinition make_first_person_player_definition(
@@ -137,6 +135,45 @@ render::TextureUploadData texture_upload_from_image(const asset::Image& image) {
   return {image.width, image.height, image.pixels};
 }
 
+render::TextureArrayUploadData texture_array_upload_from_image(const asset::Image& image) {
+  return {image.width, image.height, image.empty() ? 0U : 1U, image.pixels};
+}
+
+render::TextureArrayUploadData texture_array_upload_from_atlas(
+    const asset::TextureAtlas& atlas) {
+  render::TextureArrayUploadData upload;
+  upload.layers = static_cast<u32>(atlas.pages.size());
+  upload.limit_mipmap_levels = atlas.mip_safe_max_level > 0U;
+  upload.max_mipmap_level = atlas.mip_safe_max_level;
+  for (const asset::TextureAtlasPage& page : atlas.pages) {
+    upload.width = std::max(upload.width, page.image.width);
+    upload.height = std::max(upload.height, page.image.height);
+  }
+  if (upload.width == 0U || upload.height == 0U || upload.layers == 0U) {
+    return {};
+  }
+
+  const usize layer_bytes = static_cast<usize>(upload.width) * upload.height * 4U;
+  upload.rgba_pixels.assign(layer_bytes * upload.layers, 0U);
+  for (u32 layer = 0; layer < upload.layers; ++layer) {
+    const asset::Image& image = atlas.pages[layer].image;
+    if (image.empty() || image.channels != 4) {
+      return {};
+    }
+    for (u32 y = 0; y < image.height; ++y) {
+      const usize dst =
+          static_cast<usize>(layer) * layer_bytes +
+          static_cast<usize>(y) * upload.width * 4U;
+      const usize src = static_cast<usize>(y) * image.width * 4U;
+      std::memcpy(
+          upload.rgba_pixels.data() + dst,
+          image.pixels.data() + src,
+          static_cast<usize>(image.width) * 4U);
+    }
+  }
+  return upload;
+}
+
 std::array<Vec2f, 4> normalized_uvs(
     const std::array<Vec2i, 4>& pixels,
     u32 width,
@@ -174,7 +211,8 @@ ui::UiImageData image_data_from_atlas_entry(
 
 asset::TextureAtlasResult build_item_texture_atlas(
     asset::ResourceManager& resources,
-    const player::ItemRegistry& item_registry) {
+    const player::ItemRegistry& item_registry,
+    asset::TextureAtlasBuildOptions options) {
   std::vector<asset::AssetID> texture_ids;
   HashSet<std::string> seen;
   const auto add_texture = [&](std::string texture) {
@@ -211,7 +249,7 @@ asset::TextureAtlasResult build_item_texture_atlas(
     inputs.emplace_back(texture_id, resource->image, resource->fallback);
   }
 
-  return asset::build_texture_atlas(inputs, {.max_page_size = 1024, .padding = 2});
+  return asset::build_texture_atlas(inputs, options);
 }
 
 EntityRenderAssetsResult build_entity_render_assets(
@@ -221,14 +259,14 @@ EntityRenderAssetsResult build_entity_render_assets(
     const voxel::BlockRegistry& block_registry,
     std::span<const asset::BlockModelAssetData> block_models,
     BlockOutlineRenderConfig outline_config,
-    std::span<const PlayerSkinTextureInput> player_skin_textures) {
+    asset::TextureAtlasBuildOptions atlas_options) {
   struct PendingModel {
     EntityTypeID type_id{};
     std::optional<player::ItemID> item_id{};
     render::EntityModelID model_id{};
     render::EntityModelDefinition definition{};
-    std::string skin_hash{};
     bool first_person_player{};
+    bool player_skin_atlas{};
   };
   struct PendingTextureItem {
     player::ItemID item_id{};
@@ -268,7 +306,6 @@ EntityRenderAssetsResult build_entity_render_assets(
   std::vector<PendingBlockItem> pending_block_items;
   std::vector<asset::AssetID> texture_ids;
   HashSet<std::string> seen_textures;
-  HashMap<std::string, const asset::Image*> custom_texture_images;
   const auto add_texture = [&](std::string texture) {
     if (texture.empty()) {
       texture = "arvane:texture/missing";
@@ -311,7 +348,7 @@ EntityRenderAssetsResult build_entity_render_assets(
                               std::nullopt,
                               render::EntityModelID{type.id.value},
                               definition,
-                              {},
+                              false,
                               false});
 
     if (type.model_asset != PlayerEntityModelAsset || player_skin_texture_slots.empty()) {
@@ -321,42 +358,35 @@ EntityRenderAssetsResult build_entity_render_assets(
                               std::nullopt,
                               first_person_player_model_id(),
                               make_first_person_player_definition(definition),
-                              {},
-                              true});
-    for (usize skin_index = 0; skin_index < player_skin_textures.size(); ++skin_index) {
-      const PlayerSkinTextureInput& skin = player_skin_textures[skin_index];
-      if (skin.skin_hash.empty() || skin.image.empty()) {
-        continue;
-      }
-      const std::string texture_asset = player_skin_texture_asset(skin.skin_hash);
-      custom_texture_images[texture_asset] = &skin.image;
-      add_texture(texture_asset);
+                              true,
+                              false});
 
-      render::EntityModelDefinition skinned_definition = definition;
-      skinned_definition.name += "#skin_" + skin.skin_hash;
-      for (const usize texture_index : player_skin_texture_slots) {
-        skinned_definition.texture_assets[texture_index] = texture_asset;
-      }
-      pending_models.push_back({type.id,
-                                std::nullopt,
-                                player_skin_model_id(skin_index),
-                                std::move(skinned_definition),
-                                skin.skin_hash,
-                                false});
-
-      render::EntityModelDefinition first_person_skinned =
-          make_first_person_player_definition(definition);
-      for (const usize texture_index : player_skin_texture_slots) {
-        first_person_skinned.texture_assets[texture_index] = texture_asset;
-      }
-      first_person_skinned.name += "_" + skin.skin_hash;
-      pending_models.push_back({type.id,
-                                std::nullopt,
-                                first_person_player_skin_model_id(skin_index),
-                                std::move(first_person_skinned),
-                                skin.skin_hash,
-                                true});
+    render::EntityModelDefinition dynamic_skin_definition = definition;
+    dynamic_skin_definition.name += "#skin_dynamic";
+    for (const usize texture_index : player_skin_texture_slots) {
+      dynamic_skin_definition.texture_assets[texture_index] =
+          std::string{DynamicPlayerSkinTextureAsset};
     }
+    pending_models.push_back({type.id,
+                              std::nullopt,
+                              player_skin_model_id(),
+                              std::move(dynamic_skin_definition),
+                              false,
+                              true});
+
+    render::EntityModelDefinition first_person_dynamic_skin =
+        make_first_person_player_definition(definition);
+    first_person_dynamic_skin.name += "#skin_dynamic";
+    for (const usize texture_index : player_skin_texture_slots) {
+      first_person_dynamic_skin.texture_assets[texture_index] =
+          std::string{DynamicPlayerSkinTextureAsset};
+    }
+    pending_models.push_back({type.id,
+                              std::nullopt,
+                              first_person_player_skin_model_id(),
+                              std::move(first_person_dynamic_skin),
+                              true,
+                              true});
   }
 
   for (u32 item_value = 0; item_value < item_registry.item_count(); ++item_value) {
@@ -400,7 +430,7 @@ EntityRenderAssetsResult build_entity_render_assets(
                                   item_id,
                                   model_id,
                                   std::move(model_definition.value()),
-                                  {},
+                                  false,
                                   false});
         break;
       }
@@ -460,10 +490,6 @@ EntityRenderAssetsResult build_entity_render_assets(
       white.pixels = {255, 255, 255, 255};
       inputs.push_back({texture_id, white, false});
       source_images[texture_id.value] = std::move(white);
-    } else if (const auto custom = custom_texture_images.find(texture_id.value);
-               custom != custom_texture_images.end()) {
-      inputs.push_back({texture_id, *custom->second, false});
-      source_images[texture_id.value] = *custom->second;
     } else {
       auto handle = texture_id.value == "arvane:texture/missing"
                         ? asset::TextureLoadResult::success(resources.missing_texture())
@@ -483,9 +509,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
   }
 
-  auto atlas_result = asset::build_texture_atlas(
-      inputs,
-      {.max_page_size = 1024, .padding = 2, .require_uniform_non_fallback_size = false});
+  auto atlas_result = asset::build_texture_atlas(inputs, atlas_options);
   if (!atlas_result) {
     return EntityRenderAssetsResult::failure(atlas_result.error());
   }
@@ -496,6 +520,16 @@ EntityRenderAssetsResult build_entity_render_assets(
     std::vector<render::EntityModelTextureBinding> bindings;
     bindings.reserve(pending.definition.texture_assets.size());
     for (const std::string& texture : pending.definition.texture_assets) {
+      if (pending.player_skin_atlas && texture == DynamicPlayerSkinTextureAsset) {
+        bindings.push_back({texture,
+                            {},
+                            {1, 1},
+                            1,
+                            1,
+                            render::TextureAtlasDomain::PlayerSkins,
+                            0});
+        continue;
+      }
       const asset::TextureAtlasEntry* entry = assets.texture_atlas.find(texture);
       if (entry == nullptr) {
         return EntityRenderAssetsResult::failure({texture,
@@ -507,7 +541,9 @@ EntityRenderAssetsResult build_entity_render_assets(
                           entry->unpadded_pixel_min,
                           entry->unpadded_pixel_max,
                           entry->width,
-                          entry->height});
+                          entry->height,
+                          render::TextureAtlasDomain::Entities,
+                          static_cast<u16>(entry->page)});
     }
 
     auto model_asset =
@@ -520,12 +556,12 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
     if (pending.item_id.has_value()) {
       assets.model_by_item[pending.item_id.value()] = pending.model_id;
-    } else if (pending.first_person_player && pending.skin_hash.empty()) {
-      assets.first_person_player_model = pending.model_id;
+    } else if (pending.first_person_player && pending.player_skin_atlas) {
+      assets.first_person_player_skin_model = pending.model_id;
     } else if (pending.first_person_player) {
-      assets.first_person_player_model_by_skin_hash[pending.skin_hash] = pending.model_id;
-    } else if (!pending.skin_hash.empty()) {
-      assets.player_model_by_skin_hash[pending.skin_hash] = pending.model_id;
+      assets.first_person_player_model = pending.model_id;
+    } else if (pending.player_skin_atlas) {
+      assets.player_skin_model = pending.model_id;
     } else {
       assets.model_by_type[pending.type_id] = pending.model_id;
     }
@@ -550,6 +586,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     input.height = image->second.height;
     input.rgba_pixels = std::span<const u8>{image->second.pixels.data(), image->second.pixels.size()};
     input.atlas_pixel_min = entry->unpadded_pixel_min;
+    input.atlas_page = static_cast<u16>(entry->page);
     assets.model_by_item[pending.item_id] = pending.model_id;
     assets.models.push_back(render::build_extruded_texture_item_model(input));
   }
@@ -592,6 +629,7 @@ EntityRenderAssetsResult build_entity_render_assets(
       }
       const usize face_index = voxel::face_index(face);
       input.face_valid[face_index] = true;
+      input.face_pages[face_index] = static_cast<u16>(entry->page);
       input.face_uvs[face_index] = atlas_face_uvs(*entry, voxel::default_cube_face_uvs(face));
     }
     assets.model_by_item[pending.item_id] = pending.model_id;
@@ -638,6 +676,7 @@ EntityRenderAssetsResult build_entity_render_assets(
       for (const voxel::BlockFace face : voxel::AllBlockFaces) {
         const usize face_index = voxel::face_index(face);
         input.face_valid[face_index] = variant->renders_face[face_index];
+        input.face_pages[face_index] = static_cast<u16>(entry->page);
         input.face_uvs[face_index] = atlas_face_uvs(*entry, voxel::default_cube_face_uvs(face));
       }
       assets.break_overlay_model_by_variant[variant_value][stage] = input.id;
@@ -657,6 +696,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     outline_input.id = block_outline_model_id(variant_id);
     outline_input.name = variant->debug_name + "#outline";
     outline_input.uvs = atlas_face_uvs(*white_entry, voxel::default_cube_face_uvs(voxel::BlockFace::PositiveY));
+    outline_input.atlas_page = static_cast<u16>(white_entry->page);
     outline_input.color = outline_config.color;
     outline_input.thickness_sixteenths = outline_config.thickness;
     outline_input.model_boxes =

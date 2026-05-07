@@ -1,12 +1,13 @@
 #version 330 core
 in vec3 v_color;
 in vec2 v_uv;
+flat in uint v_atlas_page;
 flat in uint v_material_class;
 flat in uint v_animation_id;
 flat in uint v_material_flags;
 uniform float u_alpha;
 uniform float u_animation_time_seconds;
-uniform sampler2D u_terrain_atlas;
+uniform sampler2DArray u_terrain_atlas;
 uniform vec2 u_atlas_size;
 out vec4 frag_color;
 
@@ -29,7 +30,7 @@ bool is_water_animation(uint animation_id) {
 
 void main() {
   vec2 atlas_size = max(u_atlas_size, vec2(1.0, 1.0));
-  vec4 texel = texture(u_terrain_atlas, v_uv / atlas_size);
+  vec4 texel = texture(u_terrain_atlas, vec3(v_uv / atlas_size, float(v_atlas_page)));
   if ((v_material_flags & VertexMaterialFlagTintFromFluid) != 0u) {
     texel.rgb *= fluid_tint_for_vertex(v_material_class);
   }

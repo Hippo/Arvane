@@ -19,6 +19,11 @@ struct ChunkFaceGeometry {
   std::array<u8, 6> flipped_indices{};
 };
 
+struct FaceTextureReference {
+  u32 page{};
+  std::array<Vec2i, 4> uvs{};
+};
+
 constexpr std::array<ChunkFaceGeometry, voxel::BlockFaceCount> ChunkCubeFaces{{
     {
         voxel::BlockFace::PositiveX,
@@ -115,7 +120,7 @@ void emit_quad(
     const std::array<Vec3i, 4>& corners,
     const std::array<u8, 6>& indices,
     const std::array<u8, 6>& flipped_indices,
-    std::array<Vec2i, 4> uvs,
+    FaceTextureReference texture,
     std::array<voxel::LightWord, 4> lights,
     std::array<u8, 4> ao,
     VertexMaterialHints material_hints) {
@@ -126,8 +131,9 @@ void emit_quad(
     append_chunk_vertex(output, make_chunk_vertex(
                                     local,
                                     corners[index],
-                                    static_cast<u16>(uvs[index].x),
-                                    static_cast<u16>(uvs[index].y),
+                                    static_cast<u16>(texture.uvs[index].x),
+                                    static_cast<u16>(texture.uvs[index].y),
+                                    static_cast<u16>(texture.page),
                                     block_face,
                                     ao[index],
                                     voxel::light_sky(light),
@@ -149,7 +155,7 @@ void emit_cube_face(
     CpuMeshBuffer& output,
     SectionLocalPos local,
     const ChunkFaceGeometry& face,
-    std::array<Vec2i, 4> uvs,
+    FaceTextureReference texture,
     std::array<voxel::LightWord, 4> lights,
     std::array<u8, 4> ao,
     VertexMaterialHints material_hints) {
@@ -160,7 +166,7 @@ void emit_cube_face(
       face.corners,
       face.indices,
       face.flipped_indices,
-      uvs,
+      texture,
       lights,
       ao,
       material_hints);
@@ -489,18 +495,20 @@ void emit_cube_face(
   return face_geometry(face).corners;
 }
 
-[[nodiscard]] std::array<Vec2i, 4> face_uvs_for(
+[[nodiscard]] FaceTextureReference face_texture_for(
     voxel::BlockVariantID variant_id,
     voxel::BlockFace face,
     const voxel::BlockRenderData* render_data) noexcept {
-  std::array<Vec2i, 4> uvs = voxel::default_cube_face_uvs(face);
+  FaceTextureReference texture;
+  texture.uvs = voxel::default_cube_face_uvs(face);
   if (render_data != nullptr) {
     if (const voxel::BlockFaceRenderData* face_data = render_data->face(variant_id, face);
         face_data != nullptr) {
-      uvs = face_data->uvs;
+      texture.page = face_data->page;
+      texture.uvs = face_data->uvs;
     }
   }
-  return uvs;
+  return texture;
 }
 
 [[nodiscard]] VertexMaterialHints material_hints_for_block(
@@ -593,7 +601,7 @@ void emit_model_boxes(
           model_face.corners,
           model_face.indices,
           model_face.flipped_indices,
-          box.faces[face_slot]->uvs,
+          {box.faces[face_slot]->page, box.faces[face_slot]->uvs},
           smooth_face_lights(
               snapshot,
               local,
@@ -656,7 +664,7 @@ void emit_fluid_cell(
         top_corners,
         top_face.indices,
         top_face.flipped_indices,
-        face_uvs_for(water_variant, voxel::BlockFace::PositiveY, render_data),
+        face_texture_for(water_variant, voxel::BlockFace::PositiveY, render_data),
         smooth_face_lights(snapshot, local, top_face, top_corners, face_light),
         FluidAo,
         water_material_hints(fluid, voxel::BlockFace::PositiveY));
@@ -678,7 +686,7 @@ void emit_fluid_cell(
         corners,
         geometry.indices,
         geometry.flipped_indices,
-        face_uvs_for(water_variant, face, render_data),
+        face_texture_for(water_variant, face, render_data),
         smooth_face_lights(snapshot, local, geometry, corners, face_light),
         FluidAo,
         water_material_hints(fluid, face));
@@ -696,7 +704,7 @@ void emit_fluid_cell(
         bottom_face.corners,
         bottom_face.indices,
         bottom_face.flipped_indices,
-        face_uvs_for(water_variant, voxel::BlockFace::NegativeY, render_data),
+        face_texture_for(water_variant, voxel::BlockFace::NegativeY, render_data),
         smooth_face_lights(snapshot, local, bottom_face, bottom_face.corners, face_light),
         FluidAo,
         water_material_hints(fluid, voxel::BlockFace::NegativeY));
@@ -802,7 +810,7 @@ ChunkMeshData build_chunk_mesh(
                 output,
                 local,
                 face,
-                face_uvs_for(self_id, face.face, render_data),
+                face_texture_for(self_id, face.face, render_data),
                 smooth_face_lights(
                     snapshot_storage,
                     local,

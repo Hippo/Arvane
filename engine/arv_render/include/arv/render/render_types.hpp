@@ -90,9 +90,10 @@ struct ChunkVertex {
   u32 pos_ao{};
   u32 uv{};
   u32 light_face_material_hints{};
+  u32 atlas_page{};
 };
 
-static_assert(sizeof(ChunkVertex) == 12);
+static_assert(sizeof(ChunkVertex) == 16);
 
 enum class VertexMaterialClass : u8 {
   Opaque = 0,
@@ -136,6 +137,38 @@ enum class VertexAnimationId : u8 {
   Reserved14 = 14,
 
   Custom = 15,
+};
+
+enum class TextureAtlasDomain : u8 {
+  Blocks,
+  Entities,
+  PlayerSkins,
+  UiImages,
+  Fonts,
+  Particles,
+};
+
+enum class TextureFormat : u8 {
+  Rgba8,
+};
+
+struct AtlasRegion {
+  u16 page_index{};
+  u16 x{};
+  u16 y{};
+  u16 width{};
+  u16 height{};
+};
+
+struct TextureRegionHandle {
+  u32 id{};
+  u32 generation{};
+
+  [[nodiscard]] constexpr bool valid() const noexcept {
+    return id != 0U;
+  }
+
+  constexpr bool operator==(const TextureRegionHandle&) const = default;
 };
 
 enum VertexMaterialFlags : u8 {
@@ -273,6 +306,7 @@ inline constexpr u32 ChunkMaterialFlagsMask = 0x1FU;
     Vec3i model_position_sixteenths,
     u16 atlas_u,
     u16 atlas_v,
+    u16 atlas_page,
     voxel::BlockFace face,
     u8 ao = 0,
     u8 sky_light = 15,
@@ -289,7 +323,8 @@ inline constexpr u32 ChunkMaterialFlagsMask = 0x1FU;
           block_light_b,
           sky_light,
           face,
-          material_hints)};
+          material_hints),
+      atlas_page};
 }
 
 struct CpuMeshBuffer {
@@ -302,6 +337,7 @@ struct UIVertex {
   Vec2f uv{};
   Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
   f32 texture_slot{};
+  u32 atlas_page{};
 };
 
 struct TextureUploadData {
@@ -314,6 +350,22 @@ struct TextureUploadData {
   [[nodiscard]] bool valid() const noexcept {
     return width > 0 && height > 0 &&
            rgba_pixels.size() == static_cast<usize>(width) * static_cast<usize>(height) * 4U;
+  }
+};
+
+struct TextureArrayUploadData {
+  u32 width{};
+  u32 height{};
+  u32 layers{};
+  std::vector<u8> rgba_pixels{};
+  bool limit_mipmap_levels{};
+  u32 max_mipmap_level{};
+
+  [[nodiscard]] bool valid() const noexcept {
+    return width > 0 && height > 0 && layers > 0 &&
+           rgba_pixels.size() == static_cast<usize>(width) *
+                                     static_cast<usize>(height) *
+                                     static_cast<usize>(layers) * 4U;
   }
 };
 
@@ -413,6 +465,7 @@ struct EntityDrawItem {
   f32 animation_time_seconds{};
   std::string animation_name{};
   std::vector<EntityBoneRotationOverride> bone_rotation_overrides{};
+  TextureRegionHandle player_skin_region{};
 };
 
 struct EntityVertex {

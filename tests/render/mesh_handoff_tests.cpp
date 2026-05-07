@@ -98,6 +98,7 @@ TEST(RenderMeshHandoffTests, ChunkVertexPackingFollowsDocumentedBitLayout) {
       {16, 8, 0},
       12,
       34,
+      2,
       arv::voxel::BlockFace::PositiveY,
       2,
       15,
@@ -117,6 +118,7 @@ TEST(RenderMeshHandoffTests, ChunkVertexPackingFollowsDocumentedBitLayout) {
   EXPECT_EQ((vertex.pos_ao >> 30U) & 0x03U, 2U);
   EXPECT_EQ(vertex.uv & 0xFFFFU, 12U);
   EXPECT_EQ((vertex.uv >> 16U) & 0xFFFFU, 34U);
+  EXPECT_EQ(vertex.atlas_page, 2U);
   EXPECT_EQ(
       (vertex.light_face_material_hints >> arv::render::ChunkBlockLightRShift) &
           arv::render::ChunkLightMask,

@@ -18,6 +18,32 @@ render:
   block_outline:
     color: [0.02, 0.02, 0.02]
     thickness: 0.55
+  atlases:
+    blocks:
+      page_size: 4096
+      max_pages: 8
+    entities:
+      page_size: 2048
+      max_pages: 8
+    ui:
+      page_size: 2048
+      max_pages: 4
+    fonts:
+      page_size: 2048
+      max_pages: 4
+    player_skins:
+      page_size: 2048
+      max_pages: 8
+      cleanup:
+        interval_seconds: 60
+        evict_after_unused_seconds: 300
+      pressure_cleanup:
+        enabled: true
+        usage_threshold: 0.85
+        target_usage: 0.65
+    particles:
+      page_size: 2048
+      max_pages: 4
 chunk_pipeline:
   max_client_chunk_applies_per_frame: 2
   max_client_chunk_unloads_per_frame: 32

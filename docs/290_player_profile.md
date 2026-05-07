@@ -1226,6 +1226,12 @@ Local skin files in `skins/` are user-owned. Server-downloaded skin files are
 cached only in `cache/skins/` and must not be copied into `skins/` unless the
 user explicitly imports them as a local skin.
 
+Client rendering treats the disk cache and GPU residency as separate systems.
+Validated PNG files under `skins/` or `cache/skins/` may be decoded into CPU
+RGBA8 pixels and uploaded to the renderer's `PlayerSkins` paged atlas. Evicting
+a skin from that GPU atlas frees only temporary texture-array space; it must not
+delete `skins/<skin_hash>.png` or `cache/skins/<skin_hash>.png`.
+
 When `profiles.json` is missing, the client may migrate the legacy
 `identity/local_identity.json` plus `identity/local_private_key.bin` into the
 new layout. Migration writes the new files and leaves the old files in place.
@@ -1248,6 +1254,9 @@ The default skin is used when a profile has no applicable local skin, when
 server skins are disabled, while remote skins download, or when validation
 fails. It is not uploaded as a custom skin unless the user imports/selects it as
 a normal local skin.
+
+The default skin is also the immediate rendering fallback while a custom skin is
+not resident in the GPU player skin atlas or when atlas allocation/upload fails.
 
 Skin hashes are content hashes of the original accepted PNG bytes:
 

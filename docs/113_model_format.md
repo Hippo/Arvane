@@ -178,6 +178,12 @@ Example: [pig.json](../arvane_home/assets/models/entity/pig.json)
 The player model is [player.json](../arvane_home/assets/models/entity/player.json)
 and uses `["$0"]` as its skin input texture.
 
+At runtime, the renderer may build two player render variants from this model:
+one default-skin variant that samples the authored entity atlas, and one dynamic
+skin variant that samples the `PlayerSkins` paged atlas. The dynamic variant
+keeps model UVs normalized to the authored `texture_size`; per-instance atlas
+region and page data choose the resident skin.
+
 ### Structure
 
 ```json

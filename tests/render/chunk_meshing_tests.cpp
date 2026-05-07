@@ -156,6 +156,29 @@ TEST(ChunkMeshingTests, SingleOpaqueCubeEmitsSixFaces) {
   EXPECT_EQ(face_count(mesh.transparent), 0U);
 }
 
+TEST(ChunkMeshingTests, CubeVerticesCarryAtlasPageFromRenderData) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::voxel::BlockRenderData render_data =
+      arv::voxel::BlockRenderData::make_empty(registry.variant_count());
+  for (const arv::voxel::BlockFace face : arv::voxel::AllBlockFaces) {
+    arv::voxel::BlockFaceRenderData face_data;
+    face_data.page = 3;
+    face_data.uvs = arv::voxel::default_cube_face_uvs(face);
+    render_data.set_face(stone, face, face_data);
+  }
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, stone));
+
+  const arv::voxel::ChunkSnapshot snapshot =
+      arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry, &render_data);
+
+  ASSERT_GT(arv::render::chunk_vertex_count(mesh.opaque), 0U);
+  EXPECT_EQ(arv::render::chunk_vertex_at(mesh.opaque, 0).atlas_page, 3U);
+}
+
 TEST(ChunkMeshingTests, AdjacentOpaqueCubesCullInternalFaces) {
   const arv::voxel::BlockRegistry registry = make_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();

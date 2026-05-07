@@ -4,9 +4,13 @@ layout(location = 1) in vec2 a_uv;
 layout(location = 2) in vec3 a_color;
 layout(location = 3) in uint a_bone_index;
 layout(location = 4) in uint a_flags;
-layout(location = 5) in vec3 a_instance_position;
-layout(location = 6) in vec4 a_instance_rotation;
-layout(location = 7) in float a_instance_scale;
+layout(location = 5) in uint a_texture_domain;
+layout(location = 6) in uint a_atlas_page;
+layout(location = 7) in vec3 a_instance_position;
+layout(location = 8) in vec4 a_instance_rotation;
+layout(location = 9) in float a_instance_scale;
+layout(location = 10) in vec4 a_instance_player_skin_region;
+layout(location = 11) in uint a_instance_player_skin_page;
 
 uniform vec3 u_camera_position;
 uniform vec3 u_camera_forward;
@@ -24,6 +28,9 @@ uniform vec3 u_bone_positions[128];
 out vec2 v_uv;
 out vec3 v_color;
 flat out uint v_flags;
+flat out uint v_texture_domain;
+flat out uint v_atlas_page;
+out vec4 v_player_skin_region;
 
 vec3 rotate_euler_degrees(vec3 value, vec3 degrees) {
   vec3 r = radians(degrees);
@@ -74,5 +81,8 @@ void main() {
   v_uv = a_uv;
   v_color = a_color;
   v_flags = a_flags;
+  v_texture_domain = a_texture_domain;
+  v_atlas_page = a_texture_domain == 2u ? a_instance_player_skin_page : a_atlas_page;
+  v_player_skin_region = a_instance_player_skin_region;
   gl_Position = vec4(view_x * focal / aspect, view_y * focal, clip_z, view_z);
 }

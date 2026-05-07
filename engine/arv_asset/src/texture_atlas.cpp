@@ -1,34 +1,31 @@
 #include "arv/asset/texture_atlas.hpp"
 
 #include <algorithm>
+#include <numeric>
+#include <optional>
 #include <sstream>
 #include <utility>
-
-#include <rectpack2D/finders_interface.h>
 
 namespace arv::asset {
 namespace {
 
-class AtlasSubject {
-public:
-  AtlasSubject(rectpack2D::rect_xywh rect, usize input_index) : rect_(rect), input_index_(input_index) {
-  }
+struct AtlasFreeRect {
+  u32 x{};
+  u32 y{};
+  u32 width{};
+  u32 height{};
+};
 
-  [[nodiscard]] rectpack2D::rect_xywh& get_rect() noexcept {
-    return rect_;
-  }
+struct AtlasAllocation {
+  u32 x{};
+  u32 y{};
+  u32 width{};
+  u32 height{};
+};
 
-  [[nodiscard]] const rectpack2D::rect_xywh& get_rect() const noexcept {
-    return rect_;
-  }
-
-  [[nodiscard]] usize input_index() const noexcept {
-    return input_index_;
-  }
-
-private:
-  rectpack2D::rect_xywh rect_{};
-  usize input_index_{};
+struct AtlasPageBuilder {
+  TextureAtlasPage page{};
+  std::vector<AtlasFreeRect> free_rects{};
 };
 
 [[nodiscard]] bool is_power_of_two(u32 value) noexcept {
@@ -92,6 +89,46 @@ void copy_with_edge_padding(
           read_rgba_pixel(source, source_x, source_y));
     }
   }
+}
+
+[[nodiscard]] AtlasPageBuilder make_atlas_page(u32 size) {
+  AtlasPageBuilder builder;
+  builder.page.image.width = size;
+  builder.page.image.height = size;
+  builder.page.image.channels = 4;
+  builder.page.image.pixels.assign(static_cast<usize>(size) * size * 4U, 0U);
+  builder.free_rects.push_back({0, 0, size, size});
+  return builder;
+}
+
+[[nodiscard]] std::optional<AtlasAllocation> allocate_from_page(
+    AtlasPageBuilder& page,
+    u32 width,
+    u32 height) {
+  for (usize index = 0; index < page.free_rects.size(); ++index) {
+    const AtlasFreeRect free = page.free_rects[index];
+    if (free.width < width || free.height < height) {
+      continue;
+    }
+
+    page.free_rects.erase(page.free_rects.begin() + static_cast<std::ptrdiff_t>(index));
+    if (free.width > width) {
+      page.free_rects.push_back({
+          free.x + width,
+          free.y,
+          free.width - width,
+          height});
+    }
+    if (free.height > height) {
+      page.free_rects.push_back({
+          free.x,
+          free.y + height,
+          free.width,
+          free.height - height});
+    }
+    return AtlasAllocation{free.x, free.y, width, height};
+  }
+  return std::nullopt;
 }
 
 [[nodiscard]] std::string block_texture_for_face(
@@ -168,7 +205,8 @@ TextureAtlasResult build_texture_atlas(
   if (inputs.empty()) {
     return TextureAtlasResult::failure({{}, {}, "build texture atlas", "atlas has no inputs"});
   }
-  if (options.max_page_size == 0 || options.padding > options.max_page_size / 4U) {
+  if (options.max_page_size == 0 || options.max_pages == 0 ||
+      options.padding > options.max_page_size / 4U) {
     return TextureAtlasResult::failure({{}, {}, "build texture atlas", "invalid atlas sizing options"});
   }
 
@@ -211,75 +249,81 @@ TextureAtlasResult build_texture_atlas(
     }
   }
 
-  constexpr bool AllowFlip = false;
-  using Spaces = rectpack2D::empty_spaces<AllowFlip, rectpack2D::default_empty_spaces>;
-  using Rect = rectpack2D::output_rect_t<Spaces>;
-
-  std::vector<AtlasSubject> subjects;
-  subjects.reserve(inputs.size());
-  for (usize i = 0; i < inputs.size(); ++i) {
-    const TextureAtlasInput& input = inputs[i];
-    subjects.emplace_back(
-        Rect{
-            0,
-            0,
-            static_cast<int>(input.image.width + options.padding * 2U),
-            static_cast<int>(input.image.height + options.padding * 2U)},
-        i);
-  }
-
-  auto report_successful = [](Rect&) {
-    return rectpack2D::callback_result::CONTINUE_PACKING;
-  };
-  auto report_unsuccessful = [](Rect&) {
-    return rectpack2D::callback_result::ABORT_PACKING;
-  };
-
-  const rectpack2D::rect_wh result_size = rectpack2D::find_best_packing_dont_sort<Spaces>(
-      subjects,
-      rectpack2D::make_finder_input(
-          static_cast<int>(options.max_page_size),
-          -4,
-          report_successful,
-          report_unsuccessful,
-          rectpack2D::flipping_option::DISABLED));
-
-  if (result_size.w <= 0 || result_size.h <= 0 ||
-      result_size.w > static_cast<int>(options.max_page_size) ||
-      result_size.h > static_cast<int>(options.max_page_size)) {
-    return TextureAtlasResult::failure({{}, {}, "build texture atlas", "rectpack2D could not pack atlas inputs"});
-  }
-
   TextureAtlas atlas;
   atlas.padding = options.padding;
   atlas.mip_safe_max_level = mip_safe_max_level_for_padding(options.padding);
-  TextureAtlasPage page;
-  page.image.width = static_cast<u32>(result_size.w);
-  page.image.height = static_cast<u32>(result_size.h);
-  page.image.channels = 4;
-  page.image.pixels.assign(static_cast<usize>(page.image.width) * page.image.height * 4U, 0U);
-
   atlas.entries.resize(inputs.size());
-  for (AtlasSubject& subject : subjects) {
-    const usize input_index = subject.input_index();
+
+  std::vector<usize> order(inputs.size());
+  std::iota(order.begin(), order.end(), 0U);
+  std::stable_sort(order.begin(), order.end(), [&](usize lhs, usize rhs) {
+    const TextureAtlasInput& lhs_input = inputs[lhs];
+    const TextureAtlasInput& rhs_input = inputs[rhs];
+    const u32 lhs_width = lhs_input.image.width + options.padding * 2U;
+    const u32 lhs_height = lhs_input.image.height + options.padding * 2U;
+    const u32 rhs_width = rhs_input.image.width + options.padding * 2U;
+    const u32 rhs_height = rhs_input.image.height + options.padding * 2U;
+    const u64 lhs_area = static_cast<u64>(lhs_width) * lhs_height;
+    const u64 rhs_area = static_cast<u64>(rhs_width) * rhs_height;
+    if (lhs_area != rhs_area) {
+      return lhs_area > rhs_area;
+    }
+    return std::max(lhs_width, lhs_height) > std::max(rhs_width, rhs_height);
+  });
+
+  std::vector<AtlasPageBuilder> pages;
+  pages.reserve(options.max_pages);
+  for (const usize input_index : order) {
     const TextureAtlasInput& input = inputs[input_index];
-    const Rect& rect = subject.get_rect();
+    const u32 padded_width = input.image.width + options.padding * 2U;
+    const u32 padded_height = input.image.height + options.padding * 2U;
+
+    std::optional<AtlasAllocation> allocation;
+    u32 page_index = 0;
+    for (; page_index < pages.size(); ++page_index) {
+      allocation = allocate_from_page(pages[page_index], padded_width, padded_height);
+      if (allocation.has_value()) {
+        break;
+      }
+    }
+    if (!allocation.has_value()) {
+      if (pages.size() >= options.max_pages) {
+        return TextureAtlasResult::failure({input.asset_id.value,
+                                            {},
+                                            "build texture atlas",
+                                            "atlas inputs exceeded configured page count"});
+      }
+      pages.push_back(make_atlas_page(options.max_page_size));
+      page_index = static_cast<u32>(pages.size() - 1U);
+      allocation = allocate_from_page(pages.back(), padded_width, padded_height);
+    }
+    if (!allocation.has_value()) {
+      return TextureAtlasResult::failure({input.asset_id.value,
+                                          {},
+                                          "build texture atlas",
+                                          "atlas page allocator could not place texture"});
+    }
+
     copy_with_edge_padding(
         input.image,
-        page.image,
-        static_cast<u32>(rect.x),
-        static_cast<u32>(rect.y),
+        pages[page_index].page.image,
+        allocation->x,
+        allocation->y,
         options.padding);
 
     TextureAtlasEntry entry;
     entry.asset_id = input.asset_id;
-    entry.page = 0;
+    entry.page = page_index;
     entry.texture_index = static_cast<u32>(input_index);
-    entry.padded_pixel_min = {rect.x, rect.y};
-    entry.padded_pixel_max = {rect.x + rect.w, rect.y + rect.h};
+    entry.padded_pixel_min = {
+        static_cast<i32>(allocation->x),
+        static_cast<i32>(allocation->y)};
+    entry.padded_pixel_max = {
+        static_cast<i32>(allocation->x + allocation->width),
+        static_cast<i32>(allocation->y + allocation->height)};
     entry.unpadded_pixel_min = {
-        rect.x + static_cast<i32>(options.padding),
-        rect.y + static_cast<i32>(options.padding)};
+        static_cast<i32>(allocation->x + options.padding),
+        static_cast<i32>(allocation->y + options.padding)};
     entry.unpadded_pixel_max = {
         entry.unpadded_pixel_min.x + static_cast<i32>(input.image.width),
         entry.unpadded_pixel_min.y + static_cast<i32>(input.image.height)};
@@ -292,7 +336,10 @@ TextureAtlasResult build_texture_atlas(
     atlas.entries[input_index] = std::move(entry);
   }
 
-  atlas.pages.push_back(std::move(page));
+  atlas.pages.reserve(pages.size());
+  for (AtlasPageBuilder& page : pages) {
+    atlas.pages.push_back(std::move(page.page));
+  }
   return TextureAtlasResult::success(std::move(atlas));
 }
 

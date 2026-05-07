@@ -19,6 +19,31 @@ namespace {
       {std::move(category), std::move(message)});
 }
 
+[[nodiscard]] render::PlayerSkinAtlasConfig player_skin_atlas_config_from(
+    const io::RenderConfig::PlayerSkinAtlasConfig& source) noexcept {
+  render::PlayerSkinAtlasConfig config;
+  config.page_size = source.page_size;
+  config.max_pages = source.max_pages;
+  config.cleanup.interval_seconds = source.cleanup.interval_seconds;
+  config.cleanup.evict_after_unused_seconds =
+      source.cleanup.evict_after_unused_seconds;
+  config.pressure_cleanup.enabled = source.pressure_cleanup.enabled;
+  config.pressure_cleanup.usage_threshold = source.pressure_cleanup.usage_threshold;
+  config.pressure_cleanup.target_usage = source.pressure_cleanup.target_usage;
+  return config;
+}
+
+[[nodiscard]] asset::TextureAtlasBuildOptions atlas_build_options_from(
+    const io::RenderConfig::StaticAtlasConfig& source,
+    u32 padding,
+    bool require_uniform_non_fallback_size) noexcept {
+  return {
+      .max_page_size = source.page_size,
+      .max_pages = source.max_pages,
+      .padding = padding,
+      .require_uniform_non_fallback_size = require_uniform_non_fallback_size};
+}
+
 } // namespace
 
 DesktopLoadedAssetsResult load_desktop_assets(
@@ -26,6 +51,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
     render::OpenGLRenderer& renderer,
     const io::EngineConfig& config) {
   DesktopLoadedAssets loaded;
+  renderer.configure_player_skin_atlas(
+      player_skin_atlas_config_from(config.render.atlases.player_skins));
 
   auto block_definition_text = io::read_text_file(
       config.paths.config_path() / "blocks.json",
@@ -58,7 +85,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
   auto block_atlas_result = asset::build_block_texture_atlas(
       resources,
       loaded.block_registry,
-      block_models);
+      block_models,
+      atlas_build_options_from(config.render.atlases.blocks, 4, true));
   if (!block_atlas_result) {
     return asset_failure("assets", block_atlas_result.error().message);
   }
@@ -66,10 +94,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
   if (loaded.block_atlas.atlas.pages.empty()) {
     return asset_failure("assets", "block texture atlas did not produce a page");
   }
-  render::TextureUploadData terrain_atlas_upload =
-      texture_upload_from_image(loaded.block_atlas.atlas.pages.front().image);
-  terrain_atlas_upload.limit_mipmap_levels = true;
-  terrain_atlas_upload.max_mipmap_level = loaded.block_atlas.atlas.mip_safe_max_level;
+  render::TextureArrayUploadData terrain_atlas_upload =
+      texture_array_upload_from_atlas(loaded.block_atlas.atlas);
   renderer.set_chunk_texture_atlas(std::move(terrain_atlas_upload));
 
   auto ui_font = loaded.font_system.load_face(
@@ -138,7 +164,10 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("item_animations", item_animation_references.error().message);
   }
 
-  auto item_atlas_result = build_item_texture_atlas(resources, loaded.item_registry);
+  auto item_atlas_result = build_item_texture_atlas(
+      resources,
+      loaded.item_registry,
+      atlas_build_options_from(config.render.atlases.ui, 2, true));
   if (!item_atlas_result) {
     return asset_failure("assets", item_atlas_result.error().message);
   }
@@ -146,7 +175,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
   if (loaded.item_atlas.pages.empty()) {
     return asset_failure("assets", "item texture atlas did not produce a page");
   }
-  renderer.set_ui_item_atlas(texture_upload_from_image(loaded.item_atlas.pages.front().image));
+  renderer.set_ui_item_atlas(texture_array_upload_from_atlas(loaded.item_atlas));
 
   auto entity_definition_text = io::read_text_file(
       config.paths.config_path() / "entities.json",
@@ -176,7 +205,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
           {config.render.block_outline.color_r,
            config.render.block_outline.color_g,
            config.render.block_outline.color_b},
-          config.render.block_outline.thickness});
+          config.render.block_outline.thickness},
+      atlas_build_options_from(config.render.atlases.entities, 2, false));
   if (!entity_render_assets_result) {
     return asset_failure("entities", entity_render_assets_result.error().message);
   }
@@ -187,11 +217,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
           "entities",
           "entity models were loaded without an entity texture atlas");
     }
-    render::TextureUploadData entity_atlas_upload =
-        texture_upload_from_image(loaded.entity_render_assets.texture_atlas.pages.front().image);
-    entity_atlas_upload.limit_mipmap_levels = true;
-    entity_atlas_upload.max_mipmap_level =
-        loaded.entity_render_assets.texture_atlas.mip_safe_max_level;
+    render::TextureArrayUploadData entity_atlas_upload =
+        texture_array_upload_from_atlas(loaded.entity_render_assets.texture_atlas);
     renderer.set_entity_texture_atlas(std::move(entity_atlas_upload));
     for (const render::EntityModelAsset& model : loaded.entity_render_assets.models) {
       renderer.set_entity_model(model);
