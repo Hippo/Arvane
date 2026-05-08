@@ -277,8 +277,145 @@ void append_ui_quad(
   }
 }
 
+void append_ui_triangle(
+    std::vector<UIVertex>& vertices,
+    std::vector<u32>& indices,
+    std::vector<UiDrawRun>& runs,
+    Vec2f a,
+    Vec2f b,
+    Vec2f c,
+    Vec4f color,
+    f32 texture_slot,
+    u32 atlas_page,
+    UiClip clip) {
+  const u32 base = static_cast<u32>(vertices.size());
+  const u32 first_index = static_cast<u32>(indices.size());
+  vertices.emplace_back(a, Vec2f{}, color, texture_slot, atlas_page);
+  vertices.emplace_back(b, Vec2f{}, color, texture_slot, atlas_page);
+  vertices.emplace_back(c, Vec2f{}, color, texture_slot, atlas_page);
+  indices.emplace_back(base);
+  indices.emplace_back(base + 1U);
+  indices.emplace_back(base + 2U);
+  if (!runs.empty() && runs.back().clip == clip &&
+      runs.back().first_index + runs.back().index_count == first_index) {
+    runs.back().index_count += 3U;
+  } else {
+    runs.push_back({first_index, 3U, clip});
+  }
+}
+
 [[nodiscard]] UiClip clip_from_draw_item(Vec2f min, Vec2f max, bool enabled) noexcept {
   return {min, max, enabled};
+}
+
+void append_ui_solid_quad(
+    std::vector<UIVertex>& vertices,
+    std::vector<u32>& indices,
+    std::vector<UiDrawRun>& runs,
+    Vec2f min,
+    Vec2f max,
+    Vec4f color,
+    UiClip clip) {
+  append_ui_quad(
+      vertices,
+      indices,
+      runs,
+      {{{min.x, min.y}, {max.x, min.y}, {max.x, max.y}, {min.x, max.y}}},
+      {{{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}}},
+      color,
+      UiTextureSlotWhite,
+      0U,
+      clip);
+}
+
+void append_ui_rounded_rect(
+    std::vector<UIVertex>& vertices,
+    std::vector<u32>& indices,
+    std::vector<UiDrawRun>& runs,
+    Vec2f min,
+    Vec2f max,
+    Vec4f color,
+    f32 radius,
+    UiClip clip) {
+  if (color.w <= 0.0F || max.x <= min.x || max.y <= min.y) {
+    return;
+  }
+  const f32 width = max.x - min.x;
+  const f32 height = max.y - min.y;
+  radius = std::clamp(radius, 0.0F, std::min(width, height) * 0.5F);
+  if (radius <= 0.5F) {
+    append_ui_solid_quad(vertices, indices, runs, min, max, color, clip);
+    return;
+  }
+
+  constexpr usize SegmentsPerCorner = 6;
+  constexpr f32 HalfPi = 1.57079632679F;
+  std::array<Vec2f, SegmentsPerCorner * 4U + 4U> perimeter{};
+  usize count = 0;
+  const auto append_corner = [&](Vec2f center, f32 start_angle) {
+    for (usize segment = 0; segment <= SegmentsPerCorner; ++segment) {
+      const f32 t = static_cast<f32>(segment) / static_cast<f32>(SegmentsPerCorner);
+      const f32 angle = start_angle + t * HalfPi;
+      perimeter[count++] = {
+          center.x + std::cos(angle) * radius,
+          center.y + std::sin(angle) * radius};
+    }
+  };
+
+  append_corner({max.x - radius, min.y + radius}, -HalfPi);
+  append_corner({max.x - radius, max.y - radius}, 0.0F);
+  append_corner({min.x + radius, max.y - radius}, HalfPi);
+  append_corner({min.x + radius, min.y + radius}, HalfPi * 2.0F);
+
+  const Vec2f center{(min.x + max.x) * 0.5F, (min.y + max.y) * 0.5F};
+  for (usize index = 0; index < count; ++index) {
+    append_ui_triangle(
+        vertices,
+        indices,
+        runs,
+        center,
+        perimeter[index],
+        perimeter[(index + 1U) % count],
+        color,
+        UiTextureSlotWhite,
+        0U,
+        clip);
+  }
+}
+
+void append_ui_rect_item(
+    std::vector<UIVertex>& vertices,
+    std::vector<u32>& indices,
+    std::vector<UiDrawRun>& runs,
+    const UIRectDrawItem& rect) {
+  const UiClip clip = clip_from_draw_item(rect.clip_min, rect.clip_max, rect.clip);
+  const Vec2f min = rect.min;
+  const Vec2f max = rect.max;
+  if (rect.border_width > 0.0F && rect.border_color.w > 0.0F) {
+    append_ui_rounded_rect(
+        vertices,
+        indices,
+        runs,
+        min,
+        max,
+        rect.border_color,
+        rect.radius,
+        clip);
+    const f32 inset = std::min(
+        rect.border_width,
+        std::min(max.x - min.x, max.y - min.y) * 0.5F);
+    append_ui_rounded_rect(
+        vertices,
+        indices,
+        runs,
+        {min.x + inset, min.y + inset},
+        {max.x - inset, max.y - inset},
+        rect.color,
+        std::max(0.0F, rect.radius - inset),
+        clip);
+    return;
+  }
+  append_ui_rounded_rect(vertices, indices, runs, min, max, rect.color, rect.radius, clip);
 }
 
 void apply_ui_scissor(UiClip clip, u32 framebuffer_height) {
@@ -413,7 +550,7 @@ void OpenGLRenderer::set_ui_font_atlas(TextureArrayUploadData upload) {
   destroy_gpu_texture(font_atlas_);
   if (upload.valid()) {
     note_texture_upload(upload);
-    font_atlas_ = create_texture_array(upload, false);
+    font_atlas_ = create_texture_array(upload, false, TextureFilter::Linear);
   }
 }
 
@@ -1055,7 +1192,8 @@ void OpenGLRenderer::destroy_entity_gpu_model(EntityGpuModel& model) {
 
 OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture_array(
     const TextureArrayUploadData& upload,
-    bool mipmaps) {
+    bool mipmaps,
+    TextureFilter filter) {
   GpuTexture texture;
   if (!upload.valid()) {
     return texture;
@@ -1082,7 +1220,12 @@ OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture_array(
   glBindTexture(GL_TEXTURE_2D_ARRAY, texture.id);
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  const GLenum mag_filter = filter == TextureFilter::Linear ? GL_LINEAR : GL_NEAREST;
+  const GLenum min_filter = mipmaps
+                                ? (filter == TextureFilter::Linear ? GL_LINEAR_MIPMAP_LINEAR
+                                                                    : GL_NEAREST_MIPMAP_NEAREST)
+                                : mag_filter;
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, mag_filter);
   const u32 full_max_level = mipmaps ? full_mipmap_max_level(upload.width, upload.height) : 0U;
   const u32 max_level = mipmaps && upload.limit_mipmap_levels
                             ? std::min(upload.max_mipmap_level, full_max_level)
@@ -1091,7 +1234,7 @@ OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture_array(
   glTexParameteri(
       GL_TEXTURE_2D_ARRAY,
       GL_TEXTURE_MIN_FILTER,
-      mipmaps ? GL_NEAREST_MIPMAP_NEAREST : GL_NEAREST);
+      min_filter);
   glTexImage3D(
       GL_TEXTURE_2D_ARRAY,
       0,
@@ -1777,19 +1920,7 @@ void OpenGLRenderer::draw_ui_quads() {
   ui_draw_runs_.reserve(quad_count);
 
   for (const UIRectDrawItem& rect : frame_.ui_rects) {
-    append_ui_quad(
-        ui_vertices_,
-        ui_indices_,
-        ui_draw_runs_,
-        {{{rect.min.x, rect.min.y},
-          {rect.max.x, rect.min.y},
-          {rect.max.x, rect.max.y},
-          {rect.min.x, rect.max.y}}},
-        {{{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}}},
-        rect.color,
-        UiTextureSlotWhite,
-        0U,
-        clip_from_draw_item(rect.clip_min, rect.clip_max, rect.clip));
+    append_ui_rect_item(ui_vertices_, ui_indices_, ui_draw_runs_, rect);
   }
 
   for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {

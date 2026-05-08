@@ -140,7 +140,8 @@ inline void add_item_slot_children(
       UiElement count = text_element(
           std::string{stable_prefix} + ".count",
           std::to_string(stack->count),
-          {0.96F, 0.96F, 0.91F, 1.0F});
+          tree.theme().colors.text,
+          UiTextRole::Small);
       count.layout.anchor = UiAnchor::BottomRight;
       count.layout.offset = {-4.0F, -3.0F};
       tree.add_child(slot_id, std::move(count));
@@ -160,7 +161,7 @@ inline void add_item_slot_children(
       bar.layout.height = 3.0F;
       bar.layout.anchor = UiAnchor::BottomLeft;
       bar.layout.offset = {5.0F, -5.0F};
-      bar.style.background = {0.24F, 0.74F, 0.42F, 0.95F};
+      bar.style.background = tree.theme().colors.success;
       bar.hit_test = false;
       tree.add_child(slot_id, std::move(bar));
     }
@@ -170,7 +171,8 @@ inline void add_item_slot_children(
     UiElement label = text_element(
         std::string{stable_prefix} + ".label",
         std::to_string(static_cast<u32>(slot + 1U)),
-        {0.86F, 0.88F, 0.90F, 0.92F});
+        tree.theme().colors.text_muted,
+        UiTextRole::Small);
     label.layout.anchor = UiAnchor::BottomLeft;
     label.layout.offset = {4.0F, -4.0F};
     tree.add_child(slot_id, std::move(label));
@@ -186,6 +188,7 @@ inline void append_slot(
     bool selected,
     bool show_number,
     f32 size) {
+  const UiTheme& theme = tree.theme();
   UiElement item;
   item.stable_id = stable_id;
   item.type = UiElementType::ItemSlot;
@@ -193,9 +196,17 @@ inline void append_slot(
   item.layout.height_mode = UiSizeMode::Fixed;
   item.layout.width = size;
   item.layout.height = size;
-  item.style.background = selected ? Vec4f{0.18F, 0.17F, 0.12F, 0.94F}
-                                   : Vec4f{0.12F, 0.12F, 0.13F, 0.88F};
-  item.style.accent = {0.95F, 0.86F, 0.44F, 1.0F};
+  item.style.background = selected ? theme.colors.surface_selected : theme.colors.surface_alt;
+  item.style.background.w = std::min(item.style.background.w, 0.90F);
+  item.style.background_hover = theme.colors.surface_hover;
+  item.style.background_pressed = theme.colors.surface_pressed;
+  item.style.background_selected = theme.colors.surface_selected;
+  item.style.accent = theme.colors.warning;
+  item.style.border = theme.colors.border;
+  item.style.border_focus = theme.colors.border_focus;
+  item.style.border_width = theme.layout.border_width;
+  item.style.focus_border_width = std::max(theme.layout.border_width * 2.0F, 2.0F);
+  item.style.radius = theme.layout.radius_sm;
   item.selected = selected;
   item.hit_test = true;
   item.focusable = true;

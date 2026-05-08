@@ -23,12 +23,40 @@ public:
   }
 
   void build(UIContext& ctx) override {
-    const UiNodeID stack =
-        add_menu_shell(ctx, screen_id(), "Paused", 360.0F, 300.0F, PauseBackdropColor);
-    add_button(ctx.tree, stack, "menu.pause.resume", "Resume", "pause.resume");
-    add_button(ctx.tree, stack, "menu.pause.main_menu", "Back to Main Menu", "pause.main_menu");
+    const UiTheme& theme = ctx.tree.theme();
+    add_backdrop(ctx.tree, "pause_menu.backdrop", theme.colors.pause_backdrop);
+
+    UiElement stack_element = make_stack("pause_menu.stack", theme.layout.spacing_md);
+    stack_element.layout.width_mode = UiSizeMode::Fixed;
+    stack_element.layout.width = menu_button_width(theme);
+    stack_element.layout.anchor = UiAnchor::Center;
+    const UiNodeID stack = ctx.tree.add_child(ctx.tree.root_id(), std::move(stack_element));
+
+    UiElement title = make_text("pause_menu.title", "Paused", theme.colors.text, UiTextRole::Heading);
+    title.layout.anchor = UiAnchor::TopCenter;
+    title.layout.offset = {0.0F, -theme.layout.spacing_sm};
+    ctx.tree.add_child(stack, std::move(title));
+
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.pause.resume",
+        "Resume",
+        "pause.resume",
+        true,
+        false,
+        UiControlRole::Primary);
     add_button(ctx.tree, stack, "menu.pause.settings", "Settings", "pause.settings");
-    add_button(ctx.tree, stack, "menu.pause.quit", "Quit", "pause.quit");
+    add_button(ctx.tree, stack, "menu.pause.main_menu", "Back to Main Menu", "pause.main_menu");
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.pause.quit",
+        "Quit",
+        "pause.quit",
+        true,
+        false,
+        UiControlRole::Danger);
   }
 
   bool handle_action(const UiAction& action, UIContext& ctx) override {

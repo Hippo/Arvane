@@ -44,15 +44,115 @@ namespace {
       .require_uniform_non_fallback_size = require_uniform_non_fallback_size};
 }
 
+using UiFontStackLoadResult = Expected<void, DesktopAssetLoadError>;
+
+[[nodiscard]] UiFontStackLoadResult load_ui_font_stack(
+    asset::ResourceManager& resources,
+    asset::FontSystem& font_system,
+    std::string asset_name,
+    u32 pixel_size,
+    asset::FontStack& stack,
+    bool include_fallbacks) {
+  std::vector<asset::FontFaceHandle> faces;
+  asset::AssetID primary_id{std::move(asset_name)};
+  const std::filesystem::path primary_path =
+      resources.resolve_asset_path(primary_id, asset::AssetKind::Font);
+  auto primary = font_system.load_face(
+      primary_path,
+      pixel_size,
+      primary_id);
+  if (!primary) {
+    return UiFontStackLoadResult::failure({"assets", primary.error().message});
+  }
+  faces.emplace_back(primary.value());
+
+  if (include_fallbacks) {
+    for (const asset::AssetID fallback : {
+             asset::AssetID{"arvane:font/symbol"},
+             asset::AssetID{"arvane:font/arabic"},
+             asset::AssetID{"arvane:font/emoji"},
+         }) {
+      const std::filesystem::path path =
+          resources.resolve_asset_path(fallback, asset::AssetKind::Font);
+      if (!std::filesystem::exists(path)) {
+        continue;
+      }
+      auto face = font_system.load_face(path, pixel_size, fallback);
+      if (face) {
+        faces.emplace_back(face.value());
+      } else {
+        core::warn("assets", face.error().message);
+      }
+    }
+  }
+
+  stack = font_system.make_stack(faces);
+  return UiFontStackLoadResult::success();
+}
+
 } // namespace
 
 DesktopLoadedAssetsResult load_desktop_assets(
     asset::ResourceManager& resources,
     render::OpenGLRenderer& renderer,
-    const io::EngineConfig& config) {
+    const io::EngineConfig& config,
+    const ui::UiTheme& theme) {
   DesktopLoadedAssets loaded;
   renderer.configure_player_skin_atlas(
       player_skin_atlas_config_from(config.render.atlases.player_skins));
+
+  core::info("assets", "loading UI font stacks");
+  if (auto font_result = load_ui_font_stack(
+          resources,
+          loaded.font_system,
+          theme.typography.default_font,
+          theme.typography.size_sm,
+          loaded.ui_font_stacks.small,
+          false);
+      !font_result) {
+    return DesktopLoadedAssetsResult::failure(font_result.error());
+  }
+  if (auto font_result = load_ui_font_stack(
+          resources,
+          loaded.font_system,
+          theme.typography.default_font,
+          theme.typography.size_md,
+          loaded.ui_font_stacks.body,
+          true);
+      !font_result) {
+    return DesktopLoadedAssetsResult::failure(font_result.error());
+  }
+  if (auto font_result = load_ui_font_stack(
+          resources,
+          loaded.font_system,
+          theme.typography.heading_font,
+          theme.typography.size_lg,
+          loaded.ui_font_stacks.heading,
+          false);
+      !font_result) {
+    return DesktopLoadedAssetsResult::failure(font_result.error());
+  }
+  if (auto font_result = load_ui_font_stack(
+          resources,
+          loaded.font_system,
+          theme.typography.heading_font,
+          theme.typography.size_xl,
+          loaded.ui_font_stacks.title,
+          false);
+      !font_result) {
+    return DesktopLoadedAssetsResult::failure(font_result.error());
+  }
+  if (auto font_result = load_ui_font_stack(
+          resources,
+          loaded.font_system,
+          theme.typography.monospace_font,
+          theme.typography.size_md,
+          loaded.ui_font_stacks.mono,
+          false);
+      !font_result) {
+    return DesktopLoadedAssetsResult::failure(font_result.error());
+  }
+  core::info("assets", "loaded UI font stacks");
 
   auto block_definition_text = io::read_text_file(
       config.paths.config_path() / "blocks.json",
@@ -82,6 +182,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
   asset::apply_block_model_collision_boxes(loaded.block_registry, block_models);
   loaded.block_registry_hash = persistence::hash_block_registry(loaded.block_registry);
 
+  core::info("assets", "building block texture atlas");
   auto block_atlas_result = asset::build_block_texture_atlas(
       resources,
       loaded.block_registry,
@@ -97,33 +198,6 @@ DesktopLoadedAssetsResult load_desktop_assets(
   render::TextureArrayUploadData terrain_atlas_upload =
       texture_array_upload_from_atlas(loaded.block_atlas.atlas);
   renderer.set_chunk_texture_atlas(std::move(terrain_atlas_upload));
-
-  auto ui_font = loaded.font_system.load_face(
-      resources.resolve_asset_path({"arvane:font/font"}, asset::AssetKind::Font),
-      18,
-      {"arvane:font/font"});
-  if (!ui_font) {
-    return asset_failure("assets", ui_font.error().message);
-  }
-  std::vector<asset::FontFaceHandle> ui_faces{ui_font.value()};
-  for (const asset::AssetID fallback : {
-           asset::AssetID{"arvane:font/symbol"},
-           asset::AssetID{"arvane:font/arabic"},
-           asset::AssetID{"arvane:font/emoji"},
-       }) {
-    const std::filesystem::path path =
-        resources.resolve_asset_path(fallback, asset::AssetKind::Font);
-    if (!std::filesystem::exists(path)) {
-      continue;
-    }
-    auto face = loaded.font_system.load_face(path, 18, fallback);
-    if (face) {
-      ui_faces.emplace_back(face.value());
-    } else {
-      core::warn("assets", face.error().message);
-    }
-  }
-  loaded.ui_font_stack = loaded.font_system.make_stack(ui_faces);
 
   auto item_definition_text = io::read_text_file(
       config.paths.config_path() / "items.json",

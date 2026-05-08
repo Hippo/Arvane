@@ -12,28 +12,35 @@ void append_tab_menu_ui(UiTree& tree, TabMenuUiModel model) {
   if (!model.visible) {
     return;
   }
+  const UiTheme& theme = tree.theme();
 
   const f32 rows = static_cast<f32>(std::max<usize>(1U, model.players.size()));
   UiElement panel = fixed_panel(
       "tab.panel",
       360.0F,
       60.0F + rows * 24.0F + (model.footer.empty() ? 0.0F : 24.0F),
-      {0.03F, 0.034F, 0.04F, 0.88F});
+      theme.colors.surface);
+  panel.style.background.w = std::min(panel.style.background.w, 0.92F);
   panel.layout.anchor = UiAnchor::TopCenter;
   panel.layout.offset = {0.0F, 24.0F};
-  panel.layout.padding = {12.0F, 12.0F, 10.0F, 10.0F};
+  panel.layout.padding = {
+      theme.layout.spacing_lg,
+      theme.layout.spacing_lg,
+      theme.layout.spacing_md,
+      theme.layout.spacing_md};
+  style_surface(panel, theme, theme.widgets.panel.radius);
   panel.hit_test = false;
   const UiNodeID panel_id = tree.add_child(tree.root_id(), std::move(panel));
 
   UiElement stack;
   stack.stable_id = "tab.stack";
   stack.type = UiElementType::VerticalStack;
-  stack.layout.spacing = 6.0F;
+  stack.layout.spacing = theme.layout.spacing_sm;
   stack.hit_test = false;
   const UiNodeID stack_id = tree.add_child(panel_id, std::move(stack));
 
   if (!model.header.empty()) {
-    tree.add_child(stack_id, text_element("tab.header", model.header));
+    tree.add_child(stack_id, text_element("tab.header", model.header, theme.colors.text, UiTextRole::Heading));
   }
   for (usize index = 0; index < model.players.size(); ++index) {
     const PlayerListEntryView& player = model.players[index];
@@ -43,12 +50,12 @@ void append_tab_menu_ui(UiTree& tree, TabMenuUiModel model) {
     }
     tree.add_child(
         stack_id,
-        text_element("tab.player." + std::to_string(index), std::move(text)));
+        text_element("tab.player." + std::to_string(index), std::move(text), theme.colors.text));
   }
   if (!model.footer.empty()) {
     tree.add_child(
         stack_id,
-        text_element("tab.footer", model.footer, {0.78F, 0.82F, 0.86F, 1.0F}));
+        text_element("tab.footer", model.footer, theme.colors.text_muted, UiTextRole::Small));
   }
 }
 

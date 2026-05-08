@@ -1,0 +1,6 @@
+theme: "default"
+
+ui:
+  scale: 1.0
+  font_scale: 1.0
+  animation_scale: 1.0

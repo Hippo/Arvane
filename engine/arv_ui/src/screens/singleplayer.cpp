@@ -29,55 +29,81 @@ public:
       selected_save_.reset();
     }
 
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Single Player", 400.0F, 460.0F);
+    const UiTheme& theme = ctx.tree.theme();
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Single Player", 448.0F, 524.0F);
     if (saves.empty()) {
-      ctx.tree.add_child(
-          stack,
-          make_text("menu.single_player.empty", "No local saves", MutedTextColor));
+      UiElement empty = make_text(
+          "menu.single_player.empty",
+          "No local saves",
+          theme.colors.text_muted,
+          UiTextRole::Small);
+      empty.layout.anchor = UiAnchor::TopCenter;
+      ctx.tree.add_child(stack, std::move(empty));
     } else {
       for (usize index = 0; index < saves.size(); ++index) {
         const SinglePlayerSaveEntry& save = saves[index];
-        add_button(
+        add_list_row(
             ctx.tree,
             stack,
             "menu.single_player.world." + std::to_string(index),
             save_display_name(save),
+            save.detail.empty() ? "Ready to play" : save.detail,
             "single_player.select_world",
             true,
             selected_save_.has_value() && selected_save_.value() == index);
       }
     }
 
-    add_button(ctx.tree, stack, "menu.single_player.create", "Create World", "single_player.create");
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.single_player.create",
+        "Create World",
+        "single_player.create",
+        true,
+        false,
+        UiControlRole::Primary);
     add_button(
         ctx.tree,
         stack,
         "menu.single_player.delete",
         "Delete Save",
         "single_player.delete",
-        selected_save_.has_value());
+        selected_save_.has_value(),
+        false,
+        UiControlRole::Danger);
     add_button(ctx.tree, stack, "menu.single_player.back", "Back", "menu.back");
     add_error_text(ctx.tree, stack, "menu.single_player.error", error_);
 
     if (confirm_delete_ && selected_save_.has_value() && selected_save_.value() < saves.size()) {
       add_backdrop(ctx.tree, "menu.single_player.confirm.backdrop", {0.0F, 0.0F, 0.0F, 0.52F});
-      UiElement panel = make_panel("menu.single_player.confirm.panel", 340.0F, 172.0F);
+      UiElement panel = make_panel("menu.single_player.confirm.panel", 380.0F, 194.0F);
       panel.layout.anchor = UiAnchor::Center;
-      panel.layout.padding = {20.0F, 20.0F, 18.0F, 18.0F};
+      panel.layout.padding = {
+          theme.widgets.panel.padding,
+          theme.widgets.panel.padding,
+          theme.widgets.panel.padding,
+          theme.widgets.panel.padding};
+      apply_panel_style(panel, theme, true);
       const UiNodeID panel_id = ctx.tree.add_child(ctx.tree.root_id(), std::move(panel));
-      UiElement confirm_stack = make_stack("menu.single_player.confirm.stack", 10.0F);
+      UiElement confirm_stack = make_stack("menu.single_player.confirm.stack", theme.layout.spacing_md);
       const UiNodeID confirm_stack_id = ctx.tree.add_child(panel_id, std::move(confirm_stack));
       ctx.tree.add_child(
           confirm_stack_id,
           make_text(
               "menu.single_player.confirm.text",
-              "Delete " + save_display_name(saves[selected_save_.value()]) + "?"));
+              "Delete " + save_display_name(saves[selected_save_.value()]) + "?",
+              theme.colors.danger,
+              UiTextRole::Heading));
       add_button(
           ctx.tree,
           confirm_stack_id,
           "menu.single_player.confirm.delete",
           "Delete",
-          "single_player.confirm_delete");
+          "single_player.confirm_delete",
+          true,
+          false,
+          UiControlRole::Danger);
       add_button(
           ctx.tree,
           confirm_stack_id,
@@ -186,7 +212,7 @@ public:
   }
 
   void build(UIContext& ctx) override {
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Create World", 400.0F, 344.0F);
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Create World", 448.0F, 372.0F);
     add_text_box(
         ctx.tree,
         stack,
@@ -206,7 +232,15 @@ public:
         "create_world.focus_seed",
         active_field_ == TextField::Seed);
     add_error_text(ctx.tree, stack, "menu.create_world.error", error_);
-    add_button(ctx.tree, stack, "menu.create_world.create", "Create", "create_world.create");
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.create_world.create",
+        "Create",
+        "create_world.create",
+        true,
+        false,
+        UiControlRole::Primary);
     add_button(ctx.tree, stack, "menu.create_world.cancel", "Cancel", "menu.back");
   }
 

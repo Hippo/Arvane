@@ -261,6 +261,7 @@ public:
       DesktopSessionManager& sessions,
       ui::UiTree& ui_tree,
       ui::FontUiTextMeasurer& ui_text_measurer,
+      const ui::UiTheme& ui_theme,
       const voxel::FluidDefinition& water_fluid,
       DesktopMenuState& menu_state,
       ui::UIScreenManager& screen_manager)
@@ -275,6 +276,7 @@ public:
         sessions_(sessions),
         ui_tree_(ui_tree),
         ui_text_measurer_(ui_text_measurer),
+        ui_theme_(ui_theme),
         water_fluid_(water_fluid),
         menu_state_(menu_state),
         screen_manager_(screen_manager),
@@ -383,7 +385,8 @@ private:
         },
         &menu_state_,
         &menu_state_,
-        &screen_manager_};
+        &screen_manager_,
+        &ui_theme_};
   }
 
   [[nodiscard]] FrameTiming begin_frame() {
@@ -1281,6 +1284,7 @@ private:
       bool has_active_session,
       bool has_active_integrated_session,
       bool fixed_tick_ran) {
+    ui_tree_.set_theme(&ui_theme_);
     if (has_active_session) {
       update_gameplay_ui_snapshots(
           *active_session,
@@ -1304,11 +1308,12 @@ private:
             static_cast<f32>(framebuffer_.height),
         },
         &ui_text_measurer_);
+    (void)ui_tree_.route_mouse_move({platform_input.cursor_x, platform_input.cursor_y});
     append_menu_player_skin_preview(frame, menu_context);
     ui::append_ui_draw_commands(
         ui_tree_,
         assets_.font_system,
-        assets_.ui_font_stack,
+        assets_.ui_font_stacks,
         frame);
     if (assets_.font_system.atlas_dirty()) {
       renderer_.set_ui_font_atlas(
@@ -1492,6 +1497,7 @@ private:
   DesktopSessionManager& sessions_;
   ui::UiTree& ui_tree_;
   ui::FontUiTextMeasurer& ui_text_measurer_;
+  const ui::UiTheme& ui_theme_;
   const voxel::FluidDefinition& water_fluid_;
   DesktopMenuState& menu_state_;
   ui::UIScreenManager& screen_manager_;
@@ -1521,6 +1527,14 @@ int DesktopApplication::run(int argc, char** argv) {
     return 1;
   }
   const io::EngineConfig config = config_result.value();
+  const ui::UiThemeLoadResult theme_result =
+      ui::load_ui_theme(config.paths.arvane_home_path());
+  const ui::UiTheme ui_theme = theme_result.theme;
+  core::info(
+      "ui/theme",
+      "loaded theme '{}' ({})",
+      ui_theme.name,
+      theme_result.loaded_theme);
   asset::ResourceManager resources(config.paths.assets_path());
 
   platform::GlfwLibrary glfw;
@@ -1572,7 +1586,7 @@ int DesktopApplication::run(int argc, char** argv) {
   auto framebuffer = window.framebuffer_size();
   renderer.resize(framebuffer.width, framebuffer.height);
 
-  auto loaded_assets_result = load_desktop_assets(resources, renderer, config);
+  auto loaded_assets_result = load_desktop_assets(resources, renderer, config, ui_theme);
   if (!loaded_assets_result) {
     core::error(
         loaded_assets_result.error().category,
@@ -1582,8 +1596,9 @@ int DesktopApplication::run(int argc, char** argv) {
     return 1;
   }
   DesktopLoadedAssets assets = std::move(loaded_assets_result.value());
-  ui::FontUiTextMeasurer ui_text_measurer(assets.font_system, assets.ui_font_stack);
+  ui::FontUiTextMeasurer ui_text_measurer(assets.font_system, assets.ui_font_stacks);
   ui::UiTree ui_tree;
+  ui_tree.set_theme(&ui_theme);
 
   const server::ServerChunkStreamingConfig chunk_streaming =
       make_chunk_streaming_config(config);
@@ -1644,6 +1659,7 @@ int DesktopApplication::run(int argc, char** argv) {
       sessions,
       ui_tree,
       ui_text_measurer,
+      ui_theme,
       water_fluid,
       menu_state,
       screen_manager};

@@ -1,0 +1,67 @@
+name: "Light"
+description: "Readable daylight Arvane theme."
+
+colors:
+  background: "#e9eee9"
+  backdrop: "#dce3dd"
+  pause_backdrop: "#f4f8f566"
+  surface: "#f8faf7"
+  surface_alt: "#eef3ee"
+  surface_hover: "#d8e6da"
+  surface_pressed: "#d3ddd5"
+  surface_selected: "#d7e7dc"
+
+  text: "#17201c"
+  text_muted: "#53635c"
+  text_disabled: "#82908a"
+
+  border: "#aebbb2"
+  border_focus: "#2f73b8"
+
+  accent: "#33735c"
+  accent_hover: "#40876e"
+  accent_pressed: "#255642"
+  accent_text: "#f8fff9"
+
+  danger: "#b2382f"
+  danger_hover: "#c94d43"
+  danger_pressed: "#7f2923"
+  warning: "#9b6c18"
+  success: "#2d7e48"
+
+layout:
+  spacing_xs: 4
+  spacing_sm: 8
+  spacing_md: 12
+  spacing_lg: 18
+  spacing_xl: 28
+  radius_sm: 4
+  radius_md: 8
+  radius_lg: 12
+  border_width: 1
+
+typography:
+  default_font: "arvane:font/font"
+  heading_font: "arvane:font/font"
+  monospace_font: "arvane:font/font"
+  size_sm: 14
+  size_md: 18
+  size_lg: 22
+  size_xl: 34
+
+widgets:
+  button:
+    height: 44
+    min_width: 164
+    padding_x: 16
+    padding_y: 10
+    radius: 8
+  input:
+    height: 44
+    min_width: 300
+    padding_x: 14
+    padding_y: 10
+    radius: 8
+  panel:
+    padding: 22
+    radius: 12

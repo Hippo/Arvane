@@ -9,6 +9,7 @@ namespace arv::ui {
 namespace widgets_detail {
 
 void append_hotbar_hud(UiTree& tree, HotbarHudModel model) {
+  const UiTheme& theme = tree.theme();
   const u8 slot_count = static_cast<u8>(
       std::max<u32>(1U, std::min<u32>(model.slot_count, player::DefaultHotbarSlotCount)));
   const bool selected_slot_is_valid = model.selected_slot < slot_count;
@@ -19,10 +20,16 @@ void append_hotbar_hud(UiTree& tree, HotbarHudModel model) {
   hotbar.layout.width_mode = UiSizeMode::Content;
   hotbar.layout.height_mode = UiSizeMode::Content;
   hotbar.layout.spacing = 4.0F;
-  hotbar.layout.padding = {6.0F, 6.0F, 6.0F, 6.0F};
+  hotbar.layout.padding = {
+      theme.layout.spacing_sm,
+      theme.layout.spacing_sm,
+      theme.layout.spacing_sm,
+      theme.layout.spacing_sm};
   hotbar.layout.anchor = UiAnchor::BottomCenter;
   hotbar.layout.offset = {0.0F, -24.0F};
-  hotbar.style.background = {0.03F, 0.035F, 0.04F, 0.78F};
+  hotbar.style.background = theme.colors.surface_alt;
+  hotbar.style.background.w = std::min(hotbar.style.background.w, 0.82F);
+  style_surface(hotbar, theme, theme.layout.radius_lg);
   hotbar.hit_test = false;
   const UiNodeID hotbar_id = tree.add_child(tree.root_id(), std::move(hotbar));
 

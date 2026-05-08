@@ -11,6 +11,7 @@
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/player/item.hpp"
+#include "arv/ui/core/ui.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_generation.hpp"
 
@@ -33,7 +34,7 @@ struct DesktopLoadedAssets {
   asset::TextureAtlas item_atlas{};
   EntityRenderAssets entity_render_assets{};
   asset::FontSystem font_system{};
-  asset::FontStack ui_font_stack{};
+  ui::UiFontStacks ui_font_stacks{};
   world::WorldGenerationConfig default_generation_config{};
 };
 
@@ -47,6 +48,7 @@ using DesktopLoadedAssetsResult = Expected<DesktopLoadedAssets, DesktopAssetLoad
 [[nodiscard]] DesktopLoadedAssetsResult load_desktop_assets(
     asset::ResourceManager& resources,
     render::OpenGLRenderer& renderer,
-    const io::EngineConfig& config);
+    const io::EngineConfig& config,
+    const ui::UiTheme& theme);
 
 } // namespace arv::desktop

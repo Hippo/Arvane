@@ -183,7 +183,7 @@ struct FontSystem::Impl {
       return Expected<GlyphInfo, AssetError>::success(found->second);
     }
 
-    const FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_COLOR;
+    const FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_COLOR | FT_LOAD_TARGET_NORMAL;
     if (FT_Load_Glyph(record->face, glyph_index, load_flags) != 0) {
       return Expected<GlyphInfo, AssetError>::failure({
           record->asset_id.value,

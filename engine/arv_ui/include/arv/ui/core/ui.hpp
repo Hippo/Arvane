@@ -5,6 +5,7 @@
 #include "arv/core/math.hpp"
 #include "arv/core/types.hpp"
 #include "arv/render/render_types.hpp"
+#include "arv/ui/theme.hpp"
 
 #include <array>
 #include <optional>
@@ -81,8 +82,19 @@ struct UiLayout {
 
 struct UiStyle {
   Vec4f background{0.0F, 0.0F, 0.0F, 0.0F};
+  Vec4f background_hover{0.0F, 0.0F, 0.0F, 0.0F};
+  Vec4f background_pressed{0.0F, 0.0F, 0.0F, 0.0F};
+  Vec4f background_selected{0.0F, 0.0F, 0.0F, 0.0F};
   Vec4f foreground{1.0F, 1.0F, 1.0F, 1.0F};
   Vec4f accent{1.0F, 1.0F, 1.0F, 1.0F};
+  Vec4f border{0.0F, 0.0F, 0.0F, 0.0F};
+  Vec4f border_focus{0.0F, 0.0F, 0.0F, 0.0F};
+  f32 border_width{};
+  f32 focus_border_width{};
+  f32 radius{};
+  f32 letter_spacing{};
+  UiTextRole text_role{UiTextRole::Body};
+  UiControlRole control_role{UiControlRole::Neutral};
 };
 
 struct UiImageData {
@@ -125,19 +137,30 @@ struct UiAction {
 class IUiTextMeasurer {
 public:
   virtual ~IUiTextMeasurer() = default;
-  [[nodiscard]] virtual Vec2f measure(std::string_view text) const = 0;
-  [[nodiscard]] virtual f32 line_height() const = 0;
+  [[nodiscard]] virtual Vec2f measure(std::string_view text, UiTextRole role = UiTextRole::Body) const = 0;
+  [[nodiscard]] virtual f32 line_height(UiTextRole role = UiTextRole::Body) const = 0;
+};
+
+struct UiFontStacks {
+  asset::FontStack small{};
+  asset::FontStack body{};
+  asset::FontStack heading{};
+  asset::FontStack title{};
+  asset::FontStack mono{};
 };
 
 class FontUiTextMeasurer final : public IUiTextMeasurer {
 public:
   FontUiTextMeasurer(const asset::FontSystem& fonts, asset::FontStack stack);
-  [[nodiscard]] Vec2f measure(std::string_view text) const override;
-  [[nodiscard]] f32 line_height() const override;
+  FontUiTextMeasurer(const asset::FontSystem& fonts, UiFontStacks stacks);
+  [[nodiscard]] Vec2f measure(std::string_view text, UiTextRole role = UiTextRole::Body) const override;
+  [[nodiscard]] f32 line_height(UiTextRole role = UiTextRole::Body) const override;
 
 private:
+  [[nodiscard]] const asset::FontStack& stack_for(UiTextRole role) const noexcept;
+
   const asset::FontSystem* fonts_{};
-  asset::FontStack stack_{};
+  UiFontStacks stacks_{};
 };
 
 class UiTree {
@@ -145,6 +168,13 @@ public:
   UiTree();
 
   void clear();
+  void set_theme(const UiTheme* theme) noexcept {
+    theme_ = theme;
+  }
+
+  [[nodiscard]] const UiTheme& theme() const noexcept {
+    return theme_or_default(theme_);
+  }
 
   [[nodiscard]] UiNodeID root_id() const noexcept {
     return root_id_;
@@ -200,6 +230,7 @@ private:
   UiNodeID active_{};
   UiNodeID keyboard_focus_{};
   UiNodeID mouse_capture_{};
+  const UiTheme* theme_{};
 };
 struct UiDocumentElement {
   std::string type{};
@@ -231,6 +262,11 @@ struct UiDocumentValidation {
 [[nodiscard]] UiDocumentValidation validate_ui_document(
     const UiDocument& document,
     UiDocumentLimits limits = {});
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
+    const UiFontStacks& font_stacks,
+    render::FramePacket& frame);
 void append_ui_draw_commands(
     const UiTree& tree,
     asset::FontSystem& fonts,

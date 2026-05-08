@@ -443,6 +443,7 @@ UiNodeID add_account_toggle_button(
     UIContext& ctx,
     PlayerSkinTextureView texture,
     bool open) {
+  const UiTheme& theme = ctx.tree.theme();
   UiElement button;
   button.stable_id = "menu.account.toggle";
   button.type = UiElementType::Button;
@@ -452,8 +453,7 @@ UiNodeID add_account_toggle_button(
   button.layout.height = AccountButtonSize;
   button.layout.anchor = UiAnchor::TopRight;
   button.layout.offset = {-22.0F, 22.0F};
-  button.style.background = open ? ButtonSelectedColor : ButtonColor;
-  button.style.accent = AccentColor;
+  screens_detail::apply_control_style(button, theme, UiControlRole::Neutral, true, open);
   button.focusable = true;
   button.action = "account.toggle";
   const UiNodeID id = ctx.tree.add_child(ctx.tree.root_id(), std::move(button));
@@ -467,6 +467,7 @@ UiNodeID add_account_row(
     const LocalProfileEntry& profile,
     PlayerSkinTextureView default_texture,
     usize index) {
+  const UiTheme& theme = tree.theme();
   const std::string prefix = "menu.account.profile." + std::to_string(index);
   UiElement row;
   row.stable_id = prefix;
@@ -475,8 +476,7 @@ UiNodeID add_account_row(
   row.layout.height_mode = UiSizeMode::Fixed;
   row.layout.width = AccountRowWidth;
   row.layout.height = AccountRowHeight;
-  row.style.background = profile.active ? ButtonSelectedColor : ButtonColor;
-  row.style.accent = AccentColor;
+  screens_detail::apply_control_style(row, theme, UiControlRole::Neutral, true, profile.active);
   row.focusable = true;
   row.selected = profile.active;
   row.action = "account.select";
@@ -492,7 +492,7 @@ UiNodeID add_account_row(
       truncate_end(profile.display_name, 24U),
       {AccountTextX, 10.0F},
       {AccountTextWidth, 26.0F},
-      TextColor);
+      theme.colors.text);
   add_clipped_text_at(
       tree,
       row_id,
@@ -500,7 +500,7 @@ UiNodeID add_account_row(
       short_profile_id(profile.profile_id),
       {AccountTextX, 36.0F},
       {AccountTextWidth, 24.0F},
-      MutedTextColor);
+      theme.colors.text_muted);
 
   UiElement edit;
   edit.stable_id = prefix + ".edit";
@@ -512,11 +512,14 @@ UiNodeID add_account_row(
   edit.layout.anchor = UiAnchor::TopRight;
   edit.layout.offset = {-10.0F, 18.0F};
   edit.layout.padding = {8.0F, 8.0F, 8.0F, 8.0F};
-  edit.style.background = {0.150F, 0.168F, 0.184F, 0.98F};
+  screens_detail::apply_control_style(edit, theme, UiControlRole::Neutral, true, false);
   edit.focusable = true;
   edit.action = "account.edit";
   const UiNodeID edit_id = tree.add_child(row_id, std::move(edit));
-  tree.add_child(edit_id, screens_detail::make_text(prefix + ".edit.label", "Edit", TextColor));
+  UiElement edit_label =
+      screens_detail::make_text(prefix + ".edit.label", "Edit", theme.colors.text);
+  edit_label.layout.anchor = UiAnchor::Center;
+  tree.add_child(edit_id, std::move(edit_label));
   return row_id;
 }
 
@@ -525,6 +528,7 @@ void add_account_dropdown(
     const std::vector<LocalProfileEntry>& profiles,
     PlayerSkinTextureView default_texture,
     f32 scroll_y) {
+  const UiTheme& theme = ctx.tree.theme();
   const f32 content_height = account_content_height(profiles.size());
   const f32 viewport_height = std::min(content_height, AccountViewportMaxHeight);
   const f32 panel_height = 22.0F + viewport_height + 12.0F + 44.0F + 22.0F;
@@ -533,10 +537,15 @@ void add_account_dropdown(
       "menu.account.dropdown",
       AccountDropdownWidth,
       panel_height,
-      {0.032F, 0.038F, 0.046F, 0.98F});
+      theme.colors.surface);
   panel.layout.anchor = UiAnchor::TopRight;
   panel.layout.offset = {-22.0F, 100.0F};
-  panel.layout.padding = {22.0F, 22.0F, 22.0F, 22.0F};
+  panel.layout.padding = {
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding};
+  screens_detail::apply_panel_style(panel, theme, true);
   const UiNodeID panel_id = ctx.tree.add_child(ctx.tree.root_id(), std::move(panel));
 
   UiElement viewport = screens_detail::make_panel(
@@ -555,7 +564,11 @@ void add_account_dropdown(
   if (profiles.empty()) {
     ctx.tree.add_child(
         stack_id,
-        screens_detail::make_text("menu.account.empty", "No profiles", MutedTextColor));
+        screens_detail::make_text(
+            "menu.account.empty",
+            "No profiles",
+            theme.colors.text_muted,
+            UiTextRole::Small));
   } else {
     for (usize index = 0; index < profiles.size(); ++index) {
       add_account_row(ctx.tree, stack_id, profiles[index], default_texture, index);
@@ -571,12 +584,16 @@ void add_account_dropdown(
   add_button.layout.height = 44.0F;
   add_button.layout.offset = {0.0F, viewport_height + 12.0F};
   add_button.layout.padding = {12.0F, 12.0F, 11.0F, 9.0F};
-  add_button.style.background = ButtonColor;
-  add_button.style.accent = AccentColor;
+  screens_detail::apply_control_style(add_button, theme, UiControlRole::Primary, true, false);
   add_button.focusable = true;
   add_button.action = "account.create";
   const UiNodeID add_id = ctx.tree.add_child(panel_id, std::move(add_button));
-  ctx.tree.add_child(add_id, screens_detail::make_text("menu.account.create.label", "Add Profile"));
+  UiElement add_label = screens_detail::make_text(
+      "menu.account.create.label",
+      "Add Profile",
+      theme.colors.text);
+  add_label.layout.anchor = UiAnchor::Center;
+  ctx.tree.add_child(add_id, std::move(add_label));
 }
 
 UiNodeID add_fixed_action_button(
@@ -589,18 +606,27 @@ UiNodeID add_fixed_action_button(
     Vec2f offset,
     f32 width,
     Vec4f background = ButtonColor) {
+  const UiControlRole role =
+      background == ButtonSelectedColor ? UiControlRole::Primary :
+      background.x > 0.25F && background.y < 0.12F ? UiControlRole::Danger :
+      UiControlRole::Neutral;
   const UiNodeID button_id =
       screens_detail::add_button(
           tree,
           parent,
           stable_id,
           std::move(label),
-          std::move(action));
+          std::move(action),
+          true,
+          false,
+          role);
   if (UiElement* button = tree.element(button_id); button != nullptr) {
     button->layout.width = width;
     button->layout.anchor = anchor;
     button->layout.offset = offset;
-    button->style.background = background;
+    if (background != ButtonColor && background != ButtonSelectedColor) {
+      button->style.background = background;
+    }
   }
   return button_id;
 }
@@ -617,6 +643,10 @@ UiNodeID add_dialog_button(
     Vec4f background = ButtonColor,
     bool enabled = true,
     bool selected = false) {
+  const UiControlRole role =
+      background == ButtonSelectedColor ? UiControlRole::Primary :
+      background.x > 0.25F && background.y < 0.12F ? UiControlRole::Danger :
+      UiControlRole::Neutral;
   const UiNodeID button_id =
       screens_detail::add_button(
           tree,
@@ -625,13 +655,16 @@ UiNodeID add_dialog_button(
           std::move(label),
           std::move(action),
           enabled,
-          selected);
+          selected,
+          role);
   if (UiElement* button = tree.element(button_id); button != nullptr) {
     button->layout.width = width;
     button->layout.height = height;
     button->layout.offset = offset;
-    button->layout.padding = {10.0F, 10.0F, 9.0F, 7.0F};
-    button->style.background = enabled ? background : ButtonDisabledColor;
+    button->layout.padding = {10.0F, 10.0F, 8.0F, 8.0F};
+    if (background != ButtonColor && background != ButtonSelectedColor) {
+      button->style.background = enabled ? background : ButtonDisabledColor;
+    }
   }
   return button_id;
 }
@@ -644,6 +677,7 @@ void add_skin_manager_row(
     usize index,
     usize count,
     PlayerSkinTextureView default_texture) {
+  const UiTheme& theme = tree.theme();
   const std::string prefix =
       std::string{base_id} + ".row." + std::to_string(index);
   UiElement row;
@@ -653,9 +687,7 @@ void add_skin_manager_row(
   row.layout.height_mode = UiSizeMode::Fixed;
   row.layout.width = SkinRowWidth;
   row.layout.height = SkinRowHeight;
-  row.style.background = index == 0U ? Vec4f{0.128F, 0.155F, 0.176F, 0.98F}
-                                     : ButtonColor;
-  row.style.accent = index == 0U ? AccentColor : Vec4f{0.300F, 0.340F, 0.370F, 1.0F};
+  screens_detail::apply_control_style(row, theme, UiControlRole::Neutral, true, index == 0U);
   row.focusable = true;
   row.action = "account.skin_drag";
   const UiNodeID row_id = tree.add_child(parent, std::move(row));
@@ -669,7 +701,7 @@ void add_skin_manager_row(
       prefix + ".rank",
       "#" + std::to_string(index + 1U),
       {72.0F, 10.0F},
-      index == 0U ? AccentColor : MutedTextColor);
+      index == 0U ? theme.colors.accent : theme.colors.text_muted);
   add_clipped_text_at(
       tree,
       row_id,
@@ -677,7 +709,7 @@ void add_skin_manager_row(
       short_skin_hash(skin.skin_hash),
       {112.0F, 9.0F},
       {178.0F, 25.0F},
-      TextColor);
+      theme.colors.text);
   add_clipped_text_at(
       tree,
       row_id,
@@ -685,7 +717,7 @@ void add_skin_manager_row(
       std::to_string(skin.width) + " x " + std::to_string(skin.height),
       {112.0F, 36.0F},
       {178.0F, 24.0F},
-      MutedTextColor);
+      theme.colors.text_muted);
 
   add_dialog_button(
       tree,
@@ -736,6 +768,7 @@ void build_skin_manager_dialog(
     std::string_view base_id,
     const std::vector<LocalProfileSkinEntry>& skins,
     f32 scroll_y) {
+  const UiTheme& theme = ctx.tree.theme();
   screens_detail::add_backdrop(
       ctx.tree,
       std::string{base_id} + ".backdrop",
@@ -745,9 +778,14 @@ void build_skin_manager_dialog(
       std::string{base_id} + ".panel",
       SkinDialogWidth,
       SkinDialogHeight,
-      {0.038F, 0.046F, 0.056F, 0.985F});
+      theme.colors.surface);
   panel.layout.anchor = UiAnchor::Center;
-  panel.layout.padding = {26.0F, 26.0F, 24.0F, 24.0F};
+  panel.layout.padding = {
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding};
+  screens_detail::apply_panel_style(panel, theme, true);
   const UiNodeID panel_id = ctx.tree.add_child(ctx.tree.root_id(), std::move(panel));
 
   add_text_at(
@@ -756,7 +794,7 @@ void build_skin_manager_dialog(
       std::string{base_id} + ".title",
       "Manage Skins",
       {0.0F, 0.0F},
-      TextColor);
+      theme.colors.text);
   add_dialog_button(
       ctx.tree,
       panel_id,
@@ -774,8 +812,11 @@ void build_skin_manager_dialog(
       std::string{base_id} + ".viewport",
       SkinRowWidth,
       SkinListViewportHeight,
-      {0.020F, 0.025F, 0.032F, 0.72F});
+      theme.colors.surface_alt);
   viewport.layout.offset = {0.0F, 58.0F};
+  viewport.style.radius = theme.layout.radius_md;
+  viewport.style.border = theme.colors.border;
+  viewport.style.border_width = theme.layout.border_width;
   viewport.clip_children = true;
   viewport.hit_test = true;
   const UiNodeID viewport_id = ctx.tree.add_child(panel_id, std::move(viewport));
@@ -987,23 +1028,35 @@ bool handle_skin_manager_pointer(
 }
 
 void add_fullscreen_account_base(UIContext& ctx, std::string_view id, std::string title) {
+  const UiTheme& theme = ctx.tree.theme();
   screens_detail::add_backdrop(
       ctx.tree,
       std::string{id} + ".backdrop",
-      {0.010F, 0.013F, 0.017F, 0.96F});
+      theme.colors.backdrop);
 
   UiElement left = screens_detail::make_panel(
       std::string{id} + ".left",
       390.0F,
       ctx.viewport.y,
-      {0.034F, 0.040F, 0.049F, 0.98F});
+      theme.colors.surface);
   left.layout.anchor = UiAnchor::TopLeft;
-  left.layout.padding = {28.0F, 28.0F, 28.0F, 28.0F};
+  left.layout.padding = {
+      theme.layout.spacing_xl,
+      theme.layout.spacing_xl,
+      theme.layout.spacing_xl,
+      theme.layout.spacing_xl};
+  screens_detail::apply_panel_style(left, theme, true);
   const UiNodeID left_id = ctx.tree.add_child(ctx.tree.root_id(), std::move(left));
 
-  UiElement stack = screens_detail::make_stack(std::string{id} + ".controls", 12.0F);
+  UiElement stack = screens_detail::make_stack(std::string{id} + ".controls", theme.layout.spacing_md);
   const UiNodeID stack_id = ctx.tree.add_child(left_id, std::move(stack));
-  ctx.tree.add_child(stack_id, screens_detail::make_text(std::string{id} + ".title", std::move(title)));
+  ctx.tree.add_child(
+      stack_id,
+      screens_detail::make_text(
+          std::string{id} + ".title",
+          std::move(title),
+          theme.colors.text,
+          UiTextRole::Title));
 }
 
 class AccountEditScreen final : public UIScreen {
@@ -1073,7 +1126,12 @@ public:
         del != nullptr) {
       del->layout.anchor = UiAnchor::BottomLeft;
       del->layout.offset = {28.0F, -28.0F};
-      del->style.background = {0.300F, 0.070F, 0.065F, 0.96F};
+      screens_detail::apply_control_style(
+          *del,
+          ctx.tree.theme(),
+          UiControlRole::Danger,
+          true,
+          false);
     }
 
     add_fixed_action_button(
@@ -1282,6 +1340,7 @@ private:
   }
 
   void build_delete_confirmation(UIContext& ctx, const LocalProfileEntry& profile) {
+    const UiTheme& theme = ctx.tree.theme();
     screens_detail::add_backdrop(
         ctx.tree,
         "menu.account_edit.confirm.backdrop",
@@ -1290,24 +1349,33 @@ private:
         "menu.account_edit.confirm.panel",
         430.0F,
         206.0F,
-        PanelColor);
+        theme.colors.surface);
     panel.layout.anchor = UiAnchor::Center;
-    panel.layout.padding = {22.0F, 22.0F, 20.0F, 20.0F};
+    panel.layout.padding = {
+        theme.widgets.panel.padding,
+        theme.widgets.panel.padding,
+        theme.widgets.panel.padding,
+        theme.widgets.panel.padding};
+    screens_detail::apply_panel_style(panel, theme, true);
     const UiNodeID panel_id = ctx.tree.add_child(ctx.tree.root_id(), std::move(panel));
-    UiElement stack = screens_detail::make_stack("menu.account_edit.confirm.stack", 10.0F);
+    UiElement stack = screens_detail::make_stack("menu.account_edit.confirm.stack", theme.layout.spacing_md);
     const UiNodeID stack_id = ctx.tree.add_child(panel_id, std::move(stack));
     ctx.tree.add_child(
         stack_id,
         screens_detail::make_text(
             "menu.account_edit.confirm.text",
             "Delete " + profile.display_name + "? This cannot be undone.",
-            ErrorTextColor));
+            theme.colors.danger,
+            UiTextRole::Heading));
     screens_detail::add_button(
         ctx.tree,
         stack_id,
         "menu.account_edit.confirm.delete",
         "Confirm Delete",
-        "account.confirm_delete");
+        "account.confirm_delete",
+        true,
+        false,
+        UiControlRole::Danger);
     screens_detail::add_button(
         ctx.tree,
         stack_id,

@@ -1,0 +1,70 @@
+name: "Default"
+description: "Grounded clean Arvane theme."
+
+colors:
+  background: "#0e1216"
+  backdrop: "#05070a"
+  pause_backdrop: "#05070a66"
+  surface: "#18212a"
+  surface_alt: "#111820"
+  surface_hover: "#2b3e4f"
+  surface_pressed: "#0d1319"
+  surface_selected: "#203746"
+
+  text: "#edf2f5"
+  text_muted: "#a8b6bd"
+  text_disabled: "#69777f"
+
+  border: "#34434d"
+  border_focus: "#7eb6ff"
+
+  accent: "#4f88c6"
+  accent_hover: "#6aa2dc"
+  accent_pressed: "#34669f"
+  accent_text: "#f6fbff"
+
+  danger: "#c94338"
+  danger_hover: "#dc5a4e"
+  danger_pressed: "#8f3029"
+  warning: "#d69b45"
+  success: "#58a96f"
+
+layout:
+  spacing_xs: 4
+  spacing_sm: 8
+  spacing_md: 12
+  spacing_lg: 18
+  spacing_xl: 28
+
+  radius_sm: 4
+  radius_md: 8
+  radius_lg: 12
+  border_width: 1
+
+typography:
+  default_font: "arvane:font/font"
+  heading_font: "arvane:font/font"
+  monospace_font: "arvane:font/font"
+  size_sm: 14
+  size_md: 18
+  size_lg: 22
+  size_xl: 34
+
+widgets:
+  button:
+    height: 44
+    min_width: 164
+    padding_x: 16
+    padding_y: 10
+    radius: 8
+
+  input:
+    height: 44
+    min_width: 300
+    padding_x: 14
+    padding_y: 10
+    radius: 8
+
+  panel:
+    padding: 22
+    radius: 12

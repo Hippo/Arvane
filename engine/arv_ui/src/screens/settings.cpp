@@ -22,8 +22,16 @@ public:
   }
 
   void build(UIContext& ctx) override {
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Settings", 360.0F, 300.0F);
-    add_button(ctx.tree, stack, "menu.settings.render", "Render Settings", "settings.render");
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Settings", 396.0F, 344.0F);
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.settings.render",
+        "Render Settings",
+        "settings.render",
+        true,
+        false,
+        UiControlRole::Primary);
     add_button(ctx.tree, stack, "menu.settings.key_binds", "Key Binds", "settings.key_binds");
     add_button(ctx.tree, stack, "menu.settings.other", "Other Settings", "settings.other");
     add_button(ctx.tree, stack, "menu.settings.back", "Back", "menu.back");
@@ -68,10 +76,14 @@ public:
   }
 
   void build(UIContext& ctx) override {
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), title_, 380.0F, 220.0F);
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), title_, 420.0F, 244.0F);
     ctx.tree.add_child(
         stack,
-        make_text(id_ + ".placeholder", "Settings controls will appear here", MutedTextColor));
+        make_text(
+            id_ + ".placeholder",
+            "Settings controls will appear here",
+            ctx.tree.theme().colors.text_muted,
+            UiTextRole::Small));
     add_button(ctx.tree, stack, id_ + ".back", "Back", "menu.back");
   }
 

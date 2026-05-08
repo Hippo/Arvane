@@ -2,6 +2,7 @@
 
 #include "widget_common.hpp"
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 
@@ -49,28 +50,35 @@ void append_scoreboard_ui(UiTree& tree, ScoreboardUiModel model) {
   if (!model.visible || (model.lines.empty() && model.title.empty())) {
     return;
   }
+  const UiTheme& theme = tree.theme();
 
   const f32 rows = static_cast<f32>(model.lines.size() + (model.title.empty() ? 0U : 1U));
   UiElement panel = fixed_panel(
       "scoreboard.panel",
       260.0F,
       22.0F + rows * 22.0F,
-      {0.035F, 0.04F, 0.045F, 0.76F});
+      theme.colors.surface_alt);
+  panel.style.background.w = std::min(panel.style.background.w, 0.82F);
   panel.layout.anchor = UiAnchor::TopRight;
   panel.layout.offset = {-20.0F, 72.0F};
-  panel.layout.padding = {10.0F, 10.0F, 8.0F, 8.0F};
+  panel.layout.padding = {
+      theme.layout.spacing_md,
+      theme.layout.spacing_md,
+      theme.layout.spacing_sm,
+      theme.layout.spacing_sm};
+  style_surface(panel, theme, theme.layout.radius_md);
   panel.hit_test = false;
   const UiNodeID panel_id = tree.add_child(tree.root_id(), std::move(panel));
 
   UiElement stack;
   stack.stable_id = "scoreboard.stack";
   stack.type = UiElementType::VerticalStack;
-  stack.layout.spacing = 4.0F;
+  stack.layout.spacing = theme.layout.spacing_xs;
   stack.hit_test = false;
   const UiNodeID stack_id = tree.add_child(panel_id, std::move(stack));
 
   if (!model.title.empty()) {
-    tree.add_child(stack_id, text_element("scoreboard.title", model.title));
+    tree.add_child(stack_id, text_element("scoreboard.title", model.title, theme.colors.text));
   }
   for (usize index = 0; index < model.lines.size(); ++index) {
     tree.add_child(
@@ -78,7 +86,8 @@ void append_scoreboard_ui(UiTree& tree, ScoreboardUiModel model) {
         text_element(
             "scoreboard.line." + std::to_string(index),
             interpolate_scoreboard_line(model.lines[index], model.variables),
-            {0.86F, 0.89F, 0.92F, 1.0F}));
+            theme.colors.text_muted,
+            UiTextRole::Small));
   }
 }
 

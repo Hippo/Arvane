@@ -8,6 +8,7 @@ set(ARV_UI_HEADERS
   include/arv/ui/screens/screen.hpp
   include/arv/ui/screens/settings.hpp
   include/arv/ui/screens/singleplayer.hpp
+  include/arv/ui/theme.hpp
   include/arv/ui/ui.hpp
   include/arv/ui/widgets/chat.hpp
   include/arv/ui/widgets/debug_hud.hpp
@@ -28,6 +29,7 @@ add_library(arv_ui STATIC
   src/screens/screen_manager.cpp
   src/screens/settings.cpp
   src/screens/singleplayer.cpp
+  src/theme.cpp
   src/widgets/chat.cpp
   src/widgets/debug_hud.cpp
   src/widgets/gameplay.cpp
@@ -38,3 +40,4 @@ add_library(arv_ui STATIC
 )
 target_include_directories(arv_ui PUBLIC include)
 target_link_libraries(arv_ui PUBLIC arv_asset arv_core arv_player arv_render arv_voxel)
+target_link_libraries(arv_ui PRIVATE yaml-cpp)

@@ -110,11 +110,13 @@ const UIScreen* UIScreenManager::current() const noexcept {
 }
 
 void UIScreenManager::update(UIContext& ctx) {
+  ctx.tree.set_theme(ctx.theme);
   ctx.tree.clear();
   append_to(ctx);
 }
 
 void UIScreenManager::append_to(UIContext& ctx) {
+  ctx.tree.set_theme(ctx.theme);
   ctx.screens = this;
   if (UIScreen* screen = current(); screen != nullptr) {
     screen->build(ctx);

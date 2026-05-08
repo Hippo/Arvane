@@ -13,27 +13,33 @@ void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
   if (!model.visible) {
     return;
   }
+  const UiTheme& theme = tree.theme();
 
   UiElement panel = fixed_panel(
       "inventory.panel",
       426.0F,
       252.0F,
-      {0.035F, 0.04F, 0.047F, 0.94F});
+      theme.colors.surface);
   panel.layout.anchor = UiAnchor::Center;
-  panel.layout.padding = {14.0F, 14.0F, 12.0F, 12.0F};
+  panel.layout.padding = {
+      theme.layout.spacing_lg,
+      theme.layout.spacing_lg,
+      theme.layout.spacing_md,
+      theme.layout.spacing_md};
+  style_surface(panel, theme, theme.widgets.panel.radius);
   panel.hit_test = true;
   const UiNodeID panel_id = tree.add_child(tree.root_id(), std::move(panel));
 
   UiElement stack;
   stack.stable_id = "inventory.stack";
   stack.type = UiElementType::VerticalStack;
-  stack.layout.spacing = 10.0F;
+  stack.layout.spacing = theme.layout.spacing_md;
   stack.hit_test = false;
   const UiNodeID stack_id = tree.add_child(panel_id, std::move(stack));
 
   tree.add_child(
       stack_id,
-      text_element("inventory.title", model.title, {0.94F, 0.95F, 0.96F, 1.0F}));
+      text_element("inventory.title", model.title, theme.colors.text, UiTextRole::Heading));
 
   UiElement grid;
   grid.stable_id = "inventory.grid";

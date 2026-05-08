@@ -134,6 +134,11 @@ private:
     u32 layers{};
   };
 
+  enum class TextureFilter : u8 {
+    Nearest,
+    Linear,
+  };
+
   static constexpr usize MaxEntityShaderBones = 128;
 
   struct EntityGpuModel {
@@ -175,7 +180,8 @@ private:
 
   [[nodiscard]] static GpuTexture create_texture_array(
       const TextureArrayUploadData& upload,
-      bool mipmaps);
+      bool mipmaps,
+      TextureFilter filter = TextureFilter::Nearest);
   void note_texture_upload(const TextureUploadData& upload) noexcept;
   void note_texture_upload(const TextureArrayUploadData& upload) noexcept;
 

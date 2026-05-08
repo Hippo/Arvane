@@ -373,6 +373,9 @@ struct UIRectDrawItem {
   Vec2f min{};
   Vec2f max{};
   Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+  Vec4f border_color{0.0F, 0.0F, 0.0F, 0.0F};
+  f32 border_width{};
+  f32 radius{};
   Vec2f clip_min{};
   Vec2f clip_max{};
   bool clip{};

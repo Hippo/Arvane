@@ -24,11 +24,27 @@ public:
 
   void build(UIContext& ctx) override {
     using namespace screens_detail;
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Arvane", 360.0F, 300.0F);
-    add_button(ctx.tree, stack, "menu.main.single_player", "Single Player", "main.single_player");
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Arvane", 396.0F, 344.0F);
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.main.single_player",
+        "Single Player",
+        "main.single_player",
+        true,
+        false,
+        UiControlRole::Primary);
     add_button(ctx.tree, stack, "menu.main.multi_player", "Multi Player", "main.multi_player");
     add_button(ctx.tree, stack, "menu.main.settings", "Settings", "main.settings");
-    add_button(ctx.tree, stack, "menu.main.quit", "Quit", "main.quit");
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.main.quit",
+        "Quit",
+        "main.quit",
+        true,
+        false,
+        UiControlRole::Danger);
     build_account_manager_dropdown(ctx, account_state_);
   }
 

@@ -205,6 +205,7 @@ struct UIContext {
   UICommandSink* command_sink{};
   const UIScreenDataSource* data_source{};
   UIScreenManager* screens{};
+  const UiTheme* theme{};
 };
 
 enum class MenuScreenType : u8 {

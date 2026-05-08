@@ -29,26 +29,40 @@ public:
       selected_server_.reset();
     }
 
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Multi Player", 420.0F, 500.0F);
+    const UiTheme& theme = ctx.tree.theme();
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Multi Player", 472.0F, 552.0F);
     if (servers.empty()) {
-      ctx.tree.add_child(
-          stack,
-          make_text("menu.multi_player.empty", "No saved servers", MutedTextColor));
+      UiElement empty = make_text(
+          "menu.multi_player.empty",
+          "No saved servers",
+          theme.colors.text_muted,
+          UiTextRole::Small);
+      empty.layout.anchor = UiAnchor::TopCenter;
+      ctx.tree.add_child(stack, std::move(empty));
     } else {
       for (usize index = 0; index < servers.size(); ++index) {
         const ServerListEntry& server = servers[index];
-        add_button(
+        add_list_row(
             ctx.tree,
             stack,
             "menu.multi_player.server." + std::to_string(index),
-            server.name + "  " + server.address,
+            server.name,
+            server.address,
             "multi_player.select_server",
             true,
             selected_server_.has_value() && selected_server_.value() == index);
       }
     }
 
-    add_button(ctx.tree, stack, "menu.multi_player.add", "Add Server", "multi_player.add");
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.multi_player.add",
+        "Add Server",
+        "multi_player.add",
+        true,
+        false,
+        UiControlRole::Primary);
     add_button(
         ctx.tree,
         stack,
@@ -62,30 +76,42 @@ public:
         "menu.multi_player.remove",
         "Remove Server",
         "multi_player.remove",
-        selected_server_.has_value());
+        selected_server_.has_value(),
+        false,
+        UiControlRole::Danger);
     add_button(ctx.tree, stack, "menu.multi_player.back", "Back", "menu.back");
     add_error_text(ctx.tree, stack, "menu.multi_player.error", error_);
 
     if (confirm_remove_ && selected_server_.has_value() &&
         selected_server_.value() < servers.size()) {
       add_backdrop(ctx.tree, "menu.multi_player.confirm.backdrop", {0.0F, 0.0F, 0.0F, 0.52F});
-      UiElement panel = make_panel("menu.multi_player.confirm.panel", 348.0F, 172.0F);
+      UiElement panel = make_panel("menu.multi_player.confirm.panel", 392.0F, 194.0F);
       panel.layout.anchor = UiAnchor::Center;
-      panel.layout.padding = {20.0F, 20.0F, 18.0F, 18.0F};
+      panel.layout.padding = {
+          theme.widgets.panel.padding,
+          theme.widgets.panel.padding,
+          theme.widgets.panel.padding,
+          theme.widgets.panel.padding};
+      apply_panel_style(panel, theme, true);
       const UiNodeID panel_id = ctx.tree.add_child(ctx.tree.root_id(), std::move(panel));
-      UiElement confirm_stack = make_stack("menu.multi_player.confirm.stack", 10.0F);
+      UiElement confirm_stack = make_stack("menu.multi_player.confirm.stack", theme.layout.spacing_md);
       const UiNodeID confirm_stack_id = ctx.tree.add_child(panel_id, std::move(confirm_stack));
       ctx.tree.add_child(
           confirm_stack_id,
           make_text(
               "menu.multi_player.confirm.text",
-              "Remove " + servers[selected_server_.value()].name + "?"));
+              "Remove " + servers[selected_server_.value()].name + "?",
+              theme.colors.danger,
+              UiTextRole::Heading));
       add_button(
           ctx.tree,
           confirm_stack_id,
           "menu.multi_player.confirm.remove",
           "Remove",
-          "multi_player.confirm_remove");
+          "multi_player.confirm_remove",
+          true,
+          false,
+          UiControlRole::Danger);
       add_button(
           ctx.tree,
           confirm_stack_id,
@@ -196,8 +222,8 @@ public:
         ctx,
         screen_id(),
         edit_index_.has_value() ? "Edit Server" : "Add Server",
-        400.0F,
-        344.0F);
+        448.0F,
+        372.0F);
     add_text_box(
         ctx.tree,
         stack,
@@ -217,7 +243,15 @@ public:
         "server.focus_address",
         active_field_ == TextField::Address);
     add_error_text(ctx.tree, stack, "menu.server.error", error_);
-    add_button(ctx.tree, stack, "menu.server.save", "Save", "server.save");
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.server.save",
+        "Save",
+        "server.save",
+        true,
+        false,
+        UiControlRole::Primary);
     add_button(ctx.tree, stack, "menu.server.cancel", "Cancel", "menu.back");
   }
 

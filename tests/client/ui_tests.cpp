@@ -1,7 +1,11 @@
+#include "arv/asset/resource.hpp"
 #include "arv/ui/ui.hpp"
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <variant>
@@ -11,12 +15,23 @@ namespace {
 
 class FixedTextMeasurer final : public arv::ui::IUiTextMeasurer {
 public:
-  [[nodiscard]] arv::Vec2f measure(std::string_view text) const override {
-    return {static_cast<arv::f32>(text.size()) * 8.0F, 16.0F};
+  [[nodiscard]] arv::Vec2f measure(
+      std::string_view text,
+      arv::ui::UiTextRole role = arv::ui::UiTextRole::Body) const override {
+    const arv::f32 width =
+        role == arv::ui::UiTextRole::Title ? 12.0F : 8.0F;
+    const arv::f32 height =
+        role == arv::ui::UiTextRole::Title ? 30.0F :
+        role == arv::ui::UiTextRole::Heading ? 22.0F :
+        role == arv::ui::UiTextRole::Small ? 14.0F : 16.0F;
+    return {static_cast<arv::f32>(text.size()) * width, height};
   }
 
-  [[nodiscard]] arv::f32 line_height() const override {
-    return 16.0F;
+  [[nodiscard]] arv::f32 line_height(
+      arv::ui::UiTextRole role = arv::ui::UiTextRole::Body) const override {
+    return role == arv::ui::UiTextRole::Title ? 30.0F :
+           role == arv::ui::UiTextRole::Heading ? 22.0F :
+           role == arv::ui::UiTextRole::Small ? 14.0F : 16.0F;
   }
 };
 
@@ -89,7 +104,75 @@ public:
   return skin;
 }
 
+void write_text_file(const std::filesystem::path& path, const std::string& text) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::trunc);
+  output << text;
+}
+
+[[nodiscard]] bool is_pixel_snapped(arv::f32 value) {
+  return std::abs(value - static_cast<arv::f32>(std::round(value))) <= 0.001F;
+}
+
 } // namespace
+
+TEST(UiThemeTests, LoadsSelectedThemeAndScalesTokens) {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "arvane_ui_theme_loads";
+  std::filesystem::remove_all(root);
+  write_text_file(
+      root / "config/style.yaml",
+      "theme: \"warm\"\nui:\n  scale: 1.25\n  font_scale: 1.5\n  animation_scale: 0\n");
+  write_text_file(
+      root / "themes/warm.yaml",
+      "name: \"Warm\"\ncolors:\n  accent: \"#336699\"\n  pause_backdrop: \"#01020380\"\nlayout:\n  spacing_md: 10\n"
+      "typography:\n  size_md: 20\nwidgets:\n  button:\n    height: 40\n");
+
+  const arv::ui::UiThemeLoadResult result = arv::ui::load_ui_theme(root);
+  EXPECT_EQ(result.loaded_theme, "warm");
+  EXPECT_FALSE(result.used_builtin_theme);
+  EXPECT_FLOAT_EQ(result.theme.colors.accent.w, 1.0F);
+  EXPECT_NEAR(result.theme.colors.pause_backdrop.w, 128.0F / 255.0F, 0.001F);
+  EXPECT_FLOAT_EQ(result.theme.layout.spacing_md, 12.5F);
+  EXPECT_EQ(result.theme.typography.size_md, 30U);
+  EXPECT_FLOAT_EQ(result.config.ui.animation_scale, 0.0F);
+  std::filesystem::remove_all(root);
+}
+
+TEST(UiThemeTests, InvalidThemeNameFallsBackToDefaultFile) {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "arvane_ui_theme_invalid_name";
+  std::filesystem::remove_all(root);
+  write_text_file(root / "config/style.yaml", "theme: \"../bad\"\n");
+  write_text_file(root / "themes/default.yaml", "name: \"Fallback\"\ncolors:\n  accent: \"#112233\"\n");
+
+  const arv::ui::UiThemeLoadResult result = arv::ui::load_ui_theme(root);
+  EXPECT_TRUE(result.used_theme_fallback);
+  EXPECT_EQ(result.loaded_theme, "default");
+  EXPECT_EQ(result.theme.name, "Fallback");
+  EXPECT_FALSE(result.warnings.empty());
+  std::filesystem::remove_all(root);
+}
+
+TEST(UiThemeTests, MalformedTokensKeepBuiltInFallbacks) {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "arvane_ui_theme_bad_tokens";
+  std::filesystem::remove_all(root);
+  write_text_file(root / "config/style.yaml", "theme: \"default\"\nui:\n  scale: 100\n");
+  write_text_file(
+      root / "themes/default.yaml",
+      "name: \"Bad Token Test\"\ncolors:\n  accent: \"not-a-color\"\nlayout:\n  radius_md: nope\n");
+
+  const arv::ui::UiThemeLoadResult result = arv::ui::load_ui_theme(root);
+  EXPECT_EQ(result.loaded_theme, "default");
+  EXPECT_FLOAT_EQ(result.config.ui.scale, 4.0F);
+  EXPECT_EQ(result.theme.colors.accent, arv::ui::default_ui_theme().colors.accent);
+  EXPECT_FLOAT_EQ(
+      result.theme.layout.radius_md,
+      arv::ui::default_ui_theme().layout.radius_md * 4.0F);
+  EXPECT_FALSE(result.warnings.empty());
+  std::filesystem::remove_all(root);
+}
 
 TEST(UiLayoutTests, VerticalStackArrangesChildrenDeterministically) {
   arv::ui::UiTree tree;
@@ -133,7 +216,7 @@ TEST(UiLayoutTests, VerticalStackArrangesChildrenDeterministically) {
   EXPECT_FLOAT_EQ(second_element->rect.y, 17.0F);
 }
 
-TEST(UiInputTests, MouseRoutingSeparatesHoverActiveAndKeyboardFocus) {
+TEST(UiInputTests, MouseRoutingSeparatesHoverActiveFromKeyboardFocus) {
   arv::ui::UiTree tree;
   arv::ui::UiElement button;
   button.stable_id = "button";
@@ -156,7 +239,77 @@ TEST(UiInputTests, MouseRoutingSeparatesHoverActiveAndKeyboardFocus) {
   auto down = tree.route_mouse_down({12.0F, 10.0F}, arv::ui::UiMouseButton::Left);
   ASSERT_TRUE(down.has_value());
   EXPECT_NE(tree.active().value, 0U);
-  EXPECT_NE(tree.keyboard_focus().value, 0U);
+  EXPECT_EQ(tree.keyboard_focus().value, 0U);
+}
+
+TEST(UiInputTests, HoveredControlsEmitHoverBackground) {
+  arv::ui::UiTree tree;
+  arv::ui::UiElement button;
+  button.stable_id = "button";
+  button.type = arv::ui::UiElementType::Button;
+  button.layout.width_mode = arv::ui::UiSizeMode::Fixed;
+  button.layout.height_mode = arv::ui::UiSizeMode::Fixed;
+  button.layout.width = 80.0F;
+  button.layout.height = 32.0F;
+  button.style.background = {0.1F, 0.1F, 0.1F, 1.0F};
+  button.style.background_hover = {0.2F, 0.3F, 0.4F, 1.0F};
+  tree.add_child(tree.root_id(), std::move(button));
+  tree.layout({200.0F, 100.0F}, nullptr);
+  (void)tree.route_mouse_move({12.0F, 10.0F});
+
+  arv::asset::FontSystem fonts;
+  arv::ui::UiFontStacks stacks;
+  arv::render::FramePacket frame;
+  arv::ui::append_ui_draw_commands(tree, fonts, stacks, frame);
+
+  ASSERT_EQ(frame.ui_rects.size(), 1U);
+  EXPECT_EQ(frame.ui_rects.front().color, (arv::Vec4f{0.2F, 0.3F, 0.4F, 1.0F}));
+}
+
+TEST(UiTextRenderingTests, TextDrawCommandsSnapGlyphsToPixelGrid) {
+  const std::filesystem::path asset_root{ARVANE_TEST_ASSET_ROOT};
+  arv::asset::ResourceManager resources(asset_root);
+  arv::asset::FontSystem fonts;
+  ASSERT_TRUE(fonts.initialized());
+
+  auto face = fonts.load_face(
+      resources.resolve_asset_path({"arvane:font/font"}, arv::asset::AssetKind::Font),
+      18,
+      {"arvane:font/font"});
+  ASSERT_TRUE(face) << face.error().message;
+
+  const arv::asset::FontFaceHandle handles[] = {face.value()};
+  const arv::asset::FontStack stack = fonts.make_stack(handles);
+  arv::ui::UiFontStacks stacks;
+  stacks.body = stack;
+
+  arv::ui::UiTree tree;
+  arv::ui::UiElement label;
+  label.stable_id = "label";
+  label.type = arv::ui::UiElementType::Text;
+  label.text = "Clear text";
+  label.layout.width_mode = arv::ui::UiSizeMode::Fixed;
+  label.layout.height_mode = arv::ui::UiSizeMode::Fixed;
+  label.layout.width = 140.0F;
+  label.layout.height = 28.0F;
+  tree.add_child(tree.root_id(), std::move(label));
+  tree.layout({200.0F, 100.0F}, nullptr);
+
+  arv::ui::UiElement* laid_out_label = tree.find_by_stable_id("label");
+  ASSERT_NE(laid_out_label, nullptr);
+  laid_out_label->rect.x = 10.35F;
+  laid_out_label->rect.y = 20.65F;
+
+  arv::render::FramePacket frame;
+  arv::ui::append_ui_draw_commands(tree, fonts, stacks, frame);
+
+  ASSERT_FALSE(frame.ui_glyphs.empty());
+  for (const arv::render::UIGlyphDrawItem& glyph : frame.ui_glyphs) {
+    EXPECT_TRUE(is_pixel_snapped(glyph.min.x));
+    EXPECT_TRUE(is_pixel_snapped(glyph.min.y));
+    EXPECT_TRUE(is_pixel_snapped(glyph.max.x));
+    EXPECT_TRUE(is_pixel_snapped(glyph.max.y));
+  }
 }
 
 TEST(UiDocumentTests, RejectsUnsafePluginDocumentShapes) {
@@ -317,6 +470,20 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
 
   ASSERT_NE(tree.find_by_stable_id("inventory.panel"), nullptr);
   ASSERT_NE(tree.find_by_stable_id("chat.input"), nullptr);
+  const auto* chat_line = tree.find_by_stable_id("chat.line.0");
+  const auto* chat_shadow = tree.find_by_stable_id("chat.line.0.shadow");
+  ASSERT_NE(chat_line, nullptr);
+  ASSERT_NE(chat_shadow, nullptr);
+  EXPECT_EQ(chat_line->style.text_role, arv::ui::UiTextRole::Body);
+  EXPECT_EQ(chat_shadow->style.text_role, arv::ui::UiTextRole::Body);
+  EXPECT_GT(chat_line->style.letter_spacing, 0.0F);
+  EXPECT_EQ(chat_line->style.letter_spacing, chat_shadow->style.letter_spacing);
+  EXPECT_GT(chat_shadow->style.foreground.w, 0.0F);
+  const auto* chat_input = tree.find_by_stable_id("chat.input");
+  ASSERT_NE(chat_input, nullptr);
+  EXPECT_GE(chat_input->rect.height, tree.theme().widgets.input.height);
+  EXPECT_GT(chat_input->style.background.w, 0.0F);
+  EXPECT_LT(chat_input->style.background.w, 1.0F);
   ASSERT_NE(tree.find_by_stable_id("tab.panel"), nullptr);
   const auto* scoreboard_line = tree.find_by_stable_id("scoreboard.line.0");
   ASSERT_NE(scoreboard_line, nullptr);
@@ -326,6 +493,20 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   EXPECT_EQ(fps->text, "FPS: 144");
   EXPECT_FLOAT_EQ(fps->rect.x, 8.0F);
   EXPECT_FLOAT_EQ(fps->rect.y, 8.0F);
+}
+
+TEST(GameplayUiTests, EmptyPassiveChatDoesNotRenderABox) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  arv::ui::build_chat_ui(tree, {true, false, {}, ""});
+  tree.layout({800.0F, 600.0F}, &text);
+  EXPECT_EQ(tree.find_by_stable_id("chat.stack"), nullptr);
+
+  arv::ui::build_chat_ui(tree, {true, true, {}, ""});
+  tree.layout({800.0F, 600.0F}, &text);
+  ASSERT_NE(tree.find_by_stable_id("chat.stack"), nullptr);
+  ASSERT_NE(tree.find_by_stable_id("chat.input"), nullptr);
 }
 
 TEST(MenuScreenTests, MainMenuIsRootAndNavigatesToSinglePlayer) {
@@ -342,6 +523,27 @@ TEST(MenuScreenTests, MainMenuIsRootAndNavigatesToSinglePlayer) {
   tree.layout({800.0F, 600.0F}, &text);
 
   ASSERT_NE(tree.find_by_stable_id("menu.main.single_player"), nullptr);
+  const auto* primary = tree.find_by_stable_id("menu.main.single_player");
+  const auto* secondary = tree.find_by_stable_id("menu.main.multi_player");
+  const auto* primary_label = tree.find_by_stable_id("menu.main.single_player.label");
+  const auto* title = tree.find_by_stable_id("main_menu.title");
+  ASSERT_NE(primary, nullptr);
+  ASSERT_NE(secondary, nullptr);
+  ASSERT_NE(primary_label, nullptr);
+  ASSERT_NE(title, nullptr);
+  EXPECT_GT(primary->style.radius, 0.0F);
+  EXPECT_GT(primary->style.border_width, 0.0F);
+  EXPECT_EQ(primary->style.control_role, arv::ui::UiControlRole::Primary);
+  EXPECT_EQ(primary->style.background, secondary->style.background);
+  EXPECT_FLOAT_EQ(primary->rect.x + primary->rect.width * 0.5F, 400.0F);
+  EXPECT_FLOAT_EQ(secondary->rect.x + secondary->rect.width * 0.5F, 400.0F);
+  EXPECT_FLOAT_EQ(title->rect.x + title->rect.width * 0.5F, 400.0F);
+  EXPECT_FLOAT_EQ(
+      primary_label->rect.x + primary_label->rect.width * 0.5F,
+      primary->rect.x + primary->rect.width * 0.5F);
+  EXPECT_FLOAT_EQ(
+      primary_label->rect.y + primary_label->rect.height * 0.5F,
+      primary->rect.y + primary->rect.height * 0.5F);
   EXPECT_TRUE(screens.pauses_singleplayer());
   EXPECT_FALSE(screens.handle_cancel(ctx));
   EXPECT_EQ(screens.depth(), 1U);
@@ -349,6 +551,60 @@ TEST(MenuScreenTests, MainMenuIsRootAndNavigatesToSinglePlayer) {
   EXPECT_TRUE(screens.route_action({"menu.main.single_player", "main.single_player", "click"}, ctx));
   ASSERT_NE(screens.current(), nullptr);
   EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::SinglePlayerMenu);
+}
+
+TEST(MenuScreenTests, ThemedRowsExposeSelectionAndDetailText) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  data.saves.push_back({"Long World", "long-world", "default", "last played today"});
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_single_player_menu_screen());
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+  EXPECT_TRUE(screens.route_action(
+      {"menu.single_player.world.0", "single_player.select_world", "click"},
+      ctx));
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* row = tree.find_by_stable_id("menu.single_player.world.0");
+  const auto* detail = tree.find_by_stable_id("menu.single_player.world.0.detail");
+  ASSERT_NE(row, nullptr);
+  ASSERT_NE(detail, nullptr);
+  EXPECT_TRUE(row->selected);
+  EXPECT_EQ(detail->text, "last played today");
+  EXPECT_EQ(detail->style.text_role, arv::ui::UiTextRole::Small);
+}
+
+TEST(MenuScreenTests, RepresentativeMenusKeepKeyControlsInsideNarrowViewport) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_main_menu_screen());
+  arv::ui::UIContext ctx{tree, {480.0F, 360.0F}, &sink, &data, &screens};
+
+  screens.update(ctx);
+  tree.layout({480.0F, 360.0F}, &text);
+
+  for (std::string_view id : {
+           "menu.main.single_player",
+           "menu.main.multi_player",
+           "menu.main.settings",
+           "menu.main.quit",
+       }) {
+    const auto* element = tree.find_by_stable_id(id);
+    ASSERT_NE(element, nullptr) << id;
+    EXPECT_GE(element->rect.x, 0.0F) << id;
+    EXPECT_GE(element->rect.y, 0.0F) << id;
+    EXPECT_LE(element->rect.x + element->rect.width, 480.0F) << id;
+    EXPECT_LE(element->rect.y + element->rect.height, 360.0F) << id;
+  }
 }
 
 TEST(MenuScreenTests, MainMenuAccountDropdownSelectsAndEditsProfiles) {
@@ -556,12 +812,26 @@ TEST(MenuScreenTests, AccountCreateSkinManagerCanCancelBackToSnapshot) {
 }
 
 TEST(MenuScreenTests, PauseResumeEmitsCommandAndClosesScreen) {
+  FixedTextMeasurer text;
   arv::ui::UiTree tree;
   CapturingCommandSink sink;
   FixedMenuData data;
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_pause_menu_screen());
   arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  EXPECT_EQ(tree.find_by_stable_id("pause_menu.panel"), nullptr);
+  const auto* backdrop = tree.find_by_stable_id("pause_menu.backdrop");
+  ASSERT_NE(backdrop, nullptr);
+  EXPECT_GT(backdrop->style.background.w, 0.0F);
+  EXPECT_LT(backdrop->style.background.w, 1.0F);
+  const auto* stack = tree.find_by_stable_id("pause_menu.stack");
+  ASSERT_NE(stack, nullptr);
+  EXPECT_FLOAT_EQ(stack->rect.x + stack->rect.width * 0.5F, 400.0F);
+  EXPECT_FLOAT_EQ(stack->rect.y + stack->rect.height * 0.5F, 300.0F);
 
   EXPECT_TRUE(screens.pauses_singleplayer());
   EXPECT_TRUE(screens.route_action({"menu.pause.resume", "pause.resume", "click"}, ctx));

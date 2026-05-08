@@ -1,0 +1,67 @@
+name: "Dark"
+description: "Deeper nighttime Arvane theme."
+
+colors:
+  background: "#090c10"
+  backdrop: "#030406"
+  pause_backdrop: "#03040666"
+  surface: "#131920"
+  surface_alt: "#0d1218"
+  surface_hover: "#263542"
+  surface_pressed: "#080c11"
+  surface_selected: "#1b3140"
+
+  text: "#eff3f3"
+  text_muted: "#9fadad"
+  text_disabled: "#626f70"
+
+  border: "#2e3a3e"
+  border_focus: "#8ebbdc"
+
+  accent: "#6f9e8f"
+  accent_hover: "#85b4a4"
+  accent_pressed: "#4f7569"
+  accent_text: "#f7fff9"
+
+  danger: "#c94a3d"
+  danger_hover: "#dd6155"
+  danger_pressed: "#8e332b"
+  warning: "#d2a95c"
+  success: "#60b778"
+
+layout:
+  spacing_xs: 4
+  spacing_sm: 8
+  spacing_md: 12
+  spacing_lg: 18
+  spacing_xl: 28
+  radius_sm: 4
+  radius_md: 8
+  radius_lg: 12
+  border_width: 1
+
+typography:
+  default_font: "arvane:font/font"
+  heading_font: "arvane:font/font"
+  monospace_font: "arvane:font/font"
+  size_sm: 14
+  size_md: 18
+  size_lg: 22
+  size_xl: 34
+
+widgets:
+  button:
+    height: 44
+    min_width: 164
+    padding_x: 16
+    padding_y: 10
+    radius: 8
+  input:
+    height: 44
+    min_width: 300
+    padding_x: 14
+    padding_y: 10
+    radius: 8
+  panel:
+    padding: 22
+    radius: 12

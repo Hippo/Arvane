@@ -1,0 +1,67 @@
+name: "High Contrast"
+description: "High-contrast Arvane accessibility theme."
+
+colors:
+  background: "#000000"
+  backdrop: "#000000"
+  pause_backdrop: "#00000080"
+  surface: "#0c0c0c"
+  surface_alt: "#050505"
+  surface_hover: "#1c1c1c"
+  surface_pressed: "#000000"
+  surface_selected: "#1d2d1d"
+
+  text: "#ffffff"
+  text_muted: "#d8d8d8"
+  text_disabled: "#9a9a9a"
+
+  border: "#f2f2f2"
+  border_focus: "#00aaff"
+
+  accent: "#00d46a"
+  accent_hover: "#40ef91"
+  accent_pressed: "#00994d"
+  accent_text: "#000000"
+
+  danger: "#ff4a3d"
+  danger_hover: "#ff756b"
+  danger_pressed: "#c72f25"
+  warning: "#ffd447"
+  success: "#00e676"
+
+layout:
+  spacing_xs: 4
+  spacing_sm: 8
+  spacing_md: 12
+  spacing_lg: 18
+  spacing_xl: 28
+  radius_sm: 2
+  radius_md: 4
+  radius_lg: 6
+  border_width: 2
+
+typography:
+  default_font: "arvane:font/font"
+  heading_font: "arvane:font/font"
+  monospace_font: "arvane:font/font"
+  size_sm: 15
+  size_md: 19
+  size_lg: 24
+  size_xl: 36
+
+widgets:
+  button:
+    height: 48
+    min_width: 172
+    padding_x: 16
+    padding_y: 10
+    radius: 4
+  input:
+    height: 48
+    min_width: 300
+    padding_x: 14
+    padding_y: 10
+    radius: 4
+  panel:
+    padding: 24
+    radius: 6

@@ -37,12 +37,14 @@ enum class TextField : u8 {
 [[nodiscard]] inline UiElement make_text(
     std::string stable_id,
     std::string text,
-    Vec4f color = TextColor) {
+    Vec4f color = TextColor,
+    UiTextRole role = UiTextRole::Body) {
   UiElement element;
   element.stable_id = std::move(stable_id);
   element.type = UiElementType::Text;
   element.text = std::move(text);
   element.style.foreground = color;
+  element.style.text_role = role;
   element.hit_test = false;
   return element;
 }
@@ -62,6 +64,58 @@ enum class TextField : u8 {
   panel.style.background = background;
   panel.hit_test = true;
   return panel;
+}
+
+[[nodiscard]] inline f32 menu_button_width(const UiTheme& theme) noexcept {
+  return std::max({MenuButtonWidth, theme.widgets.button.min_width, theme.widgets.input.min_width});
+}
+
+inline void apply_panel_style(UiElement& panel, const UiTheme& theme, bool elevated = false) {
+  panel.style.background = elevated ? theme.colors.surface : theme.colors.surface_alt;
+  panel.style.border = theme.colors.border;
+  panel.style.border_width = theme.layout.border_width;
+  panel.style.radius = theme.widgets.panel.radius;
+}
+
+inline void apply_control_style(
+    UiElement& control,
+    const UiTheme& theme,
+    UiControlRole role,
+    bool enabled,
+    bool selected) {
+  control.style.control_role = role;
+  control.style.border = theme.colors.border;
+  control.style.border_focus = theme.colors.border_focus;
+  control.style.border_width = theme.layout.border_width;
+  control.style.focus_border_width = std::max(theme.layout.border_width * 2.0F, 2.0F);
+  control.style.radius = theme.widgets.button.radius;
+  control.style.accent = theme.colors.accent;
+  if (!enabled) {
+    control.style.background = theme.colors.surface_pressed;
+    control.style.background_hover = theme.colors.surface_pressed;
+    control.style.background_pressed = theme.colors.surface_pressed;
+    control.style.background_selected = theme.colors.surface_pressed;
+    return;
+  }
+  if (role == UiControlRole::Primary) {
+    control.style.background = selected ? theme.colors.accent : theme.colors.surface_alt;
+    control.style.background_hover = selected ? theme.colors.accent_hover : theme.colors.surface_hover;
+    control.style.background_pressed = selected ? theme.colors.accent_pressed : theme.colors.surface_pressed;
+    control.style.background_selected = theme.colors.accent;
+    control.style.border = selected ? theme.colors.accent_hover : theme.colors.border;
+  } else if (role == UiControlRole::Danger) {
+    control.style.background = theme.colors.danger;
+    control.style.background_hover = theme.colors.danger_hover;
+    control.style.background_pressed = theme.colors.danger_pressed;
+    control.style.background_selected = theme.colors.danger_hover;
+    control.style.border = theme.colors.danger_hover;
+    control.style.accent = theme.colors.warning;
+  } else {
+    control.style.background = selected ? theme.colors.surface_selected : theme.colors.surface_alt;
+    control.style.background_hover = theme.colors.surface_hover;
+    control.style.background_pressed = theme.colors.surface_pressed;
+    control.style.background_selected = theme.colors.surface_selected;
+  }
 }
 
 [[nodiscard]] inline UiElement make_stack(std::string stable_id, f32 spacing = 8.0F) {
@@ -91,18 +145,23 @@ inline UiNodeID add_button(
     std::string label,
     std::string action,
     bool enabled = true,
-    bool selected = false) {
+    bool selected = false,
+    UiControlRole role = UiControlRole::Neutral) {
+  const UiTheme& theme = tree.theme();
   UiElement button;
   button.stable_id = stable_id;
   button.type = UiElementType::Button;
   button.layout.width_mode = UiSizeMode::Fixed;
   button.layout.height_mode = UiSizeMode::Fixed;
-  button.layout.width = MenuButtonWidth;
-  button.layout.height = MenuButtonHeight;
-  button.layout.padding = {12.0F, 12.0F, 10.0F, 8.0F};
-  button.style.background = !enabled ? ButtonDisabledColor
-                                     : (selected ? ButtonSelectedColor : ButtonColor);
-  button.style.accent = AccentColor;
+  button.layout.width = menu_button_width(theme);
+  button.layout.height = std::max(MenuButtonHeight, theme.widgets.button.height);
+  button.layout.anchor = UiAnchor::TopCenter;
+  button.layout.padding = {
+      theme.widgets.button.padding_x,
+      theme.widgets.button.padding_x,
+      theme.widgets.button.padding_y,
+      theme.widgets.button.padding_y};
+  apply_control_style(button, theme, role, enabled, selected);
   button.focusable = enabled;
   button.hit_test = enabled;
   button.enabled = enabled;
@@ -111,8 +170,58 @@ inline UiNodeID add_button(
   const UiNodeID button_id = tree.add_child(parent, std::move(button));
   tree.add_child(
       button_id,
-      make_text(stable_id + ".label", std::move(label), enabled ? TextColor : MutedTextColor));
+      make_text(
+          stable_id + ".label",
+          std::move(label),
+          !enabled ? theme.colors.text_disabled :
+          (role == UiControlRole::Primary && selected) || role == UiControlRole::Danger
+              ? theme.colors.accent_text
+              : theme.colors.text));
+  if (UiElement* label_element = tree.find_by_stable_id(stable_id + ".label");
+      label_element != nullptr) {
+    label_element->layout.anchor = UiAnchor::Center;
+  }
   return button_id;
+}
+
+inline UiNodeID add_list_row(
+    UiTree& tree,
+    UiNodeID parent,
+    std::string stable_id,
+    std::string title,
+    std::string detail,
+    std::string action,
+    bool enabled = true,
+    bool selected = false) {
+  const UiTheme& theme = tree.theme();
+  UiElement row;
+  row.stable_id = stable_id;
+  row.type = UiElementType::Button;
+  row.layout.width_mode = UiSizeMode::Fixed;
+  row.layout.height_mode = UiSizeMode::Fixed;
+  row.layout.width = std::max(340.0F, menu_button_width(theme));
+  row.layout.height = std::max(58.0F, theme.widgets.button.height + theme.layout.spacing_md);
+  row.layout.anchor = UiAnchor::TopCenter;
+  row.layout.padding = {
+      theme.widgets.button.padding_x,
+      theme.widgets.button.padding_x,
+      theme.layout.spacing_sm,
+      theme.layout.spacing_sm};
+  apply_control_style(row, theme, UiControlRole::Neutral, enabled, selected);
+  row.focusable = enabled;
+  row.hit_test = enabled;
+  row.enabled = enabled;
+  row.selected = selected;
+  row.action = enabled ? std::move(action) : std::string{};
+  const UiNodeID row_id = tree.add_child(parent, std::move(row));
+  tree.add_child(
+      row_id,
+      make_text(stable_id + ".label", std::move(title), theme.colors.text));
+  UiElement detail_text =
+      make_text(stable_id + ".detail", std::move(detail), theme.colors.text_muted, UiTextRole::Small);
+  detail_text.layout.offset = {0.0F, theme.typography.size_md + theme.layout.spacing_xs};
+  tree.add_child(row_id, std::move(detail_text));
+  return row_id;
 }
 
 [[nodiscard]] inline UiNodeID add_menu_shell(
@@ -122,16 +231,38 @@ inline UiNodeID add_button(
     f32 width,
     f32 height,
     Vec4f backdrop_color = BackdropColor) {
-  add_backdrop(ctx.tree, std::string{id} + ".backdrop", backdrop_color);
+  const UiTheme& theme = theme_or_default(ctx.theme);
+  add_backdrop(
+      ctx.tree,
+      std::string{id} + ".backdrop",
+      backdrop_color.w == BackdropColor.w ? theme.colors.backdrop : backdrop_color);
 
-  UiElement panel = make_panel(std::string{id} + ".panel", width, height);
+  const f32 safe_width = std::min(width, std::max(280.0F, ctx.viewport.x - theme.layout.spacing_xl * 2.0F));
+  const f32 safe_height = std::min(height, std::max(180.0F, ctx.viewport.y - theme.layout.spacing_xl * 2.0F));
+  UiElement panel = make_panel(std::string{id} + ".panel", safe_width, safe_height);
   panel.layout.anchor = UiAnchor::Center;
-  panel.layout.padding = {22.0F, 22.0F, 20.0F, 20.0F};
+  panel.layout.padding = {
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding,
+      theme.widgets.panel.padding};
+  apply_panel_style(panel, theme, true);
   const UiNodeID panel_id = ctx.tree.add_child(ctx.tree.root_id(), std::move(panel));
 
-  UiElement stack = make_stack(std::string{id} + ".stack", 10.0F);
+  UiElement stack = make_stack(std::string{id} + ".stack", theme.layout.spacing_md);
+  stack.layout.width_mode = UiSizeMode::Fixed;
+  stack.layout.width = std::min(
+      menu_button_width(theme),
+      std::max(0.0F, safe_width - theme.widgets.panel.padding * 2.0F));
+  stack.layout.anchor = UiAnchor::TopCenter;
   const UiNodeID stack_id = ctx.tree.add_child(panel_id, std::move(stack));
-  ctx.tree.add_child(stack_id, make_text(std::string{id} + ".title", std::move(title)));
+  UiElement title_element = make_text(
+      std::string{id} + ".title",
+      std::move(title),
+      theme.colors.text,
+      UiTextRole::Title);
+  title_element.layout.anchor = UiAnchor::TopCenter;
+  ctx.tree.add_child(stack_id, std::move(title_element));
   return stack_id;
 }
 
@@ -141,7 +272,7 @@ inline void add_error_text(
     std::string stable_id,
     const std::string& error) {
   if (!error.empty()) {
-    tree.add_child(parent, make_text(std::move(stable_id), error, ErrorTextColor));
+    tree.add_child(parent, make_text(std::move(stable_id), error, tree.theme().colors.danger));
   }
 }
 
@@ -154,15 +285,27 @@ inline void add_text_box(
     std::string placeholder,
     std::string action,
     bool active) {
-  tree.add_child(parent, make_text(stable_id + ".label", std::move(label), MutedTextColor));
+  const UiTheme& theme = tree.theme();
+  tree.add_child(
+      parent,
+      make_text(
+          stable_id + ".label",
+          std::move(label),
+          theme.colors.text_muted,
+          UiTextRole::Small));
 
   UiElement box =
-      make_panel(stable_id, MenuButtonWidth, MenuButtonHeight, active ? ButtonSelectedColor : ButtonColor);
+      make_panel(stable_id, menu_button_width(theme), theme.widgets.input.height);
   box.type = UiElementType::Button;
-  box.layout.padding = {12.0F, 12.0F, 10.0F, 8.0F};
+  box.layout.padding = {
+      theme.widgets.input.padding_x,
+      theme.widgets.input.padding_x,
+      theme.widgets.input.padding_y,
+      theme.widgets.input.padding_y};
   box.focusable = true;
   box.selected = active;
-  box.style.accent = AccentColor;
+  apply_control_style(box, theme, UiControlRole::Neutral, true, active);
+  box.style.radius = theme.widgets.input.radius;
   box.action = std::move(action);
   const UiNodeID box_id = tree.add_child(parent, std::move(box));
   const bool empty = value.empty();
@@ -171,7 +314,7 @@ inline void add_text_box(
       make_text(
           stable_id + ".text",
           empty ? std::move(placeholder) : std::move(value),
-          empty ? MutedTextColor : TextColor));
+          empty ? theme.colors.text_muted : theme.colors.text));
 }
 
 [[nodiscard]] inline bool parse_index_suffix(
