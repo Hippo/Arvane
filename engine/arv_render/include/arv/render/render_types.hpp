@@ -373,6 +373,9 @@ struct UIRectDrawItem {
   Vec2f min{};
   Vec2f max{};
   Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+  Vec2f clip_min{};
+  Vec2f clip_max{};
+  bool clip{};
 };
 
 struct UIGlyphDrawItem {
@@ -382,6 +385,9 @@ struct UIGlyphDrawItem {
   Vec2f uv_max{};
   Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
   u32 page{};
+  Vec2f clip_min{};
+  Vec2f clip_max{};
+  bool clip{};
 };
 
 enum class UiTextureSource : u8 {
@@ -389,6 +395,7 @@ enum class UiTextureSource : u8 {
   FontAtlas,
   TerrainAtlas,
   ItemAtlas,
+  PlayerSkinAtlas,
 };
 
 struct UITexturedQuadDrawItem {
@@ -397,6 +404,23 @@ struct UITexturedQuadDrawItem {
   Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
   UiTextureSource source{UiTextureSource::White};
   u32 page{};
+  Vec2f clip_min{};
+  Vec2f clip_max{};
+  bool clip{};
+};
+
+struct UiClip {
+  Vec2f min{};
+  Vec2f max{};
+  bool enabled{};
+
+  constexpr bool operator==(const UiClip&) const = default;
+};
+
+struct UiDrawRun {
+  u32 first_index{};
+  u32 index_count{};
+  UiClip clip{};
 };
 
 void append_chunk_vertex(CpuMeshBuffer& buffer, ChunkVertex vertex);
@@ -468,6 +492,15 @@ struct EntityDrawItem {
   TextureRegionHandle player_skin_region{};
 };
 
+struct EntityPreviewDrawItem {
+  Vec2f viewport_min{};
+  Vec2f viewport_size{};
+  RenderView view{};
+  SkyUniforms sky{};
+  Vec4f clear_color{0.018F, 0.023F, 0.030F, 1.0F};
+  std::vector<EntityDrawItem> entities{};
+};
+
 struct EntityVertex {
   Vec3f position{};
   Vec2f uv{};
@@ -481,6 +514,7 @@ struct FramePacket {
   std::vector<ChunkDrawItem> opaque_chunks{};
   std::vector<ChunkDrawItem> transparent_chunks{};
   std::vector<EntityDrawItem> entities{};
+  std::vector<EntityPreviewDrawItem> entity_previews{};
   std::vector<UIRectDrawItem> ui_rects{};
   std::vector<UITexturedQuadDrawItem> ui_textured_quads{};
   std::vector<UIGlyphDrawItem> ui_glyphs{};

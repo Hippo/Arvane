@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <system_error>
 
 namespace {
@@ -47,6 +48,22 @@ TEST(LocalProfileTests, SavesLoadsMultipleProfilesAndUsesFirstAsActive) {
   EXPECT_EQ(loaded.value().active_profile()->display_name, "Hippo");
   EXPECT_EQ(loaded.value().profiles.front().skins.size(), 1U);
   EXPECT_TRUE(std::filesystem::exists(arv::client::local_profiles_json_path(temp.path)));
+  EXPECT_TRUE(std::filesystem::exists(arv::client::local_private_key_path(
+      temp.path,
+      loaded.value().profiles.front().private_key_file)));
+}
+
+TEST(LocalProfileTests, EmptyExistingProfilesFileCreatesFreshProfile) {
+  TempDir temp;
+  std::ofstream output(arv::client::local_profiles_json_path(temp.path), std::ios::trunc);
+  output << "[]";
+  output.close();
+
+  auto loaded = arv::client::load_or_create_local_profile_store(temp.path, "Fresh");
+
+  ASSERT_TRUE(loaded);
+  ASSERT_EQ(loaded.value().profiles.size(), 1U);
+  EXPECT_EQ(loaded.value().profiles.front().display_name, "Fresh");
   EXPECT_TRUE(std::filesystem::exists(arv::client::local_private_key_path(
       temp.path,
       loaded.value().profiles.front().private_key_file)));

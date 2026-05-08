@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -38,9 +39,55 @@ public:
     return servers;
   }
 
+  [[nodiscard]] std::vector<arv::ui::LocalProfileEntry> local_profiles() const override {
+    return profiles;
+  }
+
+  [[nodiscard]] arv::ui::PlayerSkinTextureView default_player_skin_texture() const override {
+    return default_skin;
+  }
+
+  [[nodiscard]] std::vector<arv::ui::LocalProfileSkinEntry>
+  pending_create_profile_skins() const override {
+    return create_skins;
+  }
+
+  [[nodiscard]] bool has_pending_edit_profile_skins(
+      std::string_view profile_id) const override {
+    for (const auto& [id, skins] : edit_skins) {
+      (void)skins;
+      if (id == profile_id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  [[nodiscard]] std::vector<arv::ui::LocalProfileSkinEntry> pending_edit_profile_skins(
+      std::string_view profile_id) const override {
+    for (const auto& [id, skins] : edit_skins) {
+      if (id == profile_id) {
+        return skins;
+      }
+    }
+    return {};
+  }
+
   std::vector<arv::ui::SinglePlayerSaveEntry> saves{};
   std::vector<arv::ui::ServerListEntry> servers{};
+  std::vector<arv::ui::LocalProfileEntry> profiles{};
+  std::vector<arv::ui::LocalProfileSkinEntry> create_skins{};
+  std::vector<std::pair<std::string, std::vector<arv::ui::LocalProfileSkinEntry>>> edit_skins{};
+  arv::ui::PlayerSkinTextureView default_skin{};
 };
+
+[[nodiscard]] arv::ui::LocalProfileSkinEntry make_skin_entry(std::string hash) {
+  arv::ui::LocalProfileSkinEntry skin;
+  skin.skin_hash = std::move(hash);
+  skin.width = 64;
+  skin.height = 64;
+  return skin;
+}
 
 } // namespace
 
@@ -302,6 +349,210 @@ TEST(MenuScreenTests, MainMenuIsRootAndNavigatesToSinglePlayer) {
   EXPECT_TRUE(screens.route_action({"menu.main.single_player", "main.single_player", "click"}, ctx));
   ASSERT_NE(screens.current(), nullptr);
   EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::SinglePlayerMenu);
+}
+
+TEST(MenuScreenTests, MainMenuAccountDropdownSelectsAndEditsProfiles) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  data.profiles.push_back({"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                           "Hippo",
+                           "",
+                           {},
+                           true});
+  data.profiles.push_back({"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                           "Alt",
+                           "",
+                           {},
+                           false});
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_main_menu_screen());
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  ASSERT_NE(tree.find_by_stable_id("menu.account.toggle"), nullptr);
+
+  EXPECT_TRUE(screens.route_action({"menu.account.toggle", "account.toggle", "click"}, ctx));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  ASSERT_NE(tree.find_by_stable_id("menu.account.profile.1"), nullptr);
+  const auto* id_text = tree.find_by_stable_id("menu.account.profile.1.id");
+  ASSERT_NE(id_text, nullptr);
+  EXPECT_LT(id_text->text.size(), data.profiles[1].profile_id.size());
+  const auto* name_clip = tree.find_by_stable_id("menu.account.profile.1.name.clip");
+  ASSERT_NE(name_clip, nullptr);
+  EXPECT_TRUE(name_clip->clip_children);
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.account.profile.1", "account.select", "click"},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SelectLocalProfileCommand>(sink.commands[0]));
+  EXPECT_EQ(
+      std::get<arv::ui::SelectLocalProfileCommand>(sink.commands[0]).profile_id,
+      data.profiles[1].profile_id);
+
+  EXPECT_TRUE(screens.route_action({"menu.account.toggle", "account.toggle", "click"}, ctx));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  EXPECT_TRUE(screens.route_action(
+      {"menu.account.profile.0.edit", "account.edit", "click"},
+      ctx));
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::AccountEdit);
+}
+
+TEST(MenuScreenTests, AccountEditSaveAndCancelAreExplicit) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  data.profiles.push_back({"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                           "Hippo",
+                           "",
+                           {},
+                           true});
+  arv::ui::UIScreenManager screens;
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+
+  screens.push(arv::ui::make_account_edit_screen(data.profiles[0].profile_id));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_edit.cancel"), nullptr);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_edit.save"), nullptr);
+  EXPECT_TRUE(screens.handle_text_input("2", ctx));
+  EXPECT_TRUE(screens.route_action({"menu.account_edit.cancel", "account.cancel", "click"}, ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<arv::ui::DiscardLocalProfileEditCommand>(sink.commands[0]));
+  EXPECT_TRUE(screens.empty());
+
+  screens.push(arv::ui::make_account_edit_screen(data.profiles[0].profile_id));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  EXPECT_TRUE(screens.handle_text_input("2", ctx));
+  EXPECT_TRUE(screens.route_action({"menu.account_edit.save", "account.save", "click"}, ctx));
+  ASSERT_EQ(sink.commands.size(), 2U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::UpdateLocalProfileCommand>(sink.commands[1]));
+  EXPECT_EQ(std::get<arv::ui::UpdateLocalProfileCommand>(sink.commands[1]).display_name, "Hippo2");
+  EXPECT_TRUE(screens.empty());
+
+  screens.push(arv::ui::make_account_edit_screen(data.profiles[0].profile_id));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  EXPECT_TRUE(screens.handle_text_input("3", ctx));
+  EXPECT_TRUE(screens.handle_cancel(ctx));
+  ASSERT_EQ(sink.commands.size(), 3U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::UpdateLocalProfileCommand>(sink.commands[2]));
+  EXPECT_EQ(std::get<arv::ui::UpdateLocalProfileCommand>(sink.commands[2]).display_name, "Hippo3");
+}
+
+TEST(MenuScreenTests, AccountCreateCancelDiscardsPendingCreateState) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+
+  screens.push(arv::ui::make_account_create_screen());
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_create.cancel"), nullptr);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_create.complete"), nullptr);
+
+  EXPECT_TRUE(screens.route_action({"menu.account_create.cancel", "account.cancel", "click"}, ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<arv::ui::DiscardLocalProfileCreateCommand>(sink.commands[0]));
+  EXPECT_TRUE(screens.empty());
+}
+
+TEST(MenuScreenTests, AccountEditSkinManagerStagesOrderAndPickerCommands) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::LocalProfileEntry profile;
+  profile.profile_id = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  profile.display_name = "Hippo";
+  profile.active = true;
+  profile.skins.push_back(make_skin_entry("skin-a"));
+  profile.skins.push_back(make_skin_entry("skin-b"));
+  profile.skins.push_back(make_skin_entry("skin-c"));
+  data.profiles.push_back(std::move(profile));
+
+  arv::ui::UIScreenManager screens;
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+  screens.push(arv::ui::make_account_edit_screen(data.profiles[0].profile_id));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+
+  EXPECT_TRUE(screens.route_action({"menu.account_edit.skin", "account.manage_skins", "click"}, ctx));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_edit.skin_dialog.panel"), nullptr);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_edit.skin_dialog.row.1.up"), nullptr);
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.account_edit.skin_dialog.row.1.up", "account.skin_up", "click"},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[0]));
+  const auto& reorder =
+      std::get<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[0]);
+  ASSERT_TRUE(reorder.profile_id.has_value());
+  EXPECT_EQ(reorder.profile_id.value(), data.profiles[0].profile_id);
+  EXPECT_EQ(reorder.skin_hashes, (std::vector<std::string>{"skin-b", "skin-a", "skin-c"}));
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.account_edit.skin_dialog.add", "account.skin_add", "click"},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 2U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::PickLocalProfileSkinCommand>(sink.commands[1]));
+  EXPECT_EQ(
+      std::get<arv::ui::PickLocalProfileSkinCommand>(sink.commands[1]).profile_id.value(),
+      data.profiles[0].profile_id);
+}
+
+TEST(MenuScreenTests, AccountCreateSkinManagerCanCancelBackToSnapshot) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  data.create_skins.push_back(make_skin_entry("skin-a"));
+  data.create_skins.push_back(make_skin_entry("skin-b"));
+
+  arv::ui::UIScreenManager screens;
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+  screens.push(arv::ui::make_account_create_screen());
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+
+  EXPECT_TRUE(screens.route_action({"menu.account_create.skin", "account.manage_skins", "click"}, ctx));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_create.skin_dialog.row.1.up"), nullptr);
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.account_create.skin_dialog.row.1.up", "account.skin_up", "click"},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[0]));
+  const auto& reorder =
+      std::get<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[0]);
+  EXPECT_FALSE(reorder.profile_id.has_value());
+  EXPECT_EQ(reorder.skin_hashes, (std::vector<std::string>{"skin-b", "skin-a"}));
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.account_create.skin_dialog.cancel", "account.skin_cancel", "click"},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 2U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[1]));
+  const auto& cancel =
+      std::get<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[1]);
+  EXPECT_FALSE(cancel.profile_id.has_value());
+  EXPECT_EQ(cancel.skin_hashes, (std::vector<std::string>{"skin-a", "skin-b"}));
 }
 
 TEST(MenuScreenTests, PauseResumeEmitsCommandAndClosesScreen) {

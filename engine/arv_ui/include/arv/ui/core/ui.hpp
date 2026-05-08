@@ -108,6 +108,8 @@ struct UiElement {
   bool focusable{};
   bool hit_test{true};
   bool selected{};
+  bool clip_children{};
+  bool clip_active{};
   UiImageData image{};
   UiRect rect{};
   UiRect clip{};
@@ -183,6 +185,11 @@ private:
   [[nodiscard]] UiNodeID allocate_node();
   [[nodiscard]] Vec2f measure_element(UiNodeID id, Vec2f available, const IUiTextMeasurer* text_measurer);
   void arrange_element(UiNodeID id, UiRect rect, const IUiTextMeasurer* text_measurer);
+  void arrange_element(
+      UiNodeID id,
+      UiRect rect,
+      const IUiTextMeasurer* text_measurer,
+      std::optional<UiRect> inherited_clip);
   [[nodiscard]] std::optional<UiNodeID> hit_test_recursive(UiNodeID id, Vec2f point) const;
 
   UiNodeID root_id_{UiNodeID{1}};

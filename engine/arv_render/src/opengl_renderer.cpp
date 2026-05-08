@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <utility>
@@ -21,6 +22,7 @@ constexpr f32 UiTextureSlotWhite = 0.0F;
 constexpr f32 UiTextureSlotFont = 1.0F;
 constexpr f32 UiTextureSlotTerrain = 2.0F;
 constexpr f32 UiTextureSlotItem = 3.0F;
+constexpr f32 UiTextureSlotPlayerSkin = 4.0F;
 
 static_assert(sizeof(Vec3f) == sizeof(f32) * 3U);
 
@@ -205,6 +207,8 @@ void main() {
       return UiTextureSlotTerrain;
     case UiTextureSource::ItemAtlas:
       return UiTextureSlotItem;
+    case UiTextureSource::PlayerSkinAtlas:
+      return UiTextureSlotPlayerSkin;
   }
   return UiTextureSlotWhite;
 }
@@ -246,12 +250,15 @@ void ensure_buffer_capacity(
 void append_ui_quad(
     std::vector<UIVertex>& vertices,
     std::vector<u32>& indices,
+    std::vector<UiDrawRun>& runs,
     const std::array<Vec2f, 4>& positions,
     const std::array<Vec2f, 4>& uvs,
     Vec4f color,
     f32 texture_slot,
-    u32 atlas_page) {
+    u32 atlas_page,
+    UiClip clip) {
   const u32 base = static_cast<u32>(vertices.size());
+  const u32 first_index = static_cast<u32>(indices.size());
   vertices.emplace_back(positions[0], uvs[0], color, texture_slot, atlas_page);
   vertices.emplace_back(positions[1], uvs[1], color, texture_slot, atlas_page);
   vertices.emplace_back(positions[2], uvs[2], color, texture_slot, atlas_page);
@@ -262,6 +269,33 @@ void append_ui_quad(
   indices.emplace_back(base + 2U);
   indices.emplace_back(base + 3U);
   indices.emplace_back(base);
+  if (!runs.empty() && runs.back().clip == clip &&
+      runs.back().first_index + runs.back().index_count == first_index) {
+    runs.back().index_count += 6U;
+  } else {
+    runs.push_back({first_index, 6U, clip});
+  }
+}
+
+[[nodiscard]] UiClip clip_from_draw_item(Vec2f min, Vec2f max, bool enabled) noexcept {
+  return {min, max, enabled};
+}
+
+void apply_ui_scissor(UiClip clip, u32 framebuffer_height) {
+  if (!clip.enabled) {
+    glDisable(GL_SCISSOR_TEST);
+    return;
+  }
+  const f32 x_min = std::max(0.0F, clip.min.x);
+  const f32 y_min = std::max(0.0F, clip.min.y);
+  const f32 x_max = std::max(x_min, clip.max.x);
+  const f32 y_max = std::max(y_min, clip.max.y);
+  glEnable(GL_SCISSOR_TEST);
+  glScissor(
+      static_cast<GLint>(std::floor(x_min)),
+      static_cast<GLint>(std::floor(static_cast<f32>(framebuffer_height) - y_max)),
+      static_cast<GLsizei>(std::ceil(x_max - x_min)),
+      static_cast<GLsizei>(std::ceil(y_max - y_min)));
 }
 
 [[nodiscard]] i32 compare_f32(f32 lhs, f32 rhs) noexcept {
@@ -415,6 +449,34 @@ std::optional<TextureRegionHandle> OpenGLRenderer::upload_player_skin_texture(
       static_cast<u16>(upload.height),
       render_frame_index_,
       std::chrono::steady_clock::now());
+}
+
+std::optional<AtlasRegion> OpenGLRenderer::resolve_player_skin_texture(
+    TextureRegionHandle handle) const {
+  return player_skin_atlas_.resolve(handle);
+}
+
+const ResidentSkinTexture* OpenGLRenderer::resident_player_skin_texture(
+    std::string_view skin_hash) const noexcept {
+  return player_skin_atlas_.resident(skin_hash);
+}
+
+bool OpenGLRenderer::mark_player_skin_texture_used(
+    TextureRegionHandle handle,
+    bool pinned) {
+  return player_skin_atlas_.mark_used(
+      handle,
+      render_frame_index_,
+      std::chrono::steady_clock::now(),
+      pinned);
+}
+
+u16 OpenGLRenderer::player_skin_atlas_page_width() const noexcept {
+  return player_skin_atlas_.page_width();
+}
+
+u16 OpenGLRenderer::player_skin_atlas_page_height() const noexcept {
+  return player_skin_atlas_.page_height();
 }
 
 void OpenGLRenderer::set_entity_model(EntityModelAsset model) {
@@ -606,6 +668,7 @@ void OpenGLRenderer::render() {
   glUseProgram(0);
 
   draw_ui();
+  draw_entity_previews();
   player_skin_atlas_.run_periodic_cleanup(render_frame_index_, std::chrono::steady_clock::now());
 #if ARVANE_ENABLE_TRACY
   TracyGpuCollect;
@@ -1405,8 +1468,17 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
 }
 
 void OpenGLRenderer::draw_entities() {
+  const f32 aspect = height_ == 0 ? 1.0F : static_cast<f32>(width_) / static_cast<f32>(height_);
+  draw_entities_for(frame_.entities, frame_.world_view, frame_.sky, aspect);
+}
+
+void OpenGLRenderer::draw_entities_for(
+    const std::vector<EntityDrawItem>& entities,
+    const RenderView& view,
+    const SkyUniforms& sky,
+    f32 aspect) {
   ARV_PROFILE_ZONE("Entity draw batch");
-  if (frame_.entities.empty() || entity_models_.empty() || entity_gpu_models_.empty()) {
+  if (entities.empty() || entity_models_.empty() || entity_gpu_models_.empty()) {
     return;
   }
   if (!ensure_entity_program()) {
@@ -1414,8 +1486,8 @@ void OpenGLRenderer::draw_entities() {
   }
 
   entity_draw_order_.clear();
-  entity_draw_order_.reserve(frame_.entities.size());
-  for (const EntityDrawItem& draw : frame_.entities) {
+  entity_draw_order_.reserve(entities.size());
+  for (const EntityDrawItem& draw : entities) {
     const auto model = entity_models_.find(draw.model_id);
     const auto gpu = entity_gpu_models_.find(draw.model_id);
     if (model == entity_models_.end() || gpu == entity_gpu_models_.end()) {
@@ -1458,29 +1530,28 @@ void OpenGLRenderer::draw_entities() {
   glUseProgram(entity_program_);
   glUniform3f(
       entity_camera_position_uniform_,
-      frame_.world_view.position.x,
-      frame_.world_view.position.y,
-      frame_.world_view.position.z);
+      view.position.x,
+      view.position.y,
+      view.position.z);
   glUniform3f(
       entity_camera_forward_uniform_,
-      frame_.world_view.forward.x,
-      frame_.world_view.forward.y,
-      frame_.world_view.forward.z);
+      view.forward.x,
+      view.forward.y,
+      view.forward.z);
   glUniform3f(
       entity_camera_right_uniform_,
-      frame_.world_view.right.x,
-      frame_.world_view.right.y,
-      frame_.world_view.right.z);
+      view.right.x,
+      view.right.y,
+      view.right.z);
   glUniform3f(
       entity_camera_up_uniform_,
-      frame_.world_view.up.x,
-      frame_.world_view.up.y,
-      frame_.world_view.up.z);
-  const f32 aspect = height_ == 0 ? 1.0F : static_cast<f32>(width_) / static_cast<f32>(height_);
+      view.up.x,
+      view.up.y,
+      view.up.z);
   glUniform1f(entity_camera_aspect_uniform_, aspect);
-  glUniform1f(entity_camera_fov_y_uniform_, frame_.world_view.fov_y_degrees);
-  glUniform1f(entity_camera_near_uniform_, frame_.world_view.near_plane);
-  glUniform1f(entity_camera_far_uniform_, frame_.world_view.far_plane);
+  glUniform1f(entity_camera_fov_y_uniform_, view.fov_y_degrees);
+  glUniform1f(entity_camera_near_uniform_, view.near_plane);
+  glUniform1f(entity_camera_far_uniform_, view.far_plane);
   glUniform2f(
       entity_atlas_size_uniform_,
       static_cast<f32>(entity_atlas_.width == 0 ? 1U : entity_atlas_.width),
@@ -1499,15 +1570,15 @@ void OpenGLRenderer::draw_entities() {
   glUniform1i(entity_player_skin_atlas_uniform_, 1);
   glUniform3f(
       entity_daylight_color_uniform_,
-      frame_.sky.daylight_color.x,
-      frame_.sky.daylight_color.y,
-      frame_.sky.daylight_color.z);
-  glUniform1f(entity_daylight_strength_uniform_, frame_.sky.daylight_strength);
+      sky.daylight_color.x,
+      sky.daylight_color.y,
+      sky.daylight_color.z);
+  glUniform1f(entity_daylight_strength_uniform_, sky.daylight_strength);
   glUniform3f(
       entity_ambient_color_uniform_,
-      frame_.sky.ambient_color.x,
-      frame_.sky.ambient_color.y,
-      frame_.sky.ambient_color.z);
+      sky.ambient_color.x,
+      sky.ambient_color.y,
+      sky.ambient_color.z);
 
   usize batch_begin = 0;
   while (batch_begin < entity_draw_order_.size()) {
@@ -1615,6 +1686,54 @@ void OpenGLRenderer::draw_entities() {
   glUseProgram(0);
 }
 
+void OpenGLRenderer::draw_entity_previews() {
+  if (frame_.entity_previews.empty() || width_ == 0U || height_ == 0U) {
+    return;
+  }
+
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+  glDisable(GL_BLEND);
+  glEnable(GL_SCISSOR_TEST);
+
+  for (const EntityPreviewDrawItem& preview : frame_.entity_previews) {
+    const f32 min_x = std::clamp(preview.viewport_min.x, 0.0F, static_cast<f32>(width_));
+    const f32 min_y = std::clamp(preview.viewport_min.y, 0.0F, static_cast<f32>(height_));
+    const f32 max_x = std::clamp(
+        preview.viewport_min.x + preview.viewport_size.x,
+        0.0F,
+        static_cast<f32>(width_));
+    const f32 max_y = std::clamp(
+        preview.viewport_min.y + preview.viewport_size.y,
+        0.0F,
+        static_cast<f32>(height_));
+    const GLint x = static_cast<GLint>(std::floor(min_x));
+    const GLint y_top = static_cast<GLint>(std::floor(min_y));
+    const GLsizei w = static_cast<GLsizei>(std::ceil(max_x - min_x));
+    const GLsizei h = static_cast<GLsizei>(std::ceil(max_y - min_y));
+    if (w <= 0 || h <= 0) {
+      continue;
+    }
+
+    const GLint gl_y = static_cast<GLint>(height_) - y_top - h;
+    glViewport(x, gl_y, w, h);
+    glScissor(x, gl_y, w, h);
+    glClearColor(
+        preview.clear_color.x,
+        preview.clear_color.y,
+        preview.clear_color.z,
+        preview.clear_color.w);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    const f32 aspect = h == 0 ? 1.0F : static_cast<f32>(w) / static_cast<f32>(h);
+    draw_entities_for(preview.entities, preview.view, preview.sky, aspect);
+  }
+
+  glViewport(0, 0, static_cast<GLsizei>(width_), static_cast<GLsizei>(height_));
+  glDisable(GL_SCISSOR_TEST);
+  glBindVertexArray(0);
+  glUseProgram(0);
+}
+
 void OpenGLRenderer::draw_ui() {
   if (frame_.ui_rects.empty() && frame_.ui_textured_quads.empty() && frame_.ui_glyphs.empty()) {
     return;
@@ -1629,7 +1748,7 @@ void OpenGLRenderer::draw_ui() {
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glUseProgram(ui_program_);
   glUniform2f(ui_viewport_uniform_, static_cast<f32>(width_), static_cast<f32>(height_));
-  const std::array<GLint, 4> texture_units{{0, 1, 2, 3}};
+  const std::array<GLint, 5> texture_units{{0, 1, 2, 3, 4}};
   glUniform1iv(
       ui_texture_uniform_,
       static_cast<GLsizei>(texture_units.size()),
@@ -1652,13 +1771,16 @@ void OpenGLRenderer::draw_ui_quads() {
 
   ui_vertices_.clear();
   ui_indices_.clear();
+  ui_draw_runs_.clear();
   ui_vertices_.reserve(quad_count * 4U);
   ui_indices_.reserve(quad_count * 6U);
+  ui_draw_runs_.reserve(quad_count);
 
   for (const UIRectDrawItem& rect : frame_.ui_rects) {
     append_ui_quad(
         ui_vertices_,
         ui_indices_,
+        ui_draw_runs_,
         {{{rect.min.x, rect.min.y},
           {rect.max.x, rect.min.y},
           {rect.max.x, rect.max.y},
@@ -1666,18 +1788,21 @@ void OpenGLRenderer::draw_ui_quads() {
         {{{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}}},
         rect.color,
         UiTextureSlotWhite,
-        0U);
+        0U,
+        clip_from_draw_item(rect.clip_min, rect.clip_max, rect.clip));
   }
 
   for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
     append_ui_quad(
         ui_vertices_,
         ui_indices_,
+        ui_draw_runs_,
         quad.positions,
         quad.uvs,
         quad.color,
         texture_slot_for_ui_source(quad.source),
-        quad.page);
+        quad.page,
+        clip_from_draw_item(quad.clip_min, quad.clip_max, quad.clip));
   }
 
   if (font_atlas_.id != 0) {
@@ -1685,6 +1810,7 @@ void OpenGLRenderer::draw_ui_quads() {
       append_ui_quad(
           ui_vertices_,
           ui_indices_,
+          ui_draw_runs_,
           {{{glyph.min.x, glyph.min.y},
             {glyph.max.x, glyph.min.y},
             {glyph.max.x, glyph.max.y},
@@ -1695,7 +1821,8 @@ void OpenGLRenderer::draw_ui_quads() {
             {glyph.uv_min.x, glyph.uv_max.y}}},
           glyph.color,
           UiTextureSlotFont,
-          glyph.page);
+          glyph.page,
+          clip_from_draw_item(glyph.clip_min, glyph.clip_max, glyph.clip));
     }
   }
   if (ui_vertices_.empty()) {
@@ -1710,6 +1837,11 @@ void OpenGLRenderer::draw_ui_quads() {
   glBindTexture(GL_TEXTURE_2D_ARRAY, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D_ARRAY, item_atlas_.id == 0 ? white_texture_.id : item_atlas_.id);
+  glActiveTexture(GL_TEXTURE4);
+  glBindTexture(
+      GL_TEXTURE_2D_ARRAY,
+      player_skin_atlas_.gl_texture_array() == 0 ? white_texture_.id
+                                                 : player_skin_atlas_.gl_texture_array());
 
   glBindVertexArray(ui_vao_);
   const GLsizeiptr vertex_bytes =
@@ -1734,11 +1866,19 @@ void OpenGLRenderer::draw_ui_quads() {
   glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_indices_.data());
   ++gpu_buffer_uploads_last_frame_;
   gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(index_bytes);
-  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(ui_indices_.size()), GL_UNSIGNED_INT, nullptr);
+  for (const UiDrawRun& run : ui_draw_runs_) {
+    apply_ui_scissor(run.clip, height_);
+    glDrawElements(
+        GL_TRIANGLES,
+        static_cast<GLsizei>(run.index_count),
+        GL_UNSIGNED_INT,
+        reinterpret_cast<const void*>(static_cast<usize>(run.first_index) * sizeof(u32)));
+    ++ui_draw_calls_last_frame_;
+    ++draw_calls_last_frame_;
+  }
+  glDisable(GL_SCISSOR_TEST);
   vertices_submitted_last_frame_ += static_cast<u64>(ui_indices_.size());
   triangles_submitted_last_frame_ += static_cast<u64>(ui_indices_.size() / 3U);
-  ++ui_draw_calls_last_frame_;
-  ++draw_calls_last_frame_;
   glActiveTexture(GL_TEXTURE0);
 }
 

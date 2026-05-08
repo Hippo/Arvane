@@ -4,17 +4,74 @@
 #include "arv/io/config.hpp"
 #include "arv/persistence/save.hpp"
 
+#include <algorithm>
+#include <system_error>
 #include <utility>
 #include <variant>
 
+#if ARVANE_HAS_NFD
+#include <nfd.h>
+#endif
+
 namespace arv::desktop {
+namespace {
+
+[[nodiscard]] std::optional<std::filesystem::path> open_png_picker(
+    const std::filesystem::path& default_path,
+    std::string& error_message) {
+#if ARVANE_HAS_NFD
+  const nfdresult_t init_result = NFD_Init();
+  if (init_result != NFD_OKAY) {
+    const char* error = NFD_GetError();
+    error_message = error == nullptr ? "failed to initialize native file dialog" : error;
+    return std::nullopt;
+  }
+
+  nfdu8char_t* out_path = nullptr;
+  const nfdu8filteritem_t filter_items[1] = {{"PNG image", "png"}};
+  const std::string default_path_text = default_path.string();
+  nfdopendialogu8args_t args = {0};
+  args.filterList = filter_items;
+  args.filterCount = 1;
+  args.defaultPath = default_path_text.c_str();
+  const nfdresult_t result = NFD_OpenDialogU8_With(&out_path, &args);
+  if (result == NFD_OKAY) {
+    std::filesystem::path selected{out_path == nullptr ? "" : out_path};
+    NFD_FreePathU8(out_path);
+    NFD_Quit();
+    return selected;
+  }
+  if (result == NFD_CANCEL) {
+    NFD_Quit();
+    return std::nullopt;
+  }
+
+  const char* error = NFD_GetError();
+  error_message = error == nullptr ? "native file dialog failed" : error;
+  NFD_Quit();
+  return std::nullopt;
+#else
+  (void)default_path;
+  error_message = "Native file picker support is not available in this build.";
+  return std::nullopt;
+#endif
+}
+
+[[nodiscard]] std::string display_name_or_default(std::string name) {
+  return name.empty() ? std::string{"local_player"} : std::move(name);
+}
+
+} // namespace
 
 DesktopMenuState::DesktopMenuState(
     std::filesystem::path saves_root,
-    std::filesystem::path server_list_file) : saves_root_(std::move(saves_root)),
-                                              server_list_file_(std::move(server_list_file)) {
+    std::filesystem::path server_list_file,
+    std::filesystem::path arvane_home) : saves_root_(std::move(saves_root)),
+                                         server_list_file_(std::move(server_list_file)),
+                                         arvane_home_(std::move(arvane_home)) {
   refresh_worlds();
   load_servers();
+  load_profiles();
 }
 
 std::vector<ui::SinglePlayerSaveEntry> DesktopMenuState::singleplayer_saves() const {
@@ -23,6 +80,81 @@ std::vector<ui::SinglePlayerSaveEntry> DesktopMenuState::singleplayer_saves() co
 
 std::vector<ui::ServerListEntry> DesktopMenuState::multiplayer_servers() const {
   return servers;
+}
+
+std::vector<ui::LocalProfileEntry> DesktopMenuState::local_profiles() const {
+  std::vector<ui::LocalProfileEntry> profiles;
+  profiles.reserve(profile_store_.profiles.size());
+  for (usize index = 0; index < profile_store_.profiles.size(); ++index) {
+    const client::LocalPlayerIdentity& profile = profile_store_.profiles[index];
+    ui::LocalProfileEntry entry;
+    entry.profile_id = profile.profile_id.string();
+    entry.display_name = display_name_or_default(profile.display_name);
+    entry.active = index == 0U;
+    entry.skins = skin_entries_from(profile.skins);
+    if (!profile.skins.empty()) {
+      entry.selected_skin_hash = profile.skins.front().skin_hash;
+      const auto found = skin_textures_.find(entry.selected_skin_hash);
+      if (found != skin_textures_.end()) {
+        entry.skin_texture = found->second;
+      }
+    }
+    profiles.push_back(std::move(entry));
+  }
+  return profiles;
+}
+
+ui::PlayerSkinTextureView DesktopMenuState::default_player_skin_texture() const {
+  return default_skin_texture_;
+}
+
+ui::PlayerSkinTextureView DesktopMenuState::pending_create_profile_skin_texture() const {
+  if (pending_create_skins_.empty()) {
+    return {};
+  }
+  const auto found = skin_textures_.find(pending_create_skins_.front().skin_hash);
+  return found == skin_textures_.end() ? ui::PlayerSkinTextureView{} : found->second;
+}
+
+std::string DesktopMenuState::pending_create_profile_skin_hash() const {
+  return pending_create_skins_.empty() ? std::string{} : pending_create_skins_.front().skin_hash;
+}
+
+std::vector<ui::LocalProfileSkinEntry> DesktopMenuState::pending_create_profile_skins() const {
+  return skin_entries_from(pending_create_skins_);
+}
+
+bool DesktopMenuState::has_pending_edit_profile_skins(std::string_view profile_id) const {
+  return pending_edit_skins_.find(std::string{profile_id}) != pending_edit_skins_.end();
+}
+
+std::vector<ui::LocalProfileSkinEntry> DesktopMenuState::pending_edit_profile_skins(
+    std::string_view profile_id) const {
+  const auto pending = pending_edit_skins_.find(std::string{profile_id});
+  return pending == pending_edit_skins_.end() ? std::vector<ui::LocalProfileSkinEntry>{}
+                                             : skin_entries_from(pending->second);
+}
+
+ui::PlayerSkinTextureView DesktopMenuState::pending_edit_profile_skin_texture(
+    std::string_view profile_id) const {
+  const auto pending = pending_edit_skins_.find(std::string{profile_id});
+  if (pending == pending_edit_skins_.end() || pending->second.empty()) {
+    return {};
+  }
+  const auto found = skin_textures_.find(pending->second.front().skin_hash);
+  return found == skin_textures_.end() ? ui::PlayerSkinTextureView{} : found->second;
+}
+
+std::string DesktopMenuState::pending_edit_profile_skin_hash(
+    std::string_view profile_id) const {
+  const auto pending = pending_edit_skins_.find(std::string{profile_id});
+  return pending == pending_edit_skins_.end() || pending->second.empty()
+             ? std::string{}
+             : pending->second.front().skin_hash;
+}
+
+std::string DesktopMenuState::local_profile_status() const {
+  return profile_status_;
 }
 
 void DesktopMenuState::submit(ui::UICommand command) {
@@ -35,6 +167,13 @@ void DesktopMenuState::refresh_worlds() {
        persistence::discover_saved_servers(saves_root_)) {
     saves.push_back({save.name, save.server_save_name, save.primary_world_name, {}});
   }
+}
+
+void DesktopMenuState::set_player_skin_texture_views(
+    HashMap<std::string, ui::PlayerSkinTextureView> textures,
+    ui::PlayerSkinTextureView default_texture) {
+  skin_textures_ = std::move(textures);
+  default_skin_texture_ = default_texture;
 }
 
 std::optional<ui::StartSinglePlayerCommand>
@@ -93,6 +232,158 @@ void DesktopMenuState::handle(const ui::RemoveServerEntryCommand& command) {
   }
 }
 
+void DesktopMenuState::handle(const ui::SelectLocalProfileCommand& command) {
+  const auto found = std::find_if(
+      profile_store_.profiles.begin(),
+      profile_store_.profiles.end(),
+      [&](const client::LocalPlayerIdentity& profile) {
+        return profile.profile_id.string() == command.profile_id;
+      });
+  if (found == profile_store_.profiles.end()) {
+    profile_status_ = "Profile was not found.";
+    return;
+  }
+  std::rotate(profile_store_.profiles.begin(), found, found + 1);
+  persist_profiles();
+}
+
+void DesktopMenuState::handle(const ui::UpdateLocalProfileCommand& command) {
+  client::LocalPlayerIdentity* profile = profile_by_id(command.profile_id);
+  if (profile == nullptr) {
+    profile_status_ = "Profile was not found.";
+    return;
+  }
+  profile->display_name = display_name_or_default(command.display_name);
+  if (const auto pending = pending_edit_skins_.find(command.profile_id);
+      pending != pending_edit_skins_.end()) {
+    profile->skins = std::move(pending->second);
+    pending_edit_skins_.erase(pending);
+  }
+  persist_profiles();
+}
+
+void DesktopMenuState::handle(const ui::PickLocalProfileSkinCommand& command) {
+  std::optional<client::LocalProfileSkin> imported = pick_and_import_skin();
+  if (!imported.has_value()) {
+    return;
+  }
+  if (!command.profile_id.has_value()) {
+    pending_create_skins_.erase(
+        std::remove_if(
+            pending_create_skins_.begin(),
+            pending_create_skins_.end(),
+            [&](const client::LocalProfileSkin& skin) {
+              return skin.skin_hash == imported->skin_hash;
+            }),
+        pending_create_skins_.end());
+    pending_create_skins_.insert(pending_create_skins_.begin(), std::move(imported.value()));
+    profile_status_.clear();
+    return;
+  }
+
+  client::LocalPlayerIdentity* profile = profile_by_id(command.profile_id.value());
+  if (profile == nullptr) {
+    profile_status_ = "Profile was not found.";
+    return;
+  }
+  auto pending_it = pending_edit_skins_.find(command.profile_id.value());
+  if (pending_it == pending_edit_skins_.end()) {
+    pending_it =
+        pending_edit_skins_.emplace(command.profile_id.value(), profile->skins).first;
+  }
+  std::vector<client::LocalProfileSkin>& pending = pending_it->second;
+  pending.erase(
+      std::remove_if(
+          pending.begin(),
+          pending.end(),
+          [&](const client::LocalProfileSkin& skin) {
+            return skin.skin_hash == imported->skin_hash;
+          }),
+      pending.end());
+  pending.insert(pending.begin(), std::move(imported.value()));
+  profile_status_.clear();
+}
+
+void DesktopMenuState::handle(const ui::SetLocalProfileSkinOrderCommand& command) {
+  const std::vector<client::LocalProfileSkin> source = current_skin_source(command.profile_id);
+  std::vector<client::LocalProfileSkin> ordered;
+  ordered.reserve(command.skin_hashes.size());
+  HashSet<std::string> seen;
+  for (const std::string& skin_hash : command.skin_hashes) {
+    if (!seen.insert(skin_hash).second) {
+      continue;
+    }
+    const auto found = std::find_if(
+        source.begin(),
+        source.end(),
+        [&](const client::LocalProfileSkin& skin) {
+          return skin.skin_hash == skin_hash;
+        });
+    if (found != source.end()) {
+      ordered.push_back(*found);
+    }
+  }
+
+  if (!command.profile_id.has_value()) {
+    pending_create_skins_ = std::move(ordered);
+    profile_status_.clear();
+    return;
+  }
+
+  if (profile_by_id(command.profile_id.value()) == nullptr) {
+    profile_status_ = "Profile was not found.";
+    return;
+  }
+  pending_edit_skins_[command.profile_id.value()] = std::move(ordered);
+  profile_status_.clear();
+}
+
+void DesktopMenuState::handle(const ui::CreateLocalProfileCommand& command) {
+  client::LocalPlayerIdentity profile =
+      client::make_ephemeral_local_identity(display_name_or_default(command.display_name));
+  profile.arvane_home = arvane_home_;
+  profile.private_key_file = profile.profile_id.string() + ".pk";
+  profile.skins = std::move(pending_create_skins_);
+  pending_create_skins_.clear();
+  profile_store_.profiles.insert(profile_store_.profiles.begin(), std::move(profile));
+  persist_profiles();
+}
+
+void DesktopMenuState::handle(const ui::DeleteLocalProfileCommand& command) {
+  const auto found = std::find_if(
+      profile_store_.profiles.begin(),
+      profile_store_.profiles.end(),
+      [&](const client::LocalPlayerIdentity& profile) {
+        return profile.profile_id.string() == command.profile_id;
+      });
+  if (found == profile_store_.profiles.end()) {
+    profile_status_ = "Profile was not found.";
+    return;
+  }
+
+  pending_edit_skins_.erase(command.profile_id);
+  const std::filesystem::path key_path =
+      client::local_private_key_path(arvane_home_, found->private_key_file);
+  profile_store_.profiles.erase(found);
+  persist_profiles();
+
+  std::error_code error;
+  std::filesystem::remove(key_path, error);
+  if (error) {
+    core::warn("identity", "failed to delete private key '{}': {}", key_path, error.message());
+  }
+}
+
+void DesktopMenuState::handle(const ui::DiscardLocalProfileEditCommand& command) {
+  pending_edit_skins_.erase(command.profile_id);
+  profile_status_.clear();
+}
+
+void DesktopMenuState::handle(const ui::DiscardLocalProfileCreateCommand&) {
+  pending_create_skins_.clear();
+  profile_status_.clear();
+}
+
 void DesktopMenuState::handle(const ui::ResumeGameCommand&) {
 }
 
@@ -129,6 +420,112 @@ void DesktopMenuState::persist_servers() const {
   if (!saved) {
     core::warn("config", saved.error().message);
   }
+}
+
+void DesktopMenuState::load_profiles() {
+  profile_status_.clear();
+  auto loaded = client::load_or_create_local_profile_store(arvane_home_);
+  if (!loaded) {
+    profile_status_ = loaded.error().message;
+    core::warn("identity", loaded.error().message);
+    profile_store_.profiles.clear();
+    return;
+  }
+  profile_store_ = std::move(loaded.value());
+}
+
+void DesktopMenuState::persist_profiles() {
+  auto saved = client::save_local_profile_store(arvane_home_, profile_store_);
+  if (!saved) {
+    profile_status_ = saved.error().message;
+    core::warn("identity", saved.error().message);
+    return;
+  }
+  profile_status_.clear();
+}
+
+client::LocalPlayerIdentity* DesktopMenuState::profile_by_id(std::string_view profile_id) noexcept {
+  for (client::LocalPlayerIdentity& profile : profile_store_.profiles) {
+    if (profile.profile_id.string() == profile_id) {
+      return &profile;
+    }
+  }
+  return nullptr;
+}
+
+const client::LocalPlayerIdentity* DesktopMenuState::profile_by_id(
+    std::string_view profile_id) const noexcept {
+  for (const client::LocalPlayerIdentity& profile : profile_store_.profiles) {
+    if (profile.profile_id.string() == profile_id) {
+      return &profile;
+    }
+  }
+  return nullptr;
+}
+
+ui::LocalProfileSkinEntry DesktopMenuState::skin_entry_from(
+    const client::LocalProfileSkin& skin) const {
+  ui::LocalProfileSkinEntry entry;
+  entry.skin_hash = skin.skin_hash;
+  entry.width = skin.width;
+  entry.height = skin.height;
+  const auto found = skin_textures_.find(skin.skin_hash);
+  if (found != skin_textures_.end()) {
+    entry.skin_texture = found->second;
+  }
+  return entry;
+}
+
+std::vector<ui::LocalProfileSkinEntry> DesktopMenuState::skin_entries_from(
+    const std::vector<client::LocalProfileSkin>& skins) const {
+  std::vector<ui::LocalProfileSkinEntry> entries;
+  entries.reserve(skins.size());
+  for (const client::LocalProfileSkin& skin : skins) {
+    entries.push_back(skin_entry_from(skin));
+  }
+  return entries;
+}
+
+std::vector<client::LocalProfileSkin> DesktopMenuState::current_skin_source(
+    const std::optional<std::string>& profile_id) const {
+  if (!profile_id.has_value()) {
+    return pending_create_skins_;
+  }
+  const auto pending = pending_edit_skins_.find(profile_id.value());
+  if (pending != pending_edit_skins_.end()) {
+    return pending->second;
+  }
+  const client::LocalPlayerIdentity* profile = profile_by_id(profile_id.value());
+  return profile == nullptr ? std::vector<client::LocalProfileSkin>{} : profile->skins;
+}
+
+std::optional<client::LocalProfileSkin> DesktopMenuState::pick_and_import_skin() {
+  profile_status_.clear();
+  std::error_code error;
+  std::filesystem::create_directories(client::local_skins_directory_path(arvane_home_), error);
+  if (error) {
+    profile_status_ = "Failed to create skins directory: " + error.message();
+    return std::nullopt;
+  }
+
+  std::string picker_error;
+  std::optional<std::filesystem::path> selected =
+      open_png_picker(client::local_skins_directory_path(arvane_home_), picker_error);
+  if (!selected.has_value()) {
+    if (!picker_error.empty()) {
+      profile_status_ = picker_error;
+      core::warn("identity", picker_error);
+    }
+    return std::nullopt;
+  }
+
+  auto imported = client::import_local_profile_skin_png(arvane_home_, selected.value());
+  if (!imported) {
+    profile_status_ = imported.error().message;
+    core::warn("identity", imported.error().message);
+    return std::nullopt;
+  }
+  return imported.value();
 }
 
 } // namespace arv::desktop

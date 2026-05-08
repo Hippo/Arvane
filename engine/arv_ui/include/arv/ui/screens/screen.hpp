@@ -22,6 +22,41 @@ struct ServerListEntry {
   std::string address{};
 };
 
+struct PlayerSkinTextureView {
+  bool valid{};
+  u32 page{};
+  u16 atlas_width{};
+  u16 atlas_height{};
+  u16 x{};
+  u16 y{};
+  u16 width{};
+  u16 height{};
+  u16 image_width{};
+  u16 image_height{};
+};
+
+struct LocalProfileSkinEntry {
+  std::string skin_hash{};
+  u32 width{};
+  u32 height{};
+  PlayerSkinTextureView skin_texture{};
+};
+
+struct LocalProfileEntry {
+  std::string profile_id{};
+  std::string display_name{};
+  std::string selected_skin_hash{};
+  PlayerSkinTextureView skin_texture{};
+  bool active{};
+  std::vector<LocalProfileSkinEntry> skins{};
+};
+
+struct PlayerSkinPreviewRequest {
+  std::string element_id{};
+  std::string skin_hash{};
+  f32 yaw_radians{};
+};
+
 struct StartSinglePlayerCommand {
   std::string server_save_name{};
   std::string world_name{};
@@ -52,6 +87,38 @@ struct RemoveServerEntryCommand {
   ServerListEntry server{};
 };
 
+struct SelectLocalProfileCommand {
+  std::string profile_id{};
+};
+
+struct UpdateLocalProfileCommand {
+  std::string profile_id{};
+  std::string display_name{};
+};
+
+struct PickLocalProfileSkinCommand {
+  std::optional<std::string> profile_id{};
+};
+
+struct SetLocalProfileSkinOrderCommand {
+  std::optional<std::string> profile_id{};
+  std::vector<std::string> skin_hashes{};
+};
+
+struct CreateLocalProfileCommand {
+  std::string display_name{};
+};
+
+struct DeleteLocalProfileCommand {
+  std::string profile_id{};
+};
+
+struct DiscardLocalProfileEditCommand {
+  std::string profile_id{};
+};
+
+struct DiscardLocalProfileCreateCommand {};
+
 struct ResumeGameCommand {};
 struct BackToMainMenuCommand {};
 struct QuitGameCommand {};
@@ -63,6 +130,14 @@ using UICommand = std::variant<
     JoinServerCommand,
     SaveServerEntryCommand,
     RemoveServerEntryCommand,
+    SelectLocalProfileCommand,
+    UpdateLocalProfileCommand,
+    PickLocalProfileSkinCommand,
+    SetLocalProfileSkinOrderCommand,
+    CreateLocalProfileCommand,
+    DeleteLocalProfileCommand,
+    DiscardLocalProfileEditCommand,
+    DiscardLocalProfileCreateCommand,
     ResumeGameCommand,
     BackToMainMenuCommand,
     QuitGameCommand>;
@@ -80,6 +155,44 @@ public:
     return {};
   }
   [[nodiscard]] virtual std::vector<ServerListEntry> multiplayer_servers() const {
+    return {};
+  }
+  [[nodiscard]] virtual std::vector<LocalProfileEntry> local_profiles() const {
+    return {};
+  }
+  [[nodiscard]] virtual PlayerSkinTextureView default_player_skin_texture() const {
+    return {};
+  }
+  [[nodiscard]] virtual PlayerSkinTextureView pending_create_profile_skin_texture() const {
+    return {};
+  }
+  [[nodiscard]] virtual std::string pending_create_profile_skin_hash() const {
+    return {};
+  }
+  [[nodiscard]] virtual std::vector<LocalProfileSkinEntry> pending_create_profile_skins() const {
+    return {};
+  }
+  [[nodiscard]] virtual bool has_pending_edit_profile_skins(
+      std::string_view profile_id) const {
+    (void)profile_id;
+    return false;
+  }
+  [[nodiscard]] virtual std::vector<LocalProfileSkinEntry> pending_edit_profile_skins(
+      std::string_view profile_id) const {
+    (void)profile_id;
+    return {};
+  }
+  [[nodiscard]] virtual PlayerSkinTextureView pending_edit_profile_skin_texture(
+      std::string_view profile_id) const {
+    (void)profile_id;
+    return {};
+  }
+  [[nodiscard]] virtual std::string pending_edit_profile_skin_hash(
+      std::string_view profile_id) const {
+    (void)profile_id;
+    return {};
+  }
+  [[nodiscard]] virtual std::string local_profile_status() const {
     return {};
   }
 };
@@ -101,6 +214,8 @@ enum class MenuScreenType : u8 {
   MultiPlayerMenu,
   AddServer,
   EditServer,
+  AccountCreate,
+  AccountEdit,
   SettingsMenu,
   RenderSettings,
   KeyBinds,
@@ -126,6 +241,16 @@ public:
   virtual bool handle_text_input(std::string_view text, UIContext& ctx);
   virtual bool handle_backspace(UIContext& ctx);
   virtual bool handle_submit(UIContext& ctx);
+  virtual bool handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx);
+  virtual bool handle_pointer(
+      Vec2f cursor,
+      Vec2f delta,
+      bool left_pressed,
+      bool left_released,
+      bool left_held,
+      UIContext& ctx);
+  [[nodiscard]] virtual std::optional<PlayerSkinPreviewRequest> player_skin_preview(
+      const UIContext& ctx) const;
 
   [[nodiscard]] virtual bool can_close() const noexcept {
     return true;
@@ -165,6 +290,14 @@ public:
   bool handle_text_input(std::string_view text, UIContext& ctx);
   bool handle_backspace(UIContext& ctx);
   bool handle_submit(UIContext& ctx);
+  bool handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx);
+  bool handle_pointer(
+      Vec2f cursor,
+      Vec2f delta,
+      bool left_pressed,
+      bool left_released,
+      bool left_held,
+      UIContext& ctx);
 
   [[nodiscard]] bool blocks_gameplay_input() const noexcept;
   [[nodiscard]] bool pauses_singleplayer() const noexcept;

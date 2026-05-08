@@ -20,6 +20,18 @@ namespace {
   return {x, y, width, height};
 }
 
+[[nodiscard]] UiRect intersect(UiRect lhs, UiRect rhs) noexcept {
+  const f32 x_min = std::max(lhs.x, rhs.x);
+  const f32 y_min = std::max(lhs.y, rhs.y);
+  const f32 x_max = std::min(lhs.x + lhs.width, rhs.x + rhs.width);
+  const f32 y_max = std::min(lhs.y + lhs.height, rhs.y + rhs.height);
+  return {
+      x_min,
+      y_min,
+      std::max(0.0F, x_max - x_min),
+      std::max(0.0F, y_max - y_min)};
+}
+
 [[nodiscard]] Vec2f apply_min(Vec2f size, UiLayout layout) noexcept {
   return {std::max(size.x, layout.min_width), std::max(size.y, layout.min_height)};
 }
@@ -102,17 +114,27 @@ void validate_document_element(
   }
 }
 
-void append_rect(render::FramePacket& frame, UiRect rect, Vec4f color) {
+void append_rect(render::FramePacket& frame, UiRect rect, Vec4f color, std::optional<UiRect> clip) {
   if (rect.width <= 0.0F || rect.height <= 0.0F || color.w <= 0.0F) {
     return;
   }
-  frame.ui_rects.emplace_back(
+  render::UIRectDrawItem item(
       Vec2f{rect.x, rect.y},
       Vec2f{rect.x + rect.width, rect.y + rect.height},
       color);
+  if (clip.has_value()) {
+    item.clip = true;
+    item.clip_min = {clip->x, clip->y};
+    item.clip_max = {clip->x + clip->width, clip->y + clip->height};
+  }
+  frame.ui_rects.emplace_back(item);
 }
 
-void append_image(render::FramePacket& frame, UiRect rect, const UiImageData& image) {
+void append_image(
+    render::FramePacket& frame,
+    UiRect rect,
+    const UiImageData& image,
+    std::optional<UiRect> clip) {
   if (!image.valid || rect.width <= 0.0F || rect.height <= 0.0F || image.tint.w <= 0.0F) {
     return;
   }
@@ -134,6 +156,11 @@ void append_image(render::FramePacket& frame, UiRect rect, const UiImageData& im
   quad.color = image.tint;
   quad.source = image.source;
   quad.page = image.page;
+  if (clip.has_value()) {
+    quad.clip = true;
+    quad.clip_min = {clip->x, clip->y};
+    quad.clip_max = {clip->x + clip->width, clip->y + clip->height};
+  }
   frame.ui_textured_quads.emplace_back(std::move(quad));
 }
 
@@ -378,13 +405,24 @@ void UiTree::arrange_element(
     UiNodeID id,
     UiRect rect,
     const IUiTextMeasurer* text_measurer) {
+  arrange_element(id, rect, text_measurer, std::nullopt);
+}
+
+void UiTree::arrange_element(
+    UiNodeID id,
+    UiRect rect,
+    const IUiTextMeasurer* text_measurer,
+    std::optional<UiRect> inherited_clip) {
   (void)text_measurer;
   UiElement* current = element(id);
   if (current == nullptr || !current->visible) {
     return;
   }
   current->rect = rect;
-  current->clip = rect;
+  current->clip_active = inherited_clip.has_value();
+  current->clip = inherited_clip.has_value() ? intersect(rect, *inherited_clip) : rect;
+  const std::optional<UiRect> child_clip =
+      current->clip_children ? std::optional<UiRect>{current->clip} : inherited_clip;
   const UiRect content = inset(rect, current->layout.padding);
 
   if (current->type == UiElementType::Root || current->type == UiElementType::Panel ||
@@ -418,7 +456,7 @@ void UiTree::arrange_element(
         child_rect.x = content.x + (content.width - child_rect.width) * 0.5F + child_element->layout.offset.x;
         child_rect.y = content.y + (content.height - child_rect.height) * 0.5F + child_element->layout.offset.y;
       }
-      arrange_element(child, child_rect, text_measurer);
+      arrange_element(child, child_rect, text_measurer, child_clip);
     }
   } else if (current->type == UiElementType::VerticalStack) {
     f32 y = content.y;
@@ -427,7 +465,7 @@ void UiTree::arrange_element(
       if (child_element == nullptr) {
         continue;
       }
-      arrange_element(child, {content.x, y, child_element->rect.width, child_element->rect.height}, text_measurer);
+      arrange_element(child, {content.x, y, child_element->rect.width, child_element->rect.height}, text_measurer, child_clip);
       y += child_element->rect.height + current->layout.spacing;
     }
   } else if (current->type == UiElementType::HorizontalStack) {
@@ -437,7 +475,7 @@ void UiTree::arrange_element(
       if (child_element == nullptr) {
         continue;
       }
-      arrange_element(child, {x, content.y, child_element->rect.width, child_element->rect.height}, text_measurer);
+      arrange_element(child, {x, content.y, child_element->rect.width, child_element->rect.height}, text_measurer, child_clip);
       x += child_element->rect.width + current->layout.spacing;
     }
   } else if (current->type == UiElementType::Grid) {
@@ -450,7 +488,7 @@ void UiTree::arrange_element(
       if (child_element == nullptr) {
         continue;
       }
-      arrange_element(child, {x, y, child_element->rect.width, child_element->rect.height}, text_measurer);
+      arrange_element(child, {x, y, child_element->rect.width, child_element->rect.height}, text_measurer, child_clip);
       ++column;
       if (column >= columns) {
         column = 0;
@@ -465,7 +503,13 @@ void UiTree::arrange_element(
 
 std::optional<UiNodeID> UiTree::hit_test_recursive(UiNodeID id, Vec2f point) const {
   const UiElement* current = element(id);
-  if (current == nullptr || !current->visible || !current->enabled || !contains(current->clip, point)) {
+  if (current == nullptr || !current->visible || !current->enabled) {
+    return std::nullopt;
+  }
+  if (current->clip_active && !contains(current->clip, point)) {
+    return std::nullopt;
+  }
+  if (current->type != UiElementType::Root && !contains(current->rect, point)) {
     return std::nullopt;
   }
   for (auto iter = current->children.rbegin(); iter != current->children.rend(); ++iter) {
@@ -512,16 +556,22 @@ void append_ui_draw_commands(
     if (element.type == UiElementType::Panel || element.type == UiElementType::HorizontalStack ||
         element.type == UiElementType::VerticalStack || element.type == UiElementType::Button ||
         element.type == UiElementType::ItemSlot) {
-      append_rect(frame, element.rect, element.style.background);
+      const std::optional<UiRect> clip =
+          element.clip_active ? std::optional<UiRect>{element.clip} : std::nullopt;
+      append_rect(frame, element.rect, element.style.background, clip);
       if (element.selected) {
-        append_rect(frame, {element.rect.x, element.rect.y, element.rect.width, 3.0F}, element.style.accent);
-        append_rect(frame, {element.rect.x, element.rect.y + element.rect.height - 3.0F, element.rect.width, 3.0F}, element.style.accent);
-        append_rect(frame, {element.rect.x, element.rect.y, 3.0F, element.rect.height}, element.style.accent);
-        append_rect(frame, {element.rect.x + element.rect.width - 3.0F, element.rect.y, 3.0F, element.rect.height}, element.style.accent);
+        append_rect(frame, {element.rect.x, element.rect.y, element.rect.width, 3.0F}, element.style.accent, clip);
+        append_rect(frame, {element.rect.x, element.rect.y + element.rect.height - 3.0F, element.rect.width, 3.0F}, element.style.accent, clip);
+        append_rect(frame, {element.rect.x, element.rect.y, 3.0F, element.rect.height}, element.style.accent, clip);
+        append_rect(frame, {element.rect.x + element.rect.width - 3.0F, element.rect.y, 3.0F, element.rect.height}, element.style.accent, clip);
       }
     }
     if (element.type == UiElementType::Image) {
-      append_image(frame, element.rect, element.image);
+      append_image(
+          frame,
+          element.rect,
+          element.image,
+          element.clip_active ? std::optional<UiRect>{element.clip} : std::nullopt);
     }
     if (element.type == UiElementType::Text && !element.text.empty()) {
       auto layout = fonts.layout_text(
@@ -533,13 +583,19 @@ void append_ui_draw_commands(
         continue;
       }
       for (const asset::GlyphQuad& quad : layout.value().quads) {
-        frame.ui_glyphs.emplace_back(
+        render::UIGlyphDrawItem glyph(
             quad.min,
             quad.max,
             quad.uv_min,
             quad.uv_max,
             quad.color,
             quad.page);
+        if (element.clip_active) {
+          glyph.clip = true;
+          glyph.clip_min = {element.clip.x, element.clip.y};
+          glyph.clip_max = {element.clip.x + element.clip.width, element.clip.y + element.clip.height};
+        }
+        frame.ui_glyphs.emplace_back(glyph);
       }
     }
   }

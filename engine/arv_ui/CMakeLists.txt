@@ -1,5 +1,6 @@
 set(ARV_UI_HEADERS
   include/arv/ui/core/ui.hpp
+  include/arv/ui/screens/account.hpp
   include/arv/ui/screens/main_menu.hpp
   include/arv/ui/screens/menu_screens.hpp
   include/arv/ui/screens/multiplayer.hpp
@@ -20,6 +21,7 @@ set(ARV_UI_HEADERS
 
 add_library(arv_ui STATIC
   src/core/ui.cpp
+  src/screens/account.cpp
   src/screens/main_menu.cpp
   src/screens/multiplayer.cpp
   src/screens/pause_menu.cpp

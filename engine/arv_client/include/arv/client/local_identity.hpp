@@ -53,6 +53,10 @@ struct LocalProfileStore {
     const std::filesystem::path& arvane_home,
     const LocalProfileStore& store);
 
+[[nodiscard]] Expected<LocalProfileSkin, LocalIdentityError> import_local_profile_skin_png(
+    const std::filesystem::path& arvane_home,
+    const std::filesystem::path& source_png);
+
 [[nodiscard]] const LocalProfileSkin* best_local_skin_for_max_resolution(
     const LocalPlayerIdentity& profile,
     u16 max_resolution) noexcept;
@@ -65,6 +69,8 @@ struct LocalProfileStore {
 [[nodiscard]] std::filesystem::path local_skin_path(
     const std::filesystem::path& arvane_home,
     const LocalProfileSkin& skin);
+[[nodiscard]] std::filesystem::path local_skins_directory_path(
+    const std::filesystem::path& arvane_home);
 [[nodiscard]] std::filesystem::path cached_skin_path(
     const std::filesystem::path& arvane_home,
     std::string_view skin_hash);

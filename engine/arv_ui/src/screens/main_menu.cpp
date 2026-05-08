@@ -1,5 +1,6 @@
 #include "arv/ui/screens/main_menu.hpp"
 
+#include "arv/ui/screens/account.hpp"
 #include "arv/ui/screens/multiplayer.hpp"
 #include "arv/ui/screens/settings.hpp"
 #include "arv/ui/screens/singleplayer.hpp"
@@ -28,11 +29,15 @@ public:
     add_button(ctx.tree, stack, "menu.main.multi_player", "Multi Player", "main.multi_player");
     add_button(ctx.tree, stack, "menu.main.settings", "Settings", "main.settings");
     add_button(ctx.tree, stack, "menu.main.quit", "Quit", "main.quit");
+    build_account_manager_dropdown(ctx, account_state_);
   }
 
   bool handle_action(const UiAction& action, UIContext& ctx) override {
     if (ctx.screens == nullptr) {
       return false;
+    }
+    if (handle_account_manager_action(action, ctx, account_state_)) {
+      return true;
     }
     if (action.action_id == "main.single_player") {
       ctx.screens->push(make_single_player_menu_screen());
@@ -53,6 +58,10 @@ public:
     return false;
   }
 
+  bool handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx) override {
+    return handle_account_manager_scroll(cursor, wheel_y, ctx, account_state_);
+  }
+
   [[nodiscard]] bool can_close() const noexcept override {
     return false;
   }
@@ -60,6 +69,9 @@ public:
   [[nodiscard]] bool pauses_singleplayer() const noexcept override {
     return true;
   }
+
+private:
+  AccountManagerDropdownState account_state_{};
 };
 
 } // namespace

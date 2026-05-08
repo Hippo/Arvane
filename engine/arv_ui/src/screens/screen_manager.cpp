@@ -35,6 +35,35 @@ bool UIScreen::handle_submit(UIContext& ctx) {
   return false;
 }
 
+bool UIScreen::handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx) {
+  (void)cursor;
+  (void)wheel_y;
+  (void)ctx;
+  return false;
+}
+
+bool UIScreen::handle_pointer(
+    Vec2f cursor,
+    Vec2f delta,
+    bool left_pressed,
+    bool left_released,
+    bool left_held,
+    UIContext& ctx) {
+  (void)cursor;
+  (void)delta;
+  (void)left_pressed;
+  (void)left_released;
+  (void)left_held;
+  (void)ctx;
+  return false;
+}
+
+std::optional<PlayerSkinPreviewRequest> UIScreen::player_skin_preview(
+    const UIContext& ctx) const {
+  (void)ctx;
+  return std::nullopt;
+}
+
 void UIScreenManager::push(std::unique_ptr<UIScreen> screen) {
   if (!screen) {
     return;
@@ -120,6 +149,31 @@ bool UIScreenManager::handle_submit(UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
   return screen != nullptr && screen->handle_submit(ctx);
+}
+
+bool UIScreenManager::handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx) {
+  ctx.screens = this;
+  UIScreen* screen = current();
+  return screen != nullptr && screen->handle_scroll(cursor, wheel_y, ctx);
+}
+
+bool UIScreenManager::handle_pointer(
+    Vec2f cursor,
+    Vec2f delta,
+    bool left_pressed,
+    bool left_released,
+    bool left_held,
+    UIContext& ctx) {
+  ctx.screens = this;
+  UIScreen* screen = current();
+  return screen != nullptr &&
+         screen->handle_pointer(
+             cursor,
+             delta,
+             left_pressed,
+             left_released,
+             left_held,
+             ctx);
 }
 
 bool UIScreenManager::blocks_gameplay_input() const noexcept {

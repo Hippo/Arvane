@@ -1,11 +1,14 @@
 #include "arv/client/local_identity.hpp"
 
+#include "arv/asset/resource.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/crypto/hex.hpp"
 
 #include <algorithm>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <span>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -35,6 +38,10 @@ inline constexpr std::string_view OldPrivateKeyFileName = "local_private_key.bin
 
 [[nodiscard]] std::filesystem::path keys_root(const std::filesystem::path& home) {
   return home / std::string{KeysDirectoryName};
+}
+
+[[nodiscard]] std::filesystem::path skins_root(const std::filesystem::path& home) {
+  return home / std::string{SkinsDirectoryName};
 }
 
 [[nodiscard]] std::filesystem::path old_identity_root(const std::filesystem::path& home) {
@@ -100,6 +107,52 @@ inline constexpr std::string_view OldPrivateKeyFileName = "local_private_key.bin
   if (!output) {
     return Expected<void, LocalIdentityError>::failure(
         LocalIdentityError{"failed to write local private key bytes"});
+  }
+  return Expected<void, LocalIdentityError>::success();
+}
+
+[[nodiscard]] Expected<std::vector<u8>, LocalIdentityError> read_binary_file(
+    const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    return Expected<std::vector<u8>, LocalIdentityError>::failure(
+        LocalIdentityError{"failed to open PNG file: " + path.string()});
+  }
+  return Expected<std::vector<u8>, LocalIdentityError>::success(
+      std::vector<u8>{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}});
+}
+
+[[nodiscard]] Expected<void, LocalIdentityError> write_binary_file_atomically(
+    const std::filesystem::path& path,
+    std::span<const u8> bytes) {
+  std::error_code error;
+  std::filesystem::create_directories(path.parent_path(), error);
+  if (error) {
+    return Expected<void, LocalIdentityError>::failure(
+        LocalIdentityError{"failed to create directory: " + error.message()});
+  }
+
+  const std::filesystem::path temp_path = path.string() + ".tmp";
+  {
+    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+      return Expected<void, LocalIdentityError>::failure(
+          LocalIdentityError{"failed to write temporary skin file"});
+    }
+    output.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+    if (!output) {
+      return Expected<void, LocalIdentityError>::failure(
+          LocalIdentityError{"failed to write skin PNG bytes"});
+    }
+  }
+
+  std::filesystem::rename(temp_path, path, error);
+  if (error) {
+    std::filesystem::remove(temp_path, error);
+    return Expected<void, LocalIdentityError>::failure(
+        LocalIdentityError{"failed to save skin PNG: " + error.message()});
   }
   return Expected<void, LocalIdentityError>::success();
 }
@@ -347,7 +400,11 @@ std::filesystem::path local_private_key_path(
 std::filesystem::path local_skin_path(
     const std::filesystem::path& arvane_home,
     const LocalProfileSkin& skin) {
-  return normalize_home_path(arvane_home) / std::string{SkinsDirectoryName} / skin.file;
+  return skins_root(normalize_home_path(arvane_home)) / skin.file;
+}
+
+std::filesystem::path local_skins_directory_path(const std::filesystem::path& arvane_home) {
+  return skins_root(normalize_home_path(arvane_home));
 }
 
 std::filesystem::path cached_skin_path(
@@ -381,7 +438,7 @@ Expected<void, LocalIdentityError> save_local_profile_store(
     return Expected<void, LocalIdentityError>::failure(
         LocalIdentityError{"failed to create key directory: " + error.message()});
   }
-  std::filesystem::create_directories(home / std::string{SkinsDirectoryName}, error);
+  std::filesystem::create_directories(skins_root(home), error);
   if (error) {
     return Expected<void, LocalIdentityError>::failure(
         LocalIdentityError{"failed to create skins directory: " + error.message()});
@@ -423,13 +480,67 @@ Expected<void, LocalIdentityError> save_local_profile_store(
   return Expected<void, LocalIdentityError>::success();
 }
 
+Expected<LocalProfileSkin, LocalIdentityError> import_local_profile_skin_png(
+    const std::filesystem::path& arvane_home,
+    const std::filesystem::path& source_png) {
+  auto bytes = read_binary_file(source_png);
+  if (!bytes) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(bytes.error());
+  }
+  if (bytes.value().empty() || bytes.value().size() > protocol::MaxSkinImagePayloadBytes) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(
+        LocalIdentityError{"skin PNG is empty or exceeds the maximum skin size"});
+  }
+
+  auto decoded = asset::decode_png_image_bytes(
+      bytes.value(),
+      {"arvane:texture/player_skin/import"});
+  if (!decoded) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(
+        LocalIdentityError{"failed to decode skin PNG: " + decoded.error().message});
+  }
+  if (decoded.value().width > std::numeric_limits<u16>::max() ||
+      decoded.value().height > std::numeric_limits<u16>::max()) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(
+        LocalIdentityError{"skin PNG dimensions are too large"});
+  }
+
+  LocalProfileSkin skin;
+  skin.skin_hash = protocol::skin_hash_for_bytes(bytes.value());
+  skin.format = protocol::SkinImageFormat::Png;
+  skin.width = static_cast<u16>(decoded.value().width);
+  skin.height = static_cast<u16>(decoded.value().height);
+  skin.file = skin.skin_hash + ".png";
+
+  const std::filesystem::path destination =
+      skins_root(normalize_home_path(arvane_home)) / skin.file;
+  std::error_code error;
+  if (!std::filesystem::exists(destination, error)) {
+    auto write_result = write_binary_file_atomically(destination, bytes.value());
+    if (!write_result) {
+      return Expected<LocalProfileSkin, LocalIdentityError>::failure(write_result.error());
+    }
+  }
+  return Expected<LocalProfileSkin, LocalIdentityError>::success(std::move(skin));
+}
+
 Expected<LocalProfileStore, LocalIdentityError> load_or_create_local_profile_store(
     const std::filesystem::path& arvane_home,
     std::string display_name) {
   const std::filesystem::path home = normalize_home_path(arvane_home);
   std::error_code error;
   if (std::filesystem::exists(local_profiles_json_path(home), error)) {
-    return read_profile_store(home);
+    auto store = read_profile_store(home);
+    if (!store || !store.value().profiles.empty()) {
+      return store;
+    }
+    store.value().profiles.push_back(make_persistent_identity(std::move(display_name)));
+    store.value().profiles.front().arvane_home = home;
+    auto save_result = save_local_profile_store(home, store.value());
+    if (!save_result) {
+      return Expected<LocalProfileStore, LocalIdentityError>::failure(save_result.error());
+    }
+    return store;
   }
   error.clear();
   if (std::filesystem::exists(old_identity_json_path(home), error) &&

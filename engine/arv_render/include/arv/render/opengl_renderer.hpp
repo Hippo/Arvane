@@ -11,6 +11,7 @@
 #include <deque>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::render {
@@ -28,6 +29,13 @@ public:
   [[nodiscard]] std::optional<TextureRegionHandle> upload_player_skin_texture(
       std::string skin_hash,
       TextureUploadData upload);
+  [[nodiscard]] std::optional<AtlasRegion> resolve_player_skin_texture(
+      TextureRegionHandle handle) const;
+  [[nodiscard]] const ResidentSkinTexture* resident_player_skin_texture(
+      std::string_view skin_hash) const noexcept;
+  [[nodiscard]] bool mark_player_skin_texture_used(TextureRegionHandle handle, bool pinned);
+  [[nodiscard]] u16 player_skin_atlas_page_width() const noexcept;
+  [[nodiscard]] u16 player_skin_atlas_page_height() const noexcept;
   void set_entity_model(EntityModelAsset model);
   void clear_entity_models();
 
@@ -181,6 +189,12 @@ private:
   void draw_sky();
   void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
   void draw_entities();
+  void draw_entities_for(
+      const std::vector<EntityDrawItem>& entities,
+      const RenderView& view,
+      const SkyUniforms& sky,
+      f32 aspect);
+  void draw_entity_previews();
   void draw_ui();
   void draw_ui_quads();
   void ensure_ui_buffers();
@@ -297,6 +311,7 @@ private:
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_positions_{};
   std::vector<UIVertex> ui_vertices_;
   std::vector<u32> ui_indices_;
+  std::vector<UiDrawRun> ui_draw_runs_;
 };
 
 } // namespace arv::render

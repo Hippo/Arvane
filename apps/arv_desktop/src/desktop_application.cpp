@@ -182,6 +182,71 @@ void append_command_result_to_chat(
   return std::move(image.value());
 }
 
+[[nodiscard]] std::optional<asset::Image> load_valid_local_profile_skin_render_image(
+    const std::filesystem::path& arvane_home,
+    const client::LocalProfileSkin& skin) {
+  if (skin.skin_hash.empty() || !protocol::is_valid_skin_hash(skin.skin_hash)) {
+    return std::nullopt;
+  }
+  std::optional<std::vector<u8>> bytes =
+      read_binary_file(client::local_skin_path(arvane_home, skin));
+  if (!bytes.has_value() ||
+      protocol::skin_hash_for_bytes(*bytes) != skin.skin_hash) {
+    return std::nullopt;
+  }
+
+  auto image = asset::decode_png_image_bytes(
+      *bytes,
+      {"arvane:texture/player_skin/" + skin.skin_hash});
+  if (!image || image.value().width != skin.width ||
+      image.value().height != skin.height ||
+      image.value().pixels.size() !=
+          static_cast<usize>(skin.width) * static_cast<usize>(skin.height) * 4U) {
+    return std::nullopt;
+  }
+  return std::move(image.value());
+}
+
+inline constexpr std::string_view DefaultMenuPlayerSkinKey = "arvane:default_skin/default";
+
+[[nodiscard]] ui::PlayerSkinTextureView player_skin_texture_view(
+    const render::OpenGLRenderer& renderer,
+    const render::ResidentSkinTexture& resident,
+    const render::AtlasRegion& region) noexcept {
+  ui::PlayerSkinTextureView view;
+  view.valid = true;
+  view.page = region.page_index;
+  view.atlas_width = renderer.player_skin_atlas_page_width();
+  view.atlas_height = renderer.player_skin_atlas_page_height();
+  view.x = region.x;
+  view.y = region.y;
+  view.width = region.width;
+  view.height = region.height;
+  view.image_width = resident.width;
+  view.image_height = resident.height;
+  return view;
+}
+
+[[nodiscard]] render::RenderView menu_player_preview_view() noexcept {
+  render::RenderView view;
+  view.position = {0.0F, 1.04F, -4.15F};
+  view.forward = normalize_or_zero(Vec3f{0.0F, -0.015F, 1.0F});
+  view.right = normalize_or_zero(cross(Vec3f{0.0F, 1.0F, 0.0F}, view.forward));
+  view.up = normalize_or_zero(cross(view.forward, view.right));
+  view.near_plane = 0.05F;
+  view.far_plane = 16.0F;
+  view.fov_y_degrees = 30.0F;
+  return view;
+}
+
+[[nodiscard]] render::SkyUniforms menu_player_preview_sky() noexcept {
+  render::SkyUniforms sky;
+  sky.daylight_color = {1.0F, 1.0F, 1.0F};
+  sky.daylight_strength = 1.0F;
+  sky.ambient_color = {1.0F, 1.0F, 1.0F};
+  return sky;
+}
+
 class DesktopFrameLoop {
 public:
   DesktopFrameLoop(
@@ -273,6 +338,7 @@ public:
       if (has_active_session) {
         refresh_player_skin_render_assets(*active_session);
       }
+      refresh_menu_profile_render_assets();
 
       render::FramePacket frame;
       usize visible_chunk_count = build_world_frame(
@@ -430,6 +496,19 @@ private:
     bool inventory_changed_by_ui = false;
     if (!debug_menu_.open && menu_screen_open) {
       (void)route_screen_mouse_input(screen_manager_, menu_context, platform_input);
+      (void)screen_manager_.handle_pointer(
+          {platform_input.cursor_x, platform_input.cursor_y},
+          {platform_input.mouse_delta_x, platform_input.mouse_delta_y},
+          platform_input.mouse_left_pressed,
+          platform_input.mouse_left_released,
+          platform_input.mouse_left_held,
+          menu_context);
+      if (platform_input.mouse_wheel_y != 0.0F) {
+        (void)screen_manager_.handle_scroll(
+            {platform_input.cursor_x, platform_input.cursor_y},
+            platform_input.mouse_wheel_y,
+            menu_context);
+      }
       if (!platform_input.text_input.empty()) {
         (void)screen_manager_.handle_text_input(platform_input.text_input, menu_context);
       }
@@ -1006,6 +1085,80 @@ private:
     }
   }
 
+  void refresh_menu_profile_render_assets() {
+    HashMap<std::string, asset::Image> new_images;
+
+    if (player_skin_regions_.find(std::string{DefaultMenuPlayerSkinKey}) ==
+        player_skin_regions_.end()) {
+      auto texture = resources_.load_texture({"arvane:texture/default_skin/default"});
+      if (texture) {
+        const asset::TextureResource* resource = resources_.texture(texture.value());
+        if (resource != nullptr && !resource->image.empty()) {
+          new_images[std::string{DefaultMenuPlayerSkinKey}] = resource->image;
+        }
+      }
+    }
+
+    const client::LocalProfileStore& store = menu_state_.local_profile_store();
+    const auto queue_skin = [&](const client::LocalProfileSkin& skin) {
+      if (skin.skin_hash.empty() ||
+          player_skin_regions_.find(skin.skin_hash) != player_skin_regions_.end() ||
+          new_images.find(skin.skin_hash) != new_images.end()) {
+        return;
+      }
+      std::optional<asset::Image> image =
+          load_valid_local_profile_skin_render_image(
+              config_.paths.arvane_home_path(),
+              skin);
+      if (image.has_value()) {
+        new_images[skin.skin_hash] = std::move(image.value());
+      }
+    };
+    for (const client::LocalPlayerIdentity& profile : store.profiles) {
+      for (const client::LocalProfileSkin& skin : profile.skins) {
+        queue_skin(skin);
+      }
+    }
+    for (const client::LocalProfileSkin& skin : menu_state_.pending_create_skins()) {
+      queue_skin(skin);
+    }
+    for (const auto& [profile_id, skins] : menu_state_.pending_edit_skins()) {
+      (void)profile_id;
+      for (const client::LocalProfileSkin& skin : skins) {
+        queue_skin(skin);
+      }
+    }
+
+    for (const auto& [skin_hash, image] : new_images) {
+      std::optional<render::TextureRegionHandle> handle =
+          renderer_.upload_player_skin_texture(skin_hash, texture_upload_from_image(image));
+      if (handle.has_value()) {
+        player_skin_regions_[skin_hash] = handle.value();
+      }
+    }
+
+    HashMap<std::string, ui::PlayerSkinTextureView> texture_views;
+    ui::PlayerSkinTextureView default_texture;
+    for (const auto& [skin_hash, handle] : player_skin_regions_) {
+      const render::ResidentSkinTexture* resident =
+          renderer_.resident_player_skin_texture(skin_hash);
+      const std::optional<render::AtlasRegion> region =
+          renderer_.resolve_player_skin_texture(handle);
+      if (resident == nullptr || !region.has_value()) {
+        continue;
+      }
+      (void)renderer_.mark_player_skin_texture_used(handle, true);
+      ui::PlayerSkinTextureView view =
+          player_skin_texture_view(renderer_, *resident, region.value());
+      if (skin_hash == DefaultMenuPlayerSkinKey) {
+        default_texture = view;
+      } else {
+        texture_views[skin_hash] = view;
+      }
+    }
+    menu_state_.set_player_skin_texture_views(std::move(texture_views), default_texture);
+  }
+
   [[nodiscard]] usize build_world_frame(
       render::FramePacket& frame,
       DesktopGameSession* active_session,
@@ -1070,6 +1223,56 @@ private:
     }
   }
 
+  void append_menu_player_skin_preview(
+      render::FramePacket& frame,
+      const ui::UIContext& menu_context) {
+    const ui::UIScreen* screen = screen_manager_.current();
+    if (screen == nullptr ||
+        assets_.entity_render_assets.player_skin_model.value == 0U) {
+      return;
+    }
+    std::optional<ui::PlayerSkinPreviewRequest> request =
+        screen->player_skin_preview(menu_context);
+    if (!request.has_value()) {
+      return;
+    }
+    const ui::UiElement* preview_element =
+        ui_tree_.find_by_stable_id(request->element_id);
+    if (preview_element == nullptr ||
+        preview_element->rect.width <= 0.0F ||
+        preview_element->rect.height <= 0.0F) {
+      return;
+    }
+
+    std::string skin_hash = request->skin_hash;
+    if (skin_hash.empty()) {
+      skin_hash = std::string{DefaultMenuPlayerSkinKey};
+    }
+    auto skin_region = player_skin_regions_.find(skin_hash);
+    if (skin_region == player_skin_regions_.end() || !skin_region->second.valid()) {
+      skin_region = player_skin_regions_.find(std::string{DefaultMenuPlayerSkinKey});
+    }
+    if (skin_region == player_skin_regions_.end() || !skin_region->second.valid()) {
+      return;
+    }
+
+    render::EntityPreviewDrawItem preview;
+    preview.viewport_min = {preview_element->rect.x, preview_element->rect.y};
+    preview.viewport_size = {preview_element->rect.width, preview_element->rect.height};
+    preview.view = menu_player_preview_view();
+    preview.sky = menu_player_preview_sky();
+    preview.clear_color = {0.018F, 0.023F, 0.030F, 1.0F};
+
+    render::EntityDrawItem player;
+    player.model_id = assets_.entity_render_assets.player_skin_model;
+    player.position = {0.0F, -0.02F, 0.0F};
+    player.rotation = model_forward_yaw_rotation(request->yaw_radians + PiRadians);
+    player.scale = 1.0F;
+    player.player_skin_region = skin_region->second;
+    preview.entities.push_back(std::move(player));
+    frame.entity_previews.push_back(std::move(preview));
+  }
+
   void build_ui(
       render::FramePacket& frame,
       const platform::InputSnapshot& platform_input,
@@ -1101,6 +1304,7 @@ private:
             static_cast<f32>(framebuffer_.height),
         },
         &ui_text_measurer_);
+    append_menu_player_skin_preview(frame, menu_context);
     ui::append_ui_draw_commands(
         ui_tree_,
         assets_.font_system,
@@ -1421,7 +1625,10 @@ int DesktopApplication::run(int argc, char** argv) {
           thread_budget,
       }};
 
-  DesktopMenuState menu_state{config.paths.saves_path(), config.paths.server_list_file};
+  DesktopMenuState menu_state{
+      config.paths.saves_path(),
+      config.paths.server_list_file,
+      config.paths.arvane_home_path()};
   ui::UIScreenManager screen_manager;
   screen_manager.push(ui::make_main_menu_screen());
 
