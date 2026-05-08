@@ -203,6 +203,7 @@ inline constexpr std::string_view OldPrivateKeyFileName = "local_private_key.bin
   skin.width = node.at("width").get<u16>();
   skin.height = node.at("height").get<u16>();
   skin.file = node.at("file").get<std::string>();
+  skin.slim_model = node.value("slim_model", false);
   if (!safe_relative_file_name(skin.file)) {
     return Expected<LocalProfileSkin, LocalIdentityError>::failure(
         LocalIdentityError{"profile skin file must be a safe relative file name"});
@@ -217,6 +218,7 @@ inline constexpr std::string_view OldPrivateKeyFileName = "local_private_key.bin
       {"width", skin.width},
       {"height", skin.height},
       {"file", skin.file},
+      {"slim_model", skin.slim_model},
   };
 }
 

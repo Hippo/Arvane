@@ -198,17 +198,27 @@ void populate_world_frame_draw_items(
         mirror.owning_player.has_value()
             ? session.client->profile_info_for_player(mirror.owning_player.value())
             : nullptr;
+    const bool slim_player = profile != nullptr && profile->skin.slim_model;
+    if (slim_player && entity_render_assets.player_slim_model.value != 0U) {
+      model_id = entity_render_assets.player_slim_model;
+    }
     bool using_first_person_skin = false;
     render::TextureRegionHandle player_skin_region;
     if (profile != nullptr && !profile->skin.skin_hash.empty()) {
       if (const auto region = player_skin_regions.find(profile->skin.skin_hash);
           region != player_skin_regions.end() && region->second.valid()) {
         player_skin_region = region->second;
-        if (entity_render_assets.player_skin_model.value != 0U) {
+        if (slim_player && entity_render_assets.player_slim_skin_model.value != 0U) {
+          model_id = entity_render_assets.player_slim_skin_model;
+        } else if (entity_render_assets.player_skin_model.value != 0U) {
           model_id = entity_render_assets.player_skin_model;
         }
-        if (is_local_player &&
-            entity_render_assets.first_person_player_skin_model.value != 0U) {
+        if (is_local_player && slim_player &&
+            entity_render_assets.first_person_player_slim_skin_model.value != 0U) {
+          model_id = entity_render_assets.first_person_player_slim_skin_model;
+          using_first_person_skin = true;
+        } else if (is_local_player &&
+                   entity_render_assets.first_person_player_skin_model.value != 0U) {
           model_id = entity_render_assets.first_person_player_skin_model;
           using_first_person_skin = true;
         }
@@ -216,7 +226,12 @@ void populate_world_frame_draw_items(
     }
     if (is_local_player && entity_render_assets.first_person_player_model.value != 0U) {
       if (!using_first_person_skin) {
-        model_id = entity_render_assets.first_person_player_model;
+        if (slim_player &&
+            entity_render_assets.first_person_player_slim_model.value != 0U) {
+          model_id = entity_render_assets.first_person_player_slim_model;
+        } else {
+          model_id = entity_render_assets.first_person_player_model;
+        }
       }
     }
     Vec3f position =

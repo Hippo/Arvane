@@ -137,15 +137,18 @@ Player save/profile JSON may contain:
 
 ```json
 {
-  "selected_skin_hash": "0x..."
+  "selected_skin_hash": "0x...",
+  "selected_skin_slim_model": false
 }
 ```
 
 An empty string means no custom skin. The hash points to
 `player_assets/skins/<selected_skin_hash>.png`. The hash is lowercase
 `0x`-prefixed hex and is computed from the original accepted PNG bytes.
-The filename is always derived from this hash; profile ids, display names,
-client filenames, and packet-provided paths are never used as skin asset paths.
+`selected_skin_slim_model` selects the slim player geometry for that profile and
+does not affect the stored PNG bytes or hash. The filename is always derived
+from this hash; profile ids, display names, client filenames, and
+packet-provided paths are never used as skin asset paths.
 Future save maintenance should garbage-collect unreferenced skin files according
 to server policy.
 

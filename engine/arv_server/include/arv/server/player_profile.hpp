@@ -39,6 +39,7 @@ struct PlayerProfile {
   Vec3f spawn_position{8.0F, 20.0F, -20.0F};
   std::string game_mode_id{std::string{player::SurvivalGameModeID}};
   std::string selected_skin_hash{};
+  bool selected_skin_slim_model{};
   i32 permission_level{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
   bool dirty{};

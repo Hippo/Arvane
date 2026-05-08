@@ -329,6 +329,8 @@ void append_command_result_to_chat(
 }
 
 inline constexpr std::string_view DefaultMenuPlayerSkinKey = "arvane:default_skin/default";
+inline constexpr std::string_view DefaultMenuPlayerSlimSkinKey =
+    "arvane:default_skin/default_slim";
 
 [[nodiscard]] ui::PlayerSkinTextureView player_skin_texture_view(
     const render::OpenGLRenderer& renderer,
@@ -1225,16 +1227,24 @@ private:
   void refresh_menu_profile_render_assets() {
     HashMap<std::string, asset::Image> new_images;
 
-    if (player_skin_regions_.find(std::string{DefaultMenuPlayerSkinKey}) ==
-        player_skin_regions_.end()) {
-      auto texture = resources_.load_texture({"arvane:texture/default_skin/default"});
+    const auto queue_default_skin =
+        [&](std::string_view key, std::string_view texture_asset) {
+      if (player_skin_regions_.find(std::string{key}) != player_skin_regions_.end() ||
+          new_images.find(std::string{key}) != new_images.end()) {
+        return;
+      }
+      auto texture = resources_.load_texture({std::string{texture_asset}});
       if (texture) {
         const asset::TextureResource* resource = resources_.texture(texture.value());
         if (resource != nullptr && !resource->image.empty()) {
-          new_images[std::string{DefaultMenuPlayerSkinKey}] = resource->image;
+          new_images[std::string{key}] = resource->image;
         }
       }
-    }
+    };
+    queue_default_skin(DefaultMenuPlayerSkinKey, "arvane:texture/default_skin/default");
+    queue_default_skin(
+        DefaultMenuPlayerSlimSkinKey,
+        "arvane:texture/default_skin/default_slim");
 
     const client::LocalProfileStore& store = menu_state_.local_profile_store();
     const auto queue_skin = [&](const client::LocalProfileSkin& skin) {
@@ -1292,6 +1302,8 @@ private:
           player_skin_texture_view(renderer_, *resident, region.value());
       if (skin_hash == DefaultMenuPlayerSkinKey) {
         default_texture = view;
+      } else if (skin_hash == DefaultMenuPlayerSlimSkinKey) {
+        continue;
       } else {
         texture_views[skin_hash] = view;
       }
@@ -1367,13 +1379,20 @@ private:
       render::FramePacket& frame,
       const ui::UIContext& menu_context) {
     const ui::UIScreen* screen = screen_manager_.current();
-    if (screen == nullptr ||
-        assets_.entity_render_assets.player_skin_model.value == 0U) {
+    if (screen == nullptr) {
       return;
     }
     std::optional<ui::PlayerSkinPreviewRequest> request =
         screen->player_skin_preview(menu_context);
     if (!request.has_value()) {
+      return;
+    }
+    const render::EntityModelID preview_model =
+        request->slim_model &&
+                assets_.entity_render_assets.player_slim_skin_model.value != 0U
+            ? assets_.entity_render_assets.player_slim_skin_model
+            : assets_.entity_render_assets.player_skin_model;
+    if (preview_model.value == 0U) {
       return;
     }
     const ui::UiElement* preview_element =
@@ -1385,10 +1404,16 @@ private:
     }
 
     std::string skin_hash = request->skin_hash;
+    const std::string default_skin_hash =
+        request->slim_model ? std::string{DefaultMenuPlayerSlimSkinKey}
+                            : std::string{DefaultMenuPlayerSkinKey};
     if (skin_hash.empty()) {
-      skin_hash = std::string{DefaultMenuPlayerSkinKey};
+      skin_hash = default_skin_hash;
     }
     auto skin_region = player_skin_regions_.find(skin_hash);
+    if (skin_region == player_skin_regions_.end() || !skin_region->second.valid()) {
+      skin_region = player_skin_regions_.find(default_skin_hash);
+    }
     if (skin_region == player_skin_regions_.end() || !skin_region->second.valid()) {
       skin_region = player_skin_regions_.find(std::string{DefaultMenuPlayerSkinKey});
     }
@@ -1404,7 +1429,7 @@ private:
     preview.clear_color = {0.018F, 0.023F, 0.030F, 1.0F};
 
     render::EntityDrawItem player;
-    player.model_id = assets_.entity_render_assets.player_skin_model;
+    player.model_id = preview_model;
     player.position = {0.0F, -0.02F, 0.0F};
     player.rotation = model_forward_yaw_rotation(request->yaw_radians + PiRadians);
     player.scale = 1.0F;

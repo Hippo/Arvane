@@ -797,12 +797,14 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
     if (existing_descriptor &&
         existing_descriptor.value().width == begin.width &&
         existing_descriptor.value().height == begin.height) {
-      set_selected_skin_hash_for_session(*session, existing_descriptor.value().skin_hash);
+      protocol::SkinDescriptor descriptor = std::move(existing_descriptor.value());
+      descriptor.slim_model = begin.slim_model;
+      set_selected_skin_for_session(*session, descriptor.skin_hash, descriptor.slim_model);
       core::info(
           "skin",
           "skin upload complete: profile={} skin={} bytes=0",
           session->profile_id.string(),
-          existing_descriptor.value().skin_hash);
+          descriptor.skin_hash);
       (void)send_protocol_message(
           *transport_,
           connection_id,
@@ -810,7 +812,7 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
           protocol::ReliabilityClass::ReliableOrdered,
           protocol::NetworkLane::Session,
           protocol::serialize_skin_upload_complete(
-              {upload_id, std::move(existing_descriptor.value())}));
+              {upload_id, std::move(descriptor)}));
       broadcast_player_profile_info(*session);
       return;
     }
@@ -929,7 +931,10 @@ void ServerRuntimeImpl::handle_skin_upload_data(
   (void)transfer.completed_upload_minute_limiter.try_consume(1.0, now_seconds);
   (void)transfer.completed_upload_hour_limiter.try_consume(1.0, now_seconds);
   skin_storage_bytes_ += added_storage_bytes;
-  set_selected_skin_hash_for_session(*session, descriptor.value().skin_hash);
+  set_selected_skin_for_session(
+      *session,
+      descriptor.value().skin_hash,
+      descriptor.value().slim_model);
   core::info(
       "skin",
       "skin upload complete: profile={} skin={} bytes={}",
@@ -1079,7 +1084,10 @@ void ServerRuntimeImpl::handle_skin_upload_end(
   (void)transfer.completed_upload_minute_limiter.try_consume(1.0, now_seconds);
   (void)transfer.completed_upload_hour_limiter.try_consume(1.0, now_seconds);
   skin_storage_bytes_ += added_storage_bytes;
-  set_selected_skin_hash_for_session(*session, descriptor.value().skin_hash);
+  set_selected_skin_for_session(
+      *session,
+      descriptor.value().skin_hash,
+      descriptor.value().slim_model);
   core::info(
       "skin",
       "skin upload complete: profile={} skin={} bytes={}",

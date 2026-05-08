@@ -474,6 +474,7 @@ Example server player profile:
   "public_key": "0x2e5c2f90884cb17f47b22cb4ab64efb7ccfa1343e91e8d1923a55db97a187944",
   "display_name": "Hippo",
   "selected_skin_hash": "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d",
+  "selected_skin_slim_model": false,
 
   "last_world": "arvane:overworld",
   "last_position": [12.5, 70.0, -44.5],
@@ -493,7 +494,10 @@ Example server player profile:
 
 The server profile stores the public key, never the private key.
 
-`selected_skin_hash` is the custom skin currently selected for this player on that server. Empty string means no custom skin.
+`selected_skin_hash` is the custom skin currently selected for this player on
+that server. Empty string means no custom skin. `selected_skin_slim_model`
+selects the slim player geometry for that profile; it does not change the PNG
+hash, storage path, or animation asset.
 
 ---
 
@@ -511,6 +515,7 @@ struct PlayerProfile {
 
     std::string display_name;
     std::string selected_skin_hash;
+    bool selected_skin_slim_model;
 
     std::string last_world;
     glm::dvec3 last_position;
@@ -992,7 +997,7 @@ Upload hardening:
 * full uploads must provide exactly the negotiated byte count
 * chunked uploads must use non-empty chunks no larger than the configured chunk size
 * chunked uploads may not overflow the negotiated total
-* final validation decodes PNG, checks dimensions, checks RGBA8 byte count, computes authoritative hash from compressed bytes, and updates `selected_skin_hash` only after storage succeeds
+* final validation decodes PNG, checks dimensions, checks RGBA8 byte count, computes authoritative hash from compressed bytes, and updates the selected skin hash and slim-model flag only after storage succeeds
 
 Download hardening:
 
@@ -1073,6 +1078,7 @@ struct SkinDescriptor {
     SkinImageFormat format;
     u16 width;
     u16 height;
+    bool slim_model;
 };
 ```
 
@@ -1083,7 +1089,7 @@ struct ClientboundSkinRules {
     bool enabled;
     bool allow_uploads;
     u16 max_res;
-    std::string selected_skin_hash;
+    SkinDescriptor selected_skin;
 };
 ```
 
@@ -1171,6 +1177,7 @@ struct ServerboundSkinUploadBegin {
     std::string client_skin_hash_hint; // may be empty; server does not trust it
     u16 width;
     u16 height;
+    bool slim_model;
     u32 total_upload_bytes;
 };
 
@@ -1532,6 +1539,7 @@ session -> current connection
 entity -> current in-world body
 profile -> persistent player state
 selected_skin_hash -> profile-selected custom skin on a server
+selected_skin_slim_model -> profile-selected slim player geometry flag
 ```
 
 The profile id must always be represented as:

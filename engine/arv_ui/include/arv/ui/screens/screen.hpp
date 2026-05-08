@@ -40,6 +40,7 @@ struct LocalProfileSkinEntry {
   u32 width{};
   u32 height{};
   PlayerSkinTextureView skin_texture{};
+  bool slim_model{};
 };
 
 struct LocalProfileEntry {
@@ -55,6 +56,7 @@ struct PlayerSkinPreviewRequest {
   std::string element_id{};
   std::string skin_hash{};
   f32 yaw_radians{};
+  bool slim_model{};
 };
 
 struct StartSinglePlayerCommand {
@@ -105,6 +107,12 @@ struct SetLocalProfileSkinOrderCommand {
   std::vector<std::string> skin_hashes{};
 };
 
+struct SetLocalProfileSkinSlimCommand {
+  std::optional<std::string> profile_id{};
+  std::string skin_hash{};
+  bool slim_model{};
+};
+
 struct CreateLocalProfileCommand {
   std::string display_name{};
 };
@@ -134,6 +142,7 @@ using UICommand = std::variant<
     UpdateLocalProfileCommand,
     PickLocalProfileSkinCommand,
     SetLocalProfileSkinOrderCommand,
+    SetLocalProfileSkinSlimCommand,
     CreateLocalProfileCommand,
     DeleteLocalProfileCommand,
     DiscardLocalProfileEditCommand,

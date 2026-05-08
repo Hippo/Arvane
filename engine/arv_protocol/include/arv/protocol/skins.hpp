@@ -26,6 +26,7 @@ struct SkinDescriptor {
   SkinImageFormat format{SkinImageFormat::Png};
   u16 width{};
   u16 height{};
+  bool slim_model{};
 };
 
 enum class SkinUploadMode : u8 {
@@ -75,7 +76,7 @@ struct ClientboundSkinRules {
   bool enabled{};
   bool allow_uploads{};
   u16 max_res{};
-  std::string selected_skin_hash{};
+  SkinDescriptor selected_skin{};
 };
 
 struct ClientboundPlayerProfileInfo {
@@ -136,6 +137,7 @@ struct ServerboundSkinUploadBegin {
   std::string client_skin_hash_hint{};
   u16 width{};
   u16 height{};
+  bool slim_model{};
   u32 total_upload_bytes{};
 };
 

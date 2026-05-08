@@ -127,23 +127,29 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
 TEST(ProtocolTests, SkinPacketsRoundTripThroughSerialization) {
   const std::string hash =
       "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d";
-  arv::protocol::ClientboundSkinRules rules{true, true, 128, hash};
+  arv::protocol::ClientboundSkinRules rules;
+  rules.enabled = true;
+  rules.allow_uploads = true;
+  rules.max_res = 128;
+  rules.selected_skin = {hash, arv::protocol::SkinImageFormat::Png, 64, 64, true};
   auto decoded_rules = arv::protocol::deserialize_skin_rules(
       arv::protocol::serialize_skin_rules(rules));
   ASSERT_TRUE(decoded_rules);
   EXPECT_EQ(decoded_rules.value().max_res, 128U);
-  EXPECT_EQ(decoded_rules.value().selected_skin_hash, hash);
+  EXPECT_EQ(decoded_rules.value().selected_skin.skin_hash, hash);
+  EXPECT_TRUE(decoded_rules.value().selected_skin.slim_model);
 
   arv::protocol::ClientboundPlayerProfileInfo info;
   info.player_id = arv::PlayerID{7};
   info.profile_id = hash;
   info.display_name = "Hippo";
-  info.skin = {hash, arv::protocol::SkinImageFormat::Png, 64, 64};
+  info.skin = {hash, arv::protocol::SkinImageFormat::Png, 64, 64, true};
   auto decoded_info = arv::protocol::deserialize_player_profile_info(
       arv::protocol::serialize_player_profile_info(info));
   ASSERT_TRUE(decoded_info);
   EXPECT_EQ(decoded_info.value().player_id, (arv::PlayerID{7}));
   EXPECT_EQ(decoded_info.value().skin.width, 64U);
+  EXPECT_TRUE(decoded_info.value().skin.slim_model);
 
   arv::protocol::ClientboundSkinData data;
   data.request_id = 42;
@@ -157,6 +163,19 @@ TEST(ProtocolTests, SkinPacketsRoundTripThroughSerialization) {
   ASSERT_TRUE(decoded_data);
   EXPECT_EQ(decoded_data.value().request_id, 42U);
   EXPECT_EQ(decoded_data.value().compressed_image_bytes, data.compressed_image_bytes);
+
+  arv::protocol::ServerboundSkinUploadBegin begin;
+  begin.format = arv::protocol::SkinImageFormat::Png;
+  begin.client_skin_hash_hint = hash;
+  begin.width = 64;
+  begin.height = 64;
+  begin.slim_model = true;
+  begin.total_upload_bytes = 4096;
+  auto decoded_begin = arv::protocol::deserialize_skin_upload_begin(
+      arv::protocol::serialize_skin_upload_begin(begin));
+  ASSERT_TRUE(decoded_begin);
+  EXPECT_EQ(decoded_begin.value().client_skin_hash_hint, hash);
+  EXPECT_TRUE(decoded_begin.value().slim_model);
 
   arv::protocol::ClientboundSkinUploadAccept accept{
       9,

@@ -106,6 +106,7 @@ void write_skin_descriptor(MessageWriter& writer, const SkinDescriptor& descript
   writer.write<SkinImageFormat>(descriptor.format);
   writer.write<u16>(descriptor.width);
   writer.write<u16>(descriptor.height);
+  writer.write_bool(descriptor.slim_model);
 }
 
 [[nodiscard]] Expected<SkinDescriptor, ProtocolError> read_skin_descriptor(
@@ -121,7 +122,8 @@ void write_skin_descriptor(MessageWriter& writer, const SkinDescriptor& descript
   auto format = read_skin_format(reader);
   auto width = reader.read<u16>();
   auto height = reader.read<u16>();
-  if (!format || !width || !height) {
+  auto slim_model = reader.read_bool();
+  if (!format || !width || !height || !slim_model) {
     return Expected<SkinDescriptor, ProtocolError>::failure(
         ProtocolError{"failed to read skin descriptor"});
   }
@@ -130,6 +132,7 @@ void write_skin_descriptor(MessageWriter& writer, const SkinDescriptor& descript
   descriptor.format = format.value();
   descriptor.width = width.value();
   descriptor.height = height.value();
+  descriptor.slim_model = slim_model.value();
   return Expected<SkinDescriptor, ProtocolError>::success(std::move(descriptor));
 }
 
@@ -211,7 +214,7 @@ std::vector<u8> serialize_skin_rules(const ClientboundSkinRules& rules) {
   writer.write_bool(rules.enabled);
   writer.write_bool(rules.allow_uploads);
   writer.write<u16>(rules.max_res);
-  writer.write_string(rules.selected_skin_hash);
+  write_skin_descriptor(writer, rules.selected_skin);
   return std::move(writer).take_bytes();
 }
 
@@ -222,14 +225,13 @@ Expected<ClientboundSkinRules, ProtocolError> deserialize_skin_rules(
   auto enabled = reader.read_bool();
   auto allow_uploads = reader.read_bool();
   auto max_res = reader.read<u16>();
-  auto selected_hash = reader.read_string();
-  if (!enabled || !allow_uploads || !max_res || !selected_hash) {
+  if (!enabled || !allow_uploads || !max_res) {
     return Expected<ClientboundSkinRules, ProtocolError>::failure(
         ProtocolError{"failed to read skin rules"});
   }
-  if (!valid_hash_or_empty(selected_hash.value())) {
-    return Expected<ClientboundSkinRules, ProtocolError>::failure(
-        ProtocolError{"invalid selected skin hash"});
+  auto selected_skin = read_skin_descriptor(reader);
+  if (!selected_skin) {
+    return Expected<ClientboundSkinRules, ProtocolError>::failure(selected_skin.error());
   }
   if (auto result = require_finished(reader, "skin rules"); !result) {
     return Expected<ClientboundSkinRules, ProtocolError>::failure(result.error());
@@ -237,7 +239,7 @@ Expected<ClientboundSkinRules, ProtocolError> deserialize_skin_rules(
   rules.enabled = enabled.value();
   rules.allow_uploads = allow_uploads.value();
   rules.max_res = max_res.value();
-  rules.selected_skin_hash = std::move(selected_hash.value());
+  rules.selected_skin = std::move(selected_skin.value());
   return Expected<ClientboundSkinRules, ProtocolError>::success(std::move(rules));
 }
 
@@ -543,6 +545,7 @@ std::vector<u8> serialize_skin_upload_begin(const ServerboundSkinUploadBegin& be
   writer.write_string(begin.client_skin_hash_hint);
   writer.write<u16>(begin.width);
   writer.write<u16>(begin.height);
+  writer.write_bool(begin.slim_model);
   writer.write<u32>(begin.total_upload_bytes);
   return std::move(writer).take_bytes();
 }
@@ -555,8 +558,9 @@ Expected<ServerboundSkinUploadBegin, ProtocolError> deserialize_skin_upload_begi
   auto hint = reader.read_string();
   auto width = reader.read<u16>();
   auto height = reader.read<u16>();
+  auto slim_model = reader.read_bool();
   auto total_bytes = reader.read<u32>();
-  if (!format || !hint || !width || !height || !total_bytes) {
+  if (!format || !hint || !width || !height || !slim_model || !total_bytes) {
     return Expected<ServerboundSkinUploadBegin, ProtocolError>::failure(
         ProtocolError{"failed to read skin upload begin"});
   }
@@ -571,6 +575,7 @@ Expected<ServerboundSkinUploadBegin, ProtocolError> deserialize_skin_upload_begi
   begin.client_skin_hash_hint = std::move(hint.value());
   begin.width = width.value();
   begin.height = height.value();
+  begin.slim_model = slim_model.value();
   begin.total_upload_bytes = total_bytes.value();
   return Expected<ServerboundSkinUploadBegin, ProtocolError>::success(std::move(begin));
 }

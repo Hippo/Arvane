@@ -338,6 +338,26 @@ void DesktopMenuState::handle(const ui::SetLocalProfileSkinOrderCommand& command
   profile_status_.clear();
 }
 
+void DesktopMenuState::handle(const ui::SetLocalProfileSkinSlimCommand& command) {
+  std::vector<client::LocalProfileSkin>* skins = mutable_skin_source(command.profile_id);
+  if (skins == nullptr) {
+    profile_status_ = "Profile was not found.";
+    return;
+  }
+  const auto found = std::find_if(
+      skins->begin(),
+      skins->end(),
+      [&](const client::LocalProfileSkin& skin) {
+        return skin.skin_hash == command.skin_hash;
+      });
+  if (found == skins->end()) {
+    profile_status_ = "Skin was not found.";
+    return;
+  }
+  found->slim_model = command.slim_model;
+  profile_status_.clear();
+}
+
 void DesktopMenuState::handle(const ui::CreateLocalProfileCommand& command) {
   client::LocalPlayerIdentity profile =
       client::make_ephemeral_local_identity(display_name_or_default(command.display_name));
@@ -469,6 +489,7 @@ ui::LocalProfileSkinEntry DesktopMenuState::skin_entry_from(
   entry.skin_hash = skin.skin_hash;
   entry.width = skin.width;
   entry.height = skin.height;
+  entry.slim_model = skin.slim_model;
   const auto found = skin_textures_.find(skin.skin_hash);
   if (found != skin_textures_.end()) {
     entry.skin_texture = found->second;
@@ -497,6 +518,22 @@ std::vector<client::LocalProfileSkin> DesktopMenuState::current_skin_source(
   }
   const client::LocalPlayerIdentity* profile = profile_by_id(profile_id.value());
   return profile == nullptr ? std::vector<client::LocalProfileSkin>{} : profile->skins;
+}
+
+std::vector<client::LocalProfileSkin>* DesktopMenuState::mutable_skin_source(
+    const std::optional<std::string>& profile_id) {
+  if (!profile_id.has_value()) {
+    return &pending_create_skins_;
+  }
+  auto pending = pending_edit_skins_.find(profile_id.value());
+  if (pending != pending_edit_skins_.end()) {
+    return &pending->second;
+  }
+  const client::LocalPlayerIdentity* profile = profile_by_id(profile_id.value());
+  if (profile == nullptr) {
+    return nullptr;
+  }
+  return &pending_edit_skins_.emplace(profile_id.value(), profile->skins).first->second;
 }
 
 std::optional<client::LocalProfileSkin> DesktopMenuState::pick_and_import_skin() {

@@ -1064,7 +1064,8 @@ Gameplay systems should choose semantic send policies, not raw GameNetworkingSoc
 Player profile metadata is session-scoped replicated data. Servers send
 `PlayerProfileInfo` for authenticated, relevant players. The packet contains
 `player_id`, `profile_id`, display name, and a `SkinDescriptor`; the client uses
-`player_id` to associate metadata with `EntitySpawn.owning_player`.
+`player_id` to associate metadata with `EntitySpawn.owning_player`. The
+descriptor includes the slim player model flag as presentation metadata.
 
 Custom skin image bytes are bulk data. They are never broadcast automatically
 with entity replication. Clients request missing advertised hashes on demand,

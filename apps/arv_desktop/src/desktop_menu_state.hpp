@@ -81,6 +81,7 @@ private:
   void handle(const ui::UpdateLocalProfileCommand& command);
   void handle(const ui::PickLocalProfileSkinCommand& command);
   void handle(const ui::SetLocalProfileSkinOrderCommand& command);
+  void handle(const ui::SetLocalProfileSkinSlimCommand& command);
   void handle(const ui::CreateLocalProfileCommand& command);
   void handle(const ui::DeleteLocalProfileCommand& command);
   void handle(const ui::DiscardLocalProfileEditCommand& command);
@@ -103,6 +104,8 @@ private:
       const std::vector<client::LocalProfileSkin>& skins) const;
   [[nodiscard]] std::vector<client::LocalProfileSkin> current_skin_source(
       const std::optional<std::string>& profile_id) const;
+  [[nodiscard]] std::vector<client::LocalProfileSkin>* mutable_skin_source(
+      const std::optional<std::string>& profile_id);
 
   std::filesystem::path saves_root_{};
   std::filesystem::path server_list_file_{};

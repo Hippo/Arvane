@@ -166,10 +166,14 @@ public:
   [[nodiscard]] std::string selected_skin_hash_for(
       std::string_view world_name,
       const ServerSession& session) const;
-  void set_selected_skin_hash_for(
+  [[nodiscard]] bool selected_skin_slim_model_for(
+      std::string_view world_name,
+      const ServerSession& session) const;
+  void set_selected_skin_for(
       std::string_view world_name,
       const ServerSession& session,
-      std::string skin_hash);
+      std::string skin_hash,
+      bool slim_model);
   [[nodiscard]] const std::vector<ServerPlayerSaveState>& states() const noexcept;
 
 private:
@@ -313,7 +317,11 @@ struct ServerRuntimeImpl {
   bool apply_saved_player_state(const ServerSession& session, player::PlayerState& player_state);
   void record_player_save_state(const ServerSession& session, const player::PlayerState& player_state);
   [[nodiscard]] std::string selected_skin_hash_for_session(const ServerSession& session) const;
-  void set_selected_skin_hash_for_session(const ServerSession& session, std::string skin_hash);
+  [[nodiscard]] bool selected_skin_slim_model_for_session(const ServerSession& session) const;
+  void set_selected_skin_for_session(
+      const ServerSession& session,
+      std::string skin_hash,
+      bool slim_model);
   void seed_player_inventory(player::PlayerState& player_state);
   [[nodiscard]] bool inventory_is_empty(const player::Inventory& inventory) const noexcept;
 

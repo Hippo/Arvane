@@ -648,6 +648,7 @@ struct SkinDescriptor {
     SkinImageFormat format;
     u16 width;
     u16 height;
+    bool slim_model;
 };
 
 struct PlayerProfileInfo {
@@ -686,12 +687,18 @@ struct PlayerProfileInfo {
 After authentication succeeds, the server sends `ClientboundSkinRules` near
 `ClientboundAuthResult`. The packet contains whether skins are enabled, whether
 uploads are allowed, the maximum allowed resolution for the authenticated
-player, and the server-selected skin hash.
+player, and the server-selected `SkinDescriptor`.
 
 Dedicated clients choose the first local profile skin whose width and height are
-`<= max_res`. If that skin differs from `selected_skin_hash` and uploads are
-allowed, the client sends `ServerboundSkinUploadBegin`. Integrated singleplayer
-uses the first local skin with no effective local restriction.
+`<= max_res`. If that skin differs from the selected descriptor hash or slim
+model flag and uploads are allowed, the client sends
+`ServerboundSkinUploadBegin`. Integrated singleplayer uses the first local skin
+with no effective local restriction.
+
+`SkinDescriptor::slim_model` is presentation metadata for player geometry. It
+selects the slim player model for that profile but does not change the PNG hash,
+image validation, or storage path. Slim and classic player models use the same
+player animation asset.
 
 ### Upload Flow
 
@@ -725,9 +732,9 @@ claimed dimensions matching decoded dimensions, enabled resolution match,
 decoded RGBA8 size within the resolution limit, and an authoritative hash
 computed from the original compressed bytes. The server stores files only as
 `player_assets/skins/<skin_hash>.png`, writes through a temporary file, atomically
-renames into place, updates `selected_skin_hash` only after validation succeeds,
-sends upload complete/failed, and broadcasts updated profile metadata. Repeated
-failed decodes rate-limit future upload begins.
+renames into place, updates the selected skin hash and slim-model flag only
+after validation succeeds, sends upload complete/failed, and broadcasts updated
+profile metadata. Repeated failed decodes rate-limit future upload begins.
 
 ### Download Flow
 

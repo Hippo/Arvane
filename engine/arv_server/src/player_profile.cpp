@@ -159,6 +159,7 @@ Expected<void, PlayerProfileError> save_player_profile(
       {"spawn_position", vec3_to_json(profile.spawn_position)},
       {"game_mode", profile.game_mode_id},
       {"selected_skin_hash", profile.selected_skin_hash},
+      {"selected_skin_slim_model", profile.selected_skin_slim_model},
       {"permission_level", profile.permission_level},
       {"inventory", json::object()},
       {"stats", json::object()},
@@ -232,6 +233,9 @@ Expected<PlayerProfile, PlayerProfileError> load_player_profile(
         !protocol::is_valid_skin_hash(profile.selected_skin_hash)) {
       profile.selected_skin_hash.clear();
     }
+    profile.selected_skin_slim_model =
+        !profile.selected_skin_hash.empty() &&
+        node.value("selected_skin_slim_model", false);
     profile.permission_level = node.value("permission_level", 0);
 
     const crypto::PlayerProfileID derived_profile_id =

@@ -21,6 +21,7 @@ struct LocalProfileSkin {
   u16 width{};
   u16 height{};
   std::string file{};
+  bool slim_model{};
 };
 
 struct LocalPlayerIdentity {

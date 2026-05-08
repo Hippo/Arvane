@@ -76,6 +76,7 @@ void ServerPlayerSaveCache::record(
     states_.emplace_back(std::move(save));
   } else {
     save.selected_skin_hash = found->selected_skin_hash;
+    save.selected_skin_slim_model = found->selected_skin_slim_model;
     *found = std::move(save);
   }
 }
@@ -104,10 +105,29 @@ std::string ServerPlayerSaveCache::selected_skin_hash_for(
   return found->selected_skin_hash;
 }
 
-void ServerPlayerSaveCache::set_selected_skin_hash_for(
+bool ServerPlayerSaveCache::selected_skin_slim_model_for(
+    std::string_view world_name,
+    const ServerSession& session) const {
+  const auto found = std::find_if(
+      states_.begin(),
+      states_.end(),
+      [&](const ServerPlayerSaveState& save) {
+        const bool profile_matches =
+            !session.profile_id.empty()
+                ? save.profile_id == session.profile_id
+                : save.profile_name == session.profile_name;
+        return profile_matches && save.world_name == world_name;
+      });
+  return found != states_.end() &&
+         protocol::is_valid_skin_hash(found->selected_skin_hash) &&
+         found->selected_skin_slim_model;
+}
+
+void ServerPlayerSaveCache::set_selected_skin_for(
     std::string_view world_name,
     const ServerSession& session,
-    std::string skin_hash) {
+    std::string skin_hash,
+    bool slim_model) {
   const auto found = std::find_if(
       states_.begin(),
       states_.end(),
@@ -121,8 +141,12 @@ void ServerPlayerSaveCache::set_selected_skin_hash_for(
   if (!skin_hash.empty() && !protocol::is_valid_skin_hash(skin_hash)) {
     skin_hash.clear();
   }
+  if (skin_hash.empty()) {
+    slim_model = false;
+  }
   if (found != states_.end()) {
     found->selected_skin_hash = std::move(skin_hash);
+    found->selected_skin_slim_model = slim_model;
     return;
   }
   ServerPlayerSaveState save;
@@ -131,6 +155,7 @@ void ServerPlayerSaveCache::set_selected_skin_hash_for(
   save.display_name = session.display_name;
   save.world_name = std::string{world_name};
   save.selected_skin_hash = std::move(skin_hash);
+  save.selected_skin_slim_model = slim_model;
   states_.push_back(std::move(save));
 }
 
@@ -151,10 +176,20 @@ std::string ServerRuntimeImpl::selected_skin_hash_for_session(
   return player_saves_.selected_skin_hash_for(world_name_, session);
 }
 
-void ServerRuntimeImpl::set_selected_skin_hash_for_session(
+bool ServerRuntimeImpl::selected_skin_slim_model_for_session(
+    const ServerSession& session) const {
+  return player_saves_.selected_skin_slim_model_for(world_name_, session);
+}
+
+void ServerRuntimeImpl::set_selected_skin_for_session(
     const ServerSession& session,
-    std::string skin_hash) {
-  player_saves_.set_selected_skin_hash_for(world_name_, session, std::move(skin_hash));
+    std::string skin_hash,
+    bool slim_model) {
+  player_saves_.set_selected_skin_for(
+      world_name_,
+      session,
+      std::move(skin_hash),
+      slim_model);
 }
 
 } // namespace arv::server::detail

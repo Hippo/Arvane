@@ -38,6 +38,7 @@ inline constexpr f32 SkinRowWidth = 568.0F;
 inline constexpr f32 SkinRowHeight = 68.0F;
 inline constexpr f32 SkinRowSpacing = 8.0F;
 inline constexpr f32 SkinListViewportHeight = 318.0F;
+inline constexpr f32 SkinDialogFooterY = SkinDialogHeight - 88.0F;
 
 struct SkinManagerState {
   bool open{};
@@ -167,9 +168,21 @@ struct SkinManagerState {
   return skins.empty() ? std::string{} : skins.front().skin_hash;
 }
 
+[[nodiscard]] bool edit_skin_slim_model(
+    const LocalProfileEntry& profile,
+    const UIContext& ctx) {
+  const std::vector<LocalProfileSkinEntry> skins = edit_skin_entries(profile, ctx);
+  return !skins.empty() && skins.front().slim_model;
+}
+
 [[nodiscard]] std::vector<LocalProfileSkinEntry> create_skin_entries(const UIContext& ctx) {
   return ctx.data_source == nullptr ? std::vector<LocalProfileSkinEntry>{}
                                     : ctx.data_source->pending_create_profile_skins();
+}
+
+[[nodiscard]] bool create_skin_slim_model(const UIContext& ctx) {
+  const std::vector<LocalProfileSkinEntry> skins = create_skin_entries(ctx);
+  return !skins.empty() && skins.front().slim_model;
 }
 
 [[nodiscard]] std::string short_profile_id(std::string_view id) {
@@ -660,6 +673,7 @@ UiNodeID add_dialog_button(
   if (UiElement* button = tree.element(button_id); button != nullptr) {
     button->layout.width = width;
     button->layout.height = height;
+    button->layout.anchor = UiAnchor::TopLeft;
     button->layout.offset = offset;
     button->layout.padding = {10.0F, 10.0F, 8.0F, 8.0F};
     if (background != ButtonColor && background != ButtonSelectedColor) {
@@ -722,20 +736,22 @@ void add_skin_manager_row(
   add_dialog_button(
       tree,
       row_id,
-      prefix + ".move",
-      "Move",
-      "account.skin_drag",
-      {302.0F, 17.0F},
-      58.0F,
+      prefix + ".slim",
+      skin.slim_model ? "Slim" : "Classic",
+      "account.skin_toggle_slim",
+      {292.0F, 17.0F},
+      76.0F,
       34.0F,
-      {0.122F, 0.138F, 0.154F, 0.98F});
+      ButtonSelectedColor,
+      true,
+      skin.slim_model);
   add_dialog_button(
       tree,
       row_id,
       prefix + ".up",
       "Up",
       "account.skin_up",
-      {366.0F, 17.0F},
+      {376.0F, 17.0F},
       44.0F,
       34.0F,
       {0.122F, 0.138F, 0.154F, 0.98F},
@@ -746,7 +762,7 @@ void add_skin_manager_row(
       prefix + ".down",
       "Down",
       "account.skin_down",
-      {416.0F, 17.0F},
+      {426.0F, 17.0F},
       58.0F,
       34.0F,
       {0.122F, 0.138F, 0.154F, 0.98F},
@@ -757,7 +773,7 @@ void add_skin_manager_row(
       prefix + ".remove",
       "Remove",
       "account.skin_remove",
-      {482.0F, 17.0F},
+      {492.0F, 17.0F},
       76.0F,
       34.0F,
       {0.300F, 0.070F, 0.065F, 0.96F});
@@ -795,18 +811,6 @@ void build_skin_manager_dialog(
       "Manage Skins",
       {0.0F, 0.0F},
       theme.colors.text);
-  add_dialog_button(
-      ctx.tree,
-      panel_id,
-      std::string{base_id} + ".add",
-      "Add Skin",
-      "account.skin_add",
-      {SkinDialogContentWidth - 132.0F, -2.0F},
-      132.0F,
-      38.0F,
-      ButtonSelectedColor,
-      true,
-      true);
 
   UiElement viewport = screens_detail::make_panel(
       std::string{base_id} + ".viewport",
@@ -850,10 +854,22 @@ void build_skin_manager_dialog(
   add_dialog_button(
       ctx.tree,
       panel_id,
+      std::string{base_id} + ".add",
+      "Add Skin",
+      "account.skin_add",
+      {0.0F, SkinDialogFooterY},
+      132.0F,
+      40.0F,
+      ButtonSelectedColor,
+      true,
+      false);
+  add_dialog_button(
+      ctx.tree,
+      panel_id,
       std::string{base_id} + ".cancel",
       "Cancel",
       "account.skin_cancel",
-      {SkinDialogContentWidth - 244.0F, SkinDialogHeight - 88.0F},
+      {SkinDialogContentWidth - 244.0F, SkinDialogFooterY},
       112.0F,
       40.0F);
   add_dialog_button(
@@ -862,12 +878,12 @@ void build_skin_manager_dialog(
       std::string{base_id} + ".done",
       "Done",
       "account.skin_done",
-      {SkinDialogContentWidth - 120.0F, SkinDialogHeight - 88.0F},
+      {SkinDialogContentWidth - 120.0F, SkinDialogFooterY},
       120.0F,
       40.0F,
       ButtonSelectedColor,
       true,
-      true);
+      false);
 }
 
 [[nodiscard]] std::string skin_row_prefix(std::string_view base_id) {
@@ -946,6 +962,15 @@ bool handle_skin_manager_action(
   }
   if (action.action_id == "account.skin_drag") {
     state.dragging_index = index;
+    return true;
+  }
+  if (action.action_id == "account.skin_toggle_slim") {
+    screens_detail::submit_command(
+        ctx,
+        SetLocalProfileSkinSlimCommand{
+            std::move(profile_id),
+            skins[index].skin_hash,
+            !skins[index].slim_model});
     return true;
   }
   if (action.action_id == "account.skin_up" && index > 0U) {
@@ -1304,7 +1329,8 @@ public:
     return PlayerSkinPreviewRequest{
         "menu.account_edit.preview",
         edit_skin_hash(profile.value(), ctx),
-        preview_yaw_};
+        preview_yaw_,
+        edit_skin_slim_model(profile.value(), ctx)};
   }
 
 private:
@@ -1583,7 +1609,8 @@ public:
     return PlayerSkinPreviewRequest{
         "menu.account_create.preview",
         std::move(skin_hash),
-        preview_yaw_};
+        preview_yaw_,
+        create_skin_slim_model(ctx)};
   }
 
 private:

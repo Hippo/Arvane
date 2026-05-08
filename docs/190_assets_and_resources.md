@@ -90,8 +90,9 @@ Contains all image-based assets used for rendering.
 * Block textures are typically packed into a **runtime atlas**
 * Texture resolution does not need to match logical UV size
 * Mip padding rules must be respected (see material/atlas section)
-* The default player skin asset is
-  `arvane:texture/default_skin/default`
+* The default player skin assets are
+  `arvane:texture/default_skin/default` and
+  `arvane:texture/default_skin/default_slim`
 
 User-provided skins are untrusted binary assets. Local profile-owned skins live
 in `arvane_home/skins/`; server-downloaded skins live in

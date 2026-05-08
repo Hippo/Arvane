@@ -18,12 +18,19 @@ constexpr u32 ItemEntityModelIDBase = 1'000'000U;
 constexpr u32 BreakOverlayEntityModelIDBase = 2'000'000U;
 constexpr u32 BlockOutlineEntityModelIDBase = 3'000'000U;
 constexpr u32 PlayerSkinEntityModelID = 4'000'000U;
+constexpr u32 PlayerSlimEntityModelID = 4'000'001U;
+constexpr u32 PlayerSlimSkinEntityModelID = 4'000'002U;
 constexpr u32 FirstPersonPlayerEntityModelID = 5'000'000U;
 constexpr u32 FirstPersonPlayerSkinEntityModelID = 5'000'001U;
+constexpr u32 FirstPersonPlayerSlimEntityModelID = 5'000'002U;
+constexpr u32 FirstPersonPlayerSlimSkinEntityModelID = 5'000'003U;
 constexpr std::string_view WhiteTextureAsset = "arvane:texture/generated_white";
 constexpr std::string_view DefaultPlayerSkinTextureAsset =
     "arvane:texture/default_skin/default";
+constexpr std::string_view DefaultPlayerSlimSkinTextureAsset =
+    "arvane:texture/default_skin/default_slim";
 constexpr std::string_view PlayerEntityModelAsset = "arvane:model/entity/player";
+constexpr std::string_view PlayerSlimEntityModelAsset = "arvane:model/entity/player_slim";
 constexpr std::string_view DynamicPlayerSkinTextureAsset =
     "arvane:texture/player_skin/dynamic";
 
@@ -35,12 +42,28 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
   return render::EntityModelID{PlayerSkinEntityModelID};
 }
 
+[[nodiscard]] render::EntityModelID player_slim_model_id() noexcept {
+  return render::EntityModelID{PlayerSlimEntityModelID};
+}
+
+[[nodiscard]] render::EntityModelID player_slim_skin_model_id() noexcept {
+  return render::EntityModelID{PlayerSlimSkinEntityModelID};
+}
+
 [[nodiscard]] render::EntityModelID first_person_player_model_id() noexcept {
   return render::EntityModelID{FirstPersonPlayerEntityModelID};
 }
 
 [[nodiscard]] render::EntityModelID first_person_player_skin_model_id() noexcept {
   return render::EntityModelID{FirstPersonPlayerSkinEntityModelID};
+}
+
+[[nodiscard]] render::EntityModelID first_person_player_slim_model_id() noexcept {
+  return render::EntityModelID{FirstPersonPlayerSlimEntityModelID};
+}
+
+[[nodiscard]] render::EntityModelID first_person_player_slim_skin_model_id() noexcept {
+  return render::EntityModelID{FirstPersonPlayerSlimSkinEntityModelID};
 }
 
 [[nodiscard]] render::EntityModelID break_overlay_model_id(
@@ -84,9 +107,11 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
   return std::string{leaf};
 }
 
-[[nodiscard]] std::string resolve_entity_input_texture(std::string_view texture) {
+[[nodiscard]] std::string resolve_entity_input_texture(
+    std::string_view texture,
+    std::string_view default_player_skin_texture = DefaultPlayerSkinTextureAsset) {
   if (texture == "$0") {
-    return std::string{DefaultPlayerSkinTextureAsset};
+    return std::string{default_player_skin_texture};
   }
   return std::string{texture};
 }
@@ -291,6 +316,8 @@ EntityRenderAssetsResult build_entity_render_assets(
     render::EntityModelDefinition definition{};
     bool first_person_player{};
     bool player_skin_atlas{};
+    bool slim_player{};
+    bool primary_type_model{};
   };
   struct PendingAnimation {
     EntityTypeID type_id{};
@@ -409,7 +436,9 @@ EntityRenderAssetsResult build_entity_render_assets(
                               render::EntityModelID{type.id.value},
                               definition,
                               false,
-                              false});
+                              false,
+                              false,
+                              true});
 
     if (type.model_asset != PlayerEntityModelAsset || player_skin_texture_slots.empty()) {
       continue;
@@ -419,6 +448,8 @@ EntityRenderAssetsResult build_entity_render_assets(
                               first_person_player_model_id(),
                               make_first_person_player_definition(definition),
                               true,
+                              false,
+                              false,
                               false});
 
     render::EntityModelDefinition dynamic_skin_definition = definition;
@@ -432,7 +463,9 @@ EntityRenderAssetsResult build_entity_render_assets(
                               player_skin_model_id(),
                               std::move(dynamic_skin_definition),
                               false,
-                              true});
+                              true,
+                              false,
+                              false});
 
     render::EntityModelDefinition first_person_dynamic_skin =
         make_first_person_player_definition(definition);
@@ -446,7 +479,86 @@ EntityRenderAssetsResult build_entity_render_assets(
                               first_person_player_skin_model_id(),
                               std::move(first_person_dynamic_skin),
                               true,
-                              true});
+                              true,
+                              false,
+                              false});
+
+    const asset::AssetID slim_model_asset{std::string{PlayerSlimEntityModelAsset}};
+    auto slim_model_text =
+        resources.load_text(slim_model_asset, asset::AssetKind::Model);
+    if (!slim_model_text) {
+      return EntityRenderAssetsResult::failure(slim_model_text.error());
+    }
+    auto slim_model_definition =
+        render::parse_entity_model_json(slim_model_text.value());
+    if (!slim_model_definition) {
+      return EntityRenderAssetsResult::failure({slim_model_asset.value,
+                                                resources.resolve_asset_path(slim_model_asset, asset::AssetKind::Model),
+                                                "parse slim player model",
+                                                slim_model_definition.error().message});
+    }
+    render::EntityModelDefinition slim_definition =
+        std::move(slim_model_definition.value());
+    if (slim_definition.name.empty()) {
+      slim_definition.name = asset_leaf_name(PlayerSlimEntityModelAsset);
+    }
+    std::vector<usize> slim_player_skin_texture_slots;
+    for (usize texture_index = 0; texture_index < slim_definition.texture_assets.size(); ++texture_index) {
+      std::string& texture = slim_definition.texture_assets[texture_index];
+      if (texture == "$0") {
+        slim_player_skin_texture_slots.push_back(texture_index);
+      }
+      texture = resolve_entity_input_texture(texture, DefaultPlayerSlimSkinTextureAsset);
+      add_texture(texture);
+    }
+    pending_models.push_back({type.id,
+                              std::nullopt,
+                              player_slim_model_id(),
+                              slim_definition,
+                              false,
+                              false,
+                              true,
+                              false});
+
+    pending_models.push_back({type.id,
+                              std::nullopt,
+                              first_person_player_slim_model_id(),
+                              make_first_person_player_definition(slim_definition),
+                              true,
+                              false,
+                              true,
+                              false});
+
+    render::EntityModelDefinition slim_dynamic_skin_definition = slim_definition;
+    slim_dynamic_skin_definition.name += "#skin_dynamic";
+    for (const usize texture_index : slim_player_skin_texture_slots) {
+      slim_dynamic_skin_definition.texture_assets[texture_index] =
+          std::string{DynamicPlayerSkinTextureAsset};
+    }
+    pending_models.push_back({type.id,
+                              std::nullopt,
+                              player_slim_skin_model_id(),
+                              std::move(slim_dynamic_skin_definition),
+                              false,
+                              true,
+                              true,
+                              false});
+
+    render::EntityModelDefinition first_person_slim_dynamic_skin =
+        make_first_person_player_definition(slim_definition);
+    first_person_slim_dynamic_skin.name += "#skin_dynamic";
+    for (const usize texture_index : slim_player_skin_texture_slots) {
+      first_person_slim_dynamic_skin.texture_assets[texture_index] =
+          std::string{DynamicPlayerSkinTextureAsset};
+    }
+    pending_models.push_back({type.id,
+                              std::nullopt,
+                              first_person_player_slim_skin_model_id(),
+                              std::move(first_person_slim_dynamic_skin),
+                              true,
+                              true,
+                              true,
+                              false});
   }
 
   for (u32 item_value = 0; item_value < item_registry.item_count(); ++item_value) {
@@ -493,6 +605,8 @@ EntityRenderAssetsResult build_entity_render_assets(
                                   item_id,
                                   model_id,
                                   std::move(model_definition.value()),
+                                  false,
+                                  false,
                                   false,
                                   false});
         break;
@@ -618,8 +732,7 @@ EntityRenderAssetsResult build_entity_render_assets(
                                                 model_asset.error().message});
     }
     render::EntityModelAsset built_model = std::move(model_asset.value());
-    if (!pending.item_id.has_value() && !pending.first_person_player &&
-        !pending.player_skin_atlas) {
+    if (pending.primary_type_model) {
       const auto pending_animation =
           pending_animation_by_type.find(pending.type_id);
       if (pending_animation != pending_animation_by_type.end()) {
@@ -651,12 +764,21 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
     if (pending.item_id.has_value()) {
       assets.model_by_item[pending.item_id.value()] = pending.model_id;
+    } else if (pending.first_person_player && pending.player_skin_atlas &&
+               pending.slim_player) {
+      assets.first_person_player_slim_skin_model = pending.model_id;
     } else if (pending.first_person_player && pending.player_skin_atlas) {
       assets.first_person_player_skin_model = pending.model_id;
+    } else if (pending.first_person_player && pending.slim_player) {
+      assets.first_person_player_slim_model = pending.model_id;
     } else if (pending.first_person_player) {
       assets.first_person_player_model = pending.model_id;
+    } else if (pending.player_skin_atlas && pending.slim_player) {
+      assets.player_slim_skin_model = pending.model_id;
     } else if (pending.player_skin_atlas) {
       assets.player_skin_model = pending.model_id;
+    } else if (pending.slim_player) {
+      assets.player_slim_model = pending.model_id;
     } else {
       assets.model_by_type[pending.type_id] = pending.model_id;
     }

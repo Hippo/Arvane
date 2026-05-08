@@ -122,8 +122,12 @@ void ClientSkinRuntime::handle_skin_rules(
 
   const LocalProfileSkin* skin =
       best_local_skin_for_max_resolution(identity, rules_.max_res);
+  const bool selected_skin_matches =
+      skin != nullptr &&
+      skin->skin_hash == rules_.selected_skin.skin_hash &&
+      skin->slim_model == rules_.selected_skin.slim_model;
   if (skin == nullptr || skin->skin_hash.empty() ||
-      skin->skin_hash == rules_.selected_skin_hash) {
+      selected_skin_matches) {
     return;
   }
   std::optional<std::vector<u8>> bytes =
@@ -143,6 +147,7 @@ void ClientSkinRuntime::handle_skin_rules(
   begin.client_skin_hash_hint = skin->skin_hash;
   begin.width = skin->width;
   begin.height = skin->height;
+  begin.slim_model = skin->slim_model;
   begin.total_upload_bytes = static_cast<u32>(bytes->size());
   if (sender.send_skin_upload_begin(begin)) {
     pending_upload_ = PendingUpload{std::move(begin), std::move(*bytes)};
@@ -320,7 +325,7 @@ void ClientSkinRuntime::handle_skin_upload_deny(protocol::ClientboundSkinUploadD
 }
 
 void ClientSkinRuntime::handle_skin_upload_complete(protocol::ClientboundSkinUploadComplete complete) {
-  rules_.selected_skin_hash = complete.skin.skin_hash;
+  rules_.selected_skin = std::move(complete.skin);
   pending_upload_.reset();
 }
 

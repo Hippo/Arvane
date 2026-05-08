@@ -35,7 +35,8 @@ TEST(LocalProfileTests, SavesLoadsMultipleProfilesAndUsesFirstAsActive) {
       arv::protocol::SkinImageFormat::Png,
       64,
       64,
-      "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d.png"});
+      "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d.png",
+      true});
   store.profiles.push_back(arv::client::make_ephemeral_local_identity("Second"));
   store.profiles.back().private_key_file = store.profiles.back().profile_id.string() + ".pk";
 
@@ -47,6 +48,7 @@ TEST(LocalProfileTests, SavesLoadsMultipleProfilesAndUsesFirstAsActive) {
   ASSERT_NE(loaded.value().active_profile(), nullptr);
   EXPECT_EQ(loaded.value().active_profile()->display_name, "Hippo");
   EXPECT_EQ(loaded.value().profiles.front().skins.size(), 1U);
+  EXPECT_TRUE(loaded.value().profiles.front().skins.front().slim_model);
   EXPECT_TRUE(std::filesystem::exists(arv::client::local_profiles_json_path(temp.path)));
   EXPECT_TRUE(std::filesystem::exists(arv::client::local_private_key_path(
       temp.path,

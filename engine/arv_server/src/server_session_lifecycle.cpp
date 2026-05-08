@@ -57,13 +57,15 @@ void ServerRuntimeImpl::send_skin_rules(
   rules.enabled = skins_.enabled;
   rules.allow_uploads = skins_.enabled && skins_.allow_uploads;
   rules.max_res = max_allowed_skin_resolution(skins_, player_state.resolved_permissions);
-  rules.selected_skin_hash = selected_skin_hash_for_session(session);
-  if (!rules.selected_skin_hash.empty() &&
-      !protocol::is_valid_skin_hash(rules.selected_skin_hash)) {
-    rules.selected_skin_hash.clear();
-  }
-  if (!rules.selected_skin_hash.empty()) {
-    skin_transfers_[session.session_id].advertised_skin_hashes.insert(rules.selected_skin_hash);
+  const std::string selected_skin_hash = selected_skin_hash_for_session(session);
+  if (skins_.enabled && protocol::is_valid_skin_hash(selected_skin_hash)) {
+    auto descriptor = load_stored_skin_descriptor(server_save_root_, selected_skin_hash);
+    if (descriptor) {
+      rules.selected_skin = std::move(descriptor.value());
+      rules.selected_skin.slim_model = selected_skin_slim_model_for_session(session);
+      skin_transfers_[session.session_id].advertised_skin_hashes.insert(
+          rules.selected_skin.skin_hash);
+    }
   }
   const net::NetworkResult send_result = send_protocol_message(
       *transport_,
@@ -87,6 +89,7 @@ void ServerRuntimeImpl::send_player_profile_info_to(
     auto descriptor = load_stored_skin_descriptor(server_save_root_, skin_hash);
     if (descriptor) {
       info.skin = std::move(descriptor.value());
+      info.skin.slim_model = selected_skin_slim_model_for_session(subject);
       skin_transfers_[receiver.session_id].advertised_skin_hashes.insert(info.skin.skin_hash);
     }
   }

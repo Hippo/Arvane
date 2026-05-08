@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -102,6 +103,36 @@ public:
   skin.width = 64;
   skin.height = 64;
   return skin;
+}
+
+[[nodiscard]] std::string hit_stable_id(
+    const arv::ui::UiTree& tree,
+    arv::Vec2f point) {
+  const std::optional<arv::ui::UiNodeID> hit = tree.hit_test(point);
+  if (!hit.has_value()) {
+    return {};
+  }
+  const arv::ui::UiElement* element = tree.element(hit.value());
+  return element == nullptr ? std::string{} : element->stable_id;
+}
+
+void expect_button_hittable(
+    const arv::ui::UiTree& tree,
+    std::string_view stable_id) {
+  const arv::ui::UiElement* button = tree.find_by_stable_id(stable_id);
+  ASSERT_NE(button, nullptr);
+  EXPECT_EQ(
+      hit_stable_id(
+          tree,
+          {button->rect.x + button->rect.width * 0.5F,
+           button->rect.y + button->rect.height * 0.5F}),
+      stable_id);
+  EXPECT_EQ(
+      hit_stable_id(
+          tree,
+          {button->rect.x + button->rect.width - 2.0F,
+           button->rect.y + button->rect.height * 0.5F}),
+      stable_id);
 }
 
 void write_text_file(const std::filesystem::path& path, const std::string& text) {
@@ -749,14 +780,30 @@ TEST(MenuScreenTests, AccountEditSkinManagerStagesOrderAndPickerCommands) {
   tree.layout({900.0F, 640.0F}, &text);
   ASSERT_NE(tree.find_by_stable_id("menu.account_edit.skin_dialog.panel"), nullptr);
   ASSERT_NE(tree.find_by_stable_id("menu.account_edit.skin_dialog.row.1.up"), nullptr);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_edit.skin_dialog.row.1.slim"), nullptr);
+  expect_button_hittable(tree, "menu.account_edit.skin_dialog.add");
+  expect_button_hittable(tree, "menu.account_edit.skin_dialog.cancel");
+  expect_button_hittable(tree, "menu.account_edit.skin_dialog.done");
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.account_edit.skin_dialog.row.1.slim", "account.skin_toggle_slim", "click"},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetLocalProfileSkinSlimCommand>(sink.commands[0]));
+  const auto& slim =
+      std::get<arv::ui::SetLocalProfileSkinSlimCommand>(sink.commands[0]);
+  ASSERT_TRUE(slim.profile_id.has_value());
+  EXPECT_EQ(slim.profile_id.value(), data.profiles[0].profile_id);
+  EXPECT_EQ(slim.skin_hash, "skin-b");
+  EXPECT_TRUE(slim.slim_model);
 
   EXPECT_TRUE(screens.route_action(
       {"menu.account_edit.skin_dialog.row.1.up", "account.skin_up", "click"},
       ctx));
-  ASSERT_EQ(sink.commands.size(), 1U);
-  ASSERT_TRUE(std::holds_alternative<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[0]));
+  ASSERT_EQ(sink.commands.size(), 2U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[1]));
   const auto& reorder =
-      std::get<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[0]);
+      std::get<arv::ui::SetLocalProfileSkinOrderCommand>(sink.commands[1]);
   ASSERT_TRUE(reorder.profile_id.has_value());
   EXPECT_EQ(reorder.profile_id.value(), data.profiles[0].profile_id);
   EXPECT_EQ(reorder.skin_hashes, (std::vector<std::string>{"skin-b", "skin-a", "skin-c"}));
@@ -764,10 +811,10 @@ TEST(MenuScreenTests, AccountEditSkinManagerStagesOrderAndPickerCommands) {
   EXPECT_TRUE(screens.route_action(
       {"menu.account_edit.skin_dialog.add", "account.skin_add", "click"},
       ctx));
-  ASSERT_EQ(sink.commands.size(), 2U);
-  ASSERT_TRUE(std::holds_alternative<arv::ui::PickLocalProfileSkinCommand>(sink.commands[1]));
+  ASSERT_EQ(sink.commands.size(), 3U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::PickLocalProfileSkinCommand>(sink.commands[2]));
   EXPECT_EQ(
-      std::get<arv::ui::PickLocalProfileSkinCommand>(sink.commands[1]).profile_id.value(),
+      std::get<arv::ui::PickLocalProfileSkinCommand>(sink.commands[2]).profile_id.value(),
       data.profiles[0].profile_id);
 }
 
@@ -789,6 +836,9 @@ TEST(MenuScreenTests, AccountCreateSkinManagerCanCancelBackToSnapshot) {
   screens.update(ctx);
   tree.layout({900.0F, 640.0F}, &text);
   ASSERT_NE(tree.find_by_stable_id("menu.account_create.skin_dialog.row.1.up"), nullptr);
+  expect_button_hittable(tree, "menu.account_create.skin_dialog.add");
+  expect_button_hittable(tree, "menu.account_create.skin_dialog.cancel");
+  expect_button_hittable(tree, "menu.account_create.skin_dialog.done");
 
   EXPECT_TRUE(screens.route_action(
       {"menu.account_create.skin_dialog.row.1.up", "account.skin_up", "click"},

@@ -251,6 +251,7 @@ validate_and_store_uploaded_skin(
   descriptor.format = protocol::SkinImageFormat::Png;
   descriptor.width = begin.width;
   descriptor.height = begin.height;
+  descriptor.slim_model = begin.slim_model;
   return Expected<protocol::SkinDescriptor, protocol::SkinUploadDenyReason>::success(
       std::move(descriptor));
 }
