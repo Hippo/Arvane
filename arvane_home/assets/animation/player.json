@@ -1,0 +1,1533 @@
+{
+  "animations": [
+    {
+      "name": "walk",
+      "length": 1,
+      "loop": "loop",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -45,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            45,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            45,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            -45,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.75,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            45,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.75,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            -45,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.75,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -45,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.75,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            45,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "idle",
+      "length": 2,
+      "loop": "loop",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            -5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "hit_left",
+      "length": 0.25,
+      "loop": "once",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.042,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            60,
+            0,
+            5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.125,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            60,
+            15,
+            -15
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "hit_right",
+      "length": 0.25,
+      "loop": "once",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.042,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            60,
+            0,
+            -5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.125,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            60,
+            -15,
+            15
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "sneak",
+      "length": 0.25,
+      "loop": "hold",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "body",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "head",
+          "channel": "position",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "position",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "position",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "body",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "head",
+          "channel": "position",
+          "value": [
+            0,
+            -1,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "left_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "right_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "sneak_idle",
+      "length": 2,
+      "loop": "loop",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "body",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "head",
+          "channel": "position",
+          "value": [
+            0,
+            -1,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            -5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "sneak_walk",
+      "length": 2,
+      "loop": "loop",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "body",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "head",
+          "channel": "position",
+          "value": [
+            0,
+            -1,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -35,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -10,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -10,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -35,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "sneak_hit_left",
+      "length": 0.25,
+      "loop": "once",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "body",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "head",
+          "channel": "position",
+          "value": [
+            0,
+            -1,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.042,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            60,
+            0,
+            5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.125,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            60,
+            15,
+            -15
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "sneak_hit_right",
+      "length": 0.25,
+      "loop": "once",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "body",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "head",
+          "channel": "position",
+          "value": [
+            0,
+            -1,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "position",
+          "value": [
+            0,
+            -2,
+            -6
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            -20,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.042,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            60,
+            0,
+            -5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.125,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            60,
+            -15,
+            15
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "swim_idle",
+      "length": 2,
+      "loop": "loop",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            10,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            -10,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            -5
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            -10,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            10,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 2,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "swim",
+      "length": 0.75,
+      "loop": "loop",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            80,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            80,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.25,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            180,
+            20,
+            -20
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            180,
+            -20,
+            20
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.583,
+          "bone": "left_arm",
+          "channel": "position",
+          "value": [
+            -1.25,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.583,
+          "bone": "right_arm",
+          "channel": "position",
+          "value": [
+            1.25,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.75,
+          "bone": "left_arm",
+          "channel": "rotation",
+          "value": [
+            180,
+            180,
+            -180
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.75,
+          "bone": "left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.75,
+          "bone": "right_arm",
+          "channel": "rotation",
+          "value": [
+            180,
+            180,
+            180
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.75,
+          "bone": "right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    }
+  ]
+}

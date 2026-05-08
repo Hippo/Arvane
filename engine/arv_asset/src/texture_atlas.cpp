@@ -1,6 +1,7 @@
 #include "arv/asset/texture_atlas.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <optional>
 #include <sstream>
@@ -187,6 +188,13 @@ void copy_with_edge_padding(
       return {{{u1, v1}, {u0, v1}, {u1, v0}, {u0, v0}}};
   }
   return {{{u0, v1}, {u1, v1}, {u0, v0}, {u1, v0}}};
+}
+
+[[nodiscard]] Vec3i model_coord_to_render_coord(Vec3f value) noexcept {
+  return {
+      static_cast<i32>(std::lround(value.x)),
+      static_cast<i32>(std::lround(value.y)),
+      static_cast<i32>(std::lround(value.z))};
 }
 
 } // namespace
@@ -398,8 +406,8 @@ BlockModelRenderBoxesResult build_block_model_render_boxes(
   render_boxes.reserve(model.boxes.size());
   for (const voxel::BlockModelBoxDefinition& box : model.boxes) {
     voxel::BlockModelBoxRenderData render_box;
-    render_box.min = box.min;
-    render_box.max = box.max;
+    render_box.min = model_coord_to_render_coord(box.min);
+    render_box.max = model_coord_to_render_coord(box.max);
     for (voxel::BlockFace face : voxel::AllBlockFaces) {
       const usize face_slot = voxel::face_index(face);
       if (!box.faces[face_slot].has_value()) {

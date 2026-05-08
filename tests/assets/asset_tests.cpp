@@ -76,6 +76,10 @@ TEST(AssetResourceTests, ResolvesNamespacedTexturePaths) {
   const std::filesystem::path resolved =
       resources.resolve_asset_path({"arvane:texture/block/stone"}, arv::asset::AssetKind::Texture);
   EXPECT_EQ(resolved, std::filesystem::path{"/tmp/arvane_assets/textures/block/stone.png"});
+
+  const std::filesystem::path animation =
+      resources.resolve_asset_path({"arvane:animation/pig"}, arv::asset::AssetKind::Animation);
+  EXPECT_EQ(animation, std::filesystem::path{"/tmp/arvane_assets/animation/pig.json"});
 }
 
 TEST(AssetResourceTests, MissingTextureFallbackIsCachedByIdentity) {

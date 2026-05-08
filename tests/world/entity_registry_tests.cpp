@@ -41,7 +41,8 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
         }
       },
       "presentation": {
-        "model": "pig.json"
+        "model": "pig.json",
+        "animation": "arvane:animation/pig"
       },
       "spawnable": true,
       "persistent_by_default": true,
@@ -70,6 +71,7 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
   EXPECT_EQ(pig->display_name, "Pig");
   EXPECT_EQ(pig->category, "passive");
   EXPECT_EQ(pig->model_asset, "arvane:model/entity/pig.json");
+  EXPECT_EQ(pig->animation_asset, "arvane:animation/pig");
   ASSERT_TRUE(pig->components.collision.has_value());
   EXPECT_EQ(pig->components.collision->box, (arv::Vec3f{0.9F, 0.9F, 0.9F}));
   ASSERT_TRUE(pig->components.movement.has_value());
@@ -90,6 +92,9 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
   EXPECT_EQ(
       resources.resolve_asset_path({pig->model_asset}, arv::asset::AssetKind::Model),
       std::filesystem::path{"/tmp/arvane_assets/models/entity/pig.json"});
+  EXPECT_EQ(
+      resources.resolve_asset_path({pig->animation_asset}, arv::asset::AssetKind::Animation),
+      std::filesystem::path{"/tmp/arvane_assets/animation/pig.json"});
 }
 
 TEST(EntityRegistryTests, AcceptsSingleEntityDefinitionObject) {
@@ -106,6 +111,44 @@ TEST(EntityRegistryTests, AcceptsSingleEntityDefinitionObject) {
   ASSERT_EQ(parsed.value().size(), 1U);
   EXPECT_EQ(parsed.value().front().name, "arvane:pig");
   EXPECT_EQ(parsed.value().front().model_asset, "pig.json");
+  EXPECT_TRUE(parsed.value().front().animation_asset.empty());
+}
+
+TEST(EntityRegistryTests, ParsesOptionalPresentationAnimation) {
+  auto parsed = arv::entity::parse_entity_definitions_json(R"json(
+{
+  "name": "arvane:pig",
+  "presentation": {
+    "model": "arvane:model/entity/pig",
+    "animation": "arvane:animation/pig"
+  }
+}
+)json");
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  auto registry_result =
+      arv::entity::EntityRegistry::build_with_builtins(std::move(parsed.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+  const std::optional<arv::EntityTypeID> pig_id =
+      registry_result.value().find_type("arvane:pig");
+  ASSERT_TRUE(pig_id.has_value());
+  const arv::entity::EntityTypeRecord* pig = registry_result.value().type(pig_id.value());
+  ASSERT_NE(pig, nullptr);
+  EXPECT_EQ(pig->animation_asset, "arvane:animation/pig");
+}
+
+TEST(EntityRegistryTests, RejectsInvalidPresentationAnimationAssetKind) {
+  auto parsed = arv::entity::parse_entity_definitions_json(R"json(
+{
+  "name": "arvane:pig",
+  "presentation": {
+    "model": "arvane:model/entity/pig",
+    "animation": "arvane:model/entity/pig"
+  }
+}
+)json");
+
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("presentation.animation"), std::string::npos);
 }
 
 TEST(EntityRegistryTests, RejectsUnknownAuthoredComponentIDs) {

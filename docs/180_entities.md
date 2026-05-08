@@ -134,7 +134,8 @@ Preferred format:
       },
 
       "presentation": {
-        "model": "arvane:model/entity/pig"
+        "model": "arvane:model/entity/pig",
+        "animation": "arvane:animation/pig"
       },
 
       "spawnable": true,
@@ -277,7 +278,8 @@ Defines non-simulation data used for rendering and client extraction.
 
 ```json
 "presentation": {
-  "model": "arvane:model/entity/pig"
+  "model": "arvane:model/entity/pig",
+  "animation": "arvane:animation/pig"
 }
 ```
 
@@ -286,6 +288,7 @@ Rules:
 * Presentation data must not affect simulation
 * Safe to change without breaking gameplay logic
 * Extracted by render systems, not simulation systems
+* `animation` is optional
 
 ---
 
@@ -312,6 +315,23 @@ arvane_home/assets/models/entity/
 ```
 
 Preferred format is full asset ID.
+
+### `animation`
+
+Optional animation asset reference.
+
+```json
+"animation": "arvane:animation/pig"
+```
+
+Animation references resolve under:
+
+```text
+arvane_home/assets/animation/
+```
+
+Animation data is client presentation data. It is not simulation behavior and
+does not change authoritative entity state.
 
 ---
 
@@ -456,7 +476,8 @@ This ensures:
 
 ## Entity Model Format
 
-Entity model JSON files define a simple textured skeleton made of cuboids.
+Entity model JSON files define textured cuboid geometry using the same authored
+model schema as block models.
 
 Model files live under:
 
@@ -471,21 +492,32 @@ Short texture filenames such as `pig.png` remain supported and resolve under:
 arvane_home/assets/textures/entity/
 ```
 
-The renderer supports:
+Entity models contain:
 
-- `skeleton`: named bones with a `pivot` and one or more cuboid `boxes`
-- per-face texture index and pixel UV rectangle
 - `textures`: model texture list
-- `texture_sizes`: source texture dimensions
-- `animations`: keyframed bone `rotation_euler` tracks
+- `texture_sizes`: authored UV-space dimensions
+- `boxes`: cuboids with per-face texture indices and authored UV rectangles
+- `boxes[].bone`: authored group name used by animation keyframes
+- `boxes[].pivot`: rotation origin for that authored group
 
-Skeleton box coordinates and bone pivots are authored in sixteenths of a block. Runtime rendering
-converts them to world units by dividing by 16. Bone rotations are evaluated on the client
-presentation side and never mutate authoritative entity simulation state.
+`boxes[].bone == ""` means root or static geometry. Non-empty `bone` values are
+names that animation keyframes can target. This is model-side binding metadata,
+not a model-owned hierarchy.
 
-Animation keyframes are sampled linearly by time. Looping animations wrap by their declared
-`length`. The first implemented presentation path plays the `walking` animation for rendered
-entity instances when present.
+Box coordinates and pivots are authored in sixteenths of a block. Runtime
+rendering converts them to world units by dividing by 16. Animated transforms are
+evaluated on the client presentation side and never mutate authoritative entity
+simulation state.
+
+Animations are separate assets under:
+
+```text
+arvane_home/assets/animation/
+```
+
+Animation clips contain keyframes with a `bone` string, a channel
+(`rotation`, `position`, or `scale`), and a vec3 value. Entity definitions bind
+animation assets through optional `presentation.animation`.
 
 ---
 

@@ -130,6 +130,15 @@ std::filesystem::path ResourceManager::resolve_asset_path(
       }
       extension = ".json";
       break;
+    case AssetKind::Animation:
+      if (path.starts_with("animation/")) {
+        relative = std::filesystem::path{"animation"} /
+                   std::filesystem::path{std::string{path.substr(std::string_view{"animation/"}.size())}};
+      } else {
+        relative = std::filesystem::path{std::string{path}};
+      }
+      extension = ".json";
+      break;
   }
 
   if (name_space != "arvane") {

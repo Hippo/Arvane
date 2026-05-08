@@ -1171,12 +1171,16 @@ private:
     }
 
     renderer_.clear_entity_models();
+    renderer_.clear_entity_animations();
     if (!assets.models.empty()) {
       render::TextureArrayUploadData entity_atlas_upload =
           texture_array_upload_from_atlas(assets.texture_atlas);
       renderer_.set_entity_texture_atlas(std::move(entity_atlas_upload));
       for (const render::EntityModelAsset& model : assets.models) {
         renderer_.set_entity_model(model);
+      }
+      for (const render::EntityAnimationAsset& animation : assets.animations) {
+        renderer_.set_entity_animation(animation);
       }
     }
     assets_.entity_render_assets = std::move(assets);

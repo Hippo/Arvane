@@ -81,6 +81,7 @@ struct EntityDefinition {
   std::string display_name{};
   std::string category{};
   std::string model_asset{};
+  std::string animation_asset{};
   EntityComponentSet components{};
   bool spawnable{true};
   bool persistent_by_default{};
@@ -93,6 +94,7 @@ struct EntityTypeRecord {
   std::string display_name{};
   std::string category{};
   std::string model_asset{};
+  std::string animation_asset{};
   EntityComponentSet components{};
   bool spawnable{true};
   bool persistent_by_default{};
@@ -123,6 +125,7 @@ private:
 
 [[nodiscard]] EntityDefinition make_player_entity_definition();
 [[nodiscard]] std::string normalize_entity_model_asset(std::string_view model);
+[[nodiscard]] std::string normalize_entity_animation_asset(std::string_view animation);
 [[nodiscard]] Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_definitions_json(
     std::string_view text);
 

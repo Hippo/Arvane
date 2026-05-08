@@ -35,6 +35,7 @@ arvane_home/
     models/
       block/
       entity/
+    animation/
     shaders/
     fonts/
     materials/
@@ -59,6 +60,7 @@ assets/
   models/
     block/
     entity/
+  animation/
   shaders/
   fonts/
   materials/
@@ -102,7 +104,8 @@ server-computed content hash.
 
 ### `models/`
 
-Defines geometry for blocks and entities.
+Defines geometry for blocks and entities. Block and entity models use the same
+authored cuboid schema.
 
 ```
 models/
@@ -113,8 +116,29 @@ models/
 **Notes:**
 
 * Models are **data-driven** (e.g. JSON)
+* Entity models are geometry-only assets
 * Support multiple textures per model
+* Each model box has a `bone` string and `pivot`; `bone: ""` is valid for
+  static/root geometry
 * Used by meshing and rendering systems
+
+---
+
+### `animation/`
+
+Defines separate entity presentation animation assets.
+
+```
+animation/
+```
+
+**Notes:**
+
+* Animation assets are JSON files
+* Asset IDs use `arvane:animation/name`
+* `arvane:animation/pig` resolves to `assets/animation/pig.json`
+* Keyframes reference authored model `boxes[].bone` names by string
+* Animation assets are client presentation data, not simulation behavior
 
 ---
 
@@ -249,6 +273,7 @@ Common engine asset types include:
 - item definitions
 - entity definitions
 - models
+- animations
 - fonts
 - sounds
 - localization files
@@ -318,6 +343,9 @@ Examples:
 ```txt
 arvane:block/stone
 arvane:texture/block/dirt
+arvane:model/block/stairs
+arvane:model/entity/pig
+arvane:animation/pig
 arvane:shader/world/chunk_opaque
 mod_example:block/marble
 ```
@@ -1370,6 +1398,8 @@ The first implementation should support:
 * shader source loading
 * shader compilation through renderer
 * block texture loading
+* block/entity model loading
+* entity animation asset loading
 * block atlas build
 * mip-safe atlas padding
 * fallback missing texture
@@ -1388,7 +1418,7 @@ The initial asset system does not need to support:
 * full resource pack layering
 * asset streaming from remote sources
 * compressed GPU texture formats
-* skeletal animation assets
+* complex animation controller/state-machine assets
 * audio streaming
 * arbitrary scripting assets
 * complex editor integration

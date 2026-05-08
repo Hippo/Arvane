@@ -37,7 +37,9 @@ public:
   [[nodiscard]] u16 player_skin_atlas_page_width() const noexcept;
   [[nodiscard]] u16 player_skin_atlas_page_height() const noexcept;
   void set_entity_model(EntityModelAsset model);
+  void set_entity_animation(EntityAnimationAsset animation);
   void clear_entity_models();
+  void clear_entity_animations();
 
   void resize(u32 width, u32 height) override;
 
@@ -298,6 +300,7 @@ private:
   HashMap<ChunkMeshKey, ChunkGpuState> chunks_;
   HashMap<EntityModelID, EntityModelAsset> entity_models_;
   HashMap<EntityModelID, EntityGpuModel> entity_gpu_models_;
+  HashMap<EntityAnimationID, EntityAnimationAsset> entity_animations_;
   std::deque<ChunkMeshUpload> pending_chunk_mesh_uploads_;
   std::vector<ChunkMeshUploadReceipt> chunk_mesh_upload_receipts_;
   GpuTexture terrain_atlas_{};

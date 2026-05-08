@@ -19,12 +19,14 @@ struct TextureTag {};
 struct MaterialTag {};
 struct ShaderTag {};
 struct EntityModelTag {};
+struct EntityAnimationTag {};
 
 using MeshID = ID<MeshTag>;
 using TextureID = ID<TextureTag>;
 using MaterialID = ID<MaterialTag>;
 using ShaderID = ID<ShaderTag>;
 using EntityModelID = ID<EntityModelTag>;
+using EntityAnimationID = ID<EntityAnimationTag>;
 
 struct FogParams {
   Vec3f color{0.55F, 0.68F, 0.82F};
@@ -496,6 +498,7 @@ struct EntityBoneRotationOverride {
 
 struct EntityDrawItem {
   EntityModelID model_id{};
+  EntityAnimationID animation_id{};
   Vec3f position{};
   Quatf rotation{};
   f32 scale{1.0F};

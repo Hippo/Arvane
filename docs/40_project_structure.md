@@ -150,6 +150,14 @@ Example:
 arvane_home/
   config/
     server_list.json
+  assets/
+    models/
+      block/
+      entity/
+    animation/
+    textures/
+      block/
+      entity/
   server-save/
     players/
     worlds/

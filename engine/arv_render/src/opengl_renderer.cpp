@@ -586,6 +586,11 @@ void OpenGLRenderer::set_entity_model(EntityModelAsset model) {
   entity_models_[id] = std::move(model);
 }
 
+void OpenGLRenderer::set_entity_animation(EntityAnimationAsset animation) {
+  const EntityAnimationID id = animation.id;
+  entity_animations_[id] = std::move(animation);
+}
+
 void OpenGLRenderer::clear_entity_models() {
   for (auto& [id, model] : entity_gpu_models_) {
     (void)id;
@@ -593,6 +598,10 @@ void OpenGLRenderer::clear_entity_models() {
   }
   entity_gpu_models_.clear();
   entity_models_.clear();
+}
+
+void OpenGLRenderer::clear_entity_animations() {
+  entity_animations_.clear();
 }
 
 void OpenGLRenderer::resize(u32 width, u32 height) {
@@ -1626,6 +1635,9 @@ void OpenGLRenderer::draw_entities_for(
         if (lhs->model_id != rhs->model_id) {
           return lhs->model_id < rhs->model_id;
         }
+        if (lhs->animation_id != rhs->animation_id) {
+          return lhs->animation_id < rhs->animation_id;
+        }
         if (lhs->animation_time_seconds != rhs->animation_time_seconds) {
           return lhs->animation_time_seconds < rhs->animation_time_seconds;
         }
@@ -1639,6 +1651,7 @@ void OpenGLRenderer::draw_entities_for(
 
   const auto same_entity_batch = [](const EntityDrawItem& lhs, const EntityDrawItem& rhs) {
     return lhs.model_id == rhs.model_id &&
+           lhs.animation_id == rhs.animation_id &&
            lhs.animation_time_seconds == rhs.animation_time_seconds &&
            lhs.animation_name == rhs.animation_name &&
            lhs.bone_rotation_overrides == rhs.bone_rotation_overrides;
@@ -1707,6 +1720,9 @@ void OpenGLRenderer::draw_entities_for(
 
     const EntityDrawItem& first_draw = *entity_draw_order_[batch_begin];
     const EntityModelAsset& model = entity_models_.find(first_draw.model_id)->second;
+    const auto animation_found = entity_animations_.find(first_draw.animation_id);
+    const EntityAnimationAsset* animation =
+        animation_found == entity_animations_.end() ? nullptr : &animation_found->second;
     EntityGpuModel& gpu = entity_gpu_models_.find(first_draw.model_id)->second;
     const auto bone_count = static_cast<GLsizei>(model.bones.size());
     for (usize bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
@@ -1720,6 +1736,7 @@ void OpenGLRenderer::draw_entities_for(
         model.bones.size()};
     sample_entity_model_animation(
         model,
+        animation,
         first_draw.animation_name,
         first_draw.animation_time_seconds,
         bone_rotations,

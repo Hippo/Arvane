@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -70,6 +71,19 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
   return "arvane:model/item/" + std::string{model};
 }
 
+[[nodiscard]] std::string asset_leaf_name(std::string_view asset_id) {
+  const usize separator = asset_id.find(':');
+  std::string_view path = separator == std::string_view::npos
+                              ? asset_id
+                              : asset_id.substr(separator + 1U);
+  const usize slash = path.rfind('/');
+  std::string_view leaf = slash == std::string_view::npos ? path : path.substr(slash + 1U);
+  if (leaf.ends_with(".json")) {
+    leaf.remove_suffix(std::string_view{".json"}.size());
+  }
+  return std::string{leaf};
+}
+
 [[nodiscard]] std::string resolve_entity_input_texture(std::string_view texture) {
   if (texture == "$0") {
     return std::string{DefaultPlayerSkinTextureAsset};
@@ -80,12 +94,22 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
 [[nodiscard]] render::EntityModelDefinition make_first_person_player_definition(
     render::EntityModelDefinition definition) {
   definition.name += "#first_person";
-  for (render::EntityModelBoneDefinition& bone : definition.bones) {
-    if (bone.name == "head") {
-      bone.boxes.clear();
-    }
-  }
+  definition.boxes.erase(
+      std::remove_if(
+          definition.boxes.begin(),
+          definition.boxes.end(),
+          [](const render::EntityModelBoxDefinition& box) {
+            return box.bone == "head";
+          }),
+      definition.boxes.end());
   return definition;
+}
+
+[[nodiscard]] Vec3i model_coord_to_render_coord(Vec3f value) noexcept {
+  return {
+      static_cast<i32>(std::lround(value.x)),
+      static_cast<i32>(std::lround(value.y)),
+      static_cast<i32>(std::lround(value.z))};
 }
 
 [[nodiscard]] std::string block_texture_for_face(
@@ -115,8 +139,8 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
   boxes.reserve(model.boxes.size());
   for (const voxel::BlockModelBoxDefinition& source : model.boxes) {
     voxel::BlockModelBoxRenderData box;
-    box.min = source.min;
-    box.max = source.max;
+    box.min = model_coord_to_render_coord(source.min);
+    box.max = model_coord_to_render_coord(source.max);
     for (const voxel::BlockFace face : voxel::AllBlockFaces) {
       const usize index = voxel::face_index(face);
       if (!source.faces[index].has_value() || source.faces[index]->texture_index < 0) {
@@ -268,6 +292,12 @@ EntityRenderAssetsResult build_entity_render_assets(
     bool first_person_player{};
     bool player_skin_atlas{};
   };
+  struct PendingAnimation {
+    EntityTypeID type_id{};
+    render::EntityAnimationID animation_id{};
+    std::string asset_id{};
+    render::EntityAnimationDefinition definition{};
+  };
   struct PendingTextureItem {
     player::ItemID item_id{};
     render::EntityModelID model_id{};
@@ -302,6 +332,8 @@ EntityRenderAssetsResult build_entity_render_assets(
   }
 
   std::vector<PendingModel> pending_models;
+  std::vector<PendingAnimation> pending_animations;
+  HashMap<EntityTypeID, usize> pending_animation_by_type;
   std::vector<PendingTextureItem> pending_texture_items;
   std::vector<PendingBlockItem> pending_block_items;
   std::vector<asset::AssetID> texture_ids;
@@ -334,6 +366,34 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
 
     render::EntityModelDefinition definition = std::move(model_definition.value());
+    if (definition.name.empty()) {
+      definition.name = asset_leaf_name(type.model_asset);
+    }
+    if (!type.animation_asset.empty()) {
+      auto animation_text =
+          resources.load_text({type.animation_asset}, asset::AssetKind::Animation);
+      if (!animation_text) {
+        return EntityRenderAssetsResult::failure(animation_text.error());
+      }
+      auto animation_definition = render::parse_entity_animation_json(
+          animation_text.value(),
+          resources
+              .resolve_asset_path({type.animation_asset}, asset::AssetKind::Animation)
+              .string());
+      if (!animation_definition) {
+        return EntityRenderAssetsResult::failure({type.animation_asset,
+                                                  resources.resolve_asset_path({type.animation_asset}, asset::AssetKind::Animation),
+                                                  "parse entity animation",
+                                                  animation_definition.error().message});
+      }
+      const usize animation_index = pending_animations.size();
+      pending_animation_by_type[type.id] = animation_index;
+      pending_animations.push_back({type.id,
+                                    render::EntityAnimationID{type.id.value},
+                                    type.animation_asset,
+                                    std::move(animation_definition.value())});
+    }
+
     std::vector<usize> player_skin_texture_slots;
     for (usize texture_index = 0; texture_index < definition.texture_assets.size(); ++texture_index) {
       std::string& texture = definition.texture_assets[texture_index];
@@ -425,6 +485,9 @@ EntityRenderAssetsResult build_entity_render_assets(
         for (std::string& texture : model_definition.value().texture_assets) {
           texture = resolve_entity_input_texture(texture);
           add_texture(texture);
+        }
+        if (model_definition.value().name.empty()) {
+          model_definition.value().name = asset_leaf_name(model_asset);
         }
         pending_models.push_back({EntityTypeID{},
                                   item_id,
@@ -554,6 +617,38 @@ EntityRenderAssetsResult build_entity_render_assets(
                                                 "build entity model",
                                                 model_asset.error().message});
     }
+    render::EntityModelAsset built_model = std::move(model_asset.value());
+    if (!pending.item_id.has_value() && !pending.first_person_player &&
+        !pending.player_skin_atlas) {
+      const auto pending_animation =
+          pending_animation_by_type.find(pending.type_id);
+      if (pending_animation != pending_animation_by_type.end()) {
+        PendingAnimation& animation =
+            pending_animations[pending_animation->second];
+        auto animation_asset = render::build_entity_animation_asset(
+            animation.animation_id,
+            animation.asset_id,
+            std::move(animation.definition));
+        if (!animation_asset) {
+          return EntityRenderAssetsResult::failure({animation.asset_id,
+                                                    {},
+                                                    "build entity animation",
+                                                    animation_asset.error().message});
+        }
+        if (std::optional<render::EntityModelError> binding_error =
+                render::validate_entity_animation_bindings(
+                    built_model,
+                    animation_asset.value());
+            binding_error.has_value()) {
+          return EntityRenderAssetsResult::failure({animation.asset_id,
+                                                    {},
+                                                    "validate entity animation",
+                                                    binding_error->message});
+        }
+        assets.animation_by_type[pending.type_id] = animation.animation_id;
+        assets.animations.push_back(std::move(animation_asset.value()));
+      }
+    }
     if (pending.item_id.has_value()) {
       assets.model_by_item[pending.item_id.value()] = pending.model_id;
     } else if (pending.first_person_player && pending.player_skin_atlas) {
@@ -565,7 +660,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     } else {
       assets.model_by_type[pending.type_id] = pending.model_id;
     }
-    assets.models.push_back(std::move(model_asset.value()));
+    assets.models.push_back(std::move(built_model));
   }
 
   for (const PendingTextureItem& pending : pending_texture_items) {

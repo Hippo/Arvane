@@ -24,7 +24,7 @@
               "type": "arvane:float_in_fluid",
               "priority": 0,
               "speed_multiplier": 0.5,
-              "animation": "walking"
+              "animation": "walk"
             },
             {
               "type": "arvane:wander",
@@ -33,7 +33,7 @@
               "speed_multiplier": 0.8,
               "duration_ticks": 80,
               "cooldown_ticks": 40,
-              "animation": "walking"
+              "animation": "walk"
             },
             {
               "type": "arvane:idle",
@@ -45,7 +45,8 @@
         }
       },
       "presentation": {
-        "model": "arvane:model/entity/pig"
+        "model": "arvane:model/entity/pig",
+        "animation": "arvane:animation/pig"
       },
       "spawnable": true,
       "persistent_by_default": true,

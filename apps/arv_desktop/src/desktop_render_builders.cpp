@@ -186,6 +186,7 @@ void populate_world_frame_draw_items(
     if (model == entity_render_assets.model_by_type.end()) {
       continue;
     }
+    const auto animation = entity_render_assets.animation_by_type.find(mirror.entity_type);
     render::EntityModelID model_id = model->second;
     const bool is_local_player =
         (local_entity_id.has_value() && mirror.entity_id == local_entity_id.value()) ||
@@ -236,6 +237,9 @@ void populate_world_frame_draw_items(
     }
     render::EntityDrawItem item;
     item.model_id = model_id;
+    if (animation != entity_render_assets.animation_by_type.end()) {
+      item.animation_id = animation->second;
+    }
     item.position = position;
     item.rotation =
         is_local_player

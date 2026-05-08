@@ -132,22 +132,30 @@ struct BlockVariantRecord {
   std::vector<Aabb3f> collision_boxes{};
 };
 
-struct BlockModelFaceDefinition {
+struct AuthoredModelFaceDefinition {
   i32 texture_index{};
   Vec4i uv{};
 };
 
-struct BlockModelBoxDefinition {
-  Vec3i min{};
-  Vec3i max{};
-  std::array<std::optional<BlockModelFaceDefinition>, BlockFaceCount> faces{};
+struct AuthoredModelBoxDefinition {
+  std::string bone{};
+  Vec3f pivot{};
+  Vec3f min{};
+  Vec3f max{};
+  f32 inflate{};
+  std::array<std::optional<AuthoredModelFaceDefinition>, BlockFaceCount> faces{};
 };
 
-struct BlockModelDefinition {
-  std::vector<BlockModelBoxDefinition> boxes{};
+struct AuthoredModelDefinition {
+  std::string name{};
+  std::vector<AuthoredModelBoxDefinition> boxes{};
   std::vector<std::string> texture_assets{};
   std::vector<Vec2i> texture_sizes{};
 };
+
+using BlockModelFaceDefinition = AuthoredModelFaceDefinition;
+using BlockModelBoxDefinition = AuthoredModelBoxDefinition;
+using BlockModelDefinition = AuthoredModelDefinition;
 
 struct BlockFaceRenderData {
   u32 page{};
@@ -173,6 +181,7 @@ struct BlockVariantRenderData {
 };
 
 using BlockDefinitionsResult = Expected<std::vector<BlockDefinition>, BlockRegistryError>;
+using AuthoredModelDefinitionResult = Expected<AuthoredModelDefinition, BlockRegistryError>;
 using BlockModelDefinitionResult = Expected<BlockModelDefinition, BlockRegistryError>;
 
 [[nodiscard]] constexpr usize face_index(BlockFace face) noexcept {
@@ -323,6 +332,8 @@ private:
 }
 
 [[nodiscard]] BlockDefinitionsResult parse_block_definitions_json(std::string_view text);
+
+[[nodiscard]] AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text);
 
 [[nodiscard]] BlockModelDefinitionResult parse_block_model_json(
     std::string_view text,

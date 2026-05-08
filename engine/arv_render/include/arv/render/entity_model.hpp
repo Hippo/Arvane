@@ -31,42 +31,19 @@ struct EntityModelFaceDefinition {
 };
 
 struct EntityModelBoxDefinition {
+  std::string bone{};
+  Vec3f pivot{};
   Vec3f min{};
   Vec3f max{};
   f32 inflate{};
   std::array<std::optional<EntityModelFaceDefinition>, 6> faces{};
 };
 
-struct EntityModelBoneDefinition {
-  std::string name{};
-  Vec3f pivot{};
-  std::vector<EntityModelBoxDefinition> boxes{};
-};
-
-struct EntityModelAnimationBoneDefinition {
-  std::string bone_name{};
-  std::optional<Vec3f> rotation_euler_degrees{};
-  std::optional<Vec3f> position_offset{};
-};
-
-struct EntityModelAnimationKeyframeDefinition {
-  f32 time_seconds{};
-  std::vector<EntityModelAnimationBoneDefinition> bones{};
-};
-
-struct EntityModelAnimationDefinition {
-  std::string name{};
-  f32 length_seconds{};
-  bool loop{};
-  std::vector<EntityModelAnimationKeyframeDefinition> keyframes{};
-};
-
 struct EntityModelDefinition {
   std::string name{};
-  std::vector<EntityModelBoneDefinition> bones{};
+  std::vector<EntityModelBoxDefinition> boxes{};
   std::vector<std::string> texture_assets{};
   std::vector<Vec2i> texture_sizes{};
-  std::vector<EntityModelAnimationDefinition> animations{};
 };
 
 struct EntityModelTextureBinding {
@@ -99,22 +76,39 @@ struct EntityModelMeshVertex {
   u32 atlas_page{};
 };
 
-struct EntityModelAnimationBoneKey {
-  u32 bone_index{};
-  std::optional<Vec3f> rotation_euler_degrees{};
-  std::optional<Vec3f> position_offset{};
+enum class EntityAnimationChannel : u8 {
+  Rotation,
+  Position,
+  Scale,
 };
 
-struct EntityModelAnimationKeyframe {
+enum class EntityAnimationInterpolation : u8 {
+  Linear,
+};
+
+struct EntityAnimationKeyframe {
   f32 time_seconds{};
-  std::vector<EntityModelAnimationBoneKey> bones{};
+  std::string bone_name{};
+  EntityAnimationChannel channel{EntityAnimationChannel::Rotation};
+  Vec3f value{};
+  EntityAnimationInterpolation interpolation{EntityAnimationInterpolation::Linear};
 };
 
-struct EntityModelAnimation {
+struct EntityAnimationClip {
   std::string name{};
   f32 length_seconds{};
   bool loop{};
-  std::vector<EntityModelAnimationKeyframe> keyframes{};
+  std::vector<EntityAnimationKeyframe> keyframes{};
+};
+
+struct EntityAnimationDefinition {
+  std::vector<EntityAnimationClip> clips{};
+};
+
+struct EntityAnimationAsset {
+  EntityAnimationID id{};
+  std::string name{};
+  std::vector<EntityAnimationClip> clips{};
 };
 
 struct EntityModelAsset {
@@ -123,25 +117,38 @@ struct EntityModelAsset {
   std::vector<EntityModelBone> bones{};
   std::vector<EntityModelMeshVertex> vertices{};
   std::vector<u32> indices{};
-  std::vector<EntityModelAnimation> animations{};
 };
 
 using EntityModelDefinitionResult = Expected<EntityModelDefinition, EntityModelError>;
 using EntityModelAssetResult = Expected<EntityModelAsset, EntityModelError>;
+using EntityAnimationDefinitionResult = Expected<EntityAnimationDefinition, EntityModelError>;
+using EntityAnimationAssetResult = Expected<EntityAnimationAsset, EntityModelError>;
 
 [[nodiscard]] std::string normalize_entity_texture_asset(std::string_view texture);
 [[nodiscard]] EntityModelDefinitionResult parse_entity_model_json(std::string_view text);
+[[nodiscard]] EntityAnimationDefinitionResult parse_entity_animation_json(
+    std::string_view text,
+    std::string_view diagnostic_path = {});
 [[nodiscard]] EntityModelAssetResult build_entity_model_asset(
     EntityModelID id,
     const EntityModelDefinition& definition,
     std::span<const EntityModelTextureBinding> texture_bindings);
+[[nodiscard]] EntityAnimationAssetResult build_entity_animation_asset(
+    EntityAnimationID id,
+    std::string name,
+    EntityAnimationDefinition definition);
+[[nodiscard]] std::optional<EntityModelError> validate_entity_animation_bindings(
+    const EntityModelAsset& model,
+    const EntityAnimationAsset& animation);
 void sample_entity_model_animation(
     const EntityModelAsset& model,
+    const EntityAnimationAsset* animation,
     std::string_view animation_name,
     f32 time_seconds,
     std::span<Vec3f> output_rotations);
 void sample_entity_model_animation(
     const EntityModelAsset& model,
+    const EntityAnimationAsset* animation,
     std::string_view animation_name,
     f32 time_seconds,
     std::span<Vec3f> output_rotations,

@@ -25,7 +25,9 @@ struct BlockOutlineRenderConfig {
 struct EntityRenderAssets {
   asset::TextureAtlas texture_atlas{};
   std::vector<render::EntityModelAsset> models{};
+  std::vector<render::EntityAnimationAsset> animations{};
   HashMap<EntityTypeID, render::EntityModelID> model_by_type{};
+  HashMap<EntityTypeID, render::EntityAnimationID> animation_by_type{};
   render::EntityModelID player_skin_model{};
   render::EntityModelID first_person_player_model{};
   render::EntityModelID first_person_player_skin_model{};

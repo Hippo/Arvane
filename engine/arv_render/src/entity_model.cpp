@@ -1,7 +1,10 @@
 #include "arv/render/entity_model.hpp"
 
+#include "arv/voxel/block.hpp"
+
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -15,37 +18,43 @@ using json = nlohmann::json;
   return static_cast<usize>(face);
 }
 
-[[nodiscard]] Expected<Vec3f, EntityModelError> read_vec3(const json& node, std::string_view field) {
+[[nodiscard]] Expected<Vec3f, EntityModelError> read_vec3(
+    const json& node,
+    const std::string& field) {
   if (!node.is_array() || node.size() != 3U) {
     return Expected<Vec3f, EntityModelError>::failure(
-        {std::string{field} + " must be a 3-element array"});
+        {field + " must be a 3-element numeric array"});
   }
-  return Expected<Vec3f, EntityModelError>::success({
+  for (const json& value : node) {
+    if (!value.is_number()) {
+      return Expected<Vec3f, EntityModelError>::failure(
+          {field + " entries must be numeric"});
+    }
+  }
+  Vec3f result{
       node.at(0).get<f32>(),
       node.at(1).get<f32>(),
-      node.at(2).get<f32>()});
+      node.at(2).get<f32>()};
+  if (!std::isfinite(result.x) || !std::isfinite(result.y) ||
+      !std::isfinite(result.z)) {
+    return Expected<Vec3f, EntityModelError>::failure(
+        {field + " entries must be finite"});
+  }
+  return Expected<Vec3f, EntityModelError>::success(result);
 }
 
-[[nodiscard]] Expected<Vec2i, EntityModelError> read_vec2i(const json& node, std::string_view field) {
-  if (!node.is_array() || node.size() != 2U) {
-    return Expected<Vec2i, EntityModelError>::failure(
-        {std::string{field} + " must be a 2-element array"});
+[[nodiscard]] std::string field_path(std::string_view path, std::string_view field) {
+  if (path.empty()) {
+    return std::string{field};
   }
-  return Expected<Vec2i, EntityModelError>::success({
-      node.at(0).get<i32>(),
-      node.at(1).get<i32>()});
+  return std::string{path} + "." + std::string{field};
 }
 
-[[nodiscard]] Expected<Vec4i, EntityModelError> read_vec4i(const json& node, std::string_view field) {
-  if (!node.is_array() || node.size() != 4U) {
-    return Expected<Vec4i, EntityModelError>::failure(
-        {std::string{field} + " must be a 4-element array"});
-  }
-  return Expected<Vec4i, EntityModelError>::success({
-      node.at(0).get<i32>(),
-      node.at(1).get<i32>(),
-      node.at(2).get<i32>(),
-      node.at(3).get<i32>()});
+[[nodiscard]] std::string indexed_field_path(
+    std::string_view path,
+    std::string_view field,
+    usize index) {
+  return field_path(path, field) + "[" + std::to_string(index) + "]";
 }
 
 [[nodiscard]] std::optional<EntityModelFace> face_from_name(std::string_view name) noexcept {
@@ -70,6 +79,24 @@ using json = nlohmann::json;
   return std::nullopt;
 }
 
+[[nodiscard]] EntityModelFace face_from_block_face(voxel::BlockFace face) noexcept {
+  switch (face) {
+    case voxel::BlockFace::PositiveX:
+      return EntityModelFace::PositiveX;
+    case voxel::BlockFace::NegativeX:
+      return EntityModelFace::NegativeX;
+    case voxel::BlockFace::PositiveY:
+      return EntityModelFace::PositiveY;
+    case voxel::BlockFace::NegativeY:
+      return EntityModelFace::NegativeY;
+    case voxel::BlockFace::PositiveZ:
+      return EntityModelFace::PositiveZ;
+    case voxel::BlockFace::NegativeZ:
+      return EntityModelFace::NegativeZ;
+  }
+  return EntityModelFace::NegativeX;
+}
+
 [[nodiscard]] Vec3f face_color(EntityModelFace face) noexcept {
   switch (face) {
     case EntityModelFace::PositiveY:
@@ -86,7 +113,9 @@ using json = nlohmann::json;
   return {1.0F, 1.0F, 1.0F};
 }
 
-[[nodiscard]] std::array<Vec3f, 4> face_corners(const EntityModelBoxDefinition& box, EntityModelFace face) {
+[[nodiscard]] std::array<Vec3f, 4> face_corners(
+    const EntityModelBoxDefinition& box,
+    EntityModelFace face) {
   const Vec3f min = box.min;
   const Vec3f max = box.max;
   switch (face) {
@@ -164,34 +193,10 @@ using json = nlohmann::json;
 
   box.min = {-inflated_max.x, inflated_min.y, inflated_min.z};
   box.max = {-inflated_min.x, inflated_max.y, inflated_max.z};
+  box.pivot = blockbench_position_to_engine(source.pivot);
   std::swap(box.faces[face_index(EntityModelFace::PositiveX)],
             box.faces[face_index(EntityModelFace::NegativeX)]);
   return box;
-}
-
-[[nodiscard]] Expected<EntityModelFaceDefinition, EntityModelError> read_face(const json& node) {
-  if (!node.is_object()) {
-    return Expected<EntityModelFaceDefinition, EntityModelError>::failure(
-        {"face entry must be an object"});
-  }
-  EntityModelFaceDefinition face;
-  if (const auto texture = node.find("texture"); texture != node.end()) {
-    face.texture_index = texture->get<i32>();
-  }
-  if (face.texture_index < 0) {
-    return Expected<EntityModelFaceDefinition, EntityModelError>::success(face);
-  }
-  const auto uv = node.find("uv");
-  if (uv == node.end()) {
-    return Expected<EntityModelFaceDefinition, EntityModelError>::failure(
-        {"face entry is missing uv"});
-  }
-  auto parsed_uv = read_vec4i(*uv, "face uv");
-  if (!parsed_uv) {
-    return Expected<EntityModelFaceDefinition, EntityModelError>::failure(parsed_uv.error());
-  }
-  face.uv = parsed_uv.value();
-  return Expected<EntityModelFaceDefinition, EntityModelError>::success(face);
 }
 
 void append_face(
@@ -229,60 +234,54 @@ void append_face(
       from.z + (to.z - from.z) * alpha};
 }
 
-[[nodiscard]] const EntityModelAnimation* find_animation(
-    const EntityModelAsset& model,
+[[nodiscard]] const EntityAnimationClip* find_clip(
+    const EntityAnimationAsset* animation,
     std::string_view name) noexcept {
-  if (name.empty()) {
+  if (animation == nullptr || name.empty()) {
     return nullptr;
   }
-  for (const EntityModelAnimation& animation : model.animations) {
-    if (animation.name == name) {
-      return &animation;
+  for (const EntityAnimationClip& clip : animation->clips) {
+    if (clip.name == name) {
+      return &clip;
     }
   }
   return nullptr;
 }
 
-[[nodiscard]] std::optional<Vec3f> keyframe_rotation_for_bone(
-    const EntityModelAnimationKeyframe& keyframe,
-    u32 bone_index) noexcept {
-  for (const EntityModelAnimationBoneKey& bone : keyframe.bones) {
-    if (bone.bone_index == bone_index) {
-      return bone.rotation_euler_degrees;
-    }
+[[nodiscard]] std::optional<Vec3f> keyframe_channel_for_bone(
+    const EntityAnimationKeyframe& keyframe,
+    std::string_view bone_name,
+    EntityAnimationChannel channel) noexcept {
+  if (keyframe.bone_name == bone_name && keyframe.channel == channel) {
+    return keyframe.value;
   }
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<Vec3f> keyframe_position_for_bone(
-    const EntityModelAnimationKeyframe& keyframe,
-    u32 bone_index) noexcept {
-  for (const EntityModelAnimationBoneKey& bone : keyframe.bones) {
-    if (bone.bone_index == bone_index) {
-      return bone.position_offset;
-    }
-  }
-  return std::nullopt;
-}
-
-template <typename ChannelForBone>
 [[nodiscard]] Vec3f sample_animation_bone_channel(
-    const EntityModelAnimation& animation,
-    u32 bone_index,
-    f32 sample_time,
-    ChannelForBone channel_for_bone) noexcept {
-  const bool looping = animation.loop && animation.length_seconds > 0.0F;
-  const EntityModelAnimationKeyframe* first = nullptr;
-  const EntityModelAnimationKeyframe* last = nullptr;
-  const EntityModelAnimationKeyframe* previous = nullptr;
-  const EntityModelAnimationKeyframe* next = nullptr;
+    const EntityAnimationClip& clip,
+    std::string_view bone_name,
+    EntityAnimationChannel channel,
+    f32 sample_time) noexcept {
+  const bool looping = clip.loop && clip.length_seconds > 0.0F;
+  if (looping) {
+    sample_time = std::fmod(sample_time, clip.length_seconds);
+    if (sample_time < 0.0F) {
+      sample_time += clip.length_seconds;
+    }
+  }
+  const EntityAnimationKeyframe* first = nullptr;
+  const EntityAnimationKeyframe* last = nullptr;
+  const EntityAnimationKeyframe* previous = nullptr;
+  const EntityAnimationKeyframe* next = nullptr;
   f32 first_time = 0.0F;
   f32 last_time = 0.0F;
   f32 previous_time = 0.0F;
   f32 next_time = 0.0F;
 
-  for (const EntityModelAnimationKeyframe& keyframe : animation.keyframes) {
-    const std::optional<Vec3f> value = channel_for_bone(keyframe, bone_index);
+  for (const EntityAnimationKeyframe& keyframe : clip.keyframes) {
+    const std::optional<Vec3f> value =
+        keyframe_channel_for_bone(keyframe, bone_name, channel);
     if (!value.has_value()) {
       continue;
     }
@@ -305,27 +304,26 @@ template <typename ChannelForBone>
   if (first == nullptr) {
     return {};
   }
-
   if (looping) {
     if (previous == nullptr) {
       previous = last;
-      previous_time = last_time - animation.length_seconds;
+      previous_time = last_time - clip.length_seconds;
     }
     if (next == nullptr) {
       next = first;
-      next_time = first_time + animation.length_seconds;
+      next_time = first_time + clip.length_seconds;
     }
   }
-
   if (previous == nullptr) {
     return {};
   }
-  const Vec3f from = channel_for_bone(*previous, bone_index).value_or(Vec3f{});
+  const Vec3f from =
+      keyframe_channel_for_bone(*previous, bone_name, channel).value_or(Vec3f{});
   if (next == nullptr) {
     return from;
   }
-
-  const Vec3f to = channel_for_bone(*next, bone_index).value_or(from);
+  const Vec3f to =
+      keyframe_channel_for_bone(*next, bone_name, channel).value_or(from);
   const f32 span = next_time - previous_time;
   if (span <= 0.0001F) {
     return from;
@@ -334,26 +332,67 @@ template <typename ChannelForBone>
   return lerp(from, to, alpha);
 }
 
-[[nodiscard]] Vec3f sample_animation_bone_rotation(
-    const EntityModelAnimation& animation,
-    u32 bone_index,
-    f32 sample_time) noexcept {
-  return sample_animation_bone_channel(
-      animation,
-      bone_index,
-      sample_time,
-      keyframe_rotation_for_bone);
+[[nodiscard]] Expected<EntityAnimationChannel, EntityModelError> parse_animation_channel(
+    const json& node,
+    const std::string& path) {
+  if (!node.is_string()) {
+    return Expected<EntityAnimationChannel, EntityModelError>::failure(
+        {path + ".channel must be a string"});
+  }
+  const std::string channel = node.get<std::string>();
+  if (channel == "rotation") {
+    return Expected<EntityAnimationChannel, EntityModelError>::success(
+        EntityAnimationChannel::Rotation);
+  }
+  if (channel == "position") {
+    return Expected<EntityAnimationChannel, EntityModelError>::success(
+        EntityAnimationChannel::Position);
+  }
+  if (channel == "scale") {
+    return Expected<EntityAnimationChannel, EntityModelError>::success(
+        EntityAnimationChannel::Scale);
+  }
+  return Expected<EntityAnimationChannel, EntityModelError>::failure(
+      {path + ".channel has unsupported animation channel: " + channel});
 }
 
-[[nodiscard]] Vec3f sample_animation_bone_position(
-    const EntityModelAnimation& animation,
-    u32 bone_index,
-    f32 sample_time) noexcept {
-  return sample_animation_bone_channel(
-      animation,
-      bone_index,
-      sample_time,
-      keyframe_position_for_bone);
+[[nodiscard]] Expected<EntityAnimationInterpolation, EntityModelError>
+parse_animation_interpolation(const json& node, const std::string& path) {
+  if (!node.is_string()) {
+    return Expected<EntityAnimationInterpolation, EntityModelError>::failure(
+        {path + ".interpolation must be a string"});
+  }
+  const std::string interpolation = node.get<std::string>();
+  if (interpolation == "linear") {
+    return Expected<EntityAnimationInterpolation, EntityModelError>::success(
+        EntityAnimationInterpolation::Linear);
+  }
+  return Expected<EntityAnimationInterpolation, EntityModelError>::failure(
+      {path + ".interpolation has unsupported value: " + interpolation});
+}
+
+[[nodiscard]] Expected<bool, EntityModelError> parse_animation_loop(
+    const json& node,
+    const std::string& path) {
+  if (node.is_boolean()) {
+    return Expected<bool, EntityModelError>::success(node.get<bool>());
+  }
+  if (node.is_string()) {
+    const std::string loop = node.get<std::string>();
+    if (loop.empty() || loop == "none" || loop == "false" || loop == "once" ||
+        loop == "hold") {
+      return Expected<bool, EntityModelError>::success(false);
+    }
+    if (loop == "loop" || loop == "true") {
+      return Expected<bool, EntityModelError>::success(true);
+    }
+  }
+  return Expected<bool, EntityModelError>::failure(
+      {path + ".loop must be a boolean or accepted loop string"});
+}
+
+[[nodiscard]] bool is_player_entity_model_name(const std::string& name) noexcept {
+  return name == "player" || name.rfind("player#", 0) == 0;
 }
 
 } // namespace
@@ -372,162 +411,189 @@ std::string normalize_entity_texture_asset(std::string_view texture) {
 }
 
 EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
-  try {
-    const json root = json::parse(text.begin(), text.end());
-    if (!root.is_object()) {
-      return EntityModelDefinitionResult::failure({"entity model root must be an object"});
-    }
-
-    EntityModelDefinition definition;
-    if (const auto name = root.find("name"); name != root.end()) {
-      definition.name = name->get<std::string>();
-    }
-
-    const auto skeleton = root.find("skeleton");
-    if (skeleton == root.end() || !skeleton->is_array()) {
-      return EntityModelDefinitionResult::failure({"entity model is missing skeleton array"});
-    }
-
-    definition.bones.reserve(skeleton->size());
-    for (const json& bone_json : *skeleton) {
-      if (!bone_json.is_object()) {
-        return EntityModelDefinitionResult::failure({"skeleton bone must be an object"});
-      }
-      EntityModelBoneDefinition bone;
-      bone.name = bone_json.at("name").get<std::string>();
-      auto pivot = read_vec3(bone_json.at("pivot"), "bone pivot");
-      if (!pivot) {
-        return EntityModelDefinitionResult::failure(pivot.error());
-      }
-      bone.pivot = pivot.value();
-      if (const auto boxes = bone_json.find("boxes"); boxes != bone_json.end()) {
-        if (!boxes->is_array()) {
-          return EntityModelDefinitionResult::failure({"bone boxes must be an array"});
-        }
-        for (const json& box_json : *boxes) {
-          EntityModelBoxDefinition box;
-          auto min = read_vec3(box_json.at("min"), "box min");
-          auto max = read_vec3(box_json.at("max"), "box max");
-          if (!min) {
-            return EntityModelDefinitionResult::failure(min.error());
-          }
-          if (!max) {
-            return EntityModelDefinitionResult::failure(max.error());
-          }
-          box.min = min.value();
-          box.max = max.value();
-          box.inflate = box_json.value("inflate", 0.0F);
-          for (std::string_view face_name : {"east", "west", "up", "down", "south", "north"}) {
-            const auto face_json = box_json.find(std::string{face_name});
-            if (face_json == box_json.end()) {
-              continue;
-            }
-            auto face = read_face(*face_json);
-            if (!face) {
-              return EntityModelDefinitionResult::failure(face.error());
-            }
-            box.faces[face_index(face_from_name(face_name).value())] = face.value();
-          }
-          bone.boxes.push_back(std::move(box));
-        }
-      }
-      definition.bones.push_back(std::move(bone));
-    }
-
-    if (const auto textures = root.find("textures"); textures != root.end()) {
-      if (!textures->is_array()) {
-        return EntityModelDefinitionResult::failure({"textures must be an array"});
-      }
-      for (const json& texture : *textures) {
-        definition.texture_assets.push_back(normalize_entity_texture_asset(texture.get<std::string>()));
-      }
-    }
-    if (definition.texture_assets.empty()) {
-      definition.texture_assets.push_back("arvane:texture/missing");
-    }
-
-    if (const auto texture_sizes = root.find("texture_sizes"); texture_sizes != root.end()) {
-      if (!texture_sizes->is_array()) {
-        return EntityModelDefinitionResult::failure({"texture_sizes must be an array"});
-      }
-      for (const json& size : *texture_sizes) {
-        auto parsed_size = read_vec2i(size, "texture size");
-        if (!parsed_size) {
-          return EntityModelDefinitionResult::failure(parsed_size.error());
-        }
-        definition.texture_sizes.push_back(parsed_size.value());
-      }
-    }
-
-    if (const auto animations = root.find("animations"); animations != root.end()) {
-      if (!animations->is_array()) {
-        return EntityModelDefinitionResult::failure({"animations must be an array"});
-      }
-      for (const json& animation_json : *animations) {
-        EntityModelAnimationDefinition animation;
-        animation.name = animation_json.at("name").get<std::string>();
-        animation.length_seconds = animation_json.value("length", 0.0F);
-        animation.loop = animation_json.value("loop", std::string{}) == "loop";
-        if (const auto keyframes = animation_json.find("keyframes"); keyframes != animation_json.end()) {
-          if (!keyframes->is_array()) {
-            return EntityModelDefinitionResult::failure({"animation keyframes must be an array"});
-          }
-          for (const json& keyframe_json : *keyframes) {
-            EntityModelAnimationKeyframeDefinition keyframe;
-            keyframe.time_seconds = keyframe_json.value("time", 0.0F);
-            if (const auto bones = keyframe_json.find("bones"); bones != keyframe_json.end()) {
-              if (!bones->is_array()) {
-                return EntityModelDefinitionResult::failure({"keyframe bones must be an array"});
-              }
-              for (const json& bone_json : *bones) {
-                EntityModelAnimationBoneDefinition bone;
-                bone.bone_name = bone_json.at("name").get<std::string>();
-                if (const auto rotation_json = bone_json.find("rotation_euler");
-                    rotation_json != bone_json.end()) {
-                  auto rotation = read_vec3(*rotation_json, "bone rotation_euler");
-                  if (!rotation) {
-                    return EntityModelDefinitionResult::failure(rotation.error());
-                  }
-                  bone.rotation_euler_degrees = rotation.value();
-                }
-                if (const auto position_json = bone_json.find("position");
-                    position_json != bone_json.end()) {
-                  auto position = read_vec3(*position_json, "bone position");
-                  if (!position) {
-                    return EntityModelDefinitionResult::failure(position.error());
-                  }
-                  bone.position_offset = position.value();
-                }
-                if (!bone.rotation_euler_degrees.has_value() &&
-                    !bone.position_offset.has_value()) {
-                  return EntityModelDefinitionResult::failure(
-                      {"animation bone must include rotation_euler or position"});
-                }
-                keyframe.bones.push_back(std::move(bone));
-              }
-            }
-            animation.keyframes.push_back(std::move(keyframe));
-          }
-        }
-        std::sort(
-            animation.keyframes.begin(),
-            animation.keyframes.end(),
-            [](const auto& lhs, const auto& rhs) {
-              return lhs.time_seconds < rhs.time_seconds;
-            });
-        definition.animations.push_back(std::move(animation));
-      }
-    }
-
-    return EntityModelDefinitionResult::success(std::move(definition));
-  } catch (const json::exception& ex) {
-    return EntityModelDefinitionResult::failure(
-        {"failed to parse entity model JSON: " + std::string{ex.what()}});
+  auto authored_model = voxel::parse_authored_model_json(text);
+  if (!authored_model) {
+    return EntityModelDefinitionResult::failure({authored_model.error().message});
   }
+
+  EntityModelDefinition definition;
+  definition.name = std::move(authored_model.value().name);
+  definition.texture_assets.reserve(authored_model.value().texture_assets.size());
+  for (const std::string& texture : authored_model.value().texture_assets) {
+    definition.texture_assets.push_back(normalize_entity_texture_asset(texture));
+  }
+  definition.texture_sizes = std::move(authored_model.value().texture_sizes);
+  definition.boxes.reserve(authored_model.value().boxes.size());
+  for (const voxel::AuthoredModelBoxDefinition& source_box : authored_model.value().boxes) {
+    EntityModelBoxDefinition box;
+    box.bone = source_box.bone;
+    box.pivot = source_box.pivot;
+    box.min = source_box.min;
+    box.max = source_box.max;
+    box.inflate = source_box.inflate;
+    for (voxel::BlockFace source_face : voxel::AllBlockFaces) {
+      const usize source_index = voxel::face_index(source_face);
+      if (!source_box.faces[source_index].has_value()) {
+        continue;
+      }
+      const voxel::AuthoredModelFaceDefinition& source_face_definition =
+          source_box.faces[source_index].value();
+      box.faces[face_index(face_from_block_face(source_face))] = EntityModelFaceDefinition{
+          source_face_definition.texture_index,
+          source_face_definition.uv};
+    }
+    definition.boxes.push_back(std::move(box));
+  }
+  return EntityModelDefinitionResult::success(std::move(definition));
 }
 
-[[nodiscard]] bool is_player_entity_model_name(const std::string& name) noexcept {
-  return name == "player" || name.rfind("player#", 0) == 0;
+EntityAnimationDefinitionResult parse_entity_animation_json(
+    std::string_view text,
+    std::string_view diagnostic_path) {
+  try {
+    const json root = json::parse(text.begin(), text.end());
+    const std::string root_path =
+        diagnostic_path.empty() ? std::string{"animation asset"} : std::string{diagnostic_path};
+    if (!root.is_object()) {
+      return EntityAnimationDefinitionResult::failure({root_path + " root must be an object"});
+    }
+
+    const auto animations = root.find("animations");
+    if (animations == root.end() || !animations->is_array()) {
+      return EntityAnimationDefinitionResult::failure(
+          {field_path(root_path, "animations") + " must be an array"});
+    }
+
+    EntityAnimationDefinition definition;
+    definition.clips.reserve(animations->size());
+    for (usize animation_index = 0; animation_index < animations->size(); ++animation_index) {
+      const json& animation_json = animations->at(animation_index);
+      const std::string animation_path =
+          indexed_field_path(root_path, "animations", animation_index);
+      if (!animation_json.is_object()) {
+        return EntityAnimationDefinitionResult::failure(
+            {animation_path + " must be an object"});
+      }
+
+      const auto name = animation_json.find("name");
+      if (name == animation_json.end() || !name->is_string()) {
+        return EntityAnimationDefinitionResult::failure(
+            {animation_path + ".name must be a string"});
+      }
+      const auto length = animation_json.find("length");
+      if (length == animation_json.end() || !length->is_number()) {
+        return EntityAnimationDefinitionResult::failure(
+            {animation_path + ".length must be numeric"});
+      }
+      const auto loop = animation_json.find("loop");
+      if (loop == animation_json.end()) {
+        return EntityAnimationDefinitionResult::failure(
+            {animation_path + ".loop is required"});
+      }
+      auto parsed_loop = parse_animation_loop(*loop, animation_path);
+      if (!parsed_loop) {
+        return EntityAnimationDefinitionResult::failure(parsed_loop.error());
+      }
+      const auto keyframes = animation_json.find("keyframes");
+      if (keyframes == animation_json.end() || !keyframes->is_array()) {
+        return EntityAnimationDefinitionResult::failure(
+            {animation_path + ".keyframes must be an array"});
+      }
+
+      EntityAnimationClip clip;
+      clip.name = name->get<std::string>();
+      clip.length_seconds = length->get<f32>();
+      if (!std::isfinite(clip.length_seconds)) {
+        return EntityAnimationDefinitionResult::failure(
+            {animation_path + ".length must be finite"});
+      }
+      clip.loop = parsed_loop.value();
+      clip.keyframes.reserve(keyframes->size());
+      for (usize keyframe_index = 0; keyframe_index < keyframes->size(); ++keyframe_index) {
+        const json& keyframe_json = keyframes->at(keyframe_index);
+        const std::string keyframe_path =
+            indexed_field_path(animation_path, "keyframes", keyframe_index);
+        if (!keyframe_json.is_object()) {
+          return EntityAnimationDefinitionResult::failure(
+              {keyframe_path + " must be an object"});
+        }
+
+        const auto time = keyframe_json.find("time");
+        if (time == keyframe_json.end() || !time->is_number()) {
+          return EntityAnimationDefinitionResult::failure(
+              {keyframe_path + ".time must be numeric"});
+        }
+        const auto bone = keyframe_json.find("bone");
+        if (bone == keyframe_json.end() || !bone->is_string()) {
+          return EntityAnimationDefinitionResult::failure(
+              {keyframe_path + ".bone must be a string"});
+        }
+        const auto channel = keyframe_json.find("channel");
+        if (channel == keyframe_json.end()) {
+          return EntityAnimationDefinitionResult::failure(
+              {keyframe_path + ".channel is required"});
+        }
+        auto parsed_channel = parse_animation_channel(*channel, keyframe_path);
+        if (!parsed_channel) {
+          return EntityAnimationDefinitionResult::failure(parsed_channel.error());
+        }
+        const auto value = keyframe_json.find("value");
+        if (value == keyframe_json.end()) {
+          return EntityAnimationDefinitionResult::failure(
+              {keyframe_path + ".value is required"});
+        }
+        auto parsed_value = read_vec3(*value, keyframe_path + ".value");
+        if (!parsed_value) {
+          return EntityAnimationDefinitionResult::failure(parsed_value.error());
+        }
+
+        EntityAnimationKeyframe keyframe;
+        keyframe.time_seconds = time->get<f32>();
+        if (!std::isfinite(keyframe.time_seconds)) {
+          return EntityAnimationDefinitionResult::failure(
+              {keyframe_path + ".time must be finite"});
+        }
+        keyframe.bone_name = bone->get<std::string>();
+        keyframe.channel = parsed_channel.value();
+        keyframe.value = parsed_value.value();
+        if (keyframe.channel == EntityAnimationChannel::Rotation) {
+          keyframe.value = blockbench_rotation_to_engine(keyframe.value);
+        } else if (keyframe.channel == EntityAnimationChannel::Position) {
+          keyframe.value = blockbench_position_to_engine(keyframe.value);
+        }
+        if (const auto interpolation = keyframe_json.find("interpolation");
+            interpolation != keyframe_json.end()) {
+          auto parsed_interpolation =
+              parse_animation_interpolation(*interpolation, keyframe_path);
+          if (!parsed_interpolation) {
+            return EntityAnimationDefinitionResult::failure(parsed_interpolation.error());
+          }
+          keyframe.interpolation = parsed_interpolation.value();
+        }
+        clip.keyframes.push_back(std::move(keyframe));
+      }
+      std::sort(
+          clip.keyframes.begin(),
+          clip.keyframes.end(),
+          [](const EntityAnimationKeyframe& lhs, const EntityAnimationKeyframe& rhs) {
+            if (lhs.time_seconds != rhs.time_seconds) {
+              return lhs.time_seconds < rhs.time_seconds;
+            }
+            if (lhs.bone_name != rhs.bone_name) {
+              return lhs.bone_name < rhs.bone_name;
+            }
+            return static_cast<u8>(lhs.channel) < static_cast<u8>(rhs.channel);
+          });
+      definition.clips.push_back(std::move(clip));
+    }
+
+    return EntityAnimationDefinitionResult::success(std::move(definition));
+  } catch (const json::exception& ex) {
+    const std::string root_path =
+        diagnostic_path.empty() ? std::string{"animation asset"} : std::string{diagnostic_path};
+    return EntityAnimationDefinitionResult::failure(
+        {root_path + " failed to parse animation JSON: " + std::string{ex.what()}});
+  }
 }
 
 EntityModelAssetResult build_entity_model_asset(
@@ -537,101 +603,111 @@ EntityModelAssetResult build_entity_model_asset(
   EntityModelAsset asset;
   asset.id = id;
   asset.name = definition.name;
-  asset.bones.reserve(definition.bones.size());
 
   HashMap<std::string, u32> bone_indices;
-  for (const EntityModelBoneDefinition& bone : definition.bones) {
+  const auto ensure_bone = [&](const std::string& bone_name, Vec3f pivot)
+      -> Expected<u32, EntityModelError> {
+    const auto found = bone_indices.find(bone_name);
+    if (found != bone_indices.end()) {
+      const EntityModelBone& existing = asset.bones[found->second];
+      if (!bone_name.empty() && existing.pivot != pivot) {
+        return Expected<u32, EntityModelError>::failure(
+            {"entity model boxes for bone '" + bone_name + "' use inconsistent pivots"});
+      }
+      return Expected<u32, EntityModelError>::success(found->second);
+    }
     const u32 bone_index = static_cast<u32>(asset.bones.size());
-    if (!bone_indices.emplace(bone.name, bone_index).second) {
-      return EntityModelAssetResult::failure({"duplicate entity model bone: " + bone.name});
-    }
-    asset.bones.push_back({bone.name, blockbench_position_to_engine(bone.pivot)});
-  }
+    bone_indices.emplace(bone_name, bone_index);
+    asset.bones.push_back({bone_name, pivot});
+    return Expected<u32, EntityModelError>::success(bone_index);
+  };
 
-  for (u32 bone_index = 0; bone_index < definition.bones.size(); ++bone_index) {
-    const EntityModelBoneDefinition& bone = definition.bones[bone_index];
-    for (usize box_index = 0; box_index < bone.boxes.size(); ++box_index) {
-      const EntityModelBoxDefinition box = blockbench_box_to_engine(bone.boxes[box_index]);
-      u32 flags = 0U;
-      if (is_player_entity_model_name(definition.name)) {
-        flags = (box_index % 2U) == 0U
-                    ? EntityModelMeshVertexFlagSkinBaseLayer
-                    : EntityModelMeshVertexFlagSkinDecorLayer;
-      }
-      for (usize face_value = 0; face_value < box.faces.size(); ++face_value) {
-        if (!box.faces[face_value].has_value()) {
-          continue;
-        }
-        const EntityModelFaceDefinition& face = box.faces[face_value].value();
-        if (face.texture_index < 0) {
-          continue;
-        }
-        const auto texture_index = static_cast<usize>(face.texture_index);
-        if (texture_index >= texture_bindings.size()) {
-          return EntityModelAssetResult::failure(
-              {"entity model face references missing texture index"});
-        }
-        if (!definition.texture_sizes.empty() && texture_index >= definition.texture_sizes.size()) {
-          return EntityModelAssetResult::failure(
-              {"entity model face references missing texture size"});
-        }
-        const EntityModelTextureBinding& binding = texture_bindings[texture_index];
-        const Vec2i texture_size = definition.texture_sizes.empty()
-                                       ? Vec2i{
-                                             static_cast<i32>(binding.source_width),
-                                             static_cast<i32>(binding.source_height)}
-                                       : definition.texture_sizes[texture_index];
-        append_face(
-            asset,
-            bone_index,
-            flags,
-            box,
-            static_cast<EntityModelFace>(face_value),
-            face,
-            binding,
-            texture_size);
-      }
+  HashMap<std::string, usize> emitted_box_count_by_bone;
+  for (const EntityModelBoxDefinition& source_box : definition.boxes) {
+    const EntityModelBoxDefinition box = blockbench_box_to_engine(source_box);
+    auto bone_index_result = ensure_bone(box.bone, box.pivot);
+    if (!bone_index_result) {
+      return EntityModelAssetResult::failure(bone_index_result.error());
     }
-  }
-
-  asset.animations.reserve(definition.animations.size());
-  for (const EntityModelAnimationDefinition& source_animation : definition.animations) {
-    EntityModelAnimation animation;
-    animation.name = source_animation.name;
-    animation.length_seconds = source_animation.length_seconds;
-    animation.loop = source_animation.loop;
-    animation.keyframes.reserve(source_animation.keyframes.size());
-    for (const EntityModelAnimationKeyframeDefinition& source_keyframe : source_animation.keyframes) {
-      EntityModelAnimationKeyframe keyframe;
-      keyframe.time_seconds = source_keyframe.time_seconds;
-      for (const EntityModelAnimationBoneDefinition& source_bone : source_keyframe.bones) {
-        const auto found = bone_indices.find(source_bone.bone_name);
-        if (found == bone_indices.end()) {
-          return EntityModelAssetResult::failure(
-              {"animation references unknown bone: " + source_bone.bone_name});
-        }
-        EntityModelAnimationBoneKey bone_key;
-        bone_key.bone_index = found->second;
-        if (source_bone.rotation_euler_degrees.has_value()) {
-          bone_key.rotation_euler_degrees =
-              blockbench_rotation_to_engine(source_bone.rotation_euler_degrees.value());
-        }
-        if (source_bone.position_offset.has_value()) {
-          bone_key.position_offset =
-              blockbench_position_to_engine(source_bone.position_offset.value());
-        }
-        keyframe.bones.push_back(bone_key);
-      }
-      animation.keyframes.push_back(std::move(keyframe));
+    const u32 bone_index = bone_index_result.value();
+    const usize box_index_for_bone = emitted_box_count_by_bone[source_box.bone]++;
+    u32 flags = 0U;
+    if (is_player_entity_model_name(definition.name)) {
+      flags = (box_index_for_bone % 2U) == 0U
+                  ? EntityModelMeshVertexFlagSkinBaseLayer
+                  : EntityModelMeshVertexFlagSkinDecorLayer;
     }
-    asset.animations.push_back(std::move(animation));
+    for (usize face_value = 0; face_value < box.faces.size(); ++face_value) {
+      if (!box.faces[face_value].has_value()) {
+        continue;
+      }
+      const EntityModelFaceDefinition& face = box.faces[face_value].value();
+      if (face.texture_index < 0) {
+        continue;
+      }
+      const auto texture_index = static_cast<usize>(face.texture_index);
+      if (texture_index >= texture_bindings.size()) {
+        return EntityModelAssetResult::failure(
+            {"entity model face references missing texture index"});
+      }
+      if (!definition.texture_sizes.empty() && texture_index >= definition.texture_sizes.size()) {
+        return EntityModelAssetResult::failure(
+            {"entity model face references missing texture size"});
+      }
+      const EntityModelTextureBinding& binding = texture_bindings[texture_index];
+      const Vec2i texture_size = definition.texture_sizes.empty()
+                                     ? Vec2i{
+                                           static_cast<i32>(binding.source_width),
+                                           static_cast<i32>(binding.source_height)}
+                                     : definition.texture_sizes[texture_index];
+      append_face(
+          asset,
+          bone_index,
+          flags,
+          box,
+          static_cast<EntityModelFace>(face_value),
+          face,
+          binding,
+          texture_size);
+    }
   }
 
   return EntityModelAssetResult::success(std::move(asset));
 }
 
+EntityAnimationAssetResult build_entity_animation_asset(
+    EntityAnimationID id,
+    std::string name,
+    EntityAnimationDefinition definition) {
+  EntityAnimationAsset asset;
+  asset.id = id;
+  asset.name = std::move(name);
+  asset.clips = std::move(definition.clips);
+  return EntityAnimationAssetResult::success(std::move(asset));
+}
+
+std::optional<EntityModelError> validate_entity_animation_bindings(
+    const EntityModelAsset& model,
+    const EntityAnimationAsset& animation) {
+  HashSet<std::string> model_bones;
+  for (const EntityModelBone& bone : model.bones) {
+    model_bones.insert(bone.name);
+  }
+  for (const EntityAnimationClip& clip : animation.clips) {
+    for (const EntityAnimationKeyframe& keyframe : clip.keyframes) {
+      if (model_bones.find(keyframe.bone_name) == model_bones.end()) {
+        return EntityModelError{
+            "animation " + animation.name + " clip " + clip.name +
+            " references unknown model bone: " + keyframe.bone_name};
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 void sample_entity_model_animation(
     const EntityModelAsset& model,
+    const EntityAnimationAsset* animation,
     std::string_view animation_name,
     f32 time_seconds,
     std::span<Vec3f> output_rotations) {
@@ -642,26 +718,30 @@ void sample_entity_model_animation(
     return;
   }
 
-  const EntityModelAnimation* animation = find_animation(model, animation_name);
-  if (animation == nullptr || animation->keyframes.empty()) {
+  const EntityAnimationClip* clip = find_clip(animation, animation_name);
+  if (clip == nullptr || clip->keyframes.empty()) {
     return;
   }
 
   f32 sample_time = time_seconds;
-  if (animation->loop && animation->length_seconds > 0.0F) {
-    sample_time = std::fmod(std::max(sample_time, 0.0F), animation->length_seconds);
+  if (clip->loop && clip->length_seconds > 0.0F) {
+    sample_time = std::fmod(std::max(sample_time, 0.0F), clip->length_seconds);
   } else {
-    sample_time = std::clamp(sample_time, 0.0F, animation->length_seconds);
+    sample_time = std::clamp(sample_time, 0.0F, clip->length_seconds);
   }
 
-  for (u32 bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
-    output_rotations[bone_index] =
-        sample_animation_bone_rotation(*animation, bone_index, sample_time);
+  for (usize bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
+    output_rotations[bone_index] = sample_animation_bone_channel(
+        *clip,
+        model.bones[bone_index].name,
+        EntityAnimationChannel::Rotation,
+        sample_time);
   }
 }
 
 void sample_entity_model_animation(
     const EntityModelAsset& model,
+    const EntityAnimationAsset* animation,
     std::string_view animation_name,
     f32 time_seconds,
     std::span<Vec3f> output_rotations,
@@ -677,23 +757,29 @@ void sample_entity_model_animation(
     return;
   }
 
-  const EntityModelAnimation* animation = find_animation(model, animation_name);
-  if (animation == nullptr || animation->keyframes.empty()) {
+  const EntityAnimationClip* clip = find_clip(animation, animation_name);
+  if (clip == nullptr || clip->keyframes.empty()) {
     return;
   }
 
   f32 sample_time = time_seconds;
-  if (animation->loop && animation->length_seconds > 0.0F) {
-    sample_time = std::fmod(std::max(sample_time, 0.0F), animation->length_seconds);
+  if (clip->loop && clip->length_seconds > 0.0F) {
+    sample_time = std::fmod(std::max(sample_time, 0.0F), clip->length_seconds);
   } else {
-    sample_time = std::clamp(sample_time, 0.0F, animation->length_seconds);
+    sample_time = std::clamp(sample_time, 0.0F, clip->length_seconds);
   }
 
-  for (u32 bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
-    output_rotations[bone_index] =
-        sample_animation_bone_rotation(*animation, bone_index, sample_time);
-    output_positions[bone_index] =
-        sample_animation_bone_position(*animation, bone_index, sample_time);
+  for (usize bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
+    output_rotations[bone_index] = sample_animation_bone_channel(
+        *clip,
+        model.bones[bone_index].name,
+        EntityAnimationChannel::Rotation,
+        sample_time);
+    output_positions[bone_index] = sample_animation_bone_channel(
+        *clip,
+        model.bones[bone_index].name,
+        EntityAnimationChannel::Position,
+        sample_time);
   }
 }
 

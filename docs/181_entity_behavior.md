@@ -56,7 +56,7 @@ behavior:
         priority: 8
         radius: 12
         speed_multiplier: 0.8
-        animation: walking
+        animation: walk
 ```
 
 Lower priority numbers run first.
@@ -634,4 +634,3 @@ advanced event graph
 complex NPC schedules
 boss behavior
 ```
-

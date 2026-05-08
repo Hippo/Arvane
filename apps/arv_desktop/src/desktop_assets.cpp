@@ -297,6 +297,9 @@ DesktopLoadedAssetsResult load_desktop_assets(
     for (const render::EntityModelAsset& model : loaded.entity_render_assets.models) {
       renderer.set_entity_model(model);
     }
+    for (const render::EntityAnimationAsset& animation : loaded.entity_render_assets.animations) {
+      renderer.set_entity_animation(animation);
+    }
   }
 
   auto worldgen_text = io::read_text_file(

@@ -31,6 +31,9 @@ void merge_explicit_definition(EntityDefinition& target, EntityDefinition source
   if (!source.model_asset.empty()) {
     target.model_asset = std::move(source.model_asset);
   }
+  if (!source.animation_asset.empty()) {
+    target.animation_asset = std::move(source.animation_asset);
+  }
   if (!source.components.component_ids.empty()) {
     target.components = std::move(source.components);
   }
@@ -48,6 +51,15 @@ void merge_explicit_definition(EntityDefinition& target, EntityDefinition source
   return type == "arvane:idle" ||
          type == "arvane:wander" ||
          type == "arvane:float_in_fluid";
+}
+
+[[nodiscard]] bool has_animation_asset_kind(std::string_view animation) noexcept {
+  const usize separator = animation.find(':');
+  if (separator == std::string_view::npos) {
+    return true;
+  }
+  const std::string_view path = animation.substr(separator + 1U);
+  return path.rfind("animation/", 0U) == 0U && path.size() > std::string_view{"animation/"}.size();
 }
 
 [[nodiscard]] Expected<Vec3f, EntityRegistryError> read_vec3(
@@ -182,6 +194,13 @@ EntityRegistry::Result EntityRegistry::build(std::vector<EntityDefinition> defin
       }
     }
     definition.model_asset = normalize_entity_model_asset(definition.model_asset);
+    if (!definition.animation_asset.empty()) {
+      if (!has_animation_asset_kind(definition.animation_asset)) {
+        return Result::failure(
+            {"presentation.animation must reference arvane:animation/... for " + definition.name});
+      }
+      definition.animation_asset = normalize_entity_animation_asset(definition.animation_asset);
+    }
     if (!definition_names.emplace(definition.name, index).second) {
       return Result::failure({"duplicate entity definition: " + definition.name});
     }
@@ -203,6 +222,7 @@ EntityRegistry::Result EntityRegistry::build(std::vector<EntityDefinition> defin
         definition.display_name.empty() ? record.name : std::move(definition.display_name);
     record.category = std::move(definition.category);
     record.model_asset = std::move(definition.model_asset);
+    record.animation_asset = std::move(definition.animation_asset);
     record.components = std::move(definition.components);
     record.spawnable = definition.spawnable;
     record.persistent_by_default = definition.persistent_by_default;
@@ -266,6 +286,7 @@ EntityDefinition make_player_entity_definition() {
   definition.display_name = "Player";
   definition.category = "builtin";
   definition.model_asset = "arvane:model/entity/player";
+  definition.animation_asset = "arvane:animation/player";
   definition.spawnable = false;
   definition.persistent_by_default = true;
   definition.replicated_by_default = true;
@@ -280,6 +301,16 @@ std::string normalize_entity_model_asset(std::string_view model) {
     return std::string{model};
   }
   return "arvane:model/entity/" + std::string{model};
+}
+
+std::string normalize_entity_animation_asset(std::string_view animation) {
+  if (animation.empty()) {
+    return {};
+  }
+  if (animation.find(':') != std::string_view::npos) {
+    return std::string{animation};
+  }
+  return "arvane:animation/" + std::string{animation};
 }
 
 Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_definitions_json(
@@ -330,7 +361,24 @@ Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_defini
               {"entity presentation must be an object"});
         }
         if (const auto model = presentation->find("model"); model != presentation->end()) {
+          if (!model->is_string()) {
+            return Expected<EntityDefinition, EntityRegistryError>::failure(
+                {"entity presentation.model must be a string"});
+          }
           definition.model_asset = model->get<std::string>();
+        }
+        if (const auto animation = presentation->find("animation");
+            animation != presentation->end()) {
+          if (!animation->is_string()) {
+            return Expected<EntityDefinition, EntityRegistryError>::failure(
+                {"entity presentation.animation must be a string"});
+          }
+          definition.animation_asset = animation->get<std::string>();
+          if (!definition.animation_asset.empty() &&
+              !has_animation_asset_kind(definition.animation_asset)) {
+            return Expected<EntityDefinition, EntityRegistryError>::failure(
+                {"entity presentation.animation must reference arvane:animation/..."});
+          }
         }
       }
       if (const auto iter = entity.find("model"); iter != entity.end()) {

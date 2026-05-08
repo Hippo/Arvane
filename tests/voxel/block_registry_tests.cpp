@@ -159,6 +159,8 @@ TEST(BlockRegistryTests, BlockModelTexturesCanResolveInputsOrSpecificAssets) {
   "textures": ["$0", "stone"],
   "texture_sizes": [[16, 16], [16, 16]],
   "boxes": [{
+    "bone": "",
+    "pivot": [0, 0, 0],
     "min": [0, 0, 0],
     "max": [16, 8, 16],
     "up": {"texture": 0, "uv": [0, 0, 16, 16]},
