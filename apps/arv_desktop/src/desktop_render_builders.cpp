@@ -72,7 +72,10 @@ namespace {
   if (animation_name == "sneak") {
     return std::clamp(animation_time_seconds / 0.25F, 0.0F, 1.0F);
   }
-  if (animation_name == "sneak_idle" || animation_name == "sneak_walk") {
+  if (animation_name == "sneak_idle" ||
+      animation_name == "sneak_walk" ||
+      animation_name == "sneak_hit_left" ||
+      animation_name == "sneak_hit_right") {
     return 1.0F;
   }
   return 0.0F;

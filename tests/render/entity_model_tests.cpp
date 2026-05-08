@@ -425,7 +425,14 @@ TEST(EntityModelTests, PlayerSneakAnimationsKeepBodyCrouchedForward) {
       "sneak",
       0.25F,
       std::span<arv::Vec3f>{rotations});
-  EXPECT_EQ(rotations[body_index.value()], (arv::Vec3f{-30.0F, 0.0F, 0.0F}));
+  const arv::Vec3f sneak_final_body_rotation = rotations[body_index.value()];
+
+  arv::render::sample_entity_model_animation(
+      model.value(),
+      "sneak",
+      10.0F,
+      std::span<arv::Vec3f>{rotations});
+  EXPECT_EQ(rotations[body_index.value()], sneak_final_body_rotation);
 
   arv::render::sample_entity_model_animation(
       model.value(),

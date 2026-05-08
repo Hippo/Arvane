@@ -401,9 +401,19 @@ TEST(WorldEntityTests, PlayerAnimationStateSelectsLocomotionAndSneakTransitions)
   arv::entity::EntityAnimationState* animation =
       world.find_entity_animation_state(entity.value());
   ASSERT_NE(animation, nullptr);
-  EXPECT_EQ(animation->name, "walking");
+  EXPECT_EQ(animation->name, "walk");
 
   player.velocity = {};
+  player.swimming = true;
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "swim_idle");
+
+  player.velocity = {1.0F, 0.0F, 0.0F};
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "swim");
+
+  player.velocity = {};
+  player.swimming = false;
   player.sneaking = true;
   (void)world.tick_entities();
   EXPECT_EQ(animation->name, "sneak");
@@ -413,6 +423,10 @@ TEST(WorldEntityTests, PlayerAnimationStateSelectsLocomotionAndSneakTransitions)
   EXPECT_EQ(animation->name, "sneak_idle");
 
   player.velocity = {0.0F, 0.0F, 1.0F};
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "sneak_walk");
+
+  animation->time_seconds = 1.0F;
   (void)world.tick_entities();
   EXPECT_EQ(animation->name, "sneak_walk");
 }
@@ -433,9 +447,36 @@ TEST(WorldEntityTests, PlayerHitRightAnimationPlaysOnceBeforeLocomotionResumes) 
   (void)world.tick_entities();
   EXPECT_EQ(animation->name, "hit_right");
 
-  animation->time_seconds = 0.458F;
+  animation->time_seconds = 0.25F;
   (void)world.tick_entities();
-  EXPECT_EQ(animation->name, "walking");
+  EXPECT_EQ(animation->name, "walk");
+}
+
+TEST(WorldEntityTests, PlayerSneakHitAnimationsPlayOnceBeforeSneakLocomotionResumes) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{7});
+  const std::optional<arv::EntityID> entity = world.entity_for_player(arv::PlayerID{7});
+  ASSERT_TRUE(entity.has_value());
+
+  player.sneaking = true;
+  ASSERT_TRUE(world.set_entity_animation(entity.value(), "sneak_hit_left"));
+  arv::entity::EntityAnimationState* animation =
+      world.find_entity_animation_state(entity.value());
+  ASSERT_NE(animation, nullptr);
+  animation->time_seconds = 0.10F;
+
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "sneak_hit_left");
+
+  animation->time_seconds = 0.25F;
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "sneak_idle");
+
+  player.velocity = {0.0F, 0.0F, 1.0F};
+  ASSERT_TRUE(world.set_entity_animation(entity.value(), "sneak_hit_right"));
+  animation->time_seconds = 0.25F;
+  (void)world.tick_entities();
+  EXPECT_EQ(animation->name, "sneak_walk");
 }
 
 TEST(WorldEntityTests, PersistentEntityRecordsRoundTripThroughWorldRuntime) {

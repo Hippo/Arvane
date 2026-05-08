@@ -30,6 +30,15 @@ void restart_player_entity_animation(
   animation->time_seconds = 0.0F;
 }
 
+[[nodiscard]] std::string_view player_hit_animation_name(
+    const player::PlayerState& player_state,
+    bool left) noexcept {
+  if (player_state.sneaking) {
+    return left ? "sneak_hit_left" : "sneak_hit_right";
+  }
+  return left ? "hit_left" : "hit_right";
+}
+
 [[nodiscard]] u64 hash_append_byte(u64 hash, u8 value) noexcept {
   hash ^= value;
   hash *= 1099511628211ULL;
@@ -288,10 +297,6 @@ void ServerRuntimeImpl::apply_player_command(
           ? command.selected_hotbar_slot
           : player_state.selected_hotbar_slot;
 
-  if (command.primary_pressed) {
-    restart_player_entity_animation(default_world_, player_state.player_id, "hit_right");
-  }
-
   player_state.yaw_radians +=
       static_cast<f32>(command.look_delta_x) * player_tuning_.mouse_sensitivity_radians;
   player_state.pitch_radians = std::clamp(
@@ -379,6 +384,18 @@ void ServerRuntimeImpl::apply_player_command(
     player_state.breath_seconds = step.body.breath_seconds;
   } else {
     step_player_without_collision(player_state, command, player_tuning_, tick_seconds);
+  }
+
+  if (command.primary_pressed) {
+    restart_player_entity_animation(
+        default_world_,
+        player_state.player_id,
+        player_hit_animation_name(player_state, false));
+  } else if (command.secondary_pressed) {
+    restart_player_entity_animation(
+        default_world_,
+        player_state.player_id,
+        player_hit_animation_name(player_state, true));
   }
 
   (void)default_world_.set_player_visual_pose(

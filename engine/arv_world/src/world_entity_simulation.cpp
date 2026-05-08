@@ -125,13 +125,18 @@ struct DroppedItemLiquidProbe {
 [[nodiscard]] bool player_animation_is_sneaking(std::string_view animation_name) noexcept {
   return animation_name == "sneak" ||
          animation_name == "sneak_idle" ||
-         animation_name == "sneak_walk";
+         animation_name == "sneak_walk" ||
+         animation_name == "sneak_hit_left" ||
+         animation_name == "sneak_hit_right";
 }
 
 [[nodiscard]] bool player_animation_is_active_once(
     const entity::EntityAnimationState& animation) noexcept {
-  if (animation.name == "hit_right") {
-    return animation.time_seconds < 0.458F;
+  if (animation.name == "hit_left" ||
+      animation.name == "hit_right" ||
+      animation.name == "sneak_hit_left" ||
+      animation.name == "sneak_hit_right") {
+    return animation.time_seconds < 0.25F;
   }
   return false;
 }
@@ -154,6 +159,11 @@ void update_player_animation_state(
   }
 
   const bool moving = has_horizontal_motion(player_state.velocity);
+  if (player_state.swimming) {
+    set_animation_if_changed(animation, moving ? "swim" : "swim_idle");
+    return;
+  }
+
   if (player_state.sneaking) {
     if (!player_animation_is_sneaking(animation.name)) {
       set_animation_if_changed(animation, "sneak");
@@ -166,7 +176,7 @@ void update_player_animation_state(
     return;
   }
 
-  set_animation_if_changed(animation, moving ? "walking" : "idle");
+  set_animation_if_changed(animation, moving ? "walk" : "idle");
 }
 
 [[nodiscard]] f32 horizontal_length_squared(Vec3f value) noexcept {
