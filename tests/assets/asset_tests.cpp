@@ -284,6 +284,8 @@ TEST(FontTests, ShapesMeasuresAndCachesGlyphs) {
   auto layout = fonts.layout_text("Hotbar 1", stack, {10.0F, 20.0F}, {1.0F, 1.0F, 1.0F, 1.0F});
   ASSERT_TRUE(layout) << layout.error().message;
   EXPECT_FALSE(layout.value().quads.empty());
+  EXPECT_FLOAT_EQ(layout.value().measure.width, measured.value().width);
+  EXPECT_FLOAT_EQ(layout.value().measure.height, measured.value().height);
   EXPECT_GT(fonts.cached_glyph_count(primary.value()), 0U);
   EXPECT_TRUE(fonts.atlas_dirty());
 }

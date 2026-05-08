@@ -1,8 +1,10 @@
 #include "arv/asset/font.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include <ft2build.h>
@@ -13,6 +15,9 @@
 
 namespace arv::asset {
 namespace {
+
+constexpr usize MaxTextMeasureCacheEntries = 1024;
+constexpr usize MaxTextLayoutCacheEntries = 1024;
 
 struct DecodedCodepoint {
   char32_t codepoint{};
@@ -88,6 +93,51 @@ struct DecodedCodepoint {
   return result;
 }
 
+template<typename T>
+void append_cache_bytes(std::string& key, const T& value) {
+  const auto* bytes = reinterpret_cast<const char*>(&value);
+  key.append(bytes, sizeof(T));
+}
+
+[[nodiscard]] u32 float_bits(f32 value) noexcept {
+  u32 bits = 0;
+  static_assert(sizeof(bits) == sizeof(value));
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+[[nodiscard]] std::string make_text_cache_key(
+    std::string_view utf8,
+    const FontStack& stack,
+    TextDirection direction) {
+  std::string key;
+  key.reserve(sizeof(u8) + sizeof(u32) * (stack.faces.size() + 2U) + utf8.size());
+  append_cache_bytes(key, static_cast<u8>(direction));
+  append_cache_bytes(key, static_cast<u32>(stack.faces.size()));
+  for (const FontFaceHandle face : stack.faces) {
+    append_cache_bytes(key, face.id.value);
+  }
+  append_cache_bytes(key, static_cast<u32>(utf8.size()));
+  key.append(utf8.data(), utf8.size());
+  return key;
+}
+
+[[nodiscard]] std::string make_layout_cache_key(
+    std::string_view utf8,
+    const FontStack& stack,
+    Vec2f origin,
+    Vec4f color,
+    TextDirection direction) {
+  std::string key = make_text_cache_key(utf8, stack, direction);
+  append_cache_bytes(key, float_bits(origin.x));
+  append_cache_bytes(key, float_bits(origin.y));
+  append_cache_bytes(key, float_bits(color.x));
+  append_cache_bytes(key, float_bits(color.y));
+  append_cache_bytes(key, float_bits(color.z));
+  append_cache_bytes(key, float_bits(color.w));
+  return key;
+}
+
 } // namespace
 
 struct FontSystem::Impl {
@@ -124,6 +174,8 @@ struct FontSystem::Impl {
   u32 atlas_cursor_y{1};
   u32 atlas_row_height{};
   bool atlas_dirty_flag{};
+  HashMap<std::string, TextMeasure> measure_cache{};
+  HashMap<std::string, TextLayout> layout_cache{};
 
   Impl() {
     initialized = FT_Init_FreeType(&library) == 0;
@@ -171,6 +223,11 @@ struct FontSystem::Impl {
         ft_26_6_to_pixels(size.ascender),
         ft_26_6_to_pixels(size.descender),
         ft_26_6_to_pixels(size.height)};
+  }
+
+  void clear_text_caches() {
+    measure_cache.clear();
+    layout_cache.clear();
   }
 
   [[nodiscard]] Expected<GlyphInfo, AssetError> ensure_glyph(FontFaceHandle handle, u32 glyph_index) {
@@ -301,6 +358,7 @@ FontFaceResult FontSystem::load_face(
 
   const FontFaceHandle handle{FontFaceID{static_cast<u32>(impl_->faces.size())}};
   impl_->faces.push_back(std::move(record));
+  impl_->clear_text_caches();
   return FontFaceResult::success(handle);
 }
 
@@ -357,6 +415,11 @@ TextMeasureResult FontSystem::measure_text(
   if (stack.faces.empty()) {
     return TextMeasureResult::failure({{}, {}, "measure text", "font stack is empty"});
   }
+  std::string cache_key = make_text_cache_key(utf8, stack, direction);
+  if (const auto found = impl_->measure_cache.find(cache_key);
+      found != impl_->measure_cache.end()) {
+    return TextMeasureResult::success(found->second);
+  }
 
   const FontMetrics base_metrics = metrics(stack.faces.front());
   f32 max_width = 0.0F;
@@ -408,12 +471,17 @@ TextMeasureResult FontSystem::measure_text(
     line_begin = line_end + 1U;
   }
 
-  return TextMeasureResult::success({
+  TextMeasure result{
       max_width,
       base_metrics.line_height * static_cast<f32>(line_count),
       base_metrics.ascender,
       base_metrics.descender,
-      base_metrics.line_height});
+      base_metrics.line_height};
+  if (impl_->measure_cache.size() >= MaxTextMeasureCacheEntries) {
+    impl_->measure_cache.clear();
+  }
+  impl_->measure_cache.emplace(std::move(cache_key), result);
+  return TextMeasureResult::success(result);
 }
 
 TextLayoutResult FontSystem::layout_text(
@@ -422,15 +490,20 @@ TextLayoutResult FontSystem::layout_text(
     Vec2f origin,
     Vec4f color,
     TextDirection direction) {
-  auto measure = measure_text(utf8, stack, direction);
-  if (!measure) {
-    return TextLayoutResult::failure(measure.error());
+  if (stack.faces.empty()) {
+    return TextLayoutResult::failure({{}, {}, "layout text", "font stack is empty"});
+  }
+  std::string cache_key = make_layout_cache_key(utf8, stack, origin, color, direction);
+  if (const auto found = impl_->layout_cache.find(cache_key);
+      found != impl_->layout_cache.end()) {
+    return TextLayoutResult::success(found->second);
   }
 
   const FontMetrics base_metrics = metrics(stack.faces.front());
   TextLayout layout;
-  layout.measure = measure.value();
   f32 pen_y = origin.y + base_metrics.ascender;
+  f32 max_width = 0.0F;
+  u32 line_count = 1;
   usize line_begin = 0;
   while (line_begin <= utf8.size()) {
     const usize newline = utf8.find('\n', line_begin);
@@ -465,6 +538,7 @@ TextLayoutResult FontSystem::layout_text(
       unsigned int count = 0;
       const hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, &count);
       const hb_glyph_position_t* positions = hb_buffer_get_glyph_positions(buffer, &count);
+      f32 line_width = 0.0F;
       for (unsigned int i = 0; i < count; ++i) {
         auto glyph = impl_->ensure_glyph(span.face, infos[i].codepoint);
         if (!glyph) {
@@ -495,18 +569,32 @@ TextLayoutResult FontSystem::layout_text(
               color,
               info.page});
         }
-        pen_x += static_cast<f32>(positions[i].x_advance) / 64.0F;
+        const f32 x_advance = static_cast<f32>(positions[i].x_advance) / 64.0F;
+        pen_x += x_advance;
+        line_width = std::max(line_width, pen_x - origin.x);
         pen_y += static_cast<f32>(positions[i].y_advance) / 64.0F;
       }
+      max_width = std::max(max_width, line_width);
       hb_buffer_destroy(buffer);
     }
     if (newline == std::string_view::npos) {
       break;
     }
+    ++line_count;
     pen_y += base_metrics.line_height;
     line_begin = line_end + 1U;
   }
 
+  layout.measure = {
+      max_width,
+      base_metrics.line_height * static_cast<f32>(line_count),
+      base_metrics.ascender,
+      base_metrics.descender,
+      base_metrics.line_height};
+  if (impl_->layout_cache.size() >= MaxTextLayoutCacheEntries) {
+    impl_->layout_cache.clear();
+  }
+  impl_->layout_cache.emplace(std::move(cache_key), layout);
   return TextLayoutResult::success(std::move(layout));
 }
 

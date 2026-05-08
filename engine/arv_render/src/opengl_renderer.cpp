@@ -259,10 +259,10 @@ void append_ui_quad(
     UiClip clip) {
   const u32 base = static_cast<u32>(vertices.size());
   const u32 first_index = static_cast<u32>(indices.size());
-  vertices.emplace_back(positions[0], uvs[0], color, texture_slot, atlas_page);
-  vertices.emplace_back(positions[1], uvs[1], color, texture_slot, atlas_page);
-  vertices.emplace_back(positions[2], uvs[2], color, texture_slot, atlas_page);
-  vertices.emplace_back(positions[3], uvs[3], color, texture_slot, atlas_page);
+  vertices.emplace_back(UIVertex{positions[0], uvs[0], color, texture_slot, atlas_page});
+  vertices.emplace_back(UIVertex{positions[1], uvs[1], color, texture_slot, atlas_page});
+  vertices.emplace_back(UIVertex{positions[2], uvs[2], color, texture_slot, atlas_page});
+  vertices.emplace_back(UIVertex{positions[3], uvs[3], color, texture_slot, atlas_page});
   indices.emplace_back(base);
   indices.emplace_back(base + 1U);
   indices.emplace_back(base + 2U);
@@ -277,145 +277,105 @@ void append_ui_quad(
   }
 }
 
-void append_ui_triangle(
-    std::vector<UIVertex>& vertices,
-    std::vector<u32>& indices,
-    std::vector<UiDrawRun>& runs,
-    Vec2f a,
-    Vec2f b,
-    Vec2f c,
-    Vec4f color,
-    f32 texture_slot,
-    u32 atlas_page,
-    UiClip clip) {
-  const u32 base = static_cast<u32>(vertices.size());
-  const u32 first_index = static_cast<u32>(indices.size());
-  vertices.emplace_back(a, Vec2f{}, color, texture_slot, atlas_page);
-  vertices.emplace_back(b, Vec2f{}, color, texture_slot, atlas_page);
-  vertices.emplace_back(c, Vec2f{}, color, texture_slot, atlas_page);
-  indices.emplace_back(base);
-  indices.emplace_back(base + 1U);
-  indices.emplace_back(base + 2U);
-  if (!runs.empty() && runs.back().clip == clip &&
-      runs.back().first_index + runs.back().index_count == first_index) {
-    runs.back().index_count += 3U;
-  } else {
-    runs.push_back({first_index, 3U, clip});
-  }
-}
-
 [[nodiscard]] UiClip clip_from_draw_item(Vec2f min, Vec2f max, bool enabled) noexcept {
   return {min, max, enabled};
 }
 
-void append_ui_solid_quad(
-    std::vector<UIVertex>& vertices,
+void append_ui_shape_quad(
+    std::vector<UIShapeVertex>& vertices,
     std::vector<u32>& indices,
     std::vector<UiDrawRun>& runs,
     Vec2f min,
     Vec2f max,
     Vec4f color,
-    UiClip clip) {
-  append_ui_quad(
-      vertices,
-      indices,
-      runs,
-      {{{min.x, min.y}, {max.x, min.y}, {max.x, max.y}, {min.x, max.y}}},
-      {{{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}}},
-      color,
-      UiTextureSlotWhite,
-      0U,
-      clip);
-}
-
-void append_ui_rounded_rect(
-    std::vector<UIVertex>& vertices,
-    std::vector<u32>& indices,
-    std::vector<UiDrawRun>& runs,
-    Vec2f min,
-    Vec2f max,
-    Vec4f color,
+    Vec4f border_color,
+    f32 border_width,
     f32 radius,
     UiClip clip) {
-  if (color.w <= 0.0F || max.x <= min.x || max.y <= min.y) {
+  if ((color.w <= 0.0F && border_color.w <= 0.0F) || max.x <= min.x || max.y <= min.y) {
     return;
   }
   const f32 width = max.x - min.x;
   const f32 height = max.y - min.y;
-  radius = std::clamp(radius, 0.0F, std::min(width, height) * 0.5F);
-  if (radius <= 0.5F) {
-    append_ui_solid_quad(vertices, indices, runs, min, max, color, clip);
+  const f32 max_inset = std::min(width, height) * 0.5F;
+  radius = std::clamp(radius, 0.0F, max_inset);
+  border_width = std::clamp(border_width, 0.0F, max_inset);
+  if (border_width <= 0.0F || border_color.w <= 0.0F) {
+    border_color = {};
+    border_width = 0.0F;
+  }
+  if (color.w <= 0.0F && border_color.w <= 0.0F) {
     return;
   }
 
-  constexpr usize SegmentsPerCorner = 6;
-  constexpr f32 HalfPi = 1.57079632679F;
-  std::array<Vec2f, SegmentsPerCorner * 4U + 4U> perimeter{};
-  usize count = 0;
-  const auto append_corner = [&](Vec2f center, f32 start_angle) {
-    for (usize segment = 0; segment <= SegmentsPerCorner; ++segment) {
-      const f32 t = static_cast<f32>(segment) / static_cast<f32>(SegmentsPerCorner);
-      const f32 angle = start_angle + t * HalfPi;
-      perimeter[count++] = {
-          center.x + std::cos(angle) * radius,
-          center.y + std::sin(angle) * radius};
-    }
-  };
-
-  append_corner({max.x - radius, min.y + radius}, -HalfPi);
-  append_corner({max.x - radius, max.y - radius}, 0.0F);
-  append_corner({min.x + radius, max.y - radius}, HalfPi);
-  append_corner({min.x + radius, min.y + radius}, HalfPi * 2.0F);
-
-  const Vec2f center{(min.x + max.x) * 0.5F, (min.y + max.y) * 0.5F};
-  for (usize index = 0; index < count; ++index) {
-    append_ui_triangle(
-        vertices,
-        indices,
-        runs,
-        center,
-        perimeter[index],
-        perimeter[(index + 1U) % count],
-        color,
-        UiTextureSlotWhite,
-        0U,
-        clip);
+  const u32 base = static_cast<u32>(vertices.size());
+  const u32 first_index = static_cast<u32>(indices.size());
+  const Vec2f rect_size{width, height};
+  vertices.emplace_back(UIShapeVertex{
+      {min.x, min.y},
+      {0.0F, 0.0F},
+      color,
+      rect_size,
+      border_color,
+      radius,
+      border_width});
+  vertices.emplace_back(UIShapeVertex{
+      {max.x, min.y},
+      {1.0F, 0.0F},
+      color,
+      rect_size,
+      border_color,
+      radius,
+      border_width});
+  vertices.emplace_back(UIShapeVertex{
+      {max.x, max.y},
+      {1.0F, 1.0F},
+      color,
+      rect_size,
+      border_color,
+      radius,
+      border_width});
+  vertices.emplace_back(UIShapeVertex{
+      {min.x, max.y},
+      {0.0F, 1.0F},
+      color,
+      rect_size,
+      border_color,
+      radius,
+      border_width});
+  indices.emplace_back(base);
+  indices.emplace_back(base + 1U);
+  indices.emplace_back(base + 2U);
+  indices.emplace_back(base + 2U);
+  indices.emplace_back(base + 3U);
+  indices.emplace_back(base);
+  if (!runs.empty() && runs.back().clip == clip &&
+      runs.back().first_index + runs.back().index_count == first_index) {
+    runs.back().index_count += 6U;
+  } else {
+    runs.push_back({first_index, 6U, clip});
   }
 }
 
 void append_ui_rect_item(
-    std::vector<UIVertex>& vertices,
+    std::vector<UIShapeVertex>& vertices,
     std::vector<u32>& indices,
     std::vector<UiDrawRun>& runs,
     const UIRectDrawItem& rect) {
   const UiClip clip = clip_from_draw_item(rect.clip_min, rect.clip_max, rect.clip);
   const Vec2f min = rect.min;
   const Vec2f max = rect.max;
-  if (rect.border_width > 0.0F && rect.border_color.w > 0.0F) {
-    append_ui_rounded_rect(
-        vertices,
-        indices,
-        runs,
-        min,
-        max,
-        rect.border_color,
-        rect.radius,
-        clip);
-    const f32 inset = std::min(
-        rect.border_width,
-        std::min(max.x - min.x, max.y - min.y) * 0.5F);
-    append_ui_rounded_rect(
-        vertices,
-        indices,
-        runs,
-        {min.x + inset, min.y + inset},
-        {max.x - inset, max.y - inset},
-        rect.color,
-        std::max(0.0F, rect.radius - inset),
-        clip);
-    return;
-  }
-  append_ui_rounded_rect(vertices, indices, runs, min, max, rect.color, rect.radius, clip);
+  append_ui_shape_quad(
+      vertices,
+      indices,
+      runs,
+      min,
+      max,
+      rect.color,
+      rect.border_color,
+      rect.border_width,
+      rect.radius,
+      clip);
 }
 
 void apply_ui_scissor(UiClip clip, u32 framebuffer_height) {
@@ -852,14 +812,28 @@ void OpenGLRenderer::begin_shutdown() {
   if (ui_vertex_buffer_ != 0) {
     glDeleteBuffers(1, &ui_vertex_buffer_);
   }
+  if (ui_shape_index_buffer_ != 0) {
+    glDeleteBuffers(1, &ui_shape_index_buffer_);
+  }
+  if (ui_shape_vertex_buffer_ != 0) {
+    glDeleteBuffers(1, &ui_shape_vertex_buffer_);
+  }
   if (ui_vao_ != 0) {
     glDeleteVertexArrays(1, &ui_vao_);
+  }
+  if (ui_shape_vao_ != 0) {
+    glDeleteVertexArrays(1, &ui_shape_vao_);
   }
   ui_index_buffer_ = 0;
   ui_vertex_buffer_ = 0;
   ui_vao_ = 0;
   ui_vertex_capacity_bytes_ = 0;
   ui_index_capacity_bytes_ = 0;
+  ui_shape_index_buffer_ = 0;
+  ui_shape_vertex_buffer_ = 0;
+  ui_shape_vao_ = 0;
+  ui_shape_vertex_capacity_bytes_ = 0;
+  ui_shape_index_capacity_bytes_ = 0;
   gpu_profile_context_initialized_ = false;
   render_frame_index_ = 0;
   frame_ = {};
@@ -1884,7 +1858,6 @@ void OpenGLRenderer::draw_ui() {
   if (!ensure_ui_program()) {
     return;
   }
-  ensure_ui_buffers();
 
   glDisable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
@@ -1897,20 +1870,100 @@ void OpenGLRenderer::draw_ui() {
       static_cast<GLsizei>(texture_units.size()),
       texture_units.data());
 
+  bind_ui_textures();
+  draw_ui_shapes();
   draw_ui_quads();
+  glActiveTexture(GL_TEXTURE0);
 
   glBindVertexArray(0);
   glUseProgram(0);
   glDisable(GL_BLEND);
 }
 
+void OpenGLRenderer::bind_ui_textures() {
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, white_texture_.id);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, font_atlas_.id == 0 ? white_texture_.id : font_atlas_.id);
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
+  glActiveTexture(GL_TEXTURE3);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, item_atlas_.id == 0 ? white_texture_.id : item_atlas_.id);
+  glActiveTexture(GL_TEXTURE4);
+  glBindTexture(
+      GL_TEXTURE_2D_ARRAY,
+      player_skin_atlas_.gl_texture_array() == 0 ? white_texture_.id
+                                                 : player_skin_atlas_.gl_texture_array());
+}
+
+void OpenGLRenderer::draw_ui_shapes() {
+  const usize shape_count = frame_.ui_rects.size();
+  if (shape_count == 0U) {
+    return;
+  }
+  ensure_ui_shape_buffers();
+
+  ui_shape_vertices_.clear();
+  ui_shape_indices_.clear();
+  ui_shape_draw_runs_.clear();
+  ui_shape_vertices_.reserve(shape_count * 4U);
+  ui_shape_indices_.reserve(shape_count * 6U);
+  ui_shape_draw_runs_.reserve(shape_count);
+
+  for (const UIRectDrawItem& rect : frame_.ui_rects) {
+    append_ui_rect_item(ui_shape_vertices_, ui_shape_indices_, ui_shape_draw_runs_, rect);
+  }
+  if (ui_shape_vertices_.empty()) {
+    return;
+  }
+
+  glBindVertexArray(ui_shape_vao_);
+  glVertexAttrib1f(3, UiTextureSlotWhite);
+  glVertexAttribI1ui(4, 0U);
+  const GLsizeiptr vertex_bytes =
+      static_cast<GLsizeiptr>(ui_shape_vertices_.size() * sizeof(UIShapeVertex));
+  ensure_buffer_capacity(
+      GL_ARRAY_BUFFER,
+      ui_shape_vertex_buffer_,
+      ui_shape_vertex_capacity_bytes_,
+      vertex_bytes,
+      GL_DYNAMIC_DRAW);
+  glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_bytes, ui_shape_vertices_.data());
+  ++gpu_buffer_uploads_last_frame_;
+  gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(vertex_bytes);
+  const GLsizeiptr index_bytes =
+      static_cast<GLsizeiptr>(ui_shape_indices_.size() * sizeof(u32));
+  ensure_buffer_capacity(
+      GL_ELEMENT_ARRAY_BUFFER,
+      ui_shape_index_buffer_,
+      ui_shape_index_capacity_bytes_,
+      index_bytes,
+      GL_DYNAMIC_DRAW);
+  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, index_bytes, ui_shape_indices_.data());
+  ++gpu_buffer_uploads_last_frame_;
+  gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(index_bytes);
+  for (const UiDrawRun& run : ui_shape_draw_runs_) {
+    apply_ui_scissor(run.clip, height_);
+    glDrawElements(
+        GL_TRIANGLES,
+        static_cast<GLsizei>(run.index_count),
+        GL_UNSIGNED_INT,
+        reinterpret_cast<const void*>(static_cast<usize>(run.first_index) * sizeof(u32)));
+    ++ui_draw_calls_last_frame_;
+    ++draw_calls_last_frame_;
+  }
+  glDisable(GL_SCISSOR_TEST);
+  vertices_submitted_last_frame_ += static_cast<u64>(ui_shape_indices_.size());
+  triangles_submitted_last_frame_ += static_cast<u64>(ui_shape_indices_.size() / 3U);
+}
+
 void OpenGLRenderer::draw_ui_quads() {
   const usize quad_count =
-      frame_.ui_rects.size() + frame_.ui_textured_quads.size() +
-      (font_atlas_.id == 0 ? 0U : frame_.ui_glyphs.size());
+      frame_.ui_textured_quads.size() + (font_atlas_.id == 0 ? 0U : frame_.ui_glyphs.size());
   if (quad_count == 0U) {
     return;
   }
+  ensure_ui_buffers();
 
   ui_vertices_.clear();
   ui_indices_.clear();
@@ -1918,10 +1971,6 @@ void OpenGLRenderer::draw_ui_quads() {
   ui_vertices_.reserve(quad_count * 4U);
   ui_indices_.reserve(quad_count * 6U);
   ui_draw_runs_.reserve(quad_count);
-
-  for (const UIRectDrawItem& rect : frame_.ui_rects) {
-    append_ui_rect_item(ui_vertices_, ui_indices_, ui_draw_runs_, rect);
-  }
 
   for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
     append_ui_quad(
@@ -1959,20 +2008,6 @@ void OpenGLRenderer::draw_ui_quads() {
   if (ui_vertices_.empty()) {
     return;
   }
-
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, white_texture_.id);
-  glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, font_atlas_.id == 0 ? white_texture_.id : font_atlas_.id);
-  glActiveTexture(GL_TEXTURE2);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, terrain_atlas_.id == 0 ? white_texture_.id : terrain_atlas_.id);
-  glActiveTexture(GL_TEXTURE3);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, item_atlas_.id == 0 ? white_texture_.id : item_atlas_.id);
-  glActiveTexture(GL_TEXTURE4);
-  glBindTexture(
-      GL_TEXTURE_2D_ARRAY,
-      player_skin_atlas_.gl_texture_array() == 0 ? white_texture_.id
-                                                 : player_skin_atlas_.gl_texture_array());
 
   glBindVertexArray(ui_vao_);
   const GLsizeiptr vertex_bytes =
@@ -2064,6 +2099,83 @@ void OpenGLRenderer::ensure_ui_buffers() {
       GL_UNSIGNED_INT,
       sizeof(UIVertex),
       reinterpret_cast<const void*>(offsetof(UIVertex, atlas_page)));
+  glVertexAttrib2f(5, 0.0F, 0.0F);
+  glVertexAttrib4f(6, 0.0F, 0.0F, 0.0F, 0.0F);
+  glVertexAttrib1f(7, 0.0F);
+  glVertexAttrib1f(8, 0.0F);
+  glBindVertexArray(0);
+}
+
+void OpenGLRenderer::ensure_ui_shape_buffers() {
+  if (ui_shape_vao_ != 0) {
+    return;
+  }
+
+  glGenVertexArrays(1, &ui_shape_vao_);
+  glBindVertexArray(ui_shape_vao_);
+  glGenBuffers(1, &ui_shape_vertex_buffer_);
+  glGenBuffers(1, &ui_shape_index_buffer_);
+  glBindBuffer(GL_ARRAY_BUFFER, ui_shape_vertex_buffer_);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_shape_index_buffer_);
+
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(
+      0,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIShapeVertex),
+      reinterpret_cast<const void*>(offsetof(UIShapeVertex, position)));
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(
+      1,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIShapeVertex),
+      reinterpret_cast<const void*>(offsetof(UIShapeVertex, uv)));
+  glEnableVertexAttribArray(2);
+  glVertexAttribPointer(
+      2,
+      4,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIShapeVertex),
+      reinterpret_cast<const void*>(offsetof(UIShapeVertex, color)));
+  glVertexAttrib1f(3, UiTextureSlotWhite);
+  glVertexAttribI1ui(4, 0U);
+  glEnableVertexAttribArray(5);
+  glVertexAttribPointer(
+      5,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIShapeVertex),
+      reinterpret_cast<const void*>(offsetof(UIShapeVertex, rect_size)));
+  glEnableVertexAttribArray(6);
+  glVertexAttribPointer(
+      6,
+      4,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIShapeVertex),
+      reinterpret_cast<const void*>(offsetof(UIShapeVertex, border_color)));
+  glEnableVertexAttribArray(7);
+  glVertexAttribPointer(
+      7,
+      1,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIShapeVertex),
+      reinterpret_cast<const void*>(offsetof(UIShapeVertex, radius)));
+  glEnableVertexAttribArray(8);
+  glVertexAttribPointer(
+      8,
+      1,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(UIShapeVertex),
+      reinterpret_cast<const void*>(offsetof(UIShapeVertex, border_width)));
   glBindVertexArray(0);
 }
 

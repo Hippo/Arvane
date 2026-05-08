@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -64,6 +65,126 @@ enum class HeldItemActionPlayResult : u8 {
   Suppressed,
   Played,
 };
+
+struct UiBuildCacheKey {
+  u32 width{};
+  u32 height{};
+  bool has_active_session{};
+  bool has_active_screen{};
+  u64 screen_revision{};
+  u64 gameplay_signature{};
+
+  [[nodiscard]] bool operator==(const UiBuildCacheKey& other) const noexcept {
+    return width == other.width && height == other.height &&
+           has_active_session == other.has_active_session &&
+           has_active_screen == other.has_active_screen &&
+           screen_revision == other.screen_revision &&
+           gameplay_signature == other.gameplay_signature;
+  }
+};
+
+[[nodiscard]] u64 ui_cache_hash_append_byte(u64 hash, u8 value) noexcept {
+  constexpr u64 Prime = 1099511628211ULL;
+  hash ^= value;
+  hash *= Prime;
+  return hash;
+}
+
+[[nodiscard]] u64 ui_cache_hash_append_u64(u64 hash, u64 value) noexcept {
+  for (usize index = 0; index < sizeof(value); ++index) {
+    hash = ui_cache_hash_append_byte(
+        hash,
+        static_cast<u8>((value >> (index * 8U)) & 0xFFU));
+  }
+  return hash;
+}
+
+[[nodiscard]] u64 ui_cache_hash_append_bool(u64 hash, bool value) noexcept {
+  return ui_cache_hash_append_byte(hash, value ? 1U : 0U);
+}
+
+[[nodiscard]] u64 ui_cache_hash_append_string(u64 hash, std::string_view value) noexcept {
+  hash = ui_cache_hash_append_u64(hash, value.size());
+  for (char ch : value) {
+    hash = ui_cache_hash_append_byte(hash, static_cast<u8>(ch));
+  }
+  return hash;
+}
+
+[[nodiscard]] u64 ui_cache_hash_append_f32(u64 hash, f32 value) noexcept {
+  const auto quantized =
+      static_cast<std::int64_t>(std::llround(static_cast<double>(value) * 100.0));
+  return ui_cache_hash_append_u64(hash, static_cast<u64>(quantized));
+}
+
+[[nodiscard]] u64 ui_cache_hash_append_item_stack(
+    u64 hash,
+    const ui::UiItemStackView& stack) noexcept {
+  hash = ui_cache_hash_append_string(hash, stack.item_name);
+  hash = ui_cache_hash_append_string(hash, stack.display_name);
+  hash = ui_cache_hash_append_u64(hash, stack.count);
+  hash = ui_cache_hash_append_u64(hash, stack.durability);
+  hash = ui_cache_hash_append_u64(hash, stack.max_durability);
+  hash = ui_cache_hash_append_u64(hash, static_cast<u64>(stack.render_type));
+  hash = ui_cache_hash_append_bool(hash, stack.texture_icon.valid);
+  hash = ui_cache_hash_append_u64(hash, stack.texture_icon.page);
+  hash = ui_cache_hash_append_u64(hash, stack.block_model_quads.size());
+  return hash;
+}
+
+[[nodiscard]] u64 ui_cache_hash_append_optional_item_stack(
+    u64 hash,
+    const std::optional<ui::UiItemStackView>& stack) noexcept {
+  hash = ui_cache_hash_append_bool(hash, stack.has_value());
+  return stack.has_value() ? ui_cache_hash_append_item_stack(hash, stack.value()) : hash;
+}
+
+[[nodiscard]] u64 gameplay_ui_signature(
+    const DesktopGameSession& session,
+    const platform::InputSnapshot& platform_input,
+    u32 displayed_fps) noexcept {
+  constexpr u64 OffsetBasis = 1469598103934665603ULL;
+  u64 hash = OffsetBasis;
+  hash = ui_cache_hash_append_u64(
+      hash,
+      static_cast<u64>(reinterpret_cast<std::uintptr_t>(session.client.get())));
+  if (session.client == nullptr) {
+    return hash;
+  }
+
+  hash = ui_cache_hash_append_u64(hash, session.client->selected_hotbar_slot());
+  hash = ui_cache_hash_append_bool(hash, session.client->inventory_open());
+  hash = ui_cache_hash_append_bool(hash, session.client->chat_open());
+  hash = ui_cache_hash_append_bool(hash, session.client->tab_menu_visible());
+  hash = ui_cache_hash_append_string(hash, session.client->chat_draft());
+  hash = ui_cache_hash_append_u64(hash, displayed_fps);
+
+  hash = ui_cache_hash_append_u64(hash, session.inventory_slots.size());
+  for (const ui::UiItemStackView& slot : session.inventory_slots) {
+    hash = ui_cache_hash_append_item_stack(hash, slot);
+  }
+  hash = ui_cache_hash_append_optional_item_stack(hash, session.carried_inventory_stack);
+  if (session.client->inventory_open()) {
+    hash = ui_cache_hash_append_f32(hash, platform_input.cursor_x);
+    hash = ui_cache_hash_append_f32(hash, platform_input.cursor_y);
+  }
+
+  hash = ui_cache_hash_append_u64(hash, session.chat_lines.size());
+  for (const ui::ChatLineView& line : session.chat_lines) {
+    hash = ui_cache_hash_append_string(hash, line.text);
+    hash = ui_cache_hash_append_f32(hash, line.opacity);
+  }
+
+  hash = ui_cache_hash_append_u64(hash, session.tab_players.size());
+  for (const ui::PlayerListEntryView& player : session.tab_players) {
+    hash = ui_cache_hash_append_string(hash, player.name);
+    hash = ui_cache_hash_append_bool(hash, player.latency_ms.has_value());
+    if (player.latency_ms.has_value()) {
+      hash = ui_cache_hash_append_u64(hash, player.latency_ms.value());
+    }
+  }
+  return hash;
+}
 
 [[nodiscard]] bool is_command_chat_draft(std::string_view draft) noexcept {
   return !draft.empty() && draft.front() == '/';
@@ -539,12 +660,14 @@ private:
         return false;
       }
       menu_state_.refresh_worlds();
+      invalidate_ui_tree_cache();
     }
     if (const std::optional<ui::DeleteSinglePlayerSaveCommand> command =
             menu_state_.take_delete_save_request();
         command.has_value()) {
       sessions_.delete_singleplayer_save(command.value());
       menu_state_.refresh_worlds();
+      invalidate_ui_tree_cache();
     }
     if (const std::optional<ui::JoinServerCommand> command =
             menu_state_.take_join_server_request();
@@ -554,6 +677,7 @@ private:
       } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
         screen_manager_.push(ui::make_multi_player_menu_screen());
       }
+      invalidate_ui_tree_cache();
     }
     if (const std::optional<ui::CreateWorldCommand> command =
             menu_state_.take_create_world_request();
@@ -572,6 +696,7 @@ private:
       } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
         screen_manager_.push(ui::make_single_player_menu_screen());
       }
+      invalidate_ui_tree_cache();
     }
     if (const std::optional<ui::StartSinglePlayerCommand> command =
             menu_state_.take_start_singleplayer_request();
@@ -586,11 +711,16 @@ private:
       } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
         screen_manager_.push(ui::make_single_player_menu_screen());
       }
+      invalidate_ui_tree_cache();
     }
     if (menu_state_.quit_requested) {
       window_.request_close();
     }
     return true;
+  }
+
+  void invalidate_ui_tree_cache() noexcept {
+    ui_tree_cache_valid_ = false;
   }
 
   [[nodiscard]] const player::ItemRecord* selected_held_item(
@@ -1139,6 +1269,9 @@ private:
         player_skin_regions_[skin_hash] = handle.value();
       }
     }
+    if (!new_images.empty()) {
+      invalidate_ui_tree_cache();
+    }
 
     HashMap<std::string, ui::PlayerSkinTextureView> texture_views;
     ui::PlayerSkinTextureView default_texture;
@@ -1290,24 +1423,44 @@ private:
           *active_session,
           has_active_integrated_session,
           fixed_tick_ran);
-      build_gameplay_ui(*active_session, platform_input);
-    } else {
-      ui_tree_.clear();
     }
 
     menu_context.viewport = {
         static_cast<f32>(framebuffer_.width),
         static_cast<f32>(framebuffer_.height),
     };
-    if (screen_manager_.has_active_screen()) {
-      screen_manager_.append_to(menu_context);
+    menu_context.screens = &screen_manager_;
+
+    const UiBuildCacheKey next_cache_key{
+        framebuffer_.width,
+        framebuffer_.height,
+        has_active_session,
+        screen_manager_.has_active_screen(),
+        screen_manager_.revision(),
+        has_active_session
+            ? gameplay_ui_signature(*active_session, platform_input, displayed_fps_)
+            : 0U};
+    const bool rebuild_ui_tree =
+        !ui_tree_cache_valid_ || !(next_cache_key == ui_tree_cache_key_);
+    if (rebuild_ui_tree) {
+      if (has_active_session) {
+        build_gameplay_ui(*active_session, platform_input);
+      } else {
+        ui_tree_.clear();
+      }
+
+      if (screen_manager_.has_active_screen()) {
+        screen_manager_.append_to(menu_context);
+      }
+      ui_tree_.layout(
+          {
+              static_cast<f32>(framebuffer_.width),
+              static_cast<f32>(framebuffer_.height),
+          },
+          &ui_text_measurer_);
+      ui_tree_cache_key_ = next_cache_key;
+      ui_tree_cache_valid_ = true;
     }
-    ui_tree_.layout(
-        {
-            static_cast<f32>(framebuffer_.width),
-            static_cast<f32>(framebuffer_.height),
-        },
-        &ui_text_measurer_);
     (void)ui_tree_.route_mouse_move({platform_input.cursor_x, platform_input.cursor_y});
     append_menu_player_skin_preview(frame, menu_context);
     ui::append_ui_draw_commands(
@@ -1512,6 +1665,8 @@ private:
   double last_frame_work_ms_{};
   u64 profile_frame_index_{};
   HashMap<std::string, render::TextureRegionHandle> player_skin_regions_{};
+  UiBuildCacheKey ui_tree_cache_key_{};
+  bool ui_tree_cache_valid_{};
 
   static constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
 };

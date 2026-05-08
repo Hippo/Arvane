@@ -7,6 +7,8 @@
 namespace arv::ui {
 namespace {
 
+constexpr usize MaxTextMeasureCacheEntries = 512;
+
 [[nodiscard]] bool contains(UiRect rect, Vec2f point) noexcept {
   return point.x >= rect.x && point.y >= rect.y &&
          point.x < rect.x + rect.width && point.y < rect.y + rect.height;
@@ -255,15 +257,33 @@ const asset::FontStack& FontUiTextMeasurer::stack_for(UiTextRole role) const noe
   return stacks_.body;
 }
 
+std::string FontUiTextMeasurer::measure_cache_key(std::string_view text, UiTextRole role) const {
+  std::string key;
+  key.reserve(text.size() + 2U);
+  key.push_back(static_cast<char>(role));
+  key.push_back('\0');
+  key.append(text.data(), text.size());
+  return key;
+}
+
 Vec2f FontUiTextMeasurer::measure(std::string_view text, UiTextRole role) const {
   if (fonts_ == nullptr) {
     return {};
+  }
+  std::string key = measure_cache_key(text, role);
+  if (const auto found = measure_cache_.find(key); found != measure_cache_.end()) {
+    return found->second;
   }
   auto measured = fonts_->measure_text(text, stack_for(role));
   if (!measured) {
     return {};
   }
-  return {measured.value().width, measured.value().height};
+  Vec2f size{measured.value().width, measured.value().height};
+  if (measure_cache_.size() >= MaxTextMeasureCacheEntries) {
+    measure_cache_.clear();
+  }
+  measure_cache_.emplace(std::move(key), size);
+  return size;
 }
 
 f32 FontUiTextMeasurer::line_height(UiTextRole role) const {
@@ -673,6 +693,10 @@ void append_ui_draw_commands(
     asset::FontSystem& fonts,
     const UiFontStacks& font_stacks,
     render::FramePacket& frame) {
+  const usize element_count = tree.elements().size();
+  frame.ui_rects.reserve(frame.ui_rects.size() + element_count);
+  frame.ui_textured_quads.reserve(frame.ui_textured_quads.size() + element_count);
+  frame.ui_glyphs.reserve(frame.ui_glyphs.size() + element_count * 8U);
   for (const UiElement& element : tree.elements()) {
     if (!element.visible) {
       continue;

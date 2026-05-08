@@ -158,9 +158,11 @@ public:
 
 private:
   [[nodiscard]] const asset::FontStack& stack_for(UiTextRole role) const noexcept;
+  [[nodiscard]] std::string measure_cache_key(std::string_view text, UiTextRole role) const;
 
   const asset::FontSystem* fonts_{};
   UiFontStacks stacks_{};
+  mutable HashMap<std::string, Vec2f> measure_cache_{};
 };
 
 class UiTree {

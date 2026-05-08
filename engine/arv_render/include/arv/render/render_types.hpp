@@ -340,6 +340,16 @@ struct UIVertex {
   u32 atlas_page{};
 };
 
+struct UIShapeVertex {
+  Vec2f position{};
+  Vec2f uv{};
+  Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+  Vec2f rect_size{};
+  Vec4f border_color{0.0F, 0.0F, 0.0F, 0.0F};
+  f32 radius{};
+  f32 border_width{};
+};
+
 struct TextureUploadData {
   u32 width{};
   u32 height{};

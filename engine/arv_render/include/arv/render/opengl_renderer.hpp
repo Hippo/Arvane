@@ -202,8 +202,11 @@ private:
       f32 aspect);
   void draw_entity_previews();
   void draw_ui();
+  void bind_ui_textures();
+  void draw_ui_shapes();
   void draw_ui_quads();
   void ensure_ui_buffers();
+  void ensure_ui_shape_buffers();
   void ensure_white_texture();
 
   u32 width_{};
@@ -309,6 +312,11 @@ private:
   GLuint ui_index_buffer_{};
   GLsizeiptr ui_vertex_capacity_bytes_{};
   GLsizeiptr ui_index_capacity_bytes_{};
+  GLuint ui_shape_vao_{};
+  GLuint ui_shape_vertex_buffer_{};
+  GLuint ui_shape_index_buffer_{};
+  GLsizeiptr ui_shape_vertex_capacity_bytes_{};
+  GLsizeiptr ui_shape_index_capacity_bytes_{};
   bool gpu_profile_context_initialized_{};
   std::vector<const EntityDrawItem*> entity_draw_order_;
   std::vector<EntityInstanceData> entity_instances_;
@@ -316,8 +324,11 @@ private:
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_rotations_{};
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_positions_{};
   std::vector<UIVertex> ui_vertices_;
+  std::vector<UIShapeVertex> ui_shape_vertices_;
   std::vector<u32> ui_indices_;
+  std::vector<u32> ui_shape_indices_;
   std::vector<UiDrawRun> ui_draw_runs_;
+  std::vector<UiDrawRun> ui_shape_draw_runs_;
 };
 
 } // namespace arv::render

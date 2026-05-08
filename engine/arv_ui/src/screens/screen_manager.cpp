@@ -70,6 +70,7 @@ void UIScreenManager::push(std::unique_ptr<UIScreen> screen) {
   }
   screen->on_enter();
   stack_.push_back(std::move(screen));
+  mark_dirty();
 }
 
 void UIScreenManager::pop() {
@@ -81,6 +82,7 @@ void UIScreenManager::pop() {
   }
   stack_.back()->on_exit();
   stack_.pop_back();
+  mark_dirty();
 }
 
 void UIScreenManager::replace(std::unique_ptr<UIScreen> screen) {
@@ -90,14 +92,19 @@ void UIScreenManager::replace(std::unique_ptr<UIScreen> screen) {
   if (!stack_.empty()) {
     stack_.back()->on_exit();
     stack_.pop_back();
+    mark_dirty();
   }
   push(std::move(screen));
 }
 
 void UIScreenManager::clear() {
+  const bool had_screens = !stack_.empty();
   while (!stack_.empty()) {
     stack_.back()->on_exit();
     stack_.pop_back();
+  }
+  if (had_screens) {
+    mark_dirty();
   }
 }
 
@@ -123,40 +130,68 @@ void UIScreenManager::append_to(UIContext& ctx) {
   }
 }
 
+void UIScreenManager::mark_dirty() noexcept {
+  ++revision_;
+}
+
 bool UIScreenManager::route_action(const UiAction& action, UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
-  return screen != nullptr && screen->handle_action(action, ctx);
+  const bool handled = screen != nullptr && screen->handle_action(action, ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
 }
 
 bool UIScreenManager::handle_cancel(UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
-  return screen != nullptr && screen->handle_cancel(ctx);
+  const bool handled = screen != nullptr && screen->handle_cancel(ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
 }
 
 bool UIScreenManager::handle_text_input(std::string_view text, UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
-  return screen != nullptr && screen->handle_text_input(text, ctx);
+  const bool handled = screen != nullptr && screen->handle_text_input(text, ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
 }
 
 bool UIScreenManager::handle_backspace(UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
-  return screen != nullptr && screen->handle_backspace(ctx);
+  const bool handled = screen != nullptr && screen->handle_backspace(ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
 }
 
 bool UIScreenManager::handle_submit(UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
-  return screen != nullptr && screen->handle_submit(ctx);
+  const bool handled = screen != nullptr && screen->handle_submit(ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
 }
 
 bool UIScreenManager::handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
-  return screen != nullptr && screen->handle_scroll(cursor, wheel_y, ctx);
+  const bool handled = screen != nullptr && screen->handle_scroll(cursor, wheel_y, ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
 }
 
 bool UIScreenManager::handle_pointer(
@@ -168,14 +203,19 @@ bool UIScreenManager::handle_pointer(
     UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
-  return screen != nullptr &&
-         screen->handle_pointer(
-             cursor,
-             delta,
-             left_pressed,
-             left_released,
-             left_held,
-             ctx);
+  const bool handled =
+      screen != nullptr &&
+      screen->handle_pointer(
+          cursor,
+          delta,
+          left_pressed,
+          left_released,
+          left_held,
+          ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
 }
 
 bool UIScreenManager::blocks_gameplay_input() const noexcept {

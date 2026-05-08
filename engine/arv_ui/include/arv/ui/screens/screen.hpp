@@ -282,6 +282,10 @@ public:
   [[nodiscard]] bool has_active_screen() const noexcept {
     return !stack_.empty();
   }
+  [[nodiscard]] u64 revision() const noexcept {
+    return revision_;
+  }
+  void mark_dirty() noexcept;
 
   void update(UIContext& ctx);
   void append_to(UIContext& ctx);
@@ -305,6 +309,7 @@ public:
 
 private:
   std::vector<std::unique_ptr<UIScreen>> stack_{};
+  u64 revision_{};
 };
 
 } // namespace arv::ui
