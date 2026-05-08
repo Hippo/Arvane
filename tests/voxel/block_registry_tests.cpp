@@ -77,6 +77,8 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   },
   {
     "name": "arvane:glass",
+    "buoyancy": 0.75,
+    "drops": null,
     "render_category": "transparent",
     "tags": ["arvane:transparent"],
     "properties": {
@@ -104,6 +106,10 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   EXPECT_EQ(glass->render_category, arv::voxel::RenderCategory::Transparent);
   EXPECT_FLOAT_EQ(glass->properties.hardness, 0.3F);
   EXPECT_TRUE(glass->properties.drops_with_wrong_tool);
+  const arv::voxel::BlockRecord* glass_block = registry.block(glass_id.value());
+  ASSERT_NE(glass_block, nullptr);
+  EXPECT_FLOAT_EQ(glass_block->item_buoyancy, 0.75F);
+  EXPECT_EQ(glass_block->drops.kind, arv::voxel::BlockDropKind::None);
 }
 
 TEST(BlockRegistryTests, ParsesBlockModelReferencesAndInputTextures) {

@@ -333,7 +333,12 @@ public:
       WorldEntityStore& entities,
       WorldRegionRuntime& regions,
       const voxel::BlockRegistry* block_registry);
-  [[nodiscard]] u32 tick_dropped_items(WorldEntityStore& entities, Seconds tick_seconds);
+  [[nodiscard]] u32 tick_dropped_items(
+      WorldRuntime& world,
+      WorldEntityStore& entities,
+      Seconds tick_seconds,
+      const voxel::BlockRegistry* block_registry,
+      const player::ItemRegistry* item_registry);
 
 private:
   [[nodiscard]] u32 tick_brains(WorldRuntime& world, WorldEntityStore& entities);

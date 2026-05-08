@@ -50,6 +50,12 @@ enum class RenderCategory : u8 {
   Transparent,
 };
 
+enum class BlockDropKind : u8 {
+  Default,
+  None,
+  Item,
+};
+
 struct BlockRegistryError {
   std::string message{};
 };
@@ -71,6 +77,11 @@ struct BlockProperties {
   u8 emission_b{};
 };
 
+struct BlockDropDefinition {
+  BlockDropKind kind{BlockDropKind::Default};
+  std::string item_name{};
+};
+
 struct StatePropertyDefinition {
   std::string name{};
   std::vector<std::string> values{};
@@ -85,8 +96,10 @@ struct BlockDefinition {
   std::string name{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
+  BlockDropDefinition drops{};
   RenderCategory render_category{RenderCategory::None};
   bool is_item{true};
+  f32 item_buoyancy{1.0F};
   bool hide_same_variant_faces{true};
   std::array<std::string, BlockFaceCount> texture_assets{};
   BlockModelReference model{};
@@ -98,7 +111,9 @@ struct BlockRecord {
   std::string name{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
+  BlockDropDefinition drops{};
   bool is_item{true};
+  f32 item_buoyancy{1.0F};
   BlockVariantID default_variant{};
   std::vector<BlockVariantID> variants{};
 };

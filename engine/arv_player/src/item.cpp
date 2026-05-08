@@ -107,6 +107,10 @@ void merge_explicit_definition(ItemDefinition& target, ItemDefinition source) {
     target.placement_variant = source.placement_variant;
     target.source_block = source.source_block;
   }
+  if (source.buoyancy_set) {
+    target.buoyancy = source.buoyancy;
+    target.buoyancy_set = true;
+  }
   if (!source.tool_category.empty()) {
     target.tool_category = std::move(source.tool_category);
     target.tool_break_speed_multiplier = source.tool_break_speed_multiplier;
@@ -228,6 +232,9 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
         definition.tool_break_speed_multiplier < 0.0F) {
       return Result::failure({"item tool break speed multiplier must be finite and >= 0 for " + definition.name});
     }
+    if (!std::isfinite(definition.buoyancy)) {
+      return Result::failure({"item buoyancy must be finite for " + definition.name});
+    }
     auto resolved_type = resolve_render_type(definition);
     if (!resolved_type) {
       return Result::failure(resolved_type.error());
@@ -266,6 +273,7 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     record.render_block_variant =
         record.render_type == ItemRenderType::Block ? definition.placement_variant : std::nullopt;
     record.source_block = definition.source_block;
+    record.buoyancy = definition.buoyancy;
     record.tool_category = std::move(definition.tool_category);
     record.tool_break_speed_multiplier = definition.tool_break_speed_multiplier;
     record.held_animations = std::move(definition.held_animations);
@@ -325,6 +333,8 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
     definition.generated_from_block = true;
     definition.placement_variant = block->default_variant;
     definition.source_block = block->id;
+    definition.buoyancy = block->item_buoyancy;
+    definition.buoyancy_set = true;
     definition_indices.emplace(definition.name, definitions.size());
     definitions.push_back(std::move(definition));
   }
@@ -344,6 +354,9 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
         definition.tool_break_speed_multiplier < 0.0F) {
       return Result::failure({"item tool break speed multiplier must be finite and >= 0 for " + definition.name});
     }
+    if (!std::isfinite(definition.buoyancy)) {
+      return Result::failure({"item buoyancy must be finite for " + definition.name});
+    }
     if (const auto block_id = registry.find_block(definition.name);
         block_id.has_value() && definition.name != AirItemName) {
       const voxel::BlockRecord* block = registry.block(block_id.value());
@@ -362,6 +375,17 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
       definitions.push_back(std::move(definition));
     } else {
       merge_explicit_definition(definitions[existing->second], std::move(definition));
+    }
+  }
+
+  for (u32 block_index = 0; block_index < registry.block_count(); ++block_index) {
+    const voxel::BlockRecord* block = registry.block(voxel::BlockID{block_index});
+    if (block == nullptr || block->drops.kind != voxel::BlockDropKind::Item) {
+      continue;
+    }
+    if (definition_indices.find(block->drops.item_name) == definition_indices.end()) {
+      return Result::failure(
+          {"block " + block->name + " drops missing item " + block->drops.item_name});
     }
   }
 
@@ -477,6 +501,15 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
       const auto places_block_iter = item.find("places_block");
       if (places_block_iter != item.end()) {
         definition.places_block = places_block_iter->get<std::string>();
+      }
+      const auto buoyancy_iter = item.find("buoyancy");
+      if (buoyancy_iter != item.end()) {
+        if (!buoyancy_iter->is_number()) {
+          return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+              {"buoyancy must be a number for " + definition.name});
+        }
+        definition.buoyancy = buoyancy_iter->get<f32>();
+        definition.buoyancy_set = true;
       }
       const auto tool_iter = item.find("tool");
       if (tool_iter != item.end()) {

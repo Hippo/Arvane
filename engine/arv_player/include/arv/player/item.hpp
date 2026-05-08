@@ -18,6 +18,7 @@ using ItemID = ID<ItemTag, u32>;
 inline constexpr ItemID AirItemID{0};
 inline constexpr std::string_view AirItemName = "arvane:air";
 inline constexpr std::string_view MissingItemName = "arvane:missing_item";
+inline constexpr f32 DefaultItemBuoyancy = 1.0F;
 
 enum class ItemRenderType : u8 {
   Texture,
@@ -58,6 +59,8 @@ struct ItemDefinition {
   bool generated_from_block{};
   std::optional<voxel::BlockVariantID> placement_variant{};
   std::optional<voxel::BlockID> source_block{};
+  f32 buoyancy{DefaultItemBuoyancy};
+  bool buoyancy_set{};
   std::string tool_category{};
   f32 tool_break_speed_multiplier{1.0F};
   HashMap<std::string, HeldItemAnimationBinding> held_animations{};
@@ -75,6 +78,7 @@ struct ItemRecord {
   std::optional<voxel::BlockVariantID> placement_variant{};
   std::optional<voxel::BlockVariantID> render_block_variant{};
   std::optional<voxel::BlockID> source_block{};
+  f32 buoyancy{DefaultItemBuoyancy};
   std::string tool_category{};
   f32 tool_break_speed_multiplier{1.0F};
   HashMap<std::string, HeldItemAnimationBinding> held_animations{};

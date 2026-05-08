@@ -281,6 +281,40 @@ namespace {
   return held.has_value() ? held->item : player::AirItemID;
 }
 
+[[nodiscard]] std::optional<player::ItemID> mined_block_drop_item(
+    const player::PlayerState& player_state,
+    const player::ItemRegistry& item_registry,
+    const voxel::BlockRegistry& block_registry,
+    const voxel::BlockVariantRecord& target) {
+  const voxel::BlockRecord* block = block_registry.block(target.block_id);
+  if (block == nullptr) {
+    return std::nullopt;
+  }
+
+  const bool can_drop =
+      !block_has_mineable_tool_tag(block_registry, target.block_id) ||
+      target.properties.drops_with_wrong_tool ||
+      held_item_matches_block_tool(
+          player_state,
+          item_registry,
+          block_registry,
+          target);
+  if (!can_drop) {
+    return std::nullopt;
+  }
+
+  switch (block->drops.kind) {
+    case voxel::BlockDropKind::Default:
+      return block->is_item ? item_registry.find_item(block->name) : std::nullopt;
+    case voxel::BlockDropKind::None:
+      return std::nullopt;
+    case voxel::BlockDropKind::Item:
+      return item_registry.find_item(block->drops.item_name);
+  }
+
+  return std::nullopt;
+}
+
 } // namespace
 
 void ServerRuntimeImpl::apply_player_interaction_command(
@@ -498,19 +532,13 @@ void ServerRuntimeImpl::tick_block_break_attempt(
   if (!std::isfinite(required_seconds) || required_seconds <= 0.0F) {
     if (default_world_.set_block(hit->block, voxel::AirBlockVariantID)) {
       if (!player_state.resolved_permissions.core.has_creative_inventory) {
-        const voxel::BlockRecord* block = block_registry_->block(target->block_id);
-        const bool can_drop =
-            block != nullptr && block->is_item &&
-            (!block_has_mineable_tool_tag(*block_registry_, target->block_id) ||
-             target->properties.drops_with_wrong_tool ||
-             held_item_matches_block_tool(
-                 player_state,
-                 *item_registry_,
-                 *block_registry_,
-                 *target));
         const std::optional<player::ItemID> drop_item =
-            can_drop && item_registry_ != nullptr
-                ? item_registry_->find_item(block->name)
+            item_registry_ != nullptr
+                ? mined_block_drop_item(
+                      player_state,
+                      *item_registry_,
+                      *block_registry_,
+                      *target)
                 : std::nullopt;
         if (drop_item.has_value()) {
           spawn_dropped_item_stack(
@@ -550,19 +578,13 @@ void ServerRuntimeImpl::tick_block_break_attempt(
   if (attempt.elapsed_seconds >= attempt.required_seconds &&
       default_world_.set_block(hit->block, voxel::AirBlockVariantID)) {
     if (!player_state.resolved_permissions.core.has_creative_inventory) {
-      const voxel::BlockRecord* block = block_registry_->block(target->block_id);
-      const bool can_drop =
-          block != nullptr && block->is_item &&
-          (!block_has_mineable_tool_tag(*block_registry_, target->block_id) ||
-           target->properties.drops_with_wrong_tool ||
-           held_item_matches_block_tool(
-               player_state,
-               *item_registry_,
-               *block_registry_,
-               *target));
       const std::optional<player::ItemID> drop_item =
-          can_drop && item_registry_ != nullptr
-              ? item_registry_->find_item(block->name)
+          item_registry_ != nullptr
+              ? mined_block_drop_item(
+                    player_state,
+                    *item_registry_,
+                    *block_registry_,
+                    *target)
               : std::nullopt;
       if (drop_item.has_value()) {
         spawn_dropped_item_stack(

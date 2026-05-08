@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <utility>
+#include <vector>
 
 TEST(InventoryTests, InsertStackMergesIntoExistingStacksBeforeUsingEmptySlots) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
@@ -155,6 +156,7 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
       "name": "arvane:coal",
       "display_name": "Coal",
       "max_stack_size": 64,
+      "buoyancy": 0.5,
       "render_type": "texture",
       "texture": "arvane:texture/item/coal",
       "tool": {
@@ -179,6 +181,7 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
   ASSERT_NE(coal, nullptr);
   EXPECT_EQ(coal->render_type, arv::player::ItemRenderType::Texture);
   EXPECT_EQ(coal->texture_asset, "arvane:texture/item/coal");
+  EXPECT_FLOAT_EQ(coal->buoyancy, 0.5F);
   EXPECT_EQ(coal->tool_category, "pickaxe");
   EXPECT_FLOAT_EQ(coal->tool_break_speed_multiplier, 3.5F);
   EXPECT_FALSE(coal->placement_variant.has_value());
@@ -196,4 +199,46 @@ TEST(ItemRegistryTests, GeneratedBlockItemsResolveToBlockRenderType) {
   EXPECT_EQ(stone->render_type, arv::player::ItemRenderType::Block);
   ASSERT_TRUE(stone->render_block_variant.has_value());
   EXPECT_EQ(stone->render_block_variant.value(), block_registry.find_variant("arvane:stone").value());
+}
+
+TEST(ItemRegistryTests, GeneratedBlockItemsUseBlockBuoyancy) {
+  std::vector<arv::voxel::BlockDefinition> blocks;
+  blocks.push_back(arv::voxel::make_air_definition());
+  arv::voxel::BlockDefinition cork =
+      arv::voxel::make_full_cube_definition("arvane:cork");
+  cork.item_buoyancy = 2.25F;
+  blocks.push_back(std::move(cork));
+
+  auto block_registry_result = arv::voxel::BlockRegistry::build(std::move(blocks));
+  ASSERT_TRUE(block_registry_result);
+  auto item_registry_result =
+      arv::player::ItemRegistry::build_default_block_items(block_registry_result.value());
+  ASSERT_TRUE(item_registry_result);
+
+  const auto cork_item_id = item_registry_result.value().find_item("arvane:cork");
+  ASSERT_TRUE(cork_item_id);
+  const arv::player::ItemRecord* cork_item =
+      item_registry_result.value().item(cork_item_id.value());
+  ASSERT_NE(cork_item, nullptr);
+  EXPECT_FLOAT_EQ(cork_item->buoyancy, 2.25F);
+}
+
+TEST(ItemRegistryTests, RejectsBlockDropOverrideMissingItem) {
+  std::vector<arv::voxel::BlockDefinition> blocks;
+  blocks.push_back(arv::voxel::make_air_definition());
+  arv::voxel::BlockDefinition mystery =
+      arv::voxel::make_full_cube_definition("arvane:mystery");
+  mystery.drops.kind = arv::voxel::BlockDropKind::Item;
+  mystery.drops.item_name = "arvane:not_registered";
+  blocks.push_back(std::move(mystery));
+
+  auto block_registry_result = arv::voxel::BlockRegistry::build(std::move(blocks));
+  ASSERT_TRUE(block_registry_result);
+  auto item_registry_result =
+      arv::player::ItemRegistry::build_default_block_items(block_registry_result.value());
+
+  ASSERT_FALSE(item_registry_result);
+  EXPECT_NE(
+      item_registry_result.error().message.find("drops missing item"),
+      std::string::npos);
 }

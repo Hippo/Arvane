@@ -167,6 +167,73 @@ TEST(WorldEntityTests, PhysicsEntitiesFallOntoTerrainAndStop) {
   EXPECT_FLOAT_EQ(velocity->linear.y, 0.0F);
 }
 
+TEST(WorldEntityTests, DroppedItemsFallOntoTerrainAndStop) {
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+
+  const arv::EntityID drop = world.create_dropped_item(
+      {stone_item, 1U},
+      {0.5F, 3.0F, 0.5F},
+      {});
+
+  for (int tick = 0; tick < 120; ++tick) {
+    (void)world.tick_dropped_items(
+        arv::tick_duration_seconds(arv::DefaultBaseTps),
+        &block_registry,
+        &item_registry);
+  }
+
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(drop);
+  const arv::entity::EntityVelocity* velocity = world.find_entity_velocity(drop);
+  ASSERT_NE(transform, nullptr);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_NEAR(transform->position.y, 1.001F, 0.002F);
+  EXPECT_FLOAT_EQ(velocity->linear.y, 0.0F);
+}
+
+TEST(WorldEntityTests, DroppedItemsFloatTowardLiquidSurfaceByDefault) {
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+  const arv::voxel::FluidDefinition water =
+      arv::voxel::make_water_fluid_definition();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(world.place_fluid_source({{0, 1, 0}}, water));
+
+  const arv::EntityID drop = world.create_dropped_item(
+      {stone_item, 1U},
+      {0.5F, 1.1F, 0.5F},
+      {});
+
+  for (int tick = 0; tick < 40; ++tick) {
+    (void)world.tick_dropped_items(
+        arv::tick_duration_seconds(arv::DefaultBaseTps),
+        &block_registry,
+        &item_registry);
+  }
+
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(drop);
+  const arv::entity::EntityVelocity* velocity = world.find_entity_velocity(drop);
+  ASSERT_NE(transform, nullptr);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_GT(transform->position.y, 1.5F);
+  EXPECT_LE(transform->position.y, 1.93F);
+  EXPECT_GE(velocity->linear.y, 0.0F);
+}
+
 TEST(WorldEntityTests, PhysicsEntitiesCollideWithWallsAndFaceMovementDirection) {
   const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();

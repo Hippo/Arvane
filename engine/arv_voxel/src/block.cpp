@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -344,6 +345,12 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     if (!definition_names.emplace(definition.name, i).second) {
       return Result::failure({"duplicate block definition: " + definition.name});
     }
+    if (definition.drops.kind == BlockDropKind::Item && definition.drops.item_name.empty()) {
+      return Result::failure({"block drops item must be non-empty for " + definition.name});
+    }
+    if (!std::isfinite(definition.item_buoyancy)) {
+      return Result::failure({"block item buoyancy must be finite for " + definition.name});
+    }
     if (auto state_error = validate_states(definition); state_error.has_value()) {
       return Result::failure({state_error.value()});
     }
@@ -385,7 +392,9 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     block.name = definition.name;
     block.tags = definition.tags;
     block.properties = definition.properties;
+    block.drops = definition.drops;
     block.is_item = definition.is_item;
+    block.item_buoyancy = definition.item_buoyancy;
 
     std::vector<std::string> variant_names = expand_variant_names(definition);
     if (variant_names.empty()) {
@@ -773,6 +782,33 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
       const auto is_item_iter = item.find("is_item");
       if (is_item_iter != item.end()) {
         definition.is_item = is_item_iter->get<bool>();
+      }
+
+      const auto buoyancy_iter = item.find("buoyancy");
+      if (buoyancy_iter != item.end()) {
+        if (!buoyancy_iter->is_number()) {
+          return BlockDefinitionsResult::failure(
+              {"buoyancy must be a number for " + definition.name});
+        }
+        definition.item_buoyancy = buoyancy_iter->get<f32>();
+      }
+
+      const auto drops_iter = item.find("drops");
+      if (drops_iter != item.end()) {
+        if (drops_iter->is_null()) {
+          definition.drops.kind = BlockDropKind::None;
+          definition.drops.item_name.clear();
+        } else if (drops_iter->is_string()) {
+          definition.drops.kind = BlockDropKind::Item;
+          definition.drops.item_name = drops_iter->get<std::string>();
+          if (definition.drops.item_name.empty()) {
+            return BlockDefinitionsResult::failure(
+                {"drops item must be non-empty for " + definition.name});
+          }
+        } else {
+          return BlockDefinitionsResult::failure(
+              {"drops must be a string or null for " + definition.name});
+        }
       }
 
       const bool has_model = item.find("model") != item.end();

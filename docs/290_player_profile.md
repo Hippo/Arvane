@@ -6,82 +6,18 @@ Arvane uses player profiles to represent persistent player identity and cross-wo
 
 Authentication is based on a public/private key pair. The client owns the private key. The server stores or learns the public key. During login, the server proves that the connecting client controls the matching private key by issuing a challenge that the client must sign.
 
-Arvane does **not** require a central account server at this stage. Player identity is per-installation or per-server. Global account identity, global username reservation, and cross-server profile portability are out of scope for now.
+Arvane does not require a central account server. Player identity is per installation or per server. Global account identity, global username reservation, and cross-server profile portability are out of scope.
 
 This design supports:
 
 * dedicated servers
 * integrated singleplayer servers
-* offline/local profiles
+* local/offline profiles
 * server-authoritative gameplay
 * duplicate display names
-* future central identity integration without changing the world/entity model
-
----
-
-## Module Placement
-
-A new CMake submodule should be created:
-
-```text
-arv_crypto
-```
-
-This module owns the engine-facing cryptography wrapper.
-
-Do **not** place cryptography directly in:
-
-```text
-arv_server
-arv_client
-arv_world
-arv_protocol
-arv_core
-```
-
-Those modules may depend on `arv_crypto`, but they should not include third-party crypto headers directly.
-
-Recommended structure:
-
-```text
-src/
-  arv_crypto/
-    CMakeLists.txt
-    include/
-      arv/crypto/crypto_init.hpp
-      arv/crypto/random.hpp
-      arv/crypto/ed25519.hpp
-      arv/crypto/hash.hpp
-      arv/crypto/hex.hpp
-    src/
-      crypto_init.cpp
-      random.cpp
-      ed25519.cpp
-      hash.cpp
-      hex.cpp
-```
-
-Recommended dependency:
-
-```text
-libsodium
-```
-
-`arv_crypto` should wrap the dependency behind Arvane-owned types and functions.
-
-The rest of the engine should use only:
-
-```cpp
-#include <arv/crypto/...>
-```
-
-and should not include:
-
-```cpp
-#include <sodium.h>
-```
-
-outside `arv_crypto`.
+* profile-owned skin lists
+* server-selected skin persistence
+* future identity-provider extensions without changing the world/entity model
 
 ---
 
@@ -97,13 +33,14 @@ PlayerEntity
 
 ### PlayerProfile
 
-Persistent player-owned state.
+A `PlayerProfile` is persistent player-owned state.
 
 Examples:
 
 * stable profile id
 * public authentication key
 * display name
+* selected skin hash
 * last world
 * last position
 * spawn point
@@ -117,7 +54,7 @@ The profile survives disconnects, respawns, world transfers, and entity recreati
 
 ### PlayerSession
 
-Transient runtime connection state.
+A `PlayerSession` is transient runtime connection state.
 
 Examples:
 
@@ -126,13 +63,13 @@ Examples:
 * authenticated state
 * active world
 * active entity
-* pending login/challenge state
+* pending auth challenge
 
 The session exists only while the player is connected.
 
 ### PlayerEntity
 
-The active in-world simulation body.
+A `PlayerEntity` is the active in-world simulation body.
 
 Examples:
 
@@ -149,81 +86,80 @@ The entity may be destroyed, recreated, transferred between worlds, or respawned
 
 ## Identity Model
 
-Arvane should not use username as identity.
+Arvane does not use username or display name as identity.
 
 The authoritative player identity is:
 
 ```text
-PlayerProfileID = hash(public_key)
+PlayerProfileID = 0x + lowercase_hex(hash(public_key_bytes))
 ```
 
-The display name is mutable and non-authoritative.
+The display name is mutable, non-authoritative metadata.
 
-This allows duplicate display names:
+This is valid:
 
 ```text
-Hippo
-Hippo
-Hippo
+profile_id:    0x1111...
+display_name:  Hippo
+
+profile_id:    0x2222...
+display_name:  Hippo
 ```
 
-Internally, those players are distinct because their public keys are distinct.
+Internally, those players are distinct because their public keys and profile ids are distinct.
 
 ---
 
-## Profile ID Format
+## ID Format
 
-All profile IDs derived from public keys must be represented as lowercase hexadecimal strings prefixed with:
+Profile ids, public keys, private-key filenames derived from profile ids, and skin hashes use lowercase `0x`-prefixed hexadecimal strings.
 
-```text
-0x
-```
-
-Example:
+Example profile id:
 
 ```text
 0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421
 ```
 
-The `0x` prefix is required for easy identification in logs, save files, debug tools, and protocol traces.
+Rules:
 
-### ID Rules
+* profile ids are derived from public key bytes
+* profile ids are stable as long as the key pair does not change
+* profile ids are not derived from display name
+* ids are serialized as strings
+* ids use lowercase hex
+* ids include the `0x` prefix
+* ids do not contain separators
+* ids do not depend on runtime IDs
 
-Profile IDs:
-
-* are derived from the public key
-* are stable as long as the key pair does not change
-* are not derived from username
-* are serialized as strings
-* use lowercase hex
-* include the `0x` prefix
-* should not contain separators
-* should not depend on runtime IDs
-
-Recommended derivation:
-
-```text
-profile_id = "0x" + hex(hash(public_key_bytes))
-```
-
-The hash algorithm should be selected and wrapped inside `arv_crypto`.
-
-A reasonable default is a 256-bit cryptographic hash.
+The `0x` prefix is required for readability in logs, save files, debug tools, protocol traces, and filenames.
 
 ---
 
-## Public and Private Keys
+## Cryptography Boundary
 
-Each player identity has:
+Cryptographic operations are exposed through `arv_crypto`.
 
-```text
-private key
-public key
+Gameplay, world, rendering, protocol, client, and server code may depend on `arv_crypto`, but they should not include third-party crypto headers directly.
+
+Use:
+
+```cpp
+#include <arv/crypto/...>
 ```
 
-The private key is secret and remains on the client machine.
+Do not include implementation-library headers such as `sodium.h` outside `arv_crypto`.
 
-The public key can be stored by servers and shared over the network.
+`arv_crypto` owns:
+
+* crypto initialization
+* secure random bytes
+* Ed25519 key generation
+* Ed25519 signing
+* Ed25519 verification
+* 256-bit hashing
+* lowercase hex encoding
+* `0x`-prefixed hex encoding
+* profile id derivation
 
 Recommended signature algorithm:
 
@@ -231,7 +167,7 @@ Recommended signature algorithm:
 Ed25519
 ```
 
-Recommended key sizes:
+Recommended sizes:
 
 ```text
 public key:  32 bytes
@@ -241,25 +177,7 @@ signature:   64 bytes
 
 These sizes should be exposed through constants in `arv_crypto`, not hardcoded throughout the engine.
 
-Example:
-
-```cpp
-namespace arv::crypto {
-
-inline constexpr usize ed25519_public_key_size = 32;
-inline constexpr usize ed25519_private_key_size = 64;
-inline constexpr usize ed25519_signature_size = 64;
-
-}
-```
-
----
-
-## `arv_crypto` API Shape
-
-The engine should expose strongly typed wrappers.
-
-Example:
+Example API shape:
 
 ```cpp
 namespace arv::crypto {
@@ -294,14 +212,6 @@ bool verify_ed25519(
     const Ed25519PublicKey& public_key
 );
 
-}
-```
-
-Hashing:
-
-```cpp
-namespace arv::crypto {
-
 struct Hash256 {
     std::array<std::byte, 32> bytes;
 };
@@ -311,38 +221,16 @@ Hash256 hash_256(std::span<const std::byte> data);
 std::string to_lower_hex(std::span<const std::byte> data);
 std::string to_prefixed_lower_hex(std::span<const std::byte> data);
 
-}
-```
-
-Profile ID helper:
-
-```cpp
-namespace arv::crypto {
-
 std::string derive_profile_id_from_public_key(
     const Ed25519PublicKey& public_key
 );
-
-}
-```
-
-This function must return a string beginning with `0x`.
-
----
-
-## Crypto Initialization
-
-`arv_crypto` should expose explicit initialization:
-
-```cpp
-namespace arv::crypto {
 
 bool initialize_crypto();
 
 }
 ```
 
-The application entry points should call this during startup before generating keys, signing, verifying, hashing, or generating random bytes.
+Application entry points call `arv::crypto::initialize_crypto()` during startup before generating keys, signing, verifying, hashing, or generating random bytes.
 
 Recommended callers:
 
@@ -356,62 +244,207 @@ Do not scatter third-party crypto initialization throughout gameplay or networki
 
 ---
 
-## Client Identity Storage
+## Local Profile Storage
 
-The client should store local identity material under:
-
-```text
-arvane_home/identity/
-```
-
-Recommended layout:
+Local installations store profile metadata, private keys, local skin files, and downloaded skin cache under `arvane_home`.
 
 ```text
 arvane_home/
-  identity/
-    local_identity.json
-    local_private_key.bin
+  profiles.json
+  keys/
+    <profile_id>.pk
+  skins/
+    <skin_hash>.png
+  cache/
+    skins/
+      <skin_hash>.png
 ```
 
-Example `local_identity.json`:
+### Directory Responsibilities
+
+`profiles.json`:
+
+* JSON array of local profiles
+* contains profile metadata
+* contains public keys
+* contains private key filenames
+* contains the profile-owned local skin list
+* does not contain private key bytes
+
+`keys/`:
+
+* contains local private key files
+* private key filenames should normally match `<profile_id>.pk`
+* private keys are loaded through the active profile’s `private_key_file` field
+
+`skins/`:
+
+* contains user-owned local skin files
+* these are skins selected/imported by the local user
+* these files are eligible for upload when server skin rules allow them
+
+`cache/skins/`:
+
+* contains validated skins downloaded from servers
+* remote cache files are not considered profile-owned skins
+* downloaded skins must not be copied into `skins/` unless the user explicitly imports them
+
+Client rendering treats disk cache and GPU residency as separate systems. Validated PNG files under `skins/` or `cache/skins/` may be decoded into CPU RGBA8 pixels and uploaded to the renderer’s `PlayerSkins` paged atlas. Evicting a skin from the GPU atlas frees only temporary texture-array space; it must not delete local skin files or cached skin files.
+
+### `profiles.json`
+
+`profiles.json` is a JSON array. Until a profile-selection UI exists, the first entry is the active local profile.
+
+Preferred shape:
 
 ```json
-{
-  "version": 1,
-  "profile_id": "0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421",
-  "display_name": "Hippo",
-  "public_key": "0x2e5c2f90884cb17f47b22cb4ab64efb7ccfa1343e91e8d1923a55db97a187944",
-  "private_key_file": "local_private_key.bin"
-}
+[
+  {
+    "version": 1,
+    "display_name": "Hippo",
+    "private_key_file": "0x7b851c7188122a3ab9d173548a21a8ea0640575003be964c33aacc893a95cb79.pk",
+    "profile_id": "0x7b851c7188122a3ab9d173548a21a8ea0640575003be964c33aacc893a95cb79",
+    "public_key": "0xb7b7e282606c08c6ae90eaa10e8cb8442d7f67e4287afbbcf0cc16283a6dd531",
+    "skins": [
+      {
+        "skin_hash": "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d",
+        "format": "png",
+        "width": 64,
+        "height": 64,
+        "file": "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d.png"
+      }
+    ]
+  },
+  {
+    "version": 1,
+    "display_name": "HippoAlt",
+    "private_key_file": "0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421.pk",
+    "profile_id": "0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421",
+    "public_key": "0x2e5c2f90884cb17f47b22cb4ab64efb7ccfa1343e91e8d1923a55db97a187944",
+    "skins": []
+  }
+]
 ```
 
-The private key should be stored separately from the public metadata file.
+Private key bytes must never be written into `profiles.json`.
 
-The binary private key file contains the raw private key bytes.
+Private key path resolution:
 
-For now, private-key-at-rest encryption is optional. The engine should not pretend the key is protected if it is only stored as a local file. A future account/security pass may add OS keychain integration.
+```text
+arvane_home/keys/<private_key_file>
+```
 
----
+Local skin path resolution:
 
-## Local Identity Creation
+```text
+arvane_home/skins/<skin.file>
+```
 
-If no local identity exists, the client should create one automatically.
+Remote cache path resolution:
+
+```text
+arvane_home/cache/skins/<skin_hash>.png
+```
+
+### Local Profile Creation
+
+When no local profiles exist, the client may create one automatically.
 
 Flow:
 
 ```text
 client startup
-identity file missing
+profiles.json missing or empty
 generate Ed25519 key pair
 derive profile_id from public key
-write local_identity.json
-write local_private_key.bin
-use generated identity for local/integrated play
+write keys/<profile_id>.pk
+write profiles.json with one profile entry
+use generated profile for local/integrated play
 ```
 
-The user may later change display name without changing identity.
+Changing the display name does not change identity.
 
-Changing the key pair creates a new identity.
+Changing the key pair creates a new identity and therefore a new profile id.
+
+---
+
+## Local Player Skins
+
+A local profile owns an ordered skin list in `profiles.json`.
+
+The skin list is ordered by preference. The client selects the first skin that is valid under the current server’s skin rules.
+
+For dedicated server play:
+
+```text
+best_skin = first profile skin where width <= server_max_res and height <= server_max_res
+```
+
+For integrated singleplayer:
+
+```text
+best_skin = first profile skin
+```
+
+If no skin is applicable, use the default skin.
+
+Default skin:
+
+```text
+arvane_home/assets/textures/default_skin/default.png
+arvane:texture/default_skin/default
+```
+
+The default skin is used when:
+
+* the profile has no local skins
+* no local skin satisfies server rules
+* server skins are disabled
+* a remote skin is still downloading
+* skin validation fails
+* the requested skin is not resident in the GPU player-skin atlas
+* player-skin atlas allocation or upload fails
+
+The default skin is not uploaded as a custom skin unless the user explicitly imports/selects it as a normal local skin.
+
+---
+
+## Skin Hashes and Storage
+
+Skin hashes are content hashes of the original accepted PNG bytes:
+
+```text
+skin_hash = "0x" + lowercase_hex(hash(original_png_bytes))
+```
+
+Rules:
+
+* client may compute hashes for local lookup, cache lookup, and upload hints
+* server computes the authoritative hash from uploaded bytes
+* client-supplied hashes are never authoritative
+* skin filenames are hash-derived
+* client-provided filenames are never used for server storage
+* skin hashes are lowercase `0x`-prefixed hex strings
+
+Dedicated server skin storage:
+
+```text
+server-save/player_assets/skins/<skin_hash>.png
+```
+
+Client downloaded skin cache:
+
+```text
+arvane_home/cache/skins/<skin_hash>.png
+```
+
+Local user-owned skin files:
+
+```text
+arvane_home/skins/<skin_hash>.png
+```
+
+Server and client skin writes should use temporary files before renaming into place.
 
 ---
 
@@ -427,9 +460,12 @@ arvane_home/
     server-save-1/
       players/
         0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421.json
+      player_assets/
+        skins/
+          <skin_hash>.png
 ```
 
-Example:
+Example server player profile:
 
 ```json
 {
@@ -437,6 +473,7 @@ Example:
   "profile_id": "0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421",
   "public_key": "0x2e5c2f90884cb17f47b22cb4ab64efb7ccfa1343e91e8d1923a55db97a187944",
   "display_name": "Hippo",
+  "selected_skin_hash": "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d",
 
   "last_world": "arvane:overworld",
   "last_position": [12.5, 70.0, -44.5],
@@ -456,21 +493,126 @@ Example:
 
 The server profile stores the public key, never the private key.
 
+`selected_skin_hash` is the custom skin currently selected for this player on that server. Empty string means no custom skin.
+
 ---
 
-## First-Join Policy
+## Player Profile Runtime Model
+
+`arv_server` owns persistent profiles.
+
+Example:
+
+```cpp
+struct PlayerProfile {
+    std::string profile_id;
+
+    arv::crypto::Ed25519PublicKey public_key;
+
+    std::string display_name;
+    std::string selected_skin_hash;
+
+    std::string last_world;
+    glm::dvec3 last_position;
+    glm::vec2 last_rotation;
+
+    std::string spawn_world;
+    glm::dvec3 spawn_position;
+
+    GameMode game_mode;
+    PermissionLevel permission_level;
+
+    PlayerInventoryData inventory;
+    PlayerStats stats;
+    PlayerSettings settings;
+
+    bool dirty = false;
+};
+```
+
+`profile_id` is a stable string beginning with `0x`.
+
+---
+
+## Player Session Model
+
+`arv_server` owns player sessions.
+
+Example:
+
+```cpp
+struct PlayerSession {
+    PlayerSessionID session_id;
+    ConnectionID connection_id;
+
+    std::string profile_id;
+
+    bool authenticated = false;
+    bool pending_auth = true;
+
+    WorldID active_world {};
+    entt::entity active_entity { entt::null };
+
+    std::optional<AuthChallenge> challenge;
+};
+```
+
+The session is runtime-only and is not saved.
+
+---
+
+## World/ECS Integration
+
+`arv_world` does not own player profiles.
+
+The world only needs to know that an entity is controlled by a player.
+
+Example component:
+
+```cpp
+struct PlayerControlled {
+    std::string profile_id;
+    PlayerSessionID session_id;
+};
+```
+
+The world may use this for ownership checks, replication association, and debugging.
+
+The authoritative profile data remains in `arv_server`.
+
+---
+
+## Authentication Flow
+
+Authentication uses challenge-response signing.
+
+```text
+1. Client connects.
+2. Client sends public key and display name.
+3. Server derives profile_id from public key.
+4. Server loads or creates profile.
+5. Server creates random auth challenge.
+6. Server sends challenge to client.
+7. Client signs deterministic challenge payload with private key.
+8. Client sends signature.
+9. Server verifies signature with public key.
+10. Server marks session authenticated.
+11. Server spawns or restores player entity.
+```
+
+The private key is never sent to the server.
+
+### First Join
 
 Because there is no central account server, identity is per server.
 
 Recommended policy:
 
 ```text
-first valid connection for a new profile_id creates the profile
+first valid connection for a new profile_id creates the server profile
 ```
 
-Since `profile_id` is derived from the public key, the server can independently verify that the claimed profile id matches the supplied public key.
-
-First join flow:
+First-join flow:
 
 ```text
 client connects
@@ -482,11 +624,9 @@ server creates profile
 server begins challenge authentication
 ```
 
-The server should not trust a client-supplied profile id without deriving it independently from the supplied public key.
+The server does not trust a client-supplied profile id. The server derives profile id from the supplied public key.
 
----
-
-## Existing Profile Login Policy
+### Existing Profile Login
 
 Existing profile flow:
 
@@ -499,31 +639,7 @@ server verifies stored public key matches supplied public key
 server begins challenge authentication
 ```
 
-If the profile file exists but the supplied public key does not match the stored public key, login must fail.
-
-This prevents a client from claiming another existing profile id.
-
----
-
-## Authentication Flow
-
-Authentication uses challenge-response signing.
-
-```text
-1. Client connects
-2. Client sends public key and display name
-3. Server derives profile_id = hash(public_key)
-4. Server loads or creates profile
-5. Server creates random auth challenge
-6. Server sends challenge to client
-7. Client signs challenge payload with private key
-8. Client sends signature
-9. Server verifies signature with public key
-10. Server marks session authenticated
-11. Server spawns or restores player entity
-```
-
-The private key is never sent to the server.
+If the profile file exists but the supplied public key does not match the stored public key, login fails.
 
 ---
 
@@ -558,7 +674,7 @@ Do not use `std::rand`.
 
 ## Signed Payload
 
-The client should not sign only the raw nonce. The signed message should include enough context to prevent replay across sessions, servers, or protocol versions.
+The client does not sign only the raw nonce. The signed message includes enough context to prevent replay across sessions, servers, or protocol versions.
 
 Recommended signed payload fields:
 
@@ -586,9 +702,9 @@ nonce=0x...
 expires_server_tick=123456
 ```
 
-The exact wire encoding should be defined in `arv_protocol`.
+The exact wire encoding is defined in `arv_protocol`.
 
-The server and client must build the signed payload deterministically. Do not sign JSON unless the serialization is canonical. Prefer a compact binary protocol encoding.
+The server and client must build the signed payload deterministically. Do not sign JSON unless the serialization is canonical. Prefer compact binary protocol encoding.
 
 ---
 
@@ -596,7 +712,7 @@ The server and client must build the signed payload deterministically. Do not si
 
 A valid signature must not be reusable.
 
-The server must reject:
+The server rejects:
 
 * unknown challenge
 * expired challenge
@@ -607,91 +723,7 @@ The server must reject:
 * signature for a different public key
 * signature with mismatched protocol version
 
-After a login attempt completes, the challenge should be erased regardless of success or failure.
-
----
-
-## Player Session Model
-
-`arv_server` should own player sessions.
-
-Example:
-
-```cpp
-struct PlayerSession {
-    PlayerSessionID session_id;
-    ConnectionID connection_id;
-
-    std::string profile_id;
-
-    bool authenticated = false;
-    bool pending_auth = true;
-
-    WorldID active_world {};
-    entt::entity active_entity { entt::null };
-
-    std::optional<AuthChallenge> challenge;
-};
-```
-
-The session is runtime-only and should not be saved.
-
----
-
-## Player Profile Model
-
-`arv_server` should own persistent profiles.
-
-Example:
-
-```cpp
-struct PlayerProfile {
-    std::string profile_id;
-
-    arv::crypto::Ed25519PublicKey public_key;
-
-    std::string display_name;
-
-    std::string last_world;
-    glm::dvec3 last_position;
-    glm::vec2 last_rotation;
-
-    std::string spawn_world;
-    glm::dvec3 spawn_position;
-
-    GameMode game_mode;
-    PermissionLevel permission_level;
-
-    PlayerInventoryData inventory;
-    PlayerStats stats;
-    PlayerSettings settings;
-
-    bool dirty = false;
-};
-```
-
-`profile_id` is a stable string beginning with `0x`.
-
----
-
-## World/ECS Integration
-
-`arv_world` must not own player profiles.
-
-The world should only know that an entity is controlled by a player.
-
-Example component:
-
-```cpp
-struct PlayerControlled {
-    std::string profile_id;
-    PlayerSessionID session_id;
-};
-```
-
-The world may use this for ownership checks, replication association, and debugging.
-
-The authoritative profile data remains in `arv_server`.
+After a login attempt completes, the challenge is erased regardless of success or failure.
 
 ---
 
@@ -707,6 +739,7 @@ server creates player entity
 server attaches PlayerControlled component
 server restores profile-derived state
 server sends initial world/player packets
+server sends skin rules/profile metadata packets
 server begins chunk streaming
 ```
 
@@ -774,7 +807,7 @@ Avoid saving:
 
 ## Respawn Flow
 
-Respawn should preserve the profile and session.
+Respawn preserves the profile and session.
 
 ```text
 player dies
@@ -792,7 +825,7 @@ The profile identity does not change on death.
 
 ## World Transfer Flow
 
-Dimension/world transfer should move the player profile to a new entity in another world.
+Dimension/world transfer moves the player profile to a new entity in another world.
 
 ```text
 snapshot relevant entity state
@@ -812,37 +845,11 @@ The entity does not need to persist across worlds. The profile does.
 
 ---
 
-## Duplicate Display Names
-
-Arvane should allow duplicate display names.
-
-Display name is not identity.
-
-This is valid:
-
-```text
-profile_id:    0x1111...
-display_name:  Hippo
-
-profile_id:    0x2222...
-display_name:  Hippo
-```
-
-UI, logs, and debug tools may disambiguate using a short profile id suffix:
-
-```text
-Hippo [0x8b3f7a1d]
-```
-
-Do not require display names to be globally unique.
-
----
-
 ## Display Name Rules
 
-Display names should be treated as user-facing metadata.
+Display names are user-facing metadata.
 
-Recommended rules:
+Rules:
 
 * mutable
 * non-authoritative
@@ -852,8 +859,15 @@ Recommended rules:
 * sanitized before rendering
 * length-limited
 * valid UTF-8
+* not globally unique
 
-The protocol should identify players by profile id or runtime entity id, not display name.
+The protocol identifies players by profile id, runtime player id, or runtime entity id, not display name.
+
+UI, logs, and debug tools may disambiguate duplicate names with a short profile id suffix:
+
+```text
+Hippo [0x8b3f7a1d]
+```
 
 ---
 
@@ -874,36 +888,383 @@ enum class PermissionLevel : u8 {
 
 The client may display permission status, but the server is authoritative.
 
-Command execution, debug actions, block editing, and admin tools must check server-side permission state.
+Command execution, debug actions, skin-resolution permissions, block editing, and admin tools must check server-side permission state.
+
+---
+
+## Player Skin Server Rules
+
+Dedicated servers may define skin policy in server config.
+
+Example:
+
+```yaml
+skins:
+  enabled: true
+  allow_uploads: true
+
+  resolutions:
+    - size: 64
+      enabled: true
+      max_upload_bytes: 32768
+      max_decoded_bytes: 16384
+
+    - size: 128
+      enabled: false
+      permission: "example.perm.128skin"
+
+    - size: 256
+      enabled: false
+
+    - size: 512
+      enabled: false
+
+  uploads:
+    max_chunk_bytes: 32768
+    chunk_threshold_bytes: 1048576
+    max_active_per_connection: 1
+    max_active_global: 32
+    timeout_seconds: 15
+    idle_timeout_seconds: 5
+
+  downloads:
+    require_advertised_hash: true
+    max_batch_size: 16
+
+  storage:
+    max_total_skin_bytes: 1073741824
+    max_skins_per_profile: 16
+```
+
+`skins.enabled` disables the entire custom skin system when false.
+
+`skins.allow_uploads` controls whether clients may submit new skin data. Existing selected server skins may still be advertised and requested when `skins.enabled` is true.
+
+Resolution entries define which square skin sizes are accepted.
+
+Default `max_upload_bytes`:
+
+```text
+64   => 32 KiB
+128  => 64 KiB
+256  => 256 KiB
+512  => 1 MiB
+1024 => 4 MiB
+2048 => 16 MiB
+```
+
+Default `max_decoded_bytes`:
+
+```text
+size * size * 4
+```
+
+By default, dedicated servers enable only 64x64 skins.
+
+Integrated singleplayer has no effective local skin restriction and uses the first skin entry in the active profile’s skin list.
+
+---
+
+## Skin Transfer Contract
+
+Profile metadata replication sends only:
+
+```text
+player_id
+profile_id
+display_name
+SkinDescriptor
+```
+
+Image bytes are transferred on demand with skin request/upload packets.
+
+Upload hardening:
+
+* uploads require an authenticated session
+* uploads require configured skin support
+* uploads require enabled resolution
+* width and height must match the selected resolution
+* upload byte count must not exceed the resolution limit
+* decoded byte count must not exceed the resolution limit
+* only one active upload per connection by default
+* upload ids are server-issued and session-owned
+* upload ids expire after configured total or idle timeout
+* full uploads must provide exactly the negotiated byte count
+* chunked uploads must use non-empty chunks no larger than the configured chunk size
+* chunked uploads may not overflow the negotiated total
+* final validation decodes PNG, checks dimensions, checks RGBA8 byte count, computes authoritative hash from compressed bytes, and updates `selected_skin_hash` only after storage succeeds
+
+Download hardening:
+
+* downloaded skins are request-scoped
+* clients may request only hashes advertised by the server unless config explicitly allows arbitrary lookup
+* clients validate request id, hash, byte count, PNG decode, and dimensions before writing cache files
+* cache writes use hash-derived filenames
+
+Server and client skin writes use temporary files before renaming into place.
+
+Future cleanup should add garbage collection for unreferenced server skin blobs, such as skins not selected by any profile, skins not recently used, or skins older than a server-defined threshold.
+
+---
+
+## Protocol Packets
+
+Packet names are illustrative. Exact packet naming should follow the protocol documentation style.
+
+### Clientbound Auth Challenge
+
+```cpp
+struct ClientboundAuthChallenge {
+    PlayerSessionID session_id;
+    std::array<std::byte, 32> nonce;
+    u64 expires_server_tick;
+    ServerInstanceID server_instance_id;
+};
+```
+
+### Serverbound Auth Begin
+
+```cpp
+struct ServerboundAuthBegin {
+    arv::crypto::Ed25519PublicKey public_key;
+    std::string display_name;
+};
+```
+
+The server derives:
+
+```text
+profile_id = 0x + lowercase_hex(hash(public_key_bytes))
+```
+
+The client may include its derived profile id for diagnostics, but the server must not trust it.
+
+### Serverbound Auth Response
+
+```cpp
+struct ServerboundAuthResponse {
+    arv::crypto::Ed25519Signature signature;
+};
+```
+
+The signature is over the deterministic signed auth payload.
+
+### Clientbound Auth Result
+
+```cpp
+struct ClientboundAuthResult {
+    bool accepted;
+    std::string profile_id;
+    std::string reason_if_rejected;
+};
+```
+
+Avoid leaking detailed security-sensitive rejection reasons to untrusted clients. Logs can contain more detail than network responses.
+
+### Skin Descriptor
+
+```cpp
+enum class SkinImageFormat : u8 {
+    Png = 0,
+};
+
+struct SkinDescriptor {
+    std::string skin_hash; // empty means no custom skin
+    SkinImageFormat format;
+    u16 width;
+    u16 height;
+};
+```
+
+### Clientbound Skin Rules
+
+```cpp
+struct ClientboundSkinRules {
+    bool enabled;
+    bool allow_uploads;
+    u16 max_res;
+    std::string selected_skin_hash;
+};
+```
+
+Sent after successful authentication.
+
+### Clientbound Player Profile Info
+
+```cpp
+struct ClientboundPlayerProfileInfo {
+    std::string profile_id;
+    std::string display_name;
+    SkinDescriptor skin;
+};
+```
+
+Batch variant:
+
+```cpp
+struct ClientboundPlayerProfileInfoBatch {
+    std::vector<PlayerProfileInfo> profiles;
+};
+```
+
+### Skin Requests and Skin Data
+
+```cpp
+struct SkinRequestEntry {
+    u32 request_id;
+    std::string skin_hash;
+};
+
+struct ServerboundSkinRequest {
+    u32 request_id;
+    std::string skin_hash;
+};
+
+struct ServerboundSkinRequestBatch {
+    std::vector<SkinRequestEntry> requests;
+};
+
+struct ClientboundSkinRequestDeny {
+    u32 request_id;
+    std::string skin_hash;
+    SkinRequestDenyReason reason;
+};
+
+struct ClientboundSkinData {
+    u32 request_id;
+    std::string skin_hash;
+    SkinImageFormat format;
+    u16 width;
+    u16 height;
+    std::vector<u8> compressed_image_bytes;
+};
+
+struct ClientboundSkinDataBeginChunked {
+    u32 request_id;
+    std::string skin_hash;
+    SkinImageFormat format;
+    u16 width;
+    u16 height;
+    u32 total_bytes;
+};
+
+struct ClientboundSkinDataChunk {
+    u32 request_id;
+    std::vector<u8> chunk;
+};
+
+struct ClientboundSkinDataEndChunked {
+    u32 request_id;
+};
+```
+
+### Skin Uploads
+
+```cpp
+enum class SkinUploadMode : u8 {
+    Full = 0,
+    Chunked = 1,
+};
+
+struct ServerboundSkinUploadBegin {
+    SkinImageFormat format;
+    std::string client_skin_hash_hint; // may be empty; server does not trust it
+    u16 width;
+    u16 height;
+    u32 total_upload_bytes;
+};
+
+struct ClientboundSkinUploadAccept {
+    u32 upload_id;
+    SkinUploadMode upload_mode;
+    u32 max_chunk_bytes;
+};
+
+struct ClientboundSkinUploadDeny {
+    SkinUploadDenyReason reason;
+};
+
+struct ServerboundSkinUploadData {
+    u32 upload_id;
+    std::vector<u8> compressed_image_bytes;
+};
+
+struct ServerboundSkinUploadChunk {
+    u32 upload_id;
+    std::vector<u8> image_chunk_bytes;
+};
+
+struct ServerboundSkinUploadEnd {
+    u32 upload_id;
+};
+
+struct ClientboundSkinUploadComplete {
+    u32 upload_id;
+    SkinDescriptor skin;
+};
+
+struct ClientboundSkinUploadFailed {
+    u32 upload_id;
+    SkinUploadDenyReason reason;
+};
+```
+
+Deny reasons:
+
+```cpp
+enum class SkinRequestDenyReason : u8 {
+    SkinsDisabled,
+    InvalidHash,
+    NotFound,
+    NotAdvertisedToClient,
+    RateLimited,
+    TooLarge,
+    InternalError,
+};
+
+enum class SkinUploadDenyReason : u8 {
+    SkinsDisabled,
+    UploadsDisabled,
+    NotAuthenticated,
+    InvalidFormat,
+    InvalidResolution,
+    ResolutionNotAllowed,
+    UploadTooLarge,
+    RateLimited,
+    UploadAlreadyPending,
+    ServerStorageFull,
+    DecodeFailed,
+    HashMismatch,
+    InternalError,
+};
+```
 
 ---
 
 ## Integrated Server Behavior
 
-Singleplayer should use the same profile/session/auth model where practical.
+Singleplayer uses the same profile/session model where practical.
 
 Recommended behavior:
 
 ```text
-local client loads local identity
-integrated server accepts local identity
+local client loads active profile from profiles.json
+integrated server accepts local profile
 integrated server creates/loads matching profile in save directory
 same profile/session/entity model is used
 ```
 
-The integrated server may skip the network challenge if running in-process, but it should still use the same profile id derivation and profile storage format.
-
-This avoids two separate player-save systems.
+The integrated server may skip the network challenge when running in-process, but it still uses the same profile id derivation, profile storage, and selected skin field.
 
 ---
 
 ## Dedicated Server Behavior
 
-Dedicated servers should always authenticate remote clients with challenge-response.
+Dedicated servers authenticate remote clients with challenge-response.
 
-No remote client should become an active player session until signature verification succeeds.
+No remote client becomes an active player session until signature verification succeeds.
 
-Dedicated servers may support a configuration policy:
+Dedicated servers may support:
 
 ```yaml
 auth:
@@ -945,65 +1306,9 @@ This is optional and should not be required for local or open servers.
 
 ---
 
-## Protocol Packets
-
-Packet names are illustrative. Exact packet naming should follow the protocol documentation style.
-
-### Clientbound Auth Challenge
-
-```cpp
-struct ClientboundAuthChallenge {
-    PlayerSessionID session_id;
-    std::array<std::byte, 32> nonce;
-    u64 expires_server_tick;
-    ServerInstanceID server_instance_id;
-};
-```
-
-### Serverbound Auth Begin
-
-```cpp
-struct ServerboundAuthBegin {
-    arv::crypto::Ed25519PublicKey public_key;
-    std::string display_name;
-};
-```
-
-The server derives:
-
-```text
-profile_id = hash(public_key)
-```
-
-The client may include its derived profile id for diagnostics, but the server must not trust it.
-
-### Serverbound Auth Response
-
-```cpp
-struct ServerboundAuthResponse {
-    arv::crypto::Ed25519Signature signature;
-};
-```
-
-The signature is over the deterministic signed auth payload.
-
-### Clientbound Auth Result
-
-```cpp
-struct ClientboundAuthResult {
-    bool accepted;
-    std::string profile_id;
-    std::string reason_if_rejected;
-};
-```
-
-Avoid leaking detailed security-sensitive rejection reasons to untrusted clients. Logs can contain more detail than the network response.
-
----
-
 ## Logging
 
-Logs should include profile IDs with the `0x` prefix.
+Logs should include profile ids with the `0x` prefix.
 
 Examples:
 
@@ -1011,21 +1316,23 @@ Examples:
 auth: created profile 0x8b3f7a1d... display_name=Hippo
 auth: accepted profile 0x8b3f7a1d... connection=42
 auth: rejected profile 0x8b3f7a1d... reason=signature_verify_failed
+skin: selected profile=0x8b3f7a1d... skin=0x13a465fc...
+skin: upload rejected profile=0x8b3f7a1d... reason=UploadTooLarge
 ```
 
-For readability, logs may shorten profile IDs after the prefix:
+For readability, logs may shorten ids after the prefix:
 
 ```text
 0x8b3f7a1d
 ```
 
-but save files and protocol payloads should use the full profile id.
+Save files and protocol payloads should use full ids.
 
 ---
 
 ## Error Handling
 
-Authentication should fail cleanly for:
+Authentication fails cleanly for:
 
 * malformed public key
 * malformed signature
@@ -1042,33 +1349,24 @@ Failure should close or reset the pending login state.
 
 Do not create a player entity before authentication succeeds.
 
----
+Skin operations fail cleanly for:
 
-## Testing Requirements
+* unauthenticated session
+* disabled skin system
+* uploads disabled
+* invalid hash
+* invalid format
+* invalid resolution
+* resolution not allowed by permission
+* upload too large
+* decoded image too large
+* decode failure
+* upload timeout
+* stale upload id
+* storage quota failure
+* request for unadvertised skin hash
 
-`arv_crypto` should have unit tests for:
-
-* Ed25519 key generation
-* sign/verify success
-* sign/verify failure with wrong key
-* sign/verify failure with modified payload
-* hash stability
-* hex encoding
-* `0x`-prefixed profile id derivation
-* lowercase output
-* malformed hex rejection if parsing is implemented
-
-`arv_server` should have tests for:
-
-* first-join profile creation
-* existing profile login
-* duplicate display names
-* public key mismatch rejection
-* expired challenge rejection
-* replayed challenge rejection
-* profile save/load roundtrip
-* disconnect snapshots entity state into profile
-* username/display name changes do not change profile id
+Failures should not crash the client or server. Use the default skin as the rendering fallback.
 
 ---
 
@@ -1076,7 +1374,7 @@ Do not create a player entity before authentication succeeds.
 
 Do:
 
-* use a vetted crypto library
+* use a vetted crypto library through `arv_crypto`
 * use Ed25519 for signatures
 * generate cryptographically secure random nonces
 * store only public keys on the server
@@ -1084,17 +1382,23 @@ Do:
 * bind signatures to challenge/session/server/protocol context
 * reject replayed or expired challenges
 * keep third-party crypto usage inside `arv_crypto`
+* treat skin data as untrusted binary input
+* store skins by server-computed hash only
+* validate received skin bytes before caching or uploading to the GPU
 
 Do not:
 
 * invent a custom signature algorithm
-* use username as identity
+* use display name as identity
 * trust client-supplied profile id
+* trust client-supplied skin hash as authoritative
 * send private keys over the network
 * store private keys in server saves
 * use runtime IDs in saved profile data
 * sign ambiguous or non-canonical payloads
 * identify permissions by display name
+* write client-provided skin filenames
+* delete local skin/cache files during GPU atlas eviction
 
 ---
 
@@ -1114,14 +1418,16 @@ The following are intentionally not part of this design:
 * global profile inventory
 * economy ownership verification
 * private-key encryption with OS keychain integration
+* skin content moderation
+* skin garbage collection beyond documented storage limits/TODOs
 
-These may be added later through an identity provider abstraction.
+These may be added later through identity-provider, profile-management, or server-moderation extensions.
 
 ---
 
 ## Future Extension: Identity Provider Interface
 
-Even though Arvane is not using a central account server now, code should leave room for one later.
+The current identity provider is local public-key authentication. Future providers may authenticate through a central service, passkeys, platform accounts, or wallet signatures.
 
 Possible future interface:
 
@@ -1149,29 +1455,67 @@ Initial implementation:
 LocalPublicKeyIdentityProvider
 ```
 
-Future implementation:
+Future implementation examples:
 
 ```text
 CentralAccountIdentityProvider
+PasskeyIdentityProvider
+PlatformIdentityProvider
 ```
 
 The rest of the server should not care which provider is used.
 
 ---
 
-## Recommended Implementation Order
+## Testing Requirements
 
-1. Create `arv_crypto` CMake submodule.
-2. Add wrapped Ed25519 key/sign/verify APIs.
-3. Add hash and `0x`-prefixed hex helpers.
-4. Add profile id derivation from public key.
-5. Add client local identity generation/loading.
-6. Add server player profile save/load.
-7. Add auth packets to `arv_protocol`.
-8. Add server challenge-response login.
-9. Add player session/profile/entity separation.
-10. Add tests for crypto and profile authentication.
-11. Add integrated-server path using the same profile id format.
+`arv_crypto` should have tests for:
+
+* Ed25519 key generation
+* sign/verify success
+* sign/verify failure with wrong key
+* sign/verify failure with modified payload
+* hash stability
+* hex encoding
+* `0x`-prefixed profile id derivation
+* lowercase output
+* malformed hex rejection if parsing is implemented
+
+Local profile tests:
+
+* `profiles.json` load/save
+* multiple profiles
+* first-profile active fallback
+* private key path resolution
+* local skin path resolution
+* cache skin path resolution
+* display name changes do not change profile id
+* skin list ordering
+* best skin selection by max resolution
+
+`arv_server` tests:
+
+* first-join profile creation
+* existing profile login
+* duplicate display names
+* public key mismatch rejection
+* expired challenge rejection
+* replayed challenge rejection
+* profile save/load roundtrip
+* selected skin hash save/load
+* disconnect snapshots entity state into profile
+
+Skin tests:
+
+* skin hash formatting
+* default max upload bytes by resolution
+* default max decoded bytes
+* upload denial cases
+* upload completion result
+* upload failure result
+* request denial for invalid/unavailable/unadvertised hash
+* client cache path derivation
+* server skin storage path derivation
 
 ---
 
@@ -1187,6 +1531,7 @@ display name -> mutable UI label
 session -> current connection
 entity -> current in-world body
 profile -> persistent player state
+selected_skin_hash -> profile-selected custom skin on a server
 ```
 
 The profile id must always be represented as:
@@ -1195,121 +1540,4 @@ The profile id must always be represented as:
 0x<lowercase hex hash>
 ```
 
-Username/display name must never be used as the authoritative identity.
-
----
-
-## Local Profile Storage
-
-Local installations store profiles at the `arvane_home` root, not inside the old
-`identity/` directory:
-
-```text
-arvane_home/
-  profiles.json
-  keys/
-    <profile_id>.pk
-  skins/
-    <skin_hash>.png
-  cache/
-    skins/
-      <skin_hash>.png
-```
-
-`profiles.json` is a JSON array. The first entry is the active local profile
-until a profile-selection UI exists. Each entry stores metadata, public key, the
-private key filename, and the profile-owned local skin list. Private key bytes
-must never be written into `profiles.json`; they are loaded from
-`keys/<private_key_file>`.
-
-Local skin files in `skins/` are user-owned. Server-downloaded skin files are
-cached only in `cache/skins/` and must not be copied into `skins/` unless the
-user explicitly imports them as a local skin.
-
-Client rendering treats the disk cache and GPU residency as separate systems.
-Validated PNG files under `skins/` or `cache/skins/` may be decoded into CPU
-RGBA8 pixels and uploaded to the renderer's `PlayerSkins` paged atlas. Evicting
-a skin from that GPU atlas frees only temporary texture-array space; it must not
-delete `skins/<skin_hash>.png` or `cache/skins/<skin_hash>.png`.
-
-When `profiles.json` is missing, the client may migrate the legacy
-`identity/local_identity.json` plus `identity/local_private_key.bin` into the
-new layout. Migration writes the new files and leaves the old files in place.
-
-All profile ids, public keys, and skin hashes are lowercase `0x`-prefixed
-hexadecimal strings.
-
----
-
-## Player Skins
-
-The default fallback skin is:
-
-```text
-arvane_home/assets/textures/default_skin/default.png
-arvane:texture/default_skin/default
-```
-
-The default skin is used when a profile has no applicable local skin, when
-server skins are disabled, while remote skins download, or when validation
-fails. It is not uploaded as a custom skin unless the user imports/selects it as
-a normal local skin.
-
-The default skin is also the immediate rendering fallback while a custom skin is
-not resident in the GPU player skin atlas or when atlas allocation/upload fails.
-
-Skin hashes are content hashes of the original accepted PNG bytes:
-
-```text
-skin_hash = "0x" + lowercase_hex(hash(original_png_bytes))
-```
-
-The client may compute hashes for cache lookup and upload hints. The server is
-authoritative: it computes the final hash from uploaded bytes, stores by that
-hash only, and never trusts client filenames or client-supplied hashes.
-
-Dedicated servers persist a per-profile `selected_skin_hash`. Empty string means
-no custom skin. Uploaded skin files live under:
-
-```text
-server-save/player_assets/skins/<skin_hash>.png
-```
-
-Profile metadata replication sends only:
-
-```text
-player_id
-profile_id
-display_name
-SkinDescriptor
-```
-
-Image bytes are transferred on demand with skin request/upload packets.
-
-Skin transfer hardening is part of the profile system contract:
-
-* uploads require an authenticated session, configured skin support, an enabled
-  resolution, matching width/height, byte limits, active upload capacity, and
-  per-session rate/byte budgets
-* upload ids are server-issued, session-owned, mode-specific, and expire after
-  the configured total or idle timeout
-* full uploads must provide exactly the negotiated byte count; chunked uploads
-  must use non-empty chunks no larger than the configured chunk size and may not
-  overflow the negotiated total
-* final upload validation decodes the PNG, checks decoded dimensions and RGBA8
-  byte count, computes the authoritative hash from compressed bytes, and updates
-  `selected_skin_hash` only after storage succeeds
-* downloaded skins are request-scoped and may be requested only after the server
-  advertises the hash to that client
-* clients validate request id, hash, byte count, PNG decode, and dimensions
-  before writing `cache/skins/<skin_hash>.png`
-
-Server and client skin writes use hash-derived filenames only and write through
-temporary files before renaming into place. Server storage has a configurable
-total byte quota. Per-profile skin history is currently limited to the selected
-hash; if profile-owned skin history is added later, it must enforce
-`skins.storage.max_skins_per_profile`.
-
-Future cleanup should add garbage collection for unreferenced skin blobs, such
-as skins not selected by any profile, skins not recently used, or skins older
-than a server-defined threshold.
+Display name must never be used as authoritative identity.

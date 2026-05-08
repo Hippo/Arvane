@@ -12,6 +12,8 @@
 #include <numbers>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -328,6 +330,71 @@ TEST(PlayerInteractionTests, BlockDropsSpawnWhenBrokenWithMatchingToolOrNoRequir
             return drop.stack.item == dirt_item;
           }),
       drops.end());
+}
+
+TEST(PlayerInteractionTests, BlockDropOverridesCanDropAnotherItemOrNothing) {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:stone"));
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:dirt"));
+  arv::voxel::BlockDefinition grass =
+      arv::voxel::make_full_cube_definition("arvane:grass_block");
+  grass.drops.kind = arv::voxel::BlockDropKind::Item;
+  grass.drops.item_name = "arvane:dirt";
+  definitions.push_back(std::move(grass));
+  arv::voxel::BlockDefinition glass =
+      arv::voxel::make_full_cube_definition(
+          "arvane:glass",
+          arv::voxel::RenderCategory::Transparent);
+  glass.drops.kind = arv::voxel::BlockDropKind::None;
+  definitions.push_back(std::move(glass));
+
+  auto block_registry_result =
+      arv::voxel::BlockRegistry::build(std::move(definitions));
+  ASSERT_TRUE(block_registry_result);
+  const arv::voxel::BlockRegistry block_registry =
+      std::move(block_registry_result.value());
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID grass_variant =
+      block_registry.find_variant("arvane:grass_block").value();
+  const arv::voxel::BlockVariantID glass_variant =
+      block_registry.find_variant("arvane:glass").value();
+  const arv::player::ItemID dirt_item =
+      item_registry.find_item("arvane:dirt").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.block_breaking.base_seconds_per_hardness = 0.0F;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, grass_variant));
+  prepare_test_player(server, item_registry);
+  client.submit_input(arv::client::InputFrame{.primary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  ASSERT_EQ(server.dropped_item_stacks().size(), 1U);
+  EXPECT_EQ(server.dropped_item_stacks().front().stack.item, dirt_item);
+
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, glass_variant));
+  prepare_test_player(server, item_registry);
+  client.submit_input(arv::client::InputFrame{.primary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_EQ(server.dropped_item_stacks().size(), 1U);
 }
 
 TEST(PlayerInteractionTests, BucketPicksUpSourceWaterAndBecomesWaterBucket) {

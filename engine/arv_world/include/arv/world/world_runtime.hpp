@@ -337,7 +337,10 @@ public:
       std::span<const entity::PersistentEntityRecord> records,
       const entity::EntityRegistry* entity_registry = nullptr);
   u32 tick_entities(const voxel::BlockRegistry* block_registry = nullptr);
-  u32 tick_dropped_items(Seconds tick_seconds);
+  u32 tick_dropped_items(
+      Seconds tick_seconds,
+      const voxel::BlockRegistry* block_registry = nullptr,
+      const player::ItemRegistry* item_registry = nullptr);
   player::PlayerState& ensure_player(PlayerID player_id);
   [[nodiscard]] player::PlayerState* find_player(PlayerID player_id) noexcept;
   [[nodiscard]] const player::PlayerState* find_player(PlayerID player_id) const noexcept;

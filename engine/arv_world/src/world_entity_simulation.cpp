@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string_view>
 
 namespace arv::world::detail {
@@ -47,6 +48,74 @@ namespace {
   return {
       {position.x - half_x, position.y, position.z - half_z},
       {position.x + half_x, position.y + size.y, position.z + half_z}};
+}
+
+[[nodiscard]] Aabb3f dropped_item_bounds(Vec3f position) noexcept {
+  constexpr f32 HalfWidth = 0.125F;
+  constexpr f32 Height = 0.25F;
+  return {
+      {position.x - HalfWidth, position.y, position.z - HalfWidth},
+      {position.x + HalfWidth, position.y + Height, position.z + HalfWidth}};
+}
+
+[[nodiscard]] f32 fluid_surface_y(BlockPos pos, voxel::FluidCell fluid) noexcept {
+  if (fluid.empty()) {
+    return static_cast<f32>(pos.value.y);
+  }
+  constexpr f32 MaxFluidLevel = 8.0F;
+  const f32 level = fluid.source()
+                        ? MaxFluidLevel
+                        : std::clamp(static_cast<f32>(fluid.level), 0.0F, MaxFluidLevel);
+  return static_cast<f32>(pos.value.y) + level / MaxFluidLevel;
+}
+
+struct DroppedItemLiquidProbe {
+  bool overlaps_liquid{};
+  f32 highest_surface_y{};
+};
+
+[[nodiscard]] DroppedItemLiquidProbe probe_dropped_item_liquid(
+    const physics::ICollisionQuery& query,
+    const Aabb3f& bounds,
+    f32 collision_epsilon) {
+  const i32 min_x = static_cast<i32>(std::floor(bounds.min.x));
+  const i32 min_y = static_cast<i32>(std::floor(bounds.min.y));
+  const i32 min_z = static_cast<i32>(std::floor(bounds.min.z));
+  const i32 max_x = static_cast<i32>(std::ceil(bounds.max.x));
+  const i32 max_y = static_cast<i32>(std::ceil(bounds.max.y));
+  const i32 max_z = static_cast<i32>(std::ceil(bounds.max.z));
+
+  DroppedItemLiquidProbe probe;
+  for (i32 z = min_z; z < max_z; ++z) {
+    for (i32 y = min_y; y < max_y; ++y) {
+      for (i32 x = min_x; x < max_x; ++x) {
+        const BlockPos pos{{x, y, z}};
+        const voxel::FluidCell fluid = query.fluid_cell(pos);
+        if (fluid.empty()) {
+          continue;
+        }
+
+        const f32 surface_y = fluid_surface_y(pos, fluid);
+        if (bounds.max.y <= static_cast<f32>(y) + collision_epsilon ||
+            bounds.min.y >= surface_y - collision_epsilon) {
+          continue;
+        }
+        probe.overlaps_liquid = true;
+        probe.highest_surface_y = std::max(probe.highest_surface_y, surface_y);
+      }
+    }
+  }
+  return probe;
+}
+
+[[nodiscard]] f32 dropped_item_buoyancy(
+    const entity::DroppedItem& dropped,
+    const player::ItemRegistry* item_registry) noexcept {
+  if (item_registry == nullptr) {
+    return player::DefaultItemBuoyancy;
+  }
+  const player::ItemRecord* item = item_registry->item(dropped.stack.item);
+  return item == nullptr ? player::DefaultItemBuoyancy : item->buoyancy;
 }
 
 [[nodiscard]] bool has_horizontal_motion(Vec3f value) noexcept {
@@ -612,23 +681,107 @@ u32 WorldEntitySimulation::tick_entities(
 }
 
 u32 WorldEntitySimulation::tick_dropped_items(
+    WorldRuntime& world,
     WorldEntityStore& entities,
-    Seconds tick_seconds) {
+    Seconds tick_seconds,
+    const voxel::BlockRegistry* block_registry,
+    const player::ItemRegistry* item_registry) {
   u32 updated = 0;
   if (tick_seconds <= 0.0F) {
     return updated;
   }
 
   entt::registry& registry = entities.registry();
-  const auto view = registry.view<entity::DroppedItem>();
+  const auto view = registry.view<
+      entity::EntityTransform,
+      entity::EntityVelocity,
+      entity::DroppedItem>();
+  const physics::KinematicConfig physics_config;
+  const std::optional<WorldCollisionQuery> collision_query =
+      block_registry == nullptr
+          ? std::optional<WorldCollisionQuery>{}
+          : std::optional<WorldCollisionQuery>{std::in_place, world, *block_registry, true};
   for (const entt::entity handle : view) {
+    auto& transform = view.get<entity::EntityTransform>(handle);
+    auto& velocity = view.get<entity::EntityVelocity>(handle);
     auto& dropped = view.get<entity::DroppedItem>(handle);
-    if (dropped.pickup_delay_seconds <= 0.0F) {
-      continue;
+    bool changed = false;
+    if (dropped.pickup_delay_seconds > 0.0F) {
+      dropped.pickup_delay_seconds =
+          std::max<Seconds>(0.0F, dropped.pickup_delay_seconds - tick_seconds);
+      changed = true;
     }
-    dropped.pickup_delay_seconds =
-        std::max<Seconds>(0.0F, dropped.pickup_delay_seconds - tick_seconds);
-    ++updated;
+
+    if (collision_query.has_value()) {
+      const Aabb3f bounds = dropped_item_bounds(transform.position);
+      const DroppedItemLiquidProbe liquid = probe_dropped_item_liquid(
+          collision_query.value(),
+          bounds,
+          physics_config.collision_epsilon);
+
+      if (liquid.overlaps_liquid) {
+        constexpr f32 LiquidDrag = 0.8F;
+        constexpr f32 SurfaceFloatDepth = 0.08F;
+        velocity.linear.x *= LiquidDrag;
+        velocity.linear.z *= LiquidDrag;
+
+        const f32 buoyancy = dropped_item_buoyancy(dropped, item_registry);
+        if (buoyancy > 0.0F) {
+          const f32 target_y = liquid.highest_surface_y - SurfaceFloatDepth;
+          if (transform.position.y < target_y - physics_config.collision_epsilon) {
+            velocity.linear.y = std::min(
+                std::max(velocity.linear.y, buoyancy),
+                physics_config.terminal_velocity);
+          } else if (velocity.linear.y > 0.0F) {
+            velocity.linear.y = 0.0F;
+          }
+        } else if (buoyancy < 0.0F) {
+          velocity.linear.y = std::max(
+              std::min(velocity.linear.y, buoyancy),
+              -physics_config.terminal_velocity);
+        } else {
+          velocity.linear.y = 0.0F;
+        }
+      } else {
+        const bool grounded = physics::has_support_below(
+            collision_query.value(),
+            bounds,
+            physics_config.collision_epsilon * 2.0F);
+        if (!grounded) {
+          velocity.linear.y = std::max(
+              velocity.linear.y - physics_config.gravity_per_second * tick_seconds,
+              -physics_config.terminal_velocity);
+        } else if (velocity.linear.y < 0.0F) {
+          velocity.linear.y = 0.0F;
+        }
+      }
+
+      const Vec3f movement_delta = velocity.linear * tick_seconds;
+      const physics::MovementResolution resolved = physics::resolve_movement(
+          collision_query.value(),
+          bounds,
+          movement_delta,
+          physics_config.collision_epsilon);
+
+      transform.previous_position = transform.position;
+      transform.previous_rotation = transform.rotation;
+      transform.position = transform.position + resolved.applied_delta;
+      if (resolved.hit_x) {
+        velocity.linear.x = 0.0F;
+      }
+      if (resolved.hit_y) {
+        velocity.linear.y = 0.0F;
+      }
+      if (resolved.hit_z) {
+        velocity.linear.z = 0.0F;
+      }
+      entities.update_chunk(handle);
+      changed = true;
+    }
+
+    if (changed) {
+      ++updated;
+    }
   }
   return updated;
 }
@@ -645,8 +798,16 @@ u32 WorldRuntime::tick_entities(const voxel::BlockRegistry* block_registry) {
       block_registry);
 }
 
-u32 WorldRuntime::tick_dropped_items(Seconds tick_seconds) {
-  return impl_->entity_simulation.tick_dropped_items(impl_->entities, tick_seconds);
+u32 WorldRuntime::tick_dropped_items(
+    Seconds tick_seconds,
+    const voxel::BlockRegistry* block_registry,
+    const player::ItemRegistry* item_registry) {
+  return impl_->entity_simulation.tick_dropped_items(
+      *this,
+      impl_->entities,
+      tick_seconds,
+      block_registry,
+      item_registry);
 }
 
 } // namespace arv::world

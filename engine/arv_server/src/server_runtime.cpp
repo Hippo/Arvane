@@ -267,7 +267,7 @@ void ServerRuntimeImpl::tick() {
   expire_timed_out_skin_uploads();
   tick_players();
   const Seconds tick_seconds = tick_duration_seconds(base_tps_);
-  default_world_.tick_dropped_items(tick_seconds);
+  default_world_.tick_dropped_items(tick_seconds, block_registry_, item_registry_);
   tick_dropped_item_pickups(tick_seconds);
   update_world_simulation_activity();
   (void)default_world_.tick(*block_registry_, fluid_definition_);

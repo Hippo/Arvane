@@ -10,6 +10,7 @@
     },
     {
       "name": "arvane:dirt",
+      "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [
         "arvane:mineable/shovel"
@@ -28,6 +29,8 @@
     },
     {
       "name": "arvane:glass",
+      "buoyancy": 1.0,
+      "drops": null,
       "render_category": "transparent",
       "textures": "arvane:texture/block/glass",
       "properties": {
@@ -39,6 +42,7 @@
     },
     {
       "name": "arvane:glowstone",
+      "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [
         "arvane:mineable/pickaxe"
@@ -62,6 +66,8 @@
     },
     {
       "name": "arvane:grass_block",
+      "buoyancy": 1.0,
+      "drops": "arvane:dirt",
       "render_category": "opaque",
       "tags": [
         "arvane:mineable/shovel"
@@ -84,6 +90,7 @@
     },
     {
       "name": "arvane:stone",
+      "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [
         "arvane:mineable/pickaxe"
@@ -112,6 +119,7 @@
     },
     {
       "name": "arvane:stone_stairs",
+      "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [
         "arvane:mineable/pickaxe"
