@@ -10,12 +10,11 @@ std::vector<DroppedItemStack> ServerRuntimeImpl::dropped_item_stacks() const {
       default_world_.collect_dropped_item_snapshots();
   drops.reserve(snapshots.size());
   for (const entity::DroppedItemEntitySnapshot& snapshot : snapshots) {
-    drops.push_back({
-        snapshot.net_id,
-        snapshot.world_id,
-        snapshot.position,
-        snapshot.velocity,
-        snapshot.stack});
+    drops.push_back({snapshot.net_id,
+                     snapshot.world_id,
+                     snapshot.position,
+                     snapshot.velocity,
+                     snapshot.stack});
   }
   return drops;
 }
@@ -99,7 +98,7 @@ void ServerRuntimeImpl::send_dropped_item_replication() {
 
     EntityReplicationState& state = entity_replication_[session_id];
     HashSet<EntityNetID> relevant_now;
-    protocol::DroppedItemSnapshot snapshot;
+    protocol::ClientboundDroppedItemSnapshot snapshot;
     snapshot.world_id = session->world_id;
     snapshot.server_tick = tick_index_;
 
@@ -113,11 +112,10 @@ void ServerRuntimeImpl::send_dropped_item_replication() {
       }
 
       relevant_now.insert(dropped.net_id);
-      snapshot.drops.push_back({
-          dropped.net_id,
-          dropped.stack,
-          dropped.position,
-          dropped.velocity});
+      snapshot.drops.push_back({dropped.net_id,
+                                dropped.stack,
+                                dropped.position,
+                                dropped.velocity});
     }
 
     if (snapshot.drops.empty() && state.known_dropped_items.empty()) {
@@ -128,10 +126,10 @@ void ServerRuntimeImpl::send_dropped_item_replication() {
     (void)send_protocol_message(
         *transport_,
         session->connection_id,
-        protocol::MessageType::DroppedItemSnapshot,
+        protocol::MessageType::ClientboundDroppedItemSnapshot,
         protocol::ReliabilityClass::UnreliableLatestWins,
         protocol::NetworkLane::Gameplay,
-        protocol::serialize_dropped_item_snapshot(snapshot));
+        protocol::serialize_clientbound_dropped_item_snapshot(snapshot));
   }
 }
 

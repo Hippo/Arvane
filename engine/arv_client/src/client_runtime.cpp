@@ -8,10 +8,9 @@
 namespace arv::client {
 
 struct ClientRuntime::Impl {
-  explicit Impl(std::unique_ptr<net::ITransport> transport)
-      : connection(std::move(transport)),
-        sender(connection),
-        identity(make_ephemeral_local_identity()) {
+  explicit Impl(std::unique_ptr<net::ITransport> transport) : connection(std::move(transport)),
+                                                              sender(connection),
+                                                              identity(make_ephemeral_local_identity()) {
   }
 
   [[nodiscard]] detail::ClientRuntimeContext context(
@@ -215,15 +214,15 @@ bool ClientRuntime::tab_menu_visible() const noexcept {
   return impl_->ui.tab_menu_visible();
 }
 
-std::vector<protocol::ChunkSectionData> ClientRuntime::drain_received_chunk_section_data() {
+std::vector<protocol::ClientboundChunkSectionData> ClientRuntime::drain_received_chunk_section_data() {
   return impl_->chunks.drain_chunk_section_data();
 }
 
-std::vector<protocol::ChunkSectionUnload> ClientRuntime::drain_received_chunk_section_unloads() {
+std::vector<protocol::ClientboundChunkSectionUnload> ClientRuntime::drain_received_chunk_section_unloads() {
   return impl_->chunks.drain_chunk_section_unloads();
 }
 
-std::vector<protocol::BlockUpdateBatch> ClientRuntime::drain_received_block_updates() {
+std::vector<protocol::ClientboundBlockUpdateBatch> ClientRuntime::drain_received_block_updates() {
   return impl_->chunks.drain_block_updates();
 }
 

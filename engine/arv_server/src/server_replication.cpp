@@ -5,11 +5,11 @@
 namespace arv::server::detail {
 namespace {
 
-[[nodiscard]] protocol::PlayerCorrection make_player_correction(
+[[nodiscard]] protocol::ClientboundPlayerCorrection make_player_correction(
     TickIndex server_tick,
     const player::PlayerState& player_state,
     const protocol::BlockBreakProgress* block_break = nullptr) {
-  protocol::PlayerCorrection correction;
+  protocol::ClientboundPlayerCorrection correction;
   correction.server_tick = server_tick;
   correction.player_id = player_state.player_id;
   correction.world_id = player_state.world_id;
@@ -32,8 +32,8 @@ namespace {
 }
 
 [[nodiscard]] bool same_correction_payload(
-    const protocol::PlayerCorrection& lhs,
-    const protocol::PlayerCorrection& rhs) {
+    const protocol::ClientboundPlayerCorrection& lhs,
+    const protocol::ClientboundPlayerCorrection& rhs) {
   return lhs.player_id == rhs.player_id &&
          lhs.world_id == rhs.world_id &&
          lhs.position == rhs.position &&
@@ -74,7 +74,7 @@ void ServerRuntimeImpl::send_player_corrections() {
       block_break.progress = found->second.progress;
       block_break.stage = found->second.stage;
     }
-    protocol::PlayerCorrection correction = make_player_correction(
+    protocol::ClientboundPlayerCorrection correction = make_player_correction(
         tick_index_,
         *player_state,
         block_break.active ? &block_break : nullptr);
@@ -87,10 +87,10 @@ void ServerRuntimeImpl::send_player_corrections() {
     const net::NetworkResult send_result = send_protocol_message(
         *transport_,
         session->connection_id,
-        protocol::MessageType::PlayerCorrection,
+        protocol::MessageType::ClientboundPlayerCorrection,
         protocol::ReliabilityClass::UnreliableLatestWins,
         protocol::NetworkLane::Movement,
-        protocol::serialize_player_correction(correction));
+        protocol::serialize_clientbound_player_correction(correction));
     if (send_result) {
       last_sent_player_corrections_[player_state->player_id] = std::move(correction);
     }
@@ -110,7 +110,7 @@ void ServerRuntimeImpl::send_block_updates() {
       continue;
     }
 
-    protocol::BlockUpdateBatch batch;
+    protocol::ClientboundBlockUpdateBatch batch;
     batch.world_id = session->world_id;
     batch.server_tick = tick_index_;
     for (const world::ReplicatedBlockUpdate& update : updates) {
@@ -120,11 +120,10 @@ void ServerRuntimeImpl::send_block_updates() {
               block_to_chunk(update.pos))) {
         continue;
       }
-      batch.updates.push_back({
-          update.pos,
-          update.new_state,
-          0U,
-          update.server_tick});
+      batch.updates.push_back({update.pos,
+                               update.new_state,
+                               0U,
+                               update.server_tick});
     }
     if (batch.updates.empty()) {
       continue;
@@ -133,10 +132,10 @@ void ServerRuntimeImpl::send_block_updates() {
     const net::NetworkResult send_result = send_protocol_message(
         *transport_,
         session->connection_id,
-        protocol::MessageType::BlockUpdateBatch,
+        protocol::MessageType::ClientboundBlockUpdateBatch,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Gameplay,
-        protocol::serialize_block_update_batch(batch));
+        protocol::serialize_clientbound_block_update_batch(batch));
     if (send_result) {
       for (const protocol::BlockUpdate& update : batch.updates) {
         const ChunkSectionCoord coord = block_to_chunk(update.pos);
@@ -181,7 +180,7 @@ void ServerRuntimeImpl::send_entity_replication() {
 
       relevant_now.insert(snapshot.net_id);
       if (state.known_entities.find(snapshot.net_id) == state.known_entities.end()) {
-        protocol::EntitySpawn spawn;
+        protocol::ClientboundEntitySpawn spawn;
         spawn.world_id = session->world_id;
         spawn.entity_id = snapshot.net_id;
         spawn.entity_type = snapshot.type_id;
@@ -193,10 +192,10 @@ void ServerRuntimeImpl::send_entity_replication() {
         (void)send_protocol_message(
             *transport_,
             session->connection_id,
-            protocol::MessageType::EntitySpawn,
+            protocol::MessageType::ClientboundEntitySpawn,
             protocol::ReliabilityClass::ReliableOrdered,
             protocol::NetworkLane::Gameplay,
-            protocol::serialize_entity_spawn(spawn));
+            protocol::serialize_clientbound_entity_spawn(spawn));
       }
 
       protocol::EntitySnapshotEntry entry;
@@ -216,14 +215,14 @@ void ServerRuntimeImpl::send_entity_replication() {
         continue;
       }
 
-      protocol::EntityDespawn despawn{session->world_id, known_entity, 0U};
+      protocol::ClientboundEntityDespawn despawn{session->world_id, known_entity, 0U};
       (void)send_protocol_message(
           *transport_,
           session->connection_id,
-          protocol::MessageType::EntityDespawn,
+          protocol::MessageType::ClientboundEntityDespawn,
           protocol::ReliabilityClass::ReliableOrdered,
           protocol::NetworkLane::Gameplay,
-          protocol::serialize_entity_despawn(despawn));
+          protocol::serialize_clientbound_entity_despawn(despawn));
     }
 
     state.known_entities = std::move(relevant_now);
@@ -233,17 +232,17 @@ void ServerRuntimeImpl::send_entity_replication() {
 
     // TODO(arvane): Replace full snapshot entries with per-component delta
     // compression once component replication masks are specified.
-    protocol::EntitySnapshot snapshot_message;
+    protocol::ClientboundEntitySnapshot snapshot_message;
     snapshot_message.world_id = session->world_id;
     snapshot_message.server_tick = tick_index_;
     snapshot_message.entities = std::move(snapshot_entries);
     (void)send_protocol_message(
         *transport_,
         session->connection_id,
-        protocol::MessageType::EntitySnapshot,
+        protocol::MessageType::ClientboundEntitySnapshot,
         protocol::ReliabilityClass::UnreliableLatestWins,
         protocol::NetworkLane::Movement,
-        protocol::serialize_entity_snapshot(snapshot_message));
+        protocol::serialize_clientbound_entity_snapshot(snapshot_message));
   }
 }
 

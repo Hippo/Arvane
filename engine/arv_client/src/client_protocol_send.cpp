@@ -39,7 +39,7 @@ net::NetworkResult ClientProtocolSender::send_client_hello(const LocalPlayerIden
   if (!transport) {
     return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
   }
-  protocol::ClientHello hello;
+  protocol::ServerboundHello hello;
   hello.requested_username_or_profile_name = identity.display_name;
   hello.auth_begin = protocol::ServerboundAuthBegin{
       identity.key_pair.public_key,
@@ -50,10 +50,10 @@ net::NetworkResult ClientProtocolSender::send_client_hello(const LocalPlayerIden
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::ClientHello,
+      protocol::MessageType::ServerboundHello,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
-      protocol::serialize_client_hello(hello));
+      protocol::serialize_serverbound_hello(hello));
 }
 
 net::NetworkResult ClientProtocolSender::send_auth_response(
@@ -65,14 +65,14 @@ net::NetworkResult ClientProtocolSender::send_auth_response(
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::AuthResponse,
+      protocol::MessageType::ServerboundAuthResponse,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_auth_response(response));
 }
 
 net::NetworkResult ClientProtocolSender::send_chunk_interest_update(
-    const protocol::ChunkInterestUpdate& update) {
+    const protocol::ServerboundChunkInterestUpdate& update) {
   net::ITransport* transport = connection_.transport();
   if (!transport) {
     return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
@@ -80,10 +80,10 @@ net::NetworkResult ClientProtocolSender::send_chunk_interest_update(
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::ChunkInterestUpdate,
+      protocol::MessageType::ServerboundChunkInterestUpdate,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Gameplay,
-      protocol::serialize_chunk_interest_update(update));
+      protocol::serialize_serverbound_chunk_interest_update(update));
 }
 
 net::NetworkResult ClientProtocolSender::send_input_batch(
@@ -100,21 +100,21 @@ net::NetworkResult ClientProtocolSender::send_input_batch(
     return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
   }
 
-  protocol::ClientInputBatch batch;
+  protocol::ServerboundInputBatch batch;
   batch.first_input_tick = tick_index;
   batch.inputs.emplace_back(input);
 
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::ClientInputBatch,
+      protocol::MessageType::ServerboundInputBatch,
       protocol::ReliabilityClass::UnreliableLatestWins,
       protocol::NetworkLane::Movement,
-      protocol::serialize_client_input_batch(batch));
+      protocol::serialize_serverbound_input_batch(batch));
 }
 
 net::NetworkResult ClientProtocolSender::send_inventory_action(
-    protocol::InventoryActionRequest request) {
+    protocol::ServerboundInventoryActionRequest request) {
   net::ITransport* transport = connection_.transport();
   if (!transport) {
     return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
@@ -122,10 +122,10 @@ net::NetworkResult ClientProtocolSender::send_inventory_action(
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::InventoryActionRequest,
+      protocol::MessageType::ServerboundInventoryActionRequest,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Gameplay,
-      protocol::serialize_inventory_action_request(request));
+      protocol::serialize_serverbound_inventory_action_request(request));
 }
 
 net::NetworkResult ClientProtocolSender::send_skin_request(
@@ -137,7 +137,7 @@ net::NetworkResult ClientProtocolSender::send_skin_request(
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::SkinRequest,
+      protocol::MessageType::ServerboundSkinRequest,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_skin_request(request));
@@ -152,7 +152,7 @@ net::NetworkResult ClientProtocolSender::send_skin_upload_begin(
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::SkinUploadBegin,
+      protocol::MessageType::ServerboundSkinUploadBegin,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_skin_upload_begin(begin));
@@ -167,7 +167,7 @@ net::NetworkResult ClientProtocolSender::send_skin_upload_data(
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::SkinUploadData,
+      protocol::MessageType::ServerboundSkinUploadData,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::ChunkStreaming,
       protocol::serialize_skin_upload_data(data));
@@ -182,7 +182,7 @@ net::NetworkResult ClientProtocolSender::send_skin_upload_chunk(
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::SkinUploadChunk,
+      protocol::MessageType::ServerboundSkinUploadChunk,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::ChunkStreaming,
       protocol::serialize_skin_upload_chunk(chunk));
@@ -197,7 +197,7 @@ net::NetworkResult ClientProtocolSender::send_skin_upload_end(
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::SkinUploadEnd,
+      protocol::MessageType::ServerboundSkinUploadEnd,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::ChunkStreaming,
       protocol::serialize_skin_upload_end(end));

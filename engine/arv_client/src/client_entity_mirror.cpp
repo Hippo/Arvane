@@ -5,7 +5,7 @@
 namespace arv::client {
 
 void ClientEntityMirrorStore::apply_spawn(
-    protocol::EntitySpawn spawn,
+    protocol::ClientboundEntitySpawn spawn,
     WorldID current_world) {
   if (spawn.world_id != current_world) {
     return;
@@ -24,7 +24,7 @@ void ClientEntityMirrorStore::apply_spawn(
 }
 
 void ClientEntityMirrorStore::apply_despawn(
-    const protocol::EntityDespawn& despawn,
+    const protocol::ClientboundEntityDespawn& despawn,
     WorldID current_world) {
   if (despawn.world_id != current_world) {
     return;
@@ -33,7 +33,7 @@ void ClientEntityMirrorStore::apply_despawn(
 }
 
 void ClientEntityMirrorStore::apply_snapshot(
-    const protocol::EntitySnapshot& snapshot,
+    const protocol::ClientboundEntitySnapshot& snapshot,
     WorldID current_world) {
   if (snapshot.world_id != current_world) {
     return;

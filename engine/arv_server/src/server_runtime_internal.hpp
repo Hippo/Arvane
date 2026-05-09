@@ -5,9 +5,6 @@
 #include "arv/command/command_dispatcher.hpp"
 #include "arv/core/rate_limiter.hpp"
 #include "arv/physics/collision.hpp"
-#include "arv/server/command_services.hpp"
-#include "arv/server/permission_config.hpp"
-#include "arv/server/player_profile.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
@@ -17,6 +14,9 @@
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/server/command_services.hpp"
+#include "arv/server/permission_config.hpp"
+#include "arv/server/player_profile.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
 
@@ -235,17 +235,17 @@ struct ServerRuntimeImpl {
   void handle_network_event(net::NetworkEvent event);
   void handle_connection_lost(net::ConnectionID connection_id);
   void handle_message(net::ConnectionID connection_id, const std::vector<u8>& packet);
-  void handle_client_hello(net::ConnectionID connection_id, const protocol::ClientHello& client_hello);
+  void handle_client_hello(net::ConnectionID connection_id, const protocol::ServerboundHello& client_hello);
   void handle_auth_response(
       net::ConnectionID connection_id,
       const protocol::ServerboundAuthResponse& response);
-  void handle_input_batch(net::ConnectionID connection_id, const protocol::ClientInputBatch& batch);
+  void handle_input_batch(net::ConnectionID connection_id, const protocol::ServerboundInputBatch& batch);
   void handle_chunk_interest_update(
       net::ConnectionID connection_id,
-      const protocol::ChunkInterestUpdate& interest);
+      const protocol::ServerboundChunkInterestUpdate& interest);
   void handle_inventory_action_request(
       net::ConnectionID connection_id,
-      const protocol::InventoryActionRequest& request);
+      const protocol::ServerboundInventoryActionRequest& request);
   void handle_skin_request(
       net::ConnectionID connection_id,
       const protocol::ServerboundSkinRequest& request);
@@ -310,7 +310,7 @@ struct ServerRuntimeImpl {
   void send_entity_replication();
   void send_dropped_item_replication();
   void send_inventory_updates();
-  [[nodiscard]] protocol::InventoryUpdate make_inventory_update(
+  [[nodiscard]] protocol::ClientboundInventoryUpdate make_inventory_update(
       const player::PlayerState& player_state,
       u32 revision) const;
 
@@ -357,7 +357,7 @@ struct ServerRuntimeImpl {
   u64 permission_config_revision_{};
   HashMap<PlayerID, PlayerPermissionCache> permission_caches_;
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
-  HashMap<PlayerID, protocol::PlayerCorrection> last_sent_player_corrections_;
+  HashMap<PlayerID, protocol::ClientboundPlayerCorrection> last_sent_player_corrections_;
   HashMap<PlayerID, BlockBreakAttempt> block_break_attempts_;
   HashSet<SessionID> logged_chunk_interest_sessions_;
   HashSet<SessionID> logged_chunk_delivery_sessions_;

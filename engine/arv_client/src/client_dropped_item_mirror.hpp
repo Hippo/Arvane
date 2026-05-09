@@ -10,7 +10,7 @@ namespace arv::client {
 class ClientDroppedItemMirrorStore {
 public:
   void apply_snapshot(
-      const protocol::DroppedItemSnapshot& snapshot,
+      const protocol::ClientboundDroppedItemSnapshot& snapshot,
       WorldID current_world);
 
   [[nodiscard]] usize count() const noexcept;

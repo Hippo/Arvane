@@ -18,7 +18,7 @@ enum class InventoryActionKind : u8 {
   CloseMenu,
 };
 
-struct InventoryActionRequest {
+struct ServerboundInventoryActionRequest {
   InventoryID inventory_id{};
   u32 client_action_id{};
   InventoryActionKind kind{InventoryActionKind::SlotClick};
@@ -26,7 +26,7 @@ struct InventoryActionRequest {
   player::InventoryClickButton button{player::InventoryClickButton::Primary};
 };
 
-struct InventoryUpdate {
+struct ClientboundInventoryUpdate {
   InventoryID inventory_id{};
   u32 revision{};
   u8 selected_hotbar_slot{};
@@ -37,11 +37,11 @@ struct InventoryUpdate {
 inline constexpr InventoryID PlayerInventoryID{1};
 inline constexpr u32 MaxInventorySlots = 256;
 
-std::vector<u8> serialize_inventory_action_request(const InventoryActionRequest& request);
-Expected<InventoryActionRequest, ProtocolError> deserialize_inventory_action_request(
+std::vector<u8> serialize_serverbound_inventory_action_request(const ServerboundInventoryActionRequest& request);
+Expected<ServerboundInventoryActionRequest, ProtocolError> deserialize_serverbound_inventory_action_request(
     std::span<const u8> bytes);
 
-std::vector<u8> serialize_inventory_update(const InventoryUpdate& update);
-Expected<InventoryUpdate, ProtocolError> deserialize_inventory_update(std::span<const u8> bytes);
+std::vector<u8> serialize_clientbound_inventory_update(const ClientboundInventoryUpdate& update);
+Expected<ClientboundInventoryUpdate, ProtocolError> deserialize_clientbound_inventory_update(std::span<const u8> bytes);
 
 } // namespace arv::protocol

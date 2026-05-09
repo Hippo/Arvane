@@ -1,11 +1,11 @@
 #include "arv/protocol/block_updates.hpp"
-#include "arv/protocol/message_envelope.hpp"
-#include "arv/protocol/message_registry.hpp"
-#include "arv/protocol/player_input.hpp"
-#include "arv/protocol/message_writer.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/inventory_sync.hpp"
+#include "arv/protocol/message_envelope.hpp"
+#include "arv/protocol/message_registry.hpp"
+#include "arv/protocol/message_writer.hpp"
+#include "arv/protocol/player_input.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
 
@@ -49,26 +49,26 @@ TEST(ProtocolTests, RejectsPayloadSizeMismatch) {
 TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto registry = arv::protocol::MessageRegistry::make_core_registry();
   const auto ping = registry.lookup(arv::protocol::MessageType::Ping);
-  const auto input = registry.lookup(arv::protocol::MessageType::ClientInputBatch);
-  const auto correction = registry.lookup(arv::protocol::MessageType::PlayerCorrection);
-  const auto auth_challenge = registry.lookup(arv::protocol::MessageType::AuthChallenge);
-  const auto auth_response = registry.lookup(arv::protocol::MessageType::AuthResponse);
-  const auto auth_result = registry.lookup(arv::protocol::MessageType::AuthResult);
-  const auto chunk_interest = registry.lookup(arv::protocol::MessageType::ChunkInterestUpdate);
-  const auto chunk_data = registry.lookup(arv::protocol::MessageType::ChunkSectionData);
-  const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ChunkSectionUnload);
-  const auto world_join = registry.lookup(arv::protocol::MessageType::WorldJoinResult);
-  const auto block_updates = registry.lookup(arv::protocol::MessageType::BlockUpdateBatch);
-  const auto entity_spawn = registry.lookup(arv::protocol::MessageType::EntitySpawn);
-  const auto entity_snapshot = registry.lookup(arv::protocol::MessageType::EntitySnapshot);
+  const auto input = registry.lookup(arv::protocol::MessageType::ServerboundInputBatch);
+  const auto correction = registry.lookup(arv::protocol::MessageType::ClientboundPlayerCorrection);
+  const auto auth_challenge = registry.lookup(arv::protocol::MessageType::ClientboundAuthChallenge);
+  const auto auth_response = registry.lookup(arv::protocol::MessageType::ServerboundAuthResponse);
+  const auto auth_result = registry.lookup(arv::protocol::MessageType::ClientboundAuthResult);
+  const auto chunk_interest = registry.lookup(arv::protocol::MessageType::ServerboundChunkInterestUpdate);
+  const auto chunk_data = registry.lookup(arv::protocol::MessageType::ClientboundChunkSectionData);
+  const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ClientboundChunkSectionUnload);
+  const auto world_join = registry.lookup(arv::protocol::MessageType::ClientboundWorldJoinResult);
+  const auto block_updates = registry.lookup(arv::protocol::MessageType::ClientboundBlockUpdateBatch);
+  const auto entity_spawn = registry.lookup(arv::protocol::MessageType::ClientboundEntitySpawn);
+  const auto entity_snapshot = registry.lookup(arv::protocol::MessageType::ClientboundEntitySnapshot);
   const auto dropped_item_snapshot =
-      registry.lookup(arv::protocol::MessageType::DroppedItemSnapshot);
+      registry.lookup(arv::protocol::MessageType::ClientboundDroppedItemSnapshot);
   const auto inventory_action =
-      registry.lookup(arv::protocol::MessageType::InventoryActionRequest);
-  const auto inventory_update = registry.lookup(arv::protocol::MessageType::InventoryUpdate);
-  const auto skin_rules = registry.lookup(arv::protocol::MessageType::SkinRules);
-  const auto skin_data = registry.lookup(arv::protocol::MessageType::SkinData);
-  const auto skin_upload_data = registry.lookup(arv::protocol::MessageType::SkinUploadData);
+      registry.lookup(arv::protocol::MessageType::ServerboundInventoryActionRequest);
+  const auto inventory_update = registry.lookup(arv::protocol::MessageType::ClientboundInventoryUpdate);
+  const auto skin_rules = registry.lookup(arv::protocol::MessageType::ClientboundSkinRules);
+  const auto skin_data = registry.lookup(arv::protocol::MessageType::ClientboundSkinData);
+  const auto skin_upload_data = registry.lookup(arv::protocol::MessageType::ServerboundSkinUploadData);
 
   ASSERT_TRUE(ping.has_value());
   ASSERT_TRUE(input.has_value());
@@ -188,19 +188,18 @@ TEST(ProtocolTests, SkinPacketsRoundTripThroughSerialization) {
 }
 
 TEST(ProtocolTests, ClientInputBatchRoundTripsThroughSerialization) {
-  arv::protocol::ClientInputBatch batch;
+  arv::protocol::ServerboundInputBatch batch;
   batch.first_input_tick = 44;
-  batch.inputs.push_back({
-      arv::protocol::ClientInputButtons::JumpPressed |
-          arv::protocol::ClientInputButtons::PrimaryPressed,
-      -1,
-      1,
-      12,
-      -8,
-      3});
+  batch.inputs.push_back({arv::protocol::ClientInputButtons::JumpPressed |
+                              arv::protocol::ClientInputButtons::PrimaryPressed,
+                          -1,
+                          1,
+                          12,
+                          -8,
+                          3});
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_client_input_batch(batch);
-  const auto decoded = arv::protocol::deserialize_client_input_batch(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_serverbound_input_batch(batch);
+  const auto decoded = arv::protocol::deserialize_serverbound_input_batch(bytes);
 
   ASSERT_TRUE(decoded);
   ASSERT_EQ(decoded.value().inputs.size(), 1U);
@@ -219,7 +218,7 @@ TEST(ProtocolTests, ClientInputBatchRoundTripsThroughSerialization) {
 }
 
 TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
-  arv::protocol::PlayerCorrection correction;
+  arv::protocol::ClientboundPlayerCorrection correction;
   correction.server_tick = 55;
   correction.player_id = arv::PlayerID{7};
   correction.world_id = arv::WorldID{9};
@@ -242,8 +241,8 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
   correction.block_break.progress = 0.42F;
   correction.block_break.stage = 4;
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_player_correction(correction);
-  const auto decoded = arv::protocol::deserialize_player_correction(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_player_correction(correction);
+  const auto decoded = arv::protocol::deserialize_clientbound_player_correction(bytes);
 
   ASSERT_TRUE(decoded);
   EXPECT_EQ(decoded.value().server_tick, 55U);
@@ -270,15 +269,15 @@ TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
 }
 
 TEST(ProtocolTests, ChunkInterestUpdateRoundTripsThroughSerialization) {
-  arv::protocol::ChunkInterestUpdate update;
+  arv::protocol::ServerboundChunkInterestUpdate update;
   update.world_id = arv::WorldID{3};
   update.center_chunk = {{4, 5, -6}};
   update.client_view_distance = 7;
   update.previous_center_chunk = arv::ChunkSectionCoord{{3, 5, -6}};
   update.sequence_id = 42;
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_interest_update(update);
-  const auto decoded = arv::protocol::deserialize_chunk_interest_update(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_serverbound_chunk_interest_update(update);
+  const auto decoded = arv::protocol::deserialize_serverbound_chunk_interest_update(bytes);
 
   ASSERT_TRUE(decoded);
   EXPECT_EQ(decoded.value().world_id, (arv::WorldID{3}));
@@ -290,7 +289,7 @@ TEST(ProtocolTests, ChunkInterestUpdateRoundTripsThroughSerialization) {
 }
 
 TEST(ProtocolTests, ChunkSectionDataRoundTripsThroughSerialization) {
-  arv::protocol::ChunkSectionData data;
+  arv::protocol::ClientboundChunkSectionData data;
   data.world_id = arv::WorldID{5};
   data.coord = {{1, -2, 3}};
   data.chunk_version = 12;
@@ -307,8 +306,8 @@ TEST(ProtocolTests, ChunkSectionDataRoundTripsThroughSerialization) {
   data.fluids[arv::voxel::local_index({{1, 2, 3}})] =
       arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_section_data(data);
-  const auto decoded = arv::protocol::deserialize_chunk_section_data(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_chunk_section_data(data);
+  const auto decoded = arv::protocol::deserialize_clientbound_chunk_section_data(bytes);
 
   ASSERT_TRUE(decoded);
   EXPECT_EQ(decoded.value().world_id, (arv::WorldID{5}));
@@ -329,10 +328,10 @@ TEST(ProtocolTests, ChunkSectionDataRoundTripsThroughSerialization) {
 }
 
 TEST(ProtocolTests, ChunkSectionUnloadRoundTripsThroughSerialization) {
-  const arv::protocol::ChunkSectionUnload unload{arv::WorldID{2}, {{-1, 0, 1}}};
+  const arv::protocol::ClientboundChunkSectionUnload unload{arv::WorldID{2}, {{-1, 0, 1}}};
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_section_unload(unload);
-  const auto decoded = arv::protocol::deserialize_chunk_section_unload(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_chunk_section_unload(unload);
+  const auto decoded = arv::protocol::deserialize_clientbound_chunk_section_unload(bytes);
 
   ASSERT_TRUE(decoded);
   EXPECT_EQ(decoded.value().world_id, (arv::WorldID{2}));
@@ -340,7 +339,7 @@ TEST(ProtocolTests, ChunkSectionUnloadRoundTripsThroughSerialization) {
 }
 
 TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {
-  arv::protocol::WorldJoinResult result;
+  arv::protocol::ClientboundWorldJoinResult result;
   result.accepted = true;
   result.world_id = arv::WorldID{4};
   result.player_id = arv::PlayerID{8};
@@ -350,8 +349,8 @@ TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {
   result.tick_rate = 20;
   result.effective_view_distance = 6;
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_world_join_result(result);
-  const auto decoded = arv::protocol::deserialize_world_join_result(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_world_join_result(result);
+  const auto decoded = arv::protocol::deserialize_clientbound_world_join_result(bytes);
 
   ASSERT_TRUE(decoded);
   EXPECT_TRUE(decoded.value().accepted);
@@ -363,26 +362,25 @@ TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {
   EXPECT_EQ(decoded.value().tick_rate, 20U);
   EXPECT_EQ(decoded.value().effective_view_distance, 6);
 
-  const arv::protocol::WorldLeave leave{arv::WorldID{4}, 3};
+  const arv::protocol::ClientboundWorldLeave leave{arv::WorldID{4}, 3};
   const auto decoded_leave =
-      arv::protocol::deserialize_world_leave(arv::protocol::serialize_world_leave(leave));
+      arv::protocol::deserialize_clientbound_world_leave(arv::protocol::serialize_clientbound_world_leave(leave));
   ASSERT_TRUE(decoded_leave);
   EXPECT_EQ(decoded_leave.value().world_id, (arv::WorldID{4}));
   EXPECT_EQ(decoded_leave.value().reason, 3U);
 }
 
 TEST(ProtocolTests, BlockUpdateBatchRoundTripsAndRejectsMalformedCounts) {
-  arv::protocol::BlockUpdateBatch batch;
+  arv::protocol::ClientboundBlockUpdateBatch batch;
   batch.world_id = arv::WorldID{5};
   batch.server_tick = 123;
-  batch.updates.push_back({
-      arv::BlockPos{{1, -2, 3}},
-      arv::voxel::BlockVariantID{9},
-      7,
-      120});
+  batch.updates.push_back({arv::BlockPos{{1, -2, 3}},
+                           arv::voxel::BlockVariantID{9},
+                           7,
+                           120});
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_block_update_batch(batch);
-  const auto decoded = arv::protocol::deserialize_block_update_batch(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_block_update_batch(batch);
+  const auto decoded = arv::protocol::deserialize_clientbound_block_update_batch(bytes);
 
   ASSERT_TRUE(decoded);
   ASSERT_EQ(decoded.value().updates.size(), 1U);
@@ -397,12 +395,12 @@ TEST(ProtocolTests, BlockUpdateBatchRoundTripsAndRejectsMalformedCounts) {
   malformed.write<arv::u32>(5);
   malformed.write<arv::u64>(123);
   malformed.write<arv::u32>(arv::protocol::MaxBlockUpdatesPerBatch + 1U);
-  EXPECT_FALSE(arv::protocol::deserialize_block_update_batch(
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_block_update_batch(
       std::move(malformed).take_bytes()));
 }
 
 TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) {
-  arv::protocol::EntitySpawn spawn;
+  arv::protocol::ClientboundEntitySpawn spawn;
   spawn.world_id = arv::WorldID{6};
   spawn.entity_id = arv::EntityNetID{22};
   spawn.entity_type = arv::EntityTypeID{2};
@@ -414,7 +412,7 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
   spawn.owning_player = arv::PlayerID{9};
 
   const auto decoded_spawn =
-      arv::protocol::deserialize_entity_spawn(arv::protocol::serialize_entity_spawn(spawn));
+      arv::protocol::deserialize_clientbound_entity_spawn(arv::protocol::serialize_clientbound_entity_spawn(spawn));
   ASSERT_TRUE(decoded_spawn);
   EXPECT_EQ(decoded_spawn.value().world_id, (arv::WorldID{6}));
   EXPECT_EQ(decoded_spawn.value().entity_id, (arv::EntityNetID{22}));
@@ -426,27 +424,26 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
   ASSERT_TRUE(decoded_spawn.value().owning_player.has_value());
   EXPECT_EQ(decoded_spawn.value().owning_player.value(), (arv::PlayerID{9}));
 
-  const arv::protocol::EntityDespawn despawn{arv::WorldID{6}, arv::EntityNetID{22}, 4};
-  const auto decoded_despawn = arv::protocol::deserialize_entity_despawn(
-      arv::protocol::serialize_entity_despawn(despawn));
+  const arv::protocol::ClientboundEntityDespawn despawn{arv::WorldID{6}, arv::EntityNetID{22}, 4};
+  const auto decoded_despawn = arv::protocol::deserialize_clientbound_entity_despawn(
+      arv::protocol::serialize_clientbound_entity_despawn(despawn));
   ASSERT_TRUE(decoded_despawn);
   EXPECT_EQ(decoded_despawn.value().entity_id, (arv::EntityNetID{22}));
   EXPECT_EQ(decoded_despawn.value().reason, 4U);
 
-  arv::protocol::EntitySnapshot snapshot;
+  arv::protocol::ClientboundEntitySnapshot snapshot;
   snapshot.world_id = arv::WorldID{6};
   snapshot.server_tick = 77;
-  snapshot.entities.push_back({
-      arv::EntityNetID{22},
-      {6.0F, 7.0F, 8.0F},
-      {1.0F, 0.0F, 0.0F},
-      {0.0F, 0.0F, 0.0F, 1.0F},
-      5,
-      "walking",
-      1.25F,
-      {10.0F, 20.0F, 0.0F}});
-  const auto decoded_snapshot = arv::protocol::deserialize_entity_snapshot(
-      arv::protocol::serialize_entity_snapshot(snapshot));
+  snapshot.entities.push_back({arv::EntityNetID{22},
+                               {6.0F, 7.0F, 8.0F},
+                               {1.0F, 0.0F, 0.0F},
+                               {0.0F, 0.0F, 0.0F, 1.0F},
+                               5,
+                               "walking",
+                               1.25F,
+                               {10.0F, 20.0F, 0.0F}});
+  const auto decoded_snapshot = arv::protocol::deserialize_clientbound_entity_snapshot(
+      arv::protocol::serialize_clientbound_entity_snapshot(snapshot));
   ASSERT_TRUE(decoded_snapshot);
   ASSERT_EQ(decoded_snapshot.value().entities.size(), 1U);
   EXPECT_EQ(decoded_snapshot.value().server_tick, 77U);
@@ -463,19 +460,18 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
   malformed.write<arv::u32>(6);
   malformed.write<arv::u64>(77);
   malformed.write<arv::u32>(arv::protocol::MaxEntitiesPerSnapshot + 1U);
-  EXPECT_FALSE(arv::protocol::deserialize_entity_snapshot(
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_entity_snapshot(
       std::move(malformed).take_bytes()));
 
-  arv::protocol::DroppedItemSnapshot dropped;
+  arv::protocol::ClientboundDroppedItemSnapshot dropped;
   dropped.world_id = arv::WorldID{6};
   dropped.server_tick = 88;
-  dropped.drops.push_back({
-      arv::EntityNetID{33},
-      arv::player::ItemStack{arv::player::ItemID{44}, 3},
-      {1.0F, 2.0F, 3.0F},
-      {0.1F, 0.2F, 0.3F}});
-  const auto decoded_dropped = arv::protocol::deserialize_dropped_item_snapshot(
-      arv::protocol::serialize_dropped_item_snapshot(dropped));
+  dropped.drops.push_back({arv::EntityNetID{33},
+                           arv::player::ItemStack{arv::player::ItemID{44}, 3},
+                           {1.0F, 2.0F, 3.0F},
+                           {0.1F, 0.2F, 0.3F}});
+  const auto decoded_dropped = arv::protocol::deserialize_clientbound_dropped_item_snapshot(
+      arv::protocol::serialize_clientbound_dropped_item_snapshot(dropped));
   ASSERT_TRUE(decoded_dropped);
   ASSERT_EQ(decoded_dropped.value().drops.size(), 1U);
   EXPECT_EQ(decoded_dropped.value().server_tick, 88U);
@@ -485,15 +481,15 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
 }
 
 TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
-  arv::protocol::InventoryActionRequest request;
+  arv::protocol::ServerboundInventoryActionRequest request;
   request.inventory_id = arv::protocol::PlayerInventoryID;
   request.client_action_id = 42;
   request.kind = arv::protocol::InventoryActionKind::SlotClick;
   request.slot_index = 3;
   request.button = arv::player::InventoryClickButton::Secondary;
 
-  const auto decoded_request = arv::protocol::deserialize_inventory_action_request(
-      arv::protocol::serialize_inventory_action_request(request));
+  const auto decoded_request = arv::protocol::deserialize_serverbound_inventory_action_request(
+      arv::protocol::serialize_serverbound_inventory_action_request(request));
   ASSERT_TRUE(decoded_request);
   EXPECT_EQ(decoded_request.value().inventory_id, arv::protocol::PlayerInventoryID);
   EXPECT_EQ(decoded_request.value().client_action_id, 42U);
@@ -507,10 +503,10 @@ TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
   invalid_action.write<arv::u8>(255);
   invalid_action.write<arv::u32>(3);
   invalid_action.write<arv::u8>(0);
-  EXPECT_FALSE(arv::protocol::deserialize_inventory_action_request(
+  EXPECT_FALSE(arv::protocol::deserialize_serverbound_inventory_action_request(
       std::move(invalid_action).take_bytes()));
 
-  arv::protocol::InventoryUpdate update;
+  arv::protocol::ClientboundInventoryUpdate update;
   update.inventory_id = arv::protocol::PlayerInventoryID;
   update.revision = 7;
   update.selected_hotbar_slot = 2;
@@ -519,8 +515,8 @@ TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
       std::nullopt};
   update.carried_stack = arv::player::ItemStack{arv::player::ItemID{11}, 1};
 
-  const auto decoded_update = arv::protocol::deserialize_inventory_update(
-      arv::protocol::serialize_inventory_update(update));
+  const auto decoded_update = arv::protocol::deserialize_clientbound_inventory_update(
+      arv::protocol::serialize_clientbound_inventory_update(update));
   ASSERT_TRUE(decoded_update);
   EXPECT_EQ(decoded_update.value().revision, 7U);
   EXPECT_EQ(decoded_update.value().selected_hotbar_slot, 2U);
@@ -537,6 +533,6 @@ TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
   malformed.write<arv::u32>(7);
   malformed.write<arv::u8>(2);
   malformed.write<arv::u32>(arv::protocol::MaxInventorySlots + 1U);
-  EXPECT_FALSE(arv::protocol::deserialize_inventory_update(
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_inventory_update(
       std::move(malformed).take_bytes()));
 }

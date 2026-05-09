@@ -6,14 +6,14 @@
 
 namespace {
 
-[[nodiscard]] arv::protocol::ChunkSectionData make_chunk_section_data(bool has_lighting) {
+[[nodiscard]] arv::protocol::ClientboundChunkSectionData make_chunk_section_data(bool has_lighting) {
   const arv::voxel::BlockRegistry registry = arv::bench_support::make_registry();
   const arv::voxel::BlockVariantID stone =
       arv::bench_support::find_variant(registry, "arvane:stone");
   const arv::voxel::BlockVariantID dirt =
       arv::bench_support::find_variant(registry, "arvane:dirt");
 
-  arv::protocol::ChunkSectionData data;
+  arv::protocol::ClientboundChunkSectionData data;
   data.world_id = arv::WorldID{1};
   data.coord = {{3, 0, -2}};
   data.chunk_version = 42;
@@ -27,28 +27,28 @@ namespace {
 }
 
 void BM_ChunkPacketEncodeNoLighting(benchmark::State& state) {
-  const arv::protocol::ChunkSectionData data = make_chunk_section_data(false);
+  const arv::protocol::ClientboundChunkSectionData data = make_chunk_section_data(false);
   for (auto _ : state) {
-    std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_section_data(data);
+    std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_chunk_section_data(data);
     benchmark::DoNotOptimize(bytes.data());
     benchmark::DoNotOptimize(bytes.size());
   }
 }
 
 void BM_ChunkPacketEncodeWithLighting(benchmark::State& state) {
-  const arv::protocol::ChunkSectionData data = make_chunk_section_data(true);
+  const arv::protocol::ClientboundChunkSectionData data = make_chunk_section_data(true);
   for (auto _ : state) {
-    std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_section_data(data);
+    std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_chunk_section_data(data);
     benchmark::DoNotOptimize(bytes.data());
     benchmark::DoNotOptimize(bytes.size());
   }
 }
 
 void BM_ChunkPacketDecodeWithLighting(benchmark::State& state) {
-  const arv::protocol::ChunkSectionData data = make_chunk_section_data(true);
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_chunk_section_data(data);
+  const arv::protocol::ClientboundChunkSectionData data = make_chunk_section_data(true);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_chunk_section_data(data);
   for (auto _ : state) {
-    auto decoded = arv::protocol::deserialize_chunk_section_data(bytes);
+    auto decoded = arv::protocol::deserialize_clientbound_chunk_section_data(bytes);
     benchmark::DoNotOptimize(decoded);
     if (!decoded) {
       state.SkipWithError(decoded.error().message.c_str());

@@ -4,8 +4,8 @@
 #include "save_state.hpp"
 #include "ui_model.hpp"
 
-#include "arv/core/log.hpp"
 #include "arv/client/local_identity.hpp"
+#include "arv/core/log.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/render/opengl_renderer.hpp"
@@ -27,8 +27,7 @@ namespace {
 DesktopGameSession::DesktopGameSession(TickRate base_tps) : ticks(base_tps) {
 }
 
-DesktopSessionManager::DesktopSessionManager(DesktopSessionDependencies dependencies)
-    : dependencies_(dependencies) {
+DesktopSessionManager::DesktopSessionManager(DesktopSessionDependencies dependencies) : dependencies_(dependencies) {
 }
 
 DesktopSessionManager::~DesktopSessionManager() = default;
@@ -425,21 +424,21 @@ void DesktopSessionManager::refresh_inventory_slots(DesktopGameSession& session)
 }
 
 void DesktopSessionManager::collect_client_chunk_stream(DesktopGameSession& session) const {
-  std::vector<protocol::ChunkSectionUnload> drained_unloads =
+  std::vector<protocol::ClientboundChunkSectionUnload> drained_unloads =
       session.client->drain_received_chunk_section_unloads();
-  for (const protocol::ChunkSectionUnload& unload : drained_unloads) {
+  for (const protocol::ClientboundChunkSectionUnload& unload : drained_unloads) {
     session.pending_client_chunk_unloads.emplace_back(unload);
   }
 
-  std::vector<protocol::ChunkSectionData> drained_chunks =
+  std::vector<protocol::ClientboundChunkSectionData> drained_chunks =
       session.client->drain_received_chunk_section_data();
-  for (protocol::ChunkSectionData& data : drained_chunks) {
+  for (protocol::ClientboundChunkSectionData& data : drained_chunks) {
     session.pending_client_chunk_data.emplace_back(std::move(data));
   }
 
-  std::vector<protocol::BlockUpdateBatch> drained_block_updates =
+  std::vector<protocol::ClientboundBlockUpdateBatch> drained_block_updates =
       session.client->drain_received_block_updates();
-  for (protocol::BlockUpdateBatch& batch : drained_block_updates) {
+  for (protocol::ClientboundBlockUpdateBatch& batch : drained_block_updates) {
     session.pending_client_block_updates.emplace_back(std::move(batch));
   }
 }
@@ -451,7 +450,7 @@ void DesktopSessionManager::apply_pending_client_chunk_stream(
   bool changed = false;
   u32 unloads_applied = 0;
   while (unloads_applied < unload_budget && !session.pending_client_chunk_unloads.empty()) {
-    const protocol::ChunkSectionUnload unload = session.pending_client_chunk_unloads.front();
+    const protocol::ClientboundChunkSectionUnload unload = session.pending_client_chunk_unloads.front();
     session.pending_client_chunk_unloads.pop_front();
     ++unloads_applied;
     if (unload.world_id != session.client_world.id()) {
@@ -466,7 +465,7 @@ void DesktopSessionManager::apply_pending_client_chunk_stream(
 
   u32 chunks_applied = 0;
   while (chunks_applied < chunk_budget && !session.pending_client_chunk_data.empty()) {
-    protocol::ChunkSectionData data = std::move(session.pending_client_chunk_data.front());
+    protocol::ClientboundChunkSectionData data = std::move(session.pending_client_chunk_data.front());
     session.pending_client_chunk_data.pop_front();
     ++chunks_applied;
     if (data.world_id != session.client_world.id()) {
@@ -487,7 +486,7 @@ void DesktopSessionManager::apply_pending_client_chunk_stream(
   }
 
   while (!session.pending_client_block_updates.empty()) {
-    protocol::BlockUpdateBatch batch =
+    protocol::ClientboundBlockUpdateBatch batch =
         std::move(session.pending_client_block_updates.front());
     session.pending_client_block_updates.pop_front();
     if (batch.world_id != session.client_world.id()) {

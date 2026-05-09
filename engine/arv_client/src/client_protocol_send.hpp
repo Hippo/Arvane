@@ -25,7 +25,7 @@ public:
   net::NetworkResult send_auth_response(const protocol::ServerboundAuthResponse& response);
 
   net::NetworkResult send_chunk_interest_update(
-      const protocol::ChunkInterestUpdate& update);
+      const protocol::ServerboundChunkInterestUpdate& update);
 
   net::NetworkResult send_input_batch(
       TickIndex tick_index,
@@ -35,7 +35,7 @@ public:
       const protocol::InputSample& input);
 
   net::NetworkResult send_inventory_action(
-      protocol::InventoryActionRequest request);
+      protocol::ServerboundInventoryActionRequest request);
 
   net::NetworkResult send_skin_request(const protocol::ServerboundSkinRequest& request);
   net::NetworkResult send_skin_upload_begin(

@@ -28,7 +28,7 @@ struct NamedHash {
   constexpr bool operator==(const NamedHash&) const = default;
 };
 
-struct ClientHello {
+struct ServerboundHello {
   u16 protocol_version{CurrentProtocolVersion};
   std::string client_build_id{"dev"};
   std::string client_name_or_brand{"arvane"};
@@ -41,7 +41,7 @@ struct ClientHello {
   std::optional<ServerboundAuthBegin> auth_begin{};
 };
 
-struct ServerHello {
+struct ClientboundHello {
   bool accepted{};
   std::string reject_reason{};
   u16 protocol_version{CurrentProtocolVersion};
@@ -72,14 +72,14 @@ struct HandshakePolicy {
 
 inline constexpr u32 MaxHandshakeHashEntries = 64;
 
-std::vector<u8> serialize_client_hello(const ClientHello& hello);
+std::vector<u8> serialize_serverbound_hello(const ServerboundHello& hello);
 
-Expected<ClientHello, ProtocolError> deserialize_client_hello(std::span<const u8> bytes);
+Expected<ServerboundHello, ProtocolError> deserialize_serverbound_hello(std::span<const u8> bytes);
 
-std::vector<u8> serialize_server_hello(const ServerHello& hello);
+std::vector<u8> serialize_clientbound_hello(const ClientboundHello& hello);
 
-Expected<ServerHello, ProtocolError> deserialize_server_hello(std::span<const u8> bytes);
+Expected<ClientboundHello, ProtocolError> deserialize_clientbound_hello(std::span<const u8> bytes);
 
-ServerHello make_server_hello(const ClientHello& client, const HandshakePolicy& policy);
+ClientboundHello make_clientbound_hello(const ServerboundHello& client, const HandshakePolicy& policy);
 
 } // namespace arv::protocol

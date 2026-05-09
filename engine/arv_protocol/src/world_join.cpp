@@ -27,7 +27,7 @@ Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
 
 } // namespace
 
-std::vector<u8> serialize_world_join_result(const WorldJoinResult& result) {
+std::vector<u8> serialize_clientbound_world_join_result(const ClientboundWorldJoinResult& result) {
   MessageWriter writer;
   writer.write_bool(result.accepted);
   writer.write_string(result.reject_reason);
@@ -43,7 +43,7 @@ std::vector<u8> serialize_world_join_result(const WorldJoinResult& result) {
   return std::move(writer).take_bytes();
 }
 
-Expected<WorldJoinResult, ProtocolError> deserialize_world_join_result(std::span<const u8> bytes) {
+Expected<ClientboundWorldJoinResult, ProtocolError> deserialize_clientbound_world_join_result(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto accepted = reader.read_bool();
   auto reason = reader.read_string();
@@ -58,15 +58,15 @@ Expected<WorldJoinResult, ProtocolError> deserialize_world_join_result(std::span
   auto view_distance = reader.read<i32>();
   if (!accepted || !reason || !world_id || !player_id || !entity_id || !pos_x ||
       !pos_y || !pos_z || !initial_tick || !tick_rate || !view_distance) {
-    return Expected<WorldJoinResult, ProtocolError>::failure(
+    return Expected<ClientboundWorldJoinResult, ProtocolError>::failure(
         ProtocolError{"failed to decode world join result"});
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<WorldJoinResult, ProtocolError>::failure(trailing.error());
+    return Expected<ClientboundWorldJoinResult, ProtocolError>::failure(trailing.error());
   }
 
-  WorldJoinResult result;
+  ClientboundWorldJoinResult result;
   result.accepted = accepted.value();
   result.reject_reason = std::move(reason.value());
   result.world_id = WorldID{world_id.value()};
@@ -76,29 +76,29 @@ Expected<WorldJoinResult, ProtocolError> deserialize_world_join_result(std::span
   result.initial_tick = initial_tick.value();
   result.tick_rate = tick_rate.value();
   result.effective_view_distance = view_distance.value();
-  return Expected<WorldJoinResult, ProtocolError>::success(std::move(result));
+  return Expected<ClientboundWorldJoinResult, ProtocolError>::success(std::move(result));
 }
 
-std::vector<u8> serialize_world_leave(const WorldLeave& leave) {
+std::vector<u8> serialize_clientbound_world_leave(const ClientboundWorldLeave& leave) {
   MessageWriter writer;
   writer.write<u32>(leave.world_id.value);
   writer.write<u16>(leave.reason);
   return std::move(writer).take_bytes();
 }
 
-Expected<WorldLeave, ProtocolError> deserialize_world_leave(std::span<const u8> bytes) {
+Expected<ClientboundWorldLeave, ProtocolError> deserialize_clientbound_world_leave(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
   auto reason = reader.read<u16>();
   if (!world_id || !reason) {
-    return Expected<WorldLeave, ProtocolError>::failure(
+    return Expected<ClientboundWorldLeave, ProtocolError>::failure(
         ProtocolError{"failed to decode world leave"});
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<WorldLeave, ProtocolError>::failure(trailing.error());
+    return Expected<ClientboundWorldLeave, ProtocolError>::failure(trailing.error());
   }
-  return Expected<WorldLeave, ProtocolError>::success({WorldID{world_id.value()}, reason.value()});
+  return Expected<ClientboundWorldLeave, ProtocolError>::success({WorldID{world_id.value()}, reason.value()});
 }
 
 } // namespace arv::protocol

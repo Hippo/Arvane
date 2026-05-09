@@ -187,7 +187,7 @@ void LocalPlayerController::leave_world() noexcept {
 }
 
 void LocalPlayerController::apply_authoritative_state(
-    const protocol::PlayerCorrection& correction,
+    const protocol::ClientboundPlayerCorrection& correction,
     const physics::ICollisionQuery* collision_query,
     Seconds tick_seconds) {
   if (player_id_.has_value() && correction.player_id != player_id_.value()) {

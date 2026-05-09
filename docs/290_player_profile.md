@@ -1014,7 +1014,7 @@ Future cleanup should add garbage collection for unreferenced server skin blobs,
 
 ## Protocol Packets
 
-Packet names are illustrative. Exact packet naming should follow the protocol documentation style.
+Packet names follow the protocol direction convention: Clientbound packets are sent by the server, and Serverbound packets are sent by the client.
 
 ### Clientbound Auth Challenge
 

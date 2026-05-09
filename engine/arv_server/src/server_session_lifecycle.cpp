@@ -20,7 +20,7 @@ void ServerRuntimeImpl::send_auth_result(
   const net::NetworkResult send_result = send_protocol_message(
       *transport_,
       session.connection_id,
-      protocol::MessageType::AuthResult,
+      protocol::MessageType::ClientboundAuthResult,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_auth_result(result));
@@ -43,7 +43,7 @@ void ServerRuntimeImpl::send_auth_challenge(ServerSession& session) {
   const net::NetworkResult send_result = send_protocol_message(
       *transport_,
       session.connection_id,
-      protocol::MessageType::AuthChallenge,
+      protocol::MessageType::ClientboundAuthChallenge,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_auth_challenge(packet));
@@ -70,7 +70,7 @@ void ServerRuntimeImpl::send_skin_rules(
   const net::NetworkResult send_result = send_protocol_message(
       *transport_,
       session.connection_id,
-      protocol::MessageType::SkinRules,
+      protocol::MessageType::ClientboundSkinRules,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_skin_rules(rules));
@@ -96,7 +96,7 @@ void ServerRuntimeImpl::send_player_profile_info_to(
   const net::NetworkResult send_result = send_protocol_message(
       *transport_,
       receiver.connection_id,
-      protocol::MessageType::PlayerProfileInfo,
+      protocol::MessageType::ClientboundPlayerProfileInfo,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_player_profile_info(info));
@@ -161,7 +161,7 @@ void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) 
 void ServerRuntimeImpl::send_world_join_result(
     const ServerSession& session,
     const player::PlayerState& player_state) {
-  protocol::WorldJoinResult result;
+  protocol::ClientboundWorldJoinResult result;
   result.accepted = true;
   result.world_id = session.world_id;
   result.player_id = session.player_id;
@@ -179,10 +179,10 @@ void ServerRuntimeImpl::send_world_join_result(
   const net::NetworkResult send_result = send_protocol_message(
       *transport_,
       session.connection_id,
-      protocol::MessageType::WorldJoinResult,
+      protocol::MessageType::ClientboundWorldJoinResult,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
-      protocol::serialize_world_join_result(result));
+      protocol::serialize_clientbound_world_join_result(result));
   log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
   if (send_result && mode_ == ServerMode::Dedicated) {
     core::info(

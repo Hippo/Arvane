@@ -69,7 +69,7 @@ Expected<BlockPos, ProtocolError> read_block_pos(MessageReader& reader) {
 
 } // namespace
 
-std::vector<u8> serialize_client_input_batch(const ClientInputBatch& batch) {
+std::vector<u8> serialize_serverbound_input_batch(const ServerboundInputBatch& batch) {
   MessageWriter writer;
   writer.write<u64>(batch.first_input_tick);
   writer.write<u16>(static_cast<u16>(batch.inputs.size()));
@@ -84,15 +84,15 @@ std::vector<u8> serialize_client_input_batch(const ClientInputBatch& batch) {
   return std::move(writer).take_bytes();
 }
 
-Expected<ClientInputBatch, ProtocolError> deserialize_client_input_batch(std::span<const u8> bytes) {
+Expected<ServerboundInputBatch, ProtocolError> deserialize_serverbound_input_batch(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto first_tick = reader.read<u64>();
   auto input_count = reader.read<u16>();
   if (!first_tick || !input_count) {
-    return Expected<ClientInputBatch, ProtocolError>::failure(ProtocolError{"failed to decode input batch header"});
+    return Expected<ServerboundInputBatch, ProtocolError>::failure(ProtocolError{"failed to decode input batch header"});
   }
 
-  ClientInputBatch batch;
+  ServerboundInputBatch batch;
   batch.first_input_tick = first_tick.value();
   batch.inputs.reserve(input_count.value());
   for (u16 index = 0; index < input_count.value(); ++index) {
@@ -103,7 +103,7 @@ Expected<ClientInputBatch, ProtocolError> deserialize_client_input_batch(std::sp
     auto look_delta_y = reader.read<i16>();
     auto slot = reader.read<u8>();
     if (!buttons || !move_x || !move_z || !look_delta_x || !look_delta_y || !slot) {
-      return Expected<ClientInputBatch, ProtocolError>::failure(
+      return Expected<ServerboundInputBatch, ProtocolError>::failure(
           ProtocolError{"failed to decode input sample"});
     }
     batch.inputs.emplace_back(
@@ -115,10 +115,10 @@ Expected<ClientInputBatch, ProtocolError> deserialize_client_input_batch(std::sp
         slot.value());
   }
 
-  return Expected<ClientInputBatch, ProtocolError>::success(std::move(batch));
+  return Expected<ServerboundInputBatch, ProtocolError>::success(std::move(batch));
 }
 
-std::vector<u8> serialize_player_correction(const PlayerCorrection& correction) {
+std::vector<u8> serialize_clientbound_player_correction(const ClientboundPlayerCorrection& correction) {
   MessageWriter writer;
   writer.write<u64>(correction.server_tick);
   writer.write<u64>(correction.player_id.value);
@@ -149,7 +149,7 @@ std::vector<u8> serialize_player_correction(const PlayerCorrection& correction) 
   return std::move(writer).take_bytes();
 }
 
-Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::span<const u8> bytes) {
+Expected<ClientboundPlayerCorrection, ProtocolError> deserialize_clientbound_player_correction(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto server_tick = reader.read<u64>();
   auto player_id = reader.read<u64>();
@@ -176,11 +176,11 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
       !vel_y || !vel_z || !yaw || !pitch || !movement_mode || !game_mode_id ||
       !resolved_core_permissions || !grounded || !sneaking || !swimming ||
       !breath_seconds || !selected_hotbar_slot || !block_break_active) {
-    return Expected<PlayerCorrection, ProtocolError>::failure(
+    return Expected<ClientboundPlayerCorrection, ProtocolError>::failure(
         ProtocolError{"failed to decode player correction"});
   }
 
-  PlayerCorrection correction;
+  ClientboundPlayerCorrection correction;
   correction.server_tick = server_tick.value();
   correction.player_id = PlayerID{player_id.value()};
   correction.world_id = WorldID{world_id.value()};
@@ -203,7 +203,7 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
     auto break_progress = read_f32(reader);
     auto break_stage = reader.read<u8>();
     if (!break_block || !break_variant || !break_progress || !break_stage) {
-      return Expected<PlayerCorrection, ProtocolError>::failure(
+      return Expected<ClientboundPlayerCorrection, ProtocolError>::failure(
           ProtocolError{"failed to decode block break progress"});
     }
     correction.block_break.block = break_block.value();
@@ -211,7 +211,7 @@ Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::spa
     correction.block_break.progress = break_progress.value();
     correction.block_break.stage = break_stage.value();
   }
-  return Expected<PlayerCorrection, ProtocolError>::success(std::move(correction));
+  return Expected<ClientboundPlayerCorrection, ProtocolError>::success(std::move(correction));
 }
 
 player::PlayerCommand input_sample_to_command(

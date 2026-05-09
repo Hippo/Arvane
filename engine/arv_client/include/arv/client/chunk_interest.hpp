@@ -15,7 +15,7 @@ public:
   void set_view_distance(i32 view_distance) noexcept;
   void update_player_position(Vec3f position) noexcept;
   [[nodiscard]] bool consume_interest_changed() noexcept;
-  [[nodiscard]] protocol::ChunkInterestUpdate build_interest_update() const noexcept;
+  [[nodiscard]] protocol::ServerboundChunkInterestUpdate build_interest_update() const noexcept;
 
   [[nodiscard]] ChunkSectionCoord current_chunk() const noexcept {
     return current_chunk_;

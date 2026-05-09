@@ -1,8 +1,8 @@
 #pragma once
 
 #include "arv/client/camera_shell.hpp"
-#include "arv/client/local_player_controller.hpp"
 #include "arv/client/local_identity.hpp"
+#include "arv/client/local_player_controller.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/physics/collision.hpp"
@@ -90,9 +90,9 @@ public:
   void close_chat() noexcept;
   void add_chat_message(std::string message);
   [[nodiscard]] bool tab_menu_visible() const noexcept;
-  [[nodiscard]] std::vector<protocol::ChunkSectionData> drain_received_chunk_section_data();
-  [[nodiscard]] std::vector<protocol::ChunkSectionUnload> drain_received_chunk_section_unloads();
-  [[nodiscard]] std::vector<protocol::BlockUpdateBatch> drain_received_block_updates();
+  [[nodiscard]] std::vector<protocol::ClientboundChunkSectionData> drain_received_chunk_section_data();
+  [[nodiscard]] std::vector<protocol::ClientboundChunkSectionUnload> drain_received_chunk_section_unloads();
+  [[nodiscard]] std::vector<protocol::ClientboundBlockUpdateBatch> drain_received_block_updates();
   [[nodiscard]] const player::Inventory& inventory() const noexcept;
   [[nodiscard]] const std::optional<player::ItemStack>& inventory_cursor_stack() const noexcept;
   [[nodiscard]] u32 inventory_revision() const noexcept;

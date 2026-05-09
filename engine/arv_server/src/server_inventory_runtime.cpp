@@ -123,10 +123,10 @@ player::InventoryOperationResult ServerRuntimeImpl::close_player_inventory_menu(
       insert_result.leftover};
 }
 
-protocol::InventoryUpdate ServerRuntimeImpl::make_inventory_update(
+protocol::ClientboundInventoryUpdate ServerRuntimeImpl::make_inventory_update(
     const player::PlayerState& player_state,
     u32 revision) const {
-  protocol::InventoryUpdate update;
+  protocol::ClientboundInventoryUpdate update;
   update.inventory_id = protocol::PlayerInventoryID;
   update.revision = revision;
   update.selected_hotbar_slot = player_state.selected_hotbar_slot;
@@ -162,14 +162,14 @@ void ServerRuntimeImpl::send_inventory_updates() {
     state.carried_stack = player_state->inventory_cursor_stack;
     state.selected_hotbar_slot = player_state->selected_hotbar_slot;
 
-    const protocol::InventoryUpdate update = make_inventory_update(*player_state, state.revision);
+    const protocol::ClientboundInventoryUpdate update = make_inventory_update(*player_state, state.revision);
     (void)send_protocol_message(
         *transport_,
         session->connection_id,
-        protocol::MessageType::InventoryUpdate,
+        protocol::MessageType::ClientboundInventoryUpdate,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Gameplay,
-        protocol::serialize_inventory_update(update));
+        protocol::serialize_clientbound_inventory_update(update));
   }
 }
 

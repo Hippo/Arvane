@@ -50,7 +50,7 @@ Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
 
 } // namespace
 
-std::vector<u8> serialize_inventory_action_request(const InventoryActionRequest& request) {
+std::vector<u8> serialize_serverbound_inventory_action_request(const ServerboundInventoryActionRequest& request) {
   MessageWriter writer;
   writer.write<u32>(request.inventory_id.value);
   writer.write<u32>(request.client_action_id);
@@ -60,7 +60,7 @@ std::vector<u8> serialize_inventory_action_request(const InventoryActionRequest&
   return std::move(writer).take_bytes();
 }
 
-Expected<InventoryActionRequest, ProtocolError> deserialize_inventory_action_request(
+Expected<ServerboundInventoryActionRequest, ProtocolError> deserialize_serverbound_inventory_action_request(
     std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto inventory_id = reader.read<u32>();
@@ -69,28 +69,28 @@ Expected<InventoryActionRequest, ProtocolError> deserialize_inventory_action_req
   auto slot = reader.read<u32>();
   auto button = reader.read<player::InventoryClickButton>();
   if (!inventory_id || !action_id || !kind || !slot || !button) {
-    return Expected<InventoryActionRequest, ProtocolError>::failure(
+    return Expected<ServerboundInventoryActionRequest, ProtocolError>::failure(
         ProtocolError{"failed to decode inventory action request"});
   }
   if (!valid_action_kind(kind.value()) || !valid_click_button(button.value())) {
-    return Expected<InventoryActionRequest, ProtocolError>::failure(
+    return Expected<ServerboundInventoryActionRequest, ProtocolError>::failure(
         ProtocolError{"invalid inventory action enum value"});
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<InventoryActionRequest, ProtocolError>::failure(trailing.error());
+    return Expected<ServerboundInventoryActionRequest, ProtocolError>::failure(trailing.error());
   }
 
-  InventoryActionRequest request;
+  ServerboundInventoryActionRequest request;
   request.inventory_id = InventoryID{inventory_id.value()};
   request.client_action_id = action_id.value();
   request.kind = kind.value();
   request.slot_index = slot.value();
   request.button = button.value();
-  return Expected<InventoryActionRequest, ProtocolError>::success(request);
+  return Expected<ServerboundInventoryActionRequest, ProtocolError>::success(request);
 }
 
-std::vector<u8> serialize_inventory_update(const InventoryUpdate& update) {
+std::vector<u8> serialize_clientbound_inventory_update(const ClientboundInventoryUpdate& update) {
   MessageWriter writer;
   writer.write<u32>(update.inventory_id.value);
   writer.write<u32>(update.revision);
@@ -109,22 +109,22 @@ std::vector<u8> serialize_inventory_update(const InventoryUpdate& update) {
   return std::move(writer).take_bytes();
 }
 
-Expected<InventoryUpdate, ProtocolError> deserialize_inventory_update(std::span<const u8> bytes) {
+Expected<ClientboundInventoryUpdate, ProtocolError> deserialize_clientbound_inventory_update(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto inventory_id = reader.read<u32>();
   auto revision = reader.read<u32>();
   auto selected_slot = reader.read<u8>();
   auto slot_count = reader.read<u32>();
   if (!inventory_id || !revision || !selected_slot || !slot_count) {
-    return Expected<InventoryUpdate, ProtocolError>::failure(
+    return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(
         ProtocolError{"failed to decode inventory update header"});
   }
   if (slot_count.value() > MaxInventorySlots) {
-    return Expected<InventoryUpdate, ProtocolError>::failure(
+    return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(
         ProtocolError{"too many inventory slots"});
   }
 
-  InventoryUpdate update;
+  ClientboundInventoryUpdate update;
   update.inventory_id = InventoryID{inventory_id.value()};
   update.revision = revision.value();
   update.selected_hotbar_slot = selected_slot.value();
@@ -132,7 +132,7 @@ Expected<InventoryUpdate, ProtocolError> deserialize_inventory_update(std::span<
   for (u32 index = 0; index < slot_count.value(); ++index) {
     auto has_stack = reader.read_bool();
     if (!has_stack) {
-      return Expected<InventoryUpdate, ProtocolError>::failure(
+      return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(
           ProtocolError{"failed to decode inventory slot presence"});
     }
     if (!has_stack.value()) {
@@ -141,29 +141,29 @@ Expected<InventoryUpdate, ProtocolError> deserialize_inventory_update(std::span<
     }
     auto stack = read_stack(reader);
     if (!stack) {
-      return Expected<InventoryUpdate, ProtocolError>::failure(stack.error());
+      return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(stack.error());
     }
     update.slots.emplace_back(stack.value());
   }
 
   auto has_carried = reader.read_bool();
   if (!has_carried) {
-    return Expected<InventoryUpdate, ProtocolError>::failure(
+    return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(
         ProtocolError{"failed to decode carried inventory stack presence"});
   }
   if (has_carried.value()) {
     auto stack = read_stack(reader);
     if (!stack) {
-      return Expected<InventoryUpdate, ProtocolError>::failure(stack.error());
+      return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(stack.error());
     }
     update.carried_stack = stack.value();
   }
 
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<InventoryUpdate, ProtocolError>::failure(trailing.error());
+    return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(trailing.error());
   }
-  return Expected<InventoryUpdate, ProtocolError>::success(std::move(update));
+  return Expected<ClientboundInventoryUpdate, ProtocolError>::success(std::move(update));
 }
 
 } // namespace arv::protocol

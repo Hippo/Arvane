@@ -54,9 +54,9 @@ struct DesktopGameSession {
   std::unique_ptr<client::ClientRuntime> client{};
   world::WorldRuntime client_world{server::DefaultWorldID};
   ChunkViewState chunk_view{};
-  std::deque<protocol::ChunkSectionUnload> pending_client_chunk_unloads{};
-  std::deque<protocol::ChunkSectionData> pending_client_chunk_data{};
-  std::deque<protocol::BlockUpdateBatch> pending_client_block_updates{};
+  std::deque<protocol::ClientboundChunkSectionUnload> pending_client_chunk_unloads{};
+  std::deque<protocol::ClientboundChunkSectionData> pending_client_chunk_data{};
+  std::deque<protocol::ClientboundBlockUpdateBatch> pending_client_block_updates{};
   std::optional<BlockOutlineTarget> block_outline_target{};
   core::FixedTimestepAccumulator ticks;
   TickIndex client_tick_index{};

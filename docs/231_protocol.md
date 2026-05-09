@@ -196,7 +196,7 @@ No gameplay messages are valid yet.
 Client sends:
 
 ```text
-ClientHello
+ServerboundHello
 {
     protocol_version;
     client_version;
@@ -208,7 +208,7 @@ ClientHello
 Server replies:
 
 ```text
-ServerHello
+ClientboundHello
 {
     protocol_version;
     server_version;
@@ -238,7 +238,7 @@ Client requests entry into a world.
 
 For the current dedicated-server flow, the configured world is server-owned:
 `arv_dedicated` selects the world from `server.yaml`, then advertises the
-assigned `initial_world_id` in `ServerHello` and sends a `WorldJoinResult`
+assigned `initial_world_id` in `ClientboundHello` and sends a `ClientboundWorldJoinResult`
 before the client may enter gameplay. The client must not infer the world from
 local save folders or local config.
 
@@ -283,17 +283,21 @@ Skin/profile messages currently occupy `0x0120 - 0x0131` inside the
 login/session range. Metadata/control packets use the session lane; image byte
 payloads and chunks use the chunk-streaming bulk lane.
 
+Directional packet names use `ClientboundX` for server-to-client packets and
+`ServerboundX` for client-to-server packets. Bidirectional utility packets such
+as `Ping`, `Pong`, and `DisconnectReason` keep neutral names.
+
 ---
 
 ## Core Messages
 
-### `ClientHello`
+### `ServerboundHello`
 
 Reliable ordered.
 
 Sent immediately after transport connection.
 
-### `ServerHello`
+### `ClientboundHello`
 
 Reliable ordered.
 
@@ -357,7 +361,7 @@ Client render interpolation may use snapshot history, but gameplay authority rem
 Client input is sent as unreliable latest-wins messages.
 
 ```text
-ClientInputBatch
+ServerboundInputBatch
 {
     u64 first_input_tick;
     u16 input_count;
@@ -399,7 +403,7 @@ The client may predict local movement, but the server owns final position.
 Reliable or unreliable latest-wins depending on correction severity.
 
 ```text
-PlayerCorrection
+ClientboundPlayerCorrection
 {
     u64 server_tick;
     PlayerID player_id;
@@ -460,7 +464,7 @@ ChunkCoord
 Reliable ordered.
 
 ```text
-ChunkData
+ClientboundChunkData
 {
     WorldID world_id;
     ChunkCoord coord;
@@ -501,7 +505,7 @@ Lighting data is server-authoritative. Clients may render and remesh from receiv
 Reliable ordered.
 
 ```text
-ChunkUnload
+ClientboundChunkUnload
 {
     ChunkCoord coord;
     u32 reason;
@@ -529,7 +533,7 @@ BlockUpdate
 Batch form:
 
 ```text
-BlockUpdateBatch
+ClientboundBlockUpdateBatch
 {
     u64 server_tick;
     u32 update_count;
@@ -566,7 +570,7 @@ Entity IDs are assigned by the server and scoped to a world/session.
 Reliable ordered.
 
 ```text
-EntitySpawn
+ClientboundEntitySpawn
 {
     EntityNetID entity_id;
     EntityTypeID entity_type;
@@ -582,7 +586,7 @@ EntitySpawn
 Reliable ordered.
 
 ```text
-EntityDespawn
+ClientboundEntityDespawn
 {
     EntityNetID entity_id;
     u16 reason;
@@ -594,7 +598,7 @@ EntityDespawn
 Unreliable latest-wins.
 
 ```text
-EntitySnapshot
+ClientboundEntitySnapshot
 {
     u64 server_tick;
     u32 entity_count;
@@ -644,7 +648,7 @@ UseItemRequest
 ### Inventory Update
 
 ```text
-InventoryUpdate
+ClientboundInventoryUpdate
 {
     u32 inventory_id;
     u32 revision;
@@ -910,10 +914,10 @@ Current core lanes:
 
 | Lane | Reliability            | Message types                                 |
 | ---: | ---------------------- | --------------------------------------------- |
-|  `0` | reliable               | `ClientHello`, `ServerHello`, disconnect, world join/leave |
+|  `0` | reliable               | `ServerboundHello`, `ClientboundHello`, disconnect, world join/leave |
 |  `1` | reliable               | block updates, entity lifecycle, inventory, reliable gameplay actions |
-|  `2` | unreliable latest-wins | `ClientInputBatch`, `PlayerCorrection`, `EntitySnapshot` |
-|  `3` | reliable bulk          | `ChunkData`, `ChunkUnload`, skin image upload/download chunks |
+|  `2` | unreliable latest-wins | `ServerboundInputBatch`, `ClientboundPlayerCorrection`, `ClientboundEntitySnapshot` |
+|  `3` | reliable bulk          | `ClientboundChunkData`, `ClientboundChunkUnload`, skin image upload/download chunks |
 |  `4` | mixed/debug            | ping/pong, diagnostics, dev traffic           |
 
 Chunk streaming must not starve input, entity snapshots, or critical reliable messages.
@@ -1055,7 +1059,7 @@ The server is authoritative. The client may advertise capabilities, but the serv
 The first client handshake payload should include:
 
 ```text
-ClientHello
+ServerboundHello
     protocol_version
     client_build_id
     client_name_or_brand
@@ -1086,7 +1090,7 @@ Authentication may remain a placeholder during early milestones, but the payload
 The server response should include:
 
 ```text
-ServerHello
+ClientboundHello
     accepted
     reject_reason
     protocol_version
@@ -1188,10 +1192,10 @@ Possible follow-up phases include:
 6. Entity spawn synchronization
 7. Gameplay-ready notification
 
-The client should not assume it is gameplay-ready immediately after `ServerHello`.
+The client should not assume it is gameplay-ready immediately after `ClientboundHello`.
 
 The server must explicitly transition the client into a gameplay-ready state.
-After `WorldJoinResult`, the client sends `ChunkInterestUpdate` from the
+After `ClientboundWorldJoinResult`, the client sends `ServerboundChunkInterestUpdate` from the
 server-assigned spawn/body position. The server then owns chunk generation and
 chunk payload delivery for the joined world.
 

@@ -56,7 +56,7 @@ public:
       TickRate tick_rate = DefaultBaseTps) noexcept;
   void leave_world() noexcept;
   void apply_authoritative_state(
-      const protocol::PlayerCorrection& correction,
+      const protocol::ClientboundPlayerCorrection& correction,
       const physics::ICollisionQuery* collision_query = nullptr,
       Seconds tick_seconds = tick_duration_seconds(DefaultBaseTps));
 

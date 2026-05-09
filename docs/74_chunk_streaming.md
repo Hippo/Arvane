@@ -101,7 +101,7 @@ Player moves
   -> world position changes
   -> player chunk coordinate changes
   -> client recomputes desired chunk set
-  -> client sends ChunkInterestUpdate
+  -> client sends ServerboundChunkInterestUpdate
 ```
 
 The client may also trigger a chunk interest update when:
@@ -156,7 +156,7 @@ The responsibility split should be:
 
 ```text
 Client
-  -> sends ChunkInterestUpdate
+  -> sends ServerboundChunkInterestUpdate
 
 Server networking/session layer
   -> receives interest update
@@ -172,7 +172,7 @@ World/chunk system
   -> provides immutable chunk data snapshots only after data is available
 
 Chunk streaming system
-  -> builds ChunkData messages
+  -> builds ClientboundChunkData messages
   -> queues messages for network send
 
 Networking layer
@@ -274,7 +274,7 @@ When chunks leave the player's streaming set, the server should send a chunk unl
 
 The client should unload chunks when:
 
-* receiving a ChunkUnload message
+* receiving a ClientboundChunkUnload message
 * changing world/dimension
 * disconnecting
 * performing a full chunk resync
@@ -283,7 +283,7 @@ The client may keep recently unloaded chunks in a short-lived cache, but it must
 
 ## Message Types
 
-### ChunkInterestUpdate
+### ServerboundChunkInterestUpdate
 
 Sent from client to server when the player's chunk interest changes.
 
@@ -299,7 +299,7 @@ optional sequence_id
 
 The server validates and clamps this.
 
-### ChunkData
+### ClientboundChunkData
 
 Sent from server to client when a chunk should be loaded or replaced.
 
@@ -315,7 +315,7 @@ biome/worldgen metadata if needed
 optional compressed payload
 ```
 
-### ChunkUnload
+### ClientboundChunkUnload
 
 Sent from server to client when a chunk should be removed.
 
@@ -344,7 +344,7 @@ Full chunk data should not be used for small block changes unless the chunk need
 
 ## Client Receive Flow
 
-When the client receives `ChunkData`:
+When the client receives `ClientboundChunkData`:
 
 1. Validate the world id matches the active world.
 2. Decode/decompress the payload.
@@ -371,7 +371,7 @@ The server should track enough per-player state to know which clients need updat
 Block changed in chunk
   -> world marks chunk version dirty
   -> streaming system finds players with this chunk sent
-  -> queue ChunkDelta or ChunkData replacement
+  -> queue ChunkDelta or ClientboundChunkData replacement
 ```
 
 ## Threading Rules
@@ -434,14 +434,14 @@ chunk_streamer.queue_chunk_send(client, snapshot);
 Do not do this:
 
 ```text
-Network callback receives ChunkData
+Network callback receives ClientboundChunkData
   -> immediately builds OpenGL mesh
 ```
 
 Do this instead:
 
 ```text
-Network callback receives ChunkData
+Network callback receives ClientboundChunkData
   -> enqueue client world update
   -> client world stores chunk
   -> meshing job runs later
@@ -455,7 +455,7 @@ class ClientChunkInterest {
 public:
     void update_player_position(Vec3 position);
     bool consume_interest_changed();
-    ChunkInterestUpdate build_interest_update() const;
+    ServerboundChunkInterestUpdate build_interest_update() const;
 
 private:
     ChunkCoord current_chunk_;
@@ -468,7 +468,7 @@ private:
 ```cpp
 class ServerChunkStreamer {
 public:
-    void update_player_interest(ClientId client, ChunkInterestUpdate interest);
+    void update_player_interest(ClientId client, ServerboundChunkInterestUpdate interest);
     void tick_streaming_budget();
     void notify_chunk_changed(WorldId world, ChunkCoord coord, ChunkVersion version);
 

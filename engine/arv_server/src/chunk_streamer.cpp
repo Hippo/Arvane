@@ -74,7 +74,7 @@ void ServerChunkStreamer::update_player_interest(
     const ServerSession& session,
     ChunkSectionCoord authoritative_center,
     world::WorldHeightSettings height,
-    const protocol::ChunkInterestUpdate& interest) {
+    const protocol::ServerboundChunkInterestUpdate& interest) {
   PlayerChunkStreamState& state = players_[session.session_id];
   const bool new_state = state.session_id != session.session_id;
   if (new_state) {
@@ -335,7 +335,7 @@ void ServerChunkStreamer::queue_chunk_unloads(
     const ChunkSectionCoord coord = state.unload_queue.back();
     state.unload_queue.pop_back();
 
-    protocol::ChunkSectionUnload unload;
+    protocol::ClientboundChunkSectionUnload unload;
     unload.world_id = state.world_id;
     unload.coord = coord;
     QueuedChunkStreamMessage message;
@@ -344,8 +344,8 @@ void ServerChunkStreamer::queue_chunk_unloads(
     message.world_id = state.world_id;
     message.reliability = protocol::ReliabilityClass::ReliableOrdered;
     message.lane = protocol::NetworkLane::ChunkStreaming;
-    message.message_type = protocol::MessageType::ChunkSectionUnload;
-    message.payload = protocol::serialize_chunk_section_unload(unload);
+    message.message_type = protocol::MessageType::ClientboundChunkSectionUnload;
+    message.payload = protocol::serialize_clientbound_chunk_section_unload(unload);
     message.coord = coord;
     out_messages.emplace_back(std::move(message));
     ++sent;
@@ -393,7 +393,7 @@ void ServerChunkStreamer::queue_chunk_sends(
       continue;
     }
 
-    protocol::ChunkSectionData data;
+    protocol::ClientboundChunkSectionData data;
     data.world_id = state.world_id;
     data.coord = coord;
     data.chunk_version = snapshot->source_version;
@@ -416,8 +416,8 @@ void ServerChunkStreamer::queue_chunk_sends(
     message.world_id = state.world_id;
     message.reliability = protocol::ReliabilityClass::ReliableOrdered;
     message.lane = protocol::NetworkLane::ChunkStreaming;
-    message.message_type = protocol::MessageType::ChunkSectionData;
-    message.payload = protocol::serialize_chunk_section_data(data);
+    message.message_type = protocol::MessageType::ClientboundChunkSectionData;
+    message.payload = protocol::serialize_clientbound_chunk_section_data(data);
     message.coord = coord;
     message.block_version = snapshot->source_version;
     message.light_version = source_chunk->light_data_version();

@@ -35,13 +35,13 @@ public:
       detail::ClientProtocolSender& sender,
       net::ConnectionState connection_state);
 
-  void apply_update(protocol::InventoryUpdate update);
+  void apply_update(protocol::ClientboundInventoryUpdate update);
   void reset();
 
 private:
   net::NetworkResult send_request_if_in_game(
       detail::ClientProtocolSender& sender,
-      protocol::InventoryActionRequest request,
+      protocol::ServerboundInventoryActionRequest request,
       net::ConnectionState connection_state);
 
   player::Inventory inventory_{player::DefaultPlayerInventorySlotCount};

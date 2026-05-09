@@ -22,7 +22,7 @@ namespace {
 
 void apply_world_join_result(
     ClientRuntimeContext& runtime,
-    const protocol::WorldJoinResult& result) {
+    const protocol::ClientboundWorldJoinResult& result) {
   if (!result.accepted) {
     runtime.connection.set_state(net::ConnectionState::Disconnecting);
     return;
@@ -40,7 +40,7 @@ void apply_world_join_result(
 
 void apply_world_leave(
     ClientRuntimeContext& runtime,
-    const protocol::WorldLeave& leave) {
+    const protocol::ClientboundWorldLeave& leave) {
   if (leave.world_id != runtime.player_controller.camera().world_id()) {
     return;
   }
@@ -93,8 +93,8 @@ void ClientNetworkRouter::handle_message(
   }
 
   switch (decoded.value().envelope.message_type) {
-    case protocol::MessageType::ServerHello: {
-      auto server_hello = protocol::deserialize_server_hello(decoded.value().payload);
+    case protocol::MessageType::ClientboundHello: {
+      auto server_hello = protocol::deserialize_clientbound_hello(decoded.value().payload);
       if (!server_hello) {
         runtime.connection.set_state(net::ConnectionState::Disconnecting);
         return;
@@ -113,7 +113,7 @@ void ClientNetworkRouter::handle_message(
               : net::ConnectionState::WorldJoin);
       return;
     }
-    case protocol::MessageType::AuthChallenge: {
+    case protocol::MessageType::ClientboundAuthChallenge: {
       auto challenge = protocol::deserialize_auth_challenge(decoded.value().payload);
       if (!challenge) {
         runtime.connection.set_state(net::ConnectionState::Disconnecting);
@@ -142,14 +142,14 @@ void ClientNetworkRouter::handle_message(
       }
       return;
     }
-    case protocol::MessageType::AuthResult: {
+    case protocol::MessageType::ClientboundAuthResult: {
       auto result = protocol::deserialize_auth_result(decoded.value().payload);
       if (!result || !result.value().accepted) {
         runtime.connection.set_state(net::ConnectionState::Disconnecting);
       }
       return;
     }
-    case protocol::MessageType::SkinRules: {
+    case protocol::MessageType::ClientboundSkinRules: {
       auto rules = protocol::deserialize_skin_rules(decoded.value().payload);
       if (!rules) {
         return;
@@ -160,7 +160,7 @@ void ClientNetworkRouter::handle_message(
           std::move(rules.value()));
       return;
     }
-    case protocol::MessageType::PlayerProfileInfo: {
+    case protocol::MessageType::ClientboundPlayerProfileInfo: {
       auto info = protocol::deserialize_player_profile_info(decoded.value().payload);
       if (!info) {
         return;
@@ -171,7 +171,7 @@ void ClientNetworkRouter::handle_message(
           std::move(info.value()));
       return;
     }
-    case protocol::MessageType::PlayerProfileInfoBatch: {
+    case protocol::MessageType::ClientboundPlayerProfileInfoBatch: {
       auto batch = protocol::deserialize_player_profile_info_batch(decoded.value().payload);
       if (!batch) {
         return;
@@ -182,7 +182,7 @@ void ClientNetworkRouter::handle_message(
           std::move(batch.value()));
       return;
     }
-    case protocol::MessageType::SkinData: {
+    case protocol::MessageType::ClientboundSkinData: {
       auto data = protocol::deserialize_skin_data(decoded.value().payload);
       if (!data) {
         return;
@@ -190,7 +190,7 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_data(runtime.identity, std::move(data.value()));
       return;
     }
-    case protocol::MessageType::SkinDataBeginChunked: {
+    case protocol::MessageType::ClientboundSkinDataBeginChunked: {
       auto begin = protocol::deserialize_skin_data_begin_chunked(decoded.value().payload);
       if (!begin) {
         return;
@@ -198,7 +198,7 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_data_begin_chunked(std::move(begin.value()));
       return;
     }
-    case protocol::MessageType::SkinDataChunk: {
+    case protocol::MessageType::ClientboundSkinDataChunk: {
       auto chunk = protocol::deserialize_skin_data_chunk(decoded.value().payload);
       if (!chunk) {
         return;
@@ -206,7 +206,7 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_data_chunk(std::move(chunk.value()));
       return;
     }
-    case protocol::MessageType::SkinDataEndChunked: {
+    case protocol::MessageType::ClientboundSkinDataEndChunked: {
       auto end = protocol::deserialize_skin_data_end_chunked(decoded.value().payload);
       if (!end) {
         return;
@@ -214,7 +214,7 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_data_end_chunked(runtime.identity, end.value());
       return;
     }
-    case protocol::MessageType::SkinRequestDeny: {
+    case protocol::MessageType::ClientboundSkinRequestDeny: {
       auto deny = protocol::deserialize_skin_request_deny(decoded.value().payload);
       if (!deny) {
         return;
@@ -222,7 +222,7 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_request_deny(std::move(deny.value()));
       return;
     }
-    case protocol::MessageType::SkinUploadAccept: {
+    case protocol::MessageType::ClientboundSkinUploadAccept: {
       auto accept = protocol::deserialize_skin_upload_accept(decoded.value().payload);
       if (!accept) {
         return;
@@ -230,7 +230,7 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_upload_accept(runtime.sender, accept.value());
       return;
     }
-    case protocol::MessageType::SkinUploadDeny: {
+    case protocol::MessageType::ClientboundSkinUploadDeny: {
       auto deny = protocol::deserialize_skin_upload_deny(decoded.value().payload);
       if (!deny) {
         return;
@@ -238,7 +238,7 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_upload_deny(deny.value());
       return;
     }
-    case protocol::MessageType::SkinUploadComplete: {
+    case protocol::MessageType::ClientboundSkinUploadComplete: {
       auto complete = protocol::deserialize_skin_upload_complete(decoded.value().payload);
       if (!complete) {
         return;
@@ -246,7 +246,7 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_upload_complete(std::move(complete.value()));
       return;
     }
-    case protocol::MessageType::SkinUploadFailed: {
+    case protocol::MessageType::ClientboundSkinUploadFailed: {
       auto failed = protocol::deserialize_skin_upload_failed(decoded.value().payload);
       if (!failed) {
         return;
@@ -254,8 +254,8 @@ void ClientNetworkRouter::handle_message(
       runtime.skins.handle_skin_upload_failed(failed.value());
       return;
     }
-    case protocol::MessageType::WorldJoinResult: {
-      auto result = protocol::deserialize_world_join_result(decoded.value().payload);
+    case protocol::MessageType::ClientboundWorldJoinResult: {
+      auto result = protocol::deserialize_clientbound_world_join_result(decoded.value().payload);
       if (!result) {
         runtime.connection.set_state(net::ConnectionState::Disconnecting);
         return;
@@ -263,16 +263,16 @@ void ClientNetworkRouter::handle_message(
       apply_world_join_result(runtime, result.value());
       return;
     }
-    case protocol::MessageType::WorldLeave: {
-      auto leave = protocol::deserialize_world_leave(decoded.value().payload);
+    case protocol::MessageType::ClientboundWorldLeave: {
+      auto leave = protocol::deserialize_clientbound_world_leave(decoded.value().payload);
       if (!leave) {
         return;
       }
       apply_world_leave(runtime, leave.value());
       return;
     }
-    case protocol::MessageType::PlayerCorrection: {
-      auto correction = protocol::deserialize_player_correction(decoded.value().payload);
+    case protocol::MessageType::ClientboundPlayerCorrection: {
+      auto correction = protocol::deserialize_clientbound_player_correction(decoded.value().payload);
       if (!correction) {
         return;
       }
@@ -282,24 +282,24 @@ void ClientNetworkRouter::handle_message(
           runtime.tick_seconds);
       return;
     }
-    case protocol::MessageType::ChunkSectionData: {
-      auto chunk_data = protocol::deserialize_chunk_section_data(decoded.value().payload);
+    case protocol::MessageType::ClientboundChunkSectionData: {
+      auto chunk_data = protocol::deserialize_clientbound_chunk_section_data(decoded.value().payload);
       if (!chunk_data) {
         return;
       }
       runtime.chunks.push_chunk_section_data(std::move(chunk_data.value()));
       return;
     }
-    case protocol::MessageType::ChunkSectionUnload: {
-      auto unload = protocol::deserialize_chunk_section_unload(decoded.value().payload);
+    case protocol::MessageType::ClientboundChunkSectionUnload: {
+      auto unload = protocol::deserialize_clientbound_chunk_section_unload(decoded.value().payload);
       if (!unload) {
         return;
       }
       runtime.chunks.push_chunk_section_unload(unload.value());
       return;
     }
-    case protocol::MessageType::BlockUpdateBatch: {
-      auto updates = protocol::deserialize_block_update_batch(decoded.value().payload);
+    case protocol::MessageType::ClientboundBlockUpdateBatch: {
+      auto updates = protocol::deserialize_clientbound_block_update_batch(decoded.value().payload);
       if (!updates) {
         return;
       }
@@ -308,8 +308,8 @@ void ClientNetworkRouter::handle_message(
       }
       return;
     }
-    case protocol::MessageType::EntitySpawn: {
-      auto spawn = protocol::deserialize_entity_spawn(decoded.value().payload);
+    case protocol::MessageType::ClientboundEntitySpawn: {
+      auto spawn = protocol::deserialize_clientbound_entity_spawn(decoded.value().payload);
       if (!spawn) {
         return;
       }
@@ -318,8 +318,8 @@ void ClientNetworkRouter::handle_message(
           runtime.player_controller.camera().world_id());
       return;
     }
-    case protocol::MessageType::EntityDespawn: {
-      auto despawn = protocol::deserialize_entity_despawn(decoded.value().payload);
+    case protocol::MessageType::ClientboundEntityDespawn: {
+      auto despawn = protocol::deserialize_clientbound_entity_despawn(decoded.value().payload);
       if (!despawn) {
         return;
       }
@@ -328,8 +328,8 @@ void ClientNetworkRouter::handle_message(
           runtime.player_controller.camera().world_id());
       return;
     }
-    case protocol::MessageType::EntitySnapshot: {
-      auto snapshot = protocol::deserialize_entity_snapshot(decoded.value().payload);
+    case protocol::MessageType::ClientboundEntitySnapshot: {
+      auto snapshot = protocol::deserialize_clientbound_entity_snapshot(decoded.value().payload);
       if (!snapshot) {
         return;
       }
@@ -338,8 +338,8 @@ void ClientNetworkRouter::handle_message(
           runtime.player_controller.camera().world_id());
       return;
     }
-    case protocol::MessageType::DroppedItemSnapshot: {
-      auto snapshot = protocol::deserialize_dropped_item_snapshot(decoded.value().payload);
+    case protocol::MessageType::ClientboundDroppedItemSnapshot: {
+      auto snapshot = protocol::deserialize_clientbound_dropped_item_snapshot(decoded.value().payload);
       if (!snapshot) {
         return;
       }
@@ -348,8 +348,8 @@ void ClientNetworkRouter::handle_message(
           runtime.player_controller.camera().world_id());
       return;
     }
-    case protocol::MessageType::InventoryUpdate: {
-      auto update = protocol::deserialize_inventory_update(decoded.value().payload);
+    case protocol::MessageType::ClientboundInventoryUpdate: {
+      auto update = protocol::deserialize_clientbound_inventory_update(decoded.value().payload);
       if (!update) {
         return;
       }

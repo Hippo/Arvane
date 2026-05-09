@@ -12,7 +12,7 @@
 
 namespace arv::protocol {
 
-struct WorldJoinResult {
+struct ClientboundWorldJoinResult {
   bool accepted{};
   std::string reject_reason{};
   WorldID world_id{};
@@ -24,15 +24,15 @@ struct WorldJoinResult {
   i32 effective_view_distance{};
 };
 
-struct WorldLeave {
+struct ClientboundWorldLeave {
   WorldID world_id{};
   u16 reason{};
 };
 
-std::vector<u8> serialize_world_join_result(const WorldJoinResult& result);
-Expected<WorldJoinResult, ProtocolError> deserialize_world_join_result(std::span<const u8> bytes);
+std::vector<u8> serialize_clientbound_world_join_result(const ClientboundWorldJoinResult& result);
+Expected<ClientboundWorldJoinResult, ProtocolError> deserialize_clientbound_world_join_result(std::span<const u8> bytes);
 
-std::vector<u8> serialize_world_leave(const WorldLeave& leave);
-Expected<WorldLeave, ProtocolError> deserialize_world_leave(std::span<const u8> bytes);
+std::vector<u8> serialize_clientbound_world_leave(const ClientboundWorldLeave& leave);
+Expected<ClientboundWorldLeave, ProtocolError> deserialize_clientbound_world_leave(std::span<const u8> bytes);
 
 } // namespace arv::protocol

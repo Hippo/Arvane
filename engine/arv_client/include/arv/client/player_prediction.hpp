@@ -92,7 +92,7 @@ public:
       Seconds tick_seconds);
 
   [[nodiscard]] PlayerReconciliationResult reconcile_authoritative_state(
-      const protocol::PlayerCorrection& correction,
+      const protocol::ClientboundPlayerCorrection& correction,
       const physics::ICollisionQuery* collision_query,
       const player::PlayerTuning& tuning,
       Seconds tick_seconds);
@@ -129,6 +129,6 @@ private:
     const PredictedPlayerState& state) noexcept;
 
 [[nodiscard]] movement::PlayerKinematicState kinematic_state_from_correction(
-    const protocol::PlayerCorrection& correction) noexcept;
+    const protocol::ClientboundPlayerCorrection& correction) noexcept;
 
 } // namespace arv::client

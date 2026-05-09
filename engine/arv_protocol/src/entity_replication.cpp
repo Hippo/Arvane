@@ -61,7 +61,7 @@ Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
 
 } // namespace
 
-std::vector<u8> serialize_entity_spawn(const EntitySpawn& spawn) {
+std::vector<u8> serialize_clientbound_entity_spawn(const ClientboundEntitySpawn& spawn) {
   MessageWriter writer;
   writer.write<u32>(spawn.world_id.value);
   writer.write<u32>(spawn.entity_id.value);
@@ -78,7 +78,7 @@ std::vector<u8> serialize_entity_spawn(const EntitySpawn& spawn) {
   return std::move(writer).take_bytes();
 }
 
-Expected<EntitySpawn, ProtocolError> deserialize_entity_spawn(std::span<const u8> bytes) {
+Expected<ClientboundEntitySpawn, ProtocolError> deserialize_clientbound_entity_spawn(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
   auto entity_id = reader.read<u32>();
@@ -91,7 +91,7 @@ Expected<EntitySpawn, ProtocolError> deserialize_entity_spawn(std::span<const u8
   auto has_owner = reader.read_bool();
   if (!world_id || !entity_id || !entity_type || !entity_type_name || !position ||
       !velocity || !rotation || !flags || !has_owner) {
-    return Expected<EntitySpawn, ProtocolError>::failure(
+    return Expected<ClientboundEntitySpawn, ProtocolError>::failure(
         ProtocolError{"failed to decode entity spawn"});
   }
 
@@ -99,17 +99,17 @@ Expected<EntitySpawn, ProtocolError> deserialize_entity_spawn(std::span<const u8
   if (has_owner.value()) {
     auto player_id = reader.read<u64>();
     if (!player_id) {
-      return Expected<EntitySpawn, ProtocolError>::failure(
+      return Expected<ClientboundEntitySpawn, ProtocolError>::failure(
           ProtocolError{"failed to decode entity owner"});
     }
     owner = PlayerID{player_id.value()};
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<EntitySpawn, ProtocolError>::failure(trailing.error());
+    return Expected<ClientboundEntitySpawn, ProtocolError>::failure(trailing.error());
   }
 
-  EntitySpawn spawn;
+  ClientboundEntitySpawn spawn;
   spawn.world_id = WorldID{world_id.value()};
   spawn.entity_id = EntityNetID{entity_id.value()};
   spawn.entity_type = EntityTypeID{entity_type.value()};
@@ -119,10 +119,10 @@ Expected<EntitySpawn, ProtocolError> deserialize_entity_spawn(std::span<const u8
   spawn.rotation = rotation.value();
   spawn.spawn_flags = flags.value();
   spawn.owning_player = owner;
-  return Expected<EntitySpawn, ProtocolError>::success(std::move(spawn));
+  return Expected<ClientboundEntitySpawn, ProtocolError>::success(std::move(spawn));
 }
 
-std::vector<u8> serialize_entity_despawn(const EntityDespawn& despawn) {
+std::vector<u8> serialize_clientbound_entity_despawn(const ClientboundEntityDespawn& despawn) {
   MessageWriter writer;
   writer.write<u32>(despawn.world_id.value);
   writer.write<u32>(despawn.entity_id.value);
@@ -130,24 +130,24 @@ std::vector<u8> serialize_entity_despawn(const EntityDespawn& despawn) {
   return std::move(writer).take_bytes();
 }
 
-Expected<EntityDespawn, ProtocolError> deserialize_entity_despawn(std::span<const u8> bytes) {
+Expected<ClientboundEntityDespawn, ProtocolError> deserialize_clientbound_entity_despawn(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
   auto entity_id = reader.read<u32>();
   auto reason = reader.read<u16>();
   if (!world_id || !entity_id || !reason) {
-    return Expected<EntityDespawn, ProtocolError>::failure(
+    return Expected<ClientboundEntityDespawn, ProtocolError>::failure(
         ProtocolError{"failed to decode entity despawn"});
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<EntityDespawn, ProtocolError>::failure(trailing.error());
+    return Expected<ClientboundEntityDespawn, ProtocolError>::failure(trailing.error());
   }
-  return Expected<EntityDespawn, ProtocolError>::success(
+  return Expected<ClientboundEntityDespawn, ProtocolError>::success(
       {WorldID{world_id.value()}, EntityNetID{entity_id.value()}, reason.value()});
 }
 
-std::vector<u8> serialize_entity_snapshot(const EntitySnapshot& snapshot) {
+std::vector<u8> serialize_clientbound_entity_snapshot(const ClientboundEntitySnapshot& snapshot) {
   MessageWriter writer;
   writer.write<u32>(snapshot.world_id.value);
   writer.write<u64>(snapshot.server_tick);
@@ -165,7 +165,7 @@ std::vector<u8> serialize_entity_snapshot(const EntitySnapshot& snapshot) {
   return std::move(writer).take_bytes();
 }
 
-std::vector<u8> serialize_dropped_item_snapshot(const DroppedItemSnapshot& snapshot) {
+std::vector<u8> serialize_clientbound_dropped_item_snapshot(const ClientboundDroppedItemSnapshot& snapshot) {
   MessageWriter writer;
   writer.write<u32>(snapshot.world_id.value);
   writer.write<u64>(snapshot.server_tick);
@@ -180,21 +180,21 @@ std::vector<u8> serialize_dropped_item_snapshot(const DroppedItemSnapshot& snaps
   return std::move(writer).take_bytes();
 }
 
-Expected<EntitySnapshot, ProtocolError> deserialize_entity_snapshot(std::span<const u8> bytes) {
+Expected<ClientboundEntitySnapshot, ProtocolError> deserialize_clientbound_entity_snapshot(std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
   auto server_tick = reader.read<u64>();
   auto count = reader.read<u32>();
   if (!world_id || !server_tick || !count) {
-    return Expected<EntitySnapshot, ProtocolError>::failure(
+    return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(
         ProtocolError{"failed to decode entity snapshot header"});
   }
   if (count.value() > MaxEntitiesPerSnapshot) {
-    return Expected<EntitySnapshot, ProtocolError>::failure(
+    return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(
         ProtocolError{"too many entities in snapshot"});
   }
 
-  EntitySnapshot snapshot;
+  ClientboundEntitySnapshot snapshot;
   snapshot.world_id = WorldID{world_id.value()};
   snapshot.server_tick = server_tick.value();
   snapshot.entities.reserve(count.value());
@@ -209,42 +209,41 @@ Expected<EntitySnapshot, ProtocolError> deserialize_entity_snapshot(std::span<co
     auto head_rotation = read_vec3(reader);
     if (!entity_id || !position || !velocity || !rotation || !flags ||
         !animation_name || !animation_time || !head_rotation) {
-      return Expected<EntitySnapshot, ProtocolError>::failure(
+      return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(
           ProtocolError{"failed to decode entity snapshot entry"});
     }
-    snapshot.entities.push_back({
-        EntityNetID{entity_id.value()},
-        position.value(),
-        velocity.value(),
-        rotation.value(),
-        flags.value(),
-        std::move(animation_name.value()),
-        animation_time.value(),
-        head_rotation.value()});
+    snapshot.entities.push_back({EntityNetID{entity_id.value()},
+                                 position.value(),
+                                 velocity.value(),
+                                 rotation.value(),
+                                 flags.value(),
+                                 std::move(animation_name.value()),
+                                 animation_time.value(),
+                                 head_rotation.value()});
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<EntitySnapshot, ProtocolError>::failure(trailing.error());
+    return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(trailing.error());
   }
-  return Expected<EntitySnapshot, ProtocolError>::success(std::move(snapshot));
+  return Expected<ClientboundEntitySnapshot, ProtocolError>::success(std::move(snapshot));
 }
 
-Expected<DroppedItemSnapshot, ProtocolError> deserialize_dropped_item_snapshot(
+Expected<ClientboundDroppedItemSnapshot, ProtocolError> deserialize_clientbound_dropped_item_snapshot(
     std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
   auto server_tick = reader.read<u64>();
   auto count = reader.read<u32>();
   if (!world_id || !server_tick || !count) {
-    return Expected<DroppedItemSnapshot, ProtocolError>::failure(
+    return Expected<ClientboundDroppedItemSnapshot, ProtocolError>::failure(
         ProtocolError{"failed to decode dropped item snapshot header"});
   }
   if (count.value() > MaxDroppedItemsPerSnapshot) {
-    return Expected<DroppedItemSnapshot, ProtocolError>::failure(
+    return Expected<ClientboundDroppedItemSnapshot, ProtocolError>::failure(
         ProtocolError{"too many dropped items in snapshot"});
   }
 
-  DroppedItemSnapshot snapshot;
+  ClientboundDroppedItemSnapshot snapshot;
   snapshot.world_id = WorldID{world_id.value()};
   snapshot.server_tick = server_tick.value();
   snapshot.drops.reserve(count.value());
@@ -255,20 +254,19 @@ Expected<DroppedItemSnapshot, ProtocolError> deserialize_dropped_item_snapshot(
     auto position = read_vec3(reader);
     auto velocity = read_vec3(reader);
     if (!drop_id || !item || !count_value || !position || !velocity) {
-      return Expected<DroppedItemSnapshot, ProtocolError>::failure(
+      return Expected<ClientboundDroppedItemSnapshot, ProtocolError>::failure(
           ProtocolError{"failed to decode dropped item snapshot entry"});
     }
-    snapshot.drops.push_back({
-        EntityNetID{drop_id.value()},
-        player::ItemStack{player::ItemID{item.value()}, count_value.value()},
-        position.value(),
-        velocity.value()});
+    snapshot.drops.push_back({EntityNetID{drop_id.value()},
+                              player::ItemStack{player::ItemID{item.value()}, count_value.value()},
+                              position.value(),
+                              velocity.value()});
   }
   auto trailing = require_no_trailing_bytes(reader);
   if (!trailing) {
-    return Expected<DroppedItemSnapshot, ProtocolError>::failure(trailing.error());
+    return Expected<ClientboundDroppedItemSnapshot, ProtocolError>::failure(trailing.error());
   }
-  return Expected<DroppedItemSnapshot, ProtocolError>::success(std::move(snapshot));
+  return Expected<ClientboundDroppedItemSnapshot, ProtocolError>::success(std::move(snapshot));
 }
 
 } // namespace arv::protocol

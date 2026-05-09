@@ -3,7 +3,7 @@
 namespace arv::client {
 
 void ClientDroppedItemMirrorStore::apply_snapshot(
-    const protocol::DroppedItemSnapshot& snapshot,
+    const protocol::ClientboundDroppedItemSnapshot& snapshot,
     WorldID current_world) {
   if (snapshot.world_id != current_world) {
     return;

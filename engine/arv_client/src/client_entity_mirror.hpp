@@ -9,9 +9,9 @@ namespace arv::client {
 
 class ClientEntityMirrorStore {
 public:
-  void apply_spawn(protocol::EntitySpawn spawn, WorldID current_world);
-  void apply_despawn(const protocol::EntityDespawn& despawn, WorldID current_world);
-  void apply_snapshot(const protocol::EntitySnapshot& snapshot, WorldID current_world);
+  void apply_spawn(protocol::ClientboundEntitySpawn spawn, WorldID current_world);
+  void apply_despawn(const protocol::ClientboundEntityDespawn& despawn, WorldID current_world);
+  void apply_snapshot(const protocol::ClientboundEntitySnapshot& snapshot, WorldID current_world);
 
   [[nodiscard]] usize count() const noexcept;
   [[nodiscard]] const ReplicatedEntityMirror* find(EntityNetID entity_id) const noexcept;

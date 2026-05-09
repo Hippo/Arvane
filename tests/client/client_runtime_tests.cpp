@@ -34,7 +34,7 @@ void enter_in_game(
     arv::Vec3f spawn_position = {8.0F, 20.0F, -20.0F}) {
   (void)server_transport.poll_events();
 
-  arv::protocol::ServerHello hello;
+  arv::protocol::ClientboundHello hello;
   hello.accepted = true;
   hello.assigned_session_id = arv::SessionID{1};
   hello.assigned_player_id = arv::PlayerID{1};
@@ -42,10 +42,10 @@ void enter_in_game(
   send_to_client(
       server_transport,
       connection_id,
-      arv::protocol::MessageType::ServerHello,
-      arv::protocol::serialize_server_hello(hello));
+      arv::protocol::MessageType::ClientboundHello,
+      arv::protocol::serialize_clientbound_hello(hello));
 
-  arv::protocol::WorldJoinResult join;
+  arv::protocol::ClientboundWorldJoinResult join;
   join.accepted = true;
   join.world_id = arv::WorldID{1};
   join.player_id = arv::PlayerID{1};
@@ -56,8 +56,8 @@ void enter_in_game(
   send_to_client(
       server_transport,
       connection_id,
-      arv::protocol::MessageType::WorldJoinResult,
-      arv::protocol::serialize_world_join_result(join));
+      arv::protocol::MessageType::ClientboundWorldJoinResult,
+      arv::protocol::serialize_clientbound_world_join_result(join));
 
   client.fixed_tick(1);
   ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
@@ -127,7 +127,7 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   ASSERT_TRUE(connection_id);
   enter_in_game(client, *server_transport, connection_id.value());
 
-  arv::protocol::EntitySnapshot unknown_snapshot;
+  arv::protocol::ClientboundEntitySnapshot unknown_snapshot;
   unknown_snapshot.world_id = arv::WorldID{1};
   unknown_snapshot.server_tick = 10;
   unknown_snapshot.entities.push_back({arv::EntityNetID{99},
@@ -138,13 +138,13 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::EntitySnapshot,
-      arv::protocol::serialize_entity_snapshot(unknown_snapshot),
+      arv::protocol::MessageType::ClientboundEntitySnapshot,
+      arv::protocol::serialize_clientbound_entity_snapshot(unknown_snapshot),
       arv::protocol::ReliabilityClass::UnreliableLatestWins);
   client.fixed_tick(2);
   EXPECT_EQ(client.replicated_entity_count(), 0U);
 
-  arv::protocol::EntitySpawn spawn;
+  arv::protocol::ClientboundEntitySpawn spawn;
   spawn.world_id = arv::WorldID{1};
   spawn.entity_id = arv::EntityNetID{5};
   spawn.entity_type = arv::EntityTypeID{2};
@@ -154,12 +154,12 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::EntitySpawn,
-      arv::protocol::serialize_entity_spawn(spawn));
+      arv::protocol::MessageType::ClientboundEntitySpawn,
+      arv::protocol::serialize_clientbound_entity_spawn(spawn));
   client.fixed_tick(3);
   ASSERT_EQ(client.replicated_entity_count(), 1U);
 
-  arv::protocol::EntitySnapshot fresh_snapshot;
+  arv::protocol::ClientboundEntitySnapshot fresh_snapshot;
   fresh_snapshot.world_id = arv::WorldID{1};
   fresh_snapshot.server_tick = 20;
   fresh_snapshot.entities.push_back({arv::EntityNetID{5},
@@ -173,8 +173,8 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::EntitySnapshot,
-      arv::protocol::serialize_entity_snapshot(fresh_snapshot),
+      arv::protocol::MessageType::ClientboundEntitySnapshot,
+      arv::protocol::serialize_clientbound_entity_snapshot(fresh_snapshot),
       arv::protocol::ReliabilityClass::UnreliableLatestWins);
   client.fixed_tick(4);
   const arv::client::ReplicatedEntityMirror* mirror =
@@ -191,8 +191,8 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::EntitySnapshot,
-      arv::protocol::serialize_entity_snapshot(fresh_snapshot),
+      arv::protocol::MessageType::ClientboundEntitySnapshot,
+      arv::protocol::serialize_clientbound_entity_snapshot(fresh_snapshot),
       arv::protocol::ReliabilityClass::UnreliableLatestWins);
   client.fixed_tick(5);
   mirror = client.find_replicated_entity(arv::EntityNetID{5});
@@ -202,8 +202,8 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::EntityDespawn,
-      arv::protocol::serialize_entity_despawn(
+      arv::protocol::MessageType::ClientboundEntityDespawn,
+      arv::protocol::serialize_clientbound_entity_despawn(
           {arv::WorldID{1}, arv::EntityNetID{5}, 0}));
   client.fixed_tick(6);
   EXPECT_EQ(client.replicated_entity_count(), 0U);
@@ -218,7 +218,7 @@ TEST(ClientRuntimeTests, DroppedItemSnapshotsCreateUpdateAndRemoveMirrors) {
   ASSERT_TRUE(connection_id);
   enter_in_game(client, *server_transport, connection_id.value());
 
-  arv::protocol::DroppedItemSnapshot snapshot;
+  arv::protocol::ClientboundDroppedItemSnapshot snapshot;
   snapshot.world_id = arv::WorldID{1};
   snapshot.server_tick = 10;
   snapshot.drops.push_back({arv::EntityNetID{7},
@@ -228,8 +228,8 @@ TEST(ClientRuntimeTests, DroppedItemSnapshotsCreateUpdateAndRemoveMirrors) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::DroppedItemSnapshot,
-      arv::protocol::serialize_dropped_item_snapshot(snapshot),
+      arv::protocol::MessageType::ClientboundDroppedItemSnapshot,
+      arv::protocol::serialize_clientbound_dropped_item_snapshot(snapshot),
       arv::protocol::ReliabilityClass::UnreliableLatestWins);
   client.fixed_tick(2);
 
@@ -245,8 +245,8 @@ TEST(ClientRuntimeTests, DroppedItemSnapshotsCreateUpdateAndRemoveMirrors) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::DroppedItemSnapshot,
-      arv::protocol::serialize_dropped_item_snapshot(snapshot),
+      arv::protocol::MessageType::ClientboundDroppedItemSnapshot,
+      arv::protocol::serialize_clientbound_dropped_item_snapshot(snapshot),
       arv::protocol::ReliabilityClass::UnreliableLatestWins);
   client.fixed_tick(3);
   EXPECT_EQ(client.dropped_item_count(), 0U);
@@ -261,7 +261,7 @@ TEST(ClientRuntimeTests, InventoryAndBlockUpdatesRejectInactiveOrStaleState) {
   ASSERT_TRUE(connection_id);
   enter_in_game(client, *server_transport, connection_id.value());
 
-  arv::protocol::BlockUpdateBatch wrong_world;
+  arv::protocol::ClientboundBlockUpdateBatch wrong_world;
   wrong_world.world_id = arv::WorldID{2};
   wrong_world.server_tick = 2;
   wrong_world.updates.push_back(
@@ -269,8 +269,8 @@ TEST(ClientRuntimeTests, InventoryAndBlockUpdatesRejectInactiveOrStaleState) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::BlockUpdateBatch,
-      arv::protocol::serialize_block_update_batch(wrong_world));
+      arv::protocol::MessageType::ClientboundBlockUpdateBatch,
+      arv::protocol::serialize_clientbound_block_update_batch(wrong_world));
   client.fixed_tick(2);
   EXPECT_TRUE(client.drain_received_block_updates().empty());
 
@@ -278,12 +278,12 @@ TEST(ClientRuntimeTests, InventoryAndBlockUpdatesRejectInactiveOrStaleState) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::BlockUpdateBatch,
-      arv::protocol::serialize_block_update_batch(wrong_world));
+      arv::protocol::MessageType::ClientboundBlockUpdateBatch,
+      arv::protocol::serialize_clientbound_block_update_batch(wrong_world));
   client.fixed_tick(3);
   EXPECT_EQ(client.drain_received_block_updates().size(), 1U);
 
-  arv::protocol::InventoryUpdate update;
+  arv::protocol::ClientboundInventoryUpdate update;
   update.inventory_id = arv::protocol::PlayerInventoryID;
   update.revision = 2;
   update.selected_hotbar_slot = 0;
@@ -292,8 +292,8 @@ TEST(ClientRuntimeTests, InventoryAndBlockUpdatesRejectInactiveOrStaleState) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::InventoryUpdate,
-      arv::protocol::serialize_inventory_update(update));
+      arv::protocol::MessageType::ClientboundInventoryUpdate,
+      arv::protocol::serialize_clientbound_inventory_update(update));
   client.fixed_tick(4);
   ASSERT_TRUE(client.has_authoritative_inventory());
   ASSERT_TRUE(client.inventory().slot(0).has_value());
@@ -306,8 +306,8 @@ TEST(ClientRuntimeTests, InventoryAndBlockUpdatesRejectInactiveOrStaleState) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::InventoryUpdate,
-      arv::protocol::serialize_inventory_update(update));
+      arv::protocol::MessageType::ClientboundInventoryUpdate,
+      arv::protocol::serialize_clientbound_inventory_update(update));
   client.fixed_tick(5);
   ASSERT_TRUE(client.inventory().slot(0).has_value());
   EXPECT_EQ(client.inventory().slot(0)->count, 4U);
@@ -323,7 +323,7 @@ TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {
   ASSERT_TRUE(connection_id);
   enter_in_game(client, *server_transport, connection_id.value());
 
-  arv::protocol::EntitySpawn spawn;
+  arv::protocol::ClientboundEntitySpawn spawn;
   spawn.world_id = arv::WorldID{1};
   spawn.entity_id = arv::EntityNetID{5};
   spawn.entity_type = arv::EntityTypeID{2};
@@ -331,10 +331,10 @@ TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::EntitySpawn,
-      arv::protocol::serialize_entity_spawn(spawn));
+      arv::protocol::MessageType::ClientboundEntitySpawn,
+      arv::protocol::serialize_clientbound_entity_spawn(spawn));
 
-  arv::protocol::InventoryUpdate update;
+  arv::protocol::ClientboundInventoryUpdate update;
   update.inventory_id = arv::protocol::PlayerInventoryID;
   update.revision = 1;
   update.slots = {
@@ -342,8 +342,8 @@ TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::InventoryUpdate,
-      arv::protocol::serialize_inventory_update(update));
+      arv::protocol::MessageType::ClientboundInventoryUpdate,
+      arv::protocol::serialize_clientbound_inventory_update(update));
   client.fixed_tick(2);
   ASSERT_EQ(client.replicated_entity_count(), 1U);
   ASSERT_TRUE(client.has_authoritative_inventory());
@@ -351,8 +351,8 @@ TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {
   send_to_client(
       *server_transport,
       connection_id.value(),
-      arv::protocol::MessageType::WorldLeave,
-      arv::protocol::serialize_world_leave({arv::WorldID{1}, 0}));
+      arv::protocol::MessageType::ClientboundWorldLeave,
+      arv::protocol::serialize_clientbound_world_leave({arv::WorldID{1}, 0}));
   client.fixed_tick(3);
   EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::WorldJoin);
   EXPECT_EQ(client.replicated_entity_count(), 0U);

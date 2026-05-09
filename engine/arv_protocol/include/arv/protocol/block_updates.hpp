@@ -19,7 +19,7 @@ struct BlockUpdate {
   u64 server_tick{};
 };
 
-struct BlockUpdateBatch {
+struct ClientboundBlockUpdateBatch {
   WorldID world_id{};
   u64 server_tick{};
   std::vector<BlockUpdate> updates{};
@@ -27,7 +27,7 @@ struct BlockUpdateBatch {
 
 inline constexpr u32 MaxBlockUpdatesPerBatch = 4096;
 
-std::vector<u8> serialize_block_update_batch(const BlockUpdateBatch& batch);
-Expected<BlockUpdateBatch, ProtocolError> deserialize_block_update_batch(std::span<const u8> bytes);
+std::vector<u8> serialize_clientbound_block_update_batch(const ClientboundBlockUpdateBatch& batch);
+Expected<ClientboundBlockUpdateBatch, ProtocolError> deserialize_clientbound_block_update_batch(std::span<const u8> bytes);
 
 } // namespace arv::protocol

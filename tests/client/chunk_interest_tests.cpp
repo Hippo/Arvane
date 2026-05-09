@@ -9,7 +9,7 @@ TEST(ClientChunkInterestTests, UpdatesOnlyWhenChunkOrSettingsChange) {
   interest.update_player_position({0.5F, 1.0F, -0.5F});
 
   EXPECT_TRUE(interest.consume_interest_changed());
-  arv::protocol::ChunkInterestUpdate update = interest.build_interest_update();
+  arv::protocol::ServerboundChunkInterestUpdate update = interest.build_interest_update();
   EXPECT_EQ(update.world_id, (arv::WorldID{1}));
   EXPECT_EQ(update.center_chunk, (arv::ChunkSectionCoord{{0, 0, -1}}));
   EXPECT_EQ(update.client_view_distance, 3);

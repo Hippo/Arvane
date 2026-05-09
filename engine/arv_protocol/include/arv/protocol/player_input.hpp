@@ -1,7 +1,7 @@
 #pragma once
 
-#include "arv/core/expected.hpp"
 #include "arv/core/coordinates.hpp"
+#include "arv/core/expected.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/types.hpp"
 #include "arv/player/player_state.hpp"
@@ -43,7 +43,7 @@ struct InputSample {
   u8 selected_hotbar_slot{};
 };
 
-struct ClientInputBatch {
+struct ServerboundInputBatch {
   u64 first_input_tick{};
   std::vector<InputSample> inputs{};
 };
@@ -58,7 +58,7 @@ struct BlockBreakProgress {
   constexpr bool operator==(const BlockBreakProgress&) const = default;
 };
 
-struct PlayerCorrection {
+struct ClientboundPlayerCorrection {
   u64 server_tick{};
   PlayerID player_id{};
   WorldID world_id{};
@@ -77,11 +77,11 @@ struct PlayerCorrection {
   BlockBreakProgress block_break{};
 };
 
-std::vector<u8> serialize_client_input_batch(const ClientInputBatch& batch);
-Expected<ClientInputBatch, ProtocolError> deserialize_client_input_batch(std::span<const u8> bytes);
+std::vector<u8> serialize_serverbound_input_batch(const ServerboundInputBatch& batch);
+Expected<ServerboundInputBatch, ProtocolError> deserialize_serverbound_input_batch(std::span<const u8> bytes);
 
-std::vector<u8> serialize_player_correction(const PlayerCorrection& correction);
-Expected<PlayerCorrection, ProtocolError> deserialize_player_correction(std::span<const u8> bytes);
+std::vector<u8> serialize_clientbound_player_correction(const ClientboundPlayerCorrection& correction);
+Expected<ClientboundPlayerCorrection, ProtocolError> deserialize_clientbound_player_correction(std::span<const u8> bytes);
 
 [[nodiscard]] player::PlayerCommand input_sample_to_command(
     const InputSample& sample,

@@ -16,10 +16,10 @@ namespace {
   return input;
 }
 
-[[nodiscard]] arv::protocol::PlayerCorrection correction_at(
+[[nodiscard]] arv::protocol::ClientboundPlayerCorrection correction_at(
     arv::TickIndex tick,
     arv::Vec3f position) {
-  arv::protocol::PlayerCorrection correction;
+  arv::protocol::ClientboundPlayerCorrection correction;
   correction.server_tick = tick;
   correction.position = position;
   correction.resolved_core_permissions.has_collision = false;
@@ -36,7 +36,7 @@ TEST(PlayerPredictionTests, StaleCorrectionIsIgnored) {
   arv::client::LocalPlayerPrediction prediction;
   prediction.reset({}, 10, arv::DefaultBaseTps);
 
-  const arv::protocol::PlayerCorrection stale =
+  const arv::protocol::ClientboundPlayerCorrection stale =
       correction_at(10, {100.0F, 100.0F, 100.0F});
   const arv::client::PlayerReconciliationResult result =
       prediction.reconcile_authoritative_state(

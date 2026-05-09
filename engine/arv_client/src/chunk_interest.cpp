@@ -51,8 +51,8 @@ bool ClientChunkInterest::consume_interest_changed() noexcept {
   return true;
 }
 
-protocol::ChunkInterestUpdate ClientChunkInterest::build_interest_update() const noexcept {
-  protocol::ChunkInterestUpdate update;
+protocol::ServerboundChunkInterestUpdate ClientChunkInterest::build_interest_update() const noexcept {
+  protocol::ServerboundChunkInterestUpdate update;
   update.world_id = world_id_;
   update.center_chunk = current_chunk_;
   update.client_view_distance = view_distance_;
@@ -62,10 +62,9 @@ protocol::ChunkInterestUpdate ClientChunkInterest::build_interest_update() const
 }
 
 ChunkSectionCoord ClientChunkInterest::position_to_chunk(Vec3f position) noexcept {
-  return block_to_chunk({{
-      static_cast<i32>(std::floor(position.x)),
-      static_cast<i32>(std::floor(position.y)),
-      static_cast<i32>(std::floor(position.z))}});
+  return block_to_chunk({{static_cast<i32>(std::floor(position.x)),
+                          static_cast<i32>(std::floor(position.y)),
+                          static_cast<i32>(std::floor(position.z))}});
 }
 
 } // namespace arv::client

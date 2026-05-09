@@ -250,15 +250,15 @@ void ServerRuntimeImpl::handle_message(
   }
 
   switch (decoded.value().envelope.message_type) {
-    case protocol::MessageType::ClientHello: {
-      auto client_hello = protocol::deserialize_client_hello(decoded.value().payload);
+    case protocol::MessageType::ServerboundHello: {
+      auto client_hello = protocol::deserialize_serverbound_hello(decoded.value().payload);
       if (!client_hello) {
         return;
       }
       handle_client_hello(connection_id, client_hello.value());
       return;
     }
-    case protocol::MessageType::AuthResponse: {
+    case protocol::MessageType::ServerboundAuthResponse: {
       auto response = protocol::deserialize_auth_response(decoded.value().payload);
       if (!response) {
         return;
@@ -266,31 +266,31 @@ void ServerRuntimeImpl::handle_message(
       handle_auth_response(connection_id, response.value());
       return;
     }
-    case protocol::MessageType::ClientInputBatch: {
-      auto batch = protocol::deserialize_client_input_batch(decoded.value().payload);
+    case protocol::MessageType::ServerboundInputBatch: {
+      auto batch = protocol::deserialize_serverbound_input_batch(decoded.value().payload);
       if (!batch) {
         return;
       }
       handle_input_batch(connection_id, batch.value());
       return;
     }
-    case protocol::MessageType::ChunkInterestUpdate: {
-      auto interest = protocol::deserialize_chunk_interest_update(decoded.value().payload);
+    case protocol::MessageType::ServerboundChunkInterestUpdate: {
+      auto interest = protocol::deserialize_serverbound_chunk_interest_update(decoded.value().payload);
       if (!interest) {
         return;
       }
       handle_chunk_interest_update(connection_id, interest.value());
       return;
     }
-    case protocol::MessageType::InventoryActionRequest: {
-      auto request = protocol::deserialize_inventory_action_request(decoded.value().payload);
+    case protocol::MessageType::ServerboundInventoryActionRequest: {
+      auto request = protocol::deserialize_serverbound_inventory_action_request(decoded.value().payload);
       if (!request) {
         return;
       }
       handle_inventory_action_request(connection_id, request.value());
       return;
     }
-    case protocol::MessageType::SkinRequest: {
+    case protocol::MessageType::ServerboundSkinRequest: {
       auto request = protocol::deserialize_skin_request(decoded.value().payload);
       if (!request) {
         return;
@@ -298,7 +298,7 @@ void ServerRuntimeImpl::handle_message(
       handle_skin_request(connection_id, request.value());
       return;
     }
-    case protocol::MessageType::SkinRequestBatch: {
+    case protocol::MessageType::ServerboundSkinRequestBatch: {
       auto batch = protocol::deserialize_skin_request_batch(decoded.value().payload);
       if (!batch) {
         return;
@@ -306,7 +306,7 @@ void ServerRuntimeImpl::handle_message(
       handle_skin_request_batch(connection_id, std::move(batch.value()));
       return;
     }
-    case protocol::MessageType::SkinUploadBegin: {
+    case protocol::MessageType::ServerboundSkinUploadBegin: {
       auto begin = protocol::deserialize_skin_upload_begin(decoded.value().payload);
       if (!begin) {
         return;
@@ -314,7 +314,7 @@ void ServerRuntimeImpl::handle_message(
       handle_skin_upload_begin(connection_id, begin.value());
       return;
     }
-    case protocol::MessageType::SkinUploadData: {
+    case protocol::MessageType::ServerboundSkinUploadData: {
       auto data = protocol::deserialize_skin_upload_data(decoded.value().payload);
       if (!data) {
         return;
@@ -322,7 +322,7 @@ void ServerRuntimeImpl::handle_message(
       handle_skin_upload_data(connection_id, std::move(data.value()));
       return;
     }
-    case protocol::MessageType::SkinUploadChunk: {
+    case protocol::MessageType::ServerboundSkinUploadChunk: {
       auto chunk = protocol::deserialize_skin_upload_chunk(decoded.value().payload);
       if (!chunk) {
         return;
@@ -330,7 +330,7 @@ void ServerRuntimeImpl::handle_message(
       handle_skin_upload_chunk(connection_id, std::move(chunk.value()));
       return;
     }
-    case protocol::MessageType::SkinUploadEnd: {
+    case protocol::MessageType::ServerboundSkinUploadEnd: {
       auto end = protocol::deserialize_skin_upload_end(decoded.value().payload);
       if (!end) {
         return;
@@ -345,19 +345,19 @@ void ServerRuntimeImpl::handle_message(
 
 void ServerRuntimeImpl::handle_client_hello(
     net::ConnectionID connection_id,
-    const protocol::ClientHello& client_hello) {
+    const protocol::ServerboundHello& client_hello) {
   protocol::HandshakePolicy policy = handshake_policy_;
   if (!client_hello.auth_begin.has_value()) {
-    protocol::ServerHello rejected = protocol::make_server_hello(client_hello, policy);
+    protocol::ClientboundHello rejected = protocol::make_clientbound_hello(client_hello, policy);
     rejected.accepted = false;
     rejected.reject_reason = "authentication required";
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::ServerHello,
+        protocol::MessageType::ClientboundHello,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
-        protocol::serialize_server_hello(rejected));
+        protocol::serialize_clientbound_hello(rejected));
     return;
   }
 
@@ -369,16 +369,16 @@ void ServerRuntimeImpl::handle_client_hello(
   if (profile_result.status == PlayerProfileOpenStatus::InvalidClaimedProfileID ||
       profile_result.status == PlayerProfileOpenStatus::PublicKeyMismatch ||
       profile_result.profile == nullptr) {
-    protocol::ServerHello rejected = protocol::make_server_hello(client_hello, policy);
+    protocol::ClientboundHello rejected = protocol::make_clientbound_hello(client_hello, policy);
     rejected.accepted = false;
     rejected.reject_reason = "authentication failed";
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::ServerHello,
+        protocol::MessageType::ClientboundHello,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
-        protocol::serialize_server_hello(rejected));
+        protocol::serialize_clientbound_hello(rejected));
     return;
   }
 
@@ -399,7 +399,7 @@ void ServerRuntimeImpl::handle_client_hello(
     policy.initial_world_id = DefaultWorldID;
   }
 
-  protocol::ServerHello server_hello = protocol::make_server_hello(client_hello, policy);
+  protocol::ClientboundHello server_hello = protocol::make_clientbound_hello(client_hello, policy);
   if (server_hello.accepted && sessions_.find_by_connection(connection_id) == nullptr) {
     ServerSession& session = sessions_.create(
         connection_id,
@@ -415,10 +415,10 @@ void ServerRuntimeImpl::handle_client_hello(
   (void)send_protocol_message(
       *transport_,
       connection_id,
-      protocol::MessageType::ServerHello,
+      protocol::MessageType::ClientboundHello,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
-      protocol::serialize_server_hello(server_hello));
+      protocol::serialize_clientbound_hello(server_hello));
   if (server_hello.accepted) {
     if (ServerSession* session = sessions_.find_by_connection(connection_id);
         session != nullptr) {
@@ -496,7 +496,7 @@ void ServerRuntimeImpl::handle_auth_response(
 
 void ServerRuntimeImpl::handle_input_batch(
     net::ConnectionID connection_id,
-    const protocol::ClientInputBatch& batch) {
+    const protocol::ServerboundInputBatch& batch) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
   if (session == nullptr || !session->authenticated) {
     return;
@@ -532,7 +532,7 @@ void ServerRuntimeImpl::handle_skin_request(
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::SkinRequestDeny,
+        protocol::MessageType::ClientboundSkinRequestDeny,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
         protocol::serialize_skin_request_deny(deny));
@@ -639,7 +639,7 @@ void ServerRuntimeImpl::handle_skin_request(
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::SkinData,
+        protocol::MessageType::ClientboundSkinData,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::ChunkStreaming,
         protocol::serialize_skin_data(data));
@@ -657,7 +657,7 @@ void ServerRuntimeImpl::handle_skin_request(
   (void)send_protocol_message(
       *transport_,
       connection_id,
-      protocol::MessageType::SkinDataBeginChunked,
+      protocol::MessageType::ClientboundSkinDataBeginChunked,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::ChunkStreaming,
       protocol::serialize_skin_data_begin_chunked(begin));
@@ -675,7 +675,7 @@ void ServerRuntimeImpl::handle_skin_request(
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::SkinDataChunk,
+        protocol::MessageType::ClientboundSkinDataChunk,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::ChunkStreaming,
         protocol::serialize_skin_data_chunk(chunk));
@@ -684,7 +684,7 @@ void ServerRuntimeImpl::handle_skin_request(
   (void)send_protocol_message(
       *transport_,
       connection_id,
-      protocol::MessageType::SkinDataEndChunked,
+      protocol::MessageType::ClientboundSkinDataEndChunked,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::ChunkStreaming,
       protocol::serialize_skin_data_end_chunked({request.request_id}));
@@ -714,7 +714,7 @@ void ServerRuntimeImpl::handle_skin_request_batch(
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::SkinRequestDeny,
+        protocol::MessageType::ClientboundSkinRequestDeny,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
         protocol::serialize_skin_request_deny(deny));
@@ -748,7 +748,7 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::SkinUploadDeny,
+        protocol::MessageType::ClientboundSkinUploadDeny,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
         protocol::serialize_skin_upload_deny({reason}));
@@ -808,7 +808,7 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
       (void)send_protocol_message(
           *transport_,
           connection_id,
-          protocol::MessageType::SkinUploadComplete,
+          protocol::MessageType::ClientboundSkinUploadComplete,
           protocol::ReliabilityClass::ReliableOrdered,
           protocol::NetworkLane::Session,
           protocol::serialize_skin_upload_complete(
@@ -844,7 +844,7 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
   (void)send_protocol_message(
       *transport_,
       connection_id,
-      protocol::MessageType::SkinUploadAccept,
+      protocol::MessageType::ClientboundSkinUploadAccept,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_skin_upload_accept(packet));
@@ -869,7 +869,7 @@ void ServerRuntimeImpl::handle_skin_upload_data(
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::SkinUploadFailed,
+        protocol::MessageType::ClientboundSkinUploadFailed,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
         protocol::serialize_skin_upload_failed({data.upload_id, reason}));
@@ -944,7 +944,7 @@ void ServerRuntimeImpl::handle_skin_upload_data(
   (void)send_protocol_message(
       *transport_,
       connection_id,
-      protocol::MessageType::SkinUploadComplete,
+      protocol::MessageType::ClientboundSkinUploadComplete,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_skin_upload_complete({data.upload_id, descriptor.value()}));
@@ -969,7 +969,7 @@ void ServerRuntimeImpl::handle_skin_upload_chunk(
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::SkinUploadFailed,
+        protocol::MessageType::ClientboundSkinUploadFailed,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
         protocol::serialize_skin_upload_failed({chunk.upload_id, reason}));
@@ -1025,7 +1025,7 @@ void ServerRuntimeImpl::handle_skin_upload_end(
     (void)send_protocol_message(
         *transport_,
         connection_id,
-        protocol::MessageType::SkinUploadFailed,
+        protocol::MessageType::ClientboundSkinUploadFailed,
         protocol::ReliabilityClass::ReliableOrdered,
         protocol::NetworkLane::Session,
         protocol::serialize_skin_upload_failed({end.upload_id, reason}));
@@ -1097,7 +1097,7 @@ void ServerRuntimeImpl::handle_skin_upload_end(
   (void)send_protocol_message(
       *transport_,
       connection_id,
-      protocol::MessageType::SkinUploadComplete,
+      protocol::MessageType::ClientboundSkinUploadComplete,
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_skin_upload_complete({end.upload_id, descriptor.value()}));
@@ -1106,7 +1106,7 @@ void ServerRuntimeImpl::handle_skin_upload_end(
 
 void ServerRuntimeImpl::handle_chunk_interest_update(
     net::ConnectionID connection_id,
-    const protocol::ChunkInterestUpdate& interest) {
+    const protocol::ServerboundChunkInterestUpdate& interest) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
   if (session == nullptr || !session->authenticated) {
     return;
@@ -1140,7 +1140,7 @@ void ServerRuntimeImpl::handle_chunk_interest_update(
 
 void ServerRuntimeImpl::handle_inventory_action_request(
     net::ConnectionID connection_id,
-    const protocol::InventoryActionRequest& request) {
+    const protocol::ServerboundInventoryActionRequest& request) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
   if (session == nullptr || !session->authenticated ||
       request.inventory_id != protocol::PlayerInventoryID) {

@@ -14,7 +14,7 @@
 
 namespace arv::protocol {
 
-struct EntitySpawn {
+struct ClientboundEntitySpawn {
   WorldID world_id{};
   EntityNetID entity_id{};
   EntityTypeID entity_type{};
@@ -26,7 +26,7 @@ struct EntitySpawn {
   std::optional<PlayerID> owning_player{};
 };
 
-struct EntityDespawn {
+struct ClientboundEntityDespawn {
   WorldID world_id{};
   EntityNetID entity_id{};
   u16 reason{};
@@ -43,7 +43,7 @@ struct EntitySnapshotEntry {
   Vec3f head_rotation_degrees{};
 };
 
-struct EntitySnapshot {
+struct ClientboundEntitySnapshot {
   WorldID world_id{};
   u64 server_tick{};
   std::vector<EntitySnapshotEntry> entities{};
@@ -56,7 +56,7 @@ struct DroppedItemSnapshotEntry {
   Vec3f velocity{};
 };
 
-struct DroppedItemSnapshot {
+struct ClientboundDroppedItemSnapshot {
   WorldID world_id{};
   u64 server_tick{};
   std::vector<DroppedItemSnapshotEntry> drops{};
@@ -65,17 +65,17 @@ struct DroppedItemSnapshot {
 inline constexpr u32 MaxEntitiesPerSnapshot = 4096;
 inline constexpr u32 MaxDroppedItemsPerSnapshot = 4096;
 
-std::vector<u8> serialize_entity_spawn(const EntitySpawn& spawn);
-Expected<EntitySpawn, ProtocolError> deserialize_entity_spawn(std::span<const u8> bytes);
+std::vector<u8> serialize_clientbound_entity_spawn(const ClientboundEntitySpawn& spawn);
+Expected<ClientboundEntitySpawn, ProtocolError> deserialize_clientbound_entity_spawn(std::span<const u8> bytes);
 
-std::vector<u8> serialize_entity_despawn(const EntityDespawn& despawn);
-Expected<EntityDespawn, ProtocolError> deserialize_entity_despawn(std::span<const u8> bytes);
+std::vector<u8> serialize_clientbound_entity_despawn(const ClientboundEntityDespawn& despawn);
+Expected<ClientboundEntityDespawn, ProtocolError> deserialize_clientbound_entity_despawn(std::span<const u8> bytes);
 
-std::vector<u8> serialize_entity_snapshot(const EntitySnapshot& snapshot);
-Expected<EntitySnapshot, ProtocolError> deserialize_entity_snapshot(std::span<const u8> bytes);
+std::vector<u8> serialize_clientbound_entity_snapshot(const ClientboundEntitySnapshot& snapshot);
+Expected<ClientboundEntitySnapshot, ProtocolError> deserialize_clientbound_entity_snapshot(std::span<const u8> bytes);
 
-std::vector<u8> serialize_dropped_item_snapshot(const DroppedItemSnapshot& snapshot);
-Expected<DroppedItemSnapshot, ProtocolError> deserialize_dropped_item_snapshot(
+std::vector<u8> serialize_clientbound_dropped_item_snapshot(const ClientboundDroppedItemSnapshot& snapshot);
+Expected<ClientboundDroppedItemSnapshot, ProtocolError> deserialize_clientbound_dropped_item_snapshot(
     std::span<const u8> bytes);
 
 } // namespace arv::protocol

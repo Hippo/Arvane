@@ -33,7 +33,7 @@ struct QueuedChunkStreamMessage {
   WorldID world_id{};
   protocol::ReliabilityClass reliability{protocol::ReliabilityClass::ReliableOrdered};
   protocol::NetworkLane lane{protocol::NetworkLane::ChunkStreaming};
-  protocol::MessageType message_type{protocol::MessageType::ChunkSectionData};
+  protocol::MessageType message_type{protocol::MessageType::ClientboundChunkSectionData};
   std::vector<u8> payload{};
   ChunkSectionCoord coord{};
   u64 block_version{};
@@ -49,11 +49,11 @@ public:
       const ServerSession& session,
       ChunkSectionCoord authoritative_center,
       world::WorldHeightSettings height,
-      const protocol::ChunkInterestUpdate& interest);
+      const protocol::ServerboundChunkInterestUpdate& interest);
   void update_player_interest(
       const ServerSession& session,
       ChunkSectionCoord authoritative_center,
-      const protocol::ChunkInterestUpdate& interest) {
+      const protocol::ServerboundChunkInterestUpdate& interest) {
     update_player_interest(session, authoritative_center, {}, interest);
   }
   void remove_session(SessionID session_id);

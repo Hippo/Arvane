@@ -27,7 +27,7 @@ net::NetworkResult ClientInventoryRuntime::request_slot_click(
     usize slot_index,
     player::InventoryClickButton button,
     net::ConnectionState connection_state) {
-  protocol::InventoryActionRequest request;
+  protocol::ServerboundInventoryActionRequest request;
   request.inventory_id = protocol::PlayerInventoryID;
   request.client_action_id = next_action_id_++;
   request.kind = protocol::InventoryActionKind::SlotClick;
@@ -40,7 +40,7 @@ net::NetworkResult ClientInventoryRuntime::request_drop_cursor(
     detail::ClientProtocolSender& sender,
     bool one_item,
     net::ConnectionState connection_state) {
-  protocol::InventoryActionRequest request;
+  protocol::ServerboundInventoryActionRequest request;
   request.inventory_id = protocol::PlayerInventoryID;
   request.client_action_id = next_action_id_++;
   request.kind = one_item ? protocol::InventoryActionKind::DropOneCursor
@@ -51,14 +51,14 @@ net::NetworkResult ClientInventoryRuntime::request_drop_cursor(
 net::NetworkResult ClientInventoryRuntime::request_close(
     detail::ClientProtocolSender& sender,
     net::ConnectionState connection_state) {
-  protocol::InventoryActionRequest request;
+  protocol::ServerboundInventoryActionRequest request;
   request.inventory_id = protocol::PlayerInventoryID;
   request.client_action_id = next_action_id_++;
   request.kind = protocol::InventoryActionKind::CloseMenu;
   return send_request_if_in_game(sender, request, connection_state);
 }
 
-void ClientInventoryRuntime::apply_update(protocol::InventoryUpdate update) {
+void ClientInventoryRuntime::apply_update(protocol::ClientboundInventoryUpdate update) {
   if (update.inventory_id != protocol::PlayerInventoryID ||
       update.revision <= revision_) {
     return;
@@ -82,7 +82,7 @@ void ClientInventoryRuntime::reset() {
 
 net::NetworkResult ClientInventoryRuntime::send_request_if_in_game(
     detail::ClientProtocolSender& sender,
-    protocol::InventoryActionRequest request,
+    protocol::ServerboundInventoryActionRequest request,
     net::ConnectionState connection_state) {
   if (connection_state != net::ConnectionState::InGame) {
     return net::NetworkResult::failure(net::NetworkError{"client is not in game"});

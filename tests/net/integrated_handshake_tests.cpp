@@ -39,16 +39,16 @@ void send_raw_client_hello(
     arv::net::ITransport& client_transport,
     arv::net::ConnectionID connection_id,
     const arv::client::LocalPlayerIdentity& identity) {
-  arv::protocol::ClientHello hello;
+  arv::protocol::ServerboundHello hello;
   hello.requested_username_or_profile_name = identity.display_name;
   hello.auth_begin = arv::protocol::ServerboundAuthBegin{
       identity.key_pair.public_key,
       identity.display_name,
       identity.profile_id};
-  const std::vector<arv::u8> payload = arv::protocol::serialize_client_hello(hello);
+  const std::vector<arv::u8> payload = arv::protocol::serialize_serverbound_hello(hello);
   std::vector<arv::u8> packet = arv::protocol::serialize_envelope(
       {arv::protocol::CurrentProtocolVersion,
-       arv::protocol::MessageType::ClientHello,
+       arv::protocol::MessageType::ServerboundHello,
        0,
        0,
        0,
@@ -66,7 +66,7 @@ arv::u32 player_correction_count(std::span<const arv::net::NetworkEvent> events)
     }
     const auto decoded = arv::protocol::deserialize_envelope(event.payload);
     if (decoded &&
-        decoded.value().envelope.message_type == arv::protocol::MessageType::PlayerCorrection) {
+        decoded.value().envelope.message_type == arv::protocol::MessageType::ClientboundPlayerCorrection) {
       ++count;
     }
   }
@@ -195,17 +195,17 @@ TEST(IntegratedHandshakeTests, SavedPlayerStateIsAppliedBeforeWorldJoinResult) {
   server.tick();
 
   const std::vector<arv::net::NetworkEvent> events = client_transport->poll_events();
-  std::optional<arv::protocol::WorldJoinResult> world_join;
+  std::optional<arv::protocol::ClientboundWorldJoinResult> world_join;
   for (const arv::net::NetworkEvent& event : events) {
     if (event.type != arv::net::NetworkEventType::MessageReceived) {
       continue;
     }
     auto envelope = arv::protocol::deserialize_envelope(event.payload);
     if (!envelope ||
-        envelope.value().envelope.message_type != arv::protocol::MessageType::WorldJoinResult) {
+        envelope.value().envelope.message_type != arv::protocol::MessageType::ClientboundWorldJoinResult) {
       continue;
     }
-    auto decoded = arv::protocol::deserialize_world_join_result(envelope.value().payload);
+    auto decoded = arv::protocol::deserialize_clientbound_world_join_result(envelope.value().payload);
     ASSERT_TRUE(decoded);
     world_join = decoded.value();
   }
@@ -299,7 +299,7 @@ TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
   ASSERT_TRUE(server.voxel_world().set_block(changed_block, dirt));
   server.tick();
   client.fixed_tick(server.tick_index());
-  std::vector<arv::protocol::BlockUpdateBatch> updates =
+  std::vector<arv::protocol::ClientboundBlockUpdateBatch> updates =
       client.drain_received_block_updates();
   ASSERT_EQ(updates.size(), 1U);
   ASSERT_EQ(updates.front().updates.size(), 1U);
@@ -497,7 +497,7 @@ TEST(IntegratedHandshakeTests, ClientReceivesChunkDataOnlyAfterInterestUpdate) {
 
   server.tick();
   client.fixed_tick(server.tick_index());
-  std::vector<arv::protocol::ChunkSectionData> chunks =
+  std::vector<arv::protocol::ClientboundChunkSectionData> chunks =
       client.drain_received_chunk_section_data();
   ASSERT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
@@ -542,7 +542,7 @@ TEST(IntegratedHandshakeTests, ClientReceivesGeneratedChunkAfterAsyncGeneration)
   client.fixed_tick(server.tick_index());
   EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
 
-  std::vector<arv::protocol::ChunkSectionData> chunks;
+  std::vector<arv::protocol::ClientboundChunkSectionData> chunks;
   for (int attempt = 0; attempt < 100 && chunks.empty(); ++attempt) {
     server.tick();
     client.fixed_tick(server.tick_index());
@@ -582,7 +582,7 @@ TEST(IntegratedHandshakeTests, RemoteConnectPathReceivesGeneratedChunks) {
   client.set_chunk_view_distance(0);
   ASSERT_TRUE(client.connect({"localhost", 42069}));
 
-  std::vector<arv::protocol::ChunkSectionData> chunks;
+  std::vector<arv::protocol::ClientboundChunkSectionData> chunks;
   for (int attempt = 0; attempt < 100 && chunks.empty(); ++attempt) {
     server.tick();
     client.fixed_tick(server.tick_index());
@@ -636,7 +636,7 @@ TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackReceivesGeneratedChu
     GTEST_SKIP() << connect_result.error().message;
   }
 
-  std::vector<arv::protocol::ChunkSectionData> chunks;
+  std::vector<arv::protocol::ClientboundChunkSectionData> chunks;
   for (int attempt = 0; attempt < 300 && chunks.empty(); ++attempt) {
     server.tick();
     client.fixed_tick(server.tick_index());
@@ -712,7 +712,7 @@ TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackStreamsViewDistanceO
   for (int attempt = 0; attempt < 1500 && received_chunks.size() < 27U; ++attempt) {
     server.tick();
     client.fixed_tick(server.tick_index());
-    for (const arv::protocol::ChunkSectionData& chunk :
+    for (const arv::protocol::ClientboundChunkSectionData& chunk :
          client.drain_received_chunk_section_data()) {
       if (chunk.world_id == arv::server::DefaultWorldID) {
         received_chunks.insert(chunk.coord);

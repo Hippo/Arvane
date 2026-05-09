@@ -9,20 +9,20 @@ namespace arv::client {
 
 class ClientChunkInbox {
 public:
-  void push_chunk_section_data(protocol::ChunkSectionData data);
-  void push_chunk_section_unload(protocol::ChunkSectionUnload unload);
-  void push_block_updates(protocol::BlockUpdateBatch updates);
+  void push_chunk_section_data(protocol::ClientboundChunkSectionData data);
+  void push_chunk_section_unload(protocol::ClientboundChunkSectionUnload unload);
+  void push_block_updates(protocol::ClientboundBlockUpdateBatch updates);
 
-  [[nodiscard]] std::vector<protocol::ChunkSectionData> drain_chunk_section_data();
-  [[nodiscard]] std::vector<protocol::ChunkSectionUnload> drain_chunk_section_unloads();
-  [[nodiscard]] std::vector<protocol::BlockUpdateBatch> drain_block_updates();
+  [[nodiscard]] std::vector<protocol::ClientboundChunkSectionData> drain_chunk_section_data();
+  [[nodiscard]] std::vector<protocol::ClientboundChunkSectionUnload> drain_chunk_section_unloads();
+  [[nodiscard]] std::vector<protocol::ClientboundBlockUpdateBatch> drain_block_updates();
 
   void clear() noexcept;
 
 private:
-  std::vector<protocol::ChunkSectionData> received_chunk_section_data_{};
-  std::vector<protocol::ChunkSectionUnload> received_chunk_section_unloads_{};
-  std::vector<protocol::BlockUpdateBatch> received_block_updates_{};
+  std::vector<protocol::ClientboundChunkSectionData> received_chunk_section_data_{};
+  std::vector<protocol::ClientboundChunkSectionUnload> received_chunk_section_unloads_{};
+  std::vector<protocol::ClientboundBlockUpdateBatch> received_block_updates_{};
 };
 
 } // namespace arv::client

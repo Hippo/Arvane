@@ -63,7 +63,7 @@ bool known_hashes_match(
 
 } // namespace
 
-std::vector<u8> serialize_client_hello(const ClientHello& hello) {
+std::vector<u8> serialize_serverbound_hello(const ServerboundHello& hello) {
   MessageWriter writer;
   writer.write<u16>(hello.protocol_version);
   writer.write_string(hello.client_build_id);
@@ -86,19 +86,19 @@ std::vector<u8> serialize_client_hello(const ClientHello& hello) {
   return std::move(writer).take_bytes();
 }
 
-Expected<ClientHello, ProtocolError> deserialize_client_hello(std::span<const u8> bytes) {
+Expected<ServerboundHello, ProtocolError> deserialize_serverbound_hello(std::span<const u8> bytes) {
   MessageReader reader(bytes);
-  ClientHello hello;
+  ServerboundHello hello;
 
   auto protocol_version = reader.read<u16>();
   auto client_build_id = reader.read_string();
   auto client_name = reader.read_string();
   auto compression_count = reader.read<u32>();
   if (!protocol_version || !client_build_id || !client_name || !compression_count) {
-    return Expected<ClientHello, ProtocolError>::failure(ProtocolError{"failed to read client hello header"});
+    return Expected<ServerboundHello, ProtocolError>::failure(ProtocolError{"failed to read client hello header"});
   }
   if (compression_count.value() > MaxHandshakeHashEntries) {
-    return Expected<ClientHello, ProtocolError>::failure(ProtocolError{"too many compression modes"});
+    return Expected<ServerboundHello, ProtocolError>::failure(ProtocolError{"too many compression modes"});
   }
 
   hello.protocol_version = protocol_version.value();
@@ -109,14 +109,14 @@ Expected<ClientHello, ProtocolError> deserialize_client_hello(std::span<const u8
   for (u32 i = 0; i < compression_count.value(); ++i) {
     auto mode = reader.read<CompressionMode>();
     if (!mode) {
-      return Expected<ClientHello, ProtocolError>::failure(mode.error());
+      return Expected<ServerboundHello, ProtocolError>::failure(mode.error());
     }
     hello.supported_compression_modes.push_back(mode.value());
   }
 
   auto features = reader.read<ProtocolFeatureBits>();
   if (!features) {
-    return Expected<ClientHello, ProtocolError>::failure(features.error());
+    return Expected<ServerboundHello, ProtocolError>::failure(features.error());
   }
   hello.supported_protocol_features = features.value();
 
@@ -125,7 +125,7 @@ Expected<ClientHello, ProtocolError> deserialize_client_hello(std::span<const u8
   auto username = reader.read_string();
   auto token = reader.read_string();
   if (!registry_hashes || !asset_hashes || !username || !token) {
-    return Expected<ClientHello, ProtocolError>::failure(ProtocolError{"failed to read client hello body"});
+    return Expected<ServerboundHello, ProtocolError>::failure(ProtocolError{"failed to read client hello body"});
   }
 
   hello.registry_hashes_known_by_client = std::move(registry_hashes.value());
@@ -136,24 +136,24 @@ Expected<ClientHello, ProtocolError> deserialize_client_hello(std::span<const u8
   if (reader.remaining() != 0) {
     auto has_auth = reader.read_bool();
     if (!has_auth) {
-      return Expected<ClientHello, ProtocolError>::failure(
+      return Expected<ServerboundHello, ProtocolError>::failure(
           ProtocolError{"failed to read client auth flag"});
     }
     if (has_auth.value()) {
       ServerboundAuthBegin auth;
       if (auto result = reader.read_bytes(auth.public_key.bytes); !result) {
-        return Expected<ClientHello, ProtocolError>::failure(result.error());
+        return Expected<ServerboundHello, ProtocolError>::failure(result.error());
       }
       auto display_name = reader.read_string();
       auto claimed_profile_id = reader.read_string();
       if (!display_name || !claimed_profile_id) {
-        return Expected<ClientHello, ProtocolError>::failure(
+        return Expected<ServerboundHello, ProtocolError>::failure(
             ProtocolError{"failed to read client auth begin"});
       }
       auth.display_name = std::move(display_name.value());
       auto parsed_profile_id = crypto::parse_player_profile_id(claimed_profile_id.value());
       if (!parsed_profile_id) {
-        return Expected<ClientHello, ProtocolError>::failure(
+        return Expected<ServerboundHello, ProtocolError>::failure(
             ProtocolError{parsed_profile_id.error().message});
       }
       auth.claimed_profile_id = parsed_profile_id.value();
@@ -162,13 +162,13 @@ Expected<ClientHello, ProtocolError> deserialize_client_hello(std::span<const u8
   }
 
   if (reader.remaining() != 0) {
-    return Expected<ClientHello, ProtocolError>::failure(ProtocolError{"trailing bytes in client hello"});
+    return Expected<ServerboundHello, ProtocolError>::failure(ProtocolError{"trailing bytes in client hello"});
   }
 
-  return Expected<ClientHello, ProtocolError>::success(std::move(hello));
+  return Expected<ServerboundHello, ProtocolError>::success(std::move(hello));
 }
 
-std::vector<u8> serialize_server_hello(const ServerHello& hello) {
+std::vector<u8> serialize_clientbound_hello(const ClientboundHello& hello) {
   MessageWriter writer;
   writer.write_bool(hello.accepted);
   writer.write_string(hello.reject_reason);
@@ -186,9 +186,9 @@ std::vector<u8> serialize_server_hello(const ServerHello& hello) {
   return std::move(writer).take_bytes();
 }
 
-Expected<ServerHello, ProtocolError> deserialize_server_hello(std::span<const u8> bytes) {
+Expected<ClientboundHello, ProtocolError> deserialize_clientbound_hello(std::span<const u8> bytes) {
   MessageReader reader(bytes);
-  ServerHello hello;
+  ClientboundHello hello;
 
   auto accepted = reader.read_bool();
   auto reject_reason = reader.read_string();
@@ -199,7 +199,7 @@ Expected<ServerHello, ProtocolError> deserialize_server_hello(std::span<const u8
   auto features = reader.read<ProtocolFeatureBits>();
   if (!accepted || !reject_reason || !protocol_version || !server_build_id ||
       !server_name || !compression || !features) {
-    return Expected<ServerHello, ProtocolError>::failure(ProtocolError{"failed to read server hello header"});
+    return Expected<ClientboundHello, ProtocolError>::failure(ProtocolError{"failed to read server hello header"});
   }
 
   auto registry_hashes = read_named_hashes(reader);
@@ -209,7 +209,7 @@ Expected<ServerHello, ProtocolError> deserialize_server_hello(std::span<const u8
   auto world_id = reader.read<u32>();
   auto required_sync = reader.read_bool();
   if (!registry_hashes || !asset_hashes || !session_id || !player_id || !world_id || !required_sync) {
-    return Expected<ServerHello, ProtocolError>::failure(ProtocolError{"failed to read server hello body"});
+    return Expected<ClientboundHello, ProtocolError>::failure(ProtocolError{"failed to read server hello body"});
   }
 
   hello.accepted = accepted.value();
@@ -227,14 +227,14 @@ Expected<ServerHello, ProtocolError> deserialize_server_hello(std::span<const u8
   hello.required_followup_sync = required_sync.value();
 
   if (reader.remaining() != 0) {
-    return Expected<ServerHello, ProtocolError>::failure(ProtocolError{"trailing bytes in server hello"});
+    return Expected<ClientboundHello, ProtocolError>::failure(ProtocolError{"trailing bytes in server hello"});
   }
 
-  return Expected<ServerHello, ProtocolError>::success(std::move(hello));
+  return Expected<ClientboundHello, ProtocolError>::success(std::move(hello));
 }
 
-ServerHello make_server_hello(const ClientHello& client, const HandshakePolicy& policy) {
-  ServerHello hello;
+ClientboundHello make_clientbound_hello(const ServerboundHello& client, const HandshakePolicy& policy) {
+  ClientboundHello hello;
   hello.protocol_version = policy.protocol_version;
   hello.server_build_id = policy.server_build_id;
   hello.server_name = policy.server_name;

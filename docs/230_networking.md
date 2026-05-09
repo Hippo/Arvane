@@ -250,7 +250,7 @@ inventory, block edits, and interaction results. A predicted client state must
 never be accepted by the server as authoritative movement state.
 
 Local movement prediction uses the same simulation-facing input sample that is
-sent in `ClientInputBatch`. For each fixed tick, the client:
+sent in `ServerboundInputBatch`. For each fixed tick, the client:
 
 1. consumes the local input snapshot
 2. converts it to an `InputSample`
@@ -1022,7 +1022,7 @@ For example:
 
 ```text
 connecting
-    accepts ClientHello only
+    accepts ServerboundHello only
 
 handshaking
     accepts handshake follow-up messages
@@ -1104,9 +1104,9 @@ Gameplay systems should choose semantic send policies, not raw GameNetworkingSoc
 ## Profile Metadata And Skin Bytes
 
 Player profile metadata is session-scoped replicated data. Servers send
-`PlayerProfileInfo` for authenticated, relevant players. The packet contains
+`ClientboundPlayerProfileInfo` for authenticated, relevant players. The packet contains
 `player_id`, `profile_id`, display name, and a `SkinDescriptor`; the client uses
-`player_id` to associate metadata with `EntitySpawn.owning_player`. The
+`player_id` to associate metadata with `ClientboundEntitySpawn.owning_player`. The
 descriptor includes the slim player model flag as presentation metadata.
 
 Custom skin image bytes are bulk data. They are never broadcast automatically

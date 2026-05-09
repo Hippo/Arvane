@@ -26,7 +26,7 @@ namespace {
 }
 
 [[nodiscard]] movement::PlayerMovementAuthority authority_from_correction(
-    const protocol::PlayerCorrection& correction) noexcept {
+    const protocol::ClientboundPlayerCorrection& correction) noexcept {
   return {
       correction.resolved_core_permissions.can_fly,
       correction.resolved_core_permissions.has_collision};
@@ -67,7 +67,7 @@ movement::PlayerKinematicState kinematic_state_from_prediction(
 }
 
 movement::PlayerKinematicState kinematic_state_from_correction(
-    const protocol::PlayerCorrection& correction) noexcept {
+    const protocol::ClientboundPlayerCorrection& correction) noexcept {
   return {
       correction.position,
       correction.velocity,
@@ -183,7 +183,7 @@ void LocalPlayerPrediction::predict_local_input(
 }
 
 PlayerReconciliationResult LocalPlayerPrediction::reconcile_authoritative_state(
-    const protocol::PlayerCorrection& correction,
+    const protocol::ClientboundPlayerCorrection& correction,
     const physics::ICollisionQuery* collision_query,
     const player::PlayerTuning& tuning,
     Seconds tick_seconds) {
