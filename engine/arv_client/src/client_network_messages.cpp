@@ -31,7 +31,9 @@ void apply_world_join_result(
       result.world_id,
       result.player_id,
       result.local_entity_id,
-      result.spawn_position);
+      result.spawn_position,
+      result.initial_tick,
+      result.tick_rate);
   runtime.chunk_interest.set_world_id(result.world_id);
   runtime.connection.set_state(net::ConnectionState::InGame);
 }
@@ -274,7 +276,10 @@ void ClientNetworkRouter::handle_message(
       if (!correction) {
         return;
       }
-      runtime.player_controller.apply_authoritative_state(correction.value());
+      runtime.player_controller.apply_authoritative_state(
+          correction.value(),
+          runtime.prediction_query,
+          runtime.tick_seconds);
       return;
     }
     case protocol::MessageType::ChunkSectionData: {

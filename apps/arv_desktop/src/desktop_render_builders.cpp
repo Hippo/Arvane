@@ -109,6 +109,21 @@ namespace {
   return session.first_person_sneak_visual_progress;
 }
 
+[[nodiscard]] Vec3f first_person_player_body_position(
+    const client::CameraShell& camera,
+    f32 sneak_progress) noexcept {
+  constexpr f32 EyeToBodyOriginY = 1.80F;
+  constexpr f32 BaseBackOffset = 0.42F;
+  constexpr f32 SneakBackOffset = 0.30F;
+
+  Vec3f position =
+      camera.position() -
+      horizontal_forward(camera.yaw_radians()) *
+          (BaseBackOffset + SneakBackOffset * sneak_progress);
+  position.y -= EyeToBodyOriginY;
+  return position;
+}
+
 void append_item_draw(
     render::FramePacket& frame,
     const EntityRenderAssets& entity_render_assets,
@@ -239,16 +254,14 @@ void populate_world_frame_draw_items(
             ? session.client->player_position()
             : interpolate(mirror.previous_position, mirror.position, interpolation_alpha);
     if (is_local_player) {
-      const Vec3f camera_forward = session.client->camera().forward_vector();
-      const Vec3f horizontal_forward =
-          normalize_or_zero({camera_forward.x, 0.0F, camera_forward.z});
       const f32 sneak_progress = update_first_person_sneak_visual_progress(
           session,
           mirror.animation_name,
           mirror.animation_time_seconds,
           now);
-      position = position - horizontal_forward * (0.38F + sneak_progress * 0.32F);
-      position.y -= 0.18F;
+      position = first_person_player_body_position(
+          session.client->camera(),
+          sneak_progress);
     }
     render::EntityDrawItem item;
     item.model_id = model_id;

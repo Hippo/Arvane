@@ -74,6 +74,11 @@ Rendering must not drive simulation.
 
 Rendering may interpolate between previously simulated states, but physics state advances only on fixed simulation ticks.
 
+Client-side prediction follows the same fixed tick as server movement. It must
+not integrate movement from render-frame delta time. Reconciliation may smooth
+the rendered transform, but the collision body and predicted simulation state
+are updated on fixed ticks only.
+
 ### Why 60 Hz
 
 Arvane uses 60 Hz because it provides:
@@ -315,6 +320,12 @@ This prevents:
 - disagreement between server safety and world availability
 
 Client-side prediction may use temporary approximations, but authoritative world simulation must use safe rules.
+
+For local player prediction, the preferred approximation is conservative: if
+the client collision query cannot prove terrain is loaded, treat the missing
+region as solid or block prediction into it. The server remains authoritative,
+but the client should avoid visually predicting through unknown chunks because
+that creates avoidable rubberbanding when the server correction arrives.
 
 ### Off-Thread Safety
 

@@ -10,6 +10,7 @@ add_executable(arv_tests
   client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp
   client/local_profile_tests.cpp
+  client/player_prediction_tests.cpp
   client/ui_tests.cpp
   command/command_tests.cpp
   crypto/crypto_tests.cpp
@@ -68,6 +69,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_crypto
   arv_entity
   arv_io
+  arv_movement
   arv_net
   arv_persistence
   arv_physics

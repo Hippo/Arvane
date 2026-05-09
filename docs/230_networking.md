@@ -59,7 +59,7 @@ The client owns:
 - camera presentation
 - local render state
 - rendering received chunk/block/light/mesh data
-- client-side prediction
+- client-side prediction for the controlled local player only
 - interpolation buffers
 - UI state
 - temporary visual effects
@@ -244,6 +244,23 @@ Predicted systems may include:
 - local interaction feedback
 - held item animation
 
+Prediction is presentation and input responsiveness only. The server remains the
+owner of authoritative player position, velocity, collisions, movement mode,
+inventory, block edits, and interaction results. A predicted client state must
+never be accepted by the server as authoritative movement state.
+
+Local movement prediction uses the same simulation-facing input sample that is
+sent in `ClientInputBatch`. For each fixed tick, the client:
+
+1. consumes the local input snapshot
+2. converts it to an `InputSample`
+3. stores it in a bounded tick-indexed pending-input history
+4. sends it using the unreliable latest-wins movement lane
+5. immediately simulates the controlled local player from that input
+
+Prediction is not applied to remote players. Remote entities continue to use
+replicated snapshot/interpolation behavior.
+
 The server periodically sends authoritative player state.
 
 Authoritative player state should include:
@@ -254,19 +271,27 @@ Authoritative player state should include:
 - movement mode
 - grounded state
 - relevant player flags
-- last processed input sequence
+- enough timing information for the client to discard acknowledged local inputs
 
 When the client receives authoritative state:
 
-1. compare it against predicted state for the same tick
-2. correct if error exceeds tolerance
-3. replay unacknowledged inputs from the corrected state
-4. smooth small visual corrections where appropriate
+1. discard it if `server_tick <= last_confirmed_server_tick`
+2. compare it against predicted state for the same tick if that history exists
+3. advance `last_confirmed_server_tick`
+4. remove pending local inputs with `input_tick <= server_tick`
+5. set predicted simulation state to the authoritative state
+6. replay remaining pending inputs in increasing tick order
+7. smooth small visual corrections where appropriate
 
 Simulation correction and render smoothing should be separate.
 
 The physics state may snap or rewind internally.  
 The camera and rendered player model may smooth visually.
+
+If the predicted state for the correction tick has already been pruned, the
+client falls back to the authoritative state and replays whatever newer input
+history is still available. This should be counted as a missing-history
+fallback for debugging.
 
 ---
 
@@ -283,6 +308,23 @@ Shared movement constants should come from the same configuration source.
 Do not scatter movement constants across client and server code.
 
 The server remains authoritative when prediction differs.
+
+The pending input history must be bounded. A first limit of roughly five seconds
+of simulation ticks is acceptable; this covers high latency without allowing
+unbounded memory growth. Inputs older than the confirmed server tick are dropped,
+and impossibly old inputs are pruned defensively. Reconciliation must never
+replay inputs out of tick order.
+
+Small corrections may be ignored or smoothed visually. Medium corrections should
+blend the rendered transform toward the corrected predicted simulation state
+over a short window. Large corrections snap immediately. Smoothing applies only
+to presentation; the simulation/collision body becomes corrected immediately.
+
+Prediction depends on local collision data. When client terrain data needed for
+prediction is unavailable, collision queries should use a conservative fallback
+such as treating missing chunks as solid. The server still corrects any
+disagreement, but conservative prediction avoids walking visually through
+unloaded terrain and then rubberbanding severely.
 
 ---
 

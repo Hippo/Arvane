@@ -5,6 +5,7 @@
 #include "arv/client/local_identity.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
+#include "arv/physics/collision.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/player_input.hpp"
@@ -64,6 +65,7 @@ public:
   void submit_input(InputFrame input);
   void set_chunk_view_distance(i32 view_distance) noexcept;
   void fixed_tick(TickIndex tick_index);
+  void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* prediction_query);
   [[nodiscard]] render::FramePacket build_frame_packet(
       f32 interpolation_alpha,
       u32 viewport_width = 0,
@@ -78,6 +80,9 @@ public:
   [[nodiscard]] std::optional<PlayerID> local_player_id() const noexcept;
   [[nodiscard]] std::optional<EntityNetID> local_entity_id() const noexcept;
   [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept;
+  [[nodiscard]] TickIndex world_initial_tick() const noexcept;
+  [[nodiscard]] TickRate server_tick_rate() const noexcept;
+  [[nodiscard]] PlayerPredictionDebugStats prediction_debug_stats() const noexcept;
   [[nodiscard]] bool inventory_open() const noexcept;
   [[nodiscard]] bool chat_open() const noexcept;
   [[nodiscard]] const std::string& chat_draft() const noexcept;

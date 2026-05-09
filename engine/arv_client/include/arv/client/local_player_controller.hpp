@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/client/camera_shell.hpp"
+#include "arv/client/player_prediction.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/protocol/player_input.hpp"
@@ -42,13 +43,22 @@ public:
   void set_player_tuning(player::PlayerTuning tuning) noexcept;
   void submit_input(InputFrame input) noexcept;
   [[nodiscard]] player::PlayerCommand consume_command(TickIndex tick_index) noexcept;
+  void predict_local_movement(
+      const player::PlayerCommand& command,
+      const physics::ICollisionQuery* collision_query,
+      Seconds tick_seconds);
   void enter_world(
       WorldID world_id,
       PlayerID player_id,
       EntityNetID local_entity_id,
-      Vec3f body_position) noexcept;
+      Vec3f body_position,
+      TickIndex initial_server_tick = 0,
+      TickRate tick_rate = DefaultBaseTps) noexcept;
   void leave_world() noexcept;
-  void apply_authoritative_state(const protocol::PlayerCorrection& correction);
+  void apply_authoritative_state(
+      const protocol::PlayerCorrection& correction,
+      const physics::ICollisionQuery* collision_query = nullptr,
+      Seconds tick_seconds = tick_duration_seconds(DefaultBaseTps));
 
   [[nodiscard]] const CameraShell& camera() const noexcept {
     return camera_;
@@ -74,6 +84,10 @@ public:
     return body_position_;
   }
 
+  [[nodiscard]] const Vec3f& rendered_player_position() const noexcept {
+    return render_position_;
+  }
+
   [[nodiscard]] std::optional<PlayerID> player_id() const noexcept {
     return player_id_;
   }
@@ -86,14 +100,37 @@ public:
     return block_break_progress_;
   }
 
+  [[nodiscard]] TickIndex world_initial_tick() const noexcept {
+    return world_initial_tick_;
+  }
+
+  [[nodiscard]] TickRate server_tick_rate() const noexcept {
+    return server_tick_rate_;
+  }
+
+  [[nodiscard]] PlayerPredictionDebugStats prediction_debug_stats() const noexcept {
+    return prediction_.debug_stats();
+  }
+
 private:
+  void sync_body_from_prediction() noexcept;
+  void update_eye_height() noexcept;
+  void update_target_eye_height() noexcept;
+  void update_render_smoothing() noexcept;
+  void update_camera_transform() noexcept;
+  [[nodiscard]] movement::PlayerMovementAuthority prediction_authority() const noexcept;
+
   CameraShell camera_{};
   std::optional<PlayerID> player_id_{};
   std::optional<EntityNetID> local_entity_id_{};
+  LocalPlayerPrediction prediction_{};
+  bool prediction_active_{};
   player::PlayerTuning tuning_{player::default_player_tuning()};
   u8 selected_hotbar_slot_{};
   bool has_unconfirmed_hotbar_selection_{};
   TickIndex last_authoritative_server_tick_{};
+  TickIndex world_initial_tick_{};
+  TickRate server_tick_rate_{DefaultBaseTps};
   std::string game_mode_id_{std::string{player::SurvivalGameModeID}};
   player::ResolvedPermissions resolved_permissions_{};
   protocol::BlockBreakProgress block_break_progress_{};
@@ -113,6 +150,10 @@ private:
   f32 look_delta_x_{};
   f32 look_delta_y_{};
   Vec3f body_position_{8.0F, 20.0F, -20.0F};
+  Vec3f render_position_{8.0F, 20.0F, -20.0F};
+  Vec3f render_smoothing_offset_{};
+  u32 render_smoothing_ticks_remaining_{};
+  u32 render_smoothing_ticks_total_{};
   f32 current_eye_height_{player::DefaultStandingEyeHeight};
   f32 target_eye_height_{player::DefaultStandingEyeHeight};
 };

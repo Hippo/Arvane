@@ -34,6 +34,6 @@ add_library(arv_server STATIC
   src/world_registry.cpp
 )
 target_include_directories(arv_server PUBLIC include)
-target_link_libraries(arv_server PUBLIC arv_command arv_core arv_crypto arv_io arv_net arv_protocol arv_sched arv_world)
+target_link_libraries(arv_server PUBLIC arv_command arv_core arv_crypto arv_io arv_movement arv_net arv_protocol arv_sched arv_world)
 target_link_libraries(arv_server PRIVATE arv_asset)
 target_link_libraries(arv_server PRIVATE nlohmann_json::nlohmann_json yaml-cpp)

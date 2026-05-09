@@ -1099,10 +1099,26 @@ private:
         }
         if (has_active_integrated_session) {
           active_session.integrated_server->tick();
-          active_session.client->fixed_tick(active_session.integrated_server->tick_index());
+          world::WorldCollisionQuery prediction_query(
+              active_session.client_world,
+              assets_.block_registry,
+              true);
+          active_session.client->fixed_tick(
+              active_session.integrated_server->tick_index(),
+              &prediction_query);
         } else {
+          if (active_session.client_tick_index == 0U &&
+              active_session.client->connection_state() == net::ConnectionState::InGame) {
+            active_session.client_tick_index = active_session.client->world_initial_tick();
+          }
           ++active_session.client_tick_index;
-          active_session.client->fixed_tick(active_session.client_tick_index);
+          world::WorldCollisionQuery prediction_query(
+              active_session.client_world,
+              assets_.block_registry,
+              true);
+          active_session.client->fixed_tick(
+              active_session.client_tick_index,
+              &prediction_query);
         }
         update_block_outline_target(active_session);
         sessions_.collect_client_chunk_stream(active_session);

@@ -183,6 +183,34 @@ For networking:
 - authoritative validation belongs to server/game simulation
 - client input should be representable as compact per-tick intent, not raw hardware state
 
+### Local Prediction Ownership
+
+The local controller owns predicted movement state for the controlled player
+only. That state includes position, velocity, yaw/pitch look state, movement
+mode, pose flags, the last locally predicted input tick, the last confirmed
+server tick, and a bounded pending-input history.
+
+The server owns authoritative movement. Server corrections override client
+prediction. The client must not use predicted movement to authorize collision,
+inventory, block edits, or interaction results.
+
+Every locally generated `InputSample` sent to the server is also stored with its
+input tick in the pending-input history. The client immediately simulates that
+same sample through the shared player movement path. This keeps local movement
+responsive while preserving the server-authoritative model.
+
+When authoritative movement arrives for the local player:
+
+- corrections with `server_tick <= last_confirmed_server_tick` are stale and ignored
+- pending inputs with `input_tick <= server_tick` are acknowledged and removed
+- predicted simulation state is rewound to the authoritative state
+- remaining pending inputs are replayed in tick order
+- missing history falls back to the authoritative state and continues from the available newer inputs
+
+Small visual errors may be ignored or smoothed. Large errors snap. The rendered
+camera/body presentation may smooth, but the predicted simulation/collision
+state must become correct immediately after reconciliation.
+
 ---
 
 ## Cursor Capture and Input Focus

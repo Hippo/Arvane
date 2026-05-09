@@ -73,16 +73,8 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
 }
 
 player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_index) noexcept {
-  const f32 eye_step = tuning_.eye_height_lerp_per_second / 60.0F;
-  if (current_eye_height_ < target_eye_height_) {
-    current_eye_height_ = std::min(current_eye_height_ + eye_step, target_eye_height_);
-  } else {
-    current_eye_height_ = std::max(current_eye_height_ - eye_step, target_eye_height_);
-  }
-  camera_.set_position(
-      {body_position_.x,
-       body_position_.y + current_eye_height_,
-       body_position_.z});
+  update_eye_height();
+  update_camera_transform();
 
   player::PlayerCommand command;
   command.client_tick = tick_index;
@@ -110,51 +102,214 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   return command;
 }
 
+void LocalPlayerController::predict_local_movement(
+    const player::PlayerCommand& command,
+    const physics::ICollisionQuery* collision_query,
+    Seconds tick_seconds) {
+  if (!player_id_.has_value()) {
+    return;
+  }
+  if (!prediction_active_) {
+    prediction_.reset(
+        {body_position_,
+         {},
+         camera_.yaw_radians(),
+         camera_.pitch_radians(),
+         false,
+         false,
+         false,
+         tuning_.breath_seconds,
+         player::MovementMode::Walking},
+        last_authoritative_server_tick_,
+        server_tick_rate_);
+    prediction_active_ = true;
+  }
+
+  prediction_.predict_local_input(
+      command.client_tick,
+      protocol::input_sample_from_command(command),
+      collision_query,
+      tuning_,
+      prediction_authority(),
+      tick_seconds);
+  sync_body_from_prediction();
+  update_target_eye_height();
+  camera_.set_rotation(
+      prediction_.state().yaw_radians,
+      prediction_.state().pitch_radians);
+  update_render_smoothing();
+  update_camera_transform();
+}
+
 void LocalPlayerController::enter_world(
     WorldID world_id,
     PlayerID player_id,
     EntityNetID local_entity_id,
-    Vec3f body_position) noexcept {
+    Vec3f body_position,
+    TickIndex initial_server_tick,
+    TickRate tick_rate) noexcept {
   player_id_ = player_id;
   local_entity_id_ = local_entity_id;
   body_position_ = body_position;
+  render_position_ = body_position;
+  render_smoothing_offset_ = {};
+  render_smoothing_ticks_remaining_ = 0;
+  render_smoothing_ticks_total_ = 0;
+  last_authoritative_server_tick_ = initial_server_tick;
+  world_initial_tick_ = initial_server_tick;
+  server_tick_rate_ = tick_rate == 0U ? DefaultBaseTps : tick_rate;
+  prediction_.reset(
+      {body_position,
+       {},
+       camera_.yaw_radians(),
+       camera_.pitch_radians(),
+       false,
+       false,
+       false,
+       tuning_.breath_seconds,
+       player::MovementMode::Walking},
+      initial_server_tick,
+      server_tick_rate_);
+  prediction_active_ = true;
   camera_.set_world_id(world_id);
-  camera_.set_position(
-      {body_position.x,
-       body_position.y + current_eye_height_,
-       body_position.z});
+  update_camera_transform();
 }
 
 void LocalPlayerController::leave_world() noexcept {
   player_id_.reset();
   local_entity_id_.reset();
+  prediction_.clear();
+  prediction_active_ = false;
+  render_smoothing_offset_ = {};
+  render_smoothing_ticks_remaining_ = 0;
+  render_smoothing_ticks_total_ = 0;
   camera_.set_world_id(WorldID{});
 }
 
-void LocalPlayerController::apply_authoritative_state(const protocol::PlayerCorrection& correction) {
-  if (correction.server_tick < last_authoritative_server_tick_) {
+void LocalPlayerController::apply_authoritative_state(
+    const protocol::PlayerCorrection& correction,
+    const physics::ICollisionQuery* collision_query,
+    Seconds tick_seconds) {
+  if (player_id_.has_value() && correction.player_id != player_id_.value()) {
     return;
   }
+  if (correction.server_tick <= last_authoritative_server_tick_) {
+    if (prediction_active_) {
+      (void)prediction_.reconcile_authoritative_state(
+          correction,
+          collision_query,
+          tuning_,
+          tick_seconds);
+    }
+    return;
+  }
+  const Vec3f render_position_before_correction = render_position_;
   last_authoritative_server_tick_ = correction.server_tick;
   if (!has_unconfirmed_hotbar_selection_ || correction.selected_hotbar_slot == selected_hotbar_slot_) {
     selected_hotbar_slot_ = correction.selected_hotbar_slot;
     has_unconfirmed_hotbar_selection_ = false;
   }
-  body_position_ = correction.position;
   game_mode_id_ = correction.game_mode_id;
   resolved_permissions_.core = correction.resolved_core_permissions;
   block_break_progress_ = correction.block_break;
-  target_eye_height_ =
-      correction.swimming
-          ? tuning_.swimming_eye_height
-          : (correction.sneaking ? tuning_.sneaking_eye_height
-                                 : tuning_.standing_eye_height);
   camera_.set_world_id(correction.world_id);
-  camera_.set_rotation(correction.yaw_radians, correction.pitch_radians);
+
+  PlayerReconciliationResult reconciliation;
+  if (prediction_active_) {
+    reconciliation = prediction_.reconcile_authoritative_state(
+        correction,
+        collision_query,
+        tuning_,
+        tick_seconds);
+  } else {
+    prediction_.reset(
+        kinematic_state_from_correction(correction),
+        correction.server_tick,
+        server_tick_rate_);
+    prediction_active_ = true;
+  }
+
+  sync_body_from_prediction();
+  update_target_eye_height();
+  switch (reconciliation.visual_action) {
+    case PlayerCorrectionVisualAction::Smooth:
+      render_smoothing_offset_ = render_position_before_correction - body_position_;
+      render_smoothing_ticks_total_ = std::max<u32>(prediction_.settings().smoothing_ticks, 1U);
+      render_smoothing_ticks_remaining_ = render_smoothing_ticks_total_;
+      render_position_ = render_position_before_correction;
+      break;
+    case PlayerCorrectionVisualAction::Snap:
+    case PlayerCorrectionVisualAction::Ignore:
+    case PlayerCorrectionVisualAction::None:
+      render_smoothing_offset_ = {};
+      render_smoothing_ticks_remaining_ = 0;
+      render_smoothing_ticks_total_ = 0;
+      render_position_ = body_position_;
+      break;
+  }
+  camera_.set_rotation(
+      prediction_.state().yaw_radians,
+      prediction_.state().pitch_radians);
+  update_camera_transform();
+}
+
+void LocalPlayerController::sync_body_from_prediction() noexcept {
+  const PredictedPlayerState& predicted = prediction_.state();
+  body_position_ = predicted.position;
+}
+
+void LocalPlayerController::update_eye_height() noexcept {
+  const f32 eye_step = tuning_.eye_height_lerp_per_second /
+                       static_cast<f32>(std::max<TickRate>(server_tick_rate_, 1U));
+  if (current_eye_height_ < target_eye_height_) {
+    current_eye_height_ = std::min(current_eye_height_ + eye_step, target_eye_height_);
+  } else {
+    current_eye_height_ = std::max(current_eye_height_ - eye_step, target_eye_height_);
+  }
+}
+
+void LocalPlayerController::update_target_eye_height() noexcept {
+  const PredictedPlayerState& predicted = prediction_.state();
+  target_eye_height_ =
+      predicted.swimming
+          ? tuning_.swimming_eye_height
+          : (predicted.sneaking ? tuning_.sneaking_eye_height
+                                : tuning_.standing_eye_height);
+}
+
+void LocalPlayerController::update_render_smoothing() noexcept {
+  if (render_smoothing_ticks_remaining_ == 0U) {
+    render_position_ = body_position_;
+    render_smoothing_offset_ = {};
+    render_smoothing_ticks_total_ = 0;
+    return;
+  }
+
+  --render_smoothing_ticks_remaining_;
+  if (render_smoothing_ticks_remaining_ == 0U) {
+    render_position_ = body_position_;
+    render_smoothing_offset_ = {};
+    render_smoothing_ticks_total_ = 0;
+    return;
+  }
+
+  const f32 smoothing_scale =
+      static_cast<f32>(render_smoothing_ticks_remaining_) /
+      static_cast<f32>(std::max<u32>(render_smoothing_ticks_total_, 1U));
+  render_position_ = body_position_ + render_smoothing_offset_ * smoothing_scale;
+}
+
+void LocalPlayerController::update_camera_transform() noexcept {
   camera_.set_position(
-      {correction.position.x,
-       correction.position.y + current_eye_height_,
-       correction.position.z});
+      {render_position_.x,
+       render_position_.y + current_eye_height_,
+       render_position_.z});
+}
+
+movement::PlayerMovementAuthority LocalPlayerController::prediction_authority() const noexcept {
+  return {
+      resolved_permissions_.core.can_fly,
+      resolved_permissions_.core.has_collision};
 }
 
 } // namespace arv::client

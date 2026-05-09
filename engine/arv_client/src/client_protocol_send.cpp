@@ -89,6 +89,12 @@ net::NetworkResult ClientProtocolSender::send_chunk_interest_update(
 net::NetworkResult ClientProtocolSender::send_input_batch(
     TickIndex tick_index,
     const player::PlayerCommand& command) {
+  return send_input_batch(tick_index, protocol::input_sample_from_command(command));
+}
+
+net::NetworkResult ClientProtocolSender::send_input_batch(
+    TickIndex tick_index,
+    const protocol::InputSample& input) {
   net::ITransport* transport = connection_.transport();
   if (!transport) {
     return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
@@ -96,7 +102,7 @@ net::NetworkResult ClientProtocolSender::send_input_batch(
 
   protocol::ClientInputBatch batch;
   batch.first_input_tick = tick_index;
-  batch.inputs.emplace_back(protocol::input_sample_from_command(command));
+  batch.inputs.emplace_back(input);
 
   return send_protocol_message(
       *transport,

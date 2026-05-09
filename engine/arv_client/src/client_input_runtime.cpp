@@ -60,9 +60,13 @@ void ClientInputRuntime::submit_input(
 void ClientInputRuntime::send_fixed_tick_input(
     TickIndex tick_index,
     LocalPlayerController& player_controller,
-    ClientProtocolSender& sender) {
+    ClientProtocolSender& sender,
+    const physics::ICollisionQuery* prediction_query,
+    Seconds tick_seconds) {
   const player::PlayerCommand command = player_controller.consume_command(tick_index);
-  (void)sender.send_input_batch(tick_index, command);
+  const protocol::InputSample input = protocol::input_sample_from_command(command);
+  player_controller.predict_local_movement(command, prediction_query, tick_seconds);
+  (void)sender.send_input_batch(tick_index, input);
 }
 
 } // namespace arv::client::detail

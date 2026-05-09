@@ -376,12 +376,6 @@ struct ServerRuntimeImpl {
 [[nodiscard]] Vec3f player_eye_position(
     const player::PlayerState& player_state,
     const player::PlayerTuning& tuning) noexcept;
-void step_player_without_collision(
-    player::PlayerState& player_state,
-    const player::PlayerCommand& command,
-    const player::PlayerTuning& tuning,
-    Seconds tick_seconds) noexcept;
-
 [[nodiscard]] net::NetworkResult send_protocol_message(
     net::ITransport& transport,
     net::ConnectionID connection_id,

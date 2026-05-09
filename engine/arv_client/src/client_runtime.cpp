@@ -14,7 +14,9 @@ struct ClientRuntime::Impl {
         identity(make_ephemeral_local_identity()) {
   }
 
-  [[nodiscard]] detail::ClientRuntimeContext context() noexcept {
+  [[nodiscard]] detail::ClientRuntimeContext context(
+      const physics::ICollisionQuery* prediction_query,
+      Seconds tick_seconds) noexcept {
     return {
         connection,
         sender,
@@ -26,21 +28,29 @@ struct ClientRuntime::Impl {
         inventory,
         entities,
         dropped_items,
-        skins};
+        skins,
+        prediction_query,
+        tick_seconds};
   }
 
-  void fixed_tick(TickIndex tick_index) {
+  void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* prediction_query) {
     if (!connection.transport()) {
       return;
     }
 
     const bool was_in_game = connection.state() == net::ConnectionState::InGame;
+    const Seconds tick_seconds = tick_duration_seconds(player_controller.server_tick_rate());
 
-    detail::ClientRuntimeContext runtime = context();
+    detail::ClientRuntimeContext runtime = context(prediction_query, tick_seconds);
     network.process_events(runtime);
 
     if (was_in_game && connection.state() == net::ConnectionState::InGame) {
-      input.send_fixed_tick_input(tick_index, player_controller, sender);
+      input.send_fixed_tick_input(
+          tick_index,
+          player_controller,
+          sender,
+          prediction_query,
+          tick_seconds);
     }
 
     if (connection.state() == net::ConnectionState::InGame) {
@@ -105,7 +115,13 @@ void ClientRuntime::set_chunk_view_distance(i32 view_distance) noexcept {
 }
 
 void ClientRuntime::fixed_tick(TickIndex tick_index) {
-  impl_->fixed_tick(tick_index);
+  impl_->fixed_tick(tick_index, nullptr);
+}
+
+void ClientRuntime::fixed_tick(
+    TickIndex tick_index,
+    const physics::ICollisionQuery* prediction_query) {
+  impl_->fixed_tick(tick_index, prediction_query);
 }
 
 render::FramePacket ClientRuntime::build_frame_packet(
@@ -157,6 +173,18 @@ std::optional<EntityNetID> ClientRuntime::local_entity_id() const noexcept {
 
 const protocol::BlockBreakProgress& ClientRuntime::block_break_progress() const noexcept {
   return impl_->player_controller.block_break_progress();
+}
+
+TickIndex ClientRuntime::world_initial_tick() const noexcept {
+  return impl_->player_controller.world_initial_tick();
+}
+
+TickRate ClientRuntime::server_tick_rate() const noexcept {
+  return impl_->player_controller.server_tick_rate();
+}
+
+PlayerPredictionDebugStats ClientRuntime::prediction_debug_stats() const noexcept {
+  return impl_->player_controller.prediction_debug_stats();
 }
 
 bool ClientRuntime::inventory_open() const noexcept {

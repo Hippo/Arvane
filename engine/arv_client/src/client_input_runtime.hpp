@@ -21,7 +21,9 @@ public:
   void send_fixed_tick_input(
       TickIndex tick_index,
       LocalPlayerController& player_controller,
-      ClientProtocolSender& sender);
+      ClientProtocolSender& sender,
+      const physics::ICollisionQuery* prediction_query,
+      Seconds tick_seconds);
 };
 
 } // namespace detail

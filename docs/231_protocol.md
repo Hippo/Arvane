@@ -370,14 +370,17 @@ InputSample
 {
     u32 buttons;
     i16 move_x;
-    i16 move_y;
+    i16 move_z;
     i16 look_delta_x;
     i16 look_delta_y;
     u8 selected_hotbar_slot;
 }
 ```
 
-Input batches should include enough recent samples that packet loss does not immediately cause missing input.
+`first_input_tick + sample_index` is the tick for each sample. Client input
+remains unreliable latest-wins; it must not be moved to reliable ordered just to
+avoid input loss. The client stores every locally generated sample it sends in a
+bounded pending-input history for prediction/reconciliation.
 
 The server must validate:
 
@@ -399,17 +402,39 @@ Reliable or unreliable latest-wins depending on correction severity.
 PlayerCorrection
 {
     u64 server_tick;
-    EntityNetID entity_id;
-    Vec3Fixed position;
-    Vec3Fixed velocity;
-    Rotation rotation;
-    u32 correction_flags;
+    PlayerID player_id;
+    WorldID world_id;
+    Vec3f position;
+    Vec3f velocity;
+    f32 yaw_radians;
+    f32 pitch_radians;
+    MovementMode movement_mode;
+    string game_mode_id;
+    u16 resolved_core_permissions;
+    bool grounded;
+    bool sneaking;
+    bool swimming;
+    f32 breath_seconds;
+    u8 selected_hotbar_slot;
+    BlockBreakProgress block_break;
 }
 ```
 
 Large corrections should be reliable.
 
 Small frequent movement snapshots should be unreliable latest-wins.
+
+The client applies local-player corrections with rewind and replay:
+
+* discard corrections with `server_tick <= last_confirmed_server_tick`
+* remove pending inputs with `input_tick <= server_tick`
+* replace predicted simulation state with the authoritative correction
+* replay remaining pending inputs in increasing tick order
+* classify the visual error as ignore, smooth, or snap
+
+The server correction overrides prediction. Client-predicted position, velocity,
+collision, inventory, block edits, and interaction results are never trusted by
+the server.
 
 ---
 
@@ -936,6 +961,8 @@ Examples:
 * older inventory revision is discarded
 * older entity snapshot is discarded
 * client input older than the server input window is discarded
+* player corrections at or before the last confirmed server tick are discarded
+* client pending inputs at or before a confirmed correction tick are acknowledged and pruned
 * block update targeting an unloaded chunk is queued briefly or rejected
 
 ---

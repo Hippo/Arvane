@@ -3,6 +3,8 @@
 #include "arv/client/chunk_interest.hpp"
 #include "arv/client/local_identity.hpp"
 #include "arv/client/local_player_controller.hpp"
+#include "arv/core/time.hpp"
+#include "arv/physics/collision.hpp"
 
 #include "client_chunk_inbox.hpp"
 #include "client_connection.hpp"
@@ -31,6 +33,8 @@ struct ClientRuntimeContext {
   ClientEntityMirrorStore& entities;
   ClientDroppedItemMirrorStore& dropped_items;
   ClientSkinRuntime& skins;
+  const physics::ICollisionQuery* prediction_query{};
+  Seconds tick_seconds{};
 };
 
 } // namespace arv::client::detail

@@ -8,6 +8,7 @@
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_type.hpp"
+#include "arv/protocol/player_input.hpp"
 #include "arv/protocol/skins.hpp"
 
 #include <vector>
@@ -29,6 +30,9 @@ public:
   net::NetworkResult send_input_batch(
       TickIndex tick_index,
       const player::PlayerCommand& command);
+  net::NetworkResult send_input_batch(
+      TickIndex tick_index,
+      const protocol::InputSample& input);
 
   net::NetworkResult send_inventory_action(
       protocol::InventoryActionRequest request);
