@@ -355,6 +355,17 @@ BlockModelAssetDataResult load_block_model_definitions(
     ResourceManager& resources,
     const voxel::BlockRegistry& registry) {
   std::vector<BlockModelAssetData> block_models;
+  HashMap<std::string, voxel::BlockModelDefinition> model_cache;
+
+  const auto cache_key_for = [](const voxel::BlockModelReference& model) {
+    std::string key = model.asset;
+    for (const std::string& input : model.texture_inputs) {
+      key += '\n';
+      key += input;
+    }
+    return key;
+  };
+
   for (u32 variant_value = 0; variant_value < registry.variant_count(); ++variant_value) {
     const auto variant_id = voxel::BlockVariantID{variant_value};
     const auto* variant = registry.variant(variant_id);
@@ -362,19 +373,24 @@ BlockModelAssetDataResult load_block_model_definitions(
       continue;
     }
 
-    auto model_text = resources.load_text({variant->model.asset}, AssetKind::Model);
-    if (!model_text) {
-      return BlockModelAssetDataResult::failure(model_text.error());
+    const std::string cache_key = cache_key_for(variant->model);
+    auto cached = model_cache.find(cache_key);
+    if (cached == model_cache.end()) {
+      auto model_text = resources.load_text({variant->model.asset}, AssetKind::Model);
+      if (!model_text) {
+        return BlockModelAssetDataResult::failure(model_text.error());
+      }
+      auto model_definition =
+          voxel::parse_block_model_json(model_text.value(), variant->model.texture_inputs);
+      if (!model_definition) {
+        return BlockModelAssetDataResult::failure({variant->model.asset,
+                                                   resources.resolve_asset_path({variant->model.asset}, AssetKind::Model),
+                                                   "parse block model",
+                                                   model_definition.error().message});
+      }
+      cached = model_cache.emplace(cache_key, std::move(model_definition.value())).first;
     }
-    auto model_definition =
-        voxel::parse_block_model_json(model_text.value(), variant->model.texture_inputs);
-    if (!model_definition) {
-      return BlockModelAssetDataResult::failure({variant->model.asset,
-                                                 resources.resolve_asset_path({variant->model.asset}, AssetKind::Model),
-                                                 "parse block model",
-                                                 model_definition.error().message});
-    }
-    block_models.push_back({variant_id, std::move(model_definition.value())});
+    block_models.push_back({variant_id, cached->second});
   }
 
   return BlockModelAssetDataResult::success(std::move(block_models));
@@ -394,7 +410,9 @@ void apply_block_model_collision_boxes(
     }
     registry.set_collision_boxes(
         block_model.variant_id,
-        voxel::make_block_model_collision_boxes(block_model.definition));
+        voxel::make_block_model_collision_boxes(
+            block_model.definition,
+            variant->model_transform));
   }
 }
 
@@ -555,7 +573,17 @@ BlockTextureAtlasResult build_block_texture_atlas(
       if (!render_boxes) {
         return BlockTextureAtlasResult::failure(render_boxes.error());
       }
-      result.render_data.set_model_boxes(variant_id, std::move(render_boxes.value()));
+      const Vec3i center_origin =
+          model_coord_to_render_coord(block_model_by_variant[variant_value]->center_origin);
+      std::vector<voxel::BlockModelBoxRenderData> boxes =
+          std::move(render_boxes.value());
+      for (voxel::BlockModelBoxRenderData& box : boxes) {
+        box = voxel::transform_model_box(box, center_origin, variant->model_transform);
+      }
+      result.render_data.set_model_center_origin(
+          variant_id,
+          center_origin);
+      result.render_data.set_model_boxes(variant_id, std::move(boxes));
       continue;
     }
 

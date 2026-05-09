@@ -41,6 +41,7 @@ struct EntityModelBoxDefinition {
 
 struct EntityModelDefinition {
   std::string name{};
+  Vec3f center_origin{};
   std::vector<EntityModelBoxDefinition> boxes{};
   std::vector<std::string> texture_assets{};
   std::vector<Vec2i> texture_sizes{};
@@ -114,6 +115,7 @@ struct EntityAnimationAsset {
 struct EntityModelAsset {
   EntityModelID id{};
   std::string name{};
+  Vec3f center_origin{};
   std::vector<EntityModelBone> bones{};
   std::vector<EntityModelMeshVertex> vertices{};
   std::vector<u32> indices{};

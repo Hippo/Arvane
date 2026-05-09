@@ -130,6 +130,18 @@
           "arvane:texture/block/cobblestone"
         ]
       },
+      "states": {
+        "facing": [
+          "north",
+          "south",
+          "east",
+          "west"
+        ],
+        "half": [
+          "bottom",
+          "top"
+        ]
+      },
       "properties": {
         "solid": true,
         "collidable": true,

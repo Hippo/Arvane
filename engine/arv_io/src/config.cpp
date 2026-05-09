@@ -152,6 +152,7 @@ void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
   read_scalar(physics, "sneaking_body_height", config.sneaking_body_height);
   read_scalar(physics, "swimming_body_width", config.swimming_body_width);
   read_scalar(physics, "swimming_body_height", config.swimming_body_height);
+  read_scalar(physics, "step_height", config.step_height);
   read_scalar(physics, "sneak_support_probe_depth", config.sneak_support_probe_depth);
   read_scalar(physics, "collision_epsilon", config.collision_epsilon);
   read_scalar(physics, "surface_swim_speed", config.surface_swim_speed);
@@ -546,6 +547,7 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
           << config.physics.swimming_body_width;
   emitter << YAML::Key << "swimming_body_height" << YAML::Value
           << config.physics.swimming_body_height;
+  emitter << YAML::Key << "step_height" << YAML::Value << config.physics.step_height;
   emitter << YAML::Key << "sneak_support_probe_depth" << YAML::Value
           << config.physics.sneak_support_probe_depth;
   emitter << YAML::Key << "collision_epsilon" << YAML::Value
@@ -888,6 +890,7 @@ ConfigResult save_default_shared_config_file(
           << config.physics.swimming_body_width;
   emitter << YAML::Key << "swimming_body_height" << YAML::Value
           << config.physics.swimming_body_height;
+  emitter << YAML::Key << "step_height" << YAML::Value << config.physics.step_height;
   emitter << YAML::Key << "sneak_support_probe_depth" << YAML::Value
           << config.physics.sneak_support_probe_depth;
   emitter << YAML::Key << "collision_epsilon" << YAML::Value
@@ -1299,6 +1302,7 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
            std::pair{std::string_view{"physics.sneaking_body_height"}, config.physics.sneaking_body_height},
            std::pair{std::string_view{"physics.swimming_body_width"}, config.physics.swimming_body_width},
            std::pair{std::string_view{"physics.swimming_body_height"}, config.physics.swimming_body_height},
+           std::pair{std::string_view{"physics.step_height"}, config.physics.step_height},
            std::pair{std::string_view{"physics.sneak_support_probe_depth"}, config.physics.sneak_support_probe_depth},
            std::pair{std::string_view{"physics.collision_epsilon"}, config.physics.collision_epsilon},
            std::pair{std::string_view{"physics.surface_swim_speed"}, config.physics.surface_swim_speed},

@@ -52,6 +52,7 @@ TEST(BlockRegistryTests, ExpandsStateSchemasIntoResolvedVariants) {
   std::vector<arv::voxel::BlockDefinition> definitions = minimal_definitions();
   arv::voxel::BlockDefinition stairs = arv::voxel::make_full_cube_definition("arvane:stone_stairs");
   stairs.states.push_back({"facing", {"north", "south", "east", "west"}});
+  stairs.states.push_back({"half", {"bottom", "top"}});
   definitions.push_back(std::move(stairs));
 
   auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions));
@@ -62,9 +63,15 @@ TEST(BlockRegistryTests, ExpandsStateSchemasIntoResolvedVariants) {
   ASSERT_TRUE(stairs_id);
   const arv::voxel::BlockRecord* stairs_record = registry.block(stairs_id.value());
   ASSERT_NE(stairs_record, nullptr);
-  EXPECT_EQ(stairs_record->variants.size(), 4U);
-  EXPECT_TRUE(registry.find_variant("arvane:stone_stairs[facing=north]"));
-  EXPECT_TRUE(registry.find_variant("arvane:stone_stairs[facing=west]"));
+  EXPECT_EQ(stairs_record->variants.size(), 8U);
+  const auto north_bottom = registry.find_variant("arvane:stone_stairs[facing=north,half=bottom]");
+  const auto east_top = registry.find_variant("arvane:stone_stairs[facing=east,half=top]");
+  ASSERT_TRUE(north_bottom);
+  ASSERT_TRUE(east_top);
+  const arv::voxel::BlockVariantRecord* east_top_record = registry.variant(east_top.value());
+  ASSERT_NE(east_top_record, nullptr);
+  EXPECT_EQ(east_top_record->model_transform.quarter_turns_y, 1);
+  EXPECT_TRUE(east_top_record->model_transform.mirror_y);
 }
 
 TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
@@ -180,4 +187,98 @@ TEST(BlockRegistryTests, BlockModelTexturesCanResolveInputsOrSpecificAssets) {
   EXPECT_LT(
       model.value().boxes.front().faces[arv::voxel::face_index(arv::voxel::BlockFace::NegativeY)]->texture_index,
       0);
+}
+
+TEST(BlockRegistryTests, AuthoredModelDerivesCenterOriginFromBoxBounds) {
+  auto model = arv::voxel::parse_block_model_json(R"json(
+{
+  "textures": ["stone"],
+  "texture_sizes": [[16, 16]],
+  "boxes": [{
+    "bone": "",
+    "pivot": [0, 0, 0],
+    "min": [0, 0, 0],
+    "max": [16, 8, 16],
+    "up": {"texture": 0, "uv": [0, 0, 16, 16]}
+  }, {
+    "bone": "",
+    "pivot": [0, 0, 0],
+    "min": [0, 8, 0],
+    "max": [16, 16, 8],
+    "north": {"texture": 0, "uv": [0, 0, 16, 8]}
+  }]
+}
+)json");
+
+  ASSERT_TRUE(model) << model.error().message;
+  EXPECT_FLOAT_EQ(model.value().center_origin.x, 8.0F);
+  EXPECT_FLOAT_EQ(model.value().center_origin.y, 8.0F);
+  EXPECT_FLOAT_EQ(model.value().center_origin.z, 8.0F);
+}
+
+TEST(BlockRegistryTests, BlockModelCollisionBoxesApplyStateTransform) {
+  auto model = arv::voxel::parse_block_model_json(R"json(
+{
+  "textures": ["stone"],
+  "texture_sizes": [[16, 16]],
+  "boxes": [{
+    "bone": "",
+    "pivot": [0, 0, 0],
+    "min": [0, 0, 0],
+    "max": [16, 8, 16],
+    "up": {"texture": 0, "uv": [0, 0, 16, 16]}
+  }, {
+    "bone": "",
+    "pivot": [0, 0, 0],
+    "min": [0, 8, 0],
+    "max": [16, 16, 8],
+    "north": {"texture": 0, "uv": [0, 0, 16, 8]}
+  }]
+}
+)json");
+
+  ASSERT_TRUE(model) << model.error().message;
+  const std::vector<arv::Aabb3f> boxes = arv::voxel::make_block_model_collision_boxes(
+      model.value(),
+      {1, true});
+
+  ASSERT_EQ(boxes.size(), 2U);
+  EXPECT_FLOAT_EQ(boxes.front().min.y, 0.5F);
+  EXPECT_FLOAT_EQ(boxes.front().max.y, 1.0F);
+  EXPECT_FLOAT_EQ(boxes.back().min.x, 0.5F);
+  EXPECT_FLOAT_EQ(boxes.back().max.x, 1.0F);
+  EXPECT_FLOAT_EQ(boxes.back().min.y, 0.0F);
+  EXPECT_FLOAT_EQ(boxes.back().max.y, 0.5F);
+}
+
+TEST(BlockRegistryTests, BlockModelRenderBoxTransformCarriesUvsWithRotatedFace) {
+  arv::voxel::BlockModelBoxRenderData box;
+  box.min = {0, 8, 0};
+  box.max = {16, 16, 8};
+
+  arv::voxel::BlockModelFaceRenderData north_face;
+  north_face.page = 7;
+  north_face.texture_index = 3;
+  north_face.uvs = {{{1, 2}, {3, 4}, {5, 6}, {7, 8}}};
+  box.faces[arv::voxel::face_index(arv::voxel::BlockFace::NegativeZ)] = north_face;
+
+  const arv::voxel::BlockModelBoxRenderData transformed =
+      arv::voxel::transform_model_box(box, {8, 8, 8}, {1, false});
+
+  EXPECT_EQ(transformed.min.x, 8);
+  EXPECT_EQ(transformed.min.y, 8);
+  EXPECT_EQ(transformed.min.z, 0);
+  EXPECT_EQ(transformed.max.x, 16);
+  EXPECT_EQ(transformed.max.y, 16);
+  EXPECT_EQ(transformed.max.z, 16);
+
+  const auto& transformed_east =
+      transformed.faces[arv::voxel::face_index(arv::voxel::BlockFace::PositiveX)];
+  ASSERT_TRUE(transformed_east.has_value());
+  EXPECT_EQ(transformed_east->page, north_face.page);
+  EXPECT_EQ(transformed_east->texture_index, north_face.texture_index);
+  EXPECT_EQ(transformed_east->uvs[2].x, 5);
+  EXPECT_EQ(transformed_east->uvs[2].y, 6);
+  EXPECT_FALSE(
+      transformed.faces[arv::voxel::face_index(arv::voxel::BlockFace::NegativeZ)].has_value());
 }

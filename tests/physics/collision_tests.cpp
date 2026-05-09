@@ -6,10 +6,34 @@
 
 #include <gtest/gtest.h>
 
+#include <utility>
+#include <vector>
+
 namespace {
 
 void ensure_loaded_chunk(arv::world::WorldRuntime& world, arv::ChunkSectionCoord coord) {
   (void)world.ensure_chunk(coord);
+}
+
+arv::voxel::BlockRegistry make_step_test_registry() {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:stone"));
+
+  arv::voxel::BlockDefinition half_block;
+  half_block.name = "arvane:half_block";
+  half_block.properties.solid = true;
+  half_block.properties.collidable = true;
+  half_block.render_category = arv::voxel::RenderCategory::None;
+  definitions.push_back(std::move(half_block));
+
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions));
+  EXPECT_TRUE(registry_result);
+  arv::voxel::BlockRegistry registry = std::move(registry_result.value());
+  registry.set_collision_boxes(
+      registry.find_variant("arvane:half_block").value(),
+      {{{0.0F, 0.0F, 0.0F}, {1.0F, 0.5F, 1.0F}}});
+  return registry;
 }
 
 } // namespace
@@ -66,6 +90,67 @@ TEST(PhysicsTests, GroundDetectionFindsSupportingBlocksBelowBody) {
   const arv::Aabb3f bounds = arv::physics::make_body_bounds({0.5F, 1.0F, 0.5F}, config);
 
   EXPECT_TRUE(arv::physics::has_support_below(query, bounds));
+}
+
+TEST(PhysicsTests, GroundedBodyStepsOntoObstacleWithinStepHeight) {
+  const arv::voxel::BlockRegistry registry = make_step_test_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID half_block =
+      registry.find_variant("arvane:half_block").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  ensure_loaded_chunk(world, {{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 1, 0}}, half_block));
+
+  const arv::world::WorldCollisionQuery query(world, registry, false);
+  arv::physics::KinematicConfig config;
+  config.walk_speed = 1.0F;
+  config.step_height = 0.6F;
+
+  arv::physics::KinematicInput input;
+  input.move_x = 1;
+
+  const arv::physics::KinematicStepResult result = arv::physics::step_kinematic_body(
+      query,
+      {{0.5F, 1.0F, 0.5F}, {}, true, false},
+      0.0F,
+      1.0F,
+      input,
+      config);
+
+  EXPECT_FALSE(result.movement.hit_x);
+  EXPECT_TRUE(result.body.grounded);
+  EXPECT_NEAR(result.body.position.x, 1.5F, 0.001F);
+  EXPECT_NEAR(result.body.position.y, 1.501F, 0.002F);
+}
+
+TEST(PhysicsTests, StepHeightDoesNotClimbFullBlockObstacle) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  ensure_loaded_chunk(world, {{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 1, 0}}, stone));
+
+  const arv::world::WorldCollisionQuery query(world, registry, false);
+  arv::physics::KinematicConfig config;
+  config.walk_speed = 1.0F;
+  config.step_height = 0.6F;
+
+  arv::physics::KinematicInput input;
+  input.move_x = 1;
+
+  const arv::physics::KinematicStepResult result = arv::physics::step_kinematic_body(
+      query,
+      {{0.5F, 1.0F, 0.5F}, {}, true, false},
+      0.0F,
+      1.0F,
+      input,
+      config);
+
+  EXPECT_TRUE(result.movement.hit_x);
+  EXPECT_NEAR(result.body.position.x, 0.699F, 0.002F);
+  EXPECT_NEAR(result.body.position.y, 1.0F, 0.0001F);
 }
 
 TEST(PhysicsTests, HeldJumpLaunchesWhenGrounded) {

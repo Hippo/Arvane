@@ -217,6 +217,73 @@ TEST(TextureAtlasTests, BuildsBlockAtlasRenderDataForInputTexturedModels) {
           .has_value());
 }
 
+TEST(TextureAtlasTests, CachesStateTransformedModelBoxesWithoutRotatingUvs) {
+  auto definitions = arv::voxel::parse_block_definitions_json(R"json(
+[
+  {
+    "name": "arvane:air",
+    "render_category": "none",
+    "properties": { "replaceable": true }
+  },
+  {
+    "name": "arvane:stone_stairs",
+    "states": {
+      "facing": ["north", "south", "east", "west"],
+      "half": ["bottom", "top"]
+    },
+    "render_category": "opaque",
+    "model": {
+      "path": "arvane:model/block/stairs",
+      "textures": ["arvane:texture/block/cobblestone"]
+    },
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "opaque": true,
+      "blocks_light": true,
+      "ao_occluder": true
+    }
+  }
+]
+)json");
+  ASSERT_TRUE(definitions) << definitions.error().message;
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+
+  arv::asset::ResourceManager resources(ARVANE_TEST_ASSET_ROOT);
+  auto atlas_result =
+      arv::asset::build_block_texture_atlas(resources, registry_result.value());
+
+  ASSERT_TRUE(atlas_result) << atlas_result.error().message;
+  const auto stairs_variant =
+      registry_result.value().find_variant("arvane:stone_stairs[facing=east,half=bottom]");
+  ASSERT_TRUE(stairs_variant.has_value());
+  const std::span<const arv::voxel::BlockModelBoxRenderData> boxes =
+      atlas_result.value().render_data.model_boxes(stairs_variant.value());
+  ASSERT_EQ(boxes.size(), 2U);
+
+  EXPECT_EQ(boxes.back().min.x, 8);
+  EXPECT_EQ(boxes.back().max.x, 16);
+  EXPECT_EQ(boxes.back().min.z, 0);
+  EXPECT_EQ(boxes.back().max.z, 16);
+
+  const auto& east_face =
+      boxes.back().faces[arv::voxel::face_index(arv::voxel::BlockFace::PositiveX)];
+  const auto& north_face =
+      boxes.back().faces[arv::voxel::face_index(arv::voxel::BlockFace::NegativeZ)];
+  ASSERT_TRUE(east_face.has_value());
+  ASSERT_TRUE(north_face.has_value());
+  const int uv_width =
+      east_face->uvs[1].x > east_face->uvs[0].x
+          ? east_face->uvs[1].x - east_face->uvs[0].x
+          : east_face->uvs[0].x - east_face->uvs[1].x;
+  const int north_uv_width =
+      north_face->uvs[0].x > north_face->uvs[1].x
+          ? north_face->uvs[0].x - north_face->uvs[1].x
+          : north_face->uvs[1].x - north_face->uvs[0].x;
+  EXPECT_EQ(uv_width, north_uv_width * 2);
+}
+
 TEST(TextureAtlasTests, AppliesModelCollisionBoxesPerVariantAtStartup) {
   auto definitions = arv::voxel::parse_block_definitions_json(R"json(
 [

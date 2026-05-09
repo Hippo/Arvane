@@ -87,6 +87,11 @@ struct StatePropertyDefinition {
   std::vector<std::string> values{};
 };
 
+struct BlockStateValue {
+  std::string name{};
+  std::string value{};
+};
+
 struct BlockModelReference {
   std::string asset{};
   std::vector<std::string> texture_inputs{};
@@ -118,18 +123,29 @@ struct BlockRecord {
   std::vector<BlockVariantID> variants{};
 };
 
+struct BlockModelTransform {
+  i8 quarter_turns_y{};
+  bool mirror_y{};
+};
+
+struct BlockBody {
+  std::vector<Aabb3f> boxes{};
+};
+
 struct BlockVariantRecord {
   BlockVariantID id{};
   BlockID block_id{};
   std::string debug_name{};
+  std::vector<BlockStateValue> state_values{};
   BlockProperties properties{};
   RenderCategory render_category{RenderCategory::None};
   bool hide_same_variant_faces{};
   std::array<std::string, BlockFaceCount> texture_assets{};
   BlockModelReference model{};
+  BlockModelTransform model_transform{};
+  u32 block_body_index{};
   std::array<bool, BlockFaceCount> renders_face{};
   std::array<bool, BlockFaceCount> occludes_face{};
-  std::vector<Aabb3f> collision_boxes{};
 };
 
 struct AuthoredModelFaceDefinition {
@@ -148,6 +164,7 @@ struct AuthoredModelBoxDefinition {
 
 struct AuthoredModelDefinition {
   std::string name{};
+  Vec3f center_origin{8.0F, 8.0F, 8.0F};
   std::vector<AuthoredModelBoxDefinition> boxes{};
   std::vector<std::string> texture_assets{};
   std::vector<Vec2i> texture_sizes{};
@@ -177,6 +194,7 @@ struct BlockModelBoxRenderData {
 
 struct BlockVariantRenderData {
   std::array<BlockFaceRenderData, BlockFaceCount> faces{};
+  Vec3i model_center_origin{8, 8, 8};
   std::vector<BlockModelBoxRenderData> model_boxes{};
 };
 
@@ -261,6 +279,8 @@ public:
 
   [[nodiscard]] std::string_view variant_name(BlockVariantID variant_id) const noexcept;
 
+  [[nodiscard]] const BlockBody* block_body(BlockVariantID variant_id) const noexcept;
+
   [[nodiscard]] std::span<const Aabb3f> collision_boxes(BlockVariantID variant_id) const noexcept;
 
   void set_collision_boxes(BlockVariantID variant_id, std::vector<Aabb3f> boxes);
@@ -277,10 +297,9 @@ private:
 
   [[nodiscard]] static std::optional<std::string> validate_air_definition(const BlockDefinition& definition);
 
-  [[nodiscard]] static std::vector<std::string> expand_variant_names(const BlockDefinition& definition);
-
   std::vector<BlockRecord> blocks_;
   std::vector<BlockVariantRecord> variants_;
+  std::vector<BlockBody> block_bodies_;
   HashMap<std::string, BlockID> block_name_to_id_;
   HashMap<std::string, BlockVariantID> variant_name_to_id_;
 };
@@ -298,9 +317,13 @@ public:
   [[nodiscard]] std::span<const BlockModelBoxRenderData> model_boxes(
       BlockVariantID variant_id) const noexcept;
 
+  [[nodiscard]] Vec3i model_center_origin(BlockVariantID variant_id) const noexcept;
+
   void set_model_boxes(
       BlockVariantID variant_id,
       std::vector<BlockModelBoxRenderData> boxes);
+
+  void set_model_center_origin(BlockVariantID variant_id, Vec3i center_origin);
 
   [[nodiscard]] usize variant_count() const noexcept {
     return variants_.size();
@@ -339,7 +362,22 @@ private:
     std::string_view text,
     std::span<const std::string> texture_inputs = {});
 
+[[nodiscard]] BlockFace transform_block_face(
+    BlockFace face,
+    BlockModelTransform transform) noexcept;
+
+[[nodiscard]] Vec3i transform_model_point(
+    Vec3i point,
+    Vec3i center_origin,
+    BlockModelTransform transform) noexcept;
+
+[[nodiscard]] BlockModelBoxRenderData transform_model_box(
+    const BlockModelBoxRenderData& box,
+    Vec3i center_origin,
+    BlockModelTransform transform) noexcept;
+
 [[nodiscard]] std::vector<Aabb3f> make_block_model_collision_boxes(
-    const BlockModelDefinition& model);
+    const BlockModelDefinition& model,
+    BlockModelTransform transform = {});
 
 } // namespace arv::voxel

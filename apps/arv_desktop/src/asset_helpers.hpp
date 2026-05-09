@@ -69,6 +69,7 @@ using EntityRenderAssetsResult = Expected<EntityRenderAssets, asset::AssetError>
     const entity::EntityRegistry& entity_registry,
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
+    const voxel::BlockRenderData& block_render_data,
     std::span<const asset::BlockModelAssetData> block_models = {},
     BlockOutlineRenderConfig outline_config = {},
     asset::TextureAtlasBuildOptions atlas_options =

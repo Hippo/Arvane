@@ -459,7 +459,6 @@ A block state represents one exact placement/configuration of that block, such a
 
 - `arvane:stone_stairs[facing=north]`
 - `arvane:stone_stairs[facing=east]`
-- `arvane:water[level=0]`
 
 The engine does not simulate vague block definitions in the world. The world stores concrete runtime state IDs.
 
@@ -921,7 +920,6 @@ Placement state resolution may use:
 * clicked block face
 * hit position inside the target block
 * neighboring blocks
-* water/fluid presence
 * item metadata
 * block-specific placement rules
 

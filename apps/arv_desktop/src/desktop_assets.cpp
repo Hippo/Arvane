@@ -274,6 +274,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
       loaded.entity_registry,
       loaded.item_registry,
       loaded.block_registry,
+      loaded.block_atlas.render_data,
       block_models,
       BlockOutlineRenderConfig{
           {config.render.block_outline.color_r,

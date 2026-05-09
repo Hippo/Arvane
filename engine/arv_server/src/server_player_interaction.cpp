@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace arv::server::detail {
@@ -35,6 +36,75 @@ namespace {
 
 [[nodiscard]] i32 floor_i32(f32 value) noexcept {
   return static_cast<i32>(std::floor(value));
+}
+
+[[nodiscard]] std::string horizontal_facing_from_look(
+    Vec3f look_direction,
+    std::string_view fallback) {
+  if (std::abs(look_direction.x) > std::abs(look_direction.z)) {
+    return look_direction.x >= 0.0F ? "east" : "west";
+  }
+  if (std::abs(look_direction.z) > 0.0001F) {
+    return look_direction.z >= 0.0F ? "south" : "north";
+  }
+  return std::string{fallback};
+}
+
+[[nodiscard]] std::string half_from_hit(
+    const physics::BlockRaycastHit& hit,
+    BlockPos place_pos,
+    std::string_view fallback) {
+  if (hit.face == voxel::BlockFace::PositiveY) {
+    return "bottom";
+  }
+  if (hit.face == voxel::BlockFace::NegativeY) {
+    return "top";
+  }
+  const f32 local_y = hit.hit_point.y - static_cast<f32>(place_pos.value.y);
+  if (local_y > 0.5F) {
+    return "top";
+  }
+  if (local_y >= 0.0F) {
+    return "bottom";
+  }
+  return std::string{fallback};
+}
+
+[[nodiscard]] voxel::BlockVariantID resolve_placement_variant(
+    const voxel::BlockRegistry& registry,
+    voxel::BlockVariantID default_variant,
+    const physics::BlockRaycastHit& hit,
+    BlockPos place_pos,
+    Vec3f look_direction) {
+  const voxel::BlockVariantRecord* default_record = registry.variant(default_variant);
+  if (default_record == nullptr || default_record->state_values.empty()) {
+    return default_variant;
+  }
+  const voxel::BlockRecord* block = registry.block(default_record->block_id);
+  if (block == nullptr) {
+    return default_variant;
+  }
+
+  std::string variant_name = block->name;
+  variant_name += "[";
+  for (usize index = 0; index < default_record->state_values.size(); ++index) {
+    const voxel::BlockStateValue& state = default_record->state_values[index];
+    std::string value = state.value;
+    if (state.name == "facing") {
+      value = horizontal_facing_from_look(look_direction, state.value);
+    } else if (state.name == "half") {
+      value = half_from_hit(hit, place_pos, state.value);
+    }
+
+    if (index > 0) {
+      variant_name += ",";
+    }
+    variant_name += state.name;
+    variant_name += "=";
+    variant_name += value;
+  }
+  variant_name += "]";
+  return registry.find_variant(variant_name).value_or(default_variant);
 }
 
 [[nodiscard]] bool block_stops_bucket_raycast(
@@ -436,7 +506,12 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       return;
     }
 
-    const voxel::BlockVariantID placed_variant = held_item->placement_variant.value();
+    const voxel::BlockVariantID placed_variant = resolve_placement_variant(
+        *block_registry_,
+        held_item->placement_variant.value(),
+        hit.value(),
+        place_pos,
+        look_direction);
     const physics::PlayerCollisionPose player_pose =
         player_state.swimming
             ? physics::PlayerCollisionPose::Swimming

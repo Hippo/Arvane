@@ -392,6 +392,144 @@ void set_side_textures(
   return std::nullopt;
 }
 
+struct ExpandedVariantDefinition {
+  std::string debug_name{};
+  std::vector<BlockStateValue> state_values{};
+};
+
+[[nodiscard]] std::optional<std::string_view> state_value(
+    std::span<const BlockStateValue> state_values,
+    std::string_view name) noexcept {
+  for (const BlockStateValue& state : state_values) {
+    if (state.name == name) {
+      return std::string_view{state.value};
+    }
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] BlockModelTransform model_transform_for_state_values(
+    std::span<const BlockStateValue> state_values) noexcept {
+  BlockModelTransform transform;
+  if (const std::optional<std::string_view> facing = state_value(state_values, "facing");
+      facing.has_value()) {
+    if (*facing == "east") {
+      transform.quarter_turns_y = 1;
+    } else if (*facing == "south") {
+      transform.quarter_turns_y = 2;
+    } else if (*facing == "west") {
+      transform.quarter_turns_y = 3;
+    } else {
+      transform.quarter_turns_y = 0;
+    }
+  }
+  if (const std::optional<std::string_view> half = state_value(state_values, "half");
+      half.has_value()) {
+    transform.mirror_y = *half == "top";
+  }
+  return transform;
+}
+
+[[nodiscard]] std::vector<ExpandedVariantDefinition> expand_variants(
+    const BlockDefinition& definition) {
+  if (definition.states.empty()) {
+    return {{definition.name, {}}};
+  }
+
+  std::vector<ExpandedVariantDefinition> variants;
+  variants.push_back({definition.name + "[", {}});
+  for (usize state_index = 0; state_index < definition.states.size(); ++state_index) {
+    const StatePropertyDefinition& state = definition.states[state_index];
+    std::vector<ExpandedVariantDefinition> expanded;
+    expanded.reserve(variants.size() * state.values.size());
+    for (const ExpandedVariantDefinition& prefix : variants) {
+      for (const std::string& value : state.values) {
+        ExpandedVariantDefinition next;
+        next.debug_name = prefix.debug_name;
+        if (state_index > 0) {
+          next.debug_name += ",";
+        }
+        next.debug_name += state.name;
+        next.debug_name += "=";
+        next.debug_name += value;
+        next.state_values = prefix.state_values;
+        next.state_values.push_back({state.name, value});
+        expanded.push_back(std::move(next));
+      }
+    }
+    variants = std::move(expanded);
+  }
+
+  for (ExpandedVariantDefinition& variant : variants) {
+    variant.debug_name += "]";
+  }
+  return variants;
+}
+
+[[nodiscard]] Expected<std::string, BlockRegistryError> read_state_value_string(
+    const json& value,
+    std::string_view field) {
+  if (value.is_string()) {
+    return Expected<std::string, BlockRegistryError>::success(value.get<std::string>());
+  }
+  if (value.is_boolean()) {
+    return Expected<std::string, BlockRegistryError>::success(value.get<bool>() ? "true" : "false");
+  }
+  if (value.is_number_integer()) {
+    return Expected<std::string, BlockRegistryError>::success(std::to_string(value.get<i64>()));
+  }
+  return Expected<std::string, BlockRegistryError>::failure(
+      {std::string{field} + " values must be strings, booleans, or integers"});
+}
+
+[[nodiscard]] Vec3f derive_center_origin(
+    std::span<const AuthoredModelBoxDefinition> boxes) noexcept {
+  if (boxes.empty()) {
+    return {8.0F, 8.0F, 8.0F};
+  }
+
+  Vec3f min = boxes.front().min;
+  Vec3f max = boxes.front().max;
+  for (const AuthoredModelBoxDefinition& box : boxes) {
+    min.x = std::min(min.x, box.min.x);
+    min.y = std::min(min.y, box.min.y);
+    min.z = std::min(min.z, box.min.z);
+    max.x = std::max(max.x, box.max.x);
+    max.y = std::max(max.y, box.max.y);
+    max.z = std::max(max.z, box.max.z);
+  }
+
+  return {
+      (min.x + max.x) * 0.5F,
+      (min.y + max.y) * 0.5F,
+      (min.z + max.z) * 0.5F};
+}
+
+[[nodiscard]] Vec3f transform_model_point(
+    Vec3f point,
+    Vec3f center_origin,
+    BlockModelTransform transform) noexcept {
+  if (transform.mirror_y) {
+    point.y = center_origin.y * 2.0F - point.y;
+  }
+
+  Vec3f local = point - center_origin;
+  switch ((transform.quarter_turns_y % 4 + 4) % 4) {
+    case 1:
+      local = {-local.z, local.y, local.x};
+      break;
+    case 2:
+      local = {-local.x, local.y, -local.z};
+      break;
+    case 3:
+      local = {local.z, local.y, -local.x};
+      break;
+    default:
+      break;
+  }
+  return center_origin + local;
+}
+
 } // namespace
 
 BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definitions) {
@@ -459,31 +597,36 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     block.is_item = definition.is_item;
     block.item_buoyancy = definition.item_buoyancy;
 
-    std::vector<std::string> variant_names = expand_variant_names(definition);
-    if (variant_names.empty()) {
+    std::vector<ExpandedVariantDefinition> expanded_variants = expand_variants(definition);
+    if (expanded_variants.empty()) {
       return Result::failure({"block has no variants after expansion: " + definition.name});
     }
 
-    for (std::string& variant_name : variant_names) {
+    for (ExpandedVariantDefinition& expanded_variant : expanded_variants) {
       if (next_variant_id == std::numeric_limits<u32>::max()) {
         return Result::failure({"block variant ID limit exceeded"});
       }
 
       const BlockVariantID variant_id{next_variant_id++};
+      BlockBody body;
       BlockVariantRecord variant;
       variant.id = variant_id;
       variant.block_id = block_id;
-      variant.debug_name = std::move(variant_name);
+      variant.debug_name = std::move(expanded_variant.debug_name);
+      variant.state_values = std::move(expanded_variant.state_values);
       variant.properties = definition.properties;
       variant.render_category = definition.render_category;
       variant.hide_same_variant_faces = definition.hide_same_variant_faces;
       variant.texture_assets = definition.texture_assets;
       variant.model = definition.model;
+      variant.model_transform = model_transform_for_state_values(variant.state_values);
       variant.renders_face.fill(definition.render_category != RenderCategory::None && definition.properties.full_cube);
       variant.occludes_face.fill(definition.properties.full_cube && definition.properties.opaque);
       if (definition.properties.collidable && definition.properties.full_cube) {
-        variant.collision_boxes.push_back({{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 1.0F}});
+        body.boxes.push_back({{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 1.0F}});
       }
+      variant.block_body_index = static_cast<u32>(registry.block_bodies_.size());
+      registry.block_bodies_.push_back(std::move(body));
 
       if (block.variants.empty()) {
         block.default_variant = variant_id;
@@ -555,21 +698,30 @@ std::string_view BlockRegistry::variant_name(BlockVariantID variant_id) const no
   return record == nullptr ? AirBlockName : std::string_view{record->debug_name};
 }
 
-std::span<const Aabb3f> BlockRegistry::collision_boxes(BlockVariantID variant_id) const noexcept {
+const BlockBody* BlockRegistry::block_body(BlockVariantID variant_id) const noexcept {
   const BlockVariantRecord* record = variant(variant_id);
-  if (record == nullptr) {
+  if (record == nullptr || record->block_body_index >= block_bodies_.size()) {
+    return nullptr;
+  }
+  return &block_bodies_[record->block_body_index];
+}
+
+std::span<const Aabb3f> BlockRegistry::collision_boxes(BlockVariantID variant_id) const noexcept {
+  const BlockBody* body = block_body(variant_id);
+  if (body == nullptr) {
     return {};
   }
-  return record->collision_boxes;
+  return body->boxes;
 }
 
 void BlockRegistry::set_collision_boxes(
     BlockVariantID variant_id,
     std::vector<Aabb3f> boxes) {
-  if (variant_id.value >= variants_.size()) {
+  const BlockVariantRecord* record = variant(variant_id);
+  if (record == nullptr || record->block_body_index >= block_bodies_.size()) {
     return;
   }
-  variants_[variant_id.value].collision_boxes = std::move(boxes);
+  block_bodies_[record->block_body_index].boxes = std::move(boxes);
 }
 
 bool BlockRegistry::is_replaceable(BlockVariantID variant_id) const noexcept {
@@ -637,6 +789,13 @@ std::span<const BlockModelBoxRenderData> BlockRenderData::model_boxes(
   return variants_[variant_id.value].model_boxes;
 }
 
+Vec3i BlockRenderData::model_center_origin(BlockVariantID variant_id) const noexcept {
+  if (variant_id.value >= variants_.size()) {
+    return {8, 8, 8};
+  }
+  return variants_[variant_id.value].model_center_origin;
+}
+
 void BlockRenderData::set_model_boxes(
     BlockVariantID variant_id,
     std::vector<BlockModelBoxRenderData> boxes) {
@@ -644,6 +803,15 @@ void BlockRenderData::set_model_boxes(
     return;
   }
   variants_[variant_id.value].model_boxes = std::move(boxes);
+}
+
+void BlockRenderData::set_model_center_origin(
+    BlockVariantID variant_id,
+    Vec3i center_origin) {
+  if (variant_id.value >= variants_.size()) {
+    return;
+  }
+  variants_[variant_id.value].model_center_origin = center_origin;
 }
 
 std::optional<std::string> BlockRegistry::validate_states(const BlockDefinition& definition) {
@@ -689,37 +857,6 @@ std::optional<std::string> BlockRegistry::validate_air_definition(const BlockDef
     return "arvane:air violates air behavior invariants";
   }
   return std::nullopt;
-}
-
-std::vector<std::string> BlockRegistry::expand_variant_names(const BlockDefinition& definition) {
-  if (definition.states.empty()) {
-    return {definition.name};
-  }
-
-  std::vector<std::string> names{definition.name + "["};
-  for (usize state_index = 0; state_index < definition.states.size(); ++state_index) {
-    const StatePropertyDefinition& state = definition.states[state_index];
-    std::vector<std::string> expanded;
-    expanded.reserve(names.size() * state.values.size());
-    for (const std::string& prefix : names) {
-      for (const std::string& value : state.values) {
-        std::string next = prefix;
-        if (state_index > 0) {
-          next += ",";
-        }
-        next += state.name;
-        next += "=";
-        next += value;
-        expanded.push_back(std::move(next));
-      }
-    }
-    names = std::move(expanded);
-  }
-
-  for (std::string& name : names) {
-    name += "]";
-  }
-  return names;
 }
 
 BlockDefinition make_air_definition() {
@@ -902,7 +1039,13 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
           StatePropertyDefinition state;
           state.name = state_name;
           for (const nlohmann::json& value : state_values) {
-            state.values.push_back(value.get<std::string>());
+            auto parsed_value = read_state_value_string(
+                value,
+                "state " + definition.name + "." + state.name);
+            if (!parsed_value) {
+              return BlockDefinitionsResult::failure(parsed_value.error());
+            }
+            state.values.push_back(std::move(parsed_value.value()));
           }
           definition.states.push_back(std::move(state));
         }
@@ -938,6 +1081,16 @@ AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text) {
         return AuthoredModelDefinitionResult::failure({"model name must be a string"});
       }
       definition.name = name->get<std::string>();
+    }
+    bool has_center_origin = false;
+    if (const auto center_origin = root.find("center_origin");
+        center_origin != root.end()) {
+      auto parsed_center_origin = read_vec3f(*center_origin, "model center_origin");
+      if (!parsed_center_origin) {
+        return AuthoredModelDefinitionResult::failure(parsed_center_origin.error());
+      }
+      definition.center_origin = parsed_center_origin.value();
+      has_center_origin = true;
     }
 
     const auto textures = root.find("textures");
@@ -1049,6 +1202,9 @@ AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text) {
       }
       definition.boxes.push_back(std::move(box));
     }
+    if (!has_center_origin) {
+      definition.center_origin = derive_center_origin(definition.boxes);
+    }
 
     return AuthoredModelDefinitionResult::success(std::move(definition));
   } catch (const json::exception& ex) {
@@ -1081,24 +1237,188 @@ BlockModelDefinitionResult parse_block_model_json(
   return BlockModelDefinitionResult::success(std::move(definition));
 }
 
+BlockFace transform_block_face(
+    BlockFace face,
+    BlockModelTransform transform) noexcept {
+  if (transform.mirror_y) {
+    if (face == BlockFace::PositiveY) {
+      face = BlockFace::NegativeY;
+    } else if (face == BlockFace::NegativeY) {
+      face = BlockFace::PositiveY;
+    }
+  }
+
+  const i8 turns = static_cast<i8>((transform.quarter_turns_y % 4 + 4) % 4);
+  for (i8 turn = 0; turn < turns; ++turn) {
+    switch (face) {
+      case BlockFace::PositiveX:
+        face = BlockFace::PositiveZ;
+        break;
+      case BlockFace::PositiveZ:
+        face = BlockFace::NegativeX;
+        break;
+      case BlockFace::NegativeX:
+        face = BlockFace::NegativeZ;
+        break;
+      case BlockFace::NegativeZ:
+        face = BlockFace::PositiveX;
+        break;
+      case BlockFace::PositiveY:
+      case BlockFace::NegativeY:
+        break;
+    }
+  }
+  return face;
+}
+
+Vec3i transform_model_point(
+    Vec3i point,
+    Vec3i center_origin,
+    BlockModelTransform transform) noexcept {
+  if (transform.mirror_y) {
+    point.y = center_origin.y * 2 - point.y;
+  }
+
+  Vec3i local = point - center_origin;
+  switch ((transform.quarter_turns_y % 4 + 4) % 4) {
+    case 1:
+      local = {-local.z, local.y, local.x};
+      break;
+    case 2:
+      local = {-local.x, local.y, -local.z};
+      break;
+    case 3:
+      local = {local.z, local.y, -local.x};
+      break;
+    default:
+      break;
+  }
+  return center_origin + local;
+}
+
+BlockModelBoxRenderData transform_model_box(
+    const BlockModelBoxRenderData& box,
+    Vec3i center_origin,
+    BlockModelTransform transform) noexcept {
+  if (transform.quarter_turns_y == 0 && !transform.mirror_y) {
+    return box;
+  }
+
+  const std::array<Vec3i, 8> corners{{
+      {box.min.x, box.min.y, box.min.z},
+      {box.max.x, box.min.y, box.min.z},
+      {box.min.x, box.max.y, box.min.z},
+      {box.max.x, box.max.y, box.min.z},
+      {box.min.x, box.min.y, box.max.z},
+      {box.max.x, box.min.y, box.max.z},
+      {box.min.x, box.max.y, box.max.z},
+      {box.max.x, box.max.y, box.max.z},
+  }};
+
+  BlockModelBoxRenderData transformed;
+  transformed.min = transform_model_point(corners.front(), center_origin, transform);
+  transformed.max = transformed.min;
+  for (const Vec3i corner : corners) {
+    const Vec3i point = transform_model_point(corner, center_origin, transform);
+    transformed.min.x = std::min(transformed.min.x, point.x);
+    transformed.min.y = std::min(transformed.min.y, point.y);
+    transformed.min.z = std::min(transformed.min.z, point.z);
+    transformed.max.x = std::max(transformed.max.x, point.x);
+    transformed.max.y = std::max(transformed.max.y, point.y);
+    transformed.max.z = std::max(transformed.max.z, point.z);
+  }
+
+  const auto face_corners = [](const BlockModelBoxRenderData& model_box, BlockFace face) {
+    const Vec3i min = model_box.min;
+    const Vec3i max = model_box.max;
+    switch (face) {
+      case BlockFace::PositiveX:
+        return std::array<Vec3i, 4>{{{max.x, min.y, max.z}, {max.x, min.y, min.z}, {max.x, max.y, max.z}, {max.x, max.y, min.z}}};
+      case BlockFace::NegativeX:
+        return std::array<Vec3i, 4>{{{min.x, min.y, min.z}, {min.x, min.y, max.z}, {min.x, max.y, min.z}, {min.x, max.y, max.z}}};
+      case BlockFace::PositiveY:
+        return std::array<Vec3i, 4>{{{min.x, max.y, max.z}, {max.x, max.y, max.z}, {min.x, max.y, min.z}, {max.x, max.y, min.z}}};
+      case BlockFace::NegativeY:
+        return std::array<Vec3i, 4>{{{max.x, min.y, max.z}, {min.x, min.y, max.z}, {max.x, min.y, min.z}, {min.x, min.y, min.z}}};
+      case BlockFace::PositiveZ:
+        return std::array<Vec3i, 4>{{{min.x, min.y, max.z}, {max.x, min.y, max.z}, {min.x, max.y, max.z}, {max.x, max.y, max.z}}};
+      case BlockFace::NegativeZ:
+        return std::array<Vec3i, 4>{{{max.x, min.y, min.z}, {min.x, min.y, min.z}, {max.x, max.y, min.z}, {min.x, max.y, min.z}}};
+    }
+    return std::array<Vec3i, 4>{};
+  };
+
+  for (BlockFace source_face : AllBlockFaces) {
+    const usize source_slot = face_index(source_face);
+    if (!box.faces[source_slot].has_value()) {
+      continue;
+    }
+
+    BlockModelFaceRenderData face_data = box.faces[source_slot].value();
+    const BlockFace target_face = transform_block_face(source_face, transform);
+    const std::array<Vec3i, 4> source_corners = face_corners(box, source_face);
+    const std::array<Vec3i, 4> target_corners = face_corners(transformed, target_face);
+    for (usize target_index = 0; target_index < target_corners.size(); ++target_index) {
+      for (usize source_index = 0; source_index < source_corners.size(); ++source_index) {
+        if (transform_model_point(source_corners[source_index], center_origin, transform) ==
+            target_corners[target_index]) {
+          face_data.uvs[target_index] = box.faces[source_slot]->uvs[source_index];
+          break;
+        }
+      }
+    }
+    transformed.faces[face_index(target_face)] = face_data;
+  }
+  return transformed;
+}
+
 std::vector<Aabb3f> make_block_model_collision_boxes(
-    const BlockModelDefinition& model) {
+    const BlockModelDefinition& model,
+    BlockModelTransform transform) {
   std::vector<Aabb3f> boxes;
   boxes.reserve(model.boxes.size());
+  const Vec3f center_origin{
+      model.center_origin.x / 16.0F,
+      model.center_origin.y / 16.0F,
+      model.center_origin.z / 16.0F};
   for (const BlockModelBoxDefinition& box : model.boxes) {
     if (box.min.x >= box.max.x || box.min.y >= box.max.y || box.min.z >= box.max.z) {
       continue;
     }
-    boxes.push_back({{
-                         static_cast<f32>(box.min.x) / 16.0F,
-                         static_cast<f32>(box.min.y) / 16.0F,
-                         static_cast<f32>(box.min.z) / 16.0F,
-                     },
-                     {
-                         static_cast<f32>(box.max.x) / 16.0F,
-                         static_cast<f32>(box.max.y) / 16.0F,
-                         static_cast<f32>(box.max.z) / 16.0F,
-                     }});
+    const Vec3f min{
+        static_cast<f32>(box.min.x) / 16.0F,
+        static_cast<f32>(box.min.y) / 16.0F,
+        static_cast<f32>(box.min.z) / 16.0F,
+    };
+    const Vec3f max{
+        static_cast<f32>(box.max.x) / 16.0F,
+        static_cast<f32>(box.max.y) / 16.0F,
+        static_cast<f32>(box.max.z) / 16.0F,
+    };
+
+    const std::array<Vec3f, 8> corners{{
+        {min.x, min.y, min.z},
+        {max.x, min.y, min.z},
+        {min.x, max.y, min.z},
+        {max.x, max.y, min.z},
+        {min.x, min.y, max.z},
+        {max.x, min.y, max.z},
+        {min.x, max.y, max.z},
+        {max.x, max.y, max.z},
+    }};
+
+    Vec3f transformed_min = transform_model_point(corners.front(), center_origin, transform);
+    Vec3f transformed_max = transformed_min;
+    for (const Vec3f corner : corners) {
+      const Vec3f transformed = transform_model_point(corner, center_origin, transform);
+      transformed_min.x = std::min(transformed_min.x, transformed.x);
+      transformed_min.y = std::min(transformed_min.y, transformed.y);
+      transformed_min.z = std::min(transformed_min.z, transformed.z);
+      transformed_max.x = std::max(transformed_max.x, transformed.x);
+      transformed_max.y = std::max(transformed_max.y, transformed.y);
+      transformed_max.z = std::max(transformed_max.z, transformed.z);
+    }
+    boxes.push_back({transformed_min, transformed_max});
   }
   return boxes;
 }

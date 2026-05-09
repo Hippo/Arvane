@@ -58,7 +58,7 @@ inline player::ItemRegistry make_test_item_registry(const voxel::BlockRegistry& 
   shovel.category = "tools";
   shovel.max_stack_size = 1;
   shovel.explicit_render_type = player::ItemRenderType::Texture;
-  shovel.texture_asset = "arvane:texture/item/pickaxe";
+  shovel.texture_asset = "arvane:texture/item/shovel";
   shovel.tool_category = "shovel";
   shovel.tool_break_speed_multiplier = 4.0F;
   items.push_back(std::move(shovel));

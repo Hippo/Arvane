@@ -26,6 +26,7 @@ inline constexpr f32 DefaultPlayerBodyHeight = 1.8F;
 inline constexpr f32 DefaultPlayerSneakingBodyHeight = 1.5F;
 inline constexpr f32 DefaultPlayerSwimmingBodyWidth = 0.9F;
 inline constexpr f32 DefaultPlayerSwimmingBodyHeight = 0.6F;
+inline constexpr f32 DefaultPlayerStepHeight = 0.6F;
 inline constexpr f32 DefaultEyeHeightLerpPerSecond = 12.0F;
 inline constexpr f32 DefaultSneakSupportProbeDepth = 0.05F;
 inline constexpr f32 DefaultCollisionEpsilon = 0.001F;
@@ -63,6 +64,7 @@ struct PlayerTuning {
   f32 sneaking_body_height{DefaultPlayerSneakingBodyHeight};
   f32 swimming_body_width{DefaultPlayerSwimmingBodyWidth};
   f32 swimming_body_height{DefaultPlayerSwimmingBodyHeight};
+  f32 step_height{DefaultPlayerStepHeight};
   f32 sneak_support_probe_depth{DefaultSneakSupportProbeDepth};
   f32 collision_epsilon{DefaultCollisionEpsilon};
   f32 surface_swim_speed{DefaultSurfaceSwimSpeed};

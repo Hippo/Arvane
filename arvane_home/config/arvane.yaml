@@ -53,6 +53,7 @@ physics:
   sneaking_body_height: 1.5
   swimming_body_width: 0.9
   swimming_body_height: 0.6
+  step_height: 0.6
   sneak_support_probe_depth: 0.05
   collision_epsilon: 0.001
   surface_swim_speed: 2.5

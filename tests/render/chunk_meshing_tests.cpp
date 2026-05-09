@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -55,6 +56,28 @@ arv::voxel::BlockRegistry make_model_registry() {
   return std::move(registry_result.value());
 }
 
+arv::voxel::BlockRegistry make_directional_model_registry() {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+
+  arv::voxel::BlockDefinition stairs;
+  stairs.name = "arvane:stone_stairs";
+  stairs.render_category = arv::voxel::RenderCategory::Opaque;
+  stairs.properties.solid = true;
+  stairs.properties.collidable = true;
+  stairs.properties.opaque = true;
+  stairs.properties.blocks_light = true;
+  stairs.properties.ao_occluder = true;
+  stairs.model.asset = "arvane:model/block/stairs";
+  stairs.states.push_back({"facing", {"north", "east"}});
+  stairs.states.push_back({"half", {"bottom", "top"}});
+  definitions.push_back(std::move(stairs));
+
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions));
+  EXPECT_TRUE(registry_result);
+  return std::move(registry_result.value());
+}
+
 arv::voxel::BlockRenderData make_slab_render_data(
     const arv::voxel::BlockRegistry& registry) {
   arv::voxel::BlockRenderData render_data =
@@ -74,6 +97,46 @@ arv::voxel::BlockRenderData make_slab_render_data(
   std::vector<arv::voxel::BlockModelBoxRenderData> boxes;
   boxes.push_back(std::move(box));
   render_data.set_model_boxes(slab, std::move(boxes));
+  return render_data;
+}
+
+arv::voxel::BlockRenderData make_stair_render_data(
+    const arv::voxel::BlockRegistry& registry) {
+  arv::voxel::BlockRenderData render_data =
+      arv::voxel::BlockRenderData::make_empty(registry.variant_count());
+
+  for (const std::string& name : {
+           "arvane:stone_stairs[facing=north,half=bottom]",
+           "arvane:stone_stairs[facing=north,half=top]",
+           "arvane:stone_stairs[facing=east,half=bottom]",
+           "arvane:stone_stairs[facing=east,half=top]",
+       }) {
+    const arv::voxel::BlockVariantID stairs = registry.find_variant(name).value();
+    const arv::voxel::BlockVariantRecord* variant = registry.variant(stairs);
+    const arv::voxel::BlockModelTransform transform =
+        variant == nullptr ? arv::voxel::BlockModelTransform{} : variant->model_transform;
+    render_data.set_model_center_origin(stairs, {8, 8, 8});
+
+    arv::voxel::BlockModelBoxRenderData lower;
+    lower.min = {0, 0, 0};
+    lower.max = {16, 8, 16};
+    arv::voxel::BlockModelBoxRenderData upper;
+    upper.min = {0, 8, 0};
+    upper.max = {16, 16, 8};
+    for (const arv::voxel::BlockFace face : arv::voxel::AllBlockFaces) {
+      const arv::usize index = arv::voxel::face_index(face);
+      arv::voxel::BlockModelFaceRenderData face_data;
+      face_data.uvs = arv::voxel::default_cube_face_uvs(face);
+      lower.faces[index] = face_data;
+      upper.faces[index] = face_data;
+    }
+    std::vector<arv::voxel::BlockModelBoxRenderData> boxes;
+    lower = arv::voxel::transform_model_box(lower, {8, 8, 8}, transform);
+    upper = arv::voxel::transform_model_box(upper, {8, 8, 8}, transform);
+    boxes.push_back(std::move(lower));
+    boxes.push_back(std::move(upper));
+    render_data.set_model_boxes(stairs, std::move(boxes));
+  }
   return render_data;
 }
 
@@ -279,6 +342,26 @@ TEST(ChunkMeshingTests, CustomBlockModelBoundaryFacesRespectNeighborOcclusion) {
       {{1, 1, 1}},
       {16, 0, 16},
       arv::voxel::BlockFace::PositiveX));
+}
+
+TEST(ChunkMeshingTests, DirectionalBlockModelRotationIsAppliedDuringMeshing) {
+  const arv::voxel::BlockRegistry registry = make_directional_model_registry();
+  const arv::voxel::BlockRenderData render_data = make_stair_render_data(registry);
+  const arv::voxel::BlockVariantID east_bottom =
+      registry.find_variant("arvane:stone_stairs[facing=east,half=bottom]").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, east_bottom));
+
+  const arv::voxel::ChunkSnapshot snapshot =
+      arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry, &render_data);
+
+  EXPECT_TRUE(find_vertex(
+      mesh.opaque,
+      {{1, 1, 1}},
+      {16, 16, 0},
+      arv::voxel::BlockFace::PositiveY));
 }
 
 TEST(ChunkMeshingTests, FluidCellsEmitIntoTransparentMesh) {

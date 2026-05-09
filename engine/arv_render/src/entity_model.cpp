@@ -418,6 +418,7 @@ EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
 
   EntityModelDefinition definition;
   definition.name = std::move(authored_model.value().name);
+  definition.center_origin = authored_model.value().center_origin;
   definition.texture_assets.reserve(authored_model.value().texture_assets.size());
   for (const std::string& texture : authored_model.value().texture_assets) {
     definition.texture_assets.push_back(normalize_entity_texture_asset(texture));
@@ -603,6 +604,7 @@ EntityModelAssetResult build_entity_model_asset(
   EntityModelAsset asset;
   asset.id = id;
   asset.name = definition.name;
+  asset.center_origin = blockbench_position_to_engine(definition.center_origin);
 
   HashMap<std::string, u32> bone_indices;
   const auto ensure_bone = [&](const std::string& bone_name, Vec3f pivot)

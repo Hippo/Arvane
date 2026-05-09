@@ -26,6 +26,7 @@ player::PlayerTuning make_player_tuning(const io::PhysicsConfig& physics) noexce
   tuning.sneaking_body_height = physics.sneaking_body_height;
   tuning.swimming_body_width = physics.swimming_body_width;
   tuning.swimming_body_height = physics.swimming_body_height;
+  tuning.step_height = physics.step_height;
   tuning.sneak_support_probe_depth = physics.sneak_support_probe_depth;
   tuning.collision_epsilon = physics.collision_epsilon;
   tuning.surface_swim_speed = physics.surface_swim_speed;

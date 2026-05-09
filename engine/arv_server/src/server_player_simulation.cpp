@@ -336,6 +336,7 @@ void ServerRuntimeImpl::apply_player_command(
   physics_config.sneaking_body_height = player_tuning_.sneaking_body_height;
   physics_config.swimming_body_width = player_tuning_.swimming_body_width;
   physics_config.swimming_body_height = player_tuning_.swimming_body_height;
+  physics_config.step_height = player_tuning_.step_height;
   physics_config.sneak_support_probe_depth = player_tuning_.sneak_support_probe_depth;
   physics_config.collision_epsilon = player_tuning_.collision_epsilon;
   physics_config.surface_swim_speed = player_tuning_.surface_swim_speed;

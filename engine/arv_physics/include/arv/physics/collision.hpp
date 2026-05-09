@@ -8,7 +8,6 @@
 #include "arv/voxel/fluid.hpp"
 
 #include <optional>
-#include <vector>
 
 namespace arv::physics {
 
@@ -23,8 +22,10 @@ public:
   [[nodiscard]] virtual voxel::FluidCell fluid_cell(BlockPos pos) const noexcept {
     return voxel::empty_fluid_cell();
   }
-  virtual void gather_collision_boxes(const Aabb3f& world_bounds, std::vector<Aabb3f>& out_boxes) const = 0;
-  virtual void gather_block_collision_boxes(BlockPos pos, std::vector<Aabb3f>& out_boxes) const = 0;
+  [[nodiscard]] virtual const voxel::BlockBody* block_body(BlockPos pos) const noexcept = 0;
+  [[nodiscard]] virtual bool missing_blocks_are_solid() const noexcept {
+    return true;
+  }
 };
 
 enum class LiquidContactState : u8 {
@@ -67,6 +68,7 @@ struct KinematicConfig {
   f32 sneaking_body_height{1.5F};
   f32 swimming_body_width{0.9F};
   f32 swimming_body_height{0.6F};
+  f32 step_height{0.6F};
   f32 sneak_support_probe_depth{0.05F};
   f32 collision_epsilon{CollisionEpsilon};
   f32 surface_swim_speed{2.5F};

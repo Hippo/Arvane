@@ -252,6 +252,7 @@ void append_command_result_to_chat(
   config.sneaking_body_height = physics.sneaking_body_height;
   config.swimming_body_width = physics.swimming_body_width;
   config.swimming_body_height = physics.swimming_body_height;
+  config.step_height = physics.step_height;
   return config;
 }
 

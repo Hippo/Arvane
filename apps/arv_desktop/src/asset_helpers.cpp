@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -130,13 +129,6 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
   return definition;
 }
 
-[[nodiscard]] Vec3i model_coord_to_render_coord(Vec3f value) noexcept {
-  return {
-      static_cast<i32>(std::lround(value.x)),
-      static_cast<i32>(std::lround(value.y)),
-      static_cast<i32>(std::lround(value.z))};
-}
-
 [[nodiscard]] std::string block_texture_for_face(
     const voxel::BlockVariantRecord& variant,
     voxel::BlockFace face) {
@@ -156,26 +148,6 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
         entry.unpadded_pixel_min.y + static_cast<i32>(v * static_cast<f32>(entry.height))};
   }
   return uvs;
-}
-
-[[nodiscard]] std::vector<voxel::BlockModelBoxRenderData> make_break_overlay_boxes(
-    const voxel::BlockModelDefinition& model) {
-  std::vector<voxel::BlockModelBoxRenderData> boxes;
-  boxes.reserve(model.boxes.size());
-  for (const voxel::BlockModelBoxDefinition& source : model.boxes) {
-    voxel::BlockModelBoxRenderData box;
-    box.min = model_coord_to_render_coord(source.min);
-    box.max = model_coord_to_render_coord(source.max);
-    for (const voxel::BlockFace face : voxel::AllBlockFaces) {
-      const usize index = voxel::face_index(face);
-      if (!source.faces[index].has_value() || source.faces[index]->texture_index < 0) {
-        continue;
-      }
-      box.faces[index] = voxel::BlockModelFaceRenderData{};
-    }
-    boxes.push_back(std::move(box));
-  }
-  return boxes;
 }
 
 } // namespace
@@ -306,6 +278,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     const entity::EntityRegistry& entity_registry,
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
+    const voxel::BlockRenderData& block_render_data,
     std::span<const asset::BlockModelAssetData> block_models,
     BlockOutlineRenderConfig outline_config,
     asset::TextureAtlasBuildOptions atlas_options) {
@@ -862,17 +835,18 @@ EntityRenderAssetsResult build_entity_render_assets(
       continue;
     }
 
-    const voxel::BlockModelDefinition* model_definition =
-        variant->model.asset.empty() ? nullptr : block_model_by_variant[variant_value];
     std::vector<voxel::BlockModelBoxRenderData> model_boxes;
     if (!variant->model.asset.empty()) {
+      const voxel::BlockModelDefinition* model_definition = block_model_by_variant[variant_value];
       if (model_definition == nullptr) {
         return EntityRenderAssetsResult::failure({variant->model.asset,
                                                   resources.resolve_asset_path({variant->model.asset}, asset::AssetKind::Model),
                                                   "build break overlay model",
                                                   "block model was not loaded"});
       }
-      model_boxes = make_break_overlay_boxes(*model_definition);
+      const std::span<const voxel::BlockModelBoxRenderData> cached_boxes =
+          block_render_data.model_boxes(variant_id);
+      model_boxes.assign(cached_boxes.begin(), cached_boxes.end());
     }
 
     for (usize stage = 0; stage < BreakStageTextureCount; ++stage) {

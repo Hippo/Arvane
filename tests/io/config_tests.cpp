@@ -100,6 +100,7 @@ physics:
   sneaking_body_height: 1.45
   swimming_body_width: 0.95
   swimming_body_height: 0.55
+  step_height: 0.7
   sneak_support_probe_depth: 0.06
   collision_epsilon: 0.002
   surface_swim_speed: 2.75
@@ -216,6 +217,7 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().physics.sneaking_body_height, 1.45F);
   EXPECT_FLOAT_EQ(result.value().physics.swimming_body_width, 0.95F);
   EXPECT_FLOAT_EQ(result.value().physics.swimming_body_height, 0.55F);
+  EXPECT_FLOAT_EQ(result.value().physics.step_height, 0.7F);
   EXPECT_FLOAT_EQ(result.value().physics.sneak_support_probe_depth, 0.06F);
   EXPECT_FLOAT_EQ(result.value().physics.collision_epsilon, 0.002F);
   EXPECT_FLOAT_EQ(result.value().physics.surface_swim_speed, 2.75F);

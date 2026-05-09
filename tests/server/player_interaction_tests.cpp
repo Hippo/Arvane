@@ -91,6 +91,28 @@ arv::voxel::BlockRegistry make_timed_break_block_registry() {
   return std::move(result.value());
 }
 
+arv::voxel::BlockRegistry make_stair_placement_block_registry() {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:stone"));
+
+  arv::voxel::BlockDefinition stairs;
+  stairs.name = "arvane:stone_stairs";
+  stairs.render_category = arv::voxel::RenderCategory::Opaque;
+  stairs.properties.solid = true;
+  stairs.properties.collidable = true;
+  stairs.properties.opaque = true;
+  stairs.properties.blocks_light = true;
+  stairs.properties.ao_occluder = true;
+  stairs.states.push_back({"facing", {"north", "south", "east", "west"}});
+  stairs.states.push_back({"half", {"bottom", "top"}});
+  definitions.push_back(std::move(stairs));
+
+  auto result = arv::voxel::BlockRegistry::build(std::move(definitions));
+  EXPECT_TRUE(result);
+  return std::move(result.value());
+}
+
 } // namespace
 
 TEST(PlayerInteractionTests, SecondaryPlaceFlowsThroughServerAuthorityAndConsumesHeldStack) {
@@ -126,6 +148,39 @@ TEST(PlayerInteractionTests, SecondaryPlaceFlowsThroughServerAuthorityAndConsume
   const arv::player::PlayerState& player_state = connected_player(server);
   ASSERT_TRUE(player_state.inventory.slot(0).has_value());
   EXPECT_EQ(player_state.inventory.slot(0)->count, 1U);
+}
+
+TEST(PlayerInteractionTests, StairPlacementResolvesFacingAndHalfState) {
+  const arv::voxel::BlockRegistry block_registry = make_stair_placement_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone = block_registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID east_top =
+      block_registry.find_variant("arvane:stone_stairs[facing=east,half=top]").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.block_breaking.hand_speed_multiplier = 1.0F;
+  ASSERT_TRUE(server.start(start_info));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, stone));
+  set_test_player_held_item(server, item_registry, "arvane:stone_stairs");
+
+  client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_EQ(server.voxel_world().get_block({{2, 1, 0}}), east_top);
 }
 
 TEST(PlayerInteractionTests, PrimaryBreakRemovesTargetBlockThroughServerAuthority) {

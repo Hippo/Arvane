@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace arv::physics {
 namespace {
@@ -183,13 +184,66 @@ struct RayAabbHit {
   return static_cast<i32>(std::floor(value));
 }
 
+void append_block_body_boxes(
+    const ICollisionQuery& query,
+    BlockPos pos,
+    std::vector<Aabb3f>& out_boxes) {
+  const Vec3f block_offset{
+      static_cast<f32>(pos.value.x),
+      static_cast<f32>(pos.value.y),
+      static_cast<f32>(pos.value.z)};
+
+  if (!query.is_block_loaded(pos)) {
+    if (query.missing_blocks_are_solid()) {
+      out_boxes.emplace_back(Aabb3f{block_offset, block_offset + Vec3f{1.0F, 1.0F, 1.0F}});
+    }
+    return;
+  }
+
+  const voxel::BlockBody* body = query.block_body(pos);
+  if (body == nullptr) {
+    return;
+  }
+
+  for (const Aabb3f& box : body->boxes) {
+    out_boxes.emplace_back(Aabb3f{box.min + block_offset, box.max + block_offset});
+  }
+}
+
+void collect_collision_boxes(
+    const ICollisionQuery& query,
+    const Aabb3f& world_bounds,
+    std::vector<Aabb3f>& out_boxes) {
+  const i32 min_x = floor_i32(world_bounds.min.x);
+  const i32 min_y = floor_i32(world_bounds.min.y);
+  const i32 min_z = floor_i32(world_bounds.min.z);
+  const i32 max_x = static_cast<i32>(std::ceil(world_bounds.max.x));
+  const i32 max_y = static_cast<i32>(std::ceil(world_bounds.max.y));
+  const i32 max_z = static_cast<i32>(std::ceil(world_bounds.max.z));
+  const i32 span_x = max_x > min_x ? max_x - min_x : 0;
+  const i32 span_y = max_y > min_y ? max_y - min_y : 0;
+  const i32 span_z = max_z > min_z ? max_z - min_z : 0;
+  out_boxes.reserve(
+      out_boxes.size() + static_cast<usize>(span_x) * static_cast<usize>(span_y) *
+                             static_cast<usize>(span_z));
+
+  for (i32 z = min_z; z < max_z; ++z) {
+    for (i32 y = min_y; y < max_y; ++y) {
+      for (i32 x = min_x; x < max_x; ++x) {
+        append_block_body_boxes(query, BlockPos{{x, y, z}}, out_boxes);
+      }
+    }
+  }
+}
+
 [[nodiscard]] bool is_space_clear(
     const ICollisionQuery& query,
     const Aabb3f& bounds,
     f32 collision_epsilon) {
   std::vector<Aabb3f> boxes;
   boxes.reserve(32);
-  query.gather_collision_boxes(
+  collect_collision_boxes(
+      query,
       {{bounds.min.x - collision_epsilon, bounds.min.y - collision_epsilon, bounds.min.z - collision_epsilon},
        {bounds.max.x + collision_epsilon, bounds.max.y + collision_epsilon, bounds.max.z + collision_epsilon}},
       boxes);
@@ -236,6 +290,80 @@ struct RayAabbHit {
   }
 
   return delta;
+}
+
+[[nodiscard]] f32 horizontal_delta_length_squared(Vec3f delta) noexcept {
+  return delta.x * delta.x + delta.z * delta.z;
+}
+
+[[nodiscard]] Aabb3f translated_bounds(const Aabb3f& bounds, Vec3f delta) noexcept {
+  return {
+      {bounds.min.x + delta.x, bounds.min.y + delta.y, bounds.min.z + delta.z},
+      {bounds.max.x + delta.x, bounds.max.y + delta.y, bounds.max.z + delta.z}};
+}
+
+[[nodiscard]] std::optional<MovementResolution> try_step_up(
+    const ICollisionQuery& query,
+    const Aabb3f& bounds,
+    Vec3f attempted_delta,
+    const MovementResolution& normal_movement,
+    f32 step_height,
+    f32 collision_epsilon) {
+  const Vec3f horizontal_delta{attempted_delta.x, 0.0F, attempted_delta.z};
+  if (step_height <= collision_epsilon ||
+      horizontal_delta_length_squared(horizontal_delta) <= collision_epsilon * collision_epsilon ||
+      !(normal_movement.hit_x || normal_movement.hit_z)) {
+    return std::nullopt;
+  }
+
+  const MovementResolution lift = resolve_movement(
+      query,
+      bounds,
+      {0.0F, step_height, 0.0F},
+      collision_epsilon);
+  if (lift.applied_delta.y <= collision_epsilon) {
+    return std::nullopt;
+  }
+
+  const Aabb3f lifted_bounds = translated_bounds(bounds, lift.applied_delta);
+  const MovementResolution horizontal = resolve_movement(
+      query,
+      lifted_bounds,
+      horizontal_delta,
+      collision_epsilon);
+  const f32 normal_horizontal_distance =
+      horizontal_delta_length_squared(normal_movement.applied_delta);
+  const f32 stepped_horizontal_distance =
+      horizontal_delta_length_squared(horizontal.applied_delta);
+  if (horizontal.hit_x || horizontal.hit_z ||
+      stepped_horizontal_distance <= normal_horizontal_distance + collision_epsilon * collision_epsilon) {
+    return std::nullopt;
+  }
+
+  const Aabb3f after_horizontal = translated_bounds(lifted_bounds, horizontal.applied_delta);
+  const MovementResolution settle = resolve_movement(
+      query,
+      after_horizontal,
+      {0.0F, -lift.applied_delta.y, 0.0F},
+      collision_epsilon);
+  const Aabb3f settled_bounds = translated_bounds(after_horizontal, settle.applied_delta);
+  if (!settle.hit_down && !has_support_below(query, settled_bounds, collision_epsilon * 2.0F)) {
+    return std::nullopt;
+  }
+
+  MovementResolution stepped;
+  stepped.attempted_delta = attempted_delta;
+  stepped.applied_delta = {
+      horizontal.applied_delta.x,
+      lift.applied_delta.y + settle.applied_delta.y,
+      horizontal.applied_delta.z};
+  stepped.hit_x = horizontal.hit_x;
+  stepped.hit_y = lift.hit_y || settle.hit_y;
+  stepped.hit_z = horizontal.hit_z;
+  stepped.hit_down = settle.hit_down;
+  stepped.grounded = true;
+  stepped.resolved_bounds = settled_bounds;
+  return stepped;
 }
 
 [[nodiscard]] PlayerCollisionPose pose_from_body(const KinematicBody& body) noexcept {
@@ -365,7 +493,8 @@ MovementResolution resolve_movement(
   std::vector<Aabb3f> boxes;
   boxes.reserve(64);
   const Aabb3f broad = swept_bounds(bounds, delta);
-  query.gather_collision_boxes(
+  collect_collision_boxes(
+      query,
       {{broad.min.x - collision_epsilon, broad.min.y - collision_epsilon, broad.min.z - collision_epsilon},
        {broad.max.x + collision_epsilon, broad.max.y + collision_epsilon, broad.max.z + collision_epsilon}},
       boxes);
@@ -408,7 +537,7 @@ bool has_support_below(
   Aabb3f probe{
       {bounds.min.x, bounds.min.y - probe_depth, bounds.min.z},
       {bounds.max.x, bounds.min.y, bounds.max.z}};
-  query.gather_collision_boxes(probe, boxes);
+  collect_collision_boxes(query, probe, boxes);
 
   for (const Aabb3f& box : boxes) {
     const bool overlaps_horizontally =
@@ -585,11 +714,23 @@ KinematicStepResult step_kinematic_body(
     }
   }
 
-  const MovementResolution movement = resolve_movement(
+  MovementResolution movement = resolve_movement(
       query,
       active_bounds,
       movement_delta,
       config.collision_epsilon);
+  if (!input.fly_mode && !liquid_movement && body.grounded && movement_delta.y <= config.collision_epsilon) {
+    if (std::optional<MovementResolution> stepped = try_step_up(
+            query,
+            active_bounds,
+            movement_delta,
+            movement,
+            config.step_height,
+            config.collision_epsilon);
+        stepped.has_value()) {
+      movement = stepped.value();
+    }
+  }
 
   next.position = body.position + movement.applied_delta;
   next.grounded = !input.fly_mode && !liquid_movement && movement.grounded;
@@ -652,7 +793,7 @@ std::optional<BlockRaycastHit> raycast_blocks(
   for (usize iteration = 0; iteration < MaxIterations; ++iteration) {
     const BlockPos block{{x, y, z}};
     boxes.clear();
-    query.gather_block_collision_boxes(block, boxes);
+    append_block_body_boxes(query, block, boxes);
     if (!boxes.empty()) {
       const voxel::BlockVariantID variant = query.block_variant(block);
       std::optional<RayAabbHit> closest_hit;

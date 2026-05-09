@@ -32,7 +32,7 @@
       "max_stack_size": 1,
       "buoyancy": 1.0,
       "render_type": "texture",
-      "texture": "arvane:texture/item/pickaxe",
+      "texture": "arvane:texture/item/shovel",
       "held_animations": {
         "secondary_use_start": null
       },

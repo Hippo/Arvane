@@ -185,6 +185,7 @@ struct PhysicsConfig {
   f32 sneaking_body_height{1.5F};
   f32 swimming_body_width{0.9F};
   f32 swimming_body_height{0.6F};
+  f32 step_height{0.6F};
   f32 sneak_support_probe_depth{0.05F};
   f32 collision_epsilon{0.001F};
   f32 surface_swim_speed{2.5F};
