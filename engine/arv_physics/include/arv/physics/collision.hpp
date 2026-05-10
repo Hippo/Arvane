@@ -122,6 +122,12 @@ struct BlockRaycastHit {
   f32 distance{};
 };
 
+struct RayAabbHit {
+  voxel::BlockFace face{voxel::BlockFace::PositiveY};
+  f32 distance{};
+  Vec3f hit_point{};
+};
+
 [[nodiscard]] Aabb3f make_body_bounds(Vec3f position, const KinematicConfig& config) noexcept;
 [[nodiscard]] Aabb3f make_body_bounds(
     Vec3f position,
@@ -151,6 +157,11 @@ struct BlockRaycastHit {
     const ICollisionQuery& query,
     const Aabb3f& bounds,
     f32 probe_depth = CollisionEpsilon * 2.0F);
+[[nodiscard]] std::optional<RayAabbHit> ray_intersects_aabb(
+    Vec3f origin,
+    Vec3f direction,
+    Aabb3f bounds,
+    f32 max_distance) noexcept;
 [[nodiscard]] std::optional<BlockRaycastHit> raycast_blocks(
     const ICollisionQuery& query,
     Vec3f origin,

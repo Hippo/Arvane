@@ -19,6 +19,27 @@ std::vector<arv::voxel::BlockDefinition> minimal_definitions() {
 
 } // namespace
 
+TEST(BlockRegistryTests, BlockFaceOffsetMatchesFaceDirections) {
+  EXPECT_EQ(
+      arv::voxel::block_face_offset(arv::voxel::BlockFace::PositiveX),
+      (arv::Vec3i{1, 0, 0}));
+  EXPECT_EQ(
+      arv::voxel::block_face_offset(arv::voxel::BlockFace::NegativeX),
+      (arv::Vec3i{-1, 0, 0}));
+  EXPECT_EQ(
+      arv::voxel::block_face_offset(arv::voxel::BlockFace::PositiveY),
+      (arv::Vec3i{0, 1, 0}));
+  EXPECT_EQ(
+      arv::voxel::block_face_offset(arv::voxel::BlockFace::NegativeY),
+      (arv::Vec3i{0, -1, 0}));
+  EXPECT_EQ(
+      arv::voxel::block_face_offset(arv::voxel::BlockFace::PositiveZ),
+      (arv::Vec3i{0, 0, 1}));
+  EXPECT_EQ(
+      arv::voxel::block_face_offset(arv::voxel::BlockFace::NegativeZ),
+      (arv::Vec3i{0, 0, -1}));
+}
+
 TEST(BlockRegistryTests, AssignsAirToZeroAndPreservesAirInvariants) {
   auto registry_result = arv::voxel::BlockRegistry::build(minimal_definitions());
   ASSERT_TRUE(registry_result);

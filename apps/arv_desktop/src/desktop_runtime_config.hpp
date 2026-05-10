@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/io/config.hpp"
+#include "arv/physics/collision.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/sched/scheduler.hpp"
 #include "arv/server/chunk_streamer.hpp"
@@ -10,6 +11,9 @@
 namespace arv::desktop {
 
 [[nodiscard]] player::PlayerTuning make_player_tuning(
+    const io::PhysicsConfig& physics) noexcept;
+
+[[nodiscard]] physics::KinematicConfig make_local_placement_kinematic_config(
     const io::PhysicsConfig& physics) noexcept;
 
 [[nodiscard]] server::ServerChunkStreamingConfig make_chunk_streaming_config(

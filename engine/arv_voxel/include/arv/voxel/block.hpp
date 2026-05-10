@@ -43,6 +43,24 @@ inline constexpr std::array<BlockFace, BlockFaceCount> AllBlockFaces{{
     BlockFace::NegativeZ,
 }};
 
+[[nodiscard]] constexpr Vec3i block_face_offset(BlockFace face) noexcept {
+  switch (face) {
+    case BlockFace::PositiveX:
+      return {1, 0, 0};
+    case BlockFace::NegativeX:
+      return {-1, 0, 0};
+    case BlockFace::PositiveY:
+      return {0, 1, 0};
+    case BlockFace::NegativeY:
+      return {0, -1, 0};
+    case BlockFace::PositiveZ:
+      return {0, 0, 1};
+    case BlockFace::NegativeZ:
+      return {0, 0, -1};
+  }
+  return {};
+}
+
 enum class RenderCategory : u8 {
   None,
   Opaque,

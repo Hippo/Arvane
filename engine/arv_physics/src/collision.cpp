@@ -14,12 +14,6 @@ enum class Axis {
   Z,
 };
 
-struct RayAabbHit {
-  voxel::BlockFace face{voxel::BlockFace::PositiveY};
-  f32 distance{};
-  Vec3f hit_point{};
-};
-
 [[nodiscard]] f32 min_component(f32 a, f32 b) noexcept {
   return a < b ? a : b;
 }
@@ -130,74 +124,6 @@ struct RayAabbHit {
       {max_component(bounds.max.x, bounds.max.x + delta.x),
        max_component(bounds.max.y, bounds.max.y + delta.y),
        max_component(bounds.max.z, bounds.max.z + delta.z)}};
-}
-
-[[nodiscard]] std::optional<RayAabbHit> intersect_ray_aabb(
-    Vec3f origin,
-    Vec3f direction,
-    const Aabb3f& box,
-    f32 max_distance) noexcept {
-  f32 t_min = 0.0F;
-  f32 t_max = max_distance;
-  voxel::BlockFace entry_face = voxel::BlockFace::PositiveY;
-
-  auto update_axis = [&](f32 origin_axis,
-                         f32 direction_axis,
-                         f32 min_axis,
-                         f32 max_axis,
-                         voxel::BlockFace min_face,
-                         voxel::BlockFace max_face) -> bool {
-    constexpr f32 ParallelThreshold = 1.0e-6F;
-    if (std::abs(direction_axis) <= ParallelThreshold) {
-      return origin_axis >= min_axis && origin_axis <= max_axis;
-    }
-
-    const f32 inverse = 1.0F / direction_axis;
-    f32 t1 = (min_axis - origin_axis) * inverse;
-    f32 t2 = (max_axis - origin_axis) * inverse;
-    voxel::BlockFace face = min_face;
-    if (t1 > t2) {
-      std::swap(t1, t2);
-      face = max_face;
-    }
-
-    if (t1 > t_min) {
-      t_min = t1;
-      entry_face = face;
-    }
-    t_max = std::min(t_max, t2);
-    return t_min <= t_max;
-  };
-
-  if (!update_axis(
-          origin.x,
-          direction.x,
-          box.min.x,
-          box.max.x,
-          voxel::BlockFace::NegativeX,
-          voxel::BlockFace::PositiveX) ||
-      !update_axis(
-          origin.y,
-          direction.y,
-          box.min.y,
-          box.max.y,
-          voxel::BlockFace::NegativeY,
-          voxel::BlockFace::PositiveY) ||
-      !update_axis(
-          origin.z,
-          direction.z,
-          box.min.z,
-          box.max.z,
-          voxel::BlockFace::NegativeZ,
-          voxel::BlockFace::PositiveZ)) {
-    return std::nullopt;
-  }
-
-  if (t_min < 0.0F || t_min > max_distance) {
-    return std::nullopt;
-  }
-
-  return RayAabbHit{entry_face, t_min, origin + direction * t_min};
 }
 
 [[nodiscard]] i32 floor_i32(f32 value) noexcept {
@@ -476,6 +402,79 @@ struct LiquidContactProbe {
 }
 
 } // namespace
+
+std::optional<RayAabbHit> ray_intersects_aabb(
+    Vec3f origin,
+    Vec3f direction,
+    Aabb3f bounds,
+    f32 max_distance) noexcept {
+  direction = normalize_or_zero(direction);
+  if (direction == Vec3f{}) {
+    return std::nullopt;
+  }
+
+  f32 t_min = 0.0F;
+  f32 t_max = max_distance;
+  voxel::BlockFace entry_face = voxel::BlockFace::PositiveY;
+
+  auto update_axis = [&](f32 origin_axis,
+                         f32 direction_axis,
+                         f32 min_axis,
+                         f32 max_axis,
+                         voxel::BlockFace min_face,
+                         voxel::BlockFace max_face) -> bool {
+    constexpr f32 ParallelThreshold = 1.0e-6F;
+    if (std::abs(direction_axis) <= ParallelThreshold) {
+      return origin_axis >= min_axis && origin_axis <= max_axis;
+    }
+
+    const f32 inverse = 1.0F / direction_axis;
+    f32 t1 = (min_axis - origin_axis) * inverse;
+    f32 t2 = (max_axis - origin_axis) * inverse;
+    voxel::BlockFace face = min_face;
+    if (t1 > t2) {
+      std::swap(t1, t2);
+      face = max_face;
+    }
+
+    if (t1 > t_min) {
+      t_min = t1;
+      entry_face = face;
+    }
+    t_max = std::min(t_max, t2);
+    return t_min <= t_max;
+  };
+
+  if (!update_axis(
+          origin.x,
+          direction.x,
+          bounds.min.x,
+          bounds.max.x,
+          voxel::BlockFace::NegativeX,
+          voxel::BlockFace::PositiveX) ||
+      !update_axis(
+          origin.y,
+          direction.y,
+          bounds.min.y,
+          bounds.max.y,
+          voxel::BlockFace::NegativeY,
+          voxel::BlockFace::PositiveY) ||
+      !update_axis(
+          origin.z,
+          direction.z,
+          bounds.min.z,
+          bounds.max.z,
+          voxel::BlockFace::NegativeZ,
+          voxel::BlockFace::PositiveZ)) {
+    return std::nullopt;
+  }
+
+  if (t_min < 0.0F || t_min > max_distance) {
+    return std::nullopt;
+  }
+
+  return RayAabbHit{entry_face, t_min, origin + direction * t_min};
+}
 
 Aabb3f make_body_bounds(Vec3f position, const KinematicConfig& config) noexcept {
   return make_body_bounds(position, config, PlayerCollisionPose::Standing);
@@ -838,7 +837,7 @@ std::optional<BlockRaycastHit> raycast_blocks(
       const voxel::BlockVariantID variant = query.block_variant(block);
       std::optional<RayAabbHit> closest_hit;
       for (const Aabb3f& box : boxes) {
-        auto hit = intersect_ray_aabb(origin, direction, box, max_distance);
+        auto hit = ray_intersects_aabb(origin, direction, box, max_distance);
         if (!hit.has_value()) {
           continue;
         }

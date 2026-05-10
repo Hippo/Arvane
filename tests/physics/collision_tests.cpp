@@ -240,6 +240,70 @@ TEST(PhysicsTests, RaycastReturnsMissBeyondReachLimit) {
   EXPECT_FALSE(hit.has_value());
 }
 
+TEST(PhysicsTests, RayIntersectsAabbReturnsDistanceFaceAndPoint) {
+  const std::optional<arv::physics::RayAabbHit> hit =
+      arv::physics::ray_intersects_aabb(
+          {0.0F, 1.5F, 1.5F},
+          {1.0F, 0.0F, 0.0F},
+          {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}},
+          5.0F);
+
+  ASSERT_TRUE(hit.has_value());
+  EXPECT_EQ(hit->face, arv::voxel::BlockFace::NegativeX);
+  EXPECT_NEAR(hit->distance, 1.0F, 0.0001F);
+  EXPECT_NEAR(hit->hit_point.x, 1.0F, 0.0001F);
+  EXPECT_NEAR(hit->hit_point.y, 1.5F, 0.0001F);
+  EXPECT_NEAR(hit->hit_point.z, 1.5F, 0.0001F);
+}
+
+TEST(PhysicsTests, RayIntersectsAabbMissesBeyondMaxDistance) {
+  const std::optional<arv::physics::RayAabbHit> hit =
+      arv::physics::ray_intersects_aabb(
+          {0.0F, 1.5F, 1.5F},
+          {1.0F, 0.0F, 0.0F},
+          {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}},
+          0.5F);
+
+  EXPECT_FALSE(hit.has_value());
+}
+
+TEST(PhysicsTests, RayIntersectsAabbMissesWhenParallelOutsideBounds) {
+  const std::optional<arv::physics::RayAabbHit> hit =
+      arv::physics::ray_intersects_aabb(
+          {0.0F, 3.0F, 1.5F},
+          {1.0F, 0.0F, 0.0F},
+          {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}},
+          5.0F);
+
+  EXPECT_FALSE(hit.has_value());
+}
+
+TEST(PhysicsTests, RayIntersectsAabbReturnsZeroDistanceFromInsideBounds) {
+  const std::optional<arv::physics::RayAabbHit> hit =
+      arv::physics::ray_intersects_aabb(
+          {1.5F, 1.5F, 1.5F},
+          {1.0F, 0.0F, 0.0F},
+          {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}},
+          5.0F);
+
+  ASSERT_TRUE(hit.has_value());
+  EXPECT_NEAR(hit->distance, 0.0F, 0.0001F);
+  EXPECT_NEAR(hit->hit_point.x, 1.5F, 0.0001F);
+  EXPECT_NEAR(hit->hit_point.y, 1.5F, 0.0001F);
+  EXPECT_NEAR(hit->hit_point.z, 1.5F, 0.0001F);
+}
+
+TEST(PhysicsTests, RayIntersectsAabbRejectsZeroDirection) {
+  const std::optional<arv::physics::RayAabbHit> hit =
+      arv::physics::ray_intersects_aabb(
+          {1.5F, 1.5F, 1.5F},
+          {},
+          {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}},
+          5.0F);
+
+  EXPECT_FALSE(hit.has_value());
+}
+
 TEST(PhysicsTests, SneakingPreventsWalkingOffSupportedLedge) {
   const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();

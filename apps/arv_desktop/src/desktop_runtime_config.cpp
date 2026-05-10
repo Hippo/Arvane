@@ -46,6 +46,18 @@ player::PlayerTuning make_player_tuning(const io::PhysicsConfig& physics) noexce
   return tuning;
 }
 
+physics::KinematicConfig make_local_placement_kinematic_config(
+    const io::PhysicsConfig& physics) noexcept {
+  physics::KinematicConfig config;
+  config.body_width = physics.body_width;
+  config.body_height = physics.body_height;
+  config.sneaking_body_height = physics.sneaking_body_height;
+  config.swimming_body_width = physics.swimming_body_width;
+  config.swimming_body_height = physics.swimming_body_height;
+  config.step_height = physics.step_height;
+  return config;
+}
+
 server::ServerChunkStreamingConfig make_chunk_streaming_config(
     const io::EngineConfig& config) noexcept {
   server::ServerChunkStreamingConfig chunk_streaming;

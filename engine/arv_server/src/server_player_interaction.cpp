@@ -10,30 +10,6 @@
 namespace arv::server::detail {
 namespace {
 
-[[nodiscard]] BlockPos offset_block(BlockPos pos, voxel::BlockFace face) noexcept {
-  switch (face) {
-    case voxel::BlockFace::PositiveX:
-      ++pos.value.x;
-      break;
-    case voxel::BlockFace::NegativeX:
-      --pos.value.x;
-      break;
-    case voxel::BlockFace::PositiveY:
-      ++pos.value.y;
-      break;
-    case voxel::BlockFace::NegativeY:
-      --pos.value.y;
-      break;
-    case voxel::BlockFace::PositiveZ:
-      ++pos.value.z;
-      break;
-    case voxel::BlockFace::NegativeZ:
-      --pos.value.z;
-      break;
-  }
-  return pos;
-}
-
 [[nodiscard]] i32 floor_i32(f32 value) noexcept {
   return static_cast<i32>(std::floor(value));
 }
@@ -453,7 +429,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       BlockPos place_pos = hit->block;
       const voxel::BlockVariantID target_variant = default_world_.get_block(hit->block);
       if (!block_registry_->is_replaceable(target_variant)) {
-        place_pos = offset_block(place_pos, hit->face);
+        place_pos.value = place_pos.value + voxel::block_face_offset(hit->face);
       }
       if (!interaction_query.is_block_loaded(place_pos)) {
         return;
@@ -494,7 +470,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
     BlockPos place_pos = hit->block;
     const voxel::BlockVariantID target_variant = default_world_.get_block(hit->block);
     if (!block_registry_->is_replaceable(target_variant)) {
-      place_pos = offset_block(place_pos, hit->face);
+      place_pos.value = place_pos.value + voxel::block_face_offset(hit->face);
     }
 
     if (!interaction_query.is_block_loaded(place_pos)) {

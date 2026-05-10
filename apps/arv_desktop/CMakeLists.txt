@@ -5,13 +5,20 @@ set(ARV_CLIENT_SOURCES
   src/chunk_view.cpp
   src/desktop_application.cpp
   src/desktop_assets.cpp
+  src/desktop_chat_commands.cpp
   src/desktop_frame_pacing.cpp
+  src/desktop_frame_loop.cpp
+  src/desktop_gameplay_interactions.cpp
   src/desktop_input_routing.cpp
   src/desktop_menu_state.cpp
+  src/desktop_menu_commands.cpp
   src/desktop_render_builders.cpp
   src/desktop_runtime_config.cpp
   src/desktop_save_helpers.cpp
   src/desktop_session.cpp
+  src/desktop_simulation.cpp
+  src/desktop_skin_textures.cpp
+  src/desktop_ui_runtime.cpp
   src/debug_imgui.cpp
   src/debug_menu.cpp
   src/input_adapter.cpp
