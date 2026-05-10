@@ -6,6 +6,7 @@
 #include "arv/player/player_state.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_type.hpp"
 #include "arv/protocol/player_input.hpp"
@@ -36,6 +37,8 @@ public:
 
   net::NetworkResult send_inventory_action(
       protocol::ServerboundInventoryActionRequest request);
+  net::NetworkResult send_attack_entity(
+      const protocol::ServerboundAttackEntity& attack);
 
   net::NetworkResult send_skin_request(const protocol::ServerboundSkinRequest& request);
   net::NetworkResult send_skin_upload_begin(

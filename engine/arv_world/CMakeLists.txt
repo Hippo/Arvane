@@ -25,6 +25,7 @@ add_library(arv_world STATIC
   src/world_lighting_runtime.cpp
   src/world_entity_store.cpp
   src/world_entity_components.cpp
+  src/world_entity_damage.cpp
   src/world_entity_simulation.cpp
   src/world_player_store.cpp
   src/world_region_runtime.cpp

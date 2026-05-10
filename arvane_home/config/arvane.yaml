@@ -43,6 +43,7 @@ physics:
   sprint_speed: 6.0
   sneak_speed: 2.25
   air_speed: 3.5
+  air_control_acceleration_per_second: 10.0
   fly_speed: 8.0
   fly_vertical_speed: 6.0
   jump_velocity: 8.5
@@ -77,6 +78,20 @@ gameplay:
   dropped_items:
     pickup_radius: 1.25
     pickup_delay_seconds: 0.5
+  combat:
+    default_attack_damage: 1.0
+    default_attack_range: 3.0
+    default_attack_cooldown_seconds: 0.35
+    attack_validation_grace_blocks: 3.0
+    max_attack_validation_range: 6.0
+    existing_horizontal_retention: 0.45
+    base_horizontal_knockback: 8.0
+    sprint_horizontal_bonus: 3.0
+    base_vertical_knockback: 7.0
+    airborne_vertical_knockback: 5.0
+    vertical_knockback_cap: 9.0
+    knockback_control_suppression_ticks: 2
+    use_current_block_obstruction_check: false
 chunk_pipeline:
   max_generation_jobs_per_frame: 4
   max_generation_results_per_tick: 2

@@ -34,6 +34,11 @@ struct ReplicatedEntityMirror {
   std::string animation_name{};
   Seconds animation_time_seconds{};
   Vec3f head_rotation_degrees{};
+  bool has_health{};
+  f32 health_current{};
+  f32 health_max{};
+  bool dead{};
+  bool invulnerable{};
 };
 
 struct DroppedItemMirror {
@@ -44,6 +49,12 @@ struct DroppedItemMirror {
   Vec3f velocity{};
   player::ItemStack stack{};
   u64 last_server_tick{};
+};
+
+struct ClientAttackFeedback {
+  EntityNetID target_entity{};
+  Vec3f target_position{};
+  u32 sequence{};
 };
 
 class ClientRuntime {
@@ -102,6 +113,8 @@ public:
       player::InventoryClickButton button);
   net::NetworkResult request_inventory_drop_cursor(bool one_item);
   net::NetworkResult request_inventory_close();
+  net::NetworkResult request_attack_entity(EntityNetID target_entity);
+  [[nodiscard]] std::vector<ClientAttackFeedback> drain_attack_feedback();
   [[nodiscard]] usize replicated_entity_count() const noexcept;
   [[nodiscard]] const ReplicatedEntityMirror* find_replicated_entity(
       EntityNetID entity_id) const noexcept;

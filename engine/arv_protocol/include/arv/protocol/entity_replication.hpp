@@ -41,7 +41,13 @@ struct EntitySnapshotEntry {
   std::string animation_name{};
   Seconds animation_time_seconds{};
   Vec3f head_rotation_degrees{};
+  f32 health_current{};
+  f32 health_max{};
 };
+
+inline constexpr u32 EntityStateFlagHasHealth = 1U << 0U;
+inline constexpr u32 EntityStateFlagDead = 1U << 1U;
+inline constexpr u32 EntityStateFlagInvulnerable = 1U << 2U;
 
 struct ClientboundEntitySnapshot {
   WorldID world_id{};

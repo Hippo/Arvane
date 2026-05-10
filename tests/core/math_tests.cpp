@@ -42,3 +42,14 @@ TEST(MathTests, AabbOverlapUsesOpenBounds) {
   EXPECT_TRUE(a.overlaps(overlapping));
   EXPECT_FALSE(a.overlaps(touching));
 }
+
+TEST(MathTests, DistanceSquaredPointToAabbUsesClosestPoint) {
+  const arv::Aabb3f bounds{{1.0F, 2.0F, 3.0F}, {4.0F, 6.0F, 8.0F}};
+
+  EXPECT_FLOAT_EQ(
+      arv::distance_squared_point_to_aabb({2.0F, 3.0F, 4.0F}, bounds),
+      0.0F);
+  EXPECT_FLOAT_EQ(
+      arv::distance_squared_point_to_aabb({0.0F, 3.0F, 10.0F}, bounds),
+      5.0F);
+}

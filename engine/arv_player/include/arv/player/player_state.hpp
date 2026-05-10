@@ -54,6 +54,7 @@ struct PlayerState {
   std::optional<ItemStack> inventory_cursor_stack{};
   u8 selected_hotbar_slot{};
   TickIndex last_processed_input_tick{};
+  u32 knockback_control_suppression_ticks{};
 };
 
 struct PlayerViewState {

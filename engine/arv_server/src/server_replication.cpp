@@ -1,5 +1,6 @@
 #include "server_runtime_internal.hpp"
 
+#include <optional>
 #include <utility>
 
 namespace arv::server::detail {
@@ -8,13 +9,14 @@ namespace {
 [[nodiscard]] protocol::ClientboundPlayerCorrection make_player_correction(
     TickIndex server_tick,
     const player::PlayerState& player_state,
+    Vec3f external_velocity,
     const protocol::BlockBreakProgress* block_break = nullptr) {
   protocol::ClientboundPlayerCorrection correction;
   correction.server_tick = server_tick;
   correction.player_id = player_state.player_id;
   correction.world_id = player_state.world_id;
   correction.position = player_state.position;
-  correction.velocity = player_state.velocity;
+  correction.velocity = player_state.velocity + external_velocity;
   correction.yaw_radians = player_state.yaw_radians;
   correction.pitch_radians = player_state.pitch_radians;
   correction.movement_mode = player_state.movement_mode;
@@ -77,6 +79,7 @@ void ServerRuntimeImpl::send_player_corrections() {
     protocol::ClientboundPlayerCorrection correction = make_player_correction(
         tick_index_,
         *player_state,
+        {},
         block_break.active ? &block_break : nullptr);
     if (const auto found = last_sent_player_corrections_.find(player_state->player_id);
         found != last_sent_player_corrections_.end() &&
@@ -204,6 +207,17 @@ void ServerRuntimeImpl::send_entity_replication() {
       entry.velocity = snapshot.velocity;
       entry.rotation = snapshot.rotation;
       entry.state_flags = 0U;
+      if (snapshot.has_health) {
+        entry.state_flags |= protocol::EntityStateFlagHasHealth;
+        if (snapshot.health_current <= 0.0F) {
+          entry.state_flags |= protocol::EntityStateFlagDead;
+        }
+        if (snapshot.health_invulnerable) {
+          entry.state_flags |= protocol::EntityStateFlagInvulnerable;
+        }
+        entry.health_current = snapshot.health_current;
+        entry.health_max = snapshot.health_max;
+      }
       entry.animation_name = snapshot.animation_name;
       entry.animation_time_seconds = snapshot.animation_time_seconds;
       entry.head_rotation_degrees = snapshot.head_rotation_degrees;

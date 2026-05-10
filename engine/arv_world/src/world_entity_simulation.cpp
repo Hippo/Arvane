@@ -10,6 +10,8 @@
 namespace arv::world::detail {
 namespace {
 
+inline constexpr f32 AirborneIntentBlend = 0.10F;
+
 [[nodiscard]] bool is_idle_goal(std::string_view type) noexcept {
   return type == "arvane:idle";
 }
@@ -523,7 +525,8 @@ u32 WorldEntitySimulation::tick_entity_physics(
       transform.previous_rotation = transform.rotation;
       transform.position = transform.position + velocity.linear * tick_seconds;
       if (has_horizontal_motion(velocity.linear)) {
-        transform.rotation = yaw_rotation(model_yaw_from_horizontal_direction(velocity.linear));
+        transform.rotation =
+            yaw_rotation(model_yaw_from_horizontal_direction(velocity.linear));
       }
       entities.update_chunk(handle);
       ++updated;
@@ -549,22 +552,34 @@ u32 WorldEntitySimulation::tick_entity_physics(
     entity::MovementIntent* intent = registry.try_get<entity::MovementIntent>(handle);
     const entity::EntityMovement* movement = registry.try_get<entity::EntityMovement>(handle);
 
+    const Aabb3f bounds = entity_body_bounds(transform.position, collision.box);
+    const bool has_ground_support = physics::has_support_below(
+        collision_query,
+        bounds,
+        physics_config.collision_epsilon * 2.0F);
+    const bool grounded =
+        has_ground_support && velocity.linear.y <= physics_config.collision_epsilon;
+
     if (intent != nullptr && movement != nullptr) {
       const Vec3f direction = normalize_or_zero(intent->desired_direction);
       const f32 speed = std::max(0.0F, movement->walk_speed) *
                         std::max(0.0F, intent->speed_multiplier);
-      velocity.linear.x = direction.x * speed;
-      velocity.linear.z = direction.z * speed;
+      if (grounded) {
+        velocity.linear.x = direction.x * speed;
+        velocity.linear.z = direction.z * speed;
+      } else {
+        velocity.linear.x =
+            velocity.linear.x * (1.0F - AirborneIntentBlend) +
+            direction.x * speed * AirborneIntentBlend;
+        velocity.linear.z =
+            velocity.linear.z * (1.0F - AirborneIntentBlend) +
+            direction.z * speed * AirborneIntentBlend;
+      }
       if (direction.y > 0.0F) {
         velocity.linear.y = std::max(velocity.linear.y, direction.y * speed);
       }
     }
 
-    const Aabb3f bounds = entity_body_bounds(transform.position, collision.box);
-    const bool grounded = physics::has_support_below(
-        collision_query,
-        bounds,
-        physics_config.collision_epsilon * 2.0F);
     if (!grounded) {
       velocity.linear.y = std::max(
           velocity.linear.y - physics_config.gravity_per_second * tick_seconds,

@@ -65,6 +65,7 @@ enum class MessageType : u16 {
   ClientboundEntityDespawn = 0x0601,
   ClientboundEntitySnapshot = 0x0602,
   ClientboundDroppedItemSnapshot = 0x0603,
+  ServerboundAttackEntity = 0x0604,
   ServerboundInventoryActionRequest = 0x0800,
   ClientboundInventoryUpdate = 0x0801,
 };

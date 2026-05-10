@@ -188,6 +188,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   player_tuning_ = start_info.player_tuning;
   block_breaking_ = start_info.block_breaking;
   dropped_items_ = start_info.dropped_items;
+  combat_ = start_info.combat;
   skins_ = start_info.skins;
   skin_transfers_.clear();
   active_skin_uploads_global_ = 0U;
@@ -271,6 +272,7 @@ void ServerRuntimeImpl::tick() {
   tick_dropped_item_pickups(tick_seconds);
   update_world_simulation_activity();
   (void)default_world_.tick(*block_registry_, fluid_definition_);
+  process_pending_entity_attacks();
   world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
   world_jobs_.schedule_lighting_jobs(default_world_, block_registry_);
   tick_chunk_streaming();

@@ -142,6 +142,10 @@ void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
   read_scalar(physics, "sprint_speed", config.sprint_speed);
   read_scalar(physics, "sneak_speed", config.sneak_speed);
   read_scalar(physics, "air_speed", config.air_speed);
+  read_scalar(
+      physics,
+      "air_control_acceleration_per_second",
+      config.air_control_acceleration_per_second);
   read_scalar(physics, "fly_speed", config.fly_speed);
   read_scalar(physics, "fly_vertical_speed", config.fly_vertical_speed);
   read_scalar(physics, "jump_velocity", config.jump_velocity);
@@ -197,6 +201,56 @@ void read_gameplay_config(const YAML::Node& gameplay, GameplayConfig& config) {
         dropped_items,
         "pickup_delay_seconds",
         config.dropped_items.pickup_delay_seconds);
+  }
+
+  const YAML::Node combat = gameplay["combat"];
+  if (combat) {
+    read_scalar(combat, "default_attack_damage", config.combat.default_attack_damage);
+    read_scalar(combat, "default_attack_range", config.combat.default_attack_range);
+    read_scalar(
+        combat,
+        "default_attack_cooldown_seconds",
+        config.combat.default_attack_cooldown_seconds);
+    read_scalar(
+        combat,
+        "attack_validation_grace_blocks",
+        config.combat.attack_validation_grace_blocks);
+    read_scalar(
+        combat,
+        "max_attack_validation_range",
+        config.combat.max_attack_validation_range);
+    read_scalar(
+        combat,
+        "existing_horizontal_retention",
+        config.combat.existing_horizontal_retention);
+    read_scalar(
+        combat,
+        "base_horizontal_knockback",
+        config.combat.base_horizontal_knockback);
+    read_scalar(
+        combat,
+        "sprint_horizontal_bonus",
+        config.combat.sprint_horizontal_bonus);
+    read_scalar(
+        combat,
+        "base_vertical_knockback",
+        config.combat.base_vertical_knockback);
+    read_scalar(
+        combat,
+        "airborne_vertical_knockback",
+        config.combat.airborne_vertical_knockback);
+    read_scalar(
+        combat,
+        "vertical_knockback_cap",
+        config.combat.vertical_knockback_cap);
+    read_scalar(
+        combat,
+        "knockback_control_suppression_ticks",
+        config.combat.knockback_control_suppression_ticks);
+    read_scalar(
+        combat,
+        "use_current_block_obstruction_check",
+        config.combat.use_current_block_obstruction_check);
   }
 }
 
@@ -531,6 +585,8 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "sprint_speed" << YAML::Value << config.physics.sprint_speed;
   emitter << YAML::Key << "sneak_speed" << YAML::Value << config.physics.sneak_speed;
   emitter << YAML::Key << "air_speed" << YAML::Value << config.physics.air_speed;
+  emitter << YAML::Key << "air_control_acceleration_per_second" << YAML::Value
+          << config.physics.air_control_acceleration_per_second;
   emitter << YAML::Key << "fly_speed" << YAML::Value << config.physics.fly_speed;
   emitter << YAML::Key << "fly_vertical_speed" << YAML::Value
           << config.physics.fly_vertical_speed;
@@ -592,6 +648,34 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
           << config.gameplay.dropped_items.pickup_radius;
   emitter << YAML::Key << "pickup_delay_seconds" << YAML::Value
           << config.gameplay.dropped_items.pickup_delay_seconds;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "combat" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "default_attack_damage" << YAML::Value
+          << config.gameplay.combat.default_attack_damage;
+  emitter << YAML::Key << "default_attack_range" << YAML::Value
+          << config.gameplay.combat.default_attack_range;
+  emitter << YAML::Key << "default_attack_cooldown_seconds" << YAML::Value
+          << config.gameplay.combat.default_attack_cooldown_seconds;
+  emitter << YAML::Key << "attack_validation_grace_blocks" << YAML::Value
+          << config.gameplay.combat.attack_validation_grace_blocks;
+  emitter << YAML::Key << "max_attack_validation_range" << YAML::Value
+          << config.gameplay.combat.max_attack_validation_range;
+  emitter << YAML::Key << "existing_horizontal_retention" << YAML::Value
+          << config.gameplay.combat.existing_horizontal_retention;
+  emitter << YAML::Key << "base_horizontal_knockback" << YAML::Value
+          << config.gameplay.combat.base_horizontal_knockback;
+  emitter << YAML::Key << "sprint_horizontal_bonus" << YAML::Value
+          << config.gameplay.combat.sprint_horizontal_bonus;
+  emitter << YAML::Key << "base_vertical_knockback" << YAML::Value
+          << config.gameplay.combat.base_vertical_knockback;
+  emitter << YAML::Key << "airborne_vertical_knockback" << YAML::Value
+          << config.gameplay.combat.airborne_vertical_knockback;
+  emitter << YAML::Key << "vertical_knockback_cap" << YAML::Value
+          << config.gameplay.combat.vertical_knockback_cap;
+  emitter << YAML::Key << "knockback_control_suppression_ticks" << YAML::Value
+          << config.gameplay.combat.knockback_control_suppression_ticks;
+  emitter << YAML::Key << "use_current_block_obstruction_check" << YAML::Value
+          << config.gameplay.combat.use_current_block_obstruction_check;
   emitter << YAML::EndMap;
   emitter << YAML::EndMap;
 
@@ -874,6 +958,8 @@ ConfigResult save_default_shared_config_file(
   emitter << YAML::Key << "sprint_speed" << YAML::Value << config.physics.sprint_speed;
   emitter << YAML::Key << "sneak_speed" << YAML::Value << config.physics.sneak_speed;
   emitter << YAML::Key << "air_speed" << YAML::Value << config.physics.air_speed;
+  emitter << YAML::Key << "air_control_acceleration_per_second" << YAML::Value
+          << config.physics.air_control_acceleration_per_second;
   emitter << YAML::Key << "fly_speed" << YAML::Value << config.physics.fly_speed;
   emitter << YAML::Key << "fly_vertical_speed" << YAML::Value
           << config.physics.fly_vertical_speed;
@@ -935,6 +1021,34 @@ ConfigResult save_default_shared_config_file(
           << config.gameplay.dropped_items.pickup_radius;
   emitter << YAML::Key << "pickup_delay_seconds" << YAML::Value
           << config.gameplay.dropped_items.pickup_delay_seconds;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "combat" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "default_attack_damage" << YAML::Value
+          << config.gameplay.combat.default_attack_damage;
+  emitter << YAML::Key << "default_attack_range" << YAML::Value
+          << config.gameplay.combat.default_attack_range;
+  emitter << YAML::Key << "default_attack_cooldown_seconds" << YAML::Value
+          << config.gameplay.combat.default_attack_cooldown_seconds;
+  emitter << YAML::Key << "attack_validation_grace_blocks" << YAML::Value
+          << config.gameplay.combat.attack_validation_grace_blocks;
+  emitter << YAML::Key << "max_attack_validation_range" << YAML::Value
+          << config.gameplay.combat.max_attack_validation_range;
+  emitter << YAML::Key << "existing_horizontal_retention" << YAML::Value
+          << config.gameplay.combat.existing_horizontal_retention;
+  emitter << YAML::Key << "base_horizontal_knockback" << YAML::Value
+          << config.gameplay.combat.base_horizontal_knockback;
+  emitter << YAML::Key << "sprint_horizontal_bonus" << YAML::Value
+          << config.gameplay.combat.sprint_horizontal_bonus;
+  emitter << YAML::Key << "base_vertical_knockback" << YAML::Value
+          << config.gameplay.combat.base_vertical_knockback;
+  emitter << YAML::Key << "airborne_vertical_knockback" << YAML::Value
+          << config.gameplay.combat.airborne_vertical_knockback;
+  emitter << YAML::Key << "vertical_knockback_cap" << YAML::Value
+          << config.gameplay.combat.vertical_knockback_cap;
+  emitter << YAML::Key << "knockback_control_suppression_ticks" << YAML::Value
+          << config.gameplay.combat.knockback_control_suppression_ticks;
+  emitter << YAML::Key << "use_current_block_obstruction_check" << YAML::Value
+          << config.gameplay.combat.use_current_block_obstruction_check;
   emitter << YAML::EndMap;
   emitter << YAML::EndMap;
 
@@ -1292,6 +1406,7 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
            std::pair{std::string_view{"physics.sprint_speed"}, config.physics.sprint_speed},
            std::pair{std::string_view{"physics.sneak_speed"}, config.physics.sneak_speed},
            std::pair{std::string_view{"physics.air_speed"}, config.physics.air_speed},
+           std::pair{std::string_view{"physics.air_control_acceleration_per_second"}, config.physics.air_control_acceleration_per_second},
            std::pair{std::string_view{"physics.fly_speed"}, config.physics.fly_speed},
            std::pair{std::string_view{"physics.fly_vertical_speed"}, config.physics.fly_vertical_speed},
            std::pair{std::string_view{"physics.jump_velocity"}, config.physics.jump_velocity},
@@ -1356,6 +1471,51 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   if (!std::isfinite(config.gameplay.dropped_items.pickup_delay_seconds) ||
       config.gameplay.dropped_items.pickup_delay_seconds < 0.0F) {
     return ConfigError{"gameplay.dropped_items.pickup_delay_seconds must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.default_attack_damage) ||
+      config.gameplay.combat.default_attack_damage <= 0.0F) {
+    return ConfigError{"gameplay.combat.default_attack_damage must be finite and > 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.default_attack_range) ||
+      config.gameplay.combat.default_attack_range <= 0.0F) {
+    return ConfigError{"gameplay.combat.default_attack_range must be finite and > 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.default_attack_cooldown_seconds) ||
+      config.gameplay.combat.default_attack_cooldown_seconds < 0.0F) {
+    return ConfigError{"gameplay.combat.default_attack_cooldown_seconds must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.attack_validation_grace_blocks) ||
+      config.gameplay.combat.attack_validation_grace_blocks < 0.0F) {
+    return ConfigError{"gameplay.combat.attack_validation_grace_blocks must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.max_attack_validation_range) ||
+      config.gameplay.combat.max_attack_validation_range <= 0.0F) {
+    return ConfigError{"gameplay.combat.max_attack_validation_range must be finite and > 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.existing_horizontal_retention) ||
+      config.gameplay.combat.existing_horizontal_retention < 0.0F ||
+      config.gameplay.combat.existing_horizontal_retention > 1.0F) {
+    return ConfigError{"gameplay.combat.existing_horizontal_retention must be finite and in [0, 1]"};
+  }
+  if (!std::isfinite(config.gameplay.combat.base_horizontal_knockback) ||
+      config.gameplay.combat.base_horizontal_knockback < 0.0F) {
+    return ConfigError{"gameplay.combat.base_horizontal_knockback must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.sprint_horizontal_bonus) ||
+      config.gameplay.combat.sprint_horizontal_bonus < 0.0F) {
+    return ConfigError{"gameplay.combat.sprint_horizontal_bonus must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.base_vertical_knockback) ||
+      config.gameplay.combat.base_vertical_knockback < 0.0F) {
+    return ConfigError{"gameplay.combat.base_vertical_knockback must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.airborne_vertical_knockback) ||
+      config.gameplay.combat.airborne_vertical_knockback < 0.0F) {
+    return ConfigError{"gameplay.combat.airborne_vertical_knockback must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.gameplay.combat.vertical_knockback_cap) ||
+      config.gameplay.combat.vertical_knockback_cap < 0.0F) {
+    return ConfigError{"gameplay.combat.vertical_knockback_cap must be finite and >= 0"};
   }
   if (config.render.max_chunk_mesh_uploads_per_frame == 0U) {
     return ConfigError{"render.max_chunk_mesh_uploads_per_frame must be non-zero"};

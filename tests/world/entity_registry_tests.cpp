@@ -21,7 +21,7 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
         "arvane:transform": {},
         "arvane:collision": { "box": [0.9, 0.9, 0.9] },
         "arvane:movement": { "walk_speed": 1.2 },
-        "arvane:health": { "max": 10 },
+        "arvane:health": { "max": 10, "current": 6, "invulnerable": true },
         "arvane:brain": {
           "behavior": "arvane:pig_behavior",
           "tick_rate": 5,
@@ -78,6 +78,9 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
   EXPECT_FLOAT_EQ(pig->components.movement->walk_speed, 1.2F);
   ASSERT_TRUE(pig->components.health.has_value());
   EXPECT_FLOAT_EQ(pig->components.health->max, 10.0F);
+  ASSERT_TRUE(pig->components.health->current.has_value());
+  EXPECT_FLOAT_EQ(pig->components.health->current.value(), 6.0F);
+  EXPECT_TRUE(pig->components.health->invulnerable);
   ASSERT_TRUE(pig->components.brain.has_value());
   EXPECT_EQ(pig->components.brain->behavior, "arvane:pig_behavior");
   EXPECT_EQ(pig->components.brain->tick_interval, 5U);

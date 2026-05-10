@@ -141,8 +141,42 @@ void merge_explicit_definition(EntityDefinition& target, EntityDefinition source
       components.movement = movement;
     } else if (component_id == HealthComponentID) {
       AuthoredHealthComponent health;
-      health.max = data.value("max", 1.0F);
+      const auto max = data.find("max");
+      if (max != data.end()) {
+        if (!max->is_number()) {
+          return Expected<EntityComponentSet, EntityRegistryError>::failure(
+              {"health max must be a number"});
+        }
+        health.max = max->get<f32>();
+      }
+      const auto current = data.find("current");
+      if (current != data.end()) {
+        if (!current->is_number()) {
+          return Expected<EntityComponentSet, EntityRegistryError>::failure(
+              {"health current must be a number"});
+        }
+        health.current = current->get<f32>();
+      }
+      const auto invulnerable = data.find("invulnerable");
+      if (invulnerable != data.end()) {
+        if (!invulnerable->is_boolean()) {
+          return Expected<EntityComponentSet, EntityRegistryError>::failure(
+              {"health invulnerable must be a boolean"});
+        }
+        health.invulnerable = invulnerable->get<bool>();
+      }
       components.health = health;
+    } else if (component_id == KnockbackResistanceComponentID) {
+      AuthoredKnockbackResistanceComponent resistance;
+      const auto amount = data.find("resistance");
+      if (amount != data.end()) {
+        if (!amount->is_number()) {
+          return Expected<EntityComponentSet, EntityRegistryError>::failure(
+              {"knockback resistance must be a number"});
+        }
+        resistance.resistance = amount->get<f32>();
+      }
+      components.knockback_resistance = resistance;
     } else if (component_id == BrainComponentID) {
       AuthoredBrainComponent brain;
       brain.behavior = data.value("behavior", std::string{});

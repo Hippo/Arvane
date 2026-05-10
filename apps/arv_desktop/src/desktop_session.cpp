@@ -231,6 +231,32 @@ bool DesktopSessionManager::start_singleplayer(
       dependencies_.config.gameplay.dropped_items.pickup_radius;
   server_start_info.dropped_items.pickup_delay_seconds =
       dependencies_.config.gameplay.dropped_items.pickup_delay_seconds;
+  server_start_info.combat.default_attack_damage =
+      dependencies_.config.gameplay.combat.default_attack_damage;
+  server_start_info.combat.default_attack_range =
+      dependencies_.config.gameplay.combat.default_attack_range;
+  server_start_info.combat.default_attack_cooldown_seconds =
+      dependencies_.config.gameplay.combat.default_attack_cooldown_seconds;
+  server_start_info.combat.attack_validation_grace_blocks =
+      dependencies_.config.gameplay.combat.attack_validation_grace_blocks;
+  server_start_info.combat.max_attack_validation_range =
+      dependencies_.config.gameplay.combat.max_attack_validation_range;
+  server_start_info.combat.existing_horizontal_retention =
+      dependencies_.config.gameplay.combat.existing_horizontal_retention;
+  server_start_info.combat.base_horizontal_knockback =
+      dependencies_.config.gameplay.combat.base_horizontal_knockback;
+  server_start_info.combat.sprint_horizontal_bonus =
+      dependencies_.config.gameplay.combat.sprint_horizontal_bonus;
+  server_start_info.combat.base_vertical_knockback =
+      dependencies_.config.gameplay.combat.base_vertical_knockback;
+  server_start_info.combat.airborne_vertical_knockback =
+      dependencies_.config.gameplay.combat.airborne_vertical_knockback;
+  server_start_info.combat.vertical_knockback_cap =
+      dependencies_.config.gameplay.combat.vertical_knockback_cap;
+  server_start_info.combat.knockback_control_suppression_ticks =
+      dependencies_.config.gameplay.combat.knockback_control_suppression_ticks;
+  server_start_info.combat.use_current_block_obstruction_check =
+      dependencies_.config.gameplay.combat.use_current_block_obstruction_check;
 
   auto transport_pair = net::make_in_process_transport_pair();
   auto integrated_server =

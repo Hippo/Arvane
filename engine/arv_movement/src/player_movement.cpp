@@ -49,6 +49,8 @@ physics::KinematicConfig kinematic_config_from_tuning(
   config.sprint_speed = tuning.sprint_speed;
   config.sneak_speed = tuning.sneak_speed;
   config.air_speed = tuning.air_speed;
+  config.air_control_acceleration_per_second =
+      tuning.air_control_acceleration_per_second;
   config.fly_speed = tuning.fly_speed;
   config.fly_vertical_speed = tuning.fly_vertical_speed;
   config.jump_velocity = tuning.jump_velocity;

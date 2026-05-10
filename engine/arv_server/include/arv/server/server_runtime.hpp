@@ -13,6 +13,7 @@
 #include "arv/player/player_state.hpp"
 #include "arv/sched/scheduler.hpp"
 #include "arv/server/chunk_streamer.hpp"
+#include "arv/server/server_combat.hpp"
 #include "arv/server/session_registry.hpp"
 #include "arv/server/world_registry.hpp"
 #include "arv/voxel/fluid.hpp"
@@ -99,6 +100,7 @@ struct ServerStartInfo {
   std::span<const ServerPlayerSaveState> saved_players{};
   BlockBreakingConfig block_breaking{};
   DroppedItemsConfig dropped_items{};
+  CombatConfig combat{};
   io::SkinConfig skins{};
 };
 

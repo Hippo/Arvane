@@ -5,6 +5,7 @@ set(ARV_SERVER_HEADERS
   include/arv/server/dedicated_lifetime.hpp
   include/arv/server/permission_config.hpp
   include/arv/server/player_profile.hpp
+  include/arv/server/server_combat.hpp
   include/arv/server/server_commands.hpp
   include/arv/server/session_registry.hpp
   include/arv/server/skin_runtime.hpp
@@ -20,6 +21,7 @@ add_library(arv_server STATIC
   src/server_commands.cpp
   src/server_chunk_jobs.cpp
   src/server_chunk_streaming_runtime.cpp
+  src/server_combat.cpp
   src/server_dropped_items.cpp
   src/server_inventory_runtime.cpp
   src/server_network_messages.cpp

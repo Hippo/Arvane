@@ -23,6 +23,16 @@
       "tool": {
         "category": "pickaxe",
         "break_speed_multiplier": 4.0
+      },
+      "components": {
+        "damage": {
+          "amount": 3.0,
+          "range": 3.0,
+          "cooldown_seconds": 0.35,
+          "horizontal_knockback": 8.0,
+          "vertical_knockback": 7.0,
+          "sprint_knockback_bonus": 3.0
+        }
       }
     },
     {
@@ -39,6 +49,16 @@
       "tool": {
         "category": "shovel",
         "break_speed_multiplier": 4.0
+      },
+      "components": {
+        "damage": {
+          "amount": 2.0,
+          "range": 3.0,
+          "cooldown_seconds": 0.35,
+          "horizontal_knockback": 8.0,
+          "vertical_knockback": 7.0,
+          "sprint_knockback_bonus": 3.0
+        }
       }
     },
     {

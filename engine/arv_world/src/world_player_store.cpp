@@ -24,7 +24,13 @@ player::PlayerState& WorldPlayerStore::ensure_player(
   info.replicated = true;
   info.owning_player = player_id;
   const EntityID entity_id = entities.create_entity(std::move(info));
-  return entities.registry().get<player::PlayerState>(entities.handle(entity_id));
+  const entt::entity handle = entities.handle(entity_id);
+  (void)entities.registry().get_or_emplace<entity::EntityHealth>(
+      handle,
+      20.0F,
+      20.0F,
+      false);
+  return entities.registry().get<player::PlayerState>(handle);
 }
 
 player::PlayerState* WorldPlayerStore::find_player(

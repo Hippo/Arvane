@@ -496,6 +496,7 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
           {true, "Players", "footer", {players.data(), players.size()}},
           {true, "Stats", {scoreboard_lines.data(), scoreboard_lines.size()}, &vars},
           {true, 144},
+          {true, 18.0F, 20.0F, 1.0F, {800.0F, 600.0F}},
       });
   tree.layout({800.0F, 600.0F}, &text);
 
@@ -519,6 +520,17 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   const auto* scoreboard_line = tree.find_by_stable_id("scoreboard.line.0");
   ASSERT_NE(scoreboard_line, nullptr);
   EXPECT_EQ(scoreboard_line->text, "Health: 20");
+  const auto* health = tree.find_by_stable_id("hud.health");
+  ASSERT_NE(health, nullptr);
+  EXPECT_EQ(health->children.size(), 20U);
+  ASSERT_NE(tree.find_by_stable_id("hud.health.segment.17"), nullptr);
+  ASSERT_NE(tree.find_by_stable_id("hud.health.segment.19"), nullptr);
+  EXPECT_EQ(
+      tree.find_by_stable_id("hud.health.segment.17")->style.background,
+      tree.theme().colors.danger);
+  EXPECT_NE(
+      tree.find_by_stable_id("hud.health.segment.19")->style.background,
+      tree.theme().colors.danger);
   const auto* fps = tree.find_by_stable_id("hud.debug.fps");
   ASSERT_NE(fps, nullptr);
   EXPECT_EQ(fps->text, "FPS: 144");

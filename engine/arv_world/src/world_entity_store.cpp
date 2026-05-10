@@ -266,6 +266,16 @@ const entity::EntityHealth* WorldEntityStore::find_health(EntityID entity_id) co
   return find_component<entity::EntityHealth>(registry_, handle(entity_id));
 }
 
+entity::KnockbackResistanceComponent* WorldEntityStore::find_knockback_resistance(
+    EntityID entity_id) noexcept {
+  return find_component<entity::KnockbackResistanceComponent>(registry_, handle(entity_id));
+}
+
+const entity::KnockbackResistanceComponent* WorldEntityStore::find_knockback_resistance(
+    EntityID entity_id) const noexcept {
+  return find_component<entity::KnockbackResistanceComponent>(registry_, handle(entity_id));
+}
+
 entity::BrainComponent* WorldEntityStore::find_brain(EntityID entity_id) noexcept {
   return find_component<entity::BrainComponent>(registry_, handle(entity_id));
 }
@@ -439,6 +449,13 @@ std::vector<entity::EntitySnapshotEntry> WorldEntityStore::collect_entity_snapsh
           radians_to_degrees(pose->head_pitch_radians),
           radians_to_degrees(pose->head_yaw_radians),
           0.0F};
+    }
+    if (const auto* health = registry_.try_get<entity::EntityHealth>(entity_handle);
+        health != nullptr) {
+      entry.has_health = true;
+      entry.health_current = health->current;
+      entry.health_max = health->max;
+      entry.health_invulnerable = health->invulnerable;
     }
     snapshots.emplace_back(std::move(entry));
   }
@@ -658,6 +675,16 @@ entity::EntityHealth* WorldRuntime::find_entity_health(EntityID entity_id) noexc
 
 const entity::EntityHealth* WorldRuntime::find_entity_health(EntityID entity_id) const noexcept {
   return impl_->entities.find_health(entity_id);
+}
+
+entity::KnockbackResistanceComponent* WorldRuntime::find_entity_knockback_resistance(
+    EntityID entity_id) noexcept {
+  return impl_->entities.find_knockback_resistance(entity_id);
+}
+
+const entity::KnockbackResistanceComponent* WorldRuntime::find_entity_knockback_resistance(
+    EntityID entity_id) const noexcept {
+  return impl_->entities.find_knockback_resistance(entity_id);
 }
 
 entity::BrainComponent* WorldRuntime::find_entity_brain(EntityID entity_id) noexcept {

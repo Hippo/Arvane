@@ -16,6 +16,7 @@ inline constexpr f32 DefaultWalkSpeed = 4.5F;
 inline constexpr f32 DefaultSprintSpeed = 6.0F;
 inline constexpr f32 DefaultSneakSpeed = 2.25F;
 inline constexpr f32 DefaultAirSpeed = 3.5F;
+inline constexpr f32 DefaultAirControlAccelerationPerSecond = 10.0F;
 inline constexpr f32 DefaultFlySpeed = 8.0F;
 inline constexpr f32 DefaultFlyVerticalSpeed = 6.0F;
 inline constexpr f32 DefaultJumpVelocity = 8.5F;
@@ -54,6 +55,7 @@ struct PlayerTuning {
   f32 sprint_speed{DefaultSprintSpeed};
   f32 sneak_speed{DefaultSneakSpeed};
   f32 air_speed{DefaultAirSpeed};
+  f32 air_control_acceleration_per_second{DefaultAirControlAccelerationPerSecond};
   f32 fly_speed{DefaultFlySpeed};
   f32 fly_vertical_speed{DefaultFlyVerticalSpeed};
   f32 jump_velocity{DefaultJumpVelocity};

@@ -179,6 +179,29 @@ TEST(PhysicsTests, HeldJumpLaunchesWhenGrounded) {
   EXPECT_FALSE(result.body.grounded);
 }
 
+TEST(PhysicsTests, AirborneMovementPreservesHorizontalVelocityWithLimitedControl) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  ensure_loaded_chunk(world, {{0, 0, 0}});
+
+  const arv::world::WorldCollisionQuery query(world, registry, false);
+  arv::physics::KinematicConfig config;
+  config.air_speed = 3.0F;
+  config.air_control_acceleration_per_second = 9.0F;
+
+  const arv::physics::KinematicStepResult result = arv::physics::step_kinematic_body(
+      query,
+      {{0.5F, 3.0F, 0.5F}, {8.0F, 4.0F, 0.0F}, false, false},
+      0.0F,
+      1.0F / 30.0F,
+      {},
+      config);
+
+  EXPECT_GT(result.body.velocity.x, 7.0F);
+  EXPECT_GT(result.body.position.x, 0.73F);
+  EXPECT_FALSE(result.body.grounded);
+}
+
 TEST(PhysicsTests, RaycastHitsTargetBlockWithinReach) {
   const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();

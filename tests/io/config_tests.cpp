@@ -90,6 +90,7 @@ physics:
   sprint_speed: 7.0
   sneak_speed: 2.0
   air_speed: 3.0
+  air_control_acceleration_per_second: 12.0
   fly_speed: 9.0
   fly_vertical_speed: 7.0
   jump_velocity: 9.0
@@ -124,6 +125,20 @@ gameplay:
   dropped_items:
     pickup_radius: 1.75
     pickup_delay_seconds: 0.2
+  combat:
+    default_attack_damage: 1.5
+    default_attack_range: 3.25
+    default_attack_cooldown_seconds: 0.4
+    attack_validation_grace_blocks: 2.75
+    max_attack_validation_range: 6.5
+    existing_horizontal_retention: 0.5
+    base_horizontal_knockback: 4.25
+    sprint_horizontal_bonus: 1.25
+    base_vertical_knockback: 6.75
+    airborne_vertical_knockback: 4.5
+    vertical_knockback_cap: 8.25
+    knockback_control_suppression_ticks: 3
+    use_current_block_obstruction_check: true
 render:
   max_chunk_mesh_uploads_per_frame: 3
   frame_pacing_enabled: true
@@ -207,6 +222,9 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().physics.sprint_speed, 7.0F);
   EXPECT_FLOAT_EQ(result.value().physics.sneak_speed, 2.0F);
   EXPECT_FLOAT_EQ(result.value().physics.air_speed, 3.0F);
+  EXPECT_FLOAT_EQ(
+      result.value().physics.air_control_acceleration_per_second,
+      12.0F);
   EXPECT_FLOAT_EQ(result.value().physics.fly_speed, 9.0F);
   EXPECT_FLOAT_EQ(result.value().physics.fly_vertical_speed, 7.0F);
   EXPECT_FLOAT_EQ(result.value().physics.jump_velocity, 9.0F);
@@ -238,6 +256,19 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().gameplay.block_breaking.wrong_tool_speed_multiplier, 0.1F);
   EXPECT_FLOAT_EQ(result.value().gameplay.dropped_items.pickup_radius, 1.75F);
   EXPECT_FLOAT_EQ(result.value().gameplay.dropped_items.pickup_delay_seconds, 0.2F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.default_attack_damage, 1.5F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.default_attack_range, 3.25F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.default_attack_cooldown_seconds, 0.4F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.attack_validation_grace_blocks, 2.75F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.max_attack_validation_range, 6.5F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.existing_horizontal_retention, 0.5F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.base_horizontal_knockback, 4.25F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.sprint_horizontal_bonus, 1.25F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.base_vertical_knockback, 6.75F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.airborne_vertical_knockback, 4.5F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.vertical_knockback_cap, 8.25F);
+  EXPECT_EQ(result.value().gameplay.combat.knockback_control_suppression_ticks, 3U);
+  EXPECT_TRUE(result.value().gameplay.combat.use_current_block_obstruction_check);
   EXPECT_EQ(result.value().render.max_chunk_mesh_uploads_per_frame, 3U);
   EXPECT_TRUE(result.value().render.frame_pacing_enabled);
   EXPECT_EQ(result.value().render.frame_pacing_target_fps, 120U);

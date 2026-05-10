@@ -8,6 +8,7 @@
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
@@ -104,6 +105,11 @@ struct PlayerPermissionCache {
   Vec3f last_region_position{};
   std::vector<world::RegionID> active_regions{};
   player::PermissionLayer region_layer{};
+};
+
+struct PendingEntityAttack {
+  SessionID session_id{};
+  protocol::ServerboundAttackEntity attack{};
 };
 
 class ServerWorldJobRuntime {
@@ -246,6 +252,9 @@ struct ServerRuntimeImpl {
   void handle_inventory_action_request(
       net::ConnectionID connection_id,
       const protocol::ServerboundInventoryActionRequest& request);
+  void handle_attack_entity(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundAttackEntity& attack);
   void handle_skin_request(
       net::ConnectionID connection_id,
       const protocol::ServerboundSkinRequest& request);
@@ -310,6 +319,7 @@ struct ServerRuntimeImpl {
   void send_entity_replication();
   void send_dropped_item_replication();
   void send_inventory_updates();
+  void process_pending_entity_attacks();
   [[nodiscard]] protocol::ClientboundInventoryUpdate make_inventory_update(
       const player::PlayerState& player_state,
       u32 revision) const;
@@ -346,6 +356,7 @@ struct ServerRuntimeImpl {
   player::PlayerTuning player_tuning_{};
   BlockBreakingConfig block_breaking_{};
   DroppedItemsConfig dropped_items_{};
+  CombatConfig combat_{};
   io::SkinConfig skins_{};
   voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
   ServerChunkStreamer chunk_streamer_{};
@@ -357,8 +368,10 @@ struct ServerRuntimeImpl {
   u64 permission_config_revision_{};
   HashMap<PlayerID, PlayerPermissionCache> permission_caches_;
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
+  std::vector<PendingEntityAttack> pending_entity_attacks_;
   HashMap<PlayerID, protocol::ClientboundPlayerCorrection> last_sent_player_corrections_;
   HashMap<PlayerID, BlockBreakAttempt> block_break_attempts_;
+  HashMap<SessionID, PlayerCombatState> combat_states_;
   HashSet<SessionID> logged_chunk_interest_sessions_;
   HashSet<SessionID> logged_chunk_delivery_sessions_;
   ServerPlayerSaveCache player_saves_;

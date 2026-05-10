@@ -58,6 +58,7 @@ struct KinematicConfig {
   f32 sprint_speed{6.0F};
   f32 sneak_speed{2.25F};
   f32 air_speed{3.5F};
+  f32 air_control_acceleration_per_second{10.0F};
   f32 fly_speed{8.0F};
   f32 fly_vertical_speed{6.0F};
   f32 jump_velocity{8.5F};

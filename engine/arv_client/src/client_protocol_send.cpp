@@ -2,6 +2,7 @@
 
 #include "arv/crypto/hash.hpp"
 #include "arv/protocol/auth.hpp"
+#include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/player_input.hpp"
@@ -126,6 +127,21 @@ net::NetworkResult ClientProtocolSender::send_inventory_action(
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Gameplay,
       protocol::serialize_serverbound_inventory_action_request(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_attack_entity(
+    const protocol::ServerboundAttackEntity& attack) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundAttackEntity,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_attack_entity(attack));
 }
 
 net::NetworkResult ClientProtocolSender::send_skin_request(

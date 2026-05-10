@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <optional>
 #include <utility>
 
 namespace {
@@ -140,6 +141,79 @@ TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {
   EXPECT_TRUE(animation->name.empty());
 }
 
+TEST(WorldEntityTests, HealthDamageAndInvulnerabilityAreCentralized) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::world::EntityCreateInfo source_info;
+  source_info.position = {0.0F, 0.0F, 0.0F};
+  const arv::EntityID source = world.create_entity(std::move(source_info));
+
+  arv::entity::EntityComponentSet components;
+  components.health = arv::entity::AuthoredHealthComponent{
+      10.0F,
+      8.0F,
+      false};
+  arv::world::EntityCreateInfo target_info;
+  target_info.position = {1.0F, 0.0F, 0.0F};
+  target_info.authored_components = components;
+  const arv::EntityID target = world.create_entity(std::move(target_info));
+
+  const arv::world::DamageResult first = world.apply_damage({
+      source,
+      target,
+      3.0F,
+      arv::world::DamageCause::EntityAttack});
+  EXPECT_TRUE(first.applied);
+  EXPECT_FALSE(first.killed);
+  EXPECT_FLOAT_EQ(first.previous_health, 8.0F);
+  EXPECT_FLOAT_EQ(first.new_health, 5.0F);
+
+  arv::entity::EntityHealth* health = world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 5.0F);
+  health->invulnerable = true;
+
+  const arv::world::DamageResult invulnerable = world.apply_damage({
+      source,
+      target,
+      3.0F,
+      arv::world::DamageCause::EntityAttack});
+  EXPECT_FALSE(invulnerable.applied);
+  EXPECT_FLOAT_EQ(invulnerable.new_health, 5.0F);
+
+  health->invulnerable = false;
+  const arv::world::DamageResult lethal = world.apply_damage({
+      source,
+      target,
+      8.0F,
+      arv::world::DamageCause::EntityAttack});
+  EXPECT_TRUE(lethal.applied);
+  EXPECT_TRUE(lethal.killed);
+  EXPECT_FLOAT_EQ(lethal.new_health, 0.0F);
+}
+
+TEST(WorldEntityTests, PlayerLethalDamageAutoRespawnsWithFullHealth) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  const arv::EntityID source = world.create_entity();
+  (void)world.ensure_player(arv::PlayerID{1});
+  const std::optional<arv::EntityID> target =
+      world.entity_for_player(arv::PlayerID{1});
+  ASSERT_TRUE(target.has_value());
+  arv::entity::EntityHealth* health = world.find_entity_health(target.value());
+  ASSERT_NE(health, nullptr);
+  health->current = 2.0F;
+
+  const arv::world::DamageResult lethal = world.apply_damage({
+      source,
+      target.value(),
+      3.0F,
+      arv::world::DamageCause::EntityAttack});
+
+  EXPECT_TRUE(lethal.applied);
+  EXPECT_TRUE(lethal.killed);
+  EXPECT_FLOAT_EQ(lethal.new_health, health->max);
+  EXPECT_FLOAT_EQ(health->current, health->max);
+}
+
 TEST(WorldEntityTests, PhysicsEntitiesFallOntoTerrainAndStop) {
   const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
@@ -262,6 +336,39 @@ TEST(WorldEntityTests, PhysicsEntitiesCollideWithWallsAndFaceMovementDirection) 
   EXPECT_FLOAT_EQ(velocity->linear.x, 0.0F);
   EXPECT_NEAR(transform->rotation.y, std::sin(arv::PiRadians * 0.75F), 0.001F);
   EXPECT_NEAR(transform->rotation.w, std::cos(arv::PiRadians * 0.75F), 0.001F);
+}
+
+TEST(WorldEntityTests, KnockbackVelocityMovesEntitiesSmoothlyAcrossTicks) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+
+  arv::world::EntityCreateInfo info;
+  info.type_name = "arvane:test_knockback_entity";
+  info.position = {0.5F, 1.0F, 0.5F};
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{0.9F, 0.9F, 0.9F}};
+  info.authored_components = components;
+  const arv::EntityID entity = world.create_entity(std::move(info));
+  arv::entity::EntityVelocity* velocity = world.find_entity_velocity(entity);
+  ASSERT_NE(velocity, nullptr);
+  velocity->linear = {6.0F, 0.0F, 0.0F};
+
+  (void)world.tick_entities(&registry);
+
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(entity);
+  ASSERT_NE(transform, nullptr);
+  const float first_x = transform->position.x;
+  EXPECT_GT(first_x, 0.55F);
+  EXPECT_LT(first_x, 0.7F);
+  EXPECT_FLOAT_EQ(velocity->linear.x, 6.0F);
+
+  (void)world.tick_entities(&registry);
+
+  EXPECT_GT(transform->position.x, first_x);
+  EXPECT_LT(transform->position.x, 0.8F);
 }
 
 TEST(WorldEntityTests, GoalDrivenEntitiesJumpWhenBlockedByOneBlockLedge) {

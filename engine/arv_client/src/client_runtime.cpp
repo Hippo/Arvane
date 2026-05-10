@@ -74,6 +74,8 @@ struct ClientRuntime::Impl {
   ClientEntityMirrorStore entities{};
   ClientDroppedItemMirrorStore dropped_items{};
   detail::ClientSkinRuntime skins{};
+  u32 next_attack_sequence{1};
+  std::vector<ClientAttackFeedback> attack_feedback{};
 };
 
 ClientRuntime::ClientRuntime(std::unique_ptr<net::ITransport> transport) : impl_(std::make_unique<Impl>(std::move(transport))) {
@@ -263,6 +265,25 @@ net::NetworkResult ClientRuntime::request_inventory_close() {
   return impl_->inventory.request_close(
       impl_->sender,
       impl_->connection.state());
+}
+
+net::NetworkResult ClientRuntime::request_attack_entity(EntityNetID target_entity) {
+  if (impl_->connection.state() != net::ConnectionState::InGame) {
+    return net::NetworkResult::failure(net::NetworkError{"client is not in game"});
+  }
+
+  const u32 sequence = impl_->next_attack_sequence++;
+  if (const ReplicatedEntityMirror* mirror = impl_->entities.find(target_entity);
+      mirror != nullptr) {
+    impl_->attack_feedback.push_back({target_entity, mirror->position, sequence});
+  }
+  return impl_->sender.send_attack_entity({target_entity, sequence});
+}
+
+std::vector<ClientAttackFeedback> ClientRuntime::drain_attack_feedback() {
+  std::vector<ClientAttackFeedback> drained = std::move(impl_->attack_feedback);
+  impl_->attack_feedback.clear();
+  return drained;
 }
 
 usize ClientRuntime::replicated_entity_count() const noexcept {

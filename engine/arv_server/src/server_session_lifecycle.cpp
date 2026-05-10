@@ -135,6 +135,7 @@ void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) 
     last_sent_player_corrections_.erase(session->player_id);
     permission_caches_.erase(session->player_id);
     block_break_attempts_.erase(session->player_id);
+    combat_states_.erase(session->session_id);
     logged_chunk_interest_sessions_.erase(session->session_id);
     logged_chunk_delivery_sessions_.erase(session->session_id);
     if (auto transfer = skin_transfers_.find(session->session_id);

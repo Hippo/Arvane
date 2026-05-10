@@ -58,6 +58,14 @@ void ClientEntityMirrorStore::apply_snapshot(
     mirror.animation_name = entry.animation_name;
     mirror.animation_time_seconds = entry.animation_time_seconds;
     mirror.head_rotation_degrees = entry.head_rotation_degrees;
+    mirror.has_health =
+        (entry.state_flags & protocol::EntityStateFlagHasHealth) != 0U;
+    mirror.dead =
+        (entry.state_flags & protocol::EntityStateFlagDead) != 0U;
+    mirror.invulnerable =
+        (entry.state_flags & protocol::EntityStateFlagInvulnerable) != 0U;
+    mirror.health_current = entry.health_current;
+    mirror.health_max = entry.health_max;
   }
 }
 

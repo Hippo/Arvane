@@ -25,10 +25,20 @@ void apply_authored_components(
   }
   if (components.health.has_value()) {
     const f32 max_health = std::max(0.0F, components.health->max);
+    const f32 current_health = std::clamp(
+        components.health->current.value_or(max_health),
+        0.0F,
+        max_health);
     registry.emplace_or_replace<entity::EntityHealth>(
         handle,
         max_health,
-        max_health);
+        current_health,
+        components.health->invulnerable);
+  }
+  if (components.knockback_resistance.has_value()) {
+    registry.emplace_or_replace<entity::KnockbackResistanceComponent>(
+        handle,
+        std::clamp(components.knockback_resistance->resistance, 0.0F, 1.0F));
   }
   if (components.animation.has_value()) {
     registry.emplace_or_replace<entity::EntityAnimationState>(

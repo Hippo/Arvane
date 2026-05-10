@@ -24,6 +24,7 @@ inline constexpr std::string_view VelocityComponentID = "arvane:velocity";
 inline constexpr std::string_view CollisionComponentID = "arvane:collision";
 inline constexpr std::string_view MovementComponentID = "arvane:movement";
 inline constexpr std::string_view HealthComponentID = "arvane:health";
+inline constexpr std::string_view KnockbackResistanceComponentID = "arvane:knockback_resistance";
 inline constexpr std::string_view BrainComponentID = "arvane:brain";
 inline constexpr std::string_view AnimationComponentID = "arvane:animation";
 
@@ -41,6 +42,12 @@ struct AuthoredMovementComponent {
 
 struct AuthoredHealthComponent {
   f32 max{1.0F};
+  std::optional<f32> current{};
+  bool invulnerable{};
+};
+
+struct AuthoredKnockbackResistanceComponent {
+  f32 resistance{};
 };
 
 struct AuthoredGoalDefinition {
@@ -71,6 +78,7 @@ struct EntityComponentSet {
   std::optional<AuthoredCollisionComponent> collision{};
   std::optional<AuthoredMovementComponent> movement{};
   std::optional<AuthoredHealthComponent> health{};
+  std::optional<AuthoredKnockbackResistanceComponent> knockback_resistance{};
   std::optional<AuthoredBrainComponent> brain{};
   std::optional<AuthoredAnimationComponent> animation{};
   std::vector<std::string> component_ids{};
@@ -156,6 +164,11 @@ struct EntityMovement {
 struct EntityHealth {
   f32 max{1.0F};
   f32 current{1.0F};
+  bool invulnerable{};
+};
+
+struct KnockbackResistanceComponent {
+  f32 resistance{};
 };
 
 struct MovementIntent {
@@ -258,6 +271,10 @@ struct EntitySnapshotEntry {
   std::string animation_name{};
   Seconds animation_time_seconds{};
   Vec3f head_rotation_degrees{};
+  bool has_health{};
+  f32 health_current{};
+  f32 health_max{};
+  bool health_invulnerable{};
 };
 
 struct PersistentEntityRecord {

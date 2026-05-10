@@ -16,6 +16,8 @@ player::PlayerTuning make_player_tuning(const io::PhysicsConfig& physics) noexce
   tuning.sprint_speed = physics.sprint_speed;
   tuning.sneak_speed = physics.sneak_speed;
   tuning.air_speed = physics.air_speed;
+  tuning.air_control_acceleration_per_second =
+      physics.air_control_acceleration_per_second;
   tuning.fly_speed = physics.fly_speed;
   tuning.fly_vertical_speed = physics.fly_vertical_speed;
   tuning.jump_velocity = physics.jump_velocity;

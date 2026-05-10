@@ -14,7 +14,8 @@
           "walk_speed": 1.2
         },
         "arvane:health": {
-          "max": 10
+          "max": 10,
+          "current": 10
         },
         "arvane:brain": {
           "behavior": "arvane:pig_behavior",

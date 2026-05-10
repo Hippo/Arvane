@@ -2,6 +2,7 @@
 
 #include "arv/ui/widgets/chat.hpp"
 #include "arv/ui/widgets/debug_hud.hpp"
+#include "arv/ui/widgets/health.hpp"
 #include "arv/ui/widgets/hotbar.hpp"
 #include "arv/ui/widgets/inventory.hpp"
 #include "arv/ui/widgets/scoreboard.hpp"
@@ -16,6 +17,7 @@ struct GameplayUiModel {
   TabMenuUiModel tab_menu{};
   ScoreboardUiModel scoreboard{};
   DebugHudModel debug{};
+  HealthHudModel health{};
 };
 
 void build_gameplay_ui(UiTree& tree, GameplayUiModel model);

@@ -1,5 +1,6 @@
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
@@ -63,6 +64,8 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto entity_snapshot = registry.lookup(arv::protocol::MessageType::ClientboundEntitySnapshot);
   const auto dropped_item_snapshot =
       registry.lookup(arv::protocol::MessageType::ClientboundDroppedItemSnapshot);
+  const auto attack_entity =
+      registry.lookup(arv::protocol::MessageType::ServerboundAttackEntity);
   const auto inventory_action =
       registry.lookup(arv::protocol::MessageType::ServerboundInventoryActionRequest);
   const auto inventory_update = registry.lookup(arv::protocol::MessageType::ClientboundInventoryUpdate);
@@ -84,6 +87,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(entity_spawn.has_value());
   ASSERT_TRUE(entity_snapshot.has_value());
   ASSERT_TRUE(dropped_item_snapshot.has_value());
+  ASSERT_TRUE(attack_entity.has_value());
   ASSERT_TRUE(inventory_action.has_value());
   ASSERT_TRUE(inventory_update.has_value());
   ASSERT_TRUE(skin_rules.has_value());
@@ -103,6 +107,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(entity_spawn->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(entity_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(dropped_item_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  EXPECT_EQ(attack_entity->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_action->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_update->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(ping->lane, arv::protocol::NetworkLane::Debug);
@@ -116,12 +121,13 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(entity_spawn->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(entity_snapshot->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(dropped_item_snapshot->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(attack_entity->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_action->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 40U);
+  EXPECT_EQ(registry.size(), 41U);
 }
 
 TEST(ProtocolTests, SkinPacketsRoundTripThroughSerialization) {
@@ -215,6 +221,18 @@ TEST(ProtocolTests, ClientInputBatchRoundTripsThroughSerialization) {
   EXPECT_TRUE(arv::protocol::has_button(
       decoded.value().inputs[0].buttons,
       arv::protocol::ClientInputButtons::PrimaryPressed));
+}
+
+TEST(ProtocolTests, AttackEntityRoundTripsThroughSerialization) {
+  const arv::protocol::ServerboundAttackEntity attack{
+      arv::EntityNetID{42},
+      77U};
+  const auto decoded = arv::protocol::deserialize_serverbound_attack_entity(
+      arv::protocol::serialize_serverbound_attack_entity(attack));
+
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().target_entity, (arv::EntityNetID{42}));
+  EXPECT_EQ(decoded.value().sequence, 77U);
 }
 
 TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {

@@ -50,6 +50,7 @@ inline player::ItemRegistry make_test_item_registry(const voxel::BlockRegistry& 
   pickaxe.texture_asset = "arvane:texture/item/pickaxe";
   pickaxe.tool_category = "pickaxe";
   pickaxe.tool_break_speed_multiplier = 4.0F;
+  pickaxe.attack_data = player::ItemAttackData{3.0F, 3.0F, 21U};
   items.push_back(std::move(pickaxe));
 
   player::ItemDefinition shovel;
@@ -61,6 +62,7 @@ inline player::ItemRegistry make_test_item_registry(const voxel::BlockRegistry& 
   shovel.texture_asset = "arvane:texture/item/shovel";
   shovel.tool_category = "shovel";
   shovel.tool_break_speed_multiplier = 4.0F;
+  shovel.attack_data = player::ItemAttackData{2.0F, 3.0F, 21U};
   items.push_back(std::move(shovel));
 
   player::ItemDefinition water_bucket;

@@ -21,6 +21,8 @@ player::PlayerTuning make_player_tuning(const io::PhysicsConfig& physics) noexce
   tuning.sprint_speed = physics.sprint_speed;
   tuning.sneak_speed = physics.sneak_speed;
   tuning.air_speed = physics.air_speed;
+  tuning.air_control_acceleration_per_second =
+      physics.air_control_acceleration_per_second;
   tuning.fly_speed = physics.fly_speed;
   tuning.fly_vertical_speed = physics.fly_vertical_speed;
   tuning.jump_velocity = physics.jump_velocity;
@@ -131,6 +133,32 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
       config.gameplay.dropped_items.pickup_radius;
   server_start_info.dropped_items.pickup_delay_seconds =
       config.gameplay.dropped_items.pickup_delay_seconds;
+  server_start_info.combat.default_attack_damage =
+      config.gameplay.combat.default_attack_damage;
+  server_start_info.combat.default_attack_range =
+      config.gameplay.combat.default_attack_range;
+  server_start_info.combat.default_attack_cooldown_seconds =
+      config.gameplay.combat.default_attack_cooldown_seconds;
+  server_start_info.combat.attack_validation_grace_blocks =
+      config.gameplay.combat.attack_validation_grace_blocks;
+  server_start_info.combat.max_attack_validation_range =
+      config.gameplay.combat.max_attack_validation_range;
+  server_start_info.combat.existing_horizontal_retention =
+      config.gameplay.combat.existing_horizontal_retention;
+  server_start_info.combat.base_horizontal_knockback =
+      config.gameplay.combat.base_horizontal_knockback;
+  server_start_info.combat.sprint_horizontal_bonus =
+      config.gameplay.combat.sprint_horizontal_bonus;
+  server_start_info.combat.base_vertical_knockback =
+      config.gameplay.combat.base_vertical_knockback;
+  server_start_info.combat.airborne_vertical_knockback =
+      config.gameplay.combat.airborne_vertical_knockback;
+  server_start_info.combat.vertical_knockback_cap =
+      config.gameplay.combat.vertical_knockback_cap;
+  server_start_info.combat.knockback_control_suppression_ticks =
+      config.gameplay.combat.knockback_control_suppression_ticks;
+  server_start_info.combat.use_current_block_obstruction_check =
+      config.gameplay.combat.use_current_block_obstruction_check;
   server_start_info.saved_players = std::span<const server::ServerPlayerSaveState>{
       loaded_world.saved_players.data(),
       loaded_world.saved_players.size()};

@@ -1,7 +1,10 @@
 #include "arv/player/item.hpp"
 
+#include "arv/core/time.hpp"
+
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -63,6 +66,17 @@ Expected<ItemRenderType, ItemRegistryError> resolve_render_type(const ItemDefini
   return Expected<ItemRenderType, ItemRegistryError>::failure({"invalid item render type for " + definition.name});
 }
 
+[[nodiscard]] u32 cooldown_ticks_from_seconds(f32 seconds) noexcept {
+  if (!std::isfinite(seconds) || seconds <= 0.0F) {
+    return 0U;
+  }
+  const f32 ticks = std::ceil(seconds * static_cast<f32>(DefaultBaseTps));
+  if (ticks >= static_cast<f32>(std::numeric_limits<u32>::max())) {
+    return std::numeric_limits<u32>::max();
+  }
+  return static_cast<u32>(ticks);
+}
+
 std::optional<ItemRegistryError> resolve_places_block(
     const voxel::BlockRegistry& registry,
     ItemDefinition& definition) {
@@ -114,6 +128,9 @@ void merge_explicit_definition(ItemDefinition& target, ItemDefinition source) {
   if (!source.tool_category.empty()) {
     target.tool_category = std::move(source.tool_category);
     target.tool_break_speed_multiplier = source.tool_break_speed_multiplier;
+  }
+  if (source.attack_data.has_value()) {
+    target.attack_data = source.attack_data;
   }
   for (auto& [action, animation] : source.held_animations) {
     target.held_animations.insert_or_assign(std::move(action), std::move(animation));
@@ -235,6 +252,27 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     if (!std::isfinite(definition.buoyancy)) {
       return Result::failure({"item buoyancy must be finite for " + definition.name});
     }
+    if (definition.attack_data.has_value()) {
+      const ItemAttackData& attack = definition.attack_data.value();
+      if (!std::isfinite(attack.damage_amount) || attack.damage_amount < 0.0F) {
+        return Result::failure({"item attack damage must be finite and >= 0 for " + definition.name});
+      }
+      if (!std::isfinite(attack.attack_range) || attack.attack_range <= 0.0F) {
+        return Result::failure({"item attack range must be finite and > 0 for " + definition.name});
+      }
+      if (!std::isfinite(attack.horizontal_knockback) ||
+          attack.horizontal_knockback < 0.0F) {
+        return Result::failure({"item horizontal knockback must be finite and >= 0 for " + definition.name});
+      }
+      if (!std::isfinite(attack.vertical_knockback) ||
+          attack.vertical_knockback < 0.0F) {
+        return Result::failure({"item vertical knockback must be finite and >= 0 for " + definition.name});
+      }
+      if (!std::isfinite(attack.sprint_knockback_bonus) ||
+          attack.sprint_knockback_bonus < 0.0F) {
+        return Result::failure({"item sprint knockback bonus must be finite and >= 0 for " + definition.name});
+      }
+    }
     auto resolved_type = resolve_render_type(definition);
     if (!resolved_type) {
       return Result::failure(resolved_type.error());
@@ -276,6 +314,7 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     record.buoyancy = definition.buoyancy;
     record.tool_category = std::move(definition.tool_category);
     record.tool_break_speed_multiplier = definition.tool_break_speed_multiplier;
+    record.attack_data = definition.attack_data;
     record.held_animations = std::move(definition.held_animations);
 
     if (record.render_type == ItemRenderType::Texture && record.texture_asset.empty()) {
@@ -528,6 +567,131 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
         const auto speed_iter = tool_iter->find("break_speed_multiplier");
         if (speed_iter != tool_iter->end()) {
           definition.tool_break_speed_multiplier = speed_iter->get<f32>();
+        }
+      }
+      const auto components_iter = item.find("components");
+      if (components_iter != item.end()) {
+        if (!components_iter->is_object()) {
+          return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+              {"components must be an object for " + definition.name});
+        }
+        const auto damage_iter = components_iter->find("damage");
+        if (damage_iter != components_iter->end()) {
+          if (!damage_iter->is_object()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                {"components.damage must be an object for " + definition.name});
+          }
+          const auto amount_iter = damage_iter->find("amount");
+          const auto range_iter = damage_iter->find("range");
+          if (amount_iter == damage_iter->end() || !amount_iter->is_number()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                {"components.damage.amount must be a number for " + definition.name});
+          }
+          if (range_iter == damage_iter->end() || !range_iter->is_number()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                {"components.damage.range must be a number for " + definition.name});
+          }
+          f32 horizontal_knockback = 0.0F;
+          f32 vertical_knockback = 0.0F;
+          f32 sprint_knockback_bonus = 0.0F;
+          const auto read_knockback_field =
+              [&](const nlohmann::json& source,
+                  std::string_view field,
+                  f32& value) -> std::optional<ItemRegistryError> {
+            const auto iter = source.find(std::string{field});
+            if (iter == source.end()) {
+              return std::nullopt;
+            }
+            if (!iter->is_number()) {
+              return ItemRegistryError{
+                  "components.damage." + std::string{field} +
+                  " must be a number for " + definition.name};
+            }
+            value = iter->get<f32>();
+            return std::nullopt;
+          };
+          if (const std::optional<ItemRegistryError> error =
+                  read_knockback_field(
+                      *damage_iter,
+                      "horizontal_knockback",
+                      horizontal_knockback);
+              error.has_value()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                error.value());
+          }
+          if (const std::optional<ItemRegistryError> error =
+                  read_knockback_field(
+                      *damage_iter,
+                      "vertical_knockback",
+                      vertical_knockback);
+              error.has_value()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                error.value());
+          }
+          if (const std::optional<ItemRegistryError> error =
+                  read_knockback_field(
+                      *damage_iter,
+                      "sprint_knockback_bonus",
+                      sprint_knockback_bonus);
+              error.has_value()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                error.value());
+          }
+          const auto knockback_iter = components_iter->find("knockback");
+          if (knockback_iter != components_iter->end()) {
+            if (!knockback_iter->is_object()) {
+              return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                  {"components.knockback must be an object for " + definition.name});
+            }
+            const auto read_named_knockback_field =
+                [&](std::string_view field,
+                    f32& value) -> std::optional<ItemRegistryError> {
+              const auto iter = knockback_iter->find(std::string{field});
+              if (iter == knockback_iter->end()) {
+                return std::nullopt;
+              }
+              if (!iter->is_number()) {
+                return ItemRegistryError{
+                    "components.knockback." + std::string{field} +
+                    " must be a number for " + definition.name};
+              }
+              value = iter->get<f32>();
+              return std::nullopt;
+            };
+            if (const std::optional<ItemRegistryError> error =
+                    read_named_knockback_field(
+                        "horizontal",
+                        horizontal_knockback);
+                error.has_value()) {
+              return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                  error.value());
+            }
+            if (const std::optional<ItemRegistryError> error =
+                    read_named_knockback_field(
+                        "vertical",
+                        vertical_knockback);
+                error.has_value()) {
+              return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                  error.value());
+            }
+            if (const std::optional<ItemRegistryError> error =
+                    read_named_knockback_field(
+                        "sprint_bonus",
+                        sprint_knockback_bonus);
+                error.has_value()) {
+              return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                  error.value());
+            }
+          }
+          const f32 cooldown_seconds =
+              damage_iter->value("cooldown_seconds", 0.0F);
+          definition.attack_data = ItemAttackData{
+              amount_iter->get<f32>(),
+              range_iter->get<f32>(),
+              cooldown_ticks_from_seconds(cooldown_seconds),
+              horizontal_knockback,
+              vertical_knockback,
+              sprint_knockback_bonus};
         }
       }
       const auto held_animations_iter = item.find("held_animations");

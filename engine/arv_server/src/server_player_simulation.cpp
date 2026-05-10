@@ -3,12 +3,15 @@
 #include "arv/movement/player_movement.hpp"
 #include "arv/world/world_queries.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 #include <string>
 
 namespace arv::server::detail {
 namespace {
+
+inline constexpr f32 KnockbackSuppressedInputBlend = 0.25F;
 
 void restart_player_entity_animation(
     world::WorldRuntime& world,
@@ -37,6 +40,80 @@ void restart_player_entity_animation(
     return left ? "sneak_hit_left" : "sneak_hit_right";
   }
   return left ? "hit_left" : "hit_right";
+}
+
+[[nodiscard]] physics::PlayerCollisionPose player_collision_pose(
+    const player::PlayerState& player_state) noexcept {
+  if (player_state.swimming) {
+    return physics::PlayerCollisionPose::Swimming;
+  }
+  return player_state.sneaking ? physics::PlayerCollisionPose::Sneaking
+                               : physics::PlayerCollisionPose::Standing;
+}
+
+[[nodiscard]] bool command_is_sprinting_forward(
+    const player::PlayerCommand& command) noexcept {
+  return command.sprint_held && command.move_z > 0;
+}
+
+void update_sprint_knockback_state(
+    PlayerCombatState& combat_state,
+    const player::PlayerCommand& command) noexcept {
+  const bool sprinting_forward = command_is_sprinting_forward(command);
+  if (sprinting_forward && !combat_state.was_sprinting_forward_last_tick) {
+    combat_state.sprint_knockback_ready = true;
+  }
+  combat_state.was_sprinting_forward_last_tick = sprinting_forward;
+}
+
+void apply_knockback_control_suppression(
+    player::PlayerState& player_state,
+    const world::WorldCollisionQuery& collision_query,
+    const physics::KinematicConfig& physics_config,
+    Vec3f incoming_velocity,
+    Seconds tick_seconds) noexcept {
+  if (player_state.knockback_control_suppression_ticks == 0U) {
+    return;
+  }
+
+  const Vec3f simulated_horizontal{
+      player_state.velocity.x,
+      0.0F,
+      player_state.velocity.z};
+  const Vec3f incoming_horizontal{
+      incoming_velocity.x,
+      0.0F,
+      incoming_velocity.z};
+  Vec3f blended_horizontal =
+      incoming_horizontal * (1.0F - KnockbackSuppressedInputBlend) +
+      simulated_horizontal * KnockbackSuppressedInputBlend;
+  Vec3f displacement{
+      (blended_horizontal.x - simulated_horizontal.x) * tick_seconds,
+      0.0F,
+      (blended_horizontal.z - simulated_horizontal.z) * tick_seconds};
+
+  if (player_state.resolved_permissions.core.has_collision) {
+    const physics::MovementResolution movement = physics::resolve_movement(
+        collision_query,
+        physics::make_body_bounds(
+            player_state.position,
+            physics_config,
+            player_collision_pose(player_state)),
+        displacement,
+        physics_config.collision_epsilon);
+    displacement = movement.applied_delta;
+    if (movement.hit_x) {
+      blended_horizontal.x = 0.0F;
+    }
+    if (movement.hit_z) {
+      blended_horizontal.z = 0.0F;
+    }
+  }
+
+  player_state.position = player_state.position + displacement;
+  player_state.velocity.x = blended_horizontal.x;
+  player_state.velocity.z = blended_horizontal.z;
+  --player_state.knockback_control_suppression_ticks;
 }
 
 [[nodiscard]] u64 hash_append_byte(u64 hash, u8 value) noexcept {
@@ -156,6 +233,7 @@ void ServerRuntimeImpl::tick_players() {
       command.selected_hotbar_slot = player_state->selected_hotbar_slot;
     }
 
+    update_sprint_knockback_state(combat_states_[session_id], command);
     apply_player_command(*player_state, command);
     player_state->last_processed_input_tick = command.client_tick;
   }
@@ -272,6 +350,7 @@ void ServerRuntimeImpl::apply_player_command(
   const movement::PlayerMovementAuthority movement_authority{
       player_state.resolved_permissions.core.can_fly,
       player_state.resolved_permissions.core.has_collision};
+  const Vec3f incoming_velocity = player_state.velocity;
   const movement::PlayerMovementStep movement_step =
       movement::simulate_player_movement_tick(
           &collision_query,
@@ -281,6 +360,12 @@ void ServerRuntimeImpl::apply_player_command(
           movement_authority,
           tick_seconds);
   movement::apply_kinematic_state_to_player(player_state, movement_step.state);
+  apply_knockback_control_suppression(
+      player_state,
+      collision_query,
+      physics_config,
+      incoming_velocity,
+      tick_seconds);
 
   if (command.primary_pressed) {
     restart_player_entity_animation(

@@ -13,6 +13,7 @@ set(ARV_UI_HEADERS
   include/arv/ui/widgets/chat.hpp
   include/arv/ui/widgets/debug_hud.hpp
   include/arv/ui/widgets/gameplay.hpp
+  include/arv/ui/widgets/health.hpp
   include/arv/ui/widgets/hotbar.hpp
   include/arv/ui/widgets/inventory.hpp
   include/arv/ui/widgets/items.hpp
@@ -33,6 +34,7 @@ add_library(arv_ui STATIC
   src/widgets/chat.cpp
   src/widgets/debug_hud.cpp
   src/widgets/gameplay.cpp
+  src/widgets/health.cpp
   src/widgets/hotbar.cpp
   src/widgets/inventory.cpp
   src/widgets/scoreboard.cpp

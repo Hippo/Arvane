@@ -32,6 +32,26 @@ struct RayAabbHit {
   return min_a < max_b && max_a > min_b;
 }
 
+[[nodiscard]] Vec3f approach_horizontal_velocity(
+    Vec3f current,
+    Vec3f target,
+    f32 max_delta) noexcept {
+  const Vec3f delta{target.x - current.x, 0.0F, target.z - current.z};
+  const f32 delta_sq = delta.x * delta.x + delta.z * delta.z;
+  if (delta_sq <= 0.0F || max_delta <= 0.0F) {
+    return {current.x, 0.0F, current.z};
+  }
+  const f32 max_delta_sq = max_delta * max_delta;
+  if (delta_sq <= max_delta_sq) {
+    return {target.x, 0.0F, target.z};
+  }
+  const f32 scale = max_delta / std::sqrt(delta_sq);
+  return {
+      current.x + delta.x * scale,
+      0.0F,
+      current.z + delta.z * scale};
+}
+
 [[nodiscard]] bool overlaps_other_axes(const Aabb3f& a, const Aabb3f& b, Axis axis) noexcept {
   switch (axis) {
     case Axis::X:
@@ -674,13 +694,26 @@ KinematicStepResult step_kinematic_body(
                    : config.breath_seconds;
   } else {
     next.breath_seconds = config.breath_seconds;
-    const f32 horizontal_speed =
-        body.grounded ? (next.sneaking ? config.sneak_speed
-                                       : (should_land_sprint(input) ? config.sprint_speed
-                                                                    : config.walk_speed))
-                      : config.air_speed;
-    next.velocity.x = move.x * horizontal_speed;
-    next.velocity.z = move.z * horizontal_speed;
+    if (body.grounded) {
+      const f32 horizontal_speed =
+          next.sneaking ? config.sneak_speed
+                        : (should_land_sprint(input) ? config.sprint_speed
+                                                     : config.walk_speed);
+      next.velocity.x = move.x * horizontal_speed;
+      next.velocity.z = move.z * horizontal_speed;
+    } else {
+      const Vec3f desired_horizontal{
+          move.x * config.air_speed,
+          0.0F,
+          move.z * config.air_speed};
+      const Vec3f controlled_horizontal = approach_horizontal_velocity(
+          body.velocity,
+          desired_horizontal,
+          std::max(0.0F, config.air_control_acceleration_per_second) *
+              tick_seconds);
+      next.velocity.x = controlled_horizontal.x;
+      next.velocity.z = controlled_horizontal.z;
+    }
 
     const bool jumped = (input.jump_pressed || input.jump_held) && body.grounded;
     if (jumped) {

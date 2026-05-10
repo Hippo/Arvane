@@ -290,6 +290,14 @@ void ServerRuntimeImpl::handle_message(
       handle_inventory_action_request(connection_id, request.value());
       return;
     }
+    case protocol::MessageType::ServerboundAttackEntity: {
+      auto attack = protocol::deserialize_serverbound_attack_entity(decoded.value().payload);
+      if (!attack) {
+        return;
+      }
+      handle_attack_entity(connection_id, attack.value());
+      return;
+    }
     case protocol::MessageType::ServerboundSkinRequest: {
       auto request = protocol::deserialize_skin_request(decoded.value().payload);
       if (!request) {

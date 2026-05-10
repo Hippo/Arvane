@@ -30,6 +30,7 @@
 #include "arv/io/input_bindings.hpp"
 #include "arv/platform/glfw_window.hpp"
 #include "arv/physics/collision.hpp"
+#include "arv/player/player_constants.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/sched/scheduler.hpp"
@@ -158,6 +159,20 @@ struct UiBuildCacheKey {
   hash = ui_cache_hash_append_bool(hash, session.client->tab_menu_visible());
   hash = ui_cache_hash_append_string(hash, session.client->chat_draft());
   hash = ui_cache_hash_append_u64(hash, displayed_fps);
+  if (const std::optional<EntityNetID> local_entity = session.client->local_entity_id();
+      local_entity.has_value()) {
+    const client::ReplicatedEntityMirror* mirror =
+        session.client->find_replicated_entity(local_entity.value());
+    const bool has_health = mirror != nullptr && mirror->has_health;
+    hash = ui_cache_hash_append_bool(hash, has_health);
+    if (has_health) {
+      hash = ui_cache_hash_append_f32(hash, mirror->health_current);
+      hash = ui_cache_hash_append_f32(hash, mirror->health_max);
+      hash = ui_cache_hash_append_bool(hash, mirror->dead);
+    }
+  } else {
+    hash = ui_cache_hash_append_bool(hash, false);
+  }
 
   hash = ui_cache_hash_append_u64(hash, session.inventory_slots.size());
   for (const ui::UiItemStackView& slot : session.inventory_slots) {
@@ -892,6 +907,129 @@ private:
     return false;
   }
 
+  [[nodiscard]] std::optional<f32> ray_intersects_aabb(
+      Vec3f origin,
+      Vec3f direction,
+      Aabb3f bounds,
+      f32 max_distance) const noexcept {
+    f32 t_min = 0.0F;
+    f32 t_max = max_distance;
+    const auto test_axis =
+        [](f32 origin_axis,
+           f32 direction_axis,
+           f32 min_axis,
+           f32 max_axis,
+           f32& t_min_ref,
+           f32& t_max_ref) noexcept {
+          constexpr f32 Epsilon = 0.000001F;
+          if (std::abs(direction_axis) < Epsilon) {
+            return origin_axis >= min_axis && origin_axis <= max_axis;
+          }
+          const f32 inv_direction = 1.0F / direction_axis;
+          f32 near_t = (min_axis - origin_axis) * inv_direction;
+          f32 far_t = (max_axis - origin_axis) * inv_direction;
+          if (near_t > far_t) {
+            std::swap(near_t, far_t);
+          }
+          t_min_ref = std::max(t_min_ref, near_t);
+          t_max_ref = std::min(t_max_ref, far_t);
+          return t_min_ref <= t_max_ref;
+        };
+
+    if (!test_axis(origin.x, direction.x, bounds.min.x, bounds.max.x, t_min, t_max) ||
+        !test_axis(origin.y, direction.y, bounds.min.y, bounds.max.y, t_min, t_max) ||
+        !test_axis(origin.z, direction.z, bounds.min.z, bounds.max.z, t_min, t_max)) {
+      return std::nullopt;
+    }
+    return t_min >= 0.0F ? std::optional<f32>{t_min} : std::optional<f32>{t_max};
+  }
+
+  [[nodiscard]] Aabb3f replicated_entity_attack_bounds(
+      const client::ReplicatedEntityMirror& mirror) const noexcept {
+    Vec3f box{1.0F, 1.0F, 1.0F};
+    if (const entity::EntityTypeRecord* type = assets_.entity_registry.type(mirror.entity_type);
+        type != nullptr && type->components.collision.has_value()) {
+      box = type->components.collision->box;
+    } else if (mirror.owning_player.has_value()) {
+      box = {
+          player::DefaultPlayerBodyWidth,
+          player::DefaultPlayerBodyHeight,
+          player::DefaultPlayerBodyWidth};
+    }
+
+    const f32 half_x = std::max(box.x, 0.0F) * 0.5F;
+    const f32 half_z = std::max(box.z, 0.0F) * 0.5F;
+    const f32 height = std::max(box.y, 0.0F);
+    return {
+        {mirror.position.x - half_x,
+         mirror.position.y,
+         mirror.position.z - half_z},
+        {mirror.position.x + half_x,
+         mirror.position.y + height,
+         mirror.position.z + half_z}};
+  }
+
+  [[nodiscard]] std::optional<EntityNetID> targeted_attack_entity(
+      const DesktopGameSession& session,
+      const player::ItemRecord* held_item) const {
+    if (session.client == nullptr) {
+      return std::nullopt;
+    }
+
+    const client::CameraShell& camera = session.client->camera();
+    const Vec3f origin = camera.position();
+    const Vec3f direction = camera.forward_vector();
+    f32 max_distance = config_.gameplay.combat.default_attack_range;
+    if (held_item != nullptr && held_item->attack_data.has_value()) {
+      max_distance = held_item->attack_data->attack_range;
+    }
+
+    world::WorldCollisionQuery query(
+        session.client_world,
+        assets_.block_registry,
+        false);
+    if (const std::optional<physics::BlockRaycastHit> block_hit = physics::raycast_blocks(
+            query,
+            origin,
+            direction,
+            max_distance);
+        block_hit.has_value() && !assets_.block_registry.is_air(block_hit->variant)) {
+      max_distance = std::min(max_distance, block_hit->distance);
+    }
+
+    std::optional<EntityNetID> best_entity;
+    f32 best_distance = max_distance;
+    const std::optional<EntityNetID> local_entity = session.client->local_entity_id();
+    for (const client::ReplicatedEntityMirror& mirror :
+         session.client->replicated_entity_mirrors()) {
+      if ((local_entity.has_value() && mirror.entity_id == local_entity.value()) ||
+          mirror.dead) {
+        continue;
+      }
+      const std::optional<f32> hit_distance = ray_intersects_aabb(
+          origin,
+          direction,
+          replicated_entity_attack_bounds(mirror),
+          best_distance);
+      if (hit_distance.has_value() && hit_distance.value() <= best_distance) {
+        best_distance = hit_distance.value();
+        best_entity = mirror.entity_id;
+      }
+    }
+    return best_entity;
+  }
+
+  void send_local_entity_attack_if_targeted(
+      DesktopGameSession& session,
+      const player::ItemRecord* held_item) const {
+    const std::optional<EntityNetID> target = targeted_attack_entity(session, held_item);
+    if (!target.has_value()) {
+      return;
+    }
+    (void)session.client->request_attack_entity(target.value());
+    (void)session.client->drain_attack_feedback();
+  }
+
   [[nodiscard]] bool held_item_animation_condition_passes(
       const DesktopGameSession& session,
       const player::ItemRecord* item,
@@ -940,6 +1078,9 @@ private:
 
     const player::ItemRecord* held_item = selected_held_item(session);
     if (held_item == nullptr) {
+      if (client_input.primary_pressed) {
+        send_local_entity_attack_if_targeted(session, nullptr);
+      }
       session.held_item_secondary_use_active = false;
       session.held_item_animation.stop(now_seconds);
       return;
@@ -951,6 +1092,7 @@ private:
           held_item,
           client::HeldItemActionPrimaryUse,
           now_seconds);
+      send_local_entity_attack_if_targeted(session, held_item);
     }
 
     if (client_input.primary_held &&
@@ -1553,6 +1695,24 @@ private:
   void build_gameplay_ui(
       DesktopGameSession& active_session,
       const platform::InputSnapshot& platform_input) {
+    ui::HealthHudModel health;
+    health.viewport = {
+        static_cast<f32>(framebuffer_.width),
+        static_cast<f32>(framebuffer_.height),
+    };
+    if (const std::optional<EntityNetID> local_entity =
+            active_session.client->local_entity_id();
+        local_entity.has_value()) {
+      const client::ReplicatedEntityMirror* mirror =
+          active_session.client->find_replicated_entity(local_entity.value());
+      if (mirror != nullptr && mirror->has_health) {
+        health.visible = true;
+        health.current = mirror->health_current;
+        health.max = mirror->health_max;
+        health.section_value = 1.0F;
+      }
+    }
+
     ui::build_gameplay_ui(
         ui_tree_,
         {
@@ -1605,6 +1765,7 @@ private:
             },
             {},
             {true, displayed_fps_},
+            health,
         });
   }
 

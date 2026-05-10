@@ -87,6 +87,25 @@ struct EntityCreateInfo {
   std::optional<entity::EntityComponentSet> authored_components{};
 };
 
+enum class DamageCause : u8 {
+  Generic,
+  EntityAttack,
+};
+
+struct DamageRequest {
+  EntityID source{};
+  EntityID target{};
+  f32 amount{};
+  DamageCause cause{DamageCause::Generic};
+};
+
+struct DamageResult {
+  bool applied{};
+  bool killed{};
+  f32 previous_health{};
+  f32 new_health{};
+};
+
 struct ReplicatedBlockUpdate {
   BlockPos pos{};
   voxel::BlockVariantID new_state{};
@@ -312,6 +331,9 @@ public:
   [[nodiscard]] const entity::EntityMovement* find_entity_movement(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::EntityHealth* find_entity_health(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityHealth* find_entity_health(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::KnockbackResistanceComponent* find_entity_knockback_resistance(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::KnockbackResistanceComponent* find_entity_knockback_resistance(EntityID entity_id) const noexcept;
+  [[nodiscard]] DamageResult apply_damage(const DamageRequest& request) noexcept;
   [[nodiscard]] entity::BrainComponent* find_entity_brain(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::BrainComponent* find_entity_brain(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::MovementIntent* find_entity_movement_intent(EntityID entity_id) noexcept;

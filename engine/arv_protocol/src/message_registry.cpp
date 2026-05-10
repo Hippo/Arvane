@@ -133,6 +133,9 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundDroppedItemSnapshot, "ClientboundDroppedItemSnapshot",
                              MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
                              NetworkLane::Gameplay});
+  registry.register_message({MessageType::ServerboundAttackEntity, "ServerboundAttackEntity",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
   registry.register_message({MessageType::ServerboundInventoryActionRequest, "ServerboundInventoryActionRequest",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});

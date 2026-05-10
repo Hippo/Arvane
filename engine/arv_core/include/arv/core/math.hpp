@@ -78,6 +78,24 @@ struct Aabb3f {
   }
 };
 
+[[nodiscard]] constexpr f32 distance_squared_point_to_aabb(
+    Vec3f point,
+    Aabb3f bounds) noexcept {
+  const auto axis_distance = [](f32 value, f32 min, f32 max) constexpr noexcept {
+    if (value < min) {
+      return min - value;
+    }
+    if (value > max) {
+      return value - max;
+    }
+    return 0.0F;
+  };
+  const f32 dx = axis_distance(point.x, bounds.min.x, bounds.max.x);
+  const f32 dy = axis_distance(point.y, bounds.min.y, bounds.max.y);
+  const f32 dz = axis_distance(point.z, bounds.min.z, bounds.max.z);
+  return dx * dx + dy * dy + dz * dz;
+}
+
 template<typename T>
 [[nodiscard]] constexpr Vec3<T> operator+(Vec3<T> lhs, Vec3<T> rhs) noexcept {
   return {lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z};

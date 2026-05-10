@@ -1,6 +1,7 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/player_constants.hpp"
+#include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
@@ -13,6 +14,17 @@
 #include <vector>
 
 namespace {
+
+const arv::net::NetworkEvent* find_event(
+    const std::vector<arv::net::NetworkEvent>& events,
+    arv::net::NetworkEventType type) {
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type == type) {
+      return &event;
+    }
+  }
+  return nullptr;
+}
 
 void send_to_client(
     arv::net::ITransport& server_transport,
@@ -169,7 +181,11 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
                                      0,
                                      "walking",
                                      0.5F,
-                                     {5.0F, 15.0F, 0.0F}});
+                                     {5.0F, 15.0F, 0.0F},
+                                     8.0F,
+                                     10.0F});
+  fresh_snapshot.entities.back().state_flags =
+      arv::protocol::EntityStateFlagHasHealth;
   send_to_client(
       *server_transport,
       connection_id.value(),
@@ -185,6 +201,11 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   EXPECT_EQ(mirror->animation_name, "walking");
   EXPECT_FLOAT_EQ(mirror->animation_time_seconds, 0.5F);
   EXPECT_EQ(mirror->head_rotation_degrees, (arv::Vec3f{5.0F, 15.0F, 0.0F}));
+  EXPECT_TRUE(mirror->has_health);
+  EXPECT_FALSE(mirror->dead);
+  EXPECT_FALSE(mirror->invulnerable);
+  EXPECT_FLOAT_EQ(mirror->health_current, 8.0F);
+  EXPECT_FLOAT_EQ(mirror->health_max, 10.0F);
 
   fresh_snapshot.server_tick = 19;
   fresh_snapshot.entities[0].position = {30.0F, 31.0F, 32.0F};
@@ -207,6 +228,60 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
           {arv::WorldID{1}, arv::EntityNetID{5}, 0}));
   client.fixed_tick(6);
   EXPECT_EQ(client.replicated_entity_count(), 0U);
+}
+
+TEST(ClientRuntimeTests, AttackRequestSendsEntityPacketAndQueuesFeedback) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  arv::protocol::ClientboundEntitySpawn spawn;
+  spawn.world_id = arv::WorldID{1};
+  spawn.entity_id = arv::EntityNetID{5};
+  spawn.entity_type = arv::EntityTypeID{2};
+  spawn.entity_type_name = "arvane:test_entity";
+  spawn.position = {3.0F, 1.0F, 2.0F};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundEntitySpawn,
+      arv::protocol::serialize_clientbound_entity_spawn(spawn));
+  client.fixed_tick(2);
+  ASSERT_NE(client.find_replicated_entity(arv::EntityNetID{5}), nullptr);
+  (void)server_transport->poll_events();
+
+  const auto result = client.request_attack_entity(arv::EntityNetID{5});
+  ASSERT_TRUE(result);
+
+  const std::vector<arv::client::ClientAttackFeedback> feedback =
+      client.drain_attack_feedback();
+  ASSERT_EQ(feedback.size(), 1U);
+  EXPECT_EQ(feedback.front().target_entity, (arv::EntityNetID{5}));
+  EXPECT_EQ(feedback.front().target_position, (arv::Vec3f{3.0F, 1.0F, 2.0F}));
+  EXPECT_EQ(feedback.front().sequence, 1U);
+
+  const std::vector<arv::net::NetworkEvent> server_events =
+      server_transport->poll_events();
+  const arv::net::NetworkEvent* message =
+      find_event(server_events, arv::net::NetworkEventType::MessageReceived);
+  ASSERT_NE(message, nullptr);
+  EXPECT_EQ(message->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(message->lane, arv::protocol::NetworkLane::Gameplay);
+
+  const auto decoded = arv::protocol::deserialize_envelope(message->payload);
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(
+      decoded.value().envelope.message_type,
+      arv::protocol::MessageType::ServerboundAttackEntity);
+  const auto attack =
+      arv::protocol::deserialize_serverbound_attack_entity(decoded.value().payload);
+  ASSERT_TRUE(attack);
+  EXPECT_EQ(attack.value().target_entity, (arv::EntityNetID{5}));
+  EXPECT_EQ(attack.value().sequence, 1U);
 }
 
 TEST(ClientRuntimeTests, DroppedItemSnapshotsCreateUpdateAndRemoveMirrors) {

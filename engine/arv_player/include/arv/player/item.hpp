@@ -47,6 +47,17 @@ struct ItemRegistryError {
   std::string message{};
 };
 
+struct ItemAttackData {
+  f32 damage_amount{};
+  f32 attack_range{};
+  u32 cooldown_ticks{};
+  f32 horizontal_knockback{};
+  f32 vertical_knockback{};
+  f32 sprint_knockback_bonus{};
+
+  constexpr bool operator==(const ItemAttackData&) const = default;
+};
+
 struct ItemDefinition {
   std::string name{};
   std::string display_name{};
@@ -63,6 +74,7 @@ struct ItemDefinition {
   bool buoyancy_set{};
   std::string tool_category{};
   f32 tool_break_speed_multiplier{1.0F};
+  std::optional<ItemAttackData> attack_data{};
   HashMap<std::string, HeldItemAnimationBinding> held_animations{};
 };
 
@@ -81,6 +93,7 @@ struct ItemRecord {
   f32 buoyancy{DefaultItemBuoyancy};
   std::string tool_category{};
   f32 tool_break_speed_multiplier{1.0F};
+  std::optional<ItemAttackData> attack_data{};
   HashMap<std::string, HeldItemAnimationBinding> held_animations{};
 };
 

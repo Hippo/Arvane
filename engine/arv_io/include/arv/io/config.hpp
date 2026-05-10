@@ -175,6 +175,7 @@ struct PhysicsConfig {
   f32 sprint_speed{6.0F};
   f32 sneak_speed{2.25F};
   f32 air_speed{3.5F};
+  f32 air_control_acceleration_per_second{10.0F};
   f32 fly_speed{8.0F};
   f32 fly_vertical_speed{6.0F};
   f32 jump_velocity{8.5F};
@@ -215,8 +216,25 @@ struct GameplayConfig {
     f32 pickup_delay_seconds{0.5F};
   };
 
+  struct CombatConfig {
+    f32 default_attack_damage{1.0F};
+    f32 default_attack_range{3.0F};
+    f32 default_attack_cooldown_seconds{0.35F};
+    f32 attack_validation_grace_blocks{3.0F};
+    f32 max_attack_validation_range{6.0F};
+    f32 existing_horizontal_retention{0.45F};
+    f32 base_horizontal_knockback{8.0F};
+    f32 sprint_horizontal_bonus{3.0F};
+    f32 base_vertical_knockback{7.0F};
+    f32 airborne_vertical_knockback{5.0F};
+    f32 vertical_knockback_cap{9.0F};
+    u32 knockback_control_suppression_ticks{2U};
+    bool use_current_block_obstruction_check{};
+  };
+
   BlockBreakingConfig block_breaking{};
   DroppedItemsConfig dropped_items{};
+  CombatConfig combat{};
 };
 
 struct RenderConfig {

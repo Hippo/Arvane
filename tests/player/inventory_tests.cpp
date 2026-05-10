@@ -162,6 +162,18 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
       "tool": {
         "category": "pickaxe",
         "break_speed_multiplier": 3.5
+      },
+      "components": {
+        "damage": {
+          "amount": 4.0,
+          "range": 3.0,
+          "horizontal_knockback": 4.25,
+          "vertical_knockback": 1.5,
+          "cooldown_seconds": 0.5
+        },
+        "knockback": {
+          "sprint_bonus": 0.75
+        }
       }
     }
   ]
@@ -184,6 +196,13 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
   EXPECT_FLOAT_EQ(coal->buoyancy, 0.5F);
   EXPECT_EQ(coal->tool_category, "pickaxe");
   EXPECT_FLOAT_EQ(coal->tool_break_speed_multiplier, 3.5F);
+  ASSERT_TRUE(coal->attack_data.has_value());
+  EXPECT_FLOAT_EQ(coal->attack_data->damage_amount, 4.0F);
+  EXPECT_FLOAT_EQ(coal->attack_data->attack_range, 3.0F);
+  EXPECT_EQ(coal->attack_data->cooldown_ticks, 30U);
+  EXPECT_FLOAT_EQ(coal->attack_data->horizontal_knockback, 4.25F);
+  EXPECT_FLOAT_EQ(coal->attack_data->vertical_knockback, 1.5F);
+  EXPECT_FLOAT_EQ(coal->attack_data->sprint_knockback_bonus, 0.75F);
   EXPECT_FALSE(coal->placement_variant.has_value());
 }
 

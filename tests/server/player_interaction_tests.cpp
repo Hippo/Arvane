@@ -2,6 +2,7 @@
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
+#include "arv/server/server_combat.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "support/test_registries.hpp"
 
@@ -10,12 +11,68 @@
 #include <algorithm>
 #include <chrono>
 #include <numbers>
+#include <optional>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
 namespace {
+
+struct CombatValidationFixture {
+  arv::voxel::BlockRegistry block_registry{arv::testsupport::make_test_block_registry()};
+  arv::player::ItemRegistry item_registry{arv::testsupport::make_test_item_registry(block_registry)};
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::server::CombatConfig config{};
+  arv::server::PlayerCombatState combat_state{};
+  arv::player::PlayerState* player{};
+
+  CombatValidationFixture() {
+    player = &world.ensure_player(arv::PlayerID{1});
+    player->world_id = world.id();
+    player->position = {0.0F, 0.0F, 0.0F};
+    player->selected_hotbar_slot = 0;
+    player->resolved_permissions.core.can_interact = true;
+    const std::optional<arv::player::ItemID> pickaxe =
+        item_registry.find_item("arvane:wood_pickaxe");
+    EXPECT_TRUE(pickaxe.has_value());
+    EXPECT_TRUE(player->inventory.set_slot(
+        0,
+        arv::player::ItemStack{pickaxe.value(), 1U}));
+  }
+
+  [[nodiscard]] arv::EntityID create_target(
+      arv::Vec3f position,
+      bool health = true) {
+    arv::entity::EntityComponentSet components;
+    components.collision = arv::entity::AuthoredCollisionComponent{{0.9F, 0.9F, 0.9F}};
+    if (health) {
+      components.health = arv::entity::AuthoredHealthComponent{10.0F};
+    }
+    arv::world::EntityCreateInfo info;
+    info.position = position;
+    info.authored_components = components;
+    return world.create_entity(std::move(info));
+  }
+
+  [[nodiscard]] arv::server::AttackResult attack(
+      arv::EntityID target,
+      arv::u32 sequence,
+      arv::TickIndex tick) {
+    const std::optional<arv::EntityNetID> target_net = world.network_id_for_entity(target);
+    EXPECT_TRUE(target_net.has_value());
+    return arv::server::validate_and_apply_entity_attack(
+        world,
+        *player,
+        item_registry,
+        config,
+        combat_state,
+        target_net.value(),
+        sequence,
+        tick,
+        &block_registry);
+  }
+};
 
 void complete_integrated_handshake(
     arv::server::ServerRuntime& server,
@@ -114,6 +171,311 @@ arv::voxel::BlockRegistry make_stair_placement_block_registry() {
 }
 
 } // namespace
+
+TEST(PlayerInteractionTests, EntityAttackWithinValidationRangeAppliesServerDamage) {
+  CombatValidationFixture fixture;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_TRUE(result.damage_applied);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::None);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 7.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackBeyondValidationRangeIsRejected) {
+  CombatValidationFixture fixture;
+  const arv::EntityID target = fixture.create_target({7.0F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_FALSE(result.damage_applied);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::OutOfRange);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 10.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackUsesGraceButHonorsMaxValidationRange) {
+  CombatValidationFixture fixture;
+  fixture.config.attack_validation_grace_blocks = 10.0F;
+  fixture.config.max_attack_validation_range = 4.0F;
+  const arv::EntityID target = fixture.create_target({5.0F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::OutOfRange);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 10.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackCanRejectCurrentBlockObstruction) {
+  CombatValidationFixture fixture;
+  fixture.config.use_current_block_obstruction_check = true;
+  (void)fixture.world.ensure_chunk({{0, 0, 0}});
+  const std::optional<arv::voxel::BlockVariantID> stone =
+      fixture.block_registry.find_variant("arvane:stone");
+  ASSERT_TRUE(stone.has_value());
+  ASSERT_TRUE(fixture.world.set_block({{1, 1, 0}}, stone.value()));
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::BlockObstructed);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 10.0F);
+}
+
+TEST(PlayerInteractionTests, DuplicateAttackSequenceDoesNotApplyDamageTwice) {
+  CombatValidationFixture fixture;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult first = fixture.attack(target, 7U, 10U);
+  const arv::server::AttackResult duplicate = fixture.attack(target, 7U, 40U);
+
+  EXPECT_TRUE(first.accepted);
+  EXPECT_TRUE(first.damage_applied);
+  EXPECT_FALSE(duplicate.accepted);
+  EXPECT_EQ(duplicate.reject_reason, arv::server::AttackRejectReason::Duplicate);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 7.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackCooldownPreventsFastRepeatedHits) {
+  CombatValidationFixture fixture;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult first = fixture.attack(target, 1U, 10U);
+  const arv::server::AttackResult too_soon = fixture.attack(target, 2U, 11U);
+
+  EXPECT_TRUE(first.accepted);
+  EXPECT_FALSE(too_soon.accepted);
+  EXPECT_EQ(too_soon.reject_reason, arv::server::AttackRejectReason::Cooldown);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 7.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackRejectsMissingTarget) {
+  CombatValidationFixture fixture;
+
+  const arv::server::AttackResult result =
+      arv::server::validate_and_apply_entity_attack(
+          fixture.world,
+          *fixture.player,
+          fixture.item_registry,
+          fixture.config,
+          fixture.combat_state,
+          arv::EntityNetID{9999U},
+          1U,
+          10U);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::MissingTarget);
+}
+
+TEST(PlayerInteractionTests, EntityAttackRejectsTargetsWithoutHealth) {
+  CombatValidationFixture fixture;
+  const arv::EntityID target =
+      fixture.create_target({2.8F, 0.0F, 0.0F}, false);
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::TargetNotDamageable);
+}
+
+TEST(PlayerInteractionTests, EntityAttackRejectsAlreadyDeadTargets) {
+  CombatValidationFixture fixture;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+  arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  health->current = 0.0F;
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::TargetDead);
+}
+
+TEST(PlayerInteractionTests, EntityAttackAcceptsButDoesNotDamageInvulnerableTargets) {
+  CombatValidationFixture fixture;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+  arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  health->invulnerable = true;
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_FALSE(result.damage_applied);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::None);
+  EXPECT_FLOAT_EQ(health->current, 10.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackRejectsWhenGamemodeDisallowsInteraction) {
+  CombatValidationFixture fixture;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+  fixture.player->resolved_permissions.core.can_interact = false;
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reject_reason, arv::server::AttackRejectReason::GamemodeDisallowsAttack);
+}
+
+TEST(PlayerInteractionTests, EntityAttackUsesDefaultFistProfileForEmptyHand) {
+  CombatValidationFixture fixture;
+  ASSERT_TRUE(fixture.player->inventory.clear_slot(0));
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_TRUE(result.damage_applied);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 9.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackUsesDefaultFistProfileForHeldItemsWithoutAttackData) {
+  CombatValidationFixture fixture;
+  const std::optional<arv::player::ItemID> stone =
+      fixture.item_registry.find_item("arvane:stone");
+  ASSERT_TRUE(stone.has_value());
+  ASSERT_TRUE(fixture.player->inventory.set_slot(
+      0,
+      arv::player::ItemStack{stone.value(), 1U}));
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_TRUE(result.damage_applied);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 9.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackAppliesKnockbackOnDamage) {
+  CombatValidationFixture fixture;
+  fixture.config.base_horizontal_knockback = 5.0F;
+  fixture.config.base_vertical_knockback = 1.5F;
+  fixture.config.airborne_vertical_knockback = 1.5F;
+  fixture.config.vertical_knockback_cap = 2.0F;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_TRUE(result.damage_applied);
+  EXPECT_TRUE(result.knockback_applied);
+  const arv::entity::EntityVelocity* velocity =
+      fixture.world.find_entity_velocity(target);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_GT(velocity->linear.x, 0.0F);
+  EXPECT_FLOAT_EQ(velocity->linear.y, 1.5F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackScalesKnockbackResistance) {
+  CombatValidationFixture fixture;
+  fixture.config.base_horizontal_knockback = 6.0F;
+  fixture.config.base_vertical_knockback = 2.0F;
+  fixture.config.airborne_vertical_knockback = 2.0F;
+  fixture.config.vertical_knockback_cap = 3.0F;
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{0.9F, 0.9F, 0.9F}};
+  components.health = arv::entity::AuthoredHealthComponent{10.0F};
+  components.knockback_resistance =
+      arv::entity::AuthoredKnockbackResistanceComponent{0.5F};
+  arv::world::EntityCreateInfo info;
+  info.position = {2.8F, 0.0F, 0.0F};
+  info.authored_components = components;
+  const arv::EntityID target = fixture.world.create_entity(std::move(info));
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  ASSERT_TRUE(result.accepted);
+  ASSERT_TRUE(result.damage_applied);
+  const arv::entity::EntityVelocity* velocity =
+      fixture.world.find_entity_velocity(target);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_FLOAT_EQ(velocity->linear.x, 3.0F);
+  EXPECT_FLOAT_EQ(velocity->linear.y, 1.0F);
+}
+
+TEST(PlayerInteractionTests, EntityAttackAppliesPlayerVelocityWithoutTeleporting) {
+  CombatValidationFixture fixture;
+  fixture.config.base_horizontal_knockback = 5.0F;
+  fixture.config.base_vertical_knockback = 1.5F;
+  fixture.config.airborne_vertical_knockback = 1.5F;
+  fixture.config.vertical_knockback_cap = 2.0F;
+  arv::player::PlayerState& target_player =
+      fixture.world.ensure_player(arv::PlayerID{2});
+  target_player.position = {2.8F, 0.0F, 0.0F};
+  target_player.velocity = {};
+  target_player.grounded = true;
+  const std::optional<arv::EntityID> target =
+      fixture.world.entity_for_player(arv::PlayerID{2});
+  ASSERT_TRUE(target.has_value());
+
+  const arv::server::AttackResult result = fixture.attack(target.value(), 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_TRUE(result.damage_applied);
+  EXPECT_TRUE(result.knockback_applied);
+  EXPECT_EQ(target_player.position, (arv::Vec3f{2.8F, 0.0F, 0.0F}));
+  EXPECT_FLOAT_EQ(target_player.velocity.x, 5.0F);
+  EXPECT_FLOAT_EQ(target_player.velocity.y, 1.5F);
+  EXPECT_EQ(target_player.knockback_control_suppression_ticks, 2U);
+  const arv::entity::EntityVelocity* velocity =
+      fixture.world.find_entity_velocity(target.value());
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_FLOAT_EQ(velocity->linear.x, 5.0F);
+  EXPECT_FLOAT_EQ(velocity->linear.y, 1.5F);
+  const arv::entity::EntityHealth* health =
+      fixture.world.find_entity_health(target.value());
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 17.0F);
+}
+
+TEST(PlayerInteractionTests, SprintKnockbackBonusRequiresResetAfterHit) {
+  CombatValidationFixture fixture;
+  fixture.config.existing_horizontal_retention = 0.5F;
+  fixture.config.base_horizontal_knockback = 4.0F;
+  fixture.config.sprint_horizontal_bonus = 2.0F;
+  fixture.config.base_vertical_knockback = 1.0F;
+  fixture.config.airborne_vertical_knockback = 1.0F;
+  fixture.config.vertical_knockback_cap = 2.0F;
+  fixture.combat_state.was_sprinting_forward_last_tick = true;
+  fixture.combat_state.sprint_knockback_ready = true;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult first = fixture.attack(target, 1U, 10U);
+
+  ASSERT_TRUE(first.accepted);
+  ASSERT_TRUE(first.damage_applied);
+  const arv::entity::EntityVelocity* velocity =
+      fixture.world.find_entity_velocity(target);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_FLOAT_EQ(velocity->linear.x, 6.0F);
+  EXPECT_FALSE(fixture.combat_state.sprint_knockback_ready);
+
+  const arv::server::AttackResult second = fixture.attack(target, 2U, 100U);
+
+  ASSERT_TRUE(second.accepted);
+  ASSERT_TRUE(second.damage_applied);
+  EXPECT_FLOAT_EQ(velocity->linear.x, 7.0F);
+}
 
 TEST(PlayerInteractionTests, SecondaryPlaceFlowsThroughServerAuthorityAndConsumesHeldStack) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
