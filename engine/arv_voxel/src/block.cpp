@@ -591,6 +591,8 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     BlockRecord block;
     block.id = block_id;
     block.name = definition.name;
+    block.display_name =
+        definition.display_name.empty() ? definition.name : definition.display_name;
     block.tags = definition.tags;
     block.properties = definition.properties;
     block.drops = definition.drops;
@@ -917,6 +919,15 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
 
       BlockDefinition definition;
       definition.name = name_iter->get<std::string>();
+
+      const auto display_name_iter = item.find("display_name");
+      if (display_name_iter != item.end()) {
+        if (!display_name_iter->is_string()) {
+          return BlockDefinitionsResult::failure(
+              {"display_name must be a string for " + definition.name});
+        }
+        definition.display_name = display_name_iter->get<std::string>();
+      }
 
       const auto category_iter = item.find("render_category");
       if (category_iter != item.end()) {

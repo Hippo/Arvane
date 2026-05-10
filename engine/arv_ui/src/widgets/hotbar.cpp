@@ -8,6 +8,42 @@
 namespace arv::ui {
 namespace widgets_detail {
 
+void append_hotbar_item_name_popup(UiTree& tree, const HotbarHudModel& model) {
+  if (model.item_name_popup.empty() || model.item_name_popup_alpha <= 0.0F) {
+    return;
+  }
+
+  const UiTheme& theme = tree.theme();
+  const f32 alpha = std::clamp(model.item_name_popup_alpha, 0.0F, 1.0F);
+  UiElement popup;
+  popup.stable_id = "hud.hotbar.item_name";
+  popup.type = UiElementType::Panel;
+  popup.layout.width_mode = UiSizeMode::Content;
+  popup.layout.height_mode = UiSizeMode::Content;
+  popup.layout.padding = {
+      theme.layout.spacing_md,
+      theme.layout.spacing_md,
+      theme.layout.spacing_sm,
+      theme.layout.spacing_sm};
+  popup.layout.anchor = UiAnchor::BottomCenter;
+  popup.layout.offset = {0.0F, -94.0F};
+  popup.style.background = theme.colors.surface_alt;
+  popup.style.background.w = std::min(popup.style.background.w, 0.86F) * alpha;
+  popup.hit_test = false;
+  style_surface(popup, theme, theme.layout.radius_md);
+  popup.style.border.w *= alpha;
+  const UiNodeID popup_id = tree.add_child(tree.root_id(), std::move(popup));
+
+  UiElement text = text_element(
+      "hud.hotbar.item_name.text",
+      model.item_name_popup,
+      theme.colors.text,
+      UiTextRole::Body);
+  text.layout.anchor = UiAnchor::Center;
+  text.style.foreground.w *= alpha;
+  tree.add_child(popup_id, std::move(text));
+}
+
 void append_hotbar_hud(UiTree& tree, HotbarHudModel model) {
   const UiTheme& theme = tree.theme();
   const u8 slot_count = static_cast<u8>(
@@ -46,6 +82,8 @@ void append_hotbar_hud(UiTree& tree, HotbarHudModel model) {
         false,
         42.0F);
   }
+
+  append_hotbar_item_name_popup(tree, model);
 
   (void)model.viewport;
 }

@@ -1,6 +1,7 @@
 #include "desktop_frame_loop.hpp"
 
 #include "asset_helpers.hpp"
+#include "desktop_input_routing.hpp"
 #include "desktop_skin_textures.hpp"
 #include "ui_model.hpp"
 
@@ -77,7 +78,9 @@ namespace {
 [[nodiscard]] u64 gameplay_ui_signature(
     const DesktopGameSession& session,
     const platform::InputSnapshot& platform_input,
-    u32 displayed_fps) noexcept {
+    u32 displayed_fps,
+    std::string_view hotbar_item_popup_name,
+    f32 hotbar_item_popup_alpha) noexcept {
   constexpr u64 OffsetBasis = 1469598103934665603ULL;
   u64 hash = OffsetBasis;
   hash = ui_cache_hash_append_u64(
@@ -92,6 +95,8 @@ namespace {
   hash = ui_cache_hash_append_bool(hash, session.client->chat_open());
   hash = ui_cache_hash_append_bool(hash, session.client->tab_menu_visible());
   hash = ui_cache_hash_append_string(hash, session.client->chat_draft());
+  hash = ui_cache_hash_append_string(hash, hotbar_item_popup_name);
+  hash = ui_cache_hash_append_f32(hash, hotbar_item_popup_alpha);
   hash = ui_cache_hash_append_u64(hash, displayed_fps);
   if (const std::optional<EntityNetID> local_entity = session.client->local_entity_id();
       local_entity.has_value()) {
@@ -227,13 +232,18 @@ void DesktopFrameLoop::build_ui(
     DesktopGameSession* active_session,
     bool has_active_session,
     bool has_active_integrated_session,
-    bool fixed_tick_ran) {
+    bool fixed_tick_ran,
+    std::chrono::steady_clock::time_point now) {
   ui_tree_.set_theme(&ui_theme_);
   if (has_active_session) {
     update_gameplay_ui_snapshots(
         *active_session,
         has_active_integrated_session,
         fixed_tick_ran);
+    update_hotbar_item_popup(*active_session, now);
+  } else {
+    hotbar_item_observation_initialized_ = false;
+    hotbar_item_popup_name_.clear();
   }
 
   menu_context.viewport = {
@@ -249,13 +259,18 @@ void DesktopFrameLoop::build_ui(
       screen_manager_.has_active_screen(),
       screen_manager_.revision(),
       has_active_session
-          ? gameplay_ui_signature(*active_session, platform_input, displayed_fps_)
+          ? gameplay_ui_signature(
+                *active_session,
+                platform_input,
+                displayed_fps_,
+                hotbar_item_popup_name_,
+                hotbar_item_popup_alpha(now))
           : 0U};
   const bool rebuild_ui_tree =
       !ui_tree_cache_valid_ || !(next_cache_key == ui_tree_cache_key_);
   if (rebuild_ui_tree) {
     if (has_active_session) {
-      build_gameplay_ui(*active_session, platform_input);
+      build_gameplay_ui(*active_session, platform_input, now);
     } else {
       ui_tree_.clear();
     }
@@ -272,7 +287,22 @@ void DesktopFrameLoop::build_ui(
     ui_tree_cache_key_ = next_cache_key;
     ui_tree_cache_valid_ = true;
   }
-  (void)ui_tree_.route_mouse_move({platform_input.cursor_x, platform_input.cursor_y});
+  const std::optional<ui::UiAction> hover_action =
+      ui_tree_.route_mouse_move({platform_input.cursor_x, platform_input.cursor_y});
+  if (has_active_session &&
+      append_inventory_hover_tooltip_if_needed(
+          *active_session,
+          platform_input,
+          hover_action)) {
+    ui_tree_.layout(
+        {
+            static_cast<f32>(framebuffer_.width),
+            static_cast<f32>(framebuffer_.height),
+        },
+        &ui_text_measurer_);
+    (void)ui_tree_.route_mouse_move(
+        {platform_input.cursor_x, platform_input.cursor_y});
+  }
   append_menu_player_skin_preview(frame, menu_context);
   ui::append_ui_draw_commands(
       ui_tree_,
@@ -315,9 +345,117 @@ void DesktopFrameLoop::update_gameplay_ui_snapshots(
   }
 }
 
+void DesktopFrameLoop::update_hotbar_item_popup(
+    DesktopGameSession& active_session,
+    std::chrono::steady_clock::time_point now) {
+  if (active_session.client == nullptr) {
+    hotbar_item_observation_initialized_ = false;
+    hotbar_item_popup_name_.clear();
+    return;
+  }
+
+  const u8 selected_slot = active_session.client->selected_hotbar_slot();
+  std::string selected_item_name;
+  if (selected_slot < active_session.inventory_slots.size()) {
+    const ui::UiItemStackView& stack = active_session.inventory_slots[selected_slot];
+    if (!stack.empty()) {
+      selected_item_name =
+          stack.display_name.empty() ? stack.item_name : stack.display_name;
+    }
+  }
+
+  if (!hotbar_item_observation_initialized_) {
+    observed_hotbar_slot_ = selected_slot;
+    observed_hotbar_item_name_ = std::move(selected_item_name);
+    hotbar_item_observation_initialized_ = true;
+    return;
+  }
+
+  if (selected_slot == observed_hotbar_slot_ &&
+      selected_item_name == observed_hotbar_item_name_) {
+    return;
+  }
+
+  observed_hotbar_slot_ = selected_slot;
+  observed_hotbar_item_name_ = selected_item_name;
+  if (selected_item_name.empty()) {
+    hotbar_item_popup_name_.clear();
+    hotbar_item_popup_expires_at_ = now;
+    return;
+  }
+
+  hotbar_item_popup_name_ = std::move(selected_item_name);
+  hotbar_item_popup_expires_at_ = now + HotbarItemPopupVisibleDuration;
+}
+
+f32 DesktopFrameLoop::hotbar_item_popup_alpha(
+    std::chrono::steady_clock::time_point now) const noexcept {
+  if (hotbar_item_popup_name_.empty() || now >= hotbar_item_popup_expires_at_) {
+    return 0.0F;
+  }
+
+  const auto remaining = hotbar_item_popup_expires_at_ - now;
+  if (remaining >= HotbarItemPopupFadeDuration) {
+    return 1.0F;
+  }
+  const auto remaining_ms =
+      std::chrono::duration<f32, std::milli>(remaining).count();
+  const auto fade_ms =
+      std::chrono::duration<f32, std::milli>(HotbarItemPopupFadeDuration).count();
+  return std::clamp(remaining_ms / fade_ms, 0.0F, 1.0F);
+}
+
+bool DesktopFrameLoop::append_inventory_hover_tooltip_if_needed(
+    DesktopGameSession& active_session,
+    const platform::InputSnapshot& platform_input,
+    const std::optional<ui::UiAction>& hover_action) {
+  if (active_session.client == nullptr ||
+      !active_session.client->inventory_open() ||
+      (active_session.carried_inventory_stack.has_value() &&
+       !active_session.carried_inventory_stack->empty()) ||
+      ui_tree_.find_by_stable_id("inventory.tooltip") != nullptr ||
+      !hover_action.has_value() ||
+      !std::string_view{hover_action->element_id}.starts_with("inventory.slot.")) {
+    return false;
+  }
+
+  const std::optional<usize> slot = inventory_slot_from_ui_action(*hover_action);
+  if (!slot.has_value() || slot.value() >= active_session.inventory_slots.size()) {
+    return false;
+  }
+
+  const ui::UiItemStackView& stack = active_session.inventory_slots[slot.value()];
+  if (stack.empty()) {
+    return false;
+  }
+  std::string tooltip_text =
+      stack.display_name.empty() ? stack.item_name : stack.display_name;
+  if (tooltip_text.empty()) {
+    return false;
+  }
+
+  ui::append_item_tooltip(
+      ui_tree_,
+      {
+          true,
+          std::move(tooltip_text),
+          {
+              static_cast<f32>(framebuffer_.width),
+              static_cast<f32>(framebuffer_.height),
+          },
+          {
+              platform_input.cursor_x,
+              platform_input.cursor_y,
+          },
+      });
+  return true;
+}
+
 void DesktopFrameLoop::build_gameplay_ui(
     DesktopGameSession& active_session,
-    const platform::InputSnapshot& platform_input) {
+    const platform::InputSnapshot& platform_input,
+    std::chrono::steady_clock::time_point now) {
+  const f32 item_popup_alpha = hotbar_item_popup_alpha(now);
   ui::HealthHudModel health;
   health.viewport = {
       static_cast<f32>(framebuffer_.width),
@@ -351,6 +489,8 @@ void DesktopFrameLoop::build_gameplay_ui(
                   std::min<usize>(
                       active_session.inventory_slots.size(),
                       player::DefaultHotbarSlotCount)},
+              item_popup_alpha > 0.0F ? hotbar_item_popup_name_ : std::string{},
+              item_popup_alpha,
           },
           {
               active_session.client->inventory_open(),

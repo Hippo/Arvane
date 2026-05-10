@@ -406,6 +406,28 @@ TEST(HotbarHudTests, BuildsTextureItemIconsFromResolvedRenderMetadata) {
   EXPECT_TRUE(icon->image.valid);
 }
 
+TEST(HotbarHudTests, BuildsTransientItemNamePopup) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  arv::ui::HotbarHudModel model;
+  model.selected_slot = 0;
+  model.slot_count = 9;
+  model.viewport = {800.0F, 600.0F};
+  model.item_name_popup = "Stone";
+  model.item_name_popup_alpha = 0.5F;
+
+  arv::ui::build_hotbar_hud(tree, std::move(model));
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* popup = tree.find_by_stable_id("hud.hotbar.item_name");
+  const auto* label = tree.find_by_stable_id("hud.hotbar.item_name.text");
+  ASSERT_NE(popup, nullptr);
+  ASSERT_NE(label, nullptr);
+  EXPECT_FALSE(popup->hit_test);
+  EXPECT_EQ(label->text, "Stone");
+  EXPECT_NEAR(label->style.foreground.w, 0.5F, 0.001F);
+}
+
 TEST(HotbarHudTests, BlockItemIconsKeepSideTextureTopAtTop) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;
@@ -536,6 +558,52 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   EXPECT_EQ(fps->text, "FPS: 144");
   EXPECT_FLOAT_EQ(fps->rect.x, 8.0F);
   EXPECT_FLOAT_EQ(fps->rect.y, 8.0F);
+}
+
+TEST(InventoryUiTests, PlacesHotbarBelowInventoryWithSeparator) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  std::vector<arv::ui::UiItemStackView> slots(36);
+
+  arv::ui::build_inventory_ui(
+      tree,
+      {true, "Inventory", 0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* main_first = tree.find_by_stable_id("inventory.slot.9");
+  const auto* main_last = tree.find_by_stable_id("inventory.slot.35");
+  const auto* separator = tree.find_by_stable_id("inventory.hotbar_separator");
+  const auto* hotbar = tree.find_by_stable_id("inventory.hotbar");
+  const auto* hotbar_first = tree.find_by_stable_id("inventory.slot.0");
+  ASSERT_NE(main_first, nullptr);
+  ASSERT_NE(main_last, nullptr);
+  ASSERT_NE(separator, nullptr);
+  ASSERT_NE(hotbar, nullptr);
+  ASSERT_NE(hotbar_first, nullptr);
+  EXPECT_LT(main_first->rect.y, hotbar_first->rect.y);
+  EXPECT_LT(main_last->rect.y, separator->rect.y);
+  EXPECT_LT(separator->rect.y, hotbar_first->rect.y);
+  EXPECT_LE(separator->rect.width, main_first->rect.width * 9.0F + 4.0F * 8.0F);
+  EXPECT_EQ(separator->rect.width, hotbar->rect.width);
+}
+
+TEST(InventoryUiTests, AppendsItemTooltipNearCursor) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  arv::ui::append_item_tooltip(
+      tree,
+      {true, "Stone", {800.0F, 600.0F}, {120.0F, 160.0F}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* tooltip = tree.find_by_stable_id("inventory.tooltip");
+  const auto* label = tree.find_by_stable_id("inventory.tooltip.text");
+  ASSERT_NE(tooltip, nullptr);
+  ASSERT_NE(label, nullptr);
+  EXPECT_FALSE(tooltip->hit_test);
+  EXPECT_EQ(label->text, "Stone");
+  EXPECT_GT(tooltip->rect.x, 120.0F);
+  EXPECT_GT(tooltip->rect.y, 160.0F);
 }
 
 TEST(GameplayUiTests, EmptyPassiveChatDoesNotRenderABox) {

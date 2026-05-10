@@ -189,14 +189,25 @@ private:
       DesktopGameSession* active_session,
       bool has_active_session,
       bool has_active_integrated_session,
-      bool fixed_tick_ran);
+      bool fixed_tick_ran,
+      std::chrono::steady_clock::time_point now);
   void update_gameplay_ui_snapshots(
       DesktopGameSession& active_session,
       bool has_active_integrated_session,
       bool fixed_tick_ran);
+  void update_hotbar_item_popup(
+      DesktopGameSession& active_session,
+      std::chrono::steady_clock::time_point now);
+  [[nodiscard]] f32 hotbar_item_popup_alpha(
+      std::chrono::steady_clock::time_point now) const noexcept;
+  [[nodiscard]] bool append_inventory_hover_tooltip_if_needed(
+      DesktopGameSession& active_session,
+      const platform::InputSnapshot& platform_input,
+      const std::optional<ui::UiAction>& hover_action);
   void build_gameplay_ui(
       DesktopGameSession& active_session,
-      const platform::InputSnapshot& platform_input);
+      const platform::InputSnapshot& platform_input,
+      std::chrono::steady_clock::time_point now);
 
   void submit_render_and_present(
       render::FramePacket frame,
@@ -237,8 +248,17 @@ private:
   HashMap<std::string, render::TextureRegionHandle> player_skin_regions_{};
   UiBuildCacheKey ui_tree_cache_key_{};
   bool ui_tree_cache_valid_{};
+  std::chrono::steady_clock::time_point hotbar_item_popup_expires_at_{};
+  std::string hotbar_item_popup_name_{};
+  std::string observed_hotbar_item_name_{};
+  u8 observed_hotbar_slot_{};
+  bool hotbar_item_observation_initialized_{};
 
   static constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
+  static constexpr auto HotbarItemPopupVisibleDuration =
+      std::chrono::milliseconds(1500);
+  static constexpr auto HotbarItemPopupFadeDuration =
+      std::chrono::milliseconds(350);
 };
 
 [[nodiscard]] bool session_world_ready(const DesktopGameSession* session) noexcept;

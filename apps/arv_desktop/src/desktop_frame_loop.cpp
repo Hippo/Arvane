@@ -150,7 +150,8 @@ int DesktopFrameLoop::run() {
         active_session,
         has_world_session,
         has_active_integrated_session,
-        fixed_tick_ran);
+        fixed_tick_ran,
+        timing.now);
 
     submit_render_and_present(
         std::move(frame),

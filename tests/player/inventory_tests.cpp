@@ -207,17 +207,33 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
 }
 
 TEST(ItemRegistryTests, GeneratedBlockItemsResolveToBlockRenderType) {
-  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  std::vector<arv::voxel::BlockDefinition> blocks;
+  blocks.push_back(arv::voxel::make_air_definition());
+  arv::voxel::BlockDefinition stone =
+      arv::voxel::make_full_cube_definition("arvane:stone");
+  stone.display_name = "Stone";
+  blocks.push_back(std::move(stone));
+
+  auto block_registry_result = arv::voxel::BlockRegistry::build(std::move(blocks));
+  ASSERT_TRUE(block_registry_result);
+  const arv::voxel::BlockRegistry block_registry =
+      std::move(block_registry_result.value());
+  auto item_registry_result =
+      arv::player::ItemRegistry::build_default_block_items(block_registry);
+  ASSERT_TRUE(item_registry_result);
   const arv::player::ItemRegistry item_registry =
-      arv::testsupport::make_test_item_registry(block_registry);
+      std::move(item_registry_result.value());
 
   const auto stone_id = item_registry.find_item("arvane:stone");
   ASSERT_TRUE(stone_id);
-  const arv::player::ItemRecord* stone = item_registry.item(stone_id.value());
-  ASSERT_NE(stone, nullptr);
-  EXPECT_EQ(stone->render_type, arv::player::ItemRenderType::Block);
-  ASSERT_TRUE(stone->render_block_variant.has_value());
-  EXPECT_EQ(stone->render_block_variant.value(), block_registry.find_variant("arvane:stone").value());
+  const arv::player::ItemRecord* stone_item = item_registry.item(stone_id.value());
+  ASSERT_NE(stone_item, nullptr);
+  EXPECT_EQ(stone_item->display_name, "Stone");
+  EXPECT_EQ(stone_item->render_type, arv::player::ItemRenderType::Block);
+  ASSERT_TRUE(stone_item->render_block_variant.has_value());
+  EXPECT_EQ(
+      stone_item->render_block_variant.value(),
+      block_registry.find_variant("arvane:stone").value());
 }
 
 TEST(ItemRegistryTests, GeneratedBlockItemsUseBlockBuoyancy) {

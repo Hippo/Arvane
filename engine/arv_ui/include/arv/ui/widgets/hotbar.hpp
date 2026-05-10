@@ -4,6 +4,7 @@
 #include "arv/ui/widgets/items.hpp"
 
 #include <span>
+#include <string>
 
 namespace arv::ui {
 
@@ -12,6 +13,8 @@ struct HotbarHudModel {
   u8 slot_count{player::DefaultHotbarSlotCount};
   Vec2f viewport{};
   std::span<const UiItemStackView> slots{};
+  std::string item_name_popup{};
+  f32 item_name_popup_alpha{};
 };
 
 void build_hotbar_hud(UiTree& tree, HotbarHudModel model);

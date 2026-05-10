@@ -117,6 +117,7 @@ struct BlockModelReference {
 
 struct BlockDefinition {
   std::string name{};
+  std::string display_name{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
   BlockDropDefinition drops{};
@@ -132,6 +133,7 @@ struct BlockDefinition {
 struct BlockRecord {
   BlockID id{};
   std::string name{};
+  std::string display_name{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
   BlockDropDefinition drops{};

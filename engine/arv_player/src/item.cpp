@@ -365,7 +365,8 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
 
     ItemDefinition definition;
     definition.name = block->name;
-    definition.display_name = block->name;
+    definition.display_name =
+        block->display_name.empty() ? block->name : block->display_name;
     definition.category = "blocks";
     definition.max_stack_size = 64;
     definition.places_block = block->name;

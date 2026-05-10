@@ -20,6 +20,14 @@ struct InventoryUiModel {
   Vec2f cursor_position{};
 };
 
+struct ItemTooltipUiModel {
+  bool visible{true};
+  std::string text{};
+  Vec2f viewport{};
+  Vec2f cursor_position{};
+};
+
 void build_inventory_ui(UiTree& tree, InventoryUiModel model);
+void append_item_tooltip(UiTree& tree, ItemTooltipUiModel model);
 
 } // namespace arv::ui
