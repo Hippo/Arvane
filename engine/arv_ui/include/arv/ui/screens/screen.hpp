@@ -79,6 +79,8 @@ struct JoinServerCommand {
   std::string address{};
 };
 
+struct CancelServerConnectCommand {};
+
 struct SaveServerEntryCommand {
   std::optional<usize> edit_index{};
   ServerListEntry server{};
@@ -136,6 +138,7 @@ using UICommand = std::variant<
     CreateWorldCommand,
     DeleteSinglePlayerSaveCommand,
     JoinServerCommand,
+    CancelServerConnectCommand,
     SaveServerEntryCommand,
     RemoveServerEntryCommand,
     SelectLocalProfileCommand,
@@ -222,6 +225,8 @@ enum class MenuScreenType : u8 {
   SinglePlayerMenu,
   CreateWorld,
   MultiPlayerMenu,
+  MultiplayerConnecting,
+  MultiplayerDisconnect,
   AddServer,
   EditServer,
   AccountCreate,

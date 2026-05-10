@@ -358,6 +358,7 @@ void ServerRuntimeImpl::handle_message(
     const std::vector<u8>& packet) {
   auto decoded = protocol::deserialize_envelope(packet);
   if (!decoded) {
+    kick_client(connection_id, "Invalid protocol packet.");
     return;
   }
 
@@ -365,6 +366,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundHello: {
       auto client_hello = protocol::deserialize_serverbound_hello(decoded.value().payload);
       if (!client_hello) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_client_hello(connection_id, client_hello.value());
@@ -373,14 +375,25 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundAuthResponse: {
       auto response = protocol::deserialize_auth_response(decoded.value().payload);
       if (!response) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_auth_response(connection_id, response.value());
       return;
     }
+    case protocol::MessageType::ServerboundKeepAlive: {
+      auto keep_alive = protocol::deserialize_serverbound_keep_alive(decoded.value().payload);
+      if (!keep_alive) {
+        kick_client(connection_id, "Invalid protocol packet.");
+        return;
+      }
+      handle_keep_alive(connection_id, keep_alive.value());
+      return;
+    }
     case protocol::MessageType::ServerboundPlayerMove: {
       auto move = protocol::deserialize_serverbound_player_move(decoded.value().payload);
       if (!move) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_player_move(connection_id, move.value());
@@ -389,6 +402,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundChunkInterestUpdate: {
       auto interest = protocol::deserialize_serverbound_chunk_interest_update(decoded.value().payload);
       if (!interest) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_chunk_interest_update(connection_id, interest.value());
@@ -397,6 +411,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundInventoryActionRequest: {
       auto request = protocol::deserialize_serverbound_inventory_action_request(decoded.value().payload);
       if (!request) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_inventory_action_request(connection_id, request.value());
@@ -405,6 +420,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundAttackEntity: {
       auto attack = protocol::deserialize_serverbound_attack_entity(decoded.value().payload);
       if (!attack) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_attack_entity(connection_id, attack.value());
@@ -413,6 +429,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinRequest: {
       auto request = protocol::deserialize_skin_request(decoded.value().payload);
       if (!request) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_skin_request(connection_id, request.value());
@@ -421,6 +438,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinRequestBatch: {
       auto batch = protocol::deserialize_skin_request_batch(decoded.value().payload);
       if (!batch) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_skin_request_batch(connection_id, std::move(batch.value()));
@@ -429,6 +447,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinUploadBegin: {
       auto begin = protocol::deserialize_skin_upload_begin(decoded.value().payload);
       if (!begin) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_skin_upload_begin(connection_id, begin.value());
@@ -437,6 +456,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinUploadData: {
       auto data = protocol::deserialize_skin_upload_data(decoded.value().payload);
       if (!data) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_skin_upload_data(connection_id, std::move(data.value()));
@@ -445,6 +465,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinUploadChunk: {
       auto chunk = protocol::deserialize_skin_upload_chunk(decoded.value().payload);
       if (!chunk) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_skin_upload_chunk(connection_id, std::move(chunk.value()));
@@ -453,6 +474,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinUploadEnd: {
       auto end = protocol::deserialize_skin_upload_end(decoded.value().payload);
       if (!end) {
+        kick_client(connection_id, "Invalid protocol packet.");
         return;
       }
       handle_skin_upload_end(connection_id, end.value());
@@ -468,16 +490,7 @@ void ServerRuntimeImpl::handle_client_hello(
     const protocol::ServerboundHello& client_hello) {
   protocol::HandshakePolicy policy = handshake_policy_;
   if (!client_hello.auth_begin.has_value()) {
-    protocol::ClientboundHello rejected = protocol::make_clientbound_hello(client_hello, policy);
-    rejected.accepted = false;
-    rejected.reject_reason = "authentication required";
-    (void)send_protocol_message(
-        *transport_,
-        connection_id,
-        protocol::MessageType::ClientboundHello,
-        protocol::ReliabilityClass::ReliableOrdered,
-        protocol::NetworkLane::Session,
-        protocol::serialize_clientbound_hello(rejected));
+    kick_client(connection_id, "authentication required");
     return;
   }
 
@@ -489,16 +502,7 @@ void ServerRuntimeImpl::handle_client_hello(
   if (profile_result.status == PlayerProfileOpenStatus::InvalidClaimedProfileID ||
       profile_result.status == PlayerProfileOpenStatus::PublicKeyMismatch ||
       profile_result.profile == nullptr) {
-    protocol::ClientboundHello rejected = protocol::make_clientbound_hello(client_hello, policy);
-    rejected.accepted = false;
-    rejected.reject_reason = "authentication failed";
-    (void)send_protocol_message(
-        *transport_,
-        connection_id,
-        protocol::MessageType::ClientboundHello,
-        protocol::ReliabilityClass::ReliableOrdered,
-        protocol::NetworkLane::Session,
-        protocol::serialize_clientbound_hello(rejected));
+    kick_client(connection_id, "authentication failed");
     return;
   }
 
@@ -528,7 +532,9 @@ void ServerRuntimeImpl::handle_client_hello(
         std::move(profile_identity),
         mode_ == ServerMode::Integrated);
     if (mode_ == ServerMode::Integrated) {
-      complete_authenticated_session(session);
+      if (!complete_authenticated_session(session)) {
+        return;
+      }
     }
   }
 
@@ -576,7 +582,7 @@ void ServerRuntimeImpl::handle_auth_response(
   const PendingAuthChallenge challenge = session->challenge.value();
   session->challenge.reset();
   if (tick_index_ > challenge.expires_server_tick) {
-    send_auth_result(*session, false, "authentication failed");
+    kick_client(connection_id, "authentication failed");
     return;
   }
 
@@ -594,11 +600,13 @@ void ServerRuntimeImpl::handle_auth_response(
       response.signature,
       session->public_key);
   if (!verified) {
-    send_auth_result(*session, false, "authentication failed");
+    kick_client(connection_id, "authentication failed");
     return;
   }
 
-  complete_authenticated_session(*session);
+  if (!complete_authenticated_session(*session)) {
+    return;
+  }
   send_auth_result(*session, true);
   if (const player::PlayerState* player_state = default_world_.find_player(session->player_id);
       player_state != nullptr) {
@@ -612,6 +620,19 @@ void ServerRuntimeImpl::handle_auth_response(
     });
     broadcast_player_profile_info(*session);
   }
+}
+
+void ServerRuntimeImpl::handle_keep_alive(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundKeepAlive& keep_alive) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated || session->closing) {
+    return;
+  }
+  if (keep_alive.id != session->last_keep_alive_id) {
+    return;
+  }
+  session->last_keep_alive_received_time = std::chrono::steady_clock::now();
 }
 
 void ServerRuntimeImpl::handle_player_move(

@@ -33,6 +33,9 @@ void emit_render_atlases_config(
 void emit_network_movement_config(
     YAML::Emitter& emitter,
     const MovementValidationConfig& movement);
+void emit_network_keep_alive_config(
+    YAML::Emitter& emitter,
+    const KeepAliveConfig& keep_alive);
 
 template<typename T>
 void read_scalar(const YAML::Node& parent, const char* key, T& value) {
@@ -221,6 +224,29 @@ void read_movement_validation_config(
       config.reject_unloaded_chunk_movement);
   read_scalar(movement, "solid_collision_check", config.solid_collision_check);
   read_scalar(movement, "correction_cooldown_ms", config.correction_cooldown_ms);
+}
+
+void read_keep_alive_config(
+    const YAML::Node& keep_alive,
+    KeepAliveConfig& config) {
+  read_scalar(keep_alive, "interval_seconds", config.interval_seconds);
+  read_scalar(keep_alive, "client_timeout_seconds", config.client_timeout_seconds);
+}
+
+void read_multiplayer_config(
+    const YAML::Node& multiplayer,
+    MultiplayerConfig& config) {
+  const YAML::Node keep_alive = multiplayer["keep_alive"];
+  if (keep_alive) {
+    read_scalar(
+        keep_alive,
+        "server_timeout_seconds",
+        config.keep_alive.server_timeout_seconds);
+  }
+  read_scalar(
+      multiplayer,
+      "connection_timeout_seconds",
+      config.connection_timeout_seconds);
 }
 
 void read_gameplay_config(const YAML::Node& gameplay, GameplayConfig& config) {
@@ -602,6 +628,16 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "bind_address" << YAML::Value << config.network.bind_address;
   emitter << YAML::Key << "port" << YAML::Value << config.network.port;
   emit_network_movement_config(emitter, config.network.movement);
+  emit_network_keep_alive_config(emitter, config.network.keep_alive);
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "multiplayer" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "keep_alive" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "server_timeout_seconds" << YAML::Value
+          << config.multiplayer.keep_alive.server_timeout_seconds;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "connection_timeout_seconds" << YAML::Value
+          << config.multiplayer.connection_timeout_seconds;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunks" << YAML::Value << YAML::BeginMap;
@@ -900,6 +936,17 @@ void emit_network_movement_config(
   emitter << YAML::EndMap;
 }
 
+void emit_network_keep_alive_config(
+    YAML::Emitter& emitter,
+    const KeepAliveConfig& keep_alive) {
+  emitter << YAML::Key << "keep_alive" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "interval_seconds" << YAML::Value
+          << keep_alive.interval_seconds;
+  emitter << YAML::Key << "client_timeout_seconds" << YAML::Value
+          << keep_alive.client_timeout_seconds;
+  emitter << YAML::EndMap;
+}
+
 void emit_render_atlases_config(
     YAML::Emitter& emitter,
     const RenderConfig::AtlasesConfig& atlases) {
@@ -1174,6 +1221,15 @@ ConfigResult save_default_client_config_file(
   emitter << YAML::Key << "stream_distance" << YAML::Value << config.chunks.stream_distance;
   emitter << YAML::EndMap;
 
+  emitter << YAML::Key << "multiplayer" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "keep_alive" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "server_timeout_seconds" << YAML::Value
+          << config.multiplayer.keep_alive.server_timeout_seconds;
+  emitter << YAML::EndMap;
+  emitter << YAML::Key << "connection_timeout_seconds" << YAML::Value
+          << config.multiplayer.connection_timeout_seconds;
+  emitter << YAML::EndMap;
+
   emitter << YAML::Key << "render" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "max_chunk_mesh_uploads_per_frame" << YAML::Value
           << config.render.max_chunk_mesh_uploads_per_frame;
@@ -1223,6 +1279,7 @@ ConfigResult save_default_server_config_file(
   emitter << YAML::Key << "bind_address" << YAML::Value << config.network.bind_address;
   emitter << YAML::Key << "port" << YAML::Value << config.network.port;
   emit_network_movement_config(emitter, config.network.movement);
+  emit_network_keep_alive_config(emitter, config.network.keep_alive);
   emitter << YAML::EndMap;
   emit_skins_config(emitter, config.skins);
   emitter << YAML::EndMap;
@@ -1276,6 +1333,15 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     if (movement) {
       read_movement_validation_config(movement, config.network.movement);
     }
+    const YAML::Node keep_alive = network["keep_alive"];
+    if (keep_alive) {
+      read_keep_alive_config(keep_alive, config.network.keep_alive);
+    }
+  }
+
+  const YAML::Node multiplayer = root["multiplayer"];
+  if (multiplayer) {
+    read_multiplayer_config(multiplayer, config.multiplayer);
   }
 
   const YAML::Node skins = root["skins"];
@@ -1422,6 +1488,18 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   };
   if (config.network.movement.mode != "client_authoritative_guarded") {
     return ConfigError{"network.movement.mode must be client_authoritative_guarded"};
+  }
+  if (config.network.keep_alive.interval_seconds == 0U ||
+      config.network.keep_alive.client_timeout_seconds == 0U) {
+    return ConfigError{"network.keep_alive values must be non-zero"};
+  }
+  if (config.network.keep_alive.client_timeout_seconds <=
+      config.network.keep_alive.interval_seconds) {
+    return ConfigError{"network.keep_alive.client_timeout_seconds must be greater than interval_seconds"};
+  }
+  if (config.multiplayer.keep_alive.server_timeout_seconds == 0U ||
+      config.multiplayer.connection_timeout_seconds == 0U) {
+    return ConfigError{"multiplayer timeout values must be non-zero"};
   }
   for (const auto [name, value] : {
            std::pair{std::string_view{"network.movement.send_rate_hz"}, config.network.movement.send_rate_hz},

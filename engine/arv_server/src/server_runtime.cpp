@@ -188,8 +188,10 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   dropped_items_ = start_info.dropped_items;
   combat_ = start_info.combat;
   movement_ = start_info.movement;
+  keep_alive_ = start_info.keep_alive;
   skins_ = start_info.skins;
   skin_transfers_.clear();
+  online_profile_sessions_.clear();
   active_skin_uploads_global_ = 0U;
   skin_storage_bytes_ = current_skin_storage_bytes(server_save_root_);
   fluid_definition_ = start_info.fluid_definition;
@@ -264,6 +266,7 @@ void ServerRuntimeImpl::tick() {
   for (net::NetworkEvent& event : inbound_events_) {
     handle_network_event(std::move(event));
   }
+  tick_keep_alive();
   expire_timed_out_skin_uploads();
   tick_players();
   const Seconds tick_seconds = tick_duration_seconds(base_tps_);
@@ -290,6 +293,16 @@ void ServerRuntimeImpl::shutdown() {
   }
 
   state_ = ServerRuntimeState::Stopping;
+  if (transport_) {
+    std::vector<net::ConnectionID> connections;
+    connections.reserve(sessions_.size());
+    sessions_.for_each_session([&](const ServerSession& session) {
+      connections.push_back(session.connection_id);
+    });
+    for (net::ConnectionID connection_id : connections) {
+      kick_client(connection_id, "Server is shutting down.");
+    }
+  }
   world_jobs_.wait_for_all();
   world_jobs_.drain_generation_jobs(default_world_, true);
   world_jobs_.drain_fluid_jobs(default_world_, fluid_definition_, true);

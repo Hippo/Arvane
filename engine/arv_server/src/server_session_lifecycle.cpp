@@ -114,10 +114,82 @@ void ServerRuntimeImpl::broadcast_player_profile_info(const ServerSession& subje
   });
 }
 
-void ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
+bool ServerRuntimeImpl::profile_is_online_for_another_session(
+    const ServerSession& session) const {
+  if (session.profile_id.empty()) {
+    return false;
+  }
+  const auto found = online_profile_sessions_.find(session.profile_id.string());
+  return found != online_profile_sessions_.end() && found->second != session.session_id;
+}
+
+void ServerRuntimeImpl::register_online_profile(const ServerSession& session) {
+  if (!session.profile_id.empty()) {
+    online_profile_sessions_[session.profile_id.string()] = session.session_id;
+  }
+}
+
+void ServerRuntimeImpl::remove_online_profile_for_session(const ServerSession& session) {
+  if (session.profile_id.empty()) {
+    return;
+  }
+  const auto found = online_profile_sessions_.find(session.profile_id.string());
+  if (found != online_profile_sessions_.end() && found->second == session.session_id) {
+    online_profile_sessions_.erase(found);
+  }
+}
+
+void ServerRuntimeImpl::kick_client(
+    net::ConnectionID connection_id,
+    std::string_view reason) {
+  if (!transport_) {
+    cleanup_connection(connection_id);
+    return;
+  }
+
+  if (ServerSession* session = sessions_.find_by_connection(connection_id);
+      session != nullptr) {
+    if (session->closing) {
+      return;
+    }
+    session->closing = true;
+    session->connection_state = net::ConnectionState::Disconnecting;
+  }
+
+  const protocol::ClientboundKickPlayer kick{
+      protocol::clamp_kick_reason(reason.empty() ? "Disconnected." : reason)};
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      connection_id,
+      protocol::MessageType::ClientboundKickPlayer,
+      protocol::ReliabilityClass::ReliableImmediate,
+      protocol::NetworkLane::Session,
+      protocol::serialize_clientbound_kick_player(kick));
+  log_send_failure_if_dedicated(mode_, connection_id, send_result);
+  (void)transport_->close_connection(connection_id, kick.reason);
+  cleanup_connection(connection_id);
+}
+
+bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
+  if (profile_is_online_for_another_session(session)) {
+    core::warn(
+        "server",
+        "rejecting duplicate login for profile '{}'",
+        session.profile_id.string());
+    kick_client(
+        session.connection_id,
+        "This Arvane profile is already connected to this server.");
+    return false;
+  }
+
   session.authenticated = true;
   session.pending_auth = false;
   session.challenge.reset();
+  const auto now = std::chrono::steady_clock::now();
+  session.last_keep_alive_sent_time = {};
+  session.last_keep_alive_received_time = now;
+  session.last_keep_alive_id = 0U;
+  register_online_profile(session);
   player::PlayerState& player_state = default_world_.ensure_player(session.player_id);
   player_state.world_id = session.world_id;
   if (!apply_saved_player_state(session, player_state)) {
@@ -135,11 +207,17 @@ void ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
       static_cast<double>(tick_index_) / static_cast<double>(std::max<TickRate>(base_tps_, 1U)),
       true};
   session.connection_state = net::ConnectionState::WorldJoin;
+  return true;
 }
 
 void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) {
+  cleanup_connection(connection_id);
+}
+
+void ServerRuntimeImpl::cleanup_connection(net::ConnectionID connection_id) {
   if (const ServerSession* session = sessions_.find_by_connection(connection_id);
       session != nullptr) {
+    remove_online_profile_for_session(*session);
     chunk_streamer_.remove_session(session->session_id);
     entity_replication_.erase(session->session_id);
     inventory_replication_.erase(session->player_id);
@@ -171,6 +249,56 @@ void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) 
     }
   }
   sessions_.remove_by_connection(connection_id);
+}
+
+void ServerRuntimeImpl::send_keep_alive(
+    ServerSession& session,
+    std::chrono::steady_clock::time_point now) {
+  if (!transport_ || session.closing || !session.authenticated) {
+    return;
+  }
+  ++session.last_keep_alive_id;
+  session.last_keep_alive_sent_time = now;
+  const protocol::ClientboundKeepAlive keep_alive{session.last_keep_alive_id};
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundKeepAlive,
+      protocol::ReliabilityClass::UnreliableEvent,
+      protocol::NetworkLane::Session,
+      protocol::serialize_clientbound_keep_alive(keep_alive));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::tick_keep_alive() {
+  if (!transport_) {
+    return;
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  const auto interval = std::chrono::seconds(keep_alive_.interval_seconds);
+  const auto timeout = std::chrono::seconds(keep_alive_.client_timeout_seconds);
+  std::vector<net::ConnectionID> timed_out_connections;
+  std::vector<SessionID> sessions_to_probe = sessions_.session_ids();
+  for (SessionID session_id : sessions_to_probe) {
+    ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr || !session->authenticated || session->closing) {
+      continue;
+    }
+    if (session->last_keep_alive_received_time.time_since_epoch().count() != 0 &&
+        now - session->last_keep_alive_received_time > timeout) {
+      timed_out_connections.push_back(session->connection_id);
+      continue;
+    }
+    if (session->last_keep_alive_sent_time.time_since_epoch().count() == 0 ||
+        now - session->last_keep_alive_sent_time >= interval) {
+      send_keep_alive(*session, now);
+    }
+  }
+
+  for (net::ConnectionID connection_id : timed_out_connections) {
+    kick_client(connection_id, "Timed out.");
+  }
 }
 
 void ServerRuntimeImpl::send_world_join_result(

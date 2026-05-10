@@ -47,6 +47,7 @@ public:
   [[nodiscard]] const client::LocalProfileStore& local_profile_store() const noexcept {
     return profile_store_;
   }
+  [[nodiscard]] const client::LocalPlayerIdentity* active_local_profile() const noexcept;
   [[nodiscard]] const std::vector<client::LocalProfileSkin>& pending_create_skins() const noexcept {
     return pending_create_skins_;
   }
@@ -64,6 +65,7 @@ public:
   take_delete_save_request() noexcept;
   [[nodiscard]] std::optional<ui::JoinServerCommand>
   take_join_server_request() noexcept;
+  [[nodiscard]] bool take_cancel_server_connect_request() noexcept;
   [[nodiscard]] bool take_back_to_main_menu_request() noexcept;
 
   std::vector<ui::SinglePlayerSaveEntry> saves{};
@@ -75,6 +77,7 @@ private:
   void handle(const ui::CreateWorldCommand& command);
   void handle(const ui::DeleteSinglePlayerSaveCommand& command);
   void handle(const ui::JoinServerCommand& command);
+  void handle(const ui::CancelServerConnectCommand& command);
   void handle(const ui::SaveServerEntryCommand& command);
   void handle(const ui::RemoveServerEntryCommand& command);
   void handle(const ui::SelectLocalProfileCommand& command);
@@ -114,6 +117,7 @@ private:
   std::optional<ui::CreateWorldCommand> create_world_request_{};
   std::optional<ui::DeleteSinglePlayerSaveCommand> delete_save_request_{};
   std::optional<ui::JoinServerCommand> join_server_request_{};
+  bool cancel_server_connect_requested_{};
   bool back_to_main_menu_requested_{};
   client::LocalProfileStore profile_store_{};
   std::vector<client::LocalProfileSkin> pending_create_skins_{};

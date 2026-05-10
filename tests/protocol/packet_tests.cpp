@@ -7,6 +7,7 @@
 #include "arv/protocol/message_registry.hpp"
 #include "arv/protocol/message_writer.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
 
@@ -59,6 +60,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto auth_challenge = registry.lookup(arv::protocol::MessageType::ClientboundAuthChallenge);
   const auto auth_response = registry.lookup(arv::protocol::MessageType::ServerboundAuthResponse);
   const auto auth_result = registry.lookup(arv::protocol::MessageType::ClientboundAuthResult);
+  const auto kick = registry.lookup(arv::protocol::MessageType::ClientboundKickPlayer);
+  const auto client_keep_alive = registry.lookup(arv::protocol::MessageType::ClientboundKeepAlive);
+  const auto server_keep_alive = registry.lookup(arv::protocol::MessageType::ServerboundKeepAlive);
   const auto chunk_interest = registry.lookup(arv::protocol::MessageType::ServerboundChunkInterestUpdate);
   const auto chunk_data = registry.lookup(arv::protocol::MessageType::ClientboundChunkSectionData);
   const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ClientboundChunkSectionUnload);
@@ -86,6 +90,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(auth_challenge.has_value());
   ASSERT_TRUE(auth_response.has_value());
   ASSERT_TRUE(auth_result.has_value());
+  ASSERT_TRUE(kick.has_value());
+  ASSERT_TRUE(client_keep_alive.has_value());
+  ASSERT_TRUE(server_keep_alive.has_value());
   ASSERT_TRUE(chunk_interest.has_value());
   ASSERT_TRUE(chunk_data.has_value());
   ASSERT_TRUE(chunk_unload.has_value());
@@ -109,6 +116,15 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(auth_challenge->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(auth_response->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(auth_result->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(kick->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(kick->reliability, arv::protocol::ReliabilityClass::ReliableImmediate);
+  EXPECT_EQ(kick->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(client_keep_alive->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(client_keep_alive->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
+  EXPECT_EQ(client_keep_alive->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(server_keep_alive->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(server_keep_alive->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
+  EXPECT_EQ(server_keep_alive->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(chunk_interest->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(chunk_data->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(chunk_unload->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
@@ -140,7 +156,35 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 44U);
+  EXPECT_EQ(registry.size(), 47U);
+}
+
+TEST(ProtocolTests, SessionControlPacketsRoundTripThroughSerialization) {
+  const arv::protocol::ClientboundKickPlayer kick{"Server is shutting down."};
+  const auto decoded_kick = arv::protocol::deserialize_clientbound_kick_player(
+      arv::protocol::serialize_clientbound_kick_player(kick));
+  ASSERT_TRUE(decoded_kick);
+  EXPECT_EQ(decoded_kick.value().reason, kick.reason);
+
+  const std::string long_reason(arv::protocol::MaxKickReasonBytes + 8U, 'x');
+  const auto clamped_kick = arv::protocol::deserialize_clientbound_kick_player(
+      arv::protocol::serialize_clientbound_kick_player({long_reason}));
+  ASSERT_TRUE(clamped_kick);
+  EXPECT_EQ(clamped_kick.value().reason.size(), arv::protocol::MaxKickReasonBytes);
+
+  const arv::protocol::ClientboundKeepAlive client_keep_alive{123456789ULL};
+  const auto decoded_client_keep_alive =
+      arv::protocol::deserialize_clientbound_keep_alive(
+          arv::protocol::serialize_clientbound_keep_alive(client_keep_alive));
+  ASSERT_TRUE(decoded_client_keep_alive);
+  EXPECT_EQ(decoded_client_keep_alive.value().id, client_keep_alive.id);
+
+  const arv::protocol::ServerboundKeepAlive server_keep_alive{987654321ULL};
+  const auto decoded_server_keep_alive =
+      arv::protocol::deserialize_serverbound_keep_alive(
+          arv::protocol::serialize_serverbound_keep_alive(server_keep_alive));
+  ASSERT_TRUE(decoded_server_keep_alive);
+  EXPECT_EQ(decoded_server_keep_alive.value().id, server_keep_alive.id);
 }
 
 TEST(ProtocolTests, SkinPacketsRoundTripThroughSerialization) {

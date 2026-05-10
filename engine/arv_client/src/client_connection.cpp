@@ -4,9 +4,31 @@
 
 #include "client_protocol_send.hpp"
 
+#include <chrono>
 #include <utility>
 
 namespace arv::client::detail {
+namespace {
+
+[[nodiscard]] bool is_connection_attempt_state(net::ConnectionState state) noexcept {
+  return state == net::ConnectionState::Connecting ||
+         state == net::ConnectionState::TransportConnected ||
+         state == net::ConnectionState::ProtocolHandshake;
+}
+
+[[nodiscard]] bool expects_server_keep_alive(net::ConnectionState state) noexcept {
+  return state == net::ConnectionState::WorldJoin ||
+         state == net::ConnectionState::InGame;
+}
+
+[[nodiscard]] std::string user_facing_close_reason(net::ConnectionState state) {
+  if (is_connection_attempt_state(state) || state == net::ConnectionState::RegistrySync) {
+    return "Server is offline or unreachable.";
+  }
+  return "Lost connection to the server.";
+}
+
+} // namespace
 
 ClientConnectionRuntime::ClientConnectionRuntime(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
 }
@@ -20,12 +42,14 @@ net::ConnectResult ClientConnectionRuntime::connect_integrated(
   auto result = transport_->connect({"in-process", 0});
   if (result) {
     connection_id_ = result.value();
-    connection_state_ = net::ConnectionState::TransportConnected;
+    disconnect_reason_.reset();
+    connection_attempt_started_time_ = std::chrono::steady_clock::now();
+    set_state(net::ConnectionState::TransportConnected);
     auto hello_result = sender.send_client_hello(identity);
     if (!hello_result) {
       return net::ConnectResult::failure(hello_result.error());
     }
-    connection_state_ = net::ConnectionState::ProtocolHandshake;
+    set_state(net::ConnectionState::ProtocolHandshake);
   }
   return result;
 }
@@ -37,9 +61,20 @@ net::ConnectResult ClientConnectionRuntime::connect_remote(net::NetworkAddress a
   auto result = transport_->connect(std::move(address));
   if (result) {
     connection_id_ = result.value();
-    connection_state_ = net::ConnectionState::Connecting;
+    disconnect_reason_.reset();
+    connection_attempt_started_time_ = std::chrono::steady_clock::now();
+    set_state(net::ConnectionState::Connecting);
   }
   return result;
+}
+
+void ClientConnectionRuntime::configure_timeouts(
+    u32 server_keep_alive_timeout_seconds,
+    u32 connection_timeout_seconds) noexcept {
+  server_keep_alive_timeout_seconds_ =
+      server_keep_alive_timeout_seconds == 0U ? 30U : server_keep_alive_timeout_seconds;
+  connection_timeout_seconds_ =
+      connection_timeout_seconds == 0U ? 10U : connection_timeout_seconds;
 }
 
 std::vector<net::NetworkEvent> ClientConnectionRuntime::poll_events() {
@@ -55,13 +90,13 @@ void ClientConnectionRuntime::handle_connection_accepted(
   if (connection_state_ != net::ConnectionState::Connecting) {
     return;
   }
-  connection_state_ = net::ConnectionState::TransportConnected;
+  set_state(net::ConnectionState::TransportConnected);
   auto hello_result = sender.send_client_hello(identity);
   if (!hello_result) {
-    connection_state_ = net::ConnectionState::Disconnecting;
+    disconnect_local("Server is offline or unreachable.");
     return;
   }
-  connection_state_ = net::ConnectionState::ProtocolHandshake;
+  set_state(net::ConnectionState::ProtocolHandshake);
 }
 
 void ClientConnectionRuntime::handle_connection_closed_or_failed(
@@ -71,11 +106,67 @@ void ClientConnectionRuntime::handle_connection_closed_or_failed(
       "network connection {}: {}",
       event.type == net::NetworkEventType::ConnectionClosed ? "closed" : "failed",
       event.reason);
-  connection_state_ = net::ConnectionState::Disconnected;
+  if (!disconnect_reason_.has_value()) {
+    disconnect_reason_ = user_facing_close_reason(connection_state_);
+  }
+  set_state(net::ConnectionState::Disconnected);
 }
 
 void ClientConnectionRuntime::handle_message_send_failed() noexcept {
-  connection_state_ = net::ConnectionState::Disconnecting;
+  if (!disconnect_reason_.has_value()) {
+    disconnect_reason_ = "Lost connection to the server.";
+  }
+  if (transport_ && connection_state_ != net::ConnectionState::Disconnected) {
+    (void)transport_->close_connection(connection_id_, disconnect_reason_.value());
+  }
+  set_state(net::ConnectionState::Disconnected);
+}
+
+void ClientConnectionRuntime::disconnect_local(std::string_view reason) {
+  if (!disconnect_reason_.has_value()) {
+    disconnect_reason_ = reason.empty() ? std::string{"Disconnected."} : std::string{reason};
+  }
+  if (transport_ && connection_state_ != net::ConnectionState::Disconnected) {
+    (void)transport_->close_connection(connection_id_, disconnect_reason_.value());
+  }
+  set_state(net::ConnectionState::Disconnected);
+}
+
+void ClientConnectionRuntime::record_server_keep_alive() noexcept {
+  last_server_keep_alive_time_ = std::chrono::steady_clock::now();
+}
+
+bool ClientConnectionRuntime::tick_timeouts() {
+  const auto now = std::chrono::steady_clock::now();
+  if (is_connection_attempt_state(connection_state_) &&
+      connection_attempt_started_time_.time_since_epoch().count() != 0 &&
+      now - connection_attempt_started_time_ >
+          std::chrono::seconds(connection_timeout_seconds_)) {
+    disconnect_local("Server is offline or unreachable.");
+    return true;
+  }
+  if (expects_server_keep_alive(connection_state_) &&
+      last_server_keep_alive_time_.time_since_epoch().count() != 0 &&
+      now - last_server_keep_alive_time_ >
+          std::chrono::seconds(server_keep_alive_timeout_seconds_)) {
+    disconnect_local("Lost connection to the server.");
+    return true;
+  }
+  return false;
+}
+
+std::optional<std::string> ClientConnectionRuntime::take_disconnect_reason() {
+  std::optional<std::string> reason = std::move(disconnect_reason_);
+  disconnect_reason_.reset();
+  return reason;
+}
+
+std::optional<std::string> ClientConnectionRuntime::disconnect_reason() const {
+  return disconnect_reason_;
+}
+
+void ClientConnectionRuntime::clear_disconnect_reason() noexcept {
+  disconnect_reason_.reset();
 }
 
 net::ITransport* ClientConnectionRuntime::transport() noexcept {
@@ -96,6 +187,9 @@ net::ConnectionState ClientConnectionRuntime::state() const noexcept {
 
 void ClientConnectionRuntime::set_state(net::ConnectionState state) noexcept {
   connection_state_ = state;
+  if (expects_server_keep_alive(state)) {
+    last_server_keep_alive_time_ = std::chrono::steady_clock::now();
+  }
 }
 
 } // namespace arv::client::detail

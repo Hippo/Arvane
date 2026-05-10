@@ -144,6 +144,9 @@ TEST(GameNetworkingSocketsTransportTests, ReliabilityFlagsUseNormalUnreliableByD
       arv::net::detail::gns_send_flags(arv::protocol::ReliabilityClass::ReliableOrdered),
       k_nSteamNetworkingSend_Reliable);
   EXPECT_EQ(
+      arv::net::detail::gns_send_flags(arv::protocol::ReliabilityClass::ReliableImmediate),
+      k_nSteamNetworkingSend_ReliableNoNagle);
+  EXPECT_EQ(
       arv::net::detail::gns_send_flags(arv::protocol::ReliabilityClass::UnreliableEvent),
       k_nSteamNetworkingSend_UnreliableNoDelay);
   EXPECT_EQ(

@@ -47,6 +47,8 @@ A **screen** represents a full UI state:
 * Settings Menu
 * Pause Menu
 * Create World Screen
+* Multiplayer Connecting Screen
+* Multiplayer Disconnect Screen
 
 Each screen:
 
@@ -54,6 +56,13 @@ Each screen:
 * handles UI interaction
 * emits commands
 * does NOT execute gameplay logic
+
+The multiplayer connecting and disconnect screens follow the same rule. The
+connecting screen displays pending connection state and emits
+`CancelServerConnectCommand`; the disconnect screen displays the client-provided
+reason and emits `JoinServerCommand` for reconnect. The desktop/session layer
+owns teardown, cancellation, connection startup, and the transition into world
+rendering.
 
 ---
 

@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::net {
@@ -63,6 +64,9 @@ public:
   virtual NetworkResult start_listening(const ListenAddress& address) = 0;
   virtual ConnectResult connect(const NetworkAddress& address) = 0;
   virtual NetworkResult send(TransportMessage message) = 0;
+  virtual NetworkResult close_connection(
+      ConnectionID connection_id,
+      std::string_view reason = {}) = 0;
   virtual std::vector<NetworkEvent> poll_events() = 0;
   virtual std::vector<TransportMessage> poll();
   virtual ConnectionState state(ConnectionID connection_id) const = 0;

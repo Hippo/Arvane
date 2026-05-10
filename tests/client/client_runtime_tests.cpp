@@ -6,11 +6,16 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
+#include "arv/protocol/session_control.hpp"
 #include "arv/protocol/world_join.hpp"
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -40,6 +45,28 @@ arv::u32 player_move_count(const std::vector<arv::net::NetworkEvent>& events) {
     }
   }
   return count;
+}
+
+std::vector<arv::protocol::ServerboundKeepAlive> serverbound_keep_alives(
+    const std::vector<arv::net::NetworkEvent>& events) {
+  std::vector<arv::protocol::ServerboundKeepAlive> keep_alives;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ServerboundKeepAlive) {
+      continue;
+    }
+    const auto keep_alive =
+        arv::protocol::deserialize_serverbound_keep_alive(decoded.value().payload);
+    if (keep_alive) {
+      keep_alives.push_back(keep_alive.value());
+    }
+  }
+  return keep_alives;
 }
 
 void send_to_client(
@@ -90,6 +117,47 @@ void enter_in_game(
   client.fixed_tick(1);
   ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
 }
+
+class HangingConnectTransport final : public arv::net::ITransport {
+public:
+  arv::net::NetworkResult start_listening(const arv::net::ListenAddress&) override {
+    return arv::net::NetworkResult::failure({"client test transport cannot listen"});
+  }
+
+  arv::net::ConnectResult connect(const arv::net::NetworkAddress&) override {
+    state_ = arv::net::ConnectionState::Connecting;
+    return arv::net::ConnectResult::success(arv::net::ConnectionID{7});
+  }
+
+  arv::net::NetworkResult send(arv::net::TransportMessage) override {
+    return arv::net::NetworkResult::success();
+  }
+
+  arv::net::NetworkResult close_connection(
+      arv::net::ConnectionID,
+      std::string_view reason = {}) override {
+    close_reason = std::string{reason};
+    state_ = arv::net::ConnectionState::Disconnected;
+    return arv::net::NetworkResult::success();
+  }
+
+  std::vector<arv::net::NetworkEvent> poll_events() override {
+    return {};
+  }
+
+  arv::net::ConnectionState state(arv::net::ConnectionID) const override {
+    return state_;
+  }
+
+  void shutdown() override {
+    state_ = arv::net::ConnectionState::Disconnected;
+  }
+
+  std::string close_reason{};
+
+private:
+  arv::net::ConnectionState state_{arv::net::ConnectionState::Disconnected};
+};
 
 } // namespace
 
@@ -144,6 +212,92 @@ TEST(ClientRuntimeTests, WorldJoinKeepsLocalPlayerBodyAtServerSpawn) {
   EXPECT_EQ(client.local_player_id().value(), (arv::PlayerID{1}));
   ASSERT_TRUE(client.local_entity_id().has_value());
   EXPECT_EQ(client.local_entity_id().value(), (arv::EntityNetID{1}));
+}
+
+TEST(ClientRuntimeTests, KickPacketDisconnectsAndStoresReason) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundKickPlayer,
+      arv::protocol::serialize_clientbound_kick_player({"Duplicate profile."}),
+      arv::protocol::ReliabilityClass::ReliableImmediate);
+
+  client.fixed_tick(2);
+
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::Disconnected);
+  ASSERT_TRUE(client.disconnect_reason().has_value());
+  EXPECT_EQ(client.disconnect_reason().value(), "Duplicate profile.");
+  EXPECT_FALSE(client.local_player_id().has_value());
+}
+
+TEST(ClientRuntimeTests, KeepAlivePacketGetsImmediateEcho) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  (void)server_transport->poll_events();
+
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundKeepAlive,
+      arv::protocol::serialize_clientbound_keep_alive({42U}),
+      arv::protocol::ReliabilityClass::UnreliableEvent);
+
+  client.fixed_tick(2);
+
+  const std::vector<arv::protocol::ServerboundKeepAlive> replies =
+      serverbound_keep_alives(server_transport->poll_events());
+  ASSERT_EQ(replies.size(), 1U);
+  EXPECT_EQ(replies.front().id, 42U);
+  EXPECT_FALSE(client.disconnect_reason().has_value());
+}
+
+TEST(ClientRuntimeTests, ServerKeepAliveTimeoutDisconnectsClient) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_networking({1U, 10U});
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  client.fixed_tick(2);
+
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::Disconnected);
+  ASSERT_TRUE(client.disconnect_reason().has_value());
+  EXPECT_EQ(client.disconnect_reason().value(), "Lost connection to the server.");
+}
+
+TEST(ClientRuntimeTests, ConnectionAttemptTimeoutDisconnectsClient) {
+  auto transport = std::make_unique<HangingConnectTransport>();
+  HangingConnectTransport* raw_transport = transport.get();
+  arv::client::ClientRuntime client(std::move(transport));
+  client.configure_networking({30U, 1U});
+  const auto connection = client.connect({"127.0.0.1", 42069});
+  ASSERT_TRUE(connection);
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::Connecting);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  client.fixed_tick(1);
+
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::Disconnected);
+  ASSERT_TRUE(client.disconnect_reason().has_value());
+  EXPECT_EQ(client.disconnect_reason().value(), "Server is offline or unreachable.");
+  EXPECT_EQ(raw_transport->close_reason, "Server is offline or unreachable.");
 }
 
 TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {

@@ -112,12 +112,62 @@ Behavior:
 * Saved multiplayer servers are loaded from and written to `arvane_home/config/server_list.json`.
 * Selecting a server enables edit/remove/connect actions.
 * Double-clicking or pressing Enter on a selected server may connect to it.
+* Starting a remote join opens the multiplayer connecting screen while the
+  transport and protocol handshake complete.
 * `Add Server` opens the add server screen.
 * `Edit Server` opens the edit server screen for the selected server.
 * `Remove Server` deletes the selected server entry after confirmation.
 * `Back` returns to the main menu.
 
 Removing a server entry only removes the local saved entry. It must not affect the remote server.
+
+## Multiplayer Connecting Screen
+
+The multiplayer connecting screen is shown after a remote connection attempt
+starts and before the client joins the world.
+
+UI elements:
+
+```text
+Connecting Status
+Server Name/Address
+Cancel
+```
+
+Behavior:
+
+* The screen blocks gameplay input and prevents rendering the pending remote
+  session as a world.
+* The client continues ticking networking and connection timeout logic while
+  this screen is open.
+* `Cancel` stops the pending connection and returns to the multi player menu.
+* If the server does not respond before the configured connection timeout, the
+  client switches to the multiplayer disconnect screen.
+* Once the client reaches the in-game state, the screen closes and normal world
+  rendering begins.
+
+## Multiplayer Disconnect Screen
+
+The multiplayer disconnect screen is shown after a remote connection ends before
+or during gameplay.
+
+UI elements:
+
+```text
+Reason Text
+Reconnect
+Server List
+```
+
+Behavior:
+
+* The reason text shows the first clear disconnect reason reported by the client.
+* `Reconnect` starts a fresh connection attempt to the remembered server entry.
+* `Server List` returns to the multi player menu.
+* If no server metadata is available, `Reconnect` is disabled and `Server List`
+  remains available.
+* The screen is used for server kicks, shutdown kicks, duplicate profile
+  rejection, offline/unreachable servers, and keep-alive timeouts.
 
 ## Add/Edit Server Screen
 

@@ -6,6 +6,7 @@ namespace arv::protocol {
 
 enum class ReliabilityClass : u8 {
   ReliableOrdered,
+  ReliableImmediate,
   UnreliableLatestWins,
   UnreliableEvent,
 };
@@ -33,6 +34,9 @@ enum class MessageType : u16 {
   ClientboundAuthChallenge = 0x0006,
   ServerboundAuthResponse = 0x0007,
   ClientboundAuthResult = 0x0008,
+  ClientboundKickPlayer = 0x0009,
+  ClientboundKeepAlive = 0x000A,
+  ServerboundKeepAlive = 0x000B,
   ServerboundPlayerMove = 0x0100,
   ClientboundPlayerMoveCorrection = 0x0101,
   ClientboundPlayerBlockBreakProgress = 0x0102,

@@ -18,6 +18,9 @@ network:
     reject_unloaded_chunk_movement: true
     solid_collision_check: true
     correction_cooldown_ms: 100
+  keep_alive:
+    interval_seconds: 5
+    client_timeout_seconds: 30
 skins:
   enabled: true
   allow_uploads: true

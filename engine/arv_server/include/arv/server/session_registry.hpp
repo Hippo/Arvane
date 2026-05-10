@@ -6,6 +6,7 @@
 #include "arv/net/connection_state.hpp"
 #include "arv/protocol/auth.hpp"
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <vector>
@@ -45,6 +46,10 @@ struct ServerSession {
   bool authenticated{};
   bool pending_auth{true};
   std::optional<PendingAuthChallenge> challenge{};
+  std::chrono::steady_clock::time_point last_keep_alive_sent_time{};
+  std::chrono::steady_clock::time_point last_keep_alive_received_time{};
+  u64 last_keep_alive_id{};
+  bool closing{};
 };
 
 class SessionRegistry {

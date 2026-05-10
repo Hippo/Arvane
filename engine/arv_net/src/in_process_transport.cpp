@@ -72,6 +72,24 @@ NetworkResult InProcessTransport::send(TransportMessage message) {
   return NetworkResult::success();
 }
 
+NetworkResult InProcessTransport::close_connection(ConnectionID, std::string_view reason) {
+  const ConnectionState previous =
+      local_state().state.exchange(ConnectionState::Disconnected, std::memory_order_acq_rel);
+  peer_state().state.store(ConnectionState::Disconnected, std::memory_order_release);
+
+  if (connection_is_active(previous)) {
+    NetworkEvent closed{NetworkEventType::ConnectionClosed,
+                        LocalConnectionID,
+                        protocol::ReliabilityClass::ReliableOrdered,
+                        {},
+                        std::string{reason},
+                        std::chrono::steady_clock::now()};
+    (void)outbound_events().try_enqueue(std::move(closed));
+  }
+
+  return NetworkResult::success();
+}
+
 std::vector<NetworkEvent> InProcessTransport::poll_events() {
   std::vector<NetworkEvent> events;
   events.reserve(8U);
@@ -98,9 +116,8 @@ ConnectionState InProcessTransport::state(ConnectionID) const {
 }
 
 void InProcessTransport::shutdown() {
-  const ConnectionState previous =
-      local_state().state.exchange(ConnectionState::Disconnected, std::memory_order_acq_rel);
-  peer_state().state.store(ConnectionState::Disconnected, std::memory_order_release);
+  const ConnectionState previous = local_state().state.load(std::memory_order_acquire);
+  (void)close_connection(LocalConnectionID, {});
 
   if (side_ == InProcessEndpointSide::Server) {
     shared_->server_listening.store(false, std::memory_order_release);
@@ -110,16 +127,7 @@ void InProcessTransport::shutdown() {
   while (inbound_events().try_dequeue(discarded)) {
     discarded = {};
   }
-
-  if (connection_is_active(previous)) {
-    NetworkEvent closed{NetworkEventType::ConnectionClosed,
-                        LocalConnectionID,
-                        protocol::ReliabilityClass::ReliableOrdered,
-                        {},
-                        {},
-                        std::chrono::steady_clock::now()};
-    (void)outbound_events().try_enqueue(std::move(closed));
-  }
+  (void)previous;
 }
 
 detail::InProcessEndpointState& InProcessTransport::local_state() {

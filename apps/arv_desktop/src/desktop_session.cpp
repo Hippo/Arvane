@@ -114,7 +114,8 @@ bool DesktopSessionManager::start_singleplayer(
     std::string world_name,
     std::optional<u64> create_seed,
     bool create_new,
-    std::string save_display_name) {
+    std::string save_display_name,
+    const client::LocalPlayerIdentity& local_identity) {
   if (server_save_name.empty()) {
     core::error("save", "cannot start a singleplayer world without a server save name");
     return false;
@@ -208,6 +209,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.server_save_root = server_save_root;
   server_start_info.skins = dependencies_.config.skins;
   server_start_info.movement = dependencies_.config.network.movement;
+  server_start_info.keep_alive = dependencies_.config.network.keep_alive;
   server_start_info.skins.enabled = true;
   server_start_info.skins.allow_uploads = true;
   for (io::SkinResolutionConfig& resolution : server_start_info.skins.resolutions) {
@@ -285,14 +287,10 @@ bool DesktopSessionManager::start_singleplayer(
       &dependencies_.entity_registry);
 
   auto client = std::make_unique<client::ClientRuntime>(std::move(transport_pair.client));
-  auto identity = client::load_or_create_local_identity(
-      dependencies_.config.paths.arvane_home_path());
-  if (!identity) {
-    core::error("identity", identity.error().message);
-    integrated_server->shutdown();
-    return false;
-  }
-  client->set_local_identity(std::move(identity.value()));
+  client->configure_networking(
+      {dependencies_.config.multiplayer.keep_alive.server_timeout_seconds,
+       dependencies_.config.multiplayer.connection_timeout_seconds});
+  client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);
   auto connect_result = client->connect_integrated();
@@ -350,7 +348,9 @@ bool DesktopSessionManager::start_singleplayer(
   return true;
 }
 
-bool DesktopSessionManager::start_remote(const ui::JoinServerCommand& command) {
+bool DesktopSessionManager::start_remote(
+    const ui::JoinServerCommand& command,
+    const client::LocalPlayerIdentity& local_identity) {
   const std::optional<net::NetworkAddress> address =
       parse_server_address(command.address);
   if (!address.has_value()) {
@@ -373,6 +373,7 @@ bool DesktopSessionManager::start_remote(const ui::JoinServerCommand& command) {
 
   auto session = std::make_unique<DesktopGameSession>(dependencies_.config.simulation.base_tps);
   session->server_save_display_name = command.name;
+  session->remote_server = command;
   session->generation_config = dependencies_.default_generation_config;
   const world::WorldHeightSettings session_world_height =
       world::world_height_settings_from_generation_config(session->generation_config);
@@ -382,13 +383,10 @@ bool DesktopSessionManager::start_remote(const ui::JoinServerCommand& command) {
 
   auto client = std::make_unique<client::ClientRuntime>(
       std::make_unique<net::GameNetworkingSocketsTransport>());
-  auto identity = client::load_or_create_local_identity(
-      dependencies_.config.paths.arvane_home_path());
-  if (!identity) {
-    core::error("identity", identity.error().message);
-    return false;
-  }
-  client->set_local_identity(std::move(identity.value()));
+  client->configure_networking(
+      {dependencies_.config.multiplayer.keep_alive.server_timeout_seconds,
+       dependencies_.config.multiplayer.connection_timeout_seconds});
+  client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);
   auto connect_result = client->connect(address.value());

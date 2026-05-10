@@ -69,6 +69,11 @@ struct ClientAttackFeedback {
   u32 sequence{};
 };
 
+struct ClientNetworkSettings {
+  u32 server_keep_alive_timeout_seconds{30U};
+  u32 connection_timeout_seconds{10U};
+};
+
 class ClientRuntime {
 public:
   explicit ClientRuntime(std::unique_ptr<net::ITransport> transport);
@@ -82,9 +87,13 @@ public:
 
   void set_player_tuning(player::PlayerTuning tuning) noexcept;
   void set_local_identity(LocalPlayerIdentity identity);
+  void configure_networking(ClientNetworkSettings settings) noexcept;
   [[nodiscard]] const LocalPlayerIdentity& local_identity() const noexcept;
   net::ConnectResult connect_integrated();
   net::ConnectResult connect(net::NetworkAddress address);
+  void disconnect();
+  [[nodiscard]] std::optional<std::string> take_disconnect_reason();
+  [[nodiscard]] std::optional<std::string> disconnect_reason() const;
   void submit_input(InputFrame input);
   void set_chunk_view_distance(i32 view_distance) noexcept;
   void fixed_tick(TickIndex tick_index);

@@ -52,6 +52,7 @@ struct DesktopGameSession {
   i32 max_chunk_y{};
   std::unique_ptr<server::ServerRuntime> integrated_server{};
   std::unique_ptr<client::ClientRuntime> client{};
+  std::optional<ui::JoinServerCommand> remote_server{};
   world::WorldRuntime client_world{server::DefaultWorldID};
   ChunkViewState chunk_view{};
   std::deque<protocol::ClientboundChunkSectionUnload> pending_client_chunk_unloads{};
@@ -108,9 +109,12 @@ public:
       std::string world_name,
       std::optional<u64> create_seed,
       bool create_new,
-      std::string save_display_name);
+      std::string save_display_name,
+      const client::LocalPlayerIdentity& local_identity);
 
-  [[nodiscard]] bool start_remote(const ui::JoinServerCommand& command);
+  [[nodiscard]] bool start_remote(
+      const ui::JoinServerCommand& command,
+      const client::LocalPlayerIdentity& local_identity);
 
   void delete_singleplayer_save(const ui::DeleteSinglePlayerSaveCommand& command);
 

@@ -1,12 +1,14 @@
 #pragma once
 
 #include "arv/core/expected.hpp"
+#include "arv/core/types.hpp"
 #include "arv/crypto/ed25519.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/protocol/skins.hpp"
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::client {
@@ -34,8 +36,10 @@ struct LocalPlayerIdentity {
 };
 
 struct LocalProfileStore {
+  usize selected_profile{};
   std::vector<LocalPlayerIdentity> profiles{};
 
+  [[nodiscard]] usize active_profile_index() const noexcept;
   [[nodiscard]] const LocalPlayerIdentity* active_profile() const noexcept;
 };
 

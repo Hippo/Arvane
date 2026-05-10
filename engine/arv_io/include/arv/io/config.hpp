@@ -78,14 +78,29 @@ struct MovementValidationConfig {
   u32 correction_cooldown_ms{100U};
 };
 
+struct KeepAliveConfig {
+  u32 interval_seconds{5U};
+  u32 client_timeout_seconds{30U};
+};
+
 struct NetworkConfig {
   std::string bind_address{"0.0.0.0"};
   u16 port{42069};
   MovementValidationConfig movement{};
+  KeepAliveConfig keep_alive{};
 };
 
 struct DedicatedServerConfig {
   std::string world{"default"};
+};
+
+struct MultiplayerConfig {
+  struct KeepAliveTimeoutConfig {
+    u32 server_timeout_seconds{30U};
+  };
+
+  KeepAliveTimeoutConfig keep_alive{};
+  u32 connection_timeout_seconds{10U};
 };
 
 struct SkinResolutionConfig {
@@ -381,6 +396,7 @@ struct EngineConfig {
   SimulationConfig simulation{};
   NetworkConfig network{};
   DedicatedServerConfig server{};
+  MultiplayerConfig multiplayer{};
   SkinConfig skins{};
   ChunkDistanceConfig chunks{};
   JobSystemConfig jobs{};

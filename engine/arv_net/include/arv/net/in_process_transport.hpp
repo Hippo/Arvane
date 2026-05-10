@@ -40,6 +40,7 @@ public:
   NetworkResult start_listening(const ListenAddress&) override;
   ConnectResult connect(const NetworkAddress&) override;
   NetworkResult send(TransportMessage message) override;
+  NetworkResult close_connection(ConnectionID, std::string_view reason = {}) override;
   std::vector<NetworkEvent> poll_events() override;
   ConnectionState state(ConnectionID) const override;
   void shutdown() override;

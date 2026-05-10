@@ -7,6 +7,7 @@
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/message_type.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/session_control.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/server/world_registry.hpp"
@@ -17,9 +18,11 @@
 
 #include <array>
 #include <chrono>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -36,9 +39,7 @@ arv::player::PlayerState& connected_player(arv::server::ServerRuntime& server) {
   return *player_state;
 }
 
-void send_raw_client_hello(
-    arv::net::ITransport& client_transport,
-    arv::net::ConnectionID connection_id,
+std::vector<arv::u8> raw_client_hello_packet(
     const arv::client::LocalPlayerIdentity& identity) {
   arv::protocol::ServerboundHello hello;
   hello.requested_username_or_profile_name = identity.display_name;
@@ -55,9 +56,165 @@ void send_raw_client_hello(
        0,
        0},
       payload);
+  return packet;
+}
+
+void send_raw_client_hello(
+    arv::net::ITransport& client_transport,
+    arv::net::ConnectionID connection_id,
+    const arv::client::LocalPlayerIdentity& identity) {
+  std::vector<arv::u8> packet = raw_client_hello_packet(identity);
   (void)client_transport.send(
       {connection_id, arv::protocol::ReliabilityClass::ReliableOrdered, std::move(packet)});
 }
+
+void send_raw_keep_alive(
+    arv::net::ITransport& client_transport,
+    arv::net::ConnectionID connection_id,
+    arv::u64 id) {
+  std::vector<arv::u8> packet = arv::protocol::serialize_envelope(
+      {arv::protocol::CurrentProtocolVersion,
+       arv::protocol::MessageType::ServerboundKeepAlive,
+       0,
+       0,
+       0,
+       0},
+      arv::protocol::serialize_serverbound_keep_alive({id}));
+  (void)client_transport.send(
+      {connection_id,
+       arv::protocol::ReliabilityClass::UnreliableEvent,
+       std::move(packet),
+       arv::protocol::MessageType::ServerboundKeepAlive,
+       arv::protocol::NetworkLane::Session});
+}
+
+std::vector<std::string> kick_reasons(std::span<const arv::net::NetworkEvent> events) {
+  std::vector<std::string> reasons;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ClientboundKickPlayer) {
+      continue;
+    }
+    const auto kick =
+        arv::protocol::deserialize_clientbound_kick_player(decoded.value().payload);
+    if (kick) {
+      reasons.push_back(kick.value().reason);
+    }
+  }
+  return reasons;
+}
+
+std::vector<arv::u64> keep_alive_ids(std::span<const arv::net::NetworkEvent> events) {
+  std::vector<arv::u64> ids;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ClientboundKeepAlive) {
+      continue;
+    }
+    const auto keep_alive =
+        arv::protocol::deserialize_clientbound_keep_alive(decoded.value().payload);
+    if (keep_alive) {
+      ids.push_back(keep_alive.value().id);
+    }
+  }
+  return ids;
+}
+
+std::vector<std::pair<arv::net::ConnectionID, std::string>> sent_kick_reasons(
+    std::span<const arv::net::TransportMessage> messages) {
+  std::vector<std::pair<arv::net::ConnectionID, std::string>> reasons;
+  for (const arv::net::TransportMessage& message : messages) {
+    if (message.message_type != arv::protocol::MessageType::ClientboundKickPlayer) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(message.payload);
+    if (!decoded) {
+      continue;
+    }
+    const auto kick =
+        arv::protocol::deserialize_clientbound_kick_player(decoded.value().payload);
+    if (kick) {
+      reasons.push_back({message.connection_id, kick.value().reason});
+    }
+  }
+  return reasons;
+}
+
+class ScriptedServerTransport final : public arv::net::ITransport {
+public:
+  arv::net::NetworkResult start_listening(const arv::net::ListenAddress&) override {
+    listening = true;
+    return arv::net::NetworkResult::success();
+  }
+
+  arv::net::ConnectResult connect(const arv::net::NetworkAddress&) override {
+    return arv::net::ConnectResult::failure({"server test transport cannot connect"});
+  }
+
+  arv::net::NetworkResult send(arv::net::TransportMessage message) override {
+    sent.push_back(std::move(message));
+    return arv::net::NetworkResult::success();
+  }
+
+  arv::net::NetworkResult close_connection(
+      arv::net::ConnectionID connection_id,
+      std::string_view reason = {}) override {
+    states[connection_id] = arv::net::ConnectionState::Disconnected;
+    closed.push_back({connection_id, std::string{reason}});
+    return arv::net::NetworkResult::success();
+  }
+
+  std::vector<arv::net::NetworkEvent> poll_events() override {
+    std::vector<arv::net::NetworkEvent> output;
+    while (!events.empty()) {
+      output.push_back(std::move(events.front()));
+      events.pop_front();
+    }
+    return output;
+  }
+
+  arv::net::ConnectionState state(arv::net::ConnectionID connection_id) const override {
+    const auto found = states.find(connection_id);
+    return found == states.end() ? arv::net::ConnectionState::TransportConnected
+                                 : found->second;
+  }
+
+  void shutdown() override {
+    listening = false;
+    for (auto& [connection_id, state] : states) {
+      (void)connection_id;
+      state = arv::net::ConnectionState::Disconnected;
+    }
+  }
+
+  void push_message(arv::net::ConnectionID connection_id, std::vector<arv::u8> payload) {
+    states[connection_id] = arv::net::ConnectionState::TransportConnected;
+    events.push_back({arv::net::NetworkEventType::MessageReceived,
+                      connection_id,
+                      arv::protocol::ReliabilityClass::ReliableOrdered,
+                      std::move(payload),
+                      {},
+                      std::chrono::steady_clock::now(),
+                      arv::protocol::MessageType::ServerboundHello,
+                      arv::protocol::NetworkLane::Session});
+  }
+
+  bool listening{};
+  std::deque<arv::net::NetworkEvent> events{};
+  std::vector<arv::net::TransportMessage> sent{};
+  std::vector<std::pair<arv::net::ConnectionID, std::string>> closed{};
+  arv::HashMap<arv::net::ConnectionID, arv::net::ConnectionState> states{};
+};
 
 arv::u32 player_correction_count(std::span<const arv::net::NetworkEvent> events) {
   arv::u32 count = 0;
@@ -180,6 +337,138 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
   EXPECT_NE(server.worlds().find(arv::server::DefaultWorldID), nullptr);
   EXPECT_TRUE(client.has_authoritative_inventory());
   EXPECT_GT(client.replicated_entity_count(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, DuplicateProfileRejectsNewConnectionOnly) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto scripted_transport = std::make_unique<ScriptedServerTransport>();
+  ScriptedServerTransport* transport = scripted_transport.get();
+  arv::server::ServerRuntime server(std::move(scripted_transport));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
+
+  const arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity();
+  transport->push_message(arv::net::ConnectionID{1}, raw_client_hello_packet(identity));
+  transport->push_message(arv::net::ConnectionID{2}, raw_client_hello_packet(identity));
+
+  server.tick();
+
+  EXPECT_EQ(server.sessions().size(), 1U);
+  const std::vector<std::pair<arv::net::ConnectionID, std::string>> kicks =
+      sent_kick_reasons(transport->sent);
+  ASSERT_EQ(kicks.size(), 1U);
+  EXPECT_EQ(kicks.front().first, (arv::net::ConnectionID{2}));
+  EXPECT_EQ(
+      kicks.front().second,
+      "This Arvane profile is already connected to this server.");
+  ASSERT_EQ(transport->closed.size(), 1U);
+  EXPECT_EQ(transport->closed.front().first, (arv::net::ConnectionID{2}));
+}
+
+TEST(IntegratedHandshakeTests, ServerShutdownSendsKickBeforeClosingSession) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
+
+  const auto connect_result = client_transport->connect({"in-process", 0});
+  ASSERT_TRUE(connect_result);
+  send_raw_client_hello(
+      *client_transport,
+      connect_result.value(),
+      arv::client::make_ephemeral_local_identity());
+  server.tick();
+  (void)client_transport->poll_events();
+
+  server.shutdown();
+
+  const std::vector<std::string> kicks = kick_reasons(client_transport->poll_events());
+  ASSERT_EQ(kicks.size(), 1U);
+  EXPECT_EQ(kicks.front(), "Server is shutting down.");
+}
+
+TEST(IntegratedHandshakeTests, ServerKeepAliveTimeoutKicksClient) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.keep_alive.interval_seconds = 1U;
+  start_info.keep_alive.client_timeout_seconds = 1U;
+  ASSERT_TRUE(server.start(start_info));
+
+  const auto connect_result = client_transport->connect({"in-process", 0});
+  ASSERT_TRUE(connect_result);
+  send_raw_client_hello(
+      *client_transport,
+      connect_result.value(),
+      arv::client::make_ephemeral_local_identity());
+  server.tick();
+  const std::vector<arv::u64> ids = keep_alive_ids(client_transport->poll_events());
+  ASSERT_FALSE(ids.empty());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  server.tick();
+
+  const std::vector<std::string> kicks = kick_reasons(client_transport->poll_events());
+  ASSERT_EQ(kicks.size(), 1U);
+  EXPECT_EQ(kicks.front(), "Timed out.");
+  EXPECT_EQ(server.sessions().size(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, KeepAliveReplyPreventsServerTimeout) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.keep_alive.interval_seconds = 1U;
+  start_info.keep_alive.client_timeout_seconds = 1U;
+  ASSERT_TRUE(server.start(start_info));
+
+  const auto connect_result = client_transport->connect({"in-process", 0});
+  ASSERT_TRUE(connect_result);
+  send_raw_client_hello(
+      *client_transport,
+      connect_result.value(),
+      arv::client::make_ephemeral_local_identity());
+  server.tick();
+  const std::vector<arv::u64> ids = keep_alive_ids(client_transport->poll_events());
+  ASSERT_FALSE(ids.empty());
+  send_raw_keep_alive(*client_transport, connect_result.value(), ids.back());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  server.tick();
+
+  EXPECT_EQ(server.sessions().size(), 1U);
+  EXPECT_TRUE(kick_reasons(client_transport->poll_events()).empty());
 }
 
 TEST(IntegratedHandshakeTests, ServerSendsMovementHzOverrideWhenConfigured) {

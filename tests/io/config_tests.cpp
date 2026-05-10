@@ -70,6 +70,13 @@ simulation:
       flow_interval_ticks: 37
 network:
   port: 28000
+  keep_alive:
+    interval_seconds: 7
+    client_timeout_seconds: 31
+multiplayer:
+  keep_alive:
+    server_timeout_seconds: 33
+  connection_timeout_seconds: 12
 chunks:
   load_distance: 6
   simulation_distance: 2
@@ -205,6 +212,10 @@ chunk_pipeline:
   EXPECT_EQ(result.value().simulation.fluids.water.flow_interval_ticks, 11U);
   EXPECT_EQ(result.value().simulation.fluids.lava.flow_interval_ticks, 37U);
   EXPECT_EQ(result.value().network.port, 28000U);
+  EXPECT_EQ(result.value().network.keep_alive.interval_seconds, 7U);
+  EXPECT_EQ(result.value().network.keep_alive.client_timeout_seconds, 31U);
+  EXPECT_EQ(result.value().multiplayer.keep_alive.server_timeout_seconds, 33U);
+  EXPECT_EQ(result.value().multiplayer.connection_timeout_seconds, 12U);
   EXPECT_EQ(result.value().chunks.load_distance, 6);
   EXPECT_EQ(result.value().chunks.simulation_distance, 2);
   EXPECT_EQ(result.value().chunks.render_distance, 4);
@@ -410,6 +421,10 @@ TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
   EXPECT_EQ(config.skins.downloads.max_batch_size, 16U);
   EXPECT_EQ(config.skins.storage.max_total_skin_bytes, 1024ULL * 1024ULL * 1024ULL);
   EXPECT_EQ(config.skins.storage.max_skins_per_profile, 16U);
+  EXPECT_EQ(config.network.keep_alive.interval_seconds, 5U);
+  EXPECT_EQ(config.network.keep_alive.client_timeout_seconds, 30U);
+  EXPECT_EQ(config.multiplayer.keep_alive.server_timeout_seconds, 30U);
+  EXPECT_EQ(config.multiplayer.connection_timeout_seconds, 10U);
   EXPECT_EQ(config.render.atlases.blocks.page_size, 4096U);
   EXPECT_EQ(config.render.atlases.blocks.max_pages, 8U);
   EXPECT_EQ(config.render.atlases.entities.page_size, 2048U);
@@ -481,6 +496,27 @@ TEST(ConfigTests, RejectsInvalidPhysicsConfig) {
   const auto result = arv::io::parse_config_yaml(R"(
 physics:
   body_width: 0
+)");
+
+  EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsInvalidKeepAliveConfig) {
+  const auto result = arv::io::parse_config_yaml(R"(
+network:
+  keep_alive:
+    interval_seconds: 5
+    client_timeout_seconds: 5
+)");
+
+  EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsInvalidMultiplayerTimeoutConfig) {
+  const auto result = arv::io::parse_config_yaml(R"(
+multiplayer:
+  keep_alive:
+    server_timeout_seconds: 0
 )");
 
   EXPECT_FALSE(result);

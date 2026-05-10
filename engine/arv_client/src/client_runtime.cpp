@@ -43,6 +43,9 @@ struct ClientRuntime::Impl {
 
     detail::ClientRuntimeContext runtime = context(collision_query, tick_seconds);
     network.process_events(runtime);
+    if (connection.tick_timeouts()) {
+      clear_multiplayer_runtime();
+    }
 
     if (was_in_game && connection.state() == net::ConnectionState::InGame) {
       input.send_fixed_tick_input(
@@ -60,6 +63,16 @@ struct ClientRuntime::Impl {
         (void)sender.send_chunk_interest_update(chunk_interest.build_interest_update());
       }
     }
+  }
+
+  void clear_multiplayer_runtime() {
+    entities.clear();
+    dropped_items.clear();
+    chunks.clear();
+    inventory.reset();
+    player_controller.leave_world();
+    chunk_interest.set_world_id(WorldID{});
+    ui.close_ui();
   }
 
   detail::ClientConnectionRuntime connection;
@@ -100,6 +113,12 @@ void ClientRuntime::set_local_identity(LocalPlayerIdentity identity) {
   impl_->identity = std::move(identity);
 }
 
+void ClientRuntime::configure_networking(ClientNetworkSettings settings) noexcept {
+  impl_->connection.configure_timeouts(
+      settings.server_keep_alive_timeout_seconds,
+      settings.connection_timeout_seconds);
+}
+
 const LocalPlayerIdentity& ClientRuntime::local_identity() const noexcept {
   return impl_->identity;
 }
@@ -110,6 +129,19 @@ net::ConnectResult ClientRuntime::connect_integrated() {
 
 net::ConnectResult ClientRuntime::connect(net::NetworkAddress address) {
   return impl_->connection.connect_remote(std::move(address));
+}
+
+void ClientRuntime::disconnect() {
+  impl_->connection.disconnect_local("Disconnected.");
+  impl_->clear_multiplayer_runtime();
+}
+
+std::optional<std::string> ClientRuntime::take_disconnect_reason() {
+  return impl_->connection.take_disconnect_reason();
+}
+
+std::optional<std::string> ClientRuntime::disconnect_reason() const {
+  return impl_->connection.disconnect_reason();
 }
 
 void ClientRuntime::submit_input(InputFrame input) {

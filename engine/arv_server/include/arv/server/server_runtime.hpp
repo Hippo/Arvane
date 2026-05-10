@@ -102,6 +102,7 @@ struct ServerStartInfo {
   DroppedItemsConfig dropped_items{};
   CombatConfig combat{};
   io::MovementValidationConfig movement{};
+  io::KeepAliveConfig keep_alive{};
   io::SkinConfig skins{};
 };
 

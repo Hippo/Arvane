@@ -264,7 +264,8 @@ arvane_home/
 
 `profiles.json`:
 
-* JSON array of local profiles
+* JSON object containing local profiles and selected profile index
+* contains `selected_profile`, the zero-based index of the selected local profile
 * contains profile metadata
 * contains public keys
 * contains private key filenames
@@ -293,37 +294,43 @@ Client rendering treats disk cache and GPU residency as separate systems. Valida
 
 ### `profiles.json`
 
-`profiles.json` is a JSON array. Until a profile-selection UI exists, the first entry is the active local profile.
+`profiles.json` is a JSON object. `selected_profile` is a zero-based index into
+`profiles`. If `selected_profile` is missing or outside the profile array, the
+client uses index `0`.
 
 Preferred shape:
 
 ```json
-[
-  {
-    "version": 1,
-    "display_name": "Hippo",
-    "private_key_file": "0x7b851c7188122a3ab9d173548a21a8ea0640575003be964c33aacc893a95cb79.pk",
-    "profile_id": "0x7b851c7188122a3ab9d173548a21a8ea0640575003be964c33aacc893a95cb79",
-    "public_key": "0xb7b7e282606c08c6ae90eaa10e8cb8442d7f67e4287afbbcf0cc16283a6dd531",
-    "skins": [
-      {
-        "skin_hash": "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d",
-        "format": "png",
-        "width": 64,
-        "height": 64,
-        "file": "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d.png"
-      }
-    ]
-  },
-  {
-    "version": 1,
-    "display_name": "HippoAlt",
-    "private_key_file": "0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421.pk",
-    "profile_id": "0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421",
-    "public_key": "0x2e5c2f90884cb17f47b22cb4ab64efb7ccfa1343e91e8d1923a55db97a187944",
-    "skins": []
-  }
-]
+{
+  "selected_profile": 0,
+  "profiles": [
+    {
+      "version": 1,
+      "display_name": "Hippo",
+      "private_key_file": "0x7b851c7188122a3ab9d173548a21a8ea0640575003be964c33aacc893a95cb79.pk",
+      "profile_id": "0x7b851c7188122a3ab9d173548a21a8ea0640575003be964c33aacc893a95cb79",
+      "public_key": "0xb7b7e282606c08c6ae90eaa10e8cb8442d7f67e4287afbbcf0cc16283a6dd531",
+      "skins": [
+        {
+          "skin_hash": "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d",
+          "format": "png",
+          "width": 64,
+          "height": 64,
+          "file": "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d.png",
+          "slim_model": false
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "display_name": "HippoAlt",
+      "private_key_file": "0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421.pk",
+      "profile_id": "0x8b3f7a1d4c9e2f00151b0db7f49c4cb2d7e1c69a0bb47f0fd7a66d6b89d5a421",
+      "public_key": "0x2e5c2f90884cb17f47b22cb4ab64efb7ccfa1343e91e8d1923a55db97a187944",
+      "skins": []
+    }
+  ]
+}
 ```
 
 Private key bytes must never be written into `profiles.json`.
@@ -354,11 +361,11 @@ Flow:
 
 ```text
 client startup
-profiles.json missing or empty
+profiles.json missing or profiles array empty
 generate Ed25519 key pair
 derive profile_id from public key
 write keys/<profile_id>.pk
-write profiles.json with one profile entry
+write profiles.json with selected_profile 0 and one profile entry
 use generated profile for local/integrated play
 ```
 
@@ -645,6 +652,23 @@ server begins challenge authentication
 ```
 
 If the profile file exists but the supplied public key does not match the stored public key, login fails.
+
+### Duplicate Online Profile
+
+Only one live server session may own a given authenticated `profile_id` at a
+time. After a new connection proves its profile identity, but before it is
+admitted as online, the server checks the online profile map.
+
+If another active session already owns that `profile_id`, the server sends
+`ClientboundKickPlayer` only to the new connection with:
+
+```text
+This Arvane profile is already connected to this server.
+```
+
+The existing online player remains connected and its entity, inventory, profile
+mapping, and world state are not modified. Disconnect cleanup removes a profile
+mapping only if the disconnecting session still owns it.
 
 ---
 
@@ -1504,6 +1528,7 @@ Local profile tests:
 
 * first-join profile creation
 * existing profile login
+* duplicate online profile rejects only the new connection
 * duplicate display names
 * public key mismatch rejection
 * expired challenge rejection

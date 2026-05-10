@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <system_error>
 
 namespace {
@@ -25,7 +26,7 @@ struct TempDir {
 
 } // namespace
 
-TEST(LocalProfileTests, SavesLoadsMultipleProfilesAndUsesFirstAsActive) {
+TEST(LocalProfileTests, SavesLoadsMultipleProfilesAndUsesSelectedProfile) {
   TempDir temp;
   arv::client::LocalProfileStore store;
   store.profiles.push_back(arv::client::make_ephemeral_local_identity("Hippo"));
@@ -39,14 +40,17 @@ TEST(LocalProfileTests, SavesLoadsMultipleProfilesAndUsesFirstAsActive) {
       true});
   store.profiles.push_back(arv::client::make_ephemeral_local_identity("Second"));
   store.profiles.back().private_key_file = store.profiles.back().profile_id.string() + ".pk";
+  store.selected_profile = 1U;
 
   ASSERT_TRUE(arv::client::save_local_profile_store(temp.path, store));
   auto loaded = arv::client::load_or_create_local_profile_store(temp.path);
 
   ASSERT_TRUE(loaded);
   ASSERT_EQ(loaded.value().profiles.size(), 2U);
+  EXPECT_EQ(loaded.value().selected_profile, 1U);
   ASSERT_NE(loaded.value().active_profile(), nullptr);
-  EXPECT_EQ(loaded.value().active_profile()->display_name, "Hippo");
+  EXPECT_EQ(loaded.value().active_profile()->display_name, "Second");
+  EXPECT_EQ(loaded.value().profiles.front().display_name, "Hippo");
   EXPECT_EQ(loaded.value().profiles.front().skins.size(), 1U);
   EXPECT_TRUE(loaded.value().profiles.front().skins.front().slim_model);
   EXPECT_TRUE(std::filesystem::exists(arv::client::local_profiles_json_path(temp.path)));
@@ -58,17 +62,48 @@ TEST(LocalProfileTests, SavesLoadsMultipleProfilesAndUsesFirstAsActive) {
 TEST(LocalProfileTests, EmptyExistingProfilesFileCreatesFreshProfile) {
   TempDir temp;
   std::ofstream output(arv::client::local_profiles_json_path(temp.path), std::ios::trunc);
-  output << "[]";
+  output << R"({"selected_profile": 7, "profiles": []})";
   output.close();
 
   auto loaded = arv::client::load_or_create_local_profile_store(temp.path, "Fresh");
 
   ASSERT_TRUE(loaded);
   ASSERT_EQ(loaded.value().profiles.size(), 1U);
+  EXPECT_EQ(loaded.value().selected_profile, 0U);
   EXPECT_EQ(loaded.value().profiles.front().display_name, "Fresh");
   EXPECT_TRUE(std::filesystem::exists(arv::client::local_private_key_path(
       temp.path,
       loaded.value().profiles.front().private_key_file)));
+}
+
+TEST(LocalProfileTests, OutOfBoundsSelectedProfileFallsBackToFirst) {
+  TempDir temp;
+  arv::client::LocalProfileStore store;
+  store.profiles.push_back(arv::client::make_ephemeral_local_identity("Hippo"));
+  store.profiles.back().private_key_file = store.profiles.back().profile_id.string() + ".pk";
+  store.profiles.push_back(arv::client::make_ephemeral_local_identity("Second"));
+  store.profiles.back().private_key_file = store.profiles.back().profile_id.string() + ".pk";
+  store.selected_profile = 1U;
+
+  ASSERT_TRUE(arv::client::save_local_profile_store(temp.path, store));
+  const std::filesystem::path path = arv::client::local_profiles_json_path(temp.path);
+  std::ifstream input(path);
+  std::string text{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+  const std::string selected_one = R"("selected_profile": 1)";
+  const std::string selected_out_of_bounds = R"("selected_profile": 99)";
+  const std::string::size_type selected_pos = text.find(selected_one);
+  ASSERT_NE(selected_pos, std::string::npos);
+  text.replace(selected_pos, selected_one.size(), selected_out_of_bounds);
+  std::ofstream output(path, std::ios::trunc);
+  output << text;
+  output.close();
+
+  auto loaded = arv::client::load_or_create_local_profile_store(temp.path);
+
+  ASSERT_TRUE(loaded);
+  EXPECT_EQ(loaded.value().selected_profile, 0U);
+  ASSERT_NE(loaded.value().active_profile(), nullptr);
+  EXPECT_EQ(loaded.value().active_profile()->display_name, "Hippo");
 }
 
 TEST(LocalProfileTests, SelectsFirstSkinWithinResolution) {

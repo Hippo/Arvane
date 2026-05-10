@@ -5,6 +5,7 @@
 #include "arv/persistence/save.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <system_error>
 #include <utility>
 #include <variant>
@@ -90,7 +91,7 @@ std::vector<ui::LocalProfileEntry> DesktopMenuState::local_profiles() const {
     ui::LocalProfileEntry entry;
     entry.profile_id = profile.profile_id.string();
     entry.display_name = display_name_or_default(profile.display_name);
-    entry.active = index == 0U;
+    entry.active = index == profile_store_.active_profile_index();
     entry.skins = skin_entries_from(profile.skins);
     if (!profile.skins.empty()) {
       entry.selected_skin_hash = profile.skins.front().skin_hash;
@@ -157,6 +158,10 @@ std::string DesktopMenuState::local_profile_status() const {
   return profile_status_;
 }
 
+const client::LocalPlayerIdentity* DesktopMenuState::active_local_profile() const noexcept {
+  return profile_store_.active_profile();
+}
+
 void DesktopMenuState::submit(ui::UICommand command) {
   std::visit([this](auto&& concrete) { handle(concrete); }, std::move(command));
 }
@@ -196,6 +201,10 @@ DesktopMenuState::take_join_server_request() noexcept {
   return std::exchange(join_server_request_, std::nullopt);
 }
 
+bool DesktopMenuState::take_cancel_server_connect_request() noexcept {
+  return std::exchange(cancel_server_connect_requested_, false);
+}
+
 bool DesktopMenuState::take_back_to_main_menu_request() noexcept {
   return std::exchange(back_to_main_menu_requested_, false);
 }
@@ -214,6 +223,10 @@ void DesktopMenuState::handle(const ui::DeleteSinglePlayerSaveCommand& command) 
 
 void DesktopMenuState::handle(const ui::JoinServerCommand& command) {
   join_server_request_ = command;
+}
+
+void DesktopMenuState::handle(const ui::CancelServerConnectCommand&) {
+  cancel_server_connect_requested_ = true;
 }
 
 void DesktopMenuState::handle(const ui::SaveServerEntryCommand& command) {
@@ -243,7 +256,8 @@ void DesktopMenuState::handle(const ui::SelectLocalProfileCommand& command) {
     profile_status_ = "Profile was not found.";
     return;
   }
-  std::rotate(profile_store_.profiles.begin(), found, found + 1);
+  profile_store_.selected_profile =
+      static_cast<usize>(std::distance(profile_store_.profiles.begin(), found));
   persist_profiles();
 }
 
@@ -365,7 +379,8 @@ void DesktopMenuState::handle(const ui::CreateLocalProfileCommand& command) {
   profile.private_key_file = profile.profile_id.string() + ".pk";
   profile.skins = std::move(pending_create_skins_);
   pending_create_skins_.clear();
-  profile_store_.profiles.insert(profile_store_.profiles.begin(), std::move(profile));
+  profile_store_.selected_profile = profile_store_.profiles.size();
+  profile_store_.profiles.push_back(std::move(profile));
   persist_profiles();
 }
 
@@ -381,10 +396,20 @@ void DesktopMenuState::handle(const ui::DeleteLocalProfileCommand& command) {
     return;
   }
 
+  const usize removed_index =
+      static_cast<usize>(std::distance(profile_store_.profiles.begin(), found));
+  const usize selected_index = profile_store_.active_profile_index();
   pending_edit_skins_.erase(command.profile_id);
   const std::filesystem::path key_path =
       client::local_private_key_path(arvane_home_, found->private_key_file);
   profile_store_.profiles.erase(found);
+  if (profile_store_.profiles.empty() || removed_index == selected_index) {
+    profile_store_.selected_profile = 0U;
+  } else if (removed_index < selected_index) {
+    profile_store_.selected_profile = selected_index - 1U;
+  } else {
+    profile_store_.selected_profile = selected_index;
+  }
   persist_profiles();
 
   std::error_code error;

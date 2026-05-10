@@ -623,6 +623,11 @@ Reliable ordered:
 - gameplay-affecting requests such as item use or inventory actions
 - chat and commands
 
+Reliable immediate:
+
+- `ClientboundKickPlayer`, because user-facing disconnect reasons should be
+  queued and flushed promptly before the server closes the connection
+
 Unreliable latest-wins:
 
 - `ServerboundPlayerMove` where newer movement supersedes older movement
@@ -632,6 +637,8 @@ Unreliable latest-wins:
 
 Unreliable event:
 
+- `ClientboundKeepAlive`
+- `ServerboundKeepAlive`
 - cosmetic particles
 - sound cues
 - temporary visual hints
@@ -842,6 +849,14 @@ These cases should not crash the engine.
 
 ## Disconnect Handling
 
+Server-initiated disconnects use one kick path: send `ClientboundKickPlayer`
+with a human-readable reason, flush/close the transport connection without
+blocking indefinitely, and run normal session cleanup. This path is used for
+authentication rejection, malformed protocol rejection, duplicate profile
+rejection, keep-alive timeout, orderly shutdown, and future administrative
+kicks. Transport-failed disconnects may skip the packet because the peer is
+already unreachable.
+
 When a client disconnects, the server should:
 
 - remove the session from active networking
@@ -853,6 +868,53 @@ When a client disconnects, the server should:
 The global player profile may outlive the connection.
 
 The world-local player entity may not.
+
+Remote clients show a connecting screen after transport connection startup and
+before world join. While that screen is open, networking and timeout ticks
+continue, but the pending session is not rendered as a world. `Cancel` closes
+the pending connection and returns to the server list.
+
+Clients store the first clear disconnect reason they receive. `ClientboundKickPlayer`,
+transport failure, connection-attempt timeout, and client-side keep-alive timeout
+all leave multiplayer world state and show the reusable disconnect screen. That
+screen displays the reason and offers `Reconnect` to the last selected server or
+`Server List` to return to saved servers.
+
+## Keep Alive
+
+Arvane uses application-level keep alive packets in addition to transport-level
+connection state.
+
+Server behavior:
+
+- send `ClientboundKeepAlive { id }` periodically to authenticated sessions
+- accept `ServerboundKeepAlive { id }` only when it echoes the most recent id
+- kick the client with `Timed out.` when no valid reply arrives before the
+  configured timeout
+
+Client behavior:
+
+- record the time of the latest `ClientboundKeepAlive`
+- immediately echo it with `ServerboundKeepAlive`
+- locally disconnect with `Lost connection to the server.` if no server keep
+  alive arrives before the configured timeout
+
+Configuration:
+
+```yaml
+network:
+  keep_alive:
+    interval_seconds: 5
+    client_timeout_seconds: 30
+multiplayer:
+  keep_alive:
+    server_timeout_seconds: 30
+  connection_timeout_seconds: 10
+```
+
+The server timeout must be greater than the send interval. The client
+connection timeout covers offline or unreachable server attempts before gameplay
+state can be established.
 
 ---
 
@@ -1068,7 +1130,7 @@ Arvane currently maps message lanes as:
 
 | Lane | Reliability            | Message types                                 |
 | ---: | ---------------------- | --------------------------------------------- |
-|  `0` | reliable               | handshake, movement cadence setup, disconnect, world join/leave |
+|  `0` | reliable/control       | handshake, kick, keep alive, movement cadence setup, world join/leave |
 |  `1` | reliable               | gameplay-critical blocks, inventory, entity lifecycle |
 |  `2` | mixed movement         | player movement, movement snapshots, corrections, local velocity impulses |
 |  `3` | reliable bulk          | chunk streaming                               |
@@ -1110,7 +1172,7 @@ small, bounded, and rate-limited.
 During shutdown, the networking layer should:
 
 1. Stop accepting new gameplay messages.
-2. Send disconnect messages when appropriate.
+2. Send `ClientboundKickPlayer` with `Server is shutting down.` to connected clients.
 3. Flush or discard outgoing queues according to shutdown mode.
 4. Close transport connections.
 5. Destroy poll groups.

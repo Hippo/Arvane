@@ -1019,3 +1019,68 @@ TEST(MenuScreenTests, AddServerRejectsMalformedExplicitPort) {
   EXPECT_TRUE(sink.commands.empty());
   EXPECT_EQ(screens.depth(), 1U);
 }
+
+TEST(MenuScreenTests, DisconnectScreenShowsReasonAndReconnects) {
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_multiplayer_disconnect_screen(
+      "This Arvane profile is already connected to this server.",
+      arv::ui::ServerListEntry{"Local", "localhost"}));
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+
+  screens.update(ctx);
+
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::MultiplayerDisconnect);
+  const auto* reason = tree.find_by_stable_id("menu.disconnect.reason");
+  ASSERT_NE(reason, nullptr);
+  EXPECT_NE(
+      reason->text.find("already connected"),
+      std::string::npos);
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.disconnect.reconnect", "disconnect.reconnect", "click"},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::JoinServerCommand>(sink.commands[0]));
+  EXPECT_EQ(std::get<arv::ui::JoinServerCommand>(sink.commands[0]).name, "Local");
+  EXPECT_EQ(std::get<arv::ui::JoinServerCommand>(sink.commands[0]).address, "localhost");
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.disconnect.server_list", "disconnect.server_list", "click"},
+      ctx));
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::MultiPlayerMenu);
+}
+
+TEST(MenuScreenTests, ConnectingScreenShowsServerAndCancels) {
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_multiplayer_connecting_screen(
+      arv::ui::ServerListEntry{"Local", "localhost"}));
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+
+  screens.update(ctx);
+
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::MultiplayerConnecting);
+  const auto* status = tree.find_by_stable_id("menu.connecting.status");
+  ASSERT_NE(status, nullptr);
+  EXPECT_NE(status->text.find("Waiting for the server"), std::string::npos);
+  const auto* server = tree.find_by_stable_id("menu.connecting.server");
+  ASSERT_NE(server, nullptr);
+  EXPECT_NE(server->text.find("Local"), std::string::npos);
+  EXPECT_NE(server->text.find("localhost"), std::string::npos);
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.connecting.cancel", "connecting.cancel", "click"},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<arv::ui::CancelServerConnectCommand>(sink.commands[0]));
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::MultiPlayerMenu);
+}

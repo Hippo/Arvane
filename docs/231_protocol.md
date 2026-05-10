@@ -72,6 +72,16 @@ Examples:
 - gameplay-affecting plugin messages
 - plugin-provided reliable commands
 
+### Reliable Immediate
+
+Used for tiny, rare control messages that should bypass normal reliable
+batching when the transport supports a no-delay reliable send mode.
+
+Examples:
+
+- `ClientboundKickPlayer`
+- future administrative disconnect or moderation notices
+
 ### Unreliable Latest-Wins
 
 Used for frequent state where old data becomes useless.
@@ -314,6 +324,49 @@ DisconnectReason
 {
     u16 reason_code;
     string message;
+}
+```
+
+### `ClientboundKickPlayer`
+
+Reliable immediate on the session lane.
+Message ID: `0x0009`.
+
+Sent by the server before an intentional server-side disconnect. The reason is
+human-readable UI text and is capped at 512 UTF-8 bytes on the wire. Servers use
+this packet for shutdown, duplicate profile rejection, authentication rejection,
+protocol rejection, timeout, and future administrative kicks. If the transport
+has already reported a failed connection, cleanup may happen without this packet.
+
+```text
+ClientboundKickPlayer
+{
+    string reason;
+}
+```
+
+### `ClientboundKeepAlive`
+
+Unreliable event on the session lane.
+Message ID: `0x000A`.
+
+```text
+ClientboundKeepAlive
+{
+    u64 id;
+}
+```
+
+### `ServerboundKeepAlive`
+
+Unreliable event on the session lane. The client echoes the latest
+`ClientboundKeepAlive.id`.
+Message ID: `0x000B`.
+
+```text
+ServerboundKeepAlive
+{
+    u64 id;
 }
 ```
 
@@ -969,7 +1022,7 @@ Current core lanes:
 
 | Lane | Reliability            | Message types                                 |
 | ---: | ---------------------- | --------------------------------------------- |
-|  `0` | reliable               | `ServerboundHello`, `ClientboundHello`, `ClientboundSetMovementHz`, disconnect, world join/leave |
+|  `0` | reliable/control       | `ServerboundHello`, `ClientboundHello`, `ClientboundKickPlayer`, keep alive, `ClientboundSetMovementHz`, world join/leave |
 |  `1` | reliable               | block updates, entity lifecycle, inventory, reliable gameplay actions |
 |  `2` | mixed movement         | `ServerboundPlayerMove`, `ClientboundEntitySnapshot`, `ClientboundPlayerMoveCorrection`, `ClientboundPlayerVelocity` |
 |  `3` | reliable bulk          | `ClientboundChunkData`, `ClientboundChunkUnload`, skin image upload/download chunks |

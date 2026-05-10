@@ -13,6 +13,192 @@ namespace {
 
 using namespace screens_detail;
 
+[[nodiscard]] std::string wrapped_reason_text(std::string_view reason) {
+  if (reason.empty()) {
+    return "Disconnected.";
+  }
+  constexpr usize MaxLine = 44U;
+  constexpr usize MaxDisplay = 360U;
+  std::string wrapped;
+  wrapped.reserve(std::min(reason.size(), MaxDisplay) + 16U);
+  usize line_width = 0U;
+  for (usize index = 0; index < reason.size() && index < MaxDisplay; ++index) {
+    const char ch = reason[index];
+    if (ch == '\r') {
+      continue;
+    }
+    if (ch == '\n') {
+      wrapped.push_back('\n');
+      line_width = 0U;
+      continue;
+    }
+    if (line_width >= MaxLine && ch == ' ') {
+      wrapped.push_back('\n');
+      line_width = 0U;
+      continue;
+    }
+    if (line_width >= MaxLine) {
+      wrapped.push_back('\n');
+      line_width = 0U;
+    }
+    wrapped.push_back(ch);
+    ++line_width;
+  }
+  if (reason.size() > MaxDisplay) {
+    wrapped.append("...");
+  }
+  return wrapped;
+}
+
+class MultiplayerDisconnectScreen final : public UIScreen {
+public:
+  MultiplayerDisconnectScreen(
+      std::string reason,
+      std::optional<ServerListEntry> reconnect_server) : reason_(std::move(reason)),
+                                                         reconnect_server_(std::move(reconnect_server)) {
+  }
+
+  [[nodiscard]] MenuScreenType type() const noexcept override {
+    return MenuScreenType::MultiplayerDisconnect;
+  }
+
+  [[nodiscard]] std::string_view screen_id() const noexcept override {
+    return "multiplayer_disconnect";
+  }
+
+  void build(UIContext& ctx) override {
+    const UiTheme& theme = ctx.tree.theme();
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Disconnected", 472.0F, 344.0F);
+    UiElement reason = make_text(
+        "menu.disconnect.reason",
+        wrapped_reason_text(reason_),
+        theme.colors.text,
+        UiTextRole::Body);
+    reason.layout.anchor = UiAnchor::TopCenter;
+    ctx.tree.add_child(stack, std::move(reason));
+
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.disconnect.reconnect",
+        "Reconnect",
+        "disconnect.reconnect",
+        reconnect_server_.has_value() && !reconnect_server_->address.empty(),
+        false,
+        UiControlRole::Primary);
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.disconnect.server_list",
+        "Server List",
+        "disconnect.server_list");
+  }
+
+  bool handle_action(const UiAction& action, UIContext& ctx) override {
+    if (action.action_id == "disconnect.reconnect") {
+      if (reconnect_server_.has_value()) {
+        submit_command(
+            ctx,
+            JoinServerCommand{reconnect_server_->name, reconnect_server_->address});
+      }
+      return true;
+    }
+    if (action.action_id == "disconnect.server_list") {
+      return handle_cancel(ctx);
+    }
+    return false;
+  }
+
+  bool handle_cancel(UIContext& ctx) override {
+    if (ctx.screens != nullptr) {
+      ctx.screens->replace(make_multi_player_menu_screen());
+      return true;
+    }
+    return UIScreen::handle_cancel(ctx);
+  }
+
+  [[nodiscard]] bool pauses_singleplayer() const noexcept override {
+    return true;
+  }
+
+private:
+  std::string reason_{};
+  std::optional<ServerListEntry> reconnect_server_{};
+};
+
+class MultiplayerConnectingScreen final : public UIScreen {
+public:
+  explicit MultiplayerConnectingScreen(ServerListEntry server) : server_(std::move(server)) {
+  }
+
+  [[nodiscard]] MenuScreenType type() const noexcept override {
+    return MenuScreenType::MultiplayerConnecting;
+  }
+
+  [[nodiscard]] std::string_view screen_id() const noexcept override {
+    return "multiplayer_connecting";
+  }
+
+  void build(UIContext& ctx) override {
+    const UiTheme& theme = ctx.tree.theme();
+    const UiNodeID stack =
+        add_menu_shell(ctx, screen_id(), "Connecting to server...", 448.0F, 272.0F);
+    UiElement status = make_text(
+        "menu.connecting.status",
+        "Waiting for the server to respond.",
+        theme.colors.text,
+        UiTextRole::Body);
+    status.layout.anchor = UiAnchor::TopCenter;
+    ctx.tree.add_child(stack, std::move(status));
+
+    const std::string server_text =
+        server_.name.empty() ? server_.address : server_.name + "\n" + server_.address;
+    UiElement server = make_text(
+        "menu.connecting.server",
+        server_text,
+        theme.colors.text_muted,
+        UiTextRole::Small);
+    server.layout.anchor = UiAnchor::TopCenter;
+    ctx.tree.add_child(stack, std::move(server));
+
+    add_button(
+        ctx.tree,
+        stack,
+        "menu.connecting.cancel",
+        "Cancel",
+        "connecting.cancel",
+        true,
+        false,
+        UiControlRole::Danger);
+  }
+
+  bool handle_action(const UiAction& action, UIContext& ctx) override {
+    if (action.action_id == "connecting.cancel") {
+      return handle_cancel(ctx);
+    }
+    return false;
+  }
+
+  bool handle_cancel(UIContext& ctx) override {
+    submit_command(ctx, CancelServerConnectCommand{});
+    if (ctx.screens != nullptr) {
+      ctx.screens->replace(make_multi_player_menu_screen());
+    }
+    return true;
+  }
+
+  [[nodiscard]] bool can_close() const noexcept override {
+    return false;
+  }
+
+  [[nodiscard]] bool pauses_singleplayer() const noexcept override {
+    return true;
+  }
+
+private:
+  ServerListEntry server_{};
+};
+
 class MultiPlayerMenuScreen final : public UIScreen {
 public:
   [[nodiscard]] MenuScreenType type() const noexcept override {
@@ -347,6 +533,18 @@ private:
 
 std::unique_ptr<UIScreen> make_multi_player_menu_screen() {
   return std::make_unique<MultiPlayerMenuScreen>();
+}
+
+std::unique_ptr<UIScreen> make_multiplayer_connecting_screen(ServerListEntry server) {
+  return std::make_unique<MultiplayerConnectingScreen>(std::move(server));
+}
+
+std::unique_ptr<UIScreen> make_multiplayer_disconnect_screen(
+    std::string reason,
+    std::optional<ServerListEntry> reconnect_server) {
+  return std::make_unique<MultiplayerDisconnectScreen>(
+      std::move(reason),
+      std::move(reconnect_server));
 }
 
 std::unique_ptr<UIScreen> make_add_server_screen() {

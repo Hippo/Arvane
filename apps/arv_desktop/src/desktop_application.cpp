@@ -205,6 +205,11 @@ struct UiBuildCacheKey {
   return !draft.empty() && draft.front() == '/';
 }
 
+[[nodiscard]] bool session_world_ready(const DesktopGameSession* session) noexcept {
+  return session != nullptr && session->client != nullptr &&
+         session->client->connection_state() == net::ConnectionState::InGame;
+}
+
 [[nodiscard]] std::string fallback_command_result_message(command::CommandStatus status) {
   switch (status) {
     case command::CommandStatus::Success:
@@ -431,21 +436,22 @@ public:
       FrameTiming timing = begin_frame();
       platform::InputSnapshot platform_input = poll_platform_input();
       DesktopGameSession* active_session = sessions_.active_session();
-      const bool has_session = active_session != nullptr && active_session->client != nullptr;
-      handle_debug_menu_input(platform_input, active_session, has_session);
+      bool has_world_session = session_world_ready(active_session);
+      handle_debug_menu_input(platform_input, active_session, has_world_session);
       begin_debug_frame(platform_input, timing);
-      const bool was_inventory_open = has_session && active_session->client->inventory_open();
+      const bool was_inventory_open =
+          has_world_session && active_session->client->inventory_open();
 
       ui::UIContext menu_context = make_menu_context();
-      handle_pause_menu_input(platform_input, menu_context, active_session, has_session);
+      handle_pause_menu_input(platform_input, menu_context, active_session, has_world_session);
 
       client::InputFrame client_input =
-          has_session ? to_client_input(platform_input) : client::InputFrame{};
+          has_world_session ? to_client_input(platform_input) : client::InputFrame{};
       bool inventory_changed_by_ui = route_input(
           platform_input,
           menu_context,
           active_session,
-          has_session,
+          has_world_session,
           client_input);
 
       if (!process_menu_commands()) {
@@ -453,16 +459,17 @@ public:
       }
 
       active_session = sessions_.active_session();
-      const bool has_active_session =
+      bool has_active_session =
           active_session != nullptr && active_session->client != nullptr;
-      const bool has_active_integrated_session =
-          has_active_session && active_session->integrated_server != nullptr;
+      has_world_session = session_world_ready(active_session);
+      bool has_active_integrated_session =
+          has_world_session && active_session->integrated_server != nullptr;
 
-      handle_chat_command_submit(active_session, has_active_session, client_input);
+      handle_chat_command_submit(active_session, has_world_session, client_input);
 
       submit_client_input_and_update_cursor(
           active_session,
-          has_active_session,
+          has_world_session,
           was_inventory_open,
           std::move(client_input),
           inventory_changed_by_ui,
@@ -473,9 +480,22 @@ public:
           !update_simulation_and_chunks(*active_session, timing.delta, fixed_tick_ran)) {
         return 1;
       }
+      if (has_active_session) {
+        handle_remote_connection_ready(active_session);
+        has_world_session = session_world_ready(active_session);
+        has_active_integrated_session =
+            has_world_session && active_session->integrated_server != nullptr;
+      }
+      if (has_active_session && handle_remote_disconnect(active_session)) {
+        active_session = sessions_.active_session();
+        has_active_session = active_session != nullptr && active_session->client != nullptr;
+        has_world_session = session_world_ready(active_session);
+        has_active_integrated_session =
+            has_world_session && active_session->integrated_server != nullptr;
+      }
 
       update_framebuffer_size();
-      if (has_active_session) {
+      if (has_world_session) {
         refresh_player_skin_render_assets(*active_session);
       }
       refresh_menu_profile_render_assets();
@@ -484,7 +504,7 @@ public:
       usize visible_chunk_count = build_world_frame(
           frame,
           active_session,
-          has_active_session,
+          has_world_session,
           timing.now);
 
       render_debug_menu_if_available(
@@ -498,14 +518,14 @@ public:
           platform_input,
           menu_context,
           active_session,
-          has_active_session,
+          has_world_session,
           has_active_integrated_session,
           fixed_tick_ran);
 
       submit_render_and_present(
           std::move(frame),
           timing,
-          has_active_session,
+          has_world_session,
           active_session);
       ARV_PROFILE_FRAME_MARK("Frame");
     }
@@ -672,6 +692,13 @@ private:
   }
 
   [[nodiscard]] bool process_menu_commands() {
+    if (menu_state_.take_cancel_server_connect_request()) {
+      if (!sessions_.save_and_shutdown()) {
+        return false;
+      }
+      screen_manager_.replace(ui::make_multi_player_menu_screen());
+      invalidate_ui_tree_cache();
+    }
     if (menu_state_.take_back_to_main_menu_request()) {
       if (!sessions_.save_and_shutdown()) {
         return false;
@@ -689,10 +716,16 @@ private:
     if (const std::optional<ui::JoinServerCommand> command =
             menu_state_.take_join_server_request();
         command.has_value()) {
-      if (sessions_.start_remote(command.value())) {
-        screen_manager_.clear();
-      } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
-        screen_manager_.push(ui::make_multi_player_menu_screen());
+      const client::LocalPlayerIdentity* local_identity = menu_state_.active_local_profile();
+      if (local_identity == nullptr) {
+        core::error("identity", "cannot join server without a selected local profile");
+      } else if (sessions_.start_remote(command.value(), *local_identity)) {
+        screen_manager_.replace(ui::make_multiplayer_connecting_screen(
+            ui::ServerListEntry{command->name, command->address}));
+      } else if (sessions_.active_session() == nullptr) {
+        screen_manager_.replace(ui::make_multiplayer_disconnect_screen(
+            "Server is offline or unreachable.",
+            ui::ServerListEntry{command->name, command->address}));
       }
       invalidate_ui_tree_cache();
     }
@@ -702,12 +735,16 @@ private:
       const std::string server_save_name =
           unique_server_save_name(config_, command->name);
       const u64 seed = parse_or_generate_seed(command->seed);
-      if (sessions_.start_singleplayer(
+      const client::LocalPlayerIdentity* local_identity = menu_state_.active_local_profile();
+      if (local_identity == nullptr) {
+        core::error("identity", "cannot create world without a selected local profile");
+      } else if (sessions_.start_singleplayer(
               server_save_name,
               "default",
               seed,
               true,
-              command->name)) {
+              command->name,
+              *local_identity)) {
         menu_state_.refresh_worlds();
         screen_manager_.clear();
       } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
@@ -718,12 +755,16 @@ private:
     if (const std::optional<ui::StartSinglePlayerCommand> command =
             menu_state_.take_start_singleplayer_request();
         command.has_value()) {
-      if (sessions_.start_singleplayer(
+      const client::LocalPlayerIdentity* local_identity = menu_state_.active_local_profile();
+      if (local_identity == nullptr) {
+        core::error("identity", "cannot start singleplayer without a selected local profile");
+      } else if (sessions_.start_singleplayer(
               command->server_save_name,
               command->world_name,
               std::nullopt,
               false,
-              {})) {
+              {},
+              *local_identity)) {
         screen_manager_.clear();
       } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
         screen_manager_.push(ui::make_single_player_menu_screen());
@@ -738,6 +779,42 @@ private:
 
   void invalidate_ui_tree_cache() noexcept {
     ui_tree_cache_valid_ = false;
+  }
+
+  [[nodiscard]] bool handle_remote_disconnect(DesktopGameSession* active_session) {
+    if (active_session == nullptr || active_session->client == nullptr ||
+        !active_session->remote_server.has_value()) {
+      return false;
+    }
+    const std::optional<std::string> reason = active_session->client->disconnect_reason();
+    if (!reason.has_value()) {
+      return false;
+    }
+    const ui::ServerListEntry reconnect{
+        active_session->remote_server->name,
+        active_session->remote_server->address};
+    if (!sessions_.save_and_shutdown()) {
+      return false;
+    }
+    screen_manager_.replace(ui::make_multiplayer_disconnect_screen(
+        reason.value(),
+        reconnect));
+    invalidate_ui_tree_cache();
+    return true;
+  }
+
+  void handle_remote_connection_ready(DesktopGameSession* active_session) {
+    if (active_session == nullptr || active_session->client == nullptr ||
+        !active_session->remote_server.has_value() ||
+        active_session->client->connection_state() != net::ConnectionState::InGame) {
+      return;
+    }
+    const ui::UIScreen* screen = screen_manager_.current();
+    if (screen != nullptr &&
+        screen->type() == ui::MenuScreenType::MultiplayerConnecting) {
+      screen_manager_.clear();
+      invalidate_ui_tree_cache();
+    }
   }
 
   [[nodiscard]] const player::ItemRecord* selected_held_item(
@@ -1248,11 +1325,14 @@ private:
               active_session.integrated_server->tick_index(),
               &local_collision_query);
         } else {
-          if (active_session.client_tick_index == 0U &&
-              active_session.client->connection_state() == net::ConnectionState::InGame) {
-            active_session.client_tick_index = active_session.client->world_initial_tick();
+          const bool was_in_game =
+              active_session.client->connection_state() == net::ConnectionState::InGame;
+          if (was_in_game) {
+            if (active_session.client_tick_index == 0U) {
+              active_session.client_tick_index = active_session.client->world_initial_tick();
+            }
+            ++active_session.client_tick_index;
           }
-          ++active_session.client_tick_index;
           world::WorldCollisionQuery local_collision_query(
               active_session.client_world,
               assets_.block_registry,
@@ -1260,9 +1340,15 @@ private:
           active_session.client->fixed_tick(
               active_session.client_tick_index,
               &local_collision_query);
+          if (!was_in_game &&
+              active_session.client->connection_state() == net::ConnectionState::InGame) {
+            active_session.client_tick_index = active_session.client->world_initial_tick();
+          }
         }
-        update_block_outline_target(active_session);
-        sessions_.collect_client_chunk_stream(active_session);
+        if (active_session.client->connection_state() == net::ConnectionState::InGame) {
+          update_block_outline_target(active_session);
+          sessions_.collect_client_chunk_stream(active_session);
+        }
         if constexpr (core::profiling_enabled()) {
           const auto simulation_end = std::chrono::steady_clock::now();
           core::record_thread_timing(
@@ -1274,6 +1360,10 @@ private:
         }
         fixed_tick_ran = true;
       }
+    }
+
+    if (active_session.client->connection_state() != net::ConnectionState::InGame) {
+      return true;
     }
 
     active_session.client->advance_entity_interpolation(delta.count());

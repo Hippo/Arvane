@@ -25,16 +25,6 @@ inline constexpr std::string_view ProfilesFileName = "profiles.json";
 inline constexpr std::string_view KeysDirectoryName = "keys";
 inline constexpr std::string_view SkinsDirectoryName = "skins";
 inline constexpr std::string_view CacheDirectoryName = "cache";
-inline constexpr std::string_view OldIdentityDirectoryName = "identity";
-inline constexpr std::string_view OldIdentityFileName = "local_identity.json";
-inline constexpr std::string_view OldPrivateKeyFileName = "local_private_key.bin";
-
-[[nodiscard]] std::filesystem::path normalize_home_path(
-    const std::filesystem::path& maybe_home) {
-  return maybe_home.filename() == OldIdentityDirectoryName
-             ? maybe_home.parent_path()
-             : maybe_home;
-}
 
 [[nodiscard]] std::filesystem::path keys_root(const std::filesystem::path& home) {
   return home / std::string{KeysDirectoryName};
@@ -42,18 +32,6 @@ inline constexpr std::string_view OldPrivateKeyFileName = "local_private_key.bin
 
 [[nodiscard]] std::filesystem::path skins_root(const std::filesystem::path& home) {
   return home / std::string{SkinsDirectoryName};
-}
-
-[[nodiscard]] std::filesystem::path old_identity_root(const std::filesystem::path& home) {
-  return home / std::string{OldIdentityDirectoryName};
-}
-
-[[nodiscard]] std::filesystem::path old_identity_json_path(const std::filesystem::path& home) {
-  return old_identity_root(home) / std::string{OldIdentityFileName};
-}
-
-[[nodiscard]] std::filesystem::path old_private_key_path(const std::filesystem::path& home) {
-  return old_identity_root(home) / std::string{OldPrivateKeyFileName};
 }
 
 [[nodiscard]] Expected<std::string, LocalIdentityError> read_text_file(
@@ -307,18 +285,35 @@ inline constexpr std::string_view OldPrivateKeyFileName = "local_private_key.bin
 
   try {
     const json root = json::parse(text.value());
-    if (!root.is_array()) {
+    if (!root.is_object()) {
       return Expected<LocalProfileStore, LocalIdentityError>::failure(
-          LocalIdentityError{"profiles.json must contain an array"});
+          LocalIdentityError{"profiles.json must contain an object"});
     }
+    const auto profiles_node = root.find("profiles");
+    if (profiles_node == root.end() || !profiles_node->is_array()) {
+      return Expected<LocalProfileStore, LocalIdentityError>::failure(
+          LocalIdentityError{"profiles.json profiles must contain an array"});
+    }
+
     LocalProfileStore store;
-    store.profiles.reserve(root.size());
-    for (const json& profile_node : root) {
+    const auto selected_profile = root.find("selected_profile");
+    if (selected_profile != root.end()) {
+      if (!selected_profile->is_number_unsigned()) {
+        return Expected<LocalProfileStore, LocalIdentityError>::failure(
+            LocalIdentityError{"profiles.json selected_profile must be an unsigned integer"});
+      }
+      store.selected_profile = selected_profile->get<usize>();
+    }
+    store.profiles.reserve(profiles_node->size());
+    for (const json& profile_node : *profiles_node) {
       auto profile = profile_from_json(home, profile_node);
       if (!profile) {
         return Expected<LocalProfileStore, LocalIdentityError>::failure(profile.error());
       }
       store.profiles.push_back(std::move(profile.value()));
+    }
+    if (store.selected_profile >= store.profiles.size()) {
+      store.selected_profile = 0U;
     }
     return Expected<LocalProfileStore, LocalIdentityError>::success(std::move(store));
   } catch (const json::exception& ex) {
@@ -333,86 +328,40 @@ inline constexpr std::string_view OldPrivateKeyFileName = "local_private_key.bin
   return identity;
 }
 
-[[nodiscard]] Expected<LocalProfileStore, LocalIdentityError> migrate_old_identity(
-    const std::filesystem::path& home) {
-  auto old_text = read_text_file(old_identity_json_path(home));
-  if (!old_text) {
-    return Expected<LocalProfileStore, LocalIdentityError>::failure(old_text.error());
-  }
-
-  try {
-    const json old = json::parse(old_text.value());
-    auto public_key = public_key_from_hex(old.at("public_key").get<std::string>());
-    auto private_key = read_private_key(
-        old_identity_root(home) / old.value("private_key_file", std::string{OldPrivateKeyFileName}));
-    if (!public_key) {
-      return Expected<LocalProfileStore, LocalIdentityError>::failure(public_key.error());
-    }
-    if (!private_key) {
-      return Expected<LocalProfileStore, LocalIdentityError>::failure(private_key.error());
-    }
-
-    LocalPlayerIdentity profile;
-    profile.arvane_home = home;
-    profile.key_pair.public_key = public_key.value();
-    profile.key_pair.private_key = private_key.value();
-    profile.profile_id = crypto::derive_profile_id_from_public_key(profile.key_pair.public_key);
-    profile.display_name = old.value("display_name", std::string{"local_player"});
-    profile.private_key_file = profile.profile_id.string() + ".pk";
-    auto saved_profile_id =
-        crypto::parse_player_profile_id(old.at("profile_id").get<std::string>());
-    if (!saved_profile_id) {
-      return Expected<LocalProfileStore, LocalIdentityError>::failure(
-          LocalIdentityError{saved_profile_id.error().message});
-    }
-    if (saved_profile_id.value() != profile.profile_id) {
-      return Expected<LocalProfileStore, LocalIdentityError>::failure(
-          LocalIdentityError{"old local identity profile id does not match public key"});
-    }
-
-    LocalProfileStore store;
-    store.profiles.push_back(std::move(profile));
-    auto save_result = save_local_profile_store(home, store);
-    if (!save_result) {
-      return Expected<LocalProfileStore, LocalIdentityError>::failure(save_result.error());
-    }
-    return Expected<LocalProfileStore, LocalIdentityError>::success(std::move(store));
-  } catch (const json::exception& ex) {
-    return Expected<LocalProfileStore, LocalIdentityError>::failure(
-        LocalIdentityError{"failed to parse old local identity JSON: " + std::string{ex.what()}});
-  }
-}
-
 } // namespace
 
+usize LocalProfileStore::active_profile_index() const noexcept {
+  return selected_profile < profiles.size() ? selected_profile : 0U;
+}
+
 const LocalPlayerIdentity* LocalProfileStore::active_profile() const noexcept {
-  return profiles.empty() ? nullptr : &profiles.front();
+  return profiles.empty() ? nullptr : &profiles[active_profile_index()];
 }
 
 std::filesystem::path local_profiles_json_path(const std::filesystem::path& arvane_home) {
-  return normalize_home_path(arvane_home) / std::string{ProfilesFileName};
+  return arvane_home / std::string{ProfilesFileName};
 }
 
 std::filesystem::path local_private_key_path(
     const std::filesystem::path& arvane_home,
     std::string_view private_key_file) {
-  return keys_root(normalize_home_path(arvane_home)) / std::string{private_key_file};
+  return keys_root(arvane_home) / std::string{private_key_file};
 }
 
 std::filesystem::path local_skin_path(
     const std::filesystem::path& arvane_home,
     const LocalProfileSkin& skin) {
-  return skins_root(normalize_home_path(arvane_home)) / skin.file;
+  return skins_root(arvane_home) / skin.file;
 }
 
 std::filesystem::path local_skins_directory_path(const std::filesystem::path& arvane_home) {
-  return skins_root(normalize_home_path(arvane_home));
+  return skins_root(arvane_home);
 }
 
 std::filesystem::path cached_skin_path(
     const std::filesystem::path& arvane_home,
     std::string_view skin_hash) {
-  return normalize_home_path(arvane_home) / std::string{CacheDirectoryName} /
+  return arvane_home / std::string{CacheDirectoryName} /
          std::string{SkinsDirectoryName} / (std::string{skin_hash} + ".png");
 }
 
@@ -428,7 +377,7 @@ LocalPlayerIdentity make_ephemeral_local_identity(std::string display_name) {
 Expected<void, LocalIdentityError> save_local_profile_store(
     const std::filesystem::path& arvane_home,
     const LocalProfileStore& store) {
-  const std::filesystem::path home = normalize_home_path(arvane_home);
+  const std::filesystem::path& home = arvane_home;
   std::error_code error;
   std::filesystem::create_directories(home, error);
   if (error) {
@@ -453,7 +402,7 @@ Expected<void, LocalIdentityError> save_local_profile_store(
         LocalIdentityError{"failed to create skin cache directory: " + error.message()});
   }
 
-  json root = json::array();
+  json profiles = json::array();
   for (const LocalPlayerIdentity& profile : store.profiles) {
     if (profile.private_key_file.empty() ||
         !safe_relative_file_name(profile.private_key_file)) {
@@ -466,8 +415,12 @@ Expected<void, LocalIdentityError> save_local_profile_store(
     if (!key_result) {
       return Expected<void, LocalIdentityError>::failure(key_result.error());
     }
-    root.push_back(profile_to_json(profile));
+    profiles.push_back(profile_to_json(profile));
   }
+  json root{
+      {"selected_profile", store.profiles.empty() ? 0U : store.active_profile_index()},
+      {"profiles", std::move(profiles)},
+  };
 
   std::ofstream output(local_profiles_json_path(home), std::ios::trunc);
   if (!output) {
@@ -515,7 +468,7 @@ Expected<LocalProfileSkin, LocalIdentityError> import_local_profile_skin_png(
   skin.file = skin.skin_hash + ".png";
 
   const std::filesystem::path destination =
-      skins_root(normalize_home_path(arvane_home)) / skin.file;
+      skins_root(arvane_home) / skin.file;
   std::error_code error;
   if (!std::filesystem::exists(destination, error)) {
     auto write_result = write_binary_file_atomically(destination, bytes.value());
@@ -529,7 +482,7 @@ Expected<LocalProfileSkin, LocalIdentityError> import_local_profile_skin_png(
 Expected<LocalProfileStore, LocalIdentityError> load_or_create_local_profile_store(
     const std::filesystem::path& arvane_home,
     std::string display_name) {
-  const std::filesystem::path home = normalize_home_path(arvane_home);
+  const std::filesystem::path& home = arvane_home;
   std::error_code error;
   if (std::filesystem::exists(local_profiles_json_path(home), error)) {
     auto store = read_profile_store(home);
@@ -538,21 +491,18 @@ Expected<LocalProfileStore, LocalIdentityError> load_or_create_local_profile_sto
     }
     store.value().profiles.push_back(make_persistent_identity(std::move(display_name)));
     store.value().profiles.front().arvane_home = home;
+    store.value().selected_profile = 0U;
     auto save_result = save_local_profile_store(home, store.value());
     if (!save_result) {
       return Expected<LocalProfileStore, LocalIdentityError>::failure(save_result.error());
     }
     return store;
   }
-  error.clear();
-  if (std::filesystem::exists(old_identity_json_path(home), error) &&
-      std::filesystem::exists(old_private_key_path(home), error)) {
-    return migrate_old_identity(home);
-  }
 
   LocalProfileStore store;
   store.profiles.push_back(make_persistent_identity(std::move(display_name)));
   store.profiles.front().arvane_home = home;
+  store.selected_profile = 0U;
   auto save_result = save_local_profile_store(home, store);
   if (!save_result) {
     return Expected<LocalProfileStore, LocalIdentityError>::failure(save_result.error());

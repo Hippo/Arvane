@@ -23,6 +23,8 @@ inline constexpr int GNSConnectionSendRateBytesPerSecond = 4 * 1024 * 1024;
   switch (reliability) {
     case protocol::ReliabilityClass::ReliableOrdered:
       return "reliable_ordered";
+    case protocol::ReliabilityClass::ReliableImmediate:
+      return "reliable_immediate";
     case protocol::ReliabilityClass::UnreliableLatestWins:
       return "unreliable_latest_wins";
     case protocol::ReliabilityClass::UnreliableEvent:
@@ -186,6 +188,38 @@ NetworkResult GameNetworkingSocketsTransport::send(TransportMessage message) {
     return NetworkResult::failure(NetworkError{"GameNetworkingSockets outbound send queue is full"});
   }
 
+  return NetworkResult::success();
+}
+
+NetworkResult GameNetworkingSocketsTransport::close_connection(
+    ConnectionID connection_id,
+    std::string_view reason) {
+  claim_or_assert_owner_thread();
+  if (sockets_ == nullptr) {
+    return NetworkResult::failure(NetworkError{"GameNetworkingSockets interface is unavailable"});
+  }
+
+  drain_outbound_send_commands();
+
+  const auto found = connections_.find(connection_id);
+  if (found == connections_.end()) {
+    states_[connection_id] = ConnectionState::Disconnected;
+    return NetworkResult::success();
+  }
+
+  const HSteamNetConnection handle = found->second;
+  const std::string reason_text = reason.empty() ? std::string{"Arvane close"}
+                                                 : std::string{reason};
+  (void)sockets_->FlushMessagesOnConnection(handle);
+  unregister_connection_owner(handle);
+  sockets_->CloseConnection(
+      handle,
+      k_ESteamNetConnectionEnd_App_Generic,
+      reason_text.c_str(),
+      true);
+  connection_ids_.erase(handle);
+  connections_.erase(found);
+  states_[connection_id] = ConnectionState::Disconnected;
   return NetworkResult::success();
 }
 
@@ -685,6 +719,8 @@ int gns_send_flags(protocol::ReliabilityClass reliability) noexcept {
   switch (reliability) {
     case protocol::ReliabilityClass::ReliableOrdered:
       return k_nSteamNetworkingSend_Reliable;
+    case protocol::ReliabilityClass::ReliableImmediate:
+      return k_nSteamNetworkingSend_ReliableNoNagle;
     case protocol::ReliabilityClass::UnreliableLatestWins:
       return k_nSteamNetworkingSend_UnreliableNoDelay;
     case protocol::ReliabilityClass::UnreliableEvent:

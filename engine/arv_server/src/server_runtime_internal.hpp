@@ -13,6 +13,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/server/command_services.hpp"
@@ -23,6 +24,7 @@
 #include "arv/world/world_lighting.hpp"
 
 #include <memory>
+#include <chrono>
 #include <optional>
 #include <span>
 #include <string>
@@ -274,6 +276,18 @@ struct ServerRuntimeImpl {
   void handle_skin_upload_end(
       net::ConnectionID connection_id,
       const protocol::ServerboundSkinUploadEnd& end);
+  void handle_keep_alive(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundKeepAlive& keep_alive);
+
+  void kick_client(net::ConnectionID connection_id, std::string_view reason);
+  void cleanup_connection(net::ConnectionID connection_id);
+  void tick_keep_alive();
+  void send_keep_alive(ServerSession& session, std::chrono::steady_clock::time_point now);
+  [[nodiscard]] bool profile_is_online_for_another_session(
+      const ServerSession& session) const;
+  void register_online_profile(const ServerSession& session);
+  void remove_online_profile_for_session(const ServerSession& session);
 
   void tick_players();
   void update_world_simulation_activity();
@@ -316,7 +330,7 @@ struct ServerRuntimeImpl {
       bool accepted,
       std::string_view reason_if_rejected = {});
   void send_auth_challenge(ServerSession& session);
-  void complete_authenticated_session(ServerSession& session);
+  [[nodiscard]] bool complete_authenticated_session(ServerSession& session);
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
   void send_movement_hz_if_non_default(const ServerSession& session);
   void send_skin_rules(const ServerSession& session, const player::PlayerState& player_state);
@@ -368,6 +382,7 @@ struct ServerRuntimeImpl {
   DroppedItemsConfig dropped_items_{};
   CombatConfig combat_{};
   io::MovementValidationConfig movement_{};
+  io::KeepAliveConfig keep_alive_{};
   io::SkinConfig skins_{};
   voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
   ServerChunkStreamer chunk_streamer_{};
@@ -391,6 +406,7 @@ struct ServerRuntimeImpl {
   HashMap<SessionID, EntityReplicationState> entity_replication_;
   HashMap<PlayerID, InventoryReplicationState> inventory_replication_;
   HashMap<SessionID, SkinTransferSessionState> skin_transfers_;
+  HashMap<std::string, SessionID> online_profile_sessions_;
   u32 active_skin_uploads_global_{};
   u64 skin_storage_bytes_{};
   ServerWorldJobRuntime world_jobs_;

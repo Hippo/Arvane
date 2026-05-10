@@ -6,6 +6,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
 
 #include "client_connection.hpp"
@@ -70,6 +71,21 @@ net::NetworkResult ClientProtocolSender::send_auth_response(
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Session,
       protocol::serialize_auth_response(response));
+}
+
+net::NetworkResult ClientProtocolSender::send_keep_alive(
+    const protocol::ServerboundKeepAlive& keep_alive) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundKeepAlive,
+      protocol::ReliabilityClass::UnreliableEvent,
+      protocol::NetworkLane::Session,
+      protocol::serialize_serverbound_keep_alive(keep_alive));
 }
 
 net::NetworkResult ClientProtocolSender::send_chunk_interest_update(

@@ -43,6 +43,15 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundAuthResult, "ClientboundAuthResult",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});
+  registry.register_message({MessageType::ClientboundKickPlayer, "ClientboundKickPlayer",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableImmediate,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::ClientboundKeepAlive, "ClientboundKeepAlive",
+                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableEvent,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::ServerboundKeepAlive, "ServerboundKeepAlive",
+                             MessageDirection::ClientToServer, ReliabilityClass::UnreliableEvent,
+                             NetworkLane::Session});
   registry.register_message({MessageType::ServerboundPlayerMove, "ServerboundPlayerMove",
                              MessageDirection::ClientToServer, ReliabilityClass::UnreliableLatestWins,
                              NetworkLane::Movement});
