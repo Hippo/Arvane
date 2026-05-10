@@ -87,31 +87,20 @@ net::NetworkResult ClientProtocolSender::send_chunk_interest_update(
       protocol::serialize_serverbound_chunk_interest_update(update));
 }
 
-net::NetworkResult ClientProtocolSender::send_input_batch(
-    TickIndex tick_index,
-    const player::PlayerCommand& command) {
-  return send_input_batch(tick_index, protocol::input_sample_from_command(command));
-}
-
-net::NetworkResult ClientProtocolSender::send_input_batch(
-    TickIndex tick_index,
-    const protocol::InputSample& input) {
+net::NetworkResult ClientProtocolSender::send_player_move(
+    const protocol::ServerboundPlayerMove& move) {
   net::ITransport* transport = connection_.transport();
   if (!transport) {
     return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
   }
 
-  protocol::ServerboundInputBatch batch;
-  batch.first_input_tick = tick_index;
-  batch.inputs.emplace_back(input);
-
   return send_protocol_message(
       *transport,
       connection_.connection_id(),
-      protocol::MessageType::ServerboundInputBatch,
+      protocol::MessageType::ServerboundPlayerMove,
       protocol::ReliabilityClass::UnreliableLatestWins,
       protocol::NetworkLane::Movement,
-      protocol::serialize_serverbound_input_batch(batch));
+      protocol::serialize_serverbound_player_move(move));
 }
 
 net::NetworkResult ClientProtocolSender::send_inventory_action(

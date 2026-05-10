@@ -8,13 +8,6 @@
 namespace arv::desktop {
 namespace {
 
-[[nodiscard]] Vec3f interpolate(Vec3f from, Vec3f to, f32 alpha) noexcept {
-  return {
-      from.x + (to.x - from.x) * alpha,
-      from.y + (to.y - from.y) * alpha,
-      from.z + (to.z - from.z) * alpha};
-}
-
 [[nodiscard]] Quatf camera_basis_rotation(
     Vec3f right,
     Vec3f up,
@@ -182,6 +175,7 @@ void populate_world_frame_draw_items(
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point app_start_time,
     f32 interpolation_alpha) {
+  (void)interpolation_alpha;
   const f32 entity_animation_time =
       std::chrono::duration<f32>(now - app_start_time).count();
   const world::WorldRuntime& sky_world =
@@ -252,7 +246,7 @@ void populate_world_frame_draw_items(
     Vec3f position =
         is_local_player
             ? session.client->player_position()
-            : interpolate(mirror.previous_position, mirror.position, interpolation_alpha);
+            : mirror.render_position;
     if (is_local_player) {
       const f32 sneak_progress = update_first_person_sneak_visual_progress(
           session,
@@ -272,7 +266,7 @@ void populate_world_frame_draw_items(
     item.rotation =
         is_local_player
             ? model_forward_yaw_rotation(session.client->camera().yaw_radians())
-            : mirror.rotation;
+            : mirror.render_rotation;
     item.scale = 1.0F;
     item.animation_name = mirror.animation_name;
     item.animation_time_seconds = mirror.animation_time_seconds;
@@ -296,9 +290,9 @@ void populate_world_frame_draw_items(
         frame,
         entity_render_assets,
         dropped.stack,
-        {dropped.position.x,
-         dropped.position.y + 0.42F + std::sin(phase) * 0.055F,
-         dropped.position.z},
+        {dropped.render_position.x,
+         dropped.render_position.y + 0.42F + std::sin(phase) * 0.055F,
+         dropped.render_position.z},
         yaw_rotation(entity_animation_time * 1.8F + static_cast<f32>(dropped_index)),
         0.42F);
   }

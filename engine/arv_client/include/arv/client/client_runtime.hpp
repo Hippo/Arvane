@@ -27,9 +27,16 @@ struct ReplicatedEntityMirror {
   Vec3f previous_position{};
   Vec3f position{};
   Vec3f velocity{};
+  Vec3f render_position{};
+  Vec3f interpolation_start_position{};
   Quatf previous_rotation{};
   Quatf rotation{};
+  Quatf render_rotation{};
+  Quatf interpolation_start_rotation{};
   u64 last_server_tick{};
+  u64 last_transform_change_server_tick{};
+  Seconds interpolation_elapsed_seconds{};
+  Seconds interpolation_duration_seconds{};
   std::optional<PlayerID> owning_player{};
   std::string animation_name{};
   Seconds animation_time_seconds{};
@@ -47,8 +54,13 @@ struct DroppedItemMirror {
   Vec3f previous_position{};
   Vec3f position{};
   Vec3f velocity{};
+  Vec3f render_position{};
+  Vec3f interpolation_start_position{};
   player::ItemStack stack{};
   u64 last_server_tick{};
+  u64 last_position_change_server_tick{};
+  Seconds interpolation_elapsed_seconds{};
+  Seconds interpolation_duration_seconds{};
 };
 
 struct ClientAttackFeedback {
@@ -76,7 +88,9 @@ public:
   void submit_input(InputFrame input);
   void set_chunk_view_distance(i32 view_distance) noexcept;
   void fixed_tick(TickIndex tick_index);
-  void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* prediction_query);
+  void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* collision_query);
+  void advance_entity_interpolation(Seconds delta_seconds) noexcept;
+  void set_movement_send_rate(f32 send_rate_hz) noexcept;
   [[nodiscard]] render::FramePacket build_frame_packet(
       f32 interpolation_alpha,
       u32 viewport_width = 0,
@@ -93,7 +107,6 @@ public:
   [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept;
   [[nodiscard]] TickIndex world_initial_tick() const noexcept;
   [[nodiscard]] TickRate server_tick_rate() const noexcept;
-  [[nodiscard]] PlayerPredictionDebugStats prediction_debug_stats() const noexcept;
   [[nodiscard]] bool inventory_open() const noexcept;
   [[nodiscard]] bool chat_open() const noexcept;
   [[nodiscard]] const std::string& chat_draft() const noexcept;

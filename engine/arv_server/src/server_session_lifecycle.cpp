@@ -4,6 +4,8 @@
 #include "arv/crypto/random.hpp"
 #include "arv/server/skin_runtime.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <string_view>
 #include <utility>
 
@@ -122,6 +124,16 @@ void ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
     seed_player_inventory(player_state);
   }
   refresh_player_permissions(player_state);
+  accepted_player_movement_[session.player_id] = {
+      player_state.position,
+      player_state.velocity,
+      player_state.yaw_radians,
+      player_state.pitch_radians,
+      protocol::PlayerMoveFlags::None,
+      0U,
+      tick_index_,
+      static_cast<double>(tick_index_) / static_cast<double>(std::max<TickRate>(base_tps_, 1U)),
+      true};
   session.connection_state = net::ConnectionState::WorldJoin;
 }
 
@@ -132,7 +144,9 @@ void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) 
     entity_replication_.erase(session->session_id);
     inventory_replication_.erase(session->player_id);
     pending_player_commands_.erase(session->player_id);
-    last_sent_player_corrections_.erase(session->player_id);
+    accepted_player_movement_.erase(session->player_id);
+    last_player_move_correction_seconds_.erase(session->player_id);
+    last_sent_block_break_progress_.erase(session->player_id);
     permission_caches_.erase(session->player_id);
     block_break_attempts_.erase(session->player_id);
     combat_states_.erase(session->session_id);
@@ -185,6 +199,9 @@ void ServerRuntimeImpl::send_world_join_result(
       protocol::NetworkLane::Session,
       protocol::serialize_clientbound_world_join_result(result));
   log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+  if (send_result) {
+    send_movement_hz_if_non_default(session);
+  }
   if (send_result && mode_ == ServerMode::Dedicated) {
     core::info(
         "dedicated",
@@ -199,6 +216,23 @@ void ServerRuntimeImpl::send_world_join_result(
         tick_index_,
         max_view_distance_);
   }
+}
+
+void ServerRuntimeImpl::send_movement_hz_if_non_default(const ServerSession& session) {
+  if (std::abs(movement_.send_rate_hz - protocol::DefaultClientMovementSendRateHz) <=
+      0.0001F) {
+    return;
+  }
+
+  const protocol::ClientboundSetMovementHz settings{movement_.send_rate_hz};
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundSetMovementHz,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_clientbound_set_movement_hz(settings));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
 }
 
 void ServerRuntimeImpl::seed_player_inventory(player::PlayerState& player_state) {

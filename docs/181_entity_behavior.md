@@ -599,7 +599,7 @@ This document does not define:
 * entity definition schema
 * animation graph format
 * pathfinding implementation details
-* client-side prediction rules
+* client-authored player movement rules
 * combat damage formulas
 
 Those should be covered by separate documents.

@@ -271,15 +271,37 @@ void ClientNetworkRouter::handle_message(
       apply_world_leave(runtime, leave.value());
       return;
     }
-    case protocol::MessageType::ClientboundPlayerCorrection: {
-      auto correction = protocol::deserialize_clientbound_player_correction(decoded.value().payload);
+    case protocol::MessageType::ClientboundPlayerMoveCorrection: {
+      auto correction = protocol::deserialize_clientbound_player_move_correction(decoded.value().payload);
       if (!correction) {
         return;
       }
-      runtime.player_controller.apply_authoritative_state(
-          correction.value(),
-          runtime.prediction_query,
-          runtime.tick_seconds);
+      runtime.player_controller.apply_move_correction(correction.value());
+      return;
+    }
+    case protocol::MessageType::ClientboundPlayerVelocity: {
+      auto velocity = protocol::deserialize_clientbound_player_velocity(decoded.value().payload);
+      if (!velocity) {
+        return;
+      }
+      runtime.player_controller.apply_player_velocity(velocity.value());
+      return;
+    }
+    case protocol::MessageType::ClientboundSetMovementHz: {
+      auto settings = protocol::deserialize_clientbound_set_movement_hz(decoded.value().payload);
+      if (!settings) {
+        return;
+      }
+      runtime.input.set_movement_send_rate(settings.value().movement_hz);
+      return;
+    }
+    case protocol::MessageType::ClientboundPlayerBlockBreakProgress: {
+      auto progress =
+          protocol::deserialize_clientbound_player_block_break_progress(decoded.value().payload);
+      if (!progress) {
+        return;
+      }
+      runtime.player_controller.apply_block_break_progress(progress.value());
       return;
     }
     case protocol::MessageType::ClientboundChunkSectionData: {
@@ -335,7 +357,8 @@ void ClientNetworkRouter::handle_message(
       }
       runtime.entities.apply_snapshot(
           snapshot.value(),
-          runtime.player_controller.camera().world_id());
+          runtime.player_controller.camera().world_id(),
+          runtime.player_controller.server_tick_rate());
       return;
     }
     case protocol::MessageType::ClientboundDroppedItemSnapshot: {
@@ -345,7 +368,8 @@ void ClientNetworkRouter::handle_message(
       }
       runtime.dropped_items.apply_snapshot(
           snapshot.value(),
-          runtime.player_controller.camera().world_id());
+          runtime.player_controller.camera().world_id(),
+          runtime.player_controller.server_tick_rate());
       return;
     }
     case protocol::MessageType::ClientboundInventoryUpdate: {

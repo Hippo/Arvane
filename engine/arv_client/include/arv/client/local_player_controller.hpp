@@ -1,7 +1,7 @@
 #pragma once
 
 #include "arv/client/camera_shell.hpp"
-#include "arv/client/player_prediction.hpp"
+#include "arv/movement/player_movement.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/protocol/player_input.hpp"
@@ -43,7 +43,7 @@ public:
   void set_player_tuning(player::PlayerTuning tuning) noexcept;
   void submit_input(InputFrame input) noexcept;
   [[nodiscard]] player::PlayerCommand consume_command(TickIndex tick_index) noexcept;
-  void predict_local_movement(
+  void update_local_movement(
       const player::PlayerCommand& command,
       const physics::ICollisionQuery* collision_query,
       Seconds tick_seconds);
@@ -55,10 +55,14 @@ public:
       TickIndex initial_server_tick = 0,
       TickRate tick_rate = DefaultBaseTps) noexcept;
   void leave_world() noexcept;
-  void apply_authoritative_state(
-      const protocol::ClientboundPlayerCorrection& correction,
-      const physics::ICollisionQuery* collision_query = nullptr,
-      Seconds tick_seconds = tick_duration_seconds(DefaultBaseTps));
+  void apply_move_correction(const protocol::ClientboundPlayerMoveCorrection& correction);
+  void apply_player_velocity(const protocol::ClientboundPlayerVelocity& velocity) noexcept;
+  void apply_block_break_progress(
+      const protocol::ClientboundPlayerBlockBreakProgress& progress) noexcept;
+  [[nodiscard]] protocol::ServerboundPlayerMove build_movement_packet(
+      u32 sequence,
+      TickIndex client_tick,
+      protocol::PlayerActionFlags action_flags) const noexcept;
 
   [[nodiscard]] const CameraShell& camera() const noexcept {
     return camera_;
@@ -108,32 +112,30 @@ public:
     return server_tick_rate_;
   }
 
-  [[nodiscard]] PlayerPredictionDebugStats prediction_debug_stats() const noexcept {
-    return prediction_.debug_stats();
-  }
-
 private:
-  void sync_body_from_prediction() noexcept;
   void update_eye_height() noexcept;
   void update_target_eye_height() noexcept;
+  void apply_knockback_control_suppression(
+      Vec3f incoming_velocity,
+      const physics::ICollisionQuery* collision_query,
+      Seconds tick_seconds) noexcept;
   void update_render_smoothing() noexcept;
   void update_camera_transform() noexcept;
-  [[nodiscard]] movement::PlayerMovementAuthority prediction_authority() const noexcept;
+  [[nodiscard]] movement::PlayerMovementAuthority movement_authority() const noexcept;
+  [[nodiscard]] protocol::PlayerMoveFlags movement_flags() const noexcept;
 
   CameraShell camera_{};
   std::optional<PlayerID> player_id_{};
   std::optional<EntityNetID> local_entity_id_{};
-  LocalPlayerPrediction prediction_{};
-  bool prediction_active_{};
+  movement::PlayerKinematicState movement_state_{};
   player::PlayerTuning tuning_{player::default_player_tuning()};
   u8 selected_hotbar_slot_{};
-  bool has_unconfirmed_hotbar_selection_{};
-  TickIndex last_authoritative_server_tick_{};
   TickIndex world_initial_tick_{};
   TickRate server_tick_rate_{DefaultBaseTps};
   std::string game_mode_id_{std::string{player::SurvivalGameModeID}};
   player::ResolvedPermissions resolved_permissions_{};
   protocol::BlockBreakProgress block_break_progress_{};
+  u32 knockback_control_suppression_ticks_{};
   bool move_forward_{};
   bool move_backward_{};
   bool move_left_{};

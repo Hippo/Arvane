@@ -1110,7 +1110,8 @@ Server-authoritative actions:
 * item drop
 * inventory mutation
 
-If client prediction disagrees with the server, the client must reconcile to server state.
+If local presentation feedback disagrees with the server, the client must apply
+the server state.
 
 ---
 

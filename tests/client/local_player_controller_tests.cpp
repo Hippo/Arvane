@@ -16,31 +16,47 @@ TEST(LocalPlayerControllerTests, HotbarSelectionAndScrollWrapProduceStableComman
   EXPECT_EQ(wrapped.selected_hotbar_slot, 4U);
 }
 
-TEST(LocalPlayerControllerTests, StaleCorrectionDoesNotOverrideUnconfirmedHotbarSelection) {
+TEST(LocalPlayerControllerTests, MoveCorrectionSnapsLocalTransformDirectly) {
   arv::client::LocalPlayerController controller;
 
-  controller.submit_input(arv::client::InputFrame{.hotbar_select = 5});
+  controller.enter_world(arv::WorldID{1}, arv::PlayerID{2}, arv::EntityNetID{3}, {1.0F, 2.0F, 3.0F});
+  arv::protocol::ClientboundPlayerMoveCorrection correction;
+  correction.position = {5.0F, 6.0F, 7.0F};
+  correction.velocity = {0.0F, 1.0F, 0.0F};
+  correction.yaw_radians = 0.25F;
+  correction.pitch_radians = -0.15F;
+  correction.flags = arv::protocol::PlayerMoveFlags::OnGround;
 
-  arv::protocol::ClientboundPlayerCorrection stale;
-  stale.server_tick = 10;
-  stale.selected_hotbar_slot = 0;
-  controller.apply_authoritative_state(stale);
-  EXPECT_EQ(controller.selected_hotbar_slot(), 5U);
+  controller.apply_move_correction(correction);
 
-  arv::protocol::ClientboundPlayerCorrection confirmed;
-  confirmed.server_tick = 11;
-  confirmed.selected_hotbar_slot = 5;
-  controller.apply_authoritative_state(confirmed);
-  EXPECT_EQ(controller.selected_hotbar_slot(), 5U);
-
-  arv::protocol::ClientboundPlayerCorrection late_stale;
-  late_stale.server_tick = 10;
-  late_stale.selected_hotbar_slot = 0;
-  controller.apply_authoritative_state(late_stale);
-  EXPECT_EQ(controller.selected_hotbar_slot(), 5U);
+  EXPECT_EQ(controller.player_position(), (arv::Vec3f{5.0F, 6.0F, 7.0F}));
+  EXPECT_FLOAT_EQ(controller.camera().yaw_radians(), 0.25F);
+  EXPECT_FLOAT_EQ(controller.camera().pitch_radians(), -0.15F);
 }
 
-TEST(LocalPlayerControllerTests, SendsRawSprintIntentForServerMovementRules) {
+TEST(LocalPlayerControllerTests, PlayerVelocityPacketAppliesKnockbackVelocity) {
+  arv::client::LocalPlayerController controller;
+  controller.enter_world(arv::WorldID{1}, arv::PlayerID{2}, arv::EntityNetID{3}, {0.0F, 0.0F, 0.0F});
+
+  arv::protocol::ClientboundPlayerVelocity velocity;
+  velocity.player_id = arv::PlayerID{2};
+  velocity.velocity = {8.0F, 1.5F, 0.0F};
+  velocity.knockback_control_suppression_ticks = 2;
+  controller.apply_player_velocity(velocity);
+
+  const arv::protocol::ServerboundPlayerMove move =
+      controller.build_movement_packet(
+          1,
+          10,
+          arv::protocol::PlayerActionFlags::None);
+
+  EXPECT_EQ(move.velocity, (arv::Vec3f{8.0F, 1.5F, 0.0F}));
+  EXPECT_FALSE(arv::protocol::has_move_flag(
+      move.flags,
+      arv::protocol::PlayerMoveFlags::OnGround));
+}
+
+TEST(LocalPlayerControllerTests, SendsRawSprintIntentForLocalMovementRules) {
   arv::client::LocalPlayerController controller;
 
   controller.submit_input(arv::client::InputFrame{

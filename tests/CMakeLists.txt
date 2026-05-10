@@ -10,7 +10,6 @@ add_executable(arv_tests
   client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp
   client/local_profile_tests.cpp
-  client/player_prediction_tests.cpp
   client/ui_tests.cpp
   command/command_tests.cpp
   crypto/crypto_tests.cpp
@@ -38,6 +37,7 @@ add_executable(arv_tests
   render/chunk_meshing_tests.cpp
   sched/scheduler_tests.cpp
   server/chunk_streamer_tests.cpp
+  server/player_movement_validation_tests.cpp
   server/permission_config_tests.cpp
   server/player_profile_tests.cpp
   server/player_interaction_tests.cpp

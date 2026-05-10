@@ -750,7 +750,7 @@ The interaction system decides which target wins based on the input and interact
 
 On multiplayer servers, the server owns authoritative entity state.
 
-Clients may own prediction state for local responsiveness, but server state is authoritative.
+Clients may own local presentation state for responsiveness, but server state is authoritative.
 
 Networked entities require:
 

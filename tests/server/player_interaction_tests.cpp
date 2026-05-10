@@ -433,6 +433,10 @@ TEST(PlayerInteractionTests, EntityAttackAppliesPlayerVelocityWithoutTeleporting
   EXPECT_TRUE(result.accepted);
   EXPECT_TRUE(result.damage_applied);
   EXPECT_TRUE(result.knockback_applied);
+  ASSERT_TRUE(result.knockback_player_id.has_value());
+  EXPECT_EQ(result.knockback_player_id.value(), (arv::PlayerID{2}));
+  EXPECT_EQ(result.knockback_velocity, (arv::Vec3f{5.0F, 1.5F, 0.0F}));
+  EXPECT_EQ(result.knockback_control_suppression_ticks, 2U);
   EXPECT_EQ(target_player.position, (arv::Vec3f{2.8F, 0.0F, 0.0F}));
   EXPECT_FLOAT_EQ(target_player.velocity.x, 5.0F);
   EXPECT_FLOAT_EQ(target_player.velocity.y, 1.5F);

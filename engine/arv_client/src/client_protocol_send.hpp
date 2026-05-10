@@ -28,12 +28,7 @@ public:
   net::NetworkResult send_chunk_interest_update(
       const protocol::ServerboundChunkInterestUpdate& update);
 
-  net::NetworkResult send_input_batch(
-      TickIndex tick_index,
-      const player::PlayerCommand& command);
-  net::NetworkResult send_input_batch(
-      TickIndex tick_index,
-      const protocol::InputSample& input);
+  net::NetworkResult send_player_move(const protocol::ServerboundPlayerMove& move);
 
   net::NetworkResult send_inventory_action(
       protocol::ServerboundInventoryActionRequest request);

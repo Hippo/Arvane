@@ -11,7 +11,11 @@ class ClientEntityMirrorStore {
 public:
   void apply_spawn(protocol::ClientboundEntitySpawn spawn, WorldID current_world);
   void apply_despawn(const protocol::ClientboundEntityDespawn& despawn, WorldID current_world);
-  void apply_snapshot(const protocol::ClientboundEntitySnapshot& snapshot, WorldID current_world);
+  void apply_snapshot(
+      const protocol::ClientboundEntitySnapshot& snapshot,
+      WorldID current_world,
+      TickRate server_tick_rate);
+  void advance_interpolation(Seconds delta_seconds) noexcept;
 
   [[nodiscard]] usize count() const noexcept;
   [[nodiscard]] const ReplicatedEntityMirror* find(EntityNetID entity_id) const noexcept;

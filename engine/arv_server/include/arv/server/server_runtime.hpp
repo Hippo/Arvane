@@ -2,8 +2,8 @@
 
 #include "arv/command/command.hpp"
 #include "arv/command/command_registry.hpp"
-#include "arv/core/types.hpp"
 #include "arv/core/time.hpp"
+#include "arv/core/types.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
@@ -101,6 +101,7 @@ struct ServerStartInfo {
   BlockBreakingConfig block_breaking{};
   DroppedItemsConfig dropped_items{};
   CombatConfig combat{};
+  io::MovementValidationConfig movement{};
   io::SkinConfig skins{};
 };
 

@@ -43,12 +43,21 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundAuthResult, "ClientboundAuthResult",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});
-  registry.register_message({MessageType::ServerboundInputBatch, "ServerboundInputBatch",
+  registry.register_message({MessageType::ServerboundPlayerMove, "ServerboundPlayerMove",
                              MessageDirection::ClientToServer, ReliabilityClass::UnreliableLatestWins,
                              NetworkLane::Movement});
-  registry.register_message({MessageType::ClientboundPlayerCorrection, "ClientboundPlayerCorrection",
-                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
+  registry.register_message({MessageType::ClientboundPlayerMoveCorrection, "ClientboundPlayerMoveCorrection",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Movement});
+  registry.register_message({MessageType::ClientboundPlayerVelocity, "ClientboundPlayerVelocity",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Movement});
+  registry.register_message({MessageType::ClientboundSetMovementHz, "ClientboundSetMovementHz",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::ClientboundPlayerBlockBreakProgress, "ClientboundPlayerBlockBreakProgress",
+                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
+                             NetworkLane::Gameplay});
   registry.register_message({MessageType::ClientboundSkinRules, "ClientboundSkinRules",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});

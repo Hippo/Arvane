@@ -10,50 +10,34 @@ void write_f32(MessageWriter& writer, f32 value) {
   writer.write<u32>(std::bit_cast<u32>(value));
 }
 
-void write_block_pos(MessageWriter& writer, BlockPos pos) {
-  writer.write<i32>(pos.value.x);
-  writer.write<i32>(pos.value.y);
-  writer.write<i32>(pos.value.z);
-}
-
-[[nodiscard]] u16 pack_core_permissions(
-    const player::ResolvedCorePermissions& permissions) noexcept {
-  u16 flags = 0;
-  auto set = [&flags](bool value, u16 bit) {
-    if (value) {
-      flags = static_cast<u16>(flags | bit);
-    }
-  };
-  set(permissions.can_take_damage, 1U << 0U);
-  set(permissions.can_modify_world, 1U << 1U);
-  set(permissions.can_interact, 1U << 2U);
-  set(permissions.can_open_inventory, 1U << 3U);
-  set(permissions.has_creative_inventory, 1U << 4U);
-  set(permissions.can_fly, 1U << 5U);
-  set(permissions.has_collision, 1U << 6U);
-  set(permissions.is_visible_to_others, 1U << 7U);
-  return flags;
-}
-
-[[nodiscard]] player::ResolvedCorePermissions unpack_core_permissions(u16 flags) noexcept {
-  return {
-      (flags & (1U << 0U)) != 0U,
-      (flags & (1U << 1U)) != 0U,
-      (flags & (1U << 2U)) != 0U,
-      (flags & (1U << 3U)) != 0U,
-      (flags & (1U << 4U)) != 0U,
-      (flags & (1U << 5U)) != 0U,
-      (flags & (1U << 6U)) != 0U,
-      (flags & (1U << 7U)) != 0U,
-  };
-}
-
 Expected<f32, ProtocolError> read_f32(MessageReader& reader) {
   auto value = reader.read<u32>();
   if (!value) {
     return Expected<f32, ProtocolError>::failure(value.error());
   }
   return Expected<f32, ProtocolError>::success(std::bit_cast<f32>(value.value()));
+}
+
+void write_vec3(MessageWriter& writer, Vec3f value) {
+  write_f32(writer, value.x);
+  write_f32(writer, value.y);
+  write_f32(writer, value.z);
+}
+
+void write_block_pos(MessageWriter& writer, BlockPos pos) {
+  writer.write<i32>(pos.value.x);
+  writer.write<i32>(pos.value.y);
+  writer.write<i32>(pos.value.z);
+}
+
+Expected<Vec3f, ProtocolError> read_vec3(MessageReader& reader) {
+  auto x = read_f32(reader);
+  auto y = read_f32(reader);
+  auto z = read_f32(reader);
+  if (!x || !y || !z) {
+    return Expected<Vec3f, ProtocolError>::failure(ProtocolError{"failed to decode vector"});
+  }
+  return Expected<Vec3f, ProtocolError>::success({x.value(), y.value(), z.value()});
 }
 
 Expected<BlockPos, ProtocolError> read_block_pos(MessageReader& reader) {
@@ -67,212 +51,210 @@ Expected<BlockPos, ProtocolError> read_block_pos(MessageReader& reader) {
   return Expected<BlockPos, ProtocolError>::success({{x.value(), y.value(), z.value()}});
 }
 
+Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
+  if (reader.remaining() != 0U) {
+    return Expected<void, ProtocolError>::failure(
+        ProtocolError{"trailing bytes in player message"});
+  }
+  return Expected<void, ProtocolError>::success();
+}
+
 } // namespace
 
-std::vector<u8> serialize_serverbound_input_batch(const ServerboundInputBatch& batch) {
+std::vector<u8> serialize_serverbound_player_move(const ServerboundPlayerMove& move) {
   MessageWriter writer;
-  writer.write<u64>(batch.first_input_tick);
-  writer.write<u16>(static_cast<u16>(batch.inputs.size()));
-  for (const InputSample& input : batch.inputs) {
-    writer.write<ClientInputButtons>(input.buttons);
-    writer.write<i16>(input.move_x);
-    writer.write<i16>(input.move_z);
-    writer.write<i16>(input.look_delta_x);
-    writer.write<i16>(input.look_delta_y);
-    writer.write<u8>(input.selected_hotbar_slot);
-  }
+  writer.write<u32>(move.sequence);
+  writer.write<u64>(move.client_tick);
+  write_vec3(writer, move.position);
+  write_vec3(writer, move.velocity);
+  write_f32(writer, move.yaw_radians);
+  write_f32(writer, move.pitch_radians);
+  writer.write<PlayerMoveFlags>(move.flags);
+  writer.write<PlayerActionFlags>(move.action_flags);
+  writer.write<u8>(move.selected_hotbar_slot);
   return std::move(writer).take_bytes();
 }
 
-Expected<ServerboundInputBatch, ProtocolError> deserialize_serverbound_input_batch(std::span<const u8> bytes) {
+Expected<ServerboundPlayerMove, ProtocolError> deserialize_serverbound_player_move(
+    std::span<const u8> bytes) {
   MessageReader reader(bytes);
-  auto first_tick = reader.read<u64>();
-  auto input_count = reader.read<u16>();
-  if (!first_tick || !input_count) {
-    return Expected<ServerboundInputBatch, ProtocolError>::failure(ProtocolError{"failed to decode input batch header"});
+  auto sequence = reader.read<u32>();
+  auto client_tick = reader.read<u64>();
+  auto position = read_vec3(reader);
+  auto velocity = read_vec3(reader);
+  auto yaw = read_f32(reader);
+  auto pitch = read_f32(reader);
+  auto flags = reader.read<PlayerMoveFlags>();
+  auto action_flags = reader.read<PlayerActionFlags>();
+  auto selected_hotbar_slot = reader.read<u8>();
+  if (!sequence || !client_tick || !position || !velocity || !yaw || !pitch ||
+      !flags || !action_flags || !selected_hotbar_slot) {
+    return Expected<ServerboundPlayerMove, ProtocolError>::failure(
+        ProtocolError{"failed to decode player move"});
+  }
+  auto trailing = require_no_trailing_bytes(reader);
+  if (!trailing) {
+    return Expected<ServerboundPlayerMove, ProtocolError>::failure(trailing.error());
   }
 
-  ServerboundInputBatch batch;
-  batch.first_input_tick = first_tick.value();
-  batch.inputs.reserve(input_count.value());
-  for (u16 index = 0; index < input_count.value(); ++index) {
-    auto buttons = reader.read<ClientInputButtons>();
-    auto move_x = reader.read<i16>();
-    auto move_z = reader.read<i16>();
-    auto look_delta_x = reader.read<i16>();
-    auto look_delta_y = reader.read<i16>();
-    auto slot = reader.read<u8>();
-    if (!buttons || !move_x || !move_z || !look_delta_x || !look_delta_y || !slot) {
-      return Expected<ServerboundInputBatch, ProtocolError>::failure(
-          ProtocolError{"failed to decode input sample"});
-    }
-    batch.inputs.emplace_back(
-        buttons.value(),
-        move_x.value(),
-        move_z.value(),
-        look_delta_x.value(),
-        look_delta_y.value(),
-        slot.value());
-  }
-
-  return Expected<ServerboundInputBatch, ProtocolError>::success(std::move(batch));
+  return Expected<ServerboundPlayerMove, ProtocolError>::success(
+      {sequence.value(),
+       client_tick.value(),
+       position.value(),
+       velocity.value(),
+       yaw.value(),
+       pitch.value(),
+       flags.value(),
+       action_flags.value(),
+       selected_hotbar_slot.value()});
 }
 
-std::vector<u8> serialize_clientbound_player_correction(const ClientboundPlayerCorrection& correction) {
+std::vector<u8> serialize_clientbound_player_move_correction(
+    const ClientboundPlayerMoveCorrection& correction) {
   MessageWriter writer;
-  writer.write<u64>(correction.server_tick);
-  writer.write<u64>(correction.player_id.value);
-  writer.write<u32>(correction.world_id.value);
-  write_f32(writer, correction.position.x);
-  write_f32(writer, correction.position.y);
-  write_f32(writer, correction.position.z);
-  write_f32(writer, correction.velocity.x);
-  write_f32(writer, correction.velocity.y);
-  write_f32(writer, correction.velocity.z);
+  writer.write<u32>(correction.rejected_sequence);
+  write_vec3(writer, correction.position);
+  write_vec3(writer, correction.velocity);
   write_f32(writer, correction.yaw_radians);
   write_f32(writer, correction.pitch_radians);
-  writer.write<player::MovementMode>(correction.movement_mode);
-  writer.write_string(correction.game_mode_id);
-  writer.write<u16>(pack_core_permissions(correction.resolved_core_permissions));
-  writer.write_bool(correction.grounded);
-  writer.write_bool(correction.sneaking);
-  writer.write_bool(correction.swimming);
-  write_f32(writer, correction.breath_seconds);
-  writer.write<u8>(correction.selected_hotbar_slot);
-  writer.write_bool(correction.block_break.active);
-  if (correction.block_break.active) {
-    write_block_pos(writer, correction.block_break.block);
-    writer.write<u32>(correction.block_break.variant.value);
-    write_f32(writer, correction.block_break.progress);
-    writer.write<u8>(correction.block_break.stage);
-  }
+  writer.write<PlayerMoveFlags>(correction.flags);
+  writer.write<PlayerMoveCorrectionReason>(correction.reason);
   return std::move(writer).take_bytes();
 }
 
-Expected<ClientboundPlayerCorrection, ProtocolError> deserialize_clientbound_player_correction(std::span<const u8> bytes) {
+Expected<ClientboundPlayerMoveCorrection, ProtocolError> deserialize_clientbound_player_move_correction(
+    std::span<const u8> bytes) {
+  MessageReader reader(bytes);
+  auto rejected_sequence = reader.read<u32>();
+  auto position = read_vec3(reader);
+  auto velocity = read_vec3(reader);
+  auto yaw = read_f32(reader);
+  auto pitch = read_f32(reader);
+  auto flags = reader.read<PlayerMoveFlags>();
+  auto reason = reader.read<PlayerMoveCorrectionReason>();
+  if (!rejected_sequence || !position || !velocity || !yaw || !pitch || !flags || !reason) {
+    return Expected<ClientboundPlayerMoveCorrection, ProtocolError>::failure(
+        ProtocolError{"failed to decode player move correction"});
+  }
+  auto trailing = require_no_trailing_bytes(reader);
+  if (!trailing) {
+    return Expected<ClientboundPlayerMoveCorrection, ProtocolError>::failure(trailing.error());
+  }
+
+  return Expected<ClientboundPlayerMoveCorrection, ProtocolError>::success(
+      {rejected_sequence.value(),
+       position.value(),
+       velocity.value(),
+       yaw.value(),
+       pitch.value(),
+       flags.value(),
+       reason.value()});
+}
+
+std::vector<u8> serialize_clientbound_player_velocity(
+    const ClientboundPlayerVelocity& velocity) {
+  MessageWriter writer;
+  writer.write<u64>(velocity.server_tick);
+  writer.write<u64>(velocity.player_id.value);
+  write_vec3(writer, velocity.velocity);
+  writer.write<u32>(velocity.knockback_control_suppression_ticks);
+  return std::move(writer).take_bytes();
+}
+
+Expected<ClientboundPlayerVelocity, ProtocolError> deserialize_clientbound_player_velocity(
+    std::span<const u8> bytes) {
   MessageReader reader(bytes);
   auto server_tick = reader.read<u64>();
   auto player_id = reader.read<u64>();
-  auto world_id = reader.read<u32>();
-  auto pos_x = read_f32(reader);
-  auto pos_y = read_f32(reader);
-  auto pos_z = read_f32(reader);
-  auto vel_x = read_f32(reader);
-  auto vel_y = read_f32(reader);
-  auto vel_z = read_f32(reader);
-  auto yaw = read_f32(reader);
-  auto pitch = read_f32(reader);
-  auto movement_mode = reader.read<player::MovementMode>();
-  auto game_mode_id = reader.read_string();
-  auto resolved_core_permissions = reader.read<u16>();
-  auto grounded = reader.read_bool();
-  auto sneaking = reader.read_bool();
-  auto swimming = reader.read_bool();
-  auto breath_seconds = read_f32(reader);
-  auto selected_hotbar_slot = reader.read<u8>();
-  auto block_break_active = reader.read_bool();
+  auto velocity = read_vec3(reader);
+  auto suppression_ticks = reader.read<u32>();
+  if (!server_tick || !player_id || !velocity || !suppression_ticks) {
+    return Expected<ClientboundPlayerVelocity, ProtocolError>::failure(
+        ProtocolError{"failed to decode player velocity"});
+  }
+  auto trailing = require_no_trailing_bytes(reader);
+  if (!trailing) {
+    return Expected<ClientboundPlayerVelocity, ProtocolError>::failure(trailing.error());
+  }
+  return Expected<ClientboundPlayerVelocity, ProtocolError>::success(
+      {server_tick.value(),
+       PlayerID{player_id.value()},
+       velocity.value(),
+       suppression_ticks.value()});
+}
 
-  if (!server_tick || !player_id || !world_id || !pos_x || !pos_y || !pos_z || !vel_x ||
-      !vel_y || !vel_z || !yaw || !pitch || !movement_mode || !game_mode_id ||
-      !resolved_core_permissions || !grounded || !sneaking || !swimming ||
-      !breath_seconds || !selected_hotbar_slot || !block_break_active) {
-    return Expected<ClientboundPlayerCorrection, ProtocolError>::failure(
-        ProtocolError{"failed to decode player correction"});
+std::vector<u8> serialize_clientbound_set_movement_hz(
+    const ClientboundSetMovementHz& settings) {
+  MessageWriter writer;
+  write_f32(writer, settings.movement_hz);
+  return std::move(writer).take_bytes();
+}
+
+Expected<ClientboundSetMovementHz, ProtocolError> deserialize_clientbound_set_movement_hz(
+    std::span<const u8> bytes) {
+  MessageReader reader(bytes);
+  auto movement_hz = read_f32(reader);
+  if (!movement_hz) {
+    return Expected<ClientboundSetMovementHz, ProtocolError>::failure(
+        ProtocolError{"failed to decode movement hz"});
+  }
+  auto trailing = require_no_trailing_bytes(reader);
+  if (!trailing) {
+    return Expected<ClientboundSetMovementHz, ProtocolError>::failure(trailing.error());
+  }
+  return Expected<ClientboundSetMovementHz, ProtocolError>::success({movement_hz.value()});
+}
+
+std::vector<u8> serialize_clientbound_player_block_break_progress(
+    const ClientboundPlayerBlockBreakProgress& progress) {
+  MessageWriter writer;
+  writer.write<u64>(progress.server_tick);
+  writer.write<u64>(progress.player_id.value);
+  writer.write_bool(progress.block_break.active);
+  if (progress.block_break.active) {
+    write_block_pos(writer, progress.block_break.block);
+    writer.write<u32>(progress.block_break.variant.value);
+    write_f32(writer, progress.block_break.progress);
+    writer.write<u8>(progress.block_break.stage);
+  }
+  return std::move(writer).take_bytes();
+}
+
+Expected<ClientboundPlayerBlockBreakProgress, ProtocolError>
+deserialize_clientbound_player_block_break_progress(std::span<const u8> bytes) {
+  MessageReader reader(bytes);
+  auto server_tick = reader.read<u64>();
+  auto player_id = reader.read<u64>();
+  auto active = reader.read_bool();
+  if (!server_tick || !player_id || !active) {
+    return Expected<ClientboundPlayerBlockBreakProgress, ProtocolError>::failure(
+        ProtocolError{"failed to decode player block break progress"});
   }
 
-  ClientboundPlayerCorrection correction;
-  correction.server_tick = server_tick.value();
-  correction.player_id = PlayerID{player_id.value()};
-  correction.world_id = WorldID{world_id.value()};
-  correction.position = {pos_x.value(), pos_y.value(), pos_z.value()};
-  correction.velocity = {vel_x.value(), vel_y.value(), vel_z.value()};
-  correction.yaw_radians = yaw.value();
-  correction.pitch_radians = pitch.value();
-  correction.movement_mode = movement_mode.value();
-  correction.game_mode_id = std::move(game_mode_id.value());
-  correction.resolved_core_permissions = unpack_core_permissions(resolved_core_permissions.value());
-  correction.grounded = grounded.value();
-  correction.sneaking = sneaking.value();
-  correction.swimming = swimming.value();
-  correction.breath_seconds = breath_seconds.value();
-  correction.selected_hotbar_slot = selected_hotbar_slot.value();
-  correction.block_break.active = block_break_active.value();
-  if (correction.block_break.active) {
-    auto break_block = read_block_pos(reader);
-    auto break_variant = reader.read<u32>();
-    auto break_progress = read_f32(reader);
-    auto break_stage = reader.read<u8>();
-    if (!break_block || !break_variant || !break_progress || !break_stage) {
-      return Expected<ClientboundPlayerCorrection, ProtocolError>::failure(
-          ProtocolError{"failed to decode block break progress"});
+  ClientboundPlayerBlockBreakProgress progress;
+  progress.server_tick = server_tick.value();
+  progress.player_id = PlayerID{player_id.value()};
+  progress.block_break.active = active.value();
+  if (progress.block_break.active) {
+    auto block = read_block_pos(reader);
+    auto variant = reader.read<u32>();
+    auto amount = read_f32(reader);
+    auto stage = reader.read<u8>();
+    if (!block || !variant || !amount || !stage) {
+      return Expected<ClientboundPlayerBlockBreakProgress, ProtocolError>::failure(
+          ProtocolError{"failed to decode active block break progress"});
     }
-    correction.block_break.block = break_block.value();
-    correction.block_break.variant = voxel::BlockVariantID{break_variant.value()};
-    correction.block_break.progress = break_progress.value();
-    correction.block_break.stage = break_stage.value();
-  }
-  return Expected<ClientboundPlayerCorrection, ProtocolError>::success(std::move(correction));
-}
-
-player::PlayerCommand input_sample_to_command(
-    const InputSample& sample,
-    TickIndex input_tick) noexcept {
-  player::PlayerCommand command;
-  command.client_tick = input_tick;
-  command.move_x = sample.move_x;
-  command.move_z = sample.move_z;
-  command.look_delta_x = sample.look_delta_x;
-  command.look_delta_y = sample.look_delta_y;
-  command.jump_pressed = has_button(sample.buttons, ClientInputButtons::JumpPressed);
-  command.jump_held = has_button(sample.buttons, ClientInputButtons::JumpHeld);
-  command.sneak_held = has_button(sample.buttons, ClientInputButtons::SneakHeld);
-  command.sprint_held = has_button(sample.buttons, ClientInputButtons::SprintHeld);
-  command.primary_pressed = has_button(sample.buttons, ClientInputButtons::PrimaryPressed);
-  command.primary_held = has_button(sample.buttons, ClientInputButtons::PrimaryHeld);
-  command.secondary_pressed = has_button(sample.buttons, ClientInputButtons::SecondaryPressed);
-  command.secondary_held = has_button(sample.buttons, ClientInputButtons::SecondaryHeld);
-  command.toggle_fly_pressed = has_button(sample.buttons, ClientInputButtons::ToggleFlyPressed);
-  command.selected_hotbar_slot = sample.selected_hotbar_slot;
-  return command;
-}
-
-InputSample input_sample_from_command(const player::PlayerCommand& command) noexcept {
-  ClientInputButtons buttons = ClientInputButtons::None;
-  if (command.jump_pressed) {
-    buttons = buttons | ClientInputButtons::JumpPressed;
-  }
-  if (command.jump_held) {
-    buttons = buttons | ClientInputButtons::JumpHeld;
-  }
-  if (command.sneak_held) {
-    buttons = buttons | ClientInputButtons::SneakHeld;
-  }
-  if (command.sprint_held) {
-    buttons = buttons | ClientInputButtons::SprintHeld;
-  }
-  if (command.primary_pressed) {
-    buttons = buttons | ClientInputButtons::PrimaryPressed;
-  }
-  if (command.primary_held) {
-    buttons = buttons | ClientInputButtons::PrimaryHeld;
-  }
-  if (command.secondary_pressed) {
-    buttons = buttons | ClientInputButtons::SecondaryPressed;
-  }
-  if (command.secondary_held) {
-    buttons = buttons | ClientInputButtons::SecondaryHeld;
-  }
-  if (command.toggle_fly_pressed) {
-    buttons = buttons | ClientInputButtons::ToggleFlyPressed;
+    progress.block_break.block = block.value();
+    progress.block_break.variant = voxel::BlockVariantID{variant.value()};
+    progress.block_break.progress = amount.value();
+    progress.block_break.stage = stage.value();
   }
 
-  return {
-      buttons,
-      command.move_x,
-      command.move_z,
-      command.look_delta_x,
-      command.look_delta_y,
-      command.selected_hotbar_slot};
+  auto trailing = require_no_trailing_bytes(reader);
+  if (!trailing) {
+    return Expected<ClientboundPlayerBlockBreakProgress, ProtocolError>::failure(trailing.error());
+  }
+  return Expected<ClientboundPlayerBlockBreakProgress, ProtocolError>::success(progress);
 }
 
 } // namespace arv::protocol

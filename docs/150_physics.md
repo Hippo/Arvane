@@ -10,7 +10,7 @@ Without this document, implementations tend to drift into inconsistent behavior 
 - unstable corner and slope behavior
 - inconsistent step-up handling
 - incorrect ledge behavior while sneaking
-- physics code that cannot be shared between client prediction and server authority
+- physics code that cannot be shared between local movement and server guardrails
 
 This file defines the baseline rules for:
 
@@ -30,7 +30,7 @@ The physics system must prioritize:
 - predictable movement
 - stable terrain interaction
 - clean integration with voxel worlds
-- behavior suitable for server-authoritative simulation
+- behavior suitable for local player movement and server-side validation
 - logic that feels like a game character controller, not a noclip camera
 
 The default movement model is intentionally simple and robust.
@@ -74,10 +74,10 @@ Rendering must not drive simulation.
 
 Rendering may interpolate between previously simulated states, but physics state advances only on fixed simulation ticks.
 
-Client-side prediction follows the same fixed tick as server movement. It must
-not integrate movement from render-frame delta time. Reconciliation may smooth
-the rendered transform, but the collision body and predicted simulation state
-are updated on fixed ticks only.
+Local player movement follows the same fixed tick as shared movement rules. It
+must not integrate movement from render-frame delta time. Movement corrections
+may smooth the rendered transform, but the collision body and local movement
+state are updated on fixed ticks only.
 
 ### Why 60 Hz
 
@@ -319,13 +319,13 @@ This prevents:
 - stepping into missing terrain during streaming
 - disagreement between server safety and world availability
 
-Client-side prediction may use temporary approximations, but authoritative world simulation must use safe rules.
+Local client movement may use temporary approximations, but authoritative world simulation and server guardrails must use safe rules.
 
-For local player prediction, the preferred approximation is conservative: if
-the client collision query cannot prove terrain is loaded, treat the missing
-region as solid or block prediction into it. The server remains authoritative,
-but the client should avoid visually predicting through unknown chunks because
-that creates avoidable rubberbanding when the server correction arrives.
+For local player movement, the preferred approximation is conservative: if the
+client collision query cannot prove terrain is loaded, treat the missing region
+as solid or block movement into it. The server remains authoritative over
+accepted movement and should avoid accepting movement into unloaded chunks when
+configured.
 
 ### Off-Thread Safety
 
@@ -1076,13 +1076,13 @@ The server or owning world simulation determines the true result of:
 - jumping
 - terrain interaction
 
-### Client Prediction
+### Local Client Movement
 
-Clients may run the same movement rules for prediction.
+Clients run the same movement rules for the controlled local player.
 
 This document is intentionally explicit so the same logic can be shared or mirrored.
 
-Prediction correctness depends on matching:
+Local movement consistency depends on matching:
 
 - tick rate
 - axis order
@@ -1259,7 +1259,7 @@ For example:
 
 This rule exists to ensure:
 
-- consistent behavior across server and client prediction
+- consistent behavior across client movement and server guardrails
 - easier balancing and tuning
 - easier testing
 - easier modding and gameplay customization

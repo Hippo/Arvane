@@ -281,10 +281,10 @@ void collect_collision_boxes(
     Vec3f delta,
     f32 probe_depth) {
   if ((delta.x == 0.0F && delta.z == 0.0F) || has_support_below(
-                                                query,
-                                                {{bounds.min.x + delta.x, bounds.min.y, bounds.min.z + delta.z},
-                                                 {bounds.max.x + delta.x, bounds.max.y, bounds.max.z + delta.z}},
-                                                probe_depth)) {
+                                                  query,
+                                                  {{bounds.min.x + delta.x, bounds.min.y, bounds.min.z + delta.z},
+                                                   {bounds.max.x + delta.x, bounds.max.y, bounds.max.z + delta.z}},
+                                                  probe_depth)) {
     return delta;
   }
 
@@ -546,6 +546,13 @@ MovementResolution resolve_movement(
   result.resolved_bounds = resolved;
   result.grounded = result.hit_down || has_support_below(query, resolved, collision_epsilon * 2.0F);
   return result;
+}
+
+bool overlaps_solid_blocks(
+    const ICollisionQuery& query,
+    const Aabb3f& bounds,
+    f32 collision_epsilon) {
+  return !is_space_clear(query, bounds, collision_epsilon);
 }
 
 bool has_support_below(

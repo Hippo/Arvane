@@ -26,7 +26,7 @@ The input and player model should prioritize:
 - predictable and responsive control
 - clear separation between raw device input and gameplay actions
 - deterministic simulation-facing movement inputs per tick
-- support for both local prediction and server authority
+- support for local locomotion and server gameplay authority
 - extensibility for future rebinding and additional devices
 - behavior that feels like a voxel game rather than a free-fly scene viewer
 
@@ -179,37 +179,41 @@ The simulation consumes the command snapshot once per tick.
 
 For networking:
 
-- local client may predict movement immediately
-- authoritative validation belongs to server/game simulation
+- local client moves immediately and sends `ServerboundPlayerMove`
+- movement guardrail validation belongs to the server
 - client input should be representable as compact per-tick intent, not raw hardware state
 
-### Local Prediction Ownership
+### Local Movement Ownership
 
-The local controller owns predicted movement state for the controlled player
-only. That state includes position, velocity, yaw/pitch look state, movement
-mode, pose flags, the last locally predicted input tick, the last confirmed
-server tick, and a bounded pending-input history.
+The local controller owns movement state for the controlled player only. That
+state includes position, velocity, yaw/pitch look state, movement mode, pose
+flags, selected hotbar slot, and the next outgoing movement sequence.
 
-The server owns authoritative movement. Server corrections override client
-prediction. The client must not use predicted movement to authorize collision,
-inventory, block edits, or interaction results.
+The client sends the current transform and movement flags at the configured
+network cadence. Important non-locomotion changes, such as hotbar selection or
+interaction button flags, may force an immediate movement packet so the server
+can validate gameplay requests promptly.
 
-Every locally generated `InputSample` sent to the server is also stored with its
-input tick in the pending-input history. The client immediately simulates that
-same sample through the shared player movement path. This keeps local movement
-responsive while preserving the server-authoritative model.
+The server stores the latest accepted movement state and validates client-authored
+movement against guardrails. The client must not use its local movement state to
+authorize inventory, block edits, combat, or interaction results.
 
-When authoritative movement arrives for the local player:
+When `ClientboundPlayerMoveCorrection` arrives for the local player:
 
-- corrections with `server_tick <= last_confirmed_server_tick` are stale and ignored
-- pending inputs with `input_tick <= server_tick` are acknowledged and removed
-- predicted simulation state is rewound to the authoritative state
-- remaining pending inputs are replayed in tick order
-- missing history falls back to the authoritative state and continues from the available newer inputs
+- set position, velocity, yaw, pitch, and movement flags from the correction
+- clear any visual smoothing offset that would hide the corrected state
+- keep local look/input collection active for the next tick
+- do not rewind or replay older movement commands
 
-Small visual errors may be ignored or smoothed. Large errors snap. The rendered
-camera/body presentation may smooth, but the predicted simulation/collision
-state must become correct immediately after reconciliation.
+When `ClientboundPlayerVelocity` arrives for the local player:
+
+- set local velocity from the packet
+- clear the on-ground flag if the incoming velocity has upward motion
+- apply the packet's knockback control-suppression window
+- blend horizontal input with the incoming knockback velocity until that window expires
+
+Small visual smoothing after a correction is allowed, but gameplay and collision
+state must use the corrected transform immediately.
 
 ---
 
@@ -743,12 +747,13 @@ This state should be small, explicit, and easy to serialize or inspect in debug 
 
 ## Networking Considerations
 
-The input/player model must be compatible with server-authoritative simulation.
+The input/player model must be compatible with client-authored movement and
+server-authoritative gameplay.
 
 Implications:
 
-- the client sends intent, not final truth
-- movement and interaction requests may be predicted locally
+- the client sends local movement state, not block/world mutations
+- interaction requests may have local presentation feedback
 - server validates reach, collision legality, and interaction legality
 - the controller must not rely on hidden client-only state for core gameplay correctness
 
@@ -813,9 +818,9 @@ Implementations must preserve the following invariants:
 
 The camera used for normal gameplay is owned by the local player controller on the client.
 
-The server owns authoritative player simulation state, but the client owns camera presentation.
+The server owns accepted player state for shared gameplay, but the client owns camera presentation.
 
-This distinction is important because the camera must feel responsive locally while still deriving from authoritative or reconciled player state.
+This distinction is important because the camera must feel responsive locally while still deriving from local or corrected player state.
 
 ## Camera Ownership
 
@@ -848,7 +853,7 @@ The player entity is authoritative. The camera is a local presentation view deri
 The gameplay camera may use the following inputs:
 
 ```text
-authoritative or predicted player transform
+local or corrected player transform
 local mouse/gamepad look input
 client-side interpolation state
 camera mode
@@ -887,7 +892,7 @@ CameraSnapshot
 The exact structure may evolve, but the boundary should remain stable:
 
 ```text
-player controller / prediction / interpolation
+player controller / local movement / interpolation
         ↓
 camera snapshot
         ↓
@@ -956,7 +961,7 @@ The server should validate:
 * interaction permissions
 * held item rules
 
-The client may predict the result of interactions, but the server remains authoritative.
+The client may preview the result of interactions, but the server remains authoritative.
 
 ## Camera Modes
 
@@ -987,11 +992,11 @@ render:
   show_local_player_body: true
 ```
 
-## Prediction and Reconciliation
+## Movement Correction Presentation
 
-The camera should follow predicted or interpolated local player state to avoid visible latency.
+The camera should follow local or corrected player state to avoid visible latency.
 
-When server reconciliation adjusts the player entity, camera correction should avoid harsh snapping where possible.
+When `ClientboundPlayerMoveCorrection` adjusts the player entity, camera correction should avoid harsh snapping where possible.
 
 Acceptable techniques include:
 
@@ -1000,7 +1005,7 @@ Acceptable techniques include:
 * separating visual camera smoothing from collision body correction
 * applying corrections to the player body while preserving local look input
 
-Camera smoothing must not hide serious simulation errors during debugging. Debug builds should provide a way to inspect raw authoritative and predicted positions.
+Camera smoothing must not hide serious movement errors during debugging. Debug builds should provide a way to inspect local and accepted server positions.
 
 ## World Changes
 

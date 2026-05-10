@@ -17,6 +17,7 @@
 #include "arv/protocol/world_join.hpp"
 #include "arv/server/command_services.hpp"
 #include "arv/server/permission_config.hpp"
+#include "arv/server/player_movement_validation.hpp"
 #include "arv/server/player_profile.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
@@ -245,7 +246,7 @@ struct ServerRuntimeImpl {
   void handle_auth_response(
       net::ConnectionID connection_id,
       const protocol::ServerboundAuthResponse& response);
-  void handle_input_batch(net::ConnectionID connection_id, const protocol::ServerboundInputBatch& batch);
+  void handle_player_move(net::ConnectionID connection_id, const protocol::ServerboundPlayerMove& move);
   void handle_chunk_interest_update(
       net::ConnectionID connection_id,
       const protocol::ServerboundChunkInterestUpdate& interest);
@@ -277,7 +278,7 @@ struct ServerRuntimeImpl {
   void tick_players();
   void update_world_simulation_activity();
   void refresh_player_permissions(player::PlayerState& player_state);
-  void apply_player_command(player::PlayerState& player_state, const player::PlayerCommand& command);
+  void apply_player_action_command(player::PlayerState& player_state, const player::PlayerCommand& command);
 
   void apply_player_interaction_command(
       player::PlayerState& player_state,
@@ -302,7 +303,14 @@ struct ServerRuntimeImpl {
 
   void tick_chunk_streaming();
 
-  void send_player_corrections();
+  void send_player_move_correction(
+      const ServerSession& session,
+      const player::PlayerState& player_state,
+      u32 rejected_sequence,
+      protocol::PlayerMoveCorrectionReason reason);
+  void send_player_velocity(
+      const ServerSession& session,
+      const player::PlayerState& player_state);
   void send_auth_result(
       const ServerSession& session,
       bool accepted,
@@ -310,12 +318,14 @@ struct ServerRuntimeImpl {
   void send_auth_challenge(ServerSession& session);
   void complete_authenticated_session(ServerSession& session);
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
+  void send_movement_hz_if_non_default(const ServerSession& session);
   void send_skin_rules(const ServerSession& session, const player::PlayerState& player_state);
   void send_player_profile_info_to(
       const ServerSession& receiver,
       const ServerSession& subject);
   void broadcast_player_profile_info(const ServerSession& subject);
   void send_block_updates();
+  void send_player_block_break_progress();
   void send_entity_replication();
   void send_dropped_item_replication();
   void send_inventory_updates();
@@ -357,6 +367,7 @@ struct ServerRuntimeImpl {
   BlockBreakingConfig block_breaking_{};
   DroppedItemsConfig dropped_items_{};
   CombatConfig combat_{};
+  io::MovementValidationConfig movement_{};
   io::SkinConfig skins_{};
   voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
   ServerChunkStreamer chunk_streamer_{};
@@ -369,7 +380,9 @@ struct ServerRuntimeImpl {
   HashMap<PlayerID, PlayerPermissionCache> permission_caches_;
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   std::vector<PendingEntityAttack> pending_entity_attacks_;
-  HashMap<PlayerID, protocol::ClientboundPlayerCorrection> last_sent_player_corrections_;
+  HashMap<PlayerID, AcceptedPlayerMovementState> accepted_player_movement_;
+  HashMap<PlayerID, double> last_player_move_correction_seconds_;
+  HashMap<PlayerID, protocol::BlockBreakProgress> last_sent_block_break_progress_;
   HashMap<PlayerID, BlockBreakAttempt> block_break_attempts_;
   HashMap<SessionID, PlayerCombatState> combat_states_;
   HashSet<SessionID> logged_chunk_interest_sessions_;

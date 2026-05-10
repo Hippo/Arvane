@@ -143,6 +143,10 @@ struct BlockRaycastHit {
     const Aabb3f& bounds,
     Vec3f delta,
     f32 collision_epsilon = CollisionEpsilon);
+[[nodiscard]] bool overlaps_solid_blocks(
+    const ICollisionQuery& query,
+    const Aabb3f& bounds,
+    f32 collision_epsilon = CollisionEpsilon);
 [[nodiscard]] bool has_support_below(
     const ICollisionQuery& query,
     const Aabb3f& bounds,

@@ -51,10 +51,10 @@ The base tick rate defines:
 > IMPORTANT: Base TPS is the **scheduler resolution**, not the update frequency of all systems.
 > It is not a tuning knob for individual gameplay speeds such as water or lava flow.
 
-Client prediction uses this same fixed tick cadence. After joining a world, the
-client seeds its local input tick from the server-provided initial tick so
-pending input samples and authoritative server corrections occupy the same tick
-timeline. Prediction must not advance from render-frame delta time.
+Local player movement uses this same fixed tick cadence. After joining a world,
+the client seeds its local movement tick from the server-provided initial tick
+so outgoing `ServerboundPlayerMove` packets can be correlated with server
+diagnostics. Local movement must not advance from render-frame delta time.
 
 ---
 

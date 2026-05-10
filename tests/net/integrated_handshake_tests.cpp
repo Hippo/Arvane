@@ -6,6 +6,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/message_type.hpp"
+#include "arv/protocol/player_input.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/server/world_registry.hpp"
@@ -66,11 +67,33 @@ arv::u32 player_correction_count(std::span<const arv::net::NetworkEvent> events)
     }
     const auto decoded = arv::protocol::deserialize_envelope(event.payload);
     if (decoded &&
-        decoded.value().envelope.message_type == arv::protocol::MessageType::ClientboundPlayerCorrection) {
+        decoded.value().envelope.message_type == arv::protocol::MessageType::ClientboundPlayerMoveCorrection) {
       ++count;
     }
   }
   return count;
+}
+
+std::vector<arv::protocol::ClientboundSetMovementHz> movement_hz_packets(
+    std::span<const arv::net::NetworkEvent> events) {
+  std::vector<arv::protocol::ClientboundSetMovementHz> packets;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ClientboundSetMovementHz) {
+      continue;
+    }
+    const auto settings =
+        arv::protocol::deserialize_clientbound_set_movement_hz(decoded.value().payload);
+    if (settings) {
+      packets.push_back(settings.value());
+    }
+  }
+  return packets;
 }
 
 arv::server::ServerChunkGenerationSettings make_generation_settings(
@@ -157,6 +180,36 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
   EXPECT_NE(server.worlds().find(arv::server::DefaultWorldID), nullptr);
   EXPECT_TRUE(client.has_authoritative_inventory());
   EXPECT_GT(client.replicated_entity_count(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, ServerSendsMovementHzOverrideWhenConfigured) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
+  arv::server::ServerRuntime server(std::move(transports.server));
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.movement.send_rate_hz = 30.0F;
+  ASSERT_TRUE(server.start(start_info));
+
+  const arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity();
+  const auto connect_result = client_transport->connect({"in-process", 0});
+  ASSERT_TRUE(connect_result);
+  send_raw_client_hello(*client_transport, connect_result.value(), identity);
+  server.tick();
+
+  const std::vector<arv::protocol::ClientboundSetMovementHz> packets =
+      movement_hz_packets(client_transport->poll_events());
+  ASSERT_EQ(packets.size(), 1U);
+  EXPECT_FLOAT_EQ(packets.front().movement_hz, 30.0F);
 }
 
 TEST(IntegratedHandshakeTests, SavedPlayerStateIsAppliedBeforeWorldJoinResult) {
@@ -397,7 +450,7 @@ TEST(IntegratedHandshakeTests, DisconnectCleansSessionAndWorldLocalPlayerEntity)
   EXPECT_EQ(server.voxel_world().entity_count(), 0U);
 }
 
-TEST(IntegratedHandshakeTests, ClientDoesNotOverwriteLoadedHotbarSlotBeforeCorrection) {
+TEST(IntegratedHandshakeTests, ClientMovementPacketUpdatesServerHotbarSlot) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
       arv::testsupport::make_test_item_registry(block_registry);
@@ -416,17 +469,14 @@ TEST(IntegratedHandshakeTests, ClientDoesNotOverwriteLoadedHotbarSlotBeforeCorre
   client.fixed_tick(server.tick_index());
   ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
 
-  connected_player(server).selected_hotbar_slot = 4;
-
-  server.tick();
+  client.submit_input(arv::client::InputFrame{.hotbar_select = 4});
   client.fixed_tick(server.tick_index());
-  EXPECT_EQ(client.selected_hotbar_slot(), 4U);
 
   server.tick();
   EXPECT_EQ(connected_player(server).selected_hotbar_slot, 4U);
 }
 
-TEST(IntegratedHandshakeTests, ServerSkipsUnchangedPlayerCorrections) {
+TEST(IntegratedHandshakeTests, RejectedPlayerMoveSendsReliableCorrection) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
       arv::testsupport::make_test_item_registry(block_registry);
@@ -445,19 +495,32 @@ TEST(IntegratedHandshakeTests, ServerSkipsUnchangedPlayerCorrections) {
       *client_transport,
       connect_result.value(),
       arv::client::make_ephemeral_local_identity());
-
   server.tick();
   (void)client_transport->poll_events();
-  arv::player::PlayerState& player = connected_player(server);
-  ASSERT_TRUE(server.set_player_game_mode(player.player_id, arv::player::NoClipGameModeID));
+
+  arv::protocol::ServerboundPlayerMove move;
+  move.sequence = 1;
+  move.client_tick = 1;
+  move.position = {1000.0F, 20.0F, 1000.0F};
+  move.flags = arv::protocol::PlayerMoveFlags::OnGround;
+  const std::vector<arv::u8> packet = arv::protocol::serialize_envelope(
+      {arv::protocol::CurrentProtocolVersion,
+       arv::protocol::MessageType::ServerboundPlayerMove,
+       0,
+       0,
+       0,
+       0},
+      arv::protocol::serialize_serverbound_player_move(move));
+  ASSERT_TRUE(client_transport->send(
+      {connect_result.value(),
+       arv::protocol::ReliabilityClass::UnreliableLatestWins,
+       packet,
+       arv::protocol::MessageType::ServerboundPlayerMove,
+       arv::protocol::NetworkLane::Movement}));
 
   server.tick();
-  const std::vector<arv::net::NetworkEvent> changed_events = client_transport->poll_events();
-  EXPECT_GT(player_correction_count(changed_events), 0U);
-
-  server.tick();
-  const std::vector<arv::net::NetworkEvent> unchanged_events = client_transport->poll_events();
-  EXPECT_EQ(player_correction_count(unchanged_events), 0U);
+  const std::vector<arv::net::NetworkEvent> events = client_transport->poll_events();
+  EXPECT_EQ(player_correction_count(events), 1U);
 }
 
 TEST(IntegratedHandshakeTests, ClientReceivesChunkDataOnlyAfterInterestUpdate) {

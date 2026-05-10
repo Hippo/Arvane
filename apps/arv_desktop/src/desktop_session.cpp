@@ -207,6 +207,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.entity_registry = &dependencies_.entity_registry;
   server_start_info.server_save_root = server_save_root;
   server_start_info.skins = dependencies_.config.skins;
+  server_start_info.movement = dependencies_.config.network.movement;
   server_start_info.skins.enabled = true;
   server_start_info.skins.allow_uploads = true;
   for (io::SkinResolutionConfig& resolution : server_start_info.skins.resolutions) {

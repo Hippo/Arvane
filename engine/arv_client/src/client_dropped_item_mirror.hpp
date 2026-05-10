@@ -11,7 +11,9 @@ class ClientDroppedItemMirrorStore {
 public:
   void apply_snapshot(
       const protocol::ClientboundDroppedItemSnapshot& snapshot,
-      WorldID current_world);
+      WorldID current_world,
+      TickRate server_tick_rate);
+  void advance_interpolation(Seconds delta_seconds) noexcept;
 
   [[nodiscard]] usize count() const noexcept;
   [[nodiscard]] const DroppedItemMirror* find(EntityNetID drop_id) const noexcept;

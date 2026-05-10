@@ -5,8 +5,8 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <cstddef>
 #include <fstream>
 #include <iomanip>
@@ -646,29 +646,6 @@ void render_player_tab(
       static_cast<double>(player->velocity.y),
       static_cast<double>(player->velocity.z));
   ImGui::Text("Client mode: %s", client.game_mode_id().c_str());
-
-  const client::PlayerPredictionDebugStats prediction = client.prediction_debug_stats();
-  ImGui::SeparatorText("Client Prediction");
-  ImGui::Text("Pending inputs: %zu", prediction.pending_input_count);
-  ImGui::Text(
-      "Predicted / confirmed tick: %llu / %llu",
-      static_cast<unsigned long long>(prediction.last_predicted_tick),
-      static_cast<unsigned long long>(prediction.last_confirmed_server_tick));
-  ImGui::Text(
-      "Corrections: %llu avg %.4f max %.4f",
-      static_cast<unsigned long long>(prediction.correction_count),
-      static_cast<double>(prediction.average_correction_distance),
-      static_cast<double>(prediction.max_correction_distance));
-  ImGui::Text(
-      "Smooth / snap / stale / missing history: %llu / %llu / %llu / %llu",
-      static_cast<unsigned long long>(prediction.smoothed_correction_count),
-      static_cast<unsigned long long>(prediction.hard_snap_count),
-      static_cast<unsigned long long>(prediction.dropped_stale_correction_count),
-      static_cast<unsigned long long>(prediction.missing_history_fallback_count));
-  ImGui::Text(
-      "Ignored / dropped old inputs: %llu / %llu",
-      static_cast<unsigned long long>(prediction.ignored_correction_count),
-      static_cast<unsigned long long>(prediction.dropped_old_input_count));
 
   std::vector<std::string> mode_ids = server.game_modes().mode_ids();
   std::string current_mode = player->game_mode_id;

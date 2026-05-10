@@ -30,6 +30,9 @@ constexpr std::string_view kCacheDirectoryName = "cache";
 void emit_render_atlases_config(
     YAML::Emitter& emitter,
     const RenderConfig::AtlasesConfig& atlases);
+void emit_network_movement_config(
+    YAML::Emitter& emitter,
+    const MovementValidationConfig& movement);
 
 template<typename T>
 void read_scalar(const YAML::Node& parent, const char* key, T& value) {
@@ -171,6 +174,53 @@ void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
   read_scalar(physics, "underwater_buoyancy", config.underwater_buoyancy);
   read_scalar(physics, "breath_seconds", config.breath_seconds);
   read_scalar(physics, "max_head_body_yaw_radians", config.max_head_body_yaw_radians);
+}
+
+void read_movement_validation_config(
+    const YAML::Node& movement,
+    MovementValidationConfig& config) {
+  read_scalar(movement, "enabled", config.enabled);
+  read_scalar(movement, "mode", config.mode);
+  read_scalar(movement, "send_rate_hz", config.send_rate_hz);
+  read_scalar(
+      movement,
+      "max_ground_speed_blocks_per_second",
+      config.max_ground_speed_blocks_per_second);
+  read_scalar(
+      movement,
+      "max_air_speed_blocks_per_second",
+      config.max_air_speed_blocks_per_second);
+  read_scalar(
+      movement,
+      "max_swim_speed_blocks_per_second",
+      config.max_swim_speed_blocks_per_second);
+  read_scalar(
+      movement,
+      "max_fly_speed_blocks_per_second",
+      config.max_fly_speed_blocks_per_second);
+  read_scalar(
+      movement,
+      "max_vertical_speed_blocks_per_second",
+      config.max_vertical_speed_blocks_per_second);
+  read_scalar(
+      movement,
+      "base_position_epsilon_blocks",
+      config.base_position_epsilon_blocks);
+  read_scalar(movement, "lag_grace_blocks", config.lag_grace_blocks);
+  read_scalar(
+      movement,
+      "max_single_packet_distance_blocks",
+      config.max_single_packet_distance_blocks);
+  read_scalar(
+      movement,
+      "max_validation_window_seconds",
+      config.max_validation_window_seconds);
+  read_scalar(
+      movement,
+      "reject_unloaded_chunk_movement",
+      config.reject_unloaded_chunk_movement);
+  read_scalar(movement, "solid_collision_check", config.solid_collision_check);
+  read_scalar(movement, "correction_cooldown_ms", config.correction_cooldown_ms);
 }
 
 void read_gameplay_config(const YAML::Node& gameplay, GameplayConfig& config) {
@@ -551,6 +601,7 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "network" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "bind_address" << YAML::Value << config.network.bind_address;
   emitter << YAML::Key << "port" << YAML::Value << config.network.port;
+  emit_network_movement_config(emitter, config.network.movement);
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunks" << YAML::Value << YAML::BeginMap;
@@ -812,6 +863,40 @@ void emit_skins_config(YAML::Emitter& emitter, const SkinConfig& skins) {
   emitter << YAML::Key << "max_skins_per_profile" << YAML::Value
           << skins.storage.max_skins_per_profile;
   emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
+}
+
+void emit_network_movement_config(
+    YAML::Emitter& emitter,
+    const MovementValidationConfig& movement) {
+  emitter << YAML::Key << "movement" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "enabled" << YAML::Value << movement.enabled;
+  emitter << YAML::Key << "mode" << YAML::Value << movement.mode;
+  emitter << YAML::Key << "send_rate_hz" << YAML::Value << movement.send_rate_hz;
+  emitter << YAML::Key << "max_ground_speed_blocks_per_second" << YAML::Value
+          << movement.max_ground_speed_blocks_per_second;
+  emitter << YAML::Key << "max_air_speed_blocks_per_second" << YAML::Value
+          << movement.max_air_speed_blocks_per_second;
+  emitter << YAML::Key << "max_swim_speed_blocks_per_second" << YAML::Value
+          << movement.max_swim_speed_blocks_per_second;
+  emitter << YAML::Key << "max_fly_speed_blocks_per_second" << YAML::Value
+          << movement.max_fly_speed_blocks_per_second;
+  emitter << YAML::Key << "max_vertical_speed_blocks_per_second" << YAML::Value
+          << movement.max_vertical_speed_blocks_per_second;
+  emitter << YAML::Key << "base_position_epsilon_blocks" << YAML::Value
+          << movement.base_position_epsilon_blocks;
+  emitter << YAML::Key << "lag_grace_blocks" << YAML::Value
+          << movement.lag_grace_blocks;
+  emitter << YAML::Key << "max_single_packet_distance_blocks" << YAML::Value
+          << movement.max_single_packet_distance_blocks;
+  emitter << YAML::Key << "max_validation_window_seconds" << YAML::Value
+          << movement.max_validation_window_seconds;
+  emitter << YAML::Key << "reject_unloaded_chunk_movement" << YAML::Value
+          << movement.reject_unloaded_chunk_movement;
+  emitter << YAML::Key << "solid_collision_check" << YAML::Value
+          << movement.solid_collision_check;
+  emitter << YAML::Key << "correction_cooldown_ms" << YAML::Value
+          << movement.correction_cooldown_ms;
   emitter << YAML::EndMap;
 }
 
@@ -1137,6 +1222,7 @@ ConfigResult save_default_server_config_file(
   emitter << YAML::Key << "network" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "bind_address" << YAML::Value << config.network.bind_address;
   emitter << YAML::Key << "port" << YAML::Value << config.network.port;
+  emit_network_movement_config(emitter, config.network.movement);
   emitter << YAML::EndMap;
   emit_skins_config(emitter, config.skins);
   emitter << YAML::EndMap;
@@ -1186,6 +1272,10 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
   if (network) {
     read_scalar(network, "bind_address", config.network.bind_address);
     read_scalar(network, "port", config.network.port);
+    const YAML::Node movement = network["movement"];
+    if (movement) {
+      read_movement_validation_config(movement, config.network.movement);
+    }
   }
 
   const YAML::Node skins = root["skins"];
@@ -1318,6 +1408,46 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
     return ConfigError{"window dimensions must be non-zero"};
   }
 
+  auto validate_positive_f32 = [](f32 value, std::string_view name) -> std::optional<ConfigError> {
+    if (!std::isfinite(value) || value <= 0.0F) {
+      return ConfigError{std::string{name} + " must be finite and > 0"};
+    }
+    return std::nullopt;
+  };
+  auto validate_non_negative_f32 = [](f32 value, std::string_view name) -> std::optional<ConfigError> {
+    if (!std::isfinite(value) || value < 0.0F) {
+      return ConfigError{std::string{name} + " must be finite and >= 0"};
+    }
+    return std::nullopt;
+  };
+  if (config.network.movement.mode != "client_authoritative_guarded") {
+    return ConfigError{"network.movement.mode must be client_authoritative_guarded"};
+  }
+  for (const auto [name, value] : {
+           std::pair{std::string_view{"network.movement.send_rate_hz"}, config.network.movement.send_rate_hz},
+           std::pair{std::string_view{"network.movement.max_ground_speed_blocks_per_second"}, config.network.movement.max_ground_speed_blocks_per_second},
+           std::pair{std::string_view{"network.movement.max_air_speed_blocks_per_second"}, config.network.movement.max_air_speed_blocks_per_second},
+           std::pair{std::string_view{"network.movement.max_swim_speed_blocks_per_second"}, config.network.movement.max_swim_speed_blocks_per_second},
+           std::pair{std::string_view{"network.movement.max_fly_speed_blocks_per_second"}, config.network.movement.max_fly_speed_blocks_per_second},
+           std::pair{std::string_view{"network.movement.max_vertical_speed_blocks_per_second"}, config.network.movement.max_vertical_speed_blocks_per_second},
+           std::pair{std::string_view{"network.movement.max_single_packet_distance_blocks"}, config.network.movement.max_single_packet_distance_blocks},
+           std::pair{std::string_view{"network.movement.max_validation_window_seconds"}, config.network.movement.max_validation_window_seconds},
+       }) {
+    if (std::optional<ConfigError> error = validate_positive_f32(value, name);
+        error.has_value()) {
+      return error;
+    }
+  }
+  for (const auto [name, value] : {
+           std::pair{std::string_view{"network.movement.base_position_epsilon_blocks"}, config.network.movement.base_position_epsilon_blocks},
+           std::pair{std::string_view{"network.movement.lag_grace_blocks"}, config.network.movement.lag_grace_blocks},
+       }) {
+    if (std::optional<ConfigError> error = validate_non_negative_f32(value, name);
+        error.has_value()) {
+      return error;
+    }
+  }
+
   if (config.skins.uploads.max_chunk_bytes == 0U ||
       config.skins.uploads.chunk_threshold_bytes == 0U ||
       config.skins.uploads.max_active_per_connection == 0U ||
@@ -1389,12 +1519,6 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   if (config.jobs.max_worker_threads < config.jobs.min_worker_threads) {
     return ConfigError{"jobs.max_worker_threads must be >= jobs.min_worker_threads"};
   }
-  auto validate_positive_f32 = [](f32 value, std::string_view name) -> std::optional<ConfigError> {
-    if (!std::isfinite(value) || value <= 0.0F) {
-      return ConfigError{std::string{name} + " must be finite and > 0"};
-    }
-    return std::nullopt;
-  };
   for (const auto [name, value] : {
            std::pair{std::string_view{"physics.standing_eye_height"}, config.physics.standing_eye_height},
            std::pair{std::string_view{"physics.sneaking_eye_height"}, config.physics.sneaking_eye_height},
@@ -1872,9 +1996,8 @@ ServerListResult load_server_list_file(const std::filesystem::path& path) {
             ConfigError{"server list entries must contain string name and address fields"});
       }
 
-      entries.push_back({
-          entry.at("name").get<std::string>(),
-          entry.at("address").get<std::string>()});
+      entries.push_back({entry.at("name").get<std::string>(),
+                         entry.at("address").get<std::string>()});
     }
     return ServerListResult::success(std::move(entries));
   } catch (const nlohmann::json::exception& ex) {

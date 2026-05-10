@@ -14,7 +14,7 @@ struct ClientRuntime::Impl {
   }
 
   [[nodiscard]] detail::ClientRuntimeContext context(
-      const physics::ICollisionQuery* prediction_query,
+      const physics::ICollisionQuery* collision_query,
       Seconds tick_seconds) noexcept {
     return {
         connection,
@@ -25,14 +25,15 @@ struct ClientRuntime::Impl {
         ui,
         chunks,
         inventory,
+        input,
         entities,
         dropped_items,
         skins,
-        prediction_query,
+        collision_query,
         tick_seconds};
   }
 
-  void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* prediction_query) {
+  void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* collision_query) {
     if (!connection.transport()) {
       return;
     }
@@ -40,7 +41,7 @@ struct ClientRuntime::Impl {
     const bool was_in_game = connection.state() == net::ConnectionState::InGame;
     const Seconds tick_seconds = tick_duration_seconds(player_controller.server_tick_rate());
 
-    detail::ClientRuntimeContext runtime = context(prediction_query, tick_seconds);
+    detail::ClientRuntimeContext runtime = context(collision_query, tick_seconds);
     network.process_events(runtime);
 
     if (was_in_game && connection.state() == net::ConnectionState::InGame) {
@@ -48,7 +49,7 @@ struct ClientRuntime::Impl {
           tick_index,
           player_controller,
           sender,
-          prediction_query,
+          collision_query,
           tick_seconds);
     }
 
@@ -91,6 +92,10 @@ void ClientRuntime::set_player_tuning(player::PlayerTuning tuning) noexcept {
   impl_->player_controller.set_player_tuning(tuning);
 }
 
+void ClientRuntime::set_movement_send_rate(f32 send_rate_hz) noexcept {
+  impl_->input.set_movement_send_rate(send_rate_hz);
+}
+
 void ClientRuntime::set_local_identity(LocalPlayerIdentity identity) {
   impl_->identity = std::move(identity);
 }
@@ -121,8 +126,13 @@ void ClientRuntime::fixed_tick(TickIndex tick_index) {
 
 void ClientRuntime::fixed_tick(
     TickIndex tick_index,
-    const physics::ICollisionQuery* prediction_query) {
-  impl_->fixed_tick(tick_index, prediction_query);
+    const physics::ICollisionQuery* collision_query) {
+  impl_->fixed_tick(tick_index, collision_query);
+}
+
+void ClientRuntime::advance_entity_interpolation(Seconds delta_seconds) noexcept {
+  impl_->entities.advance_interpolation(delta_seconds);
+  impl_->dropped_items.advance_interpolation(delta_seconds);
 }
 
 render::FramePacket ClientRuntime::build_frame_packet(
@@ -182,10 +192,6 @@ TickIndex ClientRuntime::world_initial_tick() const noexcept {
 
 TickRate ClientRuntime::server_tick_rate() const noexcept {
   return impl_->player_controller.server_tick_rate();
-}
-
-PlayerPredictionDebugStats ClientRuntime::prediction_debug_stats() const noexcept {
-  return impl_->player_controller.prediction_debug_stats();
 }
 
 bool ClientRuntime::inventory_open() const noexcept {

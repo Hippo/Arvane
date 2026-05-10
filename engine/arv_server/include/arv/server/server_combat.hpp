@@ -8,6 +8,8 @@
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_runtime.hpp"
 
+#include <optional>
+
 namespace arv::server {
 
 struct CombatConfig {
@@ -55,6 +57,9 @@ struct AttackResult {
   bool accepted{};
   bool damage_applied{};
   bool knockback_applied{};
+  std::optional<PlayerID> knockback_player_id{};
+  Vec3f knockback_velocity{};
+  u32 knockback_control_suppression_ticks{};
   AttackRejectReason reject_reason{AttackRejectReason::None};
 };
 

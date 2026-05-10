@@ -345,7 +345,7 @@ Add non-block simulation and expand networking beyond skeleton structure.
 - inventory sync protocol basics
 - server-authoritative entity updates
 - client interpolation
-- prediction/reconciliation placeholders if not fully implemented
+- client-authored player movement and movement correction protocol
 - connection lifecycle
 - join/leave flow
 - cross-world player identity behavior

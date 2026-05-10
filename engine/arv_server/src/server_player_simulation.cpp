@@ -234,7 +234,7 @@ void ServerRuntimeImpl::tick_players() {
     }
 
     update_sprint_knockback_state(combat_states_[session_id], command);
-    apply_player_command(*player_state, command);
+    apply_player_action_command(*player_state, command);
     player_state->last_processed_input_tick = command.client_tick;
   }
 }
@@ -333,7 +333,7 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
   cache.initialized = true;
 }
 
-void ServerRuntimeImpl::apply_player_command(
+void ServerRuntimeImpl::apply_player_action_command(
     player::PlayerState& player_state,
     const player::PlayerCommand& command) {
   refresh_player_permissions(player_state);
@@ -343,29 +343,9 @@ void ServerRuntimeImpl::apply_player_command(
           ? command.selected_hotbar_slot
           : player_state.selected_hotbar_slot;
 
-  world::WorldCollisionQuery collision_query(default_world_, *block_registry_, true);
   const physics::KinematicConfig physics_config =
       movement::kinematic_config_from_tuning(player_tuning_);
   const Seconds tick_seconds = tick_duration_seconds(base_tps_);
-  const movement::PlayerMovementAuthority movement_authority{
-      player_state.resolved_permissions.core.can_fly,
-      player_state.resolved_permissions.core.has_collision};
-  const Vec3f incoming_velocity = player_state.velocity;
-  const movement::PlayerMovementStep movement_step =
-      movement::simulate_player_movement_tick(
-          &collision_query,
-          movement::kinematic_state_from_player(player_state),
-          command,
-          player_tuning_,
-          movement_authority,
-          tick_seconds);
-  movement::apply_kinematic_state_to_player(player_state, movement_step.state);
-  apply_knockback_control_suppression(
-      player_state,
-      collision_query,
-      physics_config,
-      incoming_velocity,
-      tick_seconds);
 
   if (command.primary_pressed) {
     restart_player_entity_animation(

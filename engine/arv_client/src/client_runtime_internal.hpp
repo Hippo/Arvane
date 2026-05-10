@@ -30,10 +30,11 @@ struct ClientRuntimeContext {
   ClientUiState& ui;
   ClientChunkInbox& chunks;
   ClientInventoryRuntime& inventory;
+  ClientInputRuntime& input;
   ClientEntityMirrorStore& entities;
   ClientDroppedItemMirrorStore& dropped_items;
   ClientSkinRuntime& skins;
-  const physics::ICollisionQuery* prediction_query{};
+  const physics::ICollisionQuery* collision_query{};
   Seconds tick_seconds{};
 };
 

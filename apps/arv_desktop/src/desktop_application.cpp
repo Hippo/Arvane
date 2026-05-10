@@ -18,18 +18,18 @@
 
 #include "arv/asset/font.hpp"
 #include "arv/asset/resource.hpp"
-#include "arv/command/command.hpp"
-#include "arv/client/item_animation.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/item_animation.hpp"
 #include "arv/client/local_identity.hpp"
+#include "arv/command/command.hpp"
 #include "arv/core/arena.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/io/config.hpp"
 #include "arv/io/input_bindings.hpp"
-#include "arv/platform/glfw_window.hpp"
 #include "arv/physics/collision.hpp"
+#include "arv/platform/glfw_window.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/render/opengl_renderer.hpp"
@@ -259,7 +259,7 @@ void append_command_result_to_chat(
   return pos;
 }
 
-[[nodiscard]] physics::KinematicConfig make_prediction_kinematic_config(
+[[nodiscard]] physics::KinematicConfig make_local_placement_kinematic_config(
     const io::PhysicsConfig& physics) noexcept {
   physics::KinematicConfig config;
   config.body_width = physics.body_width;
@@ -403,23 +403,22 @@ public:
       const ui::UiTheme& ui_theme,
       const voxel::FluidDefinition& water_fluid,
       DesktopMenuState& menu_state,
-      ui::UIScreenManager& screen_manager)
-      : config_(config),
-        resources_(resources),
-        window_(window),
-        renderer_(renderer),
-        debug_imgui_(debug_imgui),
-        debug_menu_(debug_menu),
-        assets_(assets),
-        world_jobs_(world_jobs),
-        sessions_(sessions),
-        ui_tree_(ui_tree),
-        ui_text_measurer_(ui_text_measurer),
-        ui_theme_(ui_theme),
-        water_fluid_(water_fluid),
-        menu_state_(menu_state),
-        screen_manager_(screen_manager),
-        framebuffer_(window.framebuffer_size()) {
+      ui::UIScreenManager& screen_manager) : config_(config),
+                                             resources_(resources),
+                                             window_(window),
+                                             renderer_(renderer),
+                                             debug_imgui_(debug_imgui),
+                                             debug_menu_(debug_menu),
+                                             assets_(assets),
+                                             world_jobs_(world_jobs),
+                                             sessions_(sessions),
+                                             ui_tree_(ui_tree),
+                                             ui_text_measurer_(ui_text_measurer),
+                                             ui_theme_(ui_theme),
+                                             water_fluid_(water_fluid),
+                                             menu_state_(menu_state),
+                                             screen_manager_(screen_manager),
+                                             framebuffer_(window.framebuffer_size()) {
     const auto start = std::chrono::steady_clock::now();
     previous_time_ = start;
     app_start_time_ = start;
@@ -801,7 +800,7 @@ private:
     return false;
   }
 
-  [[nodiscard]] std::optional<BlockPos> predicted_secondary_place_pos(
+  [[nodiscard]] std::optional<BlockPos> local_secondary_place_pos(
       const DesktopGameSession& session,
       const physics::ICollisionQuery& query) const {
     if (session.client == nullptr) {
@@ -826,14 +825,14 @@ private:
     return place_pos;
   }
 
-  [[nodiscard]] bool predict_block_placement_succeeds(
+  [[nodiscard]] bool preview_block_placement_succeeds(
       const DesktopGameSession& session,
       const player::ItemRecord& item,
       const physics::ICollisionQuery& query) const {
     if (session.client == nullptr || !item.placement_variant.has_value()) {
       return false;
     }
-    const std::optional<BlockPos> place_pos = predicted_secondary_place_pos(session, query);
+    const std::optional<BlockPos> place_pos = local_secondary_place_pos(session, query);
     if (!place_pos.has_value()) {
       return false;
     }
@@ -845,7 +844,7 @@ private:
     }
 
     const physics::KinematicConfig physics_config =
-        make_prediction_kinematic_config(config_.physics);
+        make_local_placement_kinematic_config(config_.physics);
     const Aabb3f player_bounds = physics::make_body_bounds(
         session.client->player_position(),
         physics_config,
@@ -866,13 +865,13 @@ private:
     return true;
   }
 
-  [[nodiscard]] bool predict_water_bucket_placement_succeeds(
+  [[nodiscard]] bool preview_water_bucket_placement_succeeds(
       const DesktopGameSession& session,
       const physics::ICollisionQuery& query) const {
     if (!selected_water_bucket_can_leave_empty_bucket(session)) {
       return false;
     }
-    const std::optional<BlockPos> place_pos = predicted_secondary_place_pos(session, query);
+    const std::optional<BlockPos> place_pos = local_secondary_place_pos(session, query);
     if (!place_pos.has_value()) {
       return false;
     }
@@ -889,7 +888,7 @@ private:
            (existing_fluid.type == water_fluid_.type && !existing_fluid.source());
   }
 
-  [[nodiscard]] bool predict_held_item_placement_succeeds(
+  [[nodiscard]] bool preview_held_item_placement_succeeds(
       const DesktopGameSession& session,
       const player::ItemRecord* item) const {
     if (session.client == nullptr || item == nullptr ||
@@ -899,10 +898,10 @@ private:
 
     world::WorldCollisionQuery query(session.client_world, assets_.block_registry, false);
     if (item->placement_variant.has_value()) {
-      return predict_block_placement_succeeds(session, *item, query);
+      return preview_block_placement_succeeds(session, *item, query);
     }
     if (item->name == "arvane:water_bucket") {
-      return predict_water_bucket_placement_succeeds(session, query);
+      return preview_water_bucket_placement_succeeds(session, query);
     }
     return false;
   }
@@ -1038,7 +1037,7 @@ private:
       case player::HeldItemAnimationPlayCondition::Always:
         return true;
       case player::HeldItemAnimationPlayCondition::PlacementSucceeds:
-        return predict_held_item_placement_succeeds(session, item);
+        return preview_held_item_placement_succeeds(session, item);
     }
     return false;
   }
@@ -1241,26 +1240,26 @@ private:
         }
         if (has_active_integrated_session) {
           active_session.integrated_server->tick();
-          world::WorldCollisionQuery prediction_query(
+          world::WorldCollisionQuery local_collision_query(
               active_session.client_world,
               assets_.block_registry,
               true);
           active_session.client->fixed_tick(
               active_session.integrated_server->tick_index(),
-              &prediction_query);
+              &local_collision_query);
         } else {
           if (active_session.client_tick_index == 0U &&
               active_session.client->connection_state() == net::ConnectionState::InGame) {
             active_session.client_tick_index = active_session.client->world_initial_tick();
           }
           ++active_session.client_tick_index;
-          world::WorldCollisionQuery prediction_query(
+          world::WorldCollisionQuery local_collision_query(
               active_session.client_world,
               assets_.block_registry,
               true);
           active_session.client->fixed_tick(
               active_session.client_tick_index,
-              &prediction_query);
+              &local_collision_query);
         }
         update_block_outline_target(active_session);
         sessions_.collect_client_chunk_stream(active_session);
@@ -1276,6 +1275,8 @@ private:
         fixed_tick_ran = true;
       }
     }
+
+    active_session.client->advance_entity_interpolation(delta.count());
 
     sessions_.apply_pending_client_chunk_stream(
         active_session,
@@ -1388,18 +1389,18 @@ private:
 
     const auto queue_default_skin =
         [&](std::string_view key, std::string_view texture_asset) {
-      if (player_skin_regions_.find(std::string{key}) != player_skin_regions_.end() ||
-          new_images.find(std::string{key}) != new_images.end()) {
-        return;
-      }
-      auto texture = resources_.load_texture({std::string{texture_asset}});
-      if (texture) {
-        const asset::TextureResource* resource = resources_.texture(texture.value());
-        if (resource != nullptr && !resource->image.empty()) {
-          new_images[std::string{key}] = resource->image;
-        }
-      }
-    };
+          if (player_skin_regions_.find(std::string{key}) != player_skin_regions_.end() ||
+              new_images.find(std::string{key}) != new_images.end()) {
+            return;
+          }
+          auto texture = resources_.load_texture({std::string{texture_asset}});
+          if (texture) {
+            const asset::TextureResource* resource = resources_.texture(texture.value());
+            if (resource != nullptr && !resource->image.empty()) {
+              new_images[std::string{key}] = resource->image;
+            }
+          }
+        };
     queue_default_skin(DefaultMenuPlayerSkinKey, "arvane:texture/default_skin/default");
     queue_default_skin(
         DefaultMenuPlayerSlimSkinKey,

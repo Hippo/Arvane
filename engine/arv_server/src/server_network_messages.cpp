@@ -2,12 +2,15 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/hash.hpp"
+#include "arv/movement/player_movement.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/server/skin_runtime.hpp"
+#include "arv/world/world_queries.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <iterator>
@@ -172,6 +175,115 @@ void clear_active_skin_upload(
       std::istreambuf_iterator<char>{}};
 }
 
+[[nodiscard]] player::PlayerCommand action_command_from_move(
+    const protocol::ServerboundPlayerMove& move) noexcept {
+  player::PlayerCommand command;
+  command.client_tick = move.client_tick;
+  command.primary_pressed =
+      protocol::has_action_flag(move.action_flags, protocol::PlayerActionFlags::PrimaryPressed);
+  command.primary_held =
+      protocol::has_action_flag(move.action_flags, protocol::PlayerActionFlags::PrimaryHeld);
+  command.secondary_pressed =
+      protocol::has_action_flag(move.action_flags, protocol::PlayerActionFlags::SecondaryPressed);
+  command.secondary_held =
+      protocol::has_action_flag(move.action_flags, protocol::PlayerActionFlags::SecondaryHeld);
+  command.toggle_fly_pressed =
+      protocol::has_action_flag(move.action_flags, protocol::PlayerActionFlags::ToggleFlyPressed);
+  command.selected_hotbar_slot = move.selected_hotbar_slot;
+  command.sneak_held =
+      protocol::has_move_flag(move.flags, protocol::PlayerMoveFlags::Sneaking);
+  command.sprint_held =
+      protocol::has_move_flag(move.flags, protocol::PlayerMoveFlags::Sprinting);
+  return command;
+}
+
+[[nodiscard]] protocol::PlayerMoveFlags move_flags_from_player_state(
+    const player::PlayerState& player_state) noexcept {
+  protocol::PlayerMoveFlags flags = protocol::PlayerMoveFlags::None;
+  if (player_state.grounded) {
+    flags |= protocol::PlayerMoveFlags::OnGround;
+  }
+  if (player_state.sneaking) {
+    flags |= protocol::PlayerMoveFlags::Sneaking;
+  }
+  if (player_state.swimming) {
+    flags |= protocol::PlayerMoveFlags::Swimming;
+  }
+  if (player_state.movement_mode == player::MovementMode::Flying) {
+    flags |= protocol::PlayerMoveFlags::Flying;
+  }
+  return flags;
+}
+
+[[nodiscard]] physics::PlayerCollisionPose collision_pose_from_flags(
+    protocol::PlayerMoveFlags flags) noexcept {
+  if (protocol::has_move_flag(flags, protocol::PlayerMoveFlags::Swimming)) {
+    return physics::PlayerCollisionPose::Swimming;
+  }
+  if (protocol::has_move_flag(flags, protocol::PlayerMoveFlags::Sneaking)) {
+    return physics::PlayerCollisionPose::Sneaking;
+  }
+  return physics::PlayerCollisionPose::Standing;
+}
+
+[[nodiscard]] MovementValidationContext make_movement_validation_context(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry& block_registry,
+    const player::PlayerState& player_state,
+    const protocol::ServerboundPlayerMove& move,
+    TickIndex tick_index,
+    TickRate tick_rate,
+    const player::PlayerTuning& tuning) {
+  MovementValidationContext context;
+  context.receive_time_seconds =
+      static_cast<double>(tick_index) / static_cast<double>(std::max<TickRate>(tick_rate, 1U));
+  context.server_tick = tick_index;
+  context.can_fly = player_state.resolved_permissions.core.can_fly;
+  context.has_collision = player_state.resolved_permissions.core.has_collision;
+  context.server_velocity = player_state.velocity;
+  context.knockback_control_suppression_ticks =
+      player_state.knockback_control_suppression_ticks;
+
+  const BlockPos destination_block{{
+      static_cast<i32>(std::floor(move.position.x)),
+      static_cast<i32>(std::floor(move.position.y)),
+      static_cast<i32>(std::floor(move.position.z)),
+  }};
+  context.target_chunk_loaded = world.find_chunk(block_to_chunk(destination_block)) != nullptr;
+
+  if (context.has_collision) {
+    world::WorldCollisionQuery query(world, block_registry, false);
+    const physics::KinematicConfig physics_config =
+        movement::kinematic_config_from_tuning(tuning);
+    const Aabb3f bounds = physics::make_body_bounds(
+        move.position,
+        physics_config,
+        collision_pose_from_flags(move.flags));
+    context.final_aabb_overlaps_solid = physics::overlaps_solid_blocks(
+        query,
+        bounds,
+        physics_config.collision_epsilon);
+  }
+  return context;
+}
+
+[[nodiscard]] u32 knockback_suppression_ticks_to_consume(
+    const AcceptedPlayerMovementState& previous,
+    TickIndex tick_index,
+    u32 remaining_ticks) noexcept {
+  if (remaining_ticks == 0U) {
+    return 0U;
+  }
+  if (!previous.has_accepted_move || tick_index <= previous.last_server_tick) {
+    return 1U;
+  }
+  const TickIndex elapsed_ticks = tick_index - previous.last_server_tick;
+  const TickIndex capped_ticks = std::min<TickIndex>(
+      elapsed_ticks,
+      static_cast<TickIndex>(remaining_ticks));
+  return static_cast<u32>(std::max<TickIndex>(1U, capped_ticks));
+}
+
 } // namespace
 
 net::NetworkResult send_protocol_message(
@@ -266,12 +378,12 @@ void ServerRuntimeImpl::handle_message(
       handle_auth_response(connection_id, response.value());
       return;
     }
-    case protocol::MessageType::ServerboundInputBatch: {
-      auto batch = protocol::deserialize_serverbound_input_batch(decoded.value().payload);
-      if (!batch) {
+    case protocol::MessageType::ServerboundPlayerMove: {
+      auto move = protocol::deserialize_serverbound_player_move(decoded.value().payload);
+      if (!move) {
         return;
       }
-      handle_input_batch(connection_id, batch.value());
+      handle_player_move(connection_id, move.value());
       return;
     }
     case protocol::MessageType::ServerboundChunkInterestUpdate: {
@@ -502,23 +614,91 @@ void ServerRuntimeImpl::handle_auth_response(
   }
 }
 
-void ServerRuntimeImpl::handle_input_batch(
+void ServerRuntimeImpl::handle_player_move(
     net::ConnectionID connection_id,
-    const protocol::ServerboundInputBatch& batch) {
+    const protocol::ServerboundPlayerMove& move) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
   if (session == nullptr || !session->authenticated) {
     return;
   }
 
-  for (usize index = 0; index < batch.inputs.size(); ++index) {
-    const TickIndex input_tick = batch.first_input_tick + index;
-    player::PlayerCommand command =
-        protocol::input_sample_to_command(batch.inputs[index], input_tick);
-    player::PlayerCommand& pending = pending_player_commands_[session->player_id];
-    if (command.client_tick >= pending.client_tick) {
-      pending = std::move(command);
-    }
+  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  if (player_state == nullptr || block_registry_ == nullptr) {
+    return;
   }
+
+  refresh_player_permissions(*player_state);
+  AcceptedPlayerMovementState& previous = accepted_player_movement_[session->player_id];
+  const double receive_time_seconds =
+      static_cast<double>(tick_index_) / static_cast<double>(std::max<TickRate>(base_tps_, 1U));
+  auto sync_previous_to_player_state = [&]() {
+    previous.position = player_state->position;
+    previous.velocity = player_state->velocity;
+    previous.yaw_radians = player_state->yaw_radians;
+    previous.pitch_radians = player_state->pitch_radians;
+    previous.flags = move_flags_from_player_state(*player_state);
+    previous.last_server_tick = tick_index_;
+    previous.last_receive_time_seconds = receive_time_seconds;
+    previous.has_accepted_move = true;
+  };
+  if (!previous.has_accepted_move) {
+    sync_previous_to_player_state();
+  } else if (length(player_state->position - previous.position) >
+             movement_.base_position_epsilon_blocks) {
+    sync_previous_to_player_state();
+  }
+
+  const player::PlayerCommand command = action_command_from_move(move);
+  player::PlayerCommand& pending = pending_player_commands_[session->player_id];
+  if (command.client_tick >= player_state->last_processed_input_tick &&
+      command.client_tick >= pending.client_tick) {
+    pending = command;
+  }
+
+  const MovementValidationContext context = make_movement_validation_context(
+      default_world_,
+      *block_registry_,
+      *player_state,
+      move,
+      tick_index_,
+      base_tps_,
+      player_tuning_);
+  const MovementValidationResult validation =
+      validate_serverbound_player_move(move, previous, context, movement_);
+  if (!validation.accepted) {
+    if (validation.should_send_correction) {
+      send_player_move_correction(*session, *player_state, move.sequence, validation.reason);
+    }
+    return;
+  }
+
+  const u32 consumed_knockback_suppression_ticks =
+      knockback_suppression_ticks_to_consume(
+          previous,
+          tick_index_,
+          player_state->knockback_control_suppression_ticks);
+  previous = validation.accepted_state;
+  player_state->position = validation.accepted_state.position;
+  player_state->velocity = validation.accepted_state.velocity;
+  player_state->yaw_radians = validation.accepted_state.yaw_radians;
+  player_state->pitch_radians = validation.accepted_state.pitch_radians;
+  player_state->grounded =
+      protocol::has_move_flag(move.flags, protocol::PlayerMoveFlags::OnGround);
+  player_state->sneaking =
+      protocol::has_move_flag(move.flags, protocol::PlayerMoveFlags::Sneaking);
+  player_state->swimming =
+      protocol::has_move_flag(move.flags, protocol::PlayerMoveFlags::Swimming);
+  player_state->movement_mode =
+      protocol::has_move_flag(move.flags, protocol::PlayerMoveFlags::Flying)
+          ? player::MovementMode::Flying
+          : player::MovementMode::Walking;
+  const u32 remaining_knockback_suppression_ticks =
+      player_state->knockback_control_suppression_ticks;
+  player_state->knockback_control_suppression_ticks =
+      remaining_knockback_suppression_ticks > consumed_knockback_suppression_ticks
+          ? remaining_knockback_suppression_ticks -
+                consumed_knockback_suppression_ticks
+          : 0U;
 }
 
 void ServerRuntimeImpl::handle_skin_request(

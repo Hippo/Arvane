@@ -334,6 +334,10 @@ void apply_attack_knockback(
         std::max(
             target_velocity->player_state->knockback_control_suppression_ticks,
             config.knockback_control_suppression_ticks);
+    result.knockback_player_id = target_velocity->player_state->player_id;
+    result.knockback_velocity = velocity;
+    result.knockback_control_suppression_ticks =
+        target_velocity->player_state->knockback_control_suppression_ticks;
     if (velocity.y > 0.0F) {
       target_velocity->player_state->grounded = false;
     }
@@ -515,6 +519,22 @@ void ServerRuntimeImpl::process_pending_entity_attacks() {
           session->player_id.value,
           pending.attack.target_entity.value,
           pending.attack.sequence);
+    }
+    if (result.knockback_player_id.has_value()) {
+      const PlayerID target_player_id = result.knockback_player_id.value();
+      const player::PlayerState* target_player =
+          default_world_.find_player(target_player_id);
+      if (target_player == nullptr) {
+        continue;
+      }
+      sessions_.for_each_session([&](const ServerSession& target_session) {
+        if (!target_session.authenticated ||
+            target_session.connection_state != net::ConnectionState::InGame ||
+            target_session.player_id != target_player_id) {
+          return;
+        }
+        send_player_velocity(target_session, *target_player);
+      });
     }
   }
 }

@@ -805,7 +805,7 @@ Avoid saving:
 * collision flags
 * animation phase
 * camera bob
-* prediction buffers
+* transient movement packet state
 * interpolation state
 
 ---

@@ -1056,7 +1056,7 @@ Rules:
 
 * server validates the command independently
 * server checks permissions independently
-* client-side prediction does not apply to authoritative commands
+* local presentation shortcuts do not apply to authoritative commands
 * command result text should be treated as display data, not executable data
 
 ---

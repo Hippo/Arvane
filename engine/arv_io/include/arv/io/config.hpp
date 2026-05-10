@@ -60,9 +60,28 @@ struct SimulationConfig {
   FluidsConfig fluids{};
 };
 
+struct MovementValidationConfig {
+  bool enabled{true};
+  std::string mode{"client_authoritative_guarded"};
+  f32 send_rate_hz{20.0F};
+  f32 max_ground_speed_blocks_per_second{9.0F};
+  f32 max_air_speed_blocks_per_second{12.0F};
+  f32 max_swim_speed_blocks_per_second{8.0F};
+  f32 max_fly_speed_blocks_per_second{24.0F};
+  f32 max_vertical_speed_blocks_per_second{20.0F};
+  f32 base_position_epsilon_blocks{0.20F};
+  f32 lag_grace_blocks{1.50F};
+  f32 max_single_packet_distance_blocks{8.0F};
+  f32 max_validation_window_seconds{0.25F};
+  bool reject_unloaded_chunk_movement{true};
+  bool solid_collision_check{true};
+  u32 correction_cooldown_ms{100U};
+};
+
 struct NetworkConfig {
   std::string bind_address{"0.0.0.0"};
   u16 port{42069};
+  MovementValidationConfig movement{};
 };
 
 struct DedicatedServerConfig {

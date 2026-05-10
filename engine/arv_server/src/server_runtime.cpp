@@ -10,8 +10,7 @@
 
 namespace arv::server {
 
-ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport)
-    : impl_(std::make_unique<detail::ServerRuntimeImpl>(std::move(transport))) {
+ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport) : impl_(std::make_unique<detail::ServerRuntimeImpl>(std::move(transport))) {
 }
 
 ServerRuntime::~ServerRuntime() = default;
@@ -165,8 +164,7 @@ std::optional<command::CommandSender> ServerRuntime::command_sender_for_session(
 
 namespace detail {
 
-ServerRuntimeImpl::ServerRuntimeImpl(std::unique_ptr<net::ITransport> transport)
-    : transport_(std::move(transport)) {
+ServerRuntimeImpl::ServerRuntimeImpl(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
   register_server_commands(command_registry_);
 }
 
@@ -189,6 +187,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   block_breaking_ = start_info.block_breaking;
   dropped_items_ = start_info.dropped_items;
   combat_ = start_info.combat;
+  movement_ = start_info.movement;
   skins_ = start_info.skins;
   skin_transfers_.clear();
   active_skin_uploads_global_ = 0U;
@@ -277,7 +276,7 @@ void ServerRuntimeImpl::tick() {
   world_jobs_.schedule_lighting_jobs(default_world_, block_registry_);
   tick_chunk_streaming();
   world_jobs_.schedule_generation_jobs(default_world_, chunk_streamer_, chunk_generation_);
-  send_player_corrections();
+  send_player_block_break_progress();
   send_block_updates();
   send_entity_replication();
   send_dropped_item_replication();

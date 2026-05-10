@@ -50,8 +50,12 @@ TEST(ProtocolTests, RejectsPayloadSizeMismatch) {
 TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto registry = arv::protocol::MessageRegistry::make_core_registry();
   const auto ping = registry.lookup(arv::protocol::MessageType::Ping);
-  const auto input = registry.lookup(arv::protocol::MessageType::ServerboundInputBatch);
-  const auto correction = registry.lookup(arv::protocol::MessageType::ClientboundPlayerCorrection);
+  const auto move = registry.lookup(arv::protocol::MessageType::ServerboundPlayerMove);
+  const auto correction = registry.lookup(arv::protocol::MessageType::ClientboundPlayerMoveCorrection);
+  const auto velocity = registry.lookup(arv::protocol::MessageType::ClientboundPlayerVelocity);
+  const auto movement_hz = registry.lookup(arv::protocol::MessageType::ClientboundSetMovementHz);
+  const auto break_progress =
+      registry.lookup(arv::protocol::MessageType::ClientboundPlayerBlockBreakProgress);
   const auto auth_challenge = registry.lookup(arv::protocol::MessageType::ClientboundAuthChallenge);
   const auto auth_response = registry.lookup(arv::protocol::MessageType::ServerboundAuthResponse);
   const auto auth_result = registry.lookup(arv::protocol::MessageType::ClientboundAuthResult);
@@ -74,8 +78,11 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto skin_upload_data = registry.lookup(arv::protocol::MessageType::ServerboundSkinUploadData);
 
   ASSERT_TRUE(ping.has_value());
-  ASSERT_TRUE(input.has_value());
+  ASSERT_TRUE(move.has_value());
   ASSERT_TRUE(correction.has_value());
+  ASSERT_TRUE(velocity.has_value());
+  ASSERT_TRUE(movement_hz.has_value());
+  ASSERT_TRUE(break_progress.has_value());
   ASSERT_TRUE(auth_challenge.has_value());
   ASSERT_TRUE(auth_response.has_value());
   ASSERT_TRUE(auth_result.has_value());
@@ -94,8 +101,11 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(skin_data.has_value());
   ASSERT_TRUE(skin_upload_data.has_value());
   EXPECT_EQ(ping->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
-  EXPECT_EQ(input->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
-  EXPECT_EQ(correction->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  EXPECT_EQ(move->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  EXPECT_EQ(correction->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(velocity->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(movement_hz->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(break_progress->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(auth_challenge->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(auth_response->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(auth_result->lane, arv::protocol::NetworkLane::Session);
@@ -111,8 +121,11 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(inventory_action->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_update->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(ping->lane, arv::protocol::NetworkLane::Debug);
-  EXPECT_EQ(input->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(move->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(correction->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(velocity->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(movement_hz->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(break_progress->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(chunk_interest->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(chunk_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(chunk_unload->lane, arv::protocol::NetworkLane::ChunkStreaming);
@@ -127,7 +140,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 41U);
+  EXPECT_EQ(registry.size(), 44U);
 }
 
 TEST(ProtocolTests, SkinPacketsRoundTripThroughSerialization) {
@@ -193,34 +206,36 @@ TEST(ProtocolTests, SkinPacketsRoundTripThroughSerialization) {
   EXPECT_EQ(decoded_accept.value().upload_mode, arv::protocol::SkinUploadMode::Chunked);
 }
 
-TEST(ProtocolTests, ClientInputBatchRoundTripsThroughSerialization) {
-  arv::protocol::ServerboundInputBatch batch;
-  batch.first_input_tick = 44;
-  batch.inputs.push_back({arv::protocol::ClientInputButtons::JumpPressed |
-                              arv::protocol::ClientInputButtons::PrimaryPressed,
-                          -1,
-                          1,
-                          12,
-                          -8,
-                          3});
+TEST(ProtocolTests, ServerboundPlayerMoveRoundTripsThroughSerialization) {
+  arv::protocol::ServerboundPlayerMove move;
+  move.sequence = 44;
+  move.client_tick = 55;
+  move.position = {1.0F, 2.0F, 3.0F};
+  move.velocity = {0.25F, -0.5F, 1.5F};
+  move.yaw_radians = 0.75F;
+  move.pitch_radians = -0.25F;
+  move.flags = arv::protocol::PlayerMoveFlags::OnGround |
+               arv::protocol::PlayerMoveFlags::Sprinting;
+  move.action_flags = arv::protocol::PlayerActionFlags::PrimaryPressed;
+  move.selected_hotbar_slot = 3;
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_serverbound_input_batch(batch);
-  const auto decoded = arv::protocol::deserialize_serverbound_input_batch(bytes);
+  const std::vector<arv::u8> bytes = arv::protocol::serialize_serverbound_player_move(move);
+  const auto decoded = arv::protocol::deserialize_serverbound_player_move(bytes);
 
   ASSERT_TRUE(decoded);
-  ASSERT_EQ(decoded.value().inputs.size(), 1U);
-  EXPECT_EQ(decoded.value().first_input_tick, 44U);
-  EXPECT_EQ(decoded.value().inputs[0].move_x, -1);
-  EXPECT_EQ(decoded.value().inputs[0].move_z, 1);
-  EXPECT_EQ(decoded.value().inputs[0].look_delta_x, 12);
-  EXPECT_EQ(decoded.value().inputs[0].look_delta_y, -8);
-  EXPECT_EQ(decoded.value().inputs[0].selected_hotbar_slot, 3U);
-  EXPECT_TRUE(arv::protocol::has_button(
-      decoded.value().inputs[0].buttons,
-      arv::protocol::ClientInputButtons::JumpPressed));
-  EXPECT_TRUE(arv::protocol::has_button(
-      decoded.value().inputs[0].buttons,
-      arv::protocol::ClientInputButtons::PrimaryPressed));
+  EXPECT_EQ(decoded.value().sequence, 44U);
+  EXPECT_EQ(decoded.value().client_tick, 55U);
+  EXPECT_EQ(decoded.value().position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+  EXPECT_EQ(decoded.value().velocity, (arv::Vec3f{0.25F, -0.5F, 1.5F}));
+  EXPECT_FLOAT_EQ(decoded.value().yaw_radians, 0.75F);
+  EXPECT_FLOAT_EQ(decoded.value().pitch_radians, -0.25F);
+  EXPECT_EQ(decoded.value().selected_hotbar_slot, 3U);
+  EXPECT_TRUE(arv::protocol::has_move_flag(
+      decoded.value().flags,
+      arv::protocol::PlayerMoveFlags::Sprinting));
+  EXPECT_TRUE(arv::protocol::has_action_flag(
+      decoded.value().action_flags,
+      arv::protocol::PlayerActionFlags::PrimaryPressed));
 }
 
 TEST(ProtocolTests, AttackEntityRoundTripsThroughSerialization) {
@@ -235,54 +250,82 @@ TEST(ProtocolTests, AttackEntityRoundTripsThroughSerialization) {
   EXPECT_EQ(decoded.value().sequence, 77U);
 }
 
-TEST(ProtocolTests, PlayerCorrectionRoundTripsThroughSerialization) {
-  arv::protocol::ClientboundPlayerCorrection correction;
-  correction.server_tick = 55;
-  correction.player_id = arv::PlayerID{7};
-  correction.world_id = arv::WorldID{9};
+TEST(ProtocolTests, PlayerMoveCorrectionRoundTripsThroughSerialization) {
+  arv::protocol::ClientboundPlayerMoveCorrection correction;
+  correction.rejected_sequence = 55;
   correction.position = {1.0F, 2.0F, 3.0F};
   correction.velocity = {0.5F, -1.0F, 2.5F};
   correction.yaw_radians = 0.75F;
   correction.pitch_radians = -0.25F;
-  correction.movement_mode = arv::player::MovementMode::Flying;
-  correction.game_mode_id = std::string{arv::player::CreativeGameModeID};
-  correction.resolved_core_permissions.can_fly = true;
-  correction.resolved_core_permissions.has_creative_inventory = true;
-  correction.grounded = false;
-  correction.sneaking = true;
-  correction.swimming = true;
-  correction.breath_seconds = 12.5F;
-  correction.selected_hotbar_slot = 6;
-  correction.block_break.active = true;
-  correction.block_break.block = {{4, 5, 6}};
-  correction.block_break.variant = arv::voxel::BlockVariantID{3};
-  correction.block_break.progress = 0.42F;
-  correction.block_break.stage = 4;
+  correction.flags = arv::protocol::PlayerMoveFlags::Flying;
+  correction.reason = arv::protocol::PlayerMoveCorrectionReason::TooFar;
 
-  const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_player_correction(correction);
-  const auto decoded = arv::protocol::deserialize_clientbound_player_correction(bytes);
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_player_move_correction(correction);
+  const auto decoded = arv::protocol::deserialize_clientbound_player_move_correction(bytes);
 
   ASSERT_TRUE(decoded);
-  EXPECT_EQ(decoded.value().server_tick, 55U);
-  EXPECT_EQ(decoded.value().player_id, (arv::PlayerID{7}));
-  EXPECT_EQ(decoded.value().world_id, (arv::WorldID{9}));
+  EXPECT_EQ(decoded.value().rejected_sequence, 55U);
   EXPECT_EQ(decoded.value().position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
   EXPECT_EQ(decoded.value().velocity, (arv::Vec3f{0.5F, -1.0F, 2.5F}));
   EXPECT_FLOAT_EQ(decoded.value().yaw_radians, 0.75F);
   EXPECT_FLOAT_EQ(decoded.value().pitch_radians, -0.25F);
-  EXPECT_EQ(decoded.value().movement_mode, arv::player::MovementMode::Flying);
-  EXPECT_EQ(decoded.value().game_mode_id, arv::player::CreativeGameModeID);
-  EXPECT_TRUE(decoded.value().resolved_core_permissions.can_fly);
-  EXPECT_TRUE(decoded.value().resolved_core_permissions.has_creative_inventory);
-  EXPECT_FALSE(decoded.value().grounded);
-  EXPECT_TRUE(decoded.value().sneaking);
-  EXPECT_TRUE(decoded.value().swimming);
-  EXPECT_FLOAT_EQ(decoded.value().breath_seconds, 12.5F);
-  EXPECT_EQ(decoded.value().selected_hotbar_slot, 6U);
+  EXPECT_TRUE(arv::protocol::has_move_flag(
+      decoded.value().flags,
+      arv::protocol::PlayerMoveFlags::Flying));
+  EXPECT_EQ(decoded.value().reason, arv::protocol::PlayerMoveCorrectionReason::TooFar);
+}
+
+TEST(ProtocolTests, PlayerVelocityRoundTripsThroughSerialization) {
+  arv::protocol::ClientboundPlayerVelocity velocity;
+  velocity.server_tick = 88;
+  velocity.player_id = arv::PlayerID{9};
+  velocity.velocity = {3.0F, 4.0F, -5.0F};
+  velocity.knockback_control_suppression_ticks = 2;
+
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_player_velocity(velocity);
+  const auto decoded = arv::protocol::deserialize_clientbound_player_velocity(bytes);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().server_tick, 88U);
+  EXPECT_EQ(decoded.value().player_id, (arv::PlayerID{9}));
+  EXPECT_EQ(decoded.value().velocity, (arv::Vec3f{3.0F, 4.0F, -5.0F}));
+  EXPECT_EQ(decoded.value().knockback_control_suppression_ticks, 2U);
+}
+
+TEST(ProtocolTests, SetMovementHzRoundTripsThroughSerialization) {
+  const arv::protocol::ClientboundSetMovementHz settings{30.0F};
+
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_set_movement_hz(settings);
+  const auto decoded = arv::protocol::deserialize_clientbound_set_movement_hz(bytes);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_FLOAT_EQ(decoded.value().movement_hz, 30.0F);
+}
+
+TEST(ProtocolTests, PlayerBlockBreakProgressRoundTripsThroughSerialization) {
+  arv::protocol::ClientboundPlayerBlockBreakProgress progress;
+  progress.server_tick = 99;
+  progress.player_id = arv::PlayerID{7};
+  progress.block_break.active = true;
+  progress.block_break.block = {{3, 4, 5}};
+  progress.block_break.variant = arv::voxel::BlockVariantID{11};
+  progress.block_break.progress = 0.5F;
+  progress.block_break.stage = 4;
+
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_player_block_break_progress(progress);
+  const auto decoded = arv::protocol::deserialize_clientbound_player_block_break_progress(bytes);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().server_tick, 99U);
+  EXPECT_EQ(decoded.value().player_id, (arv::PlayerID{7}));
   EXPECT_TRUE(decoded.value().block_break.active);
-  EXPECT_EQ(decoded.value().block_break.block, (arv::BlockPos{{4, 5, 6}}));
-  EXPECT_EQ(decoded.value().block_break.variant, (arv::voxel::BlockVariantID{3}));
-  EXPECT_FLOAT_EQ(decoded.value().block_break.progress, 0.42F);
+  EXPECT_EQ(decoded.value().block_break.block, (arv::BlockPos{{3, 4, 5}}));
+  EXPECT_EQ(decoded.value().block_break.variant, (arv::voxel::BlockVariantID{11}));
+  EXPECT_FLOAT_EQ(decoded.value().block_break.progress, 0.5F);
   EXPECT_EQ(decoded.value().block_break.stage, 4U);
 }
 

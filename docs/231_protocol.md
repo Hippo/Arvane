@@ -67,6 +67,8 @@ Examples:
 - chunk unloads
 - block changes
 - entity spawn/despawn
+- local player movement corrections
+- local player server-applied velocity impulses
 - gameplay-affecting plugin messages
 - plugin-provided reliable commands
 
@@ -76,7 +78,7 @@ Used for frequent state where old data becomes useless.
 
 Examples:
 
-- client input samples
+- `ServerboundPlayerMove`
 - player look direction
 - entity movement snapshots
 - transient physics snapshots
@@ -356,89 +358,142 @@ Client render interpolation may use snapshot history, but gameplay authority rem
 
 ---
 
-## Client Input Protocol
+## Player Movement Protocol
 
-Client input is sent as unreliable latest-wins messages.
-
-```text
-ServerboundInputBatch
-{
-    u64 first_input_tick;
-    u16 input_count;
-    InputSample inputs[input_count];
-}
-```
+Player movement is sent as unreliable latest-wins messages.
 
 ```text
-InputSample
+ServerboundPlayerMove
 {
-    u32 buttons;
-    i16 move_x;
-    i16 move_z;
-    i16 look_delta_x;
-    i16 look_delta_y;
+    u32 sequence;
+    u64 client_tick;
+    Vec3f position;
+    Vec3f velocity;
+    f32 yaw_radians;
+    f32 pitch_radians;
+    u32 movement_flags;
+    u16 action_flags;
     u8 selected_hotbar_slot;
 }
 ```
 
-`first_input_tick + sample_index` is the tick for each sample. Client input
-remains unreliable latest-wins; it must not be moved to reliable ordered just to
-avoid input loss. The client stores every locally generated sample it sends in a
-bounded pending-input history for prediction/reconciliation.
+`sequence` is a monotonically increasing client movement packet counter. The
+server uses it to reject stale movement. `client_tick` is diagnostic context;
+movement guardrails use server receive time, not client-provided elapsed time.
+
+`movement_flags` describes compact locomotion state such as on-ground,
+sneaking, sprinting, swimming, and flying. `action_flags` carries edge/held
+actions that still require server gameplay validation. Hotbar selection rides on
+this packet so the server can process interaction commands with the intended
+held slot.
 
 The server must validate:
 
 * movement speed
+* movement distance
+* finite coordinates and rotation
+* loaded destination chunk
+* collision sanity
 * interaction reach
 * selected slot legality
 * action cooldowns
 * world permissions
 
-The client may predict local movement, but the server owns final position.
+Accepted movement updates the server's latest accepted player transform and is
+replicated to observers through entity snapshots. Rejected movement sends a
+reliable `ClientboundPlayerMoveCorrection`.
 
 ---
 
-## Player Correction
+## Player Movement Send Rate
 
-Reliable or unreliable latest-wins depending on correction severity.
+The client defaults to a 20 Hz movement send rate.
+
+Servers that use a non-default cadence send:
 
 ```text
-ClientboundPlayerCorrection
+ClientboundSetMovementHz
 {
-    u64 server_tick;
-    PlayerID player_id;
-    WorldID world_id;
+    f32 movement_hz;
+}
+```
+
+This packet is reliable ordered session setup data. It is sent during world join
+only when the configured movement send rate differs from the default. The client
+applies it to future `ServerboundPlayerMove` cadence; it does not acknowledge
+the packet separately.
+
+---
+
+## Player Movement Correction
+
+Movement corrections are reliable ordered.
+
+```text
+ClientboundPlayerMoveCorrection
+{
+    u32 rejected_sequence;
     Vec3f position;
     Vec3f velocity;
     f32 yaw_radians;
     f32 pitch_radians;
-    MovementMode movement_mode;
-    string game_mode_id;
-    u16 resolved_core_permissions;
-    bool grounded;
-    bool sneaking;
-    bool swimming;
-    f32 breath_seconds;
-    u8 selected_hotbar_slot;
+    u32 movement_flags;
+    u8 reason;
+}
+```
+
+The client applies this packet directly to the local player transform and
+velocity. There is no per-movement acknowledgement and no rewind/replay step.
+
+Correction reasons include invalid numbers, stale packets, excessive speed,
+excessive single-packet distance, collision, unloaded destination chunks,
+out-of-world coordinates, missing permissions, server teleports, and unknown
+fallbacks.
+
+---
+
+## Player Velocity
+
+Server-applied local player velocity impulses are reliable ordered.
+
+```text
+ClientboundPlayerVelocity
+{
+    u64 server_tick;
+    PlayerID player_id;
+    Vec3f velocity;
+    u32 knockback_control_suppression_ticks;
+}
+```
+
+The server sends this packet to the owning client when authoritative gameplay
+changes that player's velocity without teleporting them. Combat knockback uses
+the existing server knockback calculation and sends the resulting velocity plus
+the short control-suppression window used by the knockback system.
+
+The client applies the velocity directly to the local movement state. Upward
+velocity clears the local on-ground flag. During the suppression window, local
+horizontal input is blended with the incoming knockback velocity instead of
+immediately overriding it. This packet does not acknowledge movement and does
+not imply that older movement packets were accepted.
+
+---
+
+## Player Block-Break Progress
+
+Block-break UI progress is separate from movement correction.
+
+```text
+ClientboundPlayerBlockBreakProgress
+{
+    u64 server_tick;
+    PlayerID player_id;
     BlockBreakProgress block_break;
 }
 ```
 
-Large corrections should be reliable.
-
-Small frequent movement snapshots should be unreliable latest-wins.
-
-The client applies local-player corrections with rewind and replay:
-
-* discard corrections with `server_tick <= last_confirmed_server_tick`
-* remove pending inputs with `input_tick <= server_tick`
-* replace predicted simulation state with the authoritative correction
-* replay remaining pending inputs in increasing tick order
-* classify the visual error as ignore, smooth, or snap
-
-The server correction overrides prediction. Client-predicted position, velocity,
-collision, inventory, block edits, and interaction results are never trusted by
-the server.
+This packet is transient latest-wins gameplay state. It updates the local
+mining/progress presentation and does not imply movement acceptance.
 
 ---
 
@@ -914,9 +969,9 @@ Current core lanes:
 
 | Lane | Reliability            | Message types                                 |
 | ---: | ---------------------- | --------------------------------------------- |
-|  `0` | reliable               | `ServerboundHello`, `ClientboundHello`, disconnect, world join/leave |
+|  `0` | reliable               | `ServerboundHello`, `ClientboundHello`, `ClientboundSetMovementHz`, disconnect, world join/leave |
 |  `1` | reliable               | block updates, entity lifecycle, inventory, reliable gameplay actions |
-|  `2` | unreliable latest-wins | `ServerboundInputBatch`, `ClientboundPlayerCorrection`, `ClientboundEntitySnapshot` |
+|  `2` | mixed movement         | `ServerboundPlayerMove`, `ClientboundEntitySnapshot`, `ClientboundPlayerMoveCorrection`, `ClientboundPlayerVelocity` |
 |  `3` | reliable bulk          | `ClientboundChunkData`, `ClientboundChunkUnload`, skin image upload/download chunks |
 |  `4` | mixed/debug            | ping/pong, diagnostics, dev traffic           |
 
@@ -964,9 +1019,8 @@ Examples:
 * older chunk block/light versions are discarded
 * older inventory revision is discarded
 * older entity snapshot is discarded
-* client input older than the server input window is discarded
-* player corrections at or before the last confirmed server tick are discarded
-* client pending inputs at or before a confirmed correction tick are acknowledged and pruned
+* stale player movement sequences are rejected or ignored
+* stale entity snapshots are discarded by tick
 * block update targeting an unloaded chunk is queued briefly or rejected
 
 ---

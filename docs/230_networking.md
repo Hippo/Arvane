@@ -9,8 +9,9 @@ Networking must support:
 - multiple worlds/dimensions
 - chunk streaming
 - entity replication
-- player prediction
-- reconciliation
+- client-authored player movement with server guardrails
+- direct movement correction when guardrails reject a packet
+- direct local velocity impulses when authoritative gameplay applies knockback
 - future gameplay systems without redesigning the protocol
 
 The networking layer exists to synchronize client-visible state. It does not own world simulation, entity simulation, chunk storage, persistence, or gameplay rules.
@@ -31,8 +32,8 @@ The networking system should provide:
 
 Networking code must avoid becoming a second simulation layer.
 
-The server simulates the world.  
-The client renders, predicts local movement, and displays replicated state.
+The server simulates shared world state.
+The client renders, runs local player locomotion, and displays replicated state.
 
 ---
 
@@ -49,7 +50,7 @@ The server owns:
 - entity simulation
 - inventory state
 - player profiles and sessions
-- authoritative player position
+- latest accepted player position
 - authoritative interaction results
 - persistence decisions
 
@@ -59,7 +60,7 @@ The client owns:
 - camera presentation
 - local render state
 - rendering received chunk/block/light/mesh data
-- client-side prediction for the controlled local player only
+- local locomotion for the controlled player
 - interpolation buffers
 - UI state
 - temporary visual effects
@@ -135,7 +136,7 @@ Gameplay networking responsibilities:
 - chunk streaming
 - entity synchronization
 - input commands
-- reconciliation data
+- movement validation and correction data
 
 The transport backend should be replaceable without rewriting gameplay networking.
 
@@ -201,8 +202,8 @@ Networking should be tick-aware.
 Important tick values:
 
 - server tick
-- client predicted tick
-- last acknowledged input tick
+- client movement tick
+- movement packet sequence
 - replicated entity state tick
 - chunk data version or generation number
 
@@ -212,119 +213,96 @@ Messages that describe simulation state should include enough timing information
 
 ## Client Input Flow
 
-Clients send input commands to the server.
+Clients send player movement packets and gameplay requests to the server.
 
-Input commands should contain:
+`ServerboundPlayerMove` contains:
 
 - client tick or sequence number
-- movement intent
-- action buttons
+- proposed position and velocity
+- yaw and pitch
+- movement flags
+- action flags
 - selected hotbar slot
-- interaction requests
-- relevant camera/view direction
 
-The server processes input during simulation.
+The client computes local locomotion immediately from input and sends the
+result at a bounded movement cadence. Hotbar and interaction flags may force an
+immediate movement packet so gameplay requests are not delayed unnecessarily.
+The client defaults to a 20 Hz movement send rate and does not need local server
+configuration to start moving. If a server uses a different movement cadence, it
+sends `ClientboundSetMovementHz` reliably during world join.
 
-The server should acknowledge processed input so the client can discard old prediction history.
+The server validates movement packets against last accepted state, permissions,
+world bounds, loaded chunks, collision, and configured speed/distance limits.
+The server does not acknowledge ordinary movement packets. It only sends
+`ClientboundPlayerMoveCorrection` when it rejects or forcibly adjusts a move.
 
-The client should not send final authoritative positions as commands. It may send predicted position for diagnostics or anti-cheat comparison, but movement authority remains on the server.
+Authoritative gameplay may still change the local player's velocity without a
+teleport. Combat knockback sends `ClientboundPlayerVelocity` reliably to the
+owning client with the server-computed velocity and knockback control
+suppression ticks. The client applies the velocity to local locomotion; remote
+observers continue to see accepted player state through entity snapshots.
+
+Interaction and inventory results remain server-authoritative. Even when
+actions are carried on a movement packet, block edits, combat, item use, and
+inventory mutations are validated against the current accepted server state.
 
 ---
 
-## Prediction and Reconciliation
+## Client-Authored Movement
 
-The client may predict local player movement for responsiveness.
+The controlled local player moves immediately on the client. This path is not a
+rewind/replay system. The local controller owns the current player transform,
+velocity, yaw, pitch, and movement flags used for presentation and outgoing
+movement packets.
 
-Predicted systems may include:
+`ServerboundPlayerMove` is unreliable latest-wins and includes a monotonically
+increasing sequence number. The sequence lets the server ignore stale movement
+packets. The `client_tick` field is diagnostic and ordering context only; the
+server uses its own receive time for speed validation.
 
-- walking
-- jumping
-- flying
-- camera-relative movement
-- local interaction feedback
-- held item animation
+The server keeps a small accepted movement state per connected player:
 
-Prediction is presentation and input responsiveness only. The server remains the
-owner of authoritative player position, velocity, collisions, movement mode,
-inventory, block edits, and interaction results. A predicted client state must
-never be accepted by the server as authoritative movement state.
-
-Local movement prediction uses the same simulation-facing input sample that is
-sent in `ServerboundInputBatch`. For each fixed tick, the client:
-
-1. consumes the local input snapshot
-2. converts it to an `InputSample`
-3. stores it in a bounded tick-indexed pending-input history
-4. sends it using the unreliable latest-wins movement lane
-5. immediately simulates the controlled local player from that input
-
-Prediction is not applied to remote players. Remote entities continue to use
-replicated snapshot/interpolation behavior.
-
-The server periodically sends authoritative player state.
-
-Authoritative player state should include:
-
-- server tick
 - position
-- velocity
-- movement mode
-- grounded state
-- relevant player flags
-- enough timing information for the client to discard acknowledged local inputs
+- velocity derived from accepted movement when needed
+- yaw and pitch
+- movement flags
+- last accepted sequence
+- server tick and receive time
 
-When the client receives authoritative state:
+The accepted position is used for replication, interaction reach checks, combat,
+persistence, and world-interest decisions. Other clients see that accepted
+transform through entity snapshot replication.
 
-1. discard it if `server_tick <= last_confirmed_server_tick`
-2. compare it against predicted state for the same tick if that history exists
-3. advance `last_confirmed_server_tick`
-4. remove pending local inputs with `input_tick <= server_tick`
-5. set predicted simulation state to the authoritative state
-6. replay remaining pending inputs in increasing tick order
-7. smooth small visual corrections where appropriate
+When a packet is accepted, the server writes the accepted transform to player
+state. When a packet is rejected, the server sends
+`ClientboundPlayerMoveCorrection` reliably with the last accepted transform and
+a rejection reason. The client applies the correction directly. It does not
+rewind, replay, or wait for per-packet acknowledgements.
 
-Simulation correction and render smoothing should be separate.
+Recent server-applied knockback is accounted for by movement validation using
+the server velocity and the remaining control-suppression window. This keeps
+normal speed guardrails active while allowing the first post-knockback movement
+packet to include the impulse the server just assigned.
 
-The physics state may snap or rewind internally.  
-The camera and rendered player model may smooth visually.
+Movement validation should stay lightweight. It checks final state and derived
+motion; it must not run the full player controller for every remote player.
 
-If the predicted state for the correction tick has already been pruned, the
-client falls back to the authoritative state and replays whatever newer input
-history is still available. This should be counted as a missing-history
-fallback for debugging.
-
----
-
-## Reconciliation Rules
-
-Reconciliation must be deterministic enough to avoid constant correction under normal conditions.
-
-The goal is close-enough consistency, not strict lockstep determinism.
-
-Client prediction must use the same movement rules as the server where practical.
-
-Shared movement constants should come from the same configuration source.
+Shared movement constants should come from configuration where practical.
 
 Do not scatter movement constants across client and server code.
 
-The server remains authoritative when prediction differs.
+Guardrails are configured under `network.movement`, including send cadence,
+speed limits, distance tolerances, unloaded-chunk rejection, collision checks,
+and correction cooldown.
 
-The pending input history must be bounded. A first limit of roughly five seconds
-of simulation ticks is acceptable; this covers high latency without allowing
-unbounded memory growth. Inputs older than the confirmed server tick are dropped,
-and impossibly old inputs are pruned defensively. Reconciliation must never
-replay inputs out of tick order.
+Small local presentation smoothing may be used after a correction, but gameplay
+state must use the corrected transform immediately.
 
-Small corrections may be ignored or smoothed visually. Medium corrections should
-blend the rendered transform toward the corrected predicted simulation state
-over a short window. Large corrections snap immediately. Smoothing applies only
-to presentation; the simulation/collision body becomes corrected immediately.
-
-Prediction depends on local collision data. When client terrain data needed for
-prediction is unavailable, collision queries should use a conservative fallback
-such as treating missing chunks as solid. The server still corrects any
-disagreement, but conservative prediction avoids walking visually through
-unloaded terrain and then rubberbanding severely.
+Local movement depends on local collision data. When client terrain data needed
+for local collision is unavailable, collision queries should use a conservative
+fallback such as treating missing chunks as solid. The server still rejects
+invalid movement, but conservative local movement avoids walking visually
+through unknown chunks before a correction arrives.
 
 ---
 
@@ -482,7 +460,7 @@ Interest is usually determined by:
 
 The server owns entity creation, destruction, and authoritative state.
 
-The client maintains replicated entity mirrors for rendering and prediction.
+The client maintains replicated entity mirrors for rendering and local presentation.
 
 ---
 
@@ -545,13 +523,16 @@ Replication should avoid sending unchanged state every tick unless required.
 
 ## Entity Interpolation
 
-Remote entities should usually be interpolated, not predicted.
+Remote entities should usually be interpolated, not locally simulated.
 
-The client keeps a short buffer of received entity snapshots.
+The client keeps presentation interpolation state for each replicated entity.
+When a new authoritative transform arrives, rendering eases from the current
+rendered transform toward the new target over the elapsed server-tick interval.
+Dropped-item mirrors use the same presentation smoothing as other entities.
 
-Rendering uses interpolated state between known snapshots.
-
-This provides smoother movement under jitter and packet delay.
+Gameplay queries continue to use authoritative mirror transforms, not smoothed
+render transforms. This keeps visuals smoother without feeding render
+interpolation back into simulation or interaction validation.
 
 Important entities may use higher update rates or special replication rules.
 
@@ -571,12 +552,12 @@ The local player is special.
 
 For the local player:
 
-- input is predicted client-side
-- server state is reconciled
-- camera follows predicted or smoothed local state
+- movement is computed client-side and sent as `ServerboundPlayerMove`
+- rejected movement is corrected by `ClientboundPlayerMoveCorrection`
+- camera follows local or corrected player state
 - remote clients receive replicated authoritative state
 
-The local client should not treat its predicted state as authoritative world truth.
+The local client should not treat local state as authoritative world truth.
 
 Interactions still require server validation.
 
@@ -644,9 +625,9 @@ Reliable ordered:
 
 Unreliable latest-wins:
 
-- player input commands where newer input supersedes older input
+- `ServerboundPlayerMove` where newer movement supersedes older movement
 - entity transform snapshots
-- small player corrections
+- transient player block-break progress
 - transient physics, look, and movement state
 
 Unreliable event:
@@ -655,8 +636,8 @@ Unreliable event:
 - sound cues
 - temporary visual hints
 
-Hybrid cases, such as large teleports versus small player correction nudges, must choose
-the reliability class by semantic severity.
+Movement corrections are reliable ordered because they snap the local player
+back to accepted server state.
 
 The protocol should not force all traffic through one reliability mode.
 
@@ -670,7 +651,7 @@ High-priority data:
 
 - session critical messages
 - nearby chunks
-- local player corrections
+- local player movement corrections
 - nearby entity state
 - inventory confirmations
 
@@ -1087,9 +1068,9 @@ Arvane currently maps message lanes as:
 
 | Lane | Reliability            | Message types                                 |
 | ---: | ---------------------- | --------------------------------------------- |
-|  `0` | reliable               | handshake, disconnect, world join/leave       |
+|  `0` | reliable               | handshake, movement cadence setup, disconnect, world join/leave |
 |  `1` | reliable               | gameplay-critical blocks, inventory, entity lifecycle |
-|  `2` | unreliable latest-wins | input, movement snapshots, player corrections |
+|  `2` | mixed movement         | player movement, movement snapshots, corrections, local velocity impulses |
 |  `3` | reliable bulk          | chunk streaming                               |
 |  `4` | mixed/debug            | ping/pong, diagnostics                        |
 
@@ -1150,14 +1131,14 @@ Networking should expose diagnostics for:
 - pending reliable messages
 - entity replication counts
 - correction frequency
-- prediction error
+- movement rejection/correction rate
 - dropped/stale messages
 - compression ratio
 
 Debug tools should help distinguish:
 
 - server simulation bugs
-- client prediction bugs
+- client local-movement bugs
 - transport issues
 - replication interest bugs
 - chunk streaming stalls
@@ -1168,14 +1149,14 @@ Debug tools should help distinguish:
 
 Do not:
 
-- trust client position as authoritative
+- accept client position without movement guardrails
 - mutate world state directly from packet handlers
 - expose raw ECS entity IDs as network IDs
 - serialize raw pointers or raw engine memory
 - make singleplayer bypass networking semantics
 - send every entity to every client
 - stream all chunks without relevance limits
-- let chunk streaming starve player input or corrections
+- let chunk streaming starve player movement or corrections
 - mix global session state with world-local replicated state
 - hard-code protocol behavior into rendering code
 
@@ -1185,11 +1166,11 @@ Do not:
 
 Arvane networking is server-authoritative, tick-aware, and interest-based.
 
-The server owns simulation.  
-The client owns presentation and prediction.
+The server owns shared simulation and gameplay authority.
+The client owns presentation and local player locomotion.
 
 Chunks are streamed within explicit world replication boundaries.  
-Entities are replicated by interest, with interpolation for remote entities and prediction for the local player.  
+Entities are replicated by interest, with interpolation for remote entities and client-authored guarded movement for the local player.
 Client actions are requests, not mutations.  
 Authoritative state flows from the server back to the client.
 

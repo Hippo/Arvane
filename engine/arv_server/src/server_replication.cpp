@@ -1,103 +1,92 @@
 #include "server_runtime_internal.hpp"
 
+#include <algorithm>
 #include <optional>
 #include <utility>
 
 namespace arv::server::detail {
 namespace {
 
-[[nodiscard]] protocol::ClientboundPlayerCorrection make_player_correction(
-    TickIndex server_tick,
-    const player::PlayerState& player_state,
-    Vec3f external_velocity,
-    const protocol::BlockBreakProgress* block_break = nullptr) {
-  protocol::ClientboundPlayerCorrection correction;
-  correction.server_tick = server_tick;
-  correction.player_id = player_state.player_id;
-  correction.world_id = player_state.world_id;
-  correction.position = player_state.position;
-  correction.velocity = player_state.velocity + external_velocity;
-  correction.yaw_radians = player_state.yaw_radians;
-  correction.pitch_radians = player_state.pitch_radians;
-  correction.movement_mode = player_state.movement_mode;
-  correction.game_mode_id = player_state.game_mode_id;
-  correction.resolved_core_permissions = player_state.resolved_permissions.core;
-  correction.grounded = player_state.grounded;
-  correction.sneaking = player_state.sneaking;
-  correction.swimming = player_state.swimming;
-  correction.breath_seconds = player_state.breath_seconds;
-  correction.selected_hotbar_slot = player_state.selected_hotbar_slot;
-  if (block_break != nullptr) {
-    correction.block_break = *block_break;
+[[nodiscard]] protocol::PlayerMoveFlags move_flags_from_player(
+    const player::PlayerState& player_state) noexcept {
+  protocol::PlayerMoveFlags flags = protocol::PlayerMoveFlags::None;
+  if (player_state.grounded) {
+    flags |= protocol::PlayerMoveFlags::OnGround;
   }
-  return correction;
+  if (player_state.sneaking) {
+    flags |= protocol::PlayerMoveFlags::Sneaking;
+  }
+  if (player_state.swimming) {
+    flags |= protocol::PlayerMoveFlags::Swimming;
+  }
+  if (player_state.movement_mode == player::MovementMode::Flying) {
+    flags |= protocol::PlayerMoveFlags::Flying;
+  }
+  return flags;
 }
 
-[[nodiscard]] bool same_correction_payload(
-    const protocol::ClientboundPlayerCorrection& lhs,
-    const protocol::ClientboundPlayerCorrection& rhs) {
-  return lhs.player_id == rhs.player_id &&
-         lhs.world_id == rhs.world_id &&
-         lhs.position == rhs.position &&
-         lhs.velocity == rhs.velocity &&
-         lhs.yaw_radians == rhs.yaw_radians &&
-         lhs.pitch_radians == rhs.pitch_radians &&
-         lhs.movement_mode == rhs.movement_mode &&
-         lhs.game_mode_id == rhs.game_mode_id &&
-         lhs.resolved_core_permissions == rhs.resolved_core_permissions &&
-         lhs.grounded == rhs.grounded &&
-         lhs.sneaking == rhs.sneaking &&
-         lhs.swimming == rhs.swimming &&
-         lhs.breath_seconds == rhs.breath_seconds &&
-         lhs.selected_hotbar_slot == rhs.selected_hotbar_slot &&
-         lhs.block_break == rhs.block_break;
+[[nodiscard]] protocol::ClientboundPlayerMoveCorrection make_player_move_correction(
+    u32 rejected_sequence,
+    const player::PlayerState& player_state,
+    protocol::PlayerMoveCorrectionReason reason) {
+  protocol::ClientboundPlayerMoveCorrection correction;
+  correction.rejected_sequence = rejected_sequence;
+  correction.position = player_state.position;
+  correction.velocity = player_state.velocity;
+  correction.yaw_radians = player_state.yaw_radians;
+  correction.pitch_radians = player_state.pitch_radians;
+  correction.flags = move_flags_from_player(player_state);
+  correction.reason = reason;
+  return correction;
 }
 
 } // namespace
 
-void ServerRuntimeImpl::send_player_corrections() {
-  for (const SessionID session_id : sessions_.session_ids()) {
-    ServerSession* session = sessions_.find(session_id);
-    if (session == nullptr) {
-      continue;
-    }
-
-    const player::PlayerState* player_state = default_world_.find_player(session->player_id);
-    if (player_state == nullptr) {
-      continue;
-    }
-
-    protocol::BlockBreakProgress block_break;
-    if (const auto found = block_break_attempts_.find(player_state->player_id);
-        found != block_break_attempts_.end()) {
-      block_break.active = true;
-      block_break.block = found->second.block;
-      block_break.variant = found->second.variant;
-      block_break.progress = found->second.progress;
-      block_break.stage = found->second.stage;
-    }
-    protocol::ClientboundPlayerCorrection correction = make_player_correction(
-        tick_index_,
-        *player_state,
-        {},
-        block_break.active ? &block_break : nullptr);
-    if (const auto found = last_sent_player_corrections_.find(player_state->player_id);
-        found != last_sent_player_corrections_.end() &&
-        same_correction_payload(found->second, correction)) {
-      continue;
-    }
-
-    const net::NetworkResult send_result = send_protocol_message(
-        *transport_,
-        session->connection_id,
-        protocol::MessageType::ClientboundPlayerCorrection,
-        protocol::ReliabilityClass::UnreliableLatestWins,
-        protocol::NetworkLane::Movement,
-        protocol::serialize_clientbound_player_correction(correction));
-    if (send_result) {
-      last_sent_player_corrections_[player_state->player_id] = std::move(correction);
-    }
+void ServerRuntimeImpl::send_player_move_correction(
+    const ServerSession& session,
+    const player::PlayerState& player_state,
+    u32 rejected_sequence,
+    protocol::PlayerMoveCorrectionReason reason) {
+  const double now_seconds =
+      static_cast<double>(tick_index_) / static_cast<double>(std::max<TickRate>(base_tps_, 1U));
+  const double cooldown_seconds =
+      static_cast<double>(movement_.correction_cooldown_ms) / 1000.0;
+  if (const auto found = last_player_move_correction_seconds_.find(player_state.player_id);
+      found != last_player_move_correction_seconds_.end() &&
+      now_seconds - found->second < cooldown_seconds) {
+    return;
   }
+
+  protocol::ClientboundPlayerMoveCorrection correction =
+      make_player_move_correction(rejected_sequence, player_state, reason);
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundPlayerMoveCorrection,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Movement,
+      protocol::serialize_clientbound_player_move_correction(correction));
+  if (send_result) {
+    last_player_move_correction_seconds_[player_state.player_id] = now_seconds;
+  }
+}
+
+void ServerRuntimeImpl::send_player_velocity(
+    const ServerSession& session,
+    const player::PlayerState& player_state) {
+  protocol::ClientboundPlayerVelocity velocity;
+  velocity.server_tick = tick_index_;
+  velocity.player_id = player_state.player_id;
+  velocity.velocity = player_state.velocity;
+  velocity.knockback_control_suppression_ticks =
+      player_state.knockback_control_suppression_ticks;
+  (void)send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundPlayerVelocity,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Movement,
+      protocol::serialize_clientbound_player_velocity(velocity));
 }
 
 void ServerRuntimeImpl::send_block_updates() {
@@ -151,6 +140,58 @@ void ServerRuntimeImpl::send_block_updates() {
               chunk->block_version());
         }
       }
+    }
+  }
+}
+
+void ServerRuntimeImpl::send_player_block_break_progress() {
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr || session->world_id != default_world_.id()) {
+      continue;
+    }
+
+    const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+    if (player_state == nullptr) {
+      continue;
+    }
+
+    protocol::BlockBreakProgress progress;
+    if (const auto found = block_break_attempts_.find(player_state->player_id);
+        found != block_break_attempts_.end()) {
+      progress.active = true;
+      progress.block = found->second.block;
+      progress.variant = found->second.variant;
+      progress.progress = found->second.progress;
+      progress.stage = found->second.stage;
+    }
+
+    const auto last = last_sent_block_break_progress_.find(player_state->player_id);
+    if (last != last_sent_block_break_progress_.end() && last->second == progress) {
+      continue;
+    }
+    if (last == last_sent_block_break_progress_.end() && !progress.active) {
+      continue;
+    }
+
+    protocol::ClientboundPlayerBlockBreakProgress packet;
+    packet.server_tick = tick_index_;
+    packet.player_id = player_state->player_id;
+    packet.block_break = progress;
+    const net::NetworkResult send_result = send_protocol_message(
+        *transport_,
+        session->connection_id,
+        protocol::MessageType::ClientboundPlayerBlockBreakProgress,
+        protocol::ReliabilityClass::UnreliableLatestWins,
+        protocol::NetworkLane::Gameplay,
+        protocol::serialize_clientbound_player_block_break_progress(packet));
+    if (!send_result) {
+      continue;
+    }
+    if (progress.active) {
+      last_sent_block_break_progress_[player_state->player_id] = progress;
+    } else {
+      last_sent_block_break_progress_.erase(player_state->player_id);
     }
   }
 }
