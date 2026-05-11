@@ -2,6 +2,7 @@
 #include "arv/client/local_identity.hpp"
 #include "arv/net/gns_transport.hpp"
 #include "arv/net/in_process_transport.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
@@ -337,6 +338,43 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
   EXPECT_NE(server.worlds().find(arv::server::DefaultWorldID), nullptr);
   EXPECT_TRUE(client.has_authoritative_inventory());
   EXPECT_GT(client.replicated_entity_count(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, ClientChatIsFormattedAndBroadcastByServer) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.set_local_identity(arv::client::make_ephemeral_local_identity("Hippo"));
+  ASSERT_TRUE(client.connect_integrated());
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+
+  client.submit_input({.open_chat_pressed = true});
+  client.submit_input({.text_input = "{\"text\":\"fake admin\"}"});
+  client.submit_input({.text_submit_pressed = true});
+  server.tick();
+  client.fixed_tick(server.tick_index());
+
+  ASSERT_EQ(client.chat_history().size(), 1U);
+  EXPECT_EQ(client.chat_history().front().kind, arv::protocol::ChatMessageKind::Chat);
+  EXPECT_EQ(client.chat_history().front().channel, "arvane:global");
+  EXPECT_EQ(
+      arv::protocol::to_plain_text(client.chat_history().front().message),
+      "Hippo: {\"text\":\"fake admin\"}");
+  const std::vector<arv::protocol::RichTextRun> runs =
+      arv::protocol::flatten_rich_text(client.chat_history().front().message);
+  ASSERT_GE(runs.size(), 3U);
+  EXPECT_TRUE(runs.front().click_event.has_value());
 }
 
 TEST(IntegratedHandshakeTests, DuplicateProfileRejectsNewConnectionOnly) {

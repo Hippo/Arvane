@@ -27,6 +27,7 @@ add_executable(arv_tests
   physics/collision_tests.cpp
   protocol/handshake_tests.cpp
   protocol/auth_tests.cpp
+  protocol/chat_tests.cpp
   protocol/packet_tests.cpp
   player/inventory_tests.cpp
   player/permission_tests.cpp
@@ -37,6 +38,7 @@ add_executable(arv_tests
   render/chunk_meshing_tests.cpp
   sched/scheduler_tests.cpp
   server/chunk_streamer_tests.cpp
+  server/chat_service_tests.cpp
   server/player_movement_validation_tests.cpp
   server/permission_config_tests.cpp
   server/player_profile_tests.cpp

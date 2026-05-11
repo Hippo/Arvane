@@ -320,6 +320,18 @@ struct RenderConfig {
   AtlasesConfig atlases{};
 };
 
+struct UiConfig {
+  struct ChatConfig {
+    u32 max_history_messages{1000U};
+    f32 passive_visible_seconds{8.0F};
+    f32 passive_fade_seconds{2.0F};
+    u32 passive_max_lines{8U};
+    u32 open_max_lines{8U};
+  };
+
+  ChatConfig chat{};
+};
+
 struct ChunkPipelineConfig {
   u32 max_generation_jobs_per_frame{4};
   u32 max_generation_results_per_tick{2};
@@ -403,6 +415,7 @@ struct EngineConfig {
   PhysicsConfig physics{};
   GameplayConfig gameplay{};
   RenderConfig render{};
+  UiConfig ui{};
   ChunkPipelineConfig chunk_pipeline{};
 };
 

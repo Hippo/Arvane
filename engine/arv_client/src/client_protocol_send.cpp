@@ -2,6 +2,7 @@
 
 #include "arv/crypto/hash.hpp"
 #include "arv/protocol/auth.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
@@ -86,6 +87,21 @@ net::NetworkResult ClientProtocolSender::send_keep_alive(
       protocol::ReliabilityClass::UnreliableEvent,
       protocol::NetworkLane::Session,
       protocol::serialize_serverbound_keep_alive(keep_alive));
+}
+
+net::NetworkResult ClientProtocolSender::send_chat_message(
+    const protocol::ServerboundChatMessage& message) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundChatMessage,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_chat_message(message));
 }
 
 net::NetworkResult ClientProtocolSender::send_chunk_interest_update(

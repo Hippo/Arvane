@@ -1,5 +1,6 @@
 set(ARV_SERVER_HEADERS
   include/arv/commands/tp_command.hpp
+  include/arv/server/chat_service.hpp
   include/arv/server/command_services.hpp
   include/arv/server/chunk_streamer.hpp
   include/arv/server/dedicated_lifetime.hpp
@@ -16,6 +17,7 @@ set(ARV_SERVER_HEADERS
 
 add_library(arv_server STATIC
   commands/tp_command.cpp
+  src/chat_service.cpp
   src/chunk_streamer.cpp
   src/permission_config.cpp
   src/player_movement_validation.cpp

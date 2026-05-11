@@ -1,6 +1,7 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/player_constants.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
@@ -67,6 +68,28 @@ std::vector<arv::protocol::ServerboundKeepAlive> serverbound_keep_alives(
     }
   }
   return keep_alives;
+}
+
+std::vector<arv::protocol::ServerboundChatMessage> serverbound_chat_messages(
+    const std::vector<arv::net::NetworkEvent>& events) {
+  std::vector<arv::protocol::ServerboundChatMessage> messages;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ServerboundChatMessage) {
+      continue;
+    }
+    const auto chat =
+        arv::protocol::deserialize_serverbound_chat_message(decoded.value().payload);
+    if (chat) {
+      messages.push_back(chat.value());
+    }
+  }
+  return messages;
 }
 
 void send_to_client(
@@ -161,7 +184,7 @@ private:
 
 } // namespace
 
-TEST(ClientRuntimeTests, ChatDraftIgnoresOpeningKeyThenAcceptsTextEditingAndSubmit) {
+TEST(ClientRuntimeTests, ChatDraftIgnoresOpeningKeyThenAcceptsTextEditingAndSubmitWithoutLocalEcho) {
   arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
 
   client.submit_input(arv::client::InputFrame{
@@ -178,8 +201,7 @@ TEST(ClientRuntimeTests, ChatDraftIgnoresOpeningKeyThenAcceptsTextEditingAndSubm
 
   client.submit_input(arv::client::InputFrame{.text_submit_pressed = true});
   EXPECT_FALSE(client.chat_open());
-  ASSERT_EQ(client.chat_messages().size(), 1U);
-  EXPECT_EQ(client.chat_messages().front(), "hell");
+  EXPECT_TRUE(client.chat_messages().empty());
 }
 
 TEST(ClientRuntimeTests, SlashTextOpensChatWithCommandPrefix) {
@@ -190,6 +212,75 @@ TEST(ClientRuntimeTests, SlashTextOpensChatWithCommandPrefix) {
   EXPECT_TRUE(client.chat_open());
   EXPECT_EQ(client.chat_draft(), "/");
   EXPECT_TRUE(client.chat_messages().empty());
+}
+
+TEST(ClientRuntimeTests, ChatSubmitSendsRawServerboundIntentWhenInGame) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  (void)server_transport->poll_events();
+
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(arv::client::InputFrame{.text_input = " hello "});
+  client.submit_input(arv::client::InputFrame{.text_submit_pressed = true});
+
+  const std::vector<arv::protocol::ServerboundChatMessage> messages =
+      serverbound_chat_messages(server_transport->poll_events());
+  ASSERT_EQ(messages.size(), 1U);
+  EXPECT_EQ(messages.front().message, "hello");
+  EXPECT_FALSE(messages.front().channel.has_value());
+  EXPECT_TRUE(client.chat_messages().empty());
+}
+
+TEST(ClientRuntimeTests, ClientboundChatAppendsRichHistory) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  arv::protocol::TextStylePatch style;
+  style.color = arv::protocol::RgbColor{0x20U, 0x80U, 0xFFU};
+  arv::protocol::ClientboundChatMessage chat;
+  chat.message_id = 9U;
+  chat.channel = "arvane:global";
+  chat.kind = arv::protocol::ChatMessageKind::Chat;
+  chat.message = arv::protocol::plain_rich_text("server says hi", style);
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundChatMessage,
+      arv::protocol::serialize_clientbound_chat_message(chat));
+
+  client.fixed_tick(2);
+
+  ASSERT_EQ(client.chat_messages().size(), 1U);
+  EXPECT_EQ(client.chat_messages().front(), "server says hi");
+  ASSERT_EQ(client.chat_history().size(), 1U);
+  EXPECT_EQ(client.chat_history().front().message_id, 9U);
+  const std::vector<arv::protocol::RichTextRun> runs =
+      arv::protocol::flatten_rich_text(client.chat_history().front().message);
+  ASSERT_EQ(runs.size(), 1U);
+  EXPECT_EQ(runs.front().style.color, (arv::protocol::RgbColor{0x20U, 0x80U, 0xFFU}));
+}
+
+TEST(ClientRuntimeTests, ChatHistoryLimitIsConfigurable) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+  client.configure_chat({2U});
+
+  client.add_chat_message("one");
+  client.add_chat_message("two");
+  client.add_chat_message("three");
+
+  ASSERT_EQ(client.chat_history().size(), 2U);
+  EXPECT_EQ(arv::protocol::to_plain_text(client.chat_history()[0].message), "two");
+  EXPECT_EQ(arv::protocol::to_plain_text(client.chat_history()[1].message), "three");
 }
 
 TEST(ClientRuntimeTests, WorldJoinKeepsLocalPlayerBodyAtServerSpawn) {

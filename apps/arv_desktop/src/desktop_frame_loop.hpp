@@ -194,7 +194,8 @@ private:
   void update_gameplay_ui_snapshots(
       DesktopGameSession& active_session,
       bool has_active_integrated_session,
-      bool fixed_tick_ran);
+      bool fixed_tick_ran,
+      std::chrono::steady_clock::time_point now);
   void update_hotbar_item_popup(
       DesktopGameSession& active_session,
       std::chrono::steady_clock::time_point now);
@@ -204,6 +205,13 @@ private:
       DesktopGameSession& active_session,
       const platform::InputSnapshot& platform_input,
       const std::optional<ui::UiAction>& hover_action);
+  [[nodiscard]] bool append_chat_hover_tooltip_if_needed(
+      DesktopGameSession& active_session,
+      const platform::InputSnapshot& platform_input,
+      const std::optional<ui::UiAction>& hover_action);
+  [[nodiscard]] bool route_chat_mouse_input(
+      DesktopGameSession& active_session,
+      const platform::InputSnapshot& platform_input);
   void build_gameplay_ui(
       DesktopGameSession& active_session,
       const platform::InputSnapshot& platform_input,

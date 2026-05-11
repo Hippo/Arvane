@@ -4,6 +4,7 @@
 #include "arv/crypto/hash.hpp"
 #include "arv/movement/player_movement.hpp"
 #include "arv/protocol/auth.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/server/skin_runtime.hpp"
@@ -417,6 +418,15 @@ void ServerRuntimeImpl::handle_message(
       handle_inventory_action_request(connection_id, request.value());
       return;
     }
+    case protocol::MessageType::ServerboundChatMessage: {
+      auto chat = protocol::deserialize_serverbound_chat_message(decoded.value().payload);
+      if (!chat) {
+        kick_client(connection_id, "Invalid protocol packet.");
+        return;
+      }
+      handle_chat_message(connection_id, std::move(chat.value()));
+      return;
+    }
     case protocol::MessageType::ServerboundAttackEntity: {
       auto attack = protocol::deserialize_serverbound_attack_entity(decoded.value().payload);
       if (!attack) {
@@ -720,6 +730,156 @@ void ServerRuntimeImpl::handle_player_move(
           ? remaining_knockback_suppression_ticks -
                 consumed_knockback_suppression_ticks
           : 0U;
+}
+
+void ServerRuntimeImpl::handle_chat_message(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundChatMessage& message) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated || session->closing) {
+    return;
+  }
+
+  const std::string channel = message.channel.value_or("arvane:global");
+  if (std::string_view{channel} != protocol::ChatChannelGlobal) {
+    send_error_message(
+        *session,
+        chat_formatter_.format_error_message("Unknown or unavailable chat channel."));
+    return;
+  }
+
+  auto normalized = validate_chat_message_text(message.message, chat_validation_);
+  if (!normalized) {
+    send_error_message(
+        *session,
+        chat_formatter_.format_error_message(normalized.error().message));
+    return;
+  }
+
+  const Seconds now_seconds =
+      static_cast<Seconds>(tick_index_) / static_cast<Seconds>(std::max<TickRate>(base_tps_, 1U));
+  ChatRateLimitState& rate_limit = chat_rate_limits_[session->session_id];
+  if (!consume_chat_rate_limit(rate_limit, chat_validation_, now_seconds)) {
+    send_error_message(
+        *session,
+        chat_formatter_.format_error_message("You are sending messages too quickly."));
+    return;
+  }
+
+  ChatFormatContext context;
+  context.sender_profile_id = session->profile_id;
+  context.sender_name =
+      session->display_name.empty() ? session->profile_name : session->display_name;
+  context.channel = channel;
+  context.raw_message = std::move(normalized.value());
+  protocol::RichText formatted = chat_formatter_.format_player_chat(context);
+  const protocol::RichTextValidation validation = protocol::validate_rich_text(formatted);
+  if (!validation.valid) {
+    core::warn("chat", "refusing to broadcast invalid formatted chat: {}", validation.message);
+    send_error_message(
+        *session,
+        chat_formatter_.format_error_message("Chat message could not be formatted."));
+    return;
+  }
+
+  const protocol::ClientboundChatMessage packet{
+      next_chat_message_id_++,
+      "arvane:global",
+      protocol::ChatMessageKind::Chat,
+      std::move(formatted)};
+  const std::vector<u8> payload = protocol::serialize_clientbound_chat_message(packet);
+  sessions_.for_each_session([&](const ServerSession& recipient) {
+    if (!recipient.authenticated || recipient.closing) {
+      return;
+    }
+    const net::NetworkResult send_result = send_protocol_message(
+        *transport_,
+        recipient.connection_id,
+        protocol::MessageType::ClientboundChatMessage,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Gameplay,
+        payload);
+    log_send_failure_if_dedicated(mode_, recipient.connection_id, send_result);
+  });
+  core::info(
+      "chat",
+      "[{}] {}: {}",
+      packet.channel,
+      context.sender_name,
+      context.raw_message);
+}
+
+void ServerRuntimeImpl::send_system_message(
+    const ServerSession& recipient,
+    protocol::RichText message) {
+  const protocol::RichTextValidation validation = protocol::validate_rich_text(message);
+  if (!validation.valid) {
+    core::warn("chat", "refusing to send invalid system chat: {}", validation.message);
+    return;
+  }
+  const protocol::ClientboundChatMessage packet{
+      next_chat_message_id_++,
+      "arvane:system",
+      protocol::ChatMessageKind::System,
+      std::move(message)};
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      recipient.connection_id,
+      protocol::MessageType::ClientboundChatMessage,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_clientbound_chat_message(packet));
+  log_send_failure_if_dedicated(mode_, recipient.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::send_error_message(
+    const ServerSession& recipient,
+    protocol::RichText message) {
+  const protocol::RichTextValidation validation = protocol::validate_rich_text(message);
+  if (!validation.valid) {
+    core::warn("chat", "refusing to send invalid error chat: {}", validation.message);
+    return;
+  }
+  const protocol::ClientboundChatMessage packet{
+      next_chat_message_id_++,
+      "arvane:system",
+      protocol::ChatMessageKind::Error,
+      std::move(message)};
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      recipient.connection_id,
+      protocol::MessageType::ClientboundChatMessage,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_clientbound_chat_message(packet));
+  log_send_failure_if_dedicated(mode_, recipient.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::broadcast_system_message(protocol::RichText message) {
+  const protocol::RichTextValidation validation = protocol::validate_rich_text(message);
+  if (!validation.valid) {
+    core::warn("chat", "refusing to broadcast invalid system chat: {}", validation.message);
+    return;
+  }
+  const protocol::ClientboundChatMessage packet{
+      next_chat_message_id_++,
+      "arvane:system",
+      protocol::ChatMessageKind::System,
+      std::move(message)};
+  const std::vector<u8> payload = protocol::serialize_clientbound_chat_message(packet);
+  sessions_.for_each_session([&](const ServerSession& recipient) {
+    if (!recipient.authenticated || recipient.closing) {
+      return;
+    }
+    const net::NetworkResult send_result = send_protocol_message(
+        *transport_,
+        recipient.connection_id,
+        protocol::MessageType::ClientboundChatMessage,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Gameplay,
+        payload);
+    log_send_failure_if_dedicated(mode_, recipient.connection_id, send_result);
+  });
 }
 
 void ServerRuntimeImpl::handle_skin_request(

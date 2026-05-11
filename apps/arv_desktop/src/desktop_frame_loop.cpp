@@ -316,7 +316,7 @@ bool DesktopFrameLoop::route_input(
         platform_input,
         active_session->client->inventory_cursor_stack().has_value());
   } else if (!debug_menu_.open && has_session && active_session->client->chat_open()) {
-    route_ui_mouse_focus(ui_tree_, platform_input);
+    (void)route_chat_mouse_input(*active_session, platform_input);
   }
   return inventory_changed_by_ui;
 }

@@ -119,6 +119,10 @@ void ClientRuntime::configure_networking(ClientNetworkSettings settings) noexcep
       settings.connection_timeout_seconds);
 }
 
+void ClientRuntime::configure_chat(ClientChatSettings settings) {
+  impl_->ui.set_max_chat_history_messages(settings.max_history_messages);
+}
+
 const LocalPlayerIdentity& ClientRuntime::local_identity() const noexcept {
   return impl_->identity;
 }
@@ -145,7 +149,12 @@ std::optional<std::string> ClientRuntime::disconnect_reason() const {
 }
 
 void ClientRuntime::submit_input(InputFrame input) {
-  impl_->input.submit_input(std::move(input), impl_->ui, impl_->player_controller);
+  impl_->input.submit_input(
+      std::move(input),
+      impl_->ui,
+      impl_->player_controller,
+      impl_->sender,
+      impl_->connection.state());
 }
 
 void ClientRuntime::set_chunk_view_distance(i32 view_distance) noexcept {
@@ -242,12 +251,36 @@ std::span<const std::string> ClientRuntime::chat_messages() const noexcept {
   return impl_->ui.chat_messages();
 }
 
+std::span<const ChatHistoryEntry> ClientRuntime::chat_history() const noexcept {
+  return impl_->ui.chat_history();
+}
+
 void ClientRuntime::close_chat() noexcept {
   impl_->ui.close_chat();
 }
 
 void ClientRuntime::add_chat_message(std::string message) {
   impl_->ui.add_chat_message(std::move(message));
+}
+
+void ClientRuntime::suggest_chat_command(std::string command) {
+  impl_->ui.suggest_chat_command(std::move(command));
+}
+
+void ClientRuntime::request_chat_url_confirmation(std::string url) {
+  impl_->ui.request_url_confirmation(std::move(url));
+}
+
+void ClientRuntime::cancel_chat_url_confirmation() noexcept {
+  impl_->ui.cancel_url_confirmation();
+}
+
+void ClientRuntime::acknowledge_chat_url_open_unavailable() {
+  impl_->ui.acknowledge_url_open_unavailable();
+}
+
+const std::optional<std::string>& ClientRuntime::pending_chat_url_confirmation() const noexcept {
+  return impl_->ui.pending_url_confirmation();
 }
 
 bool ClientRuntime::tab_menu_visible() const noexcept {

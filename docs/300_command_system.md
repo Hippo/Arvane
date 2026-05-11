@@ -1030,11 +1030,14 @@ The protocol should distinguish chat messages from command requests.
 Client behavior:
 
 ```text
-normal chat text -> chat packet
+normal chat text -> ServerboundChatMessage
 command input    -> command request packet
 ```
 
-Server-bound command request:
+`ServerboundChatMessage` carries only raw chat intent. It is not a command
+transport, and it does not carry rich text formatting.
+
+Planned server-bound command request:
 
 ```cpp
 struct CommandRequest {
@@ -1058,6 +1061,13 @@ Rules:
 * server checks permissions independently
 * local presentation shortcuts do not apply to authoritative commands
 * command result text should be treated as display data, not executable data
+* rich text `RunCommand` click events must enter this same command path when a
+  remote command transport exists
+
+Implementation note: the current desktop client has an integrated-server command
+path but does not yet have a general remote `CommandRequest`/`CommandResponse`
+packet. Until that packet exists, slash commands and rich text `RunCommand`
+clicks are only authoritative in integrated play.
 
 ---
 

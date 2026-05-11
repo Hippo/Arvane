@@ -290,6 +290,7 @@ bool DesktopSessionManager::start_singleplayer(
   client->configure_networking(
       {dependencies_.config.multiplayer.keep_alive.server_timeout_seconds,
        dependencies_.config.multiplayer.connection_timeout_seconds});
+  client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
   client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);
@@ -386,6 +387,7 @@ bool DesktopSessionManager::start_remote(
   client->configure_networking(
       {dependencies_.config.multiplayer.keep_alive.server_timeout_seconds,
        dependencies_.config.multiplayer.connection_timeout_seconds});
+  client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
   client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);

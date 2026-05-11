@@ -14,8 +14,7 @@ namespace {
 
 class ScopedCurrentPath {
 public:
-  explicit ScopedCurrentPath(const std::filesystem::path& next)
-      : previous_(std::filesystem::current_path()) {
+  explicit ScopedCurrentPath(const std::filesystem::path& next) : previous_(std::filesystem::current_path()) {
     std::filesystem::current_path(next);
   }
 
@@ -181,6 +180,13 @@ render:
     particles:
       page_size: 256
       max_pages: 2
+ui:
+  chat:
+    max_history_messages: 42
+    passive_visible_seconds: 6.5
+    passive_fade_seconds: 1.25
+    passive_max_lines: 5
+    open_max_lines: 12
 chunk_pipeline:
   max_generation_jobs_per_frame: 2
   max_generation_results_per_tick: 3
@@ -312,6 +318,11 @@ chunk_pipeline:
       0.5F);
   EXPECT_EQ(result.value().render.atlases.particles.page_size, 256U);
   EXPECT_EQ(result.value().render.atlases.particles.max_pages, 2U);
+  EXPECT_EQ(result.value().ui.chat.max_history_messages, 42U);
+  EXPECT_FLOAT_EQ(result.value().ui.chat.passive_visible_seconds, 6.5F);
+  EXPECT_FLOAT_EQ(result.value().ui.chat.passive_fade_seconds, 1.25F);
+  EXPECT_EQ(result.value().ui.chat.passive_max_lines, 5U);
+  EXPECT_EQ(result.value().ui.chat.open_max_lines, 12U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_jobs_per_frame, 2U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_results_per_tick, 3U);
   EXPECT_EQ(result.value().chunk_pipeline.max_lighting_results_per_tick, 4U);
@@ -448,6 +459,11 @@ TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
       0.65F);
   EXPECT_EQ(config.render.atlases.particles.page_size, 2048U);
   EXPECT_EQ(config.render.atlases.particles.max_pages, 4U);
+  EXPECT_EQ(config.ui.chat.max_history_messages, 1000U);
+  EXPECT_FLOAT_EQ(config.ui.chat.passive_visible_seconds, 8.0F);
+  EXPECT_FLOAT_EQ(config.ui.chat.passive_fade_seconds, 2.0F);
+  EXPECT_EQ(config.ui.chat.passive_max_lines, 8U);
+  EXPECT_EQ(config.ui.chat.open_max_lines, 8U);
 }
 
 TEST(ConfigTests, RejectsInvalidSkinResolution) {
@@ -517,6 +533,16 @@ TEST(ConfigTests, RejectsInvalidMultiplayerTimeoutConfig) {
 multiplayer:
   keep_alive:
     server_timeout_seconds: 0
+)");
+
+  EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsInvalidChatUiConfig) {
+  const auto result = arv::io::parse_config_yaml(R"(
+ui:
+  chat:
+    max_history_messages: 0
 )");
 
   EXPECT_FALSE(result);
@@ -751,6 +777,8 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
       arv::io::read_text_file(client_config_file, "generated client config");
   ASSERT_TRUE(written_client);
   EXPECT_NE(written_client.value().find("window:"), std::string::npos);
+  EXPECT_NE(written_client.value().find("ui:"), std::string::npos);
+  EXPECT_NE(written_client.value().find("max_history_messages:"), std::string::npos);
   EXPECT_NE(written_client.value().find("input_bindings_file:"), std::string::npos);
   EXPECT_NE(written_client.value().find("server_list_file:"), std::string::npos);
 

@@ -22,17 +22,17 @@ public:
     const arv::f32 width =
         role == arv::ui::UiTextRole::Title ? 12.0F : 8.0F;
     const arv::f32 height =
-        role == arv::ui::UiTextRole::Title ? 30.0F :
-        role == arv::ui::UiTextRole::Heading ? 22.0F :
-        role == arv::ui::UiTextRole::Small ? 14.0F : 16.0F;
+        role == arv::ui::UiTextRole::Title ? 30.0F : role == arv::ui::UiTextRole::Heading ? 22.0F
+                                                 : role == arv::ui::UiTextRole::Small     ? 14.0F
+                                                                                          : 16.0F;
     return {static_cast<arv::f32>(text.size()) * width, height};
   }
 
   [[nodiscard]] arv::f32 line_height(
       arv::ui::UiTextRole role = arv::ui::UiTextRole::Body) const override {
-    return role == arv::ui::UiTextRole::Title ? 30.0F :
-           role == arv::ui::UiTextRole::Heading ? 22.0F :
-           role == arv::ui::UiTextRole::Small ? 14.0F : 16.0F;
+    return role == arv::ui::UiTextRole::Title ? 30.0F : role == arv::ui::UiTextRole::Heading ? 22.0F
+                                                    : role == arv::ui::UiTextRole::Small     ? 14.0F
+                                                                                             : 16.0F;
   }
 };
 
@@ -560,6 +560,39 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   EXPECT_FLOAT_EQ(fps->rect.y, 8.0F);
 }
 
+TEST(GameplayUiTests, RichChatRunsExposeColorAndHitActions) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  arv::protocol::RichText rich = arv::protocol::RichTextBuilder()
+                                     .append("Hippo", arv::protocol::style_patch_color(0x20U, 0x80U, 0xFFU))
+                                     .click_suggest_command("/msg Hippo ")
+                                     .hover_text("Click to message Hippo")
+                                     .append(": hello")
+                                     .build();
+  arv::ui::ChatLineView line;
+  line.text = arv::protocol::to_plain_text(rich);
+  line.opacity = 1.0F;
+  line.runs = arv::protocol::flatten_rich_text(rich);
+
+  arv::ui::build_chat_ui(tree, {true, true, {&line, 1U}, ""});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* run_text = tree.find_by_stable_id("chat.line.0.run.0.text");
+  ASSERT_NE(run_text, nullptr);
+  EXPECT_NEAR(run_text->style.foreground.x, 0x20 / 255.0F, 0.001F);
+  EXPECT_NEAR(run_text->style.foreground.y, 0x80 / 255.0F, 0.001F);
+  EXPECT_NEAR(run_text->style.foreground.z, 0xFF / 255.0F, 0.001F);
+
+  const auto* run_panel = tree.find_by_stable_id("chat.line.0.run.0");
+  ASSERT_NE(run_panel, nullptr);
+  EXPECT_EQ(run_panel->action, "chat_run");
+  const auto hover = tree.route_mouse_move(
+      {run_panel->rect.x + 1.0F, run_panel->rect.y + 1.0F});
+  ASSERT_TRUE(hover.has_value());
+  EXPECT_EQ(hover->action_id, "chat_run");
+}
+
 TEST(InventoryUiTests, PlacesHotbarBelowInventoryWithSeparator) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;
@@ -613,6 +646,14 @@ TEST(GameplayUiTests, EmptyPassiveChatDoesNotRenderABox) {
   arv::ui::build_chat_ui(tree, {true, false, {}, ""});
   tree.layout({800.0F, 600.0F}, &text);
   EXPECT_EQ(tree.find_by_stable_id("chat.stack"), nullptr);
+
+  std::vector<arv::ui::ChatLineView> messages{{"hello", 1.0F}};
+  arv::ui::build_chat_ui(tree, {true, false, {messages.data(), messages.size()}, ""});
+  tree.layout({800.0F, 600.0F}, &text);
+  const auto* passive_stack = tree.find_by_stable_id("chat.stack");
+  ASSERT_NE(passive_stack, nullptr);
+  EXPECT_GT(passive_stack->style.background.w, 0.0F);
+  EXPECT_EQ(tree.find_by_stable_id("chat.input"), nullptr);
 
   arv::ui::build_chat_ui(tree, {true, true, {}, ""});
   tree.layout({800.0F, 600.0F}, &text);

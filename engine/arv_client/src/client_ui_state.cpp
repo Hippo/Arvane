@@ -1,12 +1,31 @@
 #include "client_ui_state.hpp"
 
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <string_view>
 #include <utility>
 
 namespace arv::client {
 namespace {
 
 constexpr usize MaxChatDraftBytes = 256U;
-constexpr usize MaxChatMessages = 64U;
+
+[[nodiscard]] bool ascii_space(char ch) noexcept {
+  return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
+[[nodiscard]] std::string trim_ascii(std::string_view text) {
+  usize begin = 0U;
+  while (begin < text.size() && ascii_space(text[begin])) {
+    ++begin;
+  }
+  usize end = text.size();
+  while (end > begin && ascii_space(text[end - 1U])) {
+    --end;
+  }
+  return std::string{text.substr(begin, end - begin)};
+}
 
 void erase_last_utf8_codepoint(std::string& text) {
   if (text.empty()) {
@@ -18,6 +37,15 @@ void erase_last_utf8_codepoint(std::string& text) {
     --index;
   }
   text.erase(index);
+}
+
+template<typename T>
+void trim_vector_to_limit(std::vector<T>& values, usize limit) {
+  if (values.size() <= limit) {
+    return;
+  }
+  const usize remove_count = values.size() - limit;
+  values.erase(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(remove_count));
 }
 
 } // namespace
@@ -63,27 +91,79 @@ void ClientUiState::open_chat_with_draft(std::string draft) {
 void ClientUiState::close_chat() noexcept {
   chat_open_ = false;
   chat_draft_.clear();
+  pending_url_confirmation_.reset();
 }
 
 void ClientUiState::close_ui() noexcept {
   inventory_open_ = false;
   chat_open_ = false;
   chat_draft_.clear();
+  pending_url_confirmation_.reset();
+}
+
+void ClientUiState::set_max_chat_history_messages(usize max_messages) {
+  max_chat_history_messages_ = std::max<usize>(1U, max_messages);
+  trim_vector_to_limit(chat_messages_, max_chat_history_messages_);
+  trim_vector_to_limit(chat_history_, max_chat_history_messages_);
 }
 
 void ClientUiState::add_chat_message(std::string message) {
   if (message.empty()) {
     return;
   }
-  chat_messages_.emplace_back(std::move(message));
-  if (chat_messages_.size() > MaxChatMessages) {
-    chat_messages_.erase(chat_messages_.begin());
-  }
+  protocol::ClientboundChatMessage packet;
+  packet.message_id = 0U;
+  packet.channel = "arvane:system";
+  packet.kind = protocol::ChatMessageKind::System;
+  packet.message = protocol::plain_rich_text(message);
+  add_chat_message(std::move(packet));
 }
 
-void ClientUiState::handle_chat_input(const InputFrame& input, bool was_chat_open) {
-  if (!chat_open_) {
+void ClientUiState::add_chat_message(protocol::ClientboundChatMessage message) {
+  const std::string plain = protocol::to_plain_text(message.message);
+  if (plain.empty()) {
     return;
+  }
+  chat_messages_.push_back(plain);
+  trim_vector_to_limit(chat_messages_, max_chat_history_messages_);
+  chat_history_.push_back(
+      {message.message_id,
+       std::move(message.channel),
+       message.kind,
+       std::move(message.message),
+       next_received_chat_sequence_++,
+       std::chrono::steady_clock::now(),
+       message.message_id == 0U});
+  trim_vector_to_limit(chat_history_, max_chat_history_messages_);
+}
+
+void ClientUiState::suggest_chat_command(std::string command) {
+  open_chat_with_draft(std::move(command));
+}
+
+void ClientUiState::request_url_confirmation(std::string url) {
+  pending_url_confirmation_ = std::move(url);
+  open_chat();
+}
+
+void ClientUiState::cancel_url_confirmation() noexcept {
+  pending_url_confirmation_.reset();
+}
+
+void ClientUiState::acknowledge_url_open_unavailable() {
+  pending_url_confirmation_.reset();
+  add_chat_message("Opening external URLs is not implemented in this build.");
+}
+
+const std::optional<std::string>& ClientUiState::pending_url_confirmation() const noexcept {
+  return pending_url_confirmation_;
+}
+
+std::optional<std::string> ClientUiState::handle_chat_input(
+    const InputFrame& input,
+    bool was_chat_open) {
+  if (!chat_open_) {
+    return std::nullopt;
   }
 
   if (was_chat_open && input.text_backspace_pressed) {
@@ -95,12 +175,16 @@ void ClientUiState::handle_chat_input(const InputFrame& input, bool was_chat_ope
     chat_draft_.append(input.text_input.substr(0U, remaining));
   }
   if (was_chat_open && input.text_submit_pressed) {
-    if (!chat_draft_.empty()) {
-      add_chat_message(chat_draft_);
-      chat_draft_.clear();
+    std::optional<std::string> submitted;
+    std::string trimmed = trim_ascii(chat_draft_);
+    if (!trimmed.empty()) {
+      submitted = std::move(trimmed);
     }
+    chat_draft_.clear();
     chat_open_ = false;
+    return submitted;
   }
+  return std::nullopt;
 }
 
 const std::string& ClientUiState::chat_draft() const noexcept {
@@ -109,6 +193,10 @@ const std::string& ClientUiState::chat_draft() const noexcept {
 
 std::span<const std::string> ClientUiState::chat_messages() const noexcept {
   return chat_messages_;
+}
+
+std::span<const ChatHistoryEntry> ClientUiState::chat_history() const noexcept {
+  return chat_history_;
 }
 
 } // namespace arv::client

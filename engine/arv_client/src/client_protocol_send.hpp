@@ -5,6 +5,7 @@
 #include "arv/net/transport.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/protocol/auth.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/inventory_sync.hpp"
@@ -26,6 +27,7 @@ public:
   net::NetworkResult send_client_hello(const LocalPlayerIdentity& identity);
   net::NetworkResult send_auth_response(const protocol::ServerboundAuthResponse& response);
   net::NetworkResult send_keep_alive(const protocol::ServerboundKeepAlive& keep_alive);
+  net::NetworkResult send_chat_message(const protocol::ServerboundChatMessage& message);
 
   net::NetworkResult send_chunk_interest_update(
       const protocol::ServerboundChunkInterestUpdate& update);

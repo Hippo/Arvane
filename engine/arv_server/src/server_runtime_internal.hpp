@@ -7,6 +7,7 @@
 #include "arv/physics/collision.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
@@ -16,6 +17,7 @@
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/server/chat_service.hpp"
 #include "arv/server/command_services.hpp"
 #include "arv/server/permission_config.hpp"
 #include "arv/server/player_movement_validation.hpp"
@@ -23,8 +25,8 @@
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
 
-#include <memory>
 #include <chrono>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -255,6 +257,9 @@ struct ServerRuntimeImpl {
   void handle_inventory_action_request(
       net::ConnectionID connection_id,
       const protocol::ServerboundInventoryActionRequest& request);
+  void handle_chat_message(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundChatMessage& message);
   void handle_attack_entity(
       net::ConnectionID connection_id,
       const protocol::ServerboundAttackEntity& attack);
@@ -338,6 +343,9 @@ struct ServerRuntimeImpl {
       const ServerSession& receiver,
       const ServerSession& subject);
   void broadcast_player_profile_info(const ServerSession& subject);
+  void send_system_message(const ServerSession& recipient, protocol::RichText message);
+  void send_error_message(const ServerSession& recipient, protocol::RichText message);
+  void broadcast_system_message(protocol::RichText message);
   void send_block_updates();
   void send_player_block_break_progress();
   void send_entity_replication();
@@ -406,7 +414,11 @@ struct ServerRuntimeImpl {
   HashMap<SessionID, EntityReplicationState> entity_replication_;
   HashMap<PlayerID, InventoryReplicationState> inventory_replication_;
   HashMap<SessionID, SkinTransferSessionState> skin_transfers_;
+  HashMap<SessionID, ChatRateLimitState> chat_rate_limits_;
   HashMap<std::string, SessionID> online_profile_sessions_;
+  ChatValidationConfig chat_validation_{};
+  ChatFormatter chat_formatter_{};
+  protocol::ChatMessageId next_chat_message_id_{1U};
   u32 active_skin_uploads_global_{};
   u64 skin_storage_bytes_{};
   ServerWorldJobRuntime world_jobs_;

@@ -2,6 +2,7 @@
 
 #include "arv/client/local_player_controller.hpp"
 #include "arv/core/time.hpp"
+#include "arv/net/connection_state.hpp"
 
 namespace arv::client {
 
@@ -16,7 +17,9 @@ public:
   void submit_input(
       InputFrame input,
       ClientUiState& ui,
-      LocalPlayerController& player_controller);
+      LocalPlayerController& player_controller,
+      ClientProtocolSender& sender,
+      net::ConnectionState connection_state);
 
   void send_fixed_tick_input(
       TickIndex tick_index,

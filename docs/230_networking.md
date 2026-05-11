@@ -324,7 +324,7 @@ A client in one world does not automatically receive chunks, entities, or events
 
 Global systems may still send cross-world information, such as:
 
-- chat messages
+- `ClientboundChatMessage` rich text chat messages
 - direct messages
 - player list updates
 - server notifications
@@ -621,7 +621,8 @@ Reliable ordered:
 - inventory transactions and revisioned state
 - entity spawn/despawn
 - gameplay-affecting requests such as item use or inventory actions
-- chat and commands
+- `ServerboundChatMessage` and `ClientboundChatMessage`
+- commands
 
 Reliable immediate:
 
@@ -753,7 +754,7 @@ World-local replicated state includes:
 Global replicated state includes:
 
 - player profile/session information
-- chat routing
+- chat routing and server-authored rich text delivery
 - direct messages
 - server-wide notifications
 - permissions

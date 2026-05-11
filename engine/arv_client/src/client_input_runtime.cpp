@@ -4,6 +4,7 @@
 #include "client_ui_state.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 namespace arv::client::detail {
@@ -43,7 +44,9 @@ namespace {
 void ClientInputRuntime::submit_input(
     InputFrame input,
     ClientUiState& ui,
-    LocalPlayerController& player_controller) {
+    LocalPlayerController& player_controller,
+    ClientProtocolSender& sender,
+    net::ConnectionState connection_state) {
   ui.set_tab_menu_visible(input.tab_menu_held);
   const bool was_chat_open = ui.chat_open();
 
@@ -58,7 +61,10 @@ void ClientInputRuntime::submit_input(
     ui.open_chat_with_draft("/");
   }
 
-  ui.handle_chat_input(input, was_chat_open);
+  std::optional<std::string> chat_submission = ui.handle_chat_input(input, was_chat_open);
+  if (chat_submission.has_value() && connection_state == net::ConnectionState::InGame) {
+    (void)sender.send_chat_message({std::move(chat_submission.value()), std::nullopt});
+  }
 
   if (ui.inventory_open() || ui.chat_open()) {
     input.move_forward = false;

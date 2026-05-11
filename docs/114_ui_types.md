@@ -76,12 +76,29 @@ It should support:
 * command input
 * scrolling
 * fading inactive messages
-* server-sent messages
+* server-sent rich text messages
+* colored text runs
+* hover tooltips
+* clickable text actions
 * local client messages where appropriate
 
 The chat input should capture keyboard focus while open.
 
-Chat messages may eventually support formatting, colors, hover data, or clickable actions, but the base system should remain simple and text-first.
+When chat is closed, recent on-screen messages should render inside the same
+chat background surface used by the open chat view. If no messages are currently
+visible, the passive chat surface should not be drawn. Passive messages may
+fade out after a configured duration and be capped to a configured number of
+visible lines without being removed from retained chat history.
+
+Network-visible chat is server-authored. Normal player input sends raw text to
+the server, then the client displays the returned rich text payload. Player text
+must remain literal unless the server applies formatting.
+
+Supported chat interactions include `ShowText` hover tooltips, command
+suggestion clicks, command-run clicks through the normal command path, and safe
+URL confirmation for link clicks. Unsupported actions should fail quietly or
+produce a local informational message rather than performing unsafe platform
+behavior.
 
 ---
 

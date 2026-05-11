@@ -1,5 +1,6 @@
 set(ARV_CLIENT_HEADERS
   include/arv/client/camera_shell.hpp
+  include/arv/client/chat_history.hpp
   include/arv/client/chunk_interest.hpp
   include/arv/client/client_runtime.hpp
   include/arv/client/item_animation.hpp

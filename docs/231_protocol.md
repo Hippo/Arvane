@@ -900,23 +900,40 @@ The client must discard stale inventory revisions.
 
 ## Chat and Commands
 
-Chat and commands are reliable ordered.
+Chat is split into client intent and server-authored presentation. Chat packets
+are reliable ordered because chat is visible, low-frequency, and order-sensitive.
 
 ```text
-ChatMessage
+ServerboundChatMessage
 {
     string message;
+    optional string channel;
 }
 ```
+
+`message` is raw player-authored text. The client must not include rank
+prefixes, colors, hover events, click events, JSON rich text, or permission
+claims. The server validates and rate-limits the message before routing it.
 
 ```text
-CommandRequest
+ClientboundChatMessage
 {
-    string command_line;
+    uint64 message_id;
+    string channel;
+    ChatMessageKind kind;
+    RichText message;
 }
 ```
 
-The server must parse and authorize commands.
+`message` is the final server-authored rich text tree. It may include RGB color
+style patches, inherited text styles, `ShowText` hover events, and click events
+such as `SuggestCommand`, `RunCommand`, `OpenUrl`, and `CopyToClipboard`.
+Clients render this payload safely and apply local safeguards such as URL
+confirmation before attempting platform actions.
+
+Commands are distinct from chat. Slash-prefixed input should route through the
+normal command path, where the server parses and authorizes privileged
+behavior.
 
 The client must not execute privileged command behavior locally.
 

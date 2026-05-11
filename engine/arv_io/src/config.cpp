@@ -330,6 +330,17 @@ void read_gameplay_config(const YAML::Node& gameplay, GameplayConfig& config) {
   }
 }
 
+void read_ui_config(const YAML::Node& ui, UiConfig& config) {
+  const YAML::Node chat = ui["chat"];
+  if (chat) {
+    read_scalar(chat, "max_history_messages", config.chat.max_history_messages);
+    read_scalar(chat, "passive_visible_seconds", config.chat.passive_visible_seconds);
+    read_scalar(chat, "passive_fade_seconds", config.chat.passive_fade_seconds);
+    read_scalar(chat, "passive_max_lines", config.chat.passive_max_lines);
+    read_scalar(chat, "open_max_lines", config.chat.open_max_lines);
+  }
+}
+
 [[nodiscard]] bool is_supported_skin_resolution(u16 size) noexcept {
   return size == 64U || size == 128U || size == 256U || size == 512U ||
          size == 1024U || size == 2048U;
@@ -559,6 +570,8 @@ std::string config_path_string(
 
   return path.string();
 }
+
+void emit_ui_config(YAML::Emitter& emitter, const UiConfig& ui);
 
 ConfigResult save_default_config_file(const std::filesystem::path& path, const EngineConfig& config) {
   std::error_code error;
@@ -790,6 +803,8 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emit_render_atlases_config(emitter, config.render.atlases);
   emitter << YAML::EndMap;
 
+  emit_ui_config(emitter, config.ui);
+
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "max_generation_jobs_per_frame" << YAML::Value
           << config.chunk_pipeline.max_generation_jobs_per_frame;
@@ -982,6 +997,22 @@ void emit_render_atlases_config(
   emitter << YAML::EndMap;
   emitter << YAML::EndMap;
   emit_static_atlas("particles", atlases.particles);
+  emitter << YAML::EndMap;
+}
+
+void emit_ui_config(YAML::Emitter& emitter, const UiConfig& ui) {
+  emitter << YAML::Key << "ui" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "chat" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "max_history_messages" << YAML::Value
+          << ui.chat.max_history_messages;
+  emitter << YAML::Key << "passive_visible_seconds" << YAML::Value
+          << ui.chat.passive_visible_seconds;
+  emitter << YAML::Key << "passive_fade_seconds" << YAML::Value
+          << ui.chat.passive_fade_seconds;
+  emitter << YAML::Key << "passive_max_lines" << YAML::Value
+          << ui.chat.passive_max_lines;
+  emitter << YAML::Key << "open_max_lines" << YAML::Value << ui.chat.open_max_lines;
+  emitter << YAML::EndMap;
   emitter << YAML::EndMap;
 }
 
@@ -1252,6 +1283,8 @@ ConfigResult save_default_client_config_file(
   emit_render_atlases_config(emitter, config.render.atlases);
   emitter << YAML::EndMap;
 
+  emit_ui_config(emitter, config.ui);
+
   emitter << YAML::Key << "chunk_pipeline" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "max_client_chunk_applies_per_frame" << YAML::Value
           << config.chunk_pipeline.max_client_chunk_applies_per_frame;
@@ -1388,6 +1421,11 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_scalar(render, "show_local_player_body", config.render.show_local_player_body);
     read_block_outline_config(render, config.render.block_outline);
     read_render_atlases_config(render, config.render.atlases);
+  }
+
+  const YAML::Node ui = root["ui"];
+  if (ui) {
+    read_ui_config(ui, config.ui);
   }
 
   const YAML::Node chunk_pipeline = root["chunk_pipeline"];
@@ -1759,6 +1797,20 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
           config.render.atlases.player_skins.pressure_cleanup.usage_threshold) {
     return ConfigError{
         "render.atlases.player_skins pressure thresholds must be finite in (0, 1] and target <= usage"};
+  }
+  if (config.ui.chat.max_history_messages == 0U) {
+    return ConfigError{"ui.chat.max_history_messages must be non-zero"};
+  }
+  if (config.ui.chat.open_max_lines == 0U) {
+    return ConfigError{"ui.chat.open_max_lines must be non-zero"};
+  }
+  if (!std::isfinite(config.ui.chat.passive_visible_seconds) ||
+      config.ui.chat.passive_visible_seconds < 0.0F) {
+    return ConfigError{"ui.chat.passive_visible_seconds must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.ui.chat.passive_fade_seconds) ||
+      config.ui.chat.passive_fade_seconds < 0.0F) {
+    return ConfigError{"ui.chat.passive_fade_seconds must be finite and >= 0"};
   }
   if (config.chunk_pipeline.max_generation_jobs_per_frame == 0U ||
       config.chunk_pipeline.max_generation_results_per_tick == 0U ||

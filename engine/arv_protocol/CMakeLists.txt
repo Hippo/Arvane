@@ -1,6 +1,7 @@
 set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/auth.hpp
   include/arv/protocol/block_updates.hpp
+  include/arv/protocol/chat.hpp
   include/arv/protocol/chunk_streaming.hpp
   include/arv/protocol/entity_interaction.hpp
   include/arv/protocol/entity_replication.hpp
@@ -20,6 +21,7 @@ set(ARV_PROTOCOL_HEADERS
 add_library(arv_protocol STATIC
   src/auth.cpp
   src/block_updates.cpp
+  src/chat.cpp
   src/chunk_streaming.cpp
   src/entity_interaction.cpp
   src/entity_replication.cpp

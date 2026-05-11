@@ -236,6 +236,7 @@ void ServerRuntimeImpl::cleanup_connection(net::ConnectionID connection_id) {
       --active_skin_uploads_global_;
     }
     skin_transfers_.erase(session->session_id);
+    chat_rate_limits_.erase(session->session_id);
     if (const player::PlayerState* player_state =
             default_world_.find_player(session->player_id);
         player_state != nullptr) {

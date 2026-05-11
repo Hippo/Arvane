@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/client/camera_shell.hpp"
+#include "arv/client/chat_history.hpp"
 #include "arv/client/local_identity.hpp"
 #include "arv/client/local_player_controller.hpp"
 #include "arv/core/time.hpp"
@@ -74,6 +75,10 @@ struct ClientNetworkSettings {
   u32 connection_timeout_seconds{10U};
 };
 
+struct ClientChatSettings {
+  usize max_history_messages{DefaultMaxChatHistoryMessages};
+};
+
 class ClientRuntime {
 public:
   explicit ClientRuntime(std::unique_ptr<net::ITransport> transport);
@@ -88,6 +93,7 @@ public:
   void set_player_tuning(player::PlayerTuning tuning) noexcept;
   void set_local_identity(LocalPlayerIdentity identity);
   void configure_networking(ClientNetworkSettings settings) noexcept;
+  void configure_chat(ClientChatSettings settings);
   [[nodiscard]] const LocalPlayerIdentity& local_identity() const noexcept;
   net::ConnectResult connect_integrated();
   net::ConnectResult connect(net::NetworkAddress address);
@@ -120,8 +126,14 @@ public:
   [[nodiscard]] bool chat_open() const noexcept;
   [[nodiscard]] const std::string& chat_draft() const noexcept;
   [[nodiscard]] std::span<const std::string> chat_messages() const noexcept;
+  [[nodiscard]] std::span<const ChatHistoryEntry> chat_history() const noexcept;
   void close_chat() noexcept;
   void add_chat_message(std::string message);
+  void suggest_chat_command(std::string command);
+  void request_chat_url_confirmation(std::string url);
+  void cancel_chat_url_confirmation() noexcept;
+  void acknowledge_chat_url_open_unavailable();
+  [[nodiscard]] const std::optional<std::string>& pending_chat_url_confirmation() const noexcept;
   [[nodiscard]] bool tab_menu_visible() const noexcept;
   [[nodiscard]] std::vector<protocol::ClientboundChunkSectionData> drain_received_chunk_section_data();
   [[nodiscard]] std::vector<protocol::ClientboundChunkSectionUnload> drain_received_chunk_section_unloads();

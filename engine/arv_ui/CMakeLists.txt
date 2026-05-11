@@ -41,5 +41,5 @@ add_library(arv_ui STATIC
   src/widgets/tab_menu.cpp
 )
 target_include_directories(arv_ui PUBLIC include)
-target_link_libraries(arv_ui PUBLIC arv_asset arv_core arv_player arv_render arv_voxel)
+target_link_libraries(arv_ui PUBLIC arv_asset arv_core arv_player arv_protocol arv_render arv_voxel)
 target_link_libraries(arv_ui PRIVATE yaml-cpp)

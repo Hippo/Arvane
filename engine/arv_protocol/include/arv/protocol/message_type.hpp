@@ -75,6 +75,8 @@ enum class MessageType : u16 {
   ServerboundAttackEntity = 0x0604,
   ServerboundInventoryActionRequest = 0x0800,
   ClientboundInventoryUpdate = 0x0801,
+  ServerboundChatMessage = 0x0900,
+  ClientboundChatMessage = 0x0901,
 };
 
 } // namespace arv::protocol

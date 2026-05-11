@@ -191,6 +191,8 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   keep_alive_ = start_info.keep_alive;
   skins_ = start_info.skins;
   skin_transfers_.clear();
+  chat_rate_limits_.clear();
+  next_chat_message_id_ = 1U;
   online_profile_sessions_.clear();
   active_skin_uploads_global_ = 0U;
   skin_storage_bytes_ = current_skin_storage_bytes(server_save_root_);

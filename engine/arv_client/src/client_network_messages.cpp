@@ -3,6 +3,7 @@
 #include "arv/crypto/hash.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
@@ -309,6 +310,14 @@ void ClientNetworkRouter::handle_message(
         return;
       }
       runtime.skins.handle_skin_upload_failed(failed.value());
+      return;
+    }
+    case protocol::MessageType::ClientboundChatMessage: {
+      auto chat = protocol::deserialize_clientbound_chat_message(decoded.value().payload);
+      if (!chat) {
+        return;
+      }
+      runtime.ui.add_chat_message(std::move(chat.value()));
       return;
     }
     case protocol::MessageType::ClientboundWorldJoinResult: {

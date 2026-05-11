@@ -645,9 +645,14 @@ Requirements:
 * alignment
 * color
 * scale
-* future rich text spans
+* rich text spans for chat and server-authored UI text
 
 Text input stores UTF-8 strings.
+
+The current chat renderer represents rich text as one UI run per flattened
+component. This keeps color, hover metadata, and click metadata attached to the
+correct run even before the lower-level text renderer has native inline span
+support.
 
 ---
 
@@ -2014,6 +2019,7 @@ Missing assets use safe placeholders.
 * pause menu
 * settings skeleton
 * chat input
+* server-authored rich chat history
 
 ## Phase 3: Plugin/Server UI
 
@@ -2029,7 +2035,7 @@ Missing assets use safe placeholders.
 * animations
 * theme improvements
 * controller navigation
-* richer text
+* native inline rich text rendering
 * virtualized lists
 * accessibility improvements
 

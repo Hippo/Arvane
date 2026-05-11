@@ -1,4 +1,5 @@
 #include "arv/protocol/block_updates.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
@@ -77,6 +78,8 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto inventory_action =
       registry.lookup(arv::protocol::MessageType::ServerboundInventoryActionRequest);
   const auto inventory_update = registry.lookup(arv::protocol::MessageType::ClientboundInventoryUpdate);
+  const auto chat_send = registry.lookup(arv::protocol::MessageType::ServerboundChatMessage);
+  const auto chat_receive = registry.lookup(arv::protocol::MessageType::ClientboundChatMessage);
   const auto skin_rules = registry.lookup(arv::protocol::MessageType::ClientboundSkinRules);
   const auto skin_data = registry.lookup(arv::protocol::MessageType::ClientboundSkinData);
   const auto skin_upload_data = registry.lookup(arv::protocol::MessageType::ServerboundSkinUploadData);
@@ -104,6 +107,8 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(attack_entity.has_value());
   ASSERT_TRUE(inventory_action.has_value());
   ASSERT_TRUE(inventory_update.has_value());
+  ASSERT_TRUE(chat_send.has_value());
+  ASSERT_TRUE(chat_receive.has_value());
   ASSERT_TRUE(skin_rules.has_value());
   ASSERT_TRUE(skin_data.has_value());
   ASSERT_TRUE(skin_upload_data.has_value());
@@ -136,6 +141,10 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(attack_entity->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_action->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_update->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(chat_send->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(chat_receive->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(chat_send->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(chat_receive->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(ping->lane, arv::protocol::NetworkLane::Debug);
   EXPECT_EQ(move->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(correction->lane, arv::protocol::NetworkLane::Movement);
@@ -153,10 +162,12 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(attack_entity->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_action->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(chat_send->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(chat_receive->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 47U);
+  EXPECT_EQ(registry.size(), 49U);
 }
 
 TEST(ProtocolTests, SessionControlPacketsRoundTripThroughSerialization) {
