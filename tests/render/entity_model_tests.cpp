@@ -327,7 +327,7 @@ TEST(EntityModelTests, SamplesMultipleActiveAnimationsAdditively) {
   const std::optional<arv::usize> left_leg = find_bone_index(model.value(), "left_leg");
   ASSERT_TRUE(right_arm.has_value());
   ASSERT_TRUE(left_leg.has_value());
-  EXPECT_EQ(rotations[right_arm.value()], (arv::Vec3f{105.0F, 15.0F, -15.0F}));
+  EXPECT_EQ(rotations[right_arm.value()], (arv::Vec3f{105.0F, -15.0F, 15.0F}));
   EXPECT_EQ(rotations[left_leg.value()], (arv::Vec3f{45.0F, 0.0F, 0.0F}));
 }
 

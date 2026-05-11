@@ -560,7 +560,6 @@ void OpenGLRenderer::render() {
   glEnable(GL_DEPTH_TEST);
   glClearColor(0.08F, 0.10F, 0.12F, 1.0F);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  draw_sky();
 
   if (!ensure_chunk_program()) {
     return;
@@ -621,6 +620,7 @@ void OpenGLRenderer::render() {
   glDepthMask(GL_TRUE);
   draw_chunk_list(frame_.opaque_chunks, false);
   draw_entities();
+  draw_sky();
   glUseProgram(chunk_program_);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(
@@ -1351,12 +1351,9 @@ void OpenGLRenderer::draw_sky() {
     glGenVertexArrays(1, &sky_vao_);
   }
 
-  const GLboolean depth_enabled = glIsEnabled(GL_DEPTH_TEST);
-  const GLboolean blend_enabled = glIsEnabled(GL_BLEND);
-  const GLboolean cull_enabled = glIsEnabled(GL_CULL_FACE);
-
   glDepthMask(GL_FALSE);
-  glDisable(GL_DEPTH_TEST);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LEQUAL);
   glDisable(GL_BLEND);
   glDisable(GL_CULL_FACE);
 
@@ -1421,15 +1418,7 @@ void OpenGLRenderer::draw_sky() {
   vertices_submitted_last_frame_ += 4U;
   triangles_submitted_last_frame_ += 2U;
 
-  if (cull_enabled) {
-    glEnable(GL_CULL_FACE);
-  }
-  if (blend_enabled) {
-    glEnable(GL_BLEND);
-  }
-  if (depth_enabled) {
-    glEnable(GL_DEPTH_TEST);
-  }
+  glDepthFunc(GL_LESS);
   glDepthMask(GL_TRUE);
 }
 
