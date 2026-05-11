@@ -41,10 +41,13 @@ void apply_authored_components(
         std::clamp(components.knockback_resistance->resistance, 0.0F, 1.0F));
   }
   if (components.animation.has_value()) {
+    entity::EntityAnimationState animation;
+    if (!components.animation->initial.empty()) {
+      animation.active.push_back({components.animation->initial, 0.0F});
+    }
     registry.emplace_or_replace<entity::EntityAnimationState>(
         handle,
-        components.animation->initial,
-        0.0F);
+        std::move(animation));
   }
   if (components.brain.has_value()) {
     entity::BrainComponent brain;

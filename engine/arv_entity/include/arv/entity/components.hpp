@@ -218,9 +218,15 @@ struct BrainComponent {
   GoalBlackboard blackboard{};
 };
 
-struct EntityAnimationState {
+struct EntityAnimationPlayback {
   std::string name{};
   Seconds time_seconds{};
+
+  bool operator==(const EntityAnimationPlayback&) const = default;
+};
+
+struct EntityAnimationState {
+  std::vector<EntityAnimationPlayback> active{};
 };
 
 struct EntityType {
@@ -268,8 +274,7 @@ struct EntitySnapshotEntry {
   Quatf rotation{};
   ChunkSectionCoord chunk{};
   std::optional<PlayerID> owning_player{};
-  std::string animation_name{};
-  Seconds animation_time_seconds{};
+  std::vector<EntityAnimationPlayback> animations{};
   Vec3f head_rotation_degrees{};
   bool has_health{};
   f32 health_current{};

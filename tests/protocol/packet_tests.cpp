@@ -555,8 +555,7 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
                                {1.0F, 0.0F, 0.0F},
                                {0.0F, 0.0F, 0.0F, 1.0F},
                                5,
-                               "walking",
-                               1.25F,
+                               {{"walking", 1.25F}, {"hit_right", 0.125F}},
                                {10.0F, 20.0F, 0.0F}});
   const auto decoded_snapshot = arv::protocol::deserialize_clientbound_entity_snapshot(
       arv::protocol::serialize_clientbound_entity_snapshot(snapshot));
@@ -566,8 +565,11 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
   EXPECT_EQ(decoded_snapshot.value().entities.front().entity_id, (arv::EntityNetID{22}));
   EXPECT_EQ(decoded_snapshot.value().entities.front().position, (arv::Vec3f{6.0F, 7.0F, 8.0F}));
   EXPECT_EQ(decoded_snapshot.value().entities.front().state_flags, 5U);
-  EXPECT_EQ(decoded_snapshot.value().entities.front().animation_name, "walking");
-  EXPECT_FLOAT_EQ(decoded_snapshot.value().entities.front().animation_time_seconds, 1.25F);
+  ASSERT_EQ(decoded_snapshot.value().entities.front().animations.size(), 2U);
+  EXPECT_EQ(decoded_snapshot.value().entities.front().animations[0].name, "walking");
+  EXPECT_FLOAT_EQ(decoded_snapshot.value().entities.front().animations[0].time_seconds, 1.25F);
+  EXPECT_EQ(decoded_snapshot.value().entities.front().animations[1].name, "hit_right");
+  EXPECT_FLOAT_EQ(decoded_snapshot.value().entities.front().animations[1].time_seconds, 0.125F);
   EXPECT_EQ(
       decoded_snapshot.value().entities.front().head_rotation_degrees,
       (arv::Vec3f{10.0F, 20.0F, 0.0F}));

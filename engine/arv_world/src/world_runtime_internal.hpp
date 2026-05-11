@@ -290,6 +290,7 @@ public:
   [[nodiscard]] const entity::DroppedItem* find_dropped_item(EntityID entity_id) const noexcept;
 
   bool set_animation(EntityID entity_id, std::string animation_name) noexcept;
+  bool play_animation(EntityID entity_id, std::string animation_name) noexcept;
   bool set_player_visual_pose(
       PlayerID player_id,
       f32 look_yaw_radians,

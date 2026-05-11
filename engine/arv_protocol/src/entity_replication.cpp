@@ -158,8 +158,11 @@ std::vector<u8> serialize_clientbound_entity_snapshot(const ClientboundEntitySna
     write_vec3(writer, entry.velocity);
     write_quat(writer, entry.rotation);
     writer.write<u32>(entry.state_flags);
-    writer.write_string(entry.animation_name);
-    write_f32(writer, entry.animation_time_seconds);
+    writer.write<u32>(static_cast<u32>(entry.animations.size()));
+    for (const EntityAnimationPlayback& animation : entry.animations) {
+      writer.write_string(animation.name);
+      write_f32(writer, animation.time_seconds);
+    }
     write_vec3(writer, entry.head_rotation_degrees);
     write_f32(writer, entry.health_current);
     write_f32(writer, entry.health_max);
@@ -206,14 +209,33 @@ Expected<ClientboundEntitySnapshot, ProtocolError> deserialize_clientbound_entit
     auto velocity = read_vec3(reader);
     auto rotation = read_quat(reader);
     auto flags = reader.read<u32>();
-    auto animation_name = reader.read_string();
-    auto animation_time = read_f32(reader);
+    auto animation_count = reader.read<u32>();
+    if (!entity_id || !position || !velocity || !rotation || !flags ||
+        !animation_count) {
+      return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(
+          ProtocolError{"failed to decode entity snapshot entry"});
+    }
+    if (animation_count.value() > MaxEntityAnimationsPerSnapshotEntry) {
+      return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(
+          ProtocolError{"too many animations in entity snapshot entry"});
+    }
+    std::vector<EntityAnimationPlayback> animations;
+    animations.reserve(animation_count.value());
+    for (u32 animation_index = 0; animation_index < animation_count.value(); ++animation_index) {
+      auto animation_name = reader.read_string();
+      auto animation_time = read_f32(reader);
+      if (!animation_name || !animation_time) {
+        return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(
+            ProtocolError{"failed to decode entity snapshot animation"});
+      }
+      animations.push_back({
+          std::move(animation_name.value()),
+          animation_time.value()});
+    }
     auto head_rotation = read_vec3(reader);
     auto health_current = read_f32(reader);
     auto health_max = read_f32(reader);
-    if (!entity_id || !position || !velocity || !rotation || !flags ||
-        !animation_name || !animation_time || !head_rotation ||
-        !health_current || !health_max) {
+    if (!head_rotation || !health_current || !health_max) {
       return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(
           ProtocolError{"failed to decode entity snapshot entry"});
     }
@@ -222,8 +244,7 @@ Expected<ClientboundEntitySnapshot, ProtocolError> deserialize_clientbound_entit
                                  velocity.value(),
                                  rotation.value(),
                                  flags.value(),
-                                 std::move(animation_name.value()),
-                                 animation_time.value(),
+                                 std::move(animations),
                                  head_rotation.value(),
                                  health_current.value(),
                                  health_max.value()});

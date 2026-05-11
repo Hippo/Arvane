@@ -785,4 +785,51 @@ void sample_entity_model_animation(
   }
 }
 
+void sample_entity_model_animations(
+    const EntityModelAsset& model,
+    const EntityAnimationAsset* animation,
+    std::span<const EntityAnimationPlayback> animations,
+    std::span<Vec3f> output_rotations,
+    std::span<Vec3f> output_positions) {
+  for (Vec3f& rotation : output_rotations) {
+    rotation = {};
+  }
+  for (Vec3f& position : output_positions) {
+    position = {};
+  }
+  if (output_rotations.size() < model.bones.size() ||
+      output_positions.size() < model.bones.size()) {
+    return;
+  }
+
+  for (const EntityAnimationPlayback& playback : animations) {
+    const EntityAnimationClip* clip = find_clip(animation, playback.name);
+    if (clip == nullptr || clip->keyframes.empty()) {
+      continue;
+    }
+
+    f32 sample_time = playback.time_seconds;
+    if (clip->loop && clip->length_seconds > 0.0F) {
+      sample_time = std::fmod(std::max(sample_time, 0.0F), clip->length_seconds);
+    } else {
+      sample_time = std::clamp(sample_time, 0.0F, clip->length_seconds);
+    }
+
+    for (usize bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
+      output_rotations[bone_index] = output_rotations[bone_index] +
+          sample_animation_bone_channel(
+              *clip,
+              model.bones[bone_index].name,
+              EntityAnimationChannel::Rotation,
+              sample_time);
+      output_positions[bone_index] = output_positions[bone_index] +
+          sample_animation_bone_channel(
+              *clip,
+              model.bones[bone_index].name,
+              EntityAnimationChannel::Position,
+              sample_time);
+    }
+  }
+}
+
 } // namespace arv::render

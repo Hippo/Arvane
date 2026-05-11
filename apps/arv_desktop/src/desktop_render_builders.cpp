@@ -60,28 +60,26 @@ namespace {
 }
 
 [[nodiscard]] f32 first_person_sneak_target_progress(
-    std::string_view animation_name,
-    f32 animation_time_seconds) noexcept {
-  if (animation_name == "sneak") {
-    return std::clamp(animation_time_seconds / 0.25F, 0.0F, 1.0F);
+    const std::vector<protocol::EntityAnimationPlayback>& animations) noexcept {
+  for (const protocol::EntityAnimationPlayback& animation : animations) {
+    if (animation.name == "sneak") {
+      return std::clamp(animation.time_seconds / 0.25F, 0.0F, 1.0F);
+    }
   }
-  if (animation_name == "sneak_idle" ||
-      animation_name == "sneak_walk" ||
-      animation_name == "sneak_hit_left" ||
-      animation_name == "sneak_hit_right") {
-    return 1.0F;
+  for (const protocol::EntityAnimationPlayback& animation : animations) {
+    if (animation.name == "sneak_idle" ||
+        animation.name == "sneak_walk") {
+      return 1.0F;
+    }
   }
   return 0.0F;
 }
 
 [[nodiscard]] f32 update_first_person_sneak_visual_progress(
     DesktopGameSession& session,
-    std::string_view animation_name,
-    f32 animation_time_seconds,
+    const std::vector<protocol::EntityAnimationPlayback>& animations,
     std::chrono::steady_clock::time_point now) noexcept {
-  const f32 target = first_person_sneak_target_progress(
-      animation_name,
-      animation_time_seconds);
+  const f32 target = first_person_sneak_target_progress(animations);
   if (!session.first_person_sneak_visual_updated_at.has_value()) {
     session.first_person_sneak_visual_updated_at = now;
     session.first_person_sneak_visual_progress = target;
@@ -250,8 +248,7 @@ void populate_world_frame_draw_items(
     if (is_local_player) {
       const f32 sneak_progress = update_first_person_sneak_visual_progress(
           session,
-          mirror.animation_name,
-          mirror.animation_time_seconds,
+          mirror.animations,
           now);
       position = first_person_player_body_position(
           session.client->camera(),
@@ -268,8 +265,10 @@ void populate_world_frame_draw_items(
             ? model_forward_yaw_rotation(session.client->camera().yaw_radians())
             : mirror.render_rotation;
     item.scale = 1.0F;
-    item.animation_name = mirror.animation_name;
-    item.animation_time_seconds = mirror.animation_time_seconds;
+    item.animations.reserve(mirror.animations.size());
+    for (const protocol::EntityAnimationPlayback& animation : mirror.animations) {
+      item.animations.push_back({animation.name, animation.time_seconds});
+    }
     item.player_skin_region = player_skin_region;
     if (mirror.owning_player.has_value()) {
       item.bone_rotation_overrides.push_back({"head", mirror.head_rotation_degrees});

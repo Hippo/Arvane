@@ -155,5 +155,11 @@ void sample_entity_model_animation(
     f32 time_seconds,
     std::span<Vec3f> output_rotations,
     std::span<Vec3f> output_positions);
+void sample_entity_model_animations(
+    const EntityModelAsset& model,
+    const EntityAnimationAsset* animation,
+    std::span<const EntityAnimationPlayback> animations,
+    std::span<Vec3f> output_rotations,
+    std::span<Vec3f> output_positions);
 
 } // namespace arv::render

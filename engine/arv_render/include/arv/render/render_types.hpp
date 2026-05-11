@@ -496,14 +496,20 @@ struct EntityBoneRotationOverride {
   bool operator==(const EntityBoneRotationOverride&) const = default;
 };
 
+struct EntityAnimationPlayback {
+  std::string name{};
+  f32 time_seconds{};
+
+  bool operator==(const EntityAnimationPlayback&) const = default;
+};
+
 struct EntityDrawItem {
   EntityModelID model_id{};
   EntityAnimationID animation_id{};
   Vec3f position{};
   Quatf rotation{};
   f32 scale{1.0F};
-  f32 animation_time_seconds{};
-  std::string animation_name{};
+  std::vector<EntityAnimationPlayback> animations{};
   std::vector<EntityBoneRotationOverride> bone_rotation_overrides{};
   TextureRegionHandle player_skin_region{};
 };

@@ -127,58 +127,86 @@ struct DroppedItemLiquidProbe {
 [[nodiscard]] bool player_animation_is_sneaking(std::string_view animation_name) noexcept {
   return animation_name == "sneak" ||
          animation_name == "sneak_idle" ||
-         animation_name == "sneak_walk" ||
-         animation_name == "sneak_hit_left" ||
-         animation_name == "sneak_hit_right";
+         animation_name == "sneak_walk";
 }
 
-[[nodiscard]] bool player_animation_is_active_once(
-    const entity::EntityAnimationState& animation) noexcept {
-  if (animation.name == "hit_left" ||
-      animation.name == "hit_right" ||
-      animation.name == "sneak_hit_left" ||
-      animation.name == "sneak_hit_right") {
-    return animation.time_seconds < 0.25F;
+[[nodiscard]] bool player_animation_is_locomotion(std::string_view animation_name) noexcept {
+  return animation_name == "idle" ||
+         animation_name == "walk" ||
+         animation_name == "swim_idle" ||
+         animation_name == "swim" ||
+         player_animation_is_sneaking(animation_name);
+}
+
+[[nodiscard]] bool player_animation_is_attack(std::string_view animation_name) noexcept {
+  return animation_name == "hit_left" ||
+         animation_name == "hit_right";
+}
+
+[[nodiscard]] entity::EntityAnimationPlayback* find_player_locomotion_animation(
+    entity::EntityAnimationState& animation) noexcept {
+  for (entity::EntityAnimationPlayback& active : animation.active) {
+    if (player_animation_is_locomotion(active.name)) {
+      return &active;
+    }
   }
-  return false;
+  return nullptr;
 }
 
-void set_animation_if_changed(
+void remove_finished_player_attack_animations(
+    entity::EntityAnimationState& animation) {
+  constexpr Seconds AttackAnimationSeconds = 0.25F;
+  std::erase_if(
+      animation.active,
+      [](const entity::EntityAnimationPlayback& active) {
+        return player_animation_is_attack(active.name) &&
+               active.time_seconds >= AttackAnimationSeconds;
+      });
+}
+
+void set_player_locomotion_animation(
     entity::EntityAnimationState& animation,
     std::string_view name) {
-  if (animation.name == name) {
+  entity::EntityAnimationPlayback* current = find_player_locomotion_animation(animation);
+  if (current != nullptr && current->name == name) {
     return;
   }
-  animation.name = std::string{name};
-  animation.time_seconds = 0.0F;
+  std::erase_if(
+      animation.active,
+      [](const entity::EntityAnimationPlayback& active) {
+        return player_animation_is_locomotion(active.name);
+      });
+  if (!name.empty()) {
+    animation.active.insert(animation.active.begin(), {std::string{name}, 0.0F});
+  }
 }
 
 void update_player_animation_state(
     entity::EntityAnimationState& animation,
     const player::PlayerState& player_state) {
-  if (player_animation_is_active_once(animation)) {
-    return;
-  }
+  remove_finished_player_attack_animations(animation);
 
   const bool moving = has_horizontal_motion(player_state.velocity);
   if (player_state.swimming) {
-    set_animation_if_changed(animation, moving ? "swim" : "swim_idle");
+    set_player_locomotion_animation(animation, moving ? "swim" : "swim_idle");
     return;
   }
 
   if (player_state.sneaking) {
-    if (!player_animation_is_sneaking(animation.name)) {
-      set_animation_if_changed(animation, "sneak");
+    entity::EntityAnimationPlayback* locomotion =
+        find_player_locomotion_animation(animation);
+    if (locomotion == nullptr || !player_animation_is_sneaking(locomotion->name)) {
+      set_player_locomotion_animation(animation, "sneak");
       return;
     }
-    if (animation.name == "sneak" && animation.time_seconds < 0.25F) {
+    if (locomotion->name == "sneak" && locomotion->time_seconds < 0.25F) {
       return;
     }
-    set_animation_if_changed(animation, moving ? "sneak_walk" : "sneak_idle");
+    set_player_locomotion_animation(animation, moving ? "sneak_walk" : "sneak_idle");
     return;
   }
 
-  set_animation_if_changed(animation, moving ? "walk" : "idle");
+  set_player_locomotion_animation(animation, moving ? "walk" : "idle");
 }
 
 [[nodiscard]] bool can_jump_up_one_block(
@@ -363,10 +391,16 @@ u32 WorldEntitySimulation::tick_brains(
 
     const auto set_animation = [&](std::string_view animation_name) {
       auto& animation = registry.get_or_emplace<entity::EntityAnimationState>(handle);
-      if (animation.name != animation_name) {
-        animation.name = std::string{animation_name};
-        animation.time_seconds = 0.0F;
+      if (animation_name.empty()) {
+        animation.active.clear();
+        return;
       }
+      if (animation.active.size() == 1U &&
+          animation.active.front().name == animation_name) {
+        return;
+      }
+      animation.active.clear();
+      animation.active.push_back({std::string{animation_name}, 0.0F});
     };
     const auto clear_movement_intent = [&]() {
       if (auto* intent = registry.try_get<entity::MovementIntent>(handle);
@@ -649,11 +683,17 @@ u32 WorldEntitySimulation::tick_entity_animations(
   const auto view = registry.view<entity::EntityAnimationState>();
   for (const entt::entity handle : view) {
     auto& animation = view.get<entity::EntityAnimationState>(handle);
-    if (animation.name.empty()) {
-      animation.time_seconds = 0.0F;
+    std::erase_if(
+        animation.active,
+        [](const entity::EntityAnimationPlayback& active) {
+          return active.name.empty();
+        });
+    if (animation.active.empty()) {
       continue;
     }
-    animation.time_seconds += tick_seconds;
+    for (entity::EntityAnimationPlayback& active : animation.active) {
+      active.time_seconds += tick_seconds;
+    }
     ++updated;
   }
   return updated;

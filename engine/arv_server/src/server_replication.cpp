@@ -259,8 +259,10 @@ void ServerRuntimeImpl::send_entity_replication() {
         entry.health_current = snapshot.health_current;
         entry.health_max = snapshot.health_max;
       }
-      entry.animation_name = snapshot.animation_name;
-      entry.animation_time_seconds = snapshot.animation_time_seconds;
+      entry.animations.reserve(snapshot.animations.size());
+      for (const entity::EntityAnimationPlayback& animation : snapshot.animations) {
+        entry.animations.push_back({animation.name, animation.time_seconds});
+      }
       entry.head_rotation_degrees = snapshot.head_rotation_degrees;
       snapshot_entries.push_back(std::move(entry));
     }

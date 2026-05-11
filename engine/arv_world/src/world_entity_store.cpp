@@ -314,10 +314,34 @@ bool WorldEntityStore::set_animation(EntityID entity_id, std::string animation_n
     return false;
   }
   auto& animation = registry_.get_or_emplace<entity::EntityAnimationState>(entity_handle);
-  if (animation.name != animation_name) {
-    animation.name = std::move(animation_name);
-    animation.time_seconds = 0.0F;
+  if (animation_name.empty()) {
+    animation.active.clear();
+    return true;
   }
+  if (animation.active.size() == 1U && animation.active.front().name == animation_name) {
+    return true;
+  }
+  animation.active.clear();
+  animation.active.push_back({std::move(animation_name), 0.0F});
+  return true;
+}
+
+bool WorldEntityStore::play_animation(EntityID entity_id, std::string animation_name) noexcept {
+  if (animation_name.empty()) {
+    return false;
+  }
+  const entt::entity entity_handle = handle(entity_id);
+  if (entity_handle == entt::null || !registry_.valid(entity_handle)) {
+    return false;
+  }
+  auto& animation = registry_.get_or_emplace<entity::EntityAnimationState>(entity_handle);
+  for (entity::EntityAnimationPlayback& active : animation.active) {
+    if (active.name == animation_name) {
+      active.time_seconds = 0.0F;
+      return true;
+    }
+  }
+  animation.active.push_back({std::move(animation_name), 0.0F});
   return true;
 }
 
@@ -440,8 +464,7 @@ std::vector<entity::EntitySnapshotEntry> WorldEntityStore::collect_entity_snapsh
     }
     if (const auto* animation = registry_.try_get<entity::EntityAnimationState>(entity_handle);
         animation != nullptr) {
-      entry.animation_name = animation->name;
-      entry.animation_time_seconds = animation->time_seconds;
+      entry.animations = animation->active;
     }
     if (const auto* pose = registry_.try_get<entity::PlayerVisualPose>(entity_handle);
         pose != nullptr) {
@@ -721,6 +744,10 @@ const entity::DroppedItem* WorldRuntime::find_dropped_item(EntityID entity_id) c
 
 bool WorldRuntime::set_entity_animation(EntityID entity_id, std::string animation_name) noexcept {
   return impl_->entities.set_animation(entity_id, std::move(animation_name));
+}
+
+bool WorldRuntime::play_entity_animation(EntityID entity_id, std::string animation_name) noexcept {
+  return impl_->entities.play_animation(entity_id, std::move(animation_name));
 }
 
 bool WorldRuntime::set_player_visual_pose(

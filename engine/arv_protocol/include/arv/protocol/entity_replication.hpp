@@ -32,14 +32,20 @@ struct ClientboundEntityDespawn {
   u16 reason{};
 };
 
+struct EntityAnimationPlayback {
+  std::string name{};
+  Seconds time_seconds{};
+
+  bool operator==(const EntityAnimationPlayback&) const = default;
+};
+
 struct EntitySnapshotEntry {
   EntityNetID entity_id{};
   Vec3f position{};
   Vec3f velocity{};
   Quatf rotation{};
   u32 state_flags{};
-  std::string animation_name{};
-  Seconds animation_time_seconds{};
+  std::vector<EntityAnimationPlayback> animations{};
   Vec3f head_rotation_degrees{};
   f32 health_current{};
   f32 health_max{};
@@ -70,6 +76,7 @@ struct ClientboundDroppedItemSnapshot {
 
 inline constexpr u32 MaxEntitiesPerSnapshot = 4096;
 inline constexpr u32 MaxDroppedItemsPerSnapshot = 4096;
+inline constexpr u32 MaxEntityAnimationsPerSnapshotEntry = 16;
 
 std::vector<u8> serialize_clientbound_entity_spawn(const ClientboundEntitySpawn& spawn);
 Expected<ClientboundEntitySpawn, ProtocolError> deserialize_clientbound_entity_spawn(std::span<const u8> bytes);

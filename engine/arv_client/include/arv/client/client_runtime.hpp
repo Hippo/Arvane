@@ -9,6 +9,7 @@
 #include "arv/physics/collision.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/skins.hpp"
 
@@ -39,8 +40,7 @@ struct ReplicatedEntityMirror {
   Seconds interpolation_elapsed_seconds{};
   Seconds interpolation_duration_seconds{};
   std::optional<PlayerID> owning_player{};
-  std::string animation_name{};
-  Seconds animation_time_seconds{};
+  std::vector<protocol::EntityAnimationPlayback> animations{};
   Vec3f head_rotation_degrees{};
   bool has_health{};
   f32 health_current{};

@@ -13,6 +13,11 @@ namespace {
 
 inline constexpr f32 KnockbackSuppressedInputBlend = 0.25F;
 
+enum class PlayerAttackButton : u8 {
+  Primary,
+  Secondary,
+};
+
 void restart_player_entity_animation(
     world::WorldRuntime& world,
     PlayerID player_id,
@@ -21,25 +26,20 @@ void restart_player_entity_animation(
   if (!entity_id.has_value()) {
     return;
   }
-  entity::EntityAnimationState* animation =
-      world.find_entity_animation_state(entity_id.value());
-  if (animation == nullptr) {
-    (void)world.set_entity_animation(
-        entity_id.value(),
-        std::string{animation_name});
-    return;
-  }
-  animation->name = std::string{animation_name};
-  animation->time_seconds = 0.0F;
+  (void)world.play_entity_animation(
+      entity_id.value(),
+      std::string{animation_name});
 }
 
 [[nodiscard]] std::string_view player_hit_animation_name(
-    const player::PlayerState& player_state,
-    bool left) noexcept {
-  if (player_state.sneaking) {
-    return left ? "sneak_hit_left" : "sneak_hit_right";
+    PlayerAttackButton button) noexcept {
+  switch (button) {
+    case PlayerAttackButton::Primary:
+      return "hit_right";
+    case PlayerAttackButton::Secondary:
+      return "hit_left";
   }
-  return left ? "hit_left" : "hit_right";
+  return "hit_right";
 }
 
 [[nodiscard]] physics::PlayerCollisionPose player_collision_pose(
@@ -351,12 +351,12 @@ void ServerRuntimeImpl::apply_player_action_command(
     restart_player_entity_animation(
         default_world_,
         player_state.player_id,
-        player_hit_animation_name(player_state, false));
+        player_hit_animation_name(PlayerAttackButton::Primary));
   } else if (command.secondary_pressed) {
     restart_player_entity_animation(
         default_world_,
         player_state.player_id,
-        player_hit_animation_name(player_state, true));
+        player_hit_animation_name(PlayerAttackButton::Secondary));
   }
 
   (void)default_world_.set_player_visual_pose(

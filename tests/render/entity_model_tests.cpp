@@ -278,6 +278,56 @@ TEST(EntityModelTests, SamplesSeparatedAnimationByBoxBoneName) {
   EXPECT_EQ(rotations[front_left.value()], (arv::Vec3f{}));
 }
 
+TEST(EntityModelTests, SamplesMultipleActiveAnimationsAdditively) {
+  const std::filesystem::path player_path =
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "models" / "entity" / "player.json";
+  const std::filesystem::path player_animation_path =
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "animation" / "player.json";
+
+  auto parsed_model = arv::render::parse_entity_model_json(read_text(player_path));
+  ASSERT_TRUE(parsed_model) << parsed_model.error().message;
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{
+      "arvane:texture/default_skin/default",
+      {0, 0},
+      {64, 64},
+      64,
+      64}};
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{1},
+      parsed_model.value(),
+      bindings);
+  ASSERT_TRUE(model) << model.error().message;
+
+  auto parsed_animation = arv::render::parse_entity_animation_json(
+      read_text(player_animation_path),
+      player_animation_path.string());
+  ASSERT_TRUE(parsed_animation) << parsed_animation.error().message;
+  auto animation = arv::render::build_entity_animation_asset(
+      arv::render::EntityAnimationID{1},
+      "arvane:animation/player",
+      std::move(parsed_animation.value()));
+  ASSERT_TRUE(animation) << animation.error().message;
+
+  std::vector<arv::Vec3f> rotations(model.value().bones.size());
+  std::vector<arv::Vec3f> positions(model.value().bones.size());
+  const std::vector<arv::render::EntityAnimationPlayback> active{
+      {"walk", 0.25F},
+      {"hit_right", 0.125F}};
+  arv::render::sample_entity_model_animations(
+      model.value(),
+      &animation.value(),
+      active,
+      rotations,
+      positions);
+
+  const std::optional<arv::usize> right_arm = find_bone_index(model.value(), "right_arm");
+  const std::optional<arv::usize> left_leg = find_bone_index(model.value(), "left_leg");
+  ASSERT_TRUE(right_arm.has_value());
+  ASSERT_TRUE(left_leg.has_value());
+  EXPECT_EQ(rotations[right_arm.value()], (arv::Vec3f{105.0F, 15.0F, -15.0F}));
+  EXPECT_EQ(rotations[left_leg.value()], (arv::Vec3f{45.0F, 0.0F, 0.0F}));
+}
+
 TEST(EntityModelTests, PlayerModelPreservesInputTextureAndSkinLayerFlags) {
   const std::filesystem::path player_path =
       std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "models" / "entity" / "player.json";

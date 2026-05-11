@@ -440,6 +440,31 @@ void apply_ui_scissor(UiClip clip, u32 framebuffer_height) {
   return 0;
 }
 
+[[nodiscard]] i32 compare_entity_animation_playbacks(
+    const std::vector<EntityAnimationPlayback>& lhs,
+    const std::vector<EntityAnimationPlayback>& rhs) noexcept {
+  const usize count = std::min(lhs.size(), rhs.size());
+  for (usize index = 0; index < count; ++index) {
+    if (lhs[index].name < rhs[index].name) {
+      return -1;
+    }
+    if (rhs[index].name < lhs[index].name) {
+      return 1;
+    }
+    if (const i32 time = compare_f32(lhs[index].time_seconds, rhs[index].time_seconds);
+        time != 0) {
+      return time;
+    }
+  }
+  if (lhs.size() < rhs.size()) {
+    return -1;
+  }
+  if (lhs.size() > rhs.size()) {
+    return 1;
+  }
+  return 0;
+}
+
 void apply_bone_rotation_overrides(
     const EntityModelAsset& model,
     std::span<Vec3f> bone_rotations,
@@ -1638,11 +1663,11 @@ void OpenGLRenderer::draw_entities_for(
         if (lhs->animation_id != rhs->animation_id) {
           return lhs->animation_id < rhs->animation_id;
         }
-        if (lhs->animation_time_seconds != rhs->animation_time_seconds) {
-          return lhs->animation_time_seconds < rhs->animation_time_seconds;
-        }
-        if (lhs->animation_name != rhs->animation_name) {
-          return lhs->animation_name < rhs->animation_name;
+        if (const i32 animations = compare_entity_animation_playbacks(
+                lhs->animations,
+                rhs->animations);
+            animations != 0) {
+          return animations < 0;
         }
         return compare_bone_rotation_overrides(
                    lhs->bone_rotation_overrides,
@@ -1652,8 +1677,7 @@ void OpenGLRenderer::draw_entities_for(
   const auto same_entity_batch = [](const EntityDrawItem& lhs, const EntityDrawItem& rhs) {
     return lhs.model_id == rhs.model_id &&
            lhs.animation_id == rhs.animation_id &&
-           lhs.animation_time_seconds == rhs.animation_time_seconds &&
-           lhs.animation_name == rhs.animation_name &&
+           lhs.animations == rhs.animations &&
            lhs.bone_rotation_overrides == rhs.bone_rotation_overrides;
   };
 
@@ -1734,11 +1758,10 @@ void OpenGLRenderer::draw_entities_for(
     std::span<Vec3f> bone_positions{
         entity_bone_positions_.data(),
         model.bones.size()};
-    sample_entity_model_animation(
+    sample_entity_model_animations(
         model,
         animation,
-        first_draw.animation_name,
-        first_draw.animation_time_seconds,
+        first_draw.animations,
         bone_rotations,
         bone_positions);
     apply_bone_rotation_overrides(

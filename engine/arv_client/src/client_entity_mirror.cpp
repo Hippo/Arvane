@@ -108,6 +108,13 @@ void ClientEntityMirrorStore::apply_spawn(
   mirror.interpolation_elapsed_seconds = 0.0F;
   mirror.interpolation_duration_seconds = 0.0F;
   mirror.owning_player = spawn.owning_player;
+  mirror.animations.clear();
+  mirror.head_rotation_degrees = {};
+  mirror.has_health = false;
+  mirror.health_current = 0.0F;
+  mirror.health_max = 0.0F;
+  mirror.dead = false;
+  mirror.invulnerable = false;
 }
 
 void ClientEntityMirrorStore::apply_despawn(
@@ -154,8 +161,7 @@ void ClientEntityMirrorStore::apply_snapshot(
     mirror.position = entry.position;
     mirror.velocity = entry.velocity;
     mirror.rotation = entry.rotation;
-    mirror.animation_name = entry.animation_name;
-    mirror.animation_time_seconds = entry.animation_time_seconds;
+    mirror.animations = entry.animations;
     mirror.head_rotation_degrees = entry.head_rotation_degrees;
     mirror.has_health =
         (entry.state_flags & protocol::EntityStateFlagHasHealth) != 0U;

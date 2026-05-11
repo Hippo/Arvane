@@ -440,8 +440,7 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
                                      {1.0F, 0.0F, 0.0F},
                                      {0.0F, 0.0F, 0.0F, 1.0F},
                                      0,
-                                     "walking",
-                                     0.5F,
+                                     {{"walking", 0.5F}, {"hit_right", 0.125F}},
                                      {5.0F, 15.0F, 0.0F},
                                      8.0F,
                                      10.0F});
@@ -459,8 +458,11 @@ TEST(ClientRuntimeTests, ReplicatedEntitiesIgnoreUnknownAndStaleSnapshots) {
   ASSERT_NE(mirror, nullptr);
   EXPECT_EQ(mirror->position, (arv::Vec3f{10.0F, 11.0F, 12.0F}));
   EXPECT_EQ(mirror->last_server_tick, 20U);
-  EXPECT_EQ(mirror->animation_name, "walking");
-  EXPECT_FLOAT_EQ(mirror->animation_time_seconds, 0.5F);
+  ASSERT_EQ(mirror->animations.size(), 2U);
+  EXPECT_EQ(mirror->animations[0].name, "walking");
+  EXPECT_FLOAT_EQ(mirror->animations[0].time_seconds, 0.5F);
+  EXPECT_EQ(mirror->animations[1].name, "hit_right");
+  EXPECT_FLOAT_EQ(mirror->animations[1].time_seconds, 0.125F);
   EXPECT_EQ(mirror->head_rotation_degrees, (arv::Vec3f{5.0F, 15.0F, 0.0F}));
   EXPECT_TRUE(mirror->has_health);
   EXPECT_FALSE(mirror->dead);
