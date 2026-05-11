@@ -135,7 +135,8 @@ void append_item_draw(
 }
 
 [[nodiscard]] render::SkyUniforms sky_uniforms_from_clock(
-    const world::WorldClock& clock) noexcept {
+    const world::WorldClock& clock,
+    const io::RenderConfig& render_config) noexcept {
   const world::CelestialState celestial = world::build_celestial_state(clock);
   render::SkyUniforms uniforms;
   uniforms.enabled = true;
@@ -144,13 +145,14 @@ void append_item_draw(
   uniforms.moon_direction = celestial.moon_direction;
   uniforms.moonlight_strength = celestial.moonlight_strength;
   uniforms.daylight_color = celestial.daylight_color;
-  uniforms.star_visibility = celestial.star_visibility;
+  uniforms.star_visibility = celestial.star_visibility * render_config.sky.star_intensity;
   uniforms.ambient_color = celestial.ambient_color;
   uniforms.day_fraction = celestial.day_fraction;
   uniforms.fog_color = celestial.fog_color;
   uniforms.cloud_time_seconds = world::day_time_seconds(clock);
-  uniforms.cirrus_amount = 0.35F;
-  uniforms.cumulus_amount = 0.60F;
+  uniforms.cirrus_amount = render_config.sky.cirrus_amount;
+  uniforms.cumulus_amount = render_config.sky.cumulus_amount;
+  uniforms.cloud_intensity = render_config.sky.cloud_intensity;
   uniforms.exposure = 1.15F;
   return uniforms;
 }
@@ -169,7 +171,7 @@ void populate_world_frame_draw_items(
     DesktopGameSession& session,
     const EntityRenderAssets& entity_render_assets,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
-    bool show_local_player_body,
+    const io::RenderConfig& render_config,
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point app_start_time,
     f32 interpolation_alpha) {
@@ -180,7 +182,7 @@ void populate_world_frame_draw_items(
       session.integrated_server == nullptr
           ? session.client_world
           : session.integrated_server->voxel_world();
-  frame.sky = sky_uniforms_from_clock(sky_world.clock());
+  frame.sky = sky_uniforms_from_clock(sky_world.clock(), render_config);
   const std::optional<PlayerID> local_player_id = session.client->local_player_id();
   const std::optional<EntityNetID> local_entity_id = session.client->local_entity_id();
 
@@ -198,7 +200,7 @@ void populate_world_frame_draw_items(
     const bool is_local_player =
         (local_entity_id.has_value() && mirror.entity_id == local_entity_id.value()) ||
         (local_player_id.has_value() && mirror.owning_player == local_player_id.value());
-    if (is_local_player && !show_local_player_body) {
+    if (is_local_player && !render_config.show_local_player_body) {
       continue;
     }
     const protocol::PlayerProfileInfo* profile =

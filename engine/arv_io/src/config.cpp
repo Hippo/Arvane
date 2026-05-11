@@ -31,6 +31,9 @@ constexpr std::string_view kLangDirectoryName = "lang";
 void emit_render_atlases_config(
     YAML::Emitter& emitter,
     const RenderConfig::AtlasesConfig& atlases);
+void emit_render_sky_config(
+    YAML::Emitter& emitter,
+    const RenderConfig::SkyConfig& sky);
 void emit_network_movement_config(
     YAML::Emitter& emitter,
     const MovementValidationConfig& movement);
@@ -91,6 +94,19 @@ void read_block_outline_config(
     config.color_b = color[2].as<f32>();
   }
   read_scalar(outline, "thickness", config.thickness);
+}
+
+void read_render_sky_config(
+    const YAML::Node& render,
+    RenderConfig::SkyConfig& config) {
+  const YAML::Node sky = render["sky"];
+  if (!sky) {
+    return;
+  }
+  read_scalar(sky, "star_intensity", config.star_intensity);
+  read_scalar(sky, "cloud_intensity", config.cloud_intensity);
+  read_scalar(sky, "cirrus_amount", config.cirrus_amount);
+  read_scalar(sky, "cumulus_amount", config.cumulus_amount);
 }
 
 void read_render_atlases_config(
@@ -824,6 +840,7 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "thickness" << YAML::Value
           << config.render.block_outline.thickness;
   emitter << YAML::EndMap;
+  emit_render_sky_config(emitter, config.render.sky);
   emit_render_atlases_config(emitter, config.render.atlases);
   emitter << YAML::EndMap;
 
@@ -983,6 +1000,17 @@ void emit_network_keep_alive_config(
           << keep_alive.interval_seconds;
   emitter << YAML::Key << "client_timeout_seconds" << YAML::Value
           << keep_alive.client_timeout_seconds;
+  emitter << YAML::EndMap;
+}
+
+void emit_render_sky_config(
+    YAML::Emitter& emitter,
+    const RenderConfig::SkyConfig& sky) {
+  emitter << YAML::Key << "sky" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "star_intensity" << YAML::Value << sky.star_intensity;
+  emitter << YAML::Key << "cloud_intensity" << YAML::Value << sky.cloud_intensity;
+  emitter << YAML::Key << "cirrus_amount" << YAML::Value << sky.cirrus_amount;
+  emitter << YAML::Key << "cumulus_amount" << YAML::Value << sky.cumulus_amount;
   emitter << YAML::EndMap;
 }
 
@@ -1325,6 +1353,7 @@ ConfigResult save_default_client_config_file(
   emitter << YAML::Key << "thickness" << YAML::Value
           << config.render.block_outline.thickness;
   emitter << YAML::EndMap;
+  emit_render_sky_config(emitter, config.render.sky);
   emit_render_atlases_config(emitter, config.render.atlases);
   emitter << YAML::EndMap;
 
@@ -1471,6 +1500,7 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_scalar(render, "frame_pacing_spin_us", config.render.frame_pacing_spin_us);
     read_scalar(render, "show_local_player_body", config.render.show_local_player_body);
     read_block_outline_config(render, config.render.block_outline);
+    read_render_sky_config(render, config.render.sky);
     read_render_atlases_config(render, config.render.atlases);
   }
 
@@ -1838,6 +1868,20 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   if (!std::isfinite(config.render.block_outline.thickness) ||
       config.render.block_outline.thickness <= 0.0F) {
     return ConfigError{"render.block_outline.thickness must be finite and > 0"};
+  }
+  if (!std::isfinite(config.render.sky.star_intensity) ||
+      config.render.sky.star_intensity < 0.0F ||
+      !std::isfinite(config.render.sky.cloud_intensity) ||
+      config.render.sky.cloud_intensity < 0.0F) {
+    return ConfigError{"render.sky intensities must be finite and >= 0"};
+  }
+  if (!std::isfinite(config.render.sky.cirrus_amount) ||
+      !std::isfinite(config.render.sky.cumulus_amount) ||
+      config.render.sky.cirrus_amount < 0.0F ||
+      config.render.sky.cirrus_amount > 1.0F ||
+      config.render.sky.cumulus_amount < 0.0F ||
+      config.render.sky.cumulus_amount > 1.0F) {
+    return ConfigError{"render.sky cloud amounts must be finite values between 0 and 1"};
   }
   if (config.render.atlases.player_skins.page_size == 0U ||
       config.render.atlases.player_skins.max_pages == 0U) {

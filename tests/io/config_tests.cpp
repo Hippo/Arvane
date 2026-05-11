@@ -163,6 +163,11 @@ render:
   block_outline:
     color: [0.1, 0.2, 0.3]
     thickness: 0.75
+  sky:
+    star_intensity: 1.5
+    cloud_intensity: 1.75
+    cirrus_amount: 0.25
+    cumulus_amount: 0.85
   atlases:
     blocks:
       page_size: 1024
@@ -312,6 +317,10 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().render.block_outline.color_g, 0.2F);
   EXPECT_FLOAT_EQ(result.value().render.block_outline.color_b, 0.3F);
   EXPECT_FLOAT_EQ(result.value().render.block_outline.thickness, 0.75F);
+  EXPECT_FLOAT_EQ(result.value().render.sky.star_intensity, 1.5F);
+  EXPECT_FLOAT_EQ(result.value().render.sky.cloud_intensity, 1.75F);
+  EXPECT_FLOAT_EQ(result.value().render.sky.cirrus_amount, 0.25F);
+  EXPECT_FLOAT_EQ(result.value().render.sky.cumulus_amount, 0.85F);
   EXPECT_EQ(result.value().render.atlases.blocks.page_size, 1024U);
   EXPECT_EQ(result.value().render.atlases.blocks.max_pages, 2U);
   EXPECT_EQ(result.value().render.atlases.entities.page_size, 1536U);
@@ -476,6 +485,10 @@ TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
       0.65F);
   EXPECT_EQ(config.render.atlases.particles.page_size, 2048U);
   EXPECT_EQ(config.render.atlases.particles.max_pages, 4U);
+  EXPECT_FLOAT_EQ(config.render.sky.star_intensity, 1.25F);
+  EXPECT_FLOAT_EQ(config.render.sky.cloud_intensity, 1.25F);
+  EXPECT_FLOAT_EQ(config.render.sky.cirrus_amount, 0.45F);
+  EXPECT_FLOAT_EQ(config.render.sky.cumulus_amount, 0.80F);
   EXPECT_EQ(config.ui.chat.max_history_messages, 1000U);
   EXPECT_FLOAT_EQ(config.ui.chat.passive_visible_seconds, 8.0F);
   EXPECT_FLOAT_EQ(config.ui.chat.passive_fade_seconds, 2.0F);

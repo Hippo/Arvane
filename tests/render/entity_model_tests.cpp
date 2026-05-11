@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "arv/core/log.hpp"
+
 namespace {
 
 std::string read_text(const std::filesystem::path& path) {
@@ -180,7 +182,8 @@ TEST(EntityModelTests, RejectsUnsupportedAnimationChannels) {
         "value": [0, 0, 0]
       }]
     }]
-  })json", "arvane_home/assets/animation/bad.json");
+  })json",
+                                                         "arvane_home/assets/animation/bad.json");
 
   ASSERT_FALSE(parsed);
   EXPECT_NE(parsed.error().message.find("arvane_home/assets/animation/bad.json"), std::string::npos);
@@ -213,7 +216,8 @@ TEST(EntityModelTests, AcceptsBlockbenchLoopStrings) {
         }]
       }
     ]
-  })json", "arvane_home/assets/animation/blockbench.json");
+  })json",
+                                                         "arvane_home/assets/animation/blockbench.json");
 
   ASSERT_TRUE(parsed) << parsed.error().message;
   ASSERT_EQ(parsed.value().clips.size(), 2U);
@@ -286,12 +290,11 @@ TEST(EntityModelTests, SamplesMultipleActiveAnimationsAdditively) {
 
   auto parsed_model = arv::render::parse_entity_model_json(read_text(player_path));
   ASSERT_TRUE(parsed_model) << parsed_model.error().message;
-  const std::vector<arv::render::EntityModelTextureBinding> bindings{{
-      "arvane:texture/default_skin/default",
-      {0, 0},
-      {64, 64},
-      64,
-      64}};
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/default_skin/default",
+                                                                      {0, 0},
+                                                                      {64, 64},
+                                                                      64,
+                                                                      64}};
   auto model = arv::render::build_entity_model_asset(
       arv::render::EntityModelID{1},
       parsed_model.value(),
@@ -337,12 +340,11 @@ TEST(EntityModelTests, PlayerModelPreservesInputTextureAndSkinLayerFlags) {
 
   ASSERT_EQ(parsed.value().texture_assets.size(), 1U);
   EXPECT_EQ(parsed.value().texture_assets.front(), "$0");
-  const std::vector<arv::render::EntityModelTextureBinding> bindings{{
-      "arvane:texture/default_skin/default",
-      {0, 0},
-      {64, 64},
-      64,
-      64}};
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/default_skin/default",
+                                                                      {0, 0},
+                                                                      {64, 64},
+                                                                      64,
+                                                                      64}};
   auto model = arv::render::build_entity_model_asset(
       arv::render::EntityModelID{11},
       parsed.value(),
@@ -354,8 +356,13 @@ TEST(EntityModelTests, PlayerModelPreservesInputTextureAndSkinLayerFlags) {
   const std::optional<arv::usize> right_arm = find_bone_index(model.value(), "right_arm");
   ASSERT_TRUE(left_arm.has_value());
   ASSERT_TRUE(right_arm.has_value());
-  EXPECT_EQ(model.value().bones[left_arm.value()].pivot, (arv::Vec3f{-6.0F, 24.0F, 1.0F}));
-  EXPECT_EQ(model.value().bones[right_arm.value()].pivot, (arv::Vec3f{6.0F, 24.0F, 1.0F}));
+  EXPECT_EQ(model.value().bones[left_arm.value()].pivot, (arv::Vec3f{6.0F, 24.0F, 1.0F}));
+  EXPECT_EQ(model.value().bones[right_arm.value()].pivot, (arv::Vec3f{-6.0F, 24.0F, 1.0F}));
+
+  // Entity instances face model -Z forward by applying the model-forward yaw. The
+  // converted local X therefore flips back to the authored visual side.
+  EXPECT_EQ(-model.value().bones[left_arm.value()].pivot.x, -6.0F);
+  EXPECT_EQ(-model.value().bones[right_arm.value()].pivot.x, 6.0F);
 
   bool saw_decor = false;
   bool saw_base = false;

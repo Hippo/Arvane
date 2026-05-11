@@ -383,7 +383,7 @@ usize DesktopFrameLoop::build_world_frame(
       *active_session,
       assets_.entity_render_assets,
       player_skin_regions_,
-      config_.render.show_local_player_body,
+      config_.render,
       now,
       app_start_time_,
       interpolation_alpha);

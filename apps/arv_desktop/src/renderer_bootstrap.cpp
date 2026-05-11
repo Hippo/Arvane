@@ -24,6 +24,22 @@ bool configure_renderer(
       std::move(chunk_vertex_shader.value()),
       std::move(chunk_fragment_shader.value()));
 
+  auto sky_vertex_shader =
+      resources.load_text({"arvane:shader/world/sky.vert"}, asset::AssetKind::ShaderSource);
+  if (!sky_vertex_shader) {
+    arv::core::error("assets", sky_vertex_shader.error().message);
+    return false;
+  }
+  auto sky_fragment_shader =
+      resources.load_text({"arvane:shader/world/sky.frag"}, asset::AssetKind::ShaderSource);
+  if (!sky_fragment_shader) {
+    arv::core::error("assets", sky_fragment_shader.error().message);
+    return false;
+  }
+  renderer.set_sky_shader_sources(
+      std::move(sky_vertex_shader.value()),
+      std::move(sky_fragment_shader.value()));
+
   auto entity_vertex_shader =
       resources.load_text({"arvane:shader/entity/entity.vert"}, asset::AssetKind::ShaderSource);
   if (!entity_vertex_shader) {

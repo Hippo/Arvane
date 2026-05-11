@@ -213,14 +213,13 @@ void append_face(
   const std::array<Vec2f, 4> uvs = face_uvs(face, face_definition, binding, texture_size);
   const Vec3f color = face_color(face);
   for (usize index = 0; index < corners.size(); ++index) {
-    asset.vertices.push_back({
-        corners[index],
-        uvs[index],
-        color,
-        bone_index,
-        flags,
-        static_cast<u32>(binding.atlas_domain),
-        binding.atlas_page});
+    asset.vertices.push_back({corners[index],
+                              uvs[index],
+                              color,
+                              bone_index,
+                              flags,
+                              static_cast<u32>(binding.atlas_domain),
+                              binding.atlas_page});
   }
   asset.indices.insert(
       asset.indices.end(),
@@ -817,17 +816,17 @@ void sample_entity_model_animations(
 
     for (usize bone_index = 0; bone_index < model.bones.size(); ++bone_index) {
       output_rotations[bone_index] = output_rotations[bone_index] +
-          sample_animation_bone_channel(
-              *clip,
-              model.bones[bone_index].name,
-              EntityAnimationChannel::Rotation,
-              sample_time);
+                                     sample_animation_bone_channel(
+                                         *clip,
+                                         model.bones[bone_index].name,
+                                         EntityAnimationChannel::Rotation,
+                                         sample_time);
       output_positions[bone_index] = output_positions[bone_index] +
-          sample_animation_bone_channel(
-              *clip,
-              model.bones[bone_index].name,
-              EntityAnimationChannel::Position,
-              sample_time);
+                                     sample_animation_bone_channel(
+                                         *clip,
+                                         model.bones[bone_index].name,
+                                         EntityAnimationChannel::Position,
+                                         sample_time);
     }
   }
 }

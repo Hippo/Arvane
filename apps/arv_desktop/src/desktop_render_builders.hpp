@@ -4,6 +4,7 @@
 #include "desktop_session.hpp"
 
 #include "arv/core/types.hpp"
+#include "arv/io/config.hpp"
 #include "arv/render/render_types.hpp"
 
 #include <chrono>
@@ -19,7 +20,7 @@ void populate_world_frame_draw_items(
     DesktopGameSession& session,
     const EntityRenderAssets& entity_render_assets,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
-    bool show_local_player_body,
+    const io::RenderConfig& render_config,
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point app_start_time,
     f32 interpolation_alpha);

@@ -21,6 +21,7 @@ public:
   void set_chunk_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_entity_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_ui_shader_sources(std::string vertex_source, std::string fragment_source);
+  void set_sky_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_chunk_texture_atlas(TextureArrayUploadData upload);
   void set_entity_texture_atlas(TextureArrayUploadData upload);
   void set_ui_font_atlas(TextureArrayUploadData upload);
@@ -289,6 +290,7 @@ private:
   GLint sky_cloud_time_uniform_{-1};
   GLint sky_cirrus_amount_uniform_{-1};
   GLint sky_cumulus_amount_uniform_{-1};
+  GLint sky_cloud_intensity_uniform_{-1};
   GLint sky_exposure_uniform_{-1};
   std::string chunk_vertex_shader_source_{};
   std::string chunk_fragment_shader_source_{};
@@ -296,6 +298,8 @@ private:
   std::string entity_fragment_shader_source_{};
   std::string ui_vertex_shader_source_{};
   std::string ui_fragment_shader_source_{};
+  std::string sky_vertex_shader_source_{};
+  std::string sky_fragment_shader_source_{};
   FramePacket frame_{};
   HashMap<ChunkMeshKey, ChunkGpuState> chunks_;
   HashMap<EntityModelID, EntityModelAsset> entity_models_;

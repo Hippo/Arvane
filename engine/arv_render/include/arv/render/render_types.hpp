@@ -47,8 +47,9 @@ struct SkyUniforms {
   f32 day_fraction{0.5F};
   Vec3f fog_color{0.55F, 0.68F, 0.86F};
   f32 cloud_time_seconds{};
-  f32 cirrus_amount{0.35F};
-  f32 cumulus_amount{0.60F};
+  f32 cirrus_amount{0.45F};
+  f32 cumulus_amount{0.80F};
+  f32 cloud_intensity{1.25F};
   f32 exposure{1.0F};
 };
 

@@ -26,177 +26,6 @@ constexpr f32 UiTextureSlotPlayerSkin = 4.0F;
 
 static_assert(sizeof(Vec3f) == sizeof(f32) * 3U);
 
-constexpr const char* SkyVertexShaderSource = R"glsl(
-#version 330 core
-out vec2 v_ndc;
-
-const vec2 kQuad[4] = vec2[](
-  vec2(-1.0,  1.0),
-  vec2(-1.0, -1.0),
-  vec2( 1.0,  1.0),
-  vec2( 1.0, -1.0)
-);
-
-void main() {
-  v_ndc = kQuad[gl_VertexID];
-  gl_Position = vec4(v_ndc, 0.0, 1.0);
-}
-)glsl";
-
-constexpr const char* SkyFragmentShaderSource = R"glsl(
-#version 330 core
-in vec2 v_ndc;
-out vec4 frag_color;
-
-uniform vec3 u_camera_forward;
-uniform vec3 u_camera_right;
-uniform vec3 u_camera_up;
-uniform float u_camera_aspect;
-uniform float u_camera_fov_y_degrees;
-
-uniform vec3 u_sun_direction;
-uniform vec3 u_moon_direction;
-uniform vec3 u_daylight_color;
-uniform vec3 u_ambient_color;
-uniform vec3 u_fog_color;
-uniform float u_daylight_strength;
-uniform float u_moonlight_strength;
-uniform float u_star_visibility;
-uniform float u_day_fraction;
-uniform float u_cloud_time_seconds;
-uniform float u_cirrus_amount;
-uniform float u_cumulus_amount;
-uniform float u_exposure;
-
-const float PI = 3.14159265359;
-const float Br = 0.0025;
-const float Bm = 0.0003;
-const float MieG = 0.9800;
-const vec3 Wavelength = vec3(0.650, 0.570, 0.475);
-const vec3 Kr = Br / pow(Wavelength, vec3(4.0));
-const vec3 Km = Bm / pow(Wavelength, vec3(0.84));
-
-float hash(float n) {
-  return fract(sin(n) * 43758.5453123);
-}
-
-float noise(vec3 x) {
-  vec3 f = fract(x);
-  vec3 p = floor(x);
-  float n = dot(p, vec3(1.0, 157.0, 113.0));
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(hash(n +   0.0), hash(n +   1.0), f.x),
-                 mix(hash(n + 157.0), hash(n + 158.0), f.x), f.y),
-             mix(mix(hash(n + 113.0), hash(n + 114.0), f.x),
-                 mix(hash(n + 270.0), hash(n + 271.0), f.x), f.y), f.z);
-}
-
-const mat3 FbmMatrix = mat3(
-   0.00,  1.60,  1.20,
-  -1.60,  0.72, -0.96,
-  -1.20, -0.96,  1.28
-);
-
-float fbm(vec3 p) {
-  float f = 0.0;
-  f += noise(p) * 0.500; p = FbmMatrix * p * 1.10;
-  f += noise(p) * 0.250; p = FbmMatrix * p * 1.20;
-  f += noise(p) * 0.166; p = FbmMatrix * p * 1.30;
-  f += noise(p) * 0.083; p = FbmMatrix * p * 1.40;
-  f += noise(p) * 0.042;
-  return f;
-}
-
-vec3 view_direction() {
-  float focal_spread = tan(radians(u_camera_fov_y_degrees) * 0.5);
-  return normalize(
-      u_camera_forward +
-      u_camera_right * (v_ndc.x * max(u_camera_aspect, 0.01) * focal_spread) +
-      u_camera_up * (v_ndc.y * focal_spread));
-}
-
-vec3 scattering_color(vec3 view_dir, float sun_height, float day_amount) {
-  float horizon = max(view_dir.y, 0.0);
-  float mu = dot(normalize(view_dir), normalize(u_sun_direction));
-  float rayleigh = 3.0 / (8.0 * PI) * (1.0 + mu * mu);
-  vec3 mie = (Kr + Km * (1.0 - MieG * MieG) /
-      (2.0 + MieG * MieG) /
-      pow(max(1.0 + MieG * MieG - 2.0 * MieG * mu, 0.001), 1.5)) / (Br + Bm);
-
-  vec3 day_extinction =
-      exp(-exp(-((horizon + sun_height * 4.0) *
-                  (exp(-horizon * 16.0) + 0.1) / 80.0) / Br) *
-          (exp(-horizon * 16.0) + 0.1) * Kr / Br) *
-      exp(-horizon * exp(-horizon * 8.0) * 4.0) *
-      exp(-horizon * 2.0) * 4.0;
-
-  vec3 sky = rayleigh * mie * day_extinction * u_daylight_color;
-  vec3 zenith_tint = mix(u_fog_color, vec3(0.11, 0.34, 0.90) * u_daylight_color,
-                         pow(clamp(horizon, 0.0, 1.0), 0.35));
-  sky = mix(zenith_tint * u_daylight_strength, sky, 0.65);
-
-  vec3 night = vec3(0.010, 0.016, 0.045) +
-      u_ambient_color * 0.55 +
-      vec3(0.08, 0.10, 0.15) * u_moonlight_strength *
-          smoothstep(-0.08, 0.45, u_moon_direction.y);
-  return mix(night, sky, day_amount);
-}
-
-float star_field(vec3 view_dir) {
-  vec3 cell = floor(normalize(view_dir) * 220.0);
-  float seed = dot(cell, vec3(17.0, 59.0, 113.0));
-  float star = smoothstep(0.9965, 1.0, hash(seed));
-  float sparkle = 0.78 + 0.22 * sin(u_cloud_time_seconds * 0.45 + hash(seed + 19.0) * 6.28318);
-  return star * sparkle;
-}
-
-vec3 apply_clouds(vec3 color, vec3 view_dir, float day_amount) {
-  float height_mask = smoothstep(0.02, 0.28, view_dir.y);
-  if (height_mask <= 0.0) {
-    return color;
-  }
-
-  vec3 plane = view_dir / max(view_dir.y, 0.055);
-  float cirrus_amount = clamp(u_cirrus_amount, 0.0, 1.0);
-  float cumulus_amount = clamp(u_cumulus_amount, 0.0, 1.0);
-  float cirrus = smoothstep(
-      0.999 - cirrus_amount * 0.54,
-      1.0,
-      fbm(plane * 1.70 + vec3(u_cloud_time_seconds * 0.010, 0.0, u_cloud_time_seconds * 0.004))) *
-      cirrus_amount * 0.35;
-  float cumulus = smoothstep(
-      0.999 - cumulus_amount * 0.62,
-      1.0,
-      fbm(plane * 0.82 + vec3(u_cloud_time_seconds * 0.030, 4.2, u_cloud_time_seconds * 0.018))) *
-      cumulus_amount;
-
-  float density = clamp(cirrus + cumulus, 0.0, 1.0) * height_mask;
-  vec3 cloud_light = mix(
-      vec3(0.07, 0.08, 0.12) + u_ambient_color,
-      u_fog_color * 1.55 + u_daylight_color * 0.28,
-      day_amount);
-  return mix(color, cloud_light, density * (0.32 + 0.42 * day_amount));
-}
-
-void main() {
-  vec3 view_dir = view_direction();
-  float sun_height = u_sun_direction.y;
-  float day_amount = smoothstep(-0.08, 0.16, sun_height);
-
-  vec3 color = scattering_color(view_dir, sun_height, day_amount);
-  color = apply_clouds(color, view_dir, day_amount);
-
-  float above_horizon = smoothstep(-0.02, 0.10, view_dir.y);
-  color += vec3(0.70, 0.78, 1.0) *
-      star_field(view_dir) * u_star_visibility * above_horizon;
-
-  color = mix(u_fog_color * 0.75, color, smoothstep(-0.10, 0.18, view_dir.y));
-  color += noise(view_dir * 1000.0 + vec3(u_day_fraction * 31.0)) * 0.008;
-  color = vec3(1.0) - exp(-max(color, vec3(0.0)) * max(u_exposure, 0.01));
-  frag_color = vec4(clamp(color, 0.0, 1.0), 1.0);
-}
-)glsl";
-
 [[nodiscard]] f32 texture_slot_for_ui_source(UiTextureSource source) noexcept {
   switch (source) {
     case UiTextureSource::White:
@@ -512,6 +341,15 @@ void OpenGLRenderer::set_ui_shader_sources(std::string vertex_source, std::strin
   if (ui_program_ != 0) {
     glDeleteProgram(ui_program_);
     ui_program_ = 0;
+  }
+}
+
+void OpenGLRenderer::set_sky_shader_sources(std::string vertex_source, std::string fragment_source) {
+  sky_vertex_shader_source_ = std::move(vertex_source);
+  sky_fragment_shader_source_ = std::move(fragment_source);
+  if (sky_program_ != 0) {
+    glDeleteProgram(sky_program_);
+    sky_program_ = 0;
   }
 }
 
@@ -1231,7 +1069,7 @@ OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture_array(
   const GLenum mag_filter = filter == TextureFilter::Linear ? GL_LINEAR : GL_NEAREST;
   const GLenum min_filter = mipmaps
                                 ? (filter == TextureFilter::Linear ? GL_LINEAR_MIPMAP_LINEAR
-                                                                    : GL_NEAREST_MIPMAP_NEAREST)
+                                                                   : GL_NEAREST_MIPMAP_NEAREST)
                                 : mag_filter;
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, mag_filter);
   const u32 full_max_level = mipmaps ? full_mipmap_max_level(upload.width, upload.height) : 0U;
@@ -1450,8 +1288,12 @@ bool OpenGLRenderer::ensure_sky_program() {
     return true;
   }
 
-  const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, SkyVertexShaderSource);
-  const GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, SkyFragmentShaderSource);
+  if (sky_vertex_shader_source_.empty() || sky_fragment_shader_source_.empty()) {
+    return false;
+  }
+
+  const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, sky_vertex_shader_source_.c_str());
+  const GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, sky_fragment_shader_source_.c_str());
   if (vertex_shader == 0 || fragment_shader == 0) {
     if (vertex_shader != 0) {
       glDeleteShader(vertex_shader);
@@ -1494,6 +1336,7 @@ bool OpenGLRenderer::ensure_sky_program() {
   sky_cloud_time_uniform_ = glGetUniformLocation(sky_program_, "u_cloud_time_seconds");
   sky_cirrus_amount_uniform_ = glGetUniformLocation(sky_program_, "u_cirrus_amount");
   sky_cumulus_amount_uniform_ = glGetUniformLocation(sky_program_, "u_cumulus_amount");
+  sky_cloud_intensity_uniform_ = glGetUniformLocation(sky_program_, "u_cloud_intensity");
   sky_exposure_uniform_ = glGetUniformLocation(sky_program_, "u_exposure");
   return true;
 }
@@ -1568,6 +1411,7 @@ void OpenGLRenderer::draw_sky() {
   glUniform1f(sky_cloud_time_uniform_, frame_.sky.cloud_time_seconds);
   glUniform1f(sky_cirrus_amount_uniform_, frame_.sky.cirrus_amount);
   glUniform1f(sky_cumulus_amount_uniform_, frame_.sky.cumulus_amount);
+  glUniform1f(sky_cloud_intensity_uniform_, frame_.sky.cloud_intensity);
   glUniform1f(sky_exposure_uniform_, frame_.sky.exposure);
 
   glBindVertexArray(sky_vao_);
