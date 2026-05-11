@@ -181,10 +181,6 @@ void update_player_animation_state(
   set_animation_if_changed(animation, moving ? "walk" : "idle");
 }
 
-[[nodiscard]] f32 horizontal_length_squared(Vec3f value) noexcept {
-  return value.x * value.x + value.z * value.z;
-}
-
 [[nodiscard]] bool can_jump_up_one_block(
     const physics::ICollisionQuery& query,
     const Aabb3f& bounds,

@@ -41,6 +41,8 @@ TEST(MathTests, AabbOverlapUsesOpenBounds) {
 
   EXPECT_TRUE(a.overlaps(overlapping));
   EXPECT_FALSE(a.overlaps(touching));
+  EXPECT_TRUE(arv::intervals_overlap_open(0.0F, 1.0F, 0.5F, 1.5F));
+  EXPECT_FALSE(arv::intervals_overlap_open(0.0F, 1.0F, 1.0F, 2.0F));
 }
 
 TEST(MathTests, DistanceSquaredPointToAabbUsesClosestPoint) {
@@ -52,4 +54,23 @@ TEST(MathTests, DistanceSquaredPointToAabbUsesClosestPoint) {
   EXPECT_FLOAT_EQ(
       arv::distance_squared_point_to_aabb({0.0F, 3.0F, 10.0F}, bounds),
       5.0F);
+}
+
+TEST(MathTests, BuildsVoxelMovementAabbHelpers) {
+  const arv::Aabb3f bounds{{1.0F, 2.0F, 3.0F}, {4.0F, 5.0F, 6.0F}};
+
+  EXPECT_EQ(arv::floor_to_i32(-1.25F), -2);
+  EXPECT_FLOAT_EQ(arv::horizontal_length_squared({3.0F, 10.0F, 4.0F}), 25.0F);
+
+  const arv::Aabb3f moved = arv::translated(bounds, {2.0F, -1.0F, 0.5F});
+  EXPECT_EQ(moved.min, (arv::Vec3f{3.0F, 1.0F, 3.5F}));
+  EXPECT_EQ(moved.max, (arv::Vec3f{6.0F, 4.0F, 6.5F}));
+
+  const arv::Aabb3f broad = arv::swept(bounds, {-2.0F, 3.0F, 0.5F});
+  EXPECT_EQ(broad.min, (arv::Vec3f{-1.0F, 2.0F, 3.0F}));
+  EXPECT_EQ(broad.max, (arv::Vec3f{4.0F, 8.0F, 6.5F}));
+
+  const arv::MovementBasis basis = arv::horizontal_movement_basis(0.0F);
+  EXPECT_EQ(basis.forward, (arv::Vec3f{0.0F, 0.0F, 1.0F}));
+  EXPECT_EQ(basis.right, (arv::Vec3f{1.0F, 0.0F, -0.0F}));
 }

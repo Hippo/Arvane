@@ -95,6 +95,12 @@ struct BlockProperties {
   u8 emission_b{};
 };
 
+inline constexpr f32 DefaultBlockSlipperiness = 0.6F;
+
+struct BlockPhysicsProperties {
+  f32 slipperiness{DefaultBlockSlipperiness};
+};
+
 struct BlockDropDefinition {
   BlockDropKind kind{BlockDropKind::Default};
   std::string item_name{};
@@ -120,6 +126,7 @@ struct BlockDefinition {
   std::string display_name{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
+  BlockPhysicsProperties physics{};
   BlockDropDefinition drops{};
   RenderCategory render_category{RenderCategory::None};
   bool is_item{true};
@@ -136,6 +143,7 @@ struct BlockRecord {
   std::string display_name{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
+  BlockPhysicsProperties physics{};
   BlockDropDefinition drops{};
   bool is_item{true};
   f32 item_buoyancy{1.0F};
@@ -158,6 +166,7 @@ struct BlockVariantRecord {
   std::string debug_name{};
   std::vector<BlockStateValue> state_values{};
   BlockProperties properties{};
+  BlockPhysicsProperties physics{};
   RenderCategory render_category{RenderCategory::None};
   bool hide_same_variant_faces{};
   std::array<std::string, BlockFaceCount> texture_assets{};
@@ -302,6 +311,8 @@ public:
   [[nodiscard]] const BlockBody* block_body(BlockVariantID variant_id) const noexcept;
 
   [[nodiscard]] std::span<const Aabb3f> collision_boxes(BlockVariantID variant_id) const noexcept;
+
+  [[nodiscard]] BlockPhysicsProperties block_physics(BlockVariantID variant_id) const noexcept;
 
   void set_collision_boxes(BlockVariantID variant_id, std::vector<Aabb3f> boxes);
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/core/types.hpp"
+#include "arv/voxel/block.hpp"
 
 namespace arv::player {
 
@@ -17,9 +18,15 @@ inline constexpr f32 DefaultSprintSpeed = 6.0F;
 inline constexpr f32 DefaultSneakSpeed = 2.25F;
 inline constexpr f32 DefaultAirSpeed = 3.5F;
 inline constexpr f32 DefaultAirControlAccelerationPerSecond = 10.0F;
+inline constexpr f32 DefaultSurfaceSlipperiness = voxel::DefaultBlockSlipperiness;
+inline constexpr f32 DefaultGroundAccelerationPerSecond = 160.0F;
+inline constexpr f32 DefaultGroundDecelerationPerSecond = 180.0F;
+inline constexpr f32 DefaultMinSurfaceControl = 0.08F;
+inline constexpr f32 DefaultMaxSurfaceControl = 4.0F;
 inline constexpr f32 DefaultFlySpeed = 8.0F;
 inline constexpr f32 DefaultFlyVerticalSpeed = 6.0F;
 inline constexpr f32 DefaultJumpVelocity = 8.5F;
+inline constexpr f32 DefaultSprintJumpHorizontalBoost = 1.0F;
 inline constexpr f32 DefaultGravityPerSecond = 32.0F;
 inline constexpr f32 DefaultTerminalVelocity = 55.0F;
 inline constexpr f32 DefaultPlayerBodyWidth = 0.6F;
@@ -56,9 +63,15 @@ struct PlayerTuning {
   f32 sneak_speed{DefaultSneakSpeed};
   f32 air_speed{DefaultAirSpeed};
   f32 air_control_acceleration_per_second{DefaultAirControlAccelerationPerSecond};
+  f32 default_surface_slipperiness{DefaultSurfaceSlipperiness};
+  f32 ground_acceleration_per_second{DefaultGroundAccelerationPerSecond};
+  f32 ground_deceleration_per_second{DefaultGroundDecelerationPerSecond};
+  f32 min_surface_control{DefaultMinSurfaceControl};
+  f32 max_surface_control{DefaultMaxSurfaceControl};
   f32 fly_speed{DefaultFlySpeed};
   f32 fly_vertical_speed{DefaultFlyVerticalSpeed};
   f32 jump_velocity{DefaultJumpVelocity};
+  f32 sprint_jump_horizontal_boost{DefaultSprintJumpHorizontalBoost};
   f32 gravity_per_second{DefaultGravityPerSecond};
   f32 terminal_velocity{DefaultTerminalVelocity};
   f32 body_width{DefaultPlayerBodyWidth};

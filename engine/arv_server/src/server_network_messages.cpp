@@ -2,7 +2,7 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/hash.hpp"
-#include "arv/movement/player_movement.hpp"
+#include "arv/physics/player_movement.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/message_envelope.hpp"
@@ -255,7 +255,7 @@ void clear_active_skin_upload(
   if (context.has_collision) {
     world::WorldCollisionQuery query(world, block_registry, false);
     const physics::KinematicConfig physics_config =
-        movement::kinematic_config_from_tuning(tuning);
+        physics::kinematic_config_from_tuning(tuning);
     const Aabb3f bounds = physics::make_body_bounds(
         move.position,
         physics_config,

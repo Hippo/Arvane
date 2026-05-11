@@ -22,7 +22,7 @@ inline constexpr f32 KnockbackSuppressedInputBlend = 0.25F;
 }
 
 [[nodiscard]] physics::PlayerCollisionPose collision_pose_from_state(
-    const movement::PlayerKinematicState& state) noexcept {
+    const physics::PlayerKinematicState& state) noexcept {
   if (state.swimming) {
     return physics::PlayerCollisionPose::Swimming;
   }
@@ -117,8 +117,8 @@ void LocalPlayerController::update_local_movement(
   }
 
   const Vec3f incoming_velocity = movement_state_.velocity;
-  const movement::PlayerMovementStep movement_step =
-      movement::simulate_player_movement_tick(
+  const physics::PlayerMovementStep movement_step =
+      physics::simulate_player_movement_tick(
           collision_query,
           movement_state_,
           command,
@@ -247,10 +247,10 @@ void LocalPlayerController::apply_knockback_control_suppression(
       0.0F,
       (blended_horizontal.z - simulated_horizontal.z) * static_cast<f32>(tick_seconds)};
 
-  const movement::PlayerMovementAuthority authority = movement_authority();
+  const physics::PlayerMovementAuthority authority = movement_authority();
   if (authority.has_collision && collision_query != nullptr) {
     const physics::KinematicConfig physics_config =
-        movement::kinematic_config_from_tuning(tuning_);
+        physics::kinematic_config_from_tuning(tuning_);
     const physics::MovementResolution movement = physics::resolve_movement(
         *collision_query,
         physics::make_body_bounds(
@@ -337,7 +337,7 @@ void LocalPlayerController::update_camera_transform() noexcept {
        render_position_.z});
 }
 
-movement::PlayerMovementAuthority LocalPlayerController::movement_authority() const noexcept {
+physics::PlayerMovementAuthority LocalPlayerController::movement_authority() const noexcept {
   return {
       resolved_permissions_.core.can_fly,
       resolved_permissions_.core.has_collision};

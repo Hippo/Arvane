@@ -152,9 +152,15 @@ void read_physics_config(const YAML::Node& physics, PhysicsConfig& config) {
       physics,
       "air_control_acceleration_per_second",
       config.air_control_acceleration_per_second);
+  read_scalar(physics, "default_surface_slipperiness", config.default_surface_slipperiness);
+  read_scalar(physics, "ground_acceleration_per_second", config.ground_acceleration_per_second);
+  read_scalar(physics, "ground_deceleration_per_second", config.ground_deceleration_per_second);
+  read_scalar(physics, "min_surface_control", config.min_surface_control);
+  read_scalar(physics, "max_surface_control", config.max_surface_control);
   read_scalar(physics, "fly_speed", config.fly_speed);
   read_scalar(physics, "fly_vertical_speed", config.fly_vertical_speed);
   read_scalar(physics, "jump_velocity", config.jump_velocity);
+  read_scalar(physics, "sprint_jump_horizontal_boost", config.sprint_jump_horizontal_boost);
   read_scalar(physics, "gravity_per_second", config.gravity_per_second);
   read_scalar(physics, "terminal_velocity", config.terminal_velocity);
   read_scalar(physics, "body_width", config.body_width);
@@ -687,10 +693,22 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "air_speed" << YAML::Value << config.physics.air_speed;
   emitter << YAML::Key << "air_control_acceleration_per_second" << YAML::Value
           << config.physics.air_control_acceleration_per_second;
+  emitter << YAML::Key << "default_surface_slipperiness" << YAML::Value
+          << config.physics.default_surface_slipperiness;
+  emitter << YAML::Key << "ground_acceleration_per_second" << YAML::Value
+          << config.physics.ground_acceleration_per_second;
+  emitter << YAML::Key << "ground_deceleration_per_second" << YAML::Value
+          << config.physics.ground_deceleration_per_second;
+  emitter << YAML::Key << "min_surface_control" << YAML::Value
+          << config.physics.min_surface_control;
+  emitter << YAML::Key << "max_surface_control" << YAML::Value
+          << config.physics.max_surface_control;
   emitter << YAML::Key << "fly_speed" << YAML::Value << config.physics.fly_speed;
   emitter << YAML::Key << "fly_vertical_speed" << YAML::Value
           << config.physics.fly_vertical_speed;
   emitter << YAML::Key << "jump_velocity" << YAML::Value << config.physics.jump_velocity;
+  emitter << YAML::Key << "sprint_jump_horizontal_boost" << YAML::Value
+          << config.physics.sprint_jump_horizontal_boost;
   emitter << YAML::Key << "gravity_per_second" << YAML::Value
           << config.physics.gravity_per_second;
   emitter << YAML::Key << "terminal_velocity" << YAML::Value
@@ -1123,10 +1141,22 @@ ConfigResult save_default_shared_config_file(
   emitter << YAML::Key << "air_speed" << YAML::Value << config.physics.air_speed;
   emitter << YAML::Key << "air_control_acceleration_per_second" << YAML::Value
           << config.physics.air_control_acceleration_per_second;
+  emitter << YAML::Key << "default_surface_slipperiness" << YAML::Value
+          << config.physics.default_surface_slipperiness;
+  emitter << YAML::Key << "ground_acceleration_per_second" << YAML::Value
+          << config.physics.ground_acceleration_per_second;
+  emitter << YAML::Key << "ground_deceleration_per_second" << YAML::Value
+          << config.physics.ground_deceleration_per_second;
+  emitter << YAML::Key << "min_surface_control" << YAML::Value
+          << config.physics.min_surface_control;
+  emitter << YAML::Key << "max_surface_control" << YAML::Value
+          << config.physics.max_surface_control;
   emitter << YAML::Key << "fly_speed" << YAML::Value << config.physics.fly_speed;
   emitter << YAML::Key << "fly_vertical_speed" << YAML::Value
           << config.physics.fly_vertical_speed;
   emitter << YAML::Key << "jump_velocity" << YAML::Value << config.physics.jump_velocity;
+  emitter << YAML::Key << "sprint_jump_horizontal_boost" << YAML::Value
+          << config.physics.sprint_jump_horizontal_boost;
   emitter << YAML::Key << "gravity_per_second" << YAML::Value
           << config.physics.gravity_per_second;
   emitter << YAML::Key << "terminal_velocity" << YAML::Value
@@ -1647,6 +1677,11 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
            std::pair{std::string_view{"physics.sneak_speed"}, config.physics.sneak_speed},
            std::pair{std::string_view{"physics.air_speed"}, config.physics.air_speed},
            std::pair{std::string_view{"physics.air_control_acceleration_per_second"}, config.physics.air_control_acceleration_per_second},
+           std::pair{std::string_view{"physics.default_surface_slipperiness"}, config.physics.default_surface_slipperiness},
+           std::pair{std::string_view{"physics.ground_acceleration_per_second"}, config.physics.ground_acceleration_per_second},
+           std::pair{std::string_view{"physics.ground_deceleration_per_second"}, config.physics.ground_deceleration_per_second},
+           std::pair{std::string_view{"physics.min_surface_control"}, config.physics.min_surface_control},
+           std::pair{std::string_view{"physics.max_surface_control"}, config.physics.max_surface_control},
            std::pair{std::string_view{"physics.fly_speed"}, config.physics.fly_speed},
            std::pair{std::string_view{"physics.fly_vertical_speed"}, config.physics.fly_vertical_speed},
            std::pair{std::string_view{"physics.jump_velocity"}, config.physics.jump_velocity},
@@ -1678,6 +1713,10 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   }
   if (!std::isfinite(config.physics.underwater_buoyancy)) {
     return ConfigError{"physics.underwater_buoyancy must be finite"};
+  }
+  if (!std::isfinite(config.physics.sprint_jump_horizontal_boost) ||
+      config.physics.sprint_jump_horizontal_boost < 0.0F) {
+    return ConfigError{"physics.sprint_jump_horizontal_boost must be finite and >= 0"};
   }
   if (!std::isfinite(config.physics.liquid_drag) ||
       config.physics.liquid_drag < 0.0F ||

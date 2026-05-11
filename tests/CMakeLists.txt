@@ -71,7 +71,6 @@ target_link_libraries(arv_tests PRIVATE
   arv_crypto
   arv_entity
   arv_io
-  arv_movement
   arv_net
   arv_persistence
   arv_physics

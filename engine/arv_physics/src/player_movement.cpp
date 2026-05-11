@@ -1,8 +1,8 @@
-#include "arv/movement/player_movement.hpp"
+#include "arv/physics/player_movement.hpp"
 
 #include <algorithm>
 
-namespace arv::movement {
+namespace arv::physics {
 namespace {
 
 void step_player_without_collision(
@@ -10,12 +10,13 @@ void step_player_without_collision(
     const player::PlayerCommand& command,
     const player::PlayerTuning& tuning,
     Seconds tick_seconds) noexcept {
+  const MovementBasis basis = horizontal_movement_basis(state.yaw_radians);
   Vec3f move{};
   if (command.move_z != 0) {
-    move = move + horizontal_forward(state.yaw_radians) * static_cast<f32>(command.move_z);
+    move = move + basis.forward * static_cast<f32>(command.move_z);
   }
   if (command.move_x != 0) {
-    move = move + horizontal_right(state.yaw_radians) * static_cast<f32>(command.move_x);
+    move = move + basis.right * static_cast<f32>(command.move_x);
   }
   move = normalize_or_zero(move);
 
@@ -39,9 +40,9 @@ void step_player_without_collision(
 
 } // namespace
 
-physics::KinematicConfig kinematic_config_from_tuning(
+KinematicConfig kinematic_config_from_tuning(
     const player::PlayerTuning& tuning) noexcept {
-  physics::KinematicConfig config;
+  KinematicConfig config;
   config.standing_eye_height = tuning.standing_eye_height;
   config.sneaking_eye_height = tuning.sneaking_eye_height;
   config.swimming_eye_height = tuning.swimming_eye_height;
@@ -51,9 +52,15 @@ physics::KinematicConfig kinematic_config_from_tuning(
   config.air_speed = tuning.air_speed;
   config.air_control_acceleration_per_second =
       tuning.air_control_acceleration_per_second;
+  config.default_surface_slipperiness = tuning.default_surface_slipperiness;
+  config.ground_acceleration_per_second = tuning.ground_acceleration_per_second;
+  config.ground_deceleration_per_second = tuning.ground_deceleration_per_second;
+  config.min_surface_control = tuning.min_surface_control;
+  config.max_surface_control = tuning.max_surface_control;
   config.fly_speed = tuning.fly_speed;
   config.fly_vertical_speed = tuning.fly_vertical_speed;
   config.jump_velocity = tuning.jump_velocity;
+  config.sprint_jump_horizontal_boost = tuning.sprint_jump_horizontal_boost;
   config.gravity_per_second = tuning.gravity_per_second;
   config.terminal_velocity = tuning.terminal_velocity;
   config.body_width = tuning.body_width;
@@ -131,11 +138,11 @@ void apply_player_look_and_mode(
   }
 }
 
-physics::KinematicInput kinematic_input_from_command(
+KinematicInput kinematic_input_from_command(
     const player::PlayerCommand& command,
     const PlayerKinematicState& state,
     PlayerMovementAuthority authority) noexcept {
-  physics::KinematicInput input;
+  KinematicInput input;
   input.move_x = command.move_x;
   input.move_z = command.move_z;
   input.jump_pressed = command.jump_pressed;
@@ -149,7 +156,7 @@ physics::KinematicInput kinematic_input_from_command(
 }
 
 PlayerMovementStep simulate_player_movement_tick(
-    const physics::ICollisionQuery* collision_query,
+    const ICollisionQuery* collision_query,
     PlayerKinematicState state,
     const player::PlayerCommand& command,
     const player::PlayerTuning& tuning,
@@ -160,7 +167,7 @@ PlayerMovementStep simulate_player_movement_tick(
   PlayerMovementStep result;
   result.used_collision = authority.has_collision && collision_query != nullptr;
   if (result.used_collision) {
-    const physics::KinematicStepResult step = physics::step_kinematic_body(
+    const KinematicStepResult step = step_kinematic_body(
         *collision_query,
         {state.position,
          state.velocity,
@@ -189,4 +196,4 @@ PlayerMovementStep simulate_player_movement_tick(
   return result;
 }
 
-} // namespace arv::movement
+} // namespace arv::physics

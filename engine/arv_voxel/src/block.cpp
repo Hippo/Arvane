@@ -552,6 +552,9 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     if (!std::isfinite(definition.item_buoyancy)) {
       return Result::failure({"block item buoyancy must be finite for " + definition.name});
     }
+    if (!std::isfinite(definition.physics.slipperiness)) {
+      return Result::failure({"block slipperiness must be finite for " + definition.name});
+    }
     if (auto state_error = validate_states(definition); state_error.has_value()) {
       return Result::failure({state_error.value()});
     }
@@ -595,6 +598,7 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
         definition.display_name.empty() ? definition.name : definition.display_name;
     block.tags = definition.tags;
     block.properties = definition.properties;
+    block.physics = definition.physics;
     block.drops = definition.drops;
     block.is_item = definition.is_item;
     block.item_buoyancy = definition.item_buoyancy;
@@ -617,6 +621,7 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
       variant.debug_name = std::move(expanded_variant.debug_name);
       variant.state_values = std::move(expanded_variant.state_values);
       variant.properties = definition.properties;
+      variant.physics = definition.physics;
       variant.render_category = definition.render_category;
       variant.hide_same_variant_faces = definition.hide_same_variant_faces;
       variant.texture_assets = definition.texture_assets;
@@ -714,6 +719,11 @@ std::span<const Aabb3f> BlockRegistry::collision_boxes(BlockVariantID variant_id
     return {};
   }
   return body->boxes;
+}
+
+BlockPhysicsProperties BlockRegistry::block_physics(BlockVariantID variant_id) const noexcept {
+  const BlockVariantRecord* record = variant(variant_id);
+  return record == nullptr ? BlockPhysicsProperties{} : record->physics;
 }
 
 void BlockRegistry::set_collision_boxes(
@@ -970,6 +980,7 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
             "drops_with_wrong_tool",
             definition.properties.drops_with_wrong_tool);
         read_f32_property(*properties_iter, "hardness", definition.properties.hardness);
+        read_f32_property(*properties_iter, "slipperiness", definition.physics.slipperiness);
         const auto emission_iter = properties_iter->find("emission_rgb");
         if (emission_iter != properties_iter->end()) {
           if (!emission_iter->is_array() || emission_iter->size() != 3U) {

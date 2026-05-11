@@ -47,6 +47,7 @@ physics:
   fly_speed: 8.0
   fly_vertical_speed: 6.0
   jump_velocity: 8.5
+  sprint_jump_horizontal_boost: 1.0
   gravity_per_second: 32.0
   terminal_velocity: 55.0
   body_width: 0.6

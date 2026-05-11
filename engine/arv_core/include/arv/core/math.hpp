@@ -2,6 +2,7 @@
 
 #include "arv/core/types.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
@@ -67,6 +68,11 @@ inline constexpr f32 PiRadians = std::numbers::pi_v<f32>;
 inline constexpr f32 TauRadians = PiRadians * 2.0F;
 inline constexpr f32 ModelForwardYawOffsetRadians = PiRadians;
 
+struct MovementBasis {
+  Vec3f forward{};
+  Vec3f right{};
+};
+
 struct Aabb3f {
   Vec3f min{};
   Vec3f max{};
@@ -77,6 +83,18 @@ struct Aabb3f {
            min.z < other.max.z && max.z > other.min.z;
   }
 };
+
+[[nodiscard]] inline i32 floor_to_i32(f32 value) noexcept {
+  return static_cast<i32>(std::floor(value));
+}
+
+[[nodiscard]] constexpr bool intervals_overlap_open(
+    f32 min_a,
+    f32 max_a,
+    f32 min_b,
+    f32 max_b) noexcept {
+  return min_a < max_b && max_a > min_b;
+}
 
 [[nodiscard]] constexpr f32 distance_squared_point_to_aabb(
     Vec3f point,
@@ -94,6 +112,26 @@ struct Aabb3f {
   const f32 dy = axis_distance(point.y, bounds.min.y, bounds.max.y);
   const f32 dz = axis_distance(point.z, bounds.min.z, bounds.max.z);
   return dx * dx + dy * dy + dz * dz;
+}
+
+[[nodiscard]] constexpr f32 horizontal_length_squared(Vec3f value) noexcept {
+  return value.x * value.x + value.z * value.z;
+}
+
+[[nodiscard]] constexpr Aabb3f translated(Aabb3f bounds, Vec3f delta) noexcept {
+  return {
+      {bounds.min.x + delta.x, bounds.min.y + delta.y, bounds.min.z + delta.z},
+      {bounds.max.x + delta.x, bounds.max.y + delta.y, bounds.max.z + delta.z}};
+}
+
+[[nodiscard]] constexpr Aabb3f swept(Aabb3f bounds, Vec3f delta) noexcept {
+  return {
+      {std::min(bounds.min.x, bounds.min.x + delta.x),
+       std::min(bounds.min.y, bounds.min.y + delta.y),
+       std::min(bounds.min.z, bounds.min.z + delta.z)},
+      {std::max(bounds.max.x, bounds.max.x + delta.x),
+       std::max(bounds.max.y, bounds.max.y + delta.y),
+       std::max(bounds.max.z, bounds.max.z + delta.z)}};
 }
 
 template<typename T>
@@ -153,18 +191,31 @@ template<typename T>
 }
 
 [[nodiscard]] inline Vec3f horizontal_forward(f32 yaw_radians) noexcept {
-  return normalize_or_zero({std::sin(yaw_radians), 0.0F, std::cos(yaw_radians)});
+  return {std::sin(yaw_radians), 0.0F, std::cos(yaw_radians)};
 }
 
 [[nodiscard]] inline Vec3f horizontal_right(f32 yaw_radians) noexcept {
-  return normalize_or_zero({std::cos(yaw_radians), 0.0F, -std::sin(yaw_radians)});
+  return {std::cos(yaw_radians), 0.0F, -std::sin(yaw_radians)};
+}
+
+[[nodiscard]] inline MovementBasis horizontal_movement_basis(f32 yaw_radians) noexcept {
+  const f32 sin_yaw = std::sin(yaw_radians);
+  const f32 cos_yaw = std::cos(yaw_radians);
+  return {
+      {sin_yaw, 0.0F, cos_yaw},
+      {cos_yaw, 0.0F, -sin_yaw}};
+}
+
+[[nodiscard]] inline Vec3f view_forward(f32 yaw_radians, f32 pitch_radians) noexcept {
+  const f32 sin_yaw = std::sin(yaw_radians);
+  const f32 cos_yaw = std::cos(yaw_radians);
+  const f32 sin_pitch = std::sin(pitch_radians);
+  const f32 cos_pitch = std::cos(pitch_radians);
+  return {sin_yaw * cos_pitch, sin_pitch, cos_yaw * cos_pitch};
 }
 
 [[nodiscard]] inline Vec3f look_direction(f32 yaw_radians, f32 pitch_radians) noexcept {
-  const f32 cos_pitch = std::cos(pitch_radians);
-  return normalize_or_zero({std::sin(yaw_radians) * cos_pitch,
-                            std::sin(pitch_radians),
-                            std::cos(yaw_radians) * cos_pitch});
+  return view_forward(yaw_radians, pitch_radians);
 }
 
 [[nodiscard]] inline Quatf multiply_quat(Quatf lhs, Quatf rhs) noexcept {

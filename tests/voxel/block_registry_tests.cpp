@@ -115,7 +115,8 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
       "collidable": true,
       "full_cube": true,
       "drops_with_wrong_tool": true,
-      "hardness": 0.3
+      "hardness": 0.3,
+      "slipperiness": 0.98
     }
   }
 ]
@@ -134,6 +135,8 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   ASSERT_NE(glass, nullptr);
   EXPECT_EQ(glass->render_category, arv::voxel::RenderCategory::Transparent);
   EXPECT_FLOAT_EQ(glass->properties.hardness, 0.3F);
+  EXPECT_FLOAT_EQ(glass->physics.slipperiness, 0.98F);
+  EXPECT_FLOAT_EQ(registry.block_physics(glass->id).slipperiness, 0.98F);
   EXPECT_TRUE(glass->properties.drops_with_wrong_tool);
   const arv::voxel::BlockRecord* glass_block = registry.block(glass_id.value());
   ASSERT_NE(glass_block, nullptr);

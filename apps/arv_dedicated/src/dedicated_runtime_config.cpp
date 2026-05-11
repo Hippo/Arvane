@@ -23,9 +23,15 @@ player::PlayerTuning make_player_tuning(const io::PhysicsConfig& physics) noexce
   tuning.air_speed = physics.air_speed;
   tuning.air_control_acceleration_per_second =
       physics.air_control_acceleration_per_second;
+  tuning.default_surface_slipperiness = physics.default_surface_slipperiness;
+  tuning.ground_acceleration_per_second = physics.ground_acceleration_per_second;
+  tuning.ground_deceleration_per_second = physics.ground_deceleration_per_second;
+  tuning.min_surface_control = physics.min_surface_control;
+  tuning.max_surface_control = physics.max_surface_control;
   tuning.fly_speed = physics.fly_speed;
   tuning.fly_vertical_speed = physics.fly_vertical_speed;
   tuning.jump_velocity = physics.jump_velocity;
+  tuning.sprint_jump_horizontal_boost = physics.sprint_jump_horizontal_boost;
   tuning.gravity_per_second = physics.gravity_per_second;
   tuning.terminal_velocity = physics.terminal_velocity;
   tuning.body_width = physics.body_width;

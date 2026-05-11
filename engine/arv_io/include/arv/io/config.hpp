@@ -210,9 +210,15 @@ struct PhysicsConfig {
   f32 sneak_speed{2.25F};
   f32 air_speed{3.5F};
   f32 air_control_acceleration_per_second{10.0F};
+  f32 default_surface_slipperiness{0.6F};
+  f32 ground_acceleration_per_second{160.0F};
+  f32 ground_deceleration_per_second{180.0F};
+  f32 min_surface_control{0.08F};
+  f32 max_surface_control{4.0F};
   f32 fly_speed{8.0F};
   f32 fly_vertical_speed{6.0F};
   f32 jump_velocity{8.5F};
+  f32 sprint_jump_horizontal_boost{1.0F};
   f32 gravity_per_second{32.0F};
   f32 terminal_velocity{55.0F};
   f32 body_width{0.6F};

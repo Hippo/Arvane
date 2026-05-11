@@ -4,7 +4,7 @@
 #include "arv/physics/collision.hpp"
 #include "arv/player/player_state.hpp"
 
-namespace arv::movement {
+namespace arv::physics {
 
 struct PlayerMovementAuthority {
   bool can_fly{};
@@ -25,13 +25,13 @@ struct PlayerKinematicState {
 
 struct PlayerMovementStep {
   PlayerKinematicState state{};
-  physics::MovementResolution movement{};
-  physics::LiquidContactState liquid_state{physics::LiquidContactState::NotInLiquid};
-  physics::PlayerCollisionPose pose{physics::PlayerCollisionPose::Standing};
+  MovementResolution movement{};
+  LiquidContactState liquid_state{LiquidContactState::NotInLiquid};
+  PlayerCollisionPose pose{PlayerCollisionPose::Standing};
   bool used_collision{};
 };
 
-[[nodiscard]] physics::KinematicConfig kinematic_config_from_tuning(
+[[nodiscard]] KinematicConfig kinematic_config_from_tuning(
     const player::PlayerTuning& tuning) noexcept;
 
 [[nodiscard]] PlayerKinematicState kinematic_state_from_player(
@@ -47,17 +47,17 @@ void apply_player_look_and_mode(
     const player::PlayerTuning& tuning,
     PlayerMovementAuthority authority) noexcept;
 
-[[nodiscard]] physics::KinematicInput kinematic_input_from_command(
+[[nodiscard]] KinematicInput kinematic_input_from_command(
     const player::PlayerCommand& command,
     const PlayerKinematicState& state,
     PlayerMovementAuthority authority) noexcept;
 
 [[nodiscard]] PlayerMovementStep simulate_player_movement_tick(
-    const physics::ICollisionQuery* collision_query,
+    const ICollisionQuery* collision_query,
     PlayerKinematicState state,
     const player::PlayerCommand& command,
     const player::PlayerTuning& tuning,
     PlayerMovementAuthority authority,
     Seconds tick_seconds);
 
-} // namespace arv::movement
+} // namespace arv::physics

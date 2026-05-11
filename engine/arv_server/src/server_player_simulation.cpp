@@ -1,6 +1,6 @@
 #include "server_runtime_internal.hpp"
 
-#include "arv/movement/player_movement.hpp"
+#include "arv/physics/player_movement.hpp"
 #include "arv/world/world_queries.hpp"
 
 #include <algorithm>
@@ -344,7 +344,7 @@ void ServerRuntimeImpl::apply_player_action_command(
           : player_state.selected_hotbar_slot;
 
   const physics::KinematicConfig physics_config =
-      movement::kinematic_config_from_tuning(player_tuning_);
+      physics::kinematic_config_from_tuning(player_tuning_);
   const Seconds tick_seconds = tick_duration_seconds(base_tps_);
 
   if (command.primary_pressed) {

@@ -97,9 +97,15 @@ physics:
   sneak_speed: 2.0
   air_speed: 3.0
   air_control_acceleration_per_second: 12.0
+  default_surface_slipperiness: 0.62
+  ground_acceleration_per_second: 170.0
+  ground_deceleration_per_second: 190.0
+  min_surface_control: 0.09
+  max_surface_control: 3.5
   fly_speed: 9.0
   fly_vertical_speed: 7.0
   jump_velocity: 9.0
+  sprint_jump_horizontal_boost: 1.35
   gravity_per_second: 30.0
   terminal_velocity: 50.0
   body_width: 0.65
@@ -242,9 +248,15 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(
       result.value().physics.air_control_acceleration_per_second,
       12.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.default_surface_slipperiness, 0.62F);
+  EXPECT_FLOAT_EQ(result.value().physics.ground_acceleration_per_second, 170.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.ground_deceleration_per_second, 190.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.min_surface_control, 0.09F);
+  EXPECT_FLOAT_EQ(result.value().physics.max_surface_control, 3.5F);
   EXPECT_FLOAT_EQ(result.value().physics.fly_speed, 9.0F);
   EXPECT_FLOAT_EQ(result.value().physics.fly_vertical_speed, 7.0F);
   EXPECT_FLOAT_EQ(result.value().physics.jump_velocity, 9.0F);
+  EXPECT_FLOAT_EQ(result.value().physics.sprint_jump_horizontal_boost, 1.35F);
   EXPECT_FLOAT_EQ(result.value().physics.gravity_per_second, 30.0F);
   EXPECT_FLOAT_EQ(result.value().physics.terminal_velocity, 50.0F);
   EXPECT_FLOAT_EQ(result.value().physics.body_width, 0.65F);
@@ -512,6 +524,15 @@ TEST(ConfigTests, RejectsInvalidPhysicsConfig) {
   const auto result = arv::io::parse_config_yaml(R"(
 physics:
   body_width: 0
+)");
+
+  EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsNegativeSprintJumpBoost) {
+  const auto result = arv::io::parse_config_yaml(R"(
+physics:
+  sprint_jump_horizontal_boost: -0.1
 )");
 
   EXPECT_FALSE(result);

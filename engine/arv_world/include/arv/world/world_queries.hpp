@@ -37,6 +37,14 @@ public:
     return registry_.block_body(chunk->block(block_to_local(pos)));
   }
 
+  [[nodiscard]] voxel::BlockPhysicsProperties block_physics(BlockPos pos) const noexcept override {
+    const voxel::ChunkSection* chunk = search_.find_chunk(block_to_chunk(pos));
+    if (chunk == nullptr) {
+      return {};
+    }
+    return registry_.block_physics(chunk->block(block_to_local(pos)));
+  }
+
   [[nodiscard]] bool missing_blocks_are_solid() const noexcept override {
     return treat_missing_as_solid_;
   }

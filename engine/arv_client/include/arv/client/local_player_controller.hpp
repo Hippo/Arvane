@@ -1,7 +1,7 @@
 #pragma once
 
 #include "arv/client/camera_shell.hpp"
-#include "arv/movement/player_movement.hpp"
+#include "arv/physics/player_movement.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/protocol/player_input.hpp"
@@ -121,13 +121,13 @@ private:
       Seconds tick_seconds) noexcept;
   void update_render_smoothing() noexcept;
   void update_camera_transform() noexcept;
-  [[nodiscard]] movement::PlayerMovementAuthority movement_authority() const noexcept;
+  [[nodiscard]] physics::PlayerMovementAuthority movement_authority() const noexcept;
   [[nodiscard]] protocol::PlayerMoveFlags movement_flags() const noexcept;
 
   CameraShell camera_{};
   std::optional<PlayerID> player_id_{};
   std::optional<EntityNetID> local_entity_id_{};
-  movement::PlayerKinematicState movement_state_{};
+  physics::PlayerKinematicState movement_state_{};
   player::PlayerTuning tuning_{player::default_player_tuning()};
   u8 selected_hotbar_slot_{};
   TickIndex world_initial_tick_{};
