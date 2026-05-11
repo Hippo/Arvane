@@ -29,7 +29,7 @@ int DesktopApplication::run(int argc, char** argv) {
     core::error("config", config_result.error().message);
     return 1;
   }
-  const io::EngineConfig config = config_result.value();
+  io::EngineConfig config = config_result.value();
   const ui::UiThemeLoadResult theme_result =
       ui::load_ui_theme(config.paths.arvane_home_path());
   const ui::UiTheme ui_theme = theme_result.theme;
@@ -72,12 +72,14 @@ int DesktopApplication::run(int argc, char** argv) {
   }
   DebugMenuState debug_menu;
 
+  platform::InputBindings input_bindings = platform::default_input_bindings();
   const auto input_bindings_result =
       io::load_input_bindings_file_or_defaults(config.paths.input_bindings_file);
   if (!input_bindings_result) {
     core::warn("input", input_bindings_result.error().message);
   } else {
-    window.set_input_bindings(input_bindings_result.value());
+    input_bindings = input_bindings_result.value();
+    window.set_input_bindings(input_bindings);
   }
 
   render::OpenGLRenderer renderer;
@@ -109,7 +111,7 @@ int DesktopApplication::run(int argc, char** argv) {
       make_world_tick_policy(config.simulation);
   const voxel::FluidDefinition water_fluid =
       make_water_fluid_definition(config.simulation);
-  const player::PlayerTuning player_tuning =
+  player::PlayerTuning player_tuning =
       make_player_tuning(config.physics);
   const sched::RuntimeThreadBudgetPlan thread_budget =
       make_runtime_thread_budget_plan(config.jobs);
@@ -148,6 +150,8 @@ int DesktopApplication::run(int argc, char** argv) {
       config.paths.saves_path(),
       config.paths.server_list_file,
       config.paths.arvane_home_path(),
+      &config,
+      &input_bindings,
       &assets.language};
   ui::UIScreenManager screen_manager;
   screen_manager.push(ui::make_main_menu_screen());
@@ -157,6 +161,7 @@ int DesktopApplication::run(int argc, char** argv) {
       resources,
       window,
       renderer,
+      input_bindings,
       debug_imgui,
       debug_menu,
       assets,
@@ -166,6 +171,7 @@ int DesktopApplication::run(int argc, char** argv) {
       ui_text_measurer,
       ui_theme,
       water_fluid,
+      player_tuning,
       menu_state,
       screen_manager};
   const int loop_result = frame_loop.run();

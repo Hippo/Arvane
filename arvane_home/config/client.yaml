@@ -1,6 +1,8 @@
 paths:
   input_bindings_file: arvane_home/config/input_bindings.yaml
   server_list_file: arvane_home/config/server_list.json
+language:
+  locale: en_US
 window:
   width: 1280
   height: 720
@@ -9,6 +11,8 @@ window:
 chunks:
   render_distance: 2
   stream_distance: 2
+physics:
+  mouse_sensitivity_radians: 0.0025
 multiplayer:
   keep_alive:
     server_timeout_seconds: 30
@@ -26,7 +30,7 @@ render:
     star_intensity: 1.25
     cloud_intensity: 1.25
     cirrus_amount: 0.45
-    cumulus_amount: 0.80
+    cumulus_amount: 0.8
   atlases:
     blocks:
       page_size: 4096
@@ -53,6 +57,13 @@ render:
     particles:
       page_size: 2048
       max_pages: 4
+ui:
+  chat:
+    max_history_messages: 1000
+    passive_visible_seconds: 8
+    passive_fade_seconds: 2
+    passive_max_lines: 8
+    open_max_lines: 8
 chunk_pipeline:
   max_client_chunk_applies_per_frame: 2
   max_client_chunk_unloads_per_frame: 32

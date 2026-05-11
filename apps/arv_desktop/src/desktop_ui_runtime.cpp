@@ -317,7 +317,8 @@ void append_command_result_to_chat(
 void DesktopFrameLoop::append_menu_player_skin_preview(
     render::FramePacket& frame,
     const ui::UIContext& menu_context) {
-  const ui::UIScreen* screen = screen_manager_.current();
+  const ui::UIScreen* screen =
+      menu_context.screens == nullptr ? nullptr : menu_context.screens->current();
   if (screen == nullptr) {
     return;
   }
@@ -381,6 +382,7 @@ void DesktopFrameLoop::build_ui(
     render::FramePacket& frame,
     const platform::InputSnapshot& platform_input,
     ui::UIContext& menu_context,
+    ui::UIScreenManager& screens,
     DesktopGameSession* active_session,
     bool has_active_session,
     bool has_active_integrated_session,
@@ -403,14 +405,15 @@ void DesktopFrameLoop::build_ui(
       static_cast<f32>(framebuffer_.width),
       static_cast<f32>(framebuffer_.height),
   };
-  menu_context.screens = &screen_manager_;
+  menu_context.screens = &screens;
 
   const UiBuildCacheKey next_cache_key{
       framebuffer_.width,
       framebuffer_.height,
       has_active_session,
-      screen_manager_.has_active_screen(),
-      screen_manager_.revision(),
+      gameplay_menu_stack_active_,
+      screens.has_active_screen(),
+      screens.revision(),
       has_active_session
           ? gameplay_ui_signature(
                 *active_session,
@@ -428,8 +431,8 @@ void DesktopFrameLoop::build_ui(
       ui_tree_.clear();
     }
 
-    if (screen_manager_.has_active_screen()) {
-      screen_manager_.append_to(menu_context);
+    if (screens.has_active_screen()) {
+      screens.append_to(menu_context);
     }
     ui_tree_.layout(
         {

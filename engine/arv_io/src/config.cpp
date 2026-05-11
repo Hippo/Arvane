@@ -1325,6 +1325,11 @@ ConfigResult save_default_client_config_file(
   emitter << YAML::Key << "stream_distance" << YAML::Value << config.chunks.stream_distance;
   emitter << YAML::EndMap;
 
+  emitter << YAML::Key << "physics" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "mouse_sensitivity_radians" << YAML::Value
+          << config.physics.mouse_sensitivity_radians;
+  emitter << YAML::EndMap;
+
   emitter << YAML::Key << "multiplayer" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "keep_alive" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "server_timeout_seconds" << YAML::Value
@@ -1343,6 +1348,8 @@ ConfigResult save_default_client_config_file(
           << config.render.frame_pacing_target_fps;
   emitter << YAML::Key << "frame_pacing_spin_us" << YAML::Value
           << config.render.frame_pacing_spin_us;
+  emitter << YAML::Key << "show_local_player_body" << YAML::Value
+          << config.render.show_local_player_body;
   emitter << YAML::Key << "block_outline" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "color" << YAML::Value << YAML::Flow
           << YAML::BeginSeq
@@ -2172,6 +2179,10 @@ ConfigResult load_config_file_or_defaults(const std::filesystem::path& path) {
     options.explicit_config_path.clear();
   }
   return load_config(options);
+}
+
+ConfigResult save_client_config_file(const std::filesystem::path& path, const EngineConfig& config) {
+  return save_default_client_config_file(path, config);
 }
 
 TextFileResult read_text_file(const std::filesystem::path& path, std::string_view purpose) {

@@ -90,12 +90,32 @@ public:
     return {};
   }
 
+  [[nodiscard]] arv::ui::RenderSettingsView render_settings() const override {
+    return render;
+  }
+
+  [[nodiscard]] arv::ui::ControlsSettingsView controls_settings() const override {
+    return controls;
+  }
+
+  [[nodiscard]] arv::ui::InterfaceSettingsView interface_settings() const override {
+    return interface;
+  }
+
+  [[nodiscard]] std::vector<arv::ui::KeyBindEntryView> key_bind_entries() const override {
+    return key_binds;
+  }
+
   std::vector<arv::ui::SinglePlayerSaveEntry> saves{};
   std::vector<arv::ui::ServerListEntry> servers{};
   std::vector<arv::ui::LocalProfileEntry> profiles{};
   std::vector<arv::ui::LocalProfileSkinEntry> create_skins{};
   std::vector<std::pair<std::string, std::vector<arv::ui::LocalProfileSkinEntry>>> edit_skins{};
   arv::ui::PlayerSkinTextureView default_skin{};
+  arv::ui::RenderSettingsView render{};
+  arv::ui::ControlsSettingsView controls{};
+  arv::ui::InterfaceSettingsView interface{};
+  std::vector<arv::ui::KeyBindEntryView> key_binds{};
 };
 
 [[nodiscard]] arv::ui::LocalProfileSkinEntry make_skin_entry(std::string hash) {
@@ -1021,6 +1041,303 @@ TEST(MenuScreenTests, PauseResumeEmitsCommandAndClosesScreen) {
   EXPECT_TRUE(screens.empty());
   ASSERT_EQ(sink.commands.size(), 1U);
   EXPECT_TRUE(std::holds_alternative<arv::ui::ResumeGameCommand>(sink.commands[0]));
+}
+
+TEST(MenuScreenTests, GameplayRootIsNonBlockingBottomOfPauseStack) {
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_gameplay_screen());
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
+
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::Gameplay);
+  EXPECT_FALSE(screens.blocks_gameplay_input());
+  EXPECT_FALSE(screens.pauses_singleplayer());
+  EXPECT_TRUE(screens.handle_cancel(ctx));
+
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::PauseMenu);
+  EXPECT_EQ(screens.depth(), 2U);
+  EXPECT_TRUE(screens.blocks_gameplay_input());
+  EXPECT_TRUE(screens.pauses_singleplayer());
+
+  EXPECT_TRUE(screens.route_action({"menu.pause.resume", "pause.resume", "click"}, ctx));
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::Gameplay);
+  EXPECT_EQ(screens.depth(), 1U);
+  EXPECT_FALSE(screens.blocks_gameplay_input());
+  ASSERT_EQ(sink.commands.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<arv::ui::ResumeGameCommand>(sink.commands[0]));
+}
+
+TEST(MenuScreenTests, PauseBackToMainMenuLeavesStackForDesktopStateSwitch) {
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_gameplay_screen());
+  screens.push(arv::ui::make_pause_menu_screen());
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
+
+  EXPECT_TRUE(screens.route_action({"menu.pause.main_menu", "pause.main_menu", "click"}, ctx));
+
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::PauseMenu);
+  EXPECT_EQ(screens.depth(), 2U);
+  ASSERT_EQ(sink.commands.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<arv::ui::BackToMainMenuCommand>(sink.commands[0]));
+}
+
+TEST(MenuScreenTests, SettingsHubUsesPauseBackdropAndDomainCategories) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UiTheme theme = arv::ui::default_ui_theme();
+  theme.colors.pause_backdrop = {0.10F, 0.20F, 0.30F, 0.72F};
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_settings_menu_screen());
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, &theme, &test_language()};
+
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* backdrop = tree.find_by_stable_id("settings_menu.backdrop");
+  ASSERT_NE(backdrop, nullptr);
+  EXPECT_EQ(backdrop->style.background, theme.colors.pause_backdrop);
+  EXPECT_NE(tree.find_by_stable_id("menu.settings.render"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("menu.settings.key_binds"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("menu.settings.controls"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("menu.settings.interface"), nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("settings_menu.panel"), nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("menu.settings.other"), nullptr);
+
+  EXPECT_TRUE(screens.route_action({"menu.settings.controls", "settings.controls", "click"}, ctx));
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::ControlsSettings);
+}
+
+TEST(MenuScreenTests, RenderSettingsEmitClampedCommandsAndFitNarrowViewport) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  data.render.frame_sync = arv::ui::SettingsFrameSyncMode::FpsCap;
+  data.render.fps_cap = 238U;
+  data.render.load_distance = 4;
+  data.render.view_distance = 2;
+  data.render.mesh_upload_budget = 32U;
+
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_render_settings_screen());
+  arv::ui::UIContext ctx{tree, {480.0F, 360.0F}, &sink, &data, &screens, nullptr, &test_language()};
+
+  screens.update(ctx);
+  tree.layout({480.0F, 360.0F}, &text);
+
+  for (std::string_view id : {
+           "render.frame_sync.fps_cap",
+           "render.fps_cap.slider",
+           "render.view_distance.slider",
+       }) {
+    const auto* element = tree.find_by_stable_id(id);
+    ASSERT_NE(element, nullptr) << id;
+    EXPECT_GE(element->rect.x, 0.0F) << id;
+    EXPECT_LE(element->rect.x + element->rect.width, 480.0F) << id;
+    expect_button_hittable(tree, id);
+  }
+  EXPECT_EQ(tree.find_by_stable_id("render.fps_cap.dec"), nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("render.fps_cap.inc"), nullptr);
+  const auto* frame_row = tree.find_by_stable_id("render.frame_sync");
+  const auto* cap_button = tree.find_by_stable_id("render.frame_sync.fps_cap");
+  ASSERT_NE(frame_row, nullptr);
+  ASSERT_NE(cap_button, nullptr);
+  EXPECT_LE(
+      cap_button->rect.x + cap_button->rect.width,
+      frame_row->rect.x + frame_row->rect.width - 10.0F);
+  const auto* fps_row = tree.find_by_stable_id("render.fps_cap");
+  const auto* fps_value = tree.find_by_stable_id("render.fps_cap.value");
+  ASSERT_NE(fps_row, nullptr);
+  ASSERT_NE(fps_value, nullptr);
+  EXPECT_LE(
+      fps_value->rect.x + fps_value->rect.width,
+      fps_row->rect.x + fps_row->rect.width - 10.0F);
+
+  const auto* view_slider = tree.find_by_stable_id("render.view_distance.slider");
+  ASSERT_NE(view_slider, nullptr);
+  EXPECT_TRUE(screens.route_action(
+      {"render.view_distance.slider", "render.view_distance.slider", "click"},
+      ctx));
+  EXPECT_TRUE(screens.handle_pointer(
+      {view_slider->rect.x + view_slider->rect.width + 24.0F, view_slider->rect.y + 15.0F},
+      {},
+      false,
+      false,
+      true,
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetRenderSettingsCommand>(sink.commands[0]));
+  EXPECT_EQ(
+      std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0]).settings.view_distance,
+      4);
+
+  sink.commands.clear();
+  const auto* fps_slider = tree.find_by_stable_id("render.fps_cap.slider");
+  ASSERT_NE(fps_slider, nullptr);
+  EXPECT_TRUE(screens.route_action(
+      {"render.fps_cap.slider", "render.fps_cap.slider", "click"},
+      ctx));
+  EXPECT_TRUE(screens.handle_pointer(
+      {fps_slider->rect.x + fps_slider->rect.width + 24.0F, fps_slider->rect.y + 15.0F},
+      {},
+      false,
+      false,
+      true,
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetRenderSettingsCommand>(sink.commands[0]));
+  EXPECT_EQ(
+      std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0]).settings.fps_cap,
+      240U);
+}
+
+TEST(MenuScreenTests, ControlsAndInterfaceSettingsEmitClampedCommands) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  data.controls.mouse_sensitivity_percent = 100.0F;
+  data.interface.chat_history_max = 4900U;
+  data.interface.chat_passive_visible_seconds = 1.0F;
+  arv::ui::UIScreenManager screens;
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
+
+  screens.push(arv::ui::make_controls_settings_screen());
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+  const auto* sensitivity_slider = tree.find_by_stable_id("controls.mouse_sensitivity.slider");
+  ASSERT_NE(sensitivity_slider, nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("controls.mouse_sensitivity.dec"), nullptr);
+  EXPECT_TRUE(screens.route_action(
+      {"controls.mouse_sensitivity.slider", "controls.mouse_sensitivity.slider", "click"},
+      ctx));
+  EXPECT_TRUE(screens.handle_pointer(
+      {sensitivity_slider->rect.x - 24.0F, sensitivity_slider->rect.y + 15.0F},
+      {},
+      false,
+      false,
+      true,
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetControlsSettingsCommand>(sink.commands[0]));
+  EXPECT_FLOAT_EQ(
+      std::get<arv::ui::SetControlsSettingsCommand>(sink.commands[0])
+          .settings.mouse_sensitivity_percent,
+      10.0F);
+
+  sink.commands.clear();
+  screens.replace(arv::ui::make_interface_settings_screen());
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+  const auto* history_slider = tree.find_by_stable_id("interface.chat_history.slider");
+  ASSERT_NE(history_slider, nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("interface.chat_history.inc"), nullptr);
+  EXPECT_TRUE(screens.route_action({"interface.chat_history.slider", "interface.chat_history.slider", "click"}, ctx));
+  EXPECT_TRUE(screens.handle_pointer(
+      {history_slider->rect.x + history_slider->rect.width + 24.0F, history_slider->rect.y + 15.0F},
+      {},
+      false,
+      false,
+      true,
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetInterfaceSettingsCommand>(sink.commands[0]));
+  EXPECT_EQ(
+      std::get<arv::ui::SetInterfaceSettingsCommand>(sink.commands[0]).settings.chat_history_max,
+      5000U);
+
+  sink.commands.clear();
+  const auto* visible_slider = tree.find_by_stable_id("interface.visible_seconds.slider");
+  ASSERT_NE(visible_slider, nullptr);
+  EXPECT_TRUE(screens.route_action({"interface.visible_seconds.slider", "interface.visible_seconds.slider", "click"}, ctx));
+  EXPECT_TRUE(screens.handle_pointer(
+      {visible_slider->rect.x - 24.0F, visible_slider->rect.y + 15.0F},
+      {},
+      false,
+      false,
+      true,
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetInterfaceSettingsCommand>(sink.commands[0]));
+  EXPECT_FLOAT_EQ(
+      std::get<arv::ui::SetInterfaceSettingsCommand>(sink.commands[0])
+          .settings.chat_passive_visible_seconds,
+      0.0F);
+}
+
+TEST(MenuScreenTests, KeyBindsCaptureResetClearAndWarnOnConflicts) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::KeyBindEntryView jump;
+  jump.action_name = "Jump";
+  jump.display_name = "Jump";
+  jump.primary.has_binding = true;
+  jump.primary.binding = {true, arv::ui::InputBindingDevice::Keyboard, "Space", "Space", 0U};
+  jump.primary.conflict = true;
+  jump.secondary.has_binding = true;
+  jump.secondary.binding = {true, arv::ui::InputBindingDevice::MouseButton, "MouseMiddle", "Middle Mouse", 0U};
+
+  arv::ui::KeyBindEntryView pause;
+  pause.action_name = "TogglePauseMenu";
+  pause.display_name = "Toggle Pause";
+  pause.primary.has_binding = true;
+  pause.primary.binding = {true, arv::ui::InputBindingDevice::Keyboard, "Escape", "Escape", 0U};
+  pause.primary.conflict = true;
+
+  data.key_binds = {jump, pause};
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_key_binds_screen());
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens, nullptr, &test_language()};
+
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  ASSERT_NE(tree.find_by_stable_id("key_binds.row.0.label"), nullptr);
+  ASSERT_NE(tree.find_by_stable_id("key_binds.row.1.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("key_binds.row.0.warning"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("key_binds.row.1.warning"), nullptr);
+
+  EXPECT_TRUE(screens.route_action({"key_binds.row.0.primary", "key_bind.capture_primary", "click"}, ctx));
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+  EXPECT_NE(tree.find_by_stable_id("key_binds.cancel_capture"), nullptr);
+
+  EXPECT_TRUE(screens.handle_captured_input(
+      {arv::ui::InputBindingDevice::Keyboard, "Escape", "Escape", 0U},
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetKeyBindCommand>(sink.commands[0]));
+  const auto& captured = std::get<arv::ui::SetKeyBindCommand>(sink.commands[0]);
+  EXPECT_EQ(captured.action_name, "Jump");
+  EXPECT_EQ(captured.slot, 0U);
+  ASSERT_TRUE(captured.binding.has_value());
+  EXPECT_EQ(captured.binding->input_code, "Escape");
+
+  EXPECT_TRUE(screens.route_action({"key_binds.row.0.clear_secondary", "key_bind.clear_secondary", "click"}, ctx));
+  ASSERT_EQ(sink.commands.size(), 2U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetKeyBindCommand>(sink.commands[1]));
+  const auto& clear = std::get<arv::ui::SetKeyBindCommand>(sink.commands[1]);
+  EXPECT_EQ(clear.action_name, "Jump");
+  EXPECT_EQ(clear.slot, 1U);
+  EXPECT_FALSE(clear.binding.has_value());
+
+  EXPECT_TRUE(screens.route_action({"key_binds.row.0.reset", "key_bind.reset", "click"}, ctx));
+  ASSERT_EQ(sink.commands.size(), 3U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::ResetKeyBindCommand>(sink.commands[2]));
+  EXPECT_EQ(std::get<arv::ui::ResetKeyBindCommand>(sink.commands[2]).action_name, "Jump");
 }
 
 TEST(MenuScreenTests, SinglePlayerEmptyListStaysOnWorldListUntilCreate) {

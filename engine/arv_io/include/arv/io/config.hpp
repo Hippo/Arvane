@@ -477,6 +477,7 @@ ConfigResult load_config_file(const std::filesystem::path& path);
 ConfigResult load_config(const ConfigLoadOptions& options);
 
 ConfigResult load_config_file_or_defaults(const std::filesystem::path& path);
+ConfigResult save_client_config_file(const std::filesystem::path& path, const EngineConfig& config);
 
 TextFileResult read_text_file(const std::filesystem::path& path, std::string_view purpose);
 

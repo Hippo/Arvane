@@ -29,6 +29,10 @@ struct FramebufferSize {
   u32 height{};
 };
 
+struct RawInputEvent {
+  InputBinding binding{};
+};
+
 struct InputSnapshot {
   bool close_requested{};
   bool move_forward{};
@@ -66,6 +70,7 @@ struct InputSnapshot {
   bool text_backspace_pressed{};
   bool text_submit_pressed{};
   bool text_cancel_pressed{};
+  std::optional<RawInputEvent> raw_input{};
 };
 
 class GlfwLibrary {
@@ -109,6 +114,7 @@ public:
   InputSnapshot poll_input();
   void set_input_bindings(InputBindings bindings) noexcept;
   void set_cursor_captured(bool captured) noexcept;
+  void set_vsync(bool enabled) noexcept;
 
   [[nodiscard]] FramebufferSize framebuffer_size() const;
   [[nodiscard]] GLFWwindow* native_handle() noexcept {
@@ -136,11 +142,13 @@ private:
   bool cursor_captured_{true};
   bool previous_left_mouse_down_{};
   bool previous_right_mouse_down_{};
+  bool previous_middle_mouse_down_{};
   bool previous_backspace_down_{};
   bool previous_enter_down_{};
   std::string pending_text_input_{};
   InputBindings input_bindings_{default_input_bindings()};
   std::array<bool, static_cast<usize>(LogicalAction::Count)> previous_action_active_{};
+  std::array<bool, 64> previous_capture_key_down_{};
 };
 
 } // namespace arv::platform

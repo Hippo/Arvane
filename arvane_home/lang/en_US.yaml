@@ -139,8 +139,39 @@ ui:
       title: Settings
       render: Render Settings
       key_binds: Key Binds
-      other: Other Settings
+      controls: Controls
+      interface: Interface
       placeholder: Settings controls will appear here
+      on: "On"
+      off: "Off"
+      render_frame_sync: Frame Sync
+      render_frame_sync_off: "Off"
+      render_frame_sync_vsync: VSync
+      render_frame_sync_fps_cap: FPS Cap
+      render_fps_cap: FPS Cap
+      render_view_distance: View Distance
+      render_mesh_upload_budget: Mesh Upload Budget
+      render_local_player_body: Show Local Player Body
+      render_star_intensity: Star Intensity
+      render_cloud_intensity: Cloud Intensity
+      render_cirrus: Cirrus Clouds
+      render_cumulus: Cumulus Clouds
+      render_outline_red: Outline Red
+      render_outline_green: Outline Green
+      render_outline_blue: Outline Blue
+      render_outline_thickness: Outline Thickness
+      controls_mouse_sensitivity: Mouse Sensitivity
+      interface_chat_history: Chat History
+      interface_open_lines: Open Chat Lines
+      interface_passive_lines: Passive Chat Lines
+      interface_visible_seconds: Passive Visible Seconds
+      interface_fade_seconds: Passive Fade Seconds
+      keybind_unbound: Unbound
+      keybind_listening: Listening...
+      keybind_cancel: Cancel Bind
+      keybind_clear: Clear
+      keybind_reset: Reset
+      keybind_conflict: Conflict
     pause:
       title: Paused
       resume: Resume

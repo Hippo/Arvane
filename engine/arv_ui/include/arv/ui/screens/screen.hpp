@@ -61,6 +61,75 @@ struct PlayerSkinPreviewRequest {
   bool slim_model{};
 };
 
+enum class SettingsFrameSyncMode : u8 {
+  Off,
+  VSync,
+  FpsCap,
+};
+
+enum class InputBindingDevice : u8 {
+  Keyboard,
+  MouseButton,
+  MouseWheel,
+};
+
+struct InputBindingView {
+  bool valid{};
+  InputBindingDevice device{InputBindingDevice::Keyboard};
+  std::string input_code{};
+  std::string label{};
+  u8 modifiers{};
+};
+
+struct RenderSettingsView {
+  SettingsFrameSyncMode frame_sync{SettingsFrameSyncMode::VSync};
+  u32 fps_cap{60};
+  i32 load_distance{3};
+  i32 view_distance{2};
+  u32 mesh_upload_budget{8};
+  bool show_local_player_body{true};
+  f32 star_intensity{1.25F};
+  f32 cloud_intensity{1.25F};
+  f32 cirrus_amount{0.45F};
+  f32 cumulus_amount{0.80F};
+  f32 outline_red{0.02F};
+  f32 outline_green{0.02F};
+  f32 outline_blue{0.02F};
+  f32 outline_thickness{0.55F};
+};
+
+struct ControlsSettingsView {
+  f32 mouse_sensitivity_percent{100.0F};
+};
+
+struct InterfaceSettingsView {
+  u32 chat_history_max{1000U};
+  u32 chat_open_lines{8U};
+  u32 chat_passive_lines{8U};
+  f32 chat_passive_visible_seconds{8.0F};
+  f32 chat_passive_fade_seconds{2.0F};
+};
+
+struct KeyBindSlotView {
+  bool has_binding{};
+  InputBindingView binding{};
+  bool conflict{};
+};
+
+struct KeyBindEntryView {
+  std::string action_name{};
+  std::string display_name{};
+  KeyBindSlotView primary{};
+  KeyBindSlotView secondary{};
+};
+
+struct CapturedInputView {
+  InputBindingDevice device{InputBindingDevice::Keyboard};
+  std::string input_code{};
+  std::string label{};
+  u8 modifiers{};
+};
+
 struct StartSinglePlayerCommand {
   std::string server_save_name{};
   std::string world_name{};
@@ -135,6 +204,28 @@ struct ResumeGameCommand {};
 struct BackToMainMenuCommand {};
 struct QuitGameCommand {};
 
+struct SetRenderSettingsCommand {
+  RenderSettingsView settings{};
+};
+
+struct SetControlsSettingsCommand {
+  ControlsSettingsView settings{};
+};
+
+struct SetInterfaceSettingsCommand {
+  InterfaceSettingsView settings{};
+};
+
+struct SetKeyBindCommand {
+  std::string action_name{};
+  u8 slot{};
+  std::optional<InputBindingView> binding{};
+};
+
+struct ResetKeyBindCommand {
+  std::string action_name{};
+};
+
 using UICommand = std::variant<
     StartSinglePlayerCommand,
     CreateWorldCommand,
@@ -154,7 +245,12 @@ using UICommand = std::variant<
     DiscardLocalProfileCreateCommand,
     ResumeGameCommand,
     BackToMainMenuCommand,
-    QuitGameCommand>;
+    QuitGameCommand,
+    SetRenderSettingsCommand,
+    SetControlsSettingsCommand,
+    SetInterfaceSettingsCommand,
+    SetKeyBindCommand,
+    ResetKeyBindCommand>;
 
 class UICommandSink {
 public:
@@ -209,6 +305,18 @@ public:
   [[nodiscard]] virtual std::string local_profile_status() const {
     return {};
   }
+  [[nodiscard]] virtual RenderSettingsView render_settings() const {
+    return {};
+  }
+  [[nodiscard]] virtual ControlsSettingsView controls_settings() const {
+    return {};
+  }
+  [[nodiscard]] virtual InterfaceSettingsView interface_settings() const {
+    return {};
+  }
+  [[nodiscard]] virtual std::vector<KeyBindEntryView> key_bind_entries() const {
+    return {};
+  }
 };
 
 class UIScreenManager;
@@ -224,6 +332,7 @@ struct UIContext {
 };
 
 enum class MenuScreenType : u8 {
+  Gameplay,
   MainMenu,
   SinglePlayerMenu,
   CreateWorld,
@@ -237,7 +346,8 @@ enum class MenuScreenType : u8 {
   SettingsMenu,
   RenderSettings,
   KeyBinds,
-  OtherSettings,
+  ControlsSettings,
+  InterfaceSettings,
   PauseMenu,
 };
 
@@ -259,6 +369,7 @@ public:
   virtual bool handle_text_input(std::string_view text, UIContext& ctx);
   virtual bool handle_backspace(UIContext& ctx);
   virtual bool handle_submit(UIContext& ctx);
+  virtual bool handle_captured_input(const CapturedInputView& input, UIContext& ctx);
   virtual bool handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx);
   virtual bool handle_pointer(
       Vec2f cursor,
@@ -312,6 +423,7 @@ public:
   bool handle_text_input(std::string_view text, UIContext& ctx);
   bool handle_backspace(UIContext& ctx);
   bool handle_submit(UIContext& ctx);
+  bool handle_captured_input(const CapturedInputView& input, UIContext& ctx);
   bool handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx);
   bool handle_pointer(
       Vec2f cursor,

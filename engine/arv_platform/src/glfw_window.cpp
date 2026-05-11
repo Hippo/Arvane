@@ -13,6 +13,66 @@
 namespace arv::platform {
 namespace {
 
+constexpr std::array<std::pair<int, std::string_view>, 57> kCaptureKeys{{
+    {GLFW_KEY_A, "A"},
+    {GLFW_KEY_B, "B"},
+    {GLFW_KEY_C, "C"},
+    {GLFW_KEY_D, "D"},
+    {GLFW_KEY_E, "E"},
+    {GLFW_KEY_F, "F"},
+    {GLFW_KEY_G, "G"},
+    {GLFW_KEY_H, "H"},
+    {GLFW_KEY_I, "I"},
+    {GLFW_KEY_J, "J"},
+    {GLFW_KEY_K, "K"},
+    {GLFW_KEY_L, "L"},
+    {GLFW_KEY_M, "M"},
+    {GLFW_KEY_N, "N"},
+    {GLFW_KEY_O, "O"},
+    {GLFW_KEY_P, "P"},
+    {GLFW_KEY_Q, "Q"},
+    {GLFW_KEY_R, "R"},
+    {GLFW_KEY_S, "S"},
+    {GLFW_KEY_T, "T"},
+    {GLFW_KEY_U, "U"},
+    {GLFW_KEY_V, "V"},
+    {GLFW_KEY_W, "W"},
+    {GLFW_KEY_X, "X"},
+    {GLFW_KEY_Y, "Y"},
+    {GLFW_KEY_Z, "Z"},
+    {GLFW_KEY_0, "0"},
+    {GLFW_KEY_1, "1"},
+    {GLFW_KEY_2, "2"},
+    {GLFW_KEY_3, "3"},
+    {GLFW_KEY_4, "4"},
+    {GLFW_KEY_5, "5"},
+    {GLFW_KEY_6, "6"},
+    {GLFW_KEY_7, "7"},
+    {GLFW_KEY_8, "8"},
+    {GLFW_KEY_9, "9"},
+    {GLFW_KEY_SPACE, "Space"},
+    {GLFW_KEY_TAB, "Tab"},
+    {GLFW_KEY_ENTER, "Enter"},
+    {GLFW_KEY_ESCAPE, "Escape"},
+    {GLFW_KEY_BACKSPACE, "Backspace"},
+    {GLFW_KEY_MINUS, "Minus"},
+    {GLFW_KEY_EQUAL, "Equal"},
+    {GLFW_KEY_LEFT_BRACKET, "LeftBracket"},
+    {GLFW_KEY_RIGHT_BRACKET, "RightBracket"},
+    {GLFW_KEY_SEMICOLON, "Semicolon"},
+    {GLFW_KEY_APOSTROPHE, "Apostrophe"},
+    {GLFW_KEY_COMMA, "Comma"},
+    {GLFW_KEY_PERIOD, "Period"},
+    {GLFW_KEY_GRAVE_ACCENT, "Grave"},
+    {GLFW_KEY_SLASH, "Slash"},
+    {GLFW_KEY_LEFT_SHIFT, "LShift"},
+    {GLFW_KEY_RIGHT_SHIFT, "RShift"},
+    {GLFW_KEY_LEFT_CONTROL, "LCtrl"},
+    {GLFW_KEY_RIGHT_CONTROL, "RCtrl"},
+    {GLFW_KEY_LEFT_ALT, "LAlt"},
+    {GLFW_KEY_RIGHT_ALT, "RAlt"},
+}};
+
 [[nodiscard]] std::optional<int> glfw_key_from_code(std::string_view code) noexcept {
   if (code.size() == 1) {
     const char value = code.front();
@@ -135,6 +195,29 @@ namespace {
   return true;
 }
 
+[[nodiscard]] bool key_is_modifier(int key, InputModifier modifier) noexcept {
+  switch (modifier) {
+    case InputModifier::Shift:
+      return key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT;
+    case InputModifier::Control:
+      return key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL;
+    case InputModifier::Alt:
+      return key == GLFW_KEY_LEFT_ALT || key == GLFW_KEY_RIGHT_ALT;
+  }
+  return false;
+}
+
+[[nodiscard]] u8 current_capture_modifiers(GLFWwindow* window, int primary_key = GLFW_KEY_UNKNOWN) noexcept {
+  u8 modifiers = 0U;
+  for (const InputModifier modifier :
+       {InputModifier::Shift, InputModifier::Control, InputModifier::Alt}) {
+    if (!key_is_modifier(primary_key, modifier) && modifier_group_active(window, modifier)) {
+      modifiers |= input_modifier_mask(modifier);
+    }
+  }
+  return modifiers;
+}
+
 [[nodiscard]] bool binding_hold_active(
     GLFWwindow* window,
     const InputBinding& binding) noexcept {
@@ -244,12 +327,15 @@ OpenGLWindow::OpenGLWindow(OpenGLWindow&& other) noexcept
       cursor_captured_(std::exchange(other.cursor_captured_, true)),
       previous_left_mouse_down_(std::exchange(other.previous_left_mouse_down_, false)),
       previous_right_mouse_down_(std::exchange(other.previous_right_mouse_down_, false)),
+      previous_middle_mouse_down_(std::exchange(other.previous_middle_mouse_down_, false)),
       previous_backspace_down_(std::exchange(other.previous_backspace_down_, false)),
       previous_enter_down_(std::exchange(other.previous_enter_down_, false)),
       pending_text_input_(std::move(other.pending_text_input_)),
       input_bindings_(std::move(other.input_bindings_)),
-      previous_action_active_(other.previous_action_active_) {
+      previous_action_active_(other.previous_action_active_),
+      previous_capture_key_down_(other.previous_capture_key_down_) {
   other.previous_action_active_.fill(false);
+  other.previous_capture_key_down_.fill(false);
   if (window_ != nullptr) {
     glfwSetWindowUserPointer(window_, this);
   }
@@ -266,12 +352,15 @@ OpenGLWindow& OpenGLWindow::operator=(OpenGLWindow&& other) noexcept {
     cursor_captured_ = std::exchange(other.cursor_captured_, true);
     previous_left_mouse_down_ = std::exchange(other.previous_left_mouse_down_, false);
     previous_right_mouse_down_ = std::exchange(other.previous_right_mouse_down_, false);
+    previous_middle_mouse_down_ = std::exchange(other.previous_middle_mouse_down_, false);
     previous_backspace_down_ = std::exchange(other.previous_backspace_down_, false);
     previous_enter_down_ = std::exchange(other.previous_enter_down_, false);
     pending_text_input_ = std::move(other.pending_text_input_);
     input_bindings_ = std::move(other.input_bindings_);
     previous_action_active_ = other.previous_action_active_;
+    previous_capture_key_down_ = other.previous_capture_key_down_;
     other.previous_action_active_.fill(false);
+    other.previous_capture_key_down_.fill(false);
     if (window_ != nullptr) {
       glfwSetWindowUserPointer(window_, this);
     }
@@ -336,6 +425,7 @@ InputSnapshot OpenGLWindow::poll_input() {
   const bool enter_down = glfwGetKey(window_, GLFW_KEY_ENTER) == GLFW_PRESS;
   const bool left_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
   const bool right_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+  const bool middle_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
   input.text_backspace_pressed = backspace_down && !previous_backspace_down_;
   input.text_submit_pressed = enter_down && !previous_enter_down_;
   input.mouse_left_pressed = left_mouse_down && !previous_left_mouse_down_;
@@ -348,6 +438,38 @@ InputSnapshot OpenGLWindow::poll_input() {
   pending_text_input_.clear();
   const i32 wheel_up_steps = static_cast<i32>(std::max(accumulated_scroll_y_, 0.0));
   const i32 wheel_down_steps = static_cast<i32>(std::max(-accumulated_scroll_y_, 0.0));
+
+  for (usize index = 0; index < kCaptureKeys.size(); ++index) {
+    const auto& [key, code] = kCaptureKeys[index];
+    const bool down = glfwGetKey(window_, key) == GLFW_PRESS;
+    if (!input.raw_input.has_value() && down && !previous_capture_key_down_[index]) {
+      input.raw_input = RawInputEvent{
+          InputBinding{
+              InputDeviceType::Keyboard,
+              std::string{code},
+              current_capture_modifiers(window_, key)}};
+    }
+    previous_capture_key_down_[index] = down;
+  }
+  if (!input.raw_input.has_value() && input.mouse_left_pressed) {
+    input.raw_input = RawInputEvent{
+        InputBinding{InputDeviceType::MouseButton, "Left", current_capture_modifiers(window_)}};
+  }
+  if (!input.raw_input.has_value() && input.mouse_right_pressed) {
+    input.raw_input = RawInputEvent{
+        InputBinding{InputDeviceType::MouseButton, "Right", current_capture_modifiers(window_)}};
+  }
+  if (!input.raw_input.has_value() && middle_mouse_down && !previous_middle_mouse_down_) {
+    input.raw_input = RawInputEvent{
+        InputBinding{InputDeviceType::MouseButton, "Middle", current_capture_modifiers(window_)}};
+  }
+  if (!input.raw_input.has_value() && wheel_up_steps > 0) {
+    input.raw_input = RawInputEvent{
+        InputBinding{InputDeviceType::MouseWheel, "Up", current_capture_modifiers(window_)}};
+  } else if (!input.raw_input.has_value() && wheel_down_steps > 0) {
+    input.raw_input = RawInputEvent{
+        InputBinding{InputDeviceType::MouseWheel, "Down", current_capture_modifiers(window_)}};
+  }
 
   input.move_forward = action_hold_active(window_, input_bindings_, LogicalAction::MoveForward);
   input.move_backward = action_hold_active(window_, input_bindings_, LogicalAction::MoveBackward);
@@ -474,6 +596,7 @@ InputSnapshot OpenGLWindow::poll_input() {
   has_last_cursor_ = true;
   previous_left_mouse_down_ = left_mouse_down;
   previous_right_mouse_down_ = right_mouse_down;
+  previous_middle_mouse_down_ = middle_mouse_down;
   previous_backspace_down_ = backspace_down;
   previous_enter_down_ = enter_down;
   return input;
@@ -494,6 +617,13 @@ void OpenGLWindow::set_cursor_captured(bool captured) noexcept {
     glfwSetInputMode(window_, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
   }
   has_last_cursor_ = false;
+}
+
+void OpenGLWindow::set_vsync(bool enabled) noexcept {
+  if (window_ == nullptr) {
+    return;
+  }
+  glfwSwapInterval(enabled ? 1 : 0);
 }
 
 void OpenGLWindow::accumulate_scroll(f64 y_offset) noexcept {

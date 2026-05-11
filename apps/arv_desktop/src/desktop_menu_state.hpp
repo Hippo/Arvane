@@ -1,7 +1,9 @@
 #pragma once
 
 #include "arv/client/local_identity.hpp"
+#include "arv/io/config.hpp"
 #include "arv/lang/language.hpp"
+#include "arv/platform/input_bindings.hpp"
 #include "arv/ui/ui.hpp"
 
 #include <filesystem>
@@ -19,6 +21,8 @@ public:
       std::filesystem::path saves_root,
       std::filesystem::path server_list_file,
       std::filesystem::path arvane_home,
+      const io::EngineConfig* config,
+      const platform::InputBindings* input_bindings,
       const lang::LanguageCatalog* language);
 
   [[nodiscard]] std::vector<ui::SinglePlayerSaveEntry> singleplayer_saves() const override;
@@ -38,6 +42,10 @@ public:
   [[nodiscard]] std::string pending_edit_profile_skin_hash(
       std::string_view profile_id) const override;
   [[nodiscard]] std::string local_profile_status() const override;
+  [[nodiscard]] ui::RenderSettingsView render_settings() const override;
+  [[nodiscard]] ui::ControlsSettingsView controls_settings() const override;
+  [[nodiscard]] ui::InterfaceSettingsView interface_settings() const override;
+  [[nodiscard]] std::vector<ui::KeyBindEntryView> key_bind_entries() const override;
 
   void submit(ui::UICommand command) override;
 
@@ -69,6 +77,16 @@ public:
   take_join_server_request() noexcept;
   [[nodiscard]] bool take_cancel_server_connect_request() noexcept;
   [[nodiscard]] bool take_back_to_main_menu_request() noexcept;
+  [[nodiscard]] std::optional<ui::SetRenderSettingsCommand>
+  take_render_settings_request() noexcept;
+  [[nodiscard]] std::optional<ui::SetControlsSettingsCommand>
+  take_controls_settings_request() noexcept;
+  [[nodiscard]] std::optional<ui::SetInterfaceSettingsCommand>
+  take_interface_settings_request() noexcept;
+  [[nodiscard]] std::optional<ui::SetKeyBindCommand>
+  take_key_bind_request() noexcept;
+  [[nodiscard]] std::optional<ui::ResetKeyBindCommand>
+  take_key_bind_reset_request() noexcept;
 
   std::vector<ui::SinglePlayerSaveEntry> saves{};
   std::vector<ui::ServerListEntry> servers{};
@@ -94,6 +112,11 @@ private:
   void handle(const ui::ResumeGameCommand& command);
   void handle(const ui::BackToMainMenuCommand& command);
   void handle(const ui::QuitGameCommand& command);
+  void handle(const ui::SetRenderSettingsCommand& command);
+  void handle(const ui::SetControlsSettingsCommand& command);
+  void handle(const ui::SetInterfaceSettingsCommand& command);
+  void handle(const ui::SetKeyBindCommand& command);
+  void handle(const ui::ResetKeyBindCommand& command);
 
   void load_servers();
   void persist_servers() const;
@@ -115,11 +138,18 @@ private:
   std::filesystem::path saves_root_{};
   std::filesystem::path server_list_file_{};
   std::filesystem::path arvane_home_{};
+  const io::EngineConfig* config_{};
+  const platform::InputBindings* input_bindings_{};
   const lang::LanguageCatalog* language_{};
   std::optional<ui::StartSinglePlayerCommand> start_singleplayer_request_{};
   std::optional<ui::CreateWorldCommand> create_world_request_{};
   std::optional<ui::DeleteSinglePlayerSaveCommand> delete_save_request_{};
   std::optional<ui::JoinServerCommand> join_server_request_{};
+  std::optional<ui::SetRenderSettingsCommand> render_settings_request_{};
+  std::optional<ui::SetControlsSettingsCommand> controls_settings_request_{};
+  std::optional<ui::SetInterfaceSettingsCommand> interface_settings_request_{};
+  std::optional<ui::SetKeyBindCommand> key_bind_request_{};
+  std::optional<ui::ResetKeyBindCommand> key_bind_reset_request_{};
   bool cancel_server_connect_requested_{};
   bool back_to_main_menu_requested_{};
   client::LocalProfileStore profile_store_{};

@@ -35,6 +35,12 @@ bool UIScreen::handle_submit(UIContext& ctx) {
   return false;
 }
 
+bool UIScreen::handle_captured_input(const CapturedInputView& input, UIContext& ctx) {
+  (void)input;
+  (void)ctx;
+  return false;
+}
+
 bool UIScreen::handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx) {
   (void)cursor;
   (void)wheel_y;
@@ -178,6 +184,16 @@ bool UIScreenManager::handle_submit(UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
   const bool handled = screen != nullptr && screen->handle_submit(ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
+}
+
+bool UIScreenManager::handle_captured_input(const CapturedInputView& input, UIContext& ctx) {
+  ctx.screens = this;
+  UIScreen* screen = current();
+  const bool handled = screen != nullptr && screen->handle_captured_input(input, ctx);
   if (handled) {
     mark_dirty();
   }

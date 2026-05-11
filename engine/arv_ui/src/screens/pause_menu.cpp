@@ -1,6 +1,5 @@
 #include "arv/ui/screens/pause_menu.hpp"
 
-#include "arv/ui/screens/main_menu.hpp"
 #include "arv/ui/screens/settings.hpp"
 
 #include "menu_common.hpp"
@@ -11,6 +10,37 @@ namespace arv::ui {
 namespace {
 
 using namespace screens_detail;
+
+class GameplayScreen final : public UIScreen {
+public:
+  [[nodiscard]] MenuScreenType type() const noexcept override {
+    return MenuScreenType::Gameplay;
+  }
+
+  [[nodiscard]] std::string_view screen_id() const noexcept override {
+    return "gameplay";
+  }
+
+  void build(UIContext& ctx) override {
+    (void)ctx;
+  }
+
+  bool handle_cancel(UIContext& ctx) override {
+    if (ctx.screens == nullptr) {
+      return false;
+    }
+    ctx.screens->push(make_pause_menu_screen());
+    return true;
+  }
+
+  [[nodiscard]] bool can_close() const noexcept override {
+    return false;
+  }
+
+  [[nodiscard]] bool blocks_gameplay_input() const noexcept override {
+    return false;
+  }
+};
 
 class PauseMenuScreen final : public UIScreen {
 public:
@@ -69,9 +99,6 @@ public:
     }
     if (action.action_id == "pause.main_menu") {
       submit_command(ctx, BackToMainMenuCommand{});
-      if (ctx.screens != nullptr) {
-        ctx.screens->replace(make_main_menu_screen());
-      }
       return true;
     }
     if (action.action_id == "pause.settings" && ctx.screens != nullptr) {
@@ -99,6 +126,10 @@ public:
 };
 
 } // namespace
+
+std::unique_ptr<UIScreen> make_gameplay_screen() {
+  return std::make_unique<GameplayScreen>();
+}
 
 std::unique_ptr<UIScreen> make_pause_menu_screen() {
   return std::make_unique<PauseMenuScreen>();

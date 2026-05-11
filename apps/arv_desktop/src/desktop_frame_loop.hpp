@@ -13,6 +13,7 @@
 #include "arv/core/time.hpp"
 #include "arv/physics/collision.hpp"
 #include "arv/platform/glfw_window.hpp"
+#include "arv/player/player_constants.hpp"
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/sched/scheduler.hpp"
 #include "arv/ui/ui.hpp"
@@ -40,6 +41,7 @@ struct UiBuildCacheKey {
   u32 width{};
   u32 height{};
   bool has_active_session{};
+  bool using_gameplay_menu_stack{};
   bool has_active_screen{};
   u64 screen_revision{};
   u64 gameplay_signature{};
@@ -47,6 +49,7 @@ struct UiBuildCacheKey {
   [[nodiscard]] bool operator==(const UiBuildCacheKey& other) const noexcept {
     return width == other.width && height == other.height &&
            has_active_session == other.has_active_session &&
+           using_gameplay_menu_stack == other.using_gameplay_menu_stack &&
            has_active_screen == other.has_active_screen &&
            screen_revision == other.screen_revision &&
            gameplay_signature == other.gameplay_signature;
@@ -56,10 +59,11 @@ struct UiBuildCacheKey {
 class DesktopFrameLoop {
 public:
   DesktopFrameLoop(
-      const io::EngineConfig& config,
+      io::EngineConfig& config,
       asset::ResourceManager& resources,
       platform::OpenGLWindow& window,
       render::OpenGLRenderer& renderer,
+      platform::InputBindings& input_bindings,
       DebugImGuiLayer& debug_imgui,
       DebugMenuState& debug_menu,
       DesktopLoadedAssets& assets,
@@ -69,13 +73,18 @@ public:
       ui::FontUiTextMeasurer& ui_text_measurer,
       const ui::UiTheme& ui_theme,
       const voxel::FluidDefinition& water_fluid,
+      player::PlayerTuning& player_tuning,
       DesktopMenuState& menu_state,
       ui::UIScreenManager& screen_manager);
 
   [[nodiscard]] int run();
 
 private:
-  [[nodiscard]] ui::UIContext make_menu_context();
+  [[nodiscard]] ui::UIScreenManager& active_screen_manager() noexcept;
+  [[nodiscard]] const ui::UIScreenManager& active_screen_manager() const noexcept;
+  void reset_main_menu_stack();
+  void reset_gameplay_menu_stack();
+  [[nodiscard]] ui::UIContext make_menu_context(ui::UIScreenManager& screens);
   [[nodiscard]] FrameTiming begin_frame();
   void update_fps_sample(
       std::chrono::steady_clock::time_point now,
@@ -91,16 +100,31 @@ private:
   void handle_pause_menu_input(
       const platform::InputSnapshot& platform_input,
       ui::UIContext& menu_context,
+      ui::UIScreenManager& screens,
       DesktopGameSession* active_session,
       bool has_session);
+  void handle_captured_menu_input(
+      platform::InputSnapshot& platform_input,
+      ui::UIContext& menu_context,
+      ui::UIScreenManager& screens);
   [[nodiscard]] bool route_input(
       const platform::InputSnapshot& platform_input,
       ui::UIContext& menu_context,
+      ui::UIScreenManager& screens,
       DesktopGameSession* active_session,
       bool has_session,
       client::InputFrame& client_input);
 
   [[nodiscard]] bool process_menu_commands();
+  void apply_render_settings(const ui::SetRenderSettingsCommand& command);
+  void apply_controls_settings(const ui::SetControlsSettingsCommand& command);
+  void apply_interface_settings(const ui::SetInterfaceSettingsCommand& command);
+  void apply_key_bind(const ui::SetKeyBindCommand& command);
+  void apply_key_bind_reset(const ui::ResetKeyBindCommand& command);
+  void persist_client_settings() const;
+  void persist_input_bindings() const;
+  void refresh_runtime_player_tuning();
+  void rebuild_outline_render_assets();
   void invalidate_ui_tree_cache() noexcept;
   [[nodiscard]] bool handle_remote_disconnect(DesktopGameSession* active_session);
   void handle_remote_connection_ready(DesktopGameSession* active_session);
@@ -186,6 +210,7 @@ private:
       render::FramePacket& frame,
       const platform::InputSnapshot& platform_input,
       ui::UIContext& menu_context,
+      ui::UIScreenManager& screens,
       DesktopGameSession* active_session,
       bool has_active_session,
       bool has_active_integrated_session,
@@ -228,10 +253,11 @@ private:
       DesktopGameSession* active_session);
   void swap_buffers();
 
-  const io::EngineConfig& config_;
+  io::EngineConfig& config_;
   asset::ResourceManager& resources_;
   platform::OpenGLWindow& window_;
   render::OpenGLRenderer& renderer_;
+  platform::InputBindings& input_bindings_;
   DebugImGuiLayer& debug_imgui_;
   DebugMenuState& debug_menu_;
   DesktopLoadedAssets& assets_;
@@ -241,8 +267,10 @@ private:
   ui::FontUiTextMeasurer& ui_text_measurer_;
   const ui::UiTheme& ui_theme_;
   const voxel::FluidDefinition& water_fluid_;
+  player::PlayerTuning& player_tuning_;
   DesktopMenuState& menu_state_;
   ui::UIScreenManager& screen_manager_;
+  ui::UIScreenManager gameplay_screen_manager_{};
   platform::FramebufferSize framebuffer_{};
   FrameArena frame_arena_{};
   std::chrono::steady_clock::time_point previous_time_{};
@@ -261,6 +289,7 @@ private:
   std::string observed_hotbar_item_name_{};
   u8 observed_hotbar_slot_{};
   bool hotbar_item_observation_initialized_{};
+  bool gameplay_menu_stack_active_{};
 
   static constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
   static constexpr auto HotbarItemPopupVisibleDuration =

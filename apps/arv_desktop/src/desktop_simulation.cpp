@@ -18,7 +18,7 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
   active_session.ticks.add_time(delta.count());
   const bool has_active_integrated_session = active_session.integrated_server != nullptr;
   const bool singleplayer_paused =
-      has_active_integrated_session && screen_manager_.pauses_singleplayer();
+      has_active_integrated_session && gameplay_screen_manager_.pauses_singleplayer();
   while (active_session.ticks.consume_tick()) {
     ARV_PROFILE_ZONE("Simulation tick");
     if (!singleplayer_paused) {

@@ -11,6 +11,8 @@
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/net/connection_state.hpp"
+#include "arv/ui/screens/main_menu.hpp"
+#include "arv/ui/screens/pause_menu.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -23,11 +25,62 @@ bool session_world_ready(const DesktopGameSession* session) noexcept {
          session->client->connection_state() == net::ConnectionState::InGame;
 }
 
+namespace {
+
+[[nodiscard]] ui::InputBindingDevice ui_device_from(platform::InputDeviceType type) noexcept {
+  switch (type) {
+    case platform::InputDeviceType::Keyboard:
+      return ui::InputBindingDevice::Keyboard;
+    case platform::InputDeviceType::MouseButton:
+      return ui::InputBindingDevice::MouseButton;
+    case platform::InputDeviceType::MouseWheel:
+      return ui::InputBindingDevice::MouseWheel;
+  }
+  return ui::InputBindingDevice::Keyboard;
+}
+
+[[nodiscard]] std::string binding_label(const platform::InputBinding& binding) {
+  std::string label;
+  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Control)) {
+    label += "Ctrl + ";
+  }
+  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Shift)) {
+    label += "Shift + ";
+  }
+  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Alt)) {
+    label += "Alt + ";
+  }
+  switch (binding.device_type) {
+    case platform::InputDeviceType::Keyboard:
+      label += binding.input_code;
+      break;
+    case platform::InputDeviceType::MouseButton:
+      label += "Mouse " + binding.input_code;
+      break;
+    case platform::InputDeviceType::MouseWheel:
+      label += "Wheel " + binding.input_code;
+      break;
+  }
+  return label;
+}
+
+[[nodiscard]] ui::CapturedInputView captured_input_from(
+    const platform::RawInputEvent& event) {
+  return {
+      ui_device_from(event.binding.device_type),
+      event.binding.input_code,
+      binding_label(event.binding),
+      event.binding.modifiers};
+}
+
+} // namespace
+
 DesktopFrameLoop::DesktopFrameLoop(
-    const io::EngineConfig& config,
+    io::EngineConfig& config,
     asset::ResourceManager& resources,
     platform::OpenGLWindow& window,
     render::OpenGLRenderer& renderer,
+    platform::InputBindings& input_bindings,
     DebugImGuiLayer& debug_imgui,
     DebugMenuState& debug_menu,
     DesktopLoadedAssets& assets,
@@ -37,11 +90,13 @@ DesktopFrameLoop::DesktopFrameLoop(
     ui::FontUiTextMeasurer& ui_text_measurer,
     const ui::UiTheme& ui_theme,
     const voxel::FluidDefinition& water_fluid,
+    player::PlayerTuning& player_tuning,
     DesktopMenuState& menu_state,
     ui::UIScreenManager& screen_manager) : config_(config),
                                            resources_(resources),
                                            window_(window),
                                            renderer_(renderer),
+                                           input_bindings_(input_bindings),
                                            debug_imgui_(debug_imgui),
                                            debug_menu_(debug_menu),
                                            assets_(assets),
@@ -51,6 +106,7 @@ DesktopFrameLoop::DesktopFrameLoop(
                                            ui_text_measurer_(ui_text_measurer),
                                            ui_theme_(ui_theme),
                                            water_fluid_(water_fluid),
+                                           player_tuning_(player_tuning),
                                            menu_state_(menu_state),
                                            screen_manager_(screen_manager),
                                            framebuffer_(window.framebuffer_size()) {
@@ -66,20 +122,37 @@ int DesktopFrameLoop::run() {
     FrameTiming timing = begin_frame();
     platform::InputSnapshot platform_input = poll_platform_input();
     DesktopGameSession* active_session = sessions_.active_session();
+    const bool has_live_session =
+        active_session != nullptr && active_session->client != nullptr;
+    if (gameplay_menu_stack_active_ && !has_live_session) {
+      gameplay_menu_stack_active_ = false;
+      gameplay_screen_manager_.clear();
+      reset_main_menu_stack();
+    } else if (gameplay_menu_stack_active_ && gameplay_screen_manager_.empty()) {
+      reset_gameplay_menu_stack();
+    }
     bool has_world_session = session_world_ready(active_session);
     handle_debug_menu_input(platform_input, active_session, has_world_session);
     begin_debug_frame(platform_input, timing);
     const bool was_inventory_open =
         has_world_session && active_session->client->inventory_open();
 
-    ui::UIContext menu_context = make_menu_context();
-    handle_pause_menu_input(platform_input, menu_context, active_session, has_world_session);
+    ui::UIScreenManager& active_screens = active_screen_manager();
+    ui::UIContext menu_context = make_menu_context(active_screens);
+    handle_captured_menu_input(platform_input, menu_context, active_screens);
+    handle_pause_menu_input(
+        platform_input,
+        menu_context,
+        active_screens,
+        active_session,
+        has_world_session);
 
     client::InputFrame client_input =
         has_world_session ? to_client_input(platform_input) : client::InputFrame{};
     bool inventory_changed_by_ui = route_input(
         platform_input,
         menu_context,
+        active_screens,
         active_session,
         has_world_session,
         client_input);
@@ -92,6 +165,8 @@ int DesktopFrameLoop::run() {
     bool has_active_session =
         active_session != nullptr && active_session->client != nullptr;
     has_world_session = session_world_ready(active_session);
+    bool has_visual_gameplay_session =
+        gameplay_menu_stack_active_ && has_active_session;
     bool has_active_integrated_session =
         has_world_session && active_session->integrated_server != nullptr;
 
@@ -115,6 +190,9 @@ int DesktopFrameLoop::run() {
       has_world_session = session_world_ready(active_session);
       has_active_integrated_session =
           has_world_session && active_session->integrated_server != nullptr;
+      has_visual_gameplay_session =
+          gameplay_menu_stack_active_ && active_session != nullptr &&
+          active_session->client != nullptr;
     }
     if (has_active_session && handle_remote_disconnect(active_session)) {
       active_session = sessions_.active_session();
@@ -122,10 +200,13 @@ int DesktopFrameLoop::run() {
       has_world_session = session_world_ready(active_session);
       has_active_integrated_session =
           has_world_session && active_session->integrated_server != nullptr;
+      has_visual_gameplay_session =
+          gameplay_menu_stack_active_ && active_session != nullptr &&
+          active_session->client != nullptr;
     }
 
     update_framebuffer_size();
-    if (has_world_session) {
+    if (has_visual_gameplay_session) {
       refresh_player_skin_render_assets(*active_session);
     }
     refresh_menu_profile_render_assets();
@@ -134,7 +215,7 @@ int DesktopFrameLoop::run() {
     const usize visible_chunk_count = build_world_frame(
         frame,
         active_session,
-        has_world_session,
+        has_visual_gameplay_session,
         timing.now);
 
     render_debug_menu_if_available(
@@ -147,8 +228,9 @@ int DesktopFrameLoop::run() {
         frame,
         platform_input,
         menu_context,
+        active_screen_manager(),
         active_session,
-        has_world_session,
+        has_visual_gameplay_session,
         has_active_integrated_session,
         fixed_tick_ran,
         timing.now);
@@ -164,7 +246,27 @@ int DesktopFrameLoop::run() {
   return 0;
 }
 
-ui::UIContext DesktopFrameLoop::make_menu_context() {
+ui::UIScreenManager& DesktopFrameLoop::active_screen_manager() noexcept {
+  return gameplay_menu_stack_active_ ? gameplay_screen_manager_ : screen_manager_;
+}
+
+const ui::UIScreenManager& DesktopFrameLoop::active_screen_manager() const noexcept {
+  return gameplay_menu_stack_active_ ? gameplay_screen_manager_ : screen_manager_;
+}
+
+void DesktopFrameLoop::reset_main_menu_stack() {
+  screen_manager_.clear();
+  screen_manager_.push(ui::make_main_menu_screen());
+  invalidate_ui_tree_cache();
+}
+
+void DesktopFrameLoop::reset_gameplay_menu_stack() {
+  gameplay_screen_manager_.clear();
+  gameplay_screen_manager_.push(ui::make_gameplay_screen());
+  invalidate_ui_tree_cache();
+}
+
+ui::UIContext DesktopFrameLoop::make_menu_context(ui::UIScreenManager& screens) {
   return {
       ui_tree_,
       {
@@ -173,7 +275,7 @@ ui::UIContext DesktopFrameLoop::make_menu_context() {
       },
       &menu_state_,
       &menu_state_,
-      &screen_manager_,
+      &screens,
       &ui_theme_,
       &assets_.language};
 }
@@ -259,36 +361,81 @@ void DesktopFrameLoop::begin_debug_frame(
 void DesktopFrameLoop::handle_pause_menu_input(
     const platform::InputSnapshot& platform_input,
     ui::UIContext& menu_context,
+    ui::UIScreenManager& screens,
     DesktopGameSession* active_session,
     bool has_session) {
+  (void)has_session;
   if (debug_menu_.open || !platform_input.pause_menu_pressed) {
     return;
   }
-  if (screen_manager_.has_active_screen()) {
-    (void)screen_manager_.handle_cancel(menu_context);
-  } else if (has_session && !active_session->client->inventory_open() &&
-             !active_session->client->chat_open()) {
-    screen_manager_.push(ui::make_pause_menu_screen());
-  } else if (!has_session) {
-    screen_manager_.push(ui::make_main_menu_screen());
+  const bool has_live_session =
+      active_session != nullptr && active_session->client != nullptr;
+  if (gameplay_menu_stack_active_ && screens.empty()) {
+    reset_gameplay_menu_stack();
   }
+  if (screens.has_active_screen()) {
+    (void)screens.handle_cancel(menu_context);
+  } else if (gameplay_menu_stack_active_ && has_live_session &&
+             !active_session->client->inventory_open() &&
+             !active_session->client->chat_open()) {
+    screens.push(ui::make_pause_menu_screen());
+  } else if (!gameplay_menu_stack_active_ && screens.empty()) {
+    screens.push(ui::make_main_menu_screen());
+  }
+}
+
+void DesktopFrameLoop::handle_captured_menu_input(
+    platform::InputSnapshot& platform_input,
+    ui::UIContext& menu_context,
+    ui::UIScreenManager& screens) {
+  if (debug_menu_.open || !screens.has_active_screen() ||
+      !platform_input.raw_input.has_value()) {
+    return;
+  }
+  if (platform_input.raw_input->binding.device_type == platform::InputDeviceType::MouseButton) {
+    const std::optional<ui::UiNodeID> hit =
+        ui_tree_.hit_test({platform_input.cursor_x, platform_input.cursor_y});
+    if (hit.has_value()) {
+      const ui::UiElement* element = ui_tree_.element(hit.value());
+      if (element != nullptr && element->action == "key_bind.cancel_capture") {
+        return;
+      }
+    }
+  }
+  const ui::CapturedInputView captured =
+      captured_input_from(platform_input.raw_input.value());
+  if (!screens.handle_captured_input(captured, menu_context)) {
+    return;
+  }
+  platform_input.pause_menu_pressed = false;
+  platform_input.text_cancel_pressed = false;
+  platform_input.text_submit_pressed = false;
+  platform_input.text_backspace_pressed = false;
+  platform_input.open_inventory_pressed = false;
+  platform_input.open_chat_pressed = false;
+  platform_input.debug_menu_toggle_pressed = false;
+  platform_input.hotbar_select.reset();
+  platform_input.hotbar_scroll_steps = 0;
+  platform_input.mouse_wheel_y = 0.0F;
+  platform_input.raw_input.reset();
 }
 
 bool DesktopFrameLoop::route_input(
     const platform::InputSnapshot& platform_input,
     ui::UIContext& menu_context,
+    ui::UIScreenManager& screens,
     DesktopGameSession* active_session,
     bool has_session,
     client::InputFrame& client_input) {
-  const bool menu_screen_open = screen_manager_.has_active_screen();
-  if (debug_menu_.open || menu_screen_open) {
+  const bool menu_blocks_gameplay = screens.blocks_gameplay_input();
+  if (debug_menu_.open || menu_blocks_gameplay) {
     client_input = {};
   }
 
   bool inventory_changed_by_ui = false;
-  if (!debug_menu_.open && menu_screen_open) {
-    (void)route_screen_mouse_input(screen_manager_, menu_context, platform_input);
-    (void)screen_manager_.handle_pointer(
+  if (!debug_menu_.open && menu_blocks_gameplay) {
+    (void)route_screen_mouse_input(screens, menu_context, platform_input);
+    (void)screens.handle_pointer(
         {platform_input.cursor_x, platform_input.cursor_y},
         {platform_input.mouse_delta_x, platform_input.mouse_delta_y},
         platform_input.mouse_left_pressed,
@@ -296,19 +443,19 @@ bool DesktopFrameLoop::route_input(
         platform_input.mouse_left_held,
         menu_context);
     if (platform_input.mouse_wheel_y != 0.0F) {
-      (void)screen_manager_.handle_scroll(
+      (void)screens.handle_scroll(
           {platform_input.cursor_x, platform_input.cursor_y},
           platform_input.mouse_wheel_y,
           menu_context);
     }
     if (!platform_input.text_input.empty()) {
-      (void)screen_manager_.handle_text_input(platform_input.text_input, menu_context);
+      (void)screens.handle_text_input(platform_input.text_input, menu_context);
     }
     if (platform_input.text_backspace_pressed) {
-      (void)screen_manager_.handle_backspace(menu_context);
+      (void)screens.handle_backspace(menu_context);
     }
     if (platform_input.text_submit_pressed) {
-      (void)screen_manager_.handle_submit(menu_context);
+      (void)screens.handle_submit(menu_context);
     }
   } else if (!debug_menu_.open && has_session && active_session->client->inventory_open()) {
     inventory_changed_by_ui = route_inventory_mouse_input(
@@ -350,7 +497,7 @@ void DesktopFrameLoop::submit_client_input_and_update_cursor(
   window_.set_cursor_captured(
       has_active_session &&
       !(active_session->client->inventory_open() || active_session->client->chat_open() ||
-        debug_menu_.open || screen_manager_.blocks_gameplay_input()));
+        debug_menu_.open || active_screen_manager().blocks_gameplay_input()));
 }
 
 void DesktopFrameLoop::update_framebuffer_size() {

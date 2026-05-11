@@ -17,6 +17,10 @@ void apply_default_action_fallbacks(platform::InputBindings& bindings) {
       platform::bindings_for_action(bindings, action) =
           platform::bindings_for_action(defaults, action);
     }
+    auto& action_bindings = platform::bindings_for_action(bindings, action);
+    if (action_bindings.size() > 2U) {
+      action_bindings.resize(2U);
+    }
   }
 }
 

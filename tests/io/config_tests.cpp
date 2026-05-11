@@ -874,6 +874,61 @@ bindings:
   EXPECT_EQ(debug_menu[0].input_code, "Grave");
 }
 
+TEST(ConfigTests, InputBindingsNormalizeToTwoSlotsPerAction) {
+  auto result = arv::io::parse_input_bindings_yaml(R"yaml(
+version: 1
+bindings:
+  MoveForward:
+    - device: keyboard
+      key: W
+    - device: keyboard
+      key: Q
+    - device: mouse_button
+      button: Middle
+)yaml");
+
+  ASSERT_TRUE(result);
+  const auto& move_forward =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::MoveForward);
+  ASSERT_EQ(move_forward.size(), 2U);
+  EXPECT_EQ(move_forward[0].device_type, arv::platform::InputDeviceType::Keyboard);
+  EXPECT_EQ(move_forward[0].input_code, "W");
+  EXPECT_EQ(move_forward[1].device_type, arv::platform::InputDeviceType::Keyboard);
+  EXPECT_EQ(move_forward[1].input_code, "Q");
+}
+
+TEST(ConfigTests, SavesAndLoadsTwoSlotInputBindings) {
+  const std::filesystem::path temp_file =
+      std::filesystem::temp_directory_path() /
+      ("arvane_two_slot_bindings_" +
+       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+       ".yaml");
+  std::error_code error;
+  std::filesystem::remove(temp_file, error);
+
+  arv::platform::InputBindings bindings = arv::platform::default_input_bindings();
+  auto& jump =
+      arv::platform::bindings_for_action(bindings, arv::platform::LogicalAction::Jump);
+  jump = {
+      {arv::platform::InputDeviceType::Keyboard, "Space", 0U},
+      {arv::platform::InputDeviceType::MouseWheel, "Up", 0U},
+  };
+
+  const auto save_result = arv::io::save_input_bindings_file(temp_file, bindings);
+  ASSERT_TRUE(save_result);
+  const auto load_result = arv::io::load_input_bindings_file(temp_file);
+  ASSERT_TRUE(load_result);
+  const auto& loaded_jump =
+      arv::platform::bindings_for_action(load_result.value(), arv::platform::LogicalAction::Jump);
+  ASSERT_EQ(loaded_jump.size(), 2U);
+  EXPECT_EQ(loaded_jump[0].device_type, arv::platform::InputDeviceType::Keyboard);
+  EXPECT_EQ(loaded_jump[0].input_code, "Space");
+  EXPECT_EQ(loaded_jump[1].device_type, arv::platform::InputDeviceType::MouseWheel);
+  EXPECT_EQ(loaded_jump[1].input_code, "Up");
+
+  std::filesystem::remove(temp_file, error);
+}
+
 TEST(ConfigTests, MissingInputBindingsFileReturnsDefaultsAndWritesConfig) {
   const std::filesystem::path temp_root =
       std::filesystem::temp_directory_path() /
@@ -897,4 +952,38 @@ TEST(ConfigTests, MissingInputBindingsFileReturnsDefaultsAndWritesConfig) {
   EXPECT_EQ(debug_menu[0].input_code, "Grave");
 
   std::filesystem::remove(temp_root, error);
+}
+
+TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
+  const std::filesystem::path temp_file =
+      std::filesystem::temp_directory_path() /
+      ("arvane_client_settings_" +
+       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+       ".yaml");
+  std::error_code error;
+  std::filesystem::remove(temp_file, error);
+
+  arv::io::EngineConfig config = arv::io::default_config();
+  config.window.vsync = false;
+  config.render.frame_pacing_enabled = true;
+  config.render.frame_pacing_target_fps = 144U;
+  config.render.show_local_player_body = false;
+  config.render.sky.star_intensity = 2.25F;
+  config.physics.mouse_sensitivity_radians = 0.004F;
+  config.ui.chat.max_history_messages = 1500U;
+
+  const auto save_result = arv::io::save_client_config_file(temp_file, config);
+  ASSERT_TRUE(save_result);
+  const auto written = arv::io::read_text_file(temp_file, "saved client config");
+  ASSERT_TRUE(written);
+  EXPECT_NE(written.value().find("vsync: false"), std::string::npos);
+  EXPECT_NE(written.value().find("frame_pacing_target_fps: 144"), std::string::npos);
+  EXPECT_NE(written.value().find("show_local_player_body: false"), std::string::npos);
+  EXPECT_NE(written.value().find("star_intensity: 2.25"), std::string::npos);
+  EXPECT_NE(written.value().find("max_history_messages: 1500"), std::string::npos);
+  const auto parsed = arv::io::parse_config_yaml(written.value());
+  ASSERT_TRUE(parsed);
+  EXPECT_FLOAT_EQ(parsed.value().physics.mouse_sensitivity_radians, 0.004F);
+
+  std::filesystem::remove(temp_file, error);
 }

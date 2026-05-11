@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <sstream>
 #include <system_error>
 #include <utility>
 #include <variant>
@@ -74,15 +75,84 @@ namespace {
   return name.empty() ? std::string{"local_player"} : std::move(name);
 }
 
+[[nodiscard]] ui::InputBindingDevice ui_device_from(platform::InputDeviceType type) noexcept {
+  switch (type) {
+    case platform::InputDeviceType::Keyboard:
+      return ui::InputBindingDevice::Keyboard;
+    case platform::InputDeviceType::MouseButton:
+      return ui::InputBindingDevice::MouseButton;
+    case platform::InputDeviceType::MouseWheel:
+      return ui::InputBindingDevice::MouseWheel;
+  }
+  return ui::InputBindingDevice::Keyboard;
+}
+
+[[nodiscard]] std::string binding_label(const platform::InputBinding& binding) {
+  std::string label;
+  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Control)) {
+    label += "Ctrl + ";
+  }
+  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Shift)) {
+    label += "Shift + ";
+  }
+  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Alt)) {
+    label += "Alt + ";
+  }
+  switch (binding.device_type) {
+    case platform::InputDeviceType::Keyboard:
+      label += binding.input_code;
+      break;
+    case platform::InputDeviceType::MouseButton:
+      label += "Mouse " + binding.input_code;
+      break;
+    case platform::InputDeviceType::MouseWheel:
+      label += "Wheel " + binding.input_code;
+      break;
+  }
+  return label;
+}
+
+[[nodiscard]] std::string binding_conflict_key(const platform::InputBinding& binding) {
+  return std::string{platform::input_device_type_name(binding.device_type)} + ":" +
+         binding.input_code + ":" + std::to_string(binding.modifiers);
+}
+
+[[nodiscard]] ui::InputBindingView input_binding_view_from(
+    const platform::InputBinding& binding) {
+  return {
+      true,
+      ui_device_from(binding.device_type),
+      binding.input_code,
+      binding_label(binding),
+      binding.modifiers};
+}
+
+[[nodiscard]] std::string display_name_from_action(std::string_view action_name) {
+  std::string display;
+  display.reserve(action_name.size() + 4U);
+  for (usize index = 0; index < action_name.size(); ++index) {
+    const char ch = action_name[index];
+    if (index > 0U && ch >= 'A' && ch <= 'Z') {
+      display.push_back(' ');
+    }
+    display.push_back(ch);
+  }
+  return display;
+}
+
 } // namespace
 
 DesktopMenuState::DesktopMenuState(
     std::filesystem::path saves_root,
     std::filesystem::path server_list_file,
     std::filesystem::path arvane_home,
+    const io::EngineConfig* config,
+    const platform::InputBindings* input_bindings,
     const lang::LanguageCatalog* language) : saves_root_(std::move(saves_root)),
                                              server_list_file_(std::move(server_list_file)),
                                              arvane_home_(std::move(arvane_home)),
+                                             config_(config),
+                                             input_bindings_(input_bindings),
                                              language_(language) {
   refresh_worlds();
   load_servers();
@@ -172,6 +242,94 @@ std::string DesktopMenuState::local_profile_status() const {
   return profile_status_;
 }
 
+ui::RenderSettingsView DesktopMenuState::render_settings() const {
+  if (config_ == nullptr) {
+    return {};
+  }
+  ui::RenderSettingsView view;
+  if (config_->render.frame_pacing_enabled) {
+    view.frame_sync = ui::SettingsFrameSyncMode::FpsCap;
+  } else if (config_->window.vsync) {
+    view.frame_sync = ui::SettingsFrameSyncMode::VSync;
+  } else {
+    view.frame_sync = ui::SettingsFrameSyncMode::Off;
+  }
+  view.fps_cap = config_->render.frame_pacing_target_fps;
+  view.load_distance = config_->chunks.load_distance;
+  view.view_distance = config_->chunks.render_distance;
+  view.mesh_upload_budget = config_->render.max_chunk_mesh_uploads_per_frame;
+  view.show_local_player_body = config_->render.show_local_player_body;
+  view.star_intensity = config_->render.sky.star_intensity;
+  view.cloud_intensity = config_->render.sky.cloud_intensity;
+  view.cirrus_amount = config_->render.sky.cirrus_amount;
+  view.cumulus_amount = config_->render.sky.cumulus_amount;
+  view.outline_red = config_->render.block_outline.color_r;
+  view.outline_green = config_->render.block_outline.color_g;
+  view.outline_blue = config_->render.block_outline.color_b;
+  view.outline_thickness = config_->render.block_outline.thickness;
+  return view;
+}
+
+ui::ControlsSettingsView DesktopMenuState::controls_settings() const {
+  if (config_ == nullptr) {
+    return {};
+  }
+  constexpr f32 DefaultSensitivity = 0.0025F;
+  return {
+      DefaultSensitivity > 0.0F
+          ? (config_->physics.mouse_sensitivity_radians / DefaultSensitivity) * 100.0F
+          : 100.0F};
+}
+
+ui::InterfaceSettingsView DesktopMenuState::interface_settings() const {
+  if (config_ == nullptr) {
+    return {};
+  }
+  return {
+      config_->ui.chat.max_history_messages,
+      config_->ui.chat.open_max_lines,
+      config_->ui.chat.passive_max_lines,
+      config_->ui.chat.passive_visible_seconds,
+      config_->ui.chat.passive_fade_seconds};
+}
+
+std::vector<ui::KeyBindEntryView> DesktopMenuState::key_bind_entries() const {
+  std::vector<ui::KeyBindEntryView> entries;
+  if (input_bindings_ == nullptr) {
+    return entries;
+  }
+
+  HashMap<std::string, u32> binding_counts;
+  for (usize index = 0; index < static_cast<usize>(platform::LogicalAction::Count); ++index) {
+    const auto action = static_cast<platform::LogicalAction>(index);
+    for (const platform::InputBinding& binding :
+         platform::bindings_for_action(*input_bindings_, action)) {
+      ++binding_counts[binding_conflict_key(binding)];
+    }
+  }
+
+  entries.reserve(static_cast<usize>(platform::LogicalAction::Count));
+  for (usize index = 0; index < static_cast<usize>(platform::LogicalAction::Count); ++index) {
+    const auto action = static_cast<platform::LogicalAction>(index);
+    ui::KeyBindEntryView entry;
+    entry.action_name = std::string{platform::logical_action_name(action)};
+    entry.display_name = display_name_from_action(entry.action_name);
+    const auto& bindings = platform::bindings_for_action(*input_bindings_, action);
+    if (!bindings.empty()) {
+      entry.primary.has_binding = true;
+      entry.primary.binding = input_binding_view_from(bindings[0]);
+      entry.primary.conflict = binding_counts[binding_conflict_key(bindings[0])] > 1U;
+    }
+    if (bindings.size() > 1U) {
+      entry.secondary.has_binding = true;
+      entry.secondary.binding = input_binding_view_from(bindings[1]);
+      entry.secondary.conflict = binding_counts[binding_conflict_key(bindings[1])] > 1U;
+    }
+    entries.push_back(std::move(entry));
+  }
+  return entries;
+}
+
 const client::LocalPlayerIdentity* DesktopMenuState::active_local_profile() const noexcept {
   return profile_store_.active_profile();
 }
@@ -221,6 +379,31 @@ bool DesktopMenuState::take_cancel_server_connect_request() noexcept {
 
 bool DesktopMenuState::take_back_to_main_menu_request() noexcept {
   return std::exchange(back_to_main_menu_requested_, false);
+}
+
+std::optional<ui::SetRenderSettingsCommand>
+DesktopMenuState::take_render_settings_request() noexcept {
+  return std::exchange(render_settings_request_, std::nullopt);
+}
+
+std::optional<ui::SetControlsSettingsCommand>
+DesktopMenuState::take_controls_settings_request() noexcept {
+  return std::exchange(controls_settings_request_, std::nullopt);
+}
+
+std::optional<ui::SetInterfaceSettingsCommand>
+DesktopMenuState::take_interface_settings_request() noexcept {
+  return std::exchange(interface_settings_request_, std::nullopt);
+}
+
+std::optional<ui::SetKeyBindCommand>
+DesktopMenuState::take_key_bind_request() noexcept {
+  return std::exchange(key_bind_request_, std::nullopt);
+}
+
+std::optional<ui::ResetKeyBindCommand>
+DesktopMenuState::take_key_bind_reset_request() noexcept {
+  return std::exchange(key_bind_reset_request_, std::nullopt);
 }
 
 void DesktopMenuState::handle(const ui::StartSinglePlayerCommand& command) {
@@ -452,6 +635,26 @@ void DesktopMenuState::handle(const ui::BackToMainMenuCommand&) {
 
 void DesktopMenuState::handle(const ui::QuitGameCommand&) {
   quit_requested = true;
+}
+
+void DesktopMenuState::handle(const ui::SetRenderSettingsCommand& command) {
+  render_settings_request_ = command;
+}
+
+void DesktopMenuState::handle(const ui::SetControlsSettingsCommand& command) {
+  controls_settings_request_ = command;
+}
+
+void DesktopMenuState::handle(const ui::SetInterfaceSettingsCommand& command) {
+  interface_settings_request_ = command;
+}
+
+void DesktopMenuState::handle(const ui::SetKeyBindCommand& command) {
+  key_bind_request_ = command;
+}
+
+void DesktopMenuState::handle(const ui::ResetKeyBindCommand& command) {
+  key_bind_reset_request_ = command;
 }
 
 void DesktopMenuState::load_servers() {
