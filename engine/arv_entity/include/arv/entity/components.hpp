@@ -118,6 +118,7 @@ public:
 
   [[nodiscard]] const EntityTypeRecord* type(EntityTypeID id) const noexcept;
   [[nodiscard]] std::optional<EntityTypeID> find_type(std::string_view name) const;
+  void set_display_name(EntityTypeID id, std::string display_name);
   [[nodiscard]] usize type_count() const noexcept {
     return types_.size() > 0U ? types_.size() - 1U : 0U;
   }

@@ -20,6 +20,7 @@ add_executable(arv_tests
   core/rate_limiter_tests.cpp
   core/types_tests.cpp
   io/config_tests.cpp
+  lang/language_tests.cpp
   net/in_process_transport_tests.cpp
   net/integrated_handshake_tests.cpp
   persistence/region_file_tests.cpp
@@ -71,6 +72,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_crypto
   arv_entity
   arv_io
+  arv_lang
   arv_net
   arv_persistence
   arv_physics

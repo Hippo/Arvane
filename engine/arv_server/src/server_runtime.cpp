@@ -1,6 +1,7 @@
 #include "server_runtime_internal.hpp"
 
 #include "arv/crypto/random.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/skin_runtime.hpp"
 
@@ -9,6 +10,25 @@
 #include <utility>
 
 namespace arv::server {
+namespace {
+
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
+}
+
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog* language,
+    std::string_view key,
+    std::initializer_list<lang::FormatArg> args,
+    std::string_view fallback) {
+  return language == nullptr ? lang::LanguageCatalog{}.format(key, args, fallback)
+                             : language->format(key, args, fallback);
+}
+
+} // namespace
 
 ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport) : impl_(std::make_unique<detail::ServerRuntimeImpl>(std::move(transport))) {
 }
@@ -190,6 +210,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   movement_ = start_info.movement;
   keep_alive_ = start_info.keep_alive;
   skins_ = start_info.skins;
+  language_ = start_info.language;
   skin_transfers_.clear();
   chat_rate_limits_.clear();
   next_chat_message_id_ = 1U;
@@ -229,7 +250,9 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   default_world_.set_tick_policy(tick_policy);
   worlds_.ensure_default_world();
   handshake_policy_.server_name =
-      mode_ == ServerMode::Dedicated ? "Arvane Dedicated Server" : "Arvane Integrated Server";
+      mode_ == ServerMode::Dedicated
+          ? tr(language_, "server.name.dedicated", "Arvane Dedicated Server")
+          : tr(language_, "server.name.integrated", "Arvane Integrated Server");
   handshake_policy_.initial_world_id = DefaultWorldID;
   crypto::fill_random(server_instance_id_);
 
@@ -302,7 +325,9 @@ void ServerRuntimeImpl::shutdown() {
       connections.push_back(session.connection_id);
     });
     for (net::ConnectionID connection_id : connections) {
-      kick_client(connection_id, "Server is shutting down.");
+      kick_client(
+          connection_id,
+          tr(language_, "server.disconnect.shutting_down", "Server is shutting down."));
     }
   }
   world_jobs_.wait_for_all();
@@ -408,6 +433,7 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   command::CommandServices services{
       &domain_services,
       command::CommandPermissionCheckFn{permission_check},
+      language_,
   };
   return command::dispatch_command(
       command_registry_,
@@ -457,12 +483,18 @@ command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
     return command::CommandPermissionResult::allow();
   }
   if (!sender.player_id.has_value()) {
-    return command::CommandPermissionResult::deny("Permission denied: missing player context.");
+    return command::CommandPermissionResult::deny(tr(
+        language_,
+        "command.dispatcher.permission_missing_player_context",
+        "Permission denied: missing player context."));
   }
 
   player::PlayerState* player_state = default_world_.find_player(sender.player_id.value());
   if (player_state == nullptr) {
-    return command::CommandPermissionResult::deny("Permission denied: player is not online.");
+    return command::CommandPermissionResult::deny(tr(
+        language_,
+        "command.dispatcher.permission_player_not_online",
+        "Permission denied: player is not online."));
   }
 
   refresh_player_permissions(*player_state);
@@ -470,10 +502,11 @@ command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
     return command::CommandPermissionResult::allow();
   }
 
-  std::string text{"Permission denied: "};
-  text.append(command_def.permission);
-  text.push_back('.');
-  return command::CommandPermissionResult::deny(std::move(text));
+  return command::CommandPermissionResult::deny(tr(
+      language_,
+      "command.dispatcher.permission_denied",
+      {{"permission", command_def.permission}},
+      "Permission denied: {permission}."));
 }
 
 } // namespace detail

@@ -2,7 +2,6 @@
   "items": [
     {
       "name": "arvane:coal",
-      "display_name": "Coal",
       "category": "resources",
       "max_stack_size": 64,
       "buoyancy": 1.0,
@@ -11,7 +10,6 @@
     },
     {
       "name": "arvane:wood_pickaxe",
-      "display_name": "Wood Pickaxe",
       "category": "tools",
       "max_stack_size": 1,
       "buoyancy": 1.0,
@@ -37,7 +35,6 @@
     },
     {
       "name": "arvane:wood_shovel",
-      "display_name": "Wood Shovel",
       "category": "tools",
       "max_stack_size": 1,
       "buoyancy": 1.0,
@@ -63,7 +60,6 @@
     },
     {
       "name": "arvane:bucket",
-      "display_name": "Bucket",
       "category": "tools",
       "max_stack_size": 16,
       "buoyancy": 1.0,
@@ -72,7 +68,6 @@
     },
     {
       "name": "arvane:water_bucket",
-      "display_name": "Water Bucket",
       "category": "tools",
       "max_stack_size": 1,
       "buoyancy": 1.0,

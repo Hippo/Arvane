@@ -2,7 +2,6 @@
   "blocks": [
     {
       "name": "arvane:air",
-      "display_name": "Air",
       "render_category": "none",
       "properties": {
         "replaceable": true,
@@ -11,7 +10,6 @@
     },
     {
       "name": "arvane:dirt",
-      "display_name": "Dirt",
       "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [
@@ -31,7 +29,6 @@
     },
     {
       "name": "arvane:glass",
-      "display_name": "Glass",
       "buoyancy": 1.0,
       "drops": null,
       "render_category": "transparent",
@@ -45,7 +42,6 @@
     },
     {
       "name": "arvane:glowstone",
-      "display_name": "Glowstone",
       "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [
@@ -70,7 +66,6 @@
     },
     {
       "name": "arvane:grass_block",
-      "display_name": "Grass Block",
       "buoyancy": 1.0,
       "drops": "arvane:dirt",
       "render_category": "opaque",
@@ -95,7 +90,6 @@
     },
     {
       "name": "arvane:stone",
-      "display_name": "Stone",
       "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [
@@ -114,7 +108,6 @@
     },
     {
       "name": "arvane:water",
-      "display_name": "Water",
       "render_category": "transparent",
       "textures": "arvane:texture/block/water",
       "is_item": false,
@@ -126,7 +119,6 @@
     },
     {
       "name": "arvane:stone_stairs",
-      "display_name": "Stone Stairs",
       "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [

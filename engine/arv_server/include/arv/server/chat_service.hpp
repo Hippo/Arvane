@@ -10,6 +10,10 @@
 #include <string>
 #include <string_view>
 
+namespace arv::lang {
+class LanguageCatalog;
+} // namespace arv::lang
+
 namespace arv::server {
 
 struct ChatValidationConfig {
@@ -32,6 +36,7 @@ struct ChatRateLimitState {
 };
 
 struct ChatFormatContext {
+  const lang::LanguageCatalog* language{};
   crypto::PlayerProfileID sender_profile_id{};
   std::string sender_name{};
   std::string channel{"arvane:global"};
@@ -54,7 +59,8 @@ public:
 
 [[nodiscard]] Expected<std::string, ChatValidationError> validate_chat_message_text(
     std::string_view message,
-    const ChatValidationConfig& config = {});
+    const ChatValidationConfig& config = {},
+    const lang::LanguageCatalog* language = nullptr);
 
 [[nodiscard]] bool consume_chat_rate_limit(
     ChatRateLimitState& state,

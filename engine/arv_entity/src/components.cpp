@@ -314,6 +314,13 @@ std::optional<EntityTypeID> EntityRegistry::find_type(std::string_view name) con
   return found == name_to_id_.end() ? std::nullopt : std::optional<EntityTypeID>{found->second};
 }
 
+void EntityRegistry::set_display_name(EntityTypeID id, std::string display_name) {
+  if (id.value == 0U || id.value >= types_.size()) {
+    return;
+  }
+  types_[id.value].display_name = std::move(display_name);
+}
+
 EntityDefinition make_player_entity_definition() {
   EntityDefinition definition;
   definition.name = std::string{PlayerEntityTypeName};

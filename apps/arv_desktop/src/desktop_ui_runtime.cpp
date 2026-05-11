@@ -138,29 +138,32 @@ namespace {
   return scheme == "http" || scheme == "https";
 }
 
-[[nodiscard]] std::string fallback_command_result_message(command::CommandStatus status) {
+[[nodiscard]] std::string fallback_command_result_message(
+    const lang::LanguageCatalog& language,
+    command::CommandStatus status) {
   switch (status) {
     case command::CommandStatus::Success:
-      return "Command succeeded.";
+      return language.text("ui.chat.command.success");
     case command::CommandStatus::Failure:
-      return "Command failed.";
+      return language.text("ui.chat.command.failure");
     case command::CommandStatus::UsageError:
-      return "Invalid command usage.";
+      return language.text("ui.chat.command.usage_error");
     case command::CommandStatus::PermissionDenied:
-      return "Permission denied.";
+      return language.text("ui.chat.command.permission_denied");
     case command::CommandStatus::UnknownCommand:
-      return "Unknown command.";
+      return language.text("ui.chat.command.unknown_command");
     case command::CommandStatus::InvalidSource:
-      return "Command cannot be used from here.";
+      return language.text("ui.chat.command.invalid_source");
     case command::CommandStatus::InternalError:
-      return "Command failed internally.";
+      return language.text("ui.chat.command.internal_error");
   }
-  return "Command failed.";
+  return language.text("ui.chat.command.failure");
 }
 
 void append_command_result_to_chat(
     client::ClientRuntime& client,
-    const command::CommandResult& result) {
+    const command::CommandResult& result,
+    const lang::LanguageCatalog& language) {
   bool wrote_message = false;
   for (const command::CommandMessage& message : result.messages) {
     if (message.text.empty()) {
@@ -170,7 +173,7 @@ void append_command_result_to_chat(
     wrote_message = true;
   }
   if (!wrote_message) {
-    client.add_chat_message(fallback_command_result_message(result.status));
+    client.add_chat_message(fallback_command_result_message(language, result.status));
   }
 }
 
@@ -719,21 +722,23 @@ bool DesktopFrameLoop::route_chat_mouse_input(
               if (safe_url_scheme(click.value)) {
                 active_session.client->request_chat_url_confirmation(click.value);
               } else {
-                active_session.client->add_chat_message("Blocked unsafe URL.");
+                active_session.client->add_chat_message(
+                    assets_.language.text("ui.chat.blocked_unsafe_url"));
               }
               handled = true;
               break;
             case protocol::ClickAction::RunCommand:
               append_command_result_to_chat(
                   *active_session.client,
-                  execute_chat_command(active_session, click.value));
+                  execute_chat_command(active_session, click.value),
+                  assets_.language);
               handled = true;
               break;
             case protocol::ClickAction::CopyToClipboard:
               // TODO(arvane): Route through a platform clipboard abstraction when
               // one exists outside debug ImGui tooling.
               active_session.client->add_chat_message(
-                  "Copy to clipboard is not available in this build.");
+                  assets_.language.text("ui.chat.copy_unavailable"));
               handled = true;
               break;
           }
@@ -796,7 +801,7 @@ void DesktopFrameLoop::build_gameplay_ui(
           },
           {
               active_session.client->inventory_open(),
-              "Inventory",
+              assets_.language.text("ui.inventory.title"),
               active_session.client->selected_hotbar_slot(),
               player::DefaultHotbarSlotCount,
               {
@@ -822,10 +827,11 @@ void DesktopFrameLoop::build_gameplay_ui(
               active_session.client->pending_chat_url_confirmation(),
               active_session.client->chat_open() ? config_.ui.chat.open_max_lines
                                                  : config_.ui.chat.passive_max_lines,
+              &assets_.language,
           },
           {
               active_session.client->tab_menu_visible(),
-              "Players",
+              assets_.language.text("ui.tab.players"),
               "",
               std::span<const ui::PlayerListEntryView>{
                   active_session.tab_players.data(),

@@ -3,6 +3,7 @@
 #include "dedicated_worldgen_loader.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/lang/language.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -12,6 +13,13 @@
 
 namespace arv::dedicated {
 namespace {
+
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog& language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language.text(key, fallback);
+}
 
 [[nodiscard]] u64 generated_world_seed() noexcept {
   const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -186,7 +194,8 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     const voxel::BlockRegistry& block_registry,
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
-    u64 item_registry_hash) {
+    u64 item_registry_hash,
+    const lang::LanguageCatalog& language) {
   DedicatedLoadedWorld loaded_world;
   loaded_world.server_save_root = config.paths.dedicated_server_save_path();
   auto loaded_save_result = persistence::load_server_root(
@@ -227,7 +236,7 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     save_metadata.name =
         loaded_world.loaded_save.has_save_metadata && !loaded_world.loaded_save.save.name.empty()
             ? loaded_world.loaded_save.save.name
-            : std::string{"Dedicated Server"};
+            : tr(language, "server.save.default_name", "Dedicated Server");
     save_metadata.block_registry_hash = block_registry_hash;
     save_metadata.item_registry_hash = item_registry_hash;
 
@@ -302,7 +311,8 @@ Expected<void, DedicatedError> save_dedicated_world(
     const voxel::BlockRegistry& block_registry,
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
-    u64 item_registry_hash) {
+    u64 item_registry_hash,
+    const lang::LanguageCatalog& language) {
   const std::vector<persistence::SavedChunkSection> saved_chunks =
       capture_saved_chunks(server.voxel_world());
   const std::vector<persistence::PlayerSaveData> player_saves =
@@ -314,7 +324,9 @@ Expected<void, DedicatedError> save_dedicated_world(
       std::string{persistence::CurrentGameVersion},
       block_registry_hash,
       item_registry_hash,
-      loaded_save.save.name.empty() ? std::string{"Dedicated Server"} : loaded_save.save.name};
+      loaded_save.save.name.empty()
+          ? tr(language, "server.save.default_name", "Dedicated Server")
+          : loaded_save.save.name};
   const persistence::WorldMetadata world_metadata{
       config.server.world,
       world_seed,

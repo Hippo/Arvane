@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+namespace arv::lang {
+class LanguageCatalog;
+} // namespace arv::lang
+
 namespace arv::client {
 
 struct ReplicatedEntityMirror {
@@ -92,6 +96,7 @@ public:
 
   void set_player_tuning(player::PlayerTuning tuning) noexcept;
   void set_local_identity(LocalPlayerIdentity identity);
+  void configure_language(const lang::LanguageCatalog* language) noexcept;
   void configure_networking(ClientNetworkSettings settings) noexcept;
   void configure_chat(ClientChatSettings settings);
   [[nodiscard]] const LocalPlayerIdentity& local_identity() const noexcept;

@@ -17,6 +17,10 @@
 #include "client_skin_runtime.hpp"
 #include "client_ui_state.hpp"
 
+namespace arv::lang {
+class LanguageCatalog;
+} // namespace arv::lang
+
 namespace arv::client::detail {
 
 struct ClientRuntimeContext {
@@ -34,6 +38,7 @@ struct ClientRuntimeContext {
   ClientEntityMirrorStore& entities;
   ClientDroppedItemMirrorStore& dropped_items;
   ClientSkinRuntime& skins;
+  const lang::LanguageCatalog* language{};
   const physics::ICollisionQuery* collision_query{};
   Seconds tick_seconds{};
 };

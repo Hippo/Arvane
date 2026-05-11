@@ -304,6 +304,8 @@ public:
 
   [[nodiscard]] bool has_tag(BlockID id, std::string_view tag) const;
 
+  void set_display_name(BlockID id, std::string display_name);
+
   [[nodiscard]] BlockID block_id(BlockVariantID variant_id) const noexcept;
 
   [[nodiscard]] std::string_view variant_name(BlockVariantID variant_id) const noexcept;

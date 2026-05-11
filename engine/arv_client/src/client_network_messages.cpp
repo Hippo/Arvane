@@ -1,6 +1,7 @@
 #include "client_network_messages.hpp"
 
 #include "arv/crypto/hash.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chat.hpp"
@@ -23,11 +24,21 @@
 namespace arv::client::detail {
 namespace {
 
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
+}
+
 void apply_world_join_result(
     ClientRuntimeContext& runtime,
     const protocol::ClientboundWorldJoinResult& result) {
   if (!result.accepted) {
-    runtime.connection.disconnect_local("Server rejected world join.");
+    runtime.connection.disconnect_local(tr(
+        runtime.language,
+        "ui.connection.rejected_world_join",
+        "Server rejected world join."));
     return;
   }
   runtime.player_controller.enter_world(
@@ -113,7 +124,7 @@ void ClientNetworkRouter::handle_message(
     const std::vector<u8>& packet) {
   auto decoded = protocol::deserialize_envelope(packet);
   if (!decoded) {
-    disconnect_and_clear(runtime, "Invalid protocol packet.");
+    disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
     return;
   }
 
@@ -121,7 +132,7 @@ void ClientNetworkRouter::handle_message(
     case protocol::MessageType::ClientboundKickPlayer: {
       auto kick = protocol::deserialize_clientbound_kick_player(decoded.value().payload);
       if (!kick) {
-        disconnect_and_clear(runtime, "Invalid protocol packet.");
+        disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       disconnect_and_clear(runtime, kick.value().reason);
@@ -130,28 +141,34 @@ void ClientNetworkRouter::handle_message(
     case protocol::MessageType::ClientboundKeepAlive: {
       auto keep_alive = protocol::deserialize_clientbound_keep_alive(decoded.value().payload);
       if (!keep_alive) {
-        disconnect_and_clear(runtime, "Invalid protocol packet.");
+        disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       runtime.connection.record_server_keep_alive();
       if (!runtime.sender.send_keep_alive({keep_alive.value().id})) {
-        disconnect_and_clear(runtime, "Lost connection to the server.");
+        disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.lost", "Lost connection to the server."));
       }
       return;
     }
     case protocol::MessageType::ClientboundHello: {
       auto server_hello = protocol::deserialize_clientbound_hello(decoded.value().payload);
       if (!server_hello) {
-        disconnect_and_clear(runtime, "Invalid protocol packet.");
+        disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
 
       if (!server_hello.value().accepted) {
         const std::string& reason = server_hello.value().reject_reason;
-        disconnect_and_clear(
-            runtime,
-            reason.empty() ? std::string_view{"Server rejected connection."}
-                           : std::string_view{reason});
+        if (reason.empty()) {
+          disconnect_and_clear(
+              runtime,
+              tr(
+                  runtime.language,
+                  "ui.connection.rejected_connection",
+                  "Server rejected connection."));
+        } else {
+          disconnect_and_clear(runtime, reason);
+        }
         return;
       }
 
@@ -166,7 +183,7 @@ void ClientNetworkRouter::handle_message(
     case protocol::MessageType::ClientboundAuthChallenge: {
       auto challenge = protocol::deserialize_auth_challenge(decoded.value().payload);
       if (!challenge) {
-        disconnect_and_clear(runtime, "Invalid protocol packet.");
+        disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
 
@@ -188,7 +205,7 @@ void ClientNetworkRouter::handle_message(
           std::span<const std::byte>{first, payload_bytes.size()},
           runtime.identity.key_pair.private_key);
       if (!runtime.sender.send_auth_response(response)) {
-        disconnect_and_clear(runtime, "Lost connection to the server.");
+        disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.lost", "Lost connection to the server."));
       }
       return;
     }
@@ -196,13 +213,19 @@ void ClientNetworkRouter::handle_message(
       auto result = protocol::deserialize_auth_result(decoded.value().payload);
       if (!result || !result.value().accepted) {
         if (!result) {
-          disconnect_and_clear(runtime, "Invalid protocol packet.");
+          disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
         } else {
           const std::string& reason = result.value().reason_if_rejected;
-          disconnect_and_clear(
-              runtime,
-              reason.empty() ? std::string_view{"authentication failed"}
-                             : std::string_view{reason});
+          if (reason.empty()) {
+            disconnect_and_clear(
+                runtime,
+                tr(
+                    runtime.language,
+                    "ui.connection.authentication_failed",
+                    "authentication failed"));
+          } else {
+            disconnect_and_clear(runtime, reason);
+          }
         }
       }
       return;
@@ -323,7 +346,7 @@ void ClientNetworkRouter::handle_message(
     case protocol::MessageType::ClientboundWorldJoinResult: {
       auto result = protocol::deserialize_clientbound_world_join_result(decoded.value().payload);
       if (!result) {
-        disconnect_and_clear(runtime, "Invalid protocol packet.");
+        disconnect_and_clear(runtime, tr(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       apply_world_join_result(runtime, result.value());

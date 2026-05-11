@@ -419,18 +419,19 @@ void add_clipped_text_at(
 }
 
 void add_skin_portrait(
-    UiTree& tree,
+    UIContext& ctx,
     UiNodeID parent,
     std::string_view id,
     PlayerSkinTextureView texture,
     Vec2f origin,
     f32 size) {
+  UiTree& tree = ctx.tree;
   if (!texture.valid) {
     add_text_at(
         tree,
         parent,
         std::string{id} + ".fallback",
-        "?",
+        screens_detail::tr(ctx, "ui.common.unknown"),
         {origin.x + size * 0.42F, origin.y + size * 0.34F},
         MutedTextColor);
     return;
@@ -470,16 +471,17 @@ UiNodeID add_account_toggle_button(
   button.focusable = true;
   button.action = "account.toggle";
   const UiNodeID id = ctx.tree.add_child(ctx.tree.root_id(), std::move(button));
-  add_skin_portrait(ctx.tree, id, "menu.account.toggle.skin", texture, {11.0F, 11.0F}, 48.0F);
+  add_skin_portrait(ctx, id, "menu.account.toggle.skin", texture, {11.0F, 11.0F}, 48.0F);
   return id;
 }
 
 UiNodeID add_account_row(
-    UiTree& tree,
+    UIContext& ctx,
     UiNodeID parent,
     const LocalProfileEntry& profile,
     PlayerSkinTextureView default_texture,
     usize index) {
+  UiTree& tree = ctx.tree;
   const UiTheme& theme = tree.theme();
   const std::string prefix = "menu.account.profile." + std::to_string(index);
   UiElement row;
@@ -497,7 +499,7 @@ UiNodeID add_account_row(
 
   const PlayerSkinTextureView texture =
       profile.skin_texture.valid ? profile.skin_texture : default_texture;
-  add_skin_portrait(tree, row_id, prefix + ".skin", texture, {12.0F, 11.0F}, 48.0F);
+  add_skin_portrait(ctx, row_id, prefix + ".skin", texture, {12.0F, 11.0F}, 48.0F);
   add_clipped_text_at(
       tree,
       row_id,
@@ -530,7 +532,10 @@ UiNodeID add_account_row(
   edit.action = "account.edit";
   const UiNodeID edit_id = tree.add_child(row_id, std::move(edit));
   UiElement edit_label =
-      screens_detail::make_text(prefix + ".edit.label", "Edit", theme.colors.text);
+      screens_detail::make_text(
+          prefix + ".edit.label",
+          screens_detail::tr(ctx, "ui.menu.account.edit"),
+          theme.colors.text);
   edit_label.layout.anchor = UiAnchor::Center;
   tree.add_child(edit_id, std::move(edit_label));
   return row_id;
@@ -579,12 +584,12 @@ void add_account_dropdown(
         stack_id,
         screens_detail::make_text(
             "menu.account.empty",
-            "No profiles",
+            screens_detail::tr(ctx, "ui.menu.account.empty"),
             theme.colors.text_muted,
             UiTextRole::Small));
   } else {
     for (usize index = 0; index < profiles.size(); ++index) {
-      add_account_row(ctx.tree, stack_id, profiles[index], default_texture, index);
+      add_account_row(ctx, stack_id, profiles[index], default_texture, index);
     }
   }
 
@@ -603,7 +608,7 @@ void add_account_dropdown(
   const UiNodeID add_id = ctx.tree.add_child(panel_id, std::move(add_button));
   UiElement add_label = screens_detail::make_text(
       "menu.account.create.label",
-      "Add Profile",
+      screens_detail::tr(ctx, "ui.menu.account.add_profile"),
       theme.colors.text);
   add_label.layout.anchor = UiAnchor::Center;
   ctx.tree.add_child(add_id, std::move(add_label));
@@ -684,13 +689,14 @@ UiNodeID add_dialog_button(
 }
 
 void add_skin_manager_row(
-    UiTree& tree,
+    UIContext& ctx,
     UiNodeID parent,
     std::string_view base_id,
     const LocalProfileSkinEntry& skin,
     usize index,
     usize count,
     PlayerSkinTextureView default_texture) {
+  UiTree& tree = ctx.tree;
   const UiTheme& theme = tree.theme();
   const std::string prefix =
       std::string{base_id} + ".row." + std::to_string(index);
@@ -708,7 +714,7 @@ void add_skin_manager_row(
 
   const PlayerSkinTextureView texture =
       skin.skin_texture.valid ? skin.skin_texture : default_texture;
-  add_skin_portrait(tree, row_id, prefix + ".skin", texture, {14.0F, 10.0F}, 48.0F);
+  add_skin_portrait(ctx, row_id, prefix + ".skin", texture, {14.0F, 10.0F}, 48.0F);
   add_text_at(
       tree,
       row_id,
@@ -728,7 +734,10 @@ void add_skin_manager_row(
       tree,
       row_id,
       prefix + ".details",
-      std::to_string(skin.width) + " x " + std::to_string(skin.height),
+      screens_detail::tr(
+          ctx,
+          "ui.menu.account.skin_dimensions",
+          {{"width", std::to_string(skin.width)}, {"height", std::to_string(skin.height)}}),
       {112.0F, 36.0F},
       {178.0F, 24.0F},
       theme.colors.text_muted);
@@ -737,7 +746,8 @@ void add_skin_manager_row(
       tree,
       row_id,
       prefix + ".slim",
-      skin.slim_model ? "Slim" : "Classic",
+      skin.slim_model ? screens_detail::tr(ctx, "ui.menu.account.skin_slim")
+                      : screens_detail::tr(ctx, "ui.menu.account.skin_classic"),
       "account.skin_toggle_slim",
       {292.0F, 17.0F},
       76.0F,
@@ -749,7 +759,7 @@ void add_skin_manager_row(
       tree,
       row_id,
       prefix + ".up",
-      "Up",
+      screens_detail::tr(ctx, "ui.menu.account.up"),
       "account.skin_up",
       {376.0F, 17.0F},
       44.0F,
@@ -760,7 +770,7 @@ void add_skin_manager_row(
       tree,
       row_id,
       prefix + ".down",
-      "Down",
+      screens_detail::tr(ctx, "ui.menu.account.down"),
       "account.skin_down",
       {426.0F, 17.0F},
       58.0F,
@@ -771,7 +781,7 @@ void add_skin_manager_row(
       tree,
       row_id,
       prefix + ".remove",
-      "Remove",
+      screens_detail::tr(ctx, "ui.menu.common.remove"),
       "account.skin_remove",
       {492.0F, 17.0F},
       76.0F,
@@ -808,7 +818,7 @@ void build_skin_manager_dialog(
       ctx.tree,
       panel_id,
       std::string{base_id} + ".title",
-      "Manage Skins",
+      screens_detail::tr(ctx, "ui.menu.account.manage_skins"),
       {0.0F, 0.0F},
       theme.colors.text);
 
@@ -834,14 +844,14 @@ void build_skin_manager_dialog(
         ctx.tree,
         stack_id,
         std::string{base_id} + ".empty",
-        "No skins added",
+        screens_detail::tr(ctx, "ui.menu.account.no_skins"),
         {20.0F, 20.0F},
         MutedTextColor);
   } else {
     const PlayerSkinTextureView default_texture = default_skin_from(ctx);
     for (usize index = 0; index < skins.size(); ++index) {
       add_skin_manager_row(
-          ctx.tree,
+          ctx,
           stack_id,
           base_id,
           skins[index],
@@ -855,7 +865,7 @@ void build_skin_manager_dialog(
       ctx.tree,
       panel_id,
       std::string{base_id} + ".add",
-      "Add Skin",
+      screens_detail::tr(ctx, "ui.menu.account.add_skin"),
       "account.skin_add",
       {0.0F, SkinDialogFooterY},
       132.0F,
@@ -867,7 +877,7 @@ void build_skin_manager_dialog(
       ctx.tree,
       panel_id,
       std::string{base_id} + ".cancel",
-      "Cancel",
+      screens_detail::tr(ctx, "ui.menu.common.cancel"),
       "account.skin_cancel",
       {SkinDialogContentWidth - 244.0F, SkinDialogFooterY},
       112.0F,
@@ -876,7 +886,7 @@ void build_skin_manager_dialog(
       ctx.tree,
       panel_id,
       std::string{base_id} + ".done",
-      "Done",
+      screens_detail::tr(ctx, "ui.menu.common.done"),
       "account.skin_done",
       {SkinDialogContentWidth - 120.0F, SkinDialogFooterY},
       120.0F,
@@ -1110,22 +1120,22 @@ public:
       initialized_ = true;
     }
 
-    add_fullscreen_account_base(ctx, screen_id(), "Edit Profile");
+    add_fullscreen_account_base(ctx, screen_id(), screens_detail::tr(ctx, "ui.menu.account.edit_profile"));
     const UiNodeID stack = ctx.tree.find_by_stable_id("account_edit.controls")->node_id;
     screens_detail::add_text_box(
         ctx.tree,
         stack,
         "menu.account_edit.name",
-        "Display Name",
+        screens_detail::tr(ctx, "ui.menu.account.display_name_label"),
         display_name_,
-        "Display name",
+        screens_detail::tr(ctx, "ui.menu.account.display_name_placeholder"),
         "account.focus_name",
         true);
     screens_detail::add_button(
         ctx.tree,
         stack,
         "menu.account_edit.skin",
-        "Manage Skins",
+        screens_detail::tr(ctx, "ui.menu.account.manage_skins"),
         "account.manage_skins");
     const std::string status =
         ctx.data_source == nullptr ? std::string{} : ctx.data_source->local_profile_status();
@@ -1145,7 +1155,7 @@ public:
         ctx.tree,
         ctx.tree.root_id(),
         "menu.account_edit.delete",
-        "Delete Profile",
+        screens_detail::tr(ctx, "ui.menu.account.delete_profile"),
         "account.delete");
     if (UiElement* del = ctx.tree.find_by_stable_id("menu.account_edit.delete");
         del != nullptr) {
@@ -1163,7 +1173,7 @@ public:
         ctx.tree,
         ctx.tree.root_id(),
         "menu.account_edit.cancel",
-        "Cancel",
+        screens_detail::tr(ctx, "ui.menu.common.cancel"),
         "account.cancel",
         UiAnchor::BottomRight,
         {-182.0F, -28.0F},
@@ -1172,7 +1182,7 @@ public:
         ctx.tree,
         ctx.tree.root_id(),
         "menu.account_edit.save",
-        "Save",
+        screens_detail::tr(ctx, "ui.menu.common.save"),
         "account.save",
         UiAnchor::BottomRight,
         {-28.0F, -28.0F},
@@ -1390,14 +1400,17 @@ private:
         stack_id,
         screens_detail::make_text(
             "menu.account_edit.confirm.text",
-            "Delete " + profile.display_name + "? This cannot be undone.",
+            screens_detail::tr(
+                ctx,
+                "ui.menu.account.confirm_delete",
+                {{"name", profile.display_name}}),
             theme.colors.danger,
             UiTextRole::Heading));
     screens_detail::add_button(
         ctx.tree,
         stack_id,
         "menu.account_edit.confirm.delete",
-        "Confirm Delete",
+        screens_detail::tr(ctx, "ui.menu.account.confirm_delete_button"),
         "account.confirm_delete",
         true,
         false,
@@ -1406,7 +1419,7 @@ private:
         ctx.tree,
         stack_id,
         "menu.account_edit.confirm.cancel",
-        "Cancel",
+        screens_detail::tr(ctx, "ui.menu.common.cancel"),
         "account.cancel_delete");
   }
 
@@ -1431,22 +1444,22 @@ public:
   }
 
   void build(UIContext& ctx) override {
-    add_fullscreen_account_base(ctx, screen_id(), "Create Profile");
+    add_fullscreen_account_base(ctx, screen_id(), screens_detail::tr(ctx, "ui.menu.account.create_profile"));
     const UiNodeID stack = ctx.tree.find_by_stable_id("account_create.controls")->node_id;
     screens_detail::add_text_box(
         ctx.tree,
         stack,
         "menu.account_create.name",
-        "Display Name",
+        screens_detail::tr(ctx, "ui.menu.account.display_name_label"),
         display_name_,
-        "Display name",
+        screens_detail::tr(ctx, "ui.menu.account.display_name_placeholder"),
         "account.focus_name",
         true);
     screens_detail::add_button(
         ctx.tree,
         stack,
         "menu.account_create.skin",
-        "Manage Skins",
+        screens_detail::tr(ctx, "ui.menu.account.manage_skins"),
         "account.manage_skins");
     const std::string status =
         ctx.data_source == nullptr ? std::string{} : ctx.data_source->local_profile_status();
@@ -1466,7 +1479,7 @@ public:
         ctx.tree,
         ctx.tree.root_id(),
         "menu.account_create.cancel",
-        "Cancel",
+        screens_detail::tr(ctx, "ui.menu.common.cancel"),
         "account.cancel",
         UiAnchor::BottomRight,
         {-182.0F, -28.0F},
@@ -1475,7 +1488,7 @@ public:
         ctx.tree,
         ctx.tree.root_id(),
         "menu.account_create.complete",
-        "Complete",
+        screens_detail::tr(ctx, "ui.menu.common.complete"),
         "account.complete",
         UiAnchor::BottomRight,
         {-28.0F, -28.0F},

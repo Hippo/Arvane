@@ -1,0 +1,221 @@
+block:
+  arvane:
+    air:
+      display_name: Air
+    dirt:
+      display_name: Dirt
+    glass:
+      display_name: Glass
+    glowstone:
+      display_name: Glowstone
+    grass_block:
+      display_name: Grass Block
+    stone:
+      display_name: Stone
+    water:
+      display_name: Water
+    stone_stairs:
+      display_name: Stone Stairs
+
+item:
+  arvane:
+    air:
+      display_name: Air
+    missing_item:
+      display_name: Missing Item
+    coal:
+      display_name: Coal
+    wood_pickaxe:
+      display_name: Wood Pickaxe
+    wood_shovel:
+      display_name: Wood Shovel
+    bucket:
+      display_name: Bucket
+    water_bucket:
+      display_name: Water Bucket
+
+entity:
+  arvane:
+    player:
+      display_name: Player
+    pig:
+      display_name: Pig
+
+ui:
+  common:
+    ellipsis: "..."
+    unknown: "?"
+  inventory:
+    title: Inventory
+  tab:
+    players: Players
+  chat:
+    url_prompt: Open external URL?
+    url_open: Open
+    open_url_unavailable: Opening external URLs is not implemented in this build.
+    blocked_unsafe_url: Blocked unsafe URL.
+    copy_unavailable: Copy to clipboard is not available in this build.
+    command:
+      success: Command succeeded.
+      failure: Command failed.
+      usage_error: Invalid command usage.
+      permission_denied: Permission denied.
+      unknown_command: Unknown command.
+      invalid_source: Command cannot be used from here.
+      internal_error: Command failed internally.
+      remote_unavailable: Server command networking is not available for remote sessions yet.
+      no_player_session: No player session is available for command execution.
+      no_sender: No player command sender is available.
+  connection:
+    disconnected: Disconnected.
+    server_offline: Server is offline or unreachable.
+    lost: Lost connection to the server.
+    rejected_world_join: Server rejected world join.
+    invalid_protocol_packet: Invalid protocol packet.
+    rejected_connection: Server rejected connection.
+    authentication_failed: authentication failed
+  menu:
+    common:
+      settings: Settings
+      quit: Quit
+      back: Back
+      cancel: Cancel
+      delete: Delete
+      remove: Remove
+      create: Create
+      save: Save
+      done: Done
+      complete: Complete
+    main:
+      title: Arvane
+      single_player: Single Player
+      multi_player: Multi Player
+    single_player:
+      title: Single Player
+      empty: No local saves
+      ready: Ready to play
+      create_world: Create World
+      delete_save: Delete Save
+      confirm_delete: Delete {name}?
+      select_save_first: Select a save first
+    create_world:
+      title: Create World
+      name_label: Name
+      name_placeholder: World name
+      seed_label: Seed
+      seed_placeholder: Optional numeric seed
+      error_name_required: World name is required
+      error_name_needs_letters: World name needs letters or numbers
+      error_seed_unsigned: Seed must be an unsigned number
+      error_save_exists: A save with that name already exists
+    multi_player:
+      title: Multi Player
+      empty: No saved servers
+      add_server: Add Server
+      edit_server: Edit Server
+      remove_server: Remove Server
+      confirm_remove: Remove {name}?
+      select_server_first: Select a server first
+    server:
+      add_title: Add Server
+      edit_title: Edit Server
+      name_label: Server Name
+      name_placeholder: Server name
+      address_label: Address
+      address_placeholder: host or host:port
+      error_name_required: Server name is required
+      error_address_required: Address is required
+      error_address_invalid: Address must be a host or host:port
+    disconnect:
+      title: Disconnected
+      default_reason: Disconnected.
+      server_offline: Server is offline or unreachable.
+      reconnect: Reconnect
+      server_list: Server List
+    connecting:
+      title: Connecting to server...
+      waiting: Waiting for the server to respond.
+    settings:
+      title: Settings
+      render: Render Settings
+      key_binds: Key Binds
+      other: Other Settings
+      placeholder: Settings controls will appear here
+    pause:
+      title: Paused
+      resume: Resume
+      back_to_main_menu: Back to Main Menu
+    account:
+      edit: Edit
+      empty: No profiles
+      add_profile: Add Profile
+      edit_profile: Edit Profile
+      create_profile: Create Profile
+      display_name_label: Display Name
+      display_name_placeholder: Display name
+      manage_skins: Manage Skins
+      delete_profile: Delete Profile
+      confirm_delete: Delete {name}? This cannot be undone.
+      confirm_delete_button: Confirm Delete
+      skin_dimensions: "{width} x {height}"
+      skin_slim: Slim
+      skin_classic: Classic
+      up: Up
+      down: Down
+      no_skins: No skins added
+      add_skin: Add Skin
+      png_filter: PNG image
+      error_file_dialog_init: Failed to initialize native file dialog.
+      error_file_dialog: Native file dialog failed.
+      error_file_picker_unavailable: Native file picker support is not available in this build.
+      error_profile_missing: Profile was not found.
+      error_skin_missing: Skin was not found.
+      error_create_skins_directory: "Failed to create skins directory: {message}"
+
+server:
+  name:
+    dedicated: Arvane Dedicated Server
+    integrated: Arvane Integrated Server
+  save:
+    default_name: Dedicated Server
+  disconnect:
+    default: Disconnected.
+    shutting_down: Server is shutting down.
+    duplicate_profile: This Arvane profile is already connected to this server.
+    timed_out: Timed out.
+    invalid_protocol_packet: Invalid protocol packet.
+    auth_required: authentication required
+    auth_failed: authentication failed
+  chat:
+    hover_message: Click to message {name}
+    error:
+      unknown_channel: Unknown or unavailable chat channel.
+      rate_limited: You are sending messages too quickly.
+      format_failed: Chat message could not be formatted.
+    validation:
+      too_long: Chat message is too long.
+      invalid_utf8: Chat message is not valid UTF-8.
+      too_many_characters: Chat message has too many characters.
+      disallowed_control: Chat message contains a disallowed control character.
+      no_newlines: Chat messages cannot contain newlines.
+      empty: Chat message cannot be empty.
+
+command:
+  dispatcher:
+    console_only: Command is restricted to the server console.
+    permission_service_unavailable: Command permission service is unavailable.
+    permission_denied: "Permission denied: {permission}."
+    permission_missing_player_context: "Permission denied: missing player context."
+    permission_player_not_online: "Permission denied: player is not online."
+    no_command: No command entered.
+    unknown_command: "Unknown command: {command}."
+    wrong_domain: "Command is not available in this domain: {command}."
+    no_executor: "Command has no executor: {command}."
+  tp:
+    usage: "Usage: /tp [target] <x> <y> <z>."
+    console_requires_target: Teleport from server console requires an explicit target.
+    sender_not_online: Command sender is not an online player.
+    unknown_player: "Unknown online player: {name}."
+    services_unavailable: Server command services are unavailable.
+    unable_to_teleport: Unable to teleport player.
+    success: Teleported {name} to {position}.

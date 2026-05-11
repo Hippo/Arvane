@@ -27,6 +27,10 @@
 #include <string_view>
 #include <vector>
 
+namespace arv::lang {
+class LanguageCatalog;
+} // namespace arv::lang
+
 namespace arv::server {
 
 namespace detail {
@@ -104,6 +108,7 @@ struct ServerStartInfo {
   io::MovementValidationConfig movement{};
   io::KeepAliveConfig keep_alive{};
   io::SkinConfig skins{};
+  const lang::LanguageCatalog* language{};
 };
 
 struct DroppedItemStack {

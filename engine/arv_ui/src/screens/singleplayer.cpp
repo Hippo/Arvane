@@ -30,11 +30,11 @@ public:
     }
 
     const UiTheme& theme = ctx.tree.theme();
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Single Player", 448.0F, 524.0F);
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), tr(ctx, "ui.menu.single_player.title"), 448.0F, 524.0F);
     if (saves.empty()) {
       UiElement empty = make_text(
           "menu.single_player.empty",
-          "No local saves",
+          tr(ctx, "ui.menu.single_player.empty"),
           theme.colors.text_muted,
           UiTextRole::Small);
       empty.layout.anchor = UiAnchor::TopCenter;
@@ -47,7 +47,7 @@ public:
             stack,
             "menu.single_player.world." + std::to_string(index),
             save_display_name(save),
-            save.detail.empty() ? "Ready to play" : save.detail,
+            save.detail.empty() ? tr(ctx, "ui.menu.single_player.ready") : save.detail,
             "single_player.select_world",
             true,
             selected_save_.has_value() && selected_save_.value() == index);
@@ -58,7 +58,7 @@ public:
         ctx.tree,
         stack,
         "menu.single_player.create",
-        "Create World",
+        tr(ctx, "ui.menu.single_player.create_world"),
         "single_player.create",
         true,
         false,
@@ -67,12 +67,12 @@ public:
         ctx.tree,
         stack,
         "menu.single_player.delete",
-        "Delete Save",
+        tr(ctx, "ui.menu.single_player.delete_save"),
         "single_player.delete",
         selected_save_.has_value(),
         false,
         UiControlRole::Danger);
-    add_button(ctx.tree, stack, "menu.single_player.back", "Back", "menu.back");
+    add_button(ctx.tree, stack, "menu.single_player.back", tr(ctx, "ui.menu.common.back"), "menu.back");
     add_error_text(ctx.tree, stack, "menu.single_player.error", error_);
 
     if (confirm_delete_ && selected_save_.has_value() && selected_save_.value() < saves.size()) {
@@ -92,14 +92,16 @@ public:
           confirm_stack_id,
           make_text(
               "menu.single_player.confirm.text",
-              "Delete " + save_display_name(saves[selected_save_.value()]) + "?",
+              tr(ctx,
+                 "ui.menu.single_player.confirm_delete",
+                 {{"name", save_display_name(saves[selected_save_.value()])}}),
               theme.colors.danger,
               UiTextRole::Heading));
       add_button(
           ctx.tree,
           confirm_stack_id,
           "menu.single_player.confirm.delete",
-          "Delete",
+          tr(ctx, "ui.menu.common.delete"),
           "single_player.confirm_delete",
           true,
           false,
@@ -108,7 +110,7 @@ public:
           ctx.tree,
           confirm_stack_id,
           "menu.single_player.confirm.cancel",
-          "Cancel",
+          tr(ctx, "ui.menu.common.cancel"),
           "single_player.cancel_delete");
     }
   }
@@ -161,7 +163,7 @@ public:
     }
     if (action.action_id == "single_player.delete") {
       if (!selected_save_.has_value()) {
-        error_ = "Select a save first";
+        error_ = tr(ctx, "ui.menu.single_player.select_save_first");
       } else {
         confirm_delete_ = true;
         error_.clear();
@@ -212,23 +214,23 @@ public:
   }
 
   void build(UIContext& ctx) override {
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Create World", 448.0F, 372.0F);
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), tr(ctx, "ui.menu.create_world.title"), 448.0F, 372.0F);
     add_text_box(
         ctx.tree,
         stack,
         "menu.create_world.name",
-        "Name",
+        tr(ctx, "ui.menu.create_world.name_label"),
         name_,
-        "World name",
+        tr(ctx, "ui.menu.create_world.name_placeholder"),
         "create_world.focus_name",
         active_field_ == TextField::Name);
     add_text_box(
         ctx.tree,
         stack,
         "menu.create_world.seed",
-        "Seed",
+        tr(ctx, "ui.menu.create_world.seed_label"),
         seed_,
-        "Optional numeric seed",
+        tr(ctx, "ui.menu.create_world.seed_placeholder"),
         "create_world.focus_seed",
         active_field_ == TextField::Seed);
     add_error_text(ctx.tree, stack, "menu.create_world.error", error_);
@@ -236,12 +238,12 @@ public:
         ctx.tree,
         stack,
         "menu.create_world.create",
-        "Create",
+        tr(ctx, "ui.menu.common.create"),
         "create_world.create",
         true,
         false,
         UiControlRole::Primary);
-    add_button(ctx.tree, stack, "menu.create_world.cancel", "Cancel", "menu.back");
+    add_button(ctx.tree, stack, "menu.create_world.cancel", tr(ctx, "ui.menu.common.cancel"), "menu.back");
   }
 
   bool handle_action(const UiAction& action, UIContext& ctx) override {
@@ -308,21 +310,21 @@ private:
     const std::string seed = trim_copy(seed_);
     const std::string sanitized = sanitize_world_folder_name(name);
     if (name.empty()) {
-      error_ = "World name is required";
+      error_ = tr(ctx, "ui.menu.create_world.error_name_required");
       return true;
     }
     if (sanitized.empty()) {
-      error_ = "World name needs letters or numbers";
+      error_ = tr(ctx, "ui.menu.create_world.error_name_needs_letters");
       return true;
     }
     if (!valid_seed_text(seed)) {
-      error_ = "Seed must be an unsigned number";
+      error_ = tr(ctx, "ui.menu.create_world.error_seed_unsigned");
       return true;
     }
     for (const SinglePlayerSaveEntry& save : saves_from(ctx)) {
       if (sanitize_world_folder_name(save_display_name(save)) == sanitized ||
           sanitize_world_folder_name(save.server_save_name) == sanitized) {
-        error_ = "A save with that name already exists";
+        error_ = tr(ctx, "ui.menu.create_world.error_save_exists");
         return true;
       }
     }

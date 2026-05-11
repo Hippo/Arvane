@@ -2,6 +2,7 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/hash.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/physics/player_movement.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chat.hpp"
@@ -22,6 +23,13 @@
 
 namespace arv::server::detail {
 namespace {
+
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
+}
 
 void configure_skin_transfer_state(
     SkinTransferSessionState& state,
@@ -359,7 +367,7 @@ void ServerRuntimeImpl::handle_message(
     const std::vector<u8>& packet) {
   auto decoded = protocol::deserialize_envelope(packet);
   if (!decoded) {
-    kick_client(connection_id, "Invalid protocol packet.");
+    kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
     return;
   }
 
@@ -367,7 +375,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundHello: {
       auto client_hello = protocol::deserialize_serverbound_hello(decoded.value().payload);
       if (!client_hello) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_client_hello(connection_id, client_hello.value());
@@ -376,7 +384,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundAuthResponse: {
       auto response = protocol::deserialize_auth_response(decoded.value().payload);
       if (!response) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_auth_response(connection_id, response.value());
@@ -385,7 +393,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundKeepAlive: {
       auto keep_alive = protocol::deserialize_serverbound_keep_alive(decoded.value().payload);
       if (!keep_alive) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_keep_alive(connection_id, keep_alive.value());
@@ -394,7 +402,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundPlayerMove: {
       auto move = protocol::deserialize_serverbound_player_move(decoded.value().payload);
       if (!move) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_player_move(connection_id, move.value());
@@ -403,7 +411,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundChunkInterestUpdate: {
       auto interest = protocol::deserialize_serverbound_chunk_interest_update(decoded.value().payload);
       if (!interest) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_chunk_interest_update(connection_id, interest.value());
@@ -412,7 +420,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundInventoryActionRequest: {
       auto request = protocol::deserialize_serverbound_inventory_action_request(decoded.value().payload);
       if (!request) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_inventory_action_request(connection_id, request.value());
@@ -421,7 +429,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundChatMessage: {
       auto chat = protocol::deserialize_serverbound_chat_message(decoded.value().payload);
       if (!chat) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_chat_message(connection_id, std::move(chat.value()));
@@ -430,7 +438,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundAttackEntity: {
       auto attack = protocol::deserialize_serverbound_attack_entity(decoded.value().payload);
       if (!attack) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_attack_entity(connection_id, attack.value());
@@ -439,7 +447,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinRequest: {
       auto request = protocol::deserialize_skin_request(decoded.value().payload);
       if (!request) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_skin_request(connection_id, request.value());
@@ -448,7 +456,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinRequestBatch: {
       auto batch = protocol::deserialize_skin_request_batch(decoded.value().payload);
       if (!batch) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_skin_request_batch(connection_id, std::move(batch.value()));
@@ -457,7 +465,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinUploadBegin: {
       auto begin = protocol::deserialize_skin_upload_begin(decoded.value().payload);
       if (!begin) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_skin_upload_begin(connection_id, begin.value());
@@ -466,7 +474,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinUploadData: {
       auto data = protocol::deserialize_skin_upload_data(decoded.value().payload);
       if (!data) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_skin_upload_data(connection_id, std::move(data.value()));
@@ -475,7 +483,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinUploadChunk: {
       auto chunk = protocol::deserialize_skin_upload_chunk(decoded.value().payload);
       if (!chunk) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_skin_upload_chunk(connection_id, std::move(chunk.value()));
@@ -484,7 +492,7 @@ void ServerRuntimeImpl::handle_message(
     case protocol::MessageType::ServerboundSkinUploadEnd: {
       auto end = protocol::deserialize_skin_upload_end(decoded.value().payload);
       if (!end) {
-        kick_client(connection_id, "Invalid protocol packet.");
+        kick_client(connection_id, tr(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
         return;
       }
       handle_skin_upload_end(connection_id, end.value());
@@ -500,7 +508,7 @@ void ServerRuntimeImpl::handle_client_hello(
     const protocol::ServerboundHello& client_hello) {
   protocol::HandshakePolicy policy = handshake_policy_;
   if (!client_hello.auth_begin.has_value()) {
-    kick_client(connection_id, "authentication required");
+    kick_client(connection_id, tr(language_, "server.disconnect.auth_required", "authentication required"));
     return;
   }
 
@@ -512,7 +520,7 @@ void ServerRuntimeImpl::handle_client_hello(
   if (profile_result.status == PlayerProfileOpenStatus::InvalidClaimedProfileID ||
       profile_result.status == PlayerProfileOpenStatus::PublicKeyMismatch ||
       profile_result.profile == nullptr) {
-    kick_client(connection_id, "authentication failed");
+    kick_client(connection_id, tr(language_, "server.disconnect.auth_failed", "authentication failed"));
     return;
   }
 
@@ -592,7 +600,7 @@ void ServerRuntimeImpl::handle_auth_response(
   const PendingAuthChallenge challenge = session->challenge.value();
   session->challenge.reset();
   if (tick_index_ > challenge.expires_server_tick) {
-    kick_client(connection_id, "authentication failed");
+    kick_client(connection_id, tr(language_, "server.disconnect.auth_failed", "authentication failed"));
     return;
   }
 
@@ -610,7 +618,7 @@ void ServerRuntimeImpl::handle_auth_response(
       response.signature,
       session->public_key);
   if (!verified) {
-    kick_client(connection_id, "authentication failed");
+    kick_client(connection_id, tr(language_, "server.disconnect.auth_failed", "authentication failed"));
     return;
   }
 
@@ -744,11 +752,11 @@ void ServerRuntimeImpl::handle_chat_message(
   if (std::string_view{channel} != protocol::ChatChannelGlobal) {
     send_error_message(
         *session,
-        chat_formatter_.format_error_message("Unknown or unavailable chat channel."));
+        chat_formatter_.format_error_message(tr(language_, "server.chat.error.unknown_channel", "Unknown or unavailable chat channel.")));
     return;
   }
 
-  auto normalized = validate_chat_message_text(message.message, chat_validation_);
+  auto normalized = validate_chat_message_text(message.message, chat_validation_, language_);
   if (!normalized) {
     send_error_message(
         *session,
@@ -762,11 +770,12 @@ void ServerRuntimeImpl::handle_chat_message(
   if (!consume_chat_rate_limit(rate_limit, chat_validation_, now_seconds)) {
     send_error_message(
         *session,
-        chat_formatter_.format_error_message("You are sending messages too quickly."));
+        chat_formatter_.format_error_message(tr(language_, "server.chat.error.rate_limited", "You are sending messages too quickly.")));
     return;
   }
 
   ChatFormatContext context;
+  context.language = language_;
   context.sender_profile_id = session->profile_id;
   context.sender_name =
       session->display_name.empty() ? session->profile_name : session->display_name;
@@ -778,7 +787,7 @@ void ServerRuntimeImpl::handle_chat_message(
     core::warn("chat", "refusing to broadcast invalid formatted chat: {}", validation.message);
     send_error_message(
         *session,
-        chat_formatter_.format_error_message("Chat message could not be formatted."));
+        chat_formatter_.format_error_message(tr(language_, "server.chat.error.format_failed", "Chat message could not be formatted.")));
     return;
   }
 

@@ -141,12 +141,14 @@ int DesktopApplication::run(int argc, char** argv) {
           world_tick_policy,
           assets.default_generation_config,
           thread_budget,
+          assets.language,
       }};
 
   DesktopMenuState menu_state{
       config.paths.saves_path(),
       config.paths.server_list_file,
-      config.paths.arvane_home_path()};
+      config.paths.arvane_home_path(),
+      &assets.language};
   ui::UIScreenManager screen_manager;
   screen_manager.push(ui::make_main_menu_screen());
 

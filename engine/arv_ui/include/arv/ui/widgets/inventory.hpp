@@ -11,7 +11,7 @@ namespace arv::ui {
 
 struct InventoryUiModel {
   bool visible{};
-  std::string title{"Inventory"};
+  std::string title{};
   u8 selected_hotbar_slot{};
   u8 hotbar_slot_count{player::DefaultHotbarSlotCount};
   Vec2f viewport{};

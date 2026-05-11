@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/lang/language.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/ui/core/ui.hpp"
 
@@ -23,6 +24,7 @@ struct ChatUiModel {
   std::string draft{};
   std::optional<std::string> pending_url_confirmation{};
   usize max_visible_messages{8U};
+  const lang::LanguageCatalog* language{};
 };
 
 struct ChatTooltipUiModel {

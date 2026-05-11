@@ -1,11 +1,23 @@
 #include "arv/client/client_runtime.hpp"
 
+#include "arv/lang/language.hpp"
+
 #include "client_frame_builder.hpp"
 #include "client_runtime_internal.hpp"
 
 #include <utility>
 
 namespace arv::client {
+namespace {
+
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
+}
+
+} // namespace
 
 struct ClientRuntime::Impl {
   explicit Impl(std::unique_ptr<net::ITransport> transport) : connection(std::move(transport)),
@@ -29,8 +41,15 @@ struct ClientRuntime::Impl {
         entities,
         dropped_items,
         skins,
+        language,
         collision_query,
         tick_seconds};
+  }
+
+  void configure_language(const lang::LanguageCatalog* new_language) noexcept {
+    language = new_language;
+    connection.configure_language(new_language);
+    ui.set_language(new_language);
   }
 
   void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* collision_query) {
@@ -79,6 +98,7 @@ struct ClientRuntime::Impl {
   detail::ClientProtocolSender sender;
   LocalPlayerIdentity identity{};
   detail::ClientNetworkRouter network{};
+  const lang::LanguageCatalog* language{};
   detail::ClientInputRuntime input{};
   LocalPlayerController player_controller{};
   ClientChunkInterest chunk_interest{};
@@ -113,6 +133,10 @@ void ClientRuntime::set_local_identity(LocalPlayerIdentity identity) {
   impl_->identity = std::move(identity);
 }
 
+void ClientRuntime::configure_language(const lang::LanguageCatalog* language) noexcept {
+  impl_->configure_language(language);
+}
+
 void ClientRuntime::configure_networking(ClientNetworkSettings settings) noexcept {
   impl_->connection.configure_timeouts(
       settings.server_keep_alive_timeout_seconds,
@@ -136,7 +160,8 @@ net::ConnectResult ClientRuntime::connect(net::NetworkAddress address) {
 }
 
 void ClientRuntime::disconnect() {
-  impl_->connection.disconnect_local("Disconnected.");
+  impl_->connection.disconnect_local(
+      tr(impl_->language, "ui.connection.disconnected", "Disconnected."));
   impl_->clear_multiplayer_runtime();
 }
 

@@ -116,6 +116,7 @@ public:
 
   [[nodiscard]] const ItemRecord* item(ItemID id) const noexcept;
   [[nodiscard]] std::optional<ItemID> find_item(std::string_view name) const;
+  void set_display_name(ItemID id, std::string display_name);
   [[nodiscard]] usize item_count() const noexcept {
     return items_.size();
   }

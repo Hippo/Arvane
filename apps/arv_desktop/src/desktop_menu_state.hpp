@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/client/local_identity.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/ui/ui.hpp"
 
 #include <filesystem>
@@ -17,7 +18,8 @@ public:
   DesktopMenuState(
       std::filesystem::path saves_root,
       std::filesystem::path server_list_file,
-      std::filesystem::path arvane_home);
+      std::filesystem::path arvane_home,
+      const lang::LanguageCatalog* language);
 
   [[nodiscard]] std::vector<ui::SinglePlayerSaveEntry> singleplayer_saves() const override;
   [[nodiscard]] std::vector<ui::ServerListEntry> multiplayer_servers() const override;
@@ -113,6 +115,7 @@ private:
   std::filesystem::path saves_root_{};
   std::filesystem::path server_list_file_{};
   std::filesystem::path arvane_home_{};
+  const lang::LanguageCatalog* language_{};
   std::optional<ui::StartSinglePlayerCommand> start_singleplayer_request_{};
   std::optional<ui::CreateWorldCommand> create_world_request_{};
   std::optional<ui::DeleteSinglePlayerSaveCommand> delete_save_request_{};

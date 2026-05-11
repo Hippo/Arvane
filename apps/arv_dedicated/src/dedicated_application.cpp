@@ -60,7 +60,8 @@ int DedicatedApplication::run(int argc, char** argv) {
       registries.block_registry,
       registries.block_registry_hash,
       registries.item_registry,
-      registries.item_registry_hash);
+      registries.item_registry_hash,
+      registries.language);
   if (!loaded_world_result) {
     return fail(loaded_world_result.error());
   }
@@ -127,7 +128,8 @@ int DedicatedApplication::run(int argc, char** argv) {
       registries.block_registry,
       registries.block_registry_hash,
       registries.item_registry,
-      registries.item_registry_hash);
+      registries.item_registry_hash,
+      registries.language);
   if (!save_result) {
     return fail(save_result.error());
   }

@@ -210,6 +210,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.skins = dependencies_.config.skins;
   server_start_info.movement = dependencies_.config.network.movement;
   server_start_info.keep_alive = dependencies_.config.network.keep_alive;
+  server_start_info.language = &dependencies_.language;
   server_start_info.skins.enabled = true;
   server_start_info.skins.allow_uploads = true;
   for (io::SkinResolutionConfig& resolution : server_start_info.skins.resolutions) {
@@ -291,6 +292,7 @@ bool DesktopSessionManager::start_singleplayer(
       {dependencies_.config.multiplayer.keep_alive.server_timeout_seconds,
        dependencies_.config.multiplayer.connection_timeout_seconds});
   client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
+  client->configure_language(&dependencies_.language);
   client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);
@@ -388,6 +390,7 @@ bool DesktopSessionManager::start_remote(
       {dependencies_.config.multiplayer.keep_alive.server_timeout_seconds,
        dependencies_.config.multiplayer.connection_timeout_seconds});
   client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
+  client->configure_language(&dependencies_.language);
   client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);

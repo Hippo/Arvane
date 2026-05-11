@@ -695,6 +695,13 @@ bool BlockRegistry::has_tag(BlockID id, std::string_view tag) const {
   return std::find(record->tags.begin(), record->tags.end(), tag) != record->tags.end();
 }
 
+void BlockRegistry::set_display_name(BlockID id, std::string display_name) {
+  if (id.value >= blocks_.size()) {
+    return;
+  }
+  blocks_[id.value].display_name = std::move(display_name);
+}
+
 BlockID BlockRegistry::block_id(BlockVariantID variant_id) const noexcept {
   const BlockVariantRecord* record = variant(variant_id);
   return record == nullptr ? AirBlockID : record->block_id;

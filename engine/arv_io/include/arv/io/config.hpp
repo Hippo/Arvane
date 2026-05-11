@@ -29,6 +29,11 @@ struct WindowConfig {
   bool vsync{true};
 };
 
+struct LanguageConfig {
+  std::string locale{"en_US"};
+  std::string fallback_locale{"en_US"};
+};
+
 struct SimulationConfig {
   TickRate base_tps{DefaultBaseTps};
 
@@ -359,6 +364,7 @@ struct PathConfig {
   std::filesystem::path saves_root{};
   std::filesystem::path logs_root{};
   std::filesystem::path cache_root{};
+  std::filesystem::path lang_root{};
   std::filesystem::path config_file{};
   std::filesystem::path shared_config_file{};
   std::filesystem::path client_config_file{};
@@ -394,6 +400,10 @@ struct PathConfig {
     return cache_root;
   }
 
+  [[nodiscard]] const std::filesystem::path& lang_path() const noexcept {
+    return lang_root;
+  }
+
   [[nodiscard]] std::filesystem::path server_save_path(std::string_view save_name) const {
     return saves_root / std::filesystem::path{save_name};
   }
@@ -410,6 +420,7 @@ struct SavedServerListEntry {
 
 struct EngineConfig {
   PathConfig paths{};
+  LanguageConfig language{};
   WindowConfig window{};
   SimulationConfig simulation{};
   NetworkConfig network{};

@@ -12,6 +12,10 @@
 #include <string_view>
 #include <vector>
 
+namespace arv::lang {
+class LanguageCatalog;
+} // namespace arv::lang
+
 namespace arv::command {
 
 enum class CommandDomain : u8 {
@@ -152,6 +156,7 @@ using CommandPermissionCheckFn =
 struct CommandServices {
   void* domain_services{};
   CommandPermissionCheckFn permission_check{};
+  const lang::LanguageCatalog* language{};
 
   template<typename T>
   [[nodiscard]] T* as() noexcept {

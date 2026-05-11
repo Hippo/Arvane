@@ -447,6 +447,13 @@ std::optional<ItemID> ItemRegistry::find_item(std::string_view name) const {
   return found->second;
 }
 
+void ItemRegistry::set_display_name(ItemID id, std::string display_name) {
+  if (id.value >= items_.size()) {
+    return;
+  }
+  items_[id.value].display_name = std::move(display_name);
+}
+
 const ItemRecord* ItemRegistry::missing_item() const noexcept {
   return missing_item_id_.has_value() ? item(missing_item_id_.value()) : nullptr;
 }

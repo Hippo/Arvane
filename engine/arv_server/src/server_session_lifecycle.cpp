@@ -2,6 +2,7 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/random.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/server/skin_runtime.hpp"
 
 #include <algorithm>
@@ -10,6 +11,16 @@
 #include <utility>
 
 namespace arv::server::detail {
+namespace {
+
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
+}
+
+} // namespace
 
 void ServerRuntimeImpl::send_auth_result(
     const ServerSession& session,
@@ -157,7 +168,9 @@ void ServerRuntimeImpl::kick_client(
   }
 
   const protocol::ClientboundKickPlayer kick{
-      protocol::clamp_kick_reason(reason.empty() ? "Disconnected." : reason)};
+      protocol::clamp_kick_reason(
+          reason.empty() ? tr(language_, "server.disconnect.default", "Disconnected.")
+                         : std::string{reason})};
   const net::NetworkResult send_result = send_protocol_message(
       *transport_,
       connection_id,
@@ -178,7 +191,10 @@ bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
         session.profile_id.string());
     kick_client(
         session.connection_id,
-        "This Arvane profile is already connected to this server.");
+        tr(
+            language_,
+            "server.disconnect.duplicate_profile",
+            "This Arvane profile is already connected to this server."));
     return false;
   }
 
@@ -298,7 +314,7 @@ void ServerRuntimeImpl::tick_keep_alive() {
   }
 
   for (net::ConnectionID connection_id : timed_out_connections) {
-    kick_client(connection_id, "Timed out.");
+    kick_client(connection_id, tr(language_, "server.disconnect.timed_out", "Timed out."));
   }
 }
 

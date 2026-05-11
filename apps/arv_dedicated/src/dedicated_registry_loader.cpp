@@ -3,14 +3,90 @@
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/core/log.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/persistence/save.hpp"
 
+#include <optional>
 #include <utility>
 
 namespace arv::dedicated {
+namespace {
+
+[[nodiscard]] std::optional<DedicatedError> apply_block_language(
+    const lang::LanguageCatalog& language,
+    voxel::BlockRegistry& registry) {
+  for (u32 index = 0; index < registry.block_count(); ++index) {
+    const voxel::BlockID block_id{index};
+    const voxel::BlockRecord* block = registry.block(block_id);
+    if (block == nullptr) {
+      continue;
+    }
+    const std::string key = lang::block_display_name_key(block->name);
+    const std::optional<std::string_view> text = language.find(key);
+    if (!text.has_value()) {
+      return dedicated_error("lang", "missing language key: " + key);
+    }
+    registry.set_display_name(block_id, std::string{text.value()});
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<DedicatedError> apply_item_language(
+    const lang::LanguageCatalog& language,
+    const voxel::BlockRegistry& blocks,
+    player::ItemRegistry& registry) {
+  for (u32 index = 0; index < registry.item_count(); ++index) {
+    const player::ItemID item_id{index};
+    const player::ItemRecord* item = registry.item(item_id);
+    if (item == nullptr) {
+      continue;
+    }
+    const std::string key = lang::item_display_name_key(item->name);
+    if (const std::optional<std::string_view> text = language.find(key);
+        text.has_value()) {
+      registry.set_display_name(item_id, std::string{text.value()});
+      continue;
+    }
+    if (item->source_block.has_value()) {
+      if (const voxel::BlockRecord* block = blocks.block(item->source_block.value());
+          block != nullptr && !block->display_name.empty()) {
+        registry.set_display_name(item_id, block->display_name);
+        continue;
+      }
+    }
+    return dedicated_error("lang", "missing language key: " + key);
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<DedicatedError> apply_entity_language(
+    const lang::LanguageCatalog& language,
+    entity::EntityRegistry& registry) {
+  for (const entity::EntityTypeRecord& type : registry.records()) {
+    const std::string key = lang::entity_display_name_key(type.name);
+    const std::optional<std::string_view> text = language.find(key);
+    if (!text.has_value()) {
+      return dedicated_error("lang", "missing language key: " + key);
+    }
+    registry.set_display_name(type.id, std::string{text.value()});
+  }
+  return std::nullopt;
+}
+
+} // namespace
 
 Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
     const io::EngineConfig& config) {
+  auto language_result = lang::load_language_directory(
+      config.paths.lang_path(),
+      config.language.locale,
+      config.language.fallback_locale);
+  if (!language_result) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("lang", language_result.error().message));
+  }
+  lang::LanguageCatalog language = std::move(language_result.value());
+
   auto block_definition_text = io::read_text_file(
       config.paths.config_path() / "blocks.json",
       "dedicated block definitions");
@@ -34,7 +110,12 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
   }
 
   DedicatedRegistries registries;
+  registries.language = std::move(language);
   registries.block_registry = std::move(block_registry_result.value());
+  if (auto error = apply_block_language(registries.language, registries.block_registry);
+      error.has_value()) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(error.value());
+  }
   asset::ResourceManager resources(config.paths.assets_path());
   auto block_models_result =
       asset::load_block_model_definitions(resources, registries.block_registry);
@@ -79,6 +160,13 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
   }
 
   registries.item_registry = std::move(item_registry_result.value());
+  if (auto error = apply_item_language(
+          registries.language,
+          registries.block_registry,
+          registries.item_registry);
+      error.has_value()) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(error.value());
+  }
   registries.item_registry_hash =
       persistence::hash_item_registry(registries.item_registry);
   core::info(
@@ -110,6 +198,10 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
   }
 
   registries.entity_registry = std::move(entity_registry_result.value());
+  if (auto error = apply_entity_language(registries.language, registries.entity_registry);
+      error.has_value()) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(error.value());
+  }
   core::info(
       "dedicated",
       "loaded entity registry: types={}",

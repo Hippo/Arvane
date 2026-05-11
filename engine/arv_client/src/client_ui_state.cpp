@@ -1,5 +1,7 @@
 #include "client_ui_state.hpp"
 
+#include "arv/lang/language.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
@@ -50,6 +52,13 @@ void trim_vector_to_limit(std::vector<T>& values, usize limit) {
 
 } // namespace
 
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
+}
+
 void ClientUiState::set_tab_menu_visible(bool visible) noexcept {
   tab_menu_visible_ = visible;
 }
@@ -99,6 +108,10 @@ void ClientUiState::close_ui() noexcept {
   chat_open_ = false;
   chat_draft_.clear();
   pending_url_confirmation_.reset();
+}
+
+void ClientUiState::set_language(const lang::LanguageCatalog* language) noexcept {
+  language_ = language;
 }
 
 void ClientUiState::set_max_chat_history_messages(usize max_messages) {
@@ -152,7 +165,10 @@ void ClientUiState::cancel_url_confirmation() noexcept {
 
 void ClientUiState::acknowledge_url_open_unavailable() {
   pending_url_confirmation_.reset();
-  add_chat_message("Opening external URLs is not implemented in this build.");
+  add_chat_message(tr(
+      language_,
+      "ui.chat.open_url_unavailable",
+      "Opening external URLs is not implemented in this build."));
 }
 
 const std::optional<std::string>& ClientUiState::pending_url_confirmation() const noexcept {

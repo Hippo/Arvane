@@ -174,7 +174,8 @@ ui::UIContext DesktopFrameLoop::make_menu_context() {
       &menu_state_,
       &menu_state_,
       &screen_manager_,
-      &ui_theme_};
+      &ui_theme_,
+      &assets_.language};
 }
 
 FrameTiming DesktopFrameLoop::begin_frame() {

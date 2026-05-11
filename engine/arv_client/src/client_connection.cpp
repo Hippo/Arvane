@@ -1,6 +1,7 @@
 #include "client_connection.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/lang/language.hpp"
 
 #include "client_protocol_send.hpp"
 
@@ -21,11 +22,11 @@ namespace {
          state == net::ConnectionState::InGame;
 }
 
-[[nodiscard]] std::string user_facing_close_reason(net::ConnectionState state) {
-  if (is_connection_attempt_state(state) || state == net::ConnectionState::RegistrySync) {
-    return "Server is offline or unreachable.";
-  }
-  return "Lost connection to the server.";
+[[nodiscard]] std::string tr(
+    const lang::LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
 }
 
 } // namespace
@@ -77,6 +78,10 @@ void ClientConnectionRuntime::configure_timeouts(
       connection_timeout_seconds == 0U ? 10U : connection_timeout_seconds;
 }
 
+void ClientConnectionRuntime::configure_language(const lang::LanguageCatalog* language) noexcept {
+  language_ = language;
+}
+
 std::vector<net::NetworkEvent> ClientConnectionRuntime::poll_events() {
   if (!transport_) {
     return {};
@@ -91,11 +96,14 @@ void ClientConnectionRuntime::handle_connection_accepted(
     return;
   }
   set_state(net::ConnectionState::TransportConnected);
-  auto hello_result = sender.send_client_hello(identity);
-  if (!hello_result) {
-    disconnect_local("Server is offline or unreachable.");
-    return;
-  }
+    auto hello_result = sender.send_client_hello(identity);
+    if (!hello_result) {
+      disconnect_local(tr(
+          language_,
+          "ui.connection.server_offline",
+          "Server is offline or unreachable."));
+      return;
+    }
   set_state(net::ConnectionState::ProtocolHandshake);
 }
 
@@ -107,14 +115,21 @@ void ClientConnectionRuntime::handle_connection_closed_or_failed(
       event.type == net::NetworkEventType::ConnectionClosed ? "closed" : "failed",
       event.reason);
   if (!disconnect_reason_.has_value()) {
-    disconnect_reason_ = user_facing_close_reason(connection_state_);
+    disconnect_reason_ =
+        is_connection_attempt_state(connection_state_) ||
+                connection_state_ == net::ConnectionState::RegistrySync
+            ? tr(
+                  language_,
+                  "ui.connection.server_offline",
+                  "Server is offline or unreachable.")
+            : tr(language_, "ui.connection.lost", "Lost connection to the server.");
   }
   set_state(net::ConnectionState::Disconnected);
 }
 
 void ClientConnectionRuntime::handle_message_send_failed() noexcept {
   if (!disconnect_reason_.has_value()) {
-    disconnect_reason_ = "Lost connection to the server.";
+    disconnect_reason_ = tr(language_, "ui.connection.lost", "Lost connection to the server.");
   }
   if (transport_ && connection_state_ != net::ConnectionState::Disconnected) {
     (void)transport_->close_connection(connection_id_, disconnect_reason_.value());
@@ -124,7 +139,9 @@ void ClientConnectionRuntime::handle_message_send_failed() noexcept {
 
 void ClientConnectionRuntime::disconnect_local(std::string_view reason) {
   if (!disconnect_reason_.has_value()) {
-    disconnect_reason_ = reason.empty() ? std::string{"Disconnected."} : std::string{reason};
+    disconnect_reason_ =
+        reason.empty() ? tr(language_, "ui.connection.disconnected", "Disconnected.")
+                       : std::string{reason};
   }
   if (transport_ && connection_state_ != net::ConnectionState::Disconnected) {
     (void)transport_->close_connection(connection_id_, disconnect_reason_.value());
@@ -142,14 +159,17 @@ bool ClientConnectionRuntime::tick_timeouts() {
       connection_attempt_started_time_.time_since_epoch().count() != 0 &&
       now - connection_attempt_started_time_ >
           std::chrono::seconds(connection_timeout_seconds_)) {
-    disconnect_local("Server is offline or unreachable.");
+    disconnect_local(tr(
+        language_,
+        "ui.connection.server_offline",
+        "Server is offline or unreachable."));
     return true;
   }
   if (expects_server_keep_alive(connection_state_) &&
       last_server_keep_alive_time_.time_since_epoch().count() != 0 &&
       now - last_server_keep_alive_time_ >
           std::chrono::seconds(server_keep_alive_timeout_seconds_)) {
-    disconnect_local("Lost connection to the server.");
+    disconnect_local(tr(language_, "ui.connection.lost", "Lost connection to the server."));
     return true;
   }
   return false;

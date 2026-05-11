@@ -26,6 +26,7 @@ constexpr std::string_view kConfigDirectoryName = "config";
 constexpr std::string_view kSavesDirectoryName = "saves";
 constexpr std::string_view kLogsDirectoryName = "logs";
 constexpr std::string_view kCacheDirectoryName = "cache";
+constexpr std::string_view kLangDirectoryName = "lang";
 
 void emit_render_atlases_config(
     YAML::Emitter& emitter,
@@ -601,6 +602,11 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
           << config_path_string(config.paths.project_root, config.paths.server_list_file);
   emitter << YAML::EndMap;
 
+  emitter << YAML::Key << "language" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "locale" << YAML::Value << config.language.locale;
+  emitter << YAML::Key << "fallback_locale" << YAML::Value << config.language.fallback_locale;
+  emitter << YAML::EndMap;
+
   emitter << YAML::Key << "window" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "width" << YAML::Value << config.window.width;
   emitter << YAML::Key << "height" << YAML::Value << config.window.height;
@@ -1074,6 +1080,11 @@ ConfigResult save_default_shared_config_file(
           << config_path_string(config.paths.project_root, config.paths.arvane_home_path());
   emitter << YAML::EndMap;
 
+  emitter << YAML::Key << "language" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "locale" << YAML::Value << config.language.locale;
+  emitter << YAML::Key << "fallback_locale" << YAML::Value << config.language.fallback_locale;
+  emitter << YAML::EndMap;
+
   emitter << YAML::Key << "simulation" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "base_tps" << YAML::Value << config.simulation.base_tps;
   emitter << YAML::Key << "systems" << YAML::Value << YAML::BeginMap;
@@ -1270,6 +1281,10 @@ ConfigResult save_default_client_config_file(
           << config_path_string(config.paths.project_root, config.paths.server_list_file);
   emitter << YAML::EndMap;
 
+  emitter << YAML::Key << "language" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "locale" << YAML::Value << config.language.locale;
+  emitter << YAML::EndMap;
+
   emitter << YAML::Key << "window" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "width" << YAML::Value << config.window.width;
   emitter << YAML::Key << "height" << YAML::Value << config.window.height;
@@ -1359,6 +1374,12 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_path_scalar(paths, "config_file", config.paths.config_file);
     read_path_scalar(paths, "input_bindings_file", config.paths.input_bindings_file);
     read_path_scalar(paths, "server_list_file", config.paths.server_list_file);
+  }
+
+  const YAML::Node language = root["language"];
+  if (language) {
+    read_scalar(language, "locale", config.language.locale);
+    read_scalar(language, "fallback_locale", config.language.fallback_locale);
   }
 
   const YAML::Node window = root["window"];
@@ -1896,6 +1917,8 @@ void resolve_runtime_paths(const ConfigLoadOptions& options, EngineConfig& confi
       config.paths.arvane_home_path() / std::filesystem::path{kLogsDirectoryName});
   config.paths.cache_root = normalize_lexical(
       config.paths.arvane_home_path() / std::filesystem::path{kCacheDirectoryName});
+  config.paths.lang_root = normalize_lexical(
+      config.paths.arvane_home_path() / std::filesystem::path{kLangDirectoryName});
 
   const std::filesystem::path config_file =
       !options.explicit_config_path.empty()

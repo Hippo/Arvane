@@ -19,6 +19,10 @@ inline constexpr f32 ChatBorderAlpha = 0.62F;
   return color;
 }
 
+[[nodiscard]] std::string tr(const ChatUiModel& model, std::string_view key) {
+  return model.language == nullptr ? std::string{key} : model.language->text(key);
+}
+
 [[nodiscard]] UiElement chat_line_text(
     std::string stable_id,
     std::string text,
@@ -152,7 +156,7 @@ void append_url_confirmation(
       panel_id,
       chat_line_text(
           "chat.url.prompt",
-          "Open external URL?",
+          tr(model, "ui.chat.url_prompt"),
           theme.colors.text,
           {}));
   tree.add_child(
@@ -180,7 +184,7 @@ void append_url_confirmation(
           theme,
           UiControlRole::Primary));
   UiElement confirm_text =
-      chat_line_text("chat.url.confirm.text", "Open", theme.colors.text);
+      chat_line_text("chat.url.confirm.text", tr(model, "ui.chat.url_open"), theme.colors.text);
   confirm_text.layout.anchor = UiAnchor::Center;
   tree.add_child(confirm_id, std::move(confirm_text));
 
@@ -188,7 +192,7 @@ void append_url_confirmation(
       actions_id,
       chat_button("chat.url.cancel", "chat_url_cancel", ButtonWidth, theme));
   UiElement cancel_text =
-      chat_line_text("chat.url.cancel.text", "Cancel", theme.colors.text);
+      chat_line_text("chat.url.cancel.text", tr(model, "ui.menu.common.cancel"), theme.colors.text);
   cancel_text.layout.anchor = UiAnchor::Center;
   tree.add_child(cancel_id, std::move(cancel_text));
 }

@@ -43,7 +43,7 @@ bool DesktopFrameLoop::process_menu_commands() {
           ui::ServerListEntry{command->name, command->address}));
     } else if (sessions_.active_session() == nullptr) {
       screen_manager_.replace(ui::make_multiplayer_disconnect_screen(
-          "Server is offline or unreachable.",
+          assets_.language.text("ui.menu.disconnect.server_offline"),
           ui::ServerListEntry{command->name, command->address}));
     }
     invalidate_ui_tree_cache();

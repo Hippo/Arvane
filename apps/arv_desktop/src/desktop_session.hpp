@@ -32,6 +32,10 @@ namespace arv::render {
 class OpenGLRenderer;
 } // namespace arv::render
 
+namespace arv::lang {
+class LanguageCatalog;
+} // namespace arv::lang
+
 namespace arv::desktop {
 
 struct BlockOutlineTarget {
@@ -89,6 +93,7 @@ struct DesktopSessionDependencies {
   const world::WorldTickPolicy& world_tick_policy;
   const world::WorldGenerationConfig& default_generation_config;
   const sched::RuntimeThreadBudgetPlan& thread_budget;
+  const lang::LanguageCatalog& language;
 };
 
 class DesktopSessionManager {

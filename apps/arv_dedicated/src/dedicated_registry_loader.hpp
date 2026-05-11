@@ -6,12 +6,15 @@
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/player/item.hpp"
 #include "arv/voxel/block.hpp"
 
 namespace arv::dedicated {
 
 struct DedicatedRegistries {
+  lang::LanguageCatalog language;
+
   voxel::BlockRegistry block_registry;
   u64 block_registry_hash{};
 

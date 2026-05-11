@@ -32,7 +32,7 @@ public:
     stack_element.layout.anchor = UiAnchor::Center;
     const UiNodeID stack = ctx.tree.add_child(ctx.tree.root_id(), std::move(stack_element));
 
-    UiElement title = make_text("pause_menu.title", "Paused", theme.colors.text, UiTextRole::Heading);
+    UiElement title = make_text("pause_menu.title", tr(ctx, "ui.menu.pause.title"), theme.colors.text, UiTextRole::Heading);
     title.layout.anchor = UiAnchor::TopCenter;
     title.layout.offset = {0.0F, -theme.layout.spacing_sm};
     ctx.tree.add_child(stack, std::move(title));
@@ -41,18 +41,18 @@ public:
         ctx.tree,
         stack,
         "menu.pause.resume",
-        "Resume",
+        tr(ctx, "ui.menu.pause.resume"),
         "pause.resume",
         true,
         false,
         UiControlRole::Primary);
-    add_button(ctx.tree, stack, "menu.pause.settings", "Settings", "pause.settings");
-    add_button(ctx.tree, stack, "menu.pause.main_menu", "Back to Main Menu", "pause.main_menu");
+    add_button(ctx.tree, stack, "menu.pause.settings", tr(ctx, "ui.menu.common.settings"), "pause.settings");
+    add_button(ctx.tree, stack, "menu.pause.main_menu", tr(ctx, "ui.menu.pause.back_to_main_menu"), "pause.main_menu");
     add_button(
         ctx.tree,
         stack,
         "menu.pause.quit",
-        "Quit",
+        tr(ctx, "ui.menu.common.quit"),
         "pause.quit",
         true,
         false,

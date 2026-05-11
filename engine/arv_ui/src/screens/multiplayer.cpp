@@ -13,9 +13,9 @@ namespace {
 
 using namespace screens_detail;
 
-[[nodiscard]] std::string wrapped_reason_text(std::string_view reason) {
+[[nodiscard]] std::string wrapped_reason_text(const UIContext& ctx, std::string_view reason) {
   if (reason.empty()) {
-    return "Disconnected.";
+    return tr(ctx, "ui.menu.disconnect.default_reason");
   }
   constexpr usize MaxLine = 44U;
   constexpr usize MaxDisplay = 360U;
@@ -45,7 +45,7 @@ using namespace screens_detail;
     ++line_width;
   }
   if (reason.size() > MaxDisplay) {
-    wrapped.append("...");
+    wrapped.append(tr(ctx, "ui.common.ellipsis"));
   }
   return wrapped;
 }
@@ -68,10 +68,10 @@ public:
 
   void build(UIContext& ctx) override {
     const UiTheme& theme = ctx.tree.theme();
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Disconnected", 472.0F, 344.0F);
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), tr(ctx, "ui.menu.disconnect.title"), 472.0F, 344.0F);
     UiElement reason = make_text(
         "menu.disconnect.reason",
-        wrapped_reason_text(reason_),
+        wrapped_reason_text(ctx, reason_),
         theme.colors.text,
         UiTextRole::Body);
     reason.layout.anchor = UiAnchor::TopCenter;
@@ -81,7 +81,7 @@ public:
         ctx.tree,
         stack,
         "menu.disconnect.reconnect",
-        "Reconnect",
+        tr(ctx, "ui.menu.disconnect.reconnect"),
         "disconnect.reconnect",
         reconnect_server_.has_value() && !reconnect_server_->address.empty(),
         false,
@@ -90,7 +90,7 @@ public:
         ctx.tree,
         stack,
         "menu.disconnect.server_list",
-        "Server List",
+        tr(ctx, "ui.menu.disconnect.server_list"),
         "disconnect.server_list");
   }
 
@@ -142,10 +142,10 @@ public:
   void build(UIContext& ctx) override {
     const UiTheme& theme = ctx.tree.theme();
     const UiNodeID stack =
-        add_menu_shell(ctx, screen_id(), "Connecting to server...", 448.0F, 272.0F);
+        add_menu_shell(ctx, screen_id(), tr(ctx, "ui.menu.connecting.title"), 448.0F, 272.0F);
     UiElement status = make_text(
         "menu.connecting.status",
-        "Waiting for the server to respond.",
+        tr(ctx, "ui.menu.connecting.waiting"),
         theme.colors.text,
         UiTextRole::Body);
     status.layout.anchor = UiAnchor::TopCenter;
@@ -165,7 +165,7 @@ public:
         ctx.tree,
         stack,
         "menu.connecting.cancel",
-        "Cancel",
+        tr(ctx, "ui.menu.common.cancel"),
         "connecting.cancel",
         true,
         false,
@@ -216,11 +216,11 @@ public:
     }
 
     const UiTheme& theme = ctx.tree.theme();
-    const UiNodeID stack = add_menu_shell(ctx, screen_id(), "Multi Player", 472.0F, 552.0F);
+    const UiNodeID stack = add_menu_shell(ctx, screen_id(), tr(ctx, "ui.menu.multi_player.title"), 472.0F, 552.0F);
     if (servers.empty()) {
       UiElement empty = make_text(
           "menu.multi_player.empty",
-          "No saved servers",
+          tr(ctx, "ui.menu.multi_player.empty"),
           theme.colors.text_muted,
           UiTextRole::Small);
       empty.layout.anchor = UiAnchor::TopCenter;
@@ -244,7 +244,7 @@ public:
         ctx.tree,
         stack,
         "menu.multi_player.add",
-        "Add Server",
+        tr(ctx, "ui.menu.multi_player.add_server"),
         "multi_player.add",
         true,
         false,
@@ -253,19 +253,19 @@ public:
         ctx.tree,
         stack,
         "menu.multi_player.edit",
-        "Edit Server",
+        tr(ctx, "ui.menu.multi_player.edit_server"),
         "multi_player.edit",
         selected_server_.has_value());
     add_button(
         ctx.tree,
         stack,
         "menu.multi_player.remove",
-        "Remove Server",
+        tr(ctx, "ui.menu.multi_player.remove_server"),
         "multi_player.remove",
         selected_server_.has_value(),
         false,
         UiControlRole::Danger);
-    add_button(ctx.tree, stack, "menu.multi_player.back", "Back", "menu.back");
+    add_button(ctx.tree, stack, "menu.multi_player.back", tr(ctx, "ui.menu.common.back"), "menu.back");
     add_error_text(ctx.tree, stack, "menu.multi_player.error", error_);
 
     if (confirm_remove_ && selected_server_.has_value() &&
@@ -286,14 +286,16 @@ public:
           confirm_stack_id,
           make_text(
               "menu.multi_player.confirm.text",
-              "Remove " + servers[selected_server_.value()].name + "?",
+              tr(ctx,
+                 "ui.menu.multi_player.confirm_remove",
+                 {{"name", servers[selected_server_.value()].name}}),
               theme.colors.danger,
               UiTextRole::Heading));
       add_button(
           ctx.tree,
           confirm_stack_id,
           "menu.multi_player.confirm.remove",
-          "Remove",
+          tr(ctx, "ui.menu.common.remove"),
           "multi_player.confirm_remove",
           true,
           false,
@@ -302,7 +304,7 @@ public:
           ctx.tree,
           confirm_stack_id,
           "menu.multi_player.confirm.cancel",
-          "Cancel",
+          tr(ctx, "ui.menu.common.cancel"),
           "multi_player.cancel_remove");
     }
   }
@@ -352,7 +354,7 @@ public:
     }
     if (action.action_id == "multi_player.remove") {
       if (!selected_server_.has_value()) {
-        error_ = "Select a server first";
+        error_ = tr(ctx, "ui.menu.multi_player.select_server_first");
       } else {
         confirm_remove_ = true;
         error_.clear();
@@ -407,25 +409,25 @@ public:
     const UiNodeID stack = add_menu_shell(
         ctx,
         screen_id(),
-        edit_index_.has_value() ? "Edit Server" : "Add Server",
+        edit_index_.has_value() ? tr(ctx, "ui.menu.server.edit_title") : tr(ctx, "ui.menu.server.add_title"),
         448.0F,
         372.0F);
     add_text_box(
         ctx.tree,
         stack,
         "menu.server.name",
-        "Server Name",
+        tr(ctx, "ui.menu.server.name_label"),
         server_name_,
-        "Server name",
+        tr(ctx, "ui.menu.server.name_placeholder"),
         "server.focus_name",
         active_field_ == TextField::ServerName);
     add_text_box(
         ctx.tree,
         stack,
         "menu.server.address",
-        "Address",
+        tr(ctx, "ui.menu.server.address_label"),
         address_,
-        "host or host:port",
+        tr(ctx, "ui.menu.server.address_placeholder"),
         "server.focus_address",
         active_field_ == TextField::Address);
     add_error_text(ctx.tree, stack, "menu.server.error", error_);
@@ -433,12 +435,12 @@ public:
         ctx.tree,
         stack,
         "menu.server.save",
-        "Save",
+        tr(ctx, "ui.menu.common.save"),
         "server.save",
         true,
         false,
         UiControlRole::Primary);
-    add_button(ctx.tree, stack, "menu.server.cancel", "Cancel", "menu.back");
+    add_button(ctx.tree, stack, "menu.server.cancel", tr(ctx, "ui.menu.common.cancel"), "menu.back");
   }
 
   bool handle_action(const UiAction& action, UIContext& ctx) override {
@@ -504,15 +506,15 @@ private:
     const std::string name = trim_copy(server_name_);
     const std::string address = trim_copy(address_);
     if (name.empty()) {
-      error_ = "Server name is required";
+      error_ = tr(ctx, "ui.menu.server.error_name_required");
       return true;
     }
     if (address.empty()) {
-      error_ = "Address is required";
+      error_ = tr(ctx, "ui.menu.server.error_address_required");
       return true;
     }
     if (!valid_server_address(address)) {
-      error_ = "Address must be a host or host:port";
+      error_ = tr(ctx, "ui.menu.server.error_address_invalid");
       return true;
     }
     submit_command(ctx, SaveServerEntryCommand{edit_index_, ServerListEntry{name, address}});

@@ -1,4 +1,5 @@
 #include "arv/asset/resource.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/ui/ui.hpp"
 
 #include <gtest/gtest.h>
@@ -103,6 +104,16 @@ public:
   skin.width = 64;
   skin.height = 64;
   return skin;
+}
+
+[[nodiscard]] const arv::lang::LanguageCatalog& test_language() {
+  static const arv::lang::LanguageCatalog language = [] {
+    const std::filesystem::path lang_root =
+        std::filesystem::path{ARVANE_TEST_ASSET_ROOT}.parent_path() / "lang";
+    auto loaded = arv::lang::load_language_directory(lang_root);
+    return loaded ? std::move(loaded.value()) : arv::lang::LanguageCatalog{};
+  }();
+  return language;
 }
 
 [[nodiscard]] std::string hit_stable_id(
@@ -669,7 +680,7 @@ TEST(MenuScreenTests, MainMenuIsRootAndNavigatesToSinglePlayer) {
   data.saves.push_back({"default", "server-save-1", "default", "saved"});
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_main_menu_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
   tree.layout({800.0F, 600.0F}, &text);
@@ -713,7 +724,7 @@ TEST(MenuScreenTests, ThemedRowsExposeSelectionAndDetailText) {
   data.saves.push_back({"Long World", "long-world", "default", "last played today"});
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_single_player_menu_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
   tree.layout({800.0F, 600.0F}, &text);
@@ -739,7 +750,7 @@ TEST(MenuScreenTests, RepresentativeMenusKeepKeyControlsInsideNarrowViewport) {
   FixedMenuData data;
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_main_menu_screen());
-  arv::ui::UIContext ctx{tree, {480.0F, 360.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {480.0F, 360.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
   tree.layout({480.0F, 360.0F}, &text);
@@ -776,7 +787,7 @@ TEST(MenuScreenTests, MainMenuAccountDropdownSelectsAndEditsProfiles) {
                            false});
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_main_menu_screen());
-  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
   tree.layout({900.0F, 640.0F}, &text);
@@ -823,7 +834,7 @@ TEST(MenuScreenTests, AccountEditSaveAndCancelAreExplicit) {
                            {},
                            true});
   arv::ui::UIScreenManager screens;
-  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.push(arv::ui::make_account_edit_screen(data.profiles[0].profile_id));
   screens.update(ctx);
@@ -862,7 +873,7 @@ TEST(MenuScreenTests, AccountCreateCancelDiscardsPendingCreateState) {
   CapturingCommandSink sink;
   FixedMenuData data;
   arv::ui::UIScreenManager screens;
-  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.push(arv::ui::make_account_create_screen());
   screens.update(ctx);
@@ -891,7 +902,7 @@ TEST(MenuScreenTests, AccountEditSkinManagerStagesOrderAndPickerCommands) {
   data.profiles.push_back(std::move(profile));
 
   arv::ui::UIScreenManager screens;
-  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens, nullptr, &test_language()};
   screens.push(arv::ui::make_account_edit_screen(data.profiles[0].profile_id));
   screens.update(ctx);
   tree.layout({900.0F, 640.0F}, &text);
@@ -948,7 +959,7 @@ TEST(MenuScreenTests, AccountCreateSkinManagerCanCancelBackToSnapshot) {
   data.create_skins.push_back(make_skin_entry("skin-b"));
 
   arv::ui::UIScreenManager screens;
-  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens, nullptr, &test_language()};
   screens.push(arv::ui::make_account_create_screen());
   screens.update(ctx);
   tree.layout({900.0F, 640.0F}, &text);
@@ -989,7 +1000,7 @@ TEST(MenuScreenTests, PauseResumeEmitsCommandAndClosesScreen) {
   FixedMenuData data;
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_pause_menu_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
   tree.layout({800.0F, 600.0F}, &text);
@@ -1019,7 +1030,7 @@ TEST(MenuScreenTests, SinglePlayerEmptyListStaysOnWorldListUntilCreate) {
   FixedMenuData data;
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_single_player_menu_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
   tree.layout({800.0F, 600.0F}, &text);
@@ -1044,7 +1055,7 @@ TEST(MenuScreenTests, SinglePlayerSelectedWorldEmitsServerSaveAndWorldName) {
   data.saves.push_back({"Server One", "server-one", "default", "server-save: server-one"});
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_single_player_menu_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
   tree.layout({800.0F, 600.0F}, &text);
@@ -1075,7 +1086,7 @@ TEST(MenuScreenTests, CreateWorldValidatesBeforeEmittingCommand) {
   data.saves.push_back({"Existing", "existing", "default", "saved"});
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_create_world_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   EXPECT_TRUE(screens.handle_text_input("Existing", ctx));
   EXPECT_TRUE(screens.handle_submit(ctx));
@@ -1098,7 +1109,7 @@ TEST(MenuScreenTests, AddServerAcceptsAddressWithoutPort) {
   FixedMenuData data;
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_add_server_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   EXPECT_TRUE(screens.handle_text_input("Local", ctx));
   EXPECT_TRUE(screens.route_action({"menu.server.address", "server.focus_address", "click"}, ctx));
@@ -1118,7 +1129,7 @@ TEST(MenuScreenTests, AddServerRejectsMalformedExplicitPort) {
   FixedMenuData data;
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_add_server_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   EXPECT_TRUE(screens.handle_text_input("Local", ctx));
   EXPECT_TRUE(screens.route_action({"menu.server.address", "server.focus_address", "click"}, ctx));
@@ -1137,7 +1148,7 @@ TEST(MenuScreenTests, DisconnectScreenShowsReasonAndReconnects) {
   screens.push(arv::ui::make_multiplayer_disconnect_screen(
       "This Arvane profile is already connected to this server.",
       arv::ui::ServerListEntry{"Local", "localhost"}));
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
 
@@ -1171,7 +1182,7 @@ TEST(MenuScreenTests, ConnectingScreenShowsServerAndCancels) {
   arv::ui::UIScreenManager screens;
   screens.push(arv::ui::make_multiplayer_connecting_screen(
       arv::ui::ServerListEntry{"Local", "localhost"}));
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens};
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
   screens.update(ctx);
 

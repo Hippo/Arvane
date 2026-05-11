@@ -2,7 +2,6 @@
   "entities": [
     {
       "name": "arvane:pig",
-      "display_name": "Pig",
       "category": "passive",
       "components": {
         "arvane:transform": {},

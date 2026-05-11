@@ -17,19 +17,29 @@
 namespace arv::desktop {
 namespace {
 
+[[nodiscard]] std::string desktop_text(
+    const lang::LanguageCatalog* language,
+    std::string_view key) {
+  return language == nullptr ? std::string{key} : language->text(key);
+}
+
 [[nodiscard]] std::optional<std::filesystem::path> open_png_picker(
     const std::filesystem::path& default_path,
+    const lang::LanguageCatalog* language,
     std::string& error_message) {
 #if ARVANE_HAS_NFD
   const nfdresult_t init_result = NFD_Init();
   if (init_result != NFD_OKAY) {
     const char* error = NFD_GetError();
-    error_message = error == nullptr ? "failed to initialize native file dialog" : error;
+    error_message = error == nullptr
+                        ? desktop_text(language, "ui.menu.account.error_file_dialog_init")
+                        : error;
     return std::nullopt;
   }
 
   nfdu8char_t* out_path = nullptr;
-  const nfdu8filteritem_t filter_items[1] = {{"PNG image", "png"}};
+  const std::string png_filter = desktop_text(language, "ui.menu.account.png_filter");
+  const nfdu8filteritem_t filter_items[1] = {{png_filter.c_str(), "png"}};
   const std::string default_path_text = default_path.string();
   nfdopendialogu8args_t args = {0};
   args.filterList = filter_items;
@@ -48,12 +58,14 @@ namespace {
   }
 
   const char* error = NFD_GetError();
-  error_message = error == nullptr ? "native file dialog failed" : error;
+  error_message = error == nullptr
+                      ? desktop_text(language, "ui.menu.account.error_file_dialog")
+                      : error;
   NFD_Quit();
   return std::nullopt;
 #else
   (void)default_path;
-  error_message = "Native file picker support is not available in this build.";
+  error_message = desktop_text(language, "ui.menu.account.error_file_picker_unavailable");
   return std::nullopt;
 #endif
 }
@@ -67,9 +79,11 @@ namespace {
 DesktopMenuState::DesktopMenuState(
     std::filesystem::path saves_root,
     std::filesystem::path server_list_file,
-    std::filesystem::path arvane_home) : saves_root_(std::move(saves_root)),
-                                         server_list_file_(std::move(server_list_file)),
-                                         arvane_home_(std::move(arvane_home)) {
+    std::filesystem::path arvane_home,
+    const lang::LanguageCatalog* language) : saves_root_(std::move(saves_root)),
+                                             server_list_file_(std::move(server_list_file)),
+                                             arvane_home_(std::move(arvane_home)),
+                                             language_(language) {
   refresh_worlds();
   load_servers();
   load_profiles();
@@ -253,7 +267,7 @@ void DesktopMenuState::handle(const ui::SelectLocalProfileCommand& command) {
         return profile.profile_id.string() == command.profile_id;
       });
   if (found == profile_store_.profiles.end()) {
-    profile_status_ = "Profile was not found.";
+    profile_status_ = desktop_text(language_, "ui.menu.account.error_profile_missing");
     return;
   }
   profile_store_.selected_profile =
@@ -264,7 +278,7 @@ void DesktopMenuState::handle(const ui::SelectLocalProfileCommand& command) {
 void DesktopMenuState::handle(const ui::UpdateLocalProfileCommand& command) {
   client::LocalPlayerIdentity* profile = profile_by_id(command.profile_id);
   if (profile == nullptr) {
-    profile_status_ = "Profile was not found.";
+    profile_status_ = desktop_text(language_, "ui.menu.account.error_profile_missing");
     return;
   }
   profile->display_name = display_name_or_default(command.display_name);
@@ -297,7 +311,7 @@ void DesktopMenuState::handle(const ui::PickLocalProfileSkinCommand& command) {
 
   client::LocalPlayerIdentity* profile = profile_by_id(command.profile_id.value());
   if (profile == nullptr) {
-    profile_status_ = "Profile was not found.";
+    profile_status_ = desktop_text(language_, "ui.menu.account.error_profile_missing");
     return;
   }
   auto pending_it = pending_edit_skins_.find(command.profile_id.value());
@@ -345,7 +359,7 @@ void DesktopMenuState::handle(const ui::SetLocalProfileSkinOrderCommand& command
   }
 
   if (profile_by_id(command.profile_id.value()) == nullptr) {
-    profile_status_ = "Profile was not found.";
+    profile_status_ = desktop_text(language_, "ui.menu.account.error_profile_missing");
     return;
   }
   pending_edit_skins_[command.profile_id.value()] = std::move(ordered);
@@ -355,7 +369,7 @@ void DesktopMenuState::handle(const ui::SetLocalProfileSkinOrderCommand& command
 void DesktopMenuState::handle(const ui::SetLocalProfileSkinSlimCommand& command) {
   std::vector<client::LocalProfileSkin>* skins = mutable_skin_source(command.profile_id);
   if (skins == nullptr) {
-    profile_status_ = "Profile was not found.";
+    profile_status_ = desktop_text(language_, "ui.menu.account.error_profile_missing");
     return;
   }
   const auto found = std::find_if(
@@ -365,7 +379,7 @@ void DesktopMenuState::handle(const ui::SetLocalProfileSkinSlimCommand& command)
         return skin.skin_hash == command.skin_hash;
       });
   if (found == skins->end()) {
-    profile_status_ = "Skin was not found.";
+    profile_status_ = desktop_text(language_, "ui.menu.account.error_skin_missing");
     return;
   }
   found->slim_model = command.slim_model;
@@ -392,7 +406,7 @@ void DesktopMenuState::handle(const ui::DeleteLocalProfileCommand& command) {
         return profile.profile_id.string() == command.profile_id;
       });
   if (found == profile_store_.profiles.end()) {
-    profile_status_ = "Profile was not found.";
+    profile_status_ = desktop_text(language_, "ui.menu.account.error_profile_missing");
     return;
   }
 
@@ -566,13 +580,17 @@ std::optional<client::LocalProfileSkin> DesktopMenuState::pick_and_import_skin()
   std::error_code error;
   std::filesystem::create_directories(client::local_skins_directory_path(arvane_home_), error);
   if (error) {
-    profile_status_ = "Failed to create skins directory: " + error.message();
+    profile_status_ = language_ == nullptr
+                          ? std::string{"ui.menu.account.error_create_skins_directory"}
+                          : language_->format(
+                                "ui.menu.account.error_create_skins_directory",
+                                {{"message", error.message()}});
     return std::nullopt;
   }
 
   std::string picker_error;
   std::optional<std::filesystem::path> selected =
-      open_png_picker(client::local_skins_directory_path(arvane_home_), picker_error);
+      open_png_picker(client::local_skins_directory_path(arvane_home_), language_, picker_error);
   if (!selected.has_value()) {
     if (!picker_error.empty()) {
       profile_status_ = picker_error;

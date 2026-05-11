@@ -1,5 +1,7 @@
 #include "arv/command/command_dispatcher.hpp"
 
+#include "arv/lang/language.hpp"
+
 #include <cctype>
 #include <string>
 
@@ -20,12 +22,49 @@ namespace {
   return text;
 }
 
+[[nodiscard]] std::string localized_command_text(
+    const CommandServices& services,
+    std::string_view key,
+    std::string_view fallback) {
+  return services.language == nullptr ? std::string{fallback}
+                                      : services.language->text(key, fallback);
+}
+
+void replace_all(std::string& text, std::string_view token, std::string_view value) {
+  if (token.empty()) {
+    return;
+  }
+  usize pos = 0;
+  while ((pos = text.find(token, pos)) != std::string::npos) {
+    text.replace(pos, token.size(), value);
+    pos += value.size();
+  }
+}
+
+[[nodiscard]] std::string command_format(
+    const CommandServices& services,
+    std::string_view key,
+    std::initializer_list<lang::FormatArg> args,
+    std::string_view fallback) {
+  if (services.language != nullptr) {
+    return services.language->format(key, args, fallback);
+  }
+  std::string result{fallback};
+  for (const lang::FormatArg& arg : args) {
+    replace_all(result, "{" + arg.name + "}", arg.value);
+  }
+  return result;
+}
+
 [[nodiscard]] CommandResult validate_access(
     const Command& command,
     const CommandSender& sender,
     CommandServices& services) {
   if (command.console_only && sender.kind != CommandSourceKind::ServerConsole) {
-    return CommandResult::invalid_source("Command is restricted to the server console.");
+    return CommandResult::invalid_source(localized_command_text(
+        services,
+        "command.dispatcher.console_only",
+        "Command is restricted to the server console."));
   }
 
   if (command.domain != CommandDomain::ServerBound ||
@@ -38,7 +77,10 @@ namespace {
   }
 
   if (!services.permission_check) {
-    return CommandResult::internal_error("Command permission service is unavailable.");
+    return CommandResult::internal_error(localized_command_text(
+        services,
+        "command.dispatcher.permission_service_unavailable",
+        "Command permission service is unavailable."));
   }
 
   const CommandPermissionResult permission = services.permission_check(sender, command);
@@ -50,10 +92,11 @@ namespace {
     return CommandResult::permission_denied(permission.message);
   }
 
-  std::string text{"Permission denied: "};
-  text.append(command.permission);
-  text.push_back('.');
-  return CommandResult::permission_denied(std::move(text));
+  return CommandResult::permission_denied(command_format(
+      services,
+      "command.dispatcher.permission_denied",
+      {{"permission", command.permission}},
+      "Permission denied: {permission}."));
 }
 
 } // namespace
@@ -98,24 +141,29 @@ CommandResult dispatch_command(
   const std::string normalized = normalize_command_text(command_text);
   const std::vector<std::string_view> tokens = tokenize_command_text(normalized);
   if (tokens.empty()) {
-    return CommandResult::usage_error("No command entered.");
+    return CommandResult::usage_error(localized_command_text(
+        services,
+        "command.dispatcher.no_command",
+        "No command entered."));
   }
 
   const std::string_view input_name = tokens.front();
   const std::optional<CommandLookup> lookup = registry.resolve(input_name);
   if (!lookup.has_value() || lookup->command == nullptr) {
-    std::string text{"Unknown command: "};
-    text.append(input_name);
-    text.push_back('.');
-    return CommandResult::unknown_command(std::move(text));
+    return CommandResult::unknown_command(command_format(
+        services,
+        "command.dispatcher.unknown_command",
+        {{"command", std::string{input_name}}},
+        "Unknown command: {command}."));
   }
 
   const Command& command = *lookup->command;
   if (command.domain != domain) {
-    std::string text{"Command is not available in this domain: "};
-    text.append(input_name);
-    text.push_back('.');
-    return CommandResult::invalid_source(std::move(text));
+    return CommandResult::invalid_source(command_format(
+        services,
+        "command.dispatcher.wrong_domain",
+        {{"command", std::string{input_name}}},
+        "Command is not available in this domain: {command}."));
   }
 
   CommandResult access = validate_access(command, sender, services);
@@ -124,10 +172,11 @@ CommandResult dispatch_command(
   }
 
   if (!command.execute) {
-    std::string text{"Command has no executor: "};
-    text.append(command.name);
-    text.push_back('.');
-    return CommandResult::internal_error(std::move(text));
+    return CommandResult::internal_error(command_format(
+        services,
+        "command.dispatcher.no_executor",
+        {{"command", command.name}},
+        "Command has no executor: {command}."));
   }
 
   CommandArgs args;

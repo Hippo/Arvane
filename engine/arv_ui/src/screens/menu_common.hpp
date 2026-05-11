@@ -26,6 +26,17 @@ inline constexpr Vec4f MutedTextColor{0.660F, 0.700F, 0.740F, 1.0F};
 inline constexpr Vec4f ErrorTextColor{0.980F, 0.420F, 0.380F, 1.0F};
 inline constexpr Vec4f AccentColor{0.400F, 0.760F, 0.860F, 1.0F};
 
+[[nodiscard]] inline std::string tr(const UIContext& ctx, std::string_view key) {
+  return ctx.language == nullptr ? std::string{key} : ctx.language->text(key);
+}
+
+[[nodiscard]] inline std::string tr(
+    const UIContext& ctx,
+    std::string_view key,
+    std::initializer_list<lang::FormatArg> args) {
+  return ctx.language == nullptr ? std::string{key} : ctx.language->format(key, args);
+}
+
 enum class TextField : u8 {
   None,
   Name,

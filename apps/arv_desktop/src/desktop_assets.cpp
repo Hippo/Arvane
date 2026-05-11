@@ -2,10 +2,12 @@
 
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
+#include "arv/lang/language.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/render/opengl_renderer.hpp"
 
 #include <filesystem>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -17,6 +19,67 @@ namespace {
     std::string message) {
   return DesktopLoadedAssetsResult::failure(
       {std::move(category), std::move(message)});
+}
+
+[[nodiscard]] std::optional<DesktopAssetLoadError> apply_block_language(
+    const lang::LanguageCatalog& language,
+    voxel::BlockRegistry& registry) {
+  for (u32 index = 0; index < registry.block_count(); ++index) {
+    const voxel::BlockID block_id{index};
+    const voxel::BlockRecord* block = registry.block(block_id);
+    if (block == nullptr) {
+      continue;
+    }
+    const std::string key = lang::block_display_name_key(block->name);
+    const std::optional<std::string_view> text = language.find(key);
+    if (!text.has_value()) {
+      return DesktopAssetLoadError{"lang", "missing language key: " + key};
+    }
+    registry.set_display_name(block_id, std::string{text.value()});
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<DesktopAssetLoadError> apply_item_language(
+    const lang::LanguageCatalog& language,
+    const voxel::BlockRegistry& blocks,
+    player::ItemRegistry& registry) {
+  for (u32 index = 0; index < registry.item_count(); ++index) {
+    const player::ItemID item_id{index};
+    const player::ItemRecord* item = registry.item(item_id);
+    if (item == nullptr) {
+      continue;
+    }
+    const std::string key = lang::item_display_name_key(item->name);
+    if (const std::optional<std::string_view> text = language.find(key);
+        text.has_value()) {
+      registry.set_display_name(item_id, std::string{text.value()});
+      continue;
+    }
+    if (item->source_block.has_value()) {
+      if (const voxel::BlockRecord* block = blocks.block(item->source_block.value());
+          block != nullptr && !block->display_name.empty()) {
+        registry.set_display_name(item_id, block->display_name);
+        continue;
+      }
+    }
+    return DesktopAssetLoadError{"lang", "missing language key: " + key};
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<DesktopAssetLoadError> apply_entity_language(
+    const lang::LanguageCatalog& language,
+    entity::EntityRegistry& registry) {
+  for (const entity::EntityTypeRecord& entity : registry.records()) {
+    const std::string key = lang::entity_display_name_key(entity.name);
+    const std::optional<std::string_view> text = language.find(key);
+    if (!text.has_value()) {
+      return DesktopAssetLoadError{"lang", "missing language key: " + key};
+    }
+    registry.set_display_name(entity.id, std::string{text.value()});
+  }
+  return std::nullopt;
 }
 
 [[nodiscard]] render::PlayerSkinAtlasConfig player_skin_atlas_config_from(
@@ -101,6 +164,15 @@ DesktopLoadedAssetsResult load_desktop_assets(
   renderer.configure_player_skin_atlas(
       player_skin_atlas_config_from(config.render.atlases.player_skins));
 
+  auto language_result = lang::load_language_directory(
+      config.paths.lang_path(),
+      config.language.locale,
+      config.language.fallback_locale);
+  if (!language_result) {
+    return asset_failure("lang", language_result.error().message);
+  }
+  loaded.language = std::move(language_result.value());
+
   core::info("assets", "loading UI font stacks");
   if (auto font_result = load_ui_font_stack(
           resources,
@@ -172,6 +244,10 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("blocks", block_registry_result.error().message);
   }
   loaded.block_registry = std::move(block_registry_result.value());
+  if (auto error = apply_block_language(loaded.language, loaded.block_registry);
+      error.has_value()) {
+    return DesktopLoadedAssetsResult::failure(error.value());
+  }
 
   auto block_models_result = asset::load_block_model_definitions(resources, loaded.block_registry);
   if (!block_models_result) {
@@ -217,6 +293,13 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("items", item_registry_result.error().message);
   }
   loaded.item_registry = std::move(item_registry_result.value());
+  if (auto error = apply_item_language(
+          loaded.language,
+          loaded.block_registry,
+          loaded.item_registry);
+      error.has_value()) {
+    return DesktopLoadedAssetsResult::failure(error.value());
+  }
   loaded.item_registry_hash = persistence::hash_item_registry(loaded.item_registry);
 
   auto item_animation_text = io::read_text_file(
@@ -268,6 +351,10 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("entities", entity_registry_result.error().message);
   }
   loaded.entity_registry = std::move(entity_registry_result.value());
+  if (auto error = apply_entity_language(loaded.language, loaded.entity_registry);
+      error.has_value()) {
+    return DesktopLoadedAssetsResult::failure(error.value());
+  }
 
   auto entity_render_assets_result = build_entity_render_assets(
       resources,

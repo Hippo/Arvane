@@ -39,6 +39,9 @@ TEST(ConfigTests, ParsesYamlConfigWithDefaults) {
   const auto result = arv::io::parse_config_yaml(R"(
 paths:
   arvane_home: custom_home
+language:
+  locale: en_GB
+  fallback_locale: en_US
 world: test-world
 window:
   width: 1920
@@ -206,6 +209,8 @@ chunk_pipeline:
 
   ASSERT_TRUE(result);
   EXPECT_EQ(result.value().paths.arvane_home_path(), std::filesystem::path("custom_home"));
+  EXPECT_EQ(result.value().language.locale, "en_GB");
+  EXPECT_EQ(result.value().language.fallback_locale, "en_US");
   EXPECT_EQ(result.value().server.world, "test-world");
   EXPECT_EQ(result.value().window.width, 1920U);
   EXPECT_EQ(result.value().window.height, 720U);
@@ -599,6 +604,7 @@ TEST(ConfigTests, ResolvesDefaultRuntimePathsFromProjectRoot) {
   EXPECT_EQ(config.paths.plugins_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/plugins"));
   EXPECT_EQ(config.paths.config_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/config"));
   EXPECT_EQ(config.paths.saves_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/saves"));
+  EXPECT_EQ(config.paths.lang_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/lang"));
   EXPECT_EQ(config.paths.config_file, std::filesystem::path("/tmp/arvane_project/arvane_home/config/client.yaml"));
   EXPECT_EQ(
       config.paths.shared_config_file,
@@ -710,6 +716,9 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomeAssets) {
       result.value().paths.assets_path(),
       result.value().paths.project_root / "arvane_home" / "assets");
   EXPECT_EQ(
+      result.value().paths.lang_path(),
+      result.value().paths.project_root / "arvane_home" / "lang");
+  EXPECT_EQ(
       result.value().paths.assets_path().string().find("/.local/share/Trash/"),
       std::string::npos);
   EXPECT_TRUE(std::filesystem::exists(result.value().paths.config_path() / "blocks.json"));
@@ -791,6 +800,7 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   ASSERT_TRUE(written_shared);
   EXPECT_NE(written_shared.value().find("arvane_home: arvane_home"), std::string::npos);
   EXPECT_NE(written_shared.value().find("simulation:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("language:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("gameplay:"), std::string::npos);
   EXPECT_EQ(written_shared.value().find(temp_root.string()), std::string::npos);
 
