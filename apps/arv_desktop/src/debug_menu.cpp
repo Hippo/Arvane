@@ -1521,7 +1521,10 @@ void render_chunk_workload(
         "world dirty queue",
         true);
     row("Mesh candidates", chunk_view.mesh_candidates.size(), "client chunk view", true);
-    row("Mesh jobs in flight", chunk_view.pending_meshes.size(), "client workers", true);
+    row("Mesh job batches in flight", chunk_view.pending_meshes.size(), "client workers", true);
+    row("Mesh sections in flight", chunk_view.mesh_in_flight.size(), "client workers", true);
+    row("Mesh sections prepared", chunk_view.mesh_sections_prepared_last_frame, "last frame", true);
+    row("Empty mesh skips", chunk_view.empty_mesh_skips_last_frame, "last frame", true);
     row("Mesh uploads pending", renderer.pending_mesh_upload_count(), "renderer", true);
     ImGui::EndTable();
   }

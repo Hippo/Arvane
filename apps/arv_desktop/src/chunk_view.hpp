@@ -23,15 +23,24 @@ struct ChunkViewState {
     double duration_ms{};
   };
 
-  struct PendingMesh {
+  struct TimedChunkMeshBatchResult {
+    std::vector<TimedChunkMeshResult> meshes;
+  };
+
+  struct PendingMeshEntry {
     ChunkSectionCoord coord{};
     u64 source_version{};
     u64 source_content_version{};
     u64 source_light_version{};
-    sched::JobFuture<TimedChunkMeshResult> job;
+  };
+
+  struct PendingMesh {
+    std::vector<PendingMeshEntry> entries;
+    sched::JobFuture<TimedChunkMeshBatchResult> job;
   };
 
   HashMap<ChunkSectionCoord, render::ChunkDrawItem> draw_items;
+  HashMap<ChunkSectionCoord, u64> empty_mesh_content_versions;
   std::vector<PendingMesh> pending_meshes;
   HashSet<ChunkSectionCoord> mesh_in_flight;
 
@@ -48,8 +57,11 @@ struct ChunkViewState {
   std::vector<render::ChunkDrawItem> cached_draw_items;
 
   std::chrono::steady_clock::time_point last_profile_log{};
+  std::chrono::steady_clock::time_point last_spike_log{};
   u64 frames{};
   u32 mesh_completed_last_frame{};
+  u32 empty_mesh_skips_last_frame{};
+  u32 mesh_sections_prepared_last_frame{};
   double mesh_ms_last_frame{};
   usize visible_chunks_last_frame{};
   usize opaque_chunks_last_frame{};

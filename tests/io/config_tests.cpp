@@ -208,6 +208,8 @@ chunk_pipeline:
   max_client_chunk_applies_per_frame: 6
   max_client_chunk_unloads_per_frame: 7
   max_mesh_jobs_per_frame: 5
+  max_mesh_sections_per_job: 3
+  max_mesh_sections_prepared_per_frame: 6
   frame_spike_log_ms: 25
   profile_log_interval_ms: 750
 )");
@@ -355,6 +357,8 @@ chunk_pipeline:
   EXPECT_EQ(result.value().chunk_pipeline.max_client_chunk_applies_per_frame, 6U);
   EXPECT_EQ(result.value().chunk_pipeline.max_client_chunk_unloads_per_frame, 7U);
   EXPECT_EQ(result.value().chunk_pipeline.max_mesh_jobs_per_frame, 5U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_mesh_sections_per_job, 3U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_mesh_sections_prepared_per_frame, 6U);
   EXPECT_EQ(result.value().chunk_pipeline.frame_spike_log_ms, 25U);
   EXPECT_EQ(result.value().chunk_pipeline.profile_log_interval_ms, 750U);
 }

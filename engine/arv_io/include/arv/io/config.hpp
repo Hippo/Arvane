@@ -358,6 +358,8 @@ struct ChunkPipelineConfig {
   u32 max_client_chunk_applies_per_frame{2};
   u32 max_client_chunk_unloads_per_frame{32};
   u32 max_mesh_jobs_per_frame{4};
+  u32 max_mesh_sections_per_job{4};
+  u32 max_mesh_sections_prepared_per_frame{4};
   u32 frame_spike_log_ms{10};
   // 0 keeps recurring profiling logs off the render path; spike warnings remain enabled.
   u32 profile_log_interval_ms{};

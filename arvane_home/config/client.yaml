@@ -11,7 +11,7 @@ window:
 chunks:
   load_distance: 12
   simulation_distance: 2
-  render_distance: 12
+  render_distance: 6
   stream_distance: 12
 physics:
   mouse_sensitivity_radians: 0.0025
@@ -70,5 +70,7 @@ chunk_pipeline:
   max_client_chunk_applies_per_frame: 2
   max_client_chunk_unloads_per_frame: 32
   max_mesh_jobs_per_frame: 4
+  max_mesh_sections_per_job: 4
+  max_mesh_sections_prepared_per_frame: 4
   frame_spike_log_ms: 10
   profile_log_interval_ms: 0

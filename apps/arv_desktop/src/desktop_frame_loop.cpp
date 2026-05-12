@@ -27,6 +27,15 @@ bool session_world_ready(const DesktopGameSession* session) noexcept {
 
 namespace {
 
+constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
+
+[[nodiscard]] bool spike_log_due(
+    std::chrono::steady_clock::time_point last_log,
+    std::chrono::steady_clock::time_point now) noexcept {
+  return last_log.time_since_epoch().count() == 0 ||
+         now - last_log >= SpikeLogCooldown;
+}
+
 [[nodiscard]] ui::InputBindingDevice ui_device_from(platform::InputDeviceType type) noexcept {
   switch (type) {
     case platform::InputDeviceType::Keyboard:
@@ -606,15 +615,21 @@ void DesktopFrameLoop::record_frame_work_profile(
         frame_work_ms,
         "main/render");
     last_frame_work_ms_ = frame_work_ms;
-    if (frame_work_ms > static_cast<double>(config_.chunk_pipeline.frame_spike_log_ms)) {
+    const auto profile_now = std::chrono::steady_clock::now();
+    if (frame_work_ms > static_cast<double>(config_.chunk_pipeline.frame_spike_log_ms) &&
+        spike_log_due(last_frame_spike_log_, profile_now)) {
       core::warn(
           "frame_profile",
-          "cpu frame work spike {}ms frame_delta={}ms queued_mesh={} pending_uploads={} uploads_last_frame={}",
+          "cpu frame work spike {}ms frame_delta={}ms queued_mesh_batches={} mesh_sections_in_flight={} mesh_sections_prepared={} empty_mesh_skips={} pending_uploads={} uploads_last_frame={}",
           frame_work_ms,
           timing.frame_delta_ms,
           has_active_session ? active_session->chunk_view.pending_meshes.size() : 0U,
+          has_active_session ? active_session->chunk_view.mesh_in_flight.size() : 0U,
+          has_active_session ? active_session->chunk_view.mesh_sections_prepared_last_frame : 0U,
+          has_active_session ? active_session->chunk_view.empty_mesh_skips_last_frame : 0U,
           renderer_.pending_mesh_upload_count(),
           renderer_.mesh_uploads_last_frame());
+      last_frame_spike_log_ = profile_now;
     }
   } else {
     (void)timing;

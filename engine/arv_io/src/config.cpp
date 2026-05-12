@@ -859,6 +859,10 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
           << config.chunk_pipeline.max_client_chunk_unloads_per_frame;
   emitter << YAML::Key << "max_mesh_jobs_per_frame" << YAML::Value
           << config.chunk_pipeline.max_mesh_jobs_per_frame;
+  emitter << YAML::Key << "max_mesh_sections_per_job" << YAML::Value
+          << config.chunk_pipeline.max_mesh_sections_per_job;
+  emitter << YAML::Key << "max_mesh_sections_prepared_per_frame" << YAML::Value
+          << config.chunk_pipeline.max_mesh_sections_prepared_per_frame;
   emitter << YAML::Key << "frame_spike_log_ms" << YAML::Value
           << config.chunk_pipeline.frame_spike_log_ms;
   emitter << YAML::Key << "profile_log_interval_ms" << YAML::Value
@@ -1376,6 +1380,10 @@ ConfigResult save_default_client_config_file(
           << config.chunk_pipeline.max_client_chunk_unloads_per_frame;
   emitter << YAML::Key << "max_mesh_jobs_per_frame" << YAML::Value
           << config.chunk_pipeline.max_mesh_jobs_per_frame;
+  emitter << YAML::Key << "max_mesh_sections_per_job" << YAML::Value
+          << config.chunk_pipeline.max_mesh_sections_per_job;
+  emitter << YAML::Key << "max_mesh_sections_prepared_per_frame" << YAML::Value
+          << config.chunk_pipeline.max_mesh_sections_prepared_per_frame;
   emitter << YAML::Key << "frame_spike_log_ms" << YAML::Value
           << config.chunk_pipeline.frame_spike_log_ms;
   emitter << YAML::Key << "profile_log_interval_ms" << YAML::Value
@@ -1545,6 +1553,14 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
         chunk_pipeline,
         "max_mesh_jobs_per_frame",
         config.chunk_pipeline.max_mesh_jobs_per_frame);
+    read_scalar(
+        chunk_pipeline,
+        "max_mesh_sections_per_job",
+        config.chunk_pipeline.max_mesh_sections_per_job);
+    read_scalar(
+        chunk_pipeline,
+        "max_mesh_sections_prepared_per_frame",
+        config.chunk_pipeline.max_mesh_sections_prepared_per_frame);
     read_scalar(
         chunk_pipeline,
         "frame_spike_log_ms",
@@ -1931,7 +1947,9 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
       config.chunk_pipeline.max_lighting_results_per_tick == 0U ||
       config.chunk_pipeline.max_client_chunk_applies_per_frame == 0U ||
       config.chunk_pipeline.max_client_chunk_unloads_per_frame == 0U ||
-      config.chunk_pipeline.max_mesh_jobs_per_frame == 0U) {
+      config.chunk_pipeline.max_mesh_jobs_per_frame == 0U ||
+      config.chunk_pipeline.max_mesh_sections_per_job == 0U ||
+      config.chunk_pipeline.max_mesh_sections_prepared_per_frame == 0U) {
     return ConfigError{"chunk_pipeline job budgets must be non-zero"};
   }
 

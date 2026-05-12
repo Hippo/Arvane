@@ -281,6 +281,7 @@ private:
   u32 fps_sample_frames_{};
   Seconds fps_sample_seconds_{};
   double last_frame_work_ms_{};
+  std::chrono::steady_clock::time_point last_frame_spike_log_{};
   u64 profile_frame_index_{};
   HashMap<std::string, render::TextureRegionHandle> player_skin_regions_{};
   UiBuildCacheKey ui_tree_cache_key_{};

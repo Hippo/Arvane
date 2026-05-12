@@ -14,6 +14,20 @@
 namespace arv::desktop {
 namespace {
 
+struct MeshJobInput {
+  ChunkSectionCoord coord{};
+  voxel::ChunkSnapshot snapshot;
+};
+
+constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
+
+[[nodiscard]] bool spike_log_due(
+    std::chrono::steady_clock::time_point last_log,
+    std::chrono::steady_clock::time_point now) noexcept {
+  return last_log.time_since_epoch().count() == 0 ||
+         now - last_log >= SpikeLogCooldown;
+}
+
 [[nodiscard]] i32 abs_i32(i32 value) noexcept {
   return value < 0 ? -value : value;
 }
@@ -126,6 +140,45 @@ void set_draw_items_dirty(ChunkViewState& view) noexcept {
 
 void set_mesh_candidates_sort_dirty(ChunkViewState& view) noexcept {
   view.mesh_candidates_sort_dirty = true;
+}
+
+[[nodiscard]] bool chunk_section_is_empty_for_rendering(
+    const voxel::ChunkSection& chunk) noexcept {
+  for (const voxel::BlockVariantID block : chunk.blocks()) {
+    if (block != voxel::AirBlockVariantID) {
+      return false;
+    }
+  }
+  for (const voxel::FluidCell fluid : chunk.fluids()) {
+    if (!fluid.empty()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void remove_empty_chunk_mesh(
+    render::RenderCommandQueue& renderer,
+    ChunkViewState& view,
+    WorldID world_id,
+    ChunkSectionCoord coord) {
+  renderer.remove_chunk_mesh({world_id, coord});
+  if (view.draw_items.erase(coord) > 0U) {
+    set_draw_items_dirty(view);
+  }
+}
+
+[[nodiscard]] bool is_known_empty_mesh(
+    const ChunkViewState& view,
+    ChunkSectionCoord coord,
+    u64 content_version) {
+  const auto iter = view.empty_mesh_content_versions.find(coord);
+  return iter != view.empty_mesh_content_versions.end() && iter->second == content_version;
+}
+
+[[nodiscard]] bool chunk_waiting_for_mesh_upload(
+    const voxel::ChunkSection& chunk) noexcept {
+  return chunk.mesh_state() == voxel::ChunkMeshState::WaitingForUpload;
 }
 
 void enqueue_mesh_candidate(ChunkViewState& view, ChunkSectionCoord coord) {
@@ -257,45 +310,46 @@ void drain_mesh_jobs(
       continue;
     }
 
-    auto timed = pending.job.get();
-    view.mesh_in_flight.erase(pending.coord);
-    view.mesh_completed_last_frame++;
-    view.mesh_ms_last_frame += timed.duration_ms;
-    const bool mesh_matches_current_version =
-        world.validate_mesh_result(timed.mesh.coord, timed.mesh.source_version) &&
-        world.validate_mesh_content_result(
-            timed.mesh.coord,
-            timed.mesh.source_content_version);
-    if (mesh_matches_current_version) {
-      render::ChunkDrawItem draw_item;
-      draw_item.key = {timed.mesh.world_id, timed.mesh.coord};
-      draw_item.expected_version = timed.mesh.source_version;
-      draw_item.expected_light_version = timed.mesh.source_light_version;
-      draw_item.has_opaque_mesh = !timed.mesh.opaque.indices.empty();
-      draw_item.has_transparent_mesh = !timed.mesh.transparent.indices.empty();
-      render::ChunkMeshUpload upload;
-      upload.mesh = std::move(timed.mesh);
-      renderer.enqueue_chunk_mesh_upload(std::move(upload));
-      if (voxel::ChunkSection* upload_chunk = search.find_mutable_chunk(draw_item.key.coord);
-          upload_chunk != nullptr) {
-        upload_chunk->mark_mesh_waiting_for_upload();
+    auto batch = pending.job.get();
+    for (const ChunkViewState::PendingMeshEntry& entry : pending.entries) {
+      view.mesh_in_flight.erase(entry.coord);
+    }
+
+    for (auto& timed : batch.meshes) {
+      view.mesh_completed_last_frame++;
+      view.mesh_ms_last_frame += timed.duration_ms;
+      const bool mesh_matches_current_version =
+          world.validate_mesh_result(timed.mesh.coord, timed.mesh.source_version) &&
+          world.validate_mesh_content_result(
+              timed.mesh.coord,
+              timed.mesh.source_content_version);
+      if (mesh_matches_current_version) {
+        render::ChunkDrawItem draw_item;
+        draw_item.key = {timed.mesh.world_id, timed.mesh.coord};
+        draw_item.expected_version = timed.mesh.source_version;
+        draw_item.expected_light_version = timed.mesh.source_light_version;
+        draw_item.has_opaque_mesh = !timed.mesh.opaque.indices.empty();
+        draw_item.has_transparent_mesh = !timed.mesh.transparent.indices.empty();
+        render::ChunkMeshUpload upload;
+        upload.mesh = std::move(timed.mesh);
+        renderer.enqueue_chunk_mesh_upload(std::move(upload));
+        if (voxel::ChunkSection* upload_chunk = search.find_mutable_chunk(draw_item.key.coord);
+            upload_chunk != nullptr) {
+          upload_chunk->mark_mesh_waiting_for_upload();
+        }
+        const auto existing_draw_item = view.draw_items.find(draw_item.key.coord);
+        if (existing_draw_item == view.draw_items.end() ||
+            render::chunk_mesh_upload_at_least_as_new(
+                draw_item.expected_version,
+                draw_item.expected_light_version,
+                existing_draw_item->second.expected_version,
+                existing_draw_item->second.expected_light_version)) {
+          view.draw_items[draw_item.key.coord] = draw_item;
+          set_draw_items_dirty(view);
+        }
+      } else if (is_inside_render_view(view, timed.mesh.coord)) {
+        enqueue_mesh_candidate(view, timed.mesh.coord);
       }
-      const auto existing_draw_item = view.draw_items.find(draw_item.key.coord);
-      if (existing_draw_item == view.draw_items.end() ||
-          render::chunk_mesh_upload_at_least_as_new(
-              draw_item.expected_version,
-              draw_item.expected_light_version,
-              existing_draw_item->second.expected_version,
-              existing_draw_item->second.expected_light_version)) {
-        view.draw_items[draw_item.key.coord] = draw_item;
-        set_draw_items_dirty(view);
-      }
-      if (const voxel::ChunkSection* chunk = search.find_chunk(draw_item.key.coord);
-          chunk != nullptr && chunk->is_dirty(voxel::ChunkDirtyFlags::LightMesh)) {
-        enqueue_mesh_candidate(view, draw_item.key.coord);
-      }
-    } else if (is_inside_render_view(view, pending.coord)) {
-      enqueue_mesh_candidate(view, pending.coord);
     }
 
     view.pending_meshes.erase(
@@ -307,9 +361,18 @@ void drain_mesh_upload_receipts(
     world::WorldRuntime& world,
     render::RenderCommandQueue& renderer,
     ChunkViewState& view) {
+  world::WorldSearch search{world};
   for (const render::ChunkMeshUploadReceipt& receipt :
        renderer.drain_chunk_mesh_upload_receipts()) {
     if (!receipt.accepted) {
+      if (voxel::ChunkSection* chunk = search.find_mutable_chunk(receipt.key.coord);
+          chunk != nullptr) {
+        const voxel::ChunkDirtyFlags mesh_flags =
+            chunk->dirty_flags() &
+            (voxel::ChunkDirtyFlags::Geometry | voxel::ChunkDirtyFlags::LightMesh);
+        chunk->mark_dirty(
+            voxel::any(mesh_flags) ? mesh_flags : voxel::ChunkDirtyFlags::Geometry);
+      }
       if (is_inside_render_view(view, receipt.key.coord)) {
         enqueue_mesh_candidate(view, receipt.key.coord);
       }
@@ -323,6 +386,15 @@ void drain_mesh_upload_receipts(
         receipt.source_content_version);
     if (!published && is_inside_render_view(view, receipt.key.coord)) {
       enqueue_mesh_candidate(view, receipt.key.coord);
+      continue;
+    }
+    if (published) {
+      const voxel::ChunkSection* chunk = search.find_chunk(receipt.key.coord);
+      if (chunk != nullptr &&
+          chunk->is_dirty(voxel::ChunkDirtyFlags::Geometry | voxel::ChunkDirtyFlags::LightMesh) &&
+          is_inside_render_view(view, receipt.key.coord)) {
+        enqueue_mesh_candidate(view, receipt.key.coord);
+      }
     }
   }
 }
@@ -336,95 +408,171 @@ void schedule_mesh_jobs(
     const voxel::BlockRegistry& block_registry,
     const voxel::BlockRenderData& block_render_data) {
   ARV_PROFILE_ZONE("Chunk meshing schedule");
+  if (pipeline.max_mesh_jobs_per_frame == 0U) {
+    return;
+  }
   sort_mesh_candidates(world, view);
 
-  u32 mesh_jobs_scheduled = 0;
+  u32 mesh_batches_scheduled = 0;
+  u32 mesh_sections_prepared = 0;
+  const u32 max_sections_per_job =
+      std::max<u32>(pipeline.max_mesh_sections_per_job, 1U);
+  const u32 max_sections_prepared_per_frame =
+      std::max<u32>(pipeline.max_mesh_sections_prepared_per_frame, 1U);
   const usize soft_upload_backlog =
-      std::max<usize>(static_cast<usize>(pipeline.max_mesh_jobs_per_frame) * 4U, 16U);
+      std::max<usize>(
+          static_cast<usize>(pipeline.max_mesh_jobs_per_frame) *
+              static_cast<usize>(max_sections_per_job) * 4U,
+          16U);
   const bool upload_backlog_high = renderer.pending_mesh_upload_count() >= soft_upload_backlog;
   world::WorldSearch search{world};
   while (!view.mesh_candidates.empty() &&
-         mesh_jobs_scheduled < pipeline.max_mesh_jobs_per_frame &&
+         mesh_sections_prepared < max_sections_prepared_per_frame &&
+         mesh_batches_scheduled < pipeline.max_mesh_jobs_per_frame &&
          view.pending_meshes.size() < pipeline.max_mesh_jobs_per_frame) {
-    const ChunkSectionCoord coord = view.mesh_candidates.front();
-    view.mesh_candidates.pop_front();
-    view.mesh_candidate_set.erase(coord);
+    std::vector<MeshJobInput> inputs;
+    std::vector<ChunkViewState::PendingMeshEntry> entries;
+    inputs.reserve(max_sections_per_job);
+    entries.reserve(max_sections_per_job);
+    bool stop_after_batch = false;
 
-    if (!is_inside_render_view(view, coord) ||
-        view.mesh_in_flight.find(coord) != view.mesh_in_flight.end()) {
-      continue;
+    while (!view.mesh_candidates.empty() &&
+           mesh_sections_prepared < max_sections_prepared_per_frame &&
+           inputs.size() < static_cast<usize>(max_sections_per_job)) {
+      const ChunkSectionCoord coord = view.mesh_candidates.front();
+      view.mesh_candidates.pop_front();
+      view.mesh_candidate_set.erase(coord);
+
+      if (!is_inside_render_view(view, coord) ||
+          view.mesh_in_flight.find(coord) != view.mesh_in_flight.end()) {
+        continue;
+      }
+
+      voxel::ChunkSection* chunk = search.find_mutable_chunk(coord);
+      if (chunk == nullptr) {
+        continue;
+      }
+      if (chunk_waiting_for_mesh_upload(*chunk)) {
+        continue;
+      }
+      const bool geometry_dirty = chunk->is_dirty(voxel::ChunkDirtyFlags::Geometry);
+      const bool light_mesh_dirty = chunk->is_dirty(voxel::ChunkDirtyFlags::LightMesh);
+      const bool mesh_dirty = geometry_dirty || light_mesh_dirty;
+      const bool has_draw_item = view.draw_items.find(coord) != view.draw_items.end();
+      const u64 content_version = chunk->content_version();
+      const bool chunk_known_empty =
+          is_known_empty_mesh(view, coord, content_version) ||
+          chunk_section_is_empty_for_rendering(*chunk);
+      if (chunk_known_empty) {
+        ++mesh_sections_prepared;
+        view.empty_mesh_content_versions[coord] = content_version;
+        if (mesh_dirty) {
+          const bool published = world.publish_mesh_result(
+              coord,
+              chunk->block_version(),
+              chunk->light_version(),
+              chunk->content_version());
+          if (!published) {
+            enqueue_mesh_candidate(view, coord);
+            continue;
+          }
+          remove_empty_chunk_mesh(renderer, view, world.id(), coord);
+        } else if (has_draw_item) {
+          remove_empty_chunk_mesh(renderer, view, world.id(), coord);
+        }
+        if (mesh_dirty || !has_draw_item) {
+          ++view.empty_mesh_skips_last_frame;
+        }
+        continue;
+      }
+      if (!mesh_dirty && has_draw_item) {
+        continue;
+      }
+      if (upload_backlog_high && !geometry_dirty && has_draw_item) {
+        enqueue_mesh_candidate(view, coord);
+        stop_after_batch = true;
+        break;
+      }
+      view.empty_mesh_content_versions.erase(coord);
+      ++mesh_sections_prepared;
+
+      std::optional<voxel::ChunkSnapshot> snapshot =
+          world.make_meshing_snapshot(
+              coord,
+              world::MissingNeighborPolicy::TreatMissingAsAir);
+      if (!snapshot) {
+        continue;
+      }
+
+      entries.push_back(
+          {coord,
+           snapshot->source_version,
+           snapshot->source_content_version,
+           snapshot->source_light_version});
+      inputs.push_back({coord, std::move(*snapshot)});
     }
 
-    voxel::ChunkSection* chunk = search.find_mutable_chunk(coord);
-    if (chunk == nullptr) {
-      continue;
-    }
-    if (!chunk->is_dirty(voxel::ChunkDirtyFlags::Geometry) &&
-        !chunk->is_dirty(voxel::ChunkDirtyFlags::LightMesh) &&
-        view.draw_items.find(coord) != view.draw_items.end()) {
-      continue;
-    }
-    if (upload_backlog_high &&
-        !chunk->is_dirty(voxel::ChunkDirtyFlags::Geometry) &&
-        view.draw_items.find(coord) != view.draw_items.end()) {
-      enqueue_mesh_candidate(view, coord);
-      break;
-    }
-
-    std::optional<voxel::ChunkSnapshot> snapshot =
-        world.make_meshing_snapshot(
-            coord,
-            world::MissingNeighborPolicy::TreatMissingAsAir);
-    if (!snapshot) {
+    if (inputs.empty()) {
+      if (stop_after_batch) {
+        break;
+      }
       continue;
     }
 
     const WorldID world_id = world.id();
-    const u64 source_version = snapshot->source_version;
-    const u64 source_content_version = snapshot->source_content_version;
-    const u64 source_light_version = snapshot->source_light_version;
     sched::JobDesc desc;
-    desc.name = "view_chunk_meshing";
+    desc.name = inputs.size() == 1U ? "view_chunk_meshing" : "view_chunk_meshing_batch";
     desc.lane = sched::JobLane::BackgroundCpu;
     desc.domain = sched::JobDomain::Meshing;
     desc.completion_target = sched::JobCompletionTarget::Render;
     auto job = job_system.submit_result(
         std::move(desc),
-        [world_id, snapshot = std::move(*snapshot), &block_registry, &block_render_data] {
-          if constexpr (core::profiling_enabled()) {
+        [world_id,
+         inputs = std::move(inputs),
+         &block_registry,
+         &block_render_data] {
+          ChunkViewState::TimedChunkMeshBatchResult batch;
+          batch.meshes.reserve(inputs.size());
+          for (const MeshJobInput& input : inputs) {
             const auto start = std::chrono::steady_clock::now();
             auto mesh = render::build_chunk_mesh(
                 world_id,
-                snapshot,
+                input.snapshot,
                 block_registry,
                 &block_render_data);
-            const auto end = std::chrono::steady_clock::now();
-            return ChunkViewState::TimedChunkMeshResult{
-                std::move(mesh),
-                std::chrono::duration<double, std::milli>(end - start).count()};
-          } else {
-            auto mesh = render::build_chunk_mesh(
-                world_id,
-                snapshot,
-                block_registry,
-                &block_render_data);
-            return ChunkViewState::TimedChunkMeshResult{std::move(mesh), 0.0};
+            double duration_ms = 0.0;
+            if constexpr (core::profiling_enabled()) {
+              const auto end = std::chrono::steady_clock::now();
+              duration_ms =
+                  std::chrono::duration<double, std::milli>(end - start).count();
+            } else {
+              (void)start;
+            }
+            batch.meshes.push_back({std::move(mesh), duration_ms});
           }
+          return batch;
         });
     if (!job.valid()) {
-      enqueue_mesh_candidate(view, coord);
+      for (const auto& entry : entries) {
+        enqueue_mesh_candidate(view, entry.coord);
+      }
       break;
     }
-    chunk->mark_mesh_queued();
-    view.mesh_in_flight.insert(coord);
-    view.pending_meshes.emplace_back(
-        coord,
-        source_version,
-        source_content_version,
-        source_light_version,
-        std::move(job));
-    ++mesh_jobs_scheduled;
+
+    for (const auto& entry : entries) {
+      if (voxel::ChunkSection* chunk = search.find_mutable_chunk(entry.coord);
+          chunk != nullptr) {
+        chunk->mark_mesh_queued();
+      }
+      view.mesh_in_flight.insert(entry.coord);
+    }
+    view.pending_meshes.emplace_back(std::move(entries), std::move(job));
+    ++mesh_batches_scheduled;
+    if (stop_after_batch) {
+      break;
+    }
   }
+  view.mesh_sections_prepared_last_frame = mesh_sections_prepared;
 }
 
 void log_chunk_view_profile(
@@ -435,13 +583,17 @@ void log_chunk_view_profile(
   const auto refresh_end = std::chrono::steady_clock::now();
   const double refresh_ms =
       std::chrono::duration<double, std::milli>(refresh_end - refresh_start).count();
-  if (refresh_ms > static_cast<double>(pipeline.frame_spike_log_ms)) {
+  if (refresh_ms > static_cast<double>(pipeline.frame_spike_log_ms) &&
+      spike_log_due(view.last_spike_log, refresh_end)) {
     arv::core::warn(
         "chunk_profile",
-        "chunk view update spike {}ms queued_mesh={} mesh_candidates={}",
+        "chunk view update spike {}ms queued_mesh_batches={} mesh_sections_in_flight={} mesh_sections_prepared={} mesh_candidates={}",
         refresh_ms,
         view.pending_meshes.size(),
+        view.mesh_in_flight.size(),
+        view.mesh_sections_prepared_last_frame,
         view.mesh_candidates.size());
+    view.last_spike_log = refresh_end;
   }
 
   if (view.last_profile_log.time_since_epoch().count() == 0) {
@@ -455,6 +607,7 @@ void log_chunk_view_profile(
     const bool has_worker_activity =
         !view.pending_meshes.empty() ||
         view.mesh_completed_last_frame > 0U ||
+        view.empty_mesh_skips_last_frame > 0U ||
         renderer.pending_mesh_upload_count() > 0U ||
         renderer.mesh_uploads_last_frame() > 0U;
     if (!has_worker_activity) {
@@ -464,10 +617,13 @@ void log_chunk_view_profile(
 
     arv::core::info(
         "chunk_profile",
-        "workers queued_mesh={} completed_mesh={} mesh_ms={} pending_uploads={} "
+        "workers queued_mesh_batches={} mesh_sections_in_flight={} mesh_sections_prepared={} completed_mesh={} empty_mesh_skips={} mesh_ms={} pending_uploads={} "
         "uploads_last_frame={} upload_discards={} upload_ms={}",
         view.pending_meshes.size(),
+        view.mesh_in_flight.size(),
+        view.mesh_sections_prepared_last_frame,
         view.mesh_completed_last_frame,
+        view.empty_mesh_skips_last_frame,
         view.mesh_ms_last_frame,
         renderer.pending_mesh_upload_count(),
         renderer.mesh_uploads_last_frame(),
@@ -496,6 +652,7 @@ void request_chunk_view_mesh_rescan(ChunkViewState& view) noexcept {
 
 void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord) {
   view.draw_items.erase(coord);
+  view.empty_mesh_content_versions.erase(coord);
   view.mesh_candidate_set.erase(coord);
   for (auto iter = view.mesh_candidates.begin(); iter != view.mesh_candidates.end();) {
     if (*iter == coord) {
@@ -524,6 +681,8 @@ bool update_chunk_view(
   const auto refresh_start = std::chrono::steady_clock::now();
   ++view.frames;
   view.mesh_completed_last_frame = 0;
+  view.empty_mesh_skips_last_frame = 0;
+  view.mesh_sections_prepared_last_frame = 0;
   view.mesh_ms_last_frame = 0.0;
   const u64 entry_mesh_revision = world.mesh_revision();
   const bool mesh_revision_changed_before_update =
