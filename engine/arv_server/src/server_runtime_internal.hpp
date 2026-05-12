@@ -22,9 +22,12 @@
 #include "arv/server/permission_config.hpp"
 #include "arv/server/player_movement_validation.hpp"
 #include "arv/server/player_profile.hpp"
+#include "arv/sched/completion_queue.hpp"
+#include "arv/sched/owner_thread.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -88,16 +91,16 @@ struct SkinTransferSessionState {
 
 struct PendingLightingJob {
   u64 source_revision{};
-  sched::JobHandle<world::LightingResult> job;
+  sched::JobFuture<world::LightingResult> job;
 };
 
 struct PendingFluidJob {
-  sched::JobHandle<world::FluidSimulationResult> job;
+  sched::JobFuture<world::FluidSimulationResult> job;
 };
 
 struct PendingGenerationJob {
   ChunkCoord coord{};
-  sched::JobHandle<world::GeneratedChunkResult> job;
+  sched::JobFuture<world::GeneratedChunkResult> job;
 };
 
 struct PlayerPermissionCache {
@@ -142,14 +145,14 @@ public:
       const voxel::BlockRegistry* block_registry,
       const voxel::FluidDefinition& fluid_definition);
 
-  [[nodiscard]] sched::Scheduler* scheduler() noexcept;
-  [[nodiscard]] const sched::Scheduler* scheduler() const noexcept;
+  [[nodiscard]] sched::JobSystem* job_system() noexcept;
+  [[nodiscard]] const sched::JobSystem* job_system() const noexcept;
   [[nodiscard]] usize pending_generation_job_count() const noexcept;
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
 
 private:
-  std::unique_ptr<sched::Scheduler> scheduler_;
+  std::unique_ptr<sched::JobSystem> job_system_;
   std::vector<PendingGenerationJob> pending_generation_jobs_;
   std::vector<PendingLightingJob> pending_lighting_jobs_;
   std::vector<PendingFluidJob> pending_fluid_jobs_;
@@ -191,8 +194,26 @@ private:
   std::vector<ServerPlayerSaveState> states_;
 };
 
+class ServerNetworkThread {
+public:
+  [[nodiscard]] net::NetworkResult start(
+      net::ITransport& transport,
+      const net::ListenAddress& listen_address);
+  void request_stop() noexcept;
+  void join();
+  [[nodiscard]] std::vector<net::NetworkEvent> drain_events();
+
+private:
+  void run(net::ITransport& transport);
+
+  sched::NetworkThread thread_;
+  std::atomic_bool stop_requested_{true};
+  sched::CompletionQueue<net::NetworkEvent> events_;
+};
+
 struct ServerRuntimeImpl {
   explicit ServerRuntimeImpl(std::unique_ptr<net::ITransport> transport);
+  ~ServerRuntimeImpl();
 
   net::NetworkResult start(const ServerStartInfo& start_info);
   void tick();
@@ -214,8 +235,8 @@ struct ServerRuntimeImpl {
   [[nodiscard]] player::GameModeRegistry& game_modes() noexcept;
   [[nodiscard]] const player::PermissionGroupRegistry& permission_groups() const noexcept;
   [[nodiscard]] player::PermissionGroupRegistry& permission_groups() noexcept;
-  [[nodiscard]] const sched::Scheduler* world_scheduler() const noexcept;
-  [[nodiscard]] sched::Scheduler* world_scheduler() noexcept;
+  [[nodiscard]] const sched::JobSystem* world_job_system() const noexcept;
+  [[nodiscard]] sched::JobSystem* world_job_system() noexcept;
   [[nodiscard]] usize pending_generation_job_count() const noexcept;
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
@@ -368,6 +389,8 @@ struct ServerRuntimeImpl {
   [[nodiscard]] bool inventory_is_empty(const player::Inventory& inventory) const noexcept;
 
   std::unique_ptr<net::ITransport> transport_;
+  ServerNetworkThread network_thread_;
+  bool network_thread_enabled_{};
   ServerRuntimeState state_{ServerRuntimeState::Stopped};
   ServerMode mode_{ServerMode::Integrated};
   TickRate base_tps_{DefaultBaseTps};

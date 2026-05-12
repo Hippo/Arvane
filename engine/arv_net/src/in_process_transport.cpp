@@ -43,7 +43,7 @@ ConnectResult InProcessTransport::connect(const NetworkAddress&) {
                         {},
                         {},
                         std::chrono::steady_clock::now()};
-  if (!shared_->client_to_server_events.try_enqueue(std::move(accepted))) {
+  if (!shared_->client_to_server_events.try_push(std::move(accepted))) {
     shared_->client.state.store(ConnectionState::Disconnected, std::memory_order_release);
     shared_->server.state.store(ConnectionState::Disconnected, std::memory_order_release);
     return ConnectResult::failure(NetworkError{"in-process server event queue is full"});
@@ -66,7 +66,7 @@ NetworkResult InProcessTransport::send(TransportMessage message) {
                         std::chrono::steady_clock::now()};
   received.message_type = message.message_type;
   received.lane = message.lane;
-  if (!outbound_events().try_enqueue(std::move(received))) {
+  if (!outbound_events().try_push(std::move(received))) {
     return NetworkResult::failure(NetworkError{"in-process peer event queue is full"});
   }
   return NetworkResult::success();
@@ -84,7 +84,7 @@ NetworkResult InProcessTransport::close_connection(ConnectionID, std::string_vie
                         {},
                         std::string{reason},
                         std::chrono::steady_clock::now()};
-    (void)outbound_events().try_enqueue(std::move(closed));
+    (void)outbound_events().try_push(std::move(closed));
   }
 
   return NetworkResult::success();
@@ -94,7 +94,7 @@ std::vector<NetworkEvent> InProcessTransport::poll_events() {
   std::vector<NetworkEvent> events;
   events.reserve(8U);
   NetworkEvent event;
-  while (inbound_events().try_dequeue(event)) {
+  while (inbound_events().try_pop(event)) {
     if (side_ == InProcessEndpointSide::Server &&
         event.type == NetworkEventType::ConnectionAccepted) {
       NetworkEvent client_accepted{NetworkEventType::ConnectionAccepted,
@@ -103,7 +103,7 @@ std::vector<NetworkEvent> InProcessTransport::poll_events() {
                                    {},
                                    {},
                                    std::chrono::steady_clock::now()};
-      (void)shared_->server_to_client_events.try_enqueue(std::move(client_accepted));
+      (void)shared_->server_to_client_events.try_push(std::move(client_accepted));
     }
     events.emplace_back(std::move(event));
     event = {};
@@ -124,7 +124,7 @@ void InProcessTransport::shutdown() {
   }
 
   NetworkEvent discarded;
-  while (inbound_events().try_dequeue(discarded)) {
+  while (inbound_events().try_pop(discarded)) {
     discarded = {};
   }
   (void)previous;
@@ -146,12 +146,12 @@ const detail::InProcessEndpointState& InProcessTransport::peer_state() const {
   return side_ == InProcessEndpointSide::Client ? shared_->server : shared_->client;
 }
 
-moodycamel::ReaderWriterQueue<NetworkEvent>& InProcessTransport::inbound_events() {
+core::SpscQueue<NetworkEvent>& InProcessTransport::inbound_events() {
   return side_ == InProcessEndpointSide::Client ? shared_->server_to_client_events
                                                 : shared_->client_to_server_events;
 }
 
-moodycamel::ReaderWriterQueue<NetworkEvent>& InProcessTransport::outbound_events() {
+core::SpscQueue<NetworkEvent>& InProcessTransport::outbound_events() {
   return side_ == InProcessEndpointSide::Client ? shared_->client_to_server_events
                                                 : shared_->server_to_client_events;
 }

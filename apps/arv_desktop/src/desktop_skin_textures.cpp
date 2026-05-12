@@ -91,20 +91,18 @@ namespace {
 }
 
 [[nodiscard]] ui::PlayerSkinTextureView player_skin_texture_view(
-    const render::OpenGLRenderer& renderer,
-    const render::ResidentSkinTexture& resident,
-    const render::AtlasRegion& region) noexcept {
+    const render::PlayerSkinTextureSnapshot& snapshot) noexcept {
   ui::PlayerSkinTextureView view;
   view.valid = true;
-  view.page = region.page_index;
-  view.atlas_width = renderer.player_skin_atlas_page_width();
-  view.atlas_height = renderer.player_skin_atlas_page_height();
-  view.x = region.x;
-  view.y = region.y;
-  view.width = region.width;
-  view.height = region.height;
-  view.image_width = resident.width;
-  view.image_height = resident.height;
+  view.page = snapshot.region.page_index;
+  view.atlas_width = snapshot.atlas_width;
+  view.atlas_height = snapshot.atlas_height;
+  view.x = snapshot.region.x;
+  view.y = snapshot.region.y;
+  view.width = snapshot.region.width;
+  view.height = snapshot.region.height;
+  view.image_width = snapshot.image_width;
+  view.image_height = snapshot.image_height;
   return view;
 }
 
@@ -211,16 +209,13 @@ void DesktopFrameLoop::refresh_menu_profile_render_assets() {
   HashMap<std::string, ui::PlayerSkinTextureView> texture_views;
   ui::PlayerSkinTextureView default_texture;
   for (const auto& [skin_hash, handle] : player_skin_regions_) {
-    const render::ResidentSkinTexture* resident =
-        renderer_.resident_player_skin_texture(skin_hash);
-    const std::optional<render::AtlasRegion> region =
-        renderer_.resolve_player_skin_texture(handle);
-    if (resident == nullptr || !region.has_value()) {
+    std::optional<render::PlayerSkinTextureSnapshot> snapshot =
+        renderer_.player_skin_texture_snapshot(skin_hash, handle);
+    if (!snapshot.has_value()) {
       continue;
     }
     (void)renderer_.mark_player_skin_texture_used(handle, true);
-    ui::PlayerSkinTextureView view =
-        player_skin_texture_view(renderer_, *resident, region.value());
+    ui::PlayerSkinTextureView view = player_skin_texture_view(snapshot.value());
     if (skin_hash == DefaultMenuPlayerSkinKey) {
       default_texture = view;
     } else if (skin_hash == DefaultMenuPlayerSlimSkinKey) {

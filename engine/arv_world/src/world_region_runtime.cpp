@@ -35,6 +35,7 @@ const RegionRegistry& WorldRuntime::regions() const noexcept {
 }
 
 RegionRegistry& WorldRuntime::regions() noexcept {
+  assert_owner_thread();
   return impl_->regions.regions();
 }
 
@@ -45,6 +46,7 @@ const PlayerRegionState* WorldRuntime::player_region_state(PlayerID player_id) c
 RegionMembershipChange WorldRuntime::update_player_region_state(
     PlayerID player_id,
     RegionQuery query) {
+  assert_owner_thread();
   return impl_->regions.update_player_region_state(player_id, query);
 }
 

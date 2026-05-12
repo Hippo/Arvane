@@ -4,6 +4,7 @@
 #include "desktop_assets.hpp"
 #include "desktop_frame_loop.hpp"
 #include "desktop_menu_state.hpp"
+#include "desktop_render_thread.hpp"
 #include "desktop_runtime_config.hpp"
 #include "renderer_bootstrap.hpp"
 
@@ -13,10 +14,10 @@
 #include "arv/io/config.hpp"
 #include "arv/io/input_bindings.hpp"
 #include "arv/platform/glfw_window.hpp"
-#include "arv/render/opengl_renderer.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/ui/ui.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace arv::desktop {
@@ -63,7 +64,7 @@ int DesktopApplication::run(int argc, char** argv) {
       config.render.frame_pacing_enabled ? "enabled" : "disabled",
       config.render.frame_pacing_target_fps);
   platform::OpenGLWindow window = std::move(window_result.value());
-  core::set_profile_thread_name("main/render");
+  core::set_profile_thread_name("main/platform");
 
   DebugImGuiLayer debug_imgui;
   if (!debug_imgui.initialize(window.native_handle())) {
@@ -82,24 +83,32 @@ int DesktopApplication::run(int argc, char** argv) {
     window.set_input_bindings(input_bindings);
   }
 
-  render::OpenGLRenderer renderer;
-  if (!configure_renderer(renderer, resources, config)) {
+  DesktopRenderThread desktop_renderer{window};
+  if (!desktop_renderer.start(swap_interval_vsync, debug_imgui.font_atlas())) {
+    debug_imgui.shutdown();
+    return 1;
+  }
+  render::RenderCommandQueue& render_commands = desktop_renderer.commands();
+  if (!configure_renderer(render_commands, resources, config)) {
+    desktop_renderer.shutdown();
     debug_imgui.shutdown();
     return 1;
   }
 
   auto framebuffer = window.framebuffer_size();
-  renderer.resize(framebuffer.width, framebuffer.height);
+  render_commands.resize(framebuffer.width, framebuffer.height);
 
-  auto loaded_assets_result = load_desktop_assets(resources, renderer, config, ui_theme);
+  auto loaded_assets_result =
+      load_desktop_assets(resources, render_commands, config, ui_theme);
   if (!loaded_assets_result) {
     core::error(
         loaded_assets_result.error().category,
         loaded_assets_result.error().message);
+    desktop_renderer.shutdown();
     debug_imgui.shutdown();
-    renderer.begin_shutdown();
     return 1;
   }
+  render_commands.flush();
   DesktopLoadedAssets assets = std::move(loaded_assets_result.value());
   ui::FontUiTextMeasurer ui_text_measurer(assets.font_system, assets.ui_font_stacks);
   ui::UiTree ui_tree;
@@ -116,19 +125,30 @@ int DesktopApplication::run(int argc, char** argv) {
   const sched::RuntimeThreadBudgetPlan thread_budget =
       make_runtime_thread_budget_plan(config.jobs);
 
-  sched::Scheduler world_jobs{thread_budget.secondary_workers};
+  sched::JobSystemConfig client_job_config;
+  client_job_config.critical_cpu_workers = 1U;
+  client_job_config.background_cpu_workers = static_cast<u32>(
+      std::max<usize>(thread_budget.secondary_worker_thread_count, 1U));
+  client_job_config.blocking_io_workers = 1U;
+  client_job_config.max_mesh_jobs_in_flight =
+      std::max<u32>(config.chunk_pipeline.max_mesh_jobs_per_frame, 1U);
+  sched::JobSystem world_jobs{client_job_config};
+  world_jobs.start();
   core::info(
       "jobs",
       "hardware_threads={} reserved_threads={} server_workers={} client_workers={}",
       thread_budget.hardware_thread_count,
       thread_budget.reserved_thread_count,
       thread_budget.primary_worker_thread_count,
-      world_jobs.worker_count());
+      world_jobs.worker_count(sched::JobLane::BackgroundCpu));
+  core::info(
+      "threading",
+      "render_owner=render thread network_owner=transport pump owner world_owner=session tick owner");
 
   DesktopSessionManager sessions{
       {
           config,
-          renderer,
+          render_commands,
           world_jobs,
           assets.block_registry,
           assets.block_registry_hash,
@@ -160,7 +180,8 @@ int DesktopApplication::run(int argc, char** argv) {
       config,
       resources,
       window,
-      renderer,
+      desktop_renderer,
+      render_commands,
       input_bindings,
       debug_imgui,
       debug_menu,
@@ -177,8 +198,8 @@ int DesktopApplication::run(int argc, char** argv) {
   const int loop_result = frame_loop.run();
 
   const bool save_result = sessions.save_and_shutdown();
+  desktop_renderer.shutdown();
   debug_imgui.shutdown();
-  renderer.begin_shutdown();
   if (loop_result != 0) {
     return loop_result;
   }

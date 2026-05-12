@@ -14,6 +14,7 @@ set(ARV_CLIENT_SOURCES
   src/desktop_menu_commands.cpp
   src/desktop_render_builders.cpp
   src/desktop_runtime_config.cpp
+  src/desktop_render_thread.cpp
   src/desktop_save_helpers.cpp
   src/desktop_session.cpp
   src/desktop_simulation.cpp

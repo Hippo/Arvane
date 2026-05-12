@@ -438,6 +438,7 @@ void WorldChunkStore::update_simulation_radii(
 namespace arv::world {
 
 void WorldRuntime::configure_height(WorldHeightSettings settings) {
+  assert_owner_thread();
   impl_->chunks.configure_height(settings);
 }
 
@@ -446,6 +447,7 @@ WorldHeightSettings WorldRuntime::height_settings() const noexcept {
 }
 
 Chunk& WorldRuntime::ensure_chunk(ChunkCoord coord) {
+  assert_owner_thread();
   return impl_->chunks.ensure_column(coord);
 }
 
@@ -460,14 +462,17 @@ const Chunk* WorldRuntime::find_chunk(ChunkCoord coord) const noexcept {
 voxel::ChunkSection& WorldRuntime::ensure_chunk_section(
     ChunkSectionCoord coord,
     voxel::ChunkLifecycleState state) {
+  assert_owner_thread();
   return impl_->chunks.ensure_chunk(coord, state, impl_->dirty);
 }
 
 void WorldRuntime::request_chunk_section_load(ChunkSectionCoord coord) {
+  assert_owner_thread();
   impl_->chunks.request_chunk_load(coord, impl_->dirty);
 }
 
 bool WorldRuntime::unload_chunk_section(ChunkSectionCoord coord) noexcept {
+  assert_owner_thread();
   return unload_chunk(coord);
 }
 
@@ -482,14 +487,17 @@ const voxel::ChunkSection* WorldRuntime::find_chunk_section(ChunkSectionCoord co
 voxel::ChunkSection& WorldRuntime::ensure_chunk(
     ChunkSectionCoord coord,
     voxel::ChunkLifecycleState state) {
+  assert_owner_thread();
   return ensure_chunk_section(coord, state);
 }
 
 void WorldRuntime::request_chunk_load(ChunkSectionCoord coord) {
+  assert_owner_thread();
   request_chunk_section_load(coord);
 }
 
 bool WorldRuntime::unload_chunk(ChunkSectionCoord coord) noexcept {
+  assert_owner_thread();
   if (!impl_->chunks.unload_chunk(coord)) {
     return false;
   }
@@ -534,6 +542,7 @@ usize WorldRuntime::active_chunk_count() const noexcept {
 bool WorldRuntime::set_chunk_lifecycle_state(
     ChunkSectionCoord coord,
     voxel::ChunkLifecycleState state) noexcept {
+  assert_owner_thread();
   const bool changed = impl_->chunks.set_lifecycle_state(coord, state);
   if (changed && state == voxel::ChunkLifecycleState::Active) {
     FluidSolver::enqueue_chunk_activation_updates(*this, coord);
@@ -542,12 +551,14 @@ bool WorldRuntime::set_chunk_lifecycle_state(
 }
 
 void WorldRuntime::update_simulation_radius(ChunkSectionCoord center, i32 radius) {
+  assert_owner_thread();
   impl_->chunks.update_simulation_radius(*this, center, radius);
 }
 
 void WorldRuntime::update_simulation_radii(
     std::span<const ChunkSectionCoord> centers,
     i32 radius) {
+  assert_owner_thread();
   impl_->chunks.update_simulation_radii(*this, centers, radius);
 }
 

@@ -125,19 +125,21 @@ It serves as the foundation for engine-level scheduling and asynchronous work.
 
 The following C++ standard library facilities are used:
 
-* `std::jthread`
+* `std::thread`
 * `std::mutex`
-* `std::shared_mutex`
 * `std::atomic`
-* `std::condition_variable`
-* `std::stop_token`
 
 These are used for:
 
 * thread lifecycle management
-* synchronization
-* coordination between systems
+* narrowly scoped shared registry synchronization
+* atomic state coordination between systems
 * safe shared state handling where necessary
+
+Queue handoffs should use the project wrappers over moodycamel queues:
+
+* `arv::core::CompletionQueue`
+* `arv::core::SpscQueue`
 
 ---
 

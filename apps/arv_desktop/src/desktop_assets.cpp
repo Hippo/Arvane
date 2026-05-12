@@ -4,7 +4,7 @@
 #include "arv/io/config.hpp"
 #include "arv/lang/language.hpp"
 #include "arv/persistence/save.hpp"
-#include "arv/render/opengl_renderer.hpp"
+#include "arv/render/render_commands.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -157,7 +157,7 @@ using UiFontStackLoadResult = Expected<void, DesktopAssetLoadError>;
 
 DesktopLoadedAssetsResult load_desktop_assets(
     asset::ResourceManager& resources,
-    render::OpenGLRenderer& renderer,
+    render::RenderCommandQueue& renderer,
     const io::EngineConfig& config,
     const ui::UiTheme& theme) {
   DesktopLoadedAssets loaded;

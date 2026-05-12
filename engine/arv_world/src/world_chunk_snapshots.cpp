@@ -105,6 +105,7 @@ void WorldRuntime::apply_chunk_snapshot(
     std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights,
     std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids,
     bool lighting_authoritative) noexcept {
+  assert_owner_thread();
   const voxel::ChunkSection* existing_chunk = find_chunk(coord);
   const bool first_mesh =
       existing_chunk == nullptr || existing_chunk->mesh_built_from_block_version() == 0U;
@@ -288,6 +289,7 @@ bool WorldRuntime::publish_mesh_result(
     u64 source_block_version,
     u64 source_light_version,
     u64 source_content_version) noexcept {
+  assert_owner_thread();
   voxel::ChunkSection* chunk = find_chunk(coord);
   if (chunk == nullptr || chunk->block_version() != source_block_version) {
     return false;
@@ -300,6 +302,7 @@ bool WorldRuntime::publish_mesh_result(
 }
 
 bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
+  assert_owner_thread();
   if (generated.world_id != impl_->id) {
     return false;
   }
@@ -337,6 +340,7 @@ void WorldRuntime::restore_saved_chunk(
     std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
     std::array<voxel::LightWord, voxel::ChunkVolume> lights,
     std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids) noexcept {
+  assert_owner_thread();
   voxel::ChunkSection& chunk =
       impl_->chunks.ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded, impl_->dirty);
   chunk.replace_saved_contents(

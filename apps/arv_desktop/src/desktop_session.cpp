@@ -8,7 +8,7 @@
 #include "arv/core/log.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/persistence/save.hpp"
-#include "arv/render/opengl_renderer.hpp"
+#include "arv/render/render_commands.hpp"
 
 #include <array>
 #include <system_error>
@@ -55,7 +55,7 @@ bool DesktopSessionManager::save_and_shutdown() {
   DesktopGameSession& session = *game_session_;
   if (session.integrated_server == nullptr) {
     remove_session_chunk_meshes(session);
-    dependencies_.world_jobs.wait_for_all();
+    dependencies_.world_jobs.join();
     game_session_.reset();
     return true;
   }
@@ -103,7 +103,7 @@ bool DesktopSessionManager::save_and_shutdown() {
   }
 
   remove_session_chunk_meshes(session);
-  dependencies_.world_jobs.wait_for_all();
+  dependencies_.world_jobs.join();
   session.integrated_server->shutdown();
   game_session_.reset();
   return true;

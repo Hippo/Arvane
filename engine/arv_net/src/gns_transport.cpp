@@ -184,7 +184,7 @@ NetworkResult GameNetworkingSocketsTransport::send(TransportMessage message) {
     return send_outbound_command(OutboundSendCommand{std::move(message)});
   }
 
-  if (!outbound_sends_.try_enqueue(OutboundSendCommand{std::move(message)})) {
+  if (!outbound_sends_.try_push(OutboundSendCommand{std::move(message)})) {
     return NetworkResult::failure(NetworkError{"GameNetworkingSockets outbound send queue is full"});
   }
 
@@ -194,12 +194,29 @@ NetworkResult GameNetworkingSocketsTransport::send(TransportMessage message) {
 NetworkResult GameNetworkingSocketsTransport::close_connection(
     ConnectionID connection_id,
     std::string_view reason) {
-  claim_or_assert_owner_thread();
+  if (owner_thread_hash_.load(std::memory_order_acquire) == 0U || is_owner_thread()) {
+    claim_or_assert_owner_thread();
+    return close_connection_on_owner(connection_id, reason);
+  }
+
+  if (!accepting_sends_.load(std::memory_order_acquire)) {
+    return NetworkResult::failure(NetworkError{"GameNetworkingSockets transport is not accepting closes"});
+  }
+  if (!outbound_closes_.try_push(OutboundCloseCommand{
+          connection_id,
+          std::string{reason}})) {
+    return NetworkResult::failure(NetworkError{"GameNetworkingSockets outbound close queue is full"});
+  }
+  return NetworkResult::success();
+}
+
+NetworkResult GameNetworkingSocketsTransport::close_connection_on_owner(
+    ConnectionID connection_id,
+    std::string_view reason) {
+  assert_owner_thread();
   if (sockets_ == nullptr) {
     return NetworkResult::failure(NetworkError{"GameNetworkingSockets interface is unavailable"});
   }
-
-  drain_outbound_send_commands();
 
   const auto found = connections_.find(connection_id);
   if (found == connections_.end()) {
@@ -225,6 +242,7 @@ NetworkResult GameNetworkingSocketsTransport::close_connection(
 
 std::vector<NetworkEvent> GameNetworkingSocketsTransport::poll_events() {
   claim_or_assert_owner_thread();
+  drain_outbound_close_commands();
   drain_outbound_send_commands();
 
   if (sockets_ != nullptr) {
@@ -256,8 +274,12 @@ void GameNetworkingSocketsTransport::shutdown() {
   }
 
   OutboundSendCommand discarded;
-  while (outbound_sends_.try_dequeue(discarded)) {
+  while (outbound_sends_.try_pop(discarded)) {
     discarded = {};
+  }
+  OutboundCloseCommand discarded_close;
+  while (outbound_closes_.try_pop(discarded_close)) {
+    discarded_close = {};
   }
 
   std::vector<HSteamNetConnection> handles;
@@ -479,12 +501,24 @@ void GameNetworkingSocketsTransport::handle_connection_status_change(const Steam
   }
 }
 
+void GameNetworkingSocketsTransport::drain_outbound_close_commands() {
+  assert_owner_thread();
+  OutboundCloseCommand command;
+  usize drained = 0;
+  while (drained < MaxOutboundCommandsPerPoll &&
+         outbound_closes_.try_pop(command)) {
+    (void)close_connection_on_owner(command.connection_id, command.reason);
+    command = {};
+    ++drained;
+  }
+}
+
 void GameNetworkingSocketsTransport::drain_outbound_send_commands() {
   assert_owner_thread();
   OutboundSendCommand command;
   usize drained = 0;
   while (drained < MaxOutboundCommandsPerPoll &&
-         outbound_sends_.try_dequeue(command)) {
+         outbound_sends_.try_pop(command)) {
     NetworkResult result = send_outbound_command(command);
     if (!result) {
       queue_event({NetworkEventType::MessageSendFailed,

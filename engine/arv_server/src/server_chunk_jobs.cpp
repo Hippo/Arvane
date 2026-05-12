@@ -11,7 +11,7 @@
 namespace arv::server::detail {
 
 ServerWorldJobRuntime::ServerWorldJobRuntime()
-    : scheduler_(std::make_unique<sched::Scheduler>()) {
+    : job_system_(std::make_unique<sched::JobSystem>()) {
 }
 
 void ServerWorldJobRuntime::configure(const ServerStartInfo& start_info) {
@@ -23,26 +23,42 @@ void ServerWorldJobRuntime::configure(const ServerStartInfo& start_info) {
       std::max<u32>(start_info.max_lighting_results_per_tick, 1U);
   max_fluid_results_per_tick_ =
       std::max<u32>(start_info.max_fluid_results_per_tick, 1U);
-  scheduler_ = std::make_unique<sched::Scheduler>(start_info.worker_threads);
   max_pending_fluid_jobs_ = std::max<u32>(start_info.max_pending_fluid_jobs, 1U);
   fluid_update_interval_ = start_info.world_tick_policy.fluid_interval;
   fluid_update_budget_ = start_info.world_tick_policy.fluid_budget == 0U
                              ? world::WorldTickPolicy{}.fluid_budget
                              : start_info.world_tick_policy.fluid_budget;
+  const usize configured_workers = sched::resolve_worker_thread_count(start_info.worker_threads);
+  const u32 critical_workers = 1U;
+  sched::JobSystemConfig job_config;
+  job_config.critical_cpu_workers = critical_workers;
+  job_config.background_cpu_workers =
+      static_cast<u32>(std::max<usize>(
+          1U,
+          configured_workers > critical_workers ? configured_workers - critical_workers : 1U));
+  job_config.blocking_io_workers = 1U;
+  job_config.max_chunk_gen_in_flight = max_pending_generation_jobs_;
+  job_config.max_lighting_jobs_in_flight = max_pending_lighting_jobs_;
+  job_config.max_liquid_jobs_in_flight = max_pending_fluid_jobs_;
+  job_config.max_ai_jobs_in_flight = 1U;
+  job_config.max_pathfinding_jobs_in_flight = 1U;
+  job_system_ = std::make_unique<sched::JobSystem>(job_config);
+  job_system_->start();
 }
 
 void ServerWorldJobRuntime::wait_for_all() {
-  if (scheduler_) {
-    scheduler_->wait_for_all();
+  if (job_system_) {
+    job_system_->request_stop();
+    job_system_->join();
   }
 }
 
-sched::Scheduler* ServerWorldJobRuntime::scheduler() noexcept {
-  return scheduler_.get();
+sched::JobSystem* ServerWorldJobRuntime::job_system() noexcept {
+  return job_system_.get();
 }
 
-const sched::Scheduler* ServerWorldJobRuntime::scheduler() const noexcept {
-  return scheduler_.get();
+const sched::JobSystem* ServerWorldJobRuntime::job_system() const noexcept {
+  return job_system_.get();
 }
 
 usize ServerWorldJobRuntime::pending_generation_job_count() const noexcept {
@@ -160,9 +176,33 @@ void ServerWorldJobRuntime::schedule_generation_jobs(
     request.max_chunk_y = height.max_chunk_y;
     request.config = chunk_generation->config;
     request.palette = chunk_generation->palette;
-    auto job = scheduler_->submit("server_world_generation", [request = std::move(request)] {
-      return world::generate_chunk(request);
-    });
+    sched::JobDesc desc;
+    desc.name = "server_world_generation";
+    desc.lane = sched::JobLane::BackgroundCpu;
+    desc.domain = sched::JobDomain::ChunkGeneration;
+    desc.completion_target = sched::JobCompletionTarget::World;
+    auto job = job_system_->submit_result(
+        std::move(desc),
+        [request = std::move(request)](const sched::CancellationToken& token) {
+          if (token.is_canceled()) {
+            return world::GeneratedChunkResult::failure(
+                world::WorldGenerationError{"chunk generation canceled"});
+          }
+          return world::generate_chunk(request);
+        });
+    if (!job.valid()) {
+      for (i32 y = height.min_chunk_y; y <= height.max_chunk_y; ++y) {
+        const ChunkSectionCoord section_coord = chunk_section(coord, y);
+        const voxel::ChunkSection* section = world.find_chunk(section_coord);
+        if (section != nullptr &&
+            section->lifecycle_state() == voxel::ChunkLifecycleState::Generating) {
+          (void)world.set_chunk_lifecycle_state(
+              section_coord,
+              voxel::ChunkLifecycleState::Requested);
+        }
+      }
+      continue;
+    }
     pending_generation_jobs_.emplace_back(coord, std::move(job));
   }
 }
@@ -232,14 +272,22 @@ void ServerWorldJobRuntime::schedule_fluid_jobs(
 
   const voxel::BlockRegistry* registry = block_registry;
   const voxel::FluidDefinition definition = fluid_definition;
-  auto job = scheduler_->submit(
-      "server_world_fluids",
+  sched::JobDesc desc;
+  desc.name = "server_world_fluids";
+  desc.lane = sched::JobLane::CriticalCpu;
+  desc.domain = sched::JobDomain::Liquids;
+  desc.completion_target = sched::JobCompletionTarget::World;
+  auto job = job_system_->submit_result(
+      std::move(desc),
       [request = std::move(request.value()), registry, definition]() mutable {
         return world::FluidSolver::build_simulation_result(
             std::move(request),
             *registry,
             definition);
       });
+  if (!job.valid()) {
+    return;
+  }
   pending_fluid_jobs_.emplace_back(std::move(job));
 }
 
@@ -273,9 +321,19 @@ void ServerWorldJobRuntime::schedule_lighting_jobs(
 
   const voxel::BlockRegistry* registry = block_registry;
   core::record_lighting_job_submitted();
-  auto job = scheduler_->submit("server_world_lighting", [snapshot = std::move(snapshot), registry] {
-    return world::WorldRuntime::build_lighting_result(snapshot, *registry);
-  });
+  sched::JobDesc desc;
+  desc.name = "server_world_lighting";
+  desc.lane = sched::JobLane::BackgroundCpu;
+  desc.domain = sched::JobDomain::Lighting;
+  desc.completion_target = sched::JobCompletionTarget::World;
+  auto job = job_system_->submit_result(
+      std::move(desc),
+      [snapshot = std::move(snapshot), registry] {
+        return world::WorldRuntime::build_lighting_result(snapshot, *registry);
+      });
+  if (!job.valid()) {
+    return;
+  }
   pending_lighting_jobs_.emplace_back(source_revision, std::move(job));
 }
 

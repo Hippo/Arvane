@@ -11,7 +11,7 @@
 #include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/server/chunk_streamer.hpp"
 #include "arv/server/server_combat.hpp"
 #include "arv/server/session_registry.hpp"
@@ -94,6 +94,7 @@ struct ServerStartInfo {
   u32 max_lighting_results_per_tick{1};
   u32 max_pending_generation_jobs{4};
   sched::WorkerThreadConfig worker_threads{};
+  bool use_network_thread{};
   world::WorldTickPolicy world_tick_policy{};
   u32 max_fluid_results_per_tick{1};
   u32 max_pending_fluid_jobs{1};
@@ -154,8 +155,8 @@ public:
   [[nodiscard]] player::GameModeRegistry& game_modes() noexcept;
   [[nodiscard]] const player::PermissionGroupRegistry& permission_groups() const noexcept;
   [[nodiscard]] player::PermissionGroupRegistry& permission_groups() noexcept;
-  [[nodiscard]] const sched::Scheduler* world_scheduler() const noexcept;
-  [[nodiscard]] sched::Scheduler* world_scheduler() noexcept;
+  [[nodiscard]] const sched::JobSystem* world_job_system() const noexcept;
+  [[nodiscard]] sched::JobSystem* world_job_system() noexcept;
   [[nodiscard]] usize pending_generation_job_count() const noexcept;
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;

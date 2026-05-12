@@ -12,8 +12,9 @@
 #include "arv/net/gns_transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/render/render_commands.hpp"
 #include "arv/render/render_types.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/ui/ui.hpp"
 #include "arv/voxel/fluid.hpp"
@@ -27,10 +28,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace arv::render {
-class OpenGLRenderer;
-} // namespace arv::render
 
 namespace arv::lang {
 class LanguageCatalog;
@@ -78,8 +75,8 @@ struct DesktopGameSession {
 
 struct DesktopSessionDependencies {
   const io::EngineConfig& config;
-  render::OpenGLRenderer& renderer;
-  sched::Scheduler& world_jobs;
+  render::RenderCommandQueue& renderer;
+  sched::JobSystem& world_jobs;
   const voxel::BlockRegistry& block_registry;
   u64 block_registry_hash{};
   const player::ItemRegistry& item_registry;

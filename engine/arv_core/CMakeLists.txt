@@ -1,5 +1,6 @@
 set(ARV_CORE_HEADERS
   include/arv/core/arena.hpp
+  include/arv/core/completion_queue.hpp
   include/arv/core/coordinates.hpp
   include/arv/core/domain_ids.hpp
   include/arv/core/expected.hpp
@@ -19,7 +20,7 @@ add_library(arv_core STATIC
   src/perf_stats.cpp
 )
 target_include_directories(arv_core PUBLIC include)
-target_link_libraries(arv_core PUBLIC unordered_dense spdlog::spdlog)
+target_link_libraries(arv_core PUBLIC unordered_dense spdlog::spdlog concurrentqueue readerwriterqueue)
 target_compile_definitions(arv_core PUBLIC
   ARVANE_ENABLE_PROFILING=$<BOOL:${ARVANE_ENABLE_PROFILING}>
   $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE>

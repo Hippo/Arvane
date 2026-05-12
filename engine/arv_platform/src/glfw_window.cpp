@@ -390,25 +390,24 @@ Expected<OpenGLWindow, PlatformError> OpenGLWindow::create(const WindowConfig& c
 
   OpenGLWindow window;
   window.window_ = raw_window;
-  window.make_context_current();
   glfwSetInputMode(raw_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
   if (glfwRawMouseMotionSupported() == GLFW_TRUE) {
     glfwSetInputMode(raw_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
   }
 
-  if (gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) == 0) {
-    return Expected<OpenGLWindow, PlatformError>::failure(PlatformError{"failed to load OpenGL functions"});
-  }
-
   glfwSetWindowUserPointer(raw_window, &window);
   glfwSetScrollCallback(raw_window, glfw_scroll_callback);
   glfwSetCharCallback(raw_window, glfw_char_callback);
-  glfwSwapInterval(config.vsync ? 1 : 0);
+  (void)config;
   return Expected<OpenGLWindow, PlatformError>::success(std::move(window));
 }
 
 void OpenGLWindow::make_context_current() {
   glfwMakeContextCurrent(window_);
+}
+
+bool OpenGLWindow::load_gl_functions() noexcept {
+  return gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) != 0;
 }
 
 bool OpenGLWindow::should_close() const {
@@ -668,6 +667,10 @@ void OpenGLWindow::swap_buffers() {
 
 void OpenGLWindow::poll_events() {
   glfwPollEvents();
+}
+
+void OpenGLWindow::clear_current_context() noexcept {
+  glfwMakeContextCurrent(nullptr);
 }
 
 void OpenGLWindow::destroy() {

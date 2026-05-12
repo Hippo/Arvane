@@ -6,6 +6,7 @@
 namespace arv::world {
 
 DamageResult WorldRuntime::apply_damage(const DamageRequest& request) noexcept {
+  assert_owner_thread();
   DamageResult result;
   entity::EntityHealth* health = find_entity_health(request.target);
   if (health == nullptr) {

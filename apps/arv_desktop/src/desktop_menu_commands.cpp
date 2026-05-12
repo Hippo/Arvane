@@ -215,7 +215,7 @@ void DesktopFrameLoop::apply_render_settings(const ui::SetRenderSettingsCommand&
   config_.render.block_outline.thickness =
       std::clamp(settings.outline_thickness, 0.1F, 2.0F);
 
-  window_.set_vsync(config_.window.vsync && !config_.render.frame_pacing_enabled);
+  render_thread_.set_vsync(config_.window.vsync && !config_.render.frame_pacing_enabled);
   renderer_.set_chunk_mesh_upload_budget(config_.render.max_chunk_mesh_uploads_per_frame);
   if (DesktopGameSession* session = sessions_.active_session();
       session != nullptr && session->client != nullptr) {

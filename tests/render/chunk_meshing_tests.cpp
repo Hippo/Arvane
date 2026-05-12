@@ -1,5 +1,5 @@
 #include "arv/render/chunk_mesher.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/world/world_runtime.hpp"
 
 #include <gtest/gtest.h>
@@ -681,8 +681,17 @@ TEST(ChunkMeshingTests, WorkerMeshResultUsesSnapshotVersionAndStaleResultsAreRej
       arv::world::MissingNeighborPolicy::TreatMissingAsAir);
   ASSERT_TRUE(snapshot);
 
-  arv::sched::Scheduler scheduler(1);
-  auto job = scheduler.submit("chunk_mesh_snapshot_test", [snapshot, &registry] {
+  arv::sched::JobSystemConfig job_config;
+  job_config.critical_cpu_workers = 1;
+  job_config.background_cpu_workers = 1;
+  job_config.blocking_io_workers = 1;
+  arv::sched::JobSystem jobs{job_config};
+  jobs.start();
+  arv::sched::JobDesc job_desc;
+  job_desc.name = "chunk_mesh_snapshot_test";
+  job_desc.lane = arv::sched::JobLane::BackgroundCpu;
+  job_desc.domain = arv::sched::JobDomain::Meshing;
+  auto job = jobs.submit_result(std::move(job_desc), [snapshot, &registry] {
     return arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot.value(), registry);
   });
 

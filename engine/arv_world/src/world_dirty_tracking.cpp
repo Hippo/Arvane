@@ -286,6 +286,7 @@ u64 WorldRuntime::mesh_revision() const noexcept {
 }
 
 void WorldRuntime::mark_chunk_lighting_dirty(ChunkSectionCoord coord) noexcept {
+  assert_owner_thread();
   impl_->dirty.mark_chunk_lighting_dirty(*this, coord);
 }
 
@@ -295,6 +296,7 @@ std::vector<ChunkSectionCoord> WorldRuntime::dirty_chunks(voxel::ChunkDirtyFlags
 
 std::vector<ChunkSectionCoord> WorldRuntime::consume_dirty_mesh_chunks(
     voxel::ChunkDirtyFlags flag) {
+  assert_owner_thread();
   return impl_->dirty.consume_dirty_mesh_chunks(*this, flag);
 }
 

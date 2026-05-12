@@ -12,15 +12,12 @@
 #include "arv/io/config.hpp"
 #include "arv/lang/language.hpp"
 #include "arv/player/item.hpp"
+#include "arv/render/render_commands.hpp"
 #include "arv/ui/core/ui.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_generation.hpp"
 
 #include <string>
-
-namespace arv::render {
-class OpenGLRenderer;
-} // namespace arv::render
 
 namespace arv::desktop {
 
@@ -49,7 +46,7 @@ using DesktopLoadedAssetsResult = Expected<DesktopLoadedAssets, DesktopAssetLoad
 
 [[nodiscard]] DesktopLoadedAssetsResult load_desktop_assets(
     asset::ResourceManager& resources,
-    render::OpenGLRenderer& renderer,
+    render::RenderCommandQueue& renderer,
     const io::EngineConfig& config,
     const ui::UiTheme& theme);
 

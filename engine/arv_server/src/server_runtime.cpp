@@ -2,11 +2,14 @@
 
 #include "arv/crypto/random.hpp"
 #include "arv/lang/language.hpp"
+#include "arv/core/log.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/skin_runtime.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <utility>
 
 namespace arv::server {
@@ -115,12 +118,12 @@ player::PermissionGroupRegistry& ServerRuntime::permission_groups() noexcept {
   return impl_->permission_groups();
 }
 
-const sched::Scheduler* ServerRuntime::world_scheduler() const noexcept {
-  return impl_->world_scheduler();
+sched::JobSystem* ServerRuntime::world_job_system() noexcept {
+  return impl_->world_job_system();
 }
 
-sched::Scheduler* ServerRuntime::world_scheduler() noexcept {
-  return impl_->world_scheduler();
+const sched::JobSystem* ServerRuntime::world_job_system() const noexcept {
+  return impl_->world_job_system();
 }
 
 usize ServerRuntime::pending_generation_job_count() const noexcept {
@@ -186,6 +189,10 @@ namespace detail {
 
 ServerRuntimeImpl::ServerRuntimeImpl(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
   register_server_commands(command_registry_);
+}
+
+ServerRuntimeImpl::~ServerRuntimeImpl() {
+  shutdown();
 }
 
 net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
@@ -255,6 +262,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
           : tr(language_, "server.name.integrated", "Arvane Integrated Server");
   handshake_policy_.initial_world_id = DefaultWorldID;
   crypto::fill_random(server_instance_id_);
+  network_thread_enabled_ = start_info.use_network_thread;
 
   if (!server_save_root_.empty()) {
     auto loaded_permissions = load_server_permission_groups(server_save_root_);
@@ -270,7 +278,9 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
     return net::NetworkResult::failure(net::NetworkError{"server start requires block and item registries"});
   }
 
-  auto listen_result = transport_->start_listening(start_info.listen_address);
+  auto listen_result = network_thread_enabled_
+                           ? network_thread_.start(*transport_, start_info.listen_address)
+                           : transport_->start_listening(start_info.listen_address);
   if (!listen_result) {
     return listen_result;
   }
@@ -287,7 +297,9 @@ void ServerRuntimeImpl::tick() {
   world_jobs_.drain_generation_jobs(default_world_, false);
   world_jobs_.drain_fluid_jobs(default_world_, fluid_definition_, false);
   world_jobs_.drain_lighting_jobs(default_world_, false);
-  inbound_events_ = transport_->poll_events();
+  inbound_events_ = network_thread_enabled_
+                        ? network_thread_.drain_events()
+                        : transport_->poll_events();
   for (net::NetworkEvent& event : inbound_events_) {
     handle_network_event(std::move(event));
   }
@@ -335,9 +347,78 @@ void ServerRuntimeImpl::shutdown() {
   world_jobs_.drain_fluid_jobs(default_world_, fluid_definition_, true);
   world_jobs_.drain_lighting_jobs(default_world_, true);
   if (transport_) {
+    if (network_thread_enabled_) {
+      network_thread_.request_stop();
+      network_thread_.join();
+      network_thread_enabled_ = false;
+      state_ = ServerRuntimeState::Stopped;
+      return;
+    }
     transport_->shutdown();
   }
   state_ = ServerRuntimeState::Stopped;
+}
+
+net::NetworkResult ServerNetworkThread::start(
+    net::ITransport& transport,
+    const net::ListenAddress& listen_address) {
+  stop_requested_.store(false, std::memory_order_release);
+  if (!thread_.start()) {
+    stop_requested_.store(true, std::memory_order_release);
+    return net::NetworkResult::failure(net::NetworkError{"failed to start network thread"});
+  }
+
+  net::NetworkResult start_result = thread_.call([&transport, &listen_address] {
+    return transport.start_listening(listen_address);
+  });
+  if (!start_result) {
+    request_stop();
+    join();
+    return start_result;
+  }
+
+  if (!thread_.post([this, &transport] {
+        run(transport);
+      })) {
+    request_stop();
+    join();
+    return net::NetworkResult::failure(net::NetworkError{"failed to start network pump"});
+  }
+  core::info("threading", "network_owner=network thread");
+  return net::NetworkResult::success();
+}
+
+void ServerNetworkThread::request_stop() noexcept {
+  stop_requested_.store(true, std::memory_order_release);
+  thread_.request_stop();
+}
+
+void ServerNetworkThread::join() {
+  thread_.join();
+}
+
+std::vector<net::NetworkEvent> ServerNetworkThread::drain_events() {
+  return events_.drain();
+}
+
+void ServerNetworkThread::run(net::ITransport& transport) {
+  using namespace std::chrono_literals;
+  while (!stop_requested_.load(std::memory_order_acquire)) {
+    std::vector<net::NetworkEvent> polled = transport.poll_events();
+    if (!polled.empty()) {
+      for (net::NetworkEvent& event : polled) {
+        events_.push(std::move(event));
+      }
+    }
+    std::this_thread::sleep_for(1ms);
+  }
+  std::vector<net::NetworkEvent> polled = transport.poll_events();
+  if (!polled.empty()) {
+    for (net::NetworkEvent& event : polled) {
+      events_.push(std::move(event));
+    }
+  }
+  transport.shutdown();
 }
 
 ServerRuntimeState ServerRuntimeImpl::state() const noexcept {
@@ -402,12 +483,12 @@ player::PermissionGroupRegistry& ServerRuntimeImpl::permission_groups() noexcept
   return permission_groups_;
 }
 
-const sched::Scheduler* ServerRuntimeImpl::world_scheduler() const noexcept {
-  return world_jobs_.scheduler();
+const sched::JobSystem* ServerRuntimeImpl::world_job_system() const noexcept {
+  return world_jobs_.job_system();
 }
 
-sched::Scheduler* ServerRuntimeImpl::world_scheduler() noexcept {
-  return world_jobs_.scheduler();
+sched::JobSystem* ServerRuntimeImpl::world_job_system() noexcept {
+  return world_jobs_.job_system();
 }
 
 usize ServerRuntimeImpl::pending_generation_job_count() const noexcept {

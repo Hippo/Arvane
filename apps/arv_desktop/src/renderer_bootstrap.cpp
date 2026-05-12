@@ -5,7 +5,7 @@
 namespace arv::desktop {
 
 bool configure_renderer(
-    render::OpenGLRenderer& renderer,
+    render::RenderCommandQueue& renderer,
     asset::ResourceManager& resources,
     const io::EngineConfig& config) {
   auto chunk_vertex_shader =

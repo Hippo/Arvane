@@ -852,6 +852,7 @@ u32 WorldEntitySimulation::tick_dropped_items(
 namespace arv::world {
 
 u32 WorldRuntime::tick_entities(const voxel::BlockRegistry* block_registry) {
+  assert_owner_thread();
   return impl_->entity_simulation.tick_entities(
       *this,
       impl_->entities,
@@ -863,6 +864,7 @@ u32 WorldRuntime::tick_dropped_items(
     Seconds tick_seconds,
     const voxel::BlockRegistry* block_registry,
     const player::ItemRegistry* item_registry) {
+  assert_owner_thread();
   return impl_->entity_simulation.tick_dropped_items(
       *this,
       impl_->entities,

@@ -349,7 +349,7 @@ void clear_snapshot_profile(DebugMenuState& state) noexcept {
 
 void record_queue_profile_sample(
     DebugMenuState::QueueProfileState& queue,
-    const sched::SchedulerPressureSnapshot& snapshot) noexcept {
+    const sched::JobSystemPressureSnapshot& snapshot) noexcept {
   const u32 previous_queued = queue.current_queued_jobs;
   queue.current_queued_jobs = snapshot.current_queued_jobs;
   queue.submitted_jobs_this_frame =
@@ -1266,12 +1266,12 @@ void render_world_tab(
 
 void render_performance_tab(
     const DebugMenuFrameInfo& frame_info,
-    const sched::Scheduler& world_jobs,
-    const render::OpenGLRenderer& renderer) {
+    const sched::JobSystem& world_jobs,
+    render::RenderCommandQueue& renderer) {
   ImGui::Text("FPS: %u", frame_info.displayed_fps);
   ImGui::Text("Frame delta: %.2f ms", frame_info.frame_delta_ms);
   ImGui::Text("CPU frame work: %.2f ms", frame_info.frame_work_ms);
-  ImGui::Text("Client workers: %zu", world_jobs.worker_count());
+  ImGui::Text("Client job workers: %zu", world_jobs.total_worker_count());
   ImGui::SeparatorText("Renderer");
   ImGui::Text("Pending mesh uploads: %zu", renderer.pending_mesh_upload_count());
   ImGui::Text("Mesh uploads last frame: %u", renderer.mesh_uploads_last_frame());
@@ -1414,7 +1414,7 @@ void render_worst_events(
 
 void render_queue_pressure(
     const DebugMenuState& state,
-    const sched::Scheduler& client_jobs,
+    const sched::JobSystem& client_jobs,
     const server::ServerRuntime& server) {
   (void)client_jobs;
   ImGui::SeparatorText("Queue Pressure");
@@ -1469,7 +1469,7 @@ void render_queue_pressure(
 void render_chunk_workload(
     const DebugMenuFrameInfo& frame_info,
     const server::ServerRuntime& server,
-    const render::OpenGLRenderer& renderer,
+    render::RenderCommandQueue& renderer,
     const ChunkViewState& chunk_view) {
   const world::ChunkWorkloadSnapshot workload =
       server.voxel_world().chunk_workload_snapshot();
@@ -1612,7 +1612,7 @@ void render_lighting_profile() {
   }
 }
 
-void render_gpu_render_metrics(const render::OpenGLRenderer& renderer) {
+void render_gpu_render_metrics(render::RenderCommandQueue& renderer) {
   ImGui::SeparatorText("GPU / Render Metrics");
   if (ImGui::BeginTable(
           "GpuRenderMetrics",
@@ -1654,8 +1654,8 @@ void render_profiling_tab(
     DebugMenuState& state,
     const DebugMenuFrameInfo& frame_info,
     server::ServerRuntime& server,
-    sched::Scheduler& world_jobs,
-    const render::OpenGLRenderer& renderer,
+    sched::JobSystem& world_jobs,
+    render::RenderCommandQueue& renderer,
     const ChunkViewState& chunk_view) {
   ImGui::SeparatorText("Tracy");
   ImGui::Text(
@@ -1685,8 +1685,8 @@ void render_profiling_tab(
     clear_queue_profile(state.server_queue_profile);
     clear_queue_profile(state.client_queue_profile);
     clear_snapshot_profile(state);
-    if (sched::Scheduler* scheduler = server.world_scheduler(); scheduler != nullptr) {
-      scheduler->reset_pressure_stats();
+    if (sched::JobSystem* job_system = server.world_job_system(); job_system != nullptr) {
+      job_system->reset_pressure_stats();
     }
     world_jobs.reset_pressure_stats();
   }
@@ -1876,17 +1876,17 @@ DebugMenuResult render_debug_menu(
     Seconds now_seconds,
     const std::filesystem::path& item_animation_export_path,
     const entity::EntityRegistry& entity_registry,
-    sched::Scheduler& world_jobs,
-    const render::OpenGLRenderer& renderer,
+    sched::JobSystem& world_jobs,
+    render::RenderCommandQueue& renderer,
     const ChunkViewState& chunk_view) {
   DebugMenuResult result;
   core::set_global_timing_paused(state.profile_sampling_paused);
   record_profile_frame_sample(state, frame_info);
   if (core::profiling_enabled() && !state.profile_sampling_paused) {
-    if (const sched::Scheduler* scheduler = server.world_scheduler(); scheduler != nullptr) {
+    if (const sched::JobSystem* job_system = server.world_job_system(); job_system != nullptr) {
       record_queue_profile_sample(
           state.server_queue_profile,
-          scheduler->pressure_snapshot());
+          job_system->pressure_snapshot());
     }
     record_queue_profile_sample(
         state.client_queue_profile,

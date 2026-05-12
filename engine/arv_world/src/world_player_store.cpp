@@ -72,6 +72,7 @@ std::vector<PlayerID> WorldPlayerStore::player_ids(const WorldEntityStore& entit
 namespace arv::world {
 
 player::PlayerState& WorldRuntime::ensure_player(PlayerID player_id) {
+  assert_owner_thread();
   return impl_->players.ensure_player(impl_->entities, impl_->id, player_id);
 }
 

@@ -603,6 +603,7 @@ void WorldEntityStore::update_chunk(entt::entity entity_handle) noexcept {
 namespace arv::world {
 
 EntityID WorldRuntime::create_entity(EntityCreateInfo info) {
+  assert_owner_thread();
   return impl_->entities.create_entity(std::move(info));
 }
 
@@ -612,6 +613,7 @@ EntityID WorldRuntime::create_dropped_item(
     Vec3f velocity,
     Seconds pickup_delay_seconds,
     bool persistent) {
+  assert_owner_thread();
   return impl_->entities.create_dropped_item(
       stack,
       position,
@@ -621,10 +623,12 @@ EntityID WorldRuntime::create_dropped_item(
 }
 
 bool WorldRuntime::destroy_entity(EntityID entity_id, EntityDespawnReason reason) {
+  assert_owner_thread();
   return impl_->entities.destroy_entity(entity_id, reason);
 }
 
 void WorldRuntime::flush_entity_despawns() {
+  assert_owner_thread();
   impl_->entities.flush_despawns(impl_->regions);
 }
 
@@ -743,10 +747,12 @@ const entity::DroppedItem* WorldRuntime::find_dropped_item(EntityID entity_id) c
 }
 
 bool WorldRuntime::set_entity_animation(EntityID entity_id, std::string animation_name) noexcept {
+  assert_owner_thread();
   return impl_->entities.set_animation(entity_id, std::move(animation_name));
 }
 
 bool WorldRuntime::play_entity_animation(EntityID entity_id, std::string animation_name) noexcept {
+  assert_owner_thread();
   return impl_->entities.play_animation(entity_id, std::move(animation_name));
 }
 
@@ -755,6 +761,7 @@ bool WorldRuntime::set_player_visual_pose(
     f32 look_yaw_radians,
     f32 look_pitch_radians,
     f32 max_head_body_yaw_radians) noexcept {
+  assert_owner_thread();
   return impl_->entities.set_player_visual_pose(
       player_id,
       look_yaw_radians,
@@ -763,6 +770,7 @@ bool WorldRuntime::set_player_visual_pose(
 }
 
 bool WorldRuntime::set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept {
+  assert_owner_thread();
   return impl_->entities.set_dropped_item_stack(entity_id, stack);
 }
 
@@ -771,10 +779,12 @@ bool WorldRuntime::entity_is_persistent(EntityID entity_id) const noexcept {
 }
 
 bool WorldRuntime::set_entity_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept {
+  assert_owner_thread();
   return impl_->entities.set_transform(entity_id, position, rotation);
 }
 
 bool WorldRuntime::set_entity_position(EntityID entity_id, Vec3f position) noexcept {
+  assert_owner_thread();
   return impl_->entities.set_position(entity_id, position);
 }
 
@@ -793,6 +803,7 @@ std::vector<entity::PersistentEntityRecord> WorldRuntime::persistent_entity_reco
 void WorldRuntime::restore_persistent_entities(
     std::span<const entity::PersistentEntityRecord> records,
     const entity::EntityRegistry* entity_registry) {
+  assert_owner_thread();
   impl_->entities.restore_persistent_entities(records, entity_registry);
 }
 

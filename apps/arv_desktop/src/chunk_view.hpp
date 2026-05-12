@@ -4,8 +4,9 @@
 #include "arv/core/log.hpp"
 #include "arv/core/types.hpp"
 #include "arv/io/config.hpp"
+#include "arv/render/render_commands.hpp"
 #include "arv/render/render_types.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_runtime.hpp"
 
@@ -13,10 +14,6 @@
 #include <deque>
 #include <optional>
 #include <vector>
-
-namespace arv::render {
-class OpenGLRenderer;
-} // namespace arv::render
 
 namespace arv::desktop {
 
@@ -31,7 +28,7 @@ struct ChunkViewState {
     u64 source_version{};
     u64 source_content_version{};
     u64 source_light_version{};
-    sched::JobHandle<TimedChunkMeshResult> job;
+    sched::JobFuture<TimedChunkMeshResult> job;
   };
 
   HashMap<ChunkSectionCoord, render::ChunkDrawItem> draw_items;
@@ -64,8 +61,8 @@ void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord);
 
 [[nodiscard]] bool update_chunk_view(
     world::WorldRuntime& world,
-    render::OpenGLRenderer& renderer,
-    sched::Scheduler& scheduler,
+    render::RenderCommandQueue& renderer,
+    sched::JobSystem& job_system,
     ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
     const io::ChunkPipelineConfig& pipeline,

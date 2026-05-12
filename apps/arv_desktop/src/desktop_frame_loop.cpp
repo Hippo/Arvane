@@ -79,12 +79,13 @@ DesktopFrameLoop::DesktopFrameLoop(
     io::EngineConfig& config,
     asset::ResourceManager& resources,
     platform::OpenGLWindow& window,
-    render::OpenGLRenderer& renderer,
+    DesktopRenderThread& render_thread,
+    render::RenderCommandQueue& renderer,
     platform::InputBindings& input_bindings,
     DebugImGuiLayer& debug_imgui,
     DebugMenuState& debug_menu,
     DesktopLoadedAssets& assets,
-    sched::Scheduler& world_jobs,
+    sched::JobSystem& world_jobs,
     DesktopSessionManager& sessions,
     ui::UiTree& ui_tree,
     ui::FontUiTextMeasurer& ui_text_measurer,
@@ -95,6 +96,7 @@ DesktopFrameLoop::DesktopFrameLoop(
     ui::UIScreenManager& screen_manager) : config_(config),
                                            resources_(resources),
                                            window_(window),
+                                           render_thread_(render_thread),
                                            renderer_(renderer),
                                            input_bindings_(input_bindings),
                                            debug_imgui_(debug_imgui),
@@ -235,11 +237,13 @@ int DesktopFrameLoop::run() {
         fixed_tick_ran,
         timing.now);
 
-    submit_render_and_present(
-        std::move(frame),
-        timing,
-        has_world_session,
-        active_session);
+    if (!submit_render_and_present(
+            std::move(frame),
+            timing,
+            has_world_session,
+            active_session)) {
+      return 1;
+    }
     ARV_PROFILE_FRAME_MARK("Frame");
   }
 
@@ -573,30 +577,18 @@ void DesktopFrameLoop::render_debug_menu_if_available(
   }
 }
 
-void DesktopFrameLoop::submit_render_and_present(
+bool DesktopFrameLoop::submit_render_and_present(
     render::FramePacket frame,
     const FrameTiming& timing,
     bool has_active_session,
     DesktopGameSession* active_session) {
-  std::chrono::steady_clock::time_point render_submit_start{};
-  if constexpr (core::profiling_enabled()) {
-    render_submit_start = std::chrono::steady_clock::now();
-  }
-  renderer_.submit_frame(std::move(frame));
-  renderer_.render();
-  if constexpr (core::profiling_enabled()) {
-    const auto render_submit_end = std::chrono::steady_clock::now();
-    core::record_thread_timing(
-        core::PerfMetric::RenderSubmit,
-        std::chrono::duration<double, std::milli>(
-            render_submit_end - render_submit_start)
-            .count(),
-        "main/render");
-  }
-  debug_imgui_.render();
+  DebugImGuiDrawData debug_draw_data = debug_imgui_.capture_draw_data();
   record_frame_work_profile(timing, has_active_session, active_session);
-  swap_buffers();
+  if (!render_thread_.present_frame(std::move(frame), std::move(debug_draw_data))) {
+    return false;
+  }
   pace_frame(config_.render, timing.now);
+  return true;
 }
 
 void DesktopFrameLoop::record_frame_work_profile(
@@ -629,24 +621,6 @@ void DesktopFrameLoop::record_frame_work_profile(
     (void)has_active_session;
     (void)active_session;
     last_frame_work_ms_ = 0.0;
-  }
-}
-
-void DesktopFrameLoop::swap_buffers() {
-  ARV_PROFILE_ZONE("GPU wait time");
-  std::chrono::steady_clock::time_point gpu_wait_start{};
-  if constexpr (core::profiling_enabled()) {
-    gpu_wait_start = std::chrono::steady_clock::now();
-  }
-  window_.swap_buffers();
-  if constexpr (core::profiling_enabled()) {
-    const auto gpu_wait_end = std::chrono::steady_clock::now();
-    core::record_thread_timing(
-        core::PerfMetric::GpuWaitTime,
-        std::chrono::duration<double, std::milli>(
-            gpu_wait_end - gpu_wait_start)
-            .count(),
-        "main/render");
   }
 }
 

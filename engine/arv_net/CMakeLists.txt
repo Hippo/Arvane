@@ -14,7 +14,5 @@ target_include_directories(arv_net PUBLIC include)
 target_link_libraries(arv_net PUBLIC
   arv_core
   arv_protocol
-  concurrentqueue
-  readerwriterqueue
   GameNetworkingSockets::static
 )

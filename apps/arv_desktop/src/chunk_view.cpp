@@ -1,7 +1,7 @@
 #include "chunk_view.hpp"
 
 #include "arv/render/chunk_mesher.hpp"
-#include "arv/render/opengl_renderer.hpp"
+#include "arv/render/render_commands.hpp"
 
 #include "arv/core/profiling.hpp"
 
@@ -191,7 +191,7 @@ void retarget_chunk_view(
 
 void drain_mesh_jobs(
     world::WorldRuntime& world,
-    render::OpenGLRenderer& renderer,
+    render::RenderCommandQueue& renderer,
     ChunkViewState& view) {
   ARV_PROFILE_ZONE("Chunk meshing drain");
   world::WorldSearch search{world};
@@ -248,7 +248,7 @@ void drain_mesh_jobs(
 
 void drain_mesh_upload_receipts(
     world::WorldRuntime& world,
-    render::OpenGLRenderer& renderer,
+    render::RenderCommandQueue& renderer,
     ChunkViewState& view) {
   for (const render::ChunkMeshUploadReceipt& receipt :
        renderer.drain_chunk_mesh_upload_receipts()) {
@@ -272,8 +272,8 @@ void drain_mesh_upload_receipts(
 
 void schedule_mesh_jobs(
     world::WorldRuntime& world,
-    render::OpenGLRenderer& renderer,
-    sched::Scheduler& scheduler,
+    render::RenderCommandQueue& renderer,
+    sched::JobSystem& job_system,
     ChunkViewState& view,
     const io::ChunkPipelineConfig& pipeline,
     const voxel::BlockRegistry& block_registry,
@@ -326,8 +326,13 @@ void schedule_mesh_jobs(
     const u64 source_version = snapshot->source_version;
     const u64 source_content_version = snapshot->source_content_version;
     const u64 source_light_version = snapshot->source_light_version;
-    auto job = scheduler.submit(
-        "view_chunk_meshing",
+    sched::JobDesc desc;
+    desc.name = "view_chunk_meshing";
+    desc.lane = sched::JobLane::BackgroundCpu;
+    desc.domain = sched::JobDomain::Meshing;
+    desc.completion_target = sched::JobCompletionTarget::Render;
+    auto job = job_system.submit_result(
+        std::move(desc),
         [world_id, snapshot = std::move(*snapshot), &block_registry, &block_render_data] {
           if constexpr (core::profiling_enabled()) {
             const auto start = std::chrono::steady_clock::now();
@@ -349,6 +354,10 @@ void schedule_mesh_jobs(
             return ChunkViewState::TimedChunkMeshResult{std::move(mesh), 0.0};
           }
         });
+    if (!job.valid()) {
+      enqueue_mesh_candidate(view, coord);
+      break;
+    }
     chunk->mark_mesh_queued();
     view.mesh_in_flight.insert(coord);
     view.pending_meshes.emplace_back(
@@ -363,7 +372,7 @@ void schedule_mesh_jobs(
 
 void log_chunk_view_profile(
     ChunkViewState& view,
-    render::OpenGLRenderer& renderer,
+    render::RenderCommandQueue& renderer,
     const io::ChunkPipelineConfig& pipeline,
     std::chrono::steady_clock::time_point refresh_start) {
   const auto refresh_end = std::chrono::steady_clock::now();
@@ -443,8 +452,8 @@ void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord) {
 
 bool update_chunk_view(
     world::WorldRuntime& world,
-    render::OpenGLRenderer& renderer,
-    sched::Scheduler& scheduler,
+    render::RenderCommandQueue& renderer,
+    sched::JobSystem& job_system,
     ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
     const io::ChunkPipelineConfig& pipeline,
@@ -475,7 +484,7 @@ bool update_chunk_view(
   schedule_mesh_jobs(
       world,
       renderer,
-      scheduler,
+      job_system,
       view,
       pipeline,
       block_registry,

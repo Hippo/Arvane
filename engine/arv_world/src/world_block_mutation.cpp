@@ -68,6 +68,7 @@ voxel::FluidCell WorldRuntime::get_fluid(BlockPos pos) const noexcept {
 }
 
 bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexcept {
+  assert_owner_thread();
   const ChunkSectionCoord chunk_coord = block_to_chunk(pos);
   voxel::ChunkSection* chunk = find_chunk(chunk_coord);
   if (chunk == nullptr) {
@@ -95,6 +96,7 @@ bool WorldRuntime::set_fluid(
     BlockPos pos,
     voxel::FluidCell fluid,
     const voxel::FluidDefinition& definition) noexcept {
+  assert_owner_thread();
   return impl_->set_fluid_cell(*this, pos, fluid, definition, true);
 }
 
@@ -105,6 +107,7 @@ bool WorldRuntime::place_fluid_source(
 }
 
 std::vector<ReplicatedBlockUpdate> WorldRuntime::drain_replicated_block_updates() {
+  assert_owner_thread();
   std::vector<ReplicatedBlockUpdate> drained = std::move(impl_->replicated_block_updates);
   impl_->replicated_block_updates.clear();
   return drained;

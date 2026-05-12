@@ -106,6 +106,7 @@ public:
   static Expected<OpenGLWindow, PlatformError> create(const WindowConfig& config);
 
   void make_context_current();
+  [[nodiscard]] bool load_gl_functions() noexcept;
 
   [[nodiscard]] bool should_close() const;
 
@@ -127,6 +128,7 @@ public:
   void swap_buffers();
 
   static void poll_events();
+  static void clear_current_context() noexcept;
 
   void accumulate_scroll(f64 y_offset) noexcept;
   void append_text_input(u32 codepoint);

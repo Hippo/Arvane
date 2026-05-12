@@ -4,6 +4,7 @@
 #include "debug_menu.hpp"
 #include "desktop_assets.hpp"
 #include "desktop_menu_state.hpp"
+#include "desktop_render_thread.hpp"
 #include "desktop_session.hpp"
 
 #include "arv/asset/resource.hpp"
@@ -14,8 +15,8 @@
 #include "arv/physics/collision.hpp"
 #include "arv/platform/glfw_window.hpp"
 #include "arv/player/player_constants.hpp"
-#include "arv/render/opengl_renderer.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/render/render_commands.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/ui/ui.hpp"
 
 #include <chrono>
@@ -62,12 +63,13 @@ public:
       io::EngineConfig& config,
       asset::ResourceManager& resources,
       platform::OpenGLWindow& window,
-      render::OpenGLRenderer& renderer,
+      DesktopRenderThread& render_thread,
+      render::RenderCommandQueue& renderer,
       platform::InputBindings& input_bindings,
       DebugImGuiLayer& debug_imgui,
       DebugMenuState& debug_menu,
       DesktopLoadedAssets& assets,
-      sched::Scheduler& world_jobs,
+      sched::JobSystem& world_jobs,
       DesktopSessionManager& sessions,
       ui::UiTree& ui_tree,
       ui::FontUiTextMeasurer& ui_text_measurer,
@@ -242,7 +244,7 @@ private:
       const platform::InputSnapshot& platform_input,
       std::chrono::steady_clock::time_point now);
 
-  void submit_render_and_present(
+  [[nodiscard]] bool submit_render_and_present(
       render::FramePacket frame,
       const FrameTiming& timing,
       bool has_active_session,
@@ -251,17 +253,16 @@ private:
       const FrameTiming& timing,
       bool has_active_session,
       DesktopGameSession* active_session);
-  void swap_buffers();
-
   io::EngineConfig& config_;
   asset::ResourceManager& resources_;
   platform::OpenGLWindow& window_;
-  render::OpenGLRenderer& renderer_;
+  DesktopRenderThread& render_thread_;
+  render::RenderCommandQueue& renderer_;
   platform::InputBindings& input_bindings_;
   DebugImGuiLayer& debug_imgui_;
   DebugMenuState& debug_menu_;
   DesktopLoadedAssets& assets_;
-  sched::Scheduler& world_jobs_;
+  sched::JobSystem& world_jobs_;
   DesktopSessionManager& sessions_;
   ui::UiTree& ui_tree_;
   ui::FontUiTextMeasurer& ui_text_measurer_;

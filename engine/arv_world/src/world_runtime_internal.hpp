@@ -8,6 +8,7 @@
 #include <deque>
 #include <optional>
 #include <span>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -399,6 +400,7 @@ struct WorldRuntime::Impl {
       bool enqueue_updates) noexcept;
 
   WorldID id{};
+  std::thread::id owner_thread_id{std::this_thread::get_id()};
   detail::WorldChunkStore chunks;
   detail::WorldDirtyTracker dirty;
   detail::WorldTickQueues tick_queues;

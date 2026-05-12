@@ -5,7 +5,7 @@
 #include "arv/core/expected.hpp"
 #include "arv/io/config.hpp"
 #include "arv/player/player_constants.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/world_generation.hpp"

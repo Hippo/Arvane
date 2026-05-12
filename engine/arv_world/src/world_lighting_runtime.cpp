@@ -36,6 +36,7 @@ bool WorldRuntime::has_lighting_work() const noexcept {
 }
 
 LightingSnapshot WorldRuntime::make_lighting_snapshot() const {
+  assert_owner_thread();
   ARV_PROFILE_ZONE("Snapshot creation");
   LightingSnapshot snapshot = impl_->lighting.make_snapshot(*this);
   impl_->dirty.set_last_lighting_snapshot_chunk_count(snapshot.pending_dirty_sections);
@@ -49,6 +50,7 @@ LightingResult WorldRuntime::build_lighting_result(
 }
 
 LightingPublishStats WorldRuntime::publish_lighting_result(LightingResult result) noexcept {
+  assert_owner_thread();
   const LightingPublishStats stats = impl_->lighting.publish_result(*this, std::move(result));
   if (stats.changed_chunks > 0U || stats.remeshes_triggered > 0U) {
     impl_->dirty.mark_mesh_content_dirty();

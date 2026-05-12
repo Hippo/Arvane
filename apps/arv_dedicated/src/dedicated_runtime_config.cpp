@@ -125,6 +125,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.max_pending_generation_jobs =
       config.chunk_pipeline.max_generation_jobs_per_frame;
   server_start_info.worker_threads = runtime_config.thread_budget.primary_workers;
+  server_start_info.use_network_thread = true;
   server_start_info.world_tick_policy = runtime_config.world_tick_policy;
   server_start_info.entity_registry = &registries.entity_registry;
   server_start_info.skins = config.skins;

@@ -221,6 +221,9 @@ public:
   WorldRuntime& operator=(const WorldRuntime&) = delete;
 
   [[nodiscard]] WorldID id() const noexcept;
+  void bind_owner_thread() noexcept;
+  [[nodiscard]] bool is_owner_thread() const noexcept;
+  void assert_owner_thread() const noexcept;
   void configure_height(WorldHeightSettings settings);
   [[nodiscard]] WorldHeightSettings height_settings() const noexcept;
   [[nodiscard]] Chunk& ensure_chunk(ChunkCoord coord);

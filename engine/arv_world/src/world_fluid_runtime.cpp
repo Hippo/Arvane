@@ -271,6 +271,7 @@ void WorldRuntime::enqueue_fluid_update(
     BlockPos pos,
     FluidUpdateReason reason,
     u32 delay_ticks) {
+  assert_owner_thread();
   impl_->fluid.enqueue_update(pos, impl_->tick_index, reason, delay_ticks);
 }
 
@@ -290,17 +291,20 @@ u32 WorldRuntime::process_fluid_updates(
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& definition,
     u32 budget) {
+  assert_owner_thread();
   return impl_->fluid.process_updates(*this, registry, definition, budget);
 }
 
 std::optional<FluidSimulationRequest> WorldRuntime::make_fluid_simulation_request(
     u32 budget) {
+  assert_owner_thread();
   return impl_->fluid.make_simulation_request(impl_->chunks, impl_->tick_index, budget);
 }
 
 u32 WorldRuntime::apply_fluid_simulation_result(
     FluidSimulationResult result,
     const voxel::FluidDefinition& definition) {
+  assert_owner_thread();
   HashMap<ChunkSectionCoord, bool> accepted_chunks;
   WorldSearch search{*this};
   for (const FluidChange& change : result.changes) {

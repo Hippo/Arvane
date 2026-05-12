@@ -3,7 +3,7 @@
 #include "arv/io/config.hpp"
 #include "arv/physics/collision.hpp"
 #include "arv/player/player_constants.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/server/chunk_streamer.hpp"
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/world_runtime.hpp"

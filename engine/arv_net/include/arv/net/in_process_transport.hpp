@@ -1,11 +1,10 @@
 #pragma once
 
+#include "arv/core/completion_queue.hpp"
 #include "arv/net/transport.hpp"
 
 #include <atomic>
 #include <memory>
-
-#include <readerwriterqueue.h>
 
 namespace arv::net {
 
@@ -28,8 +27,8 @@ struct InProcessSharedState {
   InProcessEndpointState client;
   InProcessEndpointState server;
   std::atomic_bool server_listening{};
-  moodycamel::ReaderWriterQueue<NetworkEvent> client_to_server_events;
-  moodycamel::ReaderWriterQueue<NetworkEvent> server_to_client_events;
+  core::SpscQueue<NetworkEvent> client_to_server_events;
+  core::SpscQueue<NetworkEvent> server_to_client_events;
 };
 
 } // namespace detail
@@ -51,8 +50,8 @@ private:
   const detail::InProcessEndpointState& local_state() const;
   detail::InProcessEndpointState& peer_state();
   const detail::InProcessEndpointState& peer_state() const;
-  moodycamel::ReaderWriterQueue<NetworkEvent>& inbound_events();
-  moodycamel::ReaderWriterQueue<NetworkEvent>& outbound_events();
+  core::SpscQueue<NetworkEvent>& inbound_events();
+  core::SpscQueue<NetworkEvent>& outbound_events();
   [[nodiscard]] static bool connection_is_active(ConnectionState state) noexcept;
 
   std::shared_ptr<detail::InProcessSharedState> shared_;

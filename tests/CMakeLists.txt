@@ -19,6 +19,8 @@ add_executable(arv_tests
   core/math_tests.cpp
   core/rate_limiter_tests.cpp
   core/types_tests.cpp
+  desktop/debug_imgui_tests.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/debug_imgui.cpp
   io/config_tests.cpp
   lang/language_tests.cpp
   net/in_process_transport_tests.cpp
@@ -36,8 +38,9 @@ add_executable(arv_tests
   render/item_model_tests.cpp
   render/mesh_handoff_tests.cpp
   render/paged_texture_atlas_tests.cpp
+  render/render_commands_tests.cpp
   render/chunk_meshing_tests.cpp
-  sched/scheduler_tests.cpp
+  sched/job_system_tests.cpp
   server/chunk_streamer_tests.cpp
   server/chat_service_tests.cpp
   server/player_movement_validation_tests.cpp
@@ -59,7 +62,10 @@ add_executable(arv_tests
   world/world_time_tests.cpp
 )
 
-target_include_directories(arv_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(arv_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src
+)
 target_compile_definitions(arv_tests PRIVATE
   ARVANE_TEST_ASSET_ROOT="${CMAKE_SOURCE_DIR}/arvane_home/assets"
 )
@@ -88,5 +94,8 @@ target_link_libraries(arv_tests PRIVATE
   GTest::gtest_main
   GTest::gmock
   GTest::gmock_main
+  imgui
+  glfw
+  OpenGL::GL
 )
 gtest_discover_tests(arv_tests)

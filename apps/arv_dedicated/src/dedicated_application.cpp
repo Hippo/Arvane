@@ -114,7 +114,6 @@ int DedicatedApplication::run(int argc, char** argv) {
       launch_options.max_ticks);
 
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::Stopping);
-  server_runtime.shutdown();
 
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::Saving);
   auto save_result = save_dedicated_world(

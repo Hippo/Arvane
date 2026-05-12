@@ -42,14 +42,12 @@ Responsibilities:
 - window events
 - platform integration
 - input collection
-- high-level frame loop
-- coordinating simulation and rendering
-- submitting jobs to the scheduler
+- high-level frame loop and desktop UI/input routing
+- coordinating simulation and rendering handoff
+- submitting jobs to `arv::sched::JobSystem`
 - receiving completed work
 
-The main thread may also act as the simulation thread in early versions.
-
-If simulation and rendering later move to separate threads, the main thread remains the coordinator.
+Integrated desktop play still performs its session tick from the desktop frame loop. Dedicated server mode moves authoritative ticking onto `arv::sched::WorldThread`, leaving the main thread as the process lifecycle owner.
 
 ---
 
@@ -129,7 +127,11 @@ Worker jobs must not reach back into live world state.
 
 The render thread owns GPU interaction.
 
-In the initial implementation, the render thread may be the main thread.
+`arv::sched::RenderThread` is the engine owner-thread primitive for render backends that need dedicated GPU ownership. The desktop OpenGL backend uses it as the physical render owner.
+
+Desktop renderer access goes through `arv::render::RenderCommandQueue`. The facade wraps an `IRenderCommandTarget`; production desktop uses `OpenGLRenderCommandTarget` behind `DesktopRenderThread`, while tests use recording targets that do not require OpenGL. In threaded mode the facade routes commands through an `OwnerThread`; there is no desktop pump point on the main thread. This command boundary covers resize, frame submission/render, mesh uploads/removals and receipts, atlas uploads, entity model/animation updates, player skin uploads/queries, metric snapshots, and shutdown. Scalar render metric getters read the last published atomic snapshot so frame construction, chunk throttling, and debug UI do not synchronously ping the render thread; `metrics_snapshot()` remains the exact synchronous query.
+
+The desktop OpenGL backend now runs GPU work on `arv::sched::RenderThread`. The main/platform thread still creates the window, polls events, collects input, ticks session/gameplay state, builds frame packets, and builds the debug ImGui CPU context. The render thread makes the GLFW context current, loads OpenGL functions, owns `OpenGLRenderer`, renders copied ImGui draw data, controls swap interval, swaps buffers, and destroys GPU resources.
 
 If a separate render thread exists, it owns:
 
@@ -174,7 +176,9 @@ For GameNetworkingSockets, the owner thread is the only thread that may mutate:
 - transport connection states
 - inbound transport event queues
 
-Other threads may request sends through the transport API, but those calls enqueue outbound send commands. The owner thread drains the send command queue, calls GameNetworkingSockets, runs transport callbacks, receives poll-group messages, and publishes engine-level `NetworkEvent`s at an explicit pump point.
+Other threads may request sends and closes through the transport API, but those calls enqueue outbound commands. The owner thread drains the command queues, calls GameNetworkingSockets, runs transport callbacks, receives poll-group messages, and publishes engine-level `NetworkEvent`s at an explicit pump point.
+
+Dedicated server mode starts `ServerNetworkThread` on `arv::sched::NetworkThread`. That thread creates/listens the GameNetworkingSockets transport, polls it, and queues inbound `NetworkEvent`s for the world owner to consume during `ServerRuntime::tick()`.
 
 In-process transport uses one single-producer/single-consumer queue in each direction:
 
@@ -198,11 +202,39 @@ Jobs are units of computation with:
 
 Jobs should be small enough to run efficiently but large enough to avoid excessive scheduling overhead.
 
-The scheduler provides execution primitives.
+`arv::sched::JobSystem` provides the engine-facing execution primitive. It is the only engine module that owns Taskflow executors. Feature systems should submit through `JobSystem`, not through Taskflow directly.
 
 Ownership remains with the systems that submit and consume jobs.
 
 Lighting jobs are a bounded-job example. A lighting task solves one chunk section from immutable section and face-neighbor snapshots, records node/queue metrics, and returns a publishable result. If more lighting work remains, the world queues continuation sections instead of allowing the worker to expand into a whole-region flood fill. Simulation, render, and meshing code may enqueue or publish lighting work, but must not wait for propagation to finish.
+
+### Job Lanes
+
+`JobSystem` exposes three lanes:
+
+* `CriticalCpu`
+* `BackgroundCpu`
+* `BlockingIo`
+
+`CriticalCpu` is for short work that should not wait behind bulk generation or meshing. Current use includes server fluid simulation batches. Future small AI planning batches may use this lane when they are split from world-owner application.
+
+`BackgroundCpu` is for throughput work. Current use includes chunk generation, chunk meshing, and lighting propagation. These jobs must operate on snapshots or copied inputs and return results for owner-thread validation.
+
+`BlockingIo` is reserved for disk or operating-system waits. Startup and shutdown save/load paths may remain synchronous, but gameplay-time region reads, save flushes, and asset reads should use `BlockingIo` before any CPU-heavy parse stage is moved back to `BackgroundCpu`.
+
+Each job also carries a domain such as `ChunkGeneration`, `Meshing`, `Lighting`, `Liquids`, `EntityAi`, `Pathfinding`, `SaveLoad`, `Assets`, `Networking`, or `Rendering`. Domains are used for in-flight budgets and diagnostics. A domain budget of zero means unbounded; nonzero budgets reject excess submissions so the owning system can keep candidates queued for a later tick.
+
+### Current Owner Mapping
+
+The scheduler module provides distinct `RenderThread`, `NetworkThread`, and `WorldThread` owner-thread types. Unit tests assert that each starts on a physical thread distinct from the main test thread.
+
+The desktop client uses `DesktopRenderThread` as the OpenGL render owner. GLFW event polling, input collection, gameplay/session ticking, frame packet construction, and debug ImGui CPU/menu construction stay on the main/platform thread. The render thread owns the current OpenGL context, GL function loading, `OpenGLRenderer`, ImGui GL device resources, GPU uploads, draw submission, swap interval, buffer swap, and GPU deletion. Desktop code should call `RenderCommandQueue` or `DesktopRenderThread::present_frame`, not `OpenGLRenderer`, except inside the render-thread owner implementation. The current desktop present model is synchronous, so `OwnerThread` wakeups use atomic `wait()`/`notify_one()` rather than a millisecond sleep fallback.
+
+The server world owner is the thread that calls `ServerRuntime::tick()`. Integrated singleplayer uses the desktop frame loop. Dedicated server mode runs the tick loop on `WorldThread` and binds `WorldRuntime` ownership there before ticking. `WorldRuntime` records an owner thread and asserts central mutation paths in debug builds.
+
+The GameNetworkingSockets transport records its pump owner and asserts transport-state mutation on that owner. Dedicated server mode starts the transport on `NetworkThread`; cross-thread sends and closes enqueue outbound commands that the transport owner drains during `poll_events()`.
+
+Taskflow worker threads are not owners. They compute from immutable inputs and return generated chunks, lighting results, fluid deltas, CPU mesh data, or other value-like results.
 
 ---
 
@@ -410,7 +442,7 @@ Recommended runtime flow:
 ```text
 streaming system requests missing chunk
   -> world marks section Requested
-  -> server/world scheduler submits generation job
+  -> server/world job system submits BackgroundCpu ChunkGeneration job
   -> worker computes GeneratedChunk from seed/config/palette
   -> simulation thread drains completed job
   -> simulation thread validates lifecycle and publishes as Loaded
@@ -761,6 +793,16 @@ Fatal errors should be reserved for violated invariants or unrecoverable engine 
 
 ---
 
+## Gameplay-Sensitive Jobs
+
+Liquids do not have a dedicated liquid thread. The world owner maintains pending and deferred fluid-update queues. In server worlds, the world owner drains a bounded due-update batch into a `FluidSimulationRequest`, submits it as a `CriticalCpu` `Liquids` job, then applies the returned `FluidSimulationResult` on the world owner after validating chunk content versions. Inline fluid processing remains available for tests and simple non-server worlds, but server tick policy disables inline fluid budget so fluid work participates in job-lane isolation.
+
+Entity behavior currently uses lightweight `BrainComponent` goals on the world owner with per-brain tick intervals. This keeps existing behavior deterministic and immediate. No long pathfinding implementation exists yet. When expensive planning or path search is added, planning jobs must use copied entity/world inputs, submit as `CriticalCpu` `EntityAi` for short plans or `BackgroundCpu` `Pathfinding` for long searches, and return intents or paths that the world owner validates before mutating components.
+
+Save/load and region I/O are synchronous during startup and shutdown. Gameplay-time disk work should use `BlockingIo` `SaveLoad` jobs, then hand parse/decompression work to `BackgroundCpu` if it is CPU-heavy, then apply loaded world state on the world owner.
+
+---
+
 ## Debugging Requirements
 
 The job system should expose enough information to debug scheduling issues.
@@ -859,16 +901,17 @@ These invariants must hold:
 * simulation code does not perform OpenGL calls
 * locks are not used as a substitute for ownership design
 * fixed worker pools are created up front; runtime work must not spawn ad hoc threads
-* automatic worker counts reserve engine role threads and default toward `hardware_concurrency - 2`
-* one-producer/one-consumer handoffs should use `arv::sched::SpscQueue`
+* automatic job-system worker counts reserve engine role threads and default toward `hardware_concurrency - 2`
+* one-producer/one-consumer handoffs should use `arv::core::SpscQueue` or the `arv::sched` alias
+* MPSC completion and command handoffs should use `arv::core::CompletionQueue` or the `arv::sched` alias
 * completion queues should drain into reusable caller-owned vectors when possible
-* scheduler instrumentation records queue latency per worker thread
+* job-system instrumentation records queue latency per worker thread
 
 ---
 
 ## Profiling and Timing
 
-The scheduler wraps submitted jobs with Tracy zones named from the job label. Worker threads are named `worker` in Tracy, and each worker keeps thread-local histograms for:
+`JobSystem` wraps submitted jobs with Tracy zones named from the job label. Worker threads are named by lane (`worker/critical`, `worker/background`, or `worker/io`) in Tracy, and each worker keeps thread-local histograms for:
 
 * meshing task duration
 * lighting task duration
@@ -876,13 +919,24 @@ The scheduler wraps submitted jobs with Tracy zones named from the job label. Wo
 
 Histograms are fixed-size ring buffers and expose p50/p95/p99 snapshots without allocating during recording.
 
-The debug menu also shows aggregate atomic timing snapshots for those same metrics. Workers only publish samples at task boundaries, and the UI never locks or reaches into another thread's local histogram while rendering the profiling tab. When `ARVANE_ENABLE_PROFILING=OFF`, scheduler queue-latency clock reads and histogram writes are compiled out.
+The debug menu also shows aggregate atomic timing snapshots for those same metrics, plus queue-pressure snapshots from the client and server job systems. Workers only publish samples at task boundaries, and the UI never locks or reaches into another thread's local histogram while rendering the profiling tab. When `ARVANE_ENABLE_PROFILING=OFF`, job queue-latency clock reads and histogram writes are compiled out.
 
 ---
 
 ## Summary
 
 Arvane’s multithreading model is based on ownership, snapshots, jobs, and validated handoff.
+
+Current implementation checkpoints:
+
+* Taskflow is isolated behind `arv::sched::JobSystem`.
+* Client chunk meshing submits `BackgroundCpu` `Meshing` jobs and uploads on the render owner.
+* Server chunk generation submits `BackgroundCpu` `ChunkGeneration` jobs.
+* Server lighting submits `BackgroundCpu` `Lighting` jobs and publishes on the world owner.
+* Server fluid simulation submits bounded `CriticalCpu` `Liquids` jobs and applies deltas on the world owner.
+* Dedicated server networking runs on `NetworkThread`; GameNetworkingSockets transport state is pump-owner asserted.
+* Dedicated server ticking runs on `WorldThread`; `WorldRuntime` central mutation paths assert the world owner in debug builds.
+* Desktop OpenGL rendering runs on `RenderThread`; the main/platform thread still owns window events, input, gameplay/session updates, frame construction, and debug ImGui CPU/menu construction.
 
 Workers compute.
 

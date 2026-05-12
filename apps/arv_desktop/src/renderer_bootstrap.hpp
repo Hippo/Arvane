@@ -3,12 +3,12 @@
 #include "arv/asset/resource.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
-#include "arv/render/opengl_renderer.hpp"
+#include "arv/render/render_commands.hpp"
 
 namespace arv::desktop {
 
 [[nodiscard]] bool configure_renderer(
-    render::OpenGLRenderer& renderer,
+    render::RenderCommandQueue& renderer,
     asset::ResourceManager& resources,
     const io::EngineConfig& config);
 

@@ -8,8 +8,8 @@
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
-#include "arv/render/opengl_renderer.hpp"
-#include "arv/sched/scheduler.hpp"
+#include "arv/render/render_commands.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/server/server_runtime.hpp"
 
 #include <array>
@@ -108,8 +108,8 @@ struct DebugMenuResult {
     Seconds now_seconds,
     const std::filesystem::path& item_animation_export_path,
     const entity::EntityRegistry& entity_registry,
-    sched::Scheduler& world_jobs,
-    const render::OpenGLRenderer& renderer,
+    sched::JobSystem& world_jobs,
+    render::RenderCommandQueue& renderer,
     const ChunkViewState& chunk_view);
 
 } // namespace arv::desktop

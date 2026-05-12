@@ -1,4 +1,4 @@
-#include "arv/sched/scheduler.hpp"
+#include "arv/sched/job_system.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
 
@@ -76,11 +76,24 @@ TEST(WorldGenerationTests, SameSeedAndChunkProduceSameOutputThroughAJob) {
   const arv::voxel::BlockRegistry registry = make_worldgen_registry();
   const arv::world::ChunkGenerationRequest request = make_request(registry, 1234);
 
-  arv::sched::Scheduler scheduler(1);
-  auto first_job = scheduler.submit("generate_first", [request] {
+  arv::sched::JobSystemConfig job_config;
+  job_config.critical_cpu_workers = 1;
+  job_config.background_cpu_workers = 1;
+  job_config.blocking_io_workers = 1;
+  arv::sched::JobSystem jobs{job_config};
+  jobs.start();
+  arv::sched::JobDesc first_desc;
+  first_desc.name = "generate_first";
+  first_desc.lane = arv::sched::JobLane::BackgroundCpu;
+  first_desc.domain = arv::sched::JobDomain::ChunkGeneration;
+  auto first_job = jobs.submit_result(std::move(first_desc), [request] {
     return arv::world::generate_chunk(request);
   });
-  auto second_job = scheduler.submit("generate_second", [request] {
+  arv::sched::JobDesc second_desc;
+  second_desc.name = "generate_second";
+  second_desc.lane = arv::sched::JobLane::BackgroundCpu;
+  second_desc.domain = arv::sched::JobDomain::ChunkGeneration;
+  auto second_job = jobs.submit_result(std::move(second_desc), [request] {
     return arv::world::generate_chunk(request);
   });
 

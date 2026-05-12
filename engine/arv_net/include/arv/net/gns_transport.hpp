@@ -1,17 +1,18 @@
 #pragma once
 
+#include "arv/core/completion_queue.hpp"
 #include "arv/core/types.hpp"
 #include "arv/net/transport.hpp"
 
 #include <atomic>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
-#include <concurrentqueue.h>
 #include <steam/steamnetworkingsockets.h>
 
 namespace arv::net {
@@ -63,6 +64,11 @@ private:
     TransportMessage message{};
   };
 
+  struct OutboundCloseCommand {
+    ConnectionID connection_id{};
+    std::string reason{};
+  };
+
   static constexpr usize DefaultOutboundCommandQueueCapacity = 4096U;
   static constexpr usize MaxOutboundCommandsPerPoll = 512U;
   static constexpr usize MaxInboundMessagesPerPoll = 512U;
@@ -77,8 +83,12 @@ private:
   void unregister_connection_owner(HSteamNetConnection handle);
   void configure_connection(HSteamNetConnection handle);
   void handle_connection_status_change(const SteamNetConnectionStatusChangedCallback_t& info);
+  void drain_outbound_close_commands();
   void drain_outbound_send_commands();
   [[nodiscard]] NetworkResult send_outbound_command(const OutboundSendCommand& command);
+  [[nodiscard]] NetworkResult close_connection_on_owner(
+      ConnectionID connection_id,
+      std::string_view reason);
   void receive_poll_group_messages();
   ConnectionID connection_id_for_handle(HSteamNetConnection handle);
   std::optional<ConnectionID> connection_id_for_message(const ISteamNetworkingMessage& message);
@@ -98,7 +108,8 @@ private:
   u32 next_connection_id_{1};
   mutable std::atomic<usize> owner_thread_hash_{0U};
   std::atomic_bool accepting_sends_{true};
-  moodycamel::ConcurrentQueue<OutboundSendCommand> outbound_sends_{DefaultOutboundCommandQueueCapacity};
+  core::CompletionQueue<OutboundSendCommand> outbound_sends_{DefaultOutboundCommandQueueCapacity};
+  core::CompletionQueue<OutboundCloseCommand> outbound_closes_{DefaultOutboundCommandQueueCapacity};
   HashMap<ConnectionID, HSteamNetConnection> connections_;
   HashMap<HSteamNetConnection, ConnectionID> connection_ids_;
   HashMap<ConnectionID, ConnectionState> states_;
