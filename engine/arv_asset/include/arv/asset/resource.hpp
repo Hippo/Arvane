@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/asset/pack.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/id.hpp"
 #include "arv/core/math.hpp"
@@ -48,6 +49,7 @@ enum class AssetKind : u8 {
   Font,
   Model,
   Animation,
+  Theme,
 };
 
 struct AssetError {
@@ -89,12 +91,17 @@ using TextureLoadResult = Expected<TextureResourceHandle, AssetError>;
 class ResourceManager {
 public:
   explicit ResourceManager(std::filesystem::path asset_root);
+  explicit ResourceManager(PackManager pack_manager);
 
   [[nodiscard]] const std::filesystem::path& asset_root() const noexcept {
     return asset_root_;
   }
 
   [[nodiscard]] std::filesystem::path resolve_asset_path(
+      const AssetID& asset_id,
+      AssetKind kind) const;
+
+  [[nodiscard]] PackPathResult resolve_asset(
       const AssetID& asset_id,
       AssetKind kind) const;
 
@@ -114,6 +121,7 @@ private:
   [[nodiscard]] TextureResourceHandle publish_texture(TextureResource resource);
 
   std::filesystem::path asset_root_{};
+  std::optional<PackManager> pack_manager_{};
   std::vector<TextureResource> textures_{{}};
   HashMap<std::string, TextureResourceHandle> texture_cache_{};
 };

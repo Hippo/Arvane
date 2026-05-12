@@ -128,8 +128,9 @@ public:
 
 [[nodiscard]] const arv::lang::LanguageCatalog& test_language() {
   static const arv::lang::LanguageCatalog language = [] {
-    const std::filesystem::path lang_root =
-        std::filesystem::path{ARVANE_TEST_ASSET_ROOT}.parent_path() / "lang";
+    const std::filesystem::path pack_root =
+        std::filesystem::path{ARVANE_TEST_ASSET_ROOT}.parent_path().parent_path();
+    const std::filesystem::path lang_root = pack_root / "data" / "arvane" / "lang";
     auto loaded = arv::lang::load_language_directory(lang_root);
     return loaded ? std::move(loaded.value()) : arv::lang::LanguageCatalog{};
   }();

@@ -11,12 +11,34 @@
 #include "dedicated_worldgen_loader.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/asset/pack.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
 
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace arv::dedicated {
+namespace {
+
+[[nodiscard]] std::vector<persistence::RequiredPackMetadata> to_persistence_required_packs(
+    std::span<const asset::RequiredPack> packs) {
+  std::vector<persistence::RequiredPackMetadata> result;
+  result.reserve(packs.size());
+  for (const asset::RequiredPack& pack : packs) {
+    result.push_back({
+        pack.id,
+        pack.version,
+        pack.content_hash,
+        asset::pack_side_to_string(pack.required_side),
+        pack.namespaces,
+        pack.native_client_code_required});
+  }
+  return result;
+}
+
+} // namespace
 
 int DedicatedApplication::run(int argc, char** argv) {
   install_shutdown_signal_handlers();
@@ -30,6 +52,15 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(dedicated_error("config", config_result.error().message));
   }
   const io::EngineConfig config = config_result.value();
+  auto pack_manager_result = asset::PackManager::load(config.paths.arvane_home_path());
+  if (!pack_manager_result) {
+    return fail(dedicated_error("packs", pack_manager_result.error().describe()));
+  }
+  asset::PackManager pack_manager = std::move(pack_manager_result.value());
+  const std::vector<asset::RequiredPack> active_required_packs =
+      pack_manager.required_packs();
+  const std::vector<persistence::RequiredPackMetadata> required_packs =
+      to_persistence_required_packs(active_required_packs);
   core::info(
       "dedicated",
       "config={} arvane_home={} world={} listen={}:{} save_root={}",
@@ -41,14 +72,14 @@ int DedicatedApplication::run(int argc, char** argv) {
       config.paths.dedicated_server_save_path().string());
 
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::LoadingRegistries);
-  auto registries_result = load_dedicated_registries(config);
+  auto registries_result = load_dedicated_registries(config, pack_manager);
   if (!registries_result) {
     return fail(registries_result.error());
   }
   DedicatedRegistries registries = std::move(registries_result.value());
 
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::LoadingWorlds);
-  auto worldgen_result = load_dedicated_worldgen(config);
+  auto worldgen_result = load_dedicated_worldgen(config, pack_manager);
   if (!worldgen_result) {
     return fail(worldgen_result.error());
   }
@@ -61,7 +92,8 @@ int DedicatedApplication::run(int argc, char** argv) {
       registries.block_registry_hash,
       registries.item_registry,
       registries.item_registry_hash,
-      registries.language);
+      registries.language,
+      required_packs);
   if (!loaded_world_result) {
     return fail(loaded_world_result.error());
   }
@@ -128,7 +160,8 @@ int DedicatedApplication::run(int argc, char** argv) {
       registries.block_registry_hash,
       registries.item_registry,
       registries.item_registry_hash,
-      registries.language);
+      registries.language,
+      required_packs);
   if (!save_result) {
     return fail(save_result.error());
   }

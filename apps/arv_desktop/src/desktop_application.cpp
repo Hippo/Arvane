@@ -31,15 +31,22 @@ int DesktopApplication::run(int argc, char** argv) {
     return 1;
   }
   io::EngineConfig config = config_result.value();
+  auto pack_manager_result = asset::PackManager::load(config.paths.arvane_home_path());
+  if (!pack_manager_result) {
+    core::error("packs", pack_manager_result.error().describe());
+    return 1;
+  }
+  asset::PackManager pack_manager = std::move(pack_manager_result.value());
+  core::info("packs", "loaded {} enabled packs", pack_manager.stack().size());
   const ui::UiThemeLoadResult theme_result =
-      ui::load_ui_theme(config.paths.arvane_home_path());
+      ui::load_ui_theme(pack_manager, config.paths.config_path() / "style.yaml");
   const ui::UiTheme ui_theme = theme_result.theme;
   core::info(
       "ui/theme",
       "loaded theme '{}' ({})",
       ui_theme.name,
       theme_result.loaded_theme);
-  asset::ResourceManager resources(config.paths.assets_path());
+  asset::ResourceManager resources(pack_manager);
 
   platform::GlfwLibrary glfw;
   if (!glfw.initialized()) {
@@ -99,7 +106,7 @@ int DesktopApplication::run(int argc, char** argv) {
   render_commands.resize(framebuffer.width, framebuffer.height);
 
   auto loaded_assets_result =
-      load_desktop_assets(resources, render_commands, config, ui_theme);
+      load_desktop_assets(resources, render_commands, config, pack_manager, ui_theme);
   if (!loaded_assets_result) {
     core::error(
         loaded_assets_result.error().category,
@@ -161,6 +168,7 @@ int DesktopApplication::run(int argc, char** argv) {
           assets.default_generation_config,
           thread_budget,
           assets.language,
+          pack_manager.required_packs(),
       }};
 
   DesktopMenuState menu_state{

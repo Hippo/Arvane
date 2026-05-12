@@ -48,6 +48,7 @@ using DesktopLoadedAssetsResult = Expected<DesktopLoadedAssets, DesktopAssetLoad
     asset::ResourceManager& resources,
     render::RenderCommandQueue& renderer,
     const io::EngineConfig& config,
+    const asset::PackManager& packs,
     const ui::UiTheme& theme);
 
 } // namespace arv::desktop

@@ -369,6 +369,7 @@ struct PathConfig {
   std::filesystem::path project_root{"."};
   std::filesystem::path arvane_home_root{};
   std::filesystem::path asset_root{};
+  std::filesystem::path pack_root{};
   std::filesystem::path plugins_root{};
   std::filesystem::path config_root{};
   std::filesystem::path saves_root{};
@@ -388,6 +389,10 @@ struct PathConfig {
 
   [[nodiscard]] const std::filesystem::path& assets_path() const noexcept {
     return asset_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& packs_path() const noexcept {
+    return pack_root;
   }
 
   [[nodiscard]] const std::filesystem::path& plugins_path() const noexcept {

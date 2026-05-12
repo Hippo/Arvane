@@ -7,7 +7,7 @@ Arvane client UI should be configurable, consistent, and readable. The engine sh
 The preferred model is theme-driven:
 
 - `style.yaml` selects the active theme and stores broad client style preferences.
-- Theme files in `arvane_home/themes/` define colors, accents, spacing, typography, and common UI element styling.
+- Theme assets in enabled packs define colors, accents, spacing, typography, and common UI element styling.
 - UI screens consume named style tokens instead of embedding raw colors or arbitrary sizing rules.
 
 This keeps menus consistent, makes end-user customization approachable, and allows the client to support multiple visual identities without rewriting UI code.
@@ -22,18 +22,21 @@ Client UI styling is configured through:
 arvane_home/
   config/
     style.yaml
-
-  themes/
-    default.yaml
-    high_contrast.yaml
-    dark.yaml
-    light.yaml
+  packs/
+    arvane_base/
+      assets/
+        arvane/
+          themes/
+            default.yaml
+            high_contrast.yaml
+            dark.yaml
+            light.yaml
 ```
 
 `style.yaml` selects the active theme:
 
 ```yaml
-theme: "default" # resolves to arvane_home/themes/default.yaml
+theme: "default" # resolves to arvane:theme/default
 ```
 
 Theme names are logical names. They should not include file extensions or path separators.
@@ -54,11 +57,13 @@ theme: "default.yaml"
 theme: "themes/default.yaml"
 ```
 
-The client should resolve theme names using:
+The client should resolve bare theme names using the `arvane` namespace:
 
 ```text
-arvane_home/themes/<theme>.yaml
+arvane:theme/<theme>
 ```
+
+A full theme resource ID such as `example_pack:theme/night` may also be used.
 
 If the selected theme cannot be loaded, the client should fall back to `default`.
 
@@ -364,7 +369,7 @@ The client should:
 
 1. Load `arvane_home/config/style.yaml`.
 2. Read the selected `theme`.
-3. Resolve it to `arvane_home/themes/<theme>.yaml`.
+3. Resolve it to a theme asset resource ID.
 4. Load and validate the theme file.
 5. Fall back to `default` if the selected theme is missing or invalid.
 6. Fall back to built-in engine defaults if `default` is missing or invalid.
@@ -671,7 +676,7 @@ When adding or changing UI code:
 7. Validate theme files without crashing the client.
 8. Log useful warnings for invalid theme data.
 9. Keep `style.yaml` small.
-10. Put actual theme definitions in `arvane_home/themes/`.
+10. Put actual theme definitions in pack assets under `assets/<namespace>/themes/`.
 
 Agents should not add one-off styling systems for individual menus. Extend the theme schema when a new reusable visual role is needed.
 

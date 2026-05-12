@@ -97,7 +97,7 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
       std::filesystem::path{"/tmp/arvane_assets/models/entity/pig.json"});
   EXPECT_EQ(
       resources.resolve_asset_path({pig->animation_asset}, arv::asset::AssetKind::Animation),
-      std::filesystem::path{"/tmp/arvane_assets/animation/pig.json"});
+      std::filesystem::path{"/tmp/arvane_assets/animations/pig.json"});
 }
 
 TEST(EntityRegistryTests, AcceptsSingleEntityDefinitionObject) {

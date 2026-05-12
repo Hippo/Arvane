@@ -8,6 +8,10 @@
 #include <string_view>
 #include <vector>
 
+namespace arv::asset {
+class PackManager;
+} // namespace arv::asset
+
 namespace arv::ui {
 
 enum class UiTextRole : u8 {
@@ -132,6 +136,9 @@ struct UiThemeLoadResult {
 [[nodiscard]] UiStyleConfig make_default_ui_style_config();
 [[nodiscard]] bool valid_theme_name(std::string_view name) noexcept;
 [[nodiscard]] UiThemeLoadResult load_ui_theme(const std::filesystem::path& arvane_home);
+[[nodiscard]] UiThemeLoadResult load_ui_theme(
+    const asset::PackManager& packs,
+    const std::filesystem::path& style_file);
 [[nodiscard]] UiThemeLoadResult load_ui_theme_from_paths(
     const std::filesystem::path& style_file,
     const std::filesystem::path& themes_root);

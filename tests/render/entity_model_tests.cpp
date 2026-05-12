@@ -150,7 +150,7 @@ TEST(EntityModelTests, RejectsOldEntityModelFields) {
 
 TEST(EntityModelTests, LoadsAnimationAssetFromAnimationFolder) {
   const std::filesystem::path pig_animation_path =
-      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "animation" / "pig.json";
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "animations" / "pig.json";
   auto parsed = arv::render::parse_entity_animation_json(
       read_text(pig_animation_path),
       pig_animation_path.string());
@@ -183,10 +183,10 @@ TEST(EntityModelTests, RejectsUnsupportedAnimationChannels) {
       }]
     }]
   })json",
-                                                         "arvane_home/assets/animation/bad.json");
+                                                         "arvane_home/packs/arvane_base/assets/arvane/animations/bad.json");
 
   ASSERT_FALSE(parsed);
-  EXPECT_NE(parsed.error().message.find("arvane_home/assets/animation/bad.json"), std::string::npos);
+  EXPECT_NE(parsed.error().message.find("arvane_home/packs/arvane_base/assets/arvane/animations/bad.json"), std::string::npos);
   EXPECT_NE(parsed.error().message.find("unsupported animation channel"), std::string::npos);
 }
 
@@ -217,7 +217,7 @@ TEST(EntityModelTests, AcceptsBlockbenchLoopStrings) {
       }
     ]
   })json",
-                                                         "arvane_home/assets/animation/blockbench.json");
+                                                         "arvane_home/packs/arvane_base/assets/arvane/animations/blockbench.json");
 
   ASSERT_TRUE(parsed) << parsed.error().message;
   ASSERT_EQ(parsed.value().clips.size(), 2U);
@@ -229,7 +229,7 @@ TEST(EntityModelTests, SamplesSeparatedAnimationByBoxBoneName) {
   const std::filesystem::path pig_path =
       std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "models" / "entity" / "pig.json";
   const std::filesystem::path pig_animation_path =
-      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "animation" / "pig.json";
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "animations" / "pig.json";
 
   auto parsed_model = arv::render::parse_entity_model_json(read_text(pig_path));
   ASSERT_TRUE(parsed_model) << parsed_model.error().message;
@@ -286,7 +286,7 @@ TEST(EntityModelTests, SamplesMultipleActiveAnimationsAdditively) {
   const std::filesystem::path player_path =
       std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "models" / "entity" / "player.json";
   const std::filesystem::path player_animation_path =
-      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "animation" / "player.json";
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "animations" / "player.json";
 
   auto parsed_model = arv::render::parse_entity_model_json(read_text(player_path));
   ASSERT_TRUE(parsed_model) << parsed_model.error().message;

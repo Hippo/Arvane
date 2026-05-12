@@ -12,6 +12,7 @@
 #include "arv/world/world_time.hpp"
 
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,6 +30,15 @@ struct SaveMetadata {
   std::string name{};
 };
 
+struct RequiredPackMetadata {
+  std::string id{};
+  std::string version{};
+  u64 content_hash{};
+  std::string side{"both"};
+  std::vector<std::string> namespaces{};
+  bool native_client_code_required{};
+};
+
 struct WorldMetadata {
   std::string name{"default"};
   u64 seed{1};
@@ -40,6 +50,8 @@ struct WorldMetadata {
   u64 block_registry_hash{};
   u64 item_registry_hash{};
   world::WorldClock clock{world::make_world_clock()};
+  std::vector<RequiredPackMetadata> required_packs{};
+  bool content_lock_enabled{true};
 };
 
 struct PlayerSaveData {

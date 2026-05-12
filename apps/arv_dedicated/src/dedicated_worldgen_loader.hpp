@@ -4,6 +4,7 @@
 
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
+#include "arv/asset/pack.hpp"
 #include "arv/io/config.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_generation.hpp"
@@ -15,7 +16,8 @@ struct DedicatedWorldgen {
 };
 
 [[nodiscard]] Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(
-    const io::EngineConfig& config);
+    const io::EngineConfig& config,
+    const asset::PackManager& packs);
 
 [[nodiscard]] Expected<world::WorldGenerationPalette, DedicatedError>
 resolve_dedicated_worldgen_palette(

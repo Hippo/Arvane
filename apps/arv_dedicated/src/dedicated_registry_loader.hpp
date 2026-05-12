@@ -4,6 +4,7 @@
 
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
+#include "arv/asset/pack.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/lang/language.hpp"
@@ -25,6 +26,7 @@ struct DedicatedRegistries {
 };
 
 [[nodiscard]] Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
-    const io::EngineConfig& config);
+    const io::EngineConfig& config,
+    const asset::PackManager& packs);
 
 } // namespace arv::dedicated

@@ -618,6 +618,7 @@ TEST(ConfigTests, ResolvesDefaultRuntimePathsFromProjectRoot) {
 
   EXPECT_EQ(config.paths.arvane_home_path(), std::filesystem::path("/tmp/arvane_project/arvane_home"));
   EXPECT_EQ(config.paths.assets_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/assets"));
+  EXPECT_EQ(config.paths.packs_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/packs"));
   EXPECT_EQ(config.paths.plugins_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/plugins"));
   EXPECT_EQ(config.paths.config_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/config"));
   EXPECT_EQ(config.paths.saves_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/saves"));
@@ -720,9 +721,10 @@ paths:
 
   EXPECT_EQ(config.paths.arvane_home_path(), std::filesystem::path("/opt/arvane/runtime"));
   EXPECT_EQ(config.paths.assets_path(), std::filesystem::path("/opt/arvane/runtime/assets"));
+  EXPECT_EQ(config.paths.packs_path(), std::filesystem::path("/opt/arvane/runtime/packs"));
 }
 
-TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomeAssets) {
+TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomePacks) {
   auto result = arv::io::load_config({});
   ASSERT_TRUE(result);
 
@@ -730,16 +732,19 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomeAssets) {
       result.value().paths.arvane_home_path(),
       result.value().paths.project_root / "arvane_home");
   EXPECT_EQ(
-      result.value().paths.assets_path(),
-      result.value().paths.project_root / "arvane_home" / "assets");
+      result.value().paths.packs_path(),
+      result.value().paths.project_root / "arvane_home" / "packs");
   EXPECT_EQ(
       result.value().paths.lang_path(),
       result.value().paths.project_root / "arvane_home" / "lang");
   EXPECT_EQ(
-      result.value().paths.assets_path().string().find("/.local/share/Trash/"),
+      result.value().paths.packs_path().string().find("/.local/share/Trash/"),
       std::string::npos);
-  EXPECT_TRUE(std::filesystem::exists(result.value().paths.config_path() / "blocks.json"));
-  EXPECT_TRUE(std::filesystem::exists(result.value().paths.assets_path() / "shaders/world/chunk.vert"));
+  EXPECT_TRUE(std::filesystem::exists(result.value().paths.packs_path() / "enabled.yaml"));
+  EXPECT_TRUE(std::filesystem::exists(result.value().paths.packs_path() / "arvane_base/pack.yaml"));
+  EXPECT_TRUE(std::filesystem::exists(
+      result.value().paths.packs_path() /
+      "arvane_base/assets/arvane/shaders/world/chunk.vert"));
   EXPECT_EQ(
       result.value().paths.config_file,
       result.value().paths.config_path() / "client.yaml");
@@ -768,8 +773,8 @@ TEST(ConfigTests, LoadConfigDefaultsPreferProjectRootOverWorkingDirectoryRuntime
   std::error_code error;
   std::filesystem::remove_all(temp_root, error);
 
-  write_file(temp_root / "arvane_home/config/blocks.json", "{}\n");
-  write_file(temp_root / "arvane_home/assets/shaders/world/chunk.vert", "#version 330 core\n");
+  write_file(temp_root / "arvane_home/packs/enabled.yaml", "enabled:\n  - arvane_base\n");
+  write_file(temp_root / "arvane_home/packs/arvane_base/pack.yaml", "schema_version: 1\n");
 
   {
     const ScopedCurrentPath scoped_current_path{temp_root};
@@ -778,10 +783,10 @@ TEST(ConfigTests, LoadConfigDefaultsPreferProjectRootOverWorkingDirectoryRuntime
 
     EXPECT_NE(result.value().paths.project_root, temp_root);
     EXPECT_NE(
-        result.value().paths.assets_path(),
-        temp_root / "arvane_home" / "assets");
+        result.value().paths.packs_path(),
+        temp_root / "arvane_home" / "packs");
     EXPECT_TRUE(std::filesystem::exists(
-        result.value().paths.assets_path() / "shaders/world/chunk.vert"));
+        result.value().paths.packs_path() / "arvane_base/pack.yaml"));
   }
 
   std::filesystem::remove_all(temp_root, error);

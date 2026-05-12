@@ -13,14 +13,6 @@
 namespace arv::asset {
 namespace {
 
-[[nodiscard]] bool valid_namespace_char(char c) noexcept {
-  return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
-}
-
-[[nodiscard]] bool valid_path_char(char c) noexcept {
-  return valid_namespace_char(c) || c == '/' || c == '.';
-}
-
 [[nodiscard]] std::filesystem::path path_with_extension(
     std::filesystem::path path,
     std::string_view extension) {
@@ -33,19 +25,7 @@ namespace {
 } // namespace
 
 bool is_valid_asset_id(std::string_view id) noexcept {
-  const auto split = split_asset_id(id);
-  if (!split.has_value()) {
-    return false;
-  }
-
-  const auto [name_space, path] = split.value();
-  if (name_space.empty() || path.empty() || path.front() == '/' || path.back() == '/') {
-    return false;
-  }
-
-  return std::all_of(name_space.begin(), name_space.end(), valid_namespace_char) &&
-         std::all_of(path.begin(), path.end(), valid_path_char) &&
-         path.find("..") == std::string_view::npos;
+  return ResourceID::valid(id);
 }
 
 std::optional<std::pair<std::string_view, std::string_view>> split_asset_id(
@@ -82,9 +62,22 @@ ResourceManager::ResourceManager(std::filesystem::path asset_root)
     : asset_root_(std::move(asset_root)) {
 }
 
+ResourceManager::ResourceManager(PackManager pack_manager)
+    : asset_root_(pack_manager.packs_root()),
+      pack_manager_(std::move(pack_manager)) {
+}
+
 std::filesystem::path ResourceManager::resolve_asset_path(
     const AssetID& asset_id,
     AssetKind kind) const {
+  if (pack_manager_.has_value()) {
+    auto resolved = pack_manager_->resolve_asset_path(asset_id.value, kind);
+    if (resolved) {
+      return resolved.value().path;
+    }
+    return {};
+  }
+
   const auto split = split_asset_id(asset_id.value);
   if (!split.has_value()) {
     return asset_root_ / asset_id.value;
@@ -132,12 +125,21 @@ std::filesystem::path ResourceManager::resolve_asset_path(
       break;
     case AssetKind::Animation:
       if (path.starts_with("animation/")) {
-        relative = std::filesystem::path{"animation"} /
+        relative = std::filesystem::path{"animations"} /
                    std::filesystem::path{std::string{path.substr(std::string_view{"animation/"}.size())}};
       } else {
         relative = std::filesystem::path{std::string{path}};
       }
       extension = ".json";
+      break;
+    case AssetKind::Theme:
+      if (path.starts_with("theme/")) {
+        relative = std::filesystem::path{"themes"} /
+                   std::filesystem::path{std::string{path.substr(std::string_view{"theme/"}.size())}};
+      } else {
+        relative = std::filesystem::path{std::string{path}};
+      }
+      extension = ".yaml";
       break;
   }
 
@@ -148,12 +150,38 @@ std::filesystem::path ResourceManager::resolve_asset_path(
   return path_with_extension(asset_root_ / relative, extension);
 }
 
+PackPathResult ResourceManager::resolve_asset(
+    const AssetID& asset_id,
+    AssetKind kind) const {
+  if (pack_manager_.has_value()) {
+    return pack_manager_->resolve_asset_path(asset_id.value, kind);
+  }
+  if (!is_valid_asset_id(asset_id.value)) {
+    return PackPathResult::failure(
+        {"", "", {}, asset_id.value, "asset resolution", "invalid asset ID"});
+  }
+  const std::filesystem::path path = resolve_asset_path(asset_id, kind);
+  if (!std::filesystem::is_regular_file(path)) {
+    return PackPathResult::failure(
+        {"", "", path, asset_id.value, "asset resolution", "asset was not found"});
+  }
+  return PackPathResult::success({0U, {}, {}, {}, path});
+}
+
 TextAssetResult ResourceManager::load_text(const AssetID& asset_id, AssetKind kind) const {
   if (!is_valid_asset_id(asset_id.value)) {
     return TextAssetResult::failure({asset_id.value, {}, "resolve text asset", "invalid asset ID"});
   }
 
-  const std::filesystem::path path = resolve_asset_path(asset_id, kind);
+  auto resolved = resolve_asset(asset_id, kind);
+  if (!resolved) {
+    return TextAssetResult::failure({
+        asset_id.value,
+        resolved.error().file,
+        resolved.error().phase,
+        resolved.error().describe()});
+  }
+  const std::filesystem::path path = resolved.value().path;
   std::ifstream file(path);
   arv::core::info("assets", "loading text asset '{}' from '{}'", asset_id.value, path);
   if (!file) {
@@ -182,7 +210,16 @@ TextureLoadResult ResourceManager::load_texture(const AssetID& asset_id) {
     return TextureLoadResult::success(found->second);
   }
 
-  const std::filesystem::path path = resolve_asset_path(asset_id, AssetKind::Texture);
+  auto resolved = resolve_asset(asset_id, AssetKind::Texture);
+  const std::filesystem::path path = resolved ? resolved.value().path : std::filesystem::path{};
+  if (!resolved) {
+    TextureResource fallback;
+    fallback.asset_id = asset_id;
+    fallback.path = path;
+    fallback.image = make_missing_texture_image();
+    fallback.fallback = true;
+    return TextureLoadResult::success(publish_texture(std::move(fallback)));
+  }
   auto image = load_png_image(path, asset_id);
   if (!image) {
     TextureResource fallback;

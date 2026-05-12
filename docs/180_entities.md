@@ -105,8 +105,11 @@ They do not contain logic. All runtime behavior is derived from:
 Entity definitions are loaded from:
 
 ```text
-arvane_home/config/entities.json
+data/<namespace>/entities.json in enabled packs
 ```
+
+The built-in entity definitions live at
+`arvane_home/packs/arvane_base/data/arvane/entities.json`.
 
 ---
 
@@ -311,7 +314,7 @@ or:
 Short names resolve under:
 
 ```text
-arvane_home/assets/models/entity/
+assets/<namespace>/models/entity/
 ```
 
 Preferred format is full asset ID.
@@ -327,7 +330,7 @@ Optional animation asset reference.
 Animation references resolve under:
 
 ```text
-arvane_home/assets/animation/
+assets/<namespace>/animations/
 ```
 
 Animation data is client presentation data. It is not simulation behavior and
@@ -482,14 +485,14 @@ model schema as block models.
 Model files live under:
 
 ```text
-arvane_home/assets/models/entity/
+assets/<namespace>/models/entity/
 ```
 
 Entity model textures should use texture asset IDs such as `arvane:texture/entity/pig`.
 Short texture filenames such as `pig.png` remain supported and resolve under:
 
 ```text
-arvane_home/assets/textures/entity/
+assets/<namespace>/textures/entity/
 ```
 
 Entity models contain:
@@ -512,7 +515,7 @@ simulation state.
 Animations are separate assets under:
 
 ```text
-arvane_home/assets/animation/
+assets/<namespace>/animations/
 ```
 
 Animation clips contain keyframes with a `bone` string, a channel

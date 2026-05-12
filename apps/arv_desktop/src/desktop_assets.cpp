@@ -96,6 +96,43 @@ namespace {
   return config;
 }
 
+[[nodiscard]] lang::LanguageResult load_pack_language(
+    const asset::PackManager& packs,
+    std::string locale,
+    std::string fallback_locale) {
+  const auto language_paths_for = [&](std::string_view selected_locale) {
+    return packs.data_files_at("lang/" + std::string{selected_locale} + ".yaml");
+  };
+  const auto paths_only = [](const std::vector<asset::PackDataFile>& files) {
+    std::vector<std::filesystem::path> paths;
+    paths.reserve(files.size());
+    for (const asset::PackDataFile& file : files) {
+      paths.push_back(file.path);
+    }
+    return paths;
+  };
+
+  std::vector<std::filesystem::path> fallback_paths =
+      paths_only(language_paths_for(fallback_locale));
+  auto fallback = lang::load_language_files(fallback_paths, fallback_locale);
+  if (!fallback) {
+    return fallback;
+  }
+
+  lang::LanguageCatalog catalog = std::move(fallback.value());
+  if (locale != fallback_locale) {
+    std::vector<std::filesystem::path> selected_paths =
+        paths_only(language_paths_for(locale));
+    auto selected = lang::load_language_files(selected_paths, locale);
+    if (!selected) {
+      return selected;
+    }
+    catalog.merge_from(std::move(selected.value()));
+  }
+  catalog.set_locale(std::move(locale));
+  return lang::LanguageResult::success(std::move(catalog));
+}
+
 [[nodiscard]] asset::TextureAtlasBuildOptions atlas_build_options_from(
     const io::RenderConfig::StaticAtlasConfig& source,
     u32 padding,
@@ -159,13 +196,14 @@ DesktopLoadedAssetsResult load_desktop_assets(
     asset::ResourceManager& resources,
     render::RenderCommandQueue& renderer,
     const io::EngineConfig& config,
+    const asset::PackManager& packs,
     const ui::UiTheme& theme) {
   DesktopLoadedAssets loaded;
   renderer.configure_player_skin_atlas(
       player_skin_atlas_config_from(config.render.atlases.player_skins));
 
-  auto language_result = lang::load_language_directory(
-      config.paths.lang_path(),
+  auto language_result = load_pack_language(
+      packs,
       config.language.locale,
       config.language.fallback_locale);
   if (!language_result) {
@@ -226,11 +264,9 @@ DesktopLoadedAssetsResult load_desktop_assets(
   }
   core::info("assets", "loaded UI font stacks");
 
-  auto block_definition_text = io::read_text_file(
-      config.paths.config_path() / "blocks.json",
-      "startup block definitions");
+  auto block_definition_text = packs.load_merged_json_array_text("blocks", "blocks");
   if (!block_definition_text) {
-    return asset_failure("blocks", block_definition_text.error().message);
+    return asset_failure("blocks", block_definition_text.error().describe());
   }
 
   auto block_definitions = voxel::parse_block_definitions_json(block_definition_text.value());
@@ -275,11 +311,9 @@ DesktopLoadedAssetsResult load_desktop_assets(
       texture_array_upload_from_atlas(loaded.block_atlas.atlas);
   renderer.set_chunk_texture_atlas(std::move(terrain_atlas_upload));
 
-  auto item_definition_text = io::read_text_file(
-      config.paths.config_path() / "items.json",
-      "startup item definitions");
+  auto item_definition_text = packs.load_merged_json_array_text("items", "items");
   if (!item_definition_text) {
-    return asset_failure("items", item_definition_text.error().message);
+    return asset_failure("items", item_definition_text.error().describe());
   }
   auto item_definitions = player::parse_item_definitions_json(item_definition_text.value());
   if (!item_definitions) {
@@ -302,11 +336,10 @@ DesktopLoadedAssetsResult load_desktop_assets(
   }
   loaded.item_registry_hash = persistence::hash_item_registry(loaded.item_registry);
 
-  auto item_animation_text = io::read_text_file(
-      config.paths.config_path() / "item_animations.json",
-      "startup item animation definitions");
+  auto item_animation_text =
+      packs.load_merged_json_array_text("item_animations", "animations");
   if (!item_animation_text) {
-    return asset_failure("item_animations", item_animation_text.error().message);
+    return asset_failure("item_animations", item_animation_text.error().describe());
   }
   auto item_animation_library = client::parse_item_animation_library_json(
       item_animation_text.value());
@@ -334,11 +367,9 @@ DesktopLoadedAssetsResult load_desktop_assets(
   }
   renderer.set_ui_item_atlas(texture_array_upload_from_atlas(loaded.item_atlas));
 
-  auto entity_definition_text = io::read_text_file(
-      config.paths.config_path() / "entities.json",
-      "startup entity definitions");
+  auto entity_definition_text = packs.load_merged_json_array_text("entities", "entities");
   if (!entity_definition_text) {
-    return asset_failure("entities", entity_definition_text.error().message);
+    return asset_failure("entities", entity_definition_text.error().describe());
   }
   auto entity_definitions =
       entity::parse_entity_definitions_json(entity_definition_text.value());
@@ -390,11 +421,9 @@ DesktopLoadedAssetsResult load_desktop_assets(
     }
   }
 
-  auto worldgen_text = io::read_text_file(
-      config.paths.config_path() / "worldgen/overworld.yaml",
-      "overworld generator definition");
+  auto worldgen_text = packs.load_data_text("arvane:worldgen/overworld", ".yaml");
   if (!worldgen_text) {
-    return asset_failure("worldgen", worldgen_text.error().message);
+    return asset_failure("worldgen", worldgen_text.error().describe());
   }
 
   auto worldgen_config = world::parse_world_generation_yaml(worldgen_text.value());

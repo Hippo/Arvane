@@ -79,7 +79,7 @@ TEST(AssetResourceTests, ResolvesNamespacedTexturePaths) {
 
   const std::filesystem::path animation =
       resources.resolve_asset_path({"arvane:animation/pig"}, arv::asset::AssetKind::Animation);
-  EXPECT_EQ(animation, std::filesystem::path{"/tmp/arvane_assets/animation/pig.json"});
+  EXPECT_EQ(animation, std::filesystem::path{"/tmp/arvane_assets/animations/pig.json"});
 }
 
 TEST(AssetResourceTests, MissingTextureFallbackIsCachedByIdentity) {

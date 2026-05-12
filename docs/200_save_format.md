@@ -199,12 +199,35 @@ Registries are **not serialized**.
 
 They are rebuilt at startup from:
 
-* engine content
-* game content
-* plugins/mods
-* data definitions
+* enabled pack data
+* built-in `arvane_base` content
+* server-required content packs
+* explicitly enabled native/plugin systems, when supported
 
 Save data contains only the information required to resolve saved content.
+
+World metadata records the required pack set used to interpret that world:
+
+```json
+{
+  "packs": {
+    "required": [
+      {
+        "id": "arvane_base",
+        "version": "0.1.0",
+        "content_hash": "..."
+      }
+    ]
+  },
+  "content_lock": {
+    "enabled": true
+  }
+}
+```
+
+When `content_lock.enabled` is true, loading refuses worlds whose required
+packs are missing or incompatible. This prevents silently rebuilding registries
+against the wrong content.
 
 ---
 

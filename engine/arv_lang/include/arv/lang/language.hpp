@@ -6,8 +6,10 @@
 #include <filesystem>
 #include <initializer_list>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace arv::lang {
 
@@ -58,6 +60,9 @@ using LanguageResult = Expected<LanguageCatalog, LanguageError>;
 [[nodiscard]] LanguageResult parse_language_yaml(std::string_view text, std::string locale);
 [[nodiscard]] LanguageResult load_language_file(
     const std::filesystem::path& path,
+    std::string locale);
+[[nodiscard]] LanguageResult load_language_files(
+    std::span<const std::filesystem::path> paths,
     std::string locale);
 [[nodiscard]] LanguageResult load_language_directory(
     const std::filesystem::path& lang_root,

@@ -164,6 +164,26 @@ LanguageResult load_language_file(const std::filesystem::path& path, std::string
   return parse_language_yaml(buffer.str(), std::move(locale));
 }
 
+LanguageResult load_language_files(
+    std::span<const std::filesystem::path> paths,
+    std::string locale) {
+  if (paths.empty()) {
+    return LanguageResult::failure({"no language files were found for locale: " + locale});
+  }
+
+  LanguageCatalog catalog;
+  catalog.set_locale(locale);
+  for (const std::filesystem::path& path : paths) {
+    auto loaded = load_language_file(path, locale);
+    if (!loaded) {
+      return loaded;
+    }
+    catalog.merge_from(std::move(loaded.value()));
+  }
+  catalog.set_locale(std::move(locale));
+  return LanguageResult::success(std::move(catalog));
+}
+
 LanguageResult load_language_directory(
     const std::filesystem::path& lang_root,
     std::string locale,

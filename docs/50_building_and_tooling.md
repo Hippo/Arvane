@@ -388,9 +388,10 @@ arvane_home/
 
 relative to the resolved project root. Development builds stamp the source
 project root into the runtime path resolver and prefer that root when it
-contains the canonical `arvane_home/config/blocks.json` and shader assets. This
-keeps deleted or stale build directories from becoming the asset root when an
-executable is launched from an unusual working directory.
+contains the canonical `arvane_home/packs/enabled.yaml` and
+`arvane_home/packs/arvane_base/pack.yaml`. This keeps deleted or stale build
+directories from becoming the content root when an executable is launched from
+an unusual working directory.
 
 ## Default Policy
 
@@ -411,9 +412,9 @@ Example:
 
 ```text
 Failed to load block registry.
-Attempted path: arvane_home/config/blocks.json
+Attempted path: arvane_home/packs/arvane_base/data/arvane/blocks.json
 Reason: directory does not exist.
-Fix: populate arvane_home/config/ or pass --arvane-home <path>.
+Fix: populate arvane_home/packs/ or pass --arvane-home <path>.
 ```
 
 The engine should not silently continue with partially loaded core data unless the missing data is explicitly optional.

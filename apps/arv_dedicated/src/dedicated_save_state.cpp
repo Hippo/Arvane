@@ -195,7 +195,8 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
     u64 item_registry_hash,
-    const lang::LanguageCatalog& language) {
+    const lang::LanguageCatalog& language,
+    std::span<const persistence::RequiredPackMetadata> required_packs) {
   DedicatedLoadedWorld loaded_world;
   loaded_world.server_save_root = config.paths.dedicated_server_save_path();
   auto loaded_save_result = persistence::load_server_root(
@@ -248,6 +249,8 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     world_metadata.max_chunk_y = loaded_world.world_height.max_chunk_y;
     world_metadata.block_registry_hash = block_registry_hash;
     world_metadata.item_registry_hash = item_registry_hash;
+    world_metadata.required_packs.assign(required_packs.begin(), required_packs.end());
+    world_metadata.content_lock_enabled = true;
 
     auto create_save_result = persistence::save_server_root(
         loaded_world.server_save_root,
@@ -291,6 +294,28 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
         loaded_world.loaded_save.world.item_registry_hash,
         item_registry_hash);
   }
+  if (loaded_world.loaded_save.has_world_metadata &&
+      loaded_world.loaded_save.world.content_lock_enabled &&
+      !loaded_world.loaded_save.world.required_packs.empty()) {
+    for (const persistence::RequiredPackMetadata& expected :
+         loaded_world.loaded_save.world.required_packs) {
+      const auto found = std::find_if(
+          required_packs.begin(),
+          required_packs.end(),
+          [&](const persistence::RequiredPackMetadata& actual) {
+            return actual.id == expected.id &&
+                   actual.version == expected.version &&
+                   (expected.content_hash == 0U || actual.content_hash == expected.content_hash);
+          });
+      if (found == required_packs.end()) {
+        return Expected<DedicatedLoadedWorld, DedicatedError>::failure(
+            dedicated_error(
+                "packs",
+                "world requires missing or incompatible pack '" + expected.id +
+                    "' version '" + expected.version + "'"));
+      }
+    }
+  }
 
   loaded_world.saved_players.reserve(loaded_world.loaded_save.players.size());
   for (const persistence::PlayerSaveData& player : loaded_world.loaded_save.players) {
@@ -312,7 +337,8 @@ Expected<void, DedicatedError> save_dedicated_world(
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
     u64 item_registry_hash,
-    const lang::LanguageCatalog& language) {
+    const lang::LanguageCatalog& language,
+    std::span<const persistence::RequiredPackMetadata> required_packs) {
   const std::vector<persistence::SavedChunkSection> saved_chunks =
       capture_saved_chunks(server.voxel_world());
   const std::vector<persistence::PlayerSaveData> player_saves =
@@ -327,7 +353,7 @@ Expected<void, DedicatedError> save_dedicated_world(
       loaded_save.save.name.empty()
           ? tr(language, "server.save.default_name", "Dedicated Server")
           : loaded_save.save.name};
-  const persistence::WorldMetadata world_metadata{
+  persistence::WorldMetadata world_metadata{
       config.server.world,
       world_seed,
       server.voxel_world().tick_index(),
@@ -337,6 +363,8 @@ Expected<void, DedicatedError> save_dedicated_world(
       block_registry_hash,
       item_registry_hash,
       server.voxel_world().clock()};
+  world_metadata.required_packs.assign(required_packs.begin(), required_packs.end());
+  world_metadata.content_lock_enabled = true;
   auto save_result = persistence::save_server_root(
       server_save_root,
       save_metadata,

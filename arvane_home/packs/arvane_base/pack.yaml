@@ -1,0 +1,26 @@
+schema_version: 1
+
+id: "arvane_base"
+display_name: "Arvane Base"
+version: "0.1.0"
+description: "Built-in Arvane content."
+
+authors:
+  - "Arvane"
+
+namespaces:
+  - "arvane"
+
+side: "both"
+
+engine:
+  min_version: "0.1.0"
+
+dependencies: []
+load_after: []
+load_before: []
+
+capabilities:
+  assets: true
+  data: true
+  native_plugin: false

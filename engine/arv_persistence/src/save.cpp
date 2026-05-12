@@ -163,6 +163,58 @@ using json = nlohmann::json;
   };
 }
 
+[[nodiscard]] json required_packs_to_json(
+    std::span<const RequiredPackMetadata> packs) {
+  json required = json::array();
+  for (const RequiredPackMetadata& pack : packs) {
+    required.push_back({
+        {"id", pack.id},
+        {"version", pack.version},
+        {"content_hash", pack.content_hash},
+        {"side", pack.side},
+        {"namespaces", pack.namespaces},
+        {"native_client_code_required", pack.native_client_code_required},
+    });
+  }
+  return json{{"required", std::move(required)}};
+}
+
+[[nodiscard]] std::vector<RequiredPackMetadata> required_packs_from_json(const json& node) {
+  std::vector<RequiredPackMetadata> packs;
+  if (!node.is_object()) {
+    return packs;
+  }
+  const auto required = node.find("required");
+  if (required == node.end() || !required->is_array()) {
+    return packs;
+  }
+  packs.reserve(required->size());
+  for (const json& entry : *required) {
+    if (!entry.is_object()) {
+      continue;
+    }
+    RequiredPackMetadata pack;
+    pack.id = entry.value("id", std::string{});
+    pack.version = entry.value("version", std::string{});
+    pack.content_hash = entry.value("content_hash", u64{});
+    pack.side = entry.value("side", std::string{"both"});
+    if (const auto namespaces = entry.find("namespaces");
+        namespaces != entry.end() && namespaces->is_array()) {
+      for (const json& name_space : *namespaces) {
+        if (name_space.is_string()) {
+          pack.namespaces.push_back(name_space.get<std::string>());
+        }
+      }
+    }
+    pack.native_client_code_required =
+        entry.value("native_client_code_required", false);
+    if (!pack.id.empty()) {
+      packs.push_back(std::move(pack));
+    }
+  }
+  return packs;
+}
+
 [[nodiscard]] world::WorldGenerationConfig world_generation_from_json(const json& node) {
   world::WorldGenerationConfig config;
   config.id = node.at("id").get<std::string>();
@@ -707,6 +759,8 @@ Expected<void, PersistenceError> save_server_root(
         {"item_registry_hash", world.item_registry_hash}}},
       {"generation_config", world_generation_to_json(world.generation_config)},
       {"time", world_clock_to_json(saved_clock)},
+      {"packs", required_packs_to_json(world.required_packs)},
+      {"content_lock", {{"enabled", world.content_lock_enabled}}},
   };
   save_result = write_text_atomic(root / "worlds" / world.name / "world.json", world_json.dump(2));
   if (!save_result) {
@@ -905,6 +959,14 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
     if (const auto time = world_json.find("time"); time != world_json.end()) {
       loaded.world.clock = world_clock_from_json(*time, loaded.world.tick_index);
       loaded.world.tick_index = loaded.world.clock.world_tick;
+    }
+    if (const auto packs = world_json.find("packs"); packs != world_json.end()) {
+      loaded.world.required_packs = required_packs_from_json(*packs);
+    }
+    if (const auto content_lock = world_json.find("content_lock");
+        content_lock != world_json.end() && content_lock->is_object()) {
+      loaded.world.content_lock_enabled =
+          content_lock->value("enabled", loaded.world.content_lock_enabled);
     }
     loaded.has_world_metadata = true;
 

@@ -12,17 +12,17 @@ assets.
 Examples:
 
 ```text
-arvane:model/block/stone      -> arvane_home/assets/models/block/stone.json
-arvane:model/entity/pig       -> arvane_home/assets/models/entity/pig.json
-arvane:texture/block/stone    -> arvane_home/assets/textures/block/stone.png
-arvane:texture/entity/pig     -> arvane_home/assets/textures/entity/pig.png
-arvane:animation/pig          -> arvane_home/assets/animation/pig.json
+arvane:model/block/stone      -> arvane_home/packs/arvane_base/assets/arvane/models/block/stone.json
+arvane:model/entity/pig       -> arvane_home/packs/arvane_base/assets/arvane/models/entity/pig.json
+arvane:texture/block/stone    -> arvane_home/packs/arvane_base/assets/arvane/textures/block/stone.png
+arvane:texture/entity/pig     -> arvane_home/packs/arvane_base/assets/arvane/textures/entity/pig.png
+arvane:animation/pig          -> arvane_home/packs/arvane_base/assets/arvane/animations/pig.json
 ```
 
 ## Authored Model Schema
 
-The same schema is used for `assets/models/block/*.json` and
-`assets/models/entity/*.json`.
+The same schema is used for `assets/<namespace>/models/block/*.json` and
+`assets/<namespace>/models/entity/*.json`.
 
 ```json
 {
@@ -136,7 +136,7 @@ Rules:
 Entity models use the same geometry schema as block models and live under:
 
 ```text
-arvane_home/assets/models/entity/
+assets/<namespace>/models/entity/
 ```
 
 Entity model files do not contain simulation behavior, hierarchy definitions, or
@@ -148,7 +148,7 @@ animation clips. The model-side animation binding metadata is only the box-level
 Animations live under:
 
 ```text
-arvane_home/assets/animation/
+assets/<namespace>/animations/
 ```
 
 Example asset ID:

@@ -7,13 +7,13 @@
 namespace arv::dedicated {
 
 Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(
-    const io::EngineConfig& config) {
-  auto worldgen_text = io::read_text_file(
-      config.paths.config_path() / "worldgen/overworld.yaml",
-      "dedicated overworld generator definition");
+    const io::EngineConfig& config,
+    const asset::PackManager& packs) {
+  (void)config;
+  auto worldgen_text = packs.load_data_text("arvane:worldgen/overworld", ".yaml");
   if (!worldgen_text) {
     return Expected<DedicatedWorldgen, DedicatedError>::failure(
-        dedicated_error("worldgen", worldgen_text.error().message));
+        dedicated_error("worldgen", worldgen_text.error().describe()));
   }
 
   auto worldgen_config = world::parse_world_generation_yaml(worldgen_text.value());

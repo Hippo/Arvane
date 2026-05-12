@@ -6,6 +6,7 @@
 #include "arv/lang/language.hpp"
 #include "arv/persistence/save.hpp"
 
+#include <filesystem>
 #include <optional>
 #include <utility>
 
@@ -73,12 +74,44 @@ namespace {
   return std::nullopt;
 }
 
+[[nodiscard]] lang::LanguageResult load_pack_language(
+    const asset::PackManager& packs,
+    std::string locale,
+    std::string fallback_locale) {
+  const auto paths_for = [&](std::string_view selected_locale) {
+    std::vector<std::filesystem::path> paths;
+    const std::vector<asset::PackDataFile> files =
+        packs.data_files_at("lang/" + std::string{selected_locale} + ".yaml");
+    paths.reserve(files.size());
+    for (const asset::PackDataFile& file : files) {
+      paths.push_back(file.path);
+    }
+    return paths;
+  };
+
+  auto fallback = lang::load_language_files(paths_for(fallback_locale), fallback_locale);
+  if (!fallback) {
+    return fallback;
+  }
+  lang::LanguageCatalog catalog = std::move(fallback.value());
+  if (locale != fallback_locale) {
+    auto selected = lang::load_language_files(paths_for(locale), locale);
+    if (!selected) {
+      return selected;
+    }
+    catalog.merge_from(std::move(selected.value()));
+  }
+  catalog.set_locale(std::move(locale));
+  return lang::LanguageResult::success(std::move(catalog));
+}
+
 } // namespace
 
 Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
-    const io::EngineConfig& config) {
-  auto language_result = lang::load_language_directory(
-      config.paths.lang_path(),
+    const io::EngineConfig& config,
+    const asset::PackManager& packs) {
+  auto language_result = load_pack_language(
+      packs,
       config.language.locale,
       config.language.fallback_locale);
   if (!language_result) {
@@ -87,12 +120,10 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
   }
   lang::LanguageCatalog language = std::move(language_result.value());
 
-  auto block_definition_text = io::read_text_file(
-      config.paths.config_path() / "blocks.json",
-      "dedicated block definitions");
+  auto block_definition_text = packs.load_merged_json_array_text("blocks", "blocks");
   if (!block_definition_text) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(
-        dedicated_error("blocks", block_definition_text.error().message));
+        dedicated_error("blocks", block_definition_text.error().describe()));
   }
 
   auto block_definitions =
@@ -116,7 +147,7 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
       error.has_value()) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(error.value());
   }
-  asset::ResourceManager resources(config.paths.assets_path());
+  asset::ResourceManager resources(packs);
   auto block_models_result =
       asset::load_block_model_definitions(resources, registries.block_registry);
   if (!block_models_result) {
@@ -135,12 +166,10 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
       registries.block_registry.variant_count(),
       registries.block_registry_hash);
 
-  auto item_definition_text = io::read_text_file(
-      config.paths.config_path() / "items.json",
-      "dedicated item definitions");
+  auto item_definition_text = packs.load_merged_json_array_text("items", "items");
   if (!item_definition_text) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(
-        dedicated_error("items", item_definition_text.error().message));
+        dedicated_error("items", item_definition_text.error().describe()));
   }
 
   auto item_definitions =
@@ -175,12 +204,10 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
       registries.item_registry.item_count(),
       registries.item_registry_hash);
 
-  auto entity_definition_text = io::read_text_file(
-      config.paths.config_path() / "entities.json",
-      "dedicated entity definitions");
+  auto entity_definition_text = packs.load_merged_json_array_text("entities", "entities");
   if (!entity_definition_text) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(
-        dedicated_error("entities", entity_definition_text.error().message));
+        dedicated_error("entities", entity_definition_text.error().describe()));
   }
 
   auto entity_definitions =

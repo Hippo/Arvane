@@ -4,6 +4,7 @@ include(GoogleTest)
 
 add_executable(arv_tests
   assets/asset_tests.cpp
+  assets/pack_tests.cpp
   client/chunk_interest_tests.cpp
   client/client_runtime_tests.cpp
   client/camera_tests.cpp
@@ -71,7 +72,7 @@ target_include_directories(arv_tests PRIVATE
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src
 )
 target_compile_definitions(arv_tests PRIVATE
-  ARVANE_TEST_ASSET_ROOT="${CMAKE_SOURCE_DIR}/arvane_home/assets"
+  ARVANE_TEST_ASSET_ROOT="${CMAKE_SOURCE_DIR}/arvane_home/packs/arvane_base/assets/arvane"
 )
 
 target_link_libraries(arv_tests PRIVATE

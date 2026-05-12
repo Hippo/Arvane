@@ -13,6 +13,7 @@
 #include "arv/world/world_runtime.hpp"
 
 #include <filesystem>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -43,7 +44,8 @@ struct DedicatedLoadedWorld {
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
     u64 item_registry_hash,
-    const lang::LanguageCatalog& language);
+    const lang::LanguageCatalog& language,
+    std::span<const persistence::RequiredPackMetadata> required_packs);
 
 [[nodiscard]] Expected<void, DedicatedError> save_dedicated_world(
     const io::EngineConfig& config,
@@ -57,7 +59,8 @@ struct DedicatedLoadedWorld {
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
     u64 item_registry_hash,
-    const lang::LanguageCatalog& language);
+    const lang::LanguageCatalog& language,
+    std::span<const persistence::RequiredPackMetadata> required_packs);
 
 [[nodiscard]] std::vector<persistence::SavedChunkSection> capture_saved_chunks(
     const world::WorldRuntime& world);

@@ -11,7 +11,9 @@
 #include "arv/persistence/save.hpp"
 #include "arv/render/render_commands.hpp"
 
+#include <algorithm>
 #include <array>
+#include <span>
 #include <system_error>
 #include <utility>
 
@@ -21,6 +23,22 @@ namespace {
 [[nodiscard]] const server::ServerSession* local_session(
     const server::ServerRuntime& server) noexcept {
   return server.sessions().first();
+}
+
+[[nodiscard]] std::vector<persistence::RequiredPackMetadata> to_persistence_required_packs(
+    std::span<const asset::RequiredPack> packs) {
+  std::vector<persistence::RequiredPackMetadata> result;
+  result.reserve(packs.size());
+  for (const asset::RequiredPack& pack : packs) {
+    result.push_back({
+        pack.id,
+        pack.version,
+        pack.content_hash,
+        asset::pack_side_to_string(pack.required_side),
+        pack.namespaces,
+        pack.native_client_code_required});
+  }
+  return result;
 }
 
 } // namespace
@@ -88,7 +106,9 @@ bool DesktopSessionManager::save_and_shutdown() {
       session.max_chunk_y,
       dependencies_.block_registry_hash,
       dependencies_.item_registry_hash,
-      session.integrated_server->voxel_world().clock()};
+      session.integrated_server->voxel_world().clock(),
+      to_persistence_required_packs(dependencies_.required_packs),
+      true};
   auto save_result = persistence::save_server_root(
       session.server_save_root,
       save_metadata,
@@ -141,6 +161,32 @@ bool DesktopSessionManager::start_singleplayer(
   }
   const persistence::LoadedSaveData loaded_save =
       std::move(loaded_save_result.value());
+  if (loaded_save.has_world_metadata &&
+      loaded_save.world.content_lock_enabled &&
+      !loaded_save.world.required_packs.empty()) {
+    const std::vector<persistence::RequiredPackMetadata>& required =
+        loaded_save.world.required_packs;
+    for (const persistence::RequiredPackMetadata& expected : required) {
+      const auto found = std::find_if(
+          dependencies_.required_packs.begin(),
+          dependencies_.required_packs.end(),
+          [&](const asset::RequiredPack& actual) {
+            return actual.id == expected.id &&
+                   actual.version == expected.version &&
+                   (expected.content_hash == 0U || actual.content_hash == expected.content_hash);
+          });
+      if (found == dependencies_.required_packs.end()) {
+        core::error(
+            "packs",
+            "world '{}' requires pack '{}' version '{}' with hash {}, but it is not active",
+            world_name,
+            expected.id,
+            expected.version,
+            expected.content_hash);
+        return false;
+      }
+    }
+  }
   if (!create_new && !loaded_save.has_world_metadata) {
     core::error(
         "save",

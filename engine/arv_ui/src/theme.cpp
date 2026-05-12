@@ -1,5 +1,7 @@
 #include "arv/ui/theme.hpp"
 
+#include "arv/asset/pack.hpp"
+#include "arv/asset/resource.hpp"
 #include "arv/core/log.hpp"
 
 #include <algorithm>
@@ -312,6 +314,28 @@ void parse_style_file(const std::filesystem::path& path, UiThemeLoadResult& resu
   return std::filesystem::is_regular_file(path, error);
 }
 
+[[nodiscard]] std::string theme_asset_id_from_config(
+    std::string_view theme,
+    UiThemeLoadResult& result) {
+  if (theme.find(':') != std::string_view::npos) {
+    auto parsed = asset::ResourceID::parse(theme);
+    if (!parsed || !parsed.value().path.starts_with("theme/")) {
+      add_warning(result, "invalid theme resource ID, falling back to default: " + std::string{theme});
+      result.used_theme_fallback = true;
+      result.config.theme = "default";
+      return "arvane:theme/default";
+    }
+    return std::string{theme};
+  }
+  if (!valid_theme_name(theme)) {
+    add_warning(result, "invalid theme name, falling back to default: " + std::string{theme});
+    result.config.theme = "default";
+    result.used_theme_fallback = true;
+    return "arvane:theme/default";
+  }
+  return "arvane:theme/" + std::string{theme};
+}
+
 void apply_preferences(UiTheme& theme, const UiStylePreferences& preferences) noexcept {
   const f32 scale = clamp_scale(preferences.scale, 1.0F);
   const f32 font_scale = clamp_scale(preferences.font_scale, 1.0F);
@@ -395,6 +419,51 @@ UiThemeLoadResult load_ui_theme(const std::filesystem::path& arvane_home) {
       arvane_home / std::filesystem::path{ConfigDirectoryName} /
           std::filesystem::path{StyleFileName},
       arvane_home / std::filesystem::path{ThemesDirectoryName});
+}
+
+UiThemeLoadResult load_ui_theme(
+    const asset::PackManager& packs,
+    const std::filesystem::path& style_file) {
+  UiThemeLoadResult result;
+  result.config = make_default_ui_style_config();
+  result.theme = make_default_ui_theme();
+
+  if (file_exists(style_file)) {
+    parse_style_file(style_file, result);
+  } else {
+    add_warning(result, "style config not found, using default theme: " + style_file.string());
+  }
+
+  std::string theme_asset = theme_asset_id_from_config(result.config.theme, result);
+  std::optional<UiTheme> loaded;
+  auto resolved = packs.resolve_asset_path(theme_asset, asset::AssetKind::Theme);
+  if (resolved) {
+    loaded = read_theme_file(resolved.value().path, result);
+    result.loaded_theme = theme_asset;
+  } else {
+    add_warning(result, "selected theme not found, falling back to default: " + resolved.error().describe());
+  }
+
+  if (!loaded.has_value() && theme_asset != "arvane:theme/default") {
+    result.used_theme_fallback = true;
+    theme_asset = "arvane:theme/default";
+    resolved = packs.resolve_asset_path(theme_asset, asset::AssetKind::Theme);
+    if (resolved) {
+      loaded = read_theme_file(resolved.value().path, result);
+      result.loaded_theme = theme_asset;
+    } else {
+      add_warning(result, "default theme not found, using built-in theme: " + resolved.error().describe());
+    }
+  }
+
+  if (loaded.has_value()) {
+    result.theme = loaded.value();
+  } else {
+    result.used_builtin_theme = true;
+    result.loaded_theme = "built-in";
+  }
+  apply_preferences(result.theme, result.config.ui);
+  return result;
 }
 
 UiThemeLoadResult load_ui_theme_from_paths(

@@ -21,6 +21,7 @@ namespace arv::io {
 namespace {
 
 constexpr std::string_view kAssetsDirectoryName = "assets";
+constexpr std::string_view kPacksDirectoryName = "packs";
 constexpr std::string_view kPluginsDirectoryName = "plugins";
 constexpr std::string_view kConfigDirectoryName = "config";
 constexpr std::string_view kSavesDirectoryName = "saves";
@@ -462,10 +463,10 @@ std::filesystem::path normalize_lexical(std::filesystem::path path) {
 bool has_project_assets(const std::filesystem::path& path) {
   return std::filesystem::exists(
              path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /
-             std::filesystem::path{kConfigDirectoryName} / "blocks.json") &&
+             std::filesystem::path{kPacksDirectoryName} / "enabled.yaml") &&
          std::filesystem::exists(
              path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /
-             std::filesystem::path{kAssetsDirectoryName} / "shaders" / "world" / "chunk.vert");
+             std::filesystem::path{kPacksDirectoryName} / "arvane_base" / "pack.yaml");
 }
 
 std::filesystem::path normalize_project_search_start(std::filesystem::path start) {
@@ -1979,6 +1980,8 @@ void resolve_runtime_paths(const ConfigLoadOptions& options, EngineConfig& confi
 
   config.paths.asset_root = normalize_lexical(
       config.paths.arvane_home_path() / std::filesystem::path{kAssetsDirectoryName});
+  config.paths.pack_root = normalize_lexical(
+      config.paths.arvane_home_path() / std::filesystem::path{kPacksDirectoryName});
   config.paths.plugins_root = normalize_lexical(
       config.paths.arvane_home_path() / std::filesystem::path{kPluginsDirectoryName});
   config.paths.config_root = normalize_lexical(

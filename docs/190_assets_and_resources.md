@@ -16,51 +16,60 @@ Assets must not be loaded ad hoc from random systems. Systems should request ass
 
 ---
 
-## Assets Directory Layout
+## Pack Asset Layout
 
-`arvane_home/assets/` is the root location for reloadable media assets.
+Reloadable authored assets live in enabled packs under `arvane_home/packs/`.
+The built-in content pack is `arvane_base`, and it provides the `arvane`
+namespace.
 
-This folder must remain **cleanly structured, predictable, and stable**, as many systems (rendering, world generation, UI, plugins) depend on it.
+Pack asset folders must remain **cleanly structured, predictable, and stable**,
+as rendering, UI, and gameplay presentation systems resolve assets through
+namespaced resource IDs.
 
 ### Directory Structure
 
 ```
 arvane_home/
-  assets/
-    textures/
-      block/
-      entity/
-      ui/
-      font/
-    models/
-      block/
-      entity/
-    animation/
-    shaders/
-    fonts/
-    materials/
-    ui/
-    audio/
+  packs/
+    enabled.yaml
+    arvane_base/
+      pack.yaml
+      assets/
+        arvane/
+          textures/
+            block/
+            entity/
+            ui/
+          models/
+            block/
+            entity/
+          animations/
+          shaders/
+          fonts/
+          materials/
+          ui/
+          audio/
+      data/
+        arvane/
   config/
 ```
 
-`arvane_home/` is the runtime home directory for the engine/game. In development it lives at the project root by default and also contains `plugins/`, `config/`, `saves/`, and optional `logs/` / `cache/` directories.
+`arvane_home/` is the runtime home directory for the engine/game. In development it lives at the project root by default and also contains `config/`, `saves/`, `skins/`, and optional `logs/` / `cache/` directories.
 
 Systems should resolve asset paths through the central filesystem/path utility instead of hardcoding root-relative paths.
 
 ### Asset Subtree
 
 ```
-assets/
+assets/<namespace>/
   textures/
     block/
     entity/
     ui/
-    font/
   models/
     block/
     entity/
-  animation/
+  animations/
   shaders/
   fonts/
   materials/
@@ -97,7 +106,7 @@ Contains all image-based assets used for rendering.
 User-provided skins are untrusted binary assets. Local profile-owned skins live
 in `arvane_home/skins/`; server-downloaded skins live in
 `arvane_home/cache/skins/`. They are decoded and validated through the asset
-PNG loader, but they are not authored assets under `arvane_home/assets/`.
+PNG loader, but they are not authored pack assets.
 Servers store accepted uploads under `server-save/player_assets/skins/` by
 server-computed content hash.
 
@@ -125,19 +134,19 @@ models/
 
 ---
 
-### `animation/`
+### `animations/`
 
 Defines separate entity presentation animation assets.
 
 ```
-animation/
+animations/
 ```
 
 **Notes:**
 
 * Animation assets are JSON files
 * Asset IDs use `arvane:animation/name`
-* `arvane:animation/pig` resolves to `assets/animation/pig.json`
+* `arvane:animation/pig` resolves to `assets/arvane/animations/pig.json` in the owning pack
 * Keyframes reference authored model `boxes[].bone` names by string
 * Animation assets are client presentation data, not simulation behavior
 
@@ -427,18 +436,14 @@ Example:
 
 ```txt
 arvane:texture/block/stone
-  -> arvane_home/assets/arvane/textures/block/stone.png
+  -> arvane_home/packs/arvane_base/assets/arvane/textures/block/stone.png
 ```
 
-Resolution should support layered sources later, such as:
+Resolution uses the enabled pack stack. Later packs have higher priority for
+eligible asset overrides, so a user texture pack can replace a base texture
+without changing the `arvane:texture/block/stone` ID.
 
-* engine assets
-* game assets
-* resource packs
-* plugins
-* development override folders
-
-Resolution order must be explicit and deterministic.
+Resolution order must remain explicit and deterministic.
 
 ### Stage 2: Read
 
@@ -644,11 +649,11 @@ Block textures are authored as individual texture files.
 Example:
 
 ```txt
-arvane_home/assets/arvane/textures/block/stone.png
-arvane_home/assets/arvane/textures/block/dirt.png
-arvane_home/assets/arvane/textures/block/grass_top.png
-arvane_home/assets/arvane/textures/block/grass_side.png
-arvane_home/assets/arvane/textures/block/grass_bottom.png
+arvane_home/packs/arvane_base/assets/arvane/textures/block/stone.png
+arvane_home/packs/arvane_base/assets/arvane/textures/block/dirt.png
+arvane_home/packs/arvane_base/assets/arvane/textures/block/grass_top.png
+arvane_home/packs/arvane_base/assets/arvane/textures/block/grass_side.png
+arvane_home/packs/arvane_base/assets/arvane/textures/block/grass_bottom.png
 ```
 
 Block definitions reference texture asset identifiers.
@@ -928,7 +933,7 @@ Shader source files should live in a predictable folder structure.
 Example:
 
 ```txt
-arvane_home/assets/arvane/shaders/
+arvane_home/packs/arvane_base/assets/arvane/shaders/
   world/
     chunk_opaque.vert
     chunk_opaque.frag
@@ -1298,7 +1303,7 @@ Example:
 ```txt
 Failed to build block atlas:
   asset: arvane:texture/block/grass_side
-  path: arvane_home/assets/arvane/textures/block/grass_side.png
+  path: arvane_home/packs/arvane_base/assets/arvane/textures/block/grass_side.png
   reason: texture size 17x16 does not match required block texture size 16x16
 ```
 

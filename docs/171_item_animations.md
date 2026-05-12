@@ -39,10 +39,13 @@ The client may start predicted presentation animations immediately, but gameplay
 Held-item animations are loaded from:
 
 ```text
-arvane_home/config/item_animations.json
+data/<namespace>/item_animations.json in enabled packs
 ```
 
-The loader should also support future extension through asset packs or plugins, but the base engine should start with this file.
+The built-in definitions live at
+`arvane_home/packs/arvane_base/data/arvane/item_animations.json`.
+Additional packs may add definitions or explicitly override existing ones using
+the pack data override rules.
 
 ## File Shape
 

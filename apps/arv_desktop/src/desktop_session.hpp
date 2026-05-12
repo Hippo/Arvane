@@ -90,6 +90,7 @@ struct DesktopSessionDependencies {
   const world::WorldGenerationConfig& default_generation_config;
   const sched::RuntimeThreadBudgetPlan& thread_budget;
   const lang::LanguageCatalog& language;
+  std::vector<asset::RequiredPack> required_packs{};
 };
 
 class DesktopSessionManager {

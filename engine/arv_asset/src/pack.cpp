@@ -1,0 +1,1512 @@
+#include "arv/asset/pack.hpp"
+
+#include "arv/asset/resource.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <optional>
+#include <queue>
+#include <sstream>
+#include <utility>
+
+#include <nlohmann/json.hpp>
+#include <yaml-cpp/yaml.h>
+
+namespace arv::asset {
+namespace {
+
+using json = nlohmann::json;
+
+constexpr std::string_view DefaultBasePackID = "arvane_base";
+constexpr std::string_view EnabledPacksFileName = "enabled.yaml";
+constexpr u64 FnvOffset = 14695981039346656037ULL;
+constexpr u64 FnvPrime = 1099511628211ULL;
+
+[[nodiscard]] PackError pack_error(
+    std::string phase,
+    std::string message,
+    std::string pack_id = {},
+    std::filesystem::path file = {},
+    std::string resource_id = {},
+    std::string pack_version = {}) {
+  return {
+      std::move(pack_id),
+      std::move(pack_version),
+      std::move(file),
+      std::move(resource_id),
+      std::move(phase),
+      std::move(message)};
+}
+
+[[nodiscard]] bool valid_identifier_char(char c, bool first) noexcept {
+  const bool lower = c >= 'a' && c <= 'z';
+  const bool digit = c >= '0' && c <= '9';
+  if (first) {
+    return lower || digit || c == '_';
+  }
+  return lower || digit || c == '_' || c == '-' || c == '.';
+}
+
+[[nodiscard]] bool valid_resource_path_char(char c) noexcept {
+  return (c >= 'a' && c <= 'z') ||
+         (c >= '0' && c <= '9') ||
+         c == '_' ||
+         c == '-' ||
+         c == '.' ||
+         c == '/';
+}
+
+[[nodiscard]] bool path_has_unsafe_segment(std::string_view path) noexcept {
+  if (path.empty() || path.front() == '/' || path.back() == '/' ||
+      path.find('\\') != std::string_view::npos ||
+      path.find(':') != std::string_view::npos) {
+    return true;
+  }
+  usize start = 0;
+  while (start <= path.size()) {
+    const usize slash = path.find('/', start);
+    const std::string_view segment =
+        slash == std::string_view::npos ? path.substr(start) : path.substr(start, slash - start);
+    if (segment.empty() || segment == "." || segment == "..") {
+      return true;
+    }
+    if (slash == std::string_view::npos) {
+      break;
+    }
+    start = slash + 1U;
+  }
+  return false;
+}
+
+[[nodiscard]] std::filesystem::path path_with_extension(
+    std::filesystem::path path,
+    std::string_view extension) {
+  if (!extension.empty() && path.extension().empty()) {
+    path += extension;
+  }
+  return path;
+}
+
+[[nodiscard]] std::filesystem::path logical_asset_relative_path(
+    const ResourceID& id,
+    AssetKind kind) {
+  std::filesystem::path relative{"assets"};
+  relative /= id.name_space;
+
+  std::string_view logical = id.path;
+  std::filesystem::path category;
+  std::string_view extension;
+  switch (kind) {
+    case AssetKind::Texture:
+      if (logical.starts_with("texture/")) {
+        logical.remove_prefix(std::string_view{"texture/"}.size());
+      }
+      category = "textures";
+      extension = ".png";
+      break;
+    case AssetKind::ShaderSource:
+      if (logical.starts_with("shader/")) {
+        logical.remove_prefix(std::string_view{"shader/"}.size());
+      }
+      category = "shaders";
+      extension = "";
+      break;
+    case AssetKind::Font:
+      if (logical.starts_with("font/")) {
+        logical.remove_prefix(std::string_view{"font/"}.size());
+      }
+      category = "fonts";
+      extension = ".ttf";
+      break;
+    case AssetKind::Model:
+      if (logical.starts_with("model/")) {
+        logical.remove_prefix(std::string_view{"model/"}.size());
+      }
+      category = "models";
+      extension = ".json";
+      break;
+    case AssetKind::Animation:
+      if (logical.starts_with("animation/")) {
+        logical.remove_prefix(std::string_view{"animation/"}.size());
+      }
+      category = "animations";
+      extension = ".json";
+      break;
+    case AssetKind::Theme:
+      if (logical.starts_with("theme/")) {
+        logical.remove_prefix(std::string_view{"theme/"}.size());
+      }
+      category = "themes";
+      extension = ".yaml";
+      break;
+  }
+
+  relative /= category;
+  relative /= std::filesystem::path{std::string{logical}};
+  return path_with_extension(relative, extension);
+}
+
+[[nodiscard]] std::filesystem::path logical_data_relative_path(
+    const ResourceID& id,
+    std::string_view extension) {
+  std::filesystem::path relative{"data"};
+  relative /= id.name_space;
+  relative /= std::filesystem::path{id.path};
+  return path_with_extension(relative, extension);
+}
+
+[[nodiscard]] bool contains_string(std::span<const std::string> values, std::string_view value) noexcept {
+  return std::find(values.begin(), values.end(), value) != values.end();
+}
+
+[[nodiscard]] std::filesystem::path relative_to_pack(
+    const PackSource& pack,
+    const std::filesystem::path& path) {
+  return path.lexically_relative(pack.root);
+}
+
+[[nodiscard]] bool file_exists(const std::filesystem::path& path) {
+  std::error_code error;
+  return std::filesystem::is_regular_file(path, error);
+}
+
+[[nodiscard]] bool canonical_path_is_under(
+    const std::filesystem::path& root,
+    const std::filesystem::path& path) {
+  std::error_code error;
+  const std::filesystem::path canonical_root =
+      std::filesystem::weakly_canonical(root, error);
+  if (error) {
+    return false;
+  }
+  const std::filesystem::path canonical_path =
+      std::filesystem::canonical(path, error);
+  if (error) {
+    return false;
+  }
+
+  auto root_it = canonical_root.begin();
+  auto path_it = canonical_path.begin();
+  for (; root_it != canonical_root.end(); ++root_it, ++path_it) {
+    if (path_it == canonical_path.end() || *path_it != *root_it) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool file_exists_inside_root(
+    const std::filesystem::path& root,
+    const std::filesystem::path& path) {
+  std::error_code error;
+  if (!std::filesystem::is_regular_file(path, error) || error) {
+    return false;
+  }
+  return canonical_path_is_under(root, path);
+}
+
+[[nodiscard]] bool directory_exists_inside_root(
+    const std::filesystem::path& root,
+    const std::filesystem::path& path) {
+  std::error_code error;
+  if (!std::filesystem::is_directory(path, error) || error) {
+    return false;
+  }
+  return canonical_path_is_under(root, path);
+}
+
+[[nodiscard]] PackTextResult read_text_file(
+    const std::filesystem::path& path,
+    const PackSource& pack,
+    std::string phase,
+    std::string resource_id = {}) {
+  if (!file_exists_inside_root(pack.root, path)) {
+    return PackTextResult::failure(pack_error(
+        phase,
+        "file does not exist inside the pack root",
+        pack.manifest.id,
+        relative_to_pack(pack, path),
+        std::move(resource_id),
+        pack.manifest.version));
+  }
+  std::ifstream input(path);
+  if (!input) {
+    return PackTextResult::failure(pack_error(
+        phase,
+        "file could not be opened",
+        pack.manifest.id,
+        relative_to_pack(pack, path),
+        std::move(resource_id),
+        pack.manifest.version));
+  }
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  if (!input && !input.eof()) {
+    return PackTextResult::failure(pack_error(
+        phase,
+        "file read failed",
+        pack.manifest.id,
+        relative_to_pack(pack, path),
+        std::move(resource_id),
+        pack.manifest.version));
+  }
+  return PackTextResult::success(buffer.str());
+}
+
+[[nodiscard]] std::string required_scalar(
+    const YAML::Node& root,
+    std::string_view field,
+    PackError& error,
+    const std::filesystem::path& file,
+    std::string_view pack_id = {}) {
+  const YAML::Node node = root[std::string{field}];
+  if (!node || !node.IsScalar()) {
+    error = pack_error(
+        "manifest validation",
+        "missing required scalar field: " + std::string{field},
+        std::string{pack_id},
+        file);
+    return {};
+  }
+  return node.as<std::string>();
+}
+
+[[nodiscard]] std::vector<std::string> read_string_list(
+    const YAML::Node& root,
+    std::string_view field,
+    PackError& error,
+    const std::filesystem::path& file,
+    std::string_view pack_id,
+    bool required = false) {
+  std::vector<std::string> values;
+  const YAML::Node node = root[std::string{field}];
+  if (!node) {
+    if (required) {
+      error = pack_error(
+          "manifest validation",
+          "missing required list field: " + std::string{field},
+          std::string{pack_id},
+          file);
+    }
+    return values;
+  }
+  if (!node.IsSequence()) {
+    error = pack_error(
+        "manifest validation",
+        "field must be a list: " + std::string{field},
+        std::string{pack_id},
+        file);
+    return values;
+  }
+  values.reserve(node.size());
+  for (const YAML::Node& entry : node) {
+    if (!entry.IsScalar()) {
+      error = pack_error(
+          "manifest validation",
+          "list field contains a non-scalar entry: " + std::string{field},
+          std::string{pack_id},
+          file);
+      values.clear();
+      return values;
+    }
+    values.push_back(entry.as<std::string>());
+  }
+  return values;
+}
+
+[[nodiscard]] std::optional<bool> read_required_bool(
+    const YAML::Node& root,
+    std::string_view field,
+    PackError& error,
+    const std::filesystem::path& file,
+    std::string_view pack_id) {
+  const YAML::Node node = root[std::string{field}];
+  if (!node || !node.IsScalar()) {
+    error = pack_error(
+        "manifest validation",
+        "missing required boolean field: " + std::string{field},
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+  try {
+    return node.as<bool>();
+  } catch (const YAML::Exception&) {
+    error = pack_error(
+        "manifest validation",
+        "invalid boolean field: " + std::string{field},
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+}
+
+[[nodiscard]] bool dependency_version_satisfied(std::string_view actual, std::string_view requirement) {
+  if (requirement.empty()) {
+    return true;
+  }
+  if (requirement.starts_with(">=")) {
+    auto parse_parts = [](std::string_view version) {
+      std::vector<u32> parts;
+      usize start = 0;
+      while (start <= version.size()) {
+        const usize dot = version.find('.', start);
+        std::string_view part =
+            dot == std::string_view::npos ? version.substr(start) : version.substr(start, dot - start);
+        u32 value = 0;
+        for (char ch : part) {
+          if (ch < '0' || ch > '9') {
+            break;
+          }
+          value = value * 10U + static_cast<u32>(ch - '0');
+        }
+        parts.push_back(value);
+        if (dot == std::string_view::npos) {
+          break;
+        }
+        start = dot + 1U;
+      }
+      while (parts.size() < 3U) {
+        parts.push_back(0U);
+      }
+      return parts;
+    };
+    return parse_parts(actual) >= parse_parts(requirement.substr(2U));
+  }
+  return actual == requirement;
+}
+
+[[nodiscard]] u64 fnv_append(u64 hash, std::string_view text) noexcept {
+  for (const char ch : text) {
+    hash ^= static_cast<u8>(ch);
+    hash *= FnvPrime;
+  }
+  return hash;
+}
+
+[[nodiscard]] u64 hash_file(u64 hash, const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  char buffer[4096];
+  while (input) {
+    input.read(buffer, sizeof(buffer));
+    const std::streamsize count = input.gcount();
+    for (std::streamsize i = 0; i < count; ++i) {
+      hash ^= static_cast<u8>(buffer[i]);
+      hash *= FnvPrime;
+    }
+  }
+  return hash;
+}
+
+[[nodiscard]] bool hash_included_relative_path(const std::filesystem::path& relative) {
+  const std::string first = relative.begin() == relative.end() ? std::string{} : relative.begin()->string();
+  return first == "pack.yaml" || first == "assets" || first == "data" || first == "native";
+}
+
+[[nodiscard]] u64 compute_pack_content_hash(const std::filesystem::path& root) {
+  std::vector<std::filesystem::path> files;
+  std::error_code error;
+  if (!std::filesystem::exists(root, error)) {
+    return 0U;
+  }
+  for (const std::filesystem::directory_entry& entry :
+       std::filesystem::recursive_directory_iterator(
+           root,
+           std::filesystem::directory_options::skip_permission_denied,
+           error)) {
+    if (error) {
+      error.clear();
+      continue;
+    }
+    if (!file_exists_inside_root(root, entry.path())) {
+      error.clear();
+      continue;
+    }
+    const std::filesystem::path relative = entry.path().lexically_relative(root);
+    if (hash_included_relative_path(relative)) {
+      files.push_back(relative);
+    }
+  }
+  std::sort(files.begin(), files.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.generic_string() < rhs.generic_string();
+  });
+
+  u64 hash = FnvOffset;
+  for (const std::filesystem::path& relative : files) {
+    hash = fnv_append(hash, relative.generic_string());
+    hash = fnv_append(hash, "\n");
+    hash = hash_file(hash, root / relative);
+    hash = fnv_append(hash, "\n");
+  }
+  return hash;
+}
+
+[[nodiscard]] PackError validate_manifest(const PackManifest& manifest, const std::filesystem::path& file) {
+  if (manifest.schema_version != 1U) {
+    return pack_error(
+        "manifest validation",
+        "unsupported schema_version: " + std::to_string(manifest.schema_version),
+        manifest.id,
+        file,
+        {},
+        manifest.version);
+  }
+  if (!is_valid_pack_id(manifest.id)) {
+    return pack_error(
+        "manifest validation",
+        "invalid pack id: " + manifest.id,
+        manifest.id,
+        file,
+        {},
+        manifest.version);
+  }
+  if (manifest.display_name.empty()) {
+    return pack_error("manifest validation", "display_name must not be empty", manifest.id, file);
+  }
+  if (manifest.version.empty()) {
+    return pack_error("manifest validation", "version must not be empty", manifest.id, file);
+  }
+  if (manifest.namespaces.empty()) {
+    return pack_error("manifest validation", "namespaces must not be empty", manifest.id, file);
+  }
+  HashSet<std::string> namespaces;
+  for (const std::string& name_space : manifest.namespaces) {
+    if (!is_valid_pack_id(name_space)) {
+      return pack_error(
+          "manifest validation",
+          "invalid namespace: " + name_space,
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+    if (!namespaces.insert(name_space).second) {
+      return pack_error(
+          "manifest validation",
+          "duplicate namespace: " + name_space,
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+  }
+  HashSet<std::string> dependencies;
+  for (const PackDependency& dependency : manifest.dependencies) {
+    if (!is_valid_pack_id(dependency.id)) {
+      return pack_error(
+          "manifest validation",
+          "invalid dependency id: " + dependency.id,
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+    if (!dependencies.insert(dependency.id).second) {
+      return pack_error(
+          "manifest validation",
+          "duplicate dependency: " + dependency.id,
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+  }
+  if (manifest.native.has_value() && !manifest.capabilities.native_plugin) {
+    return pack_error(
+        "manifest validation",
+        "native section is only valid when capabilities.native_plugin is true",
+        manifest.id,
+        file,
+        {},
+        manifest.version);
+  }
+  return {};
+}
+
+[[nodiscard]] Expected<std::vector<std::string>, PackError> load_enabled_pack_ids(
+    const std::filesystem::path& packs_root) {
+  const std::filesystem::path enabled_path = packs_root / std::filesystem::path{EnabledPacksFileName};
+  if (!file_exists(enabled_path)) {
+    return Expected<std::vector<std::string>, PackError>::success(
+        {std::string{DefaultBasePackID}});
+  }
+  try {
+    const YAML::Node root = YAML::LoadFile(enabled_path.string());
+    const YAML::Node enabled = root["enabled"];
+    if (!enabled || !enabled.IsSequence()) {
+      return Expected<std::vector<std::string>, PackError>::failure(
+          pack_error("enabled packs", "enabled.yaml must contain an enabled list", {}, enabled_path));
+    }
+    std::vector<std::string> ids;
+    HashSet<std::string> seen;
+    ids.reserve(enabled.size());
+    for (const YAML::Node& entry : enabled) {
+      if (!entry.IsScalar()) {
+        return Expected<std::vector<std::string>, PackError>::failure(
+            pack_error("enabled packs", "enabled pack entry must be a scalar", {}, enabled_path));
+      }
+      std::string id = entry.as<std::string>();
+      if (!is_valid_pack_id(id)) {
+        return Expected<std::vector<std::string>, PackError>::failure(
+            pack_error("enabled packs", "invalid enabled pack id: " + id, {}, enabled_path));
+      }
+      if (!seen.insert(id).second) {
+        return Expected<std::vector<std::string>, PackError>::failure(
+            pack_error("enabled packs", "duplicate enabled pack id: " + id, {}, enabled_path));
+      }
+      ids.push_back(std::move(id));
+    }
+    if (ids.empty()) {
+      return Expected<std::vector<std::string>, PackError>::failure(
+          pack_error("enabled packs", "enabled pack list must not be empty", {}, enabled_path));
+    }
+    return Expected<std::vector<std::string>, PackError>::success(std::move(ids));
+  } catch (const YAML::Exception& ex) {
+    return Expected<std::vector<std::string>, PackError>::failure(
+        pack_error("enabled packs", "failed to parse enabled.yaml: " + std::string{ex.what()}, {}, enabled_path));
+  }
+}
+
+[[nodiscard]] Expected<std::vector<PackSource>, PackError> discover_packs(
+    const std::filesystem::path& packs_root) {
+  std::vector<PackSource> packs;
+  HashSet<std::string> seen_ids;
+  std::error_code error;
+  if (!std::filesystem::exists(packs_root, error)) {
+    return Expected<std::vector<PackSource>, PackError>::failure(
+        pack_error("pack discovery", "packs root does not exist", {}, packs_root));
+  }
+  if (!std::filesystem::is_directory(packs_root, error)) {
+    return Expected<std::vector<PackSource>, PackError>::failure(
+        pack_error("pack discovery", "packs root is not a directory", {}, packs_root));
+  }
+  for (const std::filesystem::directory_entry& entry :
+       std::filesystem::directory_iterator(packs_root, error)) {
+    if (error) {
+      error.clear();
+      continue;
+    }
+    if (!entry.is_directory()) {
+      continue;
+    }
+    const std::filesystem::path manifest_path = entry.path() / "pack.yaml";
+    if (!file_exists_inside_root(entry.path(), manifest_path)) {
+      continue;
+    }
+    auto manifest = load_pack_manifest(entry.path());
+    if (!manifest) {
+      return Expected<std::vector<PackSource>, PackError>::failure(manifest.error());
+    }
+    if (!seen_ids.insert(manifest.value().id).second) {
+      return Expected<std::vector<PackSource>, PackError>::failure(
+          pack_error(
+              "pack discovery",
+              "duplicate installed pack id: " + manifest.value().id,
+              manifest.value().id,
+              manifest_path,
+              {},
+              manifest.value().version));
+    }
+    PackSource source;
+    source.root = entry.path();
+    source.manifest = std::move(manifest.value());
+    source.content_hash = compute_pack_content_hash(source.root);
+    packs.push_back(std::move(source));
+  }
+  std::sort(packs.begin(), packs.end(), [](const PackSource& lhs, const PackSource& rhs) {
+    return lhs.manifest.id < rhs.manifest.id;
+  });
+  return Expected<std::vector<PackSource>, PackError>::success(std::move(packs));
+}
+
+[[nodiscard]] Expected<std::vector<PackSource>, PackError> select_and_order_packs(
+    std::vector<PackSource> discovered,
+    std::vector<std::string> enabled_ids) {
+  HashMap<std::string, usize> discovered_by_id;
+  for (usize index = 0; index < discovered.size(); ++index) {
+    discovered_by_id.emplace(discovered[index].manifest.id, index);
+  }
+
+  std::vector<PackSource> enabled;
+  enabled.reserve(enabled_ids.size());
+  HashMap<std::string, usize> enabled_order;
+  for (usize index = 0; index < enabled_ids.size(); ++index) {
+    const std::string& id = enabled_ids[index];
+    const auto found = discovered_by_id.find(id);
+    if (found == discovered_by_id.end()) {
+      return Expected<std::vector<PackSource>, PackError>::failure(
+          pack_error("pack ordering", "enabled pack is not installed: " + id, id));
+    }
+    enabled_order.emplace(id, index);
+    enabled.push_back(std::move(discovered[found->second]));
+  }
+
+  HashMap<std::string, usize> index_by_id;
+  for (usize index = 0; index < enabled.size(); ++index) {
+    index_by_id.emplace(enabled[index].manifest.id, index);
+  }
+
+  std::vector<std::vector<usize>> edges(enabled.size());
+  std::vector<u32> indegree(enabled.size());
+  const auto add_edge = [&](usize before, usize after) {
+    if (before == after) {
+      return;
+    }
+    auto& outgoing = edges[before];
+    if (std::find(outgoing.begin(), outgoing.end(), after) == outgoing.end()) {
+      outgoing.push_back(after);
+      ++indegree[after];
+    }
+  };
+
+  for (usize index = 0; index < enabled.size(); ++index) {
+    const PackSource& pack = enabled[index];
+    for (const PackDependency& dependency : pack.manifest.dependencies) {
+      const auto dep_index = index_by_id.find(dependency.id);
+      if (dep_index == index_by_id.end()) {
+        return Expected<std::vector<PackSource>, PackError>::failure(
+            pack_error(
+                "pack ordering",
+                "missing dependency '" + dependency.id + "' required by " + pack.manifest.id,
+                pack.manifest.id,
+                {},
+                {},
+                pack.manifest.version));
+      }
+      const PackSource& dependency_pack = enabled[dep_index->second];
+      if (!dependency_version_satisfied(dependency_pack.manifest.version, dependency.version)) {
+        return Expected<std::vector<PackSource>, PackError>::failure(
+            pack_error(
+                "pack ordering",
+                "dependency version does not satisfy requirement: " + dependency.id +
+                    " " + dependency.version + " actual " + dependency_pack.manifest.version,
+                pack.manifest.id,
+                {},
+                {},
+                pack.manifest.version));
+      }
+      add_edge(dep_index->second, index);
+    }
+    for (const std::string& after : pack.manifest.load_after) {
+      if (const auto found = index_by_id.find(after); found != index_by_id.end()) {
+        add_edge(found->second, index);
+      }
+    }
+    for (const std::string& before : pack.manifest.load_before) {
+      if (const auto found = index_by_id.find(before); found != index_by_id.end()) {
+        add_edge(index, found->second);
+      }
+    }
+  }
+
+  auto compare_enabled_order = [&](usize lhs, usize rhs) {
+    return enabled_order[enabled[lhs].manifest.id] > enabled_order[enabled[rhs].manifest.id];
+  };
+  std::priority_queue<usize, std::vector<usize>, decltype(compare_enabled_order)> ready(compare_enabled_order);
+  for (usize index = 0; index < indegree.size(); ++index) {
+    if (indegree[index] == 0U) {
+      ready.push(index);
+    }
+  }
+
+  std::vector<PackSource> ordered;
+  ordered.reserve(enabled.size());
+  while (!ready.empty()) {
+    const usize index = ready.top();
+    ready.pop();
+    ordered.push_back(std::move(enabled[index]));
+    std::sort(edges[index].begin(), edges[index].end(), [&](usize lhs, usize rhs) {
+      return enabled_order[enabled[lhs].manifest.id] < enabled_order[enabled[rhs].manifest.id];
+    });
+    for (const usize after : edges[index]) {
+      --indegree[after];
+      if (indegree[after] == 0U) {
+        ready.push(after);
+      }
+    }
+  }
+
+  if (ordered.size() != enabled.size()) {
+    return Expected<std::vector<PackSource>, PackError>::failure(
+        pack_error("pack ordering", "dependency or load-order cycle detected"));
+  }
+
+  return Expected<std::vector<PackSource>, PackError>::success(std::move(ordered));
+}
+
+[[nodiscard]] Expected<std::vector<json>, PackError> entries_from_json_file(
+    const PackDataFile& file,
+    std::string_view root_key) {
+  std::ifstream input(file.path);
+  if (!input) {
+    return Expected<std::vector<json>, PackError>::failure(pack_error(
+        "data loading",
+        "data file could not be opened",
+        file.pack_id,
+        file.relative_path,
+        {},
+        file.pack_version));
+  }
+  try {
+    const json root = json::parse(input);
+    const json* entries = &root;
+    if (root.is_object()) {
+      const auto found = root.find(std::string{root_key});
+      if (found != root.end()) {
+        entries = &(*found);
+      } else if (root.contains("name") || root.contains("operation")) {
+        return Expected<std::vector<json>, PackError>::success({root});
+      } else {
+        return Expected<std::vector<json>, PackError>::failure(pack_error(
+            "data validation",
+            "JSON object must contain " + std::string{root_key} + " array",
+            file.pack_id,
+            file.relative_path,
+            {},
+            file.pack_version));
+      }
+    }
+    if (!entries->is_array()) {
+      return Expected<std::vector<json>, PackError>::failure(pack_error(
+          "data validation",
+          "JSON data entries must be an array",
+          file.pack_id,
+          file.relative_path,
+          {},
+          file.pack_version));
+    }
+    std::vector<json> result;
+    result.reserve(entries->size());
+    for (const json& entry : *entries) {
+      result.push_back(entry);
+    }
+    return Expected<std::vector<json>, PackError>::success(std::move(result));
+  } catch (const json::exception& ex) {
+    return Expected<std::vector<json>, PackError>::failure(pack_error(
+        "data parsing",
+        "failed to parse JSON: " + std::string{ex.what()},
+        file.pack_id,
+        file.relative_path,
+        {},
+        file.pack_version));
+  }
+}
+
+[[nodiscard]] Expected<std::string, PackError> resource_name_from_definition(
+    const json& definition,
+    const PackDataFile& file) {
+  const auto name = definition.find("name");
+  if (name == definition.end() || !name->is_string()) {
+    return Expected<std::string, PackError>::failure(pack_error(
+        "data validation",
+        "definition is missing string field name",
+        file.pack_id,
+        file.relative_path,
+        {},
+        file.pack_version));
+  }
+  return Expected<std::string, PackError>::success(name->get<std::string>());
+}
+
+} // namespace
+
+std::string ResourceID::string() const {
+  return name_space + ":" + path;
+}
+
+Expected<ResourceID, std::string> ResourceID::parse(std::string_view text) {
+  const usize separator = text.find(':');
+  if (separator == std::string_view::npos) {
+    return Expected<ResourceID, std::string>::failure("resource ID is missing namespace separator ':'");
+  }
+  if (separator == 0U) {
+    return Expected<ResourceID, std::string>::failure("resource ID namespace is empty");
+  }
+  if (separator + 1U >= text.size()) {
+    return Expected<ResourceID, std::string>::failure("resource ID path is empty");
+  }
+  if (text.find(':', separator + 1U) != std::string_view::npos) {
+    return Expected<ResourceID, std::string>::failure("resource ID contains more than one ':'");
+  }
+
+  const std::string_view name_space = text.substr(0U, separator);
+  const std::string_view path = text.substr(separator + 1U);
+  for (usize index = 0; index < name_space.size(); ++index) {
+    if (!valid_identifier_char(name_space[index], index == 0U)) {
+      return Expected<ResourceID, std::string>::failure("resource ID namespace contains invalid characters");
+    }
+  }
+  if (path_has_unsafe_segment(path)) {
+    return Expected<ResourceID, std::string>::failure("resource ID path contains an unsafe segment");
+  }
+  if (!std::all_of(path.begin(), path.end(), valid_resource_path_char)) {
+    return Expected<ResourceID, std::string>::failure("resource ID path contains invalid characters");
+  }
+
+  return Expected<ResourceID, std::string>::success(
+      {std::string{name_space}, std::string{path}});
+}
+
+bool ResourceID::valid(std::string_view text) noexcept {
+  return parse(text).has_value();
+}
+
+std::string pack_side_to_string(PackSide side) {
+  switch (side) {
+    case PackSide::Client:
+      return "client";
+    case PackSide::Server:
+      return "server";
+    case PackSide::Both:
+      return "both";
+  }
+  return "both";
+}
+
+std::optional<PackSide> pack_side_from_string(std::string_view value) {
+  if (value == "client") {
+    return PackSide::Client;
+  }
+  if (value == "server") {
+    return PackSide::Server;
+  }
+  if (value == "both") {
+    return PackSide::Both;
+  }
+  return std::nullopt;
+}
+
+bool is_valid_pack_id(std::string_view id) noexcept {
+  if (id.empty()) {
+    return false;
+  }
+  for (usize index = 0; index < id.size(); ++index) {
+    if (!valid_identifier_char(id[index], index == 0U)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool is_safe_pack_relative_path(const std::filesystem::path& path) noexcept {
+  if (path.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory()) {
+    return false;
+  }
+  for (const std::filesystem::path& part : path) {
+    const std::string value = part.string();
+    if (value.empty() || value == "." || value == "..") {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string PackError::describe() const {
+  std::string text;
+  if (!phase.empty()) {
+    text += phase;
+    text += ": ";
+  }
+  text += message;
+  if (!pack_id.empty()) {
+    text += " (pack ";
+    text += pack_id;
+    if (!pack_version.empty()) {
+      text += " ";
+      text += pack_version;
+    }
+    text += ")";
+  }
+  if (!file.empty()) {
+    text += " [file ";
+    text += file.generic_string();
+    text += "]";
+  }
+  if (!resource_id.empty()) {
+    text += " [resource ";
+    text += resource_id;
+    text += "]";
+  }
+  return text;
+}
+
+PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
+  const std::filesystem::path manifest_path = pack_root / "pack.yaml";
+  if (!file_exists_inside_root(pack_root, manifest_path)) {
+    return PackManifestResult::failure(
+        pack_error("manifest loading", "pack.yaml is missing", {}, manifest_path));
+  }
+
+  try {
+    const YAML::Node root = YAML::LoadFile(manifest_path.string());
+    PackError error;
+
+    PackManifest manifest;
+    const YAML::Node schema = root["schema_version"];
+    if (!schema || !schema.IsScalar()) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "missing required scalar field: schema_version", {}, manifest_path));
+    }
+    manifest.schema_version = schema.as<u32>();
+    manifest.id = required_scalar(root, "id", error, manifest_path);
+    if (!error.message.empty()) {
+      return PackManifestResult::failure(error);
+    }
+    manifest.display_name = required_scalar(root, "display_name", error, manifest_path, manifest.id);
+    if (!error.message.empty()) {
+      return PackManifestResult::failure(error);
+    }
+    manifest.version = required_scalar(root, "version", error, manifest_path, manifest.id);
+    if (!error.message.empty()) {
+      return PackManifestResult::failure(error);
+    }
+    if (const YAML::Node description = root["description"]; description && description.IsScalar()) {
+      manifest.description = description.as<std::string>();
+    }
+    manifest.authors = read_string_list(root, "authors", error, manifest_path, manifest.id);
+    if (!error.message.empty()) {
+      return PackManifestResult::failure(error);
+    }
+    manifest.namespaces = read_string_list(root, "namespaces", error, manifest_path, manifest.id, true);
+    if (!error.message.empty()) {
+      return PackManifestResult::failure(error);
+    }
+    const std::string side = required_scalar(root, "side", error, manifest_path, manifest.id);
+    if (!error.message.empty()) {
+      return PackManifestResult::failure(error);
+    }
+    const std::optional<PackSide> parsed_side = pack_side_from_string(side);
+    if (!parsed_side.has_value()) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "invalid side: " + side, manifest.id, manifest_path));
+    }
+    manifest.side = parsed_side.value();
+
+    if (const YAML::Node engine = root["engine"]; engine && engine.IsMap()) {
+      if (const YAML::Node min = engine["min_version"]; min && min.IsScalar()) {
+        manifest.engine_min_version = min.as<std::string>();
+      }
+      if (const YAML::Node max = engine["max_version"]; max && max.IsScalar()) {
+        manifest.engine_max_version = max.as<std::string>();
+      }
+    }
+
+    if (const YAML::Node dependencies = root["dependencies"]; dependencies) {
+      if (!dependencies.IsSequence()) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "dependencies must be a list", manifest.id, manifest_path));
+      }
+      manifest.dependencies.reserve(dependencies.size());
+      for (const YAML::Node& entry : dependencies) {
+        if (!entry.IsMap() || !entry["id"] || !entry["id"].IsScalar()) {
+          return PackManifestResult::failure(
+              pack_error("manifest validation", "dependency entries require scalar id", manifest.id, manifest_path));
+        }
+        PackDependency dependency;
+        dependency.id = entry["id"].as<std::string>();
+        if (const YAML::Node version = entry["version"]; version && version.IsScalar()) {
+          dependency.version = version.as<std::string>();
+        }
+        manifest.dependencies.push_back(std::move(dependency));
+      }
+    }
+
+    manifest.load_after = read_string_list(root, "load_after", error, manifest_path, manifest.id);
+    if (!error.message.empty()) {
+      return PackManifestResult::failure(error);
+    }
+    manifest.load_before = read_string_list(root, "load_before", error, manifest_path, manifest.id);
+    if (!error.message.empty()) {
+      return PackManifestResult::failure(error);
+    }
+
+    const YAML::Node capabilities = root["capabilities"];
+    if (!capabilities || !capabilities.IsMap()) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "missing required capabilities map", manifest.id, manifest_path));
+    }
+    auto assets = read_required_bool(capabilities, "assets", error, manifest_path, manifest.id);
+    if (!assets) {
+      return PackManifestResult::failure(error);
+    }
+    auto data = read_required_bool(capabilities, "data", error, manifest_path, manifest.id);
+    if (!data) {
+      return PackManifestResult::failure(error);
+    }
+    auto native_plugin = read_required_bool(capabilities, "native_plugin", error, manifest_path, manifest.id);
+    if (!native_plugin) {
+      return PackManifestResult::failure(error);
+    }
+    manifest.capabilities = {assets.value(), data.value(), native_plugin.value()};
+
+    if (const YAML::Node native = root["native"]; native) {
+      if (!native.IsMap()) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "native must be a map", manifest.id, manifest_path));
+      }
+      PackNativeManifest native_manifest;
+      if (!native["api_version"] || !native["api_version"].IsScalar()) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "native.api_version is required", manifest.id, manifest_path));
+      }
+      native_manifest.api_version = native["api_version"].as<u32>();
+      if (!native["entrypoint"] || !native["entrypoint"].IsScalar()) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "native.entrypoint is required", manifest.id, manifest_path));
+      }
+      native_manifest.entrypoint = native["entrypoint"].as<std::string>();
+      const YAML::Node libraries = native["libraries"];
+      if (!libraries || !libraries.IsMap()) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "native.libraries map is required", manifest.id, manifest_path));
+      }
+      for (const auto& entry : libraries) {
+        if (!entry.first.IsScalar() || !entry.second.IsScalar()) {
+          return PackManifestResult::failure(
+              pack_error("manifest validation", "native library entries must be scalar", manifest.id, manifest_path));
+        }
+        std::filesystem::path library_path = entry.second.as<std::string>();
+        if (!is_safe_pack_relative_path(library_path)) {
+          return PackManifestResult::failure(
+              pack_error(
+                  "manifest validation",
+                  "unsafe native library path: " + library_path.generic_string(),
+                  manifest.id,
+                  manifest_path,
+                  {},
+                  manifest.version));
+        }
+        native_manifest.libraries.emplace(entry.first.as<std::string>(), std::move(library_path));
+      }
+      manifest.native = std::move(native_manifest);
+    }
+
+    PackError validation = validate_manifest(manifest, manifest_path);
+    if (!validation.message.empty()) {
+      return PackManifestResult::failure(std::move(validation));
+    }
+    return PackManifestResult::success(std::move(manifest));
+  } catch (const YAML::Exception& ex) {
+    return PackManifestResult::failure(
+        pack_error("manifest parsing", "failed to parse pack.yaml: " + std::string{ex.what()}, {}, manifest_path));
+  }
+}
+
+Expected<PackManager, PackError> PackManager::load(const std::filesystem::path& arvane_home) {
+  return load_from_packs_root(arvane_home / "packs");
+}
+
+Expected<PackManager, PackError> PackManager::load_from_packs_root(
+    const std::filesystem::path& packs_root) {
+  auto enabled = load_enabled_pack_ids(packs_root);
+  if (!enabled) {
+    return Expected<PackManager, PackError>::failure(enabled.error());
+  }
+  auto discovered = discover_packs(packs_root);
+  if (!discovered) {
+    return Expected<PackManager, PackError>::failure(discovered.error());
+  }
+  auto ordered = select_and_order_packs(std::move(discovered.value()), std::move(enabled.value()));
+  if (!ordered) {
+    return Expected<PackManager, PackError>::failure(ordered.error());
+  }
+
+  PackManager manager;
+  manager.packs_root_ = packs_root;
+  manager.stack_ = std::move(ordered.value());
+  return Expected<PackManager, PackError>::success(std::move(manager));
+}
+
+const PackSource* PackManager::find_pack(std::string_view id) const noexcept {
+  const auto found = std::find_if(stack_.begin(), stack_.end(), [&](const PackSource& pack) {
+    return pack.manifest.id == id;
+  });
+  return found == stack_.end() ? nullptr : &(*found);
+}
+
+PackPathResult PackManager::resolve_asset_path(
+    std::string_view asset_id,
+    AssetKind asset_kind) const {
+  auto parsed = ResourceID::parse(asset_id);
+  if (!parsed) {
+    return PackPathResult::failure(
+        pack_error("asset resolution", parsed.error(), {}, {}, std::string{asset_id}));
+  }
+  const ResourceID id = std::move(parsed.value());
+  const std::filesystem::path relative = logical_asset_relative_path(id, asset_kind);
+  if (!is_safe_pack_relative_path(relative)) {
+    return PackPathResult::failure(
+        pack_error("asset resolution", "asset path is unsafe", {}, relative, id.string()));
+  }
+
+  for (usize reverse_index = stack_.size(); reverse_index > 0U; --reverse_index) {
+    const usize index = reverse_index - 1U;
+    const PackSource& pack = stack_[index];
+    if (!pack.manifest.capabilities.assets ||
+        !contains_string(pack.manifest.namespaces, id.name_space)) {
+      continue;
+    }
+    const std::filesystem::path path = pack.root / relative;
+    if (file_exists_inside_root(pack.root, path)) {
+      return PackPathResult::success(
+          {index, pack.manifest.id, pack.manifest.version, relative, path});
+    }
+  }
+
+  return PackPathResult::failure(
+      pack_error("asset resolution", "asset was not found in enabled pack stack", {}, relative, id.string()));
+}
+
+PackPathResult PackManager::resolve_data_path(
+    std::string_view data_id,
+    std::string_view extension) const {
+  auto parsed = ResourceID::parse(data_id);
+  if (!parsed) {
+    return PackPathResult::failure(
+        pack_error("data resolution", parsed.error(), {}, {}, std::string{data_id}));
+  }
+  const ResourceID id = std::move(parsed.value());
+  const std::filesystem::path relative = logical_data_relative_path(id, extension);
+  if (!is_safe_pack_relative_path(relative)) {
+    return PackPathResult::failure(
+        pack_error("data resolution", "data path is unsafe", {}, relative, id.string()));
+  }
+
+  for (usize reverse_index = stack_.size(); reverse_index > 0U; --reverse_index) {
+    const usize index = reverse_index - 1U;
+    const PackSource& pack = stack_[index];
+    if (!pack.manifest.capabilities.data ||
+        !contains_string(pack.manifest.namespaces, id.name_space)) {
+      continue;
+    }
+    const std::filesystem::path path = pack.root / relative;
+    if (file_exists_inside_root(pack.root, path)) {
+      return PackPathResult::success(
+          {index, pack.manifest.id, pack.manifest.version, relative, path});
+    }
+  }
+
+  return PackPathResult::failure(
+      pack_error("data resolution", "data file was not found in enabled pack stack", {}, relative, id.string()));
+}
+
+std::vector<PackDataFile> PackManager::data_files(
+    std::string_view category,
+    std::string_view extension) const {
+  std::vector<PackDataFile> files;
+  std::error_code error;
+  for (usize pack_index = 0; pack_index < stack_.size(); ++pack_index) {
+    const PackSource& pack = stack_[pack_index];
+    if (!pack.manifest.capabilities.data) {
+      continue;
+    }
+    for (const std::string& name_space : pack.manifest.namespaces) {
+      const std::filesystem::path namespace_root = pack.root / "data" / name_space;
+      const std::filesystem::path category_file =
+          path_with_extension(namespace_root / std::string{category}, extension);
+      if (file_exists_inside_root(pack.root, category_file)) {
+        files.push_back({
+            pack_index,
+            pack.manifest.id,
+            pack.manifest.version,
+            name_space,
+            relative_to_pack(pack, category_file),
+            category_file});
+      }
+      const std::filesystem::path directory = namespace_root / std::string{category};
+      if (!directory_exists_inside_root(pack.root, directory)) {
+        error.clear();
+        continue;
+      }
+      std::vector<PackDataFile> directory_files;
+      for (const std::filesystem::directory_entry& entry :
+           std::filesystem::recursive_directory_iterator(
+               directory,
+               std::filesystem::directory_options::skip_permission_denied,
+               error)) {
+        if (error) {
+          error.clear();
+          continue;
+        }
+        if (!file_exists_inside_root(pack.root, entry.path())) {
+          error.clear();
+          continue;
+        }
+        if (!extension.empty() && entry.path().extension() != extension) {
+          continue;
+        }
+        directory_files.push_back({
+            pack_index,
+            pack.manifest.id,
+            pack.manifest.version,
+            name_space,
+            relative_to_pack(pack, entry.path()),
+            entry.path()});
+      }
+      std::sort(directory_files.begin(), directory_files.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.relative_path.generic_string() < rhs.relative_path.generic_string();
+      });
+      files.insert(files.end(), directory_files.begin(), directory_files.end());
+    }
+  }
+  return files;
+}
+
+std::vector<PackDataFile> PackManager::data_files_at(std::string_view relative_path) const {
+  std::vector<PackDataFile> files;
+  const std::filesystem::path relative_logical{std::string{relative_path}};
+  if (!is_safe_pack_relative_path(relative_logical)) {
+    return files;
+  }
+  for (usize pack_index = 0; pack_index < stack_.size(); ++pack_index) {
+    const PackSource& pack = stack_[pack_index];
+    if (!pack.manifest.capabilities.data) {
+      continue;
+    }
+    for (const std::string& name_space : pack.manifest.namespaces) {
+      const std::filesystem::path path = pack.root / "data" / name_space / relative_logical;
+      if (!file_exists_inside_root(pack.root, path)) {
+        continue;
+      }
+      files.push_back({
+          pack_index,
+          pack.manifest.id,
+          pack.manifest.version,
+          name_space,
+          relative_to_pack(pack, path),
+          path});
+    }
+  }
+  return files;
+}
+
+PackTextResult PackManager::load_data_text(
+    std::string_view data_id,
+    std::string_view extension) const {
+  auto resolved = resolve_data_path(data_id, extension);
+  if (!resolved) {
+    return PackTextResult::failure(resolved.error());
+  }
+  const PackSource& pack = stack_[resolved.value().pack_index];
+  return read_text_file(
+      resolved.value().path,
+      pack,
+      "data loading",
+      std::string{data_id});
+}
+
+PackTextResult PackManager::load_merged_json_array_text(
+    std::string_view category,
+    std::string_view root_key) const {
+  std::vector<json> definitions;
+  HashMap<std::string, usize> definition_by_name;
+  std::vector<PackDataFile> files = data_files(category, ".json");
+  if (files.empty()) {
+    return PackTextResult::failure(
+        pack_error("data loading", "no data files found for category: " + std::string{category}));
+  }
+
+  for (const PackDataFile& file : files) {
+    auto entries = entries_from_json_file(file, root_key);
+    if (!entries) {
+      return PackTextResult::failure(entries.error());
+    }
+
+    const PackSource& source = stack_[file.pack_index];
+    for (json entry : entries.value()) {
+      if (!entry.is_object()) {
+        return PackTextResult::failure(pack_error(
+            "data validation",
+            "definition entry must be an object",
+            file.pack_id,
+            file.relative_path,
+            {},
+            file.pack_version));
+      }
+
+      const auto operation = entry.find("operation");
+      if (operation != entry.end()) {
+        if (!operation->is_string()) {
+          return PackTextResult::failure(pack_error(
+              "data validation",
+              "operation must be a string",
+              file.pack_id,
+              file.relative_path,
+              {},
+              file.pack_version));
+        }
+        const std::string op = operation->get<std::string>();
+        if (op != "override") {
+          return PackTextResult::failure(pack_error(
+              "data validation",
+              "unsupported data operation: " + op,
+              file.pack_id,
+              file.relative_path,
+              {},
+              file.pack_version));
+        }
+        const auto target_iter = entry.find("target");
+        if (target_iter == entry.end() || !target_iter->is_string()) {
+          return PackTextResult::failure(pack_error(
+              "data validation",
+              "override operation requires string target",
+              file.pack_id,
+              file.relative_path,
+              {},
+              file.pack_version));
+        }
+        const std::string target = target_iter->get<std::string>();
+        auto target_id = ResourceID::parse(target);
+        if (!target_id) {
+          return PackTextResult::failure(pack_error(
+              "data validation",
+              target_id.error(),
+              file.pack_id,
+              file.relative_path,
+              target,
+              file.pack_version));
+        }
+        const auto existing = definition_by_name.find(target);
+        if (existing == definition_by_name.end()) {
+          return PackTextResult::failure(pack_error(
+              "data validation",
+              "override target does not exist in a lower-priority pack",
+              file.pack_id,
+              file.relative_path,
+              target,
+              file.pack_version));
+        }
+
+        json replacement;
+        const auto definition_iter = entry.find("definition");
+        if (definition_iter != entry.end()) {
+          replacement = *definition_iter;
+        } else {
+          replacement = entry;
+          replacement.erase("operation");
+          replacement.erase("target");
+        }
+        if (!replacement.is_object()) {
+          return PackTextResult::failure(pack_error(
+              "data validation",
+              "override definition must be an object",
+              file.pack_id,
+              file.relative_path,
+              target,
+              file.pack_version));
+        }
+        if (!replacement.contains("name")) {
+          replacement["name"] = target;
+        }
+        auto replacement_name = resource_name_from_definition(replacement, file);
+        if (!replacement_name) {
+          return PackTextResult::failure(replacement_name.error());
+        }
+        if (replacement_name.value() != target) {
+          return PackTextResult::failure(pack_error(
+              "data validation",
+              "override definition name must match target",
+              file.pack_id,
+              file.relative_path,
+              target,
+              file.pack_version));
+        }
+        definitions[existing->second] = std::move(replacement);
+        continue;
+      }
+
+      auto name = resource_name_from_definition(entry, file);
+      if (!name) {
+        return PackTextResult::failure(name.error());
+      }
+      auto parsed = ResourceID::parse(name.value());
+      if (!parsed) {
+        return PackTextResult::failure(pack_error(
+            "data validation",
+            parsed.error(),
+            file.pack_id,
+            file.relative_path,
+            name.value(),
+            file.pack_version));
+      }
+      if (!contains_string(source.manifest.namespaces, parsed.value().name_space)) {
+        return PackTextResult::failure(pack_error(
+            "data validation",
+            "definition namespace is not declared by this pack",
+            file.pack_id,
+            file.relative_path,
+            name.value(),
+            file.pack_version));
+      }
+      if (definition_by_name.find(name.value()) != definition_by_name.end()) {
+        return PackTextResult::failure(pack_error(
+            "data validation",
+            "duplicate definition without explicit override",
+            file.pack_id,
+            file.relative_path,
+            name.value(),
+            file.pack_version));
+      }
+      definition_by_name.emplace(name.value(), definitions.size());
+      definitions.push_back(std::move(entry));
+    }
+  }
+
+  json root = json::object();
+  root[std::string{root_key}] = std::move(definitions);
+  return PackTextResult::success(root.dump(2));
+}
+
+std::vector<RequiredPack> PackManager::required_packs() const {
+  std::vector<RequiredPack> required;
+  required.reserve(stack_.size());
+  for (const PackSource& pack : stack_) {
+    if (!pack.manifest.capabilities.data) {
+      continue;
+    }
+    required.push_back({
+        pack.manifest.id,
+        pack.manifest.version,
+        pack.content_hash,
+        pack.manifest.side,
+        pack.manifest.namespaces,
+        false});
+  }
+  return required;
+}
+
+PackValidationResult PackManager::validate_required_packs(
+    std::span<const RequiredPack> required) const {
+  for (const RequiredPack& expected : required) {
+    const PackSource* installed = find_pack(expected.id);
+    if (installed == nullptr) {
+      return PackValidationResult::failure(pack_error(
+          "pack lock validation",
+          "required pack is missing: " + expected.id,
+          expected.id));
+    }
+    if (!expected.version.empty() && installed->manifest.version != expected.version) {
+      return PackValidationResult::failure(pack_error(
+          "pack lock validation",
+          "required pack version mismatch: expected " + expected.version +
+              " actual " + installed->manifest.version,
+          expected.id,
+          {},
+          {},
+          installed->manifest.version));
+    }
+    if (expected.content_hash != 0U && installed->content_hash != expected.content_hash) {
+      return PackValidationResult::failure(pack_error(
+          "pack lock validation",
+          "required pack content hash mismatch",
+          expected.id,
+          {},
+          {},
+          installed->manifest.version));
+    }
+  }
+  return PackValidationResult::success();
+}
+
+} // namespace arv::asset

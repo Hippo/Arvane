@@ -398,9 +398,11 @@ If no skin is applicable, use the default skin.
 Default skin:
 
 ```text
-arvane_home/assets/textures/default_skin/default.png
 arvane:texture/default_skin/default
 ```
+
+In the built-in pack this resolves to
+`arvane_home/packs/arvane_base/assets/arvane/textures/default_skin/default.png`.
 
 The default skin is used when:
 

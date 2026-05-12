@@ -576,7 +576,7 @@ void DesktopFrameLoop::render_debug_menu_if_available(
       assets_.item_animation_library,
       active_session->held_item_animation,
       std::chrono::duration<Seconds>(timing.now - app_start_time_).count(),
-      config_.paths.config_path() / "item_animations.json",
+      config_.paths.packs_path() / "arvane_base/data/arvane/item_animations.json",
       assets_.entity_registry,
       world_jobs_,
       renderer_,
