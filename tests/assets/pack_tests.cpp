@@ -88,6 +88,20 @@ TEST(PackManifestTests, LoadsValidManifestAndRejectsUnsafeNativePath) {
   ASSERT_TRUE(manifest) << manifest.error().describe();
   EXPECT_EQ(manifest.value().id, "arvane_base");
   EXPECT_EQ(manifest.value().namespaces.front(), "arvane");
+  EXPECT_FALSE(manifest.value().builtin.has_value());
+
+  write_pack_manifest(
+      packs,
+      "builtin_base",
+      "  - \"builtin_base\"\n",
+      "both",
+      "assets: true\n  data: true\n  native_plugin: false\n",
+      "builtin:\n"
+      "  module: \"arv_base\"\n");
+  auto builtin = arv::asset::load_pack_manifest(packs / "builtin_base");
+  ASSERT_TRUE(builtin) << builtin.error().describe();
+  ASSERT_TRUE(builtin.value().builtin.has_value());
+  EXPECT_EQ(builtin.value().builtin->module, "arv_base");
 
   write_pack_manifest(
       packs,
@@ -256,4 +270,3 @@ TEST(PackLockTests, ValidatesRequiredPacks) {
   required.front().content_hash += 1U;
   EXPECT_FALSE(manager.value().validate_required_packs(required));
 }
-

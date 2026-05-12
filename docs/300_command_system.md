@@ -1109,7 +1109,11 @@ The command system should provide the framework.
 
 Feature modules should own their command implementations.
 
-Avoid putting all command behavior into `arv_commands`.
+The built-in gameplay command implementations live in `arv_base`, the compiled
+module declared by the `arvane_base` pack. For example, `/tp` is registered by
+`arv_base` while the parser, dispatcher, and registry remain in `arv_command`.
+
+Avoid putting gameplay command behavior into `arv_command`.
 
 ---
 
@@ -1185,10 +1189,10 @@ Command parser tests should not require a renderer, network transport, or full w
 
 ## Implementation Notes
 
-Recommended module:
+Recommended framework module:
 
 ```text
-arv_commands
+arv_command
 ```
 
 Possible files:
@@ -1216,13 +1220,14 @@ Feature command implementations should live near the systems they control.
 Examples:
 
 ```text
+arv_base/base_commands.cpp
 arv_client/client_commands.cpp
 arv_server/server_commands.cpp
 arv_world/world_commands.cpp
 arv_entity/entity_commands.cpp
 ```
 
-`arv_commands` should not depend directly on high-level world, entity, item, or renderer internals.
+`arv_command` should not depend directly on high-level world, entity, item, or renderer internals.
 
 Use service interfaces or registration-time callbacks to keep dependencies controlled.
 

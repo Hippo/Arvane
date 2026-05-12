@@ -24,3 +24,6 @@ capabilities:
   assets: true
   data: true
   native_plugin: false
+
+builtin:
+  module: "arv_base"

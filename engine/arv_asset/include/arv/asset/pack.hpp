@@ -50,6 +50,10 @@ struct PackNativeManifest {
   HashMap<std::string, std::filesystem::path> libraries{};
 };
 
+struct PackBuiltinManifest {
+  std::string module{};
+};
+
 struct PackManifest {
   u32 schema_version{};
   std::string id{};
@@ -65,6 +69,7 @@ struct PackManifest {
   std::vector<std::string> load_after{};
   std::vector<std::string> load_before{};
   PackCapabilities capabilities{};
+  std::optional<PackBuiltinManifest> builtin{};
   std::optional<PackNativeManifest> native{};
 };
 

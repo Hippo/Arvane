@@ -161,14 +161,18 @@ higher priority for eligible asset overrides. Registry-affecting data is stricte
 duplicate definitions are rejected unless the overriding data explicitly declares
 override intent.
 
-World metadata records required packs and content hashes. Loading a locked world
-fails clearly when a required pack is missing or incompatible. Multiplayer
-protocol packets for full required-pack negotiation remain an integration point;
-the required-pack data model is present so the server/client handshake can adopt
-it without changing pack metadata.
+World metadata records required pack IDs. Loading a locked world fails clearly
+when a required pack is missing. Worlds do not lock against content hashes
+because saved content resolves through stable string IDs. Multiplayer protocol
+packets for full required-pack negotiation remain an integration point; that
+flow may use richer version/hash metadata without changing world saves.
 
 Native plugin declarations are manifest metadata only. Normal pack discovery and
 content loading never load native libraries.
+
+Built-in packs may also declare a compiled module in `builtin.module`. Built-in
+modules are linked into the executable and registered by engine startup code;
+they are not dynamic libraries and do not use the native plugin loader.
 
 ---
 
@@ -328,6 +332,9 @@ capabilities:
   assets: true
   data: true
   native_plugin: false
+
+builtin:
+  module: "arv_base"
 ```
 
 A plugin pack may also include native plugin metadata:
@@ -506,6 +513,22 @@ capabilities:
 ```
 
 The presence of this section does not mean the native plugin should be loaded automatically.
+
+### `builtin`
+
+Describes optional compiled behavior that is already linked into the executable.
+This is for built-in packs such as `arvane_base`, whose gameplay behavior is
+provided by an engine module rather than a dynamic library.
+
+Example:
+
+```yaml
+builtin:
+  module: "arv_base"
+```
+
+The presence of this section does not dynamically load code. It declares that
+the executable is expected to provide and register the named module.
 
 ---
 
@@ -950,16 +973,17 @@ Example:
 ```yaml
 packs:
   required:
-    - id: "arvane_base"
-      version: "0.1.0"
-    - id: "better_oceans"
-      version: "1.0.0"
+    - "arvane_base"
+    - "better_oceans"
 
 content_lock:
   enabled: true
 ```
 
-The world pack lock protects saves from being loaded with missing or incompatible content.
+The world pack lock protects saves from being loaded with missing content.
+It records pack IDs only. Pack versions and hashes are intentionally not part of
+world load validation because saved chunks, entities, and palettes resolve from
+stable string IDs.
 
 If a world references:
 
@@ -1337,7 +1361,7 @@ World generation packs are authoritative. In multiplayer, the server owns world 
 
 Clients may need matching biome, block, and dimension presentation data, but clients should not be authoritative over generated terrain.
 
-A world should record the worldgen-affecting packs that were active when it was created or last loaded.
+A world should record the IDs of worldgen-affecting packs that were active when it was created or last loaded.
 
 ---
 
@@ -1423,4 +1447,3 @@ Pack
 Assets may be overridden through pack order. Data definitions require stricter merge semantics. Native code requires explicit enablement.
 
 This gives Arvane one unified content pipeline for built-in content, user asset packs, server-required content, world generation packs, and future native plugin extensions while preserving save safety, multiplayer compatibility, and clear security boundaries.
-

@@ -27,13 +27,7 @@ namespace {
   std::vector<persistence::RequiredPackMetadata> result;
   result.reserve(packs.size());
   for (const asset::RequiredPack& pack : packs) {
-    result.push_back({
-        pack.id,
-        pack.version,
-        pack.content_hash,
-        asset::pack_side_to_string(pack.required_side),
-        pack.namespaces,
-        pack.native_client_code_required});
+    result.push_back({pack.id});
   }
   return result;
 }

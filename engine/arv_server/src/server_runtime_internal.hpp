@@ -18,7 +18,6 @@
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/server/chat_service.hpp"
-#include "arv/server/command_services.hpp"
 #include "arv/server/permission_config.hpp"
 #include "arv/server/player_movement_validation.hpp"
 #include "arv/server/player_profile.hpp"

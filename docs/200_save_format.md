@@ -212,11 +212,7 @@ World metadata records the required pack set used to interpret that world:
 {
   "packs": {
     "required": [
-      {
-        "id": "arvane_base",
-        "version": "0.1.0",
-        "content_hash": "..."
-      }
+      "arvane_base"
     ]
   },
   "content_lock": {
@@ -226,8 +222,8 @@ World metadata records the required pack set used to interpret that world:
 ```
 
 When `content_lock.enabled` is true, loading refuses worlds whose required
-packs are missing or incompatible. This prevents silently rebuilding registries
-against the wrong content.
+pack IDs are missing. Worlds do not lock against pack hashes because region and
+entity data are reconstructed from stable string IDs such as `arvane:stone`.
 
 ---
 

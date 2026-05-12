@@ -1,5 +1,6 @@
 #include "server_runtime_internal.hpp"
 
+#include "arv/base/command_services.hpp"
 #include "arv/crypto/random.hpp"
 #include "arv/lang/language.hpp"
 #include "arv/core/log.hpp"
@@ -29,6 +30,86 @@ namespace {
     std::string_view fallback) {
   return language == nullptr ? lang::LanguageCatalog{}.format(key, args, fallback)
                              : language->format(key, args, fallback);
+}
+
+[[nodiscard]] base::OnlinePlayerCommandTarget base_command_target(
+    const ServerSession& session,
+    const player::PlayerState& player_state) {
+  return {
+      session.session_id,
+      session.player_id,
+      session.world_id,
+      session.display_name,
+      player_state.position,
+  };
+}
+
+[[nodiscard]] std::optional<base::OnlinePlayerCommandTarget> online_player_by_id(
+    const SessionRegistry& sessions,
+    const world::WorldRuntime& world,
+    PlayerID player_id) {
+  for (const SessionID session_id : sessions.session_ids()) {
+    const ServerSession* session = sessions.find(session_id);
+    if (session == nullptr || session->player_id != player_id) {
+      continue;
+    }
+
+    const player::PlayerState* player_state = world.find_player(session->player_id);
+    if (player_state == nullptr) {
+      continue;
+    }
+
+    return base_command_target(*session, *player_state);
+  }
+
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<base::OnlinePlayerCommandTarget> online_player_by_name(
+    const SessionRegistry& sessions,
+    const world::WorldRuntime& world,
+    std::string_view display_name) {
+  std::optional<base::OnlinePlayerCommandTarget> match;
+  for (const SessionID session_id : sessions.session_ids()) {
+    const ServerSession* session = sessions.find(session_id);
+    if (session == nullptr || session->display_name != display_name) {
+      continue;
+    }
+
+    const player::PlayerState* player_state = world.find_player(session->player_id);
+    if (player_state == nullptr) {
+      continue;
+    }
+
+    if (match.has_value()) {
+      return std::nullopt;
+    }
+
+    match = base_command_target(*session, *player_state);
+  }
+
+  return match;
+}
+
+[[nodiscard]] bool teleport_player(
+    world::WorldRuntime& world,
+    PlayerID player_id,
+    Vec3f position) {
+  player::PlayerState* player_state = world.find_player(player_id);
+  if (player_state == nullptr) {
+    return false;
+  }
+
+  player_state->position = position;
+  player_state->velocity = {};
+  player_state->grounded = false;
+
+  if (const std::optional<EntityID> entity_id = world.entity_for_player(player_id);
+      entity_id.has_value()) {
+    (void)world.set_entity_position(entity_id.value(), position);
+  }
+
+  return true;
 }
 
 } // namespace
@@ -513,7 +594,20 @@ usize ServerRuntimeImpl::pending_fluid_job_count() const noexcept {
 command::CommandResult ServerRuntimeImpl::execute_command(
     command::CommandSender sender,
     std::string_view command_text) {
-  ServerCommandServices domain_services{&sessions_, &default_world_};
+  auto find_player_by_id = [this](PlayerID player_id) {
+    return online_player_by_id(sessions_, default_world_, player_id);
+  };
+  auto find_player_by_name = [this](std::string_view display_name) {
+    return online_player_by_name(sessions_, default_world_, display_name);
+  };
+  auto move_player = [this](PlayerID player_id, Vec3f position) {
+    return teleport_player(default_world_, player_id, position);
+  };
+  base::ServerCommandServices domain_services{
+      base::OnlinePlayerByIDFn{find_player_by_id},
+      base::OnlinePlayerByNameFn{find_player_by_name},
+      base::TeleportPlayerFn{move_player},
+  };
   auto permission_check =
       [this](const command::CommandSender& checked_sender, const command::Command& checked_command) {
         return check_command_permission(checked_sender, checked_command);

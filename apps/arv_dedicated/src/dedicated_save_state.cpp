@@ -303,16 +303,13 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
           required_packs.begin(),
           required_packs.end(),
           [&](const persistence::RequiredPackMetadata& actual) {
-            return actual.id == expected.id &&
-                   actual.version == expected.version &&
-                   (expected.content_hash == 0U || actual.content_hash == expected.content_hash);
+            return actual.id == expected.id;
           });
       if (found == required_packs.end()) {
         return Expected<DedicatedLoadedWorld, DedicatedError>::failure(
             dedicated_error(
                 "packs",
-                "world requires missing or incompatible pack '" + expected.id +
-                    "' version '" + expected.version + "'"));
+                "world requires pack '" + expected.id + "', but it is not active"));
       }
     }
   }

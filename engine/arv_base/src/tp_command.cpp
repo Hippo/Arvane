@@ -1,14 +1,14 @@
-#include "arv/commands/tp_command.hpp"
+#include "tp_command.hpp"
 
+#include "arv/base/command_services.hpp"
 #include "arv/command/command.hpp"
 #include "arv/lang/language.hpp"
-#include "arv/server/command_services.hpp"
 
 #include <cassert>
 #include <sstream>
 #include <string>
 
-namespace arv::server::commands {
+namespace arv::base::commands {
 namespace {
 
 constexpr std::string_view TeleportPermission = "arvane.command.teleport";
@@ -93,7 +93,10 @@ named_target(
 
 [[nodiscard]] command::CommandResult execute_tp(command::CommandCtx& ctx) {
   const ServerCommandServices* services = ctx.services.as<ServerCommandServices>();
-  if (services == nullptr) {
+  if (services == nullptr ||
+      !services->online_player_by_id ||
+      !services->online_player_by_name ||
+      !services->teleport_player) {
     return command::CommandResult::internal_error(tr(
         ctx,
         "command.tp.services_unavailable",
@@ -144,7 +147,7 @@ named_target(
   return command::CommandResult::success(tr(
       ctx,
       "command.tp.success",
-      {{"name", std::string{target.value().display_name}},
+      {{"name", target.value().display_name},
        {"position", format_position(destination.value())}},
       "Teleported {name} to {position}."));
 }
@@ -168,4 +171,4 @@ void register_tp_command(command::CommandRegistry& registry) {
   (void)alias_result;
 }
 
-} // namespace arv::server::commands
+} // namespace arv::base::commands

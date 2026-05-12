@@ -521,6 +521,17 @@ constexpr u64 FnvPrime = 1099511628211ULL;
         {},
         manifest.version);
   }
+  if (manifest.builtin.has_value()) {
+    if (!is_valid_pack_id(manifest.builtin->module)) {
+      return pack_error(
+          "manifest validation",
+          "invalid builtin module: " + manifest.builtin->module,
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+  }
   return {};
 }
 
@@ -1039,6 +1050,19 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
       return PackManifestResult::failure(error);
     }
     manifest.capabilities = {assets.value(), data.value(), native_plugin.value()};
+
+    if (const YAML::Node builtin = root["builtin"]; builtin) {
+      if (!builtin.IsMap()) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "builtin must be a map", manifest.id, manifest_path));
+      }
+      const YAML::Node module = builtin["module"];
+      if (!module || !module.IsScalar()) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "builtin.module is required", manifest.id, manifest_path));
+      }
+      manifest.builtin = PackBuiltinManifest{module.as<std::string>()};
+    }
 
     if (const YAML::Node native = root["native"]; native) {
       if (!native.IsMap()) {

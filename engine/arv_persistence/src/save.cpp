@@ -167,14 +167,7 @@ using json = nlohmann::json;
     std::span<const RequiredPackMetadata> packs) {
   json required = json::array();
   for (const RequiredPackMetadata& pack : packs) {
-    required.push_back({
-        {"id", pack.id},
-        {"version", pack.version},
-        {"content_hash", pack.content_hash},
-        {"side", pack.side},
-        {"namespaces", pack.namespaces},
-        {"native_client_code_required", pack.native_client_code_required},
-    });
+    required.push_back(pack.id);
   }
   return json{{"required", std::move(required)}};
 }
@@ -190,24 +183,15 @@ using json = nlohmann::json;
   }
   packs.reserve(required->size());
   for (const json& entry : *required) {
-    if (!entry.is_object()) {
+    RequiredPackMetadata pack;
+    if (entry.is_string()) {
+      pack.id = entry.get<std::string>();
+    } else if (entry.is_object()) {
+      // Older saves may include version/hash metadata. Worlds only need the pack ID.
+      pack.id = entry.value("id", std::string{});
+    } else {
       continue;
     }
-    RequiredPackMetadata pack;
-    pack.id = entry.value("id", std::string{});
-    pack.version = entry.value("version", std::string{});
-    pack.content_hash = entry.value("content_hash", u64{});
-    pack.side = entry.value("side", std::string{"both"});
-    if (const auto namespaces = entry.find("namespaces");
-        namespaces != entry.end() && namespaces->is_array()) {
-      for (const json& name_space : *namespaces) {
-        if (name_space.is_string()) {
-          pack.namespaces.push_back(name_space.get<std::string>());
-        }
-      }
-    }
-    pack.native_client_code_required =
-        entry.value("native_client_code_required", false);
     if (!pack.id.empty()) {
       packs.push_back(std::move(pack));
     }

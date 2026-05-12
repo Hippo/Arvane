@@ -1,7 +1,5 @@
 set(ARV_SERVER_HEADERS
-  include/arv/commands/tp_command.hpp
   include/arv/server/chat_service.hpp
-  include/arv/server/command_services.hpp
   include/arv/server/chunk_streamer.hpp
   include/arv/server/dedicated_lifetime.hpp
   include/arv/server/permission_config.hpp
@@ -16,7 +14,6 @@ set(ARV_SERVER_HEADERS
 )
 
 add_library(arv_server STATIC
-  commands/tp_command.cpp
   src/chat_service.cpp
   src/chunk_streamer.cpp
   src/permission_config.cpp
@@ -41,5 +38,6 @@ add_library(arv_server STATIC
 )
 target_include_directories(arv_server PUBLIC include)
 target_link_libraries(arv_server PUBLIC arv_command arv_core arv_crypto arv_io arv_net arv_physics arv_protocol arv_sched arv_world)
+target_link_libraries(arv_server PRIVATE arv_base)
 target_link_libraries(arv_server PRIVATE arv_asset arv_lang)
 target_link_libraries(arv_server PRIVATE nlohmann_json::nlohmann_json yaml-cpp)

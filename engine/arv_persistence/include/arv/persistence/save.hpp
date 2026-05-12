@@ -32,11 +32,6 @@ struct SaveMetadata {
 
 struct RequiredPackMetadata {
   std::string id{};
-  std::string version{};
-  u64 content_hash{};
-  std::string side{"both"};
-  std::vector<std::string> namespaces{};
-  bool native_client_code_required{};
 };
 
 struct WorldMetadata {

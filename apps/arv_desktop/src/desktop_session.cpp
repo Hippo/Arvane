@@ -30,13 +30,7 @@ namespace {
   std::vector<persistence::RequiredPackMetadata> result;
   result.reserve(packs.size());
   for (const asset::RequiredPack& pack : packs) {
-    result.push_back({
-        pack.id,
-        pack.version,
-        pack.content_hash,
-        asset::pack_side_to_string(pack.required_side),
-        pack.namespaces,
-        pack.native_client_code_required});
+    result.push_back({pack.id});
   }
   return result;
 }
@@ -171,18 +165,14 @@ bool DesktopSessionManager::start_singleplayer(
           dependencies_.required_packs.begin(),
           dependencies_.required_packs.end(),
           [&](const asset::RequiredPack& actual) {
-            return actual.id == expected.id &&
-                   actual.version == expected.version &&
-                   (expected.content_hash == 0U || actual.content_hash == expected.content_hash);
+            return actual.id == expected.id;
           });
       if (found == dependencies_.required_packs.end()) {
         core::error(
             "packs",
-            "world '{}' requires pack '{}' version '{}' with hash {}, but it is not active",
+            "world '{}' requires pack '{}', but it is not active",
             world_name,
-            expected.id,
-            expected.version,
-            expected.content_hash);
+            expected.id);
         return false;
       }
     }

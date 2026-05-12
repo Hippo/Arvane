@@ -111,7 +111,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       arv::persistence::hash_block_registry(block_registry),
       arv::persistence::hash_item_registry(item_registry),
       "Test Save"};
-  const arv::persistence::WorldMetadata world_metadata{
+  arv::persistence::WorldMetadata world_metadata{
       "default",
       42,
       99,
@@ -120,6 +120,9 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       3,
       save_metadata.block_registry_hash,
       save_metadata.item_registry_hash};
+  world_metadata.required_packs = {
+      arv::persistence::RequiredPackMetadata{"arvane_base"},
+      arv::persistence::RequiredPackMetadata{"test_pack"}};
   const std::vector<arv::persistence::SavedChunkSection> chunks{
       make_saved_chunk({{0, 0, 0}}, stone)};
   const std::vector<arv::persistence::PlayerSaveData> players{player};
@@ -164,6 +167,16 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       server_save_root / "worlds" / "default" / "entities" / "r.0.0.json"));
   EXPECT_TRUE(std::filesystem::exists(
       server_save_root / "worlds" / "default" / "entities" / "r.-1.-1.json"));
+  {
+    std::ifstream input(server_save_root / "worlds" / "default" / "world.json");
+    ASSERT_TRUE(input);
+    const std::string world_json{
+        std::istreambuf_iterator<char>{input},
+        std::istreambuf_iterator<char>{}};
+    EXPECT_NE(world_json.find("\"arvane_base\""), std::string::npos);
+    EXPECT_NE(world_json.find("\"test_pack\""), std::string::npos);
+    EXPECT_EQ(world_json.find("content_hash"), std::string::npos);
+  }
 
   auto loaded = arv::persistence::load_server_root(
       server_save_root,
@@ -179,6 +192,9 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(loaded.value().world.tick_index, 99U);
   EXPECT_EQ(loaded.value().world.min_chunk_y, 0);
   EXPECT_EQ(loaded.value().world.max_chunk_y, 4);
+  ASSERT_EQ(loaded.value().world.required_packs.size(), 2U);
+  EXPECT_EQ(loaded.value().world.required_packs[0].id, "arvane_base");
+  EXPECT_EQ(loaded.value().world.required_packs[1].id, "test_pack");
   ASSERT_EQ(loaded.value().chunks.size(), 1U);
   EXPECT_EQ(loaded.value().chunks[0].coord, (arv::ChunkSectionCoord{{0, 0, 0}}));
   EXPECT_EQ(loaded.value().chunks[0].blocks[0], stone);
@@ -231,6 +247,53 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(dropped_item->dropped_item_stack->item, stone_item);
   EXPECT_EQ(dropped_item->dropped_item_stack->count, 4U);
   EXPECT_FLOAT_EQ(dropped_item->dropped_item_pickup_delay_seconds, 0.25F);
+
+  {
+    const std::filesystem::path world_path =
+        server_save_root / "worlds" / "default" / "world.json";
+    std::ifstream input(world_path);
+    ASSERT_TRUE(input);
+    std::string world_json{
+        std::istreambuf_iterator<char>{input},
+        std::istreambuf_iterator<char>{}};
+    const std::string current_required = R"json(    "required": [
+      "arvane_base",
+      "test_pack"
+    ])json";
+    const std::string legacy_required = R"json(    "required": [
+      {
+        "content_hash": 123456789,
+        "id": "arvane_base",
+        "namespaces": [
+          "arvane"
+        ],
+        "native_client_code_required": false,
+        "side": "both",
+        "version": "0.0.0"
+      },
+      {
+        "content_hash": 987654321,
+        "id": "test_pack",
+        "version": "0.0.0"
+      }
+    ])json";
+    const std::size_t required_offset = world_json.find(current_required);
+    ASSERT_NE(required_offset, std::string::npos);
+    world_json.replace(required_offset, current_required.size(), legacy_required);
+
+    std::ofstream output(world_path, std::ios::trunc);
+    ASSERT_TRUE(output);
+    output << world_json;
+  }
+
+  auto legacy_loaded = arv::persistence::load_server_root(
+      server_save_root,
+      block_registry,
+      item_registry);
+  ASSERT_TRUE(legacy_loaded);
+  ASSERT_EQ(legacy_loaded.value().world.required_packs.size(), 2U);
+  EXPECT_EQ(legacy_loaded.value().world.required_packs[0].id, "arvane_base");
+  EXPECT_EQ(legacy_loaded.value().world.required_packs[1].id, "test_pack");
 }
 
 TEST(SaveTests, WorldHeightLoadsFromGenerationBoundsWhenChunkBoundsAreStale) {
