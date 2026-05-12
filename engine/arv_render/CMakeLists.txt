@@ -5,6 +5,7 @@ set(ARV_RENDER_HEADERS
   include/arv/render/opengl_renderer.hpp
   include/arv/render/paged_texture_atlas.hpp
   include/arv/render/render_commands.hpp
+  include/arv/render/render_culling.hpp
   include/arv/render/render_types.hpp
 )
 

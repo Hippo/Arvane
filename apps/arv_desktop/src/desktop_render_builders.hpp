@@ -13,7 +13,8 @@ namespace arv::desktop {
 
 [[nodiscard]] usize populate_chunk_draw_lists(
     render::FramePacket& frame,
-    ChunkViewState& chunk_view);
+    ChunkViewState& chunk_view,
+    const io::ChunkDistanceConfig& distances);
 
 void populate_world_frame_draw_items(
     render::FramePacket& frame,

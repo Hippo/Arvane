@@ -488,6 +488,8 @@ struct ChunkDrawItem {
   ChunkMeshKey key{};
   u64 expected_version{};
   u64 expected_light_version{};
+  bool has_opaque_mesh{};
+  bool has_transparent_mesh{};
 };
 
 struct EntityBoneRotationOverride {

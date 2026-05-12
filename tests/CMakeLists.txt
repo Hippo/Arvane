@@ -19,8 +19,11 @@ add_executable(arv_tests
   core/math_tests.cpp
   core/rate_limiter_tests.cpp
   core/types_tests.cpp
+  desktop/chunk_view_tests.cpp
   desktop/debug_imgui_tests.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/chunk_view.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/debug_imgui.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/desktop_render_builders.cpp
   io/config_tests.cpp
   lang/language_tests.cpp
   net/in_process_transport_tests.cpp
@@ -39,6 +42,7 @@ add_executable(arv_tests
   render/mesh_handoff_tests.cpp
   render/paged_texture_atlas_tests.cpp
   render/render_commands_tests.cpp
+  render/render_culling_tests.cpp
   render/chunk_meshing_tests.cpp
   sched/job_system_tests.cpp
   server/chunk_streamer_tests.cpp

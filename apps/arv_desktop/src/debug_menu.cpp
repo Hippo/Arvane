@@ -1501,6 +1501,10 @@ void render_chunk_workload(
     row("Loaded chunks", workload.loaded_chunks, "world lifecycle");
     row("Active / simulated chunks", workload.active_chunks, "world lifecycle");
     row("Visible / renderable chunks", frame_info.visible_chunk_count, "client chunk view");
+    row("Opaque chunk pass items", chunk_view.opaque_chunks_last_frame, "client culling");
+    row("Transparent chunk pass items", chunk_view.transparent_chunks_last_frame, "client culling");
+    row("Distance-culled chunks", chunk_view.distance_culled_chunks_last_frame, "client culling");
+    row("Frustum-culled chunks", chunk_view.frustum_culled_chunks_last_frame, "client culling");
     row(
         "Chunks awaiting generation",
         workload.chunks_awaiting_generation + server.pending_generation_job_count(),

@@ -43,6 +43,7 @@ struct ChunkViewState {
   HashSet<ChunkSectionCoord> mesh_candidate_set;
   u64 observed_mesh_revision{};
   bool mesh_rescan_requested{true};
+  bool mesh_candidates_sort_dirty{true};
   bool draw_items_dirty{true};
   std::vector<render::ChunkDrawItem> cached_draw_items;
 
@@ -50,6 +51,11 @@ struct ChunkViewState {
   u64 frames{};
   u32 mesh_completed_last_frame{};
   double mesh_ms_last_frame{};
+  usize visible_chunks_last_frame{};
+  usize opaque_chunks_last_frame{};
+  usize transparent_chunks_last_frame{};
+  usize distance_culled_chunks_last_frame{};
+  usize frustum_culled_chunks_last_frame{};
 };
 
 [[nodiscard]] ChunkSectionCoord world_position_chunk_section_coord(Vec3f position);

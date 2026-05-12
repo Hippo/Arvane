@@ -1,5 +1,7 @@
 #include "desktop_render_builders.hpp"
 
+#include "arv/render/render_culling.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <optional>
@@ -157,13 +159,69 @@ void append_item_draw(
   return uniforms;
 }
 
+[[nodiscard]] i32 abs_i32(i32 value) noexcept {
+  return value < 0 ? -value : value;
+}
+
+[[nodiscard]] bool chunk_inside_render_window(
+    const ChunkViewState& chunk_view,
+    const io::ChunkDistanceConfig& distances,
+    ChunkSectionCoord coord) noexcept {
+  if (!chunk_view.target_center.has_value()) {
+    return false;
+  }
+  const ChunkSectionCoord center = chunk_view.target_center.value();
+  return coord.value.y >= chunk_view.target_min_chunk_y &&
+         coord.value.y <= chunk_view.target_max_chunk_y &&
+         abs_i32(coord.value.x - center.value.x) <= distances.render_distance &&
+         abs_i32(coord.value.z - center.value.z) <= distances.render_distance;
+}
+
 } // namespace
 
-usize populate_chunk_draw_lists(render::FramePacket& frame, ChunkViewState& chunk_view) {
-  const std::vector<render::ChunkDrawItem>& visible_chunks = chunk_draw_items(chunk_view);
-  frame.opaque_chunks = visible_chunks;
-  frame.transparent_chunks = visible_chunks;
-  return visible_chunks.size();
+usize populate_chunk_draw_lists(
+    render::FramePacket& frame,
+    ChunkViewState& chunk_view,
+    const io::ChunkDistanceConfig& distances) {
+  const std::vector<render::ChunkDrawItem>& resident_chunks =
+      chunk_draw_items(chunk_view);
+  frame.opaque_chunks.clear();
+  frame.transparent_chunks.clear();
+  frame.opaque_chunks.reserve(resident_chunks.size());
+  frame.transparent_chunks.reserve(resident_chunks.size());
+
+  usize visible_chunks = 0;
+  usize distance_culled = 0;
+  usize frustum_culled = 0;
+  for (const render::ChunkDrawItem& item : resident_chunks) {
+    if (item.key.world_id != frame.world_view.world_id ||
+        (!item.has_opaque_mesh && !item.has_transparent_mesh)) {
+      continue;
+    }
+    if (!chunk_inside_render_window(chunk_view, distances, item.key.coord)) {
+      ++distance_culled;
+      continue;
+    }
+    if (!render::chunk_aabb_intersects_view(frame.world_view, item.key.coord)) {
+      ++frustum_culled;
+      continue;
+    }
+
+    if (item.has_opaque_mesh) {
+      frame.opaque_chunks.emplace_back(item);
+    }
+    if (item.has_transparent_mesh) {
+      frame.transparent_chunks.emplace_back(item);
+    }
+    ++visible_chunks;
+  }
+
+  chunk_view.visible_chunks_last_frame = visible_chunks;
+  chunk_view.opaque_chunks_last_frame = frame.opaque_chunks.size();
+  chunk_view.transparent_chunks_last_frame = frame.transparent_chunks.size();
+  chunk_view.distance_culled_chunks_last_frame = distance_culled;
+  chunk_view.frustum_culled_chunks_last_frame = frustum_culled;
+  return visible_chunks;
 }
 
 void populate_world_frame_draw_items(

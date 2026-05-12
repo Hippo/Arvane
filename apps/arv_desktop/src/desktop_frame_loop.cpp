@@ -528,7 +528,7 @@ usize DesktopFrameLoop::build_world_frame(
       framebuffer_.width,
       framebuffer_.height);
   const usize visible_chunk_count =
-      populate_chunk_draw_lists(frame, active_session->chunk_view);
+      populate_chunk_draw_lists(frame, active_session->chunk_view, config_.chunks);
   populate_world_frame_draw_items(
       frame,
       *active_session,

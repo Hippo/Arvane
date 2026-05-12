@@ -11,8 +11,8 @@ window:
 chunks:
   load_distance: 12
   simulation_distance: 2
-  render_distance: 5
-  stream_distance: 8
+  render_distance: 12
+  stream_distance: 12
 physics:
   mouse_sensitivity_radians: 0.0025
 multiplayer:

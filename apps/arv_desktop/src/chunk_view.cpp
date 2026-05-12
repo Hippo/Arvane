@@ -81,7 +81,11 @@ namespace {
 }
 
 void sort_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
+  if (!view.mesh_candidates_sort_dirty) {
+    return;
+  }
   if (!view.target_center.has_value() || view.mesh_candidates.size() < 2U) {
+    view.mesh_candidates_sort_dirty = false;
     return;
   }
 
@@ -113,10 +117,15 @@ void sort_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
         }
         return lhs.value.y < rhs.value.y;
       });
+  view.mesh_candidates_sort_dirty = false;
 }
 
 void set_draw_items_dirty(ChunkViewState& view) noexcept {
   view.draw_items_dirty = true;
+}
+
+void set_mesh_candidates_sort_dirty(ChunkViewState& view) noexcept {
+  view.mesh_candidates_sort_dirty = true;
 }
 
 void enqueue_mesh_candidate(ChunkViewState& view, ChunkSectionCoord coord) {
@@ -125,23 +134,39 @@ void enqueue_mesh_candidate(ChunkViewState& view, ChunkSectionCoord coord) {
   }
   if (view.mesh_candidate_set.insert(coord).second) {
     view.mesh_candidates.emplace_back(coord);
-  }
-}
-
-void remove_draw_items_outside_view(ChunkViewState& view) {
-  for (auto iter = view.draw_items.begin(); iter != view.draw_items.end();) {
-    if (!is_inside_render_view(view, iter->first)) {
-      iter = view.draw_items.erase(iter);
-      set_draw_items_dirty(view);
-    } else {
-      ++iter;
-    }
+    set_mesh_candidates_sort_dirty(view);
   }
 }
 
 void clear_mesh_candidates(ChunkViewState& view) {
   view.mesh_candidates.clear();
   view.mesh_candidate_set.clear();
+  view.mesh_candidates_sort_dirty = false;
+}
+
+void remove_mesh_candidates_outside_view(ChunkViewState& view) {
+  bool removed_any = false;
+  for (auto iter = view.mesh_candidates.begin(); iter != view.mesh_candidates.end();) {
+    if (!is_inside_render_view(view, *iter)) {
+      view.mesh_candidate_set.erase(*iter);
+      iter = view.mesh_candidates.erase(iter);
+      removed_any = true;
+    } else {
+      ++iter;
+    }
+  }
+  if (removed_any) {
+    set_mesh_candidates_sort_dirty(view);
+  }
+}
+
+void enqueue_loaded_mesh_candidate(
+    const world::WorldSearch& search,
+    ChunkViewState& view,
+    ChunkSectionCoord coord) {
+  if (search.find_chunk(coord) != nullptr) {
+    enqueue_mesh_candidate(view, coord);
+  }
 }
 
 void rebuild_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
@@ -153,10 +178,30 @@ void rebuild_mesh_candidates(world::WorldRuntime& world, ChunkViewState& view) {
   for (i32 z = center.value.z - render_distance; z <= center.value.z + render_distance; ++z) {
     for (i32 x = center.value.x - render_distance; x <= center.value.x + render_distance; ++x) {
       for (i32 y = view.target_min_chunk_y; y <= view.target_max_chunk_y; ++y) {
-        const ChunkSectionCoord coord{{x, y, z}};
-        if (search.find_chunk(coord) != nullptr) {
-          enqueue_mesh_candidate(view, coord);
-        }
+        enqueue_loaded_mesh_candidate(search, view, {{x, y, z}});
+      }
+    }
+  }
+}
+
+void enqueue_entered_mesh_candidates(
+    world::WorldRuntime& world,
+    ChunkViewState& view,
+    ChunkSectionCoord previous_center) {
+  const ChunkSectionCoord center = view.target_center.value();
+  const i32 render_distance = view.target_render_distance;
+  const world::WorldSearch search{world};
+  for (i32 z = center.value.z - render_distance; z <= center.value.z + render_distance; ++z) {
+    for (i32 x = center.value.x - render_distance; x <= center.value.x + render_distance; ++x) {
+      const ChunkSectionCoord horizontal_coord{{x, center.value.y, z}};
+      if (is_inside_horizontal_distance(
+              horizontal_coord,
+              previous_center,
+              render_distance)) {
+        continue;
+      }
+      for (i32 y = view.target_min_chunk_y; y <= view.target_max_chunk_y; ++y) {
+        enqueue_loaded_mesh_candidate(search, view, {{x, y, z}});
       }
     }
   }
@@ -177,16 +222,26 @@ void retarget_chunk_view(
     ChunkSectionCoord center,
     i32 min_chunk_y,
     i32 max_chunk_y) {
+  const std::optional<ChunkSectionCoord> previous_center = view.target_center;
+  const bool same_shape =
+      previous_center.has_value() &&
+      view.target_min_chunk_y == min_chunk_y &&
+      view.target_max_chunk_y == max_chunk_y &&
+      view.target_render_distance == distances.render_distance;
+
   view.target_center = center;
   view.target_min_chunk_y = min_chunk_y;
   view.target_max_chunk_y = max_chunk_y;
   view.target_render_distance = distances.render_distance;
+  set_mesh_candidates_sort_dirty(view);
 
-  remove_draw_items_outside_view(view);
-  rebuild_mesh_candidates(world, view);
-  (void)world.consume_dirty_mesh_chunks(
-      voxel::ChunkDirtyFlags::Geometry | voxel::ChunkDirtyFlags::LightMesh);
-  view.mesh_rescan_requested = false;
+  if (same_shape) {
+    remove_mesh_candidates_outside_view(view);
+    enqueue_entered_mesh_candidates(world, view, previous_center.value());
+  } else {
+    rebuild_mesh_candidates(world, view);
+  }
+  enqueue_dirty_mesh_chunks_in_view(world, view);
 }
 
 void drain_mesh_jobs(
@@ -216,6 +271,8 @@ void drain_mesh_jobs(
       draw_item.key = {timed.mesh.world_id, timed.mesh.coord};
       draw_item.expected_version = timed.mesh.source_version;
       draw_item.expected_light_version = timed.mesh.source_light_version;
+      draw_item.has_opaque_mesh = !timed.mesh.opaque.indices.empty();
+      draw_item.has_transparent_mesh = !timed.mesh.transparent.indices.empty();
       render::ChunkMeshUpload upload;
       upload.mesh = std::move(timed.mesh);
       renderer.enqueue_chunk_mesh_upload(std::move(upload));
@@ -443,6 +500,7 @@ void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord) {
   for (auto iter = view.mesh_candidates.begin(); iter != view.mesh_candidates.end();) {
     if (*iter == coord) {
       iter = view.mesh_candidates.erase(iter);
+      set_mesh_candidates_sort_dirty(view);
     } else {
       ++iter;
     }

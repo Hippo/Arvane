@@ -1426,6 +1426,10 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
   ARV_PROFILE_ZONE("Chunk draw list");
   glUniform1f(chunk_alpha_uniform_, transparent ? 0.55F : 1.0F);
   for (const ChunkDrawItem& item : draw_items) {
+    if (transparent ? !item.has_transparent_mesh : !item.has_opaque_mesh) {
+      continue;
+    }
+
     const auto found = chunks_.find(item.key);
     if (!should_draw_chunk_mesh(found == chunks_.end() ? nullptr : &found->second.state, item)) {
       continue;
