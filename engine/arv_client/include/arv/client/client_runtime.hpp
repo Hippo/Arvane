@@ -77,6 +77,7 @@ struct ClientAttackFeedback {
 struct ClientNetworkSettings {
   u32 server_keep_alive_timeout_seconds{30U};
   u32 connection_timeout_seconds{10U};
+  bool server_keep_alive_timeout_enabled{true};
 };
 
 struct ClientChatSettings {

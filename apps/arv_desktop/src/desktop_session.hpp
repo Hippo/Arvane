@@ -86,7 +86,6 @@ struct DesktopSessionDependencies {
   const asset::TextureAtlas& item_atlas;
   const player::PlayerTuning& player_tuning;
   const voxel::FluidDefinition& water_fluid;
-  const server::ServerChunkStreamingConfig& chunk_streaming;
   const world::WorldTickPolicy& world_tick_policy;
   const world::WorldGenerationConfig& default_generation_config;
   const sched::RuntimeThreadBudgetPlan& thread_budget;

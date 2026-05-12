@@ -24,3 +24,13 @@ TEST(FixedTimestepTests, ConsumesMultipleTicksAndLeavesRemainder) {
   EXPECT_FALSE(accumulator.consume_tick());
   EXPECT_NEAR(accumulator.interpolation_alpha(), 0.25F, 0.0001F);
 }
+
+TEST(FixedTimestepTests, ClearDropsAccumulatedTime) {
+  arv::core::FixedTimestepAccumulator accumulator(60);
+  accumulator.add_time(accumulator.tick_duration() * 4.0F);
+
+  accumulator.clear();
+
+  EXPECT_FLOAT_EQ(accumulator.accumulated_seconds(), 0.0F);
+  EXPECT_FALSE(accumulator.consume_tick());
+}

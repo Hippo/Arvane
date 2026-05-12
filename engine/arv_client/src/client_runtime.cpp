@@ -140,7 +140,8 @@ void ClientRuntime::configure_language(const lang::LanguageCatalog* language) no
 void ClientRuntime::configure_networking(ClientNetworkSettings settings) noexcept {
   impl_->connection.configure_timeouts(
       settings.server_keep_alive_timeout_seconds,
-      settings.connection_timeout_seconds);
+      settings.connection_timeout_seconds,
+      settings.server_keep_alive_timeout_enabled);
 }
 
 void ClientRuntime::configure_chat(ClientChatSettings settings) {

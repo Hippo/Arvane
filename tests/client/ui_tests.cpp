@@ -1127,7 +1127,9 @@ TEST(MenuScreenTests, RenderSettingsEmitClampedCommandsAndFitNarrowViewport) {
   data.render.frame_sync = arv::ui::SettingsFrameSyncMode::FpsCap;
   data.render.fps_cap = 238U;
   data.render.load_distance = 4;
+  data.render.simulation_distance = 1;
   data.render.view_distance = 2;
+  data.render.stream_distance = 2;
   data.render.mesh_upload_budget = 32U;
 
   arv::ui::UIScreenManager screens;
@@ -1140,7 +1142,7 @@ TEST(MenuScreenTests, RenderSettingsEmitClampedCommandsAndFitNarrowViewport) {
   for (std::string_view id : {
            "render.frame_sync.fps_cap",
            "render.fps_cap.slider",
-           "render.view_distance.slider",
+           "render.load_distance.slider",
        }) {
     const auto* element = tree.find_by_stable_id(id);
     ASSERT_NE(element, nullptr) << id;
@@ -1148,6 +1150,9 @@ TEST(MenuScreenTests, RenderSettingsEmitClampedCommandsAndFitNarrowViewport) {
     EXPECT_LE(element->rect.x + element->rect.width, 480.0F) << id;
     expect_button_hittable(tree, id);
   }
+  EXPECT_NE(tree.find_by_stable_id("render.simulation_distance.slider"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.view_distance.slider"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.stream_distance.slider"), nullptr);
   EXPECT_EQ(tree.find_by_stable_id("render.fps_cap.dec"), nullptr);
   EXPECT_EQ(tree.find_by_stable_id("render.fps_cap.inc"), nullptr);
   const auto* frame_row = tree.find_by_stable_id("render.frame_sync");
@@ -1182,6 +1187,28 @@ TEST(MenuScreenTests, RenderSettingsEmitClampedCommandsAndFitNarrowViewport) {
   EXPECT_EQ(
       std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0]).settings.view_distance,
       4);
+  EXPECT_EQ(
+      std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0]).settings.stream_distance,
+      4);
+
+  sink.commands.clear();
+  const auto* load_slider = tree.find_by_stable_id("render.load_distance.slider");
+  ASSERT_NE(load_slider, nullptr);
+  EXPECT_TRUE(screens.route_action(
+      {"render.load_distance.slider", "render.load_distance.slider", "click"},
+      ctx));
+  EXPECT_TRUE(screens.handle_pointer(
+      {load_slider->rect.x + load_slider->rect.width + 24.0F, load_slider->rect.y + 15.0F},
+      {},
+      false,
+      false,
+      true,
+      ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetRenderSettingsCommand>(sink.commands[0]));
+  EXPECT_EQ(
+      std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0]).settings.load_distance,
+      32);
 
   sink.commands.clear();
   const auto* fps_slider = tree.find_by_stable_id("render.fps_cap.slider");

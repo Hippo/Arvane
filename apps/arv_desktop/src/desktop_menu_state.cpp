@@ -256,7 +256,9 @@ ui::RenderSettingsView DesktopMenuState::render_settings() const {
   }
   view.fps_cap = config_->render.frame_pacing_target_fps;
   view.load_distance = config_->chunks.load_distance;
+  view.simulation_distance = config_->chunks.simulation_distance;
   view.view_distance = config_->chunks.render_distance;
+  view.stream_distance = config_->chunks.stream_distance;
   view.mesh_upload_budget = config_->render.max_chunk_mesh_uploads_per_frame;
   view.show_local_player_body = config_->render.show_local_player_body;
   view.star_intensity = config_->render.sky.star_intensity;

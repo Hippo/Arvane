@@ -85,7 +85,9 @@ struct RenderSettingsView {
   SettingsFrameSyncMode frame_sync{SettingsFrameSyncMode::VSync};
   u32 fps_cap{60};
   i32 load_distance{3};
+  i32 simulation_distance{1};
   i32 view_distance{2};
+  i32 stream_distance{2};
   u32 mesh_upload_budget{8};
   bool show_local_player_body{true};
   f32 star_intensity{1.25F};

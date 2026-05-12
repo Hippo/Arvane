@@ -108,6 +108,7 @@ struct ServerStartInfo {
   CombatConfig combat{};
   io::MovementValidationConfig movement{};
   io::KeepAliveConfig keep_alive{};
+  bool keep_alive_enabled{true};
   io::SkinConfig skins{};
   const lang::LanguageCatalog* language{};
 };
@@ -136,6 +137,7 @@ public:
   void tick();
 
   void shutdown();
+  void configure_chunk_streaming(ServerChunkStreamingConfig config) noexcept;
 
   [[nodiscard]] ServerRuntimeState state() const noexcept;
   [[nodiscard]] TickIndex tick_index() const noexcept;

@@ -965,6 +965,8 @@ TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
 
   arv::io::EngineConfig config = arv::io::default_config();
   config.window.vsync = false;
+  config.chunks.load_distance = 8;
+  config.chunks.simulation_distance = 3;
   config.render.frame_pacing_enabled = true;
   config.render.frame_pacing_target_fps = 144U;
   config.render.show_local_player_body = false;
@@ -977,12 +979,16 @@ TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
   const auto written = arv::io::read_text_file(temp_file, "saved client config");
   ASSERT_TRUE(written);
   EXPECT_NE(written.value().find("vsync: false"), std::string::npos);
+  EXPECT_NE(written.value().find("load_distance: 8"), std::string::npos);
+  EXPECT_NE(written.value().find("simulation_distance: 3"), std::string::npos);
   EXPECT_NE(written.value().find("frame_pacing_target_fps: 144"), std::string::npos);
   EXPECT_NE(written.value().find("show_local_player_body: false"), std::string::npos);
   EXPECT_NE(written.value().find("star_intensity: 2.25"), std::string::npos);
   EXPECT_NE(written.value().find("max_history_messages: 1500"), std::string::npos);
   const auto parsed = arv::io::parse_config_yaml(written.value());
   ASSERT_TRUE(parsed);
+  EXPECT_EQ(parsed.value().chunks.load_distance, 8);
+  EXPECT_EQ(parsed.value().chunks.simulation_distance, 3);
   EXPECT_FLOAT_EQ(parsed.value().physics.mouse_sensitivity_radians, 0.004F);
 
   std::filesystem::remove(temp_file, error);

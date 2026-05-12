@@ -3,8 +3,11 @@
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
+#include <algorithm>
 #include <cstdio>
+#include <memory>
 #include <utility>
+#include <vector>
 
 namespace arv::world {
 namespace {
@@ -72,6 +75,44 @@ void format_chunk_context(
       coord.value.x,
       coord.value.y,
       coord.value.z);
+}
+
+[[nodiscard]] voxel::ChunkStorageView make_generated_missing_snapshot_storage(
+    const GenerationSurfaceProfile& surface,
+    ChunkSectionCoord coord,
+    const voxel::ChunkStorage* source = nullptr) {
+  voxel::ChunkStorageHandle storage =
+      source != nullptr ? std::make_shared<voxel::ChunkStorage>(*source)
+                        : std::make_shared<voxel::ChunkStorage>();
+  if (source == nullptr) {
+    storage->blocks.fill(voxel::AirBlockVariantID);
+    storage->lights.fill(voxel::NoLight);
+    storage->fluids.fill(voxel::empty_fluid_cell());
+  }
+
+  for (i32 z = 0; z < ChunkSize; ++z) {
+    for (i32 x = 0; x < ChunkSize; ++x) {
+      const i32 surface_y =
+          surface[static_cast<usize>(x) + voxel::ChunkSide * static_cast<usize>(z)];
+      bool sky_open = true;
+      for (i32 y = ChunkSize - 1; y >= 0; --y) {
+        const i32 world_y = coord.value.y * ChunkSize + y;
+        const usize index = voxel::local_index({{x, y, z}});
+        if (world_y <= surface_y) {
+          continue;
+        }
+        if (storage->blocks[index] != voxel::AirBlockVariantID) {
+          sky_open = false;
+          continue;
+        }
+        if (sky_open && voxel::light_sky(storage->lights[index]) < voxel::MaxLightLevel) {
+          storage->lights[index] =
+              voxel::with_sky_light(storage->lights[index], voxel::MaxLightLevel);
+        }
+      }
+    }
+  }
+  return storage;
 }
 
 } // namespace
@@ -236,7 +277,6 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
   snapshot.source_version = chunk->block_version();
   snapshot.source_content_version = chunk->content_version();
   snapshot.source_light_version = chunk->light_version();
-  snapshot.storages[voxel::ChunkSnapshotCenterStorageIndex] = chunk->storage_view();
   // TODO(arvane): Narrow meshing neighbor inputs to compact immutable boundary/edge views
   // if retaining whole neighboring chunk payload handles becomes a measurable cost.
   {
@@ -245,6 +285,50 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
         core::PerfMetric::ChunkLookupAccess,
         "world",
         profile_context.data()};
+    std::vector<std::pair<ChunkCoord, GenerationSurfaceProfile>> generated_surface_cache;
+    auto generated_surface_profile_for =
+        [this, &generated_surface_cache](ChunkCoord column_coord)
+            -> const GenerationSurfaceProfile& {
+      if (const Chunk* column = impl_->chunks.find_column(column_coord);
+          column != nullptr) {
+        if (const GenerationSurfaceProfile* cached = column->generation_surface_profile();
+            cached != nullptr) {
+          return *cached;
+        }
+      }
+      const auto cached_iter = std::find_if(
+          generated_surface_cache.begin(),
+          generated_surface_cache.end(),
+          [column_coord](const auto& entry) {
+            return entry.first == column_coord;
+          });
+      if (cached_iter != generated_surface_cache.end()) {
+        return cached_iter->second;
+      }
+
+      generated_surface_cache.emplace_back(
+          column_coord,
+          terrain_height_profile_at(
+              impl_->generation_config.value(),
+              impl_->generation_seed,
+              column_coord));
+      return generated_surface_cache.back().second;
+    };
+    auto storage_view_for_chunk =
+        [&generated_surface_profile_for, this](const voxel::ChunkSection& source) {
+      if (!impl_->generation_config.has_value() ||
+          !source.is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
+        return source.storage_view();
+      }
+
+      const voxel::ChunkStorageView source_storage = source.storage_view();
+      return make_generated_missing_snapshot_storage(
+          generated_surface_profile_for(chunk_to_column(source.coord())),
+          source.coord(),
+          source_storage.get());
+    };
+    snapshot.storages[voxel::ChunkSnapshotCenterStorageIndex] =
+        storage_view_for_chunk(*chunk);
     for (i32 oz = -1; oz <= 1; ++oz) {
       for (i32 oy = -1; oy <= 1; ++oy) {
         for (i32 ox = -1; ox <= 1; ++ox) {
@@ -262,7 +346,12 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
           }
           if (neighbor != nullptr) {
             snapshot.storages[voxel::snapshot_storage_index(ox, oy, oz)] =
-                neighbor->storage_view();
+                storage_view_for_chunk(*neighbor);
+          } else if (impl_->generation_config.has_value()) {
+            snapshot.storages[voxel::snapshot_storage_index(ox, oy, oz)] =
+                make_generated_missing_snapshot_storage(
+                    generated_surface_profile_for(chunk_to_column(neighbor_coord)),
+                    neighbor_coord);
           }
         }
       }

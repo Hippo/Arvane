@@ -15,6 +15,8 @@
 namespace arv::desktop {
 namespace {
 
+inline constexpr i32 MaxConfigurableChunkDistance = 32;
+
 [[nodiscard]] const std::filesystem::path& client_config_path(const io::EngineConfig& config) noexcept {
   return config.paths.client_config_file.empty() ? config.paths.config_file : config.paths.client_config_file;
 }
@@ -35,6 +37,19 @@ namespace {
          lhs.color_g == rhs.outline_green &&
          lhs.color_b == rhs.outline_blue &&
          lhs.thickness == rhs.outline_thickness;
+}
+
+[[nodiscard]] ui::RenderSettingsView normalized_chunk_distances(
+    ui::RenderSettingsView settings) noexcept {
+  settings.load_distance =
+      std::clamp(settings.load_distance, 1, MaxConfigurableChunkDistance);
+  settings.simulation_distance =
+      std::clamp(settings.simulation_distance, 0, settings.load_distance);
+  settings.stream_distance =
+      std::clamp(settings.stream_distance, 1, settings.load_distance);
+  settings.view_distance =
+      std::clamp(settings.view_distance, 1, settings.stream_distance);
+  return settings;
 }
 
 [[nodiscard]] platform::InputDeviceType platform_device_from(ui::InputBindingDevice type) noexcept {
@@ -190,7 +205,7 @@ bool DesktopFrameLoop::process_menu_commands() {
 }
 
 void DesktopFrameLoop::apply_render_settings(const ui::SetRenderSettingsCommand& command) {
-  const ui::RenderSettingsView settings = command.settings;
+  const ui::RenderSettingsView settings = normalized_chunk_distances(command.settings);
   const bool outline_changed =
       !outline_settings_equal(config_.render.block_outline, settings);
 
@@ -199,9 +214,10 @@ void DesktopFrameLoop::apply_render_settings(const ui::SetRenderSettingsCommand&
       settings.frame_sync == ui::SettingsFrameSyncMode::FpsCap;
   config_.render.frame_pacing_target_fps =
       std::clamp<u32>(settings.fps_cap, 30U, 240U);
-  config_.chunks.render_distance =
-      std::clamp<i32>(settings.view_distance, 1, std::max(1, config_.chunks.load_distance));
-  config_.chunks.stream_distance = config_.chunks.render_distance;
+  config_.chunks.load_distance = settings.load_distance;
+  config_.chunks.simulation_distance = settings.simulation_distance;
+  config_.chunks.render_distance = settings.view_distance;
+  config_.chunks.stream_distance = settings.stream_distance;
   config_.render.max_chunk_mesh_uploads_per_frame =
       std::clamp<u32>(settings.mesh_upload_budget, 1U, 32U);
   config_.render.show_local_player_body = settings.show_local_player_body;
@@ -219,6 +235,10 @@ void DesktopFrameLoop::apply_render_settings(const ui::SetRenderSettingsCommand&
   renderer_.set_chunk_mesh_upload_budget(config_.render.max_chunk_mesh_uploads_per_frame);
   if (DesktopGameSession* session = sessions_.active_session();
       session != nullptr && session->client != nullptr) {
+    if (session->integrated_server != nullptr) {
+      session->integrated_server->configure_chunk_streaming(
+          make_chunk_streaming_config(config_));
+    }
     session->client->set_chunk_view_distance(config_.chunks.stream_distance);
     request_chunk_view_mesh_rescan(session->chunk_view);
   }
@@ -370,18 +390,20 @@ void DesktopFrameLoop::rebuild_outline_render_assets() {
   }
 }
 
-bool DesktopFrameLoop::handle_remote_disconnect(DesktopGameSession* active_session) {
-  if (active_session == nullptr || active_session->client == nullptr ||
-      !active_session->remote_server.has_value()) {
+bool DesktopFrameLoop::handle_session_disconnect(DesktopGameSession* active_session) {
+  if (active_session == nullptr || active_session->client == nullptr) {
     return false;
   }
   const std::optional<std::string> reason = active_session->client->disconnect_reason();
   if (!reason.has_value()) {
     return false;
   }
-  const ui::ServerListEntry reconnect{
-      active_session->remote_server->name,
-      active_session->remote_server->address};
+  std::optional<ui::ServerListEntry> reconnect;
+  if (active_session->remote_server.has_value()) {
+    reconnect = ui::ServerListEntry{
+        active_session->remote_server->name,
+        active_session->remote_server->address};
+  }
   if (!sessions_.save_and_shutdown()) {
     return false;
   }

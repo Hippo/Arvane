@@ -149,7 +149,10 @@ ui:
       render_frame_sync_vsync: VSync
       render_frame_sync_fps_cap: FPS Cap
       render_fps_cap: FPS Cap
-      render_view_distance: View Distance
+      render_load_distance: Load Distance
+      render_simulation_distance: Simulation Distance
+      render_view_distance: Render Distance
+      render_stream_distance: Stream Distance
       render_mesh_upload_budget: Mesh Upload Budget
       render_local_player_body: Show Local Player Body
       render_star_intensity: Star Intensity

@@ -1,5 +1,6 @@
 #include "desktop_session.hpp"
 
+#include "desktop_runtime_config.hpp"
 #include "desktop_save_helpers.hpp"
 #include "save_state.hpp"
 #include "ui_model.hpp"
@@ -170,7 +171,9 @@ bool DesktopSessionManager::start_singleplayer(
       world::world_height_settings_from_generation_config(session->generation_config);
   session->min_chunk_y = session_world_height.min_chunk_y;
   session->max_chunk_y = session_world_height.max_chunk_y;
-  session->client_world.configure_height(session_world_height);
+  session->client_world.set_generation_context(
+      session->world_seed,
+      session->generation_config);
 
   auto worldgen_palette = world::resolve_world_generation_palette(
       session->generation_config,
@@ -194,7 +197,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.item_registry = &dependencies_.item_registry;
   server_start_info.player_tuning = dependencies_.player_tuning;
   server_start_info.fluid_definition = dependencies_.water_fluid;
-  server_start_info.chunk_streaming = dependencies_.chunk_streaming;
+  server_start_info.chunk_streaming = make_chunk_streaming_config(dependencies_.config);
   server_start_info.chunk_generation = std::move(chunk_generation);
   server_start_info.world_height = session_world_height;
   server_start_info.max_generation_results_per_tick =
@@ -210,6 +213,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.skins = dependencies_.config.skins;
   server_start_info.movement = dependencies_.config.network.movement;
   server_start_info.keep_alive = dependencies_.config.network.keep_alive;
+  server_start_info.keep_alive_enabled = false;
   server_start_info.language = &dependencies_.language;
   server_start_info.skins.enabled = true;
   server_start_info.skins.allow_uploads = true;
@@ -290,7 +294,8 @@ bool DesktopSessionManager::start_singleplayer(
   auto client = std::make_unique<client::ClientRuntime>(std::move(transport_pair.client));
   client->configure_networking(
       {dependencies_.config.multiplayer.keep_alive.server_timeout_seconds,
-       dependencies_.config.multiplayer.connection_timeout_seconds});
+       dependencies_.config.multiplayer.connection_timeout_seconds,
+       false});
   client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
   client->configure_language(&dependencies_.language);
   client->set_local_identity(local_identity);

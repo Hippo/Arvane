@@ -27,6 +27,10 @@ public:
     }
   }
 
+  constexpr void clear() noexcept {
+    accumulated_ = 0.0F;
+  }
+
   constexpr bool consume_tick() noexcept {
     if (tick_duration_ <= 0.0F || accumulated_ + Epsilon < tick_duration_) {
       return false;

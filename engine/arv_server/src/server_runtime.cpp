@@ -54,6 +54,10 @@ void ServerRuntime::shutdown() {
   impl_->shutdown();
 }
 
+void ServerRuntime::configure_chunk_streaming(ServerChunkStreamingConfig config) noexcept {
+  impl_->configure_chunk_streaming(config);
+}
+
 ServerRuntimeState ServerRuntime::state() const noexcept {
   return impl_->state();
 }
@@ -216,6 +220,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   combat_ = start_info.combat;
   movement_ = start_info.movement;
   keep_alive_ = start_info.keep_alive;
+  keep_alive_enabled_ = start_info.keep_alive_enabled;
   skins_ = start_info.skins;
   language_ = start_info.language;
   skin_transfers_.clear();
@@ -225,13 +230,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   active_skin_uploads_global_ = 0U;
   skin_storage_bytes_ = current_skin_storage_bytes(server_save_root_);
   fluid_definition_ = start_info.fluid_definition;
-  chunk_streamer_.configure(start_info.chunk_streaming);
-  const i32 max_view_distance = std::max<i32>(start_info.chunk_streaming.max_view_distance, 0);
-  max_view_distance_ = max_view_distance;
-  simulation_radius_ = std::clamp(
-      start_info.chunk_streaming.simulation_distance,
-      0,
-      max_view_distance);
+  configure_chunk_streaming(start_info.chunk_streaming);
   chunk_generation_ = start_info.chunk_generation;
   if (chunk_generation_.has_value() && chunk_generation_->enabled) {
     default_world_.set_generation_context(
@@ -287,6 +286,14 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
 
   state_ = ServerRuntimeState::Running;
   return net::NetworkResult::success();
+}
+
+void ServerRuntimeImpl::configure_chunk_streaming(
+    ServerChunkStreamingConfig config) noexcept {
+  chunk_streamer_.configure(config);
+  max_view_distance_ = std::max<i32>(config.max_view_distance, 0);
+  simulation_radius_ =
+      std::clamp(config.simulation_distance, 0, max_view_distance_);
 }
 
 void ServerRuntimeImpl::tick() {

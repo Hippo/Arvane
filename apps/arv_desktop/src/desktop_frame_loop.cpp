@@ -196,7 +196,7 @@ int DesktopFrameLoop::run() {
           gameplay_menu_stack_active_ && active_session != nullptr &&
           active_session->client != nullptr;
     }
-    if (has_active_session && handle_remote_disconnect(active_session)) {
+    if (has_active_session && handle_session_disconnect(active_session)) {
       active_session = sessions_.active_session();
       has_active_session = active_session != nullptr && active_session->client != nullptr;
       has_world_session = session_world_ready(active_session);

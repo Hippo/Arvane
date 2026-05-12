@@ -71,11 +71,13 @@ net::ConnectResult ClientConnectionRuntime::connect_remote(net::NetworkAddress a
 
 void ClientConnectionRuntime::configure_timeouts(
     u32 server_keep_alive_timeout_seconds,
-    u32 connection_timeout_seconds) noexcept {
+    u32 connection_timeout_seconds,
+    bool server_keep_alive_timeout_enabled) noexcept {
   server_keep_alive_timeout_seconds_ =
       server_keep_alive_timeout_seconds == 0U ? 30U : server_keep_alive_timeout_seconds;
   connection_timeout_seconds_ =
       connection_timeout_seconds == 0U ? 10U : connection_timeout_seconds;
+  server_keep_alive_timeout_enabled_ = server_keep_alive_timeout_enabled;
 }
 
 void ClientConnectionRuntime::configure_language(const lang::LanguageCatalog* language) noexcept {
@@ -165,7 +167,8 @@ bool ClientConnectionRuntime::tick_timeouts() {
         "Server is offline or unreachable."));
     return true;
   }
-  if (expects_server_keep_alive(connection_state_) &&
+  if (server_keep_alive_timeout_enabled_ &&
+      expects_server_keep_alive(connection_state_) &&
       last_server_keep_alive_time_.time_since_epoch().count() != 0 &&
       now - last_server_keep_alive_time_ >
           std::chrono::seconds(server_keep_alive_timeout_seconds_)) {

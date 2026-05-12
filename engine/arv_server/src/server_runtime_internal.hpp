@@ -218,6 +218,7 @@ struct ServerRuntimeImpl {
   net::NetworkResult start(const ServerStartInfo& start_info);
   void tick();
   void shutdown();
+  void configure_chunk_streaming(ServerChunkStreamingConfig config) noexcept;
 
   [[nodiscard]] ServerRuntimeState state() const noexcept;
   [[nodiscard]] TickIndex tick_index() const noexcept;
@@ -447,6 +448,7 @@ struct ServerRuntimeImpl {
   u64 skin_storage_bytes_{};
   ServerWorldJobRuntime world_jobs_;
   i32 simulation_radius_{1};
+  bool keep_alive_enabled_{true};
 };
 
 [[nodiscard]] Vec3f player_look_direction(const player::PlayerState& player_state) noexcept;

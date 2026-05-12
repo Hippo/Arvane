@@ -2,6 +2,7 @@
 
 #include "chunk_view.hpp"
 
+#include "arv/core/log.hpp"
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/net/connection_state.hpp"
@@ -10,6 +11,11 @@
 #include <chrono>
 
 namespace arv::desktop {
+namespace {
+
+inline constexpr u32 MaxSimulationTicksPerFrame = 5;
+
+} // namespace
 
 bool DesktopFrameLoop::update_simulation_and_chunks(
     DesktopGameSession& active_session,
@@ -19,6 +25,7 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
   const bool has_active_integrated_session = active_session.integrated_server != nullptr;
   const bool singleplayer_paused =
       has_active_integrated_session && gameplay_screen_manager_.pauses_singleplayer();
+  u32 simulation_ticks_this_frame = 0;
   while (active_session.ticks.consume_tick()) {
     ARV_PROFILE_ZONE("Simulation tick");
     if (!singleplayer_paused) {
@@ -70,6 +77,17 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
             "main/world");
       }
       fixed_tick_ran = true;
+    }
+    ++simulation_ticks_this_frame;
+    if (simulation_ticks_this_frame >= MaxSimulationTicksPerFrame &&
+        active_session.ticks.accumulated_seconds() >=
+            active_session.ticks.tick_duration()) {
+      core::warn(
+          "desktop",
+          "dropped accumulated simulation time after {} catch-up ticks",
+          MaxSimulationTicksPerFrame);
+      active_session.ticks.clear();
+      break;
     }
   }
 

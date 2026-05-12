@@ -176,6 +176,16 @@ arv::voxel::BlockRenderData make_stair_render_data(
   return std::nullopt;
 }
 
+[[nodiscard]] arv::world::WorldGenerationConfig flat_generation_config(arv::i32 surface_y) {
+  arv::world::WorldGenerationConfig config;
+  config.seed_salt = "meshing-test";
+  config.min_y = -32;
+  config.max_y = 64;
+  config.base_height = surface_y;
+  config.height_scale = 0;
+  return config;
+}
+
 } // namespace
 
 TEST(ChunkMeshingTests, AmbientOcclusionRuleCoversAllOccupancyCombinations) {
@@ -595,6 +605,86 @@ TEST(ChunkMeshingTests, MeshVerticesUseExposedNeighborLighting) {
   EXPECT_EQ(arv::render::unpack_chunk_block_light_g(top_face_vertex->light_face_material_hints), 4U);
   EXPECT_EQ(arv::render::unpack_chunk_block_light_b(top_face_vertex->light_face_material_hints), 5U);
   EXPECT_EQ(arv::render::unpack_chunk_sky_light(top_face_vertex->light_face_material_hints), 6U);
+}
+
+TEST(ChunkMeshingTests, GeneratedMissingAboveLightsSectionCeilingSurfaceFaces) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.set_generation_context(123U, flat_generation_config(15));
+  world.ensure_chunk({{0, 0, -6}});
+  ASSERT_TRUE(world.set_block({{10, 15, -85}}, stone));
+
+  const std::optional<arv::voxel::ChunkSnapshot> snapshot =
+      world.make_meshing_snapshot(
+          {{0, 0, -6}},
+          arv::world::MissingNeighborPolicy::TreatMissingAsAir);
+  ASSERT_TRUE(snapshot);
+
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, *snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{10, 15, 11}},
+      {0, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 15U);
+}
+
+TEST(ChunkMeshingTests, GeneratedDirtyLoadedAboveLightsSectionCeilingSurfaceFaces) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.set_generation_context(123U, flat_generation_config(15));
+  world.ensure_chunk({{1, 0, -2}});
+  world.ensure_chunk({{1, 1, -2}});
+  world.mark_chunk_lighting_dirty({{1, 1, -2}});
+  ASSERT_TRUE(world.set_block({{30, 15, -18}}, stone));
+
+  const std::optional<arv::voxel::ChunkSnapshot> snapshot =
+      world.make_meshing_snapshot(
+          {{1, 0, -2}},
+          arv::world::MissingNeighborPolicy::TreatMissingAsAir);
+  ASSERT_TRUE(snapshot);
+
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, *snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{14, 15, 14}},
+      {0, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 15U);
+}
+
+TEST(ChunkMeshingTests, GeneratedMissingAboveStaysDarkBelowSurface) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.set_generation_context(123U, flat_generation_config(20));
+  world.ensure_chunk({{0, 0, -6}});
+  ASSERT_TRUE(world.set_block({{10, 15, -85}}, stone));
+
+  const std::optional<arv::voxel::ChunkSnapshot> snapshot =
+      world.make_meshing_snapshot(
+          {{0, 0, -6}},
+          arv::world::MissingNeighborPolicy::TreatMissingAsAir);
+  ASSERT_TRUE(snapshot);
+
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, *snapshot, registry);
+  const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
+      mesh.opaque,
+      {{10, 15, 11}},
+      {0, 16, 16},
+      arv::voxel::BlockFace::PositiveY);
+
+  ASSERT_TRUE(vertex);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 0U);
 }
 
 TEST(ChunkMeshingTests, MeshVerticesAverageFaceSideAndCornerLighting) {

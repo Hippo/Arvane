@@ -9,8 +9,10 @@ window:
   title: Arvane
   vsync: false
 chunks:
-  render_distance: 2
-  stream_distance: 2
+  load_distance: 12
+  simulation_distance: 2
+  render_distance: 5
+  stream_distance: 8
 physics:
   mouse_sensitivity_radians: 0.0025
 multiplayer:
@@ -28,7 +30,7 @@ render:
     thickness: 0.55
   sky:
     star_intensity: 1.25
-    cloud_intensity: 1.25
+    cloud_intensity: 1.75
     cirrus_amount: 0.45
     cumulus_amount: 0.8
   atlases:

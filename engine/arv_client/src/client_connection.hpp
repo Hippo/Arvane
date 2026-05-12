@@ -26,7 +26,10 @@ public:
       ClientProtocolSender& sender,
       const LocalPlayerIdentity& identity);
   net::ConnectResult connect_remote(net::NetworkAddress address);
-  void configure_timeouts(u32 server_keep_alive_timeout_seconds, u32 connection_timeout_seconds) noexcept;
+  void configure_timeouts(
+      u32 server_keep_alive_timeout_seconds,
+      u32 connection_timeout_seconds,
+      bool server_keep_alive_timeout_enabled) noexcept;
   void configure_language(const lang::LanguageCatalog* language) noexcept;
 
   std::vector<net::NetworkEvent> poll_events();
@@ -60,6 +63,7 @@ private:
   const lang::LanguageCatalog* language_{};
   std::chrono::steady_clock::time_point connection_attempt_started_time_{};
   std::chrono::steady_clock::time_point last_server_keep_alive_time_{};
+  bool server_keep_alive_timeout_enabled_{true};
 };
 
 } // namespace arv::client::detail

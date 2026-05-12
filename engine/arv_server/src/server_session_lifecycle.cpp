@@ -288,7 +288,7 @@ void ServerRuntimeImpl::send_keep_alive(
 }
 
 void ServerRuntimeImpl::tick_keep_alive() {
-  if (!transport_) {
+  if (!transport_ || !keep_alive_enabled_) {
     return;
   }
 

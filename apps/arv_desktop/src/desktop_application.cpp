@@ -114,8 +114,6 @@ int DesktopApplication::run(int argc, char** argv) {
   ui::UiTree ui_tree;
   ui_tree.set_theme(&ui_theme);
 
-  const server::ServerChunkStreamingConfig chunk_streaming =
-      make_chunk_streaming_config(config);
   const world::WorldTickPolicy world_tick_policy =
       make_world_tick_policy(config.simulation);
   const voxel::FluidDefinition water_fluid =
@@ -159,7 +157,6 @@ int DesktopApplication::run(int argc, char** argv) {
           assets.item_atlas,
           player_tuning,
           water_fluid,
-          chunk_streaming,
           world_tick_policy,
           assets.default_generation_config,
           thread_budget,

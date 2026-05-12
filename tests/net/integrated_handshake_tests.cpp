@@ -474,6 +474,40 @@ TEST(IntegratedHandshakeTests, ServerKeepAliveTimeoutKicksClient) {
   EXPECT_EQ(server.sessions().size(), 0U);
 }
 
+TEST(IntegratedHandshakeTests, DisabledServerKeepAliveDoesNotKickClient) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> client_transport = std::move(transports.client);
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.keep_alive.interval_seconds = 1U;
+  start_info.keep_alive.client_timeout_seconds = 1U;
+  start_info.keep_alive_enabled = false;
+  ASSERT_TRUE(server.start(start_info));
+
+  const auto connect_result = client_transport->connect({"in-process", 0});
+  ASSERT_TRUE(connect_result);
+  send_raw_client_hello(
+      *client_transport,
+      connect_result.value(),
+      arv::client::make_ephemeral_local_identity());
+  server.tick();
+  EXPECT_TRUE(keep_alive_ids(client_transport->poll_events()).empty());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  server.tick();
+
+  EXPECT_EQ(server.sessions().size(), 1U);
+  EXPECT_TRUE(kick_reasons(client_transport->poll_events()).empty());
+}
+
 TEST(IntegratedHandshakeTests, KeepAliveReplyPreventsServerTimeout) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =

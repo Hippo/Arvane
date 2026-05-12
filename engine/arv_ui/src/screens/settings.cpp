@@ -27,6 +27,7 @@ inline constexpr f32 SettingsRowHeight = 48.0F;
 inline constexpr f32 SettingsRowSpacing = 8.0F;
 inline constexpr f32 SettingsRowInsetX = 18.0F;
 inline constexpr f32 KeyBindRowHeight = 58.0F;
+inline constexpr i32 MaxConfigurableChunkDistance = 32;
 
 struct CaptureTarget {
   std::string action_name{};
@@ -514,8 +515,20 @@ void add_back_button(UIContext& ctx, std::string_view id) {
   if (action_id == "render.fps_cap.slider") {
     return SliderSpec{30.0F, 240.0F, 5.0F};
   }
+  if (action_id == "render.load_distance.slider") {
+    return SliderSpec{1.0F, static_cast<f32>(MaxConfigurableChunkDistance), 1.0F};
+  }
+  if (action_id == "render.simulation_distance.slider") {
+    return SliderSpec{0.0F, static_cast<f32>(std::max(0, settings.load_distance)), 1.0F};
+  }
   if (action_id == "render.view_distance.slider") {
     return SliderSpec{1.0F, static_cast<f32>(std::max(1, settings.load_distance)), 1.0F};
+  }
+  if (action_id == "render.stream_distance.slider") {
+    return SliderSpec{
+        static_cast<f32>(std::max(1, settings.view_distance)),
+        static_cast<f32>(std::max(1, settings.load_distance)),
+        1.0F};
   }
   if (action_id == "render.mesh_upload_budget.slider") {
     return SliderSpec{1.0F, 32.0F, 1.0F};
@@ -537,6 +550,17 @@ void add_back_button(UIContext& ctx, std::string_view id) {
   return std::nullopt;
 }
 
+void normalize_render_chunk_distances(RenderSettingsView& settings) noexcept {
+  settings.load_distance =
+      std::clamp(settings.load_distance, 1, MaxConfigurableChunkDistance);
+  settings.simulation_distance =
+      std::clamp(settings.simulation_distance, 0, settings.load_distance);
+  settings.stream_distance =
+      std::clamp(settings.stream_distance, 1, settings.load_distance);
+  settings.view_distance =
+      std::clamp(settings.view_distance, 1, settings.stream_distance);
+}
+
 [[nodiscard]] bool apply_render_slider_value(
     RenderSettingsView& settings,
     std::string_view action_id,
@@ -549,12 +573,42 @@ void add_back_button(UIContext& ctx, std::string_view id) {
     settings.fps_cap = next;
     return true;
   }
+  if (action_id == "render.load_distance.slider") {
+    const i32 next = static_cast<i32>(std::lround(value));
+    if (settings.load_distance == next) {
+      return false;
+    }
+    settings.load_distance = next;
+    normalize_render_chunk_distances(settings);
+    return true;
+  }
+  if (action_id == "render.simulation_distance.slider") {
+    const i32 next = static_cast<i32>(std::lround(value));
+    if (settings.simulation_distance == next) {
+      return false;
+    }
+    settings.simulation_distance = next;
+    normalize_render_chunk_distances(settings);
+    return true;
+  }
   if (action_id == "render.view_distance.slider") {
     const i32 next = static_cast<i32>(std::lround(value));
     if (settings.view_distance == next) {
       return false;
     }
     settings.view_distance = next;
+    settings.stream_distance = std::max(settings.stream_distance, next);
+    normalize_render_chunk_distances(settings);
+    return true;
+  }
+  if (action_id == "render.stream_distance.slider") {
+    const i32 next = static_cast<i32>(std::lround(value));
+    if (settings.stream_distance == next) {
+      return false;
+    }
+    settings.stream_distance = next;
+    settings.view_distance = std::min(settings.view_distance, next);
+    normalize_render_chunk_distances(settings);
     return true;
   }
   if (action_id == "render.mesh_upload_budget.slider") {
@@ -765,7 +819,7 @@ public:
         screen_id(),
         tr(ctx, "ui.menu.settings.render"),
         scroll_y_,
-        13U);
+        16U);
     add_frame_sync_row(ctx, stack, settings.frame_sync);
     add_slider_row(
         ctx,
@@ -780,12 +834,41 @@ public:
     add_slider_row(
         ctx,
         stack,
+        "render.load_distance",
+        tr(ctx, "ui.menu.settings.render_load_distance"),
+        std::to_string(settings.load_distance),
+        "render.load_distance",
+        static_cast<f32>(settings.load_distance),
+        {1.0F, static_cast<f32>(MaxConfigurableChunkDistance), 1.0F});
+    add_slider_row(
+        ctx,
+        stack,
+        "render.simulation_distance",
+        tr(ctx, "ui.menu.settings.render_simulation_distance"),
+        std::to_string(settings.simulation_distance),
+        "render.simulation_distance",
+        static_cast<f32>(settings.simulation_distance),
+        {0.0F, static_cast<f32>(std::max(0, settings.load_distance)), 1.0F});
+    add_slider_row(
+        ctx,
+        stack,
         "render.view_distance",
         tr(ctx, "ui.menu.settings.render_view_distance"),
-        std::to_string(settings.view_distance) + " / " + std::to_string(settings.load_distance),
+        std::to_string(settings.view_distance),
         "render.view_distance",
         static_cast<f32>(settings.view_distance),
         {1.0F, static_cast<f32>(std::max(1, settings.load_distance)), 1.0F});
+    add_slider_row(
+        ctx,
+        stack,
+        "render.stream_distance",
+        tr(ctx, "ui.menu.settings.render_stream_distance"),
+        std::to_string(settings.stream_distance),
+        "render.stream_distance",
+        static_cast<f32>(settings.stream_distance),
+        {static_cast<f32>(std::max(1, settings.view_distance)),
+         static_cast<f32>(std::max(1, settings.load_distance)),
+         1.0F});
     add_slider_row(
         ctx,
         stack,
@@ -910,7 +993,7 @@ public:
     (void)cursor;
     (void)ctx;
     scroll_y_ =
-        std::clamp(scroll_y_ - wheel_y * 38.0F, 0.0F, settings_max_scroll(13U, SettingsRowHeight));
+        std::clamp(scroll_y_ - wheel_y * 38.0F, 0.0F, settings_max_scroll(16U, SettingsRowHeight));
     return true;
   }
 

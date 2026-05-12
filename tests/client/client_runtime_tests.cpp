@@ -373,6 +373,23 @@ TEST(ClientRuntimeTests, ServerKeepAliveTimeoutDisconnectsClient) {
   EXPECT_EQ(client.disconnect_reason().value(), "Lost connection to the server.");
 }
 
+TEST(ClientRuntimeTests, DisabledServerKeepAliveTimeoutDoesNotDisconnectClient) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_networking({1U, 10U, false});
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  client.fixed_tick(2);
+
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_FALSE(client.disconnect_reason().has_value());
+}
+
 TEST(ClientRuntimeTests, ConnectionAttemptTimeoutDisconnectsClient) {
   auto transport = std::make_unique<HangingConnectTransport>();
   HangingConnectTransport* raw_transport = transport.get();

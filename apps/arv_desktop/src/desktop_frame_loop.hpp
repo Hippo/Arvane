@@ -128,7 +128,7 @@ private:
   void refresh_runtime_player_tuning();
   void rebuild_outline_render_assets();
   void invalidate_ui_tree_cache() noexcept;
-  [[nodiscard]] bool handle_remote_disconnect(DesktopGameSession* active_session);
+  [[nodiscard]] bool handle_session_disconnect(DesktopGameSession* active_session);
   void handle_remote_connection_ready(DesktopGameSession* active_session);
 
   [[nodiscard]] const player::ItemRecord* selected_held_item(

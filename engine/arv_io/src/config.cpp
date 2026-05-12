@@ -1321,6 +1321,9 @@ ConfigResult save_default_client_config_file(
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "chunks" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "load_distance" << YAML::Value << config.chunks.load_distance;
+  emitter << YAML::Key << "simulation_distance" << YAML::Value
+          << config.chunks.simulation_distance;
   emitter << YAML::Key << "render_distance" << YAML::Value << config.chunks.render_distance;
   emitter << YAML::Key << "stream_distance" << YAML::Value << config.chunks.stream_distance;
   emitter << YAML::EndMap;
