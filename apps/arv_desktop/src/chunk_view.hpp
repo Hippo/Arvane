@@ -15,6 +15,10 @@
 #include <optional>
 #include <vector>
 
+namespace arv::render {
+class FluidRenderData;
+}
+
 namespace arv::desktop {
 
 struct ChunkViewState {
@@ -88,7 +92,8 @@ void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord);
     i32 min_chunk_y,
     i32 max_chunk_y,
     const voxel::BlockRegistry& block_registry,
-    const voxel::BlockRenderData& block_render_data);
+    const voxel::BlockRenderData& block_render_data,
+    const render::FluidRenderData* fluid_render_data = nullptr);
 
 [[nodiscard]] const std::vector<render::ChunkDrawItem>& chunk_draw_items(ChunkViewState& view);
 

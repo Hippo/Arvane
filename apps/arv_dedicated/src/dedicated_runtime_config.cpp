@@ -3,6 +3,7 @@
 #include "dedicated_registry_loader.hpp"
 #include "dedicated_save_state.hpp"
 
+#include "arv/base/base_commands.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
 
@@ -92,6 +93,8 @@ DedicatedRuntimeConfig make_dedicated_runtime_config(
       config.simulation.fluids.water.flow_interval_ticks;
   runtime_config.player_tuning = make_player_tuning(config.physics);
   base::register_base_game_modes(runtime_config.game_modes);
+  base::register_base_entity_goals(runtime_config.entity_goals);
+  base::register_base_block_break_behaviors(runtime_config.block_break_behaviors);
   for (const base::StarterInventoryItem item : base::starter_inventory_items()) {
     runtime_config.starter_inventory.push_back(
         {std::string{item.item_name}, item.count});
@@ -128,6 +131,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.starter_inventory =
       std::span<const server::StarterInventoryItem>{runtime_config.starter_inventory};
   server_start_info.fluid_containers = runtime_config.fluid_containers;
+  server_start_info.register_commands = base::register_server_commands;
   server_start_info.language = &registries.language;
   server_start_info.player_tuning = runtime_config.player_tuning;
   server_start_info.fluid_definition = runtime_config.water_fluid;
@@ -144,6 +148,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.use_network_thread = true;
   server_start_info.world_tick_policy = runtime_config.world_tick_policy;
   server_start_info.entity_registry = &registries.entity_registry;
+  server_start_info.entity_goals = &runtime_config.entity_goals;
   server_start_info.skins = config.skins;
   server_start_info.movement = config.network.movement;
   server_start_info.keep_alive = config.network.keep_alive;
@@ -155,6 +160,9 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
       config.gameplay.block_breaking.hand_speed_multiplier;
   server_start_info.block_breaking.wrong_tool_speed_multiplier =
       config.gameplay.block_breaking.wrong_tool_speed_multiplier;
+  server_start_info.block_breaking.behavior_id =
+      std::string{base::ids::MineableTagsBlockBreakBehaviorID};
+  server_start_info.block_break_behaviors = &runtime_config.block_break_behaviors;
   server_start_info.dropped_items.pickup_radius =
       config.gameplay.dropped_items.pickup_radius;
   server_start_info.dropped_items.pickup_delay_seconds =

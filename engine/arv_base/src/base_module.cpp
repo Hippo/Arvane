@@ -8,8 +8,8 @@ void register_base_module(BaseModuleRegistry& registry) {
   if (registry.game_modes != nullptr) {
     register_base_game_modes(*registry.game_modes);
   }
-  if (registry.entity_behaviors != nullptr) {
-    register_base_entity_behaviors(*registry.entity_behaviors);
+  if (registry.entity_goals != nullptr) {
+    register_base_entity_goals(*registry.entity_goals);
   }
   if (registry.entity_definitions != nullptr) {
     std::vector<entity::EntityDefinition> definitions = base_entity_definitions();

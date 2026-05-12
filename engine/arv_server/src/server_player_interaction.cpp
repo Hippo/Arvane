@@ -267,67 +267,27 @@ namespace {
   return static_cast<u8>(std::clamp(static_cast<i32>(progress * 10.0F), 0, 9));
 }
 
-[[nodiscard]] bool block_has_mineable_tool_tag(
-    const voxel::BlockRegistry& registry,
-    voxel::BlockID block_id) {
-  const voxel::BlockRecord* block = registry.block(block_id);
-  if (block == nullptr) {
-    return false;
-  }
-  return std::any_of(block->tags.begin(), block->tags.end(), [](const std::string& tag) {
-    return std::string_view{tag}.starts_with("arvane:mineable/");
-  });
-}
-
-[[nodiscard]] bool held_item_matches_block_tool(
-    const player::PlayerState& player_state,
-    const player::ItemRegistry& item_registry,
-    const voxel::BlockRegistry& block_registry,
-    const voxel::BlockVariantRecord& target) {
-  if (!block_has_mineable_tool_tag(block_registry, target.block_id)) {
-    return true;
-  }
-
-  const std::optional<player::ItemStack>& held =
-      player_state.inventory.slot(player_state.selected_hotbar_slot);
-  if (!held.has_value()) {
-    return block_registry.has_tag(target.block_id, "arvane:mineable/hand");
-  }
-
-  const player::ItemRecord* item = item_registry.item(held->item);
-  if (item == nullptr || item->tool_category.empty()) {
-    return block_registry.has_tag(target.block_id, "arvane:mineable/hand");
-  }
-
-  return block_registry.has_tag(target.block_id, "arvane:mineable/" + item->tool_category);
-}
-
-[[nodiscard]] f32 held_tool_break_speed_multiplier(
+[[nodiscard]] BlockBreakBehaviorEvaluation evaluate_block_break_behavior(
     const player::PlayerState& player_state,
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
     const voxel::BlockVariantRecord& target,
-    const BlockBreakingConfig& config) {
-  if (!block_has_mineable_tool_tag(block_registry, target.block_id)) {
-    return 1.0F;
+    const BlockBreakingConfig& config,
+    const BlockBreakBehaviorRegistry* behaviors) {
+  if (config.behavior_id.empty() || behaviors == nullptr) {
+    return {};
   }
-
-  const std::optional<player::ItemStack>& held =
-      player_state.inventory.slot(player_state.selected_hotbar_slot);
-  if (!held.has_value()) {
-    return config.hand_speed_multiplier;
+  const BlockBreakBehaviorRegistry::Handler* handler = behaviors->find(config.behavior_id);
+  if (handler == nullptr) {
+    return {};
   }
-
-  const player::ItemRecord* item = item_registry.item(held->item);
-  if (item == nullptr || item->tool_category.empty()) {
-    return config.hand_speed_multiplier;
-  }
-
-  if (!held_item_matches_block_tool(player_state, item_registry, block_registry, target)) {
-    return config.wrong_tool_speed_multiplier;
-  }
-
-  return item->tool_break_speed_multiplier;
+  return (*handler)({
+      player_state,
+      item_registry,
+      block_registry,
+      target,
+      config,
+  });
 }
 
 [[nodiscard]] player::ItemID held_item_id(const player::PlayerState& player_state) noexcept {
@@ -337,24 +297,16 @@ namespace {
 }
 
 [[nodiscard]] std::optional<player::ItemID> mined_block_drop_item(
-    const player::PlayerState& player_state,
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
-    const voxel::BlockVariantRecord& target) {
-  const voxel::BlockRecord* block = block_registry.block(target.block_id);
-  if (block == nullptr) {
+    const voxel::BlockVariantRecord& target,
+    bool drop_configured_item) {
+  if (!drop_configured_item) {
     return std::nullopt;
   }
 
-  const bool can_drop =
-      !block_has_mineable_tool_tag(block_registry, target.block_id) ||
-      target.properties.drops_with_wrong_tool ||
-      held_item_matches_block_tool(
-          player_state,
-          item_registry,
-          block_registry,
-          target);
-  if (!can_drop) {
+  const voxel::BlockRecord* block = block_registry.block(target.block_id);
+  if (block == nullptr) {
     return std::nullopt;
   }
 
@@ -580,16 +532,22 @@ void ServerRuntimeImpl::tick_block_break_attempt(
     return;
   }
 
+  const BlockBreakBehaviorEvaluation break_evaluation =
+      player_state.resolved_permissions.core.has_creative_inventory
+          ? BlockBreakBehaviorEvaluation{}
+          : evaluate_block_break_behavior(
+                player_state,
+                *item_registry_,
+                *block_registry_,
+                *target,
+                block_breaking_,
+                block_break_behaviors_);
+
   f32 required_seconds = hardness * block_breaking_.base_seconds_per_hardness;
   if (player_state.resolved_permissions.core.has_creative_inventory) {
     required_seconds *= block_breaking_.creative_inventory_multiplier;
   } else {
-    const f32 speed_multiplier = held_tool_break_speed_multiplier(
-        player_state,
-        *item_registry_,
-        *block_registry_,
-        *target,
-        block_breaking_);
+    const f32 speed_multiplier = break_evaluation.speed_multiplier;
     if (!std::isfinite(speed_multiplier) || speed_multiplier <= 0.0F) {
       clear_block_break_attempt(player_state.player_id);
       return;
@@ -603,10 +561,10 @@ void ServerRuntimeImpl::tick_block_break_attempt(
         const std::optional<player::ItemID> drop_item =
             item_registry_ != nullptr
                 ? mined_block_drop_item(
-                      player_state,
                       *item_registry_,
                       *block_registry_,
-                      *target)
+                      *target,
+                      break_evaluation.drop_configured_item)
                 : std::nullopt;
         if (drop_item.has_value()) {
           spawn_dropped_item_stack(
@@ -649,10 +607,10 @@ void ServerRuntimeImpl::tick_block_break_attempt(
       const std::optional<player::ItemID> drop_item =
           item_registry_ != nullptr
               ? mined_block_drop_item(
-                    player_state,
                     *item_registry_,
                     *block_registry_,
-                    *target)
+                    *target,
+                    break_evaluation.drop_configured_item)
               : std::nullopt;
       if (drop_item.has_value()) {
         spawn_dropped_item_stack(

@@ -1,33 +1,13 @@
 #pragma once
 
-#include "arv/core/domain_ids.hpp"
-#include "arv/core/math.hpp"
-#include "arv/core/types.hpp"
-
-#include <optional>
-#include <string>
-#include <string_view>
+#include "arv/command/server_command_services.hpp"
 
 namespace arv::base {
 
-struct OnlinePlayerCommandTarget {
-  SessionID session_id{};
-  PlayerID player_id{};
-  WorldID world_id{};
-  std::string display_name{};
-  Vec3f position{};
-};
-
-using OnlinePlayerByIDFn =
-    FunctionRef<std::optional<OnlinePlayerCommandTarget>(PlayerID)>;
-using OnlinePlayerByNameFn =
-    FunctionRef<std::optional<OnlinePlayerCommandTarget>(std::string_view)>;
-using TeleportPlayerFn = FunctionRef<bool(PlayerID, Vec3f)>;
-
-struct ServerCommandServices {
-  OnlinePlayerByIDFn online_player_by_id{};
-  OnlinePlayerByNameFn online_player_by_name{};
-  TeleportPlayerFn teleport_player{};
-};
+using OnlinePlayerCommandTarget = command::OnlinePlayerCommandTarget;
+using OnlinePlayerByIDFn = command::OnlinePlayerByIDFn;
+using OnlinePlayerByNameFn = command::OnlinePlayerByNameFn;
+using TeleportPlayerFn = command::TeleportPlayerFn;
+using ServerCommandServices = command::ServerCommandServices;
 
 } // namespace arv::base

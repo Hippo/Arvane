@@ -1,4 +1,6 @@
 #include "arv/client/client_runtime.hpp"
+#include "arv/base/base_ids.hpp"
+#include "arv/base/base_module.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
@@ -131,6 +133,12 @@ void set_test_player_held_item(
 
 arv::server::FluidContainerInteractionConfig make_test_fluid_containers() {
   return {"arvane:bucket", "arvane:water_bucket"};
+}
+
+arv::server::BlockBreakBehaviorRegistry make_base_block_break_behaviors() {
+  arv::server::BlockBreakBehaviorRegistry registry;
+  arv::base::register_base_block_break_behaviors(registry);
+  return registry;
 }
 
 arv::voxel::BlockRegistry make_timed_break_block_registry() {
@@ -687,6 +695,8 @@ TEST(PlayerInteractionTests, MatchingToolBreaksMineableBlocksFasterThanHand) {
   const arv::player::ItemRegistry item_registry =
       arv::testsupport::make_test_item_registry(block_registry);
   const arv::voxel::BlockVariantID stone = block_registry.find_variant("arvane:stone").value();
+  arv::server::BlockBreakBehaviorRegistry break_behaviors =
+      make_base_block_break_behaviors();
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
@@ -699,6 +709,9 @@ TEST(PlayerInteractionTests, MatchingToolBreaksMineableBlocksFasterThanHand) {
   start_info.block_breaking.base_seconds_per_hardness = 1.0F;
   start_info.block_breaking.hand_speed_multiplier = 0.2F;
   start_info.block_breaking.wrong_tool_speed_multiplier = 0.2F;
+  start_info.block_breaking.behavior_id =
+      std::string{arv::base::ids::MineableTagsBlockBreakBehaviorID};
+  start_info.block_break_behaviors = &break_behaviors;
   ASSERT_TRUE(server.start(start_info));
 
   arv::client::ClientRuntime client(std::move(transports.client));
@@ -730,6 +743,44 @@ TEST(PlayerInteractionTests, BlockDropsRequireCorrectToolWhenConfiguredByMineabl
   const arv::player::ItemRegistry item_registry =
       arv::testsupport::make_test_item_registry(block_registry);
   const arv::voxel::BlockVariantID stone = block_registry.find_variant("arvane:stone").value();
+  arv::server::BlockBreakBehaviorRegistry break_behaviors =
+      make_base_block_break_behaviors();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.block_breaking.base_seconds_per_hardness = 0.0F;
+  start_info.block_breaking.behavior_id =
+      std::string{arv::base::ids::MineableTagsBlockBreakBehaviorID};
+  start_info.block_break_behaviors = &break_behaviors;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, stone));
+  prepare_test_player(server, item_registry);
+
+  client.submit_input(arv::client::InputFrame{.primary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), arv::voxel::AirBlockVariantID);
+  EXPECT_TRUE(server.dropped_item_stacks().empty());
+}
+
+TEST(PlayerInteractionTests, GenericBlockBreakingIgnoresBaseMineableTagsWithoutBehavior) {
+  const arv::voxel::BlockRegistry block_registry = make_timed_break_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone = block_registry.find_variant("arvane:stone").value();
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
@@ -755,7 +806,10 @@ TEST(PlayerInteractionTests, BlockDropsRequireCorrectToolWhenConfiguredByMineabl
   server.tick();
 
   EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), arv::voxel::AirBlockVariantID);
-  EXPECT_TRUE(server.dropped_item_stacks().empty());
+  ASSERT_EQ(server.dropped_item_stacks().size(), 1U);
+  EXPECT_EQ(
+      server.dropped_item_stacks().front().stack.item,
+      item_registry.find_item("arvane:stone").value());
 }
 
 TEST(PlayerInteractionTests, BlockDropsSpawnWhenBrokenWithMatchingToolOrNoRequiredTool) {
@@ -764,6 +818,8 @@ TEST(PlayerInteractionTests, BlockDropsSpawnWhenBrokenWithMatchingToolOrNoRequir
       arv::testsupport::make_test_item_registry(block_registry);
   const arv::voxel::BlockVariantID stone = block_registry.find_variant("arvane:stone").value();
   const arv::voxel::BlockVariantID dirt = block_registry.find_variant("arvane:dirt").value();
+  arv::server::BlockBreakBehaviorRegistry break_behaviors =
+      make_base_block_break_behaviors();
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
@@ -774,6 +830,9 @@ TEST(PlayerInteractionTests, BlockDropsSpawnWhenBrokenWithMatchingToolOrNoRequir
   start_info.block_registry = &block_registry;
   start_info.item_registry = &item_registry;
   start_info.block_breaking.base_seconds_per_hardness = 0.0F;
+  start_info.block_breaking.behavior_id =
+      std::string{arv::base::ids::MineableTagsBlockBreakBehaviorID};
+  start_info.block_break_behaviors = &break_behaviors;
   ASSERT_TRUE(server.start(start_info));
 
   arv::client::ClientRuntime client(std::move(transports.client));

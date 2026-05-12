@@ -1,6 +1,6 @@
 #include "server_runtime_internal.hpp"
 
-#include "arv/base/command_services.hpp"
+#include "arv/command/server_command_services.hpp"
 #include "arv/crypto/random.hpp"
 #include "arv/lang/language.hpp"
 #include "arv/core/log.hpp"
@@ -32,7 +32,7 @@ namespace {
                              : language->format(key, args, fallback);
 }
 
-[[nodiscard]] base::OnlinePlayerCommandTarget base_command_target(
+[[nodiscard]] command::OnlinePlayerCommandTarget command_target(
     const ServerSession& session,
     const player::PlayerState& player_state) {
   return {
@@ -44,7 +44,7 @@ namespace {
   };
 }
 
-[[nodiscard]] std::optional<base::OnlinePlayerCommandTarget> online_player_by_id(
+[[nodiscard]] std::optional<command::OnlinePlayerCommandTarget> online_player_by_id(
     const SessionRegistry& sessions,
     const world::WorldRuntime& world,
     PlayerID player_id) {
@@ -59,17 +59,17 @@ namespace {
       continue;
     }
 
-    return base_command_target(*session, *player_state);
+    return command_target(*session, *player_state);
   }
 
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<base::OnlinePlayerCommandTarget> online_player_by_name(
+[[nodiscard]] std::optional<command::OnlinePlayerCommandTarget> online_player_by_name(
     const SessionRegistry& sessions,
     const world::WorldRuntime& world,
     std::string_view display_name) {
-  std::optional<base::OnlinePlayerCommandTarget> match;
+  std::optional<command::OnlinePlayerCommandTarget> match;
   for (const SessionID session_id : sessions.session_ids()) {
     const ServerSession* session = sessions.find(session_id);
     if (session == nullptr || session->display_name != display_name) {
@@ -85,7 +85,7 @@ namespace {
       return std::nullopt;
     }
 
-    match = base_command_target(*session, *player_state);
+    match = command_target(*session, *player_state);
   }
 
   return match;
@@ -273,7 +273,6 @@ std::optional<command::CommandSender> ServerRuntime::command_sender_for_session(
 namespace detail {
 
 ServerRuntimeImpl::ServerRuntimeImpl(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
-  register_server_commands(command_registry_);
 }
 
 ServerRuntimeImpl::~ServerRuntimeImpl() {
@@ -295,10 +294,12 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
   entity_registry_ = start_info.entity_registry;
+  entity_goals_ = start_info.entity_goals;
   game_modes_ = start_info.game_modes == nullptr ? player::GameModeRegistry{}
                                                  : *start_info.game_modes;
   player_tuning_ = start_info.player_tuning;
   block_breaking_ = start_info.block_breaking;
+  block_break_behaviors_ = start_info.block_break_behaviors;
   dropped_items_ = start_info.dropped_items;
   combat_ = start_info.combat;
   movement_ = start_info.movement;
@@ -306,6 +307,10 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   keep_alive_enabled_ = start_info.keep_alive_enabled;
   skins_ = start_info.skins;
   language_ = start_info.language;
+  command_registry_ = command::CommandRegistry{};
+  if (start_info.register_commands) {
+    start_info.register_commands(command_registry_);
+  }
   skin_transfers_.clear();
   chat_rate_limits_.clear();
   next_chat_message_id_ = 1U;
@@ -363,6 +368,12 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   if (block_registry_ == nullptr || item_registry_ == nullptr) {
     return net::NetworkResult::failure(net::NetworkError{"server start requires block and item registries"});
   }
+  if (!block_breaking_.behavior_id.empty() &&
+      (block_break_behaviors_ == nullptr ||
+       !block_break_behaviors_->contains(block_breaking_.behavior_id))) {
+    return net::NetworkResult::failure(net::NetworkError{
+        "missing block break behavior handler: " + block_breaking_.behavior_id});
+  }
 
   auto listen_result = network_thread_enabled_
                            ? network_thread_.start(*transport_, start_info.listen_address)
@@ -404,7 +415,7 @@ void ServerRuntimeImpl::tick() {
   default_world_.tick_dropped_items(tick_seconds, block_registry_, item_registry_);
   tick_dropped_item_pickups(tick_seconds);
   update_world_simulation_activity();
-  (void)default_world_.tick(*block_registry_, fluid_definition_);
+  (void)default_world_.tick(*block_registry_, fluid_definition_, entity_goals_);
   process_pending_entity_attacks();
   world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
   world_jobs_.schedule_lighting_jobs(default_world_, block_registry_);
@@ -609,10 +620,10 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   auto move_player = [this](PlayerID player_id, Vec3f position) {
     return teleport_player(default_world_, player_id, position);
   };
-  base::ServerCommandServices domain_services{
-      base::OnlinePlayerByIDFn{find_player_by_id},
-      base::OnlinePlayerByNameFn{find_player_by_name},
-      base::TeleportPlayerFn{move_player},
+  command::ServerCommandServices domain_services{
+      command::OnlinePlayerByIDFn{find_player_by_id},
+      command::OnlinePlayerByNameFn{find_player_by_name},
+      command::TeleportPlayerFn{move_player},
   };
   auto permission_check =
       [this](const command::CommandSender& checked_sender, const command::Command& checked_command) {

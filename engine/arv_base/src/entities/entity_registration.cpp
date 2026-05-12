@@ -1,6 +1,7 @@
 #include "arv/base/base_module.hpp"
 
 #include "arv/base/base_ids.hpp"
+#include "arv/world/entity_goal_registry.hpp"
 
 #include <cassert>
 #include <utility>
@@ -39,20 +40,6 @@ void merge_pack_entity_definition(
 
 } // namespace
 
-void register_base_entity_behaviors(entity::EntityBehaviorRegistry& registry) {
-  auto result = registry.register_goal_type(std::string{ids::IdleGoalID});
-  assert(result && "idle goal registration failed");
-  (void)result;
-
-  result = registry.register_goal_type(std::string{ids::WanderGoalID});
-  assert(result && "wander goal registration failed");
-  (void)result;
-
-  result = registry.register_goal_type(std::string{ids::FloatInFluidGoalID});
-  assert(result && "float-in-fluid goal registration failed");
-  (void)result;
-}
-
 std::vector<entity::EntityDefinition> base_entity_definitions() {
   entity::EntityDefinition player;
   player.name = std::string{ids::PlayerEntityTypeName};
@@ -67,7 +54,8 @@ std::vector<entity::EntityDefinition> base_entity_definitions() {
 }
 
 entity::EntityRegistry::Result build_base_entity_registry(
-    std::vector<entity::EntityDefinition> pack_definitions) {
+    std::vector<entity::EntityDefinition> pack_definitions,
+    const world::EntityGoalRegistry* goal_registry) {
   std::vector<entity::EntityDefinition> definitions = base_entity_definitions();
 
   HashMap<std::string, usize> definition_indices;
@@ -97,11 +85,17 @@ entity::EntityRegistry::Result build_base_entity_registry(
     }
   }
 
-  entity::EntityBehaviorRegistry behaviors;
-  register_base_entity_behaviors(behaviors);
+  world::EntityGoalRegistry fallback_goal_registry;
+  if (goal_registry == nullptr) {
+    register_base_entity_goals(fallback_goal_registry);
+    goal_registry = &fallback_goal_registry;
+  }
+  const auto goal_exists = [goal_registry](std::string_view id) {
+    return goal_registry->contains(id);
+  };
   return entity::EntityRegistry::build(
       std::move(definitions),
-      {.behaviors = &behaviors});
+      {.goal_exists = FunctionRef<bool(std::string_view)>{goal_exists}});
 }
 
 } // namespace arv::base

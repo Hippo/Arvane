@@ -9,6 +9,7 @@
 #include "arv/sched/job_system.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/voxel/fluid.hpp"
+#include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
 
@@ -29,6 +30,8 @@ struct DedicatedRuntimeConfig {
   voxel::FluidDefinition water_fluid;
   player::PlayerTuning player_tuning;
   player::GameModeRegistry game_modes;
+  world::EntityGoalRegistry entity_goals;
+  server::BlockBreakBehaviorRegistry block_break_behaviors;
   std::vector<server::StarterInventoryItem> starter_inventory;
   server::FluidContainerInteractionConfig fluid_containers;
 };

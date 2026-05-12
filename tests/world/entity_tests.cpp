@@ -1,4 +1,5 @@
 #include "arv/base/base_module.hpp"
+#include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/world_runtime.hpp"
 #include "support/test_registries.hpp"
 
@@ -61,6 +62,12 @@ arv::entity::EntityAnimationPlayback* find_active_animation(
     }
   }
   return nullptr;
+}
+
+arv::world::EntityGoalRegistry make_base_goal_registry() {
+  arv::world::EntityGoalRegistry registry;
+  arv::base::register_base_entity_goals(registry);
+  return registry;
 }
 
 } // namespace
@@ -140,6 +147,7 @@ TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {
   info.position = {1.0F, 2.0F, 3.0F};
   info.authored_components = type->components;
   const arv::EntityID entity = world.create_entity(std::move(info));
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
 
   ASSERT_NE(world.find_entity_movement(entity), nullptr);
   ASSERT_NE(world.find_entity_health(entity), nullptr);
@@ -147,7 +155,7 @@ TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {
   ASSERT_NE(world.find_entity_animation_state(entity), nullptr);
 
   world.set_tick_index(1);
-  (void)world.tick_entities();
+  (void)world.tick_entities(nullptr, &goals);
   const arv::entity::EntityAnimationState* animation =
       world.find_entity_animation_state(entity);
   ASSERT_NE(animation, nullptr);
@@ -158,9 +166,9 @@ TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {
   EXPECT_NE(transform->position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
 
   world.set_tick_index(2);
-  (void)world.tick_entities();
+  (void)world.tick_entities(nullptr, &goals);
   world.set_tick_index(3);
-  (void)world.tick_entities();
+  (void)world.tick_entities(nullptr, &goals);
   animation = world.find_entity_animation_state(entity);
   ASSERT_NE(animation, nullptr);
   EXPECT_TRUE(animation->active.empty());
@@ -398,6 +406,7 @@ TEST(WorldEntityTests, KnockbackVelocityMovesEntitiesSmoothlyAcrossTicks) {
 
 TEST(WorldEntityTests, GoalDrivenEntitiesJumpWhenBlockedByOneBlockLedge) {
   const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
   arv::world::WorldRuntime world{arv::WorldID{1}};
   (void)world.ensure_chunk({{0, 0, 0}});
@@ -406,7 +415,7 @@ TEST(WorldEntityTests, GoalDrivenEntitiesJumpWhenBlockedByOneBlockLedge) {
 
   const arv::EntityID entity = create_goal_driven_entity(world, {0.5F, 1.001F, 0.5F});
 
-  (void)world.tick_entities(&registry);
+  (void)world.tick_entities(&registry, &goals);
 
   const arv::entity::EntityVelocity* velocity = world.find_entity_velocity(entity);
   ASSERT_NE(velocity, nullptr);
@@ -415,6 +424,7 @@ TEST(WorldEntityTests, GoalDrivenEntitiesJumpWhenBlockedByOneBlockLedge) {
 
 TEST(WorldEntityTests, GoalDrivenEntitiesDoNotJumpIntoTallWalls) {
   const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
   arv::world::WorldRuntime world{arv::WorldID{1}};
   (void)world.ensure_chunk({{0, 0, 0}});
@@ -424,7 +434,7 @@ TEST(WorldEntityTests, GoalDrivenEntitiesDoNotJumpIntoTallWalls) {
 
   const arv::EntityID entity = create_goal_driven_entity(world, {0.5F, 1.001F, 0.5F});
 
-  (void)world.tick_entities(&registry);
+  (void)world.tick_entities(&registry, &goals);
 
   const arv::entity::EntityVelocity* velocity = world.find_entity_velocity(entity);
   ASSERT_NE(velocity, nullptr);
@@ -446,6 +456,7 @@ TEST(WorldEntityTests, GoalDrivenEntitiesDoNotJumpIntoTallWalls) {
 
 TEST(WorldEntityTests, GoalDrivenEntitiesPickOpenDirectionWhenOppositeWallIsBlocked) {
   const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
   arv::world::WorldRuntime world{arv::WorldID{1}};
   (void)world.ensure_chunk({{0, 0, 0}});
@@ -458,7 +469,7 @@ TEST(WorldEntityTests, GoalDrivenEntitiesPickOpenDirectionWhenOppositeWallIsBloc
 
   const arv::EntityID entity = create_goal_driven_entity(world, {0.5F, 1.001F, 0.5F});
 
-  (void)world.tick_entities(&registry);
+  (void)world.tick_entities(&registry, &goals);
 
   const arv::entity::BrainComponent* brain = world.find_entity_brain(entity);
   ASSERT_NE(brain, nullptr);
@@ -473,7 +484,7 @@ TEST(WorldEntityTests, GoalDrivenEntitiesPickOpenDirectionWhenOppositeWallIsBloc
   ASSERT_NE(before, nullptr);
   const arv::f32 z_before = before->position.z;
 
-  (void)world.tick_entities(&registry);
+  (void)world.tick_entities(&registry, &goals);
 
   const arv::entity::EntityTransform* after = world.find_entity_transform(entity);
   ASSERT_NE(after, nullptr);

@@ -8,6 +8,7 @@
 #include "arv/core/types.hpp"
 #include "arv/player/item.hpp"
 
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -30,17 +31,6 @@ inline constexpr std::string_view AnimationComponentID = "arvane:animation";
 
 struct EntityRegistryError {
   std::string message{};
-};
-
-class EntityBehaviorRegistry {
-public:
-  using Result = Expected<void, EntityRegistryError>;
-
-  [[nodiscard]] Result register_goal_type(std::string id);
-  [[nodiscard]] bool has_goal_type(std::string_view id) const;
-
-private:
-  HashSet<std::string> goal_types_{};
 };
 
 struct AuthoredCollisionComponent {
@@ -121,7 +111,7 @@ struct EntityTypeRecord {
 };
 
 struct EntityRegistryBuildOptions {
-  const EntityBehaviorRegistry* behaviors{};
+  FunctionRef<bool(std::string_view)> goal_exists{};
 };
 
 class EntityRegistry {

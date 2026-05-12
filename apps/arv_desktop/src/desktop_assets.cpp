@@ -199,7 +199,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
     render::RenderCommandQueue& renderer,
     const io::EngineConfig& config,
     const asset::PackManager& packs,
-    const ui::UiTheme& theme) {
+    const ui::UiTheme& theme,
+    const world::EntityGoalRegistry& entity_goals) {
   DesktopLoadedAssets loaded;
   renderer.configure_player_skin_atlas(
       player_skin_atlas_config_from(config.render.atlases.player_skins));
@@ -309,6 +310,12 @@ DesktopLoadedAssetsResult load_desktop_assets(
   if (loaded.block_atlas.atlas.pages.empty()) {
     return asset_failure("assets", "block texture atlas did not produce a page");
   }
+  auto fluid_render_result = base::register_base_fluid_render_data(
+      loaded.fluid_render_data,
+      loaded.block_registry);
+  if (!fluid_render_result) {
+    return asset_failure("fluids", fluid_render_result.error());
+  }
   render::TextureArrayUploadData terrain_atlas_upload =
       texture_array_upload_from_atlas(loaded.block_atlas.atlas);
   renderer.set_chunk_texture_atlas(std::move(terrain_atlas_upload));
@@ -379,7 +386,9 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("entities", entity_definitions.error().message);
   }
   auto entity_registry_result =
-      base::build_base_entity_registry(std::move(entity_definitions.value()));
+      base::build_base_entity_registry(
+          std::move(entity_definitions.value()),
+          &entity_goals);
   if (!entity_registry_result) {
     return asset_failure("entities", entity_registry_result.error().message);
   }

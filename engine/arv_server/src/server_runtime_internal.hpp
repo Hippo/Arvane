@@ -408,8 +408,10 @@ struct ServerRuntimeImpl {
   const voxel::BlockRegistry* block_registry_{};
   const player::ItemRegistry* item_registry_{};
   const entity::EntityRegistry* entity_registry_{};
+  const world::EntityGoalRegistry* entity_goals_{};
   player::PlayerTuning player_tuning_{};
   BlockBreakingConfig block_breaking_{};
+  const BlockBreakBehaviorRegistry* block_break_behaviors_{};
   DroppedItemsConfig dropped_items_{};
   CombatConfig combat_{};
   io::MovementValidationConfig movement_{};

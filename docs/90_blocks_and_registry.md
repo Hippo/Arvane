@@ -262,10 +262,13 @@ Tags must be:
 * efficiently queryable
 * usable in both engine and gameplay code
 
-`arvane:mineable/<tool>` tags declare which tool categories are correct for mining speed
-and drop eligibility. Blocks with mineable tags only drop when broken with a matching
-tool unless `drops_with_wrong_tool` is enabled, which is useful for blocks such as dirt
-that can be collected by hand but break faster with a shovel.
+`arvane:mineable/<tool>` tags are base-pack gameplay data. Generic block and
+item registries store the tags, while `arv_base` registers the
+`arvane:block_break/mineable_tags` server behavior that interprets them for
+mining speed and drop eligibility. Blocks with mineable tags only drop when
+broken with a matching tool unless `drops_with_wrong_tool` is enabled, which is
+useful for blocks such as dirt that can be collected by hand but break faster
+with a shovel.
 
 ---
 

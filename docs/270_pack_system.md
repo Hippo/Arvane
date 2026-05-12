@@ -543,8 +543,9 @@ the executable is expected to provide and register the named module.
 
 Startup treats missing required handlers from a built-in module as configuration
 errors. For example, if base entity data references `arvane:wander`, the base
-entity behavior registry must have that goal ID registered before entity
-registry construction succeeds.
+entity goal registry must have that handler registered before entity registry
+construction succeeds. Likewise, configured server behaviors such as
+`arvane:block_break/mineable_tags` must be registered before server startup.
 
 ---
 

@@ -5,6 +5,7 @@
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/item_animation.hpp"
+#include "arv/command/command_registry.hpp"
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
@@ -13,6 +14,7 @@
 #include "arv/player/item.hpp"
 #include "arv/player/permissions.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/render/chunk_mesher.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/render/render_types.hpp"
 #include "arv/sched/job_system.hpp"
@@ -25,6 +27,7 @@
 #include <chrono>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -83,10 +86,14 @@ struct DesktopSessionDependencies {
   const player::ItemRegistry& item_registry;
   u64 item_registry_hash{};
   const player::GameModeRegistry& game_modes;
+  const server::BlockBreakBehaviorRegistry& block_break_behaviors;
   std::vector<server::StarterInventoryItem> starter_inventory{};
   server::FluidContainerInteractionConfig fluid_containers{};
+  std::function<void(command::CommandRegistry&)> register_commands{};
   const entity::EntityRegistry& entity_registry;
+  const world::EntityGoalRegistry& entity_goals;
   const asset::BlockTextureAtlas& block_atlas;
+  const render::FluidRenderData& fluid_render_data;
   const asset::TextureAtlas& item_atlas;
   const player::PlayerTuning& player_tuning;
   const voxel::FluidDefinition& water_fluid;

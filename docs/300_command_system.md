@@ -1112,6 +1112,8 @@ Feature modules should own their command implementations.
 The built-in gameplay command implementations live in `arv_base`, the compiled
 module declared by the `arvane_base` pack. For example, `/tp` is registered by
 `arv_base` while the parser, dispatcher, and registry remain in `arv_command`.
+Server startup accepts an optional registrar callback; if no registrar is
+provided, the server starts with an empty command registry.
 
 Avoid putting gameplay command behavior into `arv_command`.
 
@@ -1222,10 +1224,12 @@ Examples:
 ```text
 arv_base/base_commands.cpp
 arv_client/client_commands.cpp
-arv_server/server_commands.cpp
 arv_world/world_commands.cpp
 arv_entity/entity_commands.cpp
 ```
+
+`arv_server/server_commands.cpp` contains server-owned command helpers such as
+the console sender, but it does not register `arv_base` commands directly.
 
 `arv_command` should not depend directly on high-level world, entity, item, or renderer internals.
 

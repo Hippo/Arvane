@@ -1,11 +1,25 @@
 #pragma once
 
 #include "arv/render/render_types.hpp"
+#include "arv/voxel/fluid.hpp"
 #include "arv/voxel/storage.hpp"
 
 #include <array>
+#include <optional>
+#include <utility>
+#include <vector>
 
 namespace arv::render {
+
+class FluidRenderData {
+public:
+  void set_fluid_variant(voxel::FluidTypeID fluid_type, voxel::BlockVariantID variant);
+  [[nodiscard]] std::optional<voxel::BlockVariantID> variant_for(
+      voxel::FluidTypeID fluid_type) const noexcept;
+
+private:
+  std::vector<std::pair<voxel::FluidTypeID, voxel::BlockVariantID>> variants_;
+};
 
 [[nodiscard]] constexpr u8 voxel_ambient_occlusion_value(
     bool side0,
@@ -26,6 +40,7 @@ namespace arv::render {
     WorldID world_id,
     const voxel::ChunkSnapshot& snapshot,
     const voxel::BlockRegistry& registry,
-    const voxel::BlockRenderData* render_data = nullptr);
+    const voxel::BlockRenderData* render_data = nullptr,
+    const FluidRenderData* fluid_render_data = nullptr);
 
 } // namespace arv::render

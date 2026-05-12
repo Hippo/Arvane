@@ -411,6 +411,9 @@ Examples:
 - glass next to the same glass type may or may not hide internal faces depending on authored rules
 
 These rules must come from per-state meshing descriptors, not renderer-side guesswork.
+Fluid cells are meshed through explicit fluid render data that maps fluid type
+IDs to block variants used for presentation. The mesher skips fluid types with
+no binding instead of looking up base-game IDs such as `arvane:water`.
 
 Transparent face generation still happens during chunk meshing, just into the transparent output buffer.
 

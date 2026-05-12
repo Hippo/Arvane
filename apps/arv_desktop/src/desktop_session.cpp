@@ -6,6 +6,7 @@
 #include "ui_model.hpp"
 
 #include "arv/client/local_identity.hpp"
+#include "arv/base/base_ids.hpp"
 #include "arv/core/log.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/persistence/save.hpp"
@@ -235,6 +236,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.starter_inventory =
       std::span<const server::StarterInventoryItem>{dependencies_.starter_inventory};
   server_start_info.fluid_containers = dependencies_.fluid_containers;
+  server_start_info.register_commands = dependencies_.register_commands;
   server_start_info.player_tuning = dependencies_.player_tuning;
   server_start_info.fluid_definition = dependencies_.water_fluid;
   server_start_info.chunk_streaming = make_chunk_streaming_config(dependencies_.config);
@@ -249,6 +251,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.worker_threads = dependencies_.thread_budget.primary_workers;
   server_start_info.world_tick_policy = dependencies_.world_tick_policy;
   server_start_info.entity_registry = &dependencies_.entity_registry;
+  server_start_info.entity_goals = &dependencies_.entity_goals;
   server_start_info.server_save_root = server_save_root;
   server_start_info.skins = dependencies_.config.skins;
   server_start_info.movement = dependencies_.config.network.movement;
@@ -275,6 +278,9 @@ bool DesktopSessionManager::start_singleplayer(
       dependencies_.config.gameplay.block_breaking.hand_speed_multiplier;
   server_start_info.block_breaking.wrong_tool_speed_multiplier =
       dependencies_.config.gameplay.block_breaking.wrong_tool_speed_multiplier;
+  server_start_info.block_breaking.behavior_id =
+      std::string{base::ids::MineableTagsBlockBreakBehaviorID};
+  server_start_info.block_break_behaviors = &dependencies_.block_break_behaviors;
   server_start_info.dropped_items.pickup_radius =
       dependencies_.config.gameplay.dropped_items.pickup_radius;
   server_start_info.dropped_items.pickup_delay_seconds =
@@ -382,7 +388,8 @@ bool DesktopSessionManager::start_singleplayer(
           session->min_chunk_y,
           session->max_chunk_y,
           dependencies_.block_registry,
-          dependencies_.block_atlas.render_data)) {
+          dependencies_.block_atlas.render_data,
+          &dependencies_.fluid_render_data)) {
     session->integrated_server->shutdown();
     return false;
   }

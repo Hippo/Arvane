@@ -1,5 +1,6 @@
 #include "world_runtime_internal.hpp"
 
+#include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/world_queries.hpp"
 
 #include <algorithm>
@@ -11,18 +12,6 @@ namespace arv::world::detail {
 namespace {
 
 inline constexpr f32 AirborneIntentBlend = 0.10F;
-
-[[nodiscard]] bool is_idle_goal(std::string_view type) noexcept {
-  return type == "arvane:idle";
-}
-
-[[nodiscard]] bool is_wander_goal(std::string_view type) noexcept {
-  return type == "arvane:wander";
-}
-
-[[nodiscard]] bool is_float_in_fluid_goal(std::string_view type) noexcept {
-  return type == "arvane:float_in_fluid";
-}
 
 [[nodiscard]] f32 positive_fraction(f32 value) noexcept {
   const f32 whole = std::floor(value);
@@ -331,48 +320,15 @@ void update_player_animation_state(
   return fallback;
 }
 
-void redirect_wander_after_horizontal_block(
-    EntityID entity_id,
-    TickIndex tick,
-    const physics::ICollisionQuery& query,
-    const Aabb3f& bounds,
-    entity::BrainComponent& brain,
-    entity::MovementIntent* intent,
-    Vec3f blocked_delta,
-    f32 collision_epsilon) {
-  if (!brain.active_goal.has_value() || brain.active_goal.value() >= brain.goals.size()) {
-    return;
-  }
-
-  const usize goal_index = brain.active_goal.value();
-  entity::GoalSlot& goal = brain.goals[goal_index];
-  if (!is_wander_goal(goal.type) || !has_horizontal_motion(goal.state.movement_direction)) {
-    return;
-  }
-
-  const Vec3f redirected = random_clear_wander_direction(
-      entity_id,
-      tick,
-      goal_index,
-      query,
-      bounds,
-      blocked_delta,
-      collision_epsilon);
-  if (!has_horizontal_motion(redirected)) {
-    return;
-  }
-
-  goal.state.movement_direction = redirected;
-  if (intent != nullptr) {
-    intent->desired_direction = redirected;
-  }
-}
-
 } // namespace
 
 u32 WorldEntitySimulation::tick_brains(
     WorldRuntime& world,
-    WorldEntityStore& entities) {
+    WorldEntityStore& entities,
+    const EntityGoalRegistry* goal_registry) {
+  if (goal_registry == nullptr) {
+    return 0;
+  }
   u32 updated = 0;
   entt::registry& registry = entities.registry();
   const TickIndex tick_index = world.tick_index();
@@ -411,30 +367,44 @@ u32 WorldEntitySimulation::tick_brains(
         intent->sprint = false;
       }
     };
-    const auto goal_can_start = [&](const entity::GoalSlot& goal) {
+    const auto movement_intent = [&]() -> entity::MovementIntent& {
+      return registry.get_or_emplace<entity::MovementIntent>(handle);
+    };
+    const auto make_context = [&](entity::GoalSlot& goal, usize index) {
+      return EntityGoalContext{
+          world,
+          runtime.entity_id,
+          tick_index,
+          transform,
+          brain,
+          goal,
+          index,
+          FunctionRef<void(std::string_view)>{set_animation},
+          FunctionRef<void()>{clear_movement_intent},
+          FunctionRef<entity::MovementIntent&()>{movement_intent},
+      };
+    };
+    const auto goal_can_start = [&](usize index) {
+      entity::GoalSlot& goal = brain.goals[index];
       if (goal.state.cooldown_until > tick_index) {
         return false;
       }
-      if (is_float_in_fluid_goal(goal.type)) {
-        const BlockPos pos{{
-            static_cast<i32>(std::floor(transform.position.x)),
-            static_cast<i32>(std::floor(transform.position.y)),
-            static_cast<i32>(std::floor(transform.position.z)),
-        }};
-        return !world.get_fluid(pos).empty();
+      const EntityGoalHandler* handler = goal_registry->find(goal.type);
+      if (handler == nullptr) {
+        return false;
       }
-      return is_idle_goal(goal.type) || is_wander_goal(goal.type);
+      EntityGoalContext context = make_context(goal, index);
+      return handler->can_start ? handler->can_start(context) : true;
     };
-    const auto goal_can_continue = [&](const entity::GoalSlot& goal) {
-      if (is_float_in_fluid_goal(goal.type)) {
-        const BlockPos pos{{
-            static_cast<i32>(std::floor(transform.position.x)),
-            static_cast<i32>(std::floor(transform.position.y)),
-            static_cast<i32>(std::floor(transform.position.z)),
-        }};
-        return !world.get_fluid(pos).empty();
+    const auto goal_can_continue = [&](usize index) {
+      entity::GoalSlot& goal = brain.goals[index];
+      const EntityGoalHandler* handler = goal_registry->find(goal.type);
+      if (handler == nullptr) {
+        return false;
       }
-      return goal.state.remaining_ticks > 0U;
+      EntityGoalContext context = make_context(goal, index);
+      return handler->can_continue ? handler->can_continue(context)
+                                   : goal.state.remaining_ticks > 0U;
     };
     const auto start_goal = [&](usize index) {
       entity::GoalSlot& goal = brain.goals[index];
@@ -442,13 +412,11 @@ u32 WorldEntitySimulation::tick_brains(
       if (brain.blackboard.home_position == Vec3f{}) {
         brain.blackboard.home_position = transform.position;
       }
-      if (is_wander_goal(goal.type)) {
-        goal.state.movement_direction =
-            deterministic_wander_direction(runtime.entity_id, tick_index, index);
-      } else if (is_float_in_fluid_goal(goal.type)) {
-        goal.state.movement_direction = {0.0F, 1.0F, 0.0F};
-      } else {
-        goal.state.movement_direction = {};
+      goal.state.movement_direction = {};
+      if (const EntityGoalHandler* handler = goal_registry->find(goal.type);
+          handler != nullptr && handler->start) {
+        EntityGoalContext context = make_context(goal, index);
+        handler->start(context);
       }
       set_animation(goal.animation);
       brain.active_goal = index;
@@ -464,16 +432,15 @@ u32 WorldEntitySimulation::tick_brains(
         brain.active_goal = std::nullopt;
       }
     };
-    const auto tick_goal = [&](entity::GoalSlot& goal) {
+    const auto tick_goal = [&](usize index) {
+      entity::GoalSlot& goal = brain.goals[index];
       if (goal.state.remaining_ticks > 0U) {
         --goal.state.remaining_ticks;
       }
-      if (is_wander_goal(goal.type) || is_float_in_fluid_goal(goal.type)) {
-        auto& intent = registry.get_or_emplace<entity::MovementIntent>(handle);
-        intent.desired_direction = goal.state.movement_direction;
-        intent.speed_multiplier = std::max(0.0F, goal.speed_multiplier);
-        intent.jump = is_float_in_fluid_goal(goal.type);
-        intent.sprint = false;
+      const EntityGoalHandler* handler = goal_registry->find(goal.type);
+      if (handler != nullptr && handler->tick) {
+        EntityGoalContext context = make_context(goal, index);
+        handler->tick(context);
       } else {
         clear_movement_intent();
       }
@@ -482,7 +449,7 @@ u32 WorldEntitySimulation::tick_brains(
 
     if (brain.active_goal.has_value()) {
       const usize active = brain.active_goal.value();
-      if (active >= brain.goals.size() || !goal_can_continue(brain.goals[active])) {
+      if (active >= brain.goals.size() || !goal_can_continue(active)) {
         if (active < brain.goals.size()) {
           stop_goal(active, entity::GoalStopReason::Completed);
         } else {
@@ -493,7 +460,7 @@ u32 WorldEntitySimulation::tick_brains(
 
     std::optional<usize> candidate;
     for (usize index = 0; index < brain.goals.size(); ++index) {
-      if (goal_can_start(brain.goals[index])) {
+      if (goal_can_start(index)) {
         candidate = index;
         break;
       }
@@ -509,7 +476,7 @@ u32 WorldEntitySimulation::tick_brains(
     }
 
     if (brain.active_goal.has_value()) {
-      tick_goal(brain.goals[brain.active_goal.value()]);
+      tick_goal(brain.active_goal.value());
     } else {
       clear_movement_intent();
       set_animation({});
@@ -523,6 +490,7 @@ u32 WorldEntitySimulation::tick_entity_physics(
     WorldRuntime& world,
     WorldEntityStore& entities,
     const voxel::BlockRegistry* block_registry,
+    const EntityGoalRegistry* goal_registry,
     Seconds tick_seconds) {
   if (tick_seconds <= 0.0F) {
     return 0;
@@ -647,15 +615,28 @@ u32 WorldEntitySimulation::tick_entity_physics(
         velocity.linear.y = std::max(velocity.linear.y, physics_config.jump_velocity);
       } else if (auto* brain = registry.try_get<entity::BrainComponent>(handle);
                  brain != nullptr) {
-        redirect_wander_after_horizontal_block(
-            runtime.entity_id,
-            world.tick_index(),
-            collision_query,
-            bounds,
-            *brain,
-            intent,
-            movement_delta,
-            physics_config.collision_epsilon);
+        if (goal_registry != nullptr &&
+            brain->active_goal.has_value() &&
+            brain->active_goal.value() < brain->goals.size()) {
+          const usize active = brain->active_goal.value();
+          entity::GoalSlot& goal = brain->goals[active];
+          if (const EntityGoalHandler* handler = goal_registry->find(goal.type);
+              handler != nullptr && handler->blocked) {
+            EntityGoalBlockedContext context{
+                world,
+                runtime.entity_id,
+                world.tick_index(),
+                collision_query,
+                bounds,
+                *brain,
+                goal,
+                active,
+                intent,
+                movement_delta,
+                physics_config.collision_epsilon};
+            handler->blocked(context);
+          }
+        }
       }
     }
 
@@ -703,7 +684,8 @@ u32 WorldEntitySimulation::tick_entities(
     WorldRuntime& world,
     WorldEntityStore& entities,
     WorldRegionRuntime& regions,
-    const voxel::BlockRegistry* block_registry) {
+    const voxel::BlockRegistry* block_registry,
+    const EntityGoalRegistry* goal_registry) {
   entities.flush_despawns(regions);
   u32 updated = 0;
   const Seconds tick_seconds = tick_duration_seconds(DefaultBaseTps);
@@ -730,8 +712,13 @@ u32 WorldEntitySimulation::tick_entities(
     ++updated;
   }
 
-  updated += tick_brains(world, entities);
-  updated += tick_entity_physics(world, entities, block_registry, tick_seconds);
+  updated += tick_brains(world, entities, goal_registry);
+  updated += tick_entity_physics(
+      world,
+      entities,
+      block_registry,
+      goal_registry,
+      tick_seconds);
   updated += tick_entity_animations(entities, tick_seconds);
 
   const auto transform_view = registry.view<entity::EntityTransform, entity::ChunkRelevance>();
@@ -851,13 +838,16 @@ u32 WorldEntitySimulation::tick_dropped_items(
 
 namespace arv::world {
 
-u32 WorldRuntime::tick_entities(const voxel::BlockRegistry* block_registry) {
+u32 WorldRuntime::tick_entities(
+    const voxel::BlockRegistry* block_registry,
+    const EntityGoalRegistry* goal_registry) {
   assert_owner_thread();
   return impl_->entity_simulation.tick_entities(
       *this,
       impl_->entities,
       impl_->regions,
-      block_registry);
+      block_registry,
+      goal_registry);
 }
 
 u32 WorldRuntime::tick_dropped_items(

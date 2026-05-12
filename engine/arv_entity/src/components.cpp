@@ -177,21 +177,6 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
 
 } // namespace
 
-EntityBehaviorRegistry::Result EntityBehaviorRegistry::register_goal_type(std::string id) {
-  if (id.empty()) {
-    return Result::failure({"entity goal type id is empty"});
-  }
-  if (goal_types_.find(id) != goal_types_.end()) {
-    return Result::failure({"duplicate entity goal type id: " + id});
-  }
-  goal_types_.insert(std::move(id));
-  return Result::success();
-}
-
-bool EntityBehaviorRegistry::has_goal_type(std::string_view id) const {
-  return goal_types_.find(std::string{id}) != goal_types_.end();
-}
-
 EntityRegistry::Result EntityRegistry::build(
     std::vector<EntityDefinition> definitions,
     EntityRegistryBuildOptions options) {
@@ -201,9 +186,9 @@ EntityRegistry::Result EntityRegistry::build(
     if (definition.name.empty()) {
       return Result::failure({"entity definition has empty name"});
     }
-    if (options.behaviors != nullptr && definition.components.brain.has_value()) {
+    if (options.goal_exists && definition.components.brain.has_value()) {
       for (const AuthoredGoalDefinition& goal : definition.components.brain->goals) {
-        if (!options.behaviors->has_goal_type(goal.type)) {
+        if (!options.goal_exists(goal.type)) {
           return Result::failure({"unknown behavior goal ID: " + goal.type});
         }
       }

@@ -12,9 +12,11 @@
 #include "arv/io/config.hpp"
 #include "arv/lang/language.hpp"
 #include "arv/player/item.hpp"
+#include "arv/render/chunk_mesher.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/ui/core/ui.hpp"
 #include "arv/voxel/block.hpp"
+#include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/world_generation.hpp"
 
 #include <string>
@@ -30,6 +32,7 @@ struct DesktopLoadedAssets {
   entity::EntityRegistry entity_registry{};
   lang::LanguageCatalog language{};
   asset::BlockTextureAtlas block_atlas{};
+  render::FluidRenderData fluid_render_data{};
   asset::TextureAtlas item_atlas{};
   EntityRenderAssets entity_render_assets{};
   asset::FontSystem font_system{};
@@ -49,6 +52,7 @@ using DesktopLoadedAssetsResult = Expected<DesktopLoadedAssets, DesktopAssetLoad
     render::RenderCommandQueue& renderer,
     const io::EngineConfig& config,
     const asset::PackManager& packs,
-    const ui::UiTheme& theme);
+    const ui::UiTheme& theme,
+    const world::EntityGoalRegistry& entity_goals);
 
 } // namespace arv::desktop

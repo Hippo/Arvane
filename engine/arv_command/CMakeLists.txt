@@ -3,6 +3,7 @@ set(ARV_COMMAND_HEADERS
   include/arv/command/command_dispatcher.hpp
   include/arv/command/command_registry.hpp
   include/arv/command/command_system.hpp
+  include/arv/command/server_command_services.hpp
 )
 
 add_library(arv_command STATIC

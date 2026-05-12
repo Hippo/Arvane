@@ -1,5 +1,6 @@
 set(ARV_WORLD_HEADERS
   include/arv/world/fluid_solver.hpp
+  include/arv/world/entity_goal_registry.hpp
   include/arv/world/regions.hpp
   include/arv/world/world_lighting.hpp
   include/arv/world/world_generation.hpp
@@ -9,6 +10,7 @@ set(ARV_WORLD_HEADERS
 )
 
 add_library(arv_world STATIC
+  src/entity_goal_registry.cpp
   src/fluid_solver.cpp
   src/regions.cpp
   src/world_lighting.cpp

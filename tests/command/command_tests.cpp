@@ -1,4 +1,5 @@
 #include "arv/client/client_runtime.hpp"
+#include "arv/base/base_commands.hpp"
 #include "arv/command/command_system.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/permissions.hpp"
@@ -49,6 +50,7 @@ struct RunningServerHarness {
     start_info.listen_address = {"in-process", 0};
     start_info.block_registry = &block_registry;
     start_info.item_registry = &item_registry;
+    start_info.register_commands = arv::base::register_server_commands;
     EXPECT_TRUE(server.start(start_info));
 
     EXPECT_TRUE(client.connect_integrated());
@@ -57,6 +59,28 @@ struct RunningServerHarness {
 };
 
 } // namespace
+
+TEST(CommandTests, ServerStartsWithoutBuiltInCommandRegistrar) {
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  ASSERT_TRUE(server.start(start_info));
+
+  EXPECT_TRUE(server.command_registry().commands().empty());
+  const arv::command::CommandResult result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/tp local_player 1 2 3");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::UnknownCommand);
+}
 
 TEST(CommandTests, RegistryRejectsDuplicateCommandNames) {
   arv::command::CommandRegistry registry;

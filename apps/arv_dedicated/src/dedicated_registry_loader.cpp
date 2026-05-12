@@ -110,7 +110,8 @@ namespace {
 
 Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
     const io::EngineConfig& config,
-    const asset::PackManager& packs) {
+    const asset::PackManager& packs,
+    const world::EntityGoalRegistry& entity_goals) {
   auto language_result = load_pack_language(
       packs,
       config.language.locale,
@@ -219,7 +220,9 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
   }
 
   auto entity_registry_result =
-      base::build_base_entity_registry(std::move(entity_definitions.value()));
+      base::build_base_entity_registry(
+          std::move(entity_definitions.value()),
+          &entity_goals);
   if (!entity_registry_result) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(
         dedicated_error("entities", entity_registry_result.error().message));

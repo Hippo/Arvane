@@ -2,6 +2,7 @@
 
 #include "arv/command/command.hpp"
 #include "arv/command/command_registry.hpp"
+#include "arv/core/expected.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
 #include "arv/crypto/hash.hpp"
@@ -20,11 +21,13 @@
 #include "arv/world/world_runtime.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace arv::lang {
@@ -72,6 +75,38 @@ struct BlockBreakingConfig {
   f32 creative_inventory_multiplier{0.0F};
   f32 hand_speed_multiplier{0.2F};
   f32 wrong_tool_speed_multiplier{0.2F};
+  std::string behavior_id{};
+};
+
+struct BlockBreakBehaviorQuery {
+  const player::PlayerState& player_state;
+  const player::ItemRegistry& item_registry;
+  const voxel::BlockRegistry& block_registry;
+  const voxel::BlockVariantRecord& target;
+  const BlockBreakingConfig& config;
+};
+
+struct BlockBreakBehaviorEvaluation {
+  f32 speed_multiplier{1.0F};
+  bool held_item_suitable{true};
+  bool drop_configured_item{true};
+};
+
+struct BlockBreakBehaviorRegistryError {
+  std::string message{};
+};
+
+class BlockBreakBehaviorRegistry {
+public:
+  using Result = Expected<void, BlockBreakBehaviorRegistryError>;
+  using Handler = std::function<BlockBreakBehaviorEvaluation(const BlockBreakBehaviorQuery&)>;
+
+  [[nodiscard]] Result register_handler(std::string id, Handler handler);
+  [[nodiscard]] const Handler* find(std::string_view id) const noexcept;
+  [[nodiscard]] bool contains(std::string_view id) const noexcept;
+
+private:
+  std::vector<std::pair<std::string, Handler>> handlers_;
 };
 
 struct DroppedItemsConfig {
@@ -109,11 +144,13 @@ struct ServerStartInfo {
   u32 max_fluid_results_per_tick{1};
   u32 max_pending_fluid_jobs{1};
   const entity::EntityRegistry* entity_registry{};
+  const world::EntityGoalRegistry* entity_goals{};
   TickIndex initial_tick_index{};
   std::string world_name{"default"};
   std::filesystem::path server_save_root{};
   std::span<const ServerPlayerSaveState> saved_players{};
   BlockBreakingConfig block_breaking{};
+  const BlockBreakBehaviorRegistry* block_break_behaviors{};
   DroppedItemsConfig dropped_items{};
   CombatConfig combat{};
   io::MovementValidationConfig movement{};
@@ -124,6 +161,7 @@ struct ServerStartInfo {
   const player::GameModeRegistry* game_modes{};
   std::span<const StarterInventoryItem> starter_inventory{};
   FluidContainerInteractionConfig fluid_containers{};
+  std::function<void(command::CommandRegistry&)> register_commands{};
 };
 
 struct DroppedItemStack {

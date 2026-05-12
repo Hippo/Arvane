@@ -10,6 +10,7 @@
 #include "arv/lang/language.hpp"
 #include "arv/player/item.hpp"
 #include "arv/voxel/block.hpp"
+#include "arv/world/entity_goal_registry.hpp"
 
 namespace arv::dedicated {
 
@@ -27,6 +28,7 @@ struct DedicatedRegistries {
 
 [[nodiscard]] Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
     const io::EngineConfig& config,
-    const asset::PackManager& packs);
+    const asset::PackManager& packs,
+    const world::EntityGoalRegistry& entity_goals);
 
 } // namespace arv::dedicated

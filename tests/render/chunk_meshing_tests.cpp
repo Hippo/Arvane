@@ -35,6 +35,15 @@ arv::voxel::BlockRegistry make_registry() {
   return std::move(registry_result.value());
 }
 
+arv::render::FluidRenderData make_fluid_render_data(
+    const arv::voxel::BlockRegistry& registry) {
+  arv::render::FluidRenderData render_data;
+  render_data.set_fluid_variant(
+      arv::voxel::DefaultWaterFluidTypeID,
+      registry.find_variant("arvane:water").value());
+  return render_data;
+}
+
 arv::voxel::BlockRegistry make_model_registry() {
   std::vector<arv::voxel::BlockDefinition> definitions;
   definitions.push_back(arv::voxel::make_air_definition());
@@ -376,12 +385,19 @@ TEST(ChunkMeshingTests, DirectionalBlockModelRotationIsAppliedDuringMeshing) {
 
 TEST(ChunkMeshingTests, FluidCellsEmitIntoTransparentMesh) {
   const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::render::FluidRenderData fluid_render_data =
+      make_fluid_render_data(registry);
   const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
   ASSERT_TRUE(chunk.set_fluid({{4, 4, 4}}, arv::voxel::make_fluid_source(water)));
 
   const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
-  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(
+      arv::WorldID{1},
+      snapshot,
+      registry,
+      nullptr,
+      &fluid_render_data);
 
   EXPECT_EQ(face_count(mesh.opaque), 0U);
   EXPECT_EQ(face_count(mesh.transparent), 6U);
@@ -414,6 +430,21 @@ TEST(ChunkMeshingTests, FluidCellsEmitIntoTransparentMesh) {
   }
   EXPECT_TRUE(saw_surface_animation);
   EXPECT_TRUE(saw_still_animation);
+}
+
+TEST(ChunkMeshingTests, FluidCellsSkipMeshWithoutRenderBinding) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_fluid({{4, 4, 4}}, arv::voxel::make_fluid_source(water)));
+
+  const arv::voxel::ChunkSnapshot snapshot =
+      arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+
+  EXPECT_EQ(face_count(mesh.opaque), 0U);
+  EXPECT_EQ(face_count(mesh.transparent), 0U);
 }
 
 TEST(ChunkMeshingTests, SameLayerNeighborsDoNotDarkenFlatTopFaces) {
@@ -736,6 +767,8 @@ TEST(ChunkMeshingTests, MeshVerticesIgnoreZeroSmoothLightSamplesInDivisor) {
 
 TEST(ChunkMeshingTests, PartialHeightFluidSmoothLightingDoesNotOffsetVerticalSamples) {
   const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::render::FluidRenderData fluid_render_data =
+      make_fluid_render_data(registry);
   const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
   ASSERT_TRUE(chunk.set_fluid({{1, 1, 1}}, arv::voxel::make_fluid_source(water)));
@@ -749,7 +782,12 @@ TEST(ChunkMeshingTests, PartialHeightFluidSmoothLightingDoesNotOffsetVerticalSam
 
   const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
   const arv::render::ChunkMeshData mesh =
-      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+      arv::render::build_chunk_mesh(
+          arv::WorldID{1},
+          snapshot,
+          registry,
+          nullptr,
+          &fluid_render_data);
   const std::optional<arv::render::ChunkVertex> vertex = find_vertex(
       mesh.transparent,
       {{1, 1, 1}},

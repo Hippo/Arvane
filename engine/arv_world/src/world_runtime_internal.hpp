@@ -336,7 +336,8 @@ public:
       WorldRuntime& world,
       WorldEntityStore& entities,
       WorldRegionRuntime& regions,
-      const voxel::BlockRegistry* block_registry);
+      const voxel::BlockRegistry* block_registry,
+      const EntityGoalRegistry* goal_registry);
   [[nodiscard]] u32 tick_dropped_items(
       WorldRuntime& world,
       WorldEntityStore& entities,
@@ -345,11 +346,15 @@ public:
       const player::ItemRegistry* item_registry);
 
 private:
-  [[nodiscard]] u32 tick_brains(WorldRuntime& world, WorldEntityStore& entities);
+  [[nodiscard]] u32 tick_brains(
+      WorldRuntime& world,
+      WorldEntityStore& entities,
+      const EntityGoalRegistry* goal_registry);
   [[nodiscard]] u32 tick_entity_physics(
       WorldRuntime& world,
       WorldEntityStore& entities,
       const voxel::BlockRegistry* block_registry,
+      const EntityGoalRegistry* goal_registry,
       Seconds tick_seconds);
   [[nodiscard]] u32 tick_entity_animations(WorldEntityStore& entities, Seconds tick_seconds);
 };

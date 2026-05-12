@@ -713,11 +713,34 @@ void emit_fluid_cell(
 
 } // namespace
 
+void FluidRenderData::set_fluid_variant(
+    voxel::FluidTypeID fluid_type,
+    voxel::BlockVariantID variant) {
+  for (auto& [existing_type, existing_variant] : variants_) {
+    if (existing_type == fluid_type) {
+      existing_variant = variant;
+      return;
+    }
+  }
+  variants_.push_back({fluid_type, variant});
+}
+
+std::optional<voxel::BlockVariantID> FluidRenderData::variant_for(
+    voxel::FluidTypeID fluid_type) const noexcept {
+  for (const auto& [existing_type, variant] : variants_) {
+    if (existing_type == fluid_type) {
+      return variant;
+    }
+  }
+  return std::nullopt;
+}
+
 ChunkMeshData build_chunk_mesh(
     WorldID world_id,
     const voxel::ChunkSnapshot& snapshot,
     const voxel::BlockRegistry& registry,
-    const voxel::BlockRenderData* render_data) {
+    const voxel::BlockRenderData* render_data,
+    const FluidRenderData* fluid_render_data) {
   ARV_PROFILE_ZONE("Chunk meshing");
   std::array<char, core::PerfEventContextCapacity> profile_context{};
   if constexpr (core::perf_stats_enabled()) {
@@ -747,8 +770,6 @@ ChunkMeshData build_chunk_mesh(
   mesh.opaque.vertex_bytes.reserve(
       hints.opaque_vertex_bytes.load(std::memory_order_relaxed));
   mesh.opaque.indices.reserve(hints.opaque_indices.load(std::memory_order_relaxed));
-  const voxel::BlockVariantID water_variant =
-      registry.find_variant("arvane:water").value_or(voxel::AirBlockVariantID);
   const auto& center_blocks = snapshot.blocks();
   const auto& center_fluids = snapshot.fluids();
 
@@ -757,14 +778,21 @@ ChunkMeshData build_chunk_mesh(
       for (i32 x = 0; x < ChunkSize; ++x) {
         const SectionLocalPos local{{x, y, z}};
         const usize cell_index = voxel::local_index(local);
-        emit_fluid_cell(
-            mesh.transparent,
-            snapshot_storage,
-            registry,
-            render_data,
-            water_variant,
-            local,
-            center_fluids[cell_index]);
+        const voxel::FluidCell fluid = center_fluids[cell_index];
+        if (!fluid.empty() && fluid_render_data != nullptr) {
+          if (const std::optional<voxel::BlockVariantID> fluid_variant =
+                  fluid_render_data->variant_for(fluid.type);
+              fluid_variant.has_value()) {
+            emit_fluid_cell(
+                mesh.transparent,
+                snapshot_storage,
+                registry,
+                render_data,
+                fluid_variant.value(),
+                local,
+                fluid);
+          }
+        }
 
         const voxel::BlockVariantID self_id = center_blocks[cell_index];
         const voxel::BlockVariantRecord* self = registry.variant(self_id);

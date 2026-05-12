@@ -9,6 +9,7 @@
 #include "renderer_bootstrap.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/base/base_commands.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
 #include "arv/core/log.hpp"
@@ -18,6 +19,7 @@
 #include "arv/platform/glfw_window.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/ui/ui.hpp"
+#include "arv/world/entity_goal_registry.hpp"
 
 #include <algorithm>
 #include <utility>
@@ -104,11 +106,20 @@ int DesktopApplication::run(int argc, char** argv) {
     return 1;
   }
 
+  world::EntityGoalRegistry entity_goals;
+  base::register_base_entity_goals(entity_goals);
+
   auto framebuffer = window.framebuffer_size();
   render_commands.resize(framebuffer.width, framebuffer.height);
 
   auto loaded_assets_result =
-      load_desktop_assets(resources, render_commands, config, pack_manager, ui_theme);
+      load_desktop_assets(
+          resources,
+          render_commands,
+          config,
+          pack_manager,
+          ui_theme,
+          entity_goals);
   if (!loaded_assets_result) {
     core::error(
         loaded_assets_result.error().category,
@@ -129,6 +140,8 @@ int DesktopApplication::run(int argc, char** argv) {
       make_water_fluid_definition(config.simulation);
   player::GameModeRegistry game_modes;
   base::register_base_game_modes(game_modes);
+  server::BlockBreakBehaviorRegistry block_break_behaviors;
+  base::register_base_block_break_behaviors(block_break_behaviors);
   std::vector<server::StarterInventoryItem> starter_inventory;
   for (const base::StarterInventoryItem item : base::starter_inventory_items()) {
     starter_inventory.push_back({std::string{item.item_name}, item.count});
@@ -173,10 +186,14 @@ int DesktopApplication::run(int argc, char** argv) {
           assets.item_registry,
           assets.item_registry_hash,
           game_modes,
+          block_break_behaviors,
           std::move(starter_inventory),
           std::move(fluid_containers),
+          base::register_server_commands,
           assets.entity_registry,
+          entity_goals,
           assets.block_atlas,
+          assets.fluid_render_data,
           assets.item_atlas,
           player_tuning,
           water_fluid,

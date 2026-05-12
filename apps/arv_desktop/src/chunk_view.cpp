@@ -406,7 +406,8 @@ void schedule_mesh_jobs(
     ChunkViewState& view,
     const io::ChunkPipelineConfig& pipeline,
     const voxel::BlockRegistry& block_registry,
-    const voxel::BlockRenderData& block_render_data) {
+    const voxel::BlockRenderData& block_render_data,
+    const render::FluidRenderData* fluid_render_data) {
   ARV_PROFILE_ZONE("Chunk meshing schedule");
   if (pipeline.max_mesh_jobs_per_frame == 0U) {
     return;
@@ -530,7 +531,8 @@ void schedule_mesh_jobs(
         [world_id,
          inputs = std::move(inputs),
          &block_registry,
-         &block_render_data] {
+         &block_render_data,
+         fluid_render_data] {
           ChunkViewState::TimedChunkMeshBatchResult batch;
           batch.meshes.reserve(inputs.size());
           for (const MeshJobInput& input : inputs) {
@@ -539,7 +541,8 @@ void schedule_mesh_jobs(
                 world_id,
                 input.snapshot,
                 block_registry,
-                &block_render_data);
+                &block_render_data,
+                fluid_render_data);
             double duration_ms = 0.0;
             if constexpr (core::profiling_enabled()) {
               const auto end = std::chrono::steady_clock::now();
@@ -676,7 +679,8 @@ bool update_chunk_view(
     i32 min_chunk_y,
     i32 max_chunk_y,
     const voxel::BlockRegistry& block_registry,
-    const voxel::BlockRenderData& block_render_data) {
+    const voxel::BlockRenderData& block_render_data,
+    const render::FluidRenderData* fluid_render_data) {
   ARV_PROFILE_ZONE("Chunk view update");
   const auto refresh_start = std::chrono::steady_clock::now();
   ++view.frames;
@@ -705,7 +709,8 @@ bool update_chunk_view(
       view,
       pipeline,
       block_registry,
-      block_render_data);
+      block_render_data,
+      fluid_render_data);
 
   log_chunk_view_profile(view, renderer, pipeline, refresh_start);
   view.observed_mesh_revision = world.mesh_revision();

@@ -113,7 +113,8 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
       active_session.min_chunk_y,
       active_session.max_chunk_y,
       assets_.block_registry,
-      assets_.block_atlas.render_data);
+      assets_.block_atlas.render_data,
+      &assets_.fluid_render_data);
 }
 
 } // namespace arv::desktop

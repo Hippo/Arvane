@@ -65,8 +65,12 @@ int DedicatedApplication::run(int argc, char** argv) {
       config.network.port,
       config.paths.dedicated_server_save_path().string());
 
+  const DedicatedRuntimeConfig runtime_config =
+      make_dedicated_runtime_config(config);
+
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::LoadingRegistries);
-  auto registries_result = load_dedicated_registries(config, pack_manager);
+  auto registries_result =
+      load_dedicated_registries(config, pack_manager, runtime_config.entity_goals);
   if (!registries_result) {
     return fail(registries_result.error());
   }
@@ -100,8 +104,6 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(worldgen_palette.error());
   }
 
-  const DedicatedRuntimeConfig runtime_config =
-      make_dedicated_runtime_config(config);
   auto start_info_result = make_server_start_info(
       config,
       runtime_config,

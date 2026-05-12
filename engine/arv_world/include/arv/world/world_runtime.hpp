@@ -22,6 +22,8 @@
 
 namespace arv::world {
 
+class EntityGoalRegistry;
+
 enum class MissingNeighborPolicy {
   RequireLoaded,
   TreatMissingAsAir,
@@ -362,7 +364,9 @@ public:
   void restore_persistent_entities(
       std::span<const entity::PersistentEntityRecord> records,
       const entity::EntityRegistry* entity_registry = nullptr);
-  u32 tick_entities(const voxel::BlockRegistry* block_registry = nullptr);
+  u32 tick_entities(
+      const voxel::BlockRegistry* block_registry = nullptr,
+      const EntityGoalRegistry* goal_registry = nullptr);
   u32 tick_dropped_items(
       Seconds tick_seconds,
       const voxel::BlockRegistry* block_registry = nullptr,
@@ -405,7 +409,8 @@ public:
       const voxel::FluidDefinition& definition);
   WorldTickStats tick(
       const voxel::BlockRegistry& registry,
-      const voxel::FluidDefinition& fluid_definition);
+      const voxel::FluidDefinition& fluid_definition,
+      const EntityGoalRegistry* goal_registry = nullptr);
   [[nodiscard]] std::vector<ReplicatedBlockUpdate> drain_replicated_block_updates();
   [[nodiscard]] std::vector<ChunkSectionCoord> dirty_chunks(voxel::ChunkDirtyFlags flag) const;
   [[nodiscard]] std::vector<ChunkSectionCoord> consume_dirty_mesh_chunks(

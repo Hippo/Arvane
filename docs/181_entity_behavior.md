@@ -507,27 +507,32 @@ Debug builds may optionally expose brain/goal state to developer UI.
 
 ## Behavior Registry
 
-Goal types are registered by ID.
+Goal handlers are registered by ID in `world::EntityGoalRegistry`. Entity
+registry construction validates authored goal IDs through a callback supplied by
+the composition root, and world ticking dispatches active goals through the same
+runtime registry.
 
 Example:
 
 ```cpp
-entity::EntityBehaviorRegistry behavior_registry;
-base::register_base_entity_behaviors(behavior_registry);
+world::EntityGoalRegistry goal_registry;
+base::register_base_entity_goals(goal_registry);
 
 auto entity_registry = entity::EntityRegistry::build(
     definitions,
-    {.behaviors = &behavior_registry});
+    {.goal_exists = [&](std::string_view id) {
+      return goal_registry.contains(id);
+    }});
 ```
 
 Rules:
 
 * Goal IDs are stable namespaced identifiers.
-* Runtime lookup may map IDs to dense integer IDs.
+* Runtime lookup is handler-based and may map IDs to dense integer IDs later.
 * Unknown goal IDs should fail validation with a clear error.
 * Invalid parameters should fail data loading, not crash simulation.
 * Generic entity registries own loading and validation.
-* `engine/arv_base` contributes built-in `arvane:*` behavior IDs.
+* `engine/arv_base` contributes built-in `arvane:*` goal handlers.
 * Entity definitions live in pack data unless a definition has compiled
   invariants, such as the player entity.
 
