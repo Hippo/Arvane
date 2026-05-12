@@ -1,5 +1,6 @@
 #include "tp_command.hpp"
 
+#include "arv/base/base_ids.hpp"
 #include "arv/base/command_services.hpp"
 #include "arv/command/command.hpp"
 #include "arv/lang/language.hpp"
@@ -11,7 +12,7 @@
 namespace arv::base::commands {
 namespace {
 
-constexpr std::string_view TeleportPermission = "arvane.command.teleport";
+constexpr std::string_view TeleportPermission = ids::TeleportPermissionNode;
 
 [[nodiscard]] std::string tr(
     const command::CommandCtx& ctx,

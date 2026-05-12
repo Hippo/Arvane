@@ -9,6 +9,8 @@
 #include "renderer_bootstrap.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/base/base_ids.hpp"
+#include "arv/base/base_module.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/io/config.hpp"
@@ -125,6 +127,17 @@ int DesktopApplication::run(int argc, char** argv) {
       make_world_tick_policy(config.simulation);
   const voxel::FluidDefinition water_fluid =
       make_water_fluid_definition(config.simulation);
+  player::GameModeRegistry game_modes;
+  base::register_base_game_modes(game_modes);
+  std::vector<server::StarterInventoryItem> starter_inventory;
+  for (const base::StarterInventoryItem item : base::starter_inventory_items()) {
+    starter_inventory.push_back({std::string{item.item_name}, item.count});
+  }
+  server::FluidContainerInteractionConfig fluid_containers;
+  fluid_containers.empty_container_item_name =
+      std::string{base::ids::BucketItemID};
+  fluid_containers.filled_source_item_name =
+      std::string{base::ids::WaterBucketItemID};
   player::PlayerTuning player_tuning =
       make_player_tuning(config.physics);
   const sched::RuntimeThreadBudgetPlan thread_budget =
@@ -159,6 +172,9 @@ int DesktopApplication::run(int argc, char** argv) {
           assets.block_registry_hash,
           assets.item_registry,
           assets.item_registry_hash,
+          game_modes,
+          std::move(starter_inventory),
+          std::move(fluid_containers),
           assets.entity_registry,
           assets.block_atlas,
           assets.item_atlas,

@@ -1291,15 +1291,20 @@ Chunks intersecting the structure bounding box generate only their overlapping p
 
 ## Definition Loading
 
-At startup, the engine loads worldgen definitions from:
+At startup, application composition loads worldgen definitions from the enabled
+pack stack:
 
-1. base game data
-2. enabled plugins
+1. `arvane_home/packs/arvane_base/data/arvane/worldgen/overworld.yaml`
+2. enabled packs/plugins
 3. world-specific overrides, if supported
 
 Definitions are validated before gameplay starts.
 
 Invalid definitions must fail loudly with clear diagnostics.
+
+Generic worldgen code does not synthesize `arvane` content defaults.
+`surface.rules` must define at least one surface layer, and base blocks such as
+`arvane:stone` are declared by the built-in pack data.
 
 ---
 
@@ -1508,15 +1513,20 @@ Chunks intersecting the structure bounding box generate only their overlapping p
 
 ## Definition Loading
 
-At startup, the engine loads worldgen definitions from:
+At startup, application composition loads worldgen definitions from the enabled
+pack stack:
 
-1. base game data
-2. enabled plugins
+1. `arvane_home/packs/arvane_base/data/arvane/worldgen/overworld.yaml`
+2. enabled packs/plugins
 3. world-specific overrides, if supported
 
 Definitions are validated before gameplay starts.
 
 Invalid definitions must fail loudly with clear diagnostics.
+
+Generic worldgen code does not synthesize `arvane` content defaults.
+`surface.rules` must define at least one surface layer, and base blocks such as
+`arvane:stone` are declared by the built-in pack data.
 
 ---
 
@@ -1708,4 +1718,3 @@ This system provides:
 * safe multithreaded execution
 
 ---
-

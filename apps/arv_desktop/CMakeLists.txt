@@ -71,6 +71,7 @@ if(NOT ARVANE_NFD_TARGET AND ARVANE_FETCH_NATIVE_FILE_DIALOG)
 endif()
 
 target_link_libraries(arv_desktop PRIVATE
+  arv_base
   arv_client
   arv_core
   arv_crypto

@@ -11,6 +11,7 @@
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
 #include "arv/player/item.hpp"
+#include "arv/player/permissions.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/render/render_types.hpp"
@@ -81,6 +82,9 @@ struct DesktopSessionDependencies {
   u64 block_registry_hash{};
   const player::ItemRegistry& item_registry;
   u64 item_registry_hash{};
+  const player::GameModeRegistry& game_modes;
+  std::vector<server::StarterInventoryItem> starter_inventory{};
+  server::FluidContainerInteractionConfig fluid_containers{};
   const entity::EntityRegistry& entity_registry;
   const asset::BlockTextureAtlas& block_atlas;
   const asset::TextureAtlas& item_atlas;

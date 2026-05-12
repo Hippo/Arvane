@@ -227,7 +227,8 @@ WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text) {
           {"unsupported noise.terrain.type: " + config.terrain_noise_type});
     }
     if (config.surface_layers.empty()) {
-      config.surface_layers.emplace_back("arvane:stone", 0, true);
+      return WorldGenerationConfigResult::failure(
+          {"surface.rules must define at least one surface layer"});
     }
 
     return WorldGenerationConfigResult::success(std::move(config));

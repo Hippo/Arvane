@@ -12,6 +12,7 @@
 #include <chrono>
 #include <numbers>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -125,7 +126,11 @@ void set_test_player_held_item(
       0,
       arv::player::ItemStack{
           item_registry.find_item(item_name).value(),
-          count}));
+      count}));
+}
+
+arv::server::FluidContainerInteractionConfig make_test_fluid_containers() {
+  return {"arvane:bucket", "arvane:water_bucket"};
 }
 
 arv::voxel::BlockRegistry make_timed_break_block_registry() {
@@ -881,15 +886,17 @@ TEST(PlayerInteractionTests, BucketPicksUpSourceWaterAndBecomesWaterBucket) {
   arv::server::ServerRuntime server(std::move(transports.server));
   arv::server::ServerChunkStreamingConfig streaming_config;
   streaming_config.simulation_distance = 4;
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry,
-      arv::player::default_player_tuning(),
-      water,
-      streaming_config}));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.player_tuning = arv::player::default_player_tuning();
+  start_info.fluid_definition = water;
+  start_info.chunk_streaming = streaming_config;
+  start_info.fluid_containers = make_test_fluid_containers();
+  ASSERT_TRUE(server.start(start_info));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
@@ -918,12 +925,14 @@ TEST(PlayerInteractionTests, WaterBucketPlacesSourceWaterAndBecomesBucket) {
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.fluid_containers = make_test_fluid_containers();
+  ASSERT_TRUE(server.start(start_info));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
@@ -953,12 +962,14 @@ TEST(PlayerInteractionTests, WaterBucketReplacesPartialWaterWithSource) {
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.fluid_containers = make_test_fluid_containers();
+  ASSERT_TRUE(server.start(start_info));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
@@ -992,12 +1003,14 @@ TEST(PlayerInteractionTests, PlacedWaterFlowsThroughActiveServerSimulation) {
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.fluid_containers = make_test_fluid_containers();
+  ASSERT_TRUE(server.start(start_info));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);

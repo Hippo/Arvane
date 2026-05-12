@@ -385,23 +385,14 @@ void ServerRuntimeImpl::seed_player_inventory(player::PlayerState& player_state)
     return;
   }
 
-  // TODO(arvane): Replace this starter loadout with documented gameplay spawn
-  // inventory rules once the built-in game layer is defined.
-  for (const auto [item_name, count] :
-       {std::pair{std::string_view{"arvane:stone"}, u16{64}},
-        std::pair{std::string_view{"arvane:dirt"}, u16{64}},
-        std::pair{std::string_view{"arvane:grass_block"}, u16{64}},
-        std::pair{std::string_view{"arvane:glass"}, u16{64}},
-        std::pair{std::string_view{"arvane:glowstone"}, u16{64}},
-        std::pair{std::string_view{"arvane:coal"}, u16{32}},
-        std::pair{std::string_view{"arvane:wood_pickaxe"}, u16{1}},
-        std::pair{std::string_view{"arvane:bucket"}, u16{1}},
-        std::pair{std::string_view{"arvane:water_bucket"}, u16{1}}}) {
-    const auto item_id = item_registry_->find_item(item_name);
+  for (const StarterInventoryItem& item : starter_inventory_) {
+    const auto item_id = item_registry_->find_item(item.item_name);
     if (!item_id.has_value()) {
       continue;
     }
-    (void)player_state.inventory.insert_stack({item_id.value(), count}, *item_registry_);
+    (void)player_state.inventory.insert_stack(
+        {item_id.value(), item.count},
+        *item_registry_);
   }
 }
 

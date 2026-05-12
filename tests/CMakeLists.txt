@@ -77,6 +77,7 @@ target_compile_definitions(arv_tests PRIVATE
 
 target_link_libraries(arv_tests PRIVATE
   arv_asset
+  arv_base
   arv_client
   arv_command
   arv_core

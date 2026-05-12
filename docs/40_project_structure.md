@@ -1,15 +1,3 @@
-This is a really strong direction now—this v3 is where the architecture starts to feel *intentional* instead of just “well-organized.”
-
-Below is a clean, tightened **Project Structure Document v3** with:
-
-* `engine/`, `game/`, `apps/` split
-* `arv_desktop` rename
-* strict separation between runtime libraries vs products
-* clarified layering rules
-* zero timeline language
-
----
-
 # Arvane Project Structure (v3)
 
 ## Purpose
@@ -40,9 +28,9 @@ This document is **timeless** and describes architecture, not implementation ord
 Arvane is structured into three layers:
 
 ```text
-engine/   → foundational runtime systems
-game/     → built-in gameplay rules
-apps/     → executable products
+engine/      → reusable runtime systems and linked built-in modules
+arvane_home/ → runtime packs, assets, data, config, saves
+apps/        → executable products
 ```
 
 ---
@@ -51,19 +39,23 @@ apps/     → executable products
 
 Defines reusable runtime systems and infrastructure.
 
-* does **not** define game rules
+* generic modules do **not** define game rules
 * does **not** define final products
 * is designed to be reusable and extensible
+* `engine/arv_base/` is the linked built-in module for the `arvane_base` pack,
+  not a generic framework module
 
 ---
 
-## 2. Game Layer (`game/`)
+## 2. Runtime Home (`arvane_home/`)
 
-Defines the built-in Arvane gameplay.
+Stores runtime content and user/server state.
 
-* uses engine systems
-* defines rules, mechanics, interactions
-* can be replaced or extended in the future
+* `packs/arvane_base/` contains data and assets for the built-in `arvane`
+  namespace
+* `packs/enabled.yaml` selects the active pack stack
+* `config/`, `server-save/`, and `saves/` contain runtime-local state
+* C++ source code does not live in this directory
 
 ---
 
@@ -71,7 +63,7 @@ Defines the built-in Arvane gameplay.
 
 Defines runnable products.
 
-* composes engine + gameplay
+* composes generic engine systems, `arv_base`, and runtime packs
 * defines entrypoints
 * defines runtime configuration and bootstrapping
 
@@ -112,9 +104,8 @@ arvane/
 │  ├─ arv_render/
 │  ├─ arv_ui/
 │  ├─ arv_client/
-│  └─ arv_server/
-├─ game/
-│  └─ arv_gameplay/
+│  ├─ arv_server/
+│  └─ arv_base/
 ├─ apps/
 │  ├─ arv_desktop/
 │  └─ arv_dedicated/
@@ -129,8 +120,7 @@ In development, it lives at the project root by default.
 
 It contains:
 
-* `assets/`
-* `plugins/`
+* `packs/`
 * `config/`
 * `server-save/`
 * `saves/`
@@ -148,16 +138,16 @@ Example:
 
 ```text
 arvane_home/
+  packs/
+    enabled.yaml
+    arvane_base/
+      pack.yaml
+      assets/
+        arvane/
+      data/
+        arvane/
   config/
     server_list.json
-  assets/
-    models/
-      block/
-      entity/
-    animation/
-    textures/
-      block/
-      entity/
   server-save/
     players/
     worlds/
@@ -511,27 +501,30 @@ This is **not a final executable**.
 
 ---
 
-# GAME MODULE
+# BUILT-IN PACK MODULE
 
-## `arv_gameplay`
+## `arv_base`
 
 ### Purpose
 
-Built-in Arvane gameplay rules.
+Compiled behavior provider for the built-in `arvane_base` pack.
 
 ### Responsibilities
 
-* block interactions
-* item usage
-* inventory systems
-* combat/damage rules
-* interaction mechanics
-* core gameplay behavior
+* stable `arvane` IDs used by base behavior
+* built-in game-mode registration
+* built-in entity behavior ID registration
+* built-in player entity definition
+* base starter inventory defaults
+* base command implementations
 
 ### Constraints
 
-* depends on engine
-* engine must not depend on gameplay
+* generic modules must not depend on `arv_base`
+* application/runtime composition may register `arv_base` after generic
+  registries and pack data are available
+* runtime data and assets stay under `arvane_home/packs/arvane_base/`
+* `arv_base` is linked into products; it is not loaded as a dynamic plugin
 
 ---
 
@@ -584,11 +577,12 @@ Production server host.
 ## Layer Direction
 
 ```text
-engine → game → apps
+generic engine modules → arv_base/app composition → apps
 ```
 
-* engine does not depend on game
-* game does not depend on apps
+* generic systems do not depend on `arv_base`
+* `arv_base` depends on generic registries/frameworks and registers built-in
+  behavior into them
 * apps compose everything
 
 ---
@@ -684,8 +678,8 @@ ServerRuntime
 
 Arvane is built around:
 
-* **engine/runtime separation from gameplay**
-* **clear layering: engine → game → apps**
+* **generic engine systems separated from built-in gameplay behavior**
+* **clear layering: generic engine modules → arv_base/app composition → apps**
 * **runtime vs product distinction**
 * **world-local simulation ownership**
 * **minimal global systems**

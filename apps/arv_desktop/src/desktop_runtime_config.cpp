@@ -1,5 +1,7 @@
 #include "desktop_runtime_config.hpp"
 
+#include "arv/base/base_module.hpp"
+
 #include <algorithm>
 
 namespace arv::desktop {
@@ -92,7 +94,7 @@ world::WorldTickPolicy make_world_tick_policy(
 
 voxel::FluidDefinition make_water_fluid_definition(
     const io::SimulationConfig& simulation) noexcept {
-  voxel::FluidDefinition water_fluid = voxel::make_water_fluid_definition();
+  voxel::FluidDefinition water_fluid = base::make_base_water_fluid_definition();
   water_fluid.flow_interval_ticks =
       simulation.fluids.water.flow_interval_ticks;
   return water_fluid;

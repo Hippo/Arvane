@@ -32,6 +32,17 @@ struct EntityRegistryError {
   std::string message{};
 };
 
+class EntityBehaviorRegistry {
+public:
+  using Result = Expected<void, EntityRegistryError>;
+
+  [[nodiscard]] Result register_goal_type(std::string id);
+  [[nodiscard]] bool has_goal_type(std::string_view id) const;
+
+private:
+  HashSet<std::string> goal_types_{};
+};
+
 struct AuthoredCollisionComponent {
   Vec3f box{1.0F, 1.0F, 1.0F};
 };
@@ -109,12 +120,17 @@ struct EntityTypeRecord {
   bool replicated_by_default{true};
 };
 
+struct EntityRegistryBuildOptions {
+  const EntityBehaviorRegistry* behaviors{};
+};
+
 class EntityRegistry {
 public:
   using Result = Expected<EntityRegistry, EntityRegistryError>;
 
-  [[nodiscard]] static Result build(std::vector<EntityDefinition> definitions);
-  [[nodiscard]] static Result build_with_builtins(std::vector<EntityDefinition> explicit_definitions);
+  [[nodiscard]] static Result build(
+      std::vector<EntityDefinition> definitions,
+      EntityRegistryBuildOptions options = {});
 
   [[nodiscard]] const EntityTypeRecord* type(EntityTypeID id) const noexcept;
   [[nodiscard]] std::optional<EntityTypeID> find_type(std::string_view name) const;
@@ -132,7 +148,6 @@ private:
   HashMap<std::string, EntityTypeID> name_to_id_{};
 };
 
-[[nodiscard]] EntityDefinition make_player_entity_definition();
 [[nodiscard]] std::string normalize_entity_model_asset(std::string_view model);
 [[nodiscard]] std::string normalize_entity_animation_asset(std::string_view animation);
 [[nodiscard]] Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_definitions_json(

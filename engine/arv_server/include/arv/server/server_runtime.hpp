@@ -79,6 +79,16 @@ struct DroppedItemsConfig {
   f32 pickup_delay_seconds{0.5F};
 };
 
+struct StarterInventoryItem {
+  std::string item_name{};
+  u16 count{};
+};
+
+struct FluidContainerInteractionConfig {
+  std::string empty_container_item_name{};
+  std::string filled_source_item_name{};
+};
+
 struct ServerStartInfo {
   ServerMode mode{ServerMode::Integrated};
   TickRate base_tps{DefaultBaseTps};
@@ -86,7 +96,7 @@ struct ServerStartInfo {
   const voxel::BlockRegistry* block_registry{};
   const player::ItemRegistry* item_registry{};
   player::PlayerTuning player_tuning{};
-  voxel::FluidDefinition fluid_definition{voxel::make_water_fluid_definition()};
+  voxel::FluidDefinition fluid_definition{};
   ServerChunkStreamingConfig chunk_streaming{};
   std::optional<ServerChunkGenerationSettings> chunk_generation{};
   std::optional<world::WorldHeightSettings> world_height{};
@@ -111,6 +121,9 @@ struct ServerStartInfo {
   bool keep_alive_enabled{true};
   io::SkinConfig skins{};
   const lang::LanguageCatalog* language{};
+  const player::GameModeRegistry* game_modes{};
+  std::span<const StarterInventoryItem> starter_inventory{};
+  FluidContainerInteractionConfig fluid_containers{};
 };
 
 struct DroppedItemStack {

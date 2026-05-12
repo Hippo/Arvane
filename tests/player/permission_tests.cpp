@@ -1,3 +1,5 @@
+#include "arv/base/base_ids.hpp"
+#include "arv/base/base_module.hpp"
 #include "arv/player/permissions.hpp"
 
 #include <gtest/gtest.h>
@@ -6,23 +8,24 @@
 #include <vector>
 
 TEST(PermissionTests, BuiltInGameModesResolveDocumentedCorePermissions) {
-  const arv::player::GameModeRegistry modes = arv::player::GameModeRegistry::with_builtins();
+  arv::player::GameModeRegistry modes;
+  arv::base::register_base_game_modes(modes);
 
-  const auto creative = modes.permissions_for(arv::player::CreativeGameModeID);
+  const auto creative = modes.permissions_for(arv::base::ids::CreativeGameModeID);
   ASSERT_TRUE(creative.has_value());
   EXPECT_FALSE(creative->can_take_damage);
   EXPECT_TRUE(creative->can_modify_world);
   EXPECT_TRUE(creative->can_fly);
   EXPECT_TRUE(creative->has_collision);
 
-  const auto spectator = modes.permissions_for(arv::player::SpectatorGameModeID);
+  const auto spectator = modes.permissions_for(arv::base::ids::SpectatorGameModeID);
   ASSERT_TRUE(spectator.has_value());
   EXPECT_FALSE(spectator->can_modify_world);
   EXPECT_FALSE(spectator->can_interact);
   EXPECT_TRUE(spectator->can_fly);
   EXPECT_TRUE(spectator->has_collision);
 
-  const auto noclip = modes.permissions_for(arv::player::NoClipGameModeID);
+  const auto noclip = modes.permissions_for(arv::base::ids::NoClipGameModeID);
   ASSERT_TRUE(noclip.has_value());
   EXPECT_TRUE(noclip->can_fly);
   EXPECT_FALSE(noclip->has_collision);
@@ -63,7 +66,8 @@ TEST(PermissionTests, PlayerGroupsExpandInheritanceAndRespectDenyPrecedence) {
 }
 
 TEST(PermissionTests, RuntimeOverridesCanAllowAboveGameModeBaseButRegionDenyWins) {
-  const arv::player::GameModeRegistry modes = arv::player::GameModeRegistry::with_builtins();
+  arv::player::GameModeRegistry modes;
+  arv::base::register_base_game_modes(modes);
   const arv::player::PermissionGroupRegistry groups;
 
   arv::player::PlayerPermissions player_permissions;
@@ -76,7 +80,7 @@ TEST(PermissionTests, RuntimeOverridesCanAllowAboveGameModeBaseButRegionDenyWins
       modes,
       groups,
       {
-          arv::player::SpectatorGameModeID,
+          arv::base::ids::SpectatorGameModeID,
           &player_permissions,
           {},
           &region,

@@ -25,7 +25,7 @@ struct SurfaceLayerDefinition {
 };
 
 struct WorldGenerationConfig {
-  std::string id{"arvane:overworld"};
+  std::string id{};
   u32 version{1};
   std::string seed_salt{"overworld"};
   i32 min_y{-64};

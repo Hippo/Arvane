@@ -295,6 +295,8 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
   entity_registry_ = start_info.entity_registry;
+  game_modes_ = start_info.game_modes == nullptr ? player::GameModeRegistry{}
+                                                 : *start_info.game_modes;
   player_tuning_ = start_info.player_tuning;
   block_breaking_ = start_info.block_breaking;
   dropped_items_ = start_info.dropped_items;
@@ -311,6 +313,10 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   active_skin_uploads_global_ = 0U;
   skin_storage_bytes_ = current_skin_storage_bytes(server_save_root_);
   fluid_definition_ = start_info.fluid_definition;
+  starter_inventory_.assign(
+      start_info.starter_inventory.begin(),
+      start_info.starter_inventory.end());
+  fluid_containers_ = start_info.fluid_containers;
   configure_chunk_streaming(start_info.chunk_streaming);
   chunk_generation_ = start_info.chunk_generation;
   if (chunk_generation_.has_value() && chunk_generation_->enabled) {

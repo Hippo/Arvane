@@ -5,11 +5,14 @@
 #include "arv/core/expected.hpp"
 #include "arv/io/config.hpp"
 #include "arv/player/player_constants.hpp"
+#include "arv/player/permissions.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
+
+#include <vector>
 
 namespace arv::dedicated {
 
@@ -25,6 +28,9 @@ struct DedicatedRuntimeConfig {
   world::WorldTickPolicy world_tick_policy;
   voxel::FluidDefinition water_fluid;
   player::PlayerTuning player_tuning;
+  player::GameModeRegistry game_modes;
+  std::vector<server::StarterInventoryItem> starter_inventory;
+  server::FluidContainerInteractionConfig fluid_containers;
 };
 
 [[nodiscard]] DedicatedRuntimeConfig make_dedicated_runtime_config(

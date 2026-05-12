@@ -80,7 +80,9 @@ class GameModeRegistry {
 public:
   using Result = Expected<void, PermissionError>;
 
-  [[nodiscard]] static GameModeRegistry with_builtins();
+  [[nodiscard]] Result add_builtin_mode(
+      std::string id,
+      ResolvedCorePermissions permissions);
 
   [[nodiscard]] Result add_custom_mode(
       std::string id,
@@ -93,8 +95,6 @@ public:
   [[nodiscard]] std::vector<std::string> mode_ids() const;
 
 private:
-  void add_builtin(std::string_view id, ResolvedCorePermissions permissions);
-
   std::vector<GameModeDefinition> modes_{};
   HashMap<std::string, usize> mode_indices_{};
 };

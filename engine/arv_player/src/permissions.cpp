@@ -240,60 +240,25 @@ bool ResolvedPermissions::has(std::string_view node) const {
   return custom_value(node) == TriState::Allow;
 }
 
-GameModeRegistry GameModeRegistry::with_builtins() {
-  GameModeRegistry registry;
+GameModeRegistry::Result GameModeRegistry::add_builtin_mode(
+    std::string id,
+    ResolvedCorePermissions permissions) {
+  if (id.empty()) {
+    return Result::failure({"built-in game mode id is empty"});
+  }
+  if (mode_indices_.find(id) != mode_indices_.end()) {
+    return Result::failure({"duplicate game mode id: " + id});
+  }
 
-  registry.add_builtin(SurvivalGameModeID, {});
-  registry.add_builtin(
-      CreativeGameModeID,
-      {
-          false,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-      });
-  registry.add_builtin(
-      SpectatorGameModeID,
-      {
-          false,
-          false,
-          false,
-          false,
-          false,
-          true,
-          true,
-          false,
-      });
-  registry.add_builtin(
-      LobbyGameModeID,
-      {
-          false,
-          false,
-          false,
-          true,
-          false,
-          false,
-          true,
-          true,
-      });
-  registry.add_builtin(
-      NoClipGameModeID,
-      {
-          false,
-          false,
-          false,
-          false,
-          false,
-          true,
-          false,
-          false,
-      });
+  GameModeDefinition definition;
+  definition.id = std::move(id);
+  definition.permissions = permissions;
+  definition.overrides = core_from_resolved(permissions);
+  definition.builtin = true;
 
-  return registry;
+  mode_indices_[definition.id] = modes_.size();
+  modes_.push_back(std::move(definition));
+  return Result::success();
 }
 
 GameModeRegistry::Result GameModeRegistry::add_custom_mode(
@@ -305,10 +270,6 @@ GameModeRegistry::Result GameModeRegistry::add_custom_mode(
   }
   if (mode_indices_.find(id) != mode_indices_.end()) {
     return Result::failure({"duplicate game mode id: " + id});
-  }
-  if (id == SurvivalGameModeID || id == CreativeGameModeID || id == SpectatorGameModeID ||
-      id == LobbyGameModeID || id == NoClipGameModeID) {
-    return Result::failure({"built-in game mode cannot be replaced: " + id});
   }
 
   const std::optional<ResolvedCorePermissions> base = permissions_for(base_id);
@@ -349,19 +310,6 @@ std::vector<std::string> GameModeRegistry::mode_ids() const {
     ids.push_back(mode.id);
   }
   return ids;
-}
-
-void GameModeRegistry::add_builtin(
-    std::string_view id,
-    ResolvedCorePermissions permissions) {
-  GameModeDefinition definition;
-  definition.id = std::string{id};
-  definition.permissions = permissions;
-  definition.overrides = core_from_resolved(permissions);
-  definition.builtin = true;
-
-  mode_indices_[definition.id] = modes_.size();
-  modes_.push_back(std::move(definition));
 }
 
 PermissionGroupRegistry::Result PermissionGroupRegistry::add_group(PermissionGroup group) {

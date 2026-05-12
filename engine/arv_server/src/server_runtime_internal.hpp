@@ -415,11 +415,13 @@ struct ServerRuntimeImpl {
   io::MovementValidationConfig movement_{};
   io::KeepAliveConfig keep_alive_{};
   io::SkinConfig skins_{};
-  voxel::FluidDefinition fluid_definition_{voxel::make_water_fluid_definition()};
+  voxel::FluidDefinition fluid_definition_{};
+  std::vector<StarterInventoryItem> starter_inventory_{};
+  FluidContainerInteractionConfig fluid_containers_{};
   ServerChunkStreamer chunk_streamer_{};
   std::optional<ServerChunkGenerationSettings> chunk_generation_{};
   std::vector<QueuedChunkStreamMessage> queued_chunk_stream_messages_;
-  player::GameModeRegistry game_modes_{player::GameModeRegistry::with_builtins()};
+  player::GameModeRegistry game_modes_{};
   player::PermissionGroupRegistry permission_groups_{};
   std::filesystem::path server_save_root_{};
   u64 permission_config_revision_{};

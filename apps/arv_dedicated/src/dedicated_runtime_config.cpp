@@ -3,6 +3,9 @@
 #include "dedicated_registry_loader.hpp"
 #include "dedicated_save_state.hpp"
 
+#include "arv/base/base_ids.hpp"
+#include "arv/base/base_module.hpp"
+
 #include <algorithm>
 #include <span>
 #include <utility>
@@ -84,10 +87,19 @@ DedicatedRuntimeConfig make_dedicated_runtime_config(
   runtime_config.world_tick_policy.fluid_budget =
       config.simulation.systems.fluids.budget;
 
-  runtime_config.water_fluid = voxel::make_water_fluid_definition();
+  runtime_config.water_fluid = base::make_base_water_fluid_definition();
   runtime_config.water_fluid.flow_interval_ticks =
       config.simulation.fluids.water.flow_interval_ticks;
   runtime_config.player_tuning = make_player_tuning(config.physics);
+  base::register_base_game_modes(runtime_config.game_modes);
+  for (const base::StarterInventoryItem item : base::starter_inventory_items()) {
+    runtime_config.starter_inventory.push_back(
+        {std::string{item.item_name}, item.count});
+  }
+  runtime_config.fluid_containers.empty_container_item_name =
+      std::string{base::ids::BucketItemID};
+  runtime_config.fluid_containers.filled_source_item_name =
+      std::string{base::ids::WaterBucketItemID};
   return runtime_config;
 }
 
@@ -112,6 +124,10 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.listen_address = {config.network.bind_address, config.network.port};
   server_start_info.block_registry = &registries.block_registry;
   server_start_info.item_registry = &registries.item_registry;
+  server_start_info.game_modes = &runtime_config.game_modes;
+  server_start_info.starter_inventory =
+      std::span<const server::StarterInventoryItem>{runtime_config.starter_inventory};
+  server_start_info.fluid_containers = runtime_config.fluid_containers;
   server_start_info.language = &registries.language;
   server_start_info.player_tuning = runtime_config.player_tuning;
   server_start_info.fluid_definition = runtime_config.water_fluid;

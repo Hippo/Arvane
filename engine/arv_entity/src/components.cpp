@@ -21,38 +21,6 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
   return lhs.name < rhs.name;
 }
 
-void merge_explicit_definition(EntityDefinition& target, EntityDefinition source) {
-  if (!source.display_name.empty()) {
-    target.display_name = std::move(source.display_name);
-  }
-  if (!source.category.empty()) {
-    target.category = std::move(source.category);
-  }
-  if (!source.model_asset.empty()) {
-    target.model_asset = std::move(source.model_asset);
-  }
-  if (!source.animation_asset.empty()) {
-    target.animation_asset = std::move(source.animation_asset);
-  }
-  if (!source.components.component_ids.empty()) {
-    target.components = std::move(source.components);
-  }
-  target.spawnable = source.spawnable;
-  target.persistent_by_default = source.persistent_by_default;
-  target.replicated_by_default = source.replicated_by_default;
-  if (target.name == PlayerEntityTypeName) {
-    target.spawnable = false;
-    target.persistent_by_default = true;
-    target.replicated_by_default = true;
-  }
-}
-
-[[nodiscard]] bool is_builtin_goal_type(std::string_view type) noexcept {
-  return type == "arvane:idle" ||
-         type == "arvane:wander" ||
-         type == "arvane:float_in_fluid";
-}
-
 [[nodiscard]] bool has_animation_asset_kind(std::string_view animation) noexcept {
   const usize separator = animation.find(':');
   if (separator == std::string_view::npos) {
@@ -89,10 +57,6 @@ void merge_explicit_definition(EntityDefinition& target, EntityDefinition source
 
   AuthoredGoalDefinition goal;
   goal.type = type->get<std::string>();
-  if (!is_builtin_goal_type(goal.type)) {
-    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
-        {"unknown behavior goal ID: " + goal.type});
-  }
   goal.priority = goal_json.value("priority", 0);
   goal.radius = goal_json.value("radius", 0.0F);
   goal.speed_multiplier = goal_json.value("speed_multiplier", 1.0F);
@@ -213,16 +177,33 @@ void merge_explicit_definition(EntityDefinition& target, EntityDefinition source
 
 } // namespace
 
-EntityRegistry::Result EntityRegistry::build(std::vector<EntityDefinition> definitions) {
+EntityBehaviorRegistry::Result EntityBehaviorRegistry::register_goal_type(std::string id) {
+  if (id.empty()) {
+    return Result::failure({"entity goal type id is empty"});
+  }
+  if (goal_types_.find(id) != goal_types_.end()) {
+    return Result::failure({"duplicate entity goal type id: " + id});
+  }
+  goal_types_.insert(std::move(id));
+  return Result::success();
+}
+
+bool EntityBehaviorRegistry::has_goal_type(std::string_view id) const {
+  return goal_types_.find(std::string{id}) != goal_types_.end();
+}
+
+EntityRegistry::Result EntityRegistry::build(
+    std::vector<EntityDefinition> definitions,
+    EntityRegistryBuildOptions options) {
   HashMap<std::string, usize> definition_names;
   for (usize index = 0; index < definitions.size(); ++index) {
     EntityDefinition& definition = definitions[index];
     if (definition.name.empty()) {
       return Result::failure({"entity definition has empty name"});
     }
-    if (definition.components.brain.has_value()) {
+    if (options.behaviors != nullptr && definition.components.brain.has_value()) {
       for (const AuthoredGoalDefinition& goal : definition.components.brain->goals) {
-        if (!is_builtin_goal_type(goal.type)) {
+        if (!options.behaviors->has_goal_type(goal.type)) {
           return Result::failure({"unknown behavior goal ID: " + goal.type});
         }
       }
@@ -274,34 +255,6 @@ EntityRegistry::Result EntityRegistry::build(std::vector<EntityDefinition> defin
   return Result::success(std::move(registry));
 }
 
-EntityRegistry::Result EntityRegistry::build_with_builtins(
-    std::vector<EntityDefinition> explicit_definitions) {
-  std::vector<EntityDefinition> definitions;
-  definitions.reserve(explicit_definitions.size() + 1U);
-  definitions.push_back(make_player_entity_definition());
-
-  HashMap<std::string, usize> definition_indices;
-  definition_indices.emplace(definitions.front().name, 0U);
-  HashSet<std::string> explicit_names;
-  for (EntityDefinition& definition : explicit_definitions) {
-    if (definition.name.empty()) {
-      return Result::failure({"entity definition has empty name"});
-    }
-    if (!explicit_names.insert(definition.name).second) {
-      return Result::failure({"duplicate explicit entity definition: " + definition.name});
-    }
-    if (auto existing = definition_indices.find(definition.name);
-        existing == definition_indices.end()) {
-      definition_indices.emplace(definition.name, definitions.size());
-      definitions.push_back(std::move(definition));
-    } else {
-      merge_explicit_definition(definitions[existing->second], std::move(definition));
-    }
-  }
-
-  return build(std::move(definitions));
-}
-
 const EntityTypeRecord* EntityRegistry::type(EntityTypeID id) const noexcept {
   if (id.value == 0U || id.value >= types_.size()) {
     return nullptr;
@@ -319,19 +272,6 @@ void EntityRegistry::set_display_name(EntityTypeID id, std::string display_name)
     return;
   }
   types_[id.value].display_name = std::move(display_name);
-}
-
-EntityDefinition make_player_entity_definition() {
-  EntityDefinition definition;
-  definition.name = std::string{PlayerEntityTypeName};
-  definition.display_name = "Player";
-  definition.category = "builtin";
-  definition.model_asset = "arvane:model/entity/player";
-  definition.animation_asset = "arvane:animation/player";
-  definition.spawnable = false;
-  definition.persistent_by_default = true;
-  definition.replicated_by_default = true;
-  return definition;
 }
 
 std::string normalize_entity_model_asset(std::string_view model) {

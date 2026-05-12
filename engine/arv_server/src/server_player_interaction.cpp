@@ -171,10 +171,14 @@ namespace {
 
 [[nodiscard]] std::optional<player::Inventory> inventory_after_bucket_fill(
     const player::PlayerState& player_state,
-    const player::ItemRegistry& item_registry) {
-  const std::optional<player::ItemID> water_bucket =
-      find_item_id(item_registry, "arvane:water_bucket");
-  if (!water_bucket.has_value()) {
+    const player::ItemRegistry& item_registry,
+    std::string_view filled_source_item_name) {
+  if (filled_source_item_name.empty()) {
+    return std::nullopt;
+  }
+  const std::optional<player::ItemID> filled_source_item =
+      find_item_id(item_registry, filled_source_item_name);
+  if (!filled_source_item.has_value()) {
     return std::nullopt;
   }
 
@@ -186,7 +190,7 @@ namespace {
   }
 
   if (held->count == 1U) {
-    if (!next_inventory.set_slot(slot, player::ItemStack{water_bucket.value(), 1U})) {
+    if (!next_inventory.set_slot(slot, player::ItemStack{filled_source_item.value(), 1U})) {
       return std::nullopt;
     }
   } else {
@@ -194,7 +198,7 @@ namespace {
       return std::nullopt;
     }
     const player::InventoryInsertResult insert =
-        next_inventory.insert_stack({water_bucket.value(), 1U}, item_registry);
+        next_inventory.insert_stack({filled_source_item.value(), 1U}, item_registry);
     if (!insert.complete()) {
       return std::nullopt;
     }
@@ -205,9 +209,14 @@ namespace {
 
 [[nodiscard]] std::optional<player::Inventory> inventory_after_water_place(
     const player::PlayerState& player_state,
-    const player::ItemRegistry& item_registry) {
-  const std::optional<player::ItemID> bucket = find_item_id(item_registry, "arvane:bucket");
-  if (!bucket.has_value()) {
+    const player::ItemRegistry& item_registry,
+    std::string_view empty_container_item_name) {
+  if (empty_container_item_name.empty()) {
+    return std::nullopt;
+  }
+  const std::optional<player::ItemID> empty_container_item =
+      find_item_id(item_registry, empty_container_item_name);
+  if (!empty_container_item.has_value()) {
     return std::nullopt;
   }
 
@@ -219,7 +228,7 @@ namespace {
   }
 
   if (held->count == 1U) {
-    if (!next_inventory.set_slot(slot, player::ItemStack{bucket.value(), 1U})) {
+    if (!next_inventory.set_slot(slot, player::ItemStack{empty_container_item.value(), 1U})) {
       return std::nullopt;
     }
   } else {
@@ -227,7 +236,7 @@ namespace {
       return std::nullopt;
     }
     const player::InventoryInsertResult insert =
-        next_inventory.insert_stack({bucket.value(), 1U}, item_registry);
+        next_inventory.insert_stack({empty_container_item.value(), 1U}, item_registry);
     if (!insert.complete()) {
       return std::nullopt;
     }
@@ -391,7 +400,8 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       return;
     }
 
-    if (held_item->name == "arvane:bucket") {
+    if (!fluid_containers_.empty_container_item_name.empty() &&
+        held_item->name == fluid_containers_.empty_container_item_name) {
       const std::optional<BlockPos> source = raycast_source_fluid(
           default_world_,
           *block_registry_,
@@ -403,7 +413,10 @@ void ServerRuntimeImpl::apply_player_interaction_command(
         return;
       }
       std::optional<player::Inventory> next_inventory =
-          inventory_after_bucket_fill(player_state, *item_registry_);
+          inventory_after_bucket_fill(
+              player_state,
+              *item_registry_,
+              fluid_containers_.filled_source_item_name);
       if (!next_inventory.has_value()) {
         return;
       }
@@ -416,7 +429,8 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       return;
     }
 
-    if (held_item->name == "arvane:water_bucket") {
+    if (!fluid_containers_.filled_source_item_name.empty() &&
+        held_item->name == fluid_containers_.filled_source_item_name) {
       auto hit = physics::raycast_blocks(
           interaction_query,
           eye_position,
@@ -444,7 +458,10 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       }
 
       std::optional<player::Inventory> next_inventory =
-          inventory_after_water_place(player_state, *item_registry_);
+          inventory_after_water_place(
+              player_state,
+              *item_registry_,
+              fluid_containers_.empty_container_item_name);
       if (!next_inventory.has_value()) {
         return;
       }

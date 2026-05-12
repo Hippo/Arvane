@@ -1,3 +1,4 @@
+#include "arv/base/base_module.hpp"
 #include "arv/world/world_runtime.hpp"
 #include "support/test_registries.hpp"
 
@@ -124,7 +125,7 @@ TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {
       std::string{arv::entity::BrainComponentID}};
 
   auto registry_result =
-      arv::entity::EntityRegistry::build_with_builtins({std::move(definition)});
+      arv::base::build_base_entity_registry({std::move(definition)});
   ASSERT_TRUE(registry_result) << registry_result.error().message;
   const std::optional<arv::EntityTypeID> type_id =
       registry_result.value().find_type("arvane:test_wanderer");

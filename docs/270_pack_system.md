@@ -174,6 +174,13 @@ Built-in packs may also declare a compiled module in `builtin.module`. Built-in
 modules are linked into the executable and registered by engine startup code;
 they are not dynamic libraries and do not use the native plugin loader.
 
+For the base pack, `builtin.module: "arv_base"` names the compiled provider for
+base-game behavior. Runtime composition code registers that module into generic
+registries after pack data is loaded. Generic systems own registries, parsers,
+and loaders; `arv_base` only contributes `arvane_base` behavior such as built-in
+game modes, base entity behavior IDs, the built-in player entity definition,
+starter gameplay defaults, and command implementations.
+
 ---
 
 ## Pack Directory Layout
@@ -274,6 +281,10 @@ namespaces:
 The base pack should be special only in that it is required by default. It should otherwise participate in the same pack loading, resource resolution, and validation rules as other packs.
 
 This avoids a split model where built-in content uses one loader and external content uses another.
+
+Compiled behavior for the base pack lives in `engine/arv_base/`. Data and assets
+for the same pack live in `arvane_home/packs/arvane_base/`; C++ source code must
+not be placed in the runtime pack directory.
 
 ---
 
@@ -529,6 +540,11 @@ builtin:
 
 The presence of this section does not dynamically load code. It declares that
 the executable is expected to provide and register the named module.
+
+Startup treats missing required handlers from a built-in module as configuration
+errors. For example, if base entity data references `arvane:wander`, the base
+entity behavior registry must have that goal ID registered before entity
+registry construction succeeds.
 
 ---
 

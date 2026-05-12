@@ -131,6 +131,21 @@ They may be referenced by:
 * saves
 * plugins
 
+The generic permission framework lives in `engine/arv_player`. The built-in
+Arvane presets are registered by `engine/arv_base` during application/runtime
+composition and then passed to the server runtime. Generic systems query the
+resolved permissions and do not depend on `arv_base`.
+
+`arv_base` registers these built-in IDs:
+
+```text
+survival
+creative
+spectator
+lobby
+noclip
+```
+
 ---
 
 ### Survival (default)
@@ -241,7 +256,7 @@ is_visible_to_others: false
 
 ## Custom Game Modes
 
-The engine must support defining new modes via config/plugins.
+The generic registry supports defining new modes via config/plugins.
 
 Example:
 
@@ -255,7 +270,7 @@ game_modes:
 
 ### Rules
 
-* Built-in modes cannot be modified or renamed
+* Built-in modes cannot be modified or renamed once registered
 * Custom modes:
 
   * must define a base

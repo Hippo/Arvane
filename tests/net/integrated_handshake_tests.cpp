@@ -316,11 +316,13 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
       arv::testsupport::make_test_item_registry(block_registry);
   auto transports = arv::net::make_in_process_transport_pair();
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
-                            arv::DefaultBaseTps,
-                            {"in-process", 0},
-                            &block_registry,
-                            &item_registry}));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  ASSERT_TRUE(server.start(start_info));
 
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
@@ -638,6 +640,8 @@ TEST(IntegratedHandshakeTests, InventoryActionsFlowThroughAuthoritativeProtocolU
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
       arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID bucket_item =
+      item_registry.find_item("arvane:bucket").value();
   auto transports = arv::net::make_in_process_transport_pair();
   arv::server::ServerRuntime server(std::move(transports.server));
   ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
@@ -652,6 +656,12 @@ TEST(IntegratedHandshakeTests, InventoryActionsFlowThroughAuthoritativeProtocolU
   server.tick();
   client.fixed_tick(server.tick_index());
   ASSERT_TRUE(client.has_authoritative_inventory());
+  arv::player::PlayerState& player = connected_player(server);
+  ASSERT_TRUE(server.insert_player_inventory_stack(
+      player.player_id,
+      arv::player::ItemStack{bucket_item, 1U}).complete());
+  server.tick();
+  client.fixed_tick(server.tick_index());
   ASSERT_TRUE(client.inventory().slot(0).has_value());
 
   ASSERT_TRUE(client.request_inventory_slot_click(
@@ -660,7 +670,6 @@ TEST(IntegratedHandshakeTests, InventoryActionsFlowThroughAuthoritativeProtocolU
   server.tick();
   client.fixed_tick(server.tick_index());
 
-  arv::player::PlayerState& player = connected_player(server);
   ASSERT_TRUE(player.inventory_cursor_stack.has_value());
   EXPECT_FALSE(player.inventory.slot(0).has_value());
   ASSERT_TRUE(client.inventory_cursor_stack().has_value());

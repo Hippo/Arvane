@@ -1,6 +1,8 @@
 #include "desktop_assets.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/base/base_ids.hpp"
+#include "arv/base/base_module.hpp"
 #include "arv/io/config.hpp"
 #include "arv/lang/language.hpp"
 #include "arv/persistence/save.hpp"
@@ -377,7 +379,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("entities", entity_definitions.error().message);
   }
   auto entity_registry_result =
-      entity::EntityRegistry::build_with_builtins(std::move(entity_definitions.value()));
+      base::build_base_entity_registry(std::move(entity_definitions.value()));
   if (!entity_registry_result) {
     return asset_failure("entities", entity_registry_result.error().message);
   }
@@ -421,7 +423,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
     }
   }
 
-  auto worldgen_text = packs.load_data_text("arvane:worldgen/overworld", ".yaml");
+  auto worldgen_text = packs.load_data_text(base::ids::OverworldWorldgenDataID, ".yaml");
   if (!worldgen_text) {
     return asset_failure("worldgen", worldgen_text.error().describe());
   }

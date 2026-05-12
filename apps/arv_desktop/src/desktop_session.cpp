@@ -231,6 +231,10 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.listen_address = {"in-process", 0};
   server_start_info.block_registry = &dependencies_.block_registry;
   server_start_info.item_registry = &dependencies_.item_registry;
+  server_start_info.game_modes = &dependencies_.game_modes;
+  server_start_info.starter_inventory =
+      std::span<const server::StarterInventoryItem>{dependencies_.starter_inventory};
+  server_start_info.fluid_containers = dependencies_.fluid_containers;
   server_start_info.player_tuning = dependencies_.player_tuning;
   server_start_info.fluid_definition = dependencies_.water_fluid;
   server_start_info.chunk_streaming = make_chunk_streaming_config(dependencies_.config);

@@ -512,9 +512,12 @@ Goal types are registered by ID.
 Example:
 
 ```cpp
-registry.register_goal("arvane:wander", WanderGoalType{});
-registry.register_goal("arvane:melee_attack", MeleeAttackGoalType{});
-registry.register_goal("arvane:float_in_fluid", FloatInFluidGoalType{});
+entity::EntityBehaviorRegistry behavior_registry;
+base::register_base_entity_behaviors(behavior_registry);
+
+auto entity_registry = entity::EntityRegistry::build(
+    definitions,
+    {.behaviors = &behavior_registry});
 ```
 
 Rules:
@@ -523,24 +526,33 @@ Rules:
 * Runtime lookup may map IDs to dense integer IDs.
 * Unknown goal IDs should fail validation with a clear error.
 * Invalid parameters should fail data loading, not crash simulation.
+* Generic entity registries own loading and validation.
+* `engine/arv_base` contributes built-in `arvane:*` behavior IDs.
+* Entity definitions live in pack data unless a definition has compiled
+  invariants, such as the player entity.
 
 ---
 
-## Built-In Goal Candidates
+## Built-In Goals
 
-Initial built-in goals should stay small and reusable.
+Built-in goals should stay small and reusable.
 
-Recommended first set:
+The current `arv_base` registration set is:
 
 ```text
 arvane:idle
 arvane:wander
+arvane:float_in_fluid
+```
+
+Additional reusable goals can be added behind stable IDs:
+
+```text
 arvane:look_at_target
 arvane:nearest_target
 arvane:move_to_target
 arvane:melee_attack
 arvane:flee
-arvane:float_in_fluid
 arvane:avoid_hazard
 arvane:despawn_when_far
 ```

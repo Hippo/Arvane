@@ -1,4 +1,5 @@
 #include "arv/asset/resource.hpp"
+#include "arv/base/base_module.hpp"
 #include "arv/entity/components.hpp"
 
 #include <gtest/gtest.h>
@@ -54,7 +55,7 @@ TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
   ASSERT_TRUE(parsed) << parsed.error().message;
 
   auto registry_result =
-      arv::entity::EntityRegistry::build_with_builtins(std::move(parsed.value()));
+      arv::base::build_base_entity_registry(std::move(parsed.value()));
   ASSERT_TRUE(registry_result) << registry_result.error().message;
   const arv::entity::EntityRegistry registry = std::move(registry_result.value());
 
@@ -129,7 +130,7 @@ TEST(EntityRegistryTests, ParsesOptionalPresentationAnimation) {
 )json");
   ASSERT_TRUE(parsed) << parsed.error().message;
   auto registry_result =
-      arv::entity::EntityRegistry::build_with_builtins(std::move(parsed.value()));
+      arv::base::build_base_entity_registry(std::move(parsed.value()));
   ASSERT_TRUE(registry_result) << registry_result.error().message;
   const std::optional<arv::EntityTypeID> pig_id =
       registry_result.value().find_type("arvane:pig");
@@ -182,8 +183,11 @@ TEST(EntityRegistryTests, RejectsUnknownBehaviorGoalIDs) {
 }
 )json");
 
-  ASSERT_FALSE(parsed);
-  EXPECT_NE(parsed.error().message.find("unknown behavior goal ID"), std::string::npos);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  auto registry_result =
+      arv::base::build_base_entity_registry(std::move(parsed.value()));
+  ASSERT_FALSE(registry_result);
+  EXPECT_NE(registry_result.error().message.find("unknown behavior goal ID"), std::string::npos);
 }
 
 TEST(EntityRegistryTests, RejectsDuplicateExplicitEntityNames) {
@@ -192,7 +196,7 @@ TEST(EntityRegistryTests, RejectsDuplicateExplicitEntityNames) {
   definitions.push_back({.name = "arvane:pig"});
 
   auto registry_result =
-      arv::entity::EntityRegistry::build_with_builtins(std::move(definitions));
+      arv::base::build_base_entity_registry(std::move(definitions));
   ASSERT_FALSE(registry_result);
   EXPECT_NE(registry_result.error().message.find("duplicate"), std::string::npos);
 }
@@ -208,7 +212,7 @@ TEST(EntityRegistryTests, KeepsPlayerDefinitionReservedWhenConfigured) {
   definitions.push_back(std::move(player));
 
   auto registry_result =
-      arv::entity::EntityRegistry::build_with_builtins(std::move(definitions));
+      arv::base::build_base_entity_registry(std::move(definitions));
   ASSERT_TRUE(registry_result) << registry_result.error().message;
   const arv::entity::EntityTypeRecord* player_record =
       registry_result.value().type(arv::entity::PlayerEntityTypeID);

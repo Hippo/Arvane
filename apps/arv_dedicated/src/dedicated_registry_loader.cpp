@@ -1,6 +1,7 @@
 #include "dedicated_registry_loader.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/base/base_module.hpp"
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/core/log.hpp"
 #include "arv/lang/language.hpp"
@@ -218,7 +219,7 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
   }
 
   auto entity_registry_result =
-      entity::EntityRegistry::build_with_builtins(std::move(entity_definitions.value()));
+      base::build_base_entity_registry(std::move(entity_definitions.value()));
   if (!entity_registry_result) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(
         dedicated_error("entities", entity_registry_result.error().message));

@@ -1,5 +1,6 @@
 #include "dedicated_worldgen_loader.hpp"
 
+#include "arv/base/base_ids.hpp"
 #include "arv/core/log.hpp"
 
 #include <utility>
@@ -10,7 +11,7 @@ Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(
     const io::EngineConfig& config,
     const asset::PackManager& packs) {
   (void)config;
-  auto worldgen_text = packs.load_data_text("arvane:worldgen/overworld", ".yaml");
+  auto worldgen_text = packs.load_data_text(base::ids::OverworldWorldgenDataID, ".yaml");
   if (!worldgen_text) {
     return Expected<DedicatedWorldgen, DedicatedError>::failure(
         dedicated_error("worldgen", worldgen_text.error().describe()));

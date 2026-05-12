@@ -2,6 +2,7 @@
 
 #include "desktop_runtime_config.hpp"
 
+#include "arv/base/base_ids.hpp"
 #include "arv/client/item_animation.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/world/world_queries.hpp"
@@ -33,7 +34,7 @@ bool DesktopFrameLoop::selected_water_bucket_can_leave_empty_bucket(
     return false;
   }
   const std::optional<player::ItemID> bucket_id =
-      assets_.item_registry.find_item("arvane:bucket");
+      assets_.item_registry.find_item(base::ids::BucketItemID);
   if (!bucket_id.has_value()) {
     return false;
   }
@@ -170,7 +171,7 @@ bool DesktopFrameLoop::preview_held_item_placement_succeeds(
   if (item->placement_variant.has_value()) {
     return preview_block_placement_succeeds(session, *item, query);
   }
-  if (item->name == "arvane:water_bucket") {
+  if (item->name == base::ids::WaterBucketItemID) {
     return preview_water_bucket_placement_succeeds(session, query);
   }
   return false;
