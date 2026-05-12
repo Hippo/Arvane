@@ -10,6 +10,7 @@
     },
     {
       "name": "arvane:wood_pickaxe",
+      "behavior": "arvane:item_behavior/tool",
       "category": "tools",
       "max_stack_size": 1,
       "buoyancy": 1.0,
@@ -35,6 +36,7 @@
     },
     {
       "name": "arvane:wood_shovel",
+      "behavior": "arvane:item_behavior/tool",
       "category": "tools",
       "max_stack_size": 1,
       "buoyancy": 1.0,
@@ -60,6 +62,7 @@
     },
     {
       "name": "arvane:bucket",
+      "behavior": "arvane:item_behavior/empty_fluid_container",
       "category": "tools",
       "max_stack_size": 16,
       "buoyancy": 1.0,
@@ -68,6 +71,7 @@
     },
     {
       "name": "arvane:water_bucket",
+      "behavior": "arvane:item_behavior/filled_fluid_container",
       "category": "tools",
       "max_stack_size": 1,
       "buoyancy": 1.0,

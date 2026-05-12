@@ -93,6 +93,8 @@ DedicatedRuntimeConfig make_dedicated_runtime_config(
       config.simulation.fluids.water.flow_interval_ticks;
   runtime_config.player_tuning = make_player_tuning(config.physics);
   base::register_base_game_modes(runtime_config.game_modes);
+  base::register_base_block_behaviors(runtime_config.block_behaviors);
+  base::register_base_item_behaviors(runtime_config.item_behaviors);
   base::register_base_entity_goals(runtime_config.entity_goals);
   base::register_base_block_break_behaviors(runtime_config.block_break_behaviors);
   for (const base::StarterInventoryItem item : base::starter_inventory_items()) {

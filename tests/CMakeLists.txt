@@ -5,6 +5,7 @@ include(GoogleTest)
 add_executable(arv_tests
   assets/asset_tests.cpp
   assets/pack_tests.cpp
+  base/base_behavior_tests.cpp
   client/chunk_interest_tests.cpp
   client/client_runtime_tests.cpp
   client/camera_tests.cpp

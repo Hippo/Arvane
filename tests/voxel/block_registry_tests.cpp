@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -106,6 +107,7 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   {
     "name": "arvane:glass",
     "display_name": "Glass",
+    "behavior": "test:block_behavior/glass",
     "buoyancy": 0.75,
     "drops": null,
     "render_category": "transparent",
@@ -141,8 +143,40 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   const arv::voxel::BlockRecord* glass_block = registry.block(glass_id.value());
   ASSERT_NE(glass_block, nullptr);
   EXPECT_EQ(glass_block->display_name, "Glass");
+  EXPECT_EQ(glass_block->behavior_id, "test:block_behavior/glass");
   EXPECT_FLOAT_EQ(glass_block->item_buoyancy, 0.75F);
   EXPECT_EQ(glass_block->drops.kind, arv::voxel::BlockDropKind::None);
+}
+
+TEST(BlockRegistryTests, ValidatesAuthoredBehaviorIdsWhenCallbackIsProvided) {
+  std::vector<arv::voxel::BlockDefinition> definitions = minimal_definitions();
+  definitions.back().behavior_id = "test:block_behavior/custom";
+
+  auto missing_result = arv::voxel::BlockRegistry::build(
+      definitions,
+      {.behavior_exists = arv::FunctionRef<bool(std::string_view)>{
+           [](std::string_view) { return false; }}});
+  ASSERT_FALSE(missing_result);
+  EXPECT_NE(
+      missing_result.error().message.find("missing block behavior handler"),
+      std::string::npos);
+
+  arv::voxel::BlockBehaviorRegistry behaviors;
+  ASSERT_TRUE(behaviors.register_handler("test:block_behavior/custom"));
+  auto registry_result = arv::voxel::BlockRegistry::build(
+      std::move(definitions),
+      {.behavior_exists = arv::FunctionRef<bool(std::string_view)>{
+           [&behaviors](std::string_view id) { return behaviors.contains(id); }}});
+  ASSERT_TRUE(registry_result);
+  const arv::voxel::BlockRegistry registry = std::move(registry_result.value());
+  const arv::voxel::BlockRecord* stone =
+      registry.block(registry.find_block("arvane:stone").value());
+  ASSERT_NE(stone, nullptr);
+  EXPECT_EQ(stone->behavior_id, "test:block_behavior/custom");
+  const arv::voxel::BlockVariantRecord* variant =
+      registry.variant(stone->default_variant);
+  ASSERT_NE(variant, nullptr);
+  EXPECT_EQ(variant->behavior_id, "test:block_behavior/custom");
 }
 
 TEST(BlockRegistryTests, ParsesBlockModelReferencesAndInputTextures) {

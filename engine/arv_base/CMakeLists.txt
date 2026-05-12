@@ -8,10 +8,12 @@ set(ARV_BASE_HEADERS
 add_library(arv_base STATIC
   src/base_commands.cpp
   src/base_module.cpp
+  src/blocks/block_behavior_registration.cpp
   src/entities/entity_goal_registration.cpp
   src/entities/entity_registration.cpp
   src/fluids/fluid_registration.cpp
   src/gameplay/block_break_registration.cpp
+  src/items/item_behavior_registration.cpp
   src/gameplay/starter_inventory.cpp
   src/gamemodes/gamemode_registration.cpp
   src/tp_command.cpp

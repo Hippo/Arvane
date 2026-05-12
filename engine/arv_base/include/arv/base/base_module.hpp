@@ -15,7 +15,12 @@ class FluidRenderData;
 }
 
 namespace arv::voxel {
+class BlockBehaviorRegistry;
 class BlockRegistry;
+}
+
+namespace arv::player {
+class ItemBehaviorRegistry;
 }
 
 namespace arv::world {
@@ -35,6 +40,8 @@ struct StarterInventoryItem {
 
 struct BaseModuleRegistry {
   player::GameModeRegistry* game_modes{};
+  voxel::BlockBehaviorRegistry* block_behaviors{};
+  player::ItemBehaviorRegistry* item_behaviors{};
   world::EntityGoalRegistry* entity_goals{};
   std::vector<entity::EntityDefinition>* entity_definitions{};
 };
@@ -42,6 +49,8 @@ struct BaseModuleRegistry {
 void register_base_module(BaseModuleRegistry& registry);
 
 void register_base_game_modes(player::GameModeRegistry& registry);
+void register_base_block_behaviors(voxel::BlockBehaviorRegistry& registry);
+void register_base_item_behaviors(player::ItemBehaviorRegistry& registry);
 void register_base_entity_goals(world::EntityGoalRegistry& registry);
 void register_base_block_break_behaviors(server::BlockBreakBehaviorRegistry& registry);
 

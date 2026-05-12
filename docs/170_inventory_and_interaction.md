@@ -93,6 +93,7 @@ An item definition should include:
 - max stack size
 - optional associated block state for placeable block items
 - item category
+- optional compiled behavior ID
 - use behavior
 - primary behavior
 - secondary behavior
@@ -110,6 +111,32 @@ Example authored names:
 Runtime item IDs must not be hard-coded into gameplay logic.
 
 Gameplay should reference item definitions by registry handles or authored names where appropriate.
+
+## Item Behavior IDs
+
+Items may declare a stable behavior ID:
+
+```json
+{
+  "name": "arvane:wood_pickaxe",
+  "behavior": "arvane:item_behavior/tool"
+}
+```
+
+The generic item registry stores this ID and can validate it through a supplied
+`ItemBehaviorRegistry`. Generic item loading does not include base-game
+behavior. `arv_base` registers built-in IDs such as:
+
+- `arvane:item_behavior/block`
+- `arvane:item_behavior/tool`
+- `arvane:item_behavior/empty_fluid_container`
+- `arvane:item_behavior/filled_fluid_container`
+
+If a pack-authored item names a behavior ID and the active composition does not
+register it, item registry construction fails before gameplay starts.
+
+Generated block items receive their default block-item behavior ID from runtime
+composition, not from a hard-coded dependency inside `arv_player`.
 
 ---
 

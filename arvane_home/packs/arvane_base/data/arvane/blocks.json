@@ -108,6 +108,7 @@
     },
     {
       "name": "arvane:water",
+      "behavior": "arvane:block_behavior/fluid",
       "render_category": "transparent",
       "textures": "arvane:texture/block/water",
       "is_item": false,

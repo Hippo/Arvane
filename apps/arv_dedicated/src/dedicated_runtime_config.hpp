@@ -4,6 +4,7 @@
 
 #include "arv/core/expected.hpp"
 #include "arv/io/config.hpp"
+#include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/permissions.hpp"
 #include "arv/sched/job_system.hpp"
@@ -30,6 +31,8 @@ struct DedicatedRuntimeConfig {
   voxel::FluidDefinition water_fluid;
   player::PlayerTuning player_tuning;
   player::GameModeRegistry game_modes;
+  voxel::BlockBehaviorRegistry block_behaviors;
+  player::ItemBehaviorRegistry item_behaviors;
   world::EntityGoalRegistry entity_goals;
   server::BlockBreakBehaviorRegistry block_break_behaviors;
   std::vector<server::StarterInventoryItem> starter_inventory;

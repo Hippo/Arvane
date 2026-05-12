@@ -29,6 +29,8 @@ struct DedicatedRegistries {
 [[nodiscard]] Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
     const io::EngineConfig& config,
     const asset::PackManager& packs,
+    const voxel::BlockBehaviorRegistry& block_behaviors,
+    const player::ItemBehaviorRegistry& item_behaviors,
     const world::EntityGoalRegistry& entity_goals);
 
 } // namespace arv::dedicated

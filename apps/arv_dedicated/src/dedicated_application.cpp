@@ -70,7 +70,12 @@ int DedicatedApplication::run(int argc, char** argv) {
 
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::LoadingRegistries);
   auto registries_result =
-      load_dedicated_registries(config, pack_manager, runtime_config.entity_goals);
+      load_dedicated_registries(
+          config,
+          pack_manager,
+          runtime_config.block_behaviors,
+          runtime_config.item_behaviors,
+          runtime_config.entity_goals);
   if (!registries_result) {
     return fail(registries_result.error());
   }

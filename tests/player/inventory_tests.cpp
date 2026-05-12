@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -155,6 +156,7 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
     {
       "name": "arvane:coal",
       "display_name": "Coal",
+      "behavior": "test:item_behavior/resource",
       "max_stack_size": 64,
       "buoyancy": 0.5,
       "render_type": "texture",
@@ -191,6 +193,7 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
   ASSERT_TRUE(coal_id);
   const arv::player::ItemRecord* coal = registry.item(coal_id.value());
   ASSERT_NE(coal, nullptr);
+  EXPECT_EQ(coal->behavior_id, "test:item_behavior/resource");
   EXPECT_EQ(coal->render_type, arv::player::ItemRenderType::Texture);
   EXPECT_EQ(coal->texture_asset, "arvane:texture/item/coal");
   EXPECT_FLOAT_EQ(coal->buoyancy, 0.5F);
@@ -206,6 +209,48 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
   EXPECT_FALSE(coal->placement_variant.has_value());
 }
 
+TEST(ItemRegistryTests, ValidatesAuthoredBehaviorIdsWhenCallbackIsProvided) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  auto definitions = arv::player::parse_item_definitions_json(R"json(
+{
+  "items": [
+    {
+      "name": "arvane:wand",
+      "behavior": "test:item_behavior/wand",
+      "render_type": "texture",
+      "texture": "arvane:texture/item/wand"
+    }
+  ]
+}
+)json");
+  ASSERT_TRUE(definitions);
+
+  auto missing_result = arv::player::ItemRegistry::build_from_blocks_and_items(
+      block_registry,
+      definitions.value(),
+      {.behavior_exists = arv::FunctionRef<bool(std::string_view)>{
+           [](std::string_view) { return false; }}});
+  ASSERT_FALSE(missing_result);
+  EXPECT_NE(
+      missing_result.error().message.find("missing item behavior handler"),
+      std::string::npos);
+
+  arv::player::ItemBehaviorRegistry behaviors;
+  ASSERT_TRUE(behaviors.register_handler("test:item_behavior/wand"));
+  auto registry_result = arv::player::ItemRegistry::build_from_blocks_and_items(
+      block_registry,
+      std::move(definitions.value()),
+      {.behavior_exists = arv::FunctionRef<bool(std::string_view)>{
+           [&behaviors](std::string_view id) { return behaviors.contains(id); }}});
+  ASSERT_TRUE(registry_result);
+
+  const auto wand_id = registry_result.value().find_item("arvane:wand");
+  ASSERT_TRUE(wand_id);
+  const arv::player::ItemRecord* wand = registry_result.value().item(wand_id.value());
+  ASSERT_NE(wand, nullptr);
+  EXPECT_EQ(wand->behavior_id, "test:item_behavior/wand");
+}
+
 TEST(ItemRegistryTests, GeneratedBlockItemsResolveToBlockRenderType) {
   std::vector<arv::voxel::BlockDefinition> blocks;
   blocks.push_back(arv::voxel::make_air_definition());
@@ -218,8 +263,14 @@ TEST(ItemRegistryTests, GeneratedBlockItemsResolveToBlockRenderType) {
   ASSERT_TRUE(block_registry_result);
   const arv::voxel::BlockRegistry block_registry =
       std::move(block_registry_result.value());
+  arv::player::ItemBehaviorRegistry behaviors;
+  ASSERT_TRUE(behaviors.register_handler("test:item_behavior/block"));
   auto item_registry_result =
-      arv::player::ItemRegistry::build_default_block_items(block_registry);
+      arv::player::ItemRegistry::build_default_block_items(
+          block_registry,
+          {.behavior_exists = arv::FunctionRef<bool(std::string_view)>{
+               [&behaviors](std::string_view id) { return behaviors.contains(id); }},
+           .default_block_item_behavior_id = "test:item_behavior/block"});
   ASSERT_TRUE(item_registry_result);
   const arv::player::ItemRegistry item_registry =
       std::move(item_registry_result.value());
@@ -230,6 +281,7 @@ TEST(ItemRegistryTests, GeneratedBlockItemsResolveToBlockRenderType) {
   ASSERT_NE(stone_item, nullptr);
   EXPECT_EQ(stone_item->display_name, "Stone");
   EXPECT_EQ(stone_item->render_type, arv::player::ItemRenderType::Block);
+  EXPECT_EQ(stone_item->behavior_id, "test:item_behavior/block");
   ASSERT_TRUE(stone_item->render_block_variant.has_value());
   EXPECT_EQ(
       stone_item->render_block_variant.value(),

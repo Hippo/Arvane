@@ -1,6 +1,7 @@
 #include "dedicated_registry_loader.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/core/log.hpp"
@@ -111,6 +112,8 @@ namespace {
 Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
     const io::EngineConfig& config,
     const asset::PackManager& packs,
+    const voxel::BlockBehaviorRegistry& block_behaviors,
+    const player::ItemBehaviorRegistry& item_behaviors,
     const world::EntityGoalRegistry& entity_goals) {
   auto language_result = load_pack_language(
       packs,
@@ -135,8 +138,13 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
         dedicated_error("blocks", block_definitions.error().message));
   }
 
+  const auto block_behavior_exists = [&block_behaviors](std::string_view id) {
+    return block_behaviors.contains(id);
+  };
   auto block_registry_result =
-      voxel::BlockRegistry::build(std::move(block_definitions.value()));
+      voxel::BlockRegistry::build(
+          std::move(block_definitions.value()),
+          {.behavior_exists = FunctionRef<bool(std::string_view)>{block_behavior_exists}});
   if (!block_registry_result) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(
         dedicated_error("blocks", block_registry_result.error().message));
@@ -181,10 +189,15 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
         dedicated_error("items", item_definitions.error().message));
   }
 
+  const auto item_behavior_exists = [&item_behaviors](std::string_view id) {
+    return item_behaviors.contains(id);
+  };
   auto item_registry_result =
       player::ItemRegistry::build_from_blocks_and_items(
           registries.block_registry,
-          std::move(item_definitions.value()));
+          std::move(item_definitions.value()),
+          {.behavior_exists = FunctionRef<bool(std::string_view)>{item_behavior_exists},
+           .default_block_item_behavior_id = std::string{base::ids::BlockItemBehaviorID}});
   if (!item_registry_result) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(
         dedicated_error("items", item_registry_result.error().message));

@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace arv::player {
@@ -61,6 +62,7 @@ struct ItemAttackData {
 struct ItemDefinition {
   std::string name{};
   std::string display_name{};
+  std::string behavior_id{};
   std::string category{};
   u16 max_stack_size{64};
   std::string places_block{};
@@ -82,6 +84,7 @@ struct ItemRecord {
   ItemID id{};
   std::string name{};
   std::string display_name{};
+  std::string behavior_id{};
   std::string category{};
   u16 max_stack_size{64};
   ItemRenderType render_type{ItemRenderType::Texture};
@@ -104,15 +107,39 @@ struct ItemStack {
   constexpr bool operator==(const ItemStack&) const = default;
 };
 
+struct ItemBehaviorHandler {};
+
+class ItemBehaviorRegistry {
+public:
+  using Result = Expected<void, ItemRegistryError>;
+
+  [[nodiscard]] Result register_handler(std::string id, ItemBehaviorHandler handler = {});
+  [[nodiscard]] const ItemBehaviorHandler* find(std::string_view id) const noexcept;
+  [[nodiscard]] bool contains(std::string_view id) const noexcept;
+
+private:
+  std::vector<std::pair<std::string, ItemBehaviorHandler>> handlers_;
+};
+
+struct ItemRegistryBuildOptions {
+  FunctionRef<bool(std::string_view)> behavior_exists{};
+  std::string default_block_item_behavior_id{};
+};
+
 class ItemRegistry {
 public:
   using Result = Expected<ItemRegistry, ItemRegistryError>;
 
-  [[nodiscard]] static Result build(std::vector<ItemDefinition> definitions);
-  [[nodiscard]] static Result build_default_block_items(const voxel::BlockRegistry& registry);
+  [[nodiscard]] static Result build(
+      std::vector<ItemDefinition> definitions,
+      ItemRegistryBuildOptions options = {});
+  [[nodiscard]] static Result build_default_block_items(
+      const voxel::BlockRegistry& registry,
+      ItemRegistryBuildOptions options = {});
   [[nodiscard]] static Result build_from_blocks_and_items(
       const voxel::BlockRegistry& registry,
-      std::vector<ItemDefinition> explicit_definitions);
+      std::vector<ItemDefinition> explicit_definitions,
+      ItemRegistryBuildOptions options = {});
 
   [[nodiscard]] const ItemRecord* item(ItemID id) const noexcept;
   [[nodiscard]] std::optional<ItemID> find_item(std::string_view name) const;

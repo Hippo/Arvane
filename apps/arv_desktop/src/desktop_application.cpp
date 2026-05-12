@@ -107,6 +107,10 @@ int DesktopApplication::run(int argc, char** argv) {
   }
 
   world::EntityGoalRegistry entity_goals;
+  voxel::BlockBehaviorRegistry block_behaviors;
+  player::ItemBehaviorRegistry item_behaviors;
+  base::register_base_block_behaviors(block_behaviors);
+  base::register_base_item_behaviors(item_behaviors);
   base::register_base_entity_goals(entity_goals);
 
   auto framebuffer = window.framebuffer_size();
@@ -119,6 +123,8 @@ int DesktopApplication::run(int argc, char** argv) {
           config,
           pack_manager,
           ui_theme,
+          block_behaviors,
+          item_behaviors,
           entity_goals);
   if (!loaded_assets_result) {
     core::error(

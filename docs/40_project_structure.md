@@ -513,6 +513,7 @@ Compiled behavior provider for the built-in `arvane_base` pack.
 
 * stable `arvane` IDs used by base behavior
 * built-in game-mode registration
+* built-in block and item behavior ID registration
 * built-in entity behavior ID registration
 * built-in player entity definition
 * base starter inventory defaults
@@ -521,8 +522,8 @@ Compiled behavior provider for the built-in `arvane_base` pack.
 ### Constraints
 
 * generic modules must not depend on `arv_base`
-* application/runtime composition may register `arv_base` after generic
-  registries and pack data are available
+* application/runtime composition registers `arv_base` into generic extension
+  registries before any dependent registry construction or runtime startup
 * runtime data and assets stay under `arvane_home/packs/arvane_base/`
 * `arv_base` is linked into products; it is not loaded as a dynamic plugin
 

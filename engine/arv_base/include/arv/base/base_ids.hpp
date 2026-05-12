@@ -22,6 +22,16 @@ inline constexpr std::string_view WanderGoalID = "arvane:wander";
 inline constexpr std::string_view FloatInFluidGoalID = "arvane:float_in_fluid";
 inline constexpr std::string_view MineableTagsBlockBreakBehaviorID =
     "arvane:block_break/mineable_tags";
+inline constexpr std::string_view FluidBlockBehaviorID =
+    "arvane:block_behavior/fluid";
+inline constexpr std::string_view BlockItemBehaviorID =
+    "arvane:item_behavior/block";
+inline constexpr std::string_view ToolItemBehaviorID =
+    "arvane:item_behavior/tool";
+inline constexpr std::string_view EmptyFluidContainerItemBehaviorID =
+    "arvane:item_behavior/empty_fluid_container";
+inline constexpr std::string_view FilledFluidContainerItemBehaviorID =
+    "arvane:item_behavior/filled_fluid_container";
 
 inline constexpr std::string_view AirBlockID = "arvane:air";
 inline constexpr std::string_view StoneBlockID = "arvane:stone";

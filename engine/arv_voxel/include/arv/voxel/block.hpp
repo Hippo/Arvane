@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace arv::voxel {
@@ -124,6 +125,7 @@ struct BlockModelReference {
 struct BlockDefinition {
   std::string name{};
   std::string display_name{};
+  std::string behavior_id{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
   BlockPhysicsProperties physics{};
@@ -141,6 +143,7 @@ struct BlockRecord {
   BlockID id{};
   std::string name{};
   std::string display_name{};
+  std::string behavior_id{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
   BlockPhysicsProperties physics{};
@@ -164,6 +167,7 @@ struct BlockVariantRecord {
   BlockVariantID id{};
   BlockID block_id{};
   std::string debug_name{};
+  std::string behavior_id{};
   std::vector<BlockStateValue> state_values{};
   BlockProperties properties{};
   BlockPhysicsProperties physics{};
@@ -268,11 +272,31 @@ using BlockModelDefinitionResult = Expected<BlockModelDefinition, BlockRegistryE
   return BlockFace::NegativeX;
 }
 
+struct BlockBehaviorHandler {};
+
+class BlockBehaviorRegistry {
+public:
+  using Result = Expected<void, BlockRegistryError>;
+
+  [[nodiscard]] Result register_handler(std::string id, BlockBehaviorHandler handler = {});
+  [[nodiscard]] const BlockBehaviorHandler* find(std::string_view id) const noexcept;
+  [[nodiscard]] bool contains(std::string_view id) const noexcept;
+
+private:
+  std::vector<std::pair<std::string, BlockBehaviorHandler>> handlers_;
+};
+
+struct BlockRegistryBuildOptions {
+  FunctionRef<bool(std::string_view)> behavior_exists{};
+};
+
 class BlockRegistry {
 public:
   using Result = Expected<BlockRegistry, BlockRegistryError>;
 
-  [[nodiscard]] static Result build(std::vector<BlockDefinition> definitions);
+  [[nodiscard]] static Result build(
+      std::vector<BlockDefinition> definitions,
+      BlockRegistryBuildOptions options = {});
 
   [[nodiscard]] usize block_count() const noexcept {
     return blocks_.size();

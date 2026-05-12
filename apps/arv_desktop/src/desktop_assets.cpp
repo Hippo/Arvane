@@ -200,6 +200,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
     const io::EngineConfig& config,
     const asset::PackManager& packs,
     const ui::UiTheme& theme,
+    const voxel::BlockBehaviorRegistry& block_behaviors,
+    const player::ItemBehaviorRegistry& item_behaviors,
     const world::EntityGoalRegistry& entity_goals) {
   DesktopLoadedAssets loaded;
   renderer.configure_player_skin_atlas(
@@ -277,8 +279,13 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("blocks", block_definitions.error().message);
   }
 
+  const auto block_behavior_exists = [&block_behaviors](std::string_view id) {
+    return block_behaviors.contains(id);
+  };
   auto block_registry_result =
-      voxel::BlockRegistry::build(std::move(block_definitions.value()));
+      voxel::BlockRegistry::build(
+          std::move(block_definitions.value()),
+          {.behavior_exists = FunctionRef<bool(std::string_view)>{block_behavior_exists}});
   if (!block_registry_result) {
     return asset_failure("blocks", block_registry_result.error().message);
   }
@@ -329,9 +336,14 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("items", item_definitions.error().message);
   }
 
+  const auto item_behavior_exists = [&item_behaviors](std::string_view id) {
+    return item_behaviors.contains(id);
+  };
   auto item_registry_result = player::ItemRegistry::build_from_blocks_and_items(
       loaded.block_registry,
-      std::move(item_definitions.value()));
+      std::move(item_definitions.value()),
+      {.behavior_exists = FunctionRef<bool(std::string_view)>{item_behavior_exists},
+       .default_block_item_behavior_id = std::string{base::ids::BlockItemBehaviorID}});
   if (!item_registry_result) {
     return asset_failure("items", item_registry_result.error().message);
   }

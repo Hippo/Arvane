@@ -53,6 +53,8 @@ using DesktopLoadedAssetsResult = Expected<DesktopLoadedAssets, DesktopAssetLoad
     const io::EngineConfig& config,
     const asset::PackManager& packs,
     const ui::UiTheme& theme,
+    const voxel::BlockBehaviorRegistry& block_behaviors,
+    const player::ItemBehaviorRegistry& item_behaviors,
     const world::EntityGoalRegistry& entity_goals);
 
 } // namespace arv::desktop

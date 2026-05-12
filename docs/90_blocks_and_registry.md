@@ -272,6 +272,31 @@ with a shovel.
 
 ---
 
+### Behavior IDs
+
+Blocks may declare a compiled behavior binding:
+
+```json
+{
+  "name": "arvane:water",
+  "behavior": "arvane:block_behavior/fluid"
+}
+```
+
+The block registry stores the authored behavior ID on both the block family and
+its resolved variants. Generic block loading does not depend on `arv_base`; it
+accepts an optional behavior validation callback. Runtime composition registers
+base block behavior IDs into a generic `BlockBehaviorRegistry` before building
+the base pack registry. If a block declares a non-empty behavior ID and the
+composition-supplied registry does not contain it, startup fails with a block
+registry diagnostic.
+
+Behavior IDs are for native hooks that cannot be represented cleanly as pure
+data. Ordinary grouping should remain tags, and ordinary physical/rendering
+facts should remain properties or model data.
+
+---
+
 ### Item Derivation
 
 Blocks may optionally define whether they should produce a corresponding item in the item registry.
@@ -368,11 +393,16 @@ This will produce an item equivalent to:
 ```json
 {
   "name": "arvane:stone",
+  "behavior": "arvane:item_behavior/block",
   "category": "blocks",
   "max_stack_size": <default_block_stack_size>,
   "places_block": "arvane:stone"
 }
 ```
+
+The block-item behavior ID is supplied by runtime composition rather than
+hard-coded in the generic item registry. `arv_base` registers
+`arvane:item_behavior/block` for the built-in base pack.
 
 Generated block items also inherit the default held-item presentation behavior:
 

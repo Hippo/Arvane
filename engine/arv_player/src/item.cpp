@@ -103,6 +103,9 @@ void merge_explicit_definition(ItemDefinition& target, ItemDefinition source) {
   if (!source.display_name.empty()) {
     target.display_name = std::move(source.display_name);
   }
+  if (!source.behavior_id.empty()) {
+    target.behavior_id = std::move(source.behavior_id);
+  }
   if (!source.category.empty()) {
     target.category = std::move(source.category);
   }
@@ -139,6 +142,32 @@ void merge_explicit_definition(ItemDefinition& target, ItemDefinition source) {
 }
 
 } // namespace
+
+ItemBehaviorRegistry::Result ItemBehaviorRegistry::register_handler(
+    std::string id,
+    ItemBehaviorHandler handler) {
+  if (id.empty()) {
+    return Result::failure({"item behavior handler id is empty"});
+  }
+  if (contains(id)) {
+    return Result::failure({"duplicate item behavior handler id: " + id});
+  }
+  handlers_.push_back({std::move(id), std::move(handler)});
+  return Result::success();
+}
+
+const ItemBehaviorHandler* ItemBehaviorRegistry::find(std::string_view id) const noexcept {
+  for (const auto& [handler_id, handler] : handlers_) {
+    if (handler_id == id) {
+      return &handler;
+    }
+  }
+  return nullptr;
+}
+
+bool ItemBehaviorRegistry::contains(std::string_view id) const noexcept {
+  return find(id) != nullptr;
+}
 
 Expected<ItemRenderType, ItemRegistryError> parse_item_render_type(std::string_view value) {
   if (value == "texture") {
@@ -231,7 +260,9 @@ Expected<HeldItemAnimationBinding, ItemRegistryError> parse_held_item_animation_
   return Expected<HeldItemAnimationBinding, ItemRegistryError>::success(std::move(binding));
 }
 
-ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions) {
+ItemRegistry::Result ItemRegistry::build(
+    std::vector<ItemDefinition> definitions,
+    ItemRegistryBuildOptions options) {
   if (definitions.empty()) {
     return Result::failure({"item registry is empty; required item arvane:air is missing"});
   }
@@ -251,6 +282,12 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     }
     if (!std::isfinite(definition.buoyancy)) {
       return Result::failure({"item buoyancy must be finite for " + definition.name});
+    }
+    if (!definition.behavior_id.empty() && options.behavior_exists &&
+        !options.behavior_exists(definition.behavior_id)) {
+      return Result::failure(
+          {"missing item behavior handler for " + definition.name + ": " +
+           definition.behavior_id});
     }
     if (definition.attack_data.has_value()) {
       const ItemAttackData& attack = definition.attack_data.value();
@@ -298,6 +335,7 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
     record.name = std::move(definition.name);
     record.display_name =
         definition.display_name.empty() ? record.name : std::move(definition.display_name);
+    record.behavior_id = std::move(definition.behavior_id);
     record.category = std::move(definition.category);
     record.max_stack_size = definition.max_stack_size;
     auto resolved_type = resolve_render_type(definition);
@@ -342,13 +380,16 @@ ItemRegistry::Result ItemRegistry::build(std::vector<ItemDefinition> definitions
   return Result::success(std::move(registry));
 }
 
-ItemRegistry::Result ItemRegistry::build_default_block_items(const voxel::BlockRegistry& registry) {
-  return build_from_blocks_and_items(registry, {});
+ItemRegistry::Result ItemRegistry::build_default_block_items(
+    const voxel::BlockRegistry& registry,
+    ItemRegistryBuildOptions options) {
+  return build_from_blocks_and_items(registry, {}, std::move(options));
 }
 
 ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
     const voxel::BlockRegistry& registry,
-    std::vector<ItemDefinition> explicit_definitions) {
+    std::vector<ItemDefinition> explicit_definitions,
+    ItemRegistryBuildOptions options) {
   std::vector<ItemDefinition> definitions;
   definitions.reserve(registry.block_count() + 2U);
   definitions.push_back(make_air_item_definition());
@@ -367,6 +408,7 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
     definition.name = block->name;
     definition.display_name =
         block->display_name.empty() ? block->name : block->display_name;
+    definition.behavior_id = options.default_block_item_behavior_id;
     definition.category = "blocks";
     definition.max_stack_size = 64;
     definition.places_block = block->name;
@@ -429,7 +471,7 @@ ItemRegistry::Result ItemRegistry::build_from_blocks_and_items(
     }
   }
 
-  return build(std::move(definitions));
+  return build(std::move(definitions), std::move(options));
 }
 
 const ItemRecord* ItemRegistry::item(ItemID id) const noexcept {
@@ -516,6 +558,18 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
       const auto display_iter = item.find("display_name");
       if (display_iter != item.end()) {
         definition.display_name = display_iter->get<std::string>();
+      }
+      const auto behavior_iter = item.find("behavior");
+      if (behavior_iter != item.end()) {
+        if (!behavior_iter->is_string()) {
+          return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+              {"behavior must be a string for " + definition.name});
+        }
+        definition.behavior_id = behavior_iter->get<std::string>();
+        if (definition.behavior_id.empty()) {
+          return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+              {"behavior must be non-empty for " + definition.name});
+        }
       }
       const auto category_iter = item.find("category");
       if (category_iter != item.end()) {

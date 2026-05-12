@@ -532,7 +532,35 @@ struct ExpandedVariantDefinition {
 
 } // namespace
 
-BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definitions) {
+BlockBehaviorRegistry::Result BlockBehaviorRegistry::register_handler(
+    std::string id,
+    BlockBehaviorHandler handler) {
+  if (id.empty()) {
+    return Result::failure({"block behavior handler id is empty"});
+  }
+  if (contains(id)) {
+    return Result::failure({"duplicate block behavior handler id: " + id});
+  }
+  handlers_.push_back({std::move(id), std::move(handler)});
+  return Result::success();
+}
+
+const BlockBehaviorHandler* BlockBehaviorRegistry::find(std::string_view id) const noexcept {
+  for (const auto& [handler_id, handler] : handlers_) {
+    if (handler_id == id) {
+      return &handler;
+    }
+  }
+  return nullptr;
+}
+
+bool BlockBehaviorRegistry::contains(std::string_view id) const noexcept {
+  return find(id) != nullptr;
+}
+
+BlockRegistry::Result BlockRegistry::build(
+    std::vector<BlockDefinition> definitions,
+    BlockRegistryBuildOptions options) {
   if (definitions.empty()) {
     return Result::failure({"block registry is empty; required block arvane:air is missing"});
   }
@@ -554,6 +582,12 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     }
     if (!std::isfinite(definition.physics.slipperiness)) {
       return Result::failure({"block slipperiness must be finite for " + definition.name});
+    }
+    if (!definition.behavior_id.empty() && options.behavior_exists &&
+        !options.behavior_exists(definition.behavior_id)) {
+      return Result::failure(
+          {"missing block behavior handler for " + definition.name + ": " +
+           definition.behavior_id});
     }
     if (auto state_error = validate_states(definition); state_error.has_value()) {
       return Result::failure({state_error.value()});
@@ -596,6 +630,7 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
     block.name = definition.name;
     block.display_name =
         definition.display_name.empty() ? definition.name : definition.display_name;
+    block.behavior_id = definition.behavior_id;
     block.tags = definition.tags;
     block.properties = definition.properties;
     block.physics = definition.physics;
@@ -619,6 +654,7 @@ BlockRegistry::Result BlockRegistry::build(std::vector<BlockDefinition> definiti
       variant.id = variant_id;
       variant.block_id = block_id;
       variant.debug_name = std::move(expanded_variant.debug_name);
+      variant.behavior_id = definition.behavior_id;
       variant.state_values = std::move(expanded_variant.state_values);
       variant.properties = definition.properties;
       variant.physics = definition.physics;
@@ -944,6 +980,17 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
               {"display_name must be a string for " + definition.name});
         }
         definition.display_name = display_name_iter->get<std::string>();
+      }
+
+      const auto behavior_iter = item.find("behavior");
+      if (behavior_iter != item.end()) {
+        if (!behavior_iter->is_string()) {
+          return BlockDefinitionsResult::failure({"behavior must be a string for " + definition.name});
+        }
+        definition.behavior_id = behavior_iter->get<std::string>();
+        if (definition.behavior_id.empty()) {
+          return BlockDefinitionsResult::failure({"behavior must be non-empty for " + definition.name});
+        }
       }
 
       const auto category_iter = item.find("render_category");

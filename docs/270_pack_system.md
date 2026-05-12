@@ -176,10 +176,11 @@ they are not dynamic libraries and do not use the native plugin loader.
 
 For the base pack, `builtin.module: "arv_base"` names the compiled provider for
 base-game behavior. Runtime composition code registers that module into generic
-registries after pack data is loaded. Generic systems own registries, parsers,
-and loaders; `arv_base` only contributes `arvane_base` behavior such as built-in
-game modes, base entity behavior IDs, the built-in player entity definition,
-starter gameplay defaults, and command implementations.
+registries before dependent registry construction or runtime startup. Generic
+systems own registries, parsers, and loaders; `arv_base` only contributes
+`arvane_base` behavior such as built-in game modes, base block/item behavior
+IDs, base entity behavior IDs, the built-in player entity definition, starter
+gameplay defaults, and command implementations.
 
 ---
 
@@ -544,7 +545,9 @@ the executable is expected to provide and register the named module.
 Startup treats missing required handlers from a built-in module as configuration
 errors. For example, if base entity data references `arvane:wander`, the base
 entity goal registry must have that handler registered before entity registry
-construction succeeds. Likewise, configured server behaviors such as
+construction succeeds. Block and item data that declare `behavior` IDs are
+validated against the block/item behavior registries before their registries are
+built. Likewise, configured server behaviors such as
 `arvane:block_break/mineable_tags` must be registered before server startup.
 
 ---
