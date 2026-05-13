@@ -22,6 +22,58 @@ int g_service_value = 42;
 bool view_equals(ArvStringView view, std::string_view expected);
 bool result_ok(ArvResult result);
 bool buffer_equals(ArvByteBuffer buffer, std::string_view expected);
+bool document_string_equals(ArvDataDocumentHandle document, std::string_view path, std::string_view expected);
+
+ArvDataDocumentHandle make_probe_document(std::string_view value) {
+  ArvDataDocumentHandle document =
+      g_api->data->create_document(g_api->data_ctx, 1);
+  if (document == 0) {
+    return 0;
+  }
+  if (!result_ok(g_api->data->set_string(
+          g_api->data_ctx,
+          document,
+          arv_cstr("value"),
+          arv_string_view(value.data(), value.size())))) {
+    g_api->data->release_document(g_api->data_ctx, document);
+    return 0;
+  }
+  return document;
+}
+
+bool save_probe_document(
+    const ArvPersistentScope& scope,
+    std::string_view key,
+    std::string_view value) {
+  ArvDataDocumentHandle document = make_probe_document(value);
+  if (document == 0) {
+    return false;
+  }
+  const bool ok = result_ok(g_api->persistent_data->save(
+      g_api->persistent_data_ctx,
+      &scope,
+      arv_string_view(key.data(), key.size()),
+      document));
+  g_api->data->release_document(g_api->data_ctx, document);
+  return ok;
+}
+
+bool load_probe_document_equals(
+    const ArvPersistentScope& scope,
+    std::string_view key,
+    std::string_view expected) {
+  ArvDataDocumentHandle document{};
+  const bool ok = result_ok(g_api->persistent_data->load(
+      g_api->persistent_data_ctx,
+      &scope,
+      arv_string_view(key.data(), key.size()),
+      &document)) &&
+      document_string_equals(document, "value", expected);
+  if (document != 0) {
+    g_api->data->release_document(g_api->data_ctx, document);
+  }
+  return ok;
+}
 
 void sync_job(void*) {
   const int sync_tick =
@@ -124,67 +176,101 @@ void sync_job(void*) {
         &persistent_handle));
   }
 
-  constexpr std::string_view world_blob = "world blob v1";
-  ArvByteBuffer data_buffer{};
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->set_world_data(
+  ArvPersistentScope server_scope{};
+  server_scope.kind = ARV_PERSISTENT_SCOPE_SERVER;
+  checks_ok = checks_ok && save_probe_document(
+      server_scope,
+      "example_plugin_pack:server/probe",
+      "server document");
+  checks_ok = checks_ok && load_probe_document_equals(
+      server_scope,
+      "example_plugin_pack:server/probe",
+      "server document");
+
+  ArvPersistentScope world_scope{};
+  world_scope.kind = ARV_PERSISTENT_SCOPE_WORLD;
+  world_scope.world = 1;
+  checks_ok = checks_ok && save_probe_document(
+      world_scope,
+      "example_plugin_pack:world/probe",
+      "world document v1");
+  checks_ok = checks_ok && save_probe_document(
+      world_scope,
+      "example_plugin_pack:world/probe",
+      "world document v2");
+  checks_ok = checks_ok && load_probe_document_equals(
+      world_scope,
+      "example_plugin_pack:world/probe",
+      "world document v2");
+  checks_ok = checks_ok && g_api->persistent_data->exists(
       g_api->persistent_data_ctx,
-      1,
-      arv_cstr("example_plugin_pack:world/probe"),
-      {reinterpret_cast<const uint8_t*>(world_blob.data()), world_blob.size()}));
-  constexpr std::string_view world_blob_overwrite = "world blob v2";
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->set_world_data(
+      &world_scope,
+      arv_cstr("example_plugin_pack:world/probe"));
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove(
       g_api->persistent_data_ctx,
-      1,
-      arv_cstr("example_plugin_pack:world/probe"),
-      {reinterpret_cast<const uint8_t*>(world_blob_overwrite.data()),
-       world_blob_overwrite.size()}));
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->get_world_data(
-      g_api->persistent_data_ctx,
-      1,
-      arv_cstr("example_plugin_pack:world/probe"),
-      &data_buffer)) &&
-      buffer_equals(data_buffer, world_blob_overwrite);
-  g_api->resources->release_buffer(g_api->resources_ctx, data_buffer);
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove_world_data(
-      g_api->persistent_data_ctx,
-      1,
+      &world_scope,
       arv_cstr("example_plugin_pack:world/probe")));
-  checks_ok = checks_ok && g_api->persistent_data->get_world_data(
+  ArvDataDocumentHandle missing_document{};
+  checks_ok = checks_ok && g_api->persistent_data->load(
       g_api->persistent_data_ctx,
-      1,
+      &world_scope,
       arv_cstr("example_plugin_pack:world/probe"),
-      &data_buffer).code == ARV_RESULT_NOT_FOUND;
-  checks_ok = checks_ok && g_api->persistent_data->set_world_data(
-      g_api->persistent_data_ctx,
-      1,
-      arv_cstr("other_pack:world/probe"),
-      {reinterpret_cast<const uint8_t*>(world_blob.data()), world_blob.size()}).code ==
-      ARV_RESULT_INVALID_ARGUMENT;
+      &missing_document).code == ARV_RESULT_NOT_FOUND;
+  ArvDataDocumentHandle wrong_namespace = make_probe_document("wrong namespace");
+  checks_ok = checks_ok && wrong_namespace != 0 &&
+      g_api->persistent_data->save(
+          g_api->persistent_data_ctx,
+          &world_scope,
+          arv_cstr("other_pack:world/probe"),
+          wrong_namespace).code == ARV_RESULT_PERMISSION_DENIED;
+  if (wrong_namespace != 0) {
+    g_api->data->release_document(g_api->data_ctx, wrong_namespace);
+  }
+
+  ArvPersistentScope player_scope{};
+  player_scope.kind = ARV_PERSISTENT_SCOPE_PLAYER;
+  player_scope.player = player_id;
+  checks_ok = checks_ok && save_probe_document(
+      player_scope,
+      "example_plugin_pack:player/probe",
+      "player document");
+  checks_ok = checks_ok && load_probe_document_equals(
+      player_scope,
+      "example_plugin_pack:player/probe",
+      "player document");
 
   ArvBlockPos block_pos{1, 2, 3};
-  constexpr std::string_view block_blob = "block blob v1";
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->set_block_data(
+  ArvPersistentScope block_scope{};
+  block_scope.kind = ARV_PERSISTENT_SCOPE_BLOCK;
+  block_scope.world = 1;
+  block_scope.block_pos = block_pos;
+  checks_ok = checks_ok && save_probe_document(
+      block_scope,
+      "example_plugin_pack:block/probe",
+      "block document");
+  checks_ok = checks_ok && load_probe_document_equals(
+      block_scope,
+      "example_plugin_pack:block/probe",
+      "block document");
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove(
       g_api->persistent_data_ctx,
-      1,
-      block_pos,
-      arv_cstr("example_plugin_pack:block/probe"),
-      {reinterpret_cast<const uint8_t*>(block_blob.data()), block_blob.size()}));
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->get_block_data(
-      g_api->persistent_data_ctx,
-      1,
-      block_pos,
-      arv_cstr("example_plugin_pack:block/probe"),
-      &data_buffer)) &&
-      buffer_equals(data_buffer, block_blob);
-  g_api->resources->release_buffer(g_api->resources_ctx, data_buffer);
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove_block_data(
-      g_api->persistent_data_ctx,
-      1,
-      block_pos,
+      &block_scope,
       arv_cstr("example_plugin_pack:block/probe")));
 
+  ArvPersistentScope chunk_scope{};
+  chunk_scope.kind = ARV_PERSISTENT_SCOPE_CHUNK;
+  chunk_scope.world = 1;
+  chunk_scope.chunk_pos = {2, -3};
+  checks_ok = checks_ok && save_probe_document(
+      chunk_scope,
+      "example_plugin_pack:chunk/probe",
+      "chunk document");
+  checks_ok = checks_ok && load_probe_document_equals(
+      chunk_scope,
+      "example_plugin_pack:chunk/probe",
+      "chunk document");
+
   ArvEntityHandle entity{};
-  constexpr std::string_view entity_blob = "entity blob v1";
   checks_ok = checks_ok && result_ok(g_api->entities->spawn(
       g_api->entities_ctx,
       1,
@@ -212,21 +298,20 @@ void sync_job(void*) {
       arv_cstr("example_plugin_pack:tagged"),
       &has_tag)) &&
       !has_tag;
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->set_entity_data(
+  ArvPersistentScope entity_scope{};
+  entity_scope.kind = ARV_PERSISTENT_SCOPE_ENTITY;
+  entity_scope.entity = entity;
+  checks_ok = checks_ok && save_probe_document(
+      entity_scope,
+      "example_plugin_pack:entity/probe",
+      "entity document");
+  checks_ok = checks_ok && load_probe_document_equals(
+      entity_scope,
+      "example_plugin_pack:entity/probe",
+      "entity document");
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove(
       g_api->persistent_data_ctx,
-      entity,
-      arv_cstr("example_plugin_pack:entity/probe"),
-      {reinterpret_cast<const uint8_t*>(entity_blob.data()), entity_blob.size()}));
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->get_entity_data(
-      g_api->persistent_data_ctx,
-      entity,
-      arv_cstr("example_plugin_pack:entity/probe"),
-      &data_buffer)) &&
-      buffer_equals(data_buffer, entity_blob);
-  g_api->resources->release_buffer(g_api->resources_ctx, data_buffer);
-  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove_entity_data(
-      g_api->persistent_data_ctx,
-      entity,
+      &entity_scope,
       arv_cstr("example_plugin_pack:entity/probe")));
 
   ArvTextHandle network_text{};
@@ -337,6 +422,19 @@ bool buffer_equals(ArvByteBuffer buffer, std::string_view expected) {
          std::memcmp(buffer.data, expected.data(), expected.size()) == 0;
 }
 
+bool document_string_equals(
+    ArvDataDocumentHandle document,
+    std::string_view path,
+    std::string_view expected) {
+  ArvStringView value{};
+  return result_ok(g_api->data->get_string(
+             g_api->data_ctx,
+             document,
+             arv_string_view(path.data(), path.size()),
+             &value)) &&
+         view_equals(value, expected);
+}
+
 } // namespace
 
 extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
@@ -385,26 +483,48 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
     return false;
   }
 
-  constexpr std::string_view expected_config = "enabled: true\n";
-  if (!result_ok(api->config->save_plugin_config(
+  ArvDataDocumentHandle config_document =
+      api->data->create_document(api->data_ctx, 1);
+  if (config_document == 0) {
+    return false;
+  }
+  if (!result_ok(api->data->set_bool(
+          api->data_ctx,
+          config_document,
+          arv_cstr("enabled"),
+          true))) {
+    api->data->release_document(api->data_ctx, config_document);
+    return false;
+  }
+  ArvConfigScope global_config{ARV_CONFIG_SCOPE_GLOBAL, 0};
+  if (!result_ok(api->config->save(
           api->config_ctx,
+          &global_config,
           arv_cstr("example_plugin_pack:settings"),
-          {reinterpret_cast<const uint8_t*>(expected_config.data()),
-           expected_config.size()}))) {
+          config_document))) {
+    api->data->release_document(api->data_ctx, config_document);
     return false;
   }
-  ArvByteBuffer config_buffer{};
-  if (!result_ok(api->config->load_plugin_config(
+  api->data->release_document(api->data_ctx, config_document);
+  ArvDataDocumentHandle loaded_config{};
+  bool enabled = false;
+  if (!result_ok(api->config->load(
           api->config_ctx,
+          &global_config,
           arv_cstr("example_plugin_pack:settings"),
-          &config_buffer))) {
+          &loaded_config)) ||
+      !result_ok(api->data->get_bool(
+          api->data_ctx,
+          loaded_config,
+          arv_cstr("enabled"),
+          &enabled)) ||
+      !enabled) {
+    if (loaded_config != 0) {
+      api->data->release_document(api->data_ctx, loaded_config);
+    }
     return false;
   }
-  const bool config_matches = buffer_equals(config_buffer, expected_config);
-  api->resources->release_buffer(api->resources_ctx, config_buffer);
-  if (!config_matches) {
-    return false;
-  }
+  api->data->release_document(api->data_ctx, loaded_config);
 
   ArvTextHandle hello{};
   ArvTextHandle world{};

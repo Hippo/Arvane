@@ -306,8 +306,8 @@ Implemented ABI surface:
 * API version `1` is exposed as `ARV_API_VERSION`.
 * `pack.yaml` native metadata must declare `api_version: 1`, a C-symbol entrypoint, and a library for the current platform key.
 * Native libraries are loaded only when `native_plugins.enabled` is true and the owning pack is listed in `native_plugins.allowed_packs`.
-* Implemented API tables include context, logger, behavior registration, command executor registration, event subscription, sync/async scheduling, service publish/lookup, data resource read/debug path, plugin config byte load/save, basic world/entity access, and metrics counters.
-* Persistent data, network, permissions, rich text helpers, and native worldgen type registries return `Unsupported` unless the corresponding engine extension points are present.
+* Implemented API tables include context, logger, behavior registration, command executor registration, event subscription, sync/async scheduling, service publish/lookup, data resource read/debug path, structured data documents, codec-backed config, scoped persistent data, basic world/entity access, and metrics counters.
+* Network, permissions, rich text helpers, and native worldgen type registries return `Unsupported` unless the corresponding engine extension points are present.
 
 Plugin author build surface:
 
@@ -1052,66 +1052,51 @@ enum class ServiceThreading {
 
 ---
 
-## Config API
+## Data, Config, And Persistent Storage APIs
 
-The config API gives plugins access to plugin-owned configuration.
+Plugin config and plugin persistent data both use the shared `DataDocument` model. The C ABI exposes opaque `ArvDataDocumentHandle` values through `ArvDataAPI`; plugins create, mutate, load, save, and release document handles without seeing engine classes, YAML, JSON, filesystem paths, save internals, or STL types.
 
-Conceptual shape:
+`DataDocument` supports null, bool, signed and unsigned integers, floating point values, strings, bytes, arrays, objects, and a top-level schema version. Returned string and byte views are borrowed from the owning document and remain valid only until that document is mutated or released.
+
+Config remains a separate API because it is human-editable settings:
 
 ```cpp
-struct ConfigAPI {
-    ConfigDocument load_plugin_config(ResourceID config_id);
-    bool save_plugin_config(ResourceID config_id, ConfigDocument document);
-    ConfigDocument load_world_config(WorldID world, ResourceID config_id);
-    bool save_world_config(WorldID world, ResourceID config_id, ConfigDocument document);
-};
+plugin.config().global().load_or_default<MyConfig>("example_plugin:settings");
+plugin.config().global().save("example_plugin:settings", config);
+plugin.config().world(world).save("example_plugin:world_settings", config);
 ```
 
-Recommended locations:
+Persistent data remains separate because it is save/runtime state with explicit lifetime scopes:
+
+```cpp
+plugin.persistent_data().server();
+plugin.persistent_data().world(world);
+plugin.persistent_data().player(player);
+plugin.persistent_data().entity(entity);
+plugin.persistent_data().block(world, block_pos);
+plugin.persistent_data().chunk(world, chunk_pos);
+```
+
+Rules:
+
+* config and persistent keys must be namespaced resource IDs owned by the plugin pack
+* keys are mapped to sanitized storage paths; plugins never provide raw filesystem paths
+* config stores YAML by default and missing config returns `NotFound`
+* persistent data stores backend-agnostic binary `DataDocument` records by default
+* persistent records include schema versions and are preserved when the plugin is absent
+* player scope resolves the SDK player handle to a stable server profile identity before touching storage
+* entity scope uses persistent entity UUIDs; transient-only entities fail explicitly
+* plugins should use C++ `Codec<T>` specializations with `load_or_default<T>()` and `save<T>()`
+
+Recommended storage roots are implementation details, not plugin contracts:
 
 ```text
-arvane_home/config/plugins/<pack_id>.yaml
-arvane_home/saves/<world>/plugin_config/<pack_id>.yaml
+arvane_home/config/plugins/<pack_id>/<safe_key_path>.yaml
+arvane_home/saves/<world>/plugin_config/<world_id>/<pack_id>/<safe_key_path>.yaml
+arvane_home/saves/<world>/plugin_data/<pack_id>/<scope>/<stable_identity>/<safe_key_path>.bin
 ```
 
-Rules:
-
-* pack data is content, not mutable runtime config
-* plugin config should not modify registry construction after startup unless a controlled reload flow exists
-* config files should be versioned
-* config diagnostics must identify the plugin and config file
-* plugins should avoid reading arbitrary filesystem paths directly
-
----
-
-## Persistent Data API
-
-The persistent data API lets plugins store plugin-owned save data.
-
-Conceptual shape:
-
-```cpp
-struct PersistentDataAPI {
-    bool set_world_data(WorldID world, ResourceID key, Bytes data);
-    bool get_world_data(WorldID world, ResourceID key, Bytes* out_data);
-
-    bool set_entity_data(EntityID entity, ResourceID key, Bytes data);
-    bool get_entity_data(EntityID entity, ResourceID key, Bytes* out_data);
-
-    bool set_block_data(WorldID world, BlockPos pos, ResourceID key, Bytes data);
-    bool get_block_data(WorldID world, BlockPos pos, ResourceID key, Bytes* out_data);
-};
-```
-
-Rules:
-
-* keys must be namespaced
-* stored data must include a plugin-defined version
-* missing plugin data should not corrupt the rest of the save
-* plugin-owned data should be recoverable or explicitly removable if the plugin is missing
-* large persistent data should be chunked or indexed instead of attached to frequently loaded objects without limits
-
-This API is the preferred way for plugins to store custom metadata without adding arbitrary ECS components or mutating engine save structures directly.
+This is the preferred way for plugins to store custom metadata without adding arbitrary ECS components or mutating engine save structures directly.
 
 ---
 

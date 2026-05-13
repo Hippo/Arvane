@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/data.h"
 #include "arv/result.h"
 #include "arv/resource_id.h"
 #include "arv/types.h"
@@ -8,52 +9,42 @@
 extern "C" {
 #endif
 
+typedef enum ArvPersistentScopeKind {
+  ARV_PERSISTENT_SCOPE_SERVER = 0,
+  ARV_PERSISTENT_SCOPE_WORLD = 1,
+  ARV_PERSISTENT_SCOPE_PLAYER = 2,
+  ARV_PERSISTENT_SCOPE_ENTITY = 3,
+  ARV_PERSISTENT_SCOPE_BLOCK = 4,
+  ARV_PERSISTENT_SCOPE_CHUNK = 5
+} ArvPersistentScopeKind;
+
+typedef struct ArvPersistentScope {
+  ArvPersistentScopeKind kind;
+  ArvWorldID world;
+  ArvPlayerID player;
+  ArvEntityID entity;
+  ArvBlockPos block_pos;
+  ArvChunkPos chunk_pos;
+} ArvPersistentScope;
+
 typedef struct ArvPersistentDataAPI {
-  ArvResult (*unsupported)(void* ctx);
-  ArvResult (*set_world_data)(
+  ArvResult (*load)(
       void* ctx,
-      ArvWorldHandle world,
+      const ArvPersistentScope* scope,
       ArvResourceID key,
-      ArvBytesView bytes);
-  ArvResult (*get_world_data)(
+      ArvDataDocumentHandle* out_document);
+  ArvResult (*save)(
       void* ctx,
-      ArvWorldHandle world,
+      const ArvPersistentScope* scope,
       ArvResourceID key,
-      ArvByteBuffer* out_buffer);
-  ArvResult (*remove_world_data)(
+      ArvDataDocumentHandle document);
+  bool (*exists)(
       void* ctx,
-      ArvWorldHandle world,
+      const ArvPersistentScope* scope,
       ArvResourceID key);
-  ArvResult (*set_entity_data)(
+  ArvResult (*remove)(
       void* ctx,
-      ArvEntityHandle entity,
-      ArvResourceID key,
-      ArvBytesView bytes);
-  ArvResult (*get_entity_data)(
-      void* ctx,
-      ArvEntityHandle entity,
-      ArvResourceID key,
-      ArvByteBuffer* out_buffer);
-  ArvResult (*remove_entity_data)(
-      void* ctx,
-      ArvEntityHandle entity,
-      ArvResourceID key);
-  ArvResult (*set_block_data)(
-      void* ctx,
-      ArvWorldHandle world,
-      ArvBlockPos pos,
-      ArvResourceID key,
-      ArvBytesView bytes);
-  ArvResult (*get_block_data)(
-      void* ctx,
-      ArvWorldHandle world,
-      ArvBlockPos pos,
-      ArvResourceID key,
-      ArvByteBuffer* out_buffer);
-  ArvResult (*remove_block_data)(
-      void* ctx,
-      ArvWorldHandle world,
-      ArvBlockPos pos,
+      const ArvPersistentScope* scope,
       ArvResourceID key);
 } ArvPersistentDataAPI;
 

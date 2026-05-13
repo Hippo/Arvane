@@ -107,6 +107,7 @@ arvane/
 │  ├─ arv_ecs/
 │  ├─ arv_sched/
 │  ├─ arv_voxel/
+│  ├─ arv_data/
 │  ├─ arv_world/
 │  ├─ arv_physics/
 │  ├─ arv_entity/
@@ -422,6 +423,17 @@ Persistence systems.
 * player data
 * save formats
 * migrations
+
+---
+
+## `arv_data`
+
+Backend-independent structured documents and plugin-owned storage services.
+
+* `DataValue` and `DataDocument`
+* YAML, JSON, and binary codecs
+* safe resource-key to storage-path mapping
+* plugin config and persistent data storage backends
 
 ---
 

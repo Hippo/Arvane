@@ -1,0 +1,20 @@
+schema_version: 1
+id: "config_example"
+display_name: "Config Example"
+version: "1.0.0"
+description: "Demonstrates typed plugin config storage."
+authors: []
+namespaces:
+  - "config_example"
+side: "server"
+dependencies: []
+load_after: []
+load_before: []
+capabilities:
+  assets: false
+  data: true
+  native_plugin: true
+native:
+  api_version: 1
+  entrypoint: "arvane_plugin_main"
+  libraries: {}

@@ -106,6 +106,8 @@ struct PluginNetworkSendRequest {
 using PluginNetworkSendResult = Expected<void, PluginNetworkSendError>;
 using PluginNetworkSendFn =
     std::function<PluginNetworkSendResult(const PluginNetworkSendRequest&)>;
+using PluginPlayerStableIDFn =
+    std::function<std::optional<std::string>(PlayerID)>;
 
 enum class PluginExtensionRegistryKind : u8 {
   EntityBehavior,
@@ -129,6 +131,7 @@ struct PluginRuntimeContext {
   u64 world_seed{};
   std::filesystem::path server_save_root{};
   std::string world_name{};
+  PluginPlayerStableIDFn player_stable_id{};
   PluginNetworkSendFn network_send{};
 };
 

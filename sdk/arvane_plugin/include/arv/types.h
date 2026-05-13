@@ -36,6 +36,11 @@ typedef struct ArvBlockPos {
   int32_t z;
 } ArvBlockPos;
 
+typedef struct ArvChunkPos {
+  int32_t x;
+  int32_t z;
+} ArvChunkPos;
+
 typedef uint64_t ArvTickIndex;
 typedef uint64_t ArvMilliseconds;
 typedef uint64_t ArvWorldID;

@@ -245,7 +245,7 @@ TEST(PluginLoadTests, LoadsAllowlistedPluginAndRegistersBehaviorServicesAndComma
   EXPECT_TRUE(harness.game_modes.find("example_plugin_pack:builder") != nullptr);
   EXPECT_TRUE(std::filesystem::exists(
       harness.temp.path / "config" / "plugins" / "example_plugin_pack" /
-      "example_plugin_pack" / "settings.yaml"));
+      "settings.yaml"));
 
   arv::command::CommandRegistry command_registry;
   manager.register_commands(command_registry);
@@ -353,6 +353,10 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
       .tick_index = 0U,
       .server_save_root = harness.temp.path / "save",
       .world_name = "default",
+      .player_stable_id = [](arv::PlayerID player_id) -> std::optional<std::string> {
+        return player_id == arv::PlayerID{7} ? std::optional<std::string>{"profile-7"}
+                                             : std::nullopt;
+      },
       .network_send = [&](const arv::plugin::PluginNetworkSendRequest& request) {
         ++network_sends;
         EXPECT_EQ(request.target_kind, arv::plugin::PluginNetworkTargetKind::Player);

@@ -47,6 +47,10 @@ arvane_home/
     save.json
     players/
       <player_uuid>.dat
+    plugin_data/
+      <pack_id>/
+        server/
+          <safe_key_path>.bin
     player_assets/
       skins/
         <skin_hash>.png
@@ -55,6 +59,17 @@ arvane_home/
         world.json
         regions/
           r.<x>.<z>.arvr
+    plugin_config/
+      <world_id>/
+        <pack_id>/
+          <safe_key_path>.yaml
+    plugin_data/
+      <pack_id>/
+        world/
+        players/
+        entities/
+        blocks/
+        chunks/
   saves/
     server-save-1/
       save.json
@@ -89,6 +104,13 @@ Notes:
   `player_assets/skins/` by server-computed content hash; writes use temporary
   files and atomic rename, and servers enforce the configured total skin storage
   quota before adding new blobs
+* Plugin config and plugin persistent data are sidecar records under controlled
+  save-root directories. Resource keys are sanitized and mapped by the storage
+  service; plugins do not read or write arbitrary filesystem paths.
+* Plugin persistent records are binary `DataDocument` files with schema
+  versions. Player-scoped records are keyed by stable player identity, not
+  transient connection/player handles. Records are preserved when their owning
+  plugin is absent.
 
 ---
 
@@ -102,6 +124,7 @@ Notes:
 * player profiles
 * server configuration
 * plugin/mod list (optional but recommended)
+* server-scoped plugin persistent data
 
 ### World Level
 
@@ -112,6 +135,7 @@ Each world stores:
 * world time / tick counter
 * simulation settings
 * region files
+* world-scoped plugin config and persistent data sidecars
 
 ### Region / Chunk Level
 

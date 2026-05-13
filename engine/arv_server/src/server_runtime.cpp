@@ -397,6 +397,15 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
         chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
         server_save_root_,
         world_name_,
+        [this](PlayerID player_id) -> std::optional<std::string> {
+          std::optional<std::string> stable_id;
+          sessions_.for_each_session([&](const ServerSession& session) {
+            if (session.player_id == player_id && !session.profile_id.empty()) {
+              stable_id = session.profile_id.string();
+            }
+          });
+          return stable_id;
+        },
         [this](const plugin::PluginNetworkSendRequest& request) {
           return send_plugin_network_packet(request);
         },
@@ -444,6 +453,15 @@ void ServerRuntimeImpl::tick() {
         chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
         server_save_root_,
         world_name_,
+        [this](PlayerID player_id) -> std::optional<std::string> {
+          std::optional<std::string> stable_id;
+          sessions_.for_each_session([&](const ServerSession& session) {
+            if (session.player_id == player_id && !session.profile_id.empty()) {
+              stable_id = session.profile_id.string();
+            }
+          });
+          return stable_id;
+        },
         [this](const plugin::PluginNetworkSendRequest& request) {
           return send_plugin_network_packet(request);
         },

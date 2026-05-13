@@ -14,3 +14,5 @@ arvane_plugin_example(arv_example_service_provider_plugin service_provider/src/s
 arvane_plugin_example(arv_example_service_consumer_plugin service_consumer/src/service_consumer.cpp)
 arvane_plugin_example(arv_example_commands_plugin commands/src/commands.cpp)
 arvane_plugin_example(arv_example_scheduler_plugin scheduler/src/scheduler.cpp)
+arvane_plugin_example(arv_example_config_plugin config_example/src/config_example.cpp)
+arvane_plugin_example(arv_example_persistent_data_plugin persistent_data_example/src/persistent_data_example.cpp)

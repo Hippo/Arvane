@@ -46,6 +46,7 @@ add_executable(arv_tests
   core/math_tests.cpp
   core/rate_limiter_tests.cpp
   core/types_tests.cpp
+  data/data_document_tests.cpp
   desktop/chunk_view_tests.cpp
   desktop/debug_imgui_tests.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/chunk_view.cpp
@@ -119,6 +120,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_command
   arv_core
   arv_crypto
+  arv_data
   arv_entity
   arv_io
   arv_lang

@@ -14,6 +14,7 @@ target_link_libraries(arv_plugin
     arv_asset
     arv_command
     arv_core
+    arv_data
     arv_entity
     arv_player
     arv_protocol

@@ -4,6 +4,7 @@
 #include "arv/commands.hpp"
 #include "arv/config.hpp"
 #include "arv/context.hpp"
+#include "arv/data.hpp"
 #include "arv/entities.hpp"
 #include "arv/events.hpp"
 #include "arv/gamemode.hpp"
@@ -37,6 +38,7 @@ public:
         scheduler_(api),
         commands_(api),
         services_(api),
+        data_(api),
         config_(api),
         worldgen_(api),
         metrics_(api),
@@ -96,6 +98,10 @@ public:
     return services_;
   }
 
+  [[nodiscard]] constexpr const Data& data() const noexcept {
+    return data_;
+  }
+
   [[nodiscard]] constexpr const Config& config() const noexcept {
     return config_;
   }
@@ -144,6 +150,7 @@ private:
   Scheduler scheduler_;
   Commands commands_;
   Services services_;
+  Data data_;
   Config config_;
   WorldGen worldgen_;
   Metrics metrics_;

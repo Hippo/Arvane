@@ -3,6 +3,7 @@
 #include "arv/commands.h"
 #include "arv/config.h"
 #include "arv/context.h"
+#include "arv/data.h"
 #include "arv/entities.h"
 #include "arv/events.h"
 #include "arv/export.h"
@@ -58,6 +59,9 @@ typedef struct ArvAPI {
 
   void* services_ctx;
   const ArvServiceAPI* services;
+
+  void* data_ctx;
+  const ArvDataAPI* data;
 
   void* config_ctx;
   const ArvConfigAPI* config;
