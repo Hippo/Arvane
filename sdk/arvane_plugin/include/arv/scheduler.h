@@ -18,14 +18,14 @@ typedef struct ArvSchedulerAPI {
       ArvScheduledJobHandle* out_handle);
   ArvResult (*sync_delayed)(
       void* ctx,
-      ArvTickIndex delay_ticks,
+      ArvMilliseconds delay_milliseconds,
       ArvJobCallback callback,
       void* user_data,
       ArvScheduledJobHandle* out_handle);
   ArvResult (*sync_repeating)(
       void* ctx,
-      ArvTickIndex start_delay_ticks,
-      ArvTickIndex interval_ticks,
+      ArvMilliseconds start_delay_milliseconds,
+      ArvMilliseconds interval_milliseconds,
       ArvJobCallback callback,
       void* user_data,
       ArvScheduledJobHandle* out_handle);
@@ -36,18 +36,44 @@ typedef struct ArvSchedulerAPI {
       ArvScheduledJobHandle* out_handle);
   ArvResult (*async_delayed)(
       void* ctx,
-      ArvTickIndex delay_ticks,
+      ArvMilliseconds delay_milliseconds,
       ArvJobCallback callback,
       void* user_data,
       ArvScheduledJobHandle* out_handle);
   ArvResult (*async_repeating)(
+      void* ctx,
+      ArvMilliseconds start_delay_milliseconds,
+      ArvMilliseconds interval_milliseconds,
+      ArvJobCallback callback,
+      void* user_data,
+      ArvScheduledJobHandle* out_handle);
+  ArvResult (*cancel)(void* ctx, ArvScheduledJobHandle handle);
+  ArvResult (*sync_delayed_tick)(
+      void* ctx,
+      ArvTickIndex delay_ticks,
+      ArvJobCallback callback,
+      void* user_data,
+      ArvScheduledJobHandle* out_handle);
+  ArvResult (*sync_repeating_tick)(
       void* ctx,
       ArvTickIndex start_delay_ticks,
       ArvTickIndex interval_ticks,
       ArvJobCallback callback,
       void* user_data,
       ArvScheduledJobHandle* out_handle);
-  ArvResult (*cancel)(void* ctx, ArvScheduledJobHandle handle);
+  ArvResult (*async_delayed_tick)(
+      void* ctx,
+      ArvTickIndex delay_ticks,
+      ArvJobCallback callback,
+      void* user_data,
+      ArvScheduledJobHandle* out_handle);
+  ArvResult (*async_repeating_tick)(
+      void* ctx,
+      ArvTickIndex start_delay_ticks,
+      ArvTickIndex interval_ticks,
+      ArvJobCallback callback,
+      void* user_data,
+      ArvScheduledJobHandle* out_handle);
 } ArvSchedulerAPI;
 
 #ifdef __cplusplus

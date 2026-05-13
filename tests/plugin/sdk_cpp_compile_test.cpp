@@ -22,6 +22,8 @@
 #include <arv/world.hpp>
 #include <arv/worldgen.hpp>
 
+#include <chrono>
+
 int arv_plugin_sdk_cpp_compile_test() {
   arv::Plugin plugin{nullptr};
   arv::Buffer buffer;
@@ -69,6 +71,12 @@ int arv_plugin_sdk_cpp_compile_test() {
       "test:event",
       event_handler);
   const arv::Result job_result = plugin.scheduler().sync(job_handler);
+  const arv::Result job_ms_result = plugin.scheduler().sync(
+      std::chrono::milliseconds{10},
+      job_handler);
+  const arv::Result job_tick_result = plugin.scheduler().sync_tick(
+      1,
+      job_handler);
   const arv::PacketResult packet_result = network.create_chat_message(text_component);
   const ArvRegionFlagDefinition flag_definition{
       arv::view("test:pvp"),
@@ -86,7 +94,8 @@ int arv_plugin_sdk_cpp_compile_test() {
   arv::Result result;
   return arv::ApiVersion == 1u && result && buffer.empty() &&
                  command_context.arg_count() == 0 && !command_result &&
-                 !event_result && !job_result && !event.id().data() &&
+                 !event_result && !job_result && !job_ms_result &&
+                 !job_tick_result && !event.id().data() &&
                  !events.subscribe("test:event", event_handler) &&
                  !config.load("test:config") && !context.owns_namespace("test") &&
                  !entities.exists({}) && !network.unsupported() &&
@@ -115,7 +124,10 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !regions.set_zone_flag(region_handle, "test:pvp", arv::RegionRuleValue::Deny) &&
                  regions.find_regions_at({}).empty() &&
                  !resources.exists(arv::ResourceKind::Data, "test:data") &&
-                 !scheduler.sync(job_handler) && services.list("test:svc", 0, 0).empty() &&
+                 !scheduler.sync(job_handler) &&
+                 !scheduler.async(std::chrono::milliseconds{10}, job_handler) &&
+                 !scheduler.async_tick(1, job_handler) &&
+                 services.list("test:svc", 0, 0).empty() &&
                  !text.unsupported() && !world.current_tick({}) &&
                  !worldgen.register_feature_type("test:feature") &&
                  !worldgen.register_noise_type("test:noise") &&

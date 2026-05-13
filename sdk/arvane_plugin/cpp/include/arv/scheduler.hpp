@@ -3,6 +3,7 @@
 #include "arv/api.h"
 #include "arv/result.hpp"
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -59,21 +60,21 @@ public:
   }
 
   template<typename Handler>
-  [[nodiscard]] Result sync(
-      ArvTickIndex delay,
+  [[nodiscard]] Result sync_tick(
+      ArvTickIndex delay_ticks,
       Handler&& handler,
       ArvScheduledJobHandle* out_handle = nullptr) const {
     return schedule_once(
-        api_ == nullptr || api_->scheduler == nullptr ? nullptr : api_->scheduler->sync_delayed,
-        delay,
+        api_ == nullptr || api_->scheduler == nullptr ? nullptr : api_->scheduler->sync_delayed_tick,
+        delay_ticks,
         0,
         std::forward<Handler>(handler),
         out_handle);
   }
 
   [[nodiscard]] Result sync_repeat(
-      ArvTickIndex start_delay,
-      ArvTickIndex interval,
+      std::chrono::milliseconds start_delay,
+      std::chrono::milliseconds interval,
       Job& job,
       ArvScheduledJobHandle* out_handle = nullptr) const {
     if (api_ == nullptr || api_->scheduler == nullptr ||
@@ -82,12 +83,56 @@ public:
     }
     return Result{api_->scheduler->sync_repeating(
         api_->scheduler_ctx,
+        milliseconds(start_delay),
+        milliseconds(interval),
+        job.callback(),
+        job.user_data(),
+        out_handle)};
+  }
+
+  [[nodiscard]] Result sync_repeat_tick(
+      ArvTickIndex start_delay,
+      ArvTickIndex interval,
+      Job& job,
+      ArvScheduledJobHandle* out_handle = nullptr) const {
+    if (api_ == nullptr || api_->scheduler == nullptr ||
+        api_->scheduler->sync_repeating_tick == nullptr) {
+      return Result::unsupported("scheduler API is unavailable");
+    }
+    return Result{api_->scheduler->sync_repeating_tick(
+        api_->scheduler_ctx,
         start_delay,
         interval,
         job.callback(),
         job.user_data(),
         out_handle)};
   }
+
+  template<typename Handler>
+  [[nodiscard]] Result sync(
+      std::chrono::milliseconds delay,
+      Handler&& handler,
+      ArvScheduledJobHandle* out_handle = nullptr) const {
+    return schedule_once(
+        api_ == nullptr || api_->scheduler == nullptr ? nullptr : api_->scheduler->sync_delayed,
+        milliseconds(delay),
+        std::forward<Handler>(handler),
+        out_handle);
+  }
+
+  template<typename Handler>
+  [[nodiscard]] Result sync_after(
+      std::chrono::milliseconds delay,
+      Handler&& handler,
+      ArvScheduledJobHandle* out_handle = nullptr) const {
+    return sync(delay, std::forward<Handler>(handler), out_handle);
+  }
+
+  [[nodiscard]] Result sync_repeat(
+      ArvMilliseconds start_delay_milliseconds,
+      ArvMilliseconds interval_milliseconds,
+      Job& job,
+      ArvScheduledJobHandle* out_handle = nullptr) const = delete;
 
   template<typename Handler>
   [[nodiscard]] Result async(
@@ -102,21 +147,21 @@ public:
   }
 
   template<typename Handler>
-  [[nodiscard]] Result async(
-      ArvTickIndex delay,
+  [[nodiscard]] Result async_tick(
+      ArvTickIndex delay_ticks,
       Handler&& handler,
       ArvScheduledJobHandle* out_handle = nullptr) const {
     return schedule_once(
-        api_ == nullptr || api_->scheduler == nullptr ? nullptr : api_->scheduler->async_delayed,
-        delay,
+        api_ == nullptr || api_->scheduler == nullptr ? nullptr : api_->scheduler->async_delayed_tick,
+        delay_ticks,
         0,
         std::forward<Handler>(handler),
         out_handle);
   }
 
   [[nodiscard]] Result async_repeat(
-      ArvTickIndex start_delay,
-      ArvTickIndex interval,
+      std::chrono::milliseconds start_delay,
+      std::chrono::milliseconds interval,
       Job& job,
       ArvScheduledJobHandle* out_handle = nullptr) const {
     if (api_ == nullptr || api_->scheduler == nullptr ||
@@ -125,12 +170,56 @@ public:
     }
     return Result{api_->scheduler->async_repeating(
         api_->scheduler_ctx,
+        milliseconds(start_delay),
+        milliseconds(interval),
+        job.callback(),
+        job.user_data(),
+        out_handle)};
+  }
+
+  [[nodiscard]] Result async_repeat_tick(
+      ArvTickIndex start_delay,
+      ArvTickIndex interval,
+      Job& job,
+      ArvScheduledJobHandle* out_handle = nullptr) const {
+    if (api_ == nullptr || api_->scheduler == nullptr ||
+        api_->scheduler->async_repeating_tick == nullptr) {
+      return Result::unsupported("scheduler API is unavailable");
+    }
+    return Result{api_->scheduler->async_repeating_tick(
+        api_->scheduler_ctx,
         start_delay,
         interval,
         job.callback(),
         job.user_data(),
         out_handle)};
   }
+
+  template<typename Handler>
+  [[nodiscard]] Result async(
+      std::chrono::milliseconds delay,
+      Handler&& handler,
+      ArvScheduledJobHandle* out_handle = nullptr) const {
+    return schedule_once(
+        api_ == nullptr || api_->scheduler == nullptr ? nullptr : api_->scheduler->async_delayed,
+        milliseconds(delay),
+        std::forward<Handler>(handler),
+        out_handle);
+  }
+
+  template<typename Handler>
+  [[nodiscard]] Result async_after(
+      std::chrono::milliseconds delay,
+      Handler&& handler,
+      ArvScheduledJobHandle* out_handle = nullptr) const {
+    return async(delay, std::forward<Handler>(handler), out_handle);
+  }
+
+  [[nodiscard]] Result async_repeat(
+      ArvMilliseconds start_delay_milliseconds,
+      ArvMilliseconds interval_milliseconds,
+      Job& job,
+      ArvScheduledJobHandle* out_handle = nullptr) const = delete;
 
   [[nodiscard]] Result cancel(ArvScheduledJobHandle handle) const {
     if (api_ == nullptr || api_->scheduler == nullptr || api_->scheduler->cancel == nullptr) {
@@ -151,6 +240,19 @@ private:
       ArvJobCallback,
       void*,
       ArvScheduledJobHandle*);
+  using DelayedMillisecondsMember = ArvResult (*)(
+      void*,
+      ArvMilliseconds,
+      ArvJobCallback,
+      void*,
+      ArvScheduledJobHandle*);
+
+  [[nodiscard]] static constexpr ArvMilliseconds milliseconds(
+      std::chrono::milliseconds duration) noexcept {
+    return duration.count() <= 0
+               ? 0U
+               : static_cast<ArvMilliseconds>(duration.count());
+  }
 
   template<typename Handler>
   struct OnceState {
@@ -196,6 +298,29 @@ private:
           out_handle);
     }
     Result result{abi_result};
+    if (result) {
+      state.release();
+    }
+    return result;
+  }
+
+  template<typename Handler>
+  [[nodiscard]] Result schedule_once(
+      DelayedMillisecondsMember member,
+      ArvMilliseconds delay,
+      Handler&& handler,
+      ArvScheduledJobHandle* out_handle) const {
+    if (api_ == nullptr || api_->scheduler == nullptr || member == nullptr) {
+      return Result::unsupported("scheduler API is unavailable");
+    }
+    using State = OnceState<std::decay_t<Handler>>;
+    auto state = std::make_unique<State>(std::forward<Handler>(handler));
+    Result result{member(
+        api_->scheduler_ctx,
+        delay,
+        &State::invoke,
+        state.get(),
+        out_handle)};
     if (result) {
       state.release();
     }

@@ -638,6 +638,13 @@ Rules:
 
 The scheduler API allows plugins to schedule sync and async jobs.
 
+Two timing modes are available:
+
+* millisecond-based schedules are the first-class default for real-time work such as countdowns, cooldown UI, announcements, and timers where wall-clock time matters
+* tick-based schedules use explicit `_tick` names for simulation/gameplay work that should advance with the server tick
+
+Tick delays remain relative tick counts, not absolute world tick indices. Millisecond delays are relative wall-clock durations measured with the engine's monotonic clock. Millisecond jobs are still dispatched from plugin scheduler pumps, so they are due after at least the requested duration has elapsed and run on the next scheduler pass.
+
 SDK ABI shape:
 
 ```cpp
@@ -651,14 +658,14 @@ typedef struct ArvSchedulerAPI {
         ArvScheduledJobHandle* out_handle);
     ArvResult (*sync_delayed)(
         void* ctx,
-        ArvTickIndex delay_ticks,
+        ArvMilliseconds delay_milliseconds,
         ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
     ArvResult (*sync_repeating)(
         void* ctx,
-        ArvTickIndex start_delay_ticks,
-        ArvTickIndex interval_ticks,
+        ArvMilliseconds start_delay_milliseconds,
+        ArvMilliseconds interval_milliseconds,
         ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
@@ -669,24 +676,56 @@ typedef struct ArvSchedulerAPI {
         ArvScheduledJobHandle* out_handle);
     ArvResult (*async_delayed)(
         void* ctx,
-        ArvTickIndex delay_ticks,
+        ArvMilliseconds delay_milliseconds,
         ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
     ArvResult (*async_repeating)(
+        void* ctx,
+        ArvMilliseconds start_delay_milliseconds,
+        ArvMilliseconds interval_milliseconds,
+        ArvJobCallback callback,
+        void* user_data,
+        ArvScheduledJobHandle* out_handle);
+    ArvResult (*cancel)(void* ctx, ArvScheduledJobHandle handle);
+    ArvResult (*sync_delayed_tick)(
+        void* ctx,
+        ArvTickIndex delay_ticks,
+        ArvJobCallback callback,
+        void* user_data,
+        ArvScheduledJobHandle* out_handle);
+    ArvResult (*sync_repeating_tick)(
         void* ctx,
         ArvTickIndex start_delay_ticks,
         ArvTickIndex interval_ticks,
         ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
-    ArvResult (*cancel)(void* ctx, ArvScheduledJobHandle handle);
+    ArvResult (*async_delayed_tick)(
+        void* ctx,
+        ArvTickIndex delay_ticks,
+        ArvJobCallback callback,
+        void* user_data,
+        ArvScheduledJobHandle* out_handle);
+    ArvResult (*async_repeating_tick)(
+        void* ctx,
+        ArvTickIndex start_delay_ticks,
+        ArvTickIndex interval_ticks,
+        ArvJobCallback callback,
+        void* user_data,
+        ArvScheduledJobHandle* out_handle);
 } ArvSchedulerAPI;
 ```
 
-`interval` is the preferred parameter name for the third `sync_repeat` / `async_repeat` argument. It describes the repeat cadence after the first run more clearly than `restart_delay`.
+`interval` is the preferred parameter name for the third repeating argument. It describes the repeat cadence after the first run more clearly than `restart_delay`.
 
-The `TickIndex` delay parameters are relative tick counts. They are not absolute world tick indices.
+The `_tick` functions are appended to the scheduler table for ABI compatibility. `ARV_API_VERSION` is unchanged.
+
+The C++ wrapper follows the same naming: `sync(std::chrono::milliseconds, ...)`,
+`async(std::chrono::milliseconds, ...)`, `sync_repeat(milliseconds, milliseconds, job)`,
+and `async_repeat(milliseconds, milliseconds, job)` are real-time schedules. Tick-based
+schedules are explicit: `sync_tick`, `async_tick`, `sync_repeat_tick`, and
+`async_repeat_tick`.
 
 ### Sync Jobs
 
@@ -2755,7 +2794,7 @@ ARV_MAIN(plugin) {
     static arv::Job tick{[] {
         run_plugin_tick();
     }};
-    plugin.scheduler().sync_repeat(1, 20, tick);
+    plugin.scheduler().sync_repeat_tick(1, 20, tick);
 
     plugin.logger().info("Example Plugin Pack loaded.");
 

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -399,14 +400,22 @@ enum class ScheduledJobKind : u8 {
   Async,
 };
 
+enum class ScheduledJobTiming : u8 {
+  Ticks,
+  Milliseconds,
+};
+
 struct ScheduledJob {
   u64 id{};
   usize owner_index{};
   ScheduledJobKind kind{ScheduledJobKind::Sync};
+  ScheduledJobTiming timing{ScheduledJobTiming::Ticks};
   ArvJobCallback callback{};
   void* user_data{};
   TickIndex next_run{};
   TickIndex interval{};
+  std::chrono::steady_clock::time_point next_time{};
+  std::chrono::milliseconds interval_time{};
   bool repeating{};
   bool canceled{};
   bool running{};
@@ -1206,9 +1215,73 @@ ArvResult schedule_job(
         id,
         ctx->plugin_index,
         kind,
+        ScheduledJobTiming::Ticks,
         callback,
         user_data,
         next_run,
+        interval,
+        {},
+        {},
+        repeating,
+        false,
+        false,
+    });
+  }
+  if (out_handle != nullptr) {
+    out_handle->value = id;
+  }
+  return ok(ctx);
+}
+
+ArvResult schedule_millisecond_job(
+    PluginCallContext* ctx,
+    ScheduledJobKind kind,
+    ArvMilliseconds delay_milliseconds,
+    ArvMilliseconds interval_milliseconds,
+    bool repeating,
+    ArvJobCallback callback,
+    void* user_data,
+    ArvScheduledJobHandle* out_handle) {
+  if (ctx == nullptr) {
+    return null_context_result(
+        ARV_RESULT_INVALID_STATE,
+        "plugin API context is null");
+  }
+  if (callback == nullptr) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "scheduled job callback is null");
+  }
+  if (repeating && interval_milliseconds == 0U) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "repeating scheduled job interval must be non-zero");
+  }
+  if (ctx->impl->shutdown_started) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_STATE,
+        "plugin manager is shutting down");
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  const auto delay = std::chrono::milliseconds{delay_milliseconds};
+  const auto interval = std::chrono::milliseconds{interval_milliseconds};
+  const u64 id = ctx->impl->next_job_id.fetch_add(1U, std::memory_order_relaxed);
+  {
+    std::lock_guard lock{ctx->impl->jobs_mutex};
+    ctx->impl->jobs.push_back({
+        id,
+        ctx->plugin_index,
+        kind,
+        ScheduledJobTiming::Milliseconds,
+        callback,
+        user_data,
+        0U,
+        0U,
+        now + delay,
         interval,
         repeating,
         false,
@@ -1239,14 +1312,14 @@ ArvResult api_sync_now(
 
 ArvResult api_sync_delayed(
     void* context,
-    uint64_t delay_ticks,
+    ArvMilliseconds delay_milliseconds,
     ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
-  return schedule_job(
+  return schedule_millisecond_job(
       call_context(context),
       ScheduledJobKind::Sync,
-      delay_ticks,
+      delay_milliseconds,
       0U,
       false,
       callback,
@@ -1256,16 +1329,16 @@ ArvResult api_sync_delayed(
 
 ArvResult api_sync_repeating(
     void* context,
-    uint64_t start_delay_ticks,
-    uint64_t interval_ticks,
+    ArvMilliseconds start_delay_milliseconds,
+    ArvMilliseconds interval_milliseconds,
     ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
-  return schedule_job(
+  return schedule_millisecond_job(
       call_context(context),
       ScheduledJobKind::Sync,
-      start_delay_ticks,
-      interval_ticks,
+      start_delay_milliseconds,
+      interval_milliseconds,
       true,
       callback,
       user_data,
@@ -1290,7 +1363,77 @@ ArvResult api_async_now(
 
 ArvResult api_async_delayed(
     void* context,
-    uint64_t delay_ticks,
+    ArvMilliseconds delay_milliseconds,
+    ArvJobCallback callback,
+    void* user_data,
+    ArvScheduledJobHandle* out_handle) {
+  return schedule_millisecond_job(
+      call_context(context),
+      ScheduledJobKind::Async,
+      delay_milliseconds,
+      0U,
+      false,
+      callback,
+      user_data,
+      out_handle);
+}
+
+ArvResult api_async_repeating(
+    void* context,
+    ArvMilliseconds start_delay_milliseconds,
+    ArvMilliseconds interval_milliseconds,
+    ArvJobCallback callback,
+    void* user_data,
+    ArvScheduledJobHandle* out_handle) {
+  return schedule_millisecond_job(
+      call_context(context),
+      ScheduledJobKind::Async,
+      start_delay_milliseconds,
+      interval_milliseconds,
+      true,
+      callback,
+      user_data,
+      out_handle);
+}
+
+ArvResult api_sync_delayed_tick(
+    void* context,
+    ArvTickIndex delay_ticks,
+    ArvJobCallback callback,
+    void* user_data,
+    ArvScheduledJobHandle* out_handle) {
+  return schedule_job(
+      call_context(context),
+      ScheduledJobKind::Sync,
+      delay_ticks,
+      0U,
+      false,
+      callback,
+      user_data,
+      out_handle);
+}
+
+ArvResult api_sync_repeating_tick(
+    void* context,
+    ArvTickIndex start_delay_ticks,
+    ArvTickIndex interval_ticks,
+    ArvJobCallback callback,
+    void* user_data,
+    ArvScheduledJobHandle* out_handle) {
+  return schedule_job(
+      call_context(context),
+      ScheduledJobKind::Sync,
+      start_delay_ticks,
+      interval_ticks,
+      true,
+      callback,
+      user_data,
+      out_handle);
+}
+
+ArvResult api_async_delayed_tick(
+    void* context,
+    ArvTickIndex delay_ticks,
     ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
@@ -1305,10 +1448,10 @@ ArvResult api_async_delayed(
       out_handle);
 }
 
-ArvResult api_async_repeating(
+ArvResult api_async_repeating_tick(
     void* context,
-    uint64_t start_delay_ticks,
-    uint64_t interval_ticks,
+    ArvTickIndex start_delay_ticks,
+    ArvTickIndex interval_ticks,
     ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
@@ -4205,6 +4348,10 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &api_async_delayed,
       &api_async_repeating,
       &api_cancel_job,
+      &api_sync_delayed_tick,
+      &api_sync_repeating_tick,
+      &api_async_delayed_tick,
+      &api_async_repeating_tick,
   };
   services_api = {
       &api_publish_service,
@@ -4681,10 +4828,15 @@ void PluginManager::tick(TickIndex tick_index) {
     void* user_data{};
   };
   std::vector<JobToRun> due;
+  const auto now = std::chrono::steady_clock::now();
   {
     std::lock_guard lock{impl_->jobs_mutex};
     for (ScheduledJob& job : impl_->jobs) {
-      if (job.canceled || job.running || job.next_run > tick_index) {
+      const bool job_due =
+          job.timing == ScheduledJobTiming::Ticks
+              ? job.next_run <= tick_index
+              : job.next_time <= now;
+      if (job.canceled || job.running || !job_due) {
         continue;
       }
       due.push_back({job.id, job.owner_index, job.kind, job.callback, job.user_data});
@@ -4692,7 +4844,11 @@ void PluginManager::tick(TickIndex tick_index) {
         job.running = true;
       }
       if (job.repeating) {
-        job.next_run = tick_index + job.interval;
+        if (job.timing == ScheduledJobTiming::Ticks) {
+          job.next_run = tick_index + job.interval;
+        } else {
+          job.next_time = now + job.interval_time;
+        }
       } else {
         job.canceled = true;
       }

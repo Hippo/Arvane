@@ -395,6 +395,8 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   EXPECT_NE(message.find("stops=1"), std::string::npos);
   EXPECT_NE(message.find("api_checks=2"), std::string::npos);
   EXPECT_NE(message.find("network_sends=2"), std::string::npos);
+  EXPECT_NE(message.find("sync_ms=1"), std::string::npos);
+  EXPECT_NE(message.find("async_ms=1"), std::string::npos);
   EXPECT_EQ(network_sends, 2);
   EXPECT_TRUE(std::filesystem::exists(
       harness.temp.path / "save" / "plugin_data" / "example_plugin_pack" /

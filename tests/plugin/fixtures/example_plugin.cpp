@@ -10,6 +10,8 @@ namespace {
 const ArvAPI* g_api{};
 std::atomic<int> g_sync_ticks{};
 std::atomic<int> g_async_ticks{};
+std::atomic<int> g_sync_ms_ticks{};
+std::atomic<int> g_async_ms_ticks{};
 std::atomic<int> g_thread_violations{};
 std::atomic<int> g_server_starts{};
 std::atomic<int> g_server_stops{};
@@ -268,6 +270,14 @@ void async_job(void*) {
   }
 }
 
+void sync_millisecond_job(void*) {
+  g_sync_ms_ticks.fetch_add(1, std::memory_order_relaxed);
+}
+
+void async_millisecond_job(void*) {
+  g_async_ms_ticks.fetch_add(1, std::memory_order_relaxed);
+}
+
 bool view_equals(ArvStringView view, std::string_view expected) {
   return view.size == expected.size() &&
          (view.size == 0U ||
@@ -308,6 +318,12 @@ ArvResult command(
       sizeof(message) - std::strlen(message),
       " network_sends=%d",
       g_network_sends.load(std::memory_order_relaxed));
+  std::snprintf(
+      message + std::strlen(message),
+      sizeof(message) - std::strlen(message),
+      " sync_ms=%d async_ms=%d",
+      g_sync_ms_ticks.load(std::memory_order_relaxed),
+      g_async_ms_ticks.load(std::memory_order_relaxed));
   ctx->reply(ctx, ARV_COMMAND_MESSAGE_SUCCESS, arv_cstr(message));
   return {ARV_RESULT_OK, ""};
 }
@@ -329,6 +345,8 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   }
   g_sync_ticks.store(0, std::memory_order_relaxed);
   g_async_ticks.store(0, std::memory_order_relaxed);
+  g_sync_ms_ticks.store(0, std::memory_order_relaxed);
+  g_async_ms_ticks.store(0, std::memory_order_relaxed);
   g_thread_violations.store(0, std::memory_order_relaxed);
   g_server_starts.store(0, std::memory_order_relaxed);
   g_server_stops.store(0, std::memory_order_relaxed);
@@ -552,7 +570,7 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   }
 
   ArvScheduledJobHandle sync_handle{};
-  if (!result_ok(api->scheduler->sync_repeating(
+  if (!result_ok(api->scheduler->sync_repeating_tick(
           api->scheduler_ctx,
           1,
           1,
@@ -562,12 +580,30 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
     return false;
   }
   ArvScheduledJobHandle async_handle{};
-  if (!result_ok(api->scheduler->async_delayed(
+  if (!result_ok(api->scheduler->async_delayed_tick(
           api->scheduler_ctx,
           1,
           &async_job,
           nullptr,
           &async_handle))) {
+    return false;
+  }
+  ArvScheduledJobHandle sync_ms_handle{};
+  if (!result_ok(api->scheduler->sync_delayed(
+          api->scheduler_ctx,
+          0,
+          &sync_millisecond_job,
+          nullptr,
+          &sync_ms_handle))) {
+    return false;
+  }
+  ArvScheduledJobHandle async_ms_handle{};
+  if (!result_ok(api->scheduler->async_delayed(
+          api->scheduler_ctx,
+          0,
+          &async_millisecond_job,
+          nullptr,
+          &async_ms_handle))) {
     return false;
   }
 
