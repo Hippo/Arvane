@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/ArvaneSDKTargets.cmake")
+
+if(NOT TARGET Arvane::SDK AND TARGET Arvane::ArvaneSDK)
+  add_library(Arvane::SDK ALIAS Arvane::ArvaneSDK)
+endif()

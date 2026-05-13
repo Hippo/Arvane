@@ -75,7 +75,7 @@ Defines runnable products.
 Defines standalone public SDKs that external authoring code can consume without
 linking engine modules.
 
-* `sdk/arvane_plugin/` defines the native plugin ABI and `Arvane::PluginSDK`
+* `sdk/arvane_plugin/` defines the native plugin ABI and `Arvane::SDK`
 * SDK headers must not include engine module headers
 * SDK targets provide compile-time authoring support, not engine runtime code
 
@@ -431,12 +431,12 @@ Plugin loader and engine-side SDK bridge.
 
 * loading/unloading
 * lifecycle
-* construction of `ArvPluginAPI` function tables
+* construction of `ArvAPI` function tables
 * conversion between SDK ABI types and engine internals
 * registration hooks
 
 The plugin authoring surface lives in `sdk/arvane_plugin/`, not in this engine
-module. External plugins link `Arvane::PluginSDK`; they do not link `arv_plugin`.
+module. External plugins link `Arvane::SDK`; they do not link `arv_plugin`.
 
 ---
 

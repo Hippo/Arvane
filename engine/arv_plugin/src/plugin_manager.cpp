@@ -70,74 +70,74 @@ private:
 }
 
 [[nodiscard]] command::CommandDomain command_domain_from_abi(
-    ArvPluginCommandDomain domain) noexcept {
+    ArvCommandDomain domain) noexcept {
   switch (domain) {
-    case ARV_PLUGIN_COMMAND_CLIENT_BOUND:
+    case ARV_COMMAND_CLIENT_BOUND:
       return command::CommandDomain::ClientBound;
-    case ARV_PLUGIN_COMMAND_SERVER_BOUND:
+    case ARV_COMMAND_SERVER_BOUND:
       return command::CommandDomain::ServerBound;
   }
   return command::CommandDomain::ServerBound;
 }
 
 [[nodiscard]] command::CommandMessageKind command_message_kind_from_abi(
-    ArvPluginCommandMessageKind kind) noexcept {
+    ArvCommandMessageKind kind) noexcept {
   switch (kind) {
-    case ARV_PLUGIN_COMMAND_MESSAGE_INFO:
+    case ARV_COMMAND_MESSAGE_INFO:
       return command::CommandMessageKind::Info;
-    case ARV_PLUGIN_COMMAND_MESSAGE_SUCCESS:
+    case ARV_COMMAND_MESSAGE_SUCCESS:
       return command::CommandMessageKind::Success;
-    case ARV_PLUGIN_COMMAND_MESSAGE_WARNING:
+    case ARV_COMMAND_MESSAGE_WARNING:
       return command::CommandMessageKind::Warning;
-    case ARV_PLUGIN_COMMAND_MESSAGE_ERROR:
+    case ARV_COMMAND_MESSAGE_ERROR:
       return command::CommandMessageKind::Error;
   }
   return command::CommandMessageKind::Info;
 }
 
 [[nodiscard]] command::CommandStatus command_status_from_result(
-    ArvPluginResultCode code) noexcept {
+    ArvResultCode code) noexcept {
   switch (code) {
-    case ARV_PLUGIN_RESULT_OK:
+    case ARV_RESULT_OK:
       return command::CommandStatus::Success;
-    case ARV_PLUGIN_RESULT_PERMISSION_DENIED:
+    case ARV_RESULT_PERMISSION_DENIED:
       return command::CommandStatus::PermissionDenied;
-    case ARV_PLUGIN_RESULT_INVALID_ARGUMENT:
+    case ARV_RESULT_INVALID_ARGUMENT:
       return command::CommandStatus::UsageError;
-    case ARV_PLUGIN_RESULT_NOT_FOUND:
+    case ARV_RESULT_NOT_FOUND:
       return command::CommandStatus::UnknownCommand;
-    case ARV_PLUGIN_RESULT_INVALID_STATE:
-    case ARV_PLUGIN_RESULT_DUPLICATE_ID:
-    case ARV_PLUGIN_RESULT_UNSUPPORTED_VERSION:
-    case ARV_PLUGIN_RESULT_THREAD_VIOLATION:
-    case ARV_PLUGIN_RESULT_UNSUPPORTED:
-    case ARV_PLUGIN_RESULT_INTERNAL_ERROR:
+    case ARV_RESULT_INVALID_STATE:
+    case ARV_RESULT_DUPLICATE_ID:
+    case ARV_RESULT_UNSUPPORTED_VERSION:
+    case ARV_RESULT_THREAD_VIOLATION:
+    case ARV_RESULT_UNSUPPORTED:
+    case ARV_RESULT_INTERNAL_ERROR:
       return command::CommandStatus::Failure;
   }
   return command::CommandStatus::Failure;
 }
 
-[[nodiscard]] std::string result_code_name(ArvPluginResultCode code) {
+[[nodiscard]] std::string result_code_name(ArvResultCode code) {
   switch (code) {
-    case ARV_PLUGIN_RESULT_OK:
+    case ARV_RESULT_OK:
       return "Ok";
-    case ARV_PLUGIN_RESULT_INVALID_ARGUMENT:
+    case ARV_RESULT_INVALID_ARGUMENT:
       return "InvalidArgument";
-    case ARV_PLUGIN_RESULT_INVALID_STATE:
+    case ARV_RESULT_INVALID_STATE:
       return "InvalidState";
-    case ARV_PLUGIN_RESULT_PERMISSION_DENIED:
+    case ARV_RESULT_PERMISSION_DENIED:
       return "PermissionDenied";
-    case ARV_PLUGIN_RESULT_NOT_FOUND:
+    case ARV_RESULT_NOT_FOUND:
       return "NotFound";
-    case ARV_PLUGIN_RESULT_DUPLICATE_ID:
+    case ARV_RESULT_DUPLICATE_ID:
       return "DuplicateID";
-    case ARV_PLUGIN_RESULT_UNSUPPORTED_VERSION:
+    case ARV_RESULT_UNSUPPORTED_VERSION:
       return "UnsupportedVersion";
-    case ARV_PLUGIN_RESULT_THREAD_VIOLATION:
+    case ARV_RESULT_THREAD_VIOLATION:
       return "ThreadViolation";
-    case ARV_PLUGIN_RESULT_UNSUPPORTED:
+    case ARV_RESULT_UNSUPPORTED:
       return "Unsupported";
-    case ARV_PLUGIN_RESULT_INTERNAL_ERROR:
+    case ARV_RESULT_INTERNAL_ERROR:
       return "InternalError";
   }
   return "Unknown";
@@ -226,8 +226,8 @@ private:
   return path;
 }
 
-[[nodiscard]] ArvPluginResult null_context_result(
-    ArvPluginResultCode code,
+[[nodiscard]] ArvResult null_context_result(
+    ArvResultCode code,
     const char* message) noexcept {
   return {code, message};
 }
@@ -242,7 +242,7 @@ struct PluginCommandRegistration {
   std::string usage{};
   bool public_to_players{};
   bool console_only{};
-  ArvPluginCommandCallback callback{};
+  ArvCommandCallback callback{};
   void* user_data{};
 };
 
@@ -255,7 +255,7 @@ struct ScheduledJob {
   u64 id{};
   usize owner_index{};
   ScheduledJobKind kind{ScheduledJobKind::Sync};
-  ArvPluginJobCallback callback{};
+  ArvJobCallback callback{};
   void* user_data{};
   TickIndex next_run{};
   TickIndex interval{};
@@ -268,8 +268,8 @@ struct EventSubscription {
   u64 id{};
   usize owner_index{};
   std::string event_id{};
-  ArvPluginEventPriority priority{ARV_PLUGIN_EVENT_PRIORITY_NORMAL};
-  ArvPluginEventCallback callback{};
+  ArvEventPriority priority{ARV_EVENT_PRIORITY_NORMAL};
+  ArvEventCallback callback{};
   void* user_data{};
   bool active{true};
 };
@@ -280,7 +280,7 @@ struct ServiceRegistration {
   std::string service_id{};
   u32 api_version{};
   i32 priority{};
-  ArvPluginServiceThreading threading{ARV_PLUGIN_SERVICE_SYNC_ONLY};
+  ArvServiceThreading threading{ARV_SERVICE_SYNC_ONLY};
   std::string display_name{};
   const void* api_table{};
   void* user_data{};
@@ -292,24 +292,24 @@ struct PluginCallContext;
 struct PluginAPIStorage {
   explicit PluginAPIStorage(PluginCallContext* context);
 
-  ArvPluginContextAPI context_api{};
-  ArvPluginLoggerAPI logger_api{};
-  ArvPluginRegistriesAPI registries_api{};
-  ArvPluginCommandsAPI commands_api{};
-  ArvPluginEventsAPI events_api{};
-  ArvPluginSchedulerAPI scheduler_api{};
-  ArvPluginServicesAPI services_api{};
-  ArvPluginResourcesAPI resources_api{};
-  ArvPluginWorldsAPI worlds_api{};
-  ArvPluginEntitiesAPI entities_api{};
-  ArvPluginConfigAPI config_api{};
-  ArvPluginPersistentDataAPI persistent_data_api{};
-  ArvPluginWorldGenAPI worldgen_api{};
-  ArvPluginNetworkAPI network_api{};
-  ArvPluginTextAPI text_api{};
-  ArvPluginMetricsAPI metrics_api{};
-  ArvPluginPermissionsAPI permissions_api{};
-  ArvPluginAPI api{};
+  ArvContextAPI context_api{};
+  ArvLoggerAPI logger_api{};
+  ArvRegistryAPI registries_api{};
+  ArvCommandAPI commands_api{};
+  ArvEventAPI events_api{};
+  ArvSchedulerAPI scheduler_api{};
+  ArvServiceAPI services_api{};
+  ArvResourceAPI resources_api{};
+  ArvWorldAPI worlds_api{};
+  ArvEntityAPI entities_api{};
+  ArvConfigAPI config_api{};
+  ArvPersistentDataAPI persistent_data_api{};
+  ArvWorldGenAPI worldgen_api{};
+  ArvNetworkAPI network_api{};
+  ArvTextAPI text_api{};
+  ArvMetricsAPI metrics_api{};
+  ArvPermissionsAPI permissions_api{};
+  ArvAPI api{};
 };
 
 struct PluginRecord {
@@ -358,9 +358,9 @@ struct PluginCallContext {
   }
 };
 
-[[nodiscard]] ArvPluginResult make_result(
+[[nodiscard]] ArvResult make_result(
     PluginCallContext* context,
-    ArvPluginResultCode code,
+    ArvResultCode code,
     std::string message = {}) {
   if (context == nullptr) {
     return null_context_result(code, "plugin API context is null");
@@ -369,8 +369,8 @@ struct PluginCallContext {
   return {code, context->result_message.c_str()};
 }
 
-[[nodiscard]] ArvPluginResult ok(PluginCallContext* context) {
-  return make_result(context, ARV_PLUGIN_RESULT_OK);
+[[nodiscard]] ArvResult ok(PluginCallContext* context) {
+  return make_result(context, ARV_RESULT_OK);
 }
 
 [[nodiscard]] PluginCallContext* call_context(void* context) noexcept {
@@ -392,34 +392,34 @@ void append_diagnostic(
   impl.diagnostics.push_back(std::move(diagnostic));
 }
 
-[[nodiscard]] ArvPluginResult require_registration_phase(
+[[nodiscard]] ArvResult require_registration_phase(
     PluginCallContext* context) {
   if (context == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (!context->impl->registration_open) {
     return make_result(
         context,
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "API may only be used during plugin registration");
   }
   return ok(context);
 }
 
-[[nodiscard]] ArvPluginResult require_sync_context(
+[[nodiscard]] ArvResult require_sync_context(
     PluginCallContext* context,
     std::string_view api_name) {
   if (context == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (tls_thread_context != PluginThreadContext::Sync) {
     return make_result(
         context,
-        ARV_PLUGIN_RESULT_THREAD_VIOLATION,
+        ARV_RESULT_THREAD_VIOLATION,
         std::string{api_name} + " requires sync plugin context");
   }
   return ok(context);
@@ -435,8 +435,8 @@ void append_diagnostic(
   return world->id().value == handle ? world : nullptr;
 }
 
-[[nodiscard]] ArvPluginByteBuffer byte_buffer_from_string(std::string text) {
-  ArvPluginByteBuffer buffer{};
+[[nodiscard]] ArvByteBuffer byte_buffer_from_string(std::string text) {
+  ArvByteBuffer buffer{};
   buffer.size = text.size();
   if (buffer.size == 0U) {
     return buffer;
@@ -523,21 +523,21 @@ void api_log_error(void* context, ArvStringView message) {
   log_for_plugin(context, core::LogLevel::Error, message);
 }
 
-ArvPluginResult api_register_block_behavior(void* context, ArvResourceID id) {
+ArvResult api_register_block_behavior(void* context, ArvResourceID id) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult phase = require_registration_phase(ctx);
-      phase.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
     return phase;
   }
   const std::string_view behavior_id = abi_view(id);
   if (auto error = validate_owned_resource_id(ctx->info(), behavior_id);
       error.has_value()) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, error.value());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
   if (ctx->impl->options.block_behaviors == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_UNSUPPORTED,
+        ARV_RESULT_UNSUPPORTED,
         "block behavior registry is unavailable");
   }
   auto result = ctx->impl->options.block_behaviors->register_handler(std::string{behavior_id});
@@ -545,28 +545,28 @@ ArvPluginResult api_register_block_behavior(void* context, ArvResourceID id) {
     return make_result(
         ctx,
         result.error().message.find("duplicate") != std::string::npos
-            ? ARV_PLUGIN_RESULT_DUPLICATE_ID
-            : ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+            ? ARV_RESULT_DUPLICATE_ID
+            : ARV_RESULT_INVALID_ARGUMENT,
         result.error().message);
   }
   return ok(ctx);
 }
 
-ArvPluginResult api_register_item_behavior(void* context, ArvResourceID id) {
+ArvResult api_register_item_behavior(void* context, ArvResourceID id) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult phase = require_registration_phase(ctx);
-      phase.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
     return phase;
   }
   const std::string_view behavior_id = abi_view(id);
   if (auto error = validate_owned_resource_id(ctx->info(), behavior_id);
       error.has_value()) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, error.value());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
   if (ctx->impl->options.item_behaviors == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_UNSUPPORTED,
+        ARV_RESULT_UNSUPPORTED,
         "item behavior registry is unavailable");
   }
   auto result = ctx->impl->options.item_behaviors->register_handler(std::string{behavior_id});
@@ -574,28 +574,28 @@ ArvPluginResult api_register_item_behavior(void* context, ArvResourceID id) {
     return make_result(
         ctx,
         result.error().message.find("duplicate") != std::string::npos
-            ? ARV_PLUGIN_RESULT_DUPLICATE_ID
-            : ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+            ? ARV_RESULT_DUPLICATE_ID
+            : ARV_RESULT_INVALID_ARGUMENT,
         result.error().message);
   }
   return ok(ctx);
 }
 
-ArvPluginResult api_register_entity_goal(void* context, ArvResourceID id) {
+ArvResult api_register_entity_goal(void* context, ArvResourceID id) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult phase = require_registration_phase(ctx);
-      phase.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
     return phase;
   }
   const std::string_view goal_id = abi_view(id);
   if (auto error = validate_owned_resource_id(ctx->info(), goal_id);
       error.has_value()) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, error.value());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
   if (ctx->impl->options.entity_goals == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_UNSUPPORTED,
+        ARV_RESULT_UNSUPPORTED,
         "entity goal registry is unavailable");
   }
   world::EntityGoalHandler handler;
@@ -612,52 +612,52 @@ ArvPluginResult api_register_entity_goal(void* context, ArvResourceID id) {
     return make_result(
         ctx,
         result.error().message.find("duplicate") != std::string::npos
-            ? ARV_PLUGIN_RESULT_DUPLICATE_ID
-            : ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+            ? ARV_RESULT_DUPLICATE_ID
+            : ARV_RESULT_INVALID_ARGUMENT,
         result.error().message);
   }
   return ok(ctx);
 }
 
-ArvPluginResult unsupported_registration(void* context, ArvResourceID id) {
+ArvResult unsupported_registration(void* context, ArvResourceID id) {
   PluginCallContext* ctx = call_context(context);
   (void)id;
   return make_result(
       ctx,
-      ARV_PLUGIN_RESULT_UNSUPPORTED,
+      ARV_RESULT_UNSUPPORTED,
       "this registry extension point is not implemented by the engine");
 }
 
-ArvPluginResult api_register_executor(
+ArvResult api_register_executor(
     void* context,
-    const ArvPluginCommandDescriptor* descriptor) {
+    const ArvCommandDescriptor* descriptor) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult phase = require_registration_phase(ctx);
-      phase.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
     return phase;
   }
   if (descriptor == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "command descriptor is null");
   }
   if (descriptor->execute == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "command descriptor execute callback is null");
   }
   const std::string executor_id{abi_view(descriptor->executor_id)};
   if (auto error = validate_owned_resource_id(ctx->info(), executor_id);
       error.has_value()) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, error.value());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
   const std::string command_name{abi_view(descriptor->command_name)};
   if (!command_name_valid(command_name)) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "command name must be non-empty and contain no whitespace");
   }
   const auto duplicate = std::find_if(
@@ -670,7 +670,7 @@ ArvPluginResult api_register_executor(
   if (duplicate != ctx->impl->commands.end()) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_DUPLICATE_ID,
+        ARV_RESULT_DUPLICATE_ID,
         "duplicate command executor or command name: " + executor_id);
   }
 
@@ -690,36 +690,36 @@ ArvPluginResult api_register_executor(
   return ok(ctx);
 }
 
-ArvPluginResult schedule_job(
+ArvResult schedule_job(
     PluginCallContext* ctx,
     ScheduledJobKind kind,
     TickIndex delay,
     TickIndex interval,
     bool repeating,
-    ArvPluginJobCallback callback,
+    ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (callback == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "scheduled job callback is null");
   }
   if (repeating && interval == 0U) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "repeating scheduled job interval must be non-zero");
   }
   if (ctx->impl->shutdown_started) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin manager is shutting down");
   }
 
@@ -747,9 +747,9 @@ ArvPluginResult schedule_job(
   return ok(ctx);
 }
 
-ArvPluginResult api_sync_now(
+ArvResult api_sync_now(
     void* context,
-    ArvPluginJobCallback callback,
+    ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
   return schedule_job(
@@ -763,10 +763,10 @@ ArvPluginResult api_sync_now(
       out_handle);
 }
 
-ArvPluginResult api_sync_delayed(
+ArvResult api_sync_delayed(
     void* context,
     uint64_t delay_ticks,
-    ArvPluginJobCallback callback,
+    ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
   return schedule_job(
@@ -780,11 +780,11 @@ ArvPluginResult api_sync_delayed(
       out_handle);
 }
 
-ArvPluginResult api_sync_repeating(
+ArvResult api_sync_repeating(
     void* context,
     uint64_t start_delay_ticks,
     uint64_t interval_ticks,
-    ArvPluginJobCallback callback,
+    ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
   return schedule_job(
@@ -798,9 +798,9 @@ ArvPluginResult api_sync_repeating(
       out_handle);
 }
 
-ArvPluginResult api_async_now(
+ArvResult api_async_now(
     void* context,
-    ArvPluginJobCallback callback,
+    ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
   return schedule_job(
@@ -814,10 +814,10 @@ ArvPluginResult api_async_now(
       out_handle);
 }
 
-ArvPluginResult api_async_delayed(
+ArvResult api_async_delayed(
     void* context,
     uint64_t delay_ticks,
-    ArvPluginJobCallback callback,
+    ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
   return schedule_job(
@@ -831,11 +831,11 @@ ArvPluginResult api_async_delayed(
       out_handle);
 }
 
-ArvPluginResult api_async_repeating(
+ArvResult api_async_repeating(
     void* context,
     uint64_t start_delay_ticks,
     uint64_t interval_ticks,
-    ArvPluginJobCallback callback,
+    ArvJobCallback callback,
     void* user_data,
     ArvScheduledJobHandle* out_handle) {
   return schedule_job(
@@ -849,11 +849,11 @@ ArvPluginResult api_async_repeating(
       out_handle);
 }
 
-ArvPluginResult api_cancel_job(void* context, ArvScheduledJobHandle handle) {
+ArvResult api_cancel_job(void* context, ArvScheduledJobHandle handle) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   std::lock_guard lock{ctx->impl->jobs_mutex};
@@ -863,31 +863,31 @@ ArvPluginResult api_cancel_job(void* context, ArvScheduledJobHandle handle) {
       return ok(ctx);
     }
   }
-  return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "scheduled job not found");
+  return make_result(ctx, ARV_RESULT_NOT_FOUND, "scheduled job not found");
 }
 
-ArvPluginResult api_subscribe_event(
+ArvResult api_subscribe_event(
     void* context,
     ArvResourceID event_id,
-    ArvPluginEventPriority priority,
-    ArvPluginEventCallback callback,
+    ArvEventPriority priority,
+    ArvEventCallback callback,
     void* user_data,
     ArvEventSubscriptionHandle* out_handle) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (callback == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "event callback is null");
   }
   const std::string id{abi_view(event_id)};
   if (auto error = validate_resource_id(id); error.has_value()) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, error.value());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
   const u64 handle = ctx->impl->next_subscription_id++;
   ctx->impl->subscriptions.push_back({
@@ -905,13 +905,13 @@ ArvPluginResult api_subscribe_event(
   return ok(ctx);
 }
 
-ArvPluginResult api_unsubscribe_event(
+ArvResult api_unsubscribe_event(
     void* context,
     ArvEventSubscriptionHandle handle) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   for (EventSubscription& subscription : ctx->impl->subscriptions) {
@@ -922,35 +922,35 @@ ArvPluginResult api_unsubscribe_event(
       return ok(ctx);
     }
   }
-  return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "event subscription not found");
+  return make_result(ctx, ARV_RESULT_NOT_FOUND, "event subscription not found");
 }
 
-ArvPluginResult api_publish_service(
+ArvResult api_publish_service(
     void* context,
-    const ArvPluginServiceDescriptor* descriptor,
+    const ArvServiceDescriptor* descriptor,
     ArvServiceHandle* out_handle) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (descriptor == nullptr || descriptor->api_table == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "service descriptor or API table is null");
   }
   if (descriptor->api_version == 0U) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "service API version must be non-zero");
   }
   const std::string id{abi_view(descriptor->service_id)};
   if (auto error = validate_owned_resource_id(ctx->info(), id);
       error.has_value()) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, error.value());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
   const u64 handle = ctx->impl->next_service_id++;
   ctx->impl->services.push_back({
@@ -971,11 +971,11 @@ ArvPluginResult api_publish_service(
   return ok(ctx);
 }
 
-ArvPluginResult api_unpublish_service(void* context, ArvServiceHandle handle) {
+ArvResult api_unpublish_service(void* context, ArvServiceHandle handle) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   for (ServiceRegistration& service : ctx->impl->services) {
@@ -986,7 +986,7 @@ ArvPluginResult api_unpublish_service(void* context, ArvServiceHandle handle) {
       return ok(ctx);
     }
   }
-  return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "service not found");
+  return make_result(ctx, ARV_RESULT_NOT_FOUND, "service not found");
 }
 
 [[nodiscard]] bool service_version_matches(
@@ -1025,7 +1025,7 @@ ArvPluginResult api_unpublish_service(void* context, ArvServiceHandle handle) {
   return matches;
 }
 
-[[nodiscard]] ArvPluginServiceRef service_ref_for(
+[[nodiscard]] ArvServiceRef service_ref_for(
     const PluginManagerImpl& impl,
     const ServiceRegistration& service) {
   return {
@@ -1039,33 +1039,33 @@ ArvPluginResult api_unpublish_service(void* context, ArvServiceHandle handle) {
   };
 }
 
-ArvPluginResult api_get_service(
+ArvResult api_get_service(
     void* context,
     ArvResourceID service_id,
     uint32_t min_api_version,
     uint32_t max_api_version,
-    ArvPluginServiceRef* out_service) {
+    ArvServiceRef* out_service) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (out_service == nullptr) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INVALID_ARGUMENT,
+        ARV_RESULT_INVALID_ARGUMENT,
         "out_service is null");
   }
   const std::string id{abi_view(service_id)};
   if (auto error = validate_resource_id(id); error.has_value()) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, error.value());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
   std::vector<const ServiceRegistration*> matches =
       matching_services(*ctx->impl, id, min_api_version, max_api_version);
   if (matches.empty()) {
     *out_service = {};
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "service not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "service not found");
   }
   *out_service = service_ref_for(*ctx->impl, *matches.front());
   return ok(ctx);
@@ -1076,7 +1076,7 @@ uint64_t api_list_services(
     ArvResourceID service_id,
     uint32_t min_api_version,
     uint32_t max_api_version,
-    ArvPluginServiceRef* out_services,
+    ArvServiceRef* out_services,
     uint64_t max_services) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
@@ -1097,21 +1097,21 @@ uint64_t api_list_services(
   return matches.size();
 }
 
-void api_release_service(void* context, ArvPluginServiceRef service) {
+void api_release_service(void* context, ArvServiceRef service) {
   (void)context;
   (void)service;
 }
 
 bool api_resource_exists(
     void* context,
-    ArvPluginResourceKind kind,
+    ArvResourceKind kind,
     ArvResourceID resource_id,
     ArvStringView extension) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr || ctx->impl->options.packs == nullptr) {
     return false;
   }
-  if (kind == ARV_PLUGIN_RESOURCE_DATA) {
+  if (kind == ARV_RESOURCE_DATA) {
     return ctx->impl->options.packs
         ->resolve_data_path(abi_view(resource_id), abi_view(extension))
         .has_value();
@@ -1119,190 +1119,190 @@ bool api_resource_exists(
   return false;
 }
 
-ArvPluginResult api_resource_read(
+ArvResult api_resource_read(
     void* context,
-    ArvPluginResourceKind kind,
+    ArvResourceKind kind,
     ArvResourceID resource_id,
     ArvStringView extension,
-    ArvPluginByteBuffer* out_buffer) {
+    ArvByteBuffer* out_buffer) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (out_buffer == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_buffer is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_buffer is null");
   }
   *out_buffer = {};
   if (ctx->impl->options.packs == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_UNSUPPORTED, "pack manager is unavailable");
+    return make_result(ctx, ARV_RESULT_UNSUPPORTED, "pack manager is unavailable");
   }
-  if (kind != ARV_PLUGIN_RESOURCE_DATA) {
+  if (kind != ARV_RESOURCE_DATA) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_UNSUPPORTED,
+        ARV_RESULT_UNSUPPORTED,
         "only data resource reads are implemented");
   }
   auto text = ctx->impl->options.packs->load_data_text(
       abi_view(resource_id),
       abi_view(extension));
   if (!text) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, text.error().describe());
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, text.error().describe());
   }
   *out_buffer = byte_buffer_from_string(std::move(text.value()));
   return ok(ctx);
 }
 
-ArvPluginResult api_resource_debug_path(
+ArvResult api_resource_debug_path(
     void* context,
-    ArvPluginResourceKind kind,
+    ArvResourceKind kind,
     ArvResourceID resource_id,
     ArvStringView extension,
-    ArvPluginByteBuffer* out_buffer) {
+    ArvByteBuffer* out_buffer) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (out_buffer == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_buffer is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_buffer is null");
   }
   *out_buffer = {};
-  if (ctx->impl->options.packs == nullptr || kind != ARV_PLUGIN_RESOURCE_DATA) {
+  if (ctx->impl->options.packs == nullptr || kind != ARV_RESOURCE_DATA) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_UNSUPPORTED,
+        ARV_RESULT_UNSUPPORTED,
         "only data resource debug paths are implemented");
   }
   auto resolved = ctx->impl->options.packs->resolve_data_path(
       abi_view(resource_id),
       abi_view(extension));
   if (!resolved) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, resolved.error().describe());
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, resolved.error().describe());
   }
   *out_buffer = byte_buffer_from_string(resolved.value().path.generic_string());
   return ok(ctx);
 }
 
-void api_release_buffer(void* context, ArvPluginByteBuffer buffer) {
+void api_release_buffer(void* context, ArvByteBuffer buffer) {
   (void)context;
   delete[] buffer.data;
 }
 
-ArvPluginResult api_world_get_block(
+ArvResult api_world_get_block(
     void* context,
     ArvWorldHandle world_handle,
-    ArvPluginBlockPos pos,
+    ArvBlockPos pos,
     uint32_t* out_block_variant) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult sync = require_sync_context(ctx, "world.get_block");
-      sync.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult sync = require_sync_context(ctx, "world.get_block");
+      sync.code != ARV_RESULT_OK) {
     return sync;
   }
   if (out_block_variant == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_block_variant is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_block_variant is null");
   }
   world::WorldRuntime* world = world_from_handle(ctx, world_handle);
   if (world == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "world not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
   }
   *out_block_variant = world->get_block({pos.x, pos.y, pos.z}).value;
   return ok(ctx);
 }
 
-ArvPluginResult api_world_set_block(
+ArvResult api_world_set_block(
     void* context,
     ArvWorldHandle world_handle,
-    ArvPluginBlockPos pos,
+    ArvBlockPos pos,
     uint32_t block_variant) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult sync = require_sync_context(ctx, "world.set_block");
-      sync.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult sync = require_sync_context(ctx, "world.set_block");
+      sync.code != ARV_RESULT_OK) {
     return sync;
   }
   world::WorldRuntime* world = world_from_handle(ctx, world_handle);
   if (world == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "world not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
   }
   if (ctx->impl->runtime.block_registry != nullptr &&
       ctx->impl->runtime.block_registry->variant(voxel::BlockVariantID{block_variant}) == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "block variant not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "block variant not found");
   }
   if (!world->set_block({pos.x, pos.y, pos.z}, voxel::BlockVariantID{block_variant})) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_STATE, "block write failed");
+    return make_result(ctx, ARV_RESULT_INVALID_STATE, "block write failed");
   }
   return ok(ctx);
 }
 
-ArvPluginResult api_world_current_tick(
+ArvResult api_world_current_tick(
     void* context,
     ArvWorldHandle world_handle,
     uint64_t* out_tick) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (out_tick == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_tick is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_tick is null");
   }
   world::WorldRuntime* world = world_from_handle(ctx, world_handle);
   if (world == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "world not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
   }
   *out_tick = world->tick_index();
   return ok(ctx);
 }
 
-ArvPluginResult api_world_seed(
+ArvResult api_world_seed(
     void* context,
     ArvWorldHandle world_handle,
     uint64_t* out_seed) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (out_seed == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_seed is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_seed is null");
   }
   if (world_from_handle(ctx, world_handle) == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "world not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
   }
   *out_seed = ctx->impl->runtime.world_seed;
   return ok(ctx);
 }
 
-ArvPluginResult api_entity_spawn(
+ArvResult api_entity_spawn(
     void* context,
     ArvWorldHandle world_handle,
     ArvResourceID entity_type,
-    ArvPluginVec3 position,
+    ArvVec3 position,
     ArvEntityHandle* out_entity) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult sync = require_sync_context(ctx, "entities.spawn");
-      sync.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult sync = require_sync_context(ctx, "entities.spawn");
+      sync.code != ARV_RESULT_OK) {
     return sync;
   }
   if (out_entity == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_entity is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_entity is null");
   }
   *out_entity = 0U;
   world::WorldRuntime* world = world_from_handle(ctx, world_handle);
   if (world == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "world not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
   }
   if (ctx->impl->runtime.entity_registry == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_UNSUPPORTED, "entity registry is unavailable");
+    return make_result(ctx, ARV_RESULT_UNSUPPORTED, "entity registry is unavailable");
   }
   const std::optional<EntityTypeID> type_id =
       ctx->impl->runtime.entity_registry->find_type(abi_view(entity_type));
   if (!type_id.has_value()) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "entity type not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity type not found");
   }
   world::EntityCreateInfo info;
   info.type_id = type_id.value();
@@ -1313,15 +1313,15 @@ ArvPluginResult api_entity_spawn(
   return ok(ctx);
 }
 
-ArvPluginResult api_entity_destroy(void* context, ArvEntityHandle entity) {
+ArvResult api_entity_destroy(void* context, ArvEntityHandle entity) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult sync = require_sync_context(ctx, "entities.destroy");
-      sync.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult sync = require_sync_context(ctx, "entities.destroy");
+      sync.code != ARV_RESULT_OK) {
     return sync;
   }
   world::WorldRuntime* world = ctx->impl->runtime.default_world;
   if (world == nullptr || !world->destroy_entity(EntityID{entity})) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "entity not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }
   return ok(ctx);
 }
@@ -1333,46 +1333,46 @@ bool api_entity_exists(void* context, ArvEntityHandle entity) {
          ctx->impl->runtime.default_world->entity_exists(EntityID{entity});
 }
 
-ArvPluginResult api_entity_world(
+ArvResult api_entity_world(
     void* context,
     ArvEntityHandle entity,
     ArvWorldHandle* out_world) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult sync = require_sync_context(ctx, "entities.world");
-      sync.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult sync = require_sync_context(ctx, "entities.world");
+      sync.code != ARV_RESULT_OK) {
     return sync;
   }
   if (out_world == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_world is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_world is null");
   }
   world::WorldRuntime* world = ctx->impl->runtime.default_world;
   if (world == nullptr || !world->entity_exists(EntityID{entity})) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "entity not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }
   *out_world = world->id().value;
   return ok(ctx);
 }
 
-ArvPluginResult api_entity_position(
+ArvResult api_entity_position(
     void* context,
     ArvEntityHandle entity,
-    ArvPluginVec3* out_position) {
+    ArvVec3* out_position) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult sync = require_sync_context(ctx, "entities.position");
-      sync.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult sync = require_sync_context(ctx, "entities.position");
+      sync.code != ARV_RESULT_OK) {
     return sync;
   }
   if (out_position == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_position is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_position is null");
   }
   world::WorldRuntime* world = ctx->impl->runtime.default_world;
   if (world == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "world not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
   }
   const entity::EntityTransform* transform =
       world->find_entity_transform(EntityID{entity});
   if (transform == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "entity transform not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity transform not found");
   }
   *out_position = {
       transform->position.x,
@@ -1381,34 +1381,34 @@ ArvPluginResult api_entity_position(
   return ok(ctx);
 }
 
-ArvPluginResult api_entity_set_position(
+ArvResult api_entity_set_position(
     void* context,
     ArvEntityHandle entity,
-    ArvPluginVec3 position) {
+    ArvVec3 position) {
   PluginCallContext* ctx = call_context(context);
-  if (ArvPluginResult sync = require_sync_context(ctx, "entities.set_position");
-      sync.code != ARV_PLUGIN_RESULT_OK) {
+  if (ArvResult sync = require_sync_context(ctx, "entities.set_position");
+      sync.code != ARV_RESULT_OK) {
     return sync;
   }
   world::WorldRuntime* world = ctx->impl->runtime.default_world;
   if (world == nullptr ||
       !world->set_entity_position(EntityID{entity}, {position.x, position.y, position.z})) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "entity not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }
   return ok(ctx);
 }
 
-ArvPluginResult unsupported_entity_tags(void* context, ArvEntityHandle entity, ArvResourceID tag) {
+ArvResult unsupported_entity_tags(void* context, ArvEntityHandle entity, ArvResourceID tag) {
   PluginCallContext* ctx = call_context(context);
   (void)entity;
   (void)tag;
   return make_result(
       ctx,
-      ARV_PLUGIN_RESULT_UNSUPPORTED,
+      ARV_RESULT_UNSUPPORTED,
       "entity tags are not implemented by the engine");
 }
 
-ArvPluginResult unsupported_entity_has_tag(
+ArvResult unsupported_entity_has_tag(
     void* context,
     ArvEntityHandle entity,
     ArvResourceID tag,
@@ -1421,33 +1421,33 @@ ArvPluginResult unsupported_entity_has_tag(
   }
   return make_result(
       ctx,
-      ARV_PLUGIN_RESULT_UNSUPPORTED,
+      ARV_RESULT_UNSUPPORTED,
       "entity tags are not implemented by the engine");
 }
 
-ArvPluginResult api_load_plugin_config(
+ArvResult api_load_plugin_config(
     void* context,
     ArvResourceID config_id,
-    ArvPluginByteBuffer* out_buffer) {
+    ArvByteBuffer* out_buffer) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (out_buffer == nullptr) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "out_buffer is null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_buffer is null");
   }
   *out_buffer = {};
   const std::string id_text{abi_view(config_id)};
   auto parsed = asset::ResourceID::parse(id_text);
   if (!parsed) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, parsed.error());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, parsed.error());
   }
   if (!owns_namespace(ctx->info(), parsed.value().name_space)) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_PERMISSION_DENIED,
+        ARV_RESULT_PERMISSION_DENIED,
         "config namespace is not owned by plugin pack");
   }
   const std::filesystem::path path =
@@ -1455,7 +1455,7 @@ ArvPluginResult api_load_plugin_config(
       ctx->info().pack_id / config_relative_path_for(parsed.value());
   std::ifstream input(path, std::ios::binary);
   if (!input) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_NOT_FOUND, "plugin config not found");
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "plugin config not found");
   }
   std::ostringstream buffer;
   buffer << input.rdbuf();
@@ -1463,32 +1463,32 @@ ArvPluginResult api_load_plugin_config(
   return ok(ctx);
 }
 
-ArvPluginResult api_save_plugin_config(
+ArvResult api_save_plugin_config(
     void* context,
     ArvResourceID config_id,
     ArvBytesView bytes) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr) {
     return null_context_result(
-        ARV_PLUGIN_RESULT_INVALID_STATE,
+        ARV_RESULT_INVALID_STATE,
         "plugin API context is null");
   }
   if (bytes.data == nullptr && bytes.size != 0U) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "config bytes are null");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "config bytes are null");
   }
   constexpr uint64_t MaxPluginConfigBytes = 1024ULL * 1024ULL;
   if (bytes.size > MaxPluginConfigBytes) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, "plugin config is too large");
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "plugin config is too large");
   }
   const std::string id_text{abi_view(config_id)};
   auto parsed = asset::ResourceID::parse(id_text);
   if (!parsed) {
-    return make_result(ctx, ARV_PLUGIN_RESULT_INVALID_ARGUMENT, parsed.error());
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, parsed.error());
   }
   if (!owns_namespace(ctx->info(), parsed.value().name_space)) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_PERMISSION_DENIED,
+        ARV_RESULT_PERMISSION_DENIED,
         "config namespace is not owned by plugin pack");
   }
   const std::filesystem::path path =
@@ -1499,14 +1499,14 @@ ArvPluginResult api_save_plugin_config(
   if (error) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INTERNAL_ERROR,
+        ARV_RESULT_INTERNAL_ERROR,
         "failed to create plugin config directory: " + error.message());
   }
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   if (!output) {
     return make_result(
         ctx,
-        ARV_PLUGIN_RESULT_INTERNAL_ERROR,
+        ARV_RESULT_INTERNAL_ERROR,
         "failed to open plugin config for writing");
   }
   output.write(
@@ -1515,20 +1515,20 @@ ArvPluginResult api_save_plugin_config(
   return ok(ctx);
 }
 
-ArvPluginResult unsupported_no_arg(void* context) {
+ArvResult unsupported_no_arg(void* context) {
   PluginCallContext* ctx = call_context(context);
   return make_result(
       ctx,
-      ARV_PLUGIN_RESULT_UNSUPPORTED,
+      ARV_RESULT_UNSUPPORTED,
       "this plugin API is not implemented by the engine");
 }
 
-ArvPluginResult unsupported_worldgen_registration(void* context, ArvResourceID id) {
+ArvResult unsupported_worldgen_registration(void* context, ArvResourceID id) {
   PluginCallContext* ctx = call_context(context);
   (void)id;
   return make_result(
       ctx,
-      ARV_PLUGIN_RESULT_UNSUPPORTED,
+      ARV_RESULT_UNSUPPORTED,
       "native worldgen type registries are not implemented by the engine");
 }
 
@@ -1546,8 +1546,7 @@ void api_metrics_counter_add(void* context, ArvResourceID metric_id, int64_t amo
 }
 
 struct CommandExecutionContext {
-  explicit CommandExecutionContext(command::CommandCtx& cpp_ctx)
-      : cpp_context(cpp_ctx) {
+  explicit CommandExecutionContext(command::CommandCtx& cpp_ctx) : cpp_context(cpp_ctx) {
     args.reserve(cpp_ctx.args.tokens.size());
     arg_views.reserve(cpp_ctx.args.tokens.size());
     for (std::string_view token : cpp_ctx.args.tokens) {
@@ -1563,8 +1562,8 @@ struct CommandExecutionContext {
   }
 
   static void reply(
-      ArvPluginCommandContext* command_context,
-      ArvPluginCommandMessageKind kind,
+      ArvCommandContext* command_context,
+      ArvCommandMessageKind kind,
       ArvStringView message) {
     if (command_context == nullptr || command_context->engine_context == nullptr) {
       return;
@@ -1580,7 +1579,7 @@ struct CommandExecutionContext {
   std::vector<std::string> args{};
   std::vector<ArvStringView> arg_views{};
   std::vector<command::CommandMessage> messages{};
-  ArvPluginCommandContext abi_context{};
+  ArvCommandContext abi_context{};
 };
 
 [[nodiscard]] command::CommandResult invoke_plugin_command(
@@ -1594,13 +1593,13 @@ struct CommandExecutionContext {
 
   CommandExecutionContext execution{ctx};
   ThreadContextScope sync_scope{PluginThreadContext::Sync};
-  ArvPluginResult result =
+  ArvResult result =
       registration.callback(&execution.abi_context, registration.user_data);
 
   command::CommandResult command_result;
   command_result.status = command_status_from_result(result.code);
   command_result.messages = std::move(execution.messages);
-  if (result.code != ARV_PLUGIN_RESULT_OK && command_result.messages.empty()) {
+  if (result.code != ARV_RESULT_OK && command_result.messages.empty()) {
     const std::string message =
         result.message != nullptr && result.message[0] != '\0'
             ? std::string{result.message}
@@ -1900,7 +1899,7 @@ PluginResult PluginManager::load_plugins(PluginLoadOptions options) {
     }
 
     impl_->plugins.push_back(std::move(record));
-    auto entrypoint = reinterpret_cast<ArvPluginEntrypoint>(raw_entrypoint);
+    auto entrypoint = reinterpret_cast<ArvEntrypoint>(raw_entrypoint);
     ThreadContextScope sync_scope{PluginThreadContext::Sync};
     bool ok = false;
     try {
@@ -2018,7 +2017,7 @@ void PluginManager::tick(TickIndex tick_index) {
     u64 id{};
     usize owner_index{};
     ScheduledJobKind kind{};
-    ArvPluginJobCallback callback{};
+    ArvJobCallback callback{};
     void* user_data{};
   };
   std::vector<JobToRun> due;
@@ -2133,7 +2132,7 @@ void PluginManager::dispatch_event(std::string_view event_id) {
     return lhs->event_id < rhs->event_id;
   });
 
-  ArvPluginEvent event;
+  ArvEvent event;
   event.tick = impl_->runtime.tick_index;
   event.world = impl_->runtime.default_world == nullptr
                     ? 0U

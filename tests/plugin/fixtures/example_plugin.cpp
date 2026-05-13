@@ -1,4 +1,4 @@
-#include <arvane/plugin/api.h>
+#include <arv/api.h>
 
 #include <atomic>
 #include <cstdio>
@@ -7,7 +7,7 @@
 
 namespace {
 
-const ArvPluginAPI* g_api{};
+const ArvAPI* g_api{};
 std::atomic<int> g_sync_ticks{};
 std::atomic<int> g_async_ticks{};
 std::atomic<int> g_thread_violations{};
@@ -22,9 +22,9 @@ void sync_job(void*) {
 void async_job(void*) {
   g_async_ticks.fetch_add(1, std::memory_order_relaxed);
   ArvBlockPos pos{0, 0, 0};
-  ArvPluginResult result =
+  ArvResult result =
       g_api->worlds->set_block(g_api->worlds_ctx, 1, pos, 0);
-  if (result.code == ARV_PLUGIN_RESULT_THREAD_VIOLATION) {
+  if (result.code == ARV_RESULT_THREAD_VIOLATION) {
     g_thread_violations.fetch_add(1, std::memory_order_relaxed);
   }
 }
@@ -35,7 +35,7 @@ bool view_equals(ArvStringView view, std::string_view expected) {
           std::memcmp(view.data, expected.data(), expected.size()) == 0);
 }
 
-void event_handler(const ArvPluginEvent* event, void*) {
+void event_handler(const ArvEvent* event, void*) {
   if (event == nullptr) {
     return;
   }
@@ -46,8 +46,8 @@ void event_handler(const ArvPluginEvent* event, void*) {
   }
 }
 
-ArvPluginResult command(
-    ArvPluginCommandContext* ctx,
+ArvResult command(
+    ArvCommandContext* ctx,
     void*) {
   char message[192];
   std::snprintf(
@@ -59,23 +59,23 @@ ArvPluginResult command(
       g_thread_violations.load(std::memory_order_relaxed),
       g_server_starts.load(std::memory_order_relaxed),
       g_server_stops.load(std::memory_order_relaxed));
-  ctx->reply(ctx, ARV_PLUGIN_COMMAND_MESSAGE_SUCCESS, arv_cstr(message));
-  return {ARV_PLUGIN_RESULT_OK, ""};
+  ctx->reply(ctx, ARV_COMMAND_MESSAGE_SUCCESS, arv_cstr(message));
+  return {ARV_RESULT_OK, ""};
 }
 
-bool result_ok(ArvPluginResult result) {
-  return result.code == ARV_PLUGIN_RESULT_OK;
+bool result_ok(ArvResult result) {
+  return result.code == ARV_RESULT_OK;
 }
 
-bool buffer_equals(ArvPluginByteBuffer buffer, std::string_view expected) {
+bool buffer_equals(ArvByteBuffer buffer, std::string_view expected) {
   return buffer.size == expected.size() &&
          std::memcmp(buffer.data, expected.data(), expected.size()) == 0;
 }
 
 } // namespace
 
-extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api) {
-  if (api == nullptr || api->api_version != ARV_PLUGIN_API_VERSION) {
+extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
+  if (api == nullptr || api->api_version != ARV_API_VERSION) {
     return false;
   }
   g_sync_ticks.store(0, std::memory_order_relaxed);
@@ -96,15 +96,15 @@ extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api) {
   constexpr std::string_view expected_resource = "probe=data\n";
   if (!api->resources->exists(
           api->resources_ctx,
-          ARV_PLUGIN_RESOURCE_DATA,
+          ARV_RESOURCE_DATA,
           arv_cstr("example_plugin_pack:plugin_probe"),
           arv_cstr(".txt"))) {
     return false;
   }
-  ArvPluginByteBuffer resource_buffer{};
+  ArvByteBuffer resource_buffer{};
   if (!result_ok(api->resources->read(
           api->resources_ctx,
-          ARV_PLUGIN_RESOURCE_DATA,
+          ARV_RESOURCE_DATA,
           arv_cstr("example_plugin_pack:plugin_probe"),
           arv_cstr(".txt"),
           &resource_buffer))) {
@@ -124,7 +124,7 @@ extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api) {
            expected_config.size()}))) {
     return false;
   }
-  ArvPluginByteBuffer config_buffer{};
+  ArvByteBuffer config_buffer{};
   if (!result_ok(api->config->load_plugin_config(
           api->config_ctx,
           arv_cstr("example_plugin_pack:settings"),
@@ -153,10 +153,10 @@ extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api) {
     return false;
   }
 
-  ArvPluginCommandDescriptor command_descriptor{};
+  ArvCommandDescriptor command_descriptor{};
   command_descriptor.executor_id = arv_cstr("example_plugin_pack:test_command");
   command_descriptor.command_name = arv_cstr("testplugin");
-  command_descriptor.domain = ARV_PLUGIN_COMMAND_SERVER_BOUND;
+  command_descriptor.domain = ARV_COMMAND_SERVER_BOUND;
   command_descriptor.execute = &command;
   if (!result_ok(api->commands->register_executor(
           api->commands_ctx,
@@ -184,11 +184,11 @@ extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api) {
     return false;
   }
 
-  ArvPluginServiceDescriptor service{};
+  ArvServiceDescriptor service{};
   service.service_id = arv_cstr("example_plugin_pack:test_service");
   service.api_version = 1;
   service.priority = 10;
-  service.threading = ARV_PLUGIN_SERVICE_ANY_THREAD;
+  service.threading = ARV_SERVICE_ANY_THREAD;
   service.display_name = arv_cstr("Test Service");
   service.api_table = &g_service_value;
   ArvServiceHandle service_handle{};
@@ -198,7 +198,7 @@ extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api) {
           &service_handle))) {
     return false;
   }
-  ArvPluginServiceRef service_ref{};
+  ArvServiceRef service_ref{};
   if (!result_ok(api->services->get(
           api->services_ctx,
           arv_cstr("example_plugin_pack:test_service"),
@@ -215,7 +215,7 @@ extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api) {
   if (!result_ok(api->events->subscribe(
           api->events_ctx,
           arv_cstr("arvane:event/server_start"),
-          ARV_PLUGIN_EVENT_PRIORITY_NORMAL,
+          ARV_EVENT_PRIORITY_NORMAL,
           &event_handler,
           nullptr,
           &start_subscription))) {
@@ -225,7 +225,7 @@ extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api) {
   if (!result_ok(api->events->subscribe(
           api->events_ctx,
           arv_cstr("arvane:event/server_stop"),
-          ARV_PLUGIN_EVENT_PRIORITY_NORMAL,
+          ARV_EVENT_PRIORITY_NORMAL,
           &event_handler,
           nullptr,
           &stop_subscription))) {

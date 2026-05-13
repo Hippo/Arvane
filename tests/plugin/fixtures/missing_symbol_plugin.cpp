@@ -1,5 +1,5 @@
-#include <arvane/plugin/api.h>
+#include <arv/api.h>
 
-extern "C" ARV_PLUGIN_EXPORT bool not_arvane_plugin_main(const ArvPluginAPI*) {
+extern "C" ARV_EXPORT bool not_arvane_plugin_main(const ArvAPI*) {
   return true;
 }

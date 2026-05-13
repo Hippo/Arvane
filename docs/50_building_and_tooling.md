@@ -37,12 +37,12 @@ All development environments and IDE integrations should rely on CMake rather th
 
 ---
 
-## Plugin SDK
+## SDK
 
 Native plugins are built against the standalone SDK target:
 
 ```cmake
-find_package(ArvanePluginSDK REQUIRED)
+find_package(ArvaneSDK REQUIRED)
 
 add_library(example_plugin SHARED
     src/example_plugin.cpp
@@ -50,16 +50,16 @@ add_library(example_plugin SHARED
 
 target_link_libraries(example_plugin
     PRIVATE
-        Arvane::PluginSDK
+        Arvane::SDK
 )
 ```
 
-`Arvane::PluginSDK` is an `INTERFACE` target. It provides SDK include
+`Arvane::SDK` is an `INTERFACE` target. It provides SDK include
 directories, compile features, and header-only C++ wrappers without linking
 engine libraries into plugin binaries.
 
 The in-tree examples under `examples/plugins/` build by default when
-`ARVANE_BUILD_PLUGIN_EXAMPLES` is enabled.
+`ARVANE_BUILD_SDK_EXAMPLES` is enabled.
 
 ---
 
@@ -490,7 +490,7 @@ Arvane’s tooling stack is intentionally minimal and focused:
 
 * **Language:** C++20
 * **Build system:** CMake
-* **Plugin SDK:** Standalone `Arvane::PluginSDK` interface target
+* **SDK:** Standalone `Arvane::SDK` interface target
 * **Rendering:** OpenGL 3.3 Core + GLAD
 * **Windowing/Input:** GLFW
 * **ECS:** EnTT

@@ -5,27 +5,27 @@ include(GoogleTest)
 add_library(arv_test_example_plugin SHARED
   plugin/fixtures/example_plugin.cpp
 )
-target_link_libraries(arv_test_example_plugin PRIVATE Arvane::PluginSDK)
+target_link_libraries(arv_test_example_plugin PRIVATE Arvane::SDK)
 
 add_library(arv_test_failing_plugin SHARED
   plugin/fixtures/failing_plugin.cpp
 )
-target_link_libraries(arv_test_failing_plugin PRIVATE Arvane::PluginSDK)
+target_link_libraries(arv_test_failing_plugin PRIVATE Arvane::SDK)
 
 add_library(arv_test_missing_symbol_plugin SHARED
   plugin/fixtures/missing_symbol_plugin.cpp
 )
-target_link_libraries(arv_test_missing_symbol_plugin PRIVATE Arvane::PluginSDK)
+target_link_libraries(arv_test_missing_symbol_plugin PRIVATE Arvane::SDK)
 
 add_library(arv_plugin_sdk_c_compile OBJECT
   plugin/sdk_c_compile_test.c
 )
-target_link_libraries(arv_plugin_sdk_c_compile PRIVATE Arvane::PluginSDK)
+target_link_libraries(arv_plugin_sdk_c_compile PRIVATE Arvane::SDK)
 
 add_library(arv_plugin_sdk_cpp_compile OBJECT
   plugin/sdk_cpp_compile_test.cpp
 )
-target_link_libraries(arv_plugin_sdk_cpp_compile PRIVATE Arvane::PluginSDK)
+target_link_libraries(arv_plugin_sdk_cpp_compile PRIVATE Arvane::SDK)
 
 add_executable(arv_tests
   assets/asset_tests.cpp

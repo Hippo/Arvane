@@ -10,7 +10,7 @@ add_library(arv_plugin STATIC
 target_include_directories(arv_plugin PUBLIC include)
 target_link_libraries(arv_plugin
   PUBLIC
-    Arvane::PluginSDK
+    Arvane::SDK
     arv_asset
     arv_command
     arv_core

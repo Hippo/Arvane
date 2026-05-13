@@ -271,7 +271,15 @@ The engine may keep limited direct registration hooks for built-in bootstrap cas
 
 Native plugins should use a stable C ABI boundary.
 
-C++ convenience wrappers may exist in a plugin SDK, but the actual binary interface should avoid:
+The SDK also provides first-class header-only C++ wrappers split by API domain.
+For example, `arv::Event` and `arv::Events` live in `<arv/events.hpp>`,
+`arv::Services` lives in `<arv/services.hpp>`, and `arv::Commands` lives in
+`<arv/commands.hpp>`. `<arv/plugin.hpp>` is the aggregate facade for plugin
+entrypoints and exposes `arv::Plugin`.
+
+C++ plugins should use `arv::Plugin`, `arv::Logger`, `arv::Services`,
+`arv::Commands`, and the other `arv::` wrapper types instead of calling raw C
+tables directly. The actual binary interface remains C and should avoid:
 
 * C++ standard library types
 * exceptions crossing the ABI boundary
@@ -282,8 +290,8 @@ C++ convenience wrappers may exist in a plugin SDK, but the actual binary interf
 Conceptual entrypoint:
 
 ```cpp
-extern "C" ARV_PLUGIN_EXPORT
-bool arvane_plugin_main(const ArvPluginAPI* api);
+extern "C" ARV_EXPORT
+bool arvane_plugin_main(const ArvAPI* api);
 ```
 
 The plugin returns `true` if initialization succeeds.
@@ -292,10 +300,10 @@ The plugin returns `false` if it cannot initialize. The engine should then disab
 
 Implemented ABI surface:
 
-* The C ABI lives in the standalone Plugin SDK at `sdk/arvane_plugin/include/arvane/plugin/api.h`.
-* Plugins include SDK headers and link only the `Arvane::PluginSDK` CMake `INTERFACE` target.
+* The C ABI lives in the standalone SDK at `sdk/arvane_plugin/include/arv/api.h`.
+* Plugins include SDK headers and link only the `Arvane::SDK` CMake `INTERFACE` target.
 * The engine implements the ABI in `engine/arv_plugin/` and passes function tables to plugins at load time.
-* API version `1` is exposed as `ARV_PLUGIN_API_VERSION`.
+* API version `1` is exposed as `ARV_API_VERSION`.
 * `pack.yaml` native metadata must declare `api_version: 1`, a C-symbol entrypoint, and a library for the current platform key.
 * Native libraries are loaded only when `native_plugins.enabled` is true and the owning pack is listed in `native_plugins.allowed_packs`.
 * Implemented API tables include context, logger, behavior registration, command executor registration, event subscription, sync/async scheduling, service publish/lookup, data resource read/debug path, plugin config byte load/save, basic world/entity access, and metrics counters.
@@ -304,7 +312,7 @@ Implemented ABI surface:
 Plugin author build surface:
 
 ```cmake
-find_package(ArvanePluginSDK REQUIRED)
+find_package(ArvaneSDK REQUIRED)
 
 add_library(example_plugin SHARED
     src/example_plugin.cpp
@@ -312,12 +320,26 @@ add_library(example_plugin SHARED
 
 target_link_libraries(example_plugin
     PRIVATE
-        Arvane::PluginSDK
+        Arvane::SDK
 )
 ```
 
-`Arvane::PluginSDK` provides include paths, compile features, and optional
-header-only C++ wrappers. It must not pull in engine link libraries.
+`Arvane::SDK` provides include paths, compile features, and header-only C++
+wrappers under `<arv/*.hpp>`. It must not pull in engine link libraries.
+
+C++ plugin entrypoint:
+
+```cpp
+#include <arv/plugin.hpp>
+
+ARV_MAIN(plugin) {
+    plugin.logger().info("Plugin loaded.");
+    return true;
+}
+```
+
+The `ARV_MAIN` macro exports `arvane_plugin_main`, validates `ARV_API_VERSION`,
+and constructs the `arv::Plugin` wrapper before calling the user body.
 
 ---
 
@@ -328,29 +350,29 @@ The engine exposes functionality through versioned SDK API tables.
 Conceptual shape:
 
 ```cpp
-typedef struct ArvPluginAPI {
+typedef struct ArvAPI {
     uint32_t api_version;
 
     void* context_ctx;
-    const ArvPluginContextAPI* context;
+    const ArvContextAPI* context;
 
     void* registries_ctx;
-    const ArvPluginRegistriesAPI* registries;
+    const ArvRegistryAPI* registries;
 
     void* scheduler_ctx;
-    const ArvPluginSchedulerAPI* scheduler;
+    const ArvSchedulerAPI* scheduler;
 
     void* commands_ctx;
-    const ArvPluginCommandsAPI* commands;
+    const ArvCommandAPI* commands;
 
     void* services_ctx;
-    const ArvPluginServicesAPI* services;
+    const ArvServiceAPI* services;
 
     void* events_ctx;
-    const ArvPluginEventsAPI* events;
+    const ArvEventAPI* events;
 
     void* logger_ctx;
-    const ArvPluginLoggerAPI* logger;
+    const ArvLoggerAPI* logger;
 };
 ```
 
@@ -367,14 +389,14 @@ The context API exposes metadata about the currently loaded plugin.
 SDK ABI shape:
 
 ```cpp
-typedef struct ArvPluginContextAPI {
+typedef struct ArvContextAPI {
     ArvStringView (*pack_id)(void* ctx);
     ArvStringView (*pack_version)(void* ctx);
     ArvStringView (*side)(void* ctx);
     uint32_t (*namespace_count)(void* ctx);
     ArvStringView (*namespace_at)(void* ctx, uint32_t index);
     bool (*owns_namespace)(void* ctx, ArvStringView name_space);
-} ArvPluginContextAPI;
+} ArvContextAPI;
 ```
 
 Rules:
@@ -445,13 +467,13 @@ SDK ABI shape:
 
 ```cpp
 typedef struct ArvRegistryAPI {
-    ArvPluginResult (*register_block_behavior)(void* ctx, ArvResourceID id);
-    ArvPluginResult (*register_item_behavior)(void* ctx, ArvResourceID id);
-    ArvPluginResult (*register_entity_goal)(void* ctx, ArvResourceID id);
-    ArvPluginResult (*register_entity_behavior)(void* ctx, ArvResourceID id);
-    ArvPluginResult (*register_component_codec)(void* ctx, ArvResourceID id);
-    ArvPluginResult (*register_loot_function)(void* ctx, ArvResourceID id);
-    ArvPluginResult (*register_recipe_type)(void* ctx, ArvResourceID id);
+    ArvResult (*register_block_behavior)(void* ctx, ArvResourceID id);
+    ArvResult (*register_item_behavior)(void* ctx, ArvResourceID id);
+    ArvResult (*register_entity_goal)(void* ctx, ArvResourceID id);
+    ArvResult (*register_entity_behavior)(void* ctx, ArvResourceID id);
+    ArvResult (*register_component_codec)(void* ctx, ArvResourceID id);
+    ArvResult (*register_loot_function)(void* ctx, ArvResourceID id);
+    ArvResult (*register_recipe_type)(void* ctx, ArvResourceID id);
 } ArvRegistryAPI;
 ```
 
@@ -619,46 +641,46 @@ The scheduler API allows plugins to schedule sync and async jobs.
 SDK ABI shape:
 
 ```cpp
-typedef void (*ArvPluginJobCallback)(void* user_data);
+typedef void (*ArvJobCallback)(void* user_data);
 
 typedef struct ArvSchedulerAPI {
-    ArvPluginResult (*sync_now)(
+    ArvResult (*sync_now)(
         void* ctx,
-        ArvPluginJobCallback callback,
+        ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
-    ArvPluginResult (*sync_delayed)(
+    ArvResult (*sync_delayed)(
         void* ctx,
         ArvTickIndex delay_ticks,
-        ArvPluginJobCallback callback,
+        ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
-    ArvPluginResult (*sync_repeating)(
+    ArvResult (*sync_repeating)(
         void* ctx,
         ArvTickIndex start_delay_ticks,
         ArvTickIndex interval_ticks,
-        ArvPluginJobCallback callback,
+        ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
-    ArvPluginResult (*async_now)(
+    ArvResult (*async_now)(
         void* ctx,
-        ArvPluginJobCallback callback,
+        ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
-    ArvPluginResult (*async_delayed)(
+    ArvResult (*async_delayed)(
         void* ctx,
         ArvTickIndex delay_ticks,
-        ArvPluginJobCallback callback,
+        ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
-    ArvPluginResult (*async_repeating)(
+    ArvResult (*async_repeating)(
         void* ctx,
         ArvTickIndex start_delay_ticks,
         ArvTickIndex interval_ticks,
-        ArvPluginJobCallback callback,
+        ArvJobCallback callback,
         void* user_data,
         ArvScheduledJobHandle* out_handle);
-    ArvPluginResult (*cancel)(void* ctx, ArvScheduledJobHandle handle);
+    ArvResult (*cancel)(void* ctx, ArvScheduledJobHandle handle);
 } ArvSchedulerAPI;
 ```
 
@@ -749,27 +771,27 @@ Native plugins register command executors for command IDs.
 SDK ABI shape:
 
 ```cpp
-typedef ArvPluginResult (*ArvPluginCommandCallback)(
-    ArvPluginCommandContext* command_ctx,
+typedef ArvResult (*ArvCommandCallback)(
+    ArvCommandContext* command_ctx,
     void* user_data);
 
-typedef struct ArvPluginCommandDescriptor {
+typedef struct ArvCommandDescriptor {
     ArvResourceID executor_id;
     ArvStringView command_name;
-    ArvPluginCommandDomain domain;
+    ArvCommandDomain domain;
     ArvStringView permission;
     ArvStringView description;
     ArvStringView usage;
     bool public_to_players;
     bool console_only;
-    ArvPluginCommandCallback execute;
+    ArvCommandCallback execute;
     void* user_data;
-} ArvPluginCommandDescriptor;
+} ArvCommandDescriptor;
 
 typedef struct ArvCommandAPI {
-    ArvPluginResult (*register_executor)(
+    ArvResult (*register_executor)(
         void* ctx,
-        const ArvPluginCommandDescriptor* descriptor);
+        const ArvCommandDescriptor* descriptor);
 } ArvCommandAPI;
 ```
 
@@ -793,15 +815,15 @@ executor: example_plugin_pack:heal_executor
 ```
 
 ```cpp
-ArvPluginCommandDescriptor descriptor{};
-descriptor.executor_id = arv_cstr("example_plugin_pack:heal");
-descriptor.command_name = arv_cstr("heal");
-descriptor.domain = ARV_PLUGIN_COMMAND_SERVER_BOUND;
-descriptor.execute = &heal_executor;
-
-api->commands->register_executor(
-    api->commands_ctx,
-    &descriptor
+plugin.commands().register_executor(
+    {
+        .executor_id = "example_plugin_pack:heal",
+        .name = "heal",
+        .domain = arv::CommandDomain::ServerBound,
+    },
+    [](arv::CommandContext& ctx) {
+        ctx.success("Healed.");
+    }
 );
 ```
 
@@ -869,17 +891,17 @@ The service ID should describe the API contract, not just the provider implement
 ### SDK ABI Shape
 
 ```cpp
-typedef struct ArvPluginServiceDescriptor {
+typedef struct ArvServiceDescriptor {
     ArvResourceID service_id;
     uint32_t api_version;
     int32_t priority;
-    ArvPluginServiceThreading threading;
+    ArvServiceThreading threading;
     ArvStringView display_name;
     const void* api_table;
     void* user_data;
-} ArvPluginServiceDescriptor;
+} ArvServiceDescriptor;
 
-typedef struct ArvPluginServiceRef {
+typedef struct ArvServiceRef {
     ArvServiceHandle handle;
     ArvResourceID service_id;
     uint32_t api_version;
@@ -887,28 +909,28 @@ typedef struct ArvPluginServiceRef {
     const void* api_table;
     void* user_data;
     bool valid;
-} ArvPluginServiceRef;
+} ArvServiceRef;
 
 typedef struct ArvServiceAPI {
-    ArvPluginResult (*publish)(
+    ArvResult (*publish)(
         void* ctx,
-        const ArvPluginServiceDescriptor* descriptor,
+        const ArvServiceDescriptor* descriptor,
         ArvServiceHandle* out_handle);
-    ArvPluginResult (*unpublish)(void* ctx, ArvServiceHandle handle);
-    ArvPluginResult (*get)(
+    ArvResult (*unpublish)(void* ctx, ArvServiceHandle handle);
+    ArvResult (*get)(
         void* ctx,
         ArvResourceID service_id,
         uint32_t min_api_version,
         uint32_t max_api_version,
-        ArvPluginServiceRef* out_service);
+        ArvServiceRef* out_service);
     uint64_t (*list)(
         void* ctx,
         ArvResourceID service_id,
         uint32_t min_api_version,
         uint32_t max_api_version,
-        ArvPluginServiceRef* out_services,
+        ArvServiceRef* out_services,
         uint64_t max_services);
-    void (*release)(void* ctx, ArvPluginServiceRef service);
+    void (*release)(void* ctx, ArvServiceRef service);
 } ArvServiceAPI;
 ```
 
@@ -935,34 +957,25 @@ static EconomyAccountsV1 economy_api = {
     .withdraw = &withdraw,
 };
 
-ArvPluginServiceDescriptor descriptor{};
-descriptor.service_id = arv_cstr("economy:accounts");
-descriptor.api_version = 1;
-descriptor.priority = 0;
-descriptor.threading = ARV_PLUGIN_SERVICE_SYNC_ONLY;
-descriptor.display_name = arv_cstr("Example Economy");
-descriptor.api_table = &economy_api;
-
 ArvServiceHandle handle{};
-api->services->publish(api->services_ctx, &descriptor, &handle);
+plugin.services().publish(
+    "economy:accounts",
+    1,
+    economy_api,
+    &handle,
+    "Example Economy",
+    arv::ServiceThreading::SyncOnly
+);
 ```
 
 Consumer:
 
 ```cpp
-ArvPluginServiceRef ref{};
-api->services->get(
-    api->services_ctx,
-    arv_cstr("economy:accounts"),
-    1,
-    1,
-    &ref
-);
+auto ref = plugin.services().get("economy:accounts", 1, 1);
 
-if (ref.valid) {
-    auto* economy = static_cast<const EconomyAccountsV1*>(ref.api_table);
+if (ref) {
+    const auto* economy = ref.service.table<EconomyAccountsV1>();
     economy->deposit(player_id, 100);
-    api->services->release(api->services_ctx, ref);
 }
 ```
 
@@ -1640,43 +1653,30 @@ presentation:
 Plugin code:
 
 ```cpp
-#include <arvane/plugin/api.h>
+#include <arv/plugin.hpp>
 
-extern "C" ARV_PLUGIN_EXPORT
-bool arvane_plugin_main(const ArvPluginAPI* api) {
-    if (!api || api->api_version != ARV_PLUGIN_API_VERSION) {
-        return false;
-    }
-
-    api->registries->register_block_behavior(
-        api->registries_ctx,
-        arv_cstr("example_plugin_pack:glowing_block_behavior")
+ARV_MAIN(plugin) {
+    plugin.registries().register_block_behavior(
+        "example_plugin_pack:glowing_block_behavior"
     );
 
-    ArvPluginCommandDescriptor command{};
-    command.executor_id = arv_cstr("example_plugin_pack:heal");
-    command.command_name = arv_cstr("heal");
-    command.domain = ARV_PLUGIN_COMMAND_SERVER_BOUND;
-    command.execute = &heal_command_executor;
-    api->commands->register_executor(
-        api->commands_ctx,
-        &command
+    plugin.commands().register_executor(
+        {
+            .executor_id = "example_plugin_pack:heal",
+            .name = "heal",
+            .domain = arv::CommandDomain::ServerBound,
+        },
+        [](arv::CommandContext& ctx) {
+            ctx.success("Healed.");
+        }
     );
 
-    ArvScheduledJobHandle job{};
-    api->scheduler->sync_repeating(
-        api->scheduler_ctx,
-        1,
-        20,
-        &run_plugin_tick,
-        nullptr,
-        &job
-    );
+    static arv::Job tick{[] {
+        run_plugin_tick();
+    }};
+    plugin.scheduler().sync_repeat(1, 20, tick);
 
-    api->logger->info(
-        api->logger_ctx,
-        arv_cstr("Example Plugin Pack loaded.")
-    );
+    plugin.logger().info("Example Plugin Pack loaded.");
 
     return true;
 }

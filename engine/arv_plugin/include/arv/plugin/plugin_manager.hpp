@@ -1,6 +1,6 @@
 #pragma once
 
-#include "arvane/plugin/api.h"
+#include "arv/api.h"
 
 #include "arv/asset/pack.hpp"
 #include "arv/command/command_registry.hpp"
@@ -23,7 +23,7 @@
 
 namespace arv::plugin {
 
-inline constexpr u32 PluginApiVersion = ARV_PLUGIN_API_VERSION;
+inline constexpr u32 PluginApiVersion = ARV_API_VERSION;
 
 struct PluginError {
   std::string pack_id{};

@@ -1,6 +1,6 @@
 function(arvane_plugin_example target source)
   add_library(${target} SHARED ${source})
-  target_link_libraries(${target} PRIVATE Arvane::PluginSDK)
+  target_link_libraries(${target} PRIVATE Arvane::SDK)
   set_target_properties(${target} PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     C_VISIBILITY_PRESET hidden
