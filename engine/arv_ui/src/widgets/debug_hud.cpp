@@ -15,8 +15,8 @@ void append_debug_hud(UiTree& tree, DebugHudModel model) {
   UiElement fps = text_element(
       "hud.debug.fps",
       "FPS: " + std::to_string(model.fps),
-      tree.theme().colors.success,
-      UiTextRole::Small);
+      tree.theme().colors.background,
+      UiTextRole::Heading);
   fps.layout.anchor = UiAnchor::TopLeft;
   fps.layout.offset = {8.0F, 8.0F};
   tree.add_child(tree.root_id(), std::move(fps));
