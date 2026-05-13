@@ -61,6 +61,28 @@ void write_pack_manifest(
           std::string{extra});
 }
 
+std::string native_library_name(std::string_view stem) {
+#if defined(_WIN32)
+  return std::string{stem} + ".dll";
+#elif defined(__APPLE__)
+  return "lib" + std::string{stem} + ".dylib";
+#else
+  return "lib" + std::string{stem} + ".so";
+#endif
+}
+
+std::string native_manifest_extra(
+    std::string_view library_path,
+    std::string_view api_version = "1",
+    std::string_view entrypoint = "arvane_plugin_main") {
+  return "native:\n"
+         "  api_version: " + std::string{api_version} + "\n"
+         "  entrypoint: \"" + std::string{entrypoint} + "\"\n"
+         "  libraries:\n"
+         "    " + arv::asset::native_plugin_platform_key() + ": \"" +
+         std::string{library_path} + "\"\n";
+}
+
 } // namespace
 
 TEST(PackResourceIDTests, ParsesValidAndRejectsUnsafeIds) {
@@ -109,14 +131,82 @@ TEST(PackManifestTests, LoadsValidManifestAndRejectsUnsafeNativePath) {
       "  - \"native_bad\"\n",
       "both",
       "assets: false\n  data: false\n  native_plugin: true\n",
+      native_manifest_extra("../outside.so"));
+  auto bad = arv::asset::load_pack_manifest(packs / "native_bad");
+  EXPECT_FALSE(bad);
+  EXPECT_NE(bad.error().describe().find("unsafe native library path"), std::string::npos);
+}
+
+TEST(PackManifestTests, LoadsNativeMetadataAndRejectsInvalidNativeDeclarations) {
+  ScopedTempDir temp("arvane_pack_native_manifest_");
+  const std::filesystem::path packs = temp.path / "packs";
+  const std::string library =
+      "native/" + arv::asset::native_plugin_platform_key() + "/" +
+      native_library_name("example_plugin_pack");
+  write_pack_manifest(
+      packs,
+      "example_plugin_pack",
+      "  - \"example_plugin_pack\"\n",
+      "server",
+      "assets: true\n  data: true\n  native_plugin: true\n",
+      native_manifest_extra(library));
+
+  auto manifest = arv::asset::load_pack_manifest(packs / "example_plugin_pack");
+  ASSERT_TRUE(manifest) << manifest.error().describe();
+  ASSERT_TRUE(manifest.value().native.has_value());
+  EXPECT_EQ(manifest.value().native->api_version, 1U);
+  EXPECT_EQ(manifest.value().native->entrypoint, "arvane_plugin_main");
+  EXPECT_EQ(
+      manifest.value().native->libraries.at(arv::asset::native_plugin_platform_key()),
+      std::filesystem::path{library});
+
+  write_pack_manifest(
+      packs,
+      "native_no_capability",
+      "  - \"native_no_capability\"\n",
+      "server",
+      "assets: true\n  data: true\n  native_plugin: false\n",
+      native_manifest_extra(library));
+  auto no_capability = arv::asset::load_pack_manifest(packs / "native_no_capability");
+  EXPECT_FALSE(no_capability);
+  EXPECT_NE(no_capability.error().describe().find("capabilities.native_plugin"), std::string::npos);
+
+  write_pack_manifest(
+      packs,
+      "native_bad_version",
+      "  - \"native_bad_version\"\n",
+      "server",
+      "assets: true\n  data: true\n  native_plugin: true\n",
+      native_manifest_extra(library, "999"));
+  auto bad_version = arv::asset::load_pack_manifest(packs / "native_bad_version");
+  EXPECT_FALSE(bad_version);
+  EXPECT_NE(bad_version.error().describe().find("unsupported native.api_version"), std::string::npos);
+
+  write_pack_manifest(
+      packs,
+      "native_bad_entry",
+      "  - \"native_bad_entry\"\n",
+      "server",
+      "assets: true\n  data: true\n  native_plugin: true\n",
+      native_manifest_extra(library, "1", "bad entry"));
+  auto bad_entry = arv::asset::load_pack_manifest(packs / "native_bad_entry");
+  EXPECT_FALSE(bad_entry);
+  EXPECT_NE(bad_entry.error().describe().find("native.entrypoint"), std::string::npos);
+
+  write_pack_manifest(
+      packs,
+      "native_missing_platform",
+      "  - \"native_missing_platform\"\n",
+      "server",
+      "assets: true\n  data: true\n  native_plugin: true\n",
       "native:\n"
       "  api_version: 1\n"
       "  entrypoint: \"arvane_plugin_main\"\n"
       "  libraries:\n"
-      "    linux-x86_64: \"../outside.so\"\n");
-  auto bad = arv::asset::load_pack_manifest(packs / "native_bad");
-  EXPECT_FALSE(bad);
-  EXPECT_NE(bad.error().describe().find("unsafe native library path"), std::string::npos);
+      "    unsupported-platform: \"native/unsupported/libexample.so\"\n");
+  auto missing_platform = arv::asset::load_pack_manifest(packs / "native_missing_platform");
+  EXPECT_FALSE(missing_platform);
+  EXPECT_NE(missing_platform.error().describe().find("missing current platform"), std::string::npos);
 }
 
 TEST(PackManagerTests, OrdersDependenciesAndResolvesAssetOverrides) {

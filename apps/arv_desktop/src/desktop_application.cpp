@@ -17,6 +17,7 @@
 #include "arv/io/config.hpp"
 #include "arv/io/input_bindings.hpp"
 #include "arv/platform/glfw_window.hpp"
+#include "arv/plugin/plugin_manager.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/ui/ui.hpp"
 #include "arv/world/entity_goal_registry.hpp"
@@ -25,6 +26,14 @@
 #include <utility>
 
 namespace arv::desktop {
+namespace {
+
+[[nodiscard]] plugin::NativePluginPolicy native_plugin_policy_from_config(
+    const io::NativePluginsConfig& config) {
+  return {config.enabled, config.allowed_packs};
+}
+
+} // namespace
 
 int DesktopApplication::run(int argc, char** argv) {
   core::info("desktop", "starting Arvane desktop client");
@@ -113,6 +122,22 @@ int DesktopApplication::run(int argc, char** argv) {
   base::register_base_item_behaviors(item_behaviors);
   base::register_base_entity_goals(entity_goals);
 
+  plugin::PluginManager plugin_manager;
+  auto plugin_result = plugin_manager.load_plugins({
+      &pack_manager,
+      native_plugin_policy_from_config(config.native_plugins),
+      config.paths.config_path(),
+      &block_behaviors,
+      &item_behaviors,
+      &entity_goals,
+  });
+  if (!plugin_result) {
+    core::error("plugins", plugin_result.error().describe());
+    desktop_renderer.shutdown();
+    debug_imgui.shutdown();
+    return 1;
+  }
+
   auto framebuffer = window.framebuffer_size();
   render_commands.resize(framebuffer.width, framebuffer.height);
 
@@ -195,7 +220,10 @@ int DesktopApplication::run(int argc, char** argv) {
           block_break_behaviors,
           std::move(starter_inventory),
           std::move(fluid_containers),
-          base::register_server_commands,
+          [&plugin_manager](command::CommandRegistry& registry) {
+            base::register_server_commands(registry);
+            plugin_manager.register_commands(registry);
+          },
           assets.entity_registry,
           entity_goals,
           assets.block_atlas,
@@ -208,6 +236,7 @@ int DesktopApplication::run(int argc, char** argv) {
           thread_budget,
           assets.language,
           pack_manager.required_packs(),
+          &plugin_manager,
       }};
 
   DesktopMenuState menu_state{
@@ -242,6 +271,7 @@ int DesktopApplication::run(int argc, char** argv) {
   const int loop_result = frame_loop.run();
 
   const bool save_result = sessions.save_and_shutdown();
+  plugin_manager.shutdown();
   desktop_renderer.shutdown();
   debug_imgui.shutdown();
   if (loop_result != 0) {

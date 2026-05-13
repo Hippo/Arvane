@@ -2,6 +2,30 @@ enable_testing()
 
 include(GoogleTest)
 
+add_library(arv_test_example_plugin SHARED
+  plugin/fixtures/example_plugin.cpp
+)
+target_include_directories(arv_test_example_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/engine/arv_plugin/include
+)
+target_compile_definitions(arv_test_example_plugin PRIVATE ARV_PLUGIN_BUILD=1)
+
+add_library(arv_test_failing_plugin SHARED
+  plugin/fixtures/failing_plugin.cpp
+)
+target_include_directories(arv_test_failing_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/engine/arv_plugin/include
+)
+target_compile_definitions(arv_test_failing_plugin PRIVATE ARV_PLUGIN_BUILD=1)
+
+add_library(arv_test_missing_symbol_plugin SHARED
+  plugin/fixtures/missing_symbol_plugin.cpp
+)
+target_include_directories(arv_test_missing_symbol_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/engine/arv_plugin/include
+)
+target_compile_definitions(arv_test_missing_symbol_plugin PRIVATE ARV_PLUGIN_BUILD=1)
+
 add_executable(arv_tests
   assets/asset_tests.cpp
   assets/pack_tests.cpp
@@ -39,6 +63,7 @@ add_executable(arv_tests
   protocol/packet_tests.cpp
   player/inventory_tests.cpp
   player/permission_tests.cpp
+  plugin/plugin_system_tests.cpp
   render/entity_model_tests.cpp
   render/item_model_tests.cpp
   render/mesh_handoff_tests.cpp
@@ -74,6 +99,14 @@ target_include_directories(arv_tests PRIVATE
 )
 target_compile_definitions(arv_tests PRIVATE
   ARVANE_TEST_ASSET_ROOT="${CMAKE_SOURCE_DIR}/arvane_home/packs/arvane_base/assets/arvane"
+  ARV_TEST_EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:arv_test_example_plugin>"
+  ARV_TEST_FAILING_PLUGIN_PATH="$<TARGET_FILE:arv_test_failing_plugin>"
+  ARV_TEST_MISSING_SYMBOL_PLUGIN_PATH="$<TARGET_FILE:arv_test_missing_symbol_plugin>"
+)
+add_dependencies(arv_tests
+  arv_test_example_plugin
+  arv_test_failing_plugin
+  arv_test_missing_symbol_plugin
 )
 
 target_link_libraries(arv_tests PRIVATE
@@ -89,6 +122,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_net
   arv_persistence
   arv_physics
+  arv_plugin
   arv_player
   arv_protocol
   arv_render

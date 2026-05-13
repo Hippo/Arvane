@@ -12,6 +12,7 @@
 #include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
+#include "arv/plugin/plugin_manager.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/server/chunk_streamer.hpp"
 #include "arv/server/server_combat.hpp"
@@ -162,6 +163,7 @@ struct ServerStartInfo {
   std::span<const StarterInventoryItem> starter_inventory{};
   FluidContainerInteractionConfig fluid_containers{};
   std::function<void(command::CommandRegistry&)> register_commands{};
+  plugin::PluginManager* plugins{};
 };
 
 struct DroppedItemStack {

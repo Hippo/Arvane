@@ -80,6 +80,7 @@ target_link_libraries(arv_desktop PRIVATE
   arv_net
   arv_platform
   arv_persistence
+  arv_plugin
   arv_player
   arv_render
   arv_sched

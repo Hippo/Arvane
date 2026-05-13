@@ -13,6 +13,7 @@
 #include "arv/net/gns_transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/permissions.hpp"
+#include "arv/plugin/plugin_manager.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/render/render_commands.hpp"
@@ -102,6 +103,7 @@ struct DesktopSessionDependencies {
   const sched::RuntimeThreadBudgetPlan& thread_budget;
   const lang::LanguageCatalog& language;
   std::vector<asset::RequiredPack> required_packs{};
+  plugin::PluginManager* plugins{};
 };
 
 class DesktopSessionManager {

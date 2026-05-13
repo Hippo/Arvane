@@ -307,6 +307,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   keep_alive_enabled_ = start_info.keep_alive_enabled;
   skins_ = start_info.skins;
   language_ = start_info.language;
+  plugins_ = start_info.plugins;
   command_registry_ = command::CommandRegistry{};
   if (start_info.register_commands) {
     start_info.register_commands(command_registry_);
@@ -383,6 +384,17 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   }
 
   state_ = ServerRuntimeState::Running;
+  if (plugins_ != nullptr) {
+    plugins_->attach_runtime({
+        &default_world_,
+        block_registry_,
+        item_registry_,
+        entity_registry_,
+        world_jobs_.job_system(),
+        tick_index_,
+        chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
+    });
+  }
   return net::NetworkResult::success();
 }
 
@@ -412,6 +424,18 @@ void ServerRuntimeImpl::tick() {
   expire_timed_out_skin_uploads();
   tick_players();
   const Seconds tick_seconds = tick_duration_seconds(base_tps_);
+  if (plugins_ != nullptr) {
+    plugins_->attach_runtime({
+        &default_world_,
+        block_registry_,
+        item_registry_,
+        entity_registry_,
+        world_jobs_.job_system(),
+        tick_index_,
+        chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
+    });
+    plugins_->tick(tick_index_);
+  }
   default_world_.tick_dropped_items(tick_seconds, block_registry_, item_registry_);
   tick_dropped_item_pickups(tick_seconds);
   update_world_simulation_activity();
@@ -435,6 +459,9 @@ void ServerRuntimeImpl::shutdown() {
   }
 
   state_ = ServerRuntimeState::Stopping;
+  if (plugins_ != nullptr) {
+    plugins_->stop_runtime();
+  }
   if (transport_) {
     std::vector<net::ConnectionID> connections;
     connections.reserve(sessions_.size());

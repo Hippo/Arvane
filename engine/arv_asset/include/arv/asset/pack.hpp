@@ -126,6 +126,9 @@ using PackValidationResult = Expected<void, PackError>;
 [[nodiscard]] std::optional<PackSide> pack_side_from_string(std::string_view value);
 [[nodiscard]] bool is_valid_pack_id(std::string_view id) noexcept;
 [[nodiscard]] bool is_safe_pack_relative_path(const std::filesystem::path& path) noexcept;
+[[nodiscard]] std::string native_plugin_platform_key();
+[[nodiscard]] bool native_plugin_library_extension_matches_platform(
+    const std::filesystem::path& path);
 
 [[nodiscard]] PackManifestResult load_pack_manifest(
     const std::filesystem::path& pack_root);

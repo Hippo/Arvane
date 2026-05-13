@@ -237,6 +237,7 @@ bool DesktopSessionManager::start_singleplayer(
       std::span<const server::StarterInventoryItem>{dependencies_.starter_inventory};
   server_start_info.fluid_containers = dependencies_.fluid_containers;
   server_start_info.register_commands = dependencies_.register_commands;
+  server_start_info.plugins = dependencies_.plugins;
   server_start_info.player_tuning = dependencies_.player_tuning;
   server_start_info.fluid_definition = dependencies_.water_fluid;
   server_start_info.chunk_streaming = make_chunk_streaming_config(dependencies_.config);

@@ -75,6 +75,11 @@ network:
   keep_alive:
     interval_seconds: 7
     client_timeout_seconds: 31
+native_plugins:
+  enabled: true
+  allowed_packs:
+    - example_plugin_pack
+    - trusted_tools
 multiplayer:
   keep_alive:
     server_timeout_seconds: 33
@@ -238,6 +243,10 @@ chunk_pipeline:
   EXPECT_EQ(result.value().network.port, 28000U);
   EXPECT_EQ(result.value().network.keep_alive.interval_seconds, 7U);
   EXPECT_EQ(result.value().network.keep_alive.client_timeout_seconds, 31U);
+  EXPECT_TRUE(result.value().native_plugins.enabled);
+  ASSERT_EQ(result.value().native_plugins.allowed_packs.size(), 2U);
+  EXPECT_EQ(result.value().native_plugins.allowed_packs[0], "example_plugin_pack");
+  EXPECT_EQ(result.value().native_plugins.allowed_packs[1], "trusted_tools");
   EXPECT_EQ(result.value().multiplayer.keep_alive.server_timeout_seconds, 33U);
   EXPECT_EQ(result.value().multiplayer.connection_timeout_seconds, 12U);
   EXPECT_EQ(result.value().chunks.load_distance, 6);
@@ -464,6 +473,8 @@ TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
   EXPECT_EQ(config.skins.storage.max_skins_per_profile, 16U);
   EXPECT_EQ(config.network.keep_alive.interval_seconds, 5U);
   EXPECT_EQ(config.network.keep_alive.client_timeout_seconds, 30U);
+  EXPECT_FALSE(config.native_plugins.enabled);
+  EXPECT_TRUE(config.native_plugins.allowed_packs.empty());
   EXPECT_EQ(config.multiplayer.keep_alive.server_timeout_seconds, 30U);
   EXPECT_EQ(config.multiplayer.connection_timeout_seconds, 10U);
   EXPECT_EQ(config.render.atlases.blocks.page_size, 4096U);
@@ -566,6 +577,17 @@ network:
   keep_alive:
     interval_seconds: 5
     client_timeout_seconds: 5
+)");
+
+  EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsInvalidNativePluginAllowlistPackId) {
+  const auto result = arv::io::parse_config_yaml(R"(
+native_plugins:
+  enabled: true
+  allowed_packs:
+    - "Bad Pack"
 )");
 
   EXPECT_FALSE(result);

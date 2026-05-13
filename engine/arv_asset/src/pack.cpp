@@ -20,6 +20,7 @@ using json = nlohmann::json;
 
 constexpr std::string_view DefaultBasePackID = "arvane_base";
 constexpr std::string_view EnabledPacksFileName = "enabled.yaml";
+constexpr u32 SupportedNativePluginApiVersion = 1U;
 constexpr u64 FnvOffset = 14695981039346656037ULL;
 constexpr u64 FnvPrime = 1099511628211ULL;
 
@@ -55,6 +56,26 @@ constexpr u64 FnvPrime = 1099511628211ULL;
          c == '-' ||
          c == '.' ||
          c == '/';
+}
+
+[[nodiscard]] bool valid_native_entrypoint(std::string_view entrypoint) noexcept {
+  if (entrypoint.empty()) {
+    return false;
+  }
+  for (usize index = 0; index < entrypoint.size(); ++index) {
+    const char c = entrypoint[index];
+    const bool alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    const bool digit = c >= '0' && c <= '9';
+    const bool underscore = c == '_';
+    if (index == 0U) {
+      if (!alpha && !underscore) {
+        return false;
+      }
+    } else if (!alpha && !digit && !underscore) {
+      return false;
+    }
+  }
+  return true;
 }
 
 [[nodiscard]] bool path_has_unsafe_segment(std::string_view path) noexcept {
@@ -521,6 +542,57 @@ constexpr u64 FnvPrime = 1099511628211ULL;
         {},
         manifest.version);
   }
+  if (manifest.native.has_value()) {
+    if (manifest.native->api_version == 0U) {
+      return pack_error(
+          "manifest validation",
+          "native.api_version must be non-zero",
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+    if (manifest.native->api_version != SupportedNativePluginApiVersion) {
+      return pack_error(
+          "manifest validation",
+          "unsupported native.api_version: " +
+              std::to_string(manifest.native->api_version),
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+    if (!valid_native_entrypoint(manifest.native->entrypoint)) {
+      return pack_error(
+          "manifest validation",
+          "native.entrypoint must be a non-empty C symbol name",
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+    const std::string platform_key = native_plugin_platform_key();
+    const auto library = manifest.native->libraries.find(platform_key);
+    if (library == manifest.native->libraries.end()) {
+      return pack_error(
+          "manifest validation",
+          "native.libraries is missing current platform key: " + platform_key,
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+    if (!native_plugin_library_extension_matches_platform(library->second)) {
+      return pack_error(
+          "manifest validation",
+          "native library extension does not match current platform: " +
+              library->second.generic_string(),
+          manifest.id,
+          file,
+          {},
+          manifest.version);
+    }
+  }
   if (manifest.builtin.has_value()) {
     if (!is_valid_pack_id(manifest.builtin->module)) {
       return pack_error(
@@ -911,6 +983,38 @@ bool is_safe_pack_relative_path(const std::filesystem::path& path) noexcept {
     }
   }
   return true;
+}
+
+std::string native_plugin_platform_key() {
+#if defined(_WIN32)
+  constexpr std::string_view os = "windows";
+#elif defined(__APPLE__)
+  constexpr std::string_view os = "macos";
+#elif defined(__linux__)
+  constexpr std::string_view os = "linux";
+#else
+  constexpr std::string_view os = "unknown";
+#endif
+
+#if defined(__x86_64__) || defined(_M_X64)
+  constexpr std::string_view arch = "x86_64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  constexpr std::string_view arch = "arm64";
+#else
+  constexpr std::string_view arch = "unknown";
+#endif
+  return std::string{os} + "-" + std::string{arch};
+}
+
+bool native_plugin_library_extension_matches_platform(
+    const std::filesystem::path& path) {
+#if defined(_WIN32)
+  return path.extension() == ".dll";
+#elif defined(__APPLE__)
+  return path.extension() == ".dylib";
+#else
+  return path.extension() == ".so";
+#endif
 }
 
 std::string PackError::describe() const {

@@ -446,6 +446,7 @@ struct ServerRuntimeImpl {
   ChatValidationConfig chat_validation_{};
   ChatFormatter chat_formatter_{};
   const lang::LanguageCatalog* language_{};
+  plugin::PluginManager* plugins_{};
   protocol::ChatMessageId next_chat_message_id_{1U};
   u32 active_skin_uploads_global_{};
   u64 skin_storage_bytes_{};

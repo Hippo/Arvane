@@ -10,10 +10,12 @@
 #include "dedicated_tick_loop.hpp"
 #include "dedicated_worldgen_loader.hpp"
 
+#include "arv/base/base_commands.hpp"
 #include "arv/core/log.hpp"
 #include "arv/asset/pack.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
+#include "arv/plugin/plugin_manager.hpp"
 
 #include <span>
 #include <utility>
@@ -30,6 +32,11 @@ namespace {
     result.push_back({pack.id});
   }
   return result;
+}
+
+[[nodiscard]] plugin::NativePluginPolicy native_plugin_policy_from_config(
+    const io::NativePluginsConfig& config) {
+  return {config.enabled, config.allowed_packs};
 }
 
 } // namespace
@@ -65,8 +72,21 @@ int DedicatedApplication::run(int argc, char** argv) {
       config.network.port,
       config.paths.dedicated_server_save_path().string());
 
-  const DedicatedRuntimeConfig runtime_config =
+  DedicatedRuntimeConfig runtime_config =
       make_dedicated_runtime_config(config);
+
+  plugin::PluginManager plugin_manager;
+  auto plugin_result = plugin_manager.load_plugins({
+      &pack_manager,
+      native_plugin_policy_from_config(config.native_plugins),
+      config.paths.config_path(),
+      &runtime_config.block_behaviors,
+      &runtime_config.item_behaviors,
+      &runtime_config.entity_goals,
+  });
+  if (!plugin_result) {
+    return fail(dedicated_error("plugins", plugin_result.error().describe()));
+  }
 
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::LoadingRegistries);
   auto registries_result =
@@ -119,6 +139,12 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(start_info_result.error());
   }
   server::ServerStartInfo server_start_info = std::move(start_info_result.value());
+  server_start_info.register_commands =
+      [&plugin_manager](command::CommandRegistry& registry) {
+        base::register_server_commands(registry);
+        plugin_manager.register_commands(registry);
+      };
+  server_start_info.plugins = &plugin_manager;
 
   net::GameNetworkingSocketsEnvironment gns;
   auto gns_result = initialize_game_networking_environment(gns);
@@ -167,6 +193,7 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(save_result.error());
   }
 
+  plugin_manager.shutdown();
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::Stopped);
   return 0;
 }

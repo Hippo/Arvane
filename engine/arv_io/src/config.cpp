@@ -57,6 +57,23 @@ void read_path_scalar(const YAML::Node& parent, const char* key, std::filesystem
   }
 }
 
+void read_string_sequence(
+    const YAML::Node& parent,
+    const char* key,
+    std::vector<std::string>& values) {
+  const YAML::Node child = parent[key];
+  if (!child || !child.IsSequence()) {
+    return;
+  }
+  values.clear();
+  values.reserve(child.size());
+  for (const YAML::Node& node : child) {
+    if (node && node.IsScalar()) {
+      values.push_back(node.as<std::string>());
+    }
+  }
+}
+
 void read_tick_system_config(
     const YAML::Node& systems,
     const char* key,
@@ -580,6 +597,24 @@ bool path_starts_with_parent_reference(const std::filesystem::path& path) {
   return part != path.end() && *part == "..";
 }
 
+bool valid_config_pack_id(std::string_view id) noexcept {
+  if (id.empty()) {
+    return false;
+  }
+  for (usize index = 0; index < id.size(); ++index) {
+    const char c = id[index];
+    const bool lower = c >= 'a' && c <= 'z';
+    const bool digit = c >= '0' && c <= '9';
+    const bool valid = index == 0U
+                           ? (lower || digit || c == '_')
+                           : (lower || digit || c == '_' || c == '-' || c == '.');
+    if (!valid) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::string config_path_string(
     const std::filesystem::path& project_root,
     const std::filesystem::path& path) {
@@ -671,6 +706,15 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "port" << YAML::Value << config.network.port;
   emit_network_movement_config(emitter, config.network.movement);
   emit_network_keep_alive_config(emitter, config.network.keep_alive);
+  emitter << YAML::EndMap;
+
+  emitter << YAML::Key << "native_plugins" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "enabled" << YAML::Value << config.native_plugins.enabled;
+  emitter << YAML::Key << "allowed_packs" << YAML::Value << YAML::BeginSeq;
+  for (const std::string& pack_id : config.native_plugins.allowed_packs) {
+    emitter << pack_id;
+  }
+  emitter << YAML::EndSeq;
   emitter << YAML::EndMap;
 
   emitter << YAML::Key << "multiplayer" << YAML::Value << YAML::BeginMap;
@@ -1407,6 +1451,14 @@ ConfigResult save_default_server_config_file(
   emit_network_movement_config(emitter, config.network.movement);
   emit_network_keep_alive_config(emitter, config.network.keep_alive);
   emitter << YAML::EndMap;
+  emitter << YAML::Key << "native_plugins" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "enabled" << YAML::Value << config.native_plugins.enabled;
+  emitter << YAML::Key << "allowed_packs" << YAML::Value << YAML::BeginSeq;
+  for (const std::string& pack_id : config.native_plugins.allowed_packs) {
+    emitter << pack_id;
+  }
+  emitter << YAML::EndSeq;
+  emitter << YAML::EndMap;
   emit_skins_config(emitter, config.skins);
   emitter << YAML::EndMap;
 
@@ -1469,6 +1521,15 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     if (keep_alive) {
       read_keep_alive_config(keep_alive, config.network.keep_alive);
     }
+  }
+
+  const YAML::Node native_plugins = root["native_plugins"];
+  if (native_plugins) {
+    read_scalar(native_plugins, "enabled", config.native_plugins.enabled);
+    read_string_sequence(
+        native_plugins,
+        "allowed_packs",
+        config.native_plugins.allowed_packs);
   }
 
   const YAML::Node multiplayer = root["multiplayer"];
@@ -1642,6 +1703,11 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   if (config.network.keep_alive.client_timeout_seconds <=
       config.network.keep_alive.interval_seconds) {
     return ConfigError{"network.keep_alive.client_timeout_seconds must be greater than interval_seconds"};
+  }
+  for (const std::string& pack_id : config.native_plugins.allowed_packs) {
+    if (!valid_config_pack_id(pack_id)) {
+      return ConfigError{"native_plugins.allowed_packs contains an invalid pack id"};
+    }
   }
   if (config.multiplayer.keep_alive.server_timeout_seconds == 0U ||
       config.multiplayer.connection_timeout_seconds == 0U) {

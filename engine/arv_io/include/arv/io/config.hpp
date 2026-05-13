@@ -99,6 +99,11 @@ struct DedicatedServerConfig {
   std::string world{"default"};
 };
 
+struct NativePluginsConfig {
+  bool enabled{};
+  std::vector<std::string> allowed_packs{};
+};
+
 struct MultiplayerConfig {
   struct KeepAliveTimeoutConfig {
     u32 server_timeout_seconds{30U};
@@ -440,6 +445,7 @@ struct EngineConfig {
   SimulationConfig simulation{};
   NetworkConfig network{};
   DedicatedServerConfig server{};
+  NativePluginsConfig native_plugins{};
   MultiplayerConfig multiplayer{};
   SkinConfig skins{};
   ChunkDistanceConfig chunks{};
