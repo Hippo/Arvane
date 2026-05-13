@@ -23,6 +23,14 @@ enum class RegionShapeType : u8 {
   Aabb,
 };
 
+enum class RegionRuleValue : u8 {
+  Unset,
+  Allow,
+  Deny,
+};
+
+using RegionFlagMap = HashMap<std::string, RegionRuleValue>;
+
 struct RegionShape {
   RegionShapeType type{RegionShapeType::Aabb};
   Vec3f min{};
@@ -36,6 +44,7 @@ struct Zone {
   i32 priority{};
   player::CorePermissionSet core{};
   player::CustomPermissionMap permissions{};
+  RegionFlagMap flags{};
 };
 
 struct Region {
@@ -48,6 +57,7 @@ struct Region {
   std::vector<ZoneID> zones{};
   player::CorePermissionSet core{};
   player::CustomPermissionMap permissions{};
+  RegionFlagMap flags{};
 };
 
 struct RegionQuery {
@@ -76,6 +86,20 @@ public:
   [[nodiscard]] const Zone* zone(std::string_view name) const noexcept;
   [[nodiscard]] const Region* region(std::string_view name) const noexcept;
   [[nodiscard]] std::vector<RegionID> find_regions_at(RegionQuery query) const;
+  bool set_zone_flag(ZoneID id, std::string flag, RegionRuleValue value);
+  bool set_region_flag(RegionID id, std::string flag, RegionRuleValue value);
+  [[nodiscard]] RegionRuleValue region_flag(
+      RegionID id,
+      std::string_view flag,
+      RegionRuleValue default_value = RegionRuleValue::Unset) const;
+  [[nodiscard]] RegionRuleValue region_flag(
+      std::string_view name,
+      std::string_view flag,
+      RegionRuleValue default_value = RegionRuleValue::Unset) const;
+  [[nodiscard]] RegionRuleValue flag_at(
+      RegionQuery query,
+      std::string_view flag,
+      RegionRuleValue default_value = RegionRuleValue::Unset) const;
   [[nodiscard]] player::PermissionLayer permission_layer_for_regions(
       std::span<const RegionID> region_ids) const;
   [[nodiscard]] player::PermissionLayer permission_layer_at(RegionQuery query) const;

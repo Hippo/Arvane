@@ -90,6 +90,23 @@ TEST(WorldEntityTests, EntityLifecycleQueuesDespawnAndFlushes) {
   EXPECT_EQ(world.entity_count(), 0U);
 }
 
+TEST(WorldEntityTests, RuntimeTagsAreRemovedWithEntityLifecycle) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::world::EntityCreateInfo info;
+  info.type_name = "arvane:test_entity";
+  const arv::EntityID entity = world.create_entity(std::move(info));
+
+  ASSERT_TRUE(world.add_entity_tag(entity, "test:tagged"));
+  EXPECT_TRUE(world.entity_has_tag(entity, "test:tagged"));
+  ASSERT_TRUE(world.remove_entity_tag(entity, "test:tagged"));
+  EXPECT_FALSE(world.entity_has_tag(entity, "test:tagged"));
+  ASSERT_TRUE(world.add_entity_tag(entity, "test:tagged"));
+
+  ASSERT_TRUE(world.destroy_entity(entity));
+  world.flush_entity_despawns();
+  EXPECT_FALSE(world.entity_has_tag(entity, "test:tagged"));
+}
+
 TEST(WorldEntityTests, TransformUpdatesPreviousStateAndChunkRelevance) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::world::EntityCreateInfo info;

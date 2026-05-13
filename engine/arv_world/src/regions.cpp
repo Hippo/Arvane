@@ -60,6 +60,27 @@ void merge_layer(
   merge_custom(target.custom, custom, equal_priority);
 }
 
+void merge_flag(
+    RegionRuleValue& target,
+    RegionRuleValue incoming,
+    bool equal_priority) {
+  if (incoming == RegionRuleValue::Unset) {
+    return;
+  }
+  if (equal_priority && target == RegionRuleValue::Deny &&
+      incoming == RegionRuleValue::Allow) {
+    return;
+  }
+  target = incoming;
+}
+
+[[nodiscard]] RegionRuleValue flag_value(
+    const RegionFlagMap& flags,
+    std::string_view flag) {
+  const auto found = flags.find(std::string{flag});
+  return found == flags.end() ? RegionRuleValue::Unset : found->second;
+}
+
 [[nodiscard]] bool contains_region_id(
     std::span<const RegionID> ids,
     RegionID id) noexcept {
@@ -171,6 +192,131 @@ std::vector<RegionID> RegionRegistry::find_regions_at(RegionQuery query) const {
     matches.emplace_back(candidate.id);
   }
   return matches;
+}
+
+bool RegionRegistry::set_zone_flag(
+    ZoneID id,
+    std::string flag,
+    RegionRuleValue value) {
+  Zone* current = id.value == 0U || id.value > zones_.size() ? nullptr : &zones_[id.value - 1U];
+  if (current == nullptr || !current->active || flag.empty()) {
+    return false;
+  }
+  if (value == RegionRuleValue::Unset) {
+    current->flags.erase(flag);
+  } else {
+    current->flags[std::move(flag)] = value;
+  }
+  ++revision_;
+  return true;
+}
+
+bool RegionRegistry::set_region_flag(
+    RegionID id,
+    std::string flag,
+    RegionRuleValue value) {
+  Region* current =
+      id.value == 0U || id.value > regions_.size() ? nullptr : &regions_[id.value - 1U];
+  if (current == nullptr || !current->active || flag.empty()) {
+    return false;
+  }
+  if (value == RegionRuleValue::Unset) {
+    current->flags.erase(flag);
+  } else {
+    current->flags[std::move(flag)] = value;
+  }
+  ++revision_;
+  return true;
+}
+
+RegionRuleValue RegionRegistry::region_flag(
+    RegionID id,
+    std::string_view flag,
+    RegionRuleValue default_value) const {
+  const Region* current = region(id);
+  if (current == nullptr) {
+    return default_value;
+  }
+  const RegionRuleValue value = flag_value(current->flags, flag);
+  return value == RegionRuleValue::Unset ? default_value : value;
+}
+
+RegionRuleValue RegionRegistry::region_flag(
+    std::string_view name,
+    std::string_view flag,
+    RegionRuleValue default_value) const {
+  const Region* current = region(name);
+  if (current == nullptr) {
+    return default_value;
+  }
+  return region_flag(current->id, flag, default_value);
+}
+
+RegionRuleValue RegionRegistry::flag_at(
+    RegionQuery query,
+    std::string_view flag,
+    RegionRuleValue default_value) const {
+  const std::vector<RegionID> matching_ids = find_regions_at(query);
+  if (matching_ids.empty()) {
+    return default_value;
+  }
+
+  RegionRuleValue result = default_value;
+  std::vector<const Zone*> matching_zones;
+  for (const RegionID region_id : matching_ids) {
+    const Region* current = region(region_id);
+    if (current == nullptr) {
+      continue;
+    }
+    for (const ZoneID zone_id : current->zones) {
+      const Zone* current_zone = zone(zone_id);
+      if (current_zone != nullptr &&
+          std::find(matching_zones.begin(), matching_zones.end(), current_zone) == matching_zones.end()) {
+        matching_zones.emplace_back(current_zone);
+      }
+    }
+  }
+  std::sort(matching_zones.begin(), matching_zones.end(), [](const Zone* lhs, const Zone* rhs) {
+    if (lhs->priority != rhs->priority) {
+      return lhs->priority < rhs->priority;
+    }
+    return lhs->id < rhs->id;
+  });
+
+  std::optional<i32> previous_zone_priority;
+  for (const Zone* current_zone : matching_zones) {
+    const bool equal_priority =
+        previous_zone_priority.has_value() &&
+        previous_zone_priority.value() == current_zone->priority;
+    merge_flag(result, flag_value(current_zone->flags, flag), equal_priority);
+    previous_zone_priority = current_zone->priority;
+  }
+
+  std::vector<const Region*> matching_regions;
+  matching_regions.reserve(matching_ids.size());
+  for (const RegionID region_id : matching_ids) {
+    const Region* current = region(region_id);
+    if (current != nullptr) {
+      matching_regions.emplace_back(current);
+    }
+  }
+  std::sort(matching_regions.begin(), matching_regions.end(), [](const Region* lhs, const Region* rhs) {
+    if (lhs->priority != rhs->priority) {
+      return lhs->priority < rhs->priority;
+    }
+    return lhs->id < rhs->id;
+  });
+
+  std::optional<i32> previous_region_priority;
+  for (const Region* current : matching_regions) {
+    const bool equal_priority =
+        previous_region_priority.has_value() &&
+        previous_region_priority.value() == current->priority;
+    merge_flag(result, flag_value(current->flags, flag), equal_priority);
+    previous_region_priority = current->priority;
+  }
+
+  return result;
 }
 
 player::PermissionLayer RegionRegistry::permission_layer_for_regions(

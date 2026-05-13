@@ -19,9 +19,11 @@ int g_service_value = 42;
 
 bool view_equals(ArvStringView view, std::string_view expected);
 bool result_ok(ArvResult result);
+bool buffer_equals(ArvByteBuffer buffer, std::string_view expected);
 
 void sync_job(void*) {
-  g_sync_ticks.fetch_add(1, std::memory_order_relaxed);
+  const int sync_tick =
+      g_sync_ticks.fetch_add(1, std::memory_order_relaxed) + 1;
 
   bool checks_ok = true;
   constexpr ArvPlayerID player_id = 7;
@@ -63,6 +65,11 @@ void sync_job(void*) {
       g_api->regions_ctx,
       &region,
       &region_handle));
+  checks_ok = checks_ok && result_ok(g_api->regions->set_region_flag(
+      g_api->regions_ctx,
+      region_handle,
+      arv_cstr("example_plugin_pack:pvp"),
+      ARV_REGION_RULE_DENY));
   ArvRegionQuery query{};
   query.world = 1;
   query.position = {8.0F, 20.0F, -20.0F};
@@ -80,6 +87,20 @@ void sync_job(void*) {
       g_api->regions_ctx,
       player_id,
       arv_cstr("example_plugin_pack:runtime_spawn"));
+  ArvRegionRuleValue pvp_flag = ARV_REGION_RULE_UNSET;
+  checks_ok = checks_ok && result_ok(g_api->regions->region_flag(
+      g_api->regions_ctx,
+      arv_cstr("example_plugin_pack:runtime_spawn"),
+      arv_cstr("example_plugin_pack:pvp"),
+      &pvp_flag)) &&
+      pvp_flag == ARV_REGION_RULE_DENY;
+  pvp_flag = ARV_REGION_RULE_UNSET;
+  checks_ok = checks_ok && result_ok(g_api->regions->query_flag(
+      g_api->regions_ctx,
+      &query,
+      arv_cstr("example_plugin_pack:pvp"),
+      &pvp_flag)) &&
+      pvp_flag == ARV_REGION_RULE_DENY;
   bool can_modify_world = true;
   checks_ok = checks_ok && result_ok(g_api->permissions->check_core(
       g_api->permissions_ctx,
@@ -90,6 +111,121 @@ void sync_job(void*) {
   checks_ok = checks_ok && result_ok(g_api->regions->remove_runtime_region(
       g_api->regions_ctx,
       region_handle));
+  if (sync_tick == 1) {
+    ArvRegionDefinition persistent_region = region;
+    persistent_region.id = arv_cstr("example_plugin_pack:persistent_runtime_spawn");
+    persistent_region.persistent = true;
+    ArvRegionHandle persistent_handle{};
+    checks_ok = checks_ok && result_ok(g_api->regions->create_runtime_region(
+        g_api->regions_ctx,
+        &persistent_region,
+        &persistent_handle));
+  }
+
+  constexpr std::string_view world_blob = "world blob v1";
+  ArvByteBuffer data_buffer{};
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->set_world_data(
+      g_api->persistent_data_ctx,
+      1,
+      arv_cstr("example_plugin_pack:world/probe"),
+      {reinterpret_cast<const uint8_t*>(world_blob.data()), world_blob.size()}));
+  constexpr std::string_view world_blob_overwrite = "world blob v2";
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->set_world_data(
+      g_api->persistent_data_ctx,
+      1,
+      arv_cstr("example_plugin_pack:world/probe"),
+      {reinterpret_cast<const uint8_t*>(world_blob_overwrite.data()),
+       world_blob_overwrite.size()}));
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->get_world_data(
+      g_api->persistent_data_ctx,
+      1,
+      arv_cstr("example_plugin_pack:world/probe"),
+      &data_buffer)) &&
+      buffer_equals(data_buffer, world_blob_overwrite);
+  g_api->resources->release_buffer(g_api->resources_ctx, data_buffer);
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove_world_data(
+      g_api->persistent_data_ctx,
+      1,
+      arv_cstr("example_plugin_pack:world/probe")));
+  checks_ok = checks_ok && g_api->persistent_data->get_world_data(
+      g_api->persistent_data_ctx,
+      1,
+      arv_cstr("example_plugin_pack:world/probe"),
+      &data_buffer).code == ARV_RESULT_NOT_FOUND;
+  checks_ok = checks_ok && g_api->persistent_data->set_world_data(
+      g_api->persistent_data_ctx,
+      1,
+      arv_cstr("other_pack:world/probe"),
+      {reinterpret_cast<const uint8_t*>(world_blob.data()), world_blob.size()}).code ==
+      ARV_RESULT_INVALID_ARGUMENT;
+
+  ArvBlockPos block_pos{1, 2, 3};
+  constexpr std::string_view block_blob = "block blob v1";
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->set_block_data(
+      g_api->persistent_data_ctx,
+      1,
+      block_pos,
+      arv_cstr("example_plugin_pack:block/probe"),
+      {reinterpret_cast<const uint8_t*>(block_blob.data()), block_blob.size()}));
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->get_block_data(
+      g_api->persistent_data_ctx,
+      1,
+      block_pos,
+      arv_cstr("example_plugin_pack:block/probe"),
+      &data_buffer)) &&
+      buffer_equals(data_buffer, block_blob);
+  g_api->resources->release_buffer(g_api->resources_ctx, data_buffer);
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove_block_data(
+      g_api->persistent_data_ctx,
+      1,
+      block_pos,
+      arv_cstr("example_plugin_pack:block/probe")));
+
+  ArvEntityHandle entity{};
+  constexpr std::string_view entity_blob = "entity blob v1";
+  checks_ok = checks_ok && result_ok(g_api->entities->spawn(
+      g_api->entities_ctx,
+      1,
+      arv_cstr("example_plugin_pack:persistent_probe"),
+      {8.0F, 20.0F, -20.0F},
+      &entity));
+  checks_ok = checks_ok && result_ok(g_api->entities->add_tag(
+      g_api->entities_ctx,
+      entity,
+      arv_cstr("example_plugin_pack:tagged")));
+  bool has_tag = false;
+  checks_ok = checks_ok && result_ok(g_api->entities->has_tag(
+      g_api->entities_ctx,
+      entity,
+      arv_cstr("example_plugin_pack:tagged"),
+      &has_tag)) &&
+      has_tag;
+  checks_ok = checks_ok && result_ok(g_api->entities->remove_tag(
+      g_api->entities_ctx,
+      entity,
+      arv_cstr("example_plugin_pack:tagged")));
+  checks_ok = checks_ok && result_ok(g_api->entities->has_tag(
+      g_api->entities_ctx,
+      entity,
+      arv_cstr("example_plugin_pack:tagged"),
+      &has_tag)) &&
+      !has_tag;
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->set_entity_data(
+      g_api->persistent_data_ctx,
+      entity,
+      arv_cstr("example_plugin_pack:entity/probe"),
+      {reinterpret_cast<const uint8_t*>(entity_blob.data()), entity_blob.size()}));
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->get_entity_data(
+      g_api->persistent_data_ctx,
+      entity,
+      arv_cstr("example_plugin_pack:entity/probe"),
+      &data_buffer)) &&
+      buffer_equals(data_buffer, entity_blob);
+  g_api->resources->release_buffer(g_api->resources_ctx, data_buffer);
+  checks_ok = checks_ok && result_ok(g_api->persistent_data->remove_entity_data(
+      g_api->persistent_data_ctx,
+      entity,
+      arv_cstr("example_plugin_pack:entity/probe")));
 
   ArvTextHandle network_text{};
   ArvPacketHandle network_packet{};
@@ -257,7 +393,14 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   ArvTextHandle red_hello{};
   ArvTextHandle combined{};
   ArvTextHandle clickable{};
+  ArvTextHandle translated{};
   if (!result_ok(api->text->literal(api->text_ctx, arv_cstr("Hello"), &hello))) {
+    return false;
+  }
+  if (!result_ok(api->text->translatable(
+          api->text_ctx,
+          arv_cstr("example_plugin_pack.text.hello"),
+          &translated))) {
     return false;
   }
   if (!result_ok(api->text->literal(api->text_ctx, arv_cstr(" world"), &world))) {
@@ -286,6 +429,13 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   }
   const bool plain_matches = buffer_equals(plain_text, "Hello world");
   api->resources->release_buffer(api->resources_ctx, plain_text);
+  ArvByteBuffer translated_plain{};
+  if (!result_ok(api->text->plain_text(api->text_ctx, translated, &translated_plain))) {
+    return false;
+  }
+  const bool translated_matches =
+      buffer_equals(translated_plain, "example_plugin_pack.text.hello");
+  api->resources->release_buffer(api->resources_ctx, translated_plain);
   ArvByteBuffer rich_text{};
   if (!result_ok(api->text->serialize(api->text_ctx, clickable, &rich_text))) {
     return false;
@@ -296,8 +446,9 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   api->text->release(api->text_ctx, combined);
   api->text->release(api->text_ctx, red_hello);
   api->text->release(api->text_ctx, world);
+  api->text->release(api->text_ctx, translated);
   api->text->release(api->text_ctx, hello);
-  if (!plain_matches || !serialized_nonempty) {
+  if (!plain_matches || !translated_matches || !serialized_nonempty) {
     return false;
   }
 
@@ -321,6 +472,22 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   if (!result_ok(api->permissions->register_group(api->permissions_ctx, &group))) {
     return false;
   }
+  ArvGameModeDefinition mode{};
+  mode.id = arv_cstr("example_plugin_pack:builder");
+  mode.base_id = arv_cstr("survival");
+  mode.custom_permissions = &group_permission;
+  mode.custom_permission_count = 1;
+  if (!result_ok(api->gamemodes->register_mode(api->gamemodes_ctx, &mode))) {
+    return false;
+  }
+
+  ArvRegionFlagDefinition flag{};
+  flag.id = arv_cstr("example_plugin_pack:pvp");
+  flag.description = arv_cstr("Player combat enabled");
+  flag.default_value = ARV_REGION_RULE_ALLOW;
+  if (!result_ok(api->regions->register_region_flag(api->regions_ctx, &flag))) {
+    return false;
+  }
 
   if (!result_ok(api->registries->register_block_behavior(
           api->registries_ctx,
@@ -335,6 +502,41 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   if (!result_ok(api->registries->register_entity_goal(
           api->registries_ctx,
           arv_cstr("example_plugin_pack:idle_goal")))) {
+    return false;
+  }
+  if (!result_ok(api->registries->register_entity_behavior(
+          api->registries_ctx,
+          arv_cstr("example_plugin_pack:entity_behavior")))) {
+    return false;
+  }
+  if (!result_ok(api->registries->register_component_codec(
+          api->registries_ctx,
+          arv_cstr("example_plugin_pack:component_codec")))) {
+    return false;
+  }
+  if (!result_ok(api->registries->register_loot_function(
+          api->registries_ctx,
+          arv_cstr("example_plugin_pack:loot_function")))) {
+    return false;
+  }
+  if (!result_ok(api->registries->register_recipe_type(
+          api->registries_ctx,
+          arv_cstr("example_plugin_pack:recipe_type")))) {
+    return false;
+  }
+  if (!result_ok(api->worldgen->register_feature_type(
+          api->worldgen_ctx,
+          arv_cstr("example_plugin_pack:feature")))) {
+    return false;
+  }
+  if (!result_ok(api->worldgen->register_noise_type(
+          api->worldgen_ctx,
+          arv_cstr("example_plugin_pack:noise")))) {
+    return false;
+  }
+  if (!result_ok(api->worldgen->register_density_function_type(
+          api->worldgen_ctx,
+          arv_cstr("example_plugin_pack:density")))) {
     return false;
   }
 

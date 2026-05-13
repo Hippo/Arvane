@@ -99,3 +99,41 @@ TEST(RegionTests, TracksPlayerRegionEntryAndExitSets) {
   ASSERT_EQ(exited.exited.size(), 1U);
   EXPECT_EQ(exited.exited[0], spawn_id);
 }
+
+TEST(RegionTests, FlagsUseZoneThenRegionPriorityWithDefaultFallback) {
+  arv::world::RegionRegistry regions;
+
+  arv::world::Zone zone;
+  zone.name = "arena_zone";
+  zone.priority = 10;
+  zone.flags["pvp"] = arv::world::RegionRuleValue::Allow;
+  const arv::world::ZoneID zone_id = regions.add_zone(std::move(zone));
+  ASSERT_NE(zone_id.value, 0U);
+
+  arv::world::Region spawn;
+  spawn.name = "spawn";
+  spawn.world = arv::WorldID{1};
+  spawn.priority = 10;
+  spawn.shape.min = {-10.0F, 0.0F, -10.0F};
+  spawn.shape.max = {10.0F, 10.0F, 10.0F};
+  spawn.zones.push_back(zone_id);
+  spawn.flags["pvp"] = arv::world::RegionRuleValue::Deny;
+  const arv::world::RegionID spawn_id = regions.add_region(std::move(spawn));
+  ASSERT_NE(spawn_id.value, 0U);
+
+  EXPECT_EQ(
+      regions.region_flag(spawn_id, "pvp", arv::world::RegionRuleValue::Allow),
+      arv::world::RegionRuleValue::Deny);
+  EXPECT_EQ(
+      regions.flag_at(
+          {arv::WorldID{1}, {0.0F, 1.0F, 0.0F}},
+          "pvp",
+          arv::world::RegionRuleValue::Allow),
+      arv::world::RegionRuleValue::Deny);
+  EXPECT_EQ(
+      regions.flag_at(
+          {arv::WorldID{1}, {40.0F, 1.0F, 0.0F}},
+          "pvp",
+          arv::world::RegionRuleValue::Allow),
+      arv::world::RegionRuleValue::Allow);
+}

@@ -404,6 +404,50 @@ bool WorldEntityStore::is_persistent(EntityID entity_id) const noexcept {
          registry_.all_of<entity::PersistentEntity>(entity_handle);
 }
 
+std::optional<std::string> WorldEntityStore::persistent_uuid(EntityID entity_id) const {
+  const entity::PersistentEntity* persistent =
+      find_component<entity::PersistentEntity>(registry_, handle(entity_id));
+  if (persistent == nullptr) {
+    return std::nullopt;
+  }
+  return persistent->uuid;
+}
+
+bool WorldEntityStore::add_tag(EntityID entity_id, std::string tag) {
+  if (tag.empty()) {
+    return false;
+  }
+  const entt::entity entity_handle = handle(entity_id);
+  if (entity_handle == entt::null || !registry_.valid(entity_handle)) {
+    return false;
+  }
+  auto& tags = registry_.get_or_emplace<entity::EntityTags>(entity_handle);
+  tags.tags.insert(std::move(tag));
+  return true;
+}
+
+bool WorldEntityStore::remove_tag(EntityID entity_id, std::string_view tag) noexcept {
+  const entt::entity entity_handle = handle(entity_id);
+  if (entity_handle == entt::null || !registry_.valid(entity_handle)) {
+    return false;
+  }
+  auto* tags = registry_.try_get<entity::EntityTags>(entity_handle);
+  if (tags == nullptr) {
+    return true;
+  }
+  tags->tags.erase(std::string{tag});
+  if (tags->tags.empty()) {
+    registry_.remove<entity::EntityTags>(entity_handle);
+  }
+  return true;
+}
+
+bool WorldEntityStore::has_tag(EntityID entity_id, std::string_view tag) const noexcept {
+  const entt::entity entity_handle = handle(entity_id);
+  const auto* tags = find_component<entity::EntityTags>(registry_, entity_handle);
+  return tags != nullptr && tags->tags.find(std::string{tag}) != tags->tags.end();
+}
+
 bool WorldEntityStore::set_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept {
   const entt::entity entity_handle = handle(entity_id);
   entity::EntityTransform* transform = find_component<entity::EntityTransform>(
@@ -776,6 +820,24 @@ bool WorldRuntime::set_dropped_item_stack(EntityID entity_id, player::ItemStack 
 
 bool WorldRuntime::entity_is_persistent(EntityID entity_id) const noexcept {
   return impl_->entities.is_persistent(entity_id);
+}
+
+std::optional<std::string> WorldRuntime::persistent_entity_uuid(EntityID entity_id) const {
+  return impl_->entities.persistent_uuid(entity_id);
+}
+
+bool WorldRuntime::add_entity_tag(EntityID entity_id, std::string tag) {
+  assert_owner_thread();
+  return impl_->entities.add_tag(entity_id, std::move(tag));
+}
+
+bool WorldRuntime::remove_entity_tag(EntityID entity_id, std::string_view tag) noexcept {
+  assert_owner_thread();
+  return impl_->entities.remove_tag(entity_id, tag);
+}
+
+bool WorldRuntime::entity_has_tag(EntityID entity_id, std::string_view tag) const noexcept {
+  return impl_->entities.has_tag(entity_id, tag);
 }
 
 bool WorldRuntime::set_entity_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept {

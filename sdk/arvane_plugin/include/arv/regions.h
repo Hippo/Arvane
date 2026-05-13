@@ -114,6 +114,16 @@ typedef struct ArvRegionsAPI {
       const ArvRegionQuery* query,
       ArvResourceID flag,
       ArvRegionRuleValue* out_value);
+  ArvResult (*set_region_flag)(
+      void* ctx,
+      ArvRegionHandle region,
+      ArvResourceID flag,
+      ArvRegionRuleValue value);
+  ArvResult (*set_zone_flag)(
+      void* ctx,
+      ArvRegionHandle zone,
+      ArvResourceID flag,
+      ArvRegionRuleValue value);
 } ArvRegionsAPI;
 
 #ifdef __cplusplus

@@ -107,6 +107,16 @@ using PluginNetworkSendResult = Expected<void, PluginNetworkSendError>;
 using PluginNetworkSendFn =
     std::function<PluginNetworkSendResult(const PluginNetworkSendRequest&)>;
 
+enum class PluginExtensionRegistryKind : u8 {
+  EntityBehavior,
+  ComponentCodec,
+  LootFunction,
+  RecipeType,
+  WorldgenFeature,
+  WorldgenNoise,
+  WorldgenDensityFunction,
+};
+
 struct PluginRuntimeContext {
   world::WorldRuntime* default_world{};
   const voxel::BlockRegistry* block_registry{};
@@ -117,6 +127,8 @@ struct PluginRuntimeContext {
   sched::JobSystem* job_system{};
   TickIndex tick_index{};
   u64 world_seed{};
+  std::filesystem::path server_save_root{};
+  std::string world_name{};
   PluginNetworkSendFn network_send{};
 };
 
@@ -148,6 +160,11 @@ public:
   [[nodiscard]] usize service_count() const noexcept;
   [[nodiscard]] bool has_command_executor(std::string_view id) const noexcept;
   [[nodiscard]] bool has_service(std::string_view id) const noexcept;
+  [[nodiscard]] bool has_registered_extension(
+      PluginExtensionRegistryKind kind,
+      std::string_view id) const noexcept;
+  [[nodiscard]] std::vector<std::string> registered_extension_ids(
+      PluginExtensionRegistryKind kind) const;
 
 private:
   std::unique_ptr<PluginManagerImpl> impl_;

@@ -96,6 +96,15 @@ struct RichTextValidateStats {
   return false;
 }
 
+[[nodiscard]] bool valid_rich_text_node_kind(RichTextNodeKind kind) noexcept {
+  switch (kind) {
+    case RichTextNodeKind::Literal:
+    case RichTextNodeKind::Translatable:
+      return true;
+  }
+  return false;
+}
+
 void write_style_patch(MessageWriter& writer, const TextStylePatch& style) {
   u16 flags = 0U;
   if (style.color.has_value()) {
@@ -306,7 +315,10 @@ void write_hover_event(MessageWriter& writer, const HoverEvent& event) {
 }
 
 void write_rich_text_node(MessageWriter& writer, const RichText& text) {
-  writer.write_string(text.text);
+  writer.write<RichTextNodeKind>(text.kind);
+  writer.write_string(
+      text.kind == RichTextNodeKind::Translatable ? text.translation_key
+                                                  : text.text);
   write_style_patch(writer, text.style);
   writer.write<u32>(static_cast<u32>(text.children.size()));
   for (const RichText& child : text.children) {
@@ -337,9 +349,26 @@ void write_rich_text_node(MessageWriter& writer, const RichText& text) {
         ProtocolError{"rich text exceeds maximum node count"});
   }
 
-  auto text = read_bounded_string(reader, limits.max_text_bytes, "rich text node text");
-  if (!text) {
-    return Expected<RichText, ProtocolError>::failure(text.error());
+  auto kind = reader.read<RichTextNodeKind>();
+  if (!kind) {
+    return Expected<RichText, ProtocolError>::failure(kind.error());
+  }
+  if (!valid_rich_text_node_kind(kind.value())) {
+    return Expected<RichText, ProtocolError>::failure(
+        ProtocolError{"invalid rich text node kind"});
+  }
+  const usize max_payload_bytes =
+      kind.value() == RichTextNodeKind::Translatable
+          ? MaxRichTextTranslationKeyBytes
+          : limits.max_text_bytes;
+  auto payload = read_bounded_string(
+      reader,
+      max_payload_bytes,
+      kind.value() == RichTextNodeKind::Translatable
+          ? std::string_view{"rich text translation key"}
+          : std::string_view{"rich text node text"});
+  if (!payload) {
+    return Expected<RichText, ProtocolError>::failure(payload.error());
   }
   auto style = read_style_patch(reader);
   if (!style) {
@@ -355,7 +384,12 @@ void write_rich_text_node(MessageWriter& writer, const RichText& text) {
   }
 
   RichText node;
-  node.text = std::move(text.value());
+  node.kind = kind.value();
+  if (node.kind == RichTextNodeKind::Translatable) {
+    node.translation_key = std::move(payload.value());
+  } else {
+    node.text = std::move(payload.value());
+  }
   node.style = std::move(style.value());
   node.children.reserve(child_count.value());
   for (u32 index = 0; index < child_count.value(); ++index) {
@@ -424,8 +458,10 @@ void flatten_rich_text_into(
     ResolvedTextStyle inherited,
     std::vector<RichTextRun>& runs) {
   const ResolvedTextStyle style = resolve_style(std::move(inherited), text.style);
-  if (!text.text.empty()) {
-    runs.push_back({text.text, style, text.click_event, text.hover_event});
+  const std::string& display_text =
+      text.kind == RichTextNodeKind::Translatable ? text.translation_key : text.text;
+  if (!display_text.empty()) {
+    runs.push_back({display_text, style, text.click_event, text.hover_event});
   }
   for (const RichText& child : text.children) {
     flatten_rich_text_into(child, style, runs);
@@ -433,7 +469,8 @@ void flatten_rich_text_into(
 }
 
 void append_plain_text(const RichText& text, std::string& out) {
-  out.append(text.text);
+  out.append(
+      text.kind == RichTextNodeKind::Translatable ? text.translation_key : text.text);
   for (const RichText& child : text.children) {
     append_plain_text(child, out);
   }
@@ -456,11 +493,20 @@ void append_plain_text(const RichText& text, std::string& out) {
   if (stats.nodes > limits.max_nodes) {
     return validation_error("rich text exceeds maximum node count");
   }
-  stats.text_bytes += text.text.size();
+  if (!valid_rich_text_node_kind(text.kind)) {
+    return validation_error("rich text contains invalid node kind");
+  }
+  const std::string& payload =
+      text.kind == RichTextNodeKind::Translatable ? text.translation_key : text.text;
+  stats.text_bytes += payload.size();
   if (stats.text_bytes > (hover_root ? limits.max_hover_text_bytes : limits.max_text_bytes)) {
     return validation_error("rich text exceeds maximum text bytes");
   }
-  if (!is_valid_utf8(text.text)) {
+  if (text.kind == RichTextNodeKind::Translatable &&
+      text.translation_key.size() > MaxRichTextTranslationKeyBytes) {
+    return validation_error("rich text translation key exceeds maximum length");
+  }
+  if (!is_valid_utf8(payload)) {
     return validation_error("rich text contains invalid UTF-8");
   }
   if (text.style.font.has_value()) {
@@ -588,7 +634,16 @@ TextStylePatch style_patch_color(u8 r, u8 g, u8 b) {
 
 RichText plain_rich_text(std::string text, TextStylePatch style) {
   RichText rich;
+  rich.kind = RichTextNodeKind::Literal;
   rich.text = std::move(text);
+  rich.style = std::move(style);
+  return rich;
+}
+
+RichText translatable_rich_text(std::string translation_key, TextStylePatch style) {
+  RichText rich;
+  rich.kind = RichTextNodeKind::Translatable;
+  rich.translation_key = std::move(translation_key);
   rich.style = std::move(style);
   return rich;
 }

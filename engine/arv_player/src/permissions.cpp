@@ -264,7 +264,8 @@ GameModeRegistry::Result GameModeRegistry::add_builtin_mode(
 GameModeRegistry::Result GameModeRegistry::add_custom_mode(
     std::string id,
     std::string base_id,
-    CorePermissionSet overrides) {
+    CorePermissionSet overrides,
+    CustomPermissionMap custom_permissions) {
   if (id.empty()) {
     return Result::failure({"custom game mode id is empty"});
   }
@@ -282,6 +283,7 @@ GameModeRegistry::Result GameModeRegistry::add_custom_mode(
   definition.base_id = std::move(base_id);
   definition.overrides = overrides;
   definition.permissions = apply_core_override(base.value(), overrides);
+  definition.custom_permissions = std::move(custom_permissions);
   definition.builtin = false;
 
   mode_indices_[definition.id] = modes_.size();
@@ -413,8 +415,11 @@ ResolvedPermissions resolve_permissions(
     const PermissionGroupRegistry& groups,
     const PermissionResolveRequest& request) {
   ResolvedPermissions resolved;
-  resolved.core = game_modes.permissions_for(request.game_mode_id).value_or(
-      survival_core_permissions());
+  const GameModeDefinition* mode = game_modes.find(request.game_mode_id);
+  resolved.core = mode == nullptr ? survival_core_permissions() : mode->permissions;
+  if (mode != nullptr) {
+    merge_custom_final(resolved.custom, mode->custom_permissions);
+  }
 
   std::vector<PermissionLayer> layers;
 

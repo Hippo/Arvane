@@ -69,6 +69,26 @@ TEST(ChatProtocolTests, ClientboundChatMessageRoundTripsRichText) {
   EXPECT_EQ(arv::protocol::to_plain_text(*runs[1].hover_event->show_text), "hover");
 }
 
+TEST(ChatProtocolTests, TranslatableRichTextFallsBackToKeyAndRoundTrips) {
+  arv::protocol::RichText text =
+      arv::protocol::translatable_rich_text("example_plugin_pack.text.hello");
+  text.children.push_back(arv::protocol::plain_rich_text("!"));
+
+  const auto decoded = arv::protocol::deserialize_rich_text(
+      arv::protocol::serialize_rich_text(text));
+
+  ASSERT_TRUE(decoded) << decoded.error().message;
+  EXPECT_EQ(decoded.value().kind, arv::protocol::RichTextNodeKind::Translatable);
+  EXPECT_EQ(decoded.value().translation_key, "example_plugin_pack.text.hello");
+  EXPECT_EQ(
+      arv::protocol::to_plain_text(decoded.value()),
+      "example_plugin_pack.text.hello!");
+  const std::vector<arv::protocol::RichTextRun> runs =
+      arv::protocol::flatten_rich_text(decoded.value());
+  ASSERT_EQ(runs.size(), 2U);
+  EXPECT_EQ(runs.front().text, "example_plugin_pack.text.hello");
+}
+
 TEST(ChatProtocolTests, RichTextLimitsRejectDepthNodeAndTextAbuse) {
   arv::protocol::RichTextLimits limits;
   limits.max_depth = 2U;

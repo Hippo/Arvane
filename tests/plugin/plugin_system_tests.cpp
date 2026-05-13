@@ -2,6 +2,7 @@
 
 #include "arv/command/command_dispatcher.hpp"
 #include "arv/command/command_registry.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 
@@ -115,11 +116,15 @@ struct PluginHarness {
   arv::voxel::BlockBehaviorRegistry block_behaviors;
   arv::player::ItemBehaviorRegistry item_behaviors;
   arv::world::EntityGoalRegistry entity_goals;
+  arv::player::GameModeRegistry game_modes;
   arv::asset::PackManager pack_manager;
 
   explicit PluginHarness(std::string_view prefix)
       : temp(prefix),
         packs(temp.path / "packs") {
+    (void)game_modes.add_builtin_mode(
+        std::string{arv::player::SurvivalGameModeID},
+        {});
   }
 
   void load_packs() {
@@ -133,7 +138,7 @@ struct PluginHarness {
         &pack_manager,
         std::move(policy),
         temp.path / "config",
-        nullptr,
+        &game_modes,
         &block_behaviors,
         &item_behaviors,
         &entity_goals,
@@ -214,8 +219,30 @@ TEST(PluginLoadTests, LoadsAllowlistedPluginAndRegistersBehaviorServicesAndComma
   EXPECT_TRUE(harness.block_behaviors.contains("example_plugin_pack:glowing_block_behavior"));
   EXPECT_TRUE(harness.item_behaviors.contains("example_plugin_pack:wand_use"));
   EXPECT_TRUE(harness.entity_goals.contains("example_plugin_pack:idle_goal"));
+  EXPECT_TRUE(manager.has_registered_extension(
+      arv::plugin::PluginExtensionRegistryKind::EntityBehavior,
+      "example_plugin_pack:entity_behavior"));
+  EXPECT_TRUE(manager.has_registered_extension(
+      arv::plugin::PluginExtensionRegistryKind::ComponentCodec,
+      "example_plugin_pack:component_codec"));
+  EXPECT_TRUE(manager.has_registered_extension(
+      arv::plugin::PluginExtensionRegistryKind::LootFunction,
+      "example_plugin_pack:loot_function"));
+  EXPECT_TRUE(manager.has_registered_extension(
+      arv::plugin::PluginExtensionRegistryKind::RecipeType,
+      "example_plugin_pack:recipe_type"));
+  EXPECT_TRUE(manager.has_registered_extension(
+      arv::plugin::PluginExtensionRegistryKind::WorldgenFeature,
+      "example_plugin_pack:feature"));
+  EXPECT_TRUE(manager.has_registered_extension(
+      arv::plugin::PluginExtensionRegistryKind::WorldgenNoise,
+      "example_plugin_pack:noise"));
+  EXPECT_TRUE(manager.has_registered_extension(
+      arv::plugin::PluginExtensionRegistryKind::WorldgenDensityFunction,
+      "example_plugin_pack:density"));
   EXPECT_TRUE(manager.has_command_executor("example_plugin_pack:test_command"));
   EXPECT_TRUE(manager.has_service("example_plugin_pack:test_service"));
+  EXPECT_TRUE(harness.game_modes.find("example_plugin_pack:builder") != nullptr);
   EXPECT_TRUE(std::filesystem::exists(
       harness.temp.path / "config" / "plugins" / "example_plugin_pack" /
       "example_plugin_pack" / "settings.yaml"));
@@ -297,19 +324,35 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   arv::sched::JobSystem jobs{{.background_cpu_workers = 1U}};
   arv::world::WorldRuntime world{arv::WorldID{1}};
   (void)world.ensure_player(arv::PlayerID{7});
+  arv::entity::EntityDefinition persistent_probe;
+  persistent_probe.name = "example_plugin_pack:persistent_probe";
+  persistent_probe.persistent_by_default = true;
+  persistent_probe.replicated_by_default = false;
+  auto entity_registry_result =
+      arv::entity::EntityRegistry::build({std::move(persistent_probe)});
+  ASSERT_TRUE(entity_registry_result) << entity_registry_result.error().message;
+  arv::entity::EntityRegistry entity_registry = std::move(entity_registry_result.value());
   arv::player::GameModeRegistry game_modes;
   ASSERT_TRUE(game_modes.add_builtin_mode(
       std::string{arv::player::SurvivalGameModeID},
       {}).has_value());
+  ASSERT_TRUE(game_modes.add_custom_mode(
+      "example_plugin_pack:builder",
+      std::string{arv::player::SurvivalGameModeID},
+      {},
+      {{"example_plugin_pack.command.test", arv::player::TriState::Allow}}).has_value());
   arv::player::PermissionGroupRegistry permission_groups;
   int network_sends = 0;
   jobs.start();
   manager.attach_runtime({
       .default_world = &world,
+      .entity_registry = &entity_registry,
       .game_modes = &game_modes,
       .permission_groups = &permission_groups,
       .job_system = &jobs,
       .tick_index = 0U,
+      .server_save_root = harness.temp.path / "save",
+      .world_name = "default",
       .network_send = [&](const arv::plugin::PluginNetworkSendRequest& request) {
         ++network_sends;
         EXPECT_EQ(request.target_kind, arv::plugin::PluginNetworkTargetKind::Player);
@@ -353,4 +396,7 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   EXPECT_NE(message.find("api_checks=2"), std::string::npos);
   EXPECT_NE(message.find("network_sends=2"), std::string::npos);
   EXPECT_EQ(network_sends, 2);
+  EXPECT_TRUE(std::filesystem::exists(
+      harness.temp.path / "save" / "plugin_data" / "example_plugin_pack" /
+      "regions" / "example_plugin_pack" / "persistent_runtime_spawn.region"));
 }

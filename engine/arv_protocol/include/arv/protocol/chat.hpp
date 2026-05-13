@@ -18,6 +18,7 @@ inline constexpr std::string_view ChatChannelSystem = "arvane:system";
 inline constexpr usize MaxServerboundChatMessageBytes = 512U;
 inline constexpr usize MaxChatChannelBytes = 128U;
 inline constexpr usize MaxRichTextFontBytes = 128U;
+inline constexpr usize MaxRichTextTranslationKeyBytes = 256U;
 
 using ChatMessageId = u64;
 
@@ -79,8 +80,15 @@ struct HoverEvent {
   std::string fallback_text{};
 };
 
+enum class RichTextNodeKind : u8 {
+  Literal,
+  Translatable,
+};
+
 struct RichText {
+  RichTextNodeKind kind{RichTextNodeKind::Literal};
   std::string text{};
+  std::string translation_key{};
   TextStylePatch style{};
   std::vector<RichText> children{};
   std::optional<ClickEvent> click_event{};
@@ -150,6 +158,9 @@ private:
 [[nodiscard]] TextStylePatch style_patch_color(RgbColor color);
 [[nodiscard]] TextStylePatch style_patch_color(u8 r, u8 g, u8 b);
 [[nodiscard]] RichText plain_rich_text(std::string text, TextStylePatch style = {});
+[[nodiscard]] RichText translatable_rich_text(
+    std::string translation_key,
+    TextStylePatch style = {});
 [[nodiscard]] HoverEvent make_show_text_hover(RichText text);
 
 [[nodiscard]] bool is_valid_utf8(std::string_view text) noexcept;

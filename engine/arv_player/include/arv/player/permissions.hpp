@@ -73,6 +73,7 @@ struct GameModeDefinition {
   std::string base_id{};
   ResolvedCorePermissions permissions{};
   CorePermissionSet overrides{};
+  CustomPermissionMap custom_permissions{};
   bool builtin{};
 };
 
@@ -87,7 +88,8 @@ public:
   [[nodiscard]] Result add_custom_mode(
       std::string id,
       std::string base_id,
-      CorePermissionSet overrides);
+      CorePermissionSet overrides,
+      CustomPermissionMap custom_permissions = {});
 
   [[nodiscard]] const GameModeDefinition* find(std::string_view id) const noexcept;
   [[nodiscard]] std::optional<ResolvedCorePermissions> permissions_for(

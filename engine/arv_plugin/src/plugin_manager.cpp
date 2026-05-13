@@ -124,6 +124,62 @@ private:
   return ARV_PERMISSION_UNSET;
 }
 
+[[nodiscard]] world::RegionRuleValue region_rule_value_from_abi(
+    ArvRegionRuleValue value) noexcept {
+  switch (value) {
+    case ARV_REGION_RULE_ALLOW:
+      return world::RegionRuleValue::Allow;
+    case ARV_REGION_RULE_DENY:
+      return world::RegionRuleValue::Deny;
+    case ARV_REGION_RULE_UNSET:
+      return world::RegionRuleValue::Unset;
+  }
+  return world::RegionRuleValue::Unset;
+}
+
+[[nodiscard]] ArvRegionRuleValue region_rule_value_to_abi(
+    world::RegionRuleValue value) noexcept {
+  switch (value) {
+    case world::RegionRuleValue::Allow:
+      return ARV_REGION_RULE_ALLOW;
+    case world::RegionRuleValue::Deny:
+      return ARV_REGION_RULE_DENY;
+    case world::RegionRuleValue::Unset:
+      return ARV_REGION_RULE_UNSET;
+  }
+  return ARV_REGION_RULE_UNSET;
+}
+
+[[nodiscard]] int tristate_to_int(player::TriState value) noexcept {
+  return static_cast<int>(value);
+}
+
+[[nodiscard]] player::TriState tristate_from_int(int value) noexcept {
+  switch (value) {
+    case static_cast<int>(player::TriState::Allow):
+      return player::TriState::Allow;
+    case static_cast<int>(player::TriState::Deny):
+      return player::TriState::Deny;
+    default:
+      return player::TriState::Unset;
+  }
+}
+
+[[nodiscard]] int region_rule_to_int(world::RegionRuleValue value) noexcept {
+  return static_cast<int>(value);
+}
+
+[[nodiscard]] world::RegionRuleValue region_rule_from_int(int value) noexcept {
+  switch (value) {
+    case static_cast<int>(world::RegionRuleValue::Allow):
+      return world::RegionRuleValue::Allow;
+    case static_cast<int>(world::RegionRuleValue::Deny):
+      return world::RegionRuleValue::Deny;
+    default:
+      return world::RegionRuleValue::Unset;
+  }
+}
+
 [[nodiscard]] player::CorePermissionSet core_permissions_from_abi(
     const ArvCorePermissionSet& permissions) noexcept {
   return {
@@ -263,6 +319,17 @@ private:
   return path;
 }
 
+[[nodiscard]] std::filesystem::path data_relative_path_for(
+    const asset::ResourceID& id,
+    std::string_view extension) {
+  std::filesystem::path path{id.name_space};
+  path /= std::filesystem::path{id.path};
+  if (!extension.empty()) {
+    path += std::string{extension};
+  }
+  return path;
+}
+
 [[nodiscard]] bool path_is_under_lexically(
     const std::filesystem::path& root,
     const std::filesystem::path& path) {
@@ -381,10 +448,25 @@ struct PermissionGroupRegistration {
   bool installed{};
 };
 
+struct PluginExtensionRegistration {
+  usize owner_index{};
+  PluginExtensionRegistryKind kind{PluginExtensionRegistryKind::EntityBehavior};
+  std::string id{};
+};
+
+struct RegionFlagRegistration {
+  usize owner_index{};
+  std::string id{};
+  std::string description{};
+  world::RegionRuleValue default_value{world::RegionRuleValue::Unset};
+};
+
 struct RuntimeRegionRegistration {
   usize owner_index{};
   world::RegionID id{};
   bool active{true};
+  bool persistent{};
+  std::filesystem::path storage_path{};
 };
 
 struct RuntimeZoneRegistration {
@@ -444,13 +526,16 @@ struct PluginManagerImpl {
   std::vector<ScheduledJob> jobs{};
   std::vector<EventSubscription> subscriptions{};
   std::vector<ServiceRegistration> services{};
+  std::vector<PluginExtensionRegistration> extension_registrations{};
   std::vector<PermissionNodeRegistration> permission_nodes{};
   std::vector<PermissionGroupRegistration> permission_groups{};
+  std::vector<RegionFlagRegistration> region_flags{};
   std::vector<RuntimeRegionRegistration> runtime_regions{};
   std::vector<RuntimeZoneRegistration> runtime_zones{};
   std::atomic<u64> next_job_id{1};
   u64 next_subscription_id{1};
   u64 next_service_id{1};
+  bool persistent_regions_installed{};
   mutable std::mutex jobs_mutex;
 };
 
@@ -933,13 +1018,88 @@ ArvResult api_register_entity_goal(void* context, ArvResourceID id) {
   return ok(ctx);
 }
 
-ArvResult unsupported_registration(void* context, ArvResourceID id) {
+[[nodiscard]] const char* extension_kind_name(
+    PluginExtensionRegistryKind kind) noexcept {
+  switch (kind) {
+    case PluginExtensionRegistryKind::EntityBehavior:
+      return "entity behavior";
+    case PluginExtensionRegistryKind::ComponentCodec:
+      return "component codec";
+    case PluginExtensionRegistryKind::LootFunction:
+      return "loot function";
+    case PluginExtensionRegistryKind::RecipeType:
+      return "recipe type";
+    case PluginExtensionRegistryKind::WorldgenFeature:
+      return "worldgen feature";
+    case PluginExtensionRegistryKind::WorldgenNoise:
+      return "worldgen noise";
+    case PluginExtensionRegistryKind::WorldgenDensityFunction:
+      return "worldgen density function";
+  }
+  return "extension";
+}
+
+ArvResult register_extension_marker(
+    void* context,
+    ArvResourceID id,
+    PluginExtensionRegistryKind kind) {
   PluginCallContext* ctx = call_context(context);
-  (void)id;
-  return make_result(
-      ctx,
-      ARV_RESULT_UNSUPPORTED,
-      "this registry extension point is not implemented by the engine");
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
+    return phase;
+  }
+  const std::string marker_id{abi_view(id)};
+  if (auto error = validate_owned_resource_id(ctx->info(), marker_id);
+      error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  const auto duplicate = std::find_if(
+      ctx->impl->extension_registrations.begin(),
+      ctx->impl->extension_registrations.end(),
+      [&](const PluginExtensionRegistration& registration) {
+        return registration.kind == kind && registration.id == marker_id;
+      });
+  if (duplicate != ctx->impl->extension_registrations.end()) {
+    return make_result(
+        ctx,
+        ARV_RESULT_DUPLICATE_ID,
+        std::string{"duplicate "} + extension_kind_name(kind) + " id: " +
+            marker_id);
+  }
+  ctx->impl->extension_registrations.push_back({
+      ctx->plugin_index,
+      kind,
+      marker_id,
+  });
+  return ok(ctx);
+}
+
+ArvResult api_register_entity_behavior(void* context, ArvResourceID id) {
+  return register_extension_marker(
+      context,
+      id,
+      PluginExtensionRegistryKind::EntityBehavior);
+}
+
+ArvResult api_register_component_codec(void* context, ArvResourceID id) {
+  return register_extension_marker(
+      context,
+      id,
+      PluginExtensionRegistryKind::ComponentCodec);
+}
+
+ArvResult api_register_loot_function(void* context, ArvResourceID id) {
+  return register_extension_marker(
+      context,
+      id,
+      PluginExtensionRegistryKind::LootFunction);
+}
+
+ArvResult api_register_recipe_type(void* context, ArvResourceID id) {
+  return register_extension_marker(
+      context,
+      id,
+      PluginExtensionRegistryKind::RecipeType);
 }
 
 ArvResult api_register_executor(
@@ -1622,6 +1782,13 @@ ArvResult api_entity_spawn(
   info.type_id = type_id.value();
   info.type_name = abi_string(entity_type);
   info.position = {position.x, position.y, position.z};
+  if (const entity::EntityTypeRecord* type =
+          ctx->impl->runtime.entity_registry->type(type_id.value());
+      type != nullptr) {
+    info.persistent = type->persistent_by_default;
+    info.replicated = type->replicated_by_default;
+    info.authored_components = type->components;
+  }
   const EntityID entity = world->create_entity(std::move(info));
   *out_entity = entity.value;
   return ok(ctx);
@@ -1712,31 +1879,73 @@ ArvResult api_entity_set_position(
   return ok(ctx);
 }
 
-ArvResult unsupported_entity_tags(void* context, ArvEntityHandle entity, ArvResourceID tag) {
+ArvResult api_entity_add_tag(
+    void* context,
+    ArvEntityHandle entity,
+    ArvResourceID tag) {
   PluginCallContext* ctx = call_context(context);
-  (void)entity;
-  (void)tag;
-  return make_result(
-      ctx,
-      ARV_RESULT_UNSUPPORTED,
-      "entity tags are not implemented by the engine");
+  if (ArvResult sync = require_sync_context(ctx, "entities.add_tag");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  const std::string tag_id{abi_view(tag)};
+  if (auto error = validate_owned_resource_id(ctx->info(), tag_id);
+      error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  if (world == nullptr || !world->add_entity_tag(EntityID{entity}, tag_id)) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
+  }
+  return ok(ctx);
 }
 
-ArvResult unsupported_entity_has_tag(
+ArvResult api_entity_remove_tag(
+    void* context,
+    ArvEntityHandle entity,
+    ArvResourceID tag) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "entities.remove_tag");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  const std::string tag_id{abi_view(tag)};
+  if (auto error = validate_owned_resource_id(ctx->info(), tag_id);
+      error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  if (world == nullptr || !world->remove_entity_tag(EntityID{entity}, tag_id)) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
+  }
+  return ok(ctx);
+}
+
+ArvResult api_entity_has_tag(
     void* context,
     ArvEntityHandle entity,
     ArvResourceID tag,
     bool* out_has_tag) {
   PluginCallContext* ctx = call_context(context);
-  (void)entity;
-  (void)tag;
-  if (out_has_tag != nullptr) {
-    *out_has_tag = false;
+  if (ArvResult sync = require_sync_context(ctx, "entities.has_tag");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
   }
-  return make_result(
-      ctx,
-      ARV_RESULT_UNSUPPORTED,
-      "entity tags are not implemented by the engine");
+  if (out_has_tag == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_has_tag is null");
+  }
+  *out_has_tag = false;
+  const std::string tag_id{abi_view(tag)};
+  if (auto error = validate_owned_resource_id(ctx->info(), tag_id);
+      error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  if (world == nullptr || !world->entity_exists(EntityID{entity})) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
+  }
+  *out_has_tag = world->entity_has_tag(EntityID{entity}, tag_id);
+  return ok(ctx);
 }
 
 ArvResult api_load_plugin_config(
@@ -1829,6 +2038,364 @@ ArvResult api_save_plugin_config(
   return ok(ctx);
 }
 
+[[nodiscard]] std::filesystem::path plugin_data_root(PluginCallContext* ctx) {
+  if (ctx == nullptr || ctx->impl->runtime.server_save_root.empty()) {
+    return {};
+  }
+  return ctx->impl->runtime.server_save_root / "plugin_data" / ctx->info().pack_id;
+}
+
+[[nodiscard]] std::optional<std::filesystem::path> persistent_key_path(
+    PluginCallContext* ctx,
+    ArvResourceID key,
+    std::string_view area,
+    std::string_view scope,
+    std::string& error_message) {
+  const std::string key_text{abi_view(key)};
+  auto parsed = asset::ResourceID::parse(key_text);
+  if (!parsed) {
+    error_message = parsed.error();
+    return std::nullopt;
+  }
+  if (!owns_namespace(ctx->info(), parsed.value().name_space)) {
+    error_message = "persistent data key namespace is not owned by plugin pack";
+    return std::nullopt;
+  }
+  const std::filesystem::path root = plugin_data_root(ctx);
+  if (root.empty()) {
+    error_message = "plugin persistent data root is unavailable";
+    return std::nullopt;
+  }
+  return root / "persistent" / std::filesystem::path{area} /
+         std::filesystem::path{scope} /
+         data_relative_path_for(parsed.value(), ".bin");
+}
+
+[[nodiscard]] std::string block_scope(
+    ArvWorldHandle world,
+    ArvBlockPos pos) {
+  return std::to_string(world) + "/" + std::to_string(pos.x) + "_" +
+         std::to_string(pos.y) + "_" + std::to_string(pos.z);
+}
+
+ArvResult write_persistent_blob(
+    PluginCallContext* ctx,
+    const std::filesystem::path& path,
+    ArvBytesView bytes) {
+  if (bytes.data == nullptr && bytes.size != 0U) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "persistent bytes are null");
+  }
+  constexpr size_t MaxPersistentBlobBytes = 1024U * 1024U;
+  if (bytes.size > MaxPersistentBlobBytes) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "persistent data blob is too large");
+  }
+  std::error_code error;
+  std::filesystem::create_directories(path.parent_path(), error);
+  if (error) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INTERNAL_ERROR,
+        "failed to create persistent data directory: " + error.message());
+  }
+  static std::atomic<u64> temp_counter{1U};
+  const std::filesystem::path temp =
+      path.string() + ".tmp." +
+      std::to_string(temp_counter.fetch_add(1U, std::memory_order_relaxed));
+  {
+    std::ofstream output(temp, std::ios::binary | std::ios::trunc);
+    if (!output) {
+      return make_result(
+          ctx,
+          ARV_RESULT_INTERNAL_ERROR,
+          "failed to open persistent data temp file");
+    }
+    output.write(
+        reinterpret_cast<const char*>(bytes.data),
+        static_cast<std::streamsize>(bytes.size));
+    if (!output) {
+      return make_result(
+          ctx,
+          ARV_RESULT_INTERNAL_ERROR,
+          "failed to write persistent data temp file");
+    }
+  }
+  std::filesystem::rename(temp, path, error);
+  if (error) {
+    std::error_code cleanup_error;
+    std::filesystem::remove(temp, cleanup_error);
+    return make_result(
+        ctx,
+        ARV_RESULT_INTERNAL_ERROR,
+        "failed to publish persistent data file: " + error.message());
+  }
+  return ok(ctx);
+}
+
+ArvResult read_persistent_blob(
+    PluginCallContext* ctx,
+    const std::filesystem::path& path,
+    ArvByteBuffer* out_buffer) {
+  if (out_buffer == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_buffer is null");
+  }
+  *out_buffer = {};
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "persistent data key not found");
+  }
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  std::string bytes = buffer.str();
+  if (bytes.size() > 1024U * 1024U) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "persistent data blob is too large");
+  }
+  *out_buffer = byte_buffer_from_string(std::move(bytes));
+  return ok(ctx);
+}
+
+ArvResult remove_persistent_blob(
+    PluginCallContext* ctx,
+    const std::filesystem::path& path) {
+  std::error_code error;
+  const bool removed = std::filesystem::remove(path, error);
+  if (error) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INTERNAL_ERROR,
+        "failed to remove persistent data file: " + error.message());
+  }
+  return removed
+             ? ok(ctx)
+             : make_result(ctx, ARV_RESULT_NOT_FOUND, "persistent data key not found");
+}
+
+ArvResult api_set_world_data(
+    void* context,
+    ArvWorldHandle world_handle,
+    ArvResourceID key,
+    ArvBytesView bytes) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.set_world_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (world_from_handle(ctx, world_handle) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  std::string error;
+  auto path = persistent_key_path(
+      ctx,
+      key,
+      "world",
+      std::to_string(world_handle),
+      error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return write_persistent_blob(ctx, path.value(), bytes);
+}
+
+ArvResult api_get_world_data(
+    void* context,
+    ArvWorldHandle world_handle,
+    ArvResourceID key,
+    ArvByteBuffer* out_buffer) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.get_world_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (world_from_handle(ctx, world_handle) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  std::string error;
+  auto path = persistent_key_path(ctx, key, "world", std::to_string(world_handle), error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return read_persistent_blob(ctx, path.value(), out_buffer);
+}
+
+ArvResult api_remove_world_data(
+    void* context,
+    ArvWorldHandle world_handle,
+    ArvResourceID key) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.remove_world_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (world_from_handle(ctx, world_handle) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  std::string error;
+  auto path = persistent_key_path(ctx, key, "world", std::to_string(world_handle), error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return remove_persistent_blob(ctx, path.value());
+}
+
+ArvResult require_persistent_entity(
+    PluginCallContext* ctx,
+    ArvEntityHandle entity,
+    std::optional<std::string>& out_uuid) {
+  if (ctx == nullptr || ctx->impl->runtime.default_world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  if (!ctx->impl->runtime.default_world->entity_exists(EntityID{entity})) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
+  }
+  out_uuid =
+      ctx->impl->runtime.default_world->persistent_entity_uuid(EntityID{entity});
+  if (!out_uuid.has_value()) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_STATE,
+        "entity has no persistent UUID");
+  }
+  return ok(ctx);
+}
+
+ArvResult api_set_entity_data(
+    void* context,
+    ArvEntityHandle entity,
+    ArvResourceID key,
+    ArvBytesView bytes) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.set_entity_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  std::optional<std::string> uuid;
+  if (ArvResult persistent = require_persistent_entity(ctx, entity, uuid);
+      persistent.code != ARV_RESULT_OK) {
+    return persistent;
+  }
+  std::string error;
+  auto path = persistent_key_path(ctx, key, "entity", uuid.value(), error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return write_persistent_blob(ctx, path.value(), bytes);
+}
+
+ArvResult api_get_entity_data(
+    void* context,
+    ArvEntityHandle entity,
+    ArvResourceID key,
+    ArvByteBuffer* out_buffer) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.get_entity_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  std::optional<std::string> uuid;
+  if (ArvResult persistent = require_persistent_entity(ctx, entity, uuid);
+      persistent.code != ARV_RESULT_OK) {
+    return persistent;
+  }
+  std::string error;
+  auto path = persistent_key_path(ctx, key, "entity", uuid.value(), error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return read_persistent_blob(ctx, path.value(), out_buffer);
+}
+
+ArvResult api_remove_entity_data(
+    void* context,
+    ArvEntityHandle entity,
+    ArvResourceID key) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.remove_entity_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  std::optional<std::string> uuid;
+  if (ArvResult persistent = require_persistent_entity(ctx, entity, uuid);
+      persistent.code != ARV_RESULT_OK) {
+    return persistent;
+  }
+  std::string error;
+  auto path = persistent_key_path(ctx, key, "entity", uuid.value(), error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return remove_persistent_blob(ctx, path.value());
+}
+
+ArvResult api_set_block_data(
+    void* context,
+    ArvWorldHandle world_handle,
+    ArvBlockPos pos,
+    ArvResourceID key,
+    ArvBytesView bytes) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.set_block_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (world_from_handle(ctx, world_handle) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  std::string error;
+  auto path = persistent_key_path(ctx, key, "block", block_scope(world_handle, pos), error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return write_persistent_blob(ctx, path.value(), bytes);
+}
+
+ArvResult api_get_block_data(
+    void* context,
+    ArvWorldHandle world_handle,
+    ArvBlockPos pos,
+    ArvResourceID key,
+    ArvByteBuffer* out_buffer) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.get_block_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (world_from_handle(ctx, world_handle) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  std::string error;
+  auto path = persistent_key_path(ctx, key, "block", block_scope(world_handle, pos), error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return read_persistent_blob(ctx, path.value(), out_buffer);
+}
+
+ArvResult api_remove_block_data(
+    void* context,
+    ArvWorldHandle world_handle,
+    ArvBlockPos pos,
+    ArvResourceID key) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "persistent_data.remove_block_data");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (world_from_handle(ctx, world_handle) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  std::string error;
+  auto path = persistent_key_path(ctx, key, "block", block_scope(world_handle, pos), error);
+  if (!path.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error);
+  }
+  return remove_persistent_blob(ctx, path.value());
+}
+
 ArvResult api_text_literal(
     void* context,
     ArvStringView text,
@@ -1854,14 +2421,28 @@ ArvResult api_text_translatable(
     ArvStringView translation_key,
     ArvTextHandle* out_text) {
   PluginCallContext* ctx = call_context(context);
-  (void)translation_key;
-  if (out_text != nullptr) {
-    *out_text = {};
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
   }
-  return make_result(
-      ctx,
-      ARV_RESULT_UNSUPPORTED,
-      "translatable rich text nodes are not implemented by the engine");
+  if (out_text == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
+  }
+  *out_text = {};
+  const std::string key{abi_view(translation_key)};
+  if (key.empty()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "translation key is empty");
+  }
+  if (key.size() > protocol::MaxRichTextTranslationKeyBytes) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "translation key is too long");
+  }
+  if (!protocol::is_valid_utf8(key)) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "translation key is not valid UTF-8");
+  }
+  *out_text = store_text(ctx, protocol::translatable_rich_text(key));
+  return ok(ctx);
 }
 
 ArvResult api_text_append(
@@ -2368,15 +2949,43 @@ uint64_t api_permission_groups(
   return groups.size();
 }
 
+[[nodiscard]] const RegionFlagRegistration* find_region_flag_registration(
+    const PluginManagerImpl& impl,
+    std::string_view id) noexcept {
+  const auto found = std::find_if(
+      impl.region_flags.begin(),
+      impl.region_flags.end(),
+      [&](const RegionFlagRegistration& registration) {
+        return registration.id == id;
+      });
+  return found == impl.region_flags.end() ? nullptr : &*found;
+}
+
 ArvResult api_register_region_flag(
     void* context,
     const ArvRegionFlagDefinition* definition) {
   PluginCallContext* ctx = call_context(context);
-  (void)definition;
-  return make_result(
-      ctx,
-      ARV_RESULT_UNSUPPORTED,
-      "region flags are not implemented by the engine");
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
+    return phase;
+  }
+  if (definition == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "region flag definition is null");
+  }
+  const std::string id{abi_view(definition->id)};
+  if (auto error = validate_owned_resource_id(ctx->info(), id); error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  if (find_region_flag_registration(*ctx->impl, id) != nullptr) {
+    return make_result(ctx, ARV_RESULT_DUPLICATE_ID, "duplicate region flag");
+  }
+  ctx->impl->region_flags.push_back({
+      ctx->plugin_index,
+      id,
+      abi_string(definition->description),
+      region_rule_value_from_abi(definition->default_value),
+  });
+  return ok(ctx);
 }
 
 void fill_region_info(
@@ -2388,6 +2997,261 @@ void fill_region_info(
       region.world.value,
       region.priority,
   };
+}
+
+[[nodiscard]] std::optional<std::filesystem::path> persistent_region_path(
+    PluginCallContext* ctx,
+    std::string_view region_id,
+    std::string& error_message) {
+  auto parsed = asset::ResourceID::parse(region_id);
+  if (!parsed) {
+    error_message = parsed.error();
+    return std::nullopt;
+  }
+  if (!owns_namespace(ctx->info(), parsed.value().name_space)) {
+    error_message = "region namespace is not owned by plugin pack";
+    return std::nullopt;
+  }
+  const std::filesystem::path root = plugin_data_root(ctx);
+  if (root.empty()) {
+    error_message = "plugin persistent data root is unavailable";
+    return std::nullopt;
+  }
+  return root / "regions" / data_relative_path_for(parsed.value(), ".region");
+}
+
+[[nodiscard]] world::Region make_region_from_definition(
+    const ArvRegionDefinition& definition,
+    std::string id) {
+  world::Region region;
+  region.name = std::move(id);
+  region.world = WorldID{static_cast<u32>(definition.world)};
+  region.priority = definition.priority;
+  region.shape = {
+      world::RegionShapeType::Aabb,
+      {definition.shape.aabb.min.x, definition.shape.aabb.min.y, definition.shape.aabb.min.z},
+      {definition.shape.aabb.max.x, definition.shape.aabb.max.y, definition.shape.aabb.max.z},
+  };
+  region.core = core_permissions_from_abi(definition.core);
+  return region;
+}
+
+ArvResult persist_region_to_file(
+    PluginCallContext* ctx,
+    const world::Region& region,
+    const std::filesystem::path& path) {
+  std::error_code error;
+  std::filesystem::create_directories(path.parent_path(), error);
+  if (error) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INTERNAL_ERROR,
+        "failed to create persistent region directory: " + error.message());
+  }
+  static std::atomic<u64> region_temp_counter{1U};
+  const std::filesystem::path temp =
+      path.string() + ".tmp." +
+      std::to_string(region_temp_counter.fetch_add(1U, std::memory_order_relaxed));
+  {
+    std::ofstream output(temp, std::ios::trunc);
+    if (!output) {
+      return make_result(
+          ctx,
+          ARV_RESULT_INTERNAL_ERROR,
+          "failed to open persistent region temp file");
+    }
+    output << "version 1\n";
+    output << "id " << region.name << "\n";
+    output << "world " << region.world.value << "\n";
+    output << "priority " << region.priority << "\n";
+    output << "aabb " << region.shape.min.x << ' ' << region.shape.min.y << ' '
+           << region.shape.min.z << ' ' << region.shape.max.x << ' '
+           << region.shape.max.y << ' ' << region.shape.max.z << "\n";
+    output << "zones 0\n";
+    output << "core "
+           << tristate_to_int(region.core.can_take_damage) << ' '
+           << tristate_to_int(region.core.can_modify_world) << ' '
+           << tristate_to_int(region.core.can_interact) << ' '
+           << tristate_to_int(region.core.can_open_inventory) << ' '
+           << tristate_to_int(region.core.has_creative_inventory) << ' '
+           << tristate_to_int(region.core.can_fly) << ' '
+           << tristate_to_int(region.core.has_collision) << ' '
+           << tristate_to_int(region.core.is_visible_to_others) << "\n";
+    output << "custom " << region.permissions.size() << "\n";
+    for (const auto& [node, value] : region.permissions) {
+      output << node << ' ' << tristate_to_int(value) << "\n";
+    }
+    output << "flags " << region.flags.size() << "\n";
+    for (const auto& [flag, value] : region.flags) {
+      output << flag << ' ' << region_rule_to_int(value) << "\n";
+    }
+    if (!output) {
+      return make_result(
+          ctx,
+          ARV_RESULT_INTERNAL_ERROR,
+          "failed to write persistent region file");
+    }
+  }
+  std::filesystem::rename(temp, path, error);
+  if (error) {
+    std::error_code cleanup_error;
+    std::filesystem::remove(temp, cleanup_error);
+    return make_result(
+        ctx,
+        ARV_RESULT_INTERNAL_ERROR,
+        "failed to publish persistent region file: " + error.message());
+  }
+  return ok(ctx);
+}
+
+[[nodiscard]] std::optional<world::Region> load_persistent_region_file(
+    const std::filesystem::path& path) {
+  std::ifstream input(path);
+  if (!input) {
+    return std::nullopt;
+  }
+  std::string label;
+  int version = 0;
+  if (!(input >> label >> version) || label != "version" || version != 1) {
+    return std::nullopt;
+  }
+  world::Region region;
+  u32 world_value = 0U;
+  if (!(input >> label >> region.name) || label != "id") {
+    return std::nullopt;
+  }
+  if (!(input >> label >> world_value) || label != "world") {
+    return std::nullopt;
+  }
+  region.world = WorldID{world_value};
+  if (!(input >> label >> region.priority) || label != "priority") {
+    return std::nullopt;
+  }
+  if (!(input >> label >> region.shape.min.x >> region.shape.min.y >>
+        region.shape.min.z >> region.shape.max.x >> region.shape.max.y >>
+        region.shape.max.z) ||
+      label != "aabb") {
+    return std::nullopt;
+  }
+  region.shape.type = world::RegionShapeType::Aabb;
+  usize zone_count = 0U;
+  if (!(input >> label >> zone_count) || label != "zones") {
+    return std::nullopt;
+  }
+  for (usize index = 0; index < zone_count; ++index) {
+    std::string ignored;
+    input >> ignored;
+  }
+  int core_values[8]{};
+  if (!(input >> label >> core_values[0] >> core_values[1] >> core_values[2] >>
+        core_values[3] >> core_values[4] >> core_values[5] >> core_values[6] >>
+        core_values[7]) ||
+      label != "core") {
+    return std::nullopt;
+  }
+  region.core = {
+      tristate_from_int(core_values[0]),
+      tristate_from_int(core_values[1]),
+      tristate_from_int(core_values[2]),
+      tristate_from_int(core_values[3]),
+      tristate_from_int(core_values[4]),
+      tristate_from_int(core_values[5]),
+      tristate_from_int(core_values[6]),
+      tristate_from_int(core_values[7]),
+  };
+  usize custom_count = 0U;
+  if (!(input >> label >> custom_count) || label != "custom") {
+    return std::nullopt;
+  }
+  for (usize index = 0; index < custom_count; ++index) {
+    std::string node;
+    int value = 0;
+    if (!(input >> node >> value)) {
+      return std::nullopt;
+    }
+    region.permissions[node] = tristate_from_int(value);
+  }
+  usize flag_count = 0U;
+  if (!(input >> label >> flag_count) || label != "flags") {
+    return std::nullopt;
+  }
+  for (usize index = 0; index < flag_count; ++index) {
+    std::string flag;
+    int value = 0;
+    if (!(input >> flag >> value)) {
+      return std::nullopt;
+    }
+    region.flags[flag] = region_rule_from_int(value);
+  }
+  return region;
+}
+
+void install_persistent_regions(PluginManagerImpl& impl) {
+  if (impl.persistent_regions_installed || impl.runtime.default_world == nullptr ||
+      impl.runtime.server_save_root.empty()) {
+    return;
+  }
+  for (usize plugin_index = 0; plugin_index < impl.plugins.size(); ++plugin_index) {
+    PluginRecord& plugin = impl.plugins[plugin_index];
+    if (plugin.info.state != PluginState::Initialized) {
+      continue;
+    }
+    const std::filesystem::path root =
+        impl.runtime.server_save_root / "plugin_data" / plugin.info.pack_id / "regions";
+    std::error_code error;
+    if (!std::filesystem::exists(root, error)) {
+      continue;
+    }
+    for (std::filesystem::recursive_directory_iterator it(root, error), end;
+         !error && it != end;
+         it.increment(error)) {
+      if (!it->is_regular_file(error) || it->path().extension() != ".region") {
+        continue;
+      }
+      auto region = load_persistent_region_file(it->path());
+      if (!region.has_value()) {
+        append_diagnostic(
+            impl,
+            plugin.info.pack_id,
+            "persistent region load",
+            it->path(),
+            "persistent region file is invalid");
+        continue;
+      }
+      if (auto id_error = validate_owned_resource_id(plugin.info, region->name);
+          id_error.has_value()) {
+        append_diagnostic(
+            impl,
+            plugin.info.pack_id,
+            "persistent region load",
+            it->path(),
+            id_error.value());
+        continue;
+      }
+      if (region->world != impl.runtime.default_world->id()) {
+        continue;
+      }
+      const world::RegionID id =
+          impl.runtime.default_world->regions().add_region(std::move(region.value()));
+      if (id.value == 0U) {
+        append_diagnostic(
+            impl,
+            plugin.info.pack_id,
+            "persistent region load",
+            it->path(),
+            "persistent region could not be added");
+        continue;
+      }
+      impl.runtime_regions.push_back({
+          plugin_index,
+          id,
+          true,
+          true,
+          it->path(),
+      });
+    }
+  }
+  impl.persistent_regions_installed = true;
 }
 
 ArvResult api_create_runtime_region(
@@ -2403,15 +3267,18 @@ ArvResult api_create_runtime_region(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "region definition or out_handle is null");
   }
   *out_handle = {};
-  if (definition->persistent) {
-    return make_result(
-        ctx,
-        ARV_RESULT_UNSUPPORTED,
-        "persistent plugin-created regions are not implemented");
-  }
   const std::string id{abi_view(definition->id)};
   if (auto error = validate_owned_resource_id(ctx->info(), id); error.has_value()) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  std::filesystem::path persistent_path;
+  if (definition->persistent) {
+    std::string path_error;
+    auto path = persistent_region_path(ctx, id, path_error);
+    if (!path.has_value()) {
+      return make_result(ctx, ARV_RESULT_INVALID_STATE, path_error);
+    }
+    persistent_path = path.value();
   }
   world::WorldRuntime* world = world_from_handle(ctx, definition->world);
   if (world == nullptr) {
@@ -2431,16 +3298,7 @@ ArvResult api_create_runtime_region(
         "region custom permissions is null");
   }
 
-  world::Region region;
-  region.name = id;
-  region.world = WorldID{static_cast<u32>(definition->world)};
-  region.priority = definition->priority;
-  region.shape = {
-      world::RegionShapeType::Aabb,
-      {definition->shape.aabb.min.x, definition->shape.aabb.min.y, definition->shape.aabb.min.z},
-      {definition->shape.aabb.max.x, definition->shape.aabb.max.y, definition->shape.aabb.max.z},
-  };
-  region.core = core_permissions_from_abi(definition->core);
+  world::Region region = make_region_from_definition(*definition, id);
   for (usize index = 0; index < definition->zone_count; ++index) {
     const std::string zone_id{abi_view(definition->zones[index])};
     const world::Zone* zone = world->regions().zone(zone_id);
@@ -2458,11 +3316,26 @@ ArvResult api_create_runtime_region(
     region.permissions[node] = permission_value_from_abi(entry.value);
   }
 
+  world::Region persisted_region = region;
   const world::RegionID id_value = world->regions().add_region(std::move(region));
   if (id_value.value == 0U) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "region could not be added");
   }
-  ctx->impl->runtime_regions.push_back({ctx->plugin_index, id_value, true});
+  if (definition->persistent) {
+    if (ArvResult persisted =
+            persist_region_to_file(ctx, persisted_region, persistent_path);
+        persisted.code != ARV_RESULT_OK) {
+      (void)world->regions().remove_region(id_value);
+      return persisted;
+    }
+  }
+  ctx->impl->runtime_regions.push_back({
+      ctx->plugin_index,
+      id_value,
+      true,
+      definition->persistent,
+      persistent_path,
+  });
   *out_handle = {id_value.value};
   return ok(ctx);
 }
@@ -2481,9 +3354,22 @@ ArvResult api_remove_runtime_region(void* context, ArvRegionHandle handle) {
         registration.owner_index == ctx->plugin_index &&
         registration.active) {
       registration.active = false;
-      return ctx->impl->runtime.default_world->regions().remove_region(registration.id)
-                 ? ok(ctx)
-                 : make_result(ctx, ARV_RESULT_NOT_FOUND, "region not found");
+      const bool removed =
+          ctx->impl->runtime.default_world->regions().remove_region(registration.id);
+      if (!removed) {
+        return make_result(ctx, ARV_RESULT_NOT_FOUND, "region not found");
+      }
+      if (registration.persistent && !registration.storage_path.empty()) {
+        std::error_code error;
+        std::filesystem::remove(registration.storage_path, error);
+        if (error) {
+          return make_result(
+              ctx,
+              ARV_RESULT_INTERNAL_ERROR,
+              "failed to remove persistent region file: " + error.message());
+        }
+      }
+      return ok(ctx);
     }
   }
   return make_result(ctx, ARV_RESULT_NOT_FOUND, "runtime region not found");
@@ -2660,15 +3546,33 @@ ArvResult api_region_flag(
     ArvResourceID flag,
     ArvRegionRuleValue* out_value) {
   PluginCallContext* ctx = call_context(context);
-  (void)region_id;
-  (void)flag;
-  if (out_value != nullptr) {
-    *out_value = ARV_REGION_RULE_UNSET;
+  if (ArvResult sync = require_sync_context(ctx, "regions.region_flag");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
   }
-  return make_result(
-      ctx,
-      ARV_RESULT_UNSUPPORTED,
-      "region flags are not implemented by the engine");
+  if (out_value == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_value is null");
+  }
+  *out_value = ARV_REGION_RULE_UNSET;
+  const std::string flag_id{abi_view(flag)};
+  const RegionFlagRegistration* registration =
+      find_region_flag_registration(*ctx->impl, flag_id);
+  if (registration == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "region flag not registered");
+  }
+  if (ctx->impl->runtime.default_world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  if (ctx->impl->runtime.default_world->regions().region(abi_view(region_id)) ==
+      nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "region not found");
+  }
+  *out_value = region_rule_value_to_abi(
+      ctx->impl->runtime.default_world->regions().region_flag(
+          abi_view(region_id),
+          flag_id,
+          registration->default_value));
+  return ok(ctx);
 }
 
 ArvResult api_query_flag(
@@ -2677,15 +3581,105 @@ ArvResult api_query_flag(
     ArvResourceID flag,
     ArvRegionRuleValue* out_value) {
   PluginCallContext* ctx = call_context(context);
-  (void)query;
-  (void)flag;
-  if (out_value != nullptr) {
-    *out_value = ARV_REGION_RULE_UNSET;
+  if (ArvResult sync = require_sync_context(ctx, "regions.query_flag");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
   }
-  return make_result(
-      ctx,
-      ARV_RESULT_UNSUPPORTED,
-      "region flags are not implemented by the engine");
+  if (query == nullptr || out_value == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "query or out_value is null");
+  }
+  *out_value = ARV_REGION_RULE_UNSET;
+  const std::string flag_id{abi_view(flag)};
+  const RegionFlagRegistration* registration =
+      find_region_flag_registration(*ctx->impl, flag_id);
+  if (registration == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "region flag not registered");
+  }
+  world::WorldRuntime* world = world_from_handle(ctx, query->world);
+  if (world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  *out_value = region_rule_value_to_abi(
+      world->regions().flag_at(
+          {
+              WorldID{static_cast<u32>(query->world)},
+              {query->position.x, query->position.y, query->position.z},
+          },
+          flag_id,
+          registration->default_value));
+  return ok(ctx);
+}
+
+ArvResult api_set_region_flag(
+    void* context,
+    ArvRegionHandle handle,
+    ArvResourceID flag,
+    ArvRegionRuleValue value) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "regions.set_region_flag");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  const std::string flag_id{abi_view(flag)};
+  if (find_region_flag_registration(*ctx->impl, flag_id) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "region flag not registered");
+  }
+  if (ctx->impl->runtime.default_world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  for (RuntimeRegionRegistration& registration : ctx->impl->runtime_regions) {
+    if (registration.id.value == handle.value &&
+        registration.owner_index == ctx->plugin_index &&
+        registration.active) {
+      if (!ctx->impl->runtime.default_world->regions().set_region_flag(
+              registration.id,
+              flag_id,
+              region_rule_value_from_abi(value))) {
+        return make_result(ctx, ARV_RESULT_NOT_FOUND, "region not found");
+      }
+      if (registration.persistent && !registration.storage_path.empty()) {
+        if (const world::Region* region =
+                ctx->impl->runtime.default_world->regions().region(registration.id);
+            region != nullptr) {
+          return persist_region_to_file(ctx, *region, registration.storage_path);
+        }
+      }
+      return ok(ctx);
+    }
+  }
+  return make_result(ctx, ARV_RESULT_NOT_FOUND, "runtime region not found");
+}
+
+ArvResult api_set_zone_flag(
+    void* context,
+    ArvRegionHandle handle,
+    ArvResourceID flag,
+    ArvRegionRuleValue value) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "regions.set_zone_flag");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  const std::string flag_id{abi_view(flag)};
+  if (find_region_flag_registration(*ctx->impl, flag_id) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "region flag not registered");
+  }
+  if (ctx->impl->runtime.default_world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  for (RuntimeZoneRegistration& registration : ctx->impl->runtime_zones) {
+    if (registration.id.value == handle.value &&
+        registration.owner_index == ctx->plugin_index &&
+        registration.active) {
+      return ctx->impl->runtime.default_world->regions().set_zone_flag(
+                 registration.id,
+                 flag_id,
+                 region_rule_value_from_abi(value))
+                 ? ok(ctx)
+                 : make_result(ctx, ARV_RESULT_NOT_FOUND, "zone not found");
+    }
+  }
+  return make_result(ctx, ARV_RESULT_NOT_FOUND, "runtime zone not found");
 }
 
 ArvResult api_register_game_mode(
@@ -2702,11 +3696,12 @@ ArvResult api_register_game_mode(
   if (ctx->impl->options.game_modes == nullptr) {
     return make_result(ctx, ARV_RESULT_UNSUPPORTED, "game mode registry is unavailable");
   }
-  if (definition->custom_permission_count != 0U) {
+  if (definition->custom_permission_count != 0U &&
+      definition->custom_permissions == nullptr) {
     return make_result(
         ctx,
-        ARV_RESULT_UNSUPPORTED,
-        "custom game mode permission defaults are not implemented");
+        ARV_RESULT_INVALID_ARGUMENT,
+        "game mode custom permissions is null");
   }
   const std::string id{abi_view(definition->id)};
   if (auto error = validate_owned_resource_id(ctx->info(), id); error.has_value()) {
@@ -2716,10 +3711,26 @@ ArvResult api_register_game_mode(
   if (base_id.empty()) {
     base_id = std::string{player::SurvivalGameModeID};
   }
+  player::CustomPermissionMap custom_permissions;
+  for (usize index = 0; index < definition->custom_permission_count; ++index) {
+    const ArvCustomPermissionEntry& entry = definition->custom_permissions[index];
+    const std::string node{abi_view(entry.node)};
+    if (!player::is_valid_custom_permission_node(node)) {
+      return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "invalid permission node");
+    }
+    if (!permission_node_owned_by_plugin(ctx->info(), node)) {
+      return make_result(
+          ctx,
+          ARV_RESULT_PERMISSION_DENIED,
+          "permission node is not owned by plugin pack");
+    }
+    custom_permissions[node] = permission_value_from_abi(entry.value);
+  }
   auto result = ctx->impl->options.game_modes->add_custom_mode(
       id,
       base_id,
-      core_permissions_from_abi(definition->core));
+      core_permissions_from_abi(definition->core),
+      std::move(custom_permissions));
   if (!result) {
     return make_result(
         ctx,
@@ -2859,13 +3870,27 @@ ArvResult unsupported_no_arg(void* context) {
       "this plugin API is not implemented by the engine");
 }
 
-ArvResult unsupported_worldgen_registration(void* context, ArvResourceID id) {
-  PluginCallContext* ctx = call_context(context);
-  (void)id;
-  return make_result(
-      ctx,
-      ARV_RESULT_UNSUPPORTED,
-      "native worldgen type registries are not implemented by the engine");
+ArvResult api_register_worldgen_feature_type(void* context, ArvResourceID id) {
+  return register_extension_marker(
+      context,
+      id,
+      PluginExtensionRegistryKind::WorldgenFeature);
+}
+
+ArvResult api_register_worldgen_noise_type(void* context, ArvResourceID id) {
+  return register_extension_marker(
+      context,
+      id,
+      PluginExtensionRegistryKind::WorldgenNoise);
+}
+
+ArvResult api_register_worldgen_density_function_type(
+    void* context,
+    ArvResourceID id) {
+  return register_extension_marker(
+      context,
+      id,
+      PluginExtensionRegistryKind::WorldgenDensityFunction);
 }
 
 void api_metrics_counter_add(void* context, ArvResourceID metric_id, int64_t amount) {
@@ -3165,10 +4190,10 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &api_register_block_behavior,
       &api_register_item_behavior,
       &api_register_entity_goal,
-      &unsupported_registration,
-      &unsupported_registration,
-      &unsupported_registration,
-      &unsupported_registration,
+      &api_register_entity_behavior,
+      &api_register_component_codec,
+      &api_register_loot_function,
+      &api_register_recipe_type,
   };
   commands_api = {&api_register_executor};
   events_api = {&api_subscribe_event, &api_unsubscribe_event};
@@ -3207,19 +4232,30 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &api_entity_world,
       &api_entity_position,
       &api_entity_set_position,
-      &unsupported_entity_tags,
-      &unsupported_entity_tags,
-      &unsupported_entity_has_tag,
+      &api_entity_add_tag,
+      &api_entity_remove_tag,
+      &api_entity_has_tag,
   };
   config_api = {
       &api_load_plugin_config,
       &api_save_plugin_config,
   };
-  persistent_data_api = {&unsupported_no_arg};
+  persistent_data_api = {
+      &unsupported_no_arg,
+      &api_set_world_data,
+      &api_get_world_data,
+      &api_remove_world_data,
+      &api_set_entity_data,
+      &api_get_entity_data,
+      &api_remove_entity_data,
+      &api_set_block_data,
+      &api_get_block_data,
+      &api_remove_block_data,
+  };
   worldgen_api = {
-      &unsupported_worldgen_registration,
-      &unsupported_worldgen_registration,
-      &unsupported_worldgen_registration,
+      &api_register_worldgen_feature_type,
+      &api_register_worldgen_noise_type,
+      &api_register_worldgen_density_function_type,
   };
   network_api = {
       &unsupported_no_arg,
@@ -3269,6 +4305,8 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &api_is_player_in_region,
       &api_region_flag,
       &api_query_flag,
+      &api_set_region_flag,
+      &api_set_zone_flag,
   };
   game_modes_api = {
       &api_register_game_mode,
@@ -3568,13 +4606,18 @@ void PluginManager::register_commands(command::CommandRegistry& registry) {
 void PluginManager::attach_runtime(PluginRuntimeContext context) {
   const player::PermissionGroupRegistry* previous_group_registry =
       impl_->runtime.permission_groups;
+  const world::WorldRuntime* previous_world = impl_->runtime.default_world;
   if (previous_group_registry != context.permission_groups) {
     for (PermissionGroupRegistration& registration : impl_->permission_groups) {
       registration.installed = false;
     }
   }
+  if (previous_world != context.default_world) {
+    impl_->persistent_regions_installed = false;
+  }
   impl_->runtime = context;
   install_plugin_permission_groups(*impl_);
+  install_persistent_regions(*impl_);
   if (!impl_->runtime_active && context.default_world != nullptr) {
     impl_->runtime_active = true;
     impl_->shutdown_event_dispatched = false;
@@ -3621,6 +4664,7 @@ void PluginManager::stop_runtime() {
   }
   impl_->runtime = {};
   impl_->runtime_active = false;
+  impl_->persistent_regions_installed = false;
 }
 
 void PluginManager::tick(TickIndex tick_index) {
@@ -3844,6 +4888,29 @@ bool PluginManager::has_service(std::string_view id) const noexcept {
       [&](const ServiceRegistration& service) {
         return service.active && service.service_id == id;
       });
+}
+
+bool PluginManager::has_registered_extension(
+    PluginExtensionRegistryKind kind,
+    std::string_view id) const noexcept {
+  return std::any_of(
+      impl_->extension_registrations.begin(),
+      impl_->extension_registrations.end(),
+      [&](const PluginExtensionRegistration& registration) {
+        return registration.kind == kind && registration.id == id;
+      });
+}
+
+std::vector<std::string> PluginManager::registered_extension_ids(
+    PluginExtensionRegistryKind kind) const {
+  std::vector<std::string> ids;
+  for (const PluginExtensionRegistration& registration :
+       impl_->extension_registrations) {
+    if (registration.kind == kind) {
+      ids.push_back(registration.id);
+    }
+  }
+  return ids;
 }
 
 const char* plugin_state_name(PluginState state) noexcept {

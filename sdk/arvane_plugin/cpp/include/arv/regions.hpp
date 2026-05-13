@@ -43,6 +43,103 @@ public:
     };
   }
 
+  [[nodiscard]] Result register_region_flag(
+      const ArvRegionFlagDefinition& definition) const {
+    if (api_ == nullptr || api_->regions == nullptr ||
+        api_->regions->register_region_flag == nullptr) {
+      return Result::unsupported("regions API is unavailable");
+    }
+    return Result{api_->regions->register_region_flag(
+        api_->regions_ctx,
+        &definition)};
+  }
+
+  [[nodiscard]] ValueResult<RegionHandle> register_runtime_zone(
+      const ZoneDefinition& definition) const {
+    RegionHandle handle{};
+    if (api_ == nullptr || api_->regions == nullptr ||
+        api_->regions->register_runtime_zone == nullptr) {
+      return {Result::unsupported("regions API is unavailable"), handle};
+    }
+    return {
+        Result{api_->regions->register_runtime_zone(
+            api_->regions_ctx,
+            &definition,
+            &handle)},
+        handle,
+    };
+  }
+
+  [[nodiscard]] Result remove_runtime_zone(RegionHandle handle) const {
+    if (api_ == nullptr || api_->regions == nullptr ||
+        api_->regions->remove_runtime_zone == nullptr) {
+      return Result::unsupported("regions API is unavailable");
+    }
+    return Result{api_->regions->remove_runtime_zone(api_->regions_ctx, handle)};
+  }
+
+  [[nodiscard]] ValueResult<RegionRuleValue> region_flag(
+      std::string_view region_id,
+      std::string_view flag) const {
+    ArvRegionRuleValue value{ARV_REGION_RULE_UNSET};
+    if (api_ == nullptr || api_->regions == nullptr ||
+        api_->regions->region_flag == nullptr) {
+      return {Result::unsupported("regions API is unavailable"), RegionRuleValue::Unset};
+    }
+    Result result{api_->regions->region_flag(
+        api_->regions_ctx,
+        view(region_id),
+        view(flag),
+        &value)};
+    return {result, static_cast<RegionRuleValue>(value)};
+  }
+
+  [[nodiscard]] ValueResult<RegionRuleValue> query_flag(
+      const RegionQuery& query,
+      std::string_view flag) const {
+    ArvRegionRuleValue value{ARV_REGION_RULE_UNSET};
+    if (api_ == nullptr || api_->regions == nullptr ||
+        api_->regions->query_flag == nullptr) {
+      return {Result::unsupported("regions API is unavailable"), RegionRuleValue::Unset};
+    }
+    Result result{api_->regions->query_flag(
+        api_->regions_ctx,
+        &query,
+        view(flag),
+        &value)};
+    return {result, static_cast<RegionRuleValue>(value)};
+  }
+
+  [[nodiscard]] Result set_region_flag(
+      RegionHandle region,
+      std::string_view flag,
+      RegionRuleValue value) const {
+    if (api_ == nullptr || api_->regions == nullptr ||
+        api_->regions->set_region_flag == nullptr) {
+      return Result::unsupported("regions API is unavailable");
+    }
+    return Result{api_->regions->set_region_flag(
+        api_->regions_ctx,
+        region,
+        view(flag),
+        static_cast<ArvRegionRuleValue>(value))};
+  }
+
+  [[nodiscard]] Result set_zone_flag(
+      RegionHandle zone,
+      std::string_view flag,
+      RegionRuleValue value) const {
+    if (api_ == nullptr || api_->regions == nullptr ||
+        api_->regions->set_zone_flag == nullptr) {
+      return Result::unsupported("regions API is unavailable");
+    }
+    return Result{api_->regions->set_zone_flag(
+        api_->regions_ctx,
+        zone,
+        view(flag),
+        static_cast<ArvRegionRuleValue>(value))};
+  }
+
   [[nodiscard]] Result remove_runtime_region(RegionHandle handle) const {
     if (api_ == nullptr || api_->regions == nullptr ||
         api_->regions->remove_runtime_region == nullptr) {

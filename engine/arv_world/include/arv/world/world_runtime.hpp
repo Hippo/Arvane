@@ -356,6 +356,13 @@ public:
       f32 max_head_body_yaw_radians) noexcept;
   bool set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept;
   [[nodiscard]] bool entity_is_persistent(EntityID entity_id) const noexcept;
+  [[nodiscard]] std::optional<std::string> persistent_entity_uuid(
+      EntityID entity_id) const;
+  bool add_entity_tag(EntityID entity_id, std::string tag);
+  bool remove_entity_tag(EntityID entity_id, std::string_view tag) noexcept;
+  [[nodiscard]] bool entity_has_tag(
+      EntityID entity_id,
+      std::string_view tag) const noexcept;
   bool set_entity_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept;
   bool set_entity_position(EntityID entity_id, Vec3f position) noexcept;
   [[nodiscard]] std::vector<entity::EntitySnapshotEntry> collect_entity_snapshots() const;

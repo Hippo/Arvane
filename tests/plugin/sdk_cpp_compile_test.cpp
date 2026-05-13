@@ -70,6 +70,18 @@ int arv_plugin_sdk_cpp_compile_test() {
       event_handler);
   const arv::Result job_result = plugin.scheduler().sync(job_handler);
   const arv::PacketResult packet_result = network.create_chat_message(text_component);
+  const ArvRegionFlagDefinition flag_definition{
+      arv::view("test:pvp"),
+      arv::view("pvp"),
+      ARV_REGION_RULE_ALLOW};
+  const ArvZoneDefinition zone_definition{
+      arv::view("test:zone"),
+      0,
+      {},
+      nullptr,
+      0};
+  const ArvRegionHandle region_handle{};
+  const ArvBlockPos block_pos{};
 
   arv::Result result;
   return arv::ApiVersion == 1u && result && buffer.empty() &&
@@ -81,12 +93,33 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !packet_result && !network.broadcast(packet) &&
                  !gamemodes.exists("survival") && !permissions.unsupported() &&
                  !persistent_data.unsupported() &&
+                 !persistent_data.set_world(1, "test:data", arv::bytes("x")) &&
+                 !persistent_data.get_world(1, "test:data") &&
+                 !persistent_data.remove_world(1, "test:data") &&
+                 !persistent_data.set_entity(1, "test:data", arv::bytes("x")) &&
+                 !persistent_data.get_entity(1, "test:data") &&
+                 !persistent_data.remove_entity(1, "test:data") &&
+                 !persistent_data.set_block(1, block_pos, "test:data", arv::bytes("x")) &&
+                 !persistent_data.get_block(1, block_pos, "test:data") &&
+                 !persistent_data.remove_block(1, block_pos, "test:data") &&
                  !registries.register_item_behavior("test:item") &&
+                 !registries.register_entity_behavior("test:entity_behavior") &&
+                 !registries.register_component_codec("test:component") &&
+                 !registries.register_loot_function("test:loot") &&
+                 !registries.register_recipe_type("test:recipe") &&
+                 !regions.register_region_flag(flag_definition) &&
+                 !regions.register_runtime_zone(zone_definition) &&
+                 !regions.region_flag("test:region", "test:pvp") &&
+                 !regions.query_flag({}, "test:pvp") &&
+                 !regions.set_region_flag(region_handle, "test:pvp", arv::RegionRuleValue::Allow) &&
+                 !regions.set_zone_flag(region_handle, "test:pvp", arv::RegionRuleValue::Deny) &&
                  regions.find_regions_at({}).empty() &&
                  !resources.exists(arv::ResourceKind::Data, "test:data") &&
                  !scheduler.sync(job_handler) && services.list("test:svc", 0, 0).empty() &&
                  !text.unsupported() && !world.current_tick({}) &&
                  !worldgen.register_feature_type("test:feature") &&
+                 !worldgen.register_noise_type("test:noise") &&
+                 !worldgen.register_density_function_type("test:density") &&
                  plugin.context().namespace_count() == 0
              ? 0
              : 1;

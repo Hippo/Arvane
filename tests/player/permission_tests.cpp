@@ -107,3 +107,31 @@ TEST(PermissionTests, CustomPermissionWildcardsPreferSpecificMatches) {
       arv::player::custom_permission_value(permissions, "arvane.command.gamemode"),
       arv::player::TriState::Allow);
 }
+
+TEST(PermissionTests, GameModeCustomPermissionsSeedResolvedCustomMap) {
+  arv::player::GameModeRegistry modes;
+  ASSERT_TRUE(modes.add_builtin_mode(
+      std::string{arv::player::SurvivalGameModeID},
+      {}).has_value());
+  ASSERT_TRUE(modes.add_custom_mode(
+      "builder",
+      std::string{arv::player::SurvivalGameModeID},
+      {},
+      {{"plugin.build", arv::player::TriState::Allow}}).has_value());
+
+  const arv::player::PermissionGroupRegistry groups;
+  const arv::player::ResolvedPermissions resolved = arv::player::resolve_permissions(
+      modes,
+      groups,
+      {
+          "builder",
+          nullptr,
+          {},
+          nullptr,
+          {},
+      });
+
+  EXPECT_EQ(
+      resolved.custom_value("plugin.build"),
+      arv::player::TriState::Allow);
+}

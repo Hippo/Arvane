@@ -246,6 +246,10 @@ struct PersistentEntity {
   std::string type_name{};
 };
 
+struct EntityTags {
+  HashSet<std::string> tags{};
+};
+
 struct PlayerEntity {
   PlayerID player_id{};
 };
