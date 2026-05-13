@@ -68,6 +68,7 @@ struct PluginLoadOptions {
   const asset::PackManager* packs{};
   NativePluginPolicy policy{};
   std::filesystem::path config_root{};
+  player::GameModeRegistry* game_modes{};
   voxel::BlockBehaviorRegistry* block_behaviors{};
   player::ItemBehaviorRegistry* item_behaviors{};
   world::EntityGoalRegistry* entity_goals{};
@@ -78,6 +79,8 @@ struct PluginRuntimeContext {
   const voxel::BlockRegistry* block_registry{};
   const player::ItemRegistry* item_registry{};
   const entity::EntityRegistry* entity_registry{};
+  player::GameModeRegistry* game_modes{};
+  player::PermissionGroupRegistry* permission_groups{};
   sched::JobSystem* job_system{};
   TickIndex tick_index{};
   u64 world_seed{};

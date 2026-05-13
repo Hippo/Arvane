@@ -74,6 +74,7 @@ ZoneID RegionRegistry::add_zone(Zone zone) {
   }
 
   zone.id = ZoneID{static_cast<u32>(zones_.size() + 1U)};
+  zone.active = true;
   if (!zone.name.empty()) {
     zone_names_[zone.name] = zone.id;
   }
@@ -98,6 +99,7 @@ RegionID RegionRegistry::add_region(Region region) {
   }
 
   region.id = RegionID{static_cast<u32>(regions_.size() + 1U)};
+  region.active = true;
   if (!region.name.empty()) {
     region_names_[region.name] = region.id;
   }
@@ -106,24 +108,64 @@ RegionID RegionRegistry::add_region(Region region) {
   return regions_.back().id;
 }
 
+bool RegionRegistry::remove_zone(ZoneID id) {
+  Zone* current = id.value == 0U || id.value > zones_.size() ? nullptr : &zones_[id.value - 1U];
+  if (current == nullptr || !current->active) {
+    return false;
+  }
+  current->active = false;
+  if (!current->name.empty()) {
+    zone_names_.erase(current->name);
+  }
+  ++revision_;
+  return true;
+}
+
+bool RegionRegistry::remove_region(RegionID id) {
+  Region* current =
+      id.value == 0U || id.value > regions_.size() ? nullptr : &regions_[id.value - 1U];
+  if (current == nullptr || !current->active) {
+    return false;
+  }
+  current->active = false;
+  if (!current->name.empty()) {
+    region_names_.erase(current->name);
+  }
+  ++revision_;
+  return true;
+}
+
 const Zone* RegionRegistry::zone(ZoneID id) const noexcept {
   if (id.value == 0U || id.value > zones_.size()) {
     return nullptr;
   }
-  return &zones_[id.value - 1U];
+  const Zone& current = zones_[id.value - 1U];
+  return current.active ? &current : nullptr;
 }
 
 const Region* RegionRegistry::region(RegionID id) const noexcept {
   if (id.value == 0U || id.value > regions_.size()) {
     return nullptr;
   }
-  return &regions_[id.value - 1U];
+  const Region& current = regions_[id.value - 1U];
+  return current.active ? &current : nullptr;
+}
+
+const Zone* RegionRegistry::zone(std::string_view name) const noexcept {
+  const auto found = zone_names_.find(std::string{name});
+  return found == zone_names_.end() ? nullptr : zone(found->second);
+}
+
+const Region* RegionRegistry::region(std::string_view name) const noexcept {
+  const auto found = region_names_.find(std::string{name});
+  return found == region_names_.end() ? nullptr : region(found->second);
 }
 
 std::vector<RegionID> RegionRegistry::find_regions_at(RegionQuery query) const {
   std::vector<RegionID> matches;
   for (const Region& candidate : regions_) {
-    if (candidate.world != query.world || !contains(candidate.shape, query.position)) {
+    if (!candidate.active || candidate.world != query.world ||
+        !contains(candidate.shape, query.position)) {
       continue;
     }
     matches.emplace_back(candidate.id);

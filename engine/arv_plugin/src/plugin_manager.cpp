@@ -4,6 +4,7 @@
 
 #include "arv/asset/resource.hpp"
 #include "arv/core/log.hpp"
+#include "arv/protocol/chat.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -93,6 +94,84 @@ private:
       return command::CommandMessageKind::Error;
   }
   return command::CommandMessageKind::Info;
+}
+
+[[nodiscard]] player::TriState permission_value_from_abi(
+    ArvPermissionValue value) noexcept {
+  switch (value) {
+    case ARV_PERMISSION_ALLOW:
+      return player::TriState::Allow;
+    case ARV_PERMISSION_DENY:
+      return player::TriState::Deny;
+    case ARV_PERMISSION_UNSET:
+      return player::TriState::Unset;
+  }
+  return player::TriState::Unset;
+}
+
+[[nodiscard]] ArvPermissionValue permission_value_to_abi(
+    player::TriState value) noexcept {
+  switch (value) {
+    case player::TriState::Allow:
+      return ARV_PERMISSION_ALLOW;
+    case player::TriState::Deny:
+      return ARV_PERMISSION_DENY;
+    case player::TriState::Unset:
+      return ARV_PERMISSION_UNSET;
+  }
+  return ARV_PERMISSION_UNSET;
+}
+
+[[nodiscard]] player::CorePermissionSet core_permissions_from_abi(
+    const ArvCorePermissionSet& permissions) noexcept {
+  return {
+      permission_value_from_abi(permissions.can_take_damage),
+      permission_value_from_abi(permissions.can_modify_world),
+      permission_value_from_abi(permissions.can_interact),
+      permission_value_from_abi(permissions.can_open_inventory),
+      permission_value_from_abi(permissions.has_creative_inventory),
+      permission_value_from_abi(permissions.can_fly),
+      permission_value_from_abi(permissions.has_collision),
+      permission_value_from_abi(permissions.is_visible_to_others),
+  };
+}
+
+[[nodiscard]] ArvResolvedCorePermissions resolved_core_to_abi(
+    const player::ResolvedCorePermissions& permissions) noexcept {
+  return {
+      permissions.can_take_damage,
+      permissions.can_modify_world,
+      permissions.can_interact,
+      permissions.can_open_inventory,
+      permissions.has_creative_inventory,
+      permissions.can_fly,
+      permissions.has_collision,
+      permissions.is_visible_to_others,
+  };
+}
+
+[[nodiscard]] bool resolved_core_permission_value(
+    const player::ResolvedCorePermissions& permissions,
+    ArvCorePermission permission) noexcept {
+  switch (permission) {
+    case ARV_CORE_PERMISSION_CAN_TAKE_DAMAGE:
+      return permissions.can_take_damage;
+    case ARV_CORE_PERMISSION_CAN_MODIFY_WORLD:
+      return permissions.can_modify_world;
+    case ARV_CORE_PERMISSION_CAN_INTERACT:
+      return permissions.can_interact;
+    case ARV_CORE_PERMISSION_CAN_OPEN_INVENTORY:
+      return permissions.can_open_inventory;
+    case ARV_CORE_PERMISSION_HAS_CREATIVE_INVENTORY:
+      return permissions.has_creative_inventory;
+    case ARV_CORE_PERMISSION_CAN_FLY:
+      return permissions.can_fly;
+    case ARV_CORE_PERMISSION_HAS_COLLISION:
+      return permissions.has_collision;
+    case ARV_CORE_PERMISSION_IS_VISIBLE_TO_OTHERS:
+      return permissions.is_visible_to_others;
+  }
+  return false;
 }
 
 [[nodiscard]] command::CommandStatus command_status_from_result(
@@ -287,6 +366,31 @@ struct ServiceRegistration {
   bool active{true};
 };
 
+struct PermissionNodeRegistration {
+  usize owner_index{};
+  std::string node{};
+  std::string description{};
+  player::TriState default_value{player::TriState::Unset};
+};
+
+struct PermissionGroupRegistration {
+  usize owner_index{};
+  player::PermissionGroup group{};
+  bool installed{};
+};
+
+struct RuntimeRegionRegistration {
+  usize owner_index{};
+  world::RegionID id{};
+  bool active{true};
+};
+
+struct RuntimeZoneRegistration {
+  usize owner_index{};
+  world::ZoneID id{};
+  bool active{true};
+};
+
 struct PluginCallContext;
 
 struct PluginAPIStorage {
@@ -309,6 +413,8 @@ struct PluginAPIStorage {
   ArvTextAPI text_api{};
   ArvMetricsAPI metrics_api{};
   ArvPermissionsAPI permissions_api{};
+  ArvRegionsAPI regions_api{};
+  ArvGameModeAPI game_modes_api{};
   ArvAPI api{};
 };
 
@@ -336,6 +442,10 @@ struct PluginManagerImpl {
   std::vector<ScheduledJob> jobs{};
   std::vector<EventSubscription> subscriptions{};
   std::vector<ServiceRegistration> services{};
+  std::vector<PermissionNodeRegistration> permission_nodes{};
+  std::vector<PermissionGroupRegistration> permission_groups{};
+  std::vector<RuntimeRegionRegistration> runtime_regions{};
+  std::vector<RuntimeZoneRegistration> runtime_zones{};
   std::atomic<u64> next_job_id{1};
   u64 next_subscription_id{1};
   u64 next_service_id{1};
@@ -348,6 +458,8 @@ struct PluginCallContext {
   PluginManagerImpl* impl{};
   usize plugin_index{};
   std::string result_message{};
+  u64 next_text_handle{1U};
+  HashMap<u64, protocol::RichText> text_components{};
 
   [[nodiscard]] PluginInfo& info() noexcept {
     return impl->plugins[plugin_index].info;
@@ -435,6 +547,86 @@ void append_diagnostic(
   return world->id().value == handle ? world : nullptr;
 }
 
+[[nodiscard]] player::PlayerState* player_from_id(
+    PluginCallContext* context,
+    ArvPlayerID player_id) {
+  if (context == nullptr || context->impl->runtime.default_world == nullptr) {
+    return nullptr;
+  }
+  return context->impl->runtime.default_world->find_player(PlayerID{player_id});
+}
+
+[[nodiscard]] const player::GameModeRegistry& runtime_game_modes(
+    const PluginManagerImpl& impl) noexcept {
+  static const player::GameModeRegistry empty_modes;
+  if (impl.runtime.game_modes != nullptr) {
+    return *impl.runtime.game_modes;
+  }
+  if (impl.options.game_modes != nullptr) {
+    return *impl.options.game_modes;
+  }
+  return empty_modes;
+}
+
+[[nodiscard]] const player::PermissionGroupRegistry& runtime_permission_groups(
+    const PluginManagerImpl& impl) noexcept {
+  static const player::PermissionGroupRegistry empty_groups;
+  return impl.runtime.permission_groups == nullptr ? empty_groups
+                                                  : *impl.runtime.permission_groups;
+}
+
+void refresh_plugin_player_permissions(
+    PluginManagerImpl& impl,
+    player::PlayerState& player_state) {
+  player::PermissionLayer region_layer;
+  if (impl.runtime.default_world != nullptr) {
+    const world::RegionQuery query{player_state.world_id, player_state.position};
+    (void)impl.runtime.default_world->update_player_region_state(
+        player_state.player_id,
+        query);
+    if (const world::PlayerRegionState* state =
+            impl.runtime.default_world->player_region_state(player_state.player_id);
+        state != nullptr) {
+      region_layer =
+          impl.runtime.default_world->regions().permission_layer_for_regions(
+              state->active_regions);
+    }
+  }
+
+  player_state.resolved_permissions = player::resolve_permissions(
+      runtime_game_modes(impl),
+      runtime_permission_groups(impl),
+      {
+          player_state.game_mode_id,
+          &player_state.permission_overrides,
+          {},
+          &region_layer,
+          {},
+      });
+}
+
+void install_plugin_permission_groups(PluginManagerImpl& impl) {
+  if (impl.runtime.permission_groups == nullptr) {
+    return;
+  }
+  for (PermissionGroupRegistration& registration : impl.permission_groups) {
+    if (registration.installed) {
+      continue;
+    }
+    auto result =
+        impl.runtime.permission_groups->add_group(registration.group);
+    if (!result) {
+      append_diagnostic(
+          impl,
+          impl.plugins[registration.owner_index].info.pack_id,
+          "permission group registration",
+          {},
+          result.error().message);
+    }
+    registration.installed = true;
+  }
+}
+
 [[nodiscard]] ArvByteBuffer byte_buffer_from_string(std::string text) {
   ArvByteBuffer buffer{};
   buffer.size = text.size();
@@ -444,6 +636,86 @@ void append_diagnostic(
   buffer.data = new uint8_t[buffer.size];
   std::memcpy(buffer.data, text.data(), buffer.size);
   return buffer;
+}
+
+[[nodiscard]] protocol::RichText* text_from_handle(
+    PluginCallContext* ctx,
+    ArvTextHandle handle) {
+  if (ctx == nullptr || handle.value == 0U) {
+    return nullptr;
+  }
+  const auto found = ctx->text_components.find(handle.value);
+  return found == ctx->text_components.end() ? nullptr : &found->second;
+}
+
+[[nodiscard]] ArvTextHandle store_text(
+    PluginCallContext* ctx,
+    protocol::RichText text) {
+  if (ctx == nullptr) {
+    return {};
+  }
+  const u64 handle = ctx->next_text_handle++;
+  ctx->text_components.emplace(handle, std::move(text));
+  return {handle};
+}
+
+void apply_text_style_patch(
+    protocol::TextStylePatch& result,
+    ArvTextStylePatch style) {
+  if (style.has_color) {
+    result.color = protocol::RgbColor{style.color.r, style.color.g, style.color.b};
+  }
+  if (style.has_bold) {
+    result.bold = style.bold;
+  }
+  if (style.has_italic) {
+    result.italic = style.italic;
+  }
+  if (style.has_underlined) {
+    result.underlined = style.underlined;
+  }
+  if (style.has_strikethrough) {
+    result.strikethrough = style.strikethrough;
+  }
+  if (style.has_obfuscated) {
+    result.obfuscated = style.obfuscated;
+  }
+  if (style.has_font) {
+    result.font = abi_string(style.font);
+  }
+}
+
+[[nodiscard]] protocol::ClickAction click_action_from_abi(
+    ArvTextClickAction action) noexcept {
+  switch (action) {
+    case ARV_TEXT_CLICK_OPEN_URL:
+      return protocol::ClickAction::OpenUrl;
+    case ARV_TEXT_CLICK_SUGGEST_COMMAND:
+      return protocol::ClickAction::SuggestCommand;
+    case ARV_TEXT_CLICK_RUN_COMMAND:
+      return protocol::ClickAction::RunCommand;
+    case ARV_TEXT_CLICK_COPY_TO_CLIPBOARD:
+      return protocol::ClickAction::CopyToClipboard;
+  }
+  return protocol::ClickAction::SuggestCommand;
+}
+
+[[nodiscard]] protocol::RichTextLimits text_limits_from_abi(
+    const ArvTextLimits* limits) noexcept {
+  protocol::RichTextLimits result;
+  if (limits == nullptr) {
+    return result;
+  }
+  result.max_serialized_size_bytes =
+      static_cast<usize>(limits->max_serialized_size_bytes);
+  result.max_text_bytes = static_cast<usize>(limits->max_text_bytes);
+  result.max_nodes = static_cast<usize>(limits->max_nodes);
+  result.max_depth = static_cast<usize>(limits->max_depth);
+  result.max_hover_text_bytes =
+      static_cast<usize>(limits->max_hover_text_bytes);
+  result.max_click_value_bytes =
+      static_cast<usize>(limits->max_click_value_bytes);
+  return result;
 }
 
 ArvStringView api_pack_id(void* context) {
@@ -1515,6 +1787,1028 @@ ArvResult api_save_plugin_config(
   return ok(ctx);
 }
 
+ArvResult api_text_literal(
+    void* context,
+    ArvStringView text,
+    ArvTextHandle* out_text) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_text == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
+  }
+  *out_text = {};
+  const std::string value{abi_view(text)};
+  if (!protocol::is_valid_utf8(value)) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "text is not valid UTF-8");
+  }
+  *out_text = store_text(ctx, protocol::plain_rich_text(value));
+  return ok(ctx);
+}
+
+ArvResult api_text_translatable(
+    void* context,
+    ArvStringView translation_key,
+    ArvTextHandle* out_text) {
+  PluginCallContext* ctx = call_context(context);
+  (void)translation_key;
+  if (out_text != nullptr) {
+    *out_text = {};
+  }
+  return make_result(
+      ctx,
+      ARV_RESULT_UNSUPPORTED,
+      "translatable rich text nodes are not implemented by the engine");
+}
+
+ArvResult api_text_append(
+    void* context,
+    ArvTextHandle parent,
+    ArvTextHandle child,
+    ArvTextHandle* out_text) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_text == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
+  }
+  *out_text = {};
+  protocol::RichText* parent_text = text_from_handle(ctx, parent);
+  protocol::RichText* child_text = text_from_handle(ctx, child);
+  if (parent_text == nullptr || child_text == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
+  }
+  protocol::RichText copy = *parent_text;
+  copy.children.push_back(*child_text);
+  *out_text = store_text(ctx, std::move(copy));
+  return ok(ctx);
+}
+
+ArvResult api_text_style(
+    void* context,
+    ArvTextHandle text,
+    ArvTextStylePatch style,
+    ArvTextHandle* out_text) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_text == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
+  }
+  *out_text = {};
+  protocol::RichText* source = text_from_handle(ctx, text);
+  if (source == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
+  }
+  protocol::RichText copy = *source;
+  apply_text_style_patch(copy.style, style);
+  const protocol::RichTextValidation validation = protocol::validate_rich_text(copy);
+  if (!validation.valid) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
+  }
+  *out_text = store_text(ctx, std::move(copy));
+  return ok(ctx);
+}
+
+ArvResult api_text_color(
+    void* context,
+    ArvTextHandle text,
+    ArvTextColor color,
+    ArvTextHandle* out_text) {
+  ArvTextStylePatch style{};
+  style.has_color = true;
+  style.color = color;
+  return api_text_style(context, text, style, out_text);
+}
+
+void apply_hover_to_text(protocol::RichText& text, protocol::HoverEvent hover) {
+  bool applied = false;
+  if (!text.text.empty()) {
+    text.hover_event = hover;
+    applied = true;
+  }
+  for (protocol::RichText& child : text.children) {
+    apply_hover_to_text(child, hover);
+    applied = true;
+  }
+  if (!applied) {
+    text.hover_event = std::move(hover);
+  }
+}
+
+void apply_click_to_text(protocol::RichText& text, protocol::ClickEvent click) {
+  bool applied = false;
+  if (!text.text.empty()) {
+    text.click_event = click;
+    applied = true;
+  }
+  for (protocol::RichText& child : text.children) {
+    apply_click_to_text(child, click);
+    applied = true;
+  }
+  if (!applied) {
+    text.click_event = std::move(click);
+  }
+}
+
+ArvResult api_text_hover_text(
+    void* context,
+    ArvTextHandle text,
+    ArvTextHandle hover_text,
+    ArvTextHandle* out_text) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_text == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
+  }
+  *out_text = {};
+  protocol::RichText* source = text_from_handle(ctx, text);
+  protocol::RichText* hover_source = text_from_handle(ctx, hover_text);
+  if (source == nullptr || hover_source == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
+  }
+  protocol::RichText copy = *source;
+  apply_hover_to_text(copy, protocol::make_show_text_hover(*hover_source));
+  const protocol::RichTextValidation validation = protocol::validate_rich_text(copy);
+  if (!validation.valid) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
+  }
+  *out_text = store_text(ctx, std::move(copy));
+  return ok(ctx);
+}
+
+ArvResult api_text_click(
+    void* context,
+    ArvTextHandle text,
+    ArvTextClickAction action,
+    ArvStringView value,
+    ArvTextHandle* out_text) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_text == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
+  }
+  *out_text = {};
+  protocol::RichText* source = text_from_handle(ctx, text);
+  if (source == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
+  }
+  protocol::RichText copy = *source;
+  apply_click_to_text(
+      copy,
+      protocol::ClickEvent{click_action_from_abi(action), abi_string(value)});
+  const protocol::RichTextValidation validation = protocol::validate_rich_text(copy);
+  if (!validation.valid) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
+  }
+  *out_text = store_text(ctx, std::move(copy));
+  return ok(ctx);
+}
+
+ArvResult api_text_plain_text(
+    void* context,
+    ArvTextHandle text,
+    ArvByteBuffer* out_buffer) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_buffer == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_buffer is null");
+  }
+  *out_buffer = {};
+  protocol::RichText* source = text_from_handle(ctx, text);
+  if (source == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
+  }
+  *out_buffer = byte_buffer_from_string(protocol::to_plain_text(*source));
+  return ok(ctx);
+}
+
+ArvResult api_text_serialize(
+    void* context,
+    ArvTextHandle text,
+    ArvByteBuffer* out_buffer) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_buffer == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_buffer is null");
+  }
+  *out_buffer = {};
+  protocol::RichText* source = text_from_handle(ctx, text);
+  if (source == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
+  }
+  const protocol::RichTextValidation validation = protocol::validate_rich_text(*source);
+  if (!validation.valid) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
+  }
+  const std::vector<u8> bytes = protocol::serialize_rich_text(*source);
+  std::string serialized;
+  serialized.resize(bytes.size());
+  if (!bytes.empty()) {
+    std::memcpy(serialized.data(), bytes.data(), bytes.size());
+  }
+  *out_buffer = byte_buffer_from_string(std::move(serialized));
+  return ok(ctx);
+}
+
+ArvResult api_text_validate(
+    void* context,
+    ArvTextHandle text,
+    const ArvTextLimits* limits) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  protocol::RichText* source = text_from_handle(ctx, text);
+  if (source == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
+  }
+  const protocol::RichTextValidation validation =
+      protocol::validate_rich_text(*source, text_limits_from_abi(limits));
+  return validation.valid
+             ? ok(ctx)
+             : make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
+}
+
+void api_text_release(void* context, ArvTextHandle text) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx != nullptr && text.value != 0U) {
+    ctx->text_components.erase(text.value);
+  }
+}
+
+bool permission_node_owned_by_plugin(
+    const PluginInfo& info,
+    std::string_view node) {
+  for (const std::string& name_space : info.namespaces) {
+    if (node == name_space ||
+        (node.size() > name_space.size() &&
+         node.substr(0, name_space.size()) == name_space &&
+         node[name_space.size()] == '.')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+ArvResult api_register_permission_node(
+    void* context,
+    const ArvPermissionNodeDefinition* definition) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
+    return phase;
+  }
+  if (definition == nullptr) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "permission node definition is null");
+  }
+  const std::string node{abi_view(definition->node)};
+  if (!player::is_valid_custom_permission_node(node)) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "invalid permission node");
+  }
+  if (!permission_node_owned_by_plugin(ctx->info(), node)) {
+    return make_result(
+        ctx,
+        ARV_RESULT_PERMISSION_DENIED,
+        "permission node is not owned by plugin pack");
+  }
+  const auto duplicate = std::find_if(
+      ctx->impl->permission_nodes.begin(),
+      ctx->impl->permission_nodes.end(),
+      [&](const PermissionNodeRegistration& registration) {
+        return registration.node == node;
+      });
+  if (duplicate != ctx->impl->permission_nodes.end()) {
+    return make_result(ctx, ARV_RESULT_DUPLICATE_ID, "duplicate permission node");
+  }
+  ctx->impl->permission_nodes.push_back({
+      ctx->plugin_index,
+      node,
+      abi_string(definition->description),
+      permission_value_from_abi(definition->default_value),
+  });
+  return ok(ctx);
+}
+
+ArvResult api_permission_check_core(
+    void* context,
+    ArvPlayerID player,
+    ArvCorePermission permission,
+    bool* out_allowed) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "permissions.check_core");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (out_allowed == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_allowed is null");
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  refresh_plugin_player_permissions(*ctx->impl, *player_state);
+  *out_allowed =
+      resolved_core_permission_value(player_state->resolved_permissions.core, permission);
+  return ok(ctx);
+}
+
+ArvResult api_permission_check_custom(
+    void* context,
+    ArvPlayerID player,
+    ArvStringView node,
+    ArvPermissionValue* out_value) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "permissions.check_custom");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (out_value == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_value is null");
+  }
+  const std::string node_text{abi_view(node)};
+  if (!player::is_valid_custom_permission_node(node_text)) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "invalid permission node");
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  refresh_plugin_player_permissions(*ctx->impl, *player_state);
+  *out_value = permission_value_to_abi(
+      player_state->resolved_permissions.custom_value(node_text));
+  return ok(ctx);
+}
+
+ArvResult api_permission_resolved_core(
+    void* context,
+    ArvPlayerID player,
+    ArvResolvedCorePermissions* out_permissions) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "permissions.resolved_core");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (out_permissions == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_permissions is null");
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  refresh_plugin_player_permissions(*ctx->impl, *player_state);
+  *out_permissions = resolved_core_to_abi(player_state->resolved_permissions.core);
+  return ok(ctx);
+}
+
+ArvResult api_permission_register_group(
+    void* context,
+    const ArvPermissionGroupDefinition* definition) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
+    return phase;
+  }
+  if (definition == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "permission group definition is null");
+  }
+  const std::string id{abi_view(definition->id)};
+  if (auto error = validate_owned_resource_id(ctx->info(), id); error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  if (definition->inherit_count != 0U && definition->inherits == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "permission group inherits is null");
+  }
+  if (definition->custom_permission_count != 0U &&
+      definition->custom_permissions == nullptr) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "permission group custom permissions is null");
+  }
+  const auto duplicate = std::find_if(
+      ctx->impl->permission_groups.begin(),
+      ctx->impl->permission_groups.end(),
+      [&](const PermissionGroupRegistration& registration) {
+        return registration.group.id == id;
+      });
+  if (duplicate != ctx->impl->permission_groups.end()) {
+    return make_result(ctx, ARV_RESULT_DUPLICATE_ID, "duplicate permission group");
+  }
+
+  player::PermissionGroup group;
+  group.id = id;
+  group.priority = definition->priority;
+  group.core = core_permissions_from_abi(definition->core);
+  group.inherits.reserve(definition->inherit_count);
+  for (usize index = 0; index < definition->inherit_count; ++index) {
+    group.inherits.push_back(abi_string(definition->inherits[index]));
+  }
+  for (usize index = 0; index < definition->custom_permission_count; ++index) {
+    const ArvCustomPermissionEntry& entry = definition->custom_permissions[index];
+    const std::string node{abi_view(entry.node)};
+    if (!player::is_valid_custom_permission_node(node)) {
+      return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "invalid permission node");
+    }
+    group.custom[node] = permission_value_from_abi(entry.value);
+  }
+  ctx->impl->permission_groups.push_back({ctx->plugin_index, std::move(group), false});
+  return ok(ctx);
+}
+
+ArvResult api_permission_has_group(
+    void* context,
+    ArvPlayerID player,
+    ArvStringView group_id,
+    bool* out_has_group) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "permissions.has_group");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (out_has_group == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_has_group is null");
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  const std::string id{abi_view(group_id)};
+  *out_has_group = std::find(
+                       player_state->permission_overrides.groups.begin(),
+                       player_state->permission_overrides.groups.end(),
+                       id) != player_state->permission_overrides.groups.end();
+  return ok(ctx);
+}
+
+ArvResult api_permission_add_group(
+    void* context,
+    ArvPlayerID player,
+    ArvStringView group_id) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "permissions.add_group");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  const std::string id{abi_view(group_id)};
+  if (runtime_permission_groups(*ctx->impl).find(id) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "permission group not found");
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  auto& groups = player_state->permission_overrides.groups;
+  if (std::find(groups.begin(), groups.end(), id) == groups.end()) {
+    groups.push_back(id);
+    refresh_plugin_player_permissions(*ctx->impl, *player_state);
+  }
+  return ok(ctx);
+}
+
+ArvResult api_permission_remove_group(
+    void* context,
+    ArvPlayerID player,
+    ArvStringView group_id) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "permissions.remove_group");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  const std::string id{abi_view(group_id)};
+  auto& groups = player_state->permission_overrides.groups;
+  const usize old_size = groups.size();
+  groups.erase(std::remove(groups.begin(), groups.end(), id), groups.end());
+  if (groups.size() != old_size) {
+    refresh_plugin_player_permissions(*ctx->impl, *player_state);
+  }
+  return ok(ctx);
+}
+
+uint64_t api_permission_groups(
+    void* context,
+    ArvPlayerID player,
+    ArvStringView* out_groups,
+    uint64_t max_groups) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr || tls_thread_context != PluginThreadContext::Sync) {
+    return 0U;
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return 0U;
+  }
+  const std::vector<std::string>& groups = player_state->permission_overrides.groups;
+  if (out_groups != nullptr && max_groups > 0U) {
+    const uint64_t count = std::min<uint64_t>(groups.size(), max_groups);
+    for (uint64_t index = 0; index < count; ++index) {
+      out_groups[index] = stable_view(groups[index]);
+    }
+  }
+  return groups.size();
+}
+
+ArvResult api_register_region_flag(
+    void* context,
+    const ArvRegionFlagDefinition* definition) {
+  PluginCallContext* ctx = call_context(context);
+  (void)definition;
+  return make_result(
+      ctx,
+      ARV_RESULT_UNSUPPORTED,
+      "region flags are not implemented by the engine");
+}
+
+void fill_region_info(
+    const world::Region& region,
+    ArvRegionInfo& out_region) noexcept {
+  out_region = {
+      ArvRegionHandle{region.id.value},
+      stable_view(region.name),
+      region.world.value,
+      region.priority,
+  };
+}
+
+ArvResult api_create_runtime_region(
+    void* context,
+    const ArvRegionDefinition* definition,
+    ArvRegionHandle* out_handle) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "regions.create_runtime_region");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (definition == nullptr || out_handle == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "region definition or out_handle is null");
+  }
+  *out_handle = {};
+  if (definition->persistent) {
+    return make_result(
+        ctx,
+        ARV_RESULT_UNSUPPORTED,
+        "persistent plugin-created regions are not implemented");
+  }
+  const std::string id{abi_view(definition->id)};
+  if (auto error = validate_owned_resource_id(ctx->info(), id); error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  world::WorldRuntime* world = world_from_handle(ctx, definition->world);
+  if (world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  if (definition->shape.kind != ARV_REGION_SHAPE_AABB) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "unsupported region shape");
+  }
+  if (definition->zone_count != 0U && definition->zones == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "region zones is null");
+  }
+  if (definition->custom_permission_count != 0U &&
+      definition->custom_permissions == nullptr) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "region custom permissions is null");
+  }
+
+  world::Region region;
+  region.name = id;
+  region.world = WorldID{static_cast<u32>(definition->world)};
+  region.priority = definition->priority;
+  region.shape = {
+      world::RegionShapeType::Aabb,
+      {definition->shape.aabb.min.x, definition->shape.aabb.min.y, definition->shape.aabb.min.z},
+      {definition->shape.aabb.max.x, definition->shape.aabb.max.y, definition->shape.aabb.max.z},
+  };
+  region.core = core_permissions_from_abi(definition->core);
+  for (usize index = 0; index < definition->zone_count; ++index) {
+    const std::string zone_id{abi_view(definition->zones[index])};
+    const world::Zone* zone = world->regions().zone(zone_id);
+    if (zone == nullptr) {
+      return make_result(ctx, ARV_RESULT_NOT_FOUND, "region zone not found: " + zone_id);
+    }
+    region.zones.push_back(zone->id);
+  }
+  for (usize index = 0; index < definition->custom_permission_count; ++index) {
+    const ArvCustomPermissionEntry& entry = definition->custom_permissions[index];
+    const std::string node{abi_view(entry.node)};
+    if (!player::is_valid_custom_permission_node(node)) {
+      return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "invalid permission node");
+    }
+    region.permissions[node] = permission_value_from_abi(entry.value);
+  }
+
+  const world::RegionID id_value = world->regions().add_region(std::move(region));
+  if (id_value.value == 0U) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "region could not be added");
+  }
+  ctx->impl->runtime_regions.push_back({ctx->plugin_index, id_value, true});
+  *out_handle = {id_value.value};
+  return ok(ctx);
+}
+
+ArvResult api_remove_runtime_region(void* context, ArvRegionHandle handle) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "regions.remove_runtime_region");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (ctx->impl->runtime.default_world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  for (RuntimeRegionRegistration& registration : ctx->impl->runtime_regions) {
+    if (registration.id.value == handle.value &&
+        registration.owner_index == ctx->plugin_index &&
+        registration.active) {
+      registration.active = false;
+      return ctx->impl->runtime.default_world->regions().remove_region(registration.id)
+                 ? ok(ctx)
+                 : make_result(ctx, ARV_RESULT_NOT_FOUND, "region not found");
+    }
+  }
+  return make_result(ctx, ARV_RESULT_NOT_FOUND, "runtime region not found");
+}
+
+ArvResult api_register_runtime_zone(
+    void* context,
+    const ArvZoneDefinition* definition,
+    ArvRegionHandle* out_handle) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "regions.register_runtime_zone");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (definition == nullptr || out_handle == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "zone definition or out_handle is null");
+  }
+  *out_handle = {};
+  if (ctx->impl->runtime.default_world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  const std::string id{abi_view(definition->id)};
+  if (auto error = validate_owned_resource_id(ctx->info(), id); error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  if (definition->custom_permission_count != 0U &&
+      definition->custom_permissions == nullptr) {
+    return make_result(
+        ctx,
+        ARV_RESULT_INVALID_ARGUMENT,
+        "zone custom permissions is null");
+  }
+  world::Zone zone;
+  zone.name = id;
+  zone.priority = definition->priority;
+  zone.core = core_permissions_from_abi(definition->core);
+  for (usize index = 0; index < definition->custom_permission_count; ++index) {
+    const ArvCustomPermissionEntry& entry = definition->custom_permissions[index];
+    const std::string node{abi_view(entry.node)};
+    if (!player::is_valid_custom_permission_node(node)) {
+      return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "invalid permission node");
+    }
+    zone.permissions[node] = permission_value_from_abi(entry.value);
+  }
+  const world::ZoneID id_value =
+      ctx->impl->runtime.default_world->regions().add_zone(std::move(zone));
+  if (id_value.value == 0U) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "zone could not be added");
+  }
+  ctx->impl->runtime_zones.push_back({ctx->plugin_index, id_value, true});
+  *out_handle = {id_value.value};
+  return ok(ctx);
+}
+
+ArvResult api_remove_runtime_zone(void* context, ArvRegionHandle handle) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "regions.remove_runtime_zone");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (ctx->impl->runtime.default_world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  for (RuntimeZoneRegistration& registration : ctx->impl->runtime_zones) {
+    if (registration.id.value == handle.value &&
+        registration.owner_index == ctx->plugin_index &&
+        registration.active) {
+      registration.active = false;
+      return ctx->impl->runtime.default_world->regions().remove_zone(registration.id)
+                 ? ok(ctx)
+                 : make_result(ctx, ARV_RESULT_NOT_FOUND, "zone not found");
+    }
+  }
+  return make_result(ctx, ARV_RESULT_NOT_FOUND, "runtime zone not found");
+}
+
+uint64_t api_find_regions_at(
+    void* context,
+    const ArvRegionQuery* query,
+    ArvRegionInfo* out_regions,
+    uint64_t max_regions) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr || query == nullptr ||
+      tls_thread_context != PluginThreadContext::Sync) {
+    return 0U;
+  }
+  world::WorldRuntime* world = world_from_handle(ctx, query->world);
+  if (world == nullptr) {
+    return 0U;
+  }
+  const std::vector<world::RegionID> ids = world->regions().find_regions_at({
+      WorldID{static_cast<u32>(query->world)},
+      {query->position.x, query->position.y, query->position.z},
+  });
+  if (out_regions != nullptr && max_regions > 0U) {
+    const uint64_t count = std::min<uint64_t>(max_regions, ids.size());
+    for (uint64_t index = 0; index < count; ++index) {
+      if (const world::Region* region = world->regions().region(ids[index]);
+          region != nullptr) {
+        fill_region_info(*region, out_regions[index]);
+      }
+    }
+  }
+  return ids.size();
+}
+
+uint64_t api_active_regions(
+    void* context,
+    ArvPlayerID player,
+    ArvRegionInfo* out_regions,
+    uint64_t max_regions) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr || tls_thread_context != PluginThreadContext::Sync ||
+      ctx->impl->runtime.default_world == nullptr) {
+    return 0U;
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return 0U;
+  }
+  const world::RegionQuery query{player_state->world_id, player_state->position};
+  (void)ctx->impl->runtime.default_world->update_player_region_state(
+      player_state->player_id,
+      query);
+  const world::PlayerRegionState* state =
+      ctx->impl->runtime.default_world->player_region_state(player_state->player_id);
+  if (state == nullptr) {
+    return 0U;
+  }
+  if (out_regions != nullptr && max_regions > 0U) {
+    const uint64_t count =
+        std::min<uint64_t>(max_regions, state->active_regions.size());
+    for (uint64_t index = 0; index < count; ++index) {
+      if (const world::Region* region =
+              ctx->impl->runtime.default_world->regions().region(
+                  state->active_regions[index]);
+          region != nullptr) {
+        fill_region_info(*region, out_regions[index]);
+      }
+    }
+  }
+  return state->active_regions.size();
+}
+
+bool api_is_player_in_region(
+    void* context,
+    ArvPlayerID player,
+    ArvResourceID region_id) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr || tls_thread_context != PluginThreadContext::Sync ||
+      ctx->impl->runtime.default_world == nullptr) {
+    return false;
+  }
+  const world::Region* region =
+      ctx->impl->runtime.default_world->regions().region(abi_view(region_id));
+  if (region == nullptr) {
+    return false;
+  }
+  std::vector<ArvRegionInfo> scratch(api_active_regions(context, player, nullptr, 0U));
+  if (!scratch.empty()) {
+    (void)api_active_regions(context, player, scratch.data(), scratch.size());
+  }
+  return std::any_of(
+      scratch.begin(),
+      scratch.end(),
+      [&](const ArvRegionInfo& info) {
+        return info.handle.value == region->id.value;
+      });
+}
+
+ArvResult api_region_flag(
+    void* context,
+    ArvResourceID region_id,
+    ArvResourceID flag,
+    ArvRegionRuleValue* out_value) {
+  PluginCallContext* ctx = call_context(context);
+  (void)region_id;
+  (void)flag;
+  if (out_value != nullptr) {
+    *out_value = ARV_REGION_RULE_UNSET;
+  }
+  return make_result(
+      ctx,
+      ARV_RESULT_UNSUPPORTED,
+      "region flags are not implemented by the engine");
+}
+
+ArvResult api_query_flag(
+    void* context,
+    const ArvRegionQuery* query,
+    ArvResourceID flag,
+    ArvRegionRuleValue* out_value) {
+  PluginCallContext* ctx = call_context(context);
+  (void)query;
+  (void)flag;
+  if (out_value != nullptr) {
+    *out_value = ARV_REGION_RULE_UNSET;
+  }
+  return make_result(
+      ctx,
+      ARV_RESULT_UNSUPPORTED,
+      "region flags are not implemented by the engine");
+}
+
+ArvResult api_register_game_mode(
+    void* context,
+    const ArvGameModeDefinition* definition) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult phase = require_registration_phase(ctx);
+      phase.code != ARV_RESULT_OK) {
+    return phase;
+  }
+  if (definition == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "game mode definition is null");
+  }
+  if (ctx->impl->options.game_modes == nullptr) {
+    return make_result(ctx, ARV_RESULT_UNSUPPORTED, "game mode registry is unavailable");
+  }
+  if (definition->custom_permission_count != 0U) {
+    return make_result(
+        ctx,
+        ARV_RESULT_UNSUPPORTED,
+        "custom game mode permission defaults are not implemented");
+  }
+  const std::string id{abi_view(definition->id)};
+  if (auto error = validate_owned_resource_id(ctx->info(), id); error.has_value()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
+  }
+  std::string base_id{abi_view(definition->base_id)};
+  if (base_id.empty()) {
+    base_id = std::string{player::SurvivalGameModeID};
+  }
+  auto result = ctx->impl->options.game_modes->add_custom_mode(
+      id,
+      base_id,
+      core_permissions_from_abi(definition->core));
+  if (!result) {
+    return make_result(
+        ctx,
+        result.error().message.find("duplicate") != std::string::npos
+            ? ARV_RESULT_DUPLICATE_ID
+            : ARV_RESULT_INVALID_ARGUMENT,
+        result.error().message);
+  }
+  return ok(ctx);
+}
+
+bool api_game_mode_exists(void* context, ArvStringView mode_id) {
+  PluginCallContext* ctx = call_context(context);
+  return ctx != nullptr &&
+         runtime_game_modes(*ctx->impl).find(abi_view(mode_id)) != nullptr;
+}
+
+void fill_game_mode_info(
+    const player::GameModeDefinition& mode,
+    ArvGameModeInfo& out_info) noexcept {
+  out_info = {
+      stable_view(mode.id),
+      stable_view(mode.id),
+      mode.builtin,
+      resolved_core_to_abi(mode.permissions),
+  };
+}
+
+ArvResult api_game_mode_info(
+    void* context,
+    ArvStringView mode_id,
+    ArvGameModeInfo* out_info) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_info == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_info is null");
+  }
+  const player::GameModeDefinition* mode =
+      runtime_game_modes(*ctx->impl).find(abi_view(mode_id));
+  if (mode == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "game mode not found");
+  }
+  fill_game_mode_info(*mode, *out_info);
+  return ok(ctx);
+}
+
+ArvResult api_game_mode_current(
+    void* context,
+    ArvPlayerID player,
+    ArvStringView* out_mode_id) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "gamemodes.current");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (out_mode_id == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_mode_id is null");
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  *out_mode_id = stable_view(player_state->game_mode_id);
+  return ok(ctx);
+}
+
+ArvResult api_game_mode_set(
+    void* context,
+    ArvPlayerID player,
+    ArvStringView mode_id,
+    ArvResourceID reason) {
+  PluginCallContext* ctx = call_context(context);
+  (void)reason;
+  if (ArvResult sync = require_sync_context(ctx, "gamemodes.set");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  const std::string mode{abi_view(mode_id)};
+  if (runtime_game_modes(*ctx->impl).find(mode) == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "game mode not found");
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  player_state->game_mode_id = mode;
+  refresh_plugin_player_permissions(*ctx->impl, *player_state);
+  return ok(ctx);
+}
+
+ArvResult api_game_mode_base_core_permissions(
+    void* context,
+    ArvStringView mode_id,
+    ArvResolvedCorePermissions* out_permissions) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
+  }
+  if (out_permissions == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_permissions is null");
+  }
+  const std::optional<player::ResolvedCorePermissions> permissions =
+      runtime_game_modes(*ctx->impl).permissions_for(abi_view(mode_id));
+  if (!permissions.has_value()) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "game mode not found");
+  }
+  *out_permissions = resolved_core_to_abi(permissions.value());
+  return ok(ctx);
+}
+
+uint64_t api_game_mode_list(
+    void* context,
+    ArvGameModeInfo* out_modes,
+    uint64_t max_modes) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return 0U;
+  }
+  std::span<const player::GameModeDefinition> modes =
+      runtime_game_modes(*ctx->impl).modes();
+  if (out_modes != nullptr && max_modes > 0U) {
+    const uint64_t count = std::min<uint64_t>(max_modes, modes.size());
+    for (uint64_t index = 0; index < count; ++index) {
+      fill_game_mode_info(modes[index], out_modes[index]);
+    }
+  }
+  return modes.size();
+}
+
 ArvResult unsupported_no_arg(void* context) {
   PluginCallContext* ctx = call_context(context);
   return make_result(
@@ -1686,9 +2980,54 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &unsupported_worldgen_registration,
   };
   network_api = {&unsupported_no_arg};
-  text_api = {&unsupported_no_arg};
+  text_api = {
+      &unsupported_no_arg,
+      &api_text_literal,
+      &api_text_translatable,
+      &api_text_append,
+      &api_text_style,
+      &api_text_color,
+      &api_text_hover_text,
+      &api_text_click,
+      &api_text_plain_text,
+      &api_text_serialize,
+      &api_text_validate,
+      &api_text_release,
+  };
   metrics_api = {&api_metrics_counter_add};
-  permissions_api = {&unsupported_no_arg};
+  permissions_api = {
+      &unsupported_no_arg,
+      &api_register_permission_node,
+      &api_permission_check_core,
+      &api_permission_check_custom,
+      &api_permission_resolved_core,
+      &api_permission_register_group,
+      &api_permission_has_group,
+      &api_permission_add_group,
+      &api_permission_remove_group,
+      &api_permission_groups,
+  };
+  regions_api = {
+      &api_register_region_flag,
+      &api_create_runtime_region,
+      &api_remove_runtime_region,
+      &api_register_runtime_zone,
+      &api_remove_runtime_zone,
+      &api_find_regions_at,
+      &api_active_regions,
+      &api_is_player_in_region,
+      &api_region_flag,
+      &api_query_flag,
+  };
+  game_modes_api = {
+      &api_register_game_mode,
+      &api_game_mode_exists,
+      &api_game_mode_info,
+      &api_game_mode_current,
+      &api_game_mode_set,
+      &api_game_mode_base_core_permissions,
+      &api_game_mode_list,
+  };
   api = {
       PluginApiVersion,
       context,
@@ -1725,6 +3064,10 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &metrics_api,
       context,
       &logger_api,
+      context,
+      &regions_api,
+      context,
+      &game_modes_api,
   };
 }
 
@@ -1972,7 +3315,15 @@ void PluginManager::register_commands(command::CommandRegistry& registry) {
 }
 
 void PluginManager::attach_runtime(PluginRuntimeContext context) {
+  const player::PermissionGroupRegistry* previous_group_registry =
+      impl_->runtime.permission_groups;
+  if (previous_group_registry != context.permission_groups) {
+    for (PermissionGroupRegistration& registration : impl_->permission_groups) {
+      registration.installed = false;
+    }
+  }
   impl_->runtime = context;
+  install_plugin_permission_groups(*impl_);
   if (!impl_->runtime_active && context.default_world != nullptr) {
     impl_->runtime_active = true;
     impl_->shutdown_event_dispatched = false;
@@ -2002,6 +3353,20 @@ void PluginManager::stop_runtime() {
               return job.canceled && !job.running;
             }),
         impl_->jobs.end());
+  }
+  if (impl_->runtime.default_world != nullptr) {
+    for (RuntimeRegionRegistration& registration : impl_->runtime_regions) {
+      if (registration.active) {
+        (void)impl_->runtime.default_world->regions().remove_region(registration.id);
+        registration.active = false;
+      }
+    }
+    for (RuntimeZoneRegistration& registration : impl_->runtime_zones) {
+      if (registration.active) {
+        (void)impl_->runtime.default_world->regions().remove_zone(registration.id);
+        registration.active = false;
+      }
+    }
   }
   impl_->runtime = {};
   impl_->runtime_active = false;

@@ -118,6 +118,8 @@ int DesktopApplication::run(int argc, char** argv) {
   world::EntityGoalRegistry entity_goals;
   voxel::BlockBehaviorRegistry block_behaviors;
   player::ItemBehaviorRegistry item_behaviors;
+  player::GameModeRegistry game_modes;
+  base::register_base_game_modes(game_modes);
   base::register_base_block_behaviors(block_behaviors);
   base::register_base_item_behaviors(item_behaviors);
   base::register_base_entity_goals(entity_goals);
@@ -127,6 +129,7 @@ int DesktopApplication::run(int argc, char** argv) {
       &pack_manager,
       native_plugin_policy_from_config(config.native_plugins),
       config.paths.config_path(),
+      &game_modes,
       &block_behaviors,
       &item_behaviors,
       &entity_goals,
@@ -169,8 +172,6 @@ int DesktopApplication::run(int argc, char** argv) {
       make_world_tick_policy(config.simulation);
   const voxel::FluidDefinition water_fluid =
       make_water_fluid_definition(config.simulation);
-  player::GameModeRegistry game_modes;
-  base::register_base_game_modes(game_modes);
   server::BlockBreakBehaviorRegistry block_break_behaviors;
   base::register_base_block_break_behaviors(block_break_behaviors);
   std::vector<server::StarterInventoryItem> starter_inventory;

@@ -1110,6 +1110,886 @@ Rules:
 
 ---
 
+## Permissions API
+
+The permissions API exposes Arvane’s authoritative permission system to plugins.
+
+Permissions are the source of truth for gameplay authority. Game modes, groups, regions, temporary effects, and plugin rules all contribute to the final resolved permission state, but systems should query permissions instead of checking those sources directly.
+
+Plugins use the permissions API to:
+
+* check core engine permissions
+* check custom node-based permissions
+* register custom permission nodes
+* contribute temporary permission modifiers
+* contribute plugin/system permission overrides
+* query resolved player permissions
+* inspect and manage permission groups where authorized
+
+The permissions API should not expose direct mutation of the resolved permission cache. Plugins add or remove permission sources; the engine recomputes and caches final resolved permissions.
+
+---
+
+### Permission Values
+
+Permissions use a tri-state model:
+
+```cpp
+enum class PermissionValue {
+    Unset,
+    Allow,
+    Deny,
+};
+```
+
+Rules:
+
+* `Allow` grants the permission when no higher-precedence denial exists
+* `Deny` denies the permission
+* `Unset` means the source has no opinion
+* `Deny` takes precedence over `Allow`
+* final permission results must never be ambiguous
+
+---
+
+### Core Permissions
+
+Core permissions are fixed engine-level capabilities.
+
+```cpp
+enum class CorePermission {
+    CanTakeDamage,
+    CanModifyWorld,
+    CanInteract,
+    CanOpenInventory,
+    HasCreativeInventory,
+    CanFly,
+    HasCollision,
+    IsVisibleToOthers,
+};
+```
+
+Core permissions must remain fast, fixed, and queryable without string lookup.
+
+Systems should use core permissions for engine-critical checks:
+
+```cpp
+if (!permissions.can_modify_world(player)) {
+    return;
+}
+```
+
+They should not use game mode checks:
+
+```cpp
+if (player.mode == GameMode::Creative) {
+    // Incorrect authority model.
+}
+```
+
+---
+
+### Custom Permissions
+
+Custom permissions are node-based permissions intended for commands, plugins, server rules, and gameplay extensions.
+
+Examples:
+
+```text
+arvane.command.teleport
+arvane.command.gamemode
+plugin.shop.buy
+plugin.minigame.join
+```
+
+Custom permission nodes use dot-separated hierarchy.
+
+Wildcards are supported:
+
+```text
+arvane.command.*
+```
+
+An exact match is more specific than a wildcard. A more specific wildcard is stronger than a broader wildcard.
+
+Example:
+
+```yaml
+permissions:
+  arvane.*: ALLOW
+  arvane.command.*: DENY
+  arvane.command.spawn: ALLOW
+```
+
+Resolution:
+
+```text
+arvane.chat.send       -> ALLOW
+arvane.command.tp      -> DENY
+arvane.command.spawn   -> ALLOW unless a higher or equal DENY applies
+```
+
+---
+
+### Permission Sources
+
+The permission pipeline uses layered sources.
+
+From lowest to highest conceptual layer:
+
+```text
+5. Plugin/System Overrides
+4. Region-Based Permissions
+3. Temporary Modifiers
+2. Player Overrides
+   - Groups
+   - Direct player overrides
+1. Game Mode Base
+```
+
+Game mode provides the base layer.
+
+Groups and direct player overrides provide persistent player-specific authority.
+
+Temporary modifiers represent time-limited or runtime effects.
+
+Regions and zones provide spatial context.
+
+Plugin/system overrides provide server logic and custom mechanics.
+
+The engine owns final resolution and caching.
+
+---
+
+### Conceptual Shape
+
+```cpp
+struct PermissionNodeDefinition {
+    StringView node;
+    StringView description;
+    PermissionValue default_value;
+};
+
+struct CorePermissionSet {
+    PermissionValue can_take_damage;
+    PermissionValue can_modify_world;
+    PermissionValue can_interact;
+    PermissionValue can_open_inventory;
+    PermissionValue has_creative_inventory;
+    PermissionValue can_fly;
+    PermissionValue has_collision;
+    PermissionValue is_visible_to_others;
+};
+
+struct CustomPermissionEntry {
+    StringView node;
+    PermissionValue value;
+};
+
+struct PermissionOverrideSet {
+    CorePermissionSet core;
+    Span<CustomPermissionEntry> custom;
+};
+
+enum class PermissionOverrideLayer {
+    TemporaryModifier,
+    PluginSystemOverride,
+};
+
+struct PermissionOverrideDefinition {
+    ResourceID id;
+    PlayerID player;
+    PermissionOverrideLayer layer;
+    PermissionOverrideSet permissions;
+
+    // Optional. If unset, the override remains until removed.
+    Optional<TickIndex> expires_after_ticks;
+};
+
+struct ResolvedPermissions {
+    bool can_take_damage;
+    bool can_modify_world;
+    bool can_interact;
+    bool can_open_inventory;
+    bool has_creative_inventory;
+    bool can_fly;
+    bool has_collision;
+    bool is_visible_to_others;
+};
+
+struct PermissionsAPI {
+    bool register_permission_node(const PermissionNodeDefinition& definition);
+
+    bool check_core(PlayerID player, CorePermission permission);
+    PermissionValue check_custom(PlayerID player, StringView node);
+
+    ResolvedPermissions resolved_core(PlayerID player);
+
+    PermissionOverrideHandle add_override(const PermissionOverrideDefinition& definition);
+    bool remove_override(PermissionOverrideHandle handle);
+
+    bool invalidate_player(PlayerID player);
+
+    bool has_group(PlayerID player, ResourceID group_id);
+    bool add_group(PlayerID player, ResourceID group_id);
+    bool remove_group(PlayerID player, ResourceID group_id);
+
+    Span<ResourceID> groups(PlayerID player);
+};
+```
+
+The actual standalone Plugin SDK should expose this through ABI-safe function tables and opaque handles. This C++ shape is conceptual.
+
+---
+
+### Permission Groups
+
+Permission groups are reusable permission containers.
+
+Groups may define:
+
+* core permission overrides
+* custom permission nodes
+* inheritance
+* priority
+
+Conceptual group definition:
+
+```cpp
+struct PermissionGroupDefinition {
+    ResourceID id;
+    i32 priority;
+
+    Span<ResourceID> inherits;
+
+    CorePermissionSet core;
+    Span<CustomPermissionEntry> custom;
+};
+```
+
+Plugins may register groups when they own the group namespace.
+
+```cpp
+struct PermissionsAPI {
+    bool register_group(const PermissionGroupDefinition& definition);
+};
+```
+
+Rules:
+
+* group IDs must be stable
+* plugin-defined group IDs must be namespaced
+* group inheritance must not contain cycles
+* missing inherited groups are validation errors
+* priority defaults to `0`
+* players may have multiple groups
+* higher-priority groups override lower-priority groups
+* `Deny` wins when conflicts remain
+
+Groups are part of the Player Overrides layer.
+
+---
+
+### Plugin Overrides
+
+Plugin/system overrides are for server logic and custom mechanics.
+
+Examples:
+
+* minigame plugin denies block breaking during a countdown
+* combat arena plugin allows PvP inside a match
+* tutorial plugin disables inventory access for one step
+* admin tool temporarily grants flight
+
+Plugins should add overrides through handles:
+
+```cpp
+PermissionOverrideHandle handle =
+    permissions.add_override({
+        .id = "example_minigame:match_rule",
+        .player = player,
+        .layer = PermissionOverrideLayer::PluginSystemOverride,
+        .permissions = rule_permissions,
+    });
+```
+
+The plugin must remove the override when it no longer applies:
+
+```cpp
+permissions.remove_override(handle);
+```
+
+Rules:
+
+* overrides must be owned by the registering plugin
+* overrides must not mutate the resolved cache directly
+* overrides are automatically removed when the owning plugin shuts down
+* temporary overrides may expire by tick
+* adding or removing an override invalidates the affected player’s resolved permission cache
+
+---
+
+### Permission Events
+
+The event API should expose permission-related events.
+
+Recommended event IDs:
+
+```text
+arvane:event/permissions_changed
+arvane:event/player_group_added
+arvane:event/player_group_removed
+arvane:event/permission_override_added
+arvane:event/permission_override_removed
+```
+
+These events are useful for:
+
+* updating UI
+* refreshing cached plugin state
+* updating scoreboard lines
+* applying minigame rules
+* auditing administrative actions
+
+Permission events should be server-side authoritative.
+
+---
+
+### Rules
+
+* plugins must query permissions, not game modes, for gameplay checks
+* clients may use permissions for prediction or UI, but the server remains authoritative
+* core permission checks must be fast
+* custom permission checks may use cached wildcard resolution
+* plugins must not store resolved permission snapshots indefinitely
+* resolved permissions are invalidated on mode changes, group changes, region changes, temporary modifier updates, and plugin override changes
+* permission node names should be stable
+* plugin permission nodes should be prefixed with the plugin namespace or domain
+* plugin shutdown removes plugin-owned overrides
+
+---
+
+## Regions API
+
+The regions API exposes spatial gameplay rules to plugins.
+
+Regions and zones are not just permissions. They are spatial context objects used for:
+
+* spawn protection
+* lobby areas
+* minigame arenas
+* protected builds
+* PvP areas
+* scripted gameplay spaces
+* world-specific behavior overrides
+
+Regions integrate with permissions as the Region-Based Permissions layer, but they remain a separate system.
+
+Plugins use the regions API to:
+
+* query regions at a position
+* query a player’s active regions
+* create runtime plugin-owned regions
+* remove plugin-owned runtime regions
+* register custom region flags
+* read region flags
+* respond to region enter/exit events
+
+Persistent server/world regions should primarily be loaded from config or pack/server data. Runtime plugin-created regions are useful for minigames, temporary arenas, selections, scripted events, and admin tools.
+
+---
+
+### Region and Zone Model
+
+A region is a named spatial volume with rules attached.
+
+A zone is a shared rule bundle that regions may opt into.
+
+Regions may define:
+
+* shape
+* world
+* priority
+* zones
+* permission overrides
+* custom flags
+* enter/exit behavior
+
+Zones may define:
+
+* shared permission rules
+* shared custom flags
+* priority
+
+Regions are scoped to a world or dimension.
+
+A player can only be inside regions that belong to their current world.
+
+---
+
+### Region Shapes
+
+The initial plugin API should expose AABB regions.
+
+```cpp
+struct RegionAabb {
+    BlockPos min;
+    BlockPos max;
+};
+```
+
+Future shapes may include:
+
+* cylinder
+* sphere
+* polygonal 2D footprint with height range
+
+The first API should not overfit to future shape types. It should use a tagged shape structure so the ABI can grow cleanly.
+
+```cpp
+enum class RegionShapeKind {
+    Aabb,
+};
+
+struct RegionShape {
+    RegionShapeKind kind;
+
+    union {
+        RegionAabb aabb;
+    };
+};
+```
+
+---
+
+### Region Flags
+
+Region flags are named gameplay booleans or tri-state values.
+
+Examples:
+
+```text
+arvane:pvp
+arvane:fall_damage
+example_minigame:in_match
+example_claims:protected
+```
+
+Flags are separate from permissions.
+
+A permission answers:
+
+```text
+Can this player do X?
+```
+
+A region flag answers:
+
+```text
+What rule applies in this space?
+```
+
+This distinction is important. Not every spatial rule is player-specific.
+
+---
+
+### Conceptual Shape
+
+```cpp
+enum class RegionRuleValue {
+    Unset,
+    Allow,
+    Deny,
+};
+
+struct RegionFlagDefinition {
+    ResourceID id;
+    StringView description;
+    RegionRuleValue default_value;
+};
+
+struct RegionPermissionRules {
+    CorePermissionSet core;
+    Span<CustomPermissionEntry> custom;
+};
+
+struct RegionFlagEntry {
+    ResourceID flag;
+    RegionRuleValue value;
+};
+
+struct RegionDefinition {
+    ResourceID id;
+    WorldID world;
+
+    i32 priority;
+    RegionShape shape;
+
+    Span<ResourceID> zones;
+
+    RegionPermissionRules permissions;
+    Span<RegionFlagEntry> flags;
+
+    bool persistent;
+};
+
+struct ZoneDefinition {
+    ResourceID id;
+
+    i32 priority;
+
+    RegionPermissionRules permissions;
+    Span<RegionFlagEntry> flags;
+};
+
+struct RegionQuery {
+    WorldID world;
+    Vec3 position;
+};
+
+struct RegionInfo {
+    ResourceID id;
+    WorldID world;
+    i32 priority;
+};
+
+struct RegionsAPI {
+    bool register_region_flag(const RegionFlagDefinition& definition);
+
+    RegionHandle create_runtime_region(const RegionDefinition& definition);
+    bool remove_runtime_region(RegionHandle handle);
+
+    bool register_runtime_zone(const ZoneDefinition& definition);
+    bool remove_runtime_zone(ResourceID zone_id);
+
+    Span<RegionInfo> find_regions_at(const RegionQuery& query);
+    Span<RegionInfo> active_regions(PlayerID player);
+
+    bool is_player_in_region(PlayerID player, ResourceID region_id);
+
+    RegionRuleValue region_flag(ResourceID region_id, ResourceID flag);
+    RegionRuleValue query_flag(const RegionQuery& query, ResourceID flag);
+};
+```
+
+The actual standalone Plugin SDK should expose this through ABI-safe result buffers, opaque handles, and explicit release calls.
+
+---
+
+### Runtime Regions
+
+Runtime regions are plugin-owned regions created through the API.
+
+Examples:
+
+* temporary minigame arena bounds
+* active event areas
+* admin selection previews
+* temporary no-build areas
+* scripted dungeon rooms
+
+Rules:
+
+* runtime region IDs must be namespaced
+* runtime regions are owned by the creating plugin
+* runtime regions are removed when the owning plugin shuts down
+* runtime regions may be persistent only if the engine exposes explicit persistence support
+* persistent world-owned regions should usually be defined through world/server config
+* creating or removing a region invalidates affected players’ resolved permission caches
+
+---
+
+### Region Priority
+
+Regions have explicit priority.
+
+Higher-priority regions override lower-priority regions within the region permission layer.
+
+If priority is equal:
+
+* `Deny` wins over `Allow`
+* explicit values win over `Unset`
+* deterministic ordering uses region ID as a final tie-breaker
+
+Zones apply through regions.
+
+Within the region layer:
+
+```text
+1. Zone rules
+2. Region rules
+3. Higher-priority region rules
+```
+
+---
+
+### Region Events
+
+The server tracks player region membership.
+
+When membership changes, the event API should emit:
+
+```text
+arvane:event/player_enter_region
+arvane:event/player_exit_region
+arvane:event/player_regions_changed
+```
+
+These events are useful for:
+
+* titles/messages
+* minigame start triggers
+* UI prompts
+* temporary effects
+* scoreboard updates
+* audio/visual cues
+
+Region events should include:
+
+```cpp
+struct PlayerRegionEvent {
+    PlayerID player;
+    WorldID world;
+    ResourceID region_id;
+};
+```
+
+Region event payloads should be exposed through the Event API using ABI-safe event contexts.
+
+---
+
+### Interaction With Permissions
+
+Regions contribute to the Region-Based Permissions layer.
+
+A region may deny block modification:
+
+```yaml
+core:
+  can_modify_world: DENY
+```
+
+A plugin should still check:
+
+```cpp
+permissions.check_core(player, CorePermission::CanModifyWorld);
+```
+
+The plugin should not manually query regions and reconstruct permission results unless it is implementing diagnostics or an editor.
+
+Regions do not change a player’s game mode by default.
+
+A creative player entering spawn may remain creative while `can_modify_world` resolves to false because of region rules.
+
+---
+
+### Rules
+
+* region logic is server authoritative
+* clients must not decide region membership authoritatively
+* region queries must be scoped to a world
+* plugins must not manually scan internal region storage
+* plugins must use `RegionsAPI` queries
+* plugin-owned runtime regions must be removed on plugin shutdown
+* region changes must invalidate affected permission caches
+* high-volume region queries should use engine-owned spatial acceleration
+* region APIs should not expose raw internal region containers
+
+---
+
+## Game Mode API
+
+The game mode API exposes game mode presets to plugins.
+
+Game modes are presets over permissions. They are not the source of truth.
+
+Plugins use the game mode API to:
+
+* query a player’s current game mode
+* set a player’s game mode when authorized
+* register custom game mode presets
+* inspect game mode permission presets
+* listen for game mode changes
+
+Gameplay systems should not check game mode directly for authority. They should query the Permissions API.
+
+---
+
+### Built-In Game Modes
+
+The built-in game modes are fixed identifiers and must not be renamed.
+
+```text
+survival
+creative
+spectator
+lobby
+noclip
+```
+
+These IDs may appear in:
+
+* saves
+* networking
+* commands
+* plugins
+* server config
+
+Built-in game modes are registered by base game behavior during runtime composition.
+
+Generic systems should not depend on the base module. They should query resolved permissions.
+
+---
+
+### Custom Game Modes
+
+Custom game modes are permission presets.
+
+A custom game mode should define:
+
+* stable ID
+* optional base mode
+* core permission overrides
+* custom permission defaults
+* display metadata
+
+Example:
+
+```yaml
+game_modes:
+  example_pack:builder_plus:
+    base: creative
+    overrides:
+      is_visible_to_others: false
+```
+
+Custom plugin-defined game modes should use namespaced IDs to avoid collisions.
+
+Built-in short IDs remain reserved.
+
+---
+
+### Conceptual Shape
+
+```cpp
+using GameModeID = StringView;
+
+struct GameModeDefinition {
+    GameModeID id;
+
+    Optional<GameModeID> base;
+
+    StringView display_name;
+    StringView description;
+
+    CorePermissionSet core;
+    Span<CustomPermissionEntry> custom;
+};
+
+struct GameModeInfo {
+    GameModeID id;
+    StringView display_name;
+    bool builtin;
+};
+
+struct GameModeChange {
+    PlayerID player;
+    GameModeID mode;
+    ResourceID reason;
+};
+
+struct GameModeAPI {
+    bool register_mode(const GameModeDefinition& definition);
+
+    bool exists(GameModeID mode);
+    GameModeInfo info(GameModeID mode);
+
+    GameModeID current(PlayerID player);
+    bool set(PlayerID player, GameModeID mode, ResourceID reason);
+
+    CorePermissionSet base_core_permissions(GameModeID mode);
+
+    Span<GameModeInfo> list_modes();
+};
+```
+
+The actual standalone Plugin SDK should expose game mode IDs as ABI-safe string views and return lists through explicit output buffers or releaseable result handles.
+
+---
+
+### Setting Game Modes
+
+Changing a player’s game mode should:
+
+1. validate that the mode exists
+2. verify that the caller is authorized
+3. update the player’s stored game mode ID
+4. recompute resolved permissions
+5. notify the client if needed
+6. emit a game mode change event
+
+Recommended event ID:
+
+```text
+arvane:event/player_game_mode_changed
+```
+
+Changing game mode should not directly grant permanent permission groups or player overrides.
+
+---
+
+### Registering Game Modes
+
+Custom game mode definitions should normally be loaded from pack data.
+
+Native plugins may register mode definitions during the registration phase when useful, but data-driven definitions should be preferred.
+
+Rules:
+
+* built-in modes cannot be modified or renamed
+* custom modes must use stable IDs
+* plugin-defined custom modes should use namespaced IDs
+* custom modes may inherit from a base mode
+* inheritance cycles are invalid
+* mode definitions must be locked after registry construction
+* saves store the selected mode ID, not resolved permissions
+
+---
+
+### Interaction With Permissions
+
+Game mode contributes the base permission layer.
+
+If a player is in creative mode but a region denies world modification, the final resolved permission denies modification.
+
+Plugins should use this:
+
+```cpp
+permissions.check_core(player, CorePermission::CanModifyWorld);
+```
+
+Not this:
+
+```cpp
+game_modes.current(player) == "creative";
+```
+
+GameModeAPI is for mode management and presentation, not authority checks.
+
+---
+
+### Rules
+
+* game modes are server authoritative
+* clients may use game mode for UI and prediction only
+* all authoritative action checks must use resolved permissions
+* changing mode invalidates resolved permission cache
+* game mode IDs stored in saves must remain stable
+* plugin-defined modes should not depend on native plugin code being present unless the owning pack requires it
+* missing custom game mode on save load should produce a clear missing-content diagnostic
+
+---
+
 ## Network API
 
 The network API is for plugin-defined protocol extensions.

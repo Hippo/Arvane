@@ -16,6 +16,7 @@ target_link_libraries(arv_plugin
     arv_core
     arv_entity
     arv_player
+    arv_protocol
     arv_sched
     arv_voxel
     arv_world

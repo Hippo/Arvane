@@ -6,12 +6,14 @@
 #include "arv/entities.h"
 #include "arv/events.h"
 #include "arv/export.h"
+#include "arv/gamemode.h"
 #include "arv/logger.h"
 #include "arv/metrics.h"
 #include "arv/network.h"
 #include "arv/permissions.h"
 #include "arv/persistent_data.h"
 #include "arv/registries.h"
+#include "arv/regions.h"
 #include "arv/resources.h"
 #include "arv/scheduler.h"
 #include "arv/services.h"
@@ -77,6 +79,12 @@ typedef struct ArvAPI {
 
   void* logger_ctx;
   const ArvLoggerAPI* logger;
+
+  void* regions_ctx;
+  const ArvRegionsAPI* regions;
+
+  void* gamemodes_ctx;
+  const ArvGameModeAPI* gamemodes;
 } ArvAPI;
 
 typedef bool (*ArvEntrypoint)(const ArvAPI* api);

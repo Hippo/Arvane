@@ -4,6 +4,7 @@
 #include <arv/context.hpp>
 #include <arv/entities.hpp>
 #include <arv/events.hpp>
+#include <arv/gamemode.hpp>
 #include <arv/logger.hpp>
 #include <arv/metrics.hpp>
 #include <arv/network.hpp>
@@ -11,6 +12,7 @@
 #include <arv/persistent_data.hpp>
 #include <arv/plugin.hpp>
 #include <arv/registries.hpp>
+#include <arv/regions.hpp>
 #include <arv/resources.hpp>
 #include <arv/result.hpp>
 #include <arv/scheduler.hpp>
@@ -29,12 +31,14 @@ int arv_plugin_sdk_cpp_compile_test() {
   arv::Entities entities{nullptr};
   arv::Event event{nullptr};
   arv::Events events{nullptr};
+  arv::GameModes gamemodes{nullptr};
   arv::Logger logger{nullptr};
   arv::Metrics metrics{nullptr};
   arv::Network network{nullptr};
   arv::Permissions permissions{nullptr};
   arv::PersistentData persistent_data{nullptr};
   arv::Registries registries{nullptr};
+  arv::Regions regions{nullptr};
   arv::Resources resources{nullptr};
   arv::Job job{[] {}};
   arv::Scheduler scheduler{nullptr};
@@ -71,8 +75,10 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !events.subscribe("test:event", event_handler) &&
                  !config.load("test:config") && !context.owns_namespace("test") &&
                  !entities.exists({}) && !network.unsupported() &&
-                 !permissions.unsupported() && !persistent_data.unsupported() &&
+                 !gamemodes.exists("survival") && !permissions.unsupported() &&
+                 !persistent_data.unsupported() &&
                  !registries.register_item_behavior("test:item") &&
+                 regions.find_regions_at({}).empty() &&
                  !resources.exists(arv::ResourceKind::Data, "test:data") &&
                  !scheduler.sync(job_handler) && services.list("test:svc", 0, 0).empty() &&
                  !text.unsupported() && !world.current_tick({}) &&

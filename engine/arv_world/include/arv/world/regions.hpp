@@ -31,6 +31,7 @@ struct RegionShape {
 
 struct Zone {
   ZoneID id{};
+  bool active{true};
   std::string name{};
   i32 priority{};
   player::CorePermissionSet core{};
@@ -39,6 +40,7 @@ struct Zone {
 
 struct Region {
   RegionID id{};
+  bool active{true};
   std::string name{};
   WorldID world{};
   i32 priority{};
@@ -66,9 +68,13 @@ class RegionRegistry {
 public:
   [[nodiscard]] ZoneID add_zone(Zone zone);
   [[nodiscard]] RegionID add_region(Region region);
+  [[nodiscard]] bool remove_zone(ZoneID id);
+  [[nodiscard]] bool remove_region(RegionID id);
 
   [[nodiscard]] const Zone* zone(ZoneID id) const noexcept;
   [[nodiscard]] const Region* region(RegionID id) const noexcept;
+  [[nodiscard]] const Zone* zone(std::string_view name) const noexcept;
+  [[nodiscard]] const Region* region(std::string_view name) const noexcept;
   [[nodiscard]] std::vector<RegionID> find_regions_at(RegionQuery query) const;
   [[nodiscard]] player::PermissionLayer permission_layer_for_regions(
       std::span<const RegionID> region_ids) const;

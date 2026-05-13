@@ -80,6 +80,7 @@ int DedicatedApplication::run(int argc, char** argv) {
       &pack_manager,
       native_plugin_policy_from_config(config.native_plugins),
       config.paths.config_path(),
+      &runtime_config.game_modes,
       &runtime_config.block_behaviors,
       &runtime_config.item_behaviors,
       &runtime_config.entity_goals,

@@ -93,6 +93,7 @@ public:
   [[nodiscard]] std::optional<ResolvedCorePermissions> permissions_for(
       std::string_view id) const noexcept;
   [[nodiscard]] std::vector<std::string> mode_ids() const;
+  [[nodiscard]] std::span<const GameModeDefinition> modes() const noexcept;
 
 private:
   std::vector<GameModeDefinition> modes_{};
@@ -121,6 +122,7 @@ public:
   [[nodiscard]] Result add_group(PermissionGroup group);
   [[nodiscard]] const PermissionGroup* find(std::string_view id) const noexcept;
   [[nodiscard]] LayerResult resolve_groups(std::span<const std::string> group_ids) const;
+  [[nodiscard]] std::span<const PermissionGroup> groups() const noexcept;
 
 private:
   [[nodiscard]] LayerResult resolve_group(

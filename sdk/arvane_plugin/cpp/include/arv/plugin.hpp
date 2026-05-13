@@ -6,12 +6,14 @@
 #include "arv/context.hpp"
 #include "arv/entities.hpp"
 #include "arv/events.hpp"
+#include "arv/gamemode.hpp"
 #include "arv/logger.hpp"
 #include "arv/metrics.hpp"
 #include "arv/network.hpp"
 #include "arv/permissions.hpp"
 #include "arv/persistent_data.hpp"
 #include "arv/registries.hpp"
+#include "arv/regions.hpp"
 #include "arv/resources.hpp"
 #include "arv/scheduler.hpp"
 #include "arv/services.hpp"
@@ -41,7 +43,9 @@ public:
         permissions_(api),
         persistent_data_(api),
         network_(api),
-        text_(api) {
+        text_(api),
+        regions_(api),
+        gamemodes_(api) {
   }
 
   [[nodiscard]] constexpr bool valid() const noexcept {
@@ -120,6 +124,14 @@ public:
     return text_;
   }
 
+  [[nodiscard]] constexpr const Regions& regions() const noexcept {
+    return regions_;
+  }
+
+  [[nodiscard]] constexpr const GameModes& gamemodes() const noexcept {
+    return gamemodes_;
+  }
+
 private:
   const ArvAPI* api_{};
   Context context_;
@@ -139,6 +151,8 @@ private:
   PersistentData persistent_data_;
   Network network_;
   Text text_;
+  Regions regions_;
+  GameModes gamemodes_;
 };
 
 } // namespace arv

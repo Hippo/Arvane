@@ -133,6 +133,7 @@ struct PluginHarness {
         &pack_manager,
         std::move(policy),
         temp.path / "config",
+        nullptr,
         &block_behaviors,
         &item_behaviors,
         &entity_goals,
@@ -295,9 +296,17 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
 
   arv::sched::JobSystem jobs{{.background_cpu_workers = 1U}};
   arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_player(arv::PlayerID{7});
+  arv::player::GameModeRegistry game_modes;
+  ASSERT_TRUE(game_modes.add_builtin_mode(
+      std::string{arv::player::SurvivalGameModeID},
+      {}).has_value());
+  arv::player::PermissionGroupRegistry permission_groups;
   jobs.start();
   manager.attach_runtime({
       .default_world = &world,
+      .game_modes = &game_modes,
+      .permission_groups = &permission_groups,
       .job_system = &jobs,
       .tick_index = 0U,
   });
@@ -326,4 +335,5 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   EXPECT_NE(message.find("thread_violations=1"), std::string::npos);
   EXPECT_NE(message.find("starts=1"), std::string::npos);
   EXPECT_NE(message.find("stops=1"), std::string::npos);
+  EXPECT_NE(message.find("api_checks=2"), std::string::npos);
 }

@@ -312,6 +312,10 @@ std::vector<std::string> GameModeRegistry::mode_ids() const {
   return ids;
 }
 
+std::span<const GameModeDefinition> GameModeRegistry::modes() const noexcept {
+  return modes_;
+}
+
 PermissionGroupRegistry::Result PermissionGroupRegistry::add_group(PermissionGroup group) {
   if (group.id.empty()) {
     return Result::failure({"permission group id is empty"});
@@ -327,6 +331,10 @@ PermissionGroupRegistry::Result PermissionGroupRegistry::add_group(PermissionGro
 const PermissionGroup* PermissionGroupRegistry::find(std::string_view id) const noexcept {
   const auto found = group_indices_.find(std::string{id});
   return found == group_indices_.end() ? nullptr : &groups_[found->second];
+}
+
+std::span<const PermissionGroup> PermissionGroupRegistry::groups() const noexcept {
+  return groups_;
 }
 
 PermissionGroupRegistry::LayerResult PermissionGroupRegistry::resolve_groups(

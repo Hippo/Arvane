@@ -13,10 +13,86 @@ std::atomic<int> g_async_ticks{};
 std::atomic<int> g_thread_violations{};
 std::atomic<int> g_server_starts{};
 std::atomic<int> g_server_stops{};
+std::atomic<int> g_api_checks{};
 int g_service_value = 42;
+
+bool view_equals(ArvStringView view, std::string_view expected);
+bool result_ok(ArvResult result);
 
 void sync_job(void*) {
   g_sync_ticks.fetch_add(1, std::memory_order_relaxed);
+
+  bool checks_ok = true;
+  constexpr ArvPlayerID player_id = 7;
+
+  checks_ok = checks_ok && g_api->gamemodes->exists(
+      g_api->gamemodes_ctx,
+      arv_cstr("survival"));
+  ArvStringView current_mode{};
+  checks_ok = checks_ok && result_ok(g_api->gamemodes->current(
+      g_api->gamemodes_ctx,
+      player_id,
+      &current_mode)) &&
+      view_equals(current_mode, "survival");
+
+  checks_ok = checks_ok && result_ok(g_api->permissions->add_group(
+      g_api->permissions_ctx,
+      player_id,
+      arv_cstr("example_plugin_pack:vip")));
+  ArvPermissionValue custom_value = ARV_PERMISSION_UNSET;
+  checks_ok = checks_ok && result_ok(g_api->permissions->check_custom(
+      g_api->permissions_ctx,
+      player_id,
+      arv_cstr("example_plugin_pack.command.test"),
+      &custom_value)) &&
+      custom_value == ARV_PERMISSION_ALLOW;
+
+  ArvCorePermissionSet region_core{};
+  region_core.can_modify_world = ARV_PERMISSION_DENY;
+  ArvRegionDefinition region{};
+  region.id = arv_cstr("example_plugin_pack:runtime_spawn");
+  region.world = 1;
+  region.priority = 100;
+  region.shape.kind = ARV_REGION_SHAPE_AABB;
+  region.shape.aabb.min = {0.0F, 0.0F, -30.0F};
+  region.shape.aabb.max = {20.0F, 40.0F, 0.0F};
+  region.core = region_core;
+  ArvRegionHandle region_handle{};
+  checks_ok = checks_ok && result_ok(g_api->regions->create_runtime_region(
+      g_api->regions_ctx,
+      &region,
+      &region_handle));
+  ArvRegionQuery query{};
+  query.world = 1;
+  query.position = {8.0F, 20.0F, -20.0F};
+  checks_ok = checks_ok && g_api->regions->find_regions_at(
+      g_api->regions_ctx,
+      &query,
+      nullptr,
+      0) >= 1;
+  checks_ok = checks_ok && g_api->regions->active_regions(
+      g_api->regions_ctx,
+      player_id,
+      nullptr,
+      0) >= 1;
+  checks_ok = checks_ok && g_api->regions->is_player_in_region(
+      g_api->regions_ctx,
+      player_id,
+      arv_cstr("example_plugin_pack:runtime_spawn"));
+  bool can_modify_world = true;
+  checks_ok = checks_ok && result_ok(g_api->permissions->check_core(
+      g_api->permissions_ctx,
+      player_id,
+      ARV_CORE_PERMISSION_CAN_MODIFY_WORLD,
+      &can_modify_world)) &&
+      !can_modify_world;
+  checks_ok = checks_ok && result_ok(g_api->regions->remove_runtime_region(
+      g_api->regions_ctx,
+      region_handle));
+
+  if (checks_ok) {
+    g_api_checks.fetch_add(1, std::memory_order_relaxed);
+  }
 }
 
 void async_job(void*) {
@@ -59,6 +135,11 @@ ArvResult command(
       g_thread_violations.load(std::memory_order_relaxed),
       g_server_starts.load(std::memory_order_relaxed),
       g_server_stops.load(std::memory_order_relaxed));
+  std::snprintf(
+      message + std::strlen(message),
+      sizeof(message) - std::strlen(message),
+      " api_checks=%d",
+      g_api_checks.load(std::memory_order_relaxed));
   ctx->reply(ctx, ARV_COMMAND_MESSAGE_SUCCESS, arv_cstr(message));
   return {ARV_RESULT_OK, ""};
 }
@@ -83,6 +164,7 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   g_thread_violations.store(0, std::memory_order_relaxed);
   g_server_starts.store(0, std::memory_order_relaxed);
   g_server_stops.store(0, std::memory_order_relaxed);
+  g_api_checks.store(0, std::memory_order_relaxed);
   g_api = api;
   api->logger->info(api->logger_ctx, arv_cstr("example plugin loaded"));
 
@@ -134,6 +216,76 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   const bool config_matches = buffer_equals(config_buffer, expected_config);
   api->resources->release_buffer(api->resources_ctx, config_buffer);
   if (!config_matches) {
+    return false;
+  }
+
+  ArvTextHandle hello{};
+  ArvTextHandle world{};
+  ArvTextHandle red_hello{};
+  ArvTextHandle combined{};
+  ArvTextHandle clickable{};
+  if (!result_ok(api->text->literal(api->text_ctx, arv_cstr("Hello"), &hello))) {
+    return false;
+  }
+  if (!result_ok(api->text->literal(api->text_ctx, arv_cstr(" world"), &world))) {
+    return false;
+  }
+  if (!result_ok(api->text->color(api->text_ctx, hello, {255, 64, 64}, &red_hello))) {
+    return false;
+  }
+  if (!result_ok(api->text->append(api->text_ctx, red_hello, world, &combined))) {
+    return false;
+  }
+  if (!result_ok(api->text->click(
+          api->text_ctx,
+          combined,
+          ARV_TEXT_CLICK_SUGGEST_COMMAND,
+          arv_cstr("/help"),
+          &clickable))) {
+    return false;
+  }
+  if (!result_ok(api->text->validate(api->text_ctx, clickable, nullptr))) {
+    return false;
+  }
+  ArvByteBuffer plain_text{};
+  if (!result_ok(api->text->plain_text(api->text_ctx, clickable, &plain_text))) {
+    return false;
+  }
+  const bool plain_matches = buffer_equals(plain_text, "Hello world");
+  api->resources->release_buffer(api->resources_ctx, plain_text);
+  ArvByteBuffer rich_text{};
+  if (!result_ok(api->text->serialize(api->text_ctx, clickable, &rich_text))) {
+    return false;
+  }
+  const bool serialized_nonempty = rich_text.size > 0U;
+  api->resources->release_buffer(api->resources_ctx, rich_text);
+  api->text->release(api->text_ctx, clickable);
+  api->text->release(api->text_ctx, combined);
+  api->text->release(api->text_ctx, red_hello);
+  api->text->release(api->text_ctx, world);
+  api->text->release(api->text_ctx, hello);
+  if (!plain_matches || !serialized_nonempty) {
+    return false;
+  }
+
+  ArvPermissionNodeDefinition permission_node{};
+  permission_node.node = arv_cstr("example_plugin_pack.command.test");
+  permission_node.description = arv_cstr("Test permission");
+  permission_node.default_value = ARV_PERMISSION_UNSET;
+  if (!result_ok(api->permissions->register_permission_node(
+          api->permissions_ctx,
+          &permission_node))) {
+    return false;
+  }
+  ArvCustomPermissionEntry group_permission{};
+  group_permission.node = arv_cstr("example_plugin_pack.command.test");
+  group_permission.value = ARV_PERMISSION_ALLOW;
+  ArvPermissionGroupDefinition group{};
+  group.id = arv_cstr("example_plugin_pack:vip");
+  group.priority = 10;
+  group.custom_permissions = &group_permission;
+  group.custom_permission_count = 1;
+  if (!result_ok(api->permissions->register_group(api->permissions_ctx, &group))) {
     return false;
   }
 
