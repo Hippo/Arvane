@@ -395,6 +395,9 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
         world_jobs_.job_system(),
         tick_index_,
         chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
+        [this](const plugin::PluginNetworkSendRequest& request) {
+          return send_plugin_network_packet(request);
+        },
     });
   }
   return net::NetworkResult::success();
@@ -437,6 +440,9 @@ void ServerRuntimeImpl::tick() {
         world_jobs_.job_system(),
         tick_index_,
         chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
+        [this](const plugin::PluginNetworkSendRequest& request) {
+          return send_plugin_network_packet(request);
+        },
     });
     plugins_->tick(tick_index_);
   }

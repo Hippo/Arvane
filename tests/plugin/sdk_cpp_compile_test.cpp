@@ -35,6 +35,7 @@ int arv_plugin_sdk_cpp_compile_test() {
   arv::Logger logger{nullptr};
   arv::Metrics metrics{nullptr};
   arv::Network network{nullptr};
+  arv::Packet packet;
   arv::Permissions permissions{nullptr};
   arv::PersistentData persistent_data{nullptr};
   arv::Registries registries{nullptr};
@@ -44,6 +45,7 @@ int arv_plugin_sdk_cpp_compile_test() {
   arv::Scheduler scheduler{nullptr};
   arv::Services services{nullptr};
   arv::Text text{nullptr};
+  arv::TextComponent text_component;
   arv::World world{nullptr};
   arv::WorldGen worldgen{nullptr};
 
@@ -67,6 +69,7 @@ int arv_plugin_sdk_cpp_compile_test() {
       "test:event",
       event_handler);
   const arv::Result job_result = plugin.scheduler().sync(job_handler);
+  const arv::PacketResult packet_result = network.create_chat_message(text_component);
 
   arv::Result result;
   return arv::ApiVersion == 1u && result && buffer.empty() &&
@@ -75,6 +78,7 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !events.subscribe("test:event", event_handler) &&
                  !config.load("test:config") && !context.owns_namespace("test") &&
                  !entities.exists({}) && !network.unsupported() &&
+                 !packet_result && !network.broadcast(packet) &&
                  !gamemodes.exists("survival") && !permissions.unsupported() &&
                  !persistent_data.unsupported() &&
                  !registries.register_item_behavior("test:item") &&

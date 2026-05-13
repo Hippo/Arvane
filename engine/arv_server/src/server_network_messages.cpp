@@ -328,6 +328,155 @@ void log_send_failure_if_dedicated(
       send_result.error().message);
 }
 
+plugin::PluginNetworkSendResult ServerRuntimeImpl::send_plugin_network_packet(
+    const plugin::PluginNetworkSendRequest& request) {
+  auto failure = [](
+                     ArvResultCode code,
+                     std::string message) -> plugin::PluginNetworkSendResult {
+    return plugin::PluginNetworkSendResult::failure(
+        {code, std::move(message)});
+  };
+
+  if (state_ != ServerRuntimeState::Running || !transport_) {
+    return failure(ARV_RESULT_INVALID_STATE, "server network is not running");
+  }
+  if (request.packet == nullptr) {
+    return failure(ARV_RESULT_NOT_FOUND, "packet handle not found");
+  }
+
+  const plugin::PluginNetworkPacket& packet = *request.packet;
+  switch (packet.message_type) {
+    case protocol::MessageType::ClientboundChatMessage:
+    case protocol::MessageType::ClientboundKickPlayer:
+      break;
+    default:
+      return failure(ARV_RESULT_UNSUPPORTED, "packet type is not exposed to plugins");
+  }
+
+  std::vector<u8> payload;
+  bool payload_prepared{};
+  auto prepare_payload = [&]() -> plugin::PluginNetworkSendResult {
+    if (payload_prepared) {
+      return plugin::PluginNetworkSendResult::success();
+    }
+    payload = packet.payload;
+    if (packet.message_type == protocol::MessageType::ClientboundChatMessage) {
+      auto chat = protocol::deserialize_clientbound_chat_message(payload);
+      if (!chat) {
+        return failure(ARV_RESULT_INVALID_ARGUMENT, "chat packet payload is invalid");
+      }
+      chat.value().message_id = next_chat_message_id_++;
+      payload = protocol::serialize_clientbound_chat_message(chat.value());
+    }
+    payload_prepared = true;
+    return plugin::PluginNetworkSendResult::success();
+  };
+
+  auto session_for_player = [this](PlayerID player_id) -> const ServerSession* {
+    const ServerSession* match = nullptr;
+    sessions_.for_each_session([&](const ServerSession& session) {
+      if (session.player_id == player_id) {
+        match = &session;
+      }
+    });
+    return match;
+  };
+
+  auto validate_phase = [&](const ServerSession& session)
+      -> plugin::PluginNetworkSendResult {
+    if (session.closing ||
+        session.connection_state == net::ConnectionState::Disconnected ||
+        session.connection_state == net::ConnectionState::Disconnecting) {
+      return failure(ARV_RESULT_INVALID_STATE, "target player connection is closing");
+    }
+    if (packet.message_type == protocol::MessageType::ClientboundChatMessage &&
+        (!session.authenticated ||
+         session.connection_state != net::ConnectionState::InGame)) {
+      return failure(
+          ARV_RESULT_INVALID_STATE,
+          "chat packets require an in-game target player");
+    }
+    return plugin::PluginNetworkSendResult::success();
+  };
+
+  auto send_to_session = [&](const ServerSession& session)
+      -> plugin::PluginNetworkSendResult {
+    plugin::PluginNetworkSendResult phase = validate_phase(session);
+    if (!phase) {
+      return phase;
+    }
+    plugin::PluginNetworkSendResult prepared = prepare_payload();
+    if (!prepared) {
+      return prepared;
+    }
+    net::NetworkResult send_result = send_protocol_message(
+        *transport_,
+        session.connection_id,
+        packet.message_type,
+        packet.reliability,
+        packet.lane,
+        payload);
+    log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+    if (!send_result) {
+      return failure(ARV_RESULT_INTERNAL_ERROR, send_result.error().message);
+    }
+    return plugin::PluginNetworkSendResult::success();
+  };
+
+  switch (request.target_kind) {
+    case plugin::PluginNetworkTargetKind::Player: {
+      const ServerSession* session = session_for_player(request.player);
+      if (session == nullptr) {
+        return failure(ARV_RESULT_NOT_FOUND, "target player is not connected");
+      }
+      return send_to_session(*session);
+    }
+    case plugin::PluginNetworkTargetKind::Players:
+      for (PlayerID player_id : request.players) {
+        const ServerSession* session = session_for_player(player_id);
+        if (session == nullptr) {
+          return failure(ARV_RESULT_NOT_FOUND, "target player is not connected");
+        }
+        plugin::PluginNetworkSendResult result = send_to_session(*session);
+        if (!result) {
+          return result;
+        }
+      }
+      return plugin::PluginNetworkSendResult::success();
+    case plugin::PluginNetworkTargetKind::Broadcast: {
+      plugin::PluginNetworkSendResult last_result =
+          plugin::PluginNetworkSendResult::success();
+      sessions_.for_each_session([&](const ServerSession& session) {
+        if (!last_result) {
+          return;
+        }
+        plugin::PluginNetworkSendResult phase = validate_phase(session);
+        if (!phase) {
+          return;
+        }
+        last_result = send_to_session(session);
+      });
+      return last_result;
+    }
+    case plugin::PluginNetworkTargetKind::World: {
+      plugin::PluginNetworkSendResult last_result =
+          plugin::PluginNetworkSendResult::success();
+      sessions_.for_each_session([&](const ServerSession& session) {
+        if (!last_result || session.world_id != request.world) {
+          return;
+        }
+        plugin::PluginNetworkSendResult phase = validate_phase(session);
+        if (!phase) {
+          return;
+        }
+        last_result = send_to_session(session);
+      });
+      return last_result;
+    }
+  }
+  return failure(ARV_RESULT_INVALID_ARGUMENT, "invalid network target kind");
+}
+
 void ServerRuntimeImpl::expire_timed_out_skin_uploads() {
   for (auto& [session_id, transfer] : skin_transfers_) {
     (void)session_id;

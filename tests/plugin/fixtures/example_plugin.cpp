@@ -14,6 +14,7 @@ std::atomic<int> g_thread_violations{};
 std::atomic<int> g_server_starts{};
 std::atomic<int> g_server_stops{};
 std::atomic<int> g_api_checks{};
+std::atomic<int> g_network_sends{};
 int g_service_value = 42;
 
 bool view_equals(ArvStringView view, std::string_view expected);
@@ -90,6 +91,32 @@ void sync_job(void*) {
       g_api->regions_ctx,
       region_handle));
 
+  ArvTextHandle network_text{};
+  ArvPacketHandle network_packet{};
+  checks_ok = checks_ok && result_ok(g_api->text->literal(
+      g_api->text_ctx,
+      arv_cstr("network api probe"),
+      &network_text));
+  checks_ok = checks_ok && result_ok(g_api->network->create_clientbound_chat_message(
+      g_api->network_ctx,
+      network_text,
+      arv_cstr("arvane:system"),
+      ARV_CHAT_MESSAGE_SYSTEM,
+      &network_packet));
+  checks_ok = checks_ok && result_ok(g_api->network->send_to_player(
+      g_api->network_ctx,
+      player_id,
+      network_packet));
+  if (network_packet.value != 0U) {
+    g_api->network->release_packet(g_api->network_ctx, network_packet);
+  }
+  if (network_text.value != 0U) {
+    g_api->text->release(g_api->text_ctx, network_text);
+  }
+  if (checks_ok) {
+    g_network_sends.fetch_add(1, std::memory_order_relaxed);
+  }
+
   if (checks_ok) {
     g_api_checks.fetch_add(1, std::memory_order_relaxed);
   }
@@ -140,6 +167,11 @@ ArvResult command(
       sizeof(message) - std::strlen(message),
       " api_checks=%d",
       g_api_checks.load(std::memory_order_relaxed));
+  std::snprintf(
+      message + std::strlen(message),
+      sizeof(message) - std::strlen(message),
+      " network_sends=%d",
+      g_network_sends.load(std::memory_order_relaxed));
   ctx->reply(ctx, ARV_COMMAND_MESSAGE_SUCCESS, arv_cstr(message));
   return {ARV_RESULT_OK, ""};
 }
@@ -165,6 +197,7 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   g_server_starts.store(0, std::memory_order_relaxed);
   g_server_stops.store(0, std::memory_order_relaxed);
   g_api_checks.store(0, std::memory_order_relaxed);
+  g_network_sends.store(0, std::memory_order_relaxed);
   g_api = api;
   api->logger->info(api->logger_ctx, arv_cstr("example plugin loaded"));
 

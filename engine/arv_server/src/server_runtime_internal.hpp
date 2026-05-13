@@ -263,6 +263,8 @@ struct ServerRuntimeImpl {
   [[nodiscard]] command::CommandPermissionResult check_command_permission(
       const command::CommandSender& sender,
       const command::Command& command_def);
+  [[nodiscard]] plugin::PluginNetworkSendResult send_plugin_network_packet(
+      const plugin::PluginNetworkSendRequest& request);
 
   void handle_network_event(net::NetworkEvent event);
   void handle_connection_lost(net::ConnectionID connection_id);

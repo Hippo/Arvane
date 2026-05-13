@@ -1992,46 +1992,247 @@ GameModeAPI is for mode management and presentation, not authority checks.
 
 ## Network API
 
-The network API is for plugin-defined protocol extensions.
+The network API lets server-side plugins send existing `arv_protocol` packets to clients.
 
-This should be optional and conservative because Arvane’s core gameplay protocol must remain stable and server-authoritative.
+It is **not** a plugin-defined protocol extension system. Plugins do not register custom channels, define custom packet IDs, negotiate plugin channels, or send arbitrary packet payloads.
 
-Conceptual shape:
+The purpose of this API is narrow:
 
-```cpp
-struct NetworkAPI {
-    bool register_channel(ResourceID channel_id, ChannelDescriptor descriptor);
+* allow plugins to send supported `ClientboundX` packets
+* keep packet definitions centralized in `arv_protocol`
+* preserve server-authoritative networking
+* prevent plugins from bypassing protocol validation
 
-    bool send_to_client(PlayerID player, ResourceID channel_id, Bytes payload);
-    bool send_to_server(ResourceID channel_id, Bytes payload);
-};
+---
+
+### Protocol Ownership
+
+All packets exposed through this API must be defined by `arv_protocol`.
+
+Plugins may send packets such as:
+
+```text
+ClientboundChatMessage
+ClientboundKickPlayer
+ClientboundOpenScreen
+ClientboundCloseScreen
+ClientboundPlaySound
+ClientboundTitle
+ClientboundSetHealth
+ClientboundSetGameMode
+ClientboundUpdatePermissions
 ```
 
-Rules:
+Only packets intentionally exposed to plugins should be available through the plugin API.
 
-* channel IDs must be namespaced
-* plugin network channels must be negotiated during connection setup
-* server-side plugins must not assume the client has a matching native plugin
-* missing client plugin support should fail gracefully or disable optional features
-* all server-received payloads must be treated as untrusted
-* payload sizes must be bounded
-* plugin channels must not bypass core permission and authority checks
+Plugins must not:
 
-Packet naming inside plugin protocol documentation should follow Arvane naming conventions:
+* define new packet IDs
+* register packet channels
+* send arbitrary byte payloads
+* bypass packet validation
+* send `ServerboundX` packets
+* pretend to be a client
+* mutate connection state directly
+
+---
+
+### Direction Rules
+
+Packet naming follows Arvane protocol conventions:
 
 ```text
 ServerboundX  -> client sends X to server
 ClientboundX  -> server sends X to client
 ```
 
-Examples:
+The plugin Network API is server-side and may only send `ClientboundX` packets.
+
+Plugins do not send `ServerboundX` packets. Serverbound packets are client input and must be received through the normal networking pipeline, validated by the server, and handled by engine systems.
+
+---
+
+### Conceptual Shape
+
+```cpp
+struct NetworkAPI {
+    bool send_to_player(PlayerID player, const ClientboundPacket& packet);
+
+    bool send_to_players(Span<PlayerID> players, const ClientboundPacket& packet);
+
+    bool broadcast(const ClientboundPacket& packet);
+
+    bool broadcast_world(WorldID world, const ClientboundPacket& packet);
+};
+```
+
+The standalone Plugin SDK should expose this through ABI-safe packet handles or packet builder functions rather than raw engine packet classes.
+
+A C ABI shape may look like:
+
+```cpp
+typedef uint64_t ArvPacketHandle;
+
+struct NetworkAPI {
+    ArvPacketHandle create_clientbound_packet(ClientboundPacketKind kind);
+
+    bool packet_set_field(
+        ArvPacketHandle packet,
+        PacketFieldID field,
+        PacketFieldValue value
+    );
+
+    bool send_to_player(PlayerID player, ArvPacketHandle packet);
+    bool send_to_players(const PlayerID* players, size_t count, ArvPacketHandle packet);
+    bool broadcast(ArvPacketHandle packet);
+    bool broadcast_world(WorldID world, ArvPacketHandle packet);
+
+    void release_packet(ArvPacketHandle packet);
+};
+```
+
+The exact implementation may use generated packet builders from `arv_protocol` if available.
+
+---
+
+### Typed Packet Builders
+
+Prefer typed packet builder helpers over generic field mutation when practical.
+
+Example conceptual C++ wrapper:
+
+```cpp
+network.send_to_player(
+    player,
+    ClientboundChatMessage {
+        .message = text,
+        .position = ChatPosition::System,
+    }
+);
+```
+
+For the ABI layer, this can be represented by explicit creation functions for exposed packet types:
+
+```cpp
+ArvPacketHandle create_clientbound_chat_message(TextHandle message);
+ArvPacketHandle create_clientbound_kick_player(TextHandle reason);
+ArvPacketHandle create_clientbound_title(TextHandle title, TextHandle subtitle);
+```
+
+This is safer than giving plugins arbitrary byte serialization access.
+
+---
+
+### Exposed Packet Set
+
+The engine should maintain an explicit allowlist of protocol packets available to plugins.
+
+Initial candidates:
 
 ```text
-ServerboundQuestAction
-ClientboundQuestToast
-ServerboundCustomUIScreenAction
-ClientboundCustomUIScreenOpen
+ClientboundChatMessage
+ClientboundKickPlayer
+ClientboundOpenScreen
+ClientboundCloseScreen
+ClientboundPlaySound
+ClientboundTitle
+ClientboundSetGameMode
+ClientboundUpdatePermissions
 ```
+
+Packets that affect core synchronization, registry state, chunk streaming, entity replication, login state, authentication, or transport internals should not be exposed casually.
+
+Examples to avoid exposing directly:
+
+```text
+ClientboundChunkData
+ClientboundRegistryData
+ClientboundEntitySnapshot
+ClientboundLoginAccepted
+ClientboundKeepAlive
+```
+
+Those packets are owned by engine systems and should be sent only by the normal networking pipeline.
+
+---
+
+### Validation Rules
+
+The network API must validate packets before sending.
+
+Validation should check:
+
+* packet kind is exposed to plugins
+* target player is connected
+* target player is in the correct protocol phase
+* payload size is bounded
+* text components are validated
+* resource IDs are valid
+* referenced screens, sounds, or assets are available to the client when required
+* packet is legal for the target connection state
+
+Invalid packets must fail cleanly and log diagnostics with the owning plugin ID.
+
+---
+
+### Authority Rules
+
+Sending a packet does not grant authority.
+
+Plugins must still use the correct engine APIs for authoritative state changes.
+
+Examples:
+
+* To change a player’s game mode, use `GameModeAPI`, not only `ClientboundSetGameMode`.
+* To change permissions, use `PermissionsAPI`, not only `ClientboundUpdatePermissions`.
+* To kick a player, use the server/player management API if one exists; `ClientboundKickPlayer` should be paired with connection closure by the engine.
+* To modify world state, use `WorldAPI`; do not attempt to fake world changes with client packets.
+
+Network packets are for client notification and presentation, not authoritative state ownership.
+
+---
+
+### Reliability
+
+Packet reliability is determined by `arv_protocol` and the engine networking layer.
+
+Plugins should not choose raw GameNetworkingSockets reliability flags directly.
+
+The protocol definition should decide whether a packet is:
+
+* reliable
+* unreliable
+* ordered
+* unordered
+* state-replicated
+* event-like
+
+The plugin API should expose packet sending at the protocol level, not the transport level.
+
+---
+
+### Client Compatibility
+
+Plugins may only send packets that the connected client is expected to understand as part of the active `arv_protocol` version.
+
+Because custom plugin packets are not supported here, no plugin channel negotiation is required.
+
+If a packet depends on optional client-visible content from packs, the server must ensure that the client has compatible required packs before sending content references.
+
+---
+
+### Rules
+
+* plugins may only send exposed `ClientboundX` packets
+* plugins must not send `ServerboundX` packets
+* plugins must not register custom channels
+* plugins must not send arbitrary serialized payloads
+* all packets must be defined in `arv_protocol`
+* packet sending must respect connection state
+* packet payloads must be validated and bounded
+* transport reliability is owned by the protocol/network layer
+* network packets must not bypass permissions, game mode logic, world state, or server authority
+* packet send failures should return explicit errors and include plugin-scoped diagnostics
 
 ---
 

@@ -302,6 +302,7 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
       std::string{arv::player::SurvivalGameModeID},
       {}).has_value());
   arv::player::PermissionGroupRegistry permission_groups;
+  int network_sends = 0;
   jobs.start();
   manager.attach_runtime({
       .default_world = &world,
@@ -309,6 +310,20 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
       .permission_groups = &permission_groups,
       .job_system = &jobs,
       .tick_index = 0U,
+      .network_send = [&](const arv::plugin::PluginNetworkSendRequest& request) {
+        ++network_sends;
+        EXPECT_EQ(request.target_kind, arv::plugin::PluginNetworkTargetKind::Player);
+        EXPECT_EQ(request.player, arv::PlayerID{7});
+        if (request.packet == nullptr) {
+          return arv::plugin::PluginNetworkSendResult::failure(
+              {ARV_RESULT_NOT_FOUND, "packet missing"});
+        }
+        EXPECT_EQ(
+            request.packet->message_type,
+            arv::protocol::MessageType::ClientboundChatMessage);
+        EXPECT_FALSE(request.packet->payload.empty());
+        return arv::plugin::PluginNetworkSendResult::success();
+      },
   });
   manager.tick(1U);
   jobs.join();
@@ -336,4 +351,6 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   EXPECT_NE(message.find("starts=1"), std::string::npos);
   EXPECT_NE(message.find("stops=1"), std::string::npos);
   EXPECT_NE(message.find("api_checks=2"), std::string::npos);
+  EXPECT_NE(message.find("network_sends=2"), std::string::npos);
+  EXPECT_EQ(network_sends, 2);
 }

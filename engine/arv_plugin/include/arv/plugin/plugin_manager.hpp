@@ -9,12 +9,14 @@
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
+#include "arv/protocol/message_type.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/world_runtime.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -74,6 +76,37 @@ struct PluginLoadOptions {
   world::EntityGoalRegistry* entity_goals{};
 };
 
+enum class PluginNetworkTargetKind : u8 {
+  Player,
+  Players,
+  Broadcast,
+  World,
+};
+
+struct PluginNetworkPacket {
+  protocol::MessageType message_type{protocol::MessageType::Ping};
+  protocol::ReliabilityClass reliability{protocol::ReliabilityClass::ReliableOrdered};
+  protocol::NetworkLane lane{protocol::NetworkLane::Session};
+  std::vector<u8> payload{};
+};
+
+struct PluginNetworkSendError {
+  ArvResultCode code{ARV_RESULT_INTERNAL_ERROR};
+  std::string message{};
+};
+
+struct PluginNetworkSendRequest {
+  PluginNetworkTargetKind target_kind{PluginNetworkTargetKind::Player};
+  PlayerID player{};
+  std::span<const PlayerID> players{};
+  WorldID world{};
+  const PluginNetworkPacket* packet{};
+};
+
+using PluginNetworkSendResult = Expected<void, PluginNetworkSendError>;
+using PluginNetworkSendFn =
+    std::function<PluginNetworkSendResult(const PluginNetworkSendRequest&)>;
+
 struct PluginRuntimeContext {
   world::WorldRuntime* default_world{};
   const voxel::BlockRegistry* block_registry{};
@@ -84,6 +117,7 @@ struct PluginRuntimeContext {
   sched::JobSystem* job_system{};
   TickIndex tick_index{};
   u64 world_seed{};
+  PluginNetworkSendFn network_send{};
 };
 
 struct PluginManagerImpl;
