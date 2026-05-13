@@ -25,12 +25,13 @@ This document is **timeless** and describes architecture, not implementation ord
 
 # Core Architectural Model
 
-Arvane is structured into three layers:
+Arvane is structured around four top-level areas:
 
 ```text
 engine/      → reusable runtime systems and linked built-in modules
 arvane_home/ → runtime packs, assets, data, config, saves
 apps/        → executable products
+sdk/         → standalone public authoring SDKs
 ```
 
 ---
@@ -69,6 +70,17 @@ Defines runnable products.
 
 ---
 
+## 4. SDK Layer (`sdk/`)
+
+Defines standalone public SDKs that external authoring code can consume without
+linking engine modules.
+
+* `sdk/arvane_plugin/` defines the native plugin ABI and `Arvane::PluginSDK`
+* SDK headers must not include engine module headers
+* SDK targets provide compile-time authoring support, not engine runtime code
+
+---
+
 # Repository Structure
 
 ```text
@@ -84,6 +96,8 @@ arvane/
 │  └─ cache/
 ├─ tests/
 ├─ examples/
+├─ sdk/
+│  └─ arvane_plugin/
 ├─ engine/
 │  ├─ arv_core/
 │  ├─ arv_platform/
@@ -413,12 +427,16 @@ Persistence systems.
 
 ## `arv_plugin`
 
-Plugin system.
+Plugin loader and engine-side SDK bridge.
 
 * loading/unloading
 * lifecycle
-* API exposure
+* construction of `ArvPluginAPI` function tables
+* conversion between SDK ABI types and engine internals
 * registration hooks
+
+The plugin authoring surface lives in `sdk/arvane_plugin/`, not in this engine
+module. External plugins link `Arvane::PluginSDK`; they do not link `arv_plugin`.
 
 ---
 

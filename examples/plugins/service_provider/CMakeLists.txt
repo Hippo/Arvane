@@ -1,0 +1,2 @@
+add_library(service_provider_plugin SHARED src/service_provider.cpp)
+target_link_libraries(service_provider_plugin PRIVATE Arvane::PluginSDK)

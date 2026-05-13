@@ -5,26 +5,27 @@ include(GoogleTest)
 add_library(arv_test_example_plugin SHARED
   plugin/fixtures/example_plugin.cpp
 )
-target_include_directories(arv_test_example_plugin PRIVATE
-  ${CMAKE_SOURCE_DIR}/engine/arv_plugin/include
-)
-target_compile_definitions(arv_test_example_plugin PRIVATE ARV_PLUGIN_BUILD=1)
+target_link_libraries(arv_test_example_plugin PRIVATE Arvane::PluginSDK)
 
 add_library(arv_test_failing_plugin SHARED
   plugin/fixtures/failing_plugin.cpp
 )
-target_include_directories(arv_test_failing_plugin PRIVATE
-  ${CMAKE_SOURCE_DIR}/engine/arv_plugin/include
-)
-target_compile_definitions(arv_test_failing_plugin PRIVATE ARV_PLUGIN_BUILD=1)
+target_link_libraries(arv_test_failing_plugin PRIVATE Arvane::PluginSDK)
 
 add_library(arv_test_missing_symbol_plugin SHARED
   plugin/fixtures/missing_symbol_plugin.cpp
 )
-target_include_directories(arv_test_missing_symbol_plugin PRIVATE
-  ${CMAKE_SOURCE_DIR}/engine/arv_plugin/include
+target_link_libraries(arv_test_missing_symbol_plugin PRIVATE Arvane::PluginSDK)
+
+add_library(arv_plugin_sdk_c_compile OBJECT
+  plugin/sdk_c_compile_test.c
 )
-target_compile_definitions(arv_test_missing_symbol_plugin PRIVATE ARV_PLUGIN_BUILD=1)
+target_link_libraries(arv_plugin_sdk_c_compile PRIVATE Arvane::PluginSDK)
+
+add_library(arv_plugin_sdk_cpp_compile OBJECT
+  plugin/sdk_cpp_compile_test.cpp
+)
+target_link_libraries(arv_plugin_sdk_cpp_compile PRIVATE Arvane::PluginSDK)
 
 add_executable(arv_tests
   assets/asset_tests.cpp
@@ -107,6 +108,8 @@ add_dependencies(arv_tests
   arv_test_example_plugin
   arv_test_failing_plugin
   arv_test_missing_symbol_plugin
+  arv_plugin_sdk_c_compile
+  arv_plugin_sdk_cpp_compile
 )
 
 target_link_libraries(arv_tests PRIVATE

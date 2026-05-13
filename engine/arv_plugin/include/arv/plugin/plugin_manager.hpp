@@ -1,6 +1,6 @@
 #pragma once
 
-#include "arv/plugin/plugin_api.h"
+#include "arvane/plugin/api.h"
 
 #include "arv/asset/pack.hpp"
 #include "arv/command/command_registry.hpp"

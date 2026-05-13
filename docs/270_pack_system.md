@@ -526,6 +526,12 @@ capabilities:
 
 The presence of this section does not mean the native plugin should be loaded automatically.
 
+Native plugin libraries are authored against the standalone Plugin SDK. A
+plugin includes `<arvane/plugin/api.h>`, exports the configured C entrypoint,
+and links only the `Arvane::PluginSDK` interface target. The pack manifest names
+the library to load; it does not grant the plugin direct access to engine
+libraries.
+
 ### `builtin`
 
 Describes optional compiled behavior that is already linked into the executable.
@@ -1084,6 +1090,8 @@ Recommended rules:
 6. Native plugins should not expose C++ STL types across the ABI boundary.
 7. Native plugins should not be hot-unloaded during normal gameplay.
 8. Native plugins should receive engine access through narrow, versioned API tables.
+9. Native plugins should link only against the standalone `Arvane::PluginSDK`
+   interface target, not engine modules.
 
 Conceptual entrypoint:
 
@@ -1092,6 +1100,21 @@ extern "C" ARV_PLUGIN_EXPORT bool arvane_plugin_main(const ArvPluginAPI* api);
 ```
 
 The exact API is defined by the plugin system, not by the pack manifest.
+
+Typical plugin CMake:
+
+```cmake
+find_package(ArvanePluginSDK REQUIRED)
+
+add_library(example_plugin SHARED
+    src/example_plugin.cpp
+)
+
+target_link_libraries(example_plugin
+    PRIVATE
+        Arvane::PluginSDK
+)
+```
 
 ---
 

@@ -1,0 +1,18 @@
+schema_version: 1
+id: "scheduler"
+display_name: "Scheduler Plugin"
+version: "1.0.0"
+namespaces: ["scheduler"]
+side: "server"
+dependencies: []
+load_after: []
+load_before: []
+capabilities:
+  assets: false
+  data: false
+  native_plugin: true
+native:
+  api_version: 1
+  entrypoint: "arvane_plugin_main"
+  libraries:
+    linux-x86_64: "native/linux-x86_64/libarv_example_scheduler_plugin.so"

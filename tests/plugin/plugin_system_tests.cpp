@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <array>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -139,6 +141,30 @@ struct PluginHarness {
 };
 
 } // namespace
+
+TEST(PluginSdkTests, FixturePluginsLinkOnlySdkAndDoNotDependOnEngineSharedLibraries) {
+#if defined(__linux__) || defined(__APPLE__)
+  const std::string command =
+#if defined(__APPLE__)
+      "otool -L \"" + std::string{ARV_TEST_EXAMPLE_PLUGIN_PATH} + "\"";
+#else
+      "ldd \"" + std::string{ARV_TEST_EXAMPLE_PLUGIN_PATH} + "\"";
+#endif
+  FILE* pipe = popen(command.c_str(), "r");
+  ASSERT_NE(pipe, nullptr);
+  std::string output;
+  std::array<char, 256> buffer{};
+  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+    output += buffer.data();
+  }
+  const int status = pclose(pipe);
+  EXPECT_EQ(status, 0);
+  EXPECT_EQ(output.find("libarv_"), std::string::npos) << output;
+  EXPECT_EQ(output.find("libarvane"), std::string::npos) << output;
+#else
+  GTEST_SKIP() << "Dependency inspection is platform-specific.";
+#endif
+}
 
 TEST(PluginPolicyTests, DisabledAndAllowlistPoliciesSkipWithoutLoading) {
   PluginHarness harness("arvane_plugin_policy_");

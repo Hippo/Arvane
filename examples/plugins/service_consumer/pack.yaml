@@ -1,0 +1,18 @@
+schema_version: 1
+id: "service_consumer"
+display_name: "Service Consumer Plugin"
+version: "1.0.0"
+namespaces: ["service_consumer"]
+side: "server"
+dependencies: []
+load_after: ["service_provider"]
+load_before: []
+capabilities:
+  assets: false
+  data: false
+  native_plugin: true
+native:
+  api_version: 1
+  entrypoint: "arvane_plugin_main"
+  libraries:
+    linux-x86_64: "native/linux-x86_64/libarv_example_service_consumer_plugin.so"
