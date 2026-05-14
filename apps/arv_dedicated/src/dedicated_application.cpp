@@ -15,31 +15,13 @@
 #include "arv/asset/pack.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
+#include "arv/persistence/save.hpp"
 #include "arv/plugin/plugin_manager.hpp"
 
-#include <span>
 #include <utility>
 #include <vector>
 
 namespace arv::dedicated {
-namespace {
-
-[[nodiscard]] std::vector<persistence::RequiredPackMetadata> to_persistence_required_packs(
-    std::span<const asset::RequiredPack> packs) {
-  std::vector<persistence::RequiredPackMetadata> result;
-  result.reserve(packs.size());
-  for (const asset::RequiredPack& pack : packs) {
-    result.push_back({pack.id});
-  }
-  return result;
-}
-
-[[nodiscard]] plugin::NativePluginPolicy native_plugin_policy_from_config(
-    const io::NativePluginsConfig& config) {
-  return {config.enabled, config.allowed_packs};
-}
-
-} // namespace
 
 int DedicatedApplication::run(int argc, char** argv) {
   install_shutdown_signal_handlers();
@@ -61,7 +43,7 @@ int DedicatedApplication::run(int argc, char** argv) {
   const std::vector<asset::RequiredPack> active_required_packs =
       pack_manager.required_packs();
   const std::vector<persistence::RequiredPackMetadata> required_packs =
-      to_persistence_required_packs(active_required_packs);
+      persistence::required_pack_metadata(active_required_packs);
   core::info(
       "dedicated",
       "config={} arvane_home={} world={} listen={}:{} save_root={}",
@@ -78,7 +60,9 @@ int DedicatedApplication::run(int argc, char** argv) {
   plugin::PluginManager plugin_manager;
   auto plugin_result = plugin_manager.load_plugins({
       &pack_manager,
-      native_plugin_policy_from_config(config.native_plugins),
+      plugin::make_native_plugin_policy(
+          config.native_plugins.enabled,
+          config.native_plugins.allowed_packs),
       config.paths.config_path(),
       &runtime_config.game_modes,
       &runtime_config.block_behaviors,

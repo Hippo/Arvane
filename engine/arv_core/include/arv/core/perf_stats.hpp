@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/core/coordinates.hpp"
 #include "arv/core/types.hpp"
 
 #include <array>
@@ -56,6 +57,10 @@ struct TimingMetricSnapshot {
 inline constexpr usize PerfEventThreadCapacity = 32;
 inline constexpr usize PerfEventContextCapacity = 96;
 inline constexpr usize WorstEventRingCapacity = 64;
+
+void format_chunk_section_perf_context(
+    std::array<char, PerfEventContextCapacity>& context,
+    ChunkSectionCoord coord) noexcept;
 
 struct PerfEventSample {
   PerfMetric metric{};

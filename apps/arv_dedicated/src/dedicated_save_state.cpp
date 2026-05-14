@@ -14,13 +14,6 @@
 namespace arv::dedicated {
 namespace {
 
-[[nodiscard]] std::string tr(
-    const arv::text::LanguageCatalog& language,
-    std::string_view key,
-    std::string_view fallback) {
-  return language.text(key, fallback);
-}
-
 [[nodiscard]] u64 generated_world_seed() noexcept {
   const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
   return static_cast<u64>(now == 0 ? 1 : now);
@@ -70,26 +63,6 @@ namespace {
   return save;
 }
 
-void upsert_player_save(
-    std::vector<persistence::PlayerSaveData>& players,
-    persistence::PlayerSaveData save) {
-  const auto found = std::find_if(
-      players.begin(),
-      players.end(),
-      [&](const persistence::PlayerSaveData& existing) {
-        const bool profile_matches =
-            !save.profile_id.empty()
-                ? existing.profile_id == save.profile_id
-                : existing.profile_name == save.profile_name;
-        return profile_matches && existing.world_name == save.world_name;
-      });
-  if (found == players.end()) {
-    players.emplace_back(std::move(save));
-  } else {
-    *found = std::move(save);
-  }
-}
-
 } // namespace
 
 std::vector<persistence::SavedChunkSection> capture_saved_chunks(
@@ -129,7 +102,7 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     std::string_view world_name) {
   std::vector<persistence::PlayerSaveData> players;
   for (const server::ServerPlayerSaveState& save : server.saved_player_states()) {
-    upsert_player_save(players, to_persistence_player_save(save));
+    persistence::upsert_player_save(players, to_persistence_player_save(save));
   }
 
   for (const SessionID session_id : server.sessions().session_ids()) {
@@ -173,7 +146,7 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     save.permission_overrides = player_state->permission_overrides;
     save.selected_hotbar_slot = player_state->selected_hotbar_slot;
     save.inventory = player_state->inventory;
-    upsert_player_save(players, std::move(save));
+    persistence::upsert_player_save(players, std::move(save));
   }
 
   std::sort(players.begin(), players.end(), [](const auto& lhs, const auto& rhs) {
@@ -237,7 +210,10 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     save_metadata.name =
         loaded_world.loaded_save.has_save_metadata && !loaded_world.loaded_save.save.name.empty()
             ? loaded_world.loaded_save.save.name
-            : tr(language, "server.save.default_name", "Dedicated Server");
+            : arv::text::text_or_fallback(
+                  &language,
+                  "server.save.default_name",
+                  "Dedicated Server");
     save_metadata.block_registry_hash = block_registry_hash;
     save_metadata.item_registry_hash = item_registry_hash;
 
@@ -348,7 +324,10 @@ Expected<void, DedicatedError> save_dedicated_world(
       block_registry_hash,
       item_registry_hash,
       loaded_save.save.name.empty()
-          ? tr(language, "server.save.default_name", "Dedicated Server")
+          ? arv::text::text_or_fallback(
+                &language,
+                "server.save.default_name",
+                "Dedicated Server")
           : loaded_save.save.name};
   persistence::WorldMetadata world_metadata{
       config.server.world,

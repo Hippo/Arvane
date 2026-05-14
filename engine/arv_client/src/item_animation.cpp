@@ -186,13 +186,6 @@ read_keyframes(
   return t;
 }
 
-[[nodiscard]] Vec3f lerp(Vec3f from, Vec3f to, f32 alpha) noexcept {
-  return {
-      from.x + (to.x - from.x) * alpha,
-      from.y + (to.y - from.y) * alpha,
-      from.z + (to.z - from.z) * alpha};
-}
-
 [[nodiscard]] HeldItemAnimationPose lerp_pose(
     HeldItemAnimationPose from,
     HeldItemAnimationPose to,

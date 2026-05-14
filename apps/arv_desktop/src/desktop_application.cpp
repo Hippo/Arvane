@@ -26,14 +26,6 @@
 #include <utility>
 
 namespace arv::desktop {
-namespace {
-
-[[nodiscard]] plugin::NativePluginPolicy native_plugin_policy_from_config(
-    const io::NativePluginsConfig& config) {
-  return {config.enabled, config.allowed_packs};
-}
-
-} // namespace
 
 int DesktopApplication::run(int argc, char** argv) {
   core::info("desktop", "starting Arvane desktop client");
@@ -127,7 +119,9 @@ int DesktopApplication::run(int argc, char** argv) {
   plugin::PluginManager plugin_manager;
   auto plugin_result = plugin_manager.load_plugins({
       &pack_manager,
-      native_plugin_policy_from_config(config.native_plugins),
+      plugin::make_native_plugin_policy(
+          config.native_plugins.enabled,
+          config.native_plugins.allowed_packs),
       config.paths.config_path(),
       &game_modes,
       &block_behaviors,

@@ -10,6 +10,7 @@
 #include "arv/core/log.hpp"
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
+#include "arv/core/time.hpp"
 #include "arv/net/connection_state.hpp"
 #include "arv/base/ui/screens/main_menu.hpp"
 #include "arv/base/ui/screens/pause_menu.hpp"
@@ -29,66 +30,8 @@ namespace {
 
 constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
 
-[[nodiscard]] bool spike_log_due(
-    std::chrono::steady_clock::time_point last_log,
-    std::chrono::steady_clock::time_point now) noexcept {
-  return last_log.time_since_epoch().count() == 0 ||
-         now - last_log >= SpikeLogCooldown;
-}
-
-[[nodiscard]] ui::InputBindingDevice ui_device_from(platform::InputDeviceType type) noexcept {
-  switch (type) {
-    case platform::InputDeviceType::Keyboard:
-      return ui::InputBindingDevice::Keyboard;
-    case platform::InputDeviceType::MouseButton:
-      return ui::InputBindingDevice::MouseButton;
-    case platform::InputDeviceType::MouseWheel:
-      return ui::InputBindingDevice::MouseWheel;
-  }
-  return ui::InputBindingDevice::Keyboard;
-}
-
-[[nodiscard]] std::string binding_label(const platform::InputBinding& binding) {
-  std::string label;
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Control)) {
-    label += "Ctrl + ";
-  }
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Shift)) {
-    label += "Shift + ";
-  }
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Alt)) {
-    label += "Alt + ";
-  }
-  switch (binding.device_type) {
-    case platform::InputDeviceType::Keyboard:
-      label += binding.input_code;
-      break;
-    case platform::InputDeviceType::MouseButton:
-      label += "Mouse " + binding.input_code;
-      break;
-    case platform::InputDeviceType::MouseWheel:
-      label += "Wheel " + binding.input_code;
-      break;
-  }
-  return label;
-}
-
-[[nodiscard]] ui::CapturedInputView captured_input_from(
-    const platform::RawInputEvent& event) {
-  return {
-      ui_device_from(event.binding.device_type),
-      event.binding.input_code,
-      binding_label(event.binding),
-      event.binding.modifiers};
-}
-
-[[nodiscard]] Vec2f window_size_vec(platform::WindowSize size) noexcept {
-  return {
-      static_cast<f32>(size.width),
-      static_cast<f32>(size.height)};
-}
-
-[[nodiscard]] Vec2f framebuffer_size_vec(platform::FramebufferSize size) noexcept {
+template <typename Size>
+[[nodiscard]] Vec2f size_vec(Size size) noexcept {
   return {
       static_cast<f32>(size.width),
       static_cast<f32>(size.height)};
@@ -135,8 +78,8 @@ DesktopFrameLoop::DesktopFrameLoop(
                                            framebuffer_(window.framebuffer_size()),
                                            ui_metrics_(
                                                ui::UiDisplayMetrics::from_window_and_framebuffer(
-                                                   window_size_vec(window.window_size()),
-                                                   framebuffer_size_vec(framebuffer_))) {
+                                                   size_vec(window.window_size()),
+                                                   size_vec(framebuffer_))) {
   const auto start = std::chrono::steady_clock::now();
   previous_time_ = start;
   app_start_time_ = start;
@@ -530,8 +473,8 @@ void DesktopFrameLoop::update_framebuffer_size() {
   const auto next_framebuffer = window_.framebuffer_size();
   const ui::UiDisplayMetrics next_metrics =
       ui::UiDisplayMetrics::from_window_and_framebuffer(
-          window_size_vec(window_.window_size()),
-          framebuffer_size_vec(next_framebuffer));
+          size_vec(window_.window_size()),
+          size_vec(next_framebuffer));
   if (next_metrics.logical_size != ui_metrics_.logical_size) {
     invalidate_ui_tree_cache();
   }
@@ -639,7 +582,7 @@ void DesktopFrameLoop::record_frame_work_profile(
     last_frame_work_ms_ = frame_work_ms;
     const auto profile_now = std::chrono::steady_clock::now();
     if (frame_work_ms > static_cast<double>(config_.chunk_pipeline.frame_spike_log_ms) &&
-        spike_log_due(last_frame_spike_log_, profile_now)) {
+        cooldown_due(last_frame_spike_log_, profile_now, SpikeLogCooldown)) {
       core::warn(
           "frame_profile",
           "cpu frame work spike {}ms frame_delta={}ms queued_mesh_batches={} mesh_sections_in_flight={} mesh_sections_prepared={} empty_mesh_skips={} pending_uploads={} uploads_last_frame={}",

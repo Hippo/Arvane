@@ -7,24 +7,6 @@
 namespace arv::server::detail {
 namespace {
 
-[[nodiscard]] protocol::PlayerMoveFlags move_flags_from_player(
-    const player::PlayerState& player_state) noexcept {
-  protocol::PlayerMoveFlags flags = protocol::PlayerMoveFlags::None;
-  if (player_state.grounded) {
-    flags |= protocol::PlayerMoveFlags::OnGround;
-  }
-  if (player_state.sneaking) {
-    flags |= protocol::PlayerMoveFlags::Sneaking;
-  }
-  if (player_state.swimming) {
-    flags |= protocol::PlayerMoveFlags::Swimming;
-  }
-  if (player_state.movement_mode == player::MovementMode::Flying) {
-    flags |= protocol::PlayerMoveFlags::Flying;
-  }
-  return flags;
-}
-
 [[nodiscard]] protocol::ClientboundPlayerMoveCorrection make_player_move_correction(
     u32 rejected_sequence,
     const player::PlayerState& player_state,
@@ -35,7 +17,7 @@ namespace {
   correction.velocity = player_state.velocity;
   correction.yaw_radians = player_state.yaw_radians;
   correction.pitch_radians = player_state.pitch_radians;
-  correction.flags = move_flags_from_player(player_state);
+  correction.flags = player_move_flags_from_state(player_state);
   correction.reason = reason;
   return correction;
 }

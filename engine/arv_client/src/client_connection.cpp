@@ -22,13 +22,6 @@ namespace {
          state == net::ConnectionState::InGame;
 }
 
-[[nodiscard]] std::string tr(
-    const arv::text::LanguageCatalog* language,
-    std::string_view key,
-    std::string_view fallback) {
-  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
-}
-
 } // namespace
 
 ClientConnectionRuntime::ClientConnectionRuntime(std::unique_ptr<net::ITransport> transport) : transport_(std::move(transport)) {
@@ -100,7 +93,7 @@ void ClientConnectionRuntime::handle_connection_accepted(
   set_state(net::ConnectionState::TransportConnected);
     auto hello_result = sender.send_client_hello(identity);
     if (!hello_result) {
-      disconnect_local(tr(
+      disconnect_local(arv::text::text_or_fallback(
           language_,
           "ui.connection.server_offline",
           "Server is offline or unreachable."));
@@ -120,18 +113,24 @@ void ClientConnectionRuntime::handle_connection_closed_or_failed(
     disconnect_reason_ =
         is_connection_attempt_state(connection_state_) ||
                 connection_state_ == net::ConnectionState::RegistrySync
-            ? tr(
+            ? arv::text::text_or_fallback(
                   language_,
                   "ui.connection.server_offline",
                   "Server is offline or unreachable.")
-            : tr(language_, "ui.connection.lost", "Lost connection to the server.");
+            : arv::text::text_or_fallback(
+                  language_,
+                  "ui.connection.lost",
+                  "Lost connection to the server.");
   }
   set_state(net::ConnectionState::Disconnected);
 }
 
 void ClientConnectionRuntime::handle_message_send_failed() noexcept {
   if (!disconnect_reason_.has_value()) {
-    disconnect_reason_ = tr(language_, "ui.connection.lost", "Lost connection to the server.");
+    disconnect_reason_ = arv::text::text_or_fallback(
+        language_,
+        "ui.connection.lost",
+        "Lost connection to the server.");
   }
   if (transport_ && connection_state_ != net::ConnectionState::Disconnected) {
     (void)transport_->close_connection(connection_id_, disconnect_reason_.value());
@@ -142,7 +141,10 @@ void ClientConnectionRuntime::handle_message_send_failed() noexcept {
 void ClientConnectionRuntime::disconnect_local(std::string_view reason) {
   if (!disconnect_reason_.has_value()) {
     disconnect_reason_ =
-        reason.empty() ? tr(language_, "ui.connection.disconnected", "Disconnected.")
+        reason.empty() ? arv::text::text_or_fallback(
+                             language_,
+                             "ui.connection.disconnected",
+                             "Disconnected.")
                        : std::string{reason};
   }
   if (transport_ && connection_state_ != net::ConnectionState::Disconnected) {
@@ -161,7 +163,7 @@ bool ClientConnectionRuntime::tick_timeouts() {
       connection_attempt_started_time_.time_since_epoch().count() != 0 &&
       now - connection_attempt_started_time_ >
           std::chrono::seconds(connection_timeout_seconds_)) {
-    disconnect_local(tr(
+    disconnect_local(arv::text::text_or_fallback(
         language_,
         "ui.connection.server_offline",
         "Server is offline or unreachable."));
@@ -172,7 +174,10 @@ bool ClientConnectionRuntime::tick_timeouts() {
       last_server_keep_alive_time_.time_since_epoch().count() != 0 &&
       now - last_server_keep_alive_time_ >
           std::chrono::seconds(server_keep_alive_timeout_seconds_)) {
-    disconnect_local(tr(language_, "ui.connection.lost", "Lost connection to the server."));
+    disconnect_local(arv::text::text_or_fallback(
+        language_,
+        "ui.connection.lost",
+        "Lost connection to the server."));
     return true;
   }
   return false;

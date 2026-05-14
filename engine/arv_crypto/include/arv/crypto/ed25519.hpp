@@ -1,10 +1,13 @@
 #pragma once
 
+#include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
+#include "arv/crypto/hex.hpp"
 
 #include <array>
 #include <cstddef>
 #include <span>
+#include <string_view>
 
 namespace arv::crypto {
 
@@ -34,6 +37,11 @@ struct Ed25519KeyPair {
   Ed25519PublicKey public_key{};
   Ed25519PrivateKey private_key{};
 };
+
+using Ed25519PublicKeyResult = Expected<Ed25519PublicKey, HexError>;
+
+[[nodiscard]] Ed25519PublicKeyResult parse_prefixed_ed25519_public_key(
+    std::string_view text);
 
 [[nodiscard]] Ed25519KeyPair generate_ed25519_keypair() noexcept;
 

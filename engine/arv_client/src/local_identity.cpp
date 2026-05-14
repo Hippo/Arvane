@@ -3,10 +3,9 @@
 #include "arv/asset/resource.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/crypto/hex.hpp"
+#include "arv/io/files.hpp"
 
-#include <algorithm>
 #include <fstream>
-#include <iterator>
 #include <limits>
 #include <span>
 #include <string_view>
@@ -32,17 +31,6 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
 
 [[nodiscard]] std::filesystem::path skins_root(const std::filesystem::path& home) {
   return home / std::string{SkinsDirectoryName};
-}
-
-[[nodiscard]] Expected<std::string, LocalIdentityError> read_text_file(
-    const std::filesystem::path& path) {
-  std::ifstream input(path);
-  if (!input) {
-    return Expected<std::string, LocalIdentityError>::failure(
-        LocalIdentityError{"failed to open local profile file: " + path.string()});
-  }
-  return Expected<std::string, LocalIdentityError>::success(
-      std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}});
 }
 
 [[nodiscard]] Expected<crypto::Ed25519PrivateKey, LocalIdentityError> read_private_key(
@@ -89,17 +77,6 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
   return Expected<void, LocalIdentityError>::success();
 }
 
-[[nodiscard]] Expected<std::vector<u8>, LocalIdentityError> read_binary_file(
-    const std::filesystem::path& path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    return Expected<std::vector<u8>, LocalIdentityError>::failure(
-        LocalIdentityError{"failed to open PNG file: " + path.string()});
-  }
-  return Expected<std::vector<u8>, LocalIdentityError>::success(
-      std::vector<u8>{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}});
-}
-
 [[nodiscard]] Expected<void, LocalIdentityError> write_binary_file_atomically(
     const std::filesystem::path& path,
     std::span<const u8> bytes) {
@@ -133,23 +110,6 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
         LocalIdentityError{"failed to save skin PNG: " + error.message()});
   }
   return Expected<void, LocalIdentityError>::success();
-}
-
-[[nodiscard]] Expected<crypto::Ed25519PublicKey, LocalIdentityError> public_key_from_hex(
-    std::string_view text) {
-  auto bytes = crypto::from_prefixed_lower_hex(text);
-  if (!bytes) {
-    return Expected<crypto::Ed25519PublicKey, LocalIdentityError>::failure(
-        LocalIdentityError{bytes.error().message});
-  }
-  if (bytes.value().size() != crypto::ed25519_public_key_size) {
-    return Expected<crypto::Ed25519PublicKey, LocalIdentityError>::failure(
-        LocalIdentityError{"local profile public key has the wrong size"});
-  }
-
-  crypto::Ed25519PublicKey public_key;
-  std::copy(bytes.value().begin(), bytes.value().end(), public_key.bytes.begin());
-  return Expected<crypto::Ed25519PublicKey, LocalIdentityError>::success(public_key);
 }
 
 [[nodiscard]] bool safe_relative_file_name(std::string_view file) noexcept {
@@ -221,10 +181,12 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
         LocalIdentityError{"local profile private key file must be a safe relative file name"});
   }
 
-  auto public_key = public_key_from_hex(node.at("public_key").get<std::string>());
+  auto public_key =
+      crypto::parse_prefixed_ed25519_public_key(node.at("public_key").get<std::string>());
   auto private_key = read_private_key(local_private_key_path(home, profile.private_key_file));
   if (!public_key) {
-    return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(public_key.error());
+    return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(
+        LocalIdentityError{public_key.error().message});
   }
   if (!private_key) {
     return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(private_key.error());
@@ -278,9 +240,11 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
 
 [[nodiscard]] Expected<LocalProfileStore, LocalIdentityError> read_profile_store(
     const std::filesystem::path& home) {
-  auto text = read_text_file(local_profiles_json_path(home));
+  const std::filesystem::path profiles_path = local_profiles_json_path(home);
+  auto text = io::read_text_file_contents(profiles_path);
   if (!text) {
-    return Expected<LocalProfileStore, LocalIdentityError>::failure(text.error());
+    return Expected<LocalProfileStore, LocalIdentityError>::failure(
+        LocalIdentityError{"failed to open local profile file: " + profiles_path.string()});
   }
 
   try {
@@ -438,9 +402,10 @@ Expected<void, LocalIdentityError> save_local_profile_store(
 Expected<LocalProfileSkin, LocalIdentityError> import_local_profile_skin_png(
     const std::filesystem::path& arvane_home,
     const std::filesystem::path& source_png) {
-  auto bytes = read_binary_file(source_png);
+  auto bytes = io::read_binary_file(source_png);
   if (!bytes) {
-    return Expected<LocalProfileSkin, LocalIdentityError>::failure(bytes.error());
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(
+        LocalIdentityError{"failed to open PNG file: " + source_png.string()});
   }
   if (bytes.value().empty() || bytes.value().size() > protocol::MaxSkinImagePayloadBytes) {
     return Expected<LocalProfileSkin, LocalIdentityError>::failure(

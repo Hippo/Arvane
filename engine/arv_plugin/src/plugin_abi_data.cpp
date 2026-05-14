@@ -3,14 +3,6 @@
 namespace arv::plugin {
 namespace {
 
-ArvDataDocumentHandle api_data_create_document(void* context, uint32_t schema_version) {
-  PluginCallContext* ctx = call_context(context);
-  if (ctx == nullptr) {
-    return 0U;
-  }
-  return store_document(ctx, data::DataDocument{schema_version, data::DataValue::object()});
-}
-
 void api_data_release_document(void* context, ArvDataDocumentHandle document) {
   PluginCallContext* ctx = call_context(context);
   if (ctx == nullptr || document == 0U) {

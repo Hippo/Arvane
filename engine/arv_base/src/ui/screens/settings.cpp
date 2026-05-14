@@ -1237,26 +1237,7 @@ private:
     std::string_view stable_id,
     std::string_view prefix,
     usize& index) noexcept {
-  if (!stable_id.starts_with(prefix)) {
-    return false;
-  }
-  std::string_view suffix = stable_id.substr(prefix.size());
-  const usize dot = suffix.find('.');
-  if (dot != std::string_view::npos) {
-    suffix = suffix.substr(0U, dot);
-  }
-  if (suffix.empty()) {
-    return false;
-  }
-  usize parsed = 0;
-  for (const char ch : suffix) {
-    if (ch < '0' || ch > '9') {
-      return false;
-    }
-    parsed = parsed * 10U + static_cast<usize>(ch - '0');
-  }
-  index = parsed;
-  return true;
+  return parse_index_after_prefix(stable_id, prefix, index);
 }
 
 [[nodiscard]] std::string bind_label(const KeyBindSlotView& slot, const UIContext& ctx) {

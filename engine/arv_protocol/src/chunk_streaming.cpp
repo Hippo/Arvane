@@ -1,4 +1,5 @@
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/message_primitives.hpp"
 
 #include <utility>
 
@@ -20,13 +21,6 @@ Expected<ChunkSectionCoord, ProtocolError> read_chunk_coord(MessageReader& reade
         ProtocolError{"failed to decode chunk coordinate"});
   }
   return Expected<ChunkSectionCoord, ProtocolError>::success({{x.value(), y.value(), z.value()}});
-}
-
-Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
-  if (reader.remaining() != 0U) {
-    return Expected<void, ProtocolError>::failure(ProtocolError{"trailing bytes in chunk message"});
-  }
-  return Expected<void, ProtocolError>::success();
 }
 
 [[nodiscard]] constexpr usize fluid_wire_size() noexcept {
@@ -81,7 +75,7 @@ Expected<ServerboundChunkInterestUpdate, ProtocolError> deserialize_serverbound_
     return Expected<ServerboundChunkInterestUpdate, ProtocolError>::failure(
         ProtocolError{"failed to decode chunk interest update sequence"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "chunk message");
   if (!trailing) {
     return Expected<ServerboundChunkInterestUpdate, ProtocolError>::failure(trailing.error());
   }
@@ -187,7 +181,7 @@ Expected<ClientboundChunkSectionData, ProtocolError> deserialize_clientbound_chu
     }
   }
 
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "chunk message");
   if (!trailing) {
     return Expected<ClientboundChunkSectionData, ProtocolError>::failure(trailing.error());
   }
@@ -210,7 +204,7 @@ Expected<ClientboundChunkSectionUnload, ProtocolError> deserialize_clientbound_c
     return Expected<ClientboundChunkSectionUnload, ProtocolError>::failure(
         ProtocolError{"failed to decode chunk section unload"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "chunk message");
   if (!trailing) {
     return Expected<ClientboundChunkSectionUnload, ProtocolError>::failure(trailing.error());
   }

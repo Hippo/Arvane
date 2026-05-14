@@ -1,44 +1,18 @@
 #include "arv/command/command_dispatcher.hpp"
 
+#include "arv/core/string.hpp"
 #include "arv/text/language.hpp"
 
-#include <cctype>
 #include <string>
 
 namespace arv::command {
 namespace {
 
-[[nodiscard]] bool ascii_space(char c) noexcept {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
-[[nodiscard]] std::string_view trim_ascii(std::string_view text) noexcept {
-  while (!text.empty() && ascii_space(text.front())) {
-    text.remove_prefix(1U);
-  }
-  while (!text.empty() && ascii_space(text.back())) {
-    text.remove_suffix(1U);
-  }
-  return text;
-}
-
 [[nodiscard]] std::string localized_command_text(
     const CommandServices& services,
     std::string_view key,
     std::string_view fallback) {
-  return services.language == nullptr ? std::string{fallback}
-                                      : services.language->text(key, fallback);
-}
-
-void replace_all(std::string& text, std::string_view token, std::string_view value) {
-  if (token.empty()) {
-    return;
-  }
-  usize pos = 0;
-  while ((pos = text.find(token, pos)) != std::string::npos) {
-    text.replace(pos, token.size(), value);
-    pos += value.size();
-  }
+  return text::text_or_fallback(services.language, key, fallback);
 }
 
 [[nodiscard]] std::string command_format(
@@ -46,14 +20,7 @@ void replace_all(std::string& text, std::string_view token, std::string_view val
     std::string_view key,
     std::initializer_list<arv::text::FormatArg> args,
     std::string_view fallback) {
-  if (services.language != nullptr) {
-    return services.language->format(key, args, fallback);
-  }
-  std::string result{fallback};
-  for (const arv::text::FormatArg& arg : args) {
-    replace_all(result, "{" + arg.name + "}", arg.value);
-  }
-  return result;
+  return text::format_or_fallback(services.language, key, args, fallback);
 }
 
 [[nodiscard]] CommandResult validate_access(
@@ -102,10 +69,10 @@ void replace_all(std::string& text, std::string_view token, std::string_view val
 } // namespace
 
 std::string normalize_command_text(std::string_view command_text) {
-  std::string_view trimmed = trim_ascii(command_text);
+  std::string_view trimmed = trim_ascii_view(command_text);
   if (!trimmed.empty() && trimmed.front() == '/') {
     trimmed.remove_prefix(1U);
-    trimmed = trim_ascii(trimmed);
+    trimmed = trim_ascii_view(trimmed);
   }
   return std::string{trimmed};
 }

@@ -141,17 +141,6 @@ namespace {
   return body.sneaking ? PlayerCollisionPose::Sneaking : PlayerCollisionPose::Standing;
 }
 
-[[nodiscard]] f32 fluid_surface_y(BlockPos pos, voxel::FluidCell fluid) noexcept {
-  if (fluid.empty()) {
-    return static_cast<f32>(pos.value.y);
-  }
-  constexpr f32 MaxFluidLevel = 8.0F;
-  const f32 level = fluid.source()
-                        ? MaxFluidLevel
-                        : std::clamp(static_cast<f32>(fluid.level), 0.0F, MaxFluidLevel);
-  return static_cast<f32>(pos.value.y) + level / MaxFluidLevel;
-}
-
 struct LiquidContactProbe {
   LiquidContactState state{LiquidContactState::NotInLiquid};
   f32 highest_surface_y{};
@@ -163,7 +152,7 @@ struct LiquidContactProbe {
     f32 collision_epsilon) {
   const BlockPos pos{{floor_to_i32(point.x), floor_to_i32(point.y), floor_to_i32(point.z)}};
   const voxel::FluidCell fluid = query.fluid_cell(pos);
-  return !fluid.empty() && point.y < fluid_surface_y(pos, fluid) - collision_epsilon;
+  return !fluid.empty() && point.y < voxel::fluid_surface_y(pos, fluid) - collision_epsilon;
 }
 
 [[nodiscard]] LiquidContactProbe probe_liquid_contact(
@@ -189,7 +178,7 @@ struct LiquidContactProbe {
           continue;
         }
 
-        const f32 surface_y = fluid_surface_y(pos, fluid);
+        const f32 surface_y = voxel::fluid_surface_y(pos, fluid);
         if (bounds.max.y <= static_cast<f32>(y) + collision_epsilon ||
             bounds.min.y >= surface_y - collision_epsilon) {
           continue;

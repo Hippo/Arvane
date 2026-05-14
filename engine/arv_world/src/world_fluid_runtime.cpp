@@ -21,7 +21,7 @@ namespace {
   return 0U;
 }
 
-[[nodiscard]] bool should_replace_pending_fluid_update(
+[[nodiscard]] bool should_replace_fluid_update(
     const FluidUpdate& current,
     const FluidUpdate& candidate) noexcept {
   if (candidate.execute_at != current.execute_at) {
@@ -35,15 +35,6 @@ namespace {
     const FluidUpdate& queued) noexcept {
   return pending.execute_at == queued.execute_at &&
          fluid_update_priority(pending.reason) == fluid_update_priority(queued.reason);
-}
-
-[[nodiscard]] bool should_replace_deferred_update(
-    const FluidUpdate& current,
-    const FluidUpdate& candidate) noexcept {
-  if (candidate.execute_at != current.execute_at) {
-    return candidate.execute_at < current.execute_at;
-  }
-  return fluid_update_priority(candidate.reason) > fluid_update_priority(current.reason);
 }
 
 [[nodiscard]] BlockPos offset_fluid_probe(BlockPos pos, Vec3i offset) noexcept {
@@ -80,18 +71,6 @@ void add_required_fluid_chunks(HashSet<ChunkSectionCoord>& chunks, BlockPos pos)
   }
 }
 
-[[nodiscard]] bool chunk_section_less(
-    ChunkSectionCoord lhs,
-    ChunkSectionCoord rhs) noexcept {
-  if (lhs.value.x != rhs.value.x) {
-    return lhs.value.x < rhs.value.x;
-  }
-  if (lhs.value.y != rhs.value.y) {
-    return lhs.value.y < rhs.value.y;
-  }
-  return lhs.value.z < rhs.value.z;
-}
-
 } // namespace
 
 void WorldFluidRuntime::enqueue_update(
@@ -110,7 +89,7 @@ void WorldFluidRuntime::enqueue_update_unique(FluidUpdate update) {
     return;
   }
 
-  if (!should_replace_pending_fluid_update(pending->second, update)) {
+  if (!should_replace_fluid_update(pending->second, update)) {
     return;
   }
 
@@ -157,7 +136,7 @@ void WorldFluidRuntime::store_deferred_boundary_update(
   auto& updates = deferred_boundary_fluid_updates_[target];
   for (FluidUpdate& existing : updates) {
     if (existing.pos == update.pos) {
-      if (should_replace_deferred_update(existing, update)) {
+      if (should_replace_fluid_update(existing, update)) {
         existing = update;
       }
       return;
@@ -245,7 +224,7 @@ std::optional<FluidSimulationRequest> WorldFluidRuntime::make_simulation_request
   for (const ChunkSectionCoord coord : required_chunks) {
     required_coords.emplace_back(coord);
   }
-  std::sort(required_coords.begin(), required_coords.end(), chunk_section_less);
+  std::sort(required_coords.begin(), required_coords.end(), chunk_section_less_xyz);
 
   request.chunks.reserve(required_coords.size());
   for (const ChunkSectionCoord coord : required_coords) {

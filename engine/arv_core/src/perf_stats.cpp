@@ -1,8 +1,11 @@
 #include "arv/core/perf_stats.hpp"
 
+#include "arv/core/atomic.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstddef>
 #include <cstring>
 
@@ -29,28 +32,6 @@ namespace {
   const u32 rank = static_cast<u32>(
       (static_cast<u64>(count - 1U) * static_cast<u64>(percentile) + 99ULL) / 100ULL);
   return samples[rank];
-}
-
-void update_maximum(std::atomic<u32>& target, u32 value) noexcept {
-  u32 current = target.load(std::memory_order_relaxed);
-  while (current < value &&
-         !target.compare_exchange_weak(
-             current,
-             value,
-             std::memory_order_relaxed,
-             std::memory_order_relaxed)) {
-  }
-}
-
-void update_maximum(std::atomic<u64>& target, u64 value) noexcept {
-  u64 current = target.load(std::memory_order_relaxed);
-  while (current < value &&
-         !target.compare_exchange_weak(
-             current,
-             value,
-             std::memory_order_relaxed,
-             std::memory_order_relaxed)) {
-  }
 }
 
 template<usize Capacity>
@@ -87,7 +68,7 @@ public:
     }
 
     latest_us_.store(sample_us, std::memory_order_relaxed);
-    update_maximum(max_us_, sample_us);
+    update_atomic_maximum(max_us_, sample_us);
   }
 
   [[nodiscard]] TimingMetricSnapshot snapshot() const noexcept {
@@ -265,74 +246,81 @@ using GlobalWorstEventRings =
   return frame_index;
 }
 
-[[nodiscard]] std::atomic<u64>& snapshots_created_total() noexcept {
+template <typename Tag>
+[[nodiscard]] std::atomic<u64>& global_u64_counter() noexcept {
   static std::atomic<u64> value{0U};
   return value;
+}
+
+struct SnapshotsCreatedCounter {};
+struct SnapshotsReusedCounter {};
+struct SnapshotCopiesCounter {};
+struct SnapshotBytesCopiedCounter {};
+struct LightingJobsSubmittedCounter {};
+struct LightingJobsCompletedCounter {};
+struct LightingJobsContinuedCounter {};
+struct LightingNodesProcessedCounter {};
+struct LightingAddNodesProcessedCounter {};
+struct LightingRemoveNodesProcessedCounter {};
+struct LightingBoundaryDeferralsCounter {};
+struct LightingSectionsTouchedCounter {};
+struct LightingSectionsPublishedCounter {};
+struct LightingRemeshesTriggeredCounter {};
+
+[[nodiscard]] std::atomic<u64>& snapshots_created_total() noexcept {
+  return global_u64_counter<SnapshotsCreatedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& snapshots_reused_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<SnapshotsReusedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& snapshot_copies_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<SnapshotCopiesCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& snapshot_bytes_copied_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<SnapshotBytesCopiedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_jobs_submitted_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingJobsSubmittedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_jobs_completed_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingJobsCompletedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_jobs_continued_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingJobsContinuedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_nodes_processed_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingNodesProcessedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_add_nodes_processed_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingAddNodesProcessedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_remove_nodes_processed_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingRemoveNodesProcessedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_boundary_deferrals_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingBoundaryDeferralsCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_sections_touched_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingSectionsTouchedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_sections_published_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingSectionsPublishedCounter>();
 }
 
 [[nodiscard]] std::atomic<u64>& lighting_remeshes_triggered_total() noexcept {
-  static std::atomic<u64> value{0U};
-  return value;
+  return global_u64_counter<LightingRemeshesTriggeredCounter>();
 }
 
 [[nodiscard]] std::atomic<u32>& lighting_max_queue_depth() noexcept {
@@ -380,6 +368,18 @@ void insert_worst_sample(std::span<PerfEventSample> out, usize& count, PerfEvent
 }
 
 } // namespace
+
+void format_chunk_section_perf_context(
+    std::array<char, PerfEventContextCapacity>& context,
+    ChunkSectionCoord coord) noexcept {
+  (void)std::snprintf(
+      context.data(),
+      context.size(),
+      "section=(%d,%d,%d)",
+      coord.value.x,
+      coord.value.y,
+      coord.value.z);
+}
 
 void TimingHistogram::record_ms(double milliseconds) noexcept {
   samples_us_[write_index_] = clamp_to_microseconds(milliseconds);
@@ -685,7 +685,7 @@ void record_lighting_job_completed(const LightingStatsUpdate& update) noexcept {
   lighting_sections_touched_total().fetch_add(update.sections_touched, std::memory_order_relaxed);
   lighting_sections_published_total().fetch_add(update.sections_published, std::memory_order_relaxed);
   lighting_remeshes_triggered_total().fetch_add(update.remeshes_triggered, std::memory_order_relaxed);
-  update_maximum(lighting_max_queue_depth(), update.max_queue_depth);
+  update_atomic_maximum(lighting_max_queue_depth(), update.max_queue_depth);
 #else
   (void)update;
 #endif

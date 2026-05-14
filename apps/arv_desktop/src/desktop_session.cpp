@@ -14,29 +14,11 @@
 
 #include <algorithm>
 #include <array>
-#include <span>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace arv::desktop {
-namespace {
-
-[[nodiscard]] const server::ServerSession* local_session(
-    const server::ServerRuntime& server) noexcept {
-  return server.sessions().first();
-}
-
-[[nodiscard]] std::vector<persistence::RequiredPackMetadata> to_persistence_required_packs(
-    std::span<const asset::RequiredPack> packs) {
-  std::vector<persistence::RequiredPackMetadata> result;
-  result.reserve(packs.size());
-  for (const asset::RequiredPack& pack : packs) {
-    result.push_back({pack.id});
-  }
-  return result;
-}
-
-} // namespace
 
 DesktopGameSession::DesktopGameSession(TickRate base_tps) : ticks(base_tps) {
 }
@@ -75,7 +57,7 @@ bool DesktopSessionManager::save_and_shutdown() {
   }
 
   if (const server::ServerSession* server_session =
-          local_session(*session.integrated_server);
+          session.integrated_server->sessions().first();
       server_session != nullptr) {
     (void)session.integrated_server->close_player_inventory_menu(server_session->player_id);
   }
@@ -102,7 +84,7 @@ bool DesktopSessionManager::save_and_shutdown() {
       dependencies_.block_registry_hash,
       dependencies_.item_registry_hash,
       session.integrated_server->voxel_world().clock(),
-      to_persistence_required_packs(dependencies_.required_packs),
+      persistence::required_pack_metadata(dependencies_.required_packs),
       true};
   auto save_result = persistence::save_server_root(
       session.server_save_root,

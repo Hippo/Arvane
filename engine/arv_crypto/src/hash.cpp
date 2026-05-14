@@ -3,21 +3,13 @@
 #include "arv/crypto/crypto_init.hpp"
 #include "arv/crypto/hex.hpp"
 
+#include "sodium_bytes.hpp"
+
 #include <utility>
 
 #include <sodium.h>
 
 namespace arv::crypto {
-namespace {
-
-[[nodiscard]] const unsigned char* bytes_data(std::span<const std::byte> bytes) noexcept {
-  if (bytes.empty()) {
-    return nullptr;
-  }
-  return reinterpret_cast<const unsigned char*>(bytes.data());
-}
-
-} // namespace
 
 Hash256 hash_256(std::span<const std::byte> data) noexcept {
   static_assert(hash_256_size == crypto_generichash_BYTES);
@@ -28,7 +20,7 @@ Hash256 hash_256(std::span<const std::byte> data) noexcept {
   if (crypto_generichash(
           reinterpret_cast<unsigned char*>(hash.bytes.data()),
           hash.bytes.size(),
-          bytes_data(data),
+          detail::bytes_data(data),
           static_cast<unsigned long long>(data.size()),
           nullptr,
           0) != 0) {

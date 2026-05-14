@@ -1,9 +1,12 @@
 #include "arv/persistence/save.hpp"
 
+#include "atomic_file.hpp"
+
+#include "arv/data/json_math.hpp"
+#include "arv/player/permissions.hpp"
 #include "arv/world/world_runtime.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <optional>
@@ -23,17 +26,6 @@ using json = nlohmann::json;
     hash *= 1099511628211ULL;
   }
   return hash;
-}
-
-[[nodiscard]] json vec3_to_json(Vec3f value) {
-  return json::array({value.x, value.y, value.z});
-}
-
-[[nodiscard]] Vec3f json_to_vec3(const json& node) {
-  return {
-      node.at(0).get<f32>(),
-      node.at(1).get<f32>(),
-      node.at(2).get<f32>()};
 }
 
 [[nodiscard]] json quat_to_json(Quatf value) {
@@ -95,9 +87,9 @@ using json = nlohmann::json;
       {"type", entity.type_name},
       {"version", 1},
       {"world_id", entity.world_id.value},
-      {"position", vec3_to_json(entity.position)},
+      {"position", data::vec3_to_json(entity.position)},
       {"rotation", quat_to_json(entity.rotation)},
-      {"velocity", vec3_to_json(entity.velocity)},
+      {"velocity", data::vec3_to_json(entity.velocity)},
       {"components", std::move(components)},
   };
 }
@@ -109,9 +101,9 @@ using json = nlohmann::json;
   record.uuid = entry.at("uuid").get<std::string>();
   record.type_name = entry.at("type").get<std::string>();
   record.world_id = WorldID{entry.at("world_id").get<u32>()};
-  record.position = json_to_vec3(entry.at("position"));
+  record.position = data::json_to_vec3(entry.at("position"));
   record.rotation = json_to_quat(entry.at("rotation"));
-  record.velocity = json_to_vec3(entry.at("velocity"));
+  record.velocity = data::json_to_vec3(entry.at("velocity"));
   if (const auto components = entry.find("components");
       components != entry.end() && components->is_object()) {
     if (const auto dropped_item = components->find("dropped_item");
@@ -260,10 +252,6 @@ using json = nlohmann::json;
   return clock;
 }
 
-[[nodiscard]] std::filesystem::path temporary_path_for(const std::filesystem::path& path) {
-  return path.parent_path() / (path.filename().string() + ".tmp");
-}
-
 Expected<void, PersistenceError> write_text_atomic(
     const std::filesystem::path& path,
     std::string_view text) {
@@ -274,7 +262,7 @@ Expected<void, PersistenceError> write_text_atomic(
         PersistenceError{"failed to create save directory: " + error.message()});
   }
 
-  const std::filesystem::path temp_path = temporary_path_for(path);
+  const std::filesystem::path temp_path = detail::temporary_path_for(path);
   {
     std::ofstream output(temp_path, std::ios::trunc);
     if (!output) {
@@ -394,20 +382,7 @@ Expected<void, PersistenceError> write_text_atomic(
     return std::nullopt;
   }
 
-  std::string text = node.get<std::string>();
-  std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  if (text == "allow" || text == "allowed" || text == "true" || text == "yes") {
-    return player::TriState::Allow;
-  }
-  if (text == "deny" || text == "denied" || text == "false" || text == "no") {
-    return player::TriState::Deny;
-  }
-  if (text == "unset" || text == "none" || text == "null") {
-    return player::TriState::Unset;
-  }
-  return std::nullopt;
+  return player::tri_state_from_string(node.get<std::string>());
 }
 
 void write_core_value(json& node, std::string_view name, player::TriState value) {
@@ -447,32 +422,6 @@ void write_core_value(json& node, std::string_view name, player::TriState value)
   };
 }
 
-bool set_core_permission(
-    player::CorePermissionSet& core,
-    std::string_view name,
-    player::TriState value) {
-  if (name == "can_take_damage") {
-    core.can_take_damage = value;
-  } else if (name == "can_modify_world") {
-    core.can_modify_world = value;
-  } else if (name == "can_interact") {
-    core.can_interact = value;
-  } else if (name == "can_open_inventory") {
-    core.can_open_inventory = value;
-  } else if (name == "has_creative_inventory") {
-    core.has_creative_inventory = value;
-  } else if (name == "can_fly") {
-    core.can_fly = value;
-  } else if (name == "has_collision") {
-    core.has_collision = value;
-  } else if (name == "is_visible_to_others") {
-    core.is_visible_to_others = value;
-  } else {
-    return false;
-  }
-  return true;
-}
-
 void read_group_list(player::PlayerPermissions& permissions, const json& node) {
   if (!node.is_array()) {
     return;
@@ -491,7 +440,10 @@ void read_core_permissions(player::PlayerPermissions& permissions, const json& n
   for (auto iter = node.begin(); iter != node.end(); ++iter) {
     const std::optional<player::TriState> value = tri_state_from_json(iter.value());
     if (value.has_value()) {
-      (void)set_core_permission(permissions.overrides, iter.key(), value.value());
+      (void)player::set_core_permission_by_name(
+          permissions.overrides,
+          iter.key(),
+          value.value());
     }
   }
 }
@@ -558,6 +510,36 @@ Expected<void, PersistenceError> ensure_permission_config_file(
 }
 
 } // namespace
+
+std::vector<RequiredPackMetadata> required_pack_metadata(
+    std::span<const asset::RequiredPack> packs) {
+  std::vector<RequiredPackMetadata> result;
+  result.reserve(packs.size());
+  for (const asset::RequiredPack& pack : packs) {
+    result.push_back({pack.id});
+  }
+  return result;
+}
+
+void upsert_player_save(
+    std::vector<PlayerSaveData>& players,
+    PlayerSaveData save) {
+  const auto found = std::find_if(
+      players.begin(),
+      players.end(),
+      [&](const PlayerSaveData& existing) {
+        const bool profile_matches =
+            !save.profile_id.empty()
+                ? existing.profile_id == save.profile_id
+                : existing.profile_name == save.profile_name;
+        return profile_matches && existing.world_name == save.world_name;
+      });
+  if (found == players.end()) {
+    players.emplace_back(std::move(save));
+  } else {
+    *found = std::move(save);
+  }
+}
 
 u64 hash_block_registry(const voxel::BlockRegistry& registry) noexcept {
   u64 hash = 14695981039346656037ULL;
@@ -772,8 +754,8 @@ Expected<void, PersistenceError> save_server_root(
         {"profile_name", player.profile_name},
         {"display_name", player.display_name},
         {"world_name", player.world_name},
-        {"position", vec3_to_json(player.position)},
-        {"velocity", vec3_to_json(player.velocity)},
+        {"position", data::vec3_to_json(player.position)},
+        {"velocity", data::vec3_to_json(player.velocity)},
         {"yaw_radians", player.yaw_radians},
         {"pitch_radians", player.pitch_radians},
         {"grounded", player.grounded},
@@ -1029,8 +1011,8 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
         player_save.profile_name = player_json.value("profile_name", std::string{"local_player"});
         player_save.display_name = player_json.value("display_name", player_save.profile_name);
         player_save.world_name = player_json.at("world_name").get<std::string>();
-        player_save.position = json_to_vec3(player_json.at("position"));
-        player_save.velocity = json_to_vec3(player_json.at("velocity"));
+        player_save.position = data::json_to_vec3(player_json.at("position"));
+        player_save.velocity = data::json_to_vec3(player_json.at("velocity"));
         player_save.yaw_radians = player_json.at("yaw_radians").get<f32>();
         player_save.pitch_radians = player_json.at("pitch_radians").get<f32>();
         player_save.grounded = player_json.at("grounded").get<bool>();

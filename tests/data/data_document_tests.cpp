@@ -1,43 +1,22 @@
 #include "arv/data/codecs.hpp"
 #include "arv/data/storage.hpp"
+#include "support/temp_dir.hpp"
+#include "support/temp_files.hpp"
 
 #include <gtest/gtest.h>
 
-#include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <string_view>
 
 namespace {
 
-struct ScopedTempDir {
-  std::filesystem::path path;
-
-  explicit ScopedTempDir(std::string_view prefix) {
-    path = std::filesystem::temp_directory_path() /
-           (std::string{prefix} +
-            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::error_code error;
-    std::filesystem::remove_all(path, error);
-    std::filesystem::create_directories(path);
-  }
-
-  ~ScopedTempDir() {
-    std::error_code error;
-    std::filesystem::remove_all(path, error);
-  }
-};
+using arv::testsupport::ScopedTempDir;
+using arv::testsupport::write_text;
 
 arv::asset::ResourceID key(std::string_view text) {
   auto parsed = arv::asset::ResourceID::parse(text);
   EXPECT_TRUE(parsed) << parsed.error();
   return parsed ? parsed.value() : arv::asset::ResourceID{};
-}
-
-void write_text(const std::filesystem::path& path, std::string_view text) {
-  std::filesystem::create_directories(path.parent_path());
-  std::ofstream output(path, std::ios::trunc);
-  output << text;
 }
 
 } // namespace

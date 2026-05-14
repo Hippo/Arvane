@@ -1,4 +1,5 @@
 #include "arv/protocol/inventory_sync.hpp"
+#include "arv/protocol/message_primitives.hpp"
 
 #include <utility>
 
@@ -19,13 +20,6 @@ Expected<player::ItemStack, ProtocolError> read_stack(MessageReader& reader) {
   }
   return Expected<player::ItemStack, ProtocolError>::success(
       {player::ItemID{item.value()}, count.value()});
-}
-
-Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
-  if (reader.remaining() != 0U) {
-    return Expected<void, ProtocolError>::failure(ProtocolError{"trailing bytes in inventory message"});
-  }
-  return Expected<void, ProtocolError>::success();
 }
 
 [[nodiscard]] bool valid_action_kind(InventoryActionKind kind) noexcept {
@@ -76,7 +70,7 @@ Expected<ServerboundInventoryActionRequest, ProtocolError> deserialize_serverbou
     return Expected<ServerboundInventoryActionRequest, ProtocolError>::failure(
         ProtocolError{"invalid inventory action enum value"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "inventory message");
   if (!trailing) {
     return Expected<ServerboundInventoryActionRequest, ProtocolError>::failure(trailing.error());
   }
@@ -159,7 +153,7 @@ Expected<ClientboundInventoryUpdate, ProtocolError> deserialize_clientbound_inve
     update.carried_stack = stack.value();
   }
 
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "inventory message");
   if (!trailing) {
     return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(trailing.error());
   }

@@ -1,5 +1,7 @@
 #include "plugin_alias_data.hpp"
 
+#include "arv/core/string.hpp"
+
 #include "plugin_paths.hpp"
 
 #include <algorithm>
@@ -13,16 +15,6 @@
 
 namespace arv::plugin::detail {
 namespace {
-
-[[nodiscard]] bool ascii_space(char c) noexcept {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' ||
-         c == '\v';
-}
-
-[[nodiscard]] bool command_name_valid(std::string_view name) noexcept {
-  return !name.empty() &&
-         std::none_of(name.begin(), name.end(), ascii_space);
-}
 
 void append_alias_diagnostic(
     PluginCommandAliasLoadResult& result,
@@ -51,7 +43,7 @@ void append_alias_diagnostic(
     return std::nullopt;
   }
   std::string alias = alias_node.as<std::string>();
-  if (!command_name_valid(alias)) {
+  if (alias.empty() || contains_ascii_space(alias)) {
     error = "alias entry requires a non-empty scalar alias with no whitespace";
     return std::nullopt;
   }
@@ -65,7 +57,7 @@ void append_alias_diagnostic(
     return std::nullopt;
   }
   std::string command_name = command_node.as<std::string>();
-  if (!command_name_valid(command_name)) {
+  if (command_name.empty() || contains_ascii_space(command_name)) {
     error = "alias entry requires a non-empty scalar command with no whitespace";
     return std::nullopt;
   }

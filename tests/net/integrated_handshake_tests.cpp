@@ -13,6 +13,7 @@
 #include "arv/server/server_runtime.hpp"
 #include "arv/server/world_registry.hpp"
 #include "arv/world/world_generation.hpp"
+#include "support/server_harness.hpp"
 #include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
@@ -30,15 +31,7 @@
 
 namespace {
 
-arv::player::PlayerState& connected_player(arv::server::ServerRuntime& server) {
-  const std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
-  EXPECT_EQ(session_ids.size(), 1U);
-  const arv::server::ServerSession* session = server.sessions().find(session_ids.front());
-  EXPECT_NE(session, nullptr);
-  arv::player::PlayerState* player_state = server.voxel_world().find_player(session->player_id);
-  EXPECT_NE(player_state, nullptr);
-  return *player_state;
-}
+using arv::testsupport::connected_player;
 
 std::vector<arv::u8> raw_client_hello_packet(
     const arv::client::LocalPlayerIdentity& identity) {

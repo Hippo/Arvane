@@ -1,5 +1,6 @@
 #include "arv/net/gns_transport.hpp"
 #include "arv/net/in_process_transport.hpp"
+#include "support/net_events.hpp"
 
 #include <gtest/gtest.h>
 
@@ -12,16 +13,7 @@
 
 namespace {
 
-const arv::net::NetworkEvent* find_event(
-    const std::vector<arv::net::NetworkEvent>& events,
-    arv::net::NetworkEventType type) {
-  for (const arv::net::NetworkEvent& event : events) {
-    if (event.type == type) {
-      return &event;
-    }
-  }
-  return nullptr;
-}
+using arv::testsupport::find_event;
 
 void connect_and_drain_accept(arv::net::ITransport& client, arv::net::ITransport& server) {
   ASSERT_TRUE(server.start_listening({}));

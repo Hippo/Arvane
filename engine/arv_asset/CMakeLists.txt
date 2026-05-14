@@ -18,6 +18,7 @@ target_link_libraries(arv_asset
     arv_core
     arv_voxel
   PRIVATE
+    arv_io
     Freetype::Freetype
     harfbuzz::harfbuzz
     rectpack2D

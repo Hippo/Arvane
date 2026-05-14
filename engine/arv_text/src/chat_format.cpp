@@ -9,15 +9,6 @@ namespace {
   return style_patch_color(r, g, b);
 }
 
-[[nodiscard]] std::string tr(
-    const LanguageCatalog* language,
-    std::string_view key,
-    std::initializer_list<FormatArg> args,
-    std::string_view fallback) {
-  return language == nullptr ? LanguageCatalog{}.format(key, args, fallback)
-                             : language->format(key, args, fallback);
-}
-
 } // namespace
 
 RichText ChatFormatter::format_player_chat(const ChatFormatContext& context) const {
@@ -33,7 +24,7 @@ RichText ChatFormatter::format_player_chat(const ChatFormatContext& context) con
   builder
       .append(sender_name, chat_color(0xFFU, 0xFFU, 0xFFU))
       .click_suggest_command("/msg " + sender_name + " ")
-      .hover_text(tr(
+      .hover_text(format_or_fallback(
           context.language,
           "server.chat.hover_message",
           {{"name", sender_name}},

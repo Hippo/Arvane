@@ -1,10 +1,12 @@
 set(ARV_IO_HEADERS
   include/arv/io/config.hpp
+  include/arv/io/files.hpp
   include/arv/io/input_bindings.hpp
 )
 
 add_library(arv_io STATIC
   src/config.cpp
+  src/files.cpp
   src/input_bindings.cpp
 )
 target_include_directories(arv_io PUBLIC include)

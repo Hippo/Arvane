@@ -1,5 +1,6 @@
 #include "client_ui_state.hpp"
 
+#include "arv/core/string.hpp"
 #include "arv/text/language.hpp"
 
 #include <algorithm>
@@ -12,22 +13,6 @@ namespace arv::client {
 namespace {
 
 constexpr usize MaxChatDraftBytes = 256U;
-
-[[nodiscard]] bool ascii_space(char ch) noexcept {
-  return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
-}
-
-[[nodiscard]] std::string trim_ascii(std::string_view text) {
-  usize begin = 0U;
-  while (begin < text.size() && ascii_space(text[begin])) {
-    ++begin;
-  }
-  usize end = text.size();
-  while (end > begin && ascii_space(text[end - 1U])) {
-    --end;
-  }
-  return std::string{text.substr(begin, end - begin)};
-}
 
 void erase_last_utf8_codepoint(std::string& text) {
   if (text.empty()) {
@@ -51,13 +36,6 @@ void trim_vector_to_limit(std::vector<T>& values, usize limit) {
 }
 
 } // namespace
-
-[[nodiscard]] std::string tr(
-    const arv::text::LanguageCatalog* language,
-    std::string_view key,
-    std::string_view fallback) {
-  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
-}
 
 void ClientUiState::set_tab_menu_visible(bool visible) noexcept {
   tab_menu_visible_ = visible;
@@ -165,7 +143,7 @@ void ClientUiState::cancel_url_confirmation() noexcept {
 
 void ClientUiState::acknowledge_url_open_unavailable() {
   pending_url_confirmation_.reset();
-  add_chat_message(tr(
+  add_chat_message(arv::text::text_or_fallback(
       language_,
       "ui.chat.open_url_unavailable",
       "Opening external URLs is not implemented in this build."));
@@ -192,7 +170,7 @@ std::optional<std::string> ClientUiState::handle_chat_input(
   }
   if (was_chat_open && input.text_submit_pressed) {
     std::optional<std::string> submitted;
-    std::string trimmed = trim_ascii(chat_draft_);
+    std::string trimmed = trim_ascii_copy(chat_draft_);
     if (!trimmed.empty()) {
       submitted = std::move(trimmed);
     }

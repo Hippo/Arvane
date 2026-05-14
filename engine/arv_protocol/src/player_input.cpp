@@ -1,65 +1,9 @@
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/message_primitives.hpp"
 
-#include <bit>
 #include <utility>
 
 namespace arv::protocol {
-namespace {
-
-void write_f32(MessageWriter& writer, f32 value) {
-  writer.write<u32>(std::bit_cast<u32>(value));
-}
-
-Expected<f32, ProtocolError> read_f32(MessageReader& reader) {
-  auto value = reader.read<u32>();
-  if (!value) {
-    return Expected<f32, ProtocolError>::failure(value.error());
-  }
-  return Expected<f32, ProtocolError>::success(std::bit_cast<f32>(value.value()));
-}
-
-void write_vec3(MessageWriter& writer, Vec3f value) {
-  write_f32(writer, value.x);
-  write_f32(writer, value.y);
-  write_f32(writer, value.z);
-}
-
-void write_block_pos(MessageWriter& writer, BlockPos pos) {
-  writer.write<i32>(pos.value.x);
-  writer.write<i32>(pos.value.y);
-  writer.write<i32>(pos.value.z);
-}
-
-Expected<Vec3f, ProtocolError> read_vec3(MessageReader& reader) {
-  auto x = read_f32(reader);
-  auto y = read_f32(reader);
-  auto z = read_f32(reader);
-  if (!x || !y || !z) {
-    return Expected<Vec3f, ProtocolError>::failure(ProtocolError{"failed to decode vector"});
-  }
-  return Expected<Vec3f, ProtocolError>::success({x.value(), y.value(), z.value()});
-}
-
-Expected<BlockPos, ProtocolError> read_block_pos(MessageReader& reader) {
-  auto x = reader.read<i32>();
-  auto y = reader.read<i32>();
-  auto z = reader.read<i32>();
-  if (!x || !y || !z) {
-    return Expected<BlockPos, ProtocolError>::failure(
-        ProtocolError{"failed to decode block position"});
-  }
-  return Expected<BlockPos, ProtocolError>::success({{x.value(), y.value(), z.value()}});
-}
-
-Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
-  if (reader.remaining() != 0U) {
-    return Expected<void, ProtocolError>::failure(
-        ProtocolError{"trailing bytes in player message"});
-  }
-  return Expected<void, ProtocolError>::success();
-}
-
-} // namespace
 
 std::vector<u8> serialize_serverbound_player_move(const ServerboundPlayerMove& move) {
   MessageWriter writer;
@@ -92,7 +36,7 @@ Expected<ServerboundPlayerMove, ProtocolError> deserialize_serverbound_player_mo
     return Expected<ServerboundPlayerMove, ProtocolError>::failure(
         ProtocolError{"failed to decode player move"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "player message");
   if (!trailing) {
     return Expected<ServerboundPlayerMove, ProtocolError>::failure(trailing.error());
   }
@@ -136,7 +80,7 @@ Expected<ClientboundPlayerMoveCorrection, ProtocolError> deserialize_clientbound
     return Expected<ClientboundPlayerMoveCorrection, ProtocolError>::failure(
         ProtocolError{"failed to decode player move correction"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "player message");
   if (!trailing) {
     return Expected<ClientboundPlayerMoveCorrection, ProtocolError>::failure(trailing.error());
   }
@@ -172,7 +116,7 @@ Expected<ClientboundPlayerVelocity, ProtocolError> deserialize_clientbound_playe
     return Expected<ClientboundPlayerVelocity, ProtocolError>::failure(
         ProtocolError{"failed to decode player velocity"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "player message");
   if (!trailing) {
     return Expected<ClientboundPlayerVelocity, ProtocolError>::failure(trailing.error());
   }
@@ -198,7 +142,7 @@ Expected<ClientboundSetMovementHz, ProtocolError> deserialize_clientbound_set_mo
     return Expected<ClientboundSetMovementHz, ProtocolError>::failure(
         ProtocolError{"failed to decode movement hz"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "player message");
   if (!trailing) {
     return Expected<ClientboundSetMovementHz, ProtocolError>::failure(trailing.error());
   }
@@ -250,7 +194,7 @@ deserialize_clientbound_player_block_break_progress(std::span<const u8> bytes) {
     progress.block_break.stage = stage.value();
   }
 
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "player message");
   if (!trailing) {
     return Expected<ClientboundPlayerBlockBreakProgress, ProtocolError>::failure(trailing.error());
   }

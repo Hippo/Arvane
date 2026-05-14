@@ -1,6 +1,7 @@
 #include "arv/asset/pack.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/io/files.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -193,11 +194,6 @@ constexpr u64 FnvPrime = 1099511628211ULL;
     const PackSource& pack,
     const std::filesystem::path& path) {
   return path.lexically_relative(pack.root);
-}
-
-[[nodiscard]] bool file_exists(const std::filesystem::path& path) {
-  std::error_code error;
-  return std::filesystem::is_regular_file(path, error);
 }
 
 [[nodiscard]] bool canonical_path_is_under(
@@ -618,7 +614,7 @@ constexpr u64 FnvPrime = 1099511628211ULL;
 [[nodiscard]] Expected<std::vector<std::string>, PackError> load_enabled_pack_ids(
     const std::filesystem::path& packs_root) {
   const std::filesystem::path enabled_path = packs_root / std::filesystem::path{EnabledPacksFileName};
-  if (!file_exists(enabled_path)) {
+  if (!io::regular_file_exists(enabled_path)) {
     return Expected<std::vector<std::string>, PackError>::success(
         {std::string{DefaultBasePackID}});
   }

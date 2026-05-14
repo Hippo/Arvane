@@ -1,25 +1,11 @@
 #include "arv/command/command_registry.hpp"
 
+#include "arv/core/string.hpp"
+
 #include <utility>
 
 namespace arv::command {
 namespace {
-
-[[nodiscard]] bool ascii_space(char c) noexcept {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
-[[nodiscard]] bool valid_registry_name(std::string_view name) noexcept {
-  if (name.empty()) {
-    return false;
-  }
-  for (const char c : name) {
-    if (ascii_space(c)) {
-      return false;
-    }
-  }
-  return true;
-}
 
 [[nodiscard]] CommandRegistry::Result registry_error(std::string message) {
   return CommandRegistry::Result::failure(CommandRegistryError{std::move(message)});
@@ -28,7 +14,7 @@ namespace {
 } // namespace
 
 CommandRegistry::Result CommandRegistry::register_command(Command command) {
-  if (!valid_registry_name(command.name)) {
+  if (command.name.empty() || contains_ascii_space(command.name)) {
     return registry_error("Command name must be non-empty and contain no whitespace.");
   }
   if (command_indices_.contains(command.name) || alias_indices_.contains(command.name)) {
@@ -48,7 +34,7 @@ CommandRegistry::Result CommandRegistry::register_alias(
     std::string alias,
     std::string command_name,
     bool visible_in_help) {
-  if (!valid_registry_name(alias)) {
+  if (alias.empty() || contains_ascii_space(alias)) {
     return registry_error("Command alias must be non-empty and contain no whitespace.");
   }
   if (command_indices_.contains(alias) || alias_indices_.contains(alias)) {

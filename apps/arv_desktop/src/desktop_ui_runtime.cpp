@@ -5,6 +5,7 @@
 #include "desktop_skin_textures.hpp"
 #include "ui_model.hpp"
 
+#include "arv/client/command_chat.hpp"
 #include "arv/player/player_constants.hpp"
 
 #include <algorithm>
@@ -141,45 +142,6 @@ namespace {
     scheme.push_back(ch);
   }
   return scheme == "http" || scheme == "https";
-}
-
-[[nodiscard]] std::string fallback_command_result_message(
-    const arv::text::LanguageCatalog& language,
-    command::CommandStatus status) {
-  switch (status) {
-    case command::CommandStatus::Success:
-      return language.text("ui.chat.command.success");
-    case command::CommandStatus::Failure:
-      return language.text("ui.chat.command.failure");
-    case command::CommandStatus::UsageError:
-      return language.text("ui.chat.command.usage_error");
-    case command::CommandStatus::PermissionDenied:
-      return language.text("ui.chat.command.permission_denied");
-    case command::CommandStatus::UnknownCommand:
-      return language.text("ui.chat.command.unknown_command");
-    case command::CommandStatus::InvalidSource:
-      return language.text("ui.chat.command.invalid_source");
-    case command::CommandStatus::InternalError:
-      return language.text("ui.chat.command.internal_error");
-  }
-  return language.text("ui.chat.command.failure");
-}
-
-void append_command_result_to_chat(
-    client::ClientRuntime& client,
-    const command::CommandResult& result,
-    const arv::text::LanguageCatalog& language) {
-  bool wrote_message = false;
-  for (const command::CommandMessage& message : result.messages) {
-    if (message.text.empty()) {
-      continue;
-    }
-    client.add_chat_message(message.text);
-    wrote_message = true;
-  }
-  if (!wrote_message) {
-    client.add_chat_message(fallback_command_result_message(language, result.status));
-  }
 }
 
 [[nodiscard]] std::optional<f32> passive_chat_opacity(
@@ -720,7 +682,7 @@ bool DesktopFrameLoop::route_chat_mouse_input(
               handled = true;
               break;
             case arv::text::ClickAction::RunCommand:
-              append_command_result_to_chat(
+              client::append_command_result_to_chat(
                   *active_session.client,
                   execute_chat_command(active_session, click.value),
                   assets_.language);

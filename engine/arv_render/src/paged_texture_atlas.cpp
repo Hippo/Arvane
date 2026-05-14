@@ -2,6 +2,8 @@
 
 #include "arv/core/log.hpp"
 
+#include "render_gl_utils.hpp"
+
 #include <algorithm>
 #include <utility>
 
@@ -41,16 +43,6 @@ namespace {
     return value;
   }
   return static_cast<u16>(std::min<u32>(value, static_cast<u32>(limit)));
-}
-
-[[nodiscard]] u32 full_mipmap_max_level(u32 width, u32 height) noexcept {
-  u32 size = std::max(width, height);
-  u32 level = 0;
-  while (size > 1U) {
-    size /= 2U;
-    ++level;
-  }
-  return level;
 }
 
 } // namespace
@@ -111,7 +103,7 @@ bool PagedTextureAtlas::initialize_on_render_thread() {
       GL_TEXTURE_2D_ARRAY,
       GL_TEXTURE_MAX_LEVEL,
       config_.generate_mipmaps
-          ? static_cast<GLint>(full_mipmap_max_level(actual_page_width_, actual_page_height_))
+          ? static_cast<GLint>(detail::full_mipmap_max_level(actual_page_width_, actual_page_height_))
           : 0);
   glTexImage3D(
       GL_TEXTURE_2D_ARRAY,

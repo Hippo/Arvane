@@ -1,5 +1,7 @@
 #include "arv/persistence/region_file.hpp"
 
+#include "atomic_file.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -335,10 +337,6 @@ void write_fluid_cells(ByteWriter& writer, const std::array<voxel::FluidCell, vo
   return Expected<std::vector<std::string>, PersistenceError>::success(std::move(block_state_table));
 }
 
-[[nodiscard]] std::filesystem::path temporary_path_for(const std::filesystem::path& path) {
-  return path.parent_path() / (path.filename().string() + ".tmp");
-}
-
 Expected<void, PersistenceError> write_binary_atomic(
     const std::filesystem::path& path,
     std::span<const u8> bytes) {
@@ -349,7 +347,7 @@ Expected<void, PersistenceError> write_binary_atomic(
         make_error("failed to create directory for region file: " + error.message()));
   }
 
-  const std::filesystem::path temp_path = temporary_path_for(path);
+  const std::filesystem::path temp_path = detail::temporary_path_for(path);
   {
     std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
     if (!output) {

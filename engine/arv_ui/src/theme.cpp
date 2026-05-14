@@ -3,6 +3,7 @@
 #include "arv/asset/pack.hpp"
 #include "arv/asset/resource.hpp"
 #include "arv/core/log.hpp"
+#include "arv/io/files.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -10,7 +11,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
 #include <yaml-cpp/yaml.h>
@@ -357,8 +357,6 @@ void parse_theme_node(const YAML::Node& root, UiTheme& theme, UiThemeLoadResult&
     UiThemeLoadResult& result,
     std::vector<std::string>& stack);
 
-[[nodiscard]] bool file_exists(const std::filesystem::path& path);
-
 [[nodiscard]] std::optional<UiTheme> read_theme_path(
     const std::filesystem::path& path,
     std::string theme_id,
@@ -465,7 +463,7 @@ struct LocalThemeReference {
         "cyclic theme inheritance detected: " + describe_theme_chain(stack, theme_id));
     return std::nullopt;
   }
-  if (!file_exists(path)) {
+  if (!io::regular_file_exists(path)) {
     add_warning(result, "theme not found: " + path.string());
     return std::nullopt;
   }
@@ -534,11 +532,6 @@ void parse_style_file(const std::filesystem::path& path, UiThemeLoadResult& resu
   } catch (const std::exception& error) {
     add_warning(result, "could not load style config " + path.string() + ": " + error.what());
   }
-}
-
-[[nodiscard]] bool file_exists(const std::filesystem::path& path) {
-  std::error_code error;
-  return std::filesystem::is_regular_file(path, error);
 }
 
 [[nodiscard]] std::string theme_asset_id_from_config(
@@ -655,7 +648,7 @@ UiThemeLoadResult load_ui_theme(
   result.config = make_default_ui_style_config();
   result.theme = make_default_ui_theme();
 
-  if (file_exists(style_file)) {
+  if (io::regular_file_exists(style_file)) {
     parse_style_file(style_file, result);
   } else {
     add_warning(result, "style config not found, using default theme: " + style_file.string());
@@ -704,7 +697,7 @@ UiThemeLoadResult load_ui_theme_from_paths(
   result.config = make_default_ui_style_config();
   result.theme = make_default_ui_theme();
 
-  if (file_exists(style_file)) {
+  if (io::regular_file_exists(style_file)) {
     parse_style_file(style_file, result);
   } else {
     add_warning(result, "style config not found, using default theme: " + style_file.string());
@@ -720,7 +713,7 @@ UiThemeLoadResult load_ui_theme_from_paths(
       themes_root / std::filesystem::path{result.config.theme + ".yaml"};
   std::optional<UiTheme> loaded;
   std::vector<std::string> theme_stack;
-  if (file_exists(selected_path)) {
+  if (io::regular_file_exists(selected_path)) {
     loaded = read_theme_path(
         selected_path,
         result.config.theme,
@@ -737,7 +730,7 @@ UiThemeLoadResult load_ui_theme_from_paths(
     result.used_theme_fallback = true;
     const std::filesystem::path default_path = themes_root / "default.yaml";
     theme_stack.clear();
-    if (file_exists(default_path)) {
+    if (io::regular_file_exists(default_path)) {
       loaded = read_theme_path(default_path, "default", themes_root, result, theme_stack);
       result.loaded_theme = "default";
     } else {

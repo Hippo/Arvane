@@ -350,6 +350,32 @@ inline void add_text_box(
   return true;
 }
 
+[[nodiscard]] inline bool parse_index_after_prefix(
+    std::string_view stable_id,
+    std::string_view prefix,
+    usize& value) noexcept {
+  if (!stable_id.starts_with(prefix)) {
+    return false;
+  }
+  std::string_view suffix = stable_id.substr(prefix.size());
+  const usize dot = suffix.find('.');
+  if (dot != std::string_view::npos) {
+    suffix = suffix.substr(0U, dot);
+  }
+  if (suffix.empty()) {
+    return false;
+  }
+  usize parsed = 0;
+  for (const char ch : suffix) {
+    if (ch < '0' || ch > '9') {
+      return false;
+    }
+    parsed = parsed * 10U + static_cast<usize>(ch - '0');
+  }
+  value = parsed;
+  return true;
+}
+
 [[nodiscard]] inline std::string trim_copy(std::string_view value) {
   usize begin = 0;
   while (begin < value.size() &&

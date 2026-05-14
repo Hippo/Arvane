@@ -1,5 +1,7 @@
 #include "arv_mason/mason_plugin.hpp"
 
+#include "command_utils.hpp"
+
 #include "arv_mason/ids.hpp"
 
 #include <algorithm>
@@ -7,37 +9,11 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace arv_mason {
 namespace {
-
-[[nodiscard]] std::vector<std::string> copy_args(const MasonPlugin::Args& args) {
-  std::vector<std::string> out;
-  out.reserve(args.size());
-  for (std::string_view arg : args) {
-    out.emplace_back(arg);
-  }
-  return out;
-}
-
-[[nodiscard]] MasonPlugin::Args view_args(const std::vector<std::string>& args) {
-  MasonPlugin::Args out;
-  out.reserve(args.size());
-  for (const std::string& arg : args) {
-    out.emplace_back(arg);
-  }
-  return out;
-}
-
-[[nodiscard]] std::string count_text(std::uint64_t count) {
-  std::ostringstream out;
-  out << count;
-  return out.str();
-}
 
 [[nodiscard]] std::string operation_kind_name(PendingOperationKind kind) {
   switch (kind) {

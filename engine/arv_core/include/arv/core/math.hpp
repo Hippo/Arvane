@@ -154,6 +154,18 @@ template<typename T>
   return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
 }
 
+[[nodiscard]] constexpr f32 distance_squared(Vec3f from, Vec3f to) noexcept {
+  const Vec3f delta = from - to;
+  return dot(delta, delta);
+}
+
+[[nodiscard]] constexpr Vec3f lerp(Vec3f from, Vec3f to, f32 alpha) noexcept {
+  return {
+      from.x + (to.x - from.x) * alpha,
+      from.y + (to.y - from.y) * alpha,
+      from.z + (to.z - from.z) * alpha};
+}
+
 template<typename T>
 [[nodiscard]] constexpr Vec3<T> cross(Vec3<T> lhs, Vec3<T> rhs) noexcept {
   return {

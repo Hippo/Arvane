@@ -1,28 +1,16 @@
 #include "arv_mason/mason_plugin.hpp"
 
+#include "../string_utils.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 namespace arv_mason {
-namespace {
-
-[[nodiscard]] bool contains_string(const std::vector<std::string>& values, std::string_view value) {
-  return std::find(values.begin(), values.end(), value) != values.end();
-}
-
-void add_candidate(std::vector<std::string>& candidates, std::string value) {
-  if (!contains_string(candidates, value)) {
-    candidates.push_back(std::move(value));
-  }
-}
-
-} // namespace
 
 std::optional<std::uint32_t> MasonPlugin::parse_block_variant(
     arv::CommandContext& ctx,
@@ -33,14 +21,14 @@ std::optional<std::uint32_t> MasonPlugin::parse_block_variant(
   }
   std::vector<std::string> candidates;
   const std::string raw{text};
-  add_candidate(candidates, raw);
+  append_unique_string(candidates, raw);
   if (raw.find(':') == std::string::npos) {
-    add_candidate(candidates, "arvane:" + raw);
+    append_unique_string(candidates, "arvane:" + raw);
   }
   const std::vector<std::string> base = candidates;
   for (const std::string& candidate : base) {
     if (candidate.find('[') == std::string::npos) {
-      add_candidate(candidates, candidate + "[]");
+      append_unique_string(candidates, candidate + "[]");
     }
   }
   for (const std::string& candidate : candidates) {

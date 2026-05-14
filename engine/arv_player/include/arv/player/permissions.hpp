@@ -23,6 +23,8 @@ enum class TriState : u8 {
   Deny,
 };
 
+[[nodiscard]] std::optional<TriState> tri_state_from_string(std::string_view text);
+
 struct CorePermissionSet {
   TriState can_take_damage{TriState::Unset};
   TriState can_modify_world{TriState::Unset};
@@ -35,6 +37,11 @@ struct CorePermissionSet {
 
   constexpr bool operator==(const CorePermissionSet&) const = default;
 };
+
+[[nodiscard]] bool set_core_permission_by_name(
+    CorePermissionSet& permissions,
+    std::string_view name,
+    TriState value) noexcept;
 
 struct ResolvedCorePermissions {
   bool can_take_damage{true};

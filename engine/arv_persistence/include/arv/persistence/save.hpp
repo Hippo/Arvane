@@ -3,6 +3,7 @@
 #include "arv/core/expected.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
+#include "arv/asset/pack.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/persistence/region_file.hpp"
@@ -94,6 +95,11 @@ struct SavedServerSummary {
 
 [[nodiscard]] u64 hash_block_registry(const voxel::BlockRegistry& registry) noexcept;
 [[nodiscard]] u64 hash_item_registry(const player::ItemRegistry& registry) noexcept;
+[[nodiscard]] std::vector<RequiredPackMetadata> required_pack_metadata(
+    std::span<const asset::RequiredPack> packs);
+void upsert_player_save(
+    std::vector<PlayerSaveData>& players,
+    PlayerSaveData save);
 [[nodiscard]] std::vector<SavedServerSummary> discover_saved_servers(
     const std::filesystem::path& saves_root);
 [[nodiscard]] std::vector<SavedWorldSummary> discover_saved_worlds(

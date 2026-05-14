@@ -145,18 +145,6 @@ const GenerationSurfaceProfile* Chunk::generation_surface_profile() const noexce
 namespace arv::world::detail {
 namespace {
 
-[[nodiscard]] bool simulation_center_less(
-    ChunkSectionCoord lhs,
-    ChunkSectionCoord rhs) noexcept {
-  if (lhs.value.x != rhs.value.x) {
-    return lhs.value.x < rhs.value.x;
-  }
-  if (lhs.value.y != rhs.value.y) {
-    return lhs.value.y < rhs.value.y;
-  }
-  return lhs.value.z < rhs.value.z;
-}
-
 [[nodiscard]] bool simulation_membership_state(
     voxel::ChunkLifecycleState state) noexcept {
   return state == voxel::ChunkLifecycleState::Loaded ||
@@ -385,7 +373,7 @@ void WorldChunkStore::update_simulation_radii(
   std::sort(
       normalized_centers.begin(),
       normalized_centers.end(),
-      simulation_center_less);
+      chunk_section_less_xyz);
   normalized_centers.erase(
       std::unique(normalized_centers.begin(), normalized_centers.end()),
       normalized_centers.end());

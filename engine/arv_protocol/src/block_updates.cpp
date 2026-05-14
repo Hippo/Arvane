@@ -1,34 +1,9 @@
 #include "arv/protocol/block_updates.hpp"
+#include "arv/protocol/message_primitives.hpp"
 
 #include <utility>
 
 namespace arv::protocol {
-namespace {
-
-void write_block_pos(MessageWriter& writer, BlockPos pos) {
-  writer.write<i32>(pos.value.x);
-  writer.write<i32>(pos.value.y);
-  writer.write<i32>(pos.value.z);
-}
-
-Expected<BlockPos, ProtocolError> read_block_pos(MessageReader& reader) {
-  auto x = reader.read<i32>();
-  auto y = reader.read<i32>();
-  auto z = reader.read<i32>();
-  if (!x || !y || !z) {
-    return Expected<BlockPos, ProtocolError>::failure(ProtocolError{"failed to decode block position"});
-  }
-  return Expected<BlockPos, ProtocolError>::success({{x.value(), y.value(), z.value()}});
-}
-
-Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
-  if (reader.remaining() != 0U) {
-    return Expected<void, ProtocolError>::failure(ProtocolError{"trailing bytes in block update message"});
-  }
-  return Expected<void, ProtocolError>::success();
-}
-
-} // namespace
 
 std::vector<u8> serialize_clientbound_block_update_batch(const ClientboundBlockUpdateBatch& batch) {
   MessageWriter writer;
@@ -76,7 +51,7 @@ Expected<ClientboundBlockUpdateBatch, ProtocolError> deserialize_clientbound_blo
                              flags.value(),
                              tick.value()});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "block update message");
   if (!trailing) {
     return Expected<ClientboundBlockUpdateBatch, ProtocolError>::failure(trailing.error());
   }

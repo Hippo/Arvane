@@ -73,6 +73,15 @@ using LanguageResult = Expected<LanguageCatalog, LanguageError>;
     std::string_view domain,
     std::string_view namespaced_id,
     std::string_view suffix = DisplayNameSuffix);
+[[nodiscard]] std::string text_or_fallback(
+    const LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback);
+[[nodiscard]] std::string format_or_fallback(
+    const LanguageCatalog* language,
+    std::string_view key,
+    std::initializer_list<FormatArg> args,
+    std::string_view fallback);
 [[nodiscard]] std::string block_display_name_key(std::string_view block_name);
 [[nodiscard]] std::string item_display_name_key(std::string_view item_name);
 [[nodiscard]] std::string entity_display_name_key(std::string_view entity_name);

@@ -1,5 +1,6 @@
 set(ARV_CORE_HEADERS
   include/arv/core/arena.hpp
+  include/arv/core/atomic.hpp
   include/arv/core/completion_queue.hpp
   include/arv/core/coordinates.hpp
   include/arv/core/domain_ids.hpp
@@ -11,6 +12,7 @@ set(ARV_CORE_HEADERS
   include/arv/core/perf_stats.hpp
   include/arv/core/profiling.hpp
   include/arv/core/rate_limiter.hpp
+  include/arv/core/string.hpp
   include/arv/core/time.hpp
   include/arv/core/types.hpp
 )

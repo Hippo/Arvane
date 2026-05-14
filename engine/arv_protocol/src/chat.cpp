@@ -1,4 +1,5 @@
 #include "arv/protocol/chat.hpp"
+#include "arv/protocol/message_primitives.hpp"
 
 #include <utility>
 
@@ -22,17 +23,6 @@ inline constexpr u16 KnownStyleFlags = StyleColor | StyleBold | StyleItalic |
 struct RichTextReadStats {
   usize nodes{};
 };
-
-[[nodiscard]] Expected<void, ProtocolError> require_no_trailing_bytes(
-    MessageReader& reader,
-    std::string_view packet_name) {
-  if (reader.remaining() != 0U) {
-    std::string message{"trailing bytes in "};
-    message.append(packet_name);
-    return Expected<void, ProtocolError>::failure(ProtocolError{std::move(message)});
-  }
-  return Expected<void, ProtocolError>::success();
-}
 
 [[nodiscard]] Expected<std::string, ProtocolError> read_bounded_string(
     MessageReader& reader,

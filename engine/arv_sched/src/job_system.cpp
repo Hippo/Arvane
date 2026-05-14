@@ -1,5 +1,7 @@
 #include "arv/sched/job_system.hpp"
 
+#include "arv/core/atomic.hpp"
+
 #include "arv/core/arena.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/perf_stats.hpp"
@@ -77,17 +79,6 @@ constexpr usize CompletionTargetCount = 5U;
       return 4U;
   }
   return 0U;
-}
-
-void update_peak(std::atomic<u32>& target, u32 value) noexcept {
-  u32 current = target.load(std::memory_order_relaxed);
-  while (current < value &&
-         !target.compare_exchange_weak(
-             current,
-             value,
-             std::memory_order_relaxed,
-             std::memory_order_relaxed)) {
-  }
 }
 
 [[nodiscard]] usize hardware_thread_count_or_one_impl() noexcept {
@@ -380,7 +371,7 @@ struct JobSystem::Impl {
     submitted.fetch_add(1U, std::memory_order_relaxed);
     const usize index = lane_index(lane);
     queued_jobs[index].fetch_add(1U, std::memory_order_relaxed);
-    update_peak(peak_queued_jobs, queued_total());
+    core::update_atomic_maximum(peak_queued_jobs, queued_total());
   }
 
   void record_started(JobLane lane) noexcept {

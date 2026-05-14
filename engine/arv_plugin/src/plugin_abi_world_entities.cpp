@@ -286,14 +286,6 @@ ArvResult api_entity_has_tag(
   return ok(ctx);
 }
 
-ArvDataDocumentHandle api_data_create_document(void* context, uint32_t schema_version) {
-  PluginCallContext* ctx = call_context(context);
-  if (ctx == nullptr) {
-    return 0U;
-  }
-  return store_document(ctx, data::DataDocument{schema_version, data::DataValue::object()});
-}
-
 } // namespace
 
 void fill_world_entity_api(PluginAPIStorage& storage) {

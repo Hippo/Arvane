@@ -37,6 +37,24 @@
 
 namespace arv::server::detail {
 
+[[nodiscard]] inline protocol::PlayerMoveFlags player_move_flags_from_state(
+    const player::PlayerState& player_state) noexcept {
+  protocol::PlayerMoveFlags flags = protocol::PlayerMoveFlags::None;
+  if (player_state.grounded) {
+    flags |= protocol::PlayerMoveFlags::OnGround;
+  }
+  if (player_state.sneaking) {
+    flags |= protocol::PlayerMoveFlags::Sneaking;
+  }
+  if (player_state.swimming) {
+    flags |= protocol::PlayerMoveFlags::Swimming;
+  }
+  if (player_state.movement_mode == player::MovementMode::Flying) {
+    flags |= protocol::PlayerMoveFlags::Flying;
+  }
+  return flags;
+}
+
 struct BlockBreakAttempt {
   BlockPos block{};
   voxel::BlockVariantID variant{};

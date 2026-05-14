@@ -1,22 +1,13 @@
 #include "arv_mason/mason_plugin.hpp"
 
+#include "command_utils.hpp"
+
 #include "arv_mason/ids.hpp"
 
-#include <cstdint>
-#include <sstream>
 #include <string>
 #include <utility>
 
 namespace arv_mason {
-namespace {
-
-[[nodiscard]] std::string count_text(std::uint64_t count) {
-  std::ostringstream out;
-  out << count;
-  return out.str();
-}
-
-} // namespace
 
 void MasonPlugin::push_history(
     ArvPlayerID,

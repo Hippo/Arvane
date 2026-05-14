@@ -12,18 +12,6 @@ inline constexpr Seconds MaxEntitySmoothingSeconds = 0.12F;
 inline constexpr f32 PositionChangeEpsilonSquared = 0.000001F;
 inline constexpr f32 TeleportSnapDistanceSquared = 16.0F * 16.0F;
 
-[[nodiscard]] f32 distance_squared(Vec3f from, Vec3f to) noexcept {
-  const Vec3f delta = to - from;
-  return dot(delta, delta);
-}
-
-[[nodiscard]] Vec3f lerp(Vec3f from, Vec3f to, f32 alpha) noexcept {
-  return {
-      from.x + (to.x - from.x) * alpha,
-      from.y + (to.y - from.y) * alpha,
-      from.z + (to.z - from.z) * alpha};
-}
-
 [[nodiscard]] f32 quat_dot(Quatf lhs, Quatf rhs) noexcept {
   return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z + lhs.w * rhs.w;
 }

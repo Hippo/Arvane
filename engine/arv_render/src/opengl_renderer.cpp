@@ -3,6 +3,8 @@
 #include "arv/core/log.hpp"
 #include "arv/core/profiling.hpp"
 
+#include "render_gl_utils.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -40,16 +42,6 @@ static_assert(sizeof(Vec3f) == sizeof(f32) * 3U);
       return UiTextureSlotPlayerSkin;
   }
   return UiTextureSlotWhite;
-}
-
-[[nodiscard]] u32 full_mipmap_max_level(u32 width, u32 height) noexcept {
-  u32 size = std::max(width, height);
-  u32 level = 0;
-  while (size > 1U) {
-    size /= 2U;
-    ++level;
-  }
-  return level;
 }
 
 [[nodiscard]] GLsizeiptr next_buffer_capacity(GLsizeiptr required) noexcept {
@@ -1072,7 +1064,7 @@ OpenGLRenderer::GpuTexture OpenGLRenderer::create_texture_array(
                                                                    : GL_NEAREST_MIPMAP_NEAREST)
                                 : mag_filter;
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, mag_filter);
-  const u32 full_max_level = mipmaps ? full_mipmap_max_level(upload.width, upload.height) : 0U;
+  const u32 full_max_level = mipmaps ? detail::full_mipmap_max_level(upload.width, upload.height) : 0U;
   const u32 max_level = mipmaps && upload.limit_mipmap_levels
                             ? std::min(upload.max_mipmap_level, full_max_level)
                             : full_max_level;

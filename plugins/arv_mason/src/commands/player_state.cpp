@@ -1,22 +1,18 @@
 #include "arv_mason/mason_plugin.hpp"
 
+#include "command_utils.hpp"
+
 #include "arv_mason/ids.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <optional>
-#include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace arv_mason {
 namespace {
-
-[[nodiscard]] std::string count_text(std::uint64_t count) {
-  std::ostringstream out;
-  out << count;
-  return out.str();
-}
 
 [[nodiscard]] ArvBlockPos floor_block_pos(ArvVec3 position) {
   return {

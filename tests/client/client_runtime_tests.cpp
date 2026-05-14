@@ -9,6 +9,7 @@
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "support/net_events.hpp"
 
 #include <gtest/gtest.h>
 
@@ -21,16 +22,7 @@
 
 namespace {
 
-const arv::net::NetworkEvent* find_event(
-    const std::vector<arv::net::NetworkEvent>& events,
-    arv::net::NetworkEventType type) {
-  for (const arv::net::NetworkEvent& event : events) {
-    if (event.type == type) {
-      return &event;
-    }
-  }
-  return nullptr;
-}
+using arv::testsupport::find_event;
 
 arv::u32 player_move_count(const std::vector<arv::net::NetworkEvent>& events) {
   arv::u32 count = 0;

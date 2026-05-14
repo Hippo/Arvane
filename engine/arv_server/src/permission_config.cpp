@@ -1,9 +1,7 @@
 #include "arv/server/permission_config.hpp"
 
-#include <algorithm>
-#include <cctype>
-#include <fstream>
-#include <iterator>
+#include "arv/io/files.hpp"
+
 #include <optional>
 #include <string>
 #include <system_error>
@@ -20,55 +18,12 @@ using Result = PermissionGroupConfigResult;
   return {std::move(message)};
 }
 
-[[nodiscard]] std::string lower_ascii(std::string text) {
-  std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return text;
-}
-
 [[nodiscard]] std::optional<player::TriState> parse_tri_state(const YAML::Node& node) {
   if (!node || !node.IsScalar()) {
     return std::nullopt;
   }
 
-  const std::string text = lower_ascii(node.as<std::string>());
-  if (text == "allow" || text == "allowed" || text == "true" || text == "yes") {
-    return player::TriState::Allow;
-  }
-  if (text == "deny" || text == "denied" || text == "false" || text == "no") {
-    return player::TriState::Deny;
-  }
-  if (text == "unset" || text == "null" || text == "none") {
-    return player::TriState::Unset;
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] bool set_core_permission(
-    player::CorePermissionSet& core,
-    std::string_view name,
-    player::TriState value) {
-  if (name == "can_take_damage") {
-    core.can_take_damage = value;
-  } else if (name == "can_modify_world") {
-    core.can_modify_world = value;
-  } else if (name == "can_interact") {
-    core.can_interact = value;
-  } else if (name == "can_open_inventory") {
-    core.can_open_inventory = value;
-  } else if (name == "has_creative_inventory") {
-    core.has_creative_inventory = value;
-  } else if (name == "can_fly") {
-    core.can_fly = value;
-  } else if (name == "has_collision") {
-    core.has_collision = value;
-  } else if (name == "is_visible_to_others") {
-    core.is_visible_to_others = value;
-  } else {
-    return false;
-  }
-  return true;
+  return player::tri_state_from_string(node.as<std::string>());
 }
 
 [[nodiscard]] Expected<std::vector<std::string>, PermissionConfigError> parse_inherits(
@@ -128,7 +83,7 @@ using Result = PermissionGroupConfigResult;
           error("permission group '" + std::string{group_id} +
                 "' has invalid core permission value for '" + key + "'"));
     }
-    if (!set_core_permission(core, key, value.value())) {
+    if (!player::set_core_permission_by_name(core, key, value.value())) {
       return Expected<void, PermissionConfigError>::failure(
           error("permission group '" + std::string{group_id} +
                 "' has unknown core permission '" + key + "'"));
@@ -218,17 +173,6 @@ using Result = PermissionGroupConfigResult;
       std::move(group));
 }
 
-[[nodiscard]] Expected<std::string, PermissionConfigError> read_text_file(
-    const std::filesystem::path& path) {
-  std::ifstream input(path);
-  if (!input) {
-    return Expected<std::string, PermissionConfigError>::failure(
-        error("failed to open permissions file: " + path.string()));
-  }
-  return Expected<std::string, PermissionConfigError>::success(
-      std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}});
-}
-
 } // namespace
 
 std::filesystem::path permission_config_file_path(
@@ -287,9 +231,9 @@ PermissionGroupConfigResult load_server_permission_groups(
     return Result::failure(error("permissions path is not a file: " + path.string()));
   }
 
-  auto text = read_text_file(path);
+  auto text = io::read_text_file_contents(path);
   if (!text) {
-    return Result::failure(text.error());
+    return Result::failure(error("failed to open permissions file: " + path.string()));
   }
   return parse_permission_groups_yaml(text.value());
 }

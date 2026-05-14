@@ -1,5 +1,7 @@
 #include "desktop_frame_loop.hpp"
 
+#include "arv/client/command_chat.hpp"
+
 #include <string>
 #include <string_view>
 
@@ -8,45 +10,6 @@ namespace {
 
 [[nodiscard]] bool is_command_chat_draft(std::string_view draft) noexcept {
   return !draft.empty() && draft.front() == '/';
-}
-
-[[nodiscard]] std::string fallback_command_result_message(
-    const arv::text::LanguageCatalog& language,
-    command::CommandStatus status) {
-  switch (status) {
-    case command::CommandStatus::Success:
-      return language.text("ui.chat.command.success");
-    case command::CommandStatus::Failure:
-      return language.text("ui.chat.command.failure");
-    case command::CommandStatus::UsageError:
-      return language.text("ui.chat.command.usage_error");
-    case command::CommandStatus::PermissionDenied:
-      return language.text("ui.chat.command.permission_denied");
-    case command::CommandStatus::UnknownCommand:
-      return language.text("ui.chat.command.unknown_command");
-    case command::CommandStatus::InvalidSource:
-      return language.text("ui.chat.command.invalid_source");
-    case command::CommandStatus::InternalError:
-      return language.text("ui.chat.command.internal_error");
-  }
-  return language.text("ui.chat.command.failure");
-}
-
-void append_command_result_to_chat(
-    client::ClientRuntime& client,
-    const command::CommandResult& result,
-    const arv::text::LanguageCatalog& language) {
-  bool wrote_message = false;
-  for (const command::CommandMessage& message : result.messages) {
-    if (message.text.empty()) {
-      continue;
-    }
-    client.add_chat_message(message.text);
-    wrote_message = true;
-  }
-  if (!wrote_message) {
-    client.add_chat_message(fallback_command_result_message(language, result.status));
-  }
 }
 
 } // namespace
@@ -95,7 +58,7 @@ void DesktopFrameLoop::handle_chat_command_submit(
 
   client_input.text_submit_pressed = false;
   active_session->client->close_chat();
-  append_command_result_to_chat(
+  client::append_command_result_to_chat(
       *active_session->client,
       execute_chat_command(*active_session, command_text),
       assets_.language);

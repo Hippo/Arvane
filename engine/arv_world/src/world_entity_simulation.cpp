@@ -1,5 +1,6 @@
 #include "world_runtime_internal.hpp"
 
+#include "arv/world/entity_goal_utils.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/world_queries.hpp"
 
@@ -12,22 +13,6 @@ namespace arv::world::detail {
 namespace {
 
 inline constexpr f32 AirborneIntentBlend = 0.10F;
-
-[[nodiscard]] f32 positive_fraction(f32 value) noexcept {
-  const f32 whole = std::floor(value);
-  return value - whole;
-}
-
-[[nodiscard]] Vec3f deterministic_wander_direction(
-    EntityID entity_id,
-    TickIndex tick,
-    usize goal_index) noexcept {
-  const f32 seed =
-      static_cast<f32>(entity_id.value * 37U + static_cast<u32>(goal_index) * 101U) +
-      static_cast<f32>(tick % 100000U) * 0.173F;
-  const f32 angle = positive_fraction(std::sin(seed) * 43758.5453F) * TauRadians;
-  return {std::cos(angle), 0.0F, std::sin(angle)};
-}
 
 [[nodiscard]] Aabb3f entity_body_bounds(Vec3f position, Vec3f box) noexcept {
   const Vec3f size{
@@ -47,17 +32,6 @@ inline constexpr f32 AirborneIntentBlend = 0.10F;
   return {
       {position.x - HalfWidth, position.y, position.z - HalfWidth},
       {position.x + HalfWidth, position.y + Height, position.z + HalfWidth}};
-}
-
-[[nodiscard]] f32 fluid_surface_y(BlockPos pos, voxel::FluidCell fluid) noexcept {
-  if (fluid.empty()) {
-    return static_cast<f32>(pos.value.y);
-  }
-  constexpr f32 MaxFluidLevel = 8.0F;
-  const f32 level = fluid.source()
-                        ? MaxFluidLevel
-                        : std::clamp(static_cast<f32>(fluid.level), 0.0F, MaxFluidLevel);
-  return static_cast<f32>(pos.value.y) + level / MaxFluidLevel;
 }
 
 struct DroppedItemLiquidProbe {
@@ -86,7 +60,7 @@ struct DroppedItemLiquidProbe {
           continue;
         }
 
-        const f32 surface_y = fluid_surface_y(pos, fluid);
+        const f32 surface_y = voxel::fluid_surface_y(pos, fluid);
         if (bounds.max.y <= static_cast<f32>(y) + collision_epsilon ||
             bounds.min.y >= surface_y - collision_epsilon) {
           continue;
@@ -107,10 +81,6 @@ struct DroppedItemLiquidProbe {
   }
   const player::ItemRecord* item = item_registry->item(dropped.stack.item);
   return item == nullptr ? player::DefaultItemBuoyancy : item->buoyancy;
-}
-
-[[nodiscard]] bool has_horizontal_motion(Vec3f value) noexcept {
-  return value.x * value.x + value.z * value.z > 0.000001F;
 }
 
 [[nodiscard]] bool player_animation_is_sneaking(std::string_view animation_name) noexcept {
@@ -231,93 +201,6 @@ void update_player_animation_state(
       query,
       crossed.resolved_bounds,
       collision_epsilon * 2.0F);
-}
-
-[[nodiscard]] f32 horizontal_progress_squared(
-    const physics::ICollisionQuery& query,
-    const Aabb3f& bounds,
-    Vec3f direction,
-    f32 probe_distance,
-    f32 collision_epsilon) {
-  const Vec3f horizontal_direction = normalize_or_zero({direction.x, 0.0F, direction.z});
-  if (!has_horizontal_motion(horizontal_direction)) {
-    return false;
-  }
-
-  const physics::MovementResolution resolved = physics::resolve_movement(
-      query,
-      bounds,
-      horizontal_direction * std::max(probe_distance, collision_epsilon * 4.0F),
-      collision_epsilon);
-  return horizontal_length_squared(resolved.applied_delta);
-}
-
-[[nodiscard]] Vec3f cardinal_horizontal_direction(usize index) noexcept {
-  switch (index % 4U) {
-    case 0U:
-      return {1.0F, 0.0F, 0.0F};
-    case 1U:
-      return {-1.0F, 0.0F, 0.0F};
-    case 2U:
-      return {0.0F, 0.0F, 1.0F};
-    default:
-      return {0.0F, 0.0F, -1.0F};
-  }
-}
-
-[[nodiscard]] Vec3f random_clear_wander_direction(
-    EntityID entity_id,
-    TickIndex tick,
-    usize goal_index,
-    const physics::ICollisionQuery& query,
-    const Aabb3f& bounds,
-    Vec3f blocked_delta,
-    f32 collision_epsilon) {
-  const f32 probe_distance = std::sqrt(horizontal_length_squared(blocked_delta));
-  Vec3f fallback{};
-  Vec3f best{};
-  f32 best_score{};
-
-  const auto consider = [&](Vec3f candidate) {
-    candidate.y = 0.0F;
-    candidate = normalize_or_zero(candidate);
-    if (!has_horizontal_motion(candidate)) {
-      return;
-    }
-    if (!has_horizontal_motion(fallback)) {
-      fallback = candidate;
-    }
-
-    const f32 score = horizontal_progress_squared(
-        query,
-        bounds,
-        candidate,
-        probe_distance,
-        collision_epsilon);
-    if (score > best_score) {
-      best_score = score;
-      best = candidate;
-    }
-  };
-
-  constexpr usize MaxAttempts = 12;
-  for (usize attempt = 0; attempt < MaxAttempts; ++attempt) {
-    consider(deterministic_wander_direction(
-        entity_id,
-        tick + static_cast<TickIndex>(attempt + 1U),
-        goal_index + attempt + 1U));
-  }
-
-  const usize cardinal_start =
-      static_cast<usize>(entity_id.value + static_cast<u64>(tick) + goal_index);
-  for (usize attempt = 0; attempt < 4U; ++attempt) {
-    consider(cardinal_horizontal_direction(cardinal_start + attempt));
-  }
-
-  if (best_score > collision_epsilon * collision_epsilon) {
-    return best;
-  }
-  return fallback;
 }
 
 } // namespace

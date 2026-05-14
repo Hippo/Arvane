@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/core/coordinates.hpp"
 #include "arv/core/id.hpp"
 #include "arv/core/types.hpp"
 
@@ -100,6 +101,19 @@ struct FluidDefinition {
     u8 level,
     FluidFlags flags = FluidFlags::None) noexcept {
   return {definition.type, level > definition.max_level ? definition.max_level : level, flags};
+}
+
+[[nodiscard]] constexpr f32 fluid_surface_y(BlockPos pos, FluidCell fluid) noexcept {
+  if (fluid.empty()) {
+    return static_cast<f32>(pos.value.y);
+  }
+  constexpr f32 MaxFluidLevel = 8.0F;
+  const f32 raw_level = static_cast<f32>(fluid.level);
+  const f32 level =
+      fluid.source()
+          ? MaxFluidLevel
+          : (raw_level < 0.0F ? 0.0F : (raw_level > MaxFluidLevel ? MaxFluidLevel : raw_level));
+  return static_cast<f32>(pos.value.y) + level / MaxFluidLevel;
 }
 
 } // namespace arv::voxel

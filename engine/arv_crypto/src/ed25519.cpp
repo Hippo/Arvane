@@ -2,19 +2,28 @@
 
 #include "arv/crypto/crypto_init.hpp"
 
+#include "sodium_bytes.hpp"
+
+#include <algorithm>
+
 #include <sodium.h>
 
 namespace arv::crypto {
-namespace {
 
-[[nodiscard]] const unsigned char* bytes_data(std::span<const std::byte> bytes) noexcept {
-  if (bytes.empty()) {
-    return nullptr;
+Ed25519PublicKeyResult parse_prefixed_ed25519_public_key(std::string_view text) {
+  auto bytes = from_prefixed_lower_hex(text);
+  if (!bytes) {
+    return Ed25519PublicKeyResult::failure(bytes.error());
   }
-  return reinterpret_cast<const unsigned char*>(bytes.data());
-}
+  if (bytes.value().size() != ed25519_public_key_size) {
+    return Ed25519PublicKeyResult::failure(
+        HexError{"ed25519 public key has the wrong size"});
+  }
 
-} // namespace
+  Ed25519PublicKey public_key;
+  std::copy(bytes.value().begin(), bytes.value().end(), public_key.bytes.begin());
+  return Ed25519PublicKeyResult::success(public_key);
+}
 
 Ed25519KeyPair generate_ed25519_keypair() noexcept {
   static_assert(ed25519_public_key_size == crypto_sign_PUBLICKEYBYTES);
@@ -40,7 +49,7 @@ Ed25519Signature sign_ed25519(
   if (crypto_sign_detached(
           reinterpret_cast<unsigned char*>(signature.bytes.data()),
           nullptr,
-          bytes_data(message),
+          detail::bytes_data(message),
           static_cast<unsigned long long>(message.size()),
           reinterpret_cast<const unsigned char*>(private_key.bytes.data())) != 0) {
     signature.bytes.fill(std::byte{0});
@@ -57,7 +66,7 @@ bool verify_ed25519(
   }
   return crypto_sign_verify_detached(
              reinterpret_cast<const unsigned char*>(signature.bytes.data()),
-             bytes_data(message),
+             detail::bytes_data(message),
              static_cast<unsigned long long>(message.size()),
              reinterpret_cast<const unsigned char*>(public_key.bytes.data())) == 0;
 }

@@ -1,5 +1,7 @@
 #include "plugin_manager_internal.hpp"
 
+#include "arv/core/string.hpp"
+
 namespace arv::plugin {
 
 thread_local PluginThreadContext tls_thread_context = PluginThreadContext::None;
@@ -33,13 +35,8 @@ ThreadContextScope::~ThreadContextScope() {
   return {text, text == nullptr ? 0U : std::strlen(text)};
 }
 
-[[nodiscard]] bool ascii_space(char c) noexcept {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
 [[nodiscard]] bool command_name_valid(std::string_view name) noexcept {
-  return !name.empty() &&
-         std::none_of(name.begin(), name.end(), ascii_space);
+  return !name.empty() && !contains_ascii_space(name);
 }
 
 [[nodiscard]] command::CommandDomain command_domain_from_abi(
@@ -375,6 +372,14 @@ ThreadContextScope::~ThreadContextScope() {
   const u64 handle = ctx->next_data_document_handle++;
   ctx->data_documents.emplace(handle, std::move(document));
   return handle;
+}
+
+ArvDataDocumentHandle api_data_create_document(void* context, uint32_t schema_version) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr) {
+    return 0U;
+  }
+  return store_document(ctx, data::DataDocument{schema_version, data::DataValue::object()});
 }
 
 [[nodiscard]] std::optional<asset::ResourceID> parse_owned_plugin_key(

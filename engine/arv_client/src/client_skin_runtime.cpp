@@ -1,6 +1,7 @@
 #include "client_skin_runtime.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/io/files.hpp"
 
 #include "client_protocol_send.hpp"
 
@@ -8,22 +9,11 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <system_error>
 #include <utility>
 
 namespace arv::client::detail {
 namespace {
-
-[[nodiscard]] std::optional<std::vector<u8>> read_binary_file(const std::filesystem::path& path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    return std::nullopt;
-  }
-  return std::vector<u8>{
-      std::istreambuf_iterator<char>{input},
-      std::istreambuf_iterator<char>{}};
-}
 
 [[nodiscard]] bool decoded_png_matches(
     std::span<const u8> bytes,
@@ -48,7 +38,7 @@ namespace {
     return false;
   }
   std::optional<std::vector<u8>> bytes =
-      read_binary_file(cached_skin_path(identity.arvane_home, skin.skin_hash));
+      io::try_read_binary_file(cached_skin_path(identity.arvane_home, skin.skin_hash));
   if (!bytes.has_value()) {
     return false;
   }
@@ -131,7 +121,7 @@ void ClientSkinRuntime::handle_skin_rules(
     return;
   }
   std::optional<std::vector<u8>> bytes =
-      read_binary_file(local_skin_path(identity.arvane_home, *skin));
+      io::try_read_binary_file(local_skin_path(identity.arvane_home, *skin));
   if (!bytes.has_value() || bytes->empty()) {
     return;
   }

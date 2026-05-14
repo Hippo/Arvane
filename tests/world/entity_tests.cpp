@@ -1,16 +1,18 @@
 #include "arv/base/base_module.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/world_runtime.hpp"
+#include "support/entity_animation.hpp"
 #include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <optional>
-#include <string_view>
 #include <utility>
 
 namespace {
+
+using arv::testsupport::find_active_animation;
 
 arv::EntityID create_goal_driven_entity(
     arv::world::WorldRuntime& world,
@@ -40,28 +42,6 @@ arv::EntityID create_goal_driven_entity(
     brain->goals[0].state.movement_direction = {1.0F, 0.0F, 0.0F};
   }
   return entity;
-}
-
-const arv::entity::EntityAnimationPlayback* find_active_animation(
-    const arv::entity::EntityAnimationState& animation,
-    std::string_view name) {
-  for (const arv::entity::EntityAnimationPlayback& active : animation.active) {
-    if (active.name == name) {
-      return &active;
-    }
-  }
-  return nullptr;
-}
-
-arv::entity::EntityAnimationPlayback* find_active_animation(
-    arv::entity::EntityAnimationState& animation,
-    std::string_view name) {
-  for (arv::entity::EntityAnimationPlayback& active : animation.active) {
-    if (active.name == name) {
-      return &active;
-    }
-  }
-  return nullptr;
 }
 
 arv::world::EntityGoalRegistry make_base_goal_registry() {

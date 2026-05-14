@@ -47,59 +47,18 @@ struct SkinManagerState {
   std::optional<usize> dragging_index{};
 };
 
-[[nodiscard]] bool contains(UiRect rect, Vec2f point) noexcept {
-  return point.x >= rect.x && point.y >= rect.y &&
-         point.x < rect.x + rect.width && point.y < rect.y + rect.height;
-}
-
 [[nodiscard]] bool parse_account_profile_index(std::string_view stable_id, usize& index) noexcept {
-  constexpr std::string_view prefix = "menu.account.profile.";
-  if (!stable_id.starts_with(prefix)) {
-    return false;
-  }
-  std::string_view suffix = stable_id.substr(prefix.size());
-  const usize dot = suffix.find('.');
-  if (dot != std::string_view::npos) {
-    suffix = suffix.substr(0U, dot);
-  }
-  if (suffix.empty()) {
-    return false;
-  }
-  usize parsed = 0;
-  for (const char ch : suffix) {
-    if (ch < '0' || ch > '9') {
-      return false;
-    }
-    parsed = parsed * 10U + static_cast<usize>(ch - '0');
-  }
-  index = parsed;
-  return true;
+  return screens_detail::parse_index_after_prefix(
+      stable_id,
+      "menu.account.profile.",
+      index);
 }
 
 [[nodiscard]] bool parse_index_after_prefix(
     std::string_view stable_id,
     std::string_view prefix,
     usize& index) noexcept {
-  if (!stable_id.starts_with(prefix)) {
-    return false;
-  }
-  std::string_view suffix = stable_id.substr(prefix.size());
-  const usize dot = suffix.find('.');
-  if (dot != std::string_view::npos) {
-    suffix = suffix.substr(0U, dot);
-  }
-  if (suffix.empty()) {
-    return false;
-  }
-  usize parsed = 0;
-  for (const char ch : suffix) {
-    if (ch < '0' || ch > '9') {
-      return false;
-    }
-    parsed = parsed * 10U + static_cast<usize>(ch - '0');
-  }
-  index = parsed;
-  return true;
+  return screens_detail::parse_index_after_prefix(stable_id, prefix, index);
 }
 
 [[nodiscard]] std::vector<LocalProfileEntry> profiles_from(const UIContext& ctx) {

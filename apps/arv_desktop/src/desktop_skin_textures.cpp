@@ -3,11 +3,10 @@
 #include "asset_helpers.hpp"
 #include "desktop_skin_textures.hpp"
 
+#include "arv/io/files.hpp"
 #include "arv/protocol/skins.hpp"
 
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,17 +15,6 @@
 
 namespace arv::desktop {
 namespace {
-
-[[nodiscard]] std::optional<std::vector<u8>> read_binary_file(
-    const std::filesystem::path& path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    return std::nullopt;
-  }
-  return std::vector<u8>{
-      std::istreambuf_iterator<char>{input},
-      std::istreambuf_iterator<char>{}};
-}
 
 [[nodiscard]] std::filesystem::path player_skin_render_path(
     const client::LocalPlayerIdentity& identity,
@@ -47,7 +35,7 @@ namespace {
     return std::nullopt;
   }
   std::optional<std::vector<u8>> bytes =
-      read_binary_file(player_skin_render_path(identity, skin.skin_hash));
+      io::try_read_binary_file(player_skin_render_path(identity, skin.skin_hash));
   if (!bytes.has_value() ||
       protocol::skin_hash_for_bytes(*bytes) != skin.skin_hash) {
     return std::nullopt;
@@ -72,7 +60,7 @@ namespace {
     return std::nullopt;
   }
   std::optional<std::vector<u8>> bytes =
-      read_binary_file(client::local_skin_path(arvane_home, skin));
+      io::try_read_binary_file(client::local_skin_path(arvane_home, skin));
   if (!bytes.has_value() ||
       protocol::skin_hash_for_bytes(*bytes) != skin.skin_hash) {
     return std::nullopt;

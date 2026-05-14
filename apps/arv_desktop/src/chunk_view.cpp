@@ -4,6 +4,7 @@
 #include "arv/render/render_commands.hpp"
 
 #include "arv/core/profiling.hpp"
+#include "arv/core/time.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,23 +22,12 @@ struct MeshJobInput {
 
 constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
 
-[[nodiscard]] bool spike_log_due(
-    std::chrono::steady_clock::time_point last_log,
-    std::chrono::steady_clock::time_point now) noexcept {
-  return last_log.time_since_epoch().count() == 0 ||
-         now - last_log >= SpikeLogCooldown;
-}
-
-[[nodiscard]] i32 abs_i32(i32 value) noexcept {
-  return value < 0 ? -value : value;
-}
-
 [[nodiscard]] bool is_inside_horizontal_distance(
     ChunkSectionCoord coord,
     ChunkSectionCoord center,
     i32 radius) noexcept {
-  return abs_i32(coord.value.x - center.value.x) <= radius &&
-         abs_i32(coord.value.z - center.value.z) <= radius;
+  return std::abs(coord.value.x - center.value.x) <= radius &&
+         std::abs(coord.value.z - center.value.z) <= radius;
 }
 
 [[nodiscard]] bool target_matches(
@@ -69,9 +59,9 @@ constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
 
 [[nodiscard]] i32 chunk_priority_distance(ChunkSectionCoord coord, ChunkSectionCoord center) noexcept {
   const i32 horizontal = std::max(
-      abs_i32(coord.value.x - center.value.x),
-      abs_i32(coord.value.z - center.value.z));
-  const i32 vertical = abs_i32(coord.value.y - center.value.y);
+      std::abs(coord.value.x - center.value.x),
+      std::abs(coord.value.z - center.value.z));
+  const i32 vertical = std::abs(coord.value.y - center.value.y);
   return horizontal * 4 + vertical;
 }
 
@@ -587,7 +577,7 @@ void log_chunk_view_profile(
   const double refresh_ms =
       std::chrono::duration<double, std::milli>(refresh_end - refresh_start).count();
   if (refresh_ms > static_cast<double>(pipeline.frame_spike_log_ms) &&
-      spike_log_due(view.last_spike_log, refresh_end)) {
+      cooldown_due(view.last_spike_log, refresh_end, SpikeLogCooldown)) {
     arv::core::warn(
         "chunk_profile",
         "chunk view update spike {}ms queued_mesh_batches={} mesh_sections_in_flight={} mesh_sections_prepared={} mesh_candidates={}",

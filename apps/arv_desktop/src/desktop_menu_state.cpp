@@ -1,5 +1,7 @@
 #include "desktop_menu_state.hpp"
 
+#include "input_adapter.hpp"
+
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
 #include "arv/persistence/save.hpp"
@@ -73,43 +75,6 @@ namespace {
 
 [[nodiscard]] std::string display_name_or_default(std::string name) {
   return name.empty() ? std::string{"local_player"} : std::move(name);
-}
-
-[[nodiscard]] ui::InputBindingDevice ui_device_from(platform::InputDeviceType type) noexcept {
-  switch (type) {
-    case platform::InputDeviceType::Keyboard:
-      return ui::InputBindingDevice::Keyboard;
-    case platform::InputDeviceType::MouseButton:
-      return ui::InputBindingDevice::MouseButton;
-    case platform::InputDeviceType::MouseWheel:
-      return ui::InputBindingDevice::MouseWheel;
-  }
-  return ui::InputBindingDevice::Keyboard;
-}
-
-[[nodiscard]] std::string binding_label(const platform::InputBinding& binding) {
-  std::string label;
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Control)) {
-    label += "Ctrl + ";
-  }
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Shift)) {
-    label += "Shift + ";
-  }
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Alt)) {
-    label += "Alt + ";
-  }
-  switch (binding.device_type) {
-    case platform::InputDeviceType::Keyboard:
-      label += binding.input_code;
-      break;
-    case platform::InputDeviceType::MouseButton:
-      label += "Mouse " + binding.input_code;
-      break;
-    case platform::InputDeviceType::MouseWheel:
-      label += "Wheel " + binding.input_code;
-      break;
-  }
-  return label;
 }
 
 [[nodiscard]] std::string binding_conflict_key(const platform::InputBinding& binding) {

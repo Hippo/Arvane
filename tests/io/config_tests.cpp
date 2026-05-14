@@ -1,16 +1,18 @@
 #include "arv/io/config.hpp"
 #include "arv/io/input_bindings.hpp"
+#include "support/temp_dir.hpp"
+#include "support/temp_files.hpp"
 
 #include <gtest/gtest.h>
 
-#include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace {
+
+using arv::testsupport::TempDir;
+using arv::testsupport::write_file;
 
 class ScopedCurrentPath {
 public:
@@ -26,12 +28,6 @@ public:
 private:
   std::filesystem::path previous_;
 };
-
-void write_file(const std::filesystem::path& path, std::string_view text) {
-  std::filesystem::create_directories(path.parent_path());
-  std::ofstream output(path, std::ios::trunc);
-  output << text;
-}
 
 } // namespace
 
@@ -690,14 +686,9 @@ TEST(ConfigTests, ConstructsServerSavePathsUnderArvaneHomeSaves) {
 }
 
 TEST(ConfigTests, SavesAndLoadsMultiplayerServerList) {
-  const std::filesystem::path temp_root =
-      std::filesystem::temp_directory_path() /
-      ("arvane_server_list_" +
-       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-  std::error_code error;
-  std::filesystem::remove_all(temp_root, error);
+  const TempDir temp{"arvane_server_list_"};
 
-  const std::filesystem::path list_file = temp_root / "arvane_home/config/server_list.json";
+  const std::filesystem::path list_file = temp.path / "arvane_home/config/server_list.json";
   const std::vector<arv::io::SavedServerListEntry> servers{
       {"Local", "localhost"},
       {"LAN", "192.168.1.20:42069"}};
@@ -712,8 +703,6 @@ TEST(ConfigTests, SavesAndLoadsMultiplayerServerList) {
   EXPECT_EQ(load_result.value()[0].address, "localhost");
   EXPECT_EQ(load_result.value()[1].name, "LAN");
   EXPECT_EQ(load_result.value()[1].address, "192.168.1.20:42069");
-
-  std::filesystem::remove_all(temp_root, error);
 }
 
 TEST(ConfigTests, ExplicitConfigPathIsResolvedFromProjectRoot) {
@@ -788,12 +777,8 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomePacks) {
 }
 
 TEST(ConfigTests, LoadConfigDefaultsPreferProjectRootOverWorkingDirectoryRuntimeHome) {
-  const std::filesystem::path temp_root =
-      std::filesystem::temp_directory_path() /
-      ("arvane_stale_runtime_" +
-       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-  std::error_code error;
-  std::filesystem::remove_all(temp_root, error);
+  const TempDir temp{"arvane_stale_runtime_"};
+  const std::filesystem::path& temp_root = temp.path;
 
   write_file(temp_root / "arvane_home/packs/enabled.yaml", "enabled:\n  - arvane_base\n");
   write_file(temp_root / "arvane_home/packs/arvane_base/pack.yaml", "schema_version: 1\n");
@@ -810,17 +795,11 @@ TEST(ConfigTests, LoadConfigDefaultsPreferProjectRootOverWorkingDirectoryRuntime
     EXPECT_TRUE(std::filesystem::exists(
         result.value().paths.packs_path() / "arvane_base/pack.yaml"));
   }
-
-  std::filesystem::remove_all(temp_root, error);
 }
 
 TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
-  const std::filesystem::path temp_root =
-      std::filesystem::temp_directory_path() /
-      ("arvane_config_" +
-       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-  std::error_code error;
-  std::filesystem::remove_all(temp_root, error);
+  const TempDir temp{"arvane_config_"};
+  const std::filesystem::path& temp_root = temp.path;
 
   arv::io::ConfigLoadOptions options;
   options.project_root = temp_root;
@@ -862,8 +841,6 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   ASSERT_TRUE(written_server);
   EXPECT_NE(written_server.value().find("network:"), std::string::npos);
   EXPECT_NE(written_server.value().find("world: default"), std::string::npos);
-
-  std::filesystem::remove_all(temp_root, error);
 }
 
 TEST(ConfigTests, ParsesAndFallsBackInputBindings) {
@@ -929,13 +906,8 @@ bindings:
 }
 
 TEST(ConfigTests, SavesAndLoadsTwoSlotInputBindings) {
-  const std::filesystem::path temp_file =
-      std::filesystem::temp_directory_path() /
-      ("arvane_two_slot_bindings_" +
-       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-       ".yaml");
-  std::error_code error;
-  std::filesystem::remove(temp_file, error);
+  const TempDir temp{"arvane_two_slot_bindings_"};
+  const std::filesystem::path temp_file = temp.path / "input_bindings.yaml";
 
   arv::platform::InputBindings bindings = arv::platform::default_input_bindings();
   auto& jump =
@@ -956,23 +928,16 @@ TEST(ConfigTests, SavesAndLoadsTwoSlotInputBindings) {
   EXPECT_EQ(loaded_jump[0].input_code, "Space");
   EXPECT_EQ(loaded_jump[1].device_type, arv::platform::InputDeviceType::MouseWheel);
   EXPECT_EQ(loaded_jump[1].input_code, "Up");
-
-  std::filesystem::remove(temp_file, error);
 }
 
 TEST(ConfigTests, MissingInputBindingsFileReturnsDefaultsAndWritesConfig) {
-  const std::filesystem::path temp_root =
-      std::filesystem::temp_directory_path() /
-      ("arvane_input_bindings_" +
-       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-       ".yaml");
-  std::error_code error;
-  std::filesystem::remove(temp_root, error);
+  const TempDir temp{"arvane_input_bindings_"};
+  const std::filesystem::path temp_file = temp.path / "input_bindings.yaml";
 
-  const auto result = arv::io::load_input_bindings_file_or_defaults(temp_root);
+  const auto result = arv::io::load_input_bindings_file_or_defaults(temp_file);
 
   ASSERT_TRUE(result);
-  EXPECT_TRUE(std::filesystem::exists(temp_root));
+  EXPECT_TRUE(std::filesystem::exists(temp_file));
   const auto& jump =
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Jump);
   const auto& debug_menu =
@@ -981,18 +946,11 @@ TEST(ConfigTests, MissingInputBindingsFileReturnsDefaultsAndWritesConfig) {
   EXPECT_EQ(jump[0].input_code, "Space");
   ASSERT_EQ(debug_menu.size(), 1U);
   EXPECT_EQ(debug_menu[0].input_code, "Grave");
-
-  std::filesystem::remove(temp_root, error);
 }
 
 TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
-  const std::filesystem::path temp_file =
-      std::filesystem::temp_directory_path() /
-      ("arvane_client_settings_" +
-       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-       ".yaml");
-  std::error_code error;
-  std::filesystem::remove(temp_file, error);
+  const TempDir temp{"arvane_client_settings_"};
+  const std::filesystem::path temp_file = temp.path / "client.yaml";
 
   arv::io::EngineConfig config = arv::io::default_config();
   config.window.vsync = false;
@@ -1021,6 +979,4 @@ TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
   EXPECT_EQ(parsed.value().chunks.load_distance, 8);
   EXPECT_EQ(parsed.value().chunks.simulation_distance, 3);
   EXPECT_FLOAT_EQ(parsed.value().physics.mouse_sensitivity_radians, 0.004F);
-
-  std::filesystem::remove(temp_file, error);
 }

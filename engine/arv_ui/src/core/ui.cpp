@@ -5,14 +5,15 @@
 #include <utility>
 
 namespace arv::ui {
-namespace {
 
-constexpr usize MaxTextMeasureCacheEntries = 512;
-
-[[nodiscard]] bool contains(UiRect rect, Vec2f point) noexcept {
+bool contains(UiRect rect, Vec2f point) noexcept {
   return point.x >= rect.x && point.y >= rect.y &&
          point.x < rect.x + rect.width && point.y < rect.y + rect.height;
 }
+
+namespace {
+
+constexpr usize MaxTextMeasureCacheEntries = 512;
 
 [[nodiscard]] UiRect inset(UiRect rect, UiPadding padding) noexcept {
   const f32 x = rect.x + padding.left;

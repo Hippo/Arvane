@@ -36,6 +36,10 @@ struct NativePluginPolicy {
   [[nodiscard]] bool allows(std::string_view pack_id) const noexcept;
 };
 
+[[nodiscard]] NativePluginPolicy make_native_plugin_policy(
+    bool enabled,
+    std::vector<std::string> allowed_packs);
+
 struct PluginLoadOptions {
   const asset::PackManager* packs{};
   NativePluginPolicy policy{};

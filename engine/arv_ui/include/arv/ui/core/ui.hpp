@@ -25,6 +25,8 @@ struct UiRect {
   f32 height{};
 };
 
+[[nodiscard]] bool contains(UiRect rect, Vec2f point) noexcept;
+
 struct UiDisplayMetrics {
   Vec2f logical_size{};
   Vec2f framebuffer_size{};

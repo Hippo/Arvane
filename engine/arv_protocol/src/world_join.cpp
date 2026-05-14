@@ -1,31 +1,9 @@
 #include "arv/protocol/world_join.hpp"
+#include "arv/protocol/message_primitives.hpp"
 
-#include <bit>
 #include <utility>
 
 namespace arv::protocol {
-namespace {
-
-void write_f32(MessageWriter& writer, f32 value) {
-  writer.write<u32>(std::bit_cast<u32>(value));
-}
-
-Expected<f32, ProtocolError> read_f32(MessageReader& reader) {
-  auto value = reader.read<u32>();
-  if (!value) {
-    return Expected<f32, ProtocolError>::failure(value.error());
-  }
-  return Expected<f32, ProtocolError>::success(std::bit_cast<f32>(value.value()));
-}
-
-Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
-  if (reader.remaining() != 0U) {
-    return Expected<void, ProtocolError>::failure(ProtocolError{"trailing bytes in world join message"});
-  }
-  return Expected<void, ProtocolError>::success();
-}
-
-} // namespace
 
 std::vector<u8> serialize_clientbound_world_join_result(const ClientboundWorldJoinResult& result) {
   MessageWriter writer;
@@ -61,7 +39,7 @@ Expected<ClientboundWorldJoinResult, ProtocolError> deserialize_clientbound_worl
     return Expected<ClientboundWorldJoinResult, ProtocolError>::failure(
         ProtocolError{"failed to decode world join result"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "world join message");
   if (!trailing) {
     return Expected<ClientboundWorldJoinResult, ProtocolError>::failure(trailing.error());
   }
@@ -94,7 +72,7 @@ Expected<ClientboundWorldLeave, ProtocolError> deserialize_clientbound_world_lea
     return Expected<ClientboundWorldLeave, ProtocolError>::failure(
         ProtocolError{"failed to decode world leave"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "world join message");
   if (!trailing) {
     return Expected<ClientboundWorldLeave, ProtocolError>::failure(trailing.error());
   }

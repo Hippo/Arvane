@@ -1,10 +1,10 @@
 #include "arv/data/storage.hpp"
 
 #include "arv/data/codecs.hpp"
+#include "arv/io/files.hpp"
 
 #include <atomic>
 #include <fstream>
-#include <sstream>
 #include <system_error>
 #include <utility>
 
@@ -59,47 +59,6 @@ DataStorageError storage_error(
     relative += std::string{extension};
   }
   return StoragePathResult::success(std::move(relative));
-}
-
-[[nodiscard]] std::optional<std::string> read_text_file(
-    const std::filesystem::path& path,
-    DataStorageError& out_error) {
-  std::ifstream input(path);
-  if (!input) {
-    out_error = storage_error(DataStorageCode::NotFound, path, "file was not found");
-    return std::nullopt;
-  }
-  std::ostringstream buffer;
-  buffer << input.rdbuf();
-  if (!input && !input.eof()) {
-    out_error = storage_error(DataStorageCode::InternalError, path, "failed to read file");
-    return std::nullopt;
-  }
-  return buffer.str();
-}
-
-[[nodiscard]] std::optional<std::vector<u8>> read_binary_file(
-    const std::filesystem::path& path,
-    DataStorageError& out_error) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    out_error = storage_error(DataStorageCode::NotFound, path, "file was not found");
-    return std::nullopt;
-  }
-  input.seekg(0, std::ios::end);
-  const std::streamoff size = input.tellg();
-  if (size < 0) {
-    out_error = storage_error(DataStorageCode::InternalError, path, "failed to determine file size");
-    return std::nullopt;
-  }
-  input.seekg(0, std::ios::beg);
-  std::vector<u8> bytes(static_cast<usize>(size));
-  input.read(reinterpret_cast<char*>(bytes.data()), size);
-  if (!input && !input.eof()) {
-    out_error = storage_error(DataStorageCode::InternalError, path, "failed to read file");
-    return std::nullopt;
-  }
-  return bytes;
 }
 
 [[nodiscard]] StorageSaveResult write_bytes_atomic(
@@ -165,10 +124,12 @@ DataStorageError storage_error(
 }
 
 [[nodiscard]] StorageLoadResult load_yaml_document(const std::filesystem::path& path) {
-  DataStorageError error;
-  auto text = read_text_file(path, error);
+  auto text = io::read_text_file_contents(path);
   if (!text.has_value()) {
-    return StorageLoadResult::failure(std::move(error));
+    return StorageLoadResult::failure(storage_error(
+        DataStorageCode::NotFound,
+        path,
+        "file was not found"));
   }
   auto decoded = decode_yaml(text.value());
   if (!decoded) {
@@ -197,10 +158,12 @@ DataStorageError storage_error(
 }
 
 [[nodiscard]] StorageLoadResult load_binary_document(const std::filesystem::path& path) {
-  DataStorageError error;
-  auto bytes = read_binary_file(path, error);
+  auto bytes = io::read_binary_file(path);
   if (!bytes.has_value()) {
-    return StorageLoadResult::failure(std::move(error));
+    return StorageLoadResult::failure(storage_error(
+        DataStorageCode::NotFound,
+        path,
+        "file was not found"));
   }
   auto decoded = decode_binary(bytes.value());
   if (!decoded) {

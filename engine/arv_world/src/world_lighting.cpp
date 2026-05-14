@@ -4,6 +4,8 @@
 #include "arv/core/profiling.hpp"
 #include "world_runtime_internal.hpp"
 
+#include "chunk_dependency_mask.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -16,7 +18,7 @@ namespace arv::world {
 namespace {
 
 using LightArray = std::array<voxel::LightWord, voxel::ChunkVolume>;
-using DependencyMask = std::array<bool, voxel::ChunkSnapshotNeighborhoodVolume>;
+using DependencyMask = detail::ChunkDependencyMask;
 
 inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
     {1, 0, 0},
@@ -132,32 +134,12 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
   return mask;
 }
 
-void add_dependency_offset(DependencyMask& mask, i32 x, i32 y, i32 z) noexcept {
-  if (x == 0 && y == 0 && z == 0) {
-    return;
-  }
-  mask[voxel::snapshot_storage_index(x, y, z)] = true;
-}
-
 void add_light_dependency_offsets(
     DependencyMask& mask,
     i32 x,
     i32 y,
     i32 z) noexcept {
-  const i32 min_x = x == 0 ? -1 : 0;
-  const i32 max_x = x == ChunkSize - 1 ? 1 : 0;
-  const i32 min_y = y == 0 ? -1 : 0;
-  const i32 max_y = y == ChunkSize - 1 ? 1 : 0;
-  const i32 min_z = z == 0 ? -1 : 0;
-  const i32 max_z = z == ChunkSize - 1 ? 1 : 0;
-
-  for (i32 oz = min_z; oz <= max_z; ++oz) {
-    for (i32 oy = min_y; oy <= max_y; ++oy) {
-      for (i32 ox = min_x; ox <= max_x; ++ox) {
-        add_dependency_offset(mask, ox, oy, oz);
-      }
-    }
-  }
+  detail::add_boundary_dependency_offsets(mask, SectionLocalPos{{x, y, z}});
 }
 
 [[nodiscard]] ChunkSectionCoord offset_chunk(ChunkSectionCoord coord, Vec3i offset) noexcept {

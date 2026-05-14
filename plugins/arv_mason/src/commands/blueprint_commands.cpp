@@ -1,5 +1,8 @@
 #include "arv_mason/mason_plugin.hpp"
 
+#include "../string_utils.hpp"
+#include "command_utils.hpp"
+
 #include "arv_mason/ids.hpp"
 
 #include <algorithm>
@@ -12,28 +15,6 @@
 #include <vector>
 
 namespace arv_mason {
-namespace {
-
-[[nodiscard]] std::vector<std::string> copy_args(const MasonPlugin::Args& args) {
-  std::vector<std::string> out;
-  out.reserve(args.size());
-  for (std::string_view arg : args) {
-    out.emplace_back(arg);
-  }
-  return out;
-}
-
-[[nodiscard]] std::string count_text(std::uint64_t count) {
-  std::ostringstream out;
-  out << count;
-  return out.str();
-}
-
-[[nodiscard]] bool contains_string(const std::vector<std::string>& values, std::string_view value) {
-  return std::find(values.begin(), values.end(), value) != values.end();
-}
-
-} // namespace
 
 std::vector<std::string> MasonPlugin::load_blueprint_index(ArvWorldHandle world) const {
   std::vector<std::string> names;
@@ -218,8 +199,7 @@ arv::Result MasonPlugin::handle_blueprint(
       return arv::Result{arv::ResultCode::InternalError, "blueprint save failed"};
     }
     std::vector<std::string> names = load_blueprint_index(*world);
-    if (!contains_string(names, name)) {
-      names.push_back(name);
+    if (append_unique_string(names, name)) {
       std::sort(names.begin(), names.end());
       save_blueprint_index(*world, names);
     }

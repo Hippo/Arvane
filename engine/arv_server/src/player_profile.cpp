@@ -2,11 +2,11 @@
 
 #include "arv/crypto/hash.hpp"
 #include "arv/crypto/hex.hpp"
+#include "arv/data/json_math.hpp"
+#include "arv/io/files.hpp"
 #include "arv/protocol/skins.hpp"
 
-#include <algorithm>
 #include <fstream>
-#include <iterator>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -17,45 +17,6 @@ namespace arv::server {
 namespace {
 
 using json = nlohmann::json;
-
-[[nodiscard]] json vec3_to_json(Vec3f value) {
-  return json::array({value.x, value.y, value.z});
-}
-
-[[nodiscard]] Vec3f json_to_vec3(const json& node) {
-  return {
-      node.at(0).get<f32>(),
-      node.at(1).get<f32>(),
-      node.at(2).get<f32>()};
-}
-
-[[nodiscard]] Expected<crypto::Ed25519PublicKey, PlayerProfileError> public_key_from_hex(
-    std::string_view text) {
-  auto bytes = crypto::from_prefixed_lower_hex(text);
-  if (!bytes) {
-    return Expected<crypto::Ed25519PublicKey, PlayerProfileError>::failure(
-        PlayerProfileError{bytes.error().message});
-  }
-  if (bytes.value().size() != crypto::ed25519_public_key_size) {
-    return Expected<crypto::Ed25519PublicKey, PlayerProfileError>::failure(
-        PlayerProfileError{"profile public key has the wrong size"});
-  }
-
-  crypto::Ed25519PublicKey public_key;
-  std::copy(bytes.value().begin(), bytes.value().end(), public_key.bytes.begin());
-  return Expected<crypto::Ed25519PublicKey, PlayerProfileError>::success(public_key);
-}
-
-[[nodiscard]] Expected<std::string, PlayerProfileError> read_text_file(
-    const std::filesystem::path& path) {
-  std::ifstream input(path);
-  if (!input) {
-    return Expected<std::string, PlayerProfileError>::failure(
-        PlayerProfileError{"failed to open player profile file: " + path.string()});
-  }
-  return Expected<std::string, PlayerProfileError>::success(
-      std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}});
-}
 
 } // namespace
 
@@ -153,10 +114,10 @@ Expected<void, PlayerProfileError> save_player_profile(
       {"public_key", crypto::to_prefixed_lower_hex(profile.public_key.bytes)},
       {"display_name", profile.display_name},
       {"last_world", profile.last_world},
-      {"last_position", vec3_to_json(profile.last_position)},
+      {"last_position", data::vec3_to_json(profile.last_position)},
       {"last_rotation", json::array({profile.last_yaw_radians, profile.last_pitch_radians})},
       {"spawn_world", profile.spawn_world},
-      {"spawn_position", vec3_to_json(profile.spawn_position)},
+      {"spawn_position", data::vec3_to_json(profile.spawn_position)},
       {"game_mode", profile.game_mode_id},
       {"selected_skin_hash", profile.selected_skin_hash},
       {"selected_skin_slim_model", profile.selected_skin_slim_model},
@@ -187,9 +148,11 @@ Expected<PlayerProfile, PlayerProfileError> load_player_profile(
         PlayerProfileError{"profile id must be 0x-prefixed lowercase hex"});
   }
 
-  auto text = read_text_file(player_profile_file_path(server_save_root, profile_id));
+  const std::filesystem::path path = player_profile_file_path(server_save_root, profile_id);
+  auto text = io::read_text_file_contents(path);
   if (!text) {
-    return Expected<PlayerProfile, PlayerProfileError>::failure(text.error());
+    return Expected<PlayerProfile, PlayerProfileError>::failure(
+        PlayerProfileError{"failed to open player profile file: " + path.string()});
   }
 
   try {
@@ -199,9 +162,11 @@ Expected<PlayerProfile, PlayerProfileError> load_player_profile(
           PlayerProfileError{"unsupported player profile version"});
     }
 
-    auto public_key = public_key_from_hex(node.at("public_key").get<std::string>());
+    auto public_key =
+        crypto::parse_prefixed_ed25519_public_key(node.at("public_key").get<std::string>());
     if (!public_key) {
-      return Expected<PlayerProfile, PlayerProfileError>::failure(public_key.error());
+      return Expected<PlayerProfile, PlayerProfileError>::failure(
+          PlayerProfileError{public_key.error().message});
     }
 
     PlayerProfile profile;
@@ -216,7 +181,7 @@ Expected<PlayerProfile, PlayerProfileError> load_player_profile(
     profile.display_name = node.value("display_name", std::string{"local_player"});
     profile.last_world = node.value("last_world", std::string{"default"});
     if (const auto value = node.find("last_position"); value != node.end()) {
-      profile.last_position = json_to_vec3(*value);
+      profile.last_position = data::json_to_vec3(*value);
     }
     if (const auto value = node.find("last_rotation");
         value != node.end() && value->is_array() && value->size() >= 2U) {
@@ -225,7 +190,7 @@ Expected<PlayerProfile, PlayerProfileError> load_player_profile(
     }
     profile.spawn_world = node.value("spawn_world", std::string{"default"});
     if (const auto value = node.find("spawn_position"); value != node.end()) {
-      profile.spawn_position = json_to_vec3(*value);
+      profile.spawn_position = data::json_to_vec3(*value);
     }
     profile.game_mode_id = node.value("game_mode", std::string{player::SurvivalGameModeID});
     profile.selected_skin_hash = node.value("selected_skin_hash", std::string{});

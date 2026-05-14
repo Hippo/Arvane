@@ -5,14 +5,14 @@
 #include "arv/entity/components.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/world/entity_goal_registry.hpp"
+#include "support/temp_dir.hpp"
+#include "support/temp_files.hpp"
 
 #include <gtest/gtest.h>
 
 #include <array>
-#include <chrono>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <string>
 
 #ifndef ARV_TEST_EXAMPLE_PLUGIN_PATH
@@ -33,29 +33,8 @@
 
 namespace {
 
-struct ScopedTempDir {
-  std::filesystem::path path;
-
-  explicit ScopedTempDir(std::string_view prefix) {
-    path = std::filesystem::temp_directory_path() /
-           (std::string{prefix} +
-            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::error_code error;
-    std::filesystem::remove_all(path, error);
-    std::filesystem::create_directories(path);
-  }
-
-  ~ScopedTempDir() {
-    std::error_code error;
-    std::filesystem::remove_all(path, error);
-  }
-};
-
-void write_text(const std::filesystem::path& path, std::string_view text) {
-  std::filesystem::create_directories(path.parent_path());
-  std::ofstream output(path, std::ios::trunc);
-  output << text;
-}
+using arv::testsupport::ScopedTempDir;
+using arv::testsupport::write_text;
 
 std::filesystem::path copy_plugin_library(
     const std::filesystem::path& packs_root,

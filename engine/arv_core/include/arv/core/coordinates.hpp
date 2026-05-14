@@ -134,6 +134,18 @@ enum class AxisDirection {
   return chunk;
 }
 
+[[nodiscard]] constexpr bool chunk_section_less_xyz(
+    ChunkSectionCoord lhs,
+    ChunkSectionCoord rhs) noexcept {
+  if (lhs.value.x != rhs.value.x) {
+    return lhs.value.x < rhs.value.x;
+  }
+  if (lhs.value.y != rhs.value.y) {
+    return lhs.value.y < rhs.value.y;
+  }
+  return lhs.value.z < rhs.value.z;
+}
+
 } // namespace arv
 
 template<>

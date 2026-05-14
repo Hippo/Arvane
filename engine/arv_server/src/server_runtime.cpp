@@ -16,22 +16,6 @@
 namespace arv::server {
 namespace {
 
-[[nodiscard]] std::string tr(
-    const arv::text::LanguageCatalog* language,
-    std::string_view key,
-    std::string_view fallback) {
-  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
-}
-
-[[nodiscard]] std::string tr(
-    const arv::text::LanguageCatalog* language,
-    std::string_view key,
-    std::initializer_list<arv::text::FormatArg> args,
-    std::string_view fallback) {
-  return language == nullptr ? arv::text::LanguageCatalog{}.format(key, args, fallback)
-                             : language->format(key, args, fallback);
-}
-
 [[nodiscard]] command::OnlinePlayerCommandTarget command_target(
     const ServerSession& session,
     const player::PlayerState& player_state) {
@@ -350,8 +334,8 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   worlds_.ensure_default_world();
   handshake_policy_.server_name =
       mode_ == ServerMode::Dedicated
-          ? tr(language_, "server.name.dedicated", "Arvane Dedicated Server")
-          : tr(language_, "server.name.integrated", "Arvane Integrated Server");
+          ? arv::text::text_or_fallback(language_, "server.name.dedicated", "Arvane Dedicated Server")
+          : arv::text::text_or_fallback(language_, "server.name.integrated", "Arvane Integrated Server");
   handshake_policy_.initial_world_id = DefaultWorldID;
   crypto::fill_random(server_instance_id_);
   network_thread_enabled_ = start_info.use_network_thread;
@@ -503,7 +487,7 @@ void ServerRuntimeImpl::shutdown() {
     for (net::ConnectionID connection_id : connections) {
       kick_client(
           connection_id,
-          tr(language_, "server.disconnect.shutting_down", "Server is shutting down."));
+          arv::text::text_or_fallback(language_, "server.disconnect.shutting_down", "Server is shutting down."));
     }
   }
   world_jobs_.wait_for_all();
@@ -741,16 +725,14 @@ command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
     return command::CommandPermissionResult::allow();
   }
   if (!sender.player_id.has_value()) {
-    return command::CommandPermissionResult::deny(tr(
-        language_,
+    return command::CommandPermissionResult::deny(arv::text::text_or_fallback(language_,
         "command.dispatcher.permission_missing_player_context",
         "Permission denied: missing player context."));
   }
 
   player::PlayerState* player_state = default_world_.find_player(sender.player_id.value());
   if (player_state == nullptr) {
-    return command::CommandPermissionResult::deny(tr(
-        language_,
+    return command::CommandPermissionResult::deny(arv::text::text_or_fallback(language_,
         "command.dispatcher.permission_player_not_online",
         "Permission denied: player is not online."));
   }
@@ -760,7 +742,7 @@ command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
     return command::CommandPermissionResult::allow();
   }
 
-  return command::CommandPermissionResult::deny(tr(
+  return command::CommandPermissionResult::deny(arv::text::format_or_fallback(
       language_,
       "command.dispatcher.permission_denied",
       {{"permission", command_def.permission}},

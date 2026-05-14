@@ -1,6 +1,7 @@
 #include "arv/player/permissions.hpp"
 
 #include <algorithm>
+#include <cctype>
 
 namespace arv::player {
 namespace {
@@ -51,10 +52,11 @@ constexpr CorePermissionField CorePermissionFields[] = {
   return TriState::Unset;
 }
 
+template <typename Permissions, typename Value>
 void set_core_value(
-    CorePermissionSet& permissions,
+    Permissions& permissions,
     CorePermissionField field,
-    TriState value) noexcept {
+    Value value) noexcept {
   switch (field) {
     case CorePermissionField::CanTakeDamage:
       permissions.can_take_damage = value;
@@ -107,38 +109,6 @@ void set_core_value(
   return false;
 }
 
-void set_resolved_core_value(
-    ResolvedCorePermissions& permissions,
-    CorePermissionField field,
-    bool value) noexcept {
-  switch (field) {
-    case CorePermissionField::CanTakeDamage:
-      permissions.can_take_damage = value;
-      break;
-    case CorePermissionField::CanModifyWorld:
-      permissions.can_modify_world = value;
-      break;
-    case CorePermissionField::CanInteract:
-      permissions.can_interact = value;
-      break;
-    case CorePermissionField::CanOpenInventory:
-      permissions.can_open_inventory = value;
-      break;
-    case CorePermissionField::HasCreativeInventory:
-      permissions.has_creative_inventory = value;
-      break;
-    case CorePermissionField::CanFly:
-      permissions.can_fly = value;
-      break;
-    case CorePermissionField::HasCollision:
-      permissions.has_collision = value;
-      break;
-    case CorePermissionField::IsVisibleToOthers:
-      permissions.is_visible_to_others = value;
-      break;
-  }
-}
-
 [[nodiscard]] CorePermissionSet core_from_resolved(
     ResolvedCorePermissions permissions) noexcept {
   CorePermissionSet result;
@@ -159,7 +129,7 @@ void set_resolved_core_value(
     if (value == TriState::Unset) {
       continue;
     }
-    set_resolved_core_value(base, field, value == TriState::Allow);
+    set_core_value(base, field, value == TriState::Allow);
   }
   return base;
 }
@@ -230,7 +200,73 @@ void merge_custom_final(CustomPermissionMap& target, const CustomPermissionMap& 
   return node.size() >= prefix.size() && node.substr(0, prefix.size()) == prefix;
 }
 
+[[nodiscard]] std::optional<CorePermissionField> core_permission_field_from_name(
+    std::string_view name) noexcept {
+  if (name == "can_take_damage") {
+    return CorePermissionField::CanTakeDamage;
+  }
+  if (name == "can_modify_world") {
+    return CorePermissionField::CanModifyWorld;
+  }
+  if (name == "can_interact") {
+    return CorePermissionField::CanInteract;
+  }
+  if (name == "can_open_inventory") {
+    return CorePermissionField::CanOpenInventory;
+  }
+  if (name == "has_creative_inventory") {
+    return CorePermissionField::HasCreativeInventory;
+  }
+  if (name == "can_fly") {
+    return CorePermissionField::CanFly;
+  }
+  if (name == "has_collision") {
+    return CorePermissionField::HasCollision;
+  }
+  if (name == "is_visible_to_others") {
+    return CorePermissionField::IsVisibleToOthers;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::string lower_ascii(std::string_view text) {
+  std::string lowered{text};
+  std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  return lowered;
+}
+
 } // namespace
+
+std::optional<TriState> tri_state_from_string(std::string_view text) {
+  const std::string lowered = lower_ascii(text);
+  if (lowered == "allow" || lowered == "allowed" || lowered == "true" ||
+      lowered == "yes") {
+    return TriState::Allow;
+  }
+  if (lowered == "deny" || lowered == "denied" || lowered == "false" ||
+      lowered == "no") {
+    return TriState::Deny;
+  }
+  if (lowered == "unset" || lowered == "none" || lowered == "null") {
+    return TriState::Unset;
+  }
+  return std::nullopt;
+}
+
+bool set_core_permission_by_name(
+    CorePermissionSet& permissions,
+    std::string_view name,
+    TriState value) noexcept {
+  const std::optional<CorePermissionField> field =
+      core_permission_field_from_name(name);
+  if (!field.has_value()) {
+    return false;
+  }
+  set_core_value(permissions, field.value(), value);
+  return true;
+}
 
 TriState ResolvedPermissions::custom_value(std::string_view node) const {
   return custom_permission_value(custom, node);
@@ -469,10 +505,10 @@ ResolvedCorePermissions apply_core_overrides(
         continue;
       }
       if (value == TriState::Deny) {
-        set_resolved_core_value(base, field, false);
+        set_core_value(base, field, false);
         denied[index] = true;
       } else if (!denied[index]) {
-        set_resolved_core_value(base, field, true);
+        set_core_value(base, field, true);
       }
     }
   }

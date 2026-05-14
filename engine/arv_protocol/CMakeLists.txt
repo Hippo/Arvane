@@ -8,6 +8,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/handshake.hpp
   include/arv/protocol/inventory_sync.hpp
   include/arv/protocol/message_envelope.hpp
+  include/arv/protocol/message_primitives.hpp
   include/arv/protocol/message_registry.hpp
   include/arv/protocol/message_type.hpp
   include/arv/protocol/message_writer.hpp

@@ -1,8 +1,9 @@
 #include "arv/asset/font.hpp"
 
+#include "arv/io/files.hpp"
+
 #include <algorithm>
 #include <cstring>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -24,31 +25,6 @@ struct DecodedCodepoint {
   usize byte_begin{};
   usize byte_end{};
 };
-
-[[nodiscard]] Expected<std::vector<u8>, AssetError> read_binary_file(
-    const std::filesystem::path& path,
-    const AssetID& asset_id) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    return Expected<std::vector<u8>, AssetError>::failure({
-        asset_id.value,
-        path,
-        "read font",
-        "file could not be opened"});
-  }
-  file.seekg(0, std::ios::end);
-  std::vector<u8> bytes(static_cast<usize>(file.tellg()));
-  file.seekg(0, std::ios::beg);
-  file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-  if (!file && !file.eof()) {
-    return Expected<std::vector<u8>, AssetError>::failure({
-        asset_id.value,
-        path,
-        "read font",
-        "file read failed"});
-  }
-  return Expected<std::vector<u8>, AssetError>::success(std::move(bytes));
-}
 
 [[nodiscard]] std::vector<DecodedCodepoint> decode_utf8(std::string_view utf8) {
   std::vector<DecodedCodepoint> decoded;
@@ -328,9 +304,13 @@ FontFaceResult FontSystem::load_face(
     return FontFaceResult::failure({asset_id.value, path, "load font", "font pixel size must be positive"});
   }
 
-  auto bytes = read_binary_file(path, asset_id);
+  auto bytes = io::read_binary_file(path);
   if (!bytes) {
-    return FontFaceResult::failure(bytes.error());
+    return FontFaceResult::failure({
+        asset_id.value,
+        path,
+        "read font",
+        bytes.error().message});
   }
 
   Impl::FontFaceRecord record;

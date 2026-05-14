@@ -249,7 +249,6 @@ struct PluginCallContext {
 [[nodiscard]] std::string abi_string(ArvStringView view);
 [[nodiscard]] ArvStringView stable_view(const std::string& text) noexcept;
 [[nodiscard]] ArvStringView literal_view(const char* text) noexcept;
-[[nodiscard]] bool ascii_space(char c) noexcept;
 [[nodiscard]] bool command_name_valid(std::string_view name) noexcept;
 [[nodiscard]] command::CommandDomain command_domain_from_abi(
     ArvCommandDomain domain) noexcept;
@@ -304,6 +303,9 @@ struct PluginCallContext {
 [[nodiscard]] ArvDataDocumentHandle store_document(
     PluginCallContext* ctx,
     data::DataDocument document);
+[[nodiscard]] ArvDataDocumentHandle api_data_create_document(
+    void* context,
+    uint32_t schema_version);
 [[nodiscard]] std::optional<asset::ResourceID> parse_owned_plugin_key(
     PluginCallContext* ctx,
     ArvResourceID key,

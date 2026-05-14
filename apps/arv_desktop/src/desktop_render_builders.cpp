@@ -159,10 +159,6 @@ void append_item_draw(
   return uniforms;
 }
 
-[[nodiscard]] i32 abs_i32(i32 value) noexcept {
-  return value < 0 ? -value : value;
-}
-
 [[nodiscard]] bool chunk_inside_render_window(
     const ChunkViewState& chunk_view,
     const io::ChunkDistanceConfig& distances,
@@ -173,8 +169,8 @@ void append_item_draw(
   const ChunkSectionCoord center = chunk_view.target_center.value();
   return coord.value.y >= chunk_view.target_min_chunk_y &&
          coord.value.y <= chunk_view.target_max_chunk_y &&
-         abs_i32(coord.value.x - center.value.x) <= distances.render_distance &&
-         abs_i32(coord.value.z - center.value.z) <= distances.render_distance;
+         std::abs(coord.value.x - center.value.x) <= distances.render_distance &&
+         std::abs(coord.value.z - center.value.z) <= distances.render_distance;
 }
 
 } // namespace

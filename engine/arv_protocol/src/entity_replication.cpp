@@ -1,65 +1,9 @@
 #include "arv/protocol/entity_replication.hpp"
+#include "arv/protocol/message_primitives.hpp"
 
-#include <bit>
 #include <utility>
 
 namespace arv::protocol {
-namespace {
-
-void write_f32(MessageWriter& writer, f32 value) {
-  writer.write<u32>(std::bit_cast<u32>(value));
-}
-
-Expected<f32, ProtocolError> read_f32(MessageReader& reader) {
-  auto value = reader.read<u32>();
-  if (!value) {
-    return Expected<f32, ProtocolError>::failure(value.error());
-  }
-  return Expected<f32, ProtocolError>::success(std::bit_cast<f32>(value.value()));
-}
-
-void write_vec3(MessageWriter& writer, Vec3f value) {
-  write_f32(writer, value.x);
-  write_f32(writer, value.y);
-  write_f32(writer, value.z);
-}
-
-Expected<Vec3f, ProtocolError> read_vec3(MessageReader& reader) {
-  auto x = read_f32(reader);
-  auto y = read_f32(reader);
-  auto z = read_f32(reader);
-  if (!x || !y || !z) {
-    return Expected<Vec3f, ProtocolError>::failure(ProtocolError{"failed to decode vector"});
-  }
-  return Expected<Vec3f, ProtocolError>::success({x.value(), y.value(), z.value()});
-}
-
-void write_quat(MessageWriter& writer, Quatf value) {
-  write_f32(writer, value.x);
-  write_f32(writer, value.y);
-  write_f32(writer, value.z);
-  write_f32(writer, value.w);
-}
-
-Expected<Quatf, ProtocolError> read_quat(MessageReader& reader) {
-  auto x = read_f32(reader);
-  auto y = read_f32(reader);
-  auto z = read_f32(reader);
-  auto w = read_f32(reader);
-  if (!x || !y || !z || !w) {
-    return Expected<Quatf, ProtocolError>::failure(ProtocolError{"failed to decode rotation"});
-  }
-  return Expected<Quatf, ProtocolError>::success({x.value(), y.value(), z.value(), w.value()});
-}
-
-Expected<void, ProtocolError> require_no_trailing_bytes(MessageReader& reader) {
-  if (reader.remaining() != 0U) {
-    return Expected<void, ProtocolError>::failure(ProtocolError{"trailing bytes in entity message"});
-  }
-  return Expected<void, ProtocolError>::success();
-}
-
-} // namespace
 
 std::vector<u8> serialize_clientbound_entity_spawn(const ClientboundEntitySpawn& spawn) {
   MessageWriter writer;
@@ -104,7 +48,7 @@ Expected<ClientboundEntitySpawn, ProtocolError> deserialize_clientbound_entity_s
     }
     owner = PlayerID{player_id.value()};
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "entity message");
   if (!trailing) {
     return Expected<ClientboundEntitySpawn, ProtocolError>::failure(trailing.error());
   }
@@ -139,7 +83,7 @@ Expected<ClientboundEntityDespawn, ProtocolError> deserialize_clientbound_entity
     return Expected<ClientboundEntityDespawn, ProtocolError>::failure(
         ProtocolError{"failed to decode entity despawn"});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "entity message");
   if (!trailing) {
     return Expected<ClientboundEntityDespawn, ProtocolError>::failure(trailing.error());
   }
@@ -249,7 +193,7 @@ Expected<ClientboundEntitySnapshot, ProtocolError> deserialize_clientbound_entit
                                  health_current.value(),
                                  health_max.value()});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "entity message");
   if (!trailing) {
     return Expected<ClientboundEntitySnapshot, ProtocolError>::failure(trailing.error());
   }
@@ -290,7 +234,7 @@ Expected<ClientboundDroppedItemSnapshot, ProtocolError> deserialize_clientbound_
                               position.value(),
                               velocity.value()});
   }
-  auto trailing = require_no_trailing_bytes(reader);
+  auto trailing = require_no_trailing_bytes(reader, "entity message");
   if (!trailing) {
     return Expected<ClientboundDroppedItemSnapshot, ProtocolError>::failure(trailing.error());
   }

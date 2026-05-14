@@ -2,6 +2,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/camera_shell.hpp
   include/arv/client/chat_history.hpp
   include/arv/client/chunk_interest.hpp
+  include/arv/client/command_chat.hpp
   include/arv/client/client_runtime.hpp
   include/arv/client/item_animation.hpp
   include/arv/client/local_identity.hpp
@@ -11,6 +12,7 @@ set(ARV_CLIENT_HEADERS
 add_library(arv_client STATIC
   src/camera_shell.cpp
   src/chunk_interest.cpp
+  src/command_chat.cpp
   src/client_chunk_inbox.cpp
   src/client_connection.cpp
   src/client_dropped_item_mirror.cpp
@@ -29,5 +31,5 @@ add_library(arv_client STATIC
 )
 target_include_directories(arv_client PUBLIC include)
 target_link_libraries(arv_client PUBLIC arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
-target_link_libraries(arv_client PRIVATE arv_asset arv_text)
+target_link_libraries(arv_client PRIVATE arv_asset arv_command arv_io arv_text)
 target_link_libraries(arv_client PRIVATE nlohmann_json::nlohmann_json)

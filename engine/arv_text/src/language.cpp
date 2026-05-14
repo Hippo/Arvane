@@ -230,6 +230,22 @@ std::string key_for_namespaced_id(
   return key;
 }
 
+std::string text_or_fallback(
+    const LanguageCatalog* language,
+    std::string_view key,
+    std::string_view fallback) {
+  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
+}
+
+std::string format_or_fallback(
+    const LanguageCatalog* language,
+    std::string_view key,
+    std::initializer_list<FormatArg> args,
+    std::string_view fallback) {
+  return language == nullptr ? LanguageCatalog{}.format(key, args, fallback)
+                             : language->format(key, args, fallback);
+}
+
 std::string block_display_name_key(std::string_view block_name) {
   return key_for_namespaced_id("block", block_name, DisplayNameSuffix);
 }

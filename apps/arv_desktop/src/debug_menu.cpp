@@ -20,13 +20,8 @@
 namespace arv::desktop {
 namespace {
 
-[[nodiscard]] const server::ServerSession* local_session(
-    const server::ServerRuntime& server) noexcept {
-  return server.sessions().first();
-}
-
 [[nodiscard]] player::PlayerState* local_player_state(server::ServerRuntime& server) noexcept {
-  const server::ServerSession* session = local_session(server);
+  const server::ServerSession* session = server.sessions().first();
   return session == nullptr ? nullptr : server.voxel_world().find_player(session->player_id);
 }
 
@@ -706,7 +701,7 @@ void render_player_tab(
   ImGui::SliderInt("Stack size", &state.stack_size, 1, max_stack_size);
   ImGui::Checkbox("Replace selected hotbar slot", &state.replace_selected_hotbar_slot);
 
-  const server::ServerSession* session = local_session(server);
+  const server::ServerSession* session = server.sessions().first();
   player::PlayerState* player = local_player_state(server);
   const bool can_add = item != nullptr && session != nullptr && player != nullptr;
   if (!can_add) {

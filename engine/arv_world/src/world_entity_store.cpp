@@ -7,22 +7,13 @@
 namespace arv::world::detail {
 namespace {
 
-template <typename Component>
-[[nodiscard]] Component* find_component(
-    entt::registry& registry,
-    entt::entity handle) noexcept {
+template <typename Component, typename Registry>
+[[nodiscard]] auto find_component(
+    Registry& registry,
+    entt::entity handle) noexcept -> decltype(registry.template try_get<Component>(handle)) {
   return handle == entt::null || !registry.valid(handle)
              ? nullptr
-             : registry.try_get<Component>(handle);
-}
-
-template <typename Component>
-[[nodiscard]] const Component* find_component(
-    const entt::registry& registry,
-    entt::entity handle) noexcept {
-  return handle == entt::null || !registry.valid(handle)
-             ? nullptr
-             : registry.try_get<Component>(handle);
+             : registry.template try_get<Component>(handle);
 }
 
 } // namespace

@@ -3,8 +3,9 @@
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
+#include "chunk_dependency_mask.hpp"
+
 #include <algorithm>
-#include <cstdio>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -12,70 +13,7 @@
 namespace arv::world {
 namespace {
 
-using DependencyMask = std::array<bool, voxel::ChunkSnapshotNeighborhoodVolume>;
-
-void add_dependency_offset(DependencyMask& mask, i32 x, i32 y, i32 z) noexcept {
-  if (x == 0 && y == 0 && z == 0) {
-    return;
-  }
-  mask[voxel::snapshot_storage_index(x, y, z)] = true;
-}
-
-void add_all_neighbor_dependency_offsets(DependencyMask& mask) noexcept {
-  for (i32 z = -1; z <= 1; ++z) {
-    for (i32 y = -1; y <= 1; ++y) {
-      for (i32 x = -1; x <= 1; ++x) {
-        add_dependency_offset(mask, x, y, z);
-      }
-    }
-  }
-}
-
-void add_block_dependency_offsets(DependencyMask& mask, SectionLocalPos local) noexcept {
-  const i32 min_x = local.value.x == 0 ? -1 : 0;
-  const i32 max_x = local.value.x == ChunkSize - 1 ? 1 : 0;
-  const i32 min_y = local.value.y == 0 ? -1 : 0;
-  const i32 max_y = local.value.y == ChunkSize - 1 ? 1 : 0;
-  const i32 min_z = local.value.z == 0 ? -1 : 0;
-  const i32 max_z = local.value.z == ChunkSize - 1 ? 1 : 0;
-
-  for (i32 z = min_z; z <= max_z; ++z) {
-    for (i32 y = min_y; y <= max_y; ++y) {
-      for (i32 x = min_x; x <= max_x; ++x) {
-        add_dependency_offset(mask, x, y, z);
-      }
-    }
-  }
-}
-
-void add_light_dependency_offsets(DependencyMask& mask, SectionLocalPos local) noexcept {
-  const i32 min_x = local.value.x == 0 ? -1 : 0;
-  const i32 max_x = local.value.x == ChunkSize - 1 ? 1 : 0;
-  const i32 min_y = local.value.y == 0 ? -1 : 0;
-  const i32 max_y = local.value.y == ChunkSize - 1 ? 1 : 0;
-  const i32 min_z = local.value.z == 0 ? -1 : 0;
-  const i32 max_z = local.value.z == ChunkSize - 1 ? 1 : 0;
-
-  for (i32 z = min_z; z <= max_z; ++z) {
-    for (i32 y = min_y; y <= max_y; ++y) {
-      for (i32 x = min_x; x <= max_x; ++x) {
-        add_dependency_offset(mask, x, y, z);
-      }
-    }
-  }
-}
-
-void format_chunk_context(
-    std::array<char, core::PerfEventContextCapacity>& context,
-    ChunkSectionCoord coord) noexcept {
-  (void)std::snprintf(
-      context.data(),
-      context.size(),
-      "section=(%d,%d,%d)",
-      coord.value.x,
-      coord.value.y,
-      coord.value.z);
-}
+using DependencyMask = detail::ChunkDependencyMask;
 
 [[nodiscard]] voxel::ChunkStorageView make_generated_missing_snapshot_storage(
     const GenerationSurfaceProfile& surface,
@@ -180,20 +118,24 @@ void WorldRuntime::apply_chunk_snapshot(
       for (usize index = 0; index < voxel::ChunkVolume; ++index) {
         if (existing_chunk->blocks()[index] != blocks[index] ||
             (fluids.has_value() && existing_chunk->fluids()[index] != fluids.value()[index])) {
-          add_block_dependency_offsets(block_dependency_offsets, detail::local_from_index(index));
+          detail::add_boundary_dependency_offsets(
+              block_dependency_offsets,
+              detail::local_from_index(index));
         }
       }
     }
     if (lights_changed) {
       for (usize index = 0; index < voxel::ChunkVolume; ++index) {
         if (existing_chunk->lights()[index] != resolved_lights[index]) {
-          add_light_dependency_offsets(light_dependency_offsets, detail::local_from_index(index));
+          detail::add_boundary_dependency_offsets(
+              light_dependency_offsets,
+              detail::local_from_index(index));
         }
       }
     }
   } else {
-    add_all_neighbor_dependency_offsets(block_dependency_offsets);
-    add_all_neighbor_dependency_offsets(light_dependency_offsets);
+    detail::add_all_neighbor_dependency_offsets(block_dependency_offsets);
+    detail::add_all_neighbor_dependency_offsets(light_dependency_offsets);
   }
 
   voxel::ChunkSection& chunk =
@@ -259,7 +201,7 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
   ARV_PROFILE_ZONE("Snapshot creation");
   std::array<char, core::PerfEventContextCapacity> profile_context{};
   if constexpr (core::perf_stats_enabled()) {
-    format_chunk_context(profile_context, coord);
+    core::format_chunk_section_perf_context(profile_context, coord);
   }
   const core::ScopedThreadTiming snapshot_timing{
       core::PerfMetric::SnapshotCreation,

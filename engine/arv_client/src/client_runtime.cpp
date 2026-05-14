@@ -8,16 +8,6 @@
 #include <utility>
 
 namespace arv::client {
-namespace {
-
-[[nodiscard]] std::string tr(
-    const arv::text::LanguageCatalog* language,
-    std::string_view key,
-    std::string_view fallback) {
-  return language == nullptr ? std::string{fallback} : language->text(key, fallback);
-}
-
-} // namespace
 
 struct ClientRuntime::Impl {
   explicit Impl(std::unique_ptr<net::ITransport> transport) : connection(std::move(transport)),
@@ -162,7 +152,10 @@ net::ConnectResult ClientRuntime::connect(net::NetworkAddress address) {
 
 void ClientRuntime::disconnect() {
   impl_->connection.disconnect_local(
-      tr(impl_->language, "ui.connection.disconnected", "Disconnected."));
+      arv::text::text_or_fallback(
+          impl_->language,
+          "ui.connection.disconnected",
+          "Disconnected."));
   impl_->clear_multiplayer_runtime();
 }
 

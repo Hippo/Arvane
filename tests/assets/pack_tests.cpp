@@ -1,38 +1,18 @@
 #include "arv/asset/pack.hpp"
 #include "arv/asset/resource.hpp"
+#include "support/temp_dir.hpp"
+#include "support/temp_files.hpp"
 
-#include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <string>
+#include <string_view>
 
 #include <gtest/gtest.h>
 
 namespace {
 
-struct ScopedTempDir {
-  std::filesystem::path path;
-
-  explicit ScopedTempDir(std::string_view prefix) {
-    path = std::filesystem::temp_directory_path() /
-           (std::string{prefix} +
-            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::error_code error;
-    std::filesystem::remove_all(path, error);
-    std::filesystem::create_directories(path);
-  }
-
-  ~ScopedTempDir() {
-    std::error_code error;
-    std::filesystem::remove_all(path, error);
-  }
-};
-
-void write_text(const std::filesystem::path& path, std::string_view text) {
-  std::filesystem::create_directories(path.parent_path());
-  std::ofstream output(path, std::ios::trunc);
-  output << text;
-}
+using arv::testsupport::ScopedTempDir;
+using arv::testsupport::write_text;
 
 void write_enabled(const std::filesystem::path& packs_root, std::string_view text) {
   write_text(packs_root / "enabled.yaml", text);

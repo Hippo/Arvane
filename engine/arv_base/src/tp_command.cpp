@@ -14,27 +14,9 @@ namespace {
 
 constexpr std::string_view TeleportPermission = ids::TeleportPermissionNode;
 
-[[nodiscard]] std::string tr(
-    const command::CommandCtx& ctx,
-    std::string_view key,
-    std::string_view fallback) {
-  return ctx.services.language == nullptr ? std::string{fallback}
-                                          : ctx.services.language->text(key, fallback);
-}
-
-[[nodiscard]] std::string tr(
-    const command::CommandCtx& ctx,
-    std::string_view key,
-    std::initializer_list<arv::text::FormatArg> args,
-    std::string_view fallback) {
-  return ctx.services.language == nullptr
-             ? arv::text::LanguageCatalog{}.format(key, args, fallback)
-             : ctx.services.language->format(key, args, fallback);
-}
-
 [[nodiscard]] command::CommandResult usage_error(const command::CommandCtx& ctx) {
   return command::CommandResult::usage_error(
-      tr(ctx, "command.tp.usage", "Usage: /tp [target] <x> <y> <z>."));
+      arv::text::text_or_fallback(ctx.services.language, "command.tp.usage", "Usage: /tp [target] <x> <y> <z>."));
 }
 
 [[nodiscard]] std::string format_position(Vec3f position) {
@@ -48,8 +30,7 @@ sender_target(command::CommandCtx& ctx, const ServerCommandServices& services) {
   if (!ctx.sender.player_id.has_value()) {
     return Expected<OnlinePlayerCommandTarget, command::CommandResult>::failure(
         command::CommandResult::invalid_source(
-            tr(
-                ctx,
+            arv::text::text_or_fallback(ctx.services.language,
                 "command.tp.console_requires_target",
                 "Teleport from server console requires an explicit target.")));
   }
@@ -58,8 +39,7 @@ sender_target(command::CommandCtx& ctx, const ServerCommandServices& services) {
       services.online_player_by_id(ctx.sender.player_id.value());
   if (!target.has_value()) {
     return Expected<OnlinePlayerCommandTarget, command::CommandResult>::failure(
-        command::CommandResult::invalid_source(tr(
-            ctx,
+        command::CommandResult::invalid_source(arv::text::text_or_fallback(ctx.services.language,
             "command.tp.sender_not_online",
             "Command sender is not an online player.")));
   }
@@ -81,8 +61,8 @@ named_target(
       services.online_player_by_name(target_name);
   if (!target.has_value()) {
     return Expected<OnlinePlayerCommandTarget, command::CommandResult>::failure(
-        command::CommandResult::usage_error(tr(
-            ctx,
+        command::CommandResult::usage_error(arv::text::format_or_fallback(
+            ctx.services.language,
             "command.tp.unknown_player",
             {{"name", std::string{target_name}}},
             "Unknown online player: {name}.")));
@@ -98,8 +78,7 @@ named_target(
       !services->online_player_by_id ||
       !services->online_player_by_name ||
       !services->teleport_player) {
-    return command::CommandResult::internal_error(tr(
-        ctx,
+    return command::CommandResult::internal_error(arv::text::text_or_fallback(ctx.services.language,
         "command.tp.services_unavailable",
         "Server command services are unavailable."));
   }
@@ -142,11 +121,11 @@ named_target(
 
   if (!services->teleport_player(target.value().player_id, destination.value())) {
     return command::CommandResult::failure(
-        tr(ctx, "command.tp.unable_to_teleport", "Unable to teleport player."));
+        arv::text::text_or_fallback(ctx.services.language, "command.tp.unable_to_teleport", "Unable to teleport player."));
   }
 
-  return command::CommandResult::success(tr(
-      ctx,
+  return command::CommandResult::success(arv::text::format_or_fallback(
+      ctx.services.language,
       "command.tp.success",
       {{"name", target.value().display_name},
        {"position", format_position(destination.value())}},

@@ -3,7 +3,6 @@
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 
-#include <cstdio>
 #include <utility>
 
 namespace arv::voxel {
@@ -23,18 +22,6 @@ namespace {
 
 [[nodiscard]] constexpr i32 wrapped_snapshot_local(i32 value) noexcept {
   return value < 0 ? ChunkSize - 1 : (value >= ChunkSize ? 0 : value);
-}
-
-void format_chunk_context(
-    std::array<char, core::PerfEventContextCapacity>& context,
-    ChunkSectionCoord coord) noexcept {
-  (void)std::snprintf(
-      context.data(),
-      context.size(),
-      "section=(%d,%d,%d)",
-      coord.value.x,
-      coord.value.y,
-      coord.value.z);
 }
 
 [[nodiscard]] const ChunkStorage* snapshot_storage_for_local(
@@ -293,7 +280,7 @@ ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk) {
   ARV_PROFILE_ZONE("Snapshot creation");
   std::array<char, core::PerfEventContextCapacity> profile_context{};
   if constexpr (core::perf_stats_enabled()) {
-    format_chunk_context(profile_context, chunk.coord());
+    core::format_chunk_section_perf_context(profile_context, chunk.coord());
   }
   const core::ScopedThreadTiming timing{
       core::PerfMetric::SnapshotCreation,
