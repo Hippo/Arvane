@@ -1,6 +1,6 @@
 #include "arv/client/client_runtime.hpp"
 
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include "client_frame_builder.hpp"
 #include "client_runtime_internal.hpp"
@@ -11,7 +11,7 @@ namespace arv::client {
 namespace {
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
     std::string_view fallback) {
   return language == nullptr ? std::string{fallback} : language->text(key, fallback);
@@ -46,7 +46,7 @@ struct ClientRuntime::Impl {
         tick_seconds};
   }
 
-  void configure_language(const lang::LanguageCatalog* new_language) noexcept {
+  void configure_language(const arv::text::LanguageCatalog* new_language) noexcept {
     language = new_language;
     connection.configure_language(new_language);
     ui.set_language(new_language);
@@ -98,7 +98,7 @@ struct ClientRuntime::Impl {
   detail::ClientProtocolSender sender;
   LocalPlayerIdentity identity{};
   detail::ClientNetworkRouter network{};
-  const lang::LanguageCatalog* language{};
+  const arv::text::LanguageCatalog* language{};
   detail::ClientInputRuntime input{};
   LocalPlayerController player_controller{};
   ClientChunkInterest chunk_interest{};
@@ -133,7 +133,7 @@ void ClientRuntime::set_local_identity(LocalPlayerIdentity identity) {
   impl_->identity = std::move(identity);
 }
 
-void ClientRuntime::configure_language(const lang::LanguageCatalog* language) noexcept {
+void ClientRuntime::configure_language(const arv::text::LanguageCatalog* language) noexcept {
   impl_->configure_language(language);
 }
 

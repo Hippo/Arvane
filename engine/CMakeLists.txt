@@ -1,6 +1,6 @@
 add_subdirectory(arv_core)
 add_subdirectory(arv_crypto)
-add_subdirectory(arv_lang)
+add_subdirectory(arv_text)
 add_subdirectory(arv_command)
 add_subdirectory(arv_io)
 add_subdirectory(arv_sched)

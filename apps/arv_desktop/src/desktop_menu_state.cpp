@@ -19,14 +19,14 @@ namespace arv::desktop {
 namespace {
 
 [[nodiscard]] std::string desktop_text(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key) {
   return language == nullptr ? std::string{key} : language->text(key);
 }
 
 [[nodiscard]] std::optional<std::filesystem::path> open_png_picker(
     const std::filesystem::path& default_path,
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string& error_message) {
 #if ARVANE_HAS_NFD
   const nfdresult_t init_result = NFD_Init();
@@ -148,7 +148,7 @@ DesktopMenuState::DesktopMenuState(
     std::filesystem::path arvane_home,
     const io::EngineConfig* config,
     const platform::InputBindings* input_bindings,
-    const lang::LanguageCatalog* language) : saves_root_(std::move(saves_root)),
+    const arv::text::LanguageCatalog* language) : saves_root_(std::move(saves_root)),
                                              server_list_file_(std::move(server_list_file)),
                                              arvane_home_(std::move(arvane_home)),
                                              config_(config),

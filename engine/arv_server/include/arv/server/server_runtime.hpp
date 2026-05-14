@@ -31,9 +31,9 @@
 #include <utility>
 #include <vector>
 
-namespace arv::lang {
+namespace arv::text {
 class LanguageCatalog;
-} // namespace arv::lang
+} // namespace arv::text
 
 namespace arv::server {
 
@@ -158,7 +158,7 @@ struct ServerStartInfo {
   io::KeepAliveConfig keep_alive{};
   bool keep_alive_enabled{true};
   io::SkinConfig skins{};
-  const lang::LanguageCatalog* language{};
+  const arv::text::LanguageCatalog* language{};
   const player::GameModeRegistry* game_modes{};
   std::span<const StarterInventoryItem> starter_inventory{};
   FluidContainerInteractionConfig fluid_containers{};

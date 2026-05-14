@@ -10,9 +10,9 @@
 #include <string>
 #include <vector>
 
-namespace arv::lang {
+namespace arv::text {
 class LanguageCatalog;
-} // namespace arv::lang
+} // namespace arv::text
 
 namespace arv::client {
 
@@ -29,7 +29,7 @@ public:
   void open_chat_with_draft(std::string draft);
   void close_chat() noexcept;
   void close_ui() noexcept;
-  void set_language(const lang::LanguageCatalog* language) noexcept;
+  void set_language(const arv::text::LanguageCatalog* language) noexcept;
   void set_max_chat_history_messages(usize max_messages);
   void add_chat_message(std::string message);
   void add_chat_message(protocol::ClientboundChatMessage message);
@@ -55,7 +55,7 @@ private:
   std::vector<std::string> chat_messages_{};
   std::vector<ChatHistoryEntry> chat_history_{};
   std::optional<std::string> pending_url_confirmation_{};
-  const lang::LanguageCatalog* language_{};
+  const arv::text::LanguageCatalog* language_{};
   usize max_chat_history_messages_{DefaultMaxChatHistoryMessages};
   u64 next_received_chat_sequence_{1U};
 };

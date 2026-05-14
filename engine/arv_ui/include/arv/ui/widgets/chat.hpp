@@ -1,6 +1,6 @@
 #pragma once
 
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/ui/core/ui.hpp"
 
@@ -14,7 +14,7 @@ namespace arv::ui {
 struct ChatLineView {
   std::string text{};
   f32 opacity{1.0F};
-  std::vector<protocol::RichTextRun> runs{};
+  std::vector<arv::text::RichTextRun> runs{};
 };
 
 struct ChatUiModel {
@@ -24,7 +24,7 @@ struct ChatUiModel {
   std::string draft{};
   std::optional<std::string> pending_url_confirmation{};
   usize max_visible_messages{8U};
-  const lang::LanguageCatalog* language{};
+  const arv::text::LanguageCatalog* language{};
 };
 
 struct ChatTooltipUiModel {

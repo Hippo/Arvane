@@ -925,11 +925,14 @@ ClientboundChatMessage
 }
 ```
 
-`message` is the final server-authored rich text tree. It may include RGB color
-style patches, inherited text styles, `ShowText` hover events, and click events
-such as `SuggestCommand`, `RunCommand`, `OpenUrl`, and `CopyToClipboard`.
-Clients render this payload safely and apply local safeguards such as URL
-confirmation before attempting platform actions.
+`message` is the final server-authored rich text tree. The rich text model,
+color/style semantics, flattening, validation, and default chat formatter live
+in `arv_text`; this protocol section only describes how those text payloads are
+carried on the wire. A payload may include RGB color style patches, inherited
+text styles, `ShowText` hover events, and click events such as
+`SuggestCommand`, `RunCommand`, `OpenUrl`, and `CopyToClipboard`. Clients render
+this payload safely and apply local safeguards such as URL confirmation before
+attempting platform actions.
 
 Commands are distinct from chat. Slash-prefixed input should route through the
 normal command path, where the server parses and authorizes privileged

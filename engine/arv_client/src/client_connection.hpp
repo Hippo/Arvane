@@ -10,9 +10,9 @@
 #include <string_view>
 #include <vector>
 
-namespace arv::lang {
+namespace arv::text {
 class LanguageCatalog;
-} // namespace arv::lang
+} // namespace arv::text
 
 namespace arv::client::detail {
 
@@ -30,7 +30,7 @@ public:
       u32 server_keep_alive_timeout_seconds,
       u32 connection_timeout_seconds,
       bool server_keep_alive_timeout_enabled) noexcept;
-  void configure_language(const lang::LanguageCatalog* language) noexcept;
+  void configure_language(const arv::text::LanguageCatalog* language) noexcept;
 
   std::vector<net::NetworkEvent> poll_events();
 
@@ -60,7 +60,7 @@ private:
   u32 server_keep_alive_timeout_seconds_{30U};
   u32 connection_timeout_seconds_{10U};
   std::optional<std::string> disconnect_reason_{};
-  const lang::LanguageCatalog* language_{};
+  const arv::text::LanguageCatalog* language_{};
   std::chrono::steady_clock::time_point connection_attempt_started_time_{};
   std::chrono::steady_clock::time_point last_server_keep_alive_time_{};
   bool server_keep_alive_timeout_enabled_{true};

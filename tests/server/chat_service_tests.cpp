@@ -38,19 +38,19 @@ TEST(ServerChatTests, RateLimiterAllowsWindowThenRejectsSpam) {
 }
 
 TEST(ServerChatTests, FormatterBuildsRichTextWithPlayerInteractions) {
-  arv::server::ChatFormatter formatter;
-  arv::server::ChatFormatContext context;
+  arv::text::ChatFormatter formatter;
+  arv::text::ChatFormatContext context;
   context.sender_name = "Hippo";
   context.raw_message = "hello";
 
-  const arv::protocol::RichText rich = formatter.format_player_chat(context);
+  const arv::text::RichText rich = formatter.format_player_chat(context);
 
-  EXPECT_EQ(arv::protocol::to_plain_text(rich), "Hippo: hello");
-  const std::vector<arv::protocol::RichTextRun> runs =
-      arv::protocol::flatten_rich_text(rich);
+  EXPECT_EQ(arv::text::to_plain_text(rich), "Hippo: hello");
+  const std::vector<arv::text::RichTextRun> runs =
+      arv::text::flatten_rich_text(rich);
   ASSERT_GE(runs.size(), 3U);
   ASSERT_TRUE(runs.front().click_event.has_value());
-  EXPECT_EQ(runs.front().click_event->action, arv::protocol::ClickAction::SuggestCommand);
+  EXPECT_EQ(runs.front().click_event->action, arv::text::ClickAction::SuggestCommand);
   EXPECT_EQ(runs.front().click_event->value, "/msg Hippo ");
   ASSERT_TRUE(runs.front().hover_event.has_value());
   ASSERT_NE(runs.front().hover_event->show_text, nullptr);

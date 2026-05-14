@@ -11,7 +11,7 @@ namespace {
 }
 
 [[nodiscard]] std::string fallback_command_result_message(
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     command::CommandStatus status) {
   switch (status) {
     case command::CommandStatus::Success:
@@ -35,7 +35,7 @@ namespace {
 void append_command_result_to_chat(
     client::ClientRuntime& client,
     const command::CommandResult& result,
-    const lang::LanguageCatalog& language) {
+    const arv::text::LanguageCatalog& language) {
   bool wrote_message = false;
   for (const command::CommandMessage& message : result.messages) {
     if (message.text.empty()) {

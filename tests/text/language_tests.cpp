@@ -1,9 +1,9 @@
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include <gtest/gtest.h>
 
 TEST(LanguageTests, ParsesNestedYamlAndFormatsStrings) {
-  auto parsed = arv::lang::parse_language_yaml(
+  auto parsed = arv::text::parse_language_yaml(
       R"yaml(
 ui:
   menu:
@@ -30,9 +30,9 @@ block:
 
 TEST(LanguageTests, BuildsDisplayNameKeysFromNamespacedIds) {
   EXPECT_EQ(
-      arv::lang::block_display_name_key("arvane:stone_stairs"),
+      arv::text::block_display_name_key("arvane:stone_stairs"),
       "block.arvane.stone_stairs.display_name");
   EXPECT_EQ(
-      arv::lang::item_display_name_key("example:tools/hammer"),
+      arv::text::item_display_name_key("example:tools/hammer"),
       "item.example.tools.hammer.display_name");
 }

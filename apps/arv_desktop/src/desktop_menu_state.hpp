@@ -2,7 +2,7 @@
 
 #include "arv/client/local_identity.hpp"
 #include "arv/io/config.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/platform/input_bindings.hpp"
 #include "arv/ui/ui.hpp"
 
@@ -23,7 +23,7 @@ public:
       std::filesystem::path arvane_home,
       const io::EngineConfig* config,
       const platform::InputBindings* input_bindings,
-      const lang::LanguageCatalog* language);
+      const arv::text::LanguageCatalog* language);
 
   [[nodiscard]] std::vector<ui::SinglePlayerSaveEntry> singleplayer_saves() const override;
   [[nodiscard]] std::vector<ui::ServerListEntry> multiplayer_servers() const override;
@@ -140,7 +140,7 @@ private:
   std::filesystem::path arvane_home_{};
   const io::EngineConfig* config_{};
   const platform::InputBindings* input_bindings_{};
-  const lang::LanguageCatalog* language_{};
+  const arv::text::LanguageCatalog* language_{};
   std::optional<ui::StartSinglePlayerCommand> start_singleplayer_request_{};
   std::optional<ui::CreateWorldCommand> create_world_request_{};
   std::optional<ui::DeleteSinglePlayerSaveCommand> delete_save_request_{};

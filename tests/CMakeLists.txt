@@ -53,7 +53,8 @@ add_executable(arv_tests
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/debug_imgui.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/desktop_render_builders.cpp
   io/config_tests.cpp
-  lang/language_tests.cpp
+  text/language_tests.cpp
+  text/rich_text_tests.cpp
   net/in_process_transport_tests.cpp
   net/integrated_handshake_tests.cpp
   persistence/region_file_tests.cpp
@@ -125,7 +126,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_data
   arv_entity
   arv_io
-  arv_lang
+  arv_text
   arv_net
   arv_persistence
   arv_physics

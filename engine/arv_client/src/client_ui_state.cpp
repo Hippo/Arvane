@@ -1,6 +1,6 @@
 #include "client_ui_state.hpp"
 
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -53,7 +53,7 @@ void trim_vector_to_limit(std::vector<T>& values, usize limit) {
 } // namespace
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
     std::string_view fallback) {
   return language == nullptr ? std::string{fallback} : language->text(key, fallback);
@@ -110,7 +110,7 @@ void ClientUiState::close_ui() noexcept {
   pending_url_confirmation_.reset();
 }
 
-void ClientUiState::set_language(const lang::LanguageCatalog* language) noexcept {
+void ClientUiState::set_language(const arv::text::LanguageCatalog* language) noexcept {
   language_ = language;
 }
 
@@ -128,12 +128,12 @@ void ClientUiState::add_chat_message(std::string message) {
   packet.message_id = 0U;
   packet.channel = "arvane:system";
   packet.kind = protocol::ChatMessageKind::System;
-  packet.message = protocol::plain_rich_text(message);
+  packet.message = arv::text::plain_rich_text(message);
   add_chat_message(std::move(packet));
 }
 
 void ClientUiState::add_chat_message(protocol::ClientboundChatMessage message) {
-  const std::string plain = protocol::to_plain_text(message.message);
+  const std::string plain = arv::text::to_plain_text(message.message);
   if (plain.empty()) {
     return;
   }

@@ -1,7 +1,7 @@
 #include "client_connection.hpp"
 
 #include "arv/core/log.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include "client_protocol_send.hpp"
 
@@ -23,7 +23,7 @@ namespace {
 }
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
     std::string_view fallback) {
   return language == nullptr ? std::string{fallback} : language->text(key, fallback);
@@ -80,7 +80,7 @@ void ClientConnectionRuntime::configure_timeouts(
   server_keep_alive_timeout_enabled_ = server_keep_alive_timeout_enabled;
 }
 
-void ClientConnectionRuntime::configure_language(const lang::LanguageCatalog* language) noexcept {
+void ClientConnectionRuntime::configure_language(const arv::text::LanguageCatalog* language) noexcept {
   language_ = language;
 }
 

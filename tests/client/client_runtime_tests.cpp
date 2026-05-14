@@ -245,13 +245,13 @@ TEST(ClientRuntimeTests, ClientboundChatAppendsRichHistory) {
   ASSERT_TRUE(connection_id);
   enter_in_game(client, *server_transport, connection_id.value());
 
-  arv::protocol::TextStylePatch style;
-  style.color = arv::protocol::RgbColor{0x20U, 0x80U, 0xFFU};
+  arv::text::TextStylePatch style;
+  style.color = arv::text::RgbColor{0x20U, 0x80U, 0xFFU};
   arv::protocol::ClientboundChatMessage chat;
   chat.message_id = 9U;
   chat.channel = "arvane:global";
   chat.kind = arv::protocol::ChatMessageKind::Chat;
-  chat.message = arv::protocol::plain_rich_text("server says hi", style);
+  chat.message = arv::text::plain_rich_text("server says hi", style);
   send_to_client(
       *server_transport,
       connection_id.value(),
@@ -264,10 +264,10 @@ TEST(ClientRuntimeTests, ClientboundChatAppendsRichHistory) {
   EXPECT_EQ(client.chat_messages().front(), "server says hi");
   ASSERT_EQ(client.chat_history().size(), 1U);
   EXPECT_EQ(client.chat_history().front().message_id, 9U);
-  const std::vector<arv::protocol::RichTextRun> runs =
-      arv::protocol::flatten_rich_text(client.chat_history().front().message);
+  const std::vector<arv::text::RichTextRun> runs =
+      arv::text::flatten_rich_text(client.chat_history().front().message);
   ASSERT_EQ(runs.size(), 1U);
-  EXPECT_EQ(runs.front().style.color, (arv::protocol::RgbColor{0x20U, 0x80U, 0xFFU}));
+  EXPECT_EQ(runs.front().style.color, (arv::text::RgbColor{0x20U, 0x80U, 0xFFU}));
 }
 
 TEST(ClientRuntimeTests, ChatHistoryLimitIsConfigurable) {
@@ -279,8 +279,8 @@ TEST(ClientRuntimeTests, ChatHistoryLimitIsConfigurable) {
   client.add_chat_message("three");
 
   ASSERT_EQ(client.chat_history().size(), 2U);
-  EXPECT_EQ(arv::protocol::to_plain_text(client.chat_history()[0].message), "two");
-  EXPECT_EQ(arv::protocol::to_plain_text(client.chat_history()[1].message), "three");
+  EXPECT_EQ(arv::text::to_plain_text(client.chat_history()[0].message), "two");
+  EXPECT_EQ(arv::text::to_plain_text(client.chat_history()[1].message), "three");
 }
 
 TEST(ClientRuntimeTests, WorldJoinKeepsLocalPlayerBodyAtServerSpawn) {

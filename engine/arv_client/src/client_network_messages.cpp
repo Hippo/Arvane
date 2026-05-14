@@ -1,7 +1,7 @@
 #include "client_network_messages.hpp"
 
 #include "arv/crypto/hash.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chat.hpp"
@@ -25,7 +25,7 @@ namespace arv::client::detail {
 namespace {
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
     std::string_view fallback) {
   return language == nullptr ? std::string{fallback} : language->text(key, fallback);

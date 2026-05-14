@@ -39,11 +39,11 @@ inline constexpr f32 ChatBorderAlpha = 0.62F;
 }
 
 [[nodiscard]] Vec4f run_color(
-    const protocol::RichTextRun& run,
+    const arv::text::RichTextRun& run,
     const UiTheme& theme,
     f32 opacity) noexcept {
   const f32 scale = 1.0F / 255.0F;
-  const protocol::RgbColor color = run.style.color;
+  const arv::text::RgbColor color = run.style.color;
   return {
       static_cast<f32>(color.r) * scale,
       static_cast<f32>(color.g) * scale,
@@ -51,7 +51,7 @@ inline constexpr f32 ChatBorderAlpha = 0.62F;
       opacity <= 0.0F ? theme.colors.text.w : opacity};
 }
 
-[[nodiscard]] bool run_interactive(const protocol::RichTextRun& run) noexcept {
+[[nodiscard]] bool run_interactive(const arv::text::RichTextRun& run) noexcept {
   return run.click_event.has_value() || run.hover_event.has_value();
 }
 
@@ -60,7 +60,7 @@ void append_chat_run(
     UiNodeID row_id,
     const std::string& line_id,
     usize run_index,
-    const protocol::RichTextRun& run,
+    const arv::text::RichTextRun& run,
     const UiTheme& theme,
     f32 opacity,
     f32 line_height) {

@@ -12,9 +12,9 @@
 #include <string_view>
 #include <vector>
 
-namespace arv::lang {
+namespace arv::text {
 class LanguageCatalog;
-} // namespace arv::lang
+} // namespace arv::text
 
 namespace arv::command {
 
@@ -156,7 +156,7 @@ using CommandPermissionCheckFn =
 struct CommandServices {
   void* domain_services{};
   CommandPermissionCheckFn permission_check{};
-  const lang::LanguageCatalog* language{};
+  const arv::text::LanguageCatalog* language{};
 
   template<typename T>
   [[nodiscard]] T* as() noexcept {

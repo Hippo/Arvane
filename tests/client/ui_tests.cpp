@@ -1,5 +1,5 @@
 #include "arv/asset/resource.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/ui/ui.hpp"
 
 #include <gtest/gtest.h>
@@ -126,13 +126,13 @@ public:
   return skin;
 }
 
-[[nodiscard]] const arv::lang::LanguageCatalog& test_language() {
-  static const arv::lang::LanguageCatalog language = [] {
+[[nodiscard]] const arv::text::LanguageCatalog& test_language() {
+  static const arv::text::LanguageCatalog language = [] {
     const std::filesystem::path pack_root =
         std::filesystem::path{ARVANE_TEST_ASSET_ROOT}.parent_path().parent_path();
     const std::filesystem::path lang_root = pack_root / "data" / "arvane" / "lang";
-    auto loaded = arv::lang::load_language_directory(lang_root);
-    return loaded ? std::move(loaded.value()) : arv::lang::LanguageCatalog{};
+    auto loaded = arv::text::load_language_directory(lang_root);
+    return loaded ? std::move(loaded.value()) : arv::text::LanguageCatalog{};
   }();
   return language;
 }
@@ -596,16 +596,16 @@ TEST(GameplayUiTests, RichChatRunsExposeColorAndHitActions) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;
 
-  arv::protocol::RichText rich = arv::protocol::RichTextBuilder()
-                                     .append("Hippo", arv::protocol::style_patch_color(0x20U, 0x80U, 0xFFU))
+  arv::text::RichText rich = arv::text::RichTextBuilder()
+                                     .append("Hippo", arv::text::style_patch_color(0x20U, 0x80U, 0xFFU))
                                      .click_suggest_command("/msg Hippo ")
                                      .hover_text("Click to message Hippo")
                                      .append(": hello")
                                      .build();
   arv::ui::ChatLineView line;
-  line.text = arv::protocol::to_plain_text(rich);
+  line.text = arv::text::to_plain_text(rich);
   line.opacity = 1.0F;
-  line.runs = arv::protocol::flatten_rich_text(rich);
+  line.runs = arv::text::flatten_rich_text(rich);
 
   arv::ui::build_chat_ui(tree, {true, true, {&line, 1U}, ""});
   tree.layout({800.0F, 600.0F}, &text);

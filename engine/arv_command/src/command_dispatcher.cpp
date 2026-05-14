@@ -1,6 +1,6 @@
 #include "arv/command/command_dispatcher.hpp"
 
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include <cctype>
 #include <string>
@@ -44,13 +44,13 @@ void replace_all(std::string& text, std::string_view token, std::string_view val
 [[nodiscard]] std::string command_format(
     const CommandServices& services,
     std::string_view key,
-    std::initializer_list<lang::FormatArg> args,
+    std::initializer_list<arv::text::FormatArg> args,
     std::string_view fallback) {
   if (services.language != nullptr) {
     return services.language->format(key, args, fallback);
   }
   std::string result{fallback};
-  for (const lang::FormatArg& arg : args) {
+  for (const arv::text::FormatArg& arg : args) {
     replace_all(result, "{" + arg.name + "}", arg.value);
   }
   return result;

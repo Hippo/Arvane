@@ -2,7 +2,7 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/random.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/server/skin_runtime.hpp"
 
 #include <algorithm>
@@ -14,7 +14,7 @@ namespace arv::server::detail {
 namespace {
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
     std::string_view fallback) {
   return language == nullptr ? std::string{fallback} : language->text(key, fallback);

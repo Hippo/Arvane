@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace arv::lang {
+namespace arv::text {
 
 inline constexpr std::string_view DefaultLocale = "en_US";
 inline constexpr std::string_view DisplayNameSuffix = "display_name";
@@ -77,4 +77,4 @@ using LanguageResult = Expected<LanguageCatalog, LanguageError>;
 [[nodiscard]] std::string item_display_name_key(std::string_view item_name);
 [[nodiscard]] std::string entity_display_name_key(std::string_view entity_name);
 
-} // namespace arv::lang
+} // namespace arv::text

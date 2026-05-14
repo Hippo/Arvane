@@ -3,7 +3,7 @@
 #include "arv/base/base_ids.hpp"
 #include "arv/base/command_services.hpp"
 #include "arv/command/command.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include <cassert>
 #include <sstream>
@@ -25,10 +25,10 @@ constexpr std::string_view TeleportPermission = ids::TeleportPermissionNode;
 [[nodiscard]] std::string tr(
     const command::CommandCtx& ctx,
     std::string_view key,
-    std::initializer_list<lang::FormatArg> args,
+    std::initializer_list<arv::text::FormatArg> args,
     std::string_view fallback) {
   return ctx.services.language == nullptr
-             ? lang::LanguageCatalog{}.format(key, args, fallback)
+             ? arv::text::LanguageCatalog{}.format(key, args, fallback)
              : ctx.services.language->format(key, args, fallback);
 }
 

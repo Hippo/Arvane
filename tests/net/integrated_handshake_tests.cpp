@@ -371,10 +371,10 @@ TEST(IntegratedHandshakeTests, ClientChatIsFormattedAndBroadcastByServer) {
   EXPECT_EQ(client.chat_history().front().kind, arv::protocol::ChatMessageKind::Chat);
   EXPECT_EQ(client.chat_history().front().channel, "arvane:global");
   EXPECT_EQ(
-      arv::protocol::to_plain_text(client.chat_history().front().message),
+      arv::text::to_plain_text(client.chat_history().front().message),
       "Hippo: {\"text\":\"fake admin\"}");
-  const std::vector<arv::protocol::RichTextRun> runs =
-      arv::protocol::flatten_rich_text(client.chat_history().front().message);
+  const std::vector<arv::text::RichTextRun> runs =
+      arv::text::flatten_rich_text(client.chat_history().front().message);
   ASSERT_GE(runs.size(), 3U);
   EXPECT_TRUE(runs.front().click_event.has_value());
 }

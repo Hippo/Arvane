@@ -1,6 +1,6 @@
 #include "arv/server/chat_service.hpp"
 
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include <algorithm>
 
@@ -52,84 +52,31 @@ namespace {
   return out;
 }
 
-[[nodiscard]] protocol::TextStylePatch chat_color(u8 r, u8 g, u8 b) {
-  return protocol::style_patch_color(r, g, b);
-}
-
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
     std::string_view fallback) {
   return language == nullptr ? std::string{fallback} : language->text(key, fallback);
 }
 
-[[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
-    std::string_view key,
-    std::initializer_list<lang::FormatArg> args,
-    std::string_view fallback) {
-  return language == nullptr ? lang::LanguageCatalog{}.format(key, args, fallback)
-                             : language->format(key, args, fallback);
-}
-
 } // namespace
-
-protocol::RichText ChatFormatter::format_player_chat(
-    const ChatFormatContext& context) const {
-  const std::string sender_name =
-      context.sender_name.empty() ? std::string{"player"} : context.sender_name;
-
-  protocol::RichTextBuilder builder;
-  if (context.rank_prefix.has_value()) {
-    builder.append_component(context.rank_prefix.value());
-    builder.append(" ");
-  }
-
-  builder
-      .append(sender_name, chat_color(0xFFU, 0xFFU, 0xFFU))
-      .click_suggest_command("/msg " + sender_name + " ")
-      .hover_text(tr(
-          context.language,
-          "server.chat.hover_message",
-          {{"name", sender_name}},
-          "Click to message {name}"))
-      .append(": ", chat_color(0xA8U, 0xA8U, 0xA8U))
-      .append_literal(context.raw_message, chat_color(0xDDU, 0xDDU, 0xDDU));
-  return builder.build();
-}
-
-protocol::RichText ChatFormatter::format_system_message(
-    std::string_view message) const {
-  return protocol::RichTextBuilder()
-      .append(std::string{message}, chat_color(0xE6U, 0xE1U, 0x8DU))
-      .build();
-}
-
-protocol::RichText ChatFormatter::format_error_message(
-    std::string_view message) const {
-  protocol::TextStylePatch style = chat_color(0xFFU, 0x6BU, 0x6BU);
-  style.bold = true;
-  return protocol::RichTextBuilder()
-      .append(std::string{message}, std::move(style))
-      .build();
-}
 
 Expected<std::string, ChatValidationError> validate_chat_message_text(
     std::string_view message,
     const ChatValidationConfig& config,
-    const lang::LanguageCatalog* language) {
+    const arv::text::LanguageCatalog* language) {
   if (message.size() > config.max_message_bytes) {
     return Expected<std::string, ChatValidationError>::failure(
         {tr(language, "server.chat.validation.too_long", "Chat message is too long.")});
   }
-  if (!protocol::is_valid_utf8(message)) {
+  if (!arv::text::is_valid_utf8(message)) {
     return Expected<std::string, ChatValidationError>::failure(
         {tr(
             language,
             "server.chat.validation.invalid_utf8",
             "Chat message is not valid UTF-8.")});
   }
-  if (protocol::utf8_codepoint_count(message) > config.max_message_codepoints) {
+  if (arv::text::utf8_codepoint_count(message) > config.max_message_codepoints) {
     return Expected<std::string, ChatValidationError>::failure(
         {tr(
             language,

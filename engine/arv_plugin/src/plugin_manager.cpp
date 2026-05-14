@@ -498,7 +498,7 @@ struct PluginCallContext {
   u64 next_data_document_handle{1U};
   HashMap<u64, data::DataDocument> data_documents{};
   u64 next_text_handle{1U};
-  HashMap<u64, protocol::RichText> text_components{};
+  HashMap<u64, arv::text::RichText> text_components{};
   u64 next_packet_handle{1U};
   HashMap<u64, PluginNetworkPacket> network_packets{};
 
@@ -780,7 +780,7 @@ void install_plugin_permission_groups(PluginManagerImpl& impl) {
   return buffer;
 }
 
-[[nodiscard]] protocol::RichText* text_from_handle(
+[[nodiscard]] arv::text::RichText* text_from_handle(
     PluginCallContext* ctx,
     ArvTextHandle handle) {
   if (ctx == nullptr || handle.value == 0U) {
@@ -792,7 +792,7 @@ void install_plugin_permission_groups(PluginManagerImpl& impl) {
 
 [[nodiscard]] ArvTextHandle store_text(
     PluginCallContext* ctx,
-    protocol::RichText text) {
+    arv::text::RichText text) {
   if (ctx == nullptr) {
     return {};
   }
@@ -823,10 +823,10 @@ void install_plugin_permission_groups(PluginManagerImpl& impl) {
 }
 
 void apply_text_style_patch(
-    protocol::TextStylePatch& result,
+    arv::text::TextStylePatch& result,
     ArvTextStylePatch style) {
   if (style.has_color) {
-    result.color = protocol::RgbColor{style.color.r, style.color.g, style.color.b};
+    result.color = arv::text::RgbColor{style.color.r, style.color.g, style.color.b};
   }
   if (style.has_bold) {
     result.bold = style.bold;
@@ -865,24 +865,24 @@ void apply_text_style_patch(
   return std::nullopt;
 }
 
-[[nodiscard]] protocol::ClickAction click_action_from_abi(
+[[nodiscard]] arv::text::ClickAction click_action_from_abi(
     ArvTextClickAction action) noexcept {
   switch (action) {
     case ARV_TEXT_CLICK_OPEN_URL:
-      return protocol::ClickAction::OpenUrl;
+      return arv::text::ClickAction::OpenUrl;
     case ARV_TEXT_CLICK_SUGGEST_COMMAND:
-      return protocol::ClickAction::SuggestCommand;
+      return arv::text::ClickAction::SuggestCommand;
     case ARV_TEXT_CLICK_RUN_COMMAND:
-      return protocol::ClickAction::RunCommand;
+      return arv::text::ClickAction::RunCommand;
     case ARV_TEXT_CLICK_COPY_TO_CLIPBOARD:
-      return protocol::ClickAction::CopyToClipboard;
+      return arv::text::ClickAction::CopyToClipboard;
   }
-  return protocol::ClickAction::SuggestCommand;
+  return arv::text::ClickAction::SuggestCommand;
 }
 
-[[nodiscard]] protocol::RichTextLimits text_limits_from_abi(
+[[nodiscard]] arv::text::RichTextLimits text_limits_from_abi(
     const ArvTextLimits* limits) noexcept {
-  protocol::RichTextLimits result;
+  arv::text::RichTextLimits result;
   if (limits == nullptr) {
     return result;
   }
@@ -2978,10 +2978,10 @@ ArvResult api_text_literal(
   }
   *out_text = {};
   const std::string value{abi_view(text)};
-  if (!protocol::is_valid_utf8(value)) {
+  if (!arv::text::is_valid_utf8(value)) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "text is not valid UTF-8");
   }
-  *out_text = store_text(ctx, protocol::plain_rich_text(value));
+  *out_text = store_text(ctx, arv::text::plain_rich_text(value));
   return ok(ctx);
 }
 
@@ -3004,13 +3004,13 @@ ArvResult api_text_translatable(
   if (key.size() > protocol::MaxRichTextTranslationKeyBytes) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "translation key is too long");
   }
-  if (!protocol::is_valid_utf8(key)) {
+  if (!arv::text::is_valid_utf8(key)) {
     return make_result(
         ctx,
         ARV_RESULT_INVALID_ARGUMENT,
         "translation key is not valid UTF-8");
   }
-  *out_text = store_text(ctx, protocol::translatable_rich_text(key));
+  *out_text = store_text(ctx, arv::text::translatable_rich_text(key));
   return ok(ctx);
 }
 
@@ -3027,12 +3027,12 @@ ArvResult api_text_append(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
   }
   *out_text = {};
-  protocol::RichText* parent_text = text_from_handle(ctx, parent);
-  protocol::RichText* child_text = text_from_handle(ctx, child);
+  arv::text::RichText* parent_text = text_from_handle(ctx, parent);
+  arv::text::RichText* child_text = text_from_handle(ctx, child);
   if (parent_text == nullptr || child_text == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  protocol::RichText copy = *parent_text;
+  arv::text::RichText copy = *parent_text;
   copy.children.push_back(*child_text);
   *out_text = store_text(ctx, std::move(copy));
   return ok(ctx);
@@ -3051,13 +3051,13 @@ ArvResult api_text_style(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
   }
   *out_text = {};
-  protocol::RichText* source = text_from_handle(ctx, text);
+  arv::text::RichText* source = text_from_handle(ctx, text);
   if (source == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  protocol::RichText copy = *source;
+  arv::text::RichText copy = *source;
   apply_text_style_patch(copy.style, style);
-  const protocol::RichTextValidation validation = protocol::validate_rich_text(copy);
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(copy);
   if (!validation.valid) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
   }
@@ -3076,13 +3076,13 @@ ArvResult api_text_color(
   return api_text_style(context, text, style, out_text);
 }
 
-void apply_hover_to_text(protocol::RichText& text, protocol::HoverEvent hover) {
+void apply_hover_to_text(arv::text::RichText& text, arv::text::HoverEvent hover) {
   bool applied = false;
   if (!text.text.empty()) {
     text.hover_event = hover;
     applied = true;
   }
-  for (protocol::RichText& child : text.children) {
+  for (arv::text::RichText& child : text.children) {
     apply_hover_to_text(child, hover);
     applied = true;
   }
@@ -3091,13 +3091,13 @@ void apply_hover_to_text(protocol::RichText& text, protocol::HoverEvent hover) {
   }
 }
 
-void apply_click_to_text(protocol::RichText& text, protocol::ClickEvent click) {
+void apply_click_to_text(arv::text::RichText& text, arv::text::ClickEvent click) {
   bool applied = false;
   if (!text.text.empty()) {
     text.click_event = click;
     applied = true;
   }
-  for (protocol::RichText& child : text.children) {
+  for (arv::text::RichText& child : text.children) {
     apply_click_to_text(child, click);
     applied = true;
   }
@@ -3119,14 +3119,14 @@ ArvResult api_text_hover_text(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
   }
   *out_text = {};
-  protocol::RichText* source = text_from_handle(ctx, text);
-  protocol::RichText* hover_source = text_from_handle(ctx, hover_text);
+  arv::text::RichText* source = text_from_handle(ctx, text);
+  arv::text::RichText* hover_source = text_from_handle(ctx, hover_text);
   if (source == nullptr || hover_source == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  protocol::RichText copy = *source;
-  apply_hover_to_text(copy, protocol::make_show_text_hover(*hover_source));
-  const protocol::RichTextValidation validation = protocol::validate_rich_text(copy);
+  arv::text::RichText copy = *source;
+  apply_hover_to_text(copy, arv::text::make_show_text_hover(*hover_source));
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(copy);
   if (!validation.valid) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
   }
@@ -3148,15 +3148,15 @@ ArvResult api_text_click(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_text is null");
   }
   *out_text = {};
-  protocol::RichText* source = text_from_handle(ctx, text);
+  arv::text::RichText* source = text_from_handle(ctx, text);
   if (source == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  protocol::RichText copy = *source;
+  arv::text::RichText copy = *source;
   apply_click_to_text(
       copy,
-      protocol::ClickEvent{click_action_from_abi(action), abi_string(value)});
-  const protocol::RichTextValidation validation = protocol::validate_rich_text(copy);
+      arv::text::ClickEvent{click_action_from_abi(action), abi_string(value)});
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(copy);
   if (!validation.valid) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
   }
@@ -3176,11 +3176,11 @@ ArvResult api_text_plain_text(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_buffer is null");
   }
   *out_buffer = {};
-  protocol::RichText* source = text_from_handle(ctx, text);
+  arv::text::RichText* source = text_from_handle(ctx, text);
   if (source == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  *out_buffer = byte_buffer_from_string(protocol::to_plain_text(*source));
+  *out_buffer = byte_buffer_from_string(arv::text::to_plain_text(*source));
   return ok(ctx);
 }
 
@@ -3196,11 +3196,11 @@ ArvResult api_text_serialize(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_buffer is null");
   }
   *out_buffer = {};
-  protocol::RichText* source = text_from_handle(ctx, text);
+  arv::text::RichText* source = text_from_handle(ctx, text);
   if (source == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  const protocol::RichTextValidation validation = protocol::validate_rich_text(*source);
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(*source);
   if (!validation.valid) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
   }
@@ -3222,12 +3222,12 @@ ArvResult api_text_validate(
   if (ctx == nullptr) {
     return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
   }
-  protocol::RichText* source = text_from_handle(ctx, text);
+  arv::text::RichText* source = text_from_handle(ctx, text);
   if (source == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  const protocol::RichTextValidation validation =
-      protocol::validate_rich_text(*source, text_limits_from_abi(limits));
+  const arv::text::RichTextValidation validation =
+      arv::text::validate_rich_text(*source, text_limits_from_abi(limits));
   return validation.valid
              ? ok(ctx)
              : make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, validation.message);
@@ -4509,12 +4509,12 @@ ArvResult api_network_create_chat_message(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_packet is null");
   }
   *out_packet = {};
-  protocol::RichText* rich_text = text_from_handle(ctx, message);
+  arv::text::RichText* rich_text = text_from_handle(ctx, message);
   if (rich_text == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  const protocol::RichTextValidation text_validation =
-      protocol::validate_rich_text(*rich_text);
+  const arv::text::RichTextValidation text_validation =
+      arv::text::validate_rich_text(*rich_text);
   if (!text_validation.valid) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, text_validation.message);
   }
@@ -4563,17 +4563,17 @@ ArvResult api_network_create_kick_player(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_packet is null");
   }
   *out_packet = {};
-  protocol::RichText* rich_text = text_from_handle(ctx, reason);
+  arv::text::RichText* rich_text = text_from_handle(ctx, reason);
   if (rich_text == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "text handle not found");
   }
-  const protocol::RichTextValidation text_validation =
-      protocol::validate_rich_text(*rich_text);
+  const arv::text::RichTextValidation text_validation =
+      arv::text::validate_rich_text(*rich_text);
   if (!text_validation.valid) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, text_validation.message);
   }
   const protocol::ClientboundKickPlayer packet{
-      protocol::clamp_kick_reason(protocol::to_plain_text(*rich_text))};
+      protocol::clamp_kick_reason(arv::text::to_plain_text(*rich_text))};
   *out_packet = store_packet(
       ctx,
       {

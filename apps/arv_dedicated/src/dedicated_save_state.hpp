@@ -18,9 +18,9 @@
 #include <utility>
 #include <vector>
 
-namespace arv::lang {
+namespace arv::text {
 class LanguageCatalog;
-} // namespace arv::lang
+} // namespace arv::text
 
 namespace arv::dedicated {
 
@@ -44,7 +44,7 @@ struct DedicatedLoadedWorld {
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
     u64 item_registry_hash,
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     std::span<const persistence::RequiredPackMetadata> required_packs);
 
 [[nodiscard]] Expected<void, DedicatedError> save_dedicated_world(
@@ -59,7 +59,7 @@ struct DedicatedLoadedWorld {
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
     u64 item_registry_hash,
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     std::span<const persistence::RequiredPackMetadata> required_packs);
 
 [[nodiscard]] std::vector<persistence::SavedChunkSection> capture_saved_chunks(

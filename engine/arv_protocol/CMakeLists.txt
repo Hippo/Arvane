@@ -35,4 +35,4 @@ add_library(arv_protocol STATIC
   src/world_join.cpp
 )
 target_include_directories(arv_protocol PUBLIC include)
-target_link_libraries(arv_protocol PUBLIC arv_core arv_crypto arv_player arv_voxel)
+target_link_libraries(arv_protocol PUBLIC arv_core arv_crypto arv_player arv_text arv_voxel)

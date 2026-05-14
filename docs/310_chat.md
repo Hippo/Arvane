@@ -669,7 +669,7 @@ The formatter should receive structured context:
 
 ```cpp
 struct ChatFormatContext {
-    PlayerProfileId sender_profile_id;
+    std::string sender_profile_id;
     std::string sender_name;
     std::string channel;
     std::string raw_message;
@@ -1039,7 +1039,7 @@ Recommended log fields:
 struct ChatLogEntry {
     TimePoint time;
     std::string channel;
-    PlayerProfileId sender_profile_id;
+    std::string sender_profile_id;
     std::string sender_name;
     std::string plain_message;
     std::vector<PlayerProfileId> recipients;
@@ -1383,15 +1383,22 @@ Human-readable rich text:
 
 ## Implementation boundaries
 
-Shared protocol layer:
+Shared text layer (`arv_text`):
 
-* Defines `ServerboundChatMessage`.
-* Defines `ClientboundChatMessage`.
 * Defines `RichText`.
 * Defines `TextStylePatch`.
 * Defines `ClickEvent`.
 * Defines `HoverEvent`.
-* Defines serialization and validation helpers.
+* Defines rich text validation, flattening, plain-text extraction, colors, and
+  default chat formatting helpers.
+
+Shared protocol layer:
+
+* Defines `ServerboundChatMessage`.
+* Defines `ClientboundChatMessage`.
+* Defines chat message kinds and channel constants.
+* Defines wire serialization and deserialization helpers for chat packets and
+  rich text payloads.
 
 Server layer:
 

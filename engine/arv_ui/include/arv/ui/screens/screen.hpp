@@ -2,7 +2,7 @@
 
 #include "arv/ui/core/ui.hpp"
 
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include <memory>
 #include <optional>
@@ -330,7 +330,7 @@ struct UIContext {
   const UIScreenDataSource* data_source{};
   UIScreenManager* screens{};
   const UiTheme* theme{};
-  const lang::LanguageCatalog* language{};
+  const arv::text::LanguageCatalog* language{};
 };
 
 enum class MenuScreenType : u8 {

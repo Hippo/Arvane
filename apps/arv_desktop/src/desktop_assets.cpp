@@ -4,7 +4,7 @@
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
 #include "arv/io/config.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/render/render_commands.hpp"
 
@@ -24,7 +24,7 @@ namespace {
 }
 
 [[nodiscard]] std::optional<DesktopAssetLoadError> apply_block_language(
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     voxel::BlockRegistry& registry) {
   for (u32 index = 0; index < registry.block_count(); ++index) {
     const voxel::BlockID block_id{index};
@@ -32,7 +32,7 @@ namespace {
     if (block == nullptr) {
       continue;
     }
-    const std::string key = lang::block_display_name_key(block->name);
+    const std::string key = arv::text::block_display_name_key(block->name);
     const std::optional<std::string_view> text = language.find(key);
     if (!text.has_value()) {
       return DesktopAssetLoadError{"lang", "missing language key: " + key};
@@ -43,7 +43,7 @@ namespace {
 }
 
 [[nodiscard]] std::optional<DesktopAssetLoadError> apply_item_language(
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     const voxel::BlockRegistry& blocks,
     player::ItemRegistry& registry) {
   for (u32 index = 0; index < registry.item_count(); ++index) {
@@ -52,7 +52,7 @@ namespace {
     if (item == nullptr) {
       continue;
     }
-    const std::string key = lang::item_display_name_key(item->name);
+    const std::string key = arv::text::item_display_name_key(item->name);
     if (const std::optional<std::string_view> text = language.find(key);
         text.has_value()) {
       registry.set_display_name(item_id, std::string{text.value()});
@@ -71,10 +71,10 @@ namespace {
 }
 
 [[nodiscard]] std::optional<DesktopAssetLoadError> apply_entity_language(
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     entity::EntityRegistry& registry) {
   for (const entity::EntityTypeRecord& entity : registry.records()) {
-    const std::string key = lang::entity_display_name_key(entity.name);
+    const std::string key = arv::text::entity_display_name_key(entity.name);
     const std::optional<std::string_view> text = language.find(key);
     if (!text.has_value()) {
       return DesktopAssetLoadError{"lang", "missing language key: " + key};
@@ -98,7 +98,7 @@ namespace {
   return config;
 }
 
-[[nodiscard]] lang::LanguageResult load_pack_language(
+[[nodiscard]] arv::text::LanguageResult load_pack_language(
     const asset::PackManager& packs,
     std::string locale,
     std::string fallback_locale) {
@@ -116,23 +116,23 @@ namespace {
 
   std::vector<std::filesystem::path> fallback_paths =
       paths_only(language_paths_for(fallback_locale));
-  auto fallback = lang::load_language_files(fallback_paths, fallback_locale);
+  auto fallback = arv::text::load_language_files(fallback_paths, fallback_locale);
   if (!fallback) {
     return fallback;
   }
 
-  lang::LanguageCatalog catalog = std::move(fallback.value());
+  arv::text::LanguageCatalog catalog = std::move(fallback.value());
   if (locale != fallback_locale) {
     std::vector<std::filesystem::path> selected_paths =
         paths_only(language_paths_for(locale));
-    auto selected = lang::load_language_files(selected_paths, locale);
+    auto selected = arv::text::load_language_files(selected_paths, locale);
     if (!selected) {
       return selected;
     }
     catalog.merge_from(std::move(selected.value()));
   }
   catalog.set_locale(std::move(locale));
-  return lang::LanguageResult::success(std::move(catalog));
+  return arv::text::LanguageResult::success(std::move(catalog));
 }
 
 [[nodiscard]] asset::TextureAtlasBuildOptions atlas_build_options_from(

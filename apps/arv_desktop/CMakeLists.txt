@@ -76,7 +76,7 @@ target_link_libraries(arv_desktop PRIVATE
   arv_core
   arv_crypto
   arv_io
-  arv_lang
+  arv_text
   arv_net
   arv_platform
   arv_persistence

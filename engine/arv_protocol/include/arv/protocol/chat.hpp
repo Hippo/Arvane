@@ -3,8 +3,8 @@
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
 #include "arv/protocol/message_writer.hpp"
+#include "arv/text/rich_text.hpp"
 
-#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -17,90 +17,33 @@ inline constexpr std::string_view ChatChannelGlobal = "arvane:global";
 inline constexpr std::string_view ChatChannelSystem = "arvane:system";
 inline constexpr usize MaxServerboundChatMessageBytes = 512U;
 inline constexpr usize MaxChatChannelBytes = 128U;
-inline constexpr usize MaxRichTextFontBytes = 128U;
-inline constexpr usize MaxRichTextTranslationKeyBytes = 256U;
 
 using ChatMessageId = u64;
 
-struct RgbColor {
-  u8 r{};
-  u8 g{};
-  u8 b{};
-
-  constexpr bool operator==(const RgbColor&) const = default;
-};
-
-struct TextStylePatch {
-  std::optional<RgbColor> color{};
-  std::optional<bool> bold{};
-  std::optional<bool> italic{};
-  std::optional<bool> underlined{};
-  std::optional<bool> strikethrough{};
-  std::optional<bool> obfuscated{};
-  std::optional<std::string> font{};
-};
-
-struct ResolvedTextStyle {
-  RgbColor color{0xFFU, 0xFFU, 0xFFU};
-  bool bold{};
-  bool italic{};
-  bool underlined{};
-  bool strikethrough{};
-  bool obfuscated{};
-  std::string font{};
-
-  bool operator==(const ResolvedTextStyle&) const = default;
-};
-
-enum class ClickAction : u8 {
-  OpenUrl,
-  SuggestCommand,
-  RunCommand,
-  CopyToClipboard,
-};
-
-struct ClickEvent {
-  ClickAction action{ClickAction::SuggestCommand};
-  std::string value{};
-
-  bool operator==(const ClickEvent&) const = default;
-};
-
-enum class HoverAction : u8 {
-  ShowText,
-  ShowItem,
-  ShowEntity,
-};
-
-struct RichText;
-
-struct HoverEvent {
-  HoverAction action{HoverAction::ShowText};
-  std::shared_ptr<RichText> show_text{};
-  std::string fallback_text{};
-};
-
-enum class RichTextNodeKind : u8 {
-  Literal,
-  Translatable,
-};
-
-struct RichText {
-  RichTextNodeKind kind{RichTextNodeKind::Literal};
-  std::string text{};
-  std::string translation_key{};
-  TextStylePatch style{};
-  std::vector<RichText> children{};
-  std::optional<ClickEvent> click_event{};
-  std::optional<HoverEvent> hover_event{};
-};
-
-struct RichTextRun {
-  std::string text{};
-  ResolvedTextStyle style{};
-  std::optional<ClickEvent> click_event{};
-  std::optional<HoverEvent> hover_event{};
-};
+using arv::text::ClickAction;
+using arv::text::ClickEvent;
+using arv::text::HoverAction;
+using arv::text::HoverEvent;
+using arv::text::MaxRichTextFontBytes;
+using arv::text::MaxRichTextTranslationKeyBytes;
+using arv::text::ResolvedTextStyle;
+using arv::text::RgbColor;
+using arv::text::RichText;
+using arv::text::RichTextBuilder;
+using arv::text::RichTextLimits;
+using arv::text::RichTextNodeKind;
+using arv::text::RichTextRun;
+using arv::text::RichTextValidation;
+using arv::text::TextStylePatch;
+using arv::text::flatten_rich_text;
+using arv::text::is_valid_utf8;
+using arv::text::make_show_text_hover;
+using arv::text::plain_rich_text;
+using arv::text::style_patch_color;
+using arv::text::to_plain_text;
+using arv::text::translatable_rich_text;
+using arv::text::utf8_codepoint_count;
+using arv::text::validate_rich_text;
 
 enum class ChatMessageKind : u8 {
   Chat,
@@ -121,57 +64,6 @@ struct ClientboundChatMessage {
   ChatMessageKind kind{ChatMessageKind::Chat};
   RichText message{};
 };
-
-struct RichTextLimits {
-  usize max_serialized_size_bytes{16U * 1024U};
-  usize max_text_bytes{4096U};
-  usize max_nodes{256U};
-  usize max_depth{16U};
-  usize max_hover_text_bytes{4096U};
-  usize max_click_value_bytes{1024U};
-};
-
-struct RichTextValidation {
-  bool valid{};
-  std::string message{};
-};
-
-class RichTextBuilder {
-public:
-  RichTextBuilder& append(std::string text, TextStylePatch style = {});
-  RichTextBuilder& append_literal(std::string text, TextStylePatch style = {});
-  RichTextBuilder& append_component(RichText component);
-  RichTextBuilder& click_open_url(std::string value);
-  RichTextBuilder& click_suggest_command(std::string value);
-  RichTextBuilder& click_run_command(std::string value);
-  RichTextBuilder& click_copy_to_clipboard(std::string value);
-  RichTextBuilder& hover_text(std::string text);
-  RichTextBuilder& hover_text(RichText text);
-  [[nodiscard]] RichText build() const;
-
-private:
-  void attach_click(ClickAction action, std::string value);
-
-  RichText root_{};
-};
-
-[[nodiscard]] TextStylePatch style_patch_color(RgbColor color);
-[[nodiscard]] TextStylePatch style_patch_color(u8 r, u8 g, u8 b);
-[[nodiscard]] RichText plain_rich_text(std::string text, TextStylePatch style = {});
-[[nodiscard]] RichText translatable_rich_text(
-    std::string translation_key,
-    TextStylePatch style = {});
-[[nodiscard]] HoverEvent make_show_text_hover(RichText text);
-
-[[nodiscard]] bool is_valid_utf8(std::string_view text) noexcept;
-[[nodiscard]] usize utf8_codepoint_count(std::string_view text) noexcept;
-[[nodiscard]] std::string to_plain_text(const RichText& text);
-[[nodiscard]] std::vector<RichTextRun> flatten_rich_text(
-    const RichText& text,
-    ResolvedTextStyle base_style = {});
-[[nodiscard]] RichTextValidation validate_rich_text(
-    const RichText& text,
-    const RichTextLimits& limits = {});
 
 [[nodiscard]] std::vector<u8> serialize_rich_text(const RichText& text);
 [[nodiscard]] Expected<RichText, ProtocolError> deserialize_rich_text(

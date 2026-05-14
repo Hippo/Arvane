@@ -34,9 +34,9 @@
 #include <string>
 #include <vector>
 
-namespace arv::lang {
+namespace arv::text {
 class LanguageCatalog;
-} // namespace arv::lang
+} // namespace arv::text
 
 namespace arv::desktop {
 
@@ -101,7 +101,7 @@ struct DesktopSessionDependencies {
   const world::WorldTickPolicy& world_tick_policy;
   const world::WorldGenerationConfig& default_generation_config;
   const sched::RuntimeThreadBudgetPlan& thread_budget;
-  const lang::LanguageCatalog& language;
+  const arv::text::LanguageCatalog& language;
   std::vector<asset::RequiredPack> required_packs{};
   plugin::PluginManager* plugins{};
 };

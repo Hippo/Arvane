@@ -1,4 +1,4 @@
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -6,7 +6,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-namespace arv::lang {
+namespace arv::text {
 namespace {
 
 [[nodiscard]] std::string language_file_name(std::string_view locale) {
@@ -242,4 +242,4 @@ std::string entity_display_name_key(std::string_view entity_name) {
   return key_for_namespaced_id("entity", entity_name, DisplayNameSuffix);
 }
 
-} // namespace arv::lang
+} // namespace arv::text

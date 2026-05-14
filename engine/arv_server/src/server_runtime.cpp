@@ -2,7 +2,7 @@
 
 #include "arv/command/server_command_services.hpp"
 #include "arv/crypto/random.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/core/log.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/skin_runtime.hpp"
@@ -17,18 +17,18 @@ namespace arv::server {
 namespace {
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
     std::string_view fallback) {
   return language == nullptr ? std::string{fallback} : language->text(key, fallback);
 }
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
-    std::initializer_list<lang::FormatArg> args,
+    std::initializer_list<arv::text::FormatArg> args,
     std::string_view fallback) {
-  return language == nullptr ? lang::LanguageCatalog{}.format(key, args, fallback)
+  return language == nullptr ? arv::text::LanguageCatalog{}.format(key, args, fallback)
                              : language->format(key, args, fallback);
 }
 

@@ -13,4 +13,4 @@ add_library(arv_command STATIC
 )
 target_include_directories(arv_command PUBLIC include)
 target_link_libraries(arv_command PUBLIC arv_core arv_crypto)
-target_link_libraries(arv_command PRIVATE arv_lang)
+target_link_libraries(arv_command PRIVATE arv_text)

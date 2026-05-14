@@ -33,7 +33,7 @@ inline constexpr Vec4f AccentColor{0.400F, 0.760F, 0.860F, 1.0F};
 [[nodiscard]] inline std::string tr(
     const UIContext& ctx,
     std::string_view key,
-    std::initializer_list<lang::FormatArg> args) {
+    std::initializer_list<arv::text::FormatArg> args) {
   return ctx.language == nullptr ? std::string{key} : ctx.language->format(key, args);
 }
 

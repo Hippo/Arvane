@@ -2,7 +2,7 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/hash.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/physics/player_movement.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chat.hpp"
@@ -25,7 +25,7 @@ namespace arv::server::detail {
 namespace {
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog* language,
+    const arv::text::LanguageCatalog* language,
     std::string_view key,
     std::string_view fallback) {
   return language == nullptr ? std::string{fallback} : language->text(key, fallback);
@@ -923,15 +923,15 @@ void ServerRuntimeImpl::handle_chat_message(
     return;
   }
 
-  ChatFormatContext context;
+  arv::text::ChatFormatContext context;
   context.language = language_;
-  context.sender_profile_id = session->profile_id;
+  context.sender_profile_id = session->profile_id.string();
   context.sender_name =
       session->display_name.empty() ? session->profile_name : session->display_name;
   context.channel = channel;
   context.raw_message = std::move(normalized.value());
-  protocol::RichText formatted = chat_formatter_.format_player_chat(context);
-  const protocol::RichTextValidation validation = protocol::validate_rich_text(formatted);
+  arv::text::RichText formatted = chat_formatter_.format_player_chat(context);
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(formatted);
   if (!validation.valid) {
     core::warn("chat", "refusing to broadcast invalid formatted chat: {}", validation.message);
     send_error_message(
@@ -969,8 +969,8 @@ void ServerRuntimeImpl::handle_chat_message(
 
 void ServerRuntimeImpl::send_system_message(
     const ServerSession& recipient,
-    protocol::RichText message) {
-  const protocol::RichTextValidation validation = protocol::validate_rich_text(message);
+    arv::text::RichText message) {
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(message);
   if (!validation.valid) {
     core::warn("chat", "refusing to send invalid system chat: {}", validation.message);
     return;
@@ -992,8 +992,8 @@ void ServerRuntimeImpl::send_system_message(
 
 void ServerRuntimeImpl::send_error_message(
     const ServerSession& recipient,
-    protocol::RichText message) {
-  const protocol::RichTextValidation validation = protocol::validate_rich_text(message);
+    arv::text::RichText message) {
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(message);
   if (!validation.valid) {
     core::warn("chat", "refusing to send invalid error chat: {}", validation.message);
     return;
@@ -1013,8 +1013,8 @@ void ServerRuntimeImpl::send_error_message(
   log_send_failure_if_dedicated(mode_, recipient.connection_id, send_result);
 }
 
-void ServerRuntimeImpl::broadcast_system_message(protocol::RichText message) {
-  const protocol::RichTextValidation validation = protocol::validate_rich_text(message);
+void ServerRuntimeImpl::broadcast_system_message(arv::text::RichText message) {
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(message);
   if (!validation.valid) {
     core::warn("chat", "refusing to broadcast invalid system chat: {}", validation.message);
     return;

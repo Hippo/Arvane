@@ -10,7 +10,7 @@
 #include "arv/client/item_animation.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/player/item.hpp"
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/render/render_commands.hpp"
@@ -30,7 +30,7 @@ struct DesktopLoadedAssets {
   u64 item_registry_hash{};
   client::ItemAnimationLibrary item_animation_library{};
   entity::EntityRegistry entity_registry{};
-  lang::LanguageCatalog language{};
+  arv::text::LanguageCatalog language{};
   asset::BlockTextureAtlas block_atlas{};
   render::FluidRenderData fluid_render_data{};
   asset::TextureAtlas item_atlas{};

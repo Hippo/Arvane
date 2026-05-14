@@ -3,7 +3,7 @@
 #include "dedicated_worldgen_loader.hpp"
 
 #include "arv/core/log.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -15,7 +15,7 @@ namespace arv::dedicated {
 namespace {
 
 [[nodiscard]] std::string tr(
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     std::string_view key,
     std::string_view fallback) {
   return language.text(key, fallback);
@@ -195,7 +195,7 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
     u64 item_registry_hash,
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     std::span<const persistence::RequiredPackMetadata> required_packs) {
   DedicatedLoadedWorld loaded_world;
   loaded_world.server_save_root = config.paths.dedicated_server_save_path();
@@ -334,7 +334,7 @@ Expected<void, DedicatedError> save_dedicated_world(
     u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
     u64 item_registry_hash,
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     std::span<const persistence::RequiredPackMetadata> required_packs) {
   const std::vector<persistence::SavedChunkSection> saved_chunks =
       capture_saved_chunks(server.voxel_world());

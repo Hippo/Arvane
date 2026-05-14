@@ -40,7 +40,7 @@ namespace {
   return ui_cache_hash_append_byte(hash, value ? 1U : 0U);
 }
 
-[[nodiscard]] u64 ui_cache_hash_append_color(u64 hash, protocol::RgbColor color) noexcept {
+[[nodiscard]] u64 ui_cache_hash_append_color(u64 hash, arv::text::RgbColor color) noexcept {
   hash = ui_cache_hash_append_byte(hash, color.r);
   hash = ui_cache_hash_append_byte(hash, color.g);
   hash = ui_cache_hash_append_byte(hash, color.b);
@@ -139,7 +139,7 @@ namespace {
 }
 
 [[nodiscard]] std::string fallback_command_result_message(
-    const lang::LanguageCatalog& language,
+    const arv::text::LanguageCatalog& language,
     command::CommandStatus status) {
   switch (status) {
     case command::CommandStatus::Success:
@@ -163,7 +163,7 @@ namespace {
 void append_command_result_to_chat(
     client::ClientRuntime& client,
     const command::CommandResult& result,
-    const lang::LanguageCatalog& language) {
+    const arv::text::LanguageCatalog& language) {
   bool wrote_message = false;
   for (const command::CommandMessage& message : result.messages) {
     if (message.text.empty()) {
@@ -202,9 +202,9 @@ void append_command_result_to_chat(
     const client::ChatHistoryEntry& entry,
     f32 opacity) {
   ui::ChatLineView line;
-  line.text = protocol::to_plain_text(entry.message);
+  line.text = arv::text::to_plain_text(entry.message);
   line.opacity = opacity;
-  line.runs = protocol::flatten_rich_text(entry.message);
+  line.runs = arv::text::flatten_rich_text(entry.message);
   return line;
 }
 
@@ -261,7 +261,7 @@ void append_command_result_to_chat(
     hash = ui_cache_hash_append_string(hash, line.text);
     hash = ui_cache_hash_append_f32(hash, line.opacity);
     hash = ui_cache_hash_append_u64(hash, line.runs.size());
-    for (const protocol::RichTextRun& run : line.runs) {
+    for (const arv::text::RichTextRun& run : line.runs) {
       hash = ui_cache_hash_append_string(hash, run.text);
       hash = ui_cache_hash_append_color(hash, run.style.color);
       hash = ui_cache_hash_append_bool(hash, run.style.bold);
@@ -657,14 +657,14 @@ bool DesktopFrameLoop::append_chat_hover_tooltip_if_needed(
       run_id->second >= active_session.chat_lines[run_id->first].runs.size()) {
     return false;
   }
-  const protocol::RichTextRun& run =
+  const arv::text::RichTextRun& run =
       active_session.chat_lines[run_id->first].runs[run_id->second];
   if (!run.hover_event.has_value() ||
-      run.hover_event->action != protocol::HoverAction::ShowText ||
+      run.hover_event->action != arv::text::HoverAction::ShowText ||
       run.hover_event->show_text == nullptr) {
     return false;
   }
-  const std::string tooltip = protocol::to_plain_text(*run.hover_event->show_text);
+  const std::string tooltip = arv::text::to_plain_text(*run.hover_event->show_text);
   if (tooltip.empty()) {
     return false;
   }
@@ -712,16 +712,16 @@ bool DesktopFrameLoop::route_chat_mouse_input(
       if (run_id.has_value() &&
           run_id->first < active_session.chat_lines.size() &&
           run_id->second < active_session.chat_lines[run_id->first].runs.size()) {
-        const protocol::RichTextRun& run =
+        const arv::text::RichTextRun& run =
             active_session.chat_lines[run_id->first].runs[run_id->second];
         if (run.click_event.has_value()) {
-          const protocol::ClickEvent& click = run.click_event.value();
+          const arv::text::ClickEvent& click = run.click_event.value();
           switch (click.action) {
-            case protocol::ClickAction::SuggestCommand:
+            case arv::text::ClickAction::SuggestCommand:
               active_session.client->suggest_chat_command(click.value);
               handled = true;
               break;
-            case protocol::ClickAction::OpenUrl:
+            case arv::text::ClickAction::OpenUrl:
               if (safe_url_scheme(click.value)) {
                 active_session.client->request_chat_url_confirmation(click.value);
               } else {
@@ -730,14 +730,14 @@ bool DesktopFrameLoop::route_chat_mouse_input(
               }
               handled = true;
               break;
-            case protocol::ClickAction::RunCommand:
+            case arv::text::ClickAction::RunCommand:
               append_command_result_to_chat(
                   *active_session.client,
                   execute_chat_command(active_session, click.value),
                   assets_.language);
               handled = true;
               break;
-            case protocol::ClickAction::CopyToClipboard:
+            case arv::text::ClickAction::CopyToClipboard:
               // TODO(arvane): Route through a platform clipboard abstraction when
               // one exists outside debug ImGui tooling.
               active_session.client->add_chat_message(

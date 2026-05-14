@@ -7,7 +7,7 @@
 #include "arv/asset/pack.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
-#include "arv/lang/language.hpp"
+#include "arv/text/language.hpp"
 #include "arv/player/item.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/entity_goal_registry.hpp"
@@ -15,7 +15,7 @@
 namespace arv::dedicated {
 
 struct DedicatedRegistries {
-  lang::LanguageCatalog language;
+  arv::text::LanguageCatalog language;
 
   voxel::BlockRegistry block_registry;
   u64 block_registry_hash{};

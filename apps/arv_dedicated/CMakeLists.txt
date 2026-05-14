@@ -20,7 +20,7 @@ target_link_libraries(arv_dedicated PRIVATE
   arv_crypto
   arv_entity
   arv_io
-  arv_lang
+  arv_text
   arv_net
   arv_persistence
   arv_plugin
