@@ -1,0 +1,48 @@
+schema_version: 1
+
+nodes:
+  - id: mason.command.use
+    description: Use Mason commands.
+    default: unset
+  - id: mason.command.select
+    description: Set and inspect Mason selections.
+    default: unset
+  - id: mason.command.set
+    description: Fill Mason selections.
+    default: unset
+  - id: mason.command.replace
+    description: Replace blocks in Mason selections.
+    default: unset
+  - id: mason.command.copy
+    description: Copy Mason selections.
+    default: unset
+  - id: mason.command.paste
+    description: Paste Mason clipboards.
+    default: unset
+  - id: mason.command.undo
+    description: Undo Mason edits.
+    default: unset
+  - id: mason.command.redo
+    description: Redo Mason edits.
+    default: unset
+  - id: mason.command.blueprint.save
+    description: Save Mason blueprints.
+    default: unset
+  - id: mason.command.blueprint.load
+    description: Load Mason blueprints.
+    default: unset
+  - id: mason.command.blueprint.paste
+    description: Paste Mason blueprints.
+    default: unset
+  - id: mason.command.blueprint.list
+    description: List Mason blueprints.
+    default: unset
+  - id: mason.command.blueprint.info
+    description: Inspect Mason blueprints.
+    default: unset
+  - id: mason.limit.bypass
+    description: Bypass Mason operation limits.
+    default: unset
+  - id: mason.region.bypass
+    description: Bypass region restrictions when server policy allows it.
+    default: unset

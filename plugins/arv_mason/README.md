@@ -6,6 +6,33 @@ Pack ID: `arv_mason`
 Namespace: `arv_mason`
 Version: `0.1.0`
 
+## Install
+
+Build and install Mason into the development runtime home with:
+
+```text
+cmake --build build --target arv_mason_install_pack
+```
+
+The target copies `plugins/arv_mason/pack/` to
+`arvane_home/packs/arv_mason/` and installs the current platform native library
+under the pack's `native/<platform>/` directory. Enable the pack with:
+
+```yaml
+enabled:
+  - "arvane_base"
+  - "arv_mason"
+```
+
+Native loading is controlled separately by runtime policy:
+
+```yaml
+native_plugins:
+  enabled: true
+  allowed_packs:
+    - "arv_mason"
+```
+
 ## Commands
 
 Root command:

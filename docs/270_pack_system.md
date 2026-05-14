@@ -245,6 +245,8 @@ arvane_home/
           example_plugin_pack.dll
         macos-arm64/
           libexample_plugin_pack.dylib
+        macos-x86_64/
+          libexample_plugin_pack.dylib
 ```
 
 A pack has three major content roots:
@@ -306,6 +308,17 @@ The order is meaningful.
 Earlier packs are lower priority. Later packs are higher priority for eligible overrides.
 
 For singleplayer worlds, the enabled pack list may be combined with the world’s required pack list. For multiplayer, the server’s required pack list is authoritative for gameplay-affecting content.
+
+First-party plugin packs can provide a CMake install target that copies the
+authored pack and current-platform native library into the development runtime
+home. For example:
+
+```text
+cmake --build build --target arv_mason_install_pack
+```
+
+That target installs Mason to `arvane_home/packs/arv_mason/`; the pack is still
+activated through `arvane_home/packs/enabled.yaml`.
 
 ---
 
@@ -376,6 +389,7 @@ native:
     linux-x86_64: "native/linux-x86_64/libexample_plugin_pack.so"
     windows-x86_64: "native/windows-x86_64/example_plugin_pack.dll"
     macos-arm64: "native/macos-arm64/libexample_plugin_pack.dylib"
+    macos-x86_64: "native/macos-x86_64/libexample_plugin_pack.dylib"
 ```
 
 ---
@@ -1119,6 +1133,9 @@ native:
   entrypoint: "arvane_plugin_main"
   libraries:
     linux-x86_64: "native/linux-x86_64/libexample.so"
+    windows-x86_64: "native/windows-x86_64/example.dll"
+    macos-arm64: "native/macos-arm64/libexample.dylib"
+    macos-x86_64: "native/macos-x86_64/libexample.dylib"
 ```
 
 The engine must not load native plugin code just because this metadata exists.

@@ -32,3 +32,4 @@ native:
     linux-x86_64: "native/linux-x86_64/libarv_mason.so"
     windows-x86_64: "native/windows-x86_64/arv_mason.dll"
     macos-arm64: "native/macos-arm64/libarv_mason.dylib"
+    macos-x86_64: "native/macos-x86_64/libarv_mason.dylib"

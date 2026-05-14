@@ -1,0 +1,35 @@
+schema_version: 1
+
+id: "arv_mason"
+display_name: "Mason"
+version: "0.1.0"
+description: "First-party Arvane world editing and blueprint authoring tools."
+
+authors:
+  - "Arvane"
+
+namespaces:
+  - "arv_mason"
+
+side: "server"
+
+engine:
+  min_version: "0.1.0"
+
+dependencies:
+  - id: "arvane_base"
+    version: ">=0.1.0"
+
+capabilities:
+  assets: true
+  data: true
+  native_plugin: true
+
+native:
+  api_version: 1
+  entrypoint: "arvane_plugin_main"
+  libraries:
+    linux-x86_64: "native/linux-x86_64/libarv_mason.so"
+    windows-x86_64: "native/windows-x86_64/arv_mason.dll"
+    macos-arm64: "native/macos-arm64/libarv_mason.dylib"
+    macos-x86_64: "native/macos-x86_64/libarv_mason.dylib"

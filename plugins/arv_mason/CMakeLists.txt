@@ -49,20 +49,32 @@ elseif(APPLE)
 endif()
 
 set(ARV_MASON_PACK_DIR "${CMAKE_BINARY_DIR}/arvane_home/packs/arv_mason")
-add_custom_target(arv_mason_pack ALL
-  COMMAND ${CMAKE_COMMAND} -E remove_directory
-          "${ARV_MASON_PACK_DIR}"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-          "${CMAKE_CURRENT_SOURCE_DIR}/pack"
-          "${ARV_MASON_PACK_DIR}"
-  COMMAND ${CMAKE_COMMAND} -E make_directory
-          "${ARV_MASON_PACK_DIR}/native/${ARV_MASON_PLATFORM_KEY}"
-  COMMAND ${CMAKE_COMMAND} -E copy
-          "$<TARGET_FILE:arv_mason>"
-          "${ARV_MASON_PACK_DIR}/native/${ARV_MASON_PLATFORM_KEY}/$<TARGET_FILE_NAME:arv_mason>"
-  DEPENDS arv_mason
-  VERBATIM
-)
+set(ARV_MASON_DEV_PACK_DIR "${CMAKE_SOURCE_DIR}/arvane_home/packs/arv_mason")
+
+function(arv_mason_add_pack_copy_target TARGET_NAME PACK_DIR)
+  set(ALL_ARG)
+  if(ARGC GREATER 2 AND ARGV2)
+    set(ALL_ARG ALL)
+  endif()
+
+  add_custom_target(${TARGET_NAME} ${ALL_ARG}
+    COMMAND ${CMAKE_COMMAND} -E remove_directory
+            "${PACK_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/pack"
+            "${PACK_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${PACK_DIR}/native/${ARV_MASON_PLATFORM_KEY}"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "$<TARGET_FILE:arv_mason>"
+            "${PACK_DIR}/native/${ARV_MASON_PLATFORM_KEY}/$<TARGET_FILE_NAME:arv_mason>"
+    DEPENDS arv_mason
+    VERBATIM
+  )
+endfunction()
+
+arv_mason_add_pack_copy_target(arv_mason_pack "${ARV_MASON_PACK_DIR}" TRUE)
+arv_mason_add_pack_copy_target(arv_mason_install_pack "${ARV_MASON_DEV_PACK_DIR}")
 
 install(DIRECTORY pack/ DESTINATION packs/arv_mason)
 install(TARGETS arv_mason

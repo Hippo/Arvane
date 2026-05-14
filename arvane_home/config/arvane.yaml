@@ -1,5 +1,9 @@
 paths:
   arvane_home: arvane_home
+native_plugins:
+  enabled: true
+  allowed_packs:
+    - "arv_mason"
 simulation:
   base_tps: 60
   systems:

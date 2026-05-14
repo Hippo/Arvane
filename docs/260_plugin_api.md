@@ -95,6 +95,7 @@ Examples:
 native/linux-x86_64/libexample_pack.so
 native/windows-x86_64/example_pack.dll
 native/macos-arm64/libexample_pack.dylib
+native/macos-x86_64/libexample_pack.dylib
 ```
 
 ### Built-In Module
@@ -187,6 +188,7 @@ native:
     linux-x86_64: "native/linux-x86_64/libexample_plugin_pack.so"
     windows-x86_64: "native/windows-x86_64/example_plugin_pack.dll"
     macos-arm64: "native/macos-arm64/libexample_plugin_pack.dylib"
+    macos-x86_64: "native/macos-x86_64/libexample_plugin_pack.dylib"
 ```
 
 The presence of `native` metadata does not automatically load the plugin.
