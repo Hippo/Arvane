@@ -224,6 +224,34 @@ Lighting jobs are a bounded-job example. A lighting task solves one chunk sectio
 
 Each job also carries a domain such as `ChunkGeneration`, `Meshing`, `Lighting`, `Liquids`, `EntityAi`, `Pathfinding`, `SaveLoad`, `Assets`, `Networking`, or `Rendering`. Domains are used for in-flight budgets and diagnostics. A domain budget of zero means unbounded; nonzero budgets reject excess submissions so the owning system can keep candidates queued for a later tick.
 
+### Runtime Job Configuration
+
+The shared `arvane.yaml` `jobs` section owns both the generic worker-thread budget and the per-runtime `JobSystem` policy:
+
+```yaml
+jobs:
+  worker_threads: 0
+  reserved_threads: 2
+  min_worker_threads: 1
+  max_worker_threads: 64
+  client:
+    critical_cpu_workers: 1
+    background_cpu_workers: 0
+    blocking_io_workers: 1
+    max_mesh_jobs_in_flight: 4
+  server:
+    critical_cpu_workers: 1
+    background_cpu_workers: 0
+    blocking_io_workers: 1
+    max_chunk_gen_in_flight: 4
+    max_lighting_jobs_in_flight: 2
+    max_liquid_jobs_in_flight: 1
+    max_ai_jobs_in_flight: 1
+    max_pathfinding_jobs_in_flight: 1
+```
+
+`worker_threads: 0` keeps the total worker count automatic after reserving owner/platform threads. `background_cpu_workers: 0` lets the app derive the background lane from the runtime budget. Domain budgets use the `JobSystemConfig` field names; zero keeps the raw `JobSystem` domain unbounded, though owner systems with their own pending queues may substitute their runtime default.
+
 ### Current Owner Mapping
 
 The scheduler module provides distinct `RenderThread`, `NetworkThread`, and `WorldThread` owner-thread types. Unit tests assert that each starts on a physical thread distinct from the main test thread.

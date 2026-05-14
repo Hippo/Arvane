@@ -41,6 +41,7 @@ void emit_network_movement_config(
 void emit_network_keep_alive_config(
     YAML::Emitter& emitter,
     const KeepAliveConfig& keep_alive);
+void emit_jobs_config(YAML::Emitter& emitter, const JobSystemConfig& jobs);
 
 template<typename T>
 void read_scalar(const YAML::Node& parent, const char* key, T& value) {
@@ -72,6 +73,26 @@ void read_string_sequence(
       values.push_back(node.as<std::string>());
     }
   }
+}
+
+void read_job_runtime_config(
+    const YAML::Node& jobs,
+    const char* key,
+    JobSystemConfig::RuntimeConfig& config) {
+  const YAML::Node runtime = jobs[key];
+  if (!runtime) {
+    return;
+  }
+
+  read_scalar(runtime, "critical_cpu_workers", config.critical_cpu_workers);
+  read_scalar(runtime, "background_cpu_workers", config.background_cpu_workers);
+  read_scalar(runtime, "blocking_io_workers", config.blocking_io_workers);
+  read_scalar(runtime, "max_chunk_gen_in_flight", config.max_chunk_gen_in_flight);
+  read_scalar(runtime, "max_mesh_jobs_in_flight", config.max_mesh_jobs_in_flight);
+  read_scalar(runtime, "max_lighting_jobs_in_flight", config.max_lighting_jobs_in_flight);
+  read_scalar(runtime, "max_liquid_jobs_in_flight", config.max_liquid_jobs_in_flight);
+  read_scalar(runtime, "max_ai_jobs_in_flight", config.max_ai_jobs_in_flight);
+  read_scalar(runtime, "max_pathfinding_jobs_in_flight", config.max_pathfinding_jobs_in_flight);
 }
 
 void read_tick_system_config(
@@ -735,12 +756,7 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::Key << "unload_margin" << YAML::Value << config.chunks.unload_margin;
   emitter << YAML::EndMap;
 
-  emitter << YAML::Key << "jobs" << YAML::Value << YAML::BeginMap;
-  emitter << YAML::Key << "worker_threads" << YAML::Value << config.jobs.worker_threads;
-  emitter << YAML::Key << "reserved_threads" << YAML::Value << config.jobs.reserved_threads;
-  emitter << YAML::Key << "min_worker_threads" << YAML::Value << config.jobs.min_worker_threads;
-  emitter << YAML::Key << "max_worker_threads" << YAML::Value << config.jobs.max_worker_threads;
-  emitter << YAML::EndMap;
+  emit_jobs_config(emitter, config.jobs);
 
   emitter << YAML::Key << "physics" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "standing_eye_height" << YAML::Value
@@ -1117,6 +1133,45 @@ void emit_ui_config(YAML::Emitter& emitter, const UiConfig& ui) {
   emitter << YAML::EndMap;
 }
 
+void emit_job_runtime_config(
+    YAML::Emitter& emitter,
+    std::string_view key,
+    const JobSystemConfig::RuntimeConfig& runtime) {
+  emitter << YAML::Key << std::string{key} << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "critical_cpu_workers" << YAML::Value
+          << runtime.critical_cpu_workers;
+  emitter << YAML::Key << "background_cpu_workers" << YAML::Value
+          << runtime.background_cpu_workers;
+  emitter << YAML::Key << "blocking_io_workers" << YAML::Value
+          << runtime.blocking_io_workers;
+  emitter << YAML::Key << "max_chunk_gen_in_flight" << YAML::Value
+          << runtime.max_chunk_gen_in_flight;
+  emitter << YAML::Key << "max_mesh_jobs_in_flight" << YAML::Value
+          << runtime.max_mesh_jobs_in_flight;
+  emitter << YAML::Key << "max_lighting_jobs_in_flight" << YAML::Value
+          << runtime.max_lighting_jobs_in_flight;
+  emitter << YAML::Key << "max_liquid_jobs_in_flight" << YAML::Value
+          << runtime.max_liquid_jobs_in_flight;
+  emitter << YAML::Key << "max_ai_jobs_in_flight" << YAML::Value
+          << runtime.max_ai_jobs_in_flight;
+  emitter << YAML::Key << "max_pathfinding_jobs_in_flight" << YAML::Value
+          << runtime.max_pathfinding_jobs_in_flight;
+  emitter << YAML::EndMap;
+}
+
+void emit_jobs_config(YAML::Emitter& emitter, const JobSystemConfig& jobs) {
+  emitter << YAML::Key << "jobs" << YAML::Value << YAML::BeginMap;
+  emitter << YAML::Key << "worker_threads" << YAML::Value << jobs.worker_threads;
+  emitter << YAML::Key << "reserved_threads" << YAML::Value << jobs.reserved_threads;
+  emitter << YAML::Key << "min_worker_threads" << YAML::Value
+          << jobs.min_worker_threads;
+  emitter << YAML::Key << "max_worker_threads" << YAML::Value
+          << jobs.max_worker_threads;
+  emit_job_runtime_config(emitter, "client", jobs.client);
+  emit_job_runtime_config(emitter, "server", jobs.server);
+  emitter << YAML::EndMap;
+}
+
 ConfigResult write_emitted_config_file(
     const std::filesystem::path& path,
     const YAML::Emitter& emitter,
@@ -1204,12 +1259,7 @@ ConfigResult save_default_shared_config_file(
   emitter << YAML::Key << "unload_margin" << YAML::Value << config.chunks.unload_margin;
   emitter << YAML::EndMap;
 
-  emitter << YAML::Key << "jobs" << YAML::Value << YAML::BeginMap;
-  emitter << YAML::Key << "worker_threads" << YAML::Value << config.jobs.worker_threads;
-  emitter << YAML::Key << "reserved_threads" << YAML::Value << config.jobs.reserved_threads;
-  emitter << YAML::Key << "min_worker_threads" << YAML::Value << config.jobs.min_worker_threads;
-  emitter << YAML::Key << "max_worker_threads" << YAML::Value << config.jobs.max_worker_threads;
-  emitter << YAML::EndMap;
+  emit_jobs_config(emitter, config.jobs);
 
   emitter << YAML::Key << "physics" << YAML::Value << YAML::BeginMap;
   emitter << YAML::Key << "standing_eye_height" << YAML::Value
@@ -1557,6 +1607,8 @@ void read_config_node(const YAML::Node& root, EngineConfig& config) {
     read_scalar(jobs, "reserved_threads", config.jobs.reserved_threads);
     read_scalar(jobs, "min_worker_threads", config.jobs.min_worker_threads);
     read_scalar(jobs, "max_worker_threads", config.jobs.max_worker_threads);
+    read_job_runtime_config(jobs, "client", config.jobs.client);
+    read_job_runtime_config(jobs, "server", config.jobs.server);
   }
 
   const YAML::Node physics = root["physics"];
@@ -2269,6 +2321,56 @@ ConfigResult load_config_file_or_defaults(const std::filesystem::path& path) {
     options.explicit_config_path.clear();
   }
   return load_config(options);
+}
+
+ConfigResult save_config_file(const std::filesystem::path& path, const EngineConfig& config) {
+  return save_default_config_file(path, config);
+}
+
+ConfigResult save_config_files(const EngineConfig& config, ConfigProfile active_profile) {
+  if (config.paths.shared_config_file.empty() ||
+      config.paths.client_config_file.empty() ||
+      config.paths.server_config_file.empty()) {
+    return ConfigResult::failure(
+        ConfigError{"cannot save split config files without resolved config paths"});
+  }
+
+  auto shared = save_default_shared_config_file(config.paths.shared_config_file, config);
+  if (!shared) {
+    return shared;
+  }
+
+  EngineConfig client_config = config;
+  if (active_profile != ConfigProfile::Client &&
+      std::filesystem::exists(config.paths.client_config_file)) {
+    auto client_overlay =
+        apply_config_overlay_file(config.paths.client_config_file, client_config);
+    if (!client_overlay) {
+      return client_overlay;
+    }
+  }
+
+  EngineConfig server_config = config;
+  if (active_profile != ConfigProfile::Server &&
+      std::filesystem::exists(config.paths.server_config_file)) {
+    auto server_overlay =
+        apply_config_overlay_file(config.paths.server_config_file, server_config);
+    if (!server_overlay) {
+      return server_overlay;
+    }
+  }
+
+  auto client =
+      save_default_client_config_file(config.paths.client_config_file, client_config);
+  if (!client) {
+    return client;
+  }
+  auto server =
+      save_default_server_config_file(config.paths.server_config_file, server_config);
+  if (!server) {
+    return server;
+  }
+  return ConfigResult::success(config);
 }
 
 ConfigResult save_client_config_file(const std::filesystem::path& path, const EngineConfig& config) {

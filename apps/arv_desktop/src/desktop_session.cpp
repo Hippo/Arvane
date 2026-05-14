@@ -232,6 +232,8 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.max_pending_generation_jobs =
       dependencies_.config.chunk_pipeline.max_generation_jobs_per_frame;
   server_start_info.worker_threads = dependencies_.thread_budget.primary_workers;
+  server_start_info.job_system =
+      make_server_job_system_config(dependencies_.config.jobs);
   server_start_info.world_tick_policy = dependencies_.world_tick_policy;
   server_start_info.entity_registry = &dependencies_.entity_registry;
   server_start_info.entity_goals = &dependencies_.entity_goals;

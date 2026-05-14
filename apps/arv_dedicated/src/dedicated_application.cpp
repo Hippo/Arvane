@@ -178,6 +178,15 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(save_result.error());
   }
 
+  const auto config_save_result =
+      launch_options.config.explicit_config_path.empty()
+          ? io::save_config_files(config, io::ConfigProfile::Server)
+          : io::save_config_file(config.paths.config_file, config);
+  if (!config_save_result) {
+    plugin_manager.shutdown();
+    return fail(dedicated_error("config", config_save_result.error().message));
+  }
+
   plugin_manager.shutdown();
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::Stopped);
   return 0;

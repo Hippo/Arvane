@@ -12,6 +12,24 @@
 #include <utility>
 
 namespace arv::dedicated {
+namespace {
+
+[[nodiscard]] sched::JobSystemConfig make_server_job_system_config(
+    const io::JobSystemConfig& jobs) noexcept {
+  sched::JobSystemConfig config;
+  config.critical_cpu_workers = jobs.server.critical_cpu_workers;
+  config.background_cpu_workers = jobs.server.background_cpu_workers;
+  config.blocking_io_workers = jobs.server.blocking_io_workers;
+  config.max_chunk_gen_in_flight = jobs.server.max_chunk_gen_in_flight;
+  config.max_mesh_jobs_in_flight = jobs.server.max_mesh_jobs_in_flight;
+  config.max_lighting_jobs_in_flight = jobs.server.max_lighting_jobs_in_flight;
+  config.max_liquid_jobs_in_flight = jobs.server.max_liquid_jobs_in_flight;
+  config.max_ai_jobs_in_flight = jobs.server.max_ai_jobs_in_flight;
+  config.max_pathfinding_jobs_in_flight = jobs.server.max_pathfinding_jobs_in_flight;
+  return config;
+}
+
+} // namespace
 
 player::PlayerTuning make_player_tuning(const io::PhysicsConfig& physics) noexcept {
   player::PlayerTuning tuning = player::default_player_tuning();
@@ -147,6 +165,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.max_pending_generation_jobs =
       config.chunk_pipeline.max_generation_jobs_per_frame;
   server_start_info.worker_threads = runtime_config.thread_budget.primary_workers;
+  server_start_info.job_system = make_server_job_system_config(config.jobs);
   server_start_info.use_network_thread = true;
   server_start_info.world_tick_policy = runtime_config.world_tick_policy;
   server_start_info.entity_registry = &registries.entity_registry;

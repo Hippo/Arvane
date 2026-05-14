@@ -201,11 +201,26 @@ struct ChunkDistanceConfig {
 };
 
 struct JobSystemConfig {
+  struct RuntimeConfig {
+    // 0 means automatic for worker counts; domain budgets are runtime-specific.
+    u32 critical_cpu_workers{1};
+    u32 background_cpu_workers{};
+    u32 blocking_io_workers{1};
+    u32 max_chunk_gen_in_flight{};
+    u32 max_mesh_jobs_in_flight{};
+    u32 max_lighting_jobs_in_flight{};
+    u32 max_liquid_jobs_in_flight{};
+    u32 max_ai_jobs_in_flight{};
+    u32 max_pathfinding_jobs_in_flight{};
+  };
+
   // 0 means automatic through the engine-owned scheduling policy.
   u32 worker_threads{};
   u32 reserved_threads{2};
   u32 min_worker_threads{1};
   u32 max_worker_threads{64};
+  RuntimeConfig client{1, 0, 1, 0, 4, 0, 0, 0, 0};
+  RuntimeConfig server{1, 0, 1, 4, 0, 2, 1, 1, 1};
 };
 
 struct PhysicsConfig {
@@ -490,6 +505,8 @@ ConfigResult load_config_file(const std::filesystem::path& path);
 ConfigResult load_config(const ConfigLoadOptions& options);
 
 ConfigResult load_config_file_or_defaults(const std::filesystem::path& path);
+ConfigResult save_config_file(const std::filesystem::path& path, const EngineConfig& config);
+ConfigResult save_config_files(const EngineConfig& config, ConfigProfile active_profile);
 ConfigResult save_client_config_file(const std::filesystem::path& path, const EngineConfig& config);
 
 TextFileResult read_text_file(const std::filesystem::path& path, std::string_view purpose);

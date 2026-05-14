@@ -28,4 +28,11 @@ namespace arv::desktop {
 [[nodiscard]] sched::RuntimeThreadBudgetPlan make_runtime_thread_budget_plan(
     const io::JobSystemConfig& jobs) noexcept;
 
+[[nodiscard]] sched::JobSystemConfig make_client_job_system_config(
+    const io::JobSystemConfig& jobs,
+    const sched::RuntimeThreadBudgetPlan& thread_budget) noexcept;
+
+[[nodiscard]] sched::JobSystemConfig make_server_job_system_config(
+    const io::JobSystemConfig& jobs) noexcept;
+
 } // namespace arv::desktop

@@ -5,6 +5,55 @@
 #include <algorithm>
 
 namespace arv::desktop {
+namespace {
+
+[[nodiscard]] sched::WorkerThreadConfig make_worker_thread_config(
+    const io::JobSystemConfig& jobs) noexcept {
+  sched::WorkerThreadConfig workers;
+  workers.worker_thread_count = jobs.worker_threads;
+  workers.reserved_thread_count = jobs.reserved_threads;
+  workers.min_worker_thread_count = jobs.min_worker_threads;
+  workers.max_worker_thread_count = jobs.max_worker_threads;
+  return workers;
+}
+
+[[nodiscard]] sched::JobSystemConfig make_job_system_config(
+    const io::JobSystemConfig::RuntimeConfig& runtime,
+    usize automatic_background_workers) noexcept {
+  sched::JobSystemConfig config;
+  config.critical_cpu_workers =
+      runtime.critical_cpu_workers == 0U ? 1U : runtime.critical_cpu_workers;
+  config.background_cpu_workers =
+      runtime.background_cpu_workers == 0U
+          ? static_cast<u32>(std::max<usize>(automatic_background_workers, 1U))
+          : runtime.background_cpu_workers;
+  config.blocking_io_workers =
+      runtime.blocking_io_workers == 0U ? 1U : runtime.blocking_io_workers;
+  config.max_chunk_gen_in_flight = runtime.max_chunk_gen_in_flight;
+  config.max_mesh_jobs_in_flight = runtime.max_mesh_jobs_in_flight;
+  config.max_lighting_jobs_in_flight = runtime.max_lighting_jobs_in_flight;
+  config.max_liquid_jobs_in_flight = runtime.max_liquid_jobs_in_flight;
+  config.max_ai_jobs_in_flight = runtime.max_ai_jobs_in_flight;
+  config.max_pathfinding_jobs_in_flight = runtime.max_pathfinding_jobs_in_flight;
+  return config;
+}
+
+[[nodiscard]] sched::JobSystemConfig copy_job_system_config(
+    const io::JobSystemConfig::RuntimeConfig& runtime) noexcept {
+  sched::JobSystemConfig config;
+  config.critical_cpu_workers = runtime.critical_cpu_workers;
+  config.background_cpu_workers = runtime.background_cpu_workers;
+  config.blocking_io_workers = runtime.blocking_io_workers;
+  config.max_chunk_gen_in_flight = runtime.max_chunk_gen_in_flight;
+  config.max_mesh_jobs_in_flight = runtime.max_mesh_jobs_in_flight;
+  config.max_lighting_jobs_in_flight = runtime.max_lighting_jobs_in_flight;
+  config.max_liquid_jobs_in_flight = runtime.max_liquid_jobs_in_flight;
+  config.max_ai_jobs_in_flight = runtime.max_ai_jobs_in_flight;
+  config.max_pathfinding_jobs_in_flight = runtime.max_pathfinding_jobs_in_flight;
+  return config;
+}
+
+} // namespace
 
 player::PlayerTuning make_player_tuning(const io::PhysicsConfig& physics) noexcept {
   player::PlayerTuning tuning = player::default_player_tuning();
@@ -103,12 +152,22 @@ voxel::FluidDefinition make_water_fluid_definition(
 sched::RuntimeThreadBudgetPlan make_runtime_thread_budget_plan(
     const io::JobSystemConfig& jobs) noexcept {
   sched::RuntimeThreadBudgetConfig thread_budget_config;
-  thread_budget_config.workers.worker_thread_count = jobs.worker_threads;
-  thread_budget_config.workers.reserved_thread_count = jobs.reserved_threads;
-  thread_budget_config.workers.min_worker_thread_count = jobs.min_worker_threads;
-  thread_budget_config.workers.max_worker_thread_count = jobs.max_worker_threads;
+  thread_budget_config.workers = make_worker_thread_config(jobs);
   thread_budget_config.split_primary_secondary_pools = true;
   return sched::plan_runtime_thread_budget(thread_budget_config);
+}
+
+sched::JobSystemConfig make_client_job_system_config(
+    const io::JobSystemConfig& jobs,
+    const sched::RuntimeThreadBudgetPlan& thread_budget) noexcept {
+  return make_job_system_config(
+      jobs.client,
+      thread_budget.secondary_worker_thread_count);
+}
+
+sched::JobSystemConfig make_server_job_system_config(
+    const io::JobSystemConfig& jobs) noexcept {
+  return copy_job_system_config(jobs.server);
 }
 
 } // namespace arv::desktop

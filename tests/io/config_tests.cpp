@@ -89,6 +89,22 @@ chunks:
 jobs:
   worker_threads: 6
   reserved_threads: 5
+  min_worker_threads: 2
+  max_worker_threads: 12
+  client:
+    critical_cpu_workers: 2
+    background_cpu_workers: 3
+    blocking_io_workers: 2
+    max_mesh_jobs_in_flight: 7
+  server:
+    critical_cpu_workers: 2
+    background_cpu_workers: 4
+    blocking_io_workers: 2
+    max_chunk_gen_in_flight: 8
+    max_lighting_jobs_in_flight: 3
+    max_liquid_jobs_in_flight: 2
+    max_ai_jobs_in_flight: 2
+    max_pathfinding_jobs_in_flight: 2
 physics:
   standing_eye_height: 1.7
   sneaking_eye_height: 1.4
@@ -252,6 +268,20 @@ chunk_pipeline:
   EXPECT_EQ(result.value().chunks.unload_margin, 3);
   EXPECT_EQ(result.value().jobs.worker_threads, 6U);
   EXPECT_EQ(result.value().jobs.reserved_threads, 5U);
+  EXPECT_EQ(result.value().jobs.min_worker_threads, 2U);
+  EXPECT_EQ(result.value().jobs.max_worker_threads, 12U);
+  EXPECT_EQ(result.value().jobs.client.critical_cpu_workers, 2U);
+  EXPECT_EQ(result.value().jobs.client.background_cpu_workers, 3U);
+  EXPECT_EQ(result.value().jobs.client.blocking_io_workers, 2U);
+  EXPECT_EQ(result.value().jobs.client.max_mesh_jobs_in_flight, 7U);
+  EXPECT_EQ(result.value().jobs.server.critical_cpu_workers, 2U);
+  EXPECT_EQ(result.value().jobs.server.background_cpu_workers, 4U);
+  EXPECT_EQ(result.value().jobs.server.blocking_io_workers, 2U);
+  EXPECT_EQ(result.value().jobs.server.max_chunk_gen_in_flight, 8U);
+  EXPECT_EQ(result.value().jobs.server.max_lighting_jobs_in_flight, 3U);
+  EXPECT_EQ(result.value().jobs.server.max_liquid_jobs_in_flight, 2U);
+  EXPECT_EQ(result.value().jobs.server.max_ai_jobs_in_flight, 2U);
+  EXPECT_EQ(result.value().jobs.server.max_pathfinding_jobs_in_flight, 2U);
   EXPECT_FLOAT_EQ(result.value().physics.standing_eye_height, 1.7F);
   EXPECT_FLOAT_EQ(result.value().physics.sneaking_eye_height, 1.4F);
   EXPECT_FLOAT_EQ(result.value().physics.swimming_eye_height, 0.5F);
@@ -825,6 +855,9 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   EXPECT_NE(written_shared.value().find("simulation:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("language:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("gameplay:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("client:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("server:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("max_mesh_jobs_in_flight:"), std::string::npos);
   EXPECT_EQ(written_shared.value().find(temp_root.string()), std::string::npos);
 
   const auto written_client =
@@ -841,6 +874,53 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   ASSERT_TRUE(written_server);
   EXPECT_NE(written_server.value().find("network:"), std::string::npos);
   EXPECT_NE(written_server.value().find("world: default"), std::string::npos);
+}
+
+TEST(ConfigTests, SaveConfigFilesCanonicalizesSplitConfigFiles) {
+  const TempDir temp{"arvane_canonical_config_"};
+
+  arv::io::EngineConfig config = arv::io::default_config();
+  arv::io::ConfigLoadOptions options;
+  options.project_root = temp.path;
+  arv::io::resolve_runtime_paths(options, config);
+  config.window.width = 1600U;
+  config.server.world = "canonical";
+  config.jobs.worker_threads = 6U;
+  config.jobs.client.max_mesh_jobs_in_flight = 9U;
+
+  write_file(
+      config.paths.shared_config_file,
+      "obsolete_shared:\n  enabled: true\njobs:\n  worker_threads: 2\n");
+  write_file(
+      config.paths.client_config_file,
+      "obsolete_client:\n  enabled: true\n");
+  write_file(
+      config.paths.server_config_file,
+      "obsolete_server:\n  enabled: true\nworld: preserved_server\n");
+
+  const auto save_result =
+      arv::io::save_config_files(config, arv::io::ConfigProfile::Client);
+  ASSERT_TRUE(save_result);
+
+  const auto written_shared =
+      arv::io::read_text_file(config.paths.shared_config_file, "canonical shared config");
+  ASSERT_TRUE(written_shared);
+  EXPECT_EQ(written_shared.value().find("obsolete_shared"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("worker_threads: 6"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("max_mesh_jobs_in_flight: 9"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("max_pathfinding_jobs_in_flight:"), std::string::npos);
+
+  const auto written_client =
+      arv::io::read_text_file(config.paths.client_config_file, "canonical client config");
+  ASSERT_TRUE(written_client);
+  EXPECT_EQ(written_client.value().find("obsolete_client"), std::string::npos);
+  EXPECT_NE(written_client.value().find("width: 1600"), std::string::npos);
+
+  const auto written_server =
+      arv::io::read_text_file(config.paths.server_config_file, "canonical server config");
+  ASSERT_TRUE(written_server);
+  EXPECT_EQ(written_server.value().find("obsolete_server"), std::string::npos);
+  EXPECT_NE(written_server.value().find("world: preserved_server"), std::string::npos);
 }
 
 TEST(ConfigTests, ParsesAndFallsBackInputBindings) {

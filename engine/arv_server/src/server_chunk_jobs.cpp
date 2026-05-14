@@ -15,33 +15,62 @@ ServerWorldJobRuntime::ServerWorldJobRuntime()
 }
 
 void ServerWorldJobRuntime::configure(const ServerStartInfo& start_info) {
+  const sched::JobSystemConfig requested_job_config = start_info.job_system;
   max_pending_generation_jobs_ =
-      std::max<u32>(start_info.max_pending_generation_jobs, 1U);
+      std::max<u32>(
+          requested_job_config.max_chunk_gen_in_flight == 0U
+              ? start_info.max_pending_generation_jobs
+              : requested_job_config.max_chunk_gen_in_flight,
+          1U);
   max_generation_results_per_tick_ =
       std::max<u32>(start_info.max_generation_results_per_tick, 1U);
   max_lighting_results_per_tick_ =
       std::max<u32>(start_info.max_lighting_results_per_tick, 1U);
   max_fluid_results_per_tick_ =
       std::max<u32>(start_info.max_fluid_results_per_tick, 1U);
-  max_pending_fluid_jobs_ = std::max<u32>(start_info.max_pending_fluid_jobs, 1U);
+  max_pending_lighting_jobs_ =
+      std::max<u32>(
+          requested_job_config.max_lighting_jobs_in_flight == 0U
+              ? max_pending_lighting_jobs_
+              : requested_job_config.max_lighting_jobs_in_flight,
+          1U);
+  max_pending_fluid_jobs_ =
+      std::max<u32>(
+          requested_job_config.max_liquid_jobs_in_flight == 0U
+              ? start_info.max_pending_fluid_jobs
+              : requested_job_config.max_liquid_jobs_in_flight,
+          1U);
   fluid_update_interval_ = start_info.world_tick_policy.fluid_interval;
   fluid_update_budget_ = start_info.world_tick_policy.fluid_budget == 0U
                              ? world::WorldTickPolicy{}.fluid_budget
                              : start_info.world_tick_policy.fluid_budget;
   const usize configured_workers = sched::resolve_worker_thread_count(start_info.worker_threads);
-  const u32 critical_workers = 1U;
+  const u32 critical_workers = requested_job_config.critical_cpu_workers == 0U
+                                   ? 1U
+                                   : requested_job_config.critical_cpu_workers;
   sched::JobSystemConfig job_config;
   job_config.critical_cpu_workers = critical_workers;
-  job_config.background_cpu_workers =
-      static_cast<u32>(std::max<usize>(
-          1U,
-          configured_workers > critical_workers ? configured_workers - critical_workers : 1U));
-  job_config.blocking_io_workers = 1U;
+  job_config.background_cpu_workers = requested_job_config.background_cpu_workers == 0U
+                                          ? static_cast<u32>(std::max<usize>(
+                                                1U,
+                                                configured_workers > critical_workers
+                                                    ? configured_workers - critical_workers
+                                                    : 1U))
+                                          : requested_job_config.background_cpu_workers;
+  job_config.blocking_io_workers = requested_job_config.blocking_io_workers == 0U
+                                       ? 1U
+                                       : requested_job_config.blocking_io_workers;
   job_config.max_chunk_gen_in_flight = max_pending_generation_jobs_;
   job_config.max_lighting_jobs_in_flight = max_pending_lighting_jobs_;
   job_config.max_liquid_jobs_in_flight = max_pending_fluid_jobs_;
-  job_config.max_ai_jobs_in_flight = 1U;
-  job_config.max_pathfinding_jobs_in_flight = 1U;
+  job_config.max_ai_jobs_in_flight =
+      requested_job_config.max_ai_jobs_in_flight == 0U
+          ? 1U
+          : requested_job_config.max_ai_jobs_in_flight;
+  job_config.max_pathfinding_jobs_in_flight =
+      requested_job_config.max_pathfinding_jobs_in_flight == 0U
+          ? 1U
+          : requested_job_config.max_pathfinding_jobs_in_flight;
   job_system_ = std::make_unique<sched::JobSystem>(job_config);
   job_system_->start();
 }

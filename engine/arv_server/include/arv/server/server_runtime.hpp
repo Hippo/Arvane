@@ -140,6 +140,7 @@ struct ServerStartInfo {
   u32 max_lighting_results_per_tick{1};
   u32 max_pending_generation_jobs{4};
   sched::WorkerThreadConfig worker_threads{};
+  sched::JobSystemConfig job_system{};
   bool use_network_thread{};
   world::WorldTickPolicy world_tick_policy{};
   u32 max_fluid_results_per_tick{1};

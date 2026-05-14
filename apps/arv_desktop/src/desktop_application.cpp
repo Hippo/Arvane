@@ -22,7 +22,6 @@
 #include "arv/sched/job_system.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 
-#include <algorithm>
 #include <utility>
 
 namespace arv::desktop {
@@ -30,7 +29,8 @@ namespace arv::desktop {
 int DesktopApplication::run(int argc, char** argv) {
   core::info("desktop", "starting Arvane desktop client");
 
-  auto config_result = io::load_config(parse_config_options(argc, argv));
+  const io::ConfigLoadOptions config_options = parse_config_options(argc, argv);
+  auto config_result = io::load_config(config_options);
   if (!config_result) {
     core::error("config", config_result.error().message);
     return 1;
@@ -196,23 +196,19 @@ int DesktopApplication::run(int argc, char** argv) {
       make_player_tuning(config.physics);
   const sched::RuntimeThreadBudgetPlan thread_budget =
       make_runtime_thread_budget_plan(config.jobs);
-
-  sched::JobSystemConfig client_job_config;
-  client_job_config.critical_cpu_workers = 1U;
-  client_job_config.background_cpu_workers = static_cast<u32>(
-      std::max<usize>(thread_budget.secondary_worker_thread_count, 1U));
-  client_job_config.blocking_io_workers = 1U;
-  client_job_config.max_mesh_jobs_in_flight =
-      std::max<u32>(config.chunk_pipeline.max_mesh_jobs_per_frame, 1U);
+  const sched::JobSystemConfig client_job_config =
+      make_client_job_system_config(config.jobs, thread_budget);
   sched::JobSystem world_jobs{client_job_config};
   world_jobs.start();
   core::info(
       "jobs",
-      "hardware_threads={} reserved_threads={} server_workers={} client_workers={}",
+      "hardware_threads={} reserved_threads={} server_workers={} client_workers={} client_critical={} client_io={}",
       thread_budget.hardware_thread_count,
       thread_budget.reserved_thread_count,
       thread_budget.primary_worker_thread_count,
-      world_jobs.worker_count(sched::JobLane::BackgroundCpu));
+      world_jobs.worker_count(sched::JobLane::BackgroundCpu),
+      world_jobs.worker_count(sched::JobLane::CriticalCpu),
+      world_jobs.worker_count(sched::JobLane::BlockingIo));
   core::info(
       "threading",
       "render_owner=render thread network_owner=transport pump owner world_owner=session tick owner");
@@ -280,6 +276,19 @@ int DesktopApplication::run(int argc, char** argv) {
       screen_manager};
   const int loop_result = frame_loop.run();
 
+  const auto config_save_result =
+      config_options.explicit_config_path.empty()
+          ? io::save_config_files(config, io::ConfigProfile::Client)
+          : io::save_config_file(config.paths.config_file, config);
+  if (!config_save_result) {
+    core::warn("config", config_save_result.error().message);
+  }
+  const auto input_bindings_save_result =
+      io::save_input_bindings_file(config.paths.input_bindings_file, input_bindings);
+  if (!input_bindings_save_result) {
+    core::warn("input", input_bindings_save_result.error().message);
+  }
+
   const bool save_result = sessions.save_and_shutdown();
   plugin_manager.shutdown();
   desktop_renderer.shutdown();
@@ -287,7 +296,7 @@ int DesktopApplication::run(int argc, char** argv) {
   if (loop_result != 0) {
     return loop_result;
   }
-  if (!save_result) {
+  if (!config_save_result || !input_bindings_save_result || !save_result) {
     return 1;
   }
   core::info("desktop", "shutdown complete");

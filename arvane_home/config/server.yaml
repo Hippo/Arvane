@@ -6,14 +6,14 @@ network:
     enabled: true
     mode: client_authoritative_guarded
     send_rate_hz: 20
-    max_ground_speed_blocks_per_second: 9.0
-    max_air_speed_blocks_per_second: 12.0
-    max_swim_speed_blocks_per_second: 8.0
-    max_fly_speed_blocks_per_second: 24.0
-    max_vertical_speed_blocks_per_second: 20.0
-    base_position_epsilon_blocks: 0.20
-    lag_grace_blocks: 1.50
-    max_single_packet_distance_blocks: 8.0
+    max_ground_speed_blocks_per_second: 9
+    max_air_speed_blocks_per_second: 12
+    max_swim_speed_blocks_per_second: 8
+    max_fly_speed_blocks_per_second: 24
+    max_vertical_speed_blocks_per_second: 20
+    base_position_epsilon_blocks: 0.2
+    lag_grace_blocks: 1.5
+    max_single_packet_distance_blocks: 8
     max_validation_window_seconds: 0.25
     reject_unloaded_chunk_movement: true
     solid_collision_check: true
@@ -21,6 +21,10 @@ network:
   keep_alive:
     interval_seconds: 5
     client_timeout_seconds: 30
+native_plugins:
+  enabled: true
+  allowed_packs:
+    - arv_mason
 skins:
   enabled: true
   allow_uploads: true
