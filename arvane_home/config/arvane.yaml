@@ -1,127 +1,127 @@
-paths:
-  arvane_home: arvane_home
-language:
-  locale: en_US
-  fallback_locale: en_US
-simulation:
-  base_tps: 60
-  systems:
-    physics:
-      interval: 1
-    entities:
-      interval: 1
-    ai:
-      interval: 2
-    block_updates:
-      interval: 3
-      budget: 5000
-    fluids:
-      interval: 1
-      budget: 2000
-    random_ticks:
-      interval: 20
-      samples_per_chunk: 3
-  fluids:
-    water:
-      flow_interval_ticks: 10
-    lava:
-      flow_interval_ticks: 30
-chunks:
-  load_distance: 12
-  simulation_distance: 2
-  unload_margin: 1
-jobs:
-  worker_threads: 0
-  reserved_threads: 2
-  min_worker_threads: 1
-  max_worker_threads: 64
-  client:
-    critical_cpu_workers: 1
-    background_cpu_workers: 0
-    blocking_io_workers: 1
-    max_chunk_gen_in_flight: 0
-    max_mesh_jobs_in_flight: 4
-    max_lighting_jobs_in_flight: 0
-    max_liquid_jobs_in_flight: 0
-    max_ai_jobs_in_flight: 0
-    max_pathfinding_jobs_in_flight: 0
-  server:
-    critical_cpu_workers: 1
-    background_cpu_workers: 0
-    blocking_io_workers: 1
-    max_chunk_gen_in_flight: 4
-    max_mesh_jobs_in_flight: 0
-    max_lighting_jobs_in_flight: 2
-    max_liquid_jobs_in_flight: 1
-    max_ai_jobs_in_flight: 1
-    max_pathfinding_jobs_in_flight: 1
-physics:
-  standing_eye_height: 1.62
-  sneaking_eye_height: 1.35
-  swimming_eye_height: 0.45
-  eye_height_lerp_per_second: 12
-  reach_distance: 5
-  mouse_sensitivity_radians: 0.0025
-  walk_speed: 4.5
-  sprint_speed: 6
-  sneak_speed: 2.25
-  air_speed: 3.5
-  air_control_acceleration_per_second: 10
-  default_surface_slipperiness: 0.6
-  ground_acceleration_per_second: 160
-  ground_deceleration_per_second: 180
-  min_surface_control: 0.08
-  max_surface_control: 4
-  fly_speed: 8
-  fly_vertical_speed: 6
-  jump_velocity: 8.5
-  sprint_jump_horizontal_boost: 1
-  gravity_per_second: 32
-  terminal_velocity: 55
-  body_width: 0.6
-  body_height: 1.8
-  sneaking_body_height: 1.5
-  swimming_body_width: 0.9
-  swimming_body_height: 0.6
-  step_height: 0.6
-  sneak_support_probe_depth: 0.05
-  collision_epsilon: 0.001
-  surface_swim_speed: 2.5
-  underwater_swim_speed: 2
-  fast_surface_swim_speed: 5.6
-  fast_underwater_swim_speed: 5
-  upward_swim_acceleration: 18
-  downward_swim_acceleration: 18
-  liquid_drag: 0.8
-  surface_float_depth: 1
-  surface_buoyancy: 10
-  underwater_buoyancy: 1
-  breath_seconds: 15
-  max_head_body_yaw_radians: 1.309
-gameplay:
-  block_breaking:
-    base_seconds_per_hardness: 1
-    creative_inventory_multiplier: 0
-    hand_speed_multiplier: 0.2
-    wrong_tool_speed_multiplier: 0.2
-  dropped_items:
-    pickup_radius: 1.25
-    pickup_delay_seconds: 0.5
-  combat:
-    default_attack_damage: 1
-    default_attack_range: 3
-    default_attack_cooldown_seconds: 0.35
-    attack_validation_grace_blocks: 3
-    max_attack_validation_range: 6
-    existing_horizontal_retention: 0.45
-    base_horizontal_knockback: 8
-    sprint_horizontal_bonus: 3
-    base_vertical_knockback: 7
-    airborne_vertical_knockback: 5
-    vertical_knockback_cap: 9
-    knockback_control_suppression_ticks: 2
-    use_current_block_obstruction_check: false
 chunk_pipeline:
   max_generation_jobs_per_frame: 4
   max_generation_results_per_tick: 2
   max_lighting_results_per_tick: 1
+chunks:
+  load_distance: 12
+  simulation_distance: 2
+  unload_margin: 1
+gameplay:
+  block_breaking:
+    base_seconds_per_hardness: 1
+    creative_inventory_multiplier: 0
+    hand_speed_multiplier: 0.20000000298023224
+    wrong_tool_speed_multiplier: 0.20000000298023224
+  combat:
+    airborne_vertical_knockback: 5
+    attack_validation_grace_blocks: 3
+    base_horizontal_knockback: 8
+    base_vertical_knockback: 7
+    default_attack_cooldown_seconds: 0.3499999940395355
+    default_attack_damage: 1
+    default_attack_range: 3
+    existing_horizontal_retention: 0.44999998807907104
+    knockback_control_suppression_ticks: 2
+    max_attack_validation_range: 6
+    sprint_horizontal_bonus: 3
+    use_current_block_obstruction_check: false
+    vertical_knockback_cap: 9
+  dropped_items:
+    pickup_delay_seconds: 0.5
+    pickup_radius: 1.25
+jobs:
+  client:
+    background_cpu_workers: 0
+    blocking_io_workers: 1
+    critical_cpu_workers: 1
+    max_ai_jobs_in_flight: 0
+    max_chunk_gen_in_flight: 0
+    max_lighting_jobs_in_flight: 0
+    max_liquid_jobs_in_flight: 0
+    max_mesh_jobs_in_flight: 4
+    max_pathfinding_jobs_in_flight: 0
+  max_worker_threads: 64
+  min_worker_threads: 1
+  reserved_threads: 2
+  server:
+    background_cpu_workers: 0
+    blocking_io_workers: 1
+    critical_cpu_workers: 1
+    max_ai_jobs_in_flight: 1
+    max_chunk_gen_in_flight: 4
+    max_lighting_jobs_in_flight: 2
+    max_liquid_jobs_in_flight: 1
+    max_mesh_jobs_in_flight: 0
+    max_pathfinding_jobs_in_flight: 1
+  worker_threads: 0
+language:
+  fallback_locale: en_US
+  locale: en_US
+paths:
+  arvane_home: arvane_home
+physics:
+  air_control_acceleration_per_second: 10
+  air_speed: 3.5
+  body_height: 1.7999999523162842
+  body_width: 0.6000000238418579
+  breath_seconds: 15
+  collision_epsilon: 0.0010000000474974513
+  default_surface_slipperiness: 0.6000000238418579
+  downward_swim_acceleration: 18
+  eye_height_lerp_per_second: 12
+  fast_surface_swim_speed: 5.599999904632568
+  fast_underwater_swim_speed: 5
+  fly_speed: 8
+  fly_vertical_speed: 6
+  gravity_per_second: 32
+  ground_acceleration_per_second: 160
+  ground_deceleration_per_second: 180
+  jump_velocity: 8.5
+  liquid_drag: 0.800000011920929
+  max_head_body_yaw_radians: 1.309000015258789
+  max_surface_control: 4
+  min_surface_control: 0.07999999821186066
+  mouse_sensitivity_radians: 0.0024999999441206455
+  reach_distance: 5
+  sneak_speed: 2.25
+  sneak_support_probe_depth: 0.05000000074505806
+  sneaking_body_height: 1.5
+  sneaking_eye_height: 1.350000023841858
+  sprint_jump_horizontal_boost: 1
+  sprint_speed: 6
+  standing_eye_height: 1.6200000047683716
+  step_height: 0.6000000238418579
+  surface_buoyancy: 10
+  surface_float_depth: 1
+  surface_swim_speed: 2.5
+  swimming_body_height: 0.6000000238418579
+  swimming_body_width: 0.8999999761581421
+  swimming_eye_height: 0.44999998807907104
+  terminal_velocity: 55
+  underwater_buoyancy: 1
+  underwater_swim_speed: 2
+  upward_swim_acceleration: 18
+  walk_speed: 4.5
+simulation:
+  base_tps: 60
+  fluids:
+    lava:
+      flow_interval_ticks: 30
+    water:
+      flow_interval_ticks: 10
+  systems:
+    ai:
+      interval: 2
+    block_updates:
+      budget: 5000
+      interval: 3
+    entities:
+      interval: 1
+    fluids:
+      budget: 2000
+      interval: 1
+    physics:
+      interval: 1
+    random_ticks:
+      interval: 20
+      samples_per_chunk: 3

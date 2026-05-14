@@ -127,7 +127,6 @@ target_link_libraries(arv_tests PRIVATE
   arv_command
   arv_core
   arv_crypto
-  arv_data
   arv_entity
   arv_io
   arv_text

@@ -301,49 +301,49 @@ ThreadContextScope::~ThreadContextScope() {
   return static_cast<PluginCallContext*>(context);
 }
 
-[[nodiscard]] ArvResultCode storage_result_code(data::DataStorageCode code) noexcept {
+[[nodiscard]] ArvResultCode storage_result_code(io::DataStorageCode code) noexcept {
   switch (code) {
-    case data::DataStorageCode::NotFound:
+    case io::DataStorageCode::NotFound:
       return ARV_RESULT_NOT_FOUND;
-    case data::DataStorageCode::InvalidArgument:
+    case io::DataStorageCode::InvalidArgument:
       return ARV_RESULT_INVALID_ARGUMENT;
-    case data::DataStorageCode::PermissionDenied:
+    case io::DataStorageCode::PermissionDenied:
       return ARV_RESULT_PERMISSION_DENIED;
-    case data::DataStorageCode::Unsupported:
+    case io::DataStorageCode::Unsupported:
       return ARV_RESULT_UNSUPPORTED;
-    case data::DataStorageCode::Corrupt:
+    case io::DataStorageCode::Corrupt:
       return ARV_RESULT_INVALID_ARGUMENT;
-    case data::DataStorageCode::InternalError:
+    case io::DataStorageCode::InternalError:
       return ARV_RESULT_INTERNAL_ERROR;
   }
   return ARV_RESULT_INTERNAL_ERROR;
 }
 
-[[nodiscard]] ArvDataKind data_kind_to_abi(data::DataKind kind) noexcept {
+[[nodiscard]] ArvDataKind data_kind_to_abi(io::DataKind kind) noexcept {
   switch (kind) {
-    case data::DataKind::Null:
+    case io::DataKind::Null:
       return ARV_DATA_NULL;
-    case data::DataKind::Bool:
+    case io::DataKind::Bool:
       return ARV_DATA_BOOL;
-    case data::DataKind::I64:
+    case io::DataKind::I64:
       return ARV_DATA_I64;
-    case data::DataKind::U64:
+    case io::DataKind::U64:
       return ARV_DATA_U64;
-    case data::DataKind::F64:
+    case io::DataKind::F64:
       return ARV_DATA_F64;
-    case data::DataKind::String:
+    case io::DataKind::String:
       return ARV_DATA_STRING;
-    case data::DataKind::Bytes:
+    case io::DataKind::Bytes:
       return ARV_DATA_BYTES;
-    case data::DataKind::Array:
+    case io::DataKind::Array:
       return ARV_DATA_ARRAY;
-    case data::DataKind::Object:
+    case io::DataKind::Object:
       return ARV_DATA_OBJECT;
   }
   return ARV_DATA_INVALID;
 }
 
-[[nodiscard]] data::DataDocument* document_from_handle(
+[[nodiscard]] io::DataDocument* document_from_handle(
     PluginCallContext* ctx,
     ArvDataDocumentHandle handle) {
   if (ctx == nullptr || handle == 0U) {
@@ -353,7 +353,7 @@ ThreadContextScope::~ThreadContextScope() {
   return found == ctx->data_documents.end() ? nullptr : &found->second;
 }
 
-[[nodiscard]] const data::DataDocument* document_from_handle(
+[[nodiscard]] const io::DataDocument* document_from_handle(
     const PluginCallContext* ctx,
     ArvDataDocumentHandle handle) {
   if (ctx == nullptr || handle == 0U) {
@@ -365,7 +365,7 @@ ThreadContextScope::~ThreadContextScope() {
 
 [[nodiscard]] ArvDataDocumentHandle store_document(
     PluginCallContext* ctx,
-    data::DataDocument document) {
+    io::DataDocument document) {
   if (ctx == nullptr) {
     return 0U;
   }
@@ -379,10 +379,10 @@ ArvDataDocumentHandle api_data_create_document(void* context, uint32_t schema_ve
   if (ctx == nullptr) {
     return 0U;
   }
-  return store_document(ctx, data::DataDocument{schema_version, data::DataValue::object()});
+  return store_document(ctx, io::DataDocument{schema_version, io::DataValue::object()});
 }
 
-[[nodiscard]] std::optional<asset::ResourceID> parse_owned_plugin_key(
+[[nodiscard]] std::optional<io::ResourceKey> parse_owned_plugin_key(
     PluginCallContext* ctx,
     ArvResourceID key,
     std::string_view purpose,
@@ -400,7 +400,9 @@ ArvDataDocumentHandle api_data_create_document(void* context, uint32_t schema_ve
     out_message = std::string{purpose} + " namespace is not owned by plugin pack";
     return std::nullopt;
   }
-  return parsed.value();
+  return io::ResourceKey{
+      .name_space = parsed.value().name_space,
+      .path = parsed.value().path};
 }
 
 void append_diagnostic(PluginManagerImpl& impl, PluginError diagnostic);

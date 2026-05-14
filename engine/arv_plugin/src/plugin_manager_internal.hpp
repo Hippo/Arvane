@@ -11,8 +11,8 @@
 #include "arv/asset/resource.hpp"
 #include "arv/command/command_registry.hpp"
 #include "arv/core/log.hpp"
-#include "arv/data/document.hpp"
-#include "arv/data/storage.hpp"
+#include "arv/io/data_document.hpp"
+#include "arv/io/storage.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/permissions.hpp"
@@ -230,7 +230,7 @@ struct PluginCallContext {
   usize plugin_index{};
   std::string result_message{};
   u64 next_data_document_handle{1U};
-  HashMap<u64, data::DataDocument> data_documents{};
+  HashMap<u64, io::DataDocument> data_documents{};
   u64 next_text_handle{1U};
   HashMap<u64, arv::text::RichText> text_components{};
   u64 next_packet_handle{1U};
@@ -293,21 +293,21 @@ struct PluginCallContext {
     std::string message = {});
 [[nodiscard]] ArvResult ok(PluginCallContext* context);
 [[nodiscard]] PluginCallContext* call_context(void* context) noexcept;
-[[nodiscard]] ArvResultCode storage_result_code(data::DataStorageCode code) noexcept;
-[[nodiscard]] ArvDataKind data_kind_to_abi(data::DataKind kind) noexcept;
-[[nodiscard]] data::DataDocument* document_from_handle(
+[[nodiscard]] ArvResultCode storage_result_code(io::DataStorageCode code) noexcept;
+[[nodiscard]] ArvDataKind data_kind_to_abi(io::DataKind kind) noexcept;
+[[nodiscard]] io::DataDocument* document_from_handle(
     PluginCallContext* ctx,
     ArvDataDocumentHandle handle);
-[[nodiscard]] const data::DataDocument* document_from_handle(
+[[nodiscard]] const io::DataDocument* document_from_handle(
     const PluginCallContext* ctx,
     ArvDataDocumentHandle handle);
 [[nodiscard]] ArvDataDocumentHandle store_document(
     PluginCallContext* ctx,
-    data::DataDocument document);
+    io::DataDocument document);
 [[nodiscard]] ArvDataDocumentHandle api_data_create_document(
     void* context,
     uint32_t schema_version);
-[[nodiscard]] std::optional<asset::ResourceID> parse_owned_plugin_key(
+[[nodiscard]] std::optional<io::ResourceKey> parse_owned_plugin_key(
     PluginCallContext* ctx,
     ArvResourceID key,
     std::string_view purpose,

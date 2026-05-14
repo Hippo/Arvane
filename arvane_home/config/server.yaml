@@ -1,67 +1,67 @@
-world: default
-network:
-  bind_address: 0.0.0.0
-  port: 42069
-  movement:
-    enabled: true
-    mode: client_authoritative_guarded
-    send_rate_hz: 20
-    max_ground_speed_blocks_per_second: 9
-    max_air_speed_blocks_per_second: 12
-    max_swim_speed_blocks_per_second: 8
-    max_fly_speed_blocks_per_second: 24
-    max_vertical_speed_blocks_per_second: 20
-    base_position_epsilon_blocks: 0.2
-    lag_grace_blocks: 1.5
-    max_single_packet_distance_blocks: 8
-    max_validation_window_seconds: 0.25
-    reject_unloaded_chunk_movement: true
-    solid_collision_check: true
-    correction_cooldown_ms: 100
-  keep_alive:
-    interval_seconds: 5
-    client_timeout_seconds: 30
 native_plugins:
-  enabled: true
   allowed_packs:
     - arv_mason
-skins:
   enabled: true
+network:
+  bind_address: 0.0.0.0
+  keep_alive:
+    client_timeout_seconds: 30
+    interval_seconds: 5
+  movement:
+    base_position_epsilon_blocks: 0.20000000298023224
+    correction_cooldown_ms: 100
+    enabled: true
+    lag_grace_blocks: 1.5
+    max_air_speed_blocks_per_second: 12
+    max_fly_speed_blocks_per_second: 24
+    max_ground_speed_blocks_per_second: 9
+    max_single_packet_distance_blocks: 8
+    max_swim_speed_blocks_per_second: 8
+    max_validation_window_seconds: 0.25
+    max_vertical_speed_blocks_per_second: 20
+    mode: client_authoritative_guarded
+    reject_unloaded_chunk_movement: true
+    send_rate_hz: 20
+    solid_collision_check: true
+  port: 42069
+skins:
   allow_uploads: true
-  resolutions:
-    - size: 64
-      enabled: true
-      max_upload_bytes: 32768
-      max_decoded_bytes: 16384
-    - size: 128
-      enabled: false
-    - size: 256
-      enabled: false
-    - size: 512
-      enabled: false
-    - size: 1024
-      enabled: false
-    - size: 2048
-      enabled: false
-  uploads:
-    max_chunk_bytes: 32768
-    chunk_threshold_bytes: 1048576
-    max_active_per_connection: 1
-    max_active_global: 32
-    timeout_seconds: 15
-    idle_timeout_seconds: 5
-    max_begin_attempts_per_minute: 6
-    max_completed_uploads_per_minute: 2
-    max_completed_uploads_per_hour: 10
-    max_upload_bytes_per_hour: 5242880
-    max_failed_decodes_per_minute: 3
   downloads:
-    max_requests_per_second: 8
-    max_requests_per_minute: 120
+    max_batch_size: 16
     max_bytes_per_minute: 8388608
     max_in_flight_per_connection: 4
+    max_requests_per_minute: 120
+    max_requests_per_second: 8
     require_advertised_hash: true
-    max_batch_size: 16
+  enabled: true
+  resolutions:
+    - enabled: true
+      max_decoded_bytes: 16384
+      max_upload_bytes: 32768
+      size: 64
+    - enabled: false
+      size: 128
+    - enabled: false
+      size: 256
+    - enabled: false
+      size: 512
+    - enabled: false
+      size: 1024
+    - enabled: false
+      size: 2048
   storage:
-    max_total_skin_bytes: 1073741824
     max_skins_per_profile: 16
+    max_total_skin_bytes: 1073741824
+  uploads:
+    chunk_threshold_bytes: 1048576
+    idle_timeout_seconds: 5
+    max_active_global: 32
+    max_active_per_connection: 1
+    max_begin_attempts_per_minute: 6
+    max_chunk_bytes: 32768
+    max_completed_uploads_per_hour: 10
+    max_completed_uploads_per_minute: 2
+    max_failed_decodes_per_minute: 3
+    max_upload_bytes_per_hour: 5242880
+    timeout_seconds: 15
+world: default

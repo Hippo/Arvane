@@ -1,14 +1,15 @@
-#include "arv/data/storage.hpp"
+#include "arv/io/storage.hpp"
 
-#include "arv/data/codecs.hpp"
+#include "arv/io/data_codecs.hpp"
 #include "arv/io/files.hpp"
 
 #include <atomic>
 #include <fstream>
+#include <span>
 #include <system_error>
 #include <utility>
 
-namespace arv::data {
+namespace arv::io {
 namespace {
 
 DataStorageError storage_error(
@@ -124,7 +125,7 @@ DataStorageError storage_error(
 }
 
 [[nodiscard]] StorageLoadResult load_yaml_document(const std::filesystem::path& path) {
-  auto text = io::read_text_file_contents(path);
+  auto text = read_text_file_contents(path);
   if (!text.has_value()) {
     return StorageLoadResult::failure(storage_error(
         DataStorageCode::NotFound,
@@ -158,7 +159,7 @@ DataStorageError storage_error(
 }
 
 [[nodiscard]] StorageLoadResult load_binary_document(const std::filesystem::path& path) {
-  auto bytes = io::read_binary_file(path);
+  auto bytes = read_binary_file(path);
   if (!bytes.has_value()) {
     return StorageLoadResult::failure(storage_error(
         DataStorageCode::NotFound,
@@ -218,7 +219,7 @@ std::string DataStorageError::describe() const {
 
 StoragePathResult safe_resource_relative_path(
     std::string_view owner_pack_id,
-    const asset::ResourceID& key,
+    const ResourceKey& key,
     std::string_view extension) {
   if (owner_pack_id.empty()) {
     return StoragePathResult::failure(storage_error(
@@ -255,41 +256,41 @@ ConfigStorageService::ConfigStorageService(
 
 StorageLoadResult ConfigStorageService::load_global_config(
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   return load_yaml_document(global_path(owner_pack_id, key));
 }
 
 StorageSaveResult ConfigStorageService::save_global_config(
     std::string_view owner_pack_id,
-    const asset::ResourceID& key,
+    const ResourceKey& key,
     const DataDocument& document) const {
   return save_yaml_document(global_path(owner_pack_id, key), document);
 }
 
 bool ConfigStorageService::exists_global_config(
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   std::error_code error;
   return std::filesystem::is_regular_file(global_path(owner_pack_id, key), error);
 }
 
 StorageRemoveResult ConfigStorageService::remove_global_config(
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   return remove_file(global_path(owner_pack_id, key));
 }
 
 StorageLoadResult ConfigStorageService::load_world_config(
     WorldID world,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   return load_yaml_document(world_path(world, owner_pack_id, key));
 }
 
 StorageSaveResult ConfigStorageService::save_world_config(
     WorldID world,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key,
+    const ResourceKey& key,
     const DataDocument& document) const {
   return save_yaml_document(world_path(world, owner_pack_id, key), document);
 }
@@ -297,7 +298,7 @@ StorageSaveResult ConfigStorageService::save_world_config(
 bool ConfigStorageService::exists_world_config(
     WorldID world,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   std::error_code error;
   return std::filesystem::is_regular_file(world_path(world, owner_pack_id, key), error);
 }
@@ -305,13 +306,13 @@ bool ConfigStorageService::exists_world_config(
 StorageRemoveResult ConfigStorageService::remove_world_config(
     WorldID world,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   return remove_file(world_path(world, owner_pack_id, key));
 }
 
 std::filesystem::path ConfigStorageService::global_path(
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   auto relative = safe_resource_relative_path(owner_pack_id, key, ".yaml");
   return config_root_ / "plugins" / std::string{owner_pack_id} /
          (relative ? relative.value() : std::filesystem::path{"invalid.yaml"});
@@ -320,7 +321,7 @@ std::filesystem::path ConfigStorageService::global_path(
 std::filesystem::path ConfigStorageService::world_path(
     WorldID world,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   auto relative = safe_resource_relative_path(owner_pack_id, key, ".yaml");
   return world_save_root_ / "plugin_config" / std::to_string(world.value) /
          std::string{owner_pack_id} /
@@ -334,14 +335,14 @@ PersistentDataStorageService::PersistentDataStorageService(std::filesystem::path
 StorageLoadResult PersistentDataStorageService::load(
     const PersistentScope& scope,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   return load_binary_document(path_for(scope, owner_pack_id, key));
 }
 
 StorageSaveResult PersistentDataStorageService::save(
     const PersistentScope& scope,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key,
+    const ResourceKey& key,
     const DataDocument& document) const {
   return save_binary_document(path_for(scope, owner_pack_id, key), document);
 }
@@ -349,7 +350,7 @@ StorageSaveResult PersistentDataStorageService::save(
 bool PersistentDataStorageService::exists(
     const PersistentScope& scope,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   std::error_code error;
   return std::filesystem::is_regular_file(path_for(scope, owner_pack_id, key), error);
 }
@@ -357,14 +358,14 @@ bool PersistentDataStorageService::exists(
 StorageRemoveResult PersistentDataStorageService::remove(
     const PersistentScope& scope,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   return remove_file(path_for(scope, owner_pack_id, key));
 }
 
 std::filesystem::path PersistentDataStorageService::path_for(
     const PersistentScope& scope,
     std::string_view owner_pack_id,
-    const asset::ResourceID& key) const {
+    const ResourceKey& key) const {
   auto relative = safe_resource_relative_path(owner_pack_id, key, ".bin");
   std::filesystem::path root = save_root_ / "plugin_data" / std::string{owner_pack_id};
   switch (scope.kind) {
@@ -396,4 +397,4 @@ std::filesystem::path PersistentDataStorageService::path_for(
   return root / (relative ? relative.value() : std::filesystem::path{"invalid.bin"});
 }
 
-} // namespace arv::data
+} // namespace arv::io

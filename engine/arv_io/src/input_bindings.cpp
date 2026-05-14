@@ -1,12 +1,10 @@
 #include "arv/io/input_bindings.hpp"
 
-#include "arv/io/codec.hpp"
+#include "arv/io/data_codecs.hpp"
 
 #include <fstream>
 #include <sstream>
 #include <system_error>
-
-#include <yaml-cpp/yaml.h>
 
 namespace arv::io {
 namespace {
@@ -26,18 +24,18 @@ void apply_default_action_fallbacks(platform::InputBindings& bindings) {
   }
 }
 
-std::optional<platform::InputBinding> parse_input_binding_node(const YAML::Node& node) {
-  if (!node || !node.IsMap()) {
+std::optional<platform::InputBinding> parse_input_binding_value(const DataValue& node) {
+  if (node.kind() != DataKind::Object) {
     return std::nullopt;
   }
 
-  const YAML::Node device_node = node["device"];
-  if (!device_node || !device_node.IsScalar()) {
+  const DataValue* device_node = node.get("device");
+  if (device_node == nullptr || device_node->kind() != DataKind::String) {
     return std::nullopt;
   }
 
   const auto device_type =
-      platform::input_device_type_from_name(device_node.as<std::string>());
+      platform::input_device_type_from_name(device_node->as_string_or({}));
   if (!device_type.has_value()) {
     return std::nullopt;
   }
@@ -55,29 +53,30 @@ std::optional<platform::InputBinding> parse_input_binding_node(const YAML::Node&
       break;
   }
 
-  const YAML::Node input_node = node[key_name];
-  if (!input_node || !input_node.IsScalar()) {
+  const DataValue* input_node = node.get(key_name);
+  if (input_node == nullptr || input_node->kind() != DataKind::String) {
     return std::nullopt;
   }
 
   const auto input_code =
-      platform::canonical_input_code(device_type.value(), input_node.as<std::string>());
+      platform::canonical_input_code(device_type.value(), input_node->as_string_or({}));
   if (!input_code.has_value()) {
     return std::nullopt;
   }
 
   u8 modifiers = 0U;
-  const YAML::Node modifiers_node = node["modifiers"];
-  if (modifiers_node) {
-    if (!modifiers_node.IsSequence()) {
+  const DataValue* modifiers_node = node.get("modifiers");
+  if (modifiers_node != nullptr) {
+    const DataValue::Array* modifier_values = modifiers_node->array_if();
+    if (modifier_values == nullptr) {
       return std::nullopt;
     }
-    for (const YAML::Node& modifier_node : modifiers_node) {
-      if (!modifier_node.IsScalar()) {
+    for (const DataValue& modifier_node : *modifier_values) {
+      if (modifier_node.kind() != DataKind::String) {
         return std::nullopt;
       }
       const auto modifier =
-          platform::input_modifier_from_name(modifier_node.as<std::string>());
+          platform::input_modifier_from_name(modifier_node.as_string_or({}));
       if (!modifier.has_value()) {
         return std::nullopt;
       }
@@ -88,77 +87,75 @@ std::optional<platform::InputBinding> parse_input_binding_node(const YAML::Node&
   return platform::InputBinding{device_type.value(), input_code.value(), modifiers};
 }
 
-void emit_binding(YAML::Emitter& emitter, const platform::InputBinding& binding) {
-  emitter << YAML::BeginMap;
-  emitter << YAML::Key << "device" << YAML::Value
-          << std::string{platform::input_device_type_name(binding.device_type)};
+DataValue binding_value(const platform::InputBinding& binding) {
+  DataValue value = DataValue::object();
+  value.set("device", DataValue{platform::input_device_type_name(binding.device_type)});
   switch (binding.device_type) {
     case platform::InputDeviceType::Keyboard:
-      emitter << YAML::Key << "key" << YAML::Value << binding.input_code;
+      value.set("key", DataValue{binding.input_code});
       break;
     case platform::InputDeviceType::MouseButton:
-      emitter << YAML::Key << "button" << YAML::Value << binding.input_code;
+      value.set("button", DataValue{binding.input_code});
       break;
     case platform::InputDeviceType::MouseWheel:
-      emitter << YAML::Key << "direction" << YAML::Value << binding.input_code;
+      value.set("direction", DataValue{binding.input_code});
       break;
   }
 
   if (binding.modifiers != 0U) {
-    emitter << YAML::Key << "modifiers" << YAML::Value << YAML::BeginSeq;
+    DataValue modifiers = DataValue::array();
     for (platform::InputModifier modifier :
          {platform::InputModifier::Shift, platform::InputModifier::Control, platform::InputModifier::Alt}) {
       if (platform::has_input_modifier(binding.modifiers, modifier)) {
-        emitter << std::string{platform::input_modifier_name(modifier)};
+        modifiers.push(DataValue{platform::input_modifier_name(modifier)});
       }
     }
-    emitter << YAML::EndSeq;
+    value.set("modifiers", std::move(modifiers));
   }
-  emitter << YAML::EndMap;
+  return value;
 }
 
 } // namespace
 
 InputBindingsResult decode_input_bindings_yaml(std::string_view text) {
   platform::InputBindings bindings;
-  try {
-    const YAML::Node root = YAML::Load(std::string{text});
-    if (root && !root.IsNull()) {
-      const YAML::Node version = root["version"];
-      if (version && version.IsScalar()) {
-        bindings.version = version.as<u32>();
-      }
+  auto decoded = decode_yaml_value(text);
+  if (!decoded) {
+    return InputBindingsResult::failure(
+        ConfigError{"failed to parse input bindings YAML: " + decoded.error().describe()});
+  }
 
-      const YAML::Node bindings_node = root["bindings"];
-      if (bindings_node && bindings_node.IsMap()) {
-        for (const auto& entry : bindings_node) {
-          if (!entry.first.IsScalar()) {
-            continue;
-          }
+  const DataValue& root = decoded.value().root;
+  if (root.kind() != DataKind::Null) {
+    const DataValue* version = root.get("version");
+    if (version != nullptr && (version->kind() == DataKind::I64 || version->kind() == DataKind::U64)) {
+      bindings.version = static_cast<u32>(version->as_u64_or(bindings.version));
+    }
 
-          const auto action =
-              platform::logical_action_from_name(entry.first.as<std::string>());
-          if (!action.has_value()) {
-            continue;
-          }
+    const DataValue* bindings_node = root.get("bindings");
+    const DataValue::Object* bindings_map =
+        bindings_node == nullptr ? nullptr : bindings_node->object_if();
+    if (bindings_map != nullptr) {
+      for (const auto& [action_name, action_value] : *bindings_map) {
+        const auto action = platform::logical_action_from_name(action_name);
+        if (!action.has_value()) {
+          continue;
+        }
 
-          const YAML::Node action_bindings = entry.second;
-          if (!action_bindings || !action_bindings.IsSequence()) {
-            continue;
-          }
+        const DataValue::Array* action_bindings = action_value.array_if();
+        if (action_bindings == nullptr) {
+          continue;
+        }
 
-          auto& output = platform::bindings_for_action(bindings, action.value());
-          for (const YAML::Node& binding_node : action_bindings) {
-            const auto binding = parse_input_binding_node(binding_node);
-            if (binding.has_value()) {
-              output.push_back(std::move(binding.value()));
-            }
+        auto& output = platform::bindings_for_action(bindings, action.value());
+        for (const DataValue& binding_node : *action_bindings) {
+          const auto binding = parse_input_binding_value(binding_node);
+          if (binding.has_value()) {
+            output.push_back(binding.value());
           }
         }
       }
     }
-  } catch (const YAML::Exception& ex) {
-    return InputBindingsResult::failure(ConfigError{ex.what()});
   }
 
   apply_default_action_fallbacks(bindings);
@@ -166,10 +163,9 @@ InputBindingsResult decode_input_bindings_yaml(std::string_view text) {
 }
 
 TextFileResult encode_input_bindings_yaml(const platform::InputBindings& bindings) {
-  YAML::Emitter emitter;
-  emitter << YAML::BeginMap;
-  emitter << YAML::Key << "version" << YAML::Value << bindings.version;
-  emitter << YAML::Key << "bindings" << YAML::Value << YAML::BeginMap;
+  DataValue root = DataValue::object();
+  root.set("version", DataValue{static_cast<u64>(bindings.version)});
+  DataValue bindings_node = DataValue::object();
   for (usize index = 0; index < static_cast<usize>(platform::LogicalAction::Count); ++index) {
     const auto action = static_cast<platform::LogicalAction>(index);
     const auto& action_bindings = platform::bindings_for_action(bindings, action);
@@ -177,46 +173,28 @@ TextFileResult encode_input_bindings_yaml(const platform::InputBindings& binding
       continue;
     }
 
-    emitter << YAML::Key << std::string{platform::logical_action_name(action)};
-    emitter << YAML::Value << YAML::BeginSeq;
+    DataValue action_values = DataValue::array();
     for (const platform::InputBinding& binding : action_bindings) {
-      emit_binding(emitter, binding);
+      action_values.push(binding_value(binding));
     }
-    emitter << YAML::EndSeq;
+    bindings_node.set(std::string{platform::logical_action_name(action)}, std::move(action_values));
   }
-  emitter << YAML::EndMap;
-  emitter << YAML::EndMap;
+  root.set("bindings", std::move(bindings_node));
 
-  if (!emitter.good()) {
+  auto encoded = encode_yaml_value(root);
+  if (!encoded) {
     return TextFileResult::failure(
-        ConfigError{"failed to encode input bindings YAML: " +
-                    std::string{emitter.GetLastError()}});
+        ConfigError{"failed to encode input bindings YAML: " + encoded.error().describe()});
   }
-  return TextFileResult::success(std::string{emitter.c_str()});
+  return TextFileResult::success(std::move(encoded.value()));
 }
 
 } // namespace arv::io
 
-namespace arv {
-
-template<>
-struct Codec<platform::InputBindings> {
-  [[nodiscard]] static io::InputBindingsResult decode_yaml(std::string_view text) {
-    return io::decode_input_bindings_yaml(text);
-  }
-
-  [[nodiscard]] static io::TextFileResult encode_yaml(
-      const platform::InputBindings& bindings) {
-    return io::encode_input_bindings_yaml(bindings);
-  }
-};
-
-} // namespace arv
-
 namespace arv::io {
 
 InputBindingsResult parse_input_bindings_yaml(std::string_view text) {
-  return Codec<platform::InputBindings>::decode_yaml(text);
+  return decode_input_bindings_yaml(text);
 }
 
 InputBindingsResult load_input_bindings_file(const std::filesystem::path& path) {
@@ -259,7 +237,7 @@ WriteConfigResult save_input_bindings_file(
         ConfigError{"failed to create input bindings directory: " + error.message()});
   }
 
-  auto encoded = Codec<platform::InputBindings>::encode_yaml(bindings);
+  auto encoded = encode_input_bindings_yaml(bindings);
   if (!encoded) {
     return WriteConfigResult::failure(encoded.error());
   }

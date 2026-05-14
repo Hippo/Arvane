@@ -109,7 +109,6 @@ arvane/
 │  ├─ arv_ecs/
 │  ├─ arv_sched/
 │  ├─ arv_voxel/
-│  ├─ arv_data/
 │  ├─ arv_blueprint/
 │  ├─ arv_world/
 │  ├─ arv_physics/
@@ -231,7 +230,10 @@ General IO systems.
 * streams
 * virtual filesystem concepts
 * config loading helpers
-* generic `arv::Codec<T>` declarations and format-preserving IO codec adapters
+* `DataValue` and `DataDocument`
+* YAML, JSON, and binary codec backends
+* plugin config and persistent data storage backends
+* safe resource-key to storage-path mapping
 
 ---
 
@@ -428,17 +430,6 @@ Persistence systems.
 * player data
 * save formats
 * migrations
-
----
-
-## `arv_data`
-
-Backend-independent structured documents and plugin-owned storage services.
-
-* `DataValue` and `DataDocument`
-* YAML, JSON, and binary codecs
-* safe resource-key to storage-path mapping
-* plugin config and persistent data storage backends
 
 ---
 

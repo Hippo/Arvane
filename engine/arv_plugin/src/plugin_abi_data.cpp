@@ -13,7 +13,7 @@ void api_data_release_document(void* context, ArvDataDocumentHandle document) {
 
 uint32_t api_data_schema_version(void* context, ArvDataDocumentHandle document) {
   const PluginCallContext* ctx = call_context(context);
-  const data::DataDocument* stored = document_from_handle(ctx, document);
+  const io::DataDocument* stored = document_from_handle(ctx, document);
   return stored == nullptr ? 0U : stored->schema_version;
 }
 
@@ -22,11 +22,11 @@ ArvDataKind api_data_kind(
     ArvDataDocumentHandle document,
     ArvStringView path) {
   const PluginCallContext* ctx = call_context(context);
-  const data::DataDocument* stored = document_from_handle(ctx, document);
+  const io::DataDocument* stored = document_from_handle(ctx, document);
   if (stored == nullptr) {
     return ARV_DATA_INVALID;
   }
-  const data::DataValue* value = data::find_path(*stored, abi_view(path));
+  const io::DataValue* value = io::find_path(*stored, abi_view(path));
   return value == nullptr ? ARV_DATA_INVALID : data_kind_to_abi(value->kind());
 }
 
@@ -34,12 +34,12 @@ ArvResult set_data_value(
     PluginCallContext* ctx,
     ArvDataDocumentHandle document,
     ArvStringView path,
-    data::DataValue value) {
-  data::DataDocument* stored = document_from_handle(ctx, document);
+    io::DataValue value) {
+  io::DataDocument* stored = document_from_handle(ctx, document);
   if (stored == nullptr) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data document handle is invalid");
   }
-  auto result = data::set_path(*stored, abi_view(path), std::move(value));
+  auto result = io::set_path(*stored, abi_view(path), std::move(value));
   if (!result) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, result.error().describe());
   }
@@ -103,41 +103,41 @@ ArvResult api_data_set_bytes(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "bytes view is null");
   }
   const std::span<const u8> bytes{value.data, value.size};
-  return set_data_value(ctx, document, path, data::DataValue::bytes(bytes));
+  return set_data_value(ctx, document, path, io::DataValue::bytes(bytes));
 }
 
 ArvResult api_data_set_array(
     void* context,
     ArvDataDocumentHandle document,
     ArvStringView path) {
-  return set_data_value(call_context(context), document, path, data::DataValue::array());
+  return set_data_value(call_context(context), document, path, io::DataValue::array());
 }
 
 ArvResult api_data_set_object(
     void* context,
     ArvDataDocumentHandle document,
     ArvStringView path) {
-  return set_data_value(call_context(context), document, path, data::DataValue::object());
+  return set_data_value(call_context(context), document, path, io::DataValue::object());
 }
 
 ArvResult push_data_array_value(
     PluginCallContext* ctx,
     ArvDataDocumentHandle document,
     ArvStringView path,
-    data::DataValue value) {
-  data::DataDocument* stored = document_from_handle(ctx, document);
+    io::DataValue value) {
+  io::DataDocument* stored = document_from_handle(ctx, document);
   if (stored == nullptr) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data document handle is invalid");
   }
-  data::DataValue* array = data::find_path(*stored, abi_view(path));
+  io::DataValue* array = io::find_path(*stored, abi_view(path));
   if (array == nullptr) {
-    auto created = data::set_path(*stored, abi_view(path), data::DataValue::array());
+    auto created = io::set_path(*stored, abi_view(path), io::DataValue::array());
     if (!created) {
       return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, created.error().describe());
     }
-    array = data::find_path(*stored, abi_view(path));
+    array = io::find_path(*stored, abi_view(path));
   }
-  if (array == nullptr || array->kind() != data::DataKind::Array) {
+  if (array == nullptr || array->kind() != io::DataKind::Array) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data path is not an array");
   }
   array->push(std::move(value));
@@ -196,26 +196,26 @@ size_t api_data_size(
     ArvDataDocumentHandle document,
     ArvStringView path) {
   const PluginCallContext* ctx = call_context(context);
-  const data::DataDocument* stored = document_from_handle(ctx, document);
+  const io::DataDocument* stored = document_from_handle(ctx, document);
   if (stored == nullptr) {
     return 0U;
   }
-  const data::DataValue* value = data::find_path(*stored, abi_view(path));
+  const io::DataValue* value = io::find_path(*stored, abi_view(path));
   return value == nullptr ? 0U : value->size();
 }
 
-[[nodiscard]] const data::DataValue* require_data_value(
+[[nodiscard]] const io::DataValue* require_data_value(
     PluginCallContext* ctx,
     ArvDataDocumentHandle document,
     ArvStringView path,
     ArvResult& out_error) {
-  const data::DataDocument* stored = document_from_handle(ctx, document);
+  const io::DataDocument* stored = document_from_handle(ctx, document);
   if (stored == nullptr) {
     out_error = make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data document handle is invalid");
     return nullptr;
   }
-  data::DataDiagnostic diagnostic;
-  const data::DataValue* value = data::find_path(*stored, abi_view(path), &diagnostic);
+  io::DataDiagnostic diagnostic;
+  const io::DataValue* value = io::find_path(*stored, abi_view(path), &diagnostic);
   if (value == nullptr) {
     out_error = make_result(ctx, ARV_RESULT_NOT_FOUND, diagnostic.describe());
   }
@@ -233,11 +233,11 @@ ArvResult api_data_get_bool(
   }
   *out = false;
   ArvResult error{};
-  const data::DataValue* value = require_data_value(ctx, document, path, error);
+  const io::DataValue* value = require_data_value(ctx, document, path, error);
   if (value == nullptr) {
     return error;
   }
-  if (value->kind() != data::DataKind::Bool) {
+  if (value->kind() != io::DataKind::Bool) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data value is not a bool");
   }
   *out = value->as_bool_or(false);
@@ -255,11 +255,11 @@ ArvResult api_data_get_i64(
   }
   *out = 0;
   ArvResult error{};
-  const data::DataValue* value = require_data_value(ctx, document, path, error);
+  const io::DataValue* value = require_data_value(ctx, document, path, error);
   if (value == nullptr) {
     return error;
   }
-  if (value->kind() != data::DataKind::I64 && value->kind() != data::DataKind::U64) {
+  if (value->kind() != io::DataKind::I64 && value->kind() != io::DataKind::U64) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data value is not an integer");
   }
   *out = value->as_i64_or(0);
@@ -277,11 +277,11 @@ ArvResult api_data_get_u64(
   }
   *out = 0;
   ArvResult error{};
-  const data::DataValue* value = require_data_value(ctx, document, path, error);
+  const io::DataValue* value = require_data_value(ctx, document, path, error);
   if (value == nullptr) {
     return error;
   }
-  if (value->kind() != data::DataKind::I64 && value->kind() != data::DataKind::U64) {
+  if (value->kind() != io::DataKind::I64 && value->kind() != io::DataKind::U64) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data value is not an integer");
   }
   *out = value->as_u64_or(0);
@@ -299,12 +299,12 @@ ArvResult api_data_get_f64(
   }
   *out = 0.0;
   ArvResult error{};
-  const data::DataValue* value = require_data_value(ctx, document, path, error);
+  const io::DataValue* value = require_data_value(ctx, document, path, error);
   if (value == nullptr) {
     return error;
   }
-  if (value->kind() != data::DataKind::I64 && value->kind() != data::DataKind::U64 &&
-      value->kind() != data::DataKind::F64) {
+  if (value->kind() != io::DataKind::I64 && value->kind() != io::DataKind::U64 &&
+      value->kind() != io::DataKind::F64) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data value is not numeric");
   }
   *out = value->as_f64_or(0.0);
@@ -322,11 +322,11 @@ ArvResult api_data_get_string(
   }
   *out = {};
   ArvResult error{};
-  const data::DataValue* value = require_data_value(ctx, document, path, error);
+  const io::DataValue* value = require_data_value(ctx, document, path, error);
   if (value == nullptr) {
     return error;
   }
-  if (value->kind() != data::DataKind::String) {
+  if (value->kind() != io::DataKind::String) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data value is not a string");
   }
   const std::string_view text = value->as_string_or({});
@@ -345,7 +345,7 @@ ArvResult api_data_get_bytes(
   }
   *out = {};
   ArvResult error{};
-  const data::DataValue* value = require_data_value(ctx, document, path, error);
+  const io::DataValue* value = require_data_value(ctx, document, path, error);
   if (value == nullptr) {
     return error;
   }
@@ -357,8 +357,8 @@ ArvResult api_data_get_bytes(
   return ok(ctx);
 }
 
-[[nodiscard]] data::ConfigStorageService config_storage_service(PluginCallContext* ctx) {
-  return data::ConfigStorageService{
+[[nodiscard]] io::ConfigStorageService config_storage_service(PluginCallContext* ctx) {
+  return io::ConfigStorageService{
       ctx == nullptr ? std::filesystem::path{} : ctx->impl->options.config_root,
       ctx == nullptr ? std::filesystem::path{} : ctx->impl->runtime.server_save_root};
 }
@@ -410,8 +410,8 @@ ArvResult api_config_load(
   if (!parsed.has_value()) {
     return make_result(ctx, key_code, key_error);
   }
-  data::ConfigStorageService storage = config_storage_service(ctx);
-  data::StorageLoadResult loaded =
+  io::ConfigStorageService storage = config_storage_service(ctx);
+  io::StorageLoadResult loaded =
       validated_scope.kind == ARV_CONFIG_SCOPE_GLOBAL
           ? storage.load_global_config(ctx->info().pack_id, parsed.value())
           : storage.load_world_config(
@@ -436,7 +436,7 @@ ArvResult api_config_save(
       scope_result.code != ARV_RESULT_OK) {
     return scope_result;
   }
-  const data::DataDocument* stored = document_from_handle(ctx, document);
+  const io::DataDocument* stored = document_from_handle(ctx, document);
   if (stored == nullptr) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data document handle is invalid");
   }
@@ -446,8 +446,8 @@ ArvResult api_config_save(
   if (!parsed.has_value()) {
     return make_result(ctx, key_code, key_error);
   }
-  data::ConfigStorageService storage = config_storage_service(ctx);
-  data::StorageSaveResult saved =
+  io::ConfigStorageService storage = config_storage_service(ctx);
+  io::StorageSaveResult saved =
       validated_scope.kind == ARV_CONFIG_SCOPE_GLOBAL
           ? storage.save_global_config(ctx->info().pack_id, parsed.value(), *stored)
           : storage.save_world_config(
@@ -476,7 +476,7 @@ bool api_config_exists(
   if (!parsed.has_value()) {
     return false;
   }
-  data::ConfigStorageService storage = config_storage_service(ctx);
+  io::ConfigStorageService storage = config_storage_service(ctx);
   return validated_scope.kind == ARV_CONFIG_SCOPE_GLOBAL
              ? storage.exists_global_config(ctx->info().pack_id, parsed.value())
              : storage.exists_world_config(
@@ -501,8 +501,8 @@ ArvResult api_config_remove(
   if (!parsed.has_value()) {
     return make_result(ctx, key_code, key_error);
   }
-  data::ConfigStorageService storage = config_storage_service(ctx);
-  data::StorageRemoveResult removed =
+  io::ConfigStorageService storage = config_storage_service(ctx);
+  io::StorageRemoveResult removed =
       validated_scope.kind == ARV_CONFIG_SCOPE_GLOBAL
           ? storage.remove_global_config(ctx->info().pack_id, parsed.value())
           : storage.remove_world_config(
@@ -536,9 +536,9 @@ ArvResult require_persistent_entity(
   return ok(ctx);
 }
 
-[[nodiscard]] data::PersistentDataStorageService persistent_storage_service(
+[[nodiscard]] io::PersistentDataStorageService persistent_storage_service(
     PluginCallContext* ctx) {
-  return data::PersistentDataStorageService{
+  return io::PersistentDataStorageService{
       ctx == nullptr ? std::filesystem::path{} : ctx->impl->runtime.server_save_root};
 }
 
@@ -553,7 +553,7 @@ ArvResult require_persistent_entity(
 [[nodiscard]] ArvResult validate_persistent_scope(
     PluginCallContext* ctx,
     const ArvPersistentScope* scope,
-    data::PersistentScope& out_scope) {
+    io::PersistentScope& out_scope) {
   if (ctx == nullptr) {
     return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
   }
@@ -566,14 +566,14 @@ ArvResult require_persistent_entity(
 
   switch (scope->kind) {
     case ARV_PERSISTENT_SCOPE_SERVER:
-      out_scope = {.kind = data::PersistentScopeKind::Server};
+      out_scope = {.kind = io::PersistentScopeKind::Server};
       return ok(ctx);
     case ARV_PERSISTENT_SCOPE_WORLD:
       if (world_from_handle(ctx, scope->world) == nullptr) {
         return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
       }
       out_scope = {
-          .kind = data::PersistentScopeKind::World,
+          .kind = io::PersistentScopeKind::World,
           .world = WorldID{static_cast<u32>(scope->world)}};
       return ok(ctx);
     case ARV_PERSISTENT_SCOPE_PLAYER:
@@ -590,13 +590,13 @@ ArvResult require_persistent_entity(
               ctx->impl->runtime.player_stable_id(PlayerID{scope->player});
           stable_id.has_value() && !stable_id->empty()) {
         out_scope = {
-            .kind = data::PersistentScopeKind::Player,
+            .kind = io::PersistentScopeKind::Player,
             .player = PlayerID{scope->player},
             .player_stable_id = stable_id.value()};
         return ok(ctx);
       }
       out_scope = {
-          .kind = data::PersistentScopeKind::Player,
+          .kind = io::PersistentScopeKind::Player,
           .player = PlayerID{scope->player}};
       return make_result(ctx, ARV_RESULT_INVALID_STATE, "player has no stable identity");
     case ARV_PERSISTENT_SCOPE_ENTITY: {
@@ -606,7 +606,7 @@ ArvResult require_persistent_entity(
         return persistent;
       }
       out_scope = {
-          .kind = data::PersistentScopeKind::Entity,
+          .kind = io::PersistentScopeKind::Entity,
           .entity_uuid = uuid.value()};
       return ok(ctx);
     }
@@ -615,7 +615,7 @@ ArvResult require_persistent_entity(
         return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
       }
       out_scope = {
-          .kind = data::PersistentScopeKind::Block,
+          .kind = io::PersistentScopeKind::Block,
           .world = WorldID{static_cast<u32>(scope->world)},
           .block_pos = block_pos_from_abi(scope->block_pos)};
       return ok(ctx);
@@ -624,7 +624,7 @@ ArvResult require_persistent_entity(
         return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
       }
       out_scope = {
-          .kind = data::PersistentScopeKind::Chunk,
+          .kind = io::PersistentScopeKind::Chunk,
           .world = WorldID{static_cast<u32>(scope->world)},
           .chunk_pos = chunk_pos_from_abi(scope->chunk_pos)};
       return ok(ctx);
@@ -646,7 +646,7 @@ ArvResult api_persistent_load(
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_document is null");
   }
   *out_document = 0U;
-  data::PersistentScope validated_scope{};
+  io::PersistentScope validated_scope{};
   if (ArvResult scope_result = validate_persistent_scope(ctx, scope, validated_scope);
       scope_result.code != ARV_RESULT_OK) {
     return scope_result;
@@ -678,11 +678,11 @@ ArvResult api_persistent_save(
       sync.code != ARV_RESULT_OK) {
     return sync;
   }
-  const data::DataDocument* stored = document_from_handle(ctx, document);
+  const io::DataDocument* stored = document_from_handle(ctx, document);
   if (stored == nullptr) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "data document handle is invalid");
   }
-  data::PersistentScope validated_scope{};
+  io::PersistentScope validated_scope{};
   if (ArvResult scope_result = validate_persistent_scope(ctx, scope, validated_scope);
       scope_result.code != ARV_RESULT_OK) {
     return scope_result;
@@ -712,7 +712,7 @@ bool api_persistent_exists(
   if (require_sync_context(ctx, "persistent_data.exists").code != ARV_RESULT_OK) {
     return false;
   }
-  data::PersistentScope validated_scope{};
+  io::PersistentScope validated_scope{};
   if (validate_persistent_scope(ctx, scope, validated_scope).code != ARV_RESULT_OK) {
     return false;
   }
@@ -737,7 +737,7 @@ ArvResult api_persistent_remove(
       sync.code != ARV_RESULT_OK) {
     return sync;
   }
-  data::PersistentScope validated_scope{};
+  io::PersistentScope validated_scope{};
   if (ArvResult scope_result = validate_persistent_scope(ctx, scope, validated_scope);
       scope_result.code != ARV_RESULT_OK) {
     return scope_result;

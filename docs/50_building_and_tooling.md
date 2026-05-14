@@ -206,12 +206,16 @@ Arvane uses **rectpack2D** for:
 
 ### Data Serialization
 
-Arvane uses:
+Arvane routes structured data through `arv_io` codecs. The codec backends use:
 
 * **nlohmann/json** for JSON parsing and serialization
 * **yaml-cpp** for YAML parsing and serialization
 
-These are used for:
+These libraries should be linked by `arv_io` only. Other engine modules should
+work with `DataValue`, `DataDocument`, or typed codec APIs instead of including
+JSON/YAML library headers directly.
+
+The codec layer is used for:
 
 * configuration files
 * data-driven definitions (blocks, world gen, etc.)
@@ -500,6 +504,6 @@ Arvane’s tooling stack is intentionally minimal and focused:
 * **Image loading:** stb_image
 * **Text rendering:** FreeType + HarfBuzz
 * **Atlas packing:** rectpack2D
-* **Serialization:** nlohmann/json + yaml-cpp
+* **Serialization:** `arv_io` codecs backed by nlohmann/json + yaml-cpp
 
 This foundation provides a balance of performance, control, and maintainability suitable for a modern voxel engine.

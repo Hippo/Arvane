@@ -1,32 +1,4 @@
-version: 1
 bindings:
-  MoveForward:
-    - device: keyboard
-      key: W
-  MoveBackward:
-    - device: keyboard
-      key: S
-  MoveLeft:
-    - device: keyboard
-      key: A
-  MoveRight:
-    - device: keyboard
-      key: D
-  Jump:
-    - device: keyboard
-      key: Space
-  Sneak:
-    - device: keyboard
-      key: LCtrl
-  Sprint:
-    - device: keyboard
-      key: LShift
-  PrimaryInteract:
-    - device: mouse_button
-      button: Left
-  SecondaryInteract:
-    - device: mouse_button
-      button: Right
   Hotbar1:
     - device: keyboard
       key: 1
@@ -54,27 +26,55 @@ bindings:
   Hotbar9:
     - device: keyboard
       key: 9
+  Jump:
+    - device: keyboard
+      key: Space
+  MoveBackward:
+    - device: keyboard
+      key: S
+  MoveForward:
+    - device: keyboard
+      key: W
+  MoveLeft:
+    - device: keyboard
+      key: A
+  MoveRight:
+    - device: keyboard
+      key: D
   NextHotbarSlot:
     - device: mouse_wheel
       direction: Up
-  PrevHotbarSlot:
-    - device: mouse_wheel
-      direction: Down
-  ToggleFly:
-    - device: keyboard
-      key: F
-  OpenInventory:
-    - device: keyboard
-      key: E
   OpenChat:
     - device: keyboard
       key: T
+  OpenInventory:
+    - device: keyboard
+      key: E
+  PrevHotbarSlot:
+    - device: mouse_wheel
+      direction: Down
+  PrimaryInteract:
+    - button: Left
+      device: mouse_button
+  SecondaryInteract:
+    - button: Right
+      device: mouse_button
   ShowTabMenu:
     - device: keyboard
       key: Tab
-  TogglePauseMenu:
+  Sneak:
     - device: keyboard
-      key: Escape
+      key: LCtrl
+  Sprint:
+    - device: keyboard
+      key: LShift
   ToggleDebugMenu:
     - device: keyboard
       key: Grave
+  ToggleFly:
+    - device: keyboard
+      key: F
+  TogglePauseMenu:
+    - device: keyboard
+      key: Escape
+version: 1
