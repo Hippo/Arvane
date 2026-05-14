@@ -661,6 +661,15 @@ FramebufferSize OpenGLWindow::framebuffer_size() const {
       static_cast<u32>(height < 0 ? 0 : height)};
 }
 
+WindowSize OpenGLWindow::window_size() const {
+  int width = 0;
+  int height = 0;
+  glfwGetWindowSize(window_, &width, &height);
+  return {
+      static_cast<u32>(width < 0 ? 0 : width),
+      static_cast<u32>(height < 0 ? 0 : height)};
+}
+
 void OpenGLWindow::swap_buffers() {
   glfwSwapBuffers(window_);
 }

@@ -1,9 +1,11 @@
+#include "arv/asset/pack.hpp"
 #include "arv/asset/resource.hpp"
 #include "arv/text/language.hpp"
-#include "arv/ui/ui.hpp"
+#include "arv/base/ui.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -173,6 +175,44 @@ void write_text_file(const std::filesystem::path& path, const std::string& text)
   output << text;
 }
 
+void write_theme_pack_manifest(
+    const std::filesystem::path& packs_root,
+    std::string_view pack_id,
+    std::string_view name_space) {
+  const std::string manifest =
+      "schema_version: 1\n"
+      "id: \"" +
+      std::string{pack_id} + "\"\n"
+                             "display_name: \"" +
+      std::string{pack_id} + "\"\n"
+                             "version: \"1.0.0\"\n"
+                             "namespaces:\n"
+                             "  - \"" +
+      std::string{name_space} + "\"\n"
+                                "side: \"client\"\n"
+                                "dependencies: []\n"
+                                "load_after: []\n"
+                                "load_before: []\n"
+                                "capabilities:\n"
+                                "  assets: true\n"
+                                "  data: false\n"
+                                "  native_plugin: false\n";
+  write_text_file(
+      packs_root / std::string{pack_id} / "pack.yaml",
+      manifest);
+}
+
+[[nodiscard]] bool warning_contains(
+    const arv::ui::UiThemeLoadResult& result,
+    std::string_view needle) {
+  return std::any_of(
+      result.warnings.begin(),
+      result.warnings.end(),
+      [needle](const std::string& warning) {
+        return warning.find(needle) != std::string::npos;
+      });
+}
+
 [[nodiscard]] bool is_pixel_snapped(arv::f32 value) {
   return std::abs(value - static_cast<arv::f32>(std::round(value))) <= 0.001F;
 }
@@ -235,6 +275,192 @@ TEST(UiThemeTests, MalformedTokensKeepBuiltInFallbacks) {
       arv::ui::default_ui_theme().layout.radius_md * 4.0F);
   EXPECT_FALSE(result.warnings.empty());
   std::filesystem::remove_all(root);
+}
+
+TEST(UiThemeTests, InheritsParentTokensAndAppliesChildOverrides) {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "arvane_ui_theme_inherits";
+  std::filesystem::remove_all(root);
+  write_text_file(root / "config/style.yaml", "theme: \"child\"\n");
+  write_text_file(
+      root / "themes/parent.yaml",
+      "name: \"Parent\"\n"
+      "colors:\n"
+      "  text: \"#102030\"\n"
+      "  accent: \"#203040\"\n"
+      "layout:\n"
+      "  spacing_md: 30\n"
+      "typography:\n"
+      "  size_md: 24\n"
+      "widgets:\n"
+      "  input:\n"
+      "    height: 52\n");
+  write_text_file(
+      root / "themes/child.yaml",
+      "name: \"Child\"\n"
+      "inherits: \"parent\"\n"
+      "colors:\n"
+      "  accent: \"#aabbcc\"\n"
+      "widgets:\n"
+      "  panel:\n"
+      "    padding: 44\n");
+
+  const arv::ui::UiThemeLoadResult result = arv::ui::load_ui_theme(root);
+  EXPECT_EQ(result.loaded_theme, "child");
+  EXPECT_FALSE(result.used_theme_fallback);
+  EXPECT_EQ(result.theme.name, "Child");
+  EXPECT_NEAR(result.theme.colors.text.x, 16.0F / 255.0F, 0.001F);
+  EXPECT_NEAR(result.theme.colors.accent.x, 170.0F / 255.0F, 0.001F);
+  EXPECT_FLOAT_EQ(result.theme.layout.spacing_md, 30.0F);
+  EXPECT_EQ(result.theme.typography.size_md, 24U);
+  EXPECT_FLOAT_EQ(result.theme.widgets.input.height, 52.0F);
+  EXPECT_FLOAT_EQ(result.theme.widgets.panel.padding, 44.0F);
+  std::filesystem::remove_all(root);
+}
+
+TEST(UiThemeTests, PackThemesInheritResourceIds) {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "arvane_ui_theme_pack_inherits";
+  const std::filesystem::path packs = root / "packs";
+  std::filesystem::remove_all(root);
+  write_text_file(packs / "enabled.yaml", "enabled:\n  - \"arvane_base\"\n");
+  write_theme_pack_manifest(packs, "arvane_base", "arvane");
+  write_text_file(root / "config/style.yaml", "theme: \"arvane:theme/child\"\n");
+  write_text_file(
+      packs / "arvane_base/assets/arvane/themes/base.yaml",
+      "name: \"Base\"\n"
+      "colors:\n"
+      "  text: \"#010203\"\n"
+      "layout:\n"
+      "  spacing_lg: 31\n"
+      "widgets:\n"
+      "  button:\n"
+      "    min_width: 222\n");
+  write_text_file(
+      packs / "arvane_base/assets/arvane/themes/child.yaml",
+      "name: \"Child\"\n"
+      "inherits: \"arvane:theme/base\"\n"
+      "colors:\n"
+      "  accent: \"#112233\"\n"
+      "typography:\n"
+      "  size_lg: 33\n");
+
+  auto manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(manager) << manager.error().describe();
+
+  const arv::ui::UiThemeLoadResult result =
+      arv::ui::load_ui_theme(manager.value(), root / "config/style.yaml");
+  EXPECT_EQ(result.loaded_theme, "arvane:theme/child");
+  EXPECT_FALSE(result.used_theme_fallback);
+  EXPECT_NEAR(result.theme.colors.text.x, 1.0F / 255.0F, 0.001F);
+  EXPECT_NEAR(result.theme.colors.accent.x, 17.0F / 255.0F, 0.001F);
+  EXPECT_FLOAT_EQ(result.theme.layout.spacing_lg, 31.0F);
+  EXPECT_FLOAT_EQ(result.theme.widgets.button.min_width, 222.0F);
+  EXPECT_EQ(result.theme.typography.size_lg, 33U);
+  std::filesystem::remove_all(root);
+}
+
+TEST(UiThemeTests, MissingInheritedThemeFallsBackToDefault) {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "arvane_ui_theme_missing_parent";
+  std::filesystem::remove_all(root);
+  write_text_file(root / "config/style.yaml", "theme: \"child\"\n");
+  write_text_file(
+      root / "themes/child.yaml",
+      "name: \"Child\"\n"
+      "inherits: \"missing_parent\"\n"
+      "colors:\n"
+      "  accent: \"#ff0000\"\n");
+  write_text_file(root / "themes/default.yaml", "name: \"Fallback\"\ncolors:\n  accent: \"#010203\"\n");
+
+  const arv::ui::UiThemeLoadResult result = arv::ui::load_ui_theme(root);
+  EXPECT_TRUE(result.used_theme_fallback);
+  EXPECT_EQ(result.loaded_theme, "default");
+  EXPECT_EQ(result.theme.name, "Fallback");
+  EXPECT_NEAR(result.theme.colors.accent.x, 1.0F / 255.0F, 0.001F);
+  EXPECT_TRUE(warning_contains(result, "inherited theme could not be loaded"));
+  std::filesystem::remove_all(root);
+}
+
+TEST(UiThemeTests, CyclicThemeInheritanceFallsBackToDefault) {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "arvane_ui_theme_cycle";
+  std::filesystem::remove_all(root);
+  write_text_file(root / "config/style.yaml", "theme: \"first\"\n");
+  write_text_file(root / "themes/first.yaml", "name: \"First\"\ninherits: \"second\"\n");
+  write_text_file(root / "themes/second.yaml", "name: \"Second\"\ninherits: \"first\"\n");
+  write_text_file(root / "themes/default.yaml", "name: \"Fallback\"\n");
+
+  const arv::ui::UiThemeLoadResult result = arv::ui::load_ui_theme(root);
+  EXPECT_TRUE(result.used_theme_fallback);
+  EXPECT_EQ(result.loaded_theme, "default");
+  EXPECT_EQ(result.theme.name, "Fallback");
+  EXPECT_TRUE(warning_contains(result, "cyclic theme inheritance detected"));
+  std::filesystem::remove_all(root);
+}
+
+TEST(UiMetricsTests, ConvertsLogicalWindowDotsToFramebufferPixels) {
+  const arv::ui::UiDisplayMetrics metrics =
+      arv::ui::UiDisplayMetrics::from_window_and_framebuffer(
+          {800.0F, 600.0F},
+          {1600.0F, 1200.0F});
+
+  EXPECT_EQ(metrics.logical_size, (arv::Vec2f{800.0F, 600.0F}));
+  EXPECT_EQ(metrics.framebuffer_size, (arv::Vec2f{1600.0F, 1200.0F}));
+  EXPECT_EQ(metrics.framebuffer_scale, (arv::Vec2f{2.0F, 2.0F}));
+  EXPECT_EQ(
+      metrics.framebuffer_from_logical(arv::Vec2f{12.5F, 30.0F}),
+      (arv::Vec2f{25.0F, 60.0F}));
+  EXPECT_EQ(
+      metrics.logical_from_framebuffer(arv::Vec2f{300.0F, 120.0F}),
+      (arv::Vec2f{150.0F, 60.0F}));
+  EXPECT_EQ(metrics.font_pixel_size(18U), 36U);
+}
+
+TEST(UiMetricsTests, LayoutStaysInLogicalDotsWhileDrawCommandsScaleToFramebuffer) {
+  const arv::ui::UiDisplayMetrics metrics =
+      arv::ui::UiDisplayMetrics::from_window_and_framebuffer(
+          {800.0F, 600.0F},
+          {1600.0F, 1200.0F});
+
+  arv::ui::UiTree tree;
+  arv::ui::UiElement button;
+  button.stable_id = "button";
+  button.type = arv::ui::UiElementType::Button;
+  button.layout.width_mode = arv::ui::UiSizeMode::Fixed;
+  button.layout.height_mode = arv::ui::UiSizeMode::Fixed;
+  button.layout.width = 100.0F;
+  button.layout.height = 40.0F;
+  button.style.background = {0.1F, 0.2F, 0.3F, 1.0F};
+  button.style.border = {1.0F, 1.0F, 1.0F, 1.0F};
+  button.style.border_width = 1.5F;
+  button.style.radius = 4.0F;
+  tree.add_child(tree.root_id(), std::move(button));
+
+  tree.layout_with_metrics(metrics, nullptr);
+
+  const auto* laid_out = tree.find_by_stable_id("button");
+  ASSERT_NE(laid_out, nullptr);
+  EXPECT_FLOAT_EQ(laid_out->rect.width, 100.0F);
+  EXPECT_FLOAT_EQ(laid_out->rect.height, 40.0F);
+  EXPECT_EQ(hit_stable_id(tree, {50.0F, 20.0F}), "button");
+  EXPECT_EQ(
+      hit_stable_id(
+          tree,
+          metrics.logical_from_framebuffer({100.0F, 40.0F})),
+      "button");
+  EXPECT_FALSE(tree.hit_test_framebuffer({220.0F, 40.0F}, metrics).has_value());
+
+  arv::asset::FontSystem fonts;
+  arv::ui::UiFontStacks stacks;
+  arv::render::FramePacket frame;
+  arv::ui::append_ui_draw_commands(tree, fonts, stacks, frame, metrics);
+
+  ASSERT_EQ(frame.ui_rects.size(), 1U);
+  EXPECT_EQ(frame.ui_rects.front().min, (arv::Vec2f{0.0F, 0.0F}));
+  EXPECT_EQ(frame.ui_rects.front().max, (arv::Vec2f{200.0F, 80.0F}));
+  EXPECT_FLOAT_EQ(frame.ui_rects.front().border_width, 3.0F);
+  EXPECT_FLOAT_EQ(frame.ui_rects.front().radius, 8.0F);
 }
 
 TEST(UiLayoutTests, VerticalStackArrangesChildrenDeterministically) {

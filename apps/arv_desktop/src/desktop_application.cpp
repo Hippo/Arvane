@@ -19,7 +19,7 @@
 #include "arv/platform/glfw_window.hpp"
 #include "arv/plugin/plugin_manager.hpp"
 #include "arv/sched/job_system.hpp"
-#include "arv/ui/ui.hpp"
+#include "arv/base/ui.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 
 #include <algorithm>
@@ -142,6 +142,17 @@ int DesktopApplication::run(int argc, char** argv) {
   }
 
   auto framebuffer = window.framebuffer_size();
+  auto window_size = window.window_size();
+  const ui::UiDisplayMetrics initial_ui_metrics =
+      ui::UiDisplayMetrics::from_window_and_framebuffer(
+          {
+              static_cast<f32>(window_size.width),
+              static_cast<f32>(window_size.height),
+          },
+          {
+              static_cast<f32>(framebuffer.width),
+              static_cast<f32>(framebuffer.height),
+          });
   render_commands.resize(framebuffer.width, framebuffer.height);
 
   auto loaded_assets_result =
@@ -151,6 +162,7 @@ int DesktopApplication::run(int argc, char** argv) {
           config,
           pack_manager,
           ui_theme,
+          initial_ui_metrics,
           block_behaviors,
           item_behaviors,
           entity_goals);
@@ -164,7 +176,10 @@ int DesktopApplication::run(int argc, char** argv) {
   }
   render_commands.flush();
   DesktopLoadedAssets assets = std::move(loaded_assets_result.value());
-  ui::FontUiTextMeasurer ui_text_measurer(assets.font_system, assets.ui_font_stacks);
+  ui::FontUiTextMeasurer ui_text_measurer(
+      assets.font_system,
+      assets.ui_font_stacks,
+      initial_ui_metrics.scalar_to_framebuffer(1.0F));
   ui::UiTree ui_tree;
   ui_tree.set_theme(&ui_theme);
 

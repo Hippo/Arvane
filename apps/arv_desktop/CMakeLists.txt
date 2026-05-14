@@ -72,6 +72,7 @@ endif()
 
 target_link_libraries(arv_desktop PRIVATE
   arv_base
+  arv_base_ui
   arv_client
   arv_core
   arv_crypto

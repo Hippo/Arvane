@@ -20,7 +20,7 @@
 #include "arv/render/render_types.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/server/server_runtime.hpp"
-#include "arv/ui/ui.hpp"
+#include "arv/base/ui.hpp"
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"

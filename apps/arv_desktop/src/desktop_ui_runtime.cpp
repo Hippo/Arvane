@@ -61,6 +61,11 @@ namespace {
   return ui_cache_hash_append_u64(hash, static_cast<u64>(quantized));
 }
 
+[[nodiscard]] u32 ui_cache_dimension(f32 value) noexcept {
+  const auto rounded = std::llround(static_cast<double>(value));
+  return rounded <= 0 ? 0U : static_cast<u32>(rounded);
+}
+
 [[nodiscard]] u64 ui_cache_hash_append_item_stack(
     u64 hash,
     const ui::UiItemStackView& stack) noexcept {
@@ -361,9 +366,11 @@ void DesktopFrameLoop::append_menu_player_skin_preview(
     return;
   }
 
+  const ui::UiRect preview_rect =
+      ui_metrics_.framebuffer_from_logical(preview_element->rect);
   render::EntityPreviewDrawItem preview;
-  preview.viewport_min = {preview_element->rect.x, preview_element->rect.y};
-  preview.viewport_size = {preview_element->rect.width, preview_element->rect.height};
+  preview.viewport_min = {preview_rect.x, preview_rect.y};
+  preview.viewport_size = {preview_rect.width, preview_rect.height};
   preview.view = menu_player_preview_view();
   preview.sky = menu_player_preview_sky();
   preview.clear_color = {0.018F, 0.023F, 0.030F, 1.0F};
@@ -401,15 +408,12 @@ void DesktopFrameLoop::build_ui(
     hotbar_item_popup_name_.clear();
   }
 
-  menu_context.viewport = {
-      static_cast<f32>(framebuffer_.width),
-      static_cast<f32>(framebuffer_.height),
-  };
+  menu_context.viewport = ui_metrics_.logical_size;
   menu_context.screens = &screens;
 
   const UiBuildCacheKey next_cache_key{
-      framebuffer_.width,
-      framebuffer_.height,
+      ui_cache_dimension(ui_metrics_.logical_size.x),
+      ui_cache_dimension(ui_metrics_.logical_size.y),
       has_active_session,
       gameplay_menu_stack_active_,
       screens.has_active_screen(),
@@ -434,12 +438,7 @@ void DesktopFrameLoop::build_ui(
     if (screens.has_active_screen()) {
       screens.append_to(menu_context);
     }
-    ui_tree_.layout(
-        {
-            static_cast<f32>(framebuffer_.width),
-            static_cast<f32>(framebuffer_.height),
-        },
-        &ui_text_measurer_);
+    ui_tree_.layout_with_metrics(ui_metrics_, &ui_text_measurer_);
     ui_tree_cache_key_ = next_cache_key;
     ui_tree_cache_valid_ = true;
   }
@@ -458,12 +457,7 @@ void DesktopFrameLoop::build_ui(
           platform_input,
           hover_action);
   if (added_inventory_tooltip || added_chat_tooltip) {
-    ui_tree_.layout(
-        {
-            static_cast<f32>(framebuffer_.width),
-            static_cast<f32>(framebuffer_.height),
-        },
-        &ui_text_measurer_);
+    ui_tree_.layout_with_metrics(ui_metrics_, &ui_text_measurer_);
     (void)ui_tree_.route_mouse_move(
         {platform_input.cursor_x, platform_input.cursor_y});
   }
@@ -472,7 +466,8 @@ void DesktopFrameLoop::build_ui(
       ui_tree_,
       assets_.font_system,
       assets_.ui_font_stacks,
-      frame);
+      frame,
+      ui_metrics_);
   if (assets_.font_system.atlas_dirty()) {
     renderer_.set_ui_font_atlas(
         texture_array_upload_from_image(assets_.font_system.atlas_image()));
@@ -628,10 +623,7 @@ bool DesktopFrameLoop::append_inventory_hover_tooltip_if_needed(
       {
           true,
           std::move(tooltip_text),
-          {
-              static_cast<f32>(framebuffer_.width),
-              static_cast<f32>(framebuffer_.height),
-          },
+          ui_metrics_.logical_size,
           {
               platform_input.cursor_x,
               platform_input.cursor_y,
@@ -673,10 +665,7 @@ bool DesktopFrameLoop::append_chat_hover_tooltip_if_needed(
       {
           true,
           tooltip,
-          {
-              static_cast<f32>(framebuffer_.width),
-              static_cast<f32>(framebuffer_.height),
-          },
+          ui_metrics_.logical_size,
           {
               platform_input.cursor_x,
               platform_input.cursor_y,
@@ -767,10 +756,7 @@ void DesktopFrameLoop::build_gameplay_ui(
     std::chrono::steady_clock::time_point now) {
   const f32 item_popup_alpha = hotbar_item_popup_alpha(now);
   ui::HealthHudModel health;
-  health.viewport = {
-      static_cast<f32>(framebuffer_.width),
-      static_cast<f32>(framebuffer_.height),
-  };
+  health.viewport = ui_metrics_.logical_size;
   if (const std::optional<EntityNetID> local_entity =
           active_session.client->local_entity_id();
       local_entity.has_value()) {
@@ -790,10 +776,7 @@ void DesktopFrameLoop::build_gameplay_ui(
           {
               active_session.client->selected_hotbar_slot(),
               player::DefaultHotbarSlotCount,
-              {
-                  static_cast<f32>(framebuffer_.width),
-                  static_cast<f32>(framebuffer_.height),
-              },
+              ui_metrics_.logical_size,
               std::span<const ui::UiItemStackView>{
                   active_session.inventory_slots.data(),
                   std::min<usize>(
@@ -807,10 +790,7 @@ void DesktopFrameLoop::build_gameplay_ui(
               assets_.language.text("ui.inventory.title"),
               active_session.client->selected_hotbar_slot(),
               player::DefaultHotbarSlotCount,
-              {
-                  static_cast<f32>(framebuffer_.width),
-                  static_cast<f32>(framebuffer_.height),
-              },
+              ui_metrics_.logical_size,
               std::span<const ui::UiItemStackView>{
                   active_session.inventory_slots.data(),
                   active_session.inventory_slots.size()},

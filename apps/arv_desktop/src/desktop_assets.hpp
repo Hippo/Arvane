@@ -53,6 +53,7 @@ using DesktopLoadedAssetsResult = Expected<DesktopLoadedAssets, DesktopAssetLoad
     const io::EngineConfig& config,
     const asset::PackManager& packs,
     const ui::UiTheme& theme,
+    const ui::UiDisplayMetrics& ui_metrics,
     const voxel::BlockBehaviorRegistry& block_behaviors,
     const player::ItemBehaviorRegistry& item_behaviors,
     const world::EntityGoalRegistry& entity_goals);

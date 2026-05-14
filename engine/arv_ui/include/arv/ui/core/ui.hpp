@@ -25,6 +25,23 @@ struct UiRect {
   f32 height{};
 };
 
+struct UiDisplayMetrics {
+  Vec2f logical_size{};
+  Vec2f framebuffer_size{};
+  Vec2f framebuffer_scale{1.0F, 1.0F};
+
+  [[nodiscard]] static UiDisplayMetrics from_logical_size(Vec2f logical_size) noexcept;
+  [[nodiscard]] static UiDisplayMetrics from_window_and_framebuffer(
+      Vec2f window_size,
+      Vec2f framebuffer_size) noexcept;
+
+  [[nodiscard]] Vec2f framebuffer_from_logical(Vec2f point) const noexcept;
+  [[nodiscard]] UiRect framebuffer_from_logical(UiRect rect) const noexcept;
+  [[nodiscard]] Vec2f logical_from_framebuffer(Vec2f point) const noexcept;
+  [[nodiscard]] f32 scalar_to_framebuffer(f32 value) const noexcept;
+  [[nodiscard]] u32 font_pixel_size(u32 logical_pixel_size) const noexcept;
+};
+
 enum class UiElementType : u8 {
   Root,
   Panel,
@@ -34,7 +51,7 @@ enum class UiElementType : u8 {
   HorizontalStack,
   Grid,
   Spacer,
-  ItemSlot,
+  Slot,
   Image,
 };
 
@@ -151,17 +168,26 @@ struct UiFontStacks {
 
 class FontUiTextMeasurer final : public IUiTextMeasurer {
 public:
-  FontUiTextMeasurer(const asset::FontSystem& fonts, asset::FontStack stack);
-  FontUiTextMeasurer(const asset::FontSystem& fonts, UiFontStacks stacks);
+  FontUiTextMeasurer(
+      const asset::FontSystem& fonts,
+      asset::FontStack stack,
+      f32 logical_to_framebuffer_scale = 1.0F);
+  FontUiTextMeasurer(
+      const asset::FontSystem& fonts,
+      UiFontStacks stacks,
+      f32 logical_to_framebuffer_scale = 1.0F);
+  void set_display_scale(f32 logical_to_framebuffer_scale);
   [[nodiscard]] Vec2f measure(std::string_view text, UiTextRole role = UiTextRole::Body) const override;
   [[nodiscard]] f32 line_height(UiTextRole role = UiTextRole::Body) const override;
 
 private:
   [[nodiscard]] const asset::FontStack& stack_for(UiTextRole role) const noexcept;
   [[nodiscard]] std::string measure_cache_key(std::string_view text, UiTextRole role) const;
+  [[nodiscard]] f32 framebuffer_to_logical_scale() const noexcept;
 
   const asset::FontSystem* fonts_{};
   UiFontStacks stacks_{};
+  f32 logical_to_framebuffer_scale_{1.0F};
   mutable HashMap<std::string, Vec2f> measure_cache_{};
 };
 
@@ -190,12 +216,27 @@ public:
   UiNodeID add_child(UiNodeID parent, UiElement element);
 
   void layout(Vec2f viewport, const IUiTextMeasurer* text_measurer);
+  void layout_with_metrics(const UiDisplayMetrics& metrics, const IUiTextMeasurer* text_measurer);
 
   [[nodiscard]] std::optional<UiNodeID> hit_test(Vec2f point) const;
+  [[nodiscard]] std::optional<UiNodeID> hit_test_framebuffer(
+      Vec2f point,
+      const UiDisplayMetrics& metrics) const;
 
   [[nodiscard]] std::optional<UiAction> route_mouse_move(Vec2f point);
   [[nodiscard]] std::optional<UiAction> route_mouse_down(Vec2f point, UiMouseButton button);
   [[nodiscard]] std::optional<UiAction> route_mouse_up(Vec2f point, UiMouseButton button);
+  [[nodiscard]] std::optional<UiAction> route_mouse_move_framebuffer(
+      Vec2f point,
+      const UiDisplayMetrics& metrics);
+  [[nodiscard]] std::optional<UiAction> route_mouse_down_framebuffer(
+      Vec2f point,
+      UiMouseButton button,
+      const UiDisplayMetrics& metrics);
+  [[nodiscard]] std::optional<UiAction> route_mouse_up_framebuffer(
+      Vec2f point,
+      UiMouseButton button,
+      const UiDisplayMetrics& metrics);
 
   [[nodiscard]] UiNodeID hovered() const noexcept {
     return hovered_;
@@ -272,7 +313,19 @@ void append_ui_draw_commands(
 void append_ui_draw_commands(
     const UiTree& tree,
     asset::FontSystem& fonts,
+    const UiFontStacks& font_stacks,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics);
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
     const asset::FontStack& font_stack,
     render::FramePacket& frame);
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
+    const asset::FontStack& font_stack,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics);
 
 } // namespace arv::ui

@@ -3,7 +3,7 @@
 #include "arv/core/types.hpp"
 #include "arv/player/inventory.hpp"
 #include "arv/platform/glfw_window.hpp"
-#include "arv/ui/ui.hpp"
+#include "arv/base/ui.hpp"
 
 #include <optional>
 

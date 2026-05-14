@@ -11,8 +11,8 @@
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/net/connection_state.hpp"
-#include "arv/ui/screens/main_menu.hpp"
-#include "arv/ui/screens/pause_menu.hpp"
+#include "arv/base/ui/screens/main_menu.hpp"
+#include "arv/base/ui/screens/pause_menu.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -82,6 +82,18 @@ constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
       event.binding.modifiers};
 }
 
+[[nodiscard]] Vec2f window_size_vec(platform::WindowSize size) noexcept {
+  return {
+      static_cast<f32>(size.width),
+      static_cast<f32>(size.height)};
+}
+
+[[nodiscard]] Vec2f framebuffer_size_vec(platform::FramebufferSize size) noexcept {
+  return {
+      static_cast<f32>(size.width),
+      static_cast<f32>(size.height)};
+}
+
 } // namespace
 
 DesktopFrameLoop::DesktopFrameLoop(
@@ -120,7 +132,11 @@ DesktopFrameLoop::DesktopFrameLoop(
                                            player_tuning_(player_tuning),
                                            menu_state_(menu_state),
                                            screen_manager_(screen_manager),
-                                           framebuffer_(window.framebuffer_size()) {
+                                           framebuffer_(window.framebuffer_size()),
+                                           ui_metrics_(
+                                               ui::UiDisplayMetrics::from_window_and_framebuffer(
+                                                   window_size_vec(window.window_size()),
+                                                   framebuffer_size_vec(framebuffer_))) {
   const auto start = std::chrono::steady_clock::now();
   previous_time_ = start;
   app_start_time_ = start;
@@ -132,6 +148,7 @@ int DesktopFrameLoop::run() {
     ARV_PROFILE_ZONE("Frame time");
     FrameTiming timing = begin_frame();
     platform::InputSnapshot platform_input = poll_platform_input();
+    update_framebuffer_size();
     DesktopGameSession* active_session = sessions_.active_session();
     const bool has_live_session =
         active_session != nullptr && active_session->client != nullptr;
@@ -216,7 +233,6 @@ int DesktopFrameLoop::run() {
           active_session->client != nullptr;
     }
 
-    update_framebuffer_size();
     if (has_visual_gameplay_session) {
       refresh_player_skin_render_assets(*active_session);
     }
@@ -282,10 +298,7 @@ void DesktopFrameLoop::reset_gameplay_menu_stack() {
 ui::UIContext DesktopFrameLoop::make_menu_context(ui::UIScreenManager& screens) {
   return {
       ui_tree_,
-      {
-          static_cast<f32>(framebuffer_.width),
-          static_cast<f32>(framebuffer_.height),
-      },
+      ui_metrics_.logical_size,
       &menu_state_,
       &menu_state_,
       &screens,
@@ -515,6 +528,15 @@ void DesktopFrameLoop::submit_client_input_and_update_cursor(
 
 void DesktopFrameLoop::update_framebuffer_size() {
   const auto next_framebuffer = window_.framebuffer_size();
+  const ui::UiDisplayMetrics next_metrics =
+      ui::UiDisplayMetrics::from_window_and_framebuffer(
+          window_size_vec(window_.window_size()),
+          framebuffer_size_vec(next_framebuffer));
+  if (next_metrics.logical_size != ui_metrics_.logical_size) {
+    invalidate_ui_tree_cache();
+  }
+  ui_text_measurer_.set_display_scale(next_metrics.scalar_to_framebuffer(1.0F));
+  ui_metrics_ = next_metrics;
   if (next_framebuffer.width != framebuffer_.width ||
       next_framebuffer.height != framebuffer_.height) {
     framebuffer_ = next_framebuffer;

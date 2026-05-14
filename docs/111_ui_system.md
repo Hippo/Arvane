@@ -654,11 +654,30 @@ component. This keeps color, hover metadata, and click metadata attached to the
 correct run even before the lower-level text renderer has native inline span
 support.
 
+## UI Units
+
+`arv_ui` layout and input coordinates are expressed in logical UI dots, not raw
+framebuffer pixels. The desktop client converts window coordinates to dots for
+hit testing and scales paint commands to framebuffer pixels at submit time. Font
+faces are loaded at the framebuffer-scaled pixel size, while text measurement is
+reported back in logical dots so layout stays stable across DPI scales.
+
 ---
 
 # Styling
 
 Widgets use style tokens rather than hardcoded values.
+
+Theme YAML may declare `inherits` to reuse another theme and override only the
+tokens it changes:
+
+```yaml
+inherits: "arvane:theme/default"
+```
+
+Missing tokens are resolved from the inherited theme before falling back to the
+built-in defaults. Cycles or missing parents make the selected theme fail and
+follow the normal default-theme fallback path.
 
 Example style token categories:
 
@@ -686,9 +705,9 @@ Plugin/server-authored UI may reference approved style tokens but must not defin
 
 ---
 
-# Built-In Widgets
+# Built-In UI
 
-Initial built-in widgets:
+Initial generic primitives in `arv_ui`:
 
 * panel
 * text
@@ -702,11 +721,10 @@ Initial built-in widgets:
 * horizontal stack
 * grid
 * tooltip
-* item slot
-* hotbar
+* slot
 * modal dialog
 
-Game-specific widgets:
+Base-game widgets live in `arv_base` and compose those primitives:
 
 * item slot
 * item icon
@@ -912,7 +930,7 @@ Allowed children:
 * text
 * image
 * button
-* item_slot
+* slot
 * spacer
 
 Allowed props:
@@ -938,7 +956,7 @@ Allowed children:
 * text
 * image
 * button
-* item_slot
+* slot
 * spacer
 * separator
 
@@ -971,7 +989,7 @@ Allowed children:
 * text
 * image
 * button
-* item_slot
+* slot
 * spacer
 * separator
 
@@ -1004,7 +1022,7 @@ Allowed children:
 * text
 * image
 * button
-* item_slot
+* slot
 * spacer
 * separator
 
@@ -1033,7 +1051,7 @@ Allowed children:
 * text
 * image
 * button
-* item_slot
+* slot
 * spacer
 
 Allowed props:
@@ -1340,33 +1358,23 @@ Server/plugin text fields must be length-limited.
 
 ---
 
-## `item_slot`
+## `slot`
 
-Game item display/interact element.
+Generic framed cell for selectable or interactive content.
 
 Allowed children:
 
 ```text
-none
+text
+image
+panel
 ```
 
 Allowed props:
 
 ```text
-item
-  Optional item identifier.
-
-count
-  Optional integer.
-
-durability
-  Optional normalized value.
-
 slot_index
   Optional integer.
-
-inventory_id
-  Optional inventory identifier.
 
 action
   Optional action identifier.
@@ -1381,7 +1389,8 @@ tooltip
   Optional tooltip mode or text.
 ```
 
-Item slots must emit semantic actions, not raw inventory mutations.
+Base-game item slots are authored in `arv_base` on top of this primitive. They
+must emit semantic actions, not raw inventory mutations.
 
 Examples of semantic interaction:
 
@@ -1457,7 +1466,7 @@ Allowed children:
 * image
 * stack_vertical
 * stack_horizontal
-* item_slot
+* slot
 
 Allowed props:
 

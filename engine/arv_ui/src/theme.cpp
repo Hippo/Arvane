@@ -9,7 +9,9 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <vector>
 
 #include <yaml-cpp/yaml.h>
 
@@ -19,6 +21,13 @@ namespace {
 constexpr std::string_view ConfigDirectoryName = "config";
 constexpr std::string_view ThemesDirectoryName = "themes";
 constexpr std::string_view StyleFileName = "style.yaml";
+constexpr std::string_view ThemeResourcePrefix = "theme/";
+constexpr std::string_view DefaultThemeAsset = "arvane:theme/default";
+
+struct ThemeDocument {
+  YAML::Node root{};
+  std::optional<std::string> inherits{};
+};
 
 [[nodiscard]] f32 clamp_scale(f32 value, f32 fallback) noexcept {
   if (!std::isfinite(value)) {
@@ -172,6 +181,92 @@ void read_u32_token(
   }
 }
 
+[[nodiscard]] bool theme_stack_contains(
+    const std::vector<std::string>& stack,
+    std::string_view theme_id) noexcept {
+  return std::any_of(
+      stack.begin(),
+      stack.end(),
+      [theme_id](const std::string& entry) {
+        return entry == theme_id;
+      });
+}
+
+[[nodiscard]] std::string describe_theme_chain(
+    const std::vector<std::string>& stack,
+    std::string_view next) {
+  std::string chain;
+  for (const std::string& entry : stack) {
+    if (!chain.empty()) {
+      chain += " -> ";
+    }
+    chain += entry;
+  }
+  if (!chain.empty()) {
+    chain += " -> ";
+  }
+  chain += next;
+  return chain;
+}
+
+[[nodiscard]] std::filesystem::path with_yaml_extension(std::filesystem::path path) {
+  if (path.extension().empty()) {
+    path += ".yaml";
+  }
+  return path;
+}
+
+[[nodiscard]] std::optional<std::string> theme_asset_id_from_reference(
+    std::string_view theme,
+    UiThemeLoadResult& result,
+    std::string_view context) {
+  if (theme.find(':') != std::string_view::npos) {
+    auto parsed = asset::ResourceID::parse(theme);
+    if (!parsed || !parsed.value().path.starts_with(ThemeResourcePrefix)) {
+      add_warning(
+          result,
+          "invalid inherited theme resource ID in " + std::string{context} + ": " +
+              std::string{theme});
+      return std::nullopt;
+    }
+    return parsed.value().string();
+  }
+  if (!valid_theme_name(theme)) {
+    add_warning(
+        result,
+        "invalid inherited theme name in " + std::string{context} + ": " + std::string{theme});
+    return std::nullopt;
+  }
+  return "arvane:theme/" + std::string{theme};
+}
+
+[[nodiscard]] std::optional<ThemeDocument> read_theme_document(
+    const std::filesystem::path& path,
+    UiThemeLoadResult& result) {
+  try {
+    ThemeDocument document;
+    document.root = YAML::LoadFile(path.string());
+    const YAML::Node inherits = document.root["inherits"];
+    if (inherits) {
+      if (!inherits.IsScalar()) {
+        add_warning(result, "theme inherits is not a scalar: " + path.string());
+        return std::nullopt;
+      }
+      document.inherits = inherits.as<std::string>();
+      if (document.inherits->empty()) {
+        add_warning(result, "theme inherits is empty: " + path.string());
+        return std::nullopt;
+      }
+    }
+    return document;
+  } catch (const YAML::Exception& error) {
+    add_warning(result, "could not load theme file " + path.string() + ": " + error.what());
+  } catch (const std::exception& error) {
+    add_warning(result, "could not load theme file " + path.string() + ": " + error.what());
+  }
+  return std::nullopt;
+}
+
 void parse_theme_node(const YAML::Node& root, UiTheme& theme, UiThemeLoadResult& result) {
   if (const YAML::Node name = root["name"]; name && name.IsScalar()) {
     theme.name = name.as<std::string>();
@@ -256,20 +351,152 @@ void parse_theme_node(const YAML::Node& root, UiTheme& theme, UiThemeLoadResult&
   }
 }
 
-[[nodiscard]] std::optional<UiTheme> read_theme_file(
+[[nodiscard]] std::optional<UiTheme> read_theme_asset(
+    const asset::PackManager& packs,
+    std::string theme_asset,
+    UiThemeLoadResult& result,
+    std::vector<std::string>& stack);
+
+[[nodiscard]] bool file_exists(const std::filesystem::path& path);
+
+[[nodiscard]] std::optional<UiTheme> read_theme_path(
     const std::filesystem::path& path,
-    UiThemeLoadResult& result) {
-  try {
-    YAML::Node root = YAML::LoadFile(path.string());
-    UiTheme theme = make_default_ui_theme();
-    parse_theme_node(root, theme, result);
-    return theme;
-  } catch (const YAML::Exception& error) {
-    add_warning(result, "could not load theme file " + path.string() + ": " + error.what());
-  } catch (const std::exception& error) {
-    add_warning(result, "could not load theme file " + path.string() + ": " + error.what());
+    std::string theme_id,
+    const std::filesystem::path& themes_root,
+    UiThemeLoadResult& result,
+    std::vector<std::string>& stack);
+
+[[nodiscard]] std::optional<UiTheme> read_theme_asset(
+    const asset::PackManager& packs,
+    std::string theme_asset,
+    UiThemeLoadResult& result,
+    std::vector<std::string>& stack) {
+  if (theme_stack_contains(stack, theme_asset)) {
+    add_warning(
+        result,
+        "cyclic theme inheritance detected: " + describe_theme_chain(stack, theme_asset));
+    return std::nullopt;
   }
-  return std::nullopt;
+
+  auto resolved = packs.resolve_asset_path(theme_asset, asset::AssetKind::Theme);
+  if (!resolved) {
+    add_warning(result, "theme not found: " + resolved.error().describe());
+    return std::nullopt;
+  }
+
+  stack.push_back(theme_asset);
+  const std::optional<ThemeDocument> document = read_theme_document(resolved.value().path, result);
+  if (!document.has_value()) {
+    stack.pop_back();
+    return std::nullopt;
+  }
+
+  UiTheme theme = make_default_ui_theme();
+  if (document->inherits.has_value()) {
+    std::optional<std::string> parent = theme_asset_id_from_reference(
+        document->inherits.value(),
+        result,
+        resolved.value().path.string());
+    if (!parent.has_value()) {
+      stack.pop_back();
+      return std::nullopt;
+    }
+    std::optional<UiTheme> inherited = read_theme_asset(packs, parent.value(), result, stack);
+    if (!inherited.has_value()) {
+      add_warning(result, "inherited theme could not be loaded: " + parent.value());
+      stack.pop_back();
+      return std::nullopt;
+    }
+    theme = std::move(inherited.value());
+  }
+  parse_theme_node(document->root, theme, result);
+  stack.pop_back();
+  return theme;
+}
+
+struct LocalThemeReference {
+  std::string id{};
+  std::filesystem::path path{};
+};
+
+[[nodiscard]] std::optional<LocalThemeReference> local_theme_reference(
+    std::string_view theme,
+    const std::filesystem::path& themes_root,
+    UiThemeLoadResult& result,
+    std::string_view context) {
+  if (theme.find(':') != std::string_view::npos) {
+    auto parsed = asset::ResourceID::parse(theme);
+    if (!parsed || !parsed.value().path.starts_with(ThemeResourcePrefix)) {
+      add_warning(
+          result,
+          "invalid inherited theme resource ID in " + std::string{context} + ": " +
+              std::string{theme});
+      return std::nullopt;
+    }
+    std::string logical = parsed.value().path.substr(ThemeResourcePrefix.size());
+    std::filesystem::path path = themes_root / std::filesystem::path{logical};
+    if (parsed.value().name_space != "arvane") {
+      path = themes_root / std::filesystem::path{parsed.value().name_space} /
+             std::filesystem::path{logical};
+    }
+    return LocalThemeReference{parsed.value().string(), with_yaml_extension(std::move(path))};
+  }
+
+  if (!valid_theme_name(theme)) {
+    add_warning(
+        result,
+        "invalid inherited theme name in " + std::string{context} + ": " + std::string{theme});
+    return std::nullopt;
+  }
+
+  std::string name{theme};
+  return LocalThemeReference{name, themes_root / std::filesystem::path{name + ".yaml"}};
+}
+
+[[nodiscard]] std::optional<UiTheme> read_theme_path(
+    const std::filesystem::path& path,
+    std::string theme_id,
+    const std::filesystem::path& themes_root,
+    UiThemeLoadResult& result,
+    std::vector<std::string>& stack) {
+  if (theme_stack_contains(stack, theme_id)) {
+    add_warning(
+        result,
+        "cyclic theme inheritance detected: " + describe_theme_chain(stack, theme_id));
+    return std::nullopt;
+  }
+  if (!file_exists(path)) {
+    add_warning(result, "theme not found: " + path.string());
+    return std::nullopt;
+  }
+
+  stack.push_back(std::move(theme_id));
+  const std::optional<ThemeDocument> document = read_theme_document(path, result);
+  if (!document.has_value()) {
+    stack.pop_back();
+    return std::nullopt;
+  }
+
+  UiTheme theme = make_default_ui_theme();
+  if (document->inherits.has_value()) {
+    std::optional<LocalThemeReference> parent =
+        local_theme_reference(document->inherits.value(), themes_root, result, path.string());
+    if (!parent.has_value()) {
+      stack.pop_back();
+      return std::nullopt;
+    }
+    std::optional<UiTheme> inherited =
+        read_theme_path(parent->path, parent->id, themes_root, result, stack);
+    if (!inherited.has_value()) {
+      add_warning(result, "inherited theme could not be loaded: " + parent->id);
+      stack.pop_back();
+      return std::nullopt;
+    }
+    theme = std::move(inherited.value());
+  }
+  parse_theme_node(document->root, theme, result);
+  stack.pop_back();
+  return theme;
 }
 
 void parse_style_file(const std::filesystem::path& path, UiThemeLoadResult& result) {
@@ -323,7 +550,7 @@ void parse_style_file(const std::filesystem::path& path, UiThemeLoadResult& resu
       add_warning(result, "invalid theme resource ID, falling back to default: " + std::string{theme});
       result.used_theme_fallback = true;
       result.config.theme = "default";
-      return "arvane:theme/default";
+      return std::string{DefaultThemeAsset};
     }
     return std::string{theme};
   }
@@ -331,7 +558,7 @@ void parse_style_file(const std::filesystem::path& path, UiThemeLoadResult& resu
     add_warning(result, "invalid theme name, falling back to default: " + std::string{theme});
     result.config.theme = "default";
     result.used_theme_fallback = true;
-    return "arvane:theme/default";
+    return std::string{DefaultThemeAsset};
   }
   return "arvane:theme/" + std::string{theme};
 }
@@ -436,23 +663,27 @@ UiThemeLoadResult load_ui_theme(
 
   std::string theme_asset = theme_asset_id_from_config(result.config.theme, result);
   std::optional<UiTheme> loaded;
-  auto resolved = packs.resolve_asset_path(theme_asset, asset::AssetKind::Theme);
-  if (resolved) {
-    loaded = read_theme_file(resolved.value().path, result);
+  std::vector<std::string> theme_stack;
+  loaded = read_theme_asset(packs, theme_asset, result, theme_stack);
+  if (loaded.has_value()) {
     result.loaded_theme = theme_asset;
   } else {
-    add_warning(result, "selected theme not found, falling back to default: " + resolved.error().describe());
+    add_warning(
+        result,
+        "selected theme could not be loaded, falling back to default: " + theme_asset);
   }
 
-  if (!loaded.has_value() && theme_asset != "arvane:theme/default") {
+  if (!loaded.has_value() && theme_asset != DefaultThemeAsset) {
     result.used_theme_fallback = true;
-    theme_asset = "arvane:theme/default";
-    resolved = packs.resolve_asset_path(theme_asset, asset::AssetKind::Theme);
-    if (resolved) {
-      loaded = read_theme_file(resolved.value().path, result);
+    theme_asset = std::string{DefaultThemeAsset};
+    theme_stack.clear();
+    loaded = read_theme_asset(packs, theme_asset, result, theme_stack);
+    if (loaded.has_value()) {
       result.loaded_theme = theme_asset;
     } else {
-      add_warning(result, "default theme not found, using built-in theme: " + resolved.error().describe());
+      add_warning(
+          result,
+          "default theme could not be loaded, using built-in theme: " + theme_asset);
     }
   }
 
@@ -488,20 +719,31 @@ UiThemeLoadResult load_ui_theme_from_paths(
   const std::filesystem::path selected_path =
       themes_root / std::filesystem::path{result.config.theme + ".yaml"};
   std::optional<UiTheme> loaded;
+  std::vector<std::string> theme_stack;
   if (file_exists(selected_path)) {
-    loaded = read_theme_file(selected_path, result);
+    loaded = read_theme_path(
+        selected_path,
+        result.config.theme,
+        themes_root,
+        result,
+        theme_stack);
   } else {
-    add_warning(result, "selected theme not found, falling back to default: " + selected_path.string());
+    add_warning(
+        result,
+        "selected theme not found, falling back to default: " + selected_path.string());
   }
 
   if (!loaded.has_value() && result.config.theme != "default") {
     result.used_theme_fallback = true;
     const std::filesystem::path default_path = themes_root / "default.yaml";
+    theme_stack.clear();
     if (file_exists(default_path)) {
-      loaded = read_theme_file(default_path, result);
+      loaded = read_theme_path(default_path, "default", themes_root, result, theme_stack);
       result.loaded_theme = "default";
     } else {
-      add_warning(result, "default theme not found, using built-in theme: " + default_path.string());
+      add_warning(
+          result,
+          "default theme not found, using built-in theme: " + default_path.string());
     }
   }
 

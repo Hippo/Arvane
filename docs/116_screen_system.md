@@ -11,7 +11,8 @@ The goals are:
 * ensure consistent navigation behavior
 * provide a clean command/event boundary
 
-This system applies to all player-facing UI implemented with `arv_ui`.
+This system applies to the base-game/player-facing screens implemented in
+`arv_base` on top of the generic `arv_ui` retained UI engine.
 
 ---
 
@@ -20,10 +21,15 @@ This system applies to all player-facing UI implemented with `arv_ui`.
 ## Ownership
 
 ```text
-arv_ui        → UI framework + screens + navigation
+arv_ui        → retained UI tree, layout, hit testing, drawing commands, themes
+arv_base      → base-game screens, HUD widgets, menu navigation, UI commands
 arv_client    → handles UI commands and executes actions
 arv_world     → simulation (never directly touched by UI)
 ```
+
+The source files live under `engine/arv_base`, but client UI code is built as
+the separate `arv_base_ui` target so dedicated/server-only users of `arv_base`
+do not link the UI stack.
 
 ## Core Rule
 
@@ -233,7 +239,8 @@ using UICommand = std::variant<
 
 ## Command Sink
 
-`arv_ui` should not process commands.
+`arv_ui` should not process commands. Base-game screens in `arv_base` emit
+commands that the app/client layer handles externally.
 
 Instead, expose a sink:
 
@@ -522,8 +529,9 @@ If something feels like "UI is doing too much", it probably is — move it to `a
 # Final Summary
 
 ```text
-Screens live in:        arv_ui/screens
-Navigation lives in:    arv_ui (screen manager)
+Generic UI lives in:    arv_ui
+Base screens live in:   arv_base/ui/screens
+Navigation lives in:    arv_base UI screen manager
 Commands flow to:       arv_client
 World never sees UI
 ```

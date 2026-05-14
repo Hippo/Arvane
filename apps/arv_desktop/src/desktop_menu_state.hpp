@@ -4,7 +4,7 @@
 #include "arv/io/config.hpp"
 #include "arv/text/language.hpp"
 #include "arv/platform/input_bindings.hpp"
-#include "arv/ui/ui.hpp"
+#include "arv/base/ui.hpp"
 
 #include <filesystem>
 #include <optional>

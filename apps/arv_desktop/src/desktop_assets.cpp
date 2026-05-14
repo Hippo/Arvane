@@ -200,6 +200,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
     const io::EngineConfig& config,
     const asset::PackManager& packs,
     const ui::UiTheme& theme,
+    const ui::UiDisplayMetrics& ui_metrics,
     const voxel::BlockBehaviorRegistry& block_behaviors,
     const player::ItemBehaviorRegistry& item_behaviors,
     const world::EntityGoalRegistry& entity_goals) {
@@ -221,7 +222,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
           resources,
           loaded.font_system,
           theme.typography.default_font,
-          theme.typography.size_sm,
+          ui_metrics.font_pixel_size(theme.typography.size_sm),
           loaded.ui_font_stacks.small,
           false);
       !font_result) {
@@ -231,7 +232,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
           resources,
           loaded.font_system,
           theme.typography.default_font,
-          theme.typography.size_md,
+          ui_metrics.font_pixel_size(theme.typography.size_md),
           loaded.ui_font_stacks.body,
           true);
       !font_result) {
@@ -241,7 +242,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
           resources,
           loaded.font_system,
           theme.typography.heading_font,
-          theme.typography.size_lg,
+          ui_metrics.font_pixel_size(theme.typography.size_lg),
           loaded.ui_font_stacks.heading,
           false);
       !font_result) {
@@ -251,7 +252,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
           resources,
           loaded.font_system,
           theme.typography.heading_font,
-          theme.typography.size_xl,
+          ui_metrics.font_pixel_size(theme.typography.size_xl),
           loaded.ui_font_stacks.title,
           false);
       !font_result) {
@@ -261,7 +262,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
           resources,
           loaded.font_system,
           theme.typography.monospace_font,
-          theme.typography.size_md,
+          ui_metrics.font_pixel_size(theme.typography.size_md),
           loaded.ui_font_stacks.mono,
           false);
       !font_result) {

@@ -29,6 +29,11 @@ struct FramebufferSize {
   u32 height{};
 };
 
+struct WindowSize {
+  u32 width{};
+  u32 height{};
+};
+
 struct RawInputEvent {
   InputBinding binding{};
 };
@@ -118,6 +123,7 @@ public:
   void set_vsync(bool enabled) noexcept;
 
   [[nodiscard]] FramebufferSize framebuffer_size() const;
+  [[nodiscard]] WindowSize window_size() const;
   [[nodiscard]] GLFWwindow* native_handle() noexcept {
     return window_;
   }

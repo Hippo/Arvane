@@ -17,7 +17,7 @@
 #include "arv/player/player_constants.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/sched/job_system.hpp"
-#include "arv/ui/ui.hpp"
+#include "arv/base/ui.hpp"
 
 #include <chrono>
 #include <optional>
@@ -273,6 +273,7 @@ private:
   ui::UIScreenManager& screen_manager_;
   ui::UIScreenManager gameplay_screen_manager_{};
   platform::FramebufferSize framebuffer_{};
+  ui::UiDisplayMetrics ui_metrics_{};
   FrameArena frame_arena_{};
   std::chrono::steady_clock::time_point previous_time_{};
   std::chrono::steady_clock::time_point app_start_time_{};

@@ -104,8 +104,8 @@ constexpr usize MaxTextMeasureCacheEntries = 512;
       return "grid";
     case UiElementType::Spacer:
       return "spacer";
-    case UiElementType::ItemSlot:
-      return "item_slot";
+    case UiElementType::Slot:
+      return "slot";
     case UiElementType::Image:
       return "image";
   }
@@ -116,7 +116,7 @@ constexpr usize MaxTextMeasureCacheEntries = 512;
   return type == "root" || type == "panel" || type == "stack_vertical" ||
          type == "stack_horizontal" || type == "grid" || type == "scroll_area" ||
          type == "overlay" || type == "text" || type == "image" ||
-         type == "button" || type == "item_slot" || type == "spacer" ||
+         type == "button" || type == "slot" || type == "spacer" ||
          type == "separator" || type == "tooltip" || type == "checkbox" ||
          type == "slider" || type == "text_input" || type == "progress_bar";
 }
@@ -195,22 +195,26 @@ void append_image(
     render::FramePacket& frame,
     UiRect rect,
     const UiImageData& image,
-    std::optional<UiRect> clip) {
+    std::optional<UiRect> clip,
+    const UiDisplayMetrics& metrics) {
   if (!image.valid || rect.width <= 0.0F || rect.height <= 0.0F || image.tint.w <= 0.0F) {
     return;
   }
 
+  const UiRect framebuffer_rect = metrics.framebuffer_from_logical(rect);
   render::UITexturedQuadDrawItem quad;
   if (image.custom_points) {
     for (usize index = 0; index < image.points.size(); ++index) {
-      quad.positions[index] = {rect.x + image.points[index].x, rect.y + image.points[index].y};
+      quad.positions[index] = {
+          framebuffer_rect.x + image.points[index].x * metrics.framebuffer_scale.x,
+          framebuffer_rect.y + image.points[index].y * metrics.framebuffer_scale.y};
     }
   } else {
     quad.positions = {{
-        {rect.x, rect.y},
-        {rect.x + rect.width, rect.y},
-        {rect.x + rect.width, rect.y + rect.height},
-        {rect.x, rect.y + rect.height},
+        {framebuffer_rect.x, framebuffer_rect.y},
+        {framebuffer_rect.x + framebuffer_rect.width, framebuffer_rect.y},
+        {framebuffer_rect.x + framebuffer_rect.width, framebuffer_rect.y + framebuffer_rect.height},
+        {framebuffer_rect.x, framebuffer_rect.y + framebuffer_rect.height},
     }};
   }
   quad.uvs = image.uvs;
@@ -218,17 +222,89 @@ void append_image(
   quad.source = image.source;
   quad.page = image.page;
   if (clip.has_value()) {
+    const UiRect framebuffer_clip = metrics.framebuffer_from_logical(*clip);
     quad.clip = true;
-    quad.clip_min = {clip->x, clip->y};
-    quad.clip_max = {clip->x + clip->width, clip->y + clip->height};
+    quad.clip_min = {framebuffer_clip.x, framebuffer_clip.y};
+    quad.clip_max = {
+        framebuffer_clip.x + framebuffer_clip.width,
+        framebuffer_clip.y + framebuffer_clip.height};
   }
   frame.ui_textured_quads.emplace_back(std::move(quad));
 }
 
 } // namespace
 
-FontUiTextMeasurer::FontUiTextMeasurer(const asset::FontSystem& fonts, asset::FontStack stack)
-    : fonts_(&fonts) {
+UiDisplayMetrics UiDisplayMetrics::from_logical_size(Vec2f logical_size) noexcept {
+  logical_size.x = std::max(0.0F, logical_size.x);
+  logical_size.y = std::max(0.0F, logical_size.y);
+  return {
+      logical_size,
+      logical_size,
+      {1.0F, 1.0F}};
+}
+
+UiDisplayMetrics UiDisplayMetrics::from_window_and_framebuffer(
+    Vec2f window_size,
+    Vec2f framebuffer_size) noexcept {
+  window_size.x = std::max(0.0F, window_size.x);
+  window_size.y = std::max(0.0F, window_size.y);
+  framebuffer_size.x = std::max(0.0F, framebuffer_size.x);
+  framebuffer_size.y = std::max(0.0F, framebuffer_size.y);
+  if (window_size.x <= 0.0F && framebuffer_size.x > 0.0F) {
+    window_size.x = framebuffer_size.x;
+  }
+  if (window_size.y <= 0.0F && framebuffer_size.y > 0.0F) {
+    window_size.y = framebuffer_size.y;
+  }
+  if (framebuffer_size.x <= 0.0F && window_size.x > 0.0F) {
+    framebuffer_size.x = window_size.x;
+  }
+  if (framebuffer_size.y <= 0.0F && window_size.y > 0.0F) {
+    framebuffer_size.y = window_size.y;
+  }
+  const Vec2f scale{
+      window_size.x > 0.0F ? framebuffer_size.x / window_size.x : 1.0F,
+      window_size.y > 0.0F ? framebuffer_size.y / window_size.y : 1.0F};
+  return {window_size, framebuffer_size, scale};
+}
+
+Vec2f UiDisplayMetrics::framebuffer_from_logical(Vec2f point) const noexcept {
+  return {point.x * framebuffer_scale.x, point.y * framebuffer_scale.y};
+}
+
+UiRect UiDisplayMetrics::framebuffer_from_logical(UiRect rect) const noexcept {
+  return {
+      rect.x * framebuffer_scale.x,
+      rect.y * framebuffer_scale.y,
+      rect.width * framebuffer_scale.x,
+      rect.height * framebuffer_scale.y};
+}
+
+Vec2f UiDisplayMetrics::logical_from_framebuffer(Vec2f point) const noexcept {
+  return {
+      framebuffer_scale.x > 0.0F ? point.x / framebuffer_scale.x : point.x,
+      framebuffer_scale.y > 0.0F ? point.y / framebuffer_scale.y : point.y};
+}
+
+f32 UiDisplayMetrics::scalar_to_framebuffer(f32 value) const noexcept {
+  return value * std::max(framebuffer_scale.x, framebuffer_scale.y);
+}
+
+u32 UiDisplayMetrics::font_pixel_size(u32 logical_pixel_size) const noexcept {
+  if (logical_pixel_size == 0U) {
+    return 0U;
+  }
+  const f32 scaled =
+      static_cast<f32>(logical_pixel_size) * std::max(framebuffer_scale.x, framebuffer_scale.y);
+  return std::max(1U, static_cast<u32>(std::lround(scaled)));
+}
+
+FontUiTextMeasurer::FontUiTextMeasurer(
+    const asset::FontSystem& fonts,
+    asset::FontStack stack,
+    f32 logical_to_framebuffer_scale)
+    : fonts_(&fonts),
+      logical_to_framebuffer_scale_(std::max(0.25F, logical_to_framebuffer_scale)) {
   stacks_.small = stack;
   stacks_.body = stack;
   stacks_.heading = stack;
@@ -236,9 +312,22 @@ FontUiTextMeasurer::FontUiTextMeasurer(const asset::FontSystem& fonts, asset::Fo
   stacks_.mono = std::move(stack);
 }
 
-FontUiTextMeasurer::FontUiTextMeasurer(const asset::FontSystem& fonts, UiFontStacks stacks)
+FontUiTextMeasurer::FontUiTextMeasurer(
+    const asset::FontSystem& fonts,
+    UiFontStacks stacks,
+    f32 logical_to_framebuffer_scale)
     : fonts_(&fonts),
-      stacks_(std::move(stacks)) {
+      stacks_(std::move(stacks)),
+      logical_to_framebuffer_scale_(std::max(0.25F, logical_to_framebuffer_scale)) {
+}
+
+void FontUiTextMeasurer::set_display_scale(f32 logical_to_framebuffer_scale) {
+  const f32 clamped = std::max(0.25F, logical_to_framebuffer_scale);
+  if (std::abs(clamped - logical_to_framebuffer_scale_) <= 0.001F) {
+    return;
+  }
+  logical_to_framebuffer_scale_ = clamped;
+  measure_cache_.clear();
 }
 
 const asset::FontStack& FontUiTextMeasurer::stack_for(UiTextRole role) const noexcept {
@@ -266,6 +355,10 @@ std::string FontUiTextMeasurer::measure_cache_key(std::string_view text, UiTextR
   return key;
 }
 
+f32 FontUiTextMeasurer::framebuffer_to_logical_scale() const noexcept {
+  return logical_to_framebuffer_scale_ > 0.0F ? 1.0F / logical_to_framebuffer_scale_ : 1.0F;
+}
+
 Vec2f FontUiTextMeasurer::measure(std::string_view text, UiTextRole role) const {
   if (fonts_ == nullptr) {
     return {};
@@ -278,7 +371,8 @@ Vec2f FontUiTextMeasurer::measure(std::string_view text, UiTextRole role) const 
   if (!measured) {
     return {};
   }
-  Vec2f size{measured.value().width, measured.value().height};
+  const f32 to_logical = framebuffer_to_logical_scale();
+  Vec2f size{measured.value().width * to_logical, measured.value().height * to_logical};
   if (measure_cache_.size() >= MaxTextMeasureCacheEntries) {
     measure_cache_.clear();
   }
@@ -291,7 +385,7 @@ f32 FontUiTextMeasurer::line_height(UiTextRole role) const {
   if (fonts_ == nullptr || stack.faces.empty()) {
     return 0.0F;
   }
-  return fonts_->metrics(stack.faces.front()).line_height;
+  return fonts_->metrics(stack.faces.front()).line_height * framebuffer_to_logical_scale();
 }
 
 UiTree::UiTree() {
@@ -362,8 +456,20 @@ void UiTree::layout(Vec2f viewport, const IUiTextMeasurer* text_measurer) {
   arrange_element(root_id_, {0.0F, 0.0F, viewport.x, viewport.y}, text_measurer);
 }
 
+void UiTree::layout_with_metrics(
+    const UiDisplayMetrics& metrics,
+    const IUiTextMeasurer* text_measurer) {
+  layout(metrics.logical_size, text_measurer);
+}
+
 std::optional<UiNodeID> UiTree::hit_test(Vec2f point) const {
   return hit_test_recursive(root_id_, point);
+}
+
+std::optional<UiNodeID> UiTree::hit_test_framebuffer(
+    Vec2f point,
+    const UiDisplayMetrics& metrics) const {
+  return hit_test(metrics.logical_from_framebuffer(point));
 }
 
 std::optional<UiAction> UiTree::route_mouse_move(Vec2f point) {
@@ -372,6 +478,26 @@ std::optional<UiAction> UiTree::route_mouse_move(Vec2f point) {
     return UiAction{hover->stable_id, hover->action, "hover"};
   }
   return std::nullopt;
+}
+
+std::optional<UiAction> UiTree::route_mouse_move_framebuffer(
+    Vec2f point,
+    const UiDisplayMetrics& metrics) {
+  return route_mouse_move(metrics.logical_from_framebuffer(point));
+}
+
+std::optional<UiAction> UiTree::route_mouse_down_framebuffer(
+    Vec2f point,
+    UiMouseButton button,
+    const UiDisplayMetrics& metrics) {
+  return route_mouse_down(metrics.logical_from_framebuffer(point), button);
+}
+
+std::optional<UiAction> UiTree::route_mouse_up_framebuffer(
+    Vec2f point,
+    UiMouseButton button,
+    const UiDisplayMetrics& metrics) {
+  return route_mouse_up(metrics.logical_from_framebuffer(point), button);
 }
 
 std::optional<UiAction> UiTree::route_mouse_down(Vec2f point, UiMouseButton button) {
@@ -428,7 +554,7 @@ Vec2f UiTree::measure_element(
         measured.x += current->style.letter_spacing * static_cast<f32>(text_units - 1U);
       }
     }
-  } else if (current->type == UiElementType::Spacer || current->type == UiElementType::ItemSlot ||
+  } else if (current->type == UiElementType::Spacer || current->type == UiElementType::Slot ||
              current->type == UiElementType::Image) {
     measured = {current->layout.width, current->layout.height};
     for (const UiNodeID child : current->children) {
@@ -536,7 +662,7 @@ void UiTree::arrange_element(
   const UiRect content = inset(rect, current->layout.padding);
 
   if (current->type == UiElementType::Root || current->type == UiElementType::Panel ||
-      current->type == UiElementType::Button || current->type == UiElementType::ItemSlot) {
+      current->type == UiElementType::Button || current->type == UiElementType::Slot) {
     for (const UiNodeID child : current->children) {
       UiElement* child_element = element(child);
       if (child_element == nullptr) {
@@ -693,6 +819,23 @@ void append_ui_draw_commands(
     asset::FontSystem& fonts,
     const UiFontStacks& font_stacks,
     render::FramePacket& frame) {
+  const UiElement* root = tree.element(tree.root_id());
+  const Vec2f logical_size =
+      root == nullptr ? Vec2f{} : Vec2f{root->rect.width, root->rect.height};
+  append_ui_draw_commands(
+      tree,
+      fonts,
+      font_stacks,
+      frame,
+      UiDisplayMetrics::from_logical_size(logical_size));
+}
+
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
+    const UiFontStacks& font_stacks,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics) {
   const usize element_count = tree.elements().size();
   frame.ui_rects.reserve(frame.ui_rects.size() + element_count);
   frame.ui_textured_quads.reserve(frame.ui_textured_quads.size() + element_count);
@@ -703,7 +846,7 @@ void append_ui_draw_commands(
     }
     if (element.type == UiElementType::Panel || element.type == UiElementType::HorizontalStack ||
         element.type == UiElementType::VerticalStack || element.type == UiElementType::Button ||
-        element.type == UiElementType::ItemSlot) {
+        element.type == UiElementType::Slot) {
       const std::optional<UiRect> clip =
           element.clip_active ? std::optional<UiRect>{element.clip} : std::nullopt;
       Vec4f border = element.style.border;
@@ -717,24 +860,29 @@ void append_ui_draw_commands(
         border = element.style.border_focus;
         border_width = std::max(border_width, element.style.focus_border_width);
       }
+      const std::optional<UiRect> framebuffer_clip =
+          clip.has_value() ? std::optional<UiRect>{metrics.framebuffer_from_logical(*clip)}
+                           : std::nullopt;
       append_rect(
           frame,
-          element.rect,
+          metrics.framebuffer_from_logical(element.rect),
           interactive_background(tree, element),
           border,
-          border_width,
-          element.style.radius,
-          clip);
+          metrics.scalar_to_framebuffer(border_width),
+          metrics.scalar_to_framebuffer(element.style.radius),
+          framebuffer_clip);
     }
     if (element.type == UiElementType::Image) {
       append_image(
           frame,
           element.rect,
           element.image,
-          element.clip_active ? std::optional<UiRect>{element.clip} : std::nullopt);
+          element.clip_active ? std::optional<UiRect>{element.clip} : std::nullopt,
+          metrics);
     }
     if (element.type == UiElementType::Text && !element.text.empty()) {
-      const Vec2f text_origin{snap_pixel(element.rect.x), snap_pixel(element.rect.y)};
+      const Vec2f text_origin =
+          metrics.framebuffer_from_logical(Vec2f{element.rect.x, element.rect.y});
       auto layout = fonts.layout_text(
           element.text,
           font_stack_for_role(font_stacks, element.style.text_role),
@@ -749,23 +897,27 @@ void append_ui_draw_commands(
         if (glyph_index_in_line > 0U && quad.min.x < previous_glyph_x - 0.5F) {
           glyph_index_in_line = 0U;
         }
-        const f32 tracking =
-            element.style.letter_spacing * static_cast<f32>(glyph_index_in_line);
+        const f32 tracking = metrics.scalar_to_framebuffer(element.style.letter_spacing) *
+                             static_cast<f32>(glyph_index_in_line);
         const Vec2f glyph_min{snap_pixel(quad.min.x + tracking), snap_pixel(quad.min.y)};
-        const Vec2f glyph_size{
-            std::max(0.0F, snap_pixel(quad.max.x - quad.min.x)),
-            std::max(0.0F, snap_pixel(quad.max.y - quad.min.y))};
+        const Vec2f glyph_max{snap_pixel(quad.max.x + tracking), snap_pixel(quad.max.y)};
         render::UIGlyphDrawItem glyph(
             glyph_min,
-            {glyph_min.x + glyph_size.x, glyph_min.y + glyph_size.y},
+            {
+                std::max(glyph_min.x, glyph_max.x),
+                std::max(glyph_min.y, glyph_max.y),
+            },
             quad.uv_min,
             quad.uv_max,
             quad.color,
             quad.page);
         if (element.clip_active) {
+          const UiRect framebuffer_clip = metrics.framebuffer_from_logical(element.clip);
           glyph.clip = true;
-          glyph.clip_min = {element.clip.x, element.clip.y};
-          glyph.clip_max = {element.clip.x + element.clip.width, element.clip.y + element.clip.height};
+          glyph.clip_min = {framebuffer_clip.x, framebuffer_clip.y};
+          glyph.clip_max = {
+              framebuffer_clip.x + framebuffer_clip.width,
+              framebuffer_clip.y + framebuffer_clip.height};
         }
         frame.ui_glyphs.emplace_back(glyph);
         previous_glyph_x = quad.min.x;
@@ -780,13 +932,30 @@ void append_ui_draw_commands(
     asset::FontSystem& fonts,
     const asset::FontStack& font_stack,
     render::FramePacket& frame) {
+  const UiElement* root = tree.element(tree.root_id());
+  const Vec2f logical_size =
+      root == nullptr ? Vec2f{} : Vec2f{root->rect.width, root->rect.height};
+  append_ui_draw_commands(
+      tree,
+      fonts,
+      font_stack,
+      frame,
+      UiDisplayMetrics::from_logical_size(logical_size));
+}
+
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
+    const asset::FontStack& font_stack,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics) {
   UiFontStacks stacks;
   stacks.small = font_stack;
   stacks.body = font_stack;
   stacks.heading = font_stack;
   stacks.title = font_stack;
   stacks.mono = font_stack;
-  append_ui_draw_commands(tree, fonts, stacks, frame);
+  append_ui_draw_commands(tree, fonts, stacks, frame, metrics);
 }
 
 } // namespace arv::ui
