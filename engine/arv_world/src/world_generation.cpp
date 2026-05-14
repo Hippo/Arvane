@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <optional>
 #include <utility>
 
@@ -39,10 +40,16 @@ namespace {
 
 class TerrainNoiseSampler {
 public:
+  static constexpr i32 UpsampleStep = 4;
+
   TerrainNoiseSampler(const WorldGenerationConfig& config, u64 seed) noexcept
       : config_(config),
         salt_(fnv1a(config.seed_salt)),
         mixed_seed_(generator_seed(seed, salt_, config.version)) {
+    seed_bias_ =
+        (static_cast<f32>((mixed_seed_ >> 48U) & 0xFFFFU) / static_cast<f32>(0xFFFFU) * 2.0F - 1.0F) *
+        0.08F;
+
     auto simplex = FastNoise::New<FastNoise::Simplex>(FastSIMD::FeatureSet::Max);
     if (!simplex) {
       return;
@@ -59,43 +66,139 @@ public:
         generator_ = fractal;
       }
     }
+
+    layers_[0] = make_layer(0.35F, 0xD1B54A32D192ED03ULL);
+    layers_[1] = make_layer(1.0F, 0xABC98388FB8FAC03ULL);
+    layers_[2] = make_layer(3.75F, 0x8CB92BA72F3D8DD7ULL);
   }
 
   [[nodiscard]] f32 terrain(i32 world_x, i32 world_z) const noexcept {
-    const f32 continental = sample_layer(world_x, world_z, 0.35F, 0xD1B54A32D192ED03ULL);
-    const f32 hills = sample_layer(world_x, world_z, 1.0F, 0xABC98388FB8FAC03ULL);
-    const f32 detail = sample_layer(world_x, world_z, 3.75F, 0x8CB92BA72F3D8DD7ULL);
-    const f32 seed_bias =
-        (static_cast<f32>((mixed_seed_ >> 48U) & 0xFFFFU) / static_cast<f32>(0xFFFFU) * 2.0F - 1.0F) *
-        0.08F;
-    return ((continental * 0.55F) + (hills * 0.35F) + (detail * 0.10F)) *
-               config_.terrain_amplitude +
-           seed_bias;
+    return combine_layers(
+        sample_layer(world_x, world_z, layers_[0]),
+        sample_layer(world_x, world_z, layers_[1]),
+        sample_layer(world_x, world_z, layers_[2]));
+  }
+
+  [[nodiscard]] f32 interpolated_terrain(i32 world_x, i32 world_z) const noexcept {
+    const i32 base_x = floor_div(world_x, UpsampleStep) * UpsampleStep;
+    const i32 base_z = floor_div(world_z, UpsampleStep) * UpsampleStep;
+    const f32 t_x = static_cast<f32>(world_x - base_x) / static_cast<f32>(UpsampleStep);
+    const f32 t_z = static_cast<f32>(world_z - base_z) / static_cast<f32>(UpsampleStep);
+    return interpolate(
+        terrain(base_x, base_z),
+        terrain(base_x + UpsampleStep, base_z),
+        terrain(base_x, base_z + UpsampleStep),
+        terrain(base_x + UpsampleStep, base_z + UpsampleStep),
+        t_x,
+        t_z);
+  }
+
+  [[nodiscard]] i32 height_from_terrain(f32 terrain) const noexcept {
+    const f32 height = static_cast<f32>(config_.base_height) +
+                       terrain * static_cast<f32>(config_.height_scale);
+    const i32 rounded = static_cast<i32>(std::floor(height + 0.5F));
+    return std::clamp(rounded, config_.min_y, config_.max_y);
+  }
+
+  [[nodiscard]] static f32 lerp(f32 a, f32 b, f32 t) noexcept {
+    return a + (b - a) * t;
+  }
+
+  [[nodiscard]] static f32 interpolate(
+      f32 lower_left,
+      f32 lower_right,
+      f32 upper_left,
+      f32 upper_right,
+      f32 t_x,
+      f32 t_z) noexcept {
+    return lerp(lerp(lower_left, lower_right, t_x), lerp(upper_left, upper_right, t_x), t_z);
   }
 
 private:
-  [[nodiscard]] f32 sample_layer(
-      i32 world_x,
-      i32 world_z,
-      f32 frequency_scale,
-      u64 layer_salt) const noexcept {
+  struct NoiseLayer {
+    f32 frequency{};
+    f32 offset_x{};
+    f32 offset_z{};
+    int seed{};
+  };
+
+  [[nodiscard]] NoiseLayer make_layer(f32 frequency_scale, u64 layer_salt) const noexcept {
+    const u64 layer_seed = mix64(mixed_seed_ ^ mix64(salt_ ^ layer_salt));
+    return {
+        config_.terrain_frequency * frequency_scale,
+        static_cast<f32>((layer_seed >> 8U) & 0xFFFFU) * 0.125F,
+        static_cast<f32>((layer_seed >> 24U) & 0xFFFFU) * 0.125F,
+        static_cast<int>(layer_seed & 0x7FFFFFFFULL)};
+  }
+
+  [[nodiscard]] f32 sample_layer(i32 world_x, i32 world_z, const NoiseLayer& layer) const noexcept {
     if (!generator_) {
       return 0.0F;
     }
 
-    const u64 layer_seed = mix64(mixed_seed_ ^ mix64(salt_ ^ layer_salt));
-    const f32 domain_offset_x = static_cast<f32>((layer_seed >> 8U) & 0xFFFFU) * 0.125F;
-    const f32 domain_offset_z = static_cast<f32>((layer_seed >> 24U) & 0xFFFFU) * 0.125F;
     return generator_->GenSingle2D(
-        static_cast<f32>(world_x) * config_.terrain_frequency * frequency_scale + domain_offset_x,
-        static_cast<f32>(world_z) * config_.terrain_frequency * frequency_scale + domain_offset_z,
-        static_cast<int>(layer_seed & 0x7FFFFFFFULL));
+        static_cast<f32>(world_x) * layer.frequency + layer.offset_x,
+        static_cast<f32>(world_z) * layer.frequency + layer.offset_z,
+        layer.seed);
+  }
+
+  [[nodiscard]] f32 combine_layers(f32 continental, f32 hills, f32 detail) const noexcept {
+    return ((continental * 0.55F) + (hills * 0.35F) + (detail * 0.10F)) *
+               config_.terrain_amplitude +
+           seed_bias_;
   }
 
   const WorldGenerationConfig& config_;
   u64 salt_{};
   u64 mixed_seed_{};
+  std::array<NoiseLayer, 3> layers_{};
+  f32 seed_bias_{};
   FastNoise::SmartNode<> generator_{};
+};
+
+class ChunkTerrainHeightCache {
+public:
+  ChunkTerrainHeightCache(const WorldGenerationConfig& config, u64 seed, ChunkCoord coord) noexcept
+      : sampler_(config, seed),
+        origin_x_(coord.x * ChunkSize),
+        origin_z_(coord.z * ChunkSize) {
+    for (i32 grid_z = 0; grid_z < GridSide; ++grid_z) {
+      for (i32 grid_x = 0; grid_x < GridSide; ++grid_x) {
+        lattice_[grid_index(grid_x, grid_z)] = sampler_.terrain(
+            origin_x_ + grid_x * TerrainNoiseSampler::UpsampleStep,
+            origin_z_ + grid_z * TerrainNoiseSampler::UpsampleStep);
+      }
+    }
+  }
+
+  [[nodiscard]] i32 height_at(i32 local_x, i32 local_z) const noexcept {
+    const i32 grid_x = local_x / TerrainNoiseSampler::UpsampleStep;
+    const i32 grid_z = local_z / TerrainNoiseSampler::UpsampleStep;
+    const f32 t_x = static_cast<f32>(local_x % TerrainNoiseSampler::UpsampleStep) /
+                    static_cast<f32>(TerrainNoiseSampler::UpsampleStep);
+    const f32 t_z = static_cast<f32>(local_z % TerrainNoiseSampler::UpsampleStep) /
+                    static_cast<f32>(TerrainNoiseSampler::UpsampleStep);
+    return sampler_.height_from_terrain(TerrainNoiseSampler::interpolate(
+        lattice_[grid_index(grid_x, grid_z)],
+        lattice_[grid_index(grid_x + 1, grid_z)],
+        lattice_[grid_index(grid_x, grid_z + 1)],
+        lattice_[grid_index(grid_x + 1, grid_z + 1)],
+        t_x,
+        t_z));
+  }
+
+private:
+  static constexpr i32 GridSide = (ChunkSize / TerrainNoiseSampler::UpsampleStep) + 1;
+  static_assert(ChunkSize % TerrainNoiseSampler::UpsampleStep == 0);
+
+  [[nodiscard]] static constexpr usize grid_index(i32 grid_x, i32 grid_z) noexcept {
+    return static_cast<usize>(grid_x) + static_cast<usize>(GridSide) * static_cast<usize>(grid_z);
+  }
+
+  TerrainNoiseSampler sampler_;
+  i32 origin_x_{};
+  i32 origin_z_{};
+  std::array<f32, static_cast<usize>(GridSide* GridSide)> lattice_{};
 };
 
 void read_i32(const YAML::Node& parent, const char* key, i32& value) {
@@ -267,33 +370,18 @@ i32 terrain_height_at(
     i32 world_x,
     i32 world_z) noexcept {
   const TerrainNoiseSampler sampler{config, seed};
-  const f32 terrain = sampler.terrain(world_x, world_z);
-  const f32 height = static_cast<f32>(config.base_height) +
-                     terrain * static_cast<f32>(config.height_scale);
-  const i32 rounded = static_cast<i32>(std::floor(height + 0.5F));
-  return rounded < config.min_y ? config.min_y : (rounded > config.max_y ? config.max_y : rounded);
+  return sampler.height_from_terrain(sampler.interpolated_terrain(world_x, world_z));
 }
 
 GenerationSurfaceProfile terrain_height_profile_at(
     const WorldGenerationConfig& config,
     u64 seed,
     ChunkCoord coord) noexcept {
-  const TerrainNoiseSampler terrain_sampler{config, seed};
+  const ChunkTerrainHeightCache height_cache{config, seed, coord};
   GenerationSurfaceProfile surface_y_by_column{};
-  for (i32 z = 0; z < ChunkSize; ++z) {
-    for (i32 x = 0; x < ChunkSize; ++x) {
-      const i32 world_x = coord.x * ChunkSize + x;
-      const i32 world_z = coord.z * ChunkSize + z;
-      const f32 terrain = terrain_sampler.terrain(world_x, world_z);
-      const f32 height = static_cast<f32>(config.base_height) +
-                         terrain * static_cast<f32>(config.height_scale);
-      const i32 rounded = static_cast<i32>(std::floor(height + 0.5F));
-      const i32 surface_y = rounded < config.min_y
-                                ? config.min_y
-                                : (rounded > config.max_y ? config.max_y : rounded);
-      surface_y_by_column[static_cast<usize>(x) + voxel::ChunkSide * static_cast<usize>(z)] =
-          surface_y;
-    }
+  for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
+    const ChunkLocalColumn column = voxel::local_column(column_index);
+    surface_y_by_column[column_index] = height_cache.height_at(column.x, column.z);
   }
   return surface_y_by_column;
 }
@@ -348,27 +436,47 @@ GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
       terrain_height_profile_at(request.config, request.seed, request.coord);
   chunk.surface_y_by_column = surface_y_by_column;
 
+  i32 max_surface_y = std::numeric_limits<i32>::min();
+  for (const i32 surface_y : surface_y_by_column) {
+    max_surface_y = std::max(max_surface_y, surface_y);
+  }
+
   for (i32 chunk_y = min_chunk_y; chunk_y <= max_chunk_y; ++chunk_y) {
     GeneratedChunkSection section;
     section.coord = chunk_section(request.coord, chunk_y);
     section.blocks.fill(voxel::AirBlockVariantID);
-    for (i32 z = 0; z < ChunkSize; ++z) {
-      for (i32 x = 0; x < ChunkSize; ++x) {
-        const i32 surface_y =
-            surface_y_by_column[static_cast<usize>(x) + voxel::ChunkSide * static_cast<usize>(z)];
-        for (i32 y = 0; y < ChunkSize; ++y) {
-          const SectionLocalPos local{{x, y, z}};
-          const i32 world_y = chunk_y * ChunkSize + y;
-          if (world_y < request.config.min_y ||
-              world_y > request.config.max_y ||
-              world_y > surface_y) {
-            continue;
-          }
 
-          const i32 depth_from_surface = surface_y - world_y;
-          section.blocks[voxel::local_index(local)] =
-              choose_surface_block(request.palette, depth_from_surface);
-        }
+    const i32 section_min_y = chunk_y * ChunkSize;
+    const i32 section_max_y = section_min_y + ChunkSize - 1;
+    if (section_max_y < request.config.min_y ||
+        section_min_y > request.config.max_y ||
+        section_min_y > max_surface_y) {
+      chunk.sections.emplace_back(std::move(section));
+      continue;
+    }
+
+    const i32 fill_min_y = std::max(section_min_y, request.config.min_y);
+    const i32 fill_max_y = std::min({section_max_y, request.config.max_y, max_surface_y});
+    if (fill_max_y < fill_min_y) {
+      chunk.sections.emplace_back(std::move(section));
+      continue;
+    }
+
+    const i32 local_y_begin = fill_min_y - section_min_y;
+    for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
+      const i32 surface_y = surface_y_by_column[column_index];
+      if (fill_min_y > surface_y) {
+        continue;
+      }
+
+      const ChunkLocalColumn column = voxel::local_column(column_index);
+      const i32 local_y_end = std::min(fill_max_y, surface_y) - section_min_y;
+      usize block_index = voxel::local_index({{column.x, local_y_begin, column.z}});
+      for (i32 local_y = local_y_begin; local_y <= local_y_end; ++local_y) {
+        const i32 world_y = section_min_y + local_y;
+        const i32 depth_from_surface = surface_y - world_y;
+        section.blocks[block_index] = choose_surface_block(request.palette, depth_from_surface);
+        block_index += voxel::ChunkSide;
       }
     }
     chunk.sections.emplace_back(std::move(section));

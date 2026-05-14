@@ -10,6 +10,42 @@ TEST(ChunkStorageTests, LocalIndexUsesCanonicalChunkSectionLayout) {
   EXPECT_EQ(arv::voxel::local_index({{15, 15, 15}}), arv::voxel::ChunkVolume - 1U);
 }
 
+TEST(ChunkStorageTests, LocalColumnIndexUsesCanonicalChunkColumnLayout) {
+  EXPECT_EQ(arv::voxel::local_column_index({0, 0}), 0U);
+  EXPECT_EQ(arv::voxel::local_column_index({1, 0}), 1U);
+  EXPECT_EQ(arv::voxel::local_column_index({0, 1}), 16U);
+  EXPECT_EQ(arv::voxel::local_column_index({15, 15}), arv::voxel::ChunkArea - 1U);
+}
+
+TEST(ChunkStorageTests, LocalPosUsesCanonicalChunkSectionLayout) {
+  EXPECT_EQ(arv::voxel::local_pos(0U).value, (arv::Vec3i{0, 0, 0}));
+  EXPECT_EQ(arv::voxel::local_pos(1U).value, (arv::Vec3i{1, 0, 0}));
+  EXPECT_EQ(arv::voxel::local_pos(16U).value, (arv::Vec3i{0, 1, 0}));
+  EXPECT_EQ(arv::voxel::local_pos(256U).value, (arv::Vec3i{0, 0, 1}));
+  EXPECT_EQ(
+      arv::voxel::local_pos(arv::voxel::ChunkVolume - 1U).value,
+      (arv::Vec3i{15, 15, 15}));
+}
+
+TEST(ChunkStorageTests, LocalIndexAndLocalPosRoundTrip) {
+  for (arv::usize index = 0; index < arv::voxel::ChunkVolume; ++index) {
+    const arv::SectionLocalPos local = arv::voxel::local_pos(index);
+    ASSERT_TRUE(arv::voxel::is_valid_local(local));
+    EXPECT_EQ(arv::voxel::local_index(local), index);
+  }
+}
+
+TEST(ChunkStorageTests, LocalColumnIndexAndLocalColumnRoundTrip) {
+  for (arv::usize index = 0; index < arv::voxel::ChunkArea; ++index) {
+    const arv::ChunkLocalColumn local = arv::voxel::local_column(index);
+    EXPECT_GE(local.x, 0);
+    EXPECT_LT(local.x, arv::ChunkSize);
+    EXPECT_GE(local.z, 0);
+    EXPECT_LT(local.z, arv::ChunkSize);
+    EXPECT_EQ(arv::voxel::local_column_index(local), index);
+  }
+}
+
 TEST(ChunkStorageTests, ChunksDefaultToAirStorage) {
   const arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
 

@@ -89,6 +89,24 @@ constexpr ChunkDirtyFlags& operator&=(ChunkDirtyFlags& lhs, ChunkDirtyFlags rhs)
          ChunkSide * (static_cast<usize>(local.value.y) + ChunkSide * static_cast<usize>(local.value.z));
 }
 
+[[nodiscard]] constexpr usize local_column_index(ChunkLocalColumn local) noexcept {
+  return static_cast<usize>(local.x) + ChunkSide * static_cast<usize>(local.z);
+}
+
+[[nodiscard]] constexpr SectionLocalPos local_pos(usize index) noexcept {
+  return {{
+      static_cast<i32>(index % ChunkSide),
+      static_cast<i32>((index / ChunkSide) % ChunkSide),
+      static_cast<i32>(index / ChunkArea),
+  }};
+}
+
+[[nodiscard]] constexpr ChunkLocalColumn local_column(usize index) noexcept {
+  return {
+      static_cast<i32>(index % ChunkSide),
+      static_cast<i32>(index / ChunkSide)};
+}
+
 [[nodiscard]] constexpr bool is_valid_halo_local(SectionLocalPos local) noexcept {
   return local.value.x >= -1 && local.value.x <= ChunkSize &&
          local.value.y >= -1 && local.value.y <= ChunkSize &&

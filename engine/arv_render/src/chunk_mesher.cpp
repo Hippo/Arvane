@@ -752,82 +752,77 @@ ChunkMeshData build_chunk_mesh(
   const auto& center_blocks = snapshot.blocks();
   const auto& center_fluids = snapshot.fluids();
 
-  for (i32 z = 0; z < ChunkSize; ++z) {
-    for (i32 y = 0; y < ChunkSize; ++y) {
-      for (i32 x = 0; x < ChunkSize; ++x) {
-        const SectionLocalPos local{{x, y, z}};
-        const usize cell_index = voxel::local_index(local);
-        const voxel::FluidCell fluid = center_fluids[cell_index];
-        if (!fluid.empty() && fluid_render_data != nullptr) {
-          if (const std::optional<voxel::BlockVariantID> fluid_variant =
-                  fluid_render_data->variant_for(fluid.type);
-              fluid_variant.has_value()) {
-            emit_fluid_cell(
-                mesh.transparent,
+  for (usize cell_index = 0; cell_index < voxel::ChunkVolume; ++cell_index) {
+    const SectionLocalPos local = voxel::local_pos(cell_index);
+    const voxel::FluidCell fluid = center_fluids[cell_index];
+    if (!fluid.empty() && fluid_render_data != nullptr) {
+      if (const std::optional<voxel::BlockVariantID> fluid_variant =
+              fluid_render_data->variant_for(fluid.type);
+          fluid_variant.has_value()) {
+        emit_fluid_cell(
+            mesh.transparent,
+            snapshot_storage,
+            registry,
+            render_data,
+            fluid_variant.value(),
+            local,
+            fluid);
+      }
+    }
+
+    const voxel::BlockVariantID self_id = center_blocks[cell_index];
+    const voxel::BlockVariantRecord* self = registry.variant(self_id);
+    if (self == nullptr || self->render_category == voxel::RenderCategory::None) {
+      continue;
+    }
+
+    CpuMeshBuffer& output = self->render_category == voxel::RenderCategory::Transparent
+                                ? mesh.transparent
+                                : mesh.opaque;
+    if (self->render_category == voxel::RenderCategory::Transparent) {
+      ensure_transparent_capacity(output);
+    }
+    const VertexMaterialHints material_hints = material_hints_for_block(*self);
+
+    if (!self->model.asset.empty()) {
+      if (render_data != nullptr) {
+        emit_model_boxes(
+            output,
+            snapshot_storage,
+            registry,
+            *render_data,
+            self_id,
+            *self,
+            local,
+            material_hints);
+      }
+      continue;
+    }
+
+    if (!self->properties.full_cube) {
+      continue;
+    }
+
+    for (const ChunkFaceGeometry& face : ChunkCubeFaces) {
+      const SectionLocalPos neighbor_local = offset_local(local, face.neighbor_offset);
+      const voxel::BlockVariantID neighbor_id =
+          voxel::snapshot_block(snapshot_storage, neighbor_local);
+      if (registry.should_emit_face(self_id, neighbor_id, face.face)) {
+        const voxel::LightWord face_light =
+            voxel::snapshot_light(snapshot_storage, neighbor_local);
+        emit_cube_face(
+            output,
+            local,
+            face,
+            face_texture_for(self_id, face.face, render_data),
+            smooth_face_lights(
                 snapshot_storage,
-                registry,
-                render_data,
-                fluid_variant.value(),
-                local,
-                fluid);
-          }
-        }
-
-        const voxel::BlockVariantID self_id = center_blocks[cell_index];
-        const voxel::BlockVariantRecord* self = registry.variant(self_id);
-        if (self == nullptr || self->render_category == voxel::RenderCategory::None) {
-          continue;
-        }
-
-        CpuMeshBuffer& output = self->render_category == voxel::RenderCategory::Transparent
-                                    ? mesh.transparent
-                                    : mesh.opaque;
-        if (self->render_category == voxel::RenderCategory::Transparent) {
-          ensure_transparent_capacity(output);
-        }
-        const VertexMaterialHints material_hints = material_hints_for_block(*self);
-
-        if (!self->model.asset.empty()) {
-          if (render_data != nullptr) {
-            emit_model_boxes(
-                output,
-                snapshot_storage,
-                registry,
-                *render_data,
-                self_id,
-                *self,
-                local,
-                material_hints);
-          }
-          continue;
-        }
-
-        if (!self->properties.full_cube) {
-          continue;
-        }
-
-        for (const ChunkFaceGeometry& face : ChunkCubeFaces) {
-          const SectionLocalPos neighbor_local = offset_local(local, face.neighbor_offset);
-          const voxel::BlockVariantID neighbor_id =
-              voxel::snapshot_block(snapshot_storage, neighbor_local);
-          if (registry.should_emit_face(self_id, neighbor_id, face.face)) {
-            const voxel::LightWord face_light =
-                voxel::snapshot_light(snapshot_storage, neighbor_local);
-            emit_cube_face(
-                output,
                 local,
                 face,
-                face_texture_for(self_id, face.face, render_data),
-                smooth_face_lights(
-                    snapshot_storage,
-                    local,
-                    face,
-                    face.corners,
-                    face_light),
-                face_ao(snapshot_storage, registry, local, face),
-                material_hints);
-          }
-        }
+                face.corners,
+                face_light),
+            face_ao(snapshot_storage, registry, local, face),
+            material_hints);
       }
     }
   }

@@ -49,6 +49,13 @@ struct SectionLocalPos {
   constexpr bool operator==(const SectionLocalPos&) const = default;
 };
 
+struct ChunkLocalColumn {
+  i32 x{};
+  i32 z{};
+
+  constexpr bool operator==(const ChunkLocalColumn&) const = default;
+};
+
 enum class AxisDirection {
   NegativeX,
   PositiveX,

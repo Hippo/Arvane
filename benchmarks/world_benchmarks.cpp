@@ -1,8 +1,61 @@
 #include "benchmark_support.hpp"
 
+#include "arv/world/world_generation.hpp"
+
 #include <benchmark/benchmark.h>
 
+#include <stdexcept>
+#include <utility>
+
 namespace {
+
+arv::world::ChunkGenerationRequest make_worldgen_request(
+    const arv::voxel::BlockRegistry& registry,
+    arv::ChunkSectionCoord coord = {{0, 0, 0}}) {
+  auto parsed = arv::world::parse_world_generation_yaml(R"yaml(
+id: arvane:benchmark_overworld
+version: 1
+seed_salt: "benchmark"
+vertical:
+  min_y: -64
+  max_y: 128
+  sea_level: 32
+noise:
+  terrain:
+    frequency: 0.035
+    octaves: 3
+density:
+  base_height: 20
+  height_scale: 24
+surface:
+  rules:
+    - layers:
+        - block: arvane:grass
+          depth: 1
+        - block: arvane:dirt
+          depth: 3
+        - block: arvane:stone
+          depth: remaining
+)yaml");
+  if (!parsed) {
+    throw std::runtime_error(parsed.error().message);
+  }
+
+  arv::world::ChunkGenerationRequest request;
+  request.world_id = arv::WorldID{1};
+  request.seed = 0xBADC0FFEEULL;
+  request.coord = arv::chunk_to_column(coord);
+  request.config = std::move(parsed.value());
+  request.min_chunk_y = arv::floor_div(request.config.min_y, arv::ChunkSize);
+  request.max_chunk_y = arv::floor_div(request.config.max_y, arv::ChunkSize);
+
+  auto palette = arv::world::resolve_world_generation_palette(request.config, registry);
+  if (!palette) {
+    throw std::runtime_error(palette.error().message);
+  }
+  request.palette = std::move(palette.value());
+  return request;
+}
 
 void BM_ChunkAllocationReset(benchmark::State& state) {
   const arv::voxel::BlockRegistry registry = arv::bench_support::make_registry();
@@ -83,6 +136,23 @@ void BM_NeighborBoundaryExtraction(benchmark::State& state) {
   }
 }
 
+void BM_GenerateChunkColumn(benchmark::State& state) {
+  const arv::voxel::BlockRegistry registry = arv::bench_support::make_registry();
+  arv::world::ChunkGenerationRequest request = make_worldgen_request(registry);
+  arv::i32 chunk_x = 0;
+  for (auto _ : state) {
+    request.coord = {chunk_x, chunk_x / 3};
+    auto generated = arv::world::generate_chunk(request);
+    if (!generated) {
+      state.SkipWithError(generated.error().message.c_str());
+      break;
+    }
+    benchmark::DoNotOptimize(generated.value().surface_y_by_column.data());
+    benchmark::DoNotOptimize(generated.value().sections.size());
+    ++chunk_x;
+  }
+}
+
 } // namespace
 
 BENCHMARK(BM_ChunkAllocationReset);
@@ -90,3 +160,4 @@ BENCHMARK(BM_BlockGetSet);
 BENCHMARK(BM_SectionSnapshotCreation);
 BENCHMARK(BM_CopyOnWriteSnapshotPath);
 BENCHMARK(BM_NeighborBoundaryExtraction);
+BENCHMARK(BM_GenerateChunkColumn);

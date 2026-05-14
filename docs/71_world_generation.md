@@ -140,10 +140,19 @@ Noise functions must:
 * be seeded with world seed
 * be thread-safe
 * support 2D and 3D sampling
+* cache repeated per-chunk samples where possible
+* support coarse-grid sampling with interpolation for high-volume paths
 
 Recommended:
 
 * OpenSimplex or similar
+
+The current chunk-column generator samples terrain height on a 4-block X/Z
+lattice, caches the lattice for each generated column, and bilinearly
+interpolates the in-between block columns. Section filling then uses the
+resulting height extremes to leave above-terrain sections as air without
+entering the per-block fill path. Future 3D density and cave passes should use
+the same height extremity checks before issuing expensive 3D noise samples.
 
 ---
 

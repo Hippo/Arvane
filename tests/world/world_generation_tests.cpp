@@ -193,6 +193,21 @@ TEST(WorldGenerationTests, ColumnGenerationIncludesNegativeConfiguredSections) {
   EXPECT_EQ(generated.value().sections.back().coord, (arv::ChunkSectionCoord{{-1, 1, 1}}));
 }
 
+TEST(WorldGenerationTests, SectionsAboveConfiguredTerrainRemainAir) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  arv::world::ChunkGenerationRequest request = make_request(registry, 99, {{0, 0, 0}});
+  request.min_chunk_y = arv::floor_div(request.config.max_y, arv::ChunkSize) + 1;
+  request.max_chunk_y = request.min_chunk_y;
+
+  auto generated = arv::world::generate_chunk(request);
+
+  ASSERT_TRUE(generated);
+  ASSERT_EQ(generated.value().sections.size(), 1U);
+  for (const arv::voxel::BlockVariantID variant : generated.value().sections.front().blocks) {
+    EXPECT_EQ(variant, arv::voxel::AirBlockVariantID);
+  }
+}
+
 TEST(WorldGenerationTests, WorldPublishesGeneratedChunksOnlyForItsWorldId) {
   const arv::voxel::BlockRegistry registry = make_worldgen_registry();
   auto generated = arv::world::generate_chunk(make_request(registry, 99));
