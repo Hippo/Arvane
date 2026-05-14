@@ -1,0 +1,66 @@
+#pragma once
+
+#include "arv/core/domain_ids.hpp"
+#include "arv/core/time.hpp"
+#include "arv/core/types.hpp"
+#include "arv/plugin/plugin_network.hpp"
+
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <string>
+
+namespace arv::entity {
+class EntityRegistry;
+}
+
+namespace arv::player {
+class GameModeRegistry;
+class ItemRegistry;
+class PermissionGroupRegistry;
+}
+
+namespace arv::sched {
+class JobSystem;
+}
+
+namespace arv::voxel {
+class BlockRegistry;
+}
+
+namespace arv::world {
+class WorldRuntime;
+}
+
+namespace arv::plugin {
+
+using PluginPlayerStableIDFn =
+    std::function<std::optional<std::string>(PlayerID)>;
+
+enum class PluginExtensionRegistryKind : u8 {
+  EntityBehavior,
+  ComponentCodec,
+  LootFunction,
+  RecipeType,
+  WorldgenFeature,
+  WorldgenNoise,
+  WorldgenDensityFunction,
+};
+
+struct PluginRuntimeContext {
+  world::WorldRuntime* default_world{};
+  const voxel::BlockRegistry* block_registry{};
+  const player::ItemRegistry* item_registry{};
+  const entity::EntityRegistry* entity_registry{};
+  player::GameModeRegistry* game_modes{};
+  player::PermissionGroupRegistry* permission_groups{};
+  sched::JobSystem* job_system{};
+  TickIndex tick_index{};
+  u64 world_seed{};
+  std::filesystem::path server_save_root{};
+  std::string world_name{};
+  PluginPlayerStableIDFn player_stable_id{};
+  PluginNetworkSendFn network_send{};
+};
+
+} // namespace arv::plugin

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "arv/asset/pack.hpp"
-#include "arv/plugin/plugin_manager.hpp"
+#include "arv/plugin/plugin_info.hpp"
 
 #include <filesystem>
 #include <string>

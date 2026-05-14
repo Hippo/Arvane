@@ -1,6 +1,4 @@
-#include "arv/plugin/plugin_manager.hpp"
-
-#include <algorithm>
+#include "arv/plugin/plugin_info.hpp"
 
 namespace arv::plugin {
 
@@ -22,11 +20,6 @@ std::string PluginError::describe() const {
     text += "]";
   }
   return text;
-}
-
-bool NativePluginPolicy::allows(std::string_view pack_id) const noexcept {
-  return std::find(allowed_packs.begin(), allowed_packs.end(), pack_id) !=
-         allowed_packs.end();
 }
 
 const char* plugin_state_name(PluginState state) noexcept {

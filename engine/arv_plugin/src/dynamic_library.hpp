@@ -1,9 +1,11 @@
 #pragma once
 
-#include "arv/plugin/plugin_manager.hpp"
+#include "arv/plugin/plugin_info.hpp"
 
 #include <filesystem>
 #include <string>
+#include <string>
+#include <string_view>
 
 namespace arv::plugin::detail {
 

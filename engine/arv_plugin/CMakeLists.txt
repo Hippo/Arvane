@@ -1,14 +1,38 @@
 set(ARV_PLUGIN_HEADERS
+  include/arv/plugin/plugin_info.hpp
+  include/arv/plugin/plugin_loading.hpp
   include/arv/plugin/plugin_manager.hpp
+  include/arv/plugin/plugin_network.hpp
+  include/arv/plugin/plugin_runtime.hpp
 )
 
 add_library(arv_plugin STATIC
   src/dynamic_library.cpp
+  src/plugin_abi_commands.cpp
+  src/plugin_abi_context.cpp
+  src/plugin_abi_data.cpp
+  src/plugin_abi_events.cpp
+  src/plugin_abi_gamemodes.cpp
+  src/plugin_abi_network.cpp
+  src/plugin_abi_permissions.cpp
+  src/plugin_abi_regions.cpp
+  src/plugin_abi_registries.cpp
+  src/plugin_abi_resources.cpp
+  src/plugin_abi_scheduler.cpp
+  src/plugin_abi_services.cpp
+  src/plugin_abi_text.cpp
+  src/plugin_abi_world_entities.cpp
   src/plugin_alias_data.cpp
+  src/plugin_api_storage.cpp
+  src/plugin_info.cpp
+  src/plugin_loading_types.cpp
   src/plugin_manager.cpp
+  src/plugin_manager_common.cpp
+  src/plugin_manager_loading.cpp
+  src/plugin_manager_queries.cpp
+  src/plugin_manager_runtime.cpp
   src/plugin_native_loading.cpp
   src/plugin_paths.cpp
-  src/plugin_public_types.cpp
 )
 
 target_include_directories(arv_plugin PUBLIC include)
