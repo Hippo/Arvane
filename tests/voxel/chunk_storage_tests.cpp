@@ -46,6 +46,19 @@ TEST(ChunkStorageTests, LocalColumnIndexAndLocalColumnRoundTrip) {
   }
 }
 
+TEST(ChunkStorageTests, SnapshotStorageIndexAndOffsetRoundTrip) {
+  for (arv::usize index = 0; index < arv::voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+    const arv::Vec3i offset = arv::voxel::snapshot_storage_offset(index);
+    EXPECT_GE(offset.x, -1);
+    EXPECT_LE(offset.x, 1);
+    EXPECT_GE(offset.y, -1);
+    EXPECT_LE(offset.y, 1);
+    EXPECT_GE(offset.z, -1);
+    EXPECT_LE(offset.z, 1);
+    EXPECT_EQ(arv::voxel::snapshot_storage_index(offset.x, offset.y, offset.z), index);
+  }
+}
+
 TEST(ChunkStorageTests, ChunksDefaultToAirStorage) {
   const arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
 

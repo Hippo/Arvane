@@ -12,6 +12,7 @@
 #include "arv/base/base_commands.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
+#include "arv/base/ui.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/io/config.hpp"
@@ -19,7 +20,6 @@
 #include "arv/platform/glfw_window.hpp"
 #include "arv/plugin/plugin_manager.hpp"
 #include "arv/sched/job_system.hpp"
-#include "arv/base/ui.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 
 #include <algorithm>

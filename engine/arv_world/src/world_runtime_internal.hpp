@@ -35,7 +35,6 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
 [[nodiscard]] i32 max_abs3(i32 x, i32 y, i32 z) noexcept;
 [[nodiscard]] BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept;
 [[nodiscard]] ChunkSectionCoord chunk_for_position(Vec3f position) noexcept;
-[[nodiscard]] SectionLocalPos local_from_index(usize index) noexcept;
 [[nodiscard]] usize lifecycle_index(voxel::ChunkLifecycleState state) noexcept;
 
 class WorldDirtyTracker;

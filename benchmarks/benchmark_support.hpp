@@ -28,11 +28,7 @@ namespace arv::bench_support {
 }
 
 [[nodiscard]] inline SectionLocalPos local_from_index(usize index) noexcept {
-  const i32 x = static_cast<i32>(index % voxel::ChunkSide);
-  index /= voxel::ChunkSide;
-  const i32 y = static_cast<i32>(index % voxel::ChunkSide);
-  const i32 z = static_cast<i32>(index / voxel::ChunkSide);
-  return {{x, y, z}};
+  return voxel::local_pos(index);
 }
 
 [[nodiscard]] inline voxel::BlockRegistry make_registry() {
@@ -115,13 +111,12 @@ namespace arv::bench_support {
     voxel::BlockVariantID dirt) {
   std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks;
   blocks.fill(voxel::AirBlockVariantID);
-  for (i32 z = 0; z < ChunkSize; ++z) {
-    for (i32 x = 0; x < ChunkSize; ++x) {
-      const i32 height = 4 + static_cast<i32>(mixed_index(static_cast<u32>(x + z * ChunkSize)) % 9U);
-      for (i32 y = 0; y <= height && y < ChunkSize; ++y) {
-        const SectionLocalPos local{{x, y, z}};
-        blocks[voxel::local_index(local)] = y == height ? dirt : stone;
-      }
+  for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
+    const ChunkLocalColumn column = voxel::local_column(column_index);
+    const i32 height = 4 + static_cast<i32>(mixed_index(static_cast<u32>(column_index)) % 9U);
+    for (i32 y = 0; y <= height && y < ChunkSize; ++y) {
+      const SectionLocalPos local{{column.x, y, column.z}};
+      blocks[voxel::local_index(local)] = y == height ? dirt : stone;
     }
   }
   return blocks;
@@ -140,14 +135,12 @@ inline void fill_noisy_terrain(
   (void)registry;
   world::WorldRuntime world{WorldID{1}};
   world.configure_height({-1, 1});
-  for (i32 z = -1; z <= 1; ++z) {
-    for (i32 y = -1; y <= 1; ++y) {
-      for (i32 x = -1; x <= 1; ++x) {
-        voxel::ChunkSection& chunk = world.ensure_chunk({{x, y, z}});
-        if (x == 0 && y == 0 && z == 0 && center_fill != voxel::AirBlockVariantID) {
-          chunk.replace_generated_blocks(filled_blocks(center_fill));
-        }
-      }
+  for (usize index = 0; index < voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+    const Vec3i offset = voxel::snapshot_storage_offset(index);
+    voxel::ChunkSection& chunk = world.ensure_chunk({{offset.x, offset.y, offset.z}});
+    if (index == voxel::ChunkSnapshotCenterStorageIndex &&
+        center_fill != voxel::AirBlockVariantID) {
+      chunk.replace_generated_blocks(filled_blocks(center_fill));
     }
   }
   return world;

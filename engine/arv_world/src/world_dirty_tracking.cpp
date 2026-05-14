@@ -5,6 +5,23 @@
 #include <algorithm>
 
 namespace arv::world::detail {
+namespace {
+
+[[nodiscard]] ChunkSectionCoord offset_chunk(ChunkSectionCoord coord, Vec3i offset) noexcept {
+  return {{
+      coord.value.x + offset.x,
+      coord.value.y + offset.y,
+      coord.value.z + offset.z,
+  }};
+}
+
+[[nodiscard]] int nonzero_axis_count(Vec3i offset) noexcept {
+  return static_cast<int>(offset.x != 0) +
+         static_cast<int>(offset.y != 0) +
+         static_cast<int>(offset.z != 0);
+}
+
+} // namespace
 
 u64 WorldDirtyTracker::lighting_revision() const noexcept {
   return lighting_revision_;
@@ -134,26 +151,22 @@ void WorldDirtyTracker::mark_boundary_neighbors_dirty(
   const i32 min_z = local.value.z == 0 ? -1 : 0;
   const i32 max_z = local.value.z == ChunkSize - 1 ? 1 : 0;
 
-  for (i32 z = min_z; z <= max_z; ++z) {
-    for (i32 y = min_y; y <= max_y; ++y) {
-      for (i32 x = min_x; x <= max_x; ++x) {
-        if (x == 0 && y == 0 && z == 0) {
-          continue;
-        }
+  for (usize index = 0; index < voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+    const Vec3i offset = voxel::snapshot_storage_offset(index);
+    if (offset.x == 0 && offset.y == 0 && offset.z == 0) {
+      continue;
+    }
+    if (offset.x < min_x || offset.x > max_x ||
+        offset.y < min_y || offset.y > max_y ||
+        offset.z < min_z || offset.z > max_z) {
+      continue;
+    }
 
-        const ChunkSectionCoord neighbor{{
-            coord.value.x + x,
-            coord.value.y + y,
-            coord.value.z + z,
-        }};
-        const int axis_count =
-            static_cast<int>(x != 0) + static_cast<int>(y != 0) + static_cast<int>(z != 0);
-        if (axis_count == 1) {
-          mark_neighbor_mesh_dependency_dirty(world, neighbor);
-        } else {
-          mark_neighbor_mesh_only_dependency_dirty(world, neighbor);
-        }
-      }
+    const ChunkSectionCoord neighbor = offset_chunk(coord, offset);
+    if (nonzero_axis_count(offset) == 1) {
+      mark_neighbor_mesh_dependency_dirty(world, neighbor);
+    } else {
+      mark_neighbor_mesh_only_dependency_dirty(world, neighbor);
     }
   }
 }
@@ -161,26 +174,17 @@ void WorldDirtyTracker::mark_boundary_neighbors_dirty(
 void WorldDirtyTracker::mark_loaded_chunk_neighbors_dirty(
     WorldRuntime& world,
     ChunkSectionCoord coord) noexcept {
-  for (i32 z = -1; z <= 1; ++z) {
-    for (i32 y = -1; y <= 1; ++y) {
-      for (i32 x = -1; x <= 1; ++x) {
-        if (x == 0 && y == 0 && z == 0) {
-          continue;
-        }
+  for (usize index = 0; index < voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+    const Vec3i offset = voxel::snapshot_storage_offset(index);
+    if (offset.x == 0 && offset.y == 0 && offset.z == 0) {
+      continue;
+    }
 
-        const ChunkSectionCoord neighbor{{
-            coord.value.x + x,
-            coord.value.y + y,
-            coord.value.z + z,
-        }};
-        const int axis_count =
-            static_cast<int>(x != 0) + static_cast<int>(y != 0) + static_cast<int>(z != 0);
-        if (axis_count == 1) {
-          mark_neighbor_mesh_dependency_dirty(world, neighbor);
-        } else {
-          mark_neighbor_mesh_only_dependency_dirty(world, neighbor);
-        }
-      }
+    const ChunkSectionCoord neighbor = offset_chunk(coord, offset);
+    if (nonzero_axis_count(offset) == 1) {
+      mark_neighbor_mesh_dependency_dirty(world, neighbor);
+    } else {
+      mark_neighbor_mesh_only_dependency_dirty(world, neighbor);
     }
   }
 }
@@ -188,22 +192,13 @@ void WorldDirtyTracker::mark_loaded_chunk_neighbors_dirty(
 void WorldDirtyTracker::mark_loaded_chunk_lighting_dependencies_dirty(
     WorldRuntime& world,
     ChunkSectionCoord coord) noexcept {
-  for (i32 z = -1; z <= 1; ++z) {
-    for (i32 y = -1; y <= 1; ++y) {
-      for (i32 x = -1; x <= 1; ++x) {
-        if (x == 0 && y == 0 && z == 0) {
-          continue;
-        }
-
-        mark_neighbor_lighting_dependency_dirty(
-            world,
-            {{
-                coord.value.x + x,
-                coord.value.y + y,
-                coord.value.z + z,
-            }});
-      }
+  for (usize index = 0; index < voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+    const Vec3i offset = voxel::snapshot_storage_offset(index);
+    if (offset.x == 0 && offset.y == 0 && offset.z == 0) {
+      continue;
     }
+
+    mark_neighbor_lighting_dependency_dirty(world, offset_chunk(coord, offset));
   }
 }
 

@@ -161,15 +161,11 @@ void WorldFluidRuntime::enqueue_chunk_activation_updates(
     deferred_boundary_fluid_updates_.erase(deferred);
   }
 
-  for (i32 z = 0; z < ChunkSize; ++z) {
-    for (i32 y = 0; y < ChunkSize; ++y) {
-      for (i32 x = 0; x < ChunkSize; ++x) {
-        const SectionLocalPos local{{x, y, z}};
-        if (!chunk->fluid(local).empty()) {
-          enqueue_update_unique(
-              {chunk_local_to_block(coord, local), FluidUpdateReason::ChunkActivated, world.tick_index()});
-        }
-      }
+  for (usize index = 0; index < voxel::ChunkVolume; ++index) {
+    const SectionLocalPos local = voxel::local_pos(index);
+    if (!chunk->fluid(local).empty()) {
+      enqueue_update_unique(
+          {chunk_local_to_block(coord, local), FluidUpdateReason::ChunkActivated, world.tick_index()});
     }
   }
 }

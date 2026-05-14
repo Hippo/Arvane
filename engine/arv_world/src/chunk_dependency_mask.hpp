@@ -21,12 +21,9 @@ inline void add_dependency_offset(
 }
 
 inline void add_all_neighbor_dependency_offsets(ChunkDependencyMask& mask) noexcept {
-  for (i32 z = -1; z <= 1; ++z) {
-    for (i32 y = -1; y <= 1; ++y) {
-      for (i32 x = -1; x <= 1; ++x) {
-        add_dependency_offset(mask, x, y, z);
-      }
-    }
+  for (usize index = 0; index < voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+    const Vec3i offset = voxel::snapshot_storage_offset(index);
+    add_dependency_offset(mask, offset.x, offset.y, offset.z);
   }
 }
 
@@ -40,12 +37,14 @@ inline void add_boundary_dependency_offsets(
   const i32 min_z = local.value.z == 0 ? -1 : 0;
   const i32 max_z = local.value.z == ChunkSize - 1 ? 1 : 0;
 
-  for (i32 z = min_z; z <= max_z; ++z) {
-    for (i32 y = min_y; y <= max_y; ++y) {
-      for (i32 x = min_x; x <= max_x; ++x) {
-        add_dependency_offset(mask, x, y, z);
-      }
+  for (usize index = 0; index < voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+    const Vec3i offset = voxel::snapshot_storage_offset(index);
+    if (offset.x < min_x || offset.x > max_x ||
+        offset.y < min_y || offset.y > max_y ||
+        offset.z < min_z || offset.z > max_z) {
+      continue;
     }
+    add_dependency_offset(mask, offset.x, offset.y, offset.z);
   }
 }
 

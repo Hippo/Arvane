@@ -152,6 +152,13 @@ constexpr ChunkDirtyFlags& operator&=(ChunkDirtyFlags& lhs, ChunkDirtyFlags rhs)
                                           ChunkSnapshotNeighborhoodSide * static_cast<usize>(offset_z + 1));
 }
 
+[[nodiscard]] constexpr Vec3i snapshot_storage_offset(usize index) noexcept {
+  return {
+      static_cast<i32>(index % ChunkSnapshotNeighborhoodSide) - 1,
+      static_cast<i32>((index / ChunkSnapshotNeighborhoodSide) % ChunkSnapshotNeighborhoodSide) - 1,
+      static_cast<i32>(index / (ChunkSnapshotNeighborhoodSide * ChunkSnapshotNeighborhoodSide)) - 1};
+}
+
 inline constexpr usize ChunkSnapshotCenterStorageIndex = snapshot_storage_index(0, 0, 0);
 
 struct ChunkStorage {

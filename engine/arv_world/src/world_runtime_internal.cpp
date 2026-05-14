@@ -25,14 +25,6 @@ ChunkSectionCoord chunk_for_position(Vec3f position) noexcept {
   }});
 }
 
-SectionLocalPos local_from_index(usize index) noexcept {
-  const i32 x = static_cast<i32>(index % voxel::ChunkSide);
-  index /= voxel::ChunkSide;
-  const i32 y = static_cast<i32>(index % voxel::ChunkSide);
-  const i32 z = static_cast<i32>(index / voxel::ChunkSide);
-  return {{x, y, z}};
-}
-
 usize lifecycle_index(voxel::ChunkLifecycleState state) noexcept {
   switch (state) {
     case voxel::ChunkLifecycleState::Unloaded:

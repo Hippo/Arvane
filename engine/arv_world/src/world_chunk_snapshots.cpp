@@ -15,6 +15,14 @@ namespace {
 
 using DependencyMask = detail::ChunkDependencyMask;
 
+[[nodiscard]] ChunkSectionCoord offset_chunk(ChunkSectionCoord coord, Vec3i offset) noexcept {
+  return {{
+      coord.value.x + offset.x,
+      coord.value.y + offset.y,
+      coord.value.z + offset.z,
+  }};
+}
+
 [[nodiscard]] voxel::ChunkStorageView make_generated_missing_snapshot_storage(
     const GenerationSurfaceProfile& surface,
     ChunkSectionCoord coord,
@@ -28,25 +36,23 @@ using DependencyMask = detail::ChunkDependencyMask;
     storage->fluids.fill(voxel::empty_fluid_cell());
   }
 
-  for (i32 z = 0; z < ChunkSize; ++z) {
-    for (i32 x = 0; x < ChunkSize; ++x) {
-      const i32 surface_y =
-          surface[static_cast<usize>(x) + voxel::ChunkSide * static_cast<usize>(z)];
-      bool sky_open = true;
-      for (i32 y = ChunkSize - 1; y >= 0; --y) {
-        const i32 world_y = coord.value.y * ChunkSize + y;
-        const usize index = voxel::local_index({{x, y, z}});
-        if (world_y <= surface_y) {
-          continue;
-        }
-        if (storage->blocks[index] != voxel::AirBlockVariantID) {
-          sky_open = false;
-          continue;
-        }
-        if (sky_open && voxel::light_sky(storage->lights[index]) < voxel::MaxLightLevel) {
-          storage->lights[index] =
-              voxel::with_sky_light(storage->lights[index], voxel::MaxLightLevel);
-        }
+  for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
+    const ChunkLocalColumn column = voxel::local_column(column_index);
+    const i32 surface_y = surface[column_index];
+    bool sky_open = true;
+    for (i32 y = ChunkSize - 1; y >= 0; --y) {
+      const i32 world_y = coord.value.y * ChunkSize + y;
+      const usize index = voxel::local_index({{column.x, y, column.z}});
+      if (world_y <= surface_y) {
+        continue;
+      }
+      if (storage->blocks[index] != voxel::AirBlockVariantID) {
+        sky_open = false;
+        continue;
+      }
+      if (sky_open && voxel::light_sky(storage->lights[index]) < voxel::MaxLightLevel) {
+        storage->lights[index] =
+            voxel::with_sky_light(storage->lights[index], voxel::MaxLightLevel);
       }
     }
   }
@@ -120,7 +126,7 @@ void WorldRuntime::apply_chunk_snapshot(
             (fluids.has_value() && existing_chunk->fluids()[index] != fluids.value()[index])) {
           detail::add_boundary_dependency_offsets(
               block_dependency_offsets,
-              detail::local_from_index(index));
+              voxel::local_pos(index));
         }
       }
     }
@@ -129,7 +135,7 @@ void WorldRuntime::apply_chunk_snapshot(
         if (existing_chunk->lights()[index] != resolved_lights[index]) {
           detail::add_boundary_dependency_offsets(
               light_dependency_offsets,
-              detail::local_from_index(index));
+              voxel::local_pos(index));
         }
       }
     }
@@ -158,39 +164,23 @@ void WorldRuntime::apply_chunk_snapshot(
     impl_->dirty.enqueue_dirty_mesh_chunk(coord);
   }
   if (blocks_changed || fluids_changed || needs_first_mesh_dirty) {
-    for (i32 z = -1; z <= 1; ++z) {
-      for (i32 y = -1; y <= 1; ++y) {
-        for (i32 x = -1; x <= 1; ++x) {
-          if (!block_dependency_offsets[voxel::snapshot_storage_index(x, y, z)]) {
-            continue;
-          }
-          impl_->dirty.mark_neighbor_mesh_only_dependency_dirty(
-              *this,
-              {{
-                  coord.value.x + x,
-                  coord.value.y + y,
-                  coord.value.z + z,
-              }});
-        }
+    for (usize index = 0; index < voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+      if (!block_dependency_offsets[index]) {
+        continue;
       }
+      impl_->dirty.mark_neighbor_mesh_only_dependency_dirty(
+          *this,
+          offset_chunk(coord, voxel::snapshot_storage_offset(index)));
     }
   }
   if (lights_changed) {
-    for (i32 z = -1; z <= 1; ++z) {
-      for (i32 y = -1; y <= 1; ++y) {
-        for (i32 x = -1; x <= 1; ++x) {
-          if (!light_dependency_offsets[voxel::snapshot_storage_index(x, y, z)]) {
-            continue;
-          }
-          impl_->dirty.mark_neighbor_light_dependency_dirty(
-              *this,
-              {{
-                  coord.value.x + x,
-                  coord.value.y + y,
-                  coord.value.z + z,
-              }});
-        }
+    for (usize index = 0; index < voxel::ChunkSnapshotNeighborhoodVolume; ++index) {
+      if (!light_dependency_offsets[index]) {
+        continue;
       }
+      impl_->dirty.mark_neighbor_light_dependency_dirty(
+          *this,
+          offset_chunk(coord, voxel::snapshot_storage_offset(index)));
     }
   }
 }
@@ -230,7 +220,7 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
     std::vector<std::pair<ChunkCoord, GenerationSurfaceProfile>> generated_surface_cache;
     auto generated_surface_profile_for =
         [this, &generated_surface_cache](ChunkCoord column_coord)
-            -> const GenerationSurfaceProfile& {
+        -> const GenerationSurfaceProfile& {
       if (const Chunk* column = impl_->chunks.find_column(column_coord);
           column != nullptr) {
         if (const GenerationSurfaceProfile* cached = column->generation_surface_profile();
@@ -258,44 +248,36 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
     };
     auto storage_view_for_chunk =
         [&generated_surface_profile_for, this](const voxel::ChunkSection& source) {
-      if (!impl_->generation_config.has_value() ||
-          !source.is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
-        return source.storage_view();
-      }
+          if (!impl_->generation_config.has_value() ||
+              !source.is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
+            return source.storage_view();
+          }
 
-      const voxel::ChunkStorageView source_storage = source.storage_view();
-      return make_generated_missing_snapshot_storage(
-          generated_surface_profile_for(chunk_to_column(source.coord())),
-          source.coord(),
-          source_storage.get());
-    };
+          const voxel::ChunkStorageView source_storage = source.storage_view();
+          return make_generated_missing_snapshot_storage(
+              generated_surface_profile_for(chunk_to_column(source.coord())),
+              source.coord(),
+              source_storage.get());
+        };
     snapshot.storages[voxel::ChunkSnapshotCenterStorageIndex] =
         storage_view_for_chunk(*chunk);
-    for (i32 oz = -1; oz <= 1; ++oz) {
-      for (i32 oy = -1; oy <= 1; ++oy) {
-        for (i32 ox = -1; ox <= 1; ++ox) {
-          if (ox == 0 && oy == 0 && oz == 0) {
-            continue;
-          }
-          const ChunkSectionCoord neighbor_coord{{
-              coord.value.x + ox,
-              coord.value.y + oy,
-              coord.value.z + oz,
-          }};
-          const voxel::ChunkSection* neighbor = find_chunk(neighbor_coord);
-          if (neighbor == nullptr && missing_neighbor_policy == MissingNeighborPolicy::RequireLoaded) {
-            return std::nullopt;
-          }
-          if (neighbor != nullptr) {
-            snapshot.storages[voxel::snapshot_storage_index(ox, oy, oz)] =
-                storage_view_for_chunk(*neighbor);
-          } else if (impl_->generation_config.has_value()) {
-            snapshot.storages[voxel::snapshot_storage_index(ox, oy, oz)] =
-                make_generated_missing_snapshot_storage(
-                    generated_surface_profile_for(chunk_to_column(neighbor_coord)),
-                    neighbor_coord);
-          }
-        }
+    for (usize storage_index = 0; storage_index < voxel::ChunkSnapshotNeighborhoodVolume; ++storage_index) {
+      if (storage_index == voxel::ChunkSnapshotCenterStorageIndex) {
+        continue;
+      }
+      const ChunkSectionCoord neighbor_coord =
+          offset_chunk(coord, voxel::snapshot_storage_offset(storage_index));
+      const voxel::ChunkSection* neighbor = find_chunk(neighbor_coord);
+      if (neighbor == nullptr && missing_neighbor_policy == MissingNeighborPolicy::RequireLoaded) {
+        return std::nullopt;
+      }
+      if (neighbor != nullptr) {
+        snapshot.storages[storage_index] = storage_view_for_chunk(*neighbor);
+      } else if (impl_->generation_config.has_value()) {
+        snapshot.storages[storage_index] =
+            make_generated_missing_snapshot_storage(
+                generated_surface_profile_for(chunk_to_column(neighbor_coord)),
+                neighbor_coord);
       }
     }
   }

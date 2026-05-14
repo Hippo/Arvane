@@ -87,20 +87,19 @@ void BM_NearbyChunkLookup(benchmark::State& state) {
   arv::usize hits = 0;
   for (auto _ : state) {
     const arv::ChunkSectionCoord center = centers[index & (centers.size() - 1U)];
-    for (arv::i32 z = -1; z <= 1; ++z) {
-      for (arv::i32 y = -1; y <= 1; ++y) {
-        for (arv::i32 x = -1; x <= 1; ++x) {
-          if (x == 0 && y == 0 && z == 0) {
-            continue;
-          }
-          const arv::ChunkSectionCoord coord{{
-              center.value.x + x,
-              center.value.y + y,
-              center.value.z + z,
-          }};
-          hits += world.find_chunk(coord) != nullptr ? 1U : 0U;
-        }
+    for (arv::usize storage_index = 0;
+         storage_index < arv::voxel::ChunkSnapshotNeighborhoodVolume;
+         ++storage_index) {
+      if (storage_index == arv::voxel::ChunkSnapshotCenterStorageIndex) {
+        continue;
       }
+      const arv::Vec3i offset = arv::voxel::snapshot_storage_offset(storage_index);
+      const arv::ChunkSectionCoord coord{{
+          center.value.x + offset.x,
+          center.value.y + offset.y,
+          center.value.z + offset.z,
+      }};
+      hits += world.find_chunk(coord) != nullptr ? 1U : 0U;
     }
     ++index;
   }
