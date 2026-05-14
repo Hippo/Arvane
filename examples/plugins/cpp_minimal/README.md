@@ -1,3 +1,3 @@
 # C++ Minimal Plugin
 
-Builds a C++ plugin using the header-only SDK wrappers from `<arv/plugin.hpp>`.
+Builds a C++ plugin using the SDK wrappers from `<arv/plugin.hpp>`.

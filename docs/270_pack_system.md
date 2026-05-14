@@ -543,7 +543,7 @@ The presence of this section does not mean the native plugin should be loaded au
 
 Native plugin libraries are authored against the standalone SDK. A
 plugin includes `<arv/api.h>`, exports the configured C entrypoint,
-and links only the `Arvane::SDK` interface target. The pack manifest names
+and links only the `Arvane::SDK` target. The pack manifest names
 the library to load; it does not grant the plugin direct access to engine
 libraries.
 
@@ -1162,7 +1162,7 @@ Recommended rules:
 7. Native plugins should not be hot-unloaded during normal gameplay.
 8. Native plugins should receive engine access through narrow, versioned API tables.
 9. Native plugins should link only against the standalone `Arvane::SDK`
-   interface target, not engine modules.
+   target, not engine modules.
 
 Conceptual entrypoint:
 

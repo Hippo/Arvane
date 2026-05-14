@@ -23,30 +23,15 @@ enum class EventPriority {
 
 class Event {
 public:
-  explicit constexpr Event(const ArvEvent* event) noexcept : event_(event) {
-  }
+  explicit Event(const ArvEvent* event) noexcept;
 
-  [[nodiscard]] std::string_view id() const noexcept {
-    return event_ == nullptr ? std::string_view{} : view(event_->event_id);
-  }
+  [[nodiscard]] std::string_view id() const noexcept;
 
-  [[nodiscard]] ArvTickIndex tick() const noexcept {
-    return event_ == nullptr ? 0 : event_->tick;
-  }
+  [[nodiscard]] ArvTickIndex tick() const noexcept;
 
-  [[nodiscard]] ArvWorldHandle world() const noexcept {
-    return event_ == nullptr ? 0 : event_->world;
-  }
+  [[nodiscard]] ArvWorldHandle world() const noexcept;
 
-  [[nodiscard]] std::span<const std::byte> payload() const noexcept {
-    if (event_ == nullptr) {
-      return {};
-    }
-    return {
-        reinterpret_cast<const std::byte*>(event_->payload.data),
-        event_->payload.size,
-    };
-  }
+  [[nodiscard]] std::span<const std::byte> payload() const noexcept;
 
 private:
   const ArvEvent* event_{};
@@ -54,8 +39,7 @@ private:
 
 class Events {
 public:
-  explicit constexpr Events(const ArvAPI* api) noexcept : api_(api) {
-  }
+  explicit Events(const ArvAPI* api) noexcept;
 
   template<typename Handler>
   [[nodiscard]] Result subscribe(
@@ -81,12 +65,7 @@ public:
     return result;
   }
 
-  [[nodiscard]] Result unsubscribe(ArvEventSubscriptionHandle handle) const {
-    if (api_ == nullptr || api_->events == nullptr || api_->events->unsubscribe == nullptr) {
-      return Result::unsupported("event API is unavailable");
-    }
-    return Result{api_->events->unsubscribe(api_->events_ctx, handle)};
-  }
+  [[nodiscard]] Result unsubscribe(ArvEventSubscriptionHandle handle) const;
 
 private:
   template<typename Handler>

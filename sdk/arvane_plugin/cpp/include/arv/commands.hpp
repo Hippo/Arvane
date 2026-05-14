@@ -34,92 +34,35 @@ enum class CommandSourceKind {
 
 class CommandContext {
 public:
-  explicit constexpr CommandContext(ArvCommandContext* context) noexcept
-      : context_(context) {
-  }
+  explicit CommandContext(ArvCommandContext* context) noexcept;
 
-  [[nodiscard]] std::uint32_t arg_count() const noexcept {
-    return context_ == nullptr ? 0 : context_->arg_count;
-  }
+  [[nodiscard]] std::uint32_t arg_count() const noexcept;
 
-  [[nodiscard]] std::string_view arg(std::uint32_t index) const noexcept {
-    if (context_ == nullptr || index >= context_->arg_count || context_->args == nullptr) {
-      return {};
-    }
-    return view(context_->args[index]);
-  }
+  [[nodiscard]] std::string_view arg(std::uint32_t index) const noexcept;
 
-  [[nodiscard]] std::vector<std::string_view> args() const {
-    std::vector<std::string_view> values;
-    const std::uint32_t count = arg_count();
-    values.reserve(count);
-    for (std::uint32_t i = 0; i < count; ++i) {
-      values.push_back(arg(i));
-    }
-    return values;
-  }
+  [[nodiscard]] std::vector<std::string_view> args() const;
 
-  [[nodiscard]] CommandSourceKind source_kind() const noexcept {
-    return context_ == nullptr ? CommandSourceKind::ServerConsole
-                               : static_cast<CommandSourceKind>(context_->source_kind);
-  }
+  [[nodiscard]] CommandSourceKind source_kind() const noexcept;
 
-  [[nodiscard]] bool is_player() const noexcept {
-    return source_kind() == CommandSourceKind::Player;
-  }
+  [[nodiscard]] bool is_player() const noexcept;
 
-  [[nodiscard]] std::optional<ArvPlayerID> player() const noexcept {
-    if (context_ == nullptr || !context_->has_player) {
-      return std::nullopt;
-    }
-    return context_->player;
-  }
+  [[nodiscard]] std::optional<ArvPlayerID> player() const noexcept;
 
-  [[nodiscard]] std::optional<ArvEntityID> entity() const noexcept {
-    if (context_ == nullptr || !context_->has_entity) {
-      return std::nullopt;
-    }
-    return context_->entity;
-  }
+  [[nodiscard]] std::optional<ArvEntityID> entity() const noexcept;
 
-  [[nodiscard]] std::optional<ArvWorldHandle> world() const noexcept {
-    if (context_ == nullptr || !context_->has_world) {
-      return std::nullopt;
-    }
-    return context_->world;
-  }
+  [[nodiscard]] std::optional<ArvWorldHandle> world() const noexcept;
 
-  [[nodiscard]] std::optional<ArvVec3> position() const noexcept {
-    if (context_ == nullptr || !context_->has_position) {
-      return std::nullopt;
-    }
-    return context_->position;
-  }
+  [[nodiscard]] std::optional<ArvVec3> position() const noexcept;
 
-  void reply(CommandMessageKind kind, std::string_view message) const {
-    if (context_ != nullptr && context_->reply != nullptr) {
-      context_->reply(
-          context_,
-          static_cast<ArvCommandMessageKind>(kind),
-          view(message));
-    }
-  }
+  void reply(CommandMessageKind kind, std::string_view message) const;
 
-  void info(std::string_view message) const {
-    reply(CommandMessageKind::Info, message);
-  }
+  void info(std::string_view message) const;
 
-  void success(std::string_view message) const {
-    reply(CommandMessageKind::Success, message);
-  }
+  void success(std::string_view message) const;
 
-  void warn(std::string_view message) const {
-    reply(CommandMessageKind::Warning, message);
-  }
+  void warn(std::string_view message) const;
 
-  void error(std::string_view message) const {
-    reply(CommandMessageKind::Error, message);
-  }
+  void error(std::string_view message) const;
 
 private:
   ArvCommandContext* context_{};
@@ -138,8 +81,7 @@ struct CommandDescriptor {
 
 class Commands {
 public:
-  explicit constexpr Commands(const ArvAPI* api) noexcept : api_(api) {
-  }
+  explicit Commands(const ArvAPI* api) noexcept;
 
   template<typename Handler>
   [[nodiscard]] Result register_command(

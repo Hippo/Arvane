@@ -17,59 +17,22 @@ enum class ResourceKind {
 
 class Resources {
 public:
-  explicit constexpr Resources(const ArvAPI* api) noexcept : api_(api) {
-  }
+  explicit Resources(const ArvAPI* api) noexcept;
 
   [[nodiscard]] bool exists(
       ResourceKind kind,
       std::string_view id,
-      std::string_view extension = {}) const {
-    if (api_ == nullptr || api_->resources == nullptr ||
-        api_->resources->exists == nullptr) {
-      return false;
-    }
-    return api_->resources->exists(
-        api_->resources_ctx,
-        static_cast<ArvResourceKind>(kind),
-        view(id),
-        view(extension));
-  }
+      std::string_view extension = {}) const;
 
   [[nodiscard]] BufferResult read(
       ResourceKind kind,
       std::string_view id,
-      std::string_view extension = {}) const {
-    if (api_ == nullptr || api_->resources == nullptr ||
-        api_->resources->read == nullptr) {
-      return {Result::unsupported("resource API is unavailable"), {}};
-    }
-    ArvByteBuffer buffer{};
-    Result result{api_->resources->read(
-        api_->resources_ctx,
-        static_cast<ArvResourceKind>(kind),
-        view(id),
-        view(extension),
-        &buffer)};
-    return {result, Buffer{api_, buffer}};
-  }
+      std::string_view extension = {}) const;
 
   [[nodiscard]] BufferResult debug_resolved_path(
       ResourceKind kind,
       std::string_view id,
-      std::string_view extension = {}) const {
-    if (api_ == nullptr || api_->resources == nullptr ||
-        api_->resources->debug_resolved_path == nullptr) {
-      return {Result::unsupported("resource API is unavailable"), {}};
-    }
-    ArvByteBuffer buffer{};
-    Result result{api_->resources->debug_resolved_path(
-        api_->resources_ctx,
-        static_cast<ArvResourceKind>(kind),
-        view(id),
-        view(extension),
-        &buffer)};
-    return {result, Buffer{api_, buffer}};
-  }
+      std::string_view extension = {}) const;
 
 private:
   const ArvAPI* api_{};

@@ -273,7 +273,7 @@ The engine may keep limited direct registration hooks for built-in bootstrap cas
 
 Native plugins should use a stable C ABI boundary.
 
-The SDK also provides first-class header-only C++ wrappers split by API domain.
+The SDK also provides first-class C++ wrappers split by API domain.
 For example, `arv::Event` and `arv::Events` live in `<arv/events.hpp>`,
 `arv::Services` lives in `<arv/services.hpp>`, and `arv::Commands` lives in
 `<arv/commands.hpp>`. `<arv/plugin.hpp>` is the aggregate facade for plugin
@@ -303,7 +303,7 @@ The plugin returns `false` if it cannot initialize. The engine should then disab
 Implemented ABI surface:
 
 * The C ABI lives in the standalone SDK at `sdk/arvane_plugin/include/arv/api.h`.
-* Plugins include SDK headers and link only the `Arvane::SDK` CMake `INTERFACE` target.
+* Plugins include SDK headers and link only the `Arvane::SDK` CMake target.
 * The engine implements the ABI in `engine/arv_plugin/` and passes function tables to plugins at load time.
 * API version `1` is exposed as `ARV_API_VERSION`.
 * `pack.yaml` native metadata must declare `api_version: 1`, a C-symbol entrypoint, and a library for the current platform key.
@@ -326,8 +326,9 @@ target_link_libraries(example_plugin
 )
 ```
 
-`Arvane::SDK` provides include paths, compile features, and header-only C++
-wrappers under `<arv/*.hpp>`. It must not pull in engine link libraries.
+`Arvane::SDK` provides include paths, compile features, and compiled C/C++
+wrapper code for `<arv/*.h>` and `<arv/*.hpp>`. It must not pull in engine
+link libraries.
 
 C++ plugin entrypoint:
 

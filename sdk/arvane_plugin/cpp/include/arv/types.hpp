@@ -12,26 +12,12 @@ namespace arv {
 
 inline constexpr std::uint32_t ApiVersion = ARV_API_VERSION;
 
-[[nodiscard]] constexpr ArvStringView view(std::string_view text) noexcept {
-  return {text.data(), text.size()};
-}
+[[nodiscard]] ArvStringView view(std::string_view text) noexcept;
 
-[[nodiscard]] constexpr std::string_view view(ArvStringView text) noexcept {
-  return text.data == nullptr ? std::string_view{} : std::string_view{text.data, text.size};
-}
+[[nodiscard]] std::string_view view(ArvStringView text) noexcept;
 
-[[nodiscard]] inline ArvBytesView bytes(std::span<const std::byte> data) noexcept {
-  return {
-      reinterpret_cast<const std::uint8_t*>(data.data()),
-      data.size(),
-  };
-}
+[[nodiscard]] ArvBytesView bytes(std::span<const std::byte> data) noexcept;
 
-[[nodiscard]] inline ArvBytesView bytes(std::string_view text) noexcept {
-  return {
-      reinterpret_cast<const std::uint8_t*>(text.data()),
-      text.size(),
-  };
-}
+[[nodiscard]] ArvBytesView bytes(std::string_view text) noexcept;
 
 } // namespace arv

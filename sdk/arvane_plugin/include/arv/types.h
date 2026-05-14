@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,16 +61,9 @@ typedef struct ArvEventSubscriptionHandle {
 
 typedef ArvWorldID ArvWorldHandle;
 typedef ArvEntityID ArvEntityHandle;
-static inline ArvStringView arv_string_view(const char* data, size_t size) {
-  ArvStringView view;
-  view.data = data;
-  view.size = data == NULL ? 0u : size;
-  return view;
-}
 
-static inline ArvStringView arv_cstr(const char* text) {
-  return arv_string_view(text, text == NULL ? 0u : strlen(text));
-}
+ArvStringView arv_string_view(const char* data, size_t size);
+ArvStringView arv_cstr(const char* text);
 
 #ifdef __cplusplus
 }

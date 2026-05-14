@@ -10,15 +10,9 @@ namespace arv {
 
 class Metrics {
 public:
-  explicit constexpr Metrics(const ArvAPI* api) noexcept : api_(api) {
-  }
+  explicit Metrics(const ArvAPI* api) noexcept;
 
-  void counter_add(std::string_view metric_id, std::int64_t amount) const {
-    if (api_ != nullptr && api_->metrics != nullptr &&
-        api_->metrics->counter_add != nullptr) {
-      api_->metrics->counter_add(api_->metrics_ctx, view(metric_id), amount);
-    }
-  }
+  void counter_add(std::string_view metric_id, std::int64_t amount) const;
 
 private:
   const ArvAPI* api_{};

@@ -19,40 +19,23 @@ enum class ResultCode {
 
 class Result {
 public:
-  constexpr Result() noexcept = default;
-  constexpr Result(ResultCode code, const char* message = "") noexcept
-      : abi_{static_cast<ArvResultCode>(code), message} {
-  }
-  constexpr explicit Result(ArvResult result) noexcept : abi_(result) {
-  }
+  Result() noexcept;
+  Result(ResultCode code, const char* message = "") noexcept;
+  explicit Result(ArvResult result) noexcept;
 
-  [[nodiscard]] static constexpr Result ok() noexcept {
-    return Result{ResultCode::Ok};
-  }
+  [[nodiscard]] static Result ok() noexcept;
 
-  [[nodiscard]] static constexpr Result unsupported(const char* message) noexcept {
-    return Result{ResultCode::Unsupported, message};
-  }
+  [[nodiscard]] static Result unsupported(const char* message) noexcept;
 
-  [[nodiscard]] constexpr bool ok_value() const noexcept {
-    return abi_.code == ARV_RESULT_OK;
-  }
+  [[nodiscard]] bool ok_value() const noexcept;
 
-  [[nodiscard]] constexpr explicit operator bool() const noexcept {
-    return ok_value();
-  }
+  [[nodiscard]] explicit operator bool() const noexcept;
 
-  [[nodiscard]] constexpr ResultCode code() const noexcept {
-    return static_cast<ResultCode>(abi_.code);
-  }
+  [[nodiscard]] ResultCode code() const noexcept;
 
-  [[nodiscard]] constexpr const char* message() const noexcept {
-    return abi_.message == nullptr ? "" : abi_.message;
-  }
+  [[nodiscard]] const char* message() const noexcept;
 
-  [[nodiscard]] constexpr ArvResult abi() const noexcept {
-    return abi_;
-  }
+  [[nodiscard]] ArvResult abi() const noexcept;
 
 private:
   ArvResult abi_{ARV_RESULT_OK, ""};

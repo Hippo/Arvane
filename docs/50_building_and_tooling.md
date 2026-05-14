@@ -54,9 +54,9 @@ target_link_libraries(example_plugin
 )
 ```
 
-`Arvane::SDK` is an `INTERFACE` target. It provides SDK include
-directories, compile features, and header-only C++ wrappers without linking
-engine libraries into plugin binaries.
+`Arvane::SDK` is a standalone SDK target. It provides SDK include directories,
+compile features, and compiled SDK C/C++ wrapper code without linking engine
+libraries into plugin binaries.
 
 The in-tree examples under `examples/plugins/` build by default when
 `ARVANE_BUILD_SDK_EXAMPLES` is enabled.
@@ -490,7 +490,7 @@ Arvane’s tooling stack is intentionally minimal and focused:
 
 * **Language:** C++20
 * **Build system:** CMake
-* **SDK:** Standalone `Arvane::SDK` interface target
+* **SDK:** Standalone `Arvane::SDK` target
 * **Rendering:** OpenGL 3.3 Core + GLAD
 * **Windowing/Input:** GLFW
 * **ECS:** EnTT

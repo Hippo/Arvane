@@ -26,117 +26,51 @@ namespace arv {
 
 class Plugin {
 public:
-  explicit constexpr Plugin(const ArvAPI* api) noexcept
-      : api_(api),
-        context_(api),
-        logger_(api),
-        registries_(api),
-        resources_(api),
-        world_(api),
-        entities_(api),
-        events_(api),
-        scheduler_(api),
-        commands_(api),
-        services_(api),
-        data_(api),
-        config_(api),
-        worldgen_(api),
-        metrics_(api),
-        permissions_(api),
-        persistent_data_(api),
-        network_(api),
-        text_(api),
-        regions_(api),
-        gamemodes_(api) {
-  }
+  explicit Plugin(const ArvAPI* api) noexcept;
 
-  [[nodiscard]] constexpr bool valid() const noexcept {
-    return api_ != nullptr && api_->api_version == ARV_API_VERSION;
-  }
+  [[nodiscard]] bool valid() const noexcept;
 
-  [[nodiscard]] constexpr const ArvAPI* api() const noexcept {
-    return api_;
-  }
+  [[nodiscard]] const ArvAPI* api() const noexcept;
 
-  [[nodiscard]] constexpr const Context& context() const noexcept {
-    return context_;
-  }
+  [[nodiscard]] const Context& context() const noexcept;
 
-  [[nodiscard]] constexpr const Logger& logger() const noexcept {
-    return logger_;
-  }
+  [[nodiscard]] const Logger& logger() const noexcept;
 
-  [[nodiscard]] constexpr const Registries& registries() const noexcept {
-    return registries_;
-  }
+  [[nodiscard]] const Registries& registries() const noexcept;
 
-  [[nodiscard]] constexpr const Resources& resources() const noexcept {
-    return resources_;
-  }
+  [[nodiscard]] const Resources& resources() const noexcept;
 
-  [[nodiscard]] constexpr const World& world() const noexcept {
-    return world_;
-  }
+  [[nodiscard]] const World& world() const noexcept;
 
-  [[nodiscard]] constexpr const Entities& entities() const noexcept {
-    return entities_;
-  }
+  [[nodiscard]] const Entities& entities() const noexcept;
 
-  [[nodiscard]] constexpr const Events& events() const noexcept {
-    return events_;
-  }
+  [[nodiscard]] const Events& events() const noexcept;
 
-  [[nodiscard]] constexpr const Scheduler& scheduler() const noexcept {
-    return scheduler_;
-  }
+  [[nodiscard]] const Scheduler& scheduler() const noexcept;
 
-  [[nodiscard]] constexpr const Commands& commands() const noexcept {
-    return commands_;
-  }
+  [[nodiscard]] const Commands& commands() const noexcept;
 
-  [[nodiscard]] constexpr const Services& services() const noexcept {
-    return services_;
-  }
+  [[nodiscard]] const Services& services() const noexcept;
 
-  [[nodiscard]] constexpr const Data& data() const noexcept {
-    return data_;
-  }
+  [[nodiscard]] const Data& data() const noexcept;
 
-  [[nodiscard]] constexpr const Config& config() const noexcept {
-    return config_;
-  }
+  [[nodiscard]] const Config& config() const noexcept;
 
-  [[nodiscard]] constexpr const WorldGen& worldgen() const noexcept {
-    return worldgen_;
-  }
+  [[nodiscard]] const WorldGen& worldgen() const noexcept;
 
-  [[nodiscard]] constexpr const Metrics& metrics() const noexcept {
-    return metrics_;
-  }
+  [[nodiscard]] const Metrics& metrics() const noexcept;
 
-  [[nodiscard]] constexpr const Permissions& permissions() const noexcept {
-    return permissions_;
-  }
+  [[nodiscard]] const Permissions& permissions() const noexcept;
 
-  [[nodiscard]] constexpr const PersistentData& persistent_data() const noexcept {
-    return persistent_data_;
-  }
+  [[nodiscard]] const PersistentData& persistent_data() const noexcept;
 
-  [[nodiscard]] constexpr const Network& network() const noexcept {
-    return network_;
-  }
+  [[nodiscard]] const Network& network() const noexcept;
 
-  [[nodiscard]] constexpr const Text& text() const noexcept {
-    return text_;
-  }
+  [[nodiscard]] const Text& text() const noexcept;
 
-  [[nodiscard]] constexpr const Regions& regions() const noexcept {
-    return regions_;
-  }
+  [[nodiscard]] const Regions& regions() const noexcept;
 
-  [[nodiscard]] constexpr const GameModes& gamemodes() const noexcept {
-    return gamemodes_;
-  }
+  [[nodiscard]] const GameModes& gamemodes() const noexcept;
 
 private:
   const ArvAPI* api_{};

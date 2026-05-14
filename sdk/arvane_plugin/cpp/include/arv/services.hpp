@@ -29,68 +29,36 @@ struct ServiceDescriptor {
 
 class ServiceRef {
 public:
-  ServiceRef() = default;
-  ServiceRef(const ArvAPI* api, ArvServiceRef ref) noexcept : api_(api), ref_(ref) {
-  }
+  ServiceRef() noexcept;
+  ServiceRef(const ArvAPI* api, ArvServiceRef ref) noexcept;
 
   ServiceRef(const ServiceRef&) = delete;
   ServiceRef& operator=(const ServiceRef&) = delete;
 
-  ServiceRef(ServiceRef&& other) noexcept
-      : api_(std::exchange(other.api_, nullptr)),
-        ref_(std::exchange(other.ref_, {})) {
-  }
+  ServiceRef(ServiceRef&& other) noexcept;
 
-  ServiceRef& operator=(ServiceRef&& other) noexcept {
-    if (this != &other) {
-      release();
-      api_ = std::exchange(other.api_, nullptr);
-      ref_ = std::exchange(other.ref_, {});
-    }
-    return *this;
-  }
+  ServiceRef& operator=(ServiceRef&& other) noexcept;
 
-  ~ServiceRef() {
-    release();
-  }
+  ~ServiceRef();
 
-  void release() noexcept {
-    if (api_ != nullptr && ref_.valid && api_->services != nullptr &&
-        api_->services->release != nullptr) {
-      api_->services->release(api_->services_ctx, ref_);
-    }
-    api_ = nullptr;
-    ref_ = {};
-  }
+  void release() noexcept;
 
-  [[nodiscard]] explicit operator bool() const noexcept {
-    return ref_.valid;
-  }
+  [[nodiscard]] explicit operator bool() const noexcept;
 
-  [[nodiscard]] std::string_view id() const noexcept {
-    return view(ref_.service_id);
-  }
+  [[nodiscard]] std::string_view id() const noexcept;
 
-  [[nodiscard]] std::string_view provider_pack_id() const noexcept {
-    return view(ref_.provider_pack_id);
-  }
+  [[nodiscard]] std::string_view provider_pack_id() const noexcept;
 
-  [[nodiscard]] std::uint32_t api_version() const noexcept {
-    return ref_.api_version;
-  }
+  [[nodiscard]] std::uint32_t api_version() const noexcept;
 
   template<typename T>
   [[nodiscard]] const T* table() const noexcept {
     return static_cast<const T*>(ref_.api_table);
   }
 
-  [[nodiscard]] void* user_data() const noexcept {
-    return ref_.user_data;
-  }
+  [[nodiscard]] void* user_data() const noexcept;
 
-  [[nodiscard]] const ArvServiceRef& abi() const noexcept {
-    return ref_;
-  }
+  [[nodiscard]] const ArvServiceRef& abi() const noexcept;
 
 private:
   const ArvAPI* api_{};
@@ -101,32 +69,16 @@ struct ServiceQuery {
   Result result{};
   ServiceRef service{};
 
-  [[nodiscard]] explicit operator bool() const noexcept {
-    return static_cast<bool>(result) && static_cast<bool>(service);
-  }
+  [[nodiscard]] explicit operator bool() const noexcept;
 };
 
 class Services {
 public:
-  explicit constexpr Services(const ArvAPI* api) noexcept : api_(api) {
-  }
+  explicit Services(const ArvAPI* api) noexcept;
 
   [[nodiscard]] Result publish(
       const ServiceDescriptor& descriptor,
-      ArvServiceHandle* out_handle = nullptr) const {
-    if (api_ == nullptr || api_->services == nullptr || api_->services->publish == nullptr) {
-      return Result::unsupported("service API is unavailable");
-    }
-    ArvServiceDescriptor abi_descriptor{};
-    abi_descriptor.service_id = view(descriptor.id);
-    abi_descriptor.api_version = descriptor.api_version;
-    abi_descriptor.priority = descriptor.priority;
-    abi_descriptor.threading = static_cast<ArvServiceThreading>(descriptor.threading);
-    abi_descriptor.display_name = view(descriptor.display_name);
-    abi_descriptor.api_table = descriptor.api_table;
-    abi_descriptor.user_data = descriptor.user_data;
-    return Result{api_->services->publish(api_->services_ctx, &abi_descriptor, out_handle)};
-  }
+      ArvServiceHandle* out_handle = nullptr) const;
 
   template<typename T>
   [[nodiscard]] Result publish(
@@ -150,60 +102,17 @@ public:
         out_handle);
   }
 
-  [[nodiscard]] Result unpublish(ArvServiceHandle handle) const {
-    if (api_ == nullptr || api_->services == nullptr ||
-        api_->services->unpublish == nullptr) {
-      return Result::unsupported("service API is unavailable");
-    }
-    return Result{api_->services->unpublish(api_->services_ctx, handle)};
-  }
+  [[nodiscard]] Result unpublish(ArvServiceHandle handle) const;
 
   [[nodiscard]] ServiceQuery get(
       std::string_view id,
       std::uint32_t min_api_version,
-      std::uint32_t max_api_version) const {
-    if (api_ == nullptr || api_->services == nullptr || api_->services->get == nullptr) {
-      return {Result::unsupported("service API is unavailable"), {}};
-    }
-    ArvServiceRef ref{};
-    Result result{api_->services->get(
-        api_->services_ctx,
-        view(id),
-        min_api_version,
-        max_api_version,
-        &ref)};
-    return {result, ServiceRef{api_, ref}};
-  }
+      std::uint32_t max_api_version) const;
 
   [[nodiscard]] std::vector<ServiceRef> list(
       std::string_view id,
       std::uint32_t min_api_version,
-      std::uint32_t max_api_version) const {
-    std::vector<ServiceRef> results;
-    if (api_ == nullptr || api_->services == nullptr || api_->services->list == nullptr) {
-      return results;
-    }
-    const std::uint64_t count = api_->services->list(
-        api_->services_ctx,
-        view(id),
-        min_api_version,
-        max_api_version,
-        nullptr,
-        0);
-    std::vector<ArvServiceRef> refs(count);
-    api_->services->list(
-        api_->services_ctx,
-        view(id),
-        min_api_version,
-        max_api_version,
-        refs.data(),
-        refs.size());
-    results.reserve(refs.size());
-    for (ArvServiceRef& ref : refs) {
-      results.emplace_back(api_, ref);
-    }
-    return results;
-  }
+      std::uint32_t max_api_version) const;
 
 private:
   const ArvAPI* api_{};
