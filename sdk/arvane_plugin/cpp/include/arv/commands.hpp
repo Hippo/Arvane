@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -24,6 +25,11 @@ enum class CommandMessageKind {
   Success = ARV_COMMAND_MESSAGE_SUCCESS,
   Warning = ARV_COMMAND_MESSAGE_WARNING,
   Error = ARV_COMMAND_MESSAGE_ERROR,
+};
+
+enum class CommandSourceKind {
+  Player = ARV_COMMAND_SOURCE_PLAYER,
+  ServerConsole = ARV_COMMAND_SOURCE_SERVER_CONSOLE,
 };
 
 class CommandContext {
@@ -51,6 +57,43 @@ public:
       values.push_back(arg(i));
     }
     return values;
+  }
+
+  [[nodiscard]] CommandSourceKind source_kind() const noexcept {
+    return context_ == nullptr ? CommandSourceKind::ServerConsole
+                               : static_cast<CommandSourceKind>(context_->source_kind);
+  }
+
+  [[nodiscard]] bool is_player() const noexcept {
+    return source_kind() == CommandSourceKind::Player;
+  }
+
+  [[nodiscard]] std::optional<ArvPlayerID> player() const noexcept {
+    if (context_ == nullptr || !context_->has_player) {
+      return std::nullopt;
+    }
+    return context_->player;
+  }
+
+  [[nodiscard]] std::optional<ArvEntityID> entity() const noexcept {
+    if (context_ == nullptr || !context_->has_entity) {
+      return std::nullopt;
+    }
+    return context_->entity;
+  }
+
+  [[nodiscard]] std::optional<ArvWorldHandle> world() const noexcept {
+    if (context_ == nullptr || !context_->has_world) {
+      return std::nullopt;
+    }
+    return context_->world;
+  }
+
+  [[nodiscard]] std::optional<ArvVec3> position() const noexcept {
+    if (context_ == nullptr || !context_->has_position) {
+      return std::nullopt;
+    }
+    return context_->position;
   }
 
   void reply(CommandMessageKind kind, std::string_view message) const {

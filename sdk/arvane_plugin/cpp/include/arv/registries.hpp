@@ -41,6 +41,57 @@ public:
     return call(api_ == nullptr || api_->registries == nullptr ? nullptr : api_->registries->register_recipe_type, id);
   }
 
+  [[nodiscard]] ValueResult<std::uint32_t> find_block_variant(
+      std::string_view id) const {
+    std::uint32_t block_variant{};
+    if (api_ == nullptr || api_->registries == nullptr ||
+        api_->registries->find_block_variant == nullptr) {
+      return {Result::unsupported("registry API is unavailable"), block_variant};
+    }
+    return {
+        Result{api_->registries->find_block_variant(
+            api_->registries_ctx,
+            view(id),
+            &block_variant)},
+        block_variant};
+  }
+
+  [[nodiscard]] ValueResult<std::string_view> block_variant_name(
+      std::uint32_t block_variant) const {
+    ArvStringView name{};
+    if (api_ == nullptr || api_->registries == nullptr ||
+        api_->registries->block_variant_name == nullptr) {
+      return {Result::unsupported("registry API is unavailable"), {}};
+    }
+    return {
+        Result{api_->registries->block_variant_name(
+            api_->registries_ctx,
+            block_variant,
+            &name)},
+        view(name)};
+  }
+
+  [[nodiscard]] ValueResult<std::uint32_t> air_block_variant() const {
+    std::uint32_t block_variant{};
+    if (api_ == nullptr || api_->registries == nullptr ||
+        api_->registries->air_block_variant == nullptr) {
+      return {Result::unsupported("registry API is unavailable"), block_variant};
+    }
+    return {
+        Result{api_->registries->air_block_variant(
+            api_->registries_ctx,
+            &block_variant)},
+        block_variant};
+  }
+
+  [[nodiscard]] bool is_air_block_variant(std::uint32_t block_variant) const {
+    return api_ != nullptr && api_->registries != nullptr &&
+           api_->registries->is_air_block_variant != nullptr &&
+           api_->registries->is_air_block_variant(
+               api_->registries_ctx,
+               block_variant);
+  }
+
 private:
   using RegistryMember = ArvResult (*)(void*, ArvResourceID);
 

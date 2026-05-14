@@ -769,7 +769,7 @@ void append_diagnostic(
     const PluginManagerImpl& impl) noexcept {
   static const player::PermissionGroupRegistry empty_groups;
   return impl.runtime.permission_groups == nullptr ? empty_groups
-                                                  : *impl.runtime.permission_groups;
+                                                   : *impl.runtime.permission_groups;
 }
 
 void refresh_plugin_player_permissions(
@@ -1057,6 +1057,66 @@ ArvResult api_register_block_behavior(void* context, ArvResourceID id) {
         result.error().message);
   }
   return ok(ctx);
+}
+
+ArvResult api_find_block_variant(
+    void* context,
+    ArvResourceID id,
+    uint32_t* out_block_variant) {
+  PluginCallContext* ctx = call_context(context);
+  if (out_block_variant == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_block_variant is null");
+  }
+  *out_block_variant = 0U;
+  if (ctx == nullptr || ctx->impl->runtime.block_registry == nullptr) {
+    return make_result(ctx, ARV_RESULT_UNSUPPORTED, "block registry is unavailable");
+  }
+  const std::string name{abi_view(id)};
+  auto found = ctx->impl->runtime.block_registry->find_variant(name);
+  if (!found.has_value()) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "block variant not found: " + name);
+  }
+  *out_block_variant = found->value;
+  return ok(ctx);
+}
+
+ArvResult api_block_variant_name(
+    void* context,
+    uint32_t block_variant,
+    ArvStringView* out_name) {
+  PluginCallContext* ctx = call_context(context);
+  if (out_name == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_name is null");
+  }
+  *out_name = {};
+  if (ctx == nullptr || ctx->impl->runtime.block_registry == nullptr) {
+    return make_result(ctx, ARV_RESULT_UNSUPPORTED, "block registry is unavailable");
+  }
+  const auto* variant =
+      ctx->impl->runtime.block_registry->variant(voxel::BlockVariantID{block_variant});
+  if (variant == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "block variant not found");
+  }
+  *out_name = stable_view(variant->debug_name);
+  return ok(ctx);
+}
+
+ArvResult api_air_block_variant(void* context, uint32_t* out_block_variant) {
+  PluginCallContext* ctx = call_context(context);
+  if (out_block_variant == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_block_variant is null");
+  }
+  if (ctx == nullptr || ctx->impl->runtime.block_registry == nullptr) {
+    return make_result(ctx, ARV_RESULT_UNSUPPORTED, "block registry is unavailable");
+  }
+  *out_block_variant = ctx->impl->runtime.block_registry->air_variant_id().value;
+  return ok(ctx);
+}
+
+bool api_is_air_block_variant(void* context, uint32_t block_variant) {
+  PluginCallContext* ctx = call_context(context);
+  return ctx != nullptr && ctx->impl->runtime.block_registry != nullptr &&
+         ctx->impl->runtime.block_registry->is_air(voxel::BlockVariantID{block_variant});
 }
 
 ArvResult api_register_item_behavior(void* context, ArvResourceID id) {
@@ -4649,7 +4709,7 @@ ArvResult api_network_broadcast_world(
     return null_context_result(ARV_RESULT_INVALID_STATE, "plugin API context is null");
   }
   if (world > static_cast<ArvWorldHandle>(
-          std::numeric_limits<WorldID::value_type>::max())) {
+                  std::numeric_limits<WorldID::value_type>::max())) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "world handle is out of range");
   }
   ArvResult sync = require_sync_context(ctx, "NetworkAPI");
@@ -4684,6 +4744,29 @@ struct CommandExecutionContext {
     abi_context.args = arg_views.data();
     abi_context.engine_context = this;
     abi_context.reply = &reply;
+    abi_context.source_kind =
+        cpp_ctx.sender.kind == command::CommandSourceKind::Player
+            ? ARV_COMMAND_SOURCE_PLAYER
+            : ARV_COMMAND_SOURCE_SERVER_CONSOLE;
+    if (cpp_ctx.sender.player_id.has_value()) {
+      abi_context.has_player = true;
+      abi_context.player = cpp_ctx.sender.player_id->value;
+    }
+    if (cpp_ctx.sender.entity_id.has_value()) {
+      abi_context.has_entity = true;
+      abi_context.entity = cpp_ctx.sender.entity_id->value;
+    }
+    if (cpp_ctx.sender.world_id.has_value()) {
+      abi_context.has_world = true;
+      abi_context.world = cpp_ctx.sender.world_id->value;
+    }
+    if (cpp_ctx.sender.position.has_value()) {
+      abi_context.has_position = true;
+      abi_context.position = {
+          cpp_ctx.sender.position->x,
+          cpp_ctx.sender.position->y,
+          cpp_ctx.sender.position->z};
+    }
   }
 
   static void reply(
@@ -4758,6 +4841,10 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &api_register_component_codec,
       &api_register_loot_function,
       &api_register_recipe_type,
+      &api_find_block_variant,
+      &api_block_variant_name,
+      &api_air_block_variant,
+      &api_is_air_block_variant,
   };
   commands_api = {&api_register_executor};
   events_api = {&api_subscribe_event, &api_unsubscribe_event};

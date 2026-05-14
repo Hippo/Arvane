@@ -1,5 +1,6 @@
 add_library(ArvaneSDK INTERFACE)
 add_library(Arvane::SDK ALIAS ArvaneSDK)
+add_library(Arvane::PluginSDK ALIAS ArvaneSDK)
 
 target_include_directories(ArvaneSDK INTERFACE
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"

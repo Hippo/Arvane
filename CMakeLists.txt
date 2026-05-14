@@ -142,7 +142,12 @@ if(ARVANE_BUILD_TESTS)
   set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
 
+  add_subdirectory(plugins)
   add_subdirectory(tests)
+endif()
+
+if(NOT ARVANE_BUILD_TESTS)
+  add_subdirectory(plugins)
 endif()
 
 if(ARVANE_BUILD_BENCHMARKS)

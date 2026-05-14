@@ -1,0 +1,7 @@
+id: arv_mason:mason_select
+literal: mason select
+domain: server_bound
+permission: arv_mason.command.select
+executor: arv_mason:command/select
+description: Set or inspect a Mason selection.
+usage: /mason select <a|b|clear|info>

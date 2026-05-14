@@ -19,6 +19,11 @@ typedef enum ArvCommandMessageKind {
   ARV_COMMAND_MESSAGE_ERROR = 3
 } ArvCommandMessageKind;
 
+typedef enum ArvCommandSourceKind {
+  ARV_COMMAND_SOURCE_PLAYER = 0,
+  ARV_COMMAND_SOURCE_SERVER_CONSOLE = 1
+} ArvCommandSourceKind;
+
 typedef struct ArvCommandContext ArvCommandContext;
 typedef void (*ArvCommandReplyFn)(
     ArvCommandContext* command_ctx,
@@ -33,6 +38,15 @@ struct ArvCommandContext {
   const ArvStringView* args;
   void* engine_context;
   ArvCommandReplyFn reply;
+  ArvCommandSourceKind source_kind;
+  bool has_player;
+  bool has_entity;
+  bool has_world;
+  bool has_position;
+  ArvPlayerID player;
+  ArvEntityID entity;
+  ArvWorldHandle world;
+  ArvVec3 position;
 };
 
 typedef struct ArvCommandDescriptor {

@@ -1,0 +1,7 @@
+id: arv_mason:mason_blueprint
+literal: mason blueprint
+domain: server_bound
+permission: arv_mason.command.use
+executor: arv_mason:command/blueprint
+description: Save, load, paste, list, and inspect Mason blueprints.
+usage: /mason blueprint <save|load|paste|list|info>

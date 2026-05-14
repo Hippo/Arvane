@@ -8,8 +8,8 @@
 
 #include <gtest/gtest.h>
 
-#include <chrono>
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -25,6 +25,10 @@
 
 #ifndef ARV_TEST_MISSING_SYMBOL_PLUGIN_PATH
 #define ARV_TEST_MISSING_SYMBOL_PLUGIN_PATH ""
+#endif
+
+#ifndef ARV_TEST_MASON_PLUGIN_PATH
+#define ARV_TEST_MASON_PLUGIN_PATH ""
 #endif
 
 namespace {
@@ -85,25 +89,30 @@ void write_plugin_pack(
   write_text(
       packs_root / std::string{pack_id} / "pack.yaml",
       "schema_version: 1\n"
-      "id: \"" + std::string{pack_id} + "\"\n"
-      "display_name: \"" + std::string{pack_id} + "\"\n"
-      "version: \"1.0.0\"\n"
-      "namespaces:\n"
-      "  - \"" + std::string{pack_id} + "\"\n"
-      "side: \"server\"\n"
-      "dependencies: []\n"
-      "load_after: []\n"
-      "load_before: []\n"
-      "capabilities:\n"
-      "  assets: false\n"
-      "  data: true\n"
-      "  native_plugin: true\n"
-      "native:\n"
-      "  api_version: 1\n"
-      "  entrypoint: \"" + std::string{entrypoint} + "\"\n"
-      "  libraries:\n"
-      "    " + arv::asset::native_plugin_platform_key() + ": \"" +
-      relative_library.generic_string() + "\"\n");
+      "id: \"" +
+          std::string{pack_id} + "\"\n"
+                                 "display_name: \"" +
+          std::string{pack_id} + "\"\n"
+                                 "version: \"1.0.0\"\n"
+                                 "namespaces:\n"
+                                 "  - \"" +
+          std::string{pack_id} + "\"\n"
+                                 "side: \"server\"\n"
+                                 "dependencies: []\n"
+                                 "load_after: []\n"
+                                 "load_before: []\n"
+                                 "capabilities:\n"
+                                 "  assets: false\n"
+                                 "  data: true\n"
+                                 "  native_plugin: true\n"
+                                 "native:\n"
+                                 "  api_version: 1\n"
+                                 "  entrypoint: \"" +
+          std::string{entrypoint} + "\"\n"
+                                    "  libraries:\n"
+                                    "    " +
+          arv::asset::native_plugin_platform_key() + ": \"" +
+          relative_library.generic_string() + "\"\n");
   write_text(
       packs_root / std::string{pack_id} / "data" / std::string{pack_id} /
           "plugin_probe.txt",
@@ -119,9 +128,8 @@ struct PluginHarness {
   arv::player::GameModeRegistry game_modes;
   arv::asset::PackManager pack_manager;
 
-  explicit PluginHarness(std::string_view prefix)
-      : temp(prefix),
-        packs(temp.path / "packs") {
+  explicit PluginHarness(std::string_view prefix) : temp(prefix),
+                                                    packs(temp.path / "packs") {
     (void)game_modes.add_builtin_mode(
         std::string{arv::player::SurvivalGameModeID},
         {});
@@ -252,6 +260,47 @@ TEST(PluginLoadTests, LoadsAllowlistedPluginAndRegistersBehaviorServicesAndComma
   EXPECT_NE(command_registry.find("testplugin"), nullptr);
 }
 
+TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
+  if (std::string_view{ARV_TEST_MASON_PLUGIN_PATH}.empty()) {
+    GTEST_SKIP() << "Mason plugin path is unavailable.";
+  }
+
+  PluginHarness harness("arvane_mason_plugin_");
+  write_enabled(harness.packs, "arv_mason");
+  const std::filesystem::path relative = copy_plugin_library(
+      harness.packs,
+      "arv_mason",
+      ARV_TEST_MASON_PLUGIN_PATH);
+  write_plugin_pack(harness.packs, "arv_mason", relative);
+  harness.load_packs();
+
+  arv::plugin::PluginManager manager;
+  auto loaded = manager.load_plugins(harness.load_options({true, {"arv_mason"}}));
+  ASSERT_TRUE(loaded) << loaded.error().describe();
+  EXPECT_TRUE(manager.has_command_executor("arv_mason:command/mason"));
+  EXPECT_TRUE(manager.has_command_executor("arv_mason:command/copy"));
+
+  arv::command::CommandRegistry registry;
+  manager.register_commands(registry);
+  EXPECT_NE(registry.find("mason"), nullptr);
+  EXPECT_NE(registry.find("mcopy"), nullptr);
+  EXPECT_NE(registry.find("mbp"), nullptr);
+
+  arv::command::CommandSender sender;
+  sender.kind = arv::command::CommandSourceKind::ServerConsole;
+  arv::command::CommandServices services;
+  const arv::command::CommandResult result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      sender,
+      services,
+      "/mason status");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  ASSERT_FALSE(result.messages.empty());
+  EXPECT_NE(result.messages.front().text.find("Mason 0.1.0 ready"), std::string::npos);
+}
+
 TEST(PluginLoadTests, ReportsMissingLibraryMissingSymbolAndFalseEntrypoint) {
   {
     PluginHarness harness("arvane_plugin_missing_library_");
@@ -334,13 +383,15 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   arv::entity::EntityRegistry entity_registry = std::move(entity_registry_result.value());
   arv::player::GameModeRegistry game_modes;
   ASSERT_TRUE(game_modes.add_builtin_mode(
-      std::string{arv::player::SurvivalGameModeID},
-      {}).has_value());
+                            std::string{arv::player::SurvivalGameModeID},
+                            {})
+                  .has_value());
   ASSERT_TRUE(game_modes.add_custom_mode(
-      "example_plugin_pack:builder",
-      std::string{arv::player::SurvivalGameModeID},
-      {},
-      {{"example_plugin_pack.command.test", arv::player::TriState::Allow}}).has_value());
+                            "example_plugin_pack:builder",
+                            std::string{arv::player::SurvivalGameModeID},
+                            {},
+                            {{"example_plugin_pack.command.test", arv::player::TriState::Allow}})
+                  .has_value());
   arv::player::PermissionGroupRegistry permission_groups;
   int network_sends = 0;
   jobs.start();
@@ -369,8 +420,7 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
             request.packet->message_type,
             arv::protocol::MessageType::ClientboundChatMessage);
         EXPECT_FALSE(request.packet->payload.empty());
-        return arv::plugin::PluginNetworkSendResult::success();
-      },
+        return arv::plugin::PluginNetworkSendResult::success(); },
   });
   manager.tick(1U);
   jobs.join();

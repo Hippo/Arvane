@@ -104,6 +104,7 @@ target_compile_definitions(arv_tests PRIVATE
   ARV_TEST_EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:arv_test_example_plugin>"
   ARV_TEST_FAILING_PLUGIN_PATH="$<TARGET_FILE:arv_test_failing_plugin>"
   ARV_TEST_MISSING_SYMBOL_PLUGIN_PATH="$<TARGET_FILE:arv_test_missing_symbol_plugin>"
+  ARV_TEST_MASON_PLUGIN_PATH="$<TARGET_FILE:arv_mason>"
 )
 add_dependencies(arv_tests
   arv_test_example_plugin
@@ -111,6 +112,7 @@ add_dependencies(arv_tests
   arv_test_missing_symbol_plugin
   arv_plugin_sdk_c_compile
   arv_plugin_sdk_cpp_compile
+  arv_mason
 )
 
 target_link_libraries(arv_tests PRIVATE

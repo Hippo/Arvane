@@ -1,0 +1,7 @@
+id: arv_mason:mason_copy
+literal: mason copy
+domain: server_bound
+permission: arv_mason.command.copy
+executor: arv_mason:command/copy
+description: Copy the current Mason selection.
+usage: /mason copy
