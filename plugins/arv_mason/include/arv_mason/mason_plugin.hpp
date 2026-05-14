@@ -56,7 +56,7 @@ private:
       std::string_view usage,
       bool public_to_players,
       auto handler) const {
-    return plugin_.commands().register_executor(
+    return plugin_.commands().register_command(
         {
             .executor_id = executor_id,
             .name = name,

@@ -1,7 +1,0 @@
-id: arv_mason:mason_redo
-literal: mason redo
-domain: server_bound
-permission: arv_mason.command.redo
-executor: arv_mason:command/redo
-description: Redo the previous Mason operation.
-usage: /mason redo

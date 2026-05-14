@@ -206,16 +206,15 @@ arvane_home/
           themes/
           ui/
       data/
-        arvane/
-          blocks/
-          items/
-          entities/
-          biomes/
-          dimensions/
-          worldgen/
-          recipes/
-          loot_tables/
-          tags/
+        blocks.yaml
+        items.yaml
+        entities.yaml
+        commands.yaml
+        permissions.yaml
+        worldgen/
+          noise/
+          features/
+          generators/
 
     better_oceans/
       pack.yaml
@@ -225,18 +224,20 @@ arvane_home/
           models/
           sounds/
       data/
-        better_oceans/
-          blocks/
-          items/
-          biomes/
-          worldgen/
+        blocks.yaml
+        items.yaml
+        biomes.yaml
+        worldgen/
+          features/
 
     example_plugin_pack/
       pack.yaml
       assets/
         example_plugin_pack/
       data/
-        example_plugin_pack/
+        blocks.yaml
+        commands.yaml
+        permissions.yaml
       native/
         linux-x86_64/
           libexample_plugin_pack.so
@@ -663,32 +664,85 @@ The exact mapping from a resource ID to a file path is owned by the asset loader
 
 Data is authoritative game content and configuration.
 
-Common data directories:
+Small data categories should prefer one condensed YAML file at the pack data
+root. Entries carry their own stable namespaced IDs, so the directory does not
+need to repeat the namespace.
+
+Recommended small data files:
 
 ```text
-data/<namespace>/blocks/
-data/<namespace>/items/
-data/<namespace>/entities/
-data/<namespace>/biomes/
-data/<namespace>/dimensions/
-data/<namespace>/worldgen/
-data/<namespace>/recipes/
-data/<namespace>/loot_tables/
-data/<namespace>/tags/
-data/<namespace>/commands/
+data/blocks.yaml
+data/items.yaml
+data/entities.yaml
+data/biomes.yaml
+data/dimensions.yaml
+data/recipes.yaml
+data/loot_tables.yaml
+data/tags.yaml
+data/commands.yaml
+data/permissions.yaml
 ```
 
 Examples:
 
 ```text
-data/arvane/blocks/dirt.yaml
-data/arvane/items/stone_pickaxe.yaml
-data/better_oceans/biomes/kelp_forest.yaml
-data/better_oceans/worldgen/noise/abyssal_depth.yaml
-data/better_oceans/worldgen/features/coral_patch.yaml
+data/blocks.yaml
+data/items.yaml
+data/biomes.yaml
+data/commands.yaml
+data/worldgen/noise/abyssal_depth.yaml
+data/worldgen/features/coral_patch.yaml
 ```
 
+Larger or highly nested categories, especially world generation, may stay in
+dedicated folders. Older namespaced paths such as `data/<namespace>/blocks/`
+may remain readable for compatibility, but new small entries should use the
+condensed root YAML form.
+
 Data definitions may affect registries, world generation, saves, and gameplay logic. For that reason, data definitions need stricter validation than assets.
+
+### Data-Driven Command Policy
+
+Native command definitions should be registered in code. Do not create JSON or
+YAML files that merely duplicate native command metadata such as name,
+description, permission, usage, and executor ID.
+
+This is discouraged:
+
+```yaml
+name: time
+description: Reads or changes world time.
+permission: operator
+```
+
+The native registration should be the source of truth:
+
+```cpp
+registry.register_command({
+    .name = "world.time",
+    .domain = CommandDomain::ServerBound,
+    .permission = "arvane.command.world.time",
+    .description = "Reads or changes world time.",
+    .usage = "/world.time <...>",
+    .execute = execute_world_time_command,
+});
+```
+
+Data command files are useful when they define runtime policy or behavior:
+
+```yaml
+schema_version: 1
+
+aliases:
+  - alias: time
+    command: world.time
+    visible_in_help: true
+```
+
+Good uses for `data/commands.yaml` include aliases, command enable/disable
+configuration, permission overrides, command limits, macro commands, and
+scripted commands. The file should not duplicate static native metadata without
+adding behavior.
 
 ---
 
@@ -1241,7 +1295,7 @@ Example:
 Failed to load block definition.
 
 Pack: better_oceans 1.0.0
-File: data/better_oceans/blocks/coral_lamp.yaml
+File: data/blocks.yaml
 Resource: better_oceans:coral_lamp
 Reason: Unknown texture reference better_oceans:texture/block/coral_lamp_side
 ```
@@ -1391,13 +1445,13 @@ World generation configuration belongs in data packs.
 Recommended directories:
 
 ```text
-data/<namespace>/worldgen/noise/
-data/<namespace>/worldgen/features/
-data/<namespace>/worldgen/carvers/
-data/<namespace>/worldgen/biome_sources/
-data/<namespace>/worldgen/terrain/
-data/<namespace>/biomes/
-data/<namespace>/dimensions/
+data/worldgen/noise/
+data/worldgen/features/
+data/worldgen/carvers/
+data/worldgen/biome_sources/
+data/worldgen/terrain/
+data/biomes.yaml
+data/dimensions.yaml
 ```
 
 World generation packs are authoritative. In multiplayer, the server owns world generation.

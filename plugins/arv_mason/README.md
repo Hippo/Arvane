@@ -15,6 +15,9 @@ Root command:
 /mason status
 ```
 
+Native command definitions are registered in code. Short aliases live in
+`pack/data/commands.yaml`.
+
 Selection:
 
 ```text
@@ -67,21 +70,21 @@ Blueprint names are limited to letters, numbers, `_`, `-`, and `.`. Path travers
 Mason registers these custom permission nodes:
 
 ```text
-arv_mason.command.use
-arv_mason.command.select
-arv_mason.command.set
-arv_mason.command.replace
-arv_mason.command.copy
-arv_mason.command.paste
-arv_mason.command.undo
-arv_mason.command.redo
-arv_mason.command.blueprint.save
-arv_mason.command.blueprint.load
-arv_mason.command.blueprint.paste
-arv_mason.command.blueprint.list
-arv_mason.command.blueprint.info
-arv_mason.limit.bypass
-arv_mason.region.bypass
+mason.command.use
+mason.command.select
+mason.command.set
+mason.command.replace
+mason.command.copy
+mason.command.paste
+mason.command.undo
+mason.command.redo
+mason.command.blueprint.save
+mason.command.blueprint.load
+mason.command.blueprint.paste
+mason.command.blueprint.list
+mason.command.blueprint.info
+mason.limit.bypass
+mason.region.bypass
 ```
 
 Mutating commands also check the core `can_modify_world` permission through the Plugin SDK PermissionsAPI. Mason does not use game mode checks for authority.
@@ -121,4 +124,4 @@ The persistent storage API currently stores blueprint payloads in world-scoped p
 
 ## Safety Notes
 
-Large operations enforce hard limits unless `arv_mason.limit.bypass` is allowed. Operations above the confirmation threshold require `/mason confirm`. Large mutation plans are applied in scheduler-backed sync batches when they exceed `max_operation_blocks_per_tick`.
+Large operations enforce hard limits unless `mason.limit.bypass` is allowed. Operations above the confirmation threshold require `/mason confirm`. Large mutation plans are applied in scheduler-backed sync batches when they exceed `max_operation_blocks_per_tick`.

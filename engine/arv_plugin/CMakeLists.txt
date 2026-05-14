@@ -4,7 +4,11 @@ set(ARV_PLUGIN_HEADERS
 
 add_library(arv_plugin STATIC
   src/dynamic_library.cpp
+  src/plugin_alias_data.cpp
   src/plugin_manager.cpp
+  src/plugin_native_loading.cpp
+  src/plugin_paths.cpp
+  src/plugin_public_types.cpp
 )
 
 target_include_directories(arv_plugin PUBLIC include)
@@ -23,4 +27,5 @@ target_link_libraries(arv_plugin
     arv_world
   PRIVATE
     ${CMAKE_DL_LIBS}
+    yaml-cpp::yaml-cpp
 )

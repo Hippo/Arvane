@@ -1,7 +1,0 @@
-id: arv_mason:mason_undo
-literal: mason undo
-domain: server_bound
-permission: arv_mason.command.undo
-executor: arv_mason:command/undo
-description: Undo the previous Mason operation.
-usage: /mason undo

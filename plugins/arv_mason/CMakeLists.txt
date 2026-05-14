@@ -3,13 +3,20 @@ project(arv_mason LANGUAGES CXX)
 
 set(ARV_MASON_SOURCES
   src/plugin_main.cpp
-  src/mason_plugin.cpp
   src/config.cpp
+  src/commands/registration.cpp
+  src/commands/player_state.cpp
+  src/commands/selection_commands.cpp
+  src/commands/edit_commands.cpp
+  src/commands/clipboard_commands.cpp
+  src/commands/history_commands.cpp
+  src/commands/blueprint_commands.cpp
   src/selection/selection.cpp
   src/clipboard/clipboard.cpp
   src/operations/operation.cpp
   src/blueprints/blueprint.cpp
   src/history/history.cpp
+  src/world/block_resolution.cpp
 )
 
 add_library(arv_mason SHARED ${ARV_MASON_SOURCES})
@@ -43,6 +50,8 @@ endif()
 
 set(ARV_MASON_PACK_DIR "${CMAKE_BINARY_DIR}/arvane_home/packs/arv_mason")
 add_custom_target(arv_mason_pack ALL
+  COMMAND ${CMAKE_COMMAND} -E remove_directory
+          "${ARV_MASON_PACK_DIR}"
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           "${CMAKE_CURRENT_SOURCE_DIR}/pack"
           "${ARV_MASON_PACK_DIR}"

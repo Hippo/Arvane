@@ -1,0 +1,193 @@
+#include "arv_mason/mason_plugin.hpp"
+
+#include "arv_mason/ids.hpp"
+
+#include <cmath>
+#include <cstdint>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <utility>
+
+namespace arv_mason {
+namespace {
+
+[[nodiscard]] std::string count_text(std::uint64_t count) {
+  std::ostringstream out;
+  out << count;
+  return out.str();
+}
+
+[[nodiscard]] ArvBlockPos floor_block_pos(ArvVec3 position) {
+  return {
+      static_cast<std::int32_t>(std::floor(position.x)),
+      static_cast<std::int32_t>(std::floor(position.y)),
+      static_cast<std::int32_t>(std::floor(position.z)),
+  };
+}
+
+} // namespace
+
+MasonPlayerState* MasonPlugin::state_for(arv::CommandContext& ctx) {
+  const std::optional<ArvPlayerID> player = require_player(ctx);
+  if (!player.has_value()) {
+    ctx.error("This Mason command requires a player.");
+    return nullptr;
+  }
+  MasonPlayerState& state = players_[*player];
+  state.history.set_limit(static_cast<std::size_t>(config_.limits.max_history_entries));
+  if (!state.persistent_loaded) {
+    load_player_state(*player, state);
+    state.persistent_loaded = true;
+  }
+  return &state;
+}
+
+std::optional<ArvPlayerID> MasonPlugin::require_player(arv::CommandContext& ctx) const {
+  return ctx.player();
+}
+
+std::optional<ArvWorldHandle> MasonPlugin::require_world(arv::CommandContext& ctx) const {
+  return ctx.world();
+}
+
+std::optional<ArvBlockPos> MasonPlugin::require_block_position(arv::CommandContext& ctx) const {
+  auto position = ctx.position();
+  if (!position.has_value()) {
+    return std::nullopt;
+  }
+  return floor_block_pos(*position);
+}
+
+bool MasonPlugin::check_custom_permission(
+    arv::CommandContext& ctx,
+    std::string_view permission) const {
+  const std::optional<ArvPlayerID> player = ctx.player();
+  if (!player.has_value()) {
+    return true;
+  }
+  auto checked = plugin_.permissions().check_custom(*player, permission);
+  if (!checked || checked.value != arv::PermissionValue::Allow) {
+    ctx.error("Permission denied: " + std::string{permission} + ".");
+    return false;
+  }
+  return true;
+}
+
+bool MasonPlugin::check_modify_permission(arv::CommandContext& ctx) const {
+  const std::optional<ArvPlayerID> player = ctx.player();
+  if (!player.has_value()) {
+    ctx.error("World edits require a player source.");
+    return false;
+  }
+  auto checked = plugin_.permissions().check_core(*player, arv::CorePermission::CanModifyWorld);
+  if (!checked || !checked.value) {
+    ctx.error("Permission denied: can_modify_world is required.");
+    return false;
+  }
+  return true;
+}
+
+bool MasonPlugin::has_limit_bypass(arv::CommandContext& ctx) const {
+  const std::optional<ArvPlayerID> player = ctx.player();
+  if (!player.has_value()) {
+    return true;
+  }
+  auto checked = plugin_.permissions().check_custom(*player, ids::perm_limit_bypass);
+  return checked && checked.value == arv::PermissionValue::Allow;
+}
+
+bool MasonPlugin::require_limit_or_confirmation(
+    arv::CommandContext& ctx,
+    MasonPlayerState& state,
+    PendingOperation pending,
+    std::uint64_t count,
+    std::uint64_t limit,
+    bool confirmed) {
+  const bool bypass = has_limit_bypass(ctx);
+  if (!bypass && count > limit) {
+    ctx.error(
+        "Operation exceeds limit: " + count_text(count) +
+        " blocks. Limit: " + count_text(limit) + ".");
+    return false;
+  }
+  if (!bypass && !confirmed &&
+      count >= config_.behavior.require_confirmation_above_blocks) {
+    state.pending = std::move(pending);
+    ctx.warn(
+        "Operation affects " + count_text(count) +
+        " blocks. Run /mason confirm to proceed.");
+    return false;
+  }
+  return true;
+}
+
+void MasonPlugin::save_player_state(ArvPlayerID player, const MasonPlayerState& state) const {
+  if (!config_.behavior.save_selection_per_player) {
+    return;
+  }
+  auto document = plugin_.data().create_document(1);
+  if (!document) {
+    return;
+  }
+  const arv::DataDocument& doc = document.value;
+  (void)doc.set_u64("schema_version", 1);
+  (void)doc.set_bool("selection.has_world", state.selection.world.has_value());
+  if (state.selection.world.has_value()) {
+    (void)doc.set_u64("selection.world", *state.selection.world);
+  }
+  (void)doc.set_bool("selection.has_a", state.selection.a.has_value());
+  if (state.selection.a.has_value()) {
+    (void)doc.set_i64("selection.a.x", state.selection.a->x);
+    (void)doc.set_i64("selection.a.y", state.selection.a->y);
+    (void)doc.set_i64("selection.a.z", state.selection.a->z);
+  }
+  (void)doc.set_bool("selection.has_b", state.selection.b.has_value());
+  if (state.selection.b.has_value()) {
+    (void)doc.set_i64("selection.b.x", state.selection.b->x);
+    (void)doc.set_i64("selection.b.y", state.selection.b->y);
+    (void)doc.set_i64("selection.b.z", state.selection.b->z);
+  }
+  (void)plugin_.persistent_data().player(player).save(ids::player_state, doc);
+}
+
+void MasonPlugin::load_player_state(ArvPlayerID player, MasonPlayerState& state) const {
+  if (!config_.behavior.save_selection_per_player) {
+    return;
+  }
+  auto loaded = plugin_.persistent_data().player(player).load(ids::player_state);
+  if (!loaded) {
+    return;
+  }
+  const arv::DataDocument& doc = loaded.value;
+  auto has_world = doc.bool_value("selection.has_world");
+  if (has_world && has_world.value) {
+    auto world = doc.u64_value("selection.world");
+    if (world) {
+      state.selection.world = world.value;
+    }
+  }
+  auto read_pos = [&](std::string_view prefix) -> std::optional<ArvBlockPos> {
+    auto x = doc.i64_value(std::string{prefix} + ".x");
+    auto y = doc.i64_value(std::string{prefix} + ".y");
+    auto z = doc.i64_value(std::string{prefix} + ".z");
+    if (!x || !y || !z) {
+      return std::nullopt;
+    }
+    return ArvBlockPos{
+        static_cast<std::int32_t>(x.value),
+        static_cast<std::int32_t>(y.value),
+        static_cast<std::int32_t>(z.value),
+    };
+  };
+  auto has_a = doc.bool_value("selection.has_a");
+  if (has_a && has_a.value) {
+    state.selection.a = read_pos("selection.a");
+  }
+  auto has_b = doc.bool_value("selection.has_b");
+  if (has_b && has_b.value) {
+    state.selection.b = read_pos("selection.b");
+  }
+}
+
+} // namespace arv_mason

@@ -1,7 +1,0 @@
-id: arv_mason:mason_replace
-literal: mason replace
-domain: server_bound
-permission: arv_mason.command.replace
-executor: arv_mason:command/replace
-description: Replace matching blocks in the current Mason selection.
-usage: /mason replace <from> <to>

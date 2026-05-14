@@ -1,9 +1,9 @@
 #include <arv/buffer.hpp>
+#include <arv/codec.hpp>
 #include <arv/commands.hpp>
 #include <arv/config.hpp>
 #include <arv/context.hpp>
 #include <arv/data.hpp>
-#include <arv/codec.hpp>
 #include <arv/entities.hpp>
 #include <arv/events.hpp>
 #include <arv/gamemode.hpp>
@@ -13,8 +13,8 @@
 #include <arv/permissions.hpp>
 #include <arv/persistent_data.hpp>
 #include <arv/plugin.hpp>
-#include <arv/registries.hpp>
 #include <arv/regions.hpp>
+#include <arv/registries.hpp>
 #include <arv/resources.hpp>
 #include <arv/result.hpp>
 #include <arv/scheduler.hpp>
@@ -94,7 +94,7 @@ int arv_plugin_sdk_cpp_compile_test() {
   metrics.counter_add("test:metric", 1);
   job();
 
-  const arv::Result command_result = plugin.commands().register_executor(
+  const arv::Result command_result = plugin.commands().register_command(
       {
           .executor_id = "test:command",
           .name = "test",

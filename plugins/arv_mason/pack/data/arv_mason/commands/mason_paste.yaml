@@ -1,7 +1,0 @@
-id: arv_mason:mason_paste
-literal: mason paste
-domain: server_bound
-permission: arv_mason.command.paste
-executor: arv_mason:command/paste
-description: Paste the current Mason clipboard.
-usage: /mason paste [--air|--no-air]

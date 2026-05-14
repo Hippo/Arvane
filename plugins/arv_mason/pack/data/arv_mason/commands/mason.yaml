@@ -1,7 +1,0 @@
-id: arv_mason:mason
-literal: mason
-domain: server_bound
-permission: arv_mason.command.use
-executor: arv_mason:command/mason
-description: Mason world editing tools.
-usage: /mason help

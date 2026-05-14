@@ -177,6 +177,14 @@ constexpr u64 FnvPrime = 1099511628211ULL;
   return path_with_extension(relative, extension);
 }
 
+[[nodiscard]] std::filesystem::path logical_root_data_relative_path(
+    const ResourceID& id,
+    std::string_view extension) {
+  std::filesystem::path relative{"data"};
+  relative /= std::filesystem::path{id.path};
+  return path_with_extension(relative, extension);
+}
+
 [[nodiscard]] bool contains_string(std::span<const std::string> values, std::string_view value) noexcept {
   return std::find(values.begin(), values.end(), value) != values.end();
 }
@@ -1296,9 +1304,14 @@ PackPathResult PackManager::resolve_data_path(
   }
   const ResourceID id = std::move(parsed.value());
   const std::filesystem::path relative = logical_data_relative_path(id, extension);
+  const std::filesystem::path root_relative = logical_root_data_relative_path(id, extension);
   if (!is_safe_pack_relative_path(relative)) {
     return PackPathResult::failure(
         pack_error("data resolution", "data path is unsafe", {}, relative, id.string()));
+  }
+  if (!is_safe_pack_relative_path(root_relative)) {
+    return PackPathResult::failure(
+        pack_error("data resolution", "data path is unsafe", {}, root_relative, id.string()));
   }
 
   for (usize reverse_index = stack_.size(); reverse_index > 0U; --reverse_index) {
@@ -1312,6 +1325,11 @@ PackPathResult PackManager::resolve_data_path(
     if (file_exists_inside_root(pack.root, path)) {
       return PackPathResult::success(
           {index, pack.manifest.id, pack.manifest.version, relative, path});
+    }
+    const std::filesystem::path root_path = pack.root / root_relative;
+    if (file_exists_inside_root(pack.root, root_path)) {
+      return PackPathResult::success(
+          {index, pack.manifest.id, pack.manifest.version, root_relative, root_path});
     }
   }
 
@@ -1329,18 +1347,59 @@ std::vector<PackDataFile> PackManager::data_files(
     if (!pack.manifest.capabilities.data) {
       continue;
     }
+    const std::filesystem::path root_data = pack.root / "data";
+    const std::filesystem::path root_category_file =
+        path_with_extension(root_data / std::string{category}, extension);
+    if (file_exists_inside_root(pack.root, root_category_file)) {
+      files.push_back({pack_index,
+                       pack.manifest.id,
+                       pack.manifest.version,
+                       {},
+                       relative_to_pack(pack, root_category_file),
+                       root_category_file});
+    }
+    const std::filesystem::path root_directory = root_data / std::string{category};
+    if (directory_exists_inside_root(pack.root, root_directory)) {
+      std::vector<PackDataFile> root_directory_files;
+      for (const std::filesystem::directory_entry& entry :
+           std::filesystem::recursive_directory_iterator(
+               root_directory,
+               std::filesystem::directory_options::skip_permission_denied,
+               error)) {
+        if (error) {
+          error.clear();
+          continue;
+        }
+        if (!file_exists_inside_root(pack.root, entry.path())) {
+          error.clear();
+          continue;
+        }
+        if (!extension.empty() && entry.path().extension() != extension) {
+          continue;
+        }
+        root_directory_files.push_back({pack_index,
+                                        pack.manifest.id,
+                                        pack.manifest.version,
+                                        {},
+                                        relative_to_pack(pack, entry.path()),
+                                        entry.path()});
+      }
+      std::sort(root_directory_files.begin(), root_directory_files.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.relative_path.generic_string() < rhs.relative_path.generic_string();
+      });
+      files.insert(files.end(), root_directory_files.begin(), root_directory_files.end());
+    }
     for (const std::string& name_space : pack.manifest.namespaces) {
       const std::filesystem::path namespace_root = pack.root / "data" / name_space;
       const std::filesystem::path category_file =
           path_with_extension(namespace_root / std::string{category}, extension);
       if (file_exists_inside_root(pack.root, category_file)) {
-        files.push_back({
-            pack_index,
-            pack.manifest.id,
-            pack.manifest.version,
-            name_space,
-            relative_to_pack(pack, category_file),
-            category_file});
+        files.push_back({pack_index,
+                         pack.manifest.id,
+                         pack.manifest.version,
+                         name_space,
+                         relative_to_pack(pack, category_file),
+                         category_file});
       }
       const std::filesystem::path directory = namespace_root / std::string{category};
       if (!directory_exists_inside_root(pack.root, directory)) {
@@ -1364,13 +1423,12 @@ std::vector<PackDataFile> PackManager::data_files(
         if (!extension.empty() && entry.path().extension() != extension) {
           continue;
         }
-        directory_files.push_back({
-            pack_index,
-            pack.manifest.id,
-            pack.manifest.version,
-            name_space,
-            relative_to_pack(pack, entry.path()),
-            entry.path()});
+        directory_files.push_back({pack_index,
+                                   pack.manifest.id,
+                                   pack.manifest.version,
+                                   name_space,
+                                   relative_to_pack(pack, entry.path()),
+                                   entry.path()});
       }
       std::sort(directory_files.begin(), directory_files.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.relative_path.generic_string() < rhs.relative_path.generic_string();
@@ -1392,18 +1450,26 @@ std::vector<PackDataFile> PackManager::data_files_at(std::string_view relative_p
     if (!pack.manifest.capabilities.data) {
       continue;
     }
+    const std::filesystem::path root_path = pack.root / "data" / relative_logical;
+    if (file_exists_inside_root(pack.root, root_path)) {
+      files.push_back({pack_index,
+                       pack.manifest.id,
+                       pack.manifest.version,
+                       {},
+                       relative_to_pack(pack, root_path),
+                       root_path});
+    }
     for (const std::string& name_space : pack.manifest.namespaces) {
       const std::filesystem::path path = pack.root / "data" / name_space / relative_logical;
       if (!file_exists_inside_root(pack.root, path)) {
         continue;
       }
-      files.push_back({
-          pack_index,
-          pack.manifest.id,
-          pack.manifest.version,
-          name_space,
-          relative_to_pack(pack, path),
-          path});
+      files.push_back({pack_index,
+                       pack.manifest.id,
+                       pack.manifest.version,
+                       name_space,
+                       relative_to_pack(pack, path),
+                       path});
     }
   }
   return files;
@@ -1593,13 +1659,12 @@ std::vector<RequiredPack> PackManager::required_packs() const {
     if (!pack.manifest.capabilities.data) {
       continue;
     }
-    required.push_back({
-        pack.manifest.id,
-        pack.manifest.version,
-        pack.content_hash,
-        pack.manifest.side,
-        pack.manifest.namespaces,
-        false});
+    required.push_back({pack.manifest.id,
+                        pack.manifest.version,
+                        pack.content_hash,
+                        pack.manifest.side,
+                        pack.manifest.namespaces,
+                        false});
   }
   return required;
 }

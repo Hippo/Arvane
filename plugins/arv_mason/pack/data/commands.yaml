@@ -1,0 +1,27 @@
+schema_version: 1
+
+aliases:
+  - alias: mselect
+    command: mason.select
+    visible_in_help: true
+  - alias: mset
+    command: mason.set
+    visible_in_help: true
+  - alias: mreplace
+    command: mason.replace
+    visible_in_help: true
+  - alias: mcopy
+    command: mason.copy
+    visible_in_help: true
+  - alias: mpaste
+    command: mason.paste
+    visible_in_help: true
+  - alias: mundo
+    command: mason.undo
+    visible_in_help: true
+  - alias: mredo
+    command: mason.redo
+    visible_in_help: true
+  - alias: mbp
+    command: mason.blueprint
+    visible_in_help: true

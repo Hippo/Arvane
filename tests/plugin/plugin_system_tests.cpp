@@ -272,6 +272,16 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
       "arv_mason",
       ARV_TEST_MASON_PLUGIN_PATH);
   write_plugin_pack(harness.packs, "arv_mason", relative);
+  write_text(
+      harness.packs / "arv_mason" / "data" / "commands.yaml",
+      "schema_version: 1\n"
+      "aliases:\n"
+      "  - alias: mcopy\n"
+      "    command: mason.copy\n"
+      "    visible_in_help: true\n"
+      "  - alias: mbp\n"
+      "    command: mason.blueprint\n"
+      "    visible_in_help: true\n");
   harness.load_packs();
 
   arv::plugin::PluginManager manager;
@@ -283,8 +293,13 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   arv::command::CommandRegistry registry;
   manager.register_commands(registry);
   EXPECT_NE(registry.find("mason"), nullptr);
-  EXPECT_NE(registry.find("mcopy"), nullptr);
-  EXPECT_NE(registry.find("mbp"), nullptr);
+  EXPECT_NE(registry.find("mason.copy"), nullptr);
+  auto copy_alias = registry.resolve("mcopy");
+  ASSERT_TRUE(copy_alias.has_value());
+  EXPECT_EQ(copy_alias->canonical_name, "mason.copy");
+  auto blueprint_alias = registry.resolve("mbp");
+  ASSERT_TRUE(blueprint_alias.has_value());
+  EXPECT_EQ(blueprint_alias->canonical_name, "mason.blueprint");
 
   arv::command::CommandSender sender;
   sender.kind = arv::command::CommandSourceKind::ServerConsole;

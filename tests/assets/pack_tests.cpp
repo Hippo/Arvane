@@ -48,16 +48,19 @@ void write_pack_manifest(
   write_text(
       packs_root / std::string{id} / "pack.yaml",
       "schema_version: 1\n"
-      "id: \"" + std::string{id} + "\"\n"
-      "display_name: \"" + std::string{id} + "\"\n"
-      "version: \"1.0.0\"\n"
-      "namespaces:\n" +
+      "id: \"" +
+          std::string{id} + "\"\n"
+                            "display_name: \"" +
+          std::string{id} + "\"\n"
+                            "version: \"1.0.0\"\n"
+                            "namespaces:\n" +
           std::string{namespaces} +
           "side: \"" + std::string{side} + "\"\n"
-          "dependencies: []\n"
-          "load_after: []\n"
-          "load_before: []\n"
-          "capabilities:\n  " + std::string{capabilities} +
+                                           "dependencies: []\n"
+                                           "load_after: []\n"
+                                           "load_before: []\n"
+                                           "capabilities:\n  " +
+          std::string{capabilities} +
           std::string{extra});
 }
 
@@ -76,10 +79,13 @@ std::string native_manifest_extra(
     std::string_view api_version = "1",
     std::string_view entrypoint = "arvane_plugin_main") {
   return "native:\n"
-         "  api_version: " + std::string{api_version} + "\n"
-         "  entrypoint: \"" + std::string{entrypoint} + "\"\n"
-         "  libraries:\n"
-         "    " + arv::asset::native_plugin_platform_key() + ": \"" +
+         "  api_version: " +
+         std::string{api_version} + "\n"
+                                    "  entrypoint: \"" +
+         std::string{entrypoint} + "\"\n"
+                                   "  libraries:\n"
+                                   "    " +
+         arv::asset::native_plugin_platform_key() + ": \"" +
          std::string{library_path} + "\"\n";
 }
 
@@ -288,6 +294,33 @@ TEST(PackDataTests, RejectsDuplicateDefinitionsWithoutOverride) {
   auto merged = manager.value().load_merged_json_array_text("blocks", "blocks");
   EXPECT_FALSE(merged);
   EXPECT_NE(merged.error().describe().find("duplicate definition"), std::string::npos);
+}
+
+TEST(PackDataTests, LoadsCondensedRootDataFiles) {
+  ScopedTempDir temp("arvane_pack_data_root_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_enabled(packs, "enabled:\n  - \"arvane_base\"\n");
+  write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
+  write_text(
+      packs / "arvane_base/data/blocks.json",
+      "{\"blocks\":[{\"name\":\"arvane:stone\"}]}\n");
+  write_text(
+      packs / "arvane_base/data/commands.yaml",
+      "schema_version: 1\naliases: []\n");
+
+  auto manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(manager) << manager.error().describe();
+  auto merged = manager.value().load_merged_json_array_text("blocks", "blocks");
+  ASSERT_TRUE(merged) << merged.error().describe();
+  EXPECT_NE(merged.value().find("\"name\": \"arvane:stone\""), std::string::npos);
+
+  auto resolved = manager.value().resolve_data_path("arvane:blocks", ".json");
+  ASSERT_TRUE(resolved) << resolved.error().describe();
+  EXPECT_EQ(resolved.value().relative_path.generic_string(), "data/blocks.json");
+
+  const auto command_files = manager.value().data_files_at("commands.yaml");
+  ASSERT_EQ(command_files.size(), 1U);
+  EXPECT_EQ(command_files.front().relative_path.generic_string(), "data/commands.yaml");
 }
 
 TEST(PackDataTests, AllowsExplicitOverrideAndRejectsNamespaceSquatting) {

@@ -142,7 +142,7 @@ public:
   }
 
   template<typename Handler>
-  [[nodiscard]] Result register_executor(
+  [[nodiscard]] Result register_command(
       const CommandDescriptor& descriptor,
       Handler&& handler) const {
     if (api_ == nullptr || api_->commands == nullptr ||
@@ -171,6 +171,13 @@ public:
       state.release();
     }
     return result;
+  }
+
+  template<typename Handler>
+  [[nodiscard]] Result register_executor(
+      const CommandDescriptor& descriptor,
+      Handler&& handler) const {
+    return register_command(descriptor, std::forward<Handler>(handler));
   }
 
 private:

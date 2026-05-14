@@ -1,6 +1,9 @@
 #include "arv/plugin/plugin_manager.hpp"
 
 #include "dynamic_library.hpp"
+#include "plugin_alias_data.hpp"
+#include "plugin_native_loading.hpp"
+#include "plugin_paths.hpp"
 
 #include "arv/asset/resource.hpp"
 #include "arv/core/log.hpp"
@@ -312,71 +315,6 @@ private:
   return std::nullopt;
 }
 
-[[nodiscard]] std::filesystem::path config_relative_path_for(
-    const asset::ResourceID& id) {
-  std::filesystem::path path{id.name_space};
-  path /= std::filesystem::path{id.path};
-  if (path.extension().empty()) {
-    path += ".yaml";
-  }
-  return path;
-}
-
-[[nodiscard]] std::filesystem::path data_relative_path_for(
-    const asset::ResourceID& id,
-    std::string_view extension) {
-  std::filesystem::path path{id.name_space};
-  path /= std::filesystem::path{id.path};
-  if (!extension.empty()) {
-    path += std::string{extension};
-  }
-  return path;
-}
-
-[[nodiscard]] bool path_is_under_lexically(
-    const std::filesystem::path& root,
-    const std::filesystem::path& path) {
-  const std::filesystem::path normalized_root =
-      std::filesystem::absolute(root).lexically_normal();
-  const std::filesystem::path normalized_path =
-      std::filesystem::absolute(path).lexically_normal();
-  auto root_it = normalized_root.begin();
-  auto path_it = normalized_path.begin();
-  for (; root_it != normalized_root.end(); ++root_it, ++path_it) {
-    if (path_it == normalized_path.end() || *path_it != *root_it) {
-      return false;
-    }
-  }
-  return true;
-}
-
-[[nodiscard]] std::optional<std::filesystem::path> resolve_native_library_path(
-    const asset::PackSource& pack,
-    std::string_view platform_key,
-    std::string& error) {
-  if (!pack.manifest.native.has_value()) {
-    error = "pack does not declare native metadata";
-    return std::nullopt;
-  }
-  const auto found = pack.manifest.native->libraries.find(std::string{platform_key});
-  if (found == pack.manifest.native->libraries.end()) {
-    error = "native.libraries is missing current platform key: " +
-            std::string{platform_key};
-    return std::nullopt;
-  }
-  const std::filesystem::path path = (pack.root / found->second).lexically_normal();
-  if (!path_is_under_lexically(pack.root, path)) {
-    error = "native library path escapes pack root: " + found->second.generic_string();
-    return std::nullopt;
-  }
-  if (!native_library_extension_matches_platform(path)) {
-    error = "native library extension does not match platform: " +
-            found->second.generic_string();
-    return std::nullopt;
-  }
-  return path;
-}
-
 [[nodiscard]] ArvResult null_context_result(
     ArvResultCode code,
     const char* message) noexcept {
@@ -686,17 +624,24 @@ struct PluginCallContext {
   return parsed.value();
 }
 
+void append_diagnostic(PluginManagerImpl& impl, PluginError diagnostic);
+
 void append_diagnostic(
     PluginManagerImpl& impl,
     std::string pack_id,
     std::string phase,
     std::filesystem::path file,
     std::string message) {
-  PluginError diagnostic{
-      std::move(pack_id),
-      std::move(phase),
-      std::move(file),
-      std::move(message)};
+  append_diagnostic(
+      impl,
+      PluginError{
+          std::move(pack_id),
+          std::move(phase),
+          std::move(file),
+          std::move(message)});
+}
+
+void append_diagnostic(PluginManagerImpl& impl, PluginError diagnostic) {
   core::warn("plugin", diagnostic.describe());
   impl.diagnostics.push_back(std::move(diagnostic));
 }
@@ -3298,11 +3243,30 @@ void api_text_release(void* context, ArvTextHandle text) {
 bool permission_node_owned_by_plugin(
     const PluginInfo& info,
     std::string_view node) {
+  auto matches_domain = [](std::string_view value, std::string_view domain) {
+    return value == domain ||
+           (value.size() > domain.size() &&
+            value.substr(0, domain.size()) == domain &&
+            value[domain.size()] == '.');
+  };
   for (const std::string& name_space : info.namespaces) {
-    if (node == name_space ||
-        (node.size() > name_space.size() &&
-         node.substr(0, name_space.size()) == name_space &&
-         node[name_space.size()] == '.')) {
+    if (matches_domain(node, name_space)) {
+      return true;
+    }
+    constexpr std::string_view first_party_prefix = "arv_";
+    if (std::string_view{name_space}.starts_with(first_party_prefix)) {
+      const std::string_view short_domain =
+          std::string_view{name_space}.substr(first_party_prefix.size());
+      if (matches_domain(node, short_domain)) {
+        return true;
+      }
+    }
+  }
+  constexpr std::string_view first_party_prefix = "arv_";
+  if (std::string_view{info.pack_id}.starts_with(first_party_prefix)) {
+    const std::string_view short_domain =
+        std::string_view{info.pack_id}.substr(first_party_prefix.size());
+    if (matches_domain(node, short_domain)) {
       return true;
     }
   }
@@ -3641,7 +3605,8 @@ void fill_region_info(
     error_message = "plugin persistent data root is unavailable";
     return std::nullopt;
   }
-  return root / "regions" / data_relative_path_for(parsed.value(), ".region");
+  return root / "regions" /
+         detail::data_relative_path_for(parsed.value(), ".region");
 }
 
 [[nodiscard]] world::Region make_region_from_definition(
@@ -5043,31 +5008,6 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
 
 } // namespace
 
-std::string PluginError::describe() const {
-  std::string text;
-  if (!phase.empty()) {
-    text += phase;
-    text += ": ";
-  }
-  text += message;
-  if (!pack_id.empty()) {
-    text += " (pack ";
-    text += pack_id;
-    text += ")";
-  }
-  if (!file.empty()) {
-    text += " [file ";
-    text += file.generic_string();
-    text += "]";
-  }
-  return text;
-}
-
-bool NativePluginPolicy::allows(std::string_view pack_id) const noexcept {
-  return std::find(allowed_packs.begin(), allowed_packs.end(), pack_id) !=
-         allowed_packs.end();
-}
-
 PluginManager::PluginManager() : impl_(std::make_unique<PluginManagerImpl>()) {
 }
 
@@ -5150,7 +5090,7 @@ PluginResult PluginManager::load_plugins(PluginLoadOptions options) {
 
     std::string path_error;
     std::optional<std::filesystem::path> library_path =
-        resolve_native_library_path(pack, platform_key, path_error);
+        detail::resolve_native_library_path(pack, platform_key, path_error);
     if (!library_path.has_value()) {
       record.info.state = PluginState::Failed;
       record.info.diagnostics.push_back(path_error);
@@ -5280,6 +5220,30 @@ void PluginManager::register_commands(command::CommandRegistry& registry) {
           "command registration",
           {},
           result.error().message);
+    }
+  }
+  for (const PluginRecord& plugin : impl_->plugins) {
+    if (plugin.pack == nullptr || plugin.info.state != PluginState::Initialized) {
+      continue;
+    }
+    detail::PluginCommandAliasLoadResult aliases =
+        detail::load_command_aliases_from_data(*plugin.pack, plugin.info);
+    for (PluginError& diagnostic : aliases.diagnostics) {
+      append_diagnostic(*impl_, std::move(diagnostic));
+    }
+    for (detail::PluginCommandAliasData& alias : aliases.aliases) {
+      auto result = registry.register_alias(
+          std::move(alias.alias),
+          std::move(alias.command_name),
+          alias.visible_in_help);
+      if (!result) {
+        append_diagnostic(
+            *impl_,
+            plugin.info.pack_id,
+            "command alias data",
+            aliases.source_file,
+            result.error().message);
+      }
     }
   }
 }
@@ -5601,57 +5565,6 @@ std::vector<std::string> PluginManager::registered_extension_ids(
     }
   }
   return ids;
-}
-
-const char* plugin_state_name(PluginState state) noexcept {
-  switch (state) {
-    case PluginState::Discovered:
-      return "Discovered";
-    case PluginState::SkippedByPolicy:
-      return "SkippedByPolicy";
-    case PluginState::Loaded:
-      return "Loaded";
-    case PluginState::Initialized:
-      return "Initialized";
-    case PluginState::Failed:
-      return "Failed";
-    case PluginState::ShuttingDown:
-      return "ShuttingDown";
-    case PluginState::Shutdown:
-      return "Shutdown";
-  }
-  return "Unknown";
-}
-
-std::string current_native_platform_key() {
-#if defined(_WIN32)
-  constexpr std::string_view os = "windows";
-#elif defined(__APPLE__)
-  constexpr std::string_view os = "macos";
-#elif defined(__linux__)
-  constexpr std::string_view os = "linux";
-#else
-  constexpr std::string_view os = "unknown";
-#endif
-
-#if defined(__x86_64__) || defined(_M_X64)
-  constexpr std::string_view arch = "x86_64";
-#elif defined(__aarch64__) || defined(_M_ARM64)
-  constexpr std::string_view arch = "arm64";
-#else
-  constexpr std::string_view arch = "unknown";
-#endif
-  return std::string{os} + "-" + std::string{arch};
-}
-
-bool native_library_extension_matches_platform(const std::filesystem::path& path) {
-#if defined(_WIN32)
-  return path.extension() == ".dll";
-#elif defined(__APPLE__)
-  return path.extension() == ".dylib";
-#else
-  return path.extension() == ".so";
-#endif
 }
 
 } // namespace arv::plugin

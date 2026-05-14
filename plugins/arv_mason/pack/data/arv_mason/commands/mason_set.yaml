@@ -1,7 +1,0 @@
-id: arv_mason:mason_set
-literal: mason set
-domain: server_bound
-permission: arv_mason.command.set
-executor: arv_mason:command/set
-description: Fill the current Mason selection.
-usage: /mason set <block_state>

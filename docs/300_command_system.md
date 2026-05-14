@@ -1126,7 +1126,7 @@ Plugins may register commands through the command registry.
 Plugin command rules:
 
 * plugin command names must not collide with existing commands unless override is explicitly allowed
-* plugin permission nodes should use plugin namespaces
+* plugin permission nodes should use a stable plugin namespace or public plugin domain
 * plugin argument validators may be registered for plugin-specific types
 * plugin commands must declare their domain
 * server-bound plugin commands must use the same permission pipeline as native commands

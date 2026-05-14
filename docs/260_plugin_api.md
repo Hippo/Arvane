@@ -218,11 +218,11 @@ Rules:
 Plugin packs should define content through pack data:
 
 ```text
-data/example_plugin_pack/blocks/glowing_block.yaml
-data/example_plugin_pack/items/glowing_wand.yaml
-data/example_plugin_pack/entities/crystal_golem.yaml
-data/example_plugin_pack/worldgen/features/crystal_cluster.yaml
-data/example_plugin_pack/commands/heal.yaml
+data/blocks.yaml
+data/items.yaml
+data/entities.yaml
+data/worldgen/features/crystal_cluster.yaml
+data/commands.yaml
 ```
 
 Native plugin code registers behavior referenced by that data.
@@ -797,15 +797,21 @@ The scheduler should automatically cancel all outstanding jobs owned by a plugin
 
 ## Command API
 
-Commands are registry-backed and should integrate with pack data.
+Commands are registry-backed. Native command definitions should be registered in
+code, because the native implementation is the source of truth for static
+metadata and behavior.
 
-Command definitions may live in pack data:
+Do not create JSON or YAML files that merely duplicate native command metadata:
 
-```text
-data/<namespace>/commands/
+```yaml
+name: heal
+description: Restores health.
+permission: example_plugin_pack.command.heal
 ```
 
-Native plugins register command executors for command IDs.
+The C ABI registers a command executor descriptor. The preferred C++ SDK wrapper
+name is `register_command`; `register_executor` remains available as a
+compatibility alias.
 
 SDK ABI shape:
 
@@ -837,33 +843,41 @@ typedef struct ArvCommandAPI {
 Rules:
 
 * command IDs are resource IDs
-* command syntax and metadata should be data-driven where possible
-* native code supplies execution behavior
+* native command descriptors own command name, domain, permission, description, usage, and callback
+* data files should configure runtime policy or behavior, not duplicate static native metadata
+* good uses for `data/commands.yaml` include aliases, command enable/disable configuration, permission overrides, command limits, macro commands, and scripted commands
 * server-bound commands execute on the server and require permission checks
 * client-bound commands execute locally and must not require server permission
 * command output should use the Text API so colors, hover events, and click events remain structured
 
 Example:
 
-```yaml
-id: example_plugin_pack:heal
-literal: "heal"
-domain: server_bound
-permission: example_plugin_pack.command.heal
-executor: example_plugin_pack:heal_executor
-```
-
 ```cpp
-plugin.commands().register_executor(
+plugin.commands().register_command(
     {
         .executor_id = "example_plugin_pack:heal",
         .name = "heal",
         .domain = arv::CommandDomain::ServerBound,
+        .permission = "example_plugin_pack.command.heal",
+        .description = "Restores health.",
+        .usage = "/heal",
     },
     [](arv::CommandContext& ctx) {
         ctx.success("Healed.");
     }
 );
+```
+
+Data may add policy or aliases:
+
+```yaml
+# data/commands.yaml
+schema_version: 1
+
+aliases:
+  - alias: h
+    command: heal
+    visible_in_help: false
 ```
 
 ---
@@ -883,7 +897,7 @@ struct PermissionAPI {
 
 Rules:
 
-* permission IDs should be namespaced
+* permission nodes should use a stable plugin namespace or public plugin domain
 * command execution must check permissions on the authoritative side
 * permissions should be stable across server restarts
 * permission registration should happen during plugin registration
@@ -893,9 +907,14 @@ Examples:
 
 ```text
 example_plugin_pack.command.heal
+mason.command.set
 example_plugin_pack.admin.reload
 claims.region.bypass
 ```
+
+First-party plugin pack IDs may keep an `arv_` prefix for code and pack identity
+while exposing the shorter public permission domain. For example, the
+`arv_mason` pack owns the `mason.*` permission nodes.
 
 ---
 
@@ -2264,20 +2283,20 @@ If a packet depends on optional client-visible content from packs, the server mu
 
 World generation is primarily data-driven.
 
-Plugins should usually extend world generation by adding data files under their pack namespace:
+Plugins should usually extend world generation by adding data files under the pack data root:
 
 ```text
-data/<namespace>/worldgen/
-data/<namespace>/biomes/
-data/<namespace>/dimensions/
+data/worldgen/
+data/biomes.yaml
+data/dimensions.yaml
 ```
 
 Examples:
 
 ```text
-data/better_oceans/biomes/kelp_forest.yaml
-data/better_oceans/worldgen/features/coral_patch.yaml
-data/better_oceans/worldgen/generators/ocean_world.yaml
+data/biomes.yaml
+data/worldgen/features/coral_patch.yaml
+data/worldgen/generators/ocean_world.yaml
 ```
 
 The engine’s worldgen data model owns:
@@ -2743,16 +2762,17 @@ Rules:
 Pack data:
 
 ```yaml
-# data/example_plugin_pack/blocks/glowing_block.yaml
+# data/blocks.yaml
 
-id: example_plugin_pack:glowing_block
-version: 1
+blocks:
+  - id: example_plugin_pack:glowing_block
+    version: 1
 
-display_name: "Glowing Block"
-behavior: example_plugin_pack:glowing_block_behavior
+    display_name: "Glowing Block"
+    behavior: example_plugin_pack:glowing_block_behavior
 
-presentation:
-  model: example_plugin_pack:model/block/glowing_block
+    presentation:
+      model: example_plugin_pack:model/block/glowing_block
 ```
 
 Plugin code:
@@ -2765,11 +2785,14 @@ ARV_MAIN(plugin) {
         "example_plugin_pack:glowing_block_behavior"
     );
 
-    plugin.commands().register_executor(
+    plugin.commands().register_command(
         {
             .executor_id = "example_plugin_pack:heal",
             .name = "heal",
             .domain = arv::CommandDomain::ServerBound,
+            .permission = "example_plugin_pack.command.heal",
+            .description = "Restores health.",
+            .usage = "/heal",
         },
         [](arv::CommandContext& ctx) {
             ctx.success("Healed.");
@@ -2790,15 +2813,13 @@ ARV_MAIN(plugin) {
 Command data:
 
 ```yaml
-# data/example_plugin_pack/commands/heal.yaml
+# data/commands.yaml
+schema_version: 1
 
-id: example_plugin_pack:heal
-version: 1
-
-literal: "heal"
-domain: server_bound
-permission: example_plugin_pack.command.heal
-executor: example_plugin_pack:heal
+aliases:
+  - alias: h
+    command: heal
+    visible_in_help: false
 ```
 
 ---
