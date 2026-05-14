@@ -1,5 +1,7 @@
 #include "arv/io/config.hpp"
 
+#include "arv/io/codec.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -16,6 +18,23 @@
 #ifndef ARVANE_PROJECT_ROOT
 #define ARVANE_PROJECT_ROOT ""
 #endif
+
+namespace arv {
+
+template<>
+struct Codec<io::EngineConfig> {
+  [[nodiscard]] static io::ConfigResult decode_yaml(std::string_view text);
+  [[nodiscard]] static io::TextFileResult encode_yaml(const YAML::Emitter& emitter);
+};
+
+template<>
+struct Codec<std::vector<io::SavedServerListEntry>> {
+  [[nodiscard]] static io::ServerListResult decode_json(std::string_view text);
+  [[nodiscard]] static io::TextFileResult encode_json(
+      std::span<const io::SavedServerListEntry> servers);
+};
+
+} // namespace arv
 
 namespace arv::io {
 namespace {
@@ -42,6 +61,10 @@ void emit_network_keep_alive_config(
     YAML::Emitter& emitter,
     const KeepAliveConfig& keep_alive);
 void emit_jobs_config(YAML::Emitter& emitter, const JobSystemConfig& jobs);
+ConfigResult write_emitted_config_file(
+    const std::filesystem::path& path,
+    const YAML::Emitter& emitter,
+    const EngineConfig& config);
 
 template<typename T>
 void read_scalar(const YAML::Node& parent, const char* key, T& value) {
@@ -931,20 +954,7 @@ ConfigResult save_default_config_file(const std::filesystem::path& path, const E
   emitter << YAML::EndMap;
   emitter << YAML::EndMap;
 
-  std::ofstream output(path, std::ios::trunc);
-  if (!output) {
-    return ConfigResult::failure(
-        ConfigError{"failed to open config file for write: " + path.string()});
-  }
-  output << emitter.c_str();
-  output << '\n';
-  output.flush();
-  if (!output) {
-    return ConfigResult::failure(
-        ConfigError{"failed to write config file: " + path.string()});
-  }
-
-  return ConfigResult::success(config);
+  return write_emitted_config_file(path, emitter, config);
 }
 
 void emit_skins_config(YAML::Emitter& emitter, const SkinConfig& skins) {
@@ -1186,13 +1196,17 @@ ConfigResult write_emitted_config_file(
     }
   }
 
+  auto encoded = Codec<EngineConfig>::encode_yaml(emitter);
+  if (!encoded) {
+    return ConfigResult::failure(encoded.error());
+  }
+
   std::ofstream output(path, std::ios::trunc);
   if (!output) {
     return ConfigResult::failure(
         ConfigError{"failed to open config file for write: " + path.string()});
   }
-  output << emitter.c_str();
-  output << '\n';
+  output << encoded.value();
   output.flush();
   if (!output) {
     return ConfigResult::failure(
@@ -2157,7 +2171,7 @@ void resolve_runtime_paths(const ConfigLoadOptions& options, EngineConfig& confi
       resolve_project_relative(config.paths.project_root, server_list_file);
 }
 
-ConfigResult parse_config_yaml(std::string_view text) {
+ConfigResult decode_engine_config_yaml(std::string_view text) {
   EngineConfig config = default_config();
 
   try {
@@ -2176,6 +2190,33 @@ ConfigResult parse_config_yaml(std::string_view text) {
   }
 
   return ConfigResult::success(std::move(config));
+}
+
+} // namespace arv::io
+
+namespace arv {
+
+io::ConfigResult Codec<io::EngineConfig>::decode_yaml(std::string_view text) {
+  return io::decode_engine_config_yaml(text);
+}
+
+io::TextFileResult Codec<io::EngineConfig>::encode_yaml(const YAML::Emitter& emitter) {
+  if (!emitter.good()) {
+    return io::TextFileResult::failure(
+        io::ConfigError{"failed to encode config YAML: " +
+                        std::string{emitter.GetLastError()}});
+  }
+  std::string text = emitter.c_str();
+  text.push_back('\n');
+  return io::TextFileResult::success(std::move(text));
+}
+
+} // namespace arv
+
+namespace arv::io {
+
+ConfigResult parse_config_yaml(std::string_view text) {
+  return Codec<EngineConfig>::decode_yaml(text);
 }
 
 ConfigResult load_config_file(const std::filesystem::path& path) {
@@ -2392,6 +2433,63 @@ TextFileResult read_text_file(const std::filesystem::path& path, std::string_vie
   return TextFileResult::success(buffer.str());
 }
 
+} // namespace arv::io
+
+namespace arv {
+
+io::ServerListResult Codec<std::vector<io::SavedServerListEntry>>::decode_json(
+    std::string_view text) {
+  try {
+    const nlohmann::json root = nlohmann::json::parse(text);
+    const nlohmann::json* servers = &root;
+    if (root.is_object()) {
+      const auto found = root.find("servers");
+      if (found == root.end()) {
+        return io::ServerListResult::success({});
+      }
+      servers = &*found;
+    }
+    if (!servers->is_array()) {
+      return io::ServerListResult::failure(
+          io::ConfigError{"server list must be an array or object with a servers array"});
+    }
+
+    std::vector<io::SavedServerListEntry> entries;
+    entries.reserve(servers->size());
+    for (const nlohmann::json& entry : *servers) {
+      if (!entry.is_object() ||
+          !entry.contains("name") ||
+          !entry.contains("address") ||
+          !entry.at("name").is_string() ||
+          !entry.at("address").is_string()) {
+        return io::ServerListResult::failure(
+            io::ConfigError{"server list entries must contain string name and address fields"});
+      }
+
+      entries.push_back({entry.at("name").get<std::string>(),
+                         entry.at("address").get<std::string>()});
+    }
+    return io::ServerListResult::success(std::move(entries));
+  } catch (const nlohmann::json::exception& ex) {
+    return io::ServerListResult::failure(
+        io::ConfigError{"failed to parse server list file: " + std::string{ex.what()}});
+  }
+}
+
+io::TextFileResult Codec<std::vector<io::SavedServerListEntry>>::encode_json(
+    std::span<const io::SavedServerListEntry> servers) {
+  nlohmann::json server_array = nlohmann::json::array();
+  for (const io::SavedServerListEntry& server : servers) {
+    server_array.push_back({{"name", server.name}, {"address", server.address}});
+  }
+  const nlohmann::json root{{"version", 1}, {"servers", std::move(server_array)}};
+  return io::TextFileResult::success(root.dump(2) + '\n');
+}
+
+} // namespace arv
+
+namespace arv::io {
+
 ServerListResult load_server_list_file(const std::filesystem::path& path) {
   std::error_code file_error;
   if (!std::filesystem::exists(path, file_error)) {
@@ -2402,47 +2500,11 @@ ServerListResult load_server_list_file(const std::filesystem::path& path) {
     return ServerListResult::success({});
   }
 
-  std::ifstream input(path);
-  if (!input) {
-    return ServerListResult::failure(
-        ConfigError{"failed to open server list file: " + path.string()});
+  auto text = read_text_file(path, "server list file");
+  if (!text) {
+    return ServerListResult::failure(text.error());
   }
-
-  try {
-    const nlohmann::json root = nlohmann::json::parse(input);
-    const nlohmann::json* servers = &root;
-    if (root.is_object()) {
-      const auto found = root.find("servers");
-      if (found == root.end()) {
-        return ServerListResult::success({});
-      }
-      servers = &*found;
-    }
-    if (!servers->is_array()) {
-      return ServerListResult::failure(
-          ConfigError{"server list must be an array or object with a servers array"});
-    }
-
-    std::vector<SavedServerListEntry> entries;
-    entries.reserve(servers->size());
-    for (const nlohmann::json& entry : *servers) {
-      if (!entry.is_object() ||
-          !entry.contains("name") ||
-          !entry.contains("address") ||
-          !entry.at("name").is_string() ||
-          !entry.at("address").is_string()) {
-        return ServerListResult::failure(
-            ConfigError{"server list entries must contain string name and address fields"});
-      }
-
-      entries.push_back({entry.at("name").get<std::string>(),
-                         entry.at("address").get<std::string>()});
-    }
-    return ServerListResult::success(std::move(entries));
-  } catch (const nlohmann::json::exception& ex) {
-    return ServerListResult::failure(
-        ConfigError{"failed to parse server list file: " + std::string{ex.what()}});
-  }
+  return Codec<std::vector<SavedServerListEntry>>::decode_json(text.value());
 }
 
 ServerListSaveResult save_server_list_file(
@@ -2458,18 +2520,17 @@ ServerListSaveResult save_server_list_file(
     }
   }
 
-  nlohmann::json server_array = nlohmann::json::array();
-  for (const SavedServerListEntry& server : servers) {
-    server_array.push_back({{"name", server.name}, {"address", server.address}});
+  auto encoded = Codec<std::vector<SavedServerListEntry>>::encode_json(servers);
+  if (!encoded) {
+    return ServerListSaveResult::failure(encoded.error());
   }
-  const nlohmann::json root{{"version", 1}, {"servers", std::move(server_array)}};
 
   std::ofstream output(path, std::ios::trunc);
   if (!output) {
     return ServerListSaveResult::failure(
         ConfigError{"failed to open server list file for write: " + path.string()});
   }
-  output << root.dump(2) << '\n';
+  output << encoded.value();
   output.flush();
   if (!output) {
     return ServerListSaveResult::failure(

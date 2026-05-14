@@ -32,10 +32,6 @@ MasonPlayerState* MasonPlugin::state_for(arv::CommandContext& ctx) {
   }
   MasonPlayerState& state = players_[*player];
   state.history.set_limit(static_cast<std::size_t>(config_.limits.max_history_entries));
-  if (!state.persistent_loaded) {
-    load_player_state(*player, state);
-    state.persistent_loaded = true;
-  }
   return &state;
 }
 
@@ -53,6 +49,26 @@ std::optional<ArvBlockPos> MasonPlugin::require_block_position(arv::CommandConte
     return std::nullopt;
   }
   return floor_block_pos(*position);
+}
+
+std::optional<SelectionBounds> MasonPlugin::current_selection_bounds(
+    arv::CommandContext& ctx) const {
+  const std::optional<ArvPlayerID> player = require_player(ctx);
+  if (!player.has_value()) {
+    ctx.error("This Mason command requires a player.");
+    return std::nullopt;
+  }
+  auto selection = plugin_.players().current_selection(*player);
+  if (!selection) {
+    ctx.error(std::string{"Unable to read current selection: "} + selection.result.message());
+    return std::nullopt;
+  }
+  SelectionBoundsResult bounds = normalized_bounds(selection.value);
+  if (!bounds.ok) {
+    ctx.error(bounds.message);
+    return std::nullopt;
+  }
+  return bounds.bounds;
 }
 
 bool MasonPlugin::check_custom_permission(
@@ -116,74 +132,6 @@ bool MasonPlugin::require_limit_or_confirmation(
     return false;
   }
   return true;
-}
-
-void MasonPlugin::save_player_state(ArvPlayerID player, const MasonPlayerState& state) const {
-  if (!config_.behavior.save_selection_per_player) {
-    return;
-  }
-  auto document = plugin_.data().create_document(1);
-  if (!document) {
-    return;
-  }
-  const arv::DataDocument& doc = document.value;
-  (void)doc.set_u64("schema_version", 1);
-  (void)doc.set_bool("selection.has_world", state.selection.world.has_value());
-  if (state.selection.world.has_value()) {
-    (void)doc.set_u64("selection.world", *state.selection.world);
-  }
-  (void)doc.set_bool("selection.has_a", state.selection.a.has_value());
-  if (state.selection.a.has_value()) {
-    (void)doc.set_i64("selection.a.x", state.selection.a->x);
-    (void)doc.set_i64("selection.a.y", state.selection.a->y);
-    (void)doc.set_i64("selection.a.z", state.selection.a->z);
-  }
-  (void)doc.set_bool("selection.has_b", state.selection.b.has_value());
-  if (state.selection.b.has_value()) {
-    (void)doc.set_i64("selection.b.x", state.selection.b->x);
-    (void)doc.set_i64("selection.b.y", state.selection.b->y);
-    (void)doc.set_i64("selection.b.z", state.selection.b->z);
-  }
-  (void)plugin_.persistent_data().player(player).save(ids::player_state, doc);
-}
-
-void MasonPlugin::load_player_state(ArvPlayerID player, MasonPlayerState& state) const {
-  if (!config_.behavior.save_selection_per_player) {
-    return;
-  }
-  auto loaded = plugin_.persistent_data().player(player).load(ids::player_state);
-  if (!loaded) {
-    return;
-  }
-  const arv::DataDocument& doc = loaded.value;
-  auto has_world = doc.bool_value("selection.has_world");
-  if (has_world && has_world.value) {
-    auto world = doc.u64_value("selection.world");
-    if (world) {
-      state.selection.world = world.value;
-    }
-  }
-  auto read_pos = [&](std::string_view prefix) -> std::optional<ArvBlockPos> {
-    auto x = doc.i64_value(std::string{prefix} + ".x");
-    auto y = doc.i64_value(std::string{prefix} + ".y");
-    auto z = doc.i64_value(std::string{prefix} + ".z");
-    if (!x || !y || !z) {
-      return std::nullopt;
-    }
-    return ArvBlockPos{
-        static_cast<std::int32_t>(x.value),
-        static_cast<std::int32_t>(y.value),
-        static_cast<std::int32_t>(z.value),
-    };
-  };
-  auto has_a = doc.bool_value("selection.has_a");
-  if (has_a && has_a.value) {
-    state.selection.a = read_pos("selection.a");
-  }
-  auto has_b = doc.bool_value("selection.has_b");
-  if (has_b && has_b.value) {
-    state.selection.b = read_pos("selection.b");
-  }
 }
 
 } // namespace arv_mason

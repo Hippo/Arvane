@@ -3,6 +3,7 @@
 #include "arv/asset/pack.hpp"
 #include "arv/asset/resource.hpp"
 #include "arv/core/log.hpp"
+#include "arv/io/data_codecs.hpp"
 #include "arv/io/files.hpp"
 
 #include <algorithm>
@@ -12,8 +13,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <yaml-cpp/yaml.h>
 
 namespace arv::ui {
 namespace {
@@ -25,9 +24,23 @@ constexpr std::string_view ThemeResourcePrefix = "theme/";
 constexpr std::string_view DefaultThemeAsset = "arvane:theme/default";
 
 struct ThemeDocument {
-  YAML::Node root{};
+  io::DataDocument root{};
   std::optional<std::string> inherits{};
 };
+
+[[nodiscard]] const io::DataValue* member(
+    const io::DataValue& parent,
+    std::string_view key) noexcept {
+  return parent.get(key);
+}
+
+[[nodiscard]] bool is_object(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::Object;
+}
+
+[[nodiscard]] bool is_string(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::String;
+}
 
 [[nodiscard]] f32 clamp_scale(f32 value, f32 fallback) noexcept {
   if (!std::isfinite(value)) {
@@ -79,19 +92,19 @@ void add_warning(UiThemeLoadResult& result, std::string message) {
 }
 
 void read_color_token(
-    const YAML::Node& colors,
+    const io::DataValue& colors,
     const char* key,
     Vec4f& target,
     UiThemeLoadResult& result) {
-  const YAML::Node value = colors[key];
-  if (!value) {
+  const io::DataValue* value = member(colors, key);
+  if (value == nullptr) {
     return;
   }
-  if (!value.IsScalar()) {
+  if (!is_string(*value)) {
     add_warning(result, std::string{"theme color is not a scalar: "} + key);
     return;
   }
-  const std::string text = value.as<std::string>();
+  const std::string text{value->as_string_or({})};
   if (std::optional<Vec4f> color = parse_hex_color(text); color.has_value()) {
     target = color.value();
   } else {
@@ -99,86 +112,86 @@ void read_color_token(
   }
 }
 
-template<typename T>
-void read_text_token(const YAML::Node& parent, const char* key, T& target) {
-  const YAML::Node value = parent[key];
-  if (value && value.IsScalar()) {
-    target = value.as<T>();
+void read_text_token(const io::DataValue& parent, const char* key, std::string& target) {
+  const io::DataValue* value = member(parent, key);
+  if (value != nullptr && is_string(*value)) {
+    target = std::string{value->as_string_or({})};
   }
 }
 
 void read_number_token(
-    const YAML::Node& parent,
+    const io::DataValue& parent,
     const char* key,
     f32& target,
     UiThemeLoadResult& result,
     f32 minimum,
     f32 maximum) {
-  const YAML::Node value = parent[key];
-  if (!value) {
+  const io::DataValue* value = member(parent, key);
+  if (value == nullptr) {
     return;
   }
-  try {
-    const f32 parsed = value.as<f32>();
-    if (!std::isfinite(parsed) || parsed < minimum || parsed > maximum) {
-      add_warning(result, std::string{"theme numeric token is outside safe bounds: "} + key);
-      return;
-    }
-    target = parsed;
-  } catch (const YAML::Exception&) {
+  if (value->kind() != io::DataKind::I64 && value->kind() != io::DataKind::U64 &&
+      value->kind() != io::DataKind::F64) {
     add_warning(result, std::string{"theme numeric token is invalid: "} + key);
+    return;
   }
+  const f32 parsed = static_cast<f32>(value->as_f64_or(target));
+  if (!std::isfinite(parsed) || parsed < minimum || parsed > maximum) {
+    add_warning(result, std::string{"theme numeric token is outside safe bounds: "} + key);
+    return;
+  }
+  target = parsed;
 }
 
 void read_u32_token(
-    const YAML::Node& parent,
+    const io::DataValue& parent,
     const char* key,
     u32& target,
     UiThemeLoadResult& result,
     u32 minimum,
     u32 maximum) {
-  const YAML::Node value = parent[key];
-  if (!value) {
+  const io::DataValue* value = member(parent, key);
+  if (value == nullptr) {
     return;
   }
-  try {
-    const u32 parsed = value.as<u32>();
-    if (parsed < minimum || parsed > maximum) {
-      add_warning(result, std::string{"theme numeric token is outside safe bounds: "} + key);
-      return;
-    }
-    target = parsed;
-  } catch (const YAML::Exception&) {
+  if (value->kind() != io::DataKind::I64 && value->kind() != io::DataKind::U64) {
     add_warning(result, std::string{"theme numeric token is invalid: "} + key);
+    return;
   }
+  const u32 parsed = static_cast<u32>(value->as_u64_or(target));
+  if (parsed < minimum || parsed > maximum) {
+    add_warning(result, std::string{"theme numeric token is outside safe bounds: "} + key);
+    return;
+  }
+  target = parsed;
 }
 
 [[nodiscard]] f32 read_scale_preference(
-    const YAML::Node& parent,
+    const io::DataValue& parent,
     const char* key,
     f32 current,
     UiThemeLoadResult& result,
     f32 minimum,
     f32 maximum) {
-  const YAML::Node value = parent[key];
-  if (!value) {
+  const io::DataValue* value = member(parent, key);
+  if (value == nullptr) {
     return current;
   }
-  try {
-    const f32 parsed = value.as<f32>();
-    if (!std::isfinite(parsed)) {
-      add_warning(result, std::string{"ui scale token is invalid: "} + key);
-      return current;
-    }
-    const f32 clamped = std::clamp(parsed, minimum, maximum);
-    if (clamped != parsed) {
-      add_warning(result, std::string{"ui scale token was clamped: "} + key);
-    }
-    return clamped;
-  } catch (const YAML::Exception&) {
+  if (value->kind() != io::DataKind::I64 && value->kind() != io::DataKind::U64 &&
+      value->kind() != io::DataKind::F64) {
     add_warning(result, std::string{"ui scale token is invalid: "} + key);
     return current;
   }
+  const f32 parsed = static_cast<f32>(value->as_f64_or(current));
+  if (!std::isfinite(parsed)) {
+    add_warning(result, std::string{"ui scale token is invalid: "} + key);
+    return current;
+  }
+  const f32 clamped = std::clamp(parsed, minimum, maximum);
+  if (clamped != parsed) {
+    add_warning(result, std::string{"ui scale token was clamped: "} + key);
+  }
+  return clamped;
 }
 
 [[nodiscard]] bool theme_stack_contains(
@@ -243,110 +256,114 @@ void read_u32_token(
 [[nodiscard]] std::optional<ThemeDocument> read_theme_document(
     const std::filesystem::path& path,
     UiThemeLoadResult& result) {
-  try {
-    ThemeDocument document;
-    document.root = YAML::LoadFile(path.string());
-    const YAML::Node inherits = document.root["inherits"];
-    if (inherits) {
-      if (!inherits.IsScalar()) {
-        add_warning(result, "theme inherits is not a scalar: " + path.string());
-        return std::nullopt;
-      }
-      document.inherits = inherits.as<std::string>();
-      if (document.inherits->empty()) {
-        add_warning(result, "theme inherits is empty: " + path.string());
-        return std::nullopt;
-      }
-    }
-    return document;
-  } catch (const YAML::Exception& error) {
-    add_warning(result, "could not load theme file " + path.string() + ": " + error.what());
-  } catch (const std::exception& error) {
-    add_warning(result, "could not load theme file " + path.string() + ": " + error.what());
+  auto text = io::read_text_file_contents(path);
+  if (!text) {
+    add_warning(result, "could not load theme file " + path.string() + ": " + text.error().message);
+    return std::nullopt;
   }
-  return std::nullopt;
+  auto decoded = io::decode_yaml_value(text.value());
+  if (!decoded) {
+    add_warning(result, "could not load theme file " + path.string() + ": " + decoded.error().describe());
+    return std::nullopt;
+  }
+  ThemeDocument document;
+  document.root = std::move(decoded.value());
+  const io::DataValue* inherits = member(document.root.root, "inherits");
+  if (inherits != nullptr) {
+    if (!is_string(*inherits)) {
+      add_warning(result, "theme inherits is not a scalar: " + path.string());
+      return std::nullopt;
+    }
+    document.inherits = std::string{inherits->as_string_or({})};
+    if (document.inherits->empty()) {
+      add_warning(result, "theme inherits is empty: " + path.string());
+      return std::nullopt;
+    }
+  }
+  return document;
 }
 
-void parse_theme_node(const YAML::Node& root, UiTheme& theme, UiThemeLoadResult& result) {
-  if (const YAML::Node name = root["name"]; name && name.IsScalar()) {
-    theme.name = name.as<std::string>();
+void parse_theme_node(const io::DataValue& root, UiTheme& theme, UiThemeLoadResult& result) {
+  if (const io::DataValue* name = member(root, "name"); name != nullptr && is_string(*name)) {
+    theme.name = std::string{name->as_string_or({})};
   }
-  if (const YAML::Node description = root["description"]; description && description.IsScalar()) {
-    theme.description = description.as<std::string>();
-  }
-
-  const YAML::Node colors = root["colors"];
-  if (colors && colors.IsMap()) {
-    read_color_token(colors, "background", theme.colors.background, result);
-    read_color_token(colors, "backdrop", theme.colors.backdrop, result);
-    read_color_token(colors, "pause_backdrop", theme.colors.pause_backdrop, result);
-    read_color_token(colors, "surface", theme.colors.surface, result);
-    read_color_token(colors, "surface_alt", theme.colors.surface_alt, result);
-    read_color_token(colors, "surface_hover", theme.colors.surface_hover, result);
-    read_color_token(colors, "surface_pressed", theme.colors.surface_pressed, result);
-    read_color_token(colors, "surface_selected", theme.colors.surface_selected, result);
-    read_color_token(colors, "text", theme.colors.text, result);
-    read_color_token(colors, "text_muted", theme.colors.text_muted, result);
-    read_color_token(colors, "text_disabled", theme.colors.text_disabled, result);
-    read_color_token(colors, "border", theme.colors.border, result);
-    read_color_token(colors, "border_focus", theme.colors.border_focus, result);
-    read_color_token(colors, "accent", theme.colors.accent, result);
-    read_color_token(colors, "accent_hover", theme.colors.accent_hover, result);
-    read_color_token(colors, "accent_pressed", theme.colors.accent_pressed, result);
-    read_color_token(colors, "accent_text", theme.colors.accent_text, result);
-    read_color_token(colors, "danger", theme.colors.danger, result);
-    read_color_token(colors, "danger_hover", theme.colors.danger_hover, result);
-    read_color_token(colors, "danger_pressed", theme.colors.danger_pressed, result);
-    read_color_token(colors, "warning", theme.colors.warning, result);
-    read_color_token(colors, "success", theme.colors.success, result);
+  if (const io::DataValue* description = member(root, "description");
+      description != nullptr && is_string(*description)) {
+    theme.description = std::string{description->as_string_or({})};
   }
 
-  const YAML::Node layout = root["layout"];
-  if (layout && layout.IsMap()) {
-    read_number_token(layout, "spacing_xs", theme.layout.spacing_xs, result, 0.0F, 96.0F);
-    read_number_token(layout, "spacing_sm", theme.layout.spacing_sm, result, 0.0F, 128.0F);
-    read_number_token(layout, "spacing_md", theme.layout.spacing_md, result, 0.0F, 160.0F);
-    read_number_token(layout, "spacing_lg", theme.layout.spacing_lg, result, 0.0F, 192.0F);
-    read_number_token(layout, "spacing_xl", theme.layout.spacing_xl, result, 0.0F, 256.0F);
-    read_number_token(layout, "radius_sm", theme.layout.radius_sm, result, 0.0F, 48.0F);
-    read_number_token(layout, "radius_md", theme.layout.radius_md, result, 0.0F, 64.0F);
-    read_number_token(layout, "radius_lg", theme.layout.radius_lg, result, 0.0F, 96.0F);
-    read_number_token(layout, "border_width", theme.layout.border_width, result, 0.0F, 8.0F);
+  const io::DataValue* colors = member(root, "colors");
+  if (colors != nullptr && is_object(*colors)) {
+    read_color_token(*colors, "background", theme.colors.background, result);
+    read_color_token(*colors, "backdrop", theme.colors.backdrop, result);
+    read_color_token(*colors, "pause_backdrop", theme.colors.pause_backdrop, result);
+    read_color_token(*colors, "surface", theme.colors.surface, result);
+    read_color_token(*colors, "surface_alt", theme.colors.surface_alt, result);
+    read_color_token(*colors, "surface_hover", theme.colors.surface_hover, result);
+    read_color_token(*colors, "surface_pressed", theme.colors.surface_pressed, result);
+    read_color_token(*colors, "surface_selected", theme.colors.surface_selected, result);
+    read_color_token(*colors, "text", theme.colors.text, result);
+    read_color_token(*colors, "text_muted", theme.colors.text_muted, result);
+    read_color_token(*colors, "text_disabled", theme.colors.text_disabled, result);
+    read_color_token(*colors, "border", theme.colors.border, result);
+    read_color_token(*colors, "border_focus", theme.colors.border_focus, result);
+    read_color_token(*colors, "accent", theme.colors.accent, result);
+    read_color_token(*colors, "accent_hover", theme.colors.accent_hover, result);
+    read_color_token(*colors, "accent_pressed", theme.colors.accent_pressed, result);
+    read_color_token(*colors, "accent_text", theme.colors.accent_text, result);
+    read_color_token(*colors, "danger", theme.colors.danger, result);
+    read_color_token(*colors, "danger_hover", theme.colors.danger_hover, result);
+    read_color_token(*colors, "danger_pressed", theme.colors.danger_pressed, result);
+    read_color_token(*colors, "warning", theme.colors.warning, result);
+    read_color_token(*colors, "success", theme.colors.success, result);
   }
 
-  const YAML::Node typography = root["typography"];
-  if (typography && typography.IsMap()) {
-    read_text_token(typography, "default_font", theme.typography.default_font);
-    read_text_token(typography, "heading_font", theme.typography.heading_font);
-    read_text_token(typography, "monospace_font", theme.typography.monospace_font);
-    read_u32_token(typography, "size_sm", theme.typography.size_sm, result, 8U, 48U);
-    read_u32_token(typography, "size_md", theme.typography.size_md, result, 10U, 64U);
-    read_u32_token(typography, "size_lg", theme.typography.size_lg, result, 12U, 96U);
-    read_u32_token(typography, "size_xl", theme.typography.size_xl, result, 16U, 128U);
+  const io::DataValue* layout = member(root, "layout");
+  if (layout != nullptr && is_object(*layout)) {
+    read_number_token(*layout, "spacing_xs", theme.layout.spacing_xs, result, 0.0F, 96.0F);
+    read_number_token(*layout, "spacing_sm", theme.layout.spacing_sm, result, 0.0F, 128.0F);
+    read_number_token(*layout, "spacing_md", theme.layout.spacing_md, result, 0.0F, 160.0F);
+    read_number_token(*layout, "spacing_lg", theme.layout.spacing_lg, result, 0.0F, 192.0F);
+    read_number_token(*layout, "spacing_xl", theme.layout.spacing_xl, result, 0.0F, 256.0F);
+    read_number_token(*layout, "radius_sm", theme.layout.radius_sm, result, 0.0F, 48.0F);
+    read_number_token(*layout, "radius_md", theme.layout.radius_md, result, 0.0F, 64.0F);
+    read_number_token(*layout, "radius_lg", theme.layout.radius_lg, result, 0.0F, 96.0F);
+    read_number_token(*layout, "border_width", theme.layout.border_width, result, 0.0F, 8.0F);
   }
 
-  const YAML::Node widgets = root["widgets"];
-  if (widgets && widgets.IsMap()) {
-    const YAML::Node button = widgets["button"];
-    if (button && button.IsMap()) {
-      read_number_token(button, "height", theme.widgets.button.height, result, 24.0F, 120.0F);
-      read_number_token(button, "min_width", theme.widgets.button.min_width, result, 40.0F, 640.0F);
-      read_number_token(button, "padding_x", theme.widgets.button.padding_x, result, 0.0F, 96.0F);
-      read_number_token(button, "padding_y", theme.widgets.button.padding_y, result, 0.0F, 64.0F);
-      read_number_token(button, "radius", theme.widgets.button.radius, result, 0.0F, 64.0F);
+  const io::DataValue* typography = member(root, "typography");
+  if (typography != nullptr && is_object(*typography)) {
+    read_text_token(*typography, "default_font", theme.typography.default_font);
+    read_text_token(*typography, "heading_font", theme.typography.heading_font);
+    read_text_token(*typography, "monospace_font", theme.typography.monospace_font);
+    read_u32_token(*typography, "size_sm", theme.typography.size_sm, result, 8U, 48U);
+    read_u32_token(*typography, "size_md", theme.typography.size_md, result, 10U, 64U);
+    read_u32_token(*typography, "size_lg", theme.typography.size_lg, result, 12U, 96U);
+    read_u32_token(*typography, "size_xl", theme.typography.size_xl, result, 16U, 128U);
+  }
+
+  const io::DataValue* widgets = member(root, "widgets");
+  if (widgets != nullptr && is_object(*widgets)) {
+    const io::DataValue* button = member(*widgets, "button");
+    if (button != nullptr && is_object(*button)) {
+      read_number_token(*button, "height", theme.widgets.button.height, result, 24.0F, 120.0F);
+      read_number_token(*button, "min_width", theme.widgets.button.min_width, result, 40.0F, 640.0F);
+      read_number_token(*button, "padding_x", theme.widgets.button.padding_x, result, 0.0F, 96.0F);
+      read_number_token(*button, "padding_y", theme.widgets.button.padding_y, result, 0.0F, 64.0F);
+      read_number_token(*button, "radius", theme.widgets.button.radius, result, 0.0F, 64.0F);
     }
-    const YAML::Node input = widgets["input"];
-    if (input && input.IsMap()) {
-      read_number_token(input, "height", theme.widgets.input.height, result, 24.0F, 120.0F);
-      read_number_token(input, "min_width", theme.widgets.input.min_width, result, 60.0F, 720.0F);
-      read_number_token(input, "padding_x", theme.widgets.input.padding_x, result, 0.0F, 96.0F);
-      read_number_token(input, "padding_y", theme.widgets.input.padding_y, result, 0.0F, 64.0F);
-      read_number_token(input, "radius", theme.widgets.input.radius, result, 0.0F, 64.0F);
+    const io::DataValue* input = member(*widgets, "input");
+    if (input != nullptr && is_object(*input)) {
+      read_number_token(*input, "height", theme.widgets.input.height, result, 24.0F, 120.0F);
+      read_number_token(*input, "min_width", theme.widgets.input.min_width, result, 60.0F, 720.0F);
+      read_number_token(*input, "padding_x", theme.widgets.input.padding_x, result, 0.0F, 96.0F);
+      read_number_token(*input, "padding_y", theme.widgets.input.padding_y, result, 0.0F, 64.0F);
+      read_number_token(*input, "radius", theme.widgets.input.radius, result, 0.0F, 64.0F);
     }
-    const YAML::Node panel = widgets["panel"];
-    if (panel && panel.IsMap()) {
-      read_number_token(panel, "padding", theme.widgets.panel.padding, result, 0.0F, 128.0F);
-      read_number_token(panel, "radius", theme.widgets.panel.radius, result, 0.0F, 96.0F);
+    const io::DataValue* panel = member(*widgets, "panel");
+    if (panel != nullptr && is_object(*panel)) {
+      read_number_token(*panel, "padding", theme.widgets.panel.padding, result, 0.0F, 128.0F);
+      read_number_token(*panel, "radius", theme.widgets.panel.radius, result, 0.0F, 96.0F);
     }
   }
 }
@@ -407,7 +424,7 @@ void parse_theme_node(const YAML::Node& root, UiTheme& theme, UiThemeLoadResult&
     }
     theme = std::move(inherited.value());
   }
-  parse_theme_node(document->root, theme, result);
+  parse_theme_node(document->root.root, theme, result);
   stack.pop_back();
   return theme;
 }
@@ -492,45 +509,49 @@ struct LocalThemeReference {
     }
     theme = std::move(inherited.value());
   }
-  parse_theme_node(document->root, theme, result);
+  parse_theme_node(document->root.root, theme, result);
   stack.pop_back();
   return theme;
 }
 
 void parse_style_file(const std::filesystem::path& path, UiThemeLoadResult& result) {
-  try {
-    const YAML::Node root = YAML::LoadFile(path.string());
-    if (const YAML::Node theme = root["theme"]; theme && theme.IsScalar()) {
-      result.config.theme = theme.as<std::string>();
-    }
-    const YAML::Node ui = root["ui"];
-    if (ui && ui.IsMap()) {
-      result.config.ui.scale = read_scale_preference(
-          ui,
-          "scale",
-          result.config.ui.scale,
-          result,
-          0.25F,
-          4.0F);
-      result.config.ui.font_scale = read_scale_preference(
-          ui,
-          "font_scale",
-          result.config.ui.font_scale,
-          result,
-          0.25F,
-          4.0F);
-      result.config.ui.animation_scale = read_scale_preference(
-          ui,
-          "animation_scale",
-          result.config.ui.animation_scale,
-          result,
-          0.0F,
-          4.0F);
-    }
-  } catch (const YAML::Exception& error) {
-    add_warning(result, "could not load style config " + path.string() + ": " + error.what());
-  } catch (const std::exception& error) {
-    add_warning(result, "could not load style config " + path.string() + ": " + error.what());
+  auto text = io::read_text_file_contents(path);
+  if (!text) {
+    add_warning(result, "could not load style config " + path.string() + ": " + text.error().message);
+    return;
+  }
+  auto decoded = io::decode_yaml_value(text.value());
+  if (!decoded) {
+    add_warning(result, "could not load style config " + path.string() + ": " + decoded.error().describe());
+    return;
+  }
+  const io::DataValue& root = decoded.value().root;
+  if (const io::DataValue* theme = member(root, "theme"); theme != nullptr && is_string(*theme)) {
+    result.config.theme = std::string{theme->as_string_or({})};
+  }
+  const io::DataValue* ui = member(root, "ui");
+  if (ui != nullptr && is_object(*ui)) {
+    result.config.ui.scale = read_scale_preference(
+        *ui,
+        "scale",
+        result.config.ui.scale,
+        result,
+        0.25F,
+        4.0F);
+    result.config.ui.font_scale = read_scale_preference(
+        *ui,
+        "font_scale",
+        result.config.ui.font_scale,
+        result,
+        0.25F,
+        4.0F);
+    result.config.ui.animation_scale = read_scale_preference(
+        *ui,
+        "animation_scale",
+        result.config.ui.animation_scale,
+        result,
+        0.0F,
+        4.0F);
   }
 }
 

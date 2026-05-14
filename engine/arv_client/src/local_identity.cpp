@@ -3,6 +3,7 @@
 #include "arv/asset/resource.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/crypto/hex.hpp"
+#include "arv/io/data_codecs.hpp"
 #include "arv/io/files.hpp"
 
 #include <fstream>
@@ -12,18 +13,73 @@
 #include <system_error>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 namespace arv::client {
 namespace {
-
-using json = nlohmann::json;
 
 inline constexpr u32 LocalProfileVersion = 1;
 inline constexpr std::string_view ProfilesFileName = "profiles.json";
 inline constexpr std::string_view KeysDirectoryName = "keys";
 inline constexpr std::string_view SkinsDirectoryName = "skins";
 inline constexpr std::string_view CacheDirectoryName = "cache";
+
+[[nodiscard]] bool is_integer(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64;
+}
+
+[[nodiscard]] const io::DataValue* member(
+    const io::DataValue& object,
+    std::string_view key) noexcept {
+  return object.get(key);
+}
+
+[[nodiscard]] std::string string_member_or(
+    const io::DataValue& object,
+    std::string_view key,
+    std::string fallback) {
+  const io::DataValue* value = member(object, key);
+  return value != nullptr && value->kind() == io::DataKind::String
+             ? std::string{value->as_string_or({})}
+             : std::move(fallback);
+}
+
+[[nodiscard]] Expected<std::string, LocalIdentityError> required_string_member(
+    const io::DataValue& object,
+    std::string_view key,
+    std::string_view context) {
+  const io::DataValue* value = member(object, key);
+  if (value == nullptr || value->kind() != io::DataKind::String) {
+    return Expected<std::string, LocalIdentityError>::failure(
+        LocalIdentityError{std::string{context} + " requires string field " + std::string{key}});
+  }
+  return Expected<std::string, LocalIdentityError>::success(
+      std::string{value->as_string_or({})});
+}
+
+[[nodiscard]] Expected<u64, LocalIdentityError> required_u64_member(
+    const io::DataValue& object,
+    std::string_view key,
+    std::string_view context) {
+  const io::DataValue* value = member(object, key);
+  if (value == nullptr || !is_integer(*value)) {
+    return Expected<u64, LocalIdentityError>::failure(
+        LocalIdentityError{std::string{context} + " requires integer field " + std::string{key}});
+  }
+  return Expected<u64, LocalIdentityError>::success(value->as_u64_or(0U));
+}
+
+[[nodiscard]] Expected<std::string, LocalIdentityError> encode_profiles_json(
+    const io::DataValue& value) {
+  auto encoded = io::encode_json_value(value);
+  if (!encoded) {
+    return Expected<std::string, LocalIdentityError>::failure(
+        LocalIdentityError{"failed to encode profiles.json: " + encoded.error().describe()});
+  }
+  std::string text = std::move(encoded.value());
+  if (!text.empty() && text.back() == '\n') {
+    text.pop_back();
+  }
+  return Expected<std::string, LocalIdentityError>::success(std::move(text));
+}
 
 [[nodiscard]] std::filesystem::path keys_root(const std::filesystem::path& home) {
   return home / std::string{KeysDirectoryName};
@@ -119,29 +175,53 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
          file.find("..") == std::string_view::npos;
 }
 
-[[nodiscard]] Expected<LocalProfileSkin, LocalIdentityError> skin_from_json(
-    const json& node) {
-  if (!node.is_object()) {
+[[nodiscard]] Expected<LocalProfileSkin, LocalIdentityError> skin_from_value(
+    const io::DataValue& node) {
+  if (node.kind() != io::DataKind::Object) {
     return Expected<LocalProfileSkin, LocalIdentityError>::failure(
         LocalIdentityError{"profile skin entry must be an object"});
   }
 
   LocalProfileSkin skin;
-  skin.skin_hash = node.at("skin_hash").get<std::string>();
+  auto skin_hash = required_string_member(node, "skin_hash", "profile skin entry");
+  if (!skin_hash) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(skin_hash.error());
+  }
+  skin.skin_hash = std::move(skin_hash.value());
   if (!protocol::is_valid_skin_hash(skin.skin_hash)) {
     return Expected<LocalProfileSkin, LocalIdentityError>::failure(
         LocalIdentityError{"profile skin hash must be lowercase 0x-prefixed 256-bit hex"});
   }
-  const std::string format = node.value("format", std::string{"png"});
+  const std::string format = string_member_or(node, "format", "png");
   if (format != "png") {
     return Expected<LocalProfileSkin, LocalIdentityError>::failure(
         LocalIdentityError{"unsupported local profile skin format: " + format});
   }
   skin.format = protocol::SkinImageFormat::Png;
-  skin.width = node.at("width").get<u16>();
-  skin.height = node.at("height").get<u16>();
-  skin.file = node.at("file").get<std::string>();
-  skin.slim_model = node.value("slim_model", false);
+  auto width = required_u64_member(node, "width", "profile skin entry");
+  auto height = required_u64_member(node, "height", "profile skin entry");
+  auto file = required_string_member(node, "file", "profile skin entry");
+  if (!width) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(width.error());
+  }
+  if (!height) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(height.error());
+  }
+  if (!file) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(file.error());
+  }
+  if (width.value() > std::numeric_limits<u16>::max() ||
+      height.value() > std::numeric_limits<u16>::max()) {
+    return Expected<LocalProfileSkin, LocalIdentityError>::failure(
+        LocalIdentityError{"profile skin dimensions are too large"});
+  }
+  skin.width = static_cast<u16>(width.value());
+  skin.height = static_cast<u16>(height.value());
+  skin.file = std::move(file.value());
+  if (const io::DataValue* slim_model = member(node, "slim_model");
+      slim_model != nullptr && slim_model->kind() == io::DataKind::Bool) {
+    skin.slim_model = slim_model->as_bool_or(false);
+  }
   if (!safe_relative_file_name(skin.file)) {
     return Expected<LocalProfileSkin, LocalIdentityError>::failure(
         LocalIdentityError{"profile skin file must be a safe relative file name"});
@@ -149,40 +229,57 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
   return Expected<LocalProfileSkin, LocalIdentityError>::success(std::move(skin));
 }
 
-[[nodiscard]] json skin_to_json(const LocalProfileSkin& skin) {
-  return json{
-      {"skin_hash", skin.skin_hash},
-      {"format", "png"},
-      {"width", skin.width},
-      {"height", skin.height},
-      {"file", skin.file},
-      {"slim_model", skin.slim_model},
-  };
+[[nodiscard]] io::DataValue skin_to_value(const LocalProfileSkin& skin) {
+  io::DataValue node = io::DataValue::object();
+  node.set("skin_hash", skin.skin_hash);
+  node.set("format", "png");
+  node.set("width", static_cast<u64>(skin.width));
+  node.set("height", static_cast<u64>(skin.height));
+  node.set("file", skin.file);
+  node.set("slim_model", skin.slim_model);
+  return node;
 }
 
-[[nodiscard]] Expected<LocalPlayerIdentity, LocalIdentityError> profile_from_json(
+[[nodiscard]] Expected<LocalPlayerIdentity, LocalIdentityError> profile_from_value(
     const std::filesystem::path& home,
-    const json& node) {
-  if (!node.is_object()) {
+    const io::DataValue& node) {
+  if (node.kind() != io::DataKind::Object) {
     return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(
         LocalIdentityError{"local profile entry must be an object"});
   }
-  if (node.at("version").get<u32>() != LocalProfileVersion) {
+  auto version = required_u64_member(node, "version", "local profile entry");
+  if (!version) {
+    return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(version.error());
+  }
+  if (version.value() != LocalProfileVersion) {
     return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(
         LocalIdentityError{"unsupported local profile version"});
   }
 
   LocalPlayerIdentity profile;
   profile.arvane_home = home;
-  profile.display_name = node.value("display_name", std::string{"local_player"});
-  profile.private_key_file = node.at("private_key_file").get<std::string>();
+  profile.display_name = string_member_or(node, "display_name", "local_player");
+  auto private_key_file =
+      required_string_member(node, "private_key_file", "local profile entry");
+  if (!private_key_file) {
+    return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(
+        private_key_file.error());
+  }
+  profile.private_key_file = std::move(private_key_file.value());
   if (!safe_relative_file_name(profile.private_key_file)) {
     return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(
         LocalIdentityError{"local profile private key file must be a safe relative file name"});
   }
 
-  auto public_key =
-      crypto::parse_prefixed_ed25519_public_key(node.at("public_key").get<std::string>());
+  auto public_key_text = required_string_member(node, "public_key", "local profile entry");
+  auto profile_id_text = required_string_member(node, "profile_id", "local profile entry");
+  if (!public_key_text) {
+    return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(public_key_text.error());
+  }
+  if (!profile_id_text) {
+    return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(profile_id_text.error());
+  }
+  auto public_key = crypto::parse_prefixed_ed25519_public_key(public_key_text.value());
   auto private_key = read_private_key(local_private_key_path(home, profile.private_key_file));
   if (!public_key) {
     return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(
@@ -195,8 +292,7 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
   profile.key_pair.public_key = public_key.value();
   profile.key_pair.private_key = private_key.value();
   profile.profile_id = crypto::derive_profile_id_from_public_key(profile.key_pair.public_key);
-  auto saved_profile_id =
-      crypto::parse_player_profile_id(node.at("profile_id").get<std::string>());
+  auto saved_profile_id = crypto::parse_player_profile_id(profile_id_text.value());
   if (!saved_profile_id) {
     return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(
         LocalIdentityError{saved_profile_id.error().message});
@@ -206,14 +302,15 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
         LocalIdentityError{"local profile id does not match public key"});
   }
 
-  if (const auto skins = node.find("skins"); skins != node.end()) {
-    if (!skins->is_array()) {
+  if (const io::DataValue* skins = member(node, "skins"); skins != nullptr) {
+    const io::DataValue::Array* skin_array = skins->array_if();
+    if (skin_array == nullptr) {
       return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(
           LocalIdentityError{"local profile skins must be an array"});
     }
-    profile.skins.reserve(skins->size());
-    for (const json& skin_node : *skins) {
-      auto skin = skin_from_json(skin_node);
+    profile.skins.reserve(skin_array->size());
+    for (const io::DataValue& skin_node : *skin_array) {
+      auto skin = skin_from_value(skin_node);
       if (!skin) {
         return Expected<LocalPlayerIdentity, LocalIdentityError>::failure(skin.error());
       }
@@ -223,19 +320,19 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
   return Expected<LocalPlayerIdentity, LocalIdentityError>::success(std::move(profile));
 }
 
-[[nodiscard]] json profile_to_json(const LocalPlayerIdentity& profile) {
-  json skins = json::array();
+[[nodiscard]] io::DataValue profile_to_value(const LocalPlayerIdentity& profile) {
+  io::DataValue skins = io::DataValue::array();
   for (const LocalProfileSkin& skin : profile.skins) {
-    skins.push_back(skin_to_json(skin));
+    skins.push(skin_to_value(skin));
   }
-  return json{
-      {"version", LocalProfileVersion},
-      {"display_name", profile.display_name},
-      {"private_key_file", profile.private_key_file},
-      {"profile_id", profile.profile_id.string()},
-      {"public_key", crypto::to_prefixed_lower_hex(profile.key_pair.public_key.bytes)},
-      {"skins", std::move(skins)},
-  };
+  io::DataValue node = io::DataValue::object();
+  node.set("version", static_cast<u64>(LocalProfileVersion));
+  node.set("display_name", profile.display_name);
+  node.set("private_key_file", profile.private_key_file);
+  node.set("profile_id", profile.profile_id.string());
+  node.set("public_key", crypto::to_prefixed_lower_hex(profile.key_pair.public_key.bytes));
+  node.set("skins", std::move(skins));
+  return node;
 }
 
 [[nodiscard]] Expected<LocalProfileStore, LocalIdentityError> read_profile_store(
@@ -247,43 +344,45 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
         LocalIdentityError{"failed to open local profile file: " + profiles_path.string()});
   }
 
-  try {
-    const json root = json::parse(text.value());
-    if (!root.is_object()) {
-      return Expected<LocalProfileStore, LocalIdentityError>::failure(
-          LocalIdentityError{"profiles.json must contain an object"});
-    }
-    const auto profiles_node = root.find("profiles");
-    if (profiles_node == root.end() || !profiles_node->is_array()) {
-      return Expected<LocalProfileStore, LocalIdentityError>::failure(
-          LocalIdentityError{"profiles.json profiles must contain an array"});
-    }
-
-    LocalProfileStore store;
-    const auto selected_profile = root.find("selected_profile");
-    if (selected_profile != root.end()) {
-      if (!selected_profile->is_number_unsigned()) {
-        return Expected<LocalProfileStore, LocalIdentityError>::failure(
-            LocalIdentityError{"profiles.json selected_profile must be an unsigned integer"});
-      }
-      store.selected_profile = selected_profile->get<usize>();
-    }
-    store.profiles.reserve(profiles_node->size());
-    for (const json& profile_node : *profiles_node) {
-      auto profile = profile_from_json(home, profile_node);
-      if (!profile) {
-        return Expected<LocalProfileStore, LocalIdentityError>::failure(profile.error());
-      }
-      store.profiles.push_back(std::move(profile.value()));
-    }
-    if (store.selected_profile >= store.profiles.size()) {
-      store.selected_profile = 0U;
-    }
-    return Expected<LocalProfileStore, LocalIdentityError>::success(std::move(store));
-  } catch (const json::exception& ex) {
+  auto decoded = io::decode_json_value(text.value());
+  if (!decoded) {
     return Expected<LocalProfileStore, LocalIdentityError>::failure(
-        LocalIdentityError{"failed to parse profiles.json: " + std::string{ex.what()}});
+        LocalIdentityError{"failed to parse profiles.json: " + decoded.error().describe()});
   }
+  const io::DataValue& root = decoded.value().root;
+  if (root.kind() != io::DataKind::Object) {
+    return Expected<LocalProfileStore, LocalIdentityError>::failure(
+        LocalIdentityError{"profiles.json must contain an object"});
+  }
+  const io::DataValue* profiles_node = member(root, "profiles");
+  const io::DataValue::Array* profiles_array =
+      profiles_node == nullptr ? nullptr : profiles_node->array_if();
+  if (profiles_array == nullptr) {
+    return Expected<LocalProfileStore, LocalIdentityError>::failure(
+        LocalIdentityError{"profiles.json profiles must contain an array"});
+  }
+
+  LocalProfileStore store;
+  if (const io::DataValue* selected_profile = member(root, "selected_profile");
+      selected_profile != nullptr) {
+    if (!is_integer(*selected_profile)) {
+      return Expected<LocalProfileStore, LocalIdentityError>::failure(
+          LocalIdentityError{"profiles.json selected_profile must be an unsigned integer"});
+    }
+    store.selected_profile = static_cast<usize>(selected_profile->as_u64_or(0U));
+  }
+  store.profiles.reserve(profiles_array->size());
+  for (const io::DataValue& profile_node : *profiles_array) {
+    auto profile = profile_from_value(home, profile_node);
+    if (!profile) {
+      return Expected<LocalProfileStore, LocalIdentityError>::failure(profile.error());
+    }
+    store.profiles.push_back(std::move(profile.value()));
+  }
+  if (store.selected_profile >= store.profiles.size()) {
+    store.selected_profile = 0U;
+  }
+  return Expected<LocalProfileStore, LocalIdentityError>::success(std::move(store));
 }
 
 [[nodiscard]] LocalPlayerIdentity make_persistent_identity(std::string display_name) {
@@ -366,7 +465,7 @@ Expected<void, LocalIdentityError> save_local_profile_store(
         LocalIdentityError{"failed to create skin cache directory: " + error.message()});
   }
 
-  json profiles = json::array();
+  io::DataValue profiles = io::DataValue::array();
   for (const LocalPlayerIdentity& profile : store.profiles) {
     if (profile.private_key_file.empty() ||
         !safe_relative_file_name(profile.private_key_file)) {
@@ -379,19 +478,25 @@ Expected<void, LocalIdentityError> save_local_profile_store(
     if (!key_result) {
       return Expected<void, LocalIdentityError>::failure(key_result.error());
     }
-    profiles.push_back(profile_to_json(profile));
+    profiles.push(profile_to_value(profile));
   }
-  json root{
-      {"selected_profile", store.profiles.empty() ? 0U : store.active_profile_index()},
-      {"profiles", std::move(profiles)},
-  };
+  io::DataValue root = io::DataValue::object();
+  root.set(
+      "selected_profile",
+      static_cast<u64>(store.profiles.empty() ? 0U : store.active_profile_index()));
+  root.set("profiles", std::move(profiles));
+
+  auto encoded = encode_profiles_json(root);
+  if (!encoded) {
+    return Expected<void, LocalIdentityError>::failure(encoded.error());
+  }
 
   std::ofstream output(local_profiles_json_path(home), std::ios::trunc);
   if (!output) {
     return Expected<void, LocalIdentityError>::failure(
         LocalIdentityError{"failed to write profiles.json"});
   }
-  output << root.dump(2);
+  output << encoded.value();
   if (!output) {
     return Expected<void, LocalIdentityError>::failure(
         LocalIdentityError{"failed to write profiles.json bytes"});

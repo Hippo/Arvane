@@ -1,11 +1,16 @@
 set(ARV_IO_HEADERS
+  include/arv/io/codec.hpp
   include/arv/io/config.hpp
+  include/arv/io/data_codecs.hpp
+  include/arv/io/data_document.hpp
   include/arv/io/files.hpp
   include/arv/io/input_bindings.hpp
 )
 
 add_library(arv_io STATIC
   src/config.cpp
+  src/data_codecs.cpp
+  src/data_document.cpp
   src/files.cpp
   src/input_bindings.cpp
 )

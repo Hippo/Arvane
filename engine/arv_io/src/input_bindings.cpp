@@ -1,5 +1,7 @@
 #include "arv/io/input_bindings.hpp"
 
+#include "arv/io/codec.hpp"
+
 #include <fstream>
 #include <sstream>
 #include <system_error>
@@ -117,7 +119,7 @@ void emit_binding(YAML::Emitter& emitter, const platform::InputBinding& binding)
 
 } // namespace
 
-InputBindingsResult parse_input_bindings_yaml(std::string_view text) {
+InputBindingsResult decode_input_bindings_yaml(std::string_view text) {
   platform::InputBindings bindings;
   try {
     const YAML::Node root = YAML::Load(std::string{text});
@@ -163,6 +165,60 @@ InputBindingsResult parse_input_bindings_yaml(std::string_view text) {
   return InputBindingsResult::success(std::move(bindings));
 }
 
+TextFileResult encode_input_bindings_yaml(const platform::InputBindings& bindings) {
+  YAML::Emitter emitter;
+  emitter << YAML::BeginMap;
+  emitter << YAML::Key << "version" << YAML::Value << bindings.version;
+  emitter << YAML::Key << "bindings" << YAML::Value << YAML::BeginMap;
+  for (usize index = 0; index < static_cast<usize>(platform::LogicalAction::Count); ++index) {
+    const auto action = static_cast<platform::LogicalAction>(index);
+    const auto& action_bindings = platform::bindings_for_action(bindings, action);
+    if (action_bindings.empty()) {
+      continue;
+    }
+
+    emitter << YAML::Key << std::string{platform::logical_action_name(action)};
+    emitter << YAML::Value << YAML::BeginSeq;
+    for (const platform::InputBinding& binding : action_bindings) {
+      emit_binding(emitter, binding);
+    }
+    emitter << YAML::EndSeq;
+  }
+  emitter << YAML::EndMap;
+  emitter << YAML::EndMap;
+
+  if (!emitter.good()) {
+    return TextFileResult::failure(
+        ConfigError{"failed to encode input bindings YAML: " +
+                    std::string{emitter.GetLastError()}});
+  }
+  return TextFileResult::success(std::string{emitter.c_str()});
+}
+
+} // namespace arv::io
+
+namespace arv {
+
+template<>
+struct Codec<platform::InputBindings> {
+  [[nodiscard]] static io::InputBindingsResult decode_yaml(std::string_view text) {
+    return io::decode_input_bindings_yaml(text);
+  }
+
+  [[nodiscard]] static io::TextFileResult encode_yaml(
+      const platform::InputBindings& bindings) {
+    return io::encode_input_bindings_yaml(bindings);
+  }
+};
+
+} // namespace arv
+
+namespace arv::io {
+
+InputBindingsResult parse_input_bindings_yaml(std::string_view text) {
+  return Codec<platform::InputBindings>::decode_yaml(text);
+}
+
 InputBindingsResult load_input_bindings_file(const std::filesystem::path& path) {
   std::ifstream input(path);
   if (!input) {
@@ -203,33 +259,17 @@ WriteConfigResult save_input_bindings_file(
         ConfigError{"failed to create input bindings directory: " + error.message()});
   }
 
-  YAML::Emitter emitter;
-  emitter << YAML::BeginMap;
-  emitter << YAML::Key << "version" << YAML::Value << bindings.version;
-  emitter << YAML::Key << "bindings" << YAML::Value << YAML::BeginMap;
-  for (usize index = 0; index < static_cast<usize>(platform::LogicalAction::Count); ++index) {
-    const auto action = static_cast<platform::LogicalAction>(index);
-    const auto& action_bindings = platform::bindings_for_action(bindings, action);
-    if (action_bindings.empty()) {
-      continue;
-    }
-
-    emitter << YAML::Key << std::string{platform::logical_action_name(action)};
-    emitter << YAML::Value << YAML::BeginSeq;
-    for (const platform::InputBinding& binding : action_bindings) {
-      emit_binding(emitter, binding);
-    }
-    emitter << YAML::EndSeq;
+  auto encoded = Codec<platform::InputBindings>::encode_yaml(bindings);
+  if (!encoded) {
+    return WriteConfigResult::failure(encoded.error());
   }
-  emitter << YAML::EndMap;
-  emitter << YAML::EndMap;
 
   std::ofstream output(path, std::ios::trunc);
   if (!output) {
     return WriteConfigResult::failure(
         ConfigError{"failed to open input bindings file for write: " + path.string()});
   }
-  output << emitter.c_str();
+  output << encoded.value();
   output.flush();
   if (!output) {
     return WriteConfigResult::failure(

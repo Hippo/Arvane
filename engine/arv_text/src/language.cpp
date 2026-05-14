@@ -1,10 +1,9 @@
 #include "arv/text/language.hpp"
 
-#include <fstream>
-#include <sstream>
-#include <utility>
+#include "arv/io/data_codecs.hpp"
+#include "arv/io/files.hpp"
 
-#include <yaml-cpp/yaml.h>
+#include <utility>
 
 namespace arv::text {
 namespace {
@@ -13,41 +12,54 @@ namespace {
   return std::string{locale} + ".yaml";
 }
 
-[[nodiscard]] std::string key_part_from_yaml(const YAML::Node& node) {
-  if (!node.IsScalar()) {
-    return {};
-  }
-  return node.as<std::string>();
-}
-
-[[nodiscard]] std::optional<LanguageError> flatten_yaml_node(
-    const YAML::Node& node,
+[[nodiscard]] std::optional<LanguageError> flatten_language_node(
+    const io::DataValue& node,
     std::string_view prefix,
     LanguageCatalog& catalog) {
-  if (node.IsScalar()) {
+  if (node.kind() == io::DataKind::String || node.kind() == io::DataKind::Bool ||
+      node.kind() == io::DataKind::I64 || node.kind() == io::DataKind::U64 ||
+      node.kind() == io::DataKind::F64) {
     if (prefix.empty()) {
       return LanguageError{"language scalar requires a key"};
     }
-    catalog.set(std::string{prefix}, node.as<std::string>());
+    switch (node.kind()) {
+      case io::DataKind::String:
+        catalog.set(std::string{prefix}, std::string{node.as_string_or({})});
+        break;
+      case io::DataKind::Bool:
+        catalog.set(std::string{prefix}, node.as_bool_or(false) ? "true" : "false");
+        break;
+      case io::DataKind::I64:
+        catalog.set(std::string{prefix}, std::to_string(node.as_i64_or(0)));
+        break;
+      case io::DataKind::U64:
+        catalog.set(std::string{prefix}, std::to_string(node.as_u64_or(0)));
+        break;
+      case io::DataKind::F64:
+        catalog.set(std::string{prefix}, std::to_string(node.as_f64_or(0.0)));
+        break;
+      default:
+        break;
+    }
     return std::nullopt;
   }
 
-  if (!node.IsMap()) {
+  const io::DataValue::Object* object = node.object_if();
+  if (object == nullptr) {
     return LanguageError{
         prefix.empty()
             ? "language root must be a map"
             : "language key '" + std::string{prefix} + "' must be a string or map"};
   }
 
-  for (const auto& entry : node) {
-    std::string part = key_part_from_yaml(entry.first);
+  for (const auto& [part, child] : *object) {
     if (part.empty()) {
       return LanguageError{"language keys must be non-empty scalars"};
     }
     const std::string key =
-        prefix.empty() ? std::move(part) : std::string{prefix} + "." + part;
+        prefix.empty() ? part : std::string{prefix} + "." + part;
     if (std::optional<LanguageError> error =
-            flatten_yaml_node(entry.second, key, catalog);
+            flatten_language_node(child, key, catalog);
         error.has_value()) {
       return error;
     }
@@ -131,37 +143,31 @@ void LanguageCatalog::merge_from(LanguageCatalog other) {
 }
 
 LanguageResult parse_language_yaml(std::string_view text, std::string locale) {
-  try {
-    YAML::Node root = YAML::Load(std::string{text});
-    if (!root || !root.IsMap()) {
-      return LanguageResult::failure({"language YAML root must be a map"});
-    }
-    LanguageCatalog catalog;
-    catalog.set_locale(std::move(locale));
-    if (std::optional<LanguageError> error = flatten_yaml_node(root, {}, catalog);
-        error.has_value()) {
-      return LanguageResult::failure(error.value());
-    }
-    return LanguageResult::success(std::move(catalog));
-  } catch (const YAML::Exception& ex) {
+  auto decoded = io::decode_yaml_value(text);
+  if (!decoded) {
     return LanguageResult::failure(
-        {"failed to parse language YAML: " + std::string{ex.what()}});
+        {"failed to parse language YAML: " + decoded.error().describe()});
   }
+  if (decoded.value().root.kind() != io::DataKind::Object) {
+    return LanguageResult::failure({"language YAML root must be a map"});
+  }
+  LanguageCatalog catalog;
+  catalog.set_locale(std::move(locale));
+  if (std::optional<LanguageError> error =
+          flatten_language_node(decoded.value().root, {}, catalog);
+      error.has_value()) {
+    return LanguageResult::failure(error.value());
+  }
+  return LanguageResult::success(std::move(catalog));
 }
 
 LanguageResult load_language_file(const std::filesystem::path& path, std::string locale) {
-  std::ifstream file(path);
-  if (!file) {
+  auto text = io::read_text_file_contents(path);
+  if (!text) {
     return LanguageResult::failure(
         {"language file could not be opened: " + path.string()});
   }
-  std::ostringstream buffer;
-  buffer << file.rdbuf();
-  if (!file && !file.eof()) {
-    return LanguageResult::failure(
-        {"failed to read language file: " + path.string()});
-  }
-  return parse_language_yaml(buffer.str(), std::move(locale));
+  return parse_language_yaml(text.value(), std::move(locale));
 }
 
 LanguageResult load_language_files(

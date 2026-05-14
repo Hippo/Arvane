@@ -1,4 +1,4 @@
-#include "arv/data/codecs.hpp"
+#include "arv/io/data_codecs.hpp"
 
 #include <cstring>
 #include <charconv>
@@ -10,7 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <yaml-cpp/yaml.h>
 
-namespace arv::data {
+namespace arv::io {
 namespace {
 
 constexpr std::string_view BinaryMagic = "ARVDATA1";
@@ -564,6 +564,17 @@ DataTextResult encode_yaml(const DataDocument& document) {
   return DataTextResult::success(std::move(text));
 }
 
+DataTextResult encode_yaml_value(const DataValue& value) {
+  YAML::Emitter emitter;
+  emitter << value_to_yaml(value);
+  if (!emitter.good()) {
+    return DataTextResult::failure(error_at("root", emitter.GetLastError()));
+  }
+  std::string text = emitter.c_str();
+  text.push_back('\n');
+  return DataTextResult::success(std::move(text));
+}
+
 DataDocumentResult decode_yaml(std::string_view text) {
   try {
     YAML::Node root = YAML::Load(std::string{text});
@@ -590,12 +601,30 @@ DataDocumentResult decode_yaml(std::string_view text) {
   }
 }
 
+DataDocumentResult decode_yaml_value(std::string_view text, u32 schema_version) {
+  try {
+    YAML::Node root = YAML::Load(std::string{text});
+    auto decoded = value_from_yaml(root, "root");
+    if (!decoded) {
+      return decoded;
+    }
+    decoded.value().schema_version = schema_version;
+    return decoded;
+  } catch (const YAML::Exception& ex) {
+    return DataDocumentResult::failure(error_at("root", ex.what()));
+  }
+}
+
 DataTextResult encode_json(const DataDocument& document) {
   nlohmann::json root{
       {"schema_version", document.schema_version},
       {"data", value_to_json(document.root)},
   };
   return DataTextResult::success(root.dump(2) + "\n");
+}
+
+DataTextResult encode_json_value(const DataValue& value) {
+  return DataTextResult::success(value_to_json(value).dump(2) + "\n");
 }
 
 DataDocumentResult decode_json(std::string_view text) {
@@ -616,6 +645,20 @@ DataDocumentResult decode_json(std::string_view text) {
       return decoded;
     }
     decoded.value().schema_version = root.at("schema_version").get<u32>();
+    return decoded;
+  } catch (const nlohmann::json::exception& ex) {
+    return DataDocumentResult::failure(error_at("root", ex.what()));
+  }
+}
+
+DataDocumentResult decode_json_value(std::string_view text, u32 schema_version) {
+  try {
+    const nlohmann::json root = nlohmann::json::parse(text);
+    auto decoded = value_from_json(root, "root");
+    if (!decoded) {
+      return decoded;
+    }
+    decoded.value().schema_version = schema_version;
     return decoded;
   } catch (const nlohmann::json::exception& ex) {
     return DataDocumentResult::failure(error_at("root", ex.what()));
@@ -665,4 +708,4 @@ DataDocumentResult decode_binary(std::span<const u8> bytes) {
   return document;
 }
 
-} // namespace arv::data
+} // namespace arv::io

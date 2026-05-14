@@ -2,6 +2,7 @@
 
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
+#include "arv/io/data_codecs.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,7 +13,6 @@
 #include <utility>
 
 #include <FastNoise/FastNoise.h>
-#include <yaml-cpp/yaml.h>
 
 namespace arv::world {
 namespace {
@@ -201,24 +201,30 @@ private:
   std::array<f32, static_cast<usize>(GridSide* GridSide)> lattice_{};
 };
 
-void read_i32(const YAML::Node& parent, const char* key, i32& value) {
-  const YAML::Node child = parent[key];
-  if (child) {
-    value = child.as<i32>();
+[[nodiscard]] const io::DataValue* member(
+    const io::DataValue& parent,
+    std::string_view key) noexcept {
+  return parent.get(key);
+}
+
+void read_i32(const io::DataValue& parent, const char* key, i32& value) {
+  const io::DataValue* child = member(parent, key);
+  if (child != nullptr) {
+    value = static_cast<i32>(child->as_i64_or(value));
   }
 }
 
-void read_u32(const YAML::Node& parent, const char* key, u32& value) {
-  const YAML::Node child = parent[key];
-  if (child) {
-    value = child.as<u32>();
+void read_u32(const io::DataValue& parent, const char* key, u32& value) {
+  const io::DataValue* child = member(parent, key);
+  if (child != nullptr) {
+    value = static_cast<u32>(child->as_u64_or(value));
   }
 }
 
-void read_f32(const YAML::Node& parent, const char* key, f32& value) {
-  const YAML::Node child = parent[key];
-  if (child) {
-    value = child.as<f32>();
+void read_f32(const io::DataValue& parent, const char* key, f32& value) {
+  const io::DataValue* child = member(parent, key);
+  if (child != nullptr) {
+    value = static_cast<f32>(child->as_f64_or(value));
   }
 }
 
@@ -227,117 +233,120 @@ void read_f32(const YAML::Node& parent, const char* key, f32& value) {
 WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text) {
   WorldGenerationConfig config;
 
-  try {
-    const YAML::Node root = YAML::Load(std::string{text});
-    if (!root || root.IsNull()) {
-      return WorldGenerationConfigResult::failure({"world generation YAML is empty"});
-    }
-
-    const YAML::Node id = root["id"];
-    if (id) {
-      config.id = id.as<std::string>();
-    }
-    read_u32(root, "version", config.version);
-    const YAML::Node seed_salt = root["seed_salt"];
-    if (seed_salt) {
-      config.seed_salt = seed_salt.as<std::string>();
-    }
-
-    const YAML::Node vertical = root["vertical"];
-    if (vertical) {
-      read_i32(vertical, "min_y", config.min_y);
-      read_i32(vertical, "max_y", config.max_y);
-      read_i32(vertical, "sea_level", config.sea_level);
-    }
-
-    const YAML::Node density = root["density"];
-    if (density) {
-      read_i32(density, "base_height", config.base_height);
-      read_i32(density, "height_scale", config.height_scale);
-    }
-
-    const YAML::Node terrain_noise = root["noise"] ? root["noise"]["terrain"] : YAML::Node{};
-    if (terrain_noise) {
-      const YAML::Node type = terrain_noise["type"];
-      if (type) {
-        config.terrain_noise_type = type.as<std::string>();
-      }
-      read_f32(terrain_noise, "frequency", config.terrain_frequency);
-      read_u32(terrain_noise, "octaves", config.terrain_octaves);
-      read_f32(terrain_noise, "amplitude", config.terrain_amplitude);
-      read_f32(terrain_noise, "lacunarity", config.terrain_lacunarity);
-      read_f32(terrain_noise, "gain", config.terrain_gain);
-    }
-
-    const YAML::Node rules = root["surface"] ? root["surface"]["rules"] : YAML::Node{};
-    if (rules) {
-      if (!rules.IsSequence() || rules.size() == 0U) {
-        return WorldGenerationConfigResult::failure({"surface.rules must be a non-empty sequence"});
-      }
-
-      const YAML::Node layers = rules[0]["layers"];
-      if (!layers || !layers.IsSequence() || layers.size() == 0U) {
-        return WorldGenerationConfigResult::failure({"surface rule must contain a non-empty layers sequence"});
-      }
-
-      for (const YAML::Node& layer_node : layers) {
-        SurfaceLayerDefinition layer;
-        const YAML::Node block = layer_node["block"];
-        const YAML::Node depth = layer_node["depth"];
-        if (!block || !depth) {
-          return WorldGenerationConfigResult::failure({"surface layer must contain block and depth"});
-        }
-        layer.block_name = block.as<std::string>();
-        if (depth.IsScalar() && depth.as<std::string>() == "remaining") {
-          layer.remaining = true;
-        } else {
-          layer.depth = depth.as<i32>();
-          if (layer.depth <= 0) {
-            return WorldGenerationConfigResult::failure({"surface layer depth must be positive"});
-          }
-        }
-        config.surface_layers.emplace_back(std::move(layer));
-      }
-    }
-
-    if (config.id.empty()) {
-      return WorldGenerationConfigResult::failure({"world generation id must not be empty"});
-    }
-    if (config.version == 0U) {
-      return WorldGenerationConfigResult::failure({"world generation version must be non-zero"});
-    }
-    if (config.min_y > config.max_y) {
-      return WorldGenerationConfigResult::failure({"vertical.min_y must be <= vertical.max_y"});
-    }
-    if (config.terrain_frequency <= 0.0F) {
-      return WorldGenerationConfigResult::failure({"noise.terrain.frequency must be positive"});
-    }
-    if (config.terrain_octaves == 0U) {
-      return WorldGenerationConfigResult::failure({"noise.terrain.octaves must be non-zero"});
-    }
-    if (config.terrain_amplitude <= 0.0F) {
-      return WorldGenerationConfigResult::failure({"noise.terrain.amplitude must be positive"});
-    }
-    if (config.terrain_lacunarity <= 0.0F) {
-      return WorldGenerationConfigResult::failure({"noise.terrain.lacunarity must be positive"});
-    }
-    if (config.terrain_gain <= 0.0F) {
-      return WorldGenerationConfigResult::failure({"noise.terrain.gain must be positive"});
-    }
-    if (config.terrain_noise_type != "simplex_2d" &&
-        config.terrain_noise_type != "open_simplex_2d") {
-      return WorldGenerationConfigResult::failure(
-          {"unsupported noise.terrain.type: " + config.terrain_noise_type});
-    }
-    if (config.surface_layers.empty()) {
-      return WorldGenerationConfigResult::failure(
-          {"surface.rules must define at least one surface layer"});
-    }
-
-    return WorldGenerationConfigResult::success(std::move(config));
-  } catch (const YAML::Exception& ex) {
-    return WorldGenerationConfigResult::failure({"failed to parse world generation YAML: " + std::string{ex.what()}});
+  auto decoded = io::decode_yaml_value(text);
+  if (!decoded) {
+    return WorldGenerationConfigResult::failure(
+        {"failed to parse world generation YAML: " + decoded.error().describe()});
   }
+  const io::DataValue& root = decoded.value().root;
+  if (root.kind() == io::DataKind::Null) {
+    return WorldGenerationConfigResult::failure({"world generation YAML is empty"});
+  }
+
+  if (const io::DataValue* id = member(root, "id"); id != nullptr) {
+    config.id = std::string{id->as_string_or(config.id)};
+  }
+  read_u32(root, "version", config.version);
+  if (const io::DataValue* seed_salt = member(root, "seed_salt");
+      seed_salt != nullptr) {
+    config.seed_salt = std::string{seed_salt->as_string_or(config.seed_salt)};
+  }
+
+  if (const io::DataValue* vertical = member(root, "vertical"); vertical != nullptr) {
+    read_i32(*vertical, "min_y", config.min_y);
+    read_i32(*vertical, "max_y", config.max_y);
+    read_i32(*vertical, "sea_level", config.sea_level);
+  }
+
+  if (const io::DataValue* density = member(root, "density"); density != nullptr) {
+    read_i32(*density, "base_height", config.base_height);
+    read_i32(*density, "height_scale", config.height_scale);
+  }
+
+  const io::DataValue* noise = member(root, "noise");
+  const io::DataValue* terrain_noise = noise == nullptr ? nullptr : member(*noise, "terrain");
+  if (terrain_noise != nullptr) {
+    if (const io::DataValue* type = member(*terrain_noise, "type"); type != nullptr) {
+      config.terrain_noise_type = std::string{type->as_string_or(config.terrain_noise_type)};
+    }
+    read_f32(*terrain_noise, "frequency", config.terrain_frequency);
+    read_u32(*terrain_noise, "octaves", config.terrain_octaves);
+    read_f32(*terrain_noise, "amplitude", config.terrain_amplitude);
+    read_f32(*terrain_noise, "lacunarity", config.terrain_lacunarity);
+    read_f32(*terrain_noise, "gain", config.terrain_gain);
+  }
+
+  const io::DataValue* surface = member(root, "surface");
+  const io::DataValue* rules = surface == nullptr ? nullptr : member(*surface, "rules");
+  if (rules != nullptr) {
+    const io::DataValue::Array* rule_array = rules->array_if();
+    if (rule_array == nullptr || rule_array->empty()) {
+      return WorldGenerationConfigResult::failure({"surface.rules must be a non-empty sequence"});
+    }
+
+    const io::DataValue* layers = member((*rule_array)[0], "layers");
+    const io::DataValue::Array* layer_array =
+        layers == nullptr ? nullptr : layers->array_if();
+    if (layer_array == nullptr || layer_array->empty()) {
+      return WorldGenerationConfigResult::failure({"surface rule must contain a non-empty layers sequence"});
+    }
+
+    for (const io::DataValue& layer_node : *layer_array) {
+      SurfaceLayerDefinition layer;
+      const io::DataValue* block = member(layer_node, "block");
+      const io::DataValue* depth = member(layer_node, "depth");
+      if (block == nullptr || depth == nullptr) {
+        return WorldGenerationConfigResult::failure({"surface layer must contain block and depth"});
+      }
+      layer.block_name = std::string{block->as_string_or({})};
+      if (depth->kind() == io::DataKind::String &&
+          depth->as_string_or({}) == "remaining") {
+        layer.remaining = true;
+      } else {
+        layer.depth = static_cast<i32>(depth->as_i64_or(0));
+        if (layer.depth <= 0) {
+          return WorldGenerationConfigResult::failure({"surface layer depth must be positive"});
+        }
+      }
+      config.surface_layers.emplace_back(std::move(layer));
+    }
+  }
+
+  if (config.id.empty()) {
+    return WorldGenerationConfigResult::failure({"world generation id must not be empty"});
+  }
+  if (config.version == 0U) {
+    return WorldGenerationConfigResult::failure({"world generation version must be non-zero"});
+  }
+  if (config.min_y > config.max_y) {
+    return WorldGenerationConfigResult::failure({"vertical.min_y must be <= vertical.max_y"});
+  }
+  if (config.terrain_frequency <= 0.0F) {
+    return WorldGenerationConfigResult::failure({"noise.terrain.frequency must be positive"});
+  }
+  if (config.terrain_octaves == 0U) {
+    return WorldGenerationConfigResult::failure({"noise.terrain.octaves must be non-zero"});
+  }
+  if (config.terrain_amplitude <= 0.0F) {
+    return WorldGenerationConfigResult::failure({"noise.terrain.amplitude must be positive"});
+  }
+  if (config.terrain_lacunarity <= 0.0F) {
+    return WorldGenerationConfigResult::failure({"noise.terrain.lacunarity must be positive"});
+  }
+  if (config.terrain_gain <= 0.0F) {
+    return WorldGenerationConfigResult::failure({"noise.terrain.gain must be positive"});
+  }
+  if (config.terrain_noise_type != "simplex_2d" &&
+      config.terrain_noise_type != "open_simplex_2d") {
+    return WorldGenerationConfigResult::failure(
+        {"unsupported noise.terrain.type: " + config.terrain_noise_type});
+  }
+  if (config.surface_layers.empty()) {
+    return WorldGenerationConfigResult::failure(
+        {"surface.rules must define at least one surface layer"});
+  }
+
+  return WorldGenerationConfigResult::success(std::move(config));
 }
 
 WorldGenerationPaletteResult resolve_world_generation_palette(

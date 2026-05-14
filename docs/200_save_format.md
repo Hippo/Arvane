@@ -23,6 +23,21 @@ All persisted data must be:
 - Derived data is not saved (meshes, caches, etc.)
 - Save format must support migration
 
+### Codec Ownership
+
+Engine persistence and config writes should go through `arv::Codec<T>`
+backends, but codec migration must not rewrite existing file formats unless a
+format migration is explicitly planned.
+
+Current format-preserving backends keep these on-disk shapes:
+
+- YAML runtime config, input binding, and permission files stay YAML
+- server lists, save roots, world metadata, player profiles, and entity-region
+  metadata stay JSON with their existing pretty-print style
+- world region files keep the `.arvr` binary chunk-region layout
+- plugin config and persistent records keep their existing `DataDocument`
+  YAML/binary storage
+
 ---
 
 ## Save Root Structure
@@ -57,6 +72,8 @@ arvane_home/
     worlds/
       default/
         world.json
+        blueprints/
+          <name>.abp
         regions/
           r.<x>.<z>.arvr
     plugin_config/
@@ -98,6 +115,8 @@ Notes:
 * Each world is fully independent
 * A “dimension” is simply another world
 * Worlds do not nest inside each other
+* World-local blueprints are saved as `.abp` documents under
+  `worlds/<world>/blueprints/`
 * `saves/` contains singleplayer server save directories, not worlds directly
 * Players exist at the server level (not per-world)
 * Uploaded player skin assets are stored at the server-save level under
@@ -135,6 +154,7 @@ Each world stores:
 * world time / tick counter
 * simulation settings
 * region files
+* world-local blueprint documents
 * world-scoped plugin config and persistent data sidecars
 
 ### Region / Chunk Level

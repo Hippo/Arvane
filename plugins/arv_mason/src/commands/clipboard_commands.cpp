@@ -59,14 +59,13 @@ arv::Result MasonPlugin::handle_copy(arv::CommandContext& ctx, const Args& args)
   if (state == nullptr) {
     return arv::Result{arv::ResultCode::InvalidState, "player required"};
   }
-  SelectionBoundsResult bounds = normalized_bounds(state->selection);
-  if (!bounds.ok) {
-    ctx.error(bounds.message);
+  std::optional<SelectionBounds> bounds = current_selection_bounds(ctx);
+  if (!bounds.has_value()) {
     return arv::Result{arv::ResultCode::InvalidState, "selection incomplete"};
   }
-  if (!has_limit_bypass(ctx) && bounds.bounds.block_count > config_.limits.max_clipboard_blocks) {
+  if (!has_limit_bypass(ctx) && bounds->block_count > config_.limits.max_clipboard_blocks) {
     ctx.error(
-        "Clipboard exceeds limit: " + count_text(bounds.bounds.block_count) +
+        "Clipboard exceeds limit: " + count_text(bounds->block_count) +
         " blocks. Limit: " + count_text(config_.limits.max_clipboard_blocks) + ".");
     return arv::Result{arv::ResultCode::InvalidArgument, "clipboard limit exceeded"};
   }
@@ -75,7 +74,7 @@ arv::Result MasonPlugin::handle_copy(arv::CommandContext& ctx, const Args& args)
     ctx.error("Copy requires a player position.");
     return arv::Result{arv::ResultCode::InvalidState, "missing position"};
   }
-  auto clipboard = copy_selection_to_clipboard(ctx, bounds.bounds, *origin);
+  auto clipboard = copy_selection_to_clipboard(ctx, *bounds, *origin);
   if (!clipboard.has_value()) {
     return arv::Result{arv::ResultCode::InternalError, "copy failed"};
   }
@@ -107,7 +106,7 @@ arv::Result MasonPlugin::handle_paste(
     return arv::Result{arv::ResultCode::InvalidState, "player required"};
   }
   if (!state->clipboard.has_value() || state->clipboard->empty()) {
-    ctx.error("Clipboard is empty. Use /mason copy or /mason blueprint load first.");
+    ctx.error("Clipboard is empty. Use /mason copy first.");
     return arv::Result{arv::ResultCode::InvalidState, "clipboard empty"};
   }
   const MasonClipboard& clipboard = *state->clipboard;

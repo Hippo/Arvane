@@ -76,7 +76,9 @@ Defines standalone public SDKs that external authoring code can consume without
 linking engine modules.
 
 * `sdk/arvane_plugin/` defines the native plugin ABI and `Arvane::SDK`
-* SDK headers must not include engine module headers
+* SDK headers must not include engine runtime headers. Standalone,
+  SDK-compatible engine headers may be exported deliberately, such as
+  `arv/io/codec.hpp`.
 * SDK targets provide compile-time authoring support, not engine runtime code
 
 ---
@@ -108,6 +110,7 @@ arvane/
 │  ├─ arv_sched/
 │  ├─ arv_voxel/
 │  ├─ arv_data/
+│  ├─ arv_blueprint/
 │  ├─ arv_world/
 │  ├─ arv_physics/
 │  ├─ arv_entity/
@@ -228,6 +231,7 @@ General IO systems.
 * streams
 * virtual filesystem concepts
 * config loading helpers
+* generic `arv::Codec<T>` declarations and format-preserving IO codec adapters
 
 ---
 
@@ -385,6 +389,7 @@ Global player system.
 * sessions
 * connection mapping
 * permissions
+* current player block selections
 * cross-world lookup
 
 ### Model
@@ -434,6 +439,20 @@ Backend-independent structured documents and plugin-owned storage services.
 * YAML, JSON, and binary codecs
 * safe resource-key to storage-path mapping
 * plugin config and persistent data storage backends
+
+---
+
+## `arv_blueprint`
+
+Shared Arvane Blueprint document support.
+
+* blueprint data model
+* `.abp` text format encode/decode
+* palette plus RLE block storage
+* owner-scoped storage key helpers
+
+Blueprint commands, permissions, and user workflow live in `arv_base`; this
+module owns only the reusable format and codec surface.
 
 ---
 
@@ -548,6 +567,7 @@ Compiled behavior provider for the built-in `arvane_base` pack.
 * built-in player entity definition
 * base starter inventory defaults
 * base command implementations
+* first-class selection and blueprint command implementations
 
 ### Constraints
 

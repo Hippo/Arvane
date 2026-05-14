@@ -1,6 +1,5 @@
 #pragma once
 
-#include "arv_mason/blueprints/blueprint.hpp"
 #include "arv_mason/config.hpp"
 #include "arv_mason/history/history.hpp"
 #include "arv_mason/selection/selection.hpp"
@@ -21,7 +20,6 @@ enum class PendingOperationKind {
   Set,
   Replace,
   Paste,
-  BlueprintPaste,
 };
 
 struct PendingOperation {
@@ -30,8 +28,6 @@ struct PendingOperation {
 };
 
 struct MasonPlayerState {
-  bool persistent_loaded{};
-  MasonSelection selection{};
   std::optional<MasonClipboard> clipboard{};
   MasonHistory history{};
   std::optional<PendingOperation> pending{};
@@ -70,14 +66,12 @@ private:
   }
 
   [[nodiscard]] arv::Result handle_mason(arv::CommandContext& ctx);
-  [[nodiscard]] arv::Result handle_select(arv::CommandContext& ctx, const Args& args);
   [[nodiscard]] arv::Result handle_set(arv::CommandContext& ctx, const Args& args, bool confirmed = false);
   [[nodiscard]] arv::Result handle_replace(arv::CommandContext& ctx, const Args& args, bool confirmed = false);
   [[nodiscard]] arv::Result handle_copy(arv::CommandContext& ctx, const Args& args);
   [[nodiscard]] arv::Result handle_paste(arv::CommandContext& ctx, const Args& args, bool confirmed = false);
   [[nodiscard]] arv::Result handle_undo(arv::CommandContext& ctx, const Args& args);
   [[nodiscard]] arv::Result handle_redo(arv::CommandContext& ctx, const Args& args);
-  [[nodiscard]] arv::Result handle_blueprint(arv::CommandContext& ctx, const Args& args, bool confirmed = false);
   [[nodiscard]] arv::Result handle_confirm(arv::CommandContext& ctx, const Args& args);
   [[nodiscard]] arv::Result handle_status(arv::CommandContext& ctx);
 
@@ -85,6 +79,8 @@ private:
   [[nodiscard]] std::optional<ArvPlayerID> require_player(arv::CommandContext& ctx) const;
   [[nodiscard]] std::optional<ArvWorldHandle> require_world(arv::CommandContext& ctx) const;
   [[nodiscard]] std::optional<ArvBlockPos> require_block_position(arv::CommandContext& ctx) const;
+  [[nodiscard]] std::optional<SelectionBounds> current_selection_bounds(
+      arv::CommandContext& ctx) const;
 
   [[nodiscard]] bool check_custom_permission(
       arv::CommandContext& ctx,
@@ -132,16 +128,6 @@ private:
       std::string history_summary);
 
   void push_history(ArvPlayerID player, MasonPlayerState& state, const OperationPlan& plan);
-  void save_player_state(ArvPlayerID player, const MasonPlayerState& state) const;
-  void load_player_state(ArvPlayerID player, MasonPlayerState& state) const;
-
-  [[nodiscard]] std::vector<std::string> load_blueprint_index(ArvWorldHandle world) const;
-  void save_blueprint_index(ArvWorldHandle world, const std::vector<std::string>& names) const;
-  [[nodiscard]] bool save_blueprint_document(ArvWorldHandle world, std::string_view name, std::string_view abp_text) const;
-  [[nodiscard]] std::optional<std::string> load_blueprint_document(ArvWorldHandle world, std::string_view name) const;
-  [[nodiscard]] std::optional<MasonClipboard> clipboard_from_blueprint(
-      arv::CommandContext& ctx,
-      const Blueprint& blueprint) const;
 
   arv::Plugin plugin_;
   MasonConfig config_{};

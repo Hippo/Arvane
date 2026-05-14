@@ -1,5 +1,6 @@
 #include "arv/render/entity_model.hpp"
 
+#include "arv/io/data_codecs.hpp"
 #include "arv/voxel/block.hpp"
 
 #include <algorithm>
@@ -7,34 +8,49 @@
 #include <optional>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 namespace arv::render {
 namespace {
-
-using json = nlohmann::json;
 
 [[nodiscard]] usize face_index(EntityModelFace face) noexcept {
   return static_cast<usize>(face);
 }
 
+[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64 ||
+         value.kind() == io::DataKind::F64;
+}
+
+[[nodiscard]] std::optional<std::string_view> string_value(
+    const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::String
+             ? std::optional<std::string_view>{value.as_string_or({})}
+             : std::nullopt;
+}
+
+[[nodiscard]] const io::DataValue* member(
+    const io::DataValue& object,
+    std::string_view key) noexcept {
+  return object.get(key);
+}
+
 [[nodiscard]] Expected<Vec3f, EntityModelError> read_vec3(
-    const json& node,
+    const io::DataValue& node,
     const std::string& field) {
-  if (!node.is_array() || node.size() != 3U) {
+  const io::DataValue::Array* array = node.array_if();
+  if (array == nullptr || array->size() != 3U) {
     return Expected<Vec3f, EntityModelError>::failure(
         {field + " must be a 3-element numeric array"});
   }
-  for (const json& value : node) {
-    if (!value.is_number()) {
+  for (const io::DataValue& value : *array) {
+    if (!is_number(value)) {
       return Expected<Vec3f, EntityModelError>::failure(
           {field + " entries must be numeric"});
     }
   }
   Vec3f result{
-      node.at(0).get<f32>(),
-      node.at(1).get<f32>(),
-      node.at(2).get<f32>()};
+      static_cast<f32>((*array)[0].as_f64_or(0.0)),
+      static_cast<f32>((*array)[1].as_f64_or(0.0)),
+      static_cast<f32>((*array)[2].as_f64_or(0.0))};
   if (!std::isfinite(result.x) || !std::isfinite(result.y) ||
       !std::isfinite(result.z)) {
     return Expected<Vec3f, EntityModelError>::failure(
@@ -325,13 +341,14 @@ void append_face(
 }
 
 [[nodiscard]] Expected<EntityAnimationChannel, EntityModelError> parse_animation_channel(
-    const json& node,
+    const io::DataValue& node,
     const std::string& path) {
-  if (!node.is_string()) {
+  auto channel_text = string_value(node);
+  if (!channel_text.has_value()) {
     return Expected<EntityAnimationChannel, EntityModelError>::failure(
         {path + ".channel must be a string"});
   }
-  const std::string channel = node.get<std::string>();
+  const std::string_view channel = channel_text.value();
   if (channel == "rotation") {
     return Expected<EntityAnimationChannel, EntityModelError>::success(
         EntityAnimationChannel::Rotation);
@@ -345,32 +362,34 @@ void append_face(
         EntityAnimationChannel::Scale);
   }
   return Expected<EntityAnimationChannel, EntityModelError>::failure(
-      {path + ".channel has unsupported animation channel: " + channel});
+      {path + ".channel has unsupported animation channel: " + std::string{channel}});
 }
 
 [[nodiscard]] Expected<EntityAnimationInterpolation, EntityModelError>
-parse_animation_interpolation(const json& node, const std::string& path) {
-  if (!node.is_string()) {
+parse_animation_interpolation(const io::DataValue& node, const std::string& path) {
+  auto interpolation_text = string_value(node);
+  if (!interpolation_text.has_value()) {
     return Expected<EntityAnimationInterpolation, EntityModelError>::failure(
         {path + ".interpolation must be a string"});
   }
-  const std::string interpolation = node.get<std::string>();
+  const std::string_view interpolation = interpolation_text.value();
   if (interpolation == "linear") {
     return Expected<EntityAnimationInterpolation, EntityModelError>::success(
         EntityAnimationInterpolation::Linear);
   }
   return Expected<EntityAnimationInterpolation, EntityModelError>::failure(
-      {path + ".interpolation has unsupported value: " + interpolation});
+      {path + ".interpolation has unsupported value: " + std::string{interpolation}});
 }
 
 [[nodiscard]] Expected<bool, EntityModelError> parse_animation_loop(
-    const json& node,
+    const io::DataValue& node,
     const std::string& path) {
-  if (node.is_boolean()) {
-    return Expected<bool, EntityModelError>::success(node.get<bool>());
+  if (node.kind() == io::DataKind::Bool) {
+    return Expected<bool, EntityModelError>::success(node.as_bool_or(false));
   }
-  if (node.is_string()) {
-    const std::string loop = node.get<std::string>();
+  auto loop_text = string_value(node);
+  if (loop_text.has_value()) {
+    const std::string_view loop = loop_text.value();
     if (loop.empty() || loop == "none" || loop == "false" || loop == "once" ||
         loop == "hold") {
       return Expected<bool, EntityModelError>::success(false);
@@ -443,150 +462,154 @@ EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
 EntityAnimationDefinitionResult parse_entity_animation_json(
     std::string_view text,
     std::string_view diagnostic_path) {
-  try {
-    const json root = json::parse(text.begin(), text.end());
-    const std::string root_path =
-        diagnostic_path.empty() ? std::string{"animation asset"} : std::string{diagnostic_path};
-    if (!root.is_object()) {
-      return EntityAnimationDefinitionResult::failure({root_path + " root must be an object"});
-    }
-
-    const auto animations = root.find("animations");
-    if (animations == root.end() || !animations->is_array()) {
-      return EntityAnimationDefinitionResult::failure(
-          {field_path(root_path, "animations") + " must be an array"});
-    }
-
-    EntityAnimationDefinition definition;
-    definition.clips.reserve(animations->size());
-    for (usize animation_index = 0; animation_index < animations->size(); ++animation_index) {
-      const json& animation_json = animations->at(animation_index);
-      const std::string animation_path =
-          indexed_field_path(root_path, "animations", animation_index);
-      if (!animation_json.is_object()) {
-        return EntityAnimationDefinitionResult::failure(
-            {animation_path + " must be an object"});
-      }
-
-      const auto name = animation_json.find("name");
-      if (name == animation_json.end() || !name->is_string()) {
-        return EntityAnimationDefinitionResult::failure(
-            {animation_path + ".name must be a string"});
-      }
-      const auto length = animation_json.find("length");
-      if (length == animation_json.end() || !length->is_number()) {
-        return EntityAnimationDefinitionResult::failure(
-            {animation_path + ".length must be numeric"});
-      }
-      const auto loop = animation_json.find("loop");
-      if (loop == animation_json.end()) {
-        return EntityAnimationDefinitionResult::failure(
-            {animation_path + ".loop is required"});
-      }
-      auto parsed_loop = parse_animation_loop(*loop, animation_path);
-      if (!parsed_loop) {
-        return EntityAnimationDefinitionResult::failure(parsed_loop.error());
-      }
-      const auto keyframes = animation_json.find("keyframes");
-      if (keyframes == animation_json.end() || !keyframes->is_array()) {
-        return EntityAnimationDefinitionResult::failure(
-            {animation_path + ".keyframes must be an array"});
-      }
-
-      EntityAnimationClip clip;
-      clip.name = name->get<std::string>();
-      clip.length_seconds = length->get<f32>();
-      if (!std::isfinite(clip.length_seconds)) {
-        return EntityAnimationDefinitionResult::failure(
-            {animation_path + ".length must be finite"});
-      }
-      clip.loop = parsed_loop.value();
-      clip.keyframes.reserve(keyframes->size());
-      for (usize keyframe_index = 0; keyframe_index < keyframes->size(); ++keyframe_index) {
-        const json& keyframe_json = keyframes->at(keyframe_index);
-        const std::string keyframe_path =
-            indexed_field_path(animation_path, "keyframes", keyframe_index);
-        if (!keyframe_json.is_object()) {
-          return EntityAnimationDefinitionResult::failure(
-              {keyframe_path + " must be an object"});
-        }
-
-        const auto time = keyframe_json.find("time");
-        if (time == keyframe_json.end() || !time->is_number()) {
-          return EntityAnimationDefinitionResult::failure(
-              {keyframe_path + ".time must be numeric"});
-        }
-        const auto bone = keyframe_json.find("bone");
-        if (bone == keyframe_json.end() || !bone->is_string()) {
-          return EntityAnimationDefinitionResult::failure(
-              {keyframe_path + ".bone must be a string"});
-        }
-        const auto channel = keyframe_json.find("channel");
-        if (channel == keyframe_json.end()) {
-          return EntityAnimationDefinitionResult::failure(
-              {keyframe_path + ".channel is required"});
-        }
-        auto parsed_channel = parse_animation_channel(*channel, keyframe_path);
-        if (!parsed_channel) {
-          return EntityAnimationDefinitionResult::failure(parsed_channel.error());
-        }
-        const auto value = keyframe_json.find("value");
-        if (value == keyframe_json.end()) {
-          return EntityAnimationDefinitionResult::failure(
-              {keyframe_path + ".value is required"});
-        }
-        auto parsed_value = read_vec3(*value, keyframe_path + ".value");
-        if (!parsed_value) {
-          return EntityAnimationDefinitionResult::failure(parsed_value.error());
-        }
-
-        EntityAnimationKeyframe keyframe;
-        keyframe.time_seconds = time->get<f32>();
-        if (!std::isfinite(keyframe.time_seconds)) {
-          return EntityAnimationDefinitionResult::failure(
-              {keyframe_path + ".time must be finite"});
-        }
-        keyframe.bone_name = bone->get<std::string>();
-        keyframe.channel = parsed_channel.value();
-        keyframe.value = parsed_value.value();
-        if (keyframe.channel == EntityAnimationChannel::Rotation) {
-          keyframe.value = blockbench_rotation_to_engine(keyframe.value);
-        } else if (keyframe.channel == EntityAnimationChannel::Position) {
-          keyframe.value = blockbench_position_to_engine(keyframe.value);
-        }
-        if (const auto interpolation = keyframe_json.find("interpolation");
-            interpolation != keyframe_json.end()) {
-          auto parsed_interpolation =
-              parse_animation_interpolation(*interpolation, keyframe_path);
-          if (!parsed_interpolation) {
-            return EntityAnimationDefinitionResult::failure(parsed_interpolation.error());
-          }
-          keyframe.interpolation = parsed_interpolation.value();
-        }
-        clip.keyframes.push_back(std::move(keyframe));
-      }
-      std::sort(
-          clip.keyframes.begin(),
-          clip.keyframes.end(),
-          [](const EntityAnimationKeyframe& lhs, const EntityAnimationKeyframe& rhs) {
-            if (lhs.time_seconds != rhs.time_seconds) {
-              return lhs.time_seconds < rhs.time_seconds;
-            }
-            if (lhs.bone_name != rhs.bone_name) {
-              return lhs.bone_name < rhs.bone_name;
-            }
-            return static_cast<u8>(lhs.channel) < static_cast<u8>(rhs.channel);
-          });
-      definition.clips.push_back(std::move(clip));
-    }
-
-    return EntityAnimationDefinitionResult::success(std::move(definition));
-  } catch (const json::exception& ex) {
-    const std::string root_path =
-        diagnostic_path.empty() ? std::string{"animation asset"} : std::string{diagnostic_path};
+  auto decoded = io::decode_json_value(text);
+  const std::string root_path =
+      diagnostic_path.empty() ? std::string{"animation asset"} : std::string{diagnostic_path};
+  if (!decoded) {
     return EntityAnimationDefinitionResult::failure(
-        {root_path + " failed to parse animation JSON: " + std::string{ex.what()}});
+        {root_path + " failed to parse animation JSON: " + decoded.error().describe()});
   }
+  const io::DataValue& root = decoded.value().root;
+  if (root.kind() != io::DataKind::Object) {
+    return EntityAnimationDefinitionResult::failure({root_path + " root must be an object"});
+  }
+
+  const io::DataValue* animations = member(root, "animations");
+  const io::DataValue::Array* animation_array =
+      animations == nullptr ? nullptr : animations->array_if();
+  if (animation_array == nullptr) {
+    return EntityAnimationDefinitionResult::failure(
+        {field_path(root_path, "animations") + " must be an array"});
+  }
+
+  EntityAnimationDefinition definition;
+  definition.clips.reserve(animation_array->size());
+  for (usize animation_index = 0; animation_index < animation_array->size(); ++animation_index) {
+    const io::DataValue& animation_json = (*animation_array)[animation_index];
+    const std::string animation_path =
+        indexed_field_path(root_path, "animations", animation_index);
+    if (animation_json.kind() != io::DataKind::Object) {
+      return EntityAnimationDefinitionResult::failure(
+          {animation_path + " must be an object"});
+    }
+
+    const io::DataValue* name = member(animation_json, "name");
+    auto name_text = name == nullptr ? std::optional<std::string_view>{} : string_value(*name);
+    if (!name_text.has_value()) {
+      return EntityAnimationDefinitionResult::failure(
+          {animation_path + ".name must be a string"});
+    }
+    const io::DataValue* length = member(animation_json, "length");
+    if (length == nullptr || !is_number(*length)) {
+      return EntityAnimationDefinitionResult::failure(
+          {animation_path + ".length must be numeric"});
+    }
+    const io::DataValue* loop = member(animation_json, "loop");
+    if (loop == nullptr) {
+      return EntityAnimationDefinitionResult::failure(
+          {animation_path + ".loop is required"});
+    }
+    auto parsed_loop = parse_animation_loop(*loop, animation_path);
+    if (!parsed_loop) {
+      return EntityAnimationDefinitionResult::failure(parsed_loop.error());
+    }
+    const io::DataValue* keyframes = member(animation_json, "keyframes");
+    const io::DataValue::Array* keyframe_array =
+        keyframes == nullptr ? nullptr : keyframes->array_if();
+    if (keyframe_array == nullptr) {
+      return EntityAnimationDefinitionResult::failure(
+          {animation_path + ".keyframes must be an array"});
+    }
+
+    EntityAnimationClip clip;
+    clip.name = std::string{name_text.value()};
+    clip.length_seconds = static_cast<f32>(length->as_f64_or(0.0));
+    if (!std::isfinite(clip.length_seconds)) {
+      return EntityAnimationDefinitionResult::failure(
+          {animation_path + ".length must be finite"});
+    }
+    clip.loop = parsed_loop.value();
+    clip.keyframes.reserve(keyframe_array->size());
+    for (usize keyframe_index = 0; keyframe_index < keyframe_array->size(); ++keyframe_index) {
+      const io::DataValue& keyframe_json = (*keyframe_array)[keyframe_index];
+      const std::string keyframe_path =
+          indexed_field_path(animation_path, "keyframes", keyframe_index);
+      if (keyframe_json.kind() != io::DataKind::Object) {
+        return EntityAnimationDefinitionResult::failure(
+            {keyframe_path + " must be an object"});
+      }
+
+      const io::DataValue* time = member(keyframe_json, "time");
+      if (time == nullptr || !is_number(*time)) {
+        return EntityAnimationDefinitionResult::failure(
+            {keyframe_path + ".time must be numeric"});
+      }
+      const io::DataValue* bone = member(keyframe_json, "bone");
+      auto bone_text = bone == nullptr ? std::optional<std::string_view>{} : string_value(*bone);
+      if (!bone_text.has_value()) {
+        return EntityAnimationDefinitionResult::failure(
+            {keyframe_path + ".bone must be a string"});
+      }
+      const io::DataValue* channel = member(keyframe_json, "channel");
+      if (channel == nullptr) {
+        return EntityAnimationDefinitionResult::failure(
+            {keyframe_path + ".channel is required"});
+      }
+      auto parsed_channel = parse_animation_channel(*channel, keyframe_path);
+      if (!parsed_channel) {
+        return EntityAnimationDefinitionResult::failure(parsed_channel.error());
+      }
+      const io::DataValue* value = member(keyframe_json, "value");
+      if (value == nullptr) {
+        return EntityAnimationDefinitionResult::failure(
+            {keyframe_path + ".value is required"});
+      }
+      auto parsed_value = read_vec3(*value, keyframe_path + ".value");
+      if (!parsed_value) {
+        return EntityAnimationDefinitionResult::failure(parsed_value.error());
+      }
+
+      EntityAnimationKeyframe keyframe;
+      keyframe.time_seconds = static_cast<f32>(time->as_f64_or(0.0));
+      if (!std::isfinite(keyframe.time_seconds)) {
+        return EntityAnimationDefinitionResult::failure(
+            {keyframe_path + ".time must be finite"});
+      }
+      keyframe.bone_name = std::string{bone_text.value()};
+      keyframe.channel = parsed_channel.value();
+      keyframe.value = parsed_value.value();
+      if (keyframe.channel == EntityAnimationChannel::Rotation) {
+        keyframe.value = blockbench_rotation_to_engine(keyframe.value);
+      } else if (keyframe.channel == EntityAnimationChannel::Position) {
+        keyframe.value = blockbench_position_to_engine(keyframe.value);
+      }
+      if (const io::DataValue* interpolation = member(keyframe_json, "interpolation");
+          interpolation != nullptr) {
+        auto parsed_interpolation =
+            parse_animation_interpolation(*interpolation, keyframe_path);
+        if (!parsed_interpolation) {
+          return EntityAnimationDefinitionResult::failure(parsed_interpolation.error());
+        }
+        keyframe.interpolation = parsed_interpolation.value();
+      }
+      clip.keyframes.push_back(std::move(keyframe));
+    }
+    std::sort(
+        clip.keyframes.begin(),
+        clip.keyframes.end(),
+        [](const EntityAnimationKeyframe& lhs, const EntityAnimationKeyframe& rhs) {
+          if (lhs.time_seconds != rhs.time_seconds) {
+            return lhs.time_seconds < rhs.time_seconds;
+          }
+          if (lhs.bone_name != rhs.bone_name) {
+            return lhs.bone_name < rhs.bone_name;
+          }
+          return static_cast<u8>(lhs.channel) < static_cast<u8>(rhs.channel);
+        });
+    definition.clips.push_back(std::move(clip));
+  }
+
+  return EntityAnimationDefinitionResult::success(std::move(definition));
 }
 
 EntityModelAssetResult build_entity_model_asset(

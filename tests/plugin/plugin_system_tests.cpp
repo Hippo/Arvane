@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #ifndef ARV_TEST_EXAMPLE_PLUGIN_PATH
 #define ARV_TEST_EXAMPLE_PLUGIN_PATH ""
@@ -137,23 +138,30 @@ struct PluginHarness {
 
 TEST(PluginSdkTests, FixturePluginsLinkOnlySdkAndDoNotDependOnEngineSharedLibraries) {
 #if defined(__linux__) || defined(__APPLE__)
-  const std::string command =
+  const std::vector<std::string> plugin_paths{
+      ARV_TEST_EXAMPLE_PLUGIN_PATH,
+      ARV_TEST_MASON_PLUGIN_PATH,
+  };
+  for (const std::string& plugin_path : plugin_paths) {
+    ASSERT_FALSE(plugin_path.empty());
+    const std::string command =
 #if defined(__APPLE__)
-      "otool -L \"" + std::string{ARV_TEST_EXAMPLE_PLUGIN_PATH} + "\"";
+        "otool -L \"" + plugin_path + "\"";
 #else
-      "ldd \"" + std::string{ARV_TEST_EXAMPLE_PLUGIN_PATH} + "\"";
+        "ldd \"" + plugin_path + "\"";
 #endif
-  FILE* pipe = popen(command.c_str(), "r");
-  ASSERT_NE(pipe, nullptr);
-  std::string output;
-  std::array<char, 256> buffer{};
-  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
-    output += buffer.data();
+    FILE* pipe = popen(command.c_str(), "r");
+    ASSERT_NE(pipe, nullptr);
+    std::string output;
+    std::array<char, 256> buffer{};
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+      output += buffer.data();
+    }
+    const int status = pclose(pipe);
+    EXPECT_EQ(status, 0) << plugin_path;
+    EXPECT_EQ(output.find("libarv_"), std::string::npos) << plugin_path << '\n' << output;
+    EXPECT_EQ(output.find("libarvane"), std::string::npos) << plugin_path << '\n' << output;
   }
-  const int status = pclose(pipe);
-  EXPECT_EQ(status, 0);
-  EXPECT_EQ(output.find("libarv_"), std::string::npos) << output;
-  EXPECT_EQ(output.find("libarvane"), std::string::npos) << output;
 #else
   GTEST_SKIP() << "Dependency inspection is platform-specific.";
 #endif
@@ -257,9 +265,6 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
       "aliases:\n"
       "  - alias: mcopy\n"
       "    command: mason.copy\n"
-      "    visible_in_help: true\n"
-      "  - alias: mbp\n"
-      "    command: mason.blueprint\n"
       "    visible_in_help: true\n");
   harness.load_packs();
 
@@ -276,9 +281,8 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   auto copy_alias = registry.resolve("mcopy");
   ASSERT_TRUE(copy_alias.has_value());
   EXPECT_EQ(copy_alias->canonical_name, "mason.copy");
-  auto blueprint_alias = registry.resolve("mbp");
-  ASSERT_TRUE(blueprint_alias.has_value());
-  EXPECT_EQ(blueprint_alias->canonical_name, "mason.blueprint");
+  EXPECT_FALSE(manager.has_command_executor("arv_mason:command/blueprint"));
+  EXPECT_FALSE(registry.resolve("mbp").has_value());
 
   arv::command::CommandSender sender;
   sender.kind = arv::command::CommandSourceKind::ServerConsole;
@@ -366,7 +370,10 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
 
   arv::sched::JobSystem jobs{{.background_cpu_workers = 1U}};
   arv::world::WorldRuntime world{arv::WorldID{1}};
-  (void)world.ensure_player(arv::PlayerID{7});
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{7});
+  player.selection.world = arv::WorldID{1};
+  player.selection.a = arv::BlockPos{{1, 2, 3}};
+  player.selection.b = arv::BlockPos{{4, 5, 6}};
   arv::entity::EntityDefinition persistent_probe;
   persistent_probe.name = "example_plugin_pack:persistent_probe";
   persistent_probe.persistent_by_default = true;

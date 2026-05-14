@@ -4,13 +4,15 @@ set(ARV_PLAYER_HEADERS
   include/arv/player/permissions.hpp
   include/arv/player/player_constants.hpp
   include/arv/player/player_state.hpp
+  include/arv/player/selection.hpp
 )
 
 add_library(arv_player STATIC
   src/inventory.cpp
   src/item.cpp
   src/permissions.cpp
+  src/selection.cpp
 )
 target_include_directories(arv_player PUBLIC include)
 target_link_libraries(arv_player PUBLIC arv_core arv_voxel)
-target_link_libraries(arv_player PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(arv_player PRIVATE arv_io)

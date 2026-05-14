@@ -6,6 +6,7 @@
 #include "arv/player/inventory.hpp"
 #include "arv/player/permissions.hpp"
 #include "arv/player/player_constants.hpp"
+#include "arv/player/selection.hpp"
 
 #include <optional>
 #include <string>
@@ -53,6 +54,7 @@ struct PlayerState {
   Inventory inventory{DefaultPlayerInventorySlotCount};
   std::optional<ItemStack> inventory_cursor_stack{};
   u8 selected_hotbar_slot{};
+  PlayerSelection selection{};
   TickIndex last_processed_input_tick{};
   u32 knockback_control_suppression_ticks{};
 };
@@ -72,6 +74,7 @@ struct PlayerViewState {
   std::string game_mode_id{std::string{SurvivalGameModeID}};
   ResolvedPermissions resolved_permissions{};
   u8 selected_hotbar_slot{};
+  PlayerSelection selection{};
 };
 
 [[nodiscard]] inline const std::optional<ItemStack>& held_item_slot(const PlayerState& player) {

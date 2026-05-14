@@ -19,10 +19,10 @@ struct arv::Codec<SampleConfig> {
   static arv::DecodeResult<SampleConfig> decode(const arv::DataDocument& document) {
     SampleConfig config;
     if (auto max_items = document.i64_value("max_items")) {
-      config.max_items = static_cast<int>(max_items.value);
+      config.max_items = static_cast<int>(max_items.value());
     }
     if (auto enabled = document.bool_value("enabled")) {
-      config.enabled = enabled.value;
+      config.enabled = enabled.value();
     }
     return {arv::Result::ok(), config};
   }

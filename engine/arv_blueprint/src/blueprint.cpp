@@ -1,4 +1,4 @@
-#include "arv_mason/blueprints/blueprint.hpp"
+#include "arv/blueprint/blueprint.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -6,8 +6,9 @@
 #include <map>
 #include <sstream>
 #include <string_view>
+#include <utility>
 
-namespace arv_mason {
+namespace arv::blueprint {
 namespace {
 
 [[nodiscard]] bool ascii_alnum(char c) noexcept {
@@ -118,7 +119,7 @@ namespace {
   return words;
 }
 
-[[nodiscard]] bool parse_pos(std::string_view text, ArvBlockPos& out) {
+[[nodiscard]] bool parse_pos(std::string_view text, BlockPos& out) {
   const std::vector<std::string_view> words = split_words(text);
   if (words.size() != 3U) {
     return false;
@@ -134,11 +135,11 @@ namespace {
       return false;
     }
   }
-  out = {
+  out = {{
       static_cast<std::int32_t>(values[0]),
       static_cast<std::int32_t>(values[1]),
       static_cast<std::int32_t>(values[2]),
-  };
+  }};
   return true;
 }
 
@@ -179,6 +180,14 @@ namespace {
   return found == values.end() || found->second.empty() ? std::string{} : found->second.front();
 }
 
+[[nodiscard]] BlockPos sub_pos(BlockPos lhs, BlockPos rhs) noexcept {
+  return {{
+      lhs.value.x - rhs.value.x,
+      lhs.value.y - rhs.value.y,
+      lhs.value.z - rhs.value.z,
+  }};
+}
+
 } // namespace
 
 bool valid_blueprint_name(std::string_view name) noexcept {
@@ -194,17 +203,17 @@ bool valid_blueprint_name(std::string_view name) noexcept {
   return true;
 }
 
-std::string blueprint_key(std::string_view name) {
-  return "arv_mason:blueprints/" + std::string{name};
+std::string blueprint_key(std::string_view owner_namespace, std::string_view name) {
+  return std::string{owner_namespace} + ":blueprints/" + std::string{name};
 }
 
-std::uint64_t blueprint_volume(ArvBlockPos size) {
-  if (size.x <= 0 || size.y <= 0 || size.z <= 0) {
+std::uint64_t blueprint_volume(BlockPos size) {
+  if (size.value.x <= 0 || size.value.y <= 0 || size.value.z <= 0) {
     return 0U;
   }
-  const std::uint64_t x = static_cast<std::uint64_t>(size.x);
-  const std::uint64_t y = static_cast<std::uint64_t>(size.y);
-  const std::uint64_t z = static_cast<std::uint64_t>(size.z);
+  const std::uint64_t x = static_cast<std::uint64_t>(size.value.x);
+  const std::uint64_t y = static_cast<std::uint64_t>(size.value.y);
+  const std::uint64_t z = static_cast<std::uint64_t>(size.value.z);
   if (y > std::numeric_limits<std::uint64_t>::max() / x) {
     return 0U;
   }
@@ -215,14 +224,18 @@ std::uint64_t blueprint_volume(ArvBlockPos size) {
   return xy * z;
 }
 
-Blueprint blueprint_from_clipboard(std::string name, const MasonClipboard& clipboard) {
+Blueprint blueprint_from_clipboard(
+    std::string name,
+    const BlueprintClipboard& clipboard,
+    std::string created_by) {
   Blueprint blueprint;
   blueprint.metadata.name = std::move(name);
+  blueprint.metadata.created_by = std::move(created_by);
   blueprint.size = clipboard.size;
   blueprint.origin = sub_pos(clipboard.origin, clipboard.source_min);
 
   std::map<std::string, std::uint32_t> palette_indices;
-  for (const ClipboardBlock& block : clipboard.blocks) {
+  for (const BlueprintClipboardBlock& block : clipboard.blocks) {
     auto [iter, inserted] = palette_indices.emplace(
         block.stable_id,
         static_cast<std::uint32_t>(palette_indices.size()));
@@ -287,7 +300,7 @@ BlueprintCodecResult encode_blueprint(const Blueprint& blueprint) {
   if (expected == 0U || expected != blueprint.blocks.size()) {
     return {false, {}, {}, "Blueprint block count does not match its size."};
   }
-  if (blueprint.schema_version != 1U || blueprint.format != blueprint_format_id) {
+  if (blueprint.schema_version != 1U || blueprint.format != BlueprintFormatID) {
     return {false, {}, {}, "Unsupported blueprint schema or format."};
   }
   if (blueprint.palette.empty()) {
@@ -306,12 +319,14 @@ BlueprintCodecResult encode_blueprint(const Blueprint& blueprint) {
 
   std::ostringstream out;
   out << "schema_version: 1\n";
-  out << "format: " << blueprint_format_id << "\n";
+  out << "format: " << BlueprintFormatID << "\n";
   out << "metadata.name: " << escape_value(blueprint.metadata.name) << "\n";
   out << "metadata.author: " << escape_value(blueprint.metadata.author) << "\n";
   out << "metadata.created_by: " << escape_value(blueprint.metadata.created_by) << "\n";
-  out << "size: " << blueprint.size.x << ' ' << blueprint.size.y << ' ' << blueprint.size.z << "\n";
-  out << "origin: " << blueprint.origin.x << ' ' << blueprint.origin.y << ' ' << blueprint.origin.z << "\n";
+  out << "size: " << blueprint.size.value.x << ' ' << blueprint.size.value.y
+      << ' ' << blueprint.size.value.z << "\n";
+  out << "origin: " << blueprint.origin.value.x << ' ' << blueprint.origin.value.y
+      << ' ' << blueprint.origin.value.z << "\n";
   out << "block_order: x + size.x * (z + size.z * y)\n";
   out << "palette_count: " << blueprint.palette.size() << "\n";
   for (const std::string& entry : blueprint.palette) {
@@ -336,7 +351,7 @@ BlueprintCodecResult decode_blueprint(std::string_view text) {
   }
   blueprint.schema_version = schema;
   blueprint.format = get_one(values, "format");
-  if (blueprint.format != blueprint_format_id) {
+  if (blueprint.format != BlueprintFormatID) {
     return {false, {}, {}, "Unsupported or missing blueprint format."};
   }
 
@@ -416,4 +431,4 @@ BlueprintCodecResult decode_blueprint(std::string_view text) {
   return {true, blueprint, {}, {}};
 }
 
-} // namespace arv_mason
+} // namespace arv::blueprint

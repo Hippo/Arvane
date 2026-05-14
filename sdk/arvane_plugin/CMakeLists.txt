@@ -1,5 +1,16 @@
 enable_language(C)
 
+get_filename_component(
+  ARVANE_IO_INCLUDE_DIR
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/arv_io/include"
+  ABSOLUTE
+)
+get_filename_component(
+  ARVANE_CORE_INCLUDE_DIR
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/arv_core/include"
+  ABSOLUTE
+)
+
 add_library(ArvaneSDK STATIC
   src/arvane_plugin.c
   cpp/src/buffer.cpp
@@ -15,6 +26,7 @@ add_library(ArvaneSDK STATIC
   cpp/src/network.cpp
   cpp/src/permissions.cpp
   cpp/src/persistent_data.cpp
+  cpp/src/players.cpp
   cpp/src/plugin.cpp
   cpp/src/regions.cpp
   cpp/src/registries.cpp
@@ -33,6 +45,8 @@ add_library(Arvane::PluginSDK ALIAS ArvaneSDK)
 target_include_directories(ArvaneSDK PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>"
+  "$<BUILD_INTERFACE:${ARVANE_CORE_INCLUDE_DIR}>"
+  "$<BUILD_INTERFACE:${ARVANE_IO_INCLUDE_DIR}>"
   "$<INSTALL_INTERFACE:include>"
 )
 target_compile_features(ArvaneSDK PUBLIC cxx_std_20)
@@ -54,6 +68,17 @@ configure_package_config_file(
 
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY cpp/include/ DESTINATION include)
+install(FILES
+  "${ARVANE_IO_INCLUDE_DIR}/arv/io/codec.hpp"
+  "${ARVANE_IO_INCLUDE_DIR}/arv/io/data_codecs.hpp"
+  "${ARVANE_IO_INCLUDE_DIR}/arv/io/data_document.hpp"
+  DESTINATION include/arv/io
+)
+install(FILES
+  "${ARVANE_CORE_INCLUDE_DIR}/arv/core/expected.hpp"
+  "${ARVANE_CORE_INCLUDE_DIR}/arv/core/types.hpp"
+  DESTINATION include/arv/core
+)
 install(
   TARGETS ArvaneSDK
   EXPORT ArvaneSDKTargets

@@ -17,6 +17,7 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
   fill_region_api(*this);
   fill_game_mode_api(*this);
   fill_network_api(*this);
+  fill_player_api(*this);
 
   api = {
       PluginApiVersion,
@@ -60,6 +61,8 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &regions_api,
       context,
       &game_modes_api,
+      context,
+      &players_api,
   };
 }
 

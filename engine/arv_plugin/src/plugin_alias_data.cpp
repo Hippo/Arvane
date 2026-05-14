@@ -1,17 +1,15 @@
 #include "plugin_alias_data.hpp"
 
 #include "arv/core/string.hpp"
+#include "arv/io/data_codecs.hpp"
+#include "arv/io/files.hpp"
 
 #include "plugin_paths.hpp"
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <optional>
-#include <sstream>
 #include <utility>
-
-#include <yaml-cpp/yaml.h>
 
 namespace arv::plugin::detail {
 namespace {
@@ -30,50 +28,45 @@ void append_alias_diagnostic(
 }
 
 [[nodiscard]] std::optional<PluginCommandAliasData> command_alias_from_data(
-    const YAML::Node& value,
+    const io::DataValue& value,
     std::string& error) {
-  if (!value.IsMap()) {
+  if (value.kind() != io::DataKind::Object) {
     error = "alias entry must be a map";
     return std::nullopt;
   }
 
-  const YAML::Node alias_node = value["alias"];
-  if (!alias_node || !alias_node.IsScalar()) {
+  const io::DataValue* alias_node = value.get("alias");
+  if (alias_node == nullptr || alias_node->kind() != io::DataKind::String) {
     error = "alias entry requires a non-empty scalar alias with no whitespace";
     return std::nullopt;
   }
-  std::string alias = alias_node.as<std::string>();
+  std::string alias{alias_node->as_string_or({})};
   if (alias.empty() || contains_ascii_space(alias)) {
     error = "alias entry requires a non-empty scalar alias with no whitespace";
     return std::nullopt;
   }
 
-  YAML::Node command_node = value["command"];
-  if (!command_node) {
-    command_node = value["target"];
+  const io::DataValue* command_node = value.get("command");
+  if (command_node == nullptr) {
+    command_node = value.get("target");
   }
-  if (!command_node || !command_node.IsScalar()) {
+  if (command_node == nullptr || command_node->kind() != io::DataKind::String) {
     error = "alias entry requires a non-empty scalar command with no whitespace";
     return std::nullopt;
   }
-  std::string command_name = command_node.as<std::string>();
+  std::string command_name{command_node->as_string_or({})};
   if (command_name.empty() || contains_ascii_space(command_name)) {
     error = "alias entry requires a non-empty scalar command with no whitespace";
     return std::nullopt;
   }
 
   bool visible_in_help = false;
-  if (const YAML::Node visible = value["visible_in_help"]; visible) {
-    if (!visible.IsScalar()) {
+  if (const io::DataValue* visible = value.get("visible_in_help"); visible != nullptr) {
+    if (visible->kind() != io::DataKind::Bool) {
       error = "alias visible_in_help must be a boolean";
       return std::nullopt;
     }
-    try {
-      visible_in_help = visible.as<bool>();
-    } catch (const YAML::Exception&) {
-      error = "alias visible_in_help must be a boolean";
-      return std::nullopt;
-    }
+    visible_in_help = visible->as_bool_or(false);
   }
 
   return PluginCommandAliasData{
@@ -105,8 +98,8 @@ PluginCommandAliasLoadResult load_command_aliases_from_data(
 
   const std::filesystem::path relative_file = file.lexically_relative(pack.root);
   result.source_file = relative_file;
-  std::ifstream input(file);
-  if (!input) {
+  auto text = io::read_text_file_contents(file);
+  if (!text) {
     append_alias_diagnostic(
         result,
         plugin_info,
@@ -114,20 +107,17 @@ PluginCommandAliasLoadResult load_command_aliases_from_data(
         "failed to open commands.yaml");
     return result;
   }
-  std::ostringstream buffer;
-  buffer << input.rdbuf();
-  YAML::Node root;
-  try {
-    root = YAML::Load(buffer.str());
-  } catch (const YAML::Exception& ex) {
+  auto decoded = io::decode_yaml_value(text.value());
+  if (!decoded) {
     append_alias_diagnostic(
         result,
         plugin_info,
         relative_file,
-        std::string{"failed to parse commands.yaml: "} + ex.what());
+        "failed to parse commands.yaml: " + decoded.error().describe());
     return result;
   }
-  if (!root || !root.IsMap()) {
+  const io::DataValue& root = decoded.value().root;
+  if (root.kind() != io::DataKind::Object) {
     append_alias_diagnostic(
         result,
         plugin_info,
@@ -135,11 +125,12 @@ PluginCommandAliasLoadResult load_command_aliases_from_data(
         "commands.yaml root must be a map");
     return result;
   }
-  const YAML::Node aliases = root["aliases"];
-  if (!aliases) {
+  const io::DataValue* aliases = root.get("aliases");
+  if (aliases == nullptr) {
     return result;
   }
-  if (!aliases.IsSequence()) {
+  const io::DataValue::Array* alias_array = aliases->array_if();
+  if (alias_array == nullptr) {
     append_alias_diagnostic(
         result,
         plugin_info,
@@ -148,9 +139,9 @@ PluginCommandAliasLoadResult load_command_aliases_from_data(
     return result;
   }
 
-  for (usize index = 0U; index < aliases.size(); ++index) {
+  for (usize index = 0U; index < alias_array->size(); ++index) {
     std::string error;
-    auto alias = command_alias_from_data(aliases[index], error);
+    auto alias = command_alias_from_data((*alias_array)[index], error);
     if (!alias.has_value()) {
       append_alias_diagnostic(
           result,

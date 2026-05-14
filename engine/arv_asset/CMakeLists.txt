@@ -23,6 +23,4 @@ target_link_libraries(arv_asset
     harfbuzz::harfbuzz
     rectpack2D
     stb
-    nlohmann_json::nlohmann_json
-    yaml-cpp
 )

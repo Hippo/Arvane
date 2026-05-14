@@ -43,16 +43,16 @@ ArvBlockPos max_pos(ArvBlockPos lhs, ArvBlockPos rhs) noexcept {
   };
 }
 
-SelectionBoundsResult normalized_bounds(const MasonSelection& selection) {
-  if (!selection.world.has_value()) {
+SelectionBoundsResult normalized_bounds(const arv::PlayerSelection& selection) {
+  if (!selection.has_world) {
     return {false, {}, "Selection has no world."};
   }
   if (!selection.a.has_value() || !selection.b.has_value()) {
-    return {false, {}, "Selection is incomplete. Set both points with /mason select a and /mason select b."};
+    return {false, {}, "Selection is incomplete. Set both points with /select a and /select b."};
   }
 
   SelectionBounds bounds;
-  bounds.world = *selection.world;
+  bounds.world = selection.world;
   bounds.min = min_pos(*selection.a, *selection.b);
   bounds.max = max_pos(*selection.a, *selection.b);
 

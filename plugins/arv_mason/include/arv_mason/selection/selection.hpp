@@ -1,5 +1,6 @@
 #pragma once
 
+#include <arv/players.hpp>
 #include <arv/types.h>
 
 #include <cstdint>
@@ -7,12 +8,6 @@
 #include <string>
 
 namespace arv_mason {
-
-struct MasonSelection {
-  std::optional<ArvWorldHandle> world{};
-  std::optional<ArvBlockPos> a{};
-  std::optional<ArvBlockPos> b{};
-};
 
 struct SelectionBounds {
   ArvWorldHandle world{};
@@ -33,7 +28,7 @@ struct SelectionBoundsResult {
 [[nodiscard]] bool same_pos(ArvBlockPos lhs, ArvBlockPos rhs) noexcept;
 [[nodiscard]] ArvBlockPos min_pos(ArvBlockPos lhs, ArvBlockPos rhs) noexcept;
 [[nodiscard]] ArvBlockPos max_pos(ArvBlockPos lhs, ArvBlockPos rhs) noexcept;
-[[nodiscard]] SelectionBoundsResult normalized_bounds(const MasonSelection& selection);
+[[nodiscard]] SelectionBoundsResult normalized_bounds(const arv::PlayerSelection& selection);
 [[nodiscard]] std::string format_pos(ArvBlockPos pos);
 [[nodiscard]] std::string format_bounds(const SelectionBounds& bounds);
 

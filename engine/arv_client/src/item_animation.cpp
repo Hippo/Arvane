@@ -1,21 +1,38 @@
 #include "arv/client/item_animation.hpp"
 
+#include "arv/io/data_codecs.hpp"
+
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 namespace arv::client {
 namespace {
-
-using json = nlohmann::json;
 
 [[nodiscard]] bool valid_stable_name(std::string_view name) noexcept {
   const usize separator = name.find(':');
   return separator != std::string_view::npos && separator > 0U &&
          separator + 1U < name.size();
+}
+
+[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64 ||
+         value.kind() == io::DataKind::F64;
+}
+
+[[nodiscard]] std::optional<std::string_view> string_value(
+    const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::String
+             ? std::optional<std::string_view>{value.as_string_or({})}
+             : std::nullopt;
+}
+
+[[nodiscard]] const io::DataValue* member(
+    const io::DataValue& object,
+    std::string_view key) noexcept {
+  return object.get(key);
 }
 
 [[nodiscard]] ItemAnimationError animation_error(std::string message) {
@@ -51,16 +68,21 @@ using json = nlohmann::json;
 }
 
 [[nodiscard]] Expected<Vec3f, ItemAnimationError> read_vec3(
-    const json& node,
+    const io::DataValue& node,
     std::string_view context) {
-  if (!node.is_array() || node.size() != 3U) {
+  const io::DataValue::Array* array = node.array_if();
+  if (array == nullptr || array->size() != 3U) {
+    return Expected<Vec3f, ItemAnimationError>::failure(
+        animation_error(std::string{context} + " must be an array of 3 numbers"));
+  }
+  if (!is_number((*array)[0]) || !is_number((*array)[1]) || !is_number((*array)[2])) {
     return Expected<Vec3f, ItemAnimationError>::failure(
         animation_error(std::string{context} + " must be an array of 3 numbers"));
   }
   Vec3f value{
-      node[0].get<f32>(),
-      node[1].get<f32>(),
-      node[2].get<f32>()};
+      static_cast<f32>((*array)[0].as_f64_or(0.0)),
+      static_cast<f32>((*array)[1].as_f64_or(0.0)),
+      static_cast<f32>((*array)[2].as_f64_or(0.0))};
   if (!std::isfinite(value.x) || !std::isfinite(value.y) || !std::isfinite(value.z)) {
     return Expected<Vec3f, ItemAnimationError>::failure(
         animation_error(std::string{context} + " values must be finite"));
@@ -70,10 +92,11 @@ using json = nlohmann::json;
 
 [[nodiscard]] Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>
 read_keyframes(
-    const json& node,
+    const io::DataValue& node,
     std::string_view clip_name,
     std::string_view field) {
-  if (!node.is_array()) {
+  const io::DataValue::Array* frame_array = node.array_if();
+  if (frame_array == nullptr) {
     return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
         animation_error(
             "animation " + std::string{clip_name} + " channel " + std::string{field} +
@@ -81,24 +104,28 @@ read_keyframes(
   }
 
   std::vector<ItemAnimationKeyframeVec3> frames;
-  frames.reserve(node.size());
-  for (usize index = 0; index < node.size(); ++index) {
-    const json& frame_json = node[index];
+  frames.reserve(frame_array->size());
+  for (usize index = 0; index < frame_array->size(); ++index) {
+    const io::DataValue& frame_json = (*frame_array)[index];
     const std::string context =
         "animation " + std::string{clip_name} + " " + std::string{field} +
         " keyframe " + std::to_string(index);
-    if (!frame_json.is_object()) {
+    if (frame_json.kind() != io::DataKind::Object) {
       return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
           animation_error(context + " must be an object"));
     }
-    const auto time_iter = frame_json.find("time");
-    const auto value_iter = frame_json.find("value");
-    if (time_iter == frame_json.end() || value_iter == frame_json.end()) {
+    const io::DataValue* time_iter = member(frame_json, "time");
+    const io::DataValue* value_iter = member(frame_json, "value");
+    if (time_iter == nullptr || value_iter == nullptr) {
       return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
           animation_error(context + " requires time and value"));
     }
+    if (!is_number(*time_iter)) {
+      return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
+          animation_error(context + " time must be numeric"));
+    }
 
-    const Seconds time_seconds = time_iter->get<Seconds>();
+    const Seconds time_seconds = static_cast<Seconds>(time_iter->as_f64_or(0.0));
     if (!std::isfinite(time_seconds) || time_seconds < 0.0F) {
       return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
           animation_error(context + " time must be finite and non-negative"));
@@ -110,13 +137,14 @@ read_keyframes(
     }
 
     ItemAnimationEasing easing = ItemAnimationEasing::Linear;
-    const auto easing_iter = frame_json.find("easing");
-    if (easing_iter != frame_json.end()) {
-      if (!easing_iter->is_string()) {
+    const io::DataValue* easing_iter = member(frame_json, "easing");
+    if (easing_iter != nullptr) {
+      auto easing_text = string_value(*easing_iter);
+      if (!easing_text.has_value()) {
         return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
             animation_error(context + " easing must be a string"));
       }
-      auto parsed_easing = parse_easing(easing_iter->get<std::string>(), context);
+      auto parsed_easing = parse_easing(easing_text.value(), context);
       if (!parsed_easing) {
         return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
             parsed_easing.error());
@@ -138,10 +166,10 @@ read_keyframes(
 }
 
 [[nodiscard]] Expected<ItemAnimationTransformChannel, ItemAnimationError> read_transform_channel(
-    const json& node,
+    const io::DataValue& node,
     std::string_view clip_name,
     std::string_view channel_name) {
-  if (!node.is_object()) {
+  if (node.kind() != io::DataKind::Object) {
     return Expected<ItemAnimationTransformChannel, ItemAnimationError>::failure(
         animation_error(
             "animation " + std::string{clip_name} + " channel " +
@@ -154,8 +182,8 @@ read_keyframes(
            std::pair{std::string_view{"rotation_degrees"}, &channel.rotation_degrees},
            std::pair{std::string_view{"scale"}, &channel.scale},
        }) {
-    const auto iter = node.find(std::string{field});
-    if (iter == node.end()) {
+    const io::DataValue* iter = member(node, field);
+    if (iter == nullptr) {
       continue;
     }
     auto frames = read_keyframes(*iter, clip_name, field);
@@ -346,62 +374,78 @@ bool HeldItemAnimationPlayer::finished(Seconds now_seconds) const noexcept {
 
 Expected<ItemAnimationLibrary, ItemAnimationError> parse_item_animation_library_json(
     std::string_view text) {
-  try {
-    const json root = json::parse(text.begin(), text.end());
-    if (!root.is_object()) {
-      return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
-          animation_error("item animation file root must be an object"));
-    }
-    const auto animations_iter = root.find("animations");
-    if (animations_iter == root.end() || !animations_iter->is_array()) {
-      return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
-          animation_error("item animation file must contain animations array"));
-    }
-
-    std::vector<ItemAnimationClip> clips;
-    clips.reserve(animations_iter->size());
-    for (usize index = 0; index < animations_iter->size(); ++index) {
-      const json& animation_json = (*animations_iter)[index];
-      if (!animation_json.is_object()) {
-        return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
-            animation_error("item animation entry " + std::to_string(index) + " must be an object"));
-      }
-      ItemAnimationClip clip;
-      const auto name_iter = animation_json.find("name");
-      if (name_iter == animation_json.end() || !name_iter->is_string()) {
-        return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
-            animation_error("item animation entry " + std::to_string(index) + " is missing name"));
-      }
-      clip.name = name_iter->get<std::string>();
-      clip.duration_seconds = animation_json.value("duration_seconds", 0.0F);
-      clip.loop = animation_json.value("loop", false);
-      clip.blend_in_seconds = animation_json.value("blend_in_seconds", 0.0F);
-      clip.blend_out_seconds = animation_json.value("blend_out_seconds", 0.0F);
-
-      const auto channels_iter = animation_json.find("channels");
-      if (channels_iter != animation_json.end()) {
-        if (!channels_iter->is_object()) {
-          return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
-              animation_error("animation " + clip.name + " channels must be an object"));
-        }
-        const auto first_person_iter = channels_iter->find("first_person");
-        if (first_person_iter != channels_iter->end()) {
-          auto channel = read_transform_channel(*first_person_iter, clip.name, "first_person");
-          if (!channel) {
-            return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(channel.error());
-          }
-          clip.first_person = std::move(channel.value());
-        }
-      }
-
-      clips.push_back(std::move(clip));
-    }
-
-    return ItemAnimationLibrary::build(std::move(clips));
-  } catch (const json::exception& ex) {
+  auto decoded = io::decode_json_value(text);
+  if (!decoded) {
     return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
-        animation_error("failed to parse item animations JSON: " + std::string{ex.what()}));
+        animation_error("failed to parse item animations JSON: " + decoded.error().describe()));
   }
+  const io::DataValue& root = decoded.value().root;
+  if (root.kind() != io::DataKind::Object) {
+    return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
+        animation_error("item animation file root must be an object"));
+  }
+  const io::DataValue* animations_iter = member(root, "animations");
+  const io::DataValue::Array* animation_array =
+      animations_iter == nullptr ? nullptr : animations_iter->array_if();
+  if (animation_array == nullptr) {
+    return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
+        animation_error("item animation file must contain animations array"));
+  }
+
+  std::vector<ItemAnimationClip> clips;
+  clips.reserve(animation_array->size());
+  for (usize index = 0; index < animation_array->size(); ++index) {
+    const io::DataValue& animation_json = (*animation_array)[index];
+    if (animation_json.kind() != io::DataKind::Object) {
+      return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
+          animation_error("item animation entry " + std::to_string(index) + " must be an object"));
+    }
+    ItemAnimationClip clip;
+    const io::DataValue* name_iter = member(animation_json, "name");
+    auto name_text = name_iter == nullptr ? std::optional<std::string_view>{}
+                                          : string_value(*name_iter);
+    if (!name_text.has_value()) {
+      return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
+          animation_error("item animation entry " + std::to_string(index) + " is missing name"));
+    }
+    clip.name = std::string{name_text.value()};
+    if (const io::DataValue* duration = member(animation_json, "duration_seconds");
+        duration != nullptr && is_number(*duration)) {
+      clip.duration_seconds = static_cast<Seconds>(duration->as_f64_or(0.0));
+    }
+    if (const io::DataValue* loop = member(animation_json, "loop");
+        loop != nullptr && loop->kind() == io::DataKind::Bool) {
+      clip.loop = loop->as_bool_or(false);
+    }
+    if (const io::DataValue* blend_in = member(animation_json, "blend_in_seconds");
+        blend_in != nullptr && is_number(*blend_in)) {
+      clip.blend_in_seconds = static_cast<Seconds>(blend_in->as_f64_or(0.0));
+    }
+    if (const io::DataValue* blend_out = member(animation_json, "blend_out_seconds");
+        blend_out != nullptr && is_number(*blend_out)) {
+      clip.blend_out_seconds = static_cast<Seconds>(blend_out->as_f64_or(0.0));
+    }
+
+    const io::DataValue* channels_iter = member(animation_json, "channels");
+    if (channels_iter != nullptr) {
+      if (channels_iter->kind() != io::DataKind::Object) {
+        return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
+            animation_error("animation " + clip.name + " channels must be an object"));
+      }
+      const io::DataValue* first_person_iter = member(*channels_iter, "first_person");
+      if (first_person_iter != nullptr) {
+        auto channel = read_transform_channel(*first_person_iter, clip.name, "first_person");
+        if (!channel) {
+          return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(channel.error());
+        }
+        clip.first_person = std::move(channel.value());
+      }
+    }
+
+    clips.push_back(std::move(clip));
+  }
+
+  return ItemAnimationLibrary::build(std::move(clips));
 }
 
 Expected<void, ItemAnimationError> validate_item_animation_references(

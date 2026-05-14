@@ -13,6 +13,7 @@
 #include "arv/network.hpp"
 #include "arv/permissions.hpp"
 #include "arv/persistent_data.hpp"
+#include "arv/players.hpp"
 #include "arv/registries.hpp"
 #include "arv/regions.hpp"
 #include "arv/resources.hpp"
@@ -72,6 +73,8 @@ public:
 
   [[nodiscard]] const GameModes& gamemodes() const noexcept;
 
+  [[nodiscard]] const Players& players() const noexcept;
+
 private:
   const ArvAPI* api_{};
   Context context_;
@@ -94,6 +97,7 @@ private:
   Text text_;
   Regions regions_;
   GameModes gamemodes_;
+  Players players_;
 };
 
 } // namespace arv

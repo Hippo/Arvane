@@ -10,4 +10,4 @@ add_library(arv_ui STATIC
 )
 target_include_directories(arv_ui PUBLIC include)
 target_link_libraries(arv_ui PUBLIC arv_asset arv_core arv_render)
-target_link_libraries(arv_ui PRIVATE arv_io yaml-cpp)
+target_link_libraries(arv_ui PRIVATE arv_io)

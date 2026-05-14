@@ -1,9 +1,6 @@
 schema_version: 1
 
 aliases:
-  - alias: mselect
-    command: mason.select
-    visible_in_help: true
   - alias: mset
     command: mason.set
     visible_in_help: true
@@ -21,7 +18,4 @@ aliases:
     visible_in_help: true
   - alias: mredo
     command: mason.redo
-    visible_in_help: true
-  - alias: mbp
-    command: mason.blueprint
     visible_in_help: true

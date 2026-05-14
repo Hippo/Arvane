@@ -1,4 +1,5 @@
 add_subdirectory(arv_core)
+add_subdirectory(arv_blueprint)
 add_subdirectory(arv_crypto)
 add_subdirectory(arv_text)
 add_subdirectory(arv_command)

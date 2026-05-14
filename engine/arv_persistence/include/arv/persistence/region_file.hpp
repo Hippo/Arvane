@@ -8,8 +8,10 @@
 #include "arv/voxel/light.hpp"
 #include "arv/voxel/storage.hpp"
 
+#include <array>
 #include <filesystem>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace arv::persistence {

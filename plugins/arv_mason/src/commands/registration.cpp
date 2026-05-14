@@ -31,18 +31,12 @@ arv::Result MasonPlugin::register_permissions() {
   };
   const Node nodes[] = {
       {ids::perm_use, "Use Mason commands."},
-      {ids::perm_select, "Set and inspect Mason selections."},
       {ids::perm_set, "Fill a Mason selection."},
       {ids::perm_replace, "Replace blocks in a Mason selection."},
       {ids::perm_copy, "Copy a Mason selection."},
       {ids::perm_paste, "Paste a Mason clipboard."},
       {ids::perm_undo, "Undo Mason operations."},
       {ids::perm_redo, "Redo Mason operations."},
-      {ids::perm_blueprint_save, "Save Mason blueprints."},
-      {ids::perm_blueprint_load, "Load Mason blueprints."},
-      {ids::perm_blueprint_paste, "Paste Mason blueprints."},
-      {ids::perm_blueprint_list, "List Mason blueprints."},
-      {ids::perm_blueprint_info, "Inspect Mason blueprints."},
       {ids::perm_limit_bypass, "Bypass Mason operation limits."},
       {ids::perm_region_bypass, "Bypass region restrictions when server policy allows it."},
   };
@@ -80,21 +74,16 @@ arv::Result MasonPlugin::register_commands() {
     std::string_view usage;
   };
   const CommandRegistration commands[] = {
-      {ids::exec_select, "mason.select", ids::perm_select, "Set or inspect a Mason selection.", "/mason select <a|b|clear|info>"},
       {ids::exec_set, "mason.set", ids::perm_set, "Fill the current Mason selection.", "/mason set <block_state>"},
       {ids::exec_replace, "mason.replace", ids::perm_replace, "Replace blocks in the current Mason selection.", "/mason replace <from> <to>"},
       {ids::exec_copy, "mason.copy", ids::perm_copy, "Copy the current Mason selection.", "/mason copy"},
       {ids::exec_paste, "mason.paste", ids::perm_paste, "Paste the current Mason clipboard.", "/mason paste [--air|--no-air]"},
       {ids::exec_undo, "mason.undo", ids::perm_undo, "Undo the previous Mason operation.", "/mason undo"},
       {ids::exec_redo, "mason.redo", ids::perm_redo, "Redo the previous Mason operation.", "/mason redo"},
-      {ids::exec_blueprint, "mason.blueprint", ids::perm_use, "Manage Mason blueprints.", "/mason blueprint <save|load|paste|list|info>"},
   };
   for (const CommandRegistration& command : commands) {
     auto handler = [this, name = command.name](arv::CommandContext& ctx) -> arv::Result {
       const Args args = ctx.args();
-      if (name == "mason.select") {
-        return handle_select(ctx, args);
-      }
       if (name == "mason.set") {
         return handle_set(ctx, args);
       }
@@ -112,9 +101,6 @@ arv::Result MasonPlugin::register_commands() {
       }
       if (name == "mason.redo") {
         return handle_redo(ctx, args);
-      }
-      if (name == "mason.blueprint") {
-        return handle_blueprint(ctx, args);
       }
       return arv::Result{arv::ResultCode::InvalidState, "unknown Mason command"};
     };
@@ -136,17 +122,14 @@ arv::Result MasonPlugin::register_commands() {
 arv::Result MasonPlugin::handle_mason(arv::CommandContext& ctx) {
   Args args = ctx.args();
   if (args.empty() || args[0] == "help") {
-    ctx.info("Mason: /mason select <a|b|clear|info>, set, replace, copy, paste, undo, redo, blueprint, confirm.");
-    ctx.info("Aliases: /mselect /mset /mreplace /mcopy /mpaste /mundo /mredo /mbp.");
+    ctx.info("Mason: /mason set, replace, copy, paste, undo, redo, confirm.");
+    ctx.info("Aliases: /mset /mreplace /mcopy /mpaste /mundo /mredo.");
     return arv::Result::ok();
   }
   const std::string_view subcommand = args[0];
   Args rest{args.begin() + 1, args.end()};
   if (subcommand == "status") {
     return handle_status(ctx);
-  }
-  if (subcommand == "select") {
-    return handle_select(ctx, rest);
   }
   if (subcommand == "set") {
     return handle_set(ctx, rest);
@@ -166,9 +149,6 @@ arv::Result MasonPlugin::handle_mason(arv::CommandContext& ctx) {
   if (subcommand == "redo") {
     return handle_redo(ctx, rest);
   }
-  if (subcommand == "blueprint" || subcommand == "bp") {
-    return handle_blueprint(ctx, rest);
-  }
   if (subcommand == "confirm") {
     return handle_confirm(ctx, rest);
   }
@@ -180,8 +160,7 @@ arv::Result MasonPlugin::handle_status(arv::CommandContext& ctx) {
   std::ostringstream out;
   out << "Mason 0.1.0 ready. Limits: selection "
       << config_.limits.max_selection_blocks
-      << ", clipboard " << config_.limits.max_clipboard_blocks
-      << ", blueprint " << config_.limits.max_blueprint_blocks << ".";
+      << ", clipboard " << config_.limits.max_clipboard_blocks << ".";
   ctx.info(out.str());
   return arv::Result::ok();
 }

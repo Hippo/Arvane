@@ -1,6 +1,7 @@
 #include "arv/asset/pack.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/io/data_codecs.hpp"
 #include "arv/io/files.hpp"
 
 #include <algorithm>
@@ -11,13 +12,8 @@
 #include <sstream>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-#include <yaml-cpp/yaml.h>
-
 namespace arv::asset {
 namespace {
-
-using json = nlohmann::json;
 
 constexpr std::string_view DefaultBasePackID = "arvane_base";
 constexpr std::string_view EnabledPacksFileName = "enabled.yaml";
@@ -279,14 +275,32 @@ constexpr u64 FnvPrime = 1099511628211ULL;
   return PackTextResult::success(buffer.str());
 }
 
+[[nodiscard]] const io::DataValue* member(
+    const io::DataValue& root,
+    std::string_view field) noexcept {
+  return root.get(field);
+}
+
+[[nodiscard]] bool is_object(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::Object;
+}
+
+[[nodiscard]] bool is_array(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::Array;
+}
+
+[[nodiscard]] bool is_string(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::String;
+}
+
 [[nodiscard]] std::string required_scalar(
-    const YAML::Node& root,
+    const io::DataValue& root,
     std::string_view field,
     PackError& error,
     const std::filesystem::path& file,
     std::string_view pack_id = {}) {
-  const YAML::Node node = root[std::string{field}];
-  if (!node || !node.IsScalar()) {
+  const io::DataValue* node = member(root, field);
+  if (node == nullptr || !is_string(*node)) {
     error = pack_error(
         "manifest validation",
         "missing required scalar field: " + std::string{field},
@@ -294,19 +308,19 @@ constexpr u64 FnvPrime = 1099511628211ULL;
         file);
     return {};
   }
-  return node.as<std::string>();
+  return std::string{node->as_string_or({})};
 }
 
 [[nodiscard]] std::vector<std::string> read_string_list(
-    const YAML::Node& root,
+    const io::DataValue& root,
     std::string_view field,
     PackError& error,
     const std::filesystem::path& file,
     std::string_view pack_id,
     bool required = false) {
   std::vector<std::string> values;
-  const YAML::Node node = root[std::string{field}];
-  if (!node) {
+  const io::DataValue* node = member(root, field);
+  if (node == nullptr) {
     if (required) {
       error = pack_error(
           "manifest validation",
@@ -316,7 +330,8 @@ constexpr u64 FnvPrime = 1099511628211ULL;
     }
     return values;
   }
-  if (!node.IsSequence()) {
+  const io::DataValue::Array* array = node->array_if();
+  if (array == nullptr) {
     error = pack_error(
         "manifest validation",
         "field must be a list: " + std::string{field},
@@ -324,9 +339,9 @@ constexpr u64 FnvPrime = 1099511628211ULL;
         file);
     return values;
   }
-  values.reserve(node.size());
-  for (const YAML::Node& entry : node) {
-    if (!entry.IsScalar()) {
+  values.reserve(array->size());
+  for (const io::DataValue& entry : *array) {
+    if (!is_string(entry)) {
       error = pack_error(
           "manifest validation",
           "list field contains a non-scalar entry: " + std::string{field},
@@ -335,19 +350,19 @@ constexpr u64 FnvPrime = 1099511628211ULL;
       values.clear();
       return values;
     }
-    values.push_back(entry.as<std::string>());
+    values.emplace_back(entry.as_string_or({}));
   }
   return values;
 }
 
 [[nodiscard]] std::optional<bool> read_required_bool(
-    const YAML::Node& root,
+    const io::DataValue& root,
     std::string_view field,
     PackError& error,
     const std::filesystem::path& file,
     std::string_view pack_id) {
-  const YAML::Node node = root[std::string{field}];
-  if (!node || !node.IsScalar()) {
+  const io::DataValue* node = member(root, field);
+  if (node == nullptr || node->kind() != io::DataKind::Bool) {
     error = pack_error(
         "manifest validation",
         "missing required boolean field: " + std::string{field},
@@ -355,16 +370,7 @@ constexpr u64 FnvPrime = 1099511628211ULL;
         file);
     return std::nullopt;
   }
-  try {
-    return node.as<bool>();
-  } catch (const YAML::Exception&) {
-    error = pack_error(
-        "manifest validation",
-        "invalid boolean field: " + std::string{field},
-        std::string{pack_id},
-        file);
-    return std::nullopt;
-  }
+  return node->as_bool_or(false);
 }
 
 [[nodiscard]] bool dependency_version_satisfied(std::string_view actual, std::string_view requirement) {
@@ -618,41 +624,47 @@ constexpr u64 FnvPrime = 1099511628211ULL;
     return Expected<std::vector<std::string>, PackError>::success(
         {std::string{DefaultBasePackID}});
   }
-  try {
-    const YAML::Node root = YAML::LoadFile(enabled_path.string());
-    const YAML::Node enabled = root["enabled"];
-    if (!enabled || !enabled.IsSequence()) {
-      return Expected<std::vector<std::string>, PackError>::failure(
-          pack_error("enabled packs", "enabled.yaml must contain an enabled list", {}, enabled_path));
-    }
-    std::vector<std::string> ids;
-    HashSet<std::string> seen;
-    ids.reserve(enabled.size());
-    for (const YAML::Node& entry : enabled) {
-      if (!entry.IsScalar()) {
-        return Expected<std::vector<std::string>, PackError>::failure(
-            pack_error("enabled packs", "enabled pack entry must be a scalar", {}, enabled_path));
-      }
-      std::string id = entry.as<std::string>();
-      if (!is_valid_pack_id(id)) {
-        return Expected<std::vector<std::string>, PackError>::failure(
-            pack_error("enabled packs", "invalid enabled pack id: " + id, {}, enabled_path));
-      }
-      if (!seen.insert(id).second) {
-        return Expected<std::vector<std::string>, PackError>::failure(
-            pack_error("enabled packs", "duplicate enabled pack id: " + id, {}, enabled_path));
-      }
-      ids.push_back(std::move(id));
-    }
-    if (ids.empty()) {
-      return Expected<std::vector<std::string>, PackError>::failure(
-          pack_error("enabled packs", "enabled pack list must not be empty", {}, enabled_path));
-    }
-    return Expected<std::vector<std::string>, PackError>::success(std::move(ids));
-  } catch (const YAML::Exception& ex) {
+  auto text = io::read_text_file_contents(enabled_path);
+  if (!text) {
     return Expected<std::vector<std::string>, PackError>::failure(
-        pack_error("enabled packs", "failed to parse enabled.yaml: " + std::string{ex.what()}, {}, enabled_path));
+        pack_error("enabled packs", text.error().message, {}, enabled_path));
   }
+  auto decoded = io::decode_yaml_value(text.value());
+  if (!decoded) {
+    return Expected<std::vector<std::string>, PackError>::failure(
+        pack_error("enabled packs", "failed to parse enabled.yaml: " + decoded.error().describe(), {}, enabled_path));
+  }
+  const io::DataValue* enabled = member(decoded.value().root, "enabled");
+  const io::DataValue::Array* enabled_array =
+      enabled == nullptr ? nullptr : enabled->array_if();
+  if (enabled_array == nullptr) {
+    return Expected<std::vector<std::string>, PackError>::failure(
+        pack_error("enabled packs", "enabled.yaml must contain an enabled list", {}, enabled_path));
+  }
+  std::vector<std::string> ids;
+  HashSet<std::string> seen;
+  ids.reserve(enabled_array->size());
+  for (const io::DataValue& entry : *enabled_array) {
+    if (!is_string(entry)) {
+      return Expected<std::vector<std::string>, PackError>::failure(
+          pack_error("enabled packs", "enabled pack entry must be a scalar", {}, enabled_path));
+    }
+    std::string id{entry.as_string_or({})};
+    if (!is_valid_pack_id(id)) {
+      return Expected<std::vector<std::string>, PackError>::failure(
+          pack_error("enabled packs", "invalid enabled pack id: " + id, {}, enabled_path));
+    }
+    if (!seen.insert(id).second) {
+      return Expected<std::vector<std::string>, PackError>::failure(
+          pack_error("enabled packs", "duplicate enabled pack id: " + id, {}, enabled_path));
+    }
+    ids.push_back(std::move(id));
+  }
+  if (ids.empty()) {
+    return Expected<std::vector<std::string>, PackError>::failure(
+        pack_error("enabled packs", "enabled pack list must not be empty", {}, enabled_path));
+  }
+  return Expected<std::vector<std::string>, PackError>::success(std::move(ids));
 }
 
 [[nodiscard]] Expected<std::vector<PackSource>, PackError> discover_packs(
@@ -822,12 +834,12 @@ constexpr u64 FnvPrime = 1099511628211ULL;
   return Expected<std::vector<PackSource>, PackError>::success(std::move(ordered));
 }
 
-[[nodiscard]] Expected<std::vector<json>, PackError> entries_from_json_file(
+[[nodiscard]] Expected<std::vector<io::DataValue>, PackError> entries_from_json_file(
     const PackDataFile& file,
     std::string_view root_key) {
-  std::ifstream input(file.path);
-  if (!input) {
-    return Expected<std::vector<json>, PackError>::failure(pack_error(
+  auto text = io::read_text_file_contents(file.path);
+  if (!text) {
+    return Expected<std::vector<io::DataValue>, PackError>::failure(pack_error(
         "data loading",
         "data file could not be opened",
         file.pack_id,
@@ -835,56 +847,58 @@ constexpr u64 FnvPrime = 1099511628211ULL;
         {},
         file.pack_version));
   }
-  try {
-    const json root = json::parse(input);
-    const json* entries = &root;
-    if (root.is_object()) {
-      const auto found = root.find(std::string{root_key});
-      if (found != root.end()) {
-        entries = &(*found);
-      } else if (root.contains("name") || root.contains("operation")) {
-        return Expected<std::vector<json>, PackError>::success({root});
-      } else {
-        return Expected<std::vector<json>, PackError>::failure(pack_error(
-            "data validation",
-            "JSON object must contain " + std::string{root_key} + " array",
-            file.pack_id,
-            file.relative_path,
-            {},
-            file.pack_version));
-      }
-    }
-    if (!entries->is_array()) {
-      return Expected<std::vector<json>, PackError>::failure(pack_error(
-          "data validation",
-          "JSON data entries must be an array",
-          file.pack_id,
-          file.relative_path,
-          {},
-          file.pack_version));
-    }
-    std::vector<json> result;
-    result.reserve(entries->size());
-    for (const json& entry : *entries) {
-      result.push_back(entry);
-    }
-    return Expected<std::vector<json>, PackError>::success(std::move(result));
-  } catch (const json::exception& ex) {
-    return Expected<std::vector<json>, PackError>::failure(pack_error(
+  auto decoded = io::decode_json_value(text.value());
+  if (!decoded) {
+    return Expected<std::vector<io::DataValue>, PackError>::failure(pack_error(
         "data parsing",
-        "failed to parse JSON: " + std::string{ex.what()},
+        "failed to parse JSON: " + decoded.error().describe(),
         file.pack_id,
         file.relative_path,
         {},
         file.pack_version));
   }
+  const io::DataValue* entries = &decoded.value().root;
+  if (is_object(decoded.value().root)) {
+    if (const io::DataValue* found = member(decoded.value().root, root_key);
+        found != nullptr) {
+      entries = found;
+    } else if (member(decoded.value().root, "name") != nullptr ||
+               member(decoded.value().root, "operation") != nullptr) {
+      return Expected<std::vector<io::DataValue>, PackError>::success(
+          {decoded.value().root});
+    } else {
+      return Expected<std::vector<io::DataValue>, PackError>::failure(pack_error(
+          "data validation",
+          "JSON object must contain " + std::string{root_key} + " array",
+          file.pack_id,
+          file.relative_path,
+          {},
+          file.pack_version));
+    }
+  }
+  const io::DataValue::Array* array = entries->array_if();
+  if (array == nullptr) {
+    return Expected<std::vector<io::DataValue>, PackError>::failure(pack_error(
+        "data validation",
+        "JSON data entries must be an array",
+        file.pack_id,
+        file.relative_path,
+        {},
+        file.pack_version));
+  }
+  std::vector<io::DataValue> result;
+  result.reserve(array->size());
+  for (const io::DataValue& entry : *array) {
+    result.push_back(entry);
+  }
+  return Expected<std::vector<io::DataValue>, PackError>::success(std::move(result));
 }
 
 [[nodiscard]] Expected<std::string, PackError> resource_name_from_definition(
-    const json& definition,
+    const io::DataValue& definition,
     const PackDataFile& file) {
-  const auto name = definition.find("name");
-  if (name == definition.end() || !name->is_string()) {
+  const io::DataValue* name = member(definition, "name");
+  if (name == nullptr || !is_string(*name)) {
     return Expected<std::string, PackError>::failure(pack_error(
         "data validation",
         "definition is missing string field name",
@@ -893,7 +907,7 @@ constexpr u64 FnvPrime = 1099511628211ULL;
         {},
         file.pack_version));
   }
-  return Expected<std::string, PackError>::success(name->get<std::string>());
+  return Expected<std::string, PackError>::success(std::string{name->as_string_or({})});
 }
 
 } // namespace
@@ -1057,172 +1071,191 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
         pack_error("manifest loading", "pack.yaml is missing", {}, manifest_path));
   }
 
-  try {
-    const YAML::Node root = YAML::LoadFile(manifest_path.string());
-    PackError error;
-
-    PackManifest manifest;
-    const YAML::Node schema = root["schema_version"];
-    if (!schema || !schema.IsScalar()) {
-      return PackManifestResult::failure(
-          pack_error("manifest validation", "missing required scalar field: schema_version", {}, manifest_path));
-    }
-    manifest.schema_version = schema.as<u32>();
-    manifest.id = required_scalar(root, "id", error, manifest_path);
-    if (!error.message.empty()) {
-      return PackManifestResult::failure(error);
-    }
-    manifest.display_name = required_scalar(root, "display_name", error, manifest_path, manifest.id);
-    if (!error.message.empty()) {
-      return PackManifestResult::failure(error);
-    }
-    manifest.version = required_scalar(root, "version", error, manifest_path, manifest.id);
-    if (!error.message.empty()) {
-      return PackManifestResult::failure(error);
-    }
-    if (const YAML::Node description = root["description"]; description && description.IsScalar()) {
-      manifest.description = description.as<std::string>();
-    }
-    manifest.authors = read_string_list(root, "authors", error, manifest_path, manifest.id);
-    if (!error.message.empty()) {
-      return PackManifestResult::failure(error);
-    }
-    manifest.namespaces = read_string_list(root, "namespaces", error, manifest_path, manifest.id, true);
-    if (!error.message.empty()) {
-      return PackManifestResult::failure(error);
-    }
-    const std::string side = required_scalar(root, "side", error, manifest_path, manifest.id);
-    if (!error.message.empty()) {
-      return PackManifestResult::failure(error);
-    }
-    const std::optional<PackSide> parsed_side = pack_side_from_string(side);
-    if (!parsed_side.has_value()) {
-      return PackManifestResult::failure(
-          pack_error("manifest validation", "invalid side: " + side, manifest.id, manifest_path));
-    }
-    manifest.side = parsed_side.value();
-
-    if (const YAML::Node engine = root["engine"]; engine && engine.IsMap()) {
-      if (const YAML::Node min = engine["min_version"]; min && min.IsScalar()) {
-        manifest.engine_min_version = min.as<std::string>();
-      }
-      if (const YAML::Node max = engine["max_version"]; max && max.IsScalar()) {
-        manifest.engine_max_version = max.as<std::string>();
-      }
-    }
-
-    if (const YAML::Node dependencies = root["dependencies"]; dependencies) {
-      if (!dependencies.IsSequence()) {
-        return PackManifestResult::failure(
-            pack_error("manifest validation", "dependencies must be a list", manifest.id, manifest_path));
-      }
-      manifest.dependencies.reserve(dependencies.size());
-      for (const YAML::Node& entry : dependencies) {
-        if (!entry.IsMap() || !entry["id"] || !entry["id"].IsScalar()) {
-          return PackManifestResult::failure(
-              pack_error("manifest validation", "dependency entries require scalar id", manifest.id, manifest_path));
-        }
-        PackDependency dependency;
-        dependency.id = entry["id"].as<std::string>();
-        if (const YAML::Node version = entry["version"]; version && version.IsScalar()) {
-          dependency.version = version.as<std::string>();
-        }
-        manifest.dependencies.push_back(std::move(dependency));
-      }
-    }
-
-    manifest.load_after = read_string_list(root, "load_after", error, manifest_path, manifest.id);
-    if (!error.message.empty()) {
-      return PackManifestResult::failure(error);
-    }
-    manifest.load_before = read_string_list(root, "load_before", error, manifest_path, manifest.id);
-    if (!error.message.empty()) {
-      return PackManifestResult::failure(error);
-    }
-
-    const YAML::Node capabilities = root["capabilities"];
-    if (!capabilities || !capabilities.IsMap()) {
-      return PackManifestResult::failure(
-          pack_error("manifest validation", "missing required capabilities map", manifest.id, manifest_path));
-    }
-    auto assets = read_required_bool(capabilities, "assets", error, manifest_path, manifest.id);
-    if (!assets) {
-      return PackManifestResult::failure(error);
-    }
-    auto data = read_required_bool(capabilities, "data", error, manifest_path, manifest.id);
-    if (!data) {
-      return PackManifestResult::failure(error);
-    }
-    auto native_plugin = read_required_bool(capabilities, "native_plugin", error, manifest_path, manifest.id);
-    if (!native_plugin) {
-      return PackManifestResult::failure(error);
-    }
-    manifest.capabilities = {assets.value(), data.value(), native_plugin.value()};
-
-    if (const YAML::Node builtin = root["builtin"]; builtin) {
-      if (!builtin.IsMap()) {
-        return PackManifestResult::failure(
-            pack_error("manifest validation", "builtin must be a map", manifest.id, manifest_path));
-      }
-      const YAML::Node module = builtin["module"];
-      if (!module || !module.IsScalar()) {
-        return PackManifestResult::failure(
-            pack_error("manifest validation", "builtin.module is required", manifest.id, manifest_path));
-      }
-      manifest.builtin = PackBuiltinManifest{module.as<std::string>()};
-    }
-
-    if (const YAML::Node native = root["native"]; native) {
-      if (!native.IsMap()) {
-        return PackManifestResult::failure(
-            pack_error("manifest validation", "native must be a map", manifest.id, manifest_path));
-      }
-      PackNativeManifest native_manifest;
-      if (!native["api_version"] || !native["api_version"].IsScalar()) {
-        return PackManifestResult::failure(
-            pack_error("manifest validation", "native.api_version is required", manifest.id, manifest_path));
-      }
-      native_manifest.api_version = native["api_version"].as<u32>();
-      if (!native["entrypoint"] || !native["entrypoint"].IsScalar()) {
-        return PackManifestResult::failure(
-            pack_error("manifest validation", "native.entrypoint is required", manifest.id, manifest_path));
-      }
-      native_manifest.entrypoint = native["entrypoint"].as<std::string>();
-      const YAML::Node libraries = native["libraries"];
-      if (!libraries || !libraries.IsMap()) {
-        return PackManifestResult::failure(
-            pack_error("manifest validation", "native.libraries map is required", manifest.id, manifest_path));
-      }
-      for (const auto& entry : libraries) {
-        if (!entry.first.IsScalar() || !entry.second.IsScalar()) {
-          return PackManifestResult::failure(
-              pack_error("manifest validation", "native library entries must be scalar", manifest.id, manifest_path));
-        }
-        std::filesystem::path library_path = entry.second.as<std::string>();
-        if (!is_safe_pack_relative_path(library_path)) {
-          return PackManifestResult::failure(
-              pack_error(
-                  "manifest validation",
-                  "unsafe native library path: " + library_path.generic_string(),
-                  manifest.id,
-                  manifest_path,
-                  {},
-                  manifest.version));
-        }
-        native_manifest.libraries.emplace(entry.first.as<std::string>(), std::move(library_path));
-      }
-      manifest.native = std::move(native_manifest);
-    }
-
-    PackError validation = validate_manifest(manifest, manifest_path);
-    if (!validation.message.empty()) {
-      return PackManifestResult::failure(std::move(validation));
-    }
-    return PackManifestResult::success(std::move(manifest));
-  } catch (const YAML::Exception& ex) {
+  auto text = io::read_text_file_contents(manifest_path);
+  if (!text) {
     return PackManifestResult::failure(
-        pack_error("manifest parsing", "failed to parse pack.yaml: " + std::string{ex.what()}, {}, manifest_path));
+        pack_error("manifest loading", text.error().message, {}, manifest_path));
   }
+  auto decoded = io::decode_yaml_value(text.value());
+  if (!decoded) {
+    return PackManifestResult::failure(
+        pack_error("manifest parsing", "failed to parse pack.yaml: " + decoded.error().describe(), {}, manifest_path));
+  }
+  const io::DataValue& root = decoded.value().root;
+  PackError error;
+
+  PackManifest manifest;
+  const io::DataValue* schema = member(root, "schema_version");
+  if (schema == nullptr ||
+      (schema->kind() != io::DataKind::I64 && schema->kind() != io::DataKind::U64)) {
+    return PackManifestResult::failure(
+        pack_error("manifest validation", "missing required scalar field: schema_version", {}, manifest_path));
+  }
+  manifest.schema_version = static_cast<u32>(schema->as_u64_or(0));
+  manifest.id = required_scalar(root, "id", error, manifest_path);
+  if (!error.message.empty()) {
+    return PackManifestResult::failure(error);
+  }
+  manifest.display_name = required_scalar(root, "display_name", error, manifest_path, manifest.id);
+  if (!error.message.empty()) {
+    return PackManifestResult::failure(error);
+  }
+  manifest.version = required_scalar(root, "version", error, manifest_path, manifest.id);
+  if (!error.message.empty()) {
+    return PackManifestResult::failure(error);
+  }
+  if (const io::DataValue* description = member(root, "description");
+      description != nullptr && is_string(*description)) {
+    manifest.description = std::string{description->as_string_or({})};
+  }
+  manifest.authors = read_string_list(root, "authors", error, manifest_path, manifest.id);
+  if (!error.message.empty()) {
+    return PackManifestResult::failure(error);
+  }
+  manifest.namespaces = read_string_list(root, "namespaces", error, manifest_path, manifest.id, true);
+  if (!error.message.empty()) {
+    return PackManifestResult::failure(error);
+  }
+  const std::string side = required_scalar(root, "side", error, manifest_path, manifest.id);
+  if (!error.message.empty()) {
+    return PackManifestResult::failure(error);
+  }
+  const std::optional<PackSide> parsed_side = pack_side_from_string(side);
+  if (!parsed_side.has_value()) {
+    return PackManifestResult::failure(
+        pack_error("manifest validation", "invalid side: " + side, manifest.id, manifest_path));
+  }
+  manifest.side = parsed_side.value();
+
+  if (const io::DataValue* engine = member(root, "engine");
+      engine != nullptr && is_object(*engine)) {
+    if (const io::DataValue* min = member(*engine, "min_version");
+        min != nullptr && is_string(*min)) {
+      manifest.engine_min_version = std::string{min->as_string_or({})};
+    }
+    if (const io::DataValue* max = member(*engine, "max_version");
+        max != nullptr && is_string(*max)) {
+      manifest.engine_max_version = std::string{max->as_string_or({})};
+    }
+  }
+
+  if (const io::DataValue* dependencies = member(root, "dependencies");
+      dependencies != nullptr) {
+    const io::DataValue::Array* array = dependencies->array_if();
+    if (array == nullptr) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "dependencies must be a list", manifest.id, manifest_path));
+    }
+    manifest.dependencies.reserve(array->size());
+    for (const io::DataValue& entry : *array) {
+      const io::DataValue* id = member(entry, "id");
+      if (!is_object(entry) || id == nullptr || !is_string(*id)) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "dependency entries require scalar id", manifest.id, manifest_path));
+      }
+      PackDependency dependency;
+      dependency.id = std::string{id->as_string_or({})};
+      if (const io::DataValue* version = member(entry, "version");
+          version != nullptr && is_string(*version)) {
+        dependency.version = std::string{version->as_string_or({})};
+      }
+      manifest.dependencies.push_back(std::move(dependency));
+    }
+  }
+
+  manifest.load_after = read_string_list(root, "load_after", error, manifest_path, manifest.id);
+  if (!error.message.empty()) {
+    return PackManifestResult::failure(error);
+  }
+  manifest.load_before = read_string_list(root, "load_before", error, manifest_path, manifest.id);
+  if (!error.message.empty()) {
+    return PackManifestResult::failure(error);
+  }
+
+  const io::DataValue* capabilities = member(root, "capabilities");
+  if (capabilities == nullptr || !is_object(*capabilities)) {
+    return PackManifestResult::failure(
+        pack_error("manifest validation", "missing required capabilities map", manifest.id, manifest_path));
+  }
+  auto assets = read_required_bool(*capabilities, "assets", error, manifest_path, manifest.id);
+  if (!assets) {
+    return PackManifestResult::failure(error);
+  }
+  auto data = read_required_bool(*capabilities, "data", error, manifest_path, manifest.id);
+  if (!data) {
+    return PackManifestResult::failure(error);
+  }
+  auto native_plugin = read_required_bool(*capabilities, "native_plugin", error, manifest_path, manifest.id);
+  if (!native_plugin) {
+    return PackManifestResult::failure(error);
+  }
+  manifest.capabilities = {assets.value(), data.value(), native_plugin.value()};
+
+  if (const io::DataValue* builtin = member(root, "builtin"); builtin != nullptr) {
+    if (!is_object(*builtin)) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "builtin must be a map", manifest.id, manifest_path));
+    }
+    const io::DataValue* module = member(*builtin, "module");
+    if (module == nullptr || !is_string(*module)) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "builtin.module is required", manifest.id, manifest_path));
+    }
+    manifest.builtin = PackBuiltinManifest{std::string{module->as_string_or({})}};
+  }
+
+  if (const io::DataValue* native = member(root, "native"); native != nullptr) {
+    if (!is_object(*native)) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "native must be a map", manifest.id, manifest_path));
+    }
+    PackNativeManifest native_manifest;
+    const io::DataValue* api_version = member(*native, "api_version");
+    if (api_version == nullptr ||
+        (api_version->kind() != io::DataKind::I64 && api_version->kind() != io::DataKind::U64)) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "native.api_version is required", manifest.id, manifest_path));
+    }
+    native_manifest.api_version = static_cast<u32>(api_version->as_u64_or(0));
+    const io::DataValue* entrypoint = member(*native, "entrypoint");
+    if (entrypoint == nullptr || !is_string(*entrypoint)) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "native.entrypoint is required", manifest.id, manifest_path));
+    }
+    native_manifest.entrypoint = std::string{entrypoint->as_string_or({})};
+    const io::DataValue* libraries = member(*native, "libraries");
+    const io::DataValue::Object* library_object =
+        libraries == nullptr ? nullptr : libraries->object_if();
+    if (library_object == nullptr) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "native.libraries map is required", manifest.id, manifest_path));
+    }
+    for (const auto& [platform, value] : *library_object) {
+      if (!is_string(value)) {
+        return PackManifestResult::failure(
+            pack_error("manifest validation", "native library entries must be scalar", manifest.id, manifest_path));
+      }
+      std::filesystem::path library_path = std::string{value.as_string_or({})};
+      if (!is_safe_pack_relative_path(library_path)) {
+        return PackManifestResult::failure(
+            pack_error(
+                "manifest validation",
+                "unsafe native library path: " + library_path.generic_string(),
+                manifest.id,
+                manifest_path,
+                {},
+                manifest.version));
+      }
+      native_manifest.libraries.emplace(platform, std::move(library_path));
+    }
+    manifest.native = std::move(native_manifest);
+  }
+
+  PackError validation = validate_manifest(manifest, manifest_path);
+  if (!validation.message.empty()) {
+    return PackManifestResult::failure(std::move(validation));
+  }
+  return PackManifestResult::success(std::move(manifest));
 }
 
 Expected<PackManager, PackError> PackManager::load(const std::filesystem::path& arvane_home) {
@@ -1489,7 +1522,7 @@ PackTextResult PackManager::load_data_text(
 PackTextResult PackManager::load_merged_json_array_text(
     std::string_view category,
     std::string_view root_key) const {
-  std::vector<json> definitions;
+  std::vector<io::DataValue> definitions;
   HashMap<std::string, usize> definition_by_name;
   std::vector<PackDataFile> files = data_files(category, ".json");
   if (files.empty()) {
@@ -1504,8 +1537,8 @@ PackTextResult PackManager::load_merged_json_array_text(
     }
 
     const PackSource& source = stack_[file.pack_index];
-    for (json entry : entries.value()) {
-      if (!entry.is_object()) {
+    for (io::DataValue entry : entries.value()) {
+      if (!is_object(entry)) {
         return PackTextResult::failure(pack_error(
             "data validation",
             "definition entry must be an object",
@@ -1515,9 +1548,9 @@ PackTextResult PackManager::load_merged_json_array_text(
             file.pack_version));
       }
 
-      const auto operation = entry.find("operation");
-      if (operation != entry.end()) {
-        if (!operation->is_string()) {
+      const io::DataValue* operation = member(entry, "operation");
+      if (operation != nullptr) {
+        if (!is_string(*operation)) {
           return PackTextResult::failure(pack_error(
               "data validation",
               "operation must be a string",
@@ -1526,7 +1559,7 @@ PackTextResult PackManager::load_merged_json_array_text(
               {},
               file.pack_version));
         }
-        const std::string op = operation->get<std::string>();
+        const std::string op{operation->as_string_or({})};
         if (op != "override") {
           return PackTextResult::failure(pack_error(
               "data validation",
@@ -1536,8 +1569,8 @@ PackTextResult PackManager::load_merged_json_array_text(
               {},
               file.pack_version));
         }
-        const auto target_iter = entry.find("target");
-        if (target_iter == entry.end() || !target_iter->is_string()) {
+        const io::DataValue* target_iter = member(entry, "target");
+        if (target_iter == nullptr || !is_string(*target_iter)) {
           return PackTextResult::failure(pack_error(
               "data validation",
               "override operation requires string target",
@@ -1546,7 +1579,7 @@ PackTextResult PackManager::load_merged_json_array_text(
               {},
               file.pack_version));
         }
-        const std::string target = target_iter->get<std::string>();
+        const std::string target{target_iter->as_string_or({})};
         auto target_id = ResourceID::parse(target);
         if (!target_id) {
           return PackTextResult::failure(pack_error(
@@ -1568,16 +1601,19 @@ PackTextResult PackManager::load_merged_json_array_text(
               file.pack_version));
         }
 
-        json replacement;
-        const auto definition_iter = entry.find("definition");
-        if (definition_iter != entry.end()) {
+        io::DataValue replacement;
+        const io::DataValue* definition_iter = member(entry, "definition");
+        if (definition_iter != nullptr) {
           replacement = *definition_iter;
         } else {
           replacement = entry;
-          replacement.erase("operation");
-          replacement.erase("target");
+          if (io::DataValue::Object* object = replacement.object_if();
+              object != nullptr) {
+            object->erase("operation");
+            object->erase("target");
+          }
         }
-        if (!replacement.is_object()) {
+        if (!is_object(replacement)) {
           return PackTextResult::failure(pack_error(
               "data validation",
               "override definition must be an object",
@@ -1586,8 +1622,8 @@ PackTextResult PackManager::load_merged_json_array_text(
               target,
               file.pack_version));
         }
-        if (!replacement.contains("name")) {
-          replacement["name"] = target;
+        if (member(replacement, "name") == nullptr) {
+          replacement.set("name", target);
         }
         auto replacement_name = resource_name_from_definition(replacement, file);
         if (!replacement_name) {
@@ -1643,9 +1679,19 @@ PackTextResult PackManager::load_merged_json_array_text(
     }
   }
 
-  json root = json::object();
-  root[std::string{root_key}] = std::move(definitions);
-  return PackTextResult::success(root.dump(2));
+  io::DataValue::Array array;
+  array.reserve(definitions.size());
+  for (io::DataValue& definition : definitions) {
+    array.push_back(std::move(definition));
+  }
+  io::DataValue root = io::DataValue::object();
+  root.set(std::string{root_key}, io::DataValue{std::move(array)});
+  auto encoded = io::encode_json_value(root);
+  if (!encoded) {
+    return PackTextResult::failure(
+        pack_error("data encoding", encoded.error().describe()));
+  }
+  return PackTextResult::success(std::move(encoded.value()));
 }
 
 std::vector<RequiredPack> PackManager::required_packs() const {

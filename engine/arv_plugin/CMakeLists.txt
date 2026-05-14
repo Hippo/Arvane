@@ -15,6 +15,7 @@ add_library(arv_plugin STATIC
   src/plugin_abi_gamemodes.cpp
   src/plugin_abi_network.cpp
   src/plugin_abi_permissions.cpp
+  src/plugin_abi_players.cpp
   src/plugin_abi_regions.cpp
   src/plugin_abi_registries.cpp
   src/plugin_abi_resources.cpp
@@ -51,5 +52,4 @@ target_link_libraries(arv_plugin
     arv_world
   PRIVATE
     ${CMAKE_DL_LIBS}
-    yaml-cpp::yaml-cpp
 )

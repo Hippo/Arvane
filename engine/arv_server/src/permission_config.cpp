@@ -1,13 +1,12 @@
 #include "arv/server/permission_config.hpp"
 
+#include "arv/io/data_codecs.hpp"
 #include "arv/io/files.hpp"
 
 #include <optional>
 #include <string>
 #include <system_error>
 #include <vector>
-
-#include <yaml-cpp/yaml.h>
 
 namespace arv::server {
 namespace {
@@ -18,41 +17,56 @@ using Result = PermissionGroupConfigResult;
   return {std::move(message)};
 }
 
-[[nodiscard]] std::optional<player::TriState> parse_tri_state(const YAML::Node& node) {
-  if (!node || !node.IsScalar()) {
+[[nodiscard]] const io::DataValue* member(
+    const io::DataValue& root,
+    std::string_view key) noexcept {
+  return root.get(key);
+}
+
+[[nodiscard]] bool is_object(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::Object;
+}
+
+[[nodiscard]] bool is_string(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::String;
+}
+
+[[nodiscard]] std::optional<player::TriState> parse_tri_state(const io::DataValue* node) {
+  if (node == nullptr || !is_string(*node)) {
     return std::nullopt;
   }
 
-  return player::tri_state_from_string(node.as<std::string>());
+  return player::tri_state_from_string(node->as_string_or({}));
 }
 
 [[nodiscard]] Expected<std::vector<std::string>, PermissionConfigError> parse_inherits(
-    const YAML::Node& node,
+    const io::DataValue* node,
     std::string_view group_id) {
   std::vector<std::string> inherits;
-  if (!node) {
+  if (node == nullptr) {
     return Expected<std::vector<std::string>, PermissionConfigError>::success(
         std::move(inherits));
   }
 
-  if (node.IsScalar()) {
-    inherits.push_back(node.as<std::string>());
+  if (is_string(*node)) {
+    inherits.emplace_back(node->as_string_or({}));
     return Expected<std::vector<std::string>, PermissionConfigError>::success(
         std::move(inherits));
   }
-  if (!node.IsSequence()) {
+  const io::DataValue::Array* array = node->array_if();
+  if (array == nullptr) {
     return Expected<std::vector<std::string>, PermissionConfigError>::failure(
         error("permission group '" + std::string{group_id} + "' inherits must be a list"));
   }
 
-  inherits.reserve(node.size());
-  for (const YAML::Node& entry : node) {
-    if (!entry.IsScalar()) {
+  inherits.reserve(array->size());
+  for (const io::DataValue& entry : *array) {
+    if (!is_string(entry)) {
       return Expected<std::vector<std::string>, PermissionConfigError>::failure(
           error("permission group '" + std::string{group_id} +
                 "' inherits entries must be strings"));
     }
-    inherits.push_back(entry.as<std::string>());
+    inherits.emplace_back(entry.as_string_or({}));
   }
   return Expected<std::vector<std::string>, PermissionConfigError>::success(
       std::move(inherits));
@@ -60,24 +74,19 @@ using Result = PermissionGroupConfigResult;
 
 [[nodiscard]] Expected<void, PermissionConfigError> parse_core_permissions(
     player::CorePermissionSet& core,
-    const YAML::Node& node,
+    const io::DataValue* node,
     std::string_view group_id) {
-  if (!node) {
+  if (node == nullptr) {
     return Expected<void, PermissionConfigError>::success();
   }
-  if (!node.IsMap()) {
+  const io::DataValue::Object* object = node->object_if();
+  if (object == nullptr) {
     return Expected<void, PermissionConfigError>::failure(
         error("permission group '" + std::string{group_id} + "' core must be a map"));
   }
 
-  for (const auto& entry : node) {
-    if (!entry.first.IsScalar()) {
-      return Expected<void, PermissionConfigError>::failure(
-          error("permission group '" + std::string{group_id} +
-                "' core keys must be strings"));
-    }
-    const std::string key = entry.first.as<std::string>();
-    const std::optional<player::TriState> value = parse_tri_state(entry.second);
+  for (const auto& [key, raw_value] : *object) {
+    const std::optional<player::TriState> value = parse_tri_state(&raw_value);
     if (!value.has_value()) {
       return Expected<void, PermissionConfigError>::failure(
           error("permission group '" + std::string{group_id} +
@@ -94,29 +103,24 @@ using Result = PermissionGroupConfigResult;
 
 [[nodiscard]] Expected<void, PermissionConfigError> parse_custom_permissions(
     player::CustomPermissionMap& custom,
-    const YAML::Node& node,
+    const io::DataValue* node,
     std::string_view group_id) {
-  if (!node) {
+  if (node == nullptr) {
     return Expected<void, PermissionConfigError>::success();
   }
-  if (!node.IsMap()) {
+  const io::DataValue::Object* object = node->object_if();
+  if (object == nullptr) {
     return Expected<void, PermissionConfigError>::failure(
         error("permission group '" + std::string{group_id} + "' permissions must be a map"));
   }
 
-  for (const auto& entry : node) {
-    if (!entry.first.IsScalar()) {
-      return Expected<void, PermissionConfigError>::failure(
-          error("permission group '" + std::string{group_id} +
-                "' permission keys must be strings"));
-    }
-    const std::string node_name = entry.first.as<std::string>();
+  for (const auto& [node_name, raw_value] : *object) {
     if (!player::is_valid_custom_permission_node(node_name)) {
       return Expected<void, PermissionConfigError>::failure(
           error("permission group '" + std::string{group_id} +
                 "' has invalid permission node '" + node_name + "'"));
     }
-    const std::optional<player::TriState> value = parse_tri_state(entry.second);
+    const std::optional<player::TriState> value = parse_tri_state(&raw_value);
     if (!value.has_value()) {
       return Expected<void, PermissionConfigError>::failure(
           error("permission group '" + std::string{group_id} +
@@ -129,39 +133,39 @@ using Result = PermissionGroupConfigResult;
 
 [[nodiscard]] Expected<player::PermissionGroup, PermissionConfigError> parse_group(
     std::string id,
-    const YAML::Node& node) {
-  if (!node || !node.IsMap()) {
+    const io::DataValue& node) {
+  if (!is_object(node)) {
     return Expected<player::PermissionGroup, PermissionConfigError>::failure(
         error("permission group '" + id + "' must be a map"));
   }
 
   player::PermissionGroup group;
   group.id = std::move(id);
-  if (const YAML::Node priority = node["priority"]) {
-    if (!priority.IsScalar()) {
+  if (const io::DataValue* priority = member(node, "priority"); priority != nullptr) {
+    if (priority->kind() != io::DataKind::I64 && priority->kind() != io::DataKind::U64) {
       return Expected<player::PermissionGroup, PermissionConfigError>::failure(
           error("permission group '" + group.id + "' priority must be an integer"));
     }
-    group.priority = priority.as<i32>();
+    group.priority = static_cast<i32>(priority->as_i64_or(0));
   }
 
-  auto inherits = parse_inherits(node["inherits"], group.id);
+  auto inherits = parse_inherits(member(node, "inherits"), group.id);
   if (!inherits) {
     return Expected<player::PermissionGroup, PermissionConfigError>::failure(
         inherits.error());
   }
   group.inherits = std::move(inherits.value());
 
-  auto core = parse_core_permissions(group.core, node["core"], group.id);
+  auto core = parse_core_permissions(group.core, member(node, "core"), group.id);
   if (!core) {
     return Expected<player::PermissionGroup, PermissionConfigError>::failure(core.error());
   }
 
-  auto custom = parse_custom_permissions(group.custom, node["permissions"], group.id);
+  auto custom = parse_custom_permissions(group.custom, member(node, "permissions"), group.id);
   if (!custom) {
     return Expected<player::PermissionGroup, PermissionConfigError>::failure(custom.error());
   }
-  if (const YAML::Node custom_node = node["custom"]) {
+  if (const io::DataValue* custom_node = member(node, "custom"); custom_node != nullptr) {
     custom = parse_custom_permissions(group.custom, custom_node, group.id);
     if (!custom) {
       return Expected<player::PermissionGroup, PermissionConfigError>::failure(
@@ -181,39 +185,35 @@ std::filesystem::path permission_config_file_path(
 }
 
 PermissionGroupConfigResult parse_permission_groups_yaml(std::string_view text) {
-  try {
-    const YAML::Node root = YAML::Load(std::string{text});
-    player::PermissionGroupRegistry registry;
-    if (!root || !root["groups"]) {
-      return Result::success(std::move(registry));
-    }
-
-    const YAML::Node groups = root["groups"];
-    if (!groups.IsMap()) {
-      return Result::failure(error("permissions.yaml groups must be a map"));
-    }
-
-    for (const auto& entry : groups) {
-      if (!entry.first.IsScalar()) {
-        return Result::failure(error("permission group ids must be strings"));
-      }
-
-      auto parsed = parse_group(entry.first.as<std::string>(), entry.second);
-      if (!parsed) {
-        return Result::failure(parsed.error());
-      }
-
-      auto added = registry.add_group(std::move(parsed.value()));
-      if (!added) {
-        return Result::failure(error(added.error().message));
-      }
-    }
-
-    return Result::success(std::move(registry));
-  } catch (const YAML::Exception& ex) {
+  auto decoded = io::decode_yaml_value(text);
+  if (!decoded) {
     return Result::failure(
-        error("failed to parse permissions.yaml: " + std::string{ex.what()}));
+        error("failed to parse permissions.yaml: " + decoded.error().describe()));
   }
+  player::PermissionGroupRegistry registry;
+  const io::DataValue* groups = member(decoded.value().root, "groups");
+  if (groups == nullptr) {
+    return Result::success(std::move(registry));
+  }
+
+  const io::DataValue::Object* groups_object = groups->object_if();
+  if (groups_object == nullptr) {
+    return Result::failure(error("permissions.yaml groups must be a map"));
+  }
+
+  for (const auto& [id, group_node] : *groups_object) {
+    auto parsed = parse_group(id, group_node);
+    if (!parsed) {
+      return Result::failure(parsed.error());
+    }
+
+    auto added = registry.add_group(std::move(parsed.value()));
+    if (!added) {
+      return Result::failure(error(added.error().message));
+    }
+  }
+
+  return Result::success(std::move(registry));
 }
 
 PermissionGroupConfigResult load_server_permission_groups(

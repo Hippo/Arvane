@@ -19,10 +19,10 @@ struct arv::Codec<SampleWorldData> {
   static arv::DecodeResult<SampleWorldData> decode(const arv::DataDocument& document) {
     SampleWorldData data;
     if (auto launches = document.u64_value("launches")) {
-      data.launches = launches.value;
+      data.launches = launches.value();
     }
     if (auto initialized = document.bool_value("initialized")) {
-      data.initialized = initialized.value;
+      data.initialized = initialized.value();
     }
     return {arv::Result::ok(), data};
   }

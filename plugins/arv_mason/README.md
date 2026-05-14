@@ -1,6 +1,9 @@
 # Mason
 
-Mason is a first-party external Arvane plugin for world editing and blueprint authoring. It lives under `plugins/arv_mason` and links only against the standalone Plugin SDK target, `Arvane::PluginSDK`.
+Mason is a first-party external Arvane plugin for world editing. It lives under
+`plugins/arv_mason` and intentionally depends only on the Arvane Plugin SDK.
+Player selections and blueprints are first-class engine/game systems exposed by
+`arv_base` commands.
 
 Pack ID: `arv_mason`
 Namespace: `arv_mason`
@@ -48,14 +51,12 @@ Native command definitions are registered in code. Short aliases live in
 Selection:
 
 ```text
-/mason select a
-/mason select b
-/mason select clear
-/mason select info
-/mselect <a|b|clear|info>
+/select <a|b|clear|info>
+/sel <a|b|clear|info>
 ```
 
-The current SDK command context does not expose a targeted block yet, so V1 uses the player's current block position for selection points.
+The selection command is provided by `arv_base`, and Mason reads the current
+selection through the Plugin SDK.
 
 Editing:
 
@@ -82,15 +83,16 @@ Clipboard and history:
 Blueprints:
 
 ```text
-/mason blueprint save <name>
-/mason blueprint load <name>
-/mason blueprint paste <name>
-/mason blueprint list
-/mason blueprint info <name>
-/mbp <save|load|paste|list|info>
+/blueprint save <name>
+/blueprint load <name>
+/blueprint paste <name>
+/blueprint list
+/blueprint info <name>
+/bp <save|load|paste|list|info>
 ```
 
-Blueprint names are limited to letters, numbers, `_`, `-`, and `.`. Path traversal, absolute paths, separators, and drive prefixes are rejected.
+Blueprint commands and `.abp` files are provided by `arv_base` and
+`arv_blueprint`, not by Mason.
 
 ## Permissions
 
@@ -98,21 +100,17 @@ Mason registers these custom permission nodes:
 
 ```text
 mason.command.use
-mason.command.select
 mason.command.set
 mason.command.replace
 mason.command.copy
 mason.command.paste
 mason.command.undo
 mason.command.redo
-mason.command.blueprint.save
-mason.command.blueprint.load
-mason.command.blueprint.paste
-mason.command.blueprint.list
-mason.command.blueprint.info
 mason.limit.bypass
 mason.region.bypass
 ```
+
+Selection and blueprint permissions are owned by the base game commands.
 
 Mutating commands also check the core `can_modify_world` permission through the Plugin SDK PermissionsAPI. Mason does not use game mode checks for authority.
 
@@ -139,15 +137,21 @@ blueprints:
   default_scope: world
 ```
 
+The blueprint and selection-persistence fields are retained for config format
+compatibility. Mason no longer uses them; `arv_base` owns those systems now.
+
 ## Blueprint Format
 
-Mason authors Arvane Blueprint documents with the `.abp` extension and `format: arvane:blueprint`. V1 uses a palette plus RLE block encoding. Blocks are ordered as:
+The reusable Arvane Blueprint data model and `.abp` codec live in the engine
+module `arv_blueprint`. V1 uses a palette plus RLE block encoding. Blocks are
+ordered as:
 
 ```text
 index = x + size.x * (z + size.z * y)
 ```
 
-The persistent storage API currently stores blueprint payloads in world-scoped plugin data keys while preserving the `.abp` document text. A later file-storage SDK can expose direct world-local `.abp` files without changing the codec.
+Base-game blueprint commands save world-local `.abp` files under the current
+world's blueprint directory.
 
 ## Safety Notes
 

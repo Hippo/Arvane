@@ -23,8 +23,6 @@ namespace {
       return "replace";
     case PendingOperationKind::Paste:
       return "paste";
-    case PendingOperationKind::BlueprintPaste:
-      return "blueprint paste";
   }
   return "operation";
 }
@@ -46,16 +44,15 @@ arv::Result MasonPlugin::handle_set(
   if (state == nullptr) {
     return arv::Result{arv::ResultCode::InvalidState, "player required"};
   }
-  SelectionBoundsResult bounds = normalized_bounds(state->selection);
-  if (!bounds.ok) {
-    ctx.error(bounds.message);
+  std::optional<SelectionBounds> bounds = current_selection_bounds(ctx);
+  if (!bounds.has_value()) {
     return arv::Result{arv::ResultCode::InvalidState, "selection incomplete"};
   }
   if (!require_limit_or_confirmation(
           ctx,
           *state,
           {PendingOperationKind::Set, copy_args(args)},
-          bounds.bounds.block_count,
+          bounds->block_count,
           config_.limits.max_selection_blocks,
           confirmed)) {
     return arv::Result::ok();
@@ -64,11 +61,11 @@ arv::Result MasonPlugin::handle_set(
   if (!to.has_value()) {
     return arv::Result{arv::ResultCode::InvalidArgument, "invalid block state"};
   }
-  auto snapshot = snapshot_selection(ctx, bounds.bounds);
+  auto snapshot = snapshot_selection(ctx, *bounds);
   if (!snapshot.has_value()) {
     return arv::Result{arv::ResultCode::InternalError, "snapshot failed"};
   }
-  OperationPlan plan = build_set_plan_from_snapshot(bounds.bounds.world, *snapshot, *to);
+  OperationPlan plan = build_set_plan_from_snapshot(bounds->world, *snapshot, *to);
   return execute_plan(
       ctx,
       *ctx.player(),
@@ -92,16 +89,15 @@ arv::Result MasonPlugin::handle_replace(
   if (state == nullptr) {
     return arv::Result{arv::ResultCode::InvalidState, "player required"};
   }
-  SelectionBoundsResult bounds = normalized_bounds(state->selection);
-  if (!bounds.ok) {
-    ctx.error(bounds.message);
+  std::optional<SelectionBounds> bounds = current_selection_bounds(ctx);
+  if (!bounds.has_value()) {
     return arv::Result{arv::ResultCode::InvalidState, "selection incomplete"};
   }
   if (!require_limit_or_confirmation(
           ctx,
           *state,
           {PendingOperationKind::Replace, copy_args(args)},
-          bounds.bounds.block_count,
+          bounds->block_count,
           config_.limits.max_selection_blocks,
           confirmed)) {
     return arv::Result::ok();
@@ -111,12 +107,12 @@ arv::Result MasonPlugin::handle_replace(
   if (!from.has_value() || !to.has_value()) {
     return arv::Result{arv::ResultCode::InvalidArgument, "invalid block state"};
   }
-  auto snapshot = snapshot_selection(ctx, bounds.bounds);
+  auto snapshot = snapshot_selection(ctx, *bounds);
   if (!snapshot.has_value()) {
     return arv::Result{arv::ResultCode::InternalError, "snapshot failed"};
   }
   OperationPlan plan = build_replace_plan_from_snapshot(
-      bounds.bounds.world,
+      bounds->world,
       *snapshot,
       *from,
       *to);
@@ -240,8 +236,6 @@ arv::Result MasonPlugin::handle_confirm(arv::CommandContext& ctx, const Args& ar
       return handle_replace(ctx, pending_args, true);
     case PendingOperationKind::Paste:
       return handle_paste(ctx, pending_args, true);
-    case PendingOperationKind::BlueprintPaste:
-      return handle_blueprint(ctx, pending_args, true);
   }
   return arv::Result{arv::ResultCode::InvalidState, "unknown pending operation"};
 }

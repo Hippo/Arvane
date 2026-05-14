@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace arv_mason {
 namespace {
@@ -25,24 +27,21 @@ namespace {
     const arv::DataDocument& document,
     std::string_view path,
     std::uint64_t fallback) {
-  auto value = document.u64_value(path);
-  return value ? value.value : fallback;
+  return document.u64_value(path, fallback);
 }
 
 [[nodiscard]] bool read_bool(
     const arv::DataDocument& document,
     std::string_view path,
     bool fallback) {
-  auto value = document.bool_value(path);
-  return value ? value.value : fallback;
+  return document.bool_value(path, fallback);
 }
 
 [[nodiscard]] std::string read_string(
     const arv::DataDocument& document,
     std::string_view path,
     std::string fallback) {
-  auto value = document.string_value(path);
-  return value ? std::string{value.value} : std::move(fallback);
+  return std::string{document.string_value(path, fallback)};
 }
 
 MasonConfig default_config() {

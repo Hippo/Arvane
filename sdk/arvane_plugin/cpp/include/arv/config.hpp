@@ -1,8 +1,8 @@
 #pragma once
 
 #include "arv/api.h"
-#include "arv/codec.hpp"
 #include "arv/data.hpp"
+#include "arv/io/codec.hpp"
 #include "arv/result.hpp"
 #include "arv/types.hpp"
 

@@ -1,17 +1,15 @@
 #include "arv/voxel/block.hpp"
 
+#include "arv/io/data_codecs.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <limits>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 namespace arv::voxel {
 namespace {
-
-using json = nlohmann::json;
 
 [[nodiscard]] Expected<RenderCategory, BlockRegistryError> parse_render_category(
     const std::string& value) {
@@ -30,17 +28,25 @@ using json = nlohmann::json;
   return Expected<RenderCategory, BlockRegistryError>::failure({"invalid render_category: " + value});
 }
 
-void read_bool_property(const nlohmann::json& object, const char* key, bool& value) {
-  const auto found = object.find(key);
-  if (found != object.end()) {
-    value = found->get<bool>();
+[[nodiscard]] bool is_integer(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64;
+}
+
+[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
+  return is_integer(value) || value.kind() == io::DataKind::F64;
+}
+
+void read_bool_property(const io::DataValue& object, const char* key, bool& value) {
+  const io::DataValue* found = object.get(key);
+  if (found != nullptr && found->kind() == io::DataKind::Bool) {
+    value = found->as_bool_or(value);
   }
 }
 
-void read_f32_property(const nlohmann::json& object, const char* key, f32& value) {
-  const auto found = object.find(key);
-  if (found != object.end()) {
-    value = found->get<f32>();
+void read_f32_property(const io::DataValue& object, const char* key, f32& value) {
+  const io::DataValue* found = object.get(key);
+  if (found != nullptr && is_number(*found)) {
+    value = static_cast<f32>(found->as_f64_or(value));
   }
 }
 
@@ -61,40 +67,42 @@ void set_side_textures(
 }
 
 [[nodiscard]] std::optional<BlockRegistryError> read_texture_value(
-    const nlohmann::json& textures,
+    const io::DataValue& textures,
     BlockDefinition& definition,
     std::string_view field_name) {
-  if (textures.is_string()) {
-    definition.texture_assets.fill(normalize_block_texture_asset(textures.get<std::string>()));
+  if (textures.kind() == io::DataKind::String) {
+    definition.texture_assets.fill(
+        normalize_block_texture_asset(textures.as_string_or({})));
     return std::nullopt;
   }
-  if (textures.is_array()) {
-    if (textures.size() != BlockFaceCount) {
+  if (const io::DataValue::Array* texture_array = textures.array_if();
+      texture_array != nullptr) {
+    if (texture_array->size() != BlockFaceCount) {
       return BlockRegistryError{
           std::string{field_name} + " array must contain exactly 6 entries for " + definition.name};
     }
     definition.texture_assets[face_index(BlockFace::PositiveY)] =
-        normalize_block_texture_asset(textures[0].get<std::string>());
+        normalize_block_texture_asset((*texture_array)[0].as_string_or({}));
     definition.texture_assets[face_index(BlockFace::NegativeY)] =
-        normalize_block_texture_asset(textures[1].get<std::string>());
+        normalize_block_texture_asset((*texture_array)[1].as_string_or({}));
     definition.texture_assets[face_index(BlockFace::PositiveZ)] =
-        normalize_block_texture_asset(textures[2].get<std::string>());
+        normalize_block_texture_asset((*texture_array)[2].as_string_or({}));
     definition.texture_assets[face_index(BlockFace::NegativeZ)] =
-        normalize_block_texture_asset(textures[3].get<std::string>());
+        normalize_block_texture_asset((*texture_array)[3].as_string_or({}));
     definition.texture_assets[face_index(BlockFace::NegativeX)] =
-        normalize_block_texture_asset(textures[4].get<std::string>());
+        normalize_block_texture_asset((*texture_array)[4].as_string_or({}));
     definition.texture_assets[face_index(BlockFace::PositiveX)] =
-        normalize_block_texture_asset(textures[5].get<std::string>());
+        normalize_block_texture_asset((*texture_array)[5].as_string_or({}));
     return std::nullopt;
   }
-  if (!textures.is_object()) {
+  if (textures.kind() != io::DataKind::Object) {
     return BlockRegistryError{std::string{field_name} + " must be a string, array, or object for " + definition.name};
   }
 
   const auto assign_if_present = [&](std::string_view key, auto assign) {
-    const auto found = textures.find(std::string{key});
-    if (found != textures.end()) {
-      assign(found->get<std::string>());
+    const io::DataValue* found = textures.get(key);
+    if (found != nullptr) {
+      assign(std::string{found->as_string_or({})});
     }
   };
 
@@ -133,58 +141,59 @@ void set_side_textures(
 }
 
 [[nodiscard]] std::optional<BlockRegistryError> read_texture_references(
-    const nlohmann::json& item,
+    const io::DataValue& item,
     BlockDefinition& definition) {
-  const auto texture_iter = item.find("texture");
-  const auto textures_iter = item.find("textures");
-  if (texture_iter == item.end() && textures_iter == item.end()) {
+  const io::DataValue* texture_iter = item.get("texture");
+  const io::DataValue* textures_iter = item.get("textures");
+  if (texture_iter == nullptr && textures_iter == nullptr) {
     return std::nullopt;
   }
-  if (texture_iter != item.end() && textures_iter != item.end()) {
+  if (texture_iter != nullptr && textures_iter != nullptr) {
     return BlockRegistryError{"block defines both texture and textures for " + definition.name};
   }
 
   return read_texture_value(
-      texture_iter != item.end() ? *texture_iter : *textures_iter,
+      texture_iter != nullptr ? *texture_iter : *textures_iter,
       definition,
-      texture_iter != item.end() ? "texture" : "textures");
+      texture_iter != nullptr ? "texture" : "textures");
 }
 
 [[nodiscard]] std::optional<BlockRegistryError> read_model_reference(
-    const json& model,
+    const io::DataValue& model,
     BlockDefinition& definition) {
-  if (model.is_string()) {
-    definition.model.asset = normalize_block_model_asset(model.get<std::string>());
+  if (model.kind() == io::DataKind::String) {
+    definition.model.asset = normalize_block_model_asset(model.as_string_or({}));
     if (definition.model.asset.empty()) {
       return BlockRegistryError{"model must not be empty for " + definition.name};
     }
     return std::nullopt;
   }
 
-  if (!model.is_object()) {
+  if (model.kind() != io::DataKind::Object) {
     return BlockRegistryError{"model must be a string or object for " + definition.name};
   }
 
-  const auto path = model.find("path");
-  if (path == model.end() || !path->is_string()) {
+  const io::DataValue* path = model.get("path");
+  if (path == nullptr || path->kind() != io::DataKind::String) {
     return BlockRegistryError{"model object requires string path for " + definition.name};
   }
-  definition.model.asset = normalize_block_model_asset(path->get<std::string>());
+  definition.model.asset = normalize_block_model_asset(path->as_string_or({}));
   if (definition.model.asset.empty()) {
     return BlockRegistryError{"model path must not be empty for " + definition.name};
   }
 
-  if (const auto textures = model.find("textures"); textures != model.end()) {
-    if (!textures->is_array()) {
+  if (const io::DataValue* textures = model.get("textures"); textures != nullptr) {
+    const io::DataValue::Array* texture_array = textures->array_if();
+    if (texture_array == nullptr) {
       return BlockRegistryError{"model.textures must be an array for " + definition.name};
     }
-    definition.model.texture_inputs.reserve(textures->size());
-    for (const json& texture : *textures) {
-      if (!texture.is_string()) {
+    definition.model.texture_inputs.reserve(texture_array->size());
+    for (const io::DataValue& texture : *texture_array) {
+      if (texture.kind() != io::DataKind::String) {
         return BlockRegistryError{"model.textures entries must be strings for " + definition.name};
       }
       definition.model.texture_inputs.push_back(
-          normalize_block_texture_asset(texture.get<std::string>()));
+          normalize_block_texture_asset(texture.as_string_or({})));
     }
   }
 
@@ -192,19 +201,23 @@ void set_side_textures(
 }
 
 [[nodiscard]] Expected<Vec3f, BlockRegistryError> read_vec3f(
-    const json& node,
+    const io::DataValue& node,
     std::string_view field) {
-  if (!node.is_array() || node.size() != 3U) {
+  const io::DataValue::Array* array = node.array_if();
+  if (array == nullptr || array->size() != 3U) {
     return Expected<Vec3f, BlockRegistryError>::failure(
         {std::string{field} + " must be a 3-element array"});
   }
-  for (const json& value : node) {
-    if (!value.is_number()) {
+  for (const io::DataValue& value : *array) {
+    if (!is_number(value)) {
       return Expected<Vec3f, BlockRegistryError>::failure(
           {std::string{field} + " entries must be numeric"});
     }
   }
-  Vec3f result{node.at(0).get<f32>(), node.at(1).get<f32>(), node.at(2).get<f32>()};
+  Vec3f result{
+      static_cast<f32>((*array)[0].as_f64_or(0.0)),
+      static_cast<f32>((*array)[1].as_f64_or(0.0)),
+      static_cast<f32>((*array)[2].as_f64_or(0.0))};
   if (!std::isfinite(result.x) || !std::isfinite(result.y) || !std::isfinite(result.z)) {
     return Expected<Vec3f, BlockRegistryError>::failure(
         {std::string{field} + " entries must be finite"});
@@ -213,39 +226,43 @@ void set_side_textures(
 }
 
 [[nodiscard]] Expected<Vec2i, BlockRegistryError> read_vec2i(
-    const json& node,
+    const io::DataValue& node,
     std::string_view field) {
-  if (!node.is_array() || node.size() != 2U) {
+  const io::DataValue::Array* array = node.array_if();
+  if (array == nullptr || array->size() != 2U) {
     return Expected<Vec2i, BlockRegistryError>::failure(
         {std::string{field} + " must be a 2-element array"});
   }
-  for (const json& value : node) {
-    if (!value.is_number()) {
+  for (const io::DataValue& value : *array) {
+    if (!is_number(value)) {
       return Expected<Vec2i, BlockRegistryError>::failure(
           {std::string{field} + " entries must be numeric"});
     }
   }
-  return Expected<Vec2i, BlockRegistryError>::success({node.at(0).get<i32>(),
-                                                       node.at(1).get<i32>()});
+  return Expected<Vec2i, BlockRegistryError>::success({
+      static_cast<i32>((*array)[0].as_i64_or(0)),
+      static_cast<i32>((*array)[1].as_i64_or(0))});
 }
 
 [[nodiscard]] Expected<Vec4i, BlockRegistryError> read_vec4i(
-    const json& node,
+    const io::DataValue& node,
     std::string_view field) {
-  if (!node.is_array() || node.size() != 4U) {
+  const io::DataValue::Array* array = node.array_if();
+  if (array == nullptr || array->size() != 4U) {
     return Expected<Vec4i, BlockRegistryError>::failure(
         {std::string{field} + " must be a 4-element array"});
   }
-  for (const json& value : node) {
-    if (!value.is_number()) {
+  for (const io::DataValue& value : *array) {
+    if (!is_number(value)) {
       return Expected<Vec4i, BlockRegistryError>::failure(
           {std::string{field} + " entries must be numeric"});
     }
   }
-  return Expected<Vec4i, BlockRegistryError>::success({node.at(0).get<i32>(),
-                                                       node.at(1).get<i32>(),
-                                                       node.at(2).get<i32>(),
-                                                       node.at(3).get<i32>()});
+  return Expected<Vec4i, BlockRegistryError>::success({
+      static_cast<i32>((*array)[0].as_i64_or(0)),
+      static_cast<i32>((*array)[1].as_i64_or(0)),
+      static_cast<i32>((*array)[2].as_i64_or(0)),
+      static_cast<i32>((*array)[3].as_i64_or(0))});
 }
 
 [[nodiscard]] std::optional<BlockFace> block_face_from_name(std::string_view name) noexcept {
@@ -303,24 +320,24 @@ void set_side_textures(
 }
 
 [[nodiscard]] Expected<AuthoredModelFaceDefinition, BlockRegistryError> read_authored_model_face(
-    const json& node,
+    const io::DataValue& node,
     usize texture_count) {
-  if (!node.is_object()) {
+  if (node.kind() != io::DataKind::Object) {
     return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
         {"model face entry must be an object"});
   }
 
   AuthoredModelFaceDefinition face;
-  const auto texture = node.find("texture");
-  if (texture == node.end()) {
+  const io::DataValue* texture = node.get("texture");
+  if (texture == nullptr) {
     return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
         {"model face entry is missing texture"});
   }
-  if (!texture->is_number_integer()) {
+  if (!is_integer(*texture)) {
     return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
         {"model face texture must be an integer"});
   }
-  face.texture_index = texture->get<i32>();
+  face.texture_index = static_cast<i32>(texture->as_i64_or(0));
   if (face.texture_index < 0) {
     if (face.texture_index != -1) {
       return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
@@ -333,8 +350,8 @@ void set_side_textures(
         {"model face references missing texture index"});
   }
 
-  const auto uv = node.find("uv");
-  if (uv == node.end()) {
+  const io::DataValue* uv = node.get("uv");
+  if (uv == nullptr) {
     return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
         {"model face entry is missing uv"});
   }
@@ -370,7 +387,7 @@ void set_side_textures(
 }
 
 [[nodiscard]] std::optional<BlockRegistryError> reject_removed_model_fields(
-    const json& object,
+    const io::DataValue& object,
     std::string_view context) {
   for (std::string_view field : {
            "skeleton",
@@ -381,7 +398,7 @@ void set_side_textures(
            "geometry",
            "cubes",
        }) {
-    if (object.find(std::string{field}) != object.end()) {
+    if (object.get(field) != nullptr) {
       return BlockRegistryError{
           std::string{context} +
           " contains removed entity model field '" +
@@ -467,16 +484,23 @@ struct ExpandedVariantDefinition {
 }
 
 [[nodiscard]] Expected<std::string, BlockRegistryError> read_state_value_string(
-    const json& value,
+    const io::DataValue& value,
     std::string_view field) {
-  if (value.is_string()) {
-    return Expected<std::string, BlockRegistryError>::success(value.get<std::string>());
+  if (value.kind() == io::DataKind::String) {
+    return Expected<std::string, BlockRegistryError>::success(
+        std::string{value.as_string_or({})});
   }
-  if (value.is_boolean()) {
-    return Expected<std::string, BlockRegistryError>::success(value.get<bool>() ? "true" : "false");
+  if (value.kind() == io::DataKind::Bool) {
+    return Expected<std::string, BlockRegistryError>::success(
+        value.as_bool_or(false) ? "true" : "false");
   }
-  if (value.is_number_integer()) {
-    return Expected<std::string, BlockRegistryError>::success(std::to_string(value.get<i64>()));
+  if (value.kind() == io::DataKind::I64) {
+    return Expected<std::string, BlockRegistryError>::success(
+        std::to_string(value.as_i64_or(0)));
+  }
+  if (value.kind() == io::DataKind::U64) {
+    return Expected<std::string, BlockRegistryError>::success(
+        std::to_string(value.as_u64_or(0)));
   }
   return Expected<std::string, BlockRegistryError>::failure(
       {std::string{field} + " values must be strings, booleans, or integers"});
@@ -944,80 +968,86 @@ std::string normalize_block_texture_asset(std::string_view texture) {
 }
 
 BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
-  try {
-    const nlohmann::json root = nlohmann::json::parse(text.begin(), text.end());
-    const nlohmann::json* blocks = &root;
-    if (root.is_object()) {
-      const auto found = root.find("blocks");
-      if (found == root.end()) {
-        return BlockDefinitionsResult::failure({"block definition JSON object must contain blocks array"});
-      }
-      blocks = &(*found);
+  auto decoded = io::decode_json_value(text);
+  if (!decoded) {
+    return BlockDefinitionsResult::failure(
+        {"failed to parse block definitions JSON: " + decoded.error().describe()});
+  }
+  const io::DataValue& root = decoded.value().root;
+  const io::DataValue* blocks = &root;
+  if (root.kind() == io::DataKind::Object) {
+    const io::DataValue* found = root.get("blocks");
+    if (found == nullptr) {
+      return BlockDefinitionsResult::failure({"block definition JSON object must contain blocks array"});
     }
-    if (!blocks->is_array()) {
-      return BlockDefinitionsResult::failure({"block definitions must be a JSON array"});
-    }
+    blocks = found;
+  }
+  const io::DataValue::Array* block_array = blocks->array_if();
+  if (block_array == nullptr) {
+    return BlockDefinitionsResult::failure({"block definitions must be a JSON array"});
+  }
 
-    std::vector<BlockDefinition> definitions;
-    definitions.reserve(blocks->size());
-    for (const nlohmann::json& item : *blocks) {
-      if (!item.is_object()) {
+  std::vector<BlockDefinition> definitions;
+  definitions.reserve(block_array->size());
+  for (const io::DataValue& item : *block_array) {
+      if (item.kind() != io::DataKind::Object) {
         return BlockDefinitionsResult::failure({"block definition entry must be an object"});
       }
 
-      const auto name_iter = item.find("name");
-      if (name_iter == item.end() || !name_iter->is_string()) {
+      const io::DataValue* name_iter = item.get("name");
+      if (name_iter == nullptr || name_iter->kind() != io::DataKind::String) {
         return BlockDefinitionsResult::failure({"block definition is missing string field name"});
       }
 
       BlockDefinition definition;
-      definition.name = name_iter->get<std::string>();
+      definition.name = std::string{name_iter->as_string_or({})};
 
-      const auto display_name_iter = item.find("display_name");
-      if (display_name_iter != item.end()) {
-        if (!display_name_iter->is_string()) {
+      const io::DataValue* display_name_iter = item.get("display_name");
+      if (display_name_iter != nullptr) {
+        if (display_name_iter->kind() != io::DataKind::String) {
           return BlockDefinitionsResult::failure(
               {"display_name must be a string for " + definition.name});
         }
-        definition.display_name = display_name_iter->get<std::string>();
+        definition.display_name = std::string{display_name_iter->as_string_or({})};
       }
 
-      const auto behavior_iter = item.find("behavior");
-      if (behavior_iter != item.end()) {
-        if (!behavior_iter->is_string()) {
+      const io::DataValue* behavior_iter = item.get("behavior");
+      if (behavior_iter != nullptr) {
+        if (behavior_iter->kind() != io::DataKind::String) {
           return BlockDefinitionsResult::failure({"behavior must be a string for " + definition.name});
         }
-        definition.behavior_id = behavior_iter->get<std::string>();
+        definition.behavior_id = std::string{behavior_iter->as_string_or({})};
         if (definition.behavior_id.empty()) {
           return BlockDefinitionsResult::failure({"behavior must be non-empty for " + definition.name});
         }
       }
 
-      const auto category_iter = item.find("render_category");
-      if (category_iter != item.end()) {
-        if (!category_iter->is_string()) {
+      const io::DataValue* category_iter = item.get("render_category");
+      if (category_iter != nullptr) {
+        if (category_iter->kind() != io::DataKind::String) {
           return BlockDefinitionsResult::failure({"render_category must be a string for " + definition.name});
         }
-        auto parsed_category = parse_render_category(category_iter->get<std::string>());
+        auto parsed_category = parse_render_category(std::string{category_iter->as_string_or({})});
         if (!parsed_category) {
           return BlockDefinitionsResult::failure(parsed_category.error());
         }
         definition.render_category = parsed_category.value();
       }
 
-      const auto tags_iter = item.find("tags");
-      if (tags_iter != item.end()) {
-        if (!tags_iter->is_array()) {
+      const io::DataValue* tags_iter = item.get("tags");
+      if (tags_iter != nullptr) {
+        const io::DataValue::Array* tags = tags_iter->array_if();
+        if (tags == nullptr) {
           return BlockDefinitionsResult::failure({"tags must be an array for " + definition.name});
         }
-        for (const nlohmann::json& tag : *tags_iter) {
-          definition.tags.push_back(tag.get<std::string>());
+        for (const io::DataValue& tag : *tags) {
+          definition.tags.emplace_back(tag.as_string_or({}));
         }
       }
 
-      const auto properties_iter = item.find("properties");
-      if (properties_iter != item.end()) {
-        if (!properties_iter->is_object()) {
+      const io::DataValue* properties_iter = item.get("properties");
+      if (properties_iter != nullptr) {
+        if (properties_iter->kind() != io::DataKind::Object) {
           return BlockDefinitionsResult::failure({"properties must be an object for " + definition.name});
         }
         read_bool_property(*properties_iter, "solid", definition.properties.solid);
@@ -1035,48 +1065,50 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
             definition.properties.drops_with_wrong_tool);
         read_f32_property(*properties_iter, "hardness", definition.properties.hardness);
         read_f32_property(*properties_iter, "slipperiness", definition.physics.slipperiness);
-        const auto emission_iter = properties_iter->find("emission_rgb");
-        if (emission_iter != properties_iter->end()) {
-          if (!emission_iter->is_array() || emission_iter->size() != 3U) {
+        const io::DataValue* emission_iter = properties_iter->get("emission_rgb");
+        if (emission_iter != nullptr) {
+          const io::DataValue::Array* emission = emission_iter->array_if();
+          if (emission == nullptr || emission->size() != 3U) {
             return BlockDefinitionsResult::failure(
                 {"emission_rgb must be an array with 3 entries for " + definition.name});
           }
-          definition.properties.emission_r = (*emission_iter)[0].get<u8>();
-          definition.properties.emission_g = (*emission_iter)[1].get<u8>();
-          definition.properties.emission_b = (*emission_iter)[2].get<u8>();
+          definition.properties.emission_r = static_cast<u8>((*emission)[0].as_u64_or(0));
+          definition.properties.emission_g = static_cast<u8>((*emission)[1].as_u64_or(0));
+          definition.properties.emission_b = static_cast<u8>((*emission)[2].as_u64_or(0));
           definition.properties.emits_light =
               definition.properties.emission_r != 0 || definition.properties.emission_g != 0 ||
               definition.properties.emission_b != 0;
         }
       }
 
-      const auto hide_iter = item.find("hide_same_variant_faces");
-      if (hide_iter != item.end()) {
-        definition.hide_same_variant_faces = hide_iter->get<bool>();
+      const io::DataValue* hide_iter = item.get("hide_same_variant_faces");
+      if (hide_iter != nullptr) {
+        definition.hide_same_variant_faces =
+            hide_iter->as_bool_or(definition.hide_same_variant_faces);
       }
 
-      const auto is_item_iter = item.find("is_item");
-      if (is_item_iter != item.end()) {
-        definition.is_item = is_item_iter->get<bool>();
+      const io::DataValue* is_item_iter = item.get("is_item");
+      if (is_item_iter != nullptr) {
+        definition.is_item = is_item_iter->as_bool_or(definition.is_item);
       }
 
-      const auto buoyancy_iter = item.find("buoyancy");
-      if (buoyancy_iter != item.end()) {
-        if (!buoyancy_iter->is_number()) {
+      const io::DataValue* buoyancy_iter = item.get("buoyancy");
+      if (buoyancy_iter != nullptr) {
+        if (!is_number(*buoyancy_iter)) {
           return BlockDefinitionsResult::failure(
               {"buoyancy must be a number for " + definition.name});
         }
-        definition.item_buoyancy = buoyancy_iter->get<f32>();
+        definition.item_buoyancy = static_cast<f32>(buoyancy_iter->as_f64_or(0.0));
       }
 
-      const auto drops_iter = item.find("drops");
-      if (drops_iter != item.end()) {
-        if (drops_iter->is_null()) {
+      const io::DataValue* drops_iter = item.get("drops");
+      if (drops_iter != nullptr) {
+        if (drops_iter->kind() == io::DataKind::Null) {
           definition.drops.kind = BlockDropKind::None;
           definition.drops.item_name.clear();
-        } else if (drops_iter->is_string()) {
+        } else if (drops_iter->kind() == io::DataKind::String) {
           definition.drops.kind = BlockDropKind::Item;
-          definition.drops.item_name = drops_iter->get<std::string>();
+          definition.drops.item_name = std::string{drops_iter->as_string_or({})};
           if (definition.drops.item_name.empty()) {
             return BlockDefinitionsResult::failure(
                 {"drops item must be non-empty for " + definition.name});
@@ -1087,14 +1119,14 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
         }
       }
 
-      const bool has_model = item.find("model") != item.end();
-      const bool has_texture = item.find("texture") != item.end() || item.find("textures") != item.end();
+      const bool has_model = item.get("model") != nullptr;
+      const bool has_texture = item.get("texture") != nullptr || item.get("textures") != nullptr;
       if (has_model && has_texture) {
         return BlockDefinitionsResult::failure(
             {"block defines both model and texture references for " + definition.name});
       }
       if (has_model) {
-        if (auto model_error = read_model_reference(item.at("model"), definition);
+        if (auto model_error = read_model_reference(*item.get("model"), definition);
             model_error.has_value()) {
           return BlockDefinitionsResult::failure(model_error.value());
         }
@@ -1103,18 +1135,20 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
         return BlockDefinitionsResult::failure(texture_error.value());
       }
 
-      const auto states_iter = item.find("states");
-      if (states_iter != item.end()) {
-        if (!states_iter->is_object()) {
+      const io::DataValue* states_iter = item.get("states");
+      if (states_iter != nullptr) {
+        const io::DataValue::Object* states = states_iter->object_if();
+        if (states == nullptr) {
           return BlockDefinitionsResult::failure({"states must be an object for " + definition.name});
         }
-        for (const auto& [state_name, state_values] : states_iter->items()) {
-          if (!state_values.is_array()) {
+        for (const auto& [state_name, state_values] : *states) {
+          const io::DataValue::Array* values = state_values.array_if();
+          if (values == nullptr) {
             return BlockDefinitionsResult::failure({"state values must be arrays for " + definition.name});
           }
           StatePropertyDefinition state;
           state.name = state_name;
-          for (const nlohmann::json& value : state_values) {
+          for (const io::DataValue& value : *values) {
             auto parsed_value = read_state_value_string(
                 value,
                 "state " + definition.name + "." + state.name);
@@ -1128,165 +1162,168 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
       }
 
       definitions.push_back(std::move(definition));
-    }
-
-    return BlockDefinitionsResult::success(std::move(definitions));
-  } catch (const nlohmann::json::exception& ex) {
-    return BlockDefinitionsResult::failure({"failed to parse block definitions JSON: " + std::string{ex.what()}});
   }
+
+  return BlockDefinitionsResult::success(std::move(definitions));
 }
 
 AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text) {
-  try {
-    const json root = json::parse(text.begin(), text.end());
-    if (!root.is_object()) {
-      return AuthoredModelDefinitionResult::failure({"model root must be an object"});
+  auto decoded = io::decode_json_value(text);
+  if (!decoded) {
+    return AuthoredModelDefinitionResult::failure(
+        {"failed to parse model JSON: " + decoded.error().describe()});
+  }
+  const io::DataValue& root = decoded.value().root;
+  if (root.kind() != io::DataKind::Object) {
+    return AuthoredModelDefinitionResult::failure({"model root must be an object"});
+  }
+  if (auto legacy_error = reject_removed_model_fields(root, "model root");
+      legacy_error.has_value()) {
+    return AuthoredModelDefinitionResult::failure(legacy_error.value());
+  }
+  if (root.get("pivot") != nullptr) {
+    return AuthoredModelDefinitionResult::failure(
+        {"model root contains removed entity model field 'pivot'; pivots belong to boxes"});
+  }
+
+  AuthoredModelDefinition definition;
+  if (const io::DataValue* name = root.get("name"); name != nullptr) {
+    if (name->kind() != io::DataKind::String) {
+      return AuthoredModelDefinitionResult::failure({"model name must be a string"});
     }
-    if (auto legacy_error = reject_removed_model_fields(root, "model root");
+    definition.name = std::string{name->as_string_or({})};
+  }
+  bool has_center_origin = false;
+  if (const io::DataValue* center_origin = root.get("center_origin");
+      center_origin != nullptr) {
+    auto parsed_center_origin = read_vec3f(*center_origin, "model center_origin");
+    if (!parsed_center_origin) {
+      return AuthoredModelDefinitionResult::failure(parsed_center_origin.error());
+    }
+    definition.center_origin = parsed_center_origin.value();
+    has_center_origin = true;
+  }
+
+  const io::DataValue* textures = root.get("textures");
+  const io::DataValue::Array* texture_array =
+      textures == nullptr ? nullptr : textures->array_if();
+  if (texture_array == nullptr) {
+    return AuthoredModelDefinitionResult::failure({"model requires textures array"});
+  }
+  definition.texture_assets.reserve(texture_array->size());
+  for (const io::DataValue& texture : *texture_array) {
+    if (texture.kind() != io::DataKind::String) {
+      return AuthoredModelDefinitionResult::failure({"model texture entries must be strings"});
+    }
+    definition.texture_assets.emplace_back(texture.as_string_or({}));
+  }
+
+  const io::DataValue* texture_sizes = root.get("texture_sizes");
+  const io::DataValue::Array* texture_size_array =
+      texture_sizes == nullptr ? nullptr : texture_sizes->array_if();
+  if (texture_size_array == nullptr) {
+    return AuthoredModelDefinitionResult::failure({"model requires texture_sizes array"});
+  }
+  definition.texture_sizes.reserve(texture_size_array->size());
+  for (const io::DataValue& size : *texture_size_array) {
+    auto parsed_size = read_vec2i(size, "model texture size");
+    if (!parsed_size) {
+      return AuthoredModelDefinitionResult::failure(parsed_size.error());
+    }
+    if (parsed_size.value().x <= 0 || parsed_size.value().y <= 0) {
+      return AuthoredModelDefinitionResult::failure({"model texture sizes must be positive"});
+    }
+    definition.texture_sizes.push_back(parsed_size.value());
+  }
+  if (definition.texture_assets.size() != definition.texture_sizes.size()) {
+    return AuthoredModelDefinitionResult::failure(
+        {"model textures and texture_sizes must have the same length"});
+  }
+
+  const io::DataValue* boxes = root.get("boxes");
+  const io::DataValue::Array* box_array =
+      boxes == nullptr ? nullptr : boxes->array_if();
+  if (box_array == nullptr) {
+    return AuthoredModelDefinitionResult::failure({"model requires boxes array"});
+  }
+  definition.boxes.reserve(box_array->size());
+  for (const io::DataValue& box_json : *box_array) {
+    if (box_json.kind() != io::DataKind::Object) {
+      return AuthoredModelDefinitionResult::failure({"model box must be an object"});
+    }
+    if (auto legacy_error = reject_removed_model_fields(box_json, "model box");
         legacy_error.has_value()) {
       return AuthoredModelDefinitionResult::failure(legacy_error.value());
     }
-    if (root.find("pivot") != root.end()) {
+
+    const io::DataValue* bone = box_json.get("bone");
+    if (bone == nullptr || bone->kind() != io::DataKind::String) {
       return AuthoredModelDefinitionResult::failure(
-          {"model root contains removed entity model field 'pivot'; pivots belong to boxes"});
+          {"model box bone must be a string"});
+    }
+    const io::DataValue* pivot_json = box_json.get("pivot");
+    if (pivot_json == nullptr) {
+      return AuthoredModelDefinitionResult::failure({"model box is missing pivot"});
     }
 
-    AuthoredModelDefinition definition;
-    if (const auto name = root.find("name"); name != root.end()) {
-      if (!name->is_string()) {
-        return AuthoredModelDefinitionResult::failure({"model name must be a string"});
-      }
-      definition.name = name->get<std::string>();
+    const io::DataValue* min_json = box_json.get("min");
+    if (min_json == nullptr) {
+      return AuthoredModelDefinitionResult::failure({"model box is missing min"});
     }
-    bool has_center_origin = false;
-    if (const auto center_origin = root.find("center_origin");
-        center_origin != root.end()) {
-      auto parsed_center_origin = read_vec3f(*center_origin, "model center_origin");
-      if (!parsed_center_origin) {
-        return AuthoredModelDefinitionResult::failure(parsed_center_origin.error());
-      }
-      definition.center_origin = parsed_center_origin.value();
-      has_center_origin = true;
+    const io::DataValue* max_json = box_json.get("max");
+    if (max_json == nullptr) {
+      return AuthoredModelDefinitionResult::failure({"model box is missing max"});
     }
 
-    const auto textures = root.find("textures");
-    if (textures == root.end() || !textures->is_array()) {
-      return AuthoredModelDefinitionResult::failure({"model requires textures array"});
+    AuthoredModelBoxDefinition box;
+    box.bone = std::string{bone->as_string_or({})};
+    auto pivot = read_vec3f(*pivot_json, "model box pivot");
+    auto min = read_vec3f(*min_json, "model box min");
+    auto max = read_vec3f(*max_json, "model box max");
+    if (!pivot) {
+      return AuthoredModelDefinitionResult::failure(pivot.error());
     }
-    definition.texture_assets.reserve(textures->size());
-    for (const json& texture : *textures) {
-      if (!texture.is_string()) {
-        return AuthoredModelDefinitionResult::failure({"model texture entries must be strings"});
+    if (!min) {
+      return AuthoredModelDefinitionResult::failure(min.error());
+    }
+    if (!max) {
+      return AuthoredModelDefinitionResult::failure(max.error());
+    }
+    box.pivot = pivot.value();
+    box.min = min.value();
+    box.max = max.value();
+    if (const io::DataValue* inflate = box_json.get("inflate"); inflate != nullptr) {
+      if (!is_number(*inflate)) {
+        return AuthoredModelDefinitionResult::failure({"model box inflate must be numeric"});
       }
-      definition.texture_assets.push_back(texture.get<std::string>());
-    }
-
-    const auto texture_sizes = root.find("texture_sizes");
-    if (texture_sizes == root.end() || !texture_sizes->is_array()) {
-      return AuthoredModelDefinitionResult::failure({"model requires texture_sizes array"});
-    }
-    definition.texture_sizes.reserve(texture_sizes->size());
-    for (const json& size : *texture_sizes) {
-      auto parsed_size = read_vec2i(size, "model texture size");
-      if (!parsed_size) {
-        return AuthoredModelDefinitionResult::failure(parsed_size.error());
+      box.inflate = static_cast<f32>(inflate->as_f64_or(0.0));
+      if (!std::isfinite(box.inflate)) {
+        return AuthoredModelDefinitionResult::failure({"model box inflate must be finite"});
       }
-      if (parsed_size.value().x <= 0 || parsed_size.value().y <= 0) {
-        return AuthoredModelDefinitionResult::failure({"model texture sizes must be positive"});
-      }
-      definition.texture_sizes.push_back(parsed_size.value());
     }
-    if (definition.texture_assets.size() != definition.texture_sizes.size()) {
+    if (box.min.x > box.max.x || box.min.y > box.max.y || box.min.z > box.max.z) {
       return AuthoredModelDefinitionResult::failure(
-          {"model textures and texture_sizes must have the same length"});
+          {"model box min must be less than or equal to max"});
     }
 
-    const auto boxes = root.find("boxes");
-    if (boxes == root.end() || !boxes->is_array()) {
-      return AuthoredModelDefinitionResult::failure({"model requires boxes array"});
+    for (std::string_view face_name : {"east", "west", "up", "down", "south", "north"}) {
+      const io::DataValue* face_json = box_json.get(face_name);
+      if (face_json == nullptr) {
+        continue;
+      }
+      auto face = read_authored_model_face(*face_json, definition.texture_assets.size());
+      if (!face) {
+        return AuthoredModelDefinitionResult::failure(face.error());
+      }
+      box.faces[face_index(block_face_from_name(face_name).value())] = face.value();
     }
-    definition.boxes.reserve(boxes->size());
-    for (const json& box_json : *boxes) {
-      if (!box_json.is_object()) {
-        return AuthoredModelDefinitionResult::failure({"model box must be an object"});
-      }
-      if (auto legacy_error = reject_removed_model_fields(box_json, "model box");
-          legacy_error.has_value()) {
-        return AuthoredModelDefinitionResult::failure(legacy_error.value());
-      }
-
-      const auto bone = box_json.find("bone");
-      if (bone == box_json.end() || !bone->is_string()) {
-        return AuthoredModelDefinitionResult::failure(
-            {"model box bone must be a string"});
-      }
-      const auto pivot_json = box_json.find("pivot");
-      if (pivot_json == box_json.end()) {
-        return AuthoredModelDefinitionResult::failure({"model box is missing pivot"});
-      }
-
-      const auto min_json = box_json.find("min");
-      if (min_json == box_json.end()) {
-        return AuthoredModelDefinitionResult::failure({"model box is missing min"});
-      }
-      const auto max_json = box_json.find("max");
-      if (max_json == box_json.end()) {
-        return AuthoredModelDefinitionResult::failure({"model box is missing max"});
-      }
-
-      AuthoredModelBoxDefinition box;
-      box.bone = bone->get<std::string>();
-      auto pivot = read_vec3f(*pivot_json, "model box pivot");
-      auto min = read_vec3f(*min_json, "model box min");
-      auto max = read_vec3f(*max_json, "model box max");
-      if (!pivot) {
-        return AuthoredModelDefinitionResult::failure(pivot.error());
-      }
-      if (!min) {
-        return AuthoredModelDefinitionResult::failure(min.error());
-      }
-      if (!max) {
-        return AuthoredModelDefinitionResult::failure(max.error());
-      }
-      box.pivot = pivot.value();
-      box.min = min.value();
-      box.max = max.value();
-      if (const auto inflate = box_json.find("inflate"); inflate != box_json.end()) {
-        if (!inflate->is_number()) {
-          return AuthoredModelDefinitionResult::failure({"model box inflate must be numeric"});
-        }
-        box.inflate = inflate->get<f32>();
-        if (!std::isfinite(box.inflate)) {
-          return AuthoredModelDefinitionResult::failure({"model box inflate must be finite"});
-        }
-      }
-      if (box.min.x > box.max.x || box.min.y > box.max.y || box.min.z > box.max.z) {
-        return AuthoredModelDefinitionResult::failure(
-            {"model box min must be less than or equal to max"});
-      }
-
-      for (std::string_view face_name : {"east", "west", "up", "down", "south", "north"}) {
-        const auto face_json = box_json.find(std::string{face_name});
-        if (face_json == box_json.end()) {
-          continue;
-        }
-        auto face = read_authored_model_face(*face_json, definition.texture_assets.size());
-        if (!face) {
-          return AuthoredModelDefinitionResult::failure(face.error());
-        }
-        box.faces[face_index(block_face_from_name(face_name).value())] = face.value();
-      }
-      definition.boxes.push_back(std::move(box));
-    }
-    if (!has_center_origin) {
-      definition.center_origin = derive_center_origin(definition.boxes);
-    }
-
-    return AuthoredModelDefinitionResult::success(std::move(definition));
-  } catch (const json::exception& ex) {
-    return AuthoredModelDefinitionResult::failure(
-        {"failed to parse model JSON: " + std::string{ex.what()}});
+    definition.boxes.push_back(std::move(box));
   }
+  if (!has_center_origin) {
+    definition.center_origin = derive_center_origin(definition.boxes);
+  }
+
+  return AuthoredModelDefinitionResult::success(std::move(definition));
 }
 
 BlockModelDefinitionResult parse_block_model_json(

@@ -7,11 +7,13 @@
 #include <arv/entities.hpp>
 #include <arv/events.hpp>
 #include <arv/gamemode.hpp>
+#include <arv/io/codec.hpp>
 #include <arv/logger.hpp>
 #include <arv/metrics.hpp>
 #include <arv/network.hpp>
 #include <arv/permissions.hpp>
 #include <arv/persistent_data.hpp>
+#include <arv/players.hpp>
 #include <arv/plugin.hpp>
 #include <arv/regions.hpp>
 #include <arv/registries.hpp>
@@ -46,11 +48,9 @@ struct arv::Codec<SampleConfig> {
   static arv::DecodeResult<SampleConfig> decode(const arv::DataDocument& document) {
     SampleConfig config;
     if (auto max_items = document.i64_value("max_items")) {
-      config.max_items = static_cast<int>(max_items.value);
+      config.max_items = static_cast<int>(max_items.value());
     }
-    if (auto enabled = document.bool_value("enabled")) {
-      config.enabled = enabled.value;
-    }
+    config.enabled = document.bool_value("enabled", config.enabled);
     return {arv::Result::ok(), config};
   }
 };
@@ -72,6 +72,7 @@ int arv_plugin_sdk_cpp_compile_test() {
   arv::Packet packet;
   arv::Permissions permissions{nullptr};
   arv::PersistentData persistent_data{nullptr};
+  arv::Players players{nullptr};
   arv::PersistentScopeRef persistent_scope = persistent_data.world(1);
   arv::Registries registries{nullptr};
   arv::Regions regions{nullptr};
@@ -140,6 +141,7 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !entities.exists({}) && !network.unsupported() &&
                  !packet_result && !network.broadcast(packet) &&
                  !gamemodes.exists("survival") && !permissions.unsupported() &&
+                 !players.current_selection(1) &&
                  !persistent_scope.load("test:data") &&
                  !persistent_scope.save("test:data", sample) &&
                  persistent_scope.load_or_default<SampleConfig>("test:data").enabled &&

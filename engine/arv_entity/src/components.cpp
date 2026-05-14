@@ -1,15 +1,13 @@
 #include "arv/entity/components.hpp"
 
+#include "arv/io/data_codecs.hpp"
+
 #include <algorithm>
 #include <string_view>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 namespace arv::entity {
 namespace {
-
-using json = nlohmann::json;
 
 bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) {
   if (lhs.name == PlayerEntityTypeName) {
@@ -31,55 +29,73 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
 }
 
 [[nodiscard]] Expected<Vec3f, EntityRegistryError> read_vec3(
-    const json& node,
+    const io::DataValue& node,
     std::string_view field) {
-  if (!node.is_array() || node.size() != 3U) {
+  const io::DataValue::Array* array = node.array_if();
+  if (array == nullptr || array->size() != 3U) {
     return Expected<Vec3f, EntityRegistryError>::failure(
         {std::string{field} + " must be a 3-element array"});
   }
   return Expected<Vec3f, EntityRegistryError>::success({
-      node.at(0).get<f32>(),
-      node.at(1).get<f32>(),
-      node.at(2).get<f32>()});
+      static_cast<f32>((*array)[0].as_f64_or(0.0)),
+      static_cast<f32>((*array)[1].as_f64_or(0.0)),
+      static_cast<f32>((*array)[2].as_f64_or(0.0))});
 }
 
 [[nodiscard]] Expected<AuthoredGoalDefinition, EntityRegistryError> read_goal_definition(
-    const json& goal_json) {
-  if (!goal_json.is_object()) {
+    const io::DataValue& goal_json) {
+  if (goal_json.kind() != io::DataKind::Object) {
     return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
         {"brain goal entry must be an object"});
   }
-  const auto type = goal_json.find("type");
-  if (type == goal_json.end() || !type->is_string()) {
+  const io::DataValue* type = goal_json.get("type");
+  if (type == nullptr || type->kind() != io::DataKind::String) {
     return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
         {"brain goal is missing string field type"});
   }
 
   AuthoredGoalDefinition goal;
-  goal.type = type->get<std::string>();
-  goal.priority = goal_json.value("priority", 0);
-  goal.radius = goal_json.value("radius", 0.0F);
-  goal.speed_multiplier = goal_json.value("speed_multiplier", 1.0F);
-  goal.duration_ticks = goal_json.value("duration_ticks", 60U);
-  goal.cooldown_ticks = goal_json.value("cooldown_ticks", 0U);
-  goal.range = goal_json.value("range", 0.0F);
-  goal.target = goal_json.value("target", std::string{});
-  goal.animation = goal_json.value("animation", std::string{});
+  goal.type = std::string{type->as_string_or({})};
+  if (const io::DataValue* value = goal_json.get("priority"); value != nullptr) {
+    goal.priority = static_cast<i32>(value->as_i64_or(goal.priority));
+  }
+  if (const io::DataValue* value = goal_json.get("radius"); value != nullptr) {
+    goal.radius = static_cast<f32>(value->as_f64_or(goal.radius));
+  }
+  if (const io::DataValue* value = goal_json.get("speed_multiplier"); value != nullptr) {
+    goal.speed_multiplier = static_cast<f32>(value->as_f64_or(goal.speed_multiplier));
+  }
+  if (const io::DataValue* value = goal_json.get("duration_ticks"); value != nullptr) {
+    goal.duration_ticks = static_cast<u32>(value->as_u64_or(goal.duration_ticks));
+  }
+  if (const io::DataValue* value = goal_json.get("cooldown_ticks"); value != nullptr) {
+    goal.cooldown_ticks = static_cast<u32>(value->as_u64_or(goal.cooldown_ticks));
+  }
+  if (const io::DataValue* value = goal_json.get("range"); value != nullptr) {
+    goal.range = static_cast<f32>(value->as_f64_or(goal.range));
+  }
+  if (const io::DataValue* value = goal_json.get("target");
+      value != nullptr && value->kind() == io::DataKind::String) {
+    goal.target = std::string{value->as_string_or({})};
+  }
+  if (const io::DataValue* value = goal_json.get("animation");
+      value != nullptr && value->kind() == io::DataKind::String) {
+    goal.animation = std::string{value->as_string_or({})};
+  }
   return Expected<AuthoredGoalDefinition, EntityRegistryError>::success(std::move(goal));
 }
 
 [[nodiscard]] Expected<EntityComponentSet, EntityRegistryError> read_components(
-    const json& components_json) {
-  if (!components_json.is_object()) {
+    const io::DataValue& components_json) {
+  const io::DataValue::Object* components_object = components_json.object_if();
+  if (components_object == nullptr) {
     return Expected<EntityComponentSet, EntityRegistryError>::failure(
         {"entity components must be an object"});
   }
 
   EntityComponentSet components;
-  for (auto iter = components_json.begin(); iter != components_json.end(); ++iter) {
-    const std::string& component_id = iter.key();
-    const json& data = iter.value();
-    if (!data.is_object()) {
+  for (const auto& [component_id, data] : *components_object) {
+    if (data.kind() != io::DataKind::Object) {
       return Expected<EntityComponentSet, EntityRegistryError>::failure(
           {"component " + component_id + " data must be an object"});
     }
@@ -91,7 +107,7 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
       components.velocity = true;
     } else if (component_id == CollisionComponentID) {
       AuthoredCollisionComponent collision;
-      if (const auto box = data.find("box"); box != data.end()) {
+      if (const io::DataValue* box = data.get("box"); box != nullptr) {
         auto parsed_box = read_vec3(*box, "collision box");
         if (!parsed_box) {
           return Expected<EntityComponentSet, EntityRegistryError>::failure(parsed_box.error());
@@ -101,59 +117,74 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
       components.collision = collision;
     } else if (component_id == MovementComponentID) {
       AuthoredMovementComponent movement;
-      movement.walk_speed = data.value("walk_speed", 0.0F);
+      if (const io::DataValue* walk_speed = data.get("walk_speed"); walk_speed != nullptr) {
+        movement.walk_speed = static_cast<f32>(walk_speed->as_f64_or(0.0));
+      }
       components.movement = movement;
     } else if (component_id == HealthComponentID) {
       AuthoredHealthComponent health;
-      const auto max = data.find("max");
-      if (max != data.end()) {
-        if (!max->is_number()) {
+      const io::DataValue* max = data.get("max");
+      if (max != nullptr) {
+        if (max->kind() != io::DataKind::I64 && max->kind() != io::DataKind::U64 &&
+            max->kind() != io::DataKind::F64) {
           return Expected<EntityComponentSet, EntityRegistryError>::failure(
               {"health max must be a number"});
         }
-        health.max = max->get<f32>();
+        health.max = static_cast<f32>(max->as_f64_or(health.max));
       }
-      const auto current = data.find("current");
-      if (current != data.end()) {
-        if (!current->is_number()) {
+      const io::DataValue* current = data.get("current");
+      if (current != nullptr) {
+        if (current->kind() != io::DataKind::I64 && current->kind() != io::DataKind::U64 &&
+            current->kind() != io::DataKind::F64) {
           return Expected<EntityComponentSet, EntityRegistryError>::failure(
               {"health current must be a number"});
         }
-        health.current = current->get<f32>();
+        health.current = static_cast<f32>(current->as_f64_or(health.current.value_or(health.max)));
       }
-      const auto invulnerable = data.find("invulnerable");
-      if (invulnerable != data.end()) {
-        if (!invulnerable->is_boolean()) {
+      const io::DataValue* invulnerable = data.get("invulnerable");
+      if (invulnerable != nullptr) {
+        if (invulnerable->kind() != io::DataKind::Bool) {
           return Expected<EntityComponentSet, EntityRegistryError>::failure(
               {"health invulnerable must be a boolean"});
         }
-        health.invulnerable = invulnerable->get<bool>();
+        health.invulnerable = invulnerable->as_bool_or(false);
       }
       components.health = health;
     } else if (component_id == KnockbackResistanceComponentID) {
       AuthoredKnockbackResistanceComponent resistance;
-      const auto amount = data.find("resistance");
-      if (amount != data.end()) {
-        if (!amount->is_number()) {
+      const io::DataValue* amount = data.get("resistance");
+      if (amount != nullptr) {
+        if (amount->kind() != io::DataKind::I64 && amount->kind() != io::DataKind::U64 &&
+            amount->kind() != io::DataKind::F64) {
           return Expected<EntityComponentSet, EntityRegistryError>::failure(
               {"knockback resistance must be a number"});
         }
-        resistance.resistance = amount->get<f32>();
+        resistance.resistance = static_cast<f32>(amount->as_f64_or(resistance.resistance));
       }
       components.knockback_resistance = resistance;
     } else if (component_id == BrainComponentID) {
       AuthoredBrainComponent brain;
-      brain.behavior = data.value("behavior", std::string{});
+      if (const io::DataValue* behavior = data.get("behavior");
+          behavior != nullptr && behavior->kind() == io::DataKind::String) {
+        brain.behavior = std::string{behavior->as_string_or({})};
+      }
+      u32 tick_rate = 1U;
+      if (const io::DataValue* rate = data.get("tick_rate"); rate != nullptr) {
+        tick_rate = static_cast<u32>(rate->as_u64_or(tick_rate));
+      } else if (const io::DataValue* interval = data.get("tick_interval"); interval != nullptr) {
+        tick_rate = static_cast<u32>(interval->as_u64_or(tick_rate));
+      }
       brain.tick_interval = std::max<u32>(
           1U,
-          data.value("tick_rate", data.value("tick_interval", 1U)));
-      if (const auto goals = data.find("goals"); goals != data.end()) {
-        if (!goals->is_array()) {
+          tick_rate);
+      if (const io::DataValue* goals = data.get("goals"); goals != nullptr) {
+        const io::DataValue::Array* goal_array = goals->array_if();
+        if (goal_array == nullptr) {
           return Expected<EntityComponentSet, EntityRegistryError>::failure(
               {"brain goals must be an array"});
         }
-        brain.goals.reserve(goals->size());
-        for (const json& goal_json : *goals) {
+        brain.goals.reserve(goal_array->size());
+        for (const io::DataValue& goal_json : *goal_array) {
           auto goal = read_goal_definition(goal_json);
           if (!goal) {
             return Expected<EntityComponentSet, EntityRegistryError>::failure(goal.error());
@@ -164,7 +195,10 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
       components.brain = std::move(brain);
     } else if (component_id == AnimationComponentID) {
       AuthoredAnimationComponent animation;
-      animation.initial = data.value("initial", std::string{});
+      if (const io::DataValue* initial = data.get("initial");
+          initial != nullptr && initial->kind() == io::DataKind::String) {
+        animation.initial = std::string{initial->as_string_or({})};
+      }
       components.animation = std::move(animation);
     } else {
       return Expected<EntityComponentSet, EntityRegistryError>::failure(
@@ -281,65 +315,70 @@ std::string normalize_entity_animation_asset(std::string_view animation) {
 
 Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_definitions_json(
     std::string_view text) {
-  try {
-    const json root = json::parse(text.begin(), text.end());
-    const json* entities = &root;
-    if (root.is_object()) {
-      const auto found = root.find("entities");
-      if (found != root.end()) {
-        entities = &(*found);
-      } else if (root.contains("name")) {
-        entities = nullptr;
-      } else {
-        return Expected<std::vector<EntityDefinition>, EntityRegistryError>::failure(
-            {"entity definition JSON object must contain entities array or a single entity object"});
-      }
-    }
-    if (entities != nullptr && !entities->is_array()) {
+  auto decoded = io::decode_json_value(text);
+  if (!decoded) {
+    return Expected<std::vector<EntityDefinition>, EntityRegistryError>::failure(
+        {"failed to parse entity definitions JSON: " + decoded.error().describe()});
+  }
+  const io::DataValue& root = decoded.value().root;
+  const io::DataValue* entities = &root;
+  if (root.kind() == io::DataKind::Object) {
+    if (const io::DataValue* found = root.get("entities"); found != nullptr) {
+      entities = found;
+    } else if (root.get("name") != nullptr) {
+      entities = nullptr;
+    } else {
       return Expected<std::vector<EntityDefinition>, EntityRegistryError>::failure(
-          {"entity definitions must be a JSON array"});
+          {"entity definition JSON object must contain entities array or a single entity object"});
     }
+  }
+  if (entities != nullptr && entities->kind() != io::DataKind::Array) {
+    return Expected<std::vector<EntityDefinition>, EntityRegistryError>::failure(
+        {"entity definitions must be a JSON array"});
+  }
 
-    auto read_entity = [](const json& entity)
-        -> Expected<EntityDefinition, EntityRegistryError> {
-      if (!entity.is_object()) {
+  auto read_entity = [](const io::DataValue& entity)
+      -> Expected<EntityDefinition, EntityRegistryError> {
+      if (entity.kind() != io::DataKind::Object) {
         return Expected<EntityDefinition, EntityRegistryError>::failure(
             {"entity definition entry must be an object"});
       }
-      const auto name_iter = entity.find("name");
-      if (name_iter == entity.end() || !name_iter->is_string()) {
+      const io::DataValue* name_iter = entity.get("name");
+      if (name_iter == nullptr || name_iter->kind() != io::DataKind::String) {
         return Expected<EntityDefinition, EntityRegistryError>::failure(
             {"entity definition is missing string field name"});
       }
 
       EntityDefinition definition;
-      definition.name = name_iter->get<std::string>();
-      if (const auto iter = entity.find("display_name"); iter != entity.end()) {
-        definition.display_name = iter->get<std::string>();
+      definition.name = std::string{name_iter->as_string_or({})};
+      if (const io::DataValue* iter = entity.get("display_name");
+          iter != nullptr && iter->kind() == io::DataKind::String) {
+        definition.display_name = std::string{iter->as_string_or({})};
       }
-      if (const auto iter = entity.find("category"); iter != entity.end()) {
-        definition.category = iter->get<std::string>();
+      if (const io::DataValue* iter = entity.get("category");
+          iter != nullptr && iter->kind() == io::DataKind::String) {
+        definition.category = std::string{iter->as_string_or({})};
       }
-      if (const auto presentation = entity.find("presentation");
-          presentation != entity.end()) {
-        if (!presentation->is_object()) {
+      if (const io::DataValue* presentation = entity.get("presentation");
+          presentation != nullptr) {
+        if (presentation->kind() != io::DataKind::Object) {
           return Expected<EntityDefinition, EntityRegistryError>::failure(
               {"entity presentation must be an object"});
         }
-        if (const auto model = presentation->find("model"); model != presentation->end()) {
-          if (!model->is_string()) {
+        if (const io::DataValue* model = presentation->get("model"); model != nullptr) {
+          if (model->kind() != io::DataKind::String) {
             return Expected<EntityDefinition, EntityRegistryError>::failure(
                 {"entity presentation.model must be a string"});
           }
-          definition.model_asset = model->get<std::string>();
+          definition.model_asset = std::string{model->as_string_or({})};
         }
-        if (const auto animation = presentation->find("animation");
-            animation != presentation->end()) {
-          if (!animation->is_string()) {
+        if (const io::DataValue* animation = presentation->get("animation");
+            animation != nullptr) {
+          if (animation->kind() != io::DataKind::String) {
             return Expected<EntityDefinition, EntityRegistryError>::failure(
                 {"entity presentation.animation must be a string"});
           }
-          definition.animation_asset = animation->get<std::string>();
+          definition.animation_asset = std::string{animation->as_string_or({})};
           if (!definition.animation_asset.empty() &&
               !has_animation_asset_kind(definition.animation_asset)) {
             return Expected<EntityDefinition, EntityRegistryError>::failure(
@@ -347,24 +386,28 @@ Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_defini
           }
         }
       }
-      if (const auto iter = entity.find("model"); iter != entity.end()) {
-        definition.model_asset = iter->get<std::string>();
+      if (const io::DataValue* iter = entity.get("model");
+          iter != nullptr && iter->kind() == io::DataKind::String) {
+        definition.model_asset = std::string{iter->as_string_or({})};
       }
-      if (const auto iter = entity.find("components"); iter != entity.end()) {
+      if (const io::DataValue* iter = entity.get("components"); iter != nullptr) {
         auto components = read_components(*iter);
         if (!components) {
           return Expected<EntityDefinition, EntityRegistryError>::failure(components.error());
         }
         definition.components = std::move(components.value());
       }
-      if (const auto iter = entity.find("spawnable"); iter != entity.end()) {
-        definition.spawnable = iter->get<bool>();
+      if (const io::DataValue* iter = entity.get("spawnable");
+          iter != nullptr && iter->kind() == io::DataKind::Bool) {
+        definition.spawnable = iter->as_bool_or(definition.spawnable);
       }
-      if (const auto iter = entity.find("persistent_by_default"); iter != entity.end()) {
-        definition.persistent_by_default = iter->get<bool>();
+      if (const io::DataValue* iter = entity.get("persistent_by_default");
+          iter != nullptr && iter->kind() == io::DataKind::Bool) {
+        definition.persistent_by_default = iter->as_bool_or(definition.persistent_by_default);
       }
-      if (const auto iter = entity.find("replicated_by_default"); iter != entity.end()) {
-        definition.replicated_by_default = iter->get<bool>();
+      if (const io::DataValue* iter = entity.get("replicated_by_default");
+          iter != nullptr && iter->kind() == io::DataKind::Bool) {
+        definition.replicated_by_default = iter->as_bool_or(definition.replicated_by_default);
       }
       return Expected<EntityDefinition, EntityRegistryError>::success(std::move(definition));
     };
@@ -377,8 +420,9 @@ Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_defini
       }
       definitions.push_back(std::move(definition.value()));
     } else {
-      definitions.reserve(entities->size());
-      for (const json& entity : *entities) {
+      const io::DataValue::Array* entity_array = entities->array_if();
+      definitions.reserve(entity_array == nullptr ? 0U : entity_array->size());
+      for (const io::DataValue& entity : *entity_array) {
         auto definition = read_entity(entity);
         if (!definition) {
           return Expected<std::vector<EntityDefinition>, EntityRegistryError>::failure(definition.error());
@@ -388,10 +432,6 @@ Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_defini
     }
 
     return Expected<std::vector<EntityDefinition>, EntityRegistryError>::success(std::move(definitions));
-  } catch (const nlohmann::json::exception& ex) {
-    return Expected<std::vector<EntityDefinition>, EntityRegistryError>::failure(
-        {"failed to parse entity definitions JSON: " + std::string{ex.what()}});
-  }
 }
 
 } // namespace arv::entity

@@ -5,7 +5,8 @@
 namespace {
 
 TEST(MasonSelectionTests, NormalizesInclusiveBoundsAndCountsBlocks) {
-  arv_mason::MasonSelection selection;
+  arv::PlayerSelection selection;
+  selection.has_world = true;
   selection.world = 7;
   selection.a = ArvBlockPos{4, 9, -2};
   selection.b = ArvBlockPos{2, 6, 1};
@@ -28,7 +29,8 @@ TEST(MasonSelectionTests, NormalizesInclusiveBoundsAndCountsBlocks) {
 }
 
 TEST(MasonSelectionTests, RejectsIncompleteSelection) {
-  arv_mason::MasonSelection selection;
+  arv::PlayerSelection selection;
+  selection.has_world = true;
   selection.world = 1;
   selection.a = ArvBlockPos{0, 0, 0};
 
@@ -40,7 +42,8 @@ TEST(MasonSelectionTests, RejectsIncompleteSelection) {
 }
 
 TEST(MasonSelectionTests, SingleBlockSelectionCountsAsOne) {
-  arv_mason::MasonSelection selection;
+  arv::PlayerSelection selection;
+  selection.has_world = true;
   selection.world = 1;
   selection.a = ArvBlockPos{-3, 8, 11};
   selection.b = ArvBlockPos{-3, 8, 11};

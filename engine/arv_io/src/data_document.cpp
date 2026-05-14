@@ -1,9 +1,9 @@
-#include "arv/data/document.hpp"
+#include "arv/io/data_document.hpp"
 
 #include <limits>
 #include <utility>
 
-namespace arv::data {
+namespace arv::io {
 
 std::string DataDiagnostic::describe() const {
   return path + ": " + message;
@@ -208,6 +208,120 @@ DataValue& DataValue::set(std::string key, DataValue value) {
   return iter->second;
 }
 
+Expected<bool, DataDiagnostic> DataDocument::bool_value(std::string_view path) const {
+  DataDiagnostic diagnostic;
+  const DataValue* value = find_path(*this, path, &diagnostic);
+  if (value == nullptr) {
+    return Expected<bool, DataDiagnostic>::failure(std::move(diagnostic));
+  }
+  if (value->kind() != DataKind::Bool) {
+    return Expected<bool, DataDiagnostic>::failure(
+        {std::string{"root."} + std::string{path}, "data value is not a bool"});
+  }
+  return Expected<bool, DataDiagnostic>::success(value->as_bool_or(false));
+}
+
+bool DataDocument::bool_value(std::string_view path, bool fallback) const {
+  auto result = bool_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<i64, DataDiagnostic> DataDocument::i64_value(std::string_view path) const {
+  DataDiagnostic diagnostic;
+  const DataValue* value = find_path(*this, path, &diagnostic);
+  if (value == nullptr) {
+    return Expected<i64, DataDiagnostic>::failure(std::move(diagnostic));
+  }
+  if (value->kind() != DataKind::I64 && value->kind() != DataKind::U64) {
+    return Expected<i64, DataDiagnostic>::failure(
+        {std::string{"root."} + std::string{path}, "data value is not an integer"});
+  }
+  return Expected<i64, DataDiagnostic>::success(value->as_i64_or(0));
+}
+
+i64 DataDocument::i64_value(std::string_view path, i64 fallback) const {
+  auto result = i64_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<u64, DataDiagnostic> DataDocument::u64_value(std::string_view path) const {
+  DataDiagnostic diagnostic;
+  const DataValue* value = find_path(*this, path, &diagnostic);
+  if (value == nullptr) {
+    return Expected<u64, DataDiagnostic>::failure(std::move(diagnostic));
+  }
+  if (value->kind() != DataKind::I64 && value->kind() != DataKind::U64) {
+    return Expected<u64, DataDiagnostic>::failure(
+        {std::string{"root."} + std::string{path}, "data value is not an integer"});
+  }
+  return Expected<u64, DataDiagnostic>::success(value->as_u64_or(0));
+}
+
+u64 DataDocument::u64_value(std::string_view path, u64 fallback) const {
+  auto result = u64_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<f64, DataDiagnostic> DataDocument::f64_value(std::string_view path) const {
+  DataDiagnostic diagnostic;
+  const DataValue* value = find_path(*this, path, &diagnostic);
+  if (value == nullptr) {
+    return Expected<f64, DataDiagnostic>::failure(std::move(diagnostic));
+  }
+  if (value->kind() != DataKind::I64 && value->kind() != DataKind::U64 &&
+      value->kind() != DataKind::F64) {
+    return Expected<f64, DataDiagnostic>::failure(
+        {std::string{"root."} + std::string{path}, "data value is not numeric"});
+  }
+  return Expected<f64, DataDiagnostic>::success(value->as_f64_or(0.0));
+}
+
+f64 DataDocument::f64_value(std::string_view path, f64 fallback) const {
+  auto result = f64_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<std::string_view, DataDiagnostic> DataDocument::string_value(std::string_view path) const {
+  DataDiagnostic diagnostic;
+  const DataValue* value = find_path(*this, path, &diagnostic);
+  if (value == nullptr) {
+    return Expected<std::string_view, DataDiagnostic>::failure(std::move(diagnostic));
+  }
+  if (value->kind() != DataKind::String) {
+    return Expected<std::string_view, DataDiagnostic>::failure(
+        {std::string{"root."} + std::string{path}, "data value is not a string"});
+  }
+  return Expected<std::string_view, DataDiagnostic>::success(value->as_string_or({}));
+}
+
+std::string_view DataDocument::string_value(
+    std::string_view path,
+    std::string_view fallback) const {
+  auto result = string_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<std::span<const u8>, DataDiagnostic> DataDocument::bytes_value(std::string_view path) const {
+  DataDiagnostic diagnostic;
+  const DataValue* value = find_path(*this, path, &diagnostic);
+  if (value == nullptr) {
+    return Expected<std::span<const u8>, DataDiagnostic>::failure(std::move(diagnostic));
+  }
+  const DataValue::Bytes* bytes = value->bytes_if();
+  if (bytes == nullptr) {
+    return Expected<std::span<const u8>, DataDiagnostic>::failure(
+        {std::string{"root."} + std::string{path}, "data value is not bytes"});
+  }
+  return Expected<std::span<const u8>, DataDiagnostic>::success(std::span<const u8>{*bytes});
+}
+
+std::span<const u8> DataDocument::bytes_value(
+    std::string_view path,
+    std::span<const u8> fallback) const {
+  auto result = bytes_value(path);
+  return result ? result.value() : fallback;
+}
+
 std::string data_kind_name(DataKind kind) {
   switch (kind) {
     case DataKind::Null:
@@ -327,4 +441,4 @@ DataPathResult set_path(
   return DataPathResult::success();
 }
 
-} // namespace arv::data
+} // namespace arv::io

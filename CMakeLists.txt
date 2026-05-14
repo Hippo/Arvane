@@ -141,13 +141,6 @@ if(ARVANE_BUILD_TESTS)
   # For Windows: Prevent overriding the parent project's compiler/linker settings
   set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
-
-  add_subdirectory(plugins)
-  add_subdirectory(tests)
-endif()
-
-if(NOT ARVANE_BUILD_TESTS)
-  add_subdirectory(plugins)
 endif()
 
 if(ARVANE_BUILD_BENCHMARKS)
@@ -163,10 +156,14 @@ if(ARVANE_BUILD_BENCHMARKS)
 endif()
 
 add_subdirectory(engine)
+add_subdirectory(plugins)
 if(ARVANE_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 add_subdirectory(apps)
+if(ARVANE_BUILD_TESTS)
+  add_subdirectory(tests)
+endif()
 option(ARVANE_BUILD_SDK_EXAMPLES "Build standalone SDK examples" ON)
 if(ARVANE_BUILD_SDK_EXAMPLES)
   add_subdirectory(examples/plugins)

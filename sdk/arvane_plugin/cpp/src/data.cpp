@@ -129,54 +129,104 @@ Result DataDocument::set_object(std::string_view path) const {
   return Result{api_->data->set_object(api_->data_ctx, handle_, view(path))};
 }
 
-ValueResult<bool> DataDocument::bool_value(std::string_view path) const {
+Expected<bool, Result> DataDocument::bool_value(std::string_view path) const {
   bool value{};
   if (!valid() || api_->data->get_bool == nullptr) {
-    return {Result::unsupported("data API is unavailable"), value};
+    return Expected<bool, Result>::failure(Result::unsupported("data API is unavailable"));
   }
-  return {Result{api_->data->get_bool(api_->data_ctx, handle_, view(path), &value)}, value};
+  Result result{api_->data->get_bool(api_->data_ctx, handle_, view(path), &value)};
+  return result ? Expected<bool, Result>::success(value)
+                : Expected<bool, Result>::failure(result);
 }
 
-ValueResult<std::int64_t> DataDocument::i64_value(std::string_view path) const {
+bool DataDocument::bool_value(std::string_view path, bool fallback) const {
+  auto result = bool_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<std::int64_t, Result> DataDocument::i64_value(std::string_view path) const {
   std::int64_t value{};
   if (!valid() || api_->data->get_i64 == nullptr) {
-    return {Result::unsupported("data API is unavailable"), value};
+    return Expected<std::int64_t, Result>::failure(
+        Result::unsupported("data API is unavailable"));
   }
-  return {Result{api_->data->get_i64(api_->data_ctx, handle_, view(path), &value)}, value};
+  Result result{api_->data->get_i64(api_->data_ctx, handle_, view(path), &value)};
+  return result ? Expected<std::int64_t, Result>::success(value)
+                : Expected<std::int64_t, Result>::failure(result);
 }
 
-ValueResult<std::uint64_t> DataDocument::u64_value(std::string_view path) const {
+std::int64_t DataDocument::i64_value(std::string_view path, std::int64_t fallback) const {
+  auto result = i64_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<std::uint64_t, Result> DataDocument::u64_value(std::string_view path) const {
   std::uint64_t value{};
   if (!valid() || api_->data->get_u64 == nullptr) {
-    return {Result::unsupported("data API is unavailable"), value};
+    return Expected<std::uint64_t, Result>::failure(
+        Result::unsupported("data API is unavailable"));
   }
-  return {Result{api_->data->get_u64(api_->data_ctx, handle_, view(path), &value)}, value};
+  Result result{api_->data->get_u64(api_->data_ctx, handle_, view(path), &value)};
+  return result ? Expected<std::uint64_t, Result>::success(value)
+                : Expected<std::uint64_t, Result>::failure(result);
 }
 
-ValueResult<double> DataDocument::f64_value(std::string_view path) const {
+std::uint64_t DataDocument::u64_value(
+    std::string_view path,
+    std::uint64_t fallback) const {
+  auto result = u64_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<double, Result> DataDocument::f64_value(std::string_view path) const {
   double value{};
   if (!valid() || api_->data->get_f64 == nullptr) {
-    return {Result::unsupported("data API is unavailable"), value};
+    return Expected<double, Result>::failure(Result::unsupported("data API is unavailable"));
   }
-  return {Result{api_->data->get_f64(api_->data_ctx, handle_, view(path), &value)}, value};
+  Result result{api_->data->get_f64(api_->data_ctx, handle_, view(path), &value)};
+  return result ? Expected<double, Result>::success(value)
+                : Expected<double, Result>::failure(result);
 }
 
-ValueResult<std::string_view> DataDocument::string_value(std::string_view path) const {
+double DataDocument::f64_value(std::string_view path, double fallback) const {
+  auto result = f64_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<std::string_view, Result> DataDocument::string_value(std::string_view path) const {
   ArvStringView value{};
   if (!valid() || api_->data->get_string == nullptr) {
-    return {Result::unsupported("data API is unavailable"), {}};
+    return Expected<std::string_view, Result>::failure(
+        Result::unsupported("data API is unavailable"));
   }
-  return {
-      Result{api_->data->get_string(api_->data_ctx, handle_, view(path), &value)},
-      view(value)};
+  Result result{api_->data->get_string(api_->data_ctx, handle_, view(path), &value)};
+  return result ? Expected<std::string_view, Result>::success(view(value))
+                : Expected<std::string_view, Result>::failure(result);
 }
 
-ValueResult<ArvBytesView> DataDocument::bytes_value(std::string_view path) const {
+std::string_view DataDocument::string_value(
+    std::string_view path,
+    std::string_view fallback) const {
+  auto result = string_value(path);
+  return result ? result.value() : fallback;
+}
+
+Expected<ArvBytesView, Result> DataDocument::bytes_value(std::string_view path) const {
   ArvBytesView value{};
   if (!valid() || api_->data->get_bytes == nullptr) {
-    return {Result::unsupported("data API is unavailable"), value};
+    return Expected<ArvBytesView, Result>::failure(
+        Result::unsupported("data API is unavailable"));
   }
-  return {Result{api_->data->get_bytes(api_->data_ctx, handle_, view(path), &value)}, value};
+  Result result{api_->data->get_bytes(api_->data_ctx, handle_, view(path), &value)};
+  return result ? Expected<ArvBytesView, Result>::success(value)
+                : Expected<ArvBytesView, Result>::failure(result);
+}
+
+ArvBytesView DataDocument::bytes_value(
+    std::string_view path,
+    ArvBytesView fallback) const {
+  auto result = bytes_value(path);
+  return result ? result.value() : fallback;
 }
 
 Data::Data(const ArvAPI* api) noexcept : api_(api) {

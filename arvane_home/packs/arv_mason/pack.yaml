@@ -3,7 +3,7 @@ schema_version: 1
 id: "arv_mason"
 display_name: "Mason"
 version: "0.1.0"
-description: "First-party Arvane world editing and blueprint authoring tools."
+description: "First-party Arvane world editing tools."
 
 authors:
   - "Arvane"

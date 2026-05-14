@@ -4,9 +4,6 @@ nodes:
   - id: mason.command.use
     description: Use Mason commands.
     default: unset
-  - id: mason.command.select
-    description: Set and inspect Mason selections.
-    default: unset
   - id: mason.command.set
     description: Fill Mason selections.
     default: unset
@@ -24,21 +21,6 @@ nodes:
     default: unset
   - id: mason.command.redo
     description: Redo Mason edits.
-    default: unset
-  - id: mason.command.blueprint.save
-    description: Save Mason blueprints.
-    default: unset
-  - id: mason.command.blueprint.load
-    description: Load Mason blueprints.
-    default: unset
-  - id: mason.command.blueprint.paste
-    description: Paste Mason blueprints.
-    default: unset
-  - id: mason.command.blueprint.list
-    description: List Mason blueprints.
-    default: unset
-  - id: mason.command.blueprint.info
-    description: Inspect Mason blueprints.
     default: unset
   - id: mason.limit.bypass
     description: Bypass Mason operation limits.

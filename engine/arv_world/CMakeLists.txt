@@ -36,4 +36,4 @@ add_library(arv_world STATIC
 )
 target_include_directories(arv_world PUBLIC include)
 target_link_libraries(arv_world PUBLIC arv_core arv_entity arv_physics arv_player arv_voxel EnTT::EnTT)
-target_link_libraries(arv_world PRIVATE yaml-cpp FastNoise2)
+target_link_libraries(arv_world PRIVATE arv_io FastNoise2)

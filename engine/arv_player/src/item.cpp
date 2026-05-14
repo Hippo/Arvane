@@ -1,19 +1,24 @@
 #include "arv/player/item.hpp"
 
 #include "arv/core/time.hpp"
+#include "arv/io/data_codecs.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 namespace arv::player {
 
 namespace {
 
 constexpr std::string_view MissingTextureAsset = "arvane:texture/missing";
+
+[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
+  return value.kind() == io::DataKind::I64 ||
+         value.kind() == io::DataKind::U64 ||
+         value.kind() == io::DataKind::F64;
+}
 
 bool item_name_less(const ItemDefinition& lhs, const ItemDefinition& rhs) {
   if (lhs.name == AirItemName) {
@@ -200,38 +205,38 @@ Expected<HeldItemAnimationPlayCondition, ItemRegistryError> parse_held_item_anim
 }
 
 Expected<HeldItemAnimationBinding, ItemRegistryError> parse_held_item_animation_binding(
-    const nlohmann::json& animation,
+    const io::DataValue& animation,
     std::string_view item_name,
     std::string_view action) {
   const std::string context =
       "held_animations." + std::string{action} + " for " + std::string{item_name};
   HeldItemAnimationBinding binding;
 
-  if (animation.is_null()) {
+  if (animation.kind() == io::DataKind::Null) {
     binding.selection = HeldItemAnimationSelection::Disabled;
     return Expected<HeldItemAnimationBinding, ItemRegistryError>::success(std::move(binding));
   }
-  if (animation.is_string()) {
+  if (animation.kind() == io::DataKind::String) {
     binding.selection = HeldItemAnimationSelection::Named;
-    binding.animation = animation.get<std::string>();
+    binding.animation = std::string{animation.as_string_or({})};
     if (binding.animation.empty()) {
       return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
           {context + " animation must be non-empty"});
     }
     return Expected<HeldItemAnimationBinding, ItemRegistryError>::success(std::move(binding));
   }
-  if (!animation.is_object()) {
+  if (animation.kind() != io::DataKind::Object) {
     return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
         {context + " must be a string, null, or object"});
   }
 
-  if (const auto animation_iter = animation.find("animation");
-      animation_iter != animation.end()) {
-    if (animation_iter->is_null()) {
+  if (const io::DataValue* animation_iter = animation.get("animation");
+      animation_iter != nullptr) {
+    if (animation_iter->kind() == io::DataKind::Null) {
       binding.selection = HeldItemAnimationSelection::Disabled;
-    } else if (animation_iter->is_string()) {
+    } else if (animation_iter->kind() == io::DataKind::String) {
       binding.selection = HeldItemAnimationSelection::Named;
-      binding.animation = animation_iter->get<std::string>();
+      binding.animation = std::string{animation_iter->as_string_or({})};
       if (binding.animation.empty()) {
         return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
             {context + ".animation must be non-empty"});
@@ -242,14 +247,14 @@ Expected<HeldItemAnimationBinding, ItemRegistryError> parse_held_item_animation_
     }
   }
 
-  if (const auto play_when_iter = animation.find("play_when");
-      play_when_iter != animation.end()) {
-    if (!play_when_iter->is_string()) {
+  if (const io::DataValue* play_when_iter = animation.get("play_when");
+      play_when_iter != nullptr) {
+    if (play_when_iter->kind() != io::DataKind::String) {
       return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(
           {context + ".play_when must be a string"});
     }
     auto condition = parse_held_item_animation_play_condition(
-        play_when_iter->get<std::string>(),
+        play_when_iter->as_string_or({}),
         context);
     if (!condition) {
       return Expected<HeldItemAnimationBinding, ItemRegistryError>::failure(condition.error());
@@ -522,134 +527,140 @@ ItemDefinition make_missing_item_definition() {
 
 Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_json(
     std::string_view text) {
-  try {
-    const nlohmann::json root = nlohmann::json::parse(text.begin(), text.end());
-    const nlohmann::json* items = &root;
-    if (root.is_object()) {
-      const auto found = root.find("items");
-      if (found == root.end()) {
-        return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
-            {"item definition JSON object must contain items array"});
-      }
-      items = &(*found);
-    }
-    if (!items->is_array()) {
+  auto decoded = io::decode_json_value(text);
+  if (!decoded) {
+    return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+        {"failed to parse item definitions JSON: " + decoded.error().describe()});
+  }
+  const io::DataValue& root = decoded.value().root;
+  const io::DataValue* items = &root;
+  if (root.kind() == io::DataKind::Object) {
+    const io::DataValue* found = root.get("items");
+    if (found == nullptr) {
       return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
-          {"item definitions must be a JSON array"});
+          {"item definition JSON object must contain items array"});
     }
+    items = found;
+  }
+  const io::DataValue::Array* item_array = items->array_if();
+  if (item_array == nullptr) {
+    return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+        {"item definitions must be a JSON array"});
+  }
 
-    std::vector<ItemDefinition> definitions;
-    definitions.reserve(items->size());
-    for (const nlohmann::json& item : *items) {
-      if (!item.is_object()) {
+  std::vector<ItemDefinition> definitions;
+  definitions.reserve(item_array->size());
+  for (const io::DataValue& item : *item_array) {
+      if (item.kind() != io::DataKind::Object) {
         return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
             {"item definition entry must be an object"});
       }
 
-      const auto name_iter = item.find("name");
-      if (name_iter == item.end() || !name_iter->is_string()) {
+      const io::DataValue* name_iter = item.get("name");
+      if (name_iter == nullptr || name_iter->kind() != io::DataKind::String) {
         return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
             {"item definition is missing string field name"});
       }
 
       ItemDefinition definition;
-      definition.name = name_iter->get<std::string>();
+      definition.name = std::string{name_iter->as_string_or({})};
 
-      const auto display_iter = item.find("display_name");
-      if (display_iter != item.end()) {
-        definition.display_name = display_iter->get<std::string>();
+      const io::DataValue* display_iter = item.get("display_name");
+      if (display_iter != nullptr) {
+        definition.display_name = std::string{display_iter->as_string_or({})};
       }
-      const auto behavior_iter = item.find("behavior");
-      if (behavior_iter != item.end()) {
-        if (!behavior_iter->is_string()) {
+      const io::DataValue* behavior_iter = item.get("behavior");
+      if (behavior_iter != nullptr) {
+        if (behavior_iter->kind() != io::DataKind::String) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
               {"behavior must be a string for " + definition.name});
         }
-        definition.behavior_id = behavior_iter->get<std::string>();
+        definition.behavior_id = std::string{behavior_iter->as_string_or({})};
         if (definition.behavior_id.empty()) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
               {"behavior must be non-empty for " + definition.name});
         }
       }
-      const auto category_iter = item.find("category");
-      if (category_iter != item.end()) {
-        definition.category = category_iter->get<std::string>();
+      const io::DataValue* category_iter = item.get("category");
+      if (category_iter != nullptr) {
+        definition.category = std::string{category_iter->as_string_or({})};
       }
-      const auto stack_iter = item.find("max_stack_size");
-      if (stack_iter != item.end()) {
-        definition.max_stack_size = stack_iter->get<u16>();
+      const io::DataValue* stack_iter = item.get("max_stack_size");
+      if (stack_iter != nullptr) {
+        definition.max_stack_size = static_cast<u16>(stack_iter->as_u64_or(definition.max_stack_size));
       }
-      const auto render_type_iter = item.find("render_type");
-      if (render_type_iter != item.end()) {
-        if (!render_type_iter->is_string()) {
+      const io::DataValue* render_type_iter = item.get("render_type");
+      if (render_type_iter != nullptr) {
+        if (render_type_iter->kind() != io::DataKind::String) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
               {"render_type must be a string for " + definition.name});
         }
-        auto render_type = parse_item_render_type(render_type_iter->get<std::string>());
+        auto render_type = parse_item_render_type(render_type_iter->as_string_or({}));
         if (!render_type) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(render_type.error());
         }
         definition.explicit_render_type = render_type.value();
       }
-      const auto texture_iter = item.find("texture");
-      if (texture_iter != item.end()) {
-        definition.texture_asset = texture_iter->get<std::string>();
+      const io::DataValue* texture_iter = item.get("texture");
+      if (texture_iter != nullptr) {
+        definition.texture_asset = std::string{texture_iter->as_string_or({})};
       }
-      const auto model_iter = item.find("model");
-      if (model_iter != item.end()) {
-        definition.model_asset = model_iter->get<std::string>();
+      const io::DataValue* model_iter = item.get("model");
+      if (model_iter != nullptr) {
+        definition.model_asset = std::string{model_iter->as_string_or({})};
       }
-      const auto places_block_iter = item.find("places_block");
-      if (places_block_iter != item.end()) {
-        definition.places_block = places_block_iter->get<std::string>();
+      const io::DataValue* places_block_iter = item.get("places_block");
+      if (places_block_iter != nullptr) {
+        definition.places_block = std::string{places_block_iter->as_string_or({})};
       }
-      const auto buoyancy_iter = item.find("buoyancy");
-      if (buoyancy_iter != item.end()) {
-        if (!buoyancy_iter->is_number()) {
+      const io::DataValue* buoyancy_iter = item.get("buoyancy");
+      if (buoyancy_iter != nullptr) {
+        if (!is_number(*buoyancy_iter)) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
               {"buoyancy must be a number for " + definition.name});
         }
-        definition.buoyancy = buoyancy_iter->get<f32>();
+        definition.buoyancy = static_cast<f32>(buoyancy_iter->as_f64_or(definition.buoyancy));
         definition.buoyancy_set = true;
       }
-      const auto tool_iter = item.find("tool");
-      if (tool_iter != item.end()) {
-        if (!tool_iter->is_object()) {
+      const io::DataValue* tool_iter = item.get("tool");
+      if (tool_iter != nullptr) {
+        if (tool_iter->kind() != io::DataKind::Object) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
               {"tool must be an object for " + definition.name});
         }
-        const auto category_iter = tool_iter->find("category");
-        if (category_iter != tool_iter->end()) {
-          if (!category_iter->is_string()) {
+        const io::DataValue* category_iter = tool_iter->get("category");
+        if (category_iter != nullptr) {
+          if (category_iter->kind() != io::DataKind::String) {
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 {"tool.category must be a string for " + definition.name});
           }
-          definition.tool_category = category_iter->get<std::string>();
+          definition.tool_category = std::string{category_iter->as_string_or({})};
         }
-        const auto speed_iter = tool_iter->find("break_speed_multiplier");
-        if (speed_iter != tool_iter->end()) {
-          definition.tool_break_speed_multiplier = speed_iter->get<f32>();
+        const io::DataValue* speed_iter = tool_iter->get("break_speed_multiplier");
+        if (speed_iter != nullptr) {
+          definition.tool_break_speed_multiplier =
+              static_cast<f32>(speed_iter->as_f64_or(definition.tool_break_speed_multiplier));
         }
       }
-      const auto components_iter = item.find("components");
-      if (components_iter != item.end()) {
-        if (!components_iter->is_object()) {
+      const io::DataValue* components_iter = item.get("components");
+      if (components_iter != nullptr) {
+        if (components_iter->kind() != io::DataKind::Object) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
               {"components must be an object for " + definition.name});
         }
-        const auto damage_iter = components_iter->find("damage");
-        if (damage_iter != components_iter->end()) {
-          if (!damage_iter->is_object()) {
+        const io::DataValue* damage_iter = components_iter->get("damage");
+        if (damage_iter != nullptr) {
+          if (damage_iter->kind() != io::DataKind::Object) {
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 {"components.damage must be an object for " + definition.name});
           }
-          const auto amount_iter = damage_iter->find("amount");
-          const auto range_iter = damage_iter->find("range");
-          if (amount_iter == damage_iter->end() || !amount_iter->is_number()) {
+          const io::DataValue* amount_iter = damage_iter->get("amount");
+          const io::DataValue* range_iter = damage_iter->get("range");
+          if (amount_iter == nullptr || !is_number(*amount_iter)) {
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 {"components.damage.amount must be a number for " + definition.name});
           }
-          if (range_iter == damage_iter->end() || !range_iter->is_number()) {
+          if (range_iter == nullptr || !is_number(*range_iter)) {
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 {"components.damage.range must be a number for " + definition.name});
           }
@@ -657,19 +668,19 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
           f32 vertical_knockback = 0.0F;
           f32 sprint_knockback_bonus = 0.0F;
           const auto read_knockback_field =
-              [&](const nlohmann::json& source,
+              [&](const io::DataValue& source,
                   std::string_view field,
                   f32& value) -> std::optional<ItemRegistryError> {
-            const auto iter = source.find(std::string{field});
-            if (iter == source.end()) {
+            const io::DataValue* iter = source.get(field);
+            if (iter == nullptr) {
               return std::nullopt;
             }
-            if (!iter->is_number()) {
+            if (!is_number(*iter)) {
               return ItemRegistryError{
                   "components.damage." + std::string{field} +
                   " must be a number for " + definition.name};
             }
-            value = iter->get<f32>();
+            value = static_cast<f32>(iter->as_f64_or(value));
             return std::nullopt;
           };
           if (const std::optional<ItemRegistryError> error =
@@ -699,25 +710,25 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 error.value());
           }
-          const auto knockback_iter = components_iter->find("knockback");
-          if (knockback_iter != components_iter->end()) {
-            if (!knockback_iter->is_object()) {
+          const io::DataValue* knockback_iter = components_iter->get("knockback");
+          if (knockback_iter != nullptr) {
+            if (knockback_iter->kind() != io::DataKind::Object) {
               return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                   {"components.knockback must be an object for " + definition.name});
             }
             const auto read_named_knockback_field =
                 [&](std::string_view field,
                     f32& value) -> std::optional<ItemRegistryError> {
-              const auto iter = knockback_iter->find(std::string{field});
-              if (iter == knockback_iter->end()) {
+              const io::DataValue* iter = knockback_iter->get(field);
+              if (iter == nullptr) {
                 return std::nullopt;
               }
-              if (!iter->is_number()) {
+              if (!is_number(*iter)) {
                 return ItemRegistryError{
                     "components.knockback." + std::string{field} +
                     " must be a number for " + definition.name};
               }
-              value = iter->get<f32>();
+              value = static_cast<f32>(iter->as_f64_or(value));
               return std::nullopt;
             };
             if (const std::optional<ItemRegistryError> error =
@@ -746,23 +757,26 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
             }
           }
           const f32 cooldown_seconds =
-              damage_iter->value("cooldown_seconds", 0.0F);
+              damage_iter->get("cooldown_seconds") == nullptr
+                  ? 0.0F
+                  : static_cast<f32>(damage_iter->get("cooldown_seconds")->as_f64_or(0.0));
           definition.attack_data = ItemAttackData{
-              amount_iter->get<f32>(),
-              range_iter->get<f32>(),
+              static_cast<f32>(amount_iter->as_f64_or(0.0)),
+              static_cast<f32>(range_iter->as_f64_or(0.0)),
               cooldown_ticks_from_seconds(cooldown_seconds),
               horizontal_knockback,
               vertical_knockback,
               sprint_knockback_bonus};
         }
       }
-      const auto held_animations_iter = item.find("held_animations");
-      if (held_animations_iter != item.end()) {
-        if (!held_animations_iter->is_object()) {
+      const io::DataValue* held_animations_iter = item.get("held_animations");
+      if (held_animations_iter != nullptr) {
+        const io::DataValue::Object* held_animations = held_animations_iter->object_if();
+        if (held_animations == nullptr) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
               {"held_animations must be an object for " + definition.name});
         }
-        for (const auto& [action, animation] : held_animations_iter->items()) {
+        for (const auto& [action, animation] : *held_animations) {
           if (action.empty()) {
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 {"held_animations action key must be non-empty for " + definition.name});
@@ -780,13 +794,9 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
       }
 
       definitions.push_back(std::move(definition));
-    }
-
-    return Expected<std::vector<ItemDefinition>, ItemRegistryError>::success(std::move(definitions));
-  } catch (const nlohmann::json::exception& ex) {
-    return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
-        {"failed to parse item definitions JSON: " + std::string{ex.what()}});
   }
+
+  return Expected<std::vector<ItemDefinition>, ItemRegistryError>::success(std::move(definitions));
 }
 
 } // namespace arv::player

@@ -31,6 +31,7 @@ add_executable(arv_tests
   assets/asset_tests.cpp
   assets/pack_tests.cpp
   base/base_behavior_tests.cpp
+  blueprint/blueprint_codec_tests.cpp
   client/chunk_interest_tests.cpp
   client/client_runtime_tests.cpp
   client/camera_tests.cpp
@@ -66,6 +67,7 @@ add_executable(arv_tests
   protocol/packet_tests.cpp
   player/inventory_tests.cpp
   player/permission_tests.cpp
+  player/selection_tests.cpp
   plugin/plugin_system_tests.cpp
   render/entity_model_tests.cpp
   render/item_model_tests.cpp
@@ -120,6 +122,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_asset
   arv_base
   arv_base_ui
+  arv_blueprint
   arv_client
   arv_command
   arv_core

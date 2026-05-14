@@ -308,8 +308,8 @@ Implemented ABI surface:
 * API version `1` is exposed as `ARV_API_VERSION`.
 * `pack.yaml` native metadata must declare `api_version: 1`, a C-symbol entrypoint, and a library for the current platform key.
 * Native libraries are loaded only when `native_plugins.enabled` is true and the owning pack is listed in `native_plugins.allowed_packs`.
-* Implemented API tables include context, logger, behavior registration, command executor registration, event subscription, sync/async scheduling, service publish/lookup, data resource read/debug path, structured data documents, codec-backed config, scoped persistent data, basic world/entity access, and metrics counters.
-* Network, permissions, rich text helpers, and native worldgen type registries return `Unsupported` unless the corresponding engine extension points are present.
+* Implemented API tables include context, logger, behavior registration, command executor registration, event subscription, sync/async scheduling, service publish/lookup, data resource read/debug path, structured data documents, codec-backed config, scoped persistent data, basic world/entity access, network messaging, permissions, rich text helpers, regions, game modes, player selection queries, and metrics counters.
+* APIs may return `Unsupported` when the corresponding runtime context or engine extension point is not available.
 
 Plugin author build surface:
 
@@ -328,7 +328,9 @@ target_link_libraries(example_plugin
 
 `Arvane::SDK` provides include paths, compile features, and compiled C/C++
 wrapper code for `<arv/*.h>` and `<arv/*.hpp>`. It must not pull in engine
-link libraries.
+link libraries. Shared standalone headers exported by engine modules, such as
+`arv/io/codec.hpp`, may be installed with the SDK when they do not expose
+runtime engine internals.
 
 C++ plugin entrypoint:
 
@@ -557,6 +559,37 @@ Rules:
 * plugins must not store raw pointers to chunks, sections, block arrays, or lighting buffers
 * block and biome identities should be resolved through registries and resource IDs
 * world writes may be queued by the engine even when exposed as simple calls
+
+---
+
+## Player API
+
+The player API exposes controlled player-scoped state without exposing
+`PlayerState` layout.
+
+SDK ABI shape:
+
+```cpp
+typedef struct ArvPlayerSelection {
+    uint32_t flags;
+    ArvWorldHandle world;
+    ArvBlockPos a;
+    ArvBlockPos b;
+} ArvPlayerSelection;
+
+typedef struct ArvPlayersAPI {
+    ArvResult (*current_selection)(
+        void* ctx,
+        ArvPlayerID player,
+        ArvPlayerSelection* out_selection);
+} ArvPlayersAPI;
+```
+
+Rules:
+
+* calls that inspect live player state must occur on the sync simulation context
+* absent selection fields are represented by flags rather than sentinel block positions
+* plugins should treat the selection as current gameplay state, not as plugin-owned persistent data
 
 ---
 

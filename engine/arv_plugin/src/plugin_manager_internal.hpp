@@ -186,6 +186,7 @@ struct PluginAPIStorage {
   ArvPermissionsAPI permissions_api{};
   ArvRegionsAPI regions_api{};
   ArvGameModeAPI game_modes_api{};
+  ArvPlayersAPI players_api{};
   ArvAPI api{};
 };
 
@@ -381,5 +382,6 @@ void fill_permission_api(PluginAPIStorage& storage);
 void fill_region_api(PluginAPIStorage& storage);
 void fill_game_mode_api(PluginAPIStorage& storage);
 void fill_network_api(PluginAPIStorage& storage);
+void fill_player_api(PluginAPIStorage& storage);
 
 } // namespace arv::plugin

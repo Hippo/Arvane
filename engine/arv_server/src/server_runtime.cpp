@@ -2,6 +2,7 @@
 
 #include "arv/command/server_command_services.hpp"
 #include "arv/crypto/random.hpp"
+#include "arv/io/files.hpp"
 #include "arv/text/language.hpp"
 #include "arv/core/log.hpp"
 #include "arv/server/server_commands.hpp"
@@ -9,9 +10,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
+#include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace arv::server {
 namespace {
@@ -93,6 +99,135 @@ namespace {
     (void)world.set_entity_position(entity_id.value(), position);
   }
 
+  return true;
+}
+
+[[nodiscard]] command::PlayerBlockSelection command_selection_from_player(
+    const player::PlayerSelection& selection) {
+  return {selection.world, selection.a, selection.b};
+}
+
+[[nodiscard]] player::PlayerSelection player_selection_from_command(
+    const command::PlayerBlockSelection& selection) {
+  return {selection.world, selection.a, selection.b};
+}
+
+[[nodiscard]] bool safe_blueprint_file_name_char(char c) noexcept {
+  const bool ascii_alnum =
+      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9');
+  return ascii_alnum || c == '_' || c == '-' || c == '.';
+}
+
+[[nodiscard]] bool valid_blueprint_file_name(std::string_view name) noexcept {
+  if (name.empty() || name == "." || name == ".." ||
+      name.find("..") != std::string_view::npos) {
+    return false;
+  }
+  for (const char c : name) {
+    if (!safe_blueprint_file_name_char(c)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] std::filesystem::path blueprint_root_path(
+    const std::filesystem::path& server_save_root,
+    std::string_view world_name) {
+  return server_save_root / "worlds" / std::string{world_name} / "blueprints";
+}
+
+[[nodiscard]] std::filesystem::path blueprint_file_path(
+    const std::filesystem::path& server_save_root,
+    std::string_view world_name,
+    std::string_view name) {
+  return blueprint_root_path(server_save_root, world_name) /
+         (std::string{name} + ".abp");
+}
+
+[[nodiscard]] std::vector<std::string> list_blueprint_files(
+    const std::filesystem::path& server_save_root,
+    std::string_view world_name) {
+  std::vector<std::string> names;
+  if (server_save_root.empty()) {
+    return names;
+  }
+
+  std::error_code error;
+  const std::filesystem::path root =
+      blueprint_root_path(server_save_root, world_name);
+  if (!std::filesystem::is_directory(root, error) || error) {
+    return names;
+  }
+  for (const std::filesystem::directory_entry& entry :
+       std::filesystem::directory_iterator(root, error)) {
+    if (error) {
+      break;
+    }
+    if (!entry.is_regular_file(error) || error ||
+        entry.path().extension() != ".abp") {
+      error.clear();
+      continue;
+    }
+    const std::string name = entry.path().stem().string();
+    if (valid_blueprint_file_name(name)) {
+      names.push_back(name);
+    }
+  }
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
+[[nodiscard]] std::optional<std::string> load_blueprint_file(
+    const std::filesystem::path& server_save_root,
+    std::string_view world_name,
+    std::string_view name) {
+  if (server_save_root.empty() || !valid_blueprint_file_name(name)) {
+    return std::nullopt;
+  }
+  auto text = io::read_text_file_contents(
+      blueprint_file_path(server_save_root, world_name, name));
+  if (!text) {
+    return std::nullopt;
+  }
+  return std::move(text.value());
+}
+
+[[nodiscard]] bool save_blueprint_file(
+    const std::filesystem::path& server_save_root,
+    std::string_view world_name,
+    std::string_view name,
+    std::string_view text) {
+  if (server_save_root.empty() || !valid_blueprint_file_name(name)) {
+    return false;
+  }
+
+  std::error_code error;
+  const std::filesystem::path path =
+      blueprint_file_path(server_save_root, world_name, name);
+  std::filesystem::create_directories(path.parent_path(), error);
+  if (error) {
+    return false;
+  }
+
+  const std::filesystem::path temp = path.string() + ".tmp";
+  {
+    std::ofstream output(temp, std::ios::trunc);
+    if (!output) {
+      return false;
+    }
+    output << text;
+    if (!output) {
+      return false;
+    }
+  }
+  std::filesystem::rename(temp, path, error);
+  if (error) {
+    std::error_code cleanup_error;
+    std::filesystem::remove(temp, cleanup_error);
+    return false;
+  }
   return true;
 }
 
@@ -663,10 +798,95 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   auto move_player = [this](PlayerID player_id, Vec3f position) {
     return teleport_player(default_world_, player_id, position);
   };
+  auto get_selection = [this](PlayerID player_id) -> std::optional<command::PlayerBlockSelection> {
+    player::PlayerState* player_state = default_world_.find_player(player_id);
+    if (player_state == nullptr) {
+      return std::nullopt;
+    }
+    return command_selection_from_player(player_state->selection);
+  };
+  auto set_selection = [this](PlayerID player_id, const command::PlayerBlockSelection& selection) {
+    player::PlayerState* player_state = default_world_.find_player(player_id);
+    if (player_state == nullptr) {
+      return false;
+    }
+    player_state->selection = player_selection_from_command(selection);
+    return true;
+  };
+  auto read_block = [this](WorldID world_id, BlockPos pos) -> std::optional<u32> {
+    if (world_id != default_world_.id()) {
+      return std::nullopt;
+    }
+    return default_world_.get_block(pos).value;
+  };
+  auto write_block = [this](WorldID world_id, BlockPos pos, u32 block_variant) {
+    if (world_id != default_world_.id() || block_registry_ == nullptr ||
+        block_registry_->variant(voxel::BlockVariantID{block_variant}) == nullptr) {
+      return false;
+    }
+    return default_world_.set_block(pos, voxel::BlockVariantID{block_variant});
+  };
+  auto block_variant_name = [this](u32 block_variant) -> std::optional<std::string> {
+    if (block_registry_ == nullptr) {
+      return std::nullopt;
+    }
+    const voxel::BlockVariantRecord* variant =
+        block_registry_->variant(voxel::BlockVariantID{block_variant});
+    if (variant == nullptr) {
+      return std::nullopt;
+    }
+    return variant->debug_name;
+  };
+  auto block_variant_by_name = [this](std::string_view stable_id) -> std::optional<u32> {
+    if (block_registry_ == nullptr) {
+      return std::nullopt;
+    }
+    const std::optional<voxel::BlockVariantID> variant =
+        block_registry_->find_variant(stable_id);
+    if (!variant.has_value()) {
+      return std::nullopt;
+    }
+    return variant->value;
+  };
+  auto air_block_variant = [this]() -> std::optional<u32> {
+    if (block_registry_ == nullptr) {
+      return std::nullopt;
+    }
+    return block_registry_->air_variant_id().value;
+  };
+  auto list_blueprints = [this](WorldID world_id) {
+    if (world_id != default_world_.id()) {
+      return std::vector<std::string>{};
+    }
+    return list_blueprint_files(server_save_root_, world_name_);
+  };
+  auto load_blueprint = [this](WorldID world_id, std::string_view name) {
+    if (world_id != default_world_.id()) {
+      return std::optional<std::string>{};
+    }
+    return load_blueprint_file(server_save_root_, world_name_, name);
+  };
+  auto save_blueprint =
+      [this](WorldID world_id, std::string_view name, std::string_view text) {
+        if (world_id != default_world_.id()) {
+          return false;
+        }
+        return save_blueprint_file(server_save_root_, world_name_, name, text);
+      };
   command::ServerCommandServices domain_services{
       command::OnlinePlayerByIDFn{find_player_by_id},
       command::OnlinePlayerByNameFn{find_player_by_name},
       command::TeleportPlayerFn{move_player},
+      command::PlayerSelectionByIDFn{get_selection},
+      command::SetPlayerSelectionFn{set_selection},
+      command::WorldBlockReadFn{read_block},
+      command::WorldBlockWriteFn{write_block},
+      command::BlockVariantNameFn{block_variant_name},
+      command::BlockVariantByNameFn{block_variant_by_name},
+      command::AirBlockVariantFn{air_block_variant},
+      command::BlueprintListFn{list_blueprints},
+      command::BlueprintLoadFn{load_blueprint},
+      command::BlueprintSaveFn{save_blueprint},
   };
   auto permission_check =
       [this](const command::CommandSender& checked_sender, const command::Command& checked_command) {

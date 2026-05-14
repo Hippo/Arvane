@@ -7,15 +7,12 @@ set(ARV_MASON_SOURCES
   src/commands/command_utils.cpp
   src/commands/registration.cpp
   src/commands/player_state.cpp
-  src/commands/selection_commands.cpp
   src/commands/edit_commands.cpp
   src/commands/clipboard_commands.cpp
   src/commands/history_commands.cpp
-  src/commands/blueprint_commands.cpp
   src/selection/selection.cpp
   src/clipboard/clipboard.cpp
   src/operations/operation.cpp
-  src/blueprints/blueprint.cpp
   src/history/history.cpp
   src/world/block_resolution.cpp
 )
@@ -87,11 +84,9 @@ if(ARVANE_BUILD_TESTS AND TARGET GTest::gtest_main)
   add_executable(arv_mason_tests
     tests/selection_tests.cpp
     tests/operation_tests.cpp
-    tests/blueprint_codec_tests.cpp
     src/selection/selection.cpp
     src/clipboard/clipboard.cpp
     src/operations/operation.cpp
-    src/blueprints/blueprint.cpp
     src/history/history.cpp
   )
   target_include_directories(arv_mason_tests PRIVATE include)

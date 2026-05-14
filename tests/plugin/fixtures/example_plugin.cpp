@@ -91,6 +91,23 @@ void sync_job(void*) {
       player_id,
       &current_mode)) &&
       view_equals(current_mode, "survival");
+  ArvPlayerSelection selection{};
+  checks_ok = checks_ok &&
+      g_api->players != nullptr &&
+      result_ok(g_api->players->current_selection(
+          g_api->players_ctx,
+          player_id,
+          &selection)) &&
+      (selection.flags & ARV_PLAYER_SELECTION_HAS_WORLD) != 0U &&
+      (selection.flags & ARV_PLAYER_SELECTION_HAS_A) != 0U &&
+      (selection.flags & ARV_PLAYER_SELECTION_HAS_B) != 0U &&
+      selection.world == 1 &&
+      selection.a.x == 1 &&
+      selection.a.y == 2 &&
+      selection.a.z == 3 &&
+      selection.b.x == 4 &&
+      selection.b.y == 5 &&
+      selection.b.z == 6;
 
   checks_ok = checks_ok && result_ok(g_api->permissions->add_group(
       g_api->permissions_ctx,

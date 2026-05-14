@@ -22,4 +22,4 @@ add_library(arv_render STATIC
 )
 target_include_directories(arv_render PUBLIC include)
 target_link_libraries(arv_render PUBLIC arv_core arv_sched arv_voxel glad)
-target_link_libraries(arv_render PRIVATE OpenGL::GL nlohmann_json::nlohmann_json)
+target_link_libraries(arv_render PRIVATE OpenGL::GL arv_io)

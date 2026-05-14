@@ -11,4 +11,4 @@ add_library(arv_voxel STATIC
 )
 target_include_directories(arv_voxel PUBLIC include)
 target_link_libraries(arv_voxel PUBLIC arv_core)
-target_link_libraries(arv_voxel PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(arv_voxel PRIVATE arv_io)

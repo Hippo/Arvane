@@ -13,6 +13,7 @@
 #include "arv/network.h"
 #include "arv/permissions.h"
 #include "arv/persistent_data.h"
+#include "arv/players.h"
 #include "arv/registries.h"
 #include "arv/regions.h"
 #include "arv/resources.h"
@@ -89,6 +90,9 @@ typedef struct ArvAPI {
 
   void* gamemodes_ctx;
   const ArvGameModeAPI* gamemodes;
+
+  void* players_ctx;
+  const ArvPlayersAPI* players;
 } ArvAPI;
 
 typedef bool (*ArvEntrypoint)(const ArvAPI* api);

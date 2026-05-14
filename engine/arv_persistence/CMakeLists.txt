@@ -9,4 +9,4 @@ add_library(arv_persistence STATIC
 )
 target_include_directories(arv_persistence PUBLIC include)
 target_link_libraries(arv_persistence PUBLIC arv_asset arv_core arv_crypto arv_player arv_voxel arv_world)
-target_link_libraries(arv_persistence PRIVATE arv_data nlohmann_json::nlohmann_json)
+target_link_libraries(arv_persistence PRIVATE arv_data arv_io)

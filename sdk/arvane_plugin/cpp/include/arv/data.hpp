@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/api.h"
+#include "arv/core/expected.hpp"
 #include "arv/result.hpp"
 #include "arv/types.hpp"
 
@@ -66,17 +67,29 @@ public:
 
   [[nodiscard]] Result set_object(std::string_view path) const;
 
-  [[nodiscard]] ValueResult<bool> bool_value(std::string_view path) const;
+  [[nodiscard]] Expected<bool, Result> bool_value(std::string_view path) const;
+  [[nodiscard]] bool bool_value(std::string_view path, bool fallback) const;
 
-  [[nodiscard]] ValueResult<std::int64_t> i64_value(std::string_view path) const;
+  [[nodiscard]] Expected<std::int64_t, Result> i64_value(std::string_view path) const;
+  [[nodiscard]] std::int64_t i64_value(std::string_view path, std::int64_t fallback) const;
 
-  [[nodiscard]] ValueResult<std::uint64_t> u64_value(std::string_view path) const;
+  [[nodiscard]] Expected<std::uint64_t, Result> u64_value(std::string_view path) const;
+  [[nodiscard]] std::uint64_t u64_value(
+      std::string_view path,
+      std::uint64_t fallback) const;
 
-  [[nodiscard]] ValueResult<double> f64_value(std::string_view path) const;
+  [[nodiscard]] Expected<double, Result> f64_value(std::string_view path) const;
+  [[nodiscard]] double f64_value(std::string_view path, double fallback) const;
 
-  [[nodiscard]] ValueResult<std::string_view> string_value(std::string_view path) const;
+  [[nodiscard]] Expected<std::string_view, Result> string_value(std::string_view path) const;
+  [[nodiscard]] std::string_view string_value(
+      std::string_view path,
+      std::string_view fallback) const;
 
-  [[nodiscard]] ValueResult<ArvBytesView> bytes_value(std::string_view path) const;
+  [[nodiscard]] Expected<ArvBytesView, Result> bytes_value(std::string_view path) const;
+  [[nodiscard]] ArvBytesView bytes_value(
+      std::string_view path,
+      ArvBytesView fallback) const;
 
 private:
   const ArvAPI* api_{};

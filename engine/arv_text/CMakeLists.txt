@@ -11,4 +11,4 @@ add_library(arv_text STATIC
 )
 target_include_directories(arv_text PUBLIC include)
 target_link_libraries(arv_text PUBLIC arv_core)
-target_link_libraries(arv_text PRIVATE yaml-cpp)
+target_link_libraries(arv_text PRIVATE arv_io)
