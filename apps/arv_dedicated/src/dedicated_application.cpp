@@ -87,7 +87,10 @@ int DedicatedApplication::run(int argc, char** argv) {
   DedicatedRegistries registries = std::move(registries_result.value());
 
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::LoadingWorlds);
-  auto worldgen_result = load_dedicated_worldgen(config, pack_manager);
+  auto worldgen_result = load_dedicated_worldgen(
+      config,
+      pack_manager,
+      registries.block_registry);
   if (!worldgen_result) {
     return fail(worldgen_result.error());
   }

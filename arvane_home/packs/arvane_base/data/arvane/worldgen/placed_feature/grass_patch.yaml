@@ -1,0 +1,26 @@
+id: arvane:worldgen/placed_feature/grass_patch
+version: 1
+
+feature: arvane:worldgen/configured_feature/grass_patch
+salt: 46011
+
+placement:
+  stage: surface_decoration
+
+  count:
+    type: uniform
+    min: 4
+    max: 10
+
+  height:
+    type: surface
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/grassy
+
+    - type: block_below
+      blocks:
+        - arvane:grass_block
+
+    - type: replaceable

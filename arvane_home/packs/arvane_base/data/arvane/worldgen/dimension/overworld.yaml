@@ -1,0 +1,31 @@
+id: arvane:worldgen/dimension/overworld
+version: 1
+seed_salt: "overworld"
+
+vertical:
+  min_y: -32
+  max_y: 128
+  sea_level: 32
+
+generator:
+  type: arvane:generator/layered_heightmap
+
+biome_source: arvane:worldgen/biome_source/overworld
+terrain: arvane:worldgen/terrain/overworld
+surface_rule_set: arvane:worldgen/surface_rule_set/overworld
+
+carvers:
+  - arvane:worldgen/carver/caves
+
+features:
+  stages:
+    underground_ores:
+      - arvane:worldgen/placed_feature/ore_iron
+    surface_decoration:
+      - arvane:worldgen/placed_feature/grass_patch
+      - arvane:worldgen/placed_feature/oak_tree
+    structures:
+      - arvane:worldgen/placed_feature/small_ruin
+
+structure_sets:
+  - arvane:worldgen/structure_set/small_ruins

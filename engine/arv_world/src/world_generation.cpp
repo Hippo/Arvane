@@ -3,6 +3,7 @@
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/io/data_codecs.hpp"
+#include "arv/world/worldgen/chunk_generator.hpp"
 
 #include <algorithm>
 #include <array>
@@ -230,6 +231,31 @@ void read_f32(const io::DataValue& parent, const char* key, f32& value) {
 
 } // namespace
 
+WorldGenerationConfig config_from_resolved_dimension(
+    std::shared_ptr<const worldgen::ResolvedDimension> dimension) {
+  WorldGenerationConfig config;
+  if (dimension == nullptr) {
+    return config;
+  }
+  config.id = dimension->raw.id;
+  config.dimension_id = dimension->raw.id;
+  config.version = dimension->raw.version;
+  config.seed_salt = dimension->raw.seed_salt;
+  config.min_y = dimension->raw.vertical.min_y;
+  config.max_y = dimension->raw.vertical.max_y;
+  config.sea_level = dimension->raw.vertical.sea_level;
+  config.base_height = dimension->terrain.height.base;
+  config.height_scale = dimension->terrain.height.scale;
+  config.terrain_noise_type = dimension->terrain.primary_noise.type_id;
+  config.terrain_frequency = dimension->terrain.primary_noise.frequency;
+  config.terrain_octaves = dimension->terrain.primary_noise.octaves;
+  config.terrain_amplitude = dimension->terrain.primary_noise.amplitude;
+  config.terrain_lacunarity = dimension->terrain.primary_noise.lacunarity;
+  config.terrain_gain = dimension->terrain.primary_noise.gain;
+  config.resolved_dimension = std::move(dimension);
+  return config;
+}
+
 WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text) {
   WorldGenerationConfig config;
 
@@ -353,6 +379,10 @@ WorldGenerationPaletteResult resolve_world_generation_palette(
     const WorldGenerationConfig& config,
     const voxel::BlockRegistry& registry) {
   WorldGenerationPalette palette;
+  palette.resolved_dimension = config.resolved_dimension;
+  if (palette.resolved_dimension != nullptr && config.surface_layers.empty()) {
+    return WorldGenerationPaletteResult::success(std::move(palette));
+  }
   palette.surface_layers.reserve(config.surface_layers.size());
 
   bool has_remaining = false;
@@ -378,6 +408,13 @@ i32 terrain_height_at(
     u64 seed,
     i32 world_x,
     i32 world_z) noexcept {
+  if (config.resolved_dimension != nullptr) {
+    const ChunkCoord coord{floor_div(world_x, ChunkSize), floor_div(world_z, ChunkSize)};
+    const worldgen::TerrainProfile profile =
+        worldgen::generate_terrain_profile(*config.resolved_dimension, seed, coord);
+    return profile.surface_y_by_column[voxel::local_column_index(
+        {floor_mod(world_x, ChunkSize), floor_mod(world_z, ChunkSize)})];
+  }
   const TerrainNoiseSampler sampler{config, seed};
   return sampler.height_from_terrain(sampler.interpolated_terrain(world_x, world_z));
 }
@@ -386,6 +423,10 @@ GenerationSurfaceProfile terrain_height_profile_at(
     const WorldGenerationConfig& config,
     u64 seed,
     ChunkCoord coord) noexcept {
+  if (config.resolved_dimension != nullptr) {
+    return worldgen::generate_terrain_profile(*config.resolved_dimension, seed, coord)
+        .surface_y_by_column;
+  }
   const ChunkTerrainHeightCache height_cache{config, seed, coord};
   GenerationSurfaceProfile surface_y_by_column{};
   for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
@@ -428,6 +469,16 @@ GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
       core::PerfMetric::GenerationTask,
       "worker/server",
       profile_context.data()};
+  const std::shared_ptr<const worldgen::ResolvedDimension> resolved_dimension =
+      request.resolved_dimension != nullptr
+          ? request.resolved_dimension
+          : (request.palette.resolved_dimension != nullptr
+                 ? request.palette.resolved_dimension
+                 : request.config.resolved_dimension);
+  if (resolved_dimension != nullptr) {
+    return worldgen::generate_resolved_chunk(request, *resolved_dimension);
+  }
+
   if (request.palette.surface_layers.empty()) {
     return GeneratedChunkResult::failure({"chunk generation request has no resolved surface layers"});
   }

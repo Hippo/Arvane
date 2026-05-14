@@ -1,0 +1,32 @@
+id: arvane:worldgen/terrain/overworld
+version: 1
+type: arvane:terrain/heightmap
+
+height:
+  base: 8
+  scale: 28
+  detail_scale: 4
+
+noise:
+  primary:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_primary"
+    frequency: 0.012
+    octaves: 5
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  detail:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_detail"
+    frequency: 0.045
+    octaves: 2
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+biome_modifiers:
+  base_height_offset: true
+  height_scale_multiplier: true
+  roughness_multiplier: true

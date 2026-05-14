@@ -1,0 +1,15 @@
+id: arvane:worldgen/configured_feature/oak_tree
+version: 1
+type: arvane:feature/simple_tree
+
+trunk:
+  block: arvane:oak_log
+  height:
+    min: 4
+    max: 7
+
+leaves:
+  block: arvane:oak_leaves
+  radius:
+    min: 2
+    max: 3

@@ -2,6 +2,7 @@
 
 #include "arv/base/base_ids.hpp"
 #include "arv/core/log.hpp"
+#include "arv/world/worldgen/loader.hpp"
 
 #include <utility>
 
@@ -9,22 +10,26 @@ namespace arv::dedicated {
 
 Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(
     const io::EngineConfig& config,
-    const asset::PackManager& packs) {
+    const asset::PackManager& packs,
+    const voxel::BlockRegistry& block_registry) {
   (void)config;
-  auto worldgen_text = packs.load_data_text(base::ids::OverworldWorldgenDataID, ".yaml");
-  if (!worldgen_text) {
+  auto registry = world::worldgen::load_worldgen_registry_from_packs(packs);
+  if (!registry) {
     return Expected<DedicatedWorldgen, DedicatedError>::failure(
-        dedicated_error("worldgen", worldgen_text.error().describe()));
+        dedicated_error("worldgen", registry.error().describe()));
   }
 
-  auto worldgen_config = world::parse_world_generation_yaml(worldgen_text.value());
-  if (!worldgen_config) {
+  auto resolved = world::worldgen::resolve_dimension(
+      registry.value(),
+      base::ids::OverworldWorldgenDataID,
+      block_registry);
+  if (!resolved) {
     return Expected<DedicatedWorldgen, DedicatedError>::failure(
-        dedicated_error("worldgen", worldgen_config.error().message));
+        dedicated_error("worldgen", resolved.error().describe()));
   }
 
   DedicatedWorldgen worldgen;
-  worldgen.default_config = std::move(worldgen_config.value());
+  worldgen.default_config = world::config_from_resolved_dimension(std::move(resolved.value()));
   core::info(
       "dedicated",
       "loaded worldgen preset: id={} y=[{}, {}] sea_level={}",
@@ -39,6 +44,11 @@ Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(
 Expected<world::WorldGenerationPalette, DedicatedError> resolve_dedicated_worldgen_palette(
     const world::WorldGenerationConfig& config,
     const voxel::BlockRegistry& block_registry) {
+  if (config.resolved_dimension != nullptr) {
+    world::WorldGenerationPalette palette;
+    palette.resolved_dimension = config.resolved_dimension;
+    return Expected<world::WorldGenerationPalette, DedicatedError>::success(std::move(palette));
+  }
   auto worldgen_palette = world::resolve_world_generation_palette(config, block_registry);
   if (!worldgen_palette) {
     return Expected<world::WorldGenerationPalette, DedicatedError>::failure(

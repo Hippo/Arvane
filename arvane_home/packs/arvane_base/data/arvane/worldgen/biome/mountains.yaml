@@ -1,0 +1,26 @@
+id: arvane:worldgen/biome/mountains
+version: 1
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/temperate
+  - arvane:biome/grassy
+  - arvane:biome/mountain
+
+terrain:
+  base_height_offset: 10
+  height_scale_multiplier: 1.65
+  roughness_multiplier: 1.4
+
+surface_rule_set: arvane:worldgen/surface_rule_set/mountain
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/grass_patch
+
+colors:
+  grass: "#6A8F45"
+  foliage: "#4D7338"
+  water: "#3F76E4"
+  fog: "#D4DDE8"

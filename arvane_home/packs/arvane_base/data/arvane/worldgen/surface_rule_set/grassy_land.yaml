@@ -1,0 +1,26 @@
+id: arvane:worldgen/surface_rule_set/grassy_land
+version: 1
+
+rules:
+  - when:
+      above_sea_level: true
+      slope_less_than: 0.75
+    layers:
+      - block: arvane:grass_block
+        depth: 1
+      - block: arvane:dirt
+        depth: 3
+      - block: arvane:stone
+        depth: remaining
+
+  - when:
+      below_sea_level: true
+    layers:
+      - block: arvane:sand
+        depth: 3
+      - block: arvane:stone
+        depth: remaining
+
+  - layers:
+      - block: arvane:stone
+        depth: remaining

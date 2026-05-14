@@ -17,7 +17,8 @@ struct DedicatedWorldgen {
 
 [[nodiscard]] Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(
     const io::EngineConfig& config,
-    const asset::PackManager& packs);
+    const asset::PackManager& packs,
+    const voxel::BlockRegistry& block_registry);
 
 [[nodiscard]] Expected<world::WorldGenerationPalette, DedicatedError>
 resolve_dedicated_worldgen_palette(

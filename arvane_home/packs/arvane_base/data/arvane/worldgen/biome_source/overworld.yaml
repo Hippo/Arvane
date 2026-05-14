@@ -1,0 +1,44 @@
+id: arvane:worldgen/biome_source/overworld
+version: 1
+type: arvane:biome_source/climate_map
+
+noise: arvane:worldgen/noise/overworld_climate
+
+sample_scale:
+  xz: 4
+
+biomes:
+  - biome: arvane:worldgen/biome/deep_ocean
+    climate:
+      continentalness: [-1.0, -0.75]
+
+  - biome: arvane:worldgen/biome/ocean
+    climate:
+      continentalness: [-0.75, -0.45]
+
+  - biome: arvane:worldgen/biome/beach
+    climate:
+      continentalness: [-0.45, -0.35]
+
+  - biome: arvane:worldgen/biome/mountains
+    climate:
+      continentalness: [0.1, 1.0]
+      erosion: [0.55, 1.0]
+
+  - biome: arvane:worldgen/biome/desert
+    climate:
+      continentalness: [-0.35, 1.0]
+      temperature: [0.45, 1.0]
+      humidity: [-1.0, -0.25]
+
+  - biome: arvane:worldgen/biome/forest
+    climate:
+      continentalness: [-0.35, 1.0]
+      temperature: [-0.25, 0.55]
+      humidity: [0.25, 1.0]
+
+  - biome: arvane:worldgen/biome/plains
+    climate:
+      continentalness: [-0.35, 1.0]
+      temperature: [-0.35, 0.55]
+      humidity: [-0.35, 0.35]

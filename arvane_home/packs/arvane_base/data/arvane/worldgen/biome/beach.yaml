@@ -1,0 +1,21 @@
+id: arvane:worldgen/biome/beach
+version: 1
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/coast
+  - arvane:biome/beach
+  - arvane:biome/sandy
+
+terrain:
+  base_height_offset: -2
+  height_scale_multiplier: 0.35
+  roughness_multiplier: 0.25
+
+surface_rule_set: arvane:worldgen/surface_rule_set/sandy_land
+
+colors:
+  grass: "#9CA85A"
+  foliage: "#7A8A44"
+  water: "#3F76E4"
+  fog: "#DDE6FF"

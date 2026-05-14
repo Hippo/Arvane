@@ -89,6 +89,87 @@
       }
     },
     {
+      "name": "arvane:sand",
+      "buoyancy": 1.0,
+      "render_category": "opaque",
+      "tags": [
+        "arvane:mineable/shovel"
+      ],
+      "textures": "arvane:texture/block/sand",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true,
+        "ao_occluder": true,
+        "drops_with_wrong_tool": true,
+        "hardness": 0.5
+      }
+    },
+    {
+      "name": "arvane:iron_ore",
+      "buoyancy": 1.0,
+      "render_category": "opaque",
+      "tags": [
+        "arvane:mineable/pickaxe"
+      ],
+      "textures": "arvane:texture/block/coal_ore",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true,
+        "ao_occluder": true,
+        "hardness": 3.0
+      }
+    },
+    {
+      "name": "arvane:oak_log",
+      "buoyancy": 1.0,
+      "render_category": "opaque",
+      "tags": [
+        "arvane:mineable/axe"
+      ],
+      "textures": "arvane:texture/block/dirt",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true,
+        "ao_occluder": true,
+        "hardness": 2.0
+      }
+    },
+    {
+      "name": "arvane:oak_leaves",
+      "buoyancy": 1.0,
+      "render_category": "opaque",
+      "textures": "arvane:texture/block/grass_top",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true,
+        "ao_occluder": true,
+        "hardness": 0.2
+      }
+    },
+    {
+      "name": "arvane:short_grass",
+      "render_category": "transparent",
+      "textures": "arvane:texture/block/grass_top",
+      "is_item": false,
+      "properties": {
+        "replaceable": true,
+        "full_cube": false,
+        "hardness": 0.0
+      }
+    },
+    {
       "name": "arvane:stone",
       "buoyancy": 1.0,
       "render_category": "opaque",

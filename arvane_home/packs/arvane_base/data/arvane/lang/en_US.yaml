@@ -10,6 +10,16 @@ block:
       display_name: Glowstone
     grass_block:
       display_name: Grass Block
+    iron_ore:
+      display_name: Iron Ore
+    oak_leaves:
+      display_name: Oak Leaves
+    oak_log:
+      display_name: Oak Log
+    sand:
+      display_name: Sand
+    short_grass:
+      display_name: Short Grass
     stone:
       display_name: Stone
     water:
@@ -25,6 +35,16 @@ item:
       display_name: Missing Item
     coal:
       display_name: Coal
+    iron_ore:
+      display_name: Iron Ore
+    oak_leaves:
+      display_name: Oak Leaves
+    oak_log:
+      display_name: Oak Log
+    sand:
+      display_name: Sand
+    short_grass:
+      display_name: Short Grass
     wood_pickaxe:
       display_name: Wood Pickaxe
     wood_shovel:

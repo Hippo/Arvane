@@ -1,6 +1,9 @@
 #include "arv/sched/job_system.hpp"
+#include "arv/asset/pack.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
+#include "arv/world/worldgen/chunk_generator.hpp"
+#include "arv/world/worldgen/loader.hpp"
 
 #include <gtest/gtest.h>
 
@@ -17,10 +20,40 @@ arv::voxel::BlockRegistry make_worldgen_registry() {
   definitions.push_back(arv::voxel::make_full_cube_definition("arvane:dirt"));
   definitions.push_back(arv::voxel::make_full_cube_definition("arvane:grass_block"));
   definitions.push_back(arv::voxel::make_full_cube_definition("arvane:stone"));
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:sand"));
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:iron_ore"));
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:oak_log"));
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:oak_leaves"));
+  arv::voxel::BlockDefinition short_grass =
+      arv::voxel::make_full_cube_definition("arvane:short_grass");
+  short_grass.properties.replaceable = true;
+  definitions.push_back(std::move(short_grass));
+  arv::voxel::BlockDefinition water;
+  water.name = "arvane:water";
+  water.render_category = arv::voxel::RenderCategory::Transparent;
+  water.is_item = false;
+  water.properties.replaceable = true;
+  water.properties.fluid = true;
+  definitions.push_back(std::move(water));
 
   auto result = arv::voxel::BlockRegistry::build(std::move(definitions));
   EXPECT_TRUE(result);
   return std::move(result.value());
+}
+
+arv::world::WorldGenerationConfig make_pack_worldgen_config(
+    const arv::voxel::BlockRegistry& registry) {
+  auto packs = arv::asset::PackManager::load_from_packs_root("arvane_home/packs");
+  EXPECT_TRUE(packs) << packs.error().describe();
+  auto worldgen_registry =
+      arv::world::worldgen::load_worldgen_registry_from_packs(packs.value());
+  EXPECT_TRUE(worldgen_registry) << worldgen_registry.error().describe();
+  auto resolved = arv::world::worldgen::resolve_dimension(
+      worldgen_registry.value(),
+      "arvane:worldgen/dimension/overworld",
+      registry);
+  EXPECT_TRUE(resolved) << resolved.error().describe();
+  return arv::world::config_from_resolved_dimension(std::move(resolved.value()));
 }
 
 arv::world::WorldGenerationConfig make_worldgen_config() {
@@ -103,6 +136,54 @@ TEST(WorldGenerationTests, SameSeedAndChunkProduceSameOutputThroughAJob) {
   ASSERT_TRUE(first);
   ASSERT_TRUE(second);
   EXPECT_EQ(first.value().sections, second.value().sections);
+}
+
+TEST(WorldGenerationTests, LoadsPackWorldgenResourcesAndResolvesOverworld) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+
+  ASSERT_NE(config.resolved_dimension, nullptr);
+  EXPECT_EQ(config.id, "arvane:worldgen/dimension/overworld");
+  EXPECT_EQ(config.min_y, -32);
+  EXPECT_EQ(config.max_y, 128);
+  EXPECT_GE(config.resolved_dimension->biomes.size(), 7U);
+  EXPECT_GE(config.resolved_dimension->surface_rule_sets.size(), 3U);
+  EXPECT_FALSE(config.resolved_dimension->carvers.empty());
+  EXPECT_FALSE(config.resolved_dimension->placed_features.empty());
+  EXPECT_FALSE(config.resolved_dimension->structure_sets.empty());
+}
+
+TEST(WorldGenerationTests, PackWorldgenIsDeterministicAndBiomeBacked) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  auto palette = arv::world::resolve_world_generation_palette(config, registry);
+  ASSERT_TRUE(palette) << palette.error().message;
+
+  arv::world::ChunkGenerationRequest request;
+  request.world_id = arv::WorldID{1};
+  request.seed = 8181;
+  request.coord = {2, -3};
+  request.min_chunk_y = arv::floor_div(config.min_y, arv::ChunkSize);
+  request.max_chunk_y = arv::floor_div(config.max_y, arv::ChunkSize);
+  request.config = config;
+  request.palette = std::move(palette.value());
+
+  auto first = arv::world::generate_chunk(request);
+  auto second = arv::world::generate_chunk(request);
+  ASSERT_TRUE(first) << first.error().message;
+  ASSERT_TRUE(second) << second.error().message;
+  EXPECT_EQ(first.value().sections, second.value().sections);
+
+  const arv::world::worldgen::TerrainProfile profile =
+      arv::world::worldgen::generate_terrain_profile(
+          *config.resolved_dimension,
+          request.seed,
+          request.coord);
+  bool saw_biome = false;
+  for (const arv::usize biome_index : profile.biome_by_column) {
+    saw_biome = saw_biome || biome_index < config.resolved_dimension->biomes.size();
+  }
+  EXPECT_TRUE(saw_biome);
 }
 
 TEST(WorldGenerationTests, DifferentSeedsCanChangeChunkOutput) {

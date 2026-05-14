@@ -234,6 +234,7 @@ namespace {
 
   io::DataValue node = io::DataValue::object();
   node.set("id", config.id);
+  node.set("dimension_id", config.dimension_id);
   node.set("version", static_cast<u64>(config.version));
   node.set("seed_salt", config.seed_salt);
   node.set("min_y", static_cast<i64>(config.min_y));
@@ -296,6 +297,7 @@ namespace {
     const io::DataValue& node) {
   world::WorldGenerationConfig config;
   config.id = string_value_or(node, "id", std::string{});
+  config.dimension_id = string_value_or(node, "dimension_id", config.id);
   config.version = static_cast<u32>(u64_value_or(node, "version", 0U));
   config.seed_salt = string_value_or(node, "seed_salt", std::string{});
   config.min_y = static_cast<i32>(i64_value_or(node, "min_y", 0));

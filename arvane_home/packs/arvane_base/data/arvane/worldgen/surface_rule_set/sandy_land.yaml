@@ -1,0 +1,9 @@
+id: arvane:worldgen/surface_rule_set/sandy_land
+version: 1
+
+rules:
+  - layers:
+      - block: arvane:sand
+        depth: 4
+      - block: arvane:stone
+        depth: remaining

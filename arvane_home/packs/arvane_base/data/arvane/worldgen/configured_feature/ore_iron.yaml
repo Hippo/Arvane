@@ -1,0 +1,13 @@
+id: arvane:worldgen/configured_feature/ore_iron
+version: 1
+type: arvane:feature/ore_vein
+
+block: arvane:iron_ore
+
+replace:
+  blocks:
+    - arvane:stone
+
+vein_size:
+  min: 4
+  max: 9

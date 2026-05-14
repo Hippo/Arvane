@@ -1,0 +1,17 @@
+id: arvane:worldgen/surface_rule_set/ocean_floor
+version: 1
+
+rules:
+  - when:
+      underwater: true
+    layers:
+      - block: arvane:sand
+        depth: 2
+      - block: arvane:dirt
+        depth: 2
+      - block: arvane:stone
+        depth: remaining
+
+  - layers:
+      - block: arvane:stone
+        depth: remaining

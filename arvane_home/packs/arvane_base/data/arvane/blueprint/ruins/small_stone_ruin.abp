@@ -1,0 +1,16 @@
+schema_version: 1
+format: arvane:blueprint
+metadata.name: small_stone_ruin
+metadata.author: arvane
+metadata.created_by: arv_base
+size: 3 2 3
+origin: 1 0 1
+block_order: x + size.x * (z + size.z * y)
+palette_count: 2
+palette: arvane:air[]
+palette: arvane:stone[]
+blocks.encoding: rle
+rle_count: 3
+rle: 1 13
+rle: 0 1
+rle: 1 4

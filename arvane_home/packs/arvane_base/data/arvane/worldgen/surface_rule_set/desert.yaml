@@ -1,0 +1,9 @@
+id: arvane:worldgen/surface_rule_set/desert
+version: 1
+
+rules:
+  - layers:
+      - block: arvane:sand
+        depth: 5
+      - block: arvane:stone
+        depth: remaining

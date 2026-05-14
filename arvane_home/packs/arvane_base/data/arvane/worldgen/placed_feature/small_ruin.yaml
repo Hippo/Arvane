@@ -1,0 +1,29 @@
+id: arvane:worldgen/placed_feature/small_ruin
+version: 1
+
+feature: arvane:worldgen/configured_feature/small_ruin
+salt: 61103
+
+placement:
+  stage: structures
+
+  count:
+    type: chance_per_chunk
+    chance: 0.05
+
+  height:
+    type: surface
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/land
+
+    - type: block_below
+      blocks:
+        - arvane:grass_block
+        - arvane:dirt
+        - arvane:sand
+        - arvane:stone
+
+    - type: slope_less_than
+      value: 0.35

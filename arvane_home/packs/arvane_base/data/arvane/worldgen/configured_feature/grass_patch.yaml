@@ -1,0 +1,16 @@
+id: arvane:worldgen/configured_feature/grass_patch
+version: 1
+type: arvane:feature/patch
+
+block: arvane:short_grass
+tries: 24
+
+radius:
+  xz: 5
+  y: 2
+
+replace:
+  only_air: true
+
+place_on:
+  - arvane:grass_block

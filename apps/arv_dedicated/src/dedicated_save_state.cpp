@@ -191,6 +191,12 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
   if (loaded_world.loaded_save.has_world_metadata) {
     loaded_world.active_generation_config =
         loaded_world.loaded_save.world.generation_config;
+    loaded_world.active_generation_config.resolved_dimension =
+        default_generation_config.resolved_dimension;
+    if (loaded_world.active_generation_config.dimension_id.empty()) {
+      loaded_world.active_generation_config.dimension_id =
+          default_generation_config.dimension_id;
+    }
     loaded_world.world_seed = loaded_world.loaded_save.world.seed;
     loaded_world.world_height =
         world::world_height_settings_from_generation_config(loaded_world.active_generation_config);

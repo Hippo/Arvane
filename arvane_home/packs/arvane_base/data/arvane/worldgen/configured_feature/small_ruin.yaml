@@ -1,0 +1,10 @@
+id: arvane:worldgen/configured_feature/small_ruin
+version: 1
+type: arvane:feature/blueprint
+
+blueprint: arvane:blueprint/ruins/small_stone_ruin
+
+rotation:
+  random_y: true
+
+integrity: 0.85

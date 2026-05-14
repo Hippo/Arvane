@@ -1,0 +1,39 @@
+id: arvane:worldgen/noise/overworld_climate
+version: 1
+
+fields:
+  temperature:
+    type: arvane:noise/simplex_2d
+    seed_salt: "temperature"
+    frequency: 0.0025
+    octaves: 3
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  humidity:
+    type: arvane:noise/simplex_2d
+    seed_salt: "humidity"
+    frequency: 0.003
+    octaves: 3
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  continentalness:
+    type: arvane:noise/simplex_2d
+    seed_salt: "continentalness"
+    frequency: 0.0015
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  erosion:
+    type: arvane:noise/simplex_2d
+    seed_salt: "erosion"
+    frequency: 0.004
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5

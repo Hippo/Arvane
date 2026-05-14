@@ -1,0 +1,22 @@
+id: arvane:worldgen/carver/caves
+version: 1
+type: arvane:carver/noise_caves
+
+enabled: true
+
+noise:
+  type: arvane:noise/simplex_3d
+  seed_salt: "caves"
+  frequency: 0.035
+  octaves: 3
+  amplitude: 1.0
+  lacunarity: 2.0
+  gain: 0.5
+
+threshold: 0.62
+
+y_range:
+  min: -32
+  max: 64
+
+surface_margin: 8

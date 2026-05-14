@@ -6,8 +6,10 @@
 #include "arv/core/types.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/voxel/storage.hpp"
+#include "arv/world/worldgen/registry.hpp"
 
 #include <array>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,6 +30,7 @@ struct WorldGenerationConfig {
   std::string id{};
   u32 version{1};
   std::string seed_salt{"overworld"};
+  std::string dimension_id{"arvane:worldgen/dimension/overworld"};
   i32 min_y{-64};
   i32 max_y{128};
   i32 sea_level{32};
@@ -40,6 +43,7 @@ struct WorldGenerationConfig {
   f32 terrain_lacunarity{2.0F};
   f32 terrain_gain{0.5F};
   std::vector<SurfaceLayerDefinition> surface_layers{};
+  std::shared_ptr<const worldgen::ResolvedDimension> resolved_dimension{};
 };
 
 struct ResolvedSurfaceLayer {
@@ -50,6 +54,7 @@ struct ResolvedSurfaceLayer {
 
 struct WorldGenerationPalette {
   std::vector<ResolvedSurfaceLayer> surface_layers{};
+  std::shared_ptr<const worldgen::ResolvedDimension> resolved_dimension{};
 };
 
 using GenerationSurfaceProfile = std::array<i32, voxel::ChunkArea>;
@@ -62,6 +67,7 @@ struct ChunkGenerationRequest {
   i32 max_chunk_y{};
   WorldGenerationConfig config{};
   WorldGenerationPalette palette{};
+  std::shared_ptr<const worldgen::ResolvedDimension> resolved_dimension{};
 };
 
 struct GeneratedChunkSection {
@@ -83,6 +89,9 @@ struct GeneratedChunk {
 using WorldGenerationConfigResult = Expected<WorldGenerationConfig, WorldGenerationError>;
 using WorldGenerationPaletteResult = Expected<WorldGenerationPalette, WorldGenerationError>;
 using GeneratedChunkResult = Expected<GeneratedChunk, WorldGenerationError>;
+
+[[nodiscard]] WorldGenerationConfig config_from_resolved_dimension(
+    std::shared_ptr<const worldgen::ResolvedDimension> dimension);
 
 [[nodiscard]] WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text);
 

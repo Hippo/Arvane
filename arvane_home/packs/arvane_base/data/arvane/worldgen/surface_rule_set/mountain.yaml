@@ -1,0 +1,23 @@
+id: arvane:worldgen/surface_rule_set/mountain
+version: 1
+
+rules:
+  - when:
+      slope_greater_than: 0.75
+    layers:
+      - block: arvane:stone
+        depth: remaining
+
+  - when:
+      height_above: 84
+    layers:
+      - block: arvane:stone
+        depth: remaining
+
+  - layers:
+      - block: arvane:grass_block
+        depth: 1
+      - block: arvane:dirt
+        depth: 2
+      - block: arvane:stone
+        depth: remaining

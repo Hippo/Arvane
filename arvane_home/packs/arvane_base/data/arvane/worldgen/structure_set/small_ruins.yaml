@@ -1,0 +1,19 @@
+id: arvane:worldgen/structure_set/small_ruins
+version: 1
+salt: 918273
+
+structures:
+  - feature: arvane:worldgen/configured_feature/small_ruin
+    weight: 1
+
+placement:
+  type: grid
+  average_distance_chunks: 32
+  separation_chunks: 8
+
+filters:
+  - type: biome_tag
+    tag: arvane:biome/land
+
+  - type: slope_less_than
+    value: 0.35

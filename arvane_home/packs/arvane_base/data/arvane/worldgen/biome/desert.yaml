@@ -1,0 +1,21 @@
+id: arvane:worldgen/biome/desert
+version: 1
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/hot
+  - arvane:biome/dry
+  - arvane:biome/sandy
+
+terrain:
+  base_height_offset: -1
+  height_scale_multiplier: 0.55
+  roughness_multiplier: 0.45
+
+surface_rule_set: arvane:worldgen/surface_rule_set/desert
+
+colors:
+  grass: "#B5A35A"
+  foliage: "#9A8A42"
+  water: "#3F76E4"
+  fog: "#E6D6A2"

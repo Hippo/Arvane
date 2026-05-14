@@ -1,0 +1,26 @@
+id: arvane:worldgen/biome/plains
+version: 1
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/temperate
+  - arvane:biome/grassy
+
+terrain:
+  base_height_offset: 0
+  height_scale_multiplier: 0.85
+  roughness_multiplier: 0.65
+
+surface_rule_set: arvane:worldgen/surface_rule_set/grassy_land
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/grass_patch
+      - arvane:worldgen/placed_feature/oak_tree
+
+colors:
+  grass: "#6BAA45"
+  foliage: "#4F8A38"
+  water: "#3F76E4"
+  fog: "#C8D8FF"

@@ -5,6 +5,20 @@ set(ARV_WORLD_HEADERS
   include/arv/world/regions.hpp
   include/arv/world/world_lighting.hpp
   include/arv/world/world_generation.hpp
+  include/arv/world/worldgen/biome.hpp
+  include/arv/world/worldgen/biome_source.hpp
+  include/arv/world/worldgen/carver.hpp
+  include/arv/world/worldgen/chunk_generator.hpp
+  include/arv/world/worldgen/common.hpp
+  include/arv/world/worldgen/dimension.hpp
+  include/arv/world/worldgen/feature.hpp
+  include/arv/world/worldgen/loader.hpp
+  include/arv/world/worldgen/noise.hpp
+  include/arv/world/worldgen/registry.hpp
+  include/arv/world/worldgen/seeds.hpp
+  include/arv/world/worldgen/structure_set.hpp
+  include/arv/world/worldgen/surface_rules.hpp
+  include/arv/world/worldgen/terrain.hpp
   include/arv/world/world_runtime.hpp
   include/arv/world/world_queries.hpp
   include/arv/world/world_time.hpp
@@ -17,6 +31,12 @@ add_library(arv_world STATIC
   src/regions.cpp
   src/world_lighting.cpp
   src/world_generation.cpp
+  src/worldgen/chunk_generator.cpp
+  src/worldgen/common.cpp
+  src/worldgen/loader.cpp
+  src/worldgen/noise.cpp
+  src/worldgen/registry.cpp
+  src/worldgen/seeds.cpp
   src/world_time.cpp
   src/world_runtime_internal.cpp
   src/world_runtime.cpp
@@ -35,5 +55,5 @@ add_library(arv_world STATIC
   src/world_region_runtime.cpp
 )
 target_include_directories(arv_world PUBLIC include)
-target_link_libraries(arv_world PUBLIC arv_core arv_entity arv_physics arv_player arv_voxel EnTT::EnTT)
+target_link_libraries(arv_world PUBLIC arv_asset arv_blueprint arv_core arv_entity arv_physics arv_player arv_voxel EnTT::EnTT)
 target_link_libraries(arv_world PRIVATE arv_io FastNoise2)

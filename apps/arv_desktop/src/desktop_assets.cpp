@@ -7,6 +7,7 @@
 #include "arv/text/language.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/render/render_commands.hpp"
+#include "arv/world/worldgen/loader.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -445,16 +446,20 @@ DesktopLoadedAssetsResult load_desktop_assets(
     }
   }
 
-  auto worldgen_text = packs.load_data_text(base::ids::OverworldWorldgenDataID, ".yaml");
-  if (!worldgen_text) {
-    return asset_failure("worldgen", worldgen_text.error().describe());
+  auto worldgen_registry = world::worldgen::load_worldgen_registry_from_packs(packs);
+  if (!worldgen_registry) {
+    return asset_failure("worldgen", worldgen_registry.error().describe());
   }
 
-  auto worldgen_config = world::parse_world_generation_yaml(worldgen_text.value());
-  if (!worldgen_config) {
-    return asset_failure("worldgen", worldgen_config.error().message);
+  auto resolved_worldgen = world::worldgen::resolve_dimension(
+      worldgen_registry.value(),
+      base::ids::OverworldWorldgenDataID,
+      loaded.block_registry);
+  if (!resolved_worldgen) {
+    return asset_failure("worldgen", resolved_worldgen.error().describe());
   }
-  loaded.default_generation_config = std::move(worldgen_config.value());
+  loaded.default_generation_config =
+      world::config_from_resolved_dimension(std::move(resolved_worldgen.value()));
 
   return DesktopLoadedAssetsResult::success(std::move(loaded));
 }

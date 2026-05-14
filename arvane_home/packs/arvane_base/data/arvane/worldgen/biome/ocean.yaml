@@ -1,0 +1,17 @@
+id: arvane:worldgen/biome/ocean
+version: 1
+
+tags:
+  - arvane:biome/ocean
+  - arvane:biome/aquatic
+
+terrain:
+  base_height_offset: -8
+  height_scale_multiplier: 0.35
+  roughness_multiplier: 0.35
+
+surface_rule_set: arvane:worldgen/surface_rule_set/ocean_floor
+
+colors:
+  water: "#2F68C5"
+  fog: "#285A9A"

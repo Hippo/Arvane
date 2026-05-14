@@ -1,0 +1,28 @@
+id: arvane:worldgen/biome/forest
+version: 1
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/temperate
+  - arvane:biome/wet
+  - arvane:biome/grassy
+  - arvane:biome/forested
+
+terrain:
+  base_height_offset: 1
+  height_scale_multiplier: 0.9
+  roughness_multiplier: 0.8
+
+surface_rule_set: arvane:worldgen/surface_rule_set/grassy_land
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/oak_tree
+      - arvane:worldgen/placed_feature/grass_patch
+
+colors:
+  grass: "#5F9F3C"
+  foliage: "#3F7D32"
+  water: "#3F76E4"
+  fog: "#C8D8FF"
