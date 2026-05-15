@@ -302,6 +302,7 @@ struct Parser {
   if (replace == nullptr) {
     return !required;
   }
+  out.specified = true;
   if (!parser.require_object(*replace, "replace")) {
     return false;
   }
@@ -954,6 +955,9 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
             }
           }
           if (!parser.read_f32(root, "integrity", blueprint.integrity, false)) {
+            return false;
+          }
+          if (!parse_replace(parser, root, blueprint.replace, false)) {
             return false;
           }
           config.config = std::move(blueprint);

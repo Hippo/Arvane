@@ -1657,6 +1657,9 @@ rotation:
   random_y: true
 
 integrity: 0.85
+
+replace:
+  only_air: true
 ```
 
 ### Fields
@@ -1705,6 +1708,28 @@ When true, the placed blueprint may be randomly rotated around the vertical axis
 A value from `0.0` to `1.0` controlling how much of the blueprint is preserved during placement.
 
 `1.0` means the full blueprint is placed. Lower values may omit some blocks, creating damaged or ruined variants.
+
+#### `replace`
+
+Optional replacement behavior for non-air blueprint blocks.
+
+Blueprint features use the standard configured-feature replacement forms:
+
+```yaml
+replace:
+  only_air: true
+```
+
+or:
+
+```yaml
+replace:
+  blocks:
+    - arvane:grass_block
+    - arvane:dirt
+```
+
+When `replace` is omitted, non-air blueprint blocks may overwrite the target block. Blueprint air is skipped by default and does not erase existing blocks.
 
 ---
 
@@ -2629,6 +2654,22 @@ Worldgen data should be authored with this in mind:
 - blueprint structures should avoid relying on chunk generation order
 
 The same world seed and pack data should produce the same world even when chunks are generated in a different order.
+
+## Structure Chunk-Border Behavior
+
+Structures are deterministic global candidates. Chunks own their own writes.
+
+When a chunk is generated, structure sets are evaluated by computing a bounded set of nearby grid placement cells that could produce candidates overlapping the chunk. Each candidate derives its placement chunk, local origin, selected structure entry, rotation, and surface anchor deterministically from the world seed, structure set salt, placement cell, and resource identity. Candidate generation must not depend on loaded chunks, generation order, thread scheduling, unordered-map iteration, or previous random calls from other chunks.
+
+Each structure candidate has a transformed world-space block AABB. A generated chunk intersects that AABB with its own chunk-column bounds and applies only the intersecting block region to its local generation buffer. A structure must not directly mutate neighboring chunks during generation, and generation must not acquire neighbor-chunk locks or require the origin chunk to have generated first.
+
+Blueprint-backed structures are applied from the intersection volume, not by scanning the whole blueprint when only a slice intersects the current chunk. The generator converts each intersecting world block back into blueprint-local coordinates, skips blueprint air by default, evaluates configured replacement rules against the current chunk buffer only, and writes only local blocks.
+
+Placement filters for structure candidates use deterministic worldgen-derived terrain data such as surface height, biome, slope, underwater state, and terrain/surface block at the candidate origin. They do not read loaded neighbor chunks. Surface anchoring is likewise derived from the worldgen terrain profile.
+
+Any per-block randomness for blueprint structures, including `integrity` damage/omission, must be position-hashed. The hash should include at least the world seed, structure salt, structure origin, blueprint-local block position, and resource identity. A mutable RNG stream must not decide per-block integrity because the same blueprint-local block must make the same decision regardless of which intersecting chunk is generated first.
+
+Large structures should be represented as deterministic candidates or deterministic candidate pieces with conservative bounds. Candidate search must be bounded by the maximum horizontal extent of the resolved structure set rather than scanning arbitrary large regions.
 
 ---
 

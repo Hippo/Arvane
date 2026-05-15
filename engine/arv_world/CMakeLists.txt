@@ -7,6 +7,9 @@ set(ARV_WORLD_HEADERS
   include/arv/world/world_generation.hpp
   include/arv/world/worldgen/biome.hpp
   include/arv/world/worldgen/biome_source.hpp
+  include/arv/world/worldgen/blueprint_bounds.hpp
+  include/arv/world/worldgen/blueprint_placement.hpp
+  include/arv/world/worldgen/bounds.hpp
   include/arv/world/worldgen/carver.hpp
   include/arv/world/worldgen/chunk_generator.hpp
   include/arv/world/worldgen/common.hpp
@@ -16,9 +19,11 @@ set(ARV_WORLD_HEADERS
   include/arv/world/worldgen/noise.hpp
   include/arv/world/worldgen/registry.hpp
   include/arv/world/worldgen/seeds.hpp
+  include/arv/world/worldgen/structure_candidate.hpp
   include/arv/world/worldgen/structure_set.hpp
   include/arv/world/worldgen/surface_rules.hpp
   include/arv/world/worldgen/terrain.hpp
+  include/arv/world/worldgen/terrain_query.hpp
   include/arv/world/world_runtime.hpp
   include/arv/world/world_queries.hpp
   include/arv/world/world_time.hpp
@@ -31,12 +36,15 @@ add_library(arv_world STATIC
   src/regions.cpp
   src/world_lighting.cpp
   src/world_generation.cpp
+  src/worldgen/blueprint_placement.cpp
   src/worldgen/chunk_generator.cpp
   src/worldgen/common.cpp
   src/worldgen/loader.cpp
   src/worldgen/noise.cpp
   src/worldgen/registry.cpp
   src/worldgen/seeds.cpp
+  src/worldgen/structure_candidate.cpp
+  src/worldgen/terrain_query.cpp
   src/world_time.cpp
   src/world_runtime_internal.cpp
   src/world_runtime.cpp

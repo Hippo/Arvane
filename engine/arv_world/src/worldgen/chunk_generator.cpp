@@ -2,7 +2,10 @@
 
 #include "arv/core/profiling.hpp"
 #include "arv/world/world_generation.hpp"
+#include "arv/world/worldgen/blueprint_placement.hpp"
 #include "arv/world/worldgen/seeds.hpp"
+#include "arv/world/worldgen/structure_candidate.hpp"
+#include "arv/world/worldgen/terrain_query.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -89,56 +92,8 @@ struct ClimateFieldRuntime {
   ClimateNoiseLattice2D lattice{};
 };
 
-struct ChunkEditView {
-  ChunkCoord coord{};
-  i32 min_chunk_y{};
-  i32 max_chunk_y{};
-  std::vector<GeneratedChunkSection>* sections{};
-
-  [[nodiscard]] std::optional<usize> section_index(i32 chunk_y) const noexcept {
-    if (chunk_y < min_chunk_y || chunk_y > max_chunk_y) {
-      return std::nullopt;
-    }
-    return static_cast<usize>(chunk_y - min_chunk_y);
-  }
-
-  [[nodiscard]] voxel::BlockVariantID get(BlockPos pos) const noexcept {
-    if (floor_div(pos.value.x, ChunkSize) != coord.x ||
-        floor_div(pos.value.z, ChunkSize) != coord.z) {
-      return voxel::AirBlockVariantID;
-    }
-    const i32 chunk_y = floor_div(pos.value.y, ChunkSize);
-    const std::optional<usize> section = section_index(chunk_y);
-    if (!section || section.value() >= sections->size()) {
-      return voxel::AirBlockVariantID;
-    }
-    const SectionLocalPos local = block_to_local(pos);
-    return (*sections)[section.value()].blocks[voxel::local_index(local)];
-  }
-
-  void set(BlockPos pos, voxel::BlockVariantID block) noexcept {
-    if (floor_div(pos.value.x, ChunkSize) != coord.x ||
-        floor_div(pos.value.z, ChunkSize) != coord.z) {
-      return;
-    }
-    const i32 chunk_y = floor_div(pos.value.y, ChunkSize);
-    const std::optional<usize> section = section_index(chunk_y);
-    if (!section || section.value() >= sections->size()) {
-      return;
-    }
-    const SectionLocalPos local = block_to_local(pos);
-    (*sections)[section.value()].blocks[voxel::local_index(local)] = block;
-  }
-};
-
 [[nodiscard]] usize stage_index(GenerationStage stage) noexcept {
   return static_cast<usize>(stage);
-}
-
-[[nodiscard]] bool has_tag(const BiomeConfig& biome, std::string_view tag) noexcept {
-  return std::any_of(biome.tags.begin(), biome.tags.end(), [tag](const ResourceRef& ref) {
-    return ref.id == tag;
-  });
 }
 
 struct BiomeCandidate {
@@ -287,108 +242,12 @@ void insert_candidate(
   return blended;
 }
 
-[[nodiscard]] bool surface_predicate_matches(
-    const SurfaceRulePredicate& predicate,
-    const ResolvedDimension& dimension,
-    usize biome_index,
-    i32 surface_y,
-    f32 slope,
-    bool underwater) noexcept {
-  const i32 sea_level = dimension.raw.vertical.sea_level;
-  const BiomeConfig& biome = dimension.biomes[biome_index].raw;
-  if (predicate.above_sea_level.has_value() &&
-      predicate.above_sea_level.value() != (surface_y >= sea_level)) {
-    return false;
-  }
-  if (predicate.below_sea_level.has_value() &&
-      predicate.below_sea_level.value() != (surface_y < sea_level)) {
-    return false;
-  }
-  if (predicate.underwater.has_value() &&
-      predicate.underwater.value() != underwater) {
-    return false;
-  }
-  if (predicate.biome.has_value() && predicate.biome->id != biome.id) {
-    return false;
-  }
-  if (predicate.biome_tag.has_value() && !has_tag(biome, predicate.biome_tag->id)) {
-    return false;
-  }
-  if (predicate.biome_tag_not.has_value() && has_tag(biome, predicate.biome_tag_not->id)) {
-    return false;
-  }
-  if (predicate.slope_less_than.has_value() && !(slope < predicate.slope_less_than.value())) {
-    return false;
-  }
-  if (predicate.slope_greater_than.has_value() && !(slope > predicate.slope_greater_than.value())) {
-    return false;
-  }
-  if (predicate.height_above.has_value() && !(surface_y > predicate.height_above.value())) {
-    return false;
-  }
-  if (predicate.height_below.has_value() && !(surface_y < predicate.height_below.value())) {
-    return false;
-  }
-  return true;
-}
-
-[[nodiscard]] const std::vector<ResolvedSurfaceLayer>* choose_layers(
-    const ResolvedDimension& dimension,
-    const TerrainProfile& profile,
-    usize column_index) noexcept {
-  const usize biome_index = profile.biome_by_column[column_index];
-  const i32 surface_y = profile.surface_y_by_column[column_index];
-  const bool underwater = surface_y < dimension.raw.vertical.sea_level;
-  const f32 slope = profile.slope_by_column[column_index];
-  const auto try_rule_set = [&](usize rule_set_index) -> const std::vector<ResolvedSurfaceLayer>* {
-    if (rule_set_index >= dimension.surface_rule_sets.size()) {
-      return nullptr;
-    }
-    const ResolvedSurfaceRuleSet& set = dimension.surface_rule_sets[rule_set_index];
-    for (const ResolvedSurfaceRule& rule : set.rules) {
-      if (!rule.has_predicate ||
-          surface_predicate_matches(rule.when, dimension, biome_index, surface_y, slope, underwater)) {
-        return &rule.layers;
-      }
-    }
-    return nullptr;
-  };
-
-  const ResolvedBiome& biome = dimension.biomes[biome_index];
-  if (biome.surface_rule_set_index.has_value()) {
-    if (const auto* layers = try_rule_set(biome.surface_rule_set_index.value());
-        layers != nullptr) {
-      return layers;
-    }
-  }
-  if (dimension.dimension_surface_rule_set.has_value()) {
-    if (const auto* layers = try_rule_set(dimension.dimension_surface_rule_set.value());
-        layers != nullptr) {
-      return layers;
-    }
-  }
-  return nullptr;
-}
-
-[[nodiscard]] voxel::BlockVariantID choose_surface_block(
-    const std::vector<ResolvedSurfaceLayer>& layers,
-    i32 depth_from_surface) noexcept {
-  i32 consumed = 0;
-  for (const ResolvedSurfaceLayer& layer : layers) {
-    if (layer.remaining) {
-      return layer.block;
-    }
-    consumed += layer.depth;
-    if (depth_from_surface < consumed) {
-      return layer.block;
-    }
-  }
-  return layers.empty() ? voxel::AirBlockVariantID : layers.back().block;
-}
-
 [[nodiscard]] bool can_replace(
     voxel::BlockVariantID existing,
     const ResolvedReplaceRule& replace) noexcept {
+  if (!replace.specified) {
+    return true;
+  }
   if (replace.only_air) {
     return existing == voxel::AirBlockVariantID;
   }
@@ -398,32 +257,11 @@ void insert_candidate(
   return false;
 }
 
-[[nodiscard]] voxel::BlockVariantID terrain_block_at(
-    const ResolvedDimension& dimension,
-    const TerrainProfile& profile,
-    BlockPos pos) noexcept {
-  const i32 local_x = floor_mod(pos.value.x, ChunkSize);
-  const i32 local_z = floor_mod(pos.value.z, ChunkSize);
-  const usize column_index = voxel::local_column_index({local_x, local_z});
-  const i32 surface_y = profile.surface_y_by_column[column_index];
-  if (pos.value.y <= surface_y) {
-    const std::vector<ResolvedSurfaceLayer>* layers =
-        choose_layers(dimension, profile, column_index);
-    return layers == nullptr
-               ? voxel::AirBlockVariantID
-               : choose_surface_block(*layers, surface_y - pos.value.y);
-  }
-  if (pos.value.y <= dimension.raw.vertical.sea_level) {
-    return dimension.water_block;
-  }
-  return voxel::AirBlockVariantID;
-}
-
 [[nodiscard]] bool filters_pass(
     const ResolvedDimension& dimension,
     const TerrainProfile& profile,
     ChunkCoord profile_chunk,
-    const ChunkEditView& view,
+    const GeneratedChunkEditView& view,
     const std::vector<ResolvedPlacementFilter>& filters,
     BlockPos pos) noexcept {
   const i32 local_x = floor_mod(pos.value.x, ChunkSize);
@@ -450,7 +288,7 @@ void insert_candidate(
         }
         break;
       case PlacementFilterConfig::Type::BiomeTag:
-        if (!has_tag(dimension.biomes[biome_index].raw, filter.raw.tag.id)) {
+        if (!biome_has_tag(dimension.biomes[biome_index].raw, filter.raw.tag.id)) {
           return false;
         }
         break;
@@ -521,8 +359,10 @@ void insert_candidate(
 
 void place_feature(
     const ResolvedConfiguredFeature& feature,
-    ChunkEditView& view,
+    GeneratedChunkEditView& view,
     BlockPos pos,
+    u64 seed,
+    u64 salt,
     DeterministicRng& rng) {
   if (const auto* tree = std::get_if<SimpleTreeFeatureConfig>(&feature.raw.config)) {
     const i32 height = rng.range_i32(tree->trunk_height.min, tree->trunk_height.max);
@@ -603,45 +443,25 @@ void place_feature(
       view.set(pos, feature.blocks.front());
     }
   } else if (const auto* blueprint_feature = std::get_if<BlueprintFeatureConfig>(&feature.raw.config)) {
-    (void)blueprint_feature;
-    const blueprint::Blueprint& blueprint = feature.blueprint;
-    for (i32 y = 0; y < blueprint.size.value.y; ++y) {
-      for (i32 z = 0; z < blueprint.size.value.z; ++z) {
-        for (i32 x = 0; x < blueprint.size.value.x; ++x) {
-          const usize index = static_cast<usize>(x) +
-                              static_cast<usize>(blueprint.size.value.x) *
-                                  (static_cast<usize>(z) +
-                                   static_cast<usize>(blueprint.size.value.z) *
-                                       static_cast<usize>(y));
-          if (index >= blueprint.blocks.size()) {
-            continue;
-          }
-          const u32 palette_index = blueprint.blocks[index];
-          if (palette_index >= feature.blueprint_palette.size()) {
-            continue;
-          }
-          const voxel::BlockVariantID block = feature.blueprint_palette[palette_index];
-          if (block == voxel::AirBlockVariantID) {
-            continue;
-          }
-          BlockPos target{{
-              pos.value.x + x - blueprint.origin.value.x,
-              pos.value.y + y - blueprint.origin.value.y,
-              pos.value.z + z - blueprint.origin.value.z}};
-          if (blueprint_feature->integrity < 1.0F && !rng.chance(blueprint_feature->integrity)) {
-            continue;
-          }
-          view.set(target, block);
-        }
-      }
-    }
+    const StructureRotationY rotation =
+        blueprint_feature->random_y_rotation
+            ? structure_rotation_y_from_quarter_turns(rng.range_i32(0, 3))
+            : StructureRotationY::Deg0;
+    BlueprintPlacementInput input;
+    input.feature = &feature;
+    input.origin = pos;
+    input.rotation = rotation;
+    input.bounds = blueprint_world_bounds(feature.blueprint, pos, rotation);
+    input.world_seed = seed;
+    input.salt = salt;
+    place_blueprint_intersection(input, view);
   }
 }
 
 void run_placed_feature(
     const ResolvedDimension& dimension,
     const TerrainProfile& origin_profile,
-    ChunkEditView& view,
+    GeneratedChunkEditView& view,
     const ResolvedPlacedFeature& placed,
     u64 seed,
     ChunkCoord origin_chunk) {
@@ -671,73 +491,8 @@ void run_placed_feature(
     if (!filters_pass(dimension, origin_profile, origin_chunk, view, placed.filters, pos)) {
       continue;
     }
-    place_feature(feature, view, pos, rng);
+    place_feature(feature, view, pos, seed, placed.raw.salt, rng);
   }
-}
-
-void run_structure_set(
-    const ResolvedDimension& dimension,
-    const TerrainProfile& candidate_profile,
-    ChunkEditView& view,
-    const ResolvedStructureSet& structure_set,
-    u64 seed,
-    ChunkCoord cell_chunk) {
-  const i32 average = std::max(1, structure_set.raw.placement.average_distance_chunks);
-  const i32 separation = std::clamp(
-      structure_set.raw.placement.separation_chunks,
-      0,
-      std::max(0, average - 1));
-  const i32 region_x = floor_div(cell_chunk.x, average);
-  const i32 region_z = floor_div(cell_chunk.z, average);
-  DeterministicRng rng{coordinate_seed(
-      seed,
-      region_x,
-      static_cast<i32>(structure_set.raw.salt & 0x7FFFFFFF),
-      region_z,
-      structure_set.raw.salt)};
-  const i32 span = std::max(1, average - separation);
-  const ChunkCoord candidate{
-      region_x * average + rng.range_i32(0, span - 1),
-      region_z * average + rng.range_i32(0, span - 1)};
-  if (candidate != cell_chunk || structure_set.structures.empty()) {
-    return;
-  }
-  const i32 radius_chunks =
-      std::max(0, (structure_set.radius_blocks + ChunkSize - 1) / ChunkSize);
-  if (candidate != view.coord &&
-      (candidate.x < view.coord.x - radius_chunks ||
-       candidate.x > view.coord.x + radius_chunks ||
-       candidate.z < view.coord.z - radius_chunks ||
-       candidate.z > view.coord.z + radius_chunks)) {
-    return;
-  }
-  i32 total_weight = 0;
-  for (const ResolvedStructureEntry& entry : structure_set.structures) {
-    total_weight += std::max(0, entry.weight);
-  }
-  if (total_weight <= 0) {
-    return;
-  }
-  i32 pick = rng.range_i32(1, total_weight);
-  const ResolvedStructureEntry* selected = &structure_set.structures.front();
-  for (const ResolvedStructureEntry& entry : structure_set.structures) {
-    pick -= std::max(0, entry.weight);
-    if (pick <= 0) {
-      selected = &entry;
-      break;
-    }
-  }
-  const i32 local_x = rng.range_i32(0, ChunkSize - 1);
-  const i32 local_z = rng.range_i32(0, ChunkSize - 1);
-  const usize column_index = voxel::local_column_index({local_x, local_z});
-  BlockPos pos{{
-      candidate.x * ChunkSize + local_x,
-      candidate_profile.surface_y_by_column[column_index] + 1,
-      candidate.z * ChunkSize + local_z}};
-  if (!filters_pass(dimension, candidate_profile, candidate, view, structure_set.filters, pos)) {
-    return;
-  }
-  place_feature(dimension.configured_features[selected->feature_index], view, pos, rng);
 }
 
 } // namespace
@@ -870,10 +625,10 @@ GeneratedChunkResult generate_resolved_chunk(
       const i32 surface_y = profile.surface_y_by_column[column_index];
       if (world_y <= surface_y) {
         const std::vector<ResolvedSurfaceLayer>* layers =
-            choose_layers(dimension, profile, column_index);
+            choose_surface_layers(dimension, profile, column_index);
         section.blocks[index] = layers == nullptr
                                     ? voxel::AirBlockVariantID
-                                    : choose_surface_block(*layers, surface_y - world_y);
+                                    : choose_terrain_surface_block(*layers, surface_y - world_y);
       } else if (world_y <= dimension.raw.vertical.sea_level) {
         section.blocks[index] = dimension.water_block;
       }
@@ -882,7 +637,7 @@ GeneratedChunkResult generate_resolved_chunk(
   }
   }
 
-  ChunkEditView view{request.coord, min_chunk_y, max_chunk_y, &chunk.sections};
+  GeneratedChunkEditView view{request.coord, min_chunk_y, max_chunk_y, &chunk.sections};
 
   {
   ARV_PROFILE_ZONE("Worldgen carvers");
@@ -956,25 +711,26 @@ GeneratedChunkResult generate_resolved_chunk(
       }
     }
     if (stage == GenerationStage::Structures) {
-      for (const ResolvedStructureSet& structure_set : dimension.structure_sets) {
-        const i32 radius_chunks =
-            std::max(0, (structure_set.radius_blocks + ChunkSize - 1) / ChunkSize);
-        for (i32 dz = -radius_chunks; dz <= radius_chunks; ++dz) {
-          for (i32 dx = -radius_chunks; dx <= radius_chunks; ++dx) {
-            const ChunkCoord candidate_chunk{request.coord.x + dx, request.coord.z + dz};
-            const TerrainProfile candidate_profile =
-                candidate_chunk == request.coord
-                    ? profile
-                    : generate_terrain_profile(dimension, request.seed, candidate_chunk);
-            run_structure_set(
-                dimension,
-                candidate_profile,
-                view,
-                structure_set,
-                request.seed,
-                candidate_chunk);
-          }
-        }
+      const std::vector<StructureCandidate> structure_candidates =
+          collect_structure_candidates_for_chunk(
+              dimension,
+              request.seed,
+              request.coord,
+              min_chunk_y,
+              max_chunk_y);
+      for (const StructureCandidate& candidate : structure_candidates) {
+        const ResolvedStructureSet& structure_set =
+            dimension.structure_sets[candidate.structure_set_index];
+        const ResolvedConfiguredFeature& feature =
+            dimension.configured_features[candidate.feature_index];
+        BlueprintPlacementInput input;
+        input.feature = &feature;
+        input.origin = candidate.origin;
+        input.rotation = candidate.rotation;
+        input.bounds = candidate.bounds;
+        input.world_seed = request.seed;
+        input.salt = structure_set.raw.salt;
+        place_blueprint_intersection(input, view);
       }
     }
   }

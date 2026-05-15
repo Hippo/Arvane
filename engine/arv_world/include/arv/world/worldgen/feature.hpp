@@ -11,6 +11,7 @@
 namespace arv::world::worldgen {
 
 struct ReplaceRuleConfig {
+  bool specified{};
   bool only_air{};
   std::vector<std::string> blocks{};
 };
@@ -58,6 +59,7 @@ struct BlueprintFeatureConfig {
   ResourceRef blueprint{};
   bool random_y_rotation{};
   f32 integrity{1.0F};
+  ReplaceRuleConfig replace{};
 };
 
 using ConfiguredFeatureVariant = std::variant<
@@ -131,6 +133,7 @@ struct PlacedFeatureConfig {
 };
 
 struct ResolvedReplaceRule {
+  bool specified{};
   bool only_air{};
   std::vector<voxel::BlockVariantID> blocks{};
 };

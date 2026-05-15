@@ -1,5 +1,7 @@
 #include "arv/world/worldgen/registry.hpp"
 
+#include "arv/world/worldgen/blueprint_bounds.hpp"
+
 #include <algorithm>
 
 namespace arv::world::worldgen {
@@ -196,6 +198,7 @@ template<typename T>
   resolved.radius_blocks = configured_feature_radius(config);
 
   auto resolve_replace = [&](const ReplaceRuleConfig& replace) -> Expected<void, WorldGenDiagnostic> {
+    resolved.replace.specified = replace.specified;
     resolved.replace.only_air = replace.only_air;
     auto blocks = resolve_blocks(block_registry, config.id, "replace.blocks", replace.blocks);
     if (!blocks) {
@@ -279,8 +282,13 @@ template<typename T>
       }
       resolved.blueprint_palette.push_back(block.value());
     }
+    auto replace = resolve_replace(blueprint_feature->replace);
+    if (!replace) {
+      return Expected<ResolvedConfiguredFeature, WorldGenDiagnostic>::failure(replace.error());
+    }
     resolved.radius_blocks = std::max({
         resolved.radius_blocks,
+        blueprint_max_horizontal_extent_blocks(resolved.blueprint),
         resolved.blueprint.size.value.x,
         resolved.blueprint.size.value.z});
   }
