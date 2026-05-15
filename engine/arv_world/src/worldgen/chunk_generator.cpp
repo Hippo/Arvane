@@ -398,9 +398,31 @@ void insert_candidate(
   return false;
 }
 
+[[nodiscard]] voxel::BlockVariantID terrain_block_at(
+    const ResolvedDimension& dimension,
+    const TerrainProfile& profile,
+    BlockPos pos) noexcept {
+  const i32 local_x = floor_mod(pos.value.x, ChunkSize);
+  const i32 local_z = floor_mod(pos.value.z, ChunkSize);
+  const usize column_index = voxel::local_column_index({local_x, local_z});
+  const i32 surface_y = profile.surface_y_by_column[column_index];
+  if (pos.value.y <= surface_y) {
+    const std::vector<ResolvedSurfaceLayer>* layers =
+        choose_layers(dimension, profile, column_index);
+    return layers == nullptr
+               ? voxel::AirBlockVariantID
+               : choose_surface_block(*layers, surface_y - pos.value.y);
+  }
+  if (pos.value.y <= dimension.raw.vertical.sea_level) {
+    return dimension.water_block;
+  }
+  return voxel::AirBlockVariantID;
+}
+
 [[nodiscard]] bool filters_pass(
     const ResolvedDimension& dimension,
     const TerrainProfile& profile,
+    ChunkCoord profile_chunk,
     const ChunkEditView& view,
     const std::vector<ResolvedPlacementFilter>& filters,
     BlockPos pos) noexcept {
@@ -409,6 +431,17 @@ void insert_candidate(
   const usize column_index = voxel::local_column_index({local_x, local_z});
   const usize biome_index = profile.biome_by_column[column_index];
   const bool underwater = profile.surface_y_by_column[column_index] < dimension.raw.vertical.sea_level;
+  const auto placement_block_at = [&](BlockPos target) noexcept {
+    if (floor_div(target.value.x, ChunkSize) == view.coord.x &&
+        floor_div(target.value.z, ChunkSize) == view.coord.z) {
+      return view.get(target);
+    }
+    if (floor_div(target.value.x, ChunkSize) == profile_chunk.x &&
+        floor_div(target.value.z, ChunkSize) == profile_chunk.z) {
+      return terrain_block_at(dimension, profile, target);
+    }
+    return voxel::AirBlockVariantID;
+  };
   for (const ResolvedPlacementFilter& filter : filters) {
     switch (filter.raw.type) {
       case PlacementFilterConfig::Type::Biome:
@@ -423,14 +456,14 @@ void insert_candidate(
         break;
       case PlacementFilterConfig::Type::BlockBelow: {
         const voxel::BlockVariantID below =
-            view.get({{pos.value.x, pos.value.y - 1, pos.value.z}});
+            placement_block_at({{pos.value.x, pos.value.y - 1, pos.value.z}});
         if (std::find(filter.blocks.begin(), filter.blocks.end(), below) == filter.blocks.end()) {
           return false;
         }
         break;
       }
       case PlacementFilterConfig::Type::Replaceable:
-        if (view.get(pos) != voxel::AirBlockVariantID) {
+        if (placement_block_at(pos) != voxel::AirBlockVariantID) {
           return false;
         }
         break;
@@ -607,7 +640,7 @@ void place_feature(
 
 void run_placed_feature(
     const ResolvedDimension& dimension,
-    const TerrainProfile& profile,
+    const TerrainProfile& origin_profile,
     ChunkEditView& view,
     const ResolvedPlacedFeature& placed,
     u64 seed,
@@ -633,13 +666,9 @@ void run_placed_feature(
         continue;
       }
     }
-    if (floor_div(world_x, ChunkSize) != view.coord.x ||
-        floor_div(world_z, ChunkSize) != view.coord.z) {
-      continue;
-    }
-    const i32 y = placement_y(placed.raw.height, profile, local_x, local_z, rng);
+    const i32 y = placement_y(placed.raw.height, origin_profile, local_x, local_z, rng);
     BlockPos pos{{world_x, y, world_z}};
-    if (!filters_pass(dimension, profile, view, placed.filters, pos)) {
+    if (!filters_pass(dimension, origin_profile, origin_chunk, view, placed.filters, pos)) {
       continue;
     }
     place_feature(feature, view, pos, rng);
@@ -648,7 +677,7 @@ void run_placed_feature(
 
 void run_structure_set(
     const ResolvedDimension& dimension,
-    const TerrainProfile& profile,
+    const TerrainProfile& candidate_profile,
     ChunkEditView& view,
     const ResolvedStructureSet& structure_set,
     u64 seed,
@@ -670,7 +699,16 @@ void run_structure_set(
   const ChunkCoord candidate{
       region_x * average + rng.range_i32(0, span - 1),
       region_z * average + rng.range_i32(0, span - 1)};
-  if (candidate != cell_chunk || candidate != view.coord || structure_set.structures.empty()) {
+  if (candidate != cell_chunk || structure_set.structures.empty()) {
+    return;
+  }
+  const i32 radius_chunks =
+      std::max(0, (structure_set.radius_blocks + ChunkSize - 1) / ChunkSize);
+  if (candidate != view.coord &&
+      (candidate.x < view.coord.x - radius_chunks ||
+       candidate.x > view.coord.x + radius_chunks ||
+       candidate.z < view.coord.z - radius_chunks ||
+       candidate.z > view.coord.z + radius_chunks)) {
     return;
   }
   i32 total_weight = 0;
@@ -693,10 +731,10 @@ void run_structure_set(
   const i32 local_z = rng.range_i32(0, ChunkSize - 1);
   const usize column_index = voxel::local_column_index({local_x, local_z});
   BlockPos pos{{
-      view.coord.x * ChunkSize + local_x,
-      profile.surface_y_by_column[column_index] + 1,
-      view.coord.z * ChunkSize + local_z}};
-  if (!filters_pass(dimension, profile, view, structure_set.filters, pos)) {
+      candidate.x * ChunkSize + local_x,
+      candidate_profile.surface_y_by_column[column_index] + 1,
+      candidate.z * ChunkSize + local_z}};
+  if (!filters_pass(dimension, candidate_profile, candidate, view, structure_set.filters, pos)) {
     return;
   }
   place_feature(dimension.configured_features[selected->feature_index], view, pos, rng);
@@ -902,19 +940,41 @@ GeneratedChunkResult generate_resolved_chunk(
       const i32 radius_chunks = std::max(0, (placed.radius_blocks + ChunkSize - 1) / ChunkSize);
       for (i32 dz = -radius_chunks; dz <= radius_chunks; ++dz) {
         for (i32 dx = -radius_chunks; dx <= radius_chunks; ++dx) {
+          const ChunkCoord origin_chunk{request.coord.x + dx, request.coord.z + dz};
+          const TerrainProfile origin_profile =
+              origin_chunk == request.coord
+                  ? profile
+                  : generate_terrain_profile(dimension, request.seed, origin_chunk);
           run_placed_feature(
               dimension,
-              profile,
+              origin_profile,
               view,
               placed,
               request.seed,
-              {request.coord.x + dx, request.coord.z + dz});
+              origin_chunk);
         }
       }
     }
     if (stage == GenerationStage::Structures) {
       for (const ResolvedStructureSet& structure_set : dimension.structure_sets) {
-        run_structure_set(dimension, profile, view, structure_set, request.seed, request.coord);
+        const i32 radius_chunks =
+            std::max(0, (structure_set.radius_blocks + ChunkSize - 1) / ChunkSize);
+        for (i32 dz = -radius_chunks; dz <= radius_chunks; ++dz) {
+          for (i32 dx = -radius_chunks; dx <= radius_chunks; ++dx) {
+            const ChunkCoord candidate_chunk{request.coord.x + dx, request.coord.z + dz};
+            const TerrainProfile candidate_profile =
+                candidate_chunk == request.coord
+                    ? profile
+                    : generate_terrain_profile(dimension, request.seed, candidate_chunk);
+            run_structure_set(
+                dimension,
+                candidate_profile,
+                view,
+                structure_set,
+                request.seed,
+                candidate_chunk);
+          }
+        }
       }
     }
   }

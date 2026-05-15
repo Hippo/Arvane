@@ -505,6 +505,10 @@ void emit_cube_face(
       hints.material_class = VertexMaterialClass::Transparent;
       break;
   }
+  if (variant.render_tint == voxel::BlockRenderTint::Foliage) {
+    hints.material_class = VertexMaterialClass::Foliage;
+    hints.material_flags |= VertexMaterialFlag_TintFromBiome;
+  }
   return hints;
 }
 

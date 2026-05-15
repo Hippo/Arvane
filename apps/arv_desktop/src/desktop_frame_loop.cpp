@@ -559,6 +559,7 @@ usize DesktopFrameLoop::build_world_frame(
       assets_.entity_render_assets,
       player_skin_regions_,
       config_.render,
+      debug_menu_.show_chunk_boundaries,
       now,
       app_start_time_,
       interpolation_alpha);

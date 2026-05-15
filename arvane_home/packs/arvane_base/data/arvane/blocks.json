@@ -114,7 +114,7 @@
       "tags": [
         "arvane:mineable/pickaxe"
       ],
-      "textures": "arvane:texture/block/coal_ore",
+      "textures": "arvane:texture/block/iron_ore",
       "properties": {
         "solid": true,
         "collidable": true,
@@ -132,7 +132,11 @@
       "tags": [
         "arvane:mineable/axe"
       ],
-      "textures": "arvane:texture/block/dirt",
+      "textures": {
+        "top": "arvane:texture/block/oak_log_top",
+        "bottom": "arvane:texture/block/oak_log_top",
+        "side": "arvane:texture/block/oak_log"
+      },
       "properties": {
         "solid": true,
         "collidable": true,
@@ -146,15 +150,13 @@
     {
       "name": "arvane:oak_leaves",
       "buoyancy": 1.0,
-      "render_category": "opaque",
-      "textures": "arvane:texture/block/grass_top",
+      "render_category": "cutout",
+      "render_tint": "foliage",
+      "textures": "arvane:texture/block/oak_leaves",
       "properties": {
         "solid": true,
         "collidable": true,
-        "opaque": true,
-        "blocks_light": true,
         "full_cube": true,
-        "ao_occluder": true,
         "hardness": 0.2
       }
     },

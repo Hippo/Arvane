@@ -35,6 +35,7 @@ struct EntityRenderAssets {
   render::EntityModelID first_person_player_skin_model{};
   render::EntityModelID first_person_player_slim_model{};
   render::EntityModelID first_person_player_slim_skin_model{};
+  render::EntityModelID chunk_bounds_model{};
   HashMap<player::ItemID, render::EntityModelID> model_by_item{};
   std::vector<std::array<render::EntityModelID, BreakStageTextureCount>> break_overlay_model_by_variant{};
   std::vector<render::EntityModelID> outline_model_by_variant{};

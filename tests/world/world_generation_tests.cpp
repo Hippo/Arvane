@@ -7,8 +7,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -116,6 +119,146 @@ arv::world::worldgen::ResolvedDimension make_two_biome_blend_dimension() {
   dimension.biome_source.entries.push_back(std::move(low_entry));
   dimension.biome_source.entries.push_back(std::move(high_entry));
   return dimension;
+}
+
+arv::world::worldgen::ResolvedDimension make_flat_tree_dimension(
+    const arv::voxel::BlockRegistry& registry) {
+  namespace worldgen = arv::world::worldgen;
+
+  worldgen::ResolvedDimension dimension;
+  dimension.raw.id = "arvane:test/cross_chunk_tree";
+  dimension.raw.version = 1;
+  dimension.raw.seed_salt = "cross_chunk_tree";
+  dimension.raw.vertical.min_y = 0;
+  dimension.raw.vertical.max_y = 31;
+  dimension.raw.vertical.sea_level = -1;
+  dimension.terrain.height.base = 8;
+  dimension.terrain.height.scale = 0;
+  dimension.terrain.height.detail_scale = 0;
+  dimension.terrain.primary_noise.seed_salt = "flat_primary";
+  dimension.terrain.detail_noise.seed_salt = "flat_detail";
+
+  worldgen::BiomeConfig biome;
+  biome.id = "arvane:worldgen/biome/test_grassy";
+  dimension.biomes.push_back({std::move(biome), std::nullopt});
+
+  worldgen::ResolvedSurfaceRule rule;
+  rule.layers.push_back({registry.find_variant("arvane:grass_block").value(), 1, false});
+  rule.layers.push_back({registry.find_variant("arvane:dirt").value(), 1, true});
+  dimension.surface_rule_sets.push_back({"arvane:worldgen/surface_rule_set/test_grassy", {rule}});
+  dimension.dimension_surface_rule_set = 0U;
+
+  worldgen::SimpleTreeFeatureConfig tree_config;
+  tree_config.trunk_block = "arvane:oak_log";
+  tree_config.trunk_height = {4, 4};
+  tree_config.leaves_block = "arvane:oak_leaves";
+  tree_config.leaves_radius = {2, 2};
+
+  worldgen::ResolvedConfiguredFeature tree;
+  tree.id = "arvane:worldgen/configured_feature/test_oak_tree";
+  tree.type = "arvane:feature/simple_tree";
+  tree.raw.id = tree.id;
+  tree.raw.version = 1;
+  tree.raw.type = tree.type;
+  tree.raw.config = tree_config;
+  tree.blocks = {
+      registry.find_variant("arvane:oak_log").value(),
+      registry.find_variant("arvane:oak_leaves").value()};
+  tree.radius_blocks = 4;
+  dimension.configured_features.push_back(std::move(tree));
+
+  worldgen::ResolvedPlacedFeature placed;
+  placed.raw.id = "arvane:worldgen/placed_feature/test_oak_tree";
+  placed.raw.version = 1;
+  placed.raw.feature = {"arvane:worldgen/configured_feature/test_oak_tree"};
+  placed.raw.salt = 9871;
+  placed.raw.stage = worldgen::GenerationStage::SurfaceDecoration;
+  placed.raw.count.type = worldgen::PlacementCountConfig::Type::Uniform;
+  placed.raw.count.min = 1;
+  placed.raw.count.max = 1;
+  placed.raw.height.type = worldgen::PlacementHeightConfig::Type::Surface;
+  placed.feature_index = 0U;
+  placed.radius_blocks = dimension.configured_features.front().radius_blocks;
+  dimension.placed_features.push_back(std::move(placed));
+  dimension.dimension_features_by_stage[static_cast<arv::usize>(worldgen::GenerationStage::SurfaceDecoration)]
+      .push_back(0U);
+
+  return dimension;
+}
+
+arv::world::ChunkGenerationRequest make_resolved_request(
+    std::shared_ptr<const arv::world::worldgen::ResolvedDimension> dimension,
+    arv::u64 seed,
+    arv::ChunkCoord coord) {
+  arv::world::ChunkGenerationRequest request;
+  request.world_id = arv::WorldID{1};
+  request.seed = seed;
+  request.coord = coord;
+  request.min_chunk_y = arv::floor_div(dimension->raw.vertical.min_y, arv::ChunkSize);
+  request.max_chunk_y = arv::floor_div(dimension->raw.vertical.max_y, arv::ChunkSize);
+  request.config = arv::world::config_from_resolved_dimension(dimension);
+  request.resolved_dimension = std::move(dimension);
+  return request;
+}
+
+arv::voxel::BlockVariantID generated_block_at(
+    const arv::world::GeneratedChunk& chunk,
+    arv::BlockPos pos) {
+  const arv::ChunkSectionCoord coord = arv::block_to_chunk(pos);
+  for (const arv::world::GeneratedChunkSection& section : chunk.sections) {
+    if (section.coord == coord) {
+      return section.blocks[arv::voxel::local_index(arv::block_to_local(pos))];
+    }
+  }
+  return arv::voxel::AirBlockVariantID;
+}
+
+struct BorderTreeSample {
+  arv::u64 seed{};
+  arv::i32 world_z{};
+  arv::i32 base_y{};
+};
+
+std::optional<BorderTreeSample> find_east_border_tree_sample(
+    const arv::world::GeneratedChunk& origin_chunk,
+    const arv::world::GeneratedChunk& east_chunk,
+    arv::u64 seed,
+    arv::voxel::BlockVariantID log) {
+  for (const arv::world::GeneratedChunkSection& section : east_chunk.sections) {
+    for (arv::usize index = 0; index < arv::voxel::ChunkVolume; ++index) {
+      if (section.blocks[index] != log) {
+        continue;
+      }
+      const arv::SectionLocalPos local = arv::voxel::local_pos(index);
+      if (local.value.x <= 4) {
+        return std::nullopt;
+      }
+    }
+  }
+
+  std::array<arv::i32, arv::ChunkSize> min_trunk_y_by_z{};
+  min_trunk_y_by_z.fill(std::numeric_limits<arv::i32>::max());
+  for (const arv::world::GeneratedChunkSection& section : origin_chunk.sections) {
+    for (arv::usize index = 0; index < arv::voxel::ChunkVolume; ++index) {
+      if (section.blocks[index] != log) {
+        continue;
+      }
+      const arv::SectionLocalPos local = arv::voxel::local_pos(index);
+      if (local.value.x != arv::ChunkSize - 1) {
+        continue;
+      }
+      const arv::i32 world_y = section.coord.value.y * arv::ChunkSize + local.value.y;
+      min_trunk_y_by_z[static_cast<arv::usize>(local.value.z)] =
+          std::min(min_trunk_y_by_z[static_cast<arv::usize>(local.value.z)], world_y);
+    }
+  }
+
+  for (arv::usize z = 0; z < min_trunk_y_by_z.size(); ++z) {
+    if (min_trunk_y_by_z[z] != std::numeric_limits<arv::i32>::max()) {
+      return BorderTreeSample{seed, static_cast<arv::i32>(z), min_trunk_y_by_z[z]};
+    }
+  }
+  return std::nullopt;
 }
 
 arv::world::WorldGenerationConfig make_worldgen_config() {
@@ -246,6 +389,35 @@ TEST(WorldGenerationTests, PackWorldgenIsDeterministicAndBiomeBacked) {
     saw_biome = saw_biome || biome_index < config.resolved_dimension->biomes.size();
   }
   EXPECT_TRUE(saw_biome);
+}
+
+TEST(WorldGenerationTests, FeaturesOriginatingInNeighborChunksCanPopulateCurrentChunk) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  auto dimension = std::make_shared<arv::world::worldgen::ResolvedDimension>(
+      make_flat_tree_dimension(registry));
+  const arv::voxel::BlockVariantID log = registry.find_variant("arvane:oak_log").value();
+  const arv::voxel::BlockVariantID leaves =
+      registry.find_variant("arvane:oak_leaves").value();
+
+  std::optional<BorderTreeSample> sample;
+  arv::world::GeneratedChunk east_chunk;
+  for (arv::u64 seed = 1; seed < 5000 && !sample.has_value(); ++seed) {
+    auto origin = arv::world::generate_chunk(make_resolved_request(dimension, seed, {0, 0}));
+    auto east = arv::world::generate_chunk(make_resolved_request(dimension, seed, {1, 0}));
+    ASSERT_TRUE(origin) << origin.error().message;
+    ASSERT_TRUE(east) << east.error().message;
+    sample = find_east_border_tree_sample(origin.value(), east.value(), seed, log);
+    if (sample.has_value()) {
+      east_chunk = std::move(east.value());
+    }
+  }
+
+  ASSERT_TRUE(sample.has_value());
+  const arv::BlockPos expected_leaf{{
+      arv::ChunkSize,
+      sample->base_y + 4,
+      sample->world_z}};
+  EXPECT_EQ(generated_block_at(east_chunk, expected_leaf), leaves);
 }
 
 TEST(WorldGenerationTests, PackOverworldScanFindsMultipleBiomeFamilies) {

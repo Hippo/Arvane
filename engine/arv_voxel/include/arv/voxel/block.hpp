@@ -69,6 +69,11 @@ enum class RenderCategory : u8 {
   Transparent,
 };
 
+enum class BlockRenderTint : u8 {
+  None,
+  Foliage,
+};
+
 enum class BlockDropKind : u8 {
   Default,
   None,
@@ -134,6 +139,7 @@ struct BlockDefinition {
   bool is_item{true};
   f32 item_buoyancy{1.0F};
   bool hide_same_variant_faces{true};
+  BlockRenderTint render_tint{BlockRenderTint::None};
   std::array<std::string, BlockFaceCount> texture_assets{};
   BlockModelReference model{};
   std::vector<StatePropertyDefinition> states{};
@@ -172,6 +178,7 @@ struct BlockVariantRecord {
   BlockProperties properties{};
   BlockPhysicsProperties physics{};
   RenderCategory render_category{RenderCategory::None};
+  BlockRenderTint render_tint{BlockRenderTint::None};
   bool hide_same_variant_faces{};
   std::array<std::string, BlockFaceCount> texture_assets{};
   BlockModelReference model{};

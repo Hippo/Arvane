@@ -11,11 +11,19 @@ uniform sampler2DArray u_terrain_atlas;
 uniform vec2 u_atlas_size;
 out vec4 frag_color;
 
+const uint VertexMaterialClassCutout = 1u;
 const uint VertexMaterialClassWater = 3u;
+const uint VertexMaterialClassFoliage = 5u;
 const uint VertexAnimationWaterStill = 1u;
 const uint VertexAnimationWaterFlow = 2u;
 const uint VertexAnimationWaterSurface = 3u;
+const uint VertexMaterialFlagTintFromBiome = 1u;
 const uint VertexMaterialFlagTintFromFluid = 2u;
+
+vec3 biome_tint_for_vertex(uint material_class) {
+  // TODO(materials): resolve this through per-column biome tint data.
+  return material_class == VertexMaterialClassFoliage ? vec3(0.42, 0.68, 0.28) : vec3(1.0);
+}
 
 vec3 fluid_tint_for_vertex(uint material_class) {
   // TODO(materials): resolve this through material/fluid/biome tint data.
@@ -31,6 +39,13 @@ bool is_water_animation(uint animation_id) {
 void main() {
   vec2 atlas_size = max(u_atlas_size, vec2(1.0, 1.0));
   vec4 texel = texture(u_terrain_atlas, vec3(v_uv / atlas_size, float(v_atlas_page)));
+  if ((v_material_class == VertexMaterialClassCutout || v_material_class == VertexMaterialClassFoliage) &&
+      texel.a < 0.5) {
+    discard;
+  }
+  if ((v_material_flags & VertexMaterialFlagTintFromBiome) != 0u) {
+    texel.rgb *= biome_tint_for_vertex(v_material_class);
+  }
   if ((v_material_flags & VertexMaterialFlagTintFromFluid) != 0u) {
     texel.rgb *= fluid_tint_for_vertex(v_material_class);
   }

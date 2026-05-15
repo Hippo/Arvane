@@ -21,6 +21,11 @@ arv::voxel::BlockRegistry make_registry() {
   definitions.push_back(arv::voxel::make_full_cube_definition(
       "arvane:leaves",
       arv::voxel::RenderCategory::Cutout));
+  arv::voxel::BlockDefinition oak_leaves = arv::voxel::make_full_cube_definition(
+      "arvane:oak_leaves",
+      arv::voxel::RenderCategory::Cutout);
+  oak_leaves.render_tint = arv::voxel::BlockRenderTint::Foliage;
+  definitions.push_back(std::move(oak_leaves));
   arv::voxel::BlockDefinition water;
   water.name = "arvane:water";
   water.properties.replaceable = true;
@@ -315,6 +320,27 @@ TEST(ChunkMeshingTests, CutoutCubeUsesOpaqueMeshWithCutoutMaterialClass) {
   EXPECT_EQ(
       arv::render::unpack_chunk_material_class(vertex.light_face_material_hints),
       arv::render::VertexMaterialClass::Cutout);
+}
+
+TEST(ChunkMeshingTests, FoliageTintUsesOpaqueMeshWithBiomeTintFlag) {
+  const arv::voxel::BlockRegistry registry = make_registry();
+  const arv::voxel::BlockVariantID leaves = registry.find_variant("arvane:oak_leaves").value();
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{4, 4, 4}}, leaves));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+
+  EXPECT_EQ(face_count(mesh.opaque), 6U);
+  EXPECT_EQ(face_count(mesh.transparent), 0U);
+  ASSERT_GT(arv::render::chunk_vertex_count(mesh.opaque), 0U);
+  const arv::render::ChunkVertex vertex = arv::render::chunk_vertex_at(mesh.opaque, 0);
+  EXPECT_EQ(
+      arv::render::unpack_chunk_material_class(vertex.light_face_material_hints),
+      arv::render::VertexMaterialClass::Foliage);
+  EXPECT_TRUE(arv::render::has_vertex_material_flag(
+      arv::render::unpack_chunk_material_flags(vertex.light_face_material_hints),
+      arv::render::VertexMaterialFlag_TintFromBiome));
 }
 
 TEST(ChunkMeshingTests, CustomBlockModelEmitsBoxFacesForNonFullCubeVariant) {

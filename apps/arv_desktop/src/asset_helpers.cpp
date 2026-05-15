@@ -23,6 +23,7 @@ constexpr u32 FirstPersonPlayerEntityModelID = 5'000'000U;
 constexpr u32 FirstPersonPlayerSkinEntityModelID = 5'000'001U;
 constexpr u32 FirstPersonPlayerSlimEntityModelID = 5'000'002U;
 constexpr u32 FirstPersonPlayerSlimSkinEntityModelID = 5'000'003U;
+constexpr u32 ChunkBoundsEntityModelID = 6'000'000U;
 constexpr std::string_view WhiteTextureAsset = "arvane:texture/generated_white";
 constexpr std::string_view DefaultPlayerSkinTextureAsset =
     "arvane:texture/default_skin/default";
@@ -63,6 +64,10 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
 
 [[nodiscard]] render::EntityModelID first_person_player_slim_skin_model_id() noexcept {
   return render::EntityModelID{FirstPersonPlayerSlimSkinEntityModelID};
+}
+
+[[nodiscard]] render::EntityModelID chunk_bounds_model_id() noexcept {
+  return render::EntityModelID{ChunkBoundsEntityModelID};
 }
 
 [[nodiscard]] render::EntityModelID break_overlay_model_id(
@@ -828,6 +833,27 @@ EntityRenderAssetsResult build_entity_render_assets(
 
   assets.break_overlay_model_by_variant.resize(block_registry.variant_count());
   assets.outline_model_by_variant.resize(block_registry.variant_count());
+  const asset::TextureAtlasEntry* white_entry =
+      assets.texture_atlas.find(std::string{WhiteTextureAsset});
+  if (white_entry == nullptr) {
+    return EntityRenderAssetsResult::failure({std::string{WhiteTextureAsset},
+                                              {},
+                                              "build outline models",
+                                              "white texture was not present in final atlas"});
+  }
+
+  render::BlockOutlineModelInput chunk_bounds_input;
+  chunk_bounds_input.id = chunk_bounds_model_id();
+  chunk_bounds_input.name = "debug#chunk_bounds";
+  chunk_bounds_input.uvs =
+      atlas_face_uvs(*white_entry, voxel::default_cube_face_uvs(voxel::BlockFace::PositiveY));
+  chunk_bounds_input.atlas_page = static_cast<u16>(white_entry->page);
+  chunk_bounds_input.color = {0.08F, 0.75F, 1.0F};
+  chunk_bounds_input.thickness_sixteenths = 0.04F;
+  chunk_bounds_input.inflate_sixteenths = 0.01F;
+  assets.chunk_bounds_model = chunk_bounds_input.id;
+  assets.models.push_back(render::build_block_outline_model(chunk_bounds_input));
+
   for (u32 variant_value = 0; variant_value < block_registry.variant_count(); ++variant_value) {
     const voxel::BlockVariantID variant_id{variant_value};
     const voxel::BlockVariantRecord* variant = block_registry.variant(variant_id);
@@ -872,15 +898,6 @@ EntityRenderAssetsResult build_entity_render_assets(
       }
       assets.break_overlay_model_by_variant[variant_value][stage] = input.id;
       assets.models.push_back(render::build_block_break_overlay_model(input));
-    }
-
-    const asset::TextureAtlasEntry* white_entry =
-        assets.texture_atlas.find(std::string{WhiteTextureAsset});
-    if (white_entry == nullptr) {
-      return EntityRenderAssetsResult::failure({std::string{WhiteTextureAsset},
-                                                {},
-                                                "build block outline model",
-                                                "white texture was not present in final atlas"});
     }
 
     render::BlockOutlineModelInput outline_input;

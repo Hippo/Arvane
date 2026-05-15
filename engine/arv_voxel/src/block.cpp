@@ -28,6 +28,17 @@ namespace {
   return Expected<RenderCategory, BlockRegistryError>::failure({"invalid render_category: " + value});
 }
 
+[[nodiscard]] Expected<BlockRenderTint, BlockRegistryError> parse_render_tint(
+    const std::string& value) {
+  if (value == "none") {
+    return Expected<BlockRenderTint, BlockRegistryError>::success(BlockRenderTint::None);
+  }
+  if (value == "foliage") {
+    return Expected<BlockRenderTint, BlockRegistryError>::success(BlockRenderTint::Foliage);
+  }
+  return Expected<BlockRenderTint, BlockRegistryError>::failure({"invalid render_tint: " + value});
+}
+
 [[nodiscard]] bool is_integer(const io::DataValue& value) noexcept {
   return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64;
 }
@@ -683,6 +694,7 @@ BlockRegistry::Result BlockRegistry::build(
       variant.properties = definition.properties;
       variant.physics = definition.physics;
       variant.render_category = definition.render_category;
+      variant.render_tint = definition.render_tint;
       variant.hide_same_variant_faces = definition.hide_same_variant_faces;
       variant.texture_assets = definition.texture_assets;
       variant.model = definition.model;
@@ -1032,6 +1044,18 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
           return BlockDefinitionsResult::failure(parsed_category.error());
         }
         definition.render_category = parsed_category.value();
+      }
+
+      const io::DataValue* tint_iter = item.get("render_tint");
+      if (tint_iter != nullptr) {
+        if (tint_iter->kind() != io::DataKind::String) {
+          return BlockDefinitionsResult::failure({"render_tint must be a string for " + definition.name});
+        }
+        auto parsed_tint = parse_render_tint(std::string{tint_iter->as_string_or({})});
+        if (!parsed_tint) {
+          return BlockDefinitionsResult::failure(parsed_tint.error());
+        }
+        definition.render_tint = parsed_tint.value();
       }
 
       const io::DataValue* tags_iter = item.get("tags");

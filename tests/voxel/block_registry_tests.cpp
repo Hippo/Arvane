@@ -120,6 +120,18 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
       "hardness": 0.3,
       "slipperiness": 0.98
     }
+  },
+  {
+    "name": "arvane:oak_leaves",
+    "render_category": "cutout",
+    "render_tint": "foliage",
+    "textures": "arvane:texture/block/oak_leaves",
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "full_cube": true,
+      "hardness": 0.2
+    }
   }
 ]
 )json");
@@ -146,6 +158,11 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   EXPECT_EQ(glass_block->behavior_id, "test:block_behavior/glass");
   EXPECT_FLOAT_EQ(glass_block->item_buoyancy, 0.75F);
   EXPECT_EQ(glass_block->drops.kind, arv::voxel::BlockDropKind::None);
+  const arv::voxel::BlockVariantRecord* leaves =
+      registry.variant(registry.find_variant("arvane:oak_leaves").value());
+  ASSERT_NE(leaves, nullptr);
+  EXPECT_EQ(leaves->render_category, arv::voxel::RenderCategory::Cutout);
+  EXPECT_EQ(leaves->render_tint, arv::voxel::BlockRenderTint::Foliage);
 }
 
 TEST(BlockRegistryTests, ValidatesAuthoredBehaviorIdsWhenCallbackIsProvided) {

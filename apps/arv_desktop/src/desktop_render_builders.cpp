@@ -226,6 +226,7 @@ void populate_world_frame_draw_items(
     const EntityRenderAssets& entity_render_assets,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
     const io::RenderConfig& render_config,
+    bool show_chunk_boundaries,
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point app_start_time,
     f32 interpolation_alpha) {
@@ -239,6 +240,18 @@ void populate_world_frame_draw_items(
   frame.sky = sky_uniforms_from_clock(sky_world.clock(), render_config);
   const std::optional<PlayerID> local_player_id = session.client->local_player_id();
   const std::optional<EntityNetID> local_entity_id = session.client->local_entity_id();
+
+  if (show_chunk_boundaries && entity_render_assets.chunk_bounds_model.value != 0U) {
+    const ChunkSectionCoord chunk = world_position_chunk_section_coord(session.client->player_position());
+    render::EntityDrawItem bounds;
+    bounds.model_id = entity_render_assets.chunk_bounds_model;
+    bounds.position = {
+        static_cast<f32>(chunk.value.x * ChunkSize) + static_cast<f32>(ChunkSize) * 0.5F,
+        static_cast<f32>(chunk.value.y * ChunkSize) + static_cast<f32>(ChunkSize) * 0.5F,
+        static_cast<f32>(chunk.value.z * ChunkSize) + static_cast<f32>(ChunkSize) * 0.5F};
+    bounds.scale = static_cast<f32>(ChunkSize);
+    frame.entities.push_back(std::move(bounds));
+  }
 
   for (const client::ReplicatedEntityMirror& mirror :
        session.client->replicated_entity_mirrors()) {

@@ -22,6 +22,7 @@ void populate_world_frame_draw_items(
     const EntityRenderAssets& entity_render_assets,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
     const io::RenderConfig& render_config,
+    bool show_chunk_boundaries,
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point app_start_time,
     f32 interpolation_alpha);
