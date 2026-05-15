@@ -757,13 +757,15 @@ void build_skin_manager_dialog(
   screens_detail::add_backdrop(
       ctx.tree,
       std::string{base_id} + ".backdrop",
-      {0.0F, 0.0F, 0.0F, 0.58F});
+      {0.0F, 0.0F, 0.0F, 0.58F},
+      screens_detail::ModalLayer);
 
   UiElement panel = screens_detail::make_panel(
       std::string{base_id} + ".panel",
       SkinDialogWidth,
       SkinDialogHeight,
       theme.colors.surface);
+  panel.layer = screens_detail::ModalLayer;
   panel.layout.anchor = UiAnchor::Center;
   panel.layout.padding = {
       theme.widgets.panel.padding,
@@ -1075,7 +1077,7 @@ public:
       return;
     }
     if (!initialized_) {
-      display_name_ = profile->display_name;
+      display_name_ = screens_detail::TextEditBuffer{profile->display_name};
       initialized_ = true;
     }
 
@@ -1089,7 +1091,7 @@ public:
         display_name_,
         screens_detail::tr(ctx, "ui.menu.account.display_name_placeholder"),
         "account.focus_name",
-        true);
+        !confirm_delete_ && !skin_manager_.open);
     screens_detail::add_button(
         ctx.tree,
         stack,
@@ -1194,7 +1196,10 @@ public:
       confirm_delete_ = false;
       return true;
     }
-    return action.action_id == "account.focus_name";
+    if (action.action_id == "account.focus_name") {
+      return true;
+    }
+    return false;
   }
 
   bool handle_text_input(std::string_view text, UIContext& ctx) override {
@@ -1202,20 +1207,24 @@ public:
     if (confirm_delete_ || skin_manager_.open) {
       return false;
     }
-    display_name_.append(text.substr(0U, std::min<usize>(text.size(), 32U)));
-    if (display_name_.size() > 32U) {
-      display_name_.resize(32U);
-    }
+    display_name_.insert(text, 32U);
     return true;
   }
 
   bool handle_backspace(UIContext& ctx) override {
     (void)ctx;
-    if (confirm_delete_ || skin_manager_.open || display_name_.empty()) {
+    if (confirm_delete_ || skin_manager_.open) {
       return false;
     }
-    screens_detail::erase_last_utf8_codepoint(display_name_);
+    (void)display_name_.backspace();
     return true;
+  }
+
+  bool handle_text_edit(const UITextEditInput& input, UIContext& ctx) override {
+    if (confirm_delete_ || skin_manager_.open) {
+      return false;
+    }
+    return screens_detail::handle_text_edit(display_name_, input, ctx, 32U);
   }
 
   bool handle_submit(UIContext& ctx) override {
@@ -1319,7 +1328,9 @@ private:
         ctx,
         UpdateLocalProfileCommand{
             profile_id_,
-            screens_detail::trim_copy(display_name_).empty() ? "local_player" : display_name_});
+            screens_detail::trim_copy(display_name_.value).empty()
+                ? std::string{"local_player"}
+                : display_name_.value});
     if (ctx.screens != nullptr) {
       ctx.screens->pop();
     }
@@ -1339,12 +1350,14 @@ private:
     screens_detail::add_backdrop(
         ctx.tree,
         "menu.account_edit.confirm.backdrop",
-        {0.0F, 0.0F, 0.0F, 0.56F});
+        {0.0F, 0.0F, 0.0F, 0.56F},
+        screens_detail::ModalLayer);
     UiElement panel = screens_detail::make_panel(
         "menu.account_edit.confirm.panel",
         430.0F,
         206.0F,
         theme.colors.surface);
+    panel.layer = screens_detail::ModalLayer;
     panel.layout.anchor = UiAnchor::Center;
     panel.layout.padding = {
         theme.widgets.panel.padding,
@@ -1383,7 +1396,7 @@ private:
   }
 
   std::string profile_id_{};
-  std::string display_name_{};
+  screens_detail::TextEditBuffer display_name_{};
   bool initialized_{};
   bool confirm_delete_{};
   SkinManagerState skin_manager_{};
@@ -1413,7 +1426,7 @@ public:
         display_name_,
         screens_detail::tr(ctx, "ui.menu.account.display_name_placeholder"),
         "account.focus_name",
-        true);
+        !skin_manager_.open);
     screens_detail::add_button(
         ctx.tree,
         stack,
@@ -1483,26 +1496,33 @@ public:
     if (action.action_id == "account.cancel") {
       return cancel(ctx);
     }
-    return action.action_id == "account.focus_name";
+    if (action.action_id == "account.focus_name") {
+      return true;
+    }
+    return false;
   }
 
   bool handle_text_input(std::string_view text, UIContext&) override {
     if (skin_manager_.open) {
       return false;
     }
-    display_name_.append(text.substr(0U, std::min<usize>(text.size(), 32U)));
-    if (display_name_.size() > 32U) {
-      display_name_.resize(32U);
-    }
+    display_name_.insert(text, 32U);
     return true;
   }
 
   bool handle_backspace(UIContext&) override {
-    if (skin_manager_.open || display_name_.empty()) {
+    if (skin_manager_.open) {
       return false;
     }
-    screens_detail::erase_last_utf8_codepoint(display_name_);
+    (void)display_name_.backspace();
     return true;
+  }
+
+  bool handle_text_edit(const UITextEditInput& input, UIContext& ctx) override {
+    if (skin_manager_.open) {
+      return false;
+    }
+    return screens_detail::handle_text_edit(display_name_, input, ctx, 32U);
   }
 
   bool handle_submit(UIContext& ctx) override {
@@ -1596,16 +1616,16 @@ private:
   }
 
   bool complete(UIContext& ctx) {
-    const std::string name = screens_detail::trim_copy(display_name_);
+    const std::string name = screens_detail::trim_copy(display_name_.value);
     if (name.empty()) {
-      display_name_ = "local_player";
+      display_name_ = screens_detail::TextEditBuffer{"local_player"};
     }
     screens_detail::submit_command(
         ctx,
         CreateLocalProfileCommand{
-            screens_detail::trim_copy(display_name_).empty()
+            screens_detail::trim_copy(display_name_.value).empty()
                 ? std::string{"local_player"}
-                : screens_detail::trim_copy(display_name_)});
+                : screens_detail::trim_copy(display_name_.value)});
     if (ctx.screens != nullptr) {
       ctx.screens->pop();
     }
@@ -1620,7 +1640,7 @@ private:
     return true;
   }
 
-  std::string display_name_{"local_player"};
+  screens_detail::TextEditBuffer display_name_{"local_player"};
   SkinManagerState skin_manager_{};
   bool dragging_preview_{};
   std::optional<Vec2f> last_drag_cursor_{};

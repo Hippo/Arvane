@@ -76,8 +76,9 @@ public:
     add_error_text(ctx.tree, stack, "menu.single_player.error", error_);
 
     if (confirm_delete_ && selected_save_.has_value() && selected_save_.value() < saves.size()) {
-      add_backdrop(ctx.tree, "menu.single_player.confirm.backdrop", {0.0F, 0.0F, 0.0F, 0.52F});
+      add_backdrop(ctx.tree, "menu.single_player.confirm.backdrop", {0.0F, 0.0F, 0.0F, 0.52F}, ModalLayer);
       UiElement panel = make_panel("menu.single_player.confirm.panel", 380.0F, 194.0F);
+      panel.layer = ModalLayer;
       panel.layout.anchor = UiAnchor::Center;
       panel.layout.padding = {
           theme.widgets.panel.padding,
@@ -248,10 +249,16 @@ public:
 
   bool handle_action(const UiAction& action, UIContext& ctx) override {
     if (action.action_id == "create_world.focus_name") {
+      if (active_field_ != TextField::Name) {
+        name_.move_cursor_to_end();
+      }
       active_field_ = TextField::Name;
       return true;
     }
     if (action.action_id == "create_world.focus_seed") {
+      if (active_field_ != TextField::Seed) {
+        seed_.move_cursor_to_end();
+      }
       active_field_ = TextField::Seed;
       return true;
     }
@@ -266,11 +273,11 @@ public:
 
   bool handle_text_input(std::string_view text, UIContext&) override {
     if (active_field_ == TextField::Name) {
-      name_ += text;
+      name_.insert(text);
       return true;
     }
     if (active_field_ == TextField::Seed) {
-      seed_ += text;
+      seed_.insert(text);
       return true;
     }
     return false;
@@ -278,12 +285,22 @@ public:
 
   bool handle_backspace(UIContext&) override {
     if (active_field_ == TextField::Name) {
-      erase_last_utf8_codepoint(name_);
+      (void)name_.backspace();
       return true;
     }
     if (active_field_ == TextField::Seed) {
-      erase_last_utf8_codepoint(seed_);
+      (void)seed_.backspace();
       return true;
+    }
+    return false;
+  }
+
+  bool handle_text_edit(const UITextEditInput& input, UIContext& ctx) override {
+    if (active_field_ == TextField::Name) {
+      return screens_detail::handle_text_edit(name_, input, ctx);
+    }
+    if (active_field_ == TextField::Seed) {
+      return screens_detail::handle_text_edit(seed_, input, ctx);
     }
     return false;
   }
@@ -306,8 +323,8 @@ public:
 
 private:
   bool create(UIContext& ctx) {
-    const std::string name = trim_copy(name_);
-    const std::string seed = trim_copy(seed_);
+    const std::string name = trim_copy(name_.value);
+    const std::string seed = trim_copy(seed_.value);
     const std::string sanitized = sanitize_world_folder_name(name);
     if (name.empty()) {
       error_ = tr(ctx, "ui.menu.create_world.error_name_required");
@@ -336,8 +353,8 @@ private:
   }
 
   TextField active_field_{TextField::Name};
-  std::string name_{};
-  std::string seed_{};
+  TextEditBuffer name_{};
+  TextEditBuffer seed_{};
   std::string error_{};
 };
 

@@ -131,6 +131,9 @@ public:
   [[nodiscard]] bool inventory_open() const noexcept;
   [[nodiscard]] bool chat_open() const noexcept;
   [[nodiscard]] const std::string& chat_draft() const noexcept;
+  [[nodiscard]] usize chat_draft_cursor() const noexcept;
+  [[nodiscard]] usize chat_draft_selection_start() const noexcept;
+  [[nodiscard]] usize chat_draft_selection_end() const noexcept;
   [[nodiscard]] std::span<const std::string> chat_messages() const noexcept;
   [[nodiscard]] std::span<const ChatHistoryEntry> chat_history() const noexcept;
   void close_chat() noexcept;
@@ -140,6 +143,7 @@ public:
   void cancel_chat_url_confirmation() noexcept;
   void acknowledge_chat_url_open_unavailable();
   [[nodiscard]] const std::optional<std::string>& pending_chat_url_confirmation() const noexcept;
+  [[nodiscard]] std::optional<std::string> consume_pending_clipboard_text();
   [[nodiscard]] bool tab_menu_visible() const noexcept;
   [[nodiscard]] std::vector<protocol::ClientboundChunkSectionData> drain_received_chunk_section_data();
   [[nodiscard]] std::vector<protocol::ClientboundChunkSectionUnload> drain_received_chunk_section_unloads();

@@ -105,6 +105,10 @@ namespace {
     return std::nullopt;
   }
   auto parse_number = [](std::string_view text) -> std::optional<usize> {
+    const usize dot = text.find('.');
+    if (dot != std::string_view::npos) {
+      text = text.substr(0U, dot);
+    }
     if (text.empty()) {
       return std::nullopt;
     }
@@ -195,6 +199,9 @@ namespace {
   hash = ui_cache_hash_append_bool(hash, session.client->chat_open());
   hash = ui_cache_hash_append_bool(hash, session.client->tab_menu_visible());
   hash = ui_cache_hash_append_string(hash, session.client->chat_draft());
+  hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_cursor());
+  hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_selection_start());
+  hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_selection_end());
   hash = ui_cache_hash_append_string(hash, hotbar_item_popup_name);
   hash = ui_cache_hash_append_f32(hash, hotbar_item_popup_alpha);
   hash = ui_cache_hash_append_u64(hash, displayed_fps);
@@ -429,7 +436,8 @@ void DesktopFrameLoop::build_ui(
       assets_.font_system,
       assets_.ui_font_stacks,
       frame,
-      ui_metrics_);
+      ui_metrics_,
+      std::chrono::duration<f32>(now - app_start_time_).count());
   if (assets_.font_system.atlas_dirty()) {
     renderer_.set_ui_font_atlas(
         texture_array_upload_from_image(assets_.font_system.atlas_image()));
@@ -769,6 +777,9 @@ void DesktopFrameLoop::build_gameplay_ui(
                   active_session.chat_lines.data(),
                   active_session.chat_lines.size()},
               active_session.client->chat_draft(),
+              active_session.client->chat_draft_cursor(),
+              active_session.client->chat_draft_selection_start(),
+              active_session.client->chat_draft_selection_end(),
               active_session.client->pending_chat_url_confirmation(),
               active_session.client->chat_open() ? config_.ui.chat.open_max_lines
                                                  : config_.ui.chat.passive_max_lines,

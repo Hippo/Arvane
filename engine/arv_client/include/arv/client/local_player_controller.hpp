@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/client/camera_shell.hpp"
+#include "arv/core/text_edit.hpp"
 #include "arv/physics/player_movement.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
@@ -8,6 +9,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace arv::client {
 
@@ -36,6 +38,7 @@ struct InputFrame {
   bool text_backspace_pressed{};
   bool text_submit_pressed{};
   bool text_cancel_pressed{};
+  std::vector<arv::core::TextEditInput> text_edit_events{};
 };
 
 class LocalPlayerController {

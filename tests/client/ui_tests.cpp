@@ -48,6 +48,19 @@ public:
   std::vector<arv::ui::UICommand> commands{};
 };
 
+class FixedClipboard final : public arv::ui::UIClipboard {
+public:
+  [[nodiscard]] std::string text() const override {
+    return value;
+  }
+
+  void set_text(std::string text) override {
+    value = std::move(text);
+  }
+
+  std::string value{};
+};
+
 class FixedMenuData final : public arv::ui::UIScreenDataSource {
 public:
   [[nodiscard]] std::vector<arv::ui::SinglePlayerSaveEntry> singleplayer_saves() const override {
@@ -772,7 +785,7 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
       {
           {0, 9, {800.0F, 600.0F}, {slots.data(), 9}},
           {true, "Inventory", 0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}},
-          {true, true, {chat.data(), chat.size()}, "test"},
+          {true, true, {chat.data(), chat.size()}, "test", 4U, 1U, 3U},
           {true, "Players", "footer", {players.data(), players.size()}},
           {true, "Stats", {scoreboard_lines.data(), scoreboard_lines.size()}, &vars},
           {true, 144},
@@ -796,6 +809,11 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   EXPECT_GE(chat_input->rect.height, tree.theme().widgets.input.height);
   EXPECT_GT(chat_input->style.background.w, 0.0F);
   EXPECT_LT(chat_input->style.background.w, 1.0F);
+  ASSERT_TRUE(chat_input->text_input.has_value());
+  EXPECT_EQ(chat_input->text, "> test");
+  EXPECT_EQ(chat_input->text_input->cursor, 6U);
+  EXPECT_EQ(chat_input->text_input->selection_start, 3U);
+  EXPECT_EQ(chat_input->text_input->selection_end, 5U);
   ASSERT_NE(tree.find_by_stable_id("tab.panel"), nullptr);
   const auto* scoreboard_line = tree.find_by_stable_id("scoreboard.line.0");
   ASSERT_NE(scoreboard_line, nullptr);
@@ -847,6 +865,55 @@ TEST(GameplayUiTests, RichChatRunsExposeColorAndHitActions) {
   EXPECT_EQ(run_panel->action, "chat_run");
   const auto hover = tree.route_mouse_move(
       {run_panel->rect.x + 1.0F, run_panel->rect.y + 1.0F});
+  ASSERT_TRUE(hover.has_value());
+  EXPECT_EQ(hover->action_id, "chat_run");
+}
+
+TEST(GameplayUiTests, ChatWrapsLongMessagesIntoAdditionalRows) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  const std::string long_text =
+      "This message is intentionally long enough to wrap into more than one visual chat row.";
+  arv::ui::ChatLineView line{long_text, 1.0F};
+  arv::ui::build_chat_ui(tree, {true, true, {&line, 1U}, ""});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* first = tree.find_by_stable_id("chat.line.0");
+  const auto* second = tree.find_by_stable_id("chat.line.0.wrap.1");
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  EXPECT_LT(first->text.size(), long_text.size());
+  EXPECT_FALSE(second->text.empty());
+}
+
+TEST(GameplayUiTests, WrappedRichChatRunsKeepInteractiveActions) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  const std::string long_text =
+      "Click this long wrapped rich chat message because it should stay interactive after wrapping.";
+  arv::text::RichText rich =
+      arv::text::RichTextBuilder()
+          .append(long_text, arv::text::style_patch_color(0x40U, 0xE0U, 0x90U))
+          .click_suggest_command("/reply ")
+          .hover_text("Reply")
+          .build();
+  arv::ui::ChatLineView line;
+  line.text = arv::text::to_plain_text(rich);
+  line.opacity = 1.0F;
+  line.runs = arv::text::flatten_rich_text(rich);
+
+  arv::ui::build_chat_ui(tree, {true, true, {&line, 1U}, ""});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* wrapped_run_text = tree.find_by_stable_id("chat.line.0.wrap.1.run.0.text");
+  const auto* wrapped_run_panel = tree.find_by_stable_id("chat.line.0.wrap.1.run.0");
+  ASSERT_NE(wrapped_run_text, nullptr);
+  ASSERT_NE(wrapped_run_panel, nullptr);
+  EXPECT_EQ(wrapped_run_panel->action, "chat_run");
+  const auto hover = tree.route_mouse_move(
+      {wrapped_run_panel->rect.x + 1.0F, wrapped_run_panel->rect.y + 1.0F});
   ASSERT_TRUE(hover.has_value());
   EXPECT_EQ(hover->action_id, "chat_run");
 }
@@ -1650,6 +1717,35 @@ TEST(MenuScreenTests, SinglePlayerSelectedWorldEmitsServerSaveAndWorldName) {
   EXPECT_TRUE(screens.empty());
 }
 
+TEST(MenuScreenTests, SinglePlayerDeleteConfirmationUsesModalLayer) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  data.saves.push_back({"Server One", "server-one", "default", "saved"});
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_single_player_menu_screen());
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
+
+  EXPECT_TRUE(screens.route_action(
+      {"menu.single_player.world.0", "single_player.select_world", "click"},
+      ctx));
+  EXPECT_TRUE(screens.route_action(
+      {"menu.single_player.delete", "single_player.delete", "click"},
+      ctx));
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* create_label = tree.find_by_stable_id("menu.single_player.create.label");
+  const auto* confirm_panel = tree.find_by_stable_id("menu.single_player.confirm.panel");
+  const auto* confirm_text = tree.find_by_stable_id("menu.single_player.confirm.text");
+  ASSERT_NE(create_label, nullptr);
+  ASSERT_NE(confirm_panel, nullptr);
+  ASSERT_NE(confirm_text, nullptr);
+  EXPECT_GT(confirm_panel->layer, create_label->layer);
+  EXPECT_EQ(confirm_text->layer, confirm_panel->layer);
+}
+
 TEST(MenuScreenTests, CreateWorldValidatesBeforeEmittingCommand) {
   arv::ui::UiTree tree;
   CapturingCommandSink sink;
@@ -1672,6 +1768,46 @@ TEST(MenuScreenTests, CreateWorldValidatesBeforeEmittingCommand) {
   ASSERT_EQ(sink.commands.size(), 1U);
   ASSERT_TRUE(std::holds_alternative<arv::ui::CreateWorldCommand>(sink.commands[0]));
   EXPECT_EQ(std::get<arv::ui::CreateWorldCommand>(sink.commands[0]).name, "Fresh");
+}
+
+TEST(MenuScreenTests, TextInputsSupportCursorSelectionAndClipboard) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedClipboard clipboard;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_create_world_screen());
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
+  ctx.clipboard = &clipboard;
+
+  EXPECT_TRUE(screens.handle_text_input("Alpha", ctx));
+  EXPECT_TRUE(screens.handle_text_edit({arv::ui::UITextEditCommand::MoveLeft, false}, ctx));
+  EXPECT_TRUE(screens.handle_text_edit({arv::ui::UITextEditCommand::MoveLeft, false}, ctx));
+  EXPECT_TRUE(screens.handle_text_input("X", ctx));
+  EXPECT_TRUE(screens.handle_text_edit({arv::ui::UITextEditCommand::MoveLeft, true}, ctx));
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* input = tree.find_by_stable_id("menu.create_world.name");
+  ASSERT_NE(input, nullptr);
+  ASSERT_TRUE(input->text_input.has_value());
+  EXPECT_EQ(input->text, "AlpXha");
+  EXPECT_EQ(input->text_input->selection_start, 3U);
+  EXPECT_EQ(input->text_input->selection_end, 4U);
+
+  EXPECT_TRUE(screens.handle_text_edit({arv::ui::UITextEditCommand::Copy, false}, ctx));
+  EXPECT_EQ(clipboard.value, "X");
+  EXPECT_TRUE(screens.handle_text_edit({arv::ui::UITextEditCommand::Cut, false}, ctx));
+  EXPECT_TRUE(screens.handle_text_edit({arv::ui::UITextEditCommand::Paste, false}, ctx));
+  clipboard.value = "World";
+  EXPECT_TRUE(screens.handle_text_edit({arv::ui::UITextEditCommand::SelectAll, false}, ctx));
+  EXPECT_TRUE(screens.handle_text_edit({arv::ui::UITextEditCommand::Paste, false}, ctx));
+  EXPECT_TRUE(screens.handle_submit(ctx));
+
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::CreateWorldCommand>(sink.commands[0]));
+  EXPECT_EQ(std::get<arv::ui::CreateWorldCommand>(sink.commands[0]).name, "World");
 }
 
 TEST(MenuScreenTests, AddServerAcceptsAddressWithoutPort) {

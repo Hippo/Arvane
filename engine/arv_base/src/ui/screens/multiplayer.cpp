@@ -270,8 +270,9 @@ public:
 
     if (confirm_remove_ && selected_server_.has_value() &&
         selected_server_.value() < servers.size()) {
-      add_backdrop(ctx.tree, "menu.multi_player.confirm.backdrop", {0.0F, 0.0F, 0.0F, 0.52F});
+      add_backdrop(ctx.tree, "menu.multi_player.confirm.backdrop", {0.0F, 0.0F, 0.0F, 0.52F}, ModalLayer);
       UiElement panel = make_panel("menu.multi_player.confirm.panel", 392.0F, 194.0F);
+      panel.layer = ModalLayer;
       panel.layout.anchor = UiAnchor::Center;
       panel.layout.padding = {
           theme.widgets.panel.padding,
@@ -445,10 +446,16 @@ public:
 
   bool handle_action(const UiAction& action, UIContext& ctx) override {
     if (action.action_id == "server.focus_name") {
+      if (active_field_ != TextField::ServerName) {
+        server_name_.move_cursor_to_end();
+      }
       active_field_ = TextField::ServerName;
       return true;
     }
     if (action.action_id == "server.focus_address") {
+      if (active_field_ != TextField::Address) {
+        address_.move_cursor_to_end();
+      }
       active_field_ = TextField::Address;
       return true;
     }
@@ -463,11 +470,11 @@ public:
 
   bool handle_text_input(std::string_view text, UIContext&) override {
     if (active_field_ == TextField::ServerName) {
-      server_name_ += text;
+      server_name_.insert(text);
       return true;
     }
     if (active_field_ == TextField::Address) {
-      address_ += text;
+      address_.insert(text);
       return true;
     }
     return false;
@@ -475,12 +482,22 @@ public:
 
   bool handle_backspace(UIContext&) override {
     if (active_field_ == TextField::ServerName) {
-      erase_last_utf8_codepoint(server_name_);
+      (void)server_name_.backspace();
       return true;
     }
     if (active_field_ == TextField::Address) {
-      erase_last_utf8_codepoint(address_);
+      (void)address_.backspace();
       return true;
+    }
+    return false;
+  }
+
+  bool handle_text_edit(const UITextEditInput& input, UIContext& ctx) override {
+    if (active_field_ == TextField::ServerName) {
+      return screens_detail::handle_text_edit(server_name_, input, ctx);
+    }
+    if (active_field_ == TextField::Address) {
+      return screens_detail::handle_text_edit(address_, input, ctx);
     }
     return false;
   }
@@ -503,8 +520,8 @@ public:
 
 private:
   bool save(UIContext& ctx) {
-    const std::string name = trim_copy(server_name_);
-    const std::string address = trim_copy(address_);
+    const std::string name = trim_copy(server_name_.value);
+    const std::string address = trim_copy(address_.value);
     if (name.empty()) {
       error_ = tr(ctx, "ui.menu.server.error_name_required");
       return true;
@@ -526,8 +543,8 @@ private:
 
   std::optional<usize> edit_index_{};
   TextField active_field_{TextField::ServerName};
-  std::string server_name_{};
-  std::string address_{};
+  TextEditBuffer server_name_{};
+  TextEditBuffer address_{};
   std::string error_{};
 };
 

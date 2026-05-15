@@ -30,6 +30,12 @@ bool UIScreen::handle_backspace(UIContext& ctx) {
   return false;
 }
 
+bool UIScreen::handle_text_edit(const UITextEditInput& input, UIContext& ctx) {
+  (void)input;
+  (void)ctx;
+  return false;
+}
+
 bool UIScreen::handle_submit(UIContext& ctx) {
   (void)ctx;
   return false;
@@ -174,6 +180,16 @@ bool UIScreenManager::handle_backspace(UIContext& ctx) {
   ctx.screens = this;
   UIScreen* screen = current();
   const bool handled = screen != nullptr && screen->handle_backspace(ctx);
+  if (handled) {
+    mark_dirty();
+  }
+  return handled;
+}
+
+bool UIScreenManager::handle_text_edit(const UITextEditInput& input, UIContext& ctx) {
+  ctx.screens = this;
+  UIScreen* screen = current();
+  const bool handled = screen != nullptr && screen->handle_text_edit(input, ctx);
   if (handled) {
     mark_dirty();
   }

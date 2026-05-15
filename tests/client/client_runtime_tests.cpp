@@ -1,4 +1,5 @@
 #include "arv/client/client_runtime.hpp"
+#include "arv/core/text_edit.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/protocol/chat.hpp"
@@ -15,14 +16,23 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
 
 using arv::testsupport::find_event;
+
+[[nodiscard]] arv::core::TextEditInput text_edit(
+    arv::core::TextEditCommand command,
+    bool extend_selection = false,
+    std::string clipboard_text = {}) {
+  return {command, extend_selection, std::move(clipboard_text)};
+}
 
 arv::u32 player_move_count(const std::vector<arv::net::NetworkEvent>& events) {
   arv::u32 count = 0;
@@ -194,6 +204,91 @@ TEST(ClientRuntimeTests, ChatDraftIgnoresOpeningKeyThenAcceptsTextEditingAndSubm
   client.submit_input(arv::client::InputFrame{.text_submit_pressed = true});
   EXPECT_FALSE(client.chat_open());
   EXPECT_TRUE(client.chat_messages().empty());
+}
+
+TEST(ClientRuntimeTests, ChatDraftSupportsCursorSelectionClipboardAndPaste) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(arv::client::InputFrame{.text_input = "Alpha"});
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {
+              text_edit(arv::core::TextEditCommand::MoveLeft),
+              text_edit(arv::core::TextEditCommand::MoveLeft),
+          }});
+  client.submit_input(arv::client::InputFrame{.text_input = "X"});
+  EXPECT_EQ(client.chat_draft(), "AlpXha");
+  EXPECT_EQ(client.chat_draft_cursor(), 4U);
+
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveLeft, true)}});
+  EXPECT_EQ(client.chat_draft_selection_start(), 3U);
+  EXPECT_EQ(client.chat_draft_selection_end(), 4U);
+
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::Copy)}});
+  EXPECT_EQ(client.consume_pending_clipboard_text(), std::optional<std::string>{"X"});
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::Cut)}});
+  EXPECT_EQ(client.chat_draft(), "Alpha");
+  EXPECT_EQ(client.consume_pending_clipboard_text(), std::optional<std::string>{"X"});
+
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {
+              text_edit(arv::core::TextEditCommand::SelectAll),
+              text_edit(arv::core::TextEditCommand::Paste, false, "World"),
+          }});
+  EXPECT_EQ(client.chat_draft(), "World");
+}
+
+TEST(ClientRuntimeTests, ChatHistoryNavigationBottomsOutAtUncommittedDraft) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(arv::client::InputFrame{.text_input = "one"});
+  client.submit_input(arv::client::InputFrame{.text_submit_pressed = true});
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(arv::client::InputFrame{.text_input = "two"});
+  client.submit_input(arv::client::InputFrame{.text_submit_pressed = true});
+
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(arv::client::InputFrame{.text_input = "draft"});
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveUp)}});
+  EXPECT_EQ(client.chat_draft(), "two");
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveUp)}});
+  EXPECT_EQ(client.chat_draft(), "one");
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveUp)}});
+  EXPECT_EQ(client.chat_draft(), "one");
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveDown)}});
+  EXPECT_EQ(client.chat_draft(), "two");
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveDown)}});
+  EXPECT_EQ(client.chat_draft(), "draft");
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveDown)}});
+  EXPECT_EQ(client.chat_draft(), "draft");
+
+  client.submit_input(arv::client::InputFrame{.text_cancel_pressed = true});
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveDown)}});
+  EXPECT_TRUE(client.chat_draft().empty());
 }
 
 TEST(ClientRuntimeTests, SlashTextOpensChatWithCommandPrefix) {

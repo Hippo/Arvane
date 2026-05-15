@@ -260,6 +260,13 @@ public:
   virtual void submit(UICommand command) = 0;
 };
 
+class UIClipboard {
+public:
+  virtual ~UIClipboard() = default;
+  [[nodiscard]] virtual std::string text() const = 0;
+  virtual void set_text(std::string text) = 0;
+};
+
 class UIScreenDataSource {
 public:
   virtual ~UIScreenDataSource() = default;
@@ -331,6 +338,7 @@ struct UIContext {
   UIScreenManager* screens{};
   const UiTheme* theme{};
   const arv::text::LanguageCatalog* language{};
+  UIClipboard* clipboard{};
 };
 
 enum class MenuScreenType : u8 {
@@ -353,6 +361,23 @@ enum class MenuScreenType : u8 {
   PauseMenu,
 };
 
+enum class UITextEditCommand : u8 {
+  MoveLeft,
+  MoveRight,
+  MoveUp,
+  MoveDown,
+  DeleteForward,
+  Copy,
+  Paste,
+  Cut,
+  SelectAll,
+};
+
+struct UITextEditInput {
+  UITextEditCommand command{UITextEditCommand::MoveLeft};
+  bool extend_selection{};
+};
+
 class UIScreen {
 public:
   virtual ~UIScreen() = default;
@@ -370,6 +395,7 @@ public:
   virtual bool handle_cancel(UIContext& ctx);
   virtual bool handle_text_input(std::string_view text, UIContext& ctx);
   virtual bool handle_backspace(UIContext& ctx);
+  virtual bool handle_text_edit(const UITextEditInput& input, UIContext& ctx);
   virtual bool handle_submit(UIContext& ctx);
   virtual bool handle_captured_input(const CapturedInputView& input, UIContext& ctx);
   virtual bool handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx);
@@ -424,6 +450,7 @@ public:
   bool handle_cancel(UIContext& ctx);
   bool handle_text_input(std::string_view text, UIContext& ctx);
   bool handle_backspace(UIContext& ctx);
+  bool handle_text_edit(const UITextEditInput& input, UIContext& ctx);
   bool handle_submit(UIContext& ctx);
   bool handle_captured_input(const CapturedInputView& input, UIContext& ctx);
   bool handle_scroll(Vec2f cursor, f32 wheel_y, UIContext& ctx);

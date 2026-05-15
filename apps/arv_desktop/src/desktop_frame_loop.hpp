@@ -57,7 +57,7 @@ struct UiBuildCacheKey {
   }
 };
 
-class DesktopFrameLoop {
+class DesktopFrameLoop : private ui::UIClipboard {
 public:
   DesktopFrameLoop(
       io::EngineConfig& config,
@@ -87,6 +87,8 @@ private:
   void reset_main_menu_stack();
   void reset_gameplay_menu_stack();
   [[nodiscard]] ui::UIContext make_menu_context(ui::UIScreenManager& screens);
+  [[nodiscard]] std::string text() const override;
+  void set_text(std::string text) override;
   [[nodiscard]] FrameTiming begin_frame();
   void update_fps_sample(
       std::chrono::steady_clock::time_point now,

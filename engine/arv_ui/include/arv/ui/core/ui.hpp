@@ -126,6 +126,13 @@ struct UiImageData {
   Vec4f tint{1.0F, 1.0F, 1.0F, 1.0F};
 };
 
+struct UiTextInputVisual {
+  bool active{};
+  usize cursor{};
+  usize selection_start{};
+  usize selection_end{};
+};
+
 struct UiElement {
   UiNodeID node_id{};
   std::string stable_id{};
@@ -139,9 +146,11 @@ struct UiElement {
   bool focusable{};
   bool hit_test{true};
   bool selected{};
+  u8 layer{};
   bool clip_children{};
   bool clip_active{};
   UiImageData image{};
+  std::optional<UiTextInputVisual> text_input{};
   UiRect rect{};
   UiRect clip{};
   std::vector<UiNodeID> children{};
@@ -321,6 +330,13 @@ void append_ui_draw_commands(
 void append_ui_draw_commands(
     const UiTree& tree,
     asset::FontSystem& fonts,
+    const UiFontStacks& font_stacks,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics,
+    f32 time_seconds);
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
     const asset::FontStack& font_stack,
     render::FramePacket& frame);
 void append_ui_draw_commands(
@@ -329,5 +345,12 @@ void append_ui_draw_commands(
     const asset::FontStack& font_stack,
     render::FramePacket& frame,
     const UiDisplayMetrics& metrics);
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
+    const asset::FontStack& font_stack,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics,
+    f32 time_seconds);
 
 } // namespace arv::ui

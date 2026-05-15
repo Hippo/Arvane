@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <string>
 #include <utility>
 
 namespace arv::desktop {
@@ -35,6 +37,31 @@ template <typename Size>
   return {
       static_cast<f32>(size.width),
       static_cast<f32>(size.height)};
+}
+
+[[nodiscard]] ui::UITextEditCommand ui_text_edit_command_from(
+    platform::TextEditCommand command) noexcept {
+  switch (command) {
+    case platform::TextEditCommand::MoveLeft:
+      return ui::UITextEditCommand::MoveLeft;
+    case platform::TextEditCommand::MoveRight:
+      return ui::UITextEditCommand::MoveRight;
+    case platform::TextEditCommand::MoveUp:
+      return ui::UITextEditCommand::MoveUp;
+    case platform::TextEditCommand::MoveDown:
+      return ui::UITextEditCommand::MoveDown;
+    case platform::TextEditCommand::DeleteForward:
+      return ui::UITextEditCommand::DeleteForward;
+    case platform::TextEditCommand::Copy:
+      return ui::UITextEditCommand::Copy;
+    case platform::TextEditCommand::Paste:
+      return ui::UITextEditCommand::Paste;
+    case platform::TextEditCommand::Cut:
+      return ui::UITextEditCommand::Cut;
+    case platform::TextEditCommand::SelectAll:
+      return ui::UITextEditCommand::SelectAll;
+  }
+  return ui::UITextEditCommand::MoveLeft;
 }
 
 } // namespace
@@ -246,7 +273,16 @@ ui::UIContext DesktopFrameLoop::make_menu_context(ui::UIScreenManager& screens) 
       &menu_state_,
       &screens,
       &ui_theme_,
-      &assets_.language};
+      &assets_.language,
+      this};
+}
+
+std::string DesktopFrameLoop::text() const {
+  return window_.clipboard_text();
+}
+
+void DesktopFrameLoop::set_text(std::string text) {
+  window_.set_clipboard_text(text);
 }
 
 FrameTiming DesktopFrameLoop::begin_frame() {
@@ -333,21 +369,25 @@ void DesktopFrameLoop::handle_pause_menu_input(
     ui::UIScreenManager& screens,
     DesktopGameSession* active_session,
     bool has_session) {
-  (void)has_session;
   if (debug_menu_.open || !platform_input.pause_menu_pressed) {
     return;
   }
   const bool has_live_session =
       active_session != nullptr && active_session->client != nullptr;
+  const bool has_client_overlay =
+      has_live_session &&
+      (active_session->client->inventory_open() || active_session->client->chat_open());
   if (gameplay_menu_stack_active_ && screens.empty()) {
     reset_gameplay_menu_stack();
   }
-  if (screens.has_active_screen()) {
+  const ui::UIScreen* current_screen = screens.current();
+  const bool on_gameplay_root =
+      gameplay_menu_stack_active_ && current_screen != nullptr &&
+      current_screen->type() == ui::MenuScreenType::Gameplay;
+  if (current_screen != nullptr && !on_gameplay_root) {
     (void)screens.handle_cancel(menu_context);
-  } else if (gameplay_menu_stack_active_ && has_live_session &&
-             !active_session->client->inventory_open() &&
-             !active_session->client->chat_open()) {
-    screens.push(ui::make_pause_menu_screen());
+  } else if (on_gameplay_root && has_session && !has_client_overlay) {
+    (void)screens.handle_cancel(menu_context);
   } else if (!gameplay_menu_stack_active_ && screens.empty()) {
     screens.push(ui::make_main_menu_screen());
   }
@@ -417,6 +457,11 @@ bool DesktopFrameLoop::route_input(
           platform_input.mouse_wheel_y,
           menu_context);
     }
+    for (const platform::TextEditEvent& event : platform_input.text_edit_events) {
+      (void)screens.handle_text_edit(
+          {ui_text_edit_command_from(event.command), event.extend_selection},
+          menu_context);
+    }
     if (!platform_input.text_input.empty()) {
       (void)screens.handle_text_input(platform_input.text_input, menu_context);
     }
@@ -455,6 +500,11 @@ void DesktopFrameLoop::submit_client_input_and_update_cursor(
         client_input,
         std::chrono::duration<Seconds>(now - app_start_time_).count());
     active_session->client->submit_input(std::move(client_input));
+    if (std::optional<std::string> clipboard =
+            active_session->client->consume_pending_clipboard_text();
+        clipboard.has_value()) {
+      window_.set_clipboard_text(clipboard.value());
+    }
   }
   if (has_active_session && was_inventory_open && !active_session->client->inventory_open()) {
     (void)active_session->client->request_inventory_close();

@@ -330,6 +330,14 @@ OpenGLWindow::OpenGLWindow(OpenGLWindow&& other) noexcept
       previous_middle_mouse_down_(std::exchange(other.previous_middle_mouse_down_, false)),
       previous_backspace_down_(std::exchange(other.previous_backspace_down_, false)),
       previous_enter_down_(std::exchange(other.previous_enter_down_, false)),
+      previous_left_arrow_down_(std::exchange(other.previous_left_arrow_down_, false)),
+      previous_right_arrow_down_(std::exchange(other.previous_right_arrow_down_, false)),
+      previous_delete_down_(std::exchange(other.previous_delete_down_, false)),
+      previous_copy_shortcut_down_(std::exchange(other.previous_copy_shortcut_down_, false)),
+      previous_paste_shortcut_down_(std::exchange(other.previous_paste_shortcut_down_, false)),
+      previous_cut_shortcut_down_(std::exchange(other.previous_cut_shortcut_down_, false)),
+      previous_select_all_shortcut_down_(
+          std::exchange(other.previous_select_all_shortcut_down_, false)),
       pending_text_input_(std::move(other.pending_text_input_)),
       input_bindings_(std::move(other.input_bindings_)),
       previous_action_active_(other.previous_action_active_),
@@ -355,6 +363,14 @@ OpenGLWindow& OpenGLWindow::operator=(OpenGLWindow&& other) noexcept {
     previous_middle_mouse_down_ = std::exchange(other.previous_middle_mouse_down_, false);
     previous_backspace_down_ = std::exchange(other.previous_backspace_down_, false);
     previous_enter_down_ = std::exchange(other.previous_enter_down_, false);
+    previous_left_arrow_down_ = std::exchange(other.previous_left_arrow_down_, false);
+    previous_right_arrow_down_ = std::exchange(other.previous_right_arrow_down_, false);
+    previous_delete_down_ = std::exchange(other.previous_delete_down_, false);
+    previous_copy_shortcut_down_ = std::exchange(other.previous_copy_shortcut_down_, false);
+    previous_paste_shortcut_down_ = std::exchange(other.previous_paste_shortcut_down_, false);
+    previous_cut_shortcut_down_ = std::exchange(other.previous_cut_shortcut_down_, false);
+    previous_select_all_shortcut_down_ =
+        std::exchange(other.previous_select_all_shortcut_down_, false);
     pending_text_input_ = std::move(other.pending_text_input_);
     input_bindings_ = std::move(other.input_bindings_);
     previous_action_active_ = other.previous_action_active_;
@@ -422,11 +438,55 @@ InputSnapshot OpenGLWindow::poll_input() {
   InputSnapshot input;
   const bool backspace_down = glfwGetKey(window_, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
   const bool enter_down = glfwGetKey(window_, GLFW_KEY_ENTER) == GLFW_PRESS;
+  const bool left_arrow_down = glfwGetKey(window_, GLFW_KEY_LEFT) == GLFW_PRESS;
+  const bool right_arrow_down = glfwGetKey(window_, GLFW_KEY_RIGHT) == GLFW_PRESS;
+  const bool up_arrow_down = glfwGetKey(window_, GLFW_KEY_UP) == GLFW_PRESS;
+  const bool down_arrow_down = glfwGetKey(window_, GLFW_KEY_DOWN) == GLFW_PRESS;
+  const bool delete_down = glfwGetKey(window_, GLFW_KEY_DELETE) == GLFW_PRESS;
+  const bool shift_down =
+      glfwGetKey(window_, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+      glfwGetKey(window_, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+  const bool command_down =
+      glfwGetKey(window_, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+      glfwGetKey(window_, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS ||
+      glfwGetKey(window_, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS ||
+      glfwGetKey(window_, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
+  const bool copy_shortcut_down = command_down && glfwGetKey(window_, GLFW_KEY_C) == GLFW_PRESS;
+  const bool paste_shortcut_down = command_down && glfwGetKey(window_, GLFW_KEY_V) == GLFW_PRESS;
+  const bool cut_shortcut_down = command_down && glfwGetKey(window_, GLFW_KEY_X) == GLFW_PRESS;
+  const bool select_all_shortcut_down = command_down && glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS;
   const bool left_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
   const bool right_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
   const bool middle_mouse_down = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
   input.text_backspace_pressed = backspace_down && !previous_backspace_down_;
   input.text_submit_pressed = enter_down && !previous_enter_down_;
+  if (left_arrow_down && !previous_left_arrow_down_) {
+    input.text_edit_events.push_back({TextEditCommand::MoveLeft, shift_down});
+  }
+  if (right_arrow_down && !previous_right_arrow_down_) {
+    input.text_edit_events.push_back({TextEditCommand::MoveRight, shift_down});
+  }
+  if (up_arrow_down && !previous_up_arrow_down_) {
+    input.text_edit_events.push_back({TextEditCommand::MoveUp, shift_down});
+  }
+  if (down_arrow_down && !previous_down_arrow_down_) {
+    input.text_edit_events.push_back({TextEditCommand::MoveDown, shift_down});
+  }
+  if (delete_down && !previous_delete_down_) {
+    input.text_edit_events.push_back({TextEditCommand::DeleteForward, false});
+  }
+  if (copy_shortcut_down && !previous_copy_shortcut_down_) {
+    input.text_edit_events.push_back({TextEditCommand::Copy, false});
+  }
+  if (paste_shortcut_down && !previous_paste_shortcut_down_) {
+    input.text_edit_events.push_back({TextEditCommand::Paste, false, clipboard_text()});
+  }
+  if (cut_shortcut_down && !previous_cut_shortcut_down_) {
+    input.text_edit_events.push_back({TextEditCommand::Cut, false});
+  }
+  if (select_all_shortcut_down && !previous_select_all_shortcut_down_) {
+    input.text_edit_events.push_back({TextEditCommand::SelectAll, false});
+  }
   input.mouse_left_pressed = left_mouse_down && !previous_left_mouse_down_;
   input.mouse_left_released = !left_mouse_down && previous_left_mouse_down_;
   input.mouse_left_held = left_mouse_down;
@@ -435,6 +495,10 @@ InputSnapshot OpenGLWindow::poll_input() {
   input.mouse_right_held = right_mouse_down;
   input.text_input = std::move(pending_text_input_);
   pending_text_input_.clear();
+  if (copy_shortcut_down || paste_shortcut_down || cut_shortcut_down ||
+      select_all_shortcut_down) {
+    input.text_input.clear();
+  }
   const i32 wheel_up_steps = static_cast<i32>(std::max(accumulated_scroll_y_, 0.0));
   const i32 wheel_down_steps = static_cast<i32>(std::max(-accumulated_scroll_y_, 0.0));
 
@@ -598,7 +662,32 @@ InputSnapshot OpenGLWindow::poll_input() {
   previous_middle_mouse_down_ = middle_mouse_down;
   previous_backspace_down_ = backspace_down;
   previous_enter_down_ = enter_down;
+  previous_left_arrow_down_ = left_arrow_down;
+  previous_right_arrow_down_ = right_arrow_down;
+  previous_up_arrow_down_ = up_arrow_down;
+  previous_down_arrow_down_ = down_arrow_down;
+  previous_delete_down_ = delete_down;
+  previous_copy_shortcut_down_ = copy_shortcut_down;
+  previous_paste_shortcut_down_ = paste_shortcut_down;
+  previous_cut_shortcut_down_ = cut_shortcut_down;
+  previous_select_all_shortcut_down_ = select_all_shortcut_down;
   return input;
+}
+
+std::string OpenGLWindow::clipboard_text() const {
+  if (window_ == nullptr) {
+    return {};
+  }
+  const char* text = glfwGetClipboardString(window_);
+  return text == nullptr ? std::string{} : std::string{text};
+}
+
+void OpenGLWindow::set_clipboard_text(std::string_view text) {
+  if (window_ == nullptr) {
+    return;
+  }
+  const std::string owned{text};
+  glfwSetClipboardString(window_, owned.c_str());
 }
 
 void OpenGLWindow::set_input_bindings(InputBindings bindings) noexcept {

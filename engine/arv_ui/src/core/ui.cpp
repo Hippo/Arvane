@@ -172,7 +172,8 @@ void append_rect(
     Vec4f border,
     f32 border_width,
     f32 radius,
-    std::optional<UiRect> clip) {
+    std::optional<UiRect> clip,
+    u8 layer = 0U) {
   if (rect.width <= 0.0F || rect.height <= 0.0F ||
       (color.w <= 0.0F && (border.w <= 0.0F || border_width <= 0.0F))) {
     return;
@@ -184,6 +185,7 @@ void append_rect(
   item.border_color = border;
   item.border_width = border_width;
   item.radius = radius;
+  item.layer = layer;
   if (clip.has_value()) {
     item.clip = true;
     item.clip_min = {clip->x, clip->y};
@@ -197,7 +199,8 @@ void append_image(
     UiRect rect,
     const UiImageData& image,
     std::optional<UiRect> clip,
-    const UiDisplayMetrics& metrics) {
+    const UiDisplayMetrics& metrics,
+    u8 layer = 0U) {
   if (!image.valid || rect.width <= 0.0F || rect.height <= 0.0F || image.tint.w <= 0.0F) {
     return;
   }
@@ -222,6 +225,7 @@ void append_image(
   quad.color = image.tint;
   quad.source = image.source;
   quad.page = image.page;
+  quad.layer = layer;
   if (clip.has_value()) {
     const UiRect framebuffer_clip = metrics.framebuffer_from_logical(*clip);
     quad.clip = true;
@@ -444,6 +448,9 @@ UiNodeID UiTree::add_child(UiNodeID parent, UiElement element_to_add) {
   }
   element_to_add.node_id = allocate_node();
   const UiNodeID id = element_to_add.node_id;
+  if (parent_element->layer != 0U && element_to_add.layer == 0U) {
+    element_to_add.layer = parent_element->layer;
+  }
   parent_element->children.emplace_back(id);
   if (!element_to_add.stable_id.empty()) {
     stable_ids_[element_to_add.stable_id] = id;
@@ -815,6 +822,121 @@ UiDocumentValidation validate_ui_document(const UiDocument& document, UiDocument
   return static_cast<f32>(std::round(value));
 }
 
+[[nodiscard]] usize clamp_utf8_boundary(std::string_view text, usize offset) noexcept {
+  offset = std::min(offset, text.size());
+  while (offset > 0U && offset < text.size() &&
+         (static_cast<unsigned char>(text[offset]) & 0xC0U) == 0x80U) {
+    --offset;
+  }
+  return offset;
+}
+
+[[nodiscard]] usize text_unit_count(std::string_view text) noexcept {
+  usize count = 0;
+  for (const unsigned char byte : text) {
+    if ((byte & 0xC0U) != 0x80U) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+[[nodiscard]] f32 measured_prefix_width(
+    asset::FontSystem& fonts,
+    const asset::FontStack& stack,
+    std::string_view text,
+    usize offset,
+    f32 tracking) {
+  offset = clamp_utf8_boundary(text, offset);
+  if (offset == 0U) {
+    return 0.0F;
+  }
+  const std::string_view prefix = text.substr(0U, offset);
+  auto measured = fonts.measure_text(prefix, stack);
+  if (!measured) {
+    return 0.0F;
+  }
+  const usize units = text_unit_count(prefix);
+  return measured.value().width + (units > 0U ? tracking * static_cast<f32>(units - 1U) : 0.0F);
+}
+
+void append_text_input_visuals(
+    const UiElement& element,
+    asset::FontSystem& fonts,
+    const UiFontStacks& font_stacks,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics,
+    f32 time_seconds) {
+  if (!element.text_input.has_value() || !element.text_input->active) {
+    return;
+  }
+  const asset::FontStack& stack = font_stack_for_role(font_stacks, element.style.text_role);
+  const UiRect content = inset(element.rect, element.layout.padding);
+  if (content.width <= 0.0F || content.height <= 0.0F) {
+    return;
+  }
+
+  const std::string_view text = element.text;
+  const usize cursor = clamp_utf8_boundary(text, element.text_input->cursor);
+  const usize selection_start = clamp_utf8_boundary(text, element.text_input->selection_start);
+  const usize selection_end = clamp_utf8_boundary(text, element.text_input->selection_end);
+  const f32 tracking = metrics.scalar_to_framebuffer(element.style.letter_spacing);
+  const Vec2f text_origin =
+      metrics.framebuffer_from_logical(Vec2f{content.x, content.y});
+  const f32 content_height = metrics.scalar_to_framebuffer(content.height);
+  f32 line_height = content_height;
+  if (!stack.faces.empty()) {
+    line_height = std::min(content_height, fonts.metrics(stack.faces.front()).line_height);
+  }
+  line_height = std::max(1.0F, line_height);
+  const std::optional<UiRect> framebuffer_clip =
+      element.clip_active ? std::optional<UiRect>{metrics.framebuffer_from_logical(element.clip)}
+                          : std::nullopt;
+
+  if (selection_start != selection_end) {
+    const usize start = std::min(selection_start, selection_end);
+    const usize end = std::max(selection_start, selection_end);
+    const f32 start_x = text_origin.x + measured_prefix_width(fonts, stack, text, start, tracking);
+    const f32 end_x = text_origin.x + measured_prefix_width(fonts, stack, text, end, tracking);
+    Vec4f selection_color = element.style.accent;
+    selection_color.w = selection_color.w > 0.0F ? std::min(selection_color.w, 0.38F) : 0.32F;
+    append_rect(
+        frame,
+        {snap_pixel(start_x), snap_pixel(text_origin.y), std::max(1.0F, end_x - start_x), line_height},
+        selection_color,
+        {},
+        0.0F,
+        0.0F,
+        framebuffer_clip,
+        element.layer);
+  }
+
+  const f32 blink_phase = std::fmod(std::max(time_seconds, 0.0F), 1.0F);
+  if (blink_phase >= 0.5F) {
+    return;
+  }
+  const f32 cursor_x = text_origin.x + measured_prefix_width(fonts, stack, text, cursor, tracking);
+  Vec4f cursor_color = element.style.border_focus.w > 0.0F ? element.style.border_focus : element.style.accent;
+  if (cursor_color.w <= 0.0F) {
+    cursor_color = element.style.foreground;
+  }
+  cursor_color.w = 1.0F;
+  append_rect(
+      frame,
+      {
+          snap_pixel(cursor_x),
+          snap_pixel(text_origin.y),
+          std::max(1.0F, metrics.scalar_to_framebuffer(1.25F)),
+          line_height,
+      },
+      cursor_color,
+      {},
+      0.0F,
+      0.0F,
+      framebuffer_clip,
+      element.layer);
+}
+
 void append_ui_draw_commands(
     const UiTree& tree,
     asset::FontSystem& fonts,
@@ -837,6 +959,16 @@ void append_ui_draw_commands(
     const UiFontStacks& font_stacks,
     render::FramePacket& frame,
     const UiDisplayMetrics& metrics) {
+  append_ui_draw_commands(tree, fonts, font_stacks, frame, metrics, 0.0F);
+}
+
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
+    const UiFontStacks& font_stacks,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics,
+    f32 time_seconds) {
   const usize element_count = tree.elements().size();
   frame.ui_rects.reserve(frame.ui_rects.size() + element_count);
   frame.ui_textured_quads.reserve(frame.ui_textured_quads.size() + element_count);
@@ -871,7 +1003,9 @@ void append_ui_draw_commands(
           border,
           metrics.scalar_to_framebuffer(border_width),
           metrics.scalar_to_framebuffer(element.style.radius),
-          framebuffer_clip);
+          framebuffer_clip,
+          element.layer);
+      append_text_input_visuals(element, fonts, font_stacks, frame, metrics, time_seconds);
     }
     if (element.type == UiElementType::Image) {
       append_image(
@@ -879,7 +1013,8 @@ void append_ui_draw_commands(
           element.rect,
           element.image,
           element.clip_active ? std::optional<UiRect>{element.clip} : std::nullopt,
-          metrics);
+          metrics,
+          element.layer);
     }
     if (element.type == UiElementType::Text && !element.text.empty()) {
       const Vec2f text_origin =
@@ -912,6 +1047,7 @@ void append_ui_draw_commands(
             quad.uv_max,
             quad.color,
             quad.page);
+        glyph.layer = element.layer;
         if (element.clip_active) {
           const UiRect framebuffer_clip = metrics.framebuffer_from_logical(element.clip);
           glyph.clip = true;
@@ -950,13 +1086,23 @@ void append_ui_draw_commands(
     const asset::FontStack& font_stack,
     render::FramePacket& frame,
     const UiDisplayMetrics& metrics) {
+  append_ui_draw_commands(tree, fonts, font_stack, frame, metrics, 0.0F);
+}
+
+void append_ui_draw_commands(
+    const UiTree& tree,
+    asset::FontSystem& fonts,
+    const asset::FontStack& font_stack,
+    render::FramePacket& frame,
+    const UiDisplayMetrics& metrics,
+    f32 time_seconds) {
   UiFontStacks stacks;
   stacks.small = font_stack;
   stacks.body = font_stack;
   stacks.heading = font_stack;
   stacks.title = font_stack;
   stacks.mono = font_stack;
-  append_ui_draw_commands(tree, fonts, stacks, frame, metrics);
+  append_ui_draw_commands(tree, fonts, stacks, frame, metrics, time_seconds);
 }
 
 } // namespace arv::ui

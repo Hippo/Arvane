@@ -1,11 +1,13 @@
 #pragma once
 
 #include "arv/base/ui/screens/screen.hpp"
+#include "arv/core/text_edit.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -25,6 +27,7 @@ inline constexpr Vec4f TextColor{0.930F, 0.945F, 0.960F, 1.0F};
 inline constexpr Vec4f MutedTextColor{0.660F, 0.700F, 0.740F, 1.0F};
 inline constexpr Vec4f ErrorTextColor{0.980F, 0.420F, 0.380F, 1.0F};
 inline constexpr Vec4f AccentColor{0.400F, 0.760F, 0.860F, 1.0F};
+inline constexpr u8 ModalLayer = 1U;
 
 [[nodiscard]] inline std::string tr(const UIContext& ctx, std::string_view key) {
   return ctx.language == nullptr ? std::string{key} : ctx.language->text(key);
@@ -44,6 +47,51 @@ enum class TextField : u8 {
   ServerName,
   Address,
 };
+
+using TextEditBuffer = arv::core::TextEditBuffer;
+
+[[nodiscard]] inline arv::core::TextEditCommand core_text_edit_command_from(
+    UITextEditCommand command) noexcept {
+  switch (command) {
+    case UITextEditCommand::MoveLeft:
+      return arv::core::TextEditCommand::MoveLeft;
+    case UITextEditCommand::MoveRight:
+      return arv::core::TextEditCommand::MoveRight;
+    case UITextEditCommand::MoveUp:
+      return arv::core::TextEditCommand::MoveUp;
+    case UITextEditCommand::MoveDown:
+      return arv::core::TextEditCommand::MoveDown;
+    case UITextEditCommand::DeleteForward:
+      return arv::core::TextEditCommand::DeleteForward;
+    case UITextEditCommand::Copy:
+      return arv::core::TextEditCommand::Copy;
+    case UITextEditCommand::Paste:
+      return arv::core::TextEditCommand::Paste;
+    case UITextEditCommand::Cut:
+      return arv::core::TextEditCommand::Cut;
+    case UITextEditCommand::SelectAll:
+      return arv::core::TextEditCommand::SelectAll;
+  }
+  return arv::core::TextEditCommand::MoveLeft;
+}
+
+inline bool handle_text_edit(
+    TextEditBuffer& buffer,
+    const UITextEditInput& input,
+    UIContext& ctx,
+    std::optional<usize> max_size = std::nullopt) {
+  arv::core::TextEditInput core_input;
+  core_input.command = core_text_edit_command_from(input.command);
+  core_input.extend_selection = input.extend_selection;
+  if (input.command == UITextEditCommand::Paste && ctx.clipboard != nullptr) {
+    core_input.clipboard_text = ctx.clipboard->text();
+  }
+  const arv::core::TextEditResult result = buffer.handle_edit(core_input, max_size);
+  if (result.clipboard_text.has_value() && ctx.clipboard != nullptr) {
+    ctx.clipboard->set_text(result.clipboard_text.value());
+  }
+  return result.handled;
+}
 
 [[nodiscard]] inline UiElement make_text(
     std::string stable_id,
@@ -138,13 +186,14 @@ inline void apply_control_style(
   return stack;
 }
 
-inline void add_backdrop(UiTree& tree, std::string stable_id, Vec4f color) {
+inline void add_backdrop(UiTree& tree, std::string stable_id, Vec4f color, u8 layer = 0U) {
   UiElement backdrop;
   backdrop.stable_id = std::move(stable_id);
   backdrop.type = UiElementType::Panel;
   backdrop.layout.width_mode = UiSizeMode::Fill;
   backdrop.layout.height_mode = UiSizeMode::Fill;
   backdrop.style.background = color;
+  backdrop.layer = layer;
   backdrop.hit_test = true;
   tree.add_child(tree.root_id(), std::move(backdrop));
 }
@@ -292,7 +341,7 @@ inline void add_text_box(
     UiNodeID parent,
     std::string stable_id,
     std::string label,
-    std::string value,
+    const TextEditBuffer& value,
     std::string placeholder,
     std::string action,
     bool active) {
@@ -315,16 +364,24 @@ inline void add_text_box(
       theme.widgets.input.padding_y};
   box.focusable = true;
   box.selected = active;
+  box.clip_children = true;
+  box.text = value.value;
+  box.text_input = UiTextInputVisual{
+      active,
+      value.cursor,
+      value.selection_start(),
+      value.selection_end()};
   apply_control_style(box, theme, UiControlRole::Neutral, true, active);
   box.style.radius = theme.widgets.input.radius;
+  box.style.text_role = UiTextRole::Body;
   box.action = std::move(action);
   const UiNodeID box_id = tree.add_child(parent, std::move(box));
-  const bool empty = value.empty();
+  const bool empty = value.value.empty();
   tree.add_child(
       box_id,
       make_text(
           stable_id + ".text",
-          empty ? std::move(placeholder) : std::move(value),
+          empty ? std::move(placeholder) : value.value,
           empty ? theme.colors.text_muted : theme.colors.text));
 }
 

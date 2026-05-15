@@ -1740,8 +1740,20 @@ void OpenGLRenderer::draw_ui() {
       texture_units.data());
 
   bind_ui_textures();
-  draw_ui_shapes();
-  draw_ui_quads();
+  u8 max_layer = 0U;
+  for (const UIRectDrawItem& rect : frame_.ui_rects) {
+    max_layer = std::max(max_layer, rect.layer);
+  }
+  for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
+    max_layer = std::max(max_layer, quad.layer);
+  }
+  for (const UIGlyphDrawItem& glyph : frame_.ui_glyphs) {
+    max_layer = std::max(max_layer, glyph.layer);
+  }
+  for (u32 layer = 0U; layer <= static_cast<u32>(max_layer); ++layer) {
+    draw_ui_shapes(static_cast<u8>(layer));
+    draw_ui_quads(static_cast<u8>(layer));
+  }
   glActiveTexture(GL_TEXTURE0);
 
   glBindVertexArray(0);
@@ -1765,7 +1777,7 @@ void OpenGLRenderer::bind_ui_textures() {
                                                  : player_skin_atlas_.gl_texture_array());
 }
 
-void OpenGLRenderer::draw_ui_shapes() {
+void OpenGLRenderer::draw_ui_shapes(u8 layer) {
   const usize shape_count = frame_.ui_rects.size();
   if (shape_count == 0U) {
     return;
@@ -1780,6 +1792,9 @@ void OpenGLRenderer::draw_ui_shapes() {
   ui_shape_draw_runs_.reserve(shape_count);
 
   for (const UIRectDrawItem& rect : frame_.ui_rects) {
+    if (rect.layer != layer) {
+      continue;
+    }
     append_ui_rect_item(ui_shape_vertices_, ui_shape_indices_, ui_shape_draw_runs_, rect);
   }
   if (ui_shape_vertices_.empty()) {
@@ -1826,7 +1841,7 @@ void OpenGLRenderer::draw_ui_shapes() {
   triangles_submitted_last_frame_ += static_cast<u64>(ui_shape_indices_.size() / 3U);
 }
 
-void OpenGLRenderer::draw_ui_quads() {
+void OpenGLRenderer::draw_ui_quads(u8 layer) {
   const usize quad_count =
       frame_.ui_textured_quads.size() + (font_atlas_.id == 0 ? 0U : frame_.ui_glyphs.size());
   if (quad_count == 0U) {
@@ -1842,6 +1857,9 @@ void OpenGLRenderer::draw_ui_quads() {
   ui_draw_runs_.reserve(quad_count);
 
   for (const UITexturedQuadDrawItem& quad : frame_.ui_textured_quads) {
+    if (quad.layer != layer) {
+      continue;
+    }
     append_ui_quad(
         ui_vertices_,
         ui_indices_,
@@ -1856,6 +1874,9 @@ void OpenGLRenderer::draw_ui_quads() {
 
   if (font_atlas_.id != 0) {
     for (const UIGlyphDrawItem& glyph : frame_.ui_glyphs) {
+      if (glyph.layer != layer) {
+        continue;
+      }
       append_ui_quad(
           ui_vertices_,
           ui_indices_,

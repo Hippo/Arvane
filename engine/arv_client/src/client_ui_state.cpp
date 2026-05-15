@@ -13,18 +13,7 @@ namespace arv::client {
 namespace {
 
 constexpr usize MaxChatDraftBytes = 256U;
-
-void erase_last_utf8_codepoint(std::string& text) {
-  if (text.empty()) {
-    return;
-  }
-  usize index = text.size() - 1U;
-  while (index > 0U &&
-         (static_cast<unsigned char>(text[index]) & 0xC0U) == 0x80U) {
-    --index;
-  }
-  text.erase(index);
-}
+constexpr usize MaxSubmittedChatHistory = 100U;
 
 template<typename T>
 void trim_vector_to_limit(std::vector<T>& values, usize limit) {
@@ -61,30 +50,39 @@ void ClientUiState::toggle_inventory_if_allowed(
   inventory_open_ = !inventory_open_;
   if (inventory_open_) {
     chat_open_ = false;
+    reset_chat_history_navigation();
   }
 }
 
 void ClientUiState::open_chat() {
   chat_open_ = true;
   inventory_open_ = false;
+  reset_chat_history_navigation();
 }
 
 void ClientUiState::open_chat_with_draft(std::string draft) {
   chat_open_ = true;
   inventory_open_ = false;
-  chat_draft_ = std::move(draft);
+  assign_chat_draft(std::move(draft));
+  reset_chat_history_navigation();
 }
 
 void ClientUiState::close_chat() noexcept {
   chat_open_ = false;
-  chat_draft_.clear();
+  chat_draft_.value.clear();
+  chat_draft_.cursor = 0U;
+  chat_draft_.selection_anchor = 0U;
+  reset_chat_history_navigation();
   pending_url_confirmation_.reset();
 }
 
 void ClientUiState::close_ui() noexcept {
   inventory_open_ = false;
   chat_open_ = false;
-  chat_draft_.clear();
+  chat_draft_.value.clear();
+  chat_draft_.cursor = 0U;
+  chat_draft_.selection_anchor = 0U;
+  reset_chat_history_navigation();
   pending_url_confirmation_.reset();
 }
 
@@ -153,6 +151,12 @@ const std::optional<std::string>& ClientUiState::pending_url_confirmation() cons
   return pending_url_confirmation_;
 }
 
+std::optional<std::string> ClientUiState::consume_pending_clipboard_text() {
+  std::optional<std::string> text = std::move(pending_clipboard_text_);
+  pending_clipboard_text_.reset();
+  return text;
+}
+
 std::optional<std::string> ClientUiState::handle_chat_input(
     const InputFrame& input,
     bool was_chat_open) {
@@ -160,21 +164,49 @@ std::optional<std::string> ClientUiState::handle_chat_input(
     return std::nullopt;
   }
 
+  if (was_chat_open) {
+    for (const arv::core::TextEditInput& edit_input : input.text_edit_events) {
+      if (edit_input.command == arv::core::TextEditCommand::MoveUp) {
+        recall_previous_chat_history();
+        continue;
+      }
+      if (edit_input.command == arv::core::TextEditCommand::MoveDown) {
+        recall_next_chat_history();
+        continue;
+      }
+
+      const arv::core::TextEditResult result =
+          chat_draft_.handle_edit(edit_input, MaxChatDraftBytes);
+      if (result.clipboard_text.has_value()) {
+        pending_clipboard_text_ = result.clipboard_text.value();
+      }
+      if (result.text_changed) {
+        reset_chat_history_navigation();
+      }
+    }
+  }
   if (was_chat_open && input.text_backspace_pressed) {
-    erase_last_utf8_codepoint(chat_draft_);
+    if (chat_draft_.backspace()) {
+      reset_chat_history_navigation();
+    }
   }
   if (was_chat_open && !input.text_input.empty()) {
-    const usize remaining =
-        chat_draft_.size() >= MaxChatDraftBytes ? 0U : MaxChatDraftBytes - chat_draft_.size();
-    chat_draft_.append(input.text_input.substr(0U, remaining));
+    if (chat_draft_.insert(input.text_input, MaxChatDraftBytes)) {
+      reset_chat_history_navigation();
+    }
   }
   if (was_chat_open && input.text_submit_pressed) {
     std::optional<std::string> submitted;
-    std::string trimmed = trim_ascii_copy(chat_draft_);
+    std::string trimmed = trim_ascii_copy(chat_draft_.value);
     if (!trimmed.empty()) {
+      submitted_chat_history_.push_back(trimmed);
+      trim_vector_to_limit(submitted_chat_history_, MaxSubmittedChatHistory);
       submitted = std::move(trimmed);
     }
-    chat_draft_.clear();
+    chat_draft_.value.clear();
+    chat_draft_.cursor = 0U;
+    chat_draft_.selection_anchor = 0U;
+    reset_chat_history_navigation();
     chat_open_ = false;
     return submitted;
   }
@@ -182,7 +214,19 @@ std::optional<std::string> ClientUiState::handle_chat_input(
 }
 
 const std::string& ClientUiState::chat_draft() const noexcept {
-  return chat_draft_;
+  return chat_draft_.value;
+}
+
+usize ClientUiState::chat_draft_cursor() const noexcept {
+  return chat_draft_.cursor;
+}
+
+usize ClientUiState::chat_draft_selection_start() const noexcept {
+  return chat_draft_.selection_start();
+}
+
+usize ClientUiState::chat_draft_selection_end() const noexcept {
+  return chat_draft_.selection_end();
 }
 
 std::span<const std::string> ClientUiState::chat_messages() const noexcept {
@@ -191,6 +235,44 @@ std::span<const std::string> ClientUiState::chat_messages() const noexcept {
 
 std::span<const ChatHistoryEntry> ClientUiState::chat_history() const noexcept {
   return chat_history_;
+}
+
+void ClientUiState::reset_chat_history_navigation() noexcept {
+  chat_history_cursor_.reset();
+  uncommitted_chat_draft_.clear();
+}
+
+void ClientUiState::recall_previous_chat_history() {
+  if (submitted_chat_history_.empty()) {
+    return;
+  }
+  if (!chat_history_cursor_.has_value()) {
+    uncommitted_chat_draft_ = chat_draft_.value;
+    chat_history_cursor_ = submitted_chat_history_.size();
+  }
+  if (chat_history_cursor_.value() == 0U) {
+    assign_chat_draft(submitted_chat_history_.front());
+    return;
+  }
+  --chat_history_cursor_.value();
+  assign_chat_draft(submitted_chat_history_[chat_history_cursor_.value()]);
+}
+
+void ClientUiState::recall_next_chat_history() {
+  if (!chat_history_cursor_.has_value()) {
+    return;
+  }
+  if (chat_history_cursor_.value() + 1U < submitted_chat_history_.size()) {
+    ++chat_history_cursor_.value();
+    assign_chat_draft(submitted_chat_history_[chat_history_cursor_.value()]);
+    return;
+  }
+  assign_chat_draft(std::move(uncommitted_chat_draft_));
+  reset_chat_history_navigation();
+}
+
+void ClientUiState::assign_chat_draft(std::string draft) {
+  chat_draft_ = arv::core::TextEditBuffer{std::move(draft)};
 }
 
 } // namespace arv::client

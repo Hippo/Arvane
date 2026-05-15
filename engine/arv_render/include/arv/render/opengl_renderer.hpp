@@ -206,8 +206,8 @@ private:
   void draw_entity_previews();
   void draw_ui();
   void bind_ui_textures();
-  void draw_ui_shapes();
-  void draw_ui_quads();
+  void draw_ui_shapes(u8 layer);
+  void draw_ui_quads(u8 layer);
   void ensure_ui_buffers();
   void ensure_ui_shape_buffers();
   void ensure_white_texture();

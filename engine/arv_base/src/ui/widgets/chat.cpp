@@ -2,9 +2,14 @@
 
 #include "widget_common.hpp"
 
+#include "arv/core/text_edit.hpp"
+
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace arv::ui {
 namespace widgets_detail {
@@ -38,6 +43,114 @@ inline constexpr f32 ChatBorderAlpha = 0.62F;
   return element;
 }
 
+struct WrappedChatRun {
+  arv::text::RichTextRun run{};
+  usize source_run_index{};
+};
+
+struct WrappedChatLine {
+  std::string text{};
+  std::vector<WrappedChatRun> runs{};
+};
+
+[[nodiscard]] usize chat_wrap_columns(f32 width, const UiTheme& theme) noexcept {
+  const f32 estimated_glyph_width =
+      std::max(8.0F, static_cast<f32>(theme.typography.size_md) * 0.62F + ChatLetterSpacing);
+  return std::max<usize>(8U, static_cast<usize>(std::max(1.0F, width) / estimated_glyph_width));
+}
+
+void append_wrapped_codepoint(
+    WrappedChatLine& line,
+    const arv::text::RichTextRun& source,
+    usize source_run_index,
+    std::string_view codepoint) {
+  line.text.append(codepoint);
+  if (!line.runs.empty() && line.runs.back().source_run_index == source_run_index) {
+    line.runs.back().run.text.append(codepoint);
+    return;
+  }
+  arv::text::RichTextRun run = source;
+  run.text = std::string{codepoint};
+  line.runs.push_back({std::move(run), source_run_index});
+}
+
+[[nodiscard]] std::vector<std::string> wrap_plain_chat_text(
+    std::string_view text,
+    usize columns) {
+  std::vector<std::string> lines;
+  lines.emplace_back();
+  usize column = 0U;
+  for (usize index = 0U; index < text.size();) {
+    const usize next = arv::core::next_utf8_codepoint(text, index);
+    const std::string_view codepoint = text.substr(index, next - index);
+    index = next;
+    if (codepoint == "\n") {
+      lines.emplace_back();
+      column = 0U;
+      continue;
+    }
+    if (column >= columns) {
+      lines.emplace_back();
+      column = 0U;
+      if (codepoint == " ") {
+        continue;
+      }
+    }
+    if (column == 0U && codepoint == " " && !lines.back().empty()) {
+      continue;
+    }
+    lines.back().append(codepoint);
+    ++column;
+  }
+  if (lines.empty()) {
+    lines.emplace_back();
+  }
+  return lines;
+}
+
+[[nodiscard]] std::vector<WrappedChatLine> wrap_rich_chat_runs(
+    const std::vector<arv::text::RichTextRun>& runs,
+    usize columns) {
+  std::vector<WrappedChatLine> lines;
+  lines.emplace_back();
+  usize column = 0U;
+  for (usize run_index = 0U; run_index < runs.size(); ++run_index) {
+    const arv::text::RichTextRun& run = runs[run_index];
+    for (usize index = 0U; index < run.text.size();) {
+      const usize next = arv::core::next_utf8_codepoint(run.text, index);
+      const std::string_view codepoint = std::string_view{run.text}.substr(index, next - index);
+      index = next;
+      if (codepoint == "\n") {
+        lines.emplace_back();
+        column = 0U;
+        continue;
+      }
+      if (column >= columns) {
+        lines.emplace_back();
+        column = 0U;
+        if (codepoint == " ") {
+          continue;
+        }
+      }
+      if (column == 0U && codepoint == " " && !lines.back().text.empty()) {
+        continue;
+      }
+      append_wrapped_codepoint(lines.back(), run, run_index, codepoint);
+      ++column;
+    }
+  }
+  if (lines.empty()) {
+    lines.emplace_back();
+  }
+  return lines;
+}
+
+[[nodiscard]] std::string wrapped_line_id(const std::string& line_id, usize wrap_index) {
+  return wrap_index == 0U
+      ? line_id
+      : line_id + ".wrap." + std::to_string(wrap_index);
+}
+
 [[nodiscard]] Vec4f run_color(
     const arv::text::RichTextRun& run,
     const UiTheme& theme,
@@ -59,7 +172,7 @@ void append_chat_run(
     UiTree& tree,
     UiNodeID row_id,
     const std::string& line_id,
-    usize run_index,
+    usize source_run_index,
     const arv::text::RichTextRun& run,
     const UiTheme& theme,
     f32 opacity,
@@ -68,7 +181,7 @@ void append_chat_run(
     return;
   }
 
-  const std::string run_id = line_id + ".run." + std::to_string(run_index);
+  const std::string run_id = line_id + ".run." + std::to_string(source_run_index);
   UiElement segment;
   segment.stable_id = run_id;
   segment.type = UiElementType::Panel;
@@ -212,6 +325,7 @@ void append_chat_ui(UiTree& tree, ChatUiModel model) {
   const f32 chat_text_width = ChatWidth - theme.layout.spacing_sm * 2.0F;
   const f32 chat_line_height =
       static_cast<f32>(theme.typography.size_md) + theme.layout.spacing_sm;
+  const usize wrap_columns = chat_wrap_columns(chat_text_width, theme);
 
   UiElement stack;
   stack.stable_id = "chat.stack";
@@ -246,45 +360,65 @@ void append_chat_ui(UiTree& tree, ChatUiModel model) {
     const ChatLineView& line = model.messages[index];
     const f32 opacity = std::clamp(line.opacity, 0.0F, 1.0F);
     const std::string line_id = "chat.line." + std::to_string(index);
-    UiElement row;
-    row.stable_id = line_id + ".row";
-    row.type = line.runs.empty() ? UiElementType::Panel : UiElementType::HorizontalStack;
-    row.layout.width_mode = UiSizeMode::Fixed;
-    row.layout.height_mode = UiSizeMode::Fixed;
-    row.layout.width = chat_text_width;
-    row.layout.height = chat_line_height;
-    row.style.background = {0.0F, 0.0F, 0.0F, 0.0F};
-    row.hit_test = false;
-    row.clip_children = true;
-    const UiNodeID row_id = tree.add_child(stack_id, std::move(row));
     if (line.runs.empty()) {
-      tree.add_child(
-          row_id,
-          chat_line_text(
-              line_id + ".shadow",
-              line.text,
-              {0.0F, 0.0F, 0.0F, opacity * 0.70F},
-              {1.0F, 1.0F}));
-      tree.add_child(
-          row_id,
-          chat_line_text(
-              line_id,
-              line.text,
-              {theme.colors.text.x,
-               theme.colors.text.y,
-               theme.colors.text.z,
-               opacity}));
-    } else {
-      for (usize run_index = 0; run_index < line.runs.size(); ++run_index) {
-        append_chat_run(
-            tree,
+      const std::vector<std::string> wrapped = wrap_plain_chat_text(line.text, wrap_columns);
+      for (usize wrap_index = 0U; wrap_index < wrapped.size(); ++wrap_index) {
+        const std::string visual_line_id = wrapped_line_id(line_id, wrap_index);
+        UiElement row;
+        row.stable_id = visual_line_id + ".row";
+        row.type = UiElementType::Panel;
+        row.layout.width_mode = UiSizeMode::Fixed;
+        row.layout.height_mode = UiSizeMode::Fixed;
+        row.layout.width = chat_text_width;
+        row.layout.height = chat_line_height;
+        row.style.background = {0.0F, 0.0F, 0.0F, 0.0F};
+        row.hit_test = false;
+        row.clip_children = true;
+        const UiNodeID row_id = tree.add_child(stack_id, std::move(row));
+        tree.add_child(
             row_id,
-            line_id,
-            run_index,
-            line.runs[run_index],
-            theme,
-            opacity,
-            chat_line_height);
+            chat_line_text(
+                visual_line_id + ".shadow",
+                wrapped[wrap_index],
+                {0.0F, 0.0F, 0.0F, opacity * 0.70F},
+                {1.0F, 1.0F}));
+        tree.add_child(
+            row_id,
+            chat_line_text(
+                visual_line_id,
+                wrapped[wrap_index],
+                {theme.colors.text.x,
+                 theme.colors.text.y,
+                 theme.colors.text.z,
+                 opacity}));
+      }
+    } else {
+      const std::vector<WrappedChatLine> wrapped =
+          wrap_rich_chat_runs(line.runs, wrap_columns);
+      for (usize wrap_index = 0U; wrap_index < wrapped.size(); ++wrap_index) {
+        const std::string visual_line_id = wrapped_line_id(line_id, wrap_index);
+        UiElement row;
+        row.stable_id = visual_line_id + ".row";
+        row.type = UiElementType::HorizontalStack;
+        row.layout.width_mode = UiSizeMode::Fixed;
+        row.layout.height_mode = UiSizeMode::Fixed;
+        row.layout.width = chat_text_width;
+        row.layout.height = chat_line_height;
+        row.style.background = {0.0F, 0.0F, 0.0F, 0.0F};
+        row.hit_test = false;
+        row.clip_children = true;
+        const UiNodeID row_id = tree.add_child(stack_id, std::move(row));
+        for (const WrappedChatRun& wrapped_run : wrapped[wrap_index].runs) {
+          append_chat_run(
+              tree,
+              row_id,
+              visual_line_id,
+              wrapped_run.source_run_index,
+              wrapped_run.run,
+              theme,
+              opacity,
+              chat_line_height);
+        }
       }
     }
   }
@@ -302,12 +436,28 @@ void append_chat_ui(UiTree& tree, ChatUiModel model) {
         theme.widgets.input.padding_y};
     style_surface(input, theme, theme.widgets.input.radius);
     input.style.border = with_alpha(input.style.border, ChatBorderAlpha);
+    input.style.border_focus = theme.colors.border_focus;
+    input.style.accent = theme.colors.accent;
+    input.style.text_role = UiTextRole::Body;
+    input.style.letter_spacing = ChatLetterSpacing;
     input.focusable = true;
     input.action = "chat_input";
+    input.clip_children = true;
+    input.text = "> " + model.draft;
+    constexpr usize PromptBytes = 2U;
+    const usize visual_text_size = input.text.size();
+    input.text_input = UiTextInputVisual{
+        true,
+        std::min(visual_text_size, PromptBytes + model.draft_cursor),
+        std::min(visual_text_size, PromptBytes + model.draft_selection_start),
+        std::min(visual_text_size, PromptBytes + model.draft_selection_end)};
     const UiNodeID input_id = tree.add_child(stack_id, std::move(input));
     tree.add_child(
         input_id,
-        chat_line_text("chat.input.text", "> " + model.draft, theme.colors.text));
+        chat_line_text(
+            "chat.input.text",
+            "> " + model.draft,
+            theme.colors.text));
   }
 
   append_url_confirmation(tree, stack_id, model, chat_text_width);

@@ -22,6 +22,9 @@ struct ChatUiModel {
   bool input_active{};
   std::span<const ChatLineView> messages{};
   std::string draft{};
+  usize draft_cursor{};
+  usize draft_selection_start{};
+  usize draft_selection_end{};
   std::optional<std::string> pending_url_confirmation{};
   usize max_visible_messages{8U};
   const arv::text::LanguageCatalog* language{};

@@ -391,6 +391,7 @@ struct UIRectDrawItem {
   f32 radius{};
   Vec2f clip_min{};
   Vec2f clip_max{};
+  u8 layer{};
   bool clip{};
 };
 
@@ -403,6 +404,7 @@ struct UIGlyphDrawItem {
   u32 page{};
   Vec2f clip_min{};
   Vec2f clip_max{};
+  u8 layer{};
   bool clip{};
 };
 
@@ -422,6 +424,7 @@ struct UITexturedQuadDrawItem {
   u32 page{};
   Vec2f clip_min{};
   Vec2f clip_max{};
+  u8 layer{};
   bool clip{};
 };
 

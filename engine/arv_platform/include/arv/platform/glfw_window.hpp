@@ -8,6 +8,8 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 struct GLFWwindow;
 
@@ -36,6 +38,24 @@ struct WindowSize {
 
 struct RawInputEvent {
   InputBinding binding{};
+};
+
+enum class TextEditCommand : u8 {
+  MoveLeft,
+  MoveRight,
+  MoveUp,
+  MoveDown,
+  DeleteForward,
+  Copy,
+  Paste,
+  Cut,
+  SelectAll,
+};
+
+struct TextEditEvent {
+  TextEditCommand command{TextEditCommand::MoveLeft};
+  bool extend_selection{};
+  std::string clipboard_text{};
 };
 
 struct InputSnapshot {
@@ -75,6 +95,7 @@ struct InputSnapshot {
   bool text_backspace_pressed{};
   bool text_submit_pressed{};
   bool text_cancel_pressed{};
+  std::vector<TextEditEvent> text_edit_events{};
   std::optional<RawInputEvent> raw_input{};
 };
 
@@ -118,6 +139,8 @@ public:
   void request_close();
 
   InputSnapshot poll_input();
+  [[nodiscard]] std::string clipboard_text() const;
+  void set_clipboard_text(std::string_view text);
   void set_input_bindings(InputBindings bindings) noexcept;
   void set_cursor_captured(bool captured) noexcept;
   void set_vsync(bool enabled) noexcept;
@@ -153,6 +176,15 @@ private:
   bool previous_middle_mouse_down_{};
   bool previous_backspace_down_{};
   bool previous_enter_down_{};
+  bool previous_left_arrow_down_{};
+  bool previous_right_arrow_down_{};
+  bool previous_up_arrow_down_{};
+  bool previous_down_arrow_down_{};
+  bool previous_delete_down_{};
+  bool previous_copy_shortcut_down_{};
+  bool previous_paste_shortcut_down_{};
+  bool previous_cut_shortcut_down_{};
+  bool previous_select_all_shortcut_down_{};
   std::string pending_text_input_{};
   InputBindings input_bindings_{default_input_bindings()};
   std::array<bool, static_cast<usize>(LogicalAction::Count)> previous_action_active_{};

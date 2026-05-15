@@ -266,6 +266,18 @@ const std::string& ClientRuntime::chat_draft() const noexcept {
   return impl_->ui.chat_draft();
 }
 
+usize ClientRuntime::chat_draft_cursor() const noexcept {
+  return impl_->ui.chat_draft_cursor();
+}
+
+usize ClientRuntime::chat_draft_selection_start() const noexcept {
+  return impl_->ui.chat_draft_selection_start();
+}
+
+usize ClientRuntime::chat_draft_selection_end() const noexcept {
+  return impl_->ui.chat_draft_selection_end();
+}
+
 std::span<const std::string> ClientRuntime::chat_messages() const noexcept {
   return impl_->ui.chat_messages();
 }
@@ -300,6 +312,10 @@ void ClientRuntime::acknowledge_chat_url_open_unavailable() {
 
 const std::optional<std::string>& ClientRuntime::pending_chat_url_confirmation() const noexcept {
   return impl_->ui.pending_url_confirmation();
+}
+
+std::optional<std::string> ClientRuntime::consume_pending_clipboard_text() {
+  return impl_->ui.consume_pending_clipboard_text();
 }
 
 bool ClientRuntime::tab_menu_visible() const noexcept {

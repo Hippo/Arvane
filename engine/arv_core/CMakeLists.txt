@@ -13,6 +13,7 @@ set(ARV_CORE_HEADERS
   include/arv/core/profiling.hpp
   include/arv/core/rate_limiter.hpp
   include/arv/core/string.hpp
+  include/arv/core/text_edit.hpp
   include/arv/core/time.hpp
   include/arv/core/types.hpp
 )
