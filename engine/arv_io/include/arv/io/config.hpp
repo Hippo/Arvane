@@ -375,6 +375,7 @@ struct ChunkPipelineConfig {
   u32 max_generation_jobs_per_frame{4};
   u32 max_generation_results_per_tick{2};
   u32 max_lighting_results_per_tick{1};
+  u32 max_lighting_sections_per_job{32};
   u32 max_client_chunk_applies_per_frame{2};
   u32 max_client_chunk_unloads_per_frame{32};
   u32 max_mesh_jobs_per_frame{4};

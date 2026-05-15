@@ -138,6 +138,7 @@ struct ServerStartInfo {
   std::optional<world::WorldHeightSettings> world_height{};
   u32 max_generation_results_per_tick{2};
   u32 max_lighting_results_per_tick{1};
+  u32 max_lighting_sections_per_job{32};
   u32 max_pending_generation_jobs{4};
   sched::WorkerThreadConfig worker_threads{};
   sched::JobSystemConfig job_system{};

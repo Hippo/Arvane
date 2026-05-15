@@ -308,7 +308,8 @@ public:
       ChunkSectionCoord coord,
       std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
       std::array<voxel::LightWord, voxel::ChunkVolume> lights,
-      std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids = std::nullopt) noexcept;
+      std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids,
+      bool lighting_authoritative) noexcept;
   [[nodiscard]] EntityID create_entity(EntityCreateInfo info = {});
   [[nodiscard]] EntityID create_dropped_item(
       player::ItemStack stack,
@@ -401,8 +402,12 @@ public:
   [[nodiscard]] usize pending_block_update_count() const noexcept;
   [[nodiscard]] bool has_lighting_work() const noexcept;
   [[nodiscard]] LightingSnapshot make_lighting_snapshot() const;
+  [[nodiscard]] LightingBatchSnapshot make_lighting_batch_snapshot(u32 max_sections) const;
   [[nodiscard]] static LightingResult build_lighting_result(
       const LightingSnapshot& snapshot,
+      const voxel::BlockRegistry& registry);
+  [[nodiscard]] static LightingResult build_lighting_result(
+      const LightingBatchSnapshot& snapshot,
       const voxel::BlockRegistry& registry);
   LightingPublishStats publish_lighting_result(LightingResult result) noexcept;
   u32 process_fluid_updates(

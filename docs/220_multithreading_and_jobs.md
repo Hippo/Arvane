@@ -206,7 +206,7 @@ Jobs should be small enough to run efficiently but large enough to avoid excessi
 
 Ownership remains with the systems that submit and consume jobs.
 
-Lighting jobs are a bounded-job example. A lighting task solves one chunk section from immutable section and face-neighbor snapshots, records node/queue metrics, and returns a publishable result. If more lighting work remains, the world queues continuation sections instead of allowing the worker to expand into a whole-region flood fill. Simulation, render, and meshing code may enqueue or publish lighting work, but must not wait for propagation to finish.
+Lighting jobs are a bounded-job example. A lighting task solves a configurable batch of non-face-adjacent chunk sections from immutable section and face-neighbor snapshots, records node/queue metrics, and returns a publishable result. Each section solve remains section-local; if more lighting work remains, the world queues continuation sections instead of allowing the worker to expand into a whole-region flood fill. Simulation, render, and meshing code may enqueue or publish lighting work, but must not wait for propagation to finish.
 
 ### Job Lanes
 
@@ -250,7 +250,7 @@ jobs:
     max_pathfinding_jobs_in_flight: 1
 ```
 
-`worker_threads: 0` keeps the total worker count automatic after reserving owner/platform threads. `background_cpu_workers: 0` lets the app derive the background lane from the runtime budget. Domain budgets use the `JobSystemConfig` field names; zero keeps the raw `JobSystem` domain unbounded, though owner systems with their own pending queues may substitute their runtime default.
+`worker_threads: 0` keeps the total worker count automatic after reserving owner/platform threads. `background_cpu_workers: 0` lets the app derive the background lane from the runtime budget. Domain budgets use the `JobSystemConfig` field names; zero keeps the raw `JobSystem` domain unbounded, though owner systems with their own pending queues may substitute their runtime default. `chunk_pipeline.max_lighting_sections_per_job` controls how many independent section solves a server lighting job may batch together.
 
 ### Current Owner Mapping
 

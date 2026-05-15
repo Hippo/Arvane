@@ -352,7 +352,8 @@ void WorldRuntime::restore_saved_chunk(
     ChunkSectionCoord coord,
     std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
     std::array<voxel::LightWord, voxel::ChunkVolume> lights,
-    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids) noexcept {
+    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids,
+    bool lighting_authoritative) noexcept {
   assert_owner_thread();
   voxel::ChunkSection& chunk =
       impl_->chunks.ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded, impl_->dirty);
@@ -360,11 +361,16 @@ void WorldRuntime::restore_saved_chunk(
       std::move(blocks),
       std::move(lights),
       std::move(fluids),
-      false);
-  impl_->dirty.mark_chunk_lighting_dirty(*this, coord);
+      lighting_authoritative);
+  if (lighting_authoritative) {
+    chunk.clear_dirty(voxel::ChunkDirtyFlags::Lighting);
+    impl_->dirty.forget_lighting_chunk(coord);
+  } else {
+    impl_->dirty.mark_chunk_lighting_dirty(*this, coord);
+    impl_->dirty.mark_lighting_content_dirty();
+  }
   impl_->dirty.mark_mesh_content_dirty();
   impl_->dirty.enqueue_dirty_mesh_chunk(coord);
-  impl_->dirty.mark_lighting_content_dirty();
 }
 
 } // namespace arv::world

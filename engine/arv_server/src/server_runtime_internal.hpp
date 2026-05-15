@@ -178,6 +178,7 @@ private:
   u32 max_pending_fluid_jobs_{1};
   u32 max_generation_results_per_tick_{2};
   u32 max_lighting_results_per_tick_{1};
+  u32 max_lighting_sections_per_job_{32};
   u32 max_fluid_results_per_tick_{1};
   u32 fluid_update_interval_{1};
   u32 fluid_update_budget_{2000};

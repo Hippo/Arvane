@@ -2,6 +2,7 @@ chunk_pipeline:
   max_generation_jobs_per_frame: 4
   max_generation_results_per_tick: 2
   max_lighting_results_per_tick: 1
+  max_lighting_sections_per_job: 32
 chunks:
   load_distance: 12
   simulation_distance: 2

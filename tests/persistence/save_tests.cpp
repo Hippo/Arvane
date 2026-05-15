@@ -388,7 +388,8 @@ TEST(SaveTests, WorldHeightLoadsFromGenerationBoundsWhenChunkBoundsAreStale) {
       loaded.value().chunks[0].coord,
       loaded.value().chunks[0].blocks,
       loaded.value().chunks[0].lights,
-      loaded.value().chunks[0].fluids);
+      loaded.value().chunks[0].fluids,
+      loaded.value().chunks[0].lighting_valid);
   EXPECT_NE(world.find_chunk({{0, 6, 0}}), nullptr);
 }
 

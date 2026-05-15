@@ -209,6 +209,51 @@ TEST(WorldRuntimeTests, LightingSnapshotSharesChunkStorage) {
   EXPECT_EQ(snapshot.chunks[0].storage.get(), chunk.storage_identity());
 }
 
+TEST(WorldRuntimeTests, AuthoritativeSavedLightingDoesNotQueueRelight) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks{};
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights{};
+  lights.fill(arv::voxel::NoLight);
+  lights[arv::voxel::local_index({{1, 1, 1}})] = arv::voxel::with_sky_light(
+      arv::voxel::NoLight,
+      15);
+
+  world.restore_saved_chunk(
+      {{0, 0, 0}},
+      std::move(blocks),
+      std::move(lights),
+      std::nullopt,
+      true);
+
+  const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(chunk, nullptr);
+  EXPECT_FALSE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+  EXPECT_FALSE(world.has_lighting_work());
+  EXPECT_TRUE(world.make_lighting_snapshot().chunks.empty());
+}
+
+TEST(WorldRuntimeTests, NonAuthoritativeSavedLightingQueuesRelight) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks{};
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights{};
+  lights.fill(arv::voxel::NoLight);
+
+  world.restore_saved_chunk(
+      {{0, 0, 0}},
+      std::move(blocks),
+      std::move(lights),
+      std::nullopt,
+      false);
+
+  const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(chunk, nullptr);
+  EXPECT_TRUE(chunk->is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+  EXPECT_TRUE(world.has_lighting_work());
+  EXPECT_EQ(world.make_lighting_snapshot().pending_dirty_sections, 1U);
+}
+
 TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDirectNeighborsForRelightAndRemesh) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& neighbor = world.ensure_chunk({{0, 0, 0}});

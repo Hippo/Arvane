@@ -15,8 +15,20 @@ LightingSnapshot WorldLightingRuntime::make_snapshot(const WorldRuntime& world) 
   return WorldLighting::make_snapshot(world);
 }
 
+LightingBatchSnapshot WorldLightingRuntime::make_batch_snapshot(
+    const WorldRuntime& world,
+    u32 max_sections) const {
+  return WorldLighting::make_batch_snapshot(world, max_sections);
+}
+
 LightingResult WorldLightingRuntime::build_result(
     const LightingSnapshot& snapshot,
+    const voxel::BlockRegistry& registry) {
+  return WorldLighting::build_result(snapshot, registry);
+}
+
+LightingResult WorldLightingRuntime::build_result(
+    const LightingBatchSnapshot& snapshot,
     const voxel::BlockRegistry& registry) {
   return WorldLighting::build_result(snapshot, registry);
 }
@@ -43,8 +55,23 @@ LightingSnapshot WorldRuntime::make_lighting_snapshot() const {
   return snapshot;
 }
 
+LightingBatchSnapshot WorldRuntime::make_lighting_batch_snapshot(u32 max_sections) const {
+  assert_owner_thread();
+  ARV_PROFILE_ZONE("Snapshot creation");
+  LightingBatchSnapshot snapshot =
+      impl_->lighting.make_batch_snapshot(*this, max_sections);
+  impl_->dirty.set_last_lighting_snapshot_chunk_count(snapshot.pending_dirty_sections);
+  return snapshot;
+}
+
 LightingResult WorldRuntime::build_lighting_result(
     const LightingSnapshot& snapshot,
+    const voxel::BlockRegistry& registry) {
+  return detail::WorldLightingRuntime::build_result(snapshot, registry);
+}
+
+LightingResult WorldRuntime::build_lighting_result(
+    const LightingBatchSnapshot& snapshot,
     const voxel::BlockRegistry& registry) {
   return detail::WorldLightingRuntime::build_result(snapshot, registry);
 }

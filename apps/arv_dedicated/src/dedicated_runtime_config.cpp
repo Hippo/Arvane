@@ -162,6 +162,8 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
       config.chunk_pipeline.max_generation_results_per_tick;
   server_start_info.max_lighting_results_per_tick =
       config.chunk_pipeline.max_lighting_results_per_tick;
+  server_start_info.max_lighting_sections_per_job =
+      config.chunk_pipeline.max_lighting_sections_per_job;
   server_start_info.max_pending_generation_jobs =
       config.chunk_pipeline.max_generation_jobs_per_frame;
   server_start_info.worker_threads = runtime_config.thread_budget.primary_workers;

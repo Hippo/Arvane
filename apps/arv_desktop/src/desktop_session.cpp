@@ -235,6 +235,8 @@ bool DesktopSessionManager::start_singleplayer(
       dependencies_.config.chunk_pipeline.max_generation_results_per_tick;
   server_start_info.max_lighting_results_per_tick =
       dependencies_.config.chunk_pipeline.max_lighting_results_per_tick;
+  server_start_info.max_lighting_sections_per_job =
+      dependencies_.config.chunk_pipeline.max_lighting_sections_per_job;
   server_start_info.max_pending_generation_jobs =
       dependencies_.config.chunk_pipeline.max_generation_jobs_per_frame;
   server_start_info.worker_threads = dependencies_.thread_budget.primary_workers;
@@ -322,7 +324,8 @@ bool DesktopSessionManager::start_singleplayer(
         chunk.coord,
         chunk.blocks,
         chunk.lights,
-        chunk.fluids);
+        chunk.fluids,
+        chunk.lighting_valid);
   }
   integrated_server->voxel_world().restore_persistent_entities(
       loaded_save.entities,

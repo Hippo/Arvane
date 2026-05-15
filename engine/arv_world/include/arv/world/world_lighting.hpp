@@ -19,6 +19,7 @@ class WorldRuntime;
 enum class LightingJobType : u8 {
   SectionRelight,
   BoundaryContinuation,
+  SectionBatch,
 };
 
 inline constexpr u32 DefaultLightingWorkBudgetNodes =
@@ -66,6 +67,14 @@ struct LightingSnapshot {
   std::vector<ChunkLightingSnapshot> chunks{};
 };
 
+struct LightingBatchSnapshot {
+  WorldID world_id{};
+  u64 source_revision{};
+  u32 pending_dirty_sections{};
+  u32 work_budget_nodes{DefaultLightingWorkBudgetNodes};
+  std::vector<LightingSnapshot> snapshots{};
+};
+
 struct ChunkLightingResult {
   ChunkSectionCoord coord{};
   u64 source_version{};
@@ -96,10 +105,22 @@ class WorldLighting {
 public:
   [[nodiscard]] static bool has_work(const WorldRuntime& world) noexcept;
   [[nodiscard]] static LightingSnapshot make_snapshot(const WorldRuntime& world);
+  [[nodiscard]] static LightingBatchSnapshot make_batch_snapshot(
+      const WorldRuntime& world,
+      u32 max_sections);
   [[nodiscard]] static LightingResult build_result(
       const LightingSnapshot& snapshot,
       const voxel::BlockRegistry& registry);
+  [[nodiscard]] static LightingResult build_result(
+      const LightingBatchSnapshot& snapshot,
+      const voxel::BlockRegistry& registry);
   static LightingPublishStats publish_result(WorldRuntime& world, LightingResult result) noexcept;
+
+private:
+  [[nodiscard]] static LightingSnapshot make_snapshot_for_target(
+      const WorldRuntime& world,
+      ChunkSectionCoord target_coord,
+      u32 pending_dirty_sections);
 };
 
 } // namespace arv::world

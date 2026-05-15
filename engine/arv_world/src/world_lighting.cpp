@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <cstdio>
+#include <iterator>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -53,12 +54,27 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
   return lhs.value.y > rhs.value.y;
 }
 
+[[nodiscard]] i32 abs_i32(i32 value) noexcept {
+  return value < 0 ? -value : value;
+}
+
+[[nodiscard]] bool chunk_sections_share_face(
+    ChunkSectionCoord lhs,
+    ChunkSectionCoord rhs) noexcept {
+  const i32 dx = abs_i32(lhs.value.x - rhs.value.x);
+  const i32 dy = abs_i32(lhs.value.y - rhs.value.y);
+  const i32 dz = abs_i32(lhs.value.z - rhs.value.z);
+  return dx + dy + dz == 1;
+}
+
 [[nodiscard]] const char* lighting_job_type_name(LightingJobType type) noexcept {
   switch (type) {
     case LightingJobType::SectionRelight:
       return "section";
     case LightingJobType::BoundaryContinuation:
       return "boundary";
+    case LightingJobType::SectionBatch:
+      return "batch";
   }
   return "unknown";
 }
@@ -270,23 +286,15 @@ bool WorldLighting::has_work(const WorldRuntime& world) noexcept {
   return world.impl_->dirty.has_lighting_work();
 }
 
-LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
-  ARV_PROFILE_ZONE("Snapshot creation");
+LightingSnapshot WorldLighting::make_snapshot_for_target(
+    const WorldRuntime& world,
+    ChunkSectionCoord target_coord,
+    u32 pending_dirty_sections) {
   LightingSnapshot snapshot;
   snapshot.world_id = world.impl_->id;
   snapshot.source_revision = world.impl_->dirty.lighting_revision();
-
-  std::vector<ChunkSectionCoord> dirty_coords =
-      world.impl_->dirty.dirty_lighting_chunks(world);
-
-  if (dirty_coords.empty()) {
-    return snapshot;
-  }
-
-  std::sort(dirty_coords.begin(), dirty_coords.end(), chunk_coord_less);
-  snapshot.target_coord = dirty_coords.front();
-  snapshot.pending_dirty_sections = static_cast<u32>(
-      std::min<usize>(dirty_coords.size(), static_cast<usize>(~u32{0})));
+  snapshot.target_coord = target_coord;
+  snapshot.pending_dirty_sections = pending_dirty_sections;
   const WorldSearch search{world};
   if (const voxel::ChunkSection* target = search.find_chunk(snapshot.target_coord);
       target != nullptr && !target->is_dirty(voxel::ChunkDirtyFlags::Geometry)) {
@@ -402,9 +410,78 @@ LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
   return snapshot;
 }
 
-LightingResult WorldLighting::build_result(
+LightingSnapshot WorldLighting::make_snapshot(const WorldRuntime& world) {
+  ARV_PROFILE_ZONE("Snapshot creation");
+  std::vector<ChunkSectionCoord> dirty_coords =
+      world.impl_->dirty.dirty_lighting_chunks(world);
+
+  if (dirty_coords.empty()) {
+    LightingSnapshot snapshot;
+    snapshot.world_id = world.impl_->id;
+    snapshot.source_revision = world.impl_->dirty.lighting_revision();
+    return snapshot;
+  }
+
+  std::sort(dirty_coords.begin(), dirty_coords.end(), chunk_coord_less);
+  return make_snapshot_for_target(
+      world,
+      dirty_coords.front(),
+      static_cast<u32>(
+          std::min<usize>(dirty_coords.size(), static_cast<usize>(~u32{0}))));
+}
+
+LightingBatchSnapshot WorldLighting::make_batch_snapshot(
+    const WorldRuntime& world,
+    u32 max_sections) {
+  ARV_PROFILE_ZONE("Snapshot creation");
+  LightingBatchSnapshot batch;
+  batch.world_id = world.impl_->id;
+  batch.source_revision = world.impl_->dirty.lighting_revision();
+
+  std::vector<ChunkSectionCoord> dirty_coords =
+      world.impl_->dirty.dirty_lighting_chunks(world);
+  if (dirty_coords.empty()) {
+    return batch;
+  }
+
+  std::sort(dirty_coords.begin(), dirty_coords.end(), chunk_coord_less);
+  batch.pending_dirty_sections = static_cast<u32>(
+      std::min<usize>(dirty_coords.size(), static_cast<usize>(~u32{0})));
+
+  const usize section_limit = static_cast<usize>(std::max<u32>(max_sections, 1U));
+  batch.snapshots.reserve(std::min<usize>(dirty_coords.size(), section_limit));
+  std::vector<ChunkSectionCoord> selected_targets;
+  selected_targets.reserve(std::min<usize>(dirty_coords.size(), section_limit));
+  for (const ChunkSectionCoord coord : dirty_coords) {
+    if (batch.snapshots.size() >= section_limit) {
+      break;
+    }
+    const bool shares_face_with_selected = std::any_of(
+        selected_targets.begin(),
+        selected_targets.end(),
+        [coord](ChunkSectionCoord selected) noexcept {
+          return chunk_sections_share_face(coord, selected);
+        });
+    if (shares_face_with_selected) {
+      continue;
+    }
+
+    LightingSnapshot snapshot = make_snapshot_for_target(world, coord, 1U);
+    snapshot.work_budget_nodes = batch.work_budget_nodes;
+    if (!snapshot.chunks.empty()) {
+      selected_targets.emplace_back(coord);
+      batch.snapshots.emplace_back(std::move(snapshot));
+    }
+  }
+  return batch;
+}
+
+namespace {
+
+LightingResult build_section_lighting_result(
     const LightingSnapshot& snapshot,
-    const voxel::BlockRegistry& registry) {
+    const voxel::BlockRegistry& registry,
+    bool record_finished) {
   ARV_PROFILE_ZONE("Lighting propagation");
   const auto timing_start = std::chrono::steady_clock::now();
   LightingResult result;
@@ -416,7 +493,9 @@ LightingResult WorldLighting::build_result(
 
   const ChunkLightingSnapshot* target = find_snapshot_chunk(snapshot, snapshot.target_coord);
   if (target == nullptr) {
-    record_lighting_job_finished(result, timing_start);
+    if (record_finished) {
+      record_lighting_job_finished(result, timing_start);
+    }
     return result;
   }
 
@@ -816,6 +895,71 @@ LightingResult WorldLighting::build_result(
         changed_light_dependency_mask);
   }
   result.stats.sections_published = static_cast<u32>(result.chunks.size());
+  if (record_finished) {
+    record_lighting_job_finished(result, timing_start);
+  }
+  return result;
+}
+
+void merge_lighting_stats(LightingJobStats& aggregate, const LightingJobStats& section) noexcept {
+  aggregate.nodes_processed += section.nodes_processed;
+  aggregate.add_nodes_processed += section.add_nodes_processed;
+  aggregate.remove_nodes_processed += section.remove_nodes_processed;
+  aggregate.boundary_deferrals += section.boundary_deferrals;
+  aggregate.sections_touched += section.sections_touched;
+  aggregate.sections_published += section.sections_published;
+  aggregate.max_queue_depth = std::max(aggregate.max_queue_depth, section.max_queue_depth);
+  aggregate.continuation_count += section.continuation_count;
+  aggregate.touched_neighbor_sections =
+      aggregate.touched_neighbor_sections || section.touched_neighbor_sections;
+  aggregate.exceeded_soft_budget =
+      aggregate.exceeded_soft_budget || section.exceeded_soft_budget;
+}
+
+} // namespace
+
+LightingResult WorldLighting::build_result(
+    const LightingSnapshot& snapshot,
+    const voxel::BlockRegistry& registry) {
+  return build_section_lighting_result(snapshot, registry, true);
+}
+
+LightingResult WorldLighting::build_result(
+    const LightingBatchSnapshot& snapshot,
+    const voxel::BlockRegistry& registry) {
+  ARV_PROFILE_ZONE("Lighting propagation batch");
+  const auto timing_start = std::chrono::steady_clock::now();
+  LightingResult result;
+  result.world_id = snapshot.world_id;
+  result.source_revision = snapshot.source_revision;
+  result.stats.job_type = LightingJobType::SectionBatch;
+  if (!snapshot.snapshots.empty()) {
+    result.stats.section_coord = snapshot.snapshots.front().target_coord;
+  }
+
+  for (const LightingSnapshot& section_snapshot : snapshot.snapshots) {
+    LightingResult section =
+        build_section_lighting_result(section_snapshot, registry, false);
+    merge_lighting_stats(result.stats, section.stats);
+    result.continuation_requested =
+        result.continuation_requested || section.continuation_requested;
+    result.chunks.insert(
+        result.chunks.end(),
+        std::make_move_iterator(section.chunks.begin()),
+        std::make_move_iterator(section.chunks.end()));
+  }
+
+  const u32 solved_sections = static_cast<u32>(
+      std::min<usize>(snapshot.snapshots.size(), static_cast<usize>(~u32{0})));
+  if (snapshot.pending_dirty_sections > solved_sections) {
+    result.stats.continuation_count += snapshot.pending_dirty_sections - solved_sections;
+  }
+  result.stats.sections_published = static_cast<u32>(
+      std::min<usize>(result.chunks.size(), static_cast<usize>(~u32{0})));
+  result.continuation_requested =
+      result.continuation_requested ||
+      result.stats.continuation_count > 0U ||
+      result.stats.exceeded_soft_budget;
   record_lighting_job_finished(result, timing_start);
   return result;
 }
@@ -832,6 +976,8 @@ LightingPublishStats WorldLighting::publish_result(
   }
 
   WorldSearch search{world};
+  std::vector<ChunkSectionCoord> boundary_continuations;
+  std::vector<ChunkSectionCoord> light_dependency_meshes;
   for (ChunkLightingResult& chunk_result : result.chunks) {
     voxel::ChunkSection* chunk = search.find_mutable_chunk(chunk_result.coord);
     const bool chunk_matches_source =
@@ -862,9 +1008,7 @@ LightingPublishStats WorldLighting::publish_result(
           continue;
         }
 
-        neighbor->mark_light_dependency_dirty();
-        world.impl_->dirty.mark_chunk_lighting_dirty(world, neighbor_coord);
-        world.impl_->dirty.enqueue_dirty_mesh_chunk(neighbor_coord);
+        boundary_continuations.emplace_back(neighbor_coord);
         ++stats.boundary_continuations;
         ++stats.remeshes_triggered;
       }
@@ -883,15 +1027,27 @@ LightingPublishStats WorldLighting::publish_result(
         if (search.find_mutable_chunk(dependency_coord) == nullptr) {
           continue;
         }
-        world.impl_->dirty.mark_neighbor_light_dependency_dirty(
-            world,
-            dependency_coord);
+        light_dependency_meshes.emplace_back(dependency_coord);
         ++stats.remeshes_triggered;
       }
     }
     chunk->clear_dirty(voxel::ChunkDirtyFlags::Lighting);
     world.impl_->dirty.forget_lighting_chunk(chunk_result.coord);
     ++stats.accepted_chunks;
+  }
+  for (const ChunkSectionCoord neighbor_coord : boundary_continuations) {
+    voxel::ChunkSection* neighbor = search.find_mutable_chunk(neighbor_coord);
+    if (neighbor == nullptr) {
+      continue;
+    }
+    neighbor->mark_light_dependency_dirty();
+    world.impl_->dirty.mark_chunk_lighting_dirty(world, neighbor_coord);
+    world.impl_->dirty.enqueue_dirty_mesh_chunk(neighbor_coord);
+  }
+  for (const ChunkSectionCoord dependency_coord : light_dependency_meshes) {
+    world.impl_->dirty.mark_neighbor_light_dependency_dirty(
+        world,
+        dependency_coord);
   }
   if (stats.accepted_chunks > 0U) {
     core::record_lighting_sections_published(stats.accepted_chunks);

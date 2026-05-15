@@ -45,7 +45,8 @@ void restore_loaded_world_into_server(
         chunk.coord,
         chunk.blocks,
         chunk.lights,
-        chunk.fluids);
+        chunk.fluids,
+        chunk.lighting_valid);
   }
   server.voxel_world().restore_persistent_entities(
       loaded_save.entities,

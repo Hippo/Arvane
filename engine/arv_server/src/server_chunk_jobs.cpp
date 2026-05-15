@@ -26,6 +26,8 @@ void ServerWorldJobRuntime::configure(const ServerStartInfo& start_info) {
       std::max<u32>(start_info.max_generation_results_per_tick, 1U);
   max_lighting_results_per_tick_ =
       std::max<u32>(start_info.max_lighting_results_per_tick, 1U);
+  max_lighting_sections_per_job_ =
+      std::max<u32>(start_info.max_lighting_sections_per_job, 1U);
   max_fluid_results_per_tick_ =
       std::max<u32>(start_info.max_fluid_results_per_tick, 1U);
   max_pending_lighting_jobs_ =
@@ -342,8 +344,9 @@ void ServerWorldJobRuntime::schedule_lighting_jobs(
     return;
   }
 
-  world::LightingSnapshot snapshot = world.make_lighting_snapshot();
-  if (snapshot.chunks.empty()) {
+  world::LightingBatchSnapshot snapshot =
+      world.make_lighting_batch_snapshot(max_lighting_sections_per_job_);
+  if (snapshot.snapshots.empty()) {
     return;
   }
   const u64 source_revision = snapshot.source_revision;

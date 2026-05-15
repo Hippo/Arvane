@@ -230,8 +230,14 @@ class WorldLightingRuntime {
 public:
   [[nodiscard]] bool has_work(const WorldRuntime& world) const noexcept;
   [[nodiscard]] LightingSnapshot make_snapshot(const WorldRuntime& world) const;
+  [[nodiscard]] LightingBatchSnapshot make_batch_snapshot(
+      const WorldRuntime& world,
+      u32 max_sections) const;
   [[nodiscard]] static LightingResult build_result(
       const LightingSnapshot& snapshot,
+      const voxel::BlockRegistry& registry);
+  [[nodiscard]] static LightingResult build_result(
+      const LightingBatchSnapshot& snapshot,
       const voxel::BlockRegistry& registry);
   LightingPublishStats publish_result(WorldRuntime& world, LightingResult result) noexcept;
 };

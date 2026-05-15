@@ -337,11 +337,11 @@ Use queued lighting jobs:
 
 This matches the same general safety model used for meshing.
 
-### Current Section Job Model
+### Current Bounded Batch Job Model
 
-Arvane lighting jobs are bounded to one dirty 16 x 16 x 16 section at a time.
+Arvane lighting jobs are bounded batches of dirty 16 x 16 x 16 section solves. Each batch may contain several independent section snapshots, but face-adjacent dirty targets are kept in separate batches so one target can publish before the neighbor consumes it as a boundary seed. Each section is still solved with the same section-local boundary rules rather than by expanding into an unbounded region flood fill.
 
-Each job receives immutable storage handles for:
+Each section snapshot receives immutable storage handles for:
 
 * the target section
 * the six direct face-neighbor sections that are currently loaded
@@ -360,9 +360,9 @@ For generated worlds, the server installs the world seed and generation config i
 
 Dirty lighting sections in a column are selected top-down. Surface or upper-section skylight repairs should publish before lower continuation jobs consume that boundary, which keeps block breaks from flipping lower caves through stale upper light data.
 
-Workers publish at most the target section's light array. They do not mutate neighboring sections and they do not complete cross-section propagation inline. If a published result changes a boundary face, the world thread marks that face neighbor for lighting continuation and `LightMesh` remeshing. Missing neighbors are recorded as boundary deferrals; when those sections later load, normal load-neighbor dirtying repairs the boundary.
+Workers publish at most each target section's light array. They do not mutate neighboring sections and they do not complete cross-section propagation inline. If a published result changes a boundary face, the world thread marks that face neighbor for lighting continuation and `LightMesh` remeshing after the batch's accepted targets have been applied. Missing neighbors are recorded as boundary deferrals; when those sections later load, normal load-neighbor dirtying repairs the boundary.
 
-This model intentionally turns large relights into multiple small jobs. The soft work budget is tracked per job; a section job that exceeds the configured node budget is suspicious and visible in profiling, while remaining dirty sections or changed boundaries are handled as continuation jobs.
+This model intentionally turns large relights into multiple bounded jobs. The soft work budget is tracked per section solve and aggregated per batch; a section solve that exceeds the configured node budget is suspicious and visible in profiling, while remaining dirty sections or changed boundaries are handled as continuation jobs.
 
 ---
 

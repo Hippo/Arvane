@@ -82,10 +82,42 @@ bool run_lighting_worker_round(
   return processed;
 }
 
+bool run_lighting_batch_worker_round(
+    arv::world::WorldRuntime& world,
+    const arv::voxel::BlockRegistry& registry,
+    arv::u32 max_sections_per_job) {
+  bool processed = false;
+  for (int pass = 0; pass < 64; ++pass) {
+    const arv::world::LightingBatchSnapshot snapshot =
+        world.make_lighting_batch_snapshot(max_sections_per_job);
+    if (snapshot.snapshots.empty()) {
+      break;
+    }
+
+    arv::world::LightingResult result =
+        arv::world::WorldRuntime::build_lighting_result(
+            snapshot,
+            registry);
+    const arv::world::LightingPublishStats stats =
+        world.publish_lighting_result(std::move(result));
+    processed = processed || stats.accepted_chunks > 0U || stats.stale_chunks > 0U;
+  }
+  return processed;
+}
+
 arv::world::LightingResult build_single_lighting_result(
     arv::world::WorldRuntime& world,
     const arv::voxel::BlockRegistry& registry) {
   const arv::world::LightingSnapshot snapshot = world.make_lighting_snapshot();
+  return arv::world::WorldRuntime::build_lighting_result(snapshot, registry);
+}
+
+arv::world::LightingResult build_batch_lighting_result(
+    arv::world::WorldRuntime& world,
+    const arv::voxel::BlockRegistry& registry,
+    arv::u32 max_sections_per_job) {
+  const arv::world::LightingBatchSnapshot snapshot =
+      world.make_lighting_batch_snapshot(max_sections_per_job);
   return arv::world::WorldRuntime::build_lighting_result(snapshot, registry);
 }
 
@@ -365,6 +397,77 @@ TEST(LightingTests, SingleLightingJobPublishesOnlyOneSection) {
   EXPECT_LE(result.chunks.size(), 1U);
   EXPECT_GE(result.stats.continuation_count, 1U);
   EXPECT_TRUE(result.continuation_requested);
+}
+
+TEST(LightingTests, LightingBatchSnapshotCapsSectionCount) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  world.ensure_chunk({{2, 0, 0}});
+  world.ensure_chunk({{4, 0, 0}});
+  world.mark_chunk_lighting_dirty({{0, 0, 0}});
+  world.mark_chunk_lighting_dirty({{2, 0, 0}});
+  world.mark_chunk_lighting_dirty({{4, 0, 0}});
+
+  const arv::world::LightingBatchSnapshot snapshot =
+      world.make_lighting_batch_snapshot(2);
+
+  EXPECT_EQ(snapshot.pending_dirty_sections, 3U);
+  EXPECT_EQ(snapshot.snapshots.size(), 2U);
+}
+
+TEST(LightingTests, LightingBatchPublishesMultipleSections) {
+  const arv::voxel::BlockRegistry registry = make_lighting_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::voxel::ChunkSection& first = world.ensure_chunk({{0, 0, 0}});
+  arv::voxel::ChunkSection& second = world.ensure_chunk({{2, 0, 0}});
+  world.mark_chunk_lighting_dirty({{0, 0, 0}});
+  world.mark_chunk_lighting_dirty({{2, 0, 0}});
+
+  arv::world::LightingResult result = build_batch_lighting_result(world, registry, 4);
+  const arv::world::LightingPublishStats stats =
+      world.publish_lighting_result(std::move(result));
+
+  EXPECT_EQ(stats.accepted_chunks, 2U);
+  EXPECT_FALSE(first.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+  EXPECT_FALSE(second.is_dirty(arv::voxel::ChunkDirtyFlags::Lighting));
+  EXPECT_FALSE(world.has_lighting_work());
+}
+
+TEST(LightingTests, LightingBatchLeavesRemainingDirtyAfterPartialBatch) {
+  const arv::voxel::BlockRegistry registry = make_lighting_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  world.ensure_chunk({{2, 0, 0}});
+  world.ensure_chunk({{4, 0, 0}});
+  world.mark_chunk_lighting_dirty({{0, 0, 0}});
+  world.mark_chunk_lighting_dirty({{2, 0, 0}});
+  world.mark_chunk_lighting_dirty({{4, 0, 0}});
+
+  arv::world::LightingResult result = build_batch_lighting_result(world, registry, 2);
+  const arv::world::LightingPublishStats stats =
+      world.publish_lighting_result(std::move(result));
+
+  EXPECT_EQ(stats.accepted_chunks, 2U);
+  EXPECT_TRUE(world.has_lighting_work());
+  const arv::world::LightingBatchSnapshot remaining =
+      world.make_lighting_batch_snapshot(8);
+  EXPECT_EQ(remaining.pending_dirty_sections, 1U);
+  EXPECT_EQ(remaining.snapshots.size(), 1U);
+}
+
+TEST(LightingTests, LightingBatchConvergesAcrossAdjacentDirtySections) {
+  const arv::voxel::BlockRegistry registry = make_lighting_registry();
+  const arv::voxel::BlockVariantID glowstone = registry.find_variant("arvane:glowstone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  world.ensure_chunk({{1, 0, 0}});
+  ASSERT_TRUE(world.set_block({{15, 1, 1}}, glowstone));
+
+  EXPECT_TRUE(run_lighting_batch_worker_round(world, registry, 2));
+
+  EXPECT_EQ(arv::voxel::light_r(world.get_light({{15, 1, 1}})), 15);
+  EXPECT_EQ(arv::voxel::light_r(world.get_light({{16, 1, 1}})), 14);
+  EXPECT_FALSE(world.has_lighting_work());
 }
 
 TEST(LightingTests, MissingNeighborRecordsBoundaryDeferral) {

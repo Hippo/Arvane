@@ -328,6 +328,10 @@ void read_runtime_sections(const DataValue& root, EngineConfig& config) {
         config.chunk_pipeline.max_lighting_results_per_tick);
     read_scalar(
         *chunk_pipeline,
+        "max_lighting_sections_per_job",
+        config.chunk_pipeline.max_lighting_sections_per_job);
+    read_scalar(
+        *chunk_pipeline,
         "max_client_chunk_applies_per_frame",
         config.chunk_pipeline.max_client_chunk_applies_per_frame);
     read_scalar(
@@ -374,6 +378,7 @@ void put_runtime_full(DataValue& root, const EngineConfig& config) {
   put(root, "chunk_pipeline.max_generation_jobs_per_frame", config.chunk_pipeline.max_generation_jobs_per_frame);
   put(root, "chunk_pipeline.max_generation_results_per_tick", config.chunk_pipeline.max_generation_results_per_tick);
   put(root, "chunk_pipeline.max_lighting_results_per_tick", config.chunk_pipeline.max_lighting_results_per_tick);
+  put(root, "chunk_pipeline.max_lighting_sections_per_job", config.chunk_pipeline.max_lighting_sections_per_job);
   put(root, "chunk_pipeline.max_client_chunk_applies_per_frame", config.chunk_pipeline.max_client_chunk_applies_per_frame);
   put(root, "chunk_pipeline.max_client_chunk_unloads_per_frame", config.chunk_pipeline.max_client_chunk_unloads_per_frame);
   put(root, "chunk_pipeline.max_mesh_jobs_per_frame", config.chunk_pipeline.max_mesh_jobs_per_frame);
@@ -395,6 +400,7 @@ void put_runtime_shared(DataValue& root, const EngineConfig& config) {
   put(root, "chunk_pipeline.max_generation_jobs_per_frame", config.chunk_pipeline.max_generation_jobs_per_frame);
   put(root, "chunk_pipeline.max_generation_results_per_tick", config.chunk_pipeline.max_generation_results_per_tick);
   put(root, "chunk_pipeline.max_lighting_results_per_tick", config.chunk_pipeline.max_lighting_results_per_tick);
+  put(root, "chunk_pipeline.max_lighting_sections_per_job", config.chunk_pipeline.max_lighting_sections_per_job);
 }
 
 void put_runtime_client(DataValue& root, const EngineConfig& config) {
