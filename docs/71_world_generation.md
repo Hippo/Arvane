@@ -2612,6 +2612,8 @@ Surface blocks and features should normally use the dominant biome unless the ac
 
 Worldgen data should avoid assuming that biome borders are always hard chunk or block boundaries.
 
+The standard `arvane:generator/layered_heightmap` generator samples the biome source on its configured `sample_scale.xz`, selects a dominant biome for surfaces and features, and blends nearby biome terrain modifiers for base height, height scale, and roughness. This keeps visible biome identity discrete while smoothing height transitions across biome borders.
+
 ---
 
 # Chunk Boundary Behavior

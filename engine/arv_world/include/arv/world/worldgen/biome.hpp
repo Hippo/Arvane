@@ -2,10 +2,13 @@
 
 #include "arv/world/worldgen/common.hpp"
 
+#include <array>
 #include <string>
 #include <vector>
 
 namespace arv::world::worldgen {
+
+inline constexpr usize BiomeBlendWeightCount = 4;
 
 struct BiomeTerrainModifiers {
   f32 base_height_offset{};
@@ -32,12 +35,13 @@ struct BiomeConfig {
 
 struct BiomeWeight {
   usize biome_index{};
-  f32 weight{1.0F};
+  f32 weight{};
 };
 
 struct BiomeSample {
   usize dominant_biome{};
-  std::array<BiomeWeight, 1> weights{};
+  usize weight_count{};
+  std::array<BiomeWeight, BiomeBlendWeightCount> weights{};
 };
 
 } // namespace arv::world::worldgen

@@ -70,6 +70,17 @@ template<typename T>
   });
 }
 
+[[nodiscard]] std::optional<usize> index_of_climate_field(
+    const ResolvedBiomeSource& source,
+    std::string_view name) noexcept {
+  for (usize index = 0; index < source.fields.size(); ++index) {
+    if (source.fields[index].name == name) {
+      return index;
+    }
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] std::optional<voxel::BlockVariantID> resolve_block_variant(
     const voxel::BlockRegistry& registry,
     std::string_view name) {
@@ -346,6 +357,20 @@ ResolvedDimensionResult resolve_dimension(
         error(biome_source->id, "noise", "unknown noise file: " + biome_source->noise.id));
   }
   resolved->biome_source.noise = *noise;
+  std::vector<std::string> climate_field_names;
+  climate_field_names.reserve(noise->fields.size());
+  for (const auto& [name, field] : noise->fields) {
+    (void)field;
+    climate_field_names.push_back(name);
+  }
+  std::sort(climate_field_names.begin(), climate_field_names.end());
+  resolved->biome_source.fields.reserve(climate_field_names.size());
+  for (const std::string& name : climate_field_names) {
+    const auto field = noise->fields.find(name);
+    if (field != noise->fields.end()) {
+      resolved->biome_source.fields.push_back({name, field->second});
+    }
+  }
 
   for (const BiomeSourceEntryConfig& entry : biome_source->biomes) {
     const BiomeConfig* biome = find_by_id(registry.biomes, entry.biome);
@@ -360,13 +385,17 @@ ResolvedDimensionResult resolve_dimension(
     ResolvedBiomeSourceEntry resolved_entry;
     resolved_entry.biome_index = biome_index.value();
     resolved_entry.climate = entry.climate;
+    resolved_entry.resolved_climate.reserve(resolved_entry.climate.size());
     for (const ClimateRange& range : resolved_entry.climate) {
-      if (!noise->fields.contains(range.field)) {
+      const std::optional<usize> field_index =
+          index_of_climate_field(resolved->biome_source, range.field);
+      if (!field_index) {
         return ResolvedDimensionResult::failure(error(
             biome_source->id,
             "biomes[].climate." + range.field,
             "climate field is not defined in noise file"));
       }
+      resolved_entry.resolved_climate.push_back({field_index.value(), range.range});
     }
     resolved->biome_source.entries.push_back(std::move(resolved_entry));
   }

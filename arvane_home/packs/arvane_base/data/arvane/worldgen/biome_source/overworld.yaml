@@ -10,35 +10,35 @@ sample_scale:
 biomes:
   - biome: arvane:worldgen/biome/deep_ocean
     climate:
-      continentalness: [-1.0, -0.75]
+      continentalness: [-1.0, -0.65]
 
   - biome: arvane:worldgen/biome/ocean
     climate:
-      continentalness: [-0.75, -0.45]
+      continentalness: [-0.7, -0.38]
 
   - biome: arvane:worldgen/biome/beach
     climate:
-      continentalness: [-0.45, -0.35]
+      continentalness: [-0.45, -0.18]
 
   - biome: arvane:worldgen/biome/mountains
     climate:
-      continentalness: [0.1, 1.0]
-      erosion: [0.55, 1.0]
+      continentalness: [-1.0, 1.0]
+      erosion: [0.18, 1.0]
 
   - biome: arvane:worldgen/biome/desert
     climate:
-      continentalness: [-0.35, 1.0]
-      temperature: [0.45, 1.0]
-      humidity: [-1.0, -0.25]
+      continentalness: [-1.0, 1.0]
+      temperature: [0.0, 1.0]
+      humidity: [-1.0, 0.05]
 
   - biome: arvane:worldgen/biome/forest
     climate:
-      continentalness: [-0.35, 1.0]
-      temperature: [-0.25, 0.55]
-      humidity: [0.25, 1.0]
+      continentalness: [-1.0, 1.0]
+      temperature: [-0.25, 0.25]
+      humidity: [0.02, 1.0]
 
   - biome: arvane:worldgen/biome/plains
     climate:
-      continentalness: [-0.35, 1.0]
-      temperature: [-0.35, 0.55]
-      humidity: [-0.35, 0.35]
+      continentalness: [-1.0, 1.0]
+      temperature: [-0.35, 0.35]
+      humidity: [-0.15, 0.15]

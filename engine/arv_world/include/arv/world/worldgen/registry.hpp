@@ -36,14 +36,26 @@ struct ResolvedBiome {
   std::optional<usize> surface_rule_set_index{};
 };
 
+struct ResolvedClimateField {
+  std::string name{};
+  NoiseFieldConfig noise{};
+};
+
+struct ResolvedClimateRange {
+  usize field_index{};
+  FloatRange range{};
+};
+
 struct ResolvedBiomeSourceEntry {
   usize biome_index{};
   std::vector<ClimateRange> climate{};
+  std::vector<ResolvedClimateRange> resolved_climate{};
 };
 
 struct ResolvedBiomeSource {
   BiomeSourceConfig raw{};
   NoiseFileConfig noise{};
+  std::vector<ResolvedClimateField> fields{};
   std::vector<ResolvedBiomeSourceEntry> entries{};
 };
 

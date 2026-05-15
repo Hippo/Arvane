@@ -8,7 +8,10 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
 #include <optional>
+#include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -54,6 +57,65 @@ arv::world::WorldGenerationConfig make_pack_worldgen_config(
       registry);
   EXPECT_TRUE(resolved) << resolved.error().describe();
   return arv::world::config_from_resolved_dimension(std::move(resolved.value()));
+}
+
+arv::world::worldgen::ResolvedDimension make_two_biome_blend_dimension() {
+  namespace worldgen = arv::world::worldgen;
+
+  worldgen::ResolvedDimension dimension;
+  dimension.raw.id = "arvane:test/two_biome_blend";
+  dimension.raw.version = 1;
+  dimension.raw.seed_salt = "two_biome_blend";
+  dimension.raw.vertical.min_y = -32;
+  dimension.raw.vertical.max_y = 96;
+  dimension.raw.vertical.sea_level = 0;
+  dimension.terrain.height.base = 32;
+  dimension.terrain.height.scale = 0;
+  dimension.terrain.height.detail_scale = 0;
+  dimension.terrain.primary_noise.seed_salt = "flat_primary";
+  dimension.terrain.primary_noise.frequency = 0.01F;
+  dimension.terrain.primary_noise.amplitude = 0.0F;
+  dimension.terrain.detail_noise.seed_salt = "flat_detail";
+  dimension.terrain.detail_noise.frequency = 0.01F;
+  dimension.terrain.detail_noise.amplitude = 0.0F;
+
+  worldgen::BiomeConfig low;
+  low.id = "arvane:worldgen/biome/test_low";
+  low.terrain.base_height_offset = -16.0F;
+  low.terrain.height_scale_multiplier = 1.0F;
+  low.terrain.roughness_multiplier = 1.0F;
+  worldgen::BiomeConfig high;
+  high.id = "arvane:worldgen/biome/test_high";
+  high.terrain.base_height_offset = 16.0F;
+  high.terrain.height_scale_multiplier = 1.0F;
+  high.terrain.roughness_multiplier = 1.0F;
+  dimension.biomes.push_back({std::move(low), std::nullopt});
+  dimension.biomes.push_back({std::move(high), std::nullopt});
+
+  worldgen::NoiseFieldConfig climate;
+  climate.type = worldgen::NoiseType::Simplex2D;
+  climate.type_id = "arvane:noise/simplex_2d";
+  climate.seed_salt = "blend_temperature";
+  climate.frequency = 0.025F;
+  climate.octaves = 1;
+  climate.amplitude = 1.0F;
+  climate.lacunarity = 2.0F;
+  climate.gain = 0.5F;
+  dimension.biome_source.raw.id = "arvane:test/biome_source/two_biome_blend";
+  dimension.biome_source.raw.sample_scale_xz = 4;
+  dimension.biome_source.fields.push_back({"temperature", climate});
+
+  worldgen::ResolvedBiomeSourceEntry low_entry;
+  low_entry.biome_index = 0;
+  low_entry.climate.push_back({"temperature", {-1.0F, 0.0F}});
+  low_entry.resolved_climate.push_back({0U, {-1.0F, 0.0F}});
+  worldgen::ResolvedBiomeSourceEntry high_entry;
+  high_entry.biome_index = 1;
+  high_entry.climate.push_back({"temperature", {0.0F, 1.0F}});
+  high_entry.resolved_climate.push_back({0U, {0.0F, 1.0F}});
+  dimension.biome_source.entries.push_back(std::move(low_entry));
+  dimension.biome_source.entries.push_back(std::move(high_entry));
+  return dimension;
 }
 
 arv::world::WorldGenerationConfig make_worldgen_config() {
@@ -184,6 +246,172 @@ TEST(WorldGenerationTests, PackWorldgenIsDeterministicAndBiomeBacked) {
     saw_biome = saw_biome || biome_index < config.resolved_dimension->biomes.size();
   }
   EXPECT_TRUE(saw_biome);
+}
+
+TEST(WorldGenerationTests, PackOverworldScanFindsMultipleBiomeFamilies) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  ASSERT_NE(config.resolved_dimension, nullptr);
+
+  struct ScanCase {
+    arv::u64 seed{};
+    arv::ChunkCoord center{};
+    arv::usize min_biomes{};
+    bool require_desert{};
+    bool require_grassy{};
+    bool require_mountain{};
+    bool require_ocean_or_coast{};
+  };
+  const std::array<ScanCase, 2> scan_cases{
+      ScanCase{7390150598859ULL, {0, 0}, 4U, true, true, true, true},
+      ScanCase{32187121430964ULL, {-3, 141}, 3U, false, true, true, true},
+  };
+
+  for (const ScanCase& scan : scan_cases) {
+    std::unordered_set<std::string> seen;
+    bool saw_desert = false;
+    bool saw_grassy = false;
+    bool saw_mountain = false;
+    bool saw_ocean_or_coast = false;
+    for (arv::i32 z = scan.center.z - 24; z <= scan.center.z + 24; z += 3) {
+      for (arv::i32 x = scan.center.x - 24; x <= scan.center.x + 24; x += 3) {
+        const arv::world::worldgen::TerrainProfile profile =
+            arv::world::worldgen::generate_terrain_profile(
+                *config.resolved_dimension,
+                scan.seed,
+                {x, z});
+        for (const arv::usize biome_index : profile.biome_by_column) {
+          ASSERT_LT(biome_index, config.resolved_dimension->biomes.size());
+          const std::string& id = config.resolved_dimension->biomes[biome_index].raw.id;
+          seen.insert(id);
+          saw_desert = saw_desert || id == "arvane:worldgen/biome/desert";
+          saw_grassy = saw_grassy || id == "arvane:worldgen/biome/plains" ||
+                       id == "arvane:worldgen/biome/forest";
+          saw_mountain = saw_mountain || id == "arvane:worldgen/biome/mountains";
+          saw_ocean_or_coast = saw_ocean_or_coast ||
+                               id == "arvane:worldgen/biome/beach" ||
+                               id == "arvane:worldgen/biome/ocean" ||
+                               id == "arvane:worldgen/biome/deep_ocean";
+        }
+      }
+    }
+
+    std::string seen_text;
+    for (const std::string& id : seen) {
+      if (!seen_text.empty()) {
+        seen_text += ", ";
+      }
+      seen_text += id;
+    }
+    EXPECT_GE(seen.size(), scan.min_biomes) << "seed=" << scan.seed << " center=("
+                                            << scan.center.x << "," << scan.center.z
+                                            << ") seen=" << seen_text;
+    if (scan.require_desert) {
+      EXPECT_TRUE(saw_desert) << "seed=" << scan.seed << " seen=" << seen_text;
+    }
+    if (scan.require_grassy) {
+      EXPECT_TRUE(saw_grassy) << "seed=" << scan.seed << " seen=" << seen_text;
+    }
+    if (scan.require_mountain) {
+      EXPECT_TRUE(saw_mountain) << "seed=" << scan.seed << " seen=" << seen_text;
+    }
+    if (scan.require_ocean_or_coast) {
+      EXPECT_TRUE(saw_ocean_or_coast) << "seed=" << scan.seed << " seen=" << seen_text;
+    }
+  }
+}
+
+TEST(WorldGenerationTests, BiomeBlendWeightsNormalizeAndIncludeNeighbors) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  ASSERT_NE(config.resolved_dimension, nullptr);
+
+  bool saw_neighbor_weight = false;
+  for (arv::i32 z = -12; z <= 12; z += 2) {
+    for (arv::i32 x = -12; x <= 12; x += 2) {
+      const arv::world::worldgen::TerrainProfile profile =
+          arv::world::worldgen::generate_terrain_profile(
+              *config.resolved_dimension,
+              7390150598859ULL,
+              {x, z});
+      for (const arv::world::worldgen::BiomeSample& sample :
+           profile.biome_samples_by_column) {
+        ASSERT_GT(sample.weight_count, 0U);
+        ASSERT_LE(sample.weight_count, arv::world::worldgen::BiomeBlendWeightCount);
+        arv::f32 total = 0.0F;
+        for (arv::usize index = 0; index < sample.weight_count; ++index) {
+          ASSERT_LT(sample.weights[index].biome_index, config.resolved_dimension->biomes.size());
+          ASSERT_GE(sample.weights[index].weight, 0.0F);
+          total += sample.weights[index].weight;
+          saw_neighbor_weight =
+              saw_neighbor_weight ||
+              (sample.weights[index].biome_index != sample.dominant_biome &&
+               sample.weights[index].weight > 0.05F);
+        }
+        EXPECT_NEAR(total, 1.0F, 0.001F);
+      }
+    }
+  }
+
+  EXPECT_TRUE(saw_neighbor_weight);
+}
+
+TEST(WorldGenerationTests, BlendedBiomeTerrainAvoidsHardBoundaryCliffs) {
+  arv::world::worldgen::ResolvedDimension dimension = make_two_biome_blend_dimension();
+
+  bool found_boundary = false;
+  for (arv::i32 chunk_z = -16; chunk_z <= 16 && !found_boundary; ++chunk_z) {
+    for (arv::i32 chunk_x = -16; chunk_x <= 16 && !found_boundary; ++chunk_x) {
+      const arv::world::worldgen::TerrainProfile profile =
+          arv::world::worldgen::generate_terrain_profile(dimension, 424242ULL, {chunk_x, chunk_z});
+      for (arv::i32 z = 0; z < arv::ChunkSize && !found_boundary; ++z) {
+        for (arv::i32 x = 0; x < arv::ChunkSize - 1 && !found_boundary; ++x) {
+          const arv::usize lhs = arv::voxel::local_column_index({x, z});
+          const arv::usize rhs = arv::voxel::local_column_index({x + 1, z});
+          if (profile.biome_by_column[lhs] == profile.biome_by_column[rhs]) {
+            continue;
+          }
+          found_boundary = true;
+          EXPECT_LE(
+              std::abs(profile.surface_y_by_column[lhs] -
+                       profile.surface_y_by_column[rhs]),
+              8);
+          EXPECT_GT(profile.biome_samples_by_column[lhs].weight_count, 1U);
+          EXPECT_GT(profile.biome_samples_by_column[rhs].weight_count, 1U);
+        }
+      }
+    }
+  }
+
+  EXPECT_TRUE(found_boundary);
+}
+
+TEST(WorldGenerationTests, BiomeSampleScaleChangesClimateLookupDeterministically) {
+  arv::world::worldgen::ResolvedDimension fine = make_two_biome_blend_dimension();
+  arv::world::worldgen::ResolvedDimension coarse = fine;
+  fine.biome_source.raw.sample_scale_xz = 1;
+  coarse.biome_source.raw.sample_scale_xz = 16;
+
+  bool found_scale_difference = false;
+  for (arv::i32 chunk_z = -16; chunk_z <= 16 && !found_scale_difference; ++chunk_z) {
+    for (arv::i32 chunk_x = -16; chunk_x <= 16 && !found_scale_difference; ++chunk_x) {
+      const arv::ChunkCoord coord{chunk_x, chunk_z};
+      const arv::world::worldgen::TerrainProfile first =
+          arv::world::worldgen::generate_terrain_profile(fine, 8675309ULL, coord);
+      const arv::world::worldgen::TerrainProfile second =
+          arv::world::worldgen::generate_terrain_profile(fine, 8675309ULL, coord);
+      const arv::world::worldgen::TerrainProfile coarser =
+          arv::world::worldgen::generate_terrain_profile(coarse, 8675309ULL, coord);
+
+      EXPECT_EQ(first.biome_by_column, second.biome_by_column);
+      EXPECT_EQ(first.surface_y_by_column, second.surface_y_by_column);
+      found_scale_difference =
+          first.biome_by_column != coarser.biome_by_column ||
+          first.surface_y_by_column != coarser.surface_y_by_column;
+    }
+  }
+
+  EXPECT_TRUE(found_scale_difference);
 }
 
 TEST(WorldGenerationTests, DifferentSeedsCanChangeChunkOutput) {

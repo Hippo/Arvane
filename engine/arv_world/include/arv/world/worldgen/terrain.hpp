@@ -36,6 +36,7 @@ struct TerrainProfile {
   std::array<i32, voxel::ChunkArea> surface_y_by_column{};
   std::array<f32, voxel::ChunkArea> slope_by_column{};
   std::array<usize, voxel::ChunkArea> biome_by_column{};
+  std::array<BiomeSample, voxel::ChunkArea> biome_samples_by_column{};
   i32 min_surface_y{};
   i32 max_surface_y{};
 };

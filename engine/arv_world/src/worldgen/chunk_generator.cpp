@@ -7,14 +7,86 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace arv::world::worldgen {
 namespace {
 
+inline constexpr f32 BiomeDistanceEpsilon = 0.000001F;
+inline constexpr f32 MissingClimateFieldPenalty = 0.35F;
+
+class ClimateNoiseLattice2D {
+public:
+  ClimateNoiseLattice2D() = default;
+
+  ClimateNoiseLattice2D(
+      const NoiseSampler& sampler,
+      i32 origin_x,
+      i32 origin_z,
+      i32 step)
+      : step_(std::max(1, step)),
+        base_x_(floor_div(origin_x, step_) * step_),
+        base_z_(floor_div(origin_z, step_) * step_) {
+    const i32 max_x = origin_x + ChunkSize - 1;
+    const i32 max_z = origin_z + ChunkSize - 1;
+    grid_side_x_ = ((max_x - base_x_) / step_) + 2;
+    grid_side_z_ = ((max_z - base_z_) / step_) + 2;
+    lattice_.resize(static_cast<usize>(grid_side_x_) * static_cast<usize>(grid_side_z_));
+
+    for (i32 grid_z = 0; grid_z < grid_side_z_; ++grid_z) {
+      for (i32 grid_x = 0; grid_x < grid_side_x_; ++grid_x) {
+        lattice_[grid_index(grid_x, grid_z)] = sampler.sample_2d(
+            static_cast<f32>(base_x_ + grid_x * step_),
+            static_cast<f32>(base_z_ + grid_z * step_));
+      }
+    }
+  }
+
+  [[nodiscard]] f32 sample(i32 world_x, i32 world_z) const noexcept {
+    if (lattice_.empty() || grid_side_x_ < 2 || grid_side_z_ < 2) {
+      return 0.0F;
+    }
+    const i32 offset_x = world_x - base_x_;
+    const i32 offset_z = world_z - base_z_;
+    const i32 grid_x = std::clamp(offset_x / step_, 0, grid_side_x_ - 2);
+    const i32 grid_z = std::clamp(offset_z / step_, 0, grid_side_z_ - 2);
+    const f32 t_x =
+        static_cast<f32>(offset_x - grid_x * step_) / static_cast<f32>(step_);
+    const f32 t_z =
+        static_cast<f32>(offset_z - grid_z * step_) / static_cast<f32>(step_);
+    return lerp(
+        lerp(
+            lattice_[grid_index(grid_x, grid_z)],
+            lattice_[grid_index(grid_x + 1, grid_z)],
+            t_x),
+        lerp(
+            lattice_[grid_index(grid_x, grid_z + 1)],
+            lattice_[grid_index(grid_x + 1, grid_z + 1)],
+            t_x),
+        t_z);
+  }
+
+private:
+  [[nodiscard]] static f32 lerp(f32 a, f32 b, f32 t) noexcept {
+    return a + (b - a) * t;
+  }
+
+  [[nodiscard]] usize grid_index(i32 grid_x, i32 grid_z) const noexcept {
+    return static_cast<usize>(grid_x) +
+           static_cast<usize>(grid_side_x_) * static_cast<usize>(grid_z);
+  }
+
+  i32 step_{DefaultLatticeStep};
+  i32 base_x_{};
+  i32 base_z_{};
+  i32 grid_side_x_{};
+  i32 grid_side_z_{};
+  std::vector<f32> lattice_{};
+};
+
 struct ClimateFieldRuntime {
-  std::string name{};
   NoiseSampler sampler{};
-  ChunkNoiseLattice2D lattice{};
+  ClimateNoiseLattice2D lattice{};
 };
 
 struct ChunkEditView {
@@ -69,42 +141,150 @@ struct ChunkEditView {
   });
 }
 
-[[nodiscard]] usize select_biome(
-    const ResolvedDimension& dimension,
-    const std::vector<ClimateFieldRuntime>& fields,
-    i32 local_x,
-    i32 local_z) noexcept {
-  usize best_biome = dimension.biome_source.entries.empty()
-                         ? 0U
-                         : dimension.biome_source.entries.front().biome_index;
-  usize best_score = 0U;
-  bool found = false;
-  for (const ResolvedBiomeSourceEntry& entry : dimension.biome_source.entries) {
-    bool matches = true;
-    for (const ClimateRange& range : entry.climate) {
-      const auto field_iter = std::find_if(
-          fields.begin(),
-          fields.end(),
-          [&](const ClimateFieldRuntime& field) {
-            return field.name == range.field;
-          });
-      if (field_iter == fields.end()) {
-        matches = false;
-        break;
-      }
-      const f32 value = field_iter->lattice.sample(local_x, local_z);
-      if (!range.range.contains(value)) {
-        matches = false;
-        break;
-      }
-    }
-    if (matches && (!found || entry.climate.size() > best_score)) {
-      found = true;
-      best_score = entry.climate.size();
-      best_biome = entry.biome_index;
-    }
+struct BiomeCandidate {
+  usize entry_index{};
+  usize biome_index{};
+  f32 distance_sq{};
+  f32 strength{};
+};
+
+[[nodiscard]] f32 climate_range_score(FloatRange range, f32 value) noexcept {
+  const f32 center = (range.min + range.max) * 0.5F;
+  const f32 half_width = std::max((range.max - range.min) * 0.5F, 0.001F);
+  const f32 normalized_distance = (value - center) / half_width;
+  return normalized_distance * normalized_distance;
+}
+
+[[nodiscard]] bool candidate_is_closer(
+    const BiomeCandidate& lhs,
+    const BiomeCandidate& rhs) noexcept {
+  if (lhs.distance_sq + BiomeDistanceEpsilon < rhs.distance_sq) {
+    return true;
   }
-  return std::min(best_biome, dimension.biomes.size() - 1U);
+  if (rhs.distance_sq + BiomeDistanceEpsilon < lhs.distance_sq) {
+    return false;
+  }
+  return lhs.entry_index < rhs.entry_index;
+}
+
+void insert_candidate(
+    std::array<BiomeCandidate, BiomeBlendWeightCount>& selected,
+    usize& selected_count,
+    BiomeCandidate candidate) noexcept {
+  usize insert_at = 0U;
+  while (insert_at < selected_count &&
+         !candidate_is_closer(candidate, selected[insert_at])) {
+    ++insert_at;
+  }
+  if (insert_at >= BiomeBlendWeightCount) {
+    return;
+  }
+  const usize new_count = std::min(selected_count + 1U, BiomeBlendWeightCount);
+  for (usize index = new_count - 1U; index > insert_at; --index) {
+    selected[index] = selected[index - 1U];
+  }
+  selected[insert_at] = candidate;
+  selected_count = new_count;
+}
+
+[[nodiscard]] BiomeSample sample_biomes(
+    const ResolvedDimension& dimension,
+    const std::vector<f32>& climate_values) noexcept {
+  BiomeSample sample;
+  if (dimension.biomes.empty()) {
+    return sample;
+  }
+  if (dimension.biome_source.entries.empty()) {
+    sample.dominant_biome = 0U;
+    sample.weight_count = 1U;
+    sample.weights[0] = {0U, 1.0F};
+    return sample;
+  }
+
+  BiomeCandidate best{
+      0U,
+      std::min(dimension.biome_source.entries.front().biome_index, dimension.biomes.size() - 1U),
+      std::numeric_limits<f32>::max(),
+      0.0F};
+  std::array<BiomeCandidate, BiomeBlendWeightCount> selected{};
+  usize selected_count = 0U;
+
+  for (usize entry_index = 0; entry_index < dimension.biome_source.entries.size(); ++entry_index) {
+    const ResolvedBiomeSourceEntry& entry = dimension.biome_source.entries[entry_index];
+    f32 score = 0.0F;
+    for (const ResolvedClimateRange& range : entry.resolved_climate) {
+      if (range.field_index >= climate_values.size()) {
+        score += 4.0F;
+        continue;
+      }
+      score += climate_range_score(range.range, climate_values[range.field_index]);
+    }
+    if (!entry.resolved_climate.empty()) {
+      score /= static_cast<f32>(entry.resolved_climate.size());
+    }
+    if (dimension.biome_source.fields.size() > entry.resolved_climate.size()) {
+      const usize missing_fields =
+          dimension.biome_source.fields.size() - entry.resolved_climate.size();
+      score += MissingClimateFieldPenalty *
+               static_cast<f32>(missing_fields) /
+               static_cast<f32>(dimension.biome_source.fields.size());
+    }
+
+    BiomeCandidate candidate{
+        entry_index,
+        std::min(entry.biome_index, dimension.biomes.size() - 1U),
+        score,
+        1.0F / (0.05F + std::max(0.0F, score))};
+    if (candidate_is_closer(candidate, best)) {
+      best = candidate;
+    }
+    insert_candidate(selected, selected_count, candidate);
+  }
+
+  sample.dominant_biome = best.biome_index;
+  sample.weight_count = selected_count;
+  f32 total_strength = 0.0F;
+  for (usize index = 0; index < selected_count; ++index) {
+    total_strength += selected[index].strength;
+  }
+  const f32 inv_total = total_strength > BiomeDistanceEpsilon ? 1.0F / total_strength : 1.0F;
+  for (usize index = 0; index < selected_count; ++index) {
+    sample.weights[index] = {selected[index].biome_index, selected[index].strength * inv_total};
+  }
+  if (sample.weight_count == 0U) {
+    sample.weight_count = 1U;
+    sample.weights[0] = {sample.dominant_biome, 1.0F};
+  }
+  return sample;
+}
+
+[[nodiscard]] BiomeTerrainModifiers blend_terrain_modifiers(
+    const ResolvedDimension& dimension,
+    const BiomeSample& sample) noexcept {
+  BiomeTerrainModifiers blended;
+  blended.height_scale_multiplier = 0.0F;
+  blended.roughness_multiplier = 0.0F;
+  f32 total_weight = 0.0F;
+  for (usize index = 0; index < sample.weight_count; ++index) {
+    const BiomeWeight& weight = sample.weights[index];
+    if (weight.biome_index >= dimension.biomes.size() || weight.weight <= 0.0F) {
+      continue;
+    }
+    const BiomeTerrainModifiers& modifiers = dimension.biomes[weight.biome_index].raw.terrain;
+    blended.base_height_offset += modifiers.base_height_offset * weight.weight;
+    blended.height_scale_multiplier += modifiers.height_scale_multiplier * weight.weight;
+    blended.roughness_multiplier += modifiers.roughness_multiplier * weight.weight;
+    total_weight += weight.weight;
+  }
+  if (total_weight <= BiomeDistanceEpsilon) {
+    return dimension.biomes[std::min(sample.dominant_biome, dimension.biomes.size() - 1U)]
+        .raw.terrain;
+  }
+  const f32 inv_total = 1.0F / total_weight;
+  blended.base_height_offset *= inv_total;
+  blended.height_scale_multiplier *= inv_total;
+  blended.roughness_multiplier *= inv_total;
+  return blended;
 }
 
 [[nodiscard]] bool surface_predicate_matches(
@@ -534,14 +714,15 @@ TerrainProfile generate_terrain_profile(
   const i32 origin_z = coord.z * ChunkSize;
 
   std::vector<ClimateFieldRuntime> climate_fields;
-  climate_fields.reserve(dimension.biome_source.noise.fields.size());
-  for (const auto& [name, field] : dimension.biome_source.noise.fields) {
+  climate_fields.reserve(dimension.biome_source.fields.size());
+  const i32 climate_step = std::max(1, dimension.biome_source.raw.sample_scale_xz);
+  for (const ResolvedClimateField& field : dimension.biome_source.fields) {
     ClimateFieldRuntime runtime;
-    runtime.name = name;
-    runtime.sampler = NoiseSampler{field, dimension_seed};
-    runtime.lattice = ChunkNoiseLattice2D{runtime.sampler, origin_x, origin_z};
+    runtime.sampler = NoiseSampler{field.noise, dimension_seed};
+    runtime.lattice = ClimateNoiseLattice2D{runtime.sampler, origin_x, origin_z, climate_step};
     climate_fields.push_back(std::move(runtime));
   }
+  std::vector<f32> climate_values(climate_fields.size());
 
   NoiseSampler primary{dimension.terrain.primary_noise, dimension_seed};
   NoiseSampler detail{dimension.terrain.detail_noise, dimension_seed};
@@ -553,8 +734,16 @@ TerrainProfile generate_terrain_profile(
   profile.max_surface_y = std::numeric_limits<i32>::min();
   for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
     const ChunkLocalColumn column = voxel::local_column(column_index);
-    const usize biome_index = select_biome(dimension, climate_fields, column.x, column.z);
-    const BiomeTerrainModifiers& modifiers = dimension.biomes[biome_index].raw.terrain;
+    const i32 world_x = origin_x + column.x;
+    const i32 world_z = origin_z + column.z;
+    for (usize field_index = 0; field_index < climate_fields.size(); ++field_index) {
+      climate_values[field_index] = climate_fields[field_index].lattice.sample(world_x, world_z);
+    }
+    const BiomeSample biome_sample = sample_biomes(dimension, climate_values);
+    const usize biome_index =
+        std::min(biome_sample.dominant_biome, dimension.biomes.size() - 1U);
+    const BiomeTerrainModifiers modifiers =
+        blend_terrain_modifiers(dimension, biome_sample);
     const f32 base = static_cast<f32>(dimension.terrain.height.base) +
                      (dimension.terrain.biome_modifiers.base_height_offset
                           ? modifiers.base_height_offset
@@ -576,6 +765,7 @@ TerrainProfile generate_terrain_profile(
         dimension.raw.vertical.max_y);
     profile.surface_y_by_column[column_index] = surface_y;
     profile.biome_by_column[column_index] = biome_index;
+    profile.biome_samples_by_column[column_index] = biome_sample;
     profile.min_surface_y = std::min(profile.min_surface_y, surface_y);
     profile.max_surface_y = std::max(profile.max_surface_y, surface_y);
   }
