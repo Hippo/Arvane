@@ -574,6 +574,13 @@ ResolvedDimensionResult resolve_dimension(
   if (const auto water = resolve_block_variant(block_registry, "arvane:water"); water) {
     resolved->water_block = water.value();
   }
+  resolved->replaceable_blocks.reserve(block_registry.variant_count());
+  for (usize variant_index = 0; variant_index < block_registry.variant_count(); ++variant_index) {
+    const voxel::BlockVariantID variant{static_cast<u32>(variant_index)};
+    if (block_registry.is_replaceable(variant)) {
+      resolved->replaceable_blocks.push_back(variant);
+    }
+  }
 
   return ResolvedDimensionResult::success(std::move(resolved));
 }

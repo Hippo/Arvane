@@ -257,6 +257,16 @@ void insert_candidate(
   return false;
 }
 
+[[nodiscard]] bool is_replaceable_block(
+    const ResolvedDimension& dimension,
+    voxel::BlockVariantID existing) noexcept {
+  return existing == voxel::AirBlockVariantID ||
+         std::binary_search(
+             dimension.replaceable_blocks.begin(),
+             dimension.replaceable_blocks.end(),
+             existing);
+}
+
 [[nodiscard]] bool filters_pass(
     const ResolvedDimension& dimension,
     const TerrainProfile& profile,
@@ -301,7 +311,7 @@ void insert_candidate(
         break;
       }
       case PlacementFilterConfig::Type::Replaceable:
-        if (placement_block_at(pos) != voxel::AirBlockVariantID) {
+        if (!is_replaceable_block(dimension, placement_block_at(pos))) {
           return false;
         }
         break;
@@ -358,6 +368,7 @@ void insert_candidate(
 }
 
 void place_feature(
+    const ResolvedDimension& dimension,
     const ResolvedConfiguredFeature& feature,
     GeneratedChunkEditView& view,
     BlockPos pos,
@@ -371,7 +382,7 @@ void place_feature(
     const voxel::BlockVariantID leaves = feature.blocks[1];
     for (i32 y = 0; y < height; ++y) {
       BlockPos target{{pos.value.x, pos.value.y + y, pos.value.z}};
-      if (view.get(target) == voxel::AirBlockVariantID) {
+      if (is_replaceable_block(dimension, view.get(target))) {
         view.set(target, trunk);
       }
     }
@@ -383,7 +394,7 @@ void place_feature(
             continue;
           }
           BlockPos target{{pos.value.x + x, top + y, pos.value.z + z}};
-          if (view.get(target) == voxel::AirBlockVariantID) {
+          if (is_replaceable_block(dimension, view.get(target))) {
             view.set(target, leaves);
           }
         }
@@ -491,7 +502,7 @@ void run_placed_feature(
     if (!filters_pass(dimension, origin_profile, origin_chunk, view, placed.filters, pos)) {
       continue;
     }
-    place_feature(feature, view, pos, seed, placed.raw.salt, rng);
+    place_feature(dimension, feature, view, pos, seed, placed.raw.salt, rng);
   }
 }
 

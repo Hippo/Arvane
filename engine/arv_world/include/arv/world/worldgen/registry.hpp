@@ -72,6 +72,7 @@ struct ResolvedDimension {
   std::vector<ResolvedStructureSet> structure_sets{};
   std::vector<usize> dimension_features_by_stage[StageOrder.size()];
   std::vector<usize> biome_features_by_stage[StageOrder.size()];
+  std::vector<voxel::BlockVariantID> replaceable_blocks{};
   voxel::BlockVariantID water_block{voxel::AirBlockVariantID};
 };
 

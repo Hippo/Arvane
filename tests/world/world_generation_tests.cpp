@@ -188,6 +188,114 @@ arv::world::worldgen::ResolvedDimension make_flat_tree_dimension(
   return dimension;
 }
 
+arv::world::worldgen::ResolvedDimension make_tree_with_surface_decoration_dimension(
+    const arv::voxel::BlockRegistry& registry,
+    arv::u64 placement_salt) {
+  namespace worldgen = arv::world::worldgen;
+
+  worldgen::ResolvedDimension dimension;
+  dimension.raw.id = "arvane:test/tree_surface_decoration";
+  dimension.raw.version = 1;
+  dimension.raw.seed_salt = "tree_surface_decoration";
+  dimension.raw.vertical.min_y = 0;
+  dimension.raw.vertical.max_y = 31;
+  dimension.raw.vertical.sea_level = -1;
+  dimension.terrain.height.base = 8;
+  dimension.terrain.height.scale = 0;
+  dimension.terrain.height.detail_scale = 0;
+  dimension.terrain.primary_noise.seed_salt = "flat_primary";
+  dimension.terrain.detail_noise.seed_salt = "flat_detail";
+
+  worldgen::BiomeConfig biome;
+  biome.id = "arvane:worldgen/biome/test_grassy";
+  dimension.biomes.push_back({std::move(biome), std::nullopt});
+
+  worldgen::ResolvedSurfaceRule rule;
+  rule.layers.push_back({registry.find_variant("arvane:grass_block").value(), 1, false});
+  rule.layers.push_back({registry.find_variant("arvane:dirt").value(), 1, true});
+  dimension.surface_rule_sets.push_back({"arvane:worldgen/surface_rule_set/test_grassy", {rule}});
+  dimension.dimension_surface_rule_set = 0U;
+
+  const arv::voxel::BlockVariantID grass = registry.find_variant("arvane:grass_block").value();
+  const arv::voxel::BlockVariantID short_grass =
+      registry.find_variant("arvane:short_grass").value();
+  const arv::voxel::BlockVariantID log = registry.find_variant("arvane:oak_log").value();
+  const arv::voxel::BlockVariantID leaves = registry.find_variant("arvane:oak_leaves").value();
+  dimension.replaceable_blocks.push_back(short_grass);
+
+  worldgen::SingleBlockFeatureConfig decoration_config;
+  decoration_config.block = "arvane:short_grass";
+  decoration_config.replace.specified = true;
+  decoration_config.replace.only_air = true;
+  decoration_config.place_on.blocks.push_back("arvane:grass_block");
+
+  worldgen::ResolvedConfiguredFeature decoration;
+  decoration.id = "arvane:worldgen/configured_feature/test_surface_decoration";
+  decoration.type = "arvane:feature/single_block";
+  decoration.raw.id = decoration.id;
+  decoration.raw.version = 1;
+  decoration.raw.type = decoration.type;
+  decoration.raw.config = decoration_config;
+  decoration.blocks = {short_grass};
+  decoration.support_blocks = {grass};
+  decoration.replace.specified = true;
+  decoration.replace.only_air = true;
+  decoration.radius_blocks = 0;
+  dimension.configured_features.push_back(std::move(decoration));
+
+  worldgen::SimpleTreeFeatureConfig tree_config;
+  tree_config.trunk_block = "arvane:oak_log";
+  tree_config.trunk_height = {4, 4};
+  tree_config.leaves_block = "arvane:oak_leaves";
+  tree_config.leaves_radius = {2, 2};
+
+  worldgen::ResolvedConfiguredFeature tree;
+  tree.id = "arvane:worldgen/configured_feature/test_oak_tree";
+  tree.type = "arvane:feature/simple_tree";
+  tree.raw.id = tree.id;
+  tree.raw.version = 1;
+  tree.raw.type = tree.type;
+  tree.raw.config = tree_config;
+  tree.blocks = {log, leaves};
+  tree.radius_blocks = 4;
+  dimension.configured_features.push_back(std::move(tree));
+
+  worldgen::ResolvedPlacedFeature decoration_placed;
+  decoration_placed.raw.id = "arvane:worldgen/placed_feature/test_surface_decoration";
+  decoration_placed.raw.version = 1;
+  decoration_placed.raw.feature = {"arvane:worldgen/configured_feature/test_surface_decoration"};
+  decoration_placed.raw.salt = placement_salt;
+  decoration_placed.raw.stage = worldgen::GenerationStage::SurfaceDecoration;
+  decoration_placed.raw.count.type = worldgen::PlacementCountConfig::Type::Uniform;
+  decoration_placed.raw.count.min = 1;
+  decoration_placed.raw.count.max = 1;
+  decoration_placed.raw.height.type = worldgen::PlacementHeightConfig::Type::Surface;
+  decoration_placed.feature_index = 0U;
+  decoration_placed.radius_blocks = 0;
+  dimension.placed_features.push_back(std::move(decoration_placed));
+
+  worldgen::ResolvedPlacedFeature tree_placed;
+  tree_placed.raw.id = "arvane:worldgen/placed_feature/test_oak_tree";
+  tree_placed.raw.version = 1;
+  tree_placed.raw.feature = {"arvane:worldgen/configured_feature/test_oak_tree"};
+  tree_placed.raw.salt = placement_salt;
+  tree_placed.raw.stage = worldgen::GenerationStage::SurfaceDecoration;
+  tree_placed.raw.count.type = worldgen::PlacementCountConfig::Type::Uniform;
+  tree_placed.raw.count.min = 1;
+  tree_placed.raw.count.max = 1;
+  tree_placed.raw.height.type = worldgen::PlacementHeightConfig::Type::Surface;
+  tree_placed.feature_index = 1U;
+  tree_placed.radius_blocks = dimension.configured_features[1].radius_blocks;
+  dimension.placed_features.push_back(std::move(tree_placed));
+
+  dimension.dimension_features_by_stage[static_cast<arv::usize>(worldgen::GenerationStage::SurfaceDecoration)]
+      .push_back(0U);
+  dimension.dimension_features_by_stage[static_cast<arv::usize>(worldgen::GenerationStage::SurfaceDecoration)]
+      .push_back(1U);
+
+  return dimension;
+}
+
 arv::blueprint::Blueprint make_filled_blueprint(
     std::string name,
     arv::BlockPos size,
@@ -572,6 +680,37 @@ TEST(WorldGenerationTests, FeaturesOriginatingInNeighborChunksCanPopulateCurrent
       sample->base_y + 4,
       sample->world_z}};
   EXPECT_EQ(generated_block_at(east_chunk, expected_leaf), leaves);
+}
+
+TEST(WorldGenerationTests, SimpleTreeTrunkReplacesSurfaceDecorationAtBase) {
+  constexpr arv::u64 seed = 424242ULL;
+  constexpr arv::u64 salt = 13579ULL;
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  auto dimension = std::make_shared<arv::world::worldgen::ResolvedDimension>(
+      make_tree_with_surface_decoration_dimension(registry, salt));
+  const arv::voxel::BlockVariantID log = registry.find_variant("arvane:oak_log").value();
+  const arv::voxel::BlockVariantID short_grass =
+      registry.find_variant("arvane:short_grass").value();
+
+  arv::world::worldgen::DeterministicRng rng{arv::world::worldgen::coordinate_seed(
+      seed,
+      0,
+      static_cast<arv::i32>(salt & 0x7FFFFFFFULL),
+      0,
+      salt)};
+  const arv::i32 local_x = rng.range_i32(0, arv::ChunkSize - 1);
+  const arv::i32 local_z = rng.range_i32(0, arv::ChunkSize - 1);
+  const arv::world::worldgen::TerrainProfile profile =
+      arv::world::worldgen::generate_terrain_profile(*dimension, seed, {0, 0});
+  const arv::i32 surface_y =
+      profile.surface_y_by_column[arv::voxel::local_column_index({local_x, local_z})];
+  const arv::BlockPos trunk_base{{local_x, surface_y + 1, local_z}};
+
+  auto generated = arv::world::generate_chunk(make_resolved_request(dimension, seed, {0, 0}));
+
+  ASSERT_TRUE(generated) << generated.error().message;
+  EXPECT_EQ(generated_block_at(generated.value(), trunk_base), log);
+  EXPECT_NE(generated_block_at(generated.value(), trunk_base), short_grass);
 }
 
 TEST(WorldGenerationTests, StructureSetSameSeedAndChunkProduceSameOutput) {

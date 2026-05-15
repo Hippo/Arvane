@@ -2047,6 +2047,7 @@ A list of allowed blocks below the placement position.
 ### `replaceable`
 
 Requires the placement position to be replaceable.
+This uses the resolved block registry's `replaceable` property, so air and lightweight decorations such as short grass may be replaced while solid terrain is preserved.
 
 ```yaml
 - type: replaceable
