@@ -58,6 +58,10 @@ jobs:
 language:
   fallback_locale: en_US
   locale: en_US
+native_plugins:
+  allowed_packs:
+    - arv_mason
+  enabled: true
 paths:
   arvane_home: arvane_home
 physics:

@@ -36,6 +36,10 @@ native_plugins:
     - "arv_mason"
 ```
 
+For the split config layout, keep that policy in
+`arvane_home/config/arvane.yaml` so both desktop and dedicated profiles see the
+same local trust decision.
+
 ## Commands
 
 Root command:

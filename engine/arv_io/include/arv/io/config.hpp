@@ -100,7 +100,7 @@ struct DedicatedServerConfig {
 };
 
 struct NativePluginsConfig {
-  bool enabled{};
+  bool enabled{true};
   std::vector<std::string> allowed_packs{};
 };
 

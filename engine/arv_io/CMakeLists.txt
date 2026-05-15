@@ -17,6 +17,7 @@ add_library(arv_io STATIC
   src/config_documents.cpp
   src/config_gameplay.cpp
   src/config_network.cpp
+  src/config_plugins.cpp
   src/config_render_ui.cpp
   src/config_runtime.cpp
   src/config_server_list.cpp

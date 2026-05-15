@@ -30,7 +30,7 @@ namespace arv::plugin {
 inline constexpr u32 PluginApiVersion = ARV_API_VERSION;
 
 struct NativePluginPolicy {
-  bool enabled{};
+  bool enabled{true};
   std::vector<std::string> allowed_packs{};
 
   [[nodiscard]] bool allows(std::string_view pack_id) const noexcept;

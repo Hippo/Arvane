@@ -1140,7 +1140,8 @@ native:
 
 The engine must not load native plugin code just because this metadata exists.
 
-Native plugins require explicit enablement.
+Native plugin loading is enabled in generated config, but native code still
+requires explicit pack allowlisting.
 
 Example policy:
 
@@ -1153,8 +1154,8 @@ native_plugins:
 
 Recommended rules:
 
-1. Native plugins are disabled by default.
-2. Native plugins must be explicitly allowed.
+1. Native plugin loading can be disabled with `native_plugins.enabled: false`.
+2. Native plugin packs must be explicitly allowed.
 3. Native plugin paths must remain inside the pack root.
 4. Native plugins must declare an API version.
 5. Native plugins should use a stable C ABI boundary.

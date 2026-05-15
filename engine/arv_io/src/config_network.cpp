@@ -197,14 +197,6 @@ void put_network_config(DataValue& root, const NetworkConfig& network) {
   put_network_keep_alive_config(root, "network.keep_alive", network.keep_alive);
 }
 
-void put_native_plugins_config(DataValue& root, const NativePluginsConfig& native_plugins) {
-  put(root, "native_plugins.enabled", native_plugins.enabled);
-  put_path(
-      root,
-      "native_plugins.allowed_packs",
-      string_array_value(native_plugins.allowed_packs));
-}
-
 void put_multiplayer_config(DataValue& root, const MultiplayerConfig& multiplayer) {
   put(
       root,
@@ -271,15 +263,6 @@ void read_network_sections(const DataValue& root, EngineConfig& config) {
     }
   }
 
-  const DataValue* native_plugins = root.get("native_plugins");
-  if (native_plugins != nullptr) {
-    read_scalar(*native_plugins, "enabled", config.native_plugins.enabled);
-    read_string_sequence(
-        *native_plugins,
-        "allowed_packs",
-        config.native_plugins.allowed_packs);
-  }
-
   const DataValue* multiplayer = root.get("multiplayer");
   if (multiplayer != nullptr) {
     read_multiplayer_config(*multiplayer, config.multiplayer);
@@ -293,7 +276,6 @@ void read_network_sections(const DataValue& root, EngineConfig& config) {
 
 void put_network_full(DataValue& root, const EngineConfig& config) {
   put_network_config(root, config.network);
-  put_native_plugins_config(root, config.native_plugins);
   put_multiplayer_config(root, config.multiplayer);
 }
 
@@ -303,7 +285,6 @@ void put_network_client(DataValue& root, const EngineConfig& config) {
 
 void put_network_server(DataValue& root, const EngineConfig& config) {
   put_network_config(root, config.network);
-  put_native_plugins_config(root, config.native_plugins);
   put_skins_config(root, config.skins);
 }
 

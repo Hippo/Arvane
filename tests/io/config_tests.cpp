@@ -501,7 +501,7 @@ TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
   EXPECT_EQ(config.skins.storage.max_skins_per_profile, 16U);
   EXPECT_EQ(config.network.keep_alive.interval_seconds, 5U);
   EXPECT_EQ(config.network.keep_alive.client_timeout_seconds, 30U);
-  EXPECT_FALSE(config.native_plugins.enabled);
+  EXPECT_TRUE(config.native_plugins.enabled);
   EXPECT_TRUE(config.native_plugins.allowed_packs.empty());
   EXPECT_EQ(config.multiplayer.keep_alive.server_timeout_seconds, 30U);
   EXPECT_EQ(config.multiplayer.connection_timeout_seconds, 10U);
@@ -856,6 +856,9 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   EXPECT_NE(written_shared.value().find("arvane_home: arvane_home"), std::string::npos);
   EXPECT_NE(written_shared.value().find("simulation:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("language:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("native_plugins:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("enabled: true"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("allowed_packs:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("gameplay:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("client:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("server:"), std::string::npos);
@@ -875,7 +878,41 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
       arv::io::read_text_file(server_config_file, "generated server config");
   ASSERT_TRUE(written_server);
   EXPECT_NE(written_server.value().find("network:"), std::string::npos);
+  EXPECT_EQ(written_server.value().find("native_plugins:"), std::string::npos);
   EXPECT_NE(written_server.value().find("world: default"), std::string::npos);
+}
+
+TEST(ConfigTests, SplitConfigLoadsSharedNativePluginPolicyForClientAndServer) {
+  const TempDir temp{"arvane_shared_plugin_policy_"};
+
+  write_file(
+      temp.path / "arvane_home/config/arvane.yaml",
+      R"(
+native_plugins:
+  enabled: true
+  allowed_packs:
+    - arv_mason
+)");
+  write_file(temp.path / "arvane_home/config/client.yaml", "\n");
+  write_file(temp.path / "arvane_home/config/server.yaml", "world: dedicated\n");
+
+  arv::io::ConfigLoadOptions client_options;
+  client_options.project_root = temp.path;
+  const auto client_result = arv::io::load_config(client_options);
+  ASSERT_TRUE(client_result);
+  EXPECT_TRUE(client_result.value().native_plugins.enabled);
+  ASSERT_EQ(client_result.value().native_plugins.allowed_packs.size(), 1U);
+  EXPECT_EQ(client_result.value().native_plugins.allowed_packs[0], "arv_mason");
+
+  arv::io::ConfigLoadOptions server_options;
+  server_options.project_root = temp.path;
+  server_options.profile = arv::io::ConfigProfile::Server;
+  const auto server_result = arv::io::load_config(server_options);
+  ASSERT_TRUE(server_result);
+  EXPECT_TRUE(server_result.value().native_plugins.enabled);
+  ASSERT_EQ(server_result.value().native_plugins.allowed_packs.size(), 1U);
+  EXPECT_EQ(server_result.value().native_plugins.allowed_packs[0], "arv_mason");
+  EXPECT_EQ(server_result.value().server.world, "dedicated");
 }
 
 TEST(ConfigTests, SaveConfigFilesCanonicalizesSplitConfigFiles) {
@@ -889,6 +926,7 @@ TEST(ConfigTests, SaveConfigFilesCanonicalizesSplitConfigFiles) {
   config.server.world = "canonical";
   config.jobs.worker_threads = 6U;
   config.jobs.client.max_mesh_jobs_in_flight = 9U;
+  config.native_plugins.allowed_packs = {"arv_mason"};
 
   write_file(
       config.paths.shared_config_file,
@@ -911,6 +949,8 @@ TEST(ConfigTests, SaveConfigFilesCanonicalizesSplitConfigFiles) {
   EXPECT_NE(written_shared.value().find("worker_threads: 6"), std::string::npos);
   EXPECT_NE(written_shared.value().find("max_mesh_jobs_in_flight: 9"), std::string::npos);
   EXPECT_NE(written_shared.value().find("max_pathfinding_jobs_in_flight:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("native_plugins:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("arv_mason"), std::string::npos);
 
   const auto written_client =
       arv::io::read_text_file(config.paths.client_config_file, "canonical client config");
@@ -922,6 +962,7 @@ TEST(ConfigTests, SaveConfigFilesCanonicalizesSplitConfigFiles) {
       arv::io::read_text_file(config.paths.server_config_file, "canonical server config");
   ASSERT_TRUE(written_server);
   EXPECT_EQ(written_server.value().find("obsolete_server"), std::string::npos);
+  EXPECT_EQ(written_server.value().find("native_plugins:"), std::string::npos);
   EXPECT_NE(written_server.value().find("world: preserved_server"), std::string::npos);
 }
 

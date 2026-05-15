@@ -193,7 +193,9 @@ native:
 
 The presence of `native` metadata does not automatically load the plugin.
 
-Native plugin loading requires explicit runtime policy:
+Native plugin loading is controlled by runtime policy in config. Generated
+configs enable native-plugin loading by default, but native code still runs only
+for packs listed in `native_plugins.allowed_packs`:
 
 ```yaml
 native_plugins:
@@ -209,7 +211,7 @@ Rules:
 * the plugin API version must match a supported engine API version
 * plugin diagnostics must identify the owning pack
 * multiplayer servers must not cause clients to execute native code silently
-* client-side native plugins, if supported later, require separate explicit trust
+* client-side native plugins require explicit local trust through the same pack allowlist
 
 ---
 
@@ -2641,7 +2643,7 @@ They can:
 
 Therefore:
 
-* native plugins are disabled by default
+* native plugin loading can be disabled with `native_plugins.enabled: false`
 * native plugins require explicit allowlisting
 * plugin load/unload must be logged
 * ABI mismatches must fail cleanly

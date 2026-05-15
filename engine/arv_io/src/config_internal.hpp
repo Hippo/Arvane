@@ -143,6 +143,9 @@ void put_network_full(DataValue& root, const EngineConfig& config);
 void put_network_client(DataValue& root, const EngineConfig& config);
 void put_network_server(DataValue& root, const EngineConfig& config);
 
+void read_plugin_sections(const DataValue& root, EngineConfig& config);
+void put_plugin_policy_config(DataValue& root, const EngineConfig& config);
+
 void read_gameplay_sections(const DataValue& root, EngineConfig& config);
 void put_gameplay_full(DataValue& root, const EngineConfig& config);
 void put_gameplay_shared(DataValue& root, const EngineConfig& config);
