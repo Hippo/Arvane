@@ -1418,6 +1418,8 @@ public:
   void build(UIContext& ctx) override {
     add_fullscreen_account_base(ctx, screen_id(), screens_detail::tr(ctx, "ui.menu.account.create_profile"));
     const UiNodeID stack = ctx.tree.find_by_stable_id("account_create.controls")->node_id;
+    const bool has_existing_profiles =
+        ctx.data_source != nullptr && !ctx.data_source->local_profiles().empty();
     screens_detail::add_text_box(
         ctx.tree,
         stack,
@@ -1447,15 +1449,18 @@ public:
     preview.hit_test = true;
     (void)ctx.tree.add_child(ctx.tree.root_id(), std::move(preview));
 
-    add_fixed_action_button(
-        ctx.tree,
-        ctx.tree.root_id(),
-        "menu.account_create.cancel",
-        screens_detail::tr(ctx, "ui.menu.common.cancel"),
-        "account.cancel",
-        UiAnchor::BottomRight,
-        {-182.0F, -28.0F},
-        142.0F);
+    const f32 complete_offset_x = has_existing_profiles ? -28.0F : -40.0F;
+    if (has_existing_profiles) {
+      add_fixed_action_button(
+          ctx.tree,
+          ctx.tree.root_id(),
+          "menu.account_create.cancel",
+          screens_detail::tr(ctx, "ui.menu.common.cancel"),
+          "account.cancel",
+          UiAnchor::BottomRight,
+          {-182.0F, -28.0F},
+          142.0F);
+    }
     add_fixed_action_button(
         ctx.tree,
         ctx.tree.root_id(),
@@ -1463,7 +1468,7 @@ public:
         screens_detail::tr(ctx, "ui.menu.common.complete"),
         "account.complete",
         UiAnchor::BottomRight,
-        {-28.0F, -28.0F},
+        {complete_offset_x, -28.0F},
         142.0F,
         ButtonSelectedColor);
 
@@ -1494,6 +1499,9 @@ public:
       return complete(ctx);
     }
     if (action.action_id == "account.cancel") {
+      if (!can_cancel(ctx)) {
+        return true;
+      }
       return cancel(ctx);
     }
     if (action.action_id == "account.focus_name") {
@@ -1536,6 +1544,9 @@ public:
   bool handle_cancel(UIContext& ctx) override {
     if (skin_manager_.open) {
       return cancel_skin_manager(ctx, skin_manager_, std::nullopt);
+    }
+    if (!can_cancel(ctx)) {
+      return true;
     }
     return cancel(ctx);
   }
@@ -1613,6 +1624,10 @@ private:
   [[nodiscard]] std::vector<LocalProfileSkinEntry> current_skins(
       const UIContext& ctx) const {
     return create_skin_entries(ctx);
+  }
+
+  [[nodiscard]] static bool can_cancel(const UIContext& ctx) {
+    return ctx.data_source != nullptr && !ctx.data_source->local_profiles().empty();
   }
 
   bool complete(UIContext& ctx) {

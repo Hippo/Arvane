@@ -1192,6 +1192,11 @@ TEST(MenuScreenTests, AccountCreateCancelDiscardsPendingCreateState) {
   arv::ui::UiTree tree;
   CapturingCommandSink sink;
   FixedMenuData data;
+  data.profiles.push_back({"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                           "Hippo",
+                           "",
+                           {},
+                           true});
   arv::ui::UIScreenManager screens;
   arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens, nullptr, &test_language()};
 
@@ -1205,6 +1210,32 @@ TEST(MenuScreenTests, AccountCreateCancelDiscardsPendingCreateState) {
   ASSERT_EQ(sink.commands.size(), 1U);
   EXPECT_TRUE(std::holds_alternative<arv::ui::DiscardLocalProfileCreateCommand>(sink.commands[0]));
   EXPECT_TRUE(screens.empty());
+}
+
+TEST(MenuScreenTests, AccountCreateWithoutProfilesCannotCancelOut) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  arv::ui::UIContext ctx{tree, {900.0F, 640.0F}, &sink, &data, &screens, nullptr, &test_language()};
+
+  screens.push(arv::ui::make_main_menu_screen());
+  screens.push(arv::ui::make_account_create_screen());
+  screens.update(ctx);
+  tree.layout({900.0F, 640.0F}, &text);
+
+  EXPECT_EQ(tree.find_by_stable_id("menu.account_create.cancel"), nullptr);
+  ASSERT_NE(tree.find_by_stable_id("menu.account_create.complete"), nullptr);
+  EXPECT_TRUE(screens.route_action({"menu.account_create.cancel", "account.cancel", "click"}, ctx));
+  EXPECT_EQ(sink.commands.size(), 0U);
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::AccountCreate);
+
+  EXPECT_TRUE(screens.handle_cancel(ctx));
+  EXPECT_EQ(sink.commands.size(), 0U);
+  ASSERT_NE(screens.current(), nullptr);
+  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::AccountCreate);
 }
 
 TEST(MenuScreenTests, AccountEditSkinManagerStagesOrderAndPickerCommands) {

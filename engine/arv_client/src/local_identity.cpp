@@ -549,35 +549,39 @@ Expected<LocalProfileSkin, LocalIdentityError> import_local_profile_skin_png(
   return Expected<LocalProfileSkin, LocalIdentityError>::success(std::move(skin));
 }
 
+Expected<LocalProfileStore, LocalIdentityError> load_local_profile_store(
+    const std::filesystem::path& arvane_home) {
+  const std::filesystem::path& home = arvane_home;
+  std::error_code error;
+  const bool profiles_file_exists =
+      std::filesystem::exists(local_profiles_json_path(home), error);
+  if (error) {
+    return Expected<LocalProfileStore, LocalIdentityError>::failure(
+        LocalIdentityError{"failed to inspect local profile file: " + error.message()});
+  }
+  if (!profiles_file_exists) {
+    return Expected<LocalProfileStore, LocalIdentityError>::success(LocalProfileStore{});
+  }
+  return read_profile_store(home);
+}
+
 Expected<LocalProfileStore, LocalIdentityError> load_or_create_local_profile_store(
     const std::filesystem::path& arvane_home,
     std::string display_name) {
   const std::filesystem::path& home = arvane_home;
-  std::error_code error;
-  if (std::filesystem::exists(local_profiles_json_path(home), error)) {
-    auto store = read_profile_store(home);
-    if (!store || !store.value().profiles.empty()) {
-      return store;
-    }
-    store.value().profiles.push_back(make_persistent_identity(std::move(display_name)));
-    store.value().profiles.front().arvane_home = home;
-    store.value().selected_profile = 0U;
-    auto save_result = save_local_profile_store(home, store.value());
-    if (!save_result) {
-      return Expected<LocalProfileStore, LocalIdentityError>::failure(save_result.error());
-    }
+  auto store = load_local_profile_store(home);
+  if (!store || !store.value().profiles.empty()) {
     return store;
   }
 
-  LocalProfileStore store;
-  store.profiles.push_back(make_persistent_identity(std::move(display_name)));
-  store.profiles.front().arvane_home = home;
-  store.selected_profile = 0U;
-  auto save_result = save_local_profile_store(home, store);
+  store.value().profiles.push_back(make_persistent_identity(std::move(display_name)));
+  store.value().profiles.front().arvane_home = home;
+  store.value().selected_profile = 0U;
+  auto save_result = save_local_profile_store(home, store.value());
   if (!save_result) {
     return Expected<LocalProfileStore, LocalIdentityError>::failure(save_result.error());
   }
-  return Expected<LocalProfileStore, LocalIdentityError>::success(std::move(store));
+  return store;
 }
 
 Expected<LocalPlayerIdentity, LocalIdentityError> load_or_create_local_identity(

@@ -59,6 +59,30 @@ TEST(LocalProfileTests, SavesLoadsMultipleProfilesAndUsesSelectedProfile) {
       loaded.value().profiles.front().private_key_file)));
 }
 
+TEST(LocalProfileTests, LoadingMissingProfilesFileReturnsEmptyStoreWithoutCreatingFiles) {
+  TempDir temp;
+
+  auto loaded = arv::client::load_local_profile_store(temp.path);
+
+  ASSERT_TRUE(loaded);
+  EXPECT_TRUE(loaded.value().profiles.empty());
+  EXPECT_EQ(loaded.value().selected_profile, 0U);
+  EXPECT_FALSE(std::filesystem::exists(arv::client::local_profiles_json_path(temp.path)));
+}
+
+TEST(LocalProfileTests, LoadingExistingEmptyProfilesFileReturnsEmptyStore) {
+  TempDir temp;
+  std::ofstream output(arv::client::local_profiles_json_path(temp.path), std::ios::trunc);
+  output << R"({"selected_profile": 7, "profiles": []})";
+  output.close();
+
+  auto loaded = arv::client::load_local_profile_store(temp.path);
+
+  ASSERT_TRUE(loaded);
+  EXPECT_TRUE(loaded.value().profiles.empty());
+  EXPECT_EQ(loaded.value().selected_profile, 0U);
+}
+
 TEST(LocalProfileTests, EmptyExistingProfilesFileCreatesFreshProfile) {
   TempDir temp;
   std::ofstream output(arv::client::local_profiles_json_path(temp.path), std::ios::trunc);

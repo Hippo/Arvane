@@ -84,6 +84,7 @@ public:
 private:
   [[nodiscard]] ui::UIScreenManager& active_screen_manager() noexcept;
   [[nodiscard]] const ui::UIScreenManager& active_screen_manager() const noexcept;
+  void push_main_menu_root();
   void reset_main_menu_stack();
   void reset_gameplay_menu_stack();
   [[nodiscard]] ui::UIContext make_menu_context(ui::UIScreenManager& screens);

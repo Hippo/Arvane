@@ -13,6 +13,7 @@
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
 #include "arv/base/ui.hpp"
+#include "arv/base/ui/screens/account.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/profiling.hpp"
 #include "arv/io/config.hpp"
@@ -254,6 +255,9 @@ int DesktopApplication::run(int argc, char** argv) {
       &assets.language};
   ui::UIScreenManager screen_manager;
   screen_manager.push(ui::make_main_menu_screen());
+  if (menu_state.local_profile_store().profiles.empty()) {
+    screen_manager.push(ui::make_account_create_screen());
+  }
 
   DesktopFrameLoop frame_loop{
       config,

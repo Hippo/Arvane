@@ -355,13 +355,17 @@ arvane_home/cache/skins/<skin_hash>.png
 
 ### Local Profile Creation
 
-When no local profiles exist, the client may create one automatically.
+When no local profiles exist, desktop startup shows the Create Profile screen
+instead of generating an identity silently. Completing that screen creates the
+profile.
 
 Flow:
 
 ```text
 client startup
 profiles.json missing or profiles array empty
+show Create Profile screen
+user confirms display name and optional skins
 generate Ed25519 key pair
 derive profile_id from public key
 write keys/<profile_id>.pk
@@ -1282,6 +1286,7 @@ Recommended behavior:
 
 ```text
 local client loads active profile from profiles.json
+if no profiles exist, desktop startup shows Create Profile before local play
 integrated server accepts local profile
 integrated server creates/loads matching profile in save directory
 same profile/session/entity model is used

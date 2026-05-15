@@ -12,6 +12,7 @@
 #include "arv/core/profiling.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/connection_state.hpp"
+#include "arv/base/ui/screens/account.hpp"
 #include "arv/base/ui/screens/main_menu.hpp"
 #include "arv/base/ui/screens/pause_menu.hpp"
 
@@ -253,9 +254,16 @@ const ui::UIScreenManager& DesktopFrameLoop::active_screen_manager() const noexc
   return gameplay_menu_stack_active_ ? gameplay_screen_manager_ : screen_manager_;
 }
 
+void DesktopFrameLoop::push_main_menu_root() {
+  screen_manager_.push(ui::make_main_menu_screen());
+  if (menu_state_.local_profile_store().profiles.empty()) {
+    screen_manager_.push(ui::make_account_create_screen());
+  }
+}
+
 void DesktopFrameLoop::reset_main_menu_stack() {
   screen_manager_.clear();
-  screen_manager_.push(ui::make_main_menu_screen());
+  push_main_menu_root();
   invalidate_ui_tree_cache();
 }
 

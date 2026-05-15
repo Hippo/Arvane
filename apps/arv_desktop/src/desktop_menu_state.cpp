@@ -653,7 +653,7 @@ void DesktopMenuState::persist_servers() const {
 
 void DesktopMenuState::load_profiles() {
   profile_status_.clear();
-  auto loaded = client::load_or_create_local_profile_store(arvane_home_);
+  auto loaded = client::load_local_profile_store(arvane_home_);
   if (!loaded) {
     profile_status_ = loaded.error().message;
     core::warn("identity", loaded.error().message);

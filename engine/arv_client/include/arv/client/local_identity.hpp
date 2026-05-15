@@ -50,6 +50,9 @@ struct LocalProfileStore {
     const std::filesystem::path& arvane_home,
     std::string display_name = "local_player");
 
+[[nodiscard]] Expected<LocalProfileStore, LocalIdentityError> load_local_profile_store(
+    const std::filesystem::path& arvane_home);
+
 [[nodiscard]] Expected<LocalProfileStore, LocalIdentityError> load_or_create_local_profile_store(
     const std::filesystem::path& arvane_home,
     std::string display_name = "local_player");
