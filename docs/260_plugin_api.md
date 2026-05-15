@@ -1120,10 +1120,16 @@ Engine-side `DataDocument` also supports typed path decoding through `value<T>(p
 Config remains a separate API because it is human-editable settings:
 
 ```cpp
-plugin.config().global().load_or_default<MyConfig>("example_plugin:settings");
-plugin.config().global().save("example_plugin:settings", config);
-plugin.config().world(world).save("example_plugin:world_settings", config);
+plugin.config().global().load_file_or_default<MyConfig>("config.yaml");
+plugin.config().global().save_file("config.yaml", config);
+plugin.config().world(world).save_file("world_settings.yaml", config);
 ```
+
+The C++ file helpers resolve the file name inside the calling plugin's config
+directory, so `config.yaml` maps to
+`arvane_home/config/plugins/<pack_id>/config.yaml`. Lower-level namespaced keys
+such as `example_plugin:settings` remain available for advanced cases and are
+still sanitized before touching storage.
 
 Persistent data remains separate because it is save/runtime state with explicit lifetime scopes:
 
@@ -1138,7 +1144,8 @@ plugin.persistent_data().chunk(world, chunk_pos);
 
 Rules:
 
-* config and persistent keys must be namespaced resource IDs owned by the plugin pack
+* config file helpers use the calling plugin pack ID automatically
+* lower-level config and persistent keys must be namespaced resource IDs owned by the plugin pack
 * keys are mapped to sanitized storage paths; plugins never provide raw filesystem paths
 * config stores YAML by default and missing config returns `NotFound`
 * persistent data stores backend-agnostic binary `DataDocument` records by default
@@ -1150,7 +1157,7 @@ Rules:
 Recommended storage roots are implementation details, not plugin contracts:
 
 ```text
-arvane_home/config/plugins/<pack_id>/<safe_key_path>.yaml
+arvane_home/config/plugins/<pack_id>/<config_file>.yaml
 arvane_home/saves/<world>/plugin_config/<world_id>/<pack_id>/<safe_key_path>.yaml
 arvane_home/saves/<world>/plugin_data/<pack_id>/<scope>/<stable_identity>/<safe_key_path>.bin
 ```

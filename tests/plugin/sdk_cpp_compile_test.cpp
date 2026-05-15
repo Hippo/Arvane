@@ -150,7 +150,12 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !events.subscribe("test:event", event_handler) &&
                  !config.global().load("test:config") &&
                  !config.global().save("test:config", sample) &&
+                 !config.global().load_file("config.yaml") &&
+                 !config.global().save_file("config.yaml", sample) &&
                  config.global().load_or_default<SampleConfig>("test:config").enabled &&
+                 config.global().load_file_or_default<SampleConfig>("config.yaml").enabled &&
+                 !config.global().exists_file("config.yaml") &&
+                 !config.global().remove_file("config.yaml") &&
                  !context.owns_namespace("test") &&
                  !created_document &&
                  !parsed_chat && !config_chat && !chat_string &&

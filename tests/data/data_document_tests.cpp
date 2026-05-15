@@ -160,10 +160,10 @@ TEST(DataCodecTests, ValueTemplateAndProxyDecodePrimitiveAndCustomTypes) {
 TEST(DataStorageTests, SafeResourcePathsRejectUnsafeKeys) {
   auto path = arv::io::safe_resource_relative_path(
       "example_plugin",
-      key("example_plugin:config/main"),
+      key("example_plugin:config"),
       ".yaml");
   ASSERT_TRUE(path) << path.error().describe();
-  EXPECT_EQ(path.value().generic_string(), "config/main.yaml");
+  EXPECT_EQ(path.value().generic_string(), "config.yaml");
 
   EXPECT_FALSE(arv::asset::ResourceID::parse("example_plugin:../../escape"));
   EXPECT_FALSE(arv::asset::ResourceID::parse("example_plugin:/absolute"));

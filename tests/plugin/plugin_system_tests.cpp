@@ -275,6 +275,10 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   ASSERT_TRUE(loaded) << loaded.error().describe();
   EXPECT_TRUE(manager.has_command_executor("arv_mason:command/mason"));
   EXPECT_TRUE(manager.has_command_executor("arv_mason:command/copy"));
+  EXPECT_TRUE(std::filesystem::exists(
+      harness.temp.path / "config" / "plugins" / "arv_mason" / "config.yaml"));
+  EXPECT_TRUE(std::filesystem::exists(
+      harness.temp.path / "config" / "plugins" / "arv_mason" / "messages.yaml"));
 
   arv::command::CommandRegistry registry;
   manager.register_commands(registry);

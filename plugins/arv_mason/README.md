@@ -120,9 +120,16 @@ Mutating commands also check the core `can_modify_world` permission through the 
 
 ## Config
 
-Mason loads `arv_mason:config/main` through ConfigAPI. Missing or invalid config falls back to safe defaults and Mason attempts to save the default document.
-Mason also loads pack-editable messages from `pack/config/messages.yaml`
-through `arv_mason:messages`.
+Mason loads `config.yaml` and `messages.yaml` through the Plugin SDK ConfigAPI
+file helpers. They resolve to:
+
+```text
+arvane_home/config/plugins/arv_mason/config.yaml
+arvane_home/config/plugins/arv_mason/messages.yaml
+```
+
+Missing or invalid config falls back to safe defaults, and Mason attempts to
+save the default document back to the same plugin config directory.
 
 Default limits:
 

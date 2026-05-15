@@ -49,6 +49,9 @@ endif()
 
 set(ARV_MASON_PACK_DIR "${CMAKE_BINARY_DIR}/arvane_home/packs/arv_mason")
 set(ARV_MASON_DEV_PACK_DIR "${CMAKE_SOURCE_DIR}/arvane_home/packs/arv_mason")
+get_filename_component(ARV_MASON_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+set(ARV_MASON_CONFIG_SOURCE_DIR "${ARV_MASON_REPO_ROOT}/arvane_home/config/plugins/arv_mason")
+set(ARV_MASON_BUILD_CONFIG_DIR "${CMAKE_BINARY_DIR}/arvane_home/config/plugins/arv_mason")
 
 function(arv_mason_add_pack_copy_target TARGET_NAME PACK_DIR)
   set(ALL_ARG)
@@ -75,7 +78,21 @@ endfunction()
 arv_mason_add_pack_copy_target(arv_mason_pack "${ARV_MASON_PACK_DIR}" TRUE)
 arv_mason_add_pack_copy_target(arv_mason_install_pack "${ARV_MASON_DEV_PACK_DIR}")
 
+if(EXISTS "${ARV_MASON_CONFIG_SOURCE_DIR}")
+  add_custom_target(arv_mason_config ALL
+    COMMAND ${CMAKE_COMMAND} -E remove_directory
+            "${ARV_MASON_BUILD_CONFIG_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ARV_MASON_CONFIG_SOURCE_DIR}"
+            "${ARV_MASON_BUILD_CONFIG_DIR}"
+    VERBATIM
+  )
+endif()
+
 install(DIRECTORY pack/ DESTINATION packs/arv_mason)
+if(EXISTS "${ARV_MASON_CONFIG_SOURCE_DIR}")
+  install(DIRECTORY "${ARV_MASON_CONFIG_SOURCE_DIR}/" DESTINATION config/plugins/arv_mason)
+endif()
 install(TARGETS arv_mason
   LIBRARY DESTINATION packs/arv_mason/native/${ARV_MASON_PLATFORM_KEY}
   RUNTIME DESTINATION packs/arv_mason/native/${ARV_MASON_PLATFORM_KEY}

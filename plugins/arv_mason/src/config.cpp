@@ -3,7 +3,6 @@
 #include "arv_mason/ids.hpp"
 
 #include <algorithm>
-#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,27 +22,6 @@ namespace {
 }
 
 } // namespace
-
-[[nodiscard]] std::uint64_t read_u64(
-    const arv::DataDocument& document,
-    std::string_view path,
-    std::uint64_t fallback) {
-  return document.u64_value(path, fallback);
-}
-
-[[nodiscard]] bool read_bool(
-    const arv::DataDocument& document,
-    std::string_view path,
-    bool fallback) {
-  return document.bool_value(path, fallback);
-}
-
-[[nodiscard]] std::string read_string(
-    const arv::DataDocument& document,
-    std::string_view path,
-    std::string fallback) {
-  return std::string{document.string_value(path, fallback)};
-}
 
 MasonConfig default_config() {
   return {};
@@ -149,11 +127,11 @@ void validate_config(MasonConfig& config) {
 
 MasonConfig load_config(const arv::Config& config, const arv::Logger& logger) {
   MasonConfig value = default_config();
-  auto loaded = config.global().load<MasonConfig>(ids::config_main);
+  auto loaded = config.global().load_file<MasonConfig>(ids::config_file);
   if (!loaded) {
     logger.warn("Mason config was not loaded; using safe defaults.");
     validate_config(value);
-    (void)config.global().save(ids::config_main, value);
+    (void)config.global().save_file(ids::config_file, value);
     return value;
   }
   value = std::move(loaded.value);
@@ -164,9 +142,10 @@ MasonConfig load_config(const arv::Config& config, const arv::Logger& logger) {
 
 MasonMessages load_messages(const arv::Config& config, const arv::Logger& logger) {
   MasonMessages value = default_messages();
-  auto loaded = config.global().load<MasonMessages>(ids::config_messages);
+  auto loaded = config.global().load_file<MasonMessages>(ids::messages_file);
   if (!loaded) {
     logger.warn("Mason messages config was not loaded; using built-in messages.");
+    (void)config.global().save_file(ids::messages_file, value);
     return value;
   }
   value = std::move(loaded.value);
@@ -249,50 +228,39 @@ Result Codec<arv_mason::MasonConfig>::encode(
 DecodeResult<arv_mason::MasonConfig> Codec<arv_mason::MasonConfig>::decode(
     const DataDocument& document) {
   arv_mason::MasonConfig config = arv_mason::default_config();
-  config.limits.max_selection_blocks = arv_mason::read_u64(
-      document,
+  config.limits.max_selection_blocks = document.u64_value(
       "limits.max_selection_blocks",
       config.limits.max_selection_blocks);
-  config.limits.max_clipboard_blocks = arv_mason::read_u64(
-      document,
+  config.limits.max_clipboard_blocks = document.u64_value(
       "limits.max_clipboard_blocks",
       config.limits.max_clipboard_blocks);
-  config.limits.max_blueprint_blocks = arv_mason::read_u64(
-      document,
+  config.limits.max_blueprint_blocks = document.u64_value(
       "limits.max_blueprint_blocks",
       config.limits.max_blueprint_blocks);
-  config.limits.max_history_entries = arv_mason::read_u64(
-      document,
+  config.limits.max_history_entries = document.u64_value(
       "limits.max_history_entries",
       config.limits.max_history_entries);
-  config.limits.max_operation_blocks_per_tick = arv_mason::read_u64(
-      document,
+  config.limits.max_operation_blocks_per_tick = document.u64_value(
       "limits.max_operation_blocks_per_tick",
       config.limits.max_operation_blocks_per_tick);
-  config.behavior.default_paste_air = arv_mason::read_bool(
-      document,
+  config.behavior.default_paste_air = document.bool_value(
       "behavior.default_paste_air",
       config.behavior.default_paste_air);
-  config.behavior.require_confirmation_above_blocks = arv_mason::read_u64(
-      document,
+  config.behavior.require_confirmation_above_blocks = document.u64_value(
       "behavior.require_confirmation_above_blocks",
       config.behavior.require_confirmation_above_blocks);
-  config.behavior.save_selection_per_player = arv_mason::read_bool(
-      document,
+  config.behavior.save_selection_per_player = document.bool_value(
       "behavior.save_selection_per_player",
       config.behavior.save_selection_per_player);
-  config.behavior.save_clipboard_per_player = arv_mason::read_bool(
-      document,
+  config.behavior.save_clipboard_per_player = document.bool_value(
       "behavior.save_clipboard_per_player",
       config.behavior.save_clipboard_per_player);
-  config.behavior.show_progress_messages = arv_mason::read_bool(
-      document,
+  config.behavior.show_progress_messages = document.bool_value(
       "behavior.show_progress_messages",
       config.behavior.show_progress_messages);
-  config.blueprints.default_scope = arv_mason::read_string(
-      document,
+  config.blueprints.default_scope = std::string{document.string_value(
       "blueprints.default_scope",
-      config.blueprints.default_scope);
+      config.blueprints.default_scope)};
   arv_mason::validate_config(config);
   return {Result::ok(), config};
 }
@@ -314,9 +282,9 @@ Result Codec<arv_mason::MasonMessages>::encode(
 DecodeResult<arv_mason::MasonMessages> Codec<arv_mason::MasonMessages>::decode(
     const DataDocument& document) {
   arv_mason::MasonMessages messages = arv_mason::default_messages();
-  messages.prefix = arv_mason::read_string(document, "prefix", messages.prefix);
+  messages.prefix = std::string{document.string_value("prefix", messages.prefix)};
   for (auto& [key, message] : messages.entries) {
-    message = arv_mason::read_string(document, key, message);
+    message = std::string{document.string_value(key, message)};
   }
   return {Result::ok(), messages};
 }

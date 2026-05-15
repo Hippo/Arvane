@@ -7,8 +7,8 @@ namespace arv_mason::ids {
 inline constexpr std::string_view pack = "arv_mason";
 inline constexpr std::string_view name_space = "arv_mason";
 
-inline constexpr std::string_view config_main = "arv_mason:config/main";
-inline constexpr std::string_view config_messages = "arv_mason:messages";
+inline constexpr std::string_view config_file = "config.yaml";
+inline constexpr std::string_view messages_file = "messages.yaml";
 inline constexpr std::string_view variable_prefix = "arv_mason_prefix";
 
 inline constexpr std::string_view perm_use = "mason.command.use";
