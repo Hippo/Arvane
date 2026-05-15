@@ -1,5 +1,7 @@
 #include "plugin_manager_internal.hpp"
 
+#include "arv/io/data_codecs.hpp"
+
 namespace arv::plugin {
 namespace {
 
@@ -419,6 +421,23 @@ ArvResult api_config_load(
                 ctx->info().pack_id,
                 parsed.value());
   if (!loaded) {
+    if (validated_scope.kind == ARV_CONFIG_SCOPE_GLOBAL &&
+        loaded.error().code == io::DataStorageCode::NotFound &&
+        ctx->impl->options.packs != nullptr) {
+      auto pack_text =
+          ctx->impl->options.packs->load_config_text(std::string{abi_view(key)}, ".yaml");
+      if (pack_text) {
+        auto decoded = io::decode_yaml(pack_text.value());
+        if (!decoded) {
+          return make_result(
+              ctx,
+              ARV_RESULT_INVALID_ARGUMENT,
+              decoded.error().describe());
+        }
+        *out_document = store_document(ctx, std::move(decoded.value()));
+        return ok(ctx);
+      }
+    }
     return make_result(ctx, storage_result_code(loaded.error().code), loaded.error().describe());
   }
   *out_document = store_document(ctx, std::move(loaded.value()));
@@ -477,12 +496,19 @@ bool api_config_exists(
     return false;
   }
   io::ConfigStorageService storage = config_storage_service(ctx);
-  return validated_scope.kind == ARV_CONFIG_SCOPE_GLOBAL
-             ? storage.exists_global_config(ctx->info().pack_id, parsed.value())
-             : storage.exists_world_config(
-                   WorldID{static_cast<u32>(validated_scope.world)},
-                   ctx->info().pack_id,
-                   parsed.value());
+  if (validated_scope.kind == ARV_CONFIG_SCOPE_GLOBAL) {
+    if (storage.exists_global_config(ctx->info().pack_id, parsed.value())) {
+      return true;
+    }
+    return ctx->impl->options.packs != nullptr &&
+           ctx->impl->options.packs
+               ->resolve_config_path(std::string{abi_view(key)}, ".yaml")
+               .has_value();
+  }
+  return storage.exists_world_config(
+      WorldID{static_cast<u32>(validated_scope.world)},
+      ctx->info().pack_id,
+      parsed.value());
 }
 
 ArvResult api_config_remove(

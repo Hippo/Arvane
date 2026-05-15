@@ -4,6 +4,7 @@ project(arv_mason LANGUAGES CXX)
 set(ARV_MASON_SOURCES
   src/plugin_main.cpp
   src/config.cpp
+  src/messages.cpp
   src/commands/command_utils.cpp
   src/commands/registration.cpp
   src/commands/player_state.cpp

@@ -80,6 +80,8 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto inventory_update = registry.lookup(arv::protocol::MessageType::ClientboundInventoryUpdate);
   const auto chat_send = registry.lookup(arv::protocol::MessageType::ServerboundChatMessage);
   const auto chat_receive = registry.lookup(arv::protocol::MessageType::ClientboundChatMessage);
+  const auto text_variables =
+      registry.lookup(arv::protocol::MessageType::ClientboundTextVariableUpdate);
   const auto skin_rules = registry.lookup(arv::protocol::MessageType::ClientboundSkinRules);
   const auto skin_data = registry.lookup(arv::protocol::MessageType::ClientboundSkinData);
   const auto skin_upload_data = registry.lookup(arv::protocol::MessageType::ServerboundSkinUploadData);
@@ -109,6 +111,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(inventory_update.has_value());
   ASSERT_TRUE(chat_send.has_value());
   ASSERT_TRUE(chat_receive.has_value());
+  ASSERT_TRUE(text_variables.has_value());
   ASSERT_TRUE(skin_rules.has_value());
   ASSERT_TRUE(skin_data.has_value());
   ASSERT_TRUE(skin_upload_data.has_value());
@@ -143,8 +146,10 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(inventory_update->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(chat_send->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(chat_receive->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(text_variables->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(chat_send->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(chat_receive->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(text_variables->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(ping->lane, arv::protocol::NetworkLane::Debug);
   EXPECT_EQ(move->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(correction->lane, arv::protocol::NetworkLane::Movement);
@@ -164,10 +169,11 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(chat_send->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(chat_receive->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(text_variables->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 49U);
+  EXPECT_EQ(registry.size(), 50U);
 }
 
 TEST(ProtocolTests, SessionControlPacketsRoundTripThroughSerialization) {

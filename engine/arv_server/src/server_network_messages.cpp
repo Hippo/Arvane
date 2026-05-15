@@ -15,9 +15,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iomanip>
 #include <limits>
 #include <optional>
 #include <span>
+#include <sstream>
+#include <string>
 #include <utility>
 
 namespace arv::server::detail {
@@ -291,6 +294,19 @@ void log_send_failure_if_dedicated(
       send_result.error().message);
 }
 
+[[nodiscard]] std::string format_text_variable_number(f32 value) {
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(1) << value;
+  std::string text = out.str();
+  while (text.size() > 1U && text.back() == '0') {
+    text.pop_back();
+  }
+  if (!text.empty() && text.back() == '.') {
+    text.pop_back();
+  }
+  return text;
+}
+
 plugin::PluginNetworkSendResult ServerRuntimeImpl::send_plugin_network_packet(
     const plugin::PluginNetworkSendRequest& request) {
   auto failure = [](
@@ -438,6 +454,232 @@ plugin::PluginNetworkSendResult ServerRuntimeImpl::send_plugin_network_packet(
     }
   }
   return failure(ARV_RESULT_INVALID_ARGUMENT, "invalid network target kind");
+}
+
+plugin::PluginNetworkSendResult ServerRuntimeImpl::send_plugin_chat_message(
+    const plugin::PluginChatMessageSendRequest& request) {
+  auto failure = [](
+                     ArvResultCode code,
+                     std::string message) -> plugin::PluginNetworkSendResult {
+    return plugin::PluginNetworkSendResult::failure(
+        {code, std::move(message)});
+  };
+
+  if (state_ != ServerRuntimeState::Running || !transport_) {
+    return failure(ARV_RESULT_INVALID_STATE, "server network is not running");
+  }
+  if (request.message == nullptr) {
+    return failure(ARV_RESULT_NOT_FOUND, "chat message handle not found");
+  }
+  const std::string channel =
+      request.channel.empty() ? std::string{protocol::ChatChannelSystem}
+                              : request.channel;
+  if (channel.size() > protocol::MaxChatChannelBytes) {
+    return failure(ARV_RESULT_INVALID_ARGUMENT, "chat channel is too long");
+  }
+
+  auto session_for_player = [this](PlayerID player_id) -> const ServerSession* {
+    const ServerSession* match = nullptr;
+    sessions_.for_each_session([&](const ServerSession& session) {
+      if (session.player_id == player_id) {
+        match = &session;
+      }
+    });
+    return match;
+  };
+
+  auto validate_phase = [&](const ServerSession& session)
+      -> plugin::PluginNetworkSendResult {
+    if (session.closing ||
+        session.connection_state == net::ConnectionState::Disconnected ||
+        session.connection_state == net::ConnectionState::Disconnecting) {
+      return failure(ARV_RESULT_INVALID_STATE, "target player connection is closing");
+    }
+    if (!session.authenticated ||
+        session.connection_state != net::ConnectionState::InGame) {
+      return failure(
+          ARV_RESULT_INVALID_STATE,
+          "chat messages require an in-game target player");
+    }
+    return plugin::PluginNetworkSendResult::success();
+  };
+
+  auto send_to_session = [&](const ServerSession& session)
+      -> plugin::PluginNetworkSendResult {
+    plugin::PluginNetworkSendResult phase = validate_phase(session);
+    if (!phase) {
+      return phase;
+    }
+    const arv::text::TextVariableResolver resolver{
+        &text_variables_,
+        session.player_id,
+        arv::text::TextVariableResolution::ResolvedOnly};
+    arv::text::RichText rich = request.message->to_rich_text(resolver);
+    const arv::text::RichTextValidation validation =
+        arv::text::validate_rich_text(rich);
+    if (!validation.valid) {
+      return failure(ARV_RESULT_INVALID_ARGUMENT, validation.message);
+    }
+    const protocol::ClientboundChatMessage packet{
+        next_chat_message_id_++,
+        channel,
+        request.kind,
+        std::move(rich)};
+    const net::NetworkResult send_result = send_protocol_message(
+        *transport_,
+        session.connection_id,
+        protocol::MessageType::ClientboundChatMessage,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Gameplay,
+        protocol::serialize_clientbound_chat_message(packet));
+    log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+    if (!send_result) {
+      return failure(ARV_RESULT_INTERNAL_ERROR, send_result.error().message);
+    }
+    return plugin::PluginNetworkSendResult::success();
+  };
+
+  switch (request.target_kind) {
+    case plugin::PluginNetworkTargetKind::Player: {
+      const ServerSession* session = session_for_player(request.player);
+      if (session == nullptr) {
+        return failure(ARV_RESULT_NOT_FOUND, "target player is not connected");
+      }
+      return send_to_session(*session);
+    }
+    case plugin::PluginNetworkTargetKind::Players:
+      for (PlayerID player_id : request.players) {
+        const ServerSession* session = session_for_player(player_id);
+        if (session == nullptr) {
+          return failure(ARV_RESULT_NOT_FOUND, "target player is not connected");
+        }
+        plugin::PluginNetworkSendResult result = send_to_session(*session);
+        if (!result) {
+          return result;
+        }
+      }
+      return plugin::PluginNetworkSendResult::success();
+    case plugin::PluginNetworkTargetKind::Broadcast: {
+      plugin::PluginNetworkSendResult last_result =
+          plugin::PluginNetworkSendResult::success();
+      sessions_.for_each_session([&](const ServerSession& session) {
+        if (!last_result || !session.authenticated ||
+            session.connection_state != net::ConnectionState::InGame ||
+            session.closing) {
+          return;
+        }
+        last_result = send_to_session(session);
+      });
+      return last_result;
+    }
+    case plugin::PluginNetworkTargetKind::World: {
+      plugin::PluginNetworkSendResult last_result =
+          plugin::PluginNetworkSendResult::success();
+      sessions_.for_each_session([&](const ServerSession& session) {
+        if (!last_result || session.world_id != request.world ||
+            !session.authenticated ||
+            session.connection_state != net::ConnectionState::InGame ||
+            session.closing) {
+          return;
+        }
+        last_result = send_to_session(session);
+      });
+      return last_result;
+    }
+  }
+  return failure(ARV_RESULT_INVALID_ARGUMENT, "invalid network target kind");
+}
+
+void ServerRuntimeImpl::refresh_builtin_text_variables() {
+  usize online_players = 0U;
+  sessions_.for_each_session([&](const ServerSession& session) {
+    if (session.authenticated && !session.closing) {
+      ++online_players;
+    }
+  });
+  text_variables_.set_global("online_player_count", std::to_string(online_players));
+  text_variables_.set_global("tps", std::to_string(base_tps_));
+  text_variables_.set_global("world_name", world_name_);
+
+  sessions_.for_each_session([&](const ServerSession& session) {
+    if (!session.authenticated || session.closing) {
+      return;
+    }
+    const std::string display_name =
+        session.display_name.empty() ? session.profile_name : session.display_name;
+    text_variables_.set_player(session.player_id, "player_name", display_name);
+    const std::optional<EntityID> entity_id =
+        default_world_.entity_for_player(session.player_id);
+    const entity::EntityHealth* health =
+        entity_id.has_value() ? default_world_.find_entity_health(entity_id.value()) : nullptr;
+    if (health == nullptr) {
+      (void)text_variables_.clear_player_value(session.player_id, "player_health");
+      (void)text_variables_.clear_player_value(session.player_id, "player_max_health");
+      return;
+    }
+    text_variables_.set_player(
+        session.player_id,
+        "player_health",
+        format_text_variable_number(health->current));
+    text_variables_.set_player(
+        session.player_id,
+        "player_max_health",
+        format_text_variable_number(health->max));
+  });
+}
+
+void ServerRuntimeImpl::send_text_variable_updates() {
+  if (!transport_) {
+    return;
+  }
+  refresh_builtin_text_variables();
+
+  protocol::ClientboundTextVariableUpdate globals;
+  globals.reset = true;
+  globals.entries.reserve(text_variables_.globals().size());
+  for (const auto& [name, variable] : text_variables_.globals()) {
+    if (variable.binding != arv::text::TextVariableBinding::Live) {
+      continue;
+    }
+    globals.entries.push_back({
+        protocol::TextVariableScope::Global,
+        name,
+        variable.value,
+        protocol::TextVariableBinding::Live,
+    });
+  }
+
+  sessions_.for_each_session([&](const ServerSession& recipient) {
+    if (!recipient.authenticated || recipient.closing ||
+        recipient.connection_state != net::ConnectionState::InGame) {
+      return;
+    }
+    protocol::ClientboundTextVariableUpdate update = globals;
+    if (const arv::text::TextVariableMap* player_values =
+            text_variables_.player_values(recipient.player_id);
+        player_values != nullptr) {
+      update.entries.reserve(update.entries.size() + player_values->size());
+      for (const auto& [name, variable] : *player_values) {
+        if (variable.binding != arv::text::TextVariableBinding::Live) {
+          continue;
+        }
+        update.entries.push_back({
+            protocol::TextVariableScope::Player,
+            name,
+            variable.value,
+            protocol::TextVariableBinding::Live,
+        });
+      }
+    }
+    const net::NetworkResult send_result = send_protocol_message(
+        *transport_,
+        recipient.connection_id,
+        protocol::MessageType::ClientboundTextVariableUpdate,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Gameplay,
+        protocol::serialize_clientbound_text_variable_update(update));
+    log_send_failure_if_dedicated(mode_, recipient.connection_id, send_result);
+  });
 }
 
 void ServerRuntimeImpl::expire_timed_out_skin_uploads() {

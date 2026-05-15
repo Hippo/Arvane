@@ -15,6 +15,11 @@ namespace {
 using arv::testsupport::ScopedTempDir;
 using arv::testsupport::write_text;
 
+struct CodecProbe {
+  int x{};
+  bool enabled{};
+};
+
 arv::io::ResourceKey key(std::string_view text) {
   auto parsed = arv::asset::ResourceID::parse(text);
   EXPECT_TRUE(parsed) << parsed.error();
@@ -27,6 +32,30 @@ arv::io::ResourceKey key(std::string_view text) {
 }
 
 } // namespace
+
+namespace arv::io {
+
+template<>
+struct DataCodec<CodecProbe> {
+  [[nodiscard]] static Expected<CodecProbe, DataDiagnostic> decode(
+      const DataDocument& document,
+      std::string_view path) {
+    CodecProbe value;
+    auto x = document.value_as<int>(std::string{path} + ".x");
+    if (!x) {
+      return Expected<CodecProbe, DataDiagnostic>::failure(x.error());
+    }
+    auto enabled = document.value_as<bool>(std::string{path} + ".enabled");
+    if (!enabled) {
+      return Expected<CodecProbe, DataDiagnostic>::failure(enabled.error());
+    }
+    value.x = x.value();
+    value.enabled = enabled.value();
+    return Expected<CodecProbe, DataDiagnostic>::success(value);
+  }
+};
+
+} // namespace arv::io
 
 TEST(DataDocumentTests, ConstructsNestedObjectsArraysAndCopiesDeeply) {
   arv::io::DataDocument document{7, arv::io::DataValue::object()};
@@ -97,6 +126,35 @@ TEST(DataCodecTests, InvalidDocumentsReturnDiagnostics) {
   auto binary = arv::io::decode_binary(invalid);
   ASSERT_FALSE(binary);
   EXPECT_NE(binary.error().describe().find("root.magic"), std::string::npos);
+}
+
+TEST(DataCodecTests, ValueTemplateAndProxyDecodePrimitiveAndCustomTypes) {
+  arv::io::DataDocument document{1, arv::io::DataValue::object()};
+  ASSERT_TRUE(arv::io::set_path(document, "enabled", true));
+  ASSERT_TRUE(arv::io::set_path(document, "count", arv::i64{42}));
+  ASSERT_TRUE(arv::io::set_path(document, "probe.x", arv::i64{7}));
+  ASSERT_TRUE(arv::io::set_path(document, "probe.enabled", false));
+
+  auto enabled = document.value<bool>("enabled");
+  ASSERT_TRUE(enabled) << enabled.error().describe();
+  EXPECT_TRUE(enabled.value());
+
+  arv::Expected<int, arv::io::DataDiagnostic> count = document.value("count");
+  ASSERT_TRUE(count) << count.error().describe();
+  EXPECT_EQ(count.value(), 42);
+
+  auto probe = document.value_as<CodecProbe>("probe");
+  ASSERT_TRUE(probe) << probe.error().describe();
+  EXPECT_EQ(probe.value().x, 7);
+  EXPECT_FALSE(probe.value().enabled);
+
+  auto missing = document.value<CodecProbe>("missing");
+  ASSERT_FALSE(missing);
+  EXPECT_NE(missing.error().describe().find("root.missing"), std::string::npos);
+
+  auto wrong_type = document.value<int>("enabled");
+  ASSERT_FALSE(wrong_type);
+  EXPECT_NE(wrong_type.error().describe().find("not an integer"), std::string::npos);
 }
 
 TEST(DataStorageTests, SafeResourcePathsRejectUnsafeKeys) {

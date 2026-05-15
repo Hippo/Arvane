@@ -12,6 +12,7 @@
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
+#include "arv/protocol/text_variables.hpp"
 #include "arv/protocol/world_join.hpp"
 
 #include "client_runtime_internal.hpp"
@@ -57,6 +58,7 @@ void apply_world_leave(
   runtime.inventory.reset();
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
+  runtime.ui.clear_text_variables();
   runtime.connection.set_state(net::ConnectionState::WorldJoin);
 }
 
@@ -68,6 +70,7 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
   runtime.ui.close_ui();
+  runtime.ui.clear_text_variables();
 }
 
 void disconnect_and_clear(ClientRuntimeContext& runtime, std::string_view reason) {
@@ -331,7 +334,24 @@ void ClientNetworkRouter::handle_message(
       if (!chat) {
         return;
       }
-      runtime.ui.add_chat_message(std::move(chat.value()));
+      protocol::ClientboundChatMessage packet = std::move(chat.value());
+      packet.message = text::interpolate_rich_text_variables(
+          packet.message,
+          {&runtime.ui.text_variables(),
+           runtime.player_controller.player_id(),
+           text::TextVariableResolution::LiveOnly});
+      runtime.ui.add_chat_message(std::move(packet));
+      return;
+    }
+    case protocol::MessageType::ClientboundTextVariableUpdate: {
+      auto update =
+          protocol::deserialize_clientbound_text_variable_update(decoded.value().payload);
+      if (!update) {
+        return;
+      }
+      runtime.ui.apply_text_variable_update(
+          std::move(update.value()),
+          runtime.player_controller.player_id());
       return;
     }
     case protocol::MessageType::ClientboundWorldJoinResult: {

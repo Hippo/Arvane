@@ -182,6 +182,23 @@ constexpr u64 FnvPrime = 1099511628211ULL;
   return path_with_extension(relative, extension);
 }
 
+[[nodiscard]] std::filesystem::path logical_config_relative_path(
+    const ResourceID& id,
+    std::string_view extension) {
+  std::filesystem::path relative{"config"};
+  relative /= id.name_space;
+  relative /= std::filesystem::path{id.path};
+  return path_with_extension(relative, extension);
+}
+
+[[nodiscard]] std::filesystem::path logical_root_config_relative_path(
+    const ResourceID& id,
+    std::string_view extension) {
+  std::filesystem::path relative{"config"};
+  relative /= std::filesystem::path{id.path};
+  return path_with_extension(relative, extension);
+}
+
 [[nodiscard]] bool contains_string(std::span<const std::string> values, std::string_view value) noexcept {
   return std::find(values.begin(), values.end(), value) != values.end();
 }
@@ -371,6 +388,28 @@ constexpr u64 FnvPrime = 1099511628211ULL;
     return std::nullopt;
   }
   return node->as_bool_or(false);
+}
+
+[[nodiscard]] std::optional<bool> read_optional_bool(
+    const io::DataValue& root,
+    std::string_view field,
+    bool fallback,
+    PackError& error,
+    const std::filesystem::path& file,
+    std::string_view pack_id) {
+  const io::DataValue* node = member(root, field);
+  if (node == nullptr) {
+    return fallback;
+  }
+  if (node->kind() != io::DataKind::Bool) {
+    error = pack_error(
+        "manifest validation",
+        "boolean field has invalid type: " + std::string{field},
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+  return node->as_bool_or(fallback);
 }
 
 [[nodiscard]] bool dependency_version_satisfied(std::string_view actual, std::string_view requirement) {
@@ -1185,11 +1224,25 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
   if (!data) {
     return PackManifestResult::failure(error);
   }
+  auto config = read_optional_bool(
+      *capabilities,
+      "config",
+      false,
+      error,
+      manifest_path,
+      manifest.id);
+  if (!config) {
+    return PackManifestResult::failure(error);
+  }
   auto native_plugin = read_required_bool(*capabilities, "native_plugin", error, manifest_path, manifest.id);
   if (!native_plugin) {
     return PackManifestResult::failure(error);
   }
-  manifest.capabilities = {assets.value(), data.value(), native_plugin.value()};
+  manifest.capabilities = {
+      assets.value(),
+      data.value(),
+      config.value(),
+      native_plugin.value()};
 
   if (const io::DataValue* builtin = member(root, "builtin"); builtin != nullptr) {
     if (!is_object(*builtin)) {
@@ -1366,6 +1419,50 @@ PackPathResult PackManager::resolve_data_path(
       pack_error("data resolution", "data file was not found in enabled pack stack", {}, relative, id.string()));
 }
 
+PackPathResult PackManager::resolve_config_path(
+    std::string_view config_id,
+    std::string_view extension) const {
+  auto parsed = ResourceID::parse(config_id);
+  if (!parsed) {
+    return PackPathResult::failure(
+        pack_error("config resolution", parsed.error(), {}, {}, std::string{config_id}));
+  }
+  const ResourceID id = std::move(parsed.value());
+  const std::filesystem::path relative = logical_config_relative_path(id, extension);
+  const std::filesystem::path root_relative =
+      logical_root_config_relative_path(id, extension);
+  if (!is_safe_pack_relative_path(relative)) {
+    return PackPathResult::failure(
+        pack_error("config resolution", "config path is unsafe", {}, relative, id.string()));
+  }
+  if (!is_safe_pack_relative_path(root_relative)) {
+    return PackPathResult::failure(
+        pack_error("config resolution", "config path is unsafe", {}, root_relative, id.string()));
+  }
+
+  for (usize reverse_index = stack_.size(); reverse_index > 0U; --reverse_index) {
+    const usize index = reverse_index - 1U;
+    const PackSource& pack = stack_[index];
+    if (!pack.manifest.capabilities.config ||
+        !contains_string(pack.manifest.namespaces, id.name_space)) {
+      continue;
+    }
+    const std::filesystem::path path = pack.root / relative;
+    if (file_exists_inside_root(pack.root, path)) {
+      return PackPathResult::success(
+          {index, pack.manifest.id, pack.manifest.version, relative, path});
+    }
+    const std::filesystem::path root_path = pack.root / root_relative;
+    if (file_exists_inside_root(pack.root, root_path)) {
+      return PackPathResult::success(
+          {index, pack.manifest.id, pack.manifest.version, root_relative, root_path});
+    }
+  }
+
+  return PackPathResult::failure(
+      pack_error("config resolution", "config file was not found in enabled pack stack", {}, relative, id.string()));
+}
+
 std::vector<PackDataFile> PackManager::data_files(
     std::string_view category,
     std::string_view extension) const {
@@ -1517,6 +1614,21 @@ PackTextResult PackManager::load_data_text(
       pack,
       "data loading",
       std::string{data_id});
+}
+
+PackTextResult PackManager::load_config_text(
+    std::string_view config_id,
+    std::string_view extension) const {
+  auto resolved = resolve_config_path(config_id, extension);
+  if (!resolved) {
+    return PackTextResult::failure(resolved.error());
+  }
+  const PackSource& pack = stack_[resolved.value().pack_index];
+  return read_text_file(
+      resolved.value().path,
+      pack,
+      "config loading",
+      std::string{config_id});
 }
 
 PackTextResult PackManager::load_merged_json_array_text(

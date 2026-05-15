@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/api.h"
+#include "arv/chat_message.hpp"
 #include "arv/commands.hpp"
 #include "arv/config.hpp"
 #include "arv/context.hpp"
@@ -20,6 +21,7 @@
 #include "arv/scheduler.hpp"
 #include "arv/services.hpp"
 #include "arv/text.hpp"
+#include "arv/variables.hpp"
 #include "arv/world.hpp"
 #include "arv/worldgen.hpp"
 
@@ -75,6 +77,8 @@ public:
 
   [[nodiscard]] const Players& players() const noexcept;
 
+  [[nodiscard]] const Variables& variables() const noexcept;
+
 private:
   const ArvAPI* api_{};
   Context context_;
@@ -98,6 +102,7 @@ private:
   Regions regions_;
   GameModes gamemodes_;
   Players players_;
+  Variables variables_;
 };
 
 } // namespace arv

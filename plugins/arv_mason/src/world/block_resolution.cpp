@@ -16,7 +16,7 @@ std::optional<std::uint32_t> MasonPlugin::parse_block_variant(
     arv::CommandContext& ctx,
     std::string_view text) const {
   if (text.empty()) {
-    ctx.error("Block state must not be empty.");
+    error(ctx, "block-state-empty");
     return std::nullopt;
   }
   std::vector<std::string> candidates;
@@ -37,7 +37,7 @@ std::optional<std::uint32_t> MasonPlugin::parse_block_variant(
       return resolved.value;
     }
   }
-  ctx.error("Unknown block state: " + raw + ".");
+  error(ctx, "unknown-block-state", {{"block_state", raw}});
   return std::nullopt;
 }
 
@@ -73,7 +73,7 @@ std::optional<std::vector<SnapshotBlock>> MasonPlugin::snapshot_selection(
     snapshot.push_back({pos, block.value});
   });
   if (!ok) {
-    ctx.error("Failed to read selection: " + error + ".");
+    this->error(ctx, "selection-read-failed", {{"error", error}});
     return std::nullopt;
   }
   return snapshot;
@@ -110,7 +110,7 @@ std::optional<std::vector<SnapshotBlock>> MasonPlugin::snapshot_clipboard_destin
         const ArvBlockPos dest = add_pos(paste_origin, sub_pos(source_pos, clipboard.origin));
         auto before = plugin_.world().get_block(world, dest);
         if (!before) {
-          ctx.error("Failed to read paste destination: " + std::string{before.result.message()} + ".");
+          error(ctx, "paste-destination-read-failed", {{"error", before.result.message()}});
           return std::nullopt;
         }
         snapshot.push_back({dest, before.value});

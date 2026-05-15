@@ -166,6 +166,9 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundChatMessage, "ClientboundChatMessage",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundTextVariableUpdate, "ClientboundTextVariableUpdate",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
   return registry;
 }
 

@@ -22,7 +22,7 @@ void MasonPlugin::push_history(
 
 arv::Result MasonPlugin::handle_undo(arv::CommandContext& ctx, const Args& args) {
   if (!args.empty()) {
-    ctx.error("Usage: /mason undo.");
+    error(ctx, "usage-undo");
     return arv::Result{arv::ResultCode::InvalidArgument, "usage error"};
   }
   if (!check_custom_permission(ctx, ids::perm_undo) || !check_modify_permission(ctx)) {
@@ -34,7 +34,7 @@ arv::Result MasonPlugin::handle_undo(arv::CommandContext& ctx, const Args& args)
   }
   auto entry = state->history.take_undo();
   if (!entry.has_value()) {
-    ctx.info("Nothing to undo.");
+    info(ctx, "nothing-undo");
     return arv::Result::ok();
   }
   HistoryEntry inverse = inverse_history_entry(*entry, "undo " + entry->summary);
@@ -42,17 +42,17 @@ arv::Result MasonPlugin::handle_undo(arv::CommandContext& ctx, const Args& args)
   std::string error;
   if (!apply_changes_sync(plan, error)) {
     state->history.push_undo_without_clearing_redo(std::move(*entry));
-    ctx.error("Undo failed: " + error + ".");
+    this->error(ctx, "undo-failed", {{"error", error}});
     return arv::Result{arv::ResultCode::InternalError, "undo failed"};
   }
   state->history.push_redo(std::move(*entry));
-  ctx.success("Undo complete: changed " + count_text(plan.changes.size()) + " blocks.");
+  success(ctx, "undo-complete", {{"count", count_text(plan.changes.size())}});
   return arv::Result::ok();
 }
 
 arv::Result MasonPlugin::handle_redo(arv::CommandContext& ctx, const Args& args) {
   if (!args.empty()) {
-    ctx.error("Usage: /mason redo.");
+    error(ctx, "usage-redo");
     return arv::Result{arv::ResultCode::InvalidArgument, "usage error"};
   }
   if (!check_custom_permission(ctx, ids::perm_redo) || !check_modify_permission(ctx)) {
@@ -64,18 +64,18 @@ arv::Result MasonPlugin::handle_redo(arv::CommandContext& ctx, const Args& args)
   }
   auto entry = state->history.take_redo();
   if (!entry.has_value()) {
-    ctx.info("Nothing to redo.");
+    info(ctx, "nothing-redo");
     return arv::Result::ok();
   }
   OperationPlan plan{entry->world, entry->changes, "redo " + entry->summary};
   std::string error;
   if (!apply_changes_sync(plan, error)) {
     state->history.push_redo(std::move(*entry));
-    ctx.error("Redo failed: " + error + ".");
+    this->error(ctx, "redo-failed", {{"error", error}});
     return arv::Result{arv::ResultCode::InternalError, "redo failed"};
   }
   state->history.push_undo_without_clearing_redo(std::move(*entry));
-  ctx.success("Redo complete: changed " + count_text(plan.changes.size()) + " blocks.");
+  success(ctx, "redo-complete", {{"count", count_text(plan.changes.size())}});
   return arv::Result::ok();
 }
 

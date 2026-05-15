@@ -3,6 +3,7 @@
 #include "arv_mason/ids.hpp"
 
 #include <algorithm>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -46,6 +47,66 @@ namespace {
 
 MasonConfig default_config() {
   return {};
+}
+
+MasonMessages default_messages() {
+  MasonMessages messages;
+  messages.entries = {
+      {"example-message", "{arv_mason_prefix} My message"},
+      {"help", "{arv_mason_prefix} /mason set, replace, copy, paste, undo, redo, confirm."},
+      {"aliases", "{arv_mason_prefix} Aliases: /mset /mreplace /mcopy /mpaste /mundo /mredo."},
+      {"status", "{arv_mason_prefix} Mason 0.1.0 ready. Limits: selection {selection_limit}, clipboard {clipboard_limit}."},
+      {"unknown-subcommand", "{arv_mason_prefix} Unknown Mason subcommand. Try /mason help."},
+      {"usage-set", "{arv_mason_prefix} Usage: /mason set <block_state>."},
+      {"usage-replace", "{arv_mason_prefix} Usage: /mason replace <from> <to>."},
+      {"usage-copy", "{arv_mason_prefix} Usage: /mason copy."},
+      {"usage-paste", "{arv_mason_prefix} Usage: /mason paste [--air|--no-air]."},
+      {"usage-undo", "{arv_mason_prefix} Usage: /mason undo."},
+      {"usage-redo", "{arv_mason_prefix} Usage: /mason redo."},
+      {"usage-confirm", "{arv_mason_prefix} Usage: /mason confirm."},
+      {"player-required", "{arv_mason_prefix} This Mason command requires a player."},
+      {"block-state-empty", "{arv_mason_prefix} Block state must not be empty."},
+      {"unknown-block-state", "{arv_mason_prefix} Unknown block state: {block_state}."},
+      {"selection-read-failed", "{arv_mason_prefix} Failed to read selection: {error}."},
+      {"paste-destination-read-failed", "{arv_mason_prefix} Failed to read paste destination: {error}."},
+      {"current-selection-read-failed", "{arv_mason_prefix} Unable to read current selection: {error}"},
+      {"selection-invalid", "{arv_mason_prefix} {message}"},
+      {"permission-denied", "{arv_mason_prefix} Permission denied: {permission}."},
+      {"world-edit-player-required", "{arv_mason_prefix} World edits require a player source."},
+      {"permission-denied-modify", "{arv_mason_prefix} Permission denied: can_modify_world is required."},
+      {"operation-limit-exceeded", "{arv_mason_prefix} Operation exceeds limit: {count} blocks. Limit: {limit}."},
+      {"confirmation-required", "{arv_mason_prefix} Operation affects {count} blocks. Run /mason confirm to proceed."},
+      {"set-complete", "Set complete"},
+      {"replace-complete", "Replace complete"},
+      {"paste-complete", "Paste complete"},
+      {"operation-complete-zero", "{arv_mason_prefix} {summary}: changed 0 blocks."},
+      {"operation-started", "{arv_mason_prefix} Operation started: {count} blocks in batches of {batch}."},
+      {"operation-failed", "{arv_mason_prefix} Operation failed: {error}."},
+      {"operation-complete", "{arv_mason_prefix} {summary}: changed {count} blocks."},
+      {"no-pending-confirm", "{arv_mason_prefix} No Mason operation is awaiting confirmation."},
+      {"confirm", "{arv_mason_prefix} Confirmed Mason {operation} operation."},
+      {"nothing-undo", "{arv_mason_prefix} Nothing to undo."},
+      {"nothing-redo", "{arv_mason_prefix} Nothing to redo."},
+      {"undo-failed", "{arv_mason_prefix} Undo failed: {error}."},
+      {"redo-failed", "{arv_mason_prefix} Redo failed: {error}."},
+      {"undo-complete", "{arv_mason_prefix} Undo complete: changed {count} blocks."},
+      {"redo-complete", "{arv_mason_prefix} Redo complete: changed {count} blocks."},
+      {"copy-selection-failed", "{arv_mason_prefix} Failed to copy selection: {error}."},
+      {"clipboard-limit-exceeded", "{arv_mason_prefix} Clipboard exceeds limit: {count} blocks. Limit: {limit}."},
+      {"copy-requires-position", "{arv_mason_prefix} Copy requires a player position."},
+      {"copy-complete", "{arv_mason_prefix} Copied {count} blocks."},
+      {"clipboard-empty", "{arv_mason_prefix} Clipboard is empty. Use /mason copy first."},
+      {"paste-requires-position", "{arv_mason_prefix} Paste requires a player world and position."},
+  };
+  return messages;
+}
+
+std::string_view MasonMessages::get(std::string_view key) const noexcept {
+  const auto found = entries.find(std::string{key});
+  if (found == entries.end()) {
+    return {};
+  }
+  return found->second;
 }
 
 void validate_config(MasonConfig& config) {
@@ -98,6 +159,18 @@ MasonConfig load_config(const arv::Config& config, const arv::Logger& logger) {
   value = std::move(loaded.value);
   validate_config(value);
   logger.info("Mason config loaded.");
+  return value;
+}
+
+MasonMessages load_messages(const arv::Config& config, const arv::Logger& logger) {
+  MasonMessages value = default_messages();
+  auto loaded = config.global().load<MasonMessages>(ids::config_messages);
+  if (!loaded) {
+    logger.warn("Mason messages config was not loaded; using built-in messages.");
+    return value;
+  }
+  value = std::move(loaded.value);
+  logger.info("Mason messages config loaded.");
   return value;
 }
 
@@ -222,6 +295,30 @@ DecodeResult<arv_mason::MasonConfig> Codec<arv_mason::MasonConfig>::decode(
       config.blueprints.default_scope);
   arv_mason::validate_config(config);
   return {Result::ok(), config};
+}
+
+Result Codec<arv_mason::MasonMessages>::encode(
+    const DataDocument& document,
+    const arv_mason::MasonMessages& value) {
+  if (Result result = document.set_string("prefix", value.prefix); !result) {
+    return result;
+  }
+  for (const auto& [key, message] : value.entries) {
+    if (Result result = document.set_string(key, message); !result) {
+      return result;
+    }
+  }
+  return Result::ok();
+}
+
+DecodeResult<arv_mason::MasonMessages> Codec<arv_mason::MasonMessages>::decode(
+    const DataDocument& document) {
+  arv_mason::MasonMessages messages = arv_mason::default_messages();
+  messages.prefix = arv_mason::read_string(document, "prefix", messages.prefix);
+  for (auto& [key, message] : messages.entries) {
+    message = arv_mason::read_string(document, key, message);
+  }
+  return {Result::ok(), messages};
 }
 
 } // namespace arv

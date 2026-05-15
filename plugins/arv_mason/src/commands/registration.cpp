@@ -12,6 +12,13 @@ MasonPlugin::MasonPlugin(arv::Plugin plugin) : plugin_(plugin) {
 
 bool MasonPlugin::initialize() {
   config_ = load_config(plugin_.config(), plugin_.logger());
+  messages_ = load_messages(plugin_.config(), plugin_.logger());
+  (void)plugin_.variables().set_global(ids::variable_prefix, messages_.prefix);
+  (void)plugin_.events().subscribe(
+      "arvane:event/server_start",
+      [this](arv::Event) {
+        (void)plugin_.variables().set_global(ids::variable_prefix, messages_.prefix);
+      });
   if (arv::Result permissions = register_permissions(); !permissions) {
     plugin_.logger().error(std::string{"Mason permission registration failed: "} + permissions.message());
     return false;
@@ -122,8 +129,8 @@ arv::Result MasonPlugin::register_commands() {
 arv::Result MasonPlugin::handle_mason(arv::CommandContext& ctx) {
   Args args = ctx.args();
   if (args.empty() || args[0] == "help") {
-    ctx.info("Mason: /mason set, replace, copy, paste, undo, redo, confirm.");
-    ctx.info("Aliases: /mset /mreplace /mcopy /mpaste /mundo /mredo.");
+    info(ctx, "help");
+    info(ctx, "aliases");
     return arv::Result::ok();
   }
   const std::string_view subcommand = args[0];
@@ -152,16 +159,16 @@ arv::Result MasonPlugin::handle_mason(arv::CommandContext& ctx) {
   if (subcommand == "confirm") {
     return handle_confirm(ctx, rest);
   }
-  ctx.error("Unknown Mason subcommand. Try /mason help.");
+  error(ctx, "unknown-subcommand");
   return arv::Result{arv::ResultCode::InvalidArgument, "unknown Mason subcommand"};
 }
 
 arv::Result MasonPlugin::handle_status(arv::CommandContext& ctx) {
-  std::ostringstream out;
-  out << "Mason 0.1.0 ready. Limits: selection "
-      << config_.limits.max_selection_blocks
-      << ", clipboard " << config_.limits.max_clipboard_blocks << ".";
-  ctx.info(out.str());
+  info(
+      ctx,
+      "status",
+      {{"selection_limit", std::to_string(config_.limits.max_selection_blocks)},
+       {"clipboard_limit", std::to_string(config_.limits.max_clipboard_blocks)}});
   return arv::Result::ok();
 }
 

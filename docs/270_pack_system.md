@@ -215,6 +215,8 @@ arvane_home/
           noise/
           features/
           generators/
+      config/
+        messages.yaml
 
     better_oceans/
       pack.yaml
@@ -238,6 +240,8 @@ arvane_home/
         blocks.yaml
         commands.yaml
         permissions.yaml
+      config/
+        messages.yaml
       native/
         linux-x86_64/
           libexample_plugin_pack.so
@@ -249,11 +253,12 @@ arvane_home/
           libexample_plugin_pack.dylib
 ```
 
-A pack has three major content roots:
+A pack has four major content roots:
 
 ```text
 assets/  - presentation resources
 data/    - game definitions and configuration
+config/  - user-editable pack configuration
 native/  - optional executable plugin code
 ```
 
@@ -357,6 +362,7 @@ load_before: []
 capabilities:
   assets: true
   data: true
+  config: false
   native_plugin: false
 
 builtin:
@@ -380,6 +386,7 @@ side: "both"
 capabilities:
   assets: true
   data: true
+  config: true
   native_plugin: true
 
 native:
@@ -523,6 +530,7 @@ Example:
 capabilities:
   assets: true
   data: true
+  config: false
   native_plugin: false
 ```
 
@@ -536,6 +544,9 @@ This section is only valid when:
 
 ```yaml
 capabilities:
+  assets: false
+  data: false
+  config: false
   native_plugin: true
 ```
 
@@ -714,6 +725,22 @@ may remain readable for compatibility, but new small entries should use the
 condensed root YAML form.
 
 Data definitions may affect registries, world generation, saves, and gameplay logic. For that reason, data definitions need stricter validation than assets.
+
+---
+
+## Config Content
+
+`config/` is for user-editable pack configuration such as plugin messages,
+feature toggles, and display preferences.
+
+Config files are addressed with the same namespaced IDs as data files, but they
+resolve under `config/`. A pack can provide either a condensed root file such as
+`config/messages.yaml` or a namespaced file such as
+`config/<namespace>/messages.yaml`.
+
+Unlike `data/`, config content is not part of the world-required pack content
+hash. Editing a message or local preference should not make an existing world
+pack lock fail validation.
 
 ### Data-Driven Command Policy
 
@@ -1556,9 +1583,10 @@ The core structure is:
 Pack
   assets/  -> presentation resources
   data/    -> authoritative definitions and configuration
+  config/  -> user-editable pack configuration
   native/  -> optional privileged executable code
 ```
 
-Assets may be overridden through pack order. Data definitions require stricter merge semantics. Native code requires explicit enablement.
+Assets may be overridden through pack order. Data definitions require stricter merge semantics. Config is user-editable and excluded from world pack-lock hashes. Native code requires explicit enablement.
 
 This gives Arvane one unified content pipeline for built-in content, user asset packs, server-required content, world generation packs, and future native plugin extensions while preserving save safety, multiplayer compatibility, and clear security boundaries.

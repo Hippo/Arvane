@@ -528,6 +528,10 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
         [this](const plugin::PluginNetworkSendRequest& request) {
           return send_plugin_network_packet(request);
         },
+        &text_variables_,
+        [this](const plugin::PluginChatMessageSendRequest& request) {
+          return send_plugin_chat_message(request);
+        },
     });
   }
   return net::NetworkResult::success();
@@ -584,6 +588,10 @@ void ServerRuntimeImpl::tick() {
         [this](const plugin::PluginNetworkSendRequest& request) {
           return send_plugin_network_packet(request);
         },
+        &text_variables_,
+        [this](const plugin::PluginChatMessageSendRequest& request) {
+          return send_plugin_chat_message(request);
+        },
     });
     plugins_->tick(tick_index_);
   }
@@ -601,6 +609,7 @@ void ServerRuntimeImpl::tick() {
   send_entity_replication();
   send_dropped_item_replication();
   send_inventory_updates();
+  send_text_variable_updates();
   ++tick_index_;
 }
 

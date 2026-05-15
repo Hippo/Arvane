@@ -21,6 +21,7 @@
 
 namespace arv::text {
 class LanguageCatalog;
+class TextVariableStore;
 } // namespace arv::text
 
 namespace arv::client {
@@ -136,6 +137,7 @@ public:
   [[nodiscard]] usize chat_draft_selection_end() const noexcept;
   [[nodiscard]] std::span<const std::string> chat_messages() const noexcept;
   [[nodiscard]] std::span<const ChatHistoryEntry> chat_history() const noexcept;
+  [[nodiscard]] const arv::text::TextVariableStore& text_variables() const noexcept;
   void close_chat() noexcept;
   void add_chat_message(std::string message);
   void suggest_chat_command(std::string command);

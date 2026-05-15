@@ -6,6 +6,8 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 
 namespace arv_mason {
 
@@ -35,9 +37,18 @@ struct MasonConfig {
   MasonBlueprintConfig blueprints{};
 };
 
+struct MasonMessages {
+  std::string prefix{"<red>Mason<gray>></>"};
+  std::unordered_map<std::string, std::string> entries{};
+
+  [[nodiscard]] std::string_view get(std::string_view key) const noexcept;
+};
+
 [[nodiscard]] MasonConfig default_config();
+[[nodiscard]] MasonMessages default_messages();
 void validate_config(MasonConfig& config);
 [[nodiscard]] MasonConfig load_config(const arv::Config& config, const arv::Logger& logger);
+[[nodiscard]] MasonMessages load_messages(const arv::Config& config, const arv::Logger& logger);
 
 } // namespace arv_mason
 
@@ -49,6 +60,14 @@ struct Codec<arv_mason::MasonConfig> {
 
   [[nodiscard]] static Result encode(const DataDocument& document, const arv_mason::MasonConfig& value);
   [[nodiscard]] static DecodeResult<arv_mason::MasonConfig> decode(const DataDocument& document);
+};
+
+template<>
+struct Codec<arv_mason::MasonMessages> {
+  static constexpr std::uint32_t schema_version = 1;
+
+  [[nodiscard]] static Result encode(const DataDocument& document, const arv_mason::MasonMessages& value);
+  [[nodiscard]] static DecodeResult<arv_mason::MasonMessages> decode(const DataDocument& document);
 };
 
 } // namespace arv

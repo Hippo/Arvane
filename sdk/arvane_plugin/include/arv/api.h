@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/commands.h"
+#include "arv/chat_message.h"
 #include "arv/config.h"
 #include "arv/context.h"
 #include "arv/data.h"
@@ -20,6 +21,7 @@
 #include "arv/scheduler.h"
 #include "arv/services.h"
 #include "arv/text.h"
+#include "arv/variables.h"
 #include "arv/version.h"
 #include "arv/world.h"
 #include "arv/worldgen.h"
@@ -93,6 +95,12 @@ typedef struct ArvAPI {
 
   void* players_ctx;
   const ArvPlayersAPI* players;
+
+  void* variables_ctx;
+  const ArvVariablesAPI* variables;
+
+  void* chat_message_ctx;
+  const ArvChatMessageAPI* chat_message;
 } ArvAPI;
 
 typedef bool (*ArvEntrypoint)(const ArvAPI* api);

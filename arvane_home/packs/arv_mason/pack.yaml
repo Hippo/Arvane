@@ -23,6 +23,7 @@ dependencies:
 capabilities:
   assets: true
   data: true
+  config: true
   native_plugin: true
 
 native:

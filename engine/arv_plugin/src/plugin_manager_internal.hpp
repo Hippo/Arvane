@@ -18,8 +18,10 @@
 #include "arv/player/permissions.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/session_control.hpp"
+#include "arv/text/chat_message.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/text/rich_text.hpp"
+#include "arv/text/variables.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/world_runtime.hpp"
@@ -187,6 +189,8 @@ struct PluginAPIStorage {
   ArvRegionsAPI regions_api{};
   ArvGameModeAPI game_modes_api{};
   ArvPlayersAPI players_api{};
+  ArvVariablesAPI variables_api{};
+  ArvChatMessageAPI chat_message_api{};
   ArvAPI api{};
 };
 
@@ -233,6 +237,8 @@ struct PluginCallContext {
   HashMap<u64, io::DataDocument> data_documents{};
   u64 next_text_handle{1U};
   HashMap<u64, arv::text::RichText> text_components{};
+  u64 next_chat_message_handle{1U};
+  HashMap<u64, arv::text::ChatMessageTemplate> chat_messages{};
   u64 next_packet_handle{1U};
   HashMap<u64, PluginNetworkPacket> network_packets{};
 
@@ -346,6 +352,12 @@ void install_plugin_permission_groups(PluginManagerImpl& impl);
 [[nodiscard]] ArvTextHandle store_text(
     PluginCallContext* ctx,
     arv::text::RichText text);
+[[nodiscard]] arv::text::ChatMessageTemplate* chat_message_from_handle(
+    PluginCallContext* ctx,
+    ArvChatMessageHandle handle);
+[[nodiscard]] ArvChatMessageHandle store_chat_message(
+    PluginCallContext* ctx,
+    arv::text::ChatMessageTemplate message);
 [[nodiscard]] PluginNetworkPacket* packet_from_handle(
     PluginCallContext* ctx,
     ArvPacketHandle handle);
@@ -383,5 +395,7 @@ void fill_region_api(PluginAPIStorage& storage);
 void fill_game_mode_api(PluginAPIStorage& storage);
 void fill_network_api(PluginAPIStorage& storage);
 void fill_player_api(PluginAPIStorage& storage);
+void fill_variables_api(PluginAPIStorage& storage);
+void fill_chat_message_api(PluginAPIStorage& storage);
 
 } // namespace arv::plugin

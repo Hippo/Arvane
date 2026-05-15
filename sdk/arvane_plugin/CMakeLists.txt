@@ -14,6 +14,7 @@ get_filename_component(
 add_library(ArvaneSDK STATIC
   src/arvane_plugin.c
   cpp/src/buffer.cpp
+  cpp/src/chat_message.cpp
   cpp/src/commands.cpp
   cpp/src/config.cpp
   cpp/src/context.cpp
@@ -36,6 +37,7 @@ add_library(ArvaneSDK STATIC
   cpp/src/services.cpp
   cpp/src/text.cpp
   cpp/src/types.cpp
+  cpp/src/variables.cpp
   cpp/src/world.cpp
   cpp/src/worldgen.cpp
 )

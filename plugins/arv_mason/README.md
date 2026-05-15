@@ -121,6 +121,8 @@ Mutating commands also check the core `can_modify_world` permission through the 
 ## Config
 
 Mason loads `arv_mason:config/main` through ConfigAPI. Missing or invalid config falls back to safe defaults and Mason attempts to save the default document.
+Mason also loads pack-editable messages from `pack/config/messages.yaml`
+through `arv_mason:messages`.
 
 Default limits:
 
@@ -143,6 +145,18 @@ blueprints:
 
 The blueprint and selection-persistence fields are retained for config format
 compatibility. Mason no longer uses them; `arv_base` owns those systems now.
+
+Default messages start with:
+
+```yaml
+prefix: "<red>Mason<gray>></>"
+example-message: "{arv_mason_prefix} My message"
+```
+
+The prefix is registered as the resolved global variable
+`arv_mason_prefix` when the server runtime starts. Because color tags replace
+the active color, the single `</>` in the default prefix closes gray and resets
+the following message text.
 
 ## Blueprint Format
 

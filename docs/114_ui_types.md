@@ -166,26 +166,26 @@ Variables are referenced using braces:
 {custom_var}
 ```
 
-If a variable is missing, the renderer should not crash. It should either render a clear placeholder or omit the value according to the chosen UI error policy.
+If a variable is missing, the renderer should not crash. The current shared text variable resolver preserves the original placeholder, such as `{missing_name}`, so missing values are visible without inventing misleading data.
 
 ---
 
 ## Scoreboard Variables
 
-Scoreboard variables may be provided by Arvane or defined by the scoreboard configuration.
+Scoreboard variables use the same `arv_text` variable resolver as chat message templates. Variables may be provided by Arvane, server state, game logic, or plugins.
 
-Built-in variables may include:
+Built-in variables currently include:
 
 * `player_health`
 * `player_max_health`
 * `player_name`
-* `player_ping`
 * `world_name`
-* `dimension_name`
 * `online_player_count`
 * `tps`
 
-Custom variables are declared under `vars`.
+Do not display fake values for unavailable data such as ping or dimension name. Add those variables only when authoritative sources exist.
+
+Custom variables may be declared under `vars` or provided by plugins/server systems through the shared variable store.
 
 Supported variable types should include:
 
@@ -213,6 +213,16 @@ The default scope should be:
 ```yaml
 scope: global
 ```
+
+Variable binding should also be explicit when it is not the default.
+
+```yaml
+binding: live
+```
+
+`resolved` is the default binding. Resolved variables are expanded by the
+server before a chat message or scoreboard update is sent. Live variables are
+replicated to the client and resolved when the client renders the UI text.
 
 Use `scope: player` only when the value must differ per player.
 

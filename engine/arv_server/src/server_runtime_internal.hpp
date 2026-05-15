@@ -16,6 +16,7 @@
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
+#include "arv/protocol/text_variables.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/server/chat_service.hpp"
 #include "arv/server/permission_config.hpp"
@@ -23,6 +24,7 @@
 #include "arv/server/player_profile.hpp"
 #include "arv/sched/completion_queue.hpp"
 #include "arv/sched/owner_thread.hpp"
+#include "arv/text/variables.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
 
@@ -284,6 +286,8 @@ struct ServerRuntimeImpl {
       const command::Command& command_def);
   [[nodiscard]] plugin::PluginNetworkSendResult send_plugin_network_packet(
       const plugin::PluginNetworkSendRequest& request);
+  [[nodiscard]] plugin::PluginNetworkSendResult send_plugin_chat_message(
+      const plugin::PluginChatMessageSendRequest& request);
 
   void handle_network_event(net::NetworkEvent event);
   void handle_connection_lost(net::ConnectionID connection_id);
@@ -393,6 +397,8 @@ struct ServerRuntimeImpl {
   void send_entity_replication();
   void send_dropped_item_replication();
   void send_inventory_updates();
+  void refresh_builtin_text_variables();
+  void send_text_variable_updates();
   void process_pending_entity_attacks();
   [[nodiscard]] protocol::ClientboundInventoryUpdate make_inventory_update(
       const player::PlayerState& player_state,
@@ -454,6 +460,7 @@ struct ServerRuntimeImpl {
   HashMap<PlayerID, AcceptedPlayerMovementState> accepted_player_movement_;
   HashMap<PlayerID, double> last_player_move_correction_seconds_;
   HashMap<PlayerID, protocol::BlockBreakProgress> last_sent_block_break_progress_;
+  arv::text::TextVariableStore text_variables_;
   HashMap<PlayerID, BlockBreakAttempt> block_break_attempts_;
   HashMap<SessionID, PlayerCombatState> combat_states_;
   HashSet<SessionID> logged_chunk_interest_sessions_;

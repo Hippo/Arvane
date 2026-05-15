@@ -15,6 +15,17 @@ namespace {
 constexpr usize MaxChatDraftBytes = 256U;
 constexpr usize MaxSubmittedChatHistory = 100U;
 
+[[nodiscard]] arv::text::TextVariableBinding text_binding_from_protocol(
+    protocol::TextVariableBinding binding) noexcept {
+  switch (binding) {
+    case protocol::TextVariableBinding::Resolved:
+      return arv::text::TextVariableBinding::Resolved;
+    case protocol::TextVariableBinding::Live:
+      return arv::text::TextVariableBinding::Live;
+  }
+  return arv::text::TextVariableBinding::Resolved;
+}
+
 template<typename T>
 void trim_vector_to_limit(std::vector<T>& values, usize limit) {
   if (values.size() <= limit) {
@@ -94,6 +105,43 @@ void ClientUiState::set_max_chat_history_messages(usize max_messages) {
   max_chat_history_messages_ = std::max<usize>(1U, max_messages);
   trim_vector_to_limit(chat_messages_, max_chat_history_messages_);
   trim_vector_to_limit(chat_history_, max_chat_history_messages_);
+}
+
+void ClientUiState::clear_text_variables() {
+  text_variables_.clear();
+}
+
+void ClientUiState::apply_text_variable_update(
+    protocol::ClientboundTextVariableUpdate update,
+    std::optional<PlayerID> local_player_id) {
+  if (update.reset) {
+    text_variables_.clear();
+  }
+  for (protocol::TextVariableUpdateEntry& entry : update.entries) {
+    if (entry.scope == protocol::TextVariableScope::Global) {
+      if (entry.value.has_value()) {
+        text_variables_.set_global(
+            std::move(entry.name),
+            std::move(entry.value.value()),
+            text_binding_from_protocol(entry.binding));
+      } else {
+        (void)text_variables_.clear_global(entry.name);
+      }
+      continue;
+    }
+    if (!local_player_id.has_value()) {
+      continue;
+    }
+    if (entry.value.has_value()) {
+      text_variables_.set_player(
+          local_player_id.value(),
+          std::move(entry.name),
+          std::move(entry.value.value()),
+          text_binding_from_protocol(entry.binding));
+    } else {
+      (void)text_variables_.clear_player_value(local_player_id.value(), entry.name);
+    }
+  }
 }
 
 void ClientUiState::add_chat_message(std::string message) {
@@ -235,6 +283,10 @@ std::span<const std::string> ClientUiState::chat_messages() const noexcept {
 
 std::span<const ChatHistoryEntry> ClientUiState::chat_history() const noexcept {
   return chat_history_;
+}
+
+const arv::text::TextVariableStore& ClientUiState::text_variables() const noexcept {
+  return text_variables_;
 }
 
 void ClientUiState::reset_chat_history_navigation() noexcept {

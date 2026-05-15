@@ -37,7 +37,7 @@ arv::Result MasonPlugin::handle_set(
     return arv::Result{arv::ResultCode::PermissionDenied, "permission denied"};
   }
   if (args.size() != 1U) {
-    ctx.error("Usage: /mason set <block_state>.");
+    error(ctx, "usage-set");
     return arv::Result{arv::ResultCode::InvalidArgument, "usage error"};
   }
   MasonPlayerState* state = state_for(ctx);
@@ -71,7 +71,7 @@ arv::Result MasonPlugin::handle_set(
       *ctx.player(),
       *state,
       std::move(plan),
-      "Set complete");
+      std::string{messages_.get("set-complete")});
 }
 
 arv::Result MasonPlugin::handle_replace(
@@ -82,7 +82,7 @@ arv::Result MasonPlugin::handle_replace(
     return arv::Result{arv::ResultCode::PermissionDenied, "permission denied"};
   }
   if (args.size() != 2U) {
-    ctx.error("Usage: /mason replace <from> <to>.");
+    error(ctx, "usage-replace");
     return arv::Result{arv::ResultCode::InvalidArgument, "usage error"};
   }
   MasonPlayerState* state = state_for(ctx);
@@ -121,7 +121,7 @@ arv::Result MasonPlugin::handle_replace(
       *ctx.player(),
       *state,
       std::move(plan),
-      "Replace complete");
+      std::string{messages_.get("replace-complete")});
 }
 
 arv::Result MasonPlugin::execute_plan(
@@ -131,7 +131,7 @@ arv::Result MasonPlugin::execute_plan(
     OperationPlan plan,
     std::string complete_message) {
   if (plan.changes.empty()) {
-    ctx.success(complete_message + ": changed 0 blocks.");
+    success(ctx, "operation-complete-zero", {{"summary", complete_message}});
     return arv::Result::ok();
   }
   const std::uint64_t batch = config_.limits.max_operation_blocks_per_tick;
@@ -139,18 +139,22 @@ arv::Result MasonPlugin::execute_plan(
     const std::size_t count = plan.changes.size();
     const std::string summary = plan.summary;
     schedule_batched_plan(player, std::move(plan), summary);
-    ctx.success(
-        "Operation started: " + count_text(count) +
-        " blocks in batches of " + count_text(batch) + ".");
+    success(
+        ctx,
+        "operation-started",
+        {{"count", count_text(count)}, {"batch", count_text(batch)}});
     return arv::Result::ok();
   }
   std::string error;
   if (!apply_changes_sync(plan, error)) {
-    ctx.error("Operation failed: " + error + ".");
+    this->error(ctx, "operation-failed", {{"error", error}});
     return arv::Result{arv::ResultCode::InternalError, "operation failed"};
   }
   push_history(player, state, plan);
-  ctx.success(complete_message + ": changed " + count_text(plan.changes.size()) + " blocks.");
+  success(
+      ctx,
+      "operation-complete",
+      {{"summary", complete_message}, {"count", count_text(plan.changes.size())}});
   return arv::Result::ok();
 }
 
@@ -214,7 +218,7 @@ void MasonPlugin::schedule_batched_plan(
 
 arv::Result MasonPlugin::handle_confirm(arv::CommandContext& ctx, const Args& args) {
   if (!args.empty()) {
-    ctx.error("Usage: /mason confirm.");
+    error(ctx, "usage-confirm");
     return arv::Result{arv::ResultCode::InvalidArgument, "usage error"};
   }
   MasonPlayerState* state = state_for(ctx);
@@ -222,13 +226,13 @@ arv::Result MasonPlugin::handle_confirm(arv::CommandContext& ctx, const Args& ar
     return arv::Result{arv::ResultCode::InvalidState, "player required"};
   }
   if (!state->pending.has_value()) {
-    ctx.info("No Mason operation is awaiting confirmation.");
+    info(ctx, "no-pending-confirm");
     return arv::Result::ok();
   }
   PendingOperation pending = std::move(*state->pending);
   state->pending.reset();
   const Args pending_args = view_args(pending.args);
-  ctx.info("Confirmed Mason " + operation_kind_name(pending.kind) + " operation.");
+  info(ctx, "confirm", {{"operation", operation_kind_name(pending.kind)}});
   switch (pending.kind) {
     case PendingOperationKind::Set:
       return handle_set(ctx, pending_args, true);

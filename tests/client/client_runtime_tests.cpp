@@ -9,7 +9,9 @@
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/session_control.hpp"
+#include "arv/protocol/text_variables.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/text/variables.hpp"
 #include "support/net_events.hpp"
 
 #include <gtest/gtest.h>
@@ -355,6 +357,109 @@ TEST(ClientRuntimeTests, ClientboundChatAppendsRichHistory) {
       arv::text::flatten_rich_text(client.chat_history().front().message);
   ASSERT_EQ(runs.size(), 1U);
   EXPECT_EQ(runs.front().style.color, (arv::text::RgbColor{0x20U, 0x80U, 0xFFU}));
+}
+
+TEST(ClientRuntimeTests, TextVariableUpdatesApplyResetRemovalAndPlayerIsolation) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  arv::protocol::ClientboundTextVariableUpdate initial;
+  initial.reset = true;
+  initial.entries.push_back(
+      {arv::protocol::TextVariableScope::Global, "online_player_count", "2"});
+  initial.entries.push_back(
+      {arv::protocol::TextVariableScope::Player, "player_name", "Hippo"});
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundTextVariableUpdate,
+      arv::protocol::serialize_clientbound_text_variable_update(initial));
+  client.fixed_tick(2);
+
+  EXPECT_EQ(client.text_variables().global("online_player_count"), "2");
+  EXPECT_EQ(client.text_variables().player(arv::PlayerID{1}, "player_name"), "Hippo");
+  EXPECT_EQ(client.text_variables().player(arv::PlayerID{7}, "player_name"), std::nullopt);
+  EXPECT_EQ(
+      client.text_variables().global_binding("online_player_count"),
+      arv::text::TextVariableBinding::Resolved);
+
+  arv::protocol::ClientboundTextVariableUpdate removal;
+  removal.entries.push_back(
+      {arv::protocol::TextVariableScope::Global, "online_player_count", std::nullopt});
+  removal.entries.push_back(
+      {arv::protocol::TextVariableScope::Player, "player_name", std::nullopt});
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundTextVariableUpdate,
+      arv::protocol::serialize_clientbound_text_variable_update(removal));
+  client.fixed_tick(3);
+
+  EXPECT_EQ(client.text_variables().global("online_player_count"), std::nullopt);
+  EXPECT_EQ(client.text_variables().player(arv::PlayerID{1}, "player_name"), std::nullopt);
+
+  arv::protocol::ClientboundTextVariableUpdate reset;
+  reset.reset = true;
+  reset.entries.push_back(
+      {arv::protocol::TextVariableScope::Player, "player_health", "18"});
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundTextVariableUpdate,
+      arv::protocol::serialize_clientbound_text_variable_update(reset));
+  client.fixed_tick(4);
+
+  EXPECT_EQ(client.text_variables().player(arv::PlayerID{1}, "player_health"), "18");
+  EXPECT_EQ(client.text_variables().player(arv::PlayerID{7}, "player_health"), std::nullopt);
+  EXPECT_EQ(client.text_variables().global("online_player_count"), std::nullopt);
+}
+
+TEST(ClientRuntimeTests, LiveTextVariablesResolveReceivedChatOnClient) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  arv::protocol::ClientboundTextVariableUpdate variables;
+  variables.reset = true;
+  variables.entries.push_back(
+      {arv::protocol::TextVariableScope::Player,
+       "player_countdown",
+       "1",
+       arv::protocol::TextVariableBinding::Live});
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundTextVariableUpdate,
+      arv::protocol::serialize_clientbound_text_variable_update(variables));
+  client.fixed_tick(2);
+
+  arv::protocol::ClientboundChatMessage chat;
+  chat.message_id = 10U;
+  chat.channel = "arvane:system";
+  chat.kind = arv::protocol::ChatMessageKind::System;
+  chat.message = arv::text::plain_rich_text("countdown: {player_countdown}");
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundChatMessage,
+      arv::protocol::serialize_clientbound_chat_message(chat));
+  client.fixed_tick(3);
+
+  ASSERT_EQ(client.chat_messages().size(), 1U);
+  EXPECT_EQ(client.chat_messages().front(), "countdown: 1");
+  ASSERT_EQ(client.chat_history().size(), 1U);
+  EXPECT_EQ(
+      arv::text::to_plain_text(client.chat_history().front().message),
+      "countdown: 1");
 }
 
 TEST(ClientRuntimeTests, ChatHistoryLimitIsConfigurable) {

@@ -582,6 +582,27 @@ void install_plugin_permission_groups(PluginManagerImpl& impl) {
   return {handle};
 }
 
+[[nodiscard]] arv::text::ChatMessageTemplate* chat_message_from_handle(
+    PluginCallContext* ctx,
+    ArvChatMessageHandle handle) {
+  if (ctx == nullptr || handle.value == 0U) {
+    return nullptr;
+  }
+  const auto found = ctx->chat_messages.find(handle.value);
+  return found == ctx->chat_messages.end() ? nullptr : &found->second;
+}
+
+[[nodiscard]] ArvChatMessageHandle store_chat_message(
+    PluginCallContext* ctx,
+    arv::text::ChatMessageTemplate message) {
+  if (ctx == nullptr) {
+    return {};
+  }
+  const u64 handle = ctx->next_chat_message_handle++;
+  ctx->chat_messages.emplace(handle, std::move(message));
+  return {handle};
+}
+
 [[nodiscard]] PluginNetworkPacket* packet_from_handle(
     PluginCallContext* ctx,
     ArvPacketHandle handle) {

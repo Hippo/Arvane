@@ -1115,6 +1115,8 @@ Plugin config and plugin persistent data both use the shared `DataDocument` mode
 
 `DataDocument` supports null, bool, signed and unsigned integers, floating point values, strings, bytes, arrays, objects, and a top-level schema version. Returned string and byte views are borrowed from the owning document and remain valid only until that document is mutated or released.
 
+Engine-side `DataDocument` also supports typed path decoding through `value<T>(path)` and `value_as<T>(path)`. Built-in codecs cover the primitive document types, and systems may add `DataCodec<T>` specializations for authored types such as chat message templates. This keeps config decoding reusable instead of hand-parsing strings at each call site.
+
 Config remains a separate API because it is human-editable settings:
 
 ```cpp
@@ -1188,6 +1190,43 @@ Rules:
 * plugins should not embed raw formatting control codes as the primary format
 * translation keys should be namespaced
 * server-authored text sent to clients must remain validated and bounded
+
+### Chat Message Helper
+
+Plugins that need stylized chat should prefer the SDK `ChatMessage` helper over manually building a network packet. A `ChatMessage` can be parsed from a string or loaded from a `DataDocument` config field, then rendered or sent with per-recipient variable resolution:
+
+```cpp
+auto message = arv::ChatMessage::from_config(plugin, config, "message");
+message.value
+    .with_channel("example_pack:alerts")
+    .with_kind(arv::ChatMessageKind::Announcement)
+    .broadcast();
+```
+
+Supported markup is intentionally small: `<#RRGGBB>`, named colors such as `<red>`, closing scopes with `</>`, `<hover:show_text:text>`, `<click:suggest_command|run_command|open_url|copy_to_clipboard:value>`, and `{variable_name}` placeholders. Malformed markup falls back to the raw string instead of partially interpreting unsafe input.
+Starting a new color tag replaces the active color, so `<red>Mason<gray>></>`
+needs only one close tag to reset following text.
+
+### Variables API
+
+Plugins may publish shared text variables through `plugin.variables()`. Variables have global and player scopes and are stored as strings after typed SDK setters convert bool, integer, floating point, or string values.
+
+Variables also have a binding. `VariableBinding::Resolved` is the default and
+means the server expands the variable before sending chat or scoreboard text.
+`VariableBinding::Live` means the placeholder is sent to the client and the
+client resolves it from replicated variable updates:
+
+```cpp
+plugin.variables().set_player(
+    player,
+    "example_pack:countdown",
+    std::int64_t{1},
+    arv::VariableBinding::Live);
+```
+
+Built-in unqualified names such as `player_name`, `player_health`, `player_max_health`, `online_player_count`, `tps`, and `world_name` are reserved. Plugin-authored variables should use namespaced IDs owned by the plugin pack, for example `example_pack:mana`.
+
+The same variable resolver is used by chat message templates and scoreboard lines, so plugins should not maintain separate interpolation systems for each UI surface.
 
 ---
 
@@ -2076,6 +2115,8 @@ GameModeAPI is for mode management and presentation, not authority checks.
 The network API lets server-side plugins send existing `arv_protocol` packets to clients.
 
 It is **not** a plugin-defined protocol extension system. Plugins do not register custom channels, define custom packet IDs, negotiate plugin channels, or send arbitrary packet payloads.
+
+For ordinary rich chat, prefer the first-class `ChatMessage` helper. The lower-level network packet API remains available for explicitly exposed packet builders, but the chat helper handles config parsing, variable interpolation, per-recipient player variables, validation, channel selection, and send helpers.
 
 The purpose of this API is narrow:
 

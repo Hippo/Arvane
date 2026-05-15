@@ -4,7 +4,9 @@
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
+#include "arv/protocol/chat.hpp"
 #include "arv/protocol/message_type.hpp"
+#include "arv/text/chat_message.hpp"
 
 #include <functional>
 #include <span>
@@ -43,5 +45,18 @@ struct PluginNetworkSendRequest {
 using PluginNetworkSendResult = Expected<void, PluginNetworkSendError>;
 using PluginNetworkSendFn =
     std::function<PluginNetworkSendResult(const PluginNetworkSendRequest&)>;
+
+struct PluginChatMessageSendRequest {
+  PluginNetworkTargetKind target_kind{PluginNetworkTargetKind::Player};
+  PlayerID player{};
+  std::span<const PlayerID> players{};
+  WorldID world{};
+  const arv::text::ChatMessageTemplate* message{};
+  std::string channel{std::string{protocol::ChatChannelSystem}};
+  protocol::ChatMessageKind kind{protocol::ChatMessageKind::System};
+};
+
+using PluginChatMessageSendFn =
+    std::function<PluginNetworkSendResult(const PluginChatMessageSendRequest&)>;
 
 } // namespace arv::plugin

@@ -303,6 +303,32 @@ TEST(PackDataTests, LoadsCondensedRootDataFiles) {
   EXPECT_EQ(command_files.front().relative_path.generic_string(), "data/commands.yaml");
 }
 
+TEST(PackConfigTests, ResolvesRootConfigFiles) {
+  ScopedTempDir temp("arvane_pack_config_root_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_enabled(packs, "enabled:\n  - \"arv_mason\"\n");
+  write_pack_manifest(
+      packs,
+      "arv_mason",
+      "  - \"arv_mason\"\n",
+      "server",
+      "assets: false\n  data: false\n  config: true\n  native_plugin: false\n");
+  write_text(
+      packs / "arv_mason/config/messages.yaml",
+      "prefix: \"<red>Mason<gray>></>\"\n");
+
+  auto manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(manager) << manager.error().describe();
+
+  auto resolved = manager.value().resolve_config_path("arv_mason:messages", ".yaml");
+  ASSERT_TRUE(resolved) << resolved.error().describe();
+  EXPECT_EQ(resolved.value().relative_path.generic_string(), "config/messages.yaml");
+
+  auto text = manager.value().load_config_text("arv_mason:messages", ".yaml");
+  ASSERT_TRUE(text) << text.error().describe();
+  EXPECT_NE(text.value().find("<red>Mason<gray>></>"), std::string::npos);
+}
+
 TEST(PackDataTests, AllowsExplicitOverrideAndRejectsNamespaceSquatting) {
   ScopedTempDir temp("arvane_pack_data_override_");
   const std::filesystem::path packs = temp.path / "packs";
@@ -348,6 +374,13 @@ TEST(PackHashTests, IsDeterministicAndChangesWithContent) {
   ASSERT_TRUE(second) << second.error().describe();
   ASSERT_EQ(first.value().stack().size(), 1U);
   EXPECT_EQ(first.value().stack()[0].content_hash, second.value().stack()[0].content_hash);
+
+  write_text(
+      packs / "arvane_base/config/messages.yaml",
+      "prefix: \"First\"\n");
+  auto config_changed = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(config_changed) << config_changed.error().describe();
+  EXPECT_EQ(first.value().stack()[0].content_hash, config_changed.value().stack()[0].content_hash);
 
   write_text(
       packs / "arvane_base/data/arvane/blocks.json",

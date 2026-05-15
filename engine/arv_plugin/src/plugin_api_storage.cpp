@@ -18,6 +18,8 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
   fill_game_mode_api(*this);
   fill_network_api(*this);
   fill_player_api(*this);
+  fill_variables_api(*this);
+  fill_chat_message_api(*this);
 
   api = {
       PluginApiVersion,
@@ -63,6 +65,10 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &game_modes_api,
       context,
       &players_api,
+      context,
+      &variables_api,
+      context,
+      &chat_message_api,
   };
 }
 

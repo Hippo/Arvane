@@ -4,10 +4,13 @@
 #include "arv/core/types.hpp"
 
 #include <map>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -31,6 +34,11 @@ struct DataDiagnostic {
 
   [[nodiscard]] std::string describe() const;
 };
+
+struct DataDocument;
+
+template<typename T, typename Enable = void>
+struct DataCodec;
 
 class DataValue {
 public:
@@ -95,8 +103,40 @@ private:
 };
 
 struct DataDocument {
+  struct ValueProxy {
+    const DataDocument* document{};
+    std::string_view path{};
+
+    template<typename T>
+    [[nodiscard]] operator Expected<T, DataDiagnostic>() const {
+      return document == nullptr
+                 ? Expected<T, DataDiagnostic>::failure(
+                       {"root", "data document is unavailable"})
+                 : document->value_as<T>(path);
+    }
+
+    template<typename T>
+    [[nodiscard]] Expected<T, DataDiagnostic> as() const {
+      return static_cast<Expected<T, DataDiagnostic>>(*this);
+    }
+  };
+
   u32 schema_version{};
   DataValue root{DataValue::object()};
+
+  [[nodiscard]] ValueProxy value(std::string_view path) const noexcept {
+    return {this, path};
+  }
+
+  template<typename T>
+  [[nodiscard]] Expected<T, DataDiagnostic> value(std::string_view path) const {
+    return value_as<T>(path);
+  }
+
+  template<typename T>
+  [[nodiscard]] Expected<T, DataDiagnostic> value_as(std::string_view path) const {
+    return DataCodec<T>::decode(*this, path);
+  }
 
   [[nodiscard]] Expected<bool, DataDiagnostic> bool_value(std::string_view path) const;
   [[nodiscard]] bool bool_value(std::string_view path, bool fallback) const;
@@ -139,5 +179,99 @@ using DataPathResult = Expected<void, DataDiagnostic>;
     DataDocument& document,
     std::string_view path,
     DataValue value);
+
+template<>
+struct DataCodec<bool> {
+  [[nodiscard]] static Expected<bool, DataDiagnostic> decode(
+      const DataDocument& document,
+      std::string_view path) {
+    return document.bool_value(path);
+  }
+};
+
+template<typename T>
+struct DataCodec<
+    T,
+    std::enable_if_t<
+        std::is_integral_v<T> && std::is_signed_v<T> &&
+        !std::is_same_v<T, bool>>> {
+  [[nodiscard]] static Expected<T, DataDiagnostic> decode(
+      const DataDocument& document,
+      std::string_view path) {
+    auto value = document.i64_value(path);
+    if (!value) {
+      return Expected<T, DataDiagnostic>::failure(std::move(value.error()));
+    }
+    if (value.value() < static_cast<i64>(std::numeric_limits<T>::min()) ||
+        value.value() > static_cast<i64>(std::numeric_limits<T>::max())) {
+      return Expected<T, DataDiagnostic>::failure(
+          {std::string{"root."} + std::string{path}, "integer value is out of range"});
+    }
+    return Expected<T, DataDiagnostic>::success(static_cast<T>(value.value()));
+  }
+};
+
+template<typename T>
+struct DataCodec<
+    T,
+    std::enable_if_t<std::is_integral_v<T> && std::is_unsigned_v<T>>> {
+  [[nodiscard]] static Expected<T, DataDiagnostic> decode(
+      const DataDocument& document,
+      std::string_view path) {
+    auto value = document.u64_value(path);
+    if (!value) {
+      return Expected<T, DataDiagnostic>::failure(std::move(value.error()));
+    }
+    if (value.value() > static_cast<u64>(std::numeric_limits<T>::max())) {
+      return Expected<T, DataDiagnostic>::failure(
+          {std::string{"root."} + std::string{path}, "integer value is out of range"});
+    }
+    return Expected<T, DataDiagnostic>::success(static_cast<T>(value.value()));
+  }
+};
+
+template<typename T>
+struct DataCodec<T, std::enable_if_t<std::is_floating_point_v<T>>> {
+  [[nodiscard]] static Expected<T, DataDiagnostic> decode(
+      const DataDocument& document,
+      std::string_view path) {
+    auto value = document.f64_value(path);
+    if (!value) {
+      return Expected<T, DataDiagnostic>::failure(std::move(value.error()));
+    }
+    return Expected<T, DataDiagnostic>::success(static_cast<T>(value.value()));
+  }
+};
+
+template<>
+struct DataCodec<std::string> {
+  [[nodiscard]] static Expected<std::string, DataDiagnostic> decode(
+      const DataDocument& document,
+      std::string_view path) {
+    auto value = document.string_value(path);
+    if (!value) {
+      return Expected<std::string, DataDiagnostic>::failure(std::move(value.error()));
+    }
+    return Expected<std::string, DataDiagnostic>::success(std::string{value.value()});
+  }
+};
+
+template<>
+struct DataCodec<std::string_view> {
+  [[nodiscard]] static Expected<std::string_view, DataDiagnostic> decode(
+      const DataDocument& document,
+      std::string_view path) {
+    return document.string_value(path);
+  }
+};
+
+template<>
+struct DataCodec<std::span<const u8>> {
+  [[nodiscard]] static Expected<std::span<const u8>, DataDiagnostic> decode(
+      const DataDocument& document,
+      std::string_view path) {
+    return document.bytes_value(path);
+  }
+};
 
 } // namespace arv::io

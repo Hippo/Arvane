@@ -41,7 +41,7 @@ std::optional<MasonClipboard> MasonPlugin::copy_selection_to_clipboard(
     clipboard.blocks.push_back({block.value, stable_block_name(block.value)});
   });
   if (!ok) {
-    ctx.error("Failed to copy selection: " + error + ".");
+    this->error(ctx, "copy-selection-failed", {{"error", error}});
     return std::nullopt;
   }
   return clipboard;
@@ -52,7 +52,7 @@ arv::Result MasonPlugin::handle_copy(arv::CommandContext& ctx, const Args& args)
     return arv::Result{arv::ResultCode::PermissionDenied, "permission denied"};
   }
   if (!args.empty()) {
-    ctx.error("Usage: /mason copy.");
+    error(ctx, "usage-copy");
     return arv::Result{arv::ResultCode::InvalidArgument, "usage error"};
   }
   MasonPlayerState* state = state_for(ctx);
@@ -64,14 +64,16 @@ arv::Result MasonPlugin::handle_copy(arv::CommandContext& ctx, const Args& args)
     return arv::Result{arv::ResultCode::InvalidState, "selection incomplete"};
   }
   if (!has_limit_bypass(ctx) && bounds->block_count > config_.limits.max_clipboard_blocks) {
-    ctx.error(
-        "Clipboard exceeds limit: " + count_text(bounds->block_count) +
-        " blocks. Limit: " + count_text(config_.limits.max_clipboard_blocks) + ".");
+    error(
+        ctx,
+        "clipboard-limit-exceeded",
+        {{"count", count_text(bounds->block_count)},
+         {"limit", count_text(config_.limits.max_clipboard_blocks)}});
     return arv::Result{arv::ResultCode::InvalidArgument, "clipboard limit exceeded"};
   }
   const std::optional<ArvBlockPos> origin = require_block_position(ctx);
   if (!origin.has_value()) {
-    ctx.error("Copy requires a player position.");
+    error(ctx, "copy-requires-position");
     return arv::Result{arv::ResultCode::InvalidState, "missing position"};
   }
   auto clipboard = copy_selection_to_clipboard(ctx, *bounds, *origin);
@@ -79,7 +81,7 @@ arv::Result MasonPlugin::handle_copy(arv::CommandContext& ctx, const Args& args)
     return arv::Result{arv::ResultCode::InternalError, "copy failed"};
   }
   state->clipboard = std::move(*clipboard);
-  ctx.success("Copied " + count_text(state->clipboard->block_count()) + " blocks.");
+  success(ctx, "copy-complete", {{"count", count_text(state->clipboard->block_count())}});
   return arv::Result::ok();
 }
 
@@ -97,7 +99,7 @@ arv::Result MasonPlugin::handle_paste(
     } else if (arg == "--no-air") {
       paste_air = false;
     } else {
-      ctx.error("Usage: /mason paste [--air|--no-air].");
+      error(ctx, "usage-paste");
       return arv::Result{arv::ResultCode::InvalidArgument, "usage error"};
     }
   }
@@ -106,7 +108,7 @@ arv::Result MasonPlugin::handle_paste(
     return arv::Result{arv::ResultCode::InvalidState, "player required"};
   }
   if (!state->clipboard.has_value() || state->clipboard->empty()) {
-    ctx.error("Clipboard is empty. Use /mason copy first.");
+    error(ctx, "clipboard-empty");
     return arv::Result{arv::ResultCode::InvalidState, "clipboard empty"};
   }
   const MasonClipboard& clipboard = *state->clipboard;
@@ -122,7 +124,7 @@ arv::Result MasonPlugin::handle_paste(
   const std::optional<ArvWorldHandle> world = require_world(ctx);
   const std::optional<ArvBlockPos> paste_origin = require_block_position(ctx);
   if (!world.has_value() || !paste_origin.has_value()) {
-    ctx.error("Paste requires a player world and position.");
+    error(ctx, "paste-requires-position");
     return arv::Result{arv::ResultCode::InvalidState, "missing position"};
   }
   auto snapshot = snapshot_clipboard_destination(
@@ -146,7 +148,7 @@ arv::Result MasonPlugin::handle_paste(
       *ctx.player(),
       *state,
       std::move(plan),
-      "Paste complete");
+      std::string{messages_.get("paste-complete")});
 }
 
 } // namespace arv_mason

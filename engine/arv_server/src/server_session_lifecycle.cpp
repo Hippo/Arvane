@@ -229,6 +229,7 @@ void ServerRuntimeImpl::cleanup_connection(net::ConnectionID connection_id) {
     accepted_player_movement_.erase(session->player_id);
     last_player_move_correction_seconds_.erase(session->player_id);
     last_sent_block_break_progress_.erase(session->player_id);
+    text_variables_.clear_player(session->player_id);
     permission_caches_.erase(session->player_id);
     block_break_attempts_.erase(session->player_id);
     combat_states_.erase(session->session_id);

@@ -16,6 +16,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/protocol_version.hpp
   include/arv/protocol/session_control.hpp
   include/arv/protocol/skins.hpp
+  include/arv/protocol/text_variables.hpp
   include/arv/protocol/world_join.hpp
 )
 
@@ -33,6 +34,7 @@ add_library(arv_protocol STATIC
   src/player_input.cpp
   src/session_control.cpp
   src/skins.cpp
+  src/text_variables.cpp
   src/world_join.cpp
 )
 target_include_directories(arv_protocol PUBLIC include)

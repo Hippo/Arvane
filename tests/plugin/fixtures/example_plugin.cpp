@@ -17,6 +17,7 @@ std::atomic<int> g_server_starts{};
 std::atomic<int> g_server_stops{};
 std::atomic<int> g_api_checks{};
 std::atomic<int> g_network_sends{};
+std::atomic<int> g_chat_sends{};
 int g_service_value = 42;
 
 bool view_equals(ArvStringView view, std::string_view expected);
@@ -357,6 +358,78 @@ void sync_job(void*) {
     g_network_sends.fetch_add(1, std::memory_order_relaxed);
   }
 
+  checks_ok = checks_ok &&
+      g_api->variables != nullptr &&
+      result_ok(g_api->variables->set_global_string(
+          g_api->variables_ctx,
+          arv_cstr("example_plugin_pack:greeting"),
+          arv_cstr("Hello"))) &&
+      result_ok(g_api->variables->set_player_string(
+          g_api->variables_ctx,
+          player_id,
+          arv_cstr("example_plugin_pack:target"),
+          arv_cstr("Builder"))) &&
+      result_ok(g_api->variables->set_player_string_bound(
+          g_api->variables_ctx,
+          player_id,
+          arv_cstr("example_plugin_pack:live_target"),
+          arv_cstr("Builder"),
+          ARV_VARIABLE_BINDING_LIVE));
+  ArvDataDocumentHandle chat_document =
+      g_api->data->create_document(g_api->data_ctx, 1);
+  checks_ok = checks_ok && chat_document != 0 &&
+      result_ok(g_api->data->set_string(
+          g_api->data_ctx,
+          chat_document,
+          arv_cstr("message"),
+          arv_cstr("<green>{example_plugin_pack:greeting} {example_plugin_pack:target}")));
+  ArvChatMessageHandle chat_message{};
+  ArvByteBuffer chat_plain{};
+  ArvTextHandle chat_text{};
+  checks_ok = checks_ok &&
+      g_api->chat_message != nullptr &&
+      result_ok(g_api->chat_message->from_data(
+          g_api->chat_message_ctx,
+          chat_document,
+          arv_cstr("message"),
+          &chat_message)) &&
+      result_ok(g_api->chat_message->to_string_for(
+          g_api->chat_message_ctx,
+          chat_message,
+          player_id,
+          &chat_plain)) &&
+      buffer_equals(chat_plain, "Hello Builder") &&
+      result_ok(g_api->chat_message->as_text_for(
+          g_api->chat_message_ctx,
+          chat_message,
+          player_id,
+          &chat_text)) &&
+      result_ok(g_api->chat_message->send_to(
+          g_api->chat_message_ctx,
+          chat_message,
+          player_id,
+          arv_cstr("example_plugin_pack:alerts"),
+          ARV_CHAT_MESSAGE_PRIVATE)) &&
+      result_ok(g_api->variables->clear_player(
+          g_api->variables_ctx,
+          player_id,
+          arv_cstr("example_plugin_pack:target")));
+  if (chat_plain.data != nullptr) {
+    g_api->resources->release_buffer(g_api->resources_ctx, chat_plain);
+  }
+  if (chat_text.value != 0U) {
+    g_api->text->release(g_api->text_ctx, chat_text);
+  }
+  if (chat_message.value != 0U) {
+    g_api->chat_message->release(g_api->chat_message_ctx, chat_message);
+  }
+  if (chat_document != 0) {
+    g_api->data->release_document(g_api->data_ctx, chat_document);
+  }
+  if (checks_ok) {
+    g_chat_sends.fetch_add(1, std::memory_order_relaxed);
+  }
+
   if (checks_ok) {
     g_api_checks.fetch_add(1, std::memory_order_relaxed);
   }
@@ -423,6 +496,11 @@ ArvResult command(
   std::snprintf(
       message + std::strlen(message),
       sizeof(message) - std::strlen(message),
+      " chat_sends=%d",
+      g_chat_sends.load(std::memory_order_relaxed));
+  std::snprintf(
+      message + std::strlen(message),
+      sizeof(message) - std::strlen(message),
       " sync_ms=%d async_ms=%d",
       g_sync_ms_ticks.load(std::memory_order_relaxed),
       g_async_ms_ticks.load(std::memory_order_relaxed));
@@ -467,6 +545,7 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   g_server_stops.store(0, std::memory_order_relaxed);
   g_api_checks.store(0, std::memory_order_relaxed);
   g_network_sends.store(0, std::memory_order_relaxed);
+  g_chat_sends.store(0, std::memory_order_relaxed);
   g_api = api;
   api->logger->info(api->logger_ctx, arv_cstr("example plugin loaded"));
 

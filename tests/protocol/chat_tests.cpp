@@ -1,4 +1,5 @@
 #include "arv/protocol/chat.hpp"
+#include "arv/protocol/text_variables.hpp"
 
 #include <gtest/gtest.h>
 
@@ -125,4 +126,71 @@ TEST(ChatProtocolTests, DeserializationRejectsInvalidEnumAndUtf8) {
   const auto decoded_bad_utf8 =
       arv::protocol::deserialize_serverbound_chat_message(std::move(bad_utf8).take_bytes());
   EXPECT_FALSE(decoded_bad_utf8);
+}
+
+TEST(ChatProtocolTests, TextVariableUpdatesRoundTripSetAndClearEntries) {
+  arv::protocol::ClientboundTextVariableUpdate update;
+  update.reset = true;
+  update.entries.push_back(
+      {arv::protocol::TextVariableScope::Global, "online_player_count", "2"});
+  update.entries.push_back(
+      {arv::protocol::TextVariableScope::Player,
+       "player_name",
+       "Hippo",
+       arv::protocol::TextVariableBinding::Live});
+  update.entries.push_back(
+      {arv::protocol::TextVariableScope::Player, "player_health", std::nullopt});
+
+  const auto decoded = arv::protocol::deserialize_clientbound_text_variable_update(
+      arv::protocol::serialize_clientbound_text_variable_update(update));
+
+  ASSERT_TRUE(decoded) << decoded.error().message;
+  EXPECT_TRUE(decoded.value().reset);
+  ASSERT_EQ(decoded.value().entries.size(), 3U);
+  EXPECT_EQ(decoded.value().entries[0].scope, arv::protocol::TextVariableScope::Global);
+  EXPECT_EQ(decoded.value().entries[0].name, "online_player_count");
+  ASSERT_TRUE(decoded.value().entries[0].value.has_value());
+  EXPECT_EQ(decoded.value().entries[0].value.value(), "2");
+  EXPECT_EQ(decoded.value().entries[0].binding, arv::protocol::TextVariableBinding::Resolved);
+  EXPECT_EQ(decoded.value().entries[1].binding, arv::protocol::TextVariableBinding::Live);
+  EXPECT_EQ(decoded.value().entries[2].scope, arv::protocol::TextVariableScope::Player);
+  EXPECT_EQ(decoded.value().entries[2].name, "player_health");
+  EXPECT_FALSE(decoded.value().entries[2].value.has_value());
+
+  arv::protocol::MessageWriter bad_binding;
+  bad_binding.write_bool(false);
+  bad_binding.write<arv::u16>(1U);
+  bad_binding.write<arv::protocol::TextVariableScope>(
+      arv::protocol::TextVariableScope::Global);
+  bad_binding.write<arv::u8>(99U);
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_text_variable_update(
+      std::move(bad_binding).take_bytes()));
+}
+
+TEST(ChatProtocolTests, TextVariableUpdatesRejectInvalidScopeNameUtf8AndCounts) {
+  arv::protocol::MessageWriter bad_scope;
+  bad_scope.write_bool(false);
+  bad_scope.write<arv::u16>(1U);
+  bad_scope.write<arv::u8>(99U);
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_text_variable_update(
+      std::move(bad_scope).take_bytes()));
+
+  arv::protocol::ClientboundTextVariableUpdate bad_name;
+  bad_name.entries.push_back(
+      {arv::protocol::TextVariableScope::Global, "bad name", "value"});
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_text_variable_update(
+      arv::protocol::serialize_clientbound_text_variable_update(bad_name)));
+
+  arv::protocol::ClientboundTextVariableUpdate bad_utf8;
+  bad_utf8.entries.push_back(
+      {arv::protocol::TextVariableScope::Global, std::string{"bad_\xC0\xAF", 6U}, "value"});
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_text_variable_update(
+      arv::protocol::serialize_clientbound_text_variable_update(bad_utf8)));
+
+  arv::protocol::MessageWriter too_many;
+  too_many.write_bool(false);
+  too_many.write<arv::u16>(
+      static_cast<arv::u16>(arv::protocol::MaxTextVariableUpdateEntries + 1U));
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_text_variable_update(
+      std::move(too_many).take_bytes()));
 }

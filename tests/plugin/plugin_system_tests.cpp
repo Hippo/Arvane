@@ -4,6 +4,8 @@
 #include "arv/command/command_registry.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/sched/job_system.hpp"
+#include "arv/text/chat_message.hpp"
+#include "arv/text/variables.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 #include "support/temp_dir.hpp"
 #include "support/temp_files.hpp"
@@ -394,7 +396,9 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
                             {{"example_plugin_pack.command.test", arv::player::TriState::Allow}})
                   .has_value());
   arv::player::PermissionGroupRegistry permission_groups;
+  arv::text::TextVariableStore text_variables;
   int network_sends = 0;
+  int chat_sends = 0;
   jobs.start();
   manager.attach_runtime({
       .default_world = &world,
@@ -421,6 +425,22 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
             request.packet->message_type,
             arv::protocol::MessageType::ClientboundChatMessage);
         EXPECT_FALSE(request.packet->payload.empty());
+        return arv::plugin::PluginNetworkSendResult::success(); },
+      .text_variables = &text_variables,
+      .chat_message_send = [&](const arv::plugin::PluginChatMessageSendRequest& request) {
+        ++chat_sends;
+        EXPECT_EQ(request.target_kind, arv::plugin::PluginNetworkTargetKind::Player);
+        EXPECT_EQ(request.player, arv::PlayerID{7});
+        EXPECT_NE(request.message, nullptr);
+        EXPECT_EQ(request.channel, "example_plugin_pack:alerts");
+        EXPECT_EQ(request.kind, arv::protocol::ChatMessageKind::PrivateMessage);
+        if (request.message == nullptr) {
+          return arv::plugin::PluginNetworkSendResult::failure(
+              {ARV_RESULT_NOT_FOUND, "message missing"});
+        }
+        EXPECT_EQ(
+            request.message->to_string({&text_variables, request.player}),
+            "Hello Builder");
         return arv::plugin::PluginNetworkSendResult::success(); },
   });
   manager.tick(1U);
@@ -450,9 +470,11 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   EXPECT_NE(message.find("stops=1"), std::string::npos);
   EXPECT_NE(message.find("api_checks=2"), std::string::npos);
   EXPECT_NE(message.find("network_sends=2"), std::string::npos);
+  EXPECT_NE(message.find("chat_sends=2"), std::string::npos);
   EXPECT_NE(message.find("sync_ms=1"), std::string::npos);
   EXPECT_NE(message.find("async_ms=1"), std::string::npos);
   EXPECT_EQ(network_sends, 2);
+  EXPECT_EQ(chat_sends, 2);
   EXPECT_TRUE(std::filesystem::exists(
       harness.temp.path / "save" / "plugin_data" / "example_plugin_pack" /
       "regions" / "example_plugin_pack" / "persistent_runtime_spawn.region"));

@@ -32,6 +32,10 @@ namespace arv::world {
 class WorldRuntime;
 }
 
+namespace arv::text {
+class TextVariableStore;
+}
+
 namespace arv::plugin {
 
 using PluginPlayerStableIDFn =
@@ -61,6 +65,8 @@ struct PluginRuntimeContext {
   std::string world_name{};
   PluginPlayerStableIDFn player_stable_id{};
   PluginNetworkSendFn network_send{};
+  text::TextVariableStore* text_variables{};
+  PluginChatMessageSendFn chat_message_send{};
 };
 
 } // namespace arv::plugin

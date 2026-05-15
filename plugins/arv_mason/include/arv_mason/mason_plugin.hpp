@@ -7,11 +7,13 @@
 #include <arv/plugin.hpp>
 
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace arv_mason {
@@ -32,6 +34,9 @@ struct MasonPlayerState {
   MasonHistory history{};
   std::optional<PendingOperation> pending{};
 };
+
+using MasonMessageArgs =
+    std::initializer_list<std::pair<std::string_view, std::string_view>>;
 
 class MasonPlugin {
 public:
@@ -74,6 +79,31 @@ private:
   [[nodiscard]] arv::Result handle_redo(arv::CommandContext& ctx, const Args& args);
   [[nodiscard]] arv::Result handle_confirm(arv::CommandContext& ctx, const Args& args);
   [[nodiscard]] arv::Result handle_status(arv::CommandContext& ctx);
+
+  [[nodiscard]] std::string message_source(
+      std::string_view key,
+      MasonMessageArgs args = {}) const;
+  void reply(
+      arv::CommandContext& ctx,
+      arv::CommandMessageKind kind,
+      std::string_view key,
+      MasonMessageArgs args = {}) const;
+  void info(
+      arv::CommandContext& ctx,
+      std::string_view key,
+      MasonMessageArgs args = {}) const;
+  void success(
+      arv::CommandContext& ctx,
+      std::string_view key,
+      MasonMessageArgs args = {}) const;
+  void warn(
+      arv::CommandContext& ctx,
+      std::string_view key,
+      MasonMessageArgs args = {}) const;
+  void error(
+      arv::CommandContext& ctx,
+      std::string_view key,
+      MasonMessageArgs args = {}) const;
 
   [[nodiscard]] MasonPlayerState* state_for(arv::CommandContext& ctx);
   [[nodiscard]] std::optional<ArvPlayerID> require_player(arv::CommandContext& ctx) const;
@@ -131,6 +161,7 @@ private:
 
   arv::Plugin plugin_;
   MasonConfig config_{};
+  MasonMessages messages_{};
   std::unordered_map<ArvPlayerID, MasonPlayerState> players_{};
 };
 

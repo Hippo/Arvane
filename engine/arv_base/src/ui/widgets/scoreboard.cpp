@@ -4,42 +4,23 @@
 
 #include <algorithm>
 #include <string>
-#include <string_view>
 
 namespace arv::ui {
 namespace {
 
-[[nodiscard]] std::string interpolate_scoreboard_line(
-    std::string_view line,
-    const ScoreboardVariableMap* variables) {
-  std::string output;
-  output.reserve(line.size());
-  for (usize index = 0; index < line.size();) {
-    if (line[index] != '{') {
-      output.push_back(line[index++]);
-      continue;
-    }
-
-    const usize close = line.find('}', index + 1U);
-    if (close == std::string_view::npos) {
-      output.push_back(line[index++]);
-      continue;
-    }
-
-    const std::string key{line.substr(index + 1U, close - index - 1U)};
-    if (variables != nullptr) {
-      const auto found = variables->find(key);
-      if (found != variables->end()) {
-        output += found->second;
-      } else {
-        output += "{" + key + "}";
-      }
-    } else {
-      output += "{" + key + "}";
-    }
-    index = close + 1U;
+[[nodiscard]] const arv::text::TextVariableStore* scoreboard_variable_store(
+    const ScoreboardUiModel& model,
+    arv::text::TextVariableStore& fallback) {
+  if (model.variable_store != nullptr) {
+    return model.variable_store;
   }
-  return output;
+  if (model.variables == nullptr) {
+    return nullptr;
+  }
+  for (const auto& [name, value] : *model.variables) {
+    fallback.set_global(name, value.value, value.binding);
+  }
+  return &fallback;
 }
 
 } // namespace
@@ -76,6 +57,13 @@ void append_scoreboard_ui(UiTree& tree, ScoreboardUiModel model) {
   stack.layout.spacing = theme.layout.spacing_xs;
   stack.hit_test = false;
   const UiNodeID stack_id = tree.add_child(panel_id, std::move(stack));
+  arv::text::TextVariableStore fallback_variables;
+  const arv::text::TextVariableStore* variable_store =
+      scoreboard_variable_store(model, fallback_variables);
+  const arv::text::TextVariableResolver resolver{
+      variable_store,
+      model.player_id,
+  };
 
   if (!model.title.empty()) {
     tree.add_child(stack_id, text_element("scoreboard.title", model.title, theme.colors.text));
@@ -85,7 +73,7 @@ void append_scoreboard_ui(UiTree& tree, ScoreboardUiModel model) {
         stack_id,
         text_element(
             "scoreboard.line." + std::to_string(index),
-            interpolate_scoreboard_line(model.lines[index], model.variables),
+            arv::text::interpolate_text_variables(model.lines[index], resolver),
             theme.colors.text_muted,
             UiTextRole::Small));
   }

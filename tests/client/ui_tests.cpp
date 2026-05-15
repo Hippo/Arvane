@@ -777,8 +777,11 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   slots[0] = {"arvane:stone", "Stone", 32};
   std::vector<arv::ui::ChatLineView> chat{{"hello", 1.0F}};
   std::vector<arv::ui::PlayerListEntryView> players{{"local_player", 12}};
-  std::vector<std::string> scoreboard_lines{"Health: {player_health}", ""};
-  arv::ui::ScoreboardVariableMap vars{{"player_health", "20"}};
+  std::vector<std::string> scoreboard_lines{
+      "Health: {player_health}",
+      "Missing: {missing}"};
+  arv::text::TextVariableStore vars;
+  vars.set_player(arv::PlayerID{42}, "player_health", "20");
 
   arv::ui::build_gameplay_ui(
       tree,
@@ -787,7 +790,7 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
           {true, "Inventory", 0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}},
           {true, true, {chat.data(), chat.size()}, "test", 4U, 1U, 3U},
           {true, "Players", "footer", {players.data(), players.size()}},
-          {true, "Stats", {scoreboard_lines.data(), scoreboard_lines.size()}, &vars},
+          {true, "Stats", {scoreboard_lines.data(), scoreboard_lines.size()}, nullptr, &vars, arv::PlayerID{42}},
           {true, 144},
           {true, 18.0F, 20.0F, 1.0F, {800.0F, 600.0F}},
       });
@@ -818,6 +821,9 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   const auto* scoreboard_line = tree.find_by_stable_id("scoreboard.line.0");
   ASSERT_NE(scoreboard_line, nullptr);
   EXPECT_EQ(scoreboard_line->text, "Health: 20");
+  const auto* scoreboard_missing = tree.find_by_stable_id("scoreboard.line.1");
+  ASSERT_NE(scoreboard_missing, nullptr);
+  EXPECT_EQ(scoreboard_missing->text, "Missing: {missing}");
   const auto* health = tree.find_by_stable_id("hud.health");
   ASSERT_NE(health, nullptr);
   EXPECT_EQ(health->children.size(), 20U);

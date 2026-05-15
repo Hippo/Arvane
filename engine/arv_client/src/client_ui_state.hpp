@@ -5,6 +5,8 @@
 #include "arv/core/text_edit.hpp"
 #include "arv/player/permissions.hpp"
 #include "arv/protocol/chat.hpp"
+#include "arv/protocol/text_variables.hpp"
+#include "arv/text/variables.hpp"
 
 #include <optional>
 #include <span>
@@ -32,6 +34,10 @@ public:
   void close_ui() noexcept;
   void set_language(const arv::text::LanguageCatalog* language) noexcept;
   void set_max_chat_history_messages(usize max_messages);
+  void clear_text_variables();
+  void apply_text_variable_update(
+      protocol::ClientboundTextVariableUpdate update,
+      std::optional<PlayerID> local_player_id);
   void add_chat_message(std::string message);
   void add_chat_message(protocol::ClientboundChatMessage message);
   void suggest_chat_command(std::string command);
@@ -51,6 +57,7 @@ public:
   [[nodiscard]] usize chat_draft_selection_end() const noexcept;
   [[nodiscard]] std::span<const std::string> chat_messages() const noexcept;
   [[nodiscard]] std::span<const ChatHistoryEntry> chat_history() const noexcept;
+  [[nodiscard]] const arv::text::TextVariableStore& text_variables() const noexcept;
 
 private:
   void reset_chat_history_navigation() noexcept;
@@ -69,6 +76,7 @@ private:
   std::vector<ChatHistoryEntry> chat_history_{};
   std::optional<std::string> pending_url_confirmation_{};
   std::optional<std::string> pending_clipboard_text_{};
+  arv::text::TextVariableStore text_variables_{};
   const arv::text::LanguageCatalog* language_{};
   usize max_chat_history_messages_{DefaultMaxChatHistoryMessages};
   u64 next_received_chat_sequence_{1U};

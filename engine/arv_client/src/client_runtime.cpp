@@ -286,6 +286,10 @@ std::span<const ChatHistoryEntry> ClientRuntime::chat_history() const noexcept {
   return impl_->ui.chat_history();
 }
 
+const arv::text::TextVariableStore& ClientRuntime::text_variables() const noexcept {
+  return impl_->ui.text_variables();
+}
+
 void ClientRuntime::close_chat() noexcept {
   impl_->ui.close_chat();
 }

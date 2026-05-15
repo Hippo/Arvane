@@ -36,6 +36,7 @@ enum class PackSide : u8 {
 struct PackCapabilities {
   bool assets{};
   bool data{};
+  bool config{};
   bool native_plugin{};
 };
 
@@ -163,6 +164,10 @@ public:
       std::string_view data_id,
       std::string_view extension) const;
 
+  [[nodiscard]] PackPathResult resolve_config_path(
+      std::string_view config_id,
+      std::string_view extension) const;
+
   [[nodiscard]] std::vector<PackDataFile> data_files(
       std::string_view category,
       std::string_view extension = {}) const;
@@ -172,6 +177,10 @@ public:
 
   [[nodiscard]] PackTextResult load_data_text(
       std::string_view data_id,
+      std::string_view extension) const;
+
+  [[nodiscard]] PackTextResult load_config_text(
+      std::string_view config_id,
       std::string_view extension) const;
 
   [[nodiscard]] PackTextResult load_merged_json_array_text(

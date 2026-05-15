@@ -130,6 +130,7 @@ Recommended reliability layer:
 ```text
 ServerboundChatMessage  -> reliable ordered
 ClientboundChatMessage  -> reliable ordered
+ClientboundTextVariableUpdate -> reliable ordered
 ```
 
 ## Core packets
@@ -222,6 +223,32 @@ ClientboundChatChannelState
 `ClientboundChatChannelState` updates mute/filter/visibility state for one or more channels.
 
 These should not be implemented until there is a concrete use case.
+
+### `ClientboundTextVariableUpdate`
+
+Sent by the server when shared text variables change. Each client receives global values plus only that client's player-scoped values. This packet intentionally does not synchronize scoreboard layout, titles, or line templates.
+
+```cpp
+struct TextVariableUpdateEntry {
+    TextVariableScope scope; // Global or Player
+    std::string name;
+    std::optional<std::string> value; // null clears the variable
+    TextVariableBinding binding; // Resolved or Live
+};
+
+struct ClientboundTextVariableUpdate {
+    bool reset;
+    std::vector<TextVariableUpdateEntry> entries;
+};
+```
+
+`Resolved` variables are solved by the server before sending chat or scoreboard
+text. `Live` variables are replicated to the client and left as placeholders
+until the client renders the received text. Built-in globals currently include
+`online_player_count`, `tps`, and `world_name`. Built-in player variables
+currently include `player_name`, `player_health`, and `player_max_health` when
+the server has real values for them. Ping and dimension names are intentionally
+absent until backed by authoritative sources.
 
 ## Rich text model
 
@@ -390,6 +417,30 @@ Do not send this as the canonical representation:
 Formatting codes may be accepted in server config files or plugin convenience APIs, but they must be parsed and converted into structured `RichText` before being sent to clients.
 
 Player-authored chat text should not be parsed for formatting unless the server explicitly supports permission-gated formatting.
+
+## Chat message templates
+
+`arv_text` provides `ChatMessageTemplate` as the shared authoring format for config files and plugin SDK helpers. It is a text-layer feature: the template parses to `RichText`, resolves shared variables, and can then be sent as a normal `ClientboundChatMessage`.
+
+Supported v1 markup:
+
+```text
+<#ff8800>Hello <#aaaaaa>World
+<red>Greetings <blue>{player_name}
+<red>This is colored text!</> This is not.
+<hover:show_text:Click to message {player_name}>Hover Me!</> plain
+<click:suggest_command:msg {player_name}>Click here
+```
+
+Named colors include the Minecraft-style names plus common aliases such as `orange`, `purple`, `pink`, `cyan`, `teal`, `lime`, `silver`, and `navy`.
+
+Starting a new color tag replaces the currently active color. For example,
+`<red>Mason<gray>></> My message` renders `Mason` in red, `>` in gray, and
+the following text in the default color after the single close tag.
+
+Malformed markup is treated as a raw string for the whole message. This includes unfinished `<` or `{` operations, bad hex colors, unknown click or hover actions, empty variable names, unmatched close tags, overly deep nesting, and oversized click or hover payloads.
+
+Variables use `{name}` placeholders and resolve through the shared text variable store. Missing variables render as their original placeholder. Resolved variables are expanded before parsing markup so server-authored values such as message prefixes may contain rich text tags.
 
 ## Click events
 
@@ -1265,6 +1316,8 @@ The chat system should have unit tests for:
 * URL confirmation behavior at the UI boundary.
 * Chat formatter output for default player chat.
 * Chat formatter output with rank prefixes.
+* `ChatMessageTemplate` parsing, raw fallback on malformed markup, and variable substitution.
+* Text variable update serialization, reset/removal, and per-client player-scope isolation.
 * Channel permission checks.
 * Plugin-produced rich text validation.
 

@@ -27,7 +27,7 @@ namespace {
 MasonPlayerState* MasonPlugin::state_for(arv::CommandContext& ctx) {
   const std::optional<ArvPlayerID> player = require_player(ctx);
   if (!player.has_value()) {
-    ctx.error("This Mason command requires a player.");
+    error(ctx, "player-required");
     return nullptr;
   }
   MasonPlayerState& state = players_[*player];
@@ -55,17 +55,17 @@ std::optional<SelectionBounds> MasonPlugin::current_selection_bounds(
     arv::CommandContext& ctx) const {
   const std::optional<ArvPlayerID> player = require_player(ctx);
   if (!player.has_value()) {
-    ctx.error("This Mason command requires a player.");
+    error(ctx, "player-required");
     return std::nullopt;
   }
   auto selection = plugin_.players().current_selection(*player);
   if (!selection) {
-    ctx.error(std::string{"Unable to read current selection: "} + selection.result.message());
+    error(ctx, "current-selection-read-failed", {{"error", selection.result.message()}});
     return std::nullopt;
   }
   SelectionBoundsResult bounds = normalized_bounds(selection.value);
   if (!bounds.ok) {
-    ctx.error(bounds.message);
+    error(ctx, "selection-invalid", {{"message", bounds.message}});
     return std::nullopt;
   }
   return bounds.bounds;
@@ -80,7 +80,7 @@ bool MasonPlugin::check_custom_permission(
   }
   auto checked = plugin_.permissions().check_custom(*player, permission);
   if (!checked || checked.value != arv::PermissionValue::Allow) {
-    ctx.error("Permission denied: " + std::string{permission} + ".");
+    error(ctx, "permission-denied", {{"permission", permission}});
     return false;
   }
   return true;
@@ -89,12 +89,12 @@ bool MasonPlugin::check_custom_permission(
 bool MasonPlugin::check_modify_permission(arv::CommandContext& ctx) const {
   const std::optional<ArvPlayerID> player = ctx.player();
   if (!player.has_value()) {
-    ctx.error("World edits require a player source.");
+    error(ctx, "world-edit-player-required");
     return false;
   }
   auto checked = plugin_.permissions().check_core(*player, arv::CorePermission::CanModifyWorld);
   if (!checked || !checked.value) {
-    ctx.error("Permission denied: can_modify_world is required.");
+    error(ctx, "permission-denied-modify");
     return false;
   }
   return true;
@@ -118,17 +118,16 @@ bool MasonPlugin::require_limit_or_confirmation(
     bool confirmed) {
   const bool bypass = has_limit_bypass(ctx);
   if (!bypass && count > limit) {
-    ctx.error(
-        "Operation exceeds limit: " + count_text(count) +
-        " blocks. Limit: " + count_text(limit) + ".");
+    error(
+        ctx,
+        "operation-limit-exceeded",
+        {{"count", count_text(count)}, {"limit", count_text(limit)}});
     return false;
   }
   if (!bypass && !confirmed &&
       count >= config_.behavior.require_confirmation_above_blocks) {
     state.pending = std::move(pending);
-    ctx.warn(
-        "Operation affects " + count_text(count) +
-        " blocks. Run /mason confirm to proceed.");
+    warn(ctx, "confirmation-required", {{"count", count_text(count)}});
     return false;
   }
   return true;

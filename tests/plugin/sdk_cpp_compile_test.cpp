@@ -1,4 +1,5 @@
 #include <arv/buffer.hpp>
+#include <arv/chat_message.hpp>
 #include <arv/codec.hpp>
 #include <arv/commands.hpp>
 #include <arv/config.hpp>
@@ -23,9 +24,11 @@
 #include <arv/services.hpp>
 #include <arv/text.hpp>
 #include <arv/types.hpp>
+#include <arv/variables.hpp>
 #include <arv/world.hpp>
 #include <arv/worldgen.hpp>
 
+#include <array>
 #include <chrono>
 
 struct SampleConfig {
@@ -82,8 +85,11 @@ int arv_plugin_sdk_cpp_compile_test() {
   arv::Services services{nullptr};
   arv::Text text{nullptr};
   arv::TextComponent text_component;
+  arv::Variables variables{nullptr};
   arv::World world{nullptr};
   arv::WorldGen worldgen{nullptr};
+  arv::ChatMessage chat_message{plugin, "<red>Hello {player_name}"};
+  std::array<ArvPlayerID, 2> chat_players{1, 2};
 
   auto command_handler = [](arv::CommandContext& ctx) {
     ctx.info("ok");
@@ -112,6 +118,9 @@ int arv_plugin_sdk_cpp_compile_test() {
       1,
       job_handler);
   const arv::PacketResult packet_result = network.create_chat_message(text_component);
+  chat_message.with_channel("test:alerts").with_kind(arv::ChatMessageKind::Announcement);
+  const arv::ChatMessageResult parsed_chat =
+      arv::ChatMessage::parse(plugin, "<click:suggest_command:/msg {player_name}>Hi");
   const ArvRegionFlagDefinition flag_definition{
       arv::view("test:pvp"),
       arv::view("pvp"),
@@ -127,6 +136,12 @@ int arv_plugin_sdk_cpp_compile_test() {
 
   arv::Result result;
   auto created_document = data.create_document();
+  const arv::ChatMessageResult config_chat =
+      arv::ChatMessage::from_config(plugin, created_document.value, "message");
+  const auto chat_string = chat_message.to_string();
+  const auto chat_player_string = chat_message.to_string_for(1);
+  const auto chat_text = chat_message.as_text();
+  const auto chat_player_text = chat_message.as_text_for(1);
   SampleConfig sample{};
   return arv::ApiVersion == 1u && result && buffer.empty() &&
                  command_context.arg_count() == 0 && !command_result &&
@@ -138,6 +153,10 @@ int arv_plugin_sdk_cpp_compile_test() {
                  config.global().load_or_default<SampleConfig>("test:config").enabled &&
                  !context.owns_namespace("test") &&
                  !created_document &&
+                 !parsed_chat && !config_chat && !chat_string &&
+                 !chat_player_string && !chat_text && !chat_player_text &&
+                 !chat_message.send_to(1) && !chat_message.send_all(chat_players) &&
+                 !chat_message.broadcast() && !chat_message.broadcast_world(1) &&
                  !entities.exists({}) && !network.unsupported() &&
                  !packet_result && !network.broadcast(packet) &&
                  !gamemodes.exists("survival") && !permissions.unsupported() &&
@@ -167,6 +186,27 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !scheduler.async_tick(1, job_handler) &&
                  services.list("test:svc", 0, 0).empty() &&
                  !text.unsupported() && !world.current_tick({}) &&
+                 !variables.set_global("test:message", "hello") &&
+                 !variables.set_global(
+                     "test:live_message",
+                     "hello",
+                     arv::VariableBinding::Live) &&
+                 !variables.set_global("test:enabled", true) &&
+                 !variables.set_global("test:count", std::int64_t{1}) &&
+                 !variables.set_global("test:total", std::uint64_t{1}) &&
+                 !variables.set_global("test:ratio", 0.5) &&
+                 !variables.set_player(1, "test:message", "hello") &&
+                 !variables.set_player(
+                     1,
+                     "test:live_message",
+                     "hello",
+                     arv::VariableBinding::Live) &&
+                 !variables.set_player(1, "test:enabled", true) &&
+                 !variables.set_player(1, "test:count", std::int64_t{1}) &&
+                 !variables.set_player(1, "test:total", std::uint64_t{1}) &&
+                 !variables.set_player(1, "test:ratio", 0.5) &&
+                 !variables.clear_global("test:message") &&
+                 !variables.clear_player(1, "test:message") &&
                  !worldgen.register_feature_type("test:feature") &&
                  !worldgen.register_noise_type("test:noise") &&
                  !worldgen.register_density_function_type("test:density") &&
