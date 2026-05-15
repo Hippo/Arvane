@@ -178,7 +178,7 @@ render:
   frame_pacing_spin_us: 250
   show_local_player_body: false
   block_outline:
-    color: [0.1, 0.2, 0.3]
+    color: "#1A334D"
     thickness: 0.75
   sky:
     star_intensity: 1.5
@@ -351,9 +351,9 @@ chunk_pipeline:
   EXPECT_EQ(result.value().render.frame_pacing_target_fps, 120U);
   EXPECT_EQ(result.value().render.frame_pacing_spin_us, 250U);
   EXPECT_FALSE(result.value().render.show_local_player_body);
-  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_r, 0.1F);
-  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_g, 0.2F);
-  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_b, 0.3F);
+  EXPECT_NEAR(result.value().render.block_outline.color_r, 26.0F / 255.0F, 0.0001F);
+  EXPECT_NEAR(result.value().render.block_outline.color_g, 51.0F / 255.0F, 0.0001F);
+  EXPECT_NEAR(result.value().render.block_outline.color_b, 77.0F / 255.0F, 0.0001F);
   EXPECT_FLOAT_EQ(result.value().render.block_outline.thickness, 0.75F);
   EXPECT_FLOAT_EQ(result.value().render.sky.star_intensity, 1.5F);
   EXPECT_FLOAT_EQ(result.value().render.sky.cloud_intensity, 1.75F);
@@ -398,6 +398,32 @@ chunk_pipeline:
   EXPECT_EQ(result.value().chunk_pipeline.max_mesh_sections_prepared_per_frame, 6U);
   EXPECT_EQ(result.value().chunk_pipeline.frame_spike_log_ms, 25U);
   EXPECT_EQ(result.value().chunk_pipeline.profile_log_interval_ms, 750U);
+}
+
+TEST(ConfigTests, ParsesBlockOutlineHexColor) {
+  const auto result = arv::io::parse_config_yaml(R"(
+render:
+  block_outline:
+    color: "#1A334D"
+)");
+
+  ASSERT_TRUE(result);
+  EXPECT_NEAR(result.value().render.block_outline.color_r, 26.0F / 255.0F, 0.0001F);
+  EXPECT_NEAR(result.value().render.block_outline.color_g, 51.0F / 255.0F, 0.0001F);
+  EXPECT_NEAR(result.value().render.block_outline.color_b, 77.0F / 255.0F, 0.0001F);
+}
+
+TEST(ConfigTests, IgnoresLegacyBlockOutlineArrayColor) {
+  const auto result = arv::io::parse_config_yaml(R"(
+render:
+  block_outline:
+    color: [0.1, 0.2, 0.3]
+)");
+
+  ASSERT_TRUE(result);
+  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_r, 0.02F);
+  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_g, 0.02F);
+  EXPECT_FLOAT_EQ(result.value().render.block_outline.color_b, 0.02F);
 }
 
 TEST(ConfigTests, ParsesSkinConfigAndDefaultsResolutionLimits) {
@@ -1082,8 +1108,12 @@ TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
   config.render.frame_pacing_enabled = true;
   config.render.frame_pacing_target_fps = 144U;
   config.render.show_local_player_body = false;
+  config.render.block_outline.color_r = 0.1F;
+  config.render.block_outline.color_g = 0.2F;
+  config.render.block_outline.color_b = 0.3F;
   config.render.sky.star_intensity = 2.25F;
-  config.physics.mouse_sensitivity_radians = 0.004F;
+  config.render.atlases.player_skins.pressure_cleanup.usage_threshold = 0.8500000238418579F;
+  config.physics.mouse_sensitivity_radians = 0.0024999999441206455F;
   config.ui.chat.max_history_messages = 1500U;
 
   const auto save_result = arv::io::save_client_config_file(temp_file, config);
@@ -1095,11 +1125,18 @@ TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
   EXPECT_NE(written.value().find("simulation_distance: 3"), std::string::npos);
   EXPECT_NE(written.value().find("frame_pacing_target_fps: 144"), std::string::npos);
   EXPECT_NE(written.value().find("show_local_player_body: false"), std::string::npos);
+  EXPECT_NE(written.value().find("color: \"#1A334D\""), std::string::npos);
   EXPECT_NE(written.value().find("star_intensity: 2.25"), std::string::npos);
+  EXPECT_NE(written.value().find("usage_threshold: 0.85"), std::string::npos);
+  EXPECT_NE(written.value().find("mouse_sensitivity_radians: 0.0025"), std::string::npos);
+  EXPECT_EQ(written.value().find("0.002499999"), std::string::npos);
   EXPECT_NE(written.value().find("max_history_messages: 1500"), std::string::npos);
   const auto parsed = arv::io::parse_config_yaml(written.value());
   ASSERT_TRUE(parsed);
   EXPECT_EQ(parsed.value().chunks.load_distance, 8);
   EXPECT_EQ(parsed.value().chunks.simulation_distance, 3);
-  EXPECT_FLOAT_EQ(parsed.value().physics.mouse_sensitivity_radians, 0.004F);
+  EXPECT_FLOAT_EQ(parsed.value().physics.mouse_sensitivity_radians, 0.0025F);
+  EXPECT_NEAR(parsed.value().render.block_outline.color_r, 26.0F / 255.0F, 0.0001F);
+  EXPECT_NEAR(parsed.value().render.block_outline.color_g, 51.0F / 255.0F, 0.0001F);
+  EXPECT_NEAR(parsed.value().render.block_outline.color_b, 77.0F / 255.0F, 0.0001F);
 }

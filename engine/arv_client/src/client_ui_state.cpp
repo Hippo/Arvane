@@ -178,6 +178,17 @@ void ClientUiState::suggest_chat_command(std::string command) {
   open_chat_with_draft(std::move(command));
 }
 
+std::optional<std::string> ClientUiState::commit_chat_draft_to_history() {
+  std::string trimmed = trim_ascii_copy(chat_draft_.value);
+  if (trimmed.empty()) {
+    return std::nullopt;
+  }
+  submitted_chat_history_.push_back(trimmed);
+  trim_vector_to_limit(submitted_chat_history_, MaxSubmittedChatHistory);
+  reset_chat_history_navigation();
+  return trimmed;
+}
+
 void ClientUiState::request_url_confirmation(std::string url) {
   pending_url_confirmation_ = std::move(url);
   open_chat();
@@ -244,17 +255,10 @@ std::optional<std::string> ClientUiState::handle_chat_input(
     }
   }
   if (was_chat_open && input.text_submit_pressed) {
-    std::optional<std::string> submitted;
-    std::string trimmed = trim_ascii_copy(chat_draft_.value);
-    if (!trimmed.empty()) {
-      submitted_chat_history_.push_back(trimmed);
-      trim_vector_to_limit(submitted_chat_history_, MaxSubmittedChatHistory);
-      submitted = std::move(trimmed);
-    }
+    std::optional<std::string> submitted = commit_chat_draft_to_history();
     chat_draft_.value.clear();
     chat_draft_.cursor = 0U;
     chat_draft_.selection_anchor = 0U;
-    reset_chat_history_navigation();
     chat_open_ = false;
     return submitted;
   }

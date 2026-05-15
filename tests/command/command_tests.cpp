@@ -1,6 +1,7 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/base/base_commands.hpp"
 #include "arv/base/base_ids.hpp"
+#include "arv/base/base_module.hpp"
 #include "arv/command/command_system.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/permissions.hpp"
@@ -25,24 +26,29 @@ struct RunningServerHarness {
   arv::testsupport::ScopedTempDir temp;
   arv::voxel::BlockRegistry block_registry;
   arv::player::ItemRegistry item_registry;
+  arv::player::GameModeRegistry game_modes;
   arv::net::InProcessTransportPair transports;
   arv::server::ServerRuntime server;
   arv::client::ClientRuntime client;
 
-  RunningServerHarness()
+  explicit RunningServerHarness(
+      arv::io::MovementValidationConfig movement = arv::io::MovementValidationConfig{})
       : temp("arvane_command_"),
         block_registry(arv::testsupport::make_test_block_registry()),
         item_registry(arv::testsupport::make_test_item_registry(block_registry)),
         transports(arv::net::make_in_process_transport_pair()),
         server(std::move(transports.server)),
         client(std::move(transports.client)) {
+    arv::base::register_base_game_modes(game_modes);
     arv::server::ServerStartInfo start_info;
     start_info.mode = arv::server::ServerMode::Integrated;
     start_info.base_tps = arv::DefaultBaseTps;
     start_info.listen_address = {"in-process", 0};
     start_info.block_registry = &block_registry;
     start_info.item_registry = &item_registry;
+    start_info.game_modes = &game_modes;
     start_info.register_commands = arv::base::register_server_commands;
+    start_info.movement = movement;
     start_info.world_name = "default";
     start_info.server_save_root = temp.path / "save";
     EXPECT_TRUE(server.start(start_info));
@@ -280,6 +286,137 @@ TEST(CommandTests, PlayerTeleportIsDeniedWithoutPermission) {
 
   ASSERT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
   EXPECT_EQ(player.position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+}
+
+TEST(CommandTests, PlayerGamemodeCommandUsesPerModePermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides["arvane.command.gamemode.creative"] =
+      arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/gamemode creative");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(player.game_mode_id, arv::base::ids::CreativeGameModeID);
+  EXPECT_TRUE(player.resolved_permissions.core.can_fly);
+  EXPECT_TRUE(player.resolved_permissions.core.has_creative_inventory);
+}
+
+TEST(CommandTests, PlayerGamemodeAliasUsesSamePermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides["arvane.command.gamemode.creative"] =
+      arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/gmc");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(player.game_mode_id, arv::base::ids::CreativeGameModeID);
+  EXPECT_TRUE(player.resolved_permissions.core.can_fly);
+}
+
+TEST(CommandTests, PlayerGamemodeCommandIsDeniedWithoutModePermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/gamemode creative");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_EQ(player.game_mode_id, arv::base::ids::SurvivalGameModeID);
+}
+
+TEST(CommandTests, GlobalWildcardPermissionAllowsGamemodeCommand) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides["*"] = arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/gamemode creative");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(player.game_mode_id, arv::base::ids::CreativeGameModeID);
+}
+
+TEST(CommandTests, PlayerFlyspeedCommandUpdatesPlayerSpeed) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides[std::string{arv::base::ids::FlySpeedPermissionNode}] =
+      arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/flyspeed 10");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_FLOAT_EQ(player.fly_speed, 80.0F);
+}
+
+TEST(CommandTests, PlayerFlyspeedOneUsesDefaultFlySpeed) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.fly_speed = 80.0F;
+  player.permission_overrides.custom_overrides[std::string{arv::base::ids::FlySpeedPermissionNode}] =
+      arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/flyspeed 1");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_FLOAT_EQ(player.fly_speed, 8.0F);
+}
+
+TEST(CommandTests, PlayerFlyspeedCommandIsDeniedWithoutPermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.fly_speed = 8.0F;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/flyspeed 10");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_FLOAT_EQ(player.fly_speed, 8.0F);
+}
+
+TEST(CommandTests, PlayerFlyspeedCommandRejectsServerMovementLimitMismatch) {
+  arv::io::MovementValidationConfig movement;
+  movement.max_fly_speed_blocks_per_second = 32.0F;
+  RunningServerHarness harness{movement};
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides[std::string{arv::base::ids::FlySpeedPermissionNode}] =
+      arv::player::TriState::Allow;
+  player.fly_speed = 3.0F;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/flyspeed 5");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::UsageError);
+  EXPECT_FLOAT_EQ(player.fly_speed, 3.0F);
 }
 
 TEST(CommandTests, SelectionCommandStoresCurrentPlayerSelection) {

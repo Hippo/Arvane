@@ -23,6 +23,7 @@ load_before: []
 capabilities:
   assets: true
   data: true
+  config: true
   native_plugin: false
 
 builtin:

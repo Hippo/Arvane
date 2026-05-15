@@ -103,6 +103,16 @@ namespace {
     }
     catalog.merge_from(std::move(selected.value()));
   }
+  if (auto messages = packs.load_config_text("arvane:messages", ".yaml");
+      messages) {
+    auto config_messages = arv::text::parse_language_yaml(
+        messages.value(),
+        catalog.locale());
+    if (!config_messages) {
+      return config_messages;
+    }
+    catalog.merge_from(std::move(config_messages.value()));
+  }
   catalog.set_locale(std::move(locale));
   return arv::text::LanguageResult::success(std::move(catalog));
 }

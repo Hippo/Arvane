@@ -302,6 +302,10 @@ void ClientRuntime::suggest_chat_command(std::string command) {
   impl_->ui.suggest_chat_command(std::move(command));
 }
 
+std::optional<std::string> ClientRuntime::commit_chat_draft_to_history() {
+  return impl_->ui.commit_chat_draft_to_history();
+}
+
 void ClientRuntime::request_chat_url_confirmation(std::string url) {
   impl_->ui.request_url_confirmation(std::move(url));
 }

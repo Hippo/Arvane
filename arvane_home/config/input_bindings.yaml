@@ -71,9 +71,6 @@ bindings:
   ToggleDebugMenu:
     - device: keyboard
       key: Grave
-  ToggleFly:
-    - device: keyboard
-      key: F
   TogglePauseMenu:
     - device: keyboard
       key: Escape

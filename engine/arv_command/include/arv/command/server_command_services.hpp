@@ -31,6 +31,10 @@ using OnlinePlayerByIDFn =
 using OnlinePlayerByNameFn =
     FunctionRef<std::optional<OnlinePlayerCommandTarget>(std::string_view)>;
 using TeleportPlayerFn = FunctionRef<bool(PlayerID, Vec3f)>;
+using SetPlayerGameModeFn = FunctionRef<bool(PlayerID, std::string_view)>;
+using SetPlayerFlySpeedFn = FunctionRef<bool(PlayerID, f32)>;
+using DefaultPlayerFlySpeedFn = FunctionRef<f32()>;
+using MaxPlayerFlySpeedFn = FunctionRef<f32()>;
 using PlayerSelectionByIDFn =
     FunctionRef<std::optional<PlayerBlockSelection>(PlayerID)>;
 using SetPlayerSelectionFn = FunctionRef<bool(PlayerID, const PlayerBlockSelection&)>;
@@ -47,6 +51,10 @@ struct ServerCommandServices {
   OnlinePlayerByIDFn online_player_by_id{};
   OnlinePlayerByNameFn online_player_by_name{};
   TeleportPlayerFn teleport_player{};
+  SetPlayerGameModeFn set_player_game_mode{};
+  SetPlayerFlySpeedFn set_player_fly_speed{};
+  DefaultPlayerFlySpeedFn default_player_fly_speed{};
+  MaxPlayerFlySpeedFn max_player_fly_speed{};
   PlayerSelectionByIDFn player_selection_by_id{};
   SetPlayerSelectionFn set_player_selection{};
   WorldBlockReadFn read_block{};

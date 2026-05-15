@@ -263,6 +263,7 @@ struct ServerRuntimeImpl {
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
+  [[nodiscard]] bool set_player_fly_speed(PlayerID player_id, f32 fly_speed);
   [[nodiscard]] player::InventoryInsertResult insert_player_inventory_stack(
       PlayerID player_id,
       player::ItemStack stack,
@@ -383,6 +384,10 @@ struct ServerRuntimeImpl {
   void send_auth_challenge(ServerSession& session);
   [[nodiscard]] bool complete_authenticated_session(ServerSession& session);
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
+  void send_player_permissions(const ServerSession& session, const player::PlayerState& player_state);
+  void send_player_movement_tuning(
+      const ServerSession& session,
+      const player::PlayerState& player_state);
   void send_movement_hz_if_non_default(const ServerSession& session);
   void send_skin_rules(const ServerSession& session, const player::PlayerState& player_state);
   void send_player_profile_info_to(

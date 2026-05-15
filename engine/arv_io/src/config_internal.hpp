@@ -5,6 +5,7 @@
 #include "arv/io/data_document.hpp"
 
 #include <filesystem>
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <string>
@@ -14,6 +15,17 @@
 #include <vector>
 
 namespace arv::io::detail {
+
+inline constexpr f64 ConfigFloatDecimalScale = 1'000'000.0;
+
+[[nodiscard]] inline f64 round_config_float(f64 value) noexcept {
+  if (!std::isfinite(value)) {
+    return value;
+  }
+  const f64 rounded = std::round(value * ConfigFloatDecimalScale) /
+                      ConfigFloatDecimalScale;
+  return rounded == 0.0 ? 0.0 : rounded;
+}
 
 [[nodiscard]] DataValue config_value(bool value);
 
@@ -35,7 +47,7 @@ template<typename T>
 [[nodiscard]] DataValue config_value(T value)
   requires(std::is_floating_point_v<T>)
 {
-  return DataValue{static_cast<f64>(value)};
+  return DataValue{round_config_float(static_cast<f64>(value))};
 }
 
 [[nodiscard]] DataValue config_value(std::string_view value);

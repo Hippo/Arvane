@@ -48,6 +48,7 @@ struct PlayerState {
   bool swimming{};
   f32 breath_seconds{DefaultBreathSeconds};
   MovementMode movement_mode{MovementMode::Walking};
+  f32 fly_speed{DefaultFlySpeed};
   std::string game_mode_id{std::string{SurvivalGameModeID}};
   PlayerPermissions permission_overrides{};
   ResolvedPermissions resolved_permissions{};

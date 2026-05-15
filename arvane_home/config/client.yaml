@@ -21,7 +21,7 @@ paths:
   input_bindings_file: arvane_home/config/input_bindings.yaml
   server_list_file: arvane_home/config/server_list.json
 physics:
-  mouse_sensitivity_radians: 0.0024999999441206455
+  mouse_sensitivity_radians: 0.0025
 render:
   atlases:
     blocks:
@@ -44,26 +44,23 @@ render:
       page_size: 2048
       pressure_cleanup:
         enabled: true
-        target_usage: 0.6499999761581421
-        usage_threshold: 0.8500000238418579
+        target_usage: 0.65
+        usage_threshold: 0.85
     ui:
       max_pages: 4
       page_size: 2048
   block_outline:
-    color:
-      - 0.019999999552965164
-      - 0.019999999552965164
-      - 0.019999999552965164
-    thickness: 0.550000011920929
+    color: "#050505"
+    thickness: 0.55
   frame_pacing_enabled: false
   frame_pacing_spin_us: 500
   frame_pacing_target_fps: 120
   max_chunk_mesh_uploads_per_frame: 8
   show_local_player_body: true
   sky:
-    cirrus_amount: 0.44999998807907104
+    cirrus_amount: 0.45
     cloud_intensity: 1.75
-    cumulus_amount: 0.800000011920929
+    cumulus_amount: 0.8
     star_intensity: 1.25
 ui:
   chat:

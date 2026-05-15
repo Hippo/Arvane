@@ -8,6 +8,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
+#include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/text_variables.hpp"
 #include "arv/protocol/world_join.hpp"
@@ -50,6 +51,28 @@ arv::u32 player_move_count(const std::vector<arv::net::NetworkEvent>& events) {
     }
   }
   return count;
+}
+
+std::vector<arv::protocol::ServerboundPlayerMove> serverbound_player_moves(
+    const std::vector<arv::net::NetworkEvent>& events) {
+  std::vector<arv::protocol::ServerboundPlayerMove> moves;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ServerboundPlayerMove) {
+      continue;
+    }
+    const auto move =
+        arv::protocol::deserialize_serverbound_player_move(decoded.value().payload);
+    if (move) {
+      moves.push_back(move.value());
+    }
+  }
+  return moves;
 }
 
 std::vector<arv::protocol::ServerboundKeepAlive> serverbound_keep_alives(
@@ -287,6 +310,26 @@ TEST(ClientRuntimeTests, ChatHistoryNavigationBottomsOutAtUncommittedDraft) {
 
   client.submit_input(arv::client::InputFrame{.text_cancel_pressed = true});
   client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveDown)}});
+  EXPECT_TRUE(client.chat_draft().empty());
+}
+
+TEST(ClientRuntimeTests, CommittedChatCommandAppearsInSubmittedHistoryNavigation) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+
+  client.submit_input(arv::client::InputFrame{.text_input = "/"});
+  client.submit_input(arv::client::InputFrame{.text_input = "flyspeed 10"});
+  const std::optional<std::string> command = client.commit_chat_draft_to_history();
+  ASSERT_EQ(command, std::optional<std::string>{"/flyspeed 10"});
+  client.close_chat();
+
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveUp)}});
+  EXPECT_EQ(client.chat_draft(), "/flyspeed 10");
   client.submit_input(
       arv::client::InputFrame{
           .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveDown)}});
@@ -782,6 +825,85 @@ TEST(ClientRuntimeTests, MovementHzPacketOverridesDefaultClientSendRate) {
   EXPECT_EQ(player_move_count(server_transport->poll_events()), 1U);
   client.fixed_tick(5);
   EXPECT_EQ(player_move_count(server_transport->poll_events()), 1U);
+}
+
+TEST(ClientRuntimeTests, PlayerPermissionsPacketUpdatesLocalGameModeAndCorePermissions) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  arv::protocol::ClientboundPlayerPermissions permissions;
+  permissions.game_mode_id = "creative";
+  permissions.core = arv::player::survival_core_permissions();
+  permissions.core.can_fly = true;
+  permissions.core.has_creative_inventory = true;
+  permissions.core.has_collision = false;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundPlayerPermissions,
+      arv::protocol::serialize_clientbound_player_permissions(permissions));
+
+  client.fixed_tick(2);
+  EXPECT_EQ(client.game_mode_id(), "creative");
+  EXPECT_TRUE(client.resolved_permissions().core.can_fly);
+  EXPECT_TRUE(client.resolved_permissions().core.has_creative_inventory);
+}
+
+TEST(ClientRuntimeTests, PlayerMovementTuningPacketUpdatesLocalFlySpeed) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  arv::protocol::ClientboundPlayerPermissions permissions;
+  permissions.game_mode_id = "creative";
+  permissions.core = arv::player::survival_core_permissions();
+  permissions.core.can_fly = true;
+  permissions.core.has_creative_inventory = true;
+  permissions.core.has_collision = false;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundPlayerPermissions,
+      arv::protocol::serialize_clientbound_player_permissions(permissions));
+  const arv::protocol::ClientboundPlayerMovementTuning tuning{10.0F, 6.0F};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundPlayerMovementTuning,
+      arv::protocol::serialize_clientbound_player_movement_tuning(tuning));
+  client.fixed_tick(2);
+  (void)server_transport->poll_events();
+
+  client.submit_input({.jump_pressed = true, .jump_held = true});
+  client.fixed_tick(3);
+  (void)server_transport->poll_events();
+  client.submit_input({});
+  client.fixed_tick(4);
+  (void)server_transport->poll_events();
+  client.submit_input({.jump_pressed = true, .jump_held = true});
+  client.fixed_tick(5);
+  (void)server_transport->poll_events();
+  client.submit_input({.move_forward = true});
+  client.fixed_tick(6);
+
+  const std::vector<arv::protocol::ServerboundPlayerMove> moves =
+      serverbound_player_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundPlayerMove& move = moves.back();
+  EXPECT_TRUE(arv::protocol::has_move_flag(
+      move.flags,
+      arv::protocol::PlayerMoveFlags::Flying));
+  EXPECT_FLOAT_EQ(move.velocity.z, 10.0F);
 }
 
 TEST(ClientRuntimeTests, ReplicatedEntityRenderPositionSmoothsBetweenTargets) {

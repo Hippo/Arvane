@@ -64,6 +64,12 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundSetMovementHz, "ClientboundSetMovementHz",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});
+  registry.register_message({MessageType::ClientboundPlayerPermissions, "ClientboundPlayerPermissions",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::ClientboundPlayerMovementTuning, "ClientboundPlayerMovementTuning",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
   registry.register_message({MessageType::ClientboundPlayerBlockBreakProgress, "ClientboundPlayerBlockBreakProgress",
                              MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
                              NetworkLane::Gameplay});

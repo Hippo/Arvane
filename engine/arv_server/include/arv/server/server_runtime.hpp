@@ -219,6 +219,7 @@ public:
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
+  [[nodiscard]] bool set_player_fly_speed(PlayerID player_id, f32 fly_speed);
   [[nodiscard]] player::InventoryInsertResult insert_player_inventory_stack(
       PlayerID player_id,
       player::ItemStack stack,

@@ -193,6 +193,9 @@ void merge_custom_final(CustomPermissionMap& target, const CustomPermissionMap& 
 }
 
 [[nodiscard]] bool wildcard_matches(std::string_view pattern, std::string_view node) noexcept {
+  if (pattern == "*") {
+    return true;
+  }
   if (pattern.size() < 2 || pattern.substr(pattern.size() - 2) != ".*") {
     return false;
   }
@@ -561,6 +564,10 @@ bool is_valid_custom_permission_node(std::string_view node) noexcept {
       return false;
     }
     previous_dot = ch == '.';
+  }
+
+  if (node == "*") {
+    return true;
   }
 
   const usize wildcard = node.find('*');

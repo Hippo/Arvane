@@ -11,17 +11,17 @@ gameplay:
   block_breaking:
     base_seconds_per_hardness: 1
     creative_inventory_multiplier: 0
-    hand_speed_multiplier: 0.20000000298023224
-    wrong_tool_speed_multiplier: 0.20000000298023224
+    hand_speed_multiplier: 0.2
+    wrong_tool_speed_multiplier: 0.2
   combat:
     airborne_vertical_knockback: 5
     attack_validation_grace_blocks: 3
     base_horizontal_knockback: 8
     base_vertical_knockback: 7
-    default_attack_cooldown_seconds: 0.3499999940395355
+    default_attack_cooldown_seconds: 0.35
     default_attack_damage: 1
     default_attack_range: 3
-    existing_horizontal_retention: 0.44999998807907104
+    existing_horizontal_retention: 0.45
     knockback_control_suppression_ticks: 2
     max_attack_validation_range: 6
     sprint_horizontal_bonus: 3
@@ -67,14 +67,14 @@ paths:
 physics:
   air_control_acceleration_per_second: 10
   air_speed: 3.5
-  body_height: 1.7999999523162842
-  body_width: 0.6000000238418579
+  body_height: 1.8
+  body_width: 0.6
   breath_seconds: 15
-  collision_epsilon: 0.0010000000474974513
-  default_surface_slipperiness: 0.6000000238418579
+  collision_epsilon: 0.001
+  default_surface_slipperiness: 0.6
   downward_swim_acceleration: 18
   eye_height_lerp_per_second: 12
-  fast_surface_swim_speed: 5.599999904632568
+  fast_surface_swim_speed: 5.6
   fast_underwater_swim_speed: 5
   fly_speed: 8
   fly_vertical_speed: 6
@@ -82,26 +82,26 @@ physics:
   ground_acceleration_per_second: 160
   ground_deceleration_per_second: 180
   jump_velocity: 8.5
-  liquid_drag: 0.800000011920929
-  max_head_body_yaw_radians: 1.309000015258789
+  liquid_drag: 0.8
+  max_head_body_yaw_radians: 1.309
   max_surface_control: 4
-  min_surface_control: 0.07999999821186066
-  mouse_sensitivity_radians: 0.0024999999441206455
+  min_surface_control: 0.08
+  mouse_sensitivity_radians: 0.0025
   reach_distance: 5
   sneak_speed: 2.25
-  sneak_support_probe_depth: 0.05000000074505806
+  sneak_support_probe_depth: 0.05
   sneaking_body_height: 1.5
-  sneaking_eye_height: 1.350000023841858
+  sneaking_eye_height: 1.35
   sprint_jump_horizontal_boost: 1
   sprint_speed: 6
-  standing_eye_height: 1.6200000047683716
-  step_height: 0.6000000238418579
+  standing_eye_height: 1.62
+  step_height: 0.6
   surface_buoyancy: 10
   surface_float_depth: 1
   surface_swim_speed: 2.5
-  swimming_body_height: 0.6000000238418579
-  swimming_body_width: 0.8999999761581421
-  swimming_eye_height: 0.44999998807907104
+  swimming_body_height: 0.6
+  swimming_body_width: 0.9
+  swimming_eye_height: 0.45
   terminal_velocity: 55
   underwater_buoyancy: 1
   underwater_swim_speed: 2

@@ -1,11 +1,13 @@
 #include "arv/client/local_player_controller.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace arv::client {
 namespace {
 
 inline constexpr f32 KnockbackSuppressedInputBlend = 0.25F;
+inline constexpr Seconds FlyToggleDoubleTapSeconds = 0.35;
 
 [[nodiscard]] u8 wrap_hotbar_slot(i32 slot) noexcept {
   constexpr i32 Count = player::DefaultHotbarSlotCount;
@@ -54,7 +56,6 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
   jump_pressed_ = jump_pressed_ || input.jump_pressed;
   primary_pressed_ = primary_pressed_ || input.primary_pressed;
   secondary_pressed_ = secondary_pressed_ || input.secondary_pressed;
-  toggle_fly_pressed_ = toggle_fly_pressed_ || input.toggle_fly_pressed;
 
   if (input.hotbar_select.has_value() &&
       player::is_valid_hotbar_slot(input.hotbar_select.value())) {
@@ -96,13 +97,12 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   command.primary_held = primary_held_;
   command.secondary_pressed = secondary_pressed_;
   command.secondary_held = secondary_held_;
-  command.toggle_fly_pressed = toggle_fly_pressed_;
+  command.toggle_fly_pressed = consume_fly_toggle_request(tick_index);
   command.selected_hotbar_slot = selected_hotbar_slot_;
 
   jump_pressed_ = false;
   primary_pressed_ = false;
   secondary_pressed_ = false;
-  toggle_fly_pressed_ = false;
   look_delta_x_ = 0.0F;
   look_delta_y_ = 0.0F;
   return command;
@@ -160,6 +160,7 @@ void LocalPlayerController::enter_world(
   render_smoothing_ticks_total_ = 0;
   world_initial_tick_ = initial_server_tick;
   server_tick_rate_ = tick_rate == 0U ? DefaultBaseTps : tick_rate;
+  last_jump_press_tick_.reset();
   camera_.set_world_id(world_id);
   update_camera_transform();
 }
@@ -171,6 +172,7 @@ void LocalPlayerController::leave_world() noexcept {
   render_smoothing_offset_ = {};
   render_smoothing_ticks_remaining_ = 0;
   render_smoothing_ticks_total_ = 0;
+  last_jump_press_tick_.reset();
   camera_.set_world_id(WorldID{});
 }
 
@@ -185,6 +187,29 @@ void LocalPlayerController::apply_player_velocity(
       velocity.knockback_control_suppression_ticks);
   if (movement_state_.velocity.y > 0.0F) {
     movement_state_.grounded = false;
+  }
+}
+
+void LocalPlayerController::apply_player_permissions(
+    const protocol::ClientboundPlayerPermissions& permissions) {
+  game_mode_id_ = permissions.game_mode_id;
+  resolved_permissions_.core = permissions.core;
+  resolved_permissions_.custom.clear();
+  if (!resolved_permissions_.core.can_fly) {
+    last_jump_press_tick_.reset();
+    if (movement_state_.movement_mode == player::MovementMode::Flying) {
+      movement_state_.movement_mode = player::MovementMode::Walking;
+    }
+  }
+}
+
+void LocalPlayerController::apply_player_movement_tuning(
+    const protocol::ClientboundPlayerMovementTuning& tuning) noexcept {
+  if (std::isfinite(tuning.fly_speed) && tuning.fly_speed > 0.0F) {
+    tuning_.fly_speed = tuning.fly_speed;
+  }
+  if (std::isfinite(tuning.fly_vertical_speed) && tuning.fly_vertical_speed > 0.0F) {
+    tuning_.fly_vertical_speed = tuning.fly_vertical_speed;
   }
 }
 
@@ -335,6 +360,31 @@ void LocalPlayerController::update_camera_transform() noexcept {
       {render_position_.x,
        render_position_.y + current_eye_height_,
        render_position_.z});
+}
+
+bool LocalPlayerController::consume_fly_toggle_request(TickIndex tick_index) noexcept {
+  if (!jump_pressed_) {
+    return false;
+  }
+  if (!resolved_permissions_.core.can_fly) {
+    last_jump_press_tick_.reset();
+    return false;
+  }
+
+  const TickIndex threshold_ticks = std::max<TickIndex>(
+      1U,
+      static_cast<TickIndex>(
+          FlyToggleDoubleTapSeconds *
+          static_cast<Seconds>(std::max<TickRate>(server_tick_rate_, 1U))));
+  if (last_jump_press_tick_.has_value() &&
+      tick_index >= last_jump_press_tick_.value() &&
+      tick_index - last_jump_press_tick_.value() <= threshold_ticks) {
+    last_jump_press_tick_.reset();
+    return true;
+  }
+
+  last_jump_press_tick_ = tick_index;
+  return false;
 }
 
 physics::PlayerMovementAuthority LocalPlayerController::movement_authority() const noexcept {

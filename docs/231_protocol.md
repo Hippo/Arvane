@@ -469,12 +469,25 @@ ClientboundSetMovementHz
 {
     f32 movement_hz;
 }
+
+ClientboundPlayerMovementTuning
+{
+    f32 fly_speed;
+    f32 fly_vertical_speed;
+}
 ```
 
-This packet is reliable ordered session setup data. It is sent during world join
-only when the configured movement send rate differs from the default. The client
-applies it to future `ServerboundPlayerMove` cadence; it does not acknowledge
-the packet separately.
+These packets are reliable ordered session setup data. `ClientboundSetMovementHz`
+is sent during world join only when the configured movement send rate differs
+from the default; the client applies it to future `ServerboundPlayerMove`
+cadence and does not acknowledge it separately. The client also receives a
+reliable ordered `ClientboundPlayerPermissions` packet during world join and
+whenever the server changes the player's resolved core permissions, including
+game mode changes. The server sends `ClientboundPlayerMovementTuning` during
+world join and whenever a command such as `/flyspeed` changes player-specific
+movement tuning. The packet carries actual blocks-per-second values; the
+`/flyspeed` command converts its `1..10` multiplier to those values before the
+packet is sent.
 
 ---
 
@@ -1042,7 +1055,7 @@ Current core lanes:
 
 | Lane | Reliability            | Message types                                 |
 | ---: | ---------------------- | --------------------------------------------- |
-|  `0` | reliable/control       | `ServerboundHello`, `ClientboundHello`, `ClientboundKickPlayer`, keep alive, `ClientboundSetMovementHz`, world join/leave |
+|  `0` | reliable/control       | `ServerboundHello`, `ClientboundHello`, `ClientboundKickPlayer`, keep alive, `ClientboundSetMovementHz`, `ClientboundPlayerPermissions`, `ClientboundPlayerMovementTuning`, world join/leave |
 |  `1` | reliable               | block updates, entity lifecycle, inventory, reliable gameplay actions |
 |  `2` | mixed movement         | `ServerboundPlayerMove`, `ClientboundEntitySnapshot`, `ClientboundPlayerMoveCorrection`, `ClientboundPlayerVelocity` |
 |  `3` | reliable bulk          | `ClientboundChunkData`, `ClientboundChunkUnload`, skin image upload/download chunks |

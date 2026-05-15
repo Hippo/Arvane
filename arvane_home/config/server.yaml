@@ -4,12 +4,12 @@ network:
     client_timeout_seconds: 30
     interval_seconds: 5
   movement:
-    base_position_epsilon_blocks: 0.20000000298023224
+    base_position_epsilon_blocks: 0.2
     correction_cooldown_ms: 100
     enabled: true
     lag_grace_blocks: 1.5
     max_air_speed_blocks_per_second: 12
-    max_fly_speed_blocks_per_second: 24
+    max_fly_speed_blocks_per_second: 80
     max_ground_speed_blocks_per_second: 9
     max_single_packet_distance_blocks: 8
     max_swim_speed_blocks_per_second: 8

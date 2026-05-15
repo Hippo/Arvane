@@ -6,20 +6,38 @@
 #include "arv/command/command.hpp"
 #include "arv/core/types.hpp"
 #include "arv/player/selection.hpp"
+#include "arv/text/language.hpp"
 
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::base::commands {
 namespace {
 
 constexpr u64 MaxBlueprintBlocks = 1'000'000U;
+
+[[nodiscard]] std::string msg(
+    const command::CommandCtx& ctx,
+    std::string_view key,
+    std::string_view fallback) {
+  return arv::text::text_or_fallback(ctx.services.language, key, fallback);
+}
+
+[[nodiscard]] std::string fmt(
+    const command::CommandCtx& ctx,
+    std::string_view key,
+    std::initializer_list<arv::text::FormatArg> args,
+    std::string_view fallback) {
+  return arv::text::format_or_fallback(ctx.services.language, key, args, fallback);
+}
 
 [[nodiscard]] BlockPos floor_block_pos(Vec3f position) noexcept {
   return {{
@@ -48,8 +66,10 @@ constexpr u64 MaxBlueprintBlocks = 1'000'000U;
       !services->list_blueprints ||
       !services->load_blueprint ||
       !services->save_blueprint) {
-    return command::CommandResult::internal_error(
-        "Blueprint command services are unavailable.");
+    return command::CommandResult::internal_error(msg(
+        ctx,
+        "command.blueprint.services_unavailable",
+        "Blueprint command services are unavailable."));
   }
   return command::CommandResult::success();
 }
@@ -59,12 +79,16 @@ constexpr u64 MaxBlueprintBlocks = 1'000'000U;
     PlayerID& out_player,
     WorldID& out_world) {
   if (!ctx.sender.player_id.has_value()) {
-    return command::CommandResult::invalid_source(
-        "Blueprint commands require a player source.");
+    return command::CommandResult::invalid_source(msg(
+        ctx,
+        "command.blueprint.player_required",
+        "Blueprint commands require a player source."));
   }
   if (!ctx.sender.world_id.has_value()) {
-    return command::CommandResult::invalid_source(
-        "Blueprint commands require a player world.");
+    return command::CommandResult::invalid_source(msg(
+        ctx,
+        "command.blueprint.world_required",
+        "Blueprint commands require a player world."));
   }
   out_player = ctx.sender.player_id.value();
   out_world = ctx.sender.world_id.value();
@@ -75,8 +99,10 @@ constexpr u64 MaxBlueprintBlocks = 1'000'000U;
     const command::CommandCtx& ctx,
     BlockPos& out_position) {
   if (!ctx.sender.position.has_value()) {
-    return command::CommandResult::invalid_source(
-        "Blueprint commands require a player position.");
+    return command::CommandResult::invalid_source(msg(
+        ctx,
+        "command.blueprint.position_required",
+        "Blueprint commands require a player position."));
   }
   out_position = floor_block_pos(ctx.sender.position.value());
   return command::CommandResult::success();
@@ -110,12 +136,16 @@ void for_each_position(
 }
 
 [[nodiscard]] std::optional<blueprint::BlueprintClipboard> copy_selection_to_blueprint_clipboard(
+    const command::CommandCtx& ctx,
     const ServerCommandServices& services,
     const player::SelectionBounds& bounds,
     BlockPos origin,
     std::string& out_error) {
   if (!size_fits_block_pos(bounds)) {
-    out_error = "Selection is too large for the blueprint format.";
+    out_error = msg(
+        ctx,
+        "command.blueprint.selection_too_large_for_format",
+        "Selection is too large for the blueprint format.");
     return std::nullopt;
   }
 
@@ -137,13 +167,19 @@ void for_each_position(
     std::optional<u32> block = services.read_block(bounds.world, pos);
     if (!block.has_value()) {
       ok = false;
-      out_error = "failed to read selection block";
+      out_error = msg(
+          ctx,
+          "command.blueprint.read_selection_failed",
+          "Failed to read selection block.");
       return;
     }
     std::optional<std::string> stable_name = services.block_variant_name(block.value());
     if (!stable_name.has_value()) {
       ok = false;
-      out_error = "selection contains an unknown block variant";
+      out_error = msg(
+          ctx,
+          "command.blueprint.unknown_selection_variant",
+          "Selection contains an unknown block variant.");
       return;
     }
     clipboard.blocks.push_back({block.value(), std::move(stable_name.value())});
@@ -155,6 +191,7 @@ void for_each_position(
 }
 
 [[nodiscard]] std::optional<std::vector<u32>> resolve_palette(
+    const command::CommandCtx& ctx,
     const ServerCommandServices& services,
     const blueprint::Blueprint& document,
     std::string& out_error) {
@@ -163,7 +200,11 @@ void for_each_position(
   for (const std::string& stable_id : document.palette) {
     std::optional<u32> variant = services.block_variant_by_name(stable_id);
     if (!variant.has_value()) {
-      out_error = "unknown block state in blueprint: " + stable_id;
+      out_error = fmt(
+          ctx,
+          "command.blueprint.unknown_block_state",
+          {{"block_state", stable_id}},
+          "Unknown block state in blueprint: {block_state}");
       return std::nullopt;
     }
     palette.push_back(variant.value());
@@ -197,33 +238,47 @@ void for_each_position(
 }
 
 [[nodiscard]] command::CommandResult blueprint_info_result(
+    const command::CommandCtx& ctx,
     std::string_view name,
     const blueprint::Blueprint& document) {
   const u64 blocks = blueprint::blueprint_volume(document.size);
-  std::ostringstream out;
-  out << "Blueprint " << name << ".abp: "
-      << document.size.value.x << " x " << document.size.value.y
-      << " x " << document.size.value.z << " = " << blocks
-      << " blocks, palette " << document.palette.size() << ".";
   command::CommandResult result = command::CommandResult::success();
-  result.add_message(command::CommandMessageKind::Info, out.str());
+  result.add_message(
+      command::CommandMessageKind::Info,
+      fmt(
+          ctx,
+          "command.blueprint.info",
+          {{"name", std::string{name}},
+           {"x", std::to_string(document.size.value.x)},
+           {"y", std::to_string(document.size.value.y)},
+           {"z", std::to_string(document.size.value.z)},
+           {"blocks", std::to_string(blocks)},
+           {"palette", std::to_string(document.palette.size())}},
+          "Blueprint {name}.abp: {x} x {y} x {z} = {blocks} blocks, palette {palette}."));
   return result;
 }
 
 [[nodiscard]] command::CommandResult load_blueprint_document(
+    const command::CommandCtx& ctx,
     const ServerCommandServices& services,
     WorldID world,
     std::string_view name,
     blueprint::BlueprintCodecResult& out_decoded) {
   const std::optional<std::string> text = services.load_blueprint(world, name);
   if (!text.has_value()) {
-    return command::CommandResult::failure(
-        "Blueprint not found: " + std::string{name} + ".abp.");
+    return command::CommandResult::failure(fmt(
+        ctx,
+        "command.blueprint.not_found",
+        {{"name", std::string{name}}},
+        "Blueprint not found: {name}.abp."));
   }
   out_decoded = blueprint::decode_blueprint(text.value());
   if (!out_decoded.ok) {
-    return command::CommandResult::usage_error(
-        "Blueprint is corrupt: " + out_decoded.message);
+    return command::CommandResult::usage_error(fmt(
+        ctx,
+        "command.blueprint.corrupt",
+        {{"error", out_decoded.message}},
+        "Blueprint is corrupt: {error}"));
   }
   return command::CommandResult::success();
 }
@@ -235,8 +290,10 @@ void for_each_position(
     return service_result;
   }
   if (ctx.args.empty()) {
-    return command::CommandResult::usage_error(
-        "Usage: /blueprint <save|load|paste|list|info>.");
+    return command::CommandResult::usage_error(msg(
+        ctx,
+        "command.blueprint.usage",
+        "Usage: /blueprint <save|load|paste|list|info>."));
   }
 
   PlayerID player_id;
@@ -251,26 +308,38 @@ void for_each_position(
     const std::vector<std::string> names = services->list_blueprints(world);
     if (names.empty()) {
       command::CommandResult result = command::CommandResult::success();
-      result.add_message(command::CommandMessageKind::Info, "No blueprints saved.");
+      result.add_message(
+          command::CommandMessageKind::Info,
+          msg(ctx, "command.blueprint.list_empty", "No blueprints saved."));
       return result;
     }
     std::ostringstream out;
-    out << "Blueprints:";
     for (const std::string& name : names) {
       out << ' ' << name;
     }
     command::CommandResult result = command::CommandResult::success();
-    result.add_message(command::CommandMessageKind::Info, out.str());
+    result.add_message(
+        command::CommandMessageKind::Info,
+        fmt(
+            ctx,
+            "command.blueprint.list",
+            {{"names", out.str()}},
+            "Blueprints:{names}"));
     return result;
   }
 
   if (ctx.args.size() < 2U) {
-    return command::CommandResult::usage_error("Blueprint name is required.");
+    return command::CommandResult::usage_error(msg(
+        ctx,
+        "command.blueprint.name_required",
+        "Blueprint name is required."));
   }
   const std::string name{ctx.args[1]};
   if (!blueprint::valid_blueprint_name(name)) {
-    return command::CommandResult::usage_error(
-        "Invalid blueprint name. Use only letters, numbers, underscore, dash, and dot.");
+    return command::CommandResult::usage_error(msg(
+        ctx,
+        "command.blueprint.invalid_name",
+        "Invalid blueprint name. Use only letters, numbers, underscore, dash, and dot."));
   }
 
   if (action == "save") {
@@ -282,24 +351,38 @@ void for_each_position(
     const std::optional<command::PlayerBlockSelection> current =
         services->player_selection_by_id(player_id);
     if (!current.has_value()) {
-      return command::CommandResult::invalid_source("Command sender is not an online player.");
+      return command::CommandResult::invalid_source(msg(
+          ctx,
+          "command.blueprint.sender_not_online",
+          "Command sender is not an online player."));
     }
     const player::SelectionBoundsResult bounds =
         player::normalized_bounds(to_player_selection(current.value()));
     if (!bounds.ok) {
-      return command::CommandResult::failure(bounds.message);
+      return command::CommandResult::failure(fmt(
+          ctx,
+          "command.blueprint.selection_invalid",
+          {{"message", bounds.message}},
+          "{message}"));
     }
     if (bounds.bounds.block_count > MaxBlueprintBlocks) {
-      return command::CommandResult::usage_error(
-          "Blueprint exceeds limit: " + std::to_string(bounds.bounds.block_count) +
-          " blocks. Limit: " + std::to_string(MaxBlueprintBlocks) + ".");
+      return command::CommandResult::usage_error(fmt(
+          ctx,
+          "command.blueprint.limit_exceeded",
+          {{"count", std::to_string(bounds.bounds.block_count)},
+           {"limit", std::to_string(MaxBlueprintBlocks)}},
+          "Blueprint exceeds limit: {count} blocks. Limit: {limit}."));
     }
 
     std::string error;
     std::optional<blueprint::BlueprintClipboard> clipboard =
-        copy_selection_to_blueprint_clipboard(*services, bounds.bounds, origin, error);
+        copy_selection_to_blueprint_clipboard(ctx, *services, bounds.bounds, origin, error);
     if (!clipboard.has_value()) {
-      return command::CommandResult::internal_error("Failed to copy selection: " + error + ".");
+      return command::CommandResult::internal_error(fmt(
+          ctx,
+          "command.blueprint.copy_failed",
+          {{"error", error}},
+          "Failed to copy selection: {error}."));
     }
     blueprint::Blueprint document =
         blueprint::blueprint_from_clipboard(name, clipboard.value(), std::string{ids::ModuleName});
@@ -308,33 +391,51 @@ void for_each_position(
       return command::CommandResult::usage_error(encoded.message);
     }
     if (!services->save_blueprint(world, name, encoded.text)) {
-      return command::CommandResult::internal_error("Failed to save blueprint.");
+      return command::CommandResult::internal_error(msg(
+          ctx,
+          "command.blueprint.save_failed",
+          "Failed to save blueprint."));
     }
-    return command::CommandResult::success("Blueprint saved: " + name + ".abp.");
+    return command::CommandResult::success(fmt(
+        ctx,
+        "command.blueprint.saved",
+        {{"name", name}},
+        "Blueprint saved: {name}.abp."));
   }
 
   if (action == "load" || action == "info" || action == "paste") {
     blueprint::BlueprintCodecResult decoded;
     command::CommandResult loaded =
-        load_blueprint_document(*services, world, name, decoded);
+        load_blueprint_document(ctx, *services, world, name, decoded);
     if (!loaded) {
       return loaded;
     }
     const u64 blocks = blueprint::blueprint_volume(decoded.blueprint.size);
     if (blocks > MaxBlueprintBlocks) {
-      return command::CommandResult::usage_error(
-          "Blueprint exceeds limit: " + std::to_string(blocks) +
-          " blocks. Limit: " + std::to_string(MaxBlueprintBlocks) + ".");
+      return command::CommandResult::usage_error(fmt(
+          ctx,
+          "command.blueprint.limit_exceeded",
+          {{"count", std::to_string(blocks)},
+           {"limit", std::to_string(MaxBlueprintBlocks)}},
+          "Blueprint exceeds limit: {count} blocks. Limit: {limit}."));
     }
     if (action == "info") {
-      return blueprint_info_result(name, decoded.blueprint);
+      return blueprint_info_result(ctx, name, decoded.blueprint);
     }
     if (action == "load") {
       command::CommandResult result =
-          command::CommandResult::success("Blueprint loaded: " + name + ".abp.");
+          command::CommandResult::success(fmt(
+              ctx,
+              "command.blueprint.loaded",
+              {{"name", name}},
+              "Blueprint loaded: {name}.abp."));
       result.add_message(
           command::CommandMessageKind::Info,
-          "Use /blueprint paste " + name + " to paste it at your current position.");
+          fmt(
+              ctx,
+              "command.blueprint.paste_hint",
+              {{"name", name}},
+              "Use /blueprint paste {name} to paste it at your current position."));
       return result;
     }
 
@@ -350,20 +451,29 @@ void for_each_position(
       } else if (ctx.args[index] == "--no-air") {
         paste_air = false;
       } else {
-        return command::CommandResult::usage_error(
-            "Usage: /blueprint paste <name> [--air|--no-air].");
+        return command::CommandResult::usage_error(msg(
+            ctx,
+            "command.blueprint.paste_usage",
+            "Usage: /blueprint paste <name> [--air|--no-air]."));
       }
     }
 
     std::string error;
     std::optional<std::vector<u32>> palette =
-        resolve_palette(*services, decoded.blueprint, error);
+        resolve_palette(ctx, *services, decoded.blueprint, error);
     if (!palette.has_value()) {
-      return command::CommandResult::usage_error("Blueprint cannot be resolved: " + error + ".");
+      return command::CommandResult::usage_error(fmt(
+          ctx,
+          "command.blueprint.resolve_failed",
+          {{"error", error}},
+          "Blueprint cannot be resolved: {error}."));
     }
     const std::optional<u32> air = services->air_block_variant();
     if (!air.has_value()) {
-      return command::CommandResult::internal_error("Air block variant is unavailable.");
+      return command::CommandResult::internal_error(msg(
+          ctx,
+          "command.blueprint.air_unavailable",
+          "Air block variant is unavailable."));
     }
 
     u64 changed = 0U;
@@ -376,8 +486,10 @@ void for_each_position(
           }
           const u32 palette_index = decoded.blueprint.blocks[index];
           if (palette_index >= palette->size()) {
-            return command::CommandResult::usage_error(
-                "Blueprint block references an invalid palette index.");
+            return command::CommandResult::usage_error(msg(
+                ctx,
+                "command.blueprint.invalid_palette_index",
+                "Blueprint block references an invalid palette index."));
           }
           const u32 variant = palette->at(palette_index);
           if (!paste_air && variant == air.value()) {
@@ -389,24 +501,35 @@ void for_each_position(
               sub_pos(source, decoded.blueprint.origin));
           const std::optional<u32> before = services->read_block(world, dest);
           if (!before.has_value()) {
-            return command::CommandResult::internal_error("Failed to read paste destination.");
+            return command::CommandResult::internal_error(msg(
+                ctx,
+                "command.blueprint.read_paste_failed",
+                "Failed to read paste destination."));
           }
           if (before.value() == variant) {
             continue;
           }
           if (!services->write_block(world, dest, variant)) {
-            return command::CommandResult::internal_error("Failed to write paste destination.");
+            return command::CommandResult::internal_error(msg(
+                ctx,
+                "command.blueprint.write_paste_failed",
+                "Failed to write paste destination."));
           }
           ++changed;
         }
       }
     }
-    return command::CommandResult::success(
-        "Blueprint pasted: changed " + std::to_string(changed) + " blocks.");
+    return command::CommandResult::success(fmt(
+        ctx,
+        "command.blueprint.pasted",
+        {{"count", std::to_string(changed)}},
+        "Blueprint pasted: changed {count} blocks."));
   }
 
-  return command::CommandResult::usage_error(
-      "Usage: /blueprint <save|load|paste|list|info>.");
+  return command::CommandResult::usage_error(msg(
+      ctx,
+      "command.blueprint.usage",
+      "Usage: /blueprint <save|load|paste|list|info>."));
 }
 
 } // namespace

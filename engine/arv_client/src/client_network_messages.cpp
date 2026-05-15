@@ -395,6 +395,24 @@ void ClientNetworkRouter::handle_message(
       runtime.input.set_movement_send_rate(settings.value().movement_hz);
       return;
     }
+    case protocol::MessageType::ClientboundPlayerPermissions: {
+      auto permissions =
+          protocol::deserialize_clientbound_player_permissions(decoded.value().payload);
+      if (!permissions) {
+        return;
+      }
+      runtime.player_controller.apply_player_permissions(permissions.value());
+      return;
+    }
+    case protocol::MessageType::ClientboundPlayerMovementTuning: {
+      auto tuning =
+          protocol::deserialize_clientbound_player_movement_tuning(decoded.value().payload);
+      if (!tuning) {
+        return;
+      }
+      runtime.player_controller.apply_player_movement_tuning(tuning.value());
+      return;
+    }
     case protocol::MessageType::ClientboundPlayerBlockBreakProgress: {
       auto progress =
           protocol::deserialize_clientbound_player_block_break_progress(decoded.value().payload);

@@ -72,7 +72,7 @@ struct MovementValidationConfig {
   f32 max_ground_speed_blocks_per_second{9.0F};
   f32 max_air_speed_blocks_per_second{12.0F};
   f32 max_swim_speed_blocks_per_second{8.0F};
-  f32 max_fly_speed_blocks_per_second{24.0F};
+  f32 max_fly_speed_blocks_per_second{80.0F};
   f32 max_vertical_speed_blocks_per_second{20.0F};
   f32 base_position_epsilon_blocks{0.20F};
   f32 lag_grace_blocks{1.50F};

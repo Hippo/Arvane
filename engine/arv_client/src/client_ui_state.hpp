@@ -41,6 +41,7 @@ public:
   void add_chat_message(std::string message);
   void add_chat_message(protocol::ClientboundChatMessage message);
   void suggest_chat_command(std::string command);
+  [[nodiscard]] std::optional<std::string> commit_chat_draft_to_history();
   void request_url_confirmation(std::string url);
   void cancel_url_confirmation() noexcept;
   void acknowledge_url_open_unavailable();

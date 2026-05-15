@@ -196,6 +196,7 @@ bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
   register_online_profile(session);
   player::PlayerState& player_state = default_world_.ensure_player(session.player_id);
   player_state.world_id = session.world_id;
+  player_state.fly_speed = player_tuning_.fly_speed;
   if (!apply_saved_player_state(session, player_state)) {
     seed_player_inventory(player_state);
   }
@@ -334,6 +335,8 @@ void ServerRuntimeImpl::send_world_join_result(
       protocol::serialize_clientbound_world_join_result(result));
   log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
   if (send_result) {
+    send_player_permissions(session, player_state);
+    send_player_movement_tuning(session, player_state);
     send_movement_hz_if_non_default(session);
   }
   if (send_result && mode_ == ServerMode::Dedicated) {
@@ -350,6 +353,38 @@ void ServerRuntimeImpl::send_world_join_result(
         tick_index_,
         max_view_distance_);
   }
+}
+
+void ServerRuntimeImpl::send_player_permissions(
+    const ServerSession& session,
+    const player::PlayerState& player_state) {
+  protocol::ClientboundPlayerPermissions permissions;
+  permissions.game_mode_id = player_state.game_mode_id;
+  permissions.core = player_state.resolved_permissions.core;
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundPlayerPermissions,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_clientbound_player_permissions(permissions));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::send_player_movement_tuning(
+    const ServerSession& session,
+    const player::PlayerState& player_state) {
+  protocol::ClientboundPlayerMovementTuning tuning;
+  tuning.fly_speed = player_state.fly_speed;
+  tuning.fly_vertical_speed = player_tuning_.fly_vertical_speed;
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundPlayerMovementTuning,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_clientbound_player_movement_tuning(tuning));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
 }
 
 void ServerRuntimeImpl::send_movement_hz_if_non_default(const ServerSession& session) {

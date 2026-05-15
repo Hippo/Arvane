@@ -81,6 +81,65 @@ TEST(LocalPlayerControllerTests, SendsRawSprintIntentForLocalMovementRules) {
   EXPECT_TRUE(sneaking.sprint_held);
 }
 
+TEST(LocalPlayerControllerTests, DoubleTapJumpRequestsFlyToggleWhenAllowed) {
+  arv::client::LocalPlayerController controller;
+  arv::protocol::ClientboundPlayerPermissions permissions;
+  permissions.game_mode_id = "creative";
+  permissions.core = arv::player::survival_core_permissions();
+  permissions.core.can_fly = true;
+  controller.apply_player_permissions(permissions);
+
+  controller.submit_input(arv::client::InputFrame{.jump_pressed = true, .jump_held = true});
+  const arv::player::PlayerCommand first_jump = controller.consume_command(20);
+  EXPECT_TRUE(first_jump.jump_pressed);
+  EXPECT_FALSE(first_jump.toggle_fly_pressed);
+
+  controller.submit_input(arv::client::InputFrame{.jump_pressed = true, .jump_held = true});
+  const arv::player::PlayerCommand second_jump = controller.consume_command(26);
+  EXPECT_TRUE(second_jump.jump_pressed);
+  EXPECT_TRUE(second_jump.toggle_fly_pressed);
+}
+
+TEST(LocalPlayerControllerTests, DoubleTapJumpDoesNotRequestFlyWithoutPermission) {
+  arv::client::LocalPlayerController controller;
+
+  controller.submit_input(arv::client::InputFrame{.jump_pressed = true});
+  EXPECT_FALSE(controller.consume_command(20).toggle_fly_pressed);
+  controller.submit_input(arv::client::InputFrame{.jump_pressed = true});
+  EXPECT_FALSE(controller.consume_command(21).toggle_fly_pressed);
+}
+
+TEST(LocalPlayerControllerTests, DoubleTapJumpEnablesLocalFlyingPrediction) {
+  arv::client::LocalPlayerController controller;
+  controller.enter_world(
+      arv::WorldID{1},
+      arv::PlayerID{2},
+      arv::EntityNetID{3},
+      {0.0F, 10.0F, 0.0F});
+  arv::protocol::ClientboundPlayerPermissions permissions;
+  permissions.game_mode_id = "creative";
+  permissions.core = arv::player::survival_core_permissions();
+  permissions.core.can_fly = true;
+  controller.apply_player_permissions(permissions);
+
+  controller.submit_input(arv::client::InputFrame{.jump_pressed = true});
+  arv::player::PlayerCommand command = controller.consume_command(20);
+  controller.update_local_movement(command, nullptr, arv::tick_duration_seconds(arv::DefaultBaseTps));
+  controller.submit_input(arv::client::InputFrame{.jump_pressed = true});
+  command = controller.consume_command(26);
+  ASSERT_TRUE(command.toggle_fly_pressed);
+  controller.update_local_movement(command, nullptr, arv::tick_duration_seconds(arv::DefaultBaseTps));
+
+  const arv::protocol::ServerboundPlayerMove move =
+      controller.build_movement_packet(
+          1,
+          26,
+          arv::protocol::PlayerActionFlags::ToggleFlyPressed);
+  EXPECT_TRUE(arv::protocol::has_move_flag(
+      move.flags,
+      arv::protocol::PlayerMoveFlags::Flying));
+}
+
 TEST(LocalPlayerControllerTests, SprintingAppliesCameraFovBoost) {
   arv::client::LocalPlayerController controller;
 

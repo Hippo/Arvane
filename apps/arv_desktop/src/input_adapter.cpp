@@ -59,7 +59,6 @@ client::InputFrame to_client_input(const platform::InputSnapshot& input) {
       input.primary_held,
       input.secondary_pressed,
       input.secondary_held,
-      input.toggle_fly_pressed,
       input.open_inventory_pressed,
       input.open_chat_pressed,
       input.tab_menu_held,

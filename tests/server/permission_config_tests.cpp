@@ -49,6 +49,7 @@ groups:
     core:
       can_modify_world: ALLOW
     permissions:
+      "*": ALLOW
       arvane.*: ALLOW
       arvane.command.shutdown: DENY
 )yaml");
@@ -67,6 +68,11 @@ groups:
       arv::player::custom_permission_value(
           layer.value().custom,
           "arvane.command.teleport"),
+      arv::player::TriState::Allow);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(
+          layer.value().custom,
+          "plugin.unrelated.anything"),
       arv::player::TriState::Allow);
   EXPECT_EQ(
       arv::player::custom_permission_value(

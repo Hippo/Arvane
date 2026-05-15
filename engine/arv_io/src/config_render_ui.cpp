@@ -1,6 +1,82 @@
 #include "config_internal.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <string>
+
 namespace arv::io::detail {
+namespace {
+
+[[nodiscard]] std::optional<u8> hex_digit(char value) noexcept {
+  if (value >= '0' && value <= '9') {
+    return static_cast<u8>(value - '0');
+  }
+  if (value >= 'a' && value <= 'f') {
+    return static_cast<u8>(value - 'a' + 10);
+  }
+  if (value >= 'A' && value <= 'F') {
+    return static_cast<u8>(value - 'A' + 10);
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<u8> hex_byte(std::string_view text, usize offset) noexcept {
+  const std::optional<u8> high = hex_digit(text[offset]);
+  const std::optional<u8> low = hex_digit(text[offset + 1U]);
+  if (!high.has_value() || !low.has_value()) {
+    return std::nullopt;
+  }
+  return static_cast<u8>((high.value() << 4U) | low.value());
+}
+
+[[nodiscard]] bool parse_hex_rgb(
+    std::string_view text,
+    f32& out_r,
+    f32& out_g,
+    f32& out_b) noexcept {
+  if (!text.empty() && text.front() == '#') {
+    text.remove_prefix(1U);
+  }
+  if (text.size() != 6U) {
+    return false;
+  }
+  const std::optional<u8> r = hex_byte(text, 0U);
+  const std::optional<u8> g = hex_byte(text, 2U);
+  const std::optional<u8> b = hex_byte(text, 4U);
+  if (!r.has_value() || !g.has_value() || !b.has_value()) {
+    return false;
+  }
+  out_r = static_cast<f32>(r.value()) / 255.0F;
+  out_g = static_cast<f32>(g.value()) / 255.0F;
+  out_b = static_cast<f32>(b.value()) / 255.0F;
+  return true;
+}
+
+[[nodiscard]] char hex_char(u8 value) noexcept {
+  constexpr char Digits[] = "0123456789ABCDEF";
+  return Digits[value & 0x0FU];
+}
+
+[[nodiscard]] u8 color_byte(f32 value) noexcept {
+  const f32 clamped = std::clamp(value, 0.0F, 1.0F);
+  return static_cast<u8>(std::lround(clamped * 255.0F));
+}
+
+[[nodiscard]] std::string hex_rgb(f32 r, f32 g, f32 b) {
+  const u8 red = color_byte(r);
+  const u8 green = color_byte(g);
+  const u8 blue = color_byte(b);
+  std::string text{"#000000"};
+  text[1] = hex_char(static_cast<u8>(red >> 4U));
+  text[2] = hex_char(red);
+  text[3] = hex_char(static_cast<u8>(green >> 4U));
+  text[4] = hex_char(green);
+  text[5] = hex_char(static_cast<u8>(blue >> 4U));
+  text[6] = hex_char(blue);
+  return text;
+}
+
+} // namespace
 
 void read_block_outline_config(
     const DataValue& render,
@@ -10,11 +86,12 @@ void read_block_outline_config(
     return;
   }
   const DataValue* color = outline->get("color");
-  const DataValue::Array* channels = color == nullptr ? nullptr : color->array_if();
-  if (channels != nullptr && channels->size() == 3U) {
-    config.color_r = static_cast<f32>((*channels)[0].as_f64_or(config.color_r));
-    config.color_g = static_cast<f32>((*channels)[1].as_f64_or(config.color_g));
-    config.color_b = static_cast<f32>((*channels)[2].as_f64_or(config.color_b));
+  if (color != nullptr && color->kind() == DataKind::String) {
+    (void)parse_hex_rgb(
+        color->as_string_or({}),
+        config.color_r,
+        config.color_g,
+        config.color_b);
   }
   read_scalar(*outline, "thickness", config.thickness);
 }
@@ -131,11 +208,13 @@ void put_render_config(DataValue& root, const RenderConfig& render) {
   put(root, "render.frame_pacing_spin_us", render.frame_pacing_spin_us);
   put(root, "render.show_local_player_body", render.show_local_player_body);
 
-  DataValue color = DataValue::array();
-  color.push(config_value(render.block_outline.color_r));
-  color.push(config_value(render.block_outline.color_g));
-  color.push(config_value(render.block_outline.color_b));
-  put_path(root, "render.block_outline.color", std::move(color));
+  put(
+      root,
+      "render.block_outline.color",
+      hex_rgb(
+          render.block_outline.color_r,
+          render.block_outline.color_g,
+          render.block_outline.color_b));
   put(root, "render.block_outline.thickness", render.block_outline.thickness);
   put_render_sky_config(root, render.sky);
   put_render_atlases_config(root, render.atlases);

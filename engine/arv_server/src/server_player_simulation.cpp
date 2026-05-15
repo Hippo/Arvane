@@ -208,6 +208,36 @@ bool ServerRuntimeImpl::set_player_game_mode(PlayerID player_id, std::string_vie
 
   player_state->game_mode_id = std::string{mode_id};
   refresh_player_permissions(*player_state);
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session != nullptr && session->player_id == player_id) {
+      send_player_permissions(*session, *player_state);
+      break;
+    }
+  }
+  return true;
+}
+
+bool ServerRuntimeImpl::set_player_fly_speed(PlayerID player_id, f32 fly_speed) {
+  if (!std::isfinite(fly_speed) ||
+      fly_speed <= 0.0F ||
+      fly_speed > movement_.max_fly_speed_blocks_per_second) {
+    return false;
+  }
+
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr) {
+    return false;
+  }
+
+  player_state->fly_speed = fly_speed;
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session != nullptr && session->player_id == player_id) {
+      send_player_movement_tuning(*session, *player_state);
+      break;
+    }
+  }
   return true;
 }
 

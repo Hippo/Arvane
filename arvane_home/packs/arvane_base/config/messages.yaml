@@ -1,0 +1,79 @@
+command:
+  dispatcher:
+    console_only: Command is restricted to the server console.
+    permission_service_unavailable: Command permission service is unavailable.
+    permission_denied: "Permission denied: {permission}."
+    permission_missing_player_context: "Permission denied: missing player context."
+    permission_player_not_online: "Permission denied: player is not online."
+    no_command: No command entered.
+    unknown_command: "Unknown command: {command}."
+    wrong_domain: "Command is not available in this domain: {command}."
+    no_executor: "Command has no executor: {command}."
+  tp:
+    usage: "Usage: /tp [target] <x> <y> <z>."
+    console_requires_target: Teleport from server console requires an explicit target.
+    sender_not_online: Command sender is not an online player.
+    unknown_player: "Unknown online player: {name}."
+    services_unavailable: Server command services are unavailable.
+    unable_to_teleport: Unable to teleport player.
+    success: Teleported {name} to {position}.
+  gamemode:
+    usage: "Usage: /gamemode <mode>."
+    alias_usage: "Usage: /gm<mode>."
+    player_required: Changing game mode requires a player sender.
+    services_unavailable: Server command services are unavailable.
+    unknown_mode: "Unknown game mode: {mode}."
+    success: "Set game mode to {mode}."
+  flyspeed:
+    usage: "Usage: /flyspeed <multiplier 1-10>."
+    player_required: Fly speed changes require a player sender.
+    services_unavailable: Server command services are unavailable.
+    invalid_range: Fly speed must be a multiplier from 1 to 10.
+    exceeds_server_limit: "Fly speed {speed}x ({actual} blocks/s) exceeds the server movement limit of {limit} blocks/s."
+    unable_to_update: Unable to update fly speed.
+    success: "Set fly speed to {speed}x."
+  selection:
+    usage: "Usage: /select <a|b|clear|info>."
+    player_required: Selection commands require a player source.
+    services_unavailable: Selection command services are unavailable.
+    sender_not_online: Command sender is not an online player.
+    clear_failed: Unable to clear selection.
+    cleared: Selection cleared.
+    info_incomplete: "{message}{a}{b}"
+    info_complete: "Selection: {bounds}."
+    point_requires_position: Selection points require a player world and position.
+    update_failed: Unable to update selection.
+    point_set: "Selection {point} set to {position}."
+    complete: "Selection complete: {bounds}."
+  blueprint:
+    usage: "Usage: /blueprint <save|load|paste|list|info>."
+    paste_usage: "Usage: /blueprint paste <name> [--air|--no-air]."
+    services_unavailable: Blueprint command services are unavailable.
+    player_required: Blueprint commands require a player source.
+    world_required: Blueprint commands require a player world.
+    position_required: Blueprint commands require a player position.
+    sender_not_online: Command sender is not an online player.
+    list_empty: No blueprints saved.
+    list: "Blueprints:{names}"
+    name_required: Blueprint name is required.
+    invalid_name: Invalid blueprint name. Use only letters, numbers, underscore, dash, and dot.
+    selection_too_large_for_format: Selection is too large for the blueprint format.
+    read_selection_failed: Failed to read selection block.
+    unknown_selection_variant: Selection contains an unknown block variant.
+    unknown_block_state: "Unknown block state in blueprint: {block_state}"
+    selection_invalid: "{message}"
+    limit_exceeded: "Blueprint exceeds limit: {count} blocks. Limit: {limit}."
+    copy_failed: "Failed to copy selection: {error}."
+    save_failed: Failed to save blueprint.
+    saved: "Blueprint saved: {name}.abp."
+    not_found: "Blueprint not found: {name}.abp."
+    corrupt: "Blueprint is corrupt: {error}"
+    info: "Blueprint {name}.abp: {x} x {y} x {z} = {blocks} blocks, palette {palette}."
+    loaded: "Blueprint loaded: {name}.abp."
+    paste_hint: "Use /blueprint paste {name} to paste it at your current position."
+    resolve_failed: "Blueprint cannot be resolved: {error}."
+    air_unavailable: Air block variant is unavailable.
+    invalid_palette_index: Blueprint block references an invalid palette index.
+    read_paste_failed: Failed to read paste destination.
+    write_paste_failed: Failed to write paste destination.
+    pasted: "Blueprint pasted: changed {count} blocks."

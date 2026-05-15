@@ -79,7 +79,6 @@ void ClientInputRuntime::submit_input(
     input.primary_held = false;
     input.secondary_pressed = false;
     input.secondary_held = false;
-    input.toggle_fly_pressed = false;
     input.hotbar_select.reset();
     input.hotbar_scroll_steps = 0;
     input.mouse_delta_x = 0.0F;

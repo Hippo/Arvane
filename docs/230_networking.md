@@ -230,6 +230,11 @@ immediate movement packet so gameplay requests are not delayed unnecessarily.
 The client defaults to a 20 Hz movement send rate and does not need local server
 configuration to start moving. If a server uses a different movement cadence, it
 sends `ClientboundSetMovementHz` reliably during world join.
+Server-authoritative player movement tuning, such as command-controlled fly
+speed, is sent with `ClientboundPlayerMovementTuning` so client prediction and
+server validation stay in the same speed envelope. `/flyspeed` stores an actual
+blocks-per-second value after multiplying the requested `1..10` multiplier by
+the configured default fly speed.
 
 The server validates movement packets against last accepted state, permissions,
 world bounds, loaded chunks, collision, and configured speed/distance limits.

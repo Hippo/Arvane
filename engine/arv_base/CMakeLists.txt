@@ -33,7 +33,9 @@ add_library(arv_base STATIC
   src/blocks/block_behavior_registration.cpp
   src/entities/entity_goal_registration.cpp
   src/entities/entity_registration.cpp
+  src/flyspeed_command.cpp
   src/fluids/fluid_registration.cpp
+  src/gamemode_command.cpp
   src/gameplay/block_break_registration.cpp
   src/items/item_behavior_registration.cpp
   src/gameplay/starter_inventory.cpp

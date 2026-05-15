@@ -42,6 +42,8 @@ enum class MessageType : u16 {
   ClientboundPlayerBlockBreakProgress = 0x0102,
   ClientboundPlayerVelocity = 0x0103,
   ClientboundSetMovementHz = 0x0104,
+  ClientboundPlayerPermissions = 0x0105,
+  ClientboundPlayerMovementTuning = 0x0106,
   ClientboundSkinRules = 0x0120,
   ClientboundPlayerProfileInfo = 0x0121,
   ClientboundPlayerProfileInfoBatch = 0x0122,

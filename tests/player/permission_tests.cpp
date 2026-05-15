@@ -108,6 +108,23 @@ TEST(PermissionTests, CustomPermissionWildcardsPreferSpecificMatches) {
       arv::player::TriState::Allow);
 }
 
+TEST(PermissionTests, GlobalWildcardGrantsAllCustomPermissions) {
+  arv::player::CustomPermissionMap permissions;
+  permissions["*"] = arv::player::TriState::Allow;
+  permissions["arvane.command.shutdown"] = arv::player::TriState::Deny;
+
+  EXPECT_TRUE(arv::player::is_valid_custom_permission_node("*"));
+  EXPECT_EQ(
+      arv::player::custom_permission_value(permissions, "plugin.shop.buy"),
+      arv::player::TriState::Allow);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(permissions, "arvane.command.gamemode.creative"),
+      arv::player::TriState::Allow);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(permissions, "arvane.command.shutdown"),
+      arv::player::TriState::Deny);
+}
+
 TEST(PermissionTests, GameModeCustomPermissionsSeedResolvedCustomMap) {
   arv::player::GameModeRegistry modes;
   ASSERT_TRUE(modes.add_builtin_mode(

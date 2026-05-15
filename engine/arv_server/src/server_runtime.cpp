@@ -346,6 +346,10 @@ bool ServerRuntime::set_player_game_mode(PlayerID player_id, std::string_view mo
   return impl_->set_player_game_mode(player_id, mode_id);
 }
 
+bool ServerRuntime::set_player_fly_speed(PlayerID player_id, f32 fly_speed) {
+  return impl_->set_player_fly_speed(player_id, fly_speed);
+}
+
 player::InventoryInsertResult ServerRuntime::insert_player_inventory_stack(
     PlayerID player_id,
     player::ItemStack stack,
@@ -807,6 +811,18 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   auto move_player = [this](PlayerID player_id, Vec3f position) {
     return teleport_player(default_world_, player_id, position);
   };
+  auto set_game_mode = [this](PlayerID player_id, std::string_view mode_id) {
+    return set_player_game_mode(player_id, mode_id);
+  };
+  auto set_fly_speed = [this](PlayerID player_id, f32 fly_speed) {
+    return set_player_fly_speed(player_id, fly_speed);
+  };
+  auto default_fly_speed = [this]() {
+    return player_tuning_.fly_speed;
+  };
+  auto max_fly_speed = [this]() {
+    return movement_.max_fly_speed_blocks_per_second;
+  };
   auto get_selection = [this](PlayerID player_id) -> std::optional<command::PlayerBlockSelection> {
     player::PlayerState* player_state = default_world_.find_player(player_id);
     if (player_state == nullptr) {
@@ -886,6 +902,10 @@ command::CommandResult ServerRuntimeImpl::execute_command(
       command::OnlinePlayerByIDFn{find_player_by_id},
       command::OnlinePlayerByNameFn{find_player_by_name},
       command::TeleportPlayerFn{move_player},
+      command::SetPlayerGameModeFn{set_game_mode},
+      command::SetPlayerFlySpeedFn{set_fly_speed},
+      command::DefaultPlayerFlySpeedFn{default_fly_speed},
+      command::MaxPlayerFlySpeedFn{max_fly_speed},
       command::PlayerSelectionByIDFn{get_selection},
       command::SetPlayerSelectionFn{set_selection},
       command::WorldBlockReadFn{read_block},

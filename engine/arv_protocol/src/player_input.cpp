@@ -4,6 +4,85 @@
 #include <utility>
 
 namespace arv::protocol {
+namespace {
+
+enum class ResolvedCorePermissionFlags : u16 {
+  None = 0U,
+  CanTakeDamage = 1U << 0U,
+  CanModifyWorld = 1U << 1U,
+  CanInteract = 1U << 2U,
+  CanOpenInventory = 1U << 3U,
+  HasCreativeInventory = 1U << 4U,
+  CanFly = 1U << 5U,
+  HasCollision = 1U << 6U,
+  IsVisibleToOthers = 1U << 7U,
+};
+
+[[nodiscard]] constexpr ResolvedCorePermissionFlags operator|(
+    ResolvedCorePermissionFlags lhs,
+    ResolvedCorePermissionFlags rhs) noexcept {
+  return static_cast<ResolvedCorePermissionFlags>(
+      static_cast<u16>(lhs) | static_cast<u16>(rhs));
+}
+
+constexpr ResolvedCorePermissionFlags& operator|=(
+    ResolvedCorePermissionFlags& lhs,
+    ResolvedCorePermissionFlags rhs) noexcept {
+  lhs = lhs | rhs;
+  return lhs;
+}
+
+[[nodiscard]] constexpr bool has_core_permission_flag(
+    ResolvedCorePermissionFlags flags,
+    ResolvedCorePermissionFlags flag) noexcept {
+  return (static_cast<u16>(flags) & static_cast<u16>(flag)) != 0U;
+}
+
+[[nodiscard]] ResolvedCorePermissionFlags core_permission_flags_from(
+    player::ResolvedCorePermissions core) noexcept {
+  ResolvedCorePermissionFlags flags = ResolvedCorePermissionFlags::None;
+  if (core.can_take_damage) {
+    flags |= ResolvedCorePermissionFlags::CanTakeDamage;
+  }
+  if (core.can_modify_world) {
+    flags |= ResolvedCorePermissionFlags::CanModifyWorld;
+  }
+  if (core.can_interact) {
+    flags |= ResolvedCorePermissionFlags::CanInteract;
+  }
+  if (core.can_open_inventory) {
+    flags |= ResolvedCorePermissionFlags::CanOpenInventory;
+  }
+  if (core.has_creative_inventory) {
+    flags |= ResolvedCorePermissionFlags::HasCreativeInventory;
+  }
+  if (core.can_fly) {
+    flags |= ResolvedCorePermissionFlags::CanFly;
+  }
+  if (core.has_collision) {
+    flags |= ResolvedCorePermissionFlags::HasCollision;
+  }
+  if (core.is_visible_to_others) {
+    flags |= ResolvedCorePermissionFlags::IsVisibleToOthers;
+  }
+  return flags;
+}
+
+[[nodiscard]] player::ResolvedCorePermissions core_permissions_from_flags(
+    ResolvedCorePermissionFlags flags) noexcept {
+  return {
+      has_core_permission_flag(flags, ResolvedCorePermissionFlags::CanTakeDamage),
+      has_core_permission_flag(flags, ResolvedCorePermissionFlags::CanModifyWorld),
+      has_core_permission_flag(flags, ResolvedCorePermissionFlags::CanInteract),
+      has_core_permission_flag(flags, ResolvedCorePermissionFlags::CanOpenInventory),
+      has_core_permission_flag(flags, ResolvedCorePermissionFlags::HasCreativeInventory),
+      has_core_permission_flag(flags, ResolvedCorePermissionFlags::CanFly),
+      has_core_permission_flag(flags, ResolvedCorePermissionFlags::HasCollision),
+      has_core_permission_flag(flags, ResolvedCorePermissionFlags::IsVisibleToOthers),
+  };
+}
+
+} // namespace
 
 std::vector<u8> serialize_serverbound_player_move(const ServerboundPlayerMove& move) {
   MessageWriter writer;
@@ -147,6 +226,57 @@ Expected<ClientboundSetMovementHz, ProtocolError> deserialize_clientbound_set_mo
     return Expected<ClientboundSetMovementHz, ProtocolError>::failure(trailing.error());
   }
   return Expected<ClientboundSetMovementHz, ProtocolError>::success({movement_hz.value()});
+}
+
+std::vector<u8> serialize_clientbound_player_permissions(
+    const ClientboundPlayerPermissions& permissions) {
+  MessageWriter writer;
+  writer.write_string(permissions.game_mode_id);
+  writer.write<ResolvedCorePermissionFlags>(
+      core_permission_flags_from(permissions.core));
+  return std::move(writer).take_bytes();
+}
+
+Expected<ClientboundPlayerPermissions, ProtocolError> deserialize_clientbound_player_permissions(
+    std::span<const u8> bytes) {
+  MessageReader reader(bytes);
+  auto game_mode_id = reader.read_string();
+  auto core_flags = reader.read<ResolvedCorePermissionFlags>();
+  if (!game_mode_id || !core_flags) {
+    return Expected<ClientboundPlayerPermissions, ProtocolError>::failure(
+        ProtocolError{"failed to decode player permissions"});
+  }
+  auto trailing = require_no_trailing_bytes(reader, "player message");
+  if (!trailing) {
+    return Expected<ClientboundPlayerPermissions, ProtocolError>::failure(trailing.error());
+  }
+  return Expected<ClientboundPlayerPermissions, ProtocolError>::success(
+      {std::move(game_mode_id.value()), core_permissions_from_flags(core_flags.value())});
+}
+
+std::vector<u8> serialize_clientbound_player_movement_tuning(
+    const ClientboundPlayerMovementTuning& tuning) {
+  MessageWriter writer;
+  write_f32(writer, tuning.fly_speed);
+  write_f32(writer, tuning.fly_vertical_speed);
+  return std::move(writer).take_bytes();
+}
+
+Expected<ClientboundPlayerMovementTuning, ProtocolError>
+deserialize_clientbound_player_movement_tuning(std::span<const u8> bytes) {
+  MessageReader reader(bytes);
+  auto fly_speed = read_f32(reader);
+  auto fly_vertical_speed = read_f32(reader);
+  if (!fly_speed || !fly_vertical_speed) {
+    return Expected<ClientboundPlayerMovementTuning, ProtocolError>::failure(
+        ProtocolError{"failed to decode player movement tuning"});
+  }
+  auto trailing = require_no_trailing_bytes(reader, "player message");
+  if (!trailing) {
+    return Expected<ClientboundPlayerMovementTuning, ProtocolError>::failure(trailing.error());
+  }
+  return Expected<ClientboundPlayerMovementTuning, ProtocolError>::success(
+      {fly_speed.value(), fly_vertical_speed.value()});
 }
 
 std::vector<u8> serialize_clientbound_player_block_break_progress(

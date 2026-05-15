@@ -26,7 +26,6 @@ struct InputFrame {
   bool primary_held{};
   bool secondary_pressed{};
   bool secondary_held{};
-  bool toggle_fly_pressed{};
   bool open_inventory_pressed{};
   bool open_chat_pressed{};
   bool tab_menu_held{};
@@ -60,6 +59,10 @@ public:
   void leave_world() noexcept;
   void apply_move_correction(const protocol::ClientboundPlayerMoveCorrection& correction);
   void apply_player_velocity(const protocol::ClientboundPlayerVelocity& velocity) noexcept;
+  void apply_player_permissions(
+      const protocol::ClientboundPlayerPermissions& permissions);
+  void apply_player_movement_tuning(
+      const protocol::ClientboundPlayerMovementTuning& tuning) noexcept;
   void apply_block_break_progress(
       const protocol::ClientboundPlayerBlockBreakProgress& progress) noexcept;
   [[nodiscard]] protocol::ServerboundPlayerMove build_movement_packet(
@@ -124,6 +127,7 @@ private:
       Seconds tick_seconds) noexcept;
   void update_render_smoothing() noexcept;
   void update_camera_transform() noexcept;
+  [[nodiscard]] bool consume_fly_toggle_request(TickIndex tick_index) noexcept;
   [[nodiscard]] physics::PlayerMovementAuthority movement_authority() const noexcept;
   [[nodiscard]] protocol::PlayerMoveFlags movement_flags() const noexcept;
 
@@ -151,7 +155,7 @@ private:
   bool jump_pressed_{};
   bool primary_pressed_{};
   bool secondary_pressed_{};
-  bool toggle_fly_pressed_{};
+  std::optional<TickIndex> last_jump_press_tick_{};
   f32 look_delta_x_{};
   f32 look_delta_y_{};
   Vec3f body_position_{8.0F, 20.0F, -20.0F};

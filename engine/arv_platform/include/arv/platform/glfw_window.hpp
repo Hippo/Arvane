@@ -72,7 +72,6 @@ struct InputSnapshot {
   bool primary_held{};
   bool secondary_pressed{};
   bool secondary_held{};
-  bool toggle_fly_pressed{};
   bool open_inventory_pressed{};
   bool open_chat_pressed{};
   bool tab_menu_held{};

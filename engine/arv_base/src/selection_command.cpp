@@ -4,14 +4,22 @@
 #include "arv/base/command_services.hpp"
 #include "arv/command/command.hpp"
 #include "arv/player/selection.hpp"
+#include "arv/text/language.hpp"
 
 #include <cassert>
 #include <cmath>
-#include <sstream>
 #include <string>
+#include <string_view>
 
 namespace arv::base::commands {
 namespace {
+
+[[nodiscard]] std::string msg(
+    const command::CommandCtx& ctx,
+    std::string_view key,
+    std::string_view fallback) {
+  return arv::text::text_or_fallback(ctx.services.language, key, fallback);
+}
 
 [[nodiscard]] BlockPos floor_block_pos(Vec3f position) noexcept {
   return {{
@@ -35,8 +43,10 @@ namespace {
     const command::CommandCtx& ctx,
     PlayerID& out_player) {
   if (!ctx.sender.player_id.has_value()) {
-    return command::CommandResult::invalid_source(
-        "Selection commands require a player source.");
+    return command::CommandResult::invalid_source(msg(
+        ctx,
+        "command.selection.player_required",
+        "Selection commands require a player source."));
   }
   out_player = ctx.sender.player_id.value();
   return command::CommandResult::success();
@@ -47,11 +57,16 @@ namespace {
   if (services == nullptr ||
       !services->player_selection_by_id ||
       !services->set_player_selection) {
-    return command::CommandResult::internal_error(
-        "Selection command services are unavailable.");
+    return command::CommandResult::internal_error(msg(
+        ctx,
+        "command.selection.services_unavailable",
+        "Selection command services are unavailable."));
   }
   if (ctx.args.empty()) {
-    return command::CommandResult::usage_error("Usage: /select <a|b|clear|info>.");
+    return command::CommandResult::usage_error(msg(
+        ctx,
+        "command.selection.usage",
+        "Usage: /select <a|b|clear|info>."));
   }
 
   PlayerID player_id;
@@ -64,45 +79,69 @@ namespace {
   const std::optional<command::PlayerBlockSelection> current =
       services->player_selection_by_id(player_id);
   if (!current.has_value()) {
-    return command::CommandResult::invalid_source("Command sender is not an online player.");
+    return command::CommandResult::invalid_source(msg(
+        ctx,
+        "command.selection.sender_not_online",
+        "Command sender is not an online player."));
   }
   player::PlayerSelection selection = to_player_selection(current.value());
 
   if (action == "clear") {
     if (!services->set_player_selection(player_id, {})) {
-      return command::CommandResult::internal_error("Unable to clear selection.");
+      return command::CommandResult::internal_error(msg(
+          ctx,
+          "command.selection.clear_failed",
+          "Unable to clear selection."));
     }
-    return command::CommandResult::success("Selection cleared.");
+    return command::CommandResult::success(msg(
+        ctx,
+        "command.selection.cleared",
+        "Selection cleared."));
   }
 
   if (action == "info") {
     const player::SelectionBoundsResult bounds = player::normalized_bounds(selection);
     if (!bounds.ok) {
-      std::ostringstream out;
-      out << bounds.message;
+      std::string a;
       if (selection.a.has_value()) {
-        out << " A=" << player::format_pos(selection.a.value()) << ".";
+        a = " A=" + player::format_pos(selection.a.value()) + ".";
       }
+      std::string b;
       if (selection.b.has_value()) {
-        out << " B=" << player::format_pos(selection.b.value()) << ".";
+        b = " B=" + player::format_pos(selection.b.value()) + ".";
       }
       command::CommandResult result = command::CommandResult::success();
-      result.add_message(command::CommandMessageKind::Info, out.str());
+      result.add_message(
+          command::CommandMessageKind::Info,
+          arv::text::format_or_fallback(
+              ctx.services.language,
+              "command.selection.info_incomplete",
+              {{"message", bounds.message}, {"a", a}, {"b", b}},
+              "{message}{a}{b}"));
       return result;
     }
     command::CommandResult result = command::CommandResult::success();
     result.add_message(
         command::CommandMessageKind::Info,
-        "Selection: " + player::format_bounds(bounds.bounds) + ".");
+        arv::text::format_or_fallback(
+            ctx.services.language,
+            "command.selection.info_complete",
+            {{"bounds", player::format_bounds(bounds.bounds)}},
+            "Selection: {bounds}."));
     return result;
   }
 
   if (action != "a" && action != "b") {
-    return command::CommandResult::usage_error("Usage: /select <a|b|clear|info>.");
+    return command::CommandResult::usage_error(msg(
+        ctx,
+        "command.selection.usage",
+        "Usage: /select <a|b|clear|info>."));
   }
   if (!ctx.sender.world_id.has_value() || !ctx.sender.position.has_value()) {
-    return command::CommandResult::invalid_source(
-        "Selection points require a player world and position.");
+    return command::CommandResult::invalid_source(msg(
+        ctx,
+        "command.selection.point_requires_position",
+        "Selection points require a player world and position."));
   }
 
   const WorldID world = ctx.sender.world_id.value();
@@ -117,17 +156,28 @@ namespace {
     selection.b = pos;
   }
   if (!services->set_player_selection(player_id, to_command_selection(selection))) {
-    return command::CommandResult::internal_error("Unable to update selection.");
+    return command::CommandResult::internal_error(msg(
+        ctx,
+        "command.selection.update_failed",
+        "Unable to update selection."));
   }
 
+  const std::string point = action == "a" ? "A" : "B";
   command::CommandResult result = command::CommandResult::success(
-      std::string{"Selection "} + (action == "a" ? "A" : "B") +
-      " set to " + player::format_pos(pos) + ".");
+      arv::text::format_or_fallback(
+          ctx.services.language,
+          "command.selection.point_set",
+          {{"point", point}, {"position", player::format_pos(pos)}},
+          "Selection {point} set to {position}."));
   const player::SelectionBoundsResult bounds = player::normalized_bounds(selection);
   if (bounds.ok) {
     result.add_message(
         command::CommandMessageKind::Info,
-        "Selection complete: " + player::format_bounds(bounds.bounds) + ".");
+        arv::text::format_or_fallback(
+            ctx.services.language,
+            "command.selection.complete",
+            {{"bounds", player::format_bounds(bounds.bounds)}},
+            "Selection complete: {bounds}."));
   }
   return result;
 }

@@ -81,7 +81,6 @@ Input must be represented in layers:
    - secondary use
    - pick block
    - hotbar slot selection
-   - toggle fly
    - drop item
    - open inventory
 
@@ -119,7 +118,6 @@ For example:
 - `Hotbar1` through `Hotbar9`
 - `NextHotbarSlot`
 - `PrevHotbarSlot`
-- `ToggleFly`
 - `OpenInventory`
 
 This allows rebinding and future support for other input devices without rewriting gameplay logic.
@@ -411,7 +409,8 @@ This is not the same as an unrestricted editor noclip camera unless explicitly c
 
 ### Activation
 
-Flying may be activated by gameplay rules or a controller toggle.
+Flying may be activated by gameplay rules or by double-tapping jump when the
+resolved permissions allow flight.
 
 The exact permission model is gameplay-defined, but the controller must support:
 

@@ -54,5 +54,6 @@ inline constexpr std::string_view PlayerAnimationAssetID = "arvane:animation/pla
 inline constexpr std::string_view TeleportPermissionNode = "arvane.command.teleport";
 inline constexpr std::string_view SelectionPermissionNode = "arvane.command.selection";
 inline constexpr std::string_view BlueprintPermissionNode = "arvane.command.blueprint";
+inline constexpr std::string_view FlySpeedPermissionNode = "arvane.commands.flyspeed";
 
 } // namespace arv::base::ids

@@ -56,6 +56,10 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto correction = registry.lookup(arv::protocol::MessageType::ClientboundPlayerMoveCorrection);
   const auto velocity = registry.lookup(arv::protocol::MessageType::ClientboundPlayerVelocity);
   const auto movement_hz = registry.lookup(arv::protocol::MessageType::ClientboundSetMovementHz);
+  const auto permissions =
+      registry.lookup(arv::protocol::MessageType::ClientboundPlayerPermissions);
+  const auto movement_tuning =
+      registry.lookup(arv::protocol::MessageType::ClientboundPlayerMovementTuning);
   const auto break_progress =
       registry.lookup(arv::protocol::MessageType::ClientboundPlayerBlockBreakProgress);
   const auto auth_challenge = registry.lookup(arv::protocol::MessageType::ClientboundAuthChallenge);
@@ -91,6 +95,8 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(correction.has_value());
   ASSERT_TRUE(velocity.has_value());
   ASSERT_TRUE(movement_hz.has_value());
+  ASSERT_TRUE(permissions.has_value());
+  ASSERT_TRUE(movement_tuning.has_value());
   ASSERT_TRUE(break_progress.has_value());
   ASSERT_TRUE(auth_challenge.has_value());
   ASSERT_TRUE(auth_response.has_value());
@@ -120,6 +126,10 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(correction->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(velocity->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(movement_hz->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(permissions->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(permissions->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(movement_tuning->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(movement_tuning->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(break_progress->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(auth_challenge->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(auth_response->direction, arv::protocol::MessageDirection::ClientToServer);
@@ -173,7 +183,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 50U);
+  EXPECT_EQ(registry.size(), 52U);
 }
 
 TEST(ProtocolTests, SessionControlPacketsRoundTripThroughSerialization) {
@@ -364,6 +374,40 @@ TEST(ProtocolTests, SetMovementHzRoundTripsThroughSerialization) {
 
   ASSERT_TRUE(decoded);
   EXPECT_FLOAT_EQ(decoded.value().movement_hz, 30.0F);
+}
+
+TEST(ProtocolTests, PlayerPermissionsRoundTripsThroughSerialization) {
+  arv::protocol::ClientboundPlayerPermissions permissions;
+  permissions.game_mode_id = "creative";
+  permissions.core.can_take_damage = false;
+  permissions.core.can_modify_world = true;
+  permissions.core.can_interact = true;
+  permissions.core.can_open_inventory = true;
+  permissions.core.has_creative_inventory = true;
+  permissions.core.can_fly = true;
+  permissions.core.has_collision = true;
+  permissions.core.is_visible_to_others = true;
+
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_player_permissions(permissions);
+  const auto decoded = arv::protocol::deserialize_clientbound_player_permissions(bytes);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().game_mode_id, "creative");
+  EXPECT_EQ(decoded.value().core, permissions.core);
+}
+
+TEST(ProtocolTests, PlayerMovementTuningRoundTripsThroughSerialization) {
+  const arv::protocol::ClientboundPlayerMovementTuning tuning{9.5F, 6.25F};
+
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_player_movement_tuning(tuning);
+  const auto decoded =
+      arv::protocol::deserialize_clientbound_player_movement_tuning(bytes);
+
+  ASSERT_TRUE(decoded);
+  EXPECT_FLOAT_EQ(decoded.value().fly_speed, 9.5F);
+  EXPECT_FLOAT_EQ(decoded.value().fly_vertical_speed, 6.25F);
 }
 
 TEST(ProtocolTests, PlayerBlockBreakProgressRoundTripsThroughSerialization) {

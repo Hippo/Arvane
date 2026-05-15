@@ -2,6 +2,7 @@
 
 #include "arv/client/command_chat.hpp"
 
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -51,16 +52,20 @@ void DesktopFrameLoop::handle_chat_command_submit(
     return;
   }
 
-  const std::string command_text = active_session->client->chat_draft();
-  if (!is_command_chat_draft(command_text)) {
+  if (!is_command_chat_draft(active_session->client->chat_draft())) {
     return;
   }
 
+  std::optional<std::string> command_text =
+      active_session->client->commit_chat_draft_to_history();
   client_input.text_submit_pressed = false;
   active_session->client->close_chat();
+  if (!command_text.has_value()) {
+    return;
+  }
   client::append_command_result_to_chat(
       *active_session->client,
-      execute_chat_command(*active_session, command_text),
+      execute_chat_command(*active_session, command_text.value()),
       assets_.language);
 }
 
