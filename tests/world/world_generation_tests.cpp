@@ -2,6 +2,7 @@
 #include "arv/asset/pack.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
+#include "arv/world/worldgen/blueprint_placement.hpp"
 #include "arv/world/worldgen/chunk_generator.hpp"
 #include "arv/world/worldgen/loader.hpp"
 #include "arv/world/worldgen/seeds.hpp"
@@ -678,6 +679,18 @@ TEST(WorldGenerationTests, LoadsPackWorldgenResourcesAndResolvesOverworld) {
       [](const arv::world::worldgen::CarverConfig& carver) {
         return carver.carver_type == arv::world::worldgen::CarverType::TunnelCaves;
       }));
+  const arv::usize structures_stage =
+      static_cast<arv::usize>(arv::world::worldgen::GenerationStage::Structures);
+  EXPECT_TRUE(std::none_of(
+      config.resolved_dimension->dimension_features_by_stage[structures_stage].begin(),
+      config.resolved_dimension->dimension_features_by_stage[structures_stage].end(),
+      [&](arv::usize feature_index) {
+        return feature_index < config.resolved_dimension->placed_features.size() &&
+               config.resolved_dimension
+                       ->configured_features[
+                           config.resolved_dimension->placed_features[feature_index].feature_index]
+                       .id == "arvane:worldgen/configured_feature/small_ruin";
+      }));
 }
 
 TEST(WorldGenerationTests, PackOceanBiomesGenerateWaterFluids) {
@@ -985,6 +998,54 @@ TEST(WorldGenerationTests, BorderCrossingStructureGeneratesFromEitherSide) {
   EXPECT_EQ(generated_block_at(origin_after.value(), origin_pos.value()), stone);
 }
 
+TEST(WorldGenerationTests, LargeStructureSetBlueprintCanCrossMultipleChunkColumns) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  auto dimension = std::make_shared<arv::world::worldgen::ResolvedDimension>(
+      make_flat_structure_dimension(registry));
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  const arv::usize feature_index = add_blueprint_feature(
+      *dimension,
+      registry,
+      "arvane:worldgen/configured_feature/large_border_ruin",
+      make_filled_blueprint("large_border_ruin", {{48, 1, 3}}, {{0, 0, 1}}, "arvane:stone[]"),
+      stone);
+  add_structure_set(
+      *dimension,
+      "arvane:worldgen/structure_set/large_border_ruins",
+      feature_index,
+      1731);
+
+  constexpr arv::u64 seed = 29ULL;
+  const arv::ChunkCoord far_chunk{2, 0};
+  const std::vector<arv::world::worldgen::StructureCandidate> candidates =
+      arv::world::worldgen::collect_structure_candidates_for_chunk(
+          *dimension,
+          seed,
+          far_chunk,
+          0,
+          1);
+  const auto crossing = std::find_if(
+      candidates.begin(),
+      candidates.end(),
+      [](const arv::world::worldgen::StructureCandidate& candidate) {
+        return candidate.candidate_chunk == arv::ChunkCoord{0, 0};
+      });
+  ASSERT_NE(crossing, candidates.end());
+
+  const arv::world::worldgen::ResolvedConfiguredFeature& feature =
+      dimension->configured_features[crossing->feature_index];
+  const arv::world::worldgen::BlockAabb far_bounds =
+      arv::world::worldgen::chunk_column_bounds(far_chunk, 0, 1);
+  const std::optional<arv::BlockPos> far_pos =
+      first_solid_blueprint_block_in_bounds(feature, *crossing, far_bounds);
+  ASSERT_TRUE(far_pos.has_value());
+
+  const auto generated =
+      arv::world::generate_chunk(make_resolved_request(dimension, seed, far_chunk));
+  ASSERT_TRUE(generated) << generated.error().message;
+  EXPECT_EQ(generated_block_at(generated.value(), far_pos.value()), stone);
+}
+
 TEST(WorldGenerationTests, ChunkGenerationOrderDoesNotChangeBorderStructureBlocks) {
   const arv::voxel::BlockRegistry registry = make_worldgen_registry();
   auto dimension = std::make_shared<arv::world::worldgen::ResolvedDimension>(
@@ -1102,6 +1163,42 @@ TEST(WorldGenerationTests, BlueprintIntegrityIsPositionHashedAcrossChunkIntersec
   }
   EXPECT_TRUE(checked_origin);
   EXPECT_TRUE(checked_neighbor);
+}
+
+TEST(WorldGenerationTests, BlueprintPlacementClearsFluidUnderSolidBlocks) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  arv::world::worldgen::ResolvedDimension dimension = make_flat_structure_dimension(registry);
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  const arv::usize feature_index = add_blueprint_feature(
+      dimension,
+      registry,
+      "arvane:worldgen/configured_feature/fluid_clearing_ruin",
+      make_filled_blueprint("fluid_clearing_ruin", {{1, 1, 1}}, {{0, 0, 0}}, "arvane:stone[]"),
+      stone);
+
+  arv::world::GeneratedChunkSection section;
+  section.coord = {{0, 0, 0}};
+  section.blocks.fill(arv::voxel::AirBlockVariantID);
+  section.fluids.fill(arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition()));
+  std::vector<arv::world::GeneratedChunkSection> sections;
+  sections.push_back(std::move(section));
+
+  arv::world::worldgen::GeneratedChunkEditView view{{0, 0}, 0, 0, &sections};
+  arv::world::worldgen::BlueprintPlacementInput input;
+  input.feature = &dimension.configured_features[feature_index];
+  input.origin = {{4, 4, 4}};
+  input.bounds = arv::world::worldgen::blueprint_world_bounds(
+      dimension.configured_features[feature_index].blueprint,
+      input.origin,
+      input.rotation);
+  input.world_seed = 1;
+  input.salt = 2;
+
+  arv::world::worldgen::place_blueprint_intersection(input, view);
+
+  const arv::usize index = arv::voxel::local_index({{4, 4, 4}});
+  EXPECT_EQ(sections.front().blocks[index], stone);
+  EXPECT_TRUE(sections.front().fluids[index].empty());
 }
 
 TEST(WorldGenerationTests, StructureCandidateSearchIsBoundedByMaxExtent) {

@@ -9,13 +9,13 @@ tags:
   - arvane:biome/mountain
 
 terrain:
-  base_height_offset: 10
-  height_scale_multiplier: 0.55
-  hill_multiplier: 0.75
-  ridge_multiplier: 1.25
-  roughness_multiplier: 1.2
-  terrace_step: 6
-  terrace_strength: 0.38
+  base_height_offset: 7
+  height_scale_multiplier: 0.46
+  hill_multiplier: 0.62
+  ridge_multiplier: 0.92
+  roughness_multiplier: 0.95
+  terrace_step: 5
+  terrace_strength: 0.18
 
 surface_rule_set: arvane:worldgen/surface_rule_set/cliffs
 

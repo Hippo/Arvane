@@ -323,8 +323,6 @@ features:
       - arvane:worldgen/placed_feature/ore_iron
     surface_decoration:
       - arvane:worldgen/placed_feature/grass_patch
-    structures:
-      - arvane:worldgen/placed_feature/small_ruin
 
 structure_sets:
   - arvane:worldgen/structure_set/small_ruins

@@ -122,7 +122,12 @@ void GeneratedChunkEditView::set(BlockPos pos, voxel::BlockVariantID block) noex
   if (!section || section.value() >= sections->size()) {
     return;
   }
-  (*sections)[section.value()].blocks[voxel::local_index(block_to_local(pos))] = block;
+  const usize index = voxel::local_index(block_to_local(pos));
+  GeneratedChunkSection& target = (*sections)[section.value()];
+  target.blocks[index] = block;
+  if (block != voxel::AirBlockVariantID) {
+    target.fluids[index] = voxel::empty_fluid_cell();
+  }
 }
 
 namespace {

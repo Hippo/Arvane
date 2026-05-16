@@ -30,12 +30,12 @@ biomes:
 
   - biome: arvane:worldgen/biome/cliffs
     climate:
-      continentalness: [-0.1, 0.75]
+      continentalness: [0.12, 0.82]
       temperature: [-1.0, 0.75]
       humidity: [-1.0, 1.0]
-      erosion: [0.28, 1.0]
-      ridges: [0.28, 1.0]
-      weirdness: [-1.0, 1.0]
+      erosion: [0.48, 1.0]
+      ridges: [0.5, 1.0]
+      weirdness: [0.0, 1.0]
 
   - biome: arvane:worldgen/biome/mountains
     climate:
