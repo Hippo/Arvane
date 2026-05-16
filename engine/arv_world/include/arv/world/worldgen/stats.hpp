@@ -8,26 +8,37 @@
 namespace arv::world::worldgen {
 
 enum class WorldGenerationStage : u8 {
-  TerrainProfile,
-  SurfaceSelection,
-  BaseFillAndSurface,
-  Carvers,
+  BiomeSampling,
+  TerrainPrepass,
+  SurfaceRules,
+  BaseFill,
+  FluidFill,
+  NoiseCaves,
+  Ravines,
+  TunnelCaves,
   Features,
   Structures,
+  AllocationHandoff,
   Count,
 };
 
 inline constexpr std::array<const char*, static_cast<usize>(WorldGenerationStage::Count)>
     WorldGenerationStageNames{{
-        "terrain_profile",
-        "surface_selection",
-        "base_fill_surface",
-        "carvers",
+        "biome_sampling",
+        "terrain_prepass",
+        "surface_rules",
+        "base_fill",
+        "fluid_fill",
+        "noise_caves",
+        "ravines",
+        "tunnel_caves",
         "features",
         "structures",
+        "allocation_handoff",
     }};
 
 struct WorldGenerationSectionStats {
+  u64 allocated_sections{};
   u64 generated_sections{};
   u64 skipped_sections{};
   u64 all_air_sections{};
@@ -39,14 +50,27 @@ struct WorldGenerationSectionStats {
 struct WorldGenerationCandidateStats {
   u64 placed_features_considered{};
   u64 feature_origin_chunks_considered{};
+  u64 feature_origin_chunks_profiled{};
+  u64 feature_origin_chunk_cache_hits{};
+  u64 feature_origin_chunks_rejected_by_summary{};
+  u64 feature_candidates_rejected_by_extent{};
   u64 feature_candidates_considered{};
   u64 feature_candidates_rejected{};
   u64 feature_candidates_applied{};
   u64 structure_cells_inspected{};
+  u64 structure_candidates_considered{};
+  u64 structure_candidates_intersecting{};
+  u64 structure_candidates_rejected{};
   u64 structure_candidates_applied{};
+  u64 ravine_cells_inspected{};
+  u64 ravine_candidates_considered{};
+  u64 ravine_candidates_applied{};
+  u64 tunnel_regions_considered{};
+  u64 tunnels_carved{};
 };
 
 struct WorldGenerationNoiseStats {
+  u64 terrain_profiles_generated{};
   u64 terrain_lattice_samples{};
   u64 climate_lattice_samples{};
   u64 direct_2d_noise_samples{};

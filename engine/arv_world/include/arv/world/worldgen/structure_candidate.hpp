@@ -20,6 +20,9 @@ struct StructureCandidate {
 
 struct StructureCandidateSearchStats {
   u32 inspected_cells{};
+  u32 considered_candidates{};
+  u32 intersecting_candidates{};
+  u32 rejected_candidates{};
   u32 accepted_candidates{};
 };
 

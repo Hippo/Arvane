@@ -126,6 +126,53 @@ namespace {
   return true;
 }
 
+[[nodiscard]] bool profile_may_satisfy_filter(
+    const ResolvedDimension& dimension,
+    const TerrainProfile& profile,
+    const ResolvedPlacementFilter& filter) noexcept {
+  switch (filter.raw.type) {
+    case PlacementFilterConfig::Type::Biome:
+      return filter.biome_index.has_value() &&
+             std::find(
+                 profile.biome_by_column.begin(),
+                 profile.biome_by_column.end(),
+                 filter.biome_index.value()) != profile.biome_by_column.end();
+    case PlacementFilterConfig::Type::BiomeTag:
+      if (!filter.biome_tag_index.has_value()) {
+        return false;
+      }
+      for (const usize biome_index : profile.biome_by_column) {
+        if (biome_index < dimension.biomes.size() &&
+            biome_has_resolved_tag(dimension.biomes[biome_index], filter.biome_tag_index.value())) {
+          return true;
+        }
+      }
+      return false;
+    case PlacementFilterConfig::Type::Underwater:
+      return filter.raw.bool_value
+                 ? profile.min_surface_y < dimension.raw.vertical.sea_level
+                 : profile.max_surface_y >= dimension.raw.vertical.sea_level;
+    case PlacementFilterConfig::Type::BlockBelow:
+    case PlacementFilterConfig::Type::Replaceable:
+    case PlacementFilterConfig::Type::SlopeLessThan:
+    case PlacementFilterConfig::Type::SlopeGreaterThan:
+      return true;
+  }
+  return true;
+}
+
+[[nodiscard]] bool profile_may_satisfy_filters(
+    const ResolvedDimension& dimension,
+    const TerrainProfile& profile,
+    const std::vector<ResolvedPlacementFilter>& filters) noexcept {
+  for (const ResolvedPlacementFilter& filter : filters) {
+    if (!profile_may_satisfy_filter(dimension, profile, filter)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] i32 placement_count(
     const PlacementCountConfig& count,
     DeterministicRng& rng) noexcept {
@@ -253,7 +300,13 @@ public:
           return cached.coord == coord;
         });
     if (found != profiles_.end()) {
+      if (stats_ != nullptr) {
+        ++stats_->candidates.feature_origin_chunk_cache_hits;
+      }
       return found->profile;
+    }
+    if (stats_ != nullptr) {
+      ++stats_->candidates.feature_origin_chunks_profiled;
     }
     profiles_.push_back({coord, generate_terrain_profile(dimension_, seed_, coord, stats_)});
     return profiles_.back().profile;
@@ -405,12 +458,21 @@ void run_placed_feature(
           current_local_z < -feature.radius_blocks || current_local_z >= ChunkSize + feature.radius_blocks) {
         if (stats != nullptr) {
           ++stats->candidates.feature_candidates_rejected;
+          ++stats->candidates.feature_candidates_rejected_by_extent;
         }
         continue;
       }
     }
     if (origin_profile == nullptr) {
       origin_profile = &terrain_profile_cache.get(origin_chunk);
+      if (!profile_may_satisfy_filters(dimension, *origin_profile, placed.filters)) {
+        if (stats != nullptr) {
+          ++stats->candidates.feature_origin_chunks_rejected_by_summary;
+          stats->candidates.feature_candidates_rejected +=
+              static_cast<u64>(std::max(0, count - attempt));
+        }
+        return;
+      }
     }
     const i32 y = placement_y(placed.raw.height, *origin_profile, local_x, local_z, rng);
     BlockPos pos{{world_x, y, world_z}};
@@ -442,18 +504,38 @@ GeneratedChunkResult generate_resolved_chunk(
   chunk.coord = request.coord;
   const i32 min_chunk_y = std::min(request.min_chunk_y, request.max_chunk_y);
   const i32 max_chunk_y = std::max(request.min_chunk_y, request.max_chunk_y);
-  chunk.sections.reserve(static_cast<usize>(max_chunk_y - min_chunk_y + 1));
-
-  TerrainProfile profile;
   {
-    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::TerrainProfile};
-    profile = generate_terrain_profile(dimension, request.seed, request.coord, stats);
+    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::AllocationHandoff};
+    chunk.sections.reserve(static_cast<usize>(max_chunk_y - min_chunk_y + 1));
   }
+  auto make_section = [&](i32 chunk_y) {
+    const auto section_start = std::chrono::steady_clock::now();
+    GeneratedChunkSection section;
+    section.coord = chunk_section(request.coord, chunk_y);
+    if (stats != nullptr) {
+      ++stats->sections.allocated_sections;
+      stats->add_stage_time(
+          WorldGenerationStage::AllocationHandoff,
+          elapsed_ns(section_start));
+    }
+    return section;
+  };
+  auto append_section = [&](GeneratedChunkSection section) {
+    const auto handoff_start = std::chrono::steady_clock::now();
+    chunk.sections.emplace_back(std::move(section));
+    if (stats != nullptr) {
+      stats->add_stage_time(
+          WorldGenerationStage::AllocationHandoff,
+          elapsed_ns(handoff_start));
+    }
+  };
+
+  TerrainProfile profile = generate_terrain_profile(dimension, request.seed, request.coord, stats);
   chunk.surface_y_by_column = profile.surface_y_by_column;
 
   std::array<const std::vector<ResolvedSurfaceLayer>*, voxel::ChunkArea> surface_layers_by_column{};
   {
-    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::SurfaceSelection};
+    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::SurfaceRules};
     for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
       surface_layers_by_column[column_index] =
           choose_surface_layers(dimension, profile, column_index);
@@ -467,8 +549,7 @@ GeneratedChunkResult generate_resolved_chunk(
     const i32 fill_ceiling =
         std::max(profile.max_surface_y, dimension.raw.vertical.sea_level);
     for (i32 chunk_y = min_chunk_y; chunk_y <= max_chunk_y; ++chunk_y) {
-      GeneratedChunkSection section;
-      section.coord = chunk_section(request.coord, chunk_y);
+      GeneratedChunkSection section = make_section(chunk_y);
       if (stats != nullptr) {
         ++stats->sections.generated_sections;
       }
@@ -482,7 +563,7 @@ GeneratedChunkResult generate_resolved_chunk(
           ++stats->sections.skipped_sections;
           ++stats->sections.all_air_sections;
         }
-        chunk.sections.emplace_back(std::move(section));
+        append_section(std::move(section));
         continue;
       }
 
@@ -493,17 +574,20 @@ GeneratedChunkResult generate_resolved_chunk(
           ++stats->sections.skipped_sections;
           ++stats->sections.all_air_sections;
         }
-        chunk.sections.emplace_back(std::move(section));
+        append_section(std::move(section));
         continue;
       }
 
       if (section_min_y > profile.max_surface_y &&
           section_max_y <= dimension.raw.vertical.sea_level) {
-        section.fluids.fill(water_source);
+        {
+          ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::FluidFill};
+          section.fluids.fill(water_source);
+        }
         if (stats != nullptr) {
           ++stats->sections.bulk_fluid_sections;
         }
-        chunk.sections.emplace_back(std::move(section));
+        append_section(std::move(section));
         continue;
       }
 
@@ -517,11 +601,14 @@ GeneratedChunkResult generate_resolved_chunk(
                 section_min_y,
                 section_max_y);
         if (uniform_block.has_value()) {
-          section.blocks.fill(uniform_block.value());
+          {
+            ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::BaseFill};
+            section.blocks.fill(uniform_block.value());
+          }
           if (stats != nullptr) {
             ++stats->sections.bulk_solid_sections;
           }
-          chunk.sections.emplace_back(std::move(section));
+          append_section(std::move(section));
           continue;
         }
       }
@@ -531,7 +618,7 @@ GeneratedChunkResult generate_resolved_chunk(
       }
 
       {
-        ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::BaseFillAndSurface};
+        ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::BaseFill};
         for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
           const ChunkLocalColumn column = voxel::local_column(column_index);
           const i32 surface_y = profile.surface_y_by_column[column_index];
@@ -549,7 +636,14 @@ GeneratedChunkResult generate_resolved_chunk(
               block_index += voxel::ChunkSide;
             }
           }
+        }
+      }
 
+      {
+        ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::FluidFill};
+        for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
+          const ChunkLocalColumn column = voxel::local_column(column_index);
+          const i32 surface_y = profile.surface_y_by_column[column_index];
           const i32 water_bottom_y = std::max(fill_min_y, surface_y + 1);
           const i32 water_top_y = std::min(fill_max_y, dimension.raw.vertical.sea_level);
           if (water_bottom_y > water_top_y) {
@@ -564,7 +658,7 @@ GeneratedChunkResult generate_resolved_chunk(
           }
         }
       }
-      chunk.sections.emplace_back(std::move(section));
+      append_section(std::move(section));
     }
   }
 
@@ -572,7 +666,6 @@ GeneratedChunkResult generate_resolved_chunk(
   TerrainProfileCache terrain_profile_cache{dimension, request.seed, request.coord, profile, stats};
 
   {
-    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::Carvers};
     ARV_PROFILE_ZONE("Worldgen carvers");
     apply_carvers(dimension, profile, view, request.seed, stats);
   }
@@ -639,6 +732,12 @@ GeneratedChunkResult generate_resolved_chunk(
                 stats != nullptr ? &structure_stats : nullptr);
         if (stats != nullptr) {
           stats->candidates.structure_cells_inspected += structure_stats.inspected_cells;
+          stats->candidates.structure_candidates_considered +=
+              structure_stats.considered_candidates;
+          stats->candidates.structure_candidates_intersecting +=
+              structure_stats.intersecting_candidates;
+          stats->candidates.structure_candidates_rejected +=
+              structure_stats.rejected_candidates;
           stats->candidates.structure_candidates_applied += structure_stats.accepted_candidates;
         }
         for (const StructureCandidate& candidate : structure_candidates) {

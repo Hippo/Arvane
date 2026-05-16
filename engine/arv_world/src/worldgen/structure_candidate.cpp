@@ -68,9 +68,13 @@ namespace {
     u64 seed,
     usize structure_set_index,
     ChunkCoord placement_cell,
-    BlockAabb current_chunk_bounds) {
+    BlockAabb current_chunk_bounds,
+    StructureCandidateSearchStats* stats) {
   const ResolvedStructureSet& structure_set = dimension.structure_sets[structure_set_index];
   if (structure_set.structures.empty()) {
+    if (stats != nullptr) {
+      ++stats->rejected_candidates;
+    }
     return std::nullopt;
   }
   const i32 average = std::max(1, structure_set.raw.placement.average_distance_chunks);
@@ -91,12 +95,21 @@ namespace {
   const std::optional<usize> entry_index =
       select_weighted_structure_entry(structure_set, rng);
   if (!entry_index.has_value()) {
+    if (stats != nullptr) {
+      ++stats->rejected_candidates;
+    }
     return std::nullopt;
+  }
+  if (stats != nullptr) {
+    ++stats->considered_candidates;
   }
   const ResolvedStructureEntry& entry = structure_set.structures[entry_index.value()];
   const ResolvedConfiguredFeature& feature = dimension.configured_features[entry.feature_index];
   const auto* blueprint_feature = std::get_if<BlueprintFeatureConfig>(&feature.raw.config);
   if (blueprint_feature == nullptr) {
+    if (stats != nullptr) {
+      ++stats->rejected_candidates;
+    }
     return std::nullopt;
   }
 
@@ -110,6 +123,9 @@ namespace {
       candidate_profile.surface_y_by_column[column_index] + 1,
       candidate_chunk.z * ChunkSize + local_z}};
   if (!terrain_filters_pass(dimension, candidate_profile, structure_set.filters, origin)) {
+    if (stats != nullptr) {
+      ++stats->rejected_candidates;
+    }
     return std::nullopt;
   }
   const StructureRotationY rotation =
@@ -118,7 +134,13 @@ namespace {
           : StructureRotationY::Deg0;
   const BlockAabb bounds = blueprint_world_bounds(feature.blueprint, origin, rotation);
   if (!intersects(bounds, current_chunk_bounds)) {
+    if (stats != nullptr) {
+      ++stats->rejected_candidates;
+    }
     return std::nullopt;
+  }
+  if (stats != nullptr) {
+    ++stats->intersecting_candidates;
   }
   return StructureCandidate{
       structure_set_index,
@@ -165,7 +187,8 @@ std::vector<StructureCandidate> collect_structure_candidates_for_chunk(
             seed,
             structure_set_index,
             {cell_x, cell_z},
-            current_bounds);
+            current_bounds,
+            stats);
         if (!candidate.has_value()) {
           continue;
         }

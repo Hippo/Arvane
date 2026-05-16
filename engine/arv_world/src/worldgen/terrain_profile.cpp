@@ -25,22 +25,22 @@ inline constexpr usize ExpandedTerrainArea =
   return a + (b - a) * t;
 }
 
-class ClimateNoiseLattice2D {
+class NoiseLattice2D {
 public:
-  ClimateNoiseLattice2D() = default;
+  NoiseLattice2D() = default;
 
-  ClimateNoiseLattice2D(
+  NoiseLattice2D(
       const NoiseSampler& sampler,
-      i32 origin_x,
-      i32 origin_z,
-      i32 step)
+      i32 min_world_x,
+      i32 min_world_z,
+      i32 max_world_x,
+      i32 max_world_z,
+      i32 step = DefaultLatticeStep)
       : step_(std::max(1, step)),
-        base_x_(floor_div(origin_x, step_) * step_),
-        base_z_(floor_div(origin_z, step_) * step_) {
-    const i32 max_x = origin_x + ChunkSize - 1;
-    const i32 max_z = origin_z + ChunkSize - 1;
-    grid_side_x_ = ((max_x - base_x_) / step_) + 2;
-    grid_side_z_ = ((max_z - base_z_) / step_) + 2;
+        base_x_(floor_div(min_world_x, step_) * step_),
+        base_z_(floor_div(min_world_z, step_) * step_) {
+    grid_side_x_ = ((max_world_x - base_x_) / step_) + 2;
+    grid_side_z_ = ((max_world_z - base_z_) / step_) + 2;
     lattice_.resize(static_cast<usize>(grid_side_x_) * static_cast<usize>(grid_side_z_));
 
     for (i32 grid_z = 0; grid_z < grid_side_z_; ++grid_z) {
@@ -52,18 +52,28 @@ public:
     }
   }
 
-  [[nodiscard]] f32 sample(i32 world_x, i32 world_z) const noexcept {
+  [[nodiscard]] u64 sample_count() const noexcept {
+    return static_cast<u64>(lattice_.size());
+  }
+
+  [[nodiscard]] f32 sample(f32 world_x, f32 world_z) const noexcept {
     if (lattice_.empty() || grid_side_x_ < 2 || grid_side_z_ < 2) {
       return 0.0F;
     }
-    const i32 offset_x = world_x - base_x_;
-    const i32 offset_z = world_z - base_z_;
-    const i32 grid_x = std::clamp(offset_x / step_, 0, grid_side_x_ - 2);
-    const i32 grid_z = std::clamp(offset_z / step_, 0, grid_side_z_ - 2);
+    const f32 offset_x = world_x - static_cast<f32>(base_x_);
+    const f32 offset_z = world_z - static_cast<f32>(base_z_);
+    const i32 grid_x = std::clamp(
+        static_cast<i32>(std::floor(offset_x / static_cast<f32>(step_))),
+        0,
+        grid_side_x_ - 2);
+    const i32 grid_z = std::clamp(
+        static_cast<i32>(std::floor(offset_z / static_cast<f32>(step_))),
+        0,
+        grid_side_z_ - 2);
     const f32 t_x =
-        static_cast<f32>(offset_x - grid_x * step_) / static_cast<f32>(step_);
+        (offset_x - static_cast<f32>(grid_x * step_)) / static_cast<f32>(step_);
     const f32 t_z =
-        static_cast<f32>(offset_z - grid_z * step_) / static_cast<f32>(step_);
+        (offset_z - static_cast<f32>(grid_z * step_)) / static_cast<f32>(step_);
     return lerp(
         lerp(
             lattice_[grid_index(grid_x, grid_z)],
@@ -92,33 +102,27 @@ private:
 
 struct ClimateFieldRuntime {
   NoiseSampler sampler{};
-  ClimateNoiseLattice2D lattice{};
+  NoiseLattice2D lattice{};
   f32 scale{1.0F};
   f32 offset{};
 };
 
 struct TerrainFieldRuntime {
   NoiseSampler sampler{};
-  ChunkNoiseLattice2D lattice{};
+  NoiseLattice2D lattice{};
   bool enabled{};
-  bool direct_samples{};
 
   [[nodiscard]] f32 sample(
       i32 world_x,
       i32 world_z,
-      i32 local_x,
-      i32 local_z,
       f32 warp_x,
       f32 warp_z) const noexcept {
     if (!enabled) {
       return 0.0F;
     }
-    if (direct_samples) {
-      return sampler.sample_2d(
-          static_cast<f32>(world_x) + warp_x,
-          static_cast<f32>(world_z) + warp_z);
-    }
-    return lattice.sample(local_x, local_z);
+    return lattice.sample(
+        static_cast<f32>(world_x) + warp_x,
+        static_cast<f32>(world_z) + warp_z);
   }
 };
 
@@ -144,37 +148,24 @@ struct RawTerrainColumn {
 [[nodiscard]] TerrainFieldRuntime make_terrain_field(
     const NoiseFieldConfig& config,
     u64 dimension_seed,
-    i32 origin_x,
-    i32 origin_z,
-    bool direct_samples,
+    i32 min_world_x,
+    i32 min_world_z,
+    i32 max_world_x,
+    i32 max_world_z,
     WorldGenerationStats* stats) {
   TerrainFieldRuntime field;
   field.enabled = true;
-  field.direct_samples = direct_samples;
   field.sampler = NoiseSampler{config, dimension_seed};
-  if (!direct_samples) {
-    field.lattice = ChunkNoiseLattice2D{field.sampler, origin_x, origin_z};
-    if (stats != nullptr) {
-      stats->noise.terrain_lattice_samples +=
-          static_cast<u64>(ChunkNoiseLattice2D::GridSide * ChunkNoiseLattice2D::GridSide);
-    }
+  field.lattice = NoiseLattice2D{
+      field.sampler,
+      min_world_x,
+      min_world_z,
+      max_world_x,
+      max_world_z};
+  if (stats != nullptr) {
+    stats->noise.terrain_lattice_samples += field.lattice.sample_count();
   }
   return field;
-}
-
-[[nodiscard]] u64 climate_lattice_sample_count(
-    i32 origin_x,
-    i32 origin_z,
-    i32 step) noexcept {
-  const i32 normalized_step = std::max(1, step);
-  const i32 base_x = floor_div(origin_x, normalized_step) * normalized_step;
-  const i32 base_z = floor_div(origin_z, normalized_step) * normalized_step;
-  const i32 max_x = origin_x + ChunkSize - 1;
-  const i32 max_z = origin_z + ChunkSize - 1;
-  const i32 grid_side_x = ((max_x - base_x) / normalized_step) + 2;
-  const i32 grid_side_z = ((max_z - base_z) / normalized_step) + 2;
-  return static_cast<u64>(std::max(0, grid_side_x)) *
-         static_cast<u64>(std::max(0, grid_side_z));
 }
 
 [[nodiscard]] f32 climate_range_score(FloatRange range, f32 value) noexcept {
@@ -355,117 +346,164 @@ TerrainProfile generate_terrain_profile(
       dimension.terrain.warp_x_noise.has_value() &&
       dimension.terrain.warp_z_noise.has_value();
   const bool use_step_smoothing = dimension.terrain.shape.max_column_step > 0;
-  const bool use_direct_terrain_samples = use_domain_warp || use_step_smoothing;
+  const i32 min_local = use_step_smoothing ? -ExpandedTerrainBorder : 0;
+  const i32 max_local =
+      use_step_smoothing ? ChunkSize + ExpandedTerrainBorder - 1 : ChunkSize - 1;
+  const i32 climate_min_world_x = origin_x + min_local;
+  const i32 climate_min_world_z = origin_z + min_local;
+  const i32 climate_max_world_x = origin_x + max_local;
+  const i32 climate_max_world_z = origin_z + max_local;
+  const i32 warp_margin =
+      use_domain_warp
+          ? static_cast<i32>(std::ceil(std::abs(dimension.terrain.shape.domain_warp_amplitude))) +
+                DefaultLatticeStep
+          : 0;
+  const i32 terrain_min_world_x = climate_min_world_x - warp_margin;
+  const i32 terrain_min_world_z = climate_min_world_z - warp_margin;
+  const i32 terrain_max_world_x = climate_max_world_x + warp_margin;
+  const i32 terrain_max_world_z = climate_max_world_z + warp_margin;
+
+  if (stats != nullptr) {
+    ++stats->noise.terrain_profiles_generated;
+  }
 
   std::vector<ClimateFieldRuntime> climate_fields;
-  climate_fields.reserve(dimension.biome_source.fields.size());
-  const i32 climate_step = std::max(1, dimension.biome_source.raw.sample_scale_xz);
-  for (const ResolvedClimateField& field : dimension.biome_source.fields) {
-    ClimateFieldRuntime runtime;
-    runtime.sampler = NoiseSampler{field.noise, dimension_seed};
-    if (!use_step_smoothing) {
-      runtime.lattice = ClimateNoiseLattice2D{runtime.sampler, origin_x, origin_z, climate_step};
+  {
+    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::BiomeSampling};
+    climate_fields.reserve(dimension.biome_source.fields.size());
+    const i32 climate_step = std::max(1, dimension.biome_source.raw.sample_scale_xz);
+    for (const ResolvedClimateField& field : dimension.biome_source.fields) {
+      ClimateFieldRuntime runtime;
+      runtime.sampler = NoiseSampler{field.noise, dimension_seed};
+      runtime.lattice = NoiseLattice2D{
+          runtime.sampler,
+          climate_min_world_x,
+          climate_min_world_z,
+          climate_max_world_x,
+          climate_max_world_z,
+          climate_step};
+      runtime.scale = field.scale;
+      runtime.offset = field.offset;
+      if (stats != nullptr) {
+        stats->noise.climate_lattice_samples += runtime.lattice.sample_count();
+      }
+      climate_fields.push_back(std::move(runtime));
     }
-    runtime.scale = field.scale;
-    runtime.offset = field.offset;
-    if (stats != nullptr && !use_step_smoothing) {
-      stats->noise.climate_lattice_samples +=
-          climate_lattice_sample_count(origin_x, origin_z, climate_step);
-    }
-    climate_fields.push_back(std::move(runtime));
   }
   std::vector<f32> climate_values(climate_fields.size());
-  const TerrainFieldRuntime primary = make_terrain_field(
-      dimension.terrain.primary_noise,
-      dimension_seed,
-      origin_x,
-      origin_z,
-      use_direct_terrain_samples,
-      stats);
-  const TerrainFieldRuntime detail = make_terrain_field(
-      dimension.terrain.detail_noise,
-      dimension_seed,
-      origin_x,
-      origin_z,
-      use_direct_terrain_samples,
-      stats);
-  const TerrainFieldRuntime hill =
-      dimension.terrain.hill_noise.has_value()
-          ? make_terrain_field(
-                *dimension.terrain.hill_noise,
-                dimension_seed,
-                origin_x,
-                origin_z,
-                use_direct_terrain_samples,
-                stats)
-          : TerrainFieldRuntime{};
-  const TerrainFieldRuntime ridge =
-      dimension.terrain.ridge_noise.has_value()
-          ? make_terrain_field(
-                *dimension.terrain.ridge_noise,
-                dimension_seed,
-                origin_x,
-                origin_z,
-                use_direct_terrain_samples,
-                stats)
-          : TerrainFieldRuntime{};
-  const TerrainFieldRuntime warp_x =
-      use_domain_warp
-          ? make_terrain_field(
-                *dimension.terrain.warp_x_noise,
-                dimension_seed,
-                origin_x,
-                origin_z,
-                use_step_smoothing,
-                stats)
-          : TerrainFieldRuntime{};
-  const TerrainFieldRuntime warp_z =
-      use_domain_warp
-          ? make_terrain_field(
-                *dimension.terrain.warp_z_noise,
-                dimension_seed,
-                origin_x,
-                origin_z,
-                use_step_smoothing,
-                stats)
-          : TerrainFieldRuntime{};
+  TerrainFieldRuntime primary;
+  TerrainFieldRuntime detail;
+  TerrainFieldRuntime hill;
+  TerrainFieldRuntime ridge;
+  TerrainFieldRuntime warp_x;
+  TerrainFieldRuntime warp_z;
+  {
+    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::TerrainPrepass};
+    primary = make_terrain_field(
+        dimension.terrain.primary_noise,
+        dimension_seed,
+        terrain_min_world_x,
+        terrain_min_world_z,
+        terrain_max_world_x,
+        terrain_max_world_z,
+        stats);
+    detail = make_terrain_field(
+        dimension.terrain.detail_noise,
+        dimension_seed,
+        terrain_min_world_x,
+        terrain_min_world_z,
+        terrain_max_world_x,
+        terrain_max_world_z,
+        stats);
+    hill = dimension.terrain.hill_noise.has_value()
+               ? make_terrain_field(
+                     *dimension.terrain.hill_noise,
+                     dimension_seed,
+                     terrain_min_world_x,
+                     terrain_min_world_z,
+                     terrain_max_world_x,
+                     terrain_max_world_z,
+                     stats)
+               : TerrainFieldRuntime{};
+    ridge = dimension.terrain.ridge_noise.has_value()
+                ? make_terrain_field(
+                      *dimension.terrain.ridge_noise,
+                      dimension_seed,
+                      terrain_min_world_x,
+                      terrain_min_world_z,
+                      terrain_max_world_x,
+                      terrain_max_world_z,
+                      stats)
+                : TerrainFieldRuntime{};
+    warp_x = use_domain_warp
+                 ? make_terrain_field(
+                       *dimension.terrain.warp_x_noise,
+                       dimension_seed,
+                       climate_min_world_x,
+                       climate_min_world_z,
+                       climate_max_world_x,
+                       climate_max_world_z,
+                       stats)
+                 : TerrainFieldRuntime{};
+    warp_z = use_domain_warp
+                 ? make_terrain_field(
+                       *dimension.terrain.warp_z_noise,
+                       dimension_seed,
+                       climate_min_world_x,
+                       climate_min_world_z,
+                       climate_max_world_x,
+                       climate_max_world_z,
+                       stats)
+                 : TerrainFieldRuntime{};
+  }
 
   auto climate_sample = [&](const ClimateFieldRuntime& field, i32 world_x, i32 world_z) {
-    const f32 raw =
-        use_step_smoothing
-            ? field.sampler.sample_2d(static_cast<f32>(world_x), static_cast<f32>(world_z))
-            : field.lattice.sample(world_x, world_z);
+    const f32 raw = field.lattice.sample(
+        static_cast<f32>(world_x),
+        static_cast<f32>(world_z));
     return std::clamp(raw * field.scale + field.offset, -1.0F, 1.0F);
   };
 
-  auto sample_column = [&](i32 local_x, i32 local_z) {
+  std::array<RawTerrainColumn, ExpandedTerrainArea> raw_columns{};
+  std::array<BiomeTerrainModifiers, ExpandedTerrainArea> modifiers_by_column{};
+  std::array<i32, ExpandedTerrainArea> smoothed_heights{};
+
+  {
+    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::BiomeSampling};
+    for (i32 local_z = min_local; local_z <= max_local; ++local_z) {
+      for (i32 local_x = min_local; local_x <= max_local; ++local_x) {
+        const i32 world_x = origin_x + local_x;
+        const i32 world_z = origin_z + local_z;
+        for (usize field_index = 0; field_index < climate_fields.size(); ++field_index) {
+          climate_values[field_index] =
+              climate_sample(climate_fields[field_index], world_x, world_z);
+        }
+        const BiomeSample biome_sample = sample_biomes(dimension, climate_values);
+        const usize biome_index =
+            std::min(biome_sample.dominant_biome, dimension.biomes.size() - 1U);
+        const usize index = expanded_index(local_x, local_z);
+        raw_columns[index].biome_index = biome_index;
+        raw_columns[index].biome_sample = biome_sample;
+        modifiers_by_column[index] = blend_terrain_modifiers(dimension, biome_sample);
+      }
+    }
+  }
+
+  auto sample_height = [&](i32 local_x, i32 local_z) {
     const i32 world_x = origin_x + local_x;
     const i32 world_z = origin_z + local_z;
-    for (usize field_index = 0; field_index < climate_fields.size(); ++field_index) {
-      climate_values[field_index] =
-          climate_sample(climate_fields[field_index], world_x, world_z);
-    }
-    if (stats != nullptr && use_step_smoothing) {
-      stats->noise.direct_2d_noise_samples += climate_fields.size();
-    }
-    const BiomeSample biome_sample = sample_biomes(dimension, climate_values);
-    const usize biome_index =
-        std::min(biome_sample.dominant_biome, dimension.biomes.size() - 1U);
     const BiomeTerrainModifiers modifiers =
-        blend_terrain_modifiers(dimension, biome_sample);
+        modifiers_by_column[expanded_index(local_x, local_z)];
 
     const f32 warp_amount = dimension.terrain.shape.domain_warp_amplitude;
     const f32 offset_x =
         use_domain_warp
-            ? warp_x.sample(world_x, world_z, local_x, local_z, 0.0F, 0.0F) * warp_amount
+            ? warp_x.sample(world_x, world_z, 0.0F, 0.0F) * warp_amount
             : 0.0F;
     const f32 offset_z =
         use_domain_warp
-            ? warp_z.sample(world_x, world_z, local_x, local_z, 0.0F, 0.0F) * warp_amount
+            ? warp_z.sample(world_x, world_z, 0.0F, 0.0F) * warp_amount
             : 0.0F;
-    if (stats != nullptr && use_domain_warp && use_step_smoothing) {
-      stats->noise.direct_2d_noise_samples += 2U;
-    }
 
     const f32 base = static_cast<f32>(dimension.terrain.height.base) +
                      (dimension.terrain.biome_modifiers.base_height_offset
@@ -489,17 +527,13 @@ TerrainProfile generate_terrain_profile(
              : 1.0F);
 
     const f32 continental =
-        primary.sample(world_x, world_z, local_x, local_z, offset_x, offset_z);
-    const f32 hills = hill.sample(world_x, world_z, local_x, local_z, offset_x, offset_z);
+        primary.sample(world_x, world_z, offset_x, offset_z);
+    const f32 hills = hill.sample(world_x, world_z, offset_x, offset_z);
     const f32 ridge_height = ridged_value(
-        ridge.sample(world_x, world_z, local_x, local_z, offset_x, offset_z),
+        ridge.sample(world_x, world_z, offset_x, offset_z),
         dimension.terrain.shape.ridge_sharpness);
     const f32 detail_height =
-        detail.sample(world_x, world_z, local_x, local_z, offset_x, offset_z);
-    if (stats != nullptr && use_direct_terrain_samples) {
-      stats->noise.direct_2d_noise_samples +=
-          2U + (hill.enabled ? 1U : 0U) + (ridge.enabled ? 1U : 0U);
-    }
+        detail.sample(world_x, world_z, offset_x, offset_z);
 
     f32 height = base + continental * continental_scale + hills * hill_scale +
                  ridge_height * ridge_scale + detail_height * detail_scale;
@@ -513,94 +547,92 @@ TerrainProfile generate_terrain_profile(
             : dimension.terrain.shape.terrace_strength;
     height = apply_terrace(height, terrace_step, terrace_strength);
 
-    return RawTerrainColumn{
-        std::clamp(
-            static_cast<i32>(std::floor(height + 0.5F)),
-            dimension.raw.vertical.min_y,
-            dimension.raw.vertical.max_y),
-        biome_index,
-        biome_sample};
+    return std::clamp(
+        static_cast<i32>(std::floor(height + 0.5F)),
+        dimension.raw.vertical.min_y,
+        dimension.raw.vertical.max_y);
   };
 
-  std::array<RawTerrainColumn, ExpandedTerrainArea> raw_columns{};
-  std::array<i32, ExpandedTerrainArea> smoothed_heights{};
-  const i32 min_local = use_step_smoothing ? -ExpandedTerrainBorder : 0;
-  const i32 max_local =
-      use_step_smoothing ? ChunkSize + ExpandedTerrainBorder - 1 : ChunkSize - 1;
-  for (i32 local_z = min_local; local_z <= max_local; ++local_z) {
-    for (i32 local_x = min_local; local_x <= max_local; ++local_x) {
-      const RawTerrainColumn raw = sample_column(local_x, local_z);
-      raw_columns[expanded_index(local_x, local_z)] = raw;
-      smoothed_heights[expanded_index(local_x, local_z)] = raw.surface_y;
-    }
-  }
-
-  auto relax_height_at = [&](i32 local_x, i32 local_z) {
-    const i32 max_step = dimension.terrain.shape.max_column_step;
-    i32& height = smoothed_heights[expanded_index(local_x, local_z)];
-    for (const auto [offset_x, offset_z] :
-         std::array<std::pair<i32, i32>, 4>{{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}}) {
-      const i32 neighbor_x = local_x + offset_x;
-      const i32 neighbor_z = local_z + offset_z;
-      if (neighbor_x < min_local || neighbor_x > max_local ||
-          neighbor_z < min_local || neighbor_z > max_local) {
-        continue;
-      }
-      const i32 neighbor = smoothed_heights[expanded_index(neighbor_x, neighbor_z)];
-      height = std::min(height, neighbor + max_step);
-    }
-  };
-
-  const i32 max_step = dimension.terrain.shape.max_column_step;
-  if (max_step > 0) {
-    const i32 max_passes = ExpandedTerrainSide * 2;
-    for (i32 pass = 0; pass < max_passes; ++pass) {
-      std::array<i32, ExpandedTerrainArea> before = smoothed_heights;
-      for (i32 local_z = min_local; local_z <= max_local; ++local_z) {
-        for (i32 local_x = min_local; local_x <= max_local; ++local_x) {
-          relax_height_at(local_x, local_z);
-        }
-      }
-      for (i32 local_z = max_local; local_z >= min_local; --local_z) {
-        for (i32 local_x = max_local; local_x >= min_local; --local_x) {
-          relax_height_at(local_x, local_z);
-        }
-      }
-      if (smoothed_heights == before) {
-        break;
+  {
+    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::TerrainPrepass};
+    for (i32 local_z = min_local; local_z <= max_local; ++local_z) {
+      for (i32 local_x = min_local; local_x <= max_local; ++local_x) {
+        const i32 surface_y = sample_height(local_x, local_z);
+        raw_columns[expanded_index(local_x, local_z)].surface_y = surface_y;
+        smoothed_heights[expanded_index(local_x, local_z)] = surface_y;
       }
     }
   }
 
   TerrainProfile profile;
-  profile.min_surface_y = std::numeric_limits<i32>::max();
-  profile.max_surface_y = std::numeric_limits<i32>::min();
-  for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
-    const ChunkLocalColumn column = voxel::local_column(column_index);
-    const RawTerrainColumn& raw = raw_columns[expanded_index(column.x, column.z)];
-    const i32 surface_y = smoothed_heights[expanded_index(column.x, column.z)];
-    profile.surface_y_by_column[column_index] = surface_y;
-    profile.biome_by_column[column_index] = raw.biome_index;
-    profile.biome_samples_by_column[column_index] = raw.biome_sample;
-    profile.min_surface_y = std::min(profile.min_surface_y, surface_y);
-    profile.max_surface_y = std::max(profile.max_surface_y, surface_y);
-  }
+  {
+    ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::TerrainPrepass};
+    auto relax_height_at = [&](i32 local_x, i32 local_z) {
+      const i32 max_step = dimension.terrain.shape.max_column_step;
+      i32& height = smoothed_heights[expanded_index(local_x, local_z)];
+      for (const auto [offset_x, offset_z] :
+           std::array<std::pair<i32, i32>, 4>{{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}}) {
+        const i32 neighbor_x = local_x + offset_x;
+        const i32 neighbor_z = local_z + offset_z;
+        if (neighbor_x < min_local || neighbor_x > max_local ||
+            neighbor_z < min_local || neighbor_z > max_local) {
+          continue;
+        }
+        const i32 neighbor = smoothed_heights[expanded_index(neighbor_x, neighbor_z)];
+        height = std::min(height, neighbor + max_step);
+      }
+    };
 
-  for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
-    const ChunkLocalColumn column = voxel::local_column(column_index);
-    const i32 center = profile.surface_y_by_column[column_index];
-    const i32 x0 = std::max(0, column.x - 1);
-    const i32 x1 = std::min(ChunkSize - 1, column.x + 1);
-    const i32 z0 = std::max(0, column.z - 1);
-    const i32 z1 = std::min(ChunkSize - 1, column.z + 1);
-    const i32 dx = std::max(
-        std::abs(center - profile.surface_y_by_column[voxel::local_column_index({x0, column.z})]),
-        std::abs(center - profile.surface_y_by_column[voxel::local_column_index({x1, column.z})]));
-    const i32 dz = std::max(
-        std::abs(center - profile.surface_y_by_column[voxel::local_column_index({column.x, z0})]),
-        std::abs(center - profile.surface_y_by_column[voxel::local_column_index({column.x, z1})]));
-    profile.slope_by_column[column_index] =
-        static_cast<f32>(std::max(dx, dz)) / static_cast<f32>(ChunkSize);
+    const i32 max_step = dimension.terrain.shape.max_column_step;
+    if (max_step > 0) {
+      const i32 max_passes = ExpandedTerrainSide * 2;
+      for (i32 pass = 0; pass < max_passes; ++pass) {
+        std::array<i32, ExpandedTerrainArea> before = smoothed_heights;
+        for (i32 local_z = min_local; local_z <= max_local; ++local_z) {
+          for (i32 local_x = min_local; local_x <= max_local; ++local_x) {
+            relax_height_at(local_x, local_z);
+          }
+        }
+        for (i32 local_z = max_local; local_z >= min_local; --local_z) {
+          for (i32 local_x = max_local; local_x >= min_local; --local_x) {
+            relax_height_at(local_x, local_z);
+          }
+        }
+        if (smoothed_heights == before) {
+          break;
+        }
+      }
+    }
+
+    profile.min_surface_y = std::numeric_limits<i32>::max();
+    profile.max_surface_y = std::numeric_limits<i32>::min();
+    for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
+      const ChunkLocalColumn column = voxel::local_column(column_index);
+      const RawTerrainColumn& raw = raw_columns[expanded_index(column.x, column.z)];
+      const i32 surface_y = smoothed_heights[expanded_index(column.x, column.z)];
+      profile.surface_y_by_column[column_index] = surface_y;
+      profile.biome_by_column[column_index] = raw.biome_index;
+      profile.biome_samples_by_column[column_index] = raw.biome_sample;
+      profile.min_surface_y = std::min(profile.min_surface_y, surface_y);
+      profile.max_surface_y = std::max(profile.max_surface_y, surface_y);
+    }
+
+    for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
+      const ChunkLocalColumn column = voxel::local_column(column_index);
+      const i32 center = profile.surface_y_by_column[column_index];
+      const i32 x0 = std::max(0, column.x - 1);
+      const i32 x1 = std::min(ChunkSize - 1, column.x + 1);
+      const i32 z0 = std::max(0, column.z - 1);
+      const i32 z1 = std::min(ChunkSize - 1, column.z + 1);
+      const i32 dx = std::max(
+          std::abs(center - profile.surface_y_by_column[voxel::local_column_index({x0, column.z})]),
+          std::abs(center - profile.surface_y_by_column[voxel::local_column_index({x1, column.z})]));
+      const i32 dz = std::max(
+          std::abs(center - profile.surface_y_by_column[voxel::local_column_index({column.x, z0})]),
+          std::abs(center - profile.surface_y_by_column[voxel::local_column_index({column.x, z1})]));
+      profile.slope_by_column[column_index] =
+          static_cast<f32>(std::max(dx, dz)) / static_cast<f32>(ChunkSize);
+    }
   }
 
   return profile;

@@ -2198,15 +2198,25 @@ TEST(WorldGenerationTests, ResolvedGenerationStatsReportStagesAndSectionClasses)
   EXPECT_GT(stats.total_ns, 0U);
   EXPECT_GT(
       stats.stage_ns[static_cast<arv::usize>(
-          arv::world::worldgen::WorldGenerationStage::TerrainProfile)],
+          arv::world::worldgen::WorldGenerationStage::TerrainPrepass)],
+      0U);
+  EXPECT_GT(
+      stats.stage_ns[static_cast<arv::usize>(
+          arv::world::worldgen::WorldGenerationStage::BiomeSampling)],
       0U);
   EXPECT_GT(stats.sections.generated_sections, 0U);
+  EXPECT_EQ(stats.sections.allocated_sections, generated.value().sections.size());
   EXPECT_EQ(stats.sections.generated_sections, generated.value().sections.size());
   EXPECT_EQ(
       stats.sections.generated_sections,
       stats.sections.all_air_sections + stats.sections.bulk_solid_sections +
           stats.sections.bulk_fluid_sections + stats.sections.mixed_sections);
-  EXPECT_GT(stats.noise.direct_2d_noise_samples + stats.noise.terrain_lattice_samples, 0U);
+  EXPECT_GT(stats.noise.terrain_profiles_generated, 0U);
+  EXPECT_GT(stats.noise.climate_lattice_samples + stats.noise.terrain_lattice_samples, 0U);
+  EXPECT_GT(
+      stats.candidates.feature_origin_chunks_profiled +
+          stats.candidates.feature_origin_chunk_cache_hits,
+      0U);
 }
 
 TEST(WorldGenerationTests, ResolvedGenerationStatsDoNotChangeOutput) {

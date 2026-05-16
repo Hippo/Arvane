@@ -473,7 +473,8 @@ void apply_ravine_carver(
     const TerrainProfile& profile,
     GeneratedChunkEditView& view,
     const CarverConfig& carver,
-    u64 dimension_seed) {
+    u64 dimension_seed,
+    WorldGenerationStats* stats) {
   const RavineCarverConfig& config = carver.ravine;
   const i32 region_chunks = std::max(1, config.region_size_chunks);
   const i32 radius_chunks = std::max(1, config.length_chunks.max + 1);
@@ -484,8 +485,15 @@ void apply_ravine_carver(
 
   for (i32 cell_z = min_cell_z; cell_z <= max_cell_z; ++cell_z) {
     for (i32 cell_x = min_cell_x; cell_x <= max_cell_x; ++cell_x) {
+      if (stats != nullptr) {
+        ++stats->candidates.ravine_cells_inspected;
+      }
       if (!ravine_passes_chance(carver, dimension_seed, cell_x, cell_z)) {
         continue;
+      }
+      if (stats != nullptr) {
+        ++stats->candidates.ravine_candidates_considered;
+        ++stats->candidates.ravine_candidates_applied;
       }
       carve_ravine_candidate(
           dimension,
@@ -502,7 +510,8 @@ void apply_tunnel_cave_carver(
     const TerrainProfile& profile,
     GeneratedChunkEditView& view,
     const CarverConfig& carver,
-    u64 dimension_seed) {
+    u64 dimension_seed,
+    WorldGenerationStats* stats) {
   if (view.sections == nullptr) {
     return;
   }
@@ -528,6 +537,9 @@ void apply_tunnel_cave_carver(
 
   for (i32 cell_z = min_cell_z; cell_z <= max_cell_z; ++cell_z) {
     for (i32 cell_x = min_cell_x; cell_x <= max_cell_x; ++cell_x) {
+      if (stats != nullptr) {
+        ++stats->candidates.tunnel_regions_considered;
+      }
       DeterministicRng rng{coordinate_seed(
           dimension_seed,
           cell_x,
@@ -540,6 +552,9 @@ void apply_tunnel_cave_carver(
       const i32 tunnels =
           rng.range_i32(config.tunnels_per_region.min, config.tunnels_per_region.max);
       for (i32 tunnel = 0; tunnel < tunnels; ++tunnel) {
+        if (stats != nullptr) {
+          ++stats->candidates.tunnels_carved;
+        }
         carve_tunnel_path(
             dimension,
             profile,
@@ -577,15 +592,21 @@ void apply_carvers(
       continue;
     }
     switch (carver.carver_type) {
-      case CarverType::NoiseCaves:
+      case CarverType::NoiseCaves: {
+        ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::NoiseCaves};
         apply_noise_cave_carver(dimension, profile, view, carver, dimension_seed, stats);
         break;
-      case CarverType::Ravines:
-        apply_ravine_carver(dimension, profile, view, carver, dimension_seed);
+      }
+      case CarverType::Ravines: {
+        ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::Ravines};
+        apply_ravine_carver(dimension, profile, view, carver, dimension_seed, stats);
         break;
-      case CarverType::TunnelCaves:
-        apply_tunnel_cave_carver(dimension, profile, view, carver, dimension_seed);
+      }
+      case CarverType::TunnelCaves: {
+        ScopedWorldGenerationStageTimer timer{stats, WorldGenerationStage::TunnelCaves};
+        apply_tunnel_cave_carver(dimension, profile, view, carver, dimension_seed, stats);
         break;
+      }
     }
   }
 }

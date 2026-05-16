@@ -109,6 +109,14 @@ struct WorldgenJobBenchmarkResult {
   arv::u64 run_ns{};
 };
 
+struct WorldgenChunkSample {
+  arv::u64 total_ns{};
+  std::array<
+      arv::u64,
+      static_cast<arv::usize>(arv::world::worldgen::WorldGenerationStage::Count)>
+      stage_ns{};
+};
+
 [[nodiscard]] arv::voxel::BlockRegistry make_pack_block_registry(
     const arv::asset::PackManager& packs) {
   auto block_definition_text = packs.load_merged_json_array_text("blocks", "blocks");
@@ -267,7 +275,8 @@ void add_worldgen_stats_counters(
     benchmark::State& state,
     const arv::world::worldgen::WorldGenerationStats& stats,
     arv::u64 chunks,
-    std::span<const arv::u64> chunk_latencies_ns = {}) {
+    std::span<const WorldgenChunkSample> chunk_samples = {},
+    std::span<const arv::u64> queue_wait_samples_ns = {}) {
   if (chunks == 0U) {
     return;
   }
@@ -279,8 +288,12 @@ void add_worldgen_stats_counters(
       benchmark::Counter::kIsRate);
   state.counters["ms/chunk"] =
       static_cast<double>(stats.total_ns) / 1000000.0 * inv_chunks;
-  if (!chunk_latencies_ns.empty()) {
-    std::vector<arv::u64> sorted{chunk_latencies_ns.begin(), chunk_latencies_ns.end()};
+  if (!chunk_samples.empty()) {
+    std::vector<arv::u64> sorted;
+    sorted.reserve(chunk_samples.size());
+    for (const WorldgenChunkSample& sample : chunk_samples) {
+      sorted.push_back(sample.total_ns);
+    }
     std::sort(sorted.begin(), sorted.end());
     const auto percentile_ms = [&sorted](arv::usize percentile) {
       const arv::usize rank =
@@ -289,8 +302,40 @@ void add_worldgen_stats_counters(
     };
     state.counters["p50_ms/chunk"] = percentile_ms(50);
     state.counters["p90_ms/chunk"] = percentile_ms(90);
+    state.counters["p95_ms/chunk"] = percentile_ms(95);
     state.counters["p99_ms/chunk"] = percentile_ms(99);
+    state.counters["max_ms/chunk"] =
+        static_cast<double>(sorted.back()) / 1000000.0;
+    for (arv::usize stage = 0;
+         stage < static_cast<arv::usize>(arv::world::worldgen::WorldGenerationStage::Count);
+         ++stage) {
+      sorted.clear();
+      for (const WorldgenChunkSample& sample : chunk_samples) {
+        sorted.push_back(sample.stage_ns[stage]);
+      }
+      std::sort(sorted.begin(), sorted.end());
+      const std::string prefix{
+          arv::world::worldgen::WorldGenerationStageNames[stage]};
+      state.counters[prefix + "_p99_ms/chunk"] = percentile_ms(99);
+      state.counters[prefix + "_max_ms/chunk"] =
+          static_cast<double>(sorted.back()) / 1000000.0;
+    }
   }
+  if (!queue_wait_samples_ns.empty()) {
+    std::vector<arv::u64> sorted{queue_wait_samples_ns.begin(), queue_wait_samples_ns.end()};
+    std::sort(sorted.begin(), sorted.end());
+    auto percentile_ms = [&sorted](arv::usize percentile) {
+      const arv::usize rank = (sorted.size() - 1U) * percentile / 100U;
+      return static_cast<double>(sorted[rank]) / 1000000.0;
+    };
+    state.counters["queue_wait_p50_ms/chunk"] = percentile_ms(50);
+    state.counters["queue_wait_p90_ms/chunk"] = percentile_ms(90);
+    state.counters["queue_wait_p99_ms/chunk"] = percentile_ms(99);
+    state.counters["queue_wait_max_ms/chunk"] =
+        static_cast<double>(sorted.back()) / 1000000.0;
+  }
+  state.counters["allocated_sections/chunk"] =
+      static_cast<double>(stats.sections.allocated_sections) * inv_chunks;
   state.counters["sections/chunk"] =
       static_cast<double>(stats.sections.generated_sections) * inv_chunks;
   state.counters["skipped_sections/chunk"] =
@@ -307,16 +352,40 @@ void add_worldgen_stats_counters(
       static_cast<double>(stats.candidates.placed_features_considered) * inv_chunks;
   state.counters["feature_origin_chunks/chunk"] =
       static_cast<double>(stats.candidates.feature_origin_chunks_considered) * inv_chunks;
+  state.counters["feature_origin_profiles/chunk"] =
+      static_cast<double>(stats.candidates.feature_origin_chunks_profiled) * inv_chunks;
+  state.counters["feature_origin_cache_hits/chunk"] =
+      static_cast<double>(stats.candidates.feature_origin_chunk_cache_hits) * inv_chunks;
+  state.counters["feature_origin_summary_rejects/chunk"] =
+      static_cast<double>(stats.candidates.feature_origin_chunks_rejected_by_summary) * inv_chunks;
   state.counters["feature_candidates/chunk"] =
       static_cast<double>(stats.candidates.feature_candidates_considered) * inv_chunks;
+  state.counters["feature_extent_rejects/chunk"] =
+      static_cast<double>(stats.candidates.feature_candidates_rejected_by_extent) * inv_chunks;
   state.counters["feature_rejects/chunk"] =
       static_cast<double>(stats.candidates.feature_candidates_rejected) * inv_chunks;
   state.counters["feature_applied/chunk"] =
       static_cast<double>(stats.candidates.feature_candidates_applied) * inv_chunks;
   state.counters["structure_cells/chunk"] =
       static_cast<double>(stats.candidates.structure_cells_inspected) * inv_chunks;
+  state.counters["structure_candidates/chunk"] =
+      static_cast<double>(stats.candidates.structure_candidates_considered) * inv_chunks;
+  state.counters["structure_intersections/chunk"] =
+      static_cast<double>(stats.candidates.structure_candidates_intersecting) * inv_chunks;
+  state.counters["structure_rejects/chunk"] =
+      static_cast<double>(stats.candidates.structure_candidates_rejected) * inv_chunks;
   state.counters["structures/chunk"] =
       static_cast<double>(stats.candidates.structure_candidates_applied) * inv_chunks;
+  state.counters["ravine_cells/chunk"] =
+      static_cast<double>(stats.candidates.ravine_cells_inspected) * inv_chunks;
+  state.counters["ravine_candidates/chunk"] =
+      static_cast<double>(stats.candidates.ravine_candidates_considered) * inv_chunks;
+  state.counters["tunnel_regions/chunk"] =
+      static_cast<double>(stats.candidates.tunnel_regions_considered) * inv_chunks;
+  state.counters["tunnels/chunk"] =
+      static_cast<double>(stats.candidates.tunnels_carved) * inv_chunks;
+  state.counters["terrain_profiles/chunk"] =
+      static_cast<double>(stats.noise.terrain_profiles_generated) * inv_chunks;
   state.counters["terrain_lattice/chunk"] =
       static_cast<double>(stats.noise.terrain_lattice_samples) * inv_chunks;
   state.counters["climate_lattice/chunk"] =
@@ -344,6 +413,7 @@ void accumulate_worldgen_stats(
     total.stage_ns[index] += next.stage_ns[index];
   }
   total.sections.generated_sections += next.sections.generated_sections;
+  total.sections.allocated_sections += next.sections.allocated_sections;
   total.sections.skipped_sections += next.sections.skipped_sections;
   total.sections.all_air_sections += next.sections.all_air_sections;
   total.sections.bulk_solid_sections += next.sections.bulk_solid_sections;
@@ -351,11 +421,25 @@ void accumulate_worldgen_stats(
   total.sections.mixed_sections += next.sections.mixed_sections;
   total.candidates.placed_features_considered += next.candidates.placed_features_considered;
   total.candidates.feature_origin_chunks_considered += next.candidates.feature_origin_chunks_considered;
+  total.candidates.feature_origin_chunks_profiled += next.candidates.feature_origin_chunks_profiled;
+  total.candidates.feature_origin_chunk_cache_hits += next.candidates.feature_origin_chunk_cache_hits;
+  total.candidates.feature_origin_chunks_rejected_by_summary +=
+      next.candidates.feature_origin_chunks_rejected_by_summary;
+  total.candidates.feature_candidates_rejected_by_extent += next.candidates.feature_candidates_rejected_by_extent;
   total.candidates.feature_candidates_considered += next.candidates.feature_candidates_considered;
   total.candidates.feature_candidates_rejected += next.candidates.feature_candidates_rejected;
   total.candidates.feature_candidates_applied += next.candidates.feature_candidates_applied;
   total.candidates.structure_cells_inspected += next.candidates.structure_cells_inspected;
+  total.candidates.structure_candidates_considered += next.candidates.structure_candidates_considered;
+  total.candidates.structure_candidates_intersecting += next.candidates.structure_candidates_intersecting;
+  total.candidates.structure_candidates_rejected += next.candidates.structure_candidates_rejected;
   total.candidates.structure_candidates_applied += next.candidates.structure_candidates_applied;
+  total.candidates.ravine_cells_inspected += next.candidates.ravine_cells_inspected;
+  total.candidates.ravine_candidates_considered += next.candidates.ravine_candidates_considered;
+  total.candidates.ravine_candidates_applied += next.candidates.ravine_candidates_applied;
+  total.candidates.tunnel_regions_considered += next.candidates.tunnel_regions_considered;
+  total.candidates.tunnels_carved += next.candidates.tunnels_carved;
+  total.noise.terrain_profiles_generated += next.noise.terrain_profiles_generated;
   total.noise.terrain_lattice_samples += next.noise.terrain_lattice_samples;
   total.noise.climate_lattice_samples += next.noise.climate_lattice_samples;
   total.noise.direct_2d_noise_samples += next.noise.direct_2d_noise_samples;
@@ -367,24 +451,25 @@ void run_resolved_chunk_set(
     std::span<const arv::ChunkCoord> coords) {
   const ResolvedWorldgenFixture& fixture = resolved_worldgen_fixture();
   arv::world::worldgen::WorldGenerationStats stats;
-  std::vector<arv::u64> chunk_latencies_ns;
+  std::vector<WorldgenChunkSample> chunk_samples;
   arv::u64 chunks = 0;
   for (auto _ : state) {
     for (const arv::ChunkCoord coord : coords) {
-      auto request = make_resolved_request(fixture, coord, &stats);
-      const arv::u64 before_total_ns = stats.total_ns;
+      arv::world::worldgen::WorldGenerationStats local_stats;
+      auto request = make_resolved_request(fixture, coord, &local_stats);
       auto generated = arv::world::generate_chunk(request);
       if (!generated) {
         state.SkipWithError(generated.error().message.c_str());
         break;
       }
-      chunk_latencies_ns.push_back(stats.total_ns - before_total_ns);
+      accumulate_worldgen_stats(stats, local_stats);
+      chunk_samples.push_back({local_stats.total_ns, local_stats.stage_ns});
       benchmark::DoNotOptimize(generated.value().sections.data());
       benchmark::DoNotOptimize(generated.value().surface_y_by_column.data());
       ++chunks;
     }
   }
-  add_worldgen_stats_counters(state, stats, chunks, chunk_latencies_ns);
+  add_worldgen_stats_counters(state, stats, chunks, chunk_samples);
 }
 
 [[nodiscard]] arv::world::ChunkGenerationRequest make_variant_request(
@@ -407,23 +492,24 @@ void run_variant_chunk_set(
     benchmark::State& state,
     const WorldgenVariantFixture& fixture) {
   arv::world::worldgen::WorldGenerationStats stats;
-  std::vector<arv::u64> chunk_latencies_ns;
+  std::vector<WorldgenChunkSample> chunk_samples;
   arv::u64 chunks = 0;
   for (auto _ : state) {
     for (const arv::ChunkCoord coord : fixture.coords) {
-      auto request = make_variant_request(fixture, coord, &stats);
-      const arv::u64 before_total_ns = stats.total_ns;
+      arv::world::worldgen::WorldGenerationStats local_stats;
+      auto request = make_variant_request(fixture, coord, &local_stats);
       auto generated = arv::world::generate_chunk(request);
       if (!generated) {
         state.SkipWithError(generated.error().message.c_str());
         break;
       }
-      chunk_latencies_ns.push_back(stats.total_ns - before_total_ns);
+      accumulate_worldgen_stats(stats, local_stats);
+      chunk_samples.push_back({local_stats.total_ns, local_stats.stage_ns});
       benchmark::DoNotOptimize(generated.value().sections.data());
       ++chunks;
     }
   }
-  add_worldgen_stats_counters(state, stats, chunks, chunk_latencies_ns);
+  add_worldgen_stats_counters(state, stats, chunks, chunk_samples);
 }
 
 [[nodiscard]] const WorldgenVariantFixture& structure_heavy_fixture() {
@@ -667,7 +753,8 @@ void BM_WorldgenResolvedRegion16JobSystem(benchmark::State& state) {
   arv::u64 queue_wait_ns = 0;
   arv::u64 run_ns = 0;
   arv::world::worldgen::WorldGenerationStats stats;
-  std::vector<arv::u64> chunk_latencies_ns;
+  std::vector<WorldgenChunkSample> chunk_samples;
+  std::vector<arv::u64> queue_wait_samples_ns;
   for (auto _ : state) {
     std::vector<arv::sched::JobFuture<WorldgenJobBenchmarkResult>> futures;
     futures.reserve(fixture.region16.size());
@@ -706,7 +793,8 @@ void BM_WorldgenResolvedRegion16JobSystem(benchmark::State& state) {
       }
       queue_wait_ns += result.queue_wait_ns;
       run_ns += result.run_ns;
-      chunk_latencies_ns.push_back(result.run_ns);
+      chunk_samples.push_back({result.run_ns, result.stats.stage_ns});
+      queue_wait_samples_ns.push_back(result.queue_wait_ns);
       accumulate_worldgen_stats(stats, result.stats);
       benchmark::DoNotOptimize(result.generated.value().sections.data());
       ++chunks;
@@ -716,7 +804,7 @@ void BM_WorldgenResolvedRegion16JobSystem(benchmark::State& state) {
   const arv::sched::JobSystemPressureSnapshot pressure = jobs.pressure_snapshot();
   jobs.request_stop();
   jobs.join();
-  add_worldgen_stats_counters(state, stats, chunks, chunk_latencies_ns);
+  add_worldgen_stats_counters(state, stats, chunks, chunk_samples, queue_wait_samples_ns);
   if (chunks != 0U) {
     const double inv_chunks = 1.0 / static_cast<double>(chunks);
     state.counters["queue_wait_ms/chunk"] =
