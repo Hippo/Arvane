@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -26,6 +27,14 @@ namespace {
 [[nodiscard]] player::PlayerState* local_player_state(server::ServerRuntime& server) noexcept {
   const server::ServerSession* session = server.sessions().first();
   return session == nullptr ? nullptr : server.voxel_world().find_player(session->player_id);
+}
+
+[[nodiscard]] std::string biome_display_label(
+    const world::worldgen::BiomeConfig& biome) {
+  if (biome.display_name.empty() || biome.display_name == biome.id) {
+    return biome.id;
+  }
+  return biome.display_name + " (" + biome.id + ")";
 }
 
 [[nodiscard]] const std::string& current_biome_label(
@@ -73,12 +82,135 @@ namespace {
   if (biome_index >= dimension->biomes.size()) {
     return cache_label("Unknown");
   }
-  const world::worldgen::BiomeConfig& biome =
-      dimension->biomes[biome_index].raw;
-  if (biome.display_name.empty() || biome.display_name == biome.id) {
-    return cache_label(biome.id);
+  return cache_label(biome_display_label(dimension->biomes[biome_index].raw));
+}
+
+[[nodiscard]] const std::string& nearest_different_biome_label(
+    DebugMenuState& state,
+    const world::WorldRuntime& runtime,
+    Vec3f position) {
+  auto cache_label = [&](std::string label) -> const std::string& {
+    state.nearest_biome_label = std::move(label);
+    state.nearest_biome_label_valid = true;
+    return state.nearest_biome_label;
+  };
+
+  const world::WorldGenerationConfig* config = runtime.generation_config();
+  if (config == nullptr || config->resolved_dimension == nullptr) {
+    state.nearest_biome_dimension = nullptr;
+    return cache_label("Unavailable");
   }
-  return cache_label(biome.display_name + " (" + biome.id + ")");
+
+  const i32 world_x = static_cast<i32>(std::floor(position.x));
+  const i32 world_z = static_cast<i32>(std::floor(position.z));
+  const ChunkCoord origin_chunk{floor_div(world_x, ChunkSize), floor_div(world_z, ChunkSize)};
+  const auto* dimension = config->resolved_dimension.get();
+  const u64 seed = runtime.generation_seed();
+
+  const world::worldgen::TerrainProfile origin_profile =
+      world::worldgen::generate_terrain_profile(
+          *dimension,
+          seed,
+          origin_chunk);
+  const usize origin_column =
+      voxel::local_column_index({floor_mod(world_x, ChunkSize), floor_mod(world_z, ChunkSize)});
+  const usize source_biome_index = origin_profile.biome_by_column[origin_column];
+
+  if (state.nearest_biome_label_valid &&
+      state.nearest_biome_chunk_x == origin_chunk.x &&
+      state.nearest_biome_chunk_z == origin_chunk.z &&
+      state.nearest_biome_seed == seed &&
+      state.nearest_biome_dimension == dimension &&
+      state.nearest_biome_source_index == source_biome_index) {
+    return state.nearest_biome_label;
+  }
+
+  state.nearest_biome_chunk_x = origin_chunk.x;
+  state.nearest_biome_chunk_z = origin_chunk.z;
+  state.nearest_biome_seed = seed;
+  state.nearest_biome_dimension = dimension;
+  state.nearest_biome_source_index = source_biome_index;
+
+  if (source_biome_index >= dimension->biomes.size()) {
+    return cache_label("Unknown");
+  }
+
+  struct Candidate {
+    usize biome_index{};
+    i32 world_x{};
+    i32 world_z{};
+    i64 distance_sq{std::numeric_limits<i64>::max()};
+  };
+
+  constexpr i32 MaxRadiusChunks = 64;
+  constexpr std::array<ChunkLocalColumn, 5> SampleColumns{{
+      {ChunkSize / 2, ChunkSize / 2},
+      {0, 0},
+      {ChunkSize - 1, 0},
+      {0, ChunkSize - 1},
+      {ChunkSize - 1, ChunkSize - 1},
+  }};
+
+  Candidate best;
+  auto inspect_sample = [&](ChunkCoord coord, const world::worldgen::TerrainProfile& profile, ChunkLocalColumn local) {
+    const usize column = voxel::local_column_index(local);
+    const usize biome_index = profile.biome_by_column[column];
+    if (biome_index == source_biome_index || biome_index >= dimension->biomes.size()) {
+      return;
+    }
+    const i32 sample_x = coord.x * ChunkSize + local.x;
+    const i32 sample_z = coord.z * ChunkSize + local.z;
+    const i64 dx = static_cast<i64>(sample_x) - world_x;
+    const i64 dz = static_cast<i64>(sample_z) - world_z;
+    const i64 distance_sq = dx * dx + dz * dz;
+    if (distance_sq < best.distance_sq) {
+      best = {biome_index, sample_x, sample_z, distance_sq};
+    }
+  };
+
+  auto inspect_chunk = [&](ChunkCoord coord) {
+    const world::worldgen::TerrainProfile profile =
+        coord == origin_chunk
+            ? origin_profile
+            : world::worldgen::generate_terrain_profile(*dimension, seed, coord);
+    if (coord == origin_chunk) {
+      for (usize column = 0; column < voxel::ChunkArea; ++column) {
+        inspect_sample(coord, profile, voxel::local_column(column));
+      }
+      return;
+    }
+    for (const ChunkLocalColumn local : SampleColumns) {
+      inspect_sample(coord, profile, local);
+    }
+  };
+
+  inspect_chunk(origin_chunk);
+  for (i32 radius = 1; radius <= MaxRadiusChunks && best.distance_sq == std::numeric_limits<i64>::max(); ++radius) {
+    for (i32 dz = -radius; dz <= radius; ++dz) {
+      inspect_chunk({origin_chunk.x - radius, origin_chunk.z + dz});
+      inspect_chunk({origin_chunk.x + radius, origin_chunk.z + dz});
+    }
+    for (i32 dx = -radius + 1; dx <= radius - 1; ++dx) {
+      inspect_chunk({origin_chunk.x + dx, origin_chunk.z - radius});
+      inspect_chunk({origin_chunk.x + dx, origin_chunk.z + radius});
+    }
+  }
+
+  if (best.distance_sq == std::numeric_limits<i64>::max()) {
+    return cache_label("None within 1024 blocks");
+  }
+
+  const double distance = std::sqrt(static_cast<double>(best.distance_sq));
+  std::ostringstream out;
+  out << biome_display_label(dimension->biomes[best.biome_index].raw)
+      << " at "
+      << best.world_x
+      << ", "
+      << best.world_z
+      << " (~"
+      << static_cast<i32>(std::round(distance))
+      << " blocks)";
+  return cache_label(out.str());
 }
 
 [[nodiscard]] bool contains_case_insensitive(std::string_view haystack, std::string_view needle) {
@@ -693,6 +825,27 @@ void render_player_tab(
       static_cast<double>(player->position.z));
   const std::string& biome_label = current_biome_label(state, server.voxel_world(), player->position);
   ImGui::Text("Biome: %s", biome_label.c_str());
+  const world::WorldGenerationConfig* generation_config =
+      server.voxel_world().generation_config();
+  const i32 biome_chunk_x =
+      floor_div(static_cast<i32>(std::floor(player->position.x)), ChunkSize);
+  const i32 biome_chunk_z =
+      floor_div(static_cast<i32>(std::floor(player->position.z)), ChunkSize);
+  const void* biome_dimension =
+      generation_config == nullptr ? nullptr : generation_config->resolved_dimension.get();
+  bool nearest_biome_cache_current =
+      state.nearest_biome_label_valid &&
+      state.nearest_biome_chunk_x == biome_chunk_x &&
+      state.nearest_biome_chunk_z == biome_chunk_z &&
+      state.nearest_biome_seed == server.voxel_world().generation_seed() &&
+      state.nearest_biome_dimension == biome_dimension;
+  if (ImGui::Button("Locate nearest different biome")) {
+    (void)nearest_different_biome_label(state, server.voxel_world(), player->position);
+    nearest_biome_cache_current = true;
+  }
+  ImGui::Text(
+      "Nearest biome: %s",
+      nearest_biome_cache_current ? state.nearest_biome_label.c_str() : "Not located");
   ImGui::Text(
       "Velocity: %.2f, %.2f, %.2f",
       static_cast<double>(player->velocity.x),

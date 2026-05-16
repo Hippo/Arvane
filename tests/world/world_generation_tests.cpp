@@ -441,6 +441,18 @@ arv::voxel::BlockVariantID generated_block_at(
   return arv::voxel::AirBlockVariantID;
 }
 
+arv::voxel::FluidCell generated_fluid_at(
+    const arv::world::GeneratedChunk& chunk,
+    arv::BlockPos pos) {
+  const arv::ChunkSectionCoord coord = arv::block_to_chunk(pos);
+  for (const arv::world::GeneratedChunkSection& section : chunk.sections) {
+    if (section.coord == coord) {
+      return section.fluids[arv::voxel::local_index(arv::block_to_local(pos))];
+    }
+  }
+  return arv::voxel::empty_fluid_cell();
+}
+
 std::optional<arv::BlockPos> first_solid_blueprint_block_in_bounds(
     const arv::world::worldgen::ResolvedConfiguredFeature& feature,
     const arv::world::worldgen::StructureCandidate& candidate,
@@ -666,6 +678,80 @@ TEST(WorldGenerationTests, LoadsPackWorldgenResourcesAndResolvesOverworld) {
       [](const arv::world::worldgen::CarverConfig& carver) {
         return carver.carver_type == arv::world::worldgen::CarverType::TunnelCaves;
       }));
+}
+
+TEST(WorldGenerationTests, PackOceanBiomesGenerateWaterFluids) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  ASSERT_NE(config.resolved_dimension, nullptr);
+  const auto palette = arv::world::resolve_world_generation_palette(config, registry);
+  ASSERT_TRUE(palette) << palette.error().message;
+
+  const std::array<arv::u64, 3> seeds{
+      7390150598859ULL,
+      32187121430964ULL,
+      91827364554637ULL,
+  };
+  arv::u64 found_seed = seeds.front();
+  std::optional<std::pair<arv::ChunkCoord, arv::ChunkLocalColumn>> ocean_sample;
+  for (const arv::u64 seed : seeds) {
+    for (arv::i32 chunk_z = -160; chunk_z <= 160 && !ocean_sample.has_value(); chunk_z += 8) {
+      for (arv::i32 chunk_x = -160; chunk_x <= 160 && !ocean_sample.has_value(); chunk_x += 8) {
+        const arv::ChunkCoord coord{chunk_x, chunk_z};
+        const arv::world::worldgen::TerrainProfile profile =
+            arv::world::worldgen::generate_terrain_profile(
+                *config.resolved_dimension,
+                seed,
+                coord);
+        for (arv::usize column = 0; column < arv::voxel::ChunkArea; ++column) {
+          const arv::usize biome_index = profile.biome_by_column[column];
+          ASSERT_LT(biome_index, config.resolved_dimension->biomes.size());
+          const bool ocean_biome = arv::world::worldgen::biome_has_tag(
+              config.resolved_dimension->biomes[biome_index].raw,
+              "arvane:biome/ocean");
+          if (ocean_biome &&
+              profile.surface_y_by_column[column] <=
+                  config.resolved_dimension->raw.vertical.sea_level - 4) {
+            found_seed = seed;
+            ocean_sample = std::make_pair(coord, arv::voxel::local_column(column));
+            break;
+          }
+        }
+      }
+    }
+    if (ocean_sample.has_value()) {
+      break;
+    }
+  }
+  ASSERT_TRUE(ocean_sample.has_value());
+
+  arv::world::ChunkGenerationRequest request;
+  request.world_id = arv::WorldID{1};
+  request.seed = found_seed;
+  request.coord = ocean_sample->first;
+  request.min_chunk_y = arv::floor_div(config.min_y, arv::ChunkSize);
+  request.max_chunk_y = arv::floor_div(config.max_y, arv::ChunkSize);
+  request.config = config;
+  request.palette = palette.value();
+
+  const arv::world::worldgen::TerrainProfile profile =
+      arv::world::worldgen::generate_terrain_profile(
+          *config.resolved_dimension,
+          found_seed,
+          ocean_sample->first);
+  const arv::usize column_index = arv::voxel::local_column_index(ocean_sample->second);
+  const arv::i32 surface_y = profile.surface_y_by_column[column_index];
+  const arv::BlockPos water_pos{{
+      ocean_sample->first.x * arv::ChunkSize + ocean_sample->second.x,
+      surface_y + 1,
+      ocean_sample->first.z * arv::ChunkSize + ocean_sample->second.z}};
+
+  const auto generated = arv::world::generate_chunk(request);
+  ASSERT_TRUE(generated) << generated.error().message;
+  EXPECT_EQ(generated_block_at(generated.value(), water_pos), arv::voxel::AirBlockVariantID);
+  const arv::voxel::FluidCell fluid = generated_fluid_at(generated.value(), water_pos);
+  EXPECT_TRUE(fluid.source());
+  EXPECT_EQ(fluid.type, arv::voxel::DefaultWaterFluidTypeID);
 }
 
 TEST(WorldGenerationTests, DimensionClimateAdjustmentsShiftBiomeSelection) {

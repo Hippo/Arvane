@@ -11,38 +11,22 @@ biomes:
   - biome: arvane:worldgen/biome/deep_ocean
     climate:
       continentalness: [-1.0, -0.72]
-      temperature: [-1.0, 1.0]
-      humidity: [-1.0, 1.0]
-      erosion: [-1.0, 1.0]
-      ridges: [-1.0, 1.0]
-      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/ocean
     climate:
       continentalness: [-0.78, -0.45]
-      temperature: [-1.0, 1.0]
-      humidity: [-1.0, 1.0]
-      erosion: [-1.0, 1.0]
-      ridges: [-1.0, 1.0]
-      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/rocky_coast
     climate:
       continentalness: [-0.52, -0.18]
-      temperature: [-1.0, 1.0]
-      humidity: [-1.0, 1.0]
       erosion: [0.25, 1.0]
       ridges: [0.15, 1.0]
-      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/beach
     climate:
       continentalness: [-0.52, -0.16]
-      temperature: [-1.0, 1.0]
-      humidity: [-1.0, 1.0]
       erosion: [-1.0, 0.45]
       ridges: [-1.0, 0.45]
-      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/cliffs
     climate:

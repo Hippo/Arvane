@@ -275,6 +275,26 @@ TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDirectNeighborsForRel
   EXPECT_EQ(neighbor.version(), neighbor_version + 1);
 }
 
+TEST(WorldRuntimeTests, PublishingGeneratedChunkPreservesGeneratedFluids) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+
+  arv::world::GeneratedChunk generated;
+  generated.world_id = arv::WorldID{1};
+  generated.coord = {0, 0};
+  arv::world::GeneratedChunkSection generated_section;
+  generated_section.coord = {{0, 0, 0}};
+  generated_section.blocks.fill(arv::voxel::AirBlockVariantID);
+  generated_section.fluids.fill(arv::voxel::empty_fluid_cell());
+  generated_section.fluids[arv::voxel::local_index({{2, 3, 4}})] =
+      arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
+  generated.sections.emplace_back(std::move(generated_section));
+
+  ASSERT_TRUE(world.publish_generated_chunk(std::move(generated)));
+  const arv::voxel::ChunkSection* chunk = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(chunk, nullptr);
+  EXPECT_TRUE(chunk->fluid({{2, 3, 4}}).source());
+}
+
 TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDiagonalNeighborsForRemesh) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   world.configure_height({0, 1});

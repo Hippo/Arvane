@@ -334,7 +334,11 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
         voxel::ChunkLifecycleState::Loaded,
         impl_->dirty);
     impl_->chunks.set_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
-    chunk.replace_generated_blocks(std::move(generated_section.blocks));
+    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> generated_fluids{
+        std::move(generated_section.fluids)};
+    chunk.replace_generated_blocks(
+        std::move(generated_section.blocks),
+        std::move(generated_fluids));
     if (Chunk* column = impl_->chunks.find_column(generated.coord); column != nullptr) {
       column->set_generation_surface_profile(generated.surface_y_by_column);
     }

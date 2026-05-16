@@ -128,14 +128,23 @@ bool ChunkSection::set_fluid(SectionLocalPos local, FluidCell fluid, bool affect
   return true;
 }
 
-void ChunkSection::replace_generated_blocks(std::array<BlockVariantID, ChunkVolume> blocks) noexcept {
+void ChunkSection::replace_generated_blocks(
+    std::array<BlockVariantID, ChunkVolume> blocks,
+    std::optional<std::array<FluidCell, ChunkVolume>> fluids) noexcept {
   if (storage_.use_count() <= 1) {
     storage_->blocks = std::move(blocks);
     storage_->lights.fill(NoLight);
-    storage_->fluids.fill(empty_fluid_cell());
+    if (fluids.has_value()) {
+      storage_->fluids = std::move(fluids.value());
+    } else {
+      storage_->fluids.fill(empty_fluid_cell());
+    }
   } else {
     ChunkStorageHandle storage = make_chunk_storage();
     storage->blocks = std::move(blocks);
+    if (fluids.has_value()) {
+      storage->fluids = std::move(fluids.value());
+    }
     storage_ = std::move(storage);
   }
   ++block_version_;

@@ -75,6 +75,13 @@ struct DebugMenuState {
   u64 current_biome_seed{};
   const void* current_biome_dimension{};
   std::string current_biome_label{};
+  bool nearest_biome_label_valid{};
+  i32 nearest_biome_chunk_x{};
+  i32 nearest_biome_chunk_z{};
+  u64 nearest_biome_seed{};
+  const void* nearest_biome_dimension{};
+  usize nearest_biome_source_index{};
+  std::string nearest_biome_label{};
   u32 snapshot_created_this_frame{};
   u32 snapshot_reused_this_frame{};
   u32 snapshot_copies_this_frame{};

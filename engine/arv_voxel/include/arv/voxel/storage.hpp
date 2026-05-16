@@ -264,7 +264,9 @@ public:
 
   bool set_fluid(SectionLocalPos local, FluidCell fluid, bool affects_lighting = false) noexcept;
 
-  void replace_generated_blocks(std::array<BlockVariantID, ChunkVolume> blocks) noexcept;
+  void replace_generated_blocks(
+      std::array<BlockVariantID, ChunkVolume> blocks,
+      std::optional<std::array<FluidCell, ChunkVolume>> fluids = std::nullopt) noexcept;
 
   void replace_saved_contents(
       std::array<BlockVariantID, ChunkVolume> blocks,

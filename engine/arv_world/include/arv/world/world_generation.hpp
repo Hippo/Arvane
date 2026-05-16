@@ -73,6 +73,7 @@ struct ChunkGenerationRequest {
 struct GeneratedChunkSection {
   ChunkSectionCoord coord{};
   std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks{};
+  std::array<voxel::FluidCell, voxel::ChunkVolume> fluids{};
 
   constexpr bool operator==(const GeneratedChunkSection&) const = default;
 };

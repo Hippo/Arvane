@@ -344,12 +344,15 @@ GeneratedChunkResult generate_resolved_chunk(
 
   {
     ARV_PROFILE_ZONE("Worldgen base fill and surfaces");
+    const voxel::FluidCell water_source =
+        voxel::make_fluid_source(voxel::make_water_fluid_definition());
     const i32 fill_ceiling =
         std::max(profile.max_surface_y, dimension.raw.vertical.sea_level);
     for (i32 chunk_y = min_chunk_y; chunk_y <= max_chunk_y; ++chunk_y) {
       GeneratedChunkSection section;
       section.coord = chunk_section(request.coord, chunk_y);
       section.blocks.fill(voxel::AirBlockVariantID);
+      section.fluids.fill(voxel::empty_fluid_cell());
 
       const i32 section_min_y = chunk_y * ChunkSize;
       const i32 section_max_y = section_min_y + ChunkSize - 1;
@@ -394,7 +397,7 @@ GeneratedChunkResult generate_resolved_chunk(
         const i32 local_y_end = water_top_y - section_min_y;
         usize block_index = voxel::local_index({{column.x, local_y_begin, column.z}});
         for (i32 local_y = local_y_begin; local_y <= local_y_end; ++local_y) {
-          section.blocks[block_index] = dimension.water_block;
+          section.fluids[block_index] = water_source;
           block_index += voxel::ChunkSide;
         }
       }
