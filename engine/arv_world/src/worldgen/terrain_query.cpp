@@ -6,14 +6,14 @@ namespace arv::world::worldgen {
 namespace {
 
 [[nodiscard]] bool surface_predicate_matches(
-    const SurfaceRulePredicate& predicate,
+    const ResolvedSurfaceRule& rule,
     const ResolvedDimension& dimension,
     usize biome_index,
     i32 surface_y,
     f32 slope,
     bool underwater) noexcept {
+  const SurfaceRulePredicate& predicate = rule.when;
   const i32 sea_level = dimension.raw.vertical.sea_level;
-  const BiomeConfig& biome = dimension.biomes[biome_index].raw;
   if (predicate.above_sea_level.has_value() &&
       predicate.above_sea_level.value() != (surface_y >= sea_level)) {
     return false;
@@ -26,13 +26,18 @@ namespace {
       predicate.underwater.value() != underwater) {
     return false;
   }
-  if (predicate.biome.has_value() && predicate.biome->id != biome.id) {
+  if (predicate.biome.has_value() &&
+      (!rule.biome_index.has_value() || rule.biome_index.value() != biome_index)) {
     return false;
   }
-  if (predicate.biome_tag.has_value() && !biome_has_tag(biome, predicate.biome_tag->id)) {
+  if (predicate.biome_tag.has_value() &&
+      (!rule.biome_tag_index.has_value() ||
+       !biome_has_resolved_tag(dimension.biomes[biome_index], rule.biome_tag_index.value()))) {
     return false;
   }
-  if (predicate.biome_tag_not.has_value() && biome_has_tag(biome, predicate.biome_tag_not->id)) {
+  if (predicate.biome_tag_not.has_value() &&
+      rule.biome_tag_not_index.has_value() &&
+      biome_has_resolved_tag(dimension.biomes[biome_index], rule.biome_tag_not_index.value())) {
     return false;
   }
   if (predicate.slope_less_than.has_value() && !(slope < predicate.slope_less_than.value())) {
@@ -58,6 +63,13 @@ bool biome_has_tag(const BiomeConfig& biome, std::string_view tag) noexcept {
   });
 }
 
+bool biome_has_resolved_tag(const ResolvedBiome& biome, usize tag_index) noexcept {
+  return std::binary_search(
+      biome.tag_indices.begin(),
+      biome.tag_indices.end(),
+      tag_index);
+}
+
 const std::vector<ResolvedSurfaceLayer>* choose_surface_layers(
     const ResolvedDimension& dimension,
     const TerrainProfile& profile,
@@ -73,7 +85,7 @@ const std::vector<ResolvedSurfaceLayer>* choose_surface_layers(
     const ResolvedSurfaceRuleSet& set = dimension.surface_rule_sets[rule_set_index];
     for (const ResolvedSurfaceRule& rule : set.rules) {
       if (!rule.has_predicate ||
-          surface_predicate_matches(rule.when, dimension, biome_index, surface_y, slope, underwater)) {
+          surface_predicate_matches(rule, dimension, biome_index, surface_y, slope, underwater)) {
         return &rule.layers;
       }
     }
@@ -151,7 +163,10 @@ bool terrain_filters_pass(
         }
         break;
       case PlacementFilterConfig::Type::BiomeTag:
-        if (!biome_has_tag(dimension.biomes[biome_index].raw, filter.raw.tag.id)) {
+        if (!filter.biome_tag_index.has_value() ||
+            !biome_has_resolved_tag(
+                dimension.biomes[biome_index],
+                filter.biome_tag_index.value())) {
           return false;
         }
         break;

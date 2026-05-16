@@ -7,6 +7,7 @@
 #include "arv/voxel/block.hpp"
 #include "arv/voxel/storage.hpp"
 #include "arv/world/worldgen/registry.hpp"
+#include "arv/world/worldgen/stats.hpp"
 
 #include <array>
 #include <memory>
@@ -68,6 +69,7 @@ struct ChunkGenerationRequest {
   WorldGenerationConfig config{};
   WorldGenerationPalette palette{};
   std::shared_ptr<const worldgen::ResolvedDimension> resolved_dimension{};
+  worldgen::WorldGenerationStats* stats{};
 };
 
 struct GeneratedChunkSection {

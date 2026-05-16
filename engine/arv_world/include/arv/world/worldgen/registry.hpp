@@ -34,6 +34,7 @@ struct WorldGenRegistry {
 struct ResolvedBiome {
   BiomeConfig raw{};
   std::optional<usize> surface_rule_set_index{};
+  std::vector<usize> tag_indices{};
 };
 
 struct ResolvedClimateField {
@@ -66,6 +67,7 @@ struct ResolvedDimension {
   TerrainConfig terrain{};
   ResolvedBiomeSource biome_source{};
   std::vector<ResolvedBiome> biomes{};
+  std::vector<std::string> biome_tags{};
   std::vector<ResolvedSurfaceRuleSet> surface_rule_sets{};
   std::optional<usize> dimension_surface_rule_set{};
   std::vector<CarverConfig> carvers{};
@@ -74,6 +76,7 @@ struct ResolvedDimension {
   std::vector<ResolvedStructureSet> structure_sets{};
   std::vector<usize> dimension_features_by_stage[StageOrder.size()];
   std::vector<usize> biome_features_by_stage[StageOrder.size()];
+  std::vector<usize> features_by_stage[StageOrder.size()];
   std::vector<voxel::BlockVariantID> replaceable_blocks{};
   voxel::BlockVariantID water_block{voxel::AirBlockVariantID};
 };

@@ -47,6 +47,9 @@ struct ResolvedSurfaceLayer {
 struct ResolvedSurfaceRule {
   SurfaceRulePredicate when{};
   bool has_predicate{};
+  std::optional<usize> biome_index{};
+  std::optional<usize> biome_tag_index{};
+  std::optional<usize> biome_tag_not_index{};
   std::vector<ResolvedSurfaceLayer> layers{};
 };
 

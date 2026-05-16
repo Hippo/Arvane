@@ -33,6 +33,28 @@ template<typename T>
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<usize> index_of_biome_tag(
+    const ResolvedDimension& dimension,
+    std::string_view id) noexcept {
+  for (usize index = 0; index < dimension.biome_tags.size(); ++index) {
+    if (dimension.biome_tags[index] == id) {
+      return index;
+    }
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] usize index_or_add_biome_tag(
+    ResolvedDimension& dimension,
+    std::string_view id) {
+  if (const std::optional<usize> existing = index_of_biome_tag(dimension, id); existing) {
+    return existing.value();
+  }
+  const usize index = dimension.biome_tags.size();
+  dimension.biome_tags.emplace_back(std::string{id});
+  return index;
+}
+
 [[nodiscard]] std::optional<usize> index_of_surface_rule_set(
     const ResolvedDimension& dimension,
     std::string_view id) noexcept {
@@ -64,12 +86,6 @@ template<typename T>
     }
   }
   return std::nullopt;
-}
-
-[[nodiscard]] bool biome_has_tag(const BiomeConfig& biome, std::string_view tag) noexcept {
-  return std::any_of(biome.tags.begin(), biome.tags.end(), [tag](const ResourceRef& ref) {
-    return ref.id == tag;
-  });
 }
 
 [[nodiscard]] std::optional<usize> index_of_climate_field(
@@ -150,7 +166,8 @@ template<typename T>
 
 [[nodiscard]] Expected<ResolvedSurfaceRuleSet, WorldGenDiagnostic> resolve_surface_rule_set(
     const SurfaceRuleSetConfig& config,
-    const voxel::BlockRegistry& block_registry) {
+    const voxel::BlockRegistry& block_registry,
+    const ResolvedDimension& dimension) {
   ResolvedSurfaceRuleSet resolved;
   resolved.id = config.id;
   for (const SurfaceRuleConfig& rule : config.rules) {
@@ -158,6 +175,24 @@ template<typename T>
     resolved_rule.has_predicate = rule.when.has_value();
     if (rule.when.has_value()) {
       resolved_rule.when = rule.when.value();
+      if (resolved_rule.when.biome.has_value()) {
+        const auto biome_index = index_of_biome(dimension, resolved_rule.when.biome->id);
+        if (!biome_index) {
+          return Expected<ResolvedSurfaceRuleSet, WorldGenDiagnostic>::failure(error(
+              config.id,
+              "rules[].when.biome",
+              "unknown biome: " + resolved_rule.when.biome->id));
+        }
+        resolved_rule.biome_index = biome_index.value();
+      }
+      if (resolved_rule.when.biome_tag.has_value()) {
+        resolved_rule.biome_tag_index =
+            index_of_biome_tag(dimension, resolved_rule.when.biome_tag->id);
+      }
+      if (resolved_rule.when.biome_tag_not.has_value()) {
+        resolved_rule.biome_tag_not_index =
+            index_of_biome_tag(dimension, resolved_rule.when.biome_tag_not->id);
+      }
     }
     bool has_remaining = false;
     for (const SurfaceLayerConfig& layer : rule.layers) {
@@ -330,6 +365,9 @@ template<typename T>
     }
     resolved.biome_index = index;
   }
+  if (filter.type == PlacementFilterConfig::Type::BiomeTag) {
+    resolved.biome_tag_index = index_of_biome_tag(dimension, filter.tag.id);
+  }
   return Expected<ResolvedPlacementFilter, WorldGenDiagnostic>::success(std::move(resolved));
 }
 
@@ -437,6 +475,19 @@ ResolvedDimensionResult resolve_dimension(
     resolved->biome_source.entries.push_back(std::move(resolved_entry));
   }
 
+  for (ResolvedBiome& biome : resolved->biomes) {
+    biome.tag_indices.reserve(biome.raw.tags.size());
+    for (const ResourceRef& tag : biome.raw.tags) {
+      if (!tag.empty()) {
+        biome.tag_indices.push_back(index_or_add_biome_tag(*resolved, tag.id));
+      }
+    }
+    std::sort(biome.tag_indices.begin(), biome.tag_indices.end());
+    biome.tag_indices.erase(
+        std::unique(biome.tag_indices.begin(), biome.tag_indices.end()),
+        biome.tag_indices.end());
+  }
+
   auto add_surface_rule_set = [&](const ResourceRef& ref) -> Expected<usize, WorldGenDiagnostic> {
     if (ref.empty()) {
       return Expected<usize, WorldGenDiagnostic>::failure(
@@ -450,7 +501,7 @@ ResolvedDimensionResult resolve_dimension(
       return Expected<usize, WorldGenDiagnostic>::failure(
           error(resolved->raw.id, "surface_rule_set", "unknown surface rule set: " + ref.id));
     }
-    auto resolved_rule_set = resolve_surface_rule_set(*rule_set, block_registry);
+    auto resolved_rule_set = resolve_surface_rule_set(*rule_set, block_registry, *resolved);
     if (!resolved_rule_set) {
       return Expected<usize, WorldGenDiagnostic>::failure(resolved_rule_set.error());
     }
@@ -555,6 +606,24 @@ ResolvedDimensionResult resolve_dimension(
     if (!biome_features) {
       return ResolvedDimensionResult::failure(biome_features.error());
     }
+  }
+  for (usize stage_index = 0; stage_index < StageOrder.size(); ++stage_index) {
+    std::vector<usize>& feature_indices = resolved->features_by_stage[stage_index];
+    feature_indices.reserve(
+        resolved->dimension_features_by_stage[stage_index].size() +
+        resolved->biome_features_by_stage[stage_index].size());
+    feature_indices.insert(
+        feature_indices.end(),
+        resolved->dimension_features_by_stage[stage_index].begin(),
+        resolved->dimension_features_by_stage[stage_index].end());
+    feature_indices.insert(
+        feature_indices.end(),
+        resolved->biome_features_by_stage[stage_index].begin(),
+        resolved->biome_features_by_stage[stage_index].end());
+    std::sort(feature_indices.begin(), feature_indices.end());
+    feature_indices.erase(
+        std::unique(feature_indices.begin(), feature_indices.end()),
+        feature_indices.end());
   }
 
   for (const ResourceRef& ref : resolved->raw.structure_sets) {

@@ -154,6 +154,7 @@ struct ResolvedPlacementFilter {
   PlacementFilterConfig raw{};
   std::vector<voxel::BlockVariantID> blocks{};
   std::optional<usize> biome_index{};
+  std::optional<usize> biome_tag_index{};
 };
 
 struct ResolvedPlacedFeature {

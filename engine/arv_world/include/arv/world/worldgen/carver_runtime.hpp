@@ -9,6 +9,7 @@ void apply_carvers(
     const ResolvedDimension& dimension,
     const TerrainProfile& profile,
     GeneratedChunkEditView& view,
-    u64 seed);
+    u64 seed,
+    WorldGenerationStats* stats = nullptr);
 
 } // namespace arv::world::worldgen

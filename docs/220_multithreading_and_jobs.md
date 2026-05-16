@@ -465,6 +465,8 @@ The simulation thread inserts generated chunks after validating:
 
 Save-loaded data takes priority over generated data.
 
+Generation remains a chunk-column job. The server scheduler deduplicates active work by chunk column, caps in-flight generation through the `ChunkGeneration` job-domain budget, and publishes completed sections on the world owner thread. The generator also exposes optional benchmark stats for total chunk time, stage timing, section classification, feature/structure candidates, and noise sample counts; those stats are caller-owned and are intended for benchmarks and diagnostics rather than live world mutation. The worldgen job benchmark additionally measures queue wait, worker run time, peak queued jobs, and completed job count around real `BackgroundCpu` chunk-generation submissions.
+
 Recommended runtime flow:
 
 ```text
@@ -952,6 +954,7 @@ These invariants must hold:
 
 * meshing task duration
 * lighting task duration
+* generation task duration
 * job queue latency
 
 Histograms are fixed-size ring buffers and expose p50/p95/p99 snapshots without allocating during recording.

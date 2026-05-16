@@ -162,3 +162,17 @@ TEST(ChunkStorageTests, SnapshotSamplesPreparedNeighborBoundaries) {
   EXPECT_EQ(arv::voxel::snapshot_block(snapshot, {{16, 7, 9}}), arv::voxel::BlockVariantID{8});
   EXPECT_EQ(arv::voxel::snapshot_block(snapshot, {{15, 7, 9}}), arv::voxel::AirBlockVariantID);
 }
+
+TEST(ChunkStorageTests, SnapshotMissingStorageSamplesAsEmpty) {
+  arv::voxel::ChunkSnapshot snapshot;
+
+  EXPECT_EQ(
+      arv::voxel::snapshot_block(snapshot, {{0, 0, 0}}),
+      arv::voxel::AirBlockVariantID);
+  EXPECT_EQ(
+      arv::voxel::snapshot_light(snapshot, {{0, 0, 0}}),
+      arv::voxel::NoLight);
+  EXPECT_EQ(
+      arv::voxel::snapshot_fluid(snapshot, {{0, 0, 0}}),
+      arv::voxel::empty_fluid_cell());
+}

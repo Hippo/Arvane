@@ -664,7 +664,7 @@ TEST(ChunkMeshingTests, MeshVerticesUseExposedNeighborLighting) {
   EXPECT_EQ(arv::render::unpack_chunk_sky_light(top_face_vertex->light_face_material_hints), 6U);
 }
 
-TEST(ChunkMeshingTests, GeneratedMissingAboveLightsSectionCeilingSurfaceFaces) {
+TEST(ChunkMeshingTests, GeneratedMissingAboveSamplesEmptyForSectionCeilingSurfaceFaces) {
   const arv::voxel::BlockRegistry registry = make_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
   arv::world::WorldRuntime world{arv::WorldID{1}};
@@ -687,7 +687,7 @@ TEST(ChunkMeshingTests, GeneratedMissingAboveLightsSectionCeilingSurfaceFaces) {
       arv::voxel::BlockFace::PositiveY);
 
   ASSERT_TRUE(vertex);
-  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 15U);
+  EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 0U);
 }
 
 TEST(ChunkMeshingTests, GeneratedDirtyLoadedAboveLightsSectionCeilingSurfaceFaces) {

@@ -168,6 +168,29 @@ TEST(WorldRuntimeTests, MeshingSnapshotCopiesAvailableNeighborBoundaryLight) {
   EXPECT_EQ(arv::voxel::snapshot_light(snapshot.value(), {{16, 4, 5}}), arv::voxel::pack_light(3, 4, 5, 6));
 }
 
+TEST(WorldRuntimeTests, MeshingSnapshotKeepsGeneratedMissingNeighborsNullAndEmpty) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.set_generation_context(123U, arv::world::WorldGenerationConfig{});
+  world.ensure_chunk({{0, 0, 0}});
+
+  const auto snapshot = world.make_meshing_snapshot(
+      {{0, 0, 0}},
+      arv::world::MissingNeighborPolicy::TreatMissingAsAir);
+
+  ASSERT_TRUE(snapshot);
+  const arv::usize east_index = arv::voxel::snapshot_storage_index(1, 0, 0);
+  EXPECT_EQ(snapshot->storages[east_index].get(), nullptr);
+  EXPECT_EQ(
+      arv::voxel::snapshot_block(snapshot.value(), {{16, 4, 5}}),
+      arv::voxel::AirBlockVariantID);
+  EXPECT_EQ(
+      arv::voxel::snapshot_light(snapshot.value(), {{16, 4, 5}}),
+      arv::voxel::NoLight);
+  EXPECT_EQ(
+      arv::voxel::snapshot_fluid(snapshot.value(), {{16, 4, 5}}),
+      arv::voxel::empty_fluid_cell());
+}
+
 TEST(WorldRuntimeTests, LightOnlyChangesKeepMeshingContentVersionValid) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& chunk = world.ensure_chunk({{0, 0, 0}});

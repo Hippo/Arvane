@@ -23,18 +23,12 @@ using DependencyMask = detail::ChunkDependencyMask;
   }};
 }
 
-[[nodiscard]] voxel::ChunkStorageView make_generated_missing_snapshot_storage(
+[[nodiscard]] voxel::ChunkStorageView make_generated_lighting_snapshot_storage(
     const GenerationSurfaceProfile& surface,
     ChunkSectionCoord coord,
-    const voxel::ChunkStorage* source = nullptr) {
+    const voxel::ChunkStorage& source) {
   voxel::ChunkStorageHandle storage =
-      source != nullptr ? std::make_shared<voxel::ChunkStorage>(*source)
-                        : std::make_shared<voxel::ChunkStorage>();
-  if (source == nullptr) {
-    storage->blocks.fill(voxel::AirBlockVariantID);
-    storage->lights.fill(voxel::NoLight);
-    storage->fluids.fill(voxel::empty_fluid_cell());
-  }
+      std::make_shared<voxel::ChunkStorage>(source);
 
   for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
     const ChunkLocalColumn column = voxel::local_column(column_index);
@@ -254,10 +248,10 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
           }
 
           const voxel::ChunkStorageView source_storage = source.storage_view();
-          return make_generated_missing_snapshot_storage(
+          return make_generated_lighting_snapshot_storage(
               generated_surface_profile_for(chunk_to_column(source.coord())),
               source.coord(),
-              source_storage.get());
+              *source_storage);
         };
     snapshot.storages[voxel::ChunkSnapshotCenterStorageIndex] =
         storage_view_for_chunk(*chunk);
@@ -273,11 +267,8 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
       }
       if (neighbor != nullptr) {
         snapshot.storages[storage_index] = storage_view_for_chunk(*neighbor);
-      } else if (impl_->generation_config.has_value()) {
-        snapshot.storages[storage_index] =
-            make_generated_missing_snapshot_storage(
-                generated_surface_profile_for(chunk_to_column(neighbor_coord)),
-                neighbor_coord);
+      } else {
+        snapshot.storages[storage_index].reset();
       }
     }
   }

@@ -347,7 +347,8 @@ void apply_noise_cave_carver(
     const TerrainProfile& profile,
     GeneratedChunkEditView& view,
     const CarverConfig& carver,
-    u64 dimension_seed) {
+    u64 dimension_seed,
+    WorldGenerationStats* stats) {
   const NoiseSampler sampler{carver.noise, dimension_seed};
   if (view.sections == nullptr) {
     return;
@@ -376,6 +377,9 @@ void apply_noise_cave_carver(
       if (world_y < effective_min_y || world_y > effective_max_y ||
           world_y > profile.surface_y_by_column[column_index] - carver.surface_margin) {
         continue;
+      }
+      if (stats != nullptr) {
+        ++stats->noise.direct_3d_noise_samples;
       }
       if (sampler.sample_3d(
               static_cast<f32>(world_x),
@@ -564,7 +568,8 @@ void apply_carvers(
     const ResolvedDimension& dimension,
     const TerrainProfile& profile,
     GeneratedChunkEditView& view,
-    u64 seed) {
+    u64 seed,
+    WorldGenerationStats* stats) {
   ARV_PROFILE_ZONE("Worldgen carver runtime");
   const u64 dimension_seed = salted_seed(seed, dimension.raw.seed_salt, dimension.raw.version);
   for (const CarverConfig& carver : dimension.carvers) {
@@ -573,7 +578,7 @@ void apply_carvers(
     }
     switch (carver.carver_type) {
       case CarverType::NoiseCaves:
-        apply_noise_cave_carver(dimension, profile, view, carver, dimension_seed);
+        apply_noise_cave_carver(dimension, profile, view, carver, dimension_seed, stats);
         break;
       case CarverType::Ravines:
         apply_ravine_carver(dimension, profile, view, carver, dimension_seed);

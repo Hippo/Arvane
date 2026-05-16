@@ -20,6 +20,7 @@ set(ARV_WORLD_HEADERS
   include/arv/world/worldgen/noise.hpp
   include/arv/world/worldgen/registry.hpp
   include/arv/world/worldgen/seeds.hpp
+  include/arv/world/worldgen/stats.hpp
   include/arv/world/worldgen/structure_candidate.hpp
   include/arv/world/worldgen/structure_set.hpp
   include/arv/world/worldgen/surface_rules.hpp

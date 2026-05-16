@@ -215,6 +215,8 @@ A dimension generator conceptually evaluates the following stages:
 
 The exact internal implementation may vary by generator type. The data model, however, preserves a stable conceptual distinction between terrain, biomes, surfaces, features, carvers, and structures.
 
+The engine's resolved chunk generator keeps those stages measurable. Benchmark callers may attach optional generation stats to a chunk request; the generator records total time, per-stage time, section classifications, feature and structure candidate counts, and noise sample counts without changing generated output. Runtime generation remains chunk-column scoped, with chunk sections as the storage and publication granularity. Pack-authored biome tags and stage feature lists are resolved into compact runtime indices before chunk generation so surface and placement predicates do not perform resource-string lookup in hot generation paths.
+
 ---
 
 ## Generation Stages

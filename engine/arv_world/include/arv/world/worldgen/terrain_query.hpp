@@ -5,6 +5,7 @@
 namespace arv::world::worldgen {
 
 [[nodiscard]] bool biome_has_tag(const BiomeConfig& biome, std::string_view tag) noexcept;
+[[nodiscard]] bool biome_has_resolved_tag(const ResolvedBiome& biome, usize tag_index) noexcept;
 
 [[nodiscard]] const std::vector<ResolvedSurfaceLayer>* choose_surface_layers(
     const ResolvedDimension& dimension,

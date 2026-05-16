@@ -2177,6 +2177,65 @@ TEST(WorldGenerationTests, SectionsAboveConfiguredTerrainRemainAir) {
   }
 }
 
+TEST(WorldGenerationTests, ResolvedGenerationStatsReportStagesAndSectionClasses) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  ASSERT_NE(config.resolved_dimension, nullptr);
+  arv::world::worldgen::WorldGenerationStats stats;
+  arv::world::ChunkGenerationRequest request;
+  request.world_id = arv::WorldID{1};
+  request.seed = 424242ULL;
+  request.coord = {0, 0};
+  request.min_chunk_y = arv::floor_div(config.min_y, arv::ChunkSize);
+  request.max_chunk_y = arv::floor_div(config.max_y, arv::ChunkSize);
+  request.config = config;
+  request.resolved_dimension = config.resolved_dimension;
+  request.stats = &stats;
+
+  const auto generated = arv::world::generate_chunk(request);
+
+  ASSERT_TRUE(generated);
+  EXPECT_GT(stats.total_ns, 0U);
+  EXPECT_GT(
+      stats.stage_ns[static_cast<arv::usize>(
+          arv::world::worldgen::WorldGenerationStage::TerrainProfile)],
+      0U);
+  EXPECT_GT(stats.sections.generated_sections, 0U);
+  EXPECT_EQ(stats.sections.generated_sections, generated.value().sections.size());
+  EXPECT_EQ(
+      stats.sections.generated_sections,
+      stats.sections.all_air_sections + stats.sections.bulk_solid_sections +
+          stats.sections.bulk_fluid_sections + stats.sections.mixed_sections);
+  EXPECT_GT(stats.noise.direct_2d_noise_samples + stats.noise.terrain_lattice_samples, 0U);
+}
+
+TEST(WorldGenerationTests, ResolvedGenerationStatsDoNotChangeOutput) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  ASSERT_NE(config.resolved_dimension, nullptr);
+
+  arv::world::ChunkGenerationRequest plain;
+  plain.world_id = arv::WorldID{1};
+  plain.seed = 515151ULL;
+  plain.coord = {1, -1};
+  plain.min_chunk_y = arv::floor_div(config.min_y, arv::ChunkSize);
+  plain.max_chunk_y = arv::floor_div(config.max_y, arv::ChunkSize);
+  plain.config = config;
+  plain.resolved_dimension = config.resolved_dimension;
+
+  arv::world::worldgen::WorldGenerationStats stats;
+  arv::world::ChunkGenerationRequest measured = plain;
+  measured.stats = &stats;
+
+  const auto first = arv::world::generate_chunk(plain);
+  const auto second = arv::world::generate_chunk(measured);
+
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  EXPECT_EQ(first.value().surface_y_by_column, second.value().surface_y_by_column);
+  EXPECT_EQ(first.value().sections, second.value().sections);
+}
+
 TEST(WorldGenerationTests, WorldPublishesGeneratedChunksOnlyForItsWorldId) {
   const arv::voxel::BlockRegistry registry = make_worldgen_registry();
   auto generated = arv::world::generate_chunk(make_request(registry, 99));
