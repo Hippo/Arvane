@@ -1,16 +1,24 @@
 id: arvane:worldgen/biome/deep_ocean
 version: 1
+display_name: Deep Ocean
 
 tags:
   - arvane:biome/ocean
   - arvane:biome/aquatic
 
 terrain:
-  base_height_offset: -18
-  height_scale_multiplier: 0.3
-  roughness_multiplier: 0.35
+  base_height_offset: -34
+  height_scale_multiplier: 0.16
+  hill_multiplier: 0.3
+  ridge_multiplier: 0.12
+  roughness_multiplier: 0.45
 
 surface_rule_set: arvane:worldgen/surface_rule_set/ocean_floor
+
+features:
+  stages:
+    underwater_decoration:
+      - arvane:worldgen/placed_feature/sand_disk_underwater
 
 colors:
   water: "#254D88"

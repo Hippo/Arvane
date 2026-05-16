@@ -13,7 +13,11 @@ inline constexpr usize BiomeBlendWeightCount = 4;
 struct BiomeTerrainModifiers {
   f32 base_height_offset{};
   f32 height_scale_multiplier{1.0F};
+  f32 hill_multiplier{1.0F};
+  f32 ridge_multiplier{1.0F};
   f32 roughness_multiplier{1.0F};
+  f32 terrace_step{};
+  f32 terrace_strength{};
 };
 
 struct BiomeColors {
@@ -26,6 +30,7 @@ struct BiomeColors {
 struct BiomeConfig {
   std::string id{};
   u32 version{SupportedSchemaVersion};
+  std::string display_name{};
   std::vector<ResourceRef> tags{};
   BiomeTerrainModifiers terrain{};
   ResourceRef surface_rule_set{};

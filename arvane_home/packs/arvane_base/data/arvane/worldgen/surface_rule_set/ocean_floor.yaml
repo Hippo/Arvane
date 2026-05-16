@@ -4,6 +4,13 @@ version: 1
 rules:
   - when:
       underwater: true
+      slope_greater_than: 0.35
+    layers:
+      - block: arvane:stone
+        depth: remaining
+
+  - when:
+      underwater: true
     layers:
       - block: arvane:sand
         depth: 2

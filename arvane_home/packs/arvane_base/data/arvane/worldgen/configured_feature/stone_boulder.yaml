@@ -1,0 +1,15 @@
+id: arvane:worldgen/configured_feature/stone_boulder
+version: 1
+type: arvane:feature/blueprint
+
+blueprint: arvane:blueprint/nature/stone_boulder
+
+rotation:
+  random_y: true
+
+integrity: 0.92
+
+replace:
+  blocks:
+    - arvane:air
+    - arvane:short_grass

@@ -291,12 +291,21 @@ version: 1
 seed_salt: "overworld"
 
 vertical:
-  min_y: -32
+  min_y: -64
   max_y: 128
   sea_level: 32
 
 generator:
   type: arvane:generator/layered_heightmap
+
+climate:
+  fields:
+    temperature:
+      scale: 0.78
+      offset: -0.16
+    humidity:
+      scale: 1.05
+      offset: 0.08
 
 biome_source: arvane:worldgen/biome_source/overworld
 terrain: arvane:worldgen/terrain/overworld
@@ -304,6 +313,8 @@ surface_rule_set: arvane:worldgen/surface_rule_set/overworld
 
 carvers:
   - arvane:worldgen/carver/caves
+  - arvane:worldgen/carver/tunnel_caves
+  - arvane:worldgen/carver/ravines
 
 features:
   stages:
@@ -339,7 +350,7 @@ Defines vertical generation limits and sea level.
 
 ```yaml
 vertical:
-  min_y: -32
+  min_y: -64
   max_y: 128
   sea_level: 32
 ```
@@ -377,6 +388,22 @@ arvane:generator/layered_heightmap
 
 A layered heightmap generator uses climate sampling, biome selection, heightmap terrain, surface rules, carvers, placed features, and structures.
 
+### `climate`
+
+Optional dimension-level transforms applied to biome-source climate fields after noise sampling and before biome selection.
+
+```yaml
+climate:
+  fields:
+    temperature:
+      scale: 0.78
+      offset: -0.16
+```
+
+Each key under `climate.fields` must match a climate field in the referenced biome source noise file. `scale` defaults to `1.0`, `offset` defaults to `0.0`, and the transformed value is clamped to `[-1.0, 1.0]`.
+
+Use this for dimension-level climate identity, such as cooler worlds, hotter nether-like dimensions, wetter overworld variants, or seed-independent temperature tuning. Do not bake those dimension-wide biases into individual biome ranges.
+
 ### `biome_source`
 
 A reference to a biome source file.
@@ -408,6 +435,8 @@ A list of carver resource IDs.
 ```yaml
 carvers:
   - arvane:worldgen/carver/caves
+  - arvane:worldgen/carver/tunnel_caves
+  - arvane:worldgen/carver/ravines
 ```
 
 ### `features`
@@ -567,7 +596,17 @@ type: arvane:terrain/heightmap
 height:
   base: 8
   scale: 28
+  hill_scale: 8
+  ridge_scale: 18
   detail_scale: 4
+
+shape:
+  ridge_sharpness: 2.0
+  domain_warp_amplitude: 12
+  terrace_step: 0
+  terrace_strength: 0
+  max_column_step: 6
+  max_column_step: 0
 
 noise:
   primary:
@@ -575,6 +614,24 @@ noise:
     seed_salt: "terrain_primary"
     frequency: 0.012
     octaves: 5
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  hill:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_hill"
+    frequency: 0.018
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  ridge:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_ridge"
+    frequency: 0.01
+    octaves: 4
     amplitude: 1.0
     lacunarity: 2.0
     gain: 0.5
@@ -588,10 +645,32 @@ noise:
     lacunarity: 2.0
     gain: 0.5
 
+  warp_x:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_warp_x"
+    frequency: 0.006
+    octaves: 2
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  warp_z:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_warp_z"
+    frequency: 0.006
+    octaves: 2
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
 biome_modifiers:
   base_height_offset: true
   height_scale_multiplier: true
+  hill_multiplier: true
+  ridge_multiplier: true
   roughness_multiplier: true
+  terrace_step: true
+  terrace_strength: true
 ```
 
 ## Terrain File Fields
@@ -622,6 +701,8 @@ Height configuration for heightmap terrain.
 height:
   base: 8
   scale: 28
+  hill_scale: 8
+  ridge_scale: 18
   detail_scale: 4
 ```
 
@@ -631,11 +712,51 @@ The base height offset applied to generated terrain.
 
 #### `height.scale`
 
-The main height scale applied to primary terrain noise.
+The main height scale applied to primary continental terrain noise.
+
+#### `height.hill_scale`
+
+Optional height scale applied to the `noise.hill` field. This adds rolling or sharper hill forms independently from the broad continental height.
+
+#### `height.ridge_scale`
+
+Optional height scale applied to ridged terrain. The generator samples `noise.ridge`, converts it with `1.0 - abs(noise)`, raises it by `shape.ridge_sharpness`, and multiplies by this scale.
 
 #### `height.detail_scale`
 
 The height scale applied to detail terrain noise.
+
+### `shape`
+
+Optional shaping controls for layered heightmap terrain.
+
+```yaml
+shape:
+  ridge_sharpness: 2.0
+  domain_warp_amplitude: 12
+  terrace_step: 0
+  terrace_strength: 0
+```
+
+#### `shape.ridge_sharpness`
+
+Controls how narrow ridged terrain peaks are. Higher values make ridges sharper. The value must be positive.
+
+#### `shape.domain_warp_amplitude`
+
+Horizontal warp distance, in blocks, used to offset terrain field sampling when both `noise.warp_x` and `noise.warp_z` are present. Warp is sampled per terrain column, not per block.
+
+#### `shape.terrace_step`
+
+Default vertical step size used for optional terracing. A value of `0` disables the default terrace step.
+
+#### `shape.terrace_strength`
+
+Default blend amount from raw terrain height to terraced height. `0.0` disables terracing and `1.0` fully snaps to the configured step.
+
+#### `shape.max_column_step`
+
+Optional maximum height delta allowed between neighboring terrain columns after layered height and biome modifiers are sampled. A value of `0` disables the clamp. When enabled, the generator relaxes high columns down toward nearby lower columns in a padded height field, producing ramps instead of hard biome-boundary or terrace artifacts. This does not affect cave or ravine carving.
 
 ### `noise`
 
@@ -645,8 +766,12 @@ For heightmap terrain, the standard fields are:
 
 | Field | Purpose |
 |---|---|
-| `primary` | Main large-scale terrain height variation. |
+| `primary` | Main large-scale continental terrain height variation. |
+| `hill` | Optional rolling or uneven hill terrain. |
+| `ridge` | Optional ridged terrain for mountains, highlands, cliffs, and shelves. |
 | `detail` | Smaller terrain height variation. |
+| `warp_x` | Optional horizontal X domain warp field. |
+| `warp_z` | Optional horizontal Z domain warp field. |
 
 Each noise field uses the noise field format defined in this document.
 
@@ -658,7 +783,11 @@ Controls which biome terrain modifiers affect this terrain definition.
 biome_modifiers:
   base_height_offset: true
   height_scale_multiplier: true
+  hill_multiplier: true
+  ridge_multiplier: true
   roughness_multiplier: true
+  terrace_step: true
+  terrace_strength: true
 ```
 
 #### `biome_modifiers.base_height_offset`
@@ -669,9 +798,25 @@ When true, biome `terrain.base_height_offset` modifies terrain height.
 
 When true, biome `terrain.height_scale_multiplier` modifies the primary terrain height scale.
 
+#### `biome_modifiers.hill_multiplier`
+
+When true, biome `terrain.hill_multiplier` modifies hill terrain strength.
+
+#### `biome_modifiers.ridge_multiplier`
+
+When true, biome `terrain.ridge_multiplier` modifies ridged terrain strength.
+
 #### `biome_modifiers.roughness_multiplier`
 
 When true, biome `terrain.roughness_multiplier` modifies detail terrain strength.
+
+#### `biome_modifiers.terrace_step`
+
+When true, biome `terrain.terrace_step` may override the default terrace step.
+
+#### `biome_modifiers.terrace_strength`
+
+When true, biome `terrain.terrace_strength` may override the default terrace strength.
 
 ---
 
@@ -820,6 +965,8 @@ Common climate fields are:
 | `humidity` | Dry-to-wet biome distribution. |
 | `continentalness` | Ocean, coast, and inland distribution. |
 | `erosion` | Smooth, rough, or mountainous distribution. |
+| `ridges` | Ridge, cliff, and mountain-region distribution. |
+| `weirdness` | General variation field for rarer biome variants and authored exceptions. |
 
 Climate values are normalized by the biome source. The standard range is `-1.0` to `1.0`.
 
@@ -840,6 +987,7 @@ Example:
 ```yaml
 id: arvane:worldgen/biome/plains
 version: 1
+display_name: Plains
 
 tags:
   - arvane:biome/land
@@ -876,6 +1024,16 @@ The biome resource ID.
 
 The biome schema version.
 
+### `display_name`
+
+Human-readable biome name used by debug tools and presentation systems.
+
+```yaml
+display_name: Plains
+```
+
+If omitted, the engine falls back to the biome resource ID. First-party biomes should provide this field.
+
 ### `tags`
 
 A list of biome tag IDs.
@@ -898,7 +1056,11 @@ Biome-specific terrain modifiers.
 terrain:
   base_height_offset: 0
   height_scale_multiplier: 0.85
+  hill_multiplier: 0.8
+  ridge_multiplier: 0.1
   roughness_multiplier: 0.65
+  terrace_step: 0
+  terrace_strength: 0
 ```
 
 #### `terrain.base_height_offset`
@@ -913,11 +1075,31 @@ A multiplier applied to the primary terrain height scale when enabled by the act
 
 Lower values produce flatter terrain. Higher values produce taller terrain.
 
+#### `terrain.hill_multiplier`
+
+A multiplier applied to `height.hill_scale` when enabled by the active terrain definition.
+
+Lower values reduce rolling or uneven hills. Higher values make biome-local hill forms more pronounced.
+
+#### `terrain.ridge_multiplier`
+
+A multiplier applied to `height.ridge_scale` when enabled by the active terrain definition.
+
+Low values keep ridged terrain out of smooth biomes such as plains and beaches. High values produce mountains, highlands, cliffs, rocky coasts, and other sharp elevated terrain.
+
 #### `terrain.roughness_multiplier`
 
 A multiplier applied to detail terrain strength when enabled by the active terrain definition.
 
 Lower values produce smoother terrain. Higher values produce rougher terrain.
+
+#### `terrain.terrace_step`
+
+Optional biome-controlled terrace step size, in blocks. A value of `0` means the biome does not override the terrain default.
+
+#### `terrain.terrace_strength`
+
+Optional biome-controlled terrace blend amount from `0.0` to `1.0`. Terracing should be used sparingly for shelves, mesas, cliffs, rocky coasts, and mountain ledges.
 
 ### `surface_rule_set`
 
@@ -986,6 +1168,11 @@ arvane:biome/grassy
 arvane:biome/sandy
 arvane:biome/forested
 arvane:biome/mountain
+arvane:biome/rocky
+arvane:biome/cliff
+arvane:biome/highlands
+arvane:biome/hills
+arvane:biome/basin
 arvane:biome/snowy
 ```
 
@@ -1159,10 +1346,11 @@ noise:
 threshold: 0.62
 
 y_range:
-  min: -32
+  min: -56
   max: 64
 
 surface_margin: 8
+floor_margin: 8
 ```
 
 ## Carver Fields
@@ -1179,10 +1367,12 @@ The carver schema version.
 
 The carver primitive type.
 
-The standard carver type is:
+The standard carver types are:
 
 ```text
 arvane:carver/noise_caves
+arvane:carver/tunnel_caves
+arvane:carver/ravines
 ```
 
 ### `enabled`
@@ -1207,7 +1397,7 @@ The vertical range where the carver may operate.
 
 ```yaml
 y_range:
-  min: -32
+  min: -56
   max: 64
 ```
 
@@ -1224,6 +1414,204 @@ Highest Y coordinate affected by the carver.
 Minimum distance below the surface where the carver may freely open terrain.
 
 A positive value helps prevent caves from opening too frequently directly on the surface.
+
+### `floor_margin`
+
+Minimum number of blocks above the dimension `vertical.min_y` that the carver must leave untouched.
+
+This is a shared safety clamp for cave and ravine carvers. The effective lowest carve Y is `max(y_range.min, vertical.min_y + floor_margin)`.
+
+## Tunnel Cave Carver
+
+A tunnel cave carver creates deterministic 3D cave networks from bounded region-cell candidates. Each candidate can emit multiple curving tunnels, optional branches, and occasional widened rooms. A tunnel may cross chunk boundaries, but the generator only writes blocks inside the current chunk buffer.
+
+Example:
+
+```yaml
+id: arvane:worldgen/carver/tunnel_caves
+version: 1
+type: arvane:carver/tunnel_caves
+
+enabled: true
+salt: 719333
+region_size_chunks: 5
+chance_per_region: 0.46
+
+tunnels_per_region:
+  min: 1
+  max: 3
+
+length_blocks:
+  min: 48
+  max: 112
+
+radius: [1.4, 3.2]
+vertical_radius_multiplier: [0.55, 0.9]
+
+start_y:
+  min: -54
+  max: 42
+
+horizontal_curl: 0.32
+vertical_curl: 0.16
+branch_chance: 0.28
+
+branch_count:
+  min: 1
+  max: 2
+
+room_chance: 0.14
+room_radius: [3.0, 6.5]
+
+y_range:
+  min: -58
+  max: 58
+
+surface_margin: 10
+floor_margin: 8
+```
+
+### `type`
+
+For tunnel cave networks:
+
+```text
+arvane:carver/tunnel_caves
+```
+
+### `salt`
+
+Integer salt used for deterministic tunnel candidate placement.
+
+### `region_size_chunks`
+
+Horizontal candidate-cell size in chunks. Each region cell can produce a bounded set of tunnel candidates.
+
+### `chance_per_region`
+
+Probability from `0.0` to `1.0` that a region cell emits tunnel candidates.
+
+### `tunnels_per_region`
+
+Inclusive integer range for the number of primary tunnels emitted by a selected region cell.
+
+### `length_blocks`
+
+Inclusive integer range for primary tunnel path length in blocks.
+
+### `radius`
+
+Two-number range for primary tunnel horizontal radius in blocks.
+
+### `vertical_radius_multiplier`
+
+Two-number range multiplied by tunnel radius to determine the tunnel's vertical radius.
+
+### `start_y`
+
+Inclusive Y range for primary tunnel starting points. The effective range is clamped to the carver `y_range`, dimension bounds, and `floor_margin`.
+
+### `horizontal_curl`
+
+Maximum per-step yaw change. Higher values create more winding cave paths.
+
+### `vertical_curl`
+
+Maximum per-step pitch change. Higher values create more vertical cave paths.
+
+### `branch_chance`
+
+Probability from `0.0` to `1.0` that a primary tunnel emits branches.
+
+### `branch_count`
+
+Inclusive integer range for branch count when branching occurs.
+
+### `room_chance`
+
+Probability from `0.0` to `1.0` that a tunnel contains one widened room.
+
+### `room_radius`
+
+Two-number range for room radius in blocks.
+
+## Ravine Carver
+
+A ravine carver cuts deterministic long, narrow gaps through the current chunk buffer. Ravine candidates are derived from seed, carver salt, and bounded region cells. A ravine may cross chunk boundaries, but the generator only writes blocks inside the chunk currently being generated.
+
+Example:
+
+```yaml
+id: arvane:worldgen/carver/ravines
+version: 1
+type: arvane:carver/ravines
+
+enabled: true
+salt: 190173
+region_size_chunks: 7
+chance_per_region: 0.16
+
+length_chunks:
+  min: 3
+  max: 6
+
+width: [2.4, 5.0]
+
+depth:
+  min: 14
+  max: 34
+
+y_range:
+  min: -54
+  max: 82
+
+surface_margin: 0
+floor_margin: 12
+```
+
+### `type`
+
+For ravines:
+
+```text
+arvane:carver/ravines
+```
+
+### `salt`
+
+Integer salt used for deterministic ravine candidate placement.
+
+### `region_size_chunks`
+
+Horizontal candidate-cell size in chunks. Each region cell can produce at most one ravine candidate.
+
+### `chance_per_region`
+
+Probability from `0.0` to `1.0` that a region cell emits a ravine candidate.
+
+### `length_chunks`
+
+Inclusive range for ravine path length measured in chunks.
+
+### `width`
+
+Two-number range for ravine half-width in blocks.
+
+### `depth`
+
+Inclusive range for ravine depth in blocks. The V1 ravine shape opens from the local terrain surface downward and narrows with depth.
+
+### `y_range`
+
+Vertical range where ravines may carve. Uses the same `min` and `max` fields as noise caves.
+
+### `surface_margin`
+
+Distance below the terrain surface where ravine carving begins. A value of `0` allows surface-opening ravines.
+
+### `floor_margin`
+
+Distance above the dimension floor that ravines must preserve. This prevents deep ravines from cutting through the bottom of a shallow terrain column.
 
 ---
 
@@ -2672,6 +3060,12 @@ Any per-block randomness for blueprint structures, including `integrity` damage/
 
 Large structures should be represented as deterministic candidates or deterministic candidate pieces with conservative bounds. Candidate search must be bounded by the maximum horizontal extent of the resolved structure set rather than scanning arbitrary large regions.
 
+## Carver Chunk-Border Behavior
+
+Carvers that can cross chunk boundaries, such as tunnel caves and ravines, must follow the same chunk-ownership rule: candidates are deterministic global shapes, but generation writes only into the current chunk buffer.
+
+Tunnel and ravine candidate searches must be bounded by the configured maximum length, radius, and region-cell size. Candidate placement must not read or mutate loaded neighboring chunks. Surface anchoring and carve limits use deterministic terrain profile data for the chunk currently being generated.
+
 ---
 
 # Validation Expectations
@@ -2707,7 +3101,7 @@ version: 1
 seed_salt: "overworld"
 
 vertical:
-  min_y: -32
+  min_y: -64
   max_y: 128
   sea_level: 32
 
@@ -2720,6 +3114,8 @@ surface_rule_set: arvane:worldgen/surface_rule_set/overworld
 
 carvers:
   - arvane:worldgen/carver/caves
+  - arvane:worldgen/carver/tunnel_caves
+  - arvane:worldgen/carver/ravines
 
 features:
   stages:
@@ -3008,9 +3404,9 @@ placement:
 
   height:
     type: trapezoid
-    min_y: -24
+    min_y: -56
     max_y: 72
-    peak_y: 24
+    peak_y: 8
 
   filters:
     - type: biome_tag
@@ -3038,10 +3434,11 @@ noise:
 threshold: 0.62
 
 y_range:
-  min: -32
+  min: -56
   max: 64
 
 surface_margin: 8
+floor_margin: 8
 ```
 
 ## Small Ruin Blueprint Feature

@@ -10,8 +10,7 @@
 
 namespace arv::server::detail {
 
-ServerWorldJobRuntime::ServerWorldJobRuntime()
-    : job_system_(std::make_unique<sched::JobSystem>()) {
+ServerWorldJobRuntime::ServerWorldJobRuntime() : job_system_(std::make_unique<sched::JobSystem>()) {
 }
 
 void ServerWorldJobRuntime::configure(const ServerStartInfo& start_info) {
@@ -157,8 +156,13 @@ void ServerWorldJobRuntime::schedule_generation_jobs(
     return;
   }
 
+  if (pending_generation_jobs_.size() >= max_pending_generation_jobs_) {
+    return;
+  }
+  const usize available_slots =
+      static_cast<usize>(max_pending_generation_jobs_) - pending_generation_jobs_.size();
   const std::vector<ChunkCoord> candidates =
-      chunk_streamer.pending_generation_requests(world);
+      chunk_streamer.pending_generation_requests(world, available_slots);
   for (const ChunkCoord coord : candidates) {
     if (pending_generation_jobs_.size() >= max_pending_generation_jobs_) {
       return;

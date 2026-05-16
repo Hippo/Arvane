@@ -2,8 +2,14 @@ id: arvane:worldgen/surface_rule_set/desert
 version: 1
 
 rules:
+  - when:
+      slope_greater_than: 0.25
+    layers:
+      - block: arvane:stone
+        depth: remaining
+
   - layers:
       - block: arvane:sand
-        depth: 5
+        depth: 4
       - block: arvane:stone
         depth: remaining

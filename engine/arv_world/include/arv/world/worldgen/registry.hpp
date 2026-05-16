@@ -39,6 +39,8 @@ struct ResolvedBiome {
 struct ResolvedClimateField {
   std::string name{};
   NoiseFieldConfig noise{};
+  f32 scale{1.0F};
+  f32 offset{};
 };
 
 struct ResolvedClimateRange {

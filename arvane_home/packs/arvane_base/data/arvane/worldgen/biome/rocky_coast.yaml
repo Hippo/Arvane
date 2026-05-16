@@ -1,0 +1,31 @@
+id: arvane:worldgen/biome/rocky_coast
+version: 1
+display_name: Rocky Coast
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/coast
+  - arvane:biome/rocky
+  - arvane:biome/cliff
+
+terrain:
+  base_height_offset: 0
+  height_scale_multiplier: 0.3
+  hill_multiplier: 0.45
+  ridge_multiplier: 0.65
+  roughness_multiplier: 0.85
+  terrace_step: 4
+  terrace_strength: 0.18
+
+surface_rule_set: arvane:worldgen/surface_rule_set/rocky_coast
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/stone_boulder_sparse
+
+colors:
+  grass: "#728E52"
+  foliage: "#536F3F"
+  water: "#2F68C5"
+  fog: "#D2DDE7"

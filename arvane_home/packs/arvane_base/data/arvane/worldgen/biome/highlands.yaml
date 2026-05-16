@@ -1,0 +1,33 @@
+id: arvane:worldgen/biome/highlands
+version: 1
+display_name: Highlands
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/temperate
+  - arvane:biome/grassy
+  - arvane:biome/rocky
+  - arvane:biome/highlands
+
+terrain:
+  base_height_offset: 8
+  height_scale_multiplier: 0.62
+  hill_multiplier: 1.1
+  ridge_multiplier: 0.55
+  roughness_multiplier: 1.0
+  terrace_step: 4
+  terrace_strength: 0.12
+
+surface_rule_set: arvane:worldgen/surface_rule_set/highlands
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/grass_patch
+      - arvane:worldgen/placed_feature/stone_boulder_sparse
+
+colors:
+  grass: "#6F9A4B"
+  foliage: "#547C3B"
+  water: "#3F76E4"
+  fog: "#D0DCE8"

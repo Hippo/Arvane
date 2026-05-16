@@ -274,6 +274,8 @@ public:
   [[nodiscard]] u64 mesh_revision() const noexcept;
   void mark_chunk_lighting_dirty(ChunkSectionCoord coord) noexcept;
   void set_generation_context(u64 seed, WorldGenerationConfig config);
+  [[nodiscard]] u64 generation_seed() const noexcept;
+  [[nodiscard]] const WorldGenerationConfig* generation_config() const noexcept;
   void clear_generation_context() noexcept;
   void set_tick_policy(WorldTickPolicy policy) noexcept;
   [[nodiscard]] WorldTickPolicy tick_policy() const noexcept;

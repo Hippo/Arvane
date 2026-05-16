@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <utility>
 
 namespace arv::server {
@@ -15,28 +16,99 @@ namespace {
   return std::max(abs_i32(lhs.value.x - rhs.value.x), abs_i32(lhs.value.z - rhs.value.z));
 }
 
-[[nodiscard]] bool chunk_order_less(ChunkSectionCoord lhs, ChunkSectionCoord rhs, ChunkSectionCoord center) noexcept {
-  const i32 lhs_horizontal_distance = horizontal_chunk_distance(lhs, center);
-  const i32 rhs_horizontal_distance = horizontal_chunk_distance(rhs, center);
-  if (lhs_horizontal_distance != rhs_horizontal_distance) {
-    return lhs_horizontal_distance < rhs_horizontal_distance;
-  }
-  const i32 lhs_vertical_distance = abs_i32(lhs.value.y - center.value.y);
-  const i32 rhs_vertical_distance = abs_i32(rhs.value.y - center.value.y);
-  if (lhs_vertical_distance != rhs_vertical_distance) {
-    return lhs_vertical_distance < rhs_vertical_distance;
-  }
-  if (lhs.value.z != rhs.value.z) {
-    return lhs.value.z < rhs.value.z;
-  }
-  if (lhs.value.x != rhs.value.x) {
-    return lhs.value.x < rhs.value.x;
-  }
-  return lhs.value.y < rhs.value.y;
-}
-
 [[nodiscard]] i32 generation_priority_distance(ChunkSectionCoord coord, ChunkSectionCoord center) noexcept {
   return horizontal_chunk_distance(coord, center);
+}
+
+template<typename PlayerState>
+[[nodiscard]] bool column_has_requested_section(
+    const PlayerState& state,
+    const world::WorldRuntime& world,
+    ChunkCoord column,
+    world::WorldHeightSettings height) {
+  for (i32 y = height.min_chunk_y; y <= height.max_chunk_y; ++y) {
+    const ChunkSectionCoord coord{{column.x, y, column.z}};
+    if (state.desired_chunks.find(coord) == state.desired_chunks.end() ||
+        state.pending_chunks.find(coord) == state.pending_chunks.end()) {
+      continue;
+    }
+    const voxel::ChunkSection* chunk = world.find_chunk(coord);
+    if (chunk != nullptr &&
+        chunk->lifecycle_state() == voxel::ChunkLifecycleState::Requested) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template<typename Fn>
+void visit_chunk_columns_by_distance(ChunkSectionCoord center, i32 radius, Fn&& fn) {
+  for (i32 distance = 0; distance <= radius; ++distance) {
+    const i32 min_z = center.value.z - distance;
+    const i32 max_z = center.value.z + distance;
+    const i32 min_x = center.value.x - distance;
+    const i32 max_x = center.value.x + distance;
+    for (i32 z = min_z; z <= max_z; ++z) {
+      for (i32 x = min_x; x <= max_x; ++x) {
+        if (std::max(abs_i32(x - center.value.x), abs_i32(z - center.value.z)) != distance) {
+          continue;
+        }
+        if (!fn(ChunkCoord{x, z}, distance)) {
+          return;
+        }
+      }
+    }
+  }
+}
+
+[[nodiscard]] std::vector<i32> vertical_priority_order(
+    world::WorldHeightSettings height,
+    i32 center_y) {
+  std::vector<i32> result;
+  result.reserve(height.section_count());
+  for (i32 distance = 0; result.size() < height.section_count(); ++distance) {
+    bool added = false;
+    const i32 lower = center_y - distance;
+    const i32 upper = center_y + distance;
+    if (lower >= height.min_chunk_y && lower <= height.max_chunk_y) {
+      result.push_back(lower);
+      added = true;
+    }
+    if (distance != 0 && upper >= height.min_chunk_y && upper <= height.max_chunk_y) {
+      result.push_back(upper);
+      added = true;
+    }
+    if (!added && lower < height.min_chunk_y && upper > height.max_chunk_y) {
+      break;
+    }
+  }
+  return result;
+}
+
+template<typename PlayerState>
+[[nodiscard]] std::optional<ChunkSectionCoord> next_pending_chunk_for_send(
+    const PlayerState& state,
+    world::WorldHeightSettings height,
+    const HashSet<ChunkSectionCoord>& deferred_this_tick) {
+  const std::vector<i32> y_order = vertical_priority_order(height, state.center_chunk.value.y);
+  std::optional<ChunkSectionCoord> result;
+  visit_chunk_columns_by_distance(
+      state.center_chunk,
+      state.view_distance,
+      [&](ChunkCoord column, i32) {
+        for (const i32 y : y_order) {
+          const ChunkSectionCoord coord{{column.x, y, column.z}};
+          if (deferred_this_tick.find(coord) != deferred_this_tick.end() ||
+              state.pending_chunks.find(coord) == state.pending_chunks.end() ||
+              state.desired_chunks.find(coord) == state.desired_chunks.end()) {
+            continue;
+          }
+          result = coord;
+          return false;
+        }
+        return true;
+      });
+  return result;
 }
 
 [[nodiscard]] bool has_any_fluid(const voxel::ChunkSection& chunk) noexcept {
@@ -124,12 +196,39 @@ void ServerChunkStreamer::tick_streaming_budget(
 }
 
 std::vector<ChunkCoord> ServerChunkStreamer::pending_generation_requests(
-    const world::WorldRuntime& world) const {
+    const world::WorldRuntime& world,
+    usize max_requests) const {
   std::vector<ChunkCoord> requests;
   HashMap<ChunkCoord, i32> request_priorities;
+  const world::WorldHeightSettings height = world.height_settings();
+  const bool bounded = max_requests != 0U;
   for (const auto& [session_id, state] : players_) {
     (void)session_id;
     if (state.world_id != world.id()) {
+      continue;
+    }
+    if (bounded && requests.size() >= max_requests) {
+      break;
+    }
+    if (bounded) {
+      visit_chunk_columns_by_distance(
+          state.center_chunk,
+          state.view_distance,
+          [&](ChunkCoord column, i32 priority) {
+            if (requests.size() >= max_requests) {
+              return false;
+            }
+            if (!column_has_requested_section(state, world, column, height)) {
+              return true;
+            }
+            auto [priority_iter, inserted] = request_priorities.try_emplace(column, priority);
+            if (inserted) {
+              requests.emplace_back(column);
+            } else {
+              priority_iter->second = std::min(priority_iter->second, priority);
+            }
+            return true;
+          });
       continue;
     }
     for (const ChunkSectionCoord coord : state.pending_chunks) {
@@ -357,22 +456,20 @@ void ServerChunkStreamer::queue_chunk_sends(
     PlayerChunkStreamState& state,
     std::vector<QueuedChunkStreamMessage>& out_messages) {
   u32 sent = 0;
+  u32 inspected = 0;
+  const u32 request_scan_budget =
+      config_.max_chunks_sent_per_player_tick <= std::numeric_limits<u32>::max() / 2U
+          ? config_.max_chunks_sent_per_player_tick * 2U
+          : config_.max_chunks_sent_per_player_tick;
   HashSet<ChunkSectionCoord> deferred_this_tick;
-  while (sent < config_.max_chunks_sent_per_player_tick) {
-    std::optional<ChunkSectionCoord> next_coord;
-    for (const ChunkSectionCoord coord : state.pending_chunks) {
-      if (deferred_this_tick.find(coord) != deferred_this_tick.end()) {
-        continue;
-      }
-      if (!next_coord.has_value() ||
-          chunk_order_less(coord, next_coord.value(), state.center_chunk)) {
-        next_coord = coord;
-      }
-    }
-
+  while (sent < config_.max_chunks_sent_per_player_tick &&
+         inspected < request_scan_budget) {
+    const std::optional<ChunkSectionCoord> next_coord =
+        next_pending_chunk_for_send(state, world.height_settings(), deferred_this_tick);
     if (!next_coord.has_value()) {
       return;
     }
+    ++inspected;
 
     const ChunkSectionCoord coord = next_coord.value();
     if (state.desired_chunks.find(coord) == state.desired_chunks.end()) {
@@ -383,7 +480,11 @@ void ServerChunkStreamer::queue_chunk_sends(
     const std::optional<voxel::ChunkSnapshot> snapshot =
         prepare_chunk_snapshot(world, coord);
     if (!snapshot.has_value()) {
-      deferred_this_tick.insert(coord);
+      const world::WorldHeightSettings height = world.height_settings();
+      const ChunkCoord column = chunk_to_column(coord);
+      for (i32 y = height.min_chunk_y; y <= height.max_chunk_y; ++y) {
+        deferred_this_tick.insert({{column.x, y, column.z}});
+      }
       continue;
     }
 

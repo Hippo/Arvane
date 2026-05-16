@@ -4,7 +4,7 @@ version: 1
 rules:
   - when:
       above_sea_level: true
-      slope_less_than: 0.75
+      slope_less_than: 0.42
     layers:
       - block: arvane:grass_block
         depth: 1

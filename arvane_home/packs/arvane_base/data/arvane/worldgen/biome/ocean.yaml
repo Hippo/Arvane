@@ -1,16 +1,24 @@
 id: arvane:worldgen/biome/ocean
 version: 1
+display_name: Ocean
 
 tags:
   - arvane:biome/ocean
   - arvane:biome/aquatic
 
 terrain:
-  base_height_offset: -8
-  height_scale_multiplier: 0.35
-  roughness_multiplier: 0.35
+  base_height_offset: -13
+  height_scale_multiplier: 0.18
+  hill_multiplier: 0.22
+  ridge_multiplier: 0.05
+  roughness_multiplier: 0.3
 
 surface_rule_set: arvane:worldgen/surface_rule_set/ocean_floor
+
+features:
+  stages:
+    underwater_decoration:
+      - arvane:worldgen/placed_feature/sand_disk_underwater
 
 colors:
   water: "#2F68C5"

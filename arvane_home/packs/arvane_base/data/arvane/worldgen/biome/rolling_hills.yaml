@@ -1,0 +1,31 @@
+id: arvane:worldgen/biome/rolling_hills
+version: 1
+display_name: Rolling Hills
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/temperate
+  - arvane:biome/grassy
+  - arvane:biome/hills
+
+terrain:
+  base_height_offset: 4
+  height_scale_multiplier: 0.5
+  hill_multiplier: 1.25
+  ridge_multiplier: 0.18
+  roughness_multiplier: 0.62
+
+surface_rule_set: arvane:worldgen/surface_rule_set/grassy_land
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/grass_patch
+      - arvane:worldgen/placed_feature/oak_tree_sparse
+      - arvane:worldgen/placed_feature/stone_boulder_sparse
+
+colors:
+  grass: "#72AA46"
+  foliage: "#548D39"
+  water: "#3F76E4"
+  fog: "#CADCFF"

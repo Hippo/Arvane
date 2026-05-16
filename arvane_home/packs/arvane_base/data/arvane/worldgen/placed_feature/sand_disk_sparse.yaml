@@ -1,0 +1,29 @@
+id: arvane:worldgen/placed_feature/sand_disk_sparse
+version: 1
+
+feature: arvane:worldgen/configured_feature/sand_disk
+salt: 44017
+
+placement:
+  stage: surface_decoration
+
+  count:
+    type: chance_per_chunk
+    chance: 0.28
+
+  height:
+    type: surface
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/sandy
+
+    - type: block_below
+      blocks:
+        - arvane:sand
+        - arvane:stone
+        - arvane:dirt
+        - arvane:grass_block
+
+    - type: slope_less_than
+      value: 0.35

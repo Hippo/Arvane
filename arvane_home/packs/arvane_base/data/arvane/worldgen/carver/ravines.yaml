@@ -1,0 +1,25 @@
+id: arvane:worldgen/carver/ravines
+version: 1
+type: arvane:carver/ravines
+
+enabled: true
+salt: 190173
+region_size_chunks: 7
+chance_per_region: 0.16
+
+length_chunks:
+  min: 3
+  max: 6
+
+width: [2.4, 5.0]
+
+depth:
+  min: 14
+  max: 34
+
+y_range:
+  min: -54
+  max: 82
+
+surface_margin: 0
+floor_margin: 12

@@ -2,9 +2,9 @@
 
 #include "chunk_view.hpp"
 
-#include "arv/core/perf_stats.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/item_animation.hpp"
+#include "arv/core/perf_stats.hpp"
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
@@ -69,6 +69,12 @@ struct DebugMenuState {
   std::array<f32, ProfileFrameHistoryCapacity> profile_frame_work_ms{};
   QueueProfileState server_queue_profile{};
   QueueProfileState client_queue_profile{};
+  bool current_biome_label_valid{};
+  i32 current_biome_world_x{};
+  i32 current_biome_world_z{};
+  u64 current_biome_seed{};
+  const void* current_biome_dimension{};
+  std::string current_biome_label{};
   u32 snapshot_created_this_frame{};
   u32 snapshot_reused_this_frame{};
   u32 snapshot_copies_this_frame{};

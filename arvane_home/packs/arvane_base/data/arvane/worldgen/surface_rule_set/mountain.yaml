@@ -3,13 +3,13 @@ version: 1
 
 rules:
   - when:
-      slope_greater_than: 0.75
+      slope_greater_than: 0.30
     layers:
       - block: arvane:stone
         depth: remaining
 
   - when:
-      height_above: 84
+      height_above: 76
     layers:
       - block: arvane:stone
         depth: remaining

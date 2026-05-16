@@ -484,6 +484,15 @@ the completion queue for later ticks. This keeps integrated singleplayer from
 turning one render frame into a burst of generation publish, chunk serialization,
 client chunk application, meshing, and GPU upload work.
 
+Missing chunk discovery is budgeted too. When a streaming pass finds missing
+sections, those load/generation requests consume a small bounded scan budget
+derived from the per-player chunk send budget; they cannot walk the entire
+pending view in one frame. Generation scheduling then asks the streamer only for
+the number of column requests needed to fill open job slots, and the streamer
+answers by walking outward from each player's center instead of sorting the
+whole pending view. This keeps first-load streaming nearest-first and avoids one
+frame enqueueing an entire view-distance worth of generation work.
+
 ---
 
 ## Save and Load Jobs

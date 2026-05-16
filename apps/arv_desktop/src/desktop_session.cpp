@@ -182,13 +182,9 @@ bool DesktopSessionManager::start_singleplayer(
   session->world_seed = create_seed.value_or(generated_world_seed());
   session->generation_config = dependencies_.default_generation_config;
   if (loaded_save.has_world_metadata) {
-    session->generation_config = loaded_save.world.generation_config;
-    session->generation_config.resolved_dimension =
-        dependencies_.default_generation_config.resolved_dimension;
-    if (session->generation_config.dimension_id.empty()) {
-      session->generation_config.dimension_id =
-          dependencies_.default_generation_config.dimension_id;
-    }
+    session->generation_config = world::refresh_generation_config_for_current_dimension(
+        loaded_save.world.generation_config,
+        dependencies_.default_generation_config);
     session->world_seed = loaded_save.world.seed;
     session->world_save_name = loaded_save.world.name;
   }

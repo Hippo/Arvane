@@ -1,0 +1,32 @@
+id: arvane:worldgen/biome/dry_basin
+version: 1
+display_name: Dry Basin
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/hot
+  - arvane:biome/dry
+  - arvane:biome/sandy
+  - arvane:biome/basin
+
+terrain:
+  base_height_offset: -6
+  height_scale_multiplier: 0.22
+  hill_multiplier: 0.38
+  ridge_multiplier: 0.08
+  roughness_multiplier: 0.22
+  terrace_step: 3
+  terrace_strength: 0.28
+
+surface_rule_set: arvane:worldgen/surface_rule_set/desert
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/sand_disk_sparse
+
+colors:
+  grass: "#B6A15B"
+  foliage: "#978747"
+  water: "#3F76E4"
+  fog: "#E7D8AA"

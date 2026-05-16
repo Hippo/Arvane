@@ -11,6 +11,7 @@ set(ARV_WORLD_HEADERS
   include/arv/world/worldgen/blueprint_placement.hpp
   include/arv/world/worldgen/bounds.hpp
   include/arv/world/worldgen/carver.hpp
+  include/arv/world/worldgen/carver_runtime.hpp
   include/arv/world/worldgen/chunk_generator.hpp
   include/arv/world/worldgen/common.hpp
   include/arv/world/worldgen/dimension.hpp
@@ -37,6 +38,7 @@ add_library(arv_world STATIC
   src/world_lighting.cpp
   src/world_generation.cpp
   src/worldgen/blueprint_placement.cpp
+  src/worldgen/carver_runtime.cpp
   src/worldgen/chunk_generator.cpp
   src/worldgen/common.cpp
   src/worldgen/loader.cpp
@@ -44,6 +46,7 @@ add_library(arv_world STATIC
   src/worldgen/registry.cpp
   src/worldgen/seeds.cpp
   src/worldgen/structure_candidate.cpp
+  src/worldgen/terrain_profile.cpp
   src/worldgen/terrain_query.cpp
   src/world_time.cpp
   src/world_runtime_internal.cpp

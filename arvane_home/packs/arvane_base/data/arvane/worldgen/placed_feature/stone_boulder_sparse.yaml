@@ -1,0 +1,29 @@
+id: arvane:worldgen/placed_feature/stone_boulder_sparse
+version: 1
+
+feature: arvane:worldgen/configured_feature/stone_boulder
+salt: 50123
+
+placement:
+  stage: surface_decoration
+
+  count:
+    type: chance_per_chunk
+    chance: 0.22
+
+  height:
+    type: surface
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/rocky
+
+    - type: block_below
+      blocks:
+        - arvane:grass_block
+        - arvane:dirt
+        - arvane:stone
+        - arvane:sand
+
+    - type: slope_less_than
+      value: 0.65

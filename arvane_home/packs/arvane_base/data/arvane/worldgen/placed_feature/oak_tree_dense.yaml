@@ -1,0 +1,28 @@
+id: arvane:worldgen/placed_feature/oak_tree_dense
+version: 1
+
+feature: arvane:worldgen/configured_feature/oak_tree
+salt: 17293
+
+placement:
+  stage: surface_decoration
+
+  count:
+    type: uniform
+    min: 1
+    max: 4
+
+  height:
+    type: surface
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/forested
+
+    - type: block_below
+      blocks:
+        - arvane:grass_block
+        - arvane:dirt
+
+    - type: slope_less_than
+      value: 0.42

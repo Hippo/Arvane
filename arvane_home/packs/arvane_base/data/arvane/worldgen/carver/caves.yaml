@@ -2,7 +2,7 @@ id: arvane:worldgen/carver/caves
 version: 1
 type: arvane:carver/noise_caves
 
-enabled: true
+enabled: false
 
 noise:
   type: arvane:noise/simplex_3d
@@ -16,7 +16,8 @@ noise:
 threshold: 0.62
 
 y_range:
-  min: -32
+  min: -56
   max: 64
 
 surface_margin: 8
+floor_margin: 8

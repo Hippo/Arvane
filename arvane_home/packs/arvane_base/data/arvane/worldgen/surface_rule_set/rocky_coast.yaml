@@ -1,0 +1,25 @@
+id: arvane:worldgen/surface_rule_set/rocky_coast
+version: 1
+
+rules:
+  - when:
+      underwater: true
+    layers:
+      - block: arvane:sand
+        depth: 1
+      - block: arvane:stone
+        depth: remaining
+
+  - when:
+      slope_greater_than: 0.24
+    layers:
+      - block: arvane:stone
+        depth: remaining
+
+  - layers:
+      - block: arvane:grass_block
+        depth: 1
+      - block: arvane:dirt
+        depth: 1
+      - block: arvane:stone
+        depth: remaining

@@ -3,24 +3,69 @@ version: 1
 type: arvane:terrain/heightmap
 
 height:
-  base: 8
-  scale: 28
-  detail_scale: 4
+  base: 20
+  scale: 18
+  hill_scale: 8
+  ridge_scale: 26
+  detail_scale: 5
+
+shape:
+  ridge_sharpness: 2.35
+  domain_warp_amplitude: 18
+  terrace_step: 0
+  terrace_strength: 0
+  max_column_step: 6
 
 noise:
   primary:
     type: arvane:noise/simplex_2d
-    seed_salt: "terrain_primary"
-    frequency: 0.012
+    seed_salt: "terrain_continental"
+    frequency: 0.0048
     octaves: 5
     amplitude: 1.0
     lacunarity: 2.0
     gain: 0.5
 
+  hill:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_hills"
+    frequency: 0.018
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  ridge:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_ridges"
+    frequency: 0.010
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.48
+
   detail:
     type: arvane:noise/simplex_2d
     seed_salt: "terrain_detail"
-    frequency: 0.045
+    frequency: 0.055
+    octaves: 3
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  warp_x:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_warp_x"
+    frequency: 0.006
+    octaves: 2
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  warp_z:
+    type: arvane:noise/simplex_2d
+    seed_salt: "terrain_warp_z"
+    frequency: 0.006
     octaves: 2
     amplitude: 1.0
     lacunarity: 2.0
@@ -29,4 +74,8 @@ noise:
 biome_modifiers:
   base_height_offset: true
   height_scale_multiplier: true
+  hill_multiplier: true
+  ridge_multiplier: true
   roughness_multiplier: true
+  terrace_step: true
+  terrace_strength: true

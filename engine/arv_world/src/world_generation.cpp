@@ -256,6 +256,25 @@ WorldGenerationConfig config_from_resolved_dimension(
   return config;
 }
 
+WorldGenerationConfig refresh_generation_config_for_current_dimension(
+    WorldGenerationConfig saved_config,
+    const WorldGenerationConfig& current_default_config) {
+  const bool same_dimension =
+      saved_config.dimension_id.empty() ||
+      saved_config.dimension_id == current_default_config.dimension_id;
+  saved_config.resolved_dimension = current_default_config.resolved_dimension;
+  if (!same_dimension) {
+    return saved_config;
+  }
+
+  const i32 min_y = std::min(saved_config.min_y, current_default_config.min_y);
+  const i32 max_y = std::max(saved_config.max_y, current_default_config.max_y);
+  WorldGenerationConfig refreshed = current_default_config;
+  refreshed.min_y = min_y;
+  refreshed.max_y = max_y;
+  return refreshed;
+}
+
 WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text) {
   WorldGenerationConfig config;
 

@@ -1,5 +1,6 @@
 id: arvane:worldgen/biome/plains
 version: 1
+display_name: Plains
 
 tags:
   - arvane:biome/land
@@ -8,8 +9,10 @@ tags:
 
 terrain:
   base_height_offset: 0
-  height_scale_multiplier: 0.85
-  roughness_multiplier: 0.65
+  height_scale_multiplier: 0.45
+  hill_multiplier: 0.55
+  ridge_multiplier: 0.05
+  roughness_multiplier: 0.35
 
 surface_rule_set: arvane:worldgen/surface_rule_set/grassy_land
 
@@ -17,7 +20,7 @@ features:
   stages:
     surface_decoration:
       - arvane:worldgen/placed_feature/grass_patch
-      - arvane:worldgen/placed_feature/oak_tree
+      - arvane:worldgen/placed_feature/oak_tree_sparse
 
 colors:
   grass: "#6BAA45"

@@ -1,0 +1,18 @@
+id: arvane:worldgen/configured_feature/sand_disk
+version: 1
+type: arvane:feature/disk
+
+block: arvane:sand
+
+radius:
+  min: 2
+  max: 5
+
+depth: 2
+
+replace:
+  blocks:
+    - arvane:dirt
+    - arvane:grass_block
+    - arvane:stone
+    - arvane:sand

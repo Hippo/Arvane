@@ -5,40 +5,140 @@ type: arvane:biome_source/climate_map
 noise: arvane:worldgen/noise/overworld_climate
 
 sample_scale:
-  xz: 4
+  xz: 2
 
 biomes:
   - biome: arvane:worldgen/biome/deep_ocean
     climate:
-      continentalness: [-1.0, -0.65]
+      continentalness: [-1.0, -0.72]
+      temperature: [-1.0, 1.0]
+      humidity: [-1.0, 1.0]
+      erosion: [-1.0, 1.0]
+      ridges: [-1.0, 1.0]
+      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/ocean
     climate:
-      continentalness: [-0.7, -0.38]
+      continentalness: [-0.78, -0.45]
+      temperature: [-1.0, 1.0]
+      humidity: [-1.0, 1.0]
+      erosion: [-1.0, 1.0]
+      ridges: [-1.0, 1.0]
+      weirdness: [-1.0, 1.0]
+
+  - biome: arvane:worldgen/biome/rocky_coast
+    climate:
+      continentalness: [-0.52, -0.18]
+      temperature: [-1.0, 1.0]
+      humidity: [-1.0, 1.0]
+      erosion: [0.25, 1.0]
+      ridges: [0.15, 1.0]
+      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/beach
     climate:
-      continentalness: [-0.45, -0.18]
+      continentalness: [-0.52, -0.16]
+      temperature: [-1.0, 1.0]
+      humidity: [-1.0, 1.0]
+      erosion: [-1.0, 0.45]
+      ridges: [-1.0, 0.45]
+      weirdness: [-1.0, 1.0]
+
+  - biome: arvane:worldgen/biome/cliffs
+    climate:
+      continentalness: [-0.1, 0.75]
+      temperature: [-1.0, 0.75]
+      humidity: [-1.0, 1.0]
+      erosion: [0.28, 1.0]
+      ridges: [0.28, 1.0]
+      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/mountains
     climate:
-      continentalness: [-1.0, 1.0]
-      erosion: [0.18, 1.0]
+      continentalness: [0.05, 1.0]
+      temperature: [-0.65, 0.55]
+      humidity: [-1.0, 1.0]
+      erosion: [0.15, 1.0]
+      ridges: [0.25, 1.0]
+      weirdness: [-1.0, 1.0]
+
+  - biome: arvane:worldgen/biome/highlands
+    climate:
+      continentalness: [0.0, 1.0]
+      temperature: [-0.55, 0.65]
+      humidity: [-0.65, 0.75]
+      erosion: [0.05, 0.78]
+      ridges: [-0.15, 0.65]
+      weirdness: [-1.0, 1.0]
+
+  - biome: arvane:worldgen/biome/rolling_hills
+    climate:
+      continentalness: [-0.05, 1.0]
+      temperature: [-0.5, 0.75]
+      humidity: [-0.35, 0.65]
+      erosion: [-0.1, 0.75]
+      ridges: [-0.25, 0.55]
+      weirdness: [0.15, 1.0]
+
+  - biome: arvane:worldgen/biome/badlands
+    climate:
+      continentalness: [-0.05, 1.0]
+      temperature: [0.22, 1.0]
+      humidity: [-0.85, -0.15]
+      erosion: [0.12, 0.95]
+      ridges: [0.0, 0.75]
+      weirdness: [-1.0, 1.0]
+
+  - biome: arvane:worldgen/biome/savanna
+    climate:
+      continentalness: [-0.05, 1.0]
+      temperature: [0.08, 1.0]
+      humidity: [-0.35, 0.28]
+      erosion: [-0.6, 0.55]
+      ridges: [-0.8, 0.35]
+      weirdness: [-1.0, 1.0]
+
+  - biome: arvane:worldgen/biome/dry_basin
+    climate:
+      continentalness: [-0.05, 1.0]
+      temperature: [0.42, 1.0]
+      humidity: [-1.0, -0.62]
+      erosion: [-0.85, 0.0]
+      ridges: [-1.0, 0.15]
+      weirdness: [-1.0, -0.38]
 
   - biome: arvane:worldgen/biome/desert
     climate:
-      continentalness: [-1.0, 1.0]
+      continentalness: [-0.05, 1.0]
+      temperature: [0.35, 1.0]
+      humidity: [-0.78, -0.3]
+      erosion: [-0.25, 0.55]
+      ridges: [-0.8, 0.4]
+      weirdness: [-0.4, 0.45]
+
+  - biome: arvane:worldgen/biome/scrubland
+    climate:
+      continentalness: [-0.05, 1.0]
       temperature: [0.0, 1.0]
-      humidity: [-1.0, 0.05]
+      humidity: [-0.65, 0.2]
+      erosion: [-0.55, 0.6]
+      ridges: [-0.75, 0.4]
+      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/forest
     climate:
-      continentalness: [-1.0, 1.0]
-      temperature: [-0.25, 0.25]
-      humidity: [0.02, 1.0]
+      continentalness: [-0.05, 1.0]
+      temperature: [-0.35, 0.45]
+      humidity: [0.08, 1.0]
+      erosion: [-0.65, 0.45]
+      ridges: [-0.8, 0.35]
+      weirdness: [-1.0, 1.0]
 
   - biome: arvane:worldgen/biome/plains
     climate:
-      continentalness: [-1.0, 1.0]
-      temperature: [-0.35, 0.35]
-      humidity: [-0.15, 0.15]
+      continentalness: [-0.05, 1.0]
+      temperature: [-0.65, 0.8]
+      humidity: [-0.3, 0.55]
+      erosion: [-0.85, 0.3]
+      ridges: [-1.0, 0.3]
+      weirdness: [-1.0, 1.0]

@@ -1,0 +1,25 @@
+id: arvane:worldgen/surface_rule_set/badlands
+version: 1
+
+rules:
+  - when:
+      slope_greater_than: 0.24
+    layers:
+      - block: arvane:stone
+        depth: remaining
+
+  - when:
+      height_above: 58
+    layers:
+      - block: arvane:stone
+        depth: 1
+      - block: arvane:sand
+        depth: 2
+      - block: arvane:stone
+        depth: remaining
+
+  - layers:
+      - block: arvane:sand
+        depth: 2
+      - block: arvane:stone
+        depth: remaining

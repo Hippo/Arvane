@@ -83,6 +83,18 @@ template<typename T>
   return std::nullopt;
 }
 
+[[nodiscard]] const ClimateFieldAdjustmentConfig* climate_adjustment(
+    const DimensionConfig& dimension,
+    std::string_view field) noexcept {
+  const auto found = std::find_if(
+      dimension.climate_field_adjustments.begin(),
+      dimension.climate_field_adjustments.end(),
+      [field](const ClimateFieldAdjustmentConfig& adjustment) {
+        return adjustment.field == field;
+      });
+  return found == dimension.climate_field_adjustments.end() ? nullptr : &*found;
+}
+
 [[nodiscard]] std::optional<voxel::BlockVariantID> resolve_block_variant(
     const voxel::BlockRegistry& registry,
     std::string_view name) {
@@ -376,7 +388,24 @@ ResolvedDimensionResult resolve_dimension(
   for (const std::string& name : climate_field_names) {
     const auto field = noise->fields.find(name);
     if (field != noise->fields.end()) {
-      resolved->biome_source.fields.push_back({name, field->second});
+      ResolvedClimateField resolved_field;
+      resolved_field.name = name;
+      resolved_field.noise = field->second;
+      if (const ClimateFieldAdjustmentConfig* adjustment =
+              climate_adjustment(resolved->raw, name);
+          adjustment != nullptr) {
+        resolved_field.scale = adjustment->scale;
+        resolved_field.offset = adjustment->offset;
+      }
+      resolved->biome_source.fields.push_back(std::move(resolved_field));
+    }
+  }
+  for (const ClimateFieldAdjustmentConfig& adjustment : resolved->raw.climate_field_adjustments) {
+    if (!index_of_climate_field(resolved->biome_source, adjustment.field)) {
+      return ResolvedDimensionResult::failure(error(
+          resolved->raw.id,
+          "climate.fields." + adjustment.field,
+          "climate field is not defined in biome source noise"));
     }
   }
 

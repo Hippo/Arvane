@@ -1,0 +1,30 @@
+id: arvane:worldgen/biome/savanna
+version: 1
+display_name: Savanna
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/hot
+  - arvane:biome/dry
+  - arvane:biome/grassy
+
+terrain:
+  base_height_offset: 2
+  height_scale_multiplier: 0.42
+  hill_multiplier: 0.82
+  ridge_multiplier: 0.1
+  roughness_multiplier: 0.5
+
+surface_rule_set: arvane:worldgen/surface_rule_set/grassy_land
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/grass_patch
+      - arvane:worldgen/placed_feature/oak_tree_sparse
+
+colors:
+  grass: "#9FAE45"
+  foliage: "#7F9136"
+  water: "#3F76E4"
+  fog: "#DAD4A4"

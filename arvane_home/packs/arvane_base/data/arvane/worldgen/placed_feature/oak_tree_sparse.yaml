@@ -1,0 +1,27 @@
+id: arvane:worldgen/placed_feature/oak_tree_sparse
+version: 1
+
+feature: arvane:worldgen/configured_feature/oak_tree
+salt: 17292
+
+placement:
+  stage: surface_decoration
+
+  count:
+    type: chance_per_chunk
+    chance: 0.14
+
+  height:
+    type: surface
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/grassy
+
+    - type: block_below
+      blocks:
+        - arvane:grass_block
+        - arvane:dirt
+
+    - type: slope_less_than
+      value: 0.35

@@ -61,7 +61,8 @@ public:
       world::WorldRuntime& world,
       std::vector<QueuedChunkStreamMessage>& out_messages);
   [[nodiscard]] std::vector<ChunkCoord> pending_generation_requests(
-      const world::WorldRuntime& world) const;
+      const world::WorldRuntime& world,
+      usize max_requests = 0U) const;
   [[nodiscard]] bool session_has_sent_chunk(
       SessionID session_id,
       WorldID world_id,

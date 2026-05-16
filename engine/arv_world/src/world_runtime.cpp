@@ -113,6 +113,14 @@ void WorldRuntime::set_generation_context(u64 seed, WorldGenerationConfig config
   impl_->generation_config = std::move(config);
 }
 
+u64 WorldRuntime::generation_seed() const noexcept {
+  return impl_->generation_seed;
+}
+
+const WorldGenerationConfig* WorldRuntime::generation_config() const noexcept {
+  return impl_->generation_config.has_value() ? &impl_->generation_config.value() : nullptr;
+}
+
 void WorldRuntime::clear_generation_context() noexcept {
   assert_owner_thread();
   for (auto& [coord, chunk] : impl_->chunks.chunks()) {

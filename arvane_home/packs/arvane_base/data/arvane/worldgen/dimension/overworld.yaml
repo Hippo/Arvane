@@ -3,12 +3,21 @@ version: 1
 seed_salt: "overworld"
 
 vertical:
-  min_y: -32
+  min_y: -64
   max_y: 128
   sea_level: 32
 
 generator:
   type: arvane:generator/layered_heightmap
+
+climate:
+  fields:
+    temperature:
+      scale: 0.78
+      offset: -0.16
+    humidity:
+      scale: 1.05
+      offset: 0.08
 
 biome_source: arvane:worldgen/biome_source/overworld
 terrain: arvane:worldgen/terrain/overworld
@@ -16,14 +25,13 @@ surface_rule_set: arvane:worldgen/surface_rule_set/overworld
 
 carvers:
   - arvane:worldgen/carver/caves
+  - arvane:worldgen/carver/tunnel_caves
+  - arvane:worldgen/carver/ravines
 
 features:
   stages:
     underground_ores:
       - arvane:worldgen/placed_feature/ore_iron
-    surface_decoration:
-      - arvane:worldgen/placed_feature/grass_patch
-      - arvane:worldgen/placed_feature/oak_tree
     structures:
       - arvane:worldgen/placed_feature/small_ruin
 

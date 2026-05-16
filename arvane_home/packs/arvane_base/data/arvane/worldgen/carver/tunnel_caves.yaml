@@ -1,0 +1,41 @@
+id: arvane:worldgen/carver/tunnel_caves
+version: 1
+type: arvane:carver/tunnel_caves
+
+enabled: true
+salt: 719333
+region_size_chunks: 5
+chance_per_region: 0.46
+
+tunnels_per_region:
+  min: 1
+  max: 3
+
+length_blocks:
+  min: 48
+  max: 112
+
+radius: [1.4, 3.2]
+vertical_radius_multiplier: [0.55, 0.9]
+
+start_y:
+  min: -54
+  max: 42
+
+horizontal_curl: 0.32
+vertical_curl: 0.16
+branch_chance: 0.28
+
+branch_count:
+  min: 1
+  max: 2
+
+room_chance: 0.14
+room_radius: [3.0, 6.5]
+
+y_range:
+  min: -58
+  max: 58
+
+surface_margin: 10
+floor_margin: 8

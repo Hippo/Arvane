@@ -14,9 +14,9 @@ placement:
 
   height:
     type: trapezoid
-    min_y: -24
+    min_y: -56
     max_y: 72
-    peak_y: 24
+    peak_y: 8
 
   filters:
     - type: biome_tag

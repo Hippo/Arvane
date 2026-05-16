@@ -1,0 +1,31 @@
+id: arvane:worldgen/biome/cliffs
+version: 1
+display_name: Cliffs
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/rocky
+  - arvane:biome/cliff
+  - arvane:biome/mountain
+
+terrain:
+  base_height_offset: 10
+  height_scale_multiplier: 0.55
+  hill_multiplier: 0.75
+  ridge_multiplier: 1.25
+  roughness_multiplier: 1.2
+  terrace_step: 6
+  terrace_strength: 0.38
+
+surface_rule_set: arvane:worldgen/surface_rule_set/cliffs
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/stone_boulder_sparse
+
+colors:
+  grass: "#718A4E"
+  foliage: "#536A3D"
+  water: "#3F76E4"
+  fog: "#CCD5DF"

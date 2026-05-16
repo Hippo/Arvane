@@ -1,5 +1,6 @@
 id: arvane:worldgen/biome/desert
 version: 1
+display_name: Desert
 
 tags:
   - arvane:biome/land
@@ -8,11 +9,20 @@ tags:
   - arvane:biome/sandy
 
 terrain:
-  base_height_offset: -1
-  height_scale_multiplier: 0.55
-  roughness_multiplier: 0.45
+  base_height_offset: -2
+  height_scale_multiplier: 0.32
+  hill_multiplier: 0.7
+  ridge_multiplier: 0.18
+  roughness_multiplier: 0.28
+  terrace_step: 4
+  terrace_strength: 0.18
 
 surface_rule_set: arvane:worldgen/surface_rule_set/desert
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/sand_disk_sparse
 
 colors:
   grass: "#B5A35A"

@@ -1,5 +1,6 @@
 id: arvane:worldgen/biome/forest
 version: 1
+display_name: Forest
 
 tags:
   - arvane:biome/land
@@ -10,16 +11,19 @@ tags:
 
 terrain:
   base_height_offset: 1
-  height_scale_multiplier: 0.9
-  roughness_multiplier: 0.8
+  height_scale_multiplier: 0.55
+  hill_multiplier: 0.85
+  ridge_multiplier: 0.12
+  roughness_multiplier: 0.75
 
 surface_rule_set: arvane:worldgen/surface_rule_set/grassy_land
 
 features:
   stages:
     surface_decoration:
-      - arvane:worldgen/placed_feature/oak_tree
+      - arvane:worldgen/placed_feature/oak_tree_dense
       - arvane:worldgen/placed_feature/grass_patch
+      - arvane:worldgen/placed_feature/stone_boulder_sparse
 
 colors:
   grass: "#5F9F3C"

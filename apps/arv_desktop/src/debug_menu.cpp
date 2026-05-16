@@ -2,17 +2,20 @@
 
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
+#include "arv/world/worldgen/chunk_generator.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <utility>
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -23,6 +26,59 @@ namespace {
 [[nodiscard]] player::PlayerState* local_player_state(server::ServerRuntime& server) noexcept {
   const server::ServerSession* session = server.sessions().first();
   return session == nullptr ? nullptr : server.voxel_world().find_player(session->player_id);
+}
+
+[[nodiscard]] const std::string& current_biome_label(
+    DebugMenuState& state,
+    const world::WorldRuntime& runtime,
+    Vec3f position) {
+  auto cache_label = [&](std::string label) -> const std::string& {
+    state.current_biome_label = std::move(label);
+    state.current_biome_label_valid = true;
+    return state.current_biome_label;
+  };
+
+  const world::WorldGenerationConfig* config = runtime.generation_config();
+  if (config == nullptr || config->resolved_dimension == nullptr) {
+    state.current_biome_dimension = nullptr;
+    return cache_label("Unavailable");
+  }
+
+  const i32 world_x = static_cast<i32>(std::floor(position.x));
+  const i32 world_z = static_cast<i32>(std::floor(position.z));
+  const auto* dimension = config->resolved_dimension.get();
+  const u64 seed = runtime.generation_seed();
+  if (state.current_biome_label_valid &&
+      state.current_biome_world_x == world_x &&
+      state.current_biome_world_z == world_z &&
+      state.current_biome_seed == seed &&
+      state.current_biome_dimension == dimension) {
+    return state.current_biome_label;
+  }
+
+  state.current_biome_world_x = world_x;
+  state.current_biome_world_z = world_z;
+  state.current_biome_seed = seed;
+  state.current_biome_dimension = dimension;
+
+  const ChunkCoord coord{floor_div(world_x, ChunkSize), floor_div(world_z, ChunkSize)};
+  const world::worldgen::TerrainProfile profile =
+      world::worldgen::generate_terrain_profile(
+          *dimension,
+          seed,
+          coord);
+  const usize column =
+      voxel::local_column_index({floor_mod(world_x, ChunkSize), floor_mod(world_z, ChunkSize)});
+  const usize biome_index = profile.biome_by_column[column];
+  if (biome_index >= dimension->biomes.size()) {
+    return cache_label("Unknown");
+  }
+  const world::worldgen::BiomeConfig& biome =
+      dimension->biomes[biome_index].raw;
+  if (biome.display_name.empty() || biome.display_name == biome.id) {
+    return cache_label(biome.id);
+  }
+  return cache_label(biome.display_name + " (" + biome.id + ")");
 }
 
 [[nodiscard]] bool contains_case_insensitive(std::string_view haystack, std::string_view needle) {
@@ -635,6 +691,8 @@ void render_player_tab(
       static_cast<double>(player->position.x),
       static_cast<double>(player->position.y),
       static_cast<double>(player->position.z));
+  const std::string& biome_label = current_biome_label(state, server.voxel_world(), player->position);
+  ImGui::Text("Biome: %s", biome_label.c_str());
   ImGui::Text(
       "Velocity: %.2f, %.2f, %.2f",
       static_cast<double>(player->velocity.x),

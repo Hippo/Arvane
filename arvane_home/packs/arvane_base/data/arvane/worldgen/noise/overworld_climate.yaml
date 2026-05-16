@@ -5,7 +5,7 @@ fields:
   temperature:
     type: arvane:noise/simplex_2d
     seed_salt: "temperature"
-    frequency: 0.012
+    frequency: 0.018
     octaves: 3
     amplitude: 1.0
     lacunarity: 2.0
@@ -14,7 +14,7 @@ fields:
   humidity:
     type: arvane:noise/simplex_2d
     seed_salt: "humidity"
-    frequency: 0.013
+    frequency: 0.019
     octaves: 3
     amplitude: 1.0
     lacunarity: 2.0
@@ -23,7 +23,7 @@ fields:
   continentalness:
     type: arvane:noise/simplex_2d
     seed_salt: "continentalness"
-    frequency: 0.01
+    frequency: 0.008
     octaves: 4
     amplitude: 1.0
     lacunarity: 2.0
@@ -32,8 +32,26 @@ fields:
   erosion:
     type: arvane:noise/simplex_2d
     seed_salt: "erosion"
-    frequency: 0.014
+    frequency: 0.022
     octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  ridges:
+    type: arvane:noise/simplex_2d
+    seed_salt: "climate_ridges"
+    frequency: 0.02
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  weirdness:
+    type: arvane:noise/simplex_2d
+    seed_salt: "climate_weirdness"
+    frequency: 0.024
+    octaves: 3
     amplitude: 1.0
     lacunarity: 2.0
     gain: 0.5

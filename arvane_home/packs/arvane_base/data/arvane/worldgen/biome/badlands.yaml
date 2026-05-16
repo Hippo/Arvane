@@ -1,0 +1,33 @@
+id: arvane:worldgen/biome/badlands
+version: 1
+display_name: Badlands
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/hot
+  - arvane:biome/dry
+  - arvane:biome/rocky
+  - arvane:biome/sandy
+
+terrain:
+  base_height_offset: 5
+  height_scale_multiplier: 0.4
+  hill_multiplier: 0.65
+  ridge_multiplier: 0.72
+  roughness_multiplier: 0.8
+  terrace_step: 4
+  terrace_strength: 0.2
+
+surface_rule_set: arvane:worldgen/surface_rule_set/badlands
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/stone_boulder_sparse
+      - arvane:worldgen/placed_feature/sand_disk_sparse
+
+colors:
+  grass: "#A58E4B"
+  foliage: "#7F733B"
+  water: "#3F76E4"
+  fog: "#E0C79A"

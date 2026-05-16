@@ -593,8 +593,44 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
         }
         if (!parser.read_i32(*height, "base", config.height.base) ||
             !parser.read_i32(*height, "scale", config.height.scale) ||
+            !parser.read_i32(*height, "hill_scale", config.height.hill_scale, false) ||
+            !parser.read_i32(*height, "ridge_scale", config.height.ridge_scale, false) ||
             !parser.read_i32(*height, "detail_scale", config.height.detail_scale)) {
           return false;
+        }
+        if (const io::DataValue* shape = parser.member(root, "shape"); shape != nullptr) {
+          if (!parser.require_object(*shape, "shape") ||
+              !parser.read_f32(
+                  *shape,
+                  "ridge_sharpness",
+                  config.shape.ridge_sharpness,
+                  false) ||
+              !parser.read_f32(
+                  *shape,
+                  "domain_warp_amplitude",
+                  config.shape.domain_warp_amplitude,
+                  false) ||
+              !parser.read_f32(*shape, "terrace_step", config.shape.terrace_step, false) ||
+              !parser.read_f32(
+                  *shape,
+                  "terrace_strength",
+                  config.shape.terrace_strength,
+                  false) ||
+              !parser.read_i32(
+                  *shape,
+                  "max_column_step",
+                  config.shape.max_column_step,
+                  false)) {
+            return false;
+          }
+          if (config.shape.ridge_sharpness <= 0.0F ||
+              config.shape.domain_warp_amplitude < 0.0F ||
+              config.shape.terrace_step < 0.0F ||
+              config.shape.terrace_strength < 0.0F ||
+              config.shape.terrace_strength > 1.0F ||
+              config.shape.max_column_step < 0) {
+            return parser.fail("shape", "numeric fields are outside supported ranges");
+          }
         }
         const io::DataValue* noise = parser.member(root, "noise");
         if (noise == nullptr || !parser.require_object(*noise, "noise")) {
@@ -608,6 +644,34 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
         if (!parse_noise_field(parser, *primary, config.primary_noise, "noise.primary") ||
             !parse_noise_field(parser, *detail, config.detail_noise, "noise.detail")) {
           return false;
+        }
+        if (const io::DataValue* hill = parser.member(*noise, "hill"); hill != nullptr) {
+          NoiseFieldConfig parsed;
+          if (!parse_noise_field(parser, *hill, parsed, "noise.hill")) {
+            return false;
+          }
+          config.hill_noise = std::move(parsed);
+        }
+        if (const io::DataValue* ridge = parser.member(*noise, "ridge"); ridge != nullptr) {
+          NoiseFieldConfig parsed;
+          if (!parse_noise_field(parser, *ridge, parsed, "noise.ridge")) {
+            return false;
+          }
+          config.ridge_noise = std::move(parsed);
+        }
+        if (const io::DataValue* warp_x = parser.member(*noise, "warp_x"); warp_x != nullptr) {
+          NoiseFieldConfig parsed;
+          if (!parse_noise_field(parser, *warp_x, parsed, "noise.warp_x")) {
+            return false;
+          }
+          config.warp_x_noise = std::move(parsed);
+        }
+        if (const io::DataValue* warp_z = parser.member(*noise, "warp_z"); warp_z != nullptr) {
+          NoiseFieldConfig parsed;
+          if (!parse_noise_field(parser, *warp_z, parsed, "noise.warp_z")) {
+            return false;
+          }
+          config.warp_z_noise = std::move(parsed);
         }
         if (const io::DataValue* modifiers = parser.member(root, "biome_modifiers");
             modifiers != nullptr) {
@@ -624,8 +688,28 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
                   false) ||
               !parser.read_bool(
                   *modifiers,
+                  "hill_multiplier",
+                  config.biome_modifiers.hill_multiplier,
+                  false) ||
+              !parser.read_bool(
+                  *modifiers,
+                  "ridge_multiplier",
+                  config.biome_modifiers.ridge_multiplier,
+                  false) ||
+              !parser.read_bool(
+                  *modifiers,
                   "roughness_multiplier",
                   config.biome_modifiers.roughness_multiplier,
+                  false) ||
+              !parser.read_bool(
+                  *modifiers,
+                  "terrace_step",
+                  config.biome_modifiers.terrace_step,
+                  false) ||
+              !parser.read_bool(
+                  *modifiers,
+                  "terrace_strength",
+                  config.biome_modifiers.terrace_strength,
                   false)) {
             return false;
           }
@@ -718,6 +802,12 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
         if (!read_common(parser, root, id, config.version)) {
           return false;
         }
+        if (!parser.read_string(root, "display_name", config.display_name, false)) {
+          return false;
+        }
+        if (config.display_name.empty()) {
+          config.display_name = config.id;
+        }
         if (const io::DataValue* tags = parser.member(root, "tags"); tags != nullptr) {
           const io::DataValue::Array* array = tags->array_if();
           if (array == nullptr) {
@@ -746,10 +836,39 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
                   false) ||
               !parser.read_f32(
                   *terrain,
+                  "hill_multiplier",
+                  config.terrain.hill_multiplier,
+                  false) ||
+              !parser.read_f32(
+                  *terrain,
+                  "ridge_multiplier",
+                  config.terrain.ridge_multiplier,
+                  false) ||
+              !parser.read_f32(
+                  *terrain,
                   "roughness_multiplier",
                   config.terrain.roughness_multiplier,
+                  false) ||
+              !parser.read_f32(
+                  *terrain,
+                  "terrace_step",
+                  config.terrain.terrace_step,
+                  false) ||
+              !parser.read_f32(
+                  *terrain,
+                  "terrace_strength",
+                  config.terrain.terrace_strength,
                   false)) {
             return false;
+          }
+          if (config.terrain.height_scale_multiplier < 0.0F ||
+              config.terrain.hill_multiplier < 0.0F ||
+              config.terrain.ridge_multiplier < 0.0F ||
+              config.terrain.roughness_multiplier < 0.0F ||
+              config.terrain.terrace_step < 0.0F ||
+              config.terrain.terrace_strength < 0.0F ||
+              config.terrain.terrace_strength > 1.0F) {
+            return parser.fail("terrain", "numeric terrain modifiers are outside supported ranges");
           }
         }
         if (!parser.read_ref(root, "surface_rule_set", config.surface_rule_set, false) ||
@@ -857,19 +976,103 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
             !parser.read_string(root, "type", config.type)) {
           return false;
         }
-        if (config.type != "arvane:carver/noise_caves") {
+        if (config.type == "arvane:carver/noise_caves") {
+          config.carver_type = CarverType::NoiseCaves;
+        } else if (config.type == "arvane:carver/ravines") {
+          config.carver_type = CarverType::Ravines;
+        } else if (config.type == "arvane:carver/tunnel_caves") {
+          config.carver_type = CarverType::TunnelCaves;
+        } else {
           return parser.fail("type", "unknown carver type: " + config.type);
         }
         if (!parser.read_bool(root, "enabled", config.enabled, false)) {
           return false;
         }
-        const io::DataValue* noise = parser.member(root, "noise");
-        if (noise == nullptr ||
-            !parse_noise_field(parser, *noise, config.noise, "noise") ||
-            !parser.read_f32(root, "threshold", config.threshold) ||
-            !parser.read_int_range(root, "y_range", config.y_range) ||
-            !parser.read_i32(root, "surface_margin", config.surface_margin)) {
+        if (!parser.read_int_range(root, "y_range", config.y_range) ||
+            !parser.read_i32(root, "surface_margin", config.surface_margin) ||
+            !parser.read_i32(root, "floor_margin", config.floor_margin, false)) {
           return false;
+        }
+        if (config.surface_margin < 0 || config.floor_margin < 0) {
+          return parser.fail("root", "surface_margin and floor_margin must be non-negative");
+        }
+        if (config.carver_type == CarverType::NoiseCaves) {
+          const io::DataValue* noise = parser.member(root, "noise");
+          if (noise == nullptr ||
+              !parse_noise_field(parser, *noise, config.noise, "noise") ||
+              !parser.read_f32(root, "threshold", config.threshold)) {
+            return false;
+          }
+          if (config.threshold < -1.0F || config.threshold > 1.0F) {
+            return parser.fail("threshold", "must be between -1.0 and 1.0");
+          }
+        } else if (config.carver_type == CarverType::Ravines) {
+          if (!parser.read_u64(root, "salt", config.ravine.salt) ||
+              !parser.read_i32(root, "region_size_chunks", config.ravine.region_size_chunks) ||
+              !parser.read_f32(root, "chance_per_region", config.ravine.chance_per_region) ||
+              !parser.read_int_range(root, "length_chunks", config.ravine.length_chunks) ||
+              !parser.read_int_range(root, "depth", config.ravine.depth)) {
+            return false;
+          }
+          const io::DataValue* width = parser.member(root, "width");
+          if (width == nullptr ||
+              !parser.parse_float_range(*width, "width", config.ravine.width)) {
+            return false;
+          }
+          if (config.ravine.region_size_chunks <= 0 ||
+              config.ravine.chance_per_region < 0.0F ||
+              config.ravine.chance_per_region > 1.0F ||
+              config.ravine.length_chunks.min <= 0 ||
+              config.ravine.width.min <= 0.0F ||
+              config.ravine.depth.min <= 0) {
+            return parser.fail("root", "ravine numeric fields are outside supported ranges");
+          }
+        } else {
+          if (!parser.read_u64(root, "salt", config.tunnel.salt) ||
+              !parser.read_i32(root, "region_size_chunks", config.tunnel.region_size_chunks) ||
+              !parser.read_f32(root, "chance_per_region", config.tunnel.chance_per_region) ||
+              !parser.read_int_range(root, "tunnels_per_region", config.tunnel.tunnels_per_region) ||
+              !parser.read_int_range(root, "length_blocks", config.tunnel.length_blocks) ||
+              !parser.read_int_range(root, "start_y", config.tunnel.start_y) ||
+              !parser.read_f32(root, "horizontal_curl", config.tunnel.horizontal_curl) ||
+              !parser.read_f32(root, "vertical_curl", config.tunnel.vertical_curl) ||
+              !parser.read_f32(root, "branch_chance", config.tunnel.branch_chance) ||
+              !parser.read_int_range(root, "branch_count", config.tunnel.branch_count) ||
+              !parser.read_f32(root, "room_chance", config.tunnel.room_chance)) {
+            return false;
+          }
+          const io::DataValue* radius = parser.member(root, "radius");
+          const io::DataValue* vertical_radius_multiplier =
+              parser.member(root, "vertical_radius_multiplier");
+          const io::DataValue* room_radius = parser.member(root, "room_radius");
+          if (radius == nullptr ||
+              !parser.parse_float_range(*radius, "radius", config.tunnel.radius) ||
+              vertical_radius_multiplier == nullptr ||
+              !parser.parse_float_range(
+                  *vertical_radius_multiplier,
+                  "vertical_radius_multiplier",
+                  config.tunnel.vertical_radius_multiplier) ||
+              room_radius == nullptr ||
+              !parser.parse_float_range(*room_radius, "room_radius", config.tunnel.room_radius)) {
+            return false;
+          }
+          if (config.tunnel.region_size_chunks <= 0 ||
+              config.tunnel.chance_per_region < 0.0F ||
+              config.tunnel.chance_per_region > 1.0F ||
+              config.tunnel.tunnels_per_region.min <= 0 ||
+              config.tunnel.length_blocks.min <= 0 ||
+              config.tunnel.radius.min <= 0.0F ||
+              config.tunnel.vertical_radius_multiplier.min <= 0.0F ||
+              config.tunnel.horizontal_curl < 0.0F ||
+              config.tunnel.vertical_curl < 0.0F ||
+              config.tunnel.branch_chance < 0.0F ||
+              config.tunnel.branch_chance > 1.0F ||
+              config.tunnel.branch_count.min < 0 ||
+              config.tunnel.room_chance < 0.0F ||
+              config.tunnel.room_chance > 1.0F ||
+              config.tunnel.room_radius.min <= 0.0F) {
+            return parser.fail("root", "tunnel cave numeric fields are outside supported ranges");
+          }
         }
         return insert_unique(parser, out.carvers, std::string{id}, std::move(config));
       });
@@ -1131,6 +1334,32 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
         }
         if (config.generator.type != "arvane:generator/layered_heightmap") {
           return parser.fail("generator.type", "unknown generator type");
+        }
+        if (const io::DataValue* climate = parser.member(root, "climate"); climate != nullptr) {
+          if (!parser.require_object(*climate, "climate")) {
+            return false;
+          }
+          const io::DataValue* fields = parser.member(*climate, "fields");
+          if (fields == nullptr || fields->kind() != io::DataKind::Object) {
+            return parser.fail("climate.fields", "must be an object");
+          }
+          for (const auto& [field_name, field_node] : *fields->object_if()) {
+            ClimateFieldAdjustmentConfig adjustment;
+            adjustment.field = field_name;
+            if (adjustment.field.empty() ||
+                !parser.require_object(field_node, "climate.fields." + field_name) ||
+                !parser.read_f32(field_node, "scale", adjustment.scale, false) ||
+                !parser.read_f32(field_node, "offset", adjustment.offset, false)) {
+              return false;
+            }
+            if (adjustment.scale < 0.0F || adjustment.scale > 4.0F ||
+                adjustment.offset < -2.0F || adjustment.offset > 2.0F) {
+              return parser.fail(
+                  "climate.fields." + field_name,
+                  "scale must be 0..4 and offset must be -2..2");
+            }
+            config.climate_field_adjustments.push_back(std::move(adjustment));
+          }
         }
         if (!parser.read_ref(root, "biome_source", config.biome_source) ||
             !parser.read_ref(root, "terrain", config.terrain) ||

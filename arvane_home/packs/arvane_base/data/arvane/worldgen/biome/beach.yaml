@@ -1,5 +1,6 @@
 id: arvane:worldgen/biome/beach
 version: 1
+display_name: Beach
 
 tags:
   - arvane:biome/land
@@ -8,11 +9,18 @@ tags:
   - arvane:biome/sandy
 
 terrain:
-  base_height_offset: -2
-  height_scale_multiplier: 0.35
-  roughness_multiplier: 0.25
+  base_height_offset: -3
+  height_scale_multiplier: 0.15
+  hill_multiplier: 0.18
+  ridge_multiplier: 0.02
+  roughness_multiplier: 0.18
 
 surface_rule_set: arvane:worldgen/surface_rule_set/sandy_land
+
+features:
+  stages:
+    surface_decoration:
+      - arvane:worldgen/placed_feature/sand_disk_sparse
 
 colors:
   grass: "#9CA85A"

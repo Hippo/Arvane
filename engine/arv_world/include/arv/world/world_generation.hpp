@@ -93,6 +93,10 @@ using GeneratedChunkResult = Expected<GeneratedChunk, WorldGenerationError>;
 [[nodiscard]] WorldGenerationConfig config_from_resolved_dimension(
     std::shared_ptr<const worldgen::ResolvedDimension> dimension);
 
+[[nodiscard]] WorldGenerationConfig refresh_generation_config_for_current_dimension(
+    WorldGenerationConfig saved_config,
+    const WorldGenerationConfig& current_default_config);
+
 [[nodiscard]] WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text);
 
 [[nodiscard]] WorldGenerationPaletteResult resolve_world_generation_palette(
