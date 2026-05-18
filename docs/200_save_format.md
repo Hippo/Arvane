@@ -151,6 +151,7 @@ Each world stores:
 
 * world metadata
 * seed and generator config
+* world spawn location (`x`, `y`, `z`, `yaw_radians`, `pitch_radians`, optional `world`; omitted when implicit)
 * world time / tick counter
 * simulation settings
 * region files

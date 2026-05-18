@@ -198,6 +198,12 @@ bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
   player_state.world_id = session.world_id;
   player_state.fly_speed = player_tuning_.fly_speed;
   if (!apply_saved_player_state(session, player_state)) {
+    const arv::Location spawn = default_world_.spawn_point();
+    player_state.position = location_position(spawn);
+    player_state.velocity = {};
+    player_state.yaw_radians = spawn.yaw_radians;
+    player_state.pitch_radians = spawn.pitch_radians;
+    player_state.grounded = false;
     seed_player_inventory(player_state);
   }
   refresh_player_permissions(player_state);

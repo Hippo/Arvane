@@ -693,6 +693,61 @@ TEST(WorldGenerationTests, LoadsPackWorldgenResourcesAndResolvesOverworld) {
       }));
 }
 
+TEST(WorldGenerationTests, GeneratedSpawnAvoidsOceanAndDesertAndStandsOnGround) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  ASSERT_NE(config.resolved_dimension, nullptr);
+
+  const arv::u64 seed = 32187121430964ULL;
+  const arv::Location spawn =
+      arv::world::generate_world_spawn_location(config, seed);
+  const arv::i32 block_x = static_cast<arv::i32>(std::floor(spawn.x));
+  const arv::i32 block_y = static_cast<arv::i32>(std::floor(spawn.y));
+  const arv::i32 block_z = static_cast<arv::i32>(std::floor(spawn.z));
+  const arv::ChunkCoord coord{
+      arv::floor_div(block_x, arv::ChunkSize),
+      arv::floor_div(block_z, arv::ChunkSize)};
+  const arv::world::worldgen::TerrainProfile profile =
+      arv::world::worldgen::generate_terrain_profile(
+          *config.resolved_dimension,
+          seed,
+          coord);
+  const arv::usize column_index = arv::voxel::local_column_index(
+      {arv::floor_mod(block_x, arv::ChunkSize),
+       arv::floor_mod(block_z, arv::ChunkSize)});
+  const arv::usize biome_index = profile.biome_by_column[column_index];
+  ASSERT_LT(biome_index, config.resolved_dimension->biomes.size());
+  const arv::world::worldgen::ResolvedBiome& biome =
+      config.resolved_dimension->biomes[biome_index];
+
+  EXPECT_FALSE(arv::world::worldgen::biome_has_tag(
+      biome.raw,
+      "arvane:biome/ocean"));
+  EXPECT_EQ(biome.raw.id.find("desert"), std::string::npos);
+  EXPECT_GE(
+      profile.surface_y_by_column[column_index],
+      config.resolved_dimension->raw.vertical.sea_level);
+  EXPECT_EQ(block_y, profile.surface_y_by_column[column_index] + 1);
+  EXPECT_NE(
+      arv::world::worldgen::terrain_block_at(
+          *config.resolved_dimension,
+          profile,
+          {{block_x, block_y - 1, block_z}}),
+      arv::voxel::AirBlockVariantID);
+  EXPECT_EQ(
+      arv::world::worldgen::terrain_block_at(
+          *config.resolved_dimension,
+          profile,
+          {{block_x, block_y, block_z}}),
+      arv::voxel::AirBlockVariantID);
+  EXPECT_EQ(
+      arv::world::worldgen::terrain_block_at(
+          *config.resolved_dimension,
+          profile,
+          {{block_x, block_y + 1, block_z}}),
+      arv::voxel::AirBlockVariantID);
+}
+
 TEST(WorldGenerationTests, PackOceanBiomesGenerateWaterFluids) {
   const arv::voxel::BlockRegistry registry = make_worldgen_registry();
   const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);

@@ -3,6 +3,7 @@
 #include "dedicated_error.hpp"
 
 #include "arv/core/expected.hpp"
+#include "arv/core/location.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
 #include "arv/io/config.hpp"
@@ -32,6 +33,7 @@ struct DedicatedLoadedWorld {
   world::WorldGenerationConfig active_generation_config;
   u64 world_seed{};
   world::WorldHeightSettings world_height{};
+  arv::Location world_spawn{};
   TickIndex initial_tick_index{};
 
   std::vector<server::ServerPlayerSaveState> saved_players;

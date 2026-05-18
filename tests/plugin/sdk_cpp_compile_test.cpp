@@ -87,6 +87,7 @@ int arv_plugin_sdk_cpp_compile_test() {
   arv::TextComponent text_component;
   arv::Variables variables{nullptr};
   arv::World world{nullptr};
+  ArvLocation world_spawn{};
   arv::WorldGen worldgen{nullptr};
   arv::ChatMessage chat_message{plugin, "<red>Hello {player_name}"};
   std::array<ArvPlayerID, 2> chat_players{1, 2};
@@ -143,6 +144,10 @@ int arv_plugin_sdk_cpp_compile_test() {
   const auto chat_text = chat_message.as_text();
   const auto chat_player_text = chat_message.as_text_for(1);
   SampleConfig sample{};
+  const arv::Result spawn_encode_result =
+      arv::Codec<ArvLocation>::encode(created_document.value, world_spawn);
+  const arv::DecodeResult<ArvLocation> spawn_decode_result =
+      arv::Codec<ArvLocation>::decode(created_document.value);
   return arv::ApiVersion == 1u && result && buffer.empty() &&
                  command_context.arg_count() == 0 && !command_result &&
                  !event_result && !job_result && !job_ms_result &&
@@ -157,6 +162,9 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !config.global().exists_file("config.yaml") &&
                  !config.global().remove_file("config.yaml") &&
                  !context.owns_namespace("test") &&
+                 !world.get_world_spawn(1).result &&
+                 !world.set_world_spawn(1, world_spawn) &&
+                 !spawn_encode_result && !spawn_decode_result &&
                  !created_document &&
                  !parsed_chat && !config_chat && !chat_string &&
                  !chat_player_string && !chat_text && !chat_player_text &&

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/core/expected.hpp"
+#include "arv/core/location.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
 #include "arv/asset/pack.hpp"
@@ -13,6 +14,7 @@
 #include "arv/world/world_time.hpp"
 
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -48,6 +50,7 @@ struct WorldMetadata {
   world::WorldClock clock{world::make_world_clock()};
   std::vector<RequiredPackMetadata> required_packs{};
   bool content_lock_enabled{true};
+  std::optional<Location> spawn_point{};
 };
 
 struct PlayerSaveData {

@@ -89,6 +89,61 @@ ArvResult api_world_seed(
   return ok(ctx);
 }
 
+ArvResult api_world_get_spawn(
+    void* context,
+    ArvWorldHandle world_handle,
+    ArvLocation* out_spawn) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "world.get_world_spawn");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  if (out_spawn == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_spawn is null");
+  }
+  world::WorldRuntime* world = world_from_handle(ctx, world_handle);
+  if (world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  const arv::Location spawn = world->spawn_point();
+  const WorldID spawn_world = spawn.world.value_or(world->id());
+  *out_spawn = {
+      spawn.x,
+      spawn.y,
+      spawn.z,
+      spawn.yaw_radians,
+      spawn.pitch_radians,
+      true,
+      static_cast<ArvWorldID>(spawn_world.value)};
+  return ok(ctx);
+}
+
+ArvResult api_world_set_spawn(
+    void* context,
+    ArvWorldHandle world_handle,
+    ArvLocation spawn) {
+  PluginCallContext* ctx = call_context(context);
+  if (ArvResult sync = require_sync_context(ctx, "world.set_world_spawn");
+      sync.code != ARV_RESULT_OK) {
+    return sync;
+  }
+  world::WorldRuntime* world = world_from_handle(ctx, world_handle);
+  if (world == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
+  }
+  if (spawn.has_world && spawn.world != world_handle) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "location world does not match target world");
+  }
+  world->set_spawn_point(arv::Location{
+      spawn.x,
+      spawn.y,
+      spawn.z,
+      spawn.yaw_radians,
+      spawn.pitch_radians,
+      world->id()});
+  return ok(ctx);
+}
+
 ArvResult api_entity_spawn(
     void* context,
     ArvWorldHandle world_handle,
@@ -294,6 +349,8 @@ void fill_world_entity_api(PluginAPIStorage& storage) {
       &api_world_set_block,
       &api_world_current_tick,
       &api_world_seed,
+      &api_world_get_spawn,
+      &api_world_set_spawn,
   };
   storage.entities_api = {
       &api_entity_spawn,

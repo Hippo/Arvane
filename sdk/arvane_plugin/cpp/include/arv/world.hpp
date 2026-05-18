@@ -24,6 +24,13 @@ public:
 
   [[nodiscard]] ValueResult<std::uint64_t> seed(ArvWorldHandle world) const;
 
+  [[nodiscard]] ValueResult<ArvLocation> get_world_spawn(
+      ArvWorldHandle world) const;
+
+  [[nodiscard]] Result set_world_spawn(
+      ArvWorldHandle world,
+      ArvLocation spawn) const;
+
 private:
   const ArvAPI* api_{};
 };

@@ -74,7 +74,7 @@ bool DesktopSessionManager::save_and_shutdown() {
       dependencies_.block_registry_hash,
       dependencies_.item_registry_hash,
       session.server_save_display_name};
-  const persistence::WorldMetadata world_metadata{
+  persistence::WorldMetadata world_metadata{
       session.world_save_name,
       session.world_seed,
       session.integrated_server->voxel_world().tick_index(),
@@ -86,6 +86,7 @@ bool DesktopSessionManager::save_and_shutdown() {
       session.integrated_server->voxel_world().clock(),
       persistence::required_pack_metadata(dependencies_.required_packs),
       true};
+  world_metadata.spawn_point = session.integrated_server->voxel_world().spawn_point();
   auto save_result = persistence::save_server_root(
       session.server_save_root,
       save_metadata,
@@ -192,6 +193,12 @@ bool DesktopSessionManager::start_singleplayer(
       world::world_height_settings_from_generation_config(session->generation_config);
   session->min_chunk_y = session_world_height.min_chunk_y;
   session->max_chunk_y = session_world_height.max_chunk_y;
+  const arv::Location session_world_spawn =
+      loaded_save.has_world_metadata && loaded_save.world.spawn_point.has_value()
+          ? loaded_save.world.spawn_point.value()
+          : world::generate_world_spawn_location(
+                session->generation_config,
+                session->world_seed);
   session->client_world.set_generation_context(
       session->world_seed,
       session->generation_config);
@@ -227,6 +234,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.chunk_streaming = make_chunk_streaming_config(dependencies_.config);
   server_start_info.chunk_generation = std::move(chunk_generation);
   server_start_info.world_height = session_world_height;
+  server_start_info.world_spawn = session_world_spawn;
   server_start_info.max_generation_results_per_tick =
       dependencies_.config.chunk_pipeline.max_generation_results_per_tick;
   server_start_info.max_lighting_results_per_tick =

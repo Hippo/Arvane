@@ -26,6 +26,14 @@ typedef struct ArvWorldAPI {
       void* ctx,
       ArvWorldHandle world,
       uint64_t* out_seed);
+  ArvResult (*get_world_spawn)(
+      void* ctx,
+      ArvWorldHandle world,
+      ArvLocation* out_spawn);
+  ArvResult (*set_world_spawn)(
+      void* ctx,
+      ArvWorldHandle world,
+      ArvLocation spawn);
 } ArvWorldAPI;
 
 #ifdef __cplusplus

@@ -4,6 +4,7 @@
 #include "arv/core/profiling.hpp"
 #include "arv/io/data_codecs.hpp"
 #include "arv/world/worldgen/chunk_generator.hpp"
+#include "arv/world/worldgen/terrain_query.hpp"
 
 #include <algorithm>
 #include <array>
@@ -37,6 +38,99 @@ namespace {
 [[nodiscard]] constexpr u64 generator_seed(u64 seed, u64 salt, u32 version) noexcept {
   u64 value = seed ^ mix64(salt) ^ (static_cast<u64>(version) << 32U);
   return mix64(value);
+}
+
+[[nodiscard]] bool id_has_leaf(std::string_view id, std::string_view leaf) noexcept {
+  if (id.size() < leaf.size()) {
+    return false;
+  }
+  if (id.substr(id.size() - leaf.size()) != leaf) {
+    return false;
+  }
+  return id.size() == leaf.size() || id[id.size() - leaf.size() - 1U] == '/';
+}
+
+[[nodiscard]] bool disallowed_spawn_biome(
+    const worldgen::ResolvedBiome& biome) noexcept {
+  return worldgen::biome_has_tag(biome.raw, "arvane:biome/ocean") ||
+         worldgen::biome_has_tag(biome.raw, "arvane:biome/desert") ||
+         id_has_leaf(biome.raw.id, "ocean") ||
+         id_has_leaf(biome.raw.id, "deep_ocean") ||
+         id_has_leaf(biome.raw.id, "desert");
+}
+
+[[nodiscard]] Vec2i spawn_candidate_column(u64 seed, u32 attempt) noexcept {
+  if (attempt == 0U) {
+    return {};
+  }
+  const u64 mixed =
+      mix64(seed ^ fnv1a("arvane:world_spawn") ^ (static_cast<u64>(attempt) * 0x9E3779B97F4A7C15ULL));
+  const f32 unit_angle =
+      static_cast<f32>(mixed & 0xFFFFFFULL) / static_cast<f32>(0x1000000ULL);
+  const f32 angle = unit_angle * TauRadians;
+  const f32 radius = 8.0F + std::sqrt(static_cast<f32>(attempt)) * 14.0F;
+  return {
+      static_cast<i32>(std::round(std::cos(angle) * radius)),
+      static_cast<i32>(std::round(std::sin(angle) * radius))};
+}
+
+[[nodiscard]] std::optional<arv::Location> resolved_spawn_candidate(
+    const worldgen::ResolvedDimension& dimension,
+    u64 seed,
+    i32 world_x,
+    i32 world_z) noexcept {
+  if (dimension.biomes.empty()) {
+    return std::nullopt;
+  }
+
+  const ChunkCoord coord{floor_div(world_x, ChunkSize), floor_div(world_z, ChunkSize)};
+  const worldgen::TerrainProfile profile =
+      worldgen::generate_terrain_profile(dimension, seed, coord);
+  const usize column_index = voxel::local_column_index(
+      {floor_mod(world_x, ChunkSize), floor_mod(world_z, ChunkSize)});
+  const usize biome_index =
+      std::min(profile.biome_by_column[column_index], dimension.biomes.size() - 1U);
+  if (disallowed_spawn_biome(dimension.biomes[biome_index])) {
+    return std::nullopt;
+  }
+
+  const i32 surface_y = profile.surface_y_by_column[column_index];
+  if (surface_y < dimension.raw.vertical.sea_level) {
+    return std::nullopt;
+  }
+
+  const BlockPos ground{{world_x, surface_y, world_z}};
+  const BlockPos feet{{world_x, surface_y + 1, world_z}};
+  const BlockPos head{{world_x, surface_y + 2, world_z}};
+  if (worldgen::terrain_block_at(dimension, profile, ground) == voxel::AirBlockVariantID ||
+      worldgen::terrain_block_at(dimension, profile, feet) != voxel::AirBlockVariantID ||
+      worldgen::terrain_block_at(dimension, profile, head) != voxel::AirBlockVariantID) {
+    return std::nullopt;
+  }
+
+  return arv::Location{
+      static_cast<f32>(world_x) + 0.5F,
+      static_cast<f32>(surface_y) + 1.0F,
+      static_cast<f32>(world_z) + 0.5F,
+      0.0F,
+      0.0F};
+}
+
+[[nodiscard]] std::optional<arv::Location> legacy_spawn_candidate(
+    const WorldGenerationConfig& config,
+    u64 seed,
+    i32 world_x,
+    i32 world_z) noexcept {
+  const i32 surface_y = terrain_height_at(config, seed, world_x, world_z);
+  if (surface_y < config.sea_level) {
+    return std::nullopt;
+  }
+  return arv::Location{
+      static_cast<f32>(world_x) + 0.5F,
+      static_cast<f32>(surface_y) + 1.0F,
+      static_cast<f32>(world_z) + 0.5F,
+      0.0F,
+      0.0F};
 }
 
 class TerrainNoiseSampler {
@@ -469,6 +563,34 @@ voxel::BlockVariantID choose_surface_block(
     }
   }
   return palette.surface_layers.empty() ? voxel::AirBlockVariantID : palette.surface_layers.back().block;
+}
+
+arv::Location generate_world_spawn_location(
+    const WorldGenerationConfig& config,
+    u64 seed) noexcept {
+  constexpr u32 MaxSpawnAttempts = 768U;
+  for (u32 attempt = 0; attempt < MaxSpawnAttempts; ++attempt) {
+    const Vec2i candidate = spawn_candidate_column(seed, attempt);
+    std::optional<arv::Location> spawn =
+        config.resolved_dimension != nullptr
+            ? resolved_spawn_candidate(
+                  *config.resolved_dimension,
+                  seed,
+                  candidate.x,
+                  candidate.y)
+            : legacy_spawn_candidate(config, seed, candidate.x, candidate.y);
+    if (spawn.has_value()) {
+      return spawn.value();
+    }
+  }
+
+  const i32 surface_y = terrain_height_at(config, seed, 0, 0);
+  return arv::Location{
+      0.5F,
+      static_cast<f32>(surface_y) + 1.0F,
+      0.5F,
+      0.0F,
+      0.0F};
 }
 
 GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {

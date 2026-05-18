@@ -158,6 +158,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.chunk_streaming = runtime_config.chunk_streaming;
   server_start_info.chunk_generation = std::move(chunk_generation);
   server_start_info.world_height = loaded_world.world_height;
+  server_start_info.world_spawn = loaded_world.world_spawn;
   server_start_info.max_generation_results_per_tick =
       config.chunk_pipeline.max_generation_results_per_tick;
   server_start_info.max_lighting_results_per_tick =

@@ -31,6 +31,8 @@ namespace {
       session.world_id,
       session.display_name,
       player_state.position,
+      player_state.yaw_radians,
+      player_state.pitch_radians,
   };
 }
 
@@ -99,6 +101,25 @@ namespace {
     (void)world.set_entity_position(entity_id.value(), position);
   }
 
+  return true;
+}
+
+[[nodiscard]] bool teleport_player_location(
+    world::WorldRuntime& world,
+    PlayerID player_id,
+    Location location) {
+  if (location.world.has_value() && location.world.value() != world.id()) {
+    return false;
+  }
+  if (!teleport_player(world, player_id, location_position(location))) {
+    return false;
+  }
+  player::PlayerState* player_state = world.find_player(player_id);
+  if (player_state == nullptr) {
+    return false;
+  }
+  player_state->yaw_radians = location.yaw_radians;
+  player_state->pitch_radians = location.pitch_radians;
   return true;
 }
 
@@ -464,6 +485,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   world_jobs_.configure(start_info);
   world::WorldTickPolicy tick_policy = start_info.world_tick_policy;
   tick_policy.fluid_budget = 0U;
+  default_world_.set_spawn_point(start_info.world_spawn);
   default_world_.configure_clock(
       world::DefaultDayLengthSeconds,
       world::DefaultStartDayFraction,
@@ -811,6 +833,9 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   auto move_player = [this](PlayerID player_id, Vec3f position) {
     return teleport_player(default_world_, player_id, position);
   };
+  auto move_player_location = [this](PlayerID player_id, Location location) {
+    return teleport_player_location(default_world_, player_id, location);
+  };
   auto set_game_mode = [this](PlayerID player_id, std::string_view mode_id) {
     return set_player_game_mode(player_id, mode_id);
   };
@@ -898,10 +923,28 @@ command::CommandResult ServerRuntimeImpl::execute_command(
         }
         return save_blueprint_file(server_save_root_, world_name_, name, text);
       };
+  auto read_world_spawn = [this](WorldID world_id) -> std::optional<Location> {
+    if (world_id != default_world_.id()) {
+      return std::nullopt;
+    }
+    return default_world_.spawn_point();
+  };
+  auto write_world_spawn = [this](WorldID world_id, Location location) {
+    if (world_id != default_world_.id()) {
+      return false;
+    }
+    if (location.world.has_value() && location.world.value() != world_id) {
+      return false;
+    }
+    location.world = world_id;
+    default_world_.set_spawn_point(location);
+    return true;
+  };
   command::ServerCommandServices domain_services{
       command::OnlinePlayerByIDFn{find_player_by_id},
       command::OnlinePlayerByNameFn{find_player_by_name},
       command::TeleportPlayerFn{move_player},
+      command::TeleportPlayerLocationFn{move_player_location},
       command::SetPlayerGameModeFn{set_game_mode},
       command::SetPlayerFlySpeedFn{set_fly_speed},
       command::DefaultPlayerFlySpeedFn{default_fly_speed},
@@ -916,6 +959,8 @@ command::CommandResult ServerRuntimeImpl::execute_command(
       command::BlueprintListFn{list_blueprints},
       command::BlueprintLoadFn{load_blueprint},
       command::BlueprintSaveFn{save_blueprint},
+      command::WorldSpawnReadFn{read_world_spawn},
+      command::WorldSpawnWriteFn{write_world_spawn},
   };
   auto permission_check =
       [this](const command::CommandSender& checked_sender, const command::Command& checked_command) {

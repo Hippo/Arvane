@@ -3,6 +3,7 @@
 #include "arv/command/command.hpp"
 #include "arv/command/command_registry.hpp"
 #include "arv/core/expected.hpp"
+#include "arv/core/location.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
 #include "arv/crypto/hash.hpp"
@@ -136,6 +137,7 @@ struct ServerStartInfo {
   ServerChunkStreamingConfig chunk_streaming{};
   std::optional<ServerChunkGenerationSettings> chunk_generation{};
   std::optional<world::WorldHeightSettings> world_height{};
+  Location world_spawn{default_spawn_location()};
   u32 max_generation_results_per_tick{2};
   u32 max_lighting_results_per_tick{1};
   u32 max_lighting_sections_per_job{32};

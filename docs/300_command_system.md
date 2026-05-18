@@ -197,6 +197,8 @@ Example:
 
 ```text
 arvane.command.teleport
+arvane.command.spawn
+arvane.command.setspawn
 arvane.command.world.time
 plugin.example.command.spawn_arena
 ```

@@ -273,6 +273,18 @@ command:
     services_unavailable: Server command services are unavailable.
     unable_to_teleport: Unable to teleport player.
     success: Teleported {name} to {position}.
+  spawn:
+    usage: "Usage: /spawn."
+    player_required: This command requires an online player sender.
+    sender_not_online: Command sender is not an online player.
+    services_unavailable: Server command services are unavailable.
+    unavailable: World spawn is unavailable.
+    unable_to_teleport: Unable to teleport player to world spawn.
+    success: Teleported to world spawn at {position}.
+  setspawn:
+    usage: "Usage: /setspawn."
+    unable_to_set: Unable to set world spawn.
+    success: Set world spawn to {position}.
   gamemode:
     usage: "Usage: /gamemode <mode>."
     alias_usage: "Usage: /gm<mode>."

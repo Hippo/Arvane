@@ -2,6 +2,7 @@
 
 #include "arv/core/coordinates.hpp"
 #include "arv/core/domain_ids.hpp"
+#include "arv/core/location.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
@@ -272,6 +273,8 @@ public:
   void set_day_length_seconds(Seconds day_length_seconds, TickRate fixed_tick_rate) noexcept;
   [[nodiscard]] u64 lighting_revision() const noexcept;
   [[nodiscard]] u64 mesh_revision() const noexcept;
+  [[nodiscard]] arv::Location spawn_point() const noexcept;
+  void set_spawn_point(arv::Location spawn) noexcept;
   void mark_chunk_lighting_dirty(ChunkSectionCoord coord) noexcept;
   void set_generation_context(u64 seed, WorldGenerationConfig config);
   [[nodiscard]] u64 generation_seed() const noexcept;

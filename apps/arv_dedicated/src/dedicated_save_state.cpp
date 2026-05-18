@@ -187,6 +187,10 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
   loaded_world.world_seed = generated_world_seed();
   loaded_world.world_height =
       world::world_height_settings_from_generation_config(loaded_world.active_generation_config);
+  loaded_world.world_spawn =
+      world::generate_world_spawn_location(
+          loaded_world.active_generation_config,
+          loaded_world.world_seed);
 
   if (loaded_world.loaded_save.has_world_metadata) {
     loaded_world.active_generation_config =
@@ -196,6 +200,12 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     loaded_world.world_seed = loaded_world.loaded_save.world.seed;
     loaded_world.world_height =
         world::world_height_settings_from_generation_config(loaded_world.active_generation_config);
+    loaded_world.world_spawn =
+        loaded_world.loaded_save.world.spawn_point.has_value()
+            ? loaded_world.loaded_save.world.spawn_point.value()
+            : world::generate_world_spawn_location(
+                  loaded_world.active_generation_config,
+                  loaded_world.world_seed);
     loaded_world.initial_tick_index = loaded_world.loaded_save.world.tick_index;
     core::info(
         "dedicated",
@@ -229,6 +239,7 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     world_metadata.item_registry_hash = item_registry_hash;
     world_metadata.required_packs.assign(required_packs.begin(), required_packs.end());
     world_metadata.content_lock_enabled = true;
+    world_metadata.spawn_point = loaded_world.world_spawn;
 
     auto create_save_result = persistence::save_server_root(
         loaded_world.server_save_root,
@@ -343,6 +354,7 @@ Expected<void, DedicatedError> save_dedicated_world(
       server.voxel_world().clock()};
   world_metadata.required_packs.assign(required_packs.begin(), required_packs.end());
   world_metadata.content_lock_enabled = true;
+  world_metadata.spawn_point = server.voxel_world().spawn_point();
   auto save_result = persistence::save_server_root(
       server_save_root,
       save_metadata,

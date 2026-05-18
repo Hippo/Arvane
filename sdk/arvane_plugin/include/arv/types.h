@@ -29,6 +29,23 @@ typedef struct ArvVec3 {
   float z;
 } ArvVec3;
 
+typedef uint64_t ArvTickIndex;
+typedef uint64_t ArvMilliseconds;
+typedef uint64_t ArvWorldID;
+typedef uint64_t ArvEntityID;
+typedef uint64_t ArvPlayerID;
+typedef uint64_t ArvScheduledJobID;
+
+typedef struct ArvLocation {
+  float x;
+  float y;
+  float z;
+  float yaw_radians;
+  float pitch_radians;
+  bool has_world;
+  ArvWorldID world;
+} ArvLocation;
+
 typedef struct ArvBlockPos {
   int32_t x;
   int32_t y;
@@ -39,13 +56,6 @@ typedef struct ArvChunkPos {
   int32_t x;
   int32_t z;
 } ArvChunkPos;
-
-typedef uint64_t ArvTickIndex;
-typedef uint64_t ArvMilliseconds;
-typedef uint64_t ArvWorldID;
-typedef uint64_t ArvEntityID;
-typedef uint64_t ArvPlayerID;
-typedef uint64_t ArvScheduledJobID;
 
 typedef struct ArvScheduledJobHandle {
   ArvScheduledJobID value;

@@ -52,6 +52,8 @@ inline constexpr std::string_view PlayerModelAssetID = "arvane:model/entity/play
 inline constexpr std::string_view PlayerAnimationAssetID = "arvane:animation/player";
 
 inline constexpr std::string_view TeleportPermissionNode = "arvane.command.teleport";
+inline constexpr std::string_view SpawnPermissionNode = "arvane.command.spawn";
+inline constexpr std::string_view SetSpawnPermissionNode = "arvane.command.setspawn";
 inline constexpr std::string_view SelectionPermissionNode = "arvane.command.selection";
 inline constexpr std::string_view BlueprintPermissionNode = "arvane.command.blueprint";
 inline constexpr std::string_view FlySpeedPermissionNode = "arvane.commands.flyspeed";

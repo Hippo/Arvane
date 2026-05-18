@@ -217,6 +217,13 @@ The exact internal implementation may vary by generator type. The data model, ho
 
 The engine's resolved chunk generator keeps those stages measurable. Benchmark callers may attach optional generation stats to a chunk request; the generator records total time, per-stage time, section classifications, feature and structure candidate counts, and noise sample counts without changing generated output. Runtime generation remains chunk-column scoped, with chunk sections as the storage and publication granularity. Pack-authored biome tags and stage feature lists are resolved into compact runtime indices before chunk generation so surface and placement predicates do not perform resource-string lookup in hot generation paths.
 
+World creation also derives a world spawn point from the same resolved terrain
+and biome data. Candidate positions that land in ocean biomes, desert biomes,
+or water-covered columns are rerolled until the engine finds an air column with
+solid generated ground below it. The selected spawn stores a generic location:
+`x`, `y`, `z`, `yaw_radians`, `pitch_radians`, and an optional world field
+when the world is not implicit from the containing file.
+
 ---
 
 ## Generation Stages

@@ -40,6 +40,7 @@ add_library(arv_base STATIC
   src/items/item_behavior_registration.cpp
   src/gameplay/starter_inventory.cpp
   src/selection_command.cpp
+  src/spawn_command.cpp
   src/gamemodes/gamemode_registration.cpp
   src/tp_command.cpp
 )

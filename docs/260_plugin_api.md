@@ -541,9 +541,20 @@ The world API provides controlled world access.
 Conceptual shape:
 
 ```cpp
+struct Location {
+    float x;
+    float y;
+    float z;
+    float yaw_radians;
+    float pitch_radians;
+    optional<WorldID> world;
+};
+
 struct WorldAPI {
     BlockStateID get_block(WorldID world, BlockPos pos);
     bool set_block(WorldID world, BlockPos pos, BlockStateID state);
+    Location get_world_spawn(WorldID world);
+    bool set_world_spawn(WorldID world, Location spawn);
 
     WorldSnapshotID create_snapshot(WorldID world, SnapshotRegion region);
     BlockStateID snapshot_get_block(WorldSnapshotID snapshot, BlockPos pos);

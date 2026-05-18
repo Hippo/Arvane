@@ -123,6 +123,8 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   world_metadata.required_packs = {
       arv::persistence::RequiredPackMetadata{"arvane_base"},
       arv::persistence::RequiredPackMetadata{"test_pack"}};
+  world_metadata.spawn_point =
+      arv::Location{12.5F, 34.0F, -8.5F, 1.0F, -0.25F};
   const std::vector<arv::persistence::SavedChunkSection> chunks{
       make_saved_chunk({{0, 0, 0}}, stone)};
   const std::vector<arv::persistence::PlayerSaveData> players{player};
@@ -175,6 +177,9 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
         std::istreambuf_iterator<char>{}};
     EXPECT_NE(world_json.find("\"arvane_base\""), std::string::npos);
     EXPECT_NE(world_json.find("\"test_pack\""), std::string::npos);
+    EXPECT_NE(world_json.find("\"spawn\""), std::string::npos);
+    EXPECT_NE(world_json.find("\"x\""), std::string::npos);
+    EXPECT_EQ(world_json.find("\"position\""), std::string::npos);
     EXPECT_EQ(world_json.find("content_hash"), std::string::npos);
   }
 
@@ -195,6 +200,12 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_EQ(loaded.value().world.required_packs.size(), 2U);
   EXPECT_EQ(loaded.value().world.required_packs[0].id, "arvane_base");
   EXPECT_EQ(loaded.value().world.required_packs[1].id, "test_pack");
+  ASSERT_TRUE(loaded.value().world.spawn_point.has_value());
+  EXPECT_EQ(
+      arv::location_position(*loaded.value().world.spawn_point),
+      (arv::Vec3f{12.5F, 34.0F, -8.5F}));
+  EXPECT_FLOAT_EQ(loaded.value().world.spawn_point->yaw_radians, 1.0F);
+  EXPECT_FLOAT_EQ(loaded.value().world.spawn_point->pitch_radians, -0.25F);
   ASSERT_EQ(loaded.value().chunks.size(), 1U);
   EXPECT_EQ(loaded.value().chunks[0].coord, (arv::ChunkSectionCoord{{0, 0, 0}}));
   EXPECT_EQ(loaded.value().chunks[0].blocks[0], stone);
@@ -473,10 +484,21 @@ TEST(SaveTests, DiscoversServerSavesSeparatelyFromWorldsAndLoadsRequestedWorld) 
   const std::vector<arv::persistence::PlayerSaveData> players{};
   const std::vector<arv::entity::PersistentEntityRecord> entities{};
 
+  arv::persistence::WorldMetadata default_world{
+      "default",
+      11,
+      1,
+      config,
+      0,
+      3,
+      save_metadata.block_registry_hash,
+      save_metadata.item_registry_hash};
+  default_world.spawn_point =
+      arv::Location{3.5F, 44.0F, -9.5F, 0.5F, 0.125F};
   ASSERT_TRUE(arv::persistence::save_server_root(
       server_save_root,
       save_metadata_one,
-      {"default", 11, 1, config, 0, 3, save_metadata.block_registry_hash, save_metadata.item_registry_hash},
+      default_world,
       chunks,
       players,
       entities,
@@ -532,6 +554,12 @@ TEST(SaveTests, DiscoversServerSavesSeparatelyFromWorldsAndLoadsRequestedWorld) 
   EXPECT_EQ(loaded.value().world.name, "sky");
   EXPECT_EQ(loaded.value().world.seed, 22U);
   EXPECT_EQ(loaded.value().world.max_chunk_y, 4);
+  ASSERT_TRUE(loaded.value().world.spawn_point.has_value());
+  EXPECT_EQ(
+      arv::location_position(*loaded.value().world.spawn_point),
+      (arv::Vec3f{3.5F, 44.0F, -9.5F}));
+  EXPECT_FLOAT_EQ(loaded.value().world.spawn_point->yaw_radians, 0.5F);
+  EXPECT_FLOAT_EQ(loaded.value().world.spawn_point->pitch_radians, 0.125F);
 }
 
 TEST(SaveTests, CorruptedSaveJsonReturnsFailureInsteadOfSilentlyLoading) {

@@ -403,7 +403,11 @@ private:
 namespace arv::world {
 
 struct WorldRuntime::Impl {
-  explicit Impl(WorldID world_id) : id(world_id), entities(world_id) {
+  explicit Impl(WorldID world_id)
+      : id(world_id),
+        entities(world_id),
+        spawn_point(default_spawn_location()) {
+    spawn_point.world = world_id;
   }
 
   bool set_fluid_cell(
@@ -426,6 +430,7 @@ struct WorldRuntime::Impl {
   detail::WorldRegionRuntime regions;
   TickIndex tick_index{};
   WorldClock clock{make_world_clock()};
+  arv::Location spawn_point{};
   std::optional<WorldGenerationConfig> generation_config{};
   u64 generation_seed{};
   std::vector<ReplicatedBlockUpdate> replicated_block_updates;

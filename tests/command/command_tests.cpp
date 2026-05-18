@@ -32,7 +32,8 @@ struct RunningServerHarness {
   arv::client::ClientRuntime client;
 
   explicit RunningServerHarness(
-      arv::io::MovementValidationConfig movement = arv::io::MovementValidationConfig{})
+      arv::io::MovementValidationConfig movement = arv::io::MovementValidationConfig{},
+      arv::Location world_spawn = arv::default_spawn_location())
       : temp("arvane_command_"),
         block_registry(arv::testsupport::make_test_block_registry()),
         item_registry(arv::testsupport::make_test_item_registry(block_registry)),
@@ -49,6 +50,7 @@ struct RunningServerHarness {
     start_info.game_modes = &game_modes;
     start_info.register_commands = arv::base::register_server_commands;
     start_info.movement = movement;
+    start_info.world_spawn = world_spawn;
     start_info.world_name = "default";
     start_info.server_save_root = temp.path / "save";
     EXPECT_TRUE(server.start(start_info));
@@ -283,6 +285,83 @@ TEST(CommandTests, PlayerTeleportIsDeniedWithoutPermission) {
 
   const arv::command::CommandResult result =
       harness.server.execute_command(sender.value(), "/tp 10 20 30");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_EQ(player.position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+}
+
+TEST(CommandTests, NewPlayersUseConfiguredWorldSpawn) {
+  RunningServerHarness harness(
+      arv::io::MovementValidationConfig{},
+      arv::Location{14.5F, 70.0F, -2.5F, 1.25F, -0.1F});
+
+  const arv::player::PlayerState& player = connected_player(harness.server);
+  EXPECT_EQ(player.position, (arv::Vec3f{14.5F, 70.0F, -2.5F}));
+  EXPECT_FLOAT_EQ(player.yaw_radians, 1.25F);
+  EXPECT_FLOAT_EQ(player.pitch_radians, -0.1F);
+}
+
+TEST(CommandTests, PlayerSpawnTeleportsToWorldSpawnWithRotation) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  harness.server.voxel_world().set_spawn_point(
+      arv::Location{4.5F, 9.0F, -12.5F, 0.75F, -0.2F});
+  player.position = {1.0F, 2.0F, 3.0F};
+  player.yaw_radians = 0.0F;
+  player.pitch_radians = 0.0F;
+  player.permission_overrides.custom_overrides[
+      std::string{arv::base::ids::SpawnPermissionNode}] =
+      arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/spawn");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(player.position, (arv::Vec3f{4.5F, 9.0F, -12.5F}));
+  EXPECT_FLOAT_EQ(player.yaw_radians, 0.75F);
+  EXPECT_FLOAT_EQ(player.pitch_radians, -0.2F);
+}
+
+TEST(CommandTests, SetspawnStoresCurrentPlayerLocation) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.position = {-3.5F, 64.0F, 8.5F};
+  player.yaw_radians = 1.5F;
+  player.pitch_radians = 0.25F;
+  player.permission_overrides.custom_overrides[
+      std::string{arv::base::ids::SetSpawnPermissionNode}] =
+      arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/setspawn");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  const arv::Location spawn = harness.server.voxel_world().spawn_point();
+  EXPECT_EQ(arv::location_position(spawn), (arv::Vec3f{-3.5F, 64.0F, 8.5F}));
+  EXPECT_FLOAT_EQ(spawn.yaw_radians, 1.5F);
+  EXPECT_FLOAT_EQ(spawn.pitch_radians, 0.25F);
+  ASSERT_TRUE(spawn.world.has_value());
+  EXPECT_EQ(spawn.world.value(), harness.server.voxel_world().id());
+}
+
+TEST(CommandTests, SpawnCommandIsDeniedWithoutPermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.position = {1.0F, 2.0F, 3.0F};
+  harness.server.voxel_world().set_spawn_point(
+      arv::Location{4.5F, 9.0F, -12.5F, 0.0F, 0.0F});
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/spawn");
 
   ASSERT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
   EXPECT_EQ(player.position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));

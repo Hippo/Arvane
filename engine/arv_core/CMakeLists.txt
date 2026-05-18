@@ -7,6 +7,7 @@ set(ARV_CORE_HEADERS
   include/arv/core/expected.hpp
   include/arv/core/fixed_timestep.hpp
   include/arv/core/id.hpp
+  include/arv/core/location.hpp
   include/arv/core/log.hpp
   include/arv/core/math.hpp
   include/arv/core/perf_stats.hpp

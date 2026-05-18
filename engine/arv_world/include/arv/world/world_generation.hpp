@@ -3,6 +3,7 @@
 #include "arv/core/coordinates.hpp"
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/expected.hpp"
+#include "arv/core/location.hpp"
 #include "arv/core/types.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/voxel/storage.hpp"
@@ -120,6 +121,10 @@ using GeneratedChunkResult = Expected<GeneratedChunk, WorldGenerationError>;
 [[nodiscard]] voxel::BlockVariantID choose_surface_block(
     const WorldGenerationPalette& palette,
     i32 depth_from_surface) noexcept;
+
+[[nodiscard]] arv::Location generate_world_spawn_location(
+    const WorldGenerationConfig& config,
+    u64 seed) noexcept;
 
 [[nodiscard]] GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request);
 

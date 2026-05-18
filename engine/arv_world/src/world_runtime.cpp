@@ -102,6 +102,18 @@ void WorldRuntime::set_day_length_seconds(
   set_day_fraction(fraction);
 }
 
+arv::Location WorldRuntime::spawn_point() const noexcept {
+  return impl_->spawn_point;
+}
+
+void WorldRuntime::set_spawn_point(arv::Location spawn) noexcept {
+  assert_owner_thread();
+  if (!spawn.world.has_value()) {
+    spawn.world = impl_->id;
+  }
+  impl_->spawn_point = spawn;
+}
+
 void WorldRuntime::set_generation_context(u64 seed, WorldGenerationConfig config) {
   assert_owner_thread();
   configure_height(world_height_settings_from_generation_config(config));

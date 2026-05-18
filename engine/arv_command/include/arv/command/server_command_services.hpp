@@ -2,6 +2,7 @@
 
 #include "arv/core/domain_ids.hpp"
 #include "arv/core/coordinates.hpp"
+#include "arv/core/location.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/types.hpp"
 
@@ -18,6 +19,8 @@ struct OnlinePlayerCommandTarget {
   WorldID world_id{};
   std::string display_name{};
   Vec3f position{};
+  f32 yaw_radians{};
+  f32 pitch_radians{};
 };
 
 struct PlayerBlockSelection {
@@ -31,6 +34,7 @@ using OnlinePlayerByIDFn =
 using OnlinePlayerByNameFn =
     FunctionRef<std::optional<OnlinePlayerCommandTarget>(std::string_view)>;
 using TeleportPlayerFn = FunctionRef<bool(PlayerID, Vec3f)>;
+using TeleportPlayerLocationFn = FunctionRef<bool(PlayerID, Location)>;
 using SetPlayerGameModeFn = FunctionRef<bool(PlayerID, std::string_view)>;
 using SetPlayerFlySpeedFn = FunctionRef<bool(PlayerID, f32)>;
 using DefaultPlayerFlySpeedFn = FunctionRef<f32()>;
@@ -46,11 +50,14 @@ using AirBlockVariantFn = FunctionRef<std::optional<u32>()>;
 using BlueprintListFn = FunctionRef<std::vector<std::string>(WorldID)>;
 using BlueprintLoadFn = FunctionRef<std::optional<std::string>(WorldID, std::string_view)>;
 using BlueprintSaveFn = FunctionRef<bool(WorldID, std::string_view, std::string_view)>;
+using WorldSpawnReadFn = FunctionRef<std::optional<Location>(WorldID)>;
+using WorldSpawnWriteFn = FunctionRef<bool(WorldID, Location)>;
 
 struct ServerCommandServices {
   OnlinePlayerByIDFn online_player_by_id{};
   OnlinePlayerByNameFn online_player_by_name{};
   TeleportPlayerFn teleport_player{};
+  TeleportPlayerLocationFn teleport_player_location{};
   SetPlayerGameModeFn set_player_game_mode{};
   SetPlayerFlySpeedFn set_player_fly_speed{};
   DefaultPlayerFlySpeedFn default_player_fly_speed{};
@@ -65,6 +72,8 @@ struct ServerCommandServices {
   BlueprintListFn list_blueprints{};
   BlueprintLoadFn load_blueprint{};
   BlueprintSaveFn save_blueprint{};
+  WorldSpawnReadFn read_world_spawn{};
+  WorldSpawnWriteFn write_world_spawn{};
 };
 
 } // namespace arv::command

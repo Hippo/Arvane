@@ -102,6 +102,52 @@ namespace {
       static_cast<f32>((*array)[2].as_f64_or(0.0))};
 }
 
+[[nodiscard]] io::DataValue location_to_value(Location location, bool include_world) {
+  io::DataValue node = io::DataValue::object();
+  node.set("x", static_cast<f64>(location.x));
+  node.set("y", static_cast<f64>(location.y));
+  node.set("z", static_cast<f64>(location.z));
+  node.set("yaw_radians", static_cast<f64>(location.yaw_radians));
+  node.set("pitch_radians", static_cast<f64>(location.pitch_radians));
+  if (include_world && location.world.has_value()) {
+    node.set("world", static_cast<u64>(location.world->value));
+  }
+  return node;
+}
+
+[[nodiscard]] std::optional<Location> location_from_value(const io::DataValue& node) {
+  if (node.kind() != io::DataKind::Object) {
+    return std::nullopt;
+  }
+  Location location;
+  if (const io::DataValue* position = member(node, "position");
+      position != nullptr && position->array_if() != nullptr &&
+      position->array_if()->size() >= 3U) {
+    const Vec3f vec = vec3_from_value(*position);
+    location.x = vec.x;
+    location.y = vec.y;
+    location.z = vec.z;
+  } else if (
+      member(node, "x") != nullptr &&
+      member(node, "y") != nullptr &&
+      member(node, "z") != nullptr) {
+    location.x = static_cast<f32>(f64_value_or(node, "x", 0.0));
+    location.y = static_cast<f32>(f64_value_or(node, "y", 0.0));
+    location.z = static_cast<f32>(f64_value_or(node, "z", 0.0));
+  } else {
+    return std::nullopt;
+  }
+  location.yaw_radians =
+      static_cast<f32>(f64_value_or(node, "yaw_radians", location.yaw_radians));
+  location.pitch_radians =
+      static_cast<f32>(f64_value_or(node, "pitch_radians", location.pitch_radians));
+  if (const io::DataValue* world = member(node, "world");
+      world != nullptr && is_integer(*world)) {
+    location.world = WorldID{static_cast<WorldID::value_type>(world->as_u64_or(0U))};
+  }
+  return location;
+}
+
 [[nodiscard]] io::DataValue quat_to_value(Quatf value) {
   io::DataValue array = io::DataValue::array();
   array.push(static_cast<f64>(value.x));
@@ -455,6 +501,69 @@ Expected<void, PersistenceError> write_json_atomic(
     return Expected<void, PersistenceError>::failure(text.error());
   }
   return write_text_atomic(path, text.value());
+}
+
+[[nodiscard]] std::optional<Location> read_world_spawn_from_file(
+    const std::filesystem::path& path) {
+  auto world_file = read_json_file(path, "world metadata JSON");
+  if (!world_file || world_file.value().kind() != io::DataKind::Object) {
+    return std::nullopt;
+  }
+  const io::DataValue* spawn = member(world_file.value(), "spawn");
+  return spawn == nullptr ? std::nullopt : location_from_value(*spawn);
+}
+
+[[nodiscard]] std::optional<Location> read_primary_world_spawn(
+    const std::filesystem::path& worlds_root,
+    std::string_view loaded_world_name) {
+  std::error_code error;
+  if (!std::filesystem::is_directory(worlds_root, error) || error) {
+    return std::nullopt;
+  }
+
+  std::vector<std::filesystem::path> candidates;
+  const std::filesystem::path default_world = worlds_root / "default" / "world.json";
+  if (std::filesystem::exists(default_world, error)) {
+    candidates.push_back(default_world);
+  }
+  error.clear();
+  for (const std::filesystem::directory_entry& entry :
+       std::filesystem::directory_iterator(worlds_root, error)) {
+    if (error || !entry.is_directory()) {
+      error.clear();
+      continue;
+    }
+    const std::filesystem::path candidate = entry.path() / "world.json";
+    if (candidate == default_world || !std::filesystem::exists(candidate, error)) {
+      error.clear();
+      continue;
+    }
+    candidates.push_back(candidate);
+  }
+  std::sort(
+      candidates.begin(),
+      candidates.end(),
+      [](const auto& lhs, const auto& rhs) {
+        const bool lhs_default = lhs.parent_path().filename() == "default";
+        const bool rhs_default = rhs.parent_path().filename() == "default";
+        if (lhs_default != rhs_default) {
+          return lhs_default;
+        }
+        return lhs.parent_path().filename().string() <
+               rhs.parent_path().filename().string();
+      });
+
+  for (const std::filesystem::path& candidate : candidates) {
+    if (candidate.parent_path().filename().string() == loaded_world_name) {
+      continue;
+    }
+    if (std::optional<Location> spawn =
+            read_world_spawn_from_file(candidate);
+        spawn.has_value()) {
+      return spawn;
+    }
+  }
+  return std::nullopt;
 }
 
 [[nodiscard]] io::DataValue inventory_to_value(
@@ -917,6 +1026,9 @@ Expected<void, PersistenceError> save_server_root(
   world_json.set("time", world_clock_to_value(saved_clock));
   world_json.set("packs", required_packs_to_value(world.required_packs));
   world_json.set("content_lock", std::move(content_lock));
+  if (world.spawn_point.has_value()) {
+    world_json.set("spawn", location_to_value(world.spawn_point.value(), false));
+  }
   save_result = write_json_atomic(
       root / "worlds" / world.name / "world.json",
       world_json,
@@ -1107,6 +1219,9 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
     }
     const io::DataValue world_json = std::move(world_file_json.value());
     loaded.world.name = string_value_or(world_json, "name", std::string{});
+    if (loaded.world.name.empty()) {
+      loaded.world.name = world_file.parent_path().filename().string();
+    }
     loaded.world.seed = u64_value_or(world_json, "seed", 0U);
     loaded.world.tick_index =
         static_cast<TickIndex>(u64_value_or(world_json, "tick_index", 0U));
@@ -1139,6 +1254,13 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
         content_lock != nullptr && content_lock->kind() == io::DataKind::Object) {
       loaded.world.content_lock_enabled =
           bool_value_or(*content_lock, "enabled", loaded.world.content_lock_enabled);
+    }
+    if (const io::DataValue* spawn = member(world_json, "spawn"); spawn != nullptr) {
+      loaded.world.spawn_point = location_from_value(*spawn);
+    }
+    if (!loaded.world.spawn_point.has_value()) {
+      loaded.world.spawn_point =
+          read_primary_world_spawn(worlds_root, loaded.world.name);
     }
     loaded.has_world_metadata = true;
 

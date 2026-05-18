@@ -55,4 +55,28 @@ ValueResult<std::uint64_t> World::seed(ArvWorldHandle world) const {
   };
 }
 
+ValueResult<ArvLocation> World::get_world_spawn(
+    ArvWorldHandle world) const {
+  ArvLocation spawn{};
+  if (api_ == nullptr || api_->worlds == nullptr ||
+      api_->worlds->get_world_spawn == nullptr) {
+    return {Result::unsupported("world API is unavailable"), spawn};
+  }
+  return {
+      Result{api_->worlds->get_world_spawn(api_->worlds_ctx, world, &spawn)},
+      spawn,
+  };
+}
+
+Result World::set_world_spawn(
+    ArvWorldHandle world,
+    ArvLocation spawn) const {
+  if (api_ == nullptr || api_->worlds == nullptr ||
+      api_->worlds->set_world_spawn == nullptr) {
+    return Result::unsupported("world API is unavailable");
+  }
+  return Result{
+      api_->worlds->set_world_spawn(api_->worlds_ctx, world, spawn)};
+}
+
 } // namespace arv
