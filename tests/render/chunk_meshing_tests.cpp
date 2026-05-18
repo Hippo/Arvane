@@ -718,6 +718,26 @@ TEST(ChunkMeshingTests, GeneratedDirtyLoadedAboveLightsSectionCeilingSurfaceFace
   EXPECT_EQ(arv::render::unpack_chunk_sky_light(vertex->light_face_material_hints), 15U);
 }
 
+TEST(ChunkMeshingTests, GeneratedDirtyLoadedAboveSharesStorageWithSkyOverlay) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.set_generation_context(123U, flat_generation_config(15));
+  world.ensure_chunk({{1, 0, -2}});
+  arv::voxel::ChunkSection& above = world.ensure_chunk({{1, 1, -2}});
+  world.mark_chunk_lighting_dirty({{1, 1, -2}});
+
+  const std::optional<arv::voxel::ChunkSnapshot> snapshot =
+      world.make_meshing_snapshot(
+          {{1, 0, -2}},
+          arv::world::MissingNeighborPolicy::TreatMissingAsAir);
+  ASSERT_TRUE(snapshot);
+
+  const arv::usize above_index = arv::voxel::snapshot_storage_index(0, 1, 0);
+  ASSERT_EQ(snapshot->storages[above_index].get(), above.storage_identity());
+  EXPECT_EQ(
+      arv::voxel::light_sky(arv::voxel::snapshot_light(snapshot.value(), {{14, 16, 14}})),
+      arv::voxel::MaxLightLevel);
+}
+
 TEST(ChunkMeshingTests, GeneratedMissingAboveStaysDarkBelowSurface) {
   const arv::voxel::BlockRegistry registry = make_registry();
   const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();

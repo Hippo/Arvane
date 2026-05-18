@@ -170,6 +170,18 @@ struct ChunkStorage {
 using ChunkStorageHandle = std::shared_ptr<ChunkStorage>;
 using ChunkStorageView = std::shared_ptr<const ChunkStorage>;
 
+inline constexpr u8 NoSnapshotOpenSky = static_cast<u8>(ChunkSize);
+
+struct ChunkSnapshotSkyLightOverlay {
+  ChunkSnapshotSkyLightOverlay() noexcept {
+    min_open_sky_y.fill(NoSnapshotOpenSky);
+  }
+
+  std::array<u8, ChunkArea> min_open_sky_y{};
+};
+
+using ChunkSnapshotSkyLightOverlayView = std::shared_ptr<const ChunkSnapshotSkyLightOverlay>;
+
 class ChunkSection {
 public:
   explicit ChunkSection(ChunkSectionCoord coord = {});
@@ -337,6 +349,7 @@ struct ChunkSnapshot {
   u64 source_light_version{};
 
   std::array<ChunkStorageView, ChunkSnapshotNeighborhoodVolume> storages{};
+  std::array<ChunkSnapshotSkyLightOverlayView, ChunkSnapshotNeighborhoodVolume> sky_light_overlays{};
 
   [[nodiscard]] const ChunkStorageView& center_storage() const noexcept {
     return storages[ChunkSnapshotCenterStorageIndex];
@@ -361,6 +374,7 @@ struct ChunkSnapshot {
 
 struct ChunkSnapshotStoragePointers {
   std::array<const ChunkStorage*, ChunkSnapshotNeighborhoodVolume> storages{};
+  std::array<const ChunkSnapshotSkyLightOverlay*, ChunkSnapshotNeighborhoodVolume> sky_light_overlays{};
 };
 
 [[nodiscard]] ChunkSnapshot make_chunk_snapshot_without_neighbors(const ChunkSection& chunk);

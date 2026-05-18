@@ -23,34 +23,33 @@ using DependencyMask = detail::ChunkDependencyMask;
   }};
 }
 
-[[nodiscard]] voxel::ChunkStorageView make_generated_lighting_snapshot_storage(
+[[nodiscard]] voxel::ChunkSnapshotSkyLightOverlayView make_generated_lighting_snapshot_overlay(
     const GenerationSurfaceProfile& surface,
     ChunkSectionCoord coord,
     const voxel::ChunkStorage& source) {
-  voxel::ChunkStorageHandle storage =
-      std::make_shared<voxel::ChunkStorage>(source);
+  auto overlay = std::make_shared<voxel::ChunkSnapshotSkyLightOverlay>();
+  bool has_open_sky = false;
 
   for (usize column_index = 0; column_index < voxel::ChunkArea; ++column_index) {
     const ChunkLocalColumn column = voxel::local_column(column_index);
     const i32 surface_y = surface[column_index];
-    bool sky_open = true;
     for (i32 y = ChunkSize - 1; y >= 0; --y) {
       const i32 world_y = coord.value.y * ChunkSize + y;
       const usize index = voxel::local_index({{column.x, y, column.z}});
       if (world_y <= surface_y) {
-        continue;
+        break;
       }
-      if (storage->blocks[index] != voxel::AirBlockVariantID) {
-        sky_open = false;
-        continue;
+      if (source.blocks[index] != voxel::AirBlockVariantID) {
+        break;
       }
-      if (sky_open && voxel::light_sky(storage->lights[index]) < voxel::MaxLightLevel) {
-        storage->lights[index] =
-            voxel::with_sky_light(storage->lights[index], voxel::MaxLightLevel);
-      }
+      overlay->min_open_sky_y[column_index] = static_cast<u8>(y);
+      has_open_sky = true;
     }
   }
-  return storage;
+  if (!has_open_sky) {
+    return nullptr;
+  }
+  return overlay;
 }
 
 } // namespace
@@ -240,21 +239,24 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
               column_coord));
       return generated_surface_cache.back().second;
     };
-    auto storage_view_for_chunk =
-        [&generated_surface_profile_for, this](const voxel::ChunkSection& source) {
+    auto assign_storage_for_chunk =
+        [&generated_surface_profile_for, &snapshot, this](
+            usize storage_index,
+            const voxel::ChunkSection& source) {
+          voxel::ChunkStorageView source_storage = source.storage_view();
+          snapshot.storages[storage_index] = source_storage;
           if (!impl_->generation_config.has_value() ||
               !source.is_dirty(voxel::ChunkDirtyFlags::Lighting)) {
-            return source.storage_view();
+            return;
           }
 
-          const voxel::ChunkStorageView source_storage = source.storage_view();
-          return make_generated_lighting_snapshot_storage(
-              generated_surface_profile_for(chunk_to_column(source.coord())),
-              source.coord(),
-              *source_storage);
+          snapshot.sky_light_overlays[storage_index] =
+              make_generated_lighting_snapshot_overlay(
+                  generated_surface_profile_for(chunk_to_column(source.coord())),
+                  source.coord(),
+                  *source_storage);
         };
-    snapshot.storages[voxel::ChunkSnapshotCenterStorageIndex] =
-        storage_view_for_chunk(*chunk);
+    assign_storage_for_chunk(voxel::ChunkSnapshotCenterStorageIndex, *chunk);
     for (usize storage_index = 0; storage_index < voxel::ChunkSnapshotNeighborhoodVolume; ++storage_index) {
       if (storage_index == voxel::ChunkSnapshotCenterStorageIndex) {
         continue;
@@ -266,9 +268,10 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
         return std::nullopt;
       }
       if (neighbor != nullptr) {
-        snapshot.storages[storage_index] = storage_view_for_chunk(*neighbor);
+        assign_storage_for_chunk(storage_index, *neighbor);
       } else {
         snapshot.storages[storage_index].reset();
+        snapshot.sky_light_overlays[storage_index].reset();
       }
     }
   }

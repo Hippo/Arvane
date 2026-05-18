@@ -24,30 +24,58 @@ namespace {
   return value < 0 ? ChunkSize - 1 : (value >= ChunkSize ? 0 : value);
 }
 
-[[nodiscard]] const ChunkStorage* snapshot_storage_for_local(
+struct SnapshotStorageLookup {
+  const ChunkStorage* storage{};
+  const ChunkSnapshotSkyLightOverlay* sky_light_overlay{};
+  SectionLocalPos local{};
+};
+
+[[nodiscard]] SnapshotStorageLookup snapshot_storage_for_local(
     const ChunkSnapshotStoragePointers& snapshot,
-    SectionLocalPos local,
-    SectionLocalPos& storage_local) noexcept {
+    SectionLocalPos local) noexcept {
   const i32 offset_x = local.value.x < 0 ? -1 : (local.value.x >= ChunkSize ? 1 : 0);
   const i32 offset_y = local.value.y < 0 ? -1 : (local.value.y >= ChunkSize ? 1 : 0);
   const i32 offset_z = local.value.z < 0 ? -1 : (local.value.z >= ChunkSize ? 1 : 0);
 
   if ((offset_x != 0 || offset_y != 0 || offset_z != 0) && !is_valid_halo_local(local)) {
-    return nullptr;
+    return {};
   }
 
-  const ChunkStorage* storage =
-      snapshot.storages[snapshot_storage_index(offset_x, offset_y, offset_z)];
+  const usize storage_index = snapshot_storage_index(offset_x, offset_y, offset_z);
+  const ChunkStorage* storage = snapshot.storages[storage_index];
   if (!storage) {
-    return nullptr;
+    return {};
   }
 
-  storage_local = {{
-      wrapped_snapshot_local(local.value.x),
-      wrapped_snapshot_local(local.value.y),
-      wrapped_snapshot_local(local.value.z),
-  }};
-  return storage;
+  return {
+      storage,
+      snapshot.sky_light_overlays[storage_index],
+      {{
+          wrapped_snapshot_local(local.value.x),
+          wrapped_snapshot_local(local.value.y),
+          wrapped_snapshot_local(local.value.z),
+      }}};
+}
+
+[[nodiscard]] LightWord apply_snapshot_sky_light_overlay(
+    const SnapshotStorageLookup& lookup,
+    LightWord light) noexcept {
+  if (lookup.sky_light_overlay == nullptr ||
+      light_sky(light) >= MaxLightLevel) {
+    return light;
+  }
+
+  const SectionLocalPos local = lookup.local;
+  const usize column_index =
+      local_column_index({local.value.x, local.value.z});
+  if (local.value.y < lookup.sky_light_overlay->min_open_sky_y[column_index]) {
+    return light;
+  }
+
+  if (lookup.storage->blocks[local_index(local)] != AirBlockVariantID) {
+    return light;
+  }
+  return with_sky_light(light, MaxLightLevel);
 }
 
 } // namespace
@@ -311,6 +339,7 @@ ChunkSnapshotStoragePointers make_chunk_snapshot_storage_pointers(
   ChunkSnapshotStoragePointers pointers;
   for (usize index = 0; index < pointers.storages.size(); ++index) {
     pointers.storages[index] = snapshot.storages[index].get();
+    pointers.sky_light_overlays[index] = snapshot.sky_light_overlays[index].get();
   }
   return pointers;
 }
@@ -322,9 +351,8 @@ BlockVariantID snapshot_block(const ChunkSnapshot& snapshot, SectionLocalPos loc
 BlockVariantID snapshot_block(
     const ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local) noexcept {
-  SectionLocalPos storage_local{};
-  const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
-  return storage != nullptr ? storage->blocks[local_index(storage_local)] : AirBlockVariantID;
+  const SnapshotStorageLookup lookup = snapshot_storage_for_local(snapshot, local);
+  return lookup.storage != nullptr ? lookup.storage->blocks[local_index(lookup.local)] : AirBlockVariantID;
 }
 
 LightWord snapshot_light(const ChunkSnapshot& snapshot, SectionLocalPos local) noexcept {
@@ -334,9 +362,12 @@ LightWord snapshot_light(const ChunkSnapshot& snapshot, SectionLocalPos local) n
 LightWord snapshot_light(
     const ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local) noexcept {
-  SectionLocalPos storage_local{};
-  const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
-  return storage != nullptr ? storage->lights[local_index(storage_local)] : NoLight;
+  const SnapshotStorageLookup lookup = snapshot_storage_for_local(snapshot, local);
+  if (lookup.storage == nullptr) {
+    return NoLight;
+  }
+  const LightWord light = lookup.storage->lights[local_index(lookup.local)];
+  return apply_snapshot_sky_light_overlay(lookup, light);
 }
 
 FluidCell snapshot_fluid(const ChunkSnapshot& snapshot, SectionLocalPos local) noexcept {
@@ -346,9 +377,8 @@ FluidCell snapshot_fluid(const ChunkSnapshot& snapshot, SectionLocalPos local) n
 FluidCell snapshot_fluid(
     const ChunkSnapshotStoragePointers& snapshot,
     SectionLocalPos local) noexcept {
-  SectionLocalPos storage_local{};
-  const ChunkStorage* storage = snapshot_storage_for_local(snapshot, local, storage_local);
-  return storage != nullptr ? storage->fluids[local_index(storage_local)] : empty_fluid_cell();
+  const SnapshotStorageLookup lookup = snapshot_storage_for_local(snapshot, local);
+  return lookup.storage != nullptr ? lookup.storage->fluids[local_index(lookup.local)] : empty_fluid_cell();
 }
 
 } // namespace arv::voxel

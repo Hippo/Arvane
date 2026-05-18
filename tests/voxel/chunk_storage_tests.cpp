@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 TEST(ChunkStorageTests, LocalIndexUsesCanonicalChunkSectionLayout) {
   EXPECT_EQ(arv::voxel::local_index({{0, 0, 0}}), 0U);
   EXPECT_EQ(arv::voxel::local_index({{1, 0, 0}}), 1U);
@@ -152,6 +154,49 @@ TEST(ChunkStorageTests, MutatingChunkWithActiveSnapshotDetachesAndPreservesSnaps
   EXPECT_EQ(chunk.version(), version + 1);
 }
 
+TEST(ChunkStorageTests, MutatingLightWithActiveSnapshotDetachesAndPreservesSnapshotView) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_light({{1, 2, 3}}, arv::voxel::pack_light(1, 2, 3, 4)));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::voxel::ChunkStorage* snapshot_storage = snapshot.center_storage_identity();
+  const arv::u64 light_version = chunk.light_version();
+
+  ASSERT_TRUE(chunk.set_light({{1, 2, 3}}, arv::voxel::pack_light(4, 3, 2, 1)));
+
+  EXPECT_EQ(snapshot.center_storage_identity(), snapshot_storage);
+  EXPECT_NE(chunk.storage_identity(), snapshot_storage);
+  EXPECT_EQ(
+      arv::voxel::snapshot_light(snapshot, {{1, 2, 3}}),
+      arv::voxel::pack_light(1, 2, 3, 4));
+  EXPECT_EQ(chunk.light({{1, 2, 3}}), arv::voxel::pack_light(4, 3, 2, 1));
+  EXPECT_EQ(chunk.light_version(), light_version + 1);
+}
+
+TEST(ChunkStorageTests, MutatingFluidWithActiveSnapshotDetachesAndPreservesSnapshotView) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+  ASSERT_TRUE(chunk.set_fluid({{1, 2, 3}}, arv::voxel::make_fluid_source(water)));
+
+  const arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::voxel::ChunkStorage* snapshot_storage = snapshot.center_storage_identity();
+  const arv::u64 version = chunk.version();
+
+  ASSERT_TRUE(chunk.set_fluid(
+      {{1, 2, 3}},
+      arv::voxel::make_flowing_fluid(water, 4)));
+
+  EXPECT_EQ(snapshot.center_storage_identity(), snapshot_storage);
+  EXPECT_NE(chunk.storage_identity(), snapshot_storage);
+  EXPECT_EQ(
+      arv::voxel::snapshot_fluid(snapshot, {{1, 2, 3}}),
+      arv::voxel::make_fluid_source(water));
+  EXPECT_EQ(
+      chunk.fluid({{1, 2, 3}}),
+      arv::voxel::make_flowing_fluid(water, 4));
+  EXPECT_EQ(chunk.version(), version + 1);
+}
+
 TEST(ChunkStorageTests, SnapshotSamplesPreparedNeighborBoundaries) {
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
   arv::voxel::ChunkSection neighbor{{{1, 0, 0}}};
@@ -175,4 +220,25 @@ TEST(ChunkStorageTests, SnapshotMissingStorageSamplesAsEmpty) {
   EXPECT_EQ(
       arv::voxel::snapshot_fluid(snapshot, {{0, 0, 0}}),
       arv::voxel::empty_fluid_cell());
+}
+
+TEST(ChunkStorageTests, SnapshotSkyLightOverlayAppliesOnlyToOpenAirCells) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 3, 1}}, arv::voxel::BlockVariantID{4}));
+  ASSERT_TRUE(chunk.set_light({{1, 2, 1}}, arv::voxel::pack_light(1, 2, 3, 4)));
+
+  arv::voxel::ChunkSnapshot snapshot = arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  auto overlay = std::make_shared<arv::voxel::ChunkSnapshotSkyLightOverlay>();
+  overlay->min_open_sky_y[arv::voxel::local_column_index({1, 1})] = 2U;
+  snapshot.sky_light_overlays[arv::voxel::ChunkSnapshotCenterStorageIndex] = overlay;
+
+  EXPECT_EQ(
+      arv::voxel::snapshot_light(snapshot, {{1, 1, 1}}),
+      arv::voxel::NoLight);
+  EXPECT_EQ(
+      arv::voxel::snapshot_light(snapshot, {{1, 2, 1}}),
+      arv::voxel::pack_light(1, 2, 3, arv::voxel::MaxLightLevel));
+  EXPECT_EQ(
+      arv::voxel::snapshot_light(snapshot, {{1, 3, 1}}),
+      arv::voxel::NoLight);
 }
