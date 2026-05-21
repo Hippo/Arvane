@@ -275,6 +275,56 @@ namespace {
   return dimension.dimension_features_by_stage[index];
 }
 
+[[nodiscard]] bool feature_list_contains(
+    const std::vector<usize>& feature_indices,
+    usize placed_index) noexcept {
+  return std::find(feature_indices.begin(), feature_indices.end(), placed_index) !=
+         feature_indices.end();
+}
+
+[[nodiscard]] bool placement_has_underwater_filter(
+    const std::vector<ResolvedPlacementFilter>& filters) noexcept {
+  return std::any_of(
+      filters.begin(),
+      filters.end(),
+      [](const ResolvedPlacementFilter& filter) {
+        return filter.raw.type == PlacementFilterConfig::Type::Underwater;
+      });
+}
+
+[[nodiscard]] bool surface_height_environment_passes(
+    const ResolvedDimension& dimension,
+    const ResolvedPlacedFeature& placed,
+    const TerrainProfile& profile,
+    usize column_index) noexcept {
+  if (placed.raw.height.type != PlacementHeightConfig::Type::Surface ||
+      placement_has_underwater_filter(placed.filters)) {
+    return true;
+  }
+  return profile.surface_y_by_column[column_index] >= dimension.raw.vertical.sea_level;
+}
+
+[[nodiscard]] bool placed_feature_allowed_for_biome(
+    const ResolvedDimension& dimension,
+    usize stage_index,
+    usize placed_index,
+    usize biome_index) noexcept {
+  if (stage_index >= StageOrder.size()) {
+    return true;
+  }
+  if (feature_list_contains(dimension.dimension_features_by_stage[stage_index], placed_index)) {
+    return true;
+  }
+  if (biome_index < dimension.biomes.size() &&
+      feature_list_contains(
+          dimension.biomes[biome_index].features_by_stage[stage_index],
+          placed_index)) {
+    return true;
+  }
+  return dimension.dimension_features_by_stage[stage_index].empty() &&
+         dimension.biome_features_by_stage[stage_index].empty();
+}
+
 struct CachedTerrainProfile {
   ChunkCoord coord{};
   TerrainProfile profile{};
@@ -424,6 +474,8 @@ void run_placed_feature(
     const ResolvedDimension& dimension,
     TerrainProfileCache& terrain_profile_cache,
     GeneratedChunkEditView& view,
+    usize stage_index,
+    usize placed_index,
     const ResolvedPlacedFeature& placed,
     u64 seed,
     ChunkCoord origin_chunk,
@@ -476,6 +528,23 @@ void run_placed_feature(
     }
     const i32 y = placement_y(placed.raw.height, *origin_profile, local_x, local_z, rng);
     BlockPos pos{{world_x, y, world_z}};
+    const usize column_index = voxel::local_column_index({local_x, local_z});
+    const usize biome_index = origin_profile->biome_by_column[column_index];
+    if (!placed_feature_allowed_for_biome(
+            dimension,
+            stage_index,
+            placed_index,
+            biome_index) ||
+        !surface_height_environment_passes(
+            dimension,
+            placed,
+            *origin_profile,
+            column_index)) {
+      if (stats != nullptr) {
+        ++stats->candidates.feature_candidates_rejected;
+      }
+      continue;
+    }
     if (!filters_pass(dimension, *origin_profile, origin_chunk, view, placed.filters, pos)) {
       if (stats != nullptr) {
         ++stats->candidates.feature_candidates_rejected;
@@ -700,8 +769,8 @@ GeneratedChunkResult generate_resolved_chunk(
             fallback_feature_indices.end());
         feature_indices = &fallback_feature_indices;
       }
-      for (const usize feature_index : *feature_indices) {
-        const ResolvedPlacedFeature& placed = dimension.placed_features[feature_index];
+      for (const usize placed_index : *feature_indices) {
+        const ResolvedPlacedFeature& placed = dimension.placed_features[placed_index];
         if (stats != nullptr) {
           ++stats->candidates.placed_features_considered;
         }
@@ -713,6 +782,8 @@ GeneratedChunkResult generate_resolved_chunk(
                 dimension,
                 terrain_profile_cache,
                 view,
+                index,
+                placed_index,
                 placed,
                 request.seed,
                 origin_chunk,

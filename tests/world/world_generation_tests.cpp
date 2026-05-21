@@ -822,6 +822,71 @@ TEST(WorldGenerationTests, PackOceanBiomesGenerateWaterFluids) {
   EXPECT_EQ(fluid.type, arv::voxel::DefaultWaterFluidTypeID);
 }
 
+TEST(WorldGenerationTests, PackSurfaceFeaturesDoNotPunchHolesInSavedHighlandsWater) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  ASSERT_NE(config.resolved_dimension, nullptr);
+  const auto palette = arv::world::resolve_world_generation_palette(config, registry);
+  ASSERT_TRUE(palette) << palette.error().message;
+
+  constexpr arv::u64 seed = 32187121430964ULL;
+  constexpr arv::ChunkCoord player_chunk{6, 1};
+  const arv::i32 sea_level = config.resolved_dimension->raw.vertical.sea_level;
+  arv::usize checked_water_cells = 0U;
+
+  for (arv::i32 dz = -4; dz <= 4; ++dz) {
+    for (arv::i32 dx = -4; dx <= 4; ++dx) {
+      const arv::ChunkCoord coord{player_chunk.x + dx, player_chunk.z + dz};
+      const arv::world::worldgen::TerrainProfile profile =
+          arv::world::worldgen::generate_terrain_profile(
+              *config.resolved_dimension,
+              seed,
+              coord);
+
+      arv::world::ChunkGenerationRequest request;
+      request.world_id = arv::WorldID{1};
+      request.seed = seed;
+      request.coord = coord;
+      request.min_chunk_y = arv::floor_div(config.min_y, arv::ChunkSize);
+      request.max_chunk_y = arv::floor_div(config.max_y, arv::ChunkSize);
+      request.config = config;
+      request.palette = palette.value();
+
+      const auto generated = arv::world::generate_chunk(request);
+      ASSERT_TRUE(generated) << generated.error().message;
+
+      for (arv::usize column_index = 0; column_index < arv::voxel::ChunkArea; ++column_index) {
+        const arv::usize biome_index = profile.biome_by_column[column_index];
+        ASSERT_LT(biome_index, config.resolved_dimension->biomes.size());
+        const arv::world::worldgen::ResolvedBiome& biome =
+            config.resolved_dimension->biomes[biome_index];
+        if (biome.raw.id != "arvane:worldgen/biome/highlands" ||
+            profile.surface_y_by_column[column_index] >= sea_level) {
+          continue;
+        }
+
+        const arv::ChunkLocalColumn column = arv::voxel::local_column(column_index);
+        const arv::i32 world_x = coord.x * arv::ChunkSize + column.x;
+        const arv::i32 world_z = coord.z * arv::ChunkSize + column.z;
+        for (arv::i32 y = profile.surface_y_by_column[column_index] + 1;
+             y <= sea_level;
+             ++y) {
+          const arv::BlockPos water_pos{{world_x, y, world_z}};
+          ++checked_water_cells;
+          EXPECT_EQ(generated_block_at(generated.value(), water_pos), arv::voxel::AirBlockVariantID)
+              << "coord=" << coord.x << "," << coord.z << " pos="
+              << world_x << "," << y << "," << world_z;
+          EXPECT_FALSE(generated_fluid_at(generated.value(), water_pos).empty())
+              << "coord=" << coord.x << "," << coord.z << " pos="
+              << world_x << "," << y << "," << world_z;
+        }
+      }
+    }
+  }
+
+  EXPECT_GT(checked_water_cells, 0U);
+}
+
 TEST(WorldGenerationTests, DimensionClimateAdjustmentsShiftBiomeSelection) {
   arv::world::worldgen::ResolvedDimension cool = make_two_biome_blend_dimension();
   arv::world::worldgen::ResolvedDimension warm = cool;
@@ -1773,6 +1838,80 @@ TEST(WorldGenerationTests, PackTerrainCapsKnownDesertCliffArtifactSteps) {
   for (arv::i32 dz = -2; dz <= 2; ++dz) {
     for (arv::i32 dx = -2; dx <= 2; ++dx) {
       const arv::ChunkCoord coord{observed_desert_chunk.x + dx, observed_desert_chunk.z + dz};
+      const arv::world::worldgen::TerrainProfile& profile = get_profile(coord);
+      for (arv::i32 z = 0; z < arv::ChunkSize; ++z) {
+        for (arv::i32 x = 0; x < arv::ChunkSize; ++x) {
+          const arv::usize column = arv::voxel::local_column_index({x, z});
+          if (x + 1 < arv::ChunkSize) {
+            const arv::usize east = arv::voxel::local_column_index({x + 1, z});
+            EXPECT_LE(
+                std::abs(profile.surface_y_by_column[column] -
+                         profile.surface_y_by_column[east]),
+                max_step)
+                << "coord=" << coord.x << "," << coord.z << " local=" << x << "," << z;
+          } else {
+            const arv::world::worldgen::TerrainProfile& east_profile =
+                get_profile({coord.x + 1, coord.z});
+            const arv::usize east = arv::voxel::local_column_index({0, z});
+            EXPECT_LE(
+                std::abs(profile.surface_y_by_column[column] -
+                         east_profile.surface_y_by_column[east]),
+                max_step)
+                << "east border coord=" << coord.x << "," << coord.z << " z=" << z;
+          }
+          if (z + 1 < arv::ChunkSize) {
+            const arv::usize south = arv::voxel::local_column_index({x, z + 1});
+            EXPECT_LE(
+                std::abs(profile.surface_y_by_column[column] -
+                         profile.surface_y_by_column[south]),
+                max_step)
+                << "coord=" << coord.x << "," << coord.z << " local=" << x << "," << z;
+          } else {
+            const arv::world::worldgen::TerrainProfile& south_profile =
+                get_profile({coord.x, coord.z + 1});
+            const arv::usize south = arv::voxel::local_column_index({x, 0});
+            EXPECT_LE(
+                std::abs(profile.surface_y_by_column[column] -
+                         south_profile.surface_y_by_column[south]),
+                max_step)
+                << "south border coord=" << coord.x << "," << coord.z << " x=" << x;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(WorldGenerationTests, PackTerrainCapsSavedHighlandsCliffArtifactSteps) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);
+  ASSERT_NE(config.resolved_dimension, nullptr);
+  const arv::i32 max_step = config.resolved_dimension->terrain.shape.max_column_step;
+  ASSERT_GT(max_step, 0);
+
+  constexpr arv::u64 seed = 32187121430964ULL;
+  constexpr arv::ChunkCoord player_chunk{6, 1};
+  std::unordered_map<arv::i64, arv::world::worldgen::TerrainProfile> profiles;
+  auto profile_key = [](arv::ChunkCoord coord) {
+    return static_cast<arv::i64>(
+        (static_cast<arv::u64>(static_cast<arv::u32>(coord.x)) << 32) |
+        static_cast<arv::u32>(coord.z));
+  };
+  auto get_profile = [&](arv::ChunkCoord coord) -> const arv::world::worldgen::TerrainProfile& {
+    const arv::i64 key = profile_key(coord);
+    auto [iter, inserted] = profiles.emplace(key, arv::world::worldgen::TerrainProfile{});
+    if (inserted) {
+      iter->second = arv::world::worldgen::generate_terrain_profile(
+          *config.resolved_dimension,
+          seed,
+          coord);
+    }
+    return iter->second;
+  };
+
+  for (arv::i32 dz = -4; dz <= 4; ++dz) {
+    for (arv::i32 dx = -4; dx <= 4; ++dx) {
+      const arv::ChunkCoord coord{player_chunk.x + dx, player_chunk.z + dz};
       const arv::world::worldgen::TerrainProfile& profile = get_profile(coord);
       for (arv::i32 z = 0; z < arv::ChunkSize; ++z) {
         for (arv::i32 x = 0; x < arv::ChunkSize; ++x) {

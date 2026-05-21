@@ -99,6 +99,11 @@ template<typename T>
   return std::nullopt;
 }
 
+void sort_unique_indices(std::vector<usize>& indices) {
+  std::sort(indices.begin(), indices.end());
+  indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+}
+
 [[nodiscard]] const ClimateFieldAdjustmentConfig* climate_adjustment(
     const DimensionConfig& dimension,
     std::string_view field) noexcept {
@@ -579,35 +584,50 @@ ResolvedDimensionResult resolve_dimension(
         return lhs.raw.id < rhs.raw.id;
       });
 
-  auto add_stage_refs = [&](const std::vector<StageFeatureList>& lists, bool biome_scoped) -> Expected<void, WorldGenDiagnostic> {
+  auto add_stage_refs = [&](
+                            const std::vector<StageFeatureList>& lists,
+                            std::vector<usize>(&stage_features)[StageOrder.size()],
+                            std::string_view owner_id) -> Expected<void, WorldGenDiagnostic> {
     for (const StageFeatureList& list : lists) {
       const usize stage_index = static_cast<usize>(list.stage);
       for (const ResourceRef& ref : list.features) {
         const auto placed_index = index_of_placed_feature(*resolved, ref.id);
         if (!placed_index) {
           return Expected<void, WorldGenDiagnostic>::failure(
-              error(resolved->raw.id, "features.stages", "unknown placed feature: " + ref.id));
+              error(std::string{owner_id}, "features.stages", "unknown placed feature: " + ref.id));
         }
-        if (biome_scoped) {
-          resolved->biome_features_by_stage[stage_index].push_back(placed_index.value());
-        } else {
-          resolved->dimension_features_by_stage[stage_index].push_back(placed_index.value());
-        }
+        stage_features[stage_index].push_back(placed_index.value());
       }
     }
     return Expected<void, WorldGenDiagnostic>::success();
   };
-  auto dimension_features = add_stage_refs(resolved->raw.features, false);
+  auto dimension_features =
+      add_stage_refs(
+          resolved->raw.features,
+          resolved->dimension_features_by_stage,
+          resolved->raw.id);
   if (!dimension_features) {
     return ResolvedDimensionResult::failure(dimension_features.error());
   }
-  for (const ResolvedBiome& biome : resolved->biomes) {
-    auto biome_features = add_stage_refs(biome.raw.features, true);
+  for (ResolvedBiome& biome : resolved->biomes) {
+    auto biome_features = add_stage_refs(
+        biome.raw.features,
+        biome.features_by_stage,
+        biome.raw.id);
     if (!biome_features) {
       return ResolvedDimensionResult::failure(biome_features.error());
     }
+    for (usize stage_index = 0; stage_index < StageOrder.size(); ++stage_index) {
+      sort_unique_indices(biome.features_by_stage[stage_index]);
+      resolved->biome_features_by_stage[stage_index].insert(
+          resolved->biome_features_by_stage[stage_index].end(),
+          biome.features_by_stage[stage_index].begin(),
+          biome.features_by_stage[stage_index].end());
+    }
   }
   for (usize stage_index = 0; stage_index < StageOrder.size(); ++stage_index) {
+    sort_unique_indices(resolved->dimension_features_by_stage[stage_index]);
+    sort_unique_indices(resolved->biome_features_by_stage[stage_index]);
     std::vector<usize>& feature_indices = resolved->features_by_stage[stage_index];
     feature_indices.reserve(
         resolved->dimension_features_by_stage[stage_index].size() +
@@ -620,10 +640,7 @@ ResolvedDimensionResult resolve_dimension(
         feature_indices.end(),
         resolved->biome_features_by_stage[stage_index].begin(),
         resolved->biome_features_by_stage[stage_index].end());
-    std::sort(feature_indices.begin(), feature_indices.end());
-    feature_indices.erase(
-        std::unique(feature_indices.begin(), feature_indices.end()),
-        feature_indices.end());
+    sort_unique_indices(feature_indices);
   }
 
   for (const ResourceRef& ref : resolved->raw.structure_sets) {

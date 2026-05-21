@@ -1,7 +1,7 @@
 #pragma once
 
-#include "arv/core/expected.hpp"
 #include "arv/blueprint/blueprint.hpp"
+#include "arv/core/expected.hpp"
 #include "arv/world/worldgen/biome.hpp"
 #include "arv/world/worldgen/biome_source.hpp"
 #include "arv/world/worldgen/carver.hpp"
@@ -35,6 +35,7 @@ struct ResolvedBiome {
   BiomeConfig raw{};
   std::optional<usize> surface_rule_set_index{};
   std::vector<usize> tag_indices{};
+  std::vector<usize> features_by_stage[StageOrder.size()];
 };
 
 struct ResolvedClimateField {
