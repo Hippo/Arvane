@@ -1248,16 +1248,20 @@ Entity systems should sample fluid state through world query interfaces.
 
 Natural entity spawning is a server-authoritative world simulation system.
 
-The server runs the natural spawn system after it updates the active simulation
+The server runs natural spawn commits after it updates the active simulation
 set for loaded chunks and before ordinary world/entity ticking for the frame.
-The system samples candidate positions around online players, resolves the
+Candidate planning may run on worker threads from owner-thread snapshots. The
+system samples candidate positions around online players, resolves the
 candidate biome from the active dimension terrain profile, and looks up the
 biome's spawn table for the sampled category.
 
 Natural spawning must not create chunk residency pressure. A candidate is valid
-only when its target chunk section is already loaded and active. The system may
-query deterministic terrain profiles to identify the biome and surface height,
-but it does not request generation, load missing chunks, or keep chunks alive.
+only when its target chunk section is already loaded and either active or
+horizontally near a player in the spawn radius. That horizontal fallback lets
+surface spawns continue while a player is flying above terrain without marking
+every vertical section active. The system may query deterministic terrain
+profiles to identify the biome and surface height, but it does not request
+generation, load missing chunks, or keep chunks alive.
 
 Work is bounded by:
 
@@ -1283,18 +1287,18 @@ Example configuration:
 ```yaml
 natural_spawning:
   enabled: true
-  interval_ticks: 20
+  interval_ticks: 10
   min_distance_from_player_blocks: 24
   max_distance_from_player_blocks: 96
-  attempts_per_player_per_category: 4
-  max_successes_per_player_per_tick: 2
-  max_successes_per_world_per_tick: 32
+  attempts_per_player_per_category: 24
+  max_successes_per_player_per_tick: 6
+  max_successes_per_world_per_tick: 48
   local_density_radius_blocks: 32
   caps:
     passive:
-      per_player: 24
-      per_world_soft: 512
-      local_max: 12
+      per_player: 48
+      per_world_soft: 1024
+      local_max: 24
   despawning:
     passive:
       natural_despawn: false
@@ -1303,6 +1307,12 @@ natural_spawning:
       min_lifetime_ticks: 600
       save_transient: true
 ```
+
+The base passive pig tables intentionally avoid a light-level condition for now
+so starter passive mobs are not blocked by newly generated or stale saved
+lighting. They require a standing surface tagged `arvane:spawn/grass_like`;
+replaceable non-fluid body/head blocks such as short grass do not block the
+spawn.
 
 The same category keys used by biome spawn tables are used by `caps` and
 `despawning`: `passive`, `hostile`, `ambient`, `water`, `underground`, and

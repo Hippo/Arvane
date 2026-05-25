@@ -136,6 +136,8 @@ struct NaturalSpawnCounters {
 struct SpawnEvaluationContext {
   std::vector<Vec3f> player_positions{};
   const voxel::BlockRegistry* block_registry{};
+  bool allow_loaded_candidate_sections_near_players{};
+  u32 loaded_candidate_section_max_distance_blocks{};
 };
 
 class SpawnConditionEvaluator {

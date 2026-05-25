@@ -90,6 +90,59 @@ namespace {
   return std::find(chunks.begin(), chunks.end(), coord) != chunks.end();
 }
 
+[[nodiscard]] bool loaded_candidate_section_is_near_player(
+    BlockPos candidate,
+    const std::vector<Vec3f>& player_positions,
+    u32 max_distance) noexcept {
+  return has_distance_to_player(candidate, player_positions, 0U, max_distance);
+}
+
+[[nodiscard]] bool candidate_section_is_simulated(
+    const WorldRuntime& world,
+    BlockPos candidate,
+    const SpawnEvaluationContext& context) noexcept {
+  const ChunkSectionCoord chunk = block_to_chunk(candidate);
+  if (world.find_chunk(chunk) == nullptr) {
+    return false;
+  }
+  if (world.is_chunk_active(chunk)) {
+    return true;
+  }
+  return context.allow_loaded_candidate_sections_near_players &&
+         loaded_candidate_section_is_near_player(
+             candidate,
+             context.player_positions,
+             context.loaded_candidate_section_max_distance_blocks);
+}
+
+[[nodiscard]] bool planned_candidate_section_is_simulated(
+    const NaturalSpawnJobRequest& request,
+    BlockPos candidate,
+    const std::vector<Vec3f>& player_positions) noexcept {
+  const ChunkSectionCoord section = block_to_chunk(candidate);
+  if (!contains_chunk_section(request.loaded_chunks, section)) {
+    return false;
+  }
+  return contains_chunk_section(request.active_chunks, section) ||
+         loaded_candidate_section_is_near_player(
+             candidate,
+             player_positions,
+             request.config.max_distance_from_player_blocks);
+}
+
+[[nodiscard]] bool spawn_body_cell_is_clear(
+    const voxel::BlockRegistry& block_registry,
+    voxel::BlockVariantID block) noexcept {
+  if (block_registry.is_air(block)) {
+    return true;
+  }
+  const voxel::BlockVariantRecord* record = block_registry.variant(block);
+  return record != nullptr &&
+         record->properties.replaceable &&
+         !record->properties.fluid &&
+         !record->properties.collidable;
+}
+
 [[nodiscard]] std::vector<Vec3f> player_positions(
     const std::vector<NaturalSpawnPlayerSnapshot>& players) {
   std::vector<Vec3f> positions;
@@ -391,8 +444,7 @@ bool SpawnConditionEvaluator::passes(
     const SpawnEvaluationContext& context) const {
   (void)category;
   const SpawnConditions& conditions = entry.conditions;
-  const ChunkSectionCoord chunk = block_to_chunk(candidate);
-  if (world.find_chunk(chunk) == nullptr || !world.is_chunk_active(chunk)) {
+  if (!candidate_section_is_simulated(world, candidate, context)) {
     return false;
   }
   if (conditions.min_y.has_value() && candidate.value.y < conditions.min_y.value()) {
@@ -428,10 +480,12 @@ bool SpawnConditionEvaluator::passes(
   const voxel::BlockVariantID body_block = world.get_block(candidate);
   const voxel::BlockVariantID head_block = world.get_block(head);
 
-  if (conditions.requires_air_body && !block_registry->is_air(body_block)) {
+  if (conditions.requires_air_body &&
+      !spawn_body_cell_is_clear(*block_registry, body_block)) {
     return false;
   }
-  if (conditions.requires_air_head && !block_registry->is_air(head_block)) {
+  if (conditions.requires_air_head &&
+      !spawn_body_cell_is_clear(*block_registry, head_block)) {
     return false;
   }
   if (conditions.requires_surface && !voxel::is_standing_surface(*block_registry, below_block)) {
@@ -770,7 +824,7 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
           ++result.counters.rejected_chunk_not_loaded;
           continue;
         }
-        if (!contains_chunk_section(request.active_chunks, section)) {
+        if (!planned_candidate_section_is_simulated(request, candidate, positions)) {
           ++result.counters.rejected_chunk_not_simulated;
           continue;
         }
@@ -912,6 +966,9 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
 
   SpawnEvaluationContext context;
   context.block_registry = &block_registry;
+  context.allow_loaded_candidate_sections_near_players = true;
+  context.loaded_candidate_section_max_distance_blocks =
+      config_.max_distance_from_player_blocks;
   const std::vector<PlayerID> player_ids = world.player_ids();
   context.player_positions.reserve(player_ids.size());
   for (const PlayerID player_id : player_ids) {
@@ -984,7 +1041,7 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
       ++counters_.rejected_chunk_not_loaded;
       continue;
     }
-    if (!world.is_chunk_active(section)) {
+    if (!candidate_section_is_simulated(world, root, context)) {
       ++counters_.rejected_chunk_not_simulated;
       continue;
     }

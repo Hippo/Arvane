@@ -1017,12 +1017,11 @@ features:
 spawns:
   passive:
     - entity: arvane:pig
-      weight: 12
-      min_group: 2
-      max_group: 4
+      weight: 16
+      min_group: 3
+      max_group: 5
       conditions:
         surface: true
-        min_light: 8
         block_tags_below:
           - arvane:spawn/grass_like
 
@@ -1151,12 +1150,11 @@ Optional natural entity spawn tables for the biome.
 spawns:
   passive:
     - entity: arvane:pig
-      weight: 12
-      min_group: 2
-      max_group: 4
+      weight: 16
+      min_group: 3
+      max_group: 5
       conditions:
         surface: true
-        min_light: 8
         block_tags_below:
           - arvane:spawn/grass_like
 ```

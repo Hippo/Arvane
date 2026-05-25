@@ -1,4 +1,5 @@
 #include "arv/asset/pack.hpp"
+#include "arv/base/base_module.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/net/in_process_transport.hpp"
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
@@ -48,6 +50,13 @@ arv::voxel::BlockRegistry make_spawn_block_registry() {
   water.properties.replaceable = true;
   water.is_item = false;
   definitions.push_back(std::move(water));
+  arv::voxel::BlockDefinition short_grass;
+  short_grass.name = "test:short_grass";
+  short_grass.render_category = arv::voxel::RenderCategory::Transparent;
+  short_grass.properties.replaceable = true;
+  short_grass.properties.full_cube = false;
+  short_grass.is_item = false;
+  definitions.push_back(std::move(short_grass));
 
   auto result = arv::voxel::BlockRegistry::build(std::move(definitions));
   if (!result) {
@@ -237,6 +246,105 @@ void write_pack_manifest(
                                       "  native_plugin: false\n");
 }
 
+arv::voxel::BlockRegistry load_first_party_block_registry(
+    const arv::asset::PackManager& packs) {
+  auto block_definition_text = packs.load_merged_json_array_text("blocks", "blocks");
+  if (!block_definition_text) {
+    throw std::runtime_error(block_definition_text.error().describe());
+  }
+  auto definitions =
+      arv::voxel::parse_block_definitions_json(block_definition_text.value());
+  if (!definitions) {
+    throw std::runtime_error(definitions.error().message);
+  }
+
+  arv::voxel::BlockBehaviorRegistry block_behaviors;
+  arv::base::register_base_block_behaviors(block_behaviors);
+  const auto block_behavior_exists = [&block_behaviors](std::string_view id) {
+    return block_behaviors.contains(id);
+  };
+  auto registry = arv::voxel::BlockRegistry::build(
+      std::move(definitions.value()),
+      {.behavior_exists = arv::FunctionRef<bool(std::string_view)>{
+           block_behavior_exists}});
+  if (!registry) {
+    throw std::runtime_error(registry.error().message);
+  }
+  return std::move(registry.value());
+}
+
+arv::entity::EntityRegistry load_first_party_entity_registry(
+    const arv::asset::PackManager& packs) {
+  auto entity_definition_text = packs.load_merged_json_array_text("entities", "entities");
+  if (!entity_definition_text) {
+    throw std::runtime_error(entity_definition_text.error().describe());
+  }
+  auto definitions =
+      arv::entity::parse_entity_definitions_json(entity_definition_text.value());
+  if (!definitions) {
+    throw std::runtime_error(definitions.error().message);
+  }
+  auto registry =
+      arv::base::build_base_entity_registry(std::move(definitions.value()));
+  if (!registry) {
+    throw std::runtime_error(registry.error().message);
+  }
+  return std::move(registry.value());
+}
+
+std::shared_ptr<const arv::world::worldgen::ResolvedDimension>
+load_first_party_overworld_dimension(
+    const arv::asset::PackManager& packs,
+    const arv::voxel::BlockRegistry& blocks) {
+  auto worldgen_registry =
+      arv::world::worldgen::load_worldgen_registry_from_packs(packs);
+  if (!worldgen_registry) {
+    throw std::runtime_error(worldgen_registry.error().describe());
+  }
+  auto dimension = arv::world::worldgen::resolve_dimension(
+      worldgen_registry.value(),
+      "arvane:worldgen/dimension/overworld",
+      blocks);
+  if (!dimension) {
+    throw std::runtime_error(dimension.error().describe());
+  }
+  return std::move(dimension.value());
+}
+
+void publish_generated_columns(
+    arv::world::WorldRuntime& world,
+    const std::shared_ptr<const arv::world::worldgen::ResolvedDimension>& dimension,
+    arv::u64 seed,
+    arv::ChunkCoord center,
+    arv::i32 radius_chunks) {
+  arv::world::WorldGenerationConfig config =
+      arv::world::config_from_resolved_dimension(dimension);
+  world.configure_height(arv::world::world_height_settings_from_generation_config(config));
+  world.set_generation_context(seed, config);
+
+  for (arv::i32 chunk_z = center.z - radius_chunks;
+       chunk_z <= center.z + radius_chunks;
+       ++chunk_z) {
+    for (arv::i32 chunk_x = center.x - radius_chunks;
+         chunk_x <= center.x + radius_chunks;
+         ++chunk_x) {
+      arv::world::ChunkGenerationRequest request;
+      request.world_id = world.id();
+      request.seed = seed;
+      request.coord = {chunk_x, chunk_z};
+      request.min_chunk_y = arv::floor_div(config.min_y, arv::ChunkSize);
+      request.max_chunk_y = arv::floor_div(config.max_y, arv::ChunkSize);
+      request.config = config;
+      request.resolved_dimension = dimension;
+
+      auto generated = arv::world::generate_chunk(request);
+      ASSERT_TRUE(generated) << generated.error().message;
+      ASSERT_TRUE(world.publish_generated_chunk(std::move(generated.value())))
+          << "column=(" << chunk_x << "," << chunk_z << ")";
+    }
+  }
+}
+
 } // namespace
 
 TEST(NaturalSpawnTypesTests, ParsesSpawnCategoriesAndTimePredicates) {
@@ -271,10 +379,40 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
                spawn.category == arv::world::SpawnCategory::Passive;
       });
   ASSERT_NE(pig, plains->second.spawns.end());
-  EXPECT_EQ(pig->min_group, 2U);
-  EXPECT_EQ(pig->max_group, 4U);
+  EXPECT_EQ(pig->min_group, 3U);
+  EXPECT_EQ(pig->max_group, 5U);
   EXPECT_TRUE(pig->conditions.requires_surface);
-  EXPECT_EQ(pig->conditions.min_light, 8U);
+  EXPECT_FALSE(pig->conditions.min_light.has_value());
+
+  const arv::voxel::BlockRegistry blocks =
+      load_first_party_block_registry(packs.value());
+  const std::optional<arv::voxel::BlockVariantID> grass =
+      blocks.find_variant("arvane:grass_block");
+  ASSERT_TRUE(grass.has_value());
+  EXPECT_TRUE(blocks.has_tag(
+      blocks.block_id(grass.value()),
+      "arvane:spawn/grass_like"));
+
+  for (std::string_view biome_id : {
+           "arvane:worldgen/biome/plains",
+           "arvane:worldgen/biome/forest",
+           "arvane:worldgen/biome/rolling_hills",
+           "arvane:worldgen/biome/scrubland",
+           "arvane:worldgen/biome/savanna",
+           "arvane:worldgen/biome/highlands",
+           "arvane:worldgen/biome/mountains",
+       }) {
+    const auto biome = registry.value().biomes.find(std::string{biome_id});
+    ASSERT_NE(biome, registry.value().biomes.end()) << biome_id;
+    const auto found_pig = std::find_if(
+        biome->second.spawns.begin(),
+        biome->second.spawns.end(),
+        [](const arv::world::worldgen::BiomeSpawnEntryConfig& spawn) {
+          return spawn.entity.id == "arvane:pig" &&
+                 spawn.category == arv::world::SpawnCategory::Passive;
+        });
+    EXPECT_NE(found_pig, biome->second.spawns.end()) << biome_id;
+  }
 }
 
 TEST(NaturalSpawnLoaderTests, RejectsInvalidSpawnCategoryWithDiagnostic) {
@@ -362,6 +500,17 @@ TEST(NaturalSpawnConditionTests, EnforcesLoadedActiveChunksSurfaceDistanceTagsAn
       candidate,
       arv::world::SpawnCategory::Passive,
       context));
+
+  const auto short_grass = blocks.find_variant("test:short_grass");
+  ASSERT_TRUE(short_grass.has_value());
+  ASSERT_TRUE(world.set_block(candidate, short_grass.value()));
+  EXPECT_TRUE(evaluator.passes(
+      world,
+      entry,
+      candidate,
+      arv::world::SpawnCategory::Passive,
+      context));
+  ASSERT_TRUE(world.set_block(candidate, blocks.air_variant_id()));
 
   arv::world::SpawnEntry lit_entry = entry;
   lit_entry.conditions.requires_sky_access = true;
@@ -544,6 +693,122 @@ TEST(NaturalSpawnJobTests, BuildsSpawnAndDespawnPlansWithoutMutatingWorld) {
   EXPECT_GT(result.counters.despawn_intents_generated, 0U);
   EXPECT_EQ(world.entity_count(), entity_count_before);
   EXPECT_TRUE(world.entity_exists(transient_hostile));
+}
+
+TEST(NaturalSpawnJobTests, SpawnsOnLoadedGroundWhenPlayerIsFlyingAboveSurface) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  const auto dimension = make_flat_spawn_dimension(
+      {make_spawn_config("test:pig", arv::world::SpawnCategory::Passive, 20U)});
+  arv::world::WorldRuntime world = make_spawn_world(blocks, dimension);
+  for (const arv::ChunkSectionCoord coord : world.loaded_chunk_coords()) {
+    ASSERT_TRUE(world.set_chunk_lifecycle_state(
+        coord,
+        arv::voxel::ChunkLifecycleState::Loaded));
+  }
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = {0.0F, 64.0F, 0.0F};
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.min_distance_from_player_blocks = 0U;
+  config.max_distance_from_player_blocks = 32U;
+  config.attempts_per_player_per_category = 64U;
+  config.max_successes_per_player_per_tick = 4U;
+  config.max_successes_per_world_per_tick = 4U;
+  config.local_density_radius_blocks = 4U;
+  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)].local_max = 4U;
+  system.configure(config);
+  system.set_rules(
+      arv::world::SpawnRuleRegistry::build_from_dimension(*dimension, entities, blocks));
+
+  system.tick(world, blocks, entities, 1U);
+
+  EXPECT_GT(system.counters().successes_total, 0U);
+  EXPECT_EQ(system.counters().rejected_chunk_not_simulated, 0U);
+}
+
+TEST(NaturalSpawnSystemTests, PigsCanSpawnNearCurrentIntegratedSinglePlayerSeed) {
+  auto packs = arv::asset::PackManager::load_from_packs_root("arvane_home/packs");
+  ASSERT_TRUE(packs) << packs.error().describe();
+  const arv::voxel::BlockRegistry blocks =
+      load_first_party_block_registry(packs.value());
+  const arv::entity::EntityRegistry entities =
+      load_first_party_entity_registry(packs.value());
+  const std::shared_ptr<const arv::world::worldgen::ResolvedDimension> dimension =
+      load_first_party_overworld_dimension(packs.value(), blocks);
+
+  const arv::world::SpawnRuleRegistry rules =
+      arv::world::SpawnRuleRegistry::build_from_dimension(
+          *dimension,
+          entities,
+          blocks);
+  ASSERT_GT(rules.entry_count(), 0U);
+  if (!rules.diagnostics().empty()) {
+    ADD_FAILURE() << rules.diagnostics().front().describe();
+  }
+  ASSERT_TRUE(rules.diagnostics().empty());
+
+  constexpr arv::u64 CurrentSinglePlayerSeed = 32187121430964ULL;
+  const arv::Vec3f saved_player_position{
+      495.6519775390625F,
+      46.74935531616211F,
+      213.01556396484375F};
+  const arv::ChunkCoord center{
+      arv::floor_div(
+          static_cast<arv::i32>(std::floor(saved_player_position.x)),
+          arv::ChunkSize),
+      arv::floor_div(
+          static_cast<arv::i32>(std::floor(saved_player_position.z)),
+          arv::ChunkSize)};
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.set_day_time_tick(33214U);
+  publish_generated_columns(world, dimension, CurrentSinglePlayerSeed, center, 5);
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = saved_player_position;
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.min_distance_from_player_blocks = 24U;
+  config.max_distance_from_player_blocks = 64U;
+  config.attempts_per_player_per_category = 512U;
+  config.max_successes_per_player_per_tick = 8U;
+  config.max_successes_per_world_per_tick = 8U;
+  config.local_density_radius_blocks = 32U;
+  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
+      .per_player = 64U;
+  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
+      .per_world_soft = 256U;
+  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
+      .local_max = 32U;
+  system.configure(config);
+  system.set_rules(rules);
+
+  system.tick(world, blocks, entities, 135940U);
+
+  arv::u32 pig_count = 0U;
+  for (const arv::EntityID id : world.entity_ids()) {
+    const arv::world::NaturalSpawnComponent* natural =
+        world.find_entity_natural_spawn(id);
+    const arv::entity::EntityType* type = world.find_entity_type(id);
+    if (natural != nullptr && type != nullptr && type->type_name == "arvane:pig") {
+      ++pig_count;
+    }
+  }
+  const arv::world::NaturalSpawnCounters& counters = system.counters();
+  EXPECT_GT(pig_count, 0U)
+      << "attempts=" << counters.attempts_total
+      << " intents=" << counters.spawn_intents_generated
+      << " committed=" << counters.spawn_intents_committed
+      << " no_table=" << counters.rejected_no_biome_table
+      << " conditions=" << counters.rejected_conditions
+      << " local_density=" << counters.rejected_local_density
+      << " group_failed=" << counters.rejected_group_failed
+      << " not_loaded=" << counters.rejected_chunk_not_loaded
+      << " not_simulated=" << counters.rejected_chunk_not_simulated;
 }
 
 TEST(NaturalSpawnJobTests, ApplyRevalidatesBeforeCommittingSpawnIntents) {

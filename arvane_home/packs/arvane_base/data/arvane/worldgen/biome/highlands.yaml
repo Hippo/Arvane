@@ -20,6 +20,17 @@ terrain:
 
 surface_rule_set: arvane:worldgen/surface_rule_set/highlands
 
+spawns:
+  passive:
+    - entity: arvane:pig
+      weight: 10
+      min_group: 3
+      max_group: 5
+      conditions:
+        surface: true
+        block_tags_below:
+          - arvane:spawn/grass_like
+
 features:
   stages:
     surface_decoration:
