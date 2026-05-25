@@ -39,14 +39,6 @@ namespace {
   return Expected<BlockRenderTint, BlockRegistryError>::failure({"invalid render_tint: " + value});
 }
 
-[[nodiscard]] bool is_integer(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64;
-}
-
-[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
-  return is_integer(value) || value.kind() == io::DataKind::F64;
-}
-
 void read_bool_property(const io::DataValue& object, const char* key, bool& value) {
   const io::DataValue* found = object.get(key);
   if (found != nullptr && found->kind() == io::DataKind::Bool) {
@@ -56,7 +48,7 @@ void read_bool_property(const io::DataValue& object, const char* key, bool& valu
 
 void read_f32_property(const io::DataValue& object, const char* key, f32& value) {
   const io::DataValue* found = object.get(key);
-  if (found != nullptr && is_number(*found)) {
+  if (found != nullptr && io::is_number_value(*found)) {
     value = static_cast<f32>(found->as_f64_or(value));
   }
 }
@@ -220,7 +212,7 @@ void set_side_textures(
         {std::string{field} + " must be a 3-element array"});
   }
   for (const io::DataValue& value : *array) {
-    if (!is_number(value)) {
+    if (!io::is_number_value(value)) {
       return Expected<Vec3f, BlockRegistryError>::failure(
           {std::string{field} + " entries must be numeric"});
     }
@@ -229,7 +221,7 @@ void set_side_textures(
       static_cast<f32>((*array)[0].as_f64_or(0.0)),
       static_cast<f32>((*array)[1].as_f64_or(0.0)),
       static_cast<f32>((*array)[2].as_f64_or(0.0))};
-  if (!std::isfinite(result.x) || !std::isfinite(result.y) || !std::isfinite(result.z)) {
+  if (!finite(result)) {
     return Expected<Vec3f, BlockRegistryError>::failure(
         {std::string{field} + " entries must be finite"});
   }
@@ -245,7 +237,7 @@ void set_side_textures(
         {std::string{field} + " must be a 2-element array"});
   }
   for (const io::DataValue& value : *array) {
-    if (!is_number(value)) {
+    if (!io::is_number_value(value)) {
       return Expected<Vec2i, BlockRegistryError>::failure(
           {std::string{field} + " entries must be numeric"});
     }
@@ -264,7 +256,7 @@ void set_side_textures(
         {std::string{field} + " must be a 4-element array"});
   }
   for (const io::DataValue& value : *array) {
-    if (!is_number(value)) {
+    if (!io::is_number_value(value)) {
       return Expected<Vec4i, BlockRegistryError>::failure(
           {std::string{field} + " entries must be numeric"});
     }
@@ -344,7 +336,7 @@ void set_side_textures(
     return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
         {"model face entry is missing texture"});
   }
-  if (!is_integer(*texture)) {
+  if (!io::is_integer_value(*texture)) {
     return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
         {"model face texture must be an integer"});
   }
@@ -767,6 +759,41 @@ bool BlockRegistry::has_tag(BlockID id, std::string_view tag) const {
   return std::find(record->tags.begin(), record->tags.end(), tag) != record->tags.end();
 }
 
+bool block_tag_exists(const BlockRegistry& registry, std::string_view tag) {
+  for (u32 raw_id = 0; raw_id < registry.block_count(); ++raw_id) {
+    const BlockID id{raw_id};
+    if (registry.block(id) != nullptr && registry.has_tag(id, tag)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool block_variant_has_any_tag(
+    const BlockRegistry& registry,
+    BlockVariantID variant,
+    std::span<const std::string> tags) {
+  if (tags.empty()) {
+    return true;
+  }
+  const BlockID block_id = registry.block_id(variant);
+  for (const std::string& tag : tags) {
+    if (registry.has_tag(block_id, tag)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool is_standing_surface(
+    const BlockRegistry& registry,
+    BlockVariantID variant) noexcept {
+  const BlockVariantRecord* record = registry.variant(variant);
+  return record != nullptr &&
+         (record->properties.solid || record->properties.collidable) &&
+         !record->properties.fluid;
+}
+
 void BlockRegistry::set_display_name(BlockID id, std::string display_name) {
   if (id.value >= blocks_.size()) {
     return;
@@ -1118,7 +1145,7 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
 
       const io::DataValue* buoyancy_iter = item.get("buoyancy");
       if (buoyancy_iter != nullptr) {
-        if (!is_number(*buoyancy_iter)) {
+        if (!io::is_number_value(*buoyancy_iter)) {
           return BlockDefinitionsResult::failure(
               {"buoyancy must be a number for " + definition.name});
         }
@@ -1317,7 +1344,7 @@ AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text) {
     box.min = min.value();
     box.max = max.value();
     if (const io::DataValue* inflate = box_json.get("inflate"); inflate != nullptr) {
-      if (!is_number(*inflate)) {
+      if (!io::is_number_value(*inflate)) {
         return AuthoredModelDefinitionResult::failure({"model box inflate must be numeric"});
       }
       box.inflate = static_cast<f32>(inflate->as_f64_or(0.0));

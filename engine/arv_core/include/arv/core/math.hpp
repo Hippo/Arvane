@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 namespace arv {
@@ -118,6 +119,43 @@ struct Aabb3f {
   return value.x * value.x + value.z * value.z;
 }
 
+[[nodiscard]] inline f32 horizontal_length(Vec3f value) noexcept {
+  return std::sqrt(horizontal_length_squared(value));
+}
+
+[[nodiscard]] constexpr f32 horizontal_distance_squared(Vec3f from, Vec3f to) noexcept {
+  const f32 dx = from.x - to.x;
+  const f32 dz = from.z - to.z;
+  return dx * dx + dz * dz;
+}
+
+[[nodiscard]] inline f32 horizontal_distance(Vec3f from, Vec3f to) noexcept {
+  return std::sqrt(horizontal_distance_squared(from, to));
+}
+
+[[nodiscard]] constexpr i32 abs_i32(i32 value) noexcept {
+  return value < 0
+             ? (value == std::numeric_limits<i32>::min()
+                    ? std::numeric_limits<i32>::max()
+                    : -value)
+             : value;
+}
+
+[[nodiscard]] constexpr i32 max_abs3(i32 x, i32 y, i32 z) noexcept {
+  const i32 xy = std::max(abs_i32(x), abs_i32(y));
+  return std::max(xy, abs_i32(z));
+}
+
+[[nodiscard]] constexpr int nonzero_axis_count(Vec3i value) noexcept {
+  return static_cast<int>(value.x != 0) +
+         static_cast<int>(value.y != 0) +
+         static_cast<int>(value.z != 0);
+}
+
+[[nodiscard]] inline bool finite(Vec3f value) noexcept {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
 [[nodiscard]] constexpr Aabb3f translated(Aabb3f bounds, Vec3f delta) noexcept {
   return {
       {bounds.min.x + delta.x, bounds.min.y + delta.y, bounds.min.z + delta.z},
@@ -157,6 +195,10 @@ template<typename T>
 [[nodiscard]] constexpr f32 distance_squared(Vec3f from, Vec3f to) noexcept {
   const Vec3f delta = from - to;
   return dot(delta, delta);
+}
+
+[[nodiscard]] inline f32 distance(Vec3f from, Vec3f to) noexcept {
+  return std::sqrt(distance_squared(from, to));
 }
 
 [[nodiscard]] constexpr Vec3f lerp(Vec3f from, Vec3f to, f32 alpha) noexcept {

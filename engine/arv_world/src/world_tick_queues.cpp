@@ -24,7 +24,7 @@ void WorldTickQueues::enqueue_block_update(BlockPos pos, BlockUpdateReason reaso
 
 void WorldTickQueues::enqueue_neighbor_block_updates(BlockPos pos) {
   for (const Vec3i offset : NeighborOffsets) {
-    enqueue_block_update(offset_block(pos, offset), BlockUpdateReason::NeighborChanged);
+    enqueue_block_update(arv::offset_block(pos, offset), BlockUpdateReason::NeighborChanged);
   }
 }
 

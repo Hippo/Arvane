@@ -8,18 +8,6 @@
 namespace arv::server {
 namespace {
 
-[[nodiscard]] i32 abs_i32(i32 value) noexcept {
-  return value < 0 ? -value : value;
-}
-
-[[nodiscard]] i32 horizontal_chunk_distance(ChunkSectionCoord lhs, ChunkSectionCoord rhs) noexcept {
-  return std::max(abs_i32(lhs.value.x - rhs.value.x), abs_i32(lhs.value.z - rhs.value.z));
-}
-
-[[nodiscard]] i32 generation_priority_distance(ChunkSectionCoord coord, ChunkSectionCoord center) noexcept {
-  return horizontal_chunk_distance(coord, center);
-}
-
 template<typename PlayerState>
 [[nodiscard]] bool column_has_requested_section(
     const PlayerState& state,
@@ -50,7 +38,8 @@ void visit_chunk_columns_by_distance(ChunkSectionCoord center, i32 radius, Fn&& 
     const i32 max_x = center.value.x + distance;
     for (i32 z = min_z; z <= max_z; ++z) {
       for (i32 x = min_x; x <= max_x; ++x) {
-        if (std::max(abs_i32(x - center.value.x), abs_i32(z - center.value.z)) != distance) {
+        const ChunkSectionCoord coord{{x, center.value.y, z}};
+        if (chunk_horizontal_chebyshev_distance(coord, center) != distance) {
           continue;
         }
         if (!fn(ChunkCoord{x, z}, distance)) {
@@ -241,7 +230,7 @@ std::vector<ChunkCoord> ServerChunkStreamer::pending_generation_requests(
         continue;
       }
       const ChunkCoord column = chunk_to_column(coord);
-      const i32 priority = generation_priority_distance(coord, state.center_chunk);
+      const i32 priority = chunk_horizontal_chebyshev_distance(coord, state.center_chunk);
       auto [priority_iter, inserted] = request_priorities.try_emplace(column, priority);
       if (inserted) {
         requests.emplace_back(column);

@@ -92,6 +92,7 @@ add_executable(arv_tests
   world/fluid_tests.cpp
   world/entity_tests.cpp
   world/lighting_tests.cpp
+  world/natural_spawning_tests.cpp
   world/region_tests.cpp
   world/world_generation_tests.cpp
   world/world_runtime_tests.cpp

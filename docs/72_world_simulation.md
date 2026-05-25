@@ -1244,6 +1244,72 @@ Entity systems should sample fluid state through world query interfaces.
 
 ---
 
+# Natural Entity Spawning
+
+Natural entity spawning is a server-authoritative world simulation system.
+
+The server runs the natural spawn system after it updates the active simulation
+set for loaded chunks and before ordinary world/entity ticking for the frame.
+The system samples candidate positions around online players, resolves the
+candidate biome from the active dimension terrain profile, and looks up the
+biome's spawn table for the sampled category.
+
+Natural spawning must not create chunk residency pressure. A candidate is valid
+only when its target chunk section is already loaded and active. The system may
+query deterministic terrain profiles to identify the biome and surface height,
+but it does not request generation, load missing chunks, or keep chunks alive.
+
+Work is bounded by:
+
+- `interval_ticks`
+- attempts per player and category
+- per-player and per-world success budgets
+- per-category caps
+- local density caps
+
+Spawned entities are created through the world entity API using the authored
+entity type's components, replication defaults, and persistence defaults. Each
+natural entity also receives a natural-spawn marker containing its spawn
+category, source entity type, spawn tick, and transient flag.
+
+Natural despawning applies only to entities with that natural-spawn marker.
+Player-owned entities are ignored. Persistent natural entities that are not
+marked transient are kept by despawn passes. Transient natural entities are
+omitted from entity persistence even when the underlying entity type would
+normally be persistent.
+
+Example configuration:
+
+```yaml
+natural_spawning:
+  enabled: true
+  interval_ticks: 20
+  min_distance_from_player_blocks: 24
+  max_distance_from_player_blocks: 96
+  attempts_per_player_per_category: 4
+  max_successes_per_player_per_tick: 2
+  max_successes_per_world_per_tick: 32
+  local_density_radius_blocks: 32
+  caps:
+    passive:
+      per_player: 24
+      per_world_soft: 512
+      local_max: 12
+  despawning:
+    passive:
+      natural_despawn: false
+      soft_distance_blocks: 96
+      hard_distance_blocks: 160
+      min_lifetime_ticks: 600
+      save_transient: true
+```
+
+The same category keys used by biome spawn tables are used by `caps` and
+`despawning`: `passive`, `hostile`, `ambient`, `water`, `underground`, and
+`special`.
+
+---
+
 # Fluid and Networking
 
 Fluid changes are replicated as world state changes.

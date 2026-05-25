@@ -23,16 +23,8 @@ using Result = PermissionGroupConfigResult;
   return root.get(key);
 }
 
-[[nodiscard]] bool is_object(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::Object;
-}
-
-[[nodiscard]] bool is_string(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::String;
-}
-
 [[nodiscard]] std::optional<player::TriState> parse_tri_state(const io::DataValue* node) {
-  if (node == nullptr || !is_string(*node)) {
+  if (node == nullptr || !io::is_string_value(*node)) {
     return std::nullopt;
   }
 
@@ -48,7 +40,7 @@ using Result = PermissionGroupConfigResult;
         std::move(inherits));
   }
 
-  if (is_string(*node)) {
+  if (io::is_string_value(*node)) {
     inherits.emplace_back(node->as_string_or({}));
     return Expected<std::vector<std::string>, PermissionConfigError>::success(
         std::move(inherits));
@@ -61,7 +53,7 @@ using Result = PermissionGroupConfigResult;
 
   inherits.reserve(array->size());
   for (const io::DataValue& entry : *array) {
-    if (!is_string(entry)) {
+    if (!io::is_string_value(entry)) {
       return Expected<std::vector<std::string>, PermissionConfigError>::failure(
           error("permission group '" + std::string{group_id} +
                 "' inherits entries must be strings"));
@@ -134,7 +126,7 @@ using Result = PermissionGroupConfigResult;
 [[nodiscard]] Expected<player::PermissionGroup, PermissionConfigError> parse_group(
     std::string id,
     const io::DataValue& node) {
-  if (!is_object(node)) {
+  if (!io::is_object_value(node)) {
     return Expected<player::PermissionGroup, PermissionConfigError>::failure(
         error("permission group '" + id + "' must be a map"));
   }

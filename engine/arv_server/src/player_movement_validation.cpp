@@ -6,28 +6,9 @@
 namespace arv::server {
 namespace {
 
-[[nodiscard]] bool finite_vec3(Vec3f value) noexcept {
-  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
-}
-
 [[nodiscard]] bool finite_packet(const protocol::ServerboundPlayerMove& packet) noexcept {
-  return finite_vec3(packet.position) && finite_vec3(packet.velocity) &&
+  return finite(packet.position) && finite(packet.velocity) &&
          std::isfinite(packet.yaw_radians) && std::isfinite(packet.pitch_radians);
-}
-
-[[nodiscard]] f32 horizontal_distance(Vec3f a, Vec3f b) noexcept {
-  const f32 dx = a.x - b.x;
-  const f32 dz = a.z - b.z;
-  return std::sqrt(dx * dx + dz * dz);
-}
-
-[[nodiscard]] f32 horizontal_speed(Vec3f value) noexcept {
-  return std::sqrt(value.x * value.x + value.z * value.z);
-}
-
-[[nodiscard]] f32 distance_3d(Vec3f a, Vec3f b) noexcept {
-  const Vec3f delta = a - b;
-  return length(delta);
 }
 
 [[nodiscard]] bool outside_world_bounds(
@@ -136,7 +117,7 @@ MovementValidationResult validate_serverbound_player_move(
   }
   const bool near_previous_position =
       previous.has_accepted_move &&
-      distance_3d(packet.position, previous.position) <= config.base_position_epsilon_blocks;
+      distance(packet.position, previous.position) <= config.base_position_epsilon_blocks;
   if (config.reject_unloaded_chunk_movement && !context.target_chunk_loaded &&
       !near_previous_position) {
     return reject(previous, protocol::PlayerMoveCorrectionReason::UnloadedChunk);
@@ -147,7 +128,7 @@ MovementValidationResult validate_serverbound_player_move(
 
   const double elapsed = validation_elapsed_seconds(previous, context, config);
   if (previous.has_accepted_move) {
-    const f32 horizontal = horizontal_distance(packet.position, previous.position);
+    const f32 horizontal = arv::horizontal_distance(packet.position, previous.position);
     const f32 vertical = std::abs(packet.position.y - previous.position.y);
     const f32 allowed_horizontal =
         selected_horizontal_speed(packet, context, config) * static_cast<f32>(elapsed) +
@@ -159,7 +140,7 @@ MovementValidationResult validate_serverbound_player_move(
     f32 server_vertical_allowance = 0.0F;
     if (context.knockback_control_suppression_ticks > 0U) {
       server_horizontal_allowance =
-          horizontal_speed(context.server_velocity) * static_cast<f32>(elapsed);
+          horizontal_length(context.server_velocity) * static_cast<f32>(elapsed);
       server_vertical_allowance =
           std::abs(context.server_velocity.y) * static_cast<f32>(elapsed);
     }
@@ -167,7 +148,7 @@ MovementValidationResult validate_serverbound_player_move(
         vertical > allowed_vertical + server_vertical_allowance) {
       return reject(previous, protocol::PlayerMoveCorrectionReason::TooFast);
     }
-    if (distance_3d(packet.position, previous.position) >
+    if (distance(packet.position, previous.position) >
         config.max_single_packet_distance_blocks) {
       return reject(previous, protocol::PlayerMoveCorrectionReason::TooFar);
     }

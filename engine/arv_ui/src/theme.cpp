@@ -34,14 +34,6 @@ struct ThemeDocument {
   return parent.get(key);
 }
 
-[[nodiscard]] bool is_object(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::Object;
-}
-
-[[nodiscard]] bool is_string(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::String;
-}
-
 [[nodiscard]] f32 clamp_scale(f32 value, f32 fallback) noexcept {
   if (!std::isfinite(value)) {
     return fallback;
@@ -100,7 +92,7 @@ void read_color_token(
   if (value == nullptr) {
     return;
   }
-  if (!is_string(*value)) {
+  if (!io::is_string_value(*value)) {
     add_warning(result, std::string{"theme color is not a scalar: "} + key);
     return;
   }
@@ -114,7 +106,7 @@ void read_color_token(
 
 void read_text_token(const io::DataValue& parent, const char* key, std::string& target) {
   const io::DataValue* value = member(parent, key);
-  if (value != nullptr && is_string(*value)) {
+  if (value != nullptr && io::is_string_value(*value)) {
     target = std::string{value->as_string_or({})};
   }
 }
@@ -270,7 +262,7 @@ void read_u32_token(
   document.root = std::move(decoded.value());
   const io::DataValue* inherits = member(document.root.root, "inherits");
   if (inherits != nullptr) {
-    if (!is_string(*inherits)) {
+    if (!io::is_string_value(*inherits)) {
       add_warning(result, "theme inherits is not a scalar: " + path.string());
       return std::nullopt;
     }
@@ -284,16 +276,17 @@ void read_u32_token(
 }
 
 void parse_theme_node(const io::DataValue& root, UiTheme& theme, UiThemeLoadResult& result) {
-  if (const io::DataValue* name = member(root, "name"); name != nullptr && is_string(*name)) {
+  if (const io::DataValue* name = member(root, "name");
+      name != nullptr && io::is_string_value(*name)) {
     theme.name = std::string{name->as_string_or({})};
   }
   if (const io::DataValue* description = member(root, "description");
-      description != nullptr && is_string(*description)) {
+      description != nullptr && io::is_string_value(*description)) {
     theme.description = std::string{description->as_string_or({})};
   }
 
   const io::DataValue* colors = member(root, "colors");
-  if (colors != nullptr && is_object(*colors)) {
+  if (colors != nullptr && io::is_object_value(*colors)) {
     read_color_token(*colors, "background", theme.colors.background, result);
     read_color_token(*colors, "backdrop", theme.colors.backdrop, result);
     read_color_token(*colors, "pause_backdrop", theme.colors.pause_backdrop, result);
@@ -319,7 +312,7 @@ void parse_theme_node(const io::DataValue& root, UiTheme& theme, UiThemeLoadResu
   }
 
   const io::DataValue* layout = member(root, "layout");
-  if (layout != nullptr && is_object(*layout)) {
+  if (layout != nullptr && io::is_object_value(*layout)) {
     read_number_token(*layout, "spacing_xs", theme.layout.spacing_xs, result, 0.0F, 96.0F);
     read_number_token(*layout, "spacing_sm", theme.layout.spacing_sm, result, 0.0F, 128.0F);
     read_number_token(*layout, "spacing_md", theme.layout.spacing_md, result, 0.0F, 160.0F);
@@ -332,7 +325,7 @@ void parse_theme_node(const io::DataValue& root, UiTheme& theme, UiThemeLoadResu
   }
 
   const io::DataValue* typography = member(root, "typography");
-  if (typography != nullptr && is_object(*typography)) {
+  if (typography != nullptr && io::is_object_value(*typography)) {
     read_text_token(*typography, "default_font", theme.typography.default_font);
     read_text_token(*typography, "heading_font", theme.typography.heading_font);
     read_text_token(*typography, "monospace_font", theme.typography.monospace_font);
@@ -343,9 +336,9 @@ void parse_theme_node(const io::DataValue& root, UiTheme& theme, UiThemeLoadResu
   }
 
   const io::DataValue* widgets = member(root, "widgets");
-  if (widgets != nullptr && is_object(*widgets)) {
+  if (widgets != nullptr && io::is_object_value(*widgets)) {
     const io::DataValue* button = member(*widgets, "button");
-    if (button != nullptr && is_object(*button)) {
+    if (button != nullptr && io::is_object_value(*button)) {
       read_number_token(*button, "height", theme.widgets.button.height, result, 24.0F, 120.0F);
       read_number_token(*button, "min_width", theme.widgets.button.min_width, result, 40.0F, 640.0F);
       read_number_token(*button, "padding_x", theme.widgets.button.padding_x, result, 0.0F, 96.0F);
@@ -353,7 +346,7 @@ void parse_theme_node(const io::DataValue& root, UiTheme& theme, UiThemeLoadResu
       read_number_token(*button, "radius", theme.widgets.button.radius, result, 0.0F, 64.0F);
     }
     const io::DataValue* input = member(*widgets, "input");
-    if (input != nullptr && is_object(*input)) {
+    if (input != nullptr && io::is_object_value(*input)) {
       read_number_token(*input, "height", theme.widgets.input.height, result, 24.0F, 120.0F);
       read_number_token(*input, "min_width", theme.widgets.input.min_width, result, 60.0F, 720.0F);
       read_number_token(*input, "padding_x", theme.widgets.input.padding_x, result, 0.0F, 96.0F);
@@ -361,7 +354,7 @@ void parse_theme_node(const io::DataValue& root, UiTheme& theme, UiThemeLoadResu
       read_number_token(*input, "radius", theme.widgets.input.radius, result, 0.0F, 64.0F);
     }
     const io::DataValue* panel = member(*widgets, "panel");
-    if (panel != nullptr && is_object(*panel)) {
+    if (panel != nullptr && io::is_object_value(*panel)) {
       read_number_token(*panel, "padding", theme.widgets.panel.padding, result, 0.0F, 128.0F);
       read_number_token(*panel, "radius", theme.widgets.panel.radius, result, 0.0F, 96.0F);
     }
@@ -526,11 +519,12 @@ void parse_style_file(const std::filesystem::path& path, UiThemeLoadResult& resu
     return;
   }
   const io::DataValue& root = decoded.value().root;
-  if (const io::DataValue* theme = member(root, "theme"); theme != nullptr && is_string(*theme)) {
+  if (const io::DataValue* theme = member(root, "theme");
+      theme != nullptr && io::is_string_value(*theme)) {
     result.config.theme = std::string{theme->as_string_or({})};
   }
   const io::DataValue* ui = member(root, "ui");
-  if (ui != nullptr && is_object(*ui)) {
+  if (ui != nullptr && io::is_object_value(*ui)) {
     result.config.ui.scale = read_scale_preference(
         *ui,
         "scale",

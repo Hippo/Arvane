@@ -2,6 +2,8 @@ set(ARV_WORLD_HEADERS
   include/arv/world/fluid_solver.hpp
   include/arv/world/entity_goal_utils.hpp
   include/arv/world/entity_goal_registry.hpp
+  include/arv/world/natural_spawn_types.hpp
+  include/arv/world/natural_spawning.hpp
   include/arv/world/regions.hpp
   include/arv/world/world_lighting.hpp
   include/arv/world/world_generation.hpp
@@ -35,6 +37,7 @@ add_library(arv_world STATIC
   src/entity_goal_utils.cpp
   src/entity_goal_registry.cpp
   src/fluid_solver.cpp
+  src/natural_spawning.cpp
   src/regions.cpp
   src/world_lighting.cpp
   src/world_generation.cpp

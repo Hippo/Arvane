@@ -2,11 +2,11 @@
 
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
+#include "arv/core/string.hpp"
 #include "arv/world/worldgen/chunk_generator.hpp"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -213,24 +213,6 @@ namespace {
   return cache_label(out.str());
 }
 
-[[nodiscard]] bool contains_case_insensitive(std::string_view haystack, std::string_view needle) {
-  if (needle.empty()) {
-    return true;
-  }
-  auto lower = [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  };
-  return std::search(
-             haystack.begin(),
-             haystack.end(),
-             needle.begin(),
-             needle.end(),
-             [&](char lhs, char rhs) {
-               return lower(static_cast<unsigned char>(lhs)) ==
-                      lower(static_cast<unsigned char>(rhs));
-             }) != haystack.end();
-}
-
 [[nodiscard]] std::vector<const player::ItemRecord*> filtered_items(
     const player::ItemRegistry& registry,
     std::string_view filter) {
@@ -241,8 +223,8 @@ namespace {
     if (item == nullptr || item->id == player::AirItemID) {
       continue;
     }
-    if (contains_case_insensitive(item->name, filter) ||
-        contains_case_insensitive(item->display_name, filter)) {
+    if (contains_ignore_ascii_case(item->name, filter) ||
+        contains_ignore_ascii_case(item->display_name, filter)) {
       items.emplace_back(item);
     }
   }
@@ -265,10 +247,10 @@ namespace {
     if (!type.spawnable) {
       continue;
     }
-    if (contains_case_insensitive(type.name, filter) ||
-        contains_case_insensitive(type.display_name, filter) ||
-        contains_case_insensitive(type.category, filter) ||
-        contains_case_insensitive(type.model_asset, filter)) {
+    if (contains_ignore_ascii_case(type.name, filter) ||
+        contains_ignore_ascii_case(type.display_name, filter) ||
+        contains_ignore_ascii_case(type.category, filter) ||
+        contains_ignore_ascii_case(type.model_asset, filter)) {
       types.emplace_back(&type);
     }
   }

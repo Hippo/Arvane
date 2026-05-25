@@ -981,7 +981,7 @@ Climate values are normalized by the biome source. The standard range is `-1.0` 
 
 # Biome Files
 
-Biome files define biome-specific terrain modifiers, surface rules, placed features, tags, and colors.
+Biome files define biome-specific terrain modifiers, surface rules, placed features, spawn tables, tags, and colors.
 
 Path:
 
@@ -1013,6 +1013,18 @@ features:
     surface_decoration:
       - arvane:worldgen/placed_feature/grass_patch
       - arvane:worldgen/placed_feature/oak_tree_sparse
+
+spawns:
+  passive:
+    - entity: arvane:pig
+      weight: 12
+      min_group: 2
+      max_group: 4
+      conditions:
+        surface: true
+        min_light: 8
+        block_tags_below:
+          - arvane:spawn/grass_like
 
 colors:
   grass: "#6BAA45"
@@ -1130,6 +1142,71 @@ features:
 ```
 
 Biome features are only considered when the generated position belongs to the biome or matches the biome selection rules of the active generator.
+
+### `spawns`
+
+Optional natural entity spawn tables for the biome.
+
+```yaml
+spawns:
+  passive:
+    - entity: arvane:pig
+      weight: 12
+      min_group: 2
+      max_group: 4
+      conditions:
+        surface: true
+        min_light: 8
+        block_tags_below:
+          - arvane:spawn/grass_like
+```
+
+Spawn categories are:
+
+- `passive`
+- `hostile`
+- `ambient`
+- `water`
+- `underground`
+- `special`
+
+Each entry uses a stable entity type ID. The referenced entity type must exist
+in the active entity registry and must be marked `spawnable: true`. Invalid
+entity references, non-spawnable entity types, and unknown block tags are
+reported as spawn diagnostics and skipped when the runtime spawn registry is
+built. Malformed spawn YAML, unknown fields, invalid categories, invalid group
+sizes, and invalid condition values fail worldgen data loading.
+
+Entry fields:
+
+| Field | Purpose |
+|---|---|
+| `entity` | Stable entity type ID to create. |
+| `weight` | Positive relative weight within the category table. |
+| `min_group` | Minimum number of entities required for a group spawn. |
+| `max_group` | Maximum group size. Must be greater than or equal to `min_group`. |
+| `conditions` | Optional placement predicates. |
+
+Supported condition fields:
+
+| Field | Purpose |
+|---|---|
+| `min_y`, `max_y` | Inclusive world Y range. |
+| `min_light`, `max_light` | Inclusive visible light range, including sky light. |
+| `surface` / `requires_surface` | Require a solid, non-fluid block below. |
+| `requires_sky_access` | Require full sky light at the body position. |
+| `requires_water` | Require a fluid or water block at the body position. |
+| `requires_air_body` | Require air at the body position. Defaults to `true`. |
+| `requires_air_head` | Require air at the head position. Defaults to `true`. |
+| `block_tags_below` | Require the block below to match at least one listed tag. |
+| `block_tags_inside` | Require the body block to match at least one listed tag. |
+| `block_tags_head` | Require the head block to match at least one listed tag. |
+| `min_distance_from_player_blocks` | Minimum horizontal distance from every player. |
+| `max_distance_from_player_blocks` | Maximum horizontal distance from at least one player. |
+| `time` | `day` or `night`. |
+
+All configured conditions are ANDed together. Weather predicates are not part of
+the v1 schema.
 
 ### `colors`
 

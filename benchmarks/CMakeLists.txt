@@ -3,6 +3,7 @@ add_executable(arv_benchmarks
   io_benchmarks.cpp
   lighting_benchmarks.cpp
   meshing_benchmarks.cpp
+  natural_spawning_benchmarks.cpp
   protocol_benchmarks.cpp
   simulation_benchmarks.cpp
   world_benchmarks.cpp

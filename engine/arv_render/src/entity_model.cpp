@@ -15,18 +15,6 @@ namespace {
   return static_cast<usize>(face);
 }
 
-[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64 ||
-         value.kind() == io::DataKind::F64;
-}
-
-[[nodiscard]] std::optional<std::string_view> string_value(
-    const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::String
-             ? std::optional<std::string_view>{value.as_string_or({})}
-             : std::nullopt;
-}
-
 [[nodiscard]] const io::DataValue* member(
     const io::DataValue& object,
     std::string_view key) noexcept {
@@ -42,7 +30,7 @@ namespace {
         {field + " must be a 3-element numeric array"});
   }
   for (const io::DataValue& value : *array) {
-    if (!is_number(value)) {
+    if (!io::is_number_value(value)) {
       return Expected<Vec3f, EntityModelError>::failure(
           {field + " entries must be numeric"});
     }
@@ -51,8 +39,7 @@ namespace {
       static_cast<f32>((*array)[0].as_f64_or(0.0)),
       static_cast<f32>((*array)[1].as_f64_or(0.0)),
       static_cast<f32>((*array)[2].as_f64_or(0.0))};
-  if (!std::isfinite(result.x) || !std::isfinite(result.y) ||
-      !std::isfinite(result.z)) {
+  if (!finite(result)) {
     return Expected<Vec3f, EntityModelError>::failure(
         {field + " entries must be finite"});
   }
@@ -343,7 +330,7 @@ void append_face(
 [[nodiscard]] Expected<EntityAnimationChannel, EntityModelError> parse_animation_channel(
     const io::DataValue& node,
     const std::string& path) {
-  auto channel_text = string_value(node);
+  auto channel_text = io::string_value_if(node);
   if (!channel_text.has_value()) {
     return Expected<EntityAnimationChannel, EntityModelError>::failure(
         {path + ".channel must be a string"});
@@ -367,7 +354,7 @@ void append_face(
 
 [[nodiscard]] Expected<EntityAnimationInterpolation, EntityModelError>
 parse_animation_interpolation(const io::DataValue& node, const std::string& path) {
-  auto interpolation_text = string_value(node);
+  auto interpolation_text = io::string_value_if(node);
   if (!interpolation_text.has_value()) {
     return Expected<EntityAnimationInterpolation, EntityModelError>::failure(
         {path + ".interpolation must be a string"});
@@ -387,7 +374,7 @@ parse_animation_interpolation(const io::DataValue& node, const std::string& path
   if (node.kind() == io::DataKind::Bool) {
     return Expected<bool, EntityModelError>::success(node.as_bool_or(false));
   }
-  auto loop_text = string_value(node);
+  auto loop_text = io::string_value_if(node);
   if (loop_text.has_value()) {
     const std::string_view loop = loop_text.value();
     if (loop.empty() || loop == "none" || loop == "false" || loop == "once" ||
@@ -494,13 +481,14 @@ EntityAnimationDefinitionResult parse_entity_animation_json(
     }
 
     const io::DataValue* name = member(animation_json, "name");
-    auto name_text = name == nullptr ? std::optional<std::string_view>{} : string_value(*name);
+    auto name_text =
+        name == nullptr ? std::optional<std::string_view>{} : io::string_value_if(*name);
     if (!name_text.has_value()) {
       return EntityAnimationDefinitionResult::failure(
           {animation_path + ".name must be a string"});
     }
     const io::DataValue* length = member(animation_json, "length");
-    if (length == nullptr || !is_number(*length)) {
+    if (length == nullptr || !io::is_number_value(*length)) {
       return EntityAnimationDefinitionResult::failure(
           {animation_path + ".length must be numeric"});
     }
@@ -540,12 +528,13 @@ EntityAnimationDefinitionResult parse_entity_animation_json(
       }
 
       const io::DataValue* time = member(keyframe_json, "time");
-      if (time == nullptr || !is_number(*time)) {
+      if (time == nullptr || !io::is_number_value(*time)) {
         return EntityAnimationDefinitionResult::failure(
             {keyframe_path + ".time must be numeric"});
       }
       const io::DataValue* bone = member(keyframe_json, "bone");
-      auto bone_text = bone == nullptr ? std::optional<std::string_view>{} : string_value(*bone);
+      auto bone_text =
+          bone == nullptr ? std::optional<std::string_view>{} : io::string_value_if(*bone);
       if (!bone_text.has_value()) {
         return EntityAnimationDefinitionResult::failure(
             {keyframe_path + ".bone must be a string"});

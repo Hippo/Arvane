@@ -102,6 +102,29 @@ private:
   Storage storage_{std::monostate{}};
 };
 
+[[nodiscard]] inline bool is_integer_value(const DataValue& value) noexcept {
+  return value.kind() == DataKind::I64 || value.kind() == DataKind::U64;
+}
+
+[[nodiscard]] inline bool is_number_value(const DataValue& value) noexcept {
+  return is_integer_value(value) || value.kind() == DataKind::F64;
+}
+
+[[nodiscard]] inline bool is_string_value(const DataValue& value) noexcept {
+  return value.kind() == DataKind::String;
+}
+
+[[nodiscard]] inline bool is_object_value(const DataValue& value) noexcept {
+  return value.kind() == DataKind::Object;
+}
+
+[[nodiscard]] inline std::optional<std::string_view> string_value_if(
+    const DataValue& value) noexcept {
+  return is_string_value(value)
+             ? std::optional<std::string_view>{value.as_string_or({})}
+             : std::nullopt;
+}
+
 struct DataDocument {
   struct ValueProxy {
     const DataDocument* document{};

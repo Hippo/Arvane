@@ -22,14 +22,6 @@ struct MeshJobInput {
 
 constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
 
-[[nodiscard]] bool is_inside_horizontal_distance(
-    ChunkSectionCoord coord,
-    ChunkSectionCoord center,
-    i32 radius) noexcept {
-  return std::abs(coord.value.x - center.value.x) <= radius &&
-         std::abs(coord.value.z - center.value.z) <= radius;
-}
-
 [[nodiscard]] bool target_matches(
     const ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
@@ -51,16 +43,12 @@ constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
 [[nodiscard]] bool is_inside_render_view(const ChunkViewState& view, ChunkSectionCoord coord) noexcept {
   return view.target_center.has_value() &&
          is_inside_target_y(view, coord) &&
-         is_inside_horizontal_distance(
-             coord,
-             view.target_center.value(),
-             view.target_render_distance);
+         chunk_horizontal_chebyshev_distance(coord, view.target_center.value()) <=
+             view.target_render_distance;
 }
 
 [[nodiscard]] i32 chunk_priority_distance(ChunkSectionCoord coord, ChunkSectionCoord center) noexcept {
-  const i32 horizontal = std::max(
-      std::abs(coord.value.x - center.value.x),
-      std::abs(coord.value.z - center.value.z));
+  const i32 horizontal = chunk_horizontal_chebyshev_distance(coord, center);
   const i32 vertical = std::abs(coord.value.y - center.value.y);
   return horizontal * 4 + vertical;
 }
@@ -237,10 +225,8 @@ void enqueue_entered_mesh_candidates(
   for (i32 z = center.value.z - render_distance; z <= center.value.z + render_distance; ++z) {
     for (i32 x = center.value.x - render_distance; x <= center.value.x + render_distance; ++x) {
       const ChunkSectionCoord horizontal_coord{{x, center.value.y, z}};
-      if (is_inside_horizontal_distance(
-              horizontal_coord,
-              previous_center,
-              render_distance)) {
+      if (chunk_horizontal_chebyshev_distance(horizontal_coord, previous_center) <=
+          render_distance) {
         continue;
       }
       for (i32 y = view.target_min_chunk_y; y <= view.target_max_chunk_y; ++y) {

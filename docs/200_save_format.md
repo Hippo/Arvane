@@ -170,6 +170,7 @@ Each world stores:
 
 * persistent entities
 * entity data and components
+* non-transient natural entities only
 
 ### Inventory Level
 
@@ -485,6 +486,7 @@ Rules:
 * ECS IDs are never saved
 * UUID is the persistent identity
 * component payloads use stable registry names, not runtime item/entity IDs
+* transient natural-spawned entities are skipped even if their entity type is persistent by default
 
 ---
 

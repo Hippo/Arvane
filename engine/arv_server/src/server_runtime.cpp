@@ -257,6 +257,58 @@ namespace {
 ServerRuntime::ServerRuntime(std::unique_ptr<net::ITransport> transport) : impl_(std::make_unique<detail::ServerRuntimeImpl>(std::move(transport))) {
 }
 
+world::NaturalSpawningConfig make_natural_spawning_config(
+    const io::NaturalSpawningConfig& config) noexcept {
+  world::NaturalSpawningConfig out;
+  out.enabled = config.enabled;
+  out.interval_ticks = config.interval_ticks;
+  out.min_distance_from_player_blocks = config.min_distance_from_player_blocks;
+  out.max_distance_from_player_blocks = config.max_distance_from_player_blocks;
+  out.attempts_per_player_per_category = config.attempts_per_player_per_category;
+  out.max_successes_per_player_per_tick = config.max_successes_per_player_per_tick;
+  out.max_successes_per_world_per_tick = config.max_successes_per_world_per_tick;
+  out.local_density_radius_blocks = config.local_density_radius_blocks;
+  auto copy_cap = [](const io::NaturalSpawningCategoryCapConfig& from) {
+    return world::SpawnCategoryCapConfig{
+        from.per_player,
+        from.per_world_soft,
+        from.local_max};
+  };
+  out.caps[world::spawn_category_index(world::SpawnCategory::Passive)] =
+      copy_cap(config.caps.passive);
+  out.caps[world::spawn_category_index(world::SpawnCategory::Hostile)] =
+      copy_cap(config.caps.hostile);
+  out.caps[world::spawn_category_index(world::SpawnCategory::Ambient)] =
+      copy_cap(config.caps.ambient);
+  out.caps[world::spawn_category_index(world::SpawnCategory::Water)] =
+      copy_cap(config.caps.water);
+  out.caps[world::spawn_category_index(world::SpawnCategory::Underground)] =
+      copy_cap(config.caps.underground);
+  out.caps[world::spawn_category_index(world::SpawnCategory::Special)] =
+      copy_cap(config.caps.special);
+  auto copy_despawn = [](const io::NaturalSpawningDespawnCategoryConfig& from) {
+    return world::NaturalDespawnCategoryConfig{
+        from.natural_despawn,
+        from.soft_distance_blocks,
+        from.hard_distance_blocks,
+        from.min_lifetime_ticks,
+        from.save_transient};
+  };
+  out.despawning[world::spawn_category_index(world::SpawnCategory::Passive)] =
+      copy_despawn(config.despawning.passive);
+  out.despawning[world::spawn_category_index(world::SpawnCategory::Hostile)] =
+      copy_despawn(config.despawning.hostile);
+  out.despawning[world::spawn_category_index(world::SpawnCategory::Ambient)] =
+      copy_despawn(config.despawning.ambient);
+  out.despawning[world::spawn_category_index(world::SpawnCategory::Water)] =
+      copy_despawn(config.despawning.water);
+  out.despawning[world::spawn_category_index(world::SpawnCategory::Underground)] =
+      copy_despawn(config.despawning.underground);
+  out.despawning[world::spawn_category_index(world::SpawnCategory::Special)] =
+      copy_despawn(config.despawning.special);
+  return out;
+}
+
 ServerRuntime::~ServerRuntime() = default;
 
 ServerRuntime::ServerRuntime(ServerRuntime&&) noexcept = default;
@@ -361,6 +413,10 @@ usize ServerRuntime::pending_lighting_job_count() const noexcept {
 
 usize ServerRuntime::pending_fluid_job_count() const noexcept {
   return impl_->pending_fluid_job_count();
+}
+
+const world::NaturalSpawnCounters& ServerRuntime::natural_spawn_counters() const noexcept {
+  return impl_->natural_spawn_counters();
 }
 
 bool ServerRuntime::set_player_game_mode(PlayerID player_id, std::string_view mode_id) {
@@ -514,6 +570,35 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   if (block_registry_ == nullptr || item_registry_ == nullptr) {
     return net::NetworkResult::failure(net::NetworkError{"server start requires block and item registries"});
   }
+  natural_spawns_.configure(start_info.natural_spawning);
+  if (start_info.natural_spawning.enabled) {
+    if (entity_registry_ == nullptr) {
+      core::warn("natural_spawning", "disabled: server start has no entity registry");
+      world::NaturalSpawningConfig disabled = start_info.natural_spawning;
+      disabled.enabled = false;
+      natural_spawns_.configure(disabled);
+    } else if (!chunk_generation_.has_value() ||
+               !chunk_generation_->config.resolved_dimension) {
+      core::warn("natural_spawning", "disabled: world generation has no resolved dimension");
+      world::NaturalSpawningConfig disabled = start_info.natural_spawning;
+      disabled.enabled = false;
+      natural_spawns_.configure(disabled);
+    } else {
+      world::SpawnRuleRegistry rules = world::SpawnRuleRegistry::build_from_dimension(
+          *chunk_generation_->config.resolved_dimension,
+          *entity_registry_,
+          *block_registry_);
+      for (const world::SpawnDiagnostic& diagnostic : rules.diagnostics()) {
+        core::warn("natural_spawning", diagnostic.describe());
+      }
+      core::info(
+          "natural_spawning",
+          "loaded {} natural spawn entries (diagnostics={})",
+          rules.entry_count(),
+          rules.diagnostics().size());
+      natural_spawns_.set_rules(std::move(rules));
+    }
+  }
   if (!block_breaking_.behavior_id.empty() &&
       (block_break_behaviors_ == nullptr ||
        !block_break_behaviors_->contains(block_breaking_.behavior_id))) {
@@ -624,6 +709,19 @@ void ServerRuntimeImpl::tick() {
   default_world_.tick_dropped_items(tick_seconds, block_registry_, item_registry_);
   tick_dropped_item_pickups(tick_seconds);
   update_world_simulation_activity();
+  if (entity_registry_ != nullptr) {
+    world_jobs_.drain_natural_spawn_jobs(
+        default_world_,
+        natural_spawns_,
+        block_registry_,
+        entity_registry_,
+        tick_index_,
+        false);
+    world_jobs_.schedule_natural_spawn_jobs(
+        default_world_,
+        natural_spawns_,
+        tick_index_);
+  }
   (void)default_world_.tick(*block_registry_, fluid_definition_, entity_goals_);
   process_pending_entity_attacks();
   world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
@@ -819,6 +917,10 @@ usize ServerRuntimeImpl::pending_lighting_job_count() const noexcept {
 
 usize ServerRuntimeImpl::pending_fluid_job_count() const noexcept {
   return world_jobs_.pending_fluid_job_count();
+}
+
+const world::NaturalSpawnCounters& ServerRuntimeImpl::natural_spawn_counters() const noexcept {
+  return natural_spawns_.counters();
 }
 
 command::CommandResult ServerRuntimeImpl::execute_command(

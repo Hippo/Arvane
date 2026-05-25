@@ -397,6 +397,19 @@ private:
   std::vector<BlockVariantRenderData> variants_{};
 };
 
+[[nodiscard]] bool block_tag_exists(
+    const BlockRegistry& registry,
+    std::string_view tag);
+
+[[nodiscard]] bool block_variant_has_any_tag(
+    const BlockRegistry& registry,
+    BlockVariantID variant,
+    std::span<const std::string> tags);
+
+[[nodiscard]] bool is_standing_surface(
+    const BlockRegistry& registry,
+    BlockVariantID variant) noexcept;
+
 [[nodiscard]] BlockDefinition make_air_definition();
 
 [[nodiscard]] std::string normalize_block_model_asset(std::string_view model);

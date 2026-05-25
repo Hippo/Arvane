@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <utility>
 
 namespace arv::player {
@@ -13,12 +12,6 @@ namespace arv::player {
 namespace {
 
 constexpr std::string_view MissingTextureAsset = "arvane:texture/missing";
-
-[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::I64 ||
-         value.kind() == io::DataKind::U64 ||
-         value.kind() == io::DataKind::F64;
-}
 
 bool item_name_less(const ItemDefinition& lhs, const ItemDefinition& rhs) {
   if (lhs.name == AirItemName) {
@@ -69,17 +62,6 @@ Expected<ItemRenderType, ItemRegistryError> resolve_render_type(const ItemDefini
   }
 
   return Expected<ItemRenderType, ItemRegistryError>::failure({"invalid item render type for " + definition.name});
-}
-
-[[nodiscard]] u32 cooldown_ticks_from_seconds(f32 seconds) noexcept {
-  if (!std::isfinite(seconds) || seconds <= 0.0F) {
-    return 0U;
-  }
-  const f32 ticks = std::ceil(seconds * static_cast<f32>(DefaultBaseTps));
-  if (ticks >= static_cast<f32>(std::numeric_limits<u32>::max())) {
-    return std::numeric_limits<u32>::max();
-  }
-  return static_cast<u32>(ticks);
 }
 
 std::optional<ItemRegistryError> resolve_places_block(
@@ -615,7 +597,7 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
       }
       const io::DataValue* buoyancy_iter = item.get("buoyancy");
       if (buoyancy_iter != nullptr) {
-        if (!is_number(*buoyancy_iter)) {
+        if (!io::is_number_value(*buoyancy_iter)) {
           return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
               {"buoyancy must be a number for " + definition.name});
         }
@@ -656,11 +638,11 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
           }
           const io::DataValue* amount_iter = damage_iter->get("amount");
           const io::DataValue* range_iter = damage_iter->get("range");
-          if (amount_iter == nullptr || !is_number(*amount_iter)) {
+          if (amount_iter == nullptr || !io::is_number_value(*amount_iter)) {
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 {"components.damage.amount must be a number for " + definition.name});
           }
-          if (range_iter == nullptr || !is_number(*range_iter)) {
+          if (range_iter == nullptr || !io::is_number_value(*range_iter)) {
             return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
                 {"components.damage.range must be a number for " + definition.name});
           }
@@ -675,7 +657,7 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
             if (iter == nullptr) {
               return std::nullopt;
             }
-            if (!is_number(*iter)) {
+            if (!io::is_number_value(*iter)) {
               return ItemRegistryError{
                   "components.damage." + std::string{field} +
                   " must be a number for " + definition.name};
@@ -723,7 +705,7 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
               if (iter == nullptr) {
                 return std::nullopt;
               }
-              if (!is_number(*iter)) {
+              if (!io::is_number_value(*iter)) {
                 return ItemRegistryError{
                     "components.knockback." + std::string{field} +
                     " must be a number for " + definition.name};
@@ -763,7 +745,7 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
           definition.attack_data = ItemAttackData{
               static_cast<f32>(amount_iter->as_f64_or(0.0)),
               static_cast<f32>(range_iter->as_f64_or(0.0)),
-              cooldown_ticks_from_seconds(cooldown_seconds),
+              seconds_to_ticks_ceil(cooldown_seconds),
               horizontal_knockback,
               vertical_knockback,
               sprint_knockback_bonus};

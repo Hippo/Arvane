@@ -342,9 +342,10 @@ does not change authoritative entity state.
 
 ### `spawnable`
 
-Whether debug tools or commands may spawn this entity type.
+Whether debug tools, commands, and natural spawn tables may spawn this entity
+type.
 
-Does not affect gameplay spawning systems.
+Natural spawning skips entity definitions that are not marked spawnable.
 
 ---
 
@@ -681,6 +682,31 @@ Temporary entities may skip persistence.
 Client-only entities must never affect authoritative gameplay simulation.
 
 Server-authoritative temporary entities must still follow normal ECS ownership and networking rules.
+
+---
+
+## Natural Spawned Entities
+
+Natural entity spawning is driven by biome spawn tables and server/world
+configuration. It is not an entity-type-specific logic class.
+
+When a natural spawn succeeds, the world creates the entity through the normal
+authoritative entity creation path and applies the authored component set from
+the entity registry. The runtime entity receives an additional natural-spawn
+marker with:
+
+- spawn category
+- source entity type
+- spawn tick
+- whether the entity is transient for persistence
+
+Natural despawn logic only considers entities with this marker. Ordinary
+entities, player entities, dropped items, and debug-spawned entities are not
+natural despawn candidates unless explicitly marked as natural by the server.
+
+Passive natural entities may be configured to persist by default. Hostile,
+ambient, water, underground, and special categories may be configured as
+transient so they naturally despawn at distance and are omitted from save data.
 
 ---
 

@@ -62,6 +62,103 @@ void read_fluid_speed_config(
   read_scalar(*fluid, "flow_interval_ticks", config.flow_interval_ticks);
 }
 
+void read_natural_spawning_cap_config(
+    const DataValue& caps,
+    const char* key,
+    NaturalSpawningCategoryCapConfig& config) {
+  const DataValue* category = caps.get(key);
+  if (category == nullptr) {
+    return;
+  }
+  read_scalar(*category, "per_player", config.per_player);
+  read_scalar(*category, "per_world_soft", config.per_world_soft);
+  read_scalar(*category, "local_max", config.local_max);
+}
+
+void read_natural_spawning_despawn_config(
+    const DataValue& despawning,
+    const char* key,
+    NaturalSpawningDespawnCategoryConfig& config) {
+  const DataValue* category = despawning.get(key);
+  if (category == nullptr) {
+    return;
+  }
+  read_scalar(*category, "natural_despawn", config.natural_despawn);
+  read_scalar(*category, "soft_distance_blocks", config.soft_distance_blocks);
+  read_scalar(*category, "hard_distance_blocks", config.hard_distance_blocks);
+  read_scalar(*category, "min_lifetime_ticks", config.min_lifetime_ticks);
+  read_scalar(*category, "save_transient", config.save_transient);
+}
+
+void read_natural_spawning_config(
+    const DataValue& root,
+    NaturalSpawningConfig& config) {
+  const DataValue* natural = root.get("natural_spawning");
+  if (natural == nullptr) {
+    return;
+  }
+  read_scalar(*natural, "enabled", config.enabled);
+  read_scalar(*natural, "interval_ticks", config.interval_ticks);
+  read_scalar(
+      *natural,
+      "min_distance_from_player_blocks",
+      config.min_distance_from_player_blocks);
+  read_scalar(
+      *natural,
+      "max_distance_from_player_blocks",
+      config.max_distance_from_player_blocks);
+  read_scalar(
+      *natural,
+      "attempts_per_player_per_category",
+      config.attempts_per_player_per_category);
+  read_scalar(
+      *natural,
+      "max_successes_per_player_per_tick",
+      config.max_successes_per_player_per_tick);
+  read_scalar(
+      *natural,
+      "max_successes_per_world_per_tick",
+      config.max_successes_per_world_per_tick);
+  read_scalar(
+      *natural,
+      "local_density_radius_blocks",
+      config.local_density_radius_blocks);
+  if (const DataValue* caps = natural->get("caps"); caps != nullptr) {
+    read_natural_spawning_cap_config(*caps, "passive", config.caps.passive);
+    read_natural_spawning_cap_config(*caps, "hostile", config.caps.hostile);
+    read_natural_spawning_cap_config(*caps, "ambient", config.caps.ambient);
+    read_natural_spawning_cap_config(*caps, "water", config.caps.water);
+    read_natural_spawning_cap_config(*caps, "underground", config.caps.underground);
+    read_natural_spawning_cap_config(*caps, "special", config.caps.special);
+  }
+  if (const DataValue* despawning = natural->get("despawning"); despawning != nullptr) {
+    read_natural_spawning_despawn_config(
+        *despawning,
+        "passive",
+        config.despawning.passive);
+    read_natural_spawning_despawn_config(
+        *despawning,
+        "hostile",
+        config.despawning.hostile);
+    read_natural_spawning_despawn_config(
+        *despawning,
+        "ambient",
+        config.despawning.ambient);
+    read_natural_spawning_despawn_config(
+        *despawning,
+        "water",
+        config.despawning.water);
+    read_natural_spawning_despawn_config(
+        *despawning,
+        "underground",
+        config.despawning.underground);
+    read_natural_spawning_despawn_config(
+        *despawning,
+        "special",
+        config.despawning.special);
+  }
+}
+
 std::filesystem::path normalize_lexical(std::filesystem::path path) {
   return path.lexically_normal();
 }
@@ -302,6 +399,8 @@ void read_runtime_sections(const DataValue& root, EngineConfig& config) {
     read_scalar(*chunks, "unload_margin", config.chunks.unload_margin);
   }
 
+  read_natural_spawning_config(root, config.natural_spawning);
+
   const DataValue* jobs = root.get("jobs");
   if (jobs != nullptr) {
     read_scalar(*jobs, "worker_threads", config.jobs.worker_threads);
@@ -358,6 +457,105 @@ void read_runtime_sections(const DataValue& root, EngineConfig& config) {
   }
 }
 
+void put_natural_spawning_cap_config(
+    DataValue& root,
+    std::string_view prefix,
+    const NaturalSpawningCategoryCapConfig& config) {
+  put_under(root, prefix, "per_player", config.per_player);
+  put_under(root, prefix, "per_world_soft", config.per_world_soft);
+  put_under(root, prefix, "local_max", config.local_max);
+}
+
+void put_natural_spawning_despawn_config(
+    DataValue& root,
+    std::string_view prefix,
+    const NaturalSpawningDespawnCategoryConfig& config) {
+  put_under(root, prefix, "natural_despawn", config.natural_despawn);
+  put_under(root, prefix, "soft_distance_blocks", config.soft_distance_blocks);
+  put_under(root, prefix, "hard_distance_blocks", config.hard_distance_blocks);
+  put_under(root, prefix, "min_lifetime_ticks", config.min_lifetime_ticks);
+  put_under(root, prefix, "save_transient", config.save_transient);
+}
+
+void put_natural_spawning_config(
+    DataValue& root,
+    const NaturalSpawningConfig& config) {
+  put(root, "natural_spawning.enabled", config.enabled);
+  put(root, "natural_spawning.interval_ticks", config.interval_ticks);
+  put(
+      root,
+      "natural_spawning.min_distance_from_player_blocks",
+      config.min_distance_from_player_blocks);
+  put(
+      root,
+      "natural_spawning.max_distance_from_player_blocks",
+      config.max_distance_from_player_blocks);
+  put(
+      root,
+      "natural_spawning.attempts_per_player_per_category",
+      config.attempts_per_player_per_category);
+  put(
+      root,
+      "natural_spawning.max_successes_per_player_per_tick",
+      config.max_successes_per_player_per_tick);
+  put(
+      root,
+      "natural_spawning.max_successes_per_world_per_tick",
+      config.max_successes_per_world_per_tick);
+  put(
+      root,
+      "natural_spawning.local_density_radius_blocks",
+      config.local_density_radius_blocks);
+  put_natural_spawning_cap_config(
+      root,
+      "natural_spawning.caps.passive",
+      config.caps.passive);
+  put_natural_spawning_cap_config(
+      root,
+      "natural_spawning.caps.hostile",
+      config.caps.hostile);
+  put_natural_spawning_cap_config(
+      root,
+      "natural_spawning.caps.ambient",
+      config.caps.ambient);
+  put_natural_spawning_cap_config(
+      root,
+      "natural_spawning.caps.water",
+      config.caps.water);
+  put_natural_spawning_cap_config(
+      root,
+      "natural_spawning.caps.underground",
+      config.caps.underground);
+  put_natural_spawning_cap_config(
+      root,
+      "natural_spawning.caps.special",
+      config.caps.special);
+  put_natural_spawning_despawn_config(
+      root,
+      "natural_spawning.despawning.passive",
+      config.despawning.passive);
+  put_natural_spawning_despawn_config(
+      root,
+      "natural_spawning.despawning.hostile",
+      config.despawning.hostile);
+  put_natural_spawning_despawn_config(
+      root,
+      "natural_spawning.despawning.ambient",
+      config.despawning.ambient);
+  put_natural_spawning_despawn_config(
+      root,
+      "natural_spawning.despawning.water",
+      config.despawning.water);
+  put_natural_spawning_despawn_config(
+      root,
+      "natural_spawning.despawning.underground",
+      config.despawning.underground);
+  put_natural_spawning_despawn_config(
+      root,
+      "natural_spawning.despawning.special",
+      config.despawning.special);
+}
+
 void put_runtime_full(DataValue& root, const EngineConfig& config) {
   put(root, "paths.arvane_home", config_path_string(config.paths.project_root, config.paths.arvane_home_path()));
   put(root, "paths.input_bindings_file", config_path_string(config.paths.project_root, config.paths.input_bindings_file));
@@ -374,6 +572,7 @@ void put_runtime_full(DataValue& root, const EngineConfig& config) {
   put(root, "chunks.render_distance", config.chunks.render_distance);
   put(root, "chunks.stream_distance", config.chunks.stream_distance);
   put(root, "chunks.unload_margin", config.chunks.unload_margin);
+  put_natural_spawning_config(root, config.natural_spawning);
   put_jobs_config(root, config.jobs);
   put(root, "chunk_pipeline.max_generation_jobs_per_frame", config.chunk_pipeline.max_generation_jobs_per_frame);
   put(root, "chunk_pipeline.max_generation_results_per_tick", config.chunk_pipeline.max_generation_results_per_tick);
@@ -396,6 +595,7 @@ void put_runtime_shared(DataValue& root, const EngineConfig& config) {
   put(root, "chunks.load_distance", config.chunks.load_distance);
   put(root, "chunks.simulation_distance", config.chunks.simulation_distance);
   put(root, "chunks.unload_margin", config.chunks.unload_margin);
+  put_natural_spawning_config(root, config.natural_spawning);
   put_jobs_config(root, config.jobs);
   put(root, "chunk_pipeline.max_generation_jobs_per_frame", config.chunk_pipeline.max_generation_jobs_per_frame);
   put(root, "chunk_pipeline.max_generation_results_per_tick", config.chunk_pipeline.max_generation_results_per_tick);

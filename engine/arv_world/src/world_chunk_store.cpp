@@ -397,7 +397,7 @@ void WorldChunkStore::update_simulation_radii(
         const i32 dx = coord.value.x - center.value.x;
         const i32 dy = coord.value.y - center.value.y;
         const i32 dz = coord.value.z - center.value.z;
-        if (max_abs3(dx, dy, dz) <= radius) {
+        if (arv::max_abs3(dx, dy, dz) <= radius) {
           active = true;
           break;
         }

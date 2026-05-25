@@ -13,7 +13,8 @@
       "buoyancy": 1.0,
       "render_category": "opaque",
       "tags": [
-        "arvane:mineable/shovel"
+        "arvane:mineable/shovel",
+        "arvane:spawn/grass_like"
       ],
       "textures": "arvane:texture/block/dirt",
       "properties": {

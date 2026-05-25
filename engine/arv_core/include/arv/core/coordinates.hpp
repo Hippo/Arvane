@@ -90,6 +90,44 @@ enum class AxisDirection {
       floor_mod(pos.value.z, ChunkSize)}};
 }
 
+[[nodiscard]] constexpr Vec3f block_center(BlockPos pos) noexcept {
+  return {
+      static_cast<f32>(pos.value.x) + 0.5F,
+      static_cast<f32>(pos.value.y) + 0.5F,
+      static_cast<f32>(pos.value.z) + 0.5F};
+}
+
+[[nodiscard]] constexpr Vec3f block_floor_center(BlockPos pos) noexcept {
+  return {
+      static_cast<f32>(pos.value.x) + 0.5F,
+      static_cast<f32>(pos.value.y),
+      static_cast<f32>(pos.value.z) + 0.5F};
+}
+
+[[nodiscard]] constexpr BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept {
+  return {{
+      pos.value.x + offset.x,
+      pos.value.y + offset.y,
+      pos.value.z + offset.z}};
+}
+
+[[nodiscard]] constexpr ChunkSectionCoord offset_chunk_section(
+    ChunkSectionCoord coord,
+    Vec3i offset) noexcept {
+  return {{
+      coord.value.x + offset.x,
+      coord.value.y + offset.y,
+      coord.value.z + offset.z}};
+}
+
+[[nodiscard]] constexpr i32 chunk_horizontal_chebyshev_distance(
+    ChunkSectionCoord lhs,
+    ChunkSectionCoord rhs) noexcept {
+  const i32 dx = lhs.value.x > rhs.value.x ? lhs.value.x - rhs.value.x : rhs.value.x - lhs.value.x;
+  const i32 dz = lhs.value.z > rhs.value.z ? lhs.value.z - rhs.value.z : rhs.value.z - lhs.value.z;
+  return dx > dz ? dx : dz;
+}
+
 [[nodiscard]] constexpr BlockPos chunk_local_to_block(ChunkSectionCoord chunk, SectionLocalPos local) noexcept {
   return {{
       chunk.value.x * ChunkSize + local.value.x,

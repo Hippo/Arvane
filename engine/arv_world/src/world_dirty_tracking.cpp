@@ -5,23 +5,6 @@
 #include <algorithm>
 
 namespace arv::world::detail {
-namespace {
-
-[[nodiscard]] ChunkSectionCoord offset_chunk(ChunkSectionCoord coord, Vec3i offset) noexcept {
-  return {{
-      coord.value.x + offset.x,
-      coord.value.y + offset.y,
-      coord.value.z + offset.z,
-  }};
-}
-
-[[nodiscard]] int nonzero_axis_count(Vec3i offset) noexcept {
-  return static_cast<int>(offset.x != 0) +
-         static_cast<int>(offset.y != 0) +
-         static_cast<int>(offset.z != 0);
-}
-
-} // namespace
 
 u64 WorldDirtyTracker::lighting_revision() const noexcept {
   return lighting_revision_;
@@ -162,7 +145,7 @@ void WorldDirtyTracker::mark_boundary_neighbors_dirty(
       continue;
     }
 
-    const ChunkSectionCoord neighbor = offset_chunk(coord, offset);
+    const ChunkSectionCoord neighbor = offset_chunk_section(coord, offset);
     if (nonzero_axis_count(offset) == 1) {
       mark_neighbor_mesh_dependency_dirty(world, neighbor);
     } else {
@@ -180,7 +163,7 @@ void WorldDirtyTracker::mark_loaded_chunk_neighbors_dirty(
       continue;
     }
 
-    const ChunkSectionCoord neighbor = offset_chunk(coord, offset);
+    const ChunkSectionCoord neighbor = offset_chunk_section(coord, offset);
     if (nonzero_axis_count(offset) == 1) {
       mark_neighbor_mesh_dependency_dirty(world, neighbor);
     } else {
@@ -198,7 +181,7 @@ void WorldDirtyTracker::mark_loaded_chunk_lighting_dependencies_dirty(
       continue;
     }
 
-    mark_neighbor_lighting_dependency_dirty(world, offset_chunk(coord, offset));
+    mark_neighbor_lighting_dependency_dirty(world, offset_chunk_section(coord, offset));
   }
 }
 

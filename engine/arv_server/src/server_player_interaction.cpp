@@ -10,10 +10,6 @@
 namespace arv::server::detail {
 namespace {
 
-[[nodiscard]] i32 floor_i32(f32 value) noexcept {
-  return static_cast<i32>(std::floor(value));
-}
-
 [[nodiscard]] std::string horizontal_facing_from_look(
     Vec3f look_direction,
     std::string_view fallback) {
@@ -104,9 +100,9 @@ namespace {
     return std::nullopt;
   }
 
-  i32 x = floor_i32(origin.x);
-  i32 y = floor_i32(origin.y);
-  i32 z = floor_i32(origin.z);
+  i32 x = floor_to_i32(origin.x);
+  i32 y = floor_to_i32(origin.y);
+  i32 z = floor_to_i32(origin.z);
 
   const i32 step_x = direction.x > 0.0F ? 1 : (direction.x < 0.0F ? -1 : 0);
   const i32 step_y = direction.y > 0.0F ? 1 : (direction.y < 0.0F ? -1 : 0);

@@ -298,16 +298,8 @@ constexpr u64 FnvPrime = 1099511628211ULL;
   return root.get(field);
 }
 
-[[nodiscard]] bool is_object(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::Object;
-}
-
 [[nodiscard]] bool is_array(const io::DataValue& value) noexcept {
   return value.kind() == io::DataKind::Array;
-}
-
-[[nodiscard]] bool is_string(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::String;
 }
 
 [[nodiscard]] std::string required_scalar(
@@ -317,7 +309,7 @@ constexpr u64 FnvPrime = 1099511628211ULL;
     const std::filesystem::path& file,
     std::string_view pack_id = {}) {
   const io::DataValue* node = member(root, field);
-  if (node == nullptr || !is_string(*node)) {
+  if (node == nullptr || !io::is_string_value(*node)) {
     error = pack_error(
         "manifest validation",
         "missing required scalar field: " + std::string{field},
@@ -358,7 +350,7 @@ constexpr u64 FnvPrime = 1099511628211ULL;
   }
   values.reserve(array->size());
   for (const io::DataValue& entry : *array) {
-    if (!is_string(entry)) {
+    if (!io::is_string_value(entry)) {
       error = pack_error(
           "manifest validation",
           "list field contains a non-scalar entry: " + std::string{field},
@@ -684,7 +676,7 @@ constexpr u64 FnvPrime = 1099511628211ULL;
   HashSet<std::string> seen;
   ids.reserve(enabled_array->size());
   for (const io::DataValue& entry : *enabled_array) {
-    if (!is_string(entry)) {
+    if (!io::is_string_value(entry)) {
       return Expected<std::vector<std::string>, PackError>::failure(
           pack_error("enabled packs", "enabled pack entry must be a scalar", {}, enabled_path));
     }
@@ -897,7 +889,7 @@ constexpr u64 FnvPrime = 1099511628211ULL;
         file.pack_version));
   }
   const io::DataValue* entries = &decoded.value().root;
-  if (is_object(decoded.value().root)) {
+  if (io::is_object_value(decoded.value().root)) {
     if (const io::DataValue* found = member(decoded.value().root, root_key);
         found != nullptr) {
       entries = found;
@@ -937,7 +929,7 @@ constexpr u64 FnvPrime = 1099511628211ULL;
     const io::DataValue& definition,
     const PackDataFile& file) {
   const io::DataValue* name = member(definition, "name");
-  if (name == nullptr || !is_string(*name)) {
+  if (name == nullptr || !io::is_string_value(*name)) {
     return Expected<std::string, PackError>::failure(pack_error(
         "data validation",
         "definition is missing string field name",
@@ -1144,7 +1136,7 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
     return PackManifestResult::failure(error);
   }
   if (const io::DataValue* description = member(root, "description");
-      description != nullptr && is_string(*description)) {
+      description != nullptr && io::is_string_value(*description)) {
     manifest.description = std::string{description->as_string_or({})};
   }
   manifest.authors = read_string_list(root, "authors", error, manifest_path, manifest.id);
@@ -1167,13 +1159,13 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
   manifest.side = parsed_side.value();
 
   if (const io::DataValue* engine = member(root, "engine");
-      engine != nullptr && is_object(*engine)) {
+      engine != nullptr && io::is_object_value(*engine)) {
     if (const io::DataValue* min = member(*engine, "min_version");
-        min != nullptr && is_string(*min)) {
+        min != nullptr && io::is_string_value(*min)) {
       manifest.engine_min_version = std::string{min->as_string_or({})};
     }
     if (const io::DataValue* max = member(*engine, "max_version");
-        max != nullptr && is_string(*max)) {
+        max != nullptr && io::is_string_value(*max)) {
       manifest.engine_max_version = std::string{max->as_string_or({})};
     }
   }
@@ -1188,14 +1180,14 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
     manifest.dependencies.reserve(array->size());
     for (const io::DataValue& entry : *array) {
       const io::DataValue* id = member(entry, "id");
-      if (!is_object(entry) || id == nullptr || !is_string(*id)) {
+      if (!io::is_object_value(entry) || id == nullptr || !io::is_string_value(*id)) {
         return PackManifestResult::failure(
             pack_error("manifest validation", "dependency entries require scalar id", manifest.id, manifest_path));
       }
       PackDependency dependency;
       dependency.id = std::string{id->as_string_or({})};
       if (const io::DataValue* version = member(entry, "version");
-          version != nullptr && is_string(*version)) {
+          version != nullptr && io::is_string_value(*version)) {
         dependency.version = std::string{version->as_string_or({})};
       }
       manifest.dependencies.push_back(std::move(dependency));
@@ -1212,7 +1204,7 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
   }
 
   const io::DataValue* capabilities = member(root, "capabilities");
-  if (capabilities == nullptr || !is_object(*capabilities)) {
+  if (capabilities == nullptr || !io::is_object_value(*capabilities)) {
     return PackManifestResult::failure(
         pack_error("manifest validation", "missing required capabilities map", manifest.id, manifest_path));
   }
@@ -1245,12 +1237,12 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
       native_plugin.value()};
 
   if (const io::DataValue* builtin = member(root, "builtin"); builtin != nullptr) {
-    if (!is_object(*builtin)) {
+    if (!io::is_object_value(*builtin)) {
       return PackManifestResult::failure(
           pack_error("manifest validation", "builtin must be a map", manifest.id, manifest_path));
     }
     const io::DataValue* module = member(*builtin, "module");
-    if (module == nullptr || !is_string(*module)) {
+    if (module == nullptr || !io::is_string_value(*module)) {
       return PackManifestResult::failure(
           pack_error("manifest validation", "builtin.module is required", manifest.id, manifest_path));
     }
@@ -1258,7 +1250,7 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
   }
 
   if (const io::DataValue* native = member(root, "native"); native != nullptr) {
-    if (!is_object(*native)) {
+    if (!io::is_object_value(*native)) {
       return PackManifestResult::failure(
           pack_error("manifest validation", "native must be a map", manifest.id, manifest_path));
     }
@@ -1271,7 +1263,7 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
     }
     native_manifest.api_version = static_cast<u32>(api_version->as_u64_or(0));
     const io::DataValue* entrypoint = member(*native, "entrypoint");
-    if (entrypoint == nullptr || !is_string(*entrypoint)) {
+    if (entrypoint == nullptr || !io::is_string_value(*entrypoint)) {
       return PackManifestResult::failure(
           pack_error("manifest validation", "native.entrypoint is required", manifest.id, manifest_path));
     }
@@ -1284,7 +1276,7 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
           pack_error("manifest validation", "native.libraries map is required", manifest.id, manifest_path));
     }
     for (const auto& [platform, value] : *library_object) {
-      if (!is_string(value)) {
+      if (!io::is_string_value(value)) {
         return PackManifestResult::failure(
             pack_error("manifest validation", "native library entries must be scalar", manifest.id, manifest_path));
       }
@@ -1650,7 +1642,7 @@ PackTextResult PackManager::load_merged_json_array_text(
 
     const PackSource& source = stack_[file.pack_index];
     for (io::DataValue entry : entries.value()) {
-      if (!is_object(entry)) {
+      if (!io::is_object_value(entry)) {
         return PackTextResult::failure(pack_error(
             "data validation",
             "definition entry must be an object",
@@ -1662,7 +1654,7 @@ PackTextResult PackManager::load_merged_json_array_text(
 
       const io::DataValue* operation = member(entry, "operation");
       if (operation != nullptr) {
-        if (!is_string(*operation)) {
+        if (!io::is_string_value(*operation)) {
           return PackTextResult::failure(pack_error(
               "data validation",
               "operation must be a string",
@@ -1682,7 +1674,7 @@ PackTextResult PackManager::load_merged_json_array_text(
               file.pack_version));
         }
         const io::DataValue* target_iter = member(entry, "target");
-        if (target_iter == nullptr || !is_string(*target_iter)) {
+        if (target_iter == nullptr || !io::is_string_value(*target_iter)) {
           return PackTextResult::failure(pack_error(
               "data validation",
               "override operation requires string target",
@@ -1725,7 +1717,7 @@ PackTextResult PackManager::load_merged_json_array_text(
             object->erase("target");
           }
         }
-        if (!is_object(replacement)) {
+        if (!io::is_object_value(replacement)) {
           return PackTextResult::failure(pack_error(
               "data validation",
               "override definition must be an object",

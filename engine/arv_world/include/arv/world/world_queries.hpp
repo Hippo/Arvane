@@ -55,4 +55,15 @@ private:
   bool treat_missing_as_solid_{true};
 };
 
+[[nodiscard]] inline bool world_cell_contains_fluid(
+    const WorldRuntime& world,
+    const voxel::BlockRegistry& registry,
+    BlockPos pos) noexcept {
+  if (!world.get_fluid(pos).empty()) {
+    return true;
+  }
+  const voxel::BlockVariantRecord* record = registry.variant(world.get_block(pos));
+  return record != nullptr && record->properties.fluid;
+}
+
 } // namespace arv::world

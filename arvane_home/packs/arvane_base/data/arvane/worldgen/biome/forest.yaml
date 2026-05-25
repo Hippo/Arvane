@@ -18,6 +18,18 @@ terrain:
 
 surface_rule_set: arvane:worldgen/surface_rule_set/grassy_land
 
+spawns:
+  passive:
+    - entity: arvane:pig
+      weight: 8
+      min_group: 2
+      max_group: 4
+      conditions:
+        surface: true
+        min_light: 7
+        block_tags_below:
+          - arvane:spawn/grass_like
+
 features:
   stages:
     surface_decoration:

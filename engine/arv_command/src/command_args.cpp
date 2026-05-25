@@ -1,5 +1,7 @@
 #include "arv/command/command.hpp"
 
+#include "arv/core/string.hpp"
+
 #include <charconv>
 #include <cmath>
 #include <string>
@@ -40,19 +42,6 @@ template<typename T>
     }
   }
   return Expected<T, CommandResult>::success(value);
-}
-
-[[nodiscard]] std::string lower_ascii(std::string_view text) {
-  std::string out;
-  out.reserve(text.size());
-  for (const char c : text) {
-    if (c >= 'A' && c <= 'Z') {
-      out.push_back(static_cast<char>(c - 'A' + 'a'));
-    } else {
-      out.push_back(c);
-    }
-  }
-  return out;
 }
 
 [[nodiscard]] f32 resolve_coord(RelativeCoord coord, f32 anchor) noexcept {
@@ -139,7 +128,7 @@ Expected<bool, CommandResult> CommandArgReader::read_bool(std::string_view label
     return Expected<bool, CommandResult>::failure(std::move(token.error()));
   }
 
-  const std::string lowered = lower_ascii(token.value());
+  const std::string lowered = lower_ascii_copy(token.value());
   if (lowered == "true" || lowered == "1" || lowered == "yes" || lowered == "on") {
     return Expected<bool, CommandResult>::success(true);
   }

@@ -15,14 +15,6 @@ namespace {
 
 using DependencyMask = detail::ChunkDependencyMask;
 
-[[nodiscard]] ChunkSectionCoord offset_chunk(ChunkSectionCoord coord, Vec3i offset) noexcept {
-  return {{
-      coord.value.x + offset.x,
-      coord.value.y + offset.y,
-      coord.value.z + offset.z,
-  }};
-}
-
 [[nodiscard]] voxel::ChunkSnapshotSkyLightOverlayView make_generated_lighting_snapshot_overlay(
     const GenerationSurfaceProfile& surface,
     ChunkSectionCoord coord,
@@ -163,7 +155,7 @@ void WorldRuntime::apply_chunk_snapshot(
       }
       impl_->dirty.mark_neighbor_mesh_only_dependency_dirty(
           *this,
-          offset_chunk(coord, voxel::snapshot_storage_offset(index)));
+          offset_chunk_section(coord, voxel::snapshot_storage_offset(index)));
     }
   }
   if (lights_changed) {
@@ -173,7 +165,7 @@ void WorldRuntime::apply_chunk_snapshot(
       }
       impl_->dirty.mark_neighbor_light_dependency_dirty(
           *this,
-          offset_chunk(coord, voxel::snapshot_storage_offset(index)));
+          offset_chunk_section(coord, voxel::snapshot_storage_offset(index)));
     }
   }
 }
@@ -262,7 +254,7 @@ std::optional<voxel::ChunkSnapshot> WorldRuntime::make_meshing_snapshot(
         continue;
       }
       const ChunkSectionCoord neighbor_coord =
-          offset_chunk(coord, voxel::snapshot_storage_offset(storage_index));
+          offset_chunk_section(coord, voxel::snapshot_storage_offset(storage_index));
       const voxel::ChunkSection* neighbor = find_chunk(neighbor_coord);
       if (neighbor == nullptr && missing_neighbor_policy == MissingNeighborPolicy::RequireLoaded) {
         return std::nullopt;

@@ -1,7 +1,8 @@
 #include "arv/player/permissions.hpp"
 
+#include "arv/core/string.hpp"
+
 #include <algorithm>
-#include <cctype>
 
 namespace arv::player {
 namespace {
@@ -232,18 +233,10 @@ void merge_custom_final(CustomPermissionMap& target, const CustomPermissionMap& 
   return std::nullopt;
 }
 
-[[nodiscard]] std::string lower_ascii(std::string_view text) {
-  std::string lowered{text};
-  std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return lowered;
-}
-
 } // namespace
 
 std::optional<TriState> tri_state_from_string(std::string_view text) {
-  const std::string lowered = lower_ascii(text);
+  const std::string lowered = lower_ascii_copy(text);
   if (lowered == "allow" || lowered == "allowed" || lowered == "true" ||
       lowered == "yes") {
     return TriState::Allow;

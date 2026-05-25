@@ -404,6 +404,25 @@ std::optional<std::string> WorldEntityStore::persistent_uuid(EntityID entity_id)
   return persistent->uuid;
 }
 
+bool WorldEntityStore::set_natural_spawn(
+    EntityID entity_id,
+    NaturalSpawnComponent component) noexcept {
+  const entt::entity entity_handle = handle(entity_id);
+  if (entity_handle == entt::null || !registry_.valid(entity_handle)) {
+    return false;
+  }
+  registry_.emplace_or_replace<NaturalSpawnComponent>(entity_handle, component);
+  return true;
+}
+
+NaturalSpawnComponent* WorldEntityStore::find_natural_spawn(EntityID entity_id) noexcept {
+  return find_component<NaturalSpawnComponent>(registry_, handle(entity_id));
+}
+
+const NaturalSpawnComponent* WorldEntityStore::find_natural_spawn(EntityID entity_id) const noexcept {
+  return find_component<NaturalSpawnComponent>(registry_, handle(entity_id));
+}
+
 bool WorldEntityStore::add_tag(EntityID entity_id, std::string tag) {
   if (tag.empty()) {
     return false;
@@ -563,6 +582,10 @@ std::vector<entity::PersistentEntityRecord> WorldEntityStore::persistent_records
   records.reserve(view.size_hint());
   for (const entt::entity entity_handle : view) {
     if (registry_.all_of<entity::PlayerEntity>(entity_handle)) {
+      continue;
+    }
+    if (const auto* natural = registry_.try_get<NaturalSpawnComponent>(entity_handle);
+        natural != nullptr && natural->transient) {
       continue;
     }
     const auto& persistent = view.get<entity::PersistentEntity>(entity_handle);
@@ -815,6 +838,21 @@ bool WorldRuntime::entity_is_persistent(EntityID entity_id) const noexcept {
 
 std::optional<std::string> WorldRuntime::persistent_entity_uuid(EntityID entity_id) const {
   return impl_->entities.persistent_uuid(entity_id);
+}
+
+bool WorldRuntime::set_entity_natural_spawn(
+    EntityID entity_id,
+    NaturalSpawnComponent component) noexcept {
+  assert_owner_thread();
+  return impl_->entities.set_natural_spawn(entity_id, component);
+}
+
+NaturalSpawnComponent* WorldRuntime::find_entity_natural_spawn(EntityID entity_id) noexcept {
+  return impl_->entities.find_natural_spawn(entity_id);
+}
+
+const NaturalSpawnComponent* WorldRuntime::find_entity_natural_spawn(EntityID entity_id) const noexcept {
+  return impl_->entities.find_natural_spawn(entity_id);
 }
 
 bool WorldRuntime::add_entity_tag(EntityID entity_id, std::string tag) {

@@ -200,6 +200,51 @@ struct ChunkDistanceConfig {
   i32 unload_margin{1};
 };
 
+struct NaturalSpawningCategoryCapConfig {
+  u32 per_player{};
+  u32 per_world_soft{};
+  u32 local_max{};
+};
+
+struct NaturalSpawningDespawnCategoryConfig {
+  bool natural_despawn{};
+  u32 soft_distance_blocks{};
+  u32 hard_distance_blocks{};
+  u32 min_lifetime_ticks{};
+  bool save_transient{};
+};
+
+struct NaturalSpawningCapsConfig {
+  NaturalSpawningCategoryCapConfig passive{24, 512, 12};
+  NaturalSpawningCategoryCapConfig hostile{48, 1024, 24};
+  NaturalSpawningCategoryCapConfig ambient{32, 768, 32};
+  NaturalSpawningCategoryCapConfig water{32, 768, 24};
+  NaturalSpawningCategoryCapConfig underground{32, 768, 24};
+  NaturalSpawningCategoryCapConfig special{8, 128, 8};
+};
+
+struct NaturalSpawningDespawningConfig {
+  NaturalSpawningDespawnCategoryConfig passive{false, 96, 160, 600, true};
+  NaturalSpawningDespawnCategoryConfig hostile{true, 96, 160, 600, false};
+  NaturalSpawningDespawnCategoryConfig ambient{true, 64, 128, 200, false};
+  NaturalSpawningDespawnCategoryConfig water{true, 96, 160, 400, false};
+  NaturalSpawningDespawnCategoryConfig underground{true, 96, 160, 600, false};
+  NaturalSpawningDespawnCategoryConfig special{true, 96, 160, 600, false};
+};
+
+struct NaturalSpawningConfig {
+  bool enabled{true};
+  u32 interval_ticks{20};
+  u32 min_distance_from_player_blocks{24};
+  u32 max_distance_from_player_blocks{96};
+  u32 attempts_per_player_per_category{4};
+  u32 max_successes_per_player_per_tick{2};
+  u32 max_successes_per_world_per_tick{32};
+  u32 local_density_radius_blocks{32};
+  NaturalSpawningCapsConfig caps{};
+  NaturalSpawningDespawningConfig despawning{};
+};
+
 struct JobSystemConfig {
   struct RuntimeConfig {
     // 0 means automatic for worker counts; domain budgets are runtime-specific.
@@ -465,6 +510,7 @@ struct EngineConfig {
   MultiplayerConfig multiplayer{};
   SkinConfig skins{};
   ChunkDistanceConfig chunks{};
+  NaturalSpawningConfig natural_spawning{};
   JobSystemConfig jobs{};
   PhysicsConfig physics{};
   GameplayConfig gameplay{};

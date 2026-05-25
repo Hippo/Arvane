@@ -37,6 +37,12 @@ inline constexpr LightWord NoLight = 0;
   return static_cast<u8>((value >> 12U) & 0x0FU);
 }
 
+[[nodiscard]] constexpr u8 visible_light_level(LightWord value) noexcept {
+  const u8 rgb_max = light_r(value) > light_g(value) ? light_r(value) : light_g(value);
+  const u8 block_max = rgb_max > light_b(value) ? rgb_max : light_b(value);
+  return block_max > light_sky(value) ? block_max : light_sky(value);
+}
+
 [[nodiscard]] constexpr LightWord pack_block_light(u8 r, u8 g, u8 b) noexcept {
   return pack_light(r, g, b, 0);
 }

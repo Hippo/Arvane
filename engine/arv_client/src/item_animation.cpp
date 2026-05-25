@@ -17,18 +17,6 @@ namespace {
          separator + 1U < name.size();
 }
 
-[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64 ||
-         value.kind() == io::DataKind::F64;
-}
-
-[[nodiscard]] std::optional<std::string_view> string_value(
-    const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::String
-             ? std::optional<std::string_view>{value.as_string_or({})}
-             : std::nullopt;
-}
-
 [[nodiscard]] const io::DataValue* member(
     const io::DataValue& object,
     std::string_view key) noexcept {
@@ -75,7 +63,8 @@ namespace {
     return Expected<Vec3f, ItemAnimationError>::failure(
         animation_error(std::string{context} + " must be an array of 3 numbers"));
   }
-  if (!is_number((*array)[0]) || !is_number((*array)[1]) || !is_number((*array)[2])) {
+  if (!io::is_number_value((*array)[0]) || !io::is_number_value((*array)[1]) ||
+      !io::is_number_value((*array)[2])) {
     return Expected<Vec3f, ItemAnimationError>::failure(
         animation_error(std::string{context} + " must be an array of 3 numbers"));
   }
@@ -83,7 +72,7 @@ namespace {
       static_cast<f32>((*array)[0].as_f64_or(0.0)),
       static_cast<f32>((*array)[1].as_f64_or(0.0)),
       static_cast<f32>((*array)[2].as_f64_or(0.0))};
-  if (!std::isfinite(value.x) || !std::isfinite(value.y) || !std::isfinite(value.z)) {
+  if (!finite(value)) {
     return Expected<Vec3f, ItemAnimationError>::failure(
         animation_error(std::string{context} + " values must be finite"));
   }
@@ -120,7 +109,7 @@ read_keyframes(
       return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
           animation_error(context + " requires time and value"));
     }
-    if (!is_number(*time_iter)) {
+    if (!io::is_number_value(*time_iter)) {
       return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
           animation_error(context + " time must be numeric"));
     }
@@ -139,7 +128,7 @@ read_keyframes(
     ItemAnimationEasing easing = ItemAnimationEasing::Linear;
     const io::DataValue* easing_iter = member(frame_json, "easing");
     if (easing_iter != nullptr) {
-      auto easing_text = string_value(*easing_iter);
+      auto easing_text = io::string_value_if(*easing_iter);
       if (!easing_text.has_value()) {
         return Expected<std::vector<ItemAnimationKeyframeVec3>, ItemAnimationError>::failure(
             animation_error(context + " easing must be a string"));
@@ -403,14 +392,14 @@ Expected<ItemAnimationLibrary, ItemAnimationError> parse_item_animation_library_
     ItemAnimationClip clip;
     const io::DataValue* name_iter = member(animation_json, "name");
     auto name_text = name_iter == nullptr ? std::optional<std::string_view>{}
-                                          : string_value(*name_iter);
+                                          : io::string_value_if(*name_iter);
     if (!name_text.has_value()) {
       return Expected<ItemAnimationLibrary, ItemAnimationError>::failure(
           animation_error("item animation entry " + std::to_string(index) + " is missing name"));
     }
     clip.name = std::string{name_text.value()};
     if (const io::DataValue* duration = member(animation_json, "duration_seconds");
-        duration != nullptr && is_number(*duration)) {
+        duration != nullptr && io::is_number_value(*duration)) {
       clip.duration_seconds = static_cast<Seconds>(duration->as_f64_or(0.0));
     }
     if (const io::DataValue* loop = member(animation_json, "loop");
@@ -418,11 +407,11 @@ Expected<ItemAnimationLibrary, ItemAnimationError> parse_item_animation_library_
       clip.loop = loop->as_bool_or(false);
     }
     if (const io::DataValue* blend_in = member(animation_json, "blend_in_seconds");
-        blend_in != nullptr && is_number(*blend_in)) {
+        blend_in != nullptr && io::is_number_value(*blend_in)) {
       clip.blend_in_seconds = static_cast<Seconds>(blend_in->as_f64_or(0.0));
     }
     if (const io::DataValue* blend_out = member(animation_json, "blend_out_seconds");
-        blend_out != nullptr && is_number(*blend_out)) {
+        blend_out != nullptr && io::is_number_value(*blend_out)) {
       clip.blend_out_seconds = static_cast<Seconds>(blend_out->as_f64_or(0.0));
     }
 

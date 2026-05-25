@@ -25,14 +25,6 @@ namespace {
   return hash;
 }
 
-[[nodiscard]] bool is_integer(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64;
-}
-
-[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
-  return is_integer(value) || value.kind() == io::DataKind::F64;
-}
-
 [[nodiscard]] const io::DataValue* member(
     const io::DataValue& object,
     std::string_view key) noexcept {
@@ -64,7 +56,7 @@ namespace {
     std::string_view key,
     u64 fallback) {
   const io::DataValue* value = member(object, key);
-  return value != nullptr && is_integer(*value) ? value->as_u64_or(fallback) : fallback;
+  return value != nullptr && io::is_integer_value(*value) ? value->as_u64_or(fallback) : fallback;
 }
 
 [[nodiscard]] i64 i64_value_or(
@@ -72,7 +64,7 @@ namespace {
     std::string_view key,
     i64 fallback) {
   const io::DataValue* value = member(object, key);
-  return value != nullptr && is_integer(*value) ? value->as_i64_or(fallback) : fallback;
+  return value != nullptr && io::is_integer_value(*value) ? value->as_i64_or(fallback) : fallback;
 }
 
 [[nodiscard]] f64 f64_value_or(
@@ -80,7 +72,7 @@ namespace {
     std::string_view key,
     f64 fallback) {
   const io::DataValue* value = member(object, key);
-  return value != nullptr && is_number(*value) ? value->as_f64_or(fallback) : fallback;
+  return value != nullptr && io::is_number_value(*value) ? value->as_f64_or(fallback) : fallback;
 }
 
 [[nodiscard]] io::DataValue vec3_to_value(Vec3f value) {
@@ -142,7 +134,7 @@ namespace {
   location.pitch_radians =
       static_cast<f32>(f64_value_or(node, "pitch_radians", location.pitch_radians));
   if (const io::DataValue* world = member(node, "world");
-      world != nullptr && is_integer(*world)) {
+      world != nullptr && io::is_integer_value(*world)) {
     location.world = WorldID{static_cast<WorldID::value_type>(world->as_u64_or(0U))};
   }
   return location;
@@ -251,7 +243,7 @@ namespace {
         record.dropped_item_stack = item_stack_from_value(*stack, item_registry);
       }
       if (const io::DataValue* delay = member(*dropped_item, "pickup_delay_seconds");
-          delay != nullptr && is_number(*delay)) {
+          delay != nullptr && io::is_number_value(*delay)) {
         record.dropped_item_pickup_delay_seconds =
             static_cast<Seconds>(delay->as_f64_or(0.0));
       }
@@ -397,7 +389,7 @@ namespace {
   clock.time_scale = static_cast<f32>(f64_value_or(node, "time_scale", clock.time_scale));
   world::retime_world_clock(clock, DefaultBaseTps);
   if (const io::DataValue* value = member(node, "day_time_tick");
-      value != nullptr && is_integer(*value)) {
+      value != nullptr && io::is_integer_value(*value)) {
     world::set_day_time_tick(clock, static_cast<u32>(value->as_u64_or(0U)));
   }
   return clock;

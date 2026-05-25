@@ -20,6 +20,7 @@
 #include "arv/server/session_registry.hpp"
 #include "arv/server/world_registry.hpp"
 #include "arv/voxel/fluid.hpp"
+#include "arv/world/natural_spawning.hpp"
 #include "arv/world/world_runtime.hpp"
 
 #include <filesystem>
@@ -146,6 +147,7 @@ struct ServerStartInfo {
   sched::JobSystemConfig job_system{};
   bool use_network_thread{};
   world::WorldTickPolicy world_tick_policy{};
+  world::NaturalSpawningConfig natural_spawning{};
   u32 max_fluid_results_per_tick{1};
   u32 max_pending_fluid_jobs{1};
   const entity::EntityRegistry* entity_registry{};
@@ -177,6 +179,9 @@ struct DroppedItemStack {
   Vec3f velocity{};
   player::ItemStack stack{};
 };
+
+[[nodiscard]] world::NaturalSpawningConfig make_natural_spawning_config(
+    const io::NaturalSpawningConfig& config) noexcept;
 
 class ServerRuntime {
 public:
@@ -219,6 +224,7 @@ public:
   [[nodiscard]] usize pending_generation_job_count() const noexcept;
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
+  [[nodiscard]] const world::NaturalSpawnCounters& natural_spawn_counters() const noexcept;
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
   [[nodiscard]] bool set_player_fly_speed(PlayerID player_id, f32 fly_speed);

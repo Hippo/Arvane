@@ -14,14 +14,6 @@
 namespace arv::server {
 namespace {
 
-[[nodiscard]] bool is_integer(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64;
-}
-
-[[nodiscard]] bool is_number(const io::DataValue& value) noexcept {
-  return is_integer(value) || value.kind() == io::DataKind::F64;
-}
-
 [[nodiscard]] const io::DataValue* member(
     const io::DataValue& object,
     std::string_view key) noexcept {
@@ -54,7 +46,7 @@ namespace {
     const io::DataValue& object,
     std::string_view key) {
   const io::DataValue* value = member(object, key);
-  if (value == nullptr || !is_integer(*value)) {
+  if (value == nullptr || !io::is_integer_value(*value)) {
     return Expected<u64, PlayerProfileError>::failure(
         PlayerProfileError{"player profile requires integer field " + std::string{key}});
   }
@@ -72,7 +64,8 @@ namespace {
 [[nodiscard]] Vec3f vec3_from_value(const io::DataValue& node, Vec3f fallback) {
   const io::DataValue::Array* array = node.array_if();
   if (array == nullptr || array->size() < 3U ||
-      !is_number((*array)[0]) || !is_number((*array)[1]) || !is_number((*array)[2])) {
+      !io::is_number_value((*array)[0]) || !io::is_number_value((*array)[1]) ||
+      !io::is_number_value((*array)[2])) {
     return fallback;
   }
   return {
@@ -302,7 +295,7 @@ Expected<PlayerProfile, PlayerProfileError> load_player_profile(
   if (const io::DataValue* value = member(node, "last_rotation"); value != nullptr) {
     const io::DataValue::Array* rotation = value->array_if();
     if (rotation != nullptr && rotation->size() >= 2U &&
-        is_number((*rotation)[0]) && is_number((*rotation)[1])) {
+        io::is_number_value((*rotation)[0]) && io::is_number_value((*rotation)[1])) {
       profile.last_yaw_radians = static_cast<f32>((*rotation)[0].as_f64_or(0.0));
       profile.last_pitch_radians = static_cast<f32>((*rotation)[1].as_f64_or(0.0));
     }
@@ -326,7 +319,7 @@ Expected<PlayerProfile, PlayerProfileError> load_player_profile(
     }
   }
   if (const io::DataValue* value = member(node, "permission_level");
-      value != nullptr && is_integer(*value)) {
+      value != nullptr && io::is_integer_value(*value)) {
     profile.permission_level = static_cast<i32>(value->as_i64_or(0));
   }
 

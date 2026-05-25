@@ -171,6 +171,8 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.job_system = make_server_job_system_config(config.jobs);
   server_start_info.use_network_thread = true;
   server_start_info.world_tick_policy = runtime_config.world_tick_policy;
+  server_start_info.natural_spawning =
+      server::make_natural_spawning_config(config.natural_spawning);
   server_start_info.entity_registry = &registries.entity_registry;
   server_start_info.entity_goals = &runtime_config.entity_goals;
   server_start_info.skins = config.skins;

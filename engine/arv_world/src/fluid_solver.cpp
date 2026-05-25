@@ -98,10 +98,6 @@ private:
            (chunk->active || can_process_inactive(update.reason));
   }
 
-  [[nodiscard]] static BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept {
-    return {{pos.value.x + offset.x, pos.value.y + offset.y, pos.value.z + offset.z}};
-  }
-
   [[nodiscard]] SimulationChunkState* find_chunk(ChunkSectionCoord coord) noexcept {
     if (cached_chunk_coord_.has_value() && cached_chunk_coord_.value() == coord &&
         (cached_mutable_chunk_ != nullptr || cached_chunk_ == nullptr)) {
@@ -193,7 +189,7 @@ private:
 
   void enqueue_adjacent_updates(BlockPos pos, FluidUpdateReason reason) {
     for (const Vec3i offset : NeighborOffsets) {
-      const BlockPos neighbor = offset_block(pos, offset);
+      const BlockPos neighbor = arv::offset_block(pos, offset);
       const ChunkSectionCoord origin_chunk = block_to_chunk(pos);
       const ChunkSectionCoord neighbor_chunk_coord = block_to_chunk(neighbor);
       if (origin_chunk != neighbor_chunk_coord &&
@@ -227,7 +223,7 @@ private:
       const voxel::FluidDefinition& definition,
       BlockPos pos) const noexcept {
     return definition.can_flow_down &&
-           can_fluid_occupy(registry, definition, offset_block(pos, {0, -1, 0}));
+           can_fluid_occupy(registry, definition, arv::offset_block(pos, {0, -1, 0}));
   }
 
   [[nodiscard]] voxel::FluidCell ideal_fluid_at(
@@ -243,7 +239,7 @@ private:
       return voxel::make_fluid_source(definition);
     }
 
-    const BlockPos above = offset_block(pos, {0, 1, 0});
+    const BlockPos above = arv::offset_block(pos, {0, 1, 0});
     const voxel::FluidCell above_fluid = fluid_at(above);
     if (definition.can_flow_down && above_fluid.type == definition.type && !above_fluid.empty()) {
       return voxel::make_flowing_fluid(
@@ -252,14 +248,14 @@ private:
           voxel::FluidFlags::Falling);
     }
 
-    const BlockPos below = offset_block(pos, {0, -1, 0});
+    const BlockPos below = arv::offset_block(pos, {0, -1, 0});
     const voxel::FluidCell below_fluid = fluid_at(below);
     if (definition.can_create_sources &&
         (!can_fluid_occupy(registry, definition, below) ||
          (below_fluid.type == definition.type && below_fluid.source()))) {
       u32 adjacent_sources = 0;
       for (const Vec3i offset : HorizontalOffsets) {
-        const voxel::FluidCell neighbor = fluid_at(offset_block(pos, offset));
+        const voxel::FluidCell neighbor = fluid_at(arv::offset_block(pos, offset));
         if (neighbor.type == definition.type && neighbor.source()) {
           ++adjacent_sources;
         }
@@ -275,7 +271,7 @@ private:
 
     u8 best_level = 0;
     for (const Vec3i offset : HorizontalOffsets) {
-      const BlockPos neighbor_pos = offset_block(pos, offset);
+      const BlockPos neighbor_pos = arv::offset_block(pos, offset);
       if (can_flow_down_from(registry, definition, neighbor_pos)) {
         continue;
       }
@@ -361,7 +357,7 @@ void FluidSolver::enqueue_neighbor_updates(
   world.impl_->fluid.enqueue_update_unique({pos, reason, execute_at});
   const WorldSearch search{world};
   for (const Vec3i offset : detail::NeighborOffsets) {
-    const BlockPos neighbor = detail::offset_block(pos, offset);
+    const BlockPos neighbor = arv::offset_block(pos, offset);
     const ChunkSectionCoord origin_chunk = block_to_chunk(pos);
     const ChunkSectionCoord neighbor_chunk_coord = block_to_chunk(neighbor);
     if (origin_chunk != neighbor_chunk_coord &&
@@ -451,7 +447,7 @@ bool FluidSolver::can_flow_down_from(
              search,
              registry,
              definition,
-             detail::offset_block(pos, {0, -1, 0}));
+             arv::offset_block(pos, {0, -1, 0}));
 }
 
 void FluidSolver::enqueue_adjacent_updates(
@@ -462,7 +458,7 @@ void FluidSolver::enqueue_adjacent_updates(
     u32 delay_ticks) {
   const TickIndex execute_at = world.tick_index() + delay_ticks;
   for (const Vec3i offset : detail::NeighborOffsets) {
-    const BlockPos neighbor = detail::offset_block(pos, offset);
+    const BlockPos neighbor = arv::offset_block(pos, offset);
     const ChunkSectionCoord origin_chunk = block_to_chunk(pos);
     const ChunkSectionCoord neighbor_chunk_coord = block_to_chunk(neighbor);
     if (origin_chunk != neighbor_chunk_coord &&
@@ -489,7 +485,7 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
     return voxel::make_fluid_source(definition);
   }
 
-  const BlockPos above = detail::offset_block(pos, {0, 1, 0});
+  const BlockPos above = arv::offset_block(pos, {0, 1, 0});
   const voxel::FluidCell above_fluid = search.fluid_at(above);
   if (definition.can_flow_down && above_fluid.type == definition.type && !above_fluid.empty()) {
     return voxel::make_flowing_fluid(
@@ -498,14 +494,14 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
         voxel::FluidFlags::Falling);
   }
 
-  const BlockPos below = detail::offset_block(pos, {0, -1, 0});
+  const BlockPos below = arv::offset_block(pos, {0, -1, 0});
   const voxel::FluidCell below_fluid = search.fluid_at(below);
   if (definition.can_create_sources &&
       (!can_fluid_occupy(search, registry, definition, below) ||
        (below_fluid.type == definition.type && below_fluid.source()))) {
     u32 adjacent_sources = 0;
     for (const Vec3i offset : HorizontalOffsets) {
-      const voxel::FluidCell neighbor = search.fluid_at(detail::offset_block(pos, offset));
+      const voxel::FluidCell neighbor = search.fluid_at(arv::offset_block(pos, offset));
       if (neighbor.type == definition.type && neighbor.source()) {
         ++adjacent_sources;
       }
@@ -521,7 +517,7 @@ voxel::FluidCell FluidSolver::ideal_fluid_at(
 
   u8 best_level = 0;
   for (const Vec3i offset : HorizontalOffsets) {
-    const BlockPos neighbor_pos = detail::offset_block(pos, offset);
+    const BlockPos neighbor_pos = arv::offset_block(pos, offset);
     if (can_flow_down_from(search, registry, definition, neighbor_pos)) {
       continue;
     }

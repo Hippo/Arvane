@@ -9,6 +9,7 @@
 #include "arv/player/player_state.hpp"
 #include "arv/voxel/storage.hpp"
 #include "arv/world/fluid_solver.hpp"
+#include "arv/world/natural_spawn_types.hpp"
 #include "arv/world/regions.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
@@ -364,6 +365,12 @@ public:
   [[nodiscard]] bool entity_is_persistent(EntityID entity_id) const noexcept;
   [[nodiscard]] std::optional<std::string> persistent_entity_uuid(
       EntityID entity_id) const;
+  bool set_entity_natural_spawn(
+      EntityID entity_id,
+      NaturalSpawnComponent component) noexcept;
+  [[nodiscard]] NaturalSpawnComponent* find_entity_natural_spawn(EntityID entity_id) noexcept;
+  [[nodiscard]] const NaturalSpawnComponent* find_entity_natural_spawn(
+      EntityID entity_id) const noexcept;
   bool add_entity_tag(EntityID entity_id, std::string tag);
   bool remove_entity_tag(EntityID entity_id, std::string_view tag) noexcept;
   [[nodiscard]] bool entity_has_tag(

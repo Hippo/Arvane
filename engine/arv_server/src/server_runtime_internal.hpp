@@ -122,6 +122,11 @@ struct PendingGenerationJob {
   sched::JobFuture<world::GeneratedChunkResult> job;
 };
 
+struct PendingNaturalSpawnJob {
+  TickIndex source_tick{};
+  sched::JobFuture<world::NaturalSpawnJobResult> job;
+};
+
 struct PlayerPermissionCache {
   u64 source_fingerprint{};
   u64 permission_config_revision{};
@@ -163,25 +168,40 @@ public:
       world::WorldRuntime& world,
       const voxel::BlockRegistry* block_registry,
       const voxel::FluidDefinition& fluid_definition);
+  void drain_natural_spawn_jobs(
+      world::WorldRuntime& world,
+      world::NaturalSpawnSystem& natural_spawns,
+      const voxel::BlockRegistry* block_registry,
+      const entity::EntityRegistry* entity_registry,
+      TickIndex tick,
+      bool drain_all);
+  void schedule_natural_spawn_jobs(
+      world::WorldRuntime& world,
+      world::NaturalSpawnSystem& natural_spawns,
+      TickIndex tick);
 
   [[nodiscard]] sched::JobSystem* job_system() noexcept;
   [[nodiscard]] const sched::JobSystem* job_system() const noexcept;
   [[nodiscard]] usize pending_generation_job_count() const noexcept;
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
+  [[nodiscard]] usize pending_natural_spawn_job_count() const noexcept;
 
 private:
   std::unique_ptr<sched::JobSystem> job_system_;
   std::vector<PendingGenerationJob> pending_generation_jobs_;
   std::vector<PendingLightingJob> pending_lighting_jobs_;
   std::vector<PendingFluidJob> pending_fluid_jobs_;
+  std::vector<PendingNaturalSpawnJob> pending_natural_spawn_jobs_;
   u32 max_pending_generation_jobs_{4};
   u32 max_pending_lighting_jobs_{2};
   u32 max_pending_fluid_jobs_{1};
+  u32 max_pending_natural_spawn_jobs_{1};
   u32 max_generation_results_per_tick_{2};
   u32 max_lighting_results_per_tick_{1};
   u32 max_lighting_sections_per_job_{32};
   u32 max_fluid_results_per_tick_{1};
+  u32 max_natural_spawn_results_per_tick_{1};
   u32 fluid_update_interval_{1};
   u32 fluid_update_budget_{2000};
 };
@@ -261,6 +281,7 @@ struct ServerRuntimeImpl {
   [[nodiscard]] usize pending_generation_job_count() const noexcept;
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
+  [[nodiscard]] const world::NaturalSpawnCounters& natural_spawn_counters() const noexcept;
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
   [[nodiscard]] bool set_player_fly_speed(PlayerID player_id, f32 fly_speed);
@@ -436,6 +457,7 @@ struct ServerRuntimeImpl {
   PlayerProfileStore profiles_;
   WorldRegistry worlds_;
   world::WorldRuntime default_world_{DefaultWorldID};
+  world::NaturalSpawnSystem natural_spawns_{};
   std::vector<net::NetworkEvent> inbound_events_;
   const voxel::BlockRegistry* block_registry_{};
   const player::ItemRegistry* item_registry_{};

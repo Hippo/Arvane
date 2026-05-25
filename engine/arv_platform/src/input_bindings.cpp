@@ -1,5 +1,7 @@
 #include "arv/platform/input_bindings.hpp"
 
+#include "arv/core/string.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -75,20 +77,6 @@ constexpr std::array<std::string_view, 7> kExtendedKeyboardCodes{{
 constexpr std::array<std::string_view, 3> kMouseButtons{{"Left", "Right", "Middle"}};
 constexpr std::array<std::string_view, 2> kMouseWheelDirections{{"Up", "Down"}};
 
-[[nodiscard]] bool equals_ignore_case(std::string_view lhs, std::string_view rhs) noexcept {
-  if (lhs.size() != rhs.size()) {
-    return false;
-  }
-  for (usize index = 0; index < lhs.size(); ++index) {
-    const char left = static_cast<char>(std::tolower(static_cast<unsigned char>(lhs[index])));
-    const char right = static_cast<char>(std::tolower(static_cast<unsigned char>(rhs[index])));
-    if (left != right) {
-      return false;
-    }
-  }
-  return true;
-}
-
 [[nodiscard]] std::optional<std::string> canonical_keyboard_code(std::string_view code) noexcept {
   if (code.size() == 1 && std::isalpha(static_cast<unsigned char>(code.front())) != 0) {
     return std::string{static_cast<char>(std::toupper(static_cast<unsigned char>(code.front())))};
@@ -98,18 +86,18 @@ constexpr std::array<std::string_view, 2> kMouseWheelDirections{{"Up", "Down"}};
   }
 
   for (const auto& [alias, canonical] : kKeyboardAliases) {
-    if (equals_ignore_case(alias, code)) {
+    if (equals_ignore_ascii_case(alias, code)) {
       return std::string{canonical};
     }
   }
 
   for (std::string_view supported : kKeyboardCodes) {
-    if (equals_ignore_case(supported, code)) {
+    if (equals_ignore_ascii_case(supported, code)) {
       return std::string{supported};
     }
   }
   for (std::string_view supported : kExtendedKeyboardCodes) {
-    if (equals_ignore_case(supported, code)) {
+    if (equals_ignore_ascii_case(supported, code)) {
       return std::string{supported};
     }
   }
@@ -122,7 +110,7 @@ template<usize Count>
     const std::array<std::string_view, Count>& names,
     std::string_view code) noexcept {
   for (std::string_view supported : names) {
-    if (equals_ignore_case(supported, code)) {
+    if (equals_ignore_ascii_case(supported, code)) {
       return std::string{supported};
     }
   }
@@ -201,13 +189,13 @@ std::string_view input_modifier_name(InputModifier modifier) noexcept {
 }
 
 std::optional<InputModifier> input_modifier_from_name(std::string_view name) noexcept {
-  if (equals_ignore_case(name, "Shift")) {
+  if (equals_ignore_ascii_case(name, "Shift")) {
     return InputModifier::Shift;
   }
-  if (equals_ignore_case(name, "Control") || equals_ignore_case(name, "Ctrl")) {
+  if (equals_ignore_ascii_case(name, "Control") || equals_ignore_ascii_case(name, "Ctrl")) {
     return InputModifier::Control;
   }
-  if (equals_ignore_case(name, "Alt")) {
+  if (equals_ignore_ascii_case(name, "Alt")) {
     return InputModifier::Alt;
   }
   return std::nullopt;

@@ -198,6 +198,21 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   if (config.chunks.stream_distance > config.chunks.load_distance) {
     return ConfigError{"chunks.stream_distance must be <= chunks.load_distance"};
   }
+  if (config.natural_spawning.interval_ticks == 0U) {
+    return ConfigError{"natural_spawning.interval_ticks must be non-zero"};
+  }
+  if (config.natural_spawning.min_distance_from_player_blocks >
+      config.natural_spawning.max_distance_from_player_blocks) {
+    return ConfigError{
+        "natural_spawning.min_distance_from_player_blocks must be <= max_distance_from_player_blocks"};
+  }
+  if (config.natural_spawning.max_successes_per_player_per_tick == 0U ||
+      config.natural_spawning.max_successes_per_world_per_tick == 0U) {
+    return ConfigError{"natural_spawning success budgets must be non-zero"};
+  }
+  if (config.natural_spawning.local_density_radius_blocks == 0U) {
+    return ConfigError{"natural_spawning.local_density_radius_blocks must be non-zero"};
+  }
   if (config.jobs.min_worker_threads == 0U) {
     return ConfigError{"jobs.min_worker_threads must be non-zero"};
   }

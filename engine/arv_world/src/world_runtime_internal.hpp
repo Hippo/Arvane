@@ -31,9 +31,6 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
     {0, 0, -1},
 }};
 
-[[nodiscard]] i32 abs_i32(i32 value) noexcept;
-[[nodiscard]] i32 max_abs3(i32 x, i32 y, i32 z) noexcept;
-[[nodiscard]] BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept;
 [[nodiscard]] ChunkSectionCoord chunk_for_position(Vec3f position) noexcept;
 [[nodiscard]] usize lifecycle_index(voxel::ChunkLifecycleState state) noexcept;
 
@@ -305,6 +302,9 @@ public:
   bool set_dropped_item_stack(EntityID entity_id, player::ItemStack stack) noexcept;
   [[nodiscard]] bool is_persistent(EntityID entity_id) const noexcept;
   [[nodiscard]] std::optional<std::string> persistent_uuid(EntityID entity_id) const;
+  bool set_natural_spawn(EntityID entity_id, NaturalSpawnComponent component) noexcept;
+  [[nodiscard]] NaturalSpawnComponent* find_natural_spawn(EntityID entity_id) noexcept;
+  [[nodiscard]] const NaturalSpawnComponent* find_natural_spawn(EntityID entity_id) const noexcept;
   bool add_tag(EntityID entity_id, std::string tag);
   bool remove_tag(EntityID entity_id, std::string_view tag) noexcept;
   [[nodiscard]] bool has_tag(EntityID entity_id, std::string_view tag) const noexcept;

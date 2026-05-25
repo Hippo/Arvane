@@ -22,10 +22,6 @@ inline constexpr std::string_view KeysDirectoryName = "keys";
 inline constexpr std::string_view SkinsDirectoryName = "skins";
 inline constexpr std::string_view CacheDirectoryName = "cache";
 
-[[nodiscard]] bool is_integer(const io::DataValue& value) noexcept {
-  return value.kind() == io::DataKind::I64 || value.kind() == io::DataKind::U64;
-}
-
 [[nodiscard]] const io::DataValue* member(
     const io::DataValue& object,
     std::string_view key) noexcept {
@@ -60,7 +56,7 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
     std::string_view key,
     std::string_view context) {
   const io::DataValue* value = member(object, key);
-  if (value == nullptr || !is_integer(*value)) {
+  if (value == nullptr || !io::is_integer_value(*value)) {
     return Expected<u64, LocalIdentityError>::failure(
         LocalIdentityError{std::string{context} + " requires integer field " + std::string{key}});
   }
@@ -365,7 +361,7 @@ inline constexpr std::string_view CacheDirectoryName = "cache";
   LocalProfileStore store;
   if (const io::DataValue* selected_profile = member(root, "selected_profile");
       selected_profile != nullptr) {
-    if (!is_integer(*selected_profile)) {
+    if (!io::is_integer_value(*selected_profile)) {
       return Expected<LocalProfileStore, LocalIdentityError>::failure(
           LocalIdentityError{"profiles.json selected_profile must be an unsigned integer"});
     }

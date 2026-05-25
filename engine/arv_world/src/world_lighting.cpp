@@ -38,12 +38,6 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
   return voxel::local_column_index({x, z});
 }
 
-[[nodiscard]] int nonzero_axis_count(Vec3i offset) noexcept {
-  return static_cast<int>(offset.x != 0) +
-         static_cast<int>(offset.y != 0) +
-         static_cast<int>(offset.z != 0);
-}
-
 [[nodiscard]] bool chunk_coord_less(ChunkSectionCoord lhs, ChunkSectionCoord rhs) noexcept {
   if (lhs.value.x != rhs.value.x) {
     return lhs.value.x < rhs.value.x;
@@ -52,10 +46,6 @@ inline constexpr std::array<Vec3i, voxel::BlockFaceCount> NeighborOffsets{{
     return lhs.value.z < rhs.value.z;
   }
   return lhs.value.y > rhs.value.y;
-}
-
-[[nodiscard]] i32 abs_i32(i32 value) noexcept {
-  return value < 0 ? -value : value;
 }
 
 [[nodiscard]] bool chunk_sections_share_face(
@@ -157,14 +147,6 @@ void add_light_dependency_offsets(
     i32 y,
     i32 z) noexcept {
   detail::add_boundary_dependency_offsets(mask, SectionLocalPos{{x, y, z}});
-}
-
-[[nodiscard]] ChunkSectionCoord offset_chunk(ChunkSectionCoord coord, Vec3i offset) noexcept {
-  return {{
-      coord.value.x + offset.x,
-      coord.value.y + offset.y,
-      coord.value.z + offset.z,
-  }};
 }
 
 [[nodiscard]] const ChunkLightingSnapshot* find_snapshot_chunk(
@@ -372,7 +354,7 @@ LightingSnapshot WorldLighting::make_snapshot_for_target(
 
   add_if_loaded(snapshot.target_coord);
   for (const Vec3i offset : NeighborOffsets) {
-    add_if_loaded(offset_chunk(snapshot.target_coord, offset));
+    add_if_loaded(offset_chunk_section(snapshot.target_coord, offset));
   }
   if (has_generation_surface) {
     for (i32 y = snapshot.target_coord.value.y + 1; y <= max_surface_section_y; ++y) {
@@ -503,7 +485,9 @@ LightingResult build_section_lighting_result(
   std::array<const ChunkLightingSnapshot*, voxel::BlockFaceCount> face_neighbors{};
   for (usize face_index = 0; face_index < face_neighbors.size(); ++face_index) {
     face_neighbors[face_index] =
-        find_snapshot_chunk(snapshot, offset_chunk(target->coord, NeighborOffsets[face_index]));
+        find_snapshot_chunk(
+            snapshot,
+            offset_chunk_section(target->coord, NeighborOffsets[face_index]));
     if (face_neighbors[face_index] != nullptr) {
       ++result.stats.sections_touched;
       result.stats.touched_neighbor_sections = true;
@@ -1001,7 +985,7 @@ LightingPublishStats WorldLighting::publish_result(
         }
 
         const ChunkSectionCoord neighbor_coord =
-            offset_chunk(chunk_result.coord, NeighborOffsets[face_index]);
+            offset_chunk_section(chunk_result.coord, NeighborOffsets[face_index]);
         voxel::ChunkSection* neighbor = search.find_mutable_chunk(neighbor_coord);
         if (neighbor == nullptr) {
           ++stats.boundary_deferrals;
@@ -1023,7 +1007,7 @@ LightingPublishStats WorldLighting::publish_result(
           continue;
         }
 
-        const ChunkSectionCoord dependency_coord = offset_chunk(chunk_result.coord, offset);
+        const ChunkSectionCoord dependency_coord = offset_chunk_section(chunk_result.coord, offset);
         if (search.find_mutable_chunk(dependency_coord) == nullptr) {
           continue;
         }

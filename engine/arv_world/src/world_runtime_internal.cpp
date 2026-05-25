@@ -4,19 +4,6 @@
 
 namespace arv::world::detail {
 
-i32 abs_i32(i32 value) noexcept {
-  return value < 0 ? -value : value;
-}
-
-i32 max_abs3(i32 x, i32 y, i32 z) noexcept {
-  const i32 xy = abs_i32(x) > abs_i32(y) ? abs_i32(x) : abs_i32(y);
-  return xy > abs_i32(z) ? xy : abs_i32(z);
-}
-
-BlockPos offset_block(BlockPos pos, Vec3i offset) noexcept {
-  return {{pos.value.x + offset.x, pos.value.y + offset.y, pos.value.z + offset.z}};
-}
-
 ChunkSectionCoord chunk_for_position(Vec3f position) noexcept {
   return block_to_chunk({{
       static_cast<i32>(std::floor(position.x)),

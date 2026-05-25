@@ -41,6 +41,12 @@ void ServerWorldJobRuntime::configure(const ServerStartInfo& start_info) {
               ? start_info.max_pending_fluid_jobs
               : requested_job_config.max_liquid_jobs_in_flight,
           1U);
+  max_pending_natural_spawn_jobs_ =
+      std::max<u32>(
+          requested_job_config.max_ai_jobs_in_flight == 0U
+              ? 1U
+              : requested_job_config.max_ai_jobs_in_flight,
+          1U);
   fluid_update_interval_ = start_info.world_tick_policy.fluid_interval;
   fluid_update_budget_ = start_info.world_tick_policy.fluid_budget == 0U
                              ? world::WorldTickPolicy{}.fluid_budget
@@ -101,6 +107,10 @@ usize ServerWorldJobRuntime::pending_lighting_job_count() const noexcept {
 
 usize ServerWorldJobRuntime::pending_fluid_job_count() const noexcept {
   return pending_fluid_jobs_.size();
+}
+
+usize ServerWorldJobRuntime::pending_natural_spawn_job_count() const noexcept {
+  return pending_natural_spawn_jobs_.size();
 }
 
 void ServerWorldJobRuntime::drain_generation_jobs(world::WorldRuntime& world, bool drain_all) {
@@ -324,6 +334,96 @@ void ServerWorldJobRuntime::schedule_fluid_jobs(
     return;
   }
   pending_fluid_jobs_.emplace_back(std::move(job));
+}
+
+void ServerWorldJobRuntime::drain_natural_spawn_jobs(
+    world::WorldRuntime& world,
+    world::NaturalSpawnSystem& natural_spawns,
+    const voxel::BlockRegistry* block_registry,
+    const entity::EntityRegistry* entity_registry,
+    TickIndex tick,
+    bool drain_all) {
+  ARV_PROFILE_ZONE("Natural spawning");
+  if (block_registry == nullptr || entity_registry == nullptr) {
+    natural_spawns.record_pending_job_count(
+        static_cast<u32>(pending_natural_spawn_jobs_.size()));
+    return;
+  }
+
+  u32 drained = 0;
+  for (usize index = 0;
+       index < pending_natural_spawn_jobs_.size() &&
+       (drain_all || drained < max_natural_spawn_results_per_tick_);) {
+    PendingNaturalSpawnJob& pending = pending_natural_spawn_jobs_[index];
+    if (!pending.job.is_complete()) {
+      ++index;
+      continue;
+    }
+
+    world::NaturalSpawnJobResult result = pending.job.get();
+    (void)natural_spawns.apply_job_result(
+        world,
+        *block_registry,
+        *entity_registry,
+        result,
+        tick,
+        true);
+    pending_natural_spawn_jobs_.erase(
+        pending_natural_spawn_jobs_.begin() + static_cast<isize>(index));
+    ++drained;
+  }
+
+  natural_spawns.record_pending_job_count(
+      static_cast<u32>(pending_natural_spawn_jobs_.size()));
+}
+
+void ServerWorldJobRuntime::schedule_natural_spawn_jobs(
+    world::WorldRuntime& world,
+    world::NaturalSpawnSystem& natural_spawns,
+    TickIndex tick) {
+  ARV_PROFILE_ZONE("Natural spawning");
+  if (job_system_ == nullptr ||
+      pending_natural_spawn_jobs_.size() >= max_pending_natural_spawn_jobs_) {
+    natural_spawns.record_pending_job_count(
+        static_cast<u32>(pending_natural_spawn_jobs_.size()));
+    return;
+  }
+
+  std::optional<world::NaturalSpawnJobRequest> request =
+      natural_spawns.make_job_request(world, tick);
+  if (!request.has_value()) {
+    natural_spawns.record_pending_job_count(
+        static_cast<u32>(pending_natural_spawn_jobs_.size()));
+    return;
+  }
+
+  const TickIndex source_tick = request->tick;
+  sched::JobDesc desc;
+  desc.name = "server_natural_spawning";
+  desc.lane = sched::JobLane::BackgroundCpu;
+  desc.domain = sched::JobDomain::EntityAi;
+  desc.completion_target = sched::JobCompletionTarget::World;
+  auto job = job_system_->submit_result(
+      std::move(desc),
+      [request = std::move(request.value())](const sched::CancellationToken& token) mutable {
+        if (token.is_canceled()) {
+          world::NaturalSpawnJobResult result;
+          result.world_id = request.world_id;
+          result.source_tick = request.tick;
+          result.canceled = true;
+          return result;
+        }
+        return world::NaturalSpawnSystem::build_job_result(std::move(request));
+      });
+  if (!job.valid()) {
+    natural_spawns.record_pending_job_count(
+        static_cast<u32>(pending_natural_spawn_jobs_.size()));
+    return;
+  }
+
+  pending_natural_spawn_jobs_.push_back({source_tick, std::move(job)});
+  natural_spawns.record_job_submitted(
+      static_cast<u32>(pending_natural_spawn_jobs_.size()));
 }
 
 void ServerWorldJobRuntime::schedule_lighting_jobs(

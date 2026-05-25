@@ -97,13 +97,6 @@ namespace {
   return health != nullptr && health->current <= 0.0F;
 }
 
-[[nodiscard]] u32 cooldown_ticks_from_seconds(f32 seconds) noexcept {
-  if (!std::isfinite(seconds) || seconds <= 0.0F) {
-    return 0U;
-  }
-  return static_cast<u32>(std::ceil(seconds * static_cast<f32>(DefaultBaseTps)));
-}
-
 [[nodiscard]] player::ItemAttackData default_attack_profile(
     const CombatConfig& config) noexcept {
   return {
@@ -113,7 +106,7 @@ namespace {
       std::isfinite(config.default_attack_range) && config.default_attack_range > 0.0F
           ? config.default_attack_range
           : 3.0F,
-      cooldown_ticks_from_seconds(config.default_attack_cooldown_seconds),
+      seconds_to_ticks_ceil(config.default_attack_cooldown_seconds),
       0.0F,
       0.0F,
       0.0F};

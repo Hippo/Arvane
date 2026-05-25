@@ -3,7 +3,10 @@
 #include "arv/blueprint/blueprint.hpp"
 #include "arv/io/data_codecs.hpp"
 
+#include <algorithm>
+#include <array>
 #include <fstream>
+#include <span>
 #include <sstream>
 #include <utility>
 
@@ -289,6 +292,285 @@ struct Parser {
       list.features.push_back({id});
     }
     out.push_back(std::move(list));
+  }
+  return true;
+}
+
+[[nodiscard]] bool object_has_only_fields(
+    Parser& parser,
+    const io::DataValue& root,
+    std::string_view field_prefix,
+    std::span<const std::string_view> known_fields) {
+  const io::DataValue::Object* object = root.object_if();
+  if (object == nullptr) {
+    return parser.fail(std::string{field_prefix}, "must be an object");
+  }
+  for (const auto& [field, value] : *object) {
+    (void)value;
+    const bool known =
+        std::find(known_fields.begin(), known_fields.end(), field) != known_fields.end();
+    if (!known) {
+      return parser.fail(
+          std::string{field_prefix} + "." + field,
+          "unknown field");
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool read_u8_optional(
+    Parser& parser,
+    const io::DataValue& root,
+    std::string_view field,
+    std::optional<u8>& out,
+    std::string_view field_prefix,
+    u8 max_value) {
+  const io::DataValue* node = parser.member(root, field);
+  if (node == nullptr) {
+    return true;
+  }
+  if (node->kind() != io::DataKind::I64 && node->kind() != io::DataKind::U64) {
+    return parser.fail(
+        std::string{field_prefix} + "." + std::string{field},
+        "must be an integer");
+  }
+  const u64 value = node->as_u64_or(0U);
+  if (value > max_value) {
+    return parser.fail(
+        std::string{field_prefix} + "." + std::string{field},
+        "is outside the supported range");
+  }
+  out = static_cast<u8>(value);
+  return true;
+}
+
+[[nodiscard]] bool read_resource_ref_list(
+    Parser& parser,
+    const io::DataValue& root,
+    std::string_view field,
+    std::vector<ResourceRef>& out,
+    std::string_view field_prefix) {
+  const io::DataValue* node = parser.member(root, field);
+  if (node == nullptr) {
+    return true;
+  }
+  const io::DataValue::Array* array = node->array_if();
+  if (array == nullptr) {
+    return parser.fail(
+        std::string{field_prefix} + "." + std::string{field},
+        "must be a sequence");
+  }
+  for (const io::DataValue& entry : *array) {
+    const std::string id{entry.as_string_or({})};
+    if (!valid_resource_id(id)) {
+      return parser.fail(
+          std::string{field_prefix} + "." + std::string{field},
+          "entries must be resource IDs");
+    }
+    out.push_back({id});
+  }
+  return true;
+}
+
+[[nodiscard]] bool parse_biome_spawn_conditions(
+    Parser& parser,
+    const io::DataValue& root,
+    BiomeSpawnConditionConfig& out,
+    std::string_view field_prefix) {
+  static constexpr std::array<std::string_view, 16> KnownFields{{
+      "min_y",
+      "max_y",
+      "min_light",
+      "max_light",
+      "surface",
+      "requires_surface",
+      "requires_sky_access",
+      "requires_water",
+      "requires_air_body",
+      "requires_air_head",
+      "block_tags_below",
+      "block_tags_inside",
+      "block_tags_head",
+      "min_distance_from_player_blocks",
+      "max_distance_from_player_blocks",
+      "time",
+  }};
+  if (!object_has_only_fields(parser, root, field_prefix, KnownFields)) {
+    return false;
+  }
+
+  i32 min_y = out.min_y.value_or(0);
+  i32 max_y = out.max_y.value_or(0);
+  if (parser.member(root, "min_y") != nullptr) {
+    if (!parser.read_i32(root, "min_y", min_y)) {
+      return false;
+    }
+    out.min_y = min_y;
+  }
+  if (parser.member(root, "max_y") != nullptr) {
+    if (!parser.read_i32(root, "max_y", max_y)) {
+      return false;
+    }
+    out.max_y = max_y;
+  }
+  if (out.min_y.has_value() && out.max_y.has_value() && out.min_y.value() > out.max_y.value()) {
+    return parser.fail(std::string{field_prefix}, "min_y must be <= max_y");
+  }
+
+  if (!read_u8_optional(parser, root, "min_light", out.min_light, field_prefix, 15) ||
+      !read_u8_optional(parser, root, "max_light", out.max_light, field_prefix, 15)) {
+    return false;
+  }
+  if (out.min_light.has_value() && out.max_light.has_value() &&
+      out.min_light.value() > out.max_light.value()) {
+    return parser.fail(std::string{field_prefix}, "min_light must be <= max_light");
+  }
+
+  if (!parser.read_bool(root, "surface", out.requires_surface, false) ||
+      !parser.read_bool(root, "requires_surface", out.requires_surface, false) ||
+      !parser.read_bool(root, "requires_sky_access", out.requires_sky_access, false) ||
+      !parser.read_bool(root, "requires_water", out.requires_water, false) ||
+      !parser.read_bool(root, "requires_air_body", out.requires_air_body, false) ||
+      !parser.read_bool(root, "requires_air_head", out.requires_air_head, false) ||
+      !parser.read_u32(
+          root,
+          "min_distance_from_player_blocks",
+          out.min_distance_from_player_blocks,
+          false) ||
+      !parser.read_u32(
+          root,
+          "max_distance_from_player_blocks",
+          out.max_distance_from_player_blocks,
+          false)) {
+    return false;
+  }
+  if (out.min_distance_from_player_blocks > out.max_distance_from_player_blocks) {
+    return parser.fail(
+        std::string{field_prefix},
+        "min_distance_from_player_blocks must be <= max_distance_from_player_blocks");
+  }
+  if (!read_resource_ref_list(
+          parser,
+          root,
+          "block_tags_below",
+          out.block_tags_below,
+          field_prefix) ||
+      !read_resource_ref_list(
+          parser,
+          root,
+          "block_tags_inside",
+          out.block_tags_inside,
+          field_prefix) ||
+      !read_resource_ref_list(
+          parser,
+          root,
+          "block_tags_head",
+          out.block_tags_head,
+          field_prefix)) {
+    return false;
+  }
+  if (const io::DataValue* time = parser.member(root, "time"); time != nullptr) {
+    if (time->kind() != io::DataKind::String) {
+      return parser.fail(std::string{field_prefix} + ".time", "must be a string");
+    }
+    const std::string time_name{time->as_string_or({})};
+    const std::optional<TimePredicate> parsed = time_predicate_from_string(time_name);
+    if (!parsed.has_value()) {
+      return parser.fail(
+          std::string{field_prefix} + ".time",
+          "unknown time predicate: " + time_name);
+    }
+    out.time = parsed.value();
+  }
+  return true;
+}
+
+[[nodiscard]] bool parse_biome_spawn_entry(
+    Parser& parser,
+    const io::DataValue& root,
+    SpawnCategory category,
+    std::string_view field_prefix,
+    BiomeSpawnEntryConfig& out) {
+  static constexpr std::array<std::string_view, 5> KnownFields{{
+      "entity",
+      "weight",
+      "min_group",
+      "max_group",
+      "conditions",
+  }};
+  if (!object_has_only_fields(parser, root, field_prefix, KnownFields)) {
+    return false;
+  }
+
+  out.category = category;
+  if (!parser.read_ref(root, "entity", out.entity) ||
+      !parser.read_u32(root, "weight", out.weight)) {
+    return false;
+  }
+  if (out.weight == 0U) {
+    return parser.fail(std::string{field_prefix} + ".weight", "must be greater than zero");
+  }
+  u32 min_group = out.min_group;
+  u32 max_group = out.max_group;
+  if (!parser.read_u32(root, "min_group", min_group, false) ||
+      !parser.read_u32(root, "max_group", max_group, false)) {
+    return false;
+  }
+  if (min_group == 0U || min_group > 255U || max_group == 0U || max_group > 255U) {
+    return parser.fail(std::string{field_prefix}, "group range must be 1..255");
+  }
+  if (min_group > max_group) {
+    return parser.fail(std::string{field_prefix}, "min_group must be <= max_group");
+  }
+  out.min_group = static_cast<u8>(min_group);
+  out.max_group = static_cast<u8>(max_group);
+
+  if (const io::DataValue* conditions = parser.member(root, "conditions");
+      conditions != nullptr &&
+      !parse_biome_spawn_conditions(
+          parser,
+          *conditions,
+          out.conditions,
+          std::string{field_prefix} + ".conditions")) {
+    return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool parse_biome_spawns(
+    Parser& parser,
+    const io::DataValue& root,
+    std::vector<BiomeSpawnEntryConfig>& out) {
+  const io::DataValue* spawns = parser.member(root, "spawns");
+  if (spawns == nullptr) {
+    return true;
+  }
+  const io::DataValue::Object* object = spawns->object_if();
+  if (object == nullptr) {
+    return parser.fail("spawns", "must be an object");
+  }
+  for (const auto& [category_name, entries] : *object) {
+    const std::optional<SpawnCategory> category = spawn_category_from_string(category_name);
+    if (!category.has_value()) {
+      return parser.fail("spawns." + category_name, "unknown spawn category");
+    }
+    const io::DataValue::Array* array = entries.array_if();
+    if (array == nullptr) {
+      return parser.fail("spawns." + category_name, "must be a sequence");
+    }
+    for (usize index = 0; index < array->size(); ++index) {
+      const io::DataValue& entry_node = (*array)[index];
+      BiomeSpawnEntryConfig entry;
+      if (!parse_biome_spawn_entry(
+              parser,
+              entry_node,
+              category.value(),
+              "spawns." + category_name + "[" + std::to_string(index) + "]",
+              entry)) {
+        return false;
+      }
+      out.push_back(std::move(entry));
+    }
   }
   return true;
 }
@@ -872,7 +1154,8 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
           }
         }
         if (!parser.read_ref(root, "surface_rule_set", config.surface_rule_set, false) ||
-            !parse_stage_feature_lists(parser, root, config.features, false)) {
+            !parse_stage_feature_lists(parser, root, config.features, false) ||
+            !parse_biome_spawns(parser, root, config.spawns)) {
           return false;
         }
         if (const io::DataValue* colors = parser.member(root, "colors"); colors != nullptr) {
