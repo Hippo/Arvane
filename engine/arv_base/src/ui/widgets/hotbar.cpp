@@ -7,6 +7,12 @@
 
 namespace arv::ui {
 namespace widgets_detail {
+namespace {
+
+constexpr Vec2f HotbarHudOffset{0.0F, -24.0F};
+constexpr Vec2f HotbarItemNamePopupOffset{0.0F, -148.0F};
+
+} // namespace
 
 void append_hotbar_item_name_popup(UiTree& tree, const HotbarHudModel& model) {
   if (model.item_name_popup.empty() || model.item_name_popup_alpha <= 0.0F) {
@@ -26,7 +32,7 @@ void append_hotbar_item_name_popup(UiTree& tree, const HotbarHudModel& model) {
       theme.layout.spacing_sm,
       theme.layout.spacing_sm};
   popup.layout.anchor = UiAnchor::BottomCenter;
-  popup.layout.offset = {0.0F, -94.0F};
+  popup.layout.offset = HotbarItemNamePopupOffset;
   popup.style.background = theme.colors.surface_alt;
   popup.style.background.w = std::min(popup.style.background.w, 0.86F) * alpha;
   popup.hit_test = false;
@@ -62,7 +68,7 @@ void append_hotbar_hud(UiTree& tree, HotbarHudModel model) {
       theme.layout.spacing_sm,
       theme.layout.spacing_sm};
   hotbar.layout.anchor = UiAnchor::BottomCenter;
-  hotbar.layout.offset = {0.0F, -24.0F};
+  hotbar.layout.offset = HotbarHudOffset;
   hotbar.style.background = theme.colors.surface_alt;
   hotbar.style.background.w = std::min(hotbar.style.background.w, 0.82F);
   style_surface(hotbar, theme, theme.layout.radius_lg);

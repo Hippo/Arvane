@@ -233,7 +233,7 @@ Subsystems may version independently:
 {
   "lighting_version": 1,
   "entity_version": 1,
-  "inventory_version": 1
+  "inventory_version": 2
 }
 ```
 
@@ -450,10 +450,13 @@ item_table = [
 {
   "slots": [
     { "item": 1, "count": 64 },
-    { "item": 2, "count": 1, "data": {} }
+    { "item": 2, "count": 1, "data": { "pack_namespace": { "key": "value" } } }
   ]
 }
 ```
+
+`inventory_version` 2 adds optional per-stack `data`. The root object is keyed
+by pack/plugin namespace. Missing `data` is equivalent to an empty object.
 
 ---
 
@@ -474,7 +477,11 @@ Example:
   "velocity": [0, 0, 0],
   "components": {
     "dropped_item": {
-      "stack": { "item": "arvane:stone", "count": 4 },
+      "stack": {
+        "item": "arvane:stone",
+        "count": 4,
+        "data": { "pack_namespace": { "key": "value" } }
+      },
       "pickup_delay_seconds": 0.5
     }
   }

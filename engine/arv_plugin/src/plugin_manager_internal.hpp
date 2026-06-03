@@ -191,6 +191,7 @@ struct PluginAPIStorage {
   ArvPlayersAPI players_api{};
   ArvVariablesAPI variables_api{};
   ArvChatMessageAPI chat_message_api{};
+  ArvItemsAPI items_api{};
   ArvAPI api{};
 };
 
@@ -397,5 +398,6 @@ void fill_network_api(PluginAPIStorage& storage);
 void fill_player_api(PluginAPIStorage& storage);
 void fill_variables_api(PluginAPIStorage& storage);
 void fill_chat_message_api(PluginAPIStorage& storage);
+void fill_items_api(PluginAPIStorage& storage);
 
 } // namespace arv::plugin

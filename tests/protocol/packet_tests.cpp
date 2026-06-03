@@ -16,9 +16,25 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
+namespace {
+
+[[nodiscard]] arv::io::DataDocument stack_data(std::string_view value) {
+  arv::io::DataDocument document{1U, arv::io::DataValue::object()};
+  arv::io::DataValue payload = arv::io::DataValue::object();
+  payload.set("value", std::string{value});
+  document.root.set("test", std::move(payload));
+  return document;
+}
+
+} // namespace
+
 TEST(ProtocolTests, PacketEnvelopeRoundTripsPayload) {
+  EXPECT_EQ(arv::protocol::CurrentProtocolVersion, 2U);
+
   arv::protocol::MessageWriter payload_writer;
   payload_writer.write_string("hello");
   const std::vector<arv::u8> payload = std::move(payload_writer).take_bytes();
@@ -635,7 +651,10 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
   dropped.world_id = arv::WorldID{6};
   dropped.server_tick = 88;
   dropped.drops.push_back({arv::EntityNetID{33},
-                           arv::player::ItemStack{arv::player::ItemID{44}, 3},
+                           arv::player::ItemStack{
+                               arv::player::ItemID{44},
+                               3,
+                               stack_data("dropped")},
                            {1.0F, 2.0F, 3.0F},
                            {0.1F, 0.2F, 0.3F}});
   const auto decoded_dropped = arv::protocol::deserialize_clientbound_dropped_item_snapshot(
@@ -644,7 +663,9 @@ TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) 
   ASSERT_EQ(decoded_dropped.value().drops.size(), 1U);
   EXPECT_EQ(decoded_dropped.value().server_tick, 88U);
   EXPECT_EQ(decoded_dropped.value().drops.front().drop_id, (arv::EntityNetID{33}));
-  EXPECT_EQ(decoded_dropped.value().drops.front().stack, (arv::player::ItemStack{arv::player::ItemID{44}, 3}));
+  EXPECT_EQ(
+      decoded_dropped.value().drops.front().stack,
+      (arv::player::ItemStack{arv::player::ItemID{44}, 3, stack_data("dropped")}));
   EXPECT_EQ(decoded_dropped.value().drops.front().position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
 }
 
@@ -679,9 +700,12 @@ TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
   update.revision = 7;
   update.selected_hotbar_slot = 2;
   update.slots = {
-      arv::player::ItemStack{arv::player::ItemID{10}, 5},
+      arv::player::ItemStack{arv::player::ItemID{10}, 5, stack_data("slot")},
       std::nullopt};
-  update.carried_stack = arv::player::ItemStack{arv::player::ItemID{11}, 1};
+  update.carried_stack = arv::player::ItemStack{
+      arv::player::ItemID{11},
+      1,
+      stack_data("cursor")};
 
   const auto decoded_update = arv::protocol::deserialize_clientbound_inventory_update(
       arv::protocol::serialize_clientbound_inventory_update(update));
@@ -692,9 +716,15 @@ TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
   ASSERT_TRUE(decoded_update.value().slots[0].has_value());
   EXPECT_EQ(decoded_update.value().slots[0]->item, (arv::player::ItemID{10}));
   EXPECT_EQ(decoded_update.value().slots[0]->count, 5U);
+  EXPECT_TRUE(arv::player::item_stack_data_equal(
+      decoded_update.value().slots[0]->data,
+      std::optional<arv::io::DataDocument>{stack_data("slot")}));
   EXPECT_FALSE(decoded_update.value().slots[1].has_value());
   ASSERT_TRUE(decoded_update.value().carried_stack.has_value());
   EXPECT_EQ(decoded_update.value().carried_stack->item, (arv::player::ItemID{11}));
+  EXPECT_TRUE(arv::player::item_stack_data_equal(
+      decoded_update.value().carried_stack->data,
+      std::optional<arv::io::DataDocument>{stack_data("cursor")}));
 
   arv::protocol::MessageWriter malformed;
   malformed.write<arv::u32>(arv::protocol::PlayerInventoryID.value);
@@ -703,4 +733,17 @@ TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
   malformed.write<arv::u32>(arv::protocol::MaxInventorySlots + 1U);
   EXPECT_FALSE(arv::protocol::deserialize_clientbound_inventory_update(
       std::move(malformed).take_bytes()));
+
+  arv::protocol::MessageWriter oversized_data;
+  oversized_data.write<arv::u32>(arv::protocol::PlayerInventoryID.value);
+  oversized_data.write<arv::u32>(8);
+  oversized_data.write<arv::u8>(2);
+  oversized_data.write<arv::u32>(1);
+  oversized_data.write_bool(true);
+  oversized_data.write<arv::u32>(10);
+  oversized_data.write<arv::u16>(5);
+  oversized_data.write_bool(true);
+  oversized_data.write<arv::u32>(arv::player::MaxItemStackDataBytes + 1U);
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_inventory_update(
+      std::move(oversized_data).take_bytes()));
 }

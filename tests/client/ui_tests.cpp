@@ -786,7 +786,7 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   arv::ui::build_gameplay_ui(
       tree,
       {
-          {0, 9, {800.0F, 600.0F}, {slots.data(), 9}},
+          {0, 9, {800.0F, 600.0F}, {slots.data(), 9}, "Stone", 1.0F},
           {true, "Inventory", 0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}},
           {true, true, {chat.data(), chat.size()}, "test", 4U, 1U, 3U},
           {true, "Players", "footer", {players.data(), players.size()}},
@@ -826,6 +826,12 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   EXPECT_EQ(scoreboard_missing->text, "Missing: {missing}");
   const auto* health = tree.find_by_stable_id("hud.health");
   ASSERT_NE(health, nullptr);
+  const auto* hotbar = tree.find_by_stable_id("hud.hotbar");
+  const auto* item_popup = tree.find_by_stable_id("hud.hotbar.item_name");
+  ASSERT_NE(hotbar, nullptr);
+  ASSERT_NE(item_popup, nullptr);
+  EXPECT_LT(item_popup->rect.y + item_popup->rect.height, health->rect.y);
+  EXPECT_LT(health->rect.y + health->rect.height, hotbar->rect.y);
   EXPECT_EQ(health->children.size(), 20U);
   ASSERT_NE(tree.find_by_stable_id("hud.health.segment.17"), nullptr);
   ASSERT_NE(tree.find_by_stable_id("hud.health.segment.19"), nullptr);

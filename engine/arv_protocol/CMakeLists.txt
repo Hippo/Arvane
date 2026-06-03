@@ -7,6 +7,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/entity_replication.hpp
   include/arv/protocol/handshake.hpp
   include/arv/protocol/inventory_sync.hpp
+  include/arv/protocol/item_stack_wire.hpp
   include/arv/protocol/message_envelope.hpp
   include/arv/protocol/message_primitives.hpp
   include/arv/protocol/message_registry.hpp
@@ -29,6 +30,7 @@ add_library(arv_protocol STATIC
   src/entity_replication.cpp
   src/handshake.cpp
   src/inventory_sync.cpp
+  src/item_stack_wire.cpp
   src/message_envelope.cpp
   src/message_registry.cpp
   src/player_input.cpp

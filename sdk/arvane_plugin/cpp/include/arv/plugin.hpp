@@ -9,6 +9,7 @@
 #include "arv/entities.hpp"
 #include "arv/events.hpp"
 #include "arv/gamemode.hpp"
+#include "arv/items.hpp"
 #include "arv/logger.hpp"
 #include "arv/metrics.hpp"
 #include "arv/network.hpp"
@@ -79,6 +80,8 @@ public:
 
   [[nodiscard]] const Variables& variables() const noexcept;
 
+  [[nodiscard]] const Items& items() const noexcept;
+
 private:
   const ArvAPI* api_{};
   Context context_;
@@ -103,6 +106,7 @@ private:
   GameModes gamemodes_;
   Players players_;
   Variables variables_;
+  Items items_;
 };
 
 } // namespace arv

@@ -76,6 +76,68 @@ bool load_probe_document_equals(
   return ok;
 }
 
+bool item_stack_data_checks(ArvPlayerID player_id) {
+  if (g_api->items == nullptr) {
+    return false;
+  }
+
+  ArvItemStackLocation selected{
+      player_id,
+      ARV_ITEM_STACK_SELECTED_HOTBAR,
+      0U};
+  ArvItemStackInfo info{};
+  bool checks_ok = result_ok(g_api->items->stack_info(
+      g_api->items_ctx,
+      selected,
+      &info)) &&
+      info.present &&
+      info.count == 3 &&
+      view_equals(info.item_name, "arvane:stone");
+
+  ArvDataDocumentHandle document = make_probe_document("owned item data");
+  checks_ok = checks_ok && document != 0 &&
+      result_ok(g_api->items->save_stack_namespace_data(
+          g_api->items_ctx,
+          selected,
+          arv_cstr("example_plugin_pack"),
+          document));
+  checks_ok = checks_ok &&
+      g_api->items->save_stack_namespace_data(
+          g_api->items_ctx,
+          selected,
+          arv_cstr("other_pack"),
+          document).code == ARV_RESULT_PERMISSION_DENIED;
+  if (document != 0) {
+    g_api->data->release_document(g_api->data_ctx, document);
+  }
+
+  ArvDataDocumentHandle namespace_document{};
+  checks_ok = checks_ok && result_ok(g_api->items->load_stack_namespace_data(
+      g_api->items_ctx,
+      selected,
+      arv_cstr("example_plugin_pack"),
+      &namespace_document)) &&
+      document_string_equals(namespace_document, "value", "owned item data");
+  if (namespace_document != 0) {
+    g_api->data->release_document(g_api->data_ctx, namespace_document);
+  }
+
+  ArvDataDocumentHandle full_document{};
+  checks_ok = checks_ok && result_ok(g_api->items->load_stack_data(
+      g_api->items_ctx,
+      selected,
+      &full_document)) &&
+      document_string_equals(
+          full_document,
+          "example_plugin_pack.value",
+          "owned item data");
+  if (full_document != 0) {
+    g_api->data->release_document(g_api->data_ctx, full_document);
+  }
+
+  return checks_ok;
+}
+
 void sync_job(void*) {
   const int sync_tick =
       g_sync_ticks.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -109,6 +171,7 @@ void sync_job(void*) {
       selection.b.x == 4 &&
       selection.b.y == 5 &&
       selection.b.z == 6;
+  checks_ok = checks_ok && item_stack_data_checks(player_id);
 
   checks_ok = checks_ok && result_ok(g_api->permissions->add_group(
       g_api->permissions_ctx,

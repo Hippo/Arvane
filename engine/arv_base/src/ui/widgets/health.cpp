@@ -8,6 +8,11 @@
 
 namespace arv::ui {
 namespace widgets_detail {
+namespace {
+
+constexpr Vec2f HealthHudOffset{0.0F, -112.0F};
+
+} // namespace
 
 void append_health_hud(UiTree& tree, HealthHudModel model) {
   if (!model.visible || !std::isfinite(model.max) || model.max <= 0.0F) {
@@ -40,7 +45,7 @@ void append_health_hud(UiTree& tree, HealthHudModel model) {
       theme.layout.spacing_xs,
       theme.layout.spacing_xs};
   bar.layout.anchor = UiAnchor::BottomCenter;
-  bar.layout.offset = {0.0F, -82.0F};
+  bar.layout.offset = HealthHudOffset;
   bar.style.background = theme.colors.surface_alt;
   bar.style.background.w = std::min(bar.style.background.w, 0.74F);
   style_surface(bar, theme, theme.layout.radius_md);

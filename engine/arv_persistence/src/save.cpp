@@ -164,10 +164,14 @@ namespace {
 [[nodiscard]] io::DataValue item_stack_to_value(
     player::ItemStack stack,
     const player::ItemRegistry& registry) {
+  player::normalize_item_stack_data(stack);
   const player::ItemRecord* item = registry.item(stack.item);
   io::DataValue node = io::DataValue::object();
   node.set("item", item == nullptr ? std::string{player::MissingItemName} : item->name);
   node.set("count", static_cast<u64>(stack.count));
+  if (player::item_stack_has_data(stack)) {
+    node.set("data", stack.data->root);
+  }
   return node;
 }
 
@@ -178,9 +182,14 @@ namespace {
   const player::ItemID fallback = missing_item == nullptr ? player::AirItemID : missing_item->id;
   const std::optional<player::ItemID> item =
       registry.find_item(string_value_or(node, "item", std::string{player::MissingItemName}));
-  return {
+  player::ItemStack stack{
       item.value_or(fallback),
       static_cast<u16>(u64_value_or(node, "count", 0U))};
+  if (const io::DataValue* data = member(node, "data"); data != nullptr) {
+    stack.data = io::DataDocument{1U, *data};
+    player::normalize_item_stack_data(stack);
+  }
+  return stack;
 }
 
 [[nodiscard]] RegionCoord entity_region_for_position(Vec3f position) noexcept {
@@ -582,6 +591,9 @@ Expected<void, PersistenceError> write_json_atomic(
     io::DataValue slot_node = io::DataValue::object();
     slot_node.set("item", static_cast<u64>(iter->second));
     slot_node.set("count", static_cast<u64>(slot->count));
+    if (player::item_stack_has_data(slot.value())) {
+      slot_node.set("data", slot->data->root);
+    }
     slots.push(std::move(slot_node));
   }
 
@@ -634,7 +646,12 @@ Expected<void, PersistenceError> write_json_atomic(
     if (item_index >= item_ids.size()) {
       continue;
     }
-    inventory.set_slot(index, player::ItemStack{item_ids[item_index].value_or(fallback), count});
+    player::ItemStack stack{item_ids[item_index].value_or(fallback), count};
+    if (const io::DataValue* data = member(slot, "data"); data != nullptr) {
+      stack.data = io::DataDocument{1U, *data};
+      player::normalize_item_stack_data(stack);
+    }
+    inventory.set_slot(index, std::move(stack));
   }
 
   return inventory;
@@ -1062,7 +1079,7 @@ Expected<void, PersistenceError> save_server_root(
     player_json.set("selected_skin_hash", player.selected_skin_hash);
     player_json.set("selected_skin_slim_model", player.selected_skin_slim_model);
     player_json.set("selected_hotbar_slot", static_cast<u64>(player.selected_hotbar_slot));
-    player_json.set("inventory_version", static_cast<u64>(1U));
+    player_json.set("inventory_version", static_cast<u64>(2U));
     player_json.set("inventory", inventory_to_value(player.inventory, item_registry));
     io::DataValue groups = io::DataValue::array();
     for (const std::string& group : player.permission_overrides.groups) {

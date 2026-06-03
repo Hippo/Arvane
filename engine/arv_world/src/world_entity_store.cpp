@@ -113,6 +113,7 @@ EntityID WorldEntityStore::create_dropped_item(
   info.velocity = velocity;
   info.persistent = persistent;
   info.replicated = true;
+  player::normalize_item_stack_data(stack);
   info.dropped_item_stack = stack;
   info.dropped_item_pickup_delay_seconds = std::max<Seconds>(pickup_delay_seconds, 0.0F);
   return create_entity(std::move(info));
@@ -385,6 +386,7 @@ bool WorldEntityStore::set_dropped_item_stack(EntityID entity_id, player::ItemSt
   if (dropped == nullptr) {
     return false;
   }
+  player::normalize_item_stack_data(stack);
   dropped->stack = stack;
   return true;
 }

@@ -22,6 +22,7 @@ add_library(ArvaneSDK STATIC
   cpp/src/entities.cpp
   cpp/src/events.cpp
   cpp/src/gamemode.cpp
+  cpp/src/items.cpp
   cpp/src/logger.cpp
   cpp/src/metrics.cpp
   cpp/src/network.cpp

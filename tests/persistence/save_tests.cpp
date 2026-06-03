@@ -13,6 +13,7 @@
 #include <iterator>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -76,6 +77,14 @@ arv::persistence::SavedChunkSection make_saved_chunk(
   return chunk;
 }
 
+[[nodiscard]] arv::io::DataDocument stack_data(std::string_view value) {
+  arv::io::DataDocument document{1U, arv::io::DataValue::object()};
+  arv::io::DataValue payload = arv::io::DataValue::object();
+  payload.set("value", std::string{value});
+  document.root.set("test", std::move(payload));
+  return document;
+}
+
 } // namespace
 
 TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
@@ -103,7 +112,9 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   player.permission_overrides.custom_overrides["arvane.command.test"] =
       arv::player::TriState::Deny;
   player.selected_hotbar_slot = 3;
-  ASSERT_TRUE(player.inventory.set_slot(0, arv::player::ItemStack{stone_item, 7}));
+  ASSERT_TRUE(player.inventory.set_slot(
+      0,
+      arv::player::ItemStack{stone_item, 7, stack_data("player")}));
 
   const arv::persistence::SaveMetadata save_metadata{
       arv::persistence::CurrentSaveFormatVersion,
@@ -147,7 +158,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
        {2.0F, 5.0F, 2.0F},
        {0.0F, 0.0F, 0.0F, 1.0F},
        {0.0F, 0.05F, 0.0F},
-       arv::player::ItemStack{stone_item, 4},
+       arv::player::ItemStack{stone_item, 4, stack_data("drop")},
        0.25F}};
 
   ASSERT_TRUE(arv::persistence::save_server_root(
@@ -169,6 +180,16 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       server_save_root / "worlds" / "default" / "entities" / "r.0.0.json"));
   EXPECT_TRUE(std::filesystem::exists(
       server_save_root / "worlds" / "default" / "entities" / "r.-1.-1.json"));
+  {
+    std::ifstream input(server_save_root / "players" / "local_player.dat");
+    ASSERT_TRUE(input);
+    const std::string player_json{
+        std::istreambuf_iterator<char>{input},
+        std::istreambuf_iterator<char>{}};
+    EXPECT_NE(player_json.find("\"inventory_version\": 2"), std::string::npos);
+    EXPECT_NE(player_json.find("\"data\""), std::string::npos);
+    EXPECT_NE(player_json.find("\"player\""), std::string::npos);
+  }
   {
     std::ifstream input(server_save_root / "worlds" / "default" / "world.json");
     ASSERT_TRUE(input);
@@ -225,6 +246,11 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_TRUE(loaded.value().players[0].inventory.slot(0).has_value());
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->item, stone_item);
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->count, 7U);
+  ASSERT_TRUE(loaded.value().players[0].inventory.slot(0)->data.has_value());
+  const arv::io::DataValue* player_stack_data =
+      arv::io::find_path(*loaded.value().players[0].inventory.slot(0)->data, "test.value");
+  ASSERT_NE(player_stack_data, nullptr);
+  EXPECT_EQ(player_stack_data->as_string_or({}), "player");
   ASSERT_EQ(loaded.value().entities.size(), 3U);
   const auto entity_a = std::find_if(
       loaded.value().entities.begin(),
@@ -257,6 +283,11 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   ASSERT_TRUE(dropped_item->dropped_item_stack.has_value());
   EXPECT_EQ(dropped_item->dropped_item_stack->item, stone_item);
   EXPECT_EQ(dropped_item->dropped_item_stack->count, 4U);
+  ASSERT_TRUE(dropped_item->dropped_item_stack->data.has_value());
+  const arv::io::DataValue* dropped_stack_data =
+      arv::io::find_path(*dropped_item->dropped_item_stack->data, "test.value");
+  ASSERT_NE(dropped_stack_data, nullptr);
+  EXPECT_EQ(dropped_stack_data->as_string_or({}), "drop");
   EXPECT_FLOAT_EQ(dropped_item->dropped_item_pickup_delay_seconds, 0.25F);
 
   {

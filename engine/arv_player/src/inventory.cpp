@@ -35,6 +35,9 @@ bool Inventory::set_slot(usize slot_index, std::optional<ItemStack> stack) {
   if (!is_valid_slot(slot_index)) {
     return false;
   }
+  if (stack.has_value()) {
+    normalize_item_stack_data(stack.value());
+  }
   slots_[slot_index] = std::move(stack);
   return true;
 }
@@ -49,6 +52,7 @@ bool Inventory::clear_slot(usize slot_index) {
 
 InventoryInsertResult Inventory::insert_stack(ItemStack stack, const ItemRegistry& registry) {
   InventoryInsertResult result;
+  normalize_item_stack_data(stack);
   if (stack.count == 0U) {
     return result;
   }
@@ -60,7 +64,8 @@ InventoryInsertResult Inventory::insert_stack(ItemStack stack, const ItemRegistr
   }
 
   for (std::optional<ItemStack>& slot_value : slots_) {
-    if (!slot_value.has_value() || slot_value->item != stack.item || slot_value->count >= item->max_stack_size) {
+    if (!slot_value.has_value() || !item_stacks_compatible(slot_value.value(), stack) ||
+        slot_value->count >= item->max_stack_size) {
       continue;
     }
 
@@ -79,7 +84,7 @@ InventoryInsertResult Inventory::insert_stack(ItemStack stack, const ItemRegistr
     }
 
     const u16 moved = std::min(item->max_stack_size, stack.count);
-    slot_value = ItemStack{stack.item, moved};
+    slot_value = item_stack_with_count(stack, moved);
     stack.count = static_cast<u16>(stack.count - moved);
     if (stack.count == 0U) {
       return result;
@@ -100,6 +105,7 @@ InventoryOperationResult Inventory::merge_stack_into_slot(
   if (stack.count == 0U) {
     return {InventoryOperationResultKind::NoOp};
   }
+  normalize_item_stack_data(stack);
 
   const u16 max_stack_size = max_stack_size_for(registry, stack.item);
   if (max_stack_size == 0U) {
@@ -109,7 +115,7 @@ InventoryOperationResult Inventory::merge_stack_into_slot(
   std::optional<ItemStack>& target = slots_[slot_index];
   if (!target.has_value()) {
     const u16 moved = std::min(max_stack_size, stack.count);
-    target = ItemStack{stack.item, moved};
+    target = item_stack_with_count(stack, moved);
     stack.count = static_cast<u16>(stack.count - moved);
     return {
         stack.count == 0U ? InventoryOperationResultKind::Success
@@ -143,7 +149,7 @@ std::optional<ItemStack> Inventory::remove_amount(usize slot_index, u16 amount) 
 
   ItemStack& stack = slots_[slot_index].value();
   const u16 removed = std::min(amount, stack.count);
-  ItemStack taken{stack.item, removed};
+  ItemStack taken = item_stack_with_count(stack, removed);
   stack.count = static_cast<u16>(stack.count - removed);
   if (stack.count == 0U) {
     slots_[slot_index].reset();
@@ -162,7 +168,7 @@ std::optional<ItemStack> Inventory::split_stack(usize slot_index, u16 amount) {
   }
 
   stack.count = static_cast<u16>(stack.count - amount);
-  return ItemStack{stack.item, amount};
+  return item_stack_with_count(stack, amount);
 }
 
 bool Inventory::swap_slots(usize first_slot, usize second_slot) {
@@ -202,7 +208,7 @@ bool Inventory::consume_one(usize slot_index) {
 }
 
 bool item_stacks_compatible(const ItemStack& lhs, const ItemStack& rhs) noexcept {
-  return lhs.item == rhs.item;
+  return lhs.item == rhs.item && item_stack_data_equal(lhs.data, rhs.data);
 }
 
 InventoryOperationResult apply_inventory_slot_click(
@@ -251,7 +257,7 @@ InventoryOperationResult apply_inventory_slot_click(
   }
 
   if (!slot_stack.has_value()) {
-    ItemStack one{carried_stack->item, 1U};
+    ItemStack one = item_stack_with_count(carried_stack.value(), 1U);
     if (!inventory.set_slot(slot_index, one)) {
       return {InventoryOperationResultKind::RejectedInvalidSlot};
     }

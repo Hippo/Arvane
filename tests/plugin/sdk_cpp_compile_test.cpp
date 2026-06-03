@@ -8,6 +8,7 @@
 #include <arv/entities.hpp>
 #include <arv/events.hpp>
 #include <arv/gamemode.hpp>
+#include <arv/items.hpp>
 #include <arv/io/codec.hpp>
 #include <arv/logger.hpp>
 #include <arv/metrics.hpp>
@@ -69,6 +70,7 @@ int arv_plugin_sdk_cpp_compile_test() {
   arv::Event event{nullptr};
   arv::Events events{nullptr};
   arv::GameModes gamemodes{nullptr};
+  arv::Items items{nullptr};
   arv::Logger logger{nullptr};
   arv::Metrics metrics{nullptr};
   arv::Network network{nullptr};
@@ -134,6 +136,8 @@ int arv_plugin_sdk_cpp_compile_test() {
       0};
   const ArvRegionHandle region_handle{};
   const ArvBlockPos block_pos{};
+  const arv::ItemStackRef selected_stack = plugin.items().selected_hotbar(1);
+  const auto selected_stack_info = selected_stack.info();
 
   arv::Result result;
   auto created_document = data.create_document();
@@ -172,7 +176,9 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !chat_message.broadcast() && !chat_message.broadcast_world(1) &&
                  !entities.exists({}) && !network.unsupported() &&
                  !packet_result && !network.broadcast(packet) &&
-                 !gamemodes.exists("survival") && !permissions.unsupported() &&
+                 !gamemodes.exists("survival") &&
+                 !items.selected_hotbar(1).info() &&
+                 !selected_stack_info && !permissions.unsupported() &&
                  !players.current_selection(1) &&
                  !persistent_scope.load("test:data") &&
                  !persistent_scope.save("test:data", sample) &&

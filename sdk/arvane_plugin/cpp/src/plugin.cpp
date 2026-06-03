@@ -25,7 +25,8 @@ Plugin::Plugin(const ArvAPI* api) noexcept
       regions_(api),
       gamemodes_(api),
       players_(api),
-      variables_(api) {
+      variables_(api),
+      items_(api) {
 }
 
 bool Plugin::valid() const noexcept {
@@ -122,6 +123,10 @@ const Players& Plugin::players() const noexcept {
 
 const Variables& Plugin::variables() const noexcept {
   return variables_;
+}
+
+const Items& Plugin::items() const noexcept {
+  return items_;
 }
 
 } // namespace arv

@@ -1,26 +1,11 @@
 #include "arv/protocol/inventory_sync.hpp"
+#include "arv/protocol/item_stack_wire.hpp"
 #include "arv/protocol/message_primitives.hpp"
 
 #include <utility>
 
 namespace arv::protocol {
 namespace {
-
-void write_stack(MessageWriter& writer, const player::ItemStack& stack) {
-  writer.write<u32>(stack.item.value);
-  writer.write<u16>(stack.count);
-}
-
-Expected<player::ItemStack, ProtocolError> read_stack(MessageReader& reader) {
-  auto item = reader.read<u32>();
-  auto count = reader.read<u16>();
-  if (!item || !count) {
-    return Expected<player::ItemStack, ProtocolError>::failure(
-        ProtocolError{"failed to decode item stack"});
-  }
-  return Expected<player::ItemStack, ProtocolError>::success(
-      {player::ItemID{item.value()}, count.value()});
-}
 
 [[nodiscard]] bool valid_action_kind(InventoryActionKind kind) noexcept {
   switch (kind) {
@@ -93,12 +78,16 @@ std::vector<u8> serialize_clientbound_inventory_update(const ClientboundInventor
   for (const std::optional<player::ItemStack>& slot : update.slots) {
     writer.write_bool(slot.has_value());
     if (slot.has_value()) {
-      write_stack(writer, slot.value());
+      if (auto written = write_item_stack(writer, slot.value()); !written) {
+        return {};
+      }
     }
   }
   writer.write_bool(update.carried_stack.has_value());
   if (update.carried_stack.has_value()) {
-    write_stack(writer, update.carried_stack.value());
+    if (auto written = write_item_stack(writer, update.carried_stack.value()); !written) {
+      return {};
+    }
   }
   return std::move(writer).take_bytes();
 }
@@ -133,7 +122,7 @@ Expected<ClientboundInventoryUpdate, ProtocolError> deserialize_clientbound_inve
       update.slots.emplace_back(std::nullopt);
       continue;
     }
-    auto stack = read_stack(reader);
+    auto stack = read_item_stack(reader);
     if (!stack) {
       return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(stack.error());
     }
@@ -146,7 +135,7 @@ Expected<ClientboundInventoryUpdate, ProtocolError> deserialize_clientbound_inve
         ProtocolError{"failed to decode carried inventory stack presence"});
   }
   if (has_carried.value()) {
-    auto stack = read_stack(reader);
+    auto stack = read_item_stack(reader);
     if (!stack) {
       return Expected<ClientboundInventoryUpdate, ProtocolError>::failure(stack.error());
     }

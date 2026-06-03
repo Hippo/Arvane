@@ -8,6 +8,18 @@
 #include <utility>
 #include <vector>
 
+namespace {
+
+[[nodiscard]] arv::io::DataDocument stack_data(std::string_view value) {
+  arv::io::DataDocument document{1U, arv::io::DataValue::object()};
+  arv::io::DataValue payload = arv::io::DataValue::object();
+  payload.set("value", std::string{value});
+  document.root.set("test", std::move(payload));
+  return document;
+}
+
+} // namespace
+
 TEST(InventoryTests, InsertStackMergesIntoExistingStacksBeforeUsingEmptySlots) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
@@ -28,6 +40,32 @@ TEST(InventoryTests, InsertStackMergesIntoExistingStacksBeforeUsingEmptySlots) {
   EXPECT_EQ(inventory.slot(1)->count, 8U);
 }
 
+TEST(InventoryTests, StackDataParticipatesInMergeCompatibility) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+
+  arv::player::Inventory inventory(3);
+  ASSERT_TRUE(inventory.set_slot(0, arv::player::ItemStack{stone_item, 60, stack_data("same")}));
+  ASSERT_TRUE(inventory.set_slot(1, arv::player::ItemStack{stone_item, 8, stack_data("different")}));
+
+  const arv::player::InventoryInsertResult result =
+      inventory.insert_stack({stone_item, 10, stack_data("same")}, item_registry);
+
+  EXPECT_TRUE(result.complete());
+  ASSERT_TRUE(inventory.slot(0).has_value());
+  ASSERT_TRUE(inventory.slot(1).has_value());
+  ASSERT_TRUE(inventory.slot(2).has_value());
+  EXPECT_EQ(inventory.slot(0)->count, 64U);
+  EXPECT_EQ(inventory.slot(1)->count, 8U);
+  EXPECT_EQ(inventory.slot(2)->count, 6U);
+  EXPECT_TRUE(arv::player::item_stack_data_equal(
+      inventory.slot(2)->data,
+      std::optional<arv::io::DataDocument>{stack_data("same")}));
+}
+
 TEST(InventoryTests, SplitStackReturnsRequestedAmountAndLeavesRemainder) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
@@ -45,6 +83,55 @@ TEST(InventoryTests, SplitStackReturnsRequestedAmountAndLeavesRemainder) {
   EXPECT_EQ(split->count, 4U);
   ASSERT_TRUE(inventory.slot(0).has_value());
   EXPECT_EQ(inventory.slot(0)->count, 6U);
+}
+
+TEST(InventoryTests, SplitAndSecondaryClickPreserveStackData) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+
+  arv::player::Inventory inventory(2);
+  ASSERT_TRUE(inventory.set_slot(0, arv::player::ItemStack{stone_item, 9, stack_data("kept")}));
+
+  const std::optional<arv::player::ItemStack> split = inventory.split_stack(0, 4);
+  ASSERT_TRUE(split.has_value());
+  EXPECT_TRUE(arv::player::item_stack_data_equal(
+      split->data,
+      std::optional<arv::io::DataDocument>{stack_data("kept")}));
+  ASSERT_TRUE(inventory.slot(0).has_value());
+  EXPECT_TRUE(arv::player::item_stack_data_equal(
+      inventory.slot(0)->data,
+      std::optional<arv::io::DataDocument>{stack_data("kept")}));
+
+  std::optional<arv::player::ItemStack> carried = split;
+  auto place_one = arv::player::apply_inventory_slot_click(
+      inventory,
+      1,
+      arv::player::InventoryClickButton::Secondary,
+      carried,
+      item_registry);
+
+  EXPECT_EQ(place_one.kind, arv::player::InventoryOperationResultKind::Success);
+  ASSERT_TRUE(inventory.slot(1).has_value());
+  EXPECT_EQ(inventory.slot(1)->count, 1U);
+  EXPECT_TRUE(arv::player::item_stack_data_equal(
+      inventory.slot(1)->data,
+      std::optional<arv::io::DataDocument>{stack_data("kept")}));
+}
+
+TEST(InventoryTests, EmptyObjectStackDataNormalizesToNoData) {
+  const arv::player::ItemStack original{
+      arv::player::ItemID{7},
+      3,
+      arv::io::DataDocument{1U, arv::io::DataValue::object()}};
+
+  arv::player::ItemStack normalized = original;
+  arv::player::normalize_item_stack_data(normalized);
+
+  EXPECT_FALSE(normalized.data.has_value());
+  EXPECT_TRUE(arv::player::item_stack_data_equal(original.data, normalized.data));
 }
 
 TEST(InventoryTests, PrimaryClickPicksUpMergesAndSwapsStacks) {

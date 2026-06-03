@@ -9,6 +9,7 @@
 #include "arv/events.h"
 #include "arv/export.h"
 #include "arv/gamemode.h"
+#include "arv/items.h"
 #include "arv/logger.h"
 #include "arv/metrics.h"
 #include "arv/network.h"
@@ -101,6 +102,9 @@ typedef struct ArvAPI {
 
   void* chat_message_ctx;
   const ArvChatMessageAPI* chat_message;
+
+  void* items_ctx;
+  const ArvItemsAPI* items;
 } ArvAPI;
 
 typedef bool (*ArvEntrypoint)(const ArvAPI* api);

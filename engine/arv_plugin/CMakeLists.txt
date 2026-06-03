@@ -13,6 +13,7 @@ add_library(arv_plugin STATIC
   src/plugin_abi_data.cpp
   src/plugin_abi_events.cpp
   src/plugin_abi_gamemodes.cpp
+  src/plugin_abi_items.cpp
   src/plugin_abi_chat_message.cpp
   src/plugin_abi_network.cpp
   src/plugin_abi_permissions.cpp

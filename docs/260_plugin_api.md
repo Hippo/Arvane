@@ -310,7 +310,7 @@ Implemented ABI surface:
 * API version `1` is exposed as `ARV_API_VERSION`.
 * `pack.yaml` native metadata must declare `api_version: 1`, a C-symbol entrypoint, and a library for the current platform key.
 * Native libraries are loaded only when `native_plugins.enabled` is true and the owning pack is listed in `native_plugins.allowed_packs`.
-* Implemented API tables include context, logger, behavior registration, command executor registration, event subscription, sync/async scheduling, service publish/lookup, data resource read/debug path, structured data documents, codec-backed config, scoped persistent data, basic world/entity access, network messaging, permissions, rich text helpers, regions, game modes, player selection queries, and metrics counters.
+* Implemented API tables include context, logger, behavior registration, command executor registration, event subscription, sync/async scheduling, service publish/lookup, data resource read/debug path, structured data documents, codec-backed config, scoped persistent data, basic world/entity access, network messaging, permissions, rich text helpers, regions, game modes, player selection queries, item stack data, and metrics counters.
 * APIs may return `Unsupported` when the corresponding runtime context or engine extension point is not available.
 
 Plugin author build surface:
@@ -603,6 +603,54 @@ Rules:
 * calls that inspect live player state must occur on the sync simulation context
 * absent selection fields are represented by flags rather than sentinel block positions
 * plugins should treat the selection as current gameplay state, not as plugin-owned persistent data
+
+---
+
+## Item Stack Data API
+
+The item stack data API exposes Minecraft-NBT-style per-stack structured data
+for player-visible stacks. V1 covers selected hotbar, inventory slot, and
+cursor stacks only.
+
+SDK ABI shape:
+
+```cpp
+typedef enum ArvItemStackLocationKind {
+    ARV_ITEM_STACK_SELECTED_HOTBAR,
+    ARV_ITEM_STACK_INVENTORY_SLOT,
+    ARV_ITEM_STACK_CURSOR
+} ArvItemStackLocationKind;
+
+typedef struct ArvItemStackLocation {
+    ArvPlayerID player;
+    ArvItemStackLocationKind kind;
+    uint32_t slot_index;
+} ArvItemStackLocation;
+
+typedef struct ArvItemStackInfo {
+    bool present;
+    uint32_t item_id;
+    ArvStringView item_name;
+    uint16_t count;
+    bool has_data;
+} ArvItemStackInfo;
+
+typedef struct ArvItemsAPI {
+    ArvResult (*stack_info)(void* ctx, ArvItemStackLocation location, ArvItemStackInfo* out_info);
+    ArvResult (*load_stack_data)(void* ctx, ArvItemStackLocation location, ArvDataDocumentHandle* out_document);
+    ArvResult (*load_stack_namespace_data)(void* ctx, ArvItemStackLocation location, ArvStringView namespace_id, ArvDataDocumentHandle* out_document);
+    ArvResult (*save_stack_namespace_data)(void* ctx, ArvItemStackLocation location, ArvStringView namespace_id, ArvDataDocumentHandle document);
+    ArvResult (*clear_stack_namespace_data)(void* ctx, ArvItemStackLocation location, ArvStringView namespace_id);
+} ArvItemsAPI;
+```
+
+Rules:
+
+* calls must occur on the sync simulation context
+* `stack_info` returns `present = false` for valid empty stack locations
+* load/save/clear calls require a present stack
+* plugins may read full stack data but may only write or clear namespaces owned by their plugin pack
+* stack data is bounded to 16 KiB per stack and uses the shared `DataDocument` model
 
 ---
 

@@ -14,5 +14,4 @@ add_library(arv_player STATIC
   src/selection.cpp
 )
 target_include_directories(arv_player PUBLIC include)
-target_link_libraries(arv_player PUBLIC arv_core arv_voxel)
-target_link_libraries(arv_player PRIVATE arv_io)
+target_link_libraries(arv_player PUBLIC arv_core arv_io arv_voxel)

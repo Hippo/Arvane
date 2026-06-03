@@ -1,4 +1,5 @@
 #include "arv/protocol/entity_replication.hpp"
+#include "arv/protocol/item_stack_wire.hpp"
 #include "arv/protocol/message_primitives.hpp"
 
 #include <utility>
@@ -121,8 +122,9 @@ std::vector<u8> serialize_clientbound_dropped_item_snapshot(const ClientboundDro
   writer.write<u32>(static_cast<u32>(snapshot.drops.size()));
   for (const DroppedItemSnapshotEntry& entry : snapshot.drops) {
     writer.write<u32>(entry.drop_id.value);
-    writer.write<u32>(entry.stack.item.value);
-    writer.write<u16>(entry.stack.count);
+    if (auto stack = write_item_stack(writer, entry.stack); !stack) {
+      return {};
+    }
     write_vec3(writer, entry.position);
     write_vec3(writer, entry.velocity);
   }
@@ -221,16 +223,15 @@ Expected<ClientboundDroppedItemSnapshot, ProtocolError> deserialize_clientbound_
   snapshot.drops.reserve(count.value());
   for (u32 index = 0; index < count.value(); ++index) {
     auto drop_id = reader.read<u32>();
-    auto item = reader.read<u32>();
-    auto count_value = reader.read<u16>();
+    auto stack = read_item_stack(reader);
     auto position = read_vec3(reader);
     auto velocity = read_vec3(reader);
-    if (!drop_id || !item || !count_value || !position || !velocity) {
+    if (!drop_id || !stack || !position || !velocity) {
       return Expected<ClientboundDroppedItemSnapshot, ProtocolError>::failure(
           ProtocolError{"failed to decode dropped item snapshot entry"});
     }
     snapshot.drops.push_back({EntityNetID{drop_id.value()},
-                              player::ItemStack{player::ItemID{item.value()}, count_value.value()},
+                              std::move(stack.value()),
                               position.value(),
                               velocity.value()});
   }

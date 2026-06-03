@@ -9,6 +9,7 @@
 #include "arv/world/entity_goal_registry.hpp"
 #include "support/temp_dir.hpp"
 #include "support/temp_files.hpp"
+#include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
 
@@ -375,8 +376,15 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   ASSERT_TRUE(result) << result.error().describe();
 
   arv::sched::JobSystem jobs{{.background_cpu_workers = 1U}};
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{7});
+  player.selected_hotbar_slot = 0;
+  ASSERT_TRUE(player.inventory.set_slot(0, arv::player::ItemStack{stone_item, 3}));
   player.selection.world = arv::WorldID{1};
   player.selection.a = arv::BlockPos{{1, 2, 3}};
   player.selection.b = arv::BlockPos{{4, 5, 6}};
@@ -406,6 +414,8 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   jobs.start();
   manager.attach_runtime({
       .default_world = &world,
+      .block_registry = &block_registry,
+      .item_registry = &item_registry,
       .entity_registry = &entity_registry,
       .game_modes = &game_modes,
       .permission_groups = &permission_groups,
@@ -451,6 +461,13 @@ TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   jobs.join();
   manager.tick(2U);
   manager.stop_runtime();
+
+  ASSERT_TRUE(player.inventory.slot(0).has_value());
+  ASSERT_TRUE(player.inventory.slot(0)->data.has_value());
+  const arv::io::DataValue* item_data =
+      arv::io::find_path(*player.inventory.slot(0)->data, "example_plugin_pack.value");
+  ASSERT_NE(item_data, nullptr);
+  EXPECT_EQ(item_data->as_string_or({}), "owned item data");
 
   arv::command::CommandRegistry registry;
   manager.register_commands(registry);

@@ -4,6 +4,6 @@
 
 namespace arv::protocol {
 
-inline constexpr u16 CurrentProtocolVersion = 1;
+inline constexpr u16 CurrentProtocolVersion = 2;
 
 } // namespace arv::protocol

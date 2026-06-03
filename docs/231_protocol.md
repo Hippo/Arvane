@@ -174,6 +174,8 @@ The protocol version is separate from:
 
 The client and server must negotiate protocol compatibility during handshake.
 
+The current protocol version is `2`.
+
 A server may reject a client when:
 
 * the protocol version is unsupported
@@ -738,6 +740,30 @@ EntitySnapshotEntry
 }
 ```
 
+### Dropped Item Snapshot
+
+Unreliable latest-wins.
+
+```text
+ClientboundDroppedItemSnapshot
+{
+    WorldID world_id;
+    u64 server_tick;
+    u32 drop_count;
+    DroppedItemSnapshotEntry drops[drop_count];
+}
+```
+
+```text
+DroppedItemSnapshotEntry
+{
+    EntityNetID drop_id;
+    ItemStackWire stack;
+    Vec3Fixed position;
+    Vec3Fixed velocity;
+}
+```
+
 ### Entity State Delta
 
 Reliable or unreliable depending on field semantics.
@@ -753,6 +779,27 @@ Visual-only state may be unreliable.
 Inventory state is reliable ordered.
 
 The client may request interactions, but the server validates and applies them.
+
+### Shared Item Stack Encoding
+
+Inventory updates and dropped-item snapshots encode visible stacks with the same
+wire form.
+
+```text
+ItemStackWire
+{
+    u32 item_id;
+    u16 count;
+    bool has_data;
+    if has_data:
+        u32 data_byte_count;
+        bytes data_binary_document[data_byte_count];
+}
+```
+
+`data_binary_document` is an `io::DataDocument` encoded with the binary data
+codec. `data_byte_count` is capped at 16 KiB per stack. Empty object data is
+canonicalized to `has_data=false`.
 
 ### Use Item
 
@@ -773,12 +820,16 @@ ClientboundInventoryUpdate
 {
     u32 inventory_id;
     u32 revision;
+    u8 selected_hotbar_slot;
     u32 slot_count;
-    SlotUpdate slots[slot_count];
+    OptionalItemStack slots[slot_count];
+    OptionalItemStack carried_stack;
 }
 ```
 
 Inventory revisions must be monotonic.
+
+Data-only item stack mutations must advance the inventory revision.
 
 ---
 

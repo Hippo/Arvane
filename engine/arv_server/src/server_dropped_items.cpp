@@ -23,6 +23,7 @@ void ServerRuntimeImpl::spawn_dropped_item_stack(
     WorldID world_id,
     Vec3f position,
     player::ItemStack stack) {
+  player::normalize_item_stack_data(stack);
   if (stack.count == 0U || item_registry_ == nullptr ||
       item_registry_->item(stack.item) == nullptr) {
     return;

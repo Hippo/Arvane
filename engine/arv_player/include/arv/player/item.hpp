@@ -3,6 +3,7 @@
 #include "arv/core/expected.hpp"
 #include "arv/core/id.hpp"
 #include "arv/core/types.hpp"
+#include "arv/io/data_document.hpp"
 #include "arv/voxel/block.hpp"
 
 #include <optional>
@@ -20,6 +21,7 @@ inline constexpr ItemID AirItemID{0};
 inline constexpr std::string_view AirItemName = "arvane:air";
 inline constexpr std::string_view MissingItemName = "arvane:missing_item";
 inline constexpr f32 DefaultItemBuoyancy = 1.0F;
+inline constexpr u32 MaxItemStackDataBytes = 16U * 1024U;
 
 enum class ItemRenderType : u8 {
   Texture,
@@ -103,8 +105,9 @@ struct ItemRecord {
 struct ItemStack {
   ItemID item{};
   u16 count{};
+  std::optional<io::DataDocument> data{};
 
-  constexpr bool operator==(const ItemStack&) const = default;
+  [[nodiscard]] bool operator==(const ItemStack& other) const;
 };
 
 struct ItemBehaviorHandler {};
@@ -160,6 +163,12 @@ private:
 
 [[nodiscard]] ItemDefinition make_air_item_definition();
 [[nodiscard]] ItemDefinition make_missing_item_definition();
+[[nodiscard]] bool item_stack_data_equal(
+    const std::optional<io::DataDocument>& lhs,
+    const std::optional<io::DataDocument>& rhs) noexcept;
+[[nodiscard]] bool item_stack_has_data(const ItemStack& stack) noexcept;
+void normalize_item_stack_data(ItemStack& stack) noexcept;
+[[nodiscard]] ItemStack item_stack_with_count(const ItemStack& stack, u16 count);
 [[nodiscard]] Expected<ItemRenderType, ItemRegistryError> parse_item_render_type(std::string_view value);
 [[nodiscard]] Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_json(
     std::string_view text);

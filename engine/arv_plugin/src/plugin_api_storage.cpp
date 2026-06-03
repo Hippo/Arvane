@@ -20,6 +20,7 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
   fill_player_api(*this);
   fill_variables_api(*this);
   fill_chat_message_api(*this);
+  fill_items_api(*this);
 
   api = {
       PluginApiVersion,
@@ -69,6 +70,8 @@ PluginAPIStorage::PluginAPIStorage(PluginCallContext* context) {
       &variables_api,
       context,
       &chat_message_api,
+      context,
+      &items_api,
   };
 }
 

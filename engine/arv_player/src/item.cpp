@@ -36,6 +36,71 @@ bool has_block_source(const ItemDefinition& definition) noexcept {
          definition.generated_from_block;
 }
 
+[[nodiscard]] bool data_value_equal(const io::DataValue& lhs, const io::DataValue& rhs) noexcept {
+  if (lhs.kind() != rhs.kind()) {
+    return false;
+  }
+
+  switch (lhs.kind()) {
+    case io::DataKind::Null:
+      return true;
+    case io::DataKind::Bool:
+      return lhs.as_bool_or(false) == rhs.as_bool_or(false);
+    case io::DataKind::I64:
+      return lhs.as_i64_or(0) == rhs.as_i64_or(0);
+    case io::DataKind::U64:
+      return lhs.as_u64_or(0U) == rhs.as_u64_or(0U);
+    case io::DataKind::F64:
+      return lhs.as_f64_or(0.0) == rhs.as_f64_or(0.0);
+    case io::DataKind::String:
+      return lhs.as_string_or({}) == rhs.as_string_or({});
+    case io::DataKind::Bytes: {
+      const io::DataValue::Bytes* lhs_bytes = lhs.bytes_if();
+      const io::DataValue::Bytes* rhs_bytes = rhs.bytes_if();
+      return lhs_bytes != nullptr && rhs_bytes != nullptr && *lhs_bytes == *rhs_bytes;
+    }
+    case io::DataKind::Array: {
+      const io::DataValue::Array* lhs_array = lhs.array_if();
+      const io::DataValue::Array* rhs_array = rhs.array_if();
+      if (lhs_array == nullptr || rhs_array == nullptr ||
+          lhs_array->size() != rhs_array->size()) {
+        return false;
+      }
+      for (usize index = 0; index < lhs_array->size(); ++index) {
+        if (!data_value_equal((*lhs_array)[index], (*rhs_array)[index])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case io::DataKind::Object: {
+      const io::DataValue::Object* lhs_object = lhs.object_if();
+      const io::DataValue::Object* rhs_object = rhs.object_if();
+      if (lhs_object == nullptr || rhs_object == nullptr ||
+          lhs_object->size() != rhs_object->size()) {
+        return false;
+      }
+      for (const auto& [key, lhs_child] : *lhs_object) {
+        const auto found = rhs_object->find(key);
+        if (found == rhs_object->end() || !data_value_equal(lhs_child, found->second)) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+[[nodiscard]] bool document_is_empty_stack_data(const io::DataDocument& document) noexcept {
+  if (document.root.kind() == io::DataKind::Null) {
+    return true;
+  }
+  const io::DataValue::Object* object = document.root.object_if();
+  return object != nullptr && object->empty();
+}
+
 Expected<ItemRenderType, ItemRegistryError> resolve_render_type(const ItemDefinition& definition) {
   const ItemRenderType render_type = definition.explicit_render_type.value_or(
       has_block_source(definition)
@@ -129,6 +194,10 @@ void merge_explicit_definition(ItemDefinition& target, ItemDefinition source) {
 }
 
 } // namespace
+
+bool ItemStack::operator==(const ItemStack& other) const {
+  return item == other.item && count == other.count && item_stack_data_equal(data, other.data);
+}
 
 ItemBehaviorRegistry::Result ItemBehaviorRegistry::register_handler(
     std::string id,
@@ -505,6 +574,34 @@ ItemDefinition make_missing_item_definition() {
   definition.explicit_render_type = ItemRenderType::Texture;
   definition.texture_asset = std::string{MissingTextureAsset};
   return definition;
+}
+
+bool item_stack_data_equal(
+    const std::optional<io::DataDocument>& lhs,
+    const std::optional<io::DataDocument>& rhs) noexcept {
+  const bool lhs_empty = !lhs.has_value() || document_is_empty_stack_data(lhs.value());
+  const bool rhs_empty = !rhs.has_value() || document_is_empty_stack_data(rhs.value());
+  if (lhs_empty || rhs_empty) {
+    return lhs_empty == rhs_empty;
+  }
+  return lhs->schema_version == rhs->schema_version && data_value_equal(lhs->root, rhs->root);
+}
+
+bool item_stack_has_data(const ItemStack& stack) noexcept {
+  return stack.data.has_value() && !document_is_empty_stack_data(stack.data.value());
+}
+
+void normalize_item_stack_data(ItemStack& stack) noexcept {
+  if (stack.data.has_value() && document_is_empty_stack_data(stack.data.value())) {
+    stack.data.reset();
+  }
+}
+
+ItemStack item_stack_with_count(const ItemStack& stack, u16 count) {
+  ItemStack copy = stack;
+  copy.count = count;
+  normalize_item_stack_data(copy);
+  return copy;
 }
 
 Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_json(

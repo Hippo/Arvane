@@ -82,9 +82,8 @@ std::optional<player::ItemStack> ServerRuntimeImpl::drop_one_from_player_invento
     return std::nullopt;
   }
 
-  player::ItemStack dropped{
-      player_state->inventory_cursor_stack->item,
-      1U};
+  player::ItemStack dropped =
+      player::item_stack_with_count(player_state->inventory_cursor_stack.value(), 1U);
   spawn_dropped_item_stack(
       player_state->world_id,
       player_state->position,
