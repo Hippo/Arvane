@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/core/domain_ids.hpp"
+#include "arv/core/location.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
 #include "arv/player/inventory.hpp"
@@ -52,6 +53,7 @@ struct PlayerState {
   std::string game_mode_id{std::string{SurvivalGameModeID}};
   PlayerPermissions permission_overrides{};
   ResolvedPermissions resolved_permissions{};
+  std::optional<Location> respawn_location{};
   Inventory inventory{DefaultPlayerInventorySlotCount};
   std::optional<ItemStack> inventory_cursor_stack{};
   u8 selected_hotbar_slot{};

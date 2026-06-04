@@ -1078,6 +1078,9 @@ Expected<void, PersistenceError> save_server_root(
     player_json.set("game_mode", player.game_mode_id);
     player_json.set("selected_skin_hash", player.selected_skin_hash);
     player_json.set("selected_skin_slim_model", player.selected_skin_slim_model);
+    if (player.respawn_location.has_value()) {
+      player_json.set("respawn", location_to_value(player.respawn_location.value(), false));
+    }
     player_json.set("selected_hotbar_slot", static_cast<u64>(player.selected_hotbar_slot));
     player_json.set("inventory_version", static_cast<u64>(2U));
     player_json.set("inventory", inventory_to_value(player.inventory, item_registry));
@@ -1378,6 +1381,10 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
         player_save.selected_skin_slim_model =
             !player_save.selected_skin_hash.empty() &&
             bool_value_or(player_json, "selected_skin_slim_model", false);
+        if (const io::DataValue* respawn = member(player_json, "respawn");
+            respawn != nullptr) {
+          player_save.respawn_location = location_from_value(*respawn);
+        }
         player_save.permission_overrides = player_permissions_from_value(player_json);
         player_save.selected_hotbar_slot =
             static_cast<u8>(u64_value_or(player_json, "selected_hotbar_slot", 0U));

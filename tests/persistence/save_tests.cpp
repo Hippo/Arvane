@@ -106,6 +106,8 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   player.yaw_radians = 1.25F;
   player.pitch_radians = -0.5F;
   player.grounded = true;
+  player.respawn_location =
+      arv::Location{40.5F, 71.0F, -12.5F, 0.75F, -0.125F};
   player.game_mode_id = std::string{arv::player::CreativeGameModeID};
   player.permission_overrides.groups = {"admin", "builder"};
   player.permission_overrides.overrides.can_fly = arv::player::TriState::Allow;
@@ -187,6 +189,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
         std::istreambuf_iterator<char>{input},
         std::istreambuf_iterator<char>{}};
     EXPECT_NE(player_json.find("\"inventory_version\": 2"), std::string::npos);
+    EXPECT_NE(player_json.find("\"respawn\""), std::string::npos);
     EXPECT_NE(player_json.find("\"data\""), std::string::npos);
     EXPECT_NE(player_json.find("\"player\""), std::string::npos);
   }
@@ -233,6 +236,12 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_TRUE(loaded.value().chunks[0].fluids[0].source());
   ASSERT_EQ(loaded.value().players.size(), 1U);
   EXPECT_EQ(loaded.value().players[0].profile_name, "local_player");
+  ASSERT_TRUE(loaded.value().players[0].respawn_location.has_value());
+  EXPECT_EQ(
+      arv::location_position(*loaded.value().players[0].respawn_location),
+      (arv::Vec3f{40.5F, 71.0F, -12.5F}));
+  EXPECT_FLOAT_EQ(loaded.value().players[0].respawn_location->yaw_radians, 0.75F);
+  EXPECT_FLOAT_EQ(loaded.value().players[0].respawn_location->pitch_radians, -0.125F);
   EXPECT_EQ(loaded.value().players[0].game_mode_id, arv::player::CreativeGameModeID);
   EXPECT_EQ(loaded.value().players[0].permission_overrides.groups,
             (std::vector<std::string>{"admin", "builder"}));

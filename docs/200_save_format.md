@@ -177,6 +177,14 @@ Each world stores:
 * item stacks
 * item metadata
 
+### Player Runtime State
+
+Player save JSON lives under `server-save/players/` and stores the last known
+position, velocity, rotation, game mode, permissions, inventory, skin selection,
+and optional respawn location. The `respawn` field uses the same compact
+location shape as world spawn (`x`, `y`, `z`, `yaw_radians`, `pitch_radians`).
+When `respawn` is absent, player death respawns at the current world spawn.
+
 ### Player Skin State
 
 Player save/profile JSON may contain:

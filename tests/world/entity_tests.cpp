@@ -219,12 +219,19 @@ TEST(WorldEntityTests, HealthDamageAndInvulnerabilityAreCentralized) {
   EXPECT_TRUE(lethal.applied);
   EXPECT_TRUE(lethal.killed);
   EXPECT_FLOAT_EQ(lethal.new_health, 0.0F);
+  EXPECT_TRUE(world.entity_exists(target));
+  world.flush_entity_despawns();
+  EXPECT_FALSE(world.entity_exists(target));
 }
 
-TEST(WorldEntityTests, PlayerLethalDamageAutoRespawnsWithFullHealth) {
+TEST(WorldEntityTests, PlayerLethalDamageRespawnsAtWorldSpawnWithFullHealth) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.set_spawn_point(arv::Location{12.0F, 64.0F, -8.0F, 0.5F, -0.25F});
   const arv::EntityID source = world.create_entity();
-  (void)world.ensure_player(arv::PlayerID{1});
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = {2.0F, 20.0F, 2.0F};
+  player.velocity = {1.0F, 2.0F, 3.0F};
+  player.grounded = true;
   const std::optional<arv::EntityID> target =
       world.entity_for_player(arv::PlayerID{1});
   ASSERT_TRUE(target.has_value());
@@ -242,6 +249,42 @@ TEST(WorldEntityTests, PlayerLethalDamageAutoRespawnsWithFullHealth) {
   EXPECT_TRUE(lethal.killed);
   EXPECT_FLOAT_EQ(lethal.new_health, health->max);
   EXPECT_FLOAT_EQ(health->current, health->max);
+  EXPECT_EQ(player.position, (arv::Vec3f{12.0F, 64.0F, -8.0F}));
+  EXPECT_EQ(player.velocity, (arv::Vec3f{}));
+  EXPECT_FLOAT_EQ(player.yaw_radians, 0.5F);
+  EXPECT_FLOAT_EQ(player.pitch_radians, -0.25F);
+  EXPECT_FALSE(player.grounded);
+  EXPECT_TRUE(world.entity_exists(target.value()));
+}
+
+TEST(WorldEntityTests, PlayerLethalDamageUsesCustomRespawnLocation) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.set_spawn_point(arv::Location{12.0F, 64.0F, -8.0F, 0.5F, -0.25F});
+  const arv::EntityID source = world.create_entity();
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = {2.0F, 20.0F, 2.0F};
+  player.respawn_location =
+      arv::Location{32.0F, 72.0F, 48.0F, -0.75F, 0.125F};
+  const std::optional<arv::EntityID> target =
+      world.entity_for_player(arv::PlayerID{1});
+  ASSERT_TRUE(target.has_value());
+  arv::entity::EntityHealth* health = world.find_entity_health(target.value());
+  ASSERT_NE(health, nullptr);
+  health->current = 2.0F;
+
+  const arv::world::DamageResult lethal = world.apply_damage({
+      source,
+      target.value(),
+      3.0F,
+      arv::world::DamageCause::EntityAttack});
+
+  EXPECT_TRUE(lethal.applied);
+  EXPECT_TRUE(lethal.killed);
+  EXPECT_FLOAT_EQ(lethal.new_health, health->max);
+  EXPECT_EQ(player.position, (arv::Vec3f{32.0F, 72.0F, 48.0F}));
+  EXPECT_EQ(player.velocity, (arv::Vec3f{}));
+  EXPECT_FLOAT_EQ(player.yaw_radians, -0.75F);
+  EXPECT_FLOAT_EQ(player.pitch_radians, 0.125F);
 }
 
 TEST(WorldEntityTests, PhysicsEntitiesFallOntoTerrainAndStop) {

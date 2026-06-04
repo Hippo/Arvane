@@ -724,6 +724,7 @@ void ServerRuntimeImpl::tick() {
   }
   (void)default_world_.tick(*block_registry_, fluid_definition_, entity_goals_);
   process_pending_entity_attacks();
+  default_world_.flush_entity_despawns();
   world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
   world_jobs_.schedule_lighting_jobs(default_world_, block_registry_);
   tick_chunk_streaming();

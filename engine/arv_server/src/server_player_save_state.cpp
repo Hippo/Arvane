@@ -37,6 +37,7 @@ bool ServerPlayerSaveCache::apply_to_player(
   player_state.movement_mode = found->movement_mode;
   player_state.game_mode_id = found->game_mode_id;
   player_state.permission_overrides = found->permission_overrides;
+  player_state.respawn_location = found->respawn_location;
   player_state.selected_hotbar_slot = found->selected_hotbar_slot;
   player_state.inventory = found->inventory;
   return true;
@@ -59,6 +60,7 @@ void ServerPlayerSaveCache::record(
   save.movement_mode = player_state.movement_mode;
   save.game_mode_id = player_state.game_mode_id;
   save.permission_overrides = player_state.permission_overrides;
+  save.respawn_location = player_state.respawn_location;
   save.selected_hotbar_slot = player_state.selected_hotbar_slot;
   save.inventory = player_state.inventory;
 

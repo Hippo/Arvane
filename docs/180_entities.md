@@ -861,6 +861,11 @@ Reasons for despawn include:
 - conversion into another entity
 - administrative removal
 
+When lethal damage is applied, player entities stay alive and respawn with full
+health at their optional per-player respawn location, falling back to the world
+spawn when none is set. Non-player entities are queued for despawn for now; a
+death animation/state can be inserted before that despawn later.
+
 Despawn should clean up:
 
 - ECS components

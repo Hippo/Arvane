@@ -584,6 +584,8 @@ TEST(IntegratedHandshakeTests, SavedPlayerStateIsAppliedBeforeWorldJoinResult) {
   saved_player.world_name = "default";
   saved_player.position = {12.0F, 34.0F, -56.0F};
   saved_player.velocity = {1.0F, 2.0F, 3.0F};
+  saved_player.respawn_location =
+      arv::Location{20.0F, 65.0F, 4.0F, 0.25F, -0.125F};
   saved_player.selected_hotbar_slot = 3;
   std::array<arv::server::ServerPlayerSaveState, 1> saved_players{saved_player};
 
@@ -626,6 +628,10 @@ TEST(IntegratedHandshakeTests, SavedPlayerStateIsAppliedBeforeWorldJoinResult) {
   EXPECT_EQ(world_join->spawn_position.y, 34.0F);
   EXPECT_EQ(world_join->spawn_position.z, -56.0F);
   const arv::player::PlayerState& player = connected_player(server);
+  ASSERT_TRUE(player.respawn_location.has_value());
+  EXPECT_EQ(
+      arv::location_position(*player.respawn_location),
+      (arv::Vec3f{20.0F, 65.0F, 4.0F}));
   EXPECT_EQ(player.selected_hotbar_slot, 3U);
 }
 
