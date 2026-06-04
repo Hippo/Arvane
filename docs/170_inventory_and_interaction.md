@@ -93,6 +93,7 @@ An item definition should include:
 - max stack size
 - optional associated block state for placeable block items
 - item category
+- optional tags
 - optional compiled behavior ID
 - use behavior
 - primary behavior
@@ -111,6 +112,18 @@ Example authored names:
 Runtime item IDs must not be hard-coded into gameplay logic.
 
 Gameplay should reference item definitions by registry handles or authored names where appropriate.
+
+Item definitions may include tags for gameplay grouping:
+
+```json
+{
+  "name": "arvane:wood_sword",
+  "tags": ["arvane:combat/attacking"]
+}
+```
+
+The server combat system uses `arvane:combat/attacking` to identify held items
+that can roll critical hits.
 
 ## Item Behavior IDs
 
@@ -1190,6 +1203,20 @@ gameplay:
     pickup_radius: 1.25
     pickup_delay_seconds: 0.5
 ```
+
+Current combat tuning lives in `arvane.yaml`:
+
+```yaml
+gameplay:
+  combat:
+    critical-chance: 40
+    critical-multiplier: 1.5
+```
+
+`critical-chance` is a percentage from 0 to 100. When the held item has the
+`arvane:combat/attacking` tag and the roll succeeds, server damage is multiplied
+by `critical-multiplier` and the server triggers `arvane:critical_hit` particles
+with `ClientboundSpawnParticles`.
 
 ---
 

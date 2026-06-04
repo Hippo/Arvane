@@ -18,6 +18,8 @@ gameplay:
     attack_validation_grace_blocks: 3
     base_horizontal_knockback: 8
     base_vertical_knockback: 7
+    critical-chance: 40
+    critical-multiplier: 1.5
     default_attack_cooldown_seconds: 0.35
     default_attack_damage: 1
     default_attack_range: 3

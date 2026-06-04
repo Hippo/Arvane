@@ -2041,6 +2041,35 @@ void render_network_tab(const server::ServerRuntime& server, const client::Clien
   ImGui::Text("Connection state: %u", static_cast<unsigned>(client.connection_state()));
 }
 
+void render_particles_tab(const client::ClientRuntime& client) {
+  const client::ParticleStats stats = client.particle_stats();
+  ImGui::SeparatorText("Particle Counters");
+  if (ImGui::BeginTable(
+          "ParticleCounters",
+          2,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Counter");
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 140.0F);
+    ImGui::TableHeadersRow();
+    auto row = [](const char* label, u64 value) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(label);
+      ImGui::TableNextColumn();
+      ImGui::Text("%llu", static_cast<unsigned long long>(value));
+    };
+    row("Live", stats.live_particles);
+    row("Rendered last frame", stats.rendered_last_frame);
+    row("Spawned total", stats.spawned_total);
+    row("Expired total", stats.expired_total);
+    row("Rejected unknown type", stats.rejected_unknown_type);
+    row("Rejected budget", stats.rejected_budget);
+    row("Rejected distance", stats.rejected_distance);
+    row("Rejected invalid", stats.rejected_invalid);
+    ImGui::EndTable();
+  }
+}
+
 void render_console_tab(DebugMenuState& state) {
   ImGui::InputText("Command", &state.console_command);
   ImGui::SameLine();
@@ -2135,6 +2164,10 @@ DebugMenuResult render_debug_menu(
     }
     if (ImGui::BeginTabItem("Networking")) {
       render_network_tab(server, client);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Particles")) {
+      render_particles_tab(client);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Performance")) {

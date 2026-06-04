@@ -96,6 +96,8 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
   }
 
   active_session.client->advance_entity_interpolation(delta.count());
+  update_sprint_ground_particles(active_session, delta.count());
+  active_session.client->advance_particles(delta.count());
 
   sessions_.apply_pending_client_chunk_stream(
       active_session,

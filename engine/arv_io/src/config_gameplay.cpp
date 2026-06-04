@@ -88,6 +88,8 @@ void read_gameplay_config(const DataValue& gameplay, GameplayConfig& config) {
         *combat,
         "default_attack_cooldown_seconds",
         config.combat.default_attack_cooldown_seconds);
+    read_scalar(*combat, "critical-chance", config.combat.critical_chance);
+    read_scalar(*combat, "critical-multiplier", config.combat.critical_multiplier);
     read_scalar(
         *combat,
         "attack_validation_grace_blocks",
@@ -198,6 +200,8 @@ void put_gameplay_config(DataValue& root, const GameplayConfig& gameplay) {
   put(root, "gameplay.combat.default_attack_damage", gameplay.combat.default_attack_damage);
   put(root, "gameplay.combat.default_attack_range", gameplay.combat.default_attack_range);
   put(root, "gameplay.combat.default_attack_cooldown_seconds", gameplay.combat.default_attack_cooldown_seconds);
+  put(root, "gameplay.combat.critical-chance", gameplay.combat.critical_chance);
+  put(root, "gameplay.combat.critical-multiplier", gameplay.combat.critical_multiplier);
   put(root, "gameplay.combat.attack_validation_grace_blocks", gameplay.combat.attack_validation_grace_blocks);
   put(root, "gameplay.combat.max_attack_validation_range", gameplay.combat.max_attack_validation_range);
   put(root, "gameplay.combat.existing_horizontal_retention", gameplay.combat.existing_horizontal_retention);

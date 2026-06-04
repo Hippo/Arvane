@@ -66,6 +66,7 @@ struct ItemDefinition {
   std::string display_name{};
   std::string behavior_id{};
   std::string category{};
+  std::vector<std::string> tags{};
   u16 max_stack_size{64};
   std::string places_block{};
   std::string texture_asset{};
@@ -88,6 +89,7 @@ struct ItemRecord {
   std::string display_name{};
   std::string behavior_id{};
   std::string category{};
+  std::vector<std::string> tags{};
   u16 max_stack_size{64};
   ItemRenderType render_type{ItemRenderType::Texture};
   std::string texture_asset{};

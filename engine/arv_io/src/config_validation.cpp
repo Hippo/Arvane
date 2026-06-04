@@ -317,6 +317,15 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
       config.gameplay.combat.default_attack_cooldown_seconds < 0.0F) {
     return ConfigError{"gameplay.combat.default_attack_cooldown_seconds must be finite and >= 0"};
   }
+  if (!std::isfinite(config.gameplay.combat.critical_chance) ||
+      config.gameplay.combat.critical_chance < 0.0F ||
+      config.gameplay.combat.critical_chance > 100.0F) {
+    return ConfigError{"gameplay.combat.critical-chance must be finite and in [0, 100]"};
+  }
+  if (!std::isfinite(config.gameplay.combat.critical_multiplier) ||
+      config.gameplay.combat.critical_multiplier <= 0.0F) {
+    return ConfigError{"gameplay.combat.critical-multiplier must be finite and > 0"};
+  }
   if (!std::isfinite(config.gameplay.combat.attack_validation_grace_blocks) ||
       config.gameplay.combat.attack_validation_grace_blocks < 0.0F) {
     return ConfigError{"gameplay.combat.attack_validation_grace_blocks must be finite and >= 0"};

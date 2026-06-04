@@ -89,6 +89,7 @@ Contains all image-based assets used for rendering.
   textures/
     block/    # terrain/block textures used in atlas generation
     entity/   # entity textures (players, mobs, etc.)
+    particle/ # particle textures and animation frames
     default_skin/ # fallback player skin texture
     ui/       # UI textures (icons, panels, etc.)
   font/     # bitmap font atlases (if generated or cached)
@@ -102,6 +103,9 @@ Contains all image-based assets used for rendering.
 * The default player skin assets are
   `arvane:texture/default_skin/default` and
   `arvane:texture/default_skin/default_slim`
+* Particle textures are packed into a dedicated runtime texture-array atlas.
+  Animated particle frames such as `arvane:texture/particle/explosion_0`
+  resolve to atlas entries during asset loading, not during rendering.
 
 User-provided skins are untrusted binary assets. Local profile-owned skins live
 in `arvane_home/skins/`; server-downloaded skins live in
@@ -162,6 +166,7 @@ shaders/
   world/       # chunk/block rendering
   entity/      # entity rendering
   ui/          # UI rendering
+  particle/    # instanced billboard particles
   post/        # post-processing (fog, composite, etc.)
 ```
 
@@ -666,7 +671,8 @@ Example:
   "textures": {
     "top": "arvane:texture/block/grass_top",
     "side": "arvane:texture/block/grass_side",
-    "bottom": "arvane:texture/block/dirt"
+    "bottom": "arvane:texture/block/dirt",
+    "particle": "arvane:texture/block/dirt"
   }
 }
 ```
@@ -686,9 +692,14 @@ east
 west
 up
 down
+particle
 ```
 
-The block system resolves these into per-face texture indices used by meshing.
+The block system resolves face slots into per-face texture indices used by
+meshing. The `particle` slot is not a rendered face; it selects the block dust
+texture used by sprint, mining, and break particles. If `textures` is authored as
+a single string, that same texture is used for every face and for the block
+particle texture.
 
 ---
 

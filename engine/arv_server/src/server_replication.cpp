@@ -22,6 +22,37 @@ namespace {
   return correction;
 }
 
+[[nodiscard]] u32 block_particle_seed(BlockPos pos, TickIndex tick_index) noexcept {
+  const u64 x = static_cast<u64>(static_cast<i64>(pos.value.x) * 73856093LL);
+  const u64 y = static_cast<u64>(static_cast<i64>(pos.value.y) * 19349663LL);
+  const u64 z = static_cast<u64>(static_cast<i64>(pos.value.z) * 83492791LL);
+  return static_cast<u32>(x ^ y ^ z ^ tick_index);
+}
+
+[[nodiscard]] protocol::ClientboundSpawnParticles make_block_break_particles(
+    WorldID world_id,
+    const world::ReplicatedBlockUpdate& update,
+    const voxel::BlockRegistry& block_registry) {
+  protocol::ClientboundSpawnParticles particles;
+  particles.world_id = world_id;
+  particles.particle_type = "arvane:block_dust";
+  if (const voxel::BlockVariantRecord* variant = block_registry.variant(update.old_state);
+      variant != nullptr) {
+    particles.texture_asset = variant->particle_texture_asset;
+  }
+  particles.position = {
+      static_cast<f32>(update.pos.value.x) + 0.5F,
+      static_cast<f32>(update.pos.value.y) + 0.5F,
+      static_cast<f32>(update.pos.value.z) + 0.5F};
+  particles.normal = {0.0F, 1.0F, 0.0F};
+  particles.extents = {0.46F, 0.46F, 0.46F};
+  particles.radius = 0.0F;
+  particles.count = 28U;
+  particles.seed = block_particle_seed(update.pos, update.server_tick);
+  particles.shape = protocol::ParticleSpawnShape::Box;
+  return particles;
+}
+
 } // namespace
 
 void ServerRuntimeImpl::send_player_move_correction(
@@ -111,7 +142,13 @@ void ServerRuntimeImpl::send_block_updates() {
         protocol::NetworkLane::Gameplay,
         protocol::serialize_clientbound_block_update_batch(batch));
     if (send_result) {
-      for (const protocol::BlockUpdate& update : batch.updates) {
+      for (const world::ReplicatedBlockUpdate& update : updates) {
+        if (!chunk_streamer_.session_has_sent_chunk(
+                session_id,
+                session->world_id,
+                block_to_chunk(update.pos))) {
+          continue;
+        }
         const ChunkSectionCoord coord = block_to_chunk(update.pos);
         if (const voxel::ChunkSection* chunk = default_world_.find_chunk(coord);
             chunk != nullptr) {
@@ -120,6 +157,19 @@ void ServerRuntimeImpl::send_block_updates() {
               session->world_id,
               coord,
               chunk->block_version());
+        }
+        if (block_registry_ != nullptr &&
+            update.new_state == voxel::AirBlockVariantID &&
+            update.old_state != voxel::AirBlockVariantID) {
+          const protocol::ClientboundSpawnParticles particles =
+              make_block_break_particles(session->world_id, update, *block_registry_);
+          (void)send_protocol_message(
+              *transport_,
+              session->connection_id,
+              protocol::MessageType::ClientboundSpawnParticles,
+              protocol::ReliabilityClass::UnreliableEvent,
+              protocol::NetworkLane::Gameplay,
+              protocol::serialize_clientbound_spawn_particles(particles));
         }
       }
     }

@@ -69,13 +69,32 @@ void set_side_textures(
   set_texture_slot(textures, BlockFace::NegativeZ, asset_id);
 }
 
+[[nodiscard]] std::string first_non_empty_texture(
+    const std::array<std::string, BlockFaceCount>& textures) {
+  constexpr std::array<BlockFace, BlockFaceCount> fallback_order{
+      BlockFace::PositiveY,
+      BlockFace::NegativeY,
+      BlockFace::PositiveZ,
+      BlockFace::NegativeZ,
+      BlockFace::PositiveX,
+      BlockFace::NegativeX};
+  for (const BlockFace face : fallback_order) {
+    const std::string& texture = textures[face_index(face)];
+    if (!texture.empty()) {
+      return texture;
+    }
+  }
+  return {};
+}
+
 [[nodiscard]] std::optional<BlockRegistryError> read_texture_value(
     const io::DataValue& textures,
     BlockDefinition& definition,
     std::string_view field_name) {
   if (textures.kind() == io::DataKind::String) {
-    definition.texture_assets.fill(
-        normalize_block_texture_asset(textures.as_string_or({})));
+    const std::string texture = normalize_block_texture_asset(textures.as_string_or({}));
+    definition.texture_assets.fill(texture);
+    definition.particle_texture_asset = texture;
     return std::nullopt;
   }
   if (const io::DataValue::Array* texture_array = textures.array_if();
@@ -96,6 +115,7 @@ void set_side_textures(
         normalize_block_texture_asset((*texture_array)[4].as_string_or({}));
     definition.texture_assets[face_index(BlockFace::PositiveX)] =
         normalize_block_texture_asset((*texture_array)[5].as_string_or({}));
+    definition.particle_texture_asset = first_non_empty_texture(definition.texture_assets);
     return std::nullopt;
   }
   if (textures.kind() != io::DataKind::Object) {
@@ -139,6 +159,12 @@ void set_side_textures(
   assign_if_present("north", [&](const std::string& value) {
     set_texture_slot(definition.texture_assets, BlockFace::NegativeZ, value);
   });
+  assign_if_present("particle", [&](const std::string& value) {
+    definition.particle_texture_asset = normalize_block_texture_asset(value);
+  });
+  if (definition.particle_texture_asset.empty()) {
+    definition.particle_texture_asset = first_non_empty_texture(definition.texture_assets);
+  }
 
   return std::nullopt;
 }
@@ -197,6 +223,10 @@ void set_side_textures(
       }
       definition.model.texture_inputs.push_back(
           normalize_block_texture_asset(texture.as_string_or({})));
+    }
+    if (definition.particle_texture_asset.empty() &&
+        !definition.model.texture_inputs.empty()) {
+      definition.particle_texture_asset = definition.model.texture_inputs.front();
     }
   }
 
@@ -664,6 +694,7 @@ BlockRegistry::Result BlockRegistry::build(
     block.drops = definition.drops;
     block.is_item = definition.is_item;
     block.item_buoyancy = definition.item_buoyancy;
+    block.particle_texture_asset = definition.particle_texture_asset;
 
     std::vector<ExpandedVariantDefinition> expanded_variants = expand_variants(definition);
     if (expanded_variants.empty()) {
@@ -689,6 +720,7 @@ BlockRegistry::Result BlockRegistry::build(
       variant.render_tint = definition.render_tint;
       variant.hide_same_variant_faces = definition.hide_same_variant_faces;
       variant.texture_assets = definition.texture_assets;
+      variant.particle_texture_asset = definition.particle_texture_asset;
       variant.model = definition.model;
       variant.model_transform = model_transform_for_state_values(variant.state_values);
       variant.renders_face.fill(definition.render_category != RenderCategory::None && definition.properties.full_cube);

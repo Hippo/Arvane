@@ -19,6 +19,26 @@ TEST(WorldRuntimeTests, SetAndGetBlockUseFloorBasedNegativeCoordinates) {
   EXPECT_EQ(chunk->block({{15, 0, 0}}), arv::voxel::BlockVariantID{2});
 }
 
+TEST(WorldRuntimeTests, ReplicatedBlockUpdatesPreserveOldAndNewState) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  const arv::BlockPos pos{{1, 2, 3}};
+
+  ASSERT_TRUE(world.set_block(pos, arv::voxel::BlockVariantID{2}));
+  std::vector<arv::world::ReplicatedBlockUpdate> updates =
+      world.drain_replicated_block_updates();
+  ASSERT_EQ(updates.size(), 1U);
+  EXPECT_EQ(updates.front().pos, pos);
+  EXPECT_EQ(updates.front().old_state, arv::voxel::AirBlockVariantID);
+  EXPECT_EQ(updates.front().new_state, arv::voxel::BlockVariantID{2});
+
+  ASSERT_TRUE(world.set_block(pos, arv::voxel::BlockVariantID{3}));
+  updates = world.drain_replicated_block_updates();
+  ASSERT_EQ(updates.size(), 1U);
+  EXPECT_EQ(updates.front().old_state, arv::voxel::BlockVariantID{2});
+  EXPECT_EQ(updates.front().new_state, arv::voxel::BlockVariantID{3});
+}
+
 TEST(WorldRuntimeTests, ChunkColumnsUseConfiguredHeightForSectionLookup) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   world.configure_height({-2, 1});

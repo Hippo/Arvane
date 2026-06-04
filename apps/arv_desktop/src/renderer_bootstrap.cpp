@@ -56,6 +56,22 @@ bool configure_renderer(
       std::move(entity_vertex_shader.value()),
       std::move(entity_fragment_shader.value()));
 
+  auto particle_vertex_shader =
+      resources.load_text({"arvane:shader/particle/particle.vert"}, asset::AssetKind::ShaderSource);
+  if (!particle_vertex_shader) {
+    arv::core::error("assets", particle_vertex_shader.error().message);
+    return false;
+  }
+  auto particle_fragment_shader =
+      resources.load_text({"arvane:shader/particle/particle.frag"}, asset::AssetKind::ShaderSource);
+  if (!particle_fragment_shader) {
+    arv::core::error("assets", particle_fragment_shader.error().message);
+    return false;
+  }
+  renderer.set_particle_shader_sources(
+      std::move(particle_vertex_shader.value()),
+      std::move(particle_fragment_shader.value()));
+
   auto ui_vertex_shader =
       resources.load_text({"arvane:shader/ui/ui.vert"}, asset::AssetKind::ShaderSource);
   if (!ui_vertex_shader) {

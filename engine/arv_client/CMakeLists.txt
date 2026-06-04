@@ -7,6 +7,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/item_animation.hpp
   include/arv/client/local_identity.hpp
   include/arv/client/local_player_controller.hpp
+  include/arv/client/particles.hpp
 )
 
 add_library(arv_client STATIC
@@ -28,6 +29,7 @@ add_library(arv_client STATIC
   src/item_animation.cpp
   src/local_identity.cpp
   src/local_player_controller.cpp
+  src/particles.cpp
 )
 target_include_directories(arv_client PUBLIC include)
 target_link_libraries(arv_client PUBLIC arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)

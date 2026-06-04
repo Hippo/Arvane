@@ -35,6 +35,31 @@
       }
     },
     {
+      "name": "arvane:wood_sword",
+      "behavior": "arvane:item_behavior/tool",
+      "category": "tools",
+      "tags": [
+        "arvane:combat/attacking"
+      ],
+      "max_stack_size": 1,
+      "buoyancy": 1.0,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/sword",
+      "held_animations": {
+        "secondary_use_start": null
+      },
+      "components": {
+        "damage": {
+          "amount": 5.0,
+          "range": 3.0,
+          "cooldown_seconds": 0.35,
+          "horizontal_knockback": 8.0,
+          "vertical_knockback": 7.0,
+          "sprint_knockback_bonus": 3.0
+        }
+      }
+    },
+    {
       "name": "arvane:wood_shovel",
       "behavior": "arvane:item_behavior/tool",
       "category": "tools",

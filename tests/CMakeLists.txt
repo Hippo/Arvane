@@ -37,6 +37,7 @@ add_executable(arv_tests
   client/camera_tests.cpp
   client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp
+  client/particle_system_tests.cpp
   client/local_profile_tests.cpp
   client/ui_tests.cpp
   command/command_tests.cpp

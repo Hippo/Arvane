@@ -9,6 +9,7 @@
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
+#include "arv/protocol/particles.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
@@ -446,6 +447,29 @@ void ClientNetworkRouter::handle_message(
       if (updates.value().world_id == runtime.player_controller.camera().world_id()) {
         runtime.chunks.push_block_updates(std::move(updates.value()));
       }
+      return;
+    }
+    case protocol::MessageType::ClientboundSpawnParticles: {
+      auto spawn = protocol::deserialize_clientbound_spawn_particles(decoded.value().payload);
+      if (!spawn) {
+        return;
+      }
+      if (spawn.value().world_id != runtime.player_controller.camera().world_id()) {
+        return;
+      }
+      ParticleBurstDesc desc;
+      desc.type_name = std::move(spawn.value().particle_type);
+      desc.texture_asset = std::move(spawn.value().texture_asset);
+      desc.position = spawn.value().position;
+      desc.normal = spawn.value().normal;
+      desc.extents = spawn.value().extents;
+      desc.radius = spawn.value().radius;
+      desc.count = spawn.value().count;
+      desc.seed = spawn.value().seed;
+      desc.shape = spawn.value().shape;
+      (void)runtime.particles.spawn_burst(
+          desc,
+          runtime.player_controller.camera().position());
       return;
     }
     case protocol::MessageType::ClientboundEntitySpawn: {

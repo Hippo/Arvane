@@ -520,6 +520,22 @@ struct EntityDrawItem {
   TextureRegionHandle player_skin_region{};
 };
 
+enum class ParticleRenderBlendMode : u8 {
+  Alpha,
+  Additive,
+};
+
+struct ParticleDrawItem {
+  Vec3f position{};
+  f32 size{1.0F};
+  Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+  Vec2f uv_min{};
+  Vec2f uv_max{1.0F, 1.0F};
+  u32 atlas_page{};
+  f32 rotation_radians{};
+  ParticleRenderBlendMode blend_mode{ParticleRenderBlendMode::Alpha};
+};
+
 struct EntityPreviewDrawItem {
   Vec2f viewport_min{};
   Vec2f viewport_size{};
@@ -542,6 +558,7 @@ struct FramePacket {
   std::vector<ChunkDrawItem> opaque_chunks{};
   std::vector<ChunkDrawItem> transparent_chunks{};
   std::vector<EntityDrawItem> entities{};
+  std::vector<ParticleDrawItem> particles{};
   std::vector<EntityPreviewDrawItem> entity_previews{};
   std::vector<UIRectDrawItem> ui_rects{};
   std::vector<UITexturedQuadDrawItem> ui_textured_quads{};

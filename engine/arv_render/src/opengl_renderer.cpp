@@ -345,6 +345,17 @@ void OpenGLRenderer::set_sky_shader_sources(std::string vertex_source, std::stri
   }
 }
 
+void OpenGLRenderer::set_particle_shader_sources(
+    std::string vertex_source,
+    std::string fragment_source) {
+  particle_vertex_shader_source_ = std::move(vertex_source);
+  particle_fragment_shader_source_ = std::move(fragment_source);
+  if (particle_program_ != 0) {
+    glDeleteProgram(particle_program_);
+    particle_program_ = 0;
+  }
+}
+
 void OpenGLRenderer::set_chunk_texture_atlas(TextureArrayUploadData upload) {
   destroy_gpu_texture(terrain_atlas_);
   if (upload.valid()) {
@@ -358,6 +369,14 @@ void OpenGLRenderer::set_entity_texture_atlas(TextureArrayUploadData upload) {
   if (upload.valid()) {
     note_texture_upload(upload);
     entity_atlas_ = create_texture_array(upload, true);
+  }
+}
+
+void OpenGLRenderer::set_particle_texture_atlas(TextureArrayUploadData upload) {
+  destroy_gpu_texture(particle_atlas_);
+  if (upload.valid()) {
+    note_texture_upload(upload);
+    particle_atlas_ = create_texture_array(upload, true);
   }
 }
 
@@ -623,6 +642,9 @@ void OpenGLRenderer::render() {
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glDepthMask(GL_FALSE);
   draw_chunk_list(frame_.transparent_chunks, true);
+  draw_particles(ParticleRenderBlendMode::Alpha);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+  draw_particles(ParticleRenderBlendMode::Additive);
   glDepthMask(GL_TRUE);
   glDisable(GL_BLEND);
   glBindVertexArray(0);
@@ -660,12 +682,17 @@ void OpenGLRenderer::begin_shutdown() {
     glDeleteProgram(sky_program_);
     sky_program_ = 0;
   }
+  if (particle_program_ != 0) {
+    glDeleteProgram(particle_program_);
+    particle_program_ = 0;
+  }
   if (sky_vao_ != 0) {
     glDeleteVertexArrays(1, &sky_vao_);
     sky_vao_ = 0;
   }
   destroy_gpu_texture(terrain_atlas_);
   destroy_gpu_texture(entity_atlas_);
+  destroy_gpu_texture(particle_atlas_);
   destroy_gpu_texture(font_atlas_);
   destroy_gpu_texture(item_atlas_);
   destroy_gpu_texture(white_texture_);
@@ -688,6 +715,12 @@ void OpenGLRenderer::begin_shutdown() {
   if (ui_shape_vao_ != 0) {
     glDeleteVertexArrays(1, &ui_shape_vao_);
   }
+  if (particle_instance_buffer_ != 0) {
+    glDeleteBuffers(1, &particle_instance_buffer_);
+  }
+  if (particle_vao_ != 0) {
+    glDeleteVertexArrays(1, &particle_vao_);
+  }
   ui_index_buffer_ = 0;
   ui_vertex_buffer_ = 0;
   ui_vao_ = 0;
@@ -698,6 +731,9 @@ void OpenGLRenderer::begin_shutdown() {
   ui_shape_vao_ = 0;
   ui_shape_vertex_capacity_bytes_ = 0;
   ui_shape_index_capacity_bytes_ = 0;
+  particle_instance_buffer_ = 0;
+  particle_vao_ = 0;
+  particle_instance_capacity_bytes_ = 0;
   gpu_profile_context_initialized_ = false;
   render_frame_index_ = 0;
   frame_ = {};
@@ -1333,6 +1369,62 @@ bool OpenGLRenderer::ensure_sky_program() {
   return true;
 }
 
+bool OpenGLRenderer::ensure_particle_program() {
+  if (particle_program_ != 0) {
+    return true;
+  }
+
+  if (particle_vertex_shader_source_.empty() || particle_fragment_shader_source_.empty()) {
+    return false;
+  }
+
+  const GLuint vertex_shader =
+      compile_shader(GL_VERTEX_SHADER, particle_vertex_shader_source_.c_str());
+  const GLuint fragment_shader =
+      compile_shader(GL_FRAGMENT_SHADER, particle_fragment_shader_source_.c_str());
+  if (vertex_shader == 0 || fragment_shader == 0) {
+    if (vertex_shader != 0) {
+      glDeleteShader(vertex_shader);
+    }
+    if (fragment_shader != 0) {
+      glDeleteShader(fragment_shader);
+    }
+    return false;
+  }
+
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vertex_shader);
+  glAttachShader(program, fragment_shader);
+  glLinkProgram(program);
+  glDeleteShader(vertex_shader);
+  glDeleteShader(fragment_shader);
+
+  GLint success = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &success);
+  if (success != GL_TRUE) {
+    glDeleteProgram(program);
+    return false;
+  }
+
+  particle_program_ = program;
+  particle_camera_position_uniform_ =
+      glGetUniformLocation(particle_program_, "u_camera_position");
+  particle_camera_forward_uniform_ =
+      glGetUniformLocation(particle_program_, "u_camera_forward");
+  particle_camera_right_uniform_ = glGetUniformLocation(particle_program_, "u_camera_right");
+  particle_camera_up_uniform_ = glGetUniformLocation(particle_program_, "u_camera_up");
+  particle_camera_aspect_uniform_ = glGetUniformLocation(particle_program_, "u_camera_aspect");
+  particle_camera_fov_y_uniform_ =
+      glGetUniformLocation(particle_program_, "u_camera_fov_y_degrees");
+  particle_camera_near_uniform_ =
+      glGetUniformLocation(particle_program_, "u_camera_near_plane");
+  particle_camera_far_uniform_ =
+      glGetUniformLocation(particle_program_, "u_camera_far_plane");
+  particle_atlas_size_uniform_ = glGetUniformLocation(particle_program_, "u_atlas_size");
+  particle_atlas_uniform_ = glGetUniformLocation(particle_program_, "u_particle_atlas");
+  return true;
+}
+
 void OpenGLRenderer::draw_sky() {
   ARV_PROFILE_ZONE("Sky draw");
   if (!frame_.sky.enabled || !ensure_sky_program()) {
@@ -1670,6 +1762,91 @@ void OpenGLRenderer::draw_entities_for(
 
   glBindVertexArray(0);
   glUseProgram(0);
+}
+
+void OpenGLRenderer::draw_particles(ParticleRenderBlendMode blend_mode) {
+  ARV_PROFILE_ZONE("Particle draw batch");
+  if (frame_.particles.empty() || !ensure_particle_program()) {
+    return;
+  }
+
+  particle_instances_.clear();
+  particle_instances_.reserve(frame_.particles.size());
+  for (const ParticleDrawItem& draw : frame_.particles) {
+    if (draw.blend_mode != blend_mode || draw.size <= 0.0F || draw.color.w <= 0.0F) {
+      continue;
+    }
+    particle_instances_.push_back({
+        draw.position,
+        draw.size,
+        draw.color,
+        draw.uv_min,
+        draw.uv_max,
+        draw.atlas_page,
+        draw.rotation_radians});
+  }
+  if (particle_instances_.empty()) {
+    return;
+  }
+
+  ensure_particle_buffers();
+  const f32 aspect = height_ == 0 ? 1.0F : static_cast<f32>(width_) / static_cast<f32>(height_);
+  glUseProgram(particle_program_);
+  glUniform3f(
+      particle_camera_position_uniform_,
+      frame_.world_view.position.x,
+      frame_.world_view.position.y,
+      frame_.world_view.position.z);
+  glUniform3f(
+      particle_camera_forward_uniform_,
+      frame_.world_view.forward.x,
+      frame_.world_view.forward.y,
+      frame_.world_view.forward.z);
+  glUniform3f(
+      particle_camera_right_uniform_,
+      frame_.world_view.right.x,
+      frame_.world_view.right.y,
+      frame_.world_view.right.z);
+  glUniform3f(
+      particle_camera_up_uniform_,
+      frame_.world_view.up.x,
+      frame_.world_view.up.y,
+      frame_.world_view.up.z);
+  glUniform1f(particle_camera_aspect_uniform_, aspect);
+  glUniform1f(particle_camera_fov_y_uniform_, frame_.world_view.fov_y_degrees);
+  glUniform1f(particle_camera_near_uniform_, frame_.world_view.near_plane);
+  glUniform1f(particle_camera_far_uniform_, frame_.world_view.far_plane);
+  glUniform2f(
+      particle_atlas_size_uniform_,
+      static_cast<f32>(particle_atlas_.width == 0 ? 1U : particle_atlas_.width),
+      static_cast<f32>(particle_atlas_.height == 0 ? 1U : particle_atlas_.height));
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(
+      GL_TEXTURE_2D_ARRAY,
+      particle_atlas_.id == 0 ? white_texture_.id : particle_atlas_.id);
+  glUniform1i(particle_atlas_uniform_, 0);
+
+  glBindVertexArray(particle_vao_);
+  const GLsizeiptr instance_bytes =
+      static_cast<GLsizeiptr>(particle_instances_.size() * sizeof(ParticleInstanceData));
+  ensure_buffer_capacity(
+      GL_ARRAY_BUFFER,
+      particle_instance_buffer_,
+      particle_instance_capacity_bytes_,
+      instance_bytes,
+      GL_DYNAMIC_DRAW);
+  glBufferSubData(GL_ARRAY_BUFFER, 0, instance_bytes, particle_instances_.data());
+  ++gpu_buffer_uploads_last_frame_;
+  gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(instance_bytes);
+  glDrawArraysInstanced(
+      GL_TRIANGLE_STRIP,
+      0,
+      4,
+      static_cast<GLsizei>(particle_instances_.size()));
+  vertices_submitted_last_frame_ += static_cast<u64>(particle_instances_.size()) * 4U;
+  triangles_submitted_last_frame_ += static_cast<u64>(particle_instances_.size()) * 2U;
+  ++draw_calls_last_frame_;
+  glBindVertexArray(0);
 }
 
 void OpenGLRenderer::draw_entity_previews() {
@@ -2066,6 +2243,83 @@ void OpenGLRenderer::ensure_ui_shape_buffers() {
       GL_FALSE,
       sizeof(UIShapeVertex),
       reinterpret_cast<const void*>(offsetof(UIShapeVertex, border_width)));
+  glBindVertexArray(0);
+}
+
+void OpenGLRenderer::ensure_particle_buffers() {
+  if (particle_vao_ != 0) {
+    return;
+  }
+
+  glGenVertexArrays(1, &particle_vao_);
+  glBindVertexArray(particle_vao_);
+  glGenBuffers(1, &particle_instance_buffer_);
+  glBindBuffer(GL_ARRAY_BUFFER, particle_instance_buffer_);
+  glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(
+      0,
+      3,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ParticleInstanceData),
+      reinterpret_cast<const void*>(offsetof(ParticleInstanceData, position)));
+  glVertexAttribDivisor(0, 1);
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(
+      1,
+      1,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ParticleInstanceData),
+      reinterpret_cast<const void*>(offsetof(ParticleInstanceData, size)));
+  glVertexAttribDivisor(1, 1);
+  glEnableVertexAttribArray(2);
+  glVertexAttribPointer(
+      2,
+      4,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ParticleInstanceData),
+      reinterpret_cast<const void*>(offsetof(ParticleInstanceData, color)));
+  glVertexAttribDivisor(2, 1);
+  glEnableVertexAttribArray(3);
+  glVertexAttribPointer(
+      3,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ParticleInstanceData),
+      reinterpret_cast<const void*>(offsetof(ParticleInstanceData, uv_min)));
+  glVertexAttribDivisor(3, 1);
+  glEnableVertexAttribArray(4);
+  glVertexAttribPointer(
+      4,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ParticleInstanceData),
+      reinterpret_cast<const void*>(offsetof(ParticleInstanceData, uv_max)));
+  glVertexAttribDivisor(4, 1);
+  glEnableVertexAttribArray(5);
+  glVertexAttribIPointer(
+      5,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(ParticleInstanceData),
+      reinterpret_cast<const void*>(offsetof(ParticleInstanceData, atlas_page)));
+  glVertexAttribDivisor(5, 1);
+  glEnableVertexAttribArray(6);
+  glVertexAttribPointer(
+      6,
+      1,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ParticleInstanceData),
+      reinterpret_cast<const void*>(offsetof(ParticleInstanceData, rotation_radians)));
+  glVertexAttribDivisor(6, 1);
+
   glBindVertexArray(0);
 }
 

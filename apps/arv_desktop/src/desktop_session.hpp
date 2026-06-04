@@ -5,6 +5,7 @@
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/item_animation.hpp"
+#include "arv/client/particles.hpp"
 #include "arv/command/command_registry.hpp"
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/types.hpp"
@@ -72,6 +73,10 @@ struct DesktopGameSession {
   std::vector<ui::PlayerListEntryView> tab_players{};
   std::vector<ui::ChatLineView> chat_lines{};
   client::HeldItemAnimationPlayer held_item_animation{};
+  client::InputFrame last_gameplay_input{};
+  Seconds next_block_mining_particle_seconds{};
+  Seconds sprint_particle_accumulator{};
+  u32 particle_seed_counter{1U};
   std::optional<std::chrono::steady_clock::time_point> first_person_sneak_visual_updated_at{};
   f32 first_person_sneak_visual_progress{};
   bool held_item_secondary_use_active{};
@@ -96,6 +101,7 @@ struct DesktopSessionDependencies {
   const asset::BlockTextureAtlas& block_atlas;
   const render::FluidRenderData& fluid_render_data;
   const asset::TextureAtlas& item_atlas;
+  const client::ParticleRegistry& particle_registry;
   const player::PlayerTuning& player_tuning;
   const voxel::FluidDefinition& water_fluid;
   const world::WorldTickPolicy& world_tick_policy;

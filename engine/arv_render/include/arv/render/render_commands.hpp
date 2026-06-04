@@ -69,9 +69,13 @@ public:
   virtual void set_sky_shader_sources(
       std::string vertex_source,
       std::string fragment_source) = 0;
+  virtual void set_particle_shader_sources(
+      std::string vertex_source,
+      std::string fragment_source) = 0;
 
   virtual void set_chunk_texture_atlas(TextureArrayUploadData upload) = 0;
   virtual void set_entity_texture_atlas(TextureArrayUploadData upload) = 0;
+  virtual void set_particle_texture_atlas(TextureArrayUploadData upload) = 0;
   virtual void set_ui_font_atlas(TextureArrayUploadData upload) = 0;
   virtual void set_ui_item_atlas(TextureArrayUploadData upload) = 0;
 
@@ -121,9 +125,13 @@ public:
   void set_sky_shader_sources(
       std::string vertex_source,
       std::string fragment_source) override;
+  void set_particle_shader_sources(
+      std::string vertex_source,
+      std::string fragment_source) override;
 
   void set_chunk_texture_atlas(TextureArrayUploadData upload) override;
   void set_entity_texture_atlas(TextureArrayUploadData upload) override;
+  void set_particle_texture_atlas(TextureArrayUploadData upload) override;
   void set_ui_font_atlas(TextureArrayUploadData upload) override;
   void set_ui_item_atlas(TextureArrayUploadData upload) override;
 
@@ -188,9 +196,13 @@ public:
   void set_sky_shader_sources(
       std::string vertex_source,
       std::string fragment_source);
+  void set_particle_shader_sources(
+      std::string vertex_source,
+      std::string fragment_source);
 
   void set_chunk_texture_atlas(TextureArrayUploadData upload);
   void set_entity_texture_atlas(TextureArrayUploadData upload);
+  void set_particle_texture_atlas(TextureArrayUploadData upload);
   void set_ui_font_atlas(TextureArrayUploadData upload);
   void set_ui_item_atlas(TextureArrayUploadData upload);
 

@@ -129,6 +129,21 @@ arv::server::BlockBreakBehaviorRegistry make_base_block_break_behaviors() {
   return registry;
 }
 
+arv::client::ParticleRegistry make_critical_particle_registry() {
+  arv::client::ParticleRegistry registry;
+  arv::client::ParticleType type;
+  type.name = "arvane:critical_hit";
+  type.frames.push_back(
+      {"arvane:texture/particle/critical_hit", {0.0F, 0.0F}, {16.0F, 16.0F}, 0U, 16U, 16U});
+  type.count = {1U, 1U};
+  type.lifetime_seconds = {1.0F, 1.0F};
+  type.size_start = {0.1F, 0.1F};
+  type.size_end = {0.1F, 0.1F};
+  type.color = {{1.0F, 1.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 1.0F, 0.0F}};
+  (void)registry.add(std::move(type));
+  return registry;
+}
+
 arv::voxel::BlockRegistry make_timed_break_block_registry() {
   std::vector<arv::voxel::BlockDefinition> definitions;
   definitions.push_back(arv::voxel::make_air_definition());
@@ -365,6 +380,108 @@ TEST(PlayerInteractionTests, EntityAttackUsesDefaultFistProfileForHeldItemsWitho
   const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
   ASSERT_NE(health, nullptr);
   EXPECT_FLOAT_EQ(health->current, 9.0F);
+}
+
+TEST(PlayerInteractionTests, TaggedAttackingItemCanApplyCriticalMultiplier) {
+  CombatValidationFixture fixture;
+  fixture.config.critical_chance = 100.0F;
+  fixture.config.critical_multiplier = 2.0F;
+  const std::optional<arv::player::ItemID> sword =
+      fixture.item_registry.find_item("arvane:wood_sword");
+  ASSERT_TRUE(sword.has_value());
+  ASSERT_TRUE(fixture.player->inventory.set_slot(
+      0,
+      arv::player::ItemStack{sword.value(), 1U}));
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_TRUE(result.damage_applied);
+  EXPECT_TRUE(result.critical_hit);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 0.0F);
+}
+
+TEST(PlayerInteractionTests, CriticalChanceDoesNotApplyToUntaggedAttackItems) {
+  CombatValidationFixture fixture;
+  fixture.config.critical_chance = 100.0F;
+  fixture.config.critical_multiplier = 2.0F;
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_TRUE(result.damage_applied);
+  EXPECT_FALSE(result.critical_hit);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 7.0F);
+}
+
+TEST(PlayerInteractionTests, CriticalChanceZeroDisablesTaggedItemCriticals) {
+  CombatValidationFixture fixture;
+  fixture.config.critical_chance = 0.0F;
+  fixture.config.critical_multiplier = 2.0F;
+  const std::optional<arv::player::ItemID> sword =
+      fixture.item_registry.find_item("arvane:wood_sword");
+  ASSERT_TRUE(sword.has_value());
+  ASSERT_TRUE(fixture.player->inventory.set_slot(
+      0,
+      arv::player::ItemStack{sword.value(), 1U}));
+  const arv::EntityID target = fixture.create_target({2.8F, 0.0F, 0.0F});
+
+  const arv::server::AttackResult result = fixture.attack(target, 1U, 10U);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_TRUE(result.damage_applied);
+  EXPECT_FALSE(result.critical_hit);
+  const arv::entity::EntityHealth* health = fixture.world.find_entity_health(target);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 5.0F);
+}
+
+TEST(PlayerInteractionTests, ServerCriticalHitSpawnsClientParticleEvent) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.combat.critical_chance = 100.0F;
+  start_info.combat.critical_multiplier = 2.0F;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::client::ParticleRegistry particles = make_critical_particle_registry();
+  client.configure_particles(&particles);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  set_test_player_held_item(server, item_registry, "arvane:wood_sword");
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{0.9F, 0.9F, 0.9F}};
+  components.health = arv::entity::AuthoredHealthComponent{10.0F};
+  arv::world::EntityCreateInfo info;
+  info.position = {2.8F, 0.0F, 0.0F};
+  info.authored_components = components;
+  const arv::EntityID target = server.voxel_world().create_entity(std::move(info));
+  const std::optional<arv::EntityNetID> target_net =
+      server.voxel_world().network_id_for_entity(target);
+  ASSERT_TRUE(target_net.has_value());
+
+  ASSERT_TRUE(client.request_attack_entity(target_net.value()));
+  server.tick();
+  client.fixed_tick(server.tick_index());
+
+  EXPECT_GT(client.particle_stats().spawned_total, 0U);
 }
 
 TEST(PlayerInteractionTests, EntityAttackAppliesKnockbackOnDamage) {

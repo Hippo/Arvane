@@ -77,7 +77,8 @@
       "textures": {
         "top": "arvane:texture/block/grass_top",
         "side": "arvane:texture/block/grass_side",
-        "bottom": "arvane:texture/block/dirt"
+        "bottom": "arvane:texture/block/dirt",
+        "particle": "arvane:texture/block/dirt"
       },
       "properties": {
         "solid": true,
@@ -137,7 +138,8 @@
       "textures": {
         "top": "arvane:texture/block/oak_log_top",
         "bottom": "arvane:texture/block/oak_log_top",
-        "side": "arvane:texture/block/oak_log"
+        "side": "arvane:texture/block/oak_log",
+        "particle": "arvane:texture/block/oak_log"
       },
       "properties": {
         "solid": true,

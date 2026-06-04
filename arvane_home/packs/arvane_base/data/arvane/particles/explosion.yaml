@@ -1,0 +1,40 @@
+id: arvane:explosion
+texture:
+  mode: sequence
+  frames:
+    - arvane:texture/particle/explosion_0
+    - arvane:texture/particle/explosion_1
+    - arvane:texture/particle/explosion_2
+    - arvane:texture/particle/explosion_3
+    - arvane:texture/particle/explosion_4
+    - arvane:texture/particle/explosion_5
+    - arvane:texture/particle/explosion_6
+    - arvane:texture/particle/explosion_7
+    - arvane:texture/particle/explosion_8
+    - arvane:texture/particle/explosion_9
+    - arvane:texture/particle/explosion_10
+    - arvane:texture/particle/explosion_11
+    - arvane:texture/particle/explosion_12
+    - arvane:texture/particle/explosion_13
+    - arvane:texture/particle/explosion_14
+    - arvane:texture/particle/explosion_15
+animation:
+  sample: lifetime_scaled
+  playback: once
+count: 1
+lifetime: [0.55, 0.55]
+size:
+  start: [0.75, 0.75]
+  end: [1.35, 1.35]
+velocity:
+  x: [0.0, 0.0]
+  y: [0.0, 0.0]
+  z: [0.0, 0.0]
+acceleration: [0.0, 0.0, 0.0]
+drag: 1.0
+color:
+  start: [1.0, 0.93, 0.72, 1.0]
+  end: [1.0, 0.46, 0.22, 0.0]
+blend: additive
+priority: critical
+distance_scale: true

@@ -73,12 +73,22 @@ public:
     record("set_sky_shader_sources");
   }
 
+  void set_particle_shader_sources(
+      std::string /*vertex_source*/,
+      std::string /*fragment_source*/) override {
+    record("set_particle_shader_sources");
+  }
+
   void set_chunk_texture_atlas(arv::render::TextureArrayUploadData /*upload*/) override {
     record("set_chunk_texture_atlas");
   }
 
   void set_entity_texture_atlas(arv::render::TextureArrayUploadData /*upload*/) override {
     record("set_entity_texture_atlas");
+  }
+
+  void set_particle_texture_atlas(arv::render::TextureArrayUploadData /*upload*/) override {
+    record("set_particle_texture_atlas");
   }
 
   void set_ui_font_atlas(arv::render::TextureArrayUploadData /*upload*/) override {

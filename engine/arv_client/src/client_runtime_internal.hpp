@@ -3,6 +3,7 @@
 #include "arv/client/chunk_interest.hpp"
 #include "arv/client/local_identity.hpp"
 #include "arv/client/local_player_controller.hpp"
+#include "arv/client/particles.hpp"
 #include "arv/core/time.hpp"
 #include "arv/physics/collision.hpp"
 
@@ -38,6 +39,7 @@ struct ClientRuntimeContext {
   ClientEntityMirrorStore& entities;
   ClientDroppedItemMirrorStore& dropped_items;
   ClientSkinRuntime& skins;
+  ParticleSystem& particles;
   const arv::text::LanguageCatalog* language{};
   const physics::ICollisionQuery* collision_query{};
   Seconds tick_seconds{};

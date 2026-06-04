@@ -8,6 +8,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
+#include "arv/protocol/particles.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/text_variables.hpp"
@@ -117,6 +118,23 @@ std::vector<arv::protocol::ServerboundChatMessage> serverbound_chat_messages(
     }
   }
   return messages;
+}
+
+arv::client::ParticleRegistry make_runtime_particle_registry() {
+  arv::client::ParticleRegistry registry;
+  arv::client::ParticleType type;
+  type.name = "arvane:block_dust";
+  type.frames.push_back(
+      {"arvane:texture/particle/test", {0.0F, 0.0F}, {16.0F, 16.0F}, 0U, 16U, 16U});
+  type.count = {1U, 1U};
+  type.lifetime_seconds = {1.0F, 1.0F};
+  type.size_start = {0.1F, 0.1F};
+  type.size_end = {0.1F, 0.1F};
+  type.color = {{1.0F, 1.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 1.0F, 1.0F}};
+  (void)registry.add(std::move(type));
+  registry.add_frame_reference(
+      {"arvane:texture/block/dirt", {32.0F, 0.0F}, {48.0F, 16.0F}, 0U, 16U, 16U});
+  return registry;
 }
 
 void send_to_client(
@@ -1126,6 +1144,50 @@ TEST(ClientRuntimeTests, InventoryAndBlockUpdatesRejectInactiveOrStaleState) {
   ASSERT_TRUE(client.inventory().slot(0).has_value());
   EXPECT_EQ(client.inventory().slot(0)->count, 4U);
   EXPECT_EQ(client.inventory_revision(), 2U);
+}
+
+TEST(ClientRuntimeTests, ClientboundSpawnParticlesCreatesLocalParticlesForCurrentWorld) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::client::ParticleRegistry particles = make_runtime_particle_registry();
+  client.configure_particles(&particles);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  arv::protocol::ClientboundSpawnParticles wrong_world;
+  wrong_world.world_id = arv::WorldID{2};
+  wrong_world.particle_type = "arvane:block_dust";
+  wrong_world.texture_asset = "arvane:texture/block/dirt";
+  wrong_world.position = {0.0F, 0.0F, 0.0F};
+  wrong_world.count = 2U;
+  wrong_world.seed = 7U;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundSpawnParticles,
+      arv::protocol::serialize_clientbound_spawn_particles(wrong_world),
+      arv::protocol::ReliabilityClass::UnreliableEvent);
+  client.fixed_tick(2);
+  EXPECT_EQ(client.particle_stats().spawned_total, 0U);
+
+  wrong_world.world_id = arv::WorldID{1};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundSpawnParticles,
+      arv::protocol::serialize_clientbound_spawn_particles(wrong_world),
+      arv::protocol::ReliabilityClass::UnreliableEvent);
+  client.fixed_tick(3);
+  EXPECT_EQ(client.particle_stats().spawned_total, 2U);
+  EXPECT_EQ(client.particle_stats().live_particles, 2U);
+
+  const arv::render::FramePacket frame = client.build_frame_packet(0.0F, 1280U, 720U);
+  EXPECT_EQ(frame.particles.size(), 2U);
+  ASSERT_FALSE(frame.particles.empty());
+  EXPECT_EQ(frame.particles.front().uv_min, (arv::Vec2f{32.0F, 0.0F}));
 }
 
 TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {

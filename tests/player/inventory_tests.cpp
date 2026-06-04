@@ -244,6 +244,7 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
       "name": "arvane:coal",
       "display_name": "Coal",
       "behavior": "test:item_behavior/resource",
+      "tags": ["arvane:test/resource"],
       "max_stack_size": 64,
       "buoyancy": 0.5,
       "render_type": "texture",
@@ -281,6 +282,8 @@ TEST(ItemRegistryTests, ResolvesExplicitTextureItemsFromJson) {
   const arv::player::ItemRecord* coal = registry.item(coal_id.value());
   ASSERT_NE(coal, nullptr);
   EXPECT_EQ(coal->behavior_id, "test:item_behavior/resource");
+  ASSERT_EQ(coal->tags.size(), 1U);
+  EXPECT_EQ(coal->tags.front(), "arvane:test/resource");
   EXPECT_EQ(coal->render_type, arv::player::ItemRenderType::Texture);
   EXPECT_EQ(coal->texture_asset, "arvane:texture/item/coal");
   EXPECT_FLOAT_EQ(coal->buoyancy, 0.5F);

@@ -161,6 +161,8 @@ gameplay:
     default_attack_damage: 1.5
     default_attack_range: 3.25
     default_attack_cooldown_seconds: 0.4
+    critical-chance: 25
+    critical-multiplier: 1.75
     attack_validation_grace_blocks: 2.75
     max_attack_validation_range: 6.5
     existing_horizontal_retention: 0.5
@@ -336,6 +338,8 @@ chunk_pipeline:
   EXPECT_FLOAT_EQ(result.value().gameplay.combat.default_attack_damage, 1.5F);
   EXPECT_FLOAT_EQ(result.value().gameplay.combat.default_attack_range, 3.25F);
   EXPECT_FLOAT_EQ(result.value().gameplay.combat.default_attack_cooldown_seconds, 0.4F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.critical_chance, 25.0F);
+  EXPECT_FLOAT_EQ(result.value().gameplay.combat.critical_multiplier, 1.75F);
   EXPECT_FLOAT_EQ(result.value().gameplay.combat.attack_validation_grace_blocks, 2.75F);
   EXPECT_FLOAT_EQ(result.value().gameplay.combat.max_attack_validation_range, 6.5F);
   EXPECT_FLOAT_EQ(result.value().gameplay.combat.existing_horizontal_retention, 0.5F);

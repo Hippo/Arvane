@@ -30,6 +30,7 @@ A pack may contain:
 - Shaders
 - Sounds
 - Native plugin code
+- Particle definitions and particle textures
 
 ### Asset Pack
 
@@ -682,6 +683,12 @@ arvane:animation/entity/pig
 ```
 
 The exact mapping from a resource ID to a file path is owned by the asset loader.
+
+Block definitions may reference a block dust texture through the object-form
+`textures.particle` field. When a block uses string-form `textures`, that string
+also becomes the block dust texture. These referenced block textures are packed
+into the client particle atlas during asset loading so sprint, mining, and break
+particles do not bind per-block textures while rendering.
 
 ---
 

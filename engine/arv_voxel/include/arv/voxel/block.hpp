@@ -141,6 +141,7 @@ struct BlockDefinition {
   bool hide_same_variant_faces{true};
   BlockRenderTint render_tint{BlockRenderTint::None};
   std::array<std::string, BlockFaceCount> texture_assets{};
+  std::string particle_texture_asset{};
   BlockModelReference model{};
   std::vector<StatePropertyDefinition> states{};
 };
@@ -156,6 +157,7 @@ struct BlockRecord {
   BlockDropDefinition drops{};
   bool is_item{true};
   f32 item_buoyancy{1.0F};
+  std::string particle_texture_asset{};
   BlockVariantID default_variant{};
   std::vector<BlockVariantID> variants{};
 };
@@ -181,6 +183,7 @@ struct BlockVariantRecord {
   BlockRenderTint render_tint{BlockRenderTint::None};
   bool hide_same_variant_faces{};
   std::array<std::string, BlockFaceCount> texture_assets{};
+  std::string particle_texture_asset{};
   BlockModelReference model{};
   BlockModelTransform model_transform{};
   u32 block_body_index{};

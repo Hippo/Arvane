@@ -13,6 +13,7 @@
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
+#include "arv/protocol/particles.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"

@@ -7,6 +7,7 @@
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/message_registry.hpp"
 #include "arv/protocol/message_writer.hpp"
+#include "arv/protocol/particles.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
@@ -89,6 +90,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ClientboundChunkSectionUnload);
   const auto world_join = registry.lookup(arv::protocol::MessageType::ClientboundWorldJoinResult);
   const auto block_updates = registry.lookup(arv::protocol::MessageType::ClientboundBlockUpdateBatch);
+  const auto spawn_particles = registry.lookup(arv::protocol::MessageType::ClientboundSpawnParticles);
   const auto entity_spawn = registry.lookup(arv::protocol::MessageType::ClientboundEntitySpawn);
   const auto entity_snapshot = registry.lookup(arv::protocol::MessageType::ClientboundEntitySnapshot);
   const auto dropped_item_snapshot =
@@ -125,6 +127,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(chunk_unload.has_value());
   ASSERT_TRUE(world_join.has_value());
   ASSERT_TRUE(block_updates.has_value());
+  ASSERT_TRUE(spawn_particles.has_value());
   ASSERT_TRUE(entity_spawn.has_value());
   ASSERT_TRUE(entity_snapshot.has_value());
   ASSERT_TRUE(dropped_item_snapshot.has_value());
@@ -164,6 +167,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(chunk_unload->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(world_join->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(block_updates->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(spawn_particles->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
   EXPECT_EQ(entity_spawn->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(entity_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(dropped_item_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
@@ -187,6 +191,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(chunk_unload->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(world_join->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(block_updates->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(spawn_particles->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(spawn_particles->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(spawn_particles->name, "ClientboundSpawnParticles");
   EXPECT_EQ(entity_spawn->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(entity_snapshot->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(dropped_item_snapshot->lane, arv::protocol::NetworkLane::Gameplay);
@@ -199,7 +206,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 52U);
+  EXPECT_EQ(registry.size(), 53U);
 }
 
 TEST(ProtocolTests, SessionControlPacketsRoundTripThroughSerialization) {
@@ -579,6 +586,49 @@ TEST(ProtocolTests, BlockUpdateBatchRoundTripsAndRejectsMalformedCounts) {
   malformed.write<arv::u32>(arv::protocol::MaxBlockUpdatesPerBatch + 1U);
   EXPECT_FALSE(arv::protocol::deserialize_clientbound_block_update_batch(
       std::move(malformed).take_bytes()));
+}
+
+TEST(ProtocolTests, SpawnParticlesRoundTripsAndRejectsMalformedCounts) {
+  arv::protocol::ClientboundSpawnParticles packet;
+  packet.world_id = arv::WorldID{5};
+  packet.particle_type = "arvane:block_dust";
+  packet.texture_asset = "arvane:texture/block/dirt";
+  packet.position = {1.0F, 2.0F, 3.0F};
+  packet.normal = {0.0F, 1.0F, 0.0F};
+  packet.extents = {0.25F, 0.5F, 0.75F};
+  packet.radius = 0.35F;
+  packet.count = 12U;
+  packet.seed = 99U;
+  packet.shape = arv::protocol::ParticleSpawnShape::BlockFace;
+
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_spawn_particles(packet);
+  const auto decoded = arv::protocol::deserialize_clientbound_spawn_particles(bytes);
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().world_id, (arv::WorldID{5}));
+  EXPECT_EQ(decoded.value().particle_type, "arvane:block_dust");
+  EXPECT_EQ(decoded.value().texture_asset, "arvane:texture/block/dirt");
+  EXPECT_EQ(decoded.value().position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+  EXPECT_EQ(decoded.value().normal, (arv::Vec3f{0.0F, 1.0F, 0.0F}));
+  EXPECT_EQ(decoded.value().extents, (arv::Vec3f{0.25F, 0.5F, 0.75F}));
+  EXPECT_EQ(decoded.value().radius, 0.35F);
+  EXPECT_EQ(decoded.value().count, 12U);
+  EXPECT_EQ(decoded.value().seed, 99U);
+  EXPECT_EQ(decoded.value().shape, arv::protocol::ParticleSpawnShape::BlockFace);
+
+  packet.count = arv::protocol::MaxSpawnParticleCount + 1U;
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_spawn_particles(
+      arv::protocol::serialize_clientbound_spawn_particles(packet)));
+
+  packet.count = 1U;
+  packet.texture_asset.assign(arv::protocol::MaxParticleTextureAssetNameBytes + 1U, 'x');
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_spawn_particles(
+      arv::protocol::serialize_clientbound_spawn_particles(packet)));
+
+  packet.texture_asset.clear();
+  packet.particle_type.clear();
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_spawn_particles(
+      arv::protocol::serialize_clientbound_spawn_particles(packet)));
 }
 
 TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) {

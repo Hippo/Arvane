@@ -77,6 +77,10 @@ Examples:
 - server replicates result
 
 The client may predict some effects for responsiveness, but server state always wins.
+Visual-only particle bursts are client-owned. The server can trigger them with
+`ClientboundSpawnParticles`, but it does not replicate individual particle
+state. The packet may include a texture asset override for effects such as block
+dust; clients still expand the event into local particles.
 
 ---
 
@@ -165,6 +169,7 @@ Message categories:
 - world/chunk messages
 - block update messages
 - entity replication messages
+- visual event messages such as `ClientboundSpawnParticles`
 - inventory and interaction messages
 - time/tick synchronization messages
 - debug/development messages
@@ -608,6 +613,12 @@ Events should not replace authoritative state replication.
 
 A particle event may be dropped.  
 A block update may not be silently lost if it changes authoritative world state.
+
+`ClientboundSpawnParticles` carries the world id, particle type, optional
+texture asset override, position, normal, extents/radius, count, seed, and spawn
+shape. Block-break dust uses the old block state's authored particle texture in
+this override field. Server-confirmed critical entity attacks use the
+`arvane:critical_hit` particle type.
 
 ---
 

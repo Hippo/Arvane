@@ -3,12 +3,14 @@
 #include "arv/core/log.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
+#include "arv/client/particles.hpp"
 #include "arv/io/config.hpp"
 #include "arv/text/language.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/world/worldgen/loader.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <utility>
@@ -155,6 +157,22 @@ namespace {
       .max_pages = source.max_pages,
       .padding = padding,
       .require_uniform_non_fallback_size = require_uniform_non_fallback_size};
+}
+
+[[nodiscard]] std::vector<std::string> block_particle_texture_assets(
+    const voxel::BlockRegistry& registry) {
+  std::vector<std::string> textures;
+  for (u32 index = 0; index < registry.block_count(); ++index) {
+    const voxel::BlockRecord* block = registry.block(voxel::BlockID{index});
+    if (block == nullptr || block->particle_texture_asset.empty()) {
+      continue;
+    }
+    if (std::find(textures.begin(), textures.end(), block->particle_texture_asset) ==
+        textures.end()) {
+      textures.push_back(block->particle_texture_asset);
+    }
+  }
+  return textures;
 }
 
 using UiFontStackLoadResult = Expected<void, DesktopAssetLoadError>;
@@ -455,6 +473,23 @@ DesktopLoadedAssetsResult load_desktop_assets(
       renderer.set_entity_animation(animation);
     }
   }
+
+  std::vector<std::string> block_particle_textures =
+      block_particle_texture_assets(loaded.block_registry);
+  auto particle_assets_result = client::load_particle_assets_from_packs(
+      packs,
+      resources,
+      client::default_particle_atlas_options(),
+      block_particle_textures);
+  if (!particle_assets_result) {
+    return asset_failure("particles", particle_assets_result.error().describe());
+  }
+  loaded.particle_assets = std::move(particle_assets_result.value());
+  if (loaded.particle_assets.atlas.pages.empty()) {
+    return asset_failure("particles", "particle texture atlas did not produce a page");
+  }
+  renderer.set_particle_texture_atlas(
+      texture_array_upload_from_atlas(loaded.particle_assets.atlas));
 
   auto worldgen_registry = world::worldgen::load_worldgen_registry_from_packs(packs);
   if (!worldgen_registry) {

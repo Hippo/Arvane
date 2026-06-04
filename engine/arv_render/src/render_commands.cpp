@@ -47,12 +47,22 @@ void OpenGLRenderCommandTarget::set_sky_shader_sources(
   renderer_.set_sky_shader_sources(std::move(vertex_source), std::move(fragment_source));
 }
 
+void OpenGLRenderCommandTarget::set_particle_shader_sources(
+    std::string vertex_source,
+    std::string fragment_source) {
+  renderer_.set_particle_shader_sources(std::move(vertex_source), std::move(fragment_source));
+}
+
 void OpenGLRenderCommandTarget::set_chunk_texture_atlas(TextureArrayUploadData upload) {
   renderer_.set_chunk_texture_atlas(std::move(upload));
 }
 
 void OpenGLRenderCommandTarget::set_entity_texture_atlas(TextureArrayUploadData upload) {
   renderer_.set_entity_texture_atlas(std::move(upload));
+}
+
+void OpenGLRenderCommandTarget::set_particle_texture_atlas(TextureArrayUploadData upload) {
+  renderer_.set_particle_texture_atlas(std::move(upload));
 }
 
 void OpenGLRenderCommandTarget::set_ui_font_atlas(TextureArrayUploadData upload) {
@@ -321,6 +331,16 @@ void RenderCommandQueue::set_sky_shader_sources(
       });
 }
 
+void RenderCommandQueue::set_particle_shader_sources(
+    std::string vertex_source,
+    std::string fragment_source) {
+  dispatch(
+      [vertex_source = std::move(vertex_source),
+       fragment_source = std::move(fragment_source)](IRenderCommandTarget& target) mutable {
+        target.set_particle_shader_sources(std::move(vertex_source), std::move(fragment_source));
+      });
+}
+
 void RenderCommandQueue::set_chunk_texture_atlas(TextureArrayUploadData upload) {
   dispatch([upload = std::move(upload)](IRenderCommandTarget& target) mutable {
     target.set_chunk_texture_atlas(std::move(upload));
@@ -330,6 +350,12 @@ void RenderCommandQueue::set_chunk_texture_atlas(TextureArrayUploadData upload) 
 void RenderCommandQueue::set_entity_texture_atlas(TextureArrayUploadData upload) {
   dispatch([upload = std::move(upload)](IRenderCommandTarget& target) mutable {
     target.set_entity_texture_atlas(std::move(upload));
+  });
+}
+
+void RenderCommandQueue::set_particle_texture_atlas(TextureArrayUploadData upload) {
+  dispatch([upload = std::move(upload)](IRenderCommandTarget& target) mutable {
+    target.set_particle_texture_atlas(std::move(upload));
   });
 }
 

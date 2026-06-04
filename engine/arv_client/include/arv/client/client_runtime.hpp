@@ -4,6 +4,7 @@
 #include "arv/client/chat_history.hpp"
 #include "arv/client/local_identity.hpp"
 #include "arv/client/local_player_controller.hpp"
+#include "arv/client/particles.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/physics/collision.hpp"
@@ -112,6 +113,10 @@ public:
   void fixed_tick(TickIndex tick_index);
   void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* collision_query);
   void advance_entity_interpolation(Seconds delta_seconds) noexcept;
+  void configure_particles(const ParticleRegistry* registry) noexcept;
+  [[nodiscard]] u32 spawn_particles(const ParticleBurstDesc& desc);
+  void advance_particles(Seconds delta_seconds) noexcept;
+  [[nodiscard]] ParticleStats particle_stats() const noexcept;
   void set_movement_send_rate(f32 send_rate_hz) noexcept;
   [[nodiscard]] render::FramePacket build_frame_packet(
       f32 interpolation_alpha,
@@ -121,6 +126,8 @@ public:
   [[nodiscard]] const CameraShell& camera() const noexcept;
   CameraShell& camera() noexcept;
   [[nodiscard]] const Vec3f& player_position() const noexcept;
+  [[nodiscard]] const Vec3f& player_velocity() const noexcept;
+  [[nodiscard]] bool player_grounded() const noexcept;
   [[nodiscard]] u8 selected_hotbar_slot() const noexcept;
   [[nodiscard]] const std::string& game_mode_id() const noexcept;
   [[nodiscard]] const player::ResolvedPermissions& resolved_permissions() const noexcept;

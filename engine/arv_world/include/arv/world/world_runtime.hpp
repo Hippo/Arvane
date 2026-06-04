@@ -112,6 +112,7 @@ struct DamageResult {
 
 struct ReplicatedBlockUpdate {
   BlockPos pos{};
+  voxel::BlockVariantID old_state{};
   voxel::BlockVariantID new_state{};
   TickIndex server_tick{};
 };

@@ -53,6 +53,17 @@ inline player::ItemRegistry make_test_item_registry(const voxel::BlockRegistry& 
   pickaxe.attack_data = player::ItemAttackData{3.0F, 3.0F, 21U};
   items.push_back(std::move(pickaxe));
 
+  player::ItemDefinition sword;
+  sword.name = "arvane:wood_sword";
+  sword.display_name = "Wood Sword";
+  sword.category = "tools";
+  sword.tags.push_back("arvane:combat/attacking");
+  sword.max_stack_size = 1;
+  sword.explicit_render_type = player::ItemRenderType::Texture;
+  sword.texture_asset = "arvane:texture/item/sword";
+  sword.attack_data = player::ItemAttackData{5.0F, 3.0F, 21U};
+  items.push_back(std::move(sword));
+
   player::ItemDefinition shovel;
   shovel.name = "arvane:wood_shovel";
   shovel.display_name = "Wood Shovel";

@@ -70,6 +70,7 @@ enum class MessageType : u16 {
   ClientboundChunkData = ClientboundChunkSectionData,
   ClientboundChunkUnload = ClientboundChunkSectionUnload,
   ClientboundBlockUpdateBatch = 0x0500,
+  ClientboundSpawnParticles = 0x0501,
   ClientboundEntitySpawn = 0x0600,
   ClientboundEntityDespawn = 0x0601,
   ClientboundEntitySnapshot = 0x0602,

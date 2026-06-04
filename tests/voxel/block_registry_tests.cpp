@@ -132,6 +132,24 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
       "full_cube": true,
       "hardness": 0.2
     }
+  },
+  {
+    "name": "arvane:grass_block",
+    "render_category": "opaque",
+    "textures": {
+      "top": "arvane:texture/block/grass_top",
+      "side": "arvane:texture/block/grass_side",
+      "bottom": "arvane:texture/block/dirt",
+      "particle": "arvane:texture/block/dirt"
+    },
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "opaque": true,
+      "blocks_light": true,
+      "full_cube": true,
+      "hardness": 0.6
+    }
   }
 ]
 )json");
@@ -163,6 +181,14 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   ASSERT_NE(leaves, nullptr);
   EXPECT_EQ(leaves->render_category, arv::voxel::RenderCategory::Cutout);
   EXPECT_EQ(leaves->render_tint, arv::voxel::BlockRenderTint::Foliage);
+  EXPECT_EQ(leaves->particle_texture_asset, "arvane:texture/block/oak_leaves");
+  const arv::voxel::BlockVariantRecord* grass =
+      registry.variant(registry.find_variant("arvane:grass_block").value());
+  ASSERT_NE(grass, nullptr);
+  EXPECT_EQ(
+      grass->texture_assets[arv::voxel::face_index(arv::voxel::BlockFace::PositiveY)],
+      "arvane:texture/block/grass_top");
+  EXPECT_EQ(grass->particle_texture_asset, "arvane:texture/block/dirt");
 }
 
 TEST(BlockRegistryTests, ValidatesAuthoredBehaviorIdsWhenCallbackIsProvided) {
@@ -234,6 +260,7 @@ TEST(BlockRegistryTests, ParsesBlockModelReferencesAndInputTextures) {
   EXPECT_EQ(stairs->model.asset, "arvane:model/block/stairs");
   ASSERT_EQ(stairs->model.texture_inputs.size(), 1U);
   EXPECT_EQ(stairs->model.texture_inputs.front(), "arvane:texture/block/cobblestone");
+  EXPECT_EQ(stairs->particle_texture_asset, "arvane:texture/block/cobblestone");
 }
 
 TEST(BlockRegistryTests, BlockModelTexturesCanResolveInputsOrSpecificAssets) {

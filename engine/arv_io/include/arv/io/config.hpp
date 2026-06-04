@@ -330,6 +330,8 @@ struct GameplayConfig {
     f32 default_attack_damage{1.0F};
     f32 default_attack_range{3.0F};
     f32 default_attack_cooldown_seconds{0.35F};
+    f32 critical_chance{40.0F};
+    f32 critical_multiplier{1.5F};
     f32 attack_validation_grace_blocks{3.0F};
     f32 max_attack_validation_range{6.0F};
     f32 existing_horizontal_retention{0.45F};

@@ -29,6 +29,9 @@ The rendering system depends on the following documents for core behavior and da
 * [Shading and Vertex Format](130_shading_and_vertex_format.md)
   Defines vertex layouts, packed formats, and the shader interface contract used by all rendering paths.
 
+* [Particle System](172_particles.md)
+  Defines client-owned particle simulation and instanced billboard submission.
+
 ---
 
 ## Core Principles
@@ -119,6 +122,12 @@ Renders:
 * water
 * glass
 * alpha-blended geometry
+* particle billboards
+
+Particles render after transparent chunks while depth writes remain disabled.
+Alpha particles use the same `SRC_ALPHA` / `ONE_MINUS_SRC_ALPHA` blend mode as
+transparent chunk geometry; additive particles draw in a separate particle
+sub-pass without changing chunk mesh rendering.
 
 ---
 

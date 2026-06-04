@@ -236,6 +236,7 @@ int DesktopApplication::run(int argc, char** argv) {
           assets.block_atlas,
           assets.fluid_render_data,
           assets.item_atlas,
+          assets.particle_assets.registry,
           player_tuning,
           water_fluid,
           world_tick_policy,

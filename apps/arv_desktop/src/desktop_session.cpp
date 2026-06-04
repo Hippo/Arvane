@@ -290,6 +290,10 @@ bool DesktopSessionManager::start_singleplayer(
       dependencies_.config.gameplay.combat.default_attack_range;
   server_start_info.combat.default_attack_cooldown_seconds =
       dependencies_.config.gameplay.combat.default_attack_cooldown_seconds;
+  server_start_info.combat.critical_chance =
+      dependencies_.config.gameplay.combat.critical_chance;
+  server_start_info.combat.critical_multiplier =
+      dependencies_.config.gameplay.combat.critical_multiplier;
   server_start_info.combat.attack_validation_grace_blocks =
       dependencies_.config.gameplay.combat.attack_validation_grace_blocks;
   server_start_info.combat.max_attack_validation_range =
@@ -344,6 +348,7 @@ bool DesktopSessionManager::start_singleplayer(
        false});
   client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
   client->configure_language(&dependencies_.language);
+  client->configure_particles(&dependencies_.particle_registry);
   client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);
@@ -443,6 +448,7 @@ bool DesktopSessionManager::start_remote(
        dependencies_.config.multiplayer.connection_timeout_seconds});
   client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
   client->configure_language(&dependencies_.language);
+  client->configure_particles(&dependencies_.particle_registry);
   client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);

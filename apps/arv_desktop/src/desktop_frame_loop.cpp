@@ -507,6 +507,7 @@ void DesktopFrameLoop::submit_client_input_and_update_cursor(
         *active_session,
         client_input,
         std::chrono::duration<Seconds>(now - app_start_time_).count());
+    active_session->last_gameplay_input = client_input;
     active_session->client->submit_input(std::move(client_input));
     if (std::optional<std::string> clipboard =
             active_session->client->consume_pending_clipboard_text();

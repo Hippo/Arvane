@@ -1132,6 +1132,10 @@ OR
 * Models may be fully self-contained with specific texture IDs, or may use `"$0"`, `"$1"`,
   etc. to receive texture inputs from the block definition.
 
+* If `model.textures` is present, the first input texture is used as the block
+  particle texture unless a future format supplies a more specific particle
+  field.
+
 #### Use Cases
 
 Use models for:
@@ -1155,6 +1159,7 @@ For simple cube blocks, a `texture` component can be used instead of a model.
 
 * Applies the same texture to all six faces.
 * Equivalent to a standard cube with uniform material.
+* Also uses the same texture for block dust particles.
 
 ---
 
@@ -1183,6 +1188,20 @@ Face order is strictly defined as:
 * UVs are automatically assigned to map each texture to its respective face.
 * Texture references resolve through the material/atlas system.
 
+Object-form `textures` may also include a non-face `particle` slot:
+
+```json
+"textures": {
+  "top": "arvane:texture/block/grass_top",
+  "side": "arvane:texture/block/grass_side",
+  "bottom": "arvane:texture/block/dirt",
+  "particle": "arvane:texture/block/dirt"
+}
+```
+
+The `particle` texture is used for block hit, mining, sprint, and break dust.
+It is packed into the client particle atlas during asset loading.
+
 ---
 
 ### Validation Rules
@@ -1204,6 +1223,10 @@ The following rules must be enforced during block loading:
   * a string → treated as single-texture mode
   * an array -> must contain exactly 6 entries
 
+* If object-form `textures.particle` is present, it must name the block's dust
+  texture. If string-form `textures` is used, that same string is the dust
+  texture.
+
 ---
 
 ### Engine Responsibilities
@@ -1213,6 +1236,7 @@ When loading blocks:
 * Resolve model IDs such as `arvane:model/block/stairs` through the model asset system
 * Resolve texture IDs such as `arvane:texture/block/stone` through the texture asset system
 * Register all referenced textures for atlas packing
+* Register authored block particle textures for particle atlas packing
 * Associate the resolved visual data with the block’s **StateID**
 
 ---

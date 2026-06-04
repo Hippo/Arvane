@@ -31,6 +31,7 @@ struct ClientRuntime::Impl {
         entities,
         dropped_items,
         skins,
+        particles,
         language,
         collision_query,
         tick_seconds};
@@ -79,6 +80,7 @@ struct ClientRuntime::Impl {
     dropped_items.clear();
     chunks.clear();
     inventory.reset();
+    particles.clear();
     player_controller.leave_world();
     chunk_interest.set_world_id(WorldID{});
     ui.close_ui();
@@ -98,6 +100,7 @@ struct ClientRuntime::Impl {
   ClientEntityMirrorStore entities{};
   ClientDroppedItemMirrorStore dropped_items{};
   detail::ClientSkinRuntime skins{};
+  ParticleSystem particles{};
   u32 next_attack_sequence{1};
   std::vector<ClientAttackFeedback> attack_feedback{};
 };
@@ -195,15 +198,33 @@ void ClientRuntime::advance_entity_interpolation(Seconds delta_seconds) noexcept
   impl_->dropped_items.advance_interpolation(delta_seconds);
 }
 
+void ClientRuntime::configure_particles(const ParticleRegistry* registry) noexcept {
+  impl_->particles.set_registry(registry);
+}
+
+u32 ClientRuntime::spawn_particles(const ParticleBurstDesc& desc) {
+  return impl_->particles.spawn_burst(desc, impl_->player_controller.camera().position());
+}
+
+void ClientRuntime::advance_particles(Seconds delta_seconds) noexcept {
+  impl_->particles.update(delta_seconds);
+}
+
+ParticleStats ClientRuntime::particle_stats() const noexcept {
+  return impl_->particles.stats();
+}
+
 render::FramePacket ClientRuntime::build_frame_packet(
     f32 interpolation_alpha,
     u32 viewport_width,
     u32 viewport_height) const {
-  return build_client_frame_packet(
+  render::FramePacket packet = build_client_frame_packet(
       impl_->player_controller.camera(),
       interpolation_alpha,
       viewport_width,
       viewport_height);
+  impl_->particles.append_render_items(packet.particles);
+  return packet;
 }
 
 net::ConnectionState ClientRuntime::connection_state() const noexcept {
@@ -220,6 +241,14 @@ CameraShell& ClientRuntime::camera() noexcept {
 
 const Vec3f& ClientRuntime::player_position() const noexcept {
   return impl_->player_controller.player_position();
+}
+
+const Vec3f& ClientRuntime::player_velocity() const noexcept {
+  return impl_->player_controller.player_velocity();
+}
+
+bool ClientRuntime::player_grounded() const noexcept {
+  return impl_->player_controller.grounded();
 }
 
 u8 ClientRuntime::selected_hotbar_slot() const noexcept {

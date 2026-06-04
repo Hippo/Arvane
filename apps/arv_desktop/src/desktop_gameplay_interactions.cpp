@@ -8,8 +8,24 @@
 #include "arv/world/world_queries.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace arv::desktop {
+namespace {
+
+inline constexpr Seconds BlockMiningParticleIntervalSeconds = 0.09;
+inline constexpr Seconds SprintParticleIntervalSeconds = 0.12;
+
+[[nodiscard]] u32 next_particle_seed(DesktopGameSession& session, BlockPos pos) noexcept {
+  const u32 sequence = session.particle_seed_counter++;
+  const u64 x = static_cast<u64>(static_cast<i64>(pos.value.x) * 73856093LL);
+  const u64 y = static_cast<u64>(static_cast<i64>(pos.value.y) * 19349663LL);
+  const u64 z = static_cast<u64>(static_cast<i64>(pos.value.z) * 83492791LL);
+  const u32 seed = static_cast<u32>(x ^ y ^ z ^ sequence);
+  return seed == 0U ? 1U : seed;
+}
+
+} // namespace
 
 const player::ItemRecord* DesktopFrameLoop::selected_held_item(
     const DesktopGameSession& session) const noexcept {
@@ -298,10 +314,111 @@ HeldItemActionPlayResult DesktopFrameLoop::play_held_item_action(
   return HeldItemActionPlayResult::Played;
 }
 
+void DesktopFrameLoop::spawn_local_block_face_particles(
+    DesktopGameSession& session,
+    u16 count,
+    f32 extent,
+    f32 radius) const {
+  if (session.client == nullptr) {
+    return;
+  }
+
+  world::WorldCollisionQuery query(session.client_world, assets_.block_registry, false);
+  const client::CameraShell& camera = session.client->camera();
+  const std::optional<physics::BlockRaycastHit> hit = physics::raycast_blocks(
+      query,
+      camera.position(),
+      camera.forward_vector(),
+      config_.physics.reach_distance);
+  if (!hit.has_value() || assets_.block_registry.is_air(hit->variant)) {
+    return;
+  }
+  const voxel::BlockVariantRecord* variant = assets_.block_registry.variant(hit->variant);
+
+  const Vec3i offset = voxel::block_face_offset(hit->face);
+  const Vec3f normal{
+      static_cast<f32>(offset.x),
+      static_cast<f32>(offset.y),
+      static_cast<f32>(offset.z)};
+  client::ParticleBurstDesc desc;
+  desc.type_name = "arvane:block_dust";
+  if (variant != nullptr) {
+    desc.texture_asset = variant->particle_texture_asset;
+  }
+  desc.position = hit->hit_point + normal * 0.035F;
+  desc.normal = normal;
+  desc.extents = {extent, extent, 0.0F};
+  desc.radius = radius;
+  desc.count = count;
+  desc.seed = next_particle_seed(session, hit->block);
+  desc.shape = protocol::ParticleSpawnShape::BlockFace;
+  (void)session.client->spawn_particles(desc);
+}
+
+void DesktopFrameLoop::spawn_local_block_hit_particles(DesktopGameSession& session) const {
+  spawn_local_block_face_particles(session, 5U, 0.22F, 0.025F);
+}
+
+void DesktopFrameLoop::update_sprint_ground_particles(
+    DesktopGameSession& session,
+    Seconds delta_seconds) const {
+  if (session.client == nullptr) {
+    return;
+  }
+
+  const client::InputFrame& input = session.last_gameplay_input;
+  const Vec3f velocity = session.client->player_velocity();
+  const f32 horizontal_speed_sq = velocity.x * velocity.x + velocity.z * velocity.z;
+  const bool sprinting_on_ground =
+      input.sprint_held &&
+      input.move_forward &&
+      !input.move_backward &&
+      !input.sneak_held &&
+      session.client->player_grounded() &&
+      horizontal_speed_sq > 1.0F;
+  if (!sprinting_on_ground) {
+    session.sprint_particle_accumulator = 0.0;
+    return;
+  }
+
+  session.sprint_particle_accumulator += std::max<Seconds>(delta_seconds, 0.0);
+  if (session.sprint_particle_accumulator < SprintParticleIntervalSeconds) {
+    return;
+  }
+  session.sprint_particle_accumulator =
+      std::fmod(session.sprint_particle_accumulator, SprintParticleIntervalSeconds);
+
+  world::WorldCollisionQuery query(session.client_world, assets_.block_registry, false);
+  const Vec3f origin = session.client->player_position() + Vec3f{0.0F, 0.08F, 0.0F};
+  const std::optional<physics::BlockRaycastHit> hit = physics::raycast_blocks(
+      query,
+      origin,
+      {0.0F, -1.0F, 0.0F},
+      0.35F);
+  if (!hit.has_value() || assets_.block_registry.is_air(hit->variant)) {
+    return;
+  }
+  const voxel::BlockVariantRecord* variant = assets_.block_registry.variant(hit->variant);
+
+  client::ParticleBurstDesc desc;
+  desc.type_name = "arvane:block_dust";
+  if (variant != nullptr) {
+    desc.texture_asset = variant->particle_texture_asset;
+  }
+  desc.position = hit->hit_point + Vec3f{0.0F, 0.035F, 0.0F};
+  desc.normal = {0.0F, 1.0F, 0.0F};
+  desc.extents = {0.28F, 0.28F, 0.0F};
+  desc.radius = 0.02F;
+  desc.count = 3U;
+  desc.seed = next_particle_seed(session, hit->block);
+  desc.shape = protocol::ParticleSpawnShape::BlockFace;
+  (void)session.client->spawn_particles(desc);
+}
+
 void DesktopFrameLoop::update_held_item_animation_from_input(
     DesktopGameSession& session,
     const client::InputFrame& client_input,
-    Seconds now_seconds) const noexcept {
+    Seconds now_seconds) const {
   if (session.client == nullptr ||
       session.client->inventory_open() ||
       session.client->chat_open()) {
@@ -310,8 +427,22 @@ void DesktopFrameLoop::update_held_item_animation_from_input(
   }
 
   const player::ItemRecord* held_item = selected_held_item(session);
+  const bool mining_block =
+      client_input.primary_held &&
+      session.client->block_break_progress().active;
+  if (mining_block) {
+    if (now_seconds >= session.next_block_mining_particle_seconds) {
+      spawn_local_block_face_particles(session, 2U, 0.18F, 0.02F);
+      session.next_block_mining_particle_seconds =
+          now_seconds + BlockMiningParticleIntervalSeconds;
+    }
+  } else {
+    session.next_block_mining_particle_seconds = 0.0;
+  }
+
   if (held_item == nullptr) {
     if (client_input.primary_pressed) {
+      spawn_local_block_hit_particles(session);
       send_local_entity_attack_if_targeted(session, nullptr);
     }
     session.held_item_secondary_use_active = false;
@@ -320,6 +451,7 @@ void DesktopFrameLoop::update_held_item_animation_from_input(
   }
 
   if (client_input.primary_pressed) {
+    spawn_local_block_hit_particles(session);
     (void)play_held_item_action(
         session,
         held_item,

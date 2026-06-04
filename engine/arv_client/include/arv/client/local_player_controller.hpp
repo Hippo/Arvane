@@ -94,6 +94,10 @@ public:
     return body_position_;
   }
 
+  [[nodiscard]] const Vec3f& player_velocity() const noexcept {
+    return movement_state_.velocity;
+  }
+
   [[nodiscard]] const Vec3f& rendered_player_position() const noexcept {
     return render_position_;
   }
@@ -108,6 +112,10 @@ public:
 
   [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept {
     return block_break_progress_;
+  }
+
+  [[nodiscard]] bool grounded() const noexcept {
+    return movement_state_.grounded;
   }
 
   [[nodiscard]] TickIndex world_initial_tick() const noexcept {

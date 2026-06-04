@@ -199,6 +199,10 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
       config.gameplay.combat.default_attack_range;
   server_start_info.combat.default_attack_cooldown_seconds =
       config.gameplay.combat.default_attack_cooldown_seconds;
+  server_start_info.combat.critical_chance =
+      config.gameplay.combat.critical_chance;
+  server_start_info.combat.critical_multiplier =
+      config.gameplay.combat.critical_multiplier;
   server_start_info.combat.attack_validation_grace_blocks =
       config.gameplay.combat.attack_validation_grace_blocks;
   server_start_info.combat.max_attack_validation_range =

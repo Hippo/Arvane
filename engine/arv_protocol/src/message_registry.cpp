@@ -145,6 +145,9 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundBlockUpdateBatch, "ClientboundBlockUpdateBatch",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundSpawnParticles, "ClientboundSpawnParticles",
+                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableEvent,
+                             NetworkLane::Gameplay});
   registry.register_message({MessageType::ClientboundEntitySpawn, "ClientboundEntitySpawn",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});

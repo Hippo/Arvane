@@ -38,10 +38,16 @@ public:
   void set_sky_shader_sources(std::string, std::string) override {
   }
 
+  void set_particle_shader_sources(std::string, std::string) override {
+  }
+
   void set_chunk_texture_atlas(arv::render::TextureArrayUploadData) override {
   }
 
   void set_entity_texture_atlas(arv::render::TextureArrayUploadData) override {
+  }
+
+  void set_particle_texture_atlas(arv::render::TextureArrayUploadData) override {
   }
 
   void set_ui_font_atlas(arv::render::TextureArrayUploadData) override {

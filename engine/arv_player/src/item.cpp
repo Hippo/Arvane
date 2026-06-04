@@ -161,6 +161,11 @@ void merge_explicit_definition(ItemDefinition& target, ItemDefinition source) {
   if (!source.category.empty()) {
     target.category = std::move(source.category);
   }
+  for (std::string& tag : source.tags) {
+    if (std::find(target.tags.begin(), target.tags.end(), tag) == target.tags.end()) {
+      target.tags.push_back(std::move(tag));
+    }
+  }
   target.max_stack_size = source.max_stack_size;
   if (source.explicit_render_type.has_value()) {
     target.explicit_render_type = source.explicit_render_type;
@@ -393,6 +398,7 @@ ItemRegistry::Result ItemRegistry::build(
         definition.display_name.empty() ? record.name : std::move(definition.display_name);
     record.behavior_id = std::move(definition.behavior_id);
     record.category = std::move(definition.category);
+    record.tags = std::move(definition.tags);
     record.max_stack_size = definition.max_stack_size;
     auto resolved_type = resolve_render_type(definition);
     if (!resolved_type) {
@@ -663,6 +669,26 @@ Expected<std::vector<ItemDefinition>, ItemRegistryError> parse_item_definitions_
       const io::DataValue* category_iter = item.get("category");
       if (category_iter != nullptr) {
         definition.category = std::string{category_iter->as_string_or({})};
+      }
+      const io::DataValue* tags_iter = item.get("tags");
+      if (tags_iter != nullptr) {
+        const io::DataValue::Array* tags = tags_iter->array_if();
+        if (tags == nullptr) {
+          return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+              {"tags must be an array for " + definition.name});
+        }
+        for (const io::DataValue& tag : *tags) {
+          if (tag.kind() != io::DataKind::String) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                {"tags entries must be strings for " + definition.name});
+          }
+          std::string value{tag.as_string_or({})};
+          if (value.empty()) {
+            return Expected<std::vector<ItemDefinition>, ItemRegistryError>::failure(
+                {"tags entries must be non-empty for " + definition.name});
+          }
+          definition.tags.push_back(std::move(value));
+        }
       }
       const io::DataValue* stack_iter = item.get("max_stack_size");
       if (stack_iter != nullptr) {

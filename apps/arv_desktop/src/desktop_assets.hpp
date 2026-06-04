@@ -5,6 +5,7 @@
 #include "arv/asset/font.hpp"
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
+#include "arv/client/particles.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
 #include "arv/client/item_animation.hpp"
@@ -35,6 +36,7 @@ struct DesktopLoadedAssets {
   render::FluidRenderData fluid_render_data{};
   asset::TextureAtlas item_atlas{};
   EntityRenderAssets entity_render_assets{};
+  client::ParticleAssets particle_assets{};
   asset::FontSystem font_system{};
   ui::UiFontStacks ui_font_stacks{};
   world::WorldGenerationConfig default_generation_config{};

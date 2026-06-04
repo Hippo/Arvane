@@ -47,6 +47,8 @@ item:
       display_name: Short Grass
     wood_pickaxe:
       display_name: Wood Pickaxe
+    wood_sword:
+      display_name: Wood Sword
     wood_shovel:
       display_name: Wood Shovel
     bucket:

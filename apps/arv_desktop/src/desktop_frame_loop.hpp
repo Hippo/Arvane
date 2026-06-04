@@ -171,7 +171,16 @@ private:
   void update_held_item_animation_from_input(
       DesktopGameSession& session,
       const client::InputFrame& client_input,
-      Seconds now_seconds) const noexcept;
+      Seconds now_seconds) const;
+  void spawn_local_block_hit_particles(DesktopGameSession& session) const;
+  void spawn_local_block_face_particles(
+      DesktopGameSession& session,
+      u16 count,
+      f32 extent,
+      f32 radius) const;
+  void update_sprint_ground_particles(
+      DesktopGameSession& session,
+      Seconds delta_seconds) const;
 
   [[nodiscard]] command::CommandResult execute_chat_command(
       DesktopGameSession& session,

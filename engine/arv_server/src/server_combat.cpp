@@ -12,6 +12,8 @@
 namespace arv::server {
 namespace {
 
+constexpr std::string_view AttackingItemTag = "arvane:combat/attacking";
+
 [[nodiscard]] AttackResult rejected(AttackRejectReason reason) noexcept {
   AttackResult result;
   result.reject_reason = reason;
@@ -127,6 +129,86 @@ namespace {
     return default_attack_profile(config);
   }
   return held_item->attack_data.value();
+}
+
+[[nodiscard]] const player::ItemRecord* held_item_record(
+    const player::PlayerState& player_state,
+    const player::ItemRegistry& item_registry) noexcept {
+  const std::optional<player::ItemStack>& held =
+      player_state.inventory.slot(player_state.selected_hotbar_slot);
+  if (!held.has_value() || held->count == 0U) {
+    return nullptr;
+  }
+  return item_registry.item(held->item);
+}
+
+[[nodiscard]] bool item_has_tag(
+    const player::ItemRecord& item,
+    std::string_view tag) noexcept {
+  return std::any_of(
+      item.tags.begin(),
+      item.tags.end(),
+      [tag](const std::string& candidate) { return candidate == tag; });
+}
+
+[[nodiscard]] u32 critical_hash(
+    PlayerID player_id,
+    EntityNetID target_entity,
+    u32 sequence,
+    TickIndex current_tick) noexcept {
+  u32 value = player_id.value * 747796405U + target_entity.value * 2891336453U;
+  value ^= sequence * 277803737U;
+  value ^= current_tick * 1442695041U;
+  value ^= value >> 16U;
+  value *= 2246822519U;
+  value ^= value >> 13U;
+  value *= 3266489917U;
+  value ^= value >> 16U;
+  return value;
+}
+
+[[nodiscard]] u32 critical_roll_percent(
+    PlayerID player_id,
+    EntityNetID target_entity,
+    u32 sequence,
+    TickIndex current_tick) noexcept {
+  return critical_hash(player_id, target_entity, sequence, current_tick) % 100U;
+}
+
+[[nodiscard]] bool should_apply_critical_hit(
+    const player::PlayerState& player_state,
+    const player::ItemRegistry& item_registry,
+    const CombatConfig& config,
+    EntityNetID target_entity,
+    u32 sequence,
+    TickIndex current_tick) noexcept {
+  const player::ItemRecord* held_item = held_item_record(player_state, item_registry);
+  if (held_item == nullptr || !item_has_tag(*held_item, AttackingItemTag)) {
+    return false;
+  }
+  const f32 chance = std::clamp(
+      std::isfinite(config.critical_chance) ? config.critical_chance : 0.0F,
+      0.0F,
+      100.0F);
+  if (chance <= 0.0F) {
+    return false;
+  }
+  if (chance >= 100.0F) {
+    return true;
+  }
+  return static_cast<f32>(
+             critical_roll_percent(
+                 player_state.player_id,
+                 target_entity,
+                 sequence,
+                 current_tick)) < chance;
+}
+
+[[nodiscard]] f32 critical_damage_multiplier(const CombatConfig& config) noexcept {
+  if (std::isfinite(config.critical_multiplier) && config.critical_multiplier > 0.0F) {
+    return config.critical_multiplier;
+  }
+  return 1.0F;
 }
 
 [[nodiscard]] Vec3f closest_point_on_aabb(Vec3f point, Aabb3f bounds) noexcept {
@@ -391,6 +473,13 @@ AttackResult validate_and_apply_entity_attack(
 
   const player::ItemAttackData attack =
       attack_profile_for_held_item(player_state, item_registry, config);
+  const bool critical_hit = should_apply_critical_hit(
+      player_state,
+      item_registry,
+      config,
+      target_entity,
+      sequence,
+      current_tick);
   combat_state.last_attack_sequence = sequence;
   combat_state.has_last_attack_sequence = true;
   combat_state.next_allowed_attack_tick = current_tick + attack.cooldown_ticks;
@@ -438,11 +527,13 @@ AttackResult validate_and_apply_entity_attack(
   const world::DamageResult damage = world.apply_damage({
       attacker.value(),
       target.value(),
-      attack.damage_amount,
+      critical_hit ? attack.damage_amount * critical_damage_multiplier(config)
+                   : attack.damage_amount,
       world::DamageCause::EntityAttack});
   AttackResult result;
   result.accepted = true;
   result.damage_applied = damage.applied;
+  result.critical_hit = critical_hit && damage.applied;
   result.reject_reason = AttackRejectReason::None;
   if (damage.applied) {
     apply_attack_knockback(
@@ -512,6 +603,46 @@ void ServerRuntimeImpl::process_pending_entity_attacks() {
           session->player_id.value,
           pending.attack.target_entity.value,
           pending.attack.sequence);
+    }
+    if (result.critical_hit) {
+      const std::optional<EntityID> target_entity =
+          entity_for_net_id(default_world_, pending.attack.target_entity);
+      if (target_entity.has_value()) {
+        const std::optional<Vec3f> target_position =
+            authoritative_entity_position(default_world_, target_entity.value());
+        if (target_position.has_value()) {
+          const Aabb3f target_bounds =
+              entity_attack_bounds_at(default_world_, target_entity.value(), target_position.value());
+          protocol::ClientboundSpawnParticles particles;
+          particles.world_id = player_state->world_id;
+          particles.particle_type = "arvane:critical_hit";
+          particles.position = aabb_center(target_bounds);
+          particles.normal = {0.0F, 1.0F, 0.0F};
+          particles.extents = {0.35F, 0.45F, 0.35F};
+          particles.radius = 0.35F;
+          particles.count = 10U;
+          particles.seed = critical_hash(
+              player_state->player_id,
+              pending.attack.target_entity,
+              pending.attack.sequence,
+              tick_index_);
+          particles.shape = protocol::ParticleSpawnShape::Sphere;
+          sessions_.for_each_session([&](const ServerSession& recipient) {
+            if (!recipient.authenticated ||
+                recipient.connection_state != net::ConnectionState::InGame ||
+                recipient.world_id != player_state->world_id) {
+              return;
+            }
+            (void)send_protocol_message(
+                *transport_,
+                recipient.connection_id,
+                protocol::MessageType::ClientboundSpawnParticles,
+                protocol::ReliabilityClass::UnreliableEvent,
+                protocol::NetworkLane::Gameplay,
+                protocol::serialize_clientbound_spawn_particles(particles));
+          });
+        }
+      }
     }
     if (result.knockback_player_id.has_value()) {
       const PlayerID target_player_id = result.knockback_player_id.value();

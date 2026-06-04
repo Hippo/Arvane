@@ -22,8 +22,10 @@ public:
   void set_entity_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_ui_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_sky_shader_sources(std::string vertex_source, std::string fragment_source);
+  void set_particle_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_chunk_texture_atlas(TextureArrayUploadData upload);
   void set_entity_texture_atlas(TextureArrayUploadData upload);
+  void set_particle_texture_atlas(TextureArrayUploadData upload);
   void set_ui_font_atlas(TextureArrayUploadData upload);
   void set_ui_item_atlas(TextureArrayUploadData upload);
   void configure_player_skin_atlas(PlayerSkinAtlasConfig config);
@@ -161,6 +163,16 @@ private:
     u32 player_skin_page{};
   };
 
+  struct ParticleInstanceData {
+    Vec3f position{};
+    f32 size{1.0F};
+    Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+    Vec2f uv_min{};
+    Vec2f uv_max{1.0F, 1.0F};
+    u32 atlas_page{};
+    f32 rotation_radians{};
+  };
+
   void process_chunk_mesh_uploads();
 
   [[nodiscard]] bool upload_chunk_mesh_now(ChunkMeshUpload upload);
@@ -194,6 +206,7 @@ private:
   [[nodiscard]] bool ensure_entity_program();
   [[nodiscard]] bool ensure_ui_program();
   [[nodiscard]] bool ensure_sky_program();
+  [[nodiscard]] bool ensure_particle_program();
 
   void draw_sky();
   void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
@@ -204,12 +217,14 @@ private:
       const SkyUniforms& sky,
       f32 aspect);
   void draw_entity_previews();
+  void draw_particles(ParticleRenderBlendMode blend_mode);
   void draw_ui();
   void bind_ui_textures();
   void draw_ui_shapes(u8 layer);
   void draw_ui_quads(u8 layer);
   void ensure_ui_buffers();
   void ensure_ui_shape_buffers();
+  void ensure_particle_buffers();
   void ensure_white_texture();
 
   u32 width_{};
@@ -292,6 +307,17 @@ private:
   GLint sky_cumulus_amount_uniform_{-1};
   GLint sky_cloud_intensity_uniform_{-1};
   GLint sky_exposure_uniform_{-1};
+  GLuint particle_program_{};
+  GLint particle_camera_position_uniform_{-1};
+  GLint particle_camera_forward_uniform_{-1};
+  GLint particle_camera_right_uniform_{-1};
+  GLint particle_camera_up_uniform_{-1};
+  GLint particle_camera_aspect_uniform_{-1};
+  GLint particle_camera_fov_y_uniform_{-1};
+  GLint particle_camera_near_uniform_{-1};
+  GLint particle_camera_far_uniform_{-1};
+  GLint particle_atlas_size_uniform_{-1};
+  GLint particle_atlas_uniform_{-1};
   std::string chunk_vertex_shader_source_{};
   std::string chunk_fragment_shader_source_{};
   std::string entity_vertex_shader_source_{};
@@ -300,6 +326,8 @@ private:
   std::string ui_fragment_shader_source_{};
   std::string sky_vertex_shader_source_{};
   std::string sky_fragment_shader_source_{};
+  std::string particle_vertex_shader_source_{};
+  std::string particle_fragment_shader_source_{};
   FramePacket frame_{};
   HashMap<ChunkMeshKey, ChunkGpuState> chunks_;
   HashMap<EntityModelID, EntityModelAsset> entity_models_;
@@ -309,6 +337,7 @@ private:
   std::vector<ChunkMeshUploadReceipt> chunk_mesh_upload_receipts_;
   GpuTexture terrain_atlas_{};
   GpuTexture entity_atlas_{};
+  GpuTexture particle_atlas_{};
   GpuTexture font_atlas_{};
   GpuTexture item_atlas_{};
   GpuTexture white_texture_{};
@@ -324,9 +353,13 @@ private:
   GLuint ui_shape_index_buffer_{};
   GLsizeiptr ui_shape_vertex_capacity_bytes_{};
   GLsizeiptr ui_shape_index_capacity_bytes_{};
+  GLuint particle_vao_{};
+  GLuint particle_instance_buffer_{};
+  GLsizeiptr particle_instance_capacity_bytes_{};
   bool gpu_profile_context_initialized_{};
   std::vector<const EntityDrawItem*> entity_draw_order_;
   std::vector<EntityInstanceData> entity_instances_;
+  std::vector<ParticleInstanceData> particle_instances_;
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_pivots_{};
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_rotations_{};
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_positions_{};

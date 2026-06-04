@@ -76,6 +76,7 @@ bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexce
   }
 
   const SectionLocalPos local = block_to_local(pos);
+  const voxel::BlockVariantID old_variant = chunk->block(local);
   if (!chunk->set_block(local, variant)) {
     return false;
   }
@@ -88,7 +89,7 @@ bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexce
   impl_->dirty.mark_lighting_content_dirty();
   impl_->tick_queues.enqueue_neighbor_block_updates(pos);
   FluidSolver::enqueue_neighbor_updates(*this, pos, FluidUpdateReason::BlockChanged);
-  impl_->replicated_block_updates.push_back({pos, variant, impl_->tick_index});
+  impl_->replicated_block_updates.push_back({pos, old_variant, variant, impl_->tick_index});
   return true;
 }
 
