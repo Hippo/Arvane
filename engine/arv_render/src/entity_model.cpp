@@ -160,18 +160,27 @@ namespace {
   const f32 v0 = atlas_v(face.uv.y);
   const f32 u1 = atlas_u(face.uv.z);
   const f32 v1 = atlas_v(face.uv.w);
+  std::array<Vec2f, 4> uvs{};
   switch (model_face) {
     case EntityModelFace::PositiveX:
     case EntityModelFace::NegativeX:
     case EntityModelFace::PositiveY:
     case EntityModelFace::PositiveZ:
-      return {{{u0, v1}, {u1, v1}, {u0, v0}, {u1, v0}}};
+      uvs = {{{u0, v1}, {u1, v1}, {u0, v0}, {u1, v0}}};
+      break;
     case EntityModelFace::NegativeY:
-      return {{{u1, v0}, {u0, v0}, {u1, v1}, {u0, v1}}};
+      uvs = {{{u1, v0}, {u0, v0}, {u1, v1}, {u0, v1}}};
+      break;
     case EntityModelFace::NegativeZ:
-      return {{{u1, v1}, {u0, v1}, {u1, v0}, {u0, v0}}};
+      uvs = {{{u1, v1}, {u0, v1}, {u1, v0}, {u0, v0}}};
+      break;
   }
-  return {{{u0, v1}, {u1, v1}, {u0, v0}, {u1, v0}}};
+  const i32 turns =
+      static_cast<i32>(std::lround(face.rotation / 90.0F)) % 4;
+  for (i32 turn = 0; turn < (turns + 4) % 4; ++turn) {
+    uvs = std::array<Vec2f, 4>{{uvs[2], uvs[0], uvs[3], uvs[1]}};
+  }
+  return uvs;
 }
 
 [[nodiscard]] Vec3f blockbench_position_to_engine(Vec3f position) noexcept {
@@ -180,6 +189,31 @@ namespace {
 
 [[nodiscard]] Vec3f blockbench_rotation_to_engine(Vec3f rotation_degrees) noexcept {
   return {rotation_degrees.x, -rotation_degrees.y, -rotation_degrees.z};
+}
+
+[[nodiscard]] bool is_zero(Vec3f value) noexcept {
+  constexpr f32 Epsilon = 0.0001F;
+  return std::abs(value.x) <= Epsilon &&
+         std::abs(value.y) <= Epsilon &&
+         std::abs(value.z) <= Epsilon;
+}
+
+[[nodiscard]] Vec3f rotate_euler_degrees(Vec3f value, Vec3f degrees) noexcept {
+  const Vec3f radians{
+      degrees_to_radians(degrees.x),
+      degrees_to_radians(degrees.y),
+      degrees_to_radians(degrees.z)};
+  const f32 cx = std::cos(radians.x);
+  const f32 sx = std::sin(radians.x);
+  const f32 cy = std::cos(radians.y);
+  const f32 sy = std::sin(radians.y);
+  const f32 cz = std::cos(radians.z);
+  const f32 sz = std::sin(radians.z);
+
+  value = {value.x, value.y * cx - value.z * sx, value.y * sx + value.z * cx};
+  value = {value.x * cy + value.z * sy, value.y, -value.x * sy + value.z * cy};
+  value = {value.x * cz - value.y * sz, value.x * sz + value.y * cz, value.z};
+  return value;
 }
 
 [[nodiscard]] EntityModelBoxDefinition blockbench_box_to_engine(
@@ -196,7 +230,8 @@ namespace {
 
   box.min = {-inflated_max.x, inflated_min.y, inflated_min.z};
   box.max = {-inflated_min.x, inflated_max.y, inflated_max.z};
-  box.pivot = blockbench_position_to_engine(source.pivot);
+  box.origin = blockbench_position_to_engine(source.origin);
+  box.rotation = blockbench_rotation_to_engine(source.rotation);
   std::swap(box.faces[face_index(EntityModelFace::PositiveX)],
             box.faces[face_index(EntityModelFace::NegativeX)]);
   return box;
@@ -206,13 +241,12 @@ void append_face(
     EntityModelAsset& asset,
     u32 bone_index,
     u32 flags,
-    const EntityModelBoxDefinition& box,
+    const std::array<Vec3f, 4>& corners,
     EntityModelFace face,
     const EntityModelFaceDefinition& face_definition,
     const EntityModelTextureBinding& binding,
     Vec2i texture_size) {
   const u32 base = static_cast<u32>(asset.vertices.size());
-  const std::array<Vec3f, 4> corners = face_corners(box, face);
   const std::array<Vec2f, 4> uvs = face_uvs(face, face_definition, binding, texture_size);
   const Vec3f color = face_color(face);
   for (usize index = 0; index < corners.size(); ++index) {
@@ -393,6 +427,16 @@ parse_animation_interpolation(const io::DataValue& node, const std::string& path
   return name == "player" || name.rfind("player#", 0) == 0;
 }
 
+[[nodiscard]] std::string strip_file_extension(std::string_view value) {
+  const usize slash = value.find_last_of("/\\");
+  const usize dot = value.find_last_of('.');
+  if (dot != std::string_view::npos &&
+      (slash == std::string_view::npos || dot > slash)) {
+    value = value.substr(0, dot);
+  }
+  return std::string{value};
+}
+
 } // namespace
 
 std::string normalize_entity_texture_asset(std::string_view texture) {
@@ -405,7 +449,7 @@ std::string normalize_entity_texture_asset(std::string_view texture) {
   if (texture.find(':') != std::string_view::npos) {
     return std::string{texture};
   }
-  return "arvane:texture/entity/" + std::string{texture};
+  return "arvane:texture/entity/" + strip_file_extension(texture);
 }
 
 EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
@@ -417,6 +461,14 @@ EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
   EntityModelDefinition definition;
   definition.name = std::move(authored_model.value().name);
   definition.center_origin = authored_model.value().center_origin;
+  for (const auto& [bone_name, authored_bone] : authored_model.value().bones) {
+    definition.bones.emplace(
+        bone_name,
+        EntityModelBoneDefinition{
+            authored_bone.parent,
+            authored_bone.pivot,
+            authored_bone.rotation});
+  }
   definition.texture_assets.reserve(authored_model.value().texture_assets.size());
   for (const std::string& texture : authored_model.value().texture_assets) {
     definition.texture_assets.push_back(normalize_entity_texture_asset(texture));
@@ -426,9 +478,10 @@ EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
   for (const voxel::AuthoredModelBoxDefinition& source_box : authored_model.value().boxes) {
     EntityModelBoxDefinition box;
     box.bone = source_box.bone;
-    box.pivot = source_box.pivot;
     box.min = source_box.min;
     box.max = source_box.max;
+    box.origin = source_box.origin;
+    box.rotation = source_box.rotation;
     box.inflate = source_box.inflate;
     for (voxel::BlockFace source_face : voxel::AllBlockFaces) {
       const usize source_index = voxel::face_index(source_face);
@@ -439,7 +492,8 @@ EntityModelDefinitionResult parse_entity_model_json(std::string_view text) {
           source_box.faces[source_index].value();
       box.faces[face_index(face_from_block_face(source_face))] = EntityModelFaceDefinition{
           source_face_definition.texture_index,
-          source_face_definition.uv};
+          source_face_definition.uv,
+          source_face_definition.rotation};
     }
     definition.boxes.push_back(std::move(box));
   }
@@ -610,32 +664,113 @@ EntityModelAssetResult build_entity_model_asset(
   asset.name = definition.name;
   asset.center_origin = blockbench_position_to_engine(definition.center_origin);
 
-  HashMap<std::string, u32> bone_indices;
-  const auto ensure_bone = [&](const std::string& bone_name, Vec3f pivot)
-      -> Expected<u32, EntityModelError> {
-    const auto found = bone_indices.find(bone_name);
-    if (found != bone_indices.end()) {
-      const EntityModelBone& existing = asset.bones[found->second];
-      if (!bone_name.empty() && existing.pivot != pivot) {
-        return Expected<u32, EntityModelError>::failure(
-            {"entity model boxes for bone '" + bone_name + "' use inconsistent pivots"});
+  struct EngineBoneTransform {
+    std::optional<std::string> parent{};
+    Vec3f pivot{};
+    Vec3f rotation{};
+  };
+  HashMap<std::string, EngineBoneTransform> bone_transforms;
+  bone_transforms.reserve(definition.bones.size());
+  for (const auto& [bone_name, bone] : definition.bones) {
+    bone_transforms.emplace(
+        bone_name,
+        EngineBoneTransform{
+            bone.parent,
+            blockbench_position_to_engine(bone.pivot),
+            blockbench_rotation_to_engine(bone.rotation)});
+  }
+
+  const auto bone_chain = [&](const std::string& bone_name)
+      -> Expected<std::vector<const EngineBoneTransform*>, EntityModelError> {
+    std::vector<const EngineBoneTransform*> reversed;
+    HashSet<std::string> seen;
+    std::string current = bone_name;
+    while (true) {
+      if (!seen.insert(current).second) {
+        return Expected<std::vector<const EngineBoneTransform*>, EntityModelError>::failure(
+            {"entity model bone hierarchy contains a cycle at '" + current + "'"});
       }
-      return Expected<u32, EntityModelError>::success(found->second);
+      const auto found = bone_transforms.find(current);
+      if (found == bone_transforms.end()) {
+        return Expected<std::vector<const EngineBoneTransform*>, EntityModelError>::failure(
+            {"entity model references unknown bone '" + current + "'"});
+      }
+      reversed.push_back(&found->second);
+      if (!found->second.parent.has_value()) {
+        break;
+      }
+      current = found->second.parent.value();
+    }
+    std::reverse(reversed.begin(), reversed.end());
+    return Expected<std::vector<const EngineBoneTransform*>, EntityModelError>::success(
+        std::move(reversed));
+  };
+
+  const auto apply_bone_chain =
+      [&](Vec3f point, const std::string& bone_name) -> Expected<Vec3f, EntityModelError> {
+    auto chain = bone_chain(bone_name);
+    if (!chain) {
+      return Expected<Vec3f, EntityModelError>::failure(chain.error());
+    }
+    for (const EngineBoneTransform* bone : chain.value()) {
+      point = bone->pivot + rotate_euler_degrees(point - bone->pivot, bone->rotation);
+    }
+    return Expected<Vec3f, EntityModelError>::success(point);
+  };
+
+  const auto bone_chain_has_rotation =
+      [&](const std::string& bone_name) -> Expected<bool, EntityModelError> {
+    auto chain = bone_chain(bone_name);
+    if (!chain) {
+      return Expected<bool, EntityModelError>::failure(chain.error());
+    }
+    for (const EngineBoneTransform* bone : chain.value()) {
+      if (!is_zero(bone->rotation)) {
+        return Expected<bool, EntityModelError>::success(true);
+      }
+    }
+    return Expected<bool, EntityModelError>::success(false);
+  };
+
+  HashMap<std::string, u32> bone_indices;
+  bone_indices.reserve(definition.bones.size());
+  for (const auto& [bone_name, authored_bone] : definition.bones) {
+    (void)authored_bone;
+    const auto bone = bone_transforms.find(bone_name);
+    if (bone == bone_transforms.end()) {
+      return EntityModelAssetResult::failure(
+          {"entity model references unknown bone '" + bone_name + "'"});
+    }
+    auto pivot = apply_bone_chain(bone->second.pivot, bone_name);
+    if (!pivot) {
+      return EntityModelAssetResult::failure(pivot.error());
     }
     const u32 bone_index = static_cast<u32>(asset.bones.size());
     bone_indices.emplace(bone_name, bone_index);
-    asset.bones.push_back({bone_name, pivot});
-    return Expected<u32, EntityModelError>::success(bone_index);
-  };
+    asset.bones.push_back({bone_name, pivot.value()});
+  }
 
   HashMap<std::string, usize> emitted_box_count_by_bone;
   for (const EntityModelBoxDefinition& source_box : definition.boxes) {
     const EntityModelBoxDefinition box = blockbench_box_to_engine(source_box);
-    auto bone_index_result = ensure_bone(box.bone, box.pivot);
-    if (!bone_index_result) {
-      return EntityModelAssetResult::failure(bone_index_result.error());
+    const auto bone_index_iter = bone_indices.find(box.bone);
+    if (bone_index_iter == bone_indices.end()) {
+      return EntityModelAssetResult::failure(
+          {"entity model box references unknown bone '" + box.bone + "'"});
     }
-    const u32 bone_index = bone_index_result.value();
+    const u32 bone_index = bone_index_iter->second;
+    auto has_bone_rotation = bone_chain_has_rotation(box.bone);
+    if (!has_bone_rotation) {
+      return EntityModelAssetResult::failure(has_bone_rotation.error());
+    }
+    Vec3f transformed_box_origin = box.origin;
+    if (has_bone_rotation.value()) {
+      auto transformed_origin = apply_bone_chain(box.origin, box.bone);
+      if (!transformed_origin) {
+        return EntityModelAssetResult::failure(transformed_origin.error());
+      }
+      transformed_box_origin = transformed_origin.value();
+    }
     const usize box_index_for_bone = emitted_box_count_by_bone[source_box.bone]++;
     u32 flags = 0U;
     if (is_player_entity_model_name(definition.name)) {
@@ -666,11 +801,27 @@ EntityModelAssetResult build_entity_model_asset(
                                            static_cast<i32>(binding.source_width),
                                            static_cast<i32>(binding.source_height)}
                                      : definition.texture_sizes[texture_index];
+      std::array<Vec3f, 4> corners = face_corners(box, static_cast<EntityModelFace>(face_value));
+      if (has_bone_rotation.value() || !is_zero(box.rotation)) {
+        for (Vec3f& corner : corners) {
+          if (has_bone_rotation.value()) {
+            auto transformed_corner = apply_bone_chain(corner, box.bone);
+            if (!transformed_corner) {
+              return EntityModelAssetResult::failure(transformed_corner.error());
+            }
+            corner = transformed_corner.value();
+          }
+          if (!is_zero(box.rotation)) {
+            corner = transformed_box_origin +
+                     rotate_euler_degrees(corner - transformed_box_origin, box.rotation);
+          }
+        }
+      }
       append_face(
           asset,
           bone_index,
           flags,
-          box,
+          corners,
           static_cast<EntityModelFace>(face_value),
           face,
           binding,

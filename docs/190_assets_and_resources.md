@@ -132,8 +132,8 @@ models/
 * Models are **data-driven** (e.g. JSON)
 * Entity models are geometry-only assets
 * Support multiple textures per model
-* Each model box has a `bone` string and `pivot`; `bone: ""` is valid for
-  static/root geometry
+* Each model has top-level `bones`; every box references one declared bone
+* Bone pivots/rotations and cube origins/rotations are separate model fields
 * Used by meshing and rendering systems
 
 ---

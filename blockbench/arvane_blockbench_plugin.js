@@ -334,6 +334,9 @@ Plugin.register('arvane_blockbench_plugin', {
 
       nodes.forEach(node => {
         if (isExportedCube(node)) {
+          if (!currentBoneName) {
+            throw new Error(`Cube '${node.name || node.uuid || 'unnamed'}' must be inside an exported group so it can reference a bone.`);
+          }
           boxes.push(extractCubeData(node, textureInfo, currentBoneName));
           return;
         }
@@ -526,6 +529,16 @@ Plugin.register('arvane_blockbench_plugin', {
       );
     }
 
+    function isOptionalUvRotation(value) {
+      if (value == null) return true;
+
+      const number = Number(value);
+      if (!Number.isFinite(number)) return false;
+
+      const normalized = ((number % 360) + 360) % 360;
+      return Math.abs(normalized - Math.round(normalized / 90) * 90) <= 0.001;
+    }
+
     function isObjectRecord(value) {
       return value != null && typeof value === 'object' && !Array.isArray(value);
     }
@@ -547,11 +560,15 @@ Plugin.register('arvane_blockbench_plugin', {
         throw new Error('Arvane model must contain a boxes array.');
       }
 
-      if (model.bones != null && !isObjectRecord(model.bones)) {
-        throw new Error('Arvane model bones field must be an object when present.');
+      if (!isObjectRecord(model.bones)) {
+        throw new Error('Arvane model must contain a bones object.');
       }
 
-      Object.entries(model.bones || {}).forEach(([boneName, bone], index) => {
+      Object.entries(model.bones).forEach(([boneName, bone], index) => {
+        if (!boneName) {
+          throw new Error(`Bone at index ${index} has an empty name.`);
+        }
+
         if (!isObjectRecord(bone)) {
           throw new Error(`Bone '${boneName || index}' must be an object.`);
         }
@@ -567,6 +584,10 @@ Plugin.register('arvane_blockbench_plugin', {
         if (bone.parent != null && typeof bone.parent !== 'string') {
           throw new Error(`Bone '${boneName || index}' has invalid parent field. Expected string.`);
         }
+
+        if (bone.parent != null && !Object.prototype.hasOwnProperty.call(model.bones, bone.parent)) {
+          throw new Error(`Bone '${boneName || index}' references unknown parent '${bone.parent}'.`);
+        }
       });
 
       model.boxes.forEach((box, index) => {
@@ -576,6 +597,14 @@ Plugin.register('arvane_blockbench_plugin', {
 
         if (typeof box.bone !== 'string') {
           throw new Error(`Box at index ${index} has invalid or missing bone field. Expected string.`);
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(model.bones, box.bone)) {
+          throw new Error(`Box at index ${index} references unknown bone '${box.bone}'.`);
+        }
+
+        if (box.pivot != null) {
+          throw new Error(`Box at index ${index} uses removed pivot field. Use box.origin for cube pivots and bones.<name>.pivot for bone pivots.`);
         }
 
         if (!isVec3(box.min)) {
@@ -608,6 +637,10 @@ Plugin.register('arvane_blockbench_plugin', {
 
           if (!isOptionalVec4(face.uv)) {
             throw new Error(`Box at index ${index} face '${faceName}' has invalid uv field. Expected numeric vec4.`);
+          }
+
+          if (!isOptionalUvRotation(face.rotation)) {
+            throw new Error(`Box at index ${index} face '${faceName}' has invalid rotation field. Expected numeric 0/90/180/270 degrees.`);
           }
         });
       });
@@ -815,8 +848,7 @@ Plugin.register('arvane_blockbench_plugin', {
     }
 
     function getModelBoneData(model, boneName) {
-      const bones = isObjectRecord(model?.bones) ? model.bones : null;
-      const bone = bones ? bones[String(boneName || '')] : null;
+      const bone = model.bones[String(boneName || '')];
       return isObjectRecord(bone) ? bone : {};
     }
 
@@ -824,9 +856,9 @@ Plugin.register('arvane_blockbench_plugin', {
       return typeof boneData?.parent === 'string' ? boneData.parent.trim() : '';
     }
 
-    function getBonePivot(model, boneName, legacyPivot) {
+    function getBonePivot(model, boneName) {
       const boneData = getModelBoneData(model, boneName);
-      return vec3(boneData.pivot || legacyPivot || DEFAULT_PIVOT, 0);
+      return vec3(boneData.pivot || DEFAULT_PIVOT, 0);
     }
 
     function getBoneRotation(model, boneName) {
@@ -834,11 +866,15 @@ Plugin.register('arvane_blockbench_plugin', {
       return vec3(boneData.rotation || DEFAULT_ROTATION, 0);
     }
 
-    function ensureModelGroup(name, model, legacyPivot, importedGroups, creatingGroups) {
+    function ensureModelGroup(name, model, importedGroups, creatingGroups) {
       const boneName = String(name || '');
 
       if (!boneName) {
-        return null;
+        throw new Error('Arvane boxes must reference a non-empty declared bone.');
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(model.bones, boneName)) {
+        throw new Error(`Unknown Arvane bone '${boneName}'.`);
       }
 
       if (importedGroups.has(boneName)) {
@@ -858,9 +894,9 @@ Plugin.register('arvane_blockbench_plugin', {
       const boneData = getModelBoneData(model, boneName);
       const parentName = getBoneParentName(boneData);
       const parentGroup = parentName
-        ? ensureModelGroup(parentName, model, DEFAULT_PIVOT, importedGroups, creatingGroups)
+        ? ensureModelGroup(parentName, model, importedGroups, creatingGroups)
         : null;
-      const pivot = getBonePivot(model, boneName, legacyPivot);
+      const pivot = getBonePivot(model, boneName);
       const rotation = getBoneRotation(model, boneName);
       const existing = getGroupByName(boneName);
       const group = existing || new Group({
@@ -887,8 +923,7 @@ Plugin.register('arvane_blockbench_plugin', {
     }
 
     function getBoxOrigin(box) {
-      // `origin` is the new per-cube pivot. `pivot` is accepted only for legacy files.
-      return vec3(box.origin || box.pivot || DEFAULT_PIVOT, 0);
+      return vec3(box.origin || DEFAULT_PIVOT, 0);
     }
 
     function getBoxRotation(box) {
@@ -927,9 +962,8 @@ Plugin.register('arvane_blockbench_plugin', {
       });
 
       const parent = ensureModelGroup(
-        box.bone || '',
+        box.bone,
         model,
-        box.pivot || DEFAULT_PIVOT,
         importedGroups,
         creatingGroups
       );
@@ -965,8 +999,8 @@ Plugin.register('arvane_blockbench_plugin', {
         });
 
         // Create declared bones before cubes so hierarchy, pivots, and rotations exist even for empty bones.
-        Object.keys(model.bones || {}).forEach(boneName => {
-          ensureModelGroup(boneName, model, DEFAULT_PIVOT, importedGroups, creatingGroups);
+        Object.keys(model.bones).forEach(boneName => {
+          ensureModelGroup(boneName, model, importedGroups, creatingGroups);
         });
 
         model.boxes.forEach((box, index) => {

@@ -45,9 +45,10 @@ TEST(EntityModelTests, LoadsBlockModelWithSharedSchema) {
   ASSERT_TRUE(parsed) << parsed.error().message;
   ASSERT_EQ(parsed.value().texture_assets.size(), 1U);
   EXPECT_EQ(parsed.value().texture_assets.front(), "arvane:texture/block/cobblestone");
+  ASSERT_EQ(parsed.value().bones.size(), 1U);
+  EXPECT_NE(parsed.value().bones.find("root"), parsed.value().bones.end());
   ASSERT_EQ(parsed.value().boxes.size(), 2U);
-  EXPECT_EQ(parsed.value().boxes.front().bone, "");
-  EXPECT_EQ(parsed.value().boxes.front().pivot, (arv::Vec3f{0.0F, 0.0F, 0.0F}));
+  EXPECT_EQ(parsed.value().boxes.front().bone, "root");
   EXPECT_EQ(parsed.value().boxes.front().min, (arv::Vec3f{0.0F, 0.0F, 0.0F}));
   EXPECT_EQ(parsed.value().boxes.front().max, (arv::Vec3f{16.0F, 8.0F, 16.0F}));
 }
@@ -62,9 +63,11 @@ TEST(EntityModelTests, LoadsEntityModelWithSharedSchemaAndBoneNames) {
   EXPECT_EQ(parsed.value().texture_assets.front(), "arvane:texture/entity/pig");
   ASSERT_EQ(parsed.value().texture_sizes.size(), 1U);
   EXPECT_EQ(parsed.value().texture_sizes.front(), (arv::Vec2i{64, 64}));
+  ASSERT_EQ(parsed.value().bones.size(), 6U);
+  ASSERT_NE(parsed.value().bones.find("head"), parsed.value().bones.end());
+  EXPECT_EQ(parsed.value().bones.find("head")->second.pivot, (arv::Vec3f{0.0F, 8.0F, -4.0F}));
   ASSERT_EQ(parsed.value().boxes.size(), 7U);
   EXPECT_EQ(parsed.value().boxes.front().bone, "body");
-  EXPECT_EQ(parsed.value().boxes.front().pivot, (arv::Vec3f{0.0F, 0.0F, 0.0F}));
 
   const auto head = std::find_if(
       parsed.value().boxes.begin(),
@@ -73,10 +76,9 @@ TEST(EntityModelTests, LoadsEntityModelWithSharedSchemaAndBoneNames) {
         return box.bone == "head";
       });
   ASSERT_NE(head, parsed.value().boxes.end());
-  EXPECT_EQ(head->pivot, (arv::Vec3f{0.0F, 8.0F, -4.0F}));
 }
 
-TEST(EntityModelTests, BuildsEntityMeshAndPivotsFromBoxBones) {
+TEST(EntityModelTests, BuildsEntityMeshAndPivotsFromDeclaredBones) {
   const std::filesystem::path pig_path =
       std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "models" / "entity" / "pig.json";
   auto parsed = arv::render::parse_entity_model_json(read_text(pig_path));
@@ -104,13 +106,13 @@ TEST(EntityModelTests, BuildsEntityMeshAndPivotsFromBoxBones) {
   EXPECT_EQ(model.value().bones[head_index.value()].pivot, (arv::Vec3f{0.0F, 8.0F, -4.0F}));
 }
 
-TEST(EntityModelTests, LoadsEmptyBoneRootBoxes) {
+TEST(EntityModelTests, LoadsOneBoneOneCubeModel) {
   const std::string text = R"json({
     "textures": ["pig.png"],
     "texture_sizes": [[64, 64]],
+    "bones": {"root": {}},
     "boxes": [{
-      "bone": "",
-      "pivot": [0, 0, 0],
+      "bone": "root",
       "min": [0, 0, 0],
       "max": [16, 16, 16],
       "inflate": 0,
@@ -119,8 +121,9 @@ TEST(EntityModelTests, LoadsEmptyBoneRootBoxes) {
   })json";
   auto parsed = arv::render::parse_entity_model_json(text);
   ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed.value().bones.size(), 1U);
   ASSERT_EQ(parsed.value().boxes.size(), 1U);
-  EXPECT_EQ(parsed.value().boxes.front().bone, "");
+  EXPECT_EQ(parsed.value().boxes.front().bone, "root");
 
   auto model = arv::render::build_entity_model_asset(
       arv::render::EntityModelID{9},
@@ -128,16 +131,198 @@ TEST(EntityModelTests, LoadsEmptyBoneRootBoxes) {
       std::span<const arv::render::EntityModelTextureBinding>{});
   ASSERT_TRUE(model) << model.error().message;
   ASSERT_EQ(model.value().bones.size(), 1U);
-  EXPECT_EQ(model.value().bones.front().name, "");
+  EXPECT_EQ(model.value().bones.front().name, "root");
   EXPECT_TRUE(model.value().vertices.empty());
   EXPECT_TRUE(model.value().indices.empty());
 }
 
+TEST(EntityModelTests, LoadsNestedBonesAndTransformsChildPivot) {
+  const std::string text = R"json({
+    "textures": ["pig.png"],
+    "texture_sizes": [[16, 16]],
+    "bones": {
+      "root": {"pivot": [1, 2, 3], "rotation": [0, 90, 0]},
+      "child": {"parent": "root", "pivot": [2, 2, 3]}
+    },
+    "boxes": []
+  })json";
+  auto parsed = arv::render::parse_entity_model_json(text);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed.value().bones.size(), 2U);
+  ASSERT_EQ(parsed.value().bones.find("child")->second.parent.value(), "root");
+
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{10},
+      parsed.value(),
+      std::span<const arv::render::EntityModelTextureBinding>{});
+  ASSERT_TRUE(model) << model.error().message;
+
+  const std::optional<arv::usize> child = find_bone_index(model.value(), "child");
+  ASSERT_TRUE(child.has_value());
+  EXPECT_NEAR(model.value().bones[child.value()].pivot.x, -1.0F, 0.0001F);
+  EXPECT_NEAR(model.value().bones[child.value()].pivot.y, 2.0F, 0.0001F);
+  EXPECT_NEAR(model.value().bones[child.value()].pivot.z, 2.0F, 0.0001F);
+}
+
+TEST(EntityModelTests, BakesBoneRotationOnly) {
+  const std::string text = R"json({
+    "textures": ["pig.png"],
+    "texture_sizes": [[16, 16]],
+    "bones": {"root": {"rotation": [0, 90, 0]}},
+    "boxes": [{
+      "bone": "root",
+      "min": [0, 0, 0],
+      "max": [2, 2, 2],
+      "north": {"texture": 0, "uv": [0, 0, 16, 16]}
+    }]
+  })json";
+  auto parsed = arv::render::parse_entity_model_json(text);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/entity/pig",
+                                                                      {0, 0},
+                                                                      {16, 16},
+                                                                      16,
+                                                                      16}};
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{11},
+      parsed.value(),
+      bindings);
+  ASSERT_TRUE(model) << model.error().message;
+  ASSERT_GE(model.value().vertices.size(), 2U);
+  EXPECT_NEAR(model.value().vertices[1].position.x, 0.0F, 0.0001F);
+  EXPECT_NEAR(model.value().vertices[1].position.y, 0.0F, 0.0001F);
+  EXPECT_NEAR(model.value().vertices[1].position.z, -2.0F, 0.0001F);
+}
+
+TEST(EntityModelTests, BakesCubeRotationOnly) {
+  const std::string text = R"json({
+    "textures": ["pig.png"],
+    "texture_sizes": [[16, 16]],
+    "bones": {"root": {}},
+    "boxes": [{
+      "bone": "root",
+      "min": [0, 0, 0],
+      "max": [2, 2, 2],
+      "origin": [0, 0, 0],
+      "rotation": [0, 90, 0],
+      "north": {"texture": 0, "uv": [0, 0, 16, 16]}
+    }]
+  })json";
+  auto parsed = arv::render::parse_entity_model_json(text);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/entity/pig",
+                                                                      {0, 0},
+                                                                      {16, 16},
+                                                                      16,
+                                                                      16}};
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{12},
+      parsed.value(),
+      bindings);
+  ASSERT_TRUE(model) << model.error().message;
+  ASSERT_GE(model.value().vertices.size(), 2U);
+  EXPECT_NEAR(model.value().vertices[1].position.x, 0.0F, 0.0001F);
+  EXPECT_NEAR(model.value().vertices[1].position.y, 0.0F, 0.0001F);
+  EXPECT_NEAR(model.value().vertices[1].position.z, -2.0F, 0.0001F);
+}
+
+TEST(EntityModelTests, BakesBoneThenCubeRotation) {
+  const std::string text = R"json({
+    "textures": ["pig.png"],
+    "texture_sizes": [[16, 16]],
+    "bones": {"root": {"rotation": [0, 90, 0]}},
+    "boxes": [{
+      "bone": "root",
+      "min": [0, 0, 0],
+      "max": [2, 2, 2],
+      "origin": [0, 0, 0],
+      "rotation": [0, 90, 0],
+      "north": {"texture": 0, "uv": [0, 0, 16, 16]}
+    }]
+  })json";
+  auto parsed = arv::render::parse_entity_model_json(text);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/entity/pig",
+                                                                      {0, 0},
+                                                                      {16, 16},
+                                                                      16,
+                                                                      16}};
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{13},
+      parsed.value(),
+      bindings);
+  ASSERT_TRUE(model) << model.error().message;
+  ASSERT_GE(model.value().vertices.size(), 2U);
+  EXPECT_NEAR(model.value().vertices[1].position.x, 2.0F, 0.0001F);
+  EXPECT_NEAR(model.value().vertices[1].position.y, 0.0F, 0.0001F);
+  EXPECT_NEAR(model.value().vertices[1].position.z, 0.0F, 0.0001F);
+}
+
+TEST(EntityModelTests, AppliesFaceUvRotation) {
+  const std::string text = R"json({
+    "textures": ["pig.png"],
+    "texture_sizes": [[16, 16]],
+    "bones": {"root": {}},
+    "boxes": [{
+      "bone": "root",
+      "min": [0, 0, 0],
+      "max": [2, 2, 2],
+      "north": {"texture": 0, "uv": [0, 0, 16, 16], "rotation": 90}
+    }]
+  })json";
+  auto parsed = arv::render::parse_entity_model_json(text);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/entity/pig",
+                                                                      {0, 0},
+                                                                      {16, 16},
+                                                                      16,
+                                                                      16}};
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{14},
+      parsed.value(),
+      bindings);
+  ASSERT_TRUE(model) << model.error().message;
+  ASSERT_GE(model.value().vertices.size(), 4U);
+  EXPECT_EQ(model.value().vertices[0].uv, (arv::Vec2f{16.0F, 0.0F}));
+  EXPECT_EQ(model.value().vertices[1].uv, (arv::Vec2f{16.0F, 16.0F}));
+  EXPECT_EQ(model.value().vertices[2].uv, (arv::Vec2f{0.0F, 0.0F}));
+  EXPECT_EQ(model.value().vertices[3].uv, (arv::Vec2f{0.0F, 16.0F}));
+}
+
+TEST(EntityModelTests, RejectsOldModelWithoutBonesObject) {
+  const std::string text = R"json({
+    "textures": ["pig.png"],
+    "texture_sizes": [[64, 64]],
+    "boxes": []
+  })json";
+  auto parsed = arv::render::parse_entity_model_json(text);
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("bones object"), std::string::npos);
+}
+
+TEST(EntityModelTests, RejectsUnknownBoxBone) {
+  const std::string text = R"json({
+    "textures": ["pig.png"],
+    "texture_sizes": [[64, 64]],
+    "bones": {"root": {}},
+    "boxes": [{
+      "bone": "missing",
+      "min": [0, 0, 0],
+      "max": [16, 16, 16],
+      "north": {"texture": -1}
+    }]
+  })json";
+  auto parsed = arv::render::parse_entity_model_json(text);
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("unknown bone"), std::string::npos);
+}
+
 TEST(EntityModelTests, RejectsOldEntityModelFields) {
-  for (const std::string& field : {"skeleton", "bones", "animations"}) {
+  for (const std::string& field : {"skeleton", "animations"}) {
     const std::string text = R"json({
       "textures": ["pig.png"],
       "texture_sizes": [[64, 64]],
+      "bones": {},
       "boxes": []
     })json";
     std::string with_old_field = text;

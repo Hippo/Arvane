@@ -269,9 +269,9 @@ TEST(BlockRegistryTests, BlockModelTexturesCanResolveInputsOrSpecificAssets) {
 {
   "textures": ["$0", "stone"],
   "texture_sizes": [[16, 16], [16, 16]],
+  "bones": {"root": {}},
   "boxes": [{
-    "bone": "",
-    "pivot": [0, 0, 0],
+    "bone": "root",
     "min": [0, 0, 0],
     "max": [16, 8, 16],
     "up": {"texture": 0, "uv": [0, 0, 16, 16]},
@@ -298,15 +298,14 @@ TEST(BlockRegistryTests, AuthoredModelDerivesCenterOriginFromBoxBounds) {
 {
   "textures": ["stone"],
   "texture_sizes": [[16, 16]],
+  "bones": {"root": {}},
   "boxes": [{
-    "bone": "",
-    "pivot": [0, 0, 0],
+    "bone": "root",
     "min": [0, 0, 0],
     "max": [16, 8, 16],
     "up": {"texture": 0, "uv": [0, 0, 16, 16]}
   }, {
-    "bone": "",
-    "pivot": [0, 0, 0],
+    "bone": "root",
     "min": [0, 8, 0],
     "max": [16, 16, 8],
     "north": {"texture": 0, "uv": [0, 0, 16, 8]}
@@ -325,15 +324,14 @@ TEST(BlockRegistryTests, BlockModelCollisionBoxesApplyStateTransform) {
 {
   "textures": ["stone"],
   "texture_sizes": [[16, 16]],
+  "bones": {"root": {}},
   "boxes": [{
-    "bone": "",
-    "pivot": [0, 0, 0],
+    "bone": "root",
     "min": [0, 0, 0],
     "max": [16, 8, 16],
     "up": {"texture": 0, "uv": [0, 0, 16, 16]}
   }, {
-    "bone": "",
-    "pivot": [0, 0, 0],
+    "bone": "root",
     "min": [0, 8, 0],
     "max": [16, 16, 8],
     "north": {"texture": 0, "uv": [0, 0, 16, 8]}
@@ -353,6 +351,27 @@ TEST(BlockRegistryTests, BlockModelCollisionBoxesApplyStateTransform) {
   EXPECT_FLOAT_EQ(boxes.back().max.x, 1.0F);
   EXPECT_FLOAT_EQ(boxes.back().min.y, 0.0F);
   EXPECT_FLOAT_EQ(boxes.back().max.y, 0.5F);
+}
+
+TEST(BlockRegistryTests, BlockModelRejectsUnsupportedCubeRotation) {
+  auto model = arv::voxel::parse_block_model_json(R"json(
+{
+  "textures": ["stone"],
+  "texture_sizes": [[16, 16]],
+  "bones": {"root": {}},
+  "boxes": [{
+    "bone": "root",
+    "min": [0, 0, 0],
+    "max": [16, 16, 16],
+    "origin": [8, 8, 8],
+    "rotation": [0, 45, 0],
+    "up": {"texture": 0, "uv": [0, 0, 16, 16]}
+  }]
+}
+)json");
+
+  ASSERT_FALSE(model);
+  EXPECT_NE(model.error().message.find("rotation is not supported"), std::string::npos);
 }
 
 TEST(BlockRegistryTests, BlockModelRenderBoxTransformCarriesUvsWithRotatedFace) {

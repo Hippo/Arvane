@@ -4,6 +4,7 @@
 #include "arv/render/render_types.hpp"
 
 #include <array>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -28,13 +29,21 @@ struct EntityModelError {
 struct EntityModelFaceDefinition {
   i32 texture_index{};
   Vec4i uv{};
+  f32 rotation{};
+};
+
+struct EntityModelBoneDefinition {
+  std::optional<std::string> parent{};
+  Vec3f pivot{};
+  Vec3f rotation{};
 };
 
 struct EntityModelBoxDefinition {
   std::string bone{};
-  Vec3f pivot{};
   Vec3f min{};
   Vec3f max{};
+  Vec3f origin{};
+  Vec3f rotation{};
   f32 inflate{};
   std::array<std::optional<EntityModelFaceDefinition>, 6> faces{};
 };
@@ -42,6 +51,7 @@ struct EntityModelBoxDefinition {
 struct EntityModelDefinition {
   std::string name{};
   Vec3f center_origin{};
+  std::map<std::string, EntityModelBoneDefinition, std::less<>> bones{};
   std::vector<EntityModelBoxDefinition> boxes{};
   std::vector<std::string> texture_assets{};
   std::vector<Vec2i> texture_sizes{};

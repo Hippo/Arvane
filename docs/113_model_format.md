@@ -32,15 +32,24 @@ The same schema is used for `assets/<namespace>/models/block/*.json` and
   "texture_sizes": [
     [64, 64]
   ],
+  "bones": {
+    "body": {},
+    "head": {
+      "parent": "body",
+      "pivot": [0, 12, 0],
+      "rotation": [0, 15, 0]
+    }
+  },
   "boxes": [
     {
-      "bone": "body",
-      "pivot": [0, 12, 0],
+      "bone": "head",
       "min": [0, 0, 0],
       "max": [16, 16, 16],
+      "origin": [8, 8, 8],
+      "rotation": [0, 45, 0],
       "inflate": 0,
 
-      "north": { "texture": 0, "uv": [0, 0, 16, 16] },
+      "north": { "texture": 0, "uv": [0, 0, 16, 16], "rotation": 90 },
       "south": { "texture": 0, "uv": [0, 0, 16, 16] },
       "east":  { "texture": 0, "uv": [0, 0, 16, 16] },
       "west":  { "texture": 0, "uv": [0, 0, 16, 16] },
@@ -80,38 +89,36 @@ the selected player skin.
 `texture_sizes` is a required array of numeric vec2 arrays. It defines the UV
 coordinate space, not the physical image resolution.
 
+## Bones
+
+`bones` is a required object keyed by authored Blockbench group name. Each bone
+entry is an object and may contain:
+
+* `parent`: optional string naming another declared bone
+* `pivot`: optional numeric vec3 copied from the Blockbench group origin
+* `rotation`: optional numeric vec3 copied from the Blockbench group rotation
+
+Omitted pivots and rotations default to `[0, 0, 0]`. Empty bone names are
+invalid. Parent references must name another declared bone and must not form a
+cycle.
+
 ## Boxes
 
 `boxes` is a required array. Each box must be an object with:
 
-* `bone`: required string
-* `pivot`: required numeric vec3
+* `bone`: required string referencing a declared bone
 * `min`: required numeric vec3
 * `max`: required numeric vec3
+* `origin`: optional numeric vec3 copied from the Blockbench cube origin
+* `rotation`: optional numeric vec3 copied from the Blockbench cube rotation
 * `inflate`: numeric, defaulting to `0` when omitted
 * `north`, `south`, `east`, `west`, `up`, `down`: face data
 
 Coordinates are authored in sixteenths of a block. Blocks are typically within
 `[0, 16]`; entity geometry may extend outside that range.
 
-### Bone Names
-
-`boxes[].bone` is an authored group name used by entity animation binding. It
-does not define ownership or hierarchy.
-
-Rules:
-
-* `bone: ""` marks root or static geometry.
-* Non-empty `bone` values group boxes for animation.
-* Animation keyframes reference the same strings through `keyframes[].bone`.
-* Block models may use `bone: ""` for every box.
-
-### Pivots
-
-`boxes[].pivot` is the rotation origin for the box's authored group. Boxes that
-share a non-empty `bone` name should use the same pivot.
-
-Root or static boxes still include a pivot so the schema remains uniform.
+`boxes[].bone` defines the bone that owns the cube. Animation keyframes
+reference the same bone names through `keyframes[].bone`.
 
 ### Faces
 
@@ -120,7 +127,8 @@ Each face is an object:
 ```json
 {
   "texture": 0,
-  "uv": [0, 0, 16, 16]
+  "uv": [0, 0, 16, 16],
+  "rotation": 90
 }
 ```
 
@@ -129,6 +137,7 @@ Rules:
 * `texture == -1` disables the face.
 * Other texture indices must reference an entry in `textures`.
 * `uv` is a numeric rectangle in authored texture-space units.
+* `rotation` is optional UV rotation in degrees, normally `0`, `90`, `180`, or `270`.
 * The engine normalizes UVs by dividing by `texture_sizes[texture]`.
 
 ## Entity Models
@@ -139,9 +148,8 @@ Entity models use the same geometry schema as block models and live under:
 assets/<namespace>/models/entity/
 ```
 
-Entity model files do not contain simulation behavior, hierarchy definitions, or
-animation clips. The model-side animation binding metadata is only the box-level
-`bone` name and `pivot`.
+Entity model files do not contain simulation behavior or animation clips. Bone
+hierarchy and rest-pose transforms live in the model's top-level `bones` object.
 
 ## Animation Assets
 
@@ -219,13 +227,18 @@ Model validation requires:
 * root object
 * `textures` array of strings
 * `texture_sizes` array of numeric vec2 arrays
+* `bones` object
 * `boxes` array
-* each box has string `bone`
-* each box has numeric vec3 `pivot`, `min`, and `max`
+* each bone entry is an object with optional numeric vec3 `pivot` and `rotation`
+* bone `parent` values reference declared bones
+* each box has string `bone` referencing a declared bone
+* each box has numeric vec3 `min` and `max`
+* box `origin` and `rotation`, when present, are numeric vec3 arrays
 * each face has an integer `texture`
 * enabled faces have numeric vec4 `uv`
+* face `rotation`, when present, is numeric UV rotation in quarter turns
 
-Model files do not contain root-level hierarchy or clip fields.
+Model files do not contain clip fields.
 
 ## Non-Goals
 

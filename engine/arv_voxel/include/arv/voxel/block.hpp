@@ -6,6 +6,7 @@
 #include "arv/core/types.hpp"
 
 #include <array>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -194,13 +195,21 @@ struct BlockVariantRecord {
 struct AuthoredModelFaceDefinition {
   i32 texture_index{};
   Vec4i uv{};
+  f32 rotation{};
+};
+
+struct AuthoredModelBoneDefinition {
+  std::optional<std::string> parent{};
+  Vec3f pivot{};
+  Vec3f rotation{};
 };
 
 struct AuthoredModelBoxDefinition {
   std::string bone{};
-  Vec3f pivot{};
   Vec3f min{};
   Vec3f max{};
+  Vec3f origin{};
+  Vec3f rotation{};
   f32 inflate{};
   std::array<std::optional<AuthoredModelFaceDefinition>, BlockFaceCount> faces{};
 };
@@ -208,6 +217,7 @@ struct AuthoredModelBoxDefinition {
 struct AuthoredModelDefinition {
   std::string name{};
   Vec3f center_origin{8.0F, 8.0F, 8.0F};
+  std::map<std::string, AuthoredModelBoneDefinition, std::less<>> bones{};
   std::vector<AuthoredModelBoxDefinition> boxes{};
   std::vector<std::string> texture_assets{};
   std::vector<Vec2i> texture_sizes{};

@@ -87,6 +87,16 @@ void set_side_textures(
   return {};
 }
 
+[[nodiscard]] std::string strip_file_extension(std::string_view value) {
+  const usize slash = value.find_last_of("/\\");
+  const usize dot = value.find_last_of('.');
+  if (dot != std::string_view::npos &&
+      (slash == std::string_view::npos || dot > slash)) {
+    value = value.substr(0, dot);
+  }
+  return std::string{value};
+}
+
 [[nodiscard]] std::optional<BlockRegistryError> read_texture_value(
     const io::DataValue& textures,
     BlockDefinition& definition,
@@ -258,6 +268,17 @@ void set_side_textures(
   return Expected<Vec3f, BlockRegistryError>::success(result);
 }
 
+[[nodiscard]] Expected<Vec3f, BlockRegistryError> read_optional_vec3f(
+    const io::DataValue& object,
+    std::string_view key,
+    std::string_view field) {
+  const io::DataValue* value = object.get(key);
+  if (value == nullptr) {
+    return Expected<Vec3f, BlockRegistryError>::success({});
+  }
+  return read_vec3f(*value, field);
+}
+
 [[nodiscard]] Expected<Vec2i, BlockRegistryError> read_vec2i(
     const io::DataValue& node,
     std::string_view field) {
@@ -320,6 +341,22 @@ void set_side_textures(
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<f32> normalize_uv_rotation(f64 rotation) noexcept {
+  if (!std::isfinite(rotation)) {
+    return std::nullopt;
+  }
+  f64 normalized = std::fmod(rotation, 360.0);
+  if (normalized < 0.0) {
+    normalized += 360.0;
+  }
+  const f64 quarter_turns = std::round(normalized / 90.0);
+  if (std::abs(normalized - quarter_turns * 90.0) > 0.001) {
+    return std::nullopt;
+  }
+  const auto turns = static_cast<i32>(quarter_turns) % 4;
+  return static_cast<f32>(turns * 90);
+}
+
 [[nodiscard]] bool is_block_model_input_reference(std::string_view texture) noexcept {
   if (texture.size() < 2U || texture.front() != '$') {
     return false;
@@ -371,6 +408,19 @@ void set_side_textures(
         {"model face texture must be an integer"});
   }
   face.texture_index = static_cast<i32>(texture->as_i64_or(0));
+  if (const io::DataValue* rotation = node.get("rotation"); rotation != nullptr) {
+    if (!io::is_number_value(*rotation)) {
+      return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
+          {"model face rotation must be numeric"});
+    }
+    const std::optional<f32> normalized_rotation =
+        normalize_uv_rotation(rotation->as_f64_or(0.0));
+    if (!normalized_rotation.has_value()) {
+      return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
+          {"model face rotation must be a finite multiple of 90 degrees"});
+    }
+    face.rotation = normalized_rotation.value();
+  }
   if (face.texture_index < 0) {
     if (face.texture_index != -1) {
       return Expected<AuthoredModelFaceDefinition, BlockRegistryError>::failure(
@@ -401,13 +451,15 @@ void set_side_textures(
   const auto finite = [](f32 value) noexcept {
     return std::isfinite(value);
   };
+  const auto finite_vec3 = [finite](Vec3f value) noexcept {
+    return finite(value.x) && finite(value.y) && finite(value.z);
+  };
   const auto in_range = [](f32 value) noexcept {
     return value >= 0.0F && value <= 16.0F;
   };
-  if (!finite(box.min.x) || !finite(box.min.y) || !finite(box.min.z) ||
-      !finite(box.max.x) || !finite(box.max.y) || !finite(box.max.z) ||
-      !finite(box.inflate)) {
-    return BlockRegistryError{"block model box coordinates and inflate must be finite"};
+  if (!finite_vec3(box.min) || !finite_vec3(box.max) || !finite_vec3(box.origin) ||
+      !finite_vec3(box.rotation) || !finite(box.inflate)) {
+    return BlockRegistryError{"block model box coordinates, transforms, and inflate must be finite"};
   }
   if (!in_range(box.min.x) || !in_range(box.min.y) || !in_range(box.min.z) ||
       !in_range(box.max.x) || !in_range(box.max.y) || !in_range(box.max.z)) {
@@ -416,7 +468,20 @@ void set_side_textures(
   if (box.min.x > box.max.x || box.min.y > box.max.y || box.min.z > box.max.z) {
     return BlockRegistryError{"block model box min must be less than or equal to max"};
   }
+  constexpr f32 Epsilon = 0.0001F;
+  if (std::abs(box.rotation.x) > Epsilon ||
+      std::abs(box.rotation.y) > Epsilon ||
+      std::abs(box.rotation.z) > Epsilon) {
+    return BlockRegistryError{"block model box rotation is not supported"};
+  }
   return std::nullopt;
+}
+
+[[nodiscard]] bool has_nonzero_rotation(Vec3f rotation) noexcept {
+  constexpr f32 Epsilon = 0.0001F;
+  return std::abs(rotation.x) > Epsilon ||
+         std::abs(rotation.y) > Epsilon ||
+         std::abs(rotation.z) > Epsilon;
 }
 
 [[nodiscard]] std::optional<BlockRegistryError> reject_removed_model_fields(
@@ -424,7 +489,6 @@ void set_side_textures(
     std::string_view context) {
   for (std::string_view field : {
            "skeleton",
-           "bones",
            "animations",
            "animation",
            "keyframes",
@@ -1035,7 +1099,7 @@ std::string normalize_block_texture_asset(std::string_view texture) {
   if (texture.find(':') != std::string_view::npos) {
     return std::string{texture};
   }
-  return "arvane:texture/block/" + std::string{texture};
+  return "arvane:texture/block/" + strip_file_extension(texture);
 }
 
 BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
@@ -1266,7 +1330,7 @@ AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text) {
   }
   if (root.get("pivot") != nullptr) {
     return AuthoredModelDefinitionResult::failure(
-        {"model root contains removed entity model field 'pivot'; pivots belong to boxes"});
+        {"model root contains removed entity model field 'pivot'; bone pivots belong in bones.<name>.pivot"});
   }
 
   AuthoredModelDefinition definition;
@@ -1285,6 +1349,72 @@ AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text) {
     }
     definition.center_origin = parsed_center_origin.value();
     has_center_origin = true;
+  }
+
+  const io::DataValue* bones = root.get("bones");
+  const io::DataValue::Object* bone_object =
+      bones == nullptr ? nullptr : bones->object_if();
+  if (bone_object == nullptr) {
+    return AuthoredModelDefinitionResult::failure({"model requires bones object"});
+  }
+  for (const auto& [bone_name, bone_json] : *bone_object) {
+    if (bone_name.empty()) {
+      return AuthoredModelDefinitionResult::failure({"model bone names must not be empty"});
+    }
+    if (bone_json.kind() != io::DataKind::Object) {
+      return AuthoredModelDefinitionResult::failure(
+          {"model bone '" + bone_name + "' must be an object"});
+    }
+
+    AuthoredModelBoneDefinition bone;
+    if (const io::DataValue* parent = bone_json.get("parent"); parent != nullptr) {
+      if (parent->kind() != io::DataKind::String) {
+        return AuthoredModelDefinitionResult::failure(
+            {"model bone '" + bone_name + "' parent must be a string"});
+      }
+      bone.parent = std::string{parent->as_string_or({})};
+      if (bone.parent->empty()) {
+        return AuthoredModelDefinitionResult::failure(
+            {"model bone '" + bone_name + "' parent must not be empty"});
+      }
+    }
+
+    auto pivot = read_optional_vec3f(
+        bone_json,
+        "pivot",
+        "model bone '" + bone_name + "' pivot");
+    if (!pivot) {
+      return AuthoredModelDefinitionResult::failure(pivot.error());
+    }
+    auto rotation = read_optional_vec3f(
+        bone_json,
+        "rotation",
+        "model bone '" + bone_name + "' rotation");
+    if (!rotation) {
+      return AuthoredModelDefinitionResult::failure(rotation.error());
+    }
+    bone.pivot = pivot.value();
+    bone.rotation = rotation.value();
+    definition.bones.emplace(bone_name, std::move(bone));
+  }
+  for (const auto& [bone_name, bone] : definition.bones) {
+    HashSet<std::string> seen;
+    std::string current = bone_name;
+    while (true) {
+      if (!seen.insert(current).second) {
+        return AuthoredModelDefinitionResult::failure(
+            {"model bone hierarchy contains a cycle at '" + current + "'"});
+      }
+      const auto current_iter = definition.bones.find(current);
+      if (current_iter == definition.bones.end()) {
+        return AuthoredModelDefinitionResult::failure(
+            {"model bone '" + bone_name + "' references unknown parent '" + current + "'"});
+      }
+      if (!current_iter->second.parent.has_value()) {
+        break;
+      }
+      current = current_iter->second.parent.value();
+    }
   }
 
   const io::DataValue* textures = root.get("textures");
@@ -1344,9 +1474,9 @@ AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text) {
       return AuthoredModelDefinitionResult::failure(
           {"model box bone must be a string"});
     }
-    const io::DataValue* pivot_json = box_json.get("pivot");
-    if (pivot_json == nullptr) {
-      return AuthoredModelDefinitionResult::failure({"model box is missing pivot"});
+    if (box_json.get("pivot") != nullptr) {
+      return AuthoredModelDefinitionResult::failure(
+          {"model box contains removed pivot field; cube pivots use origin and bone pivots live in bones"});
     }
 
     const io::DataValue* min_json = box_json.get("min");
@@ -1360,21 +1490,30 @@ AuthoredModelDefinitionResult parse_authored_model_json(std::string_view text) {
 
     AuthoredModelBoxDefinition box;
     box.bone = std::string{bone->as_string_or({})};
-    auto pivot = read_vec3f(*pivot_json, "model box pivot");
+    if (definition.bones.find(box.bone) == definition.bones.end()) {
+      return AuthoredModelDefinitionResult::failure(
+          {"model box references unknown bone '" + box.bone + "'"});
+    }
     auto min = read_vec3f(*min_json, "model box min");
     auto max = read_vec3f(*max_json, "model box max");
-    if (!pivot) {
-      return AuthoredModelDefinitionResult::failure(pivot.error());
-    }
     if (!min) {
       return AuthoredModelDefinitionResult::failure(min.error());
     }
     if (!max) {
       return AuthoredModelDefinitionResult::failure(max.error());
     }
-    box.pivot = pivot.value();
     box.min = min.value();
     box.max = max.value();
+    auto origin = read_optional_vec3f(box_json, "origin", "model box origin");
+    if (!origin) {
+      return AuthoredModelDefinitionResult::failure(origin.error());
+    }
+    auto rotation = read_optional_vec3f(box_json, "rotation", "model box rotation");
+    if (!rotation) {
+      return AuthoredModelDefinitionResult::failure(rotation.error());
+    }
+    box.origin = origin.value();
+    box.rotation = rotation.value();
     if (const io::DataValue* inflate = box_json.get("inflate"); inflate != nullptr) {
       if (!io::is_number_value(*inflate)) {
         return AuthoredModelDefinitionResult::failure({"model box inflate must be numeric"});
@@ -1418,6 +1557,13 @@ BlockModelDefinitionResult parse_block_model_json(
   }
 
   BlockModelDefinition definition = std::move(authored_model.value());
+  for (const auto& [bone_name, bone] : definition.bones) {
+    (void)bone_name;
+    if (has_nonzero_rotation(bone.rotation)) {
+      return BlockModelDefinitionResult::failure(
+          {"block model bone rotation is not supported"});
+    }
+  }
   for (std::string& texture : definition.texture_assets) {
     auto resolved_texture = resolve_block_model_texture(texture, texture_inputs);
     if (!resolved_texture) {

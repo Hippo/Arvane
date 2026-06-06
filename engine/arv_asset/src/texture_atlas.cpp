@@ -156,7 +156,8 @@ void copy_with_edge_padding(
     voxel::BlockFace face,
     const TextureAtlasEntry& entry,
     Vec4i logical_uv,
-    Vec2i texture_size) {
+    Vec2i texture_size,
+    f32 rotation) {
   const f32 logical_width = static_cast<f32>(std::max(texture_size.x, 1));
   const f32 logical_height = static_cast<f32>(std::max(texture_size.y, 1));
   const auto atlas_u = [&](i32 logical_u) {
@@ -176,18 +177,26 @@ void copy_with_edge_padding(
   const i32 v0 = atlas_v(logical_uv.y);
   const i32 u1 = atlas_u(logical_uv.z);
   const i32 v1 = atlas_v(logical_uv.w);
+  std::array<Vec2i, 4> uvs{};
   switch (face) {
     case voxel::BlockFace::PositiveX:
     case voxel::BlockFace::NegativeX:
     case voxel::BlockFace::PositiveY:
     case voxel::BlockFace::PositiveZ:
-      return {{{u0, v1}, {u1, v1}, {u0, v0}, {u1, v0}}};
+      uvs = {{{u0, v1}, {u1, v1}, {u0, v0}, {u1, v0}}};
+      break;
     case voxel::BlockFace::NegativeY:
-      return {{{u1, v0}, {u0, v0}, {u1, v1}, {u0, v1}}};
+      uvs = {{{u1, v0}, {u0, v0}, {u1, v1}, {u0, v1}}};
+      break;
     case voxel::BlockFace::NegativeZ:
-      return {{{u1, v1}, {u0, v1}, {u1, v0}, {u0, v0}}};
+      uvs = {{{u1, v1}, {u0, v1}, {u1, v0}, {u0, v0}}};
+      break;
   }
-  return {{{u0, v1}, {u1, v1}, {u0, v0}, {u1, v0}}};
+  const i32 turns = static_cast<i32>(std::lround(rotation / 90.0F)) % 4;
+  for (i32 turn = 0; turn < (turns + 4) % 4; ++turn) {
+    uvs = std::array<Vec2i, 4>{{uvs[2], uvs[0], uvs[3], uvs[1]}};
+  }
+  return uvs;
 }
 
 [[nodiscard]] Vec3i model_coord_to_render_coord(Vec3f value) noexcept {
@@ -457,7 +466,8 @@ BlockModelRenderBoxesResult build_block_model_render_boxes(
           face,
           *entry,
           face_definition.uv,
-          model.texture_sizes[texture_index]);
+          model.texture_sizes[texture_index],
+          face_definition.rotation);
       render_box.faces[face_slot] = face_data;
     }
     render_boxes.push_back(std::move(render_box));

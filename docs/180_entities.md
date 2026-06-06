@@ -507,18 +507,19 @@ Entity models contain:
 
 - `textures`: model texture list
 - `texture_sizes`: authored UV-space dimensions
+- `bones`: authored group names with optional parent, pivot, and rotation data
 - `boxes`: cuboids with per-face texture indices and authored UV rectangles
 - `boxes[].bone`: authored group name used by animation keyframes
-- `boxes[].pivot`: rotation origin for that authored group
+- `boxes[].origin` and `boxes[].rotation`: optional per-cube pivot and rotation
+- face `rotation`: optional per-face UV rotation
 
-`boxes[].bone == ""` means root or static geometry. Non-empty `bone` values are
-names that animation keyframes can target. This is model-side binding metadata,
-not a model-owned hierarchy.
+Every box must reference a declared bone. Bone names are the targets animation
+keyframes can reference.
 
-Box coordinates and pivots are authored in sixteenths of a block. Runtime
-rendering converts them to world units by dividing by 16. Animated transforms are
-evaluated on the client presentation side and never mutate authoritative entity
-simulation state.
+Box coordinates, bone pivots, and cube origins are authored in sixteenths of a
+block. Runtime rendering converts them to world units by dividing by 16.
+Animated transforms are evaluated on the client presentation side and never
+mutate authoritative entity simulation state.
 
 Animations are separate assets under:
 
