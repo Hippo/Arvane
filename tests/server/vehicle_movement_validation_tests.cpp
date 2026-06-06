@@ -217,6 +217,45 @@ TEST(VehicleMovementValidationTests, RejectsFinalAabbInsideSolid) {
   EXPECT_EQ(result.reason, arv::protocol::VehicleCorrectionReason::Collision);
 }
 
+TEST(VehicleMovementValidationTests, RejectsGroundRequiredVehicleClaimingUnsupportedGround) {
+  auto ground_required = authority();
+  ground_required.requires_ground = true;
+
+  auto context = controller_context();
+  context.has_ground_support = false;
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      vehicle_move(1, {0.0F, 4.0F, 0.0F}),
+      {},
+      context,
+      ground_required);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reason, arv::protocol::VehicleCorrectionReason::MissingGroundSupport);
+}
+
+TEST(VehicleMovementValidationTests, AcceptsAirborneGroundVehicleWithinGuardrails) {
+  auto ground_required = authority();
+  ground_required.requires_ground = true;
+
+  auto context = controller_context();
+  context.has_ground_support = false;
+
+  auto move = vehicle_move(2, {0.1F, 3.98F, 0.0F});
+  move.velocity = {2.0F, -0.4F, 0.0F};
+  move.flags = arv::protocol::VehicleMoveFlags::None;
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      accepted_at(1, {0.0F, 4.0F, 0.0F}),
+      context,
+      ground_required);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_EQ(result.accepted_state.flags, arv::protocol::VehicleMoveFlags::None);
+  EXPECT_EQ(result.accepted_state.velocity, (arv::Vec3f{2.0F, -0.4F, 0.0F}));
+}
+
 TEST(VehicleMovementValidationTests, RejectsMissingRequiredWaterSupport) {
   auto boat = authority();
   boat.requires_water = true;

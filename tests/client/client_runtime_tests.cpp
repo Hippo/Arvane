@@ -1024,6 +1024,59 @@ TEST(ClientRuntimeTests, GroundVehiclePredictionClampsAgainstWallAndMovesSeatAnc
   EXPECT_NEAR(client.player_position().z, last.position.z, 0.0001F);
 }
 
+TEST(ClientRuntimeTests, GroundVehiclePredictionFallsOffLedgeAndClearsGroundFlag) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_buggy_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+  spawn_and_mount_test_buggy(client, *server_transport, connection_id.value());
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  for (const arv::ChunkSectionCoord coord : {
+           arv::ChunkSectionCoord{{-1, 0, -1}},
+           arv::ChunkSectionCoord{{-1, 0, 0}},
+           arv::ChunkSectionCoord{{0, 0, -1}},
+           arv::ChunkSectionCoord{{0, 0, 0}},
+       }) {
+    (void)world.ensure_chunk(coord);
+  }
+  for (arv::i32 z = -2; z <= 2; ++z) {
+    for (arv::i32 x = -2; x <= 2; ++x) {
+      ASSERT_TRUE(world.set_block({{x, 0, z}}, stone));
+    }
+  }
+  const arv::world::WorldCollisionQuery query(world, block_registry, false);
+
+  for (arv::TickIndex tick = 3; tick < 95; ++tick) {
+    client.submit_input(arv::client::InputFrame{.move_forward = true});
+    client.fixed_tick(tick, &query);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundVehicleMove& last = moves.back();
+  EXPECT_LT(last.position.z, -3.6F);
+  EXPECT_LT(last.position.y, 0.95F);
+  EXPECT_LT(last.velocity.y, -0.1F);
+  EXPECT_FALSE(arv::protocol::has_vehicle_move_flag(
+      last.flags,
+      arv::protocol::VehicleMoveFlags::OnGround));
+  EXPECT_NEAR(client.player_position().x, last.position.x, 0.0001F);
+  EXPECT_NEAR(client.player_position().y, last.position.y + 0.8F, 0.0001F);
+  EXPECT_NEAR(client.player_position().z, last.position.z, 0.0001F);
+}
+
 TEST(ClientRuntimeTests, GroundVehiclePredictionAdvancesBetweenNetworkSends) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);

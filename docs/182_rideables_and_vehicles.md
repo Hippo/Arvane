@@ -145,7 +145,8 @@ The server:
 - validates speed, speed-up, non-impact braking, angular speed, and vertical speed
 - validates actual rotation delta from the last accepted state
 - rejects final AABB hulls that overlap solid terrain
-- validates required ground or water support
+- validates required ground support when a ground vehicle claims `OnGround`
+- validates required water support
 - writes accepted vehicle transform and velocity
 - updates passenger attachment transforms
 - sends `ClientboundVehicleCorrection` when rejecting a move
@@ -216,6 +217,8 @@ persisted in V1.
 - Movement is controller based.
 - Vehicle behavior is tuned per definition, not by a generic solver.
 - The built-in client shell is intentionally conservative.
+- Ground vehicles carry momentum over ledges and fall under simple gravity while
+  airborne; they regain `OnGround` only after support/collision resolution.
 - Surface-water V1 vehicles are water-bound; dry-land boat driving is rejected
   instead of simulated with land drag.
 - V1 passenger state is not saved across server restarts.

@@ -18,6 +18,9 @@
 namespace arv::client::detail {
 namespace {
 
+inline constexpr f32 VehicleGravityBlocksPerSecondSquared = 32.0F;
+inline constexpr f32 VehicleTerminalVelocityBlocksPerSecond = 55.0F;
+
 [[nodiscard]] bool command_chat_shortcut_requested(const InputFrame& input) noexcept {
   return !input.text_input.empty() && input.text_input.front() == '/';
 }
@@ -102,6 +105,7 @@ struct VehicleMovementProfile {
   f32 turn_rate{1.5F};
   f32 drag{0.9F};
   f32 lateral_grip{1.0F};
+  f32 gravity_scale{1.0F};
   f32 step_height{};
   Vec3f collision_size{1.0F, 1.0F, 1.0F};
   protocol::VehicleMoveFlags base_flags{protocol::VehicleMoveFlags::OnGround};
@@ -130,6 +134,7 @@ struct VehicleMovementProfile {
       profile.brake_force = std::max(definition->living_mount.acceleration, 1.0F);
       profile.turn_rate = definition->living_mount.turn_rate;
       profile.drag = definition->living_mount.friction;
+      profile.gravity_scale = definition->living_mount.gravity_scale;
       profile.step_height = definition->living_mount.step_height;
       profile.base_flags = protocol::VehicleMoveFlags::OnGround;
       break;
@@ -151,6 +156,7 @@ struct VehicleMovementProfile {
       profile.turn_rate = definition->ground.turn_rate;
       profile.drag = definition->ground.drag;
       profile.lateral_grip = definition->ground.lateral_grip;
+      profile.gravity_scale = definition->ground.gravity_scale;
       profile.step_height = definition->ground.max_step_height;
       profile.base_flags = protocol::VehicleMoveFlags::OnGround;
       break;
@@ -163,6 +169,7 @@ struct VehicleMovementProfile {
   profile.turn_rate = std::max(profile.turn_rate, 0.0F);
   profile.drag = std::clamp(profile.drag, 0.0F, 1.0F);
   profile.lateral_grip = std::clamp(profile.lateral_grip, 0.0F, 1.0F);
+  profile.gravity_scale = std::max(profile.gravity_scale, 0.0F);
   profile.step_height = std::max(profile.step_height, 0.0F);
   profile.collision_size = {
       std::max(profile.collision_size.x, 0.01F),
@@ -194,6 +201,16 @@ struct VehicleMovementProfile {
   return {
       {position.x - half.x, position.y, position.z - half.z},
       {position.x + half.x, position.y + size.y, position.z + half.z}};
+}
+
+[[nodiscard]] bool vehicle_has_ground_support(
+    const physics::ICollisionQuery& collision_query,
+    Vec3f position,
+    Vec3f size) noexcept {
+  return physics::has_support_below(
+      collision_query,
+      vehicle_bounds(position, size),
+      std::max(physics::CollisionEpsilon * 2.0F, 0.05F));
 }
 
 [[nodiscard]] const entity::VehicleSeatDefinition* find_vehicle_seat(
@@ -341,6 +358,14 @@ void ClientInputRuntime::send_fixed_tick_input(
     const f32 previous_yaw = predicted_vehicle_yaw_;
     const bool ground_vehicle =
         profile.physics == entity::VehiclePhysicsKind::GroundVehicle;
+    bool vehicle_grounded =
+        protocol::has_vehicle_move_flag(profile.base_flags, protocol::VehicleMoveFlags::OnGround);
+    if (ground_vehicle && collision_query != nullptr) {
+      vehicle_grounded = vehicle_has_ground_support(
+          *collision_query,
+          predicted_vehicle_position_,
+          profile.collision_size);
+    }
     if (ground_vehicle) {
       const f32 speed_fraction =
           profile.max_forward_speed <= 0.0F
@@ -350,9 +375,10 @@ void ClientInputRuntime::send_fixed_tick_input(
                         profile.max_forward_speed,
                     0.0F,
                     1.0F);
+      const f32 traction = vehicle_grounded ? 1.0F : 0.1F;
       const f32 steering_response =
           std::abs(throttle) > 0.01F || speed_fraction > 0.05F
-              ? std::max(speed_fraction, 0.25F)
+              ? std::max(speed_fraction, 0.25F) * traction
               : 0.0F;
       predicted_vehicle_yaw_ = wrap_angle_radians(
           predicted_vehicle_yaw_ + steer * profile.turn_rate * steering_response * dt);
@@ -369,9 +395,10 @@ void ClientInputRuntime::send_fixed_tick_input(
     const Vec3f forward = horizontal_forward(predicted_vehicle_yaw_);
     const f32 current_speed = dot(predicted_vehicle_velocity_, forward);
     f32 next_speed = current_speed;
-    if (command.secondary_held) {
+    const bool has_ground_traction = !ground_vehicle || vehicle_grounded;
+    if (command.secondary_held && has_ground_traction) {
       next_speed = approach(current_speed, 0.0F, profile.brake_force * dt);
-    } else if (std::abs(throttle) > 0.01F) {
+    } else if (std::abs(throttle) > 0.01F && has_ground_traction) {
       const f32 accel =
           (current_speed * target_speed < 0.0F) ? profile.brake_force : profile.acceleration;
       next_speed = approach(current_speed, target_speed, accel * dt);
@@ -383,7 +410,19 @@ void ClientInputRuntime::send_fixed_tick_input(
         next_speed = 0.0F;
       }
     }
+    f32 next_vertical_speed = predicted_vehicle_velocity_.y;
+    if (ground_vehicle) {
+      if (vehicle_grounded) {
+        next_vertical_speed = std::max(next_vertical_speed, 0.0F);
+      } else {
+        next_vertical_speed = std::max(
+            next_vertical_speed -
+                VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt,
+            -VehicleTerminalVelocityBlocksPerSecond);
+      }
+    }
     predicted_vehicle_velocity_ = forward * next_speed;
+    predicted_vehicle_velocity_.y = next_vertical_speed;
     const Vec3f attempted_delta = predicted_vehicle_velocity_ * dt;
     if (collision_query != nullptr) {
       const Aabb3f bounds = vehicle_bounds(predicted_vehicle_position_, profile.collision_size);
@@ -399,6 +438,9 @@ void ClientInputRuntime::send_fixed_tick_input(
       }
       if (resolved.hit_z) {
         predicted_vehicle_velocity_.z = 0.0F;
+      }
+      if (ground_vehicle) {
+        vehicle_grounded = resolved.grounded;
       }
     } else {
       predicted_vehicle_position_ =
@@ -465,7 +507,13 @@ void ClientInputRuntime::send_fixed_tick_input(
     move.angular_velocity = {0.0F, yaw_delta / dt, 0.0F};
     move.throttle = throttle;
     move.steer = steer;
-    move.flags = profile.base_flags;
+    move.flags = protocol::VehicleMoveFlags::None;
+    if (profile.physics == entity::VehiclePhysicsKind::SurfaceWaterVehicle) {
+      move.flags |= protocol::VehicleMoveFlags::InWater;
+    } else if (!ground_vehicle ||
+               vehicle_grounded) {
+      move.flags |= protocol::VehicleMoveFlags::OnGround;
+    }
     if (command.jump_pressed) {
       move.flags |= protocol::VehicleMoveFlags::Jump;
     }

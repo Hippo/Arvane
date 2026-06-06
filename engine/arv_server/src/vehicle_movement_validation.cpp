@@ -109,7 +109,9 @@ VehicleMovementValidationResult validate_serverbound_vehicle_move(
   if (context.final_aabb_overlaps_solid) {
     return reject(previous, protocol::VehicleCorrectionReason::Collision);
   }
-  if (authority.requires_ground && !context.has_ground_support) {
+  if (authority.requires_ground &&
+      protocol::has_vehicle_move_flag(packet.flags, protocol::VehicleMoveFlags::OnGround) &&
+      !context.has_ground_support) {
     return reject(previous, protocol::VehicleCorrectionReason::MissingGroundSupport);
   }
   if (authority.requires_water &&
@@ -139,8 +141,8 @@ VehicleMovementValidationResult validate_serverbound_vehicle_move(
       return reject(previous, protocol::VehicleCorrectionReason::TooFast);
     }
 
-    const f32 previous_speed = length(previous.velocity);
-    const f32 current_speed = length(packet.velocity);
+    const f32 previous_speed = horizontal_length(previous.velocity);
+    const f32 current_speed = horizontal_length(packet.velocity);
     const f32 speed_delta = current_speed - previous_speed;
     const bool impact_stop =
         current_speed <= VehicleImpactStopSpeedEpsilonBlocksPerSecond &&
