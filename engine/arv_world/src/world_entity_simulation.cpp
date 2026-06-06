@@ -15,6 +15,7 @@ namespace {
 inline constexpr f32 AirborneIntentBlend = 0.10F;
 inline constexpr f32 VehicleStopSpeedBlocksPerSecond = 0.04F;
 inline constexpr f32 VehicleStopAngularRadiansPerSecond = 0.01F;
+inline constexpr f32 VehicleAnimationSpeedEpsilonBlocksPerSecond = 0.05F;
 
 [[nodiscard]] Aabb3f entity_body_bounds(Vec3f position, Vec3f box) noexcept {
   const Vec3f size{
@@ -155,6 +156,59 @@ struct DroppedItemLiquidProbe {
       return definition->ground.gravity_scale;
   }
   return 1.0F;
+}
+
+[[nodiscard]] std::string_view ground_vehicle_motion_animation_name(
+    Quatf rotation,
+    Vec3f velocity) noexcept {
+  const Vec3f visual_forward =
+      rotate_vector(normalize_quat(rotation), {0.0F, 0.0F, -1.0F});
+  const f32 signed_speed = dot(velocity, visual_forward);
+  if (signed_speed > VehicleAnimationSpeedEpsilonBlocksPerSecond) {
+    return "driving";
+  }
+  if (signed_speed < -VehicleAnimationSpeedEpsilonBlocksPerSecond) {
+    return "reverse";
+  }
+  return {};
+}
+
+void set_single_entity_animation(
+    entt::registry& registry,
+    entt::entity handle,
+    std::string_view animation_name) {
+  entity::EntityAnimationState* animation =
+      registry.try_get<entity::EntityAnimationState>(handle);
+  if (animation_name.empty()) {
+    if (animation != nullptr) {
+      animation->active.clear();
+    }
+    return;
+  }
+
+  if (animation == nullptr) {
+    animation = &registry.emplace<entity::EntityAnimationState>(handle);
+  }
+  if (animation->active.size() == 1U && animation->active.front().name == animation_name) {
+    return;
+  }
+  animation->active.clear();
+  animation->active.push_back({std::string{animation_name}, 0.0F});
+}
+
+void update_unmounted_ground_vehicle_motion_animation(
+    entt::registry& registry,
+    entt::entity handle,
+    const entity::VehiclePhysicsComponent& physics,
+    Quatf rotation,
+    Vec3f velocity) {
+  if (physics.kind != entity::VehiclePhysicsKind::GroundVehicle) {
+    return;
+  }
+  set_single_entity_animation(
+      registry,
+      handle,
+      ground_vehicle_motion_animation_name(rotation, velocity));
 }
 
 [[nodiscard]] entity::EntityAnimationPlayback* find_player_locomotion_animation(
@@ -565,6 +619,12 @@ u32 WorldEntitySimulation::tick_entity_physics(
       }
       vehicle_physics->linear_velocity = velocity.linear;
       vehicle_physics->grounded = resolved.grounded;
+      update_unmounted_ground_vehicle_motion_animation(
+          registry,
+          handle,
+          *vehicle_physics,
+          transform.rotation,
+          velocity.linear);
       entities.update_chunk(handle);
       ++updated;
       continue;

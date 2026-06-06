@@ -20,6 +20,8 @@ namespace {
 
 inline constexpr f32 VehicleGravityBlocksPerSecondSquared = 32.0F;
 inline constexpr f32 VehicleTerminalVelocityBlocksPerSecond = 55.0F;
+inline constexpr f32 VehicleImpactProjectedStopSpeedBlocksPerSecond = 0.02F;
+inline constexpr u8 VehicleImpactMemoryTicks = 8U;
 
 [[nodiscard]] bool command_chat_shortcut_requested(const InputFrame& input) noexcept {
   return !input.text_input.empty() && input.text_input.front() == '/';
@@ -73,6 +75,12 @@ inline constexpr f32 VehicleTerminalVelocityBlocksPerSecond = 55.0F;
     return target;
   }
   return wrap_angle_radians(value + (delta < 0.0F ? -max_delta : max_delta));
+}
+
+[[nodiscard]] bool has_horizontal_vector(
+    Vec3f value,
+    f32 epsilon = 1.0e-5F) noexcept {
+  return horizontal_length_squared(value) > epsilon * epsilon;
 }
 
 [[nodiscard]] f32 yaw_from_rotation(Quatf rotation) noexcept {
@@ -213,6 +221,49 @@ struct VehicleMovementProfile {
       std::max(physics::CollisionEpsilon * 2.0F, 0.05F));
 }
 
+[[nodiscard]] Vec3f vehicle_horizontal_impact_normal_from_delta(Vec3f delta) noexcept {
+  Vec3f normal{};
+  if (std::abs(delta.x) > physics::CollisionEpsilon) {
+    normal.x = delta.x > 0.0F ? -1.0F : 1.0F;
+  }
+  if (std::abs(delta.z) > physics::CollisionEpsilon) {
+    normal.z = delta.z > 0.0F ? -1.0F : 1.0F;
+  }
+  return normal;
+}
+
+[[nodiscard]] Vec3f vehicle_horizontal_impact_normal(
+    const physics::MovementResolution& resolved,
+    Vec3f attempted_delta) noexcept {
+  Vec3f impact_delta{};
+  if (resolved.hit_x) {
+    impact_delta.x = attempted_delta.x;
+  }
+  if (resolved.hit_z) {
+    impact_delta.z = attempted_delta.z;
+  }
+  return vehicle_horizontal_impact_normal_from_delta(impact_delta);
+}
+
+[[nodiscard]] Vec3f project_velocity_out_of_impact(
+    Vec3f velocity,
+    Vec3f impact_normal) noexcept {
+  if (!has_horizontal_vector(impact_normal)) {
+    return velocity;
+  }
+  if (impact_normal.x != 0.0F && velocity.x * impact_normal.x < 0.0F) {
+    velocity.x = 0.0F;
+  }
+  if (impact_normal.z != 0.0F && velocity.z * impact_normal.z < 0.0F) {
+    velocity.z = 0.0F;
+  }
+  if (horizontal_length(velocity) < VehicleImpactProjectedStopSpeedBlocksPerSecond) {
+    velocity.x = 0.0F;
+    velocity.z = 0.0F;
+  }
+  return velocity;
+}
+
 [[nodiscard]] const entity::VehicleSeatDefinition* find_vehicle_seat(
     const entity::VehicleDefinition* definition,
     std::string_view seat_id) noexcept {
@@ -309,21 +360,26 @@ void ClientInputRuntime::send_fixed_tick_input(
         dismount_request_sent_ = true;
       }
       predicted_vehicle_id_.reset();
+      clear_vehicle_impact_memory();
       return;
     }
     dismount_request_sent_ = false;
     if (!player_controller.mounted_controls_vehicle()) {
       predicted_vehicle_id_.reset();
+      clear_vehicle_impact_memory();
       return;
     }
     const EntityNetID vehicle_id = player_controller.mounted_vehicle_id().value();
     const ReplicatedEntityMirror* mirror = entities.find(vehicle_id);
     if (mirror == nullptr) {
       predicted_vehicle_id_.reset();
+      clear_vehicle_impact_memory();
       return;
     }
     const entity::VehicleDefinition* definition =
         vehicle_registry == nullptr ? nullptr : vehicle_registry->find(mirror->entity_type_name);
+    const entity::VehicleSeatDefinition* seat =
+        find_vehicle_seat(definition, player_controller.mounted_seat_id());
     const VehicleMovementProfile profile =
         vehicle_movement_profile(*mirror, vehicle_registry, command);
     if (should_reset_vehicle_prediction(
@@ -339,6 +395,7 @@ void ClientInputRuntime::send_fixed_tick_input(
       predicted_vehicle_yaw_ = vehicle_gameplay_yaw_from_rotation(mirror->rotation);
       predicted_vehicle_animation_name_.clear();
       predicted_vehicle_animation_time_ = 0.0;
+      clear_vehicle_impact_memory();
     }
 
     movement_send_accumulator_seconds_ += tick_seconds;
@@ -358,6 +415,9 @@ void ClientInputRuntime::send_fixed_tick_input(
     const f32 previous_yaw = predicted_vehicle_yaw_;
     const bool ground_vehicle =
         profile.physics == entity::VehiclePhysicsKind::GroundVehicle;
+    if (!ground_vehicle) {
+      clear_vehicle_impact_memory();
+    }
     bool vehicle_grounded =
         protocol::has_vehicle_move_flag(profile.base_flags, protocol::VehicleMoveFlags::OnGround);
     if (ground_vehicle && collision_query != nullptr) {
@@ -421,11 +481,20 @@ void ClientInputRuntime::send_fixed_tick_input(
             -VehicleTerminalVelocityBlocksPerSecond);
       }
     }
-    predicted_vehicle_velocity_ = forward * next_speed;
+    Vec3f next_horizontal_velocity = forward * next_speed;
+    if (ground_vehicle && predicted_vehicle_impact_ticks_ > 0U) {
+      next_horizontal_velocity = project_velocity_out_of_impact(
+          next_horizontal_velocity,
+          predicted_vehicle_impact_normal_);
+    }
+    predicted_vehicle_velocity_ = next_horizontal_velocity;
     predicted_vehicle_velocity_.y = next_vertical_speed;
     const Vec3f attempted_delta = predicted_vehicle_velocity_ * dt;
+    const Quatf next_vehicle_rotation =
+        vehicle_render_rotation_from_gameplay_yaw(predicted_vehicle_yaw_);
     if (collision_query != nullptr) {
-      const Aabb3f bounds = vehicle_bounds(predicted_vehicle_position_, profile.collision_size);
+      const Aabb3f bounds =
+          vehicle_bounds(predicted_vehicle_position_, profile.collision_size);
       const physics::MovementResolution resolved =
           physics::resolve_movement(*collision_query, bounds, attempted_delta);
       predicted_vehicle_position_ =
@@ -441,13 +510,28 @@ void ClientInputRuntime::send_fixed_tick_input(
       }
       if (ground_vehicle) {
         vehicle_grounded = resolved.grounded;
+        const Vec3f impact_normal =
+            vehicle_horizontal_impact_normal(resolved, attempted_delta);
+        if (has_horizontal_vector(impact_normal)) {
+          remember_vehicle_impact(impact_normal);
+        } else if (predicted_vehicle_impact_ticks_ > 0U) {
+          --predicted_vehicle_impact_ticks_;
+          if (predicted_vehicle_impact_ticks_ == 0U) {
+            predicted_vehicle_impact_normal_ = {};
+          }
+        }
       }
     } else {
       predicted_vehicle_position_ =
           predicted_vehicle_position_ + attempted_delta;
+      if (predicted_vehicle_impact_ticks_ > 0U) {
+        --predicted_vehicle_impact_ticks_;
+        if (predicted_vehicle_impact_ticks_ == 0U) {
+          predicted_vehicle_impact_normal_ = {};
+        }
+      }
     }
-    predicted_vehicle_rotation_ =
-        vehicle_render_rotation_from_gameplay_yaw(predicted_vehicle_yaw_);
+    predicted_vehicle_rotation_ = next_vehicle_rotation;
     const f32 yaw_delta = wrap_angle_radians(predicted_vehicle_yaw_ - previous_yaw);
 
     const std::string_view animation_name =
@@ -475,8 +559,6 @@ void ClientInputRuntime::send_fixed_tick_input(
           1U};
     }
 
-    const entity::VehicleSeatDefinition* seat =
-        find_vehicle_seat(definition, player_controller.mounted_seat_id());
     player_controller.apply_mounted_vehicle_transform(
         vehicle_id,
         predicted_vehicle_position_,
@@ -527,6 +609,7 @@ void ClientInputRuntime::send_fixed_tick_input(
     return;
   }
   predicted_vehicle_id_.reset();
+  clear_vehicle_impact_memory();
   dismount_request_sent_ = false;
   player_controller.update_local_movement(command, collision_query, tick_seconds);
 
@@ -555,8 +638,31 @@ void ClientInputRuntime::set_movement_send_rate(f32 send_rate_hz) noexcept {
   movement_send_rate_hz_ = std::max(send_rate_hz, 1.0F);
 }
 
+void ClientInputRuntime::remember_vehicle_impact(Vec3f impact_normal) noexcept {
+  if (!has_horizontal_vector(impact_normal)) {
+    return;
+  }
+  if (predicted_vehicle_impact_ticks_ == 0U ||
+      !has_horizontal_vector(predicted_vehicle_impact_normal_)) {
+    predicted_vehicle_impact_normal_ = {};
+  }
+  if (impact_normal.x != 0.0F) {
+    predicted_vehicle_impact_normal_.x = impact_normal.x;
+  }
+  if (impact_normal.z != 0.0F) {
+    predicted_vehicle_impact_normal_.z = impact_normal.z;
+  }
+  predicted_vehicle_impact_ticks_ = VehicleImpactMemoryTicks;
+}
+
+void ClientInputRuntime::clear_vehicle_impact_memory() noexcept {
+  predicted_vehicle_impact_normal_ = {};
+  predicted_vehicle_impact_ticks_ = 0U;
+}
+
 void ClientInputRuntime::apply_vehicle_correction(
     const protocol::ClientboundVehicleCorrection& correction) noexcept {
+  const Vec3f correction_delta = predicted_vehicle_position_ - correction.position;
   predicted_vehicle_id_ = correction.vehicle_id;
   predicted_vehicle_position_ = correction.position;
   predicted_vehicle_velocity_ = correction.velocity;
@@ -564,6 +670,10 @@ void ClientInputRuntime::apply_vehicle_correction(
   predicted_vehicle_yaw_ = vehicle_gameplay_yaw_from_rotation(correction.rotation);
   predicted_vehicle_animation_name_.clear();
   predicted_vehicle_animation_time_ = 0.0;
+  clear_vehicle_impact_memory();
+  if (correction.reason == protocol::VehicleCorrectionReason::Collision) {
+    remember_vehicle_impact(vehicle_horizontal_impact_normal_from_delta(correction_delta));
+  }
   movement_send_accumulator_seconds_ = 0.0;
 }
 
@@ -573,6 +683,7 @@ void ClientInputRuntime::clear_vehicle_prediction() noexcept {
   predicted_vehicle_velocity_ = {};
   predicted_vehicle_rotation_ = {};
   predicted_vehicle_yaw_ = 0.0F;
+  clear_vehicle_impact_memory();
   predicted_vehicle_animation_name_.clear();
   predicted_vehicle_animation_time_ = 0.0;
 }

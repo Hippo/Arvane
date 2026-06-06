@@ -174,6 +174,79 @@ TEST(VehicleMovementValidationTests, AcceptsImpactStopWithoutCorrectionStorm) {
   EXPECT_EQ(result.accepted_state.velocity, (arv::Vec3f{}));
 }
 
+TEST(VehicleMovementValidationTests, AcceptsImpactSlideWithoutCorrectionStorm) {
+  auto move = vehicle_move(2, {0.35F, 4.0F, -0.1F});
+  move.velocity = {8.0F, 0.0F, 0.0F};
+
+  auto previous = accepted_at(1, {0.0F, 4.0F, 0.0F});
+  previous.velocity = {8.0F, 0.0F, -8.0F};
+  auto context = controller_context();
+  context.previous_velocity_sweep_hit_solid = true;
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      previous,
+      context,
+      authority());
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_EQ(result.accepted_state.velocity, move.velocity);
+}
+
+TEST(VehicleMovementValidationTests, CollisionCorrectionStopsAtLastSafeState) {
+  auto context = controller_context();
+  context.final_aabb_overlaps_solid = true;
+
+  auto previous = accepted_at(4, {1.0F, 4.0F, 0.0F});
+  previous.velocity = {8.0F, 0.0F, 0.0F};
+  previous.angular_velocity = {0.0F, 1.0F, 0.0F};
+
+  auto move = vehicle_move(5, {1.4F, 4.0F, 0.0F});
+  move.velocity = {8.0F, 0.0F, 0.0F};
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      previous,
+      context,
+      authority());
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reason, arv::protocol::VehicleCorrectionReason::Collision);
+  EXPECT_EQ(result.accepted_state.position, previous.position);
+  EXPECT_EQ(result.accepted_state.velocity, (arv::Vec3f{}));
+  EXPECT_EQ(result.accepted_state.angular_velocity, (arv::Vec3f{}));
+}
+
+TEST(VehicleMovementValidationTests, CollisionCorrectionCanUseResolvedSafeState) {
+  auto context = controller_context();
+  context.final_aabb_overlaps_solid = true;
+  context.has_collision_resolved_state = true;
+  context.collision_resolved_state =
+      accepted_at(5, {1.0F, 4.0F, -0.4F}, context.receive_time_seconds);
+  context.collision_resolved_state.velocity = {2.0F, 0.0F, 0.0F};
+  context.collision_resolved_state.angular_velocity = {0.0F, 0.25F, 0.0F};
+
+  auto previous = accepted_at(4, {1.0F, 4.0F, 0.0F});
+  previous.velocity = {2.0F, 0.0F, -8.0F};
+
+  auto move = vehicle_move(5, {1.0F, 4.0F, -0.6F});
+  move.velocity = {2.0F, 0.0F, -8.0F};
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      previous,
+      context,
+      authority());
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reason, arv::protocol::VehicleCorrectionReason::Collision);
+  EXPECT_EQ(result.accepted_state.position, context.collision_resolved_state.position);
+  EXPECT_EQ(result.accepted_state.velocity, context.collision_resolved_state.velocity);
+  EXPECT_EQ(
+      result.accepted_state.angular_velocity,
+      context.collision_resolved_state.angular_velocity);
+}
+
 TEST(VehicleMovementValidationTests, RejectsExcessiveAngularVelocity) {
   auto move = vehicle_move(1, {0.0F, 4.0F, 0.0F});
   move.angular_velocity = {0.0F, 12.0F, 0.0F};

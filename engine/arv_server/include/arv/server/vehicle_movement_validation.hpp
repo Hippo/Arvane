@@ -25,6 +25,9 @@ struct VehicleMovementValidationContext {
   bool passenger_is_mounted{};
   bool passenger_controls_vehicle{};
   bool final_aabb_overlaps_solid{};
+  bool previous_velocity_sweep_hit_solid{};
+  bool has_collision_resolved_state{};
+  AcceptedVehicleMovementState collision_resolved_state{};
   bool has_ground_support{true};
   u32 water_support_samples{};
 };

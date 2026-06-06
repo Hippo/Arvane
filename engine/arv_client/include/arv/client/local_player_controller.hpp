@@ -103,6 +103,10 @@ public:
     return resolved_permissions_;
   }
 
+  [[nodiscard]] const player::PlayerTuning& player_tuning() const noexcept {
+    return tuning_;
+  }
+
   [[nodiscard]] const Vec3f& player_position() const noexcept {
     return body_position_;
   }

@@ -29,6 +29,10 @@
 namespace arv::server::detail {
 namespace {
 
+inline constexpr f32 VehicleCollisionStopSpeedEpsilonBlocksPerSecond = 0.02F;
+inline constexpr f32 MinVehicleValidationDtSeconds = 1.0F / 60.0F;
+inline constexpr f32 MaxVehicleValidationDtSeconds = 0.25F;
+
 void configure_skin_transfer_state(
     SkinTransferSessionState& state,
     const io::SkinConfig& skins) {
@@ -269,6 +273,65 @@ void clear_active_skin_upload(
       {position.x + half.x, position.y + size.y, position.z + half.z}};
 }
 
+[[nodiscard]] f32 vehicle_validation_elapsed_seconds(
+    const protocol::ServerboundVehicleMove& move,
+    const AcceptedVehicleMovementState& previous,
+    double receive_time_seconds) noexcept {
+  if (previous.has_accepted_move) {
+    const double raw_elapsed = receive_time_seconds - previous.last_receive_time_seconds;
+    if (std::isfinite(raw_elapsed) && raw_elapsed > 0.0) {
+      return std::clamp(
+          static_cast<f32>(raw_elapsed),
+          MinVehicleValidationDtSeconds,
+          MaxVehicleValidationDtSeconds);
+    }
+  }
+  return std::clamp(
+      move.dt_seconds,
+      MinVehicleValidationDtSeconds,
+      MaxVehicleValidationDtSeconds);
+}
+
+[[nodiscard]] Vec3f collision_adjusted_vehicle_velocity(
+    Vec3f velocity,
+    const physics::MovementResolution& resolved) noexcept {
+  if (resolved.hit_x) {
+    velocity.x = 0.0F;
+  }
+  if (resolved.hit_y) {
+    velocity.y = 0.0F;
+  }
+  if (resolved.hit_z) {
+    velocity.z = 0.0F;
+  }
+  if (length(velocity) < VehicleCollisionStopSpeedEpsilonBlocksPerSecond) {
+    return {};
+  }
+  return velocity;
+}
+
+[[nodiscard]] AcceptedVehicleMovementState collision_resolved_vehicle_state(
+    const protocol::ServerboundVehicleMove& move,
+    const AcceptedVehicleMovementState& previous,
+    const physics::MovementResolution& resolved,
+    TickIndex tick_index,
+    double receive_time_seconds) noexcept {
+  AcceptedVehicleMovementState state = previous;
+  state.position = previous.position + resolved.applied_delta;
+  state.velocity = collision_adjusted_vehicle_velocity(move.velocity, resolved);
+  state.rotation = normalize_quat(move.rotation);
+  state.angular_velocity =
+      length(state.velocity) < VehicleCollisionStopSpeedEpsilonBlocksPerSecond
+          ? Vec3f{}
+          : move.angular_velocity;
+  state.flags = move.flags;
+  state.last_sequence = move.sequence;
+  state.last_server_tick = tick_index;
+  state.last_receive_time_seconds = receive_time_seconds;
+  state.has_accepted_move = true;
+  return state;
+}
+
 [[nodiscard]] u32 vehicle_water_support_samples(
     const world::WorldRuntime& world,
     const voxel::BlockRegistry& block_registry,
@@ -323,10 +386,8 @@ void update_vehicle_motion_animation(
     EntityID vehicle_entity,
     const entity::VehicleDefinition& definition,
     const AcceptedVehicleMovementState& accepted) {
-      const auto anim = std::string{vehicle_motion_animation_name(definition, accepted)};
-  (void)world.set_entity_animation(
-      vehicle_entity,
-      anim);
+  const auto anim = std::string{vehicle_motion_animation_name(definition, accepted)};
+  (void)world.set_entity_animation(vehicle_entity, anim);
 }
 
 [[nodiscard]] VehicleMovementValidationContext make_vehicle_validation_context(
@@ -354,11 +415,54 @@ void update_vehicle_motion_animation(
     return context;
   }
 
-  (void)previous;
   world::WorldCollisionQuery query(world, block_registry, true);
   const Aabb3f end = vehicle_bounds(move.position, collision->box);
   context.final_aabb_overlaps_solid =
       physics::overlaps_solid_blocks(query, end, physics::CollisionEpsilon);
+
+  std::optional<Aabb3f> collision_safe_start;
+  if (previous.has_accepted_move) {
+    const Aabb3f start = vehicle_bounds(previous.position, collision->box);
+    if (!physics::overlaps_solid_blocks(query, start, physics::CollisionEpsilon)) {
+      const f32 elapsed =
+          vehicle_validation_elapsed_seconds(move, previous, context.receive_time_seconds);
+      const physics::MovementResolution previous_velocity_sweep =
+          physics::resolve_movement(
+              query,
+              start,
+              previous.velocity * elapsed,
+              physics::CollisionEpsilon);
+      context.previous_velocity_sweep_hit_solid =
+          previous_velocity_sweep.hit_x ||
+          previous_velocity_sweep.hit_y ||
+          previous_velocity_sweep.hit_z;
+      collision_safe_start = start;
+    }
+  }
+
+  if (context.final_aabb_overlaps_solid && collision_safe_start.has_value()) {
+    const physics::MovementResolution resolved =
+        physics::resolve_movement(
+            query,
+            collision_safe_start.value(),
+            move.position - previous.position);
+    const AcceptedVehicleMovementState resolved_state =
+        collision_resolved_vehicle_state(
+            move,
+            previous,
+            resolved,
+            tick_index,
+            context.receive_time_seconds);
+    const Aabb3f resolved_end =
+        vehicle_bounds(resolved_state.position, collision->box);
+    if (!physics::overlaps_solid_blocks(
+            query,
+            resolved_end,
+            physics::CollisionEpsilon)) {
+      context.has_collision_resolved_state = true;
+      context.collision_resolved_state = resolved_state;
+    }
+  }
   context.has_ground_support =
       physics::has_support_below(
           query,
@@ -1468,6 +1572,57 @@ void ServerRuntimeImpl::handle_vehicle_move(
           context,
           definition->authority);
   if (!validation.accepted) {
+    if (validation.reason == protocol::VehicleCorrectionReason::Collision) {
+      previous = validation.accepted_state;
+      (void)default_world_.set_entity_transform(
+          vehicle_entity.value(),
+          previous.position,
+          previous.rotation);
+      if (entity::EntityVelocity* velocity =
+              default_world_.find_entity_velocity(vehicle_entity.value());
+          velocity != nullptr) {
+        velocity->linear = previous.velocity;
+      }
+      if (entity::VehiclePhysicsComponent* physics =
+              default_world_.find_entity_vehicle_physics(vehicle_entity.value());
+          physics != nullptr) {
+        physics->linear_velocity = previous.velocity;
+        physics->angular_velocity = previous.angular_velocity;
+        physics->grounded =
+            protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::OnGround);
+        physics->in_water =
+            protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::InWater);
+      }
+      update_vehicle_motion_animation(
+          default_world_,
+          vehicle_entity.value(),
+          *definition,
+          previous);
+      (void)default_world_.update_passenger_attachment_transforms();
+      if (const entity::RideableComponent* rideable =
+              default_world_.find_entity_rideable(vehicle_entity.value());
+          rideable != nullptr) {
+        for (const entity::Seat& seat : rideable->seats) {
+          if (seat.occupant.value == 0U) {
+            continue;
+          }
+          const std::optional<PlayerID> player_id =
+              default_world_.player_for_entity(seat.occupant);
+          if (!player_id.has_value()) {
+            continue;
+          }
+          player::PlayerState* player_state =
+              default_world_.find_player(player_id.value());
+          const entity::EntityTransform* passenger_transform =
+              default_world_.find_entity_transform(seat.occupant);
+          if (player_state != nullptr && passenger_transform != nullptr) {
+            player_state->position = passenger_transform->position;
+            player_state->velocity = previous.velocity;
+          }
+        }
+      }
+      broadcast_vehicle_state(move.vehicle_id, previous);
+    }
     if (validation.should_send_correction) {
       send_vehicle_correction(
           *session,

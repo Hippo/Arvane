@@ -43,6 +43,9 @@ public:
   void clear_vehicle_prediction() noexcept;
 
 private:
+  void remember_vehicle_impact(Vec3f impact_normal) noexcept;
+  void clear_vehicle_impact_memory() noexcept;
+
   f32 movement_send_rate_hz_{protocol::DefaultClientMovementSendRateHz};
   Seconds movement_send_accumulator_seconds_{};
   u32 next_movement_sequence_{1};
@@ -55,6 +58,8 @@ private:
   Vec3f predicted_vehicle_velocity_{};
   Quatf predicted_vehicle_rotation_{};
   f32 predicted_vehicle_yaw_{};
+  Vec3f predicted_vehicle_impact_normal_{};
+  u8 predicted_vehicle_impact_ticks_{};
   std::string predicted_vehicle_animation_name_{};
   Seconds predicted_vehicle_animation_time_{};
 };
