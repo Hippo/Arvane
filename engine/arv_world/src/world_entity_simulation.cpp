@@ -1,7 +1,7 @@
 #include "world_runtime_internal.hpp"
 
-#include "arv/world/entity_goal_utils.hpp"
 #include "arv/world/entity_goal_registry.hpp"
+#include "arv/world/entity_goal_utils.hpp"
 #include "arv/world/world_queries.hpp"
 
 #include <algorithm>
@@ -13,6 +13,8 @@ namespace arv::world::detail {
 namespace {
 
 inline constexpr f32 AirborneIntentBlend = 0.10F;
+inline constexpr f32 VehicleStopSpeedBlocksPerSecond = 0.04F;
+inline constexpr f32 VehicleStopAngularRadiansPerSecond = 0.01F;
 
 [[nodiscard]] Aabb3f entity_body_bounds(Vec3f position, Vec3f box) noexcept {
   const Vec3f size{
@@ -100,6 +102,59 @@ struct DroppedItemLiquidProbe {
 [[nodiscard]] bool player_animation_is_attack(std::string_view animation_name) noexcept {
   return animation_name == "hit_left" ||
          animation_name == "hit_right";
+}
+
+[[nodiscard]] bool rideable_has_occupant(
+    const entity::RideableComponent* rideable) noexcept {
+  if (rideable == nullptr) {
+    return false;
+  }
+  if (rideable->controller.value != 0U) {
+    return true;
+  }
+  return std::any_of(
+      rideable->seats.begin(),
+      rideable->seats.end(),
+      [](const entity::Seat& seat) {
+        return seat.occupant.value != 0U;
+      });
+}
+
+[[nodiscard]] f32 vehicle_ground_drag(
+    const entity::VehiclePhysicsComponent& physics,
+    const entity::VehicleDefinition* definition) noexcept {
+  switch (physics.kind) {
+    case entity::VehiclePhysicsKind::LivingMount:
+      return definition == nullptr
+                 ? 0.82F
+                 : std::min(std::max(definition->living_mount.friction, 0.0F), 0.82F);
+    case entity::VehiclePhysicsKind::SurfaceWaterVehicle:
+      if (definition == nullptr) {
+        return physics.in_water ? 0.88F : 0.35F;
+      }
+      return physics.in_water ? definition->surface_water.water_drag
+                              : definition->surface_water.land_drag;
+    case entity::VehiclePhysicsKind::GroundVehicle:
+      return definition == nullptr ? 0.94F : definition->ground.drag;
+  }
+  return 0.9F;
+}
+
+[[nodiscard]] f32 vehicle_gravity_scale(
+    const entity::VehiclePhysicsComponent& physics,
+    const entity::VehicleDefinition* definition) noexcept {
+  if (definition == nullptr) {
+    return 1.0F;
+  }
+  switch (physics.kind) {
+    case entity::VehiclePhysicsKind::LivingMount:
+      return definition->living_mount.gravity_scale;
+    case entity::VehiclePhysicsKind::SurfaceWaterVehicle:
+      return physics.in_water ? 0.0F : 1.0F;
+    case entity::VehiclePhysicsKind::GroundVehicle:
+      return definition->ground.gravity_scale;
+  }
+  return 1.0F;
 }
 
 [[nodiscard]] entity::EntityAnimationPlayback* find_player_locomotion_animation(
@@ -374,6 +429,7 @@ u32 WorldEntitySimulation::tick_entity_physics(
     WorldEntityStore& entities,
     const voxel::BlockRegistry* block_registry,
     const EntityGoalRegistry* goal_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_registry,
     Seconds tick_seconds) {
   if (tick_seconds <= 0.0F) {
     return 0;
@@ -430,6 +486,89 @@ u32 WorldEntitySimulation::tick_entity_physics(
     auto& transform = view.get<entity::EntityTransform>(handle);
     auto& velocity = view.get<entity::EntityVelocity>(handle);
     const auto& collision = view.get<entity::EntityCollision>(handle);
+    entity::VehiclePhysicsComponent* vehicle_physics =
+        registry.try_get<entity::VehiclePhysicsComponent>(handle);
+    if (vehicle_physics != nullptr) {
+      const entity::RideableComponent* rideable =
+          registry.try_get<entity::RideableComponent>(handle);
+      if (rideable_has_occupant(rideable)) {
+        continue;
+      }
+
+      const entity::VehicleDefinition* definition =
+          vehicle_registry == nullptr
+              ? nullptr
+              : vehicle_registry->find(vehicle_physics->definition);
+      const Aabb3f bounds = entity_body_bounds(transform.position, collision.box);
+      const bool supported = physics::has_support_below(
+          collision_query,
+          bounds,
+          physics_config.collision_epsilon * 2.0F);
+      const bool grounded =
+          supported && velocity.linear.y <= physics_config.collision_epsilon;
+      vehicle_physics->grounded = grounded;
+      if (grounded) {
+        vehicle_physics->ground_contact_time += static_cast<f32>(tick_seconds);
+        vehicle_physics->air_time = 0.0F;
+        if (velocity.linear.y < 0.0F) {
+          velocity.linear.y = 0.0F;
+        }
+      } else {
+        vehicle_physics->air_time += static_cast<f32>(tick_seconds);
+        vehicle_physics->ground_contact_time = 0.0F;
+        velocity.linear.y = std::max(
+            velocity.linear.y -
+                physics_config.gravity_per_second *
+                    std::max(0.0F, vehicle_gravity_scale(*vehicle_physics, definition)) *
+                    static_cast<f32>(tick_seconds),
+            -physics_config.terminal_velocity);
+      }
+
+      const f32 authored_drag =
+          std::clamp(vehicle_ground_drag(*vehicle_physics, definition), 0.0F, 1.0F);
+      const f32 per_second_ticks =
+          static_cast<f32>(tick_seconds) * static_cast<f32>(DefaultBaseTps);
+      const f32 drag =
+          grounded ? authored_drag : std::max(authored_drag, 0.99F);
+      const f32 drag_factor = std::pow(drag, std::max(0.0F, per_second_ticks));
+      velocity.linear.x *= drag_factor;
+      velocity.linear.z *= drag_factor;
+      if (horizontal_length(velocity.linear) < VehicleStopSpeedBlocksPerSecond) {
+        velocity.linear.x = 0.0F;
+        velocity.linear.z = 0.0F;
+      }
+      vehicle_physics->angular_velocity =
+          vehicle_physics->angular_velocity * drag_factor;
+      if (length(vehicle_physics->angular_velocity) <
+          VehicleStopAngularRadiansPerSecond) {
+        vehicle_physics->angular_velocity = {};
+      }
+
+      const Vec3f movement_delta = velocity.linear * tick_seconds;
+      const physics::MovementResolution resolved = physics::resolve_movement(
+          collision_query,
+          bounds,
+          movement_delta,
+          physics_config.collision_epsilon);
+
+      transform.previous_position = transform.position;
+      transform.previous_rotation = transform.rotation;
+      transform.position = transform.position + resolved.applied_delta;
+      if (resolved.hit_x) {
+        velocity.linear.x = 0.0F;
+      }
+      if (resolved.hit_y) {
+        velocity.linear.y = 0.0F;
+      }
+      if (resolved.hit_z) {
+        velocity.linear.z = 0.0F;
+      }
+      vehicle_physics->linear_velocity = velocity.linear;
+      vehicle_physics->grounded = resolved.grounded;
+      entities.update_chunk(handle);
+      ++updated;
+      continue;
+    }
     entity::MovementIntent* intent = registry.try_get<entity::MovementIntent>(handle);
     const entity::EntityMovement* movement = registry.try_get<entity::EntityMovement>(handle);
 
@@ -568,7 +707,8 @@ u32 WorldEntitySimulation::tick_entities(
     WorldEntityStore& entities,
     WorldRegionRuntime& regions,
     const voxel::BlockRegistry* block_registry,
-    const EntityGoalRegistry* goal_registry) {
+    const EntityGoalRegistry* goal_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_registry) {
   entities.flush_despawns(regions);
   u32 updated = 0;
   const Seconds tick_seconds = tick_duration_seconds(DefaultBaseTps);
@@ -601,6 +741,7 @@ u32 WorldEntitySimulation::tick_entities(
       entities,
       block_registry,
       goal_registry,
+      vehicle_registry,
       tick_seconds);
   updated += tick_entity_animations(entities, tick_seconds);
 
@@ -723,14 +864,16 @@ namespace arv::world {
 
 u32 WorldRuntime::tick_entities(
     const voxel::BlockRegistry* block_registry,
-    const EntityGoalRegistry* goal_registry) {
+    const EntityGoalRegistry* goal_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_registry) {
   assert_owner_thread();
   return impl_->entity_simulation.tick_entities(
       *this,
       impl_->entities,
       impl_->regions,
       block_registry,
-      goal_registry);
+      goal_registry,
+      vehicle_registry);
 }
 
 u32 WorldRuntime::tick_dropped_items(

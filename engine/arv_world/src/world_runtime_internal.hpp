@@ -374,7 +374,8 @@ public:
       WorldEntityStore& entities,
       WorldRegionRuntime& regions,
       const voxel::BlockRegistry* block_registry,
-      const EntityGoalRegistry* goal_registry);
+      const EntityGoalRegistry* goal_registry,
+      const entity::VehicleDefinitionRegistry* vehicle_registry);
   [[nodiscard]] u32 tick_dropped_items(
       WorldRuntime& world,
       WorldEntityStore& entities,
@@ -392,6 +393,7 @@ private:
       WorldEntityStore& entities,
       const voxel::BlockRegistry* block_registry,
       const EntityGoalRegistry* goal_registry,
+      const entity::VehicleDefinitionRegistry* vehicle_registry,
       Seconds tick_seconds);
   [[nodiscard]] u32 tick_entity_animations(WorldEntityStore& entities, Seconds tick_seconds);
 };

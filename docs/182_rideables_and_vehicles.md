@@ -156,6 +156,9 @@ The server does not run full vehicle physics for every vehicle in V1.
 For the local driver, ordinary `ClientboundVehicleState` and entity snapshots do
 not rewind the controlled vehicle. They are observer/passenger replication for
 that vehicle. `ClientboundVehicleCorrection` is the explicit guardrail snap.
+When a vehicle has no mounted occupants, the server owns the remaining simple
+motion and damps stale velocity through the same AABB collision path so an
+unmounted buggy coasts briefly and settles instead of running forever.
 
 ---
 

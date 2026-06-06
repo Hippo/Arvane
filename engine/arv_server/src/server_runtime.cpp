@@ -731,7 +731,11 @@ void ServerRuntimeImpl::tick() {
         natural_spawns_,
         tick_index_);
   }
-  (void)default_world_.tick(*block_registry_, fluid_definition_, entity_goals_);
+  (void)default_world_.tick(
+      *block_registry_,
+      fluid_definition_,
+      entity_goals_,
+      vehicle_registry_);
   process_pending_entity_attacks();
   default_world_.flush_entity_despawns();
   broadcast_pending_ride_ended_events();

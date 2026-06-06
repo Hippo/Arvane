@@ -260,6 +260,21 @@ arv::EntityID create_networked_test_buggy(
   return server.voxel_world().create_entity(std::move(info));
 }
 
+void place_server_test_floor(
+    arv::world::WorldRuntime& world,
+    arv::voxel::BlockVariantID block,
+    arv::i32 min_x,
+    arv::i32 max_x,
+    arv::i32 min_z,
+    arv::i32 max_z) {
+  for (arv::i32 z = min_z; z <= max_z; ++z) {
+    for (arv::i32 x = min_x; x <= max_x; ++x) {
+      (void)world.ensure_chunk(arv::block_to_chunk({{x, 0, z}}));
+      ASSERT_TRUE(world.set_block({{x, 0, z}}, block));
+    }
+  }
+}
+
 arv::voxel::BlockRegistry make_timed_break_block_registry() {
   std::vector<arv::voxel::BlockDefinition> definitions;
   definitions.push_back(arv::voxel::make_air_definition());
@@ -748,6 +763,125 @@ TEST(PlayerInteractionTests, AcceptedBuggyVehicleMoveUpdatesDrivingAndReverseAni
   ASSERT_NE(animation, nullptr);
   EXPECT_NE(find_active_animation(*animation, "reverse"), nullptr);
   EXPECT_EQ(find_active_animation(*animation, "driving"), nullptr);
+}
+
+TEST(PlayerInteractionTests, UnmountedBuggyCoastsStopsAndCanRemountWithFreshSequence) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_buggy_request_vehicle_registry();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.0F, 1.0F, 0.0F};
+  player_state.velocity = {};
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(player_state.player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(server.voxel_world().set_entity_position(
+      player_entity.value(),
+      player_state.position));
+
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  place_server_test_floor(server.voxel_world(), stone, -4, 16, -4, 4);
+
+  constexpr arv::f32 VehicleFloorY = 1.01F;
+  const arv::EntityID buggy = create_networked_test_buggy(
+      server,
+      vehicle_registry,
+      {2.0F, VehicleFloorY, 0.0F});
+  const std::optional<arv::EntityNetID> buggy_net =
+      server.voxel_world().network_id_for_entity(buggy);
+  ASSERT_TRUE(buggy_net.has_value());
+
+  ASSERT_TRUE(client.request_ride_entity(buggy_net.value()));
+  server.tick();
+  ASSERT_EQ(
+      server.voxel_world().mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{buggy});
+
+  arv::protocol::ServerboundVehicleMove move;
+  move.vehicle_id = buggy_net.value();
+  move.sequence = 1U;
+  move.client_tick = server.tick_index();
+  move.dt_seconds = 1.0 / static_cast<arv::Seconds>(arv::DefaultBaseTps);
+  move.position = {2.01F, VehicleFloorY, 0.0F};
+  move.velocity = {0.2F, 0.0F, 0.0F};
+  move.rotation = {};
+  move.throttle = 1.0F;
+  move.flags = arv::protocol::VehicleMoveFlags::OnGround;
+  ASSERT_TRUE(client.send_vehicle_move(move));
+  server.tick();
+
+  const arv::entity::EntityTransform* transform =
+      server.voxel_world().find_entity_transform(buggy);
+  ASSERT_NE(transform, nullptr);
+  ASSERT_EQ(transform->position, move.position);
+  const arv::entity::EntityVelocity* accepted_velocity =
+      server.voxel_world().find_entity_velocity(buggy);
+  ASSERT_NE(accepted_velocity, nullptr);
+  ASSERT_EQ(accepted_velocity->linear, move.velocity);
+
+  ASSERT_TRUE(client.request_dismount());
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  ASSERT_FALSE(server.voxel_world().mounted_rideable(player_entity.value()).has_value());
+
+  transform = server.voxel_world().find_entity_transform(buggy);
+  ASSERT_NE(transform, nullptr);
+  const arv::f32 post_dismount_x = transform->position.x;
+
+  for (int tick = 0; tick < 160; ++tick) {
+    server.tick();
+  }
+
+  transform = server.voxel_world().find_entity_transform(buggy);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_GT(transform->position.x, post_dismount_x);
+  const arv::entity::EntityVelocity* velocity =
+      server.voxel_world().find_entity_velocity(buggy);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_NEAR(arv::horizontal_length(velocity->linear), 0.0F, 0.0001F);
+
+  ASSERT_TRUE(client.request_ride_entity(buggy_net.value()));
+  server.tick();
+  ASSERT_EQ(
+      server.voxel_world().mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{buggy});
+
+  transform = server.voxel_world().find_entity_transform(buggy);
+  ASSERT_NE(transform, nullptr);
+  const arv::Vec3f remounted_position = transform->position;
+  move.sequence = 1U;
+  move.client_tick = server.tick_index();
+  move.position = remounted_position + arv::Vec3f{0.01F, 0.0F, 0.0F};
+  move.velocity = {0.1F, 0.0F, 0.0F};
+  move.rotation = transform->rotation;
+  move.throttle = 0.1F;
+  move.steer = 0.0F;
+  ASSERT_TRUE(client.send_vehicle_move(move));
+  server.tick();
+
+  transform = server.voxel_world().find_entity_transform(buggy);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_EQ(transform->position, move.position);
 }
 
 TEST(PlayerInteractionTests, EntityAttackAppliesKnockbackOnDamage) {

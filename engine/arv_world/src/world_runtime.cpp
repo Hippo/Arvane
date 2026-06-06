@@ -146,7 +146,8 @@ void WorldRuntime::clear_generation_context() noexcept {
 WorldTickStats WorldRuntime::tick(
     const voxel::BlockRegistry& registry,
     const voxel::FluidDefinition& fluid_definition,
-    const EntityGoalRegistry* goal_registry) {
+    const EntityGoalRegistry* goal_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_registry) {
   assert_owner_thread();
   ARV_PROFILE_ZONE("Simulation tick");
   tick_world_clock(impl_->clock);
@@ -159,7 +160,8 @@ WorldTickStats WorldRuntime::tick(
           impl_->entities,
           impl_->regions,
           &registry,
-          goal_registry);
+          goal_registry,
+          vehicle_registry);
   stats.scheduled_ticks_processed =
       impl_->tick_queues.process_due_scheduled_ticks(impl_->tick_index);
 

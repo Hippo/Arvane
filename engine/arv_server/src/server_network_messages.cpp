@@ -25,6 +25,7 @@
 #include <string_view>
 #include <utility>
 
+
 namespace arv::server::detail {
 namespace {
 
@@ -322,9 +323,10 @@ void update_vehicle_motion_animation(
     EntityID vehicle_entity,
     const entity::VehicleDefinition& definition,
     const AcceptedVehicleMovementState& accepted) {
+      const auto anim = std::string{vehicle_motion_animation_name(definition, accepted)};
   (void)world.set_entity_animation(
       vehicle_entity,
-      std::string{vehicle_motion_animation_name(definition, accepted)});
+      anim);
 }
 
 [[nodiscard]] VehicleMovementValidationContext make_vehicle_validation_context(
@@ -1384,6 +1386,11 @@ void ServerRuntimeImpl::handle_dismount_request(
 
   if (!default_world_.dismount_entity(passenger_entity.value())) {
     return;
+  }
+  if (const std::optional<EntityNetID> rideable_net =
+          default_world_.network_id_for_entity(rideable_entity.value());
+      rideable_net.has_value()) {
+    accepted_vehicle_movement_.erase(rideable_net.value());
   }
   (void)default_world_.set_entity_position(passenger_entity.value(), dismount_position.value());
   player::PlayerState* player_state = default_world_.find_player(session->player_id);

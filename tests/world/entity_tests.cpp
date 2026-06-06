@@ -112,6 +112,21 @@ arv::EntityID create_test_rideable(
   return world.create_entity(std::move(info));
 }
 
+void place_test_floor(
+    arv::world::WorldRuntime& world,
+    arv::voxel::BlockVariantID block,
+    arv::i32 min_x,
+    arv::i32 max_x,
+    arv::i32 min_z,
+    arv::i32 max_z) {
+  for (arv::i32 z = min_z; z <= max_z; ++z) {
+    for (arv::i32 x = min_x; x <= max_x; ++x) {
+      (void)world.ensure_chunk(arv::block_to_chunk({{x, 0, z}}));
+      ASSERT_TRUE(world.set_block({{x, 0, z}}, block));
+    }
+  }
+}
+
 } // namespace
 
 TEST(WorldEntityTests, EntityLifecycleQueuesDespawnAndFlushes) {
@@ -210,6 +225,68 @@ TEST(WorldEntityTests, AuthoredVehicleComponentsRequireResolvedDefinition) {
 
   EXPECT_EQ(entity, (arv::EntityID{}));
   EXPECT_EQ(world.entity_count(), 0U);
+}
+
+TEST(WorldEntityTests, UnmountedVehiclePhysicsDampsServerOwnedMotion) {
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_test_vehicle_registry();
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  place_test_floor(world, stone, -4, 6, -4, 4);
+  const arv::EntityID rideable = create_test_rideable(world, vehicles);
+  arv::entity::EntityVelocity* velocity = world.find_entity_velocity(rideable);
+  ASSERT_NE(velocity, nullptr);
+  velocity->linear = {6.0F, 0.0F, 0.0F};
+  arv::entity::VehiclePhysicsComponent* vehicle_physics =
+      world.find_entity_vehicle_physics(rideable);
+  ASSERT_NE(vehicle_physics, nullptr);
+  vehicle_physics->angular_velocity = {0.0F, 1.0F, 0.0F};
+
+  for (int tick = 0; tick < 120; ++tick) {
+    (void)world.tick_entities(&block_registry, nullptr, &vehicles);
+  }
+
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(rideable);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_GT(transform->position.x, 0.5F);
+  velocity = world.find_entity_velocity(rideable);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_NEAR(arv::horizontal_length(velocity->linear), 0.0F, 0.0001F);
+  const arv::entity::VehiclePhysicsComponent* physics =
+      world.find_entity_vehicle_physics(rideable);
+  ASSERT_NE(physics, nullptr);
+  EXPECT_TRUE(physics->grounded);
+  EXPECT_NEAR(arv::horizontal_length(physics->linear_velocity), 0.0F, 0.0001F);
+  EXPECT_NEAR(arv::length(physics->angular_velocity), 0.0F, 0.0001F);
+}
+
+TEST(WorldEntityTests, MountedVehiclePhysicsDoesNotAdvanceControllerOwnedVehicle) {
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_test_vehicle_registry();
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  place_test_floor(world, stone, -4, 6, -4, 4);
+  const arv::EntityID rideable = create_test_rideable(world, vehicles);
+  const arv::EntityID passenger = world.create_entity();
+  ASSERT_TRUE(world.mount_entity(rideable, passenger, std::string_view{"driver"}));
+  arv::entity::EntityVelocity* velocity = world.find_entity_velocity(rideable);
+  ASSERT_NE(velocity, nullptr);
+  velocity->linear = {6.0F, 0.0F, 0.0F};
+
+  for (int tick = 0; tick < 20; ++tick) {
+    (void)world.tick_entities(&block_registry, nullptr, &vehicles);
+  }
+
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(rideable);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_EQ(transform->position, (arv::Vec3f{0.0F, 1.0F, 0.0F}));
+  velocity = world.find_entity_velocity(rideable);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_EQ(velocity->linear, (arv::Vec3f{6.0F, 0.0F, 0.0F}));
 }
 
 TEST(WorldEntityTests, RideableDespawnDismountsPassengersAndRecordsRideEndedEvent) {
