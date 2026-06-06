@@ -79,16 +79,14 @@ arv::entity::VehicleDefinitionRegistry make_test_vehicle_registry() {
       0.8F,
       1.0F,
       0.5F};
-  buggy.authority = {
-      14.0F,
-      12.0F,
-      20.0F,
-      120.0F,
-      20.0F,
-      0.6F,
-      true,
-      false,
-      0U};
+  buggy.authority.max_speed = 14.0F;
+  buggy.authority.max_acceleration = 12.0F;
+  buggy.authority.max_deceleration = 20.0F;
+  buggy.authority.max_angular_speed = 120.0F;
+  buggy.authority.max_vertical_speed = 20.0F;
+  buggy.authority.max_step_height = 0.6F;
+  buggy.authority.requires_ground = true;
+  buggy.authority.requires_water = false;
   auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(buggy)});
   EXPECT_TRUE(registry);
   return std::move(registry.value());

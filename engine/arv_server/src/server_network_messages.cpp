@@ -25,7 +25,6 @@
 #include <string_view>
 #include <utility>
 
-
 namespace arv::server::detail {
 namespace {
 
@@ -360,6 +359,70 @@ void clear_active_skin_upload(
   return count;
 }
 
+[[nodiscard]] f32 vehicle_water_occupancy(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry& block_registry,
+    Vec3f position,
+    Vec3f size) noexcept {
+  const f32 half_x = size.x * 0.5F;
+  const f32 half_z = size.z * 0.5F;
+  const f32 mid_y = position.y + size.y * 0.5F;
+  const f32 top_y = position.y + size.y * 0.9F;
+  const f32 bottom_y = position.y + size.y * 0.1F;
+  const std::array<Vec3f, 11> samples{{
+      {position.x, mid_y, position.z},
+      {position.x, bottom_y, position.z},
+      {position.x, top_y, position.z},
+      {position.x, mid_y, position.z - half_z},
+      {position.x, mid_y, position.z + half_z},
+      {position.x - half_x, mid_y, position.z},
+      {position.x + half_x, mid_y, position.z},
+      {position.x - half_x, mid_y, position.z - half_z},
+      {position.x + half_x, mid_y, position.z - half_z},
+      {position.x - half_x, mid_y, position.z + half_z},
+      {position.x + half_x, mid_y, position.z + half_z},
+  }};
+  u32 count = 0U;
+  for (const Vec3f& sample : samples) {
+    const BlockPos block{{
+        floor_to_i32(sample.x),
+        floor_to_i32(sample.y),
+        floor_to_i32(sample.z),
+    }};
+    if (world::world_cell_contains_fluid(world, block_registry, block)) {
+      ++count;
+    }
+  }
+  return static_cast<f32>(count) / static_cast<f32>(samples.size());
+}
+
+[[nodiscard]] bool vehicle_position_chunk_loaded(
+    const world::WorldRuntime& world,
+    Vec3f position) noexcept {
+  const BlockPos block{{
+      floor_to_i32(position.x),
+      floor_to_i32(position.y),
+      floor_to_i32(position.z),
+  }};
+  return world.find_chunk(block_to_chunk(block)) != nullptr;
+}
+
+[[nodiscard]] bool vehicle_path_chunks_loaded(
+    const world::WorldRuntime& world,
+    Vec3f from,
+    Vec3f to) noexcept {
+  const f32 path_length = distance(from, to);
+  const u32 steps = static_cast<u32>(
+      std::clamp(std::ceil(path_length / 8.0F), 1.0F, 32.0F));
+  for (u32 index = 0U; index <= steps; ++index) {
+    const f32 alpha = static_cast<f32>(index) / static_cast<f32>(steps);
+    if (!vehicle_position_chunk_loaded(world, lerp(from, to, alpha))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] Vec3f model_visual_forward(Quatf rotation) noexcept {
   return rotate_vector(normalize_quat(rotation), {0.0F, 0.0F, -1.0F});
 }
@@ -409,6 +472,11 @@ void update_vehicle_motion_animation(
       rideable != nullptr) {
     context.passenger_controls_vehicle = rideable->controller == passenger_entity;
   }
+  context.target_chunk_loaded = vehicle_position_chunk_loaded(world, move.position);
+  context.swept_path_chunks_loaded =
+      previous.has_accepted_move
+          ? vehicle_path_chunks_loaded(world, previous.position, move.position)
+          : context.target_chunk_loaded;
 
   const entity::EntityCollision* collision = world.find_entity_collision(vehicle_entity);
   if (collision == nullptr) {
@@ -436,11 +504,40 @@ void update_vehicle_motion_animation(
           previous_velocity_sweep.hit_x ||
           previous_velocity_sweep.hit_y ||
           previous_velocity_sweep.hit_z;
+      const physics::MovementResolution proposed_sweep =
+          physics::resolve_movement(
+              query,
+              start,
+              move.position - previous.position,
+              physics::CollisionEpsilon);
+      context.proposed_sweep_hit_solid =
+          proposed_sweep.hit_x ||
+          proposed_sweep.hit_y ||
+          proposed_sweep.hit_z;
+      if (context.proposed_sweep_hit_solid) {
+        const AcceptedVehicleMovementState resolved_state =
+            collision_resolved_vehicle_state(
+                move,
+                previous,
+                proposed_sweep,
+                tick_index,
+                context.receive_time_seconds);
+        const Aabb3f resolved_end =
+            vehicle_bounds(resolved_state.position, collision->box);
+        if (!physics::overlaps_solid_blocks(
+                query,
+                resolved_end,
+                physics::CollisionEpsilon)) {
+          context.has_collision_resolved_state = true;
+          context.collision_resolved_state = resolved_state;
+        }
+      }
       collision_safe_start = start;
     }
   }
 
-  if (context.final_aabb_overlaps_solid && collision_safe_start.has_value()) {
+  if (context.final_aabb_overlaps_solid && collision_safe_start.has_value() &&
+      !context.has_collision_resolved_state) {
     const physics::MovementResolution resolved =
         physics::resolve_movement(
             query,
@@ -470,6 +567,8 @@ void update_vehicle_motion_animation(
           std::max(physics::CollisionEpsilon * 2.0F, 0.05F));
   context.water_support_samples =
       vehicle_water_support_samples(world, block_registry, move.position, collision->box);
+  context.water_occupancy =
+      vehicle_water_occupancy(world, block_registry, move.position, collision->box);
   return context;
 }
 
@@ -502,6 +601,26 @@ void update_vehicle_motion_animation(
   state.has_accepted_move = true;
   (void)vehicle_net_id;
   return state;
+}
+
+[[nodiscard]] std::optional<Vec3f> airborne_aircraft_dismount_position(
+    const world::WorldRuntime& world,
+    EntityID rideable_entity,
+    const player::PlayerTuning& tuning) noexcept {
+  const entity::VehiclePhysicsComponent* vehicle_physics =
+      world.find_entity_vehicle_physics(rideable_entity);
+  if (vehicle_physics == nullptr ||
+      vehicle_physics->kind != entity::VehiclePhysicsKind::Aircraft) {
+    return std::nullopt;
+  }
+  const entity::EntityTransform* transform = world.find_entity_transform(rideable_entity);
+  const entity::EntityCollision* collision = world.find_entity_collision(rideable_entity);
+  if (transform == nullptr || collision == nullptr) {
+    return std::nullopt;
+  }
+  const f32 vertical_clearance =
+      collision->box.y + tuning.body_height + physics::CollisionEpsilon;
+  return transform->position + Vec3f{0.0F, vertical_clearance, 0.0F};
 }
 
 } // namespace
@@ -1479,11 +1598,18 @@ void ServerRuntimeImpl::handle_dismount_request(
     return;
   }
 
-  const std::optional<Vec3f> dismount_position =
+  std::optional<Vec3f> dismount_position =
       default_world_.find_safe_dismount_position(
           rideable_entity.value(),
           *block_registry_,
           player_tuning_);
+  if (!dismount_position.has_value()) {
+    dismount_position =
+        airborne_aircraft_dismount_position(
+            default_world_,
+            rideable_entity.value(),
+            player_tuning_);
+  }
   if (!dismount_position.has_value()) {
     return;
   }

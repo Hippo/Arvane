@@ -57,6 +57,8 @@ enum class VehicleCorrectionReason : u8 {
   Collision,
   MissingGroundSupport,
   MissingWaterSupport,
+  AircraftEnteredUnloadedChunk,
+  InvalidSubmersibleMedium,
   Unknown,
 };
 

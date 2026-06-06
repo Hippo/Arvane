@@ -51,9 +51,12 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
   jump_held_ = input.jump_held;
   sneak_held_ = input.sneak_held;
   sprint_held_ = input.sprint_held;
+  vehicle_roll_left_held_ = input.vehicle_roll_left_held;
+  vehicle_roll_right_held_ = input.vehicle_roll_right_held;
   primary_held_ = input.primary_held;
   secondary_held_ = input.secondary_held;
   jump_pressed_ = jump_pressed_ || input.jump_pressed;
+  mount_pressed_ = mount_pressed_ || input.mount_pressed;
   primary_pressed_ = primary_pressed_ || input.primary_pressed;
   secondary_pressed_ = secondary_pressed_ || input.secondary_pressed;
 
@@ -93,6 +96,9 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   command.jump_held = jump_held_;
   command.sneak_held = sneak_held_;
   command.sprint_held = sprint_held_;
+  command.mount_pressed = mount_pressed_;
+  command.vehicle_roll_left_held = vehicle_roll_left_held_;
+  command.vehicle_roll_right_held = vehicle_roll_right_held_;
   command.primary_pressed = primary_pressed_;
   command.primary_held = primary_held_;
   command.secondary_pressed = secondary_pressed_;
@@ -101,6 +107,7 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   command.selected_hotbar_slot = selected_hotbar_slot_;
 
   jump_pressed_ = false;
+  mount_pressed_ = false;
   primary_pressed_ = false;
   secondary_pressed_ = false;
   look_delta_x_ = 0.0F;
@@ -262,6 +269,7 @@ void LocalPlayerController::apply_ride_started(
   mounted_vehicle_id_ = event.rideable_id;
   mounted_seat_id_ = event.seat_id;
   mounted_controls_vehicle_ = event.controls_vehicle;
+  mount_pressed_ = false;
   movement_state_.velocity = {};
   render_smoothing_offset_ = {};
   render_smoothing_ticks_remaining_ = 0;

@@ -112,6 +112,9 @@ For example:
 - `Jump`
 - `Sneak`
 - `Sprint`
+- `Mount`
+- `VehicleRollLeft`
+- `VehicleRollRight`
 - `PrimaryInteract`
 - `SecondaryInteract`
 - `PickBlock`

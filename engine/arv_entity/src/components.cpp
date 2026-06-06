@@ -64,6 +64,27 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
   return Expected<f32, EntityRegistryError>::success(number);
 }
 
+[[nodiscard]] Expected<f32, EntityRegistryError> read_optional_f32(
+    const io::DataValue& object,
+    std::string_view field,
+    std::string_view path,
+    f32 fallback) {
+  const io::DataValue* value = object.get(field);
+  if (value == nullptr) {
+    return Expected<f32, EntityRegistryError>::success(fallback);
+  }
+  if (!is_number(*value)) {
+    return Expected<f32, EntityRegistryError>::failure(
+        {std::string{path} + "." + std::string{field} + " must be a number"});
+  }
+  const f32 number = static_cast<f32>(value->as_f64_or(fallback));
+  if (!std::isfinite(number)) {
+    return Expected<f32, EntityRegistryError>::failure(
+        {std::string{path} + "." + std::string{field} + " must be finite"});
+  }
+  return Expected<f32, EntityRegistryError>::success(number);
+}
+
 [[nodiscard]] Expected<u32, EntityRegistryError> read_optional_u32(
     const io::DataValue& object,
     std::string_view field,
@@ -169,6 +190,9 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
   if (value == "third_person_follow") {
     return Expected<CameraMode, EntityRegistryError>::success(CameraMode::ThirdPersonFollow);
   }
+  if (value == "vehicle_chase") {
+    return Expected<CameraMode, EntityRegistryError>::success(CameraMode::VehicleChase);
+  }
   return Expected<CameraMode, EntityRegistryError>::failure(
       {std::string{path} + " has unknown camera mode: " + std::string{value}});
 }
@@ -200,6 +224,14 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
   if (value == "ground_vehicle") {
     return Expected<VehiclePhysicsKind, EntityRegistryError>::success(
         VehiclePhysicsKind::GroundVehicle);
+  }
+  if (value == "aircraft") {
+    return Expected<VehiclePhysicsKind, EntityRegistryError>::success(
+        VehiclePhysicsKind::Aircraft);
+  }
+  if (value == "submersible") {
+    return Expected<VehiclePhysicsKind, EntityRegistryError>::success(
+        VehiclePhysicsKind::Submersible);
   }
   return Expected<VehiclePhysicsKind, EntityRegistryError>::failure(
       {std::string{path} + " has unknown physics kind: " + std::string{value}});
@@ -710,6 +742,12 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
     auto max_vertical_speed = read_required_f32(root, "max_vertical_speed", path);
     auto requires_ground = read_required_bool(root, "requires_ground", path);
     auto requires_water = read_required_bool(root, "requires_water", path);
+    auto requires_swept_collision =
+        read_optional_bool(root, "requires_swept_collision", path, false);
+    auto min_water_occupancy =
+        read_optional_f32(root, "min_water_occupancy", path, 0.0F);
+    auto max_unloaded_chunk_entry_distance =
+        read_optional_f32(root, "max_unloaded_chunk_entry_distance", path, -1.0F);
     auto min_water_support =
         read_optional_u32(root, "min_water_support_samples", path, 0U);
     if (!max_speed) {
@@ -733,6 +771,18 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
     if (!requires_water) {
       return Expected<VehicleAuthorityDefinition, EntityRegistryError>::failure(requires_water.error());
     }
+    if (!requires_swept_collision) {
+      return Expected<VehicleAuthorityDefinition, EntityRegistryError>::failure(
+          requires_swept_collision.error());
+    }
+    if (!min_water_occupancy) {
+      return Expected<VehicleAuthorityDefinition, EntityRegistryError>::failure(
+          min_water_occupancy.error());
+    }
+    if (!max_unloaded_chunk_entry_distance) {
+      return Expected<VehicleAuthorityDefinition, EntityRegistryError>::failure(
+          max_unloaded_chunk_entry_distance.error());
+    }
     if (!min_water_support) {
       return Expected<VehicleAuthorityDefinition, EntityRegistryError>::failure(min_water_support.error());
     }
@@ -741,6 +791,12 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
     authority.max_deceleration = max_deceleration.value();
     authority.max_angular_speed = degrees_to_radians(max_angular_speed.value());
     authority.max_vertical_speed = max_vertical_speed.value();
+    authority.min_water_occupancy = min_water_occupancy.value();
+    if (authority.min_water_occupancy < 0.0F || authority.min_water_occupancy > 1.0F) {
+      return Expected<VehicleAuthorityDefinition, EntityRegistryError>::failure(
+          {std::string{path} + ".min_water_occupancy must be between 0 and 1"});
+    }
+    authority.max_unloaded_chunk_entry_distance = max_unloaded_chunk_entry_distance.value();
     if (const io::DataValue* max_step = root.get("max_step_height"); max_step != nullptr) {
       if (!is_number(*max_step)) {
         return Expected<VehicleAuthorityDefinition, EntityRegistryError>::failure(
@@ -750,6 +806,7 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
     }
     authority.requires_ground = requires_ground.value();
     authority.requires_water = requires_water.value();
+    authority.requires_swept_collision = requires_swept_collision.value();
     authority.min_water_support_samples = min_water_support.value();
     return Expected<VehicleAuthorityDefinition, EntityRegistryError>::success(authority);
   };
@@ -969,7 +1026,7 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
           land_drag.value(),
           float_height_offset.value(),
           buoyancy_snap_speed.value()};
-    } else {
+    } else if (definition.physics == VehiclePhysicsKind::GroundVehicle) {
       auto max_forward_speed = read_required_f32(*movement, "max_forward_speed", path + ".movement");
       auto max_reverse_speed = read_required_f32(*movement, "max_reverse_speed", path + ".movement");
       auto acceleration = read_required_f32(*movement, "acceleration", path + ".movement");
@@ -1007,6 +1064,174 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
           lateral_grip.value(),
           gravity_scale.value(),
           max_step_height.value()};
+    } else if (definition.physics == VehiclePhysicsKind::Aircraft) {
+      auto min_speed = read_required_f32(*movement, "min_speed", path + ".movement");
+      auto max_speed = read_required_f32(*movement, "max_speed", path + ".movement");
+      auto acceleration = read_required_f32(*movement, "acceleration", path + ".movement");
+      auto brake_deceleration = read_required_f32(*movement, "brake_deceleration", path + ".movement");
+      auto drag = read_required_f32(*movement, "drag", path + ".movement");
+      auto pitch_rate = read_required_f32(*movement, "pitch_rate", path + ".movement");
+      auto yaw_rate = read_required_f32(*movement, "yaw_rate", path + ".movement");
+      auto roll_rate = read_required_f32(*movement, "roll_rate", path + ".movement");
+      auto roll_auto_level_rate = read_required_f32(*movement, "roll_auto_level_rate", path + ".movement");
+      auto lift_strength = read_required_f32(*movement, "lift_strength", path + ".movement");
+      auto stall_speed = read_required_f32(*movement, "stall_speed", path + ".movement");
+      auto stall_gravity_scale = read_required_f32(*movement, "stall_gravity_scale", path + ".movement");
+      auto gravity_scale = read_required_f32(*movement, "gravity_scale", path + ".movement");
+      auto max_climb_rate = read_required_f32(*movement, "max_climb_rate", path + ".movement");
+      auto max_descent_rate = read_required_f32(*movement, "max_descent_rate", path + ".movement");
+      auto ground_takeoff_speed = read_required_f32(*movement, "ground_takeoff_speed", path + ".movement");
+      auto ground_drag = read_required_f32(*movement, "ground_drag", path + ".movement");
+      if (!min_speed)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(min_speed.error());
+      if (!max_speed)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(max_speed.error());
+      if (!acceleration)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(acceleration.error());
+      if (!brake_deceleration)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(brake_deceleration.error());
+      if (!drag)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(drag.error());
+      if (!pitch_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(pitch_rate.error());
+      if (!yaw_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(yaw_rate.error());
+      if (!roll_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(roll_rate.error());
+      if (!roll_auto_level_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(roll_auto_level_rate.error());
+      if (!lift_strength)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(lift_strength.error());
+      if (!stall_speed)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(stall_speed.error());
+      if (!stall_gravity_scale)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(stall_gravity_scale.error());
+      if (!gravity_scale)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(gravity_scale.error());
+      if (!max_climb_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(max_climb_rate.error());
+      if (!max_descent_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(max_descent_rate.error());
+      if (!ground_takeoff_speed)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(ground_takeoff_speed.error());
+      if (!ground_drag)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(ground_drag.error());
+      if (min_speed.value() < 0.0F || max_speed.value() <= 0.0F ||
+          min_speed.value() > max_speed.value()) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(
+            {path + ".movement must satisfy 0 <= min_speed <= max_speed"});
+      }
+      if (acceleration.value() < 0.0F || brake_deceleration.value() < 0.0F ||
+          lift_strength.value() < 0.0F || stall_speed.value() < 0.0F ||
+          stall_gravity_scale.value() < 0.0F || gravity_scale.value() < 0.0F ||
+          max_climb_rate.value() < 0.0F || max_descent_rate.value() < 0.0F ||
+          ground_takeoff_speed.value() < 0.0F) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(
+            {path + ".movement aircraft speeds and forces must be non-negative"});
+      }
+      if (drag.value() < 0.0F || drag.value() > 1.0F ||
+          ground_drag.value() < 0.0F || ground_drag.value() > 1.0F) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(
+            {path + ".movement aircraft drag values must be between 0 and 1"});
+      }
+      definition.aircraft = {
+          min_speed.value(),
+          max_speed.value(),
+          acceleration.value(),
+          brake_deceleration.value(),
+          drag.value(),
+          degrees_to_radians(pitch_rate.value()),
+          degrees_to_radians(yaw_rate.value()),
+          degrees_to_radians(roll_rate.value()),
+          degrees_to_radians(roll_auto_level_rate.value()),
+          lift_strength.value(),
+          stall_speed.value(),
+          stall_gravity_scale.value(),
+          gravity_scale.value(),
+          max_climb_rate.value(),
+          max_descent_rate.value(),
+          ground_takeoff_speed.value(),
+          ground_drag.value()};
+    } else if (definition.physics == VehiclePhysicsKind::Submersible) {
+      auto max_forward_speed = read_required_f32(*movement, "max_forward_speed", path + ".movement");
+      auto max_reverse_speed = read_required_f32(*movement, "max_reverse_speed", path + ".movement");
+      auto acceleration = read_required_f32(*movement, "acceleration", path + ".movement");
+      auto brake_deceleration = read_required_f32(*movement, "brake_deceleration", path + ".movement");
+      auto turn_rate = read_required_f32(*movement, "turn_rate", path + ".movement");
+      auto pitch_rate = read_required_f32(*movement, "pitch_rate", path + ".movement");
+      auto ascend_rate = read_required_f32(*movement, "ascend_rate", path + ".movement");
+      auto descend_rate = read_required_f32(*movement, "descend_rate", path + ".movement");
+      auto water_drag = read_required_f32(*movement, "water_drag", path + ".movement");
+      auto air_drag = read_required_f32(*movement, "air_drag", path + ".movement");
+      auto gravity_scale_out_of_water =
+          read_required_f32(*movement, "gravity_scale_out_of_water", path + ".movement");
+      auto min_water_occupancy =
+          read_required_f32(*movement, "min_water_occupancy", path + ".movement");
+      auto preferred_water_occupancy =
+          read_required_f32(*movement, "preferred_water_occupancy", path + ".movement");
+      auto surface_float_offset =
+          read_required_f32(*movement, "surface_float_offset", path + ".movement");
+      if (!max_forward_speed)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(max_forward_speed.error());
+      if (!max_reverse_speed)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(max_reverse_speed.error());
+      if (!acceleration)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(acceleration.error());
+      if (!brake_deceleration)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(brake_deceleration.error());
+      if (!turn_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(turn_rate.error());
+      if (!pitch_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(pitch_rate.error());
+      if (!ascend_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(ascend_rate.error());
+      if (!descend_rate)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(descend_rate.error());
+      if (!water_drag)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(water_drag.error());
+      if (!air_drag)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(air_drag.error());
+      if (!gravity_scale_out_of_water)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(gravity_scale_out_of_water.error());
+      if (!min_water_occupancy)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(min_water_occupancy.error());
+      if (!preferred_water_occupancy)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(preferred_water_occupancy.error());
+      if (!surface_float_offset)
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(surface_float_offset.error());
+      if (max_forward_speed.value() <= 0.0F || max_reverse_speed.value() < 0.0F ||
+          acceleration.value() < 0.0F || brake_deceleration.value() < 0.0F ||
+          ascend_rate.value() < 0.0F || descend_rate.value() < 0.0F ||
+          gravity_scale_out_of_water.value() < 0.0F) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(
+            {path + ".movement submersible speeds and forces must be non-negative"});
+      }
+      if (water_drag.value() < 0.0F || water_drag.value() > 1.0F ||
+          air_drag.value() < 0.0F || air_drag.value() > 1.0F) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(
+            {path + ".movement submersible drag values must be between 0 and 1"});
+      }
+      if (min_water_occupancy.value() < 0.0F || min_water_occupancy.value() > 1.0F ||
+          preferred_water_occupancy.value() < 0.0F || preferred_water_occupancy.value() > 1.0F ||
+          min_water_occupancy.value() > preferred_water_occupancy.value()) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(
+            {path + ".movement must satisfy 0 <= min_water_occupancy <= preferred_water_occupancy <= 1"});
+      }
+      definition.submersible = {
+          max_forward_speed.value(),
+          max_reverse_speed.value(),
+          acceleration.value(),
+          brake_deceleration.value(),
+          degrees_to_radians(turn_rate.value()),
+          degrees_to_radians(pitch_rate.value()),
+          ascend_rate.value(),
+          descend_rate.value(),
+          water_drag.value(),
+          air_drag.value(),
+          gravity_scale_out_of_water.value(),
+          min_water_occupancy.value(),
+          preferred_water_occupancy.value(),
+          surface_float_offset.value()};
     }
 
     const io::DataValue* authority = vehicle_json.get("authority");

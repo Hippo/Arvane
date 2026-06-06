@@ -137,6 +137,17 @@ struct DroppedItemLiquidProbe {
                               : definition->surface_water.land_drag;
     case entity::VehiclePhysicsKind::GroundVehicle:
       return definition == nullptr ? 0.94F : definition->ground.drag;
+    case entity::VehiclePhysicsKind::Aircraft:
+      return definition == nullptr
+                 ? 0.985F
+                 : (physics.grounded ? definition->aircraft.ground_drag
+                                     : definition->aircraft.drag);
+    case entity::VehiclePhysicsKind::Submersible:
+      if (definition == nullptr) {
+        return physics.in_water ? 0.88F : 0.45F;
+      }
+      return physics.in_water ? definition->submersible.water_drag
+                              : definition->submersible.air_drag;
   }
   return 0.9F;
 }
@@ -154,6 +165,10 @@ struct DroppedItemLiquidProbe {
       return physics.in_water ? 0.0F : 1.0F;
     case entity::VehiclePhysicsKind::GroundVehicle:
       return definition->ground.gravity_scale;
+    case entity::VehiclePhysicsKind::Aircraft:
+      return definition->aircraft.gravity_scale;
+    case entity::VehiclePhysicsKind::Submersible:
+      return physics.in_water ? 0.0F : definition->submersible.gravity_scale_out_of_water;
   }
   return 1.0F;
 }

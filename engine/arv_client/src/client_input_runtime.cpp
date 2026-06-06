@@ -106,6 +106,7 @@ inline constexpr u8 VehicleImpactMemoryTicks = 8U;
 
 struct VehicleMovementProfile {
   entity::VehiclePhysicsKind physics{entity::VehiclePhysicsKind::LivingMount};
+  f32 min_forward_speed{};
   f32 max_forward_speed{4.0F};
   f32 max_reverse_speed{4.0F};
   f32 acceleration{8.0F};
@@ -115,6 +116,24 @@ struct VehicleMovementProfile {
   f32 lateral_grip{1.0F};
   f32 gravity_scale{1.0F};
   f32 step_height{};
+  f32 pitch_rate{};
+  f32 yaw_rate{};
+  f32 roll_rate{};
+  f32 roll_auto_level_rate{};
+  f32 lift_strength{};
+  f32 stall_speed{};
+  f32 stall_gravity_scale{1.0F};
+  f32 max_climb_rate{};
+  f32 max_descent_rate{};
+  f32 ground_takeoff_speed{};
+  f32 ground_drag{0.9F};
+  f32 ascend_rate{};
+  f32 descend_rate{};
+  f32 water_drag{0.9F};
+  f32 air_drag{0.5F};
+  f32 gravity_scale_out_of_water{1.0F};
+  f32 min_water_occupancy{};
+  f32 preferred_water_occupancy{1.0F};
   Vec3f collision_size{1.0F, 1.0F, 1.0F};
   protocol::VehicleMoveFlags base_flags{protocol::VehicleMoveFlags::OnGround};
 };
@@ -168,8 +187,46 @@ struct VehicleMovementProfile {
       profile.step_height = definition->ground.max_step_height;
       profile.base_flags = protocol::VehicleMoveFlags::OnGround;
       break;
+    case entity::VehiclePhysicsKind::Aircraft:
+      profile.min_forward_speed = definition->aircraft.min_speed;
+      profile.max_forward_speed = definition->aircraft.max_speed;
+      profile.max_reverse_speed = 0.0F;
+      profile.acceleration = definition->aircraft.acceleration;
+      profile.brake_force = definition->aircraft.brake_deceleration;
+      profile.drag = definition->aircraft.drag;
+      profile.gravity_scale = definition->aircraft.gravity_scale;
+      profile.pitch_rate = definition->aircraft.pitch_rate;
+      profile.yaw_rate = definition->aircraft.yaw_rate;
+      profile.roll_rate = definition->aircraft.roll_rate;
+      profile.roll_auto_level_rate = definition->aircraft.roll_auto_level_rate;
+      profile.lift_strength = definition->aircraft.lift_strength;
+      profile.stall_speed = definition->aircraft.stall_speed;
+      profile.stall_gravity_scale = definition->aircraft.stall_gravity_scale;
+      profile.max_climb_rate = definition->aircraft.max_climb_rate;
+      profile.max_descent_rate = definition->aircraft.max_descent_rate;
+      profile.ground_takeoff_speed = definition->aircraft.ground_takeoff_speed;
+      profile.ground_drag = definition->aircraft.ground_drag;
+      profile.base_flags = protocol::VehicleMoveFlags::None;
+      break;
+    case entity::VehiclePhysicsKind::Submersible:
+      profile.max_forward_speed = definition->submersible.max_forward_speed;
+      profile.max_reverse_speed = definition->submersible.max_reverse_speed;
+      profile.acceleration = definition->submersible.acceleration;
+      profile.brake_force = definition->submersible.brake_deceleration;
+      profile.turn_rate = definition->submersible.turn_rate;
+      profile.pitch_rate = definition->submersible.pitch_rate;
+      profile.ascend_rate = definition->submersible.ascend_rate;
+      profile.descend_rate = definition->submersible.descend_rate;
+      profile.water_drag = definition->submersible.water_drag;
+      profile.air_drag = definition->submersible.air_drag;
+      profile.gravity_scale_out_of_water = definition->submersible.gravity_scale_out_of_water;
+      profile.min_water_occupancy = definition->submersible.min_water_occupancy;
+      profile.preferred_water_occupancy = definition->submersible.preferred_water_occupancy;
+      profile.base_flags = protocol::VehicleMoveFlags::InWater;
+      break;
   }
 
+  profile.min_forward_speed = std::max(profile.min_forward_speed, 0.0F);
   profile.max_forward_speed = std::max(profile.max_forward_speed, 0.0F);
   profile.max_reverse_speed = std::max(profile.max_reverse_speed, 0.0F);
   profile.acceleration = std::max(profile.acceleration, 0.0F);
@@ -179,6 +236,25 @@ struct VehicleMovementProfile {
   profile.lateral_grip = std::clamp(profile.lateral_grip, 0.0F, 1.0F);
   profile.gravity_scale = std::max(profile.gravity_scale, 0.0F);
   profile.step_height = std::max(profile.step_height, 0.0F);
+  profile.pitch_rate = std::max(profile.pitch_rate, 0.0F);
+  profile.yaw_rate = std::max(profile.yaw_rate, 0.0F);
+  profile.roll_rate = std::max(profile.roll_rate, 0.0F);
+  profile.roll_auto_level_rate = std::max(profile.roll_auto_level_rate, 0.0F);
+  profile.lift_strength = std::max(profile.lift_strength, 0.0F);
+  profile.stall_speed = std::max(profile.stall_speed, 0.0F);
+  profile.stall_gravity_scale = std::max(profile.stall_gravity_scale, 0.0F);
+  profile.max_climb_rate = std::max(profile.max_climb_rate, 0.0F);
+  profile.max_descent_rate = std::max(profile.max_descent_rate, 0.0F);
+  profile.ground_takeoff_speed = std::max(profile.ground_takeoff_speed, 0.0F);
+  profile.ground_drag = std::clamp(profile.ground_drag, 0.0F, 1.0F);
+  profile.ascend_rate = std::max(profile.ascend_rate, 0.0F);
+  profile.descend_rate = std::max(profile.descend_rate, 0.0F);
+  profile.water_drag = std::clamp(profile.water_drag, 0.0F, 1.0F);
+  profile.air_drag = std::clamp(profile.air_drag, 0.0F, 1.0F);
+  profile.gravity_scale_out_of_water = std::max(profile.gravity_scale_out_of_water, 0.0F);
+  profile.min_water_occupancy = std::clamp(profile.min_water_occupancy, 0.0F, 1.0F);
+  profile.preferred_water_occupancy =
+      std::clamp(profile.preferred_water_occupancy, profile.min_water_occupancy, 1.0F);
   profile.collision_size = {
       std::max(profile.collision_size.x, 0.01F),
       std::max(profile.collision_size.y, 0.01F),
@@ -219,6 +295,69 @@ struct VehicleMovementProfile {
       collision_query,
       vehicle_bounds(position, size),
       std::max(physics::CollisionEpsilon * 2.0F, 0.05F));
+}
+
+[[nodiscard]] bool vehicle_sample_contains_fluid(
+    const physics::ICollisionQuery& collision_query,
+    Vec3f sample) noexcept {
+  const BlockPos block{{
+      floor_to_i32(sample.x),
+      floor_to_i32(sample.y),
+      floor_to_i32(sample.z),
+  }};
+  return collision_query.is_block_loaded(block) &&
+         !collision_query.fluid_cell(block).empty();
+}
+
+[[nodiscard]] f32 vehicle_water_occupancy(
+    const physics::ICollisionQuery* collision_query,
+    Vec3f position,
+    Vec3f size,
+    f32 fallback) noexcept {
+  if (collision_query == nullptr) {
+    return std::clamp(fallback, 0.0F, 1.0F);
+  }
+  const f32 half_x = size.x * 0.5F;
+  const f32 half_z = size.z * 0.5F;
+  const f32 mid_y = position.y + size.y * 0.5F;
+  const f32 top_y = position.y + size.y * 0.9F;
+  const f32 bottom_y = position.y + size.y * 0.1F;
+  const std::array<Vec3f, 11> samples{{
+      {position.x, mid_y, position.z},
+      {position.x, bottom_y, position.z},
+      {position.x, top_y, position.z},
+      {position.x, mid_y, position.z - half_z},
+      {position.x, mid_y, position.z + half_z},
+      {position.x - half_x, mid_y, position.z},
+      {position.x + half_x, mid_y, position.z},
+      {position.x - half_x, mid_y, position.z - half_z},
+      {position.x + half_x, mid_y, position.z - half_z},
+      {position.x - half_x, mid_y, position.z + half_z},
+      {position.x + half_x, mid_y, position.z + half_z},
+  }};
+  u32 wet_samples = 0U;
+  for (const Vec3f& sample : samples) {
+    if (vehicle_sample_contains_fluid(*collision_query, sample)) {
+      ++wet_samples;
+    }
+  }
+  return static_cast<f32>(wet_samples) / static_cast<f32>(samples.size());
+}
+
+[[nodiscard]] f32 normalized_look_axis(i16 value, f32 divisor) noexcept {
+  return std::clamp(static_cast<f32>(value) / divisor, -1.0F, 1.0F);
+}
+
+[[nodiscard]] Quatf apply_local_vehicle_rotation(
+    Quatf rotation,
+    f32 pitch_radians,
+    f32 yaw_radians,
+    f32 roll_radians) noexcept {
+  const Quatf delta =
+      multiply_quat(
+          pitch_rotation(pitch_radians),
+          multiply_quat(yaw_rotation(yaw_radians), roll_rotation(roll_radians)));
+  return normalize_quat(multiply_quat(normalize_quat(rotation), delta));
 }
 
 [[nodiscard]] Vec3f vehicle_horizontal_impact_normal_from_delta(Vec3f delta) noexcept {
@@ -330,6 +469,9 @@ void ClientInputRuntime::submit_input(
     input.jump_held = false;
     input.sneak_held = false;
     input.sprint_held = false;
+    input.mount_pressed = false;
+    input.vehicle_roll_left_held = false;
+    input.vehicle_roll_right_held = false;
     input.primary_pressed = false;
     input.primary_held = false;
     input.secondary_pressed = false;
@@ -353,7 +495,7 @@ void ClientInputRuntime::send_fixed_tick_input(
     Seconds tick_seconds) {
   const player::PlayerCommand command = player_controller.consume_command(tick_index);
   if (player_controller.mounted_vehicle_id().has_value()) {
-    if (command.sneak_held) {
+    if (command.mount_pressed) {
       if (!dismount_request_sent_) {
         (void)sender.send_dismount_request(
             {player_controller.mounted_vehicle_id().value()});
@@ -403,95 +545,330 @@ void ClientInputRuntime::send_fixed_tick_input(
         1.0 / static_cast<Seconds>(std::max(movement_send_rate_hz_, 1.0F));
     const bool send_this_tick =
         movement_send_accumulator_seconds_ >= send_interval ||
-        command.jump_pressed || command.secondary_pressed;
+        command.jump_pressed || command.secondary_pressed || command.mount_pressed;
 
     const f32 dt = std::clamp(static_cast<f32>(tick_seconds), 1.0F / 240.0F, 0.1F);
     const f32 throttle = std::clamp(static_cast<f32>(command.move_z), -1.0F, 1.0F);
     const f32 steer = std::clamp(static_cast<f32>(command.move_x), -1.0F, 1.0F);
-    const f32 max_speed = throttle < 0.0F
-                              ? profile.max_reverse_speed
-                              : profile.max_forward_speed;
-    const f32 target_speed = throttle * max_speed;
     const f32 previous_yaw = predicted_vehicle_yaw_;
     const bool ground_vehicle =
         profile.physics == entity::VehiclePhysicsKind::GroundVehicle;
+    const bool aircraft =
+        profile.physics == entity::VehiclePhysicsKind::Aircraft;
+    const bool submersible =
+        profile.physics == entity::VehiclePhysicsKind::Submersible;
     if (!ground_vehicle) {
       clear_vehicle_impact_memory();
     }
-    bool vehicle_grounded =
-        protocol::has_vehicle_move_flag(profile.base_flags, protocol::VehicleMoveFlags::OnGround);
-    if (ground_vehicle && collision_query != nullptr) {
+    bool vehicle_grounded = protocol::has_vehicle_move_flag(
+        profile.base_flags,
+        protocol::VehicleMoveFlags::OnGround);
+    if ((ground_vehicle || aircraft || submersible) && collision_query != nullptr) {
       vehicle_grounded = vehicle_has_ground_support(
           *collision_query,
           predicted_vehicle_position_,
           profile.collision_size);
     }
-    if (ground_vehicle) {
-      const f32 speed_fraction =
-          profile.max_forward_speed <= 0.0F
-              ? 0.0F
-              : std::clamp(
-                    horizontal_length(predicted_vehicle_velocity_) /
-                        profile.max_forward_speed,
-                    0.0F,
-                    1.0F);
-      const f32 traction = vehicle_grounded ? 1.0F : 0.1F;
-      const f32 steering_response =
-          std::abs(throttle) > 0.01F || speed_fraction > 0.05F
-              ? std::max(speed_fraction, 0.25F) * traction
-              : 0.0F;
-      predicted_vehicle_yaw_ = wrap_angle_radians(
-          predicted_vehicle_yaw_ + steer * profile.turn_rate * steering_response * dt);
-    } else {
-      const f32 desired_yaw =
-          std::abs(steer) > 0.01F
-              ? wrap_angle_radians(predicted_vehicle_yaw_ + steer * profile.turn_rate)
-              : player_controller.camera().yaw_radians();
-      predicted_vehicle_yaw_ = approach_angle(
-          predicted_vehicle_yaw_,
-          desired_yaw,
-          profile.turn_rate * dt);
-    }
-    const Vec3f forward = horizontal_forward(predicted_vehicle_yaw_);
-    const f32 current_speed = dot(predicted_vehicle_velocity_, forward);
-    f32 next_speed = current_speed;
-    const bool has_ground_traction = !ground_vehicle || vehicle_grounded;
-    if (command.secondary_held && has_ground_traction) {
-      next_speed = approach(current_speed, 0.0F, profile.brake_force * dt);
-    } else if (std::abs(throttle) > 0.01F && has_ground_traction) {
-      const f32 accel =
-          (current_speed * target_speed < 0.0F) ? profile.brake_force : profile.acceleration;
-      next_speed = approach(current_speed, target_speed, accel * dt);
-    } else {
-      const f32 drag_factor =
-          std::pow(profile.drag, std::max(dt, 0.0F) * 60.0F);
-      next_speed = current_speed * drag_factor;
-      if (std::abs(next_speed) < 0.02F) {
-        next_speed = 0.0F;
+    f32 water_occupancy = 0.0F;
+    bool submersible_in_water = false;
+    protocol::VehicleMoveFlags predicted_flags = protocol::VehicleMoveFlags::None;
+    Vec3f reported_angular_velocity{};
+    Vec3f attempted_delta{};
+
+    if (aircraft) {
+      const bool near_takeoff_surface =
+          vehicle_grounded ||
+          (collision_query != nullptr &&
+           physics::has_support_below(
+               *collision_query,
+               vehicle_bounds(predicted_vehicle_position_, profile.collision_size),
+               0.35F));
+      const Vec3f speed_axis =
+          near_takeoff_surface
+              ? horizontal_forward(predicted_vehicle_yaw_)
+              : model_visual_forward(predicted_vehicle_rotation_);
+      f32 forward_speed = dot(predicted_vehicle_velocity_, speed_axis);
+      if (!std::isfinite(forward_speed)) {
+        forward_speed = 0.0F;
       }
-    }
-    f32 next_vertical_speed = predicted_vehicle_velocity_.y;
-    if (ground_vehicle) {
-      if (vehicle_grounded) {
-        next_vertical_speed = std::max(next_vertical_speed, 0.0F);
+      if (command.secondary_held) {
+        forward_speed = approach(forward_speed, 0.0F, profile.brake_force * dt);
+      } else if (throttle > 0.01F) {
+        forward_speed = std::max(forward_speed, profile.min_forward_speed);
+        forward_speed += throttle * profile.acceleration * dt;
+      } else if (throttle < -0.01F) {
+        forward_speed =
+            approach(forward_speed, 0.0F, profile.brake_force * -throttle * dt);
       } else {
-        next_vertical_speed = std::max(
-            next_vertical_speed -
-                VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt,
-            -VehicleTerminalVelocityBlocksPerSecond);
+        const f32 drag =
+            vehicle_grounded ? profile.ground_drag : profile.drag;
+        forward_speed *= std::pow(drag, std::max(dt, 0.0F) * 60.0F);
+        if (std::abs(forward_speed) < 0.02F) {
+          forward_speed = 0.0F;
+        }
       }
+      forward_speed = std::clamp(
+          forward_speed,
+          profile.min_forward_speed,
+          profile.max_forward_speed);
+
+      const f32 pitch_input = std::clamp(
+          (command.jump_held ? 1.0F : 0.0F) -
+              (command.sneak_held ? 1.0F : 0.0F),
+          -1.0F,
+          1.0F);
+      const f32 yaw_input = steer;
+      const f32 roll_input = std::clamp(
+          (command.vehicle_roll_right_held ? 1.0F : 0.0F) -
+              (command.vehicle_roll_left_held ? 1.0F : 0.0F),
+          -1.0F,
+          1.0F);
+      const bool stationary_without_collision_query =
+          collision_query == nullptr &&
+          length(predicted_vehicle_velocity_) <= 0.05F &&
+          std::abs(throttle) <= 0.01F &&
+          std::abs(steer) <= 0.01F &&
+          std::abs(pitch_input) <= 0.01F &&
+          std::abs(roll_input) <= 0.01F &&
+          !command.secondary_held;
+      f32 roll_delta = roll_input * profile.roll_rate * dt;
+      if (std::abs(roll_input) < 0.01F && profile.roll_auto_level_rate > 0.0F) {
+        const Vec3f right = rotate_vector(
+            normalize_quat(predicted_vehicle_rotation_),
+            {1.0F, 0.0F, 0.0F});
+        roll_delta += std::clamp(
+                          -right.y,
+                          -1.0F,
+                          1.0F) *
+                      profile.roll_auto_level_rate * dt;
+      }
+      const f32 pitch_delta = pitch_input * profile.pitch_rate * dt;
+      const f32 yaw_delta = yaw_input * profile.yaw_rate * dt;
+      predicted_vehicle_rotation_ =
+          apply_local_vehicle_rotation(
+              predicted_vehicle_rotation_,
+              pitch_delta,
+              yaw_delta,
+              roll_delta);
+      predicted_vehicle_yaw_ = vehicle_gameplay_yaw_from_rotation(predicted_vehicle_rotation_);
+      reported_angular_velocity = {pitch_delta / dt, yaw_delta / dt, roll_delta / dt};
+
+      Vec3f forward = normalize_or_zero(model_visual_forward(predicted_vehicle_rotation_));
+      if (length(forward) <= 0.0F) {
+        forward = horizontal_forward(predicted_vehicle_yaw_);
+      }
+      if (near_takeoff_surface) {
+        Vec3f ground_forward{forward.x, 0.0F, forward.z};
+        if (length(ground_forward) <= 0.0F) {
+          ground_forward = horizontal_forward(predicted_vehicle_yaw_);
+        } else {
+          ground_forward = normalize_or_zero(ground_forward);
+        }
+        predicted_vehicle_velocity_ = ground_forward * forward_speed;
+      } else {
+        predicted_vehicle_velocity_ = forward * forward_speed;
+      }
+      const f32 assisted_takeoff_speed = profile.ground_takeoff_speed * 0.6F;
+      const bool takeoff_ready =
+          !near_takeoff_surface ||
+          forward_speed >= profile.ground_takeoff_speed ||
+          (command.jump_held && throttle > 0.01F &&
+           forward_speed >= assisted_takeoff_speed);
+      if (stationary_without_collision_query) {
+        predicted_vehicle_velocity_ = {};
+      } else if (takeoff_ready) {
+        const f32 speed_fraction =
+            profile.max_forward_speed <= 0.0F
+                ? 0.0F
+                : std::clamp(forward_speed / profile.max_forward_speed, 0.0F, 1.0F);
+        predicted_vehicle_velocity_.y +=
+            speed_fraction * speed_fraction * profile.lift_strength * dt;
+        predicted_vehicle_velocity_.y -=
+            VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt;
+        if (forward_speed < profile.stall_speed) {
+          predicted_vehicle_velocity_.y -=
+              VehicleGravityBlocksPerSecondSquared *
+              profile.stall_gravity_scale *
+              dt;
+        }
+        if (near_takeoff_surface && command.jump_held) {
+          predicted_vehicle_velocity_.y = std::max(
+              predicted_vehicle_velocity_.y,
+              profile.max_climb_rate * 0.28F);
+        }
+        if (throttle > 0.01F) {
+          const f32 post_gravity_forward_speed =
+              dot(predicted_vehicle_velocity_, forward);
+          if (post_gravity_forward_speed < forward_speed) {
+            predicted_vehicle_velocity_ =
+                predicted_vehicle_velocity_ +
+                forward * (forward_speed - post_gravity_forward_speed);
+          }
+        }
+      } else {
+        predicted_vehicle_velocity_.y = std::max(predicted_vehicle_velocity_.y, 0.0F);
+      }
+      predicted_vehicle_velocity_.y = std::clamp(
+          predicted_vehicle_velocity_.y,
+          -profile.max_descent_rate,
+          profile.max_climb_rate);
+      attempted_delta = predicted_vehicle_velocity_ * dt;
+    } else if (submersible) {
+      water_occupancy = vehicle_water_occupancy(
+          collision_query,
+          predicted_vehicle_position_,
+          profile.collision_size,
+          profile.preferred_water_occupancy);
+      submersible_in_water = water_occupancy >= profile.min_water_occupancy;
+      const f32 vertical_input =
+          (command.jump_held ? 1.0F : 0.0F) -
+          (command.sneak_held ? 1.0F : 0.0F);
+      if (submersible_in_water) {
+        const f32 pitch_input =
+            -normalized_look_axis(command.look_delta_y, 160.0F);
+        const f32 pitch_delta = pitch_input * profile.pitch_rate * dt;
+        const f32 yaw_delta = steer * profile.turn_rate * dt;
+        predicted_vehicle_rotation_ =
+            apply_local_vehicle_rotation(
+                predicted_vehicle_rotation_,
+                pitch_delta,
+                yaw_delta,
+                0.0F);
+        predicted_vehicle_yaw_ = vehicle_gameplay_yaw_from_rotation(predicted_vehicle_rotation_);
+        reported_angular_velocity = {pitch_delta / dt, yaw_delta / dt, 0.0F};
+
+        Vec3f forward = normalize_or_zero(model_visual_forward(predicted_vehicle_rotation_));
+        if (length(forward) <= 0.0F) {
+          forward = horizontal_forward(predicted_vehicle_yaw_);
+        }
+        const f32 max_speed = throttle < 0.0F
+                                  ? profile.max_reverse_speed
+                                  : profile.max_forward_speed;
+        const f32 target_speed = throttle * max_speed;
+        const f32 current_speed = dot(predicted_vehicle_velocity_, forward);
+        f32 next_speed = current_speed;
+        if (command.secondary_held) {
+          next_speed = approach(current_speed, 0.0F, profile.brake_force * dt);
+        } else if (std::abs(throttle) > 0.01F) {
+          const f32 accel =
+              (current_speed * target_speed < 0.0F) ? profile.brake_force : profile.acceleration;
+          next_speed = approach(current_speed, target_speed, accel * dt);
+        } else {
+          next_speed = current_speed *
+                       std::pow(profile.water_drag, std::max(dt, 0.0F) * 60.0F);
+          if (std::abs(next_speed) < 0.02F) {
+            next_speed = 0.0F;
+          }
+        }
+        predicted_vehicle_velocity_ = forward * next_speed;
+        const f32 vertical_rate =
+            vertical_input >= 0.0F ? profile.ascend_rate : profile.descend_rate;
+        predicted_vehicle_velocity_.y += vertical_input * vertical_rate;
+        predicted_vehicle_velocity_ =
+            predicted_vehicle_velocity_ *
+            std::pow(profile.water_drag, std::max(dt, 0.0F) * 60.0F);
+        if (water_occupancy < profile.preferred_water_occupancy &&
+            predicted_vehicle_velocity_.y > 0.0F) {
+          const f32 surface_damping = std::clamp(
+              water_occupancy / std::max(profile.preferred_water_occupancy, 0.01F),
+              0.25F,
+              1.0F);
+          predicted_vehicle_velocity_.y *= surface_damping;
+        }
+      } else {
+        const f32 air_drag =
+            std::pow(profile.air_drag, std::max(dt, 0.0F) * 60.0F);
+        predicted_vehicle_velocity_.x *= air_drag;
+        predicted_vehicle_velocity_.z *= air_drag;
+        predicted_vehicle_velocity_.y = std::max(
+            predicted_vehicle_velocity_.y -
+                VehicleGravityBlocksPerSecondSquared *
+                    profile.gravity_scale_out_of_water *
+                    dt,
+            -VehicleTerminalVelocityBlocksPerSecond);
+        if (command.secondary_held) {
+          predicted_vehicle_velocity_.x =
+              approach(predicted_vehicle_velocity_.x, 0.0F, profile.brake_force * dt);
+          predicted_vehicle_velocity_.z =
+              approach(predicted_vehicle_velocity_.z, 0.0F, profile.brake_force * dt);
+        }
+      }
+      attempted_delta = predicted_vehicle_velocity_ * dt;
+    } else {
+      const f32 max_speed = throttle < 0.0F
+                                ? profile.max_reverse_speed
+                                : profile.max_forward_speed;
+      const f32 target_speed = throttle * max_speed;
+      if (ground_vehicle) {
+        const f32 speed_fraction =
+            profile.max_forward_speed <= 0.0F
+                ? 0.0F
+                : std::clamp(
+                      horizontal_length(predicted_vehicle_velocity_) /
+                          profile.max_forward_speed,
+                      0.0F,
+                      1.0F);
+        const f32 traction = vehicle_grounded ? 1.0F : 0.1F;
+        const f32 steering_response =
+            std::abs(throttle) > 0.01F || speed_fraction > 0.05F
+                ? std::max(speed_fraction, 0.25F) * traction
+                : 0.0F;
+        predicted_vehicle_yaw_ = wrap_angle_radians(
+            predicted_vehicle_yaw_ + steer * profile.turn_rate * steering_response * dt);
+      } else {
+        const f32 desired_yaw =
+            std::abs(steer) > 0.01F
+                ? wrap_angle_radians(predicted_vehicle_yaw_ + steer * profile.turn_rate)
+                : player_controller.camera().yaw_radians();
+        predicted_vehicle_yaw_ = approach_angle(
+            predicted_vehicle_yaw_,
+            desired_yaw,
+            profile.turn_rate * dt);
+      }
+      const Vec3f forward = horizontal_forward(predicted_vehicle_yaw_);
+      const f32 current_speed = dot(predicted_vehicle_velocity_, forward);
+      f32 next_speed = current_speed;
+      const bool has_ground_traction = !ground_vehicle || vehicle_grounded;
+      if (command.secondary_held && has_ground_traction) {
+        next_speed = approach(current_speed, 0.0F, profile.brake_force * dt);
+      } else if (std::abs(throttle) > 0.01F && has_ground_traction) {
+        const f32 accel =
+            (current_speed * target_speed < 0.0F) ? profile.brake_force : profile.acceleration;
+        next_speed = approach(current_speed, target_speed, accel * dt);
+      } else {
+        const f32 drag_factor =
+            std::pow(profile.drag, std::max(dt, 0.0F) * 60.0F);
+        next_speed = current_speed * drag_factor;
+        if (std::abs(next_speed) < 0.02F) {
+          next_speed = 0.0F;
+        }
+      }
+      f32 next_vertical_speed = predicted_vehicle_velocity_.y;
+      if (ground_vehicle) {
+        if (vehicle_grounded) {
+          next_vertical_speed = std::max(next_vertical_speed, 0.0F);
+        } else {
+          next_vertical_speed = std::max(
+              next_vertical_speed -
+                  VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt,
+              -VehicleTerminalVelocityBlocksPerSecond);
+        }
+      }
+      Vec3f next_horizontal_velocity = forward * next_speed;
+      if (ground_vehicle && predicted_vehicle_impact_ticks_ > 0U) {
+        next_horizontal_velocity = project_velocity_out_of_impact(
+            next_horizontal_velocity,
+            predicted_vehicle_impact_normal_);
+      }
+      predicted_vehicle_velocity_ = next_horizontal_velocity;
+      predicted_vehicle_velocity_.y = next_vertical_speed;
+      predicted_vehicle_rotation_ =
+          vehicle_render_rotation_from_gameplay_yaw(predicted_vehicle_yaw_);
+      const f32 yaw_delta = wrap_angle_radians(predicted_vehicle_yaw_ - previous_yaw);
+      reported_angular_velocity = {0.0F, yaw_delta / dt, 0.0F};
+      attempted_delta = predicted_vehicle_velocity_ * dt;
     }
-    Vec3f next_horizontal_velocity = forward * next_speed;
-    if (ground_vehicle && predicted_vehicle_impact_ticks_ > 0U) {
-      next_horizontal_velocity = project_velocity_out_of_impact(
-          next_horizontal_velocity,
-          predicted_vehicle_impact_normal_);
-    }
-    predicted_vehicle_velocity_ = next_horizontal_velocity;
-    predicted_vehicle_velocity_.y = next_vertical_speed;
-    const Vec3f attempted_delta = predicted_vehicle_velocity_ * dt;
-    const Quatf next_vehicle_rotation =
-        vehicle_render_rotation_from_gameplay_yaw(predicted_vehicle_yaw_);
+
     if (collision_query != nullptr) {
       const Aabb3f bounds =
           vehicle_bounds(predicted_vehicle_position_, profile.collision_size);
@@ -508,8 +885,10 @@ void ClientInputRuntime::send_fixed_tick_input(
       if (resolved.hit_z) {
         predicted_vehicle_velocity_.z = 0.0F;
       }
-      if (ground_vehicle) {
+      if (ground_vehicle || aircraft || submersible) {
         vehicle_grounded = resolved.grounded;
+      }
+      if (ground_vehicle) {
         const Vec3f impact_normal =
             vehicle_horizontal_impact_normal(resolved, attempted_delta);
         if (has_horizontal_vector(impact_normal)) {
@@ -531,8 +910,26 @@ void ClientInputRuntime::send_fixed_tick_input(
         }
       }
     }
-    predicted_vehicle_rotation_ = next_vehicle_rotation;
-    const f32 yaw_delta = wrap_angle_radians(predicted_vehicle_yaw_ - previous_yaw);
+    if (aircraft || submersible) {
+      const f32 rotation_delta = std::max(dt, 1.0F / 240.0F);
+      if (length(reported_angular_velocity) <= 0.0F) {
+        const f32 yaw_delta = wrap_angle_radians(predicted_vehicle_yaw_ - previous_yaw);
+        reported_angular_velocity = {0.0F, yaw_delta / rotation_delta, 0.0F};
+      }
+    }
+    if (aircraft && vehicle_grounded) {
+      predicted_flags |= protocol::VehicleMoveFlags::OnGround;
+    } else if (submersible) {
+      if (submersible_in_water) {
+        predicted_flags |= protocol::VehicleMoveFlags::InWater;
+      } else if (vehicle_grounded) {
+        predicted_flags |= protocol::VehicleMoveFlags::OnGround;
+      }
+    } else if (profile.physics == entity::VehiclePhysicsKind::SurfaceWaterVehicle) {
+      predicted_flags |= protocol::VehicleMoveFlags::InWater;
+    } else if (vehicle_grounded) {
+      predicted_flags |= protocol::VehicleMoveFlags::OnGround;
+    }
 
     const std::string_view animation_name =
         vehicle_motion_animation_name(
@@ -586,16 +983,10 @@ void ClientInputRuntime::send_fixed_tick_input(
     move.position = predicted_vehicle_position_;
     move.velocity = predicted_vehicle_velocity_;
     move.rotation = predicted_vehicle_rotation_;
-    move.angular_velocity = {0.0F, yaw_delta / dt, 0.0F};
+    move.angular_velocity = reported_angular_velocity;
     move.throttle = throttle;
     move.steer = steer;
-    move.flags = protocol::VehicleMoveFlags::None;
-    if (profile.physics == entity::VehiclePhysicsKind::SurfaceWaterVehicle) {
-      move.flags |= protocol::VehicleMoveFlags::InWater;
-    } else if (!ground_vehicle ||
-               vehicle_grounded) {
-      move.flags |= protocol::VehicleMoveFlags::OnGround;
-    }
+    move.flags = predicted_flags;
     if (command.jump_pressed) {
       move.flags |= protocol::VehicleMoveFlags::Jump;
     }

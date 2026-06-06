@@ -16,6 +16,46 @@ TEST(LocalPlayerControllerTests, HotbarSelectionAndScrollWrapProduceStableComman
   EXPECT_EQ(wrapped.selected_hotbar_slot, 4U);
 }
 
+TEST(LocalPlayerControllerTests, VehicleActionInputsFlowIntoCommands) {
+  arv::client::LocalPlayerController controller;
+
+  controller.submit_input(arv::client::InputFrame{
+      .mount_pressed = true,
+      .vehicle_roll_left_held = true});
+  const arv::player::PlayerCommand first = controller.consume_command(20);
+  EXPECT_TRUE(first.mount_pressed);
+  EXPECT_TRUE(first.vehicle_roll_left_held);
+  EXPECT_FALSE(first.vehicle_roll_right_held);
+
+  controller.submit_input(arv::client::InputFrame{
+      .vehicle_roll_right_held = true});
+  const arv::player::PlayerCommand second = controller.consume_command(21);
+  EXPECT_FALSE(second.mount_pressed);
+  EXPECT_FALSE(second.vehicle_roll_left_held);
+  EXPECT_TRUE(second.vehicle_roll_right_held);
+}
+
+TEST(LocalPlayerControllerTests, RideStartClearsPendingMountPress) {
+  arv::client::LocalPlayerController controller;
+  controller.enter_world(
+      arv::WorldID{1},
+      arv::PlayerID{2},
+      arv::EntityNetID{3},
+      {0.0F, 0.0F, 0.0F});
+
+  controller.submit_input(arv::client::InputFrame{.mount_pressed = true});
+  arv::protocol::ClientboundRideStarted event;
+  event.passenger_id = arv::EntityNetID{3};
+  event.rideable_id = arv::EntityNetID{10};
+  event.seat_id = "driver";
+  event.controls_vehicle = true;
+  controller.apply_ride_started(event);
+
+  const arv::player::PlayerCommand command = controller.consume_command(22);
+  EXPECT_FALSE(command.mount_pressed);
+  EXPECT_EQ(controller.mounted_vehicle_id(), std::optional<arv::EntityNetID>{arv::EntityNetID{10}});
+}
+
 TEST(LocalPlayerControllerTests, MoveCorrectionSnapsLocalTransformDirectly) {
   arv::client::LocalPlayerController controller;
 

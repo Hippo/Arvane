@@ -44,6 +44,7 @@ Examples:
 ```text
 MoveForward → [Keyboard: W]
 Jump        → [Keyboard: Space]
+Mount       → [Keyboard: F]
 PrimaryUse  → [Mouse: LeftButton]
 ```
 
@@ -143,6 +144,10 @@ bindings:
   Jump:
     - device: keyboard
       key: Space
+
+  Mount:
+    - device: keyboard
+      key: F
   
   Sneak:
     - device: keyboard
@@ -151,6 +156,14 @@ bindings:
   Sprint:
     - device: keyboard
       key: LShift
+
+  VehicleRollLeft:
+    - device: keyboard
+      key: X
+
+  VehicleRollRight:
+    - device: keyboard
+      key: C
 
   PrimaryInteract:
     - device: mouse_button

@@ -29,6 +29,9 @@ bindings:
   Jump:
     - device: keyboard
       key: Space
+  Mount:
+    - device: keyboard
+      key: F
   MoveBackward:
     - device: keyboard
       key: S
@@ -74,4 +77,10 @@ bindings:
   TogglePauseMenu:
     - device: keyboard
       key: Escape
+  VehicleRollLeft:
+    - device: keyboard
+      key: X
+  VehicleRollRight:
+    - device: keyboard
+      key: C
 version: 1

@@ -244,16 +244,14 @@ arv::entity::VehicleDefinitionRegistry make_spawn_vehicle_registry() {
       1.0F,
       0.6F,
       0.8F};
-  horse.authority = {
-      8.0F,
-      16.0F,
-      22.0F,
-      arv::degrees_to_radians(180.0F),
-      8.0F,
-      0.6F,
-      true,
-      false,
-      0U};
+  horse.authority.max_speed = 8.0F;
+  horse.authority.max_acceleration = 16.0F;
+  horse.authority.max_deceleration = 22.0F;
+  horse.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
+  horse.authority.max_vertical_speed = 8.0F;
+  horse.authority.max_step_height = 0.6F;
+  horse.authority.requires_ground = true;
+  horse.authority.requires_water = false;
 
   auto result = arv::entity::VehicleDefinitionRegistry::build({std::move(horse)});
   if (!result) {

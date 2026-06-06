@@ -167,16 +167,14 @@ arv::entity::VehicleDefinitionRegistry make_mount_request_vehicle_registry() {
       1.0F,
       0.8F,
       1.0F};
-  mount.authority = {
-      10.0F,
-      20.0F,
-      30.0F,
-      3.0F,
-      12.0F,
-      1.0F,
-      false,
-      false,
-      0U};
+  mount.authority.max_speed = 10.0F;
+  mount.authority.max_acceleration = 20.0F;
+  mount.authority.max_deceleration = 30.0F;
+  mount.authority.max_angular_speed = 3.0F;
+  mount.authority.max_vertical_speed = 12.0F;
+  mount.authority.max_step_height = 1.0F;
+  mount.authority.requires_ground = false;
+  mount.authority.requires_water = false;
   auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(mount)});
   EXPECT_TRUE(registry);
   return std::move(registry.value());
@@ -225,16 +223,14 @@ arv::entity::VehicleDefinitionRegistry make_buggy_request_vehicle_registry() {
       0.9F,
       1.0F,
       0.5F};
-  buggy.authority = {
-      22.0F,
-      18.0F,
-      50.0F,
-      arv::degrees_to_radians(110.0F),
-      24.0F,
-      0.6F,
-      false,
-      false,
-      0U};
+  buggy.authority.max_speed = 22.0F;
+  buggy.authority.max_acceleration = 18.0F;
+  buggy.authority.max_deceleration = 50.0F;
+  buggy.authority.max_angular_speed = arv::degrees_to_radians(110.0F);
+  buggy.authority.max_vertical_speed = 24.0F;
+  buggy.authority.max_step_height = 0.6F;
+  buggy.authority.requires_ground = false;
+  buggy.authority.requires_water = false;
   auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(buggy)});
   EXPECT_TRUE(registry);
   return std::move(registry.value());
@@ -254,6 +250,70 @@ arv::EntityID create_networked_test_buggy(
   arv::world::EntityCreateInfo info;
   info.type_id = arv::EntityTypeID{3};
   info.type_name = "arvane:test_buggy";
+  info.position = position;
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  return server.voxel_world().create_entity(std::move(info));
+}
+
+arv::entity::VehicleDefinitionRegistry make_plane_request_vehicle_registry() {
+  arv::entity::VehicleDefinition plane;
+  plane.name = "arvane:test_plane";
+  plane.kind = arv::entity::VehicleKind::Vehicle;
+  plane.physics = arv::entity::VehiclePhysicsKind::Aircraft;
+  plane.collision_size = {4.0F, 1.5F, 3.0625F};
+  plane.seats.push_back({"pilot",
+                         "pilot",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 0.75F, 0.35F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::VehicleChase});
+  plane.aircraft = {
+      0.0F,
+      42.0F,
+      18.0F,
+      24.0F,
+      0.985F,
+      arv::degrees_to_radians(75.0F),
+      arv::degrees_to_radians(55.0F),
+      arv::degrees_to_radians(110.0F),
+      arv::degrees_to_radians(60.0F),
+      24.0F,
+      9.0F,
+      1.8F,
+      0.65F,
+      18.0F,
+      28.0F,
+      10.0F,
+      0.92F};
+  plane.authority.max_speed = 52.0F;
+  plane.authority.max_acceleration = 36.0F;
+  plane.authority.max_deceleration = 48.0F;
+  plane.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
+  plane.authority.max_vertical_speed = 36.0F;
+  plane.authority.requires_swept_collision = true;
+  plane.authority.max_unloaded_chunk_entry_distance = 0.0F;
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(plane)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
+arv::EntityID create_networked_test_plane(
+    arv::server::ServerRuntime& server,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position) {
+  arv::entity::EntityComponentSet components;
+  components.collision =
+      arv::entity::AuthoredCollisionComponent{{4.0F, 1.5F, 3.0625F}};
+  components.rideable =
+      arv::entity::AuthoredRideableComponent{"arvane:test_plane"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_plane"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_id = arv::EntityTypeID{4};
+  info.type_name = "arvane:test_plane";
   info.position = position;
   info.authored_components = components;
   info.vehicle_definitions = &vehicles;
@@ -681,6 +741,64 @@ TEST(PlayerInteractionTests, ServerboundRideEntityRequestMountsRideableWithHeldI
   EXPECT_FLOAT_EQ(updated_player_state.position.x, 2.0F);
   EXPECT_FLOAT_EQ(updated_player_state.position.y, 1.25F);
   EXPECT_FLOAT_EQ(updated_player_state.position.z, 0.0F);
+}
+
+TEST(PlayerInteractionTests, PlaneDismountRequestWorksInMidair) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_plane_request_vehicle_registry();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.0F, 20.0F, 0.0F};
+  player_state.velocity = {};
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(player_state.player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(server.voxel_world().set_entity_position(
+      player_entity.value(),
+      player_state.position));
+
+  const arv::Vec3f plane_position{2.0F, 20.0F, 0.0F};
+  const arv::EntityID plane = create_networked_test_plane(
+      server,
+      vehicle_registry,
+      plane_position);
+  const std::optional<arv::EntityNetID> plane_net =
+      server.voxel_world().network_id_for_entity(plane);
+  ASSERT_TRUE(plane_net.has_value());
+
+  ASSERT_TRUE(client.request_ride_entity(plane_net.value()));
+  server.tick();
+  ASSERT_EQ(
+      server.voxel_world().mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{plane});
+
+  ASSERT_TRUE(client.request_dismount());
+  server.tick();
+
+  EXPECT_FALSE(server.voxel_world().mounted_rideable(player_entity.value()).has_value());
+  const arv::player::PlayerState& dismounted_player = connected_player(server);
+  EXPECT_NEAR(dismounted_player.position.x, plane_position.x, 0.0001F);
+  EXPECT_GT(dismounted_player.position.y, plane_position.y + 2.0F);
+  EXPECT_NEAR(dismounted_player.position.z, plane_position.z, 0.0001F);
 }
 
 TEST(PlayerInteractionTests, AcceptedBuggyVehicleMoveUpdatesDrivingAndReverseAnimations) {

@@ -287,6 +287,126 @@ TEST(VehicleDefinitionRegistryTests, LoadsValidVehicleDefinitions) {
   EXPECT_TRUE(buggy->authority.requires_ground);
 }
 
+TEST(VehicleDefinitionRegistryTests, LoadsAircraftAndSubmersibleDefinitions) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "vehicles": [
+    {
+      "name": "arvane:plane",
+      "kind": "vehicle",
+      "physics": "aircraft",
+      "collision": { "type": "aabb", "size": [4.0, 1.5, 3.0625] },
+      "seats": [
+        {
+          "id": "pilot",
+          "role": "driver",
+          "local_position": [0.0, 0.75, 0.35],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "vehicle_chase"
+        }
+      ],
+      "movement": {
+        "min_speed": 0.0,
+        "max_speed": 42.0,
+        "acceleration": 18.0,
+        "brake_deceleration": 24.0,
+        "drag": 0.985,
+        "pitch_rate": 75.0,
+        "yaw_rate": 55.0,
+        "roll_rate": 110.0,
+        "roll_auto_level_rate": 60.0,
+        "lift_strength": 24.0,
+        "stall_speed": 9.0,
+        "stall_gravity_scale": 1.8,
+        "gravity_scale": 0.65,
+        "max_climb_rate": 18.0,
+        "max_descent_rate": 28.0,
+        "ground_takeoff_speed": 10.0,
+        "ground_drag": 0.92
+      },
+      "authority": {
+        "max_speed": 52.0,
+        "max_acceleration": 36.0,
+        "max_deceleration": 48.0,
+        "max_angular_speed": 180.0,
+        "max_vertical_speed": 36.0,
+        "requires_ground": false,
+        "requires_water": false,
+        "requires_swept_collision": true,
+        "max_unloaded_chunk_entry_distance": 0.0
+      }
+    },
+    {
+      "name": "arvane:submarine",
+      "kind": "vehicle",
+      "physics": "submersible",
+      "collision": { "type": "aabb", "size": [2.0, 1.5, 2.25] },
+      "seats": [
+        {
+          "id": "pilot",
+          "role": "driver",
+          "local_position": [0.0, 0.85, 0.3],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "vehicle_chase"
+        }
+      ],
+      "movement": {
+        "max_forward_speed": 24.0,
+        "max_reverse_speed": 8.0,
+        "acceleration": 28.0,
+        "brake_deceleration": 24.0,
+        "turn_rate": 65.0,
+        "pitch_rate": 35.0,
+        "ascend_rate": 10.0,
+        "descend_rate": 10.0,
+        "water_drag": 0.97,
+        "air_drag": 0.45,
+        "gravity_scale_out_of_water": 1.0,
+        "min_water_occupancy": 0.45,
+        "preferred_water_occupancy": 0.75,
+        "surface_float_offset": 0.15
+      },
+      "authority": {
+        "max_speed": 28.0,
+        "max_acceleration": 36.0,
+        "max_deceleration": 36.0,
+        "max_angular_speed": 110.0,
+        "max_vertical_speed": 14.0,
+        "requires_ground": false,
+        "requires_water": false,
+        "min_water_occupancy": 0.35
+      }
+    }
+  ]
+}
+)json");
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  auto registry_result = arv::entity::VehicleDefinitionRegistry::build(std::move(parsed.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+
+  const arv::entity::VehicleDefinition* plane =
+      registry_result.value().find("arvane:plane");
+  ASSERT_NE(plane, nullptr);
+  EXPECT_EQ(plane->physics, arv::entity::VehiclePhysicsKind::Aircraft);
+  ASSERT_EQ(plane->seats.size(), 1U);
+  EXPECT_EQ(plane->seats.front().camera_mode, arv::entity::CameraMode::VehicleChase);
+  EXPECT_FLOAT_EQ(plane->aircraft.max_speed, 42.0F);
+  EXPECT_NEAR(plane->aircraft.roll_rate, arv::degrees_to_radians(110.0F), 0.00001F);
+  EXPECT_TRUE(plane->authority.requires_swept_collision);
+  EXPECT_FLOAT_EQ(plane->authority.max_unloaded_chunk_entry_distance, 0.0F);
+
+  const arv::entity::VehicleDefinition* submarine =
+      registry_result.value().find("arvane:submarine");
+  ASSERT_NE(submarine, nullptr);
+  EXPECT_EQ(submarine->physics, arv::entity::VehiclePhysicsKind::Submersible);
+  EXPECT_FLOAT_EQ(submarine->submersible.max_forward_speed, 24.0F);
+  EXPECT_NEAR(submarine->submersible.turn_rate, arv::degrees_to_radians(65.0F), 0.00001F);
+  EXPECT_FLOAT_EQ(submarine->submersible.min_water_occupancy, 0.45F);
+  EXPECT_FLOAT_EQ(submarine->authority.min_water_occupancy, 0.35F);
+}
+
 TEST(VehicleDefinitionRegistryTests, RejectsMissingControllingSeat) {
   auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
 {
@@ -349,13 +469,112 @@ TEST(VehicleDefinitionRegistryTests, RejectsUnknownPhysicsKind) {
 {
   "name": "arvane:plane",
   "kind": "vehicle",
-  "physics": "aircraft",
+  "physics": "hovercraft",
   "collision": { "type": "aabb", "size": [1.0, 1.0, 1.0] },
   "seats": []
 }
 )json");
   ASSERT_FALSE(parsed);
   EXPECT_NE(parsed.error().message.find("unknown physics kind"), std::string::npos);
+}
+
+TEST(VehicleDefinitionRegistryTests, RejectsInvalidAircraftSpeedEnvelope) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "name": "arvane:bad_plane",
+  "kind": "vehicle",
+  "physics": "aircraft",
+  "collision": { "type": "aabb", "size": [1.0, 1.0, 1.0] },
+  "seats": [
+    {
+      "id": "pilot",
+      "role": "driver",
+      "local_position": [0.0, 0.0, 0.0],
+      "local_rotation": [0.0, 0.0, 0.0, 1.0],
+      "controls_vehicle": true,
+      "camera_mode": "vehicle_chase"
+    }
+  ],
+  "movement": {
+    "min_speed": 12.0,
+    "max_speed": 4.0,
+    "acceleration": 1.0,
+    "brake_deceleration": 1.0,
+    "drag": 0.9,
+    "pitch_rate": 1.0,
+    "yaw_rate": 1.0,
+    "roll_rate": 1.0,
+    "roll_auto_level_rate": 1.0,
+    "lift_strength": 1.0,
+    "stall_speed": 1.0,
+    "stall_gravity_scale": 1.0,
+    "gravity_scale": 1.0,
+    "max_climb_rate": 1.0,
+    "max_descent_rate": 1.0,
+    "ground_takeoff_speed": 1.0,
+    "ground_drag": 0.9
+  },
+  "authority": {
+    "max_speed": 1.0,
+    "max_acceleration": 1.0,
+    "max_deceleration": 1.0,
+    "max_angular_speed": 1.0,
+    "max_vertical_speed": 1.0,
+    "requires_ground": false,
+    "requires_water": false
+  }
+}
+)json");
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("min_speed"), std::string::npos);
+}
+
+TEST(VehicleDefinitionRegistryTests, RejectsInvalidSubmersibleWaterOccupancy) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "name": "arvane:bad_submarine",
+  "kind": "vehicle",
+  "physics": "submersible",
+  "collision": { "type": "aabb", "size": [1.0, 1.0, 1.0] },
+  "seats": [
+    {
+      "id": "pilot",
+      "role": "driver",
+      "local_position": [0.0, 0.0, 0.0],
+      "local_rotation": [0.0, 0.0, 0.0, 1.0],
+      "controls_vehicle": true,
+      "camera_mode": "vehicle_chase"
+    }
+  ],
+  "movement": {
+    "max_forward_speed": 1.0,
+    "max_reverse_speed": 1.0,
+    "acceleration": 1.0,
+    "brake_deceleration": 1.0,
+    "turn_rate": 1.0,
+    "pitch_rate": 1.0,
+    "ascend_rate": 1.0,
+    "descend_rate": 1.0,
+    "water_drag": 0.9,
+    "air_drag": 0.5,
+    "gravity_scale_out_of_water": 1.0,
+    "min_water_occupancy": 0.8,
+    "preferred_water_occupancy": 0.4,
+    "surface_float_offset": 0.0
+  },
+  "authority": {
+    "max_speed": 1.0,
+    "max_acceleration": 1.0,
+    "max_deceleration": 1.0,
+    "max_angular_speed": 1.0,
+    "max_vertical_speed": 1.0,
+    "requires_ground": false,
+    "requires_water": false
+  }
+}
+)json");
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("min_water_occupancy"), std::string::npos);
 }
 
 TEST(VehicleDefinitionRegistryTests, RejectsMissingAuthorityValues) {

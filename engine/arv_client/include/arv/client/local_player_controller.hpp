@@ -24,6 +24,9 @@ struct InputFrame {
   bool jump_held{};
   bool sneak_held{};
   bool sprint_held{};
+  bool mount_pressed{};
+  bool vehicle_roll_left_held{};
+  bool vehicle_roll_right_held{};
   bool primary_pressed{};
   bool primary_held{};
   bool secondary_pressed{};
@@ -190,9 +193,12 @@ private:
   bool jump_held_{};
   bool sneak_held_{};
   bool sprint_held_{};
+  bool vehicle_roll_left_held_{};
+  bool vehicle_roll_right_held_{};
   bool primary_held_{};
   bool secondary_held_{};
   bool jump_pressed_{};
+  bool mount_pressed_{};
   bool primary_pressed_{};
   bool secondary_pressed_{};
   std::optional<TickIndex> last_jump_press_tick_{};

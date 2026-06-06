@@ -1018,6 +1018,12 @@ bindings:
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::MoveBackward);
   const auto& sneak =
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Sneak);
+  const auto& mount =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Mount);
+  const auto& roll_left =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::VehicleRollLeft);
+  const auto& roll_right =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::VehicleRollRight);
   const auto& open_inventory =
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::OpenInventory);
   const auto& debug_menu =
@@ -1029,6 +1035,12 @@ bindings:
   EXPECT_EQ(move_backward[0].input_code, "S");
   ASSERT_EQ(sneak.size(), 1U);
   EXPECT_EQ(sneak[0].input_code, "LShift");
+  ASSERT_EQ(mount.size(), 1U);
+  EXPECT_EQ(mount[0].input_code, "F");
+  ASSERT_EQ(roll_left.size(), 1U);
+  EXPECT_EQ(roll_left[0].input_code, "X");
+  ASSERT_EQ(roll_right.size(), 1U);
+  EXPECT_EQ(roll_right[0].input_code, "C");
   ASSERT_EQ(open_inventory.size(), 1U);
   EXPECT_EQ(open_inventory[0].input_code, "E");
   ASSERT_EQ(debug_menu.size(), 1U);
@@ -1093,10 +1105,30 @@ TEST(ConfigTests, MissingInputBindingsFileReturnsDefaultsAndWritesConfig) {
   EXPECT_TRUE(std::filesystem::exists(temp_file));
   const auto& jump =
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Jump);
+  const auto& sneak =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Sneak);
+  const auto& sprint =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Sprint);
+  const auto& mount =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::Mount);
+  const auto& roll_left =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::VehicleRollLeft);
+  const auto& roll_right =
+      arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::VehicleRollRight);
   const auto& debug_menu =
       arv::platform::bindings_for_action(result.value(), arv::platform::LogicalAction::ToggleDebugMenu);
   ASSERT_EQ(jump.size(), 1U);
   EXPECT_EQ(jump[0].input_code, "Space");
+  ASSERT_EQ(sneak.size(), 1U);
+  EXPECT_EQ(sneak[0].input_code, "LCtrl");
+  ASSERT_EQ(sprint.size(), 1U);
+  EXPECT_EQ(sprint[0].input_code, "LShift");
+  ASSERT_EQ(mount.size(), 1U);
+  EXPECT_EQ(mount[0].input_code, "F");
+  ASSERT_EQ(roll_left.size(), 1U);
+  EXPECT_EQ(roll_left[0].input_code, "X");
+  ASSERT_EQ(roll_right.size(), 1U);
+  EXPECT_EQ(roll_right[0].input_code, "C");
   ASSERT_EQ(debug_menu.size(), 1U);
   EXPECT_EQ(debug_menu[0].input_code, "Grave");
 }

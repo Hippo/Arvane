@@ -1,0 +1,417 @@
+{
+  "textures": [
+    "arvane:texture/entity/submarine"
+  ],
+  "texture_sizes": [
+    [
+      128,
+      128
+    ]
+  ],
+  "bones": {
+    "base": {
+      "pivot": [
+        0,
+        12,
+        0
+      ]
+    }
+  },
+  "boxes": [
+    {
+      "bone": "base",
+      "min": [
+        -16,
+        0,
+        -17
+      ],
+      "max": [
+        16,
+        4,
+        19
+      ],
+      "inflate": 0,
+      "origin": [
+        -15,
+        0,
+        -16
+      ],
+      "north": {
+        "texture": 0,
+        "uv": [
+          76,
+          4,
+          108,
+          8
+        ],
+        "rotation": 0
+      },
+      "south": {
+        "texture": 0,
+        "uv": [
+          76,
+          8,
+          108,
+          12
+        ],
+        "rotation": 0
+      },
+      "east": {
+        "texture": 0,
+        "uv": [
+          0,
+          76,
+          36,
+          80
+        ],
+        "rotation": 0
+      },
+      "west": {
+        "texture": 0,
+        "uv": [
+          76,
+          0,
+          112,
+          4
+        ],
+        "rotation": 0
+      },
+      "up": {
+        "texture": 0,
+        "uv": [
+          32,
+          36,
+          0,
+          0
+        ],
+        "rotation": 0
+      },
+      "down": {
+        "texture": 0,
+        "uv": [
+          64,
+          0,
+          32,
+          36
+        ],
+        "rotation": 0
+      }
+    },
+    {
+      "bone": "base",
+      "min": [
+        -10,
+        4,
+        -10
+      ],
+      "max": [
+        10,
+        24,
+        10
+      ],
+      "inflate": -0.001,
+      "origin": [
+        -9,
+        4,
+        -9
+      ],
+      "north": {
+        "texture": 0,
+        "uv": [
+          0,
+          36,
+          20,
+          56
+        ],
+        "rotation": 0
+      },
+      "south": {
+        "texture": 0,
+        "uv": [
+          40,
+          36,
+          60,
+          56
+        ],
+        "rotation": 0
+      },
+      "east": {
+        "texture": 0,
+        "uv": [
+          20,
+          36,
+          40,
+          56
+        ],
+        "rotation": 0
+      },
+      "west": {
+        "texture": 0,
+        "uv": [
+          0,
+          56,
+          20,
+          76
+        ],
+        "rotation": 0
+      },
+      "up": {
+        "texture": 0,
+        "uv": [
+          40,
+          76,
+          20,
+          56
+        ],
+        "rotation": 0
+      },
+      "down": {
+        "texture": 0,
+        "uv": [
+          60,
+          56,
+          40,
+          76
+        ],
+        "rotation": 0
+      }
+    },
+    {
+      "bone": "base",
+      "min": [
+        -16,
+        4,
+        -17
+      ],
+      "max": [
+        -10,
+        10,
+        19
+      ],
+      "inflate": 0,
+      "origin": [
+        -15,
+        4,
+        -16
+      ],
+      "north": {
+        "texture": 0,
+        "uv": [
+          76,
+          16,
+          82,
+          22
+        ],
+        "rotation": 0
+      },
+      "south": {
+        "texture": 0,
+        "uv": [
+          76,
+          22,
+          82,
+          28
+        ],
+        "rotation": 0
+      },
+      "east": {
+        "texture": 0,
+        "uv": [
+          60,
+          36,
+          96,
+          42
+        ],
+        "rotation": 0
+      },
+      "west": {
+        "texture": 0,
+        "uv": [
+          60,
+          42,
+          96,
+          48
+        ],
+        "rotation": 0
+      },
+      "up": {
+        "texture": 0,
+        "uv": [
+          66,
+          84,
+          60,
+          48
+        ],
+        "rotation": 0
+      },
+      "down": {
+        "texture": 0,
+        "uv": [
+          70,
+          0,
+          64,
+          36
+        ],
+        "rotation": 0
+      }
+    },
+    {
+      "bone": "base",
+      "min": [
+        10,
+        4,
+        -17
+      ],
+      "max": [
+        16,
+        10,
+        19
+      ],
+      "inflate": 0,
+      "origin": [
+        11,
+        4,
+        -16
+      ],
+      "north": {
+        "texture": 0,
+        "uv": [
+          76,
+          28,
+          82,
+          34
+        ],
+        "rotation": 0
+      },
+      "south": {
+        "texture": 0,
+        "uv": [
+          36,
+          76,
+          42,
+          82
+        ],
+        "rotation": 0
+      },
+      "east": {
+        "texture": 0,
+        "uv": [
+          66,
+          48,
+          102,
+          54
+        ],
+        "rotation": 0
+      },
+      "west": {
+        "texture": 0,
+        "uv": [
+          66,
+          54,
+          102,
+          60
+        ],
+        "rotation": 0
+      },
+      "up": {
+        "texture": 0,
+        "uv": [
+          72,
+          96,
+          66,
+          60
+        ],
+        "rotation": 0
+      },
+      "down": {
+        "texture": 0,
+        "uv": [
+          76,
+          0,
+          70,
+          36
+        ],
+        "rotation": 0
+      }
+    },
+    {
+      "bone": "base",
+      "min": [
+        -10,
+        8,
+        10
+      ],
+      "max": [
+        10,
+        10,
+        19
+      ],
+      "inflate": 0,
+      "origin": [
+        -9,
+        8,
+        11
+      ],
+      "north": {
+        "texture": 0,
+        "uv": [
+          76,
+          12,
+          96,
+          14
+        ],
+        "rotation": 0
+      },
+      "south": {
+        "texture": 0,
+        "uv": [
+          76,
+          14,
+          96,
+          16
+        ],
+        "rotation": 0
+      },
+      "east": {
+        "texture": 0,
+        "uv": [
+          76,
+          34,
+          85,
+          36
+        ],
+        "rotation": 0
+      },
+      "west": {
+        "texture": 0,
+        "uv": [
+          42,
+          76,
+          51,
+          78
+        ],
+        "rotation": 0
+      },
+      "up": {
+        "texture": 0,
+        "uv": [
+          92,
+          69,
+          72,
+          60
+        ],
+        "rotation": 0
+      },
+      "down": {
+        "texture": 0,
+        "uv": [
+          92,
+          69,
+          72,
+          78
+        ],
+        "rotation": 0
+      }
+    }
+  ]
+}

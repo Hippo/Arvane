@@ -83,6 +83,7 @@ enum class SeatRole : u8 {
 enum class CameraMode : u8 {
   MountedThirdPerson,
   ThirdPersonFollow,
+  VehicleChase,
 };
 
 enum class RideableDismountPolicy : u8 {
@@ -98,6 +99,8 @@ enum class VehiclePhysicsKind : u8 {
   LivingMount,
   SurfaceWaterVehicle,
   GroundVehicle,
+  Aircraft,
+  Submersible,
 };
 
 struct AuthoredRideableComponent {
@@ -192,8 +195,11 @@ struct VehicleAuthorityDefinition {
   f32 max_angular_speed{};
   f32 max_vertical_speed{};
   f32 max_step_height{};
+  f32 min_water_occupancy{};
+  f32 max_unloaded_chunk_entry_distance{-1.0F};
   bool requires_ground{};
   bool requires_water{};
+  bool requires_swept_collision{};
   u32 min_water_support_samples{};
 };
 
@@ -230,6 +236,43 @@ struct GroundVehicleMovementDefinition {
   f32 max_step_height{};
 };
 
+struct AircraftMovementDefinition {
+  f32 min_speed{};
+  f32 max_speed{};
+  f32 acceleration{};
+  f32 brake_deceleration{};
+  f32 drag{};
+  f32 pitch_rate{};
+  f32 yaw_rate{};
+  f32 roll_rate{};
+  f32 roll_auto_level_rate{};
+  f32 lift_strength{};
+  f32 stall_speed{};
+  f32 stall_gravity_scale{1.0F};
+  f32 gravity_scale{1.0F};
+  f32 max_climb_rate{};
+  f32 max_descent_rate{};
+  f32 ground_takeoff_speed{};
+  f32 ground_drag{};
+};
+
+struct SubmersibleMovementDefinition {
+  f32 max_forward_speed{};
+  f32 max_reverse_speed{};
+  f32 acceleration{};
+  f32 brake_deceleration{};
+  f32 turn_rate{};
+  f32 pitch_rate{};
+  f32 ascend_rate{};
+  f32 descend_rate{};
+  f32 water_drag{};
+  f32 air_drag{};
+  f32 gravity_scale_out_of_water{1.0F};
+  f32 min_water_occupancy{};
+  f32 preferred_water_occupancy{};
+  f32 surface_float_offset{};
+};
+
 struct VehicleDefinition {
   std::string name{};
   VehicleKind kind{VehicleKind::Vehicle};
@@ -239,6 +282,8 @@ struct VehicleDefinition {
   LivingMountMovementDefinition living_mount{};
   SurfaceWaterVehicleMovementDefinition surface_water{};
   GroundVehicleMovementDefinition ground{};
+  AircraftMovementDefinition aircraft{};
+  SubmersibleMovementDefinition submersible{};
   VehicleAuthorityDefinition authority{};
 };
 

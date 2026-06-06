@@ -129,6 +129,16 @@ VehicleMovementValidationResult validate_serverbound_vehicle_move(
             ? context.collision_resolved_state
             : stopped_state(previous));
   }
+  if (authority.requires_swept_collision && context.proposed_sweep_hit_solid) {
+    return reject_collision(
+        context.has_collision_resolved_state
+            ? context.collision_resolved_state
+            : stopped_state(previous));
+  }
+  if (authority.max_unloaded_chunk_entry_distance >= 0.0F &&
+      (!context.target_chunk_loaded || !context.swept_path_chunks_loaded)) {
+    return reject(previous, protocol::VehicleCorrectionReason::AircraftEnteredUnloadedChunk);
+  }
   if (authority.requires_ground &&
       protocol::has_vehicle_move_flag(packet.flags, protocol::VehicleMoveFlags::OnGround) &&
       !context.has_ground_support) {
@@ -141,6 +151,13 @@ VehicleMovementValidationResult validate_serverbound_vehicle_move(
 
   const f32 horizontal_speed = horizontal_length(packet.velocity);
   const f32 vertical_speed = std::abs(packet.velocity.y);
+  if (authority.min_water_occupancy > 0.0F &&
+      context.water_occupancy + 0.001F < authority.min_water_occupancy &&
+      (protocol::has_vehicle_move_flag(packet.flags, protocol::VehicleMoveFlags::InWater) ||
+       horizontal_speed > 1.0F ||
+       packet.velocity.y > 0.1F)) {
+    return reject(previous, protocol::VehicleCorrectionReason::InvalidSubmersibleMedium);
+  }
   if (horizontal_speed > authority.max_speed + VehicleVelocityEpsilonBlocksPerSecond) {
     return reject(previous, protocol::VehicleCorrectionReason::TooFast);
   }

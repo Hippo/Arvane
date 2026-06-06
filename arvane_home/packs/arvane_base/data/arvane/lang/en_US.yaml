@@ -68,6 +68,10 @@ entity:
       display_name: Oak Boat
     buggy:
       display_name: Buggy
+    plane:
+      display_name: Plane
+    submarine:
+      display_name: Submarine
 
 ui:
   common:

@@ -346,3 +346,89 @@ TEST(VehicleMovementValidationTests, RejectsMissingRequiredWaterSupport) {
   EXPECT_FALSE(result.accepted);
   EXPECT_EQ(result.reason, arv::protocol::VehicleCorrectionReason::MissingWaterSupport);
 }
+
+TEST(VehicleMovementValidationTests, RejectsAircraftSweptCollisionPath) {
+  auto aircraft = authority();
+  aircraft.requires_swept_collision = true;
+
+  auto context = controller_context();
+  context.proposed_sweep_hit_solid = true;
+
+  auto previous = accepted_at(1, {0.0F, 20.0F, 0.0F});
+  previous.velocity = {20.0F, 0.0F, 0.0F};
+
+  auto move = vehicle_move(2, {1.0F, 20.0F, 0.0F});
+  move.velocity = {20.0F, 0.0F, 0.0F};
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      previous,
+      context,
+      aircraft);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.reason, arv::protocol::VehicleCorrectionReason::Collision);
+}
+
+TEST(VehicleMovementValidationTests, RejectsAircraftEnteringUnloadedChunk) {
+  auto aircraft = authority();
+  aircraft.max_unloaded_chunk_entry_distance = 0.0F;
+
+  auto context = controller_context();
+  context.target_chunk_loaded = false;
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      vehicle_move(1, {32.0F, 20.0F, 0.0F}),
+      {},
+      context,
+      aircraft);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(
+      result.reason,
+      arv::protocol::VehicleCorrectionReason::AircraftEnteredUnloadedChunk);
+}
+
+TEST(VehicleMovementValidationTests, RejectsSubmersibleUsingWaterEnvelopeInAir) {
+  auto submarine = authority();
+  submarine.min_water_occupancy = 0.35F;
+
+  auto context = controller_context();
+  context.water_occupancy = 0.0F;
+
+  auto move = vehicle_move(1, {0.0F, 20.0F, 0.0F});
+  move.flags = arv::protocol::VehicleMoveFlags::InWater;
+  move.velocity = {8.0F, 1.0F, 0.0F};
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      {},
+      context,
+      submarine);
+
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(
+      result.reason,
+      arv::protocol::VehicleCorrectionReason::InvalidSubmersibleMedium);
+}
+
+TEST(VehicleMovementValidationTests, AcceptsSubmersibleOutOfWaterFallbackFall) {
+  auto submarine = authority();
+  submarine.min_water_occupancy = 0.35F;
+
+  auto context = controller_context();
+  context.water_occupancy = 0.0F;
+
+  auto move = vehicle_move(2, {0.0F, 19.98F, 0.0F});
+  move.flags = arv::protocol::VehicleMoveFlags::None;
+  move.velocity = {0.2F, -0.4F, 0.0F};
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      accepted_at(1, {0.0F, 20.0F, 0.0F}),
+      context,
+      submarine);
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_EQ(result.accepted_state.velocity, move.velocity);
+}

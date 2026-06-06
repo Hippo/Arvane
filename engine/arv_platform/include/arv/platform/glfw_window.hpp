@@ -68,6 +68,9 @@ struct InputSnapshot {
   bool jump_held{};
   bool sneak_held{};
   bool sprint_held{};
+  bool mount_pressed{};
+  bool vehicle_roll_left_held{};
+  bool vehicle_roll_right_held{};
   bool primary_pressed{};
   bool primary_held{};
   bool secondary_pressed{};

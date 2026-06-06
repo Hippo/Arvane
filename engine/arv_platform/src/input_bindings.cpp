@@ -20,6 +20,9 @@ constexpr std::array<ActionNameEntry, static_cast<usize>(LogicalAction::Count)> 
     {LogicalAction::Jump, "Jump"},
     {LogicalAction::Sneak, "Sneak"},
     {LogicalAction::Sprint, "Sprint"},
+    {LogicalAction::Mount, "Mount"},
+    {LogicalAction::VehicleRollLeft, "VehicleRollLeft"},
+    {LogicalAction::VehicleRollRight, "VehicleRollRight"},
     {LogicalAction::PrimaryInteract, "PrimaryInteract"},
     {LogicalAction::SecondaryInteract, "SecondaryInteract"},
     {LogicalAction::Hotbar1, "Hotbar1"},
@@ -227,6 +230,7 @@ bool is_required_logical_action(LogicalAction action) noexcept {
     case LogicalAction::MoveRight:
     case LogicalAction::Jump:
     case LogicalAction::Sneak:
+    case LogicalAction::Mount:
     case LogicalAction::PrimaryInteract:
     case LogicalAction::SecondaryInteract:
       return true;
@@ -242,8 +246,11 @@ InputBindings default_input_bindings() {
   set_default_binding(bindings, LogicalAction::MoveLeft, InputDeviceType::Keyboard, "A");
   set_default_binding(bindings, LogicalAction::MoveRight, InputDeviceType::Keyboard, "D");
   set_default_binding(bindings, LogicalAction::Jump, InputDeviceType::Keyboard, "Space");
-  set_default_binding(bindings, LogicalAction::Sneak, InputDeviceType::Keyboard, "LShift");
-  set_default_binding(bindings, LogicalAction::Sprint, InputDeviceType::Keyboard, "LCtrl");
+  set_default_binding(bindings, LogicalAction::Sneak, InputDeviceType::Keyboard, "LCtrl");
+  set_default_binding(bindings, LogicalAction::Sprint, InputDeviceType::Keyboard, "LShift");
+  set_default_binding(bindings, LogicalAction::Mount, InputDeviceType::Keyboard, "F");
+  set_default_binding(bindings, LogicalAction::VehicleRollLeft, InputDeviceType::Keyboard, "X");
+  set_default_binding(bindings, LogicalAction::VehicleRollRight, InputDeviceType::Keyboard, "C");
   set_default_binding(bindings, LogicalAction::PrimaryInteract, InputDeviceType::MouseButton, "Left");
   set_default_binding(bindings, LogicalAction::SecondaryInteract, InputDeviceType::MouseButton, "Right");
   set_default_binding(bindings, LogicalAction::Hotbar1, InputDeviceType::Keyboard, "1");

@@ -132,6 +132,100 @@
         "requires_ground": true,
         "requires_water": false
       }
+    },
+    {
+      "name": "arvane:plane",
+      "kind": "vehicle",
+      "physics": "aircraft",
+      "collision": {
+        "type": "aabb",
+        "size": [4.0, 1.5, 3.0625]
+      },
+      "seats": [
+        {
+          "id": "pilot",
+          "role": "driver",
+          "local_position": [0.0, 0.75, 0.35],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "vehicle_chase"
+        }
+      ],
+      "movement": {
+        "min_speed": 0.0,
+        "max_speed": 42.0,
+        "acceleration": 18.0,
+        "brake_deceleration": 24.0,
+        "drag": 0.985,
+        "pitch_rate": 75.0,
+        "yaw_rate": 55.0,
+        "roll_rate": 110.0,
+        "roll_auto_level_rate": 60.0,
+        "lift_strength": 24.0,
+        "stall_speed": 9.0,
+        "stall_gravity_scale": 1.8,
+        "gravity_scale": 0.65,
+        "max_climb_rate": 18.0,
+        "max_descent_rate": 28.0,
+        "ground_takeoff_speed": 10.0,
+        "ground_drag": 0.92
+      },
+      "authority": {
+        "max_speed": 52.0,
+        "max_acceleration": 36.0,
+        "max_deceleration": 48.0,
+        "max_angular_speed": 180.0,
+        "max_vertical_speed": 36.0,
+        "requires_ground": false,
+        "requires_water": false,
+        "requires_swept_collision": true,
+        "max_unloaded_chunk_entry_distance": 0.0
+      }
+    },
+    {
+      "name": "arvane:submarine",
+      "kind": "vehicle",
+      "physics": "submersible",
+      "collision": {
+        "type": "aabb",
+        "size": [2.0, 1.5, 2.25]
+      },
+      "seats": [
+        {
+          "id": "pilot",
+          "role": "driver",
+          "local_position": [0.0, 0.85, 0.3],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "vehicle_chase"
+        }
+      ],
+      "movement": {
+        "max_forward_speed": 24.0,
+        "max_reverse_speed": 8.0,
+        "acceleration": 28.0,
+        "brake_deceleration": 24.0,
+        "turn_rate": 65.0,
+        "pitch_rate": 35.0,
+        "ascend_rate": 10.0,
+        "descend_rate": 10.0,
+        "water_drag": 0.97,
+        "air_drag": 0.45,
+        "gravity_scale_out_of_water": 1.0,
+        "min_water_occupancy": 0.45,
+        "preferred_water_occupancy": 0.75,
+        "surface_float_offset": 0.15
+      },
+      "authority": {
+        "max_speed": 28.0,
+        "max_acceleration": 36.0,
+        "max_deceleration": 36.0,
+        "max_angular_speed": 110.0,
+        "max_vertical_speed": 14.0,
+        "requires_ground": false,
+        "requires_water": false,
+        "min_water_occupancy": 0.35
+      }
     }
   ]
 }

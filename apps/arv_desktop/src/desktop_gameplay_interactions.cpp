@@ -509,7 +509,7 @@ void DesktopFrameLoop::update_held_item_animation_from_input(
       spawn_local_block_hit_particles(session);
       send_local_entity_attack_if_targeted(session, nullptr);
     }
-    if (client_input.secondary_pressed &&
+    if (client_input.mount_pressed &&
         send_local_ride_request_if_targeted(session)) {
       session.held_item_secondary_use_active = false;
       session.held_item_animation.stop(now_seconds);
@@ -530,7 +530,7 @@ void DesktopFrameLoop::update_held_item_animation_from_input(
     send_local_entity_attack_if_targeted(session, held_item);
   }
 
-  if (client_input.secondary_pressed &&
+  if (client_input.mount_pressed &&
       send_local_ride_request_if_targeted(session)) {
     session.held_item_secondary_use_active = false;
     session.held_item_animation.stop(now_seconds);
