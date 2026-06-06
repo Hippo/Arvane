@@ -13,12 +13,21 @@
 #include "arv/render/render_commands.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
+#include <exception>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
 namespace arv::desktop {
+
+struct DesktopSessionManager::PendingShutdown {
+  std::thread thread;
+  std::atomic_bool finished{};
+  std::atomic_bool succeeded{};
+};
 
 DesktopGameSession::DesktopGameSession(TickRate base_tps) : ticks(base_tps) {
 }
@@ -26,7 +35,9 @@ DesktopGameSession::DesktopGameSession(TickRate base_tps) : ticks(base_tps) {
 DesktopSessionManager::DesktopSessionManager(DesktopSessionDependencies dependencies) : dependencies_(dependencies) {
 }
 
-DesktopSessionManager::~DesktopSessionManager() = default;
+DesktopSessionManager::~DesktopSessionManager() {
+  (void)finish_pending_shutdown();
+}
 
 DesktopGameSession* DesktopSessionManager::active_session() noexcept {
   return game_session_.get();
@@ -36,6 +47,14 @@ const DesktopGameSession* DesktopSessionManager::active_session() const noexcept
   return game_session_.get();
 }
 
+void DesktopSessionManager::poll_shutdown() {
+  if (pending_shutdown_ == nullptr ||
+      !pending_shutdown_->finished.load(std::memory_order_acquire)) {
+    return;
+  }
+  (void)finish_pending_shutdown();
+}
+
 void DesktopSessionManager::remove_session_chunk_meshes(DesktopGameSession& session) const {
   for (const auto& [coord, item] : session.chunk_view.draw_items) {
     (void)coord;
@@ -43,52 +62,51 @@ void DesktopSessionManager::remove_session_chunk_meshes(DesktopGameSession& sess
   }
 }
 
-bool DesktopSessionManager::save_and_shutdown() {
-  if (!game_session_) {
+bool DesktopSessionManager::shutdown_session(std::unique_ptr<DesktopGameSession> session) {
+  if (session == nullptr) {
     return true;
   }
 
-  DesktopGameSession& session = *game_session_;
-  if (session.integrated_server == nullptr) {
-    remove_session_chunk_meshes(session);
+  if (session->integrated_server == nullptr) {
+    cancel_chunk_view_mesh_jobs(dependencies_.world_jobs, session->chunk_view);
+    remove_session_chunk_meshes(*session);
     dependencies_.world_jobs.join();
-    game_session_.reset();
     return true;
   }
 
   if (const server::ServerSession* server_session =
-          session.integrated_server->sessions().first();
+          session->integrated_server->sessions().first();
       server_session != nullptr) {
-    (void)session.integrated_server->close_player_inventory_menu(server_session->player_id);
+    (void)session->integrated_server->close_player_inventory_menu(server_session->player_id);
   }
 
   const std::vector<persistence::SavedChunkSection> saved_chunks =
-      capture_saved_chunks(session.integrated_server->voxel_world());
+      capture_saved_chunks(session->integrated_server->voxel_world());
   const std::vector<persistence::PlayerSaveData> player_saves =
-      capture_player_saves(*session.integrated_server, session.world_save_name);
+      capture_player_saves(*session->integrated_server, session->world_save_name);
   const std::vector<entity::PersistentEntityRecord> entity_saves =
-      capture_saved_entities(session.integrated_server->voxel_world());
+      capture_saved_entities(session->integrated_server->voxel_world());
   const persistence::SaveMetadata save_metadata{
       persistence::CurrentSaveFormatVersion,
       std::string{persistence::CurrentGameVersion},
       dependencies_.block_registry_hash,
       dependencies_.item_registry_hash,
-      session.server_save_display_name};
+      session->server_save_display_name};
   persistence::WorldMetadata world_metadata{
-      session.world_save_name,
-      session.world_seed,
-      session.integrated_server->voxel_world().tick_index(),
-      session.generation_config,
-      session.min_chunk_y,
-      session.max_chunk_y,
+      session->world_save_name,
+      session->world_seed,
+      session->integrated_server->voxel_world().tick_index(),
+      session->generation_config,
+      session->min_chunk_y,
+      session->max_chunk_y,
       dependencies_.block_registry_hash,
       dependencies_.item_registry_hash,
-      session.integrated_server->voxel_world().clock(),
+      session->integrated_server->voxel_world().clock(),
       persistence::required_pack_metadata(dependencies_.required_packs),
       true};
-  world_metadata.spawn_point = session.integrated_server->voxel_world().spawn_point();
+  world_metadata.spawn_point = session->integrated_server->voxel_world().spawn_point();
   auto save_result = persistence::save_server_root(
-      session.server_save_root,
+      session->server_save_root,
       save_metadata,
       world_metadata,
       saved_chunks,
@@ -101,11 +119,69 @@ bool DesktopSessionManager::save_and_shutdown() {
     return false;
   }
 
-  remove_session_chunk_meshes(session);
+  cancel_chunk_view_mesh_jobs(dependencies_.world_jobs, session->chunk_view);
+  remove_session_chunk_meshes(*session);
   dependencies_.world_jobs.join();
-  session.integrated_server->shutdown();
-  game_session_.reset();
+  session->integrated_server->shutdown();
   return true;
+}
+
+bool DesktopSessionManager::finish_pending_shutdown() {
+  if (pending_shutdown_ == nullptr) {
+    return !shutdown_failed_;
+  }
+
+  if (pending_shutdown_->thread.joinable()) {
+    pending_shutdown_->thread.join();
+  }
+  const bool succeeded = pending_shutdown_->succeeded.load(std::memory_order_acquire);
+  pending_shutdown_.reset();
+  if (!succeeded) {
+    shutdown_failed_ = true;
+  }
+  return !shutdown_failed_;
+}
+
+bool DesktopSessionManager::begin_save_and_shutdown() {
+  if (pending_shutdown_ != nullptr && !finish_pending_shutdown()) {
+    return false;
+  }
+  if (!game_session_) {
+    return !shutdown_failed_;
+  }
+
+  auto pending = std::make_unique<PendingShutdown>();
+  PendingShutdown* state = pending.get();
+  std::unique_ptr<DesktopGameSession> session = std::move(game_session_);
+  pending->thread = std::thread([this, state, session = std::move(session)]() mutable {
+    bool succeeded = false;
+    try {
+      succeeded = shutdown_session(std::move(session));
+    } catch (const std::exception& ex) {
+      core::error("desktop", "session shutdown failed: {}", ex.what());
+    } catch (...) {
+      core::error("desktop", "session shutdown failed with an unknown exception");
+    }
+    state->succeeded.store(succeeded, std::memory_order_release);
+    state->finished.store(true, std::memory_order_release);
+  });
+  pending_shutdown_ = std::move(pending);
+  return true;
+}
+
+bool DesktopSessionManager::save_and_shutdown() {
+  if (!finish_pending_shutdown()) {
+    return false;
+  }
+  if (!game_session_) {
+    return !shutdown_failed_;
+  }
+
+  const bool succeeded = shutdown_session(std::move(game_session_));
+  if (!succeeded) {
+    shutdown_failed_ = true;
+  }
+  return succeeded && !shutdown_failed_;
 }
 
 bool DesktopSessionManager::start_singleplayer(

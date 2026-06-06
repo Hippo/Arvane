@@ -80,6 +80,7 @@ struct ChunkViewState {
 
 void request_chunk_view_mesh_rescan(ChunkViewState& view) noexcept;
 void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord);
+void cancel_chunk_view_mesh_jobs(sched::JobSystem& job_system, ChunkViewState& view) noexcept;
 
 [[nodiscard]] bool update_chunk_view(
     world::WorldRuntime& world,

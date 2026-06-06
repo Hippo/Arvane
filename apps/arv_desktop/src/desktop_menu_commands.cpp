@@ -109,7 +109,7 @@ bool DesktopFrameLoop::process_menu_commands() {
     invalidate_ui_tree_cache();
   }
   if (menu_state_.take_cancel_server_connect_request()) {
-    if (!sessions_.save_and_shutdown()) {
+    if (!sessions_.begin_save_and_shutdown()) {
       return false;
     }
     gameplay_menu_stack_active_ = false;
@@ -118,7 +118,7 @@ bool DesktopFrameLoop::process_menu_commands() {
     invalidate_ui_tree_cache();
   }
   if (menu_state_.take_back_to_main_menu_request()) {
-    if (!sessions_.save_and_shutdown()) {
+    if (!sessions_.begin_save_and_shutdown()) {
       return false;
     }
     gameplay_menu_stack_active_ = false;
@@ -199,6 +199,9 @@ bool DesktopFrameLoop::process_menu_commands() {
     invalidate_ui_tree_cache();
   }
   if (menu_state_.quit_requested) {
+    if (!sessions_.begin_save_and_shutdown()) {
+      return false;
+    }
     window_.request_close();
   }
   return true;
@@ -404,7 +407,7 @@ bool DesktopFrameLoop::handle_session_disconnect(DesktopGameSession* active_sess
         active_session->remote_server->name,
         active_session->remote_server->address};
   }
-  if (!sessions_.save_and_shutdown()) {
+  if (!sessions_.begin_save_and_shutdown()) {
     return false;
   }
   gameplay_menu_stack_active_ = false;

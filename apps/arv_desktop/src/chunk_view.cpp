@@ -508,10 +508,13 @@ void schedule_mesh_jobs(
          inputs = std::move(inputs),
          &block_registry,
          &block_render_data,
-         fluid_render_data] {
+         fluid_render_data](const sched::CancellationToken& token) {
           ChunkViewState::TimedChunkMeshBatchResult batch;
           batch.meshes.reserve(inputs.size());
           for (const MeshJobInput& input : inputs) {
+            if (token.is_canceled()) {
+              break;
+            }
             const auto start = std::chrono::steady_clock::now();
             auto mesh = render::build_chunk_mesh(
                 world_id,
@@ -642,6 +645,14 @@ void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord) {
     }
   }
   set_draw_items_dirty(view);
+}
+
+void cancel_chunk_view_mesh_jobs(sched::JobSystem& job_system, ChunkViewState& view) noexcept {
+  for (const ChunkViewState::PendingMesh& pending : view.pending_meshes) {
+    job_system.cancel(pending.job.handle());
+  }
+  view.pending_meshes.clear();
+  view.mesh_in_flight.clear();
 }
 
 bool update_chunk_view(

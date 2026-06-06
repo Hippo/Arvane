@@ -33,6 +33,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace arv::text {
@@ -124,6 +125,8 @@ public:
   [[nodiscard]] DesktopGameSession* active_session() noexcept;
   [[nodiscard]] const DesktopGameSession* active_session() const noexcept;
 
+  void poll_shutdown();
+  [[nodiscard]] bool begin_save_and_shutdown();
   [[nodiscard]] bool save_and_shutdown();
 
   [[nodiscard]] bool start_singleplayer(
@@ -148,11 +151,17 @@ public:
       u32 unload_budget) const;
 
 private:
+  struct PendingShutdown;
+
   void remove_session_chunk_meshes(DesktopGameSession& session) const;
+  [[nodiscard]] bool shutdown_session(std::unique_ptr<DesktopGameSession> session);
+  [[nodiscard]] bool finish_pending_shutdown();
 
   DesktopSessionDependencies dependencies_;
   std::unique_ptr<DesktopGameSession> game_session_{};
+  std::unique_ptr<PendingShutdown> pending_shutdown_{};
   std::unique_ptr<net::GameNetworkingSocketsEnvironment> gns_environment_{};
+  bool shutdown_failed_{};
 };
 
 } // namespace arv::desktop

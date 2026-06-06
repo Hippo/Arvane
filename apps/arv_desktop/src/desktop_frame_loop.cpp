@@ -117,6 +117,7 @@ DesktopFrameLoop::DesktopFrameLoop(
 int DesktopFrameLoop::run() {
   while (!window_.should_close()) {
     ARV_PROFILE_ZONE("Frame time");
+    sessions_.poll_shutdown();
     FrameTiming timing = begin_frame();
     platform::InputSnapshot platform_input = poll_platform_input();
     update_framebuffer_size();

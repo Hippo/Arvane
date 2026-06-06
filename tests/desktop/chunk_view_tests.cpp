@@ -5,9 +5,12 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -395,6 +398,43 @@ TEST(ChunkViewTests, MeshSchedulingRespectsSectionPreparationBudget) {
   EXPECT_EQ(chunk_view.mesh_sections_prepared_last_frame, 3U);
   EXPECT_EQ(chunk_view.mesh_candidates.size(), 2U);
   jobs.join();
+}
+
+TEST(ChunkViewTests, CancelChunkViewMeshJobsSignalsPendingJobsAndClearsViewState) {
+  arv::sched::JobSystemConfig config;
+  config.background_cpu_workers = 1U;
+  arv::sched::JobSystem jobs{config};
+  jobs.start();
+  arv::desktop::ChunkViewState chunk_view;
+  std::atomic_bool cancellation_observed{false};
+
+  arv::sched::JobDesc desc;
+  desc.name = "test_cancellable_mesh_job";
+  desc.lane = arv::sched::JobLane::BackgroundCpu;
+  desc.domain = arv::sched::JobDomain::Meshing;
+  auto job = jobs.submit_result(
+      std::move(desc),
+      [&cancellation_observed](const arv::sched::CancellationToken& token) {
+        while (!token.is_canceled()) {
+          std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+        cancellation_observed.store(true, std::memory_order_release);
+        return arv::desktop::ChunkViewState::TimedChunkMeshBatchResult{};
+      });
+  ASSERT_TRUE(job.valid());
+
+  const arv::ChunkSectionCoord coord{{0, 0, 0}};
+  chunk_view.mesh_in_flight.insert(coord);
+  chunk_view.pending_meshes.push_back(
+      {{{coord, 1U, 1U, 1U}}, std::move(job)});
+
+  arv::desktop::cancel_chunk_view_mesh_jobs(jobs, chunk_view);
+
+  EXPECT_TRUE(chunk_view.pending_meshes.empty());
+  EXPECT_TRUE(chunk_view.mesh_in_flight.empty());
+
+  jobs.join();
+  EXPECT_TRUE(cancellation_observed.load(std::memory_order_acquire));
 }
 
 TEST(ChunkViewTests, CompletedMeshWaitsForUploadReceiptBeforeRemeshing) {
