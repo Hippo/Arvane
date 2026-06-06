@@ -1,6 +1,6 @@
-#include "arv/client/client_runtime.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
+#include "arv/client/client_runtime.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/item.hpp"
@@ -117,7 +117,7 @@ void set_test_player_held_item(
       0,
       arv::player::ItemStack{
           item_registry.find_item(item_name).value(),
-      count}));
+          count}));
 }
 
 arv::server::FluidContainerInteractionConfig make_test_fluid_containers() {
@@ -196,6 +196,64 @@ arv::EntityID create_networked_test_mount(
   arv::world::EntityCreateInfo info;
   info.type_id = arv::EntityTypeID{2};
   info.type_name = "arvane:test_mount";
+  info.position = position;
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  return server.voxel_world().create_entity(std::move(info));
+}
+
+arv::entity::VehicleDefinitionRegistry make_buggy_request_vehicle_registry() {
+  arv::entity::VehicleDefinition buggy;
+  buggy.name = "arvane:test_buggy";
+  buggy.kind = arv::entity::VehicleKind::Vehicle;
+  buggy.physics = arv::entity::VehiclePhysicsKind::GroundVehicle;
+  buggy.collision_size = {1.8F, 1.2F, 3.2F};
+  buggy.seats.push_back({"driver",
+                         "driver",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 0.8F, 0.0F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::ThirdPersonFollow});
+  buggy.ground = {
+      18.0F,
+      6.0F,
+      12.0F,
+      24.0F,
+      0.94F,
+      arv::degrees_to_radians(65.0F),
+      0.9F,
+      1.0F,
+      0.5F};
+  buggy.authority = {
+      22.0F,
+      18.0F,
+      50.0F,
+      arv::degrees_to_radians(110.0F),
+      24.0F,
+      0.6F,
+      false,
+      false,
+      0U};
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(buggy)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
+arv::EntityID create_networked_test_buggy(
+    arv::server::ServerRuntime& server,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position) {
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{1.8F, 1.2F, 3.2F}};
+  components.rideable =
+      arv::entity::AuthoredRideableComponent{"arvane:test_buggy"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_buggy"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_id = arv::EntityTypeID{3};
+  info.type_name = "arvane:test_buggy";
   info.position = position;
   info.authored_components = components;
   info.vehicle_definitions = &vehicles;
@@ -608,6 +666,88 @@ TEST(PlayerInteractionTests, ServerboundRideEntityRequestMountsRideableWithHeldI
   EXPECT_FLOAT_EQ(updated_player_state.position.x, 2.0F);
   EXPECT_FLOAT_EQ(updated_player_state.position.y, 1.25F);
   EXPECT_FLOAT_EQ(updated_player_state.position.z, 0.0F);
+}
+
+TEST(PlayerInteractionTests, AcceptedBuggyVehicleMoveUpdatesDrivingAndReverseAnimations) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_buggy_request_vehicle_registry();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.0F, 0.0F, 0.0F};
+  player_state.velocity = {};
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(player_state.player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(server.voxel_world().set_entity_position(
+      player_entity.value(),
+      player_state.position));
+
+  const arv::EntityID buggy = create_networked_test_buggy(
+      server,
+      vehicle_registry,
+      {2.0F, 0.0F, 0.0F});
+  const std::optional<arv::EntityNetID> buggy_net =
+      server.voxel_world().network_id_for_entity(buggy);
+  ASSERT_TRUE(buggy_net.has_value());
+
+  ASSERT_TRUE(client.request_ride_entity(buggy_net.value()));
+  server.tick();
+  ASSERT_EQ(
+      server.voxel_world().mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{buggy});
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  (void)server.voxel_world().ensure_chunk({{0, 0, -1}});
+
+  arv::protocol::ServerboundVehicleMove move;
+  move.vehicle_id = buggy_net.value();
+  move.sequence = 1U;
+  move.client_tick = server.tick_index();
+  move.dt_seconds = 1.0 / static_cast<arv::Seconds>(arv::DefaultBaseTps);
+  move.position = {2.0F, 0.0F, -0.01F};
+  move.velocity = {0.0F, 0.0F, -0.2F};
+  move.rotation = {};
+  move.throttle = 1.0F;
+  move.flags = arv::protocol::VehicleMoveFlags::OnGround;
+  ASSERT_TRUE(client.send_vehicle_move(move));
+  server.tick();
+
+  const arv::entity::EntityAnimationState* animation =
+      server.voxel_world().find_entity_animation_state(buggy);
+  ASSERT_NE(animation, nullptr);
+  EXPECT_NE(find_active_animation(*animation, "driving"), nullptr);
+  EXPECT_EQ(find_active_animation(*animation, "reverse"), nullptr);
+
+  move.sequence = 2U;
+  move.client_tick = server.tick_index();
+  move.position = {2.0F, 0.0F, 0.0F};
+  move.velocity = {0.0F, 0.0F, 0.2F};
+  move.throttle = -1.0F;
+  ASSERT_TRUE(client.send_vehicle_move(move));
+  server.tick();
+
+  animation = server.voxel_world().find_entity_animation_state(buggy);
+  ASSERT_NE(animation, nullptr);
+  EXPECT_NE(find_active_animation(*animation, "reverse"), nullptr);
+  EXPECT_EQ(find_active_animation(*animation, "driving"), nullptr);
 }
 
 TEST(PlayerInteractionTests, EntityAttackAppliesKnockbackOnDamage) {
@@ -1326,12 +1466,11 @@ TEST(PlayerInteractionTests, RegionDenyPreventsWorldModification) {
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
@@ -1364,12 +1503,11 @@ TEST(PlayerInteractionTests, PlacementOutsideConfiguredReachIsRejected) {
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
@@ -1395,12 +1533,11 @@ TEST(PlayerInteractionTests, InventorySlotClicksMutateAuthoritativeServerInvento
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
@@ -1438,12 +1575,11 @@ TEST(PlayerInteractionTests, DroppingInventoryCursorRecordsServerDroppedStack) {
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
@@ -1474,12 +1610,11 @@ TEST(PlayerInteractionTests, DroppingOneFromInventoryCursorLeavesRemainderCarrie
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
-  ASSERT_TRUE(server.start({
-      arv::server::ServerMode::Integrated,
-      arv::DefaultBaseTps,
-      {"in-process", 0},
-      &block_registry,
-      &item_registry}));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
   arv::client::ClientRuntime client(std::move(transports.client));
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);

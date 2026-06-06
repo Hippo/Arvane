@@ -1,5 +1,6 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/core/text_edit.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/protocol/chat.hpp"
@@ -15,7 +16,10 @@
 #include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/text/variables.hpp"
+#include "arv/world/world_queries.hpp"
+#include "arv/world/world_runtime.hpp"
 #include "support/net_events.hpp"
+#include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
 
@@ -75,6 +79,39 @@ std::vector<arv::protocol::ServerboundPlayerMove> serverbound_player_moves(
     }
   }
   return moves;
+}
+
+std::vector<arv::protocol::ServerboundVehicleMove> serverbound_vehicle_moves(
+    const std::vector<arv::net::NetworkEvent>& events) {
+  std::vector<arv::protocol::ServerboundVehicleMove> moves;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ServerboundVehicleMove) {
+      continue;
+    }
+    const auto move =
+        arv::protocol::deserialize_serverbound_vehicle_move(decoded.value().payload);
+    if (move) {
+      moves.push_back(move.value());
+    }
+  }
+  return moves;
+}
+
+const arv::protocol::EntityAnimationPlayback* find_mirror_animation(
+    const arv::client::ReplicatedEntityMirror& mirror,
+    std::string_view name) {
+  for (const arv::protocol::EntityAnimationPlayback& animation : mirror.animations) {
+    if (animation.name == name) {
+      return &animation;
+    }
+  }
+  return nullptr;
 }
 
 std::vector<arv::protocol::ServerboundKeepAlive> serverbound_keep_alives(
@@ -138,6 +175,44 @@ arv::client::ParticleRegistry make_runtime_particle_registry() {
   return registry;
 }
 
+arv::entity::VehicleDefinitionRegistry make_client_buggy_registry() {
+  arv::entity::VehicleDefinition buggy;
+  buggy.name = "arvane:test_buggy";
+  buggy.kind = arv::entity::VehicleKind::Vehicle;
+  buggy.physics = arv::entity::VehiclePhysicsKind::GroundVehicle;
+  buggy.collision_size = {1.8F, 1.2F, 3.2F};
+  buggy.seats.push_back({"driver",
+                         "driver",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 0.8F, 0.0F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::ThirdPersonFollow});
+  buggy.ground = {
+      24.0F,
+      8.0F,
+      18.0F,
+      30.0F,
+      0.92F,
+      arv::degrees_to_radians(80.0F),
+      0.85F,
+      1.0F,
+      0.5F};
+  buggy.authority = {
+      28.0F,
+      26.0F,
+      45.0F,
+      arv::degrees_to_radians(130.0F),
+      30.0F,
+      0.6F,
+      true,
+      false,
+      0U};
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(buggy)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
 void send_to_client(
     arv::net::ITransport& server_transport,
     arv::net::ConnectionID connection_id,
@@ -185,6 +260,39 @@ void enter_in_game(
 
   client.fixed_tick(1);
   ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+}
+
+void spawn_and_mount_test_buggy(
+    arv::client::ClientRuntime& client,
+    arv::net::ITransport& server_transport,
+    arv::net::ConnectionID connection_id,
+    arv::EntityNetID vehicle_id = arv::EntityNetID{10},
+    arv::Vec3f position = {0.0F, 1.0F, 0.0F}) {
+  arv::protocol::ClientboundEntitySpawn spawn;
+  spawn.world_id = arv::WorldID{1};
+  spawn.entity_id = vehicle_id;
+  spawn.entity_type = arv::EntityTypeID{2};
+  spawn.entity_type_name = "arvane:test_buggy";
+  spawn.position = position;
+  send_to_client(
+      server_transport,
+      connection_id,
+      arv::protocol::MessageType::ClientboundEntitySpawn,
+      arv::protocol::serialize_clientbound_entity_spawn(spawn));
+
+  arv::protocol::ClientboundRideStarted ride;
+  ride.passenger_id = arv::EntityNetID{1};
+  ride.rideable_id = vehicle_id;
+  ride.seat_id = "driver";
+  ride.controls_vehicle = true;
+  send_to_client(
+      server_transport,
+      connection_id,
+      arv::protocol::MessageType::ClientboundRideStarted,
+      arv::protocol::serialize_clientbound_ride_started(ride));
+  client.fixed_tick(2);
+  ASSERT_TRUE(client.find_replicated_entity(vehicle_id) != nullptr);
+  (void)server_transport.poll_events();
 }
 
 class HangingConnectTransport final : public arv::net::ITransport {
@@ -850,6 +958,266 @@ TEST(ClientRuntimeTests, RideRequestSendsRideEntityPacket) {
   ASSERT_TRUE(request);
   EXPECT_EQ(request.value().rideable_id, (arv::EntityNetID{42}));
   EXPECT_EQ(request.value().seat_id, "driver");
+}
+
+TEST(ClientRuntimeTests, GroundVehiclePredictionClampsAgainstWallAndMovesSeatAnchor) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_buggy_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+
+  arv::protocol::ClientboundEntitySpawn spawn;
+  spawn.world_id = arv::WorldID{1};
+  spawn.entity_id = arv::EntityNetID{10};
+  spawn.entity_type = arv::EntityTypeID{2};
+  spawn.entity_type_name = "arvane:test_buggy";
+  spawn.position = {0.0F, 1.0F, 0.0F};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundEntitySpawn,
+      arv::protocol::serialize_clientbound_entity_spawn(spawn));
+
+  arv::protocol::ClientboundRideStarted ride;
+  ride.passenger_id = arv::EntityNetID{1};
+  ride.rideable_id = arv::EntityNetID{10};
+  ride.seat_id = "driver";
+  ride.controls_vehicle = true;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundRideStarted,
+      arv::protocol::serialize_clientbound_ride_started(ride));
+  client.fixed_tick(2);
+  ASSERT_TRUE(client.find_replicated_entity(arv::EntityNetID{10}) != nullptr);
+  (void)server_transport->poll_events();
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  (void)world.ensure_chunk({{0, 0, -1}});
+  ASSERT_TRUE(world.set_block({{0, 1, -3}}, stone));
+  const arv::world::WorldCollisionQuery query(world, block_registry, false);
+
+  for (arv::TickIndex tick = 3; tick < 34; ++tick) {
+    client.submit_input(arv::client::InputFrame{.move_forward = true});
+    client.fixed_tick(tick, &query);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundVehicleMove& last = moves.back();
+  EXPECT_GE(last.position.z, -0.401F);
+  EXPECT_NEAR(last.velocity.z, 0.0F, 0.0001F);
+  EXPECT_NEAR(client.player_position().x, last.position.x, 0.0001F);
+  EXPECT_NEAR(client.player_position().y, last.position.y + 0.8F, 0.0001F);
+  EXPECT_NEAR(client.player_position().z, last.position.z, 0.0001F);
+}
+
+TEST(ClientRuntimeTests, GroundVehiclePredictionAdvancesBetweenNetworkSends) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_buggy_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(20.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+  spawn_and_mount_test_buggy(client, *server_transport, connection_id.value());
+
+  client.submit_input(arv::client::InputFrame{.move_forward = true});
+  client.fixed_tick(3);
+
+  EXPECT_TRUE(serverbound_vehicle_moves(server_transport->poll_events()).empty());
+  const arv::client::ReplicatedEntityMirror* mirror =
+      client.find_replicated_entity(arv::EntityNetID{10});
+  ASSERT_NE(mirror, nullptr);
+  EXPECT_LT(mirror->position.z, 0.0F);
+  EXPECT_EQ(mirror->render_position, mirror->position);
+  EXPECT_NEAR(client.player_position().z, mirror->position.z, 0.0001F);
+  ASSERT_NE(find_mirror_animation(*mirror, "driving"), nullptr);
+  EXPECT_EQ(find_mirror_animation(*mirror, "reverse"), nullptr);
+  const arv::Vec3f visual_forward =
+      arv::rotate_vector(mirror->rotation, {0.0F, 0.0F, -1.0F});
+  EXPECT_GT(arv::dot(visual_forward, mirror->velocity), 0.0F);
+}
+
+TEST(ClientRuntimeTests, GroundVehicleReverseInputMovesRearwardAndPlaysReverseAnimation) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_buggy_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(20.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+  spawn_and_mount_test_buggy(client, *server_transport, connection_id.value());
+
+  client.submit_input(arv::client::InputFrame{.move_backward = true});
+  client.fixed_tick(3);
+
+  const arv::client::ReplicatedEntityMirror* mirror =
+      client.find_replicated_entity(arv::EntityNetID{10});
+  ASSERT_NE(mirror, nullptr);
+  EXPECT_GT(mirror->position.z, 0.0F);
+  ASSERT_NE(find_mirror_animation(*mirror, "reverse"), nullptr);
+  EXPECT_EQ(find_mirror_animation(*mirror, "driving"), nullptr);
+  const arv::Vec3f visual_forward =
+      arv::rotate_vector(mirror->rotation, {0.0F, 0.0F, -1.0F});
+  EXPECT_LT(arv::dot(visual_forward, mirror->velocity), 0.0F);
+}
+
+TEST(ClientRuntimeTests, LocalControlledVehicleStateEchoDoesNotRewindPrediction) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_buggy_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(10.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+  spawn_and_mount_test_buggy(client, *server_transport, connection_id.value());
+
+  client.submit_input(arv::client::InputFrame{.move_forward = true});
+  client.fixed_tick(3);
+  client.submit_input(arv::client::InputFrame{.move_forward = true});
+  client.fixed_tick(4);
+  const arv::client::ReplicatedEntityMirror* before =
+      client.find_replicated_entity(arv::EntityNetID{10});
+  ASSERT_NE(before, nullptr);
+  const arv::Vec3f predicted_before = before->position;
+  ASSERT_LT(predicted_before.z, 0.0F);
+
+  arv::protocol::ClientboundVehicleState stale_echo;
+  stale_echo.world_id = arv::WorldID{1};
+  stale_echo.vehicle_id = arv::EntityNetID{10};
+  stale_echo.server_tick = 20;
+  stale_echo.accepted_sequence = 1;
+  stale_echo.position = {0.0F, 1.0F, 0.0F};
+  stale_echo.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundVehicleState,
+      arv::protocol::serialize_clientbound_vehicle_state(stale_echo),
+      arv::protocol::ReliabilityClass::UnreliableLatestWins);
+
+  client.fixed_tick(5);
+
+  const arv::client::ReplicatedEntityMirror* after =
+      client.find_replicated_entity(arv::EntityNetID{10});
+  ASSERT_NE(after, nullptr);
+  EXPECT_LT(after->position.z, predicted_before.z);
+  EXPECT_EQ(after->render_position, after->position);
+  EXPECT_NEAR(client.player_position().z, after->position.z, 0.0001F);
+}
+
+TEST(ClientRuntimeTests, LocalControlledEntitySnapshotDoesNotRewindVehiclePrediction) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_buggy_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(10.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+  spawn_and_mount_test_buggy(client, *server_transport, connection_id.value());
+
+  client.submit_input(arv::client::InputFrame{.move_forward = true});
+  client.fixed_tick(3);
+  client.submit_input(arv::client::InputFrame{.move_forward = true});
+  client.fixed_tick(4);
+  const arv::client::ReplicatedEntityMirror* before =
+      client.find_replicated_entity(arv::EntityNetID{10});
+  ASSERT_NE(before, nullptr);
+  const arv::Vec3f predicted_before = before->position;
+  ASSERT_LT(predicted_before.z, 0.0F);
+  ASSERT_NE(find_mirror_animation(*before, "driving"), nullptr);
+
+  arv::protocol::ClientboundEntitySnapshot snapshot;
+  snapshot.world_id = arv::WorldID{1};
+  snapshot.server_tick = 20;
+  snapshot.entities.push_back({arv::EntityNetID{10},
+                               {0.0F, 1.0F, 0.0F},
+                               {},
+                               {0.0F, 0.0F, 0.0F, 1.0F},
+                               0});
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundEntitySnapshot,
+      arv::protocol::serialize_clientbound_entity_snapshot(snapshot),
+      arv::protocol::ReliabilityClass::UnreliableLatestWins);
+
+  client.fixed_tick(5);
+
+  const arv::client::ReplicatedEntityMirror* after =
+      client.find_replicated_entity(arv::EntityNetID{10});
+  ASSERT_NE(after, nullptr);
+  EXPECT_LT(after->position.z, predicted_before.z);
+  EXPECT_EQ(after->render_position, after->position);
+  EXPECT_NEAR(client.player_position().z, after->position.z, 0.0001F);
+  EXPECT_NE(find_mirror_animation(*after, "driving"), nullptr);
+}
+
+TEST(ClientRuntimeTests, VehicleCorrectionResetsLocalPredictionAndSeatAnchor) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_buggy_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(10.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+  spawn_and_mount_test_buggy(client, *server_transport, connection_id.value());
+
+  client.submit_input(arv::client::InputFrame{.move_forward = true});
+  client.fixed_tick(3);
+
+  arv::protocol::ClientboundVehicleCorrection correction;
+  correction.vehicle_id = arv::EntityNetID{10};
+  correction.rejected_sequence = 3;
+  correction.position = {4.0F, 1.0F, -2.0F};
+  correction.velocity = {};
+  correction.rotation = {};
+  correction.reason = arv::protocol::VehicleCorrectionReason::Collision;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundVehicleCorrection,
+      arv::protocol::serialize_clientbound_vehicle_correction(correction));
+
+  client.submit_input(arv::client::InputFrame{});
+  client.fixed_tick(4);
+
+  const arv::client::ReplicatedEntityMirror* mirror =
+      client.find_replicated_entity(arv::EntityNetID{10});
+  ASSERT_NE(mirror, nullptr);
+  EXPECT_EQ(mirror->position, correction.position);
+  EXPECT_EQ(mirror->render_position, correction.position);
+  EXPECT_NEAR(client.player_position().x, correction.position.x, 0.0001F);
+  EXPECT_NEAR(client.player_position().y, correction.position.y + 0.8F, 0.0001F);
+  EXPECT_NEAR(client.player_position().z, correction.position.z, 0.0001F);
 }
 
 TEST(ClientRuntimeTests, MovementHzPacketOverridesDefaultClientSendRate) {

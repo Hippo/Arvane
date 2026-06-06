@@ -254,7 +254,9 @@ send independent player movement while mounted. The full V1 vehicle model is in
 `docs/182_rideables_and_vehicles.md`.
 Vehicle guardrails validate finite numbers, sequence ordering, speed,
 acceleration, vertical speed, declared angular velocity, actual rotation delta,
-swept AABB collision, and required ground or water support.
+final AABB collision, and required ground or water support. Normal vehicle-state
+replication is for observers/passengers of a driver-owned vehicle; explicit
+vehicle corrections are the server's local-driver rewind path.
 
 Authoritative gameplay may still change the local player's velocity without a
 teleport. Combat knockback sends `ClientboundPlayerVelocity` reliably to the

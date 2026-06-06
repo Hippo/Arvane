@@ -4,6 +4,8 @@
 #include "arv/core/time.hpp"
 #include "arv/net/connection_state.hpp"
 
+#include <string>
+
 namespace arv::entity {
 class VehicleDefinitionRegistry;
 } // namespace arv::entity
@@ -30,12 +32,15 @@ public:
       TickIndex tick_index,
       LocalPlayerController& player_controller,
       ClientProtocolSender& sender,
-      const ClientEntityMirrorStore& entities,
+      ClientEntityMirrorStore& entities,
       const arv::entity::VehicleDefinitionRegistry* vehicle_registry,
       const physics::ICollisionQuery* collision_query,
       Seconds tick_seconds);
 
   void set_movement_send_rate(f32 send_rate_hz) noexcept;
+  void apply_vehicle_correction(
+      const protocol::ClientboundVehicleCorrection& correction) noexcept;
+  void clear_vehicle_prediction() noexcept;
 
 private:
   f32 movement_send_rate_hz_{protocol::DefaultClientMovementSendRateHz};
@@ -50,6 +55,8 @@ private:
   Vec3f predicted_vehicle_velocity_{};
   Quatf predicted_vehicle_rotation_{};
   f32 predicted_vehicle_yaw_{};
+  std::string predicted_vehicle_animation_name_{};
+  Seconds predicted_vehicle_animation_time_{};
 };
 
 } // namespace detail

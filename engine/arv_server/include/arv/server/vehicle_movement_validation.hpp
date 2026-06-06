@@ -24,7 +24,7 @@ struct VehicleMovementValidationContext {
   TickIndex server_tick{};
   bool passenger_is_mounted{};
   bool passenger_controls_vehicle{};
-  bool swept_aabb_overlaps_solid{};
+  bool final_aabb_overlaps_solid{};
   bool has_ground_support{true};
   u32 water_support_samples{};
 };

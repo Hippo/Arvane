@@ -134,7 +134,8 @@ void ClientEntityMirrorStore::apply_despawn(
 void ClientEntityMirrorStore::apply_snapshot(
     const protocol::ClientboundEntitySnapshot& snapshot,
     WorldID current_world,
-    TickRate server_tick_rate) {
+    TickRate server_tick_rate,
+    std::optional<EntityNetID> locally_controlled_vehicle) {
   if (snapshot.world_id != current_world) {
     return;
   }
@@ -145,6 +146,22 @@ void ClientEntityMirrorStore::apply_snapshot(
     }
     ReplicatedEntityMirror& mirror = found->second;
     if (snapshot.server_tick < mirror.last_server_tick) {
+      continue;
+    }
+    const bool local_driver_owned_transform =
+        locally_controlled_vehicle.has_value() &&
+        locally_controlled_vehicle.value() == entry.entity_id;
+    if (local_driver_owned_transform) {
+      mirror.last_server_tick = snapshot.server_tick;
+      mirror.head_rotation_degrees = entry.head_rotation_degrees;
+      mirror.has_health =
+          (entry.state_flags & protocol::EntityStateFlagHasHealth) != 0U;
+      mirror.dead =
+          (entry.state_flags & protocol::EntityStateFlagDead) != 0U;
+      mirror.invulnerable =
+          (entry.state_flags & protocol::EntityStateFlagInvulnerable) != 0U;
+      mirror.health_current = entry.health_current;
+      mirror.health_max = entry.health_max;
       continue;
     }
     const bool moved =
@@ -186,8 +203,12 @@ void ClientEntityMirrorStore::apply_snapshot(
 void ClientEntityMirrorStore::apply_vehicle_state(
     const protocol::ClientboundVehicleState& state,
     WorldID current_world,
-    TickRate server_tick_rate) {
+    TickRate server_tick_rate,
+    bool local_driver_owns_vehicle) {
   if (state.world_id != current_world) {
+    return;
+  }
+  if (local_driver_owns_vehicle) {
     return;
   }
   auto found = entities_.find(state.vehicle_id);
@@ -226,6 +247,26 @@ void ClientEntityMirrorStore::apply_vehicle_correction(
   mirror.velocity = correction.velocity;
   mirror.rotation = correction.rotation;
   mirror.last_transform_change_server_tick = mirror.last_server_tick;
+  snap_entity_render_transform(mirror);
+}
+
+void ClientEntityMirrorStore::apply_local_vehicle_prediction(
+    EntityNetID vehicle_id,
+    Vec3f position,
+    Vec3f velocity,
+    Quatf rotation,
+    std::span<const protocol::EntityAnimationPlayback> animations) {
+  auto found = entities_.find(vehicle_id);
+  if (found == entities_.end()) {
+    return;
+  }
+  ReplicatedEntityMirror& mirror = found->second;
+  mirror.previous_position = mirror.position;
+  mirror.previous_rotation = mirror.rotation;
+  mirror.position = position;
+  mirror.velocity = velocity;
+  mirror.rotation = normalize_quat(rotation);
+  mirror.animations.assign(animations.begin(), animations.end());
   snap_entity_render_transform(mirror);
 }
 

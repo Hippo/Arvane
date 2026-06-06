@@ -12,6 +12,7 @@ inline constexpr f32 VehiclePositionEpsilonBlocks = 0.15F;
 inline constexpr f32 VehicleVelocityEpsilonBlocksPerSecond = 0.5F;
 inline constexpr f32 VehicleAccelerationEpsilonBlocksPerSecond = 2.0F;
 inline constexpr f32 VehicleAngularSpeedEpsilonRadiansPerSecond = 0.25F;
+inline constexpr f32 VehicleImpactStopSpeedEpsilonBlocksPerSecond = 0.25F;
 
 [[nodiscard]] bool finite_quat(Quatf value) noexcept {
   return std::isfinite(value.x) && std::isfinite(value.y) &&
@@ -105,7 +106,7 @@ VehicleMovementValidationResult validate_serverbound_vehicle_move(
       !vehicle_sequence_is_newer(packet.sequence, previous.last_sequence)) {
     return reject(previous, protocol::VehicleCorrectionReason::StalePacket);
   }
-  if (context.swept_aabb_overlaps_solid) {
+  if (context.final_aabb_overlaps_solid) {
     return reject(previous, protocol::VehicleCorrectionReason::Collision);
   }
   if (authority.requires_ground && !context.has_ground_support) {
@@ -138,11 +139,21 @@ VehicleMovementValidationResult validate_serverbound_vehicle_move(
       return reject(previous, protocol::VehicleCorrectionReason::TooFast);
     }
 
-    const f32 acceleration = length(packet.velocity - previous.velocity) / elapsed;
-    const f32 max_velocity_delta =
-        std::max(authority.max_acceleration, authority.max_deceleration) +
-        VehicleAccelerationEpsilonBlocksPerSecond;
-    if (acceleration > max_velocity_delta) {
+    const f32 previous_speed = length(previous.velocity);
+    const f32 current_speed = length(packet.velocity);
+    const f32 speed_delta = current_speed - previous_speed;
+    const bool impact_stop =
+        current_speed <= VehicleImpactStopSpeedEpsilonBlocksPerSecond &&
+        previous_speed > current_speed &&
+        displacement <= previous_speed * elapsed + VehiclePositionEpsilonBlocks;
+    if (speed_delta > 0.0F &&
+        speed_delta / elapsed >
+            authority.max_acceleration + VehicleAccelerationEpsilonBlocksPerSecond) {
+      return reject(previous, protocol::VehicleCorrectionReason::TooMuchAcceleration);
+    }
+    if (!impact_stop && speed_delta < 0.0F &&
+        (-speed_delta) / elapsed >
+            authority.max_deceleration + VehicleAccelerationEpsilonBlocksPerSecond) {
       return reject(previous, protocol::VehicleCorrectionReason::TooMuchAcceleration);
     }
 

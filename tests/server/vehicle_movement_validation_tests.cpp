@@ -140,6 +140,40 @@ TEST(VehicleMovementValidationTests, RejectsExcessiveAcceleration) {
   EXPECT_EQ(result.reason, arv::protocol::VehicleCorrectionReason::TooMuchAcceleration);
 }
 
+TEST(VehicleMovementValidationTests, AcceptsDirectionChangeWithinSpeedAndRotationGuardrails) {
+  auto move = vehicle_move(2, {0.0F, 4.0F, 0.25F});
+  move.velocity = {0.0F, 0.0F, 5.0F};
+
+  auto previous = accepted_at(1, {0.0F, 4.0F, 0.0F});
+  previous.velocity = {5.0F, 0.0F, 0.0F};
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      previous,
+      controller_context(),
+      authority());
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_EQ(result.accepted_state.velocity, (arv::Vec3f{0.0F, 0.0F, 5.0F}));
+}
+
+TEST(VehicleMovementValidationTests, AcceptsImpactStopWithoutCorrectionStorm) {
+  auto move = vehicle_move(2, {0.4F, 4.0F, 0.0F});
+  move.velocity = {};
+
+  auto previous = accepted_at(1, {0.0F, 4.0F, 0.0F});
+  previous.velocity = {10.0F, 0.0F, 0.0F};
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      move,
+      previous,
+      controller_context(),
+      authority());
+
+  EXPECT_TRUE(result.accepted);
+  EXPECT_EQ(result.accepted_state.velocity, (arv::Vec3f{}));
+}
+
 TEST(VehicleMovementValidationTests, RejectsExcessiveAngularVelocity) {
   auto move = vehicle_move(1, {0.0F, 4.0F, 0.0F});
   move.angular_velocity = {0.0F, 12.0F, 0.0F};
@@ -169,9 +203,9 @@ TEST(VehicleMovementValidationTests, RejectsRotationJumpWithZeroAngularVelocity)
   EXPECT_EQ(result.reason, arv::protocol::VehicleCorrectionReason::TooMuchAngularVelocity);
 }
 
-TEST(VehicleMovementValidationTests, RejectsCollisionPath) {
+TEST(VehicleMovementValidationTests, RejectsFinalAabbInsideSolid) {
   auto context = controller_context();
-  context.swept_aabb_overlaps_solid = true;
+  context.final_aabb_overlaps_solid = true;
 
   const auto result = arv::server::validate_serverbound_vehicle_move(
       vehicle_move(1, {0.0F, 4.0F, 0.0F}),

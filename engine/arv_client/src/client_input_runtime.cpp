@@ -5,10 +5,14 @@
 #include "client_ui_state.hpp"
 
 #include "arv/entity/components.hpp"
+#include "arv/physics/collision_resolution.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
+#include <span>
+#include <string_view>
 #include <utility>
 
 namespace arv::client::detail {
@@ -77,12 +81,29 @@ namespace {
   return std::atan2(sin_yaw, cos_yaw);
 }
 
+[[nodiscard]] f32 vehicle_gameplay_yaw_from_rotation(Quatf rotation) noexcept {
+  return wrap_angle_radians(yaw_from_rotation(rotation) - ModelForwardYawOffsetRadians);
+}
+
+[[nodiscard]] Quatf vehicle_render_rotation_from_gameplay_yaw(f32 yaw_radians) noexcept {
+  return model_forward_yaw_rotation(yaw_radians);
+}
+
+[[nodiscard]] Vec3f model_visual_forward(Quatf rotation) noexcept {
+  return rotate_vector(normalize_quat(rotation), {0.0F, 0.0F, -1.0F});
+}
+
 struct VehicleMovementProfile {
+  entity::VehiclePhysicsKind physics{entity::VehiclePhysicsKind::LivingMount};
   f32 max_forward_speed{4.0F};
   f32 max_reverse_speed{4.0F};
   f32 acceleration{8.0F};
   f32 brake_force{10.0F};
   f32 turn_rate{1.5F};
+  f32 drag{0.9F};
+  f32 lateral_grip{1.0F};
+  f32 step_height{};
+  Vec3f collision_size{1.0F, 1.0F, 1.0F};
   protocol::VehicleMoveFlags base_flags{protocol::VehicleMoveFlags::OnGround};
 };
 
@@ -97,6 +118,8 @@ struct VehicleMovementProfile {
     return profile;
   }
 
+  profile.physics = definition->physics;
+  profile.collision_size = definition->collision_size;
   switch (definition->physics) {
     case entity::VehiclePhysicsKind::LivingMount:
       profile.max_forward_speed = command.sprint_held
@@ -106,6 +129,8 @@ struct VehicleMovementProfile {
       profile.acceleration = definition->living_mount.acceleration;
       profile.brake_force = std::max(definition->living_mount.acceleration, 1.0F);
       profile.turn_rate = definition->living_mount.turn_rate;
+      profile.drag = definition->living_mount.friction;
+      profile.step_height = definition->living_mount.step_height;
       profile.base_flags = protocol::VehicleMoveFlags::OnGround;
       break;
     case entity::VehiclePhysicsKind::SurfaceWaterVehicle:
@@ -115,6 +140,7 @@ struct VehicleMovementProfile {
       profile.brake_force = definition->surface_water.acceleration +
                             std::max(definition->surface_water.water_drag, 0.0F);
       profile.turn_rate = definition->surface_water.turn_rate;
+      profile.drag = definition->surface_water.water_drag;
       profile.base_flags = protocol::VehicleMoveFlags::InWater;
       break;
     case entity::VehiclePhysicsKind::GroundVehicle:
@@ -123,6 +149,9 @@ struct VehicleMovementProfile {
       profile.acceleration = definition->ground.acceleration;
       profile.brake_force = definition->ground.brake_force;
       profile.turn_rate = definition->ground.turn_rate;
+      profile.drag = definition->ground.drag;
+      profile.lateral_grip = definition->ground.lateral_grip;
+      profile.step_height = definition->ground.max_step_height;
       profile.base_flags = protocol::VehicleMoveFlags::OnGround;
       break;
   }
@@ -132,7 +161,69 @@ struct VehicleMovementProfile {
   profile.acceleration = std::max(profile.acceleration, 0.0F);
   profile.brake_force = std::max(profile.brake_force, profile.acceleration);
   profile.turn_rate = std::max(profile.turn_rate, 0.0F);
+  profile.drag = std::clamp(profile.drag, 0.0F, 1.0F);
+  profile.lateral_grip = std::clamp(profile.lateral_grip, 0.0F, 1.0F);
+  profile.step_height = std::max(profile.step_height, 0.0F);
+  profile.collision_size = {
+      std::max(profile.collision_size.x, 0.01F),
+      std::max(profile.collision_size.y, 0.01F),
+      std::max(profile.collision_size.z, 0.01F)};
   return profile;
+}
+
+[[nodiscard]] std::string_view vehicle_motion_animation_name(
+    const VehicleMovementProfile& profile,
+    Quatf rotation,
+    Vec3f velocity) noexcept {
+  if (profile.physics != entity::VehiclePhysicsKind::GroundVehicle) {
+    return {};
+  }
+  constexpr f32 AnimationSpeedEpsilonBlocksPerSecond = 0.05F;
+  const f32 signed_speed = dot(velocity, model_visual_forward(rotation));
+  if (signed_speed > AnimationSpeedEpsilonBlocksPerSecond) {
+    return "driving";
+  }
+  if (signed_speed < -AnimationSpeedEpsilonBlocksPerSecond) {
+    return "reverse";
+  }
+  return {};
+}
+
+[[nodiscard]] Aabb3f vehicle_bounds(Vec3f position, Vec3f size) noexcept {
+  const Vec3f half{size.x * 0.5F, 0.0F, size.z * 0.5F};
+  return {
+      {position.x - half.x, position.y, position.z - half.z},
+      {position.x + half.x, position.y + size.y, position.z + half.z}};
+}
+
+[[nodiscard]] const entity::VehicleSeatDefinition* find_vehicle_seat(
+    const entity::VehicleDefinition* definition,
+    std::string_view seat_id) noexcept {
+  if (definition == nullptr) {
+    return nullptr;
+  }
+  const auto found = std::find_if(
+      definition->seats.begin(),
+      definition->seats.end(),
+      [&](const entity::VehicleSeatDefinition& seat) {
+        return seat.id == seat_id;
+      });
+  return found == definition->seats.end() ? nullptr : &*found;
+}
+
+[[nodiscard]] bool should_reset_vehicle_prediction(
+    EntityNetID vehicle_id,
+    const ReplicatedEntityMirror& mirror,
+    const std::optional<EntityNetID>& predicted_vehicle_id,
+    Vec3f predicted_position,
+    Vec3f predicted_velocity) noexcept {
+  if (!predicted_vehicle_id.has_value() || predicted_vehicle_id.value() != vehicle_id) {
+    return true;
+  }
+  if (distance(predicted_position, mirror.position) > 2.0F) {
+    return true;
+  }
+  return distance(predicted_velocity, mirror.velocity) > 6.0F;
 }
 
 } // namespace
@@ -188,7 +279,7 @@ void ClientInputRuntime::send_fixed_tick_input(
     TickIndex tick_index,
     LocalPlayerController& player_controller,
     ClientProtocolSender& sender,
-    const ClientEntityMirrorStore& entities,
+    ClientEntityMirrorStore& entities,
     const entity::VehicleDefinitionRegistry* vehicle_registry,
     const physics::ICollisionQuery* collision_query,
     Seconds tick_seconds) {
@@ -214,52 +305,154 @@ void ClientInputRuntime::send_fixed_tick_input(
       predicted_vehicle_id_.reset();
       return;
     }
-    if (!predicted_vehicle_id_.has_value() ||
-        predicted_vehicle_id_.value() != vehicle_id ||
-        distance(predicted_vehicle_position_, mirror->position) > 2.0F) {
+    const entity::VehicleDefinition* definition =
+        vehicle_registry == nullptr ? nullptr : vehicle_registry->find(mirror->entity_type_name);
+    const VehicleMovementProfile profile =
+        vehicle_movement_profile(*mirror, vehicle_registry, command);
+    if (should_reset_vehicle_prediction(
+            vehicle_id,
+            *mirror,
+            predicted_vehicle_id_,
+            predicted_vehicle_position_,
+            predicted_vehicle_velocity_)) {
       predicted_vehicle_id_ = vehicle_id;
       predicted_vehicle_position_ = mirror->position;
       predicted_vehicle_velocity_ = mirror->velocity;
       predicted_vehicle_rotation_ = mirror->rotation;
-      predicted_vehicle_yaw_ = yaw_from_rotation(mirror->rotation);
+      predicted_vehicle_yaw_ = vehicle_gameplay_yaw_from_rotation(mirror->rotation);
+      predicted_vehicle_animation_name_.clear();
+      predicted_vehicle_animation_time_ = 0.0;
     }
 
     movement_send_accumulator_seconds_ += tick_seconds;
     const Seconds send_interval =
         1.0 / static_cast<Seconds>(std::max(movement_send_rate_hz_, 1.0F));
-    if (movement_send_accumulator_seconds_ < send_interval &&
-        !command.jump_pressed && !command.secondary_pressed) {
-      return;
-    }
-    movement_send_accumulator_seconds_ = 0.0;
+    const bool send_this_tick =
+        movement_send_accumulator_seconds_ >= send_interval ||
+        command.jump_pressed || command.secondary_pressed;
 
-    const f32 dt = std::max(tick_seconds, 1.0F / 60.0F);
+    const f32 dt = std::clamp(static_cast<f32>(tick_seconds), 1.0F / 240.0F, 0.1F);
     const f32 throttle = std::clamp(static_cast<f32>(command.move_z), -1.0F, 1.0F);
     const f32 steer = std::clamp(static_cast<f32>(command.move_x), -1.0F, 1.0F);
-    const VehicleMovementProfile profile =
-        vehicle_movement_profile(*mirror, vehicle_registry, command);
     const f32 max_speed = throttle < 0.0F
                               ? profile.max_reverse_speed
                               : profile.max_forward_speed;
     const f32 target_speed = throttle * max_speed;
-    const f32 accel = command.secondary_held ? profile.brake_force : profile.acceleration;
     const f32 previous_yaw = predicted_vehicle_yaw_;
-    const f32 desired_yaw =
-        std::abs(steer) > 0.01F
-            ? wrap_angle_radians(predicted_vehicle_yaw_ + steer * profile.turn_rate)
-            : player_controller.camera().yaw_radians();
-    predicted_vehicle_yaw_ = approach_angle(
-        predicted_vehicle_yaw_,
-        desired_yaw,
-        profile.turn_rate * dt);
+    const bool ground_vehicle =
+        profile.physics == entity::VehiclePhysicsKind::GroundVehicle;
+    if (ground_vehicle) {
+      const f32 speed_fraction =
+          profile.max_forward_speed <= 0.0F
+              ? 0.0F
+              : std::clamp(
+                    horizontal_length(predicted_vehicle_velocity_) /
+                        profile.max_forward_speed,
+                    0.0F,
+                    1.0F);
+      const f32 steering_response =
+          std::abs(throttle) > 0.01F || speed_fraction > 0.05F
+              ? std::max(speed_fraction, 0.25F)
+              : 0.0F;
+      predicted_vehicle_yaw_ = wrap_angle_radians(
+          predicted_vehicle_yaw_ + steer * profile.turn_rate * steering_response * dt);
+    } else {
+      const f32 desired_yaw =
+          std::abs(steer) > 0.01F
+              ? wrap_angle_radians(predicted_vehicle_yaw_ + steer * profile.turn_rate)
+              : player_controller.camera().yaw_radians();
+      predicted_vehicle_yaw_ = approach_angle(
+          predicted_vehicle_yaw_,
+          desired_yaw,
+          profile.turn_rate * dt);
+    }
     const Vec3f forward = horizontal_forward(predicted_vehicle_yaw_);
     const f32 current_speed = dot(predicted_vehicle_velocity_, forward);
-    const f32 next_speed = approach(current_speed, target_speed, accel * dt);
+    f32 next_speed = current_speed;
+    if (command.secondary_held) {
+      next_speed = approach(current_speed, 0.0F, profile.brake_force * dt);
+    } else if (std::abs(throttle) > 0.01F) {
+      const f32 accel =
+          (current_speed * target_speed < 0.0F) ? profile.brake_force : profile.acceleration;
+      next_speed = approach(current_speed, target_speed, accel * dt);
+    } else {
+      const f32 drag_factor =
+          std::pow(profile.drag, std::max(dt, 0.0F) * 60.0F);
+      next_speed = current_speed * drag_factor;
+      if (std::abs(next_speed) < 0.02F) {
+        next_speed = 0.0F;
+      }
+    }
     predicted_vehicle_velocity_ = forward * next_speed;
-    predicted_vehicle_position_ =
-        predicted_vehicle_position_ + predicted_vehicle_velocity_ * dt;
-    predicted_vehicle_rotation_ = yaw_rotation(predicted_vehicle_yaw_);
+    const Vec3f attempted_delta = predicted_vehicle_velocity_ * dt;
+    if (collision_query != nullptr) {
+      const Aabb3f bounds = vehicle_bounds(predicted_vehicle_position_, profile.collision_size);
+      const physics::MovementResolution resolved =
+          physics::resolve_movement(*collision_query, bounds, attempted_delta);
+      predicted_vehicle_position_ =
+          predicted_vehicle_position_ + resolved.applied_delta;
+      if (resolved.hit_x) {
+        predicted_vehicle_velocity_.x = 0.0F;
+      }
+      if (resolved.hit_y) {
+        predicted_vehicle_velocity_.y = 0.0F;
+      }
+      if (resolved.hit_z) {
+        predicted_vehicle_velocity_.z = 0.0F;
+      }
+    } else {
+      predicted_vehicle_position_ =
+          predicted_vehicle_position_ + attempted_delta;
+    }
+    predicted_vehicle_rotation_ =
+        vehicle_render_rotation_from_gameplay_yaw(predicted_vehicle_yaw_);
     const f32 yaw_delta = wrap_angle_radians(predicted_vehicle_yaw_ - previous_yaw);
+
+    const std::string_view animation_name =
+        vehicle_motion_animation_name(
+            profile,
+            predicted_vehicle_rotation_,
+            predicted_vehicle_velocity_);
+    if (animation_name.empty()) {
+      predicted_vehicle_animation_name_.clear();
+      predicted_vehicle_animation_time_ = 0.0;
+    } else if (predicted_vehicle_animation_name_ != animation_name) {
+      predicted_vehicle_animation_name_ = std::string{animation_name};
+      predicted_vehicle_animation_time_ = 0.0;
+    } else {
+      predicted_vehicle_animation_time_ += dt;
+    }
+    std::array<protocol::EntityAnimationPlayback, 1> active_animations{};
+    std::span<const protocol::EntityAnimationPlayback> active_animation_span{};
+    if (!predicted_vehicle_animation_name_.empty()) {
+      active_animations[0] = {
+          predicted_vehicle_animation_name_,
+          predicted_vehicle_animation_time_};
+      active_animation_span = std::span<const protocol::EntityAnimationPlayback>{
+          active_animations.data(),
+          1U};
+    }
+
+    const entity::VehicleSeatDefinition* seat =
+        find_vehicle_seat(definition, player_controller.mounted_seat_id());
+    player_controller.apply_mounted_vehicle_transform(
+        vehicle_id,
+        predicted_vehicle_position_,
+        predicted_vehicle_rotation_,
+        seat == nullptr ? Vec3f{} : seat->local_position,
+        seat == nullptr ? Quatf{} : seat->local_rotation,
+        predicted_vehicle_velocity_);
+    entities.apply_local_vehicle_prediction(
+        vehicle_id,
+        predicted_vehicle_position_,
+        predicted_vehicle_velocity_,
+        predicted_vehicle_rotation_,
+        active_animation_span);
+
+    if (!send_this_tick) {
+      return;
+    }
+    movement_send_accumulator_seconds_ = 0.0;
 
     protocol::ServerboundVehicleMove move;
     move.vehicle_id = vehicle_id;
@@ -312,6 +505,28 @@ void ClientInputRuntime::send_fixed_tick_input(
 
 void ClientInputRuntime::set_movement_send_rate(f32 send_rate_hz) noexcept {
   movement_send_rate_hz_ = std::max(send_rate_hz, 1.0F);
+}
+
+void ClientInputRuntime::apply_vehicle_correction(
+    const protocol::ClientboundVehicleCorrection& correction) noexcept {
+  predicted_vehicle_id_ = correction.vehicle_id;
+  predicted_vehicle_position_ = correction.position;
+  predicted_vehicle_velocity_ = correction.velocity;
+  predicted_vehicle_rotation_ = normalize_quat(correction.rotation);
+  predicted_vehicle_yaw_ = vehicle_gameplay_yaw_from_rotation(correction.rotation);
+  predicted_vehicle_animation_name_.clear();
+  predicted_vehicle_animation_time_ = 0.0;
+  movement_send_accumulator_seconds_ = 0.0;
+}
+
+void ClientInputRuntime::clear_vehicle_prediction() noexcept {
+  predicted_vehicle_id_.reset();
+  predicted_vehicle_position_ = {};
+  predicted_vehicle_velocity_ = {};
+  predicted_vehicle_rotation_ = {};
+  predicted_vehicle_yaw_ = 0.0F;
+  predicted_vehicle_animation_name_.clear();
+  predicted_vehicle_animation_time_ = 0.0;
 }
 
 } // namespace arv::client::detail

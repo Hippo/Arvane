@@ -8,13 +8,14 @@ Plugin.register('arvane_blockbench_plugin', {
   icon: 'save',
   author: 'hippo',
   description: 'Exports and imports Arvane models and animation files',
-  version: '2.2.0',
+  version: '2.3.0',
   variant: 'both',
 
   onload() {
     const FACE_NAMES = ['north', 'south', 'east', 'west', 'up', 'down'];
     const ANIMATION_CHANNELS = ['rotation', 'position', 'scale'];
     const DEFAULT_PIVOT = [0, 0, 0];
+    const DEFAULT_ROTATION = [0, 0, 0];
 
     function toNumber(value, fallback = 0) {
       const number = Number(value);
@@ -35,8 +36,23 @@ Plugin.register('arvane_blockbench_plugin', {
       return result;
     }
 
+    function vec2(value, fallback = 0) {
+      return vec(value, 2, fallback);
+    }
+
+    function vec3(value, fallback = 0) {
+      return vec(value, 3, fallback);
+    }
+
     function roundUv(uv) {
       return vec(uv, 4, 0);
+    }
+
+    function sameVec3(a, b) {
+      const av = vec3(a, 0);
+      const bv = vec3(b, 0);
+
+      return av[0] === bv[0] && av[1] === bv[1] && av[2] === bv[2];
     }
 
     function normalizePath(path) {
@@ -219,7 +235,8 @@ Plugin.register('arvane_blockbench_plugin', {
     function extractFace(face, textureInfo) {
       return {
         texture: getFaceTextureIndex(face, textureInfo),
-        uv: roundUv(face?.uv)
+        uv: roundUv(face?.uv),
+        rotation: round3(face?.rotation)
       };
     }
 
@@ -231,18 +248,64 @@ Plugin.register('arvane_blockbench_plugin', {
       return typeof Group !== 'undefined' && node instanceof Group && node.export !== false;
     }
 
-    function getGroupPivot(group) {
-      return vec(group?.origin || DEFAULT_PIVOT, 3, 0);
+    function getParentBoneName(group) {
+      const parent = group?.parent;
+
+      if (isExportedGroup(parent) && parent.name) {
+        return String(parent.name);
+      }
+
+      return '';
     }
 
-    function extractCubeData(cube, textureInfo, boneName, pivot) {
+    function addVec3IfNonDefault(target, key, value, defaultValue = DEFAULT_PIVOT) {
+      const normalized = vec3(value, 0);
+
+      if (!sameVec3(normalized, defaultValue)) {
+        target[key] = normalized;
+      }
+    }
+
+    function extractBoneData(group) {
+      const data = {};
+      const parent = getParentBoneName(group);
+
+      addVec3IfNonDefault(data, 'pivot', group?.origin || DEFAULT_PIVOT, DEFAULT_PIVOT);
+      addVec3IfNonDefault(data, 'rotation', group?.rotation || DEFAULT_ROTATION, DEFAULT_ROTATION);
+
+      if (parent) {
+        data.parent = parent;
+      }
+
+      return data;
+    }
+
+    function extractCubeData(cube, textureInfo, boneName) {
       const data = {
         bone: String(boneName || ''),
-        pivot: vec(pivot || DEFAULT_PIVOT, 3, 0),
-        min: vec(cube.from, 3, 0),
-        max: vec(cube.to, 3, 0),
+        min: vec3(cube.from, 0),
+        max: vec3(cube.to, 0),
         inflate: round3(cube.inflate)
       };
+
+      addVec3IfNonDefault(data, 'origin', cube.origin || DEFAULT_PIVOT, DEFAULT_PIVOT);
+      addVec3IfNonDefault(data, 'rotation', cube.rotation || DEFAULT_ROTATION, DEFAULT_ROTATION);
+
+      if (Array.isArray(cube.uv_offset) && !sameVec3([cube.uv_offset[0], cube.uv_offset[1], 0], DEFAULT_PIVOT)) {
+        data.uv_offset = vec2(cube.uv_offset, 0);
+      }
+
+      if (cube.box_uv === true) {
+        data.box_uv = true;
+      }
+
+      if (cube.mirror_uv === true) {
+        data.mirror_uv = true;
+      }
+
+      if (cube.shade === false) {
+        data.shade = false;
+      }
 
       for (const faceName of FACE_NAMES) {
         data[faceName] = extractFace(cube.faces?.[faceName], textureInfo);
@@ -251,43 +314,54 @@ Plugin.register('arvane_blockbench_plugin', {
       return data;
     }
 
-    function collectCubes(nodes, textureInfo, currentBoneName, currentPivot, out) {
-      if (!Array.isArray(nodes)) return out;
+    function recordBone(bones, group) {
+      const boneName = String(group?.name || '');
+
+      if (!boneName) return '';
+
+      const data = extractBoneData(group);
+
+      if (Object.prototype.hasOwnProperty.call(bones, boneName)) {
+        console.warn(`[Arvane] Duplicate bone name '${boneName}' encountered while exporting. Bone names should be unique.`);
+      }
+
+      bones[boneName] = data;
+      return boneName;
+    }
+
+    function collectModelNodes(nodes, textureInfo, currentBoneName, bones, boxes) {
+      if (!Array.isArray(nodes)) return;
 
       nodes.forEach(node => {
         if (isExportedCube(node)) {
-          out.push(extractCubeData(node, textureInfo, currentBoneName, currentPivot));
+          boxes.push(extractCubeData(node, textureInfo, currentBoneName));
           return;
         }
 
         if (isExportedGroup(node)) {
-          collectCubes(
-            node.children,
-            textureInfo,
-            node.name || '',
-            getGroupPivot(node),
-            out
-          );
+          const boneName = recordBone(bones, node);
+          collectModelNodes(node.children, textureInfo, boneName || currentBoneName, bones, boxes);
         }
       });
-
-      return out;
     }
 
     function buildModelExport() {
       const textureInfo = buildTextureInfo();
+      const bones = {};
+      const boxes = [];
 
-      const boxes = collectCubes(
+      collectModelNodes(
         typeof Outliner !== 'undefined' && Array.isArray(Outliner.root) ? Outliner.root : [],
         textureInfo,
         '',
-        DEFAULT_PIVOT,
-        []
+        bones,
+        boxes
       );
 
       return {
         textures: textureInfo.names,
         texture_sizes: textureInfo.sizes,
+        bones,
         boxes
       };
     }
@@ -440,8 +514,24 @@ Plugin.register('arvane_blockbench_plugin', {
         && value.slice(0, 3).every(component => Number.isFinite(Number(component)));
     }
 
+    function isOptionalVec3(value) {
+      return value == null || isVec3(value);
+    }
+
+    function isOptionalVec4(value) {
+      return value == null || (
+        Array.isArray(value)
+        && value.length >= 4
+        && value.slice(0, 4).every(component => Number.isFinite(Number(component)))
+      );
+    }
+
+    function isObjectRecord(value) {
+      return value != null && typeof value === 'object' && !Array.isArray(value);
+    }
+
     function assertArvaneModel(model) {
-      if (!model || typeof model !== 'object' || Array.isArray(model)) {
+      if (!isObjectRecord(model)) {
         throw new Error('Arvane model must be a JSON object.');
       }
 
@@ -457,17 +547,35 @@ Plugin.register('arvane_blockbench_plugin', {
         throw new Error('Arvane model must contain a boxes array.');
       }
 
+      if (model.bones != null && !isObjectRecord(model.bones)) {
+        throw new Error('Arvane model bones field must be an object when present.');
+      }
+
+      Object.entries(model.bones || {}).forEach(([boneName, bone], index) => {
+        if (!isObjectRecord(bone)) {
+          throw new Error(`Bone '${boneName || index}' must be an object.`);
+        }
+
+        if (!isOptionalVec3(bone.pivot)) {
+          throw new Error(`Bone '${boneName || index}' has invalid pivot field. Expected numeric vec3.`);
+        }
+
+        if (!isOptionalVec3(bone.rotation)) {
+          throw new Error(`Bone '${boneName || index}' has invalid rotation field. Expected numeric vec3.`);
+        }
+
+        if (bone.parent != null && typeof bone.parent !== 'string') {
+          throw new Error(`Bone '${boneName || index}' has invalid parent field. Expected string.`);
+        }
+      });
+
       model.boxes.forEach((box, index) => {
-        if (!box || typeof box !== 'object' || Array.isArray(box)) {
+        if (!isObjectRecord(box)) {
           throw new Error(`Box at index ${index} must be an object.`);
         }
 
         if (typeof box.bone !== 'string') {
           throw new Error(`Box at index ${index} has invalid or missing bone field. Expected string.`);
-        }
-
-        if (!isVec3(box.pivot)) {
-          throw new Error(`Box at index ${index} has invalid or missing pivot field. Expected numeric vec3.`);
         }
 
         if (!isVec3(box.min)) {
@@ -477,11 +585,36 @@ Plugin.register('arvane_blockbench_plugin', {
         if (!isVec3(box.max)) {
           throw new Error(`Box at index ${index} has invalid max field. Expected numeric vec3.`);
         }
+
+        if (!isOptionalVec3(box.origin)) {
+          throw new Error(`Box at index ${index} has invalid origin field. Expected numeric vec3.`);
+        }
+
+        if (!isOptionalVec3(box.rotation)) {
+          throw new Error(`Box at index ${index} has invalid rotation field. Expected numeric vec3.`);
+        }
+
+        if (box.uv_offset != null && !Array.isArray(box.uv_offset)) {
+          throw new Error(`Box at index ${index} has invalid uv_offset field. Expected numeric vec2.`);
+        }
+
+        FACE_NAMES.forEach(faceName => {
+          const face = box[faceName];
+          if (face == null) return;
+
+          if (!isObjectRecord(face)) {
+            throw new Error(`Box at index ${index} face '${faceName}' must be an object.`);
+          }
+
+          if (!isOptionalVec4(face.uv)) {
+            throw new Error(`Box at index ${index} face '${faceName}' has invalid uv field. Expected numeric vec4.`);
+          }
+        });
       });
     }
 
     function assertArvaneAnimations(animationFile) {
-      if (!animationFile || typeof animationFile !== 'object' || Array.isArray(animationFile)) {
+      if (!isObjectRecord(animationFile)) {
         throw new Error('Arvane animation file must be a JSON object.');
       }
 
@@ -572,15 +705,21 @@ Plugin.register('arvane_blockbench_plugin', {
       return texture.uuid || texture.id || texture.name || false;
     }
 
+    function getFaceRotation(faceData) {
+      if (!faceData || typeof faceData !== 'object') return 0;
+      return round3(faceData.rotation);
+    }
+
     function applyImportedFace(cube, faceName, faceData, textures) {
       const face = cube.faces?.[faceName];
 
       if (!face) return;
 
-      const data = faceData && typeof faceData === 'object' ? faceData : {};
+      const data = isObjectRecord(faceData) ? faceData : {};
       const textureIndex = Number(data.texture);
 
       face.uv = roundUv(data.uv);
+      face.rotation = getFaceRotation(data);
 
       if (Number.isInteger(textureIndex) && textureIndex >= 0 && textures[textureIndex]) {
         face.texture = getTextureReference(textures[textureIndex]);
@@ -597,20 +736,38 @@ Plugin.register('arvane_blockbench_plugin', {
       }
     }
 
-    function setGroupOrigin(group, pivot) {
-      if (!group) return;
+    function setArrayVector(target, key, value, length, fallback = 0) {
+      if (!target) return;
 
-      const normalizedPivot = vec(pivot, 3, 0);
-      group.origin = normalizedPivot;
+      const normalized = vec(value, length, fallback);
 
-      if (typeof group.transferOrigin === 'function') {
-        try {
-          group.transferOrigin(normalizedPivot);
-        } catch (error) {
-          // Some Blockbench formats do not support transferOrigin.
-          group.origin = normalizedPivot;
-        }
+      if (Array.isArray(target[key]) && typeof target[key].V3_set === 'function') {
+        target[key].V3_set(normalized);
+        return;
       }
+
+      if (Array.isArray(target[key]) && typeof target[key].V2_set === 'function') {
+        target[key].V2_set(normalized);
+        return;
+      }
+
+      target[key] = normalized.slice();
+    }
+
+    function setGroupPivot(group, pivot) {
+      setArrayVector(group, 'origin', pivot || DEFAULT_PIVOT, 3, 0);
+    }
+
+    function setGroupRotation(group, rotation) {
+      setArrayVector(group, 'rotation', rotation || DEFAULT_ROTATION, 3, 0);
+    }
+
+    function setCubeOrigin(cube, origin) {
+      setArrayVector(cube, 'origin', origin || DEFAULT_PIVOT, 3, 0);
+    }
+
+    function setCubeRotation(cube, rotation) {
+      setArrayVector(cube, 'rotation', rotation || DEFAULT_ROTATION, 3, 0);
     }
 
     function updateModelView() {
@@ -641,94 +798,105 @@ Plugin.register('arvane_blockbench_plugin', {
       }
     }
 
-    function attachCubeToParent(cube, parent) {
-      if (!parent) return cube;
+    function attachNodeToParent(node, parent) {
+      if (!node || !parent) return node;
 
-      if (typeof cube.addTo === 'function') {
-        cube.addTo(parent);
-        return cube;
+      if (typeof node.addTo === 'function') {
+        node.addTo(parent);
+        return node;
       }
 
-      if (Array.isArray(parent.children) && !parent.children.includes(cube)) {
-        parent.children.push(cube);
-        cube.parent = parent;
+      if (Array.isArray(parent.children) && !parent.children.includes(node)) {
+        parent.children.push(node);
+        node.parent = parent;
       }
 
-      return cube;
+      return node;
     }
 
-    function sameVec3(a, b) {
-      const av = vec(a, 3, 0);
-      const bv = vec(b, 3, 0);
-
-      return av[0] === bv[0] && av[1] === bv[1] && av[2] === bv[2];
+    function getModelBoneData(model, boneName) {
+      const bones = isObjectRecord(model?.bones) ? model.bones : null;
+      const bone = bones ? bones[String(boneName || '')] : null;
+      return isObjectRecord(bone) ? bone : {};
     }
 
-    function setGroupPivot(group, pivot) {
-      if (!group) return;
-
-      const normalizedPivot = vec(pivot || DEFAULT_PIVOT, 3, 0);
-
-      if (Array.isArray(group.origin) && typeof group.origin.V3_set === 'function') {
-        group.origin.V3_set(normalizedPivot);
-      } else {
-        group.origin = normalizedPivot.slice();
-      }
+    function getBoneParentName(boneData) {
+      return typeof boneData?.parent === 'string' ? boneData.parent.trim() : '';
     }
 
-    function ensureModelGroup(name, pivot, importedGroupPivots) {
+    function getBonePivot(model, boneName, legacyPivot) {
+      const boneData = getModelBoneData(model, boneName);
+      return vec3(boneData.pivot || legacyPivot || DEFAULT_PIVOT, 0);
+    }
+
+    function getBoneRotation(model, boneName) {
+      const boneData = getModelBoneData(model, boneName);
+      return vec3(boneData.rotation || DEFAULT_ROTATION, 0);
+    }
+
+    function ensureModelGroup(name, model, legacyPivot, importedGroups, creatingGroups) {
       const boneName = String(name || '');
 
       if (!boneName) {
         return null;
       }
 
-      const normalizedPivot = vec(pivot || DEFAULT_PIVOT, 3, 0);
-      const previousPivot = importedGroupPivots.get(boneName);
-
-      if (previousPivot && !sameVec3(previousPivot, normalizedPivot)) {
-        console.warn(
-          `[Arvane] Bone '${boneName}' was imported with multiple pivots. ` +
-          `Using first pivot ${JSON.stringify(previousPivot)}, ignoring ${JSON.stringify(normalizedPivot)}.`
-        );
+      if (importedGroups.has(boneName)) {
+        return importedGroups.get(boneName);
       }
 
-      if (!previousPivot) {
-        importedGroupPivots.set(boneName, normalizedPivot);
-      }
-
-      const existing = getGroupByName(boneName);
-
-      if (existing) {
-        if (!previousPivot) {
-          setGroupPivot(existing, normalizedPivot);
-        }
-
-        return existing;
+      if (creatingGroups.has(boneName)) {
+        throw new Error(`Bone hierarchy cycle detected at bone '${boneName}'.`);
       }
 
       if (typeof Group === 'undefined') {
         throw new Error(`Cannot create group '${boneName}' because this Blockbench format does not expose groups.`);
       }
 
-      const group = new Group({
+      creatingGroups.add(boneName);
+
+      const boneData = getModelBoneData(model, boneName);
+      const parentName = getBoneParentName(boneData);
+      const parentGroup = parentName
+        ? ensureModelGroup(parentName, model, DEFAULT_PIVOT, importedGroups, creatingGroups)
+        : null;
+      const pivot = getBonePivot(model, boneName, legacyPivot);
+      const rotation = getBoneRotation(model, boneName);
+      const existing = getGroupByName(boneName);
+      const group = existing || new Group({
         name: boneName,
-        origin: normalizedPivot.slice()
+        origin: pivot.slice(),
+        rotation: rotation.slice()
       });
 
-      setGroupPivot(group, normalizedPivot);
+      setGroupPivot(group, pivot);
+      setGroupRotation(group, rotation);
 
-      if (typeof group.init === 'function') {
+      if (!existing && typeof group.init === 'function') {
         group.init();
       }
 
-      setGroupPivot(group, normalizedPivot);
+      setGroupPivot(group, pivot);
+      setGroupRotation(group, rotation);
+      attachNodeToParent(group, parentGroup);
+
+      importedGroups.set(boneName, group);
+      creatingGroups.delete(boneName);
 
       return group;
     }
 
-    function createImportedCube(box, index, textures, importedGroupPivots) {
-      if (!box || typeof box !== 'object' || Array.isArray(box)) {
+    function getBoxOrigin(box) {
+      // `origin` is the new per-cube pivot. `pivot` is accepted only for legacy files.
+      return vec3(box.origin || box.pivot || DEFAULT_PIVOT, 0);
+    }
+
+    function getBoxRotation(box) {
+      return vec3(box.rotation || DEFAULT_ROTATION, 0);
+    }
+
+    function createImportedCube(box, index, model, textures, importedGroups, creatingGroups) {
+      if (!isObjectRecord(box)) {
         throw new Error(`Box at index ${index} must be an object.`);
       }
 
@@ -736,12 +904,23 @@ Plugin.register('arvane_blockbench_plugin', {
         throw new Error(`Box at index ${index} must contain min and max arrays.`);
       }
 
+      const origin = getBoxOrigin(box);
+      const rotation = getBoxRotation(box);
       const cube = new Cube({
         name: box.name || `box_${index}`,
-        from: vec(box.min, 3, 0),
-        to: vec(box.max, 3, 0),
-        inflate: round3(box.inflate)
+        from: vec3(box.min, 0),
+        to: vec3(box.max, 0),
+        inflate: round3(box.inflate),
+        origin: origin.slice(),
+        rotation: rotation.slice(),
+        box_uv: box.box_uv === true,
+        mirror_uv: box.mirror_uv === true,
+        shade: box.shade !== false,
+        uv_offset: Array.isArray(box.uv_offset) ? vec2(box.uv_offset, 0) : undefined
       });
+
+      setCubeOrigin(cube, origin);
+      setCubeRotation(cube, rotation);
 
       FACE_NAMES.forEach(faceName => {
         applyImportedFace(cube, faceName, box[faceName], textures);
@@ -749,15 +928,20 @@ Plugin.register('arvane_blockbench_plugin', {
 
       const parent = ensureModelGroup(
         box.bone || '',
+        model,
         box.pivot || DEFAULT_PIVOT,
-        importedGroupPivots
+        importedGroups,
+        creatingGroups
       );
 
-      attachCubeToParent(cube, parent);
+      attachNodeToParent(cube, parent);
 
       if (typeof cube.init === 'function') {
         cube.init();
       }
+
+      setCubeOrigin(cube, origin);
+      setCubeRotation(cube, rotation);
 
       return cube;
     }
@@ -773,14 +957,20 @@ Plugin.register('arvane_blockbench_plugin', {
         assertArvaneModel(model);
 
         const baseDirectory = dirName(file.path || '');
-        const importedGroupPivots = new Map();
+        const importedGroups = new Map();
+        const creatingGroups = new Set();
 
         const textures = model.textures.map((textureName, index) => {
           return createImportedTexture(textureName, model.texture_sizes[index], baseDirectory);
         });
 
+        // Create declared bones before cubes so hierarchy, pivots, and rotations exist even for empty bones.
+        Object.keys(model.bones || {}).forEach(boneName => {
+          ensureModelGroup(boneName, model, DEFAULT_PIVOT, importedGroups, creatingGroups);
+        });
+
         model.boxes.forEach((box, index) => {
-          createImportedCube(box, index, textures, importedGroupPivots);
+          createImportedCube(box, index, model, textures, importedGroups, creatingGroups);
         });
 
         updateModelView();
@@ -820,7 +1010,8 @@ Plugin.register('arvane_blockbench_plugin', {
 
       const group = new Group({
         name: boneName,
-        origin: DEFAULT_PIVOT.slice()
+        origin: DEFAULT_PIVOT.slice(),
+        rotation: DEFAULT_ROTATION.slice()
       });
 
       if (typeof group.init === 'function') {
@@ -874,7 +1065,7 @@ Plugin.register('arvane_blockbench_plugin', {
     }
 
     function createKeyframePayload(keyframeData) {
-      const value = vec(keyframeData.value, 3, keyframeData.channel === 'scale' ? 1 : 0);
+      const value = vec3(keyframeData.value, keyframeData.channel === 'scale' ? 1 : 0);
 
       return {
         channel: String(keyframeData.channel),
@@ -938,7 +1129,7 @@ Plugin.register('arvane_blockbench_plugin', {
       }
 
       animationData.keyframes.forEach((keyframe, index) => {
-        if (!keyframe || typeof keyframe !== 'object' || Array.isArray(keyframe)) {
+        if (!isObjectRecord(keyframe)) {
           throw new Error(`Keyframe ${index} in animation '${animation.name}' must be an object.`);
         }
 

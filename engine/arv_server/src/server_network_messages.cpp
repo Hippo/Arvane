@@ -22,6 +22,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace arv::server::detail {
@@ -295,6 +296,37 @@ void clear_active_skin_upload(
   return count;
 }
 
+[[nodiscard]] Vec3f model_visual_forward(Quatf rotation) noexcept {
+  return rotate_vector(normalize_quat(rotation), {0.0F, 0.0F, -1.0F});
+}
+
+[[nodiscard]] std::string_view vehicle_motion_animation_name(
+    const entity::VehicleDefinition& definition,
+    const AcceptedVehicleMovementState& accepted) noexcept {
+  if (definition.physics != entity::VehiclePhysicsKind::GroundVehicle) {
+    return {};
+  }
+  constexpr f32 AnimationSpeedEpsilonBlocksPerSecond = 0.05F;
+  const f32 signed_speed = dot(accepted.velocity, model_visual_forward(accepted.rotation));
+  if (signed_speed > AnimationSpeedEpsilonBlocksPerSecond) {
+    return "driving";
+  }
+  if (signed_speed < -AnimationSpeedEpsilonBlocksPerSecond) {
+    return "reverse";
+  }
+  return {};
+}
+
+void update_vehicle_motion_animation(
+    world::WorldRuntime& world,
+    EntityID vehicle_entity,
+    const entity::VehicleDefinition& definition,
+    const AcceptedVehicleMovementState& accepted) {
+  (void)world.set_entity_animation(
+      vehicle_entity,
+      std::string{vehicle_motion_animation_name(definition, accepted)});
+}
+
 [[nodiscard]] VehicleMovementValidationContext make_vehicle_validation_context(
     const world::WorldRuntime& world,
     const voxel::BlockRegistry& block_registry,
@@ -320,20 +352,10 @@ void clear_active_skin_upload(
     return context;
   }
 
-  const Vec3f previous_position =
-      previous.has_accepted_move
-          ? previous.position
-          : ([&]() {
-              const entity::EntityTransform* transform =
-                  world.find_entity_transform(vehicle_entity);
-              return transform == nullptr ? move.position : transform->position;
-            })();
+  (void)previous;
   world::WorldCollisionQuery query(world, block_registry, true);
-  const Aabb3f start = vehicle_bounds(previous_position, collision->box);
   const Aabb3f end = vehicle_bounds(move.position, collision->box);
-  const Aabb3f swept_bounds = swept(start, move.position - previous_position);
-  context.swept_aabb_overlaps_solid =
-      physics::overlaps_solid_blocks(query, swept_bounds, physics::CollisionEpsilon) ||
+  context.final_aabb_overlaps_solid =
       physics::overlaps_solid_blocks(query, end, physics::CollisionEpsilon);
   context.has_ground_support =
       physics::has_support_below(
@@ -1470,6 +1492,11 @@ void ServerRuntimeImpl::handle_vehicle_move(
     physics->in_water =
         protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::InWater);
   }
+  update_vehicle_motion_animation(
+      default_world_,
+      vehicle_entity.value(),
+      *definition,
+      previous);
   (void)default_world_.update_passenger_attachment_transforms();
   if (const entity::RideableComponent* rideable =
           default_world_.find_entity_rideable(vehicle_entity.value());

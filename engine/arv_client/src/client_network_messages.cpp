@@ -107,6 +107,22 @@ void disconnect_and_clear(ClientRuntimeContext& runtime, std::string_view reason
   return found == definition->seats.end() ? nullptr : &*found;
 }
 
+[[nodiscard]] bool locally_controls_vehicle(
+    const ClientRuntimeContext& runtime,
+    EntityNetID vehicle_id) noexcept {
+  return runtime.player_controller.mounted_controls_vehicle() &&
+         runtime.player_controller.mounted_vehicle_id().has_value() &&
+         runtime.player_controller.mounted_vehicle_id().value() == vehicle_id;
+}
+
+[[nodiscard]] std::optional<EntityNetID> locally_controlled_vehicle(
+    const ClientRuntimeContext& runtime) noexcept {
+  if (!runtime.player_controller.mounted_controls_vehicle()) {
+    return std::nullopt;
+  }
+  return runtime.player_controller.mounted_vehicle_id();
+}
+
 void apply_local_mounted_vehicle_transform(
     ClientRuntimeContext& runtime,
     EntityNetID rideable_id,
@@ -440,17 +456,22 @@ void ClientNetworkRouter::handle_message(
         return;
       }
       const protocol::ClientboundVehicleState packet = state.value();
+      const bool local_driver_owned =
+          locally_controls_vehicle(runtime, packet.vehicle_id);
       runtime.entities.apply_vehicle_state(
           packet,
           runtime.player_controller.camera().world_id(),
-          runtime.player_controller.server_tick_rate());
-      apply_local_mounted_vehicle_transform(
-          runtime,
-          packet.vehicle_id,
-          runtime.player_controller.mounted_seat_id(),
-          packet.position,
-          packet.velocity,
-          packet.rotation);
+          runtime.player_controller.server_tick_rate(),
+          local_driver_owned);
+      if (!local_driver_owned) {
+        apply_local_mounted_vehicle_transform(
+            runtime,
+            packet.vehicle_id,
+            runtime.player_controller.mounted_seat_id(),
+            packet.position,
+            packet.velocity,
+            packet.rotation);
+      }
       return;
     }
     case protocol::MessageType::ClientboundVehicleCorrection: {
@@ -461,6 +482,9 @@ void ClientNetworkRouter::handle_message(
       }
       const protocol::ClientboundVehicleCorrection packet = correction.value();
       runtime.entities.apply_vehicle_correction(packet);
+      if (locally_controls_vehicle(runtime, packet.vehicle_id)) {
+        runtime.input.apply_vehicle_correction(packet);
+      }
       runtime.player_controller.apply_vehicle_correction(packet);
       apply_local_mounted_vehicle_transform(
           runtime,
@@ -499,6 +523,7 @@ void ClientNetworkRouter::handle_message(
       }
       runtime.entities.apply_ride_ended(event.value());
       runtime.player_controller.apply_ride_ended(event.value());
+      runtime.input.clear_vehicle_prediction();
       return;
     }
     case protocol::MessageType::ClientboundEntityPassengersSet: {
@@ -617,10 +642,17 @@ void ClientNetworkRouter::handle_message(
       if (!despawn) {
         return;
       }
+      const protocol::ClientboundEntityDespawn packet = despawn.value();
+      const bool despawned_local_mount =
+          runtime.player_controller.mounted_vehicle_id().has_value() &&
+          runtime.player_controller.mounted_vehicle_id().value() == packet.entity_id;
       runtime.player_controller.clear_mount_if_rideable_despawned(
-          despawn.value().entity_id);
+          packet.entity_id);
+      if (despawned_local_mount) {
+        runtime.input.clear_vehicle_prediction();
+      }
       runtime.entities.apply_despawn(
-          despawn.value(),
+          packet,
           runtime.player_controller.camera().world_id());
       return;
     }
@@ -632,7 +664,8 @@ void ClientNetworkRouter::handle_message(
       runtime.entities.apply_snapshot(
           snapshot.value(),
           runtime.player_controller.camera().world_id(),
-          runtime.player_controller.server_tick_rate());
+          runtime.player_controller.server_tick_rate(),
+          locally_controlled_vehicle(runtime));
       return;
     }
     case protocol::MessageType::ClientboundDroppedItemSnapshot: {

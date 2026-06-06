@@ -115,6 +115,10 @@ seat per built-in vehicle.
 second for readability. The loader converts them to radians per second for
 runtime prediction and validation.
 
+The built-in buggy uses `arvane:animation/automobile`; the client and accepted
+server state select its `driving` clip when moving along the buggy's visual
+front and its `reverse` clip when moving backward.
+
 ---
 
 ## Movement Authority
@@ -124,6 +128,11 @@ V1 vehicle movement is client-owned with server guardrails.
 The driver client:
 
 - predicts a simple controller-based vehicle transform
+- advances prediction every fixed tick, independent of movement packet send cadence
+- resolves the predicted AABB against local terrain before sending movement
+- cancels impacted velocity axes so wall hits settle instead of correction-looping
+- keeps the local rider anchored to the predicted seat transform
+- renders the locally controlled vehicle from predicted state
 - sends `ServerboundVehicleMove`
 - stops sending independent `ServerboundPlayerMove` while mounted
 
@@ -133,9 +142,9 @@ The server:
 - checks the sender occupies the controlling seat
 - validates sequence ordering
 - validates finite numbers
-- validates speed, acceleration, angular speed, and vertical speed
+- validates speed, speed-up, non-impact braking, angular speed, and vertical speed
 - validates actual rotation delta from the last accepted state
-- validates swept AABB collision
+- rejects final AABB hulls that overlap solid terrain
 - validates required ground or water support
 - writes accepted vehicle transform and velocity
 - updates passenger attachment transforms
@@ -143,6 +152,9 @@ The server:
 - broadcasts accepted `ClientboundVehicleState`
 
 The server does not run full vehicle physics for every vehicle in V1.
+For the local driver, ordinary `ClientboundVehicleState` and entity snapshots do
+not rewind the controlled vehicle. They are observer/passenger replication for
+that vehicle. `ClientboundVehicleCorrection` is the explicit guardrail snap.
 
 ---
 
@@ -207,5 +219,5 @@ persisted in V1.
 - Surface-water V1 vehicles are water-bound; dry-land boat driving is rejected
   instead of simulated with land drag.
 - V1 passenger state is not saved across server restarts.
-- Vehicle item placement, crafting, audio, VFX, and polished animation are out
-  of scope for this pass.
+- Vehicle item placement, crafting, audio, VFX, and animation beyond the buggy's
+  minimal forward/reverse wheel clips are out of scope for this pass.

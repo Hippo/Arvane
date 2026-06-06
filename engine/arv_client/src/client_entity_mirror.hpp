@@ -3,6 +3,8 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/protocol/entity_replication.hpp"
 
+#include <optional>
+#include <span>
 #include <vector>
 
 namespace arv::client {
@@ -14,12 +16,20 @@ public:
   void apply_snapshot(
       const protocol::ClientboundEntitySnapshot& snapshot,
       WorldID current_world,
-      TickRate server_tick_rate);
+      TickRate server_tick_rate,
+      std::optional<EntityNetID> locally_controlled_vehicle);
   void apply_vehicle_state(
       const protocol::ClientboundVehicleState& state,
       WorldID current_world,
-      TickRate server_tick_rate);
+      TickRate server_tick_rate,
+      bool local_driver_owns_vehicle);
   void apply_vehicle_correction(const protocol::ClientboundVehicleCorrection& correction);
+  void apply_local_vehicle_prediction(
+      EntityNetID vehicle_id,
+      Vec3f position,
+      Vec3f velocity,
+      Quatf rotation,
+      std::span<const protocol::EntityAnimationPlayback> animations);
   void apply_ride_started(const protocol::ClientboundRideStarted& event);
   void apply_ride_ended(const protocol::ClientboundRideEnded& event);
   void apply_passengers_set(const protocol::ClientboundEntityPassengersSet& event);
