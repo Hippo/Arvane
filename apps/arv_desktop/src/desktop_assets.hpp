@@ -5,16 +5,16 @@
 #include "arv/asset/font.hpp"
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
+#include "arv/client/item_animation.hpp"
 #include "arv/client/particles.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
-#include "arv/client/item_animation.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
-#include "arv/text/language.hpp"
 #include "arv/player/item.hpp"
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/render/render_commands.hpp"
+#include "arv/text/language.hpp"
 #include "arv/ui/core/ui.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/entity_goal_registry.hpp"
@@ -31,6 +31,7 @@ struct DesktopLoadedAssets {
   u64 item_registry_hash{};
   client::ItemAnimationLibrary item_animation_library{};
   entity::EntityRegistry entity_registry{};
+  entity::VehicleDefinitionRegistry vehicle_registry{};
   arv::text::LanguageCatalog language{};
   asset::BlockTextureAtlas block_atlas{};
   render::FluidRenderData fluid_render_data{};

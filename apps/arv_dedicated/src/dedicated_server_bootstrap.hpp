@@ -29,7 +29,8 @@ namespace arv::dedicated {
 void restore_loaded_world_into_server(
     server::ServerRuntime& server,
     const persistence::LoadedSaveData& loaded_save,
-    const entity::EntityRegistry& entity_registry);
+    const entity::EntityRegistry& entity_registry,
+    const entity::VehicleDefinitionRegistry& vehicle_registry);
 
 void log_dedicated_server_ready(
     const io::EngineConfig& config,

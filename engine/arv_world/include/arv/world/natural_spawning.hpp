@@ -269,7 +269,8 @@ public:
       WorldRuntime& world,
       const voxel::BlockRegistry& block_registry,
       const entity::EntityRegistry& entity_registry,
-      TickIndex tick);
+      TickIndex tick,
+      const entity::VehicleDefinitionRegistry* vehicle_definitions = nullptr);
 
   [[nodiscard]] std::optional<NaturalSpawnJobRequest> make_job_request(
       const WorldRuntime& world,
@@ -282,7 +283,8 @@ public:
       const entity::EntityRegistry& entity_registry,
       const NaturalSpawnJobResult& result,
       TickIndex tick,
-      bool record_job_completion = false);
+      bool record_job_completion = false,
+      const entity::VehicleDefinitionRegistry* vehicle_definitions = nullptr);
 
   void record_job_submitted(u32 pending_jobs) noexcept;
   void record_pending_job_count(u32 pending_jobs) noexcept;
@@ -296,6 +298,7 @@ private:
       WorldRuntime& world,
       const voxel::BlockRegistry& block_registry,
       const entity::EntityRegistry& entity_registry,
+      const entity::VehicleDefinitionRegistry* vehicle_definitions,
       const SpawnEvaluationContext& context,
       const player::PlayerState& player,
       SpawnCategory category,
@@ -304,6 +307,7 @@ private:
   [[nodiscard]] u32 spawn_group(
       WorldRuntime& world,
       const SpawnEntry& entry,
+      const entity::VehicleDefinitionRegistry* vehicle_definitions,
       BlockPos root,
       const SpawnEvaluationContext& context,
       TickIndex tick);

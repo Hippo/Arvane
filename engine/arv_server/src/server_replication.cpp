@@ -102,6 +102,187 @@ void ServerRuntimeImpl::send_player_velocity(
       protocol::serialize_clientbound_player_velocity(velocity));
 }
 
+void ServerRuntimeImpl::send_vehicle_correction(
+    const ServerSession& session,
+    EntityNetID vehicle_net_id,
+    const AcceptedVehicleMovementState& accepted,
+    u32 rejected_sequence,
+    protocol::VehicleCorrectionReason reason) {
+  protocol::ClientboundVehicleCorrection correction;
+  correction.vehicle_id = vehicle_net_id;
+  correction.rejected_sequence = rejected_sequence;
+  correction.position = accepted.position;
+  correction.velocity = accepted.velocity;
+  correction.rotation = accepted.rotation;
+  correction.angular_velocity = accepted.angular_velocity;
+  correction.reason = reason;
+  (void)send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundVehicleCorrection,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Movement,
+      protocol::serialize_clientbound_vehicle_correction(correction));
+}
+
+void ServerRuntimeImpl::broadcast_vehicle_state(
+    EntityNetID vehicle_net_id,
+    const AcceptedVehicleMovementState& accepted) {
+  protocol::ClientboundVehicleState state;
+  state.world_id = default_world_.id();
+  state.vehicle_id = vehicle_net_id;
+  state.server_tick = tick_index_;
+  state.accepted_sequence = accepted.last_sequence;
+  state.position = accepted.position;
+  state.velocity = accepted.velocity;
+  state.rotation = accepted.rotation;
+  state.angular_velocity = accepted.angular_velocity;
+  state.flags = accepted.flags;
+  const std::vector<u8> payload = protocol::serialize_clientbound_vehicle_state(state);
+  sessions_.for_each_session([&](const ServerSession& session) {
+    if (!session.authenticated || session.closing ||
+        session.world_id != default_world_.id()) {
+      return;
+    }
+    (void)send_protocol_message(
+        *transport_,
+        session.connection_id,
+        protocol::MessageType::ClientboundVehicleState,
+        protocol::ReliabilityClass::UnreliableLatestWins,
+        protocol::NetworkLane::Movement,
+        payload);
+  });
+}
+
+void ServerRuntimeImpl::broadcast_entity_passengers(EntityID rideable_id) {
+  const entity::RideableComponent* rideable =
+      default_world_.find_entity_rideable(rideable_id);
+  const std::optional<EntityNetID> rideable_net =
+      default_world_.network_id_for_entity(rideable_id);
+  if (rideable == nullptr || !rideable_net.has_value()) {
+    return;
+  }
+
+  protocol::ClientboundEntityPassengersSet packet;
+  packet.rideable_id = rideable_net.value();
+  for (const entity::Seat& seat : rideable->seats) {
+    if (seat.occupant.value == 0U) {
+      continue;
+    }
+    const std::optional<EntityNetID> passenger_net =
+        default_world_.network_id_for_entity(seat.occupant);
+    if (!passenger_net.has_value()) {
+      continue;
+    }
+    packet.passengers.push_back(
+        {passenger_net.value(), seat.id, seat.controls_vehicle});
+  }
+  const std::vector<u8> payload =
+      protocol::serialize_clientbound_entity_passengers_set(packet);
+  sessions_.for_each_session([&](const ServerSession& session) {
+    if (!session.authenticated || session.closing ||
+        session.world_id != default_world_.id()) {
+      return;
+    }
+    (void)send_protocol_message(
+        *transport_,
+        session.connection_id,
+        protocol::MessageType::ClientboundEntityPassengersSet,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Gameplay,
+        payload);
+  });
+}
+
+void ServerRuntimeImpl::broadcast_ride_started(
+    EntityID passenger_id,
+    EntityID rideable_id,
+    std::string_view seat_id,
+    bool controls_vehicle) {
+  const std::optional<EntityNetID> passenger_net =
+      default_world_.network_id_for_entity(passenger_id);
+  const std::optional<EntityNetID> rideable_net =
+      default_world_.network_id_for_entity(rideable_id);
+  if (!passenger_net.has_value() || !rideable_net.has_value()) {
+    return;
+  }
+  protocol::ClientboundRideStarted packet;
+  packet.passenger_id = passenger_net.value();
+  packet.rideable_id = rideable_net.value();
+  packet.seat_id = std::string{seat_id};
+  packet.controls_vehicle = controls_vehicle;
+  const std::vector<u8> payload = protocol::serialize_clientbound_ride_started(packet);
+  sessions_.for_each_session([&](const ServerSession& session) {
+    if (!session.authenticated || session.closing ||
+        session.world_id != default_world_.id()) {
+      return;
+    }
+    (void)send_protocol_message(
+        *transport_,
+        session.connection_id,
+        protocol::MessageType::ClientboundRideStarted,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Gameplay,
+        payload);
+  });
+  broadcast_entity_passengers(rideable_id);
+}
+
+void ServerRuntimeImpl::broadcast_ride_ended(
+    EntityID passenger_id,
+    EntityID rideable_id,
+    Vec3f position) {
+  const std::optional<EntityNetID> passenger_net =
+      default_world_.network_id_for_entity(passenger_id);
+  const std::optional<EntityNetID> rideable_net =
+      default_world_.network_id_for_entity(rideable_id);
+  if (!passenger_net.has_value() || !rideable_net.has_value()) {
+    return;
+  }
+  broadcast_ride_ended(passenger_net.value(), rideable_net.value(), position);
+  broadcast_entity_passengers(rideable_id);
+}
+
+void ServerRuntimeImpl::broadcast_ride_ended(
+    EntityNetID passenger_net_id,
+    EntityNetID rideable_net_id,
+    Vec3f position) {
+  protocol::ClientboundRideEnded packet;
+  packet.passenger_id = passenger_net_id;
+  packet.rideable_id = rideable_net_id;
+  packet.position = position;
+  const std::vector<u8> payload = protocol::serialize_clientbound_ride_ended(packet);
+  sessions_.for_each_session([&](const ServerSession& session) {
+    if (!session.authenticated || session.closing ||
+        session.world_id != default_world_.id()) {
+      return;
+    }
+    (void)send_protocol_message(
+        *transport_,
+        session.connection_id,
+        protocol::MessageType::ClientboundRideEnded,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::Gameplay,
+        payload);
+  });
+}
+
+void ServerRuntimeImpl::broadcast_pending_ride_ended_events() {
+  for (const world::RideEndedEvent& event : default_world_.drain_ride_ended_events()) {
+    if (!event.passenger_net_id.has_value() || !event.rideable_net_id.has_value()) {
+      continue;
+    }
+    broadcast_ride_ended(
+        event.passenger_net_id.value(),
+        event.rideable_net_id.value(),
+        event.position);
+    accepted_vehicle_movement_.erase(event.rideable_net_id.value());
+    if (default_world_.entity_exists(event.rideable)) {
+      broadcast_entity_passengers(event.rideable);
+    }
+  }
+}
+
 void ServerRuntimeImpl::send_block_updates() {
   std::vector<world::ReplicatedBlockUpdate> updates =
       default_world_.drain_replicated_block_updates();

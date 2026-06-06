@@ -3,6 +3,7 @@
 #include "chunk_view.hpp"
 
 #include "arv/asset/texture_atlas.hpp"
+#include "arv/base/ui.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/item_animation.hpp"
 #include "arv/client/particles.hpp"
@@ -21,7 +22,6 @@
 #include "arv/render/render_types.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/server/server_runtime.hpp"
-#include "arv/base/ui.hpp"
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
@@ -97,6 +97,7 @@ struct DesktopSessionDependencies {
   server::FluidContainerInteractionConfig fluid_containers{};
   std::function<void(command::CommandRegistry&)> register_commands{};
   const entity::EntityRegistry& entity_registry;
+  const entity::VehicleDefinitionRegistry& vehicle_registry;
   const world::EntityGoalRegistry& entity_goals;
   const asset::BlockTextureAtlas& block_atlas;
   const render::FluidRenderData& fluid_render_data;

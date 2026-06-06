@@ -242,7 +242,11 @@ public:
 void apply_authored_components(
     entt::registry& registry,
     entt::entity handle,
-    const entity::EntityComponentSet& components);
+    const entity::EntityComponentSet& components,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions = nullptr);
+[[nodiscard]] bool authored_vehicle_components_resolved(
+    const entity::EntityComponentSet& components,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions) noexcept;
 
 class WorldEntityStore {
 public:
@@ -258,6 +262,7 @@ public:
 
   bool destroy_entity(EntityID entity_id, EntityDespawnReason reason);
   void flush_despawns(WorldRegionRuntime& regions);
+  [[nodiscard]] std::vector<RideEndedEvent> drain_ride_ended_events();
 
   [[nodiscard]] bool exists(EntityID entity_id) const noexcept;
   [[nodiscard]] usize count() const noexcept;
@@ -266,6 +271,7 @@ public:
   [[nodiscard]] std::optional<EntityID> entity_for_player(PlayerID player_id) const noexcept;
   [[nodiscard]] std::optional<PlayerID> player_for_entity(EntityID entity_id) const noexcept;
   [[nodiscard]] std::optional<EntityNetID> network_id_for_entity(EntityID entity_id) const noexcept;
+  [[nodiscard]] std::optional<EntityID> entity_for_network_id(EntityNetID net_id) const noexcept;
   [[nodiscard]] std::optional<ChunkSectionCoord> entity_chunk(EntityID entity_id) const noexcept;
   [[nodiscard]] usize player_count() const noexcept;
   [[nodiscard]] std::vector<PlayerID> player_ids() const;
@@ -279,6 +285,12 @@ public:
   [[nodiscard]] const entity::EntityCollision* find_collision(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::EntityMovement* find_movement(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityMovement* find_movement(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::RideableComponent* find_rideable(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::RideableComponent* find_rideable(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::AttachedToComponent* find_attachment(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::AttachedToComponent* find_attachment(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::VehiclePhysicsComponent* find_vehicle_physics(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::VehiclePhysicsComponent* find_vehicle_physics(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::EntityHealth* find_health(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityHealth* find_health(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::KnockbackResistanceComponent* find_knockback_resistance(EntityID entity_id) noexcept;
@@ -310,13 +322,28 @@ public:
   [[nodiscard]] bool has_tag(EntityID entity_id, std::string_view tag) const noexcept;
   bool set_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept;
   bool set_position(EntityID entity_id, Vec3f position) noexcept;
+  [[nodiscard]] bool mount_entity(
+      EntityID rideable_id,
+      EntityID passenger_id,
+      std::optional<std::string_view> requested_seat) noexcept;
+  [[nodiscard]] bool dismount_entity(EntityID passenger_id) noexcept;
+  [[nodiscard]] std::optional<EntityID> mounted_rideable(EntityID passenger_id) const noexcept;
+  [[nodiscard]] std::optional<std::string> mounted_seat(EntityID passenger_id) const;
+  [[nodiscard]] bool update_passenger_attachment_transform(EntityID passenger_id) noexcept;
+  [[nodiscard]] u32 update_passenger_attachment_transforms() noexcept;
+  [[nodiscard]] std::optional<Vec3f> find_safe_dismount_position(
+      EntityID rideable_id,
+      const WorldRuntime& world,
+      const voxel::BlockRegistry& block_registry,
+      const player::PlayerTuning& tuning) const;
 
   [[nodiscard]] std::vector<entity::EntitySnapshotEntry> collect_entity_snapshots() const;
   [[nodiscard]] std::vector<entity::DroppedItemEntitySnapshot> collect_dropped_item_snapshots() const;
   [[nodiscard]] std::vector<entity::PersistentEntityRecord> persistent_records() const;
   void restore_persistent_entities(
       std::span<const entity::PersistentEntityRecord> records,
-      const entity::EntityRegistry* entity_registry);
+      const entity::EntityRegistry* entity_registry,
+      const entity::VehicleDefinitionRegistry* vehicle_definitions);
 
   [[nodiscard]] entt::entity handle(EntityID entity_id) const noexcept;
   void update_chunk(entt::entity handle) noexcept;
@@ -335,6 +362,7 @@ private:
   StableHashMap<EntityID, entt::entity> handles_;
   StableHashMap<PlayerID, EntityID> player_entities_;
   std::vector<EntityID> pending_despawns_;
+  std::vector<RideEndedEvent> ride_ended_events_;
   u64 next_entity_id_{1};
   u32 next_entity_net_id_{1};
 };
@@ -403,10 +431,9 @@ private:
 namespace arv::world {
 
 struct WorldRuntime::Impl {
-  explicit Impl(WorldID world_id)
-      : id(world_id),
-        entities(world_id),
-        spawn_point(default_spawn_location()) {
+  explicit Impl(WorldID world_id) : id(world_id),
+                                    entities(world_id),
+                                    spawn_point(default_spawn_location()) {
     spawn_point.world = world_id;
   }
 

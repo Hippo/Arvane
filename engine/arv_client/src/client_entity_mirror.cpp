@@ -20,11 +20,10 @@ inline constexpr f32 TeleportSnapDistanceSquared = 16.0F * 16.0F;
   if (quat_dot(from, to) < 0.0F) {
     to = {-to.x, -to.y, -to.z, -to.w};
   }
-  return normalize_quat({
-      from.x + (to.x - from.x) * alpha,
-      from.y + (to.y - from.y) * alpha,
-      from.z + (to.z - from.z) * alpha,
-      from.w + (to.w - from.w) * alpha});
+  return normalize_quat({from.x + (to.x - from.x) * alpha,
+                         from.y + (to.y - from.y) * alpha,
+                         from.z + (to.z - from.z) * alpha,
+                         from.w + (to.w - from.w) * alpha});
 }
 
 [[nodiscard]] bool rotation_changed(Quatf from, Quatf to) noexcept {
@@ -103,6 +102,10 @@ void ClientEntityMirrorStore::apply_spawn(
   mirror.health_max = 0.0F;
   mirror.dead = false;
   mirror.invulnerable = false;
+  mirror.parent_rideable.reset();
+  mirror.parent_seat_id.clear();
+  mirror.controls_parent_vehicle = false;
+  mirror.passengers.clear();
 }
 
 void ClientEntityMirrorStore::apply_despawn(
@@ -110,6 +113,20 @@ void ClientEntityMirrorStore::apply_despawn(
     WorldID current_world) {
   if (despawn.world_id != current_world) {
     return;
+  }
+  for (auto& [entity_id, mirror] : entities_) {
+    (void)entity_id;
+    if (mirror.parent_rideable.has_value() &&
+        mirror.parent_rideable.value() == despawn.entity_id) {
+      mirror.parent_rideable.reset();
+      mirror.parent_seat_id.clear();
+      mirror.controls_parent_vehicle = false;
+    }
+    std::erase_if(
+        mirror.passengers,
+        [&](const ReplicatedPassengerMirror& passenger) {
+          return passenger.passenger_id == despawn.entity_id;
+        });
   }
   entities_.erase(despawn.entity_id);
 }
@@ -163,6 +180,132 @@ void ClientEntityMirrorStore::apply_snapshot(
       mirror.last_transform_change_server_tick = snapshot.server_tick;
       snap_entity_render_transform(mirror);
     }
+  }
+}
+
+void ClientEntityMirrorStore::apply_vehicle_state(
+    const protocol::ClientboundVehicleState& state,
+    WorldID current_world,
+    TickRate server_tick_rate) {
+  if (state.world_id != current_world) {
+    return;
+  }
+  auto found = entities_.find(state.vehicle_id);
+  if (found == entities_.end()) {
+    return;
+  }
+  ReplicatedEntityMirror& mirror = found->second;
+  if (state.server_tick < mirror.last_server_tick) {
+    return;
+  }
+  const bool moved =
+      distance_squared(state.position, mirror.position) >
+      PositionChangeEpsilonSquared;
+  const bool rotated = rotation_changed(state.rotation, mirror.rotation);
+  if (moved || rotated) {
+    begin_entity_smoothing(mirror, state.server_tick, server_tick_rate);
+  }
+  mirror.last_server_tick = state.server_tick;
+  mirror.previous_position = mirror.position;
+  mirror.previous_rotation = mirror.rotation;
+  mirror.position = state.position;
+  mirror.velocity = state.velocity;
+  mirror.rotation = state.rotation;
+}
+
+void ClientEntityMirrorStore::apply_vehicle_correction(
+    const protocol::ClientboundVehicleCorrection& correction) {
+  auto found = entities_.find(correction.vehicle_id);
+  if (found == entities_.end()) {
+    return;
+  }
+  ReplicatedEntityMirror& mirror = found->second;
+  mirror.previous_position = mirror.position;
+  mirror.previous_rotation = mirror.rotation;
+  mirror.position = correction.position;
+  mirror.velocity = correction.velocity;
+  mirror.rotation = correction.rotation;
+  mirror.last_transform_change_server_tick = mirror.last_server_tick;
+  snap_entity_render_transform(mirror);
+}
+
+void ClientEntityMirrorStore::apply_ride_started(
+    const protocol::ClientboundRideStarted& event) {
+  auto passenger = entities_.find(event.passenger_id);
+  if (passenger != entities_.end()) {
+    passenger->second.parent_rideable = event.rideable_id;
+    passenger->second.parent_seat_id = event.seat_id;
+    passenger->second.controls_parent_vehicle = event.controls_vehicle;
+  }
+  auto rideable = entities_.find(event.rideable_id);
+  if (rideable == entities_.end()) {
+    return;
+  }
+  for (ReplicatedPassengerMirror& existing : rideable->second.passengers) {
+    if (existing.passenger_id == event.passenger_id) {
+      existing.seat_id = event.seat_id;
+      existing.controls_vehicle = event.controls_vehicle;
+      return;
+    }
+  }
+  rideable->second.passengers.push_back(
+      {event.passenger_id, event.seat_id, event.controls_vehicle});
+}
+
+void ClientEntityMirrorStore::apply_ride_ended(
+    const protocol::ClientboundRideEnded& event) {
+  auto passenger = entities_.find(event.passenger_id);
+  if (passenger != entities_.end()) {
+    passenger->second.parent_rideable.reset();
+    passenger->second.parent_seat_id.clear();
+    passenger->second.controls_parent_vehicle = false;
+    passenger->second.position = event.position;
+    passenger->second.velocity = {};
+    snap_entity_render_transform(passenger->second);
+  }
+  auto rideable = entities_.find(event.rideable_id);
+  if (rideable == entities_.end()) {
+    return;
+  }
+  auto& passengers = rideable->second.passengers;
+  passengers.erase(
+      std::remove_if(
+          passengers.begin(),
+          passengers.end(),
+          [&](const ReplicatedPassengerMirror& entry) {
+            return entry.passenger_id == event.passenger_id;
+          }),
+      passengers.end());
+}
+
+void ClientEntityMirrorStore::apply_passengers_set(
+    const protocol::ClientboundEntityPassengersSet& event) {
+  auto rideable = entities_.find(event.rideable_id);
+  if (rideable != entities_.end()) {
+    rideable->second.passengers.clear();
+    rideable->second.passengers.reserve(event.passengers.size());
+  }
+  for (auto& [entity_id, mirror] : entities_) {
+    if (mirror.parent_rideable.has_value() &&
+        mirror.parent_rideable.value() == event.rideable_id) {
+      mirror.parent_rideable.reset();
+      mirror.parent_seat_id.clear();
+      mirror.controls_parent_vehicle = false;
+    }
+    (void)entity_id;
+  }
+  for (const protocol::VehiclePassengerEntry& passenger : event.passengers) {
+    if (rideable != entities_.end()) {
+      rideable->second.passengers.push_back(
+          {passenger.passenger_id, passenger.seat_id, passenger.controls_vehicle});
+    }
+    auto passenger_mirror = entities_.find(passenger.passenger_id);
+    if (passenger_mirror == entities_.end()) {
+      continue;
+    }
+    passenger_mirror->second.parent_rideable = event.rideable_id;
+    passenger_mirror->second.parent_seat_id = passenger.seat_id;
+    passenger_mirror->second.controls_parent_vehicle = passenger.controls_vehicle;
   }
 }
 

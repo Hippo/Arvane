@@ -1,13 +1,18 @@
 #include "world_runtime_internal.hpp"
 
+#include "arv/physics/kinematics.hpp"
+#include "arv/physics/player_movement.hpp"
+#include "arv/world/world_queries.hpp"
+
 #include <algorithm>
+#include <array>
 #include <string>
 #include <utility>
 
 namespace arv::world::detail {
 namespace {
 
-template <typename Component, typename Registry>
+template<typename Component, typename Registry>
 [[nodiscard]] auto find_component(
     Registry& registry,
     entt::entity handle) noexcept -> decltype(registry.template try_get<Component>(handle)) {
@@ -16,12 +21,72 @@ template <typename Component, typename Registry>
              : registry.template try_get<Component>(handle);
 }
 
+[[nodiscard]] Aabb3f entity_body_bounds(Vec3f position, Vec3f box) noexcept {
+  const Vec3f size{
+      std::max(0.0F, box.x),
+      std::max(0.0F, box.y),
+      std::max(0.0F, box.z)};
+  const f32 half_x = size.x * 0.5F;
+  const f32 half_z = size.z * 0.5F;
+  return {
+      {position.x - half_x, position.y, position.z - half_z},
+      {position.x + half_x, position.y + size.y, position.z + half_z}};
+}
+
+[[nodiscard]] auto find_seat(
+    entity::RideableComponent& rideable,
+    std::string_view seat_id) noexcept {
+  return std::find_if(
+      rideable.seats.begin(),
+      rideable.seats.end(),
+      [&](const entity::Seat& seat) {
+        return seat.id == seat_id;
+      });
+}
+
+[[nodiscard]] auto find_seat(
+    const entity::RideableComponent& rideable,
+    std::string_view seat_id) noexcept {
+  return std::find_if(
+      rideable.seats.begin(),
+      rideable.seats.end(),
+      [&](const entity::Seat& seat) {
+        return seat.id == seat_id;
+      });
+}
+
+[[nodiscard]] auto first_available_controlling_seat(
+    entity::RideableComponent& rideable) noexcept {
+  return std::find_if(
+      rideable.seats.begin(),
+      rideable.seats.end(),
+      [](const entity::Seat& seat) {
+        return seat.controls_vehicle && seat.occupant.value == 0U;
+      });
+}
+
+[[nodiscard]] auto first_available_seat(entity::RideableComponent& rideable) noexcept {
+  return std::find_if(
+      rideable.seats.begin(),
+      rideable.seats.end(),
+      [](const entity::Seat& seat) {
+        return seat.occupant.value == 0U;
+      });
+}
+
 } // namespace
 
 WorldEntityStore::WorldEntityStore(WorldID world_id) : world_id_(world_id) {
 }
 
 EntityID WorldEntityStore::create_entity(EntityCreateInfo info) {
+  if (info.authored_components.has_value() &&
+      !authored_vehicle_components_resolved(
+          info.authored_components.value(),
+          info.vehicle_definitions)) {
+    return {};
+  }
+
   if (info.type_name.empty()) {
     info.type_name = "arvane:unknown";
   }
@@ -95,7 +160,11 @@ EntityID WorldEntityStore::create_entity(EntityCreateInfo info) {
   }
 
   if (info.authored_components.has_value()) {
-    apply_authored_components(registry_, handle, info.authored_components.value());
+    apply_authored_components(
+        registry_,
+        handle,
+        info.authored_components.value(),
+        info.vehicle_definitions);
   }
 
   return entity_id;
@@ -132,6 +201,24 @@ bool WorldEntityStore::destroy_entity(EntityID entity_id, EntityDespawnReason re
 }
 
 void WorldEntityStore::flush_despawns(WorldRegionRuntime& regions) {
+  auto record_ride_ended = [&](EntityID passenger, EntityID rideable) {
+    const bool duplicate = std::any_of(
+        ride_ended_events_.begin(),
+        ride_ended_events_.end(),
+        [&](const RideEndedEvent& event) {
+          return event.passenger == passenger && event.rideable == rideable;
+        });
+    if (duplicate) {
+      return;
+    }
+    const entity::EntityTransform* passenger_transform = find_transform(passenger);
+    ride_ended_events_.push_back({passenger,
+                                  rideable,
+                                  network_id_for_entity(passenger),
+                                  network_id_for_entity(rideable),
+                                  passenger_transform == nullptr ? Vec3f{} : passenger_transform->position});
+  };
+
   for (const EntityID entity_id : pending_despawns_) {
     const entt::entity entity_handle = handle(entity_id);
     if (entity_handle == entt::null || !registry_.valid(entity_handle)) {
@@ -142,10 +229,35 @@ void WorldEntityStore::flush_despawns(WorldRegionRuntime& regions) {
       player_entities_.erase(player_entity->player_id);
       regions.erase_player(player_entity->player_id);
     }
+    if (const auto* attachment = registry_.try_get<entity::AttachedToComponent>(entity_handle);
+        attachment != nullptr) {
+      record_ride_ended(entity_id, attachment->parent);
+    }
+    (void)dismount_entity(entity_id);
+    if (const auto* rideable = registry_.try_get<entity::RideableComponent>(entity_handle);
+        rideable != nullptr) {
+      std::vector<EntityID> passengers;
+      passengers.reserve(rideable->seats.size());
+      for (const entity::Seat& seat : rideable->seats) {
+        if (seat.occupant.value != 0U) {
+          passengers.push_back(seat.occupant);
+        }
+      }
+      for (const EntityID passenger : passengers) {
+        record_ride_ended(passenger, entity_id);
+        (void)dismount_entity(passenger);
+      }
+    }
     handles_.erase(entity_id);
     registry_.destroy(entity_handle);
   }
   pending_despawns_.clear();
+}
+
+std::vector<RideEndedEvent> WorldEntityStore::drain_ride_ended_events() {
+  std::vector<RideEndedEvent> events = std::move(ride_ended_events_);
+  ride_ended_events_.clear();
+  return events;
 }
 
 bool WorldEntityStore::exists(EntityID entity_id) const noexcept {
@@ -189,6 +301,17 @@ std::optional<EntityNetID> WorldEntityStore::network_id_for_entity(EntityID enti
   }
   const auto* network = registry_.try_get<entity::NetworkEntity>(entity_handle);
   return network == nullptr ? std::nullopt : std::optional<EntityNetID>{network->net_id};
+}
+
+std::optional<EntityID> WorldEntityStore::entity_for_network_id(EntityNetID net_id) const noexcept {
+  const auto view = registry_.view<entity::RuntimeEntity, entity::NetworkEntity>();
+  for (const entt::entity entity_handle : view) {
+    const auto& network = view.get<entity::NetworkEntity>(entity_handle);
+    if (network.net_id == net_id) {
+      return view.get<entity::RuntimeEntity>(entity_handle).entity_id;
+    }
+  }
+  return std::nullopt;
 }
 
 std::optional<ChunkSectionCoord> WorldEntityStore::entity_chunk(EntityID entity_id) const noexcept {
@@ -248,6 +371,30 @@ entity::EntityMovement* WorldEntityStore::find_movement(EntityID entity_id) noex
 
 const entity::EntityMovement* WorldEntityStore::find_movement(EntityID entity_id) const noexcept {
   return find_component<entity::EntityMovement>(registry_, handle(entity_id));
+}
+
+entity::RideableComponent* WorldEntityStore::find_rideable(EntityID entity_id) noexcept {
+  return find_component<entity::RideableComponent>(registry_, handle(entity_id));
+}
+
+const entity::RideableComponent* WorldEntityStore::find_rideable(EntityID entity_id) const noexcept {
+  return find_component<entity::RideableComponent>(registry_, handle(entity_id));
+}
+
+entity::AttachedToComponent* WorldEntityStore::find_attachment(EntityID entity_id) noexcept {
+  return find_component<entity::AttachedToComponent>(registry_, handle(entity_id));
+}
+
+const entity::AttachedToComponent* WorldEntityStore::find_attachment(EntityID entity_id) const noexcept {
+  return find_component<entity::AttachedToComponent>(registry_, handle(entity_id));
+}
+
+entity::VehiclePhysicsComponent* WorldEntityStore::find_vehicle_physics(EntityID entity_id) noexcept {
+  return find_component<entity::VehiclePhysicsComponent>(registry_, handle(entity_id));
+}
+
+const entity::VehiclePhysicsComponent* WorldEntityStore::find_vehicle_physics(EntityID entity_id) const noexcept {
+  return find_component<entity::VehiclePhysicsComponent>(registry_, handle(entity_id));
 }
 
 entity::EntityHealth* WorldEntityStore::find_health(EntityID entity_id) noexcept {
@@ -484,6 +631,175 @@ bool WorldEntityStore::set_position(EntityID entity_id, Vec3f position) noexcept
   return set_transform(entity_id, position, transform->rotation);
 }
 
+bool WorldEntityStore::mount_entity(
+    EntityID rideable_id,
+    EntityID passenger_id,
+    std::optional<std::string_view> requested_seat) noexcept {
+  if (rideable_id == passenger_id || !exists(rideable_id) || !exists(passenger_id)) {
+    return false;
+  }
+  if (find_attachment(passenger_id) != nullptr) {
+    return false;
+  }
+  entity::RideableComponent* rideable = find_rideable(rideable_id);
+  if (rideable == nullptr || rideable->seats.empty()) {
+    return false;
+  }
+  auto seat = rideable->seats.end();
+  if (requested_seat.has_value() && !requested_seat->empty()) {
+    seat = find_seat(*rideable, requested_seat.value());
+  } else {
+    seat = first_available_controlling_seat(*rideable);
+    if (seat == rideable->seats.end()) {
+      seat = first_available_seat(*rideable);
+    }
+  }
+  if (seat == rideable->seats.end() || seat->occupant.value != 0U) {
+    return false;
+  }
+
+  seat->occupant = passenger_id;
+  if (seat->controls_vehicle) {
+    rideable->controller = passenger_id;
+  }
+  const entt::entity passenger_handle = handle(passenger_id);
+  registry_.emplace_or_replace<entity::AttachedToComponent>(
+      passenger_handle,
+      rideable_id,
+      seat->id,
+      seat->local_position,
+      seat->local_rotation);
+  return update_passenger_attachment_transform(passenger_id);
+}
+
+bool WorldEntityStore::dismount_entity(EntityID passenger_id) noexcept {
+  const entt::entity passenger_handle = handle(passenger_id);
+  entity::AttachedToComponent* attachment =
+      find_component<entity::AttachedToComponent>(registry_, passenger_handle);
+  if (attachment == nullptr) {
+    return false;
+  }
+  entity::RideableComponent* rideable = find_rideable(attachment->parent);
+  if (rideable != nullptr) {
+    auto seat = find_seat(*rideable, attachment->seat_id);
+    if (seat != rideable->seats.end() && seat->occupant == passenger_id) {
+      seat->occupant = {};
+    }
+    if (rideable->controller == passenger_id) {
+      rideable->controller = {};
+      for (const entity::Seat& candidate : rideable->seats) {
+        if (candidate.controls_vehicle && candidate.occupant.value != 0U) {
+          rideable->controller = candidate.occupant;
+          break;
+        }
+      }
+    }
+  }
+  registry_.remove<entity::AttachedToComponent>(passenger_handle);
+  return true;
+}
+
+std::optional<EntityID> WorldEntityStore::mounted_rideable(EntityID passenger_id) const noexcept {
+  const entity::AttachedToComponent* attachment = find_attachment(passenger_id);
+  return attachment == nullptr ? std::nullopt : std::optional<EntityID>{attachment->parent};
+}
+
+std::optional<std::string> WorldEntityStore::mounted_seat(EntityID passenger_id) const {
+  const entity::AttachedToComponent* attachment = find_attachment(passenger_id);
+  return attachment == nullptr ? std::nullopt : std::optional<std::string>{attachment->seat_id};
+}
+
+bool WorldEntityStore::update_passenger_attachment_transform(EntityID passenger_id) noexcept {
+  const entity::AttachedToComponent* attachment = find_attachment(passenger_id);
+  if (attachment == nullptr) {
+    return false;
+  }
+  const entity::EntityTransform* parent = find_transform(attachment->parent);
+  if (parent == nullptr) {
+    return false;
+  }
+  const Vec3f world_position =
+      parent->position + rotate_vector(parent->rotation, attachment->local_position);
+  const Quatf world_rotation = normalize_quat(
+      multiply_quat(parent->rotation, attachment->local_rotation));
+  return set_transform(passenger_id, world_position, world_rotation);
+}
+
+u32 WorldEntityStore::update_passenger_attachment_transforms() noexcept {
+  const auto view = registry_.view<entity::RuntimeEntity, entity::AttachedToComponent>();
+  u32 updated = 0;
+  for (const entt::entity handle : view) {
+    const auto& runtime = view.get<entity::RuntimeEntity>(handle);
+    if (update_passenger_attachment_transform(runtime.entity_id)) {
+      ++updated;
+    }
+  }
+  return updated;
+}
+
+std::optional<Vec3f> WorldEntityStore::find_safe_dismount_position(
+    EntityID rideable_id,
+    const WorldRuntime& world,
+    const voxel::BlockRegistry& block_registry,
+    const player::PlayerTuning& tuning) const {
+  const entity::EntityTransform* transform = find_transform(rideable_id);
+  const entity::EntityCollision* collision = find_collision(rideable_id);
+  if (transform == nullptr || collision == nullptr) {
+    return std::nullopt;
+  }
+
+  const Aabb3f vehicle_bounds = entity_body_bounds(transform->position, collision->box);
+  const physics::KinematicConfig player_config =
+      physics::kinematic_config_from_tuning(tuning);
+  const WorldCollisionQuery query(world, block_registry, true);
+  const f32 lateral = std::max(collision->box.x, collision->box.z) * 0.5F +
+                      tuning.body_width + 0.25F;
+  const f32 rear_front = collision->box.z * 0.5F + tuning.body_width + 0.25F;
+  const std::array<Vec3f, 5> local_offsets{{
+      {-lateral, 0.0F, 0.0F},
+      {lateral, 0.0F, 0.0F},
+      {0.0F, 0.0F, -rear_front},
+      {0.0F, 0.0F, rear_front},
+      {0.0F, collision->box.y + 0.1F, 0.0F},
+  }};
+
+  const auto candidate_fits = [&](Vec3f position) {
+    const Aabb3f bounds = physics::make_body_bounds(position, player_config);
+    if (physics::overlaps_solid_blocks(query, bounds, player_config.collision_epsilon)) {
+      return false;
+    }
+    const bool supported =
+        physics::has_support_below(
+            query,
+            bounds,
+            std::max(player_config.collision_epsilon * 2.0F, 0.05F));
+    if (supported) {
+      return true;
+    }
+    const BlockPos feet{{floor_to_i32(position.x), floor_to_i32(position.y), floor_to_i32(position.z)}};
+    return world_cell_contains_fluid(world, block_registry, feet);
+  };
+
+  for (const Vec3f& local_offset : local_offsets) {
+    const Vec3f position = transform->position + rotate_vector(transform->rotation, local_offset);
+    if (distance(position, transform->position) > lateral + rear_front + collision->box.y + 2.0F) {
+      continue;
+    }
+    if (candidate_fits(position)) {
+      return position;
+    }
+  }
+
+  const Vec3f top{
+      transform->position.x,
+      vehicle_bounds.max.y + player_config.collision_epsilon,
+      transform->position.z};
+  if (candidate_fits(top)) {
+    return top;
+  }
+  return std::nullopt;
+}
+
 std::vector<entity::EntitySnapshotEntry> WorldEntityStore::collect_entity_snapshots() const {
   std::vector<entity::EntitySnapshotEntry> snapshots;
   const auto view = registry_.view<
@@ -562,15 +878,14 @@ std::vector<entity::DroppedItemEntitySnapshot> WorldEntityStore::collect_dropped
       continue;
     }
 
-    snapshots.push_back({
-        runtime.entity_id,
-        network.net_id,
-        world_id_,
-        transform.position,
-        velocity.linear,
-        relevance.current_chunk,
-        dropped.stack,
-        dropped.pickup_delay_seconds});
+    snapshots.push_back({runtime.entity_id,
+                         network.net_id,
+                         world_id_,
+                         transform.position,
+                         velocity.linear,
+                         relevance.current_chunk,
+                         dropped.stack,
+                         dropped.pickup_delay_seconds});
   }
   return snapshots;
 }
@@ -612,7 +927,8 @@ std::vector<entity::PersistentEntityRecord> WorldEntityStore::persistent_records
 
 void WorldEntityStore::restore_persistent_entities(
     std::span<const entity::PersistentEntityRecord> records,
-    const entity::EntityRegistry* entity_registry) {
+    const entity::EntityRegistry* entity_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions) {
   for (const entity::PersistentEntityRecord& record : records) {
     if (record.world_id != world_id_) {
       continue;
@@ -637,6 +953,7 @@ void WorldEntityStore::restore_persistent_entities(
     info.replicated = true;
     info.dropped_item_stack = record.dropped_item_stack;
     info.dropped_item_pickup_delay_seconds = record.dropped_item_pickup_delay_seconds;
+    info.vehicle_definitions = vehicle_definitions;
     (void)create_entity(std::move(info));
   }
 }
@@ -692,6 +1009,11 @@ void WorldRuntime::flush_entity_despawns() {
   impl_->entities.flush_despawns(impl_->regions);
 }
 
+std::vector<RideEndedEvent> WorldRuntime::drain_ride_ended_events() {
+  assert_owner_thread();
+  return impl_->entities.drain_ride_ended_events();
+}
+
 bool WorldRuntime::entity_exists(EntityID entity_id) const noexcept {
   return impl_->entities.exists(entity_id);
 }
@@ -714,6 +1036,10 @@ std::optional<PlayerID> WorldRuntime::player_for_entity(EntityID entity_id) cons
 
 std::optional<EntityNetID> WorldRuntime::network_id_for_entity(EntityID entity_id) const noexcept {
   return impl_->entities.network_id_for_entity(entity_id);
+}
+
+std::optional<EntityID> WorldRuntime::entity_for_network_id(EntityNetID net_id) const noexcept {
+  return impl_->entities.entity_for_network_id(net_id);
 }
 
 std::optional<ChunkSectionCoord> WorldRuntime::entity_chunk(EntityID entity_id) const noexcept {
@@ -754,6 +1080,30 @@ entity::EntityMovement* WorldRuntime::find_entity_movement(EntityID entity_id) n
 
 const entity::EntityMovement* WorldRuntime::find_entity_movement(EntityID entity_id) const noexcept {
   return impl_->entities.find_movement(entity_id);
+}
+
+entity::RideableComponent* WorldRuntime::find_entity_rideable(EntityID entity_id) noexcept {
+  return impl_->entities.find_rideable(entity_id);
+}
+
+const entity::RideableComponent* WorldRuntime::find_entity_rideable(EntityID entity_id) const noexcept {
+  return impl_->entities.find_rideable(entity_id);
+}
+
+entity::AttachedToComponent* WorldRuntime::find_entity_attachment(EntityID entity_id) noexcept {
+  return impl_->entities.find_attachment(entity_id);
+}
+
+const entity::AttachedToComponent* WorldRuntime::find_entity_attachment(EntityID entity_id) const noexcept {
+  return impl_->entities.find_attachment(entity_id);
+}
+
+entity::VehiclePhysicsComponent* WorldRuntime::find_entity_vehicle_physics(EntityID entity_id) noexcept {
+  return impl_->entities.find_vehicle_physics(entity_id);
+}
+
+const entity::VehiclePhysicsComponent* WorldRuntime::find_entity_vehicle_physics(EntityID entity_id) const noexcept {
+  return impl_->entities.find_vehicle_physics(entity_id);
 }
 
 entity::EntityHealth* WorldRuntime::find_entity_health(EntityID entity_id) noexcept {
@@ -881,6 +1231,48 @@ bool WorldRuntime::set_entity_position(EntityID entity_id, Vec3f position) noexc
   return impl_->entities.set_position(entity_id, position);
 }
 
+bool WorldRuntime::mount_entity(
+    EntityID rideable_id,
+    EntityID passenger_id,
+    std::optional<std::string_view> requested_seat) noexcept {
+  assert_owner_thread();
+  return impl_->entities.mount_entity(rideable_id, passenger_id, requested_seat);
+}
+
+bool WorldRuntime::dismount_entity(EntityID passenger_id) noexcept {
+  assert_owner_thread();
+  return impl_->entities.dismount_entity(passenger_id);
+}
+
+std::optional<EntityID> WorldRuntime::mounted_rideable(EntityID passenger_id) const noexcept {
+  return impl_->entities.mounted_rideable(passenger_id);
+}
+
+std::optional<std::string> WorldRuntime::mounted_seat(EntityID passenger_id) const {
+  return impl_->entities.mounted_seat(passenger_id);
+}
+
+bool WorldRuntime::update_passenger_attachment_transform(EntityID passenger_id) noexcept {
+  assert_owner_thread();
+  return impl_->entities.update_passenger_attachment_transform(passenger_id);
+}
+
+u32 WorldRuntime::update_passenger_attachment_transforms() noexcept {
+  assert_owner_thread();
+  return impl_->entities.update_passenger_attachment_transforms();
+}
+
+std::optional<Vec3f> WorldRuntime::find_safe_dismount_position(
+    EntityID rideable_id,
+    const voxel::BlockRegistry& block_registry,
+    const player::PlayerTuning& tuning) const {
+  return impl_->entities.find_safe_dismount_position(
+      rideable_id,
+      *this,
+      block_registry,
+      tuning);
+}
+
 std::vector<entity::EntitySnapshotEntry> WorldRuntime::collect_entity_snapshots() const {
   return impl_->entities.collect_entity_snapshots();
 }
@@ -895,9 +1287,10 @@ std::vector<entity::PersistentEntityRecord> WorldRuntime::persistent_entity_reco
 
 void WorldRuntime::restore_persistent_entities(
     std::span<const entity::PersistentEntityRecord> records,
-    const entity::EntityRegistry* entity_registry) {
+    const entity::EntityRegistry* entity_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions) {
   assert_owner_thread();
-  impl_->entities.restore_persistent_entities(records, entity_registry);
+  impl_->entities.restore_persistent_entities(records, entity_registry, vehicle_definitions);
 }
 
 } // namespace arv::world

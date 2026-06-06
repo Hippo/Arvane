@@ -2,8 +2,8 @@
 
 #include "arv/voxel/light.hpp"
 #include "arv/world/world_queries.hpp"
-#include "arv/world/worldgen/chunk_generator.hpp"
 #include "arv/world/world_time.hpp"
+#include "arv/world/worldgen/chunk_generator.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -220,18 +220,16 @@ namespace {
   if (category == SpawnCategory::Water) {
     y = profile.surface_y_by_column[column_index];
   }
-  return {{
-      column.x * ChunkSize + local_x,
-      y,
-      column.z * ChunkSize + local_z}};
+  return {{column.x * ChunkSize + local_x,
+           y,
+           column.z * ChunkSize + local_z}};
 }
 
 [[nodiscard]] BlockPos pick_planned_group_member(BlockPos root, std::mt19937_64& rng) {
   std::uniform_int_distribution<i32> offset(-4, 4);
-  return {{
-      root.value.x + offset(rng),
-      root.value.y,
-      root.value.z + offset(rng)}};
+  return {{root.value.x + offset(rng),
+           root.value.y,
+           root.value.z + offset(rng)}};
 }
 
 void merge_planning_counters(
@@ -645,15 +643,14 @@ std::optional<NaturalSpawnJobRequest> NaturalSpawnSystem::make_job_request(
     if (transform == nullptr) {
       continue;
     }
-    request.natural_entities.push_back({
-        entity_id,
-        natural->category,
-        natural->source_entity_type,
-        transform->position,
-        natural->spawn_tick,
-        natural->transient,
-        world.entity_is_persistent(entity_id),
-        world.player_for_entity(entity_id).has_value()});
+    request.natural_entities.push_back({entity_id,
+                                        natural->category,
+                                        natural->source_entity_type,
+                                        transform->position,
+                                        natural->spawn_tick,
+                                        natural->transient,
+                                        world.entity_is_persistent(entity_id),
+                                        world.player_for_entity(entity_id).has_value()});
   }
 
   request.loaded_chunks = world.loaded_chunk_coords();
@@ -720,11 +717,10 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
       should_despawn = ((request.tick + entity.id.value) % 4U) == 0U;
     }
     if (should_despawn) {
-      result.despawn_intents.push_back({
-          entity.id,
-          entity.category,
-          entity.source_entity_type,
-          entity.spawn_tick});
+      result.despawn_intents.push_back({entity.id,
+                                        entity.category,
+                                        entity.source_entity_type,
+                                        entity.spawn_tick});
       ++result.counters.despawn_intents_generated;
     }
   }
@@ -895,15 +891,14 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
         planning_load.total_by_category[category_index] +=
             static_cast<u32>(intent.positions.size());
         for (const BlockPos pos : intent.positions) {
-          planning_entities.push_back({
-              {},
-              category,
-              entry->entity_type,
-              block_floor_center(pos),
-              request.tick,
-              true,
-              false,
-              false});
+          planning_entities.push_back({{},
+                                       category,
+                                       entry->entity_type,
+                                       block_floor_center(pos),
+                                       request.tick,
+                                       true,
+                                       false,
+                                       false});
         }
 
         result.counters.spawn_intents_generated +=
@@ -926,7 +921,8 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
     const entity::EntityRegistry& entity_registry,
     const NaturalSpawnJobResult& result,
     TickIndex tick,
-    bool record_job_completion) {
+    bool record_job_completion,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions) {
   (void)entity_registry;
   const auto started = std::chrono::steady_clock::now();
   NaturalSpawnApplyStats stats;
@@ -1092,6 +1088,7 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
       info.persistent = !transient && intent.entry.persistent_by_default;
       info.replicated = intent.entry.replicated_by_default;
       info.authored_components = intent.entry.authored_components;
+      info.vehicle_definitions = vehicle_definitions;
       const EntityID entity = world.create_entity(std::move(info));
       if (!world.entity_exists(entity) ||
           !world.set_entity_natural_spawn(
@@ -1143,7 +1140,8 @@ void NaturalSpawnSystem::tick(
     WorldRuntime& world,
     const voxel::BlockRegistry& block_registry,
     const entity::EntityRegistry& entity_registry,
-    TickIndex tick) {
+    TickIndex tick,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions) {
   if (!config_.enabled) {
     return;
   }
@@ -1154,7 +1152,14 @@ void NaturalSpawnSystem::tick(
   std::optional<NaturalSpawnJobRequest> request = make_job_request(world, tick);
   if (request.has_value()) {
     NaturalSpawnJobResult result = build_job_result(std::move(request.value()));
-    (void)apply_job_result(world, block_registry, entity_registry, result, tick);
+    (void)apply_job_result(
+        world,
+        block_registry,
+        entity_registry,
+        result,
+        tick,
+        false,
+        vehicle_definitions);
   }
 
   const auto finished = std::chrono::steady_clock::now();
@@ -1169,6 +1174,7 @@ u32 NaturalSpawnSystem::attempt_spawn_near_player(
     WorldRuntime& world,
     const voxel::BlockRegistry& block_registry,
     const entity::EntityRegistry& entity_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions,
     const SpawnEvaluationContext& context,
     const player::PlayerState& player,
     SpawnCategory category,
@@ -1266,12 +1272,13 @@ u32 NaturalSpawnSystem::attempt_spawn_near_player(
     return 0U;
   }
 
-  return spawn_group(world, *entry, candidate, context, tick);
+  return spawn_group(world, *entry, vehicle_definitions, candidate, context, tick);
 }
 
 u32 NaturalSpawnSystem::spawn_group(
     WorldRuntime& world,
     const SpawnEntry& entry,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions,
     BlockPos root,
     const SpawnEvaluationContext& context,
     TickIndex tick) {
@@ -1307,6 +1314,7 @@ u32 NaturalSpawnSystem::spawn_group(
     info.persistent = !transient && entry.persistent_by_default;
     info.replicated = entry.replicated_by_default;
     info.authored_components = entry.authored_components;
+    info.vehicle_definitions = vehicle_definitions;
     const EntityID entity = world.create_entity(std::move(info));
     if (!world.entity_exists(entity) ||
         !world.set_entity_natural_spawn(
@@ -1356,18 +1364,16 @@ BlockPos NaturalSpawnSystem::pick_candidate_near_player(
   if (category == SpawnCategory::Water) {
     y = profile.surface_y_by_column[column_index];
   }
-  return {{
-      column.x * ChunkSize + local_x,
-      y,
-      column.z * ChunkSize + local_z}};
+  return {{column.x * ChunkSize + local_x,
+           y,
+           column.z * ChunkSize + local_z}};
 }
 
 BlockPos NaturalSpawnSystem::pick_group_member(BlockPos root) {
   std::uniform_int_distribution<i32> offset(-4, 4);
-  return {{
-      root.value.x + offset(rng_),
-      root.value.y,
-      root.value.z + offset(rng_)}};
+  return {{root.value.x + offset(rng_),
+           root.value.y,
+           root.value.z + offset(rng_)}};
 }
 
 u32 NaturalSpawnSystem::despawn_natural_entities(

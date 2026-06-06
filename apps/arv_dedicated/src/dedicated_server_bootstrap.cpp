@@ -34,7 +34,8 @@ Expected<void, DedicatedError> start_dedicated_server_runtime(
 void restore_loaded_world_into_server(
     server::ServerRuntime& server,
     const persistence::LoadedSaveData& loaded_save,
-    const entity::EntityRegistry& entity_registry) {
+    const entity::EntityRegistry& entity_registry,
+    const entity::VehicleDefinitionRegistry& vehicle_registry) {
   if (loaded_save.has_world_metadata) {
     server.voxel_world().set_clock(
         loaded_save.world.clock,
@@ -50,7 +51,8 @@ void restore_loaded_world_into_server(
   }
   server.voxel_world().restore_persistent_entities(
       loaded_save.entities,
-      &entity_registry);
+      &entity_registry,
+      &vehicle_registry);
 }
 
 void log_dedicated_server_ready(

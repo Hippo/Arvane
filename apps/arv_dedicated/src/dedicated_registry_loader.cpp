@@ -1,12 +1,12 @@
 #include "dedicated_registry_loader.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/asset/texture_atlas.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
-#include "arv/asset/texture_atlas.hpp"
 #include "arv/core/log.hpp"
-#include "arv/text/language.hpp"
 #include "arv/persistence/save.hpp"
+#include "arv/text/language.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -260,6 +260,29 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
       "dedicated",
       "loaded entity registry: types={}",
       registries.entity_registry.type_count());
+
+  auto vehicle_definition_text = packs.load_merged_json_array_text("vehicles", "vehicles");
+  if (!vehicle_definition_text) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("vehicles", vehicle_definition_text.error().describe()));
+  }
+  auto vehicle_definitions =
+      entity::parse_vehicle_definitions_json(vehicle_definition_text.value());
+  if (!vehicle_definitions) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("vehicles", vehicle_definitions.error().message));
+  }
+  auto vehicle_registry_result =
+      entity::VehicleDefinitionRegistry::build(std::move(vehicle_definitions.value()));
+  if (!vehicle_registry_result) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("vehicles", vehicle_registry_result.error().message));
+  }
+  registries.vehicle_registry = std::move(vehicle_registry_result.value());
+  core::info(
+      "dedicated",
+      "loaded vehicle registry: definitions={}",
+      registries.vehicle_registry.definition_count());
 
   return Expected<DedicatedRegistries, DedicatedError>::success(std::move(registries));
 }

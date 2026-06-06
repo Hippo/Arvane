@@ -143,6 +143,9 @@ void LocalPlayerController::enter_world(
     TickRate tick_rate) noexcept {
   player_id_ = player_id;
   local_entity_id_ = local_entity_id;
+  mounted_vehicle_id_.reset();
+  mounted_seat_id_.clear();
+  mounted_controls_vehicle_ = false;
   body_position_ = body_position;
   render_position_ = body_position;
   movement_state_ = {
@@ -168,6 +171,9 @@ void LocalPlayerController::enter_world(
 void LocalPlayerController::leave_world() noexcept {
   player_id_.reset();
   local_entity_id_.reset();
+  mounted_vehicle_id_.reset();
+  mounted_seat_id_.clear();
+  mounted_controls_vehicle_ = false;
   movement_state_ = {};
   render_smoothing_offset_ = {};
   render_smoothing_ticks_remaining_ = 0;
@@ -246,6 +252,93 @@ void LocalPlayerController::apply_block_break_progress(
     return;
   }
   block_break_progress_ = progress.block_break;
+}
+
+void LocalPlayerController::apply_ride_started(
+    const protocol::ClientboundRideStarted& event) {
+  if (!local_entity_id_.has_value() || event.passenger_id != local_entity_id_.value()) {
+    return;
+  }
+  mounted_vehicle_id_ = event.rideable_id;
+  mounted_seat_id_ = event.seat_id;
+  mounted_controls_vehicle_ = event.controls_vehicle;
+  movement_state_.velocity = {};
+  render_smoothing_offset_ = {};
+  render_smoothing_ticks_remaining_ = 0;
+  render_smoothing_ticks_total_ = 0;
+}
+
+void LocalPlayerController::apply_ride_ended(
+    const protocol::ClientboundRideEnded& event) {
+  if (!local_entity_id_.has_value() || event.passenger_id != local_entity_id_.value()) {
+    return;
+  }
+  mounted_vehicle_id_.reset();
+  mounted_seat_id_.clear();
+  mounted_controls_vehicle_ = false;
+  movement_state_.position = event.position;
+  movement_state_.velocity = {};
+  movement_state_.grounded = false;
+  body_position_ = event.position;
+  render_position_ = event.position;
+  render_smoothing_offset_ = {};
+  render_smoothing_ticks_remaining_ = 0;
+  render_smoothing_ticks_total_ = 0;
+  update_camera_transform();
+}
+
+void LocalPlayerController::apply_vehicle_correction(
+    const protocol::ClientboundVehicleCorrection& correction) {
+  if (!mounted_vehicle_id_.has_value() ||
+      correction.vehicle_id != mounted_vehicle_id_.value()) {
+    return;
+  }
+  movement_state_.velocity = correction.velocity;
+  body_position_ = correction.position;
+  render_position_ = correction.position;
+  render_smoothing_offset_ = {};
+  render_smoothing_ticks_remaining_ = 0;
+  render_smoothing_ticks_total_ = 0;
+  update_camera_transform();
+}
+
+void LocalPlayerController::apply_mounted_vehicle_transform(
+    EntityNetID rideable_id,
+    Vec3f vehicle_position,
+    Quatf vehicle_rotation,
+    Vec3f seat_local_position,
+    Quatf seat_local_rotation,
+    Vec3f vehicle_velocity) noexcept {
+  (void)seat_local_rotation;
+  if (!mounted_vehicle_id_.has_value() || mounted_vehicle_id_.value() != rideable_id) {
+    return;
+  }
+  const Quatf normalized_vehicle_rotation = normalize_quat(vehicle_rotation);
+  const Vec3f seat_position =
+      vehicle_position + rotate_vector(normalized_vehicle_rotation, seat_local_position);
+  movement_state_.position = seat_position;
+  movement_state_.velocity = vehicle_velocity;
+  body_position_ = seat_position;
+  render_position_ = seat_position;
+  render_smoothing_offset_ = {};
+  render_smoothing_ticks_remaining_ = 0;
+  render_smoothing_ticks_total_ = 0;
+  update_camera_transform();
+}
+
+void LocalPlayerController::clear_mount_if_rideable_despawned(
+    EntityNetID rideable_id) noexcept {
+  if (!mounted_vehicle_id_.has_value() || mounted_vehicle_id_.value() != rideable_id) {
+    return;
+  }
+  mounted_vehicle_id_.reset();
+  mounted_seat_id_.clear();
+  mounted_controls_vehicle_ = false;
+  movement_state_.velocity = {};
+  render_smoothing_offset_ = {};
+  render_smoothing_ticks_remaining_ = 0;
+  render_smoothing_ticks_total_ = 0;
+  update_camera_transform();
 }
 
 void LocalPlayerController::apply_knockback_control_suppression(

@@ -246,6 +246,16 @@ world bounds, loaded chunks, collision, and configured speed/distance limits.
 The server does not acknowledge ordinary movement packets. It only sends
 `ClientboundPlayerMoveCorrection` when it rejects or forcibly adjusts a move.
 
+Mounted drivers use the same broad authority shape but a separate packet family:
+`ServerboundVehicleMove`, `ClientboundVehicleState`, and
+`ClientboundVehicleCorrection`. The driver client predicts the vehicle, the
+server validates from the last accepted vehicle state, and passengers do not
+send independent player movement while mounted. The full V1 vehicle model is in
+`docs/182_rideables_and_vehicles.md`.
+Vehicle guardrails validate finite numbers, sequence ordering, speed,
+acceleration, vertical speed, declared angular velocity, actual rotation delta,
+swept AABB collision, and required ground or water support.
+
 Authoritative gameplay may still change the local player's velocity without a
 teleport. Combat knockback sends `ClientboundPlayerVelocity` reliably to the
 owning client with the server-computed velocity and knockback control

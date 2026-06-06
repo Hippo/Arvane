@@ -1209,6 +1209,7 @@ void render_entities_tab(
     info.persistent_uuid = state.entity_persistent_uuid;
     info.replicated = state.entity_replicated;
     info.authored_components = selected_type->components;
+    info.vehicle_definitions = server.vehicle_registry();
     const EntityID spawned = world.create_entity(std::move(info));
     state.selected_entity_id = std::to_string(spawned.value);
     state.console_log.emplace_back("Spawned entity " + state.selected_entity_id + " (" +

@@ -6,9 +6,11 @@
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/vehicles.hpp"
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::client {
@@ -65,6 +67,17 @@ public:
       const protocol::ClientboundPlayerMovementTuning& tuning) noexcept;
   void apply_block_break_progress(
       const protocol::ClientboundPlayerBlockBreakProgress& progress) noexcept;
+  void apply_ride_started(const protocol::ClientboundRideStarted& event);
+  void apply_ride_ended(const protocol::ClientboundRideEnded& event);
+  void apply_vehicle_correction(const protocol::ClientboundVehicleCorrection& correction);
+  void apply_mounted_vehicle_transform(
+      EntityNetID rideable_id,
+      Vec3f vehicle_position,
+      Quatf vehicle_rotation,
+      Vec3f seat_local_position,
+      Quatf seat_local_rotation,
+      Vec3f vehicle_velocity) noexcept;
+  void clear_mount_if_rideable_despawned(EntityNetID rideable_id) noexcept;
   [[nodiscard]] protocol::ServerboundPlayerMove build_movement_packet(
       u32 sequence,
       TickIndex client_tick,
@@ -110,6 +123,18 @@ public:
     return local_entity_id_;
   }
 
+  [[nodiscard]] std::optional<EntityNetID> mounted_vehicle_id() const noexcept {
+    return mounted_vehicle_id_;
+  }
+
+  [[nodiscard]] std::string_view mounted_seat_id() const noexcept {
+    return mounted_seat_id_;
+  }
+
+  [[nodiscard]] bool mounted_controls_vehicle() const noexcept {
+    return mounted_controls_vehicle_;
+  }
+
   [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept {
     return block_break_progress_;
   }
@@ -142,6 +167,9 @@ private:
   CameraShell camera_{};
   std::optional<PlayerID> player_id_{};
   std::optional<EntityNetID> local_entity_id_{};
+  std::optional<EntityNetID> mounted_vehicle_id_{};
+  std::string mounted_seat_id_{};
+  bool mounted_controls_vehicle_{};
   physics::PlayerKinematicState movement_state_{};
   player::PlayerTuning tuning_{player::default_player_tuning()};
   u8 selected_hotbar_slot_{};

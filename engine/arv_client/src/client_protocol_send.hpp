@@ -13,6 +13,7 @@
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
+#include "arv/protocol/vehicles.hpp"
 
 #include <vector>
 
@@ -33,6 +34,13 @@ public:
       const protocol::ServerboundChunkInterestUpdate& update);
 
   net::NetworkResult send_player_move(const protocol::ServerboundPlayerMove& move);
+  net::NetworkResult send_vehicle_move(const protocol::ServerboundVehicleMove& move);
+  net::NetworkResult send_ride_entity_request(
+      const protocol::ServerboundRideEntityRequest& request);
+  net::NetworkResult send_dismount_request(
+      const protocol::ServerboundDismountRequest& request);
+  net::NetworkResult send_vehicle_action(
+      const protocol::ServerboundVehicleAction& action);
 
   net::NetworkResult send_inventory_action(
       protocol::ServerboundInventoryActionRequest request);

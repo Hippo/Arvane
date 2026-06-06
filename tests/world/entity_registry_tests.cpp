@@ -222,3 +222,180 @@ TEST(EntityRegistryTests, KeepsPlayerDefinitionReservedWhenConfigured) {
   EXPECT_TRUE(player_record->persistent_by_default);
   EXPECT_TRUE(player_record->replicated_by_default);
 }
+
+TEST(VehicleDefinitionRegistryTests, LoadsValidVehicleDefinitions) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "vehicles": [
+    {
+      "name": "arvane:buggy",
+      "kind": "vehicle",
+      "physics": "ground_vehicle",
+      "collision": { "type": "aabb", "size": [1.8, 1.2, 3.2] },
+      "seats": [
+        {
+          "id": "driver",
+          "role": "driver",
+          "local_position": [0.0, 0.8, 0.0],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "third_person_follow"
+        }
+      ],
+      "movement": {
+        "max_forward_speed": 24.0,
+        "max_reverse_speed": 8.0,
+        "acceleration": 18.0,
+        "brake_force": 30.0,
+        "drag": 0.92,
+        "turn_rate": 80.0,
+        "lateral_grip": 0.85,
+        "gravity_scale": 1.0,
+        "max_step_height": 0.5
+      },
+      "authority": {
+        "max_speed": 28.0,
+        "max_acceleration": 26.0,
+        "max_deceleration": 45.0,
+        "max_angular_speed": 130.0,
+        "max_vertical_speed": 30.0,
+        "max_step_height": 0.6,
+        "requires_ground": true,
+        "requires_water": false
+      }
+    }
+  ]
+}
+)json");
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  auto registry_result = arv::entity::VehicleDefinitionRegistry::build(std::move(parsed.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+
+  const arv::entity::VehicleDefinition* buggy =
+      registry_result.value().find("arvane:buggy");
+  ASSERT_NE(buggy, nullptr);
+  EXPECT_EQ(buggy->physics, arv::entity::VehiclePhysicsKind::GroundVehicle);
+  EXPECT_EQ(buggy->collision_size, (arv::Vec3f{1.8F, 1.2F, 3.2F}));
+  ASSERT_EQ(buggy->seats.size(), 1U);
+  EXPECT_TRUE(buggy->seats.front().controls_vehicle);
+  EXPECT_FLOAT_EQ(buggy->ground.max_forward_speed, 24.0F);
+  EXPECT_NEAR(buggy->ground.turn_rate, arv::degrees_to_radians(80.0F), 0.00001F);
+  EXPECT_NEAR(
+      buggy->authority.max_angular_speed,
+      arv::degrees_to_radians(130.0F),
+      0.00001F);
+  EXPECT_TRUE(buggy->authority.requires_ground);
+}
+
+TEST(VehicleDefinitionRegistryTests, RejectsMissingControllingSeat) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "name": "arvane:boat",
+  "kind": "vehicle",
+  "physics": "surface_water_vehicle",
+  "collision": { "type": "aabb", "size": [1.0, 1.0, 1.0] },
+  "seats": [
+    {
+      "id": "passenger",
+      "role": "passenger",
+      "local_position": [0.0, 0.0, 0.0],
+      "local_rotation": [0.0, 0.0, 0.0, 1.0],
+      "controls_vehicle": false,
+      "camera_mode": "third_person_follow"
+    }
+  ],
+  "movement": {
+    "acceleration": 1.0,
+    "max_speed": 2.0,
+    "turn_rate": 3.0,
+    "water_drag": 0.8,
+    "land_drag": 0.2,
+    "float_height_offset": 0.0,
+    "buoyancy_snap_speed": 1.0
+  },
+  "authority": {
+    "max_speed": 3.0,
+    "max_acceleration": 4.0,
+    "max_deceleration": 5.0,
+    "max_angular_speed": 6.0,
+    "max_vertical_speed": 7.0,
+    "requires_ground": false,
+    "requires_water": false
+  }
+}
+)json");
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  auto registry_result = arv::entity::VehicleDefinitionRegistry::build(std::move(parsed.value()));
+  ASSERT_FALSE(registry_result);
+  EXPECT_NE(registry_result.error().message.find("controlling seat"), std::string::npos);
+}
+
+TEST(VehicleDefinitionRegistryTests, RejectsInvalidCollisionSize) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "name": "arvane:bad_vehicle",
+  "kind": "vehicle",
+  "physics": "ground_vehicle",
+  "collision": { "type": "aabb", "size": [0.0, 1.0, 1.0] },
+  "seats": []
+}
+)json");
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("collision.size"), std::string::npos);
+}
+
+TEST(VehicleDefinitionRegistryTests, RejectsUnknownPhysicsKind) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "name": "arvane:plane",
+  "kind": "vehicle",
+  "physics": "aircraft",
+  "collision": { "type": "aabb", "size": [1.0, 1.0, 1.0] },
+  "seats": []
+}
+)json");
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("unknown physics kind"), std::string::npos);
+}
+
+TEST(VehicleDefinitionRegistryTests, RejectsMissingAuthorityValues) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "name": "arvane:buggy",
+  "kind": "vehicle",
+  "physics": "ground_vehicle",
+  "collision": { "type": "aabb", "size": [1.0, 1.0, 1.0] },
+  "seats": [
+    {
+      "id": "driver",
+      "role": "driver",
+      "local_position": [0.0, 0.0, 0.0],
+      "local_rotation": [0.0, 0.0, 0.0, 1.0],
+      "controls_vehicle": true,
+      "camera_mode": "third_person_follow"
+    }
+  ],
+  "movement": {
+    "max_forward_speed": 1.0,
+    "max_reverse_speed": 1.0,
+    "acceleration": 1.0,
+    "brake_force": 1.0,
+    "drag": 1.0,
+    "turn_rate": 1.0,
+    "lateral_grip": 1.0,
+    "gravity_scale": 1.0,
+    "max_step_height": 1.0
+  },
+  "authority": {
+    "max_acceleration": 1.0,
+    "max_deceleration": 1.0,
+    "max_angular_speed": 1.0,
+    "max_vertical_speed": 1.0,
+    "requires_ground": true,
+    "requires_water": false
+  }
+}
+)json");
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("max_speed"), std::string::npos);
+}

@@ -1,0 +1,137 @@
+{
+  "vehicles": [
+    {
+      "name": "arvane:horse",
+      "kind": "mount",
+      "physics": "living_mount",
+      "collision": {
+        "type": "aabb",
+        "size": [1.4, 1.6, 1.4]
+      },
+      "seats": [
+        {
+          "id": "rider",
+          "role": "driver",
+          "local_position": [0.0, 1.35, 0.0],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "mounted_third_person"
+        }
+      ],
+      "movement": {
+        "walk_speed": 4.0,
+        "sprint_speed": 9.0,
+        "acceleration": 20.0,
+        "turn_rate": 160.0,
+        "jump_strength": 8.0,
+        "gravity_scale": 1.0,
+        "step_height": 1.0,
+        "friction": 1.0
+      },
+      "authority": {
+        "max_speed": 10.5,
+        "max_acceleration": 28.0,
+        "max_deceleration": 40.0,
+        "max_angular_speed": 220.0,
+        "max_vertical_speed": 14.0,
+        "max_step_height": 1.05,
+        "requires_ground": false,
+        "requires_water": false
+      }
+    },
+    {
+      "name": "arvane:oak_boat",
+      "kind": "vehicle",
+      "physics": "surface_water_vehicle",
+      "collision": {
+        "type": "aabb",
+        "size": [1.4, 0.6, 2.4]
+      },
+      "seats": [
+        {
+          "id": "driver",
+          "role": "driver",
+          "local_position": [0.0, 0.35, 0.25],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "third_person_follow"
+        },
+        {
+          "id": "passenger",
+          "role": "passenger",
+          "local_position": [0.0, 0.35, -0.45],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": false,
+          "camera_mode": "third_person_follow"
+        }
+      ],
+      "movement": {
+        "acceleration": 7.0,
+        "max_speed": 8.0,
+        "turn_rate": 90.0,
+        "water_drag": 0.88,
+        "land_drag": 0.35,
+        "float_height_offset": 0.15,
+        "buoyancy_snap_speed": 4.0
+      },
+      "authority": {
+        "max_speed": 10.0,
+        "max_acceleration": 12.0,
+        "max_deceleration": 20.0,
+        "max_angular_speed": 130.0,
+        "max_vertical_speed": 8.0,
+        "requires_ground": false,
+        "requires_water": true,
+        "min_water_support_samples": 2
+      }
+    },
+    {
+      "name": "arvane:buggy",
+      "kind": "vehicle",
+      "physics": "ground_vehicle",
+      "collision": {
+        "type": "aabb",
+        "size": [1.8, 1.2, 3.2]
+      },
+      "seats": [
+        {
+          "id": "driver",
+          "role": "driver",
+          "local_position": [-0.35, 0.8, 0.2],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "third_person_follow"
+        },
+        {
+          "id": "passenger",
+          "role": "passenger",
+          "local_position": [0.35, 0.8, 0.2],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": false,
+          "camera_mode": "third_person_follow"
+        }
+      ],
+      "movement": {
+        "max_forward_speed": 24.0,
+        "max_reverse_speed": 8.0,
+        "acceleration": 18.0,
+        "brake_force": 30.0,
+        "drag": 0.92,
+        "turn_rate": 80.0,
+        "lateral_grip": 0.85,
+        "gravity_scale": 1.0,
+        "max_step_height": 0.5
+      },
+      "authority": {
+        "max_speed": 28.0,
+        "max_acceleration": 26.0,
+        "max_deceleration": 45.0,
+        "max_angular_speed": 130.0,
+        "max_vertical_speed": 30.0,
+        "max_step_height": 0.6,
+        "requires_ground": true,
+        "requires_water": false
+      }
+    }
+  ]
+}

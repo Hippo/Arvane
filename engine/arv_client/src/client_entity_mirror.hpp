@@ -15,6 +15,14 @@ public:
       const protocol::ClientboundEntitySnapshot& snapshot,
       WorldID current_world,
       TickRate server_tick_rate);
+  void apply_vehicle_state(
+      const protocol::ClientboundVehicleState& state,
+      WorldID current_world,
+      TickRate server_tick_rate);
+  void apply_vehicle_correction(const protocol::ClientboundVehicleCorrection& correction);
+  void apply_ride_started(const protocol::ClientboundRideStarted& event);
+  void apply_ride_ended(const protocol::ClientboundRideEnded& event);
+  void apply_passengers_set(const protocol::ClientboundEntityPassengersSet& event);
   void advance_interpolation(Seconds delta_seconds) noexcept;
 
   [[nodiscard]] usize count() const noexcept;

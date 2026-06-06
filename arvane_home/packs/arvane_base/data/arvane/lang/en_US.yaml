@@ -62,6 +62,12 @@ entity:
       display_name: Player
     pig:
       display_name: Pig
+    horse:
+      display_name: Horse
+    oak_boat:
+      display_name: Oak Boat
+    buggy:
+      display_name: Buggy
 
 ui:
   common:

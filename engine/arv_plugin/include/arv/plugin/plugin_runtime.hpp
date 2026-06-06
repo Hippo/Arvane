@@ -12,13 +12,14 @@
 
 namespace arv::entity {
 class EntityRegistry;
-}
+class VehicleDefinitionRegistry;
+} // namespace arv::entity
 
 namespace arv::player {
 class GameModeRegistry;
 class ItemRegistry;
 class PermissionGroupRegistry;
-}
+} // namespace arv::player
 
 namespace arv::sched {
 class JobSystem;
@@ -56,6 +57,7 @@ struct PluginRuntimeContext {
   const voxel::BlockRegistry* block_registry{};
   const player::ItemRegistry* item_registry{};
   const entity::EntityRegistry* entity_registry{};
+  const entity::VehicleDefinitionRegistry* vehicle_registry{};
   player::GameModeRegistry* game_modes{};
   player::PermissionGroupRegistry* permission_groups{};
   sched::JobSystem* job_system{};

@@ -181,6 +181,7 @@ ArvResult api_entity_spawn(
     info.persistent = type->persistent_by_default;
     info.replicated = type->replicated_by_default;
     info.authored_components = type->components;
+    info.vehicle_definitions = ctx->impl->runtime.vehicle_registry;
   }
   const EntityID entity = world->create_entity(std::move(info));
   *out_entity = entity.value;

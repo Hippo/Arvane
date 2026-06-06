@@ -70,6 +70,15 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundPlayerMovementTuning, "ClientboundPlayerMovementTuning",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});
+  registry.register_message({MessageType::ServerboundVehicleMove, "ServerboundVehicleMove",
+                             MessageDirection::ClientToServer, ReliabilityClass::UnreliableLatestWins,
+                             NetworkLane::Movement});
+  registry.register_message({MessageType::ClientboundVehicleState, "ClientboundVehicleState",
+                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
+                             NetworkLane::Movement});
+  registry.register_message({MessageType::ClientboundVehicleCorrection, "ClientboundVehicleCorrection",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Movement});
   registry.register_message({MessageType::ClientboundPlayerBlockBreakProgress, "ClientboundPlayerBlockBreakProgress",
                              MessageDirection::ServerToClient, ReliabilityClass::UnreliableLatestWins,
                              NetworkLane::Gameplay});
@@ -162,6 +171,24 @@ MessageRegistry MessageRegistry::make_core_registry() {
                              NetworkLane::Gameplay});
   registry.register_message({MessageType::ServerboundAttackEntity, "ServerboundAttackEntity",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ServerboundRideEntityRequest, "ServerboundRideEntityRequest",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ServerboundDismountRequest, "ServerboundDismountRequest",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ServerboundVehicleAction, "ServerboundVehicleAction",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundRideStarted, "ClientboundRideStarted",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundRideEnded, "ClientboundRideEnded",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundEntityPassengersSet, "ClientboundEntityPassengersSet",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});
   registry.register_message({MessageType::ServerboundInventoryActionRequest, "ServerboundInventoryActionRequest",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,

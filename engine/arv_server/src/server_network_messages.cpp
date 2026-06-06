@@ -3,16 +3,17 @@
 #include "arv/core/log.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/io/files.hpp"
-#include "arv/text/language.hpp"
 #include "arv/physics/player_movement.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/server/skin_runtime.hpp"
+#include "arv/text/language.hpp"
 #include "arv/world/world_queries.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <iomanip>
@@ -257,6 +258,122 @@ void clear_active_skin_upload(
       elapsed_ticks,
       static_cast<TickIndex>(remaining_ticks));
   return static_cast<u32>(std::max<TickIndex>(1U, capped_ticks));
+}
+
+[[nodiscard]] Aabb3f vehicle_bounds(Vec3f position, Vec3f size) noexcept {
+  const Vec3f half{size.x * 0.5F, 0.0F, size.z * 0.5F};
+  return {
+      {position.x - half.x, position.y, position.z - half.z},
+      {position.x + half.x, position.y + size.y, position.z + half.z}};
+}
+
+[[nodiscard]] u32 vehicle_water_support_samples(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry& block_registry,
+    Vec3f position,
+    Vec3f size) noexcept {
+  const f32 half_x = size.x * 0.5F;
+  const f32 half_z = size.z * 0.5F;
+  const std::array<Vec3f, 5> samples{{
+      position,
+      {position.x - half_x, position.y, position.z - half_z},
+      {position.x + half_x, position.y, position.z - half_z},
+      {position.x - half_x, position.y, position.z + half_z},
+      {position.x + half_x, position.y, position.z + half_z},
+  }};
+  u32 count = 0U;
+  for (const Vec3f& sample : samples) {
+    const BlockPos block{{
+        floor_to_i32(sample.x),
+        floor_to_i32(sample.y),
+        floor_to_i32(sample.z),
+    }};
+    if (world::world_cell_contains_fluid(world, block_registry, block)) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+[[nodiscard]] VehicleMovementValidationContext make_vehicle_validation_context(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry& block_registry,
+    EntityID passenger_entity,
+    EntityID vehicle_entity,
+    const protocol::ServerboundVehicleMove& move,
+    const AcceptedVehicleMovementState& previous,
+    TickIndex tick_index,
+    TickRate tick_rate) {
+  VehicleMovementValidationContext context;
+  context.receive_time_seconds =
+      static_cast<double>(tick_index) / static_cast<double>(std::max<TickRate>(tick_rate, 1U));
+  context.server_tick = tick_index;
+  const std::optional<EntityID> mounted = world.mounted_rideable(passenger_entity);
+  context.passenger_is_mounted = mounted.has_value() && mounted.value() == vehicle_entity;
+  if (const entity::RideableComponent* rideable = world.find_entity_rideable(vehicle_entity);
+      rideable != nullptr) {
+    context.passenger_controls_vehicle = rideable->controller == passenger_entity;
+  }
+
+  const entity::EntityCollision* collision = world.find_entity_collision(vehicle_entity);
+  if (collision == nullptr) {
+    return context;
+  }
+
+  const Vec3f previous_position =
+      previous.has_accepted_move
+          ? previous.position
+          : ([&]() {
+              const entity::EntityTransform* transform =
+                  world.find_entity_transform(vehicle_entity);
+              return transform == nullptr ? move.position : transform->position;
+            })();
+  world::WorldCollisionQuery query(world, block_registry, true);
+  const Aabb3f start = vehicle_bounds(previous_position, collision->box);
+  const Aabb3f end = vehicle_bounds(move.position, collision->box);
+  const Aabb3f swept_bounds = swept(start, move.position - previous_position);
+  context.swept_aabb_overlaps_solid =
+      physics::overlaps_solid_blocks(query, swept_bounds, physics::CollisionEpsilon) ||
+      physics::overlaps_solid_blocks(query, end, physics::CollisionEpsilon);
+  context.has_ground_support =
+      physics::has_support_below(
+          query,
+          end,
+          std::max(physics::CollisionEpsilon * 2.0F, 0.05F));
+  context.water_support_samples =
+      vehicle_water_support_samples(world, block_registry, move.position, collision->box);
+  return context;
+}
+
+[[nodiscard]] AcceptedVehicleMovementState accepted_vehicle_state_from_world(
+    const world::WorldRuntime& world,
+    EntityID vehicle_entity,
+    EntityNetID vehicle_net_id,
+    TickIndex tick_index,
+    TickRate tick_rate) {
+  AcceptedVehicleMovementState state;
+  if (const entity::EntityTransform* transform = world.find_entity_transform(vehicle_entity);
+      transform != nullptr) {
+    state.position = transform->position;
+    state.rotation = transform->rotation;
+  }
+  if (const entity::EntityVelocity* velocity = world.find_entity_velocity(vehicle_entity);
+      velocity != nullptr) {
+    state.velocity = velocity->linear;
+  }
+  if (const entity::VehiclePhysicsComponent* physics =
+          world.find_entity_vehicle_physics(vehicle_entity);
+      physics != nullptr) {
+    state.velocity = physics->linear_velocity;
+    state.angular_velocity = physics->angular_velocity;
+  }
+  state.last_sequence = 0U;
+  state.last_server_tick = tick_index;
+  state.last_receive_time_seconds =
+      static_cast<double>(tick_index) / static_cast<double>(std::max<TickRate>(tick_rate, 1U));
+  state.has_accepted_move = true;
+  (void)vehicle_net_id;
+  return state;
 }
 
 } // namespace
@@ -762,6 +879,42 @@ void ServerRuntimeImpl::handle_message(
       handle_player_move(connection_id, move.value());
       return;
     }
+    case protocol::MessageType::ServerboundVehicleMove: {
+      auto move = protocol::deserialize_serverbound_vehicle_move(decoded.value().payload);
+      if (!move) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_vehicle_move(connection_id, move.value());
+      return;
+    }
+    case protocol::MessageType::ServerboundRideEntityRequest: {
+      auto request = protocol::deserialize_serverbound_ride_entity_request(decoded.value().payload);
+      if (!request) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_ride_entity_request(connection_id, request.value());
+      return;
+    }
+    case protocol::MessageType::ServerboundDismountRequest: {
+      auto request = protocol::deserialize_serverbound_dismount_request(decoded.value().payload);
+      if (!request) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_dismount_request(connection_id, request.value());
+      return;
+    }
+    case protocol::MessageType::ServerboundVehicleAction: {
+      auto action = protocol::deserialize_serverbound_vehicle_action(decoded.value().payload);
+      if (!action) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_vehicle_action(connection_id, action.value());
+      return;
+    }
     case protocol::MessageType::ServerboundChunkInterestUpdate: {
       auto interest = protocol::deserialize_serverbound_chunk_interest_update(decoded.value().payload);
       if (!interest) {
@@ -1019,6 +1172,12 @@ void ServerRuntimeImpl::handle_player_move(
   if (player_state == nullptr || block_registry_ == nullptr) {
     return;
   }
+  if (const std::optional<EntityID> entity_id =
+          default_world_.entity_for_player(session->player_id);
+      entity_id.has_value() &&
+      default_world_.find_entity_attachment(entity_id.value()) != nullptr) {
+    return;
+  }
 
   refresh_player_permissions(*player_state);
   AcceptedPlayerMovementState& previous = accepted_player_movement_[session->player_id];
@@ -1092,6 +1251,249 @@ void ServerRuntimeImpl::handle_player_move(
           ? remaining_knockback_suppression_ticks -
                 consumed_knockback_suppression_ticks
           : 0U;
+}
+
+void ServerRuntimeImpl::handle_ride_entity_request(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundRideEntityRequest& request) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated) {
+    return;
+  }
+  const std::optional<EntityID> passenger_entity =
+      default_world_.entity_for_player(session->player_id);
+  const std::optional<EntityID> rideable_entity =
+      default_world_.entity_for_network_id(request.rideable_id);
+  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  if (!passenger_entity.has_value() || !rideable_entity.has_value() ||
+      player_state == nullptr) {
+    return;
+  }
+  const entity::EntityTransform* passenger_transform =
+      default_world_.find_entity_transform(passenger_entity.value());
+  const entity::EntityTransform* rideable_transform =
+      default_world_.find_entity_transform(rideable_entity.value());
+  if (passenger_transform == nullptr || rideable_transform == nullptr ||
+      default_world_.find_entity_rideable(rideable_entity.value()) == nullptr) {
+    return;
+  }
+  const f32 max_mount_distance =
+      player_tuning_.reach_distance + player_tuning_.body_width + 2.0F;
+  if (distance(passenger_transform->position, rideable_transform->position) >
+      max_mount_distance) {
+    return;
+  }
+
+  std::optional<std::string_view> requested_seat;
+  if (!request.seat_id.empty()) {
+    requested_seat = request.seat_id;
+  }
+  if (!default_world_.mount_entity(
+          rideable_entity.value(),
+          passenger_entity.value(),
+          requested_seat)) {
+    return;
+  }
+
+  if (const entity::EntityTransform* mounted_transform =
+          default_world_.find_entity_transform(passenger_entity.value());
+      mounted_transform != nullptr) {
+    player_state->position = mounted_transform->position;
+    player_state->velocity = {};
+  }
+
+  const std::optional<std::string> seat_id =
+      default_world_.mounted_seat(passenger_entity.value());
+  const entity::RideableComponent* rideable =
+      default_world_.find_entity_rideable(rideable_entity.value());
+  const bool controls_vehicle =
+      rideable != nullptr && rideable->controller == passenger_entity.value();
+  if (const std::optional<EntityNetID> rideable_net =
+          default_world_.network_id_for_entity(rideable_entity.value());
+      rideable_net.has_value() &&
+      accepted_vehicle_movement_.find(rideable_net.value()) ==
+          accepted_vehicle_movement_.end()) {
+    accepted_vehicle_movement_[rideable_net.value()] =
+        accepted_vehicle_state_from_world(
+            default_world_,
+            rideable_entity.value(),
+            rideable_net.value(),
+            tick_index_,
+            base_tps_);
+  }
+  broadcast_ride_started(
+      passenger_entity.value(),
+      rideable_entity.value(),
+      seat_id.value_or(std::string{}),
+      controls_vehicle);
+}
+
+void ServerRuntimeImpl::handle_dismount_request(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundDismountRequest& request) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated || block_registry_ == nullptr) {
+    return;
+  }
+  const std::optional<EntityID> passenger_entity =
+      default_world_.entity_for_player(session->player_id);
+  if (!passenger_entity.has_value()) {
+    return;
+  }
+  const std::optional<EntityID> rideable_entity =
+      default_world_.mounted_rideable(passenger_entity.value());
+  if (!rideable_entity.has_value()) {
+    return;
+  }
+  const std::optional<EntityID> requested_rideable =
+      default_world_.entity_for_network_id(request.rideable_id);
+  if (requested_rideable.has_value() && requested_rideable.value() != rideable_entity.value()) {
+    return;
+  }
+
+  const std::optional<Vec3f> dismount_position =
+      default_world_.find_safe_dismount_position(
+          rideable_entity.value(),
+          *block_registry_,
+          player_tuning_);
+  if (!dismount_position.has_value()) {
+    return;
+  }
+
+  if (!default_world_.dismount_entity(passenger_entity.value())) {
+    return;
+  }
+  (void)default_world_.set_entity_position(passenger_entity.value(), dismount_position.value());
+  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  if (player_state != nullptr) {
+    player_state->position = dismount_position.value();
+    player_state->velocity = {};
+    player_state->grounded = false;
+  }
+  broadcast_ride_ended(
+      passenger_entity.value(),
+      rideable_entity.value(),
+      dismount_position.value());
+}
+
+void ServerRuntimeImpl::handle_vehicle_action(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundVehicleAction& action) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated) {
+    return;
+  }
+  (void)action;
+}
+
+void ServerRuntimeImpl::handle_vehicle_move(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundVehicleMove& move) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated || block_registry_ == nullptr) {
+    return;
+  }
+  const std::optional<EntityID> vehicle_entity =
+      default_world_.entity_for_network_id(move.vehicle_id);
+  const std::optional<EntityID> passenger_entity =
+      default_world_.entity_for_player(session->player_id);
+  if (!vehicle_entity.has_value() || !passenger_entity.has_value()) {
+    return;
+  }
+
+  const entity::VehiclePhysicsComponent* vehicle_physics =
+      default_world_.find_entity_vehicle_physics(vehicle_entity.value());
+  const entity::VehicleDefinition* definition =
+      vehicle_physics != nullptr && vehicle_registry_ != nullptr
+          ? vehicle_registry_->find(vehicle_physics->definition)
+          : nullptr;
+  if (vehicle_physics == nullptr || definition == nullptr) {
+    return;
+  }
+
+  AcceptedVehicleMovementState& previous =
+      accepted_vehicle_movement_[move.vehicle_id];
+  if (!previous.has_accepted_move) {
+    previous = accepted_vehicle_state_from_world(
+        default_world_,
+        vehicle_entity.value(),
+        move.vehicle_id,
+        tick_index_,
+        base_tps_);
+  }
+
+  const VehicleMovementValidationContext context =
+      make_vehicle_validation_context(
+          default_world_,
+          *block_registry_,
+          passenger_entity.value(),
+          vehicle_entity.value(),
+          move,
+          previous,
+          tick_index_,
+          base_tps_);
+  const VehicleMovementValidationResult validation =
+      validate_serverbound_vehicle_move(
+          move,
+          previous,
+          context,
+          definition->authority);
+  if (!validation.accepted) {
+    if (validation.should_send_correction) {
+      send_vehicle_correction(
+          *session,
+          move.vehicle_id,
+          previous,
+          move.sequence,
+          validation.reason);
+    }
+    return;
+  }
+
+  previous = validation.accepted_state;
+  (void)default_world_.set_entity_transform(
+      vehicle_entity.value(),
+      previous.position,
+      previous.rotation);
+  if (entity::EntityVelocity* velocity =
+          default_world_.find_entity_velocity(vehicle_entity.value());
+      velocity != nullptr) {
+    velocity->linear = previous.velocity;
+  }
+  if (entity::VehiclePhysicsComponent* physics =
+          default_world_.find_entity_vehicle_physics(vehicle_entity.value());
+      physics != nullptr) {
+    physics->linear_velocity = previous.velocity;
+    physics->angular_velocity = previous.angular_velocity;
+    physics->grounded =
+        protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::OnGround);
+    physics->in_water =
+        protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::InWater);
+  }
+  (void)default_world_.update_passenger_attachment_transforms();
+  if (const entity::RideableComponent* rideable =
+          default_world_.find_entity_rideable(vehicle_entity.value());
+      rideable != nullptr) {
+    for (const entity::Seat& seat : rideable->seats) {
+      if (seat.occupant.value == 0U) {
+        continue;
+      }
+      const std::optional<PlayerID> player_id =
+          default_world_.player_for_entity(seat.occupant);
+      if (!player_id.has_value()) {
+        continue;
+      }
+      player::PlayerState* player_state =
+          default_world_.find_player(player_id.value());
+      const entity::EntityTransform* passenger_transform =
+          default_world_.find_entity_transform(seat.occupant);
+      if (player_state != nullptr && passenger_transform != nullptr) {
+        player_state->position = passenger_transform->position;
+        player_state->velocity = previous.velocity;
+      }
+    }
+  }
+  broadcast_vehicle_state(move.vehicle_id, previous);
 }
 
 void ServerRuntimeImpl::handle_chat_message(

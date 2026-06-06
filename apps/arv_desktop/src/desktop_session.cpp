@@ -5,8 +5,8 @@
 #include "save_state.hpp"
 #include "ui_model.hpp"
 
-#include "arv/client/local_identity.hpp"
 #include "arv/base/base_ids.hpp"
+#include "arv/client/local_identity.hpp"
 #include "arv/core/log.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/persistence/save.hpp"
@@ -250,6 +250,7 @@ bool DesktopSessionManager::start_singleplayer(
   server_start_info.natural_spawning =
       server::make_natural_spawning_config(dependencies_.config.natural_spawning);
   server_start_info.entity_registry = &dependencies_.entity_registry;
+  server_start_info.vehicle_registry = &dependencies_.vehicle_registry;
   server_start_info.entity_goals = &dependencies_.entity_goals;
   server_start_info.server_save_root = server_save_root;
   server_start_info.skins = dependencies_.config.skins;
@@ -339,7 +340,8 @@ bool DesktopSessionManager::start_singleplayer(
   }
   integrated_server->voxel_world().restore_persistent_entities(
       loaded_save.entities,
-      &dependencies_.entity_registry);
+      &dependencies_.entity_registry,
+      &dependencies_.vehicle_registry);
 
   auto client = std::make_unique<client::ClientRuntime>(std::move(transport_pair.client));
   client->configure_networking(
@@ -349,6 +351,7 @@ bool DesktopSessionManager::start_singleplayer(
   client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
   client->configure_language(&dependencies_.language);
   client->configure_particles(&dependencies_.particle_registry);
+  client->configure_vehicles(&dependencies_.vehicle_registry);
   client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);
@@ -449,6 +452,7 @@ bool DesktopSessionManager::start_remote(
   client->configure_chat({dependencies_.config.ui.chat.max_history_messages});
   client->configure_language(&dependencies_.language);
   client->configure_particles(&dependencies_.particle_registry);
+  client->configure_vehicles(&dependencies_.vehicle_registry);
   client->set_local_identity(local_identity);
   client->set_player_tuning(dependencies_.player_tuning);
   client->set_chunk_view_distance(dependencies_.config.chunks.stream_distance);

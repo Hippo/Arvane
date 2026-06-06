@@ -1,7 +1,7 @@
 #include "client_network_messages.hpp"
 
 #include "arv/crypto/hash.hpp"
-#include "arv/text/language.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chat.hpp"
@@ -14,10 +14,13 @@
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/text_variables.hpp"
+#include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/text/language.hpp"
 
 #include "client_runtime_internal.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <span>
 #include <string_view>
@@ -77,6 +80,57 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
 void disconnect_and_clear(ClientRuntimeContext& runtime, std::string_view reason) {
   runtime.connection.disconnect_local(reason);
   clear_multiplayer_runtime(runtime);
+}
+
+[[nodiscard]] const entity::VehicleSeatDefinition* find_vehicle_seat(
+    ClientRuntimeContext& runtime,
+    EntityNetID rideable_id,
+    std::string_view seat_id) noexcept {
+  if (runtime.vehicle_registry == nullptr) {
+    return nullptr;
+  }
+  const ReplicatedEntityMirror* mirror = runtime.entities.find(rideable_id);
+  if (mirror == nullptr) {
+    return nullptr;
+  }
+  const entity::VehicleDefinition* definition =
+      runtime.vehicle_registry->find(mirror->entity_type_name);
+  if (definition == nullptr) {
+    return nullptr;
+  }
+  const auto found = std::find_if(
+      definition->seats.begin(),
+      definition->seats.end(),
+      [&](const entity::VehicleSeatDefinition& seat) {
+        return seat.id == seat_id;
+      });
+  return found == definition->seats.end() ? nullptr : &*found;
+}
+
+void apply_local_mounted_vehicle_transform(
+    ClientRuntimeContext& runtime,
+    EntityNetID rideable_id,
+    std::string_view seat_id,
+    Vec3f vehicle_position,
+    Vec3f vehicle_velocity,
+    Quatf vehicle_rotation) noexcept {
+  if (!runtime.player_controller.mounted_vehicle_id().has_value() ||
+      runtime.player_controller.mounted_vehicle_id().value() != rideable_id) {
+    return;
+  }
+  const entity::VehicleSeatDefinition* seat =
+      find_vehicle_seat(runtime, rideable_id, seat_id);
+  const Vec3f seat_local_position =
+      seat == nullptr ? Vec3f{} : seat->local_position;
+  const Quatf seat_local_rotation =
+      seat == nullptr ? Quatf{} : seat->local_rotation;
+  runtime.player_controller.apply_mounted_vehicle_transform(
+      rideable_id,
+      vehicle_position,
+      vehicle_rotation,
+      seat_local_position,
+      seat_local_rotation,
+      vehicle_velocity);
 }
 
 } // namespace
@@ -160,8 +214,8 @@ void ClientNetworkRouter::handle_message(
           disconnect_and_clear(
               runtime,
               arv::text::text_or_fallback(runtime.language,
-                  "ui.connection.rejected_connection",
-                  "Server rejected connection."));
+                                          "ui.connection.rejected_connection",
+                                          "Server rejected connection."));
         } else {
           disconnect_and_clear(runtime, reason);
         }
@@ -216,8 +270,8 @@ void ClientNetworkRouter::handle_message(
             disconnect_and_clear(
                 runtime,
                 arv::text::text_or_fallback(runtime.language,
-                    "ui.connection.authentication_failed",
-                    "authentication failed"));
+                                            "ui.connection.authentication_failed",
+                                            "authentication failed"));
           } else {
             disconnect_and_clear(runtime, reason);
           }
@@ -380,6 +434,82 @@ void ClientNetworkRouter::handle_message(
       runtime.player_controller.apply_move_correction(correction.value());
       return;
     }
+    case protocol::MessageType::ClientboundVehicleState: {
+      auto state = protocol::deserialize_clientbound_vehicle_state(decoded.value().payload);
+      if (!state) {
+        return;
+      }
+      const protocol::ClientboundVehicleState packet = state.value();
+      runtime.entities.apply_vehicle_state(
+          packet,
+          runtime.player_controller.camera().world_id(),
+          runtime.player_controller.server_tick_rate());
+      apply_local_mounted_vehicle_transform(
+          runtime,
+          packet.vehicle_id,
+          runtime.player_controller.mounted_seat_id(),
+          packet.position,
+          packet.velocity,
+          packet.rotation);
+      return;
+    }
+    case protocol::MessageType::ClientboundVehicleCorrection: {
+      auto correction =
+          protocol::deserialize_clientbound_vehicle_correction(decoded.value().payload);
+      if (!correction) {
+        return;
+      }
+      const protocol::ClientboundVehicleCorrection packet = correction.value();
+      runtime.entities.apply_vehicle_correction(packet);
+      runtime.player_controller.apply_vehicle_correction(packet);
+      apply_local_mounted_vehicle_transform(
+          runtime,
+          packet.vehicle_id,
+          runtime.player_controller.mounted_seat_id(),
+          packet.position,
+          packet.velocity,
+          packet.rotation);
+      return;
+    }
+    case protocol::MessageType::ClientboundRideStarted: {
+      auto event = protocol::deserialize_clientbound_ride_started(decoded.value().payload);
+      if (!event) {
+        return;
+      }
+      const protocol::ClientboundRideStarted packet = event.value();
+      runtime.entities.apply_ride_started(packet);
+      runtime.player_controller.apply_ride_started(packet);
+      if (const ReplicatedEntityMirror* rideable =
+              runtime.entities.find(packet.rideable_id);
+          rideable != nullptr) {
+        apply_local_mounted_vehicle_transform(
+            runtime,
+            packet.rideable_id,
+            packet.seat_id,
+            rideable->position,
+            rideable->velocity,
+            rideable->rotation);
+      }
+      return;
+    }
+    case protocol::MessageType::ClientboundRideEnded: {
+      auto event = protocol::deserialize_clientbound_ride_ended(decoded.value().payload);
+      if (!event) {
+        return;
+      }
+      runtime.entities.apply_ride_ended(event.value());
+      runtime.player_controller.apply_ride_ended(event.value());
+      return;
+    }
+    case protocol::MessageType::ClientboundEntityPassengersSet: {
+      auto event =
+          protocol::deserialize_clientbound_entity_passengers_set(decoded.value().payload);
+      if (!event) {
+        return;
+      }
+      runtime.entities.apply_passengers_set(event.value());
+      return;
+    }
     case protocol::MessageType::ClientboundPlayerVelocity: {
       auto velocity = protocol::deserialize_clientbound_player_velocity(decoded.value().payload);
       if (!velocity) {
@@ -487,6 +617,8 @@ void ClientNetworkRouter::handle_message(
       if (!despawn) {
         return;
       }
+      runtime.player_controller.clear_mount_if_rideable_despawned(
+          despawn.value().entity_id);
       runtime.entities.apply_despawn(
           despawn.value(),
           runtime.player_controller.camera().world_id());

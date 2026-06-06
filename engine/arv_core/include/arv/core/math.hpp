@@ -289,6 +289,17 @@ template<typename T>
   return {value.x / len, value.y / len, value.z / len, value.w / len};
 }
 
+[[nodiscard]] inline Quatf conjugate_quat(Quatf value) noexcept {
+  return {-value.x, -value.y, -value.z, value.w};
+}
+
+[[nodiscard]] inline Vec3f rotate_vector(Quatf rotation, Vec3f value) noexcept {
+  const Quatf vector_quat{value.x, value.y, value.z, 0.0F};
+  const Quatf rotated =
+      multiply_quat(multiply_quat(rotation, vector_quat), conjugate_quat(rotation));
+  return {rotated.x, rotated.y, rotated.z};
+}
+
 [[nodiscard]] inline Quatf yaw_rotation(f32 radians) noexcept {
   const f32 half = radians * 0.5F;
   return {0.0F, std::sin(half), 0.0F, std::cos(half)};

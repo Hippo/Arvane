@@ -18,13 +18,15 @@
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/text_variables.hpp"
+#include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/sched/completion_queue.hpp"
+#include "arv/sched/owner_thread.hpp"
 #include "arv/server/chat_service.hpp"
 #include "arv/server/permission_config.hpp"
 #include "arv/server/player_movement_validation.hpp"
 #include "arv/server/player_profile.hpp"
-#include "arv/sched/completion_queue.hpp"
-#include "arv/sched/owner_thread.hpp"
+#include "arv/server/vehicle_movement_validation.hpp"
 #include "arv/text/variables.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_lighting.hpp"
@@ -174,6 +176,7 @@ public:
       world::NaturalSpawnSystem& natural_spawns,
       const voxel::BlockRegistry* block_registry,
       const entity::EntityRegistry* entity_registry,
+      const entity::VehicleDefinitionRegistry* vehicle_registry,
       TickIndex tick,
       bool drain_all);
   void schedule_natural_spawn_jobs(
@@ -273,6 +276,7 @@ struct ServerRuntimeImpl {
   [[nodiscard]] const world::WorldRuntime& voxel_world() const noexcept;
   [[nodiscard]] world::WorldRuntime& voxel_world() noexcept;
   [[nodiscard]] const entity::EntityRegistry* entity_registry() const noexcept;
+  [[nodiscard]] const entity::VehicleDefinitionRegistry* vehicle_registry() const noexcept;
   [[nodiscard]] const player::GameModeRegistry& game_modes() const noexcept;
   [[nodiscard]] player::GameModeRegistry& game_modes() noexcept;
   [[nodiscard]] const player::PermissionGroupRegistry& permission_groups() const noexcept;
@@ -320,6 +324,18 @@ struct ServerRuntimeImpl {
       net::ConnectionID connection_id,
       const protocol::ServerboundAuthResponse& response);
   void handle_player_move(net::ConnectionID connection_id, const protocol::ServerboundPlayerMove& move);
+  void handle_vehicle_move(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundVehicleMove& move);
+  void handle_ride_entity_request(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundRideEntityRequest& request);
+  void handle_dismount_request(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundDismountRequest& request);
+  void handle_vehicle_action(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundVehicleAction& action);
   void handle_chunk_interest_update(
       net::ConnectionID connection_id,
       const protocol::ServerboundChunkInterestUpdate& interest);
@@ -399,6 +415,30 @@ struct ServerRuntimeImpl {
   void send_player_velocity(
       const ServerSession& session,
       const player::PlayerState& player_state);
+  void send_vehicle_correction(
+      const ServerSession& session,
+      EntityNetID vehicle_net_id,
+      const AcceptedVehicleMovementState& accepted,
+      u32 rejected_sequence,
+      protocol::VehicleCorrectionReason reason);
+  void broadcast_vehicle_state(
+      EntityNetID vehicle_net_id,
+      const AcceptedVehicleMovementState& accepted);
+  void broadcast_entity_passengers(EntityID rideable_id);
+  void broadcast_ride_started(
+      EntityID passenger_id,
+      EntityID rideable_id,
+      std::string_view seat_id,
+      bool controls_vehicle);
+  void broadcast_ride_ended(
+      EntityID passenger_id,
+      EntityID rideable_id,
+      Vec3f position);
+  void broadcast_ride_ended(
+      EntityNetID passenger_net_id,
+      EntityNetID rideable_net_id,
+      Vec3f position);
+  void broadcast_pending_ride_ended_events();
   void send_auth_result(
       const ServerSession& session,
       bool accepted,
@@ -463,6 +503,7 @@ struct ServerRuntimeImpl {
   const voxel::BlockRegistry* block_registry_{};
   const player::ItemRegistry* item_registry_{};
   const entity::EntityRegistry* entity_registry_{};
+  const entity::VehicleDefinitionRegistry* vehicle_registry_{};
   const world::EntityGoalRegistry* entity_goals_{};
   player::PlayerTuning player_tuning_{};
   BlockBreakingConfig block_breaking_{};
@@ -486,6 +527,7 @@ struct ServerRuntimeImpl {
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   std::vector<PendingEntityAttack> pending_entity_attacks_;
   HashMap<PlayerID, AcceptedPlayerMovementState> accepted_player_movement_;
+  HashMap<EntityNetID, AcceptedVehicleMovementState> accepted_vehicle_movement_;
   HashMap<PlayerID, double> last_player_move_correction_seconds_;
   HashMap<PlayerID, protocol::BlockBreakProgress> last_sent_block_break_progress_;
   arv::text::TextVariableStore text_variables_;

@@ -9,6 +9,7 @@
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
+#include "arv/protocol/vehicles.hpp"
 
 #include "client_connection.hpp"
 
@@ -133,6 +134,70 @@ net::NetworkResult ClientProtocolSender::send_player_move(
       protocol::ReliabilityClass::UnreliableLatestWins,
       protocol::NetworkLane::Movement,
       protocol::serialize_serverbound_player_move(move));
+}
+
+net::NetworkResult ClientProtocolSender::send_vehicle_move(
+    const protocol::ServerboundVehicleMove& move) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundVehicleMove,
+      protocol::ReliabilityClass::UnreliableLatestWins,
+      protocol::NetworkLane::Movement,
+      protocol::serialize_serverbound_vehicle_move(move));
+}
+
+net::NetworkResult ClientProtocolSender::send_ride_entity_request(
+    const protocol::ServerboundRideEntityRequest& request) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundRideEntityRequest,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_ride_entity_request(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_dismount_request(
+    const protocol::ServerboundDismountRequest& request) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundDismountRequest,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_dismount_request(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_vehicle_action(
+    const protocol::ServerboundVehicleAction& action) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundVehicleAction,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_vehicle_action(action));
 }
 
 net::NetworkResult ClientProtocolSender::send_inventory_action(

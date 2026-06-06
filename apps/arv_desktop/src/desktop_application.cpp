@@ -232,6 +232,7 @@ int DesktopApplication::run(int argc, char** argv) {
             plugin_manager.register_commands(registry);
           },
           assets.entity_registry,
+          assets.vehicle_registry,
           entity_goals,
           assets.block_atlas,
           assets.fluid_render_data,

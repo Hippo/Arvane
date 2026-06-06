@@ -268,6 +268,70 @@ std::optional<EntityNetID> DesktopFrameLoop::targeted_attack_entity(
   return best_entity;
 }
 
+std::optional<EntityNetID> DesktopFrameLoop::targeted_rideable_entity(
+    const DesktopGameSession& session) const {
+  if (session.client == nullptr) {
+    return std::nullopt;
+  }
+
+  const client::CameraShell& camera = session.client->camera();
+  const Vec3f origin = camera.position();
+  const Vec3f direction = camera.forward_vector();
+  f32 max_distance = config_.physics.reach_distance + 1.5F;
+
+  world::WorldCollisionQuery query(
+      session.client_world,
+      assets_.block_registry,
+      false);
+  if (const std::optional<physics::BlockRaycastHit> block_hit = physics::raycast_blocks(
+          query,
+          origin,
+          direction,
+          max_distance);
+      block_hit.has_value() && !assets_.block_registry.is_air(block_hit->variant)) {
+    max_distance = std::min(max_distance, block_hit->distance);
+  }
+
+  std::optional<EntityNetID> best_entity;
+  f32 best_distance = max_distance;
+  const std::optional<EntityNetID> local_entity = session.client->local_entity_id();
+  for (const client::ReplicatedEntityMirror& mirror :
+       session.client->replicated_entity_mirrors()) {
+    if ((local_entity.has_value() && mirror.entity_id == local_entity.value()) ||
+        mirror.dead) {
+      continue;
+    }
+    const entity::EntityTypeRecord* type =
+        assets_.entity_registry.type(mirror.entity_type);
+    const bool type_is_rideable =
+        type != nullptr && type->components.rideable.has_value();
+    const bool definition_is_rideable =
+        assets_.vehicle_registry.find(mirror.entity_type_name) != nullptr;
+    if (!type_is_rideable && !definition_is_rideable) {
+      continue;
+    }
+    const std::optional<physics::RayAabbHit> hit = physics::ray_intersects_aabb(
+        origin,
+        direction,
+        replicated_entity_attack_bounds(mirror),
+        best_distance);
+    if (hit.has_value() && hit->distance <= best_distance) {
+      best_distance = hit->distance;
+      best_entity = mirror.entity_id;
+    }
+  }
+  return best_entity;
+}
+
+bool DesktopFrameLoop::send_local_ride_request_if_targeted(
+    DesktopGameSession& session) const {
+  const std::optional<EntityNetID> target = targeted_rideable_entity(session);
+  if (!target.has_value()) {
+    return false;
+  }
+  return static_cast<bool>(session.client->request_ride_entity(target.value()));
+}
+
 void DesktopFrameLoop::send_local_entity_attack_if_targeted(
     DesktopGameSession& session,
     const player::ItemRecord* held_item) const {
@@ -445,6 +509,12 @@ void DesktopFrameLoop::update_held_item_animation_from_input(
       spawn_local_block_hit_particles(session);
       send_local_entity_attack_if_targeted(session, nullptr);
     }
+    if (client_input.secondary_pressed &&
+        send_local_ride_request_if_targeted(session)) {
+      session.held_item_secondary_use_active = false;
+      session.held_item_animation.stop(now_seconds);
+      return;
+    }
     session.held_item_secondary_use_active = false;
     session.held_item_animation.stop(now_seconds);
     return;
@@ -458,6 +528,13 @@ void DesktopFrameLoop::update_held_item_animation_from_input(
         client::HeldItemActionPrimaryUse,
         now_seconds);
     send_local_entity_attack_if_targeted(session, held_item);
+  }
+
+  if (client_input.secondary_pressed &&
+      send_local_ride_request_if_targeted(session)) {
+    session.held_item_secondary_use_active = false;
+    session.held_item_animation.stop(now_seconds);
+    return;
   }
 
   if (client_input.primary_held &&

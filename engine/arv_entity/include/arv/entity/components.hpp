@@ -28,6 +28,8 @@ inline constexpr std::string_view HealthComponentID = "arvane:health";
 inline constexpr std::string_view KnockbackResistanceComponentID = "arvane:knockback_resistance";
 inline constexpr std::string_view BrainComponentID = "arvane:brain";
 inline constexpr std::string_view AnimationComponentID = "arvane:animation";
+inline constexpr std::string_view RideableComponentID = "arvane:rideable";
+inline constexpr std::string_view VehiclePhysicsComponentID = "arvane:vehicle_physics";
 
 struct EntityRegistryError {
   std::string message{};
@@ -73,6 +75,39 @@ struct AuthoredAnimationComponent {
   std::string initial{};
 };
 
+enum class SeatRole : u8 {
+  Driver,
+  Passenger,
+};
+
+enum class CameraMode : u8 {
+  MountedThirdPerson,
+  ThirdPersonFollow,
+};
+
+enum class RideableDismountPolicy : u8 {
+  KeepMountedIfUnsafe,
+};
+
+enum class VehicleKind : u8 {
+  Mount,
+  Vehicle,
+};
+
+enum class VehiclePhysicsKind : u8 {
+  LivingMount,
+  SurfaceWaterVehicle,
+  GroundVehicle,
+};
+
+struct AuthoredRideableComponent {
+  std::string definition{};
+};
+
+struct AuthoredVehiclePhysicsComponent {
+  std::string definition{};
+};
+
 struct EntityComponentSet {
   bool transform{};
   bool velocity{};
@@ -82,6 +117,8 @@ struct EntityComponentSet {
   std::optional<AuthoredKnockbackResistanceComponent> knockback_resistance{};
   std::optional<AuthoredBrainComponent> brain{};
   std::optional<AuthoredAnimationComponent> animation{};
+  std::optional<AuthoredRideableComponent> rideable{};
+  std::optional<AuthoredVehiclePhysicsComponent> vehicle_physics{};
   std::vector<std::string> component_ids{};
 };
 
@@ -138,9 +175,97 @@ private:
   HashMap<std::string, EntityTypeID> name_to_id_{};
 };
 
+struct VehicleSeatDefinition {
+  std::string id{};
+  std::string name{};
+  SeatRole role{SeatRole::Passenger};
+  Vec3f local_position{};
+  Quatf local_rotation{};
+  bool controls_vehicle{};
+  CameraMode camera_mode{CameraMode::ThirdPersonFollow};
+};
+
+struct VehicleAuthorityDefinition {
+  f32 max_speed{};
+  f32 max_acceleration{};
+  f32 max_deceleration{};
+  f32 max_angular_speed{};
+  f32 max_vertical_speed{};
+  f32 max_step_height{};
+  bool requires_ground{};
+  bool requires_water{};
+  u32 min_water_support_samples{};
+};
+
+struct LivingMountMovementDefinition {
+  f32 walk_speed{};
+  f32 sprint_speed{};
+  f32 acceleration{};
+  f32 turn_rate{};
+  f32 jump_strength{};
+  f32 gravity_scale{1.0F};
+  f32 step_height{};
+  f32 friction{1.0F};
+};
+
+struct SurfaceWaterVehicleMovementDefinition {
+  f32 acceleration{};
+  f32 max_speed{};
+  f32 turn_rate{};
+  f32 water_drag{};
+  f32 land_drag{};
+  f32 float_height_offset{};
+  f32 buoyancy_snap_speed{};
+};
+
+struct GroundVehicleMovementDefinition {
+  f32 max_forward_speed{};
+  f32 max_reverse_speed{};
+  f32 acceleration{};
+  f32 brake_force{};
+  f32 drag{};
+  f32 turn_rate{};
+  f32 lateral_grip{};
+  f32 gravity_scale{1.0F};
+  f32 max_step_height{};
+};
+
+struct VehicleDefinition {
+  std::string name{};
+  VehicleKind kind{VehicleKind::Vehicle};
+  VehiclePhysicsKind physics{VehiclePhysicsKind::GroundVehicle};
+  Vec3f collision_size{1.0F, 1.0F, 1.0F};
+  std::vector<VehicleSeatDefinition> seats{};
+  LivingMountMovementDefinition living_mount{};
+  SurfaceWaterVehicleMovementDefinition surface_water{};
+  GroundVehicleMovementDefinition ground{};
+  VehicleAuthorityDefinition authority{};
+};
+
+class VehicleDefinitionRegistry {
+public:
+  using Result = Expected<VehicleDefinitionRegistry, EntityRegistryError>;
+
+  [[nodiscard]] static Result build(std::vector<VehicleDefinition> definitions);
+
+  [[nodiscard]] const VehicleDefinition* find(std::string_view name) const noexcept;
+  [[nodiscard]] usize definition_count() const noexcept {
+    return definitions_.size();
+  }
+  [[nodiscard]] std::span<const VehicleDefinition> records() const noexcept {
+    return definitions_;
+  }
+
+private:
+  std::vector<VehicleDefinition> definitions_{};
+  HashMap<std::string, usize> name_to_index_{};
+};
+
 [[nodiscard]] std::string normalize_entity_model_asset(std::string_view model);
 [[nodiscard]] std::string normalize_entity_animation_asset(std::string_view animation);
 [[nodiscard]] Expected<std::vector<EntityDefinition>, EntityRegistryError> parse_entity_definitions_json(
+    std::string_view text);
+[[nodiscard]] Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_definitions_json(
     std::string_view text);
 
 struct RuntimeEntity {
@@ -165,6 +290,43 @@ struct EntityCollision {
 
 struct EntityMovement {
   f32 walk_speed{};
+};
+
+struct Seat {
+  std::string id{};
+  std::string name{};
+  SeatRole role{SeatRole::Passenger};
+  Vec3f local_position{};
+  Quatf local_rotation{};
+  EntityID occupant{};
+  bool controls_vehicle{};
+  CameraMode camera_mode{CameraMode::ThirdPersonFollow};
+};
+
+struct RideableComponent {
+  std::string definition{};
+  std::vector<Seat> seats{};
+  EntityID controller{};
+  RideableDismountPolicy dismount_policy{RideableDismountPolicy::KeepMountedIfUnsafe};
+};
+
+struct AttachedToComponent {
+  EntityID parent{};
+  std::string seat_id{};
+  Vec3f local_position{};
+  Quatf local_rotation{};
+};
+
+struct VehiclePhysicsComponent {
+  VehiclePhysicsKind kind{VehiclePhysicsKind::GroundVehicle};
+  std::string definition{};
+  Vec3f linear_velocity{};
+  Vec3f angular_velocity{};
+  bool grounded{};
+  bool in_water{};
+  bool submerged{};
+  f32 ground_contact_time{};
+  f32 air_time{};
 };
 
 struct EntityHealth {

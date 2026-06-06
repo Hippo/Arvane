@@ -2,13 +2,13 @@
 
 #include "dedicated_error.hpp"
 
+#include "arv/asset/pack.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
-#include "arv/asset/pack.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
-#include "arv/text/language.hpp"
 #include "arv/player/item.hpp"
+#include "arv/text/language.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 
@@ -24,6 +24,7 @@ struct DedicatedRegistries {
   u64 item_registry_hash{};
 
   entity::EntityRegistry entity_registry;
+  entity::VehicleDefinitionRegistry vehicle_registry;
 };
 
 [[nodiscard]] Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(

@@ -51,6 +51,83 @@
       "spawnable": true,
       "persistent_by_default": true,
       "replicated_by_default": true
+    },
+    {
+      "name": "arvane:horse",
+      "category": "passive",
+      "components": {
+        "arvane:transform": {},
+        "arvane:velocity": {},
+        "arvane:collision": {
+          "box": [1.4, 1.6, 1.4]
+        },
+        "arvane:movement": {
+          "walk_speed": 4.0
+        },
+        "arvane:health": {
+          "max": 20,
+          "current": 20
+        },
+        "arvane:rideable": {
+          "definition": "arvane:horse"
+        },
+        "arvane:vehicle_physics": {
+          "definition": "arvane:horse"
+        }
+      },
+      "presentation": {
+        "model": "arvane:model/entity/horse"
+      },
+      "spawnable": true,
+      "persistent_by_default": true,
+      "replicated_by_default": true
+    },
+    {
+      "name": "arvane:oak_boat",
+      "category": "vehicle",
+      "components": {
+        "arvane:transform": {},
+        "arvane:velocity": {},
+        "arvane:collision": {
+          "box": [1.4, 0.6, 2.4]
+        },
+        "arvane:rideable": {
+          "definition": "arvane:oak_boat"
+        },
+        "arvane:vehicle_physics": {
+          "definition": "arvane:oak_boat"
+        }
+      },
+      "presentation": {
+        "model": "arvane:model/entity/boat"
+      },
+      "spawnable": true,
+      "persistent_by_default": true,
+      "replicated_by_default": true
+    },
+    {
+      "name": "arvane:buggy",
+      "category": "vehicle",
+      "components": {
+        "arvane:transform": {},
+        "arvane:velocity": {},
+        "arvane:collision": {
+          "box": [1.8, 1.2, 3.2]
+        },
+        "arvane:rideable": {
+          "definition": "arvane:buggy"
+        },
+        "arvane:vehicle_physics": {
+          "definition": "arvane:buggy"
+        }
+      },
+      "presentation": {
+        "model": "arvane:model/entity/buggy",
+        "animation": "arvane:animation/automobile"
+      },
+      "spawnable": true,
+      "persistent_by_default": true,
+      "replicated_by_default": true
     }
   ]
 }

@@ -1,13 +1,13 @@
 #include "desktop_assets.hpp"
 
-#include "arv/core/log.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
 #include "arv/client/particles.hpp"
+#include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
-#include "arv/text/language.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/render/render_commands.hpp"
+#include "arv/text/language.hpp"
 #include "arv/world/worldgen/loader.hpp"
 
 #include <algorithm>
@@ -439,6 +439,22 @@ DesktopLoadedAssetsResult load_desktop_assets(
       error.has_value()) {
     return DesktopLoadedAssetsResult::failure(error.value());
   }
+
+  auto vehicle_definition_text = packs.load_merged_json_array_text("vehicles", "vehicles");
+  if (!vehicle_definition_text) {
+    return asset_failure("vehicles", vehicle_definition_text.error().describe());
+  }
+  auto vehicle_definitions =
+      entity::parse_vehicle_definitions_json(vehicle_definition_text.value());
+  if (!vehicle_definitions) {
+    return asset_failure("vehicles", vehicle_definitions.error().message);
+  }
+  auto vehicle_registry_result =
+      entity::VehicleDefinitionRegistry::build(std::move(vehicle_definitions.value()));
+  if (!vehicle_registry_result) {
+    return asset_failure("vehicles", vehicle_registry_result.error().message);
+  }
+  loaded.vehicle_registry = std::move(vehicle_registry_result.value());
 
   auto entity_render_assets_result = build_entity_render_assets(
       resources,

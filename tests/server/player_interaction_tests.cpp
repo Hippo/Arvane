@@ -1,6 +1,7 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
@@ -142,6 +143,63 @@ arv::client::ParticleRegistry make_critical_particle_registry() {
   type.color = {{1.0F, 1.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 1.0F, 0.0F}};
   (void)registry.add(std::move(type));
   return registry;
+}
+
+arv::entity::VehicleDefinitionRegistry make_mount_request_vehicle_registry() {
+  arv::entity::VehicleDefinition mount;
+  mount.name = "arvane:test_mount";
+  mount.kind = arv::entity::VehicleKind::Mount;
+  mount.physics = arv::entity::VehiclePhysicsKind::LivingMount;
+  mount.collision_size = {1.4F, 1.6F, 1.4F};
+  mount.seats.push_back({"rider",
+                         "rider",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 1.25F, 0.0F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::MountedThirdPerson});
+  mount.living_mount = {
+      4.0F,
+      8.0F,
+      16.0F,
+      2.0F,
+      6.0F,
+      1.0F,
+      0.8F,
+      1.0F};
+  mount.authority = {
+      10.0F,
+      20.0F,
+      30.0F,
+      3.0F,
+      12.0F,
+      1.0F,
+      false,
+      false,
+      0U};
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(mount)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
+arv::EntityID create_networked_test_mount(
+    arv::server::ServerRuntime& server,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position) {
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{1.4F, 1.6F, 1.4F}};
+  components.rideable =
+      arv::entity::AuthoredRideableComponent{"arvane:test_mount"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_mount"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_id = arv::EntityTypeID{2};
+  info.type_name = "arvane:test_mount";
+  info.position = position;
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  return server.voxel_world().create_entity(std::move(info));
 }
 
 arv::voxel::BlockRegistry make_timed_break_block_registry() {
@@ -482,6 +540,74 @@ TEST(PlayerInteractionTests, ServerCriticalHitSpawnsClientParticleEvent) {
   client.fixed_tick(server.tick_index());
 
   EXPECT_GT(client.particle_stats().spawned_total, 0U);
+}
+
+TEST(PlayerInteractionTests, ServerboundRideEntityRequestMountsRideableWithHeldItem) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_mount_request_vehicle_registry();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.0F, 0.0F, 0.0F};
+  player_state.velocity = {};
+  player_state.selected_hotbar_slot = 0;
+  ASSERT_TRUE(player_state.inventory.set_slot(
+      0,
+      arv::player::ItemStack{
+          item_registry.find_item("arvane:stone").value(),
+          1U}));
+
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(player_state.player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(server.voxel_world().set_entity_position(
+      player_entity.value(),
+      player_state.position));
+
+  const arv::EntityID mount = create_networked_test_mount(
+      server,
+      vehicle_registry,
+      {2.0F, 0.0F, 0.0F});
+  ASSERT_NE(mount, (arv::EntityID{}));
+  const std::optional<arv::EntityNetID> mount_net =
+      server.voxel_world().network_id_for_entity(mount);
+  ASSERT_TRUE(mount_net.has_value());
+
+  ASSERT_TRUE(client.request_ride_entity(mount_net.value()));
+  server.tick();
+
+  EXPECT_EQ(
+      server.voxel_world().mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{mount});
+  EXPECT_EQ(
+      server.voxel_world().mounted_seat(player_entity.value()),
+      std::optional<std::string>{"rider"});
+  const arv::entity::RideableComponent* rideable =
+      server.voxel_world().find_entity_rideable(mount);
+  ASSERT_NE(rideable, nullptr);
+  EXPECT_EQ(rideable->controller, player_entity.value());
+  const arv::player::PlayerState& updated_player_state = connected_player(server);
+  EXPECT_FLOAT_EQ(updated_player_state.position.x, 2.0F);
+  EXPECT_FLOAT_EQ(updated_player_state.position.y, 1.25F);
+  EXPECT_FLOAT_EQ(updated_player_state.position.z, 0.0F);
 }
 
 TEST(PlayerInteractionTests, EntityAttackAppliesKnockbackOnDamage) {

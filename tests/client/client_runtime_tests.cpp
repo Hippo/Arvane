@@ -12,6 +12,7 @@
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/text_variables.hpp"
+#include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/text/variables.hpp"
 #include "support/net_events.hpp"
@@ -815,6 +816,40 @@ TEST(ClientRuntimeTests, AttackRequestSendsEntityPacketAndQueuesFeedback) {
   ASSERT_TRUE(attack);
   EXPECT_EQ(attack.value().target_entity, (arv::EntityNetID{5}));
   EXPECT_EQ(attack.value().sequence, 1U);
+}
+
+TEST(ClientRuntimeTests, RideRequestSendsRideEntityPacket) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  (void)server_transport->poll_events();
+
+  const auto result =
+      client.request_ride_entity(arv::EntityNetID{42}, "driver");
+  ASSERT_TRUE(result);
+
+  const std::vector<arv::net::NetworkEvent> server_events =
+      server_transport->poll_events();
+  const arv::net::NetworkEvent* message =
+      find_event(server_events, arv::net::NetworkEventType::MessageReceived);
+  ASSERT_NE(message, nullptr);
+  EXPECT_EQ(message->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(message->lane, arv::protocol::NetworkLane::Gameplay);
+
+  const auto decoded = arv::protocol::deserialize_envelope(message->payload);
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(
+      decoded.value().envelope.message_type,
+      arv::protocol::MessageType::ServerboundRideEntityRequest);
+  const auto request =
+      arv::protocol::deserialize_serverbound_ride_entity_request(decoded.value().payload);
+  ASSERT_TRUE(request);
+  EXPECT_EQ(request.value().rideable_id, (arv::EntityNetID{42}));
+  EXPECT_EQ(request.value().seat_id, "driver");
 }
 
 TEST(ClientRuntimeTests, MovementHzPacketOverridesDefaultClientSendRate) {

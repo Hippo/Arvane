@@ -13,6 +13,7 @@
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/skins.hpp"
+#include "arv/protocol/vehicles.hpp"
 
 #include <memory>
 #include <optional>
@@ -25,7 +26,17 @@ class LanguageCatalog;
 class TextVariableStore;
 } // namespace arv::text
 
+namespace arv::entity {
+class VehicleDefinitionRegistry;
+} // namespace arv::entity
+
 namespace arv::client {
+
+struct ReplicatedPassengerMirror {
+  EntityNetID passenger_id{};
+  std::string seat_id{};
+  bool controls_vehicle{};
+};
 
 struct ReplicatedEntityMirror {
   EntityNetID entity_id{};
@@ -53,6 +64,10 @@ struct ReplicatedEntityMirror {
   f32 health_max{};
   bool dead{};
   bool invulnerable{};
+  std::optional<EntityNetID> parent_rideable{};
+  std::string parent_seat_id{};
+  bool controls_parent_vehicle{};
+  std::vector<ReplicatedPassengerMirror> passengers{};
 };
 
 struct DroppedItemMirror {
@@ -136,6 +151,7 @@ public:
   [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept;
   [[nodiscard]] TickIndex world_initial_tick() const noexcept;
   [[nodiscard]] TickRate server_tick_rate() const noexcept;
+  void configure_vehicles(const entity::VehicleDefinitionRegistry* registry) noexcept;
   [[nodiscard]] bool inventory_open() const noexcept;
   [[nodiscard]] bool chat_open() const noexcept;
   [[nodiscard]] const std::string& chat_draft() const noexcept;
@@ -168,6 +184,10 @@ public:
   net::NetworkResult request_inventory_drop_cursor(bool one_item);
   net::NetworkResult request_inventory_close();
   net::NetworkResult request_attack_entity(EntityNetID target_entity);
+  net::NetworkResult request_ride_entity(EntityNetID rideable_id, std::string seat_id = {});
+  net::NetworkResult request_dismount();
+  net::NetworkResult send_vehicle_action(protocol::ServerboundVehicleAction action);
+  net::NetworkResult send_vehicle_move(const protocol::ServerboundVehicleMove& move);
   [[nodiscard]] std::vector<ClientAttackFeedback> drain_attack_feedback();
   [[nodiscard]] usize replicated_entity_count() const noexcept;
   [[nodiscard]] const ReplicatedEntityMirror* find_replicated_entity(

@@ -5,10 +5,31 @@
 
 namespace arv::world::detail {
 
+bool authored_vehicle_components_resolved(
+    const entity::EntityComponentSet& components,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions) noexcept {
+  if (!components.rideable.has_value() && !components.vehicle_physics.has_value()) {
+    return true;
+  }
+  if (vehicle_definitions == nullptr) {
+    return false;
+  }
+  if (components.rideable.has_value() &&
+      vehicle_definitions->find(components.rideable->definition) == nullptr) {
+    return false;
+  }
+  if (components.vehicle_physics.has_value() &&
+      vehicle_definitions->find(components.vehicle_physics->definition) == nullptr) {
+    return false;
+  }
+  return true;
+}
+
 void apply_authored_components(
     entt::registry& registry,
     entt::entity handle,
-    const entity::EntityComponentSet& components) {
+    const entity::EntityComponentSet& components,
+    const entity::VehicleDefinitionRegistry* vehicle_definitions) {
   if (handle == entt::null || !registry.valid(handle)) {
     return;
   }
@@ -76,6 +97,42 @@ void apply_authored_components(
     if (!brain.goals.empty()) {
       registry.emplace_or_replace<entity::BrainComponent>(handle, std::move(brain));
       (void)registry.get_or_emplace<entity::EntityAnimationState>(handle);
+    }
+  }
+  if (components.rideable.has_value()) {
+    const entity::VehicleDefinition* definition =
+        vehicle_definitions == nullptr
+            ? nullptr
+            : vehicle_definitions->find(components.rideable->definition);
+    if (definition != nullptr) {
+      entity::RideableComponent rideable;
+      rideable.definition = definition->name;
+      rideable.seats.reserve(definition->seats.size());
+      for (const entity::VehicleSeatDefinition& source : definition->seats) {
+        rideable.seats.push_back({source.id,
+                                  source.name.empty() ? source.id : source.name,
+                                  source.role,
+                                  source.local_position,
+                                  source.local_rotation,
+                                  {},
+                                  source.controls_vehicle,
+                                  source.camera_mode});
+      }
+      registry.emplace_or_replace<entity::RideableComponent>(
+          handle,
+          std::move(rideable));
+    }
+  }
+  if (components.vehicle_physics.has_value()) {
+    const entity::VehicleDefinition* definition =
+        vehicle_definitions == nullptr
+            ? nullptr
+            : vehicle_definitions->find(components.vehicle_physics->definition);
+    if (definition != nullptr) {
+      registry.emplace_or_replace<entity::VehiclePhysicsComponent>(
+          handle,
+          definition->physics,
+          definition->name);
     }
   }
 }

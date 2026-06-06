@@ -152,6 +152,7 @@ struct ServerStartInfo {
   u32 max_fluid_results_per_tick{1};
   u32 max_pending_fluid_jobs{1};
   const entity::EntityRegistry* entity_registry{};
+  const entity::VehicleDefinitionRegistry* vehicle_registry{};
   const world::EntityGoalRegistry* entity_goals{};
   TickIndex initial_tick_index{};
   std::string world_name{"default"};
@@ -216,6 +217,7 @@ public:
   [[nodiscard]] const world::WorldRuntime& voxel_world() const noexcept;
   [[nodiscard]] world::WorldRuntime& voxel_world() noexcept;
   [[nodiscard]] const entity::EntityRegistry* entity_registry() const noexcept;
+  [[nodiscard]] const entity::VehicleDefinitionRegistry* vehicle_registry() const noexcept;
   [[nodiscard]] const player::GameModeRegistry& game_modes() const noexcept;
   [[nodiscard]] player::GameModeRegistry& game_modes() noexcept;
   [[nodiscard]] const player::PermissionGroupRegistry& permission_groups() const noexcept;

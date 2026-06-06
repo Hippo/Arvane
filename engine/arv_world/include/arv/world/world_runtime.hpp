@@ -6,6 +6,7 @@
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
+#include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/voxel/storage.hpp"
 #include "arv/world/fluid_solver.hpp"
@@ -75,6 +76,14 @@ enum class EntityDespawnReason : u16 {
   Transfer,
 };
 
+struct RideEndedEvent {
+  EntityID passenger{};
+  EntityID rideable{};
+  std::optional<EntityNetID> passenger_net_id{};
+  std::optional<EntityNetID> rideable_net_id{};
+  Vec3f position{};
+};
+
 struct EntityCreateInfo {
   EntityTypeID type_id{};
   std::string type_name{};
@@ -89,6 +98,7 @@ struct EntityCreateInfo {
   std::optional<player::ItemStack> dropped_item_stack{};
   Seconds dropped_item_pickup_delay_seconds{};
   std::optional<entity::EntityComponentSet> authored_components{};
+  const entity::VehicleDefinitionRegistry* vehicle_definitions{};
 };
 
 enum class DamageCause : u8 {
@@ -326,12 +336,14 @@ public:
       bool persistent = true);
   bool destroy_entity(EntityID entity_id, EntityDespawnReason reason = EntityDespawnReason::Removed);
   void flush_entity_despawns();
+  [[nodiscard]] std::vector<RideEndedEvent> drain_ride_ended_events();
   [[nodiscard]] bool entity_exists(EntityID entity_id) const noexcept;
   [[nodiscard]] usize entity_count() const noexcept;
   [[nodiscard]] std::vector<EntityID> entity_ids() const;
   [[nodiscard]] std::optional<EntityID> entity_for_player(PlayerID player_id) const noexcept;
   [[nodiscard]] std::optional<PlayerID> player_for_entity(EntityID entity_id) const noexcept;
   [[nodiscard]] std::optional<EntityNetID> network_id_for_entity(EntityID entity_id) const noexcept;
+  [[nodiscard]] std::optional<EntityID> entity_for_network_id(EntityNetID net_id) const noexcept;
   [[nodiscard]] std::optional<ChunkSectionCoord> entity_chunk(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::EntityTransform* find_entity_transform(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityTransform* find_entity_transform(EntityID entity_id) const noexcept;
@@ -342,6 +354,12 @@ public:
   [[nodiscard]] const entity::EntityCollision* find_entity_collision(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::EntityMovement* find_entity_movement(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityMovement* find_entity_movement(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::RideableComponent* find_entity_rideable(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::RideableComponent* find_entity_rideable(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::AttachedToComponent* find_entity_attachment(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::AttachedToComponent* find_entity_attachment(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::VehiclePhysicsComponent* find_entity_vehicle_physics(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::VehiclePhysicsComponent* find_entity_vehicle_physics(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::EntityHealth* find_entity_health(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityHealth* find_entity_health(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::KnockbackResistanceComponent* find_entity_knockback_resistance(EntityID entity_id) noexcept;
@@ -379,12 +397,26 @@ public:
       std::string_view tag) const noexcept;
   bool set_entity_transform(EntityID entity_id, Vec3f position, Quatf rotation) noexcept;
   bool set_entity_position(EntityID entity_id, Vec3f position) noexcept;
+  [[nodiscard]] bool mount_entity(
+      EntityID rideable_id,
+      EntityID passenger_id,
+      std::optional<std::string_view> requested_seat = std::nullopt) noexcept;
+  [[nodiscard]] bool dismount_entity(EntityID passenger_id) noexcept;
+  [[nodiscard]] std::optional<EntityID> mounted_rideable(EntityID passenger_id) const noexcept;
+  [[nodiscard]] std::optional<std::string> mounted_seat(EntityID passenger_id) const;
+  [[nodiscard]] bool update_passenger_attachment_transform(EntityID passenger_id) noexcept;
+  [[nodiscard]] u32 update_passenger_attachment_transforms() noexcept;
+  [[nodiscard]] std::optional<Vec3f> find_safe_dismount_position(
+      EntityID rideable_id,
+      const voxel::BlockRegistry& block_registry,
+      const player::PlayerTuning& tuning = player::default_player_tuning()) const;
   [[nodiscard]] std::vector<entity::EntitySnapshotEntry> collect_entity_snapshots() const;
   [[nodiscard]] std::vector<entity::DroppedItemEntitySnapshot> collect_dropped_item_snapshots() const;
   [[nodiscard]] std::vector<entity::PersistentEntityRecord> persistent_entity_records() const;
   void restore_persistent_entities(
       std::span<const entity::PersistentEntityRecord> records,
-      const entity::EntityRegistry* entity_registry = nullptr);
+      const entity::EntityRegistry* entity_registry = nullptr,
+      const entity::VehicleDefinitionRegistry* vehicle_definitions = nullptr);
   u32 tick_entities(
       const voxel::BlockRegistry* block_registry = nullptr,
       const EntityGoalRegistry* goal_registry = nullptr);

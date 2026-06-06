@@ -86,6 +86,7 @@ add_executable(arv_tests
   server/player_interaction_tests.cpp
   server/registry_tests.cpp
   server/skin_runtime_tests.cpp
+  server/vehicle_movement_validation_tests.cpp
   voxel/block_registry_tests.cpp
   voxel/chunk_storage_tests.cpp
   voxel/light_tests.cpp

@@ -22,6 +22,10 @@ namespace arv::text {
 class LanguageCatalog;
 } // namespace arv::text
 
+namespace arv::entity {
+class VehicleDefinitionRegistry;
+} // namespace arv::entity
+
 namespace arv::client::detail {
 
 struct ClientRuntimeContext {
@@ -41,6 +45,7 @@ struct ClientRuntimeContext {
   ClientSkinRuntime& skins;
   ParticleSystem& particles;
   const arv::text::LanguageCatalog* language{};
+  const arv::entity::VehicleDefinitionRegistry* vehicle_registry{};
   const physics::ICollisionQuery* collision_query{};
   Seconds tick_seconds{};
 };

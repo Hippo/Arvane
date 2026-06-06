@@ -26,11 +26,10 @@ arv::EntityID create_goal_driven_entity(
   components.movement = arv::entity::AuthoredMovementComponent{4.5F};
   components.brain = arv::entity::AuthoredBrainComponent{};
   components.brain->tick_interval = 1U;
-  components.brain->goals.push_back({
-      .type = "arvane:wander",
-      .priority = 1,
-      .duration_ticks = 20U,
-      .animation = "walking"});
+  components.brain->goals.push_back({.type = "arvane:wander",
+                                     .priority = 1,
+                                     .duration_ticks = 20U,
+                                     .animation = "walking"});
   info.authored_components = components;
 
   const arv::EntityID entity = world.create_entity(std::move(info));
@@ -48,6 +47,69 @@ arv::world::EntityGoalRegistry make_base_goal_registry() {
   arv::world::EntityGoalRegistry registry;
   arv::base::register_base_entity_goals(registry);
   return registry;
+}
+
+arv::entity::VehicleDefinitionRegistry make_test_vehicle_registry() {
+  arv::entity::VehicleDefinition buggy;
+  buggy.name = "arvane:test_buggy";
+  buggy.kind = arv::entity::VehicleKind::Vehicle;
+  buggy.physics = arv::entity::VehiclePhysicsKind::GroundVehicle;
+  buggy.collision_size = {1.8F, 1.2F, 3.2F};
+  buggy.seats.push_back({"driver",
+                         "driver",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 0.8F, 0.0F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::ThirdPersonFollow});
+  buggy.seats.push_back({"passenger",
+                         "passenger",
+                         arv::entity::SeatRole::Passenger,
+                         {0.5F, 0.8F, 0.0F},
+                         {},
+                         false,
+                         arv::entity::CameraMode::ThirdPersonFollow});
+  buggy.ground = {
+      12.0F,
+      4.0F,
+      8.0F,
+      16.0F,
+      0.9F,
+      80.0F,
+      0.8F,
+      1.0F,
+      0.5F};
+  buggy.authority = {
+      14.0F,
+      12.0F,
+      20.0F,
+      120.0F,
+      20.0F,
+      0.6F,
+      true,
+      false,
+      0U};
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(buggy)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
+arv::EntityID create_test_rideable(
+    arv::world::WorldRuntime& world,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position = {0.0F, 1.0F, 0.0F}) {
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{1.8F, 1.2F, 3.2F}};
+  components.rideable = arv::entity::AuthoredRideableComponent{"arvane:test_buggy"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_buggy"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_name = "arvane:test_buggy";
+  info.position = position;
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  return world.create_entity(std::move(info));
 }
 
 } // namespace
@@ -104,6 +166,146 @@ TEST(WorldEntityTests, TransformUpdatesPreviousStateAndChunkRelevance) {
   EXPECT_EQ(world.entity_chunk(entity).value(), (arv::ChunkSectionCoord{{1, 0, -1}}));
 }
 
+TEST(WorldEntityTests, RideableSeatAssignmentEnforcesInvariants) {
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_test_vehicle_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  const arv::EntityID rideable = create_test_rideable(world, vehicles);
+  const arv::EntityID passenger = world.create_entity();
+  const arv::EntityID second_passenger = world.create_entity();
+  const arv::EntityID other_rideable = create_test_rideable(world, vehicles, {4.0F, 1.0F, 0.0F});
+
+  ASSERT_TRUE(world.mount_entity(rideable, passenger, std::string_view{"driver"}));
+  EXPECT_EQ(world.mounted_rideable(passenger), rideable);
+  EXPECT_EQ(world.mounted_seat(passenger), std::optional<std::string>{"driver"});
+
+  const arv::entity::RideableComponent* rideable_state = world.find_entity_rideable(rideable);
+  ASSERT_NE(rideable_state, nullptr);
+  EXPECT_EQ(rideable_state->controller, passenger);
+  ASSERT_EQ(rideable_state->seats.size(), 2U);
+  EXPECT_EQ(rideable_state->seats.front().occupant, passenger);
+  EXPECT_FALSE(world.mount_entity(rideable, second_passenger, std::string_view{"driver"}));
+  EXPECT_FALSE(world.mount_entity(other_rideable, passenger, std::string_view{"driver"}));
+
+  ASSERT_TRUE(world.dismount_entity(passenger));
+  EXPECT_FALSE(world.mounted_rideable(passenger).has_value());
+  rideable_state = world.find_entity_rideable(rideable);
+  ASSERT_NE(rideable_state, nullptr);
+  EXPECT_EQ(rideable_state->controller, (arv::EntityID{}));
+  EXPECT_EQ(rideable_state->seats.front().occupant, (arv::EntityID{}));
+}
+
+TEST(WorldEntityTests, AuthoredVehicleComponentsRequireResolvedDefinition) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+
+  arv::entity::EntityComponentSet components;
+  components.rideable = arv::entity::AuthoredRideableComponent{"arvane:missing"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:missing"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_name = "arvane:missing_vehicle";
+  info.authored_components = components;
+
+  const arv::EntityID entity = world.create_entity(std::move(info));
+
+  EXPECT_EQ(entity, (arv::EntityID{}));
+  EXPECT_EQ(world.entity_count(), 0U);
+}
+
+TEST(WorldEntityTests, RideableDespawnDismountsPassengersAndRecordsRideEndedEvent) {
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_test_vehicle_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  const arv::EntityID rideable = create_test_rideable(world, vehicles);
+
+  arv::world::EntityCreateInfo passenger_info;
+  passenger_info.type_name = "arvane:test_passenger";
+  passenger_info.position = {1.0F, 2.0F, 3.0F};
+  const arv::EntityID passenger = world.create_entity(std::move(passenger_info));
+  const std::optional<arv::EntityNetID> rideable_net =
+      world.network_id_for_entity(rideable);
+  const std::optional<arv::EntityNetID> passenger_net =
+      world.network_id_for_entity(passenger);
+  ASSERT_TRUE(rideable_net.has_value());
+  ASSERT_TRUE(passenger_net.has_value());
+
+  ASSERT_TRUE(world.mount_entity(rideable, passenger, std::string_view{"driver"}));
+  ASSERT_TRUE(world.destroy_entity(rideable));
+  world.flush_entity_despawns();
+
+  EXPECT_FALSE(world.entity_exists(rideable));
+  EXPECT_TRUE(world.entity_exists(passenger));
+  EXPECT_FALSE(world.mounted_rideable(passenger).has_value());
+  EXPECT_EQ(world.find_entity_attachment(passenger), nullptr);
+
+  std::vector<arv::world::RideEndedEvent> events = world.drain_ride_ended_events();
+  ASSERT_EQ(events.size(), 1U);
+  EXPECT_EQ(events.front().passenger, passenger);
+  EXPECT_EQ(events.front().rideable, rideable);
+  EXPECT_EQ(events.front().passenger_net_id, passenger_net);
+  EXPECT_EQ(events.front().rideable_net_id, rideable_net);
+}
+
+TEST(WorldEntityTests, PassengerTransformDerivesFromSeatTransform) {
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_test_vehicle_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  const arv::EntityID rideable = create_test_rideable(world, vehicles, {10.0F, 2.0F, -3.0F});
+  const arv::EntityID passenger = world.create_entity();
+
+  ASSERT_TRUE(world.mount_entity(rideable, passenger, std::string_view{"passenger"}));
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(passenger);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_EQ(transform->position, (arv::Vec3f{10.5F, 2.8F, -3.0F}));
+
+  ASSERT_TRUE(world.set_entity_transform(rideable, {20.0F, 3.0F, 1.0F}, arv::yaw_rotation(arv::PiRadians)));
+  ASSERT_TRUE(world.update_passenger_attachment_transform(passenger));
+  transform = world.find_entity_transform(passenger);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_NEAR(transform->position.x, 19.5F, 0.0001F);
+  EXPECT_NEAR(transform->position.y, 3.8F, 0.0001F);
+  EXPECT_NEAR(transform->position.z, 1.0F, 0.0001F);
+}
+
+TEST(WorldEntityTests, SafeDismountFindsValidSidePosition) {
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_test_vehicle_registry();
+  const arv::voxel::BlockRegistry blocks = arv::testsupport::make_test_block_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  for (arv::i32 z = -4; z <= 4; ++z) {
+    for (arv::i32 x = -4; x <= 4; ++x) {
+      const arv::BlockPos pos{{x, 0, z}};
+      world.ensure_chunk(arv::block_to_chunk(pos));
+      ASSERT_TRUE(world.set_block(pos, arv::voxel::BlockVariantID{2}));
+    }
+  }
+
+  const arv::EntityID rideable = create_test_rideable(world, vehicles, {0.0F, 1.0F, 0.0F});
+  const std::optional<arv::Vec3f> dismount =
+      world.find_safe_dismount_position(rideable, blocks);
+
+  ASSERT_TRUE(dismount.has_value());
+  EXPECT_GE(dismount->y, 1.0F);
+  EXPECT_LT(arv::distance(dismount.value(), (arv::Vec3f{0.0F, 1.0F, 0.0F})), 8.0F);
+}
+
+TEST(WorldEntityTests, SafeDismountFailsSafelyWhenBlocked) {
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_test_vehicle_registry();
+  const arv::voxel::BlockRegistry blocks = arv::testsupport::make_test_block_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  for (arv::i32 z = -5; z <= 5; ++z) {
+    for (arv::i32 y = 0; y <= 4; ++y) {
+      for (arv::i32 x = -5; x <= 5; ++x) {
+        const arv::BlockPos pos{{x, y, z}};
+        world.ensure_chunk(arv::block_to_chunk(pos));
+        ASSERT_TRUE(world.set_block(pos, arv::voxel::BlockVariantID{2}));
+      }
+    }
+  }
+
+  const arv::EntityID rideable = create_test_rideable(world, vehicles, {0.0F, 1.0F, 0.0F});
+  EXPECT_FALSE(world.find_safe_dismount_position(rideable, blocks).has_value());
+}
+
 TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {
   arv::entity::EntityDefinition definition;
   definition.name = "arvane:test_wanderer";
@@ -111,18 +313,16 @@ TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {
   definition.components.health = arv::entity::AuthoredHealthComponent{10.0F};
   definition.components.brain = arv::entity::AuthoredBrainComponent{};
   definition.components.brain->tick_interval = 1U;
-  definition.components.brain->goals.push_back({
-      .type = "arvane:wander",
-      .priority = 8,
-      .speed_multiplier = 0.5F,
-      .duration_ticks = 2U,
-      .cooldown_ticks = 2U,
-      .animation = "walking"});
-  definition.components.brain->goals.push_back({
-      .type = "arvane:idle",
-      .priority = 10,
-      .duration_ticks = 4U,
-      .animation = ""});
+  definition.components.brain->goals.push_back({.type = "arvane:wander",
+                                                .priority = 8,
+                                                .speed_multiplier = 0.5F,
+                                                .duration_ticks = 2U,
+                                                .cooldown_ticks = 2U,
+                                                .animation = "walking"});
+  definition.components.brain->goals.push_back({.type = "arvane:idle",
+                                                .priority = 10,
+                                                .duration_ticks = 4U,
+                                                .animation = ""});
   definition.components.component_ids = {
       std::string{arv::entity::MovementComponentID},
       std::string{arv::entity::HealthComponentID},
@@ -187,11 +387,10 @@ TEST(WorldEntityTests, HealthDamageAndInvulnerabilityAreCentralized) {
   target_info.authored_components = components;
   const arv::EntityID target = world.create_entity(std::move(target_info));
 
-  const arv::world::DamageResult first = world.apply_damage({
-      source,
-      target,
-      3.0F,
-      arv::world::DamageCause::EntityAttack});
+  const arv::world::DamageResult first = world.apply_damage({source,
+                                                             target,
+                                                             3.0F,
+                                                             arv::world::DamageCause::EntityAttack});
   EXPECT_TRUE(first.applied);
   EXPECT_FALSE(first.killed);
   EXPECT_FLOAT_EQ(first.previous_health, 8.0F);
@@ -202,20 +401,18 @@ TEST(WorldEntityTests, HealthDamageAndInvulnerabilityAreCentralized) {
   EXPECT_FLOAT_EQ(health->current, 5.0F);
   health->invulnerable = true;
 
-  const arv::world::DamageResult invulnerable = world.apply_damage({
-      source,
-      target,
-      3.0F,
-      arv::world::DamageCause::EntityAttack});
+  const arv::world::DamageResult invulnerable = world.apply_damage({source,
+                                                                    target,
+                                                                    3.0F,
+                                                                    arv::world::DamageCause::EntityAttack});
   EXPECT_FALSE(invulnerable.applied);
   EXPECT_FLOAT_EQ(invulnerable.new_health, 5.0F);
 
   health->invulnerable = false;
-  const arv::world::DamageResult lethal = world.apply_damage({
-      source,
-      target,
-      8.0F,
-      arv::world::DamageCause::EntityAttack});
+  const arv::world::DamageResult lethal = world.apply_damage({source,
+                                                              target,
+                                                              8.0F,
+                                                              arv::world::DamageCause::EntityAttack});
   EXPECT_TRUE(lethal.applied);
   EXPECT_TRUE(lethal.killed);
   EXPECT_FLOAT_EQ(lethal.new_health, 0.0F);
@@ -239,11 +436,10 @@ TEST(WorldEntityTests, PlayerLethalDamageRespawnsAtWorldSpawnWithFullHealth) {
   ASSERT_NE(health, nullptr);
   health->current = 2.0F;
 
-  const arv::world::DamageResult lethal = world.apply_damage({
-      source,
-      target.value(),
-      3.0F,
-      arv::world::DamageCause::EntityAttack});
+  const arv::world::DamageResult lethal = world.apply_damage({source,
+                                                              target.value(),
+                                                              3.0F,
+                                                              arv::world::DamageCause::EntityAttack});
 
   EXPECT_TRUE(lethal.applied);
   EXPECT_TRUE(lethal.killed);
@@ -272,11 +468,10 @@ TEST(WorldEntityTests, PlayerLethalDamageUsesCustomRespawnLocation) {
   ASSERT_NE(health, nullptr);
   health->current = 2.0F;
 
-  const arv::world::DamageResult lethal = world.apply_damage({
-      source,
-      target.value(),
-      3.0F,
-      arv::world::DamageCause::EntityAttack});
+  const arv::world::DamageResult lethal = world.apply_damage({source,
+                                                              target.value(),
+                                                              3.0F,
+                                                              arv::world::DamageCause::EntityAttack});
 
   EXPECT_TRUE(lethal.applied);
   EXPECT_TRUE(lethal.killed);

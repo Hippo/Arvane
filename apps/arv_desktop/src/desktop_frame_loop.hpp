@@ -8,6 +8,7 @@
 #include "desktop_session.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/base/ui.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/command/command.hpp"
 #include "arv/core/arena.hpp"
@@ -17,7 +18,6 @@
 #include "arv/player/player_constants.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/sched/job_system.hpp"
-#include "arv/base/ui.hpp"
 
 #include <chrono>
 #include <optional>
@@ -156,6 +156,10 @@ private:
   [[nodiscard]] std::optional<EntityNetID> targeted_attack_entity(
       const DesktopGameSession& session,
       const player::ItemRecord* held_item) const;
+  [[nodiscard]] std::optional<EntityNetID> targeted_rideable_entity(
+      const DesktopGameSession& session) const;
+  [[nodiscard]] bool send_local_ride_request_if_targeted(
+      DesktopGameSession& session) const;
   void send_local_entity_attack_if_targeted(
       DesktopGameSession& session,
       const player::ItemRecord* held_item) const;

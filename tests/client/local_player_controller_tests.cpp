@@ -56,6 +56,58 @@ TEST(LocalPlayerControllerTests, PlayerVelocityPacketAppliesKnockbackVelocity) {
       arv::protocol::PlayerMoveFlags::OnGround));
 }
 
+TEST(LocalPlayerControllerTests, MountedVehicleTransformMovesLocalAnchorToSeat) {
+  arv::client::LocalPlayerController controller;
+  controller.enter_world(
+      arv::WorldID{1},
+      arv::PlayerID{2},
+      arv::EntityNetID{3},
+      {0.0F, 0.0F, 0.0F});
+
+  arv::protocol::ClientboundRideStarted event;
+  event.passenger_id = arv::EntityNetID{3};
+  event.rideable_id = arv::EntityNetID{10};
+  event.seat_id = "driver";
+  event.controls_vehicle = true;
+  controller.apply_ride_started(event);
+
+  controller.apply_mounted_vehicle_transform(
+      arv::EntityNetID{10},
+      {10.0F, 2.0F, -3.0F},
+      arv::yaw_rotation(arv::PiRadians),
+      {1.0F, 0.75F, 0.0F},
+      {},
+      {4.0F, 0.0F, 0.0F});
+
+  EXPECT_NEAR(controller.player_position().x, 9.0F, 0.0001F);
+  EXPECT_NEAR(controller.player_position().y, 2.75F, 0.0001F);
+  EXPECT_NEAR(controller.player_position().z, -3.0F, 0.0001F);
+  EXPECT_EQ(controller.player_velocity(), (arv::Vec3f{4.0F, 0.0F, 0.0F}));
+}
+
+TEST(LocalPlayerControllerTests, RideableDespawnClearsMountedState) {
+  arv::client::LocalPlayerController controller;
+  controller.enter_world(
+      arv::WorldID{1},
+      arv::PlayerID{2},
+      arv::EntityNetID{3},
+      {0.0F, 0.0F, 0.0F});
+
+  arv::protocol::ClientboundRideStarted event;
+  event.passenger_id = arv::EntityNetID{3};
+  event.rideable_id = arv::EntityNetID{10};
+  event.seat_id = "driver";
+  event.controls_vehicle = true;
+  controller.apply_ride_started(event);
+  ASSERT_EQ(controller.mounted_vehicle_id(), std::optional<arv::EntityNetID>{arv::EntityNetID{10}});
+
+  controller.clear_mount_if_rideable_despawned(arv::EntityNetID{10});
+
+  EXPECT_FALSE(controller.mounted_vehicle_id().has_value());
+  EXPECT_TRUE(controller.mounted_seat_id().empty());
+  EXPECT_EQ(controller.player_velocity(), (arv::Vec3f{}));
+}
+
 TEST(LocalPlayerControllerTests, SendsRawSprintIntentForLocalMovementRules) {
   arv::client::LocalPlayerController controller;
 

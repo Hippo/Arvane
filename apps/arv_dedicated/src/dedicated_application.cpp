@@ -10,9 +10,9 @@
 #include "dedicated_tick_loop.hpp"
 #include "dedicated_worldgen_loader.hpp"
 
+#include "arv/asset/pack.hpp"
 #include "arv/base/base_commands.hpp"
 #include "arv/core/log.hpp"
-#include "arv/asset/pack.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
 #include "arv/persistence/save.hpp"
@@ -151,7 +151,8 @@ int DedicatedApplication::run(int argc, char** argv) {
   restore_loaded_world_into_server(
       server_runtime,
       loaded_world.loaded_save,
-      registries.entity_registry);
+      registries.entity_registry,
+      registries.vehicle_registry);
   log_dedicated_server_ready(config, loaded_world, server_runtime);
 
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::Running);

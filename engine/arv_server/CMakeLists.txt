@@ -10,6 +10,7 @@ set(ARV_SERVER_HEADERS
   include/arv/server/session_registry.hpp
   include/arv/server/skin_runtime.hpp
   include/arv/server/server_runtime.hpp
+  include/arv/server/vehicle_movement_validation.hpp
   include/arv/server/world_registry.hpp
 )
 
@@ -35,6 +36,7 @@ add_library(arv_server STATIC
   src/server_session_lifecycle.cpp
   src/session_registry.cpp
   src/skin_runtime.cpp
+  src/vehicle_movement_validation.cpp
   src/world_registry.cpp
 )
 target_include_directories(arv_server PUBLIC include)

@@ -202,6 +202,93 @@ arv::world::SpawnEntry make_spawn_entry(
   return entry;
 }
 
+arv::entity::EntityRegistry make_spawn_vehicle_entity_registry() {
+  arv::entity::EntityDefinition horse;
+  horse.name = "test:horse";
+  horse.category = "passive";
+  horse.spawnable = true;
+  horse.persistent_by_default = true;
+  horse.components.collision =
+      arv::entity::AuthoredCollisionComponent{{1.4F, 1.6F, 2.0F}};
+  horse.components.rideable =
+      arv::entity::AuthoredRideableComponent{"test:horse"};
+  horse.components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"test:horse"};
+
+  auto result = arv::entity::EntityRegistry::build({std::move(horse)});
+  if (!result) {
+    throw std::runtime_error(result.error().message);
+  }
+  return std::move(result.value());
+}
+
+arv::entity::VehicleDefinitionRegistry make_spawn_vehicle_registry() {
+  arv::entity::VehicleDefinition horse;
+  horse.name = "test:horse";
+  horse.kind = arv::entity::VehicleKind::Mount;
+  horse.physics = arv::entity::VehiclePhysicsKind::LivingMount;
+  horse.collision_size = {1.4F, 1.6F, 2.0F};
+  horse.seats.push_back({"saddle",
+                         "saddle",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 1.1F, 0.0F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::ThirdPersonFollow});
+  horse.living_mount = {
+      4.0F,
+      7.0F,
+      12.0F,
+      arv::degrees_to_radians(140.0F),
+      5.0F,
+      1.0F,
+      0.6F,
+      0.8F};
+  horse.authority = {
+      8.0F,
+      16.0F,
+      22.0F,
+      arv::degrees_to_radians(180.0F),
+      8.0F,
+      0.6F,
+      true,
+      false,
+      0U};
+
+  auto result = arv::entity::VehicleDefinitionRegistry::build({std::move(horse)});
+  if (!result) {
+    throw std::runtime_error(result.error().message);
+  }
+  return std::move(result.value());
+}
+
+arv::world::SpawnEntry make_spawn_vehicle_entry(
+    const arv::entity::EntityRegistry& registry) {
+  const std::optional<arv::EntityTypeID> type_id = registry.find_type("test:horse");
+  if (!type_id.has_value()) {
+    throw std::runtime_error("test horse entity is missing");
+  }
+  const arv::entity::EntityTypeRecord* type = registry.type(type_id.value());
+  if (type == nullptr) {
+    throw std::runtime_error("test horse type record is missing");
+  }
+  arv::world::SpawnEntry entry;
+  entry.entity_type = type_id.value();
+  entry.entity_type_name = type->name;
+  entry.category = arv::world::SpawnCategory::Passive;
+  entry.weight = 10U;
+  entry.min_group = 1U;
+  entry.max_group = 1U;
+  entry.conditions.requires_surface = true;
+  entry.conditions.min_distance_from_player_blocks = 0U;
+  entry.conditions.max_distance_from_player_blocks = 96U;
+  entry.conditions.block_tags_below.push_back(std::string{GrassSpawnTag});
+  entry.persistent_by_default = type->persistent_by_default;
+  entry.replicated_by_default = type->replicated_by_default;
+  entry.authored_components = type->components;
+  return entry;
+}
+
 void set_body_light(
     arv::world::WorldRuntime& world,
     arv::BlockPos pos,
@@ -855,6 +942,44 @@ TEST(NaturalSpawnJobTests, ApplyRevalidatesBeforeCommittingSpawnIntents) {
       system.apply_job_result(world, blocks, entities, valid, 8U);
   EXPECT_EQ(valid_stats.spawned, 1U);
   EXPECT_EQ(system.counters().spawn_intents_committed, 1U);
+}
+
+TEST(NaturalSpawnJobTests, ApplyVehicleSpawnIntentUsesVehicleDefinitions) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_vehicle_entity_registry();
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_spawn_vehicle_registry();
+  arv::world::WorldRuntime world = make_spawn_world(blocks);
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = {0.0F, 1.0F, 0.0F};
+  const arv::world::SpawnEntry entry = make_spawn_vehicle_entry(entities);
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.min_distance_from_player_blocks = 0U;
+  config.max_distance_from_player_blocks = 32U;
+  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)].local_max = 4U;
+  system.configure(config);
+
+  arv::world::NaturalSpawnJobResult valid;
+  valid.world_id = world.id();
+  valid.source_tick = 8U;
+  valid.spawn_intents.push_back({entry, {{{2, 1, 2}}}});
+  const arv::world::NaturalSpawnApplyStats stats =
+      system.apply_job_result(world, blocks, entities, valid, 8U, false, &vehicles);
+
+  ASSERT_EQ(stats.spawned, 1U);
+  arv::EntityID spawned{};
+  for (const arv::EntityID id : world.entity_ids()) {
+    const arv::entity::EntityType* type = world.find_entity_type(id);
+    if (type != nullptr && type->type_name == "test:horse") {
+      spawned = id;
+      break;
+    }
+  }
+  ASSERT_NE(spawned, (arv::EntityID{}));
+  EXPECT_NE(world.find_entity_rideable(spawned), nullptr);
+  EXPECT_NE(world.find_entity_vehicle_physics(spawned), nullptr);
 }
 
 TEST(NaturalSpawnServerTests, RunsNaturalSpawningAsAsyncWorldJob) {

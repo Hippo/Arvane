@@ -1,5 +1,6 @@
 #include "arv/client/client_runtime.hpp"
 
+#include "arv/entity/components.hpp"
 #include "arv/text/language.hpp"
 
 #include "client_frame_builder.hpp"
@@ -33,6 +34,7 @@ struct ClientRuntime::Impl {
         skins,
         particles,
         language,
+        vehicle_registry,
         collision_query,
         tick_seconds};
   }
@@ -62,6 +64,8 @@ struct ClientRuntime::Impl {
           tick_index,
           player_controller,
           sender,
+          entities,
+          vehicle_registry,
           collision_query,
           tick_seconds);
     }
@@ -91,6 +95,7 @@ struct ClientRuntime::Impl {
   LocalPlayerIdentity identity{};
   detail::ClientNetworkRouter network{};
   const arv::text::LanguageCatalog* language{};
+  const entity::VehicleDefinitionRegistry* vehicle_registry{};
   detail::ClientInputRuntime input{};
   LocalPlayerController player_controller{};
   ClientChunkInterest chunk_interest{};
@@ -283,6 +288,11 @@ TickRate ClientRuntime::server_tick_rate() const noexcept {
   return impl_->player_controller.server_tick_rate();
 }
 
+void ClientRuntime::configure_vehicles(
+    const entity::VehicleDefinitionRegistry* registry) noexcept {
+  impl_->vehicle_registry = registry;
+}
+
 bool ClientRuntime::inventory_open() const noexcept {
   return impl_->ui.inventory_open();
 }
@@ -421,6 +431,41 @@ net::NetworkResult ClientRuntime::request_attack_entity(EntityNetID target_entit
     impl_->attack_feedback.push_back({target_entity, mirror->position, sequence});
   }
   return impl_->sender.send_attack_entity({target_entity, sequence});
+}
+
+net::NetworkResult ClientRuntime::request_ride_entity(
+    EntityNetID rideable_id,
+    std::string seat_id) {
+  if (impl_->connection.state() != net::ConnectionState::InGame) {
+    return net::NetworkResult::failure(net::NetworkError{"client is not in game"});
+  }
+  return impl_->sender.send_ride_entity_request({rideable_id, std::move(seat_id)});
+}
+
+net::NetworkResult ClientRuntime::request_dismount() {
+  if (impl_->connection.state() != net::ConnectionState::InGame) {
+    return net::NetworkResult::failure(net::NetworkError{"client is not in game"});
+  }
+  const std::optional<EntityNetID> vehicle_id =
+      impl_->player_controller.mounted_vehicle_id();
+  return impl_->sender.send_dismount_request(
+      {vehicle_id.value_or(EntityNetID{})});
+}
+
+net::NetworkResult ClientRuntime::send_vehicle_action(
+    protocol::ServerboundVehicleAction action) {
+  if (impl_->connection.state() != net::ConnectionState::InGame) {
+    return net::NetworkResult::failure(net::NetworkError{"client is not in game"});
+  }
+  return impl_->sender.send_vehicle_action(action);
+}
+
+net::NetworkResult ClientRuntime::send_vehicle_move(
+    const protocol::ServerboundVehicleMove& move) {
+  if (impl_->connection.state() != net::ConnectionState::InGame) {
+    return net::NetworkResult::failure(net::NetworkError{"client is not in game"});
+  }
+  return impl_->sender.send_vehicle_move(move);
 }
 
 std::vector<ClientAttackFeedback> ClientRuntime::drain_attack_feedback() {

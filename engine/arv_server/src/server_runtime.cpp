@@ -1,12 +1,12 @@
 #include "server_runtime_internal.hpp"
 
 #include "arv/command/server_command_services.hpp"
+#include "arv/core/log.hpp"
 #include "arv/crypto/random.hpp"
 #include "arv/io/files.hpp"
-#include "arv/text/language.hpp"
-#include "arv/core/log.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/skin_runtime.hpp"
+#include "arv/text/language.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -379,6 +379,10 @@ const entity::EntityRegistry* ServerRuntime::entity_registry() const noexcept {
   return impl_->entity_registry();
 }
 
+const entity::VehicleDefinitionRegistry* ServerRuntime::vehicle_registry() const noexcept {
+  return impl_->vehicle_registry();
+}
+
 const player::GameModeRegistry& ServerRuntime::game_modes() const noexcept {
   return impl_->game_modes();
 }
@@ -494,6 +498,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
   entity_registry_ = start_info.entity_registry;
+  vehicle_registry_ = start_info.vehicle_registry;
   entity_goals_ = start_info.entity_goals;
   game_modes_ = start_info.game_modes == nullptr ? player::GameModeRegistry{}
                                                  : *start_info.game_modes;
@@ -509,6 +514,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   language_ = start_info.language;
   plugins_ = start_info.plugins;
   command_registry_ = command::CommandRegistry{};
+  accepted_vehicle_movement_.clear();
   if (start_info.register_commands) {
     start_info.register_commands(command_registry_);
   }
@@ -620,6 +626,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
         block_registry_,
         item_registry_,
         entity_registry_,
+        vehicle_registry_,
         &game_modes_,
         &permission_groups_,
         world_jobs_.job_system(),
@@ -680,6 +687,7 @@ void ServerRuntimeImpl::tick() {
         block_registry_,
         item_registry_,
         entity_registry_,
+        vehicle_registry_,
         &game_modes_,
         &permission_groups_,
         world_jobs_.job_system(),
@@ -715,6 +723,7 @@ void ServerRuntimeImpl::tick() {
         natural_spawns_,
         block_registry_,
         entity_registry_,
+        vehicle_registry_,
         tick_index_,
         false);
     world_jobs_.schedule_natural_spawn_jobs(
@@ -725,6 +734,7 @@ void ServerRuntimeImpl::tick() {
   (void)default_world_.tick(*block_registry_, fluid_definition_, entity_goals_);
   process_pending_entity_attacks();
   default_world_.flush_entity_despawns();
+  broadcast_pending_ride_ended_events();
   world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
   world_jobs_.schedule_lighting_jobs(default_world_, block_registry_);
   tick_chunk_streaming();
@@ -880,6 +890,10 @@ world::WorldRuntime& ServerRuntimeImpl::voxel_world() noexcept {
 
 const entity::EntityRegistry* ServerRuntimeImpl::entity_registry() const noexcept {
   return entity_registry_;
+}
+
+const entity::VehicleDefinitionRegistry* ServerRuntimeImpl::vehicle_registry() const noexcept {
+  return vehicle_registry_;
 }
 
 const player::GameModeRegistry& ServerRuntimeImpl::game_modes() const noexcept {
@@ -1123,15 +1137,15 @@ command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
   }
   if (!sender.player_id.has_value()) {
     return command::CommandPermissionResult::deny(arv::text::text_or_fallback(language_,
-        "command.dispatcher.permission_missing_player_context",
-        "Permission denied: missing player context."));
+                                                                              "command.dispatcher.permission_missing_player_context",
+                                                                              "Permission denied: missing player context."));
   }
 
   player::PlayerState* player_state = default_world_.find_player(sender.player_id.value());
   if (player_state == nullptr) {
     return command::CommandPermissionResult::deny(arv::text::text_or_fallback(language_,
-        "command.dispatcher.permission_player_not_online",
-        "Permission denied: player is not online."));
+                                                                              "command.dispatcher.permission_player_not_online",
+                                                                              "Permission denied: player is not online."));
   }
 
   refresh_player_permissions(*player_state);

@@ -33,4 +33,4 @@ add_library(arv_client STATIC
 )
 target_include_directories(arv_client PUBLIC include)
 target_link_libraries(arv_client PUBLIC arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
-target_link_libraries(arv_client PRIVATE arv_asset arv_command arv_io arv_text)
+target_link_libraries(arv_client PRIVATE arv_asset arv_command arv_entity arv_io arv_text)

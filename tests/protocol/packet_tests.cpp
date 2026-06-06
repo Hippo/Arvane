@@ -11,6 +11,7 @@
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
+#include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
 
 #include <gtest/gtest.h>
@@ -77,6 +78,12 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
       registry.lookup(arv::protocol::MessageType::ClientboundPlayerPermissions);
   const auto movement_tuning =
       registry.lookup(arv::protocol::MessageType::ClientboundPlayerMovementTuning);
+  const auto vehicle_move =
+      registry.lookup(arv::protocol::MessageType::ServerboundVehicleMove);
+  const auto vehicle_state =
+      registry.lookup(arv::protocol::MessageType::ClientboundVehicleState);
+  const auto vehicle_correction =
+      registry.lookup(arv::protocol::MessageType::ClientboundVehicleCorrection);
   const auto break_progress =
       registry.lookup(arv::protocol::MessageType::ClientboundPlayerBlockBreakProgress);
   const auto auth_challenge = registry.lookup(arv::protocol::MessageType::ClientboundAuthChallenge);
@@ -97,6 +104,18 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
       registry.lookup(arv::protocol::MessageType::ClientboundDroppedItemSnapshot);
   const auto attack_entity =
       registry.lookup(arv::protocol::MessageType::ServerboundAttackEntity);
+  const auto ride_request =
+      registry.lookup(arv::protocol::MessageType::ServerboundRideEntityRequest);
+  const auto dismount_request =
+      registry.lookup(arv::protocol::MessageType::ServerboundDismountRequest);
+  const auto vehicle_action =
+      registry.lookup(arv::protocol::MessageType::ServerboundVehicleAction);
+  const auto ride_started =
+      registry.lookup(arv::protocol::MessageType::ClientboundRideStarted);
+  const auto ride_ended =
+      registry.lookup(arv::protocol::MessageType::ClientboundRideEnded);
+  const auto passengers_set =
+      registry.lookup(arv::protocol::MessageType::ClientboundEntityPassengersSet);
   const auto inventory_action =
       registry.lookup(arv::protocol::MessageType::ServerboundInventoryActionRequest);
   const auto inventory_update = registry.lookup(arv::protocol::MessageType::ClientboundInventoryUpdate);
@@ -115,6 +134,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(movement_hz.has_value());
   ASSERT_TRUE(permissions.has_value());
   ASSERT_TRUE(movement_tuning.has_value());
+  ASSERT_TRUE(vehicle_move.has_value());
+  ASSERT_TRUE(vehicle_state.has_value());
+  ASSERT_TRUE(vehicle_correction.has_value());
   ASSERT_TRUE(break_progress.has_value());
   ASSERT_TRUE(auth_challenge.has_value());
   ASSERT_TRUE(auth_response.has_value());
@@ -132,6 +154,12 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(entity_snapshot.has_value());
   ASSERT_TRUE(dropped_item_snapshot.has_value());
   ASSERT_TRUE(attack_entity.has_value());
+  ASSERT_TRUE(ride_request.has_value());
+  ASSERT_TRUE(dismount_request.has_value());
+  ASSERT_TRUE(vehicle_action.has_value());
+  ASSERT_TRUE(ride_started.has_value());
+  ASSERT_TRUE(ride_ended.has_value());
+  ASSERT_TRUE(passengers_set.has_value());
   ASSERT_TRUE(inventory_action.has_value());
   ASSERT_TRUE(inventory_update.has_value());
   ASSERT_TRUE(chat_send.has_value());
@@ -149,6 +177,15 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(permissions->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(movement_tuning->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(movement_tuning->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(vehicle_move->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(vehicle_move->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  EXPECT_EQ(vehicle_move->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(vehicle_state->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(vehicle_state->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  EXPECT_EQ(vehicle_state->lane, arv::protocol::NetworkLane::Movement);
+  EXPECT_EQ(vehicle_correction->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(vehicle_correction->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(vehicle_correction->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(break_progress->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(auth_challenge->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(auth_response->direction, arv::protocol::MessageDirection::ClientToServer);
@@ -172,6 +209,14 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(entity_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(dropped_item_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(attack_entity->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(ride_request->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(ride_request->name, "ServerboundRideEntityRequest");
+  EXPECT_EQ(dismount_request->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(vehicle_action->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(ride_started->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(ride_ended->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(passengers_set->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(passengers_set->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(inventory_action->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_update->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(chat_send->direction, arv::protocol::MessageDirection::ClientToServer);
@@ -198,6 +243,12 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(entity_snapshot->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(dropped_item_snapshot->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(attack_entity->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(ride_request->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(dismount_request->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(vehicle_action->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(ride_started->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(ride_ended->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(passengers_set->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_action->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(chat_send->lane, arv::protocol::NetworkLane::Gameplay);
@@ -206,7 +257,144 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 53U);
+  EXPECT_EQ(registry.size(), 62U);
+}
+
+TEST(ProtocolTests, VehiclePacketsRoundTripThroughSerialization) {
+  arv::protocol::ServerboundVehicleMove move;
+  move.vehicle_id = arv::EntityNetID{42};
+  move.sequence = 7;
+  move.client_tick = 900;
+  move.dt_seconds = 0.05F;
+  move.position = {1.0F, 2.0F, 3.0F};
+  move.velocity = {4.0F, 0.0F, -2.0F};
+  move.rotation = {0.0F, 0.0F, 0.38268343F, 0.9238795F};
+  move.angular_velocity = {0.0F, 1.25F, 0.0F};
+  move.throttle = 0.75F;
+  move.steer = -0.25F;
+  move.flags = arv::protocol::VehicleMoveFlags::OnGround |
+               arv::protocol::VehicleMoveFlags::Sprint;
+
+  const auto decoded_move = arv::protocol::deserialize_serverbound_vehicle_move(
+      arv::protocol::serialize_serverbound_vehicle_move(move));
+  ASSERT_TRUE(decoded_move);
+  EXPECT_EQ(decoded_move.value().vehicle_id, move.vehicle_id);
+  EXPECT_EQ(decoded_move.value().sequence, move.sequence);
+  EXPECT_EQ(decoded_move.value().client_tick, move.client_tick);
+  EXPECT_FLOAT_EQ(decoded_move.value().dt_seconds, move.dt_seconds);
+  EXPECT_FLOAT_EQ(decoded_move.value().position.x, move.position.x);
+  EXPECT_FLOAT_EQ(decoded_move.value().velocity.z, move.velocity.z);
+  EXPECT_FLOAT_EQ(decoded_move.value().rotation.w, move.rotation.w);
+  EXPECT_FLOAT_EQ(decoded_move.value().angular_velocity.y, move.angular_velocity.y);
+  EXPECT_FLOAT_EQ(decoded_move.value().throttle, move.throttle);
+  EXPECT_FLOAT_EQ(decoded_move.value().steer, move.steer);
+  EXPECT_TRUE(arv::protocol::has_vehicle_move_flag(
+      decoded_move.value().flags,
+      arv::protocol::VehicleMoveFlags::OnGround));
+
+  const arv::protocol::ClientboundVehicleState state{
+      arv::WorldID{1},
+      arv::EntityNetID{42},
+      11,
+      7,
+      {1.5F, 2.0F, 3.5F},
+      {3.0F, 0.0F, -1.0F},
+      {0.0F, 0.0F, 0.0F, 1.0F},
+      {0.0F, 0.5F, 0.0F},
+      arv::protocol::VehicleMoveFlags::InWater};
+  const auto decoded_state = arv::protocol::deserialize_clientbound_vehicle_state(
+      arv::protocol::serialize_clientbound_vehicle_state(state));
+  ASSERT_TRUE(decoded_state);
+  EXPECT_EQ(decoded_state.value().world_id, state.world_id);
+  EXPECT_EQ(decoded_state.value().vehicle_id, state.vehicle_id);
+  EXPECT_EQ(decoded_state.value().accepted_sequence, state.accepted_sequence);
+  EXPECT_FLOAT_EQ(decoded_state.value().position.z, state.position.z);
+  EXPECT_TRUE(arv::protocol::has_vehicle_move_flag(
+      decoded_state.value().flags,
+      arv::protocol::VehicleMoveFlags::InWater));
+
+  const arv::protocol::ClientboundVehicleCorrection correction{
+      arv::EntityNetID{42},
+      8,
+      {1.0F, 2.0F, 3.0F},
+      {},
+      {0.0F, 0.0F, 0.0F, 1.0F},
+      {},
+      arv::protocol::VehicleCorrectionReason::TooFast};
+  const auto decoded_correction =
+      arv::protocol::deserialize_clientbound_vehicle_correction(
+          arv::protocol::serialize_clientbound_vehicle_correction(correction));
+  ASSERT_TRUE(decoded_correction);
+  EXPECT_EQ(decoded_correction.value().vehicle_id, correction.vehicle_id);
+  EXPECT_EQ(decoded_correction.value().rejected_sequence, correction.rejected_sequence);
+  EXPECT_EQ(decoded_correction.value().reason, correction.reason);
+
+  const arv::protocol::ServerboundRideEntityRequest request{
+      arv::EntityNetID{42},
+      "driver"};
+  const auto decoded_request =
+      arv::protocol::deserialize_serverbound_ride_entity_request(
+          arv::protocol::serialize_serverbound_ride_entity_request(request));
+  ASSERT_TRUE(decoded_request);
+  EXPECT_EQ(decoded_request.value().rideable_id, request.rideable_id);
+  EXPECT_EQ(decoded_request.value().seat_id, request.seat_id);
+
+  const arv::protocol::ServerboundDismountRequest dismount{arv::EntityNetID{42}};
+  const auto decoded_dismount =
+      arv::protocol::deserialize_serverbound_dismount_request(
+          arv::protocol::serialize_serverbound_dismount_request(dismount));
+  ASSERT_TRUE(decoded_dismount);
+  EXPECT_EQ(decoded_dismount.value().rideable_id, dismount.rideable_id);
+
+  const arv::protocol::ServerboundVehicleAction action{
+      arv::EntityNetID{42},
+      arv::protocol::VehicleAction::Brake,
+      true};
+  const auto decoded_action =
+      arv::protocol::deserialize_serverbound_vehicle_action(
+          arv::protocol::serialize_serverbound_vehicle_action(action));
+  ASSERT_TRUE(decoded_action);
+  EXPECT_EQ(decoded_action.value().vehicle_id, action.vehicle_id);
+  EXPECT_EQ(decoded_action.value().action, action.action);
+  EXPECT_EQ(decoded_action.value().pressed, action.pressed);
+
+  const arv::protocol::ClientboundRideStarted started{
+      arv::EntityNetID{3},
+      arv::EntityNetID{42},
+      "driver",
+      true};
+  const auto decoded_started = arv::protocol::deserialize_clientbound_ride_started(
+      arv::protocol::serialize_clientbound_ride_started(started));
+  ASSERT_TRUE(decoded_started);
+  EXPECT_EQ(decoded_started.value().passenger_id, started.passenger_id);
+  EXPECT_EQ(decoded_started.value().rideable_id, started.rideable_id);
+  EXPECT_EQ(decoded_started.value().seat_id, started.seat_id);
+  EXPECT_TRUE(decoded_started.value().controls_vehicle);
+
+  const arv::protocol::ClientboundRideEnded ended{
+      arv::EntityNetID{3},
+      arv::EntityNetID{42},
+      {5.0F, 6.0F, 7.0F}};
+  const auto decoded_ended = arv::protocol::deserialize_clientbound_ride_ended(
+      arv::protocol::serialize_clientbound_ride_ended(ended));
+  ASSERT_TRUE(decoded_ended);
+  EXPECT_EQ(decoded_ended.value().passenger_id, ended.passenger_id);
+  EXPECT_EQ(decoded_ended.value().rideable_id, ended.rideable_id);
+  EXPECT_FLOAT_EQ(decoded_ended.value().position.y, ended.position.y);
+
+  arv::protocol::ClientboundEntityPassengersSet passengers;
+  passengers.rideable_id = arv::EntityNetID{42};
+  passengers.passengers.push_back({arv::EntityNetID{3}, "driver", true});
+  passengers.passengers.push_back({arv::EntityNetID{4}, "rear", false});
+  const auto decoded_passengers =
+      arv::protocol::deserialize_clientbound_entity_passengers_set(
+          arv::protocol::serialize_clientbound_entity_passengers_set(passengers));
+  ASSERT_TRUE(decoded_passengers);
+  EXPECT_EQ(decoded_passengers.value().rideable_id, passengers.rideable_id);
+  ASSERT_EQ(decoded_passengers.value().passengers.size(), 2U);
+  EXPECT_EQ(decoded_passengers.value().passengers[0].seat_id, "driver");
+  EXPECT_TRUE(decoded_passengers.value().passengers[0].controls_vehicle);
+  EXPECT_EQ(decoded_passengers.value().passengers[1].passenger_id, arv::EntityNetID{4});
 }
 
 TEST(ProtocolTests, SessionControlPacketsRoundTripThroughSerialization) {

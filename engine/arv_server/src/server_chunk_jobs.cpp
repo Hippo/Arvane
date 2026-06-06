@@ -341,6 +341,7 @@ void ServerWorldJobRuntime::drain_natural_spawn_jobs(
     world::NaturalSpawnSystem& natural_spawns,
     const voxel::BlockRegistry* block_registry,
     const entity::EntityRegistry* entity_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_registry,
     TickIndex tick,
     bool drain_all) {
   ARV_PROFILE_ZONE("Natural spawning");
@@ -367,7 +368,8 @@ void ServerWorldJobRuntime::drain_natural_spawn_jobs(
         *entity_registry,
         result,
         tick,
-        true);
+        true,
+        vehicle_registry);
     pending_natural_spawn_jobs_.erase(
         pending_natural_spawn_jobs_.begin() + static_cast<isize>(index));
     ++drained;

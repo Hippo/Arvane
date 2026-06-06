@@ -90,6 +90,13 @@ persistence identity on the same world entity. The server should replicate and
 persist dropped items from this entity state rather than maintaining a separate
 server-only dropped-stack list.
 
+Rideable mounts and vehicles are ordinary entities with rideable, attachment,
+and vehicle-physics components. Their V1 model is documented in
+`docs/182_rideables_and_vehicles.md`.
+If an authored rideable or vehicle-physics component references a missing
+vehicle definition, entity creation fails instead of creating a partial
+non-rideable entity.
+
 ---
 
 ## Authored Entity Definitions
