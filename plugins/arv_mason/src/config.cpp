@@ -31,10 +31,11 @@ MasonMessages default_messages() {
   MasonMessages messages;
   messages.entries = {
       {"example-message", "{arv_mason_prefix} My message"},
-      {"help", "{arv_mason_prefix} /mason set, replace, copy, paste, undo, redo, confirm."},
-      {"aliases", "{arv_mason_prefix} Aliases: /mset /mreplace /mcopy /mpaste /mundo /mredo."},
+      {"help", "{arv_mason_prefix} /mason marker, set, replace, copy, paste, undo, redo, confirm."},
+      {"aliases", "{arv_mason_prefix} Aliases: /mm /mmarker /mset /mreplace /mcopy /mpaste /mundo /mredo."},
       {"status", "{arv_mason_prefix} Mason 0.1.0 ready. Limits: selection {selection_limit}, clipboard {clipboard_limit}."},
       {"unknown-subcommand", "{arv_mason_prefix} Unknown Mason subcommand. Try /mason help."},
+      {"usage-marker", "{arv_mason_prefix} Usage: /mason marker."},
       {"usage-set", "{arv_mason_prefix} Usage: /mason set <block_state>."},
       {"usage-replace", "{arv_mason_prefix} Usage: /mason replace <from> <to>."},
       {"usage-copy", "{arv_mason_prefix} Usage: /mason copy."},
@@ -52,6 +53,9 @@ MasonMessages default_messages() {
       {"permission-denied", "{arv_mason_prefix} Permission denied: {permission}."},
       {"world-edit-player-required", "{arv_mason_prefix} World edits require a player source."},
       {"permission-denied-modify", "{arv_mason_prefix} Permission denied: can_modify_world is required."},
+      {"marker-create-failed", "{arv_mason_prefix} Failed to create marker item data: {error}."},
+      {"marker-give-failed", "{arv_mason_prefix} Failed to give marker item: {error}."},
+      {"marker-given", "{arv_mason_prefix} Marker added to your inventory."},
       {"operation-limit-exceeded", "{arv_mason_prefix} Operation exceeds limit: {count} blocks. Limit: {limit}."},
       {"confirmation-required", "{arv_mason_prefix} Operation affects {count} blocks. Run /mason confirm to proceed."},
       {"set-complete", "Set complete"},

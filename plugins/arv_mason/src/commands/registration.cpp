@@ -38,6 +38,7 @@ arv::Result MasonPlugin::register_permissions() {
   };
   const Node nodes[] = {
       {ids::perm_use, "Use Mason commands."},
+      {ids::perm_marker, "Receive a Mason marker item."},
       {ids::perm_set, "Fill a Mason selection."},
       {ids::perm_replace, "Replace blocks in a Mason selection."},
       {ids::perm_copy, "Copy a Mason selection."},
@@ -81,6 +82,7 @@ arv::Result MasonPlugin::register_commands() {
     std::string_view usage;
   };
   const CommandRegistration commands[] = {
+      {ids::exec_marker, "mason.marker", ids::perm_marker, "Receive a Mason marker item.", "/mason marker"},
       {ids::exec_set, "mason.set", ids::perm_set, "Fill the current Mason selection.", "/mason set <block_state>"},
       {ids::exec_replace, "mason.replace", ids::perm_replace, "Replace blocks in the current Mason selection.", "/mason replace <from> <to>"},
       {ids::exec_copy, "mason.copy", ids::perm_copy, "Copy the current Mason selection.", "/mason copy"},
@@ -91,6 +93,9 @@ arv::Result MasonPlugin::register_commands() {
   for (const CommandRegistration& command : commands) {
     auto handler = [this, name = command.name](arv::CommandContext& ctx) -> arv::Result {
       const Args args = ctx.args();
+      if (name == "mason.marker") {
+        return handle_marker(ctx, args);
+      }
       if (name == "mason.set") {
         return handle_set(ctx, args);
       }
@@ -137,6 +142,9 @@ arv::Result MasonPlugin::handle_mason(arv::CommandContext& ctx) {
   Args rest{args.begin() + 1, args.end()};
   if (subcommand == "status") {
     return handle_status(ctx);
+  }
+  if (subcommand == "marker") {
+    return handle_marker(ctx, rest);
   }
   if (subcommand == "set") {
     return handle_set(ctx, rest);

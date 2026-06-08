@@ -8,6 +8,7 @@ set(ARV_MASON_SOURCES
   src/commands/command_utils.cpp
   src/commands/registration.cpp
   src/commands/player_state.cpp
+  src/commands/marker_commands.cpp
   src/commands/edit_commands.cpp
   src/commands/clipboard_commands.cpp
   src/commands/history_commands.cpp

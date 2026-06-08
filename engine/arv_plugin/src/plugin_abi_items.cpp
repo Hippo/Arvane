@@ -336,6 +336,60 @@ ArvResult api_clear_stack_namespace_data(
   return ok(ctx);
 }
 
+ArvResult api_give_stack(
+    void* context,
+    ArvPlayerID player,
+    ArvStringView item_name,
+    uint16_t count,
+    ArvStringView name_space,
+    ArvDataDocumentHandle document_handle) {
+  PluginCallContext* ctx = call_context(context);
+  std::string namespace_text;
+  if (ArvResult valid = validate_namespace_write(
+          ctx,
+          name_space,
+          "items.give_stack",
+          namespace_text);
+      valid.code != ARV_RESULT_OK) {
+    return valid;
+  }
+  if (count == 0U) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "item stack count must be greater than zero");
+  }
+  if (ctx->impl->runtime.item_registry == nullptr) {
+    return make_result(ctx, ARV_RESULT_UNSUPPORTED, "item registry is unavailable");
+  }
+  player::PlayerState* player_state = player_from_id(ctx, player);
+  if (player_state == nullptr) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "player not found");
+  }
+  const io::DataDocument* document = document_from_handle(ctx, document_handle);
+  if (document == nullptr) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "item data document is invalid");
+  }
+  const std::string item_name_text = abi_string(item_name);
+  const std::optional<player::ItemID> item_id =
+      ctx->impl->runtime.item_registry->find_item(item_name_text);
+  if (!item_id.has_value()) {
+    return make_result(ctx, ARV_RESULT_NOT_FOUND, "item not found: " + item_name_text);
+  }
+
+  player::ItemStack stack{item_id.value(), count};
+  stack.data = io::DataDocument{1U, io::DataValue::object()};
+  stack.data->root.set(namespace_text, document->root);
+  player::normalize_item_stack_data(stack);
+  if (!stack_data_within_limit(stack.data)) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "item stack data exceeds size limit");
+  }
+
+  const player::InventoryInsertResult result =
+      player_state->inventory.insert_stack(std::move(stack), *ctx->impl->runtime.item_registry);
+  if (!result.complete()) {
+    return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "player inventory has no room for item stack");
+  }
+  return ok(ctx);
+}
+
 } // namespace
 
 void fill_items_api(PluginAPIStorage& storage) {
@@ -345,6 +399,7 @@ void fill_items_api(PluginAPIStorage& storage) {
       &api_load_stack_namespace_data,
       &api_save_stack_namespace_data,
       &api_clear_stack_namespace_data,
+      &api_give_stack,
   };
 }
 

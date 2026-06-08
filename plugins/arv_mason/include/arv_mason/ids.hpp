@@ -12,6 +12,7 @@ inline constexpr std::string_view messages_file = "messages.yaml";
 inline constexpr std::string_view variable_prefix = "arv_mason_prefix";
 
 inline constexpr std::string_view perm_use = "mason.command.use";
+inline constexpr std::string_view perm_marker = "mason.command.marker";
 inline constexpr std::string_view perm_set = "mason.command.set";
 inline constexpr std::string_view perm_replace = "mason.command.replace";
 inline constexpr std::string_view perm_copy = "mason.command.copy";
@@ -22,6 +23,7 @@ inline constexpr std::string_view perm_limit_bypass = "mason.limit.bypass";
 inline constexpr std::string_view perm_region_bypass = "mason.region.bypass";
 
 inline constexpr std::string_view exec_mason = "arv_mason:command/mason";
+inline constexpr std::string_view exec_marker = "arv_mason:command/marker";
 inline constexpr std::string_view exec_set = "arv_mason:command/set";
 inline constexpr std::string_view exec_replace = "arv_mason:command/replace";
 inline constexpr std::string_view exec_copy = "arv_mason:command/copy";

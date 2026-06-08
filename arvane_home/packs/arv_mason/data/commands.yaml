@@ -1,6 +1,12 @@
 schema_version: 1
 
 aliases:
+  - alias: mmarker
+    command: mason.marker
+    visible_in_help: true
+  - alias: mm
+    command: mason.marker
+    visible_in_help: true
   - alias: mset
     command: mason.set
     visible_in_help: true

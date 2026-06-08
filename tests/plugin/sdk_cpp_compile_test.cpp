@@ -8,8 +8,8 @@
 #include <arv/entities.hpp>
 #include <arv/events.hpp>
 #include <arv/gamemode.hpp>
-#include <arv/items.hpp>
 #include <arv/io/codec.hpp>
+#include <arv/items.hpp>
 #include <arv/logger.hpp>
 #include <arv/metrics.hpp>
 #include <arv/network.hpp>
@@ -141,6 +141,8 @@ int arv_plugin_sdk_cpp_compile_test() {
 
   arv::Result result;
   auto created_document = data.create_document();
+  const arv::Result give_item_result =
+      plugin.items().give(1, "test:item", 1, created_document.value);
   const arv::ChatMessageResult config_chat =
       arv::ChatMessage::from_config(plugin, created_document.value, "message");
   const auto chat_string = chat_message.to_string();
@@ -178,7 +180,7 @@ int arv_plugin_sdk_cpp_compile_test() {
                  !packet_result && !network.broadcast(packet) &&
                  !gamemodes.exists("survival") &&
                  !items.selected_hotbar(1).info() &&
-                 !selected_stack_info && !permissions.unsupported() &&
+                 !selected_stack_info && !give_item_result && !permissions.unsupported() &&
                  !players.current_selection(1) &&
                  !persistent_scope.load("test:data") &&
                  !persistent_scope.save("test:data", sample) &&

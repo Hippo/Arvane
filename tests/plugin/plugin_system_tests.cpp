@@ -162,8 +162,10 @@ TEST(PluginSdkTests, FixturePluginsLinkOnlySdkAndDoNotDependOnEngineSharedLibrar
     }
     const int status = pclose(pipe);
     EXPECT_EQ(status, 0) << plugin_path;
-    EXPECT_EQ(output.find("libarv_"), std::string::npos) << plugin_path << '\n' << output;
-    EXPECT_EQ(output.find("libarvane"), std::string::npos) << plugin_path << '\n' << output;
+    EXPECT_EQ(output.find("libarv_"), std::string::npos) << plugin_path << '\n'
+                                                         << output;
+    EXPECT_EQ(output.find("libarvane"), std::string::npos) << plugin_path << '\n'
+                                                           << output;
   }
 #else
   GTEST_SKIP() << "Dependency inspection is platform-specific.";
@@ -266,6 +268,12 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
       harness.packs / "arv_mason" / "data" / "commands.yaml",
       "schema_version: 1\n"
       "aliases:\n"
+      "  - alias: mmarker\n"
+      "    command: mason.marker\n"
+      "    visible_in_help: true\n"
+      "  - alias: mm\n"
+      "    command: mason.marker\n"
+      "    visible_in_help: true\n"
       "  - alias: mcopy\n"
       "    command: mason.copy\n"
       "    visible_in_help: true\n");
@@ -275,6 +283,7 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   auto loaded = manager.load_plugins(harness.load_options({true, {"arv_mason"}}));
   ASSERT_TRUE(loaded) << loaded.error().describe();
   EXPECT_TRUE(manager.has_command_executor("arv_mason:command/mason"));
+  EXPECT_TRUE(manager.has_command_executor("arv_mason:command/marker"));
   EXPECT_TRUE(manager.has_command_executor("arv_mason:command/copy"));
   EXPECT_TRUE(std::filesystem::exists(
       harness.temp.path / "config" / "plugins" / "arv_mason" / "config.yaml"));
@@ -284,7 +293,11 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   arv::command::CommandRegistry registry;
   manager.register_commands(registry);
   EXPECT_NE(registry.find("mason"), nullptr);
+  EXPECT_NE(registry.find("mason.marker"), nullptr);
   EXPECT_NE(registry.find("mason.copy"), nullptr);
+  auto marker_alias = registry.resolve("mm");
+  ASSERT_TRUE(marker_alias.has_value());
+  EXPECT_EQ(marker_alias->canonical_name, "mason.marker");
   auto copy_alias = registry.resolve("mcopy");
   ASSERT_TRUE(copy_alias.has_value());
   EXPECT_EQ(copy_alias->canonical_name, "mason.copy");
@@ -304,6 +317,56 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
   ASSERT_FALSE(result.messages.empty());
   EXPECT_NE(result.messages.front().text.find("Mason 0.1.0 ready"), std::string::npos);
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{9});
+  player.permission_overrides.custom_overrides["mason.command.marker"] =
+      arv::player::TriState::Allow;
+  manager.attach_runtime({
+      .default_world = &world,
+      .item_registry = &item_registry,
+  });
+  arv::command::CommandSender player_sender;
+  player_sender.kind = arv::command::CommandSourceKind::Player;
+  player_sender.player_id = player.player_id;
+  player_sender.world_id = world.id();
+  auto allow_command =
+      [](const arv::command::CommandSender&, const arv::command::Command&) {
+        return arv::command::CommandPermissionResult::allow();
+      };
+  arv::command::CommandServices player_services{
+      nullptr,
+      arv::command::CommandPermissionCheckFn{allow_command},
+      nullptr,
+  };
+  const arv::command::CommandResult marker_result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      player_sender,
+      player_services,
+      "/mm");
+  ASSERT_EQ(marker_result.status, arv::command::CommandStatus::Success);
+  const std::optional<arv::player::ItemID> sword =
+      item_registry.find_item("arvane:wood_sword");
+  ASSERT_TRUE(sword.has_value());
+  bool marker_found = false;
+  for (const std::optional<arv::player::ItemStack>& slot : player.inventory.slots()) {
+    if (!slot.has_value() || slot->item != sword.value() || !slot->data.has_value()) {
+      continue;
+    }
+    const arv::io::DataValue* marker =
+        arv::io::find_path(*slot->data, "arv_mason.marker");
+    marker_found = marker != nullptr && marker->as_bool_or(false);
+    if (marker_found) {
+      break;
+    }
+  }
+  EXPECT_TRUE(marker_found);
+  manager.stop_runtime();
 }
 
 TEST(PluginLoadTests, ReportsMissingLibraryMissingSymbolAndFalseEntrypoint) {

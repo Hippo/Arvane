@@ -641,6 +641,7 @@ typedef struct ArvItemsAPI {
     ArvResult (*load_stack_namespace_data)(void* ctx, ArvItemStackLocation location, ArvStringView namespace_id, ArvDataDocumentHandle* out_document);
     ArvResult (*save_stack_namespace_data)(void* ctx, ArvItemStackLocation location, ArvStringView namespace_id, ArvDataDocumentHandle document);
     ArvResult (*clear_stack_namespace_data)(void* ctx, ArvItemStackLocation location, ArvStringView namespace_id);
+    ArvResult (*give_stack)(void* ctx, ArvPlayerID player, ArvStringView item_name, uint16_t count, ArvStringView namespace_id, ArvDataDocumentHandle namespace_document);
 } ArvItemsAPI;
 ```
 
@@ -648,6 +649,9 @@ Rules:
 
 * calls must occur on the sync simulation context
 * `stack_info` returns `present = false` for valid empty stack locations
+* `give_stack` resolves `item_name` through the runtime item registry, inserts
+  through the normal player inventory path, and stores the provided document
+  under the plugin-owned namespace on the new stack
 * load/save/clear calls require a present stack
 * plugins may read full stack data but may only write or clear namespaces owned by their plugin pack
 * stack data is bounded to 16 KiB per stack and uses the shared `DataDocument` model

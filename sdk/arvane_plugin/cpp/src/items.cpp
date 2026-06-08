@@ -144,4 +144,48 @@ ItemStackRef Items::cursor(ArvPlayerID player) const noexcept {
       {player, ARV_ITEM_STACK_CURSOR, 0U}};
 }
 
+Result Items::give(
+    ArvPlayerID player,
+    std::string_view item_name,
+    std::uint16_t count,
+    const DataDocument& namespace_document) const {
+  const std::string_view name_space = default_namespace();
+  if (name_space.empty()) {
+    return Result{ResultCode::InvalidArgument, "plugin has no owned namespace"};
+  }
+  return give(player, item_name, count, name_space, namespace_document);
+}
+
+Result Items::give(
+    ArvPlayerID player,
+    std::string_view item_name,
+    std::uint16_t count,
+    std::string_view name_space,
+    const DataDocument& namespace_document) const {
+  if (!available() || api_->items->give_stack == nullptr) {
+    return Result::unsupported("items API is unavailable");
+  }
+  return Result{api_->items->give_stack(
+      api_->items_ctx,
+      player,
+      view(item_name),
+      count,
+      view(name_space),
+      namespace_document.handle())};
+}
+
+std::string_view Items::default_namespace() const {
+  if (api_ == nullptr || api_->context == nullptr ||
+      api_->context->namespace_count == nullptr ||
+      api_->context->namespace_at == nullptr ||
+      api_->context->namespace_count(api_->context_ctx) == 0U) {
+    return {};
+  }
+  return view(api_->context->namespace_at(api_->context_ctx, 0U));
+}
+
+bool Items::available() const noexcept {
+  return api_ != nullptr && api_->items != nullptr;
+}
+
 } // namespace arv

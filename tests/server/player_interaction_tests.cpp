@@ -2,6 +2,7 @@
 #include "arv/base/base_module.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/entity/components.hpp"
+#include "arv/io/data_document.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
@@ -128,6 +129,14 @@ arv::server::BlockBreakBehaviorRegistry make_base_block_break_behaviors() {
   arv::server::BlockBreakBehaviorRegistry registry;
   arv::base::register_base_block_break_behaviors(registry);
   return registry;
+}
+
+arv::io::DataDocument make_mason_marker_data() {
+  arv::io::DataDocument document{1U, arv::io::DataValue::object()};
+  arv::io::DataValue mason = arv::io::DataValue::object();
+  mason.set("marker", true);
+  document.root.set("arv_mason", std::move(mason));
+  return document;
 }
 
 arv::client::ParticleRegistry make_critical_particle_registry() {
@@ -1534,6 +1543,56 @@ TEST(PlayerInteractionTests, SecondaryPlaceFlowsThroughServerAuthorityAndConsume
   const arv::player::PlayerState& player_state = connected_player(server);
   ASSERT_TRUE(player_state.inventory.slot(0).has_value());
   EXPECT_EQ(player_state.inventory.slot(0)->count, 1U);
+}
+
+TEST(PlayerInteractionTests, MasonMarkerClicksSetSelectionWithoutEditingBlocks) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID dirt = block_registry.find_variant("arvane:dirt").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.block_breaking.base_seconds_per_hardness = 0.0F;
+  ASSERT_TRUE(server.start(start_info));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, dirt));
+  prepare_test_player(server, item_registry);
+  arv::player::PlayerState& player_state = connected_player(server);
+  const std::optional<arv::player::ItemID> sword =
+      item_registry.find_item("arvane:wood_sword");
+  ASSERT_TRUE(sword.has_value());
+  ASSERT_TRUE(player_state.inventory.set_slot(
+      0,
+      arv::player::ItemStack{sword.value(), 1U, make_mason_marker_data()}));
+
+  client.submit_input(arv::client::InputFrame{.primary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), dirt);
+  ASSERT_TRUE(player_state.selection.world.has_value());
+  ASSERT_TRUE(player_state.selection.a.has_value());
+  EXPECT_EQ(player_state.selection.world.value(), server.voxel_world().id());
+  EXPECT_EQ(player_state.selection.a.value(), (arv::BlockPos{{3, 1, 0}}));
+
+  client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), dirt);
+  ASSERT_TRUE(player_state.selection.b.has_value());
+  EXPECT_EQ(player_state.selection.b.value(), (arv::BlockPos{{3, 1, 0}}));
 }
 
 TEST(PlayerInteractionTests, StairPlacementResolvesFacingAndHalfState) {

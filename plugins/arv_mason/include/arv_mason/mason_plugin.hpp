@@ -71,6 +71,7 @@ private:
   }
 
   [[nodiscard]] arv::Result handle_mason(arv::CommandContext& ctx);
+  [[nodiscard]] arv::Result handle_marker(arv::CommandContext& ctx, const Args& args);
   [[nodiscard]] arv::Result handle_set(arv::CommandContext& ctx, const Args& args, bool confirmed = false);
   [[nodiscard]] arv::Result handle_replace(arv::CommandContext& ctx, const Args& args, bool confirmed = false);
   [[nodiscard]] arv::Result handle_copy(arv::CommandContext& ctx, const Args& args);

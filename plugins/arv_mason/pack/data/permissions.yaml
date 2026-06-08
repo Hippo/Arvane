@@ -4,6 +4,9 @@ nodes:
   - id: mason.command.use
     description: Use Mason commands.
     default: unset
+  - id: mason.command.marker
+    description: Receive Mason marker items.
+    default: unset
   - id: mason.command.set
     description: Fill Mason selections.
     default: unset

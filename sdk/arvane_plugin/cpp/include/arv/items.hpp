@@ -55,7 +55,22 @@ public:
       std::uint32_t slot_index) const noexcept;
   [[nodiscard]] ItemStackRef cursor(ArvPlayerID player) const noexcept;
 
+  [[nodiscard]] Result give(
+      ArvPlayerID player,
+      std::string_view item_name,
+      std::uint16_t count,
+      const DataDocument& namespace_document) const;
+  [[nodiscard]] Result give(
+      ArvPlayerID player,
+      std::string_view item_name,
+      std::uint16_t count,
+      std::string_view name_space,
+      const DataDocument& namespace_document) const;
+
 private:
+  [[nodiscard]] std::string_view default_namespace() const;
+  [[nodiscard]] bool available() const noexcept;
+
   const ArvAPI* api_{};
 };
 

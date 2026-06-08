@@ -47,6 +47,9 @@ Root command:
 ```text
 /mason help
 /mason status
+/mason marker
+/mmarker
+/mm
 ```
 
 Native command definitions are registered in code. Short aliases live in
@@ -61,6 +64,10 @@ Selection:
 
 The selection command is provided by `arv_base`, and Mason reads the current
 selection through the Plugin SDK.
+
+`/mason marker` adds a wood sword marker item to your inventory. Marker items
+are identified by `arv_mason.marker = true` in stack data. Left click a block
+with the marker to set point A; right click a block to set point B.
 
 Editing:
 
@@ -104,6 +111,7 @@ Mason registers these custom permission nodes:
 
 ```text
 mason.command.use
+mason.command.marker
 mason.command.set
 mason.command.replace
 mason.command.copy

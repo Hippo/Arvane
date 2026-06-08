@@ -51,6 +51,13 @@ typedef struct ArvItemsAPI {
       void* ctx,
       ArvItemStackLocation location,
       ArvStringView name_space);
+  ArvResult (*give_stack)(
+      void* ctx,
+      ArvPlayerID player,
+      ArvStringView item_name,
+      uint16_t count,
+      ArvStringView name_space,
+      ArvDataDocumentHandle namespace_document);
 } ArvItemsAPI;
 
 #ifdef __cplusplus

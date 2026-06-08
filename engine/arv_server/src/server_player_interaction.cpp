@@ -1,5 +1,7 @@
 #include "server_runtime_internal.hpp"
 
+#include "arv/io/data_document.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -292,6 +294,50 @@ namespace {
   return held.has_value() ? held->item : player::AirItemID;
 }
 
+[[nodiscard]] bool held_item_is_mason_marker(
+    const player::PlayerState& player_state) noexcept {
+  const std::optional<player::ItemStack>& held =
+      player_state.inventory.slot(player_state.selected_hotbar_slot);
+  if (!held.has_value() || !held->data.has_value()) {
+    return false;
+  }
+  const io::DataValue* marker = io::find_path(*held->data, "arv_mason.marker");
+  return marker != nullptr && marker->as_bool_or(false);
+}
+
+[[nodiscard]] bool handle_mason_marker_interaction(
+    player::PlayerState& player_state,
+    const player::PlayerCommand& command,
+    const physics::ICollisionQuery& interaction_query,
+    Vec3f eye_position,
+    Vec3f look_direction,
+    f32 reach_distance) {
+  const bool marker_button_active =
+      command.primary_pressed || command.primary_held ||
+      command.secondary_pressed || command.secondary_held;
+  if (!marker_button_active || !held_item_is_mason_marker(player_state)) {
+    return false;
+  }
+
+  auto hit = physics::raycast_blocks(
+      interaction_query,
+      eye_position,
+      look_direction,
+      reach_distance);
+  if (!hit.has_value()) {
+    return true;
+  }
+
+  player_state.selection.world = player_state.world_id;
+  if (command.primary_pressed) {
+    player_state.selection.a = hit->block;
+  }
+  if (command.secondary_pressed) {
+    player_state.selection.b = hit->block;
+  }
+  return true;
+}
+
 [[nodiscard]] std::optional<player::ItemID> mined_block_drop_item(
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
@@ -328,6 +374,17 @@ void ServerRuntimeImpl::apply_player_interaction_command(
     Vec3f look_direction,
     const physics::KinematicConfig& physics_config,
     Seconds tick_seconds) {
+  if (handle_mason_marker_interaction(
+          player_state,
+          command,
+          interaction_query,
+          eye_position,
+          look_direction,
+          player_tuning_.reach_distance)) {
+    clear_block_break_attempt(player_state.player_id);
+    return;
+  }
+
   tick_block_break_attempt(
       player_state,
       command,
