@@ -7,25 +7,43 @@
 #include "arv/player/permissions.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/server_runtime.hpp"
+#include "arv/world/world_time.hpp"
 #include "support/server_harness.hpp"
 #include "support/temp_dir.hpp"
 #include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
 using arv::testsupport::complete_integrated_handshake;
 using arv::testsupport::connected_player;
 
+[[nodiscard]] arv::entity::EntityRegistry make_command_test_entity_registry() {
+  arv::entity::EntityDefinition cow;
+  cow.name = "arvane:cow";
+  cow.display_name = "Cow";
+  cow.category = "test";
+  cow.spawnable = true;
+  cow.persistent_by_default = true;
+  cow.replicated_by_default = true;
+
+  auto result = arv::base::build_base_entity_registry({std::move(cow)});
+  EXPECT_TRUE(result) << result.error().message;
+  return std::move(result.value());
+}
+
 struct RunningServerHarness {
   arv::testsupport::ScopedTempDir temp;
   arv::voxel::BlockRegistry block_registry;
   arv::player::ItemRegistry item_registry;
+  arv::entity::EntityRegistry entity_registry;
   arv::player::GameModeRegistry game_modes;
   arv::net::InProcessTransportPair transports;
   arv::server::ServerRuntime server;
@@ -37,6 +55,7 @@ struct RunningServerHarness {
       : temp("arvane_command_"),
         block_registry(arv::testsupport::make_test_block_registry()),
         item_registry(arv::testsupport::make_test_item_registry(block_registry)),
+        entity_registry(make_command_test_entity_registry()),
         transports(arv::net::make_in_process_transport_pair()),
         server(std::move(transports.server)),
         client(std::move(transports.client)) {
@@ -47,6 +66,7 @@ struct RunningServerHarness {
     start_info.listen_address = {"in-process", 0};
     start_info.block_registry = &block_registry;
     start_info.item_registry = &item_registry;
+    start_info.entity_registry = &entity_registry;
     start_info.game_modes = &game_modes;
     start_info.register_commands = arv::base::register_server_commands;
     start_info.movement = movement;
@@ -68,6 +88,30 @@ std::optional<arv::command::CommandSender> connected_player_sender(
     return std::nullopt;
   }
   return harness.server.command_sender_for_session(session_ids.front());
+}
+
+[[nodiscard]] bool result_contains(
+    const arv::command::CommandResult& result,
+    std::string_view needle) {
+  return std::any_of(
+      result.messages.begin(),
+      result.messages.end(),
+      [&](const arv::command::CommandMessage& message) {
+        return message.text.find(needle) != std::string::npos;
+      });
+}
+
+[[nodiscard]] arv::u32 inventory_count(
+    const arv::player::Inventory& inventory,
+    arv::player::ItemID item_id) {
+  arv::u32 count = 0U;
+  for (arv::usize slot = 0; slot < inventory.slot_count(); ++slot) {
+    const std::optional<arv::player::ItemStack> stack = inventory.slot(slot);
+    if (stack.has_value() && stack->item == item_id) {
+      count += stack->count;
+    }
+  }
+  return count;
 }
 
 } // namespace
@@ -144,6 +188,44 @@ TEST(CommandTests, DispatcherNormalizesSlashAndResolvesAliases) {
   ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
   ASSERT_EQ(result.messages.size(), 1U);
   EXPECT_EQ(result.messages.front().text, "hello");
+}
+
+TEST(CommandTests, DispatcherSupportsQuotedStringsAndRejectsUnclosedQuotes) {
+  arv::command::CommandRegistry registry;
+  arv::command::Command command;
+  command.name = "test.echo";
+  command.domain = arv::command::CommandDomain::ClientBound;
+  command.execute = [](arv::command::CommandCtx& ctx) {
+    if (ctx.args.size() != 1U) {
+      return arv::command::CommandResult::usage_error("expected one argument");
+    }
+    return arv::command::CommandResult::success(std::string{ctx.args[0]});
+  };
+  ASSERT_TRUE(registry.register_command(std::move(command)));
+  ASSERT_TRUE(registry.register_alias("echo", "test.echo", true));
+
+  arv::command::CommandSender sender;
+  sender.kind = arv::command::CommandSourceKind::Player;
+  arv::command::CommandServices services;
+
+  arv::command::CommandResult result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ClientBound,
+      sender,
+      services,
+      "/echo \"hello world\"");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  ASSERT_EQ(result.messages.size(), 1U);
+  EXPECT_EQ(result.messages.front().text, "hello world");
+
+  result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ClientBound,
+      sender,
+      services,
+      "/echo \"hello");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::UsageError);
+  EXPECT_TRUE(result_contains(result, "Unclosed quoted string"));
 }
 
 TEST(CommandTests, RelativePositionResolutionUsesAnchor) {
@@ -235,6 +317,225 @@ TEST(CommandTests, ServerBoundPlayerCommandWithEmptyPermissionRunsWithoutPermiss
   EXPECT_EQ(result.status, arv::command::CommandStatus::Success);
   EXPECT_TRUE(executed);
   EXPECT_FALSE(checked);
+}
+
+TEST(CommandTests, HelpCommandUsesRegisteredMetadataAndAliases) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/help");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Commands page 1/"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/help 2");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Commands page 2/"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/help summon");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Usage: /summon <entity_id>"));
+  EXPECT_TRUE(result_contains(result, "Aliases: /spawnentity, /entityspawn"));
+  EXPECT_TRUE(result_contains(result, "Permission: arvane.command.summon"));
+  EXPECT_TRUE(result_contains(result, "arvane:cow"));
+}
+
+TEST(CommandTests, CoreWorldCommandsMutateStateAndValidateArguments) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/time query");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "World time is"));
+  (void)harness.client.take_world_time_update();
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/time set day");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  harness.client.fixed_tick(harness.server.tick_index());
+  const std::optional<arv::protocol::ClientboundWorldTime> client_time =
+      harness.client.take_world_time_update();
+  ASSERT_TRUE(client_time.has_value());
+  EXPECT_EQ(
+      harness.server.voxel_world().clock().day_time_tick,
+      arv::world::day_tick_from_hour_minute(
+          8U,
+          0U,
+          harness.server.voxel_world().clock().day_length_ticks));
+  EXPECT_EQ(
+      client_time->day_time_tick,
+      harness.server.voxel_world().clock().day_time_tick);
+  EXPECT_EQ(
+      client_time->day_length_ticks,
+      harness.server.voxel_world().clock().day_length_ticks);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/time set -1");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::UsageError);
+  EXPECT_EQ(
+      harness.server.voxel_world().clock().day_time_tick,
+      arv::world::day_tick_from_hour_minute(
+          8U,
+          0U,
+          harness.server.voxel_world().clock().day_length_ticks));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/weather rain");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(harness.server.voxel_world().weather_id(), "rain");
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/difficulty hard");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(
+      harness.server.voxel_world().difficulty(),
+      arv::world::WorldDifficulty::Hard);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/gamerule doDaylightCycle false");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  ASSERT_NE(harness.server.voxel_world().game_rule("doDaylightCycle"), nullptr);
+  EXPECT_EQ(harness.server.voxel_world().game_rule("doDaylightCycle")->bool_value, false);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/gamerule doDaylightCycle maybe");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::UsageError);
+}
+
+TEST(CommandTests, CorePlayerInventoryCommandsGiveAndClearItems) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides["*"] = arv::player::TriState::Allow;
+  const arv::player::ItemID stone =
+      harness.item_registry.find_item("arvane:stone").value();
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/give @s arvane:stone 64");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(inventory_count(player.inventory, stone), 64U);
+  EXPECT_TRUE(result_contains(result, "Gave 64 arvane:stone"));
+
+  result = harness.server.execute_command(sender.value(), "/clear @s arvane:stone");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(inventory_count(player.inventory, stone), 0U);
+  EXPECT_TRUE(result_contains(result, "Removed 64 items"));
+}
+
+TEST(CommandTests, CoreEntityAndEffectCommandsUseRegistriesAndSelectors) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides["*"] = arv::player::TriState::Allow;
+  player.position = {2.0F, 70.0F, 3.0F};
+  const arv::usize initial_entities = harness.server.voxel_world().entity_count();
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/summon arvane:cow");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(harness.server.voxel_world().entity_count(), initial_entities + 1U);
+  EXPECT_TRUE(result_contains(result, "Spawned 1 arvane:cow"));
+
+  result = harness.server.execute_command(
+      sender.value(),
+      "/summon not_namespaced");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::UsageError);
+  EXPECT_EQ(harness.server.voxel_world().entity_count(), initial_entities + 1U);
+
+  result = harness.server.execute_command(
+      sender.value(),
+      "/effect give @e arvane:speed 1 2");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Applied arvane:speed"));
+
+  result = harness.server.execute_command(sender.value(), "/effect list @s");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "arvane:speed"));
+
+  result = harness.server.execute_command(sender.value(), "/effect clear @s arvane:speed");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Cleared"));
+
+  result = harness.server.execute_command(sender.value(), "/kill @e");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Affected"));
+}
+
+TEST(CommandTests, CoreAdminCommandsProduceFeedback) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides["*"] = arv::player::TriState::Allow;
+  player.position = {1.25F, 65.5F, -4.75F};
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+
+  arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/list");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "local_player"));
+
+  result = harness.server.execute_command(sender.value(), "/say hello world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Broadcasted: hello world"));
+
+  result = harness.server.execute_command(sender.value(), "/me waves");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Broadcasted action: waves"));
+
+  result = harness.server.execute_command(sender.value(), "/debug position");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Position 1.25"));
+
+  result = harness.server.execute_command(sender.value(), "/debug tick");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "TPS"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/save-all flush");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Saved and flushed"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/kick local_player Test complete");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Kicked local_player"));
+}
+
+TEST(CommandTests, TimeSubcommandsRequireSubactionPermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides["arvane.command.time"] =
+      arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::u32 before = harness.server.voxel_world().clock().day_time_tick;
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/time set day");
+
+  EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_EQ(harness.server.voxel_world().clock().day_time_tick, before);
+  EXPECT_TRUE(result_contains(result, "arvane.command.time.set"));
 }
 
 TEST(CommandTests, ConsoleTeleportMovesNamedOnlinePlayer) {

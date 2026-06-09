@@ -66,6 +66,16 @@ namespace {
       "Permission denied: {permission}."));
 }
 
+[[nodiscard]] bool has_unclosed_quote(std::string_view text) noexcept {
+  bool quoted = false;
+  for (const char ch : text) {
+    if (ch == '"') {
+      quoted = !quoted;
+    }
+  }
+  return quoted;
+}
+
 } // namespace
 
 std::string normalize_command_text(std::string_view command_text) {
@@ -89,6 +99,20 @@ std::vector<std::string_view> tokenize_command_text(std::string_view normalized_
       break;
     }
 
+    if (normalized_command_text[cursor] == '"') {
+      ++cursor;
+      const usize start = cursor;
+      while (cursor < normalized_command_text.size() &&
+             normalized_command_text[cursor] != '"') {
+        ++cursor;
+      }
+      tokens.emplace_back(normalized_command_text.data() + start, cursor - start);
+      if (cursor < normalized_command_text.size()) {
+        ++cursor;
+      }
+      continue;
+    }
+
     const usize start = cursor;
     while (cursor < normalized_command_text.size() &&
            !ascii_space(normalized_command_text[cursor])) {
@@ -106,6 +130,13 @@ CommandResult dispatch_command(
     CommandServices& services,
     std::string_view command_text) {
   const std::string normalized = normalize_command_text(command_text);
+  services.registry = &registry;
+  if (has_unclosed_quote(normalized)) {
+    return CommandResult::usage_error(localized_command_text(
+        services,
+        "command.dispatcher.unclosed_quote",
+        "Unclosed quoted string."));
+  }
   const std::vector<std::string_view> tokens = tokenize_command_text(normalized);
   if (tokens.empty()) {
     return CommandResult::usage_error(localized_command_text(

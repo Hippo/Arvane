@@ -15,6 +15,7 @@
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/vehicles.hpp"
+#include "arv/protocol/world_time.hpp"
 
 #include <memory>
 #include <optional>
@@ -175,6 +176,7 @@ public:
   [[nodiscard]] std::vector<protocol::ClientboundChunkSectionData> drain_received_chunk_section_data();
   [[nodiscard]] std::vector<protocol::ClientboundChunkSectionUnload> drain_received_chunk_section_unloads();
   [[nodiscard]] std::vector<protocol::ClientboundBlockUpdateBatch> drain_received_block_updates();
+  [[nodiscard]] std::optional<protocol::ClientboundWorldTime> take_world_time_update();
   [[nodiscard]] const player::Inventory& inventory() const noexcept;
   [[nodiscard]] const std::optional<player::ItemStack>& inventory_cursor_stack() const noexcept;
   [[nodiscard]] u32 inventory_revision() const noexcept;

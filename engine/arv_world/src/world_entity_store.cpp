@@ -1029,6 +1029,7 @@ EntityID WorldRuntime::create_dropped_item(
 
 bool WorldRuntime::destroy_entity(EntityID entity_id, EntityDespawnReason reason) {
   assert_owner_thread();
+  (void)clear_status_effects(entity_id);
   return impl_->entities.destroy_entity(entity_id, reason);
 }
 

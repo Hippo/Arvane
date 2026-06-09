@@ -487,6 +487,8 @@ struct ServerRuntimeImpl {
   void send_auth_challenge(ServerSession& session);
   [[nodiscard]] bool complete_authenticated_session(ServerSession& session);
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
+  void send_world_time(const ServerSession& session);
+  void broadcast_world_time(WorldID world_id);
   void send_player_permissions(const ServerSession& session, const player::PlayerState& player_state);
   void send_player_movement_tuning(
       const ServerSession& session,

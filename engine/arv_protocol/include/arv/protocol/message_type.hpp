@@ -67,6 +67,7 @@ enum class MessageType : u16 {
   ClientboundSkinUploadFailed = 0x0131,
   ClientboundWorldJoinResult = 0x0301,
   ClientboundWorldLeave = 0x0302,
+  ClientboundWorldTime = 0x0303,
   ServerboundChunkInterestUpdate = 0x0400,
   ClientboundChunkSectionData = 0x0401,
   ClientboundChunkSectionUnload = 0x0402,

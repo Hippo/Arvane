@@ -43,6 +43,8 @@ public:
 
   [[nodiscard]] std::vector<const Command*> commands() const;
   [[nodiscard]] std::vector<CommandAlias> aliases() const;
+  [[nodiscard]] std::vector<std::string> visible_aliases_for(
+      std::string_view command_name) const;
 
 private:
   std::vector<Command> commands_{};

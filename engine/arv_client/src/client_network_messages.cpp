@@ -16,6 +16,7 @@
 #include "arv/protocol/text_variables.hpp"
 #include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/protocol/world_time.hpp"
 #include "arv/text/language.hpp"
 
 #include "client_runtime_internal.hpp"
@@ -60,6 +61,7 @@ void apply_world_leave(
   runtime.dropped_items.clear();
   runtime.chunks.clear();
   runtime.inventory.reset();
+  runtime.world_time_update.reset();
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
   runtime.ui.clear_text_variables();
@@ -71,6 +73,7 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
   runtime.dropped_items.clear();
   runtime.chunks.clear();
   runtime.inventory.reset();
+  runtime.world_time_update.reset();
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
   runtime.ui.close_ui();
@@ -440,6 +443,14 @@ void ClientNetworkRouter::handle_message(
         return;
       }
       apply_world_leave(runtime, leave.value());
+      return;
+    }
+    case protocol::MessageType::ClientboundWorldTime: {
+      auto time = protocol::deserialize_clientbound_world_time(decoded.value().payload);
+      if (!time) {
+        return;
+      }
+      runtime.world_time_update = time.value();
       return;
     }
     case protocol::MessageType::ClientboundPlayerMoveCorrection: {

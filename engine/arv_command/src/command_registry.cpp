@@ -55,11 +55,18 @@ CommandRegistry::Result CommandRegistry::register_alias(
 
   const usize index = aliases_.size();
   alias_indices_[alias] = index;
+  const std::string alias_copy = alias;
   aliases_.push_back(CommandAlias{
       std::move(alias),
       std::move(command_name),
       visible_in_help,
   });
+  if (visible_in_help) {
+    const auto command_found = command_indices_.find(aliases_.back().command_name);
+    if (command_found != command_indices_.end()) {
+      commands_[command_found->second].aliases.push_back(alias_copy);
+    }
+  }
   return Result::success();
 }
 
@@ -101,6 +108,17 @@ std::vector<const Command*> CommandRegistry::commands() const {
 
 std::vector<CommandAlias> CommandRegistry::aliases() const {
   return aliases_;
+}
+
+std::vector<std::string> CommandRegistry::visible_aliases_for(
+    std::string_view command_name) const {
+  std::vector<std::string> out;
+  for (const CommandAlias& alias : aliases_) {
+    if (alias.visible_in_help && alias.command_name == command_name) {
+      out.push_back(alias.alias);
+    }
+  }
+  return out;
 }
 
 } // namespace arv::command

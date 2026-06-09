@@ -761,7 +761,27 @@ void DesktopSessionManager::refresh_inventory_slots(DesktopGameSession& session)
   }
 }
 
+[[nodiscard]] world::WorldClock clock_from_packet(
+    const protocol::ClientboundWorldTime& time) {
+  world::WorldClock clock;
+  clock.world_tick = time.world_tick;
+  clock.day_time_tick = time.day_time_tick;
+  clock.day_length_ticks = std::max<u32>(time.day_length_ticks, 1U);
+  clock.day_length_seconds = time.day_length_seconds;
+  clock.time_scale = time.time_scale;
+  clock.daylight_cycle = time.daylight_cycle;
+  return clock;
+}
+
 void DesktopSessionManager::collect_client_chunk_stream(DesktopGameSession& session) const {
+  if (std::optional<protocol::ClientboundWorldTime> time =
+          session.client->take_world_time_update();
+      time.has_value() && time->world_id == session.client_world.id()) {
+    session.client_world.set_clock(
+        clock_from_packet(time.value()),
+        session.client->server_tick_rate());
+  }
+
   std::vector<protocol::ClientboundChunkSectionUnload> drained_unloads =
       session.client->drain_received_chunk_section_unloads();
   for (const protocol::ClientboundChunkSectionUnload& unload : drained_unloads) {

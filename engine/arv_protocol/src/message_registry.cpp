@@ -142,6 +142,9 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundWorldLeave, "ClientboundWorldLeave",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});
+  registry.register_message({MessageType::ClientboundWorldTime, "ClientboundWorldTime",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
   registry.register_message({MessageType::ServerboundChunkInterestUpdate, "ServerboundChunkInterestUpdate",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});

@@ -13,6 +13,7 @@
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/protocol/world_time.hpp"
 
 #include <gtest/gtest.h>
 
@@ -96,6 +97,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto chunk_data = registry.lookup(arv::protocol::MessageType::ClientboundChunkSectionData);
   const auto chunk_unload = registry.lookup(arv::protocol::MessageType::ClientboundChunkSectionUnload);
   const auto world_join = registry.lookup(arv::protocol::MessageType::ClientboundWorldJoinResult);
+  const auto world_time = registry.lookup(arv::protocol::MessageType::ClientboundWorldTime);
   const auto block_updates = registry.lookup(arv::protocol::MessageType::ClientboundBlockUpdateBatch);
   const auto spawn_particles = registry.lookup(arv::protocol::MessageType::ClientboundSpawnParticles);
   const auto entity_spawn = registry.lookup(arv::protocol::MessageType::ClientboundEntitySpawn);
@@ -148,6 +150,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(chunk_data.has_value());
   ASSERT_TRUE(chunk_unload.has_value());
   ASSERT_TRUE(world_join.has_value());
+  ASSERT_TRUE(world_time.has_value());
   ASSERT_TRUE(block_updates.has_value());
   ASSERT_TRUE(spawn_particles.has_value());
   ASSERT_TRUE(entity_spawn.has_value());
@@ -203,6 +206,8 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(chunk_data->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(chunk_unload->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(world_join->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(world_time->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(world_time->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(block_updates->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(spawn_particles->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
   EXPECT_EQ(entity_spawn->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
@@ -235,6 +240,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(chunk_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(chunk_unload->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(world_join->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(world_time->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(block_updates->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(spawn_particles->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(spawn_particles->direction, arv::protocol::MessageDirection::ServerToClient);
@@ -257,7 +263,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 62U);
+  EXPECT_EQ(registry.size(), 63U);
 }
 
 TEST(ProtocolTests, VehiclePacketsRoundTripThroughSerialization) {
@@ -745,6 +751,26 @@ TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {
   ASSERT_TRUE(decoded_leave);
   EXPECT_EQ(decoded_leave.value().world_id, (arv::WorldID{4}));
   EXPECT_EQ(decoded_leave.value().reason, 3U);
+
+  arv::protocol::ClientboundWorldTime time;
+  time.world_id = arv::WorldID{4};
+  time.world_tick = 321;
+  time.day_time_tick = 24000;
+  time.day_length_ticks = 72000;
+  time.day_length_seconds = 1200.0F;
+  time.time_scale = 1.5F;
+  time.daylight_cycle = true;
+  const auto decoded_time =
+      arv::protocol::deserialize_clientbound_world_time(
+          arv::protocol::serialize_clientbound_world_time(time));
+  ASSERT_TRUE(decoded_time);
+  EXPECT_EQ(decoded_time.value().world_id, (arv::WorldID{4}));
+  EXPECT_EQ(decoded_time.value().world_tick, 321U);
+  EXPECT_EQ(decoded_time.value().day_time_tick, 24000U);
+  EXPECT_EQ(decoded_time.value().day_length_ticks, 72000U);
+  EXPECT_FLOAT_EQ(decoded_time.value().day_length_seconds, 1200.0F);
+  EXPECT_FLOAT_EQ(decoded_time.value().time_scale, 1.5F);
+  EXPECT_TRUE(decoded_time.value().daylight_cycle);
 }
 
 TEST(ProtocolTests, BlockUpdateBatchRoundTripsAndRejectsMalformedCounts) {

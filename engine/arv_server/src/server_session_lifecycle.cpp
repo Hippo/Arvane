@@ -2,6 +2,7 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/random.hpp"
+#include "arv/protocol/world_time.hpp"
 #include "arv/text/language.hpp"
 #include "arv/server/skin_runtime.hpp"
 
@@ -11,6 +12,24 @@
 #include <utility>
 
 namespace arv::server::detail {
+namespace {
+
+[[nodiscard]] protocol::ClientboundWorldTime world_time_packet(
+    WorldID world_id,
+    const world::WorldClock& clock) {
+  return {
+      world_id,
+      clock.world_tick,
+      clock.day_time_tick,
+      clock.day_length_ticks,
+      clock.day_length_seconds,
+      clock.time_scale,
+      clock.daylight_cycle,
+  };
+}
+
+} // namespace
+
 void ServerRuntimeImpl::send_auth_result(
     const ServerSession& session,
     bool accepted,
@@ -341,6 +360,7 @@ void ServerRuntimeImpl::send_world_join_result(
       protocol::serialize_clientbound_world_join_result(result));
   log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
   if (send_result) {
+    send_world_time(session);
     send_player_permissions(session, player_state);
     send_player_movement_tuning(session, player_state);
     send_movement_hz_if_non_default(session);
@@ -358,6 +378,36 @@ void ServerRuntimeImpl::send_world_join_result(
         player_state.position.z,
         tick_index_,
         max_view_distance_);
+  }
+}
+
+void ServerRuntimeImpl::send_world_time(const ServerSession& session) {
+  if (session.world_id != default_world_.id()) {
+    return;
+  }
+  const protocol::ClientboundWorldTime packet =
+      world_time_packet(session.world_id, default_world_.clock());
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundWorldTime,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_clientbound_world_time(packet));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::broadcast_world_time(WorldID world_id) {
+  if (world_id != default_world_.id()) {
+    return;
+  }
+  for (const SessionID session_id : sessions_.session_ids()) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr || !session->authenticated || session->closing ||
+        session->world_id != world_id) {
+      continue;
+    }
+    send_world_time(*session);
   }
 }
 

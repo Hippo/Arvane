@@ -21,6 +21,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/text_variables.hpp
   include/arv/protocol/vehicles.hpp
   include/arv/protocol/world_join.hpp
+  include/arv/protocol/world_time.hpp
 )
 
 add_library(arv_protocol STATIC
@@ -42,6 +43,7 @@ add_library(arv_protocol STATIC
   src/text_variables.cpp
   src/vehicles.cpp
   src/world_join.cpp
+  src/world_time.cpp
 )
 target_include_directories(arv_protocol PUBLIC include)
 target_link_libraries(arv_protocol PUBLIC arv_core arv_crypto arv_player arv_text arv_voxel)

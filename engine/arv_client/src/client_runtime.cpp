@@ -33,6 +33,7 @@ struct ClientRuntime::Impl {
         dropped_items,
         skins,
         particles,
+        world_time_update,
         language,
         vehicle_registry,
         collision_query,
@@ -85,6 +86,7 @@ struct ClientRuntime::Impl {
     chunks.clear();
     inventory.reset();
     particles.clear();
+    world_time_update.reset();
     player_controller.leave_world();
     chunk_interest.set_world_id(WorldID{});
     ui.close_ui();
@@ -106,6 +108,7 @@ struct ClientRuntime::Impl {
   ClientDroppedItemMirrorStore dropped_items{};
   detail::ClientSkinRuntime skins{};
   ParticleSystem particles{};
+  std::optional<protocol::ClientboundWorldTime> world_time_update{};
   u32 next_attack_sequence{1};
   std::vector<ClientAttackFeedback> attack_feedback{};
 };
@@ -379,6 +382,12 @@ std::vector<protocol::ClientboundChunkSectionUnload> ClientRuntime::drain_receiv
 
 std::vector<protocol::ClientboundBlockUpdateBatch> ClientRuntime::drain_received_block_updates() {
   return impl_->chunks.drain_block_updates();
+}
+
+std::optional<protocol::ClientboundWorldTime> ClientRuntime::take_world_time_update() {
+  std::optional<protocol::ClientboundWorldTime> update = impl_->world_time_update;
+  impl_->world_time_update.reset();
+  return update;
 }
 
 const player::Inventory& ClientRuntime::inventory() const noexcept {

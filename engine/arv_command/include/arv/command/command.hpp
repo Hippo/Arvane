@@ -123,15 +123,43 @@ struct CommandSender {
 
 struct Command;
 struct CommandCtx;
+class CommandRegistry;
 
 using CommandExecuteFn = std::function<CommandResult(CommandCtx&)>;
+
+enum class CommandArgumentType : u8 {
+  String,
+  Integer,
+  UnsignedInteger,
+  Number,
+  Boolean,
+  Enum,
+  Identifier,
+  TargetSelector,
+  Position,
+  Message,
+  Metadata,
+};
+
+struct CommandArgumentSpec {
+  std::string name{};
+  CommandArgumentType type{CommandArgumentType::String};
+  bool required{true};
+  bool variadic{};
+  std::vector<std::string> enum_values{};
+  std::string description{};
+};
 
 struct Command {
   std::string name{};
   CommandDomain domain{CommandDomain::ServerBound};
+  std::vector<std::string> aliases{};
   std::string permission{};
   std::string description{};
   std::string usage{};
+  std::vector<CommandArgumentSpec> arguments{};
+  std::string technical_notes{};
+  std::vector<std::string> examples{};
   bool public_to_players{};
   bool console_only{};
   CommandExecuteFn execute{};
@@ -157,6 +185,7 @@ struct CommandServices {
   void* domain_services{};
   CommandPermissionCheckFn permission_check{};
   const arv::text::LanguageCatalog* language{};
+  const CommandRegistry* registry{};
 
   template<typename T>
   [[nodiscard]] T* as() noexcept {

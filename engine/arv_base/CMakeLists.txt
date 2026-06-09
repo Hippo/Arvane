@@ -31,6 +31,7 @@ add_library(arv_base STATIC
   src/blueprint_command.cpp
   src/base_module.cpp
   src/blocks/block_behavior_registration.cpp
+  src/core_commands.cpp
   src/entities/entity_goal_registration.cpp
   src/entities/entity_registration.cpp
   src/flyspeed_command.cpp

@@ -6,6 +6,7 @@
 #include "arv/client/particles.hpp"
 #include "arv/core/time.hpp"
 #include "arv/physics/collision.hpp"
+#include "arv/protocol/world_time.hpp"
 
 #include "client_chunk_inbox.hpp"
 #include "client_connection.hpp"
@@ -17,6 +18,8 @@
 #include "client_protocol_send.hpp"
 #include "client_skin_runtime.hpp"
 #include "client_ui_state.hpp"
+
+#include <optional>
 
 namespace arv::text {
 class LanguageCatalog;
@@ -44,6 +47,7 @@ struct ClientRuntimeContext {
   ClientDroppedItemMirrorStore& dropped_items;
   ClientSkinRuntime& skins;
   ParticleSystem& particles;
+  std::optional<protocol::ClientboundWorldTime>& world_time_update;
   const arv::text::LanguageCatalog* language{};
   const arv::entity::VehicleDefinitionRegistry* vehicle_registry{};
   const physics::ICollisionQuery* collision_query{};

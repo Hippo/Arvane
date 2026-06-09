@@ -62,6 +62,50 @@ struct WorldTickStats {
   u32 entity_updates_processed{};
 };
 
+enum class WorldDifficulty : u8 {
+  Peaceful,
+  Easy,
+  Normal,
+  Hard,
+};
+
+enum class GameRuleValueType : u8 {
+  Boolean,
+  Integer,
+  String,
+};
+
+struct GameRuleDefinition {
+  std::string_view name{};
+  GameRuleValueType type{GameRuleValueType::Boolean};
+  std::string_view description{};
+  bool default_bool{};
+  i64 default_integer{};
+  std::string_view default_string{};
+};
+
+struct GameRuleState {
+  std::string name{};
+  GameRuleValueType type{GameRuleValueType::Boolean};
+  std::string description{};
+  bool bool_value{};
+  i64 integer_value{};
+  std::string string_value{};
+};
+
+struct StatusEffectInstance {
+  std::string effect_id{};
+  u32 remaining_ticks{};
+  u32 amplifier{1};
+};
+
+[[nodiscard]] std::string_view world_difficulty_name(WorldDifficulty difficulty) noexcept;
+[[nodiscard]] std::optional<WorldDifficulty> world_difficulty_from_string(
+    std::string_view text) noexcept;
+[[nodiscard]] std::span<const GameRuleDefinition> default_game_rule_definitions() noexcept;
+[[nodiscard]] std::vector<GameRuleState> make_default_game_rule_states();
+[[nodiscard]] std::string game_rule_value_to_string(const GameRuleState& rule);
+
 struct ChunkWorkloadSnapshot {
   usize loaded_chunks{};
   usize active_chunks{};
@@ -284,6 +328,25 @@ public:
   void set_daylight_cycle(bool daylight_cycle) noexcept;
   void set_time_scale(f32 time_scale) noexcept;
   void set_day_length_seconds(Seconds day_length_seconds, TickRate fixed_tick_rate) noexcept;
+  void add_day_time_ticks(u32 delta_ticks) noexcept;
+  [[nodiscard]] std::string weather_id() const;
+  bool set_weather_id(std::string weather_id);
+  [[nodiscard]] WorldDifficulty difficulty() const noexcept;
+  void set_difficulty(WorldDifficulty difficulty) noexcept;
+  [[nodiscard]] std::span<const GameRuleState> game_rules() const noexcept;
+  [[nodiscard]] const GameRuleState* game_rule(std::string_view name) const noexcept;
+  bool set_game_rule_bool(std::string_view name, bool value);
+  bool set_game_rule_integer(std::string_view name, i64 value);
+  bool set_game_rule_string(std::string_view name, std::string value);
+  bool apply_status_effect(
+      EntityID entity_id,
+      std::string effect_id,
+      u32 duration_ticks,
+      u32 amplifier);
+  u32 clear_status_effects(
+      EntityID entity_id,
+      std::optional<std::string_view> effect_id = std::nullopt);
+  [[nodiscard]] std::vector<StatusEffectInstance> status_effects(EntityID entity_id) const;
   [[nodiscard]] u64 lighting_revision() const noexcept;
   [[nodiscard]] u64 mesh_revision() const noexcept;
   [[nodiscard]] arv::Location spawn_point() const noexcept;

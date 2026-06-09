@@ -435,7 +435,8 @@ namespace arv::world {
 struct WorldRuntime::Impl {
   explicit Impl(WorldID world_id) : id(world_id),
                                     entities(world_id),
-                                    spawn_point(default_spawn_location()) {
+                                    spawn_point(default_spawn_location()),
+                                    game_rules(make_default_game_rule_states()) {
     spawn_point.world = world_id;
   }
 
@@ -459,6 +460,10 @@ struct WorldRuntime::Impl {
   detail::WorldRegionRuntime regions;
   TickIndex tick_index{};
   WorldClock clock{make_world_clock()};
+  std::string weather{"clear"};
+  WorldDifficulty difficulty{WorldDifficulty::Normal};
+  std::vector<GameRuleState> game_rules{};
+  HashMap<EntityID, std::vector<StatusEffectInstance>> status_effects{};
   arv::Location spawn_point{};
   std::optional<WorldGenerationConfig> generation_config{};
   u64 generation_seed{};
