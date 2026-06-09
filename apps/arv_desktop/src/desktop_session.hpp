@@ -73,6 +73,7 @@ struct DesktopGameSession {
   std::optional<ui::UiItemStackView> carried_inventory_stack{};
   std::vector<ui::PlayerListEntryView> tab_players{};
   std::vector<ui::ChatLineView> chat_lines{};
+  usize chat_history_scroll_offset{};
   client::HeldItemAnimationPlayer held_item_animation{};
   client::InputFrame last_gameplay_input{};
   Seconds next_block_mining_particle_seconds{};

@@ -830,6 +830,9 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
 
   ASSERT_NE(tree.find_by_stable_id("inventory.panel"), nullptr);
   ASSERT_NE(tree.find_by_stable_id("chat.input"), nullptr);
+  const auto* chat_stack = tree.find_by_stable_id("chat.stack");
+  ASSERT_NE(chat_stack, nullptr);
+  EXPECT_GE(chat_stack->rect.width, 560.0F);
   const auto* chat_line = tree.find_by_stable_id("chat.line.0");
   const auto* chat_shadow = tree.find_by_stable_id("chat.line.0.shadow");
   ASSERT_NE(chat_line, nullptr);
@@ -929,6 +932,55 @@ TEST(GameplayUiTests, ChatWrapsLongMessagesIntoAdditionalRows) {
   ASSERT_NE(second, nullptr);
   EXPECT_LT(first->text.size(), long_text.size());
   EXPECT_FALSE(second->text.empty());
+}
+
+TEST(GameplayUiTests, ChatWrapsAtSpacesBeforeSplittingWords) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  const std::string spaced_text =
+      "aaaaa bbbbb ccccc ddddd eeeee fffff ggggg hhhhh iiiii jjjjj kkkkk lllll";
+  arv::ui::ChatLineView line{spaced_text, 1.0F};
+  arv::ui::build_chat_ui(tree, {true, true, {&line, 1U}, ""});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* first = tree.find_by_stable_id("chat.line.0");
+  const auto* second = tree.find_by_stable_id("chat.line.0.wrap.1");
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(first->text, "aaaaa bbbbb ccccc ddddd eeeee fffff ggggg hhhhh iiiii jjjjj");
+  EXPECT_EQ(second->text, "kkkkk lllll");
+}
+
+TEST(GameplayUiTests, OpenChatHistoryScrollOffsetShowsOlderMessages) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  std::vector<arv::ui::ChatLineView> messages{
+      {"zero", 1.0F},
+      {"one", 1.0F},
+      {"two", 1.0F},
+      {"three", 1.0F},
+      {"four", 1.0F},
+  };
+  arv::ui::ChatUiModel model;
+  model.visible = true;
+  model.input_active = true;
+  model.messages = {messages.data(), messages.size()};
+  model.max_visible_messages = 2U;
+  model.history_scroll_offset = 2U;
+
+  arv::ui::build_chat_ui(tree, model);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  EXPECT_EQ(tree.find_by_stable_id("chat.line.0"), nullptr);
+  const auto* first = tree.find_by_stable_id("chat.line.1");
+  const auto* second = tree.find_by_stable_id("chat.line.2");
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(first->text, "one");
+  EXPECT_EQ(second->text, "two");
+  EXPECT_EQ(tree.find_by_stable_id("chat.line.3"), nullptr);
 }
 
 TEST(GameplayUiTests, WrappedRichChatRunsKeepInteractiveActions) {

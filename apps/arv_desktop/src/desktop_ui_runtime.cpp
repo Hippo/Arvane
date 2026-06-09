@@ -184,6 +184,20 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   return line;
 }
 
+[[nodiscard]] usize chat_history_max_scroll_offset(
+    usize history_size,
+    usize max_visible_messages) noexcept {
+  const usize visible = std::max<usize>(1U, max_visible_messages);
+  return history_size > visible ? history_size - visible : 0U;
+}
+
+[[nodiscard]] usize chat_history_scroll_steps(f32 wheel_y) noexcept {
+  if (wheel_y == 0.0F || !std::isfinite(wheel_y)) {
+    return 0U;
+  }
+  return static_cast<usize>(std::max(1.0F, std::ceil(std::abs(wheel_y))));
+}
+
 [[nodiscard]] std::string mount_binding_label(
     const platform::InputBindings& input_bindings) {
   const platform::ActionBindingList& bindings =
@@ -226,6 +240,7 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_cursor());
   hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_selection_start());
   hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_selection_end());
+  hash = ui_cache_hash_append_u64(hash, session.chat_history_scroll_offset);
   hash = ui_cache_hash_append_string(hash, hotbar_item_popup_name);
   hash = ui_cache_hash_append_f32(hash, hotbar_item_popup_alpha);
   hash = ui_cache_hash_append_bool(hash, ride_prompt_visible);
@@ -605,27 +620,32 @@ void DesktopFrameLoop::update_gameplay_ui_snapshots(
   const io::UiConfig::ChatConfig& chat_config = config_.ui.chat;
   if (active_session.client->chat_open()) {
     const usize max_lines = std::max<usize>(1U, chat_config.open_max_lines);
-    const usize start =
-        chat_history.size() > max_lines ? chat_history.size() - max_lines : 0U;
-    for (usize index = start; index < chat_history.size(); ++index) {
+    active_session.chat_history_scroll_offset = std::min(
+        active_session.chat_history_scroll_offset,
+        chat_history_max_scroll_offset(chat_history.size(), max_lines));
+    active_session.chat_lines.reserve(chat_history.size());
+    for (usize index = 0U; index < chat_history.size(); ++index) {
       active_session.chat_lines.emplace_back(
           chat_line_view_from_entry(chat_history[index], 1.0F));
     }
-  } else if (chat_config.passive_max_lines > 0U) {
-    for (usize reverse_index = chat_history.size(); reverse_index > 0U; --reverse_index) {
-      const client::ChatHistoryEntry& entry = chat_history[reverse_index - 1U];
-      const std::optional<f32> opacity =
-          passive_chat_opacity(entry, now, chat_config);
-      if (!opacity.has_value()) {
-        continue;
+  } else {
+    active_session.chat_history_scroll_offset = 0U;
+    if (chat_config.passive_max_lines > 0U) {
+      for (usize reverse_index = chat_history.size(); reverse_index > 0U; --reverse_index) {
+        const client::ChatHistoryEntry& entry = chat_history[reverse_index - 1U];
+        const std::optional<f32> opacity =
+            passive_chat_opacity(entry, now, chat_config);
+        if (!opacity.has_value()) {
+          continue;
+        }
+        active_session.chat_lines.emplace_back(
+            chat_line_view_from_entry(entry, opacity.value()));
+        if (active_session.chat_lines.size() >= chat_config.passive_max_lines) {
+          break;
+        }
       }
-      active_session.chat_lines.emplace_back(
-          chat_line_view_from_entry(entry, opacity.value()));
-      if (active_session.chat_lines.size() >= chat_config.passive_max_lines) {
-        break;
-      }
+      std::reverse(active_session.chat_lines.begin(), active_session.chat_lines.end());
     }
-    std::reverse(active_session.chat_lines.begin(), active_session.chat_lines.end());
   }
 }
 
@@ -784,6 +804,26 @@ bool DesktopFrameLoop::route_chat_mouse_input(
   bool handled = false;
   const Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
   (void)ui_tree_.route_mouse_move(cursor);
+  if (platform_input.mouse_wheel_y != 0.0F) {
+    const usize max_offset = chat_history_max_scroll_offset(
+        active_session.client->chat_history().size(),
+        std::max<usize>(1U, config_.ui.chat.open_max_lines));
+    active_session.chat_history_scroll_offset =
+        std::min(active_session.chat_history_scroll_offset, max_offset);
+    const usize steps = chat_history_scroll_steps(platform_input.mouse_wheel_y);
+    if (steps > 0U) {
+      if (platform_input.mouse_wheel_y > 0.0F) {
+        const usize remaining = max_offset > active_session.chat_history_scroll_offset
+            ? max_offset - active_session.chat_history_scroll_offset
+            : 0U;
+        active_session.chat_history_scroll_offset += std::min(steps, remaining);
+      } else {
+        active_session.chat_history_scroll_offset -=
+            std::min(steps, active_session.chat_history_scroll_offset);
+      }
+      handled = true;
+    }
+  }
   if (platform_input.mouse_left_pressed) {
     const std::optional<ui::UiAction> action =
         ui_tree_.route_mouse_down(cursor, ui::UiMouseButton::Left);
@@ -871,6 +911,24 @@ void DesktopFrameLoop::build_gameplay_ui(
     }
   }
 
+  const bool chat_open = active_session.client->chat_open();
+  ui::ChatUiModel chat_model{
+      true,
+      chat_open,
+      std::span<const ui::ChatLineView>{
+          active_session.chat_lines.data(),
+          active_session.chat_lines.size()},
+      active_session.client->chat_draft(),
+      active_session.client->chat_draft_cursor(),
+      active_session.client->chat_draft_selection_start(),
+      active_session.client->chat_draft_selection_end(),
+      active_session.client->pending_chat_url_confirmation(),
+      chat_open ? config_.ui.chat.open_max_lines : config_.ui.chat.passive_max_lines,
+      &assets_.language,
+  };
+  chat_model.history_scroll_offset =
+      chat_open ? active_session.chat_history_scroll_offset : 0U;
+
   ui::build_gameplay_ui(
       ui_tree_,
       {
@@ -901,21 +959,7 @@ void DesktopFrameLoop::build_gameplay_ui(
                   platform_input.cursor_y,
               },
           },
-          {
-              true,
-              active_session.client->chat_open(),
-              std::span<const ui::ChatLineView>{
-                  active_session.chat_lines.data(),
-                  active_session.chat_lines.size()},
-              active_session.client->chat_draft(),
-              active_session.client->chat_draft_cursor(),
-              active_session.client->chat_draft_selection_start(),
-              active_session.client->chat_draft_selection_end(),
-              active_session.client->pending_chat_url_confirmation(),
-              active_session.client->chat_open() ? config_.ui.chat.open_max_lines
-                                                 : config_.ui.chat.passive_max_lines,
-              &assets_.language,
-          },
+          std::move(chat_model),
           {
               active_session.client->tab_menu_visible(),
               assets_.language.text("ui.tab.players"),

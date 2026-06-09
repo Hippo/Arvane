@@ -53,54 +53,135 @@ struct WrappedChatLine {
   std::vector<WrappedChatRun> runs{};
 };
 
+struct ChatWrapAtom {
+  std::string_view text{};
+  const arv::text::RichTextRun* source{};
+  usize source_run_index{};
+};
+
+struct ChatWrapState {
+  std::vector<WrappedChatLine> lines{};
+  usize column{};
+  std::vector<ChatWrapAtom> pending_spaces{};
+  std::vector<ChatWrapAtom> pending_word{};
+  usize pending_word_columns{};
+};
+
 [[nodiscard]] usize chat_wrap_columns(f32 width, const UiTheme& theme) noexcept {
   const f32 estimated_glyph_width =
-      std::max(8.0F, static_cast<f32>(theme.typography.size_md) * 0.62F + ChatLetterSpacing);
+      std::max(7.0F, static_cast<f32>(theme.typography.size_md) * 0.44F + ChatLetterSpacing);
   return std::max<usize>(8U, static_cast<usize>(std::max(1.0F, width) / estimated_glyph_width));
 }
 
-void append_wrapped_codepoint(
+void append_wrapped_atom(
     WrappedChatLine& line,
-    const arv::text::RichTextRun& source,
-    usize source_run_index,
-    std::string_view codepoint) {
-  line.text.append(codepoint);
-  if (!line.runs.empty() && line.runs.back().source_run_index == source_run_index) {
-    line.runs.back().run.text.append(codepoint);
+    const ChatWrapAtom& atom) {
+  line.text.append(atom.text);
+  if (atom.source == nullptr) {
     return;
   }
-  arv::text::RichTextRun run = source;
-  run.text = std::string{codepoint};
-  line.runs.push_back({std::move(run), source_run_index});
+  if (!line.runs.empty() && line.runs.back().source_run_index == atom.source_run_index) {
+    line.runs.back().run.text.append(atom.text);
+    return;
+  }
+  arv::text::RichTextRun run = *atom.source;
+  run.text = std::string{atom.text};
+  line.runs.push_back({std::move(run), atom.source_run_index});
+}
+
+void append_chat_wrap_line(ChatWrapState& state) {
+  state.lines.emplace_back();
+  state.column = 0U;
+}
+
+void append_chat_wrap_atom(ChatWrapState& state, const ChatWrapAtom& atom) {
+  append_wrapped_atom(state.lines.back(), atom);
+  ++state.column;
+}
+
+void append_chat_wrap_atoms(
+    ChatWrapState& state,
+    const std::vector<ChatWrapAtom>& atoms) {
+  for (const ChatWrapAtom& atom : atoms) {
+    append_chat_wrap_atom(state, atom);
+  }
+}
+
+void append_chat_wrap_long_word(ChatWrapState& state, usize columns) {
+  for (const ChatWrapAtom& atom : state.pending_word) {
+    if (state.column >= columns && !state.lines.back().text.empty()) {
+      append_chat_wrap_line(state);
+    }
+    append_chat_wrap_atom(state, atom);
+  }
+}
+
+void flush_chat_wrap_word(ChatWrapState& state, usize columns) {
+  if (state.pending_word.empty()) {
+    return;
+  }
+
+  const bool line_has_text = !state.lines.back().text.empty();
+  const usize separator_columns = line_has_text ? state.pending_spaces.size() : 0U;
+  if (line_has_text &&
+      state.column + separator_columns + state.pending_word_columns > columns) {
+    append_chat_wrap_line(state);
+  } else if (line_has_text) {
+    append_chat_wrap_atoms(state, state.pending_spaces);
+  }
+
+  if (state.pending_word_columns <= columns) {
+    append_chat_wrap_atoms(state, state.pending_word);
+  } else {
+    append_chat_wrap_long_word(state, columns);
+  }
+
+  state.pending_spaces.clear();
+  state.pending_word.clear();
+  state.pending_word_columns = 0U;
+}
+
+void consume_chat_wrap_atom(ChatWrapState& state, const ChatWrapAtom& atom, usize columns) {
+  if (atom.text == "\n") {
+    flush_chat_wrap_word(state, columns);
+    state.pending_spaces.clear();
+    append_chat_wrap_line(state);
+    return;
+  }
+  if (atom.text == " ") {
+    if (!state.pending_word.empty()) {
+      flush_chat_wrap_word(state, columns);
+    }
+    state.pending_spaces.push_back(atom);
+    return;
+  }
+  state.pending_word.push_back(atom);
+  ++state.pending_word_columns;
+}
+
+[[nodiscard]] std::vector<WrappedChatLine> finish_chat_wrap(ChatWrapState& state, usize columns) {
+  flush_chat_wrap_word(state, columns);
+  if (state.lines.empty()) {
+    state.lines.emplace_back();
+  }
+  return std::move(state.lines);
 }
 
 [[nodiscard]] std::vector<std::string> wrap_plain_chat_text(
     std::string_view text,
     usize columns) {
-  std::vector<std::string> lines;
-  lines.emplace_back();
-  usize column = 0U;
+  ChatWrapState state;
+  state.lines.emplace_back();
   for (usize index = 0U; index < text.size();) {
     const usize next = arv::core::next_utf8_codepoint(text, index);
-    const std::string_view codepoint = text.substr(index, next - index);
+    consume_chat_wrap_atom(state, {text.substr(index, next - index)}, columns);
     index = next;
-    if (codepoint == "\n") {
-      lines.emplace_back();
-      column = 0U;
-      continue;
-    }
-    if (column >= columns) {
-      lines.emplace_back();
-      column = 0U;
-      if (codepoint == " ") {
-        continue;
-      }
-    }
-    if (column == 0U && codepoint == " " && !lines.back().empty()) {
-      continue;
-    }
-    lines.back().append(codepoint);
-    ++column;
+  }
+  std::vector<std::string> lines;
+  std::vector<WrappedChatLine> wrapped = finish_chat_wrap(state, columns);
+  lines.reserve(wrapped.size());
+  for (WrappedChatLine& line : wrapped) {
+    lines.push_back(std::move(line.text));
   }
   if (lines.empty()) {
     lines.emplace_back();
@@ -111,38 +192,18 @@ void append_wrapped_codepoint(
 [[nodiscard]] std::vector<WrappedChatLine> wrap_rich_chat_runs(
     const std::vector<arv::text::RichTextRun>& runs,
     usize columns) {
-  std::vector<WrappedChatLine> lines;
-  lines.emplace_back();
-  usize column = 0U;
+  ChatWrapState state;
+  state.lines.emplace_back();
   for (usize run_index = 0U; run_index < runs.size(); ++run_index) {
     const arv::text::RichTextRun& run = runs[run_index];
     for (usize index = 0U; index < run.text.size();) {
       const usize next = arv::core::next_utf8_codepoint(run.text, index);
       const std::string_view codepoint = std::string_view{run.text}.substr(index, next - index);
+      consume_chat_wrap_atom(state, {codepoint, &run, run_index}, columns);
       index = next;
-      if (codepoint == "\n") {
-        lines.emplace_back();
-        column = 0U;
-        continue;
-      }
-      if (column >= columns) {
-        lines.emplace_back();
-        column = 0U;
-        if (codepoint == " ") {
-          continue;
-        }
-      }
-      if (column == 0U && codepoint == " " && !lines.back().text.empty()) {
-        continue;
-      }
-      append_wrapped_codepoint(lines.back(), run, run_index, codepoint);
-      ++column;
     }
   }
-  if (lines.empty()) {
-    lines.emplace_back();
-  }
-  return lines;
+  return finish_chat_wrap(state, columns);
 }
 
 [[nodiscard]] std::string wrapped_line_id(const std::string& line_id, usize wrap_index) {
@@ -321,7 +382,7 @@ void append_chat_ui(UiTree& tree, ChatUiModel model) {
     return;
   }
   const UiTheme& theme = tree.theme();
-  constexpr f32 ChatWidth = 420.0F;
+  constexpr f32 ChatWidth = 560.0F;
   const f32 chat_text_width = ChatWidth - theme.layout.spacing_sm * 2.0F;
   const f32 chat_line_height =
       static_cast<f32>(theme.typography.size_md) + theme.layout.spacing_sm;
@@ -351,12 +412,17 @@ void append_chat_ui(UiTree& tree, ChatUiModel model) {
   stack.hit_test = model.input_active;
   const UiNodeID stack_id = tree.add_child(tree.root_id(), std::move(stack));
 
-  const usize max_visible_messages = model.max_visible_messages;
-  const usize start =
+  const usize max_visible_messages = std::max<usize>(1U, model.max_visible_messages);
+  const usize max_scroll_offset =
       model.messages.size() > max_visible_messages
           ? model.messages.size() - max_visible_messages
           : 0U;
-  for (usize index = start; index < model.messages.size(); ++index) {
+  const usize scroll_offset =
+      std::min(model.history_scroll_offset, max_scroll_offset);
+  const usize end =
+      model.messages.size() > scroll_offset ? model.messages.size() - scroll_offset : 0U;
+  const usize start = end > max_visible_messages ? end - max_visible_messages : 0U;
+  for (usize index = start; index < end; ++index) {
     const ChatLineView& line = model.messages[index];
     const f32 opacity = std::clamp(line.opacity, 0.0F, 1.0F);
     const std::string line_id = "chat.line." + std::to_string(index);

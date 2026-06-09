@@ -28,6 +28,7 @@ struct ChatUiModel {
   std::optional<std::string> pending_url_confirmation{};
   usize max_visible_messages{8U};
   const arv::text::LanguageCatalog* language{};
+  usize history_scroll_offset{};
 };
 
 struct ChatTooltipUiModel {
