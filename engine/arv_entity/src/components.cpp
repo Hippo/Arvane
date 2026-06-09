@@ -811,6 +811,192 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
     return Expected<VehicleAuthorityDefinition, EntityRegistryError>::success(authority);
   };
 
+  auto read_crash = [](const io::DataValue& root, std::string_view path)
+      -> Expected<VehicleCrashDefinition, EntityRegistryError> {
+    if (root.kind() != io::DataKind::Object) {
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          {std::string{path} + " must be an object"});
+    }
+
+    VehicleCrashDefinition crash;
+    crash.enabled = true;
+    auto bump_threshold = read_optional_f32(root, "bump_threshold", path, 0.0F);
+    auto hard_impact_threshold =
+        read_optional_f32(root, "hard_impact_threshold", path, 0.0F);
+    auto ejection_threshold =
+        read_optional_f32(root, "ejection_threshold", path, 0.0F);
+    auto destruction_threshold =
+        read_optional_f32(root, "destruction_threshold", path, 0.0F);
+    auto explosion_threshold =
+        read_optional_f32(root, "explosion_threshold", path, 0.0F);
+    auto min_direct_impact_dot =
+        read_optional_f32(root, "min_direct_impact_dot", path, crash.min_direct_impact_dot);
+    auto event_cooldown_ticks =
+        read_optional_u32(root, "event_cooldown_ticks", path, crash.event_cooldown_ticks);
+    auto velocity_retention =
+        read_optional_f32(root, "velocity_retention", path, crash.velocity_retention);
+    auto ejection_velocity_scale =
+        read_optional_f32(root, "ejection_velocity_scale", path, crash.ejection_velocity_scale);
+    auto ejection_upward_velocity =
+        read_optional_f32(root, "ejection_upward_velocity", path, crash.ejection_upward_velocity);
+    auto ejection_min_horizontal_speed =
+        read_optional_f32(root, "ejection_min_horizontal_speed", path, crash.ejection_min_horizontal_speed);
+    auto ejection_max_horizontal_speed =
+        read_optional_f32(root, "ejection_max_horizontal_speed", path, crash.ejection_max_horizontal_speed);
+    auto ejection_max_vertical_speed =
+        read_optional_f32(root, "ejection_max_vertical_speed", path, crash.ejection_max_vertical_speed);
+    auto remount_cooldown_ticks =
+        read_optional_u32(root, "remount_cooldown_ticks", path, crash.remount_cooldown_ticks);
+    auto destroy_on_destruction =
+        read_optional_bool(root, "destroy_on_destruction", path, crash.destroy_on_destruction);
+    auto explode_on_destruction =
+        read_optional_bool(root, "explode_on_destruction", path, crash.explode_on_destruction);
+
+    if (!bump_threshold)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(bump_threshold.error());
+    if (!hard_impact_threshold)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          hard_impact_threshold.error());
+    if (!ejection_threshold)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(ejection_threshold.error());
+    if (!destruction_threshold)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          destruction_threshold.error());
+    if (!explosion_threshold)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(explosion_threshold.error());
+    if (!min_direct_impact_dot)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          min_direct_impact_dot.error());
+    if (!event_cooldown_ticks)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          event_cooldown_ticks.error());
+    if (!velocity_retention)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          velocity_retention.error());
+    if (!ejection_velocity_scale)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          ejection_velocity_scale.error());
+    if (!ejection_upward_velocity)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          ejection_upward_velocity.error());
+    if (!ejection_min_horizontal_speed)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          ejection_min_horizontal_speed.error());
+    if (!ejection_max_horizontal_speed)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          ejection_max_horizontal_speed.error());
+    if (!ejection_max_vertical_speed)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          ejection_max_vertical_speed.error());
+    if (!remount_cooldown_ticks)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          remount_cooldown_ticks.error());
+    if (!destroy_on_destruction)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          destroy_on_destruction.error());
+    if (!explode_on_destruction)
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          explode_on_destruction.error());
+
+    crash.bump_threshold = bump_threshold.value();
+    crash.hard_impact_threshold = hard_impact_threshold.value();
+    crash.ejection_threshold = ejection_threshold.value();
+    crash.destruction_threshold = destruction_threshold.value();
+    crash.explosion_threshold = explosion_threshold.value();
+    crash.min_direct_impact_dot = min_direct_impact_dot.value();
+    crash.event_cooldown_ticks = event_cooldown_ticks.value();
+    crash.velocity_retention = velocity_retention.value();
+    crash.ejection_velocity_scale = ejection_velocity_scale.value();
+    crash.ejection_upward_velocity = ejection_upward_velocity.value();
+    crash.ejection_min_horizontal_speed = ejection_min_horizontal_speed.value();
+    crash.ejection_max_horizontal_speed = ejection_max_horizontal_speed.value();
+    crash.ejection_max_vertical_speed = ejection_max_vertical_speed.value();
+    crash.remount_cooldown_ticks = remount_cooldown_ticks.value();
+    crash.destroy_on_destruction = destroy_on_destruction.value();
+    crash.explode_on_destruction = explode_on_destruction.value();
+
+    const auto reject = [&](std::string_view suffix, std::string_view message)
+        -> Expected<VehicleCrashDefinition, EntityRegistryError> {
+      return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+          {std::string{path} + "." + std::string{suffix} + " " + std::string{message}});
+    };
+    if (crash.bump_threshold < 0.0F || crash.hard_impact_threshold < 0.0F ||
+        crash.ejection_threshold < 0.0F || crash.destruction_threshold < 0.0F ||
+        crash.explosion_threshold < 0.0F) {
+      return reject("thresholds", "must be non-negative");
+    }
+    if (crash.hard_impact_threshold > 0.0F &&
+        crash.bump_threshold > crash.hard_impact_threshold) {
+      return reject("hard_impact_threshold", "must be at least bump_threshold");
+    }
+    if (crash.ejection_threshold > 0.0F &&
+        crash.hard_impact_threshold > crash.ejection_threshold) {
+      return reject("ejection_threshold", "must be at least hard_impact_threshold");
+    }
+    if (crash.destruction_threshold > 0.0F &&
+        crash.hard_impact_threshold > crash.destruction_threshold) {
+      return reject("destruction_threshold", "must be at least hard_impact_threshold");
+    }
+    if (crash.destruction_threshold > 0.0F && crash.ejection_threshold > 0.0F &&
+        crash.ejection_threshold > crash.destruction_threshold) {
+      return reject("destruction_threshold", "must be at least ejection_threshold");
+    }
+    if (crash.explosion_threshold > 0.0F && crash.destruction_threshold > 0.0F &&
+        crash.explosion_threshold < crash.destruction_threshold) {
+      return reject("explosion_threshold", "must be at least destruction_threshold");
+    }
+    if (crash.min_direct_impact_dot < 0.0F || crash.min_direct_impact_dot > 1.0F) {
+      return reject("min_direct_impact_dot", "must be between 0 and 1");
+    }
+    if (crash.velocity_retention < 0.0F || crash.velocity_retention > 1.0F) {
+      return reject("velocity_retention", "must be between 0 and 1");
+    }
+    if (crash.ejection_velocity_scale < 0.0F ||
+        crash.ejection_upward_velocity < 0.0F ||
+        crash.ejection_min_horizontal_speed < 0.0F ||
+        crash.ejection_max_horizontal_speed < 0.0F ||
+        crash.ejection_max_vertical_speed < 0.0F) {
+      return reject("ejection_velocity", "values must be non-negative");
+    }
+    if (crash.ejection_min_horizontal_speed > crash.ejection_max_horizontal_speed) {
+      return reject("ejection_max_horizontal_speed", "must be at least ejection_min_horizontal_speed");
+    }
+
+    if (const io::DataValue* damage = root.get("damage"); damage != nullptr) {
+      if (damage->kind() != io::DataKind::Object) {
+        return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+            {std::string{path} + ".damage must be an object"});
+      }
+      auto bump_damage = read_optional_f32(*damage, "bump", std::string{path} + ".damage", 0.0F);
+      auto hard_damage =
+          read_optional_f32(*damage, "hard_impact", std::string{path} + ".damage", 0.0F);
+      auto ejection_damage =
+          read_optional_f32(*damage, "ejection", std::string{path} + ".damage", 0.0F);
+      auto destruction_damage =
+          read_optional_f32(*damage, "destruction", std::string{path} + ".damage", 0.0F);
+      if (!bump_damage)
+        return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(bump_damage.error());
+      if (!hard_damage)
+        return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(hard_damage.error());
+      if (!ejection_damage)
+        return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+            ejection_damage.error());
+      if (!destruction_damage)
+        return Expected<VehicleCrashDefinition, EntityRegistryError>::failure(
+            destruction_damage.error());
+      crash.bump_damage = bump_damage.value();
+      crash.hard_impact_damage = hard_damage.value();
+      crash.ejection_damage = ejection_damage.value();
+      crash.destruction_damage = destruction_damage.value();
+      if (crash.bump_damage < 0.0F || crash.hard_impact_damage < 0.0F ||
+          crash.ejection_damage < 0.0F || crash.destruction_damage < 0.0F) {
+        return reject("damage", "values must be non-negative");
+      }
+    }
+
+    return Expected<VehicleCrashDefinition, EntityRegistryError>::success(crash);
+  };
+
   auto read_seat = [](const io::DataValue& root, std::string_view path)
       -> Expected<VehicleSeatDefinition, EntityRegistryError> {
     if (root.kind() != io::DataKind::Object) {
@@ -1244,6 +1430,14 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
       return Expected<VehicleDefinition, EntityRegistryError>::failure(parsed_authority.error());
     }
     definition.authority = parsed_authority.value();
+
+    if (const io::DataValue* crash = vehicle_json.get("crash"); crash != nullptr) {
+      auto parsed_crash = read_crash(*crash, path + ".crash");
+      if (!parsed_crash) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(parsed_crash.error());
+      }
+      definition.crash = parsed_crash.value();
+    }
     return Expected<VehicleDefinition, EntityRegistryError>::success(std::move(definition));
   };
 

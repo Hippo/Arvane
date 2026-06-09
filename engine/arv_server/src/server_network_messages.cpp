@@ -309,6 +309,90 @@ void clear_active_skin_upload(
   return velocity;
 }
 
+[[nodiscard]] Vec3f crash_axis_normal(f32 attempted_delta, f32 velocity_axis) noexcept {
+  const f32 direction =
+      std::abs(attempted_delta) > 0.0001F ? attempted_delta : velocity_axis;
+  if (direction > 0.0F) {
+    return {-1.0F, 0.0F, 0.0F};
+  }
+  return {1.0F, 0.0F, 0.0F};
+}
+
+[[nodiscard]] std::optional<VehicleCrashContact> vehicle_crash_contact_from_resolution(
+    const physics::MovementResolution& resolved,
+    Vec3f pre_impact_velocity,
+    bool resolved_safe) noexcept {
+  VehicleCrashContact contact;
+  contact.pre_impact_velocity = pre_impact_velocity;
+  contact.resolved_safe = resolved_safe;
+  f32 best_impact = 0.0F;
+
+  const auto consider = [&](Vec3f normal) {
+    const f32 impact = std::max(0.0F, dot(pre_impact_velocity * -1.0F, normal));
+    if (impact > best_impact) {
+      best_impact = impact;
+      contact.normal = normal;
+    }
+  };
+  if (resolved.hit_x) {
+    consider(crash_axis_normal(resolved.attempted_delta.x, pre_impact_velocity.x));
+  }
+  if (resolved.hit_y) {
+    Vec3f normal{0.0F, 1.0F, 0.0F};
+    const f32 direction =
+        std::abs(resolved.attempted_delta.y) > 0.0001F
+            ? resolved.attempted_delta.y
+            : pre_impact_velocity.y;
+    if (direction > 0.0F) {
+      normal.y = -1.0F;
+    }
+    consider(normal);
+  }
+  if (resolved.hit_z) {
+    Vec3f normal{0.0F, 0.0F, 1.0F};
+    const f32 direction =
+        std::abs(resolved.attempted_delta.z) > 0.0001F
+            ? resolved.attempted_delta.z
+            : pre_impact_velocity.z;
+    if (direction > 0.0F) {
+      normal.z = -1.0F;
+    }
+    consider(normal);
+  }
+  if (best_impact <= 0.0F) {
+    return std::nullopt;
+  }
+  return contact;
+}
+
+void record_vehicle_crash_contact(
+    VehicleMovementValidationContext& context,
+    const physics::MovementResolution& resolved,
+    Vec3f pre_impact_velocity,
+    bool resolved_safe) noexcept {
+  const std::optional<VehicleCrashContact> contact =
+      vehicle_crash_contact_from_resolution(
+          resolved,
+          pre_impact_velocity,
+          resolved_safe);
+  if (!contact.has_value()) {
+    return;
+  }
+  const f32 existing_impact =
+      context.has_collision_contact
+          ? std::max(
+                0.0F,
+                dot(context.collision_contact.pre_impact_velocity * -1.0F,
+                    context.collision_contact.normal))
+          : -1.0F;
+  const f32 next_impact =
+      std::max(0.0F, dot(pre_impact_velocity * -1.0F, contact->normal));
+  if (!context.has_collision_contact || next_impact > existing_impact) {
+    context.has_collision_contact = true;
+    context.collision_contact = contact.value();
+  }
+}
+
 [[nodiscard]] AcceptedVehicleMovementState collision_resolved_vehicle_state(
     const protocol::ServerboundVehicleMove& move,
     const AcceptedVehicleMovementState& previous,
@@ -453,6 +537,60 @@ void update_vehicle_motion_animation(
   (void)world.set_entity_animation(vehicle_entity, anim);
 }
 
+void apply_vehicle_accepted_state_to_world(
+    world::WorldRuntime& world,
+    EntityID vehicle_entity,
+    const entity::VehicleDefinition& definition,
+    const AcceptedVehicleMovementState& accepted) {
+  (void)world.set_entity_transform(
+      vehicle_entity,
+      accepted.position,
+      accepted.rotation);
+  if (entity::EntityVelocity* velocity =
+          world.find_entity_velocity(vehicle_entity);
+      velocity != nullptr) {
+    velocity->linear = accepted.velocity;
+  }
+  if (entity::VehiclePhysicsComponent* physics =
+          world.find_entity_vehicle_physics(vehicle_entity);
+      physics != nullptr) {
+    physics->linear_velocity = accepted.velocity;
+    physics->angular_velocity = accepted.angular_velocity;
+    physics->grounded =
+        protocol::has_vehicle_move_flag(accepted.flags, protocol::VehicleMoveFlags::OnGround);
+    physics->in_water =
+        protocol::has_vehicle_move_flag(accepted.flags, protocol::VehicleMoveFlags::InWater);
+  }
+  update_vehicle_motion_animation(
+      world,
+      vehicle_entity,
+      definition,
+      accepted);
+  (void)world.update_passenger_attachment_transforms();
+  if (const entity::RideableComponent* rideable =
+          world.find_entity_rideable(vehicle_entity);
+      rideable != nullptr) {
+    for (const entity::Seat& seat : rideable->seats) {
+      if (seat.occupant.value == 0U) {
+        continue;
+      }
+      const std::optional<PlayerID> player_id =
+          world.player_for_entity(seat.occupant);
+      if (!player_id.has_value()) {
+        continue;
+      }
+      player::PlayerState* player_state =
+          world.find_player(player_id.value());
+      const entity::EntityTransform* passenger_transform =
+          world.find_entity_transform(seat.occupant);
+      if (player_state != nullptr && passenger_transform != nullptr) {
+        player_state->position = passenger_transform->position;
+        player_state->velocity = accepted.velocity;
+      }
+    }
+  }
+}
+
 [[nodiscard]] VehicleMovementValidationContext make_vehicle_validation_context(
     const world::WorldRuntime& world,
     const voxel::BlockRegistry& block_registry,
@@ -504,6 +642,13 @@ void update_vehicle_motion_animation(
           previous_velocity_sweep.hit_x ||
           previous_velocity_sweep.hit_y ||
           previous_velocity_sweep.hit_z;
+      if (context.previous_velocity_sweep_hit_solid) {
+        record_vehicle_crash_contact(
+            context,
+            previous_velocity_sweep,
+            previous.velocity,
+            true);
+      }
       const physics::MovementResolution proposed_sweep =
           physics::resolve_movement(
               query,
@@ -530,6 +675,11 @@ void update_vehicle_motion_animation(
                 physics::CollisionEpsilon)) {
           context.has_collision_resolved_state = true;
           context.collision_resolved_state = resolved_state;
+          record_vehicle_crash_contact(
+              context,
+              proposed_sweep,
+              previous.velocity,
+              true);
         }
       }
       collision_safe_start = start;
@@ -558,6 +708,11 @@ void update_vehicle_motion_animation(
             physics::CollisionEpsilon)) {
       context.has_collision_resolved_state = true;
       context.collision_resolved_state = resolved_state;
+      record_vehicle_crash_contact(
+          context,
+          resolved,
+          previous.velocity,
+          true);
     }
   }
   context.has_ground_support =
@@ -621,6 +776,157 @@ void update_vehicle_motion_animation(
   const f32 vertical_clearance =
       collision->box.y + tuning.body_height + physics::CollisionEpsilon;
   return transform->position + Vec3f{0.0F, vertical_clearance, 0.0F};
+}
+
+[[nodiscard]] bool crash_severity_at_least(
+    entity::CrashSeverity severity,
+    entity::CrashSeverity minimum) noexcept {
+  return static_cast<u8>(severity) >= static_cast<u8>(minimum);
+}
+
+[[nodiscard]] f32 crash_damage_for_severity(
+    const entity::VehicleCrashDefinition& crash,
+    entity::CrashSeverity severity) noexcept {
+  switch (severity) {
+    case entity::CrashSeverity::Bump:
+      return crash.bump_damage;
+    case entity::CrashSeverity::HardImpact:
+      return crash.hard_impact_damage;
+    case entity::CrashSeverity::Ejection:
+      return crash.ejection_damage;
+    case entity::CrashSeverity::Destruction:
+      return crash.destruction_damage;
+    case entity::CrashSeverity::None:
+      break;
+  }
+  return 0.0F;
+}
+
+[[nodiscard]] bool crash_should_explode(
+    const entity::VehicleCrashDefinition& crash,
+    const VehicleCrashAssessment& assessment) noexcept {
+  if (!crash.explode_on_destruction ||
+      assessment.severity != entity::CrashSeverity::Destruction) {
+    return false;
+  }
+  return crash.explosion_threshold <= 0.0F ||
+         assessment.normal_impact_speed >= crash.explosion_threshold;
+}
+
+[[nodiscard]] VehicleCrashDebugInfo make_vehicle_crash_debug_info(
+    EntityNetID vehicle_net_id,
+    const entity::VehicleDefinition& definition,
+    const protocol::ServerboundVehicleMove& move,
+    const VehicleMovementValidationContext& context,
+    const VehicleMovementValidationResult& validation,
+    const VehicleCrashAssessment& assessment,
+    const AcceptedVehicleMovementState& accepted) {
+  VehicleCrashDebugInfo debug;
+  debug.vehicle_id = vehicle_net_id;
+  debug.definition = definition.name;
+  debug.server_tick = context.server_tick;
+  debug.sequence = move.sequence;
+  debug.accepted_move = validation.accepted;
+  debug.sent_correction = validation.should_send_correction;
+  debug.validation_reason = validation.reason;
+  debug.final_aabb_overlaps_solid = context.final_aabb_overlaps_solid;
+  debug.proposed_sweep_hit_solid = context.proposed_sweep_hit_solid;
+  debug.previous_velocity_sweep_hit_solid =
+      context.previous_velocity_sweep_hit_solid;
+  debug.had_collision_contact = context.has_collision_contact;
+  debug.packet_velocity = move.velocity;
+  debug.accepted_velocity = accepted.velocity;
+  debug.severity = assessment.severity;
+  debug.normal_impact_speed = assessment.normal_impact_speed;
+  debug.direct_impact_dot = assessment.direct_impact_dot;
+  if (context.has_collision_contact) {
+    debug.contact_resolved_safe = context.collision_contact.resolved_safe;
+    debug.contact_normal = context.collision_contact.normal;
+    debug.pre_impact_velocity = context.collision_contact.pre_impact_velocity;
+  }
+  return debug;
+}
+
+[[nodiscard]] Vec3f vehicle_effect_position(
+    const world::WorldRuntime& world,
+    EntityID vehicle_entity) noexcept {
+  const entity::EntityTransform* transform =
+      world.find_entity_transform(vehicle_entity);
+  if (transform == nullptr) {
+    return {};
+  }
+  const entity::EntityCollision* collision =
+      world.find_entity_collision(vehicle_entity);
+  if (collision == nullptr) {
+    return transform->position;
+  }
+  return transform->position + Vec3f{0.0F, collision->box.y * 0.5F, 0.0F};
+}
+
+[[nodiscard]] std::vector<EntityID> vehicle_occupants(
+    const world::WorldRuntime& world,
+    EntityID vehicle_entity) {
+  std::vector<EntityID> occupants;
+  const entity::RideableComponent* rideable =
+      world.find_entity_rideable(vehicle_entity);
+  if (rideable == nullptr) {
+    return occupants;
+  }
+  occupants.reserve(rideable->seats.size());
+  for (const entity::Seat& seat : rideable->seats) {
+    if (seat.occupant.value != 0U) {
+      occupants.push_back(seat.occupant);
+    }
+  }
+  return occupants;
+}
+
+[[nodiscard]] std::optional<Vec3f> crash_ejection_position(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry& block_registry,
+    EntityID vehicle_entity,
+    const player::PlayerTuning& tuning) noexcept {
+  std::optional<Vec3f> position =
+      world.find_safe_dismount_position(
+          vehicle_entity,
+          block_registry,
+          tuning);
+  if (position.has_value()) {
+    return position;
+  }
+  return airborne_aircraft_dismount_position(
+      world,
+      vehicle_entity,
+      tuning);
+}
+
+[[nodiscard]] Vec3f crash_ejection_velocity(
+    const entity::VehicleCrashDefinition& crash,
+    const VehicleCrashContact& contact) noexcept {
+  Vec3f launch = contact.pre_impact_velocity * crash.ejection_velocity_scale;
+  Vec3f horizontal{launch.x, 0.0F, launch.z};
+  f32 horizontal_speed = length(horizontal);
+  Vec3f direction = horizontal_speed > 0.001F
+                       ? horizontal * (1.0F / horizontal_speed)
+                       : normalize_or_zero(Vec3f{-contact.normal.x, 0.0F, -contact.normal.z});
+  if (horizontal_speed > crash.ejection_max_horizontal_speed &&
+      crash.ejection_max_horizontal_speed >= 0.0F) {
+    horizontal_speed = crash.ejection_max_horizontal_speed;
+  }
+  if (horizontal_speed < crash.ejection_min_horizontal_speed) {
+    horizontal_speed = crash.ejection_min_horizontal_speed;
+  }
+  horizontal = direction * horizontal_speed;
+  launch.x = horizontal.x;
+  launch.z = horizontal.z;
+  launch.y = std::max(launch.y + crash.ejection_upward_velocity, crash.ejection_upward_velocity);
+  if (crash.ejection_max_vertical_speed > 0.0F) {
+    launch.y = std::clamp(
+        launch.y,
+        -crash.ejection_max_vertical_speed,
+        crash.ejection_max_vertical_speed);
+  }
+  return launch;
 }
 
 } // namespace
@@ -1530,6 +1836,13 @@ void ServerRuntimeImpl::handle_ride_entity_request(
       max_mount_distance) {
     return;
   }
+  if (const auto cooldown = crash_remount_cooldowns_.find(session->player_id);
+      cooldown != crash_remount_cooldowns_.end()) {
+    if (tick_index_ < cooldown->second) {
+      return;
+    }
+    crash_remount_cooldowns_.erase(cooldown);
+  }
 
   std::optional<std::string_view> requested_seat;
   if (!request.seat_id.empty()) {
@@ -1645,6 +1958,162 @@ void ServerRuntimeImpl::handle_vehicle_action(
   (void)action;
 }
 
+bool ServerRuntimeImpl::apply_vehicle_crash(
+    EntityID vehicle_entity,
+    EntityNetID vehicle_net_id,
+    const entity::VehicleDefinition& definition,
+    const VehicleCrashAssessment& assessment,
+    const VehicleCrashContact& contact,
+    AcceptedVehicleMovementState& accepted,
+    VehicleCrashDebugInfo* debug) {
+  if (assessment.severity == entity::CrashSeverity::None ||
+      !definition.crash.enabled ||
+      !contact.resolved_safe) {
+    return false;
+  }
+  if (const auto cooldown = vehicle_crash_cooldowns_.find(vehicle_net_id);
+      cooldown != vehicle_crash_cooldowns_.end()) {
+    if (tick_index_ < cooldown->second) {
+      if (debug != nullptr) {
+        debug->cooldown_suppressed = true;
+        debug->cooldown_until = cooldown->second;
+      }
+      return false;
+    }
+    vehicle_crash_cooldowns_.erase(cooldown);
+  }
+
+  const f32 damage =
+      crash_damage_for_severity(definition.crash, assessment.severity);
+  const bool has_non_bump_consequence =
+      crash_severity_at_least(assessment.severity, entity::CrashSeverity::HardImpact);
+  if (!has_non_bump_consequence && damage <= 0.0F) {
+    return false;
+  }
+  if (debug != nullptr) {
+    debug->consequence_applied = true;
+    debug->damage_applied = damage;
+  }
+  vehicle_crash_cooldowns_[vehicle_net_id] =
+      tick_index_ + std::max<TickIndex>(1U, definition.crash.event_cooldown_ticks);
+
+  if (has_non_bump_consequence) {
+    accepted.velocity = accepted.velocity * definition.crash.velocity_retention;
+    accepted.angular_velocity =
+        accepted.angular_velocity * definition.crash.velocity_retention;
+    apply_vehicle_accepted_state_to_world(
+        default_world_,
+        vehicle_entity,
+        definition,
+        accepted);
+  }
+
+  if (damage > 0.0F) {
+    (void)default_world_.apply_damage(
+        {vehicle_entity,
+         vehicle_entity,
+         damage,
+         world::DamageCause::Generic});
+  }
+
+  if (crash_severity_at_least(assessment.severity, entity::CrashSeverity::Ejection) &&
+      block_registry_ != nullptr) {
+    const std::vector<EntityID> occupants =
+        vehicle_occupants(default_world_, vehicle_entity);
+    const std::optional<Vec3f> ejection_position =
+        crash_ejection_position(
+            default_world_,
+            *block_registry_,
+            vehicle_entity,
+            player_tuning_);
+    if (ejection_position.has_value()) {
+      const Vec3f launch =
+          crash_ejection_velocity(definition.crash, contact);
+      bool ejected_any = false;
+      u32 ejected_count = 0U;
+      for (const EntityID occupant : occupants) {
+        const std::optional<PlayerID> player_id =
+            default_world_.player_for_entity(occupant);
+        if (!default_world_.dismount_entity(occupant)) {
+          continue;
+        }
+        ejected_any = true;
+        ++ejected_count;
+        (void)default_world_.set_entity_position(occupant, ejection_position.value());
+        if (entity::EntityVelocity* velocity =
+                default_world_.find_entity_velocity(occupant);
+            velocity != nullptr) {
+          velocity->linear = launch;
+        }
+        if (player_id.has_value()) {
+          player::PlayerState* player_state =
+              default_world_.find_player(player_id.value());
+          if (player_state != nullptr) {
+            player_state->position = ejection_position.value();
+            player_state->velocity = launch;
+            player_state->grounded = false;
+            player_state->knockback_control_suppression_ticks =
+                std::max<u32>(player_state->knockback_control_suppression_ticks, 6U);
+            if (definition.crash.remount_cooldown_ticks > 0U) {
+              crash_remount_cooldowns_[player_id.value()] =
+                  tick_index_ + definition.crash.remount_cooldown_ticks;
+            }
+            sessions_.for_each_session([&](const ServerSession& occupant_session) {
+              if (!occupant_session.authenticated ||
+                  occupant_session.player_id != player_id.value()) {
+                return;
+              }
+              send_player_velocity(occupant_session, *player_state);
+            });
+          }
+        }
+        broadcast_ride_ended(
+            occupant,
+            vehicle_entity,
+            ejection_position.value());
+      }
+      if (ejected_any) {
+        accepted_vehicle_movement_.erase(vehicle_net_id);
+      }
+      if (debug != nullptr) {
+        debug->ejected_occupants = ejected_count;
+      }
+      if (default_world_.entity_exists(vehicle_entity)) {
+        broadcast_entity_passengers(vehicle_entity);
+      }
+    }
+  }
+
+  if (assessment.severity == entity::CrashSeverity::Destruction) {
+    if (crash_should_explode(definition.crash, assessment)) {
+      broadcast_vehicle_crash_particles(
+          vehicle_effect_position(default_world_, vehicle_entity),
+          contact.normal,
+          static_cast<u32>(
+              vehicle_net_id.value ^ static_cast<u64>(tick_index_)));
+      if (debug != nullptr) {
+        debug->explosion_broadcast = true;
+      }
+    }
+    if (definition.crash.destroy_on_destruction &&
+        default_world_.destroy_entity(vehicle_entity, world::EntityDespawnReason::Removed)) {
+      accepted_vehicle_movement_.erase(vehicle_net_id);
+      vehicle_crash_cooldowns_.erase(vehicle_net_id);
+      default_world_.flush_entity_despawns();
+      broadcast_pending_ride_ended_events();
+      if (debug != nullptr) {
+        debug->vehicle_destroyed = true;
+        debug->accepted_velocity = accepted.velocity;
+      }
+      return true;
+    }
+  }
+  if (debug != nullptr) {
+    debug->accepted_velocity = accepted.velocity;
+  }
+  return false;
+}
+
 void ServerRuntimeImpl::handle_vehicle_move(
     net::ConnectionID connection_id,
     const protocol::ServerboundVehicleMove& move) {
@@ -1700,54 +2169,47 @@ void ServerRuntimeImpl::handle_vehicle_move(
   if (!validation.accepted) {
     if (validation.reason == protocol::VehicleCorrectionReason::Collision) {
       previous = validation.accepted_state;
-      (void)default_world_.set_entity_transform(
-          vehicle_entity.value(),
-          previous.position,
-          previous.rotation);
-      if (entity::EntityVelocity* velocity =
-              default_world_.find_entity_velocity(vehicle_entity.value());
-          velocity != nullptr) {
-        velocity->linear = previous.velocity;
-      }
-      if (entity::VehiclePhysicsComponent* physics =
-              default_world_.find_entity_vehicle_physics(vehicle_entity.value());
-          physics != nullptr) {
-        physics->linear_velocity = previous.velocity;
-        physics->angular_velocity = previous.angular_velocity;
-        physics->grounded =
-            protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::OnGround);
-        physics->in_water =
-            protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::InWater);
-      }
-      update_vehicle_motion_animation(
+      apply_vehicle_accepted_state_to_world(
           default_world_,
           vehicle_entity.value(),
           *definition,
           previous);
-      (void)default_world_.update_passenger_attachment_transforms();
-      if (const entity::RideableComponent* rideable =
-              default_world_.find_entity_rideable(vehicle_entity.value());
-          rideable != nullptr) {
-        for (const entity::Seat& seat : rideable->seats) {
-          if (seat.occupant.value == 0U) {
-            continue;
-          }
-          const std::optional<PlayerID> player_id =
-              default_world_.player_for_entity(seat.occupant);
-          if (!player_id.has_value()) {
-            continue;
-          }
-          player::PlayerState* player_state =
-              default_world_.find_player(player_id.value());
-          const entity::EntityTransform* passenger_transform =
-              default_world_.find_entity_transform(seat.occupant);
-          if (player_state != nullptr && passenger_transform != nullptr) {
-            player_state->position = passenger_transform->position;
-            player_state->velocity = previous.velocity;
-          }
-        }
+      const VehicleCrashAssessment crash =
+          context.has_collision_contact
+              ? assess_vehicle_crash(definition->crash, context.collision_contact)
+              : VehicleCrashAssessment{};
+      VehicleCrashDebugInfo debug =
+          make_vehicle_crash_debug_info(
+              move.vehicle_id,
+              *definition,
+              move,
+              context,
+              validation,
+              crash,
+              previous);
+      if (apply_vehicle_crash(
+              vehicle_entity.value(),
+              move.vehicle_id,
+              *definition,
+              crash,
+              context.collision_contact,
+              previous,
+              &debug)) {
+        last_vehicle_crash_debug_[move.vehicle_id] = std::move(debug);
+        return;
       }
+      last_vehicle_crash_debug_[move.vehicle_id] = std::move(debug);
       broadcast_vehicle_state(move.vehicle_id, previous);
+    } else {
+      last_vehicle_crash_debug_[move.vehicle_id] =
+          make_vehicle_crash_debug_info(
+              move.vehicle_id,
+              *definition,
+              move,
+              context,
+              validation,
+              VehicleCrashAssessment{},
+              previous);
     }
     if (validation.should_send_correction) {
       send_vehicle_correction(
@@ -1761,53 +2223,36 @@ void ServerRuntimeImpl::handle_vehicle_move(
   }
 
   previous = validation.accepted_state;
-  (void)default_world_.set_entity_transform(
-      vehicle_entity.value(),
-      previous.position,
-      previous.rotation);
-  if (entity::EntityVelocity* velocity =
-          default_world_.find_entity_velocity(vehicle_entity.value());
-      velocity != nullptr) {
-    velocity->linear = previous.velocity;
-  }
-  if (entity::VehiclePhysicsComponent* physics =
-          default_world_.find_entity_vehicle_physics(vehicle_entity.value());
-      physics != nullptr) {
-    physics->linear_velocity = previous.velocity;
-    physics->angular_velocity = previous.angular_velocity;
-    physics->grounded =
-        protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::OnGround);
-    physics->in_water =
-        protocol::has_vehicle_move_flag(previous.flags, protocol::VehicleMoveFlags::InWater);
-  }
-  update_vehicle_motion_animation(
+  apply_vehicle_accepted_state_to_world(
       default_world_,
       vehicle_entity.value(),
       *definition,
       previous);
-  (void)default_world_.update_passenger_attachment_transforms();
-  if (const entity::RideableComponent* rideable =
-          default_world_.find_entity_rideable(vehicle_entity.value());
-      rideable != nullptr) {
-    for (const entity::Seat& seat : rideable->seats) {
-      if (seat.occupant.value == 0U) {
-        continue;
-      }
-      const std::optional<PlayerID> player_id =
-          default_world_.player_for_entity(seat.occupant);
-      if (!player_id.has_value()) {
-        continue;
-      }
-      player::PlayerState* player_state =
-          default_world_.find_player(player_id.value());
-      const entity::EntityTransform* passenger_transform =
-          default_world_.find_entity_transform(seat.occupant);
-      if (player_state != nullptr && passenger_transform != nullptr) {
-        player_state->position = passenger_transform->position;
-        player_state->velocity = previous.velocity;
-      }
-    }
+  const VehicleCrashAssessment crash =
+      context.has_collision_contact
+          ? assess_vehicle_crash(definition->crash, context.collision_contact)
+          : VehicleCrashAssessment{};
+  VehicleCrashDebugInfo debug =
+      make_vehicle_crash_debug_info(
+          move.vehicle_id,
+          *definition,
+          move,
+          context,
+          validation,
+          crash,
+          previous);
+  if (apply_vehicle_crash(
+          vehicle_entity.value(),
+          move.vehicle_id,
+          *definition,
+          crash,
+          context.collision_contact,
+          previous,
+          &debug)) {
+    last_vehicle_crash_debug_[move.vehicle_id] = std::move(debug);
+    return;
   }
+  last_vehicle_crash_debug_[move.vehicle_id] = std::move(debug);
   broadcast_vehicle_state(move.vehicle_id, previous);
 }
 

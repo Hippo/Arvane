@@ -98,6 +98,10 @@ inline constexpr f32 VehicleImpactStopSpeedEpsilonBlocksPerSecond = 0.25F;
       state};
 }
 
+[[nodiscard]] bool threshold_enabled(f32 threshold) noexcept {
+  return threshold > 0.0F;
+}
+
 } // namespace
 
 bool vehicle_sequence_is_newer(u32 sequence, u32 previous) noexcept {
@@ -214,6 +218,54 @@ VehicleMovementValidationResult validate_serverbound_vehicle_move(
       false,
       protocol::VehicleCorrectionReason::Unknown,
       accepted_state_from_packet(packet, context)};
+}
+
+VehicleCrashAssessment assess_vehicle_crash(
+    const entity::VehicleCrashDefinition& crash,
+    const VehicleCrashContact& contact) noexcept {
+  VehicleCrashAssessment assessment;
+  if (!crash.enabled || !finite(contact.normal) ||
+      !finite(contact.pre_impact_velocity)) {
+    return assessment;
+  }
+
+  const f32 speed = length(contact.pre_impact_velocity);
+  const f32 normal_length = length(contact.normal);
+  if (speed <= 0.001F || normal_length <= 0.001F) {
+    return assessment;
+  }
+
+  const Vec3f normal = contact.normal * (1.0F / normal_length);
+  assessment.normal_impact_speed =
+      std::max(0.0F, dot(contact.pre_impact_velocity * -1.0F, normal));
+  assessment.direct_impact_dot =
+      assessment.normal_impact_speed / std::max(speed, 0.001F);
+  if (assessment.normal_impact_speed <= 0.0F) {
+    return assessment;
+  }
+
+  if (assessment.direct_impact_dot + 0.0001F < crash.min_direct_impact_dot) {
+    if (threshold_enabled(crash.bump_threshold) &&
+        assessment.normal_impact_speed >= crash.bump_threshold) {
+      assessment.severity = entity::CrashSeverity::Bump;
+    }
+    return assessment;
+  }
+
+  if (threshold_enabled(crash.destruction_threshold) &&
+      assessment.normal_impact_speed >= crash.destruction_threshold) {
+    assessment.severity = entity::CrashSeverity::Destruction;
+  } else if (threshold_enabled(crash.ejection_threshold) &&
+             assessment.normal_impact_speed >= crash.ejection_threshold) {
+    assessment.severity = entity::CrashSeverity::Ejection;
+  } else if (threshold_enabled(crash.hard_impact_threshold) &&
+             assessment.normal_impact_speed >= crash.hard_impact_threshold) {
+    assessment.severity = entity::CrashSeverity::HardImpact;
+  } else if (threshold_enabled(crash.bump_threshold) &&
+             assessment.normal_impact_speed >= crash.bump_threshold) {
+    assessment.severity = entity::CrashSeverity::Bump;
+  }
+  return assessment;
 }
 
 } // namespace arv::server

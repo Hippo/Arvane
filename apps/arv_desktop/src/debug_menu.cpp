@@ -789,6 +789,230 @@ void render_timing_histogram(
   }
 }
 
+[[nodiscard]] const char* vehicle_physics_label(
+    entity::VehiclePhysicsKind physics) noexcept {
+  switch (physics) {
+    case entity::VehiclePhysicsKind::LivingMount:
+      return "living_mount";
+    case entity::VehiclePhysicsKind::SurfaceWaterVehicle:
+      return "surface_water";
+    case entity::VehiclePhysicsKind::GroundVehicle:
+      return "ground";
+    case entity::VehiclePhysicsKind::Aircraft:
+      return "aircraft";
+    case entity::VehiclePhysicsKind::Submersible:
+      return "submersible";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] const char* crash_severity_label(
+    entity::CrashSeverity severity) noexcept {
+  switch (severity) {
+    case entity::CrashSeverity::None:
+      return "none";
+    case entity::CrashSeverity::Bump:
+      return "bump";
+    case entity::CrashSeverity::HardImpact:
+      return "hard";
+    case entity::CrashSeverity::Ejection:
+      return "ejection";
+    case entity::CrashSeverity::Destruction:
+      return "destruction";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] const char* vehicle_correction_reason_label(
+    protocol::VehicleCorrectionReason reason) noexcept {
+  switch (reason) {
+    case protocol::VehicleCorrectionReason::InvalidNumber:
+      return "invalid_number";
+    case protocol::VehicleCorrectionReason::StalePacket:
+      return "stale";
+    case protocol::VehicleCorrectionReason::NotMounted:
+      return "not_mounted";
+    case protocol::VehicleCorrectionReason::NotController:
+      return "not_controller";
+    case protocol::VehicleCorrectionReason::TooFast:
+      return "too_fast";
+    case protocol::VehicleCorrectionReason::TooMuchAcceleration:
+      return "too_much_accel";
+    case protocol::VehicleCorrectionReason::TooMuchAngularVelocity:
+      return "too_much_angular";
+    case protocol::VehicleCorrectionReason::TooMuchVerticalVelocity:
+      return "too_much_vertical";
+    case protocol::VehicleCorrectionReason::Collision:
+      return "collision";
+    case protocol::VehicleCorrectionReason::MissingGroundSupport:
+      return "missing_ground";
+    case protocol::VehicleCorrectionReason::MissingWaterSupport:
+      return "missing_water";
+    case protocol::VehicleCorrectionReason::AircraftEnteredUnloadedChunk:
+      return "aircraft_unloaded_chunk";
+    case protocol::VehicleCorrectionReason::InvalidSubmersibleMedium:
+      return "invalid_sub_medium";
+    case protocol::VehicleCorrectionReason::Unknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] std::string vehicle_move_flags_label(
+    protocol::VehicleMoveFlags flags) {
+  std::string out;
+  auto append = [&](protocol::VehicleMoveFlags flag, std::string_view label) {
+    if (!protocol::has_vehicle_move_flag(flags, flag)) {
+      return;
+    }
+    if (!out.empty()) {
+      out += ", ";
+    }
+    out += label;
+  };
+  append(protocol::VehicleMoveFlags::Jump, "jump");
+  append(protocol::VehicleMoveFlags::Brake, "brake");
+  append(protocol::VehicleMoveFlags::Sprint, "sprint");
+  append(protocol::VehicleMoveFlags::OnGround, "ground");
+  append(protocol::VehicleMoveFlags::InWater, "water");
+  return out.empty() ? std::string{"none"} : out;
+}
+
+void imgui_vec3_line(const char* label, Vec3f value) {
+  ImGui::Text(
+      "%s: %.2f, %.2f, %.2f",
+      label,
+      static_cast<double>(value.x),
+      static_cast<double>(value.y),
+      static_cast<double>(value.z));
+}
+
+void render_vehicle_debug_overlay(
+    const DebugMenuState& state,
+    const server::ServerRuntime& server,
+    const client::ClientRuntime& client) {
+  if (!state.show_vehicle_debug_overlay) {
+    return;
+  }
+  const std::optional<client::VehicleDebugTelemetry> telemetry =
+      client.vehicle_debug_telemetry();
+  if (!telemetry.has_value()) {
+    return;
+  }
+
+  ImGui::SetNextWindowPos(ImVec2{14.0F, 72.0F}, ImGuiCond_Always);
+  ImGui::SetNextWindowBgAlpha(0.68F);
+  constexpr ImGuiWindowFlags Flags =
+      ImGuiWindowFlags_NoDecoration |
+      ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings |
+      ImGuiWindowFlags_NoFocusOnAppearing |
+      ImGuiWindowFlags_NoNav |
+      ImGuiWindowFlags_NoInputs;
+  if (!ImGui::Begin("Vehicle Debug Overlay", nullptr, Flags)) {
+    ImGui::End();
+    return;
+  }
+
+  const client::VehicleDebugTelemetry& info = telemetry.value();
+  ImGui::Text(
+      "Vehicle %s #%u (%s)",
+      info.definition.c_str(),
+      info.vehicle_id.value,
+      vehicle_physics_label(info.physics));
+  ImGui::Text(
+      "Speed %.2f  horizontal %.2f",
+      static_cast<double>(info.speed),
+      static_cast<double>(info.horizontal_speed));
+  imgui_vec3_line("Velocity", info.velocity);
+  imgui_vec3_line("Acceleration", info.acceleration);
+  imgui_vec3_line("Angular velocity", info.angular_velocity);
+  ImGui::Text(
+      "Input throttle %.2f  steer %.2f  dt %.3f",
+      static_cast<double>(info.throttle),
+      static_cast<double>(info.steer),
+      static_cast<double>(info.dt_seconds));
+  const std::string flags = vehicle_move_flags_label(info.flags);
+  ImGui::Text(
+      "Client tick %llu  seq %u%s  flags %s",
+      static_cast<unsigned long long>(info.client_tick),
+      info.last_sent_sequence,
+      info.sent_this_tick ? " sent" : "",
+      flags.c_str());
+  ImGui::Text(
+      "Client hit %s  impact %.2f  memory %u",
+      info.hit_collision_this_tick ? "yes" : "no",
+      static_cast<double>(info.collision_normal_impact_speed),
+      info.impact_memory_ticks);
+  if (info.hit_collision_this_tick) {
+    imgui_vec3_line("Client normal", info.collision_normal);
+  }
+
+  if (info.has_crash_tuning) {
+    ImGui::Separator();
+    ImGui::Text(
+        "Thresholds bump %.1f  hard %.1f  eject %.1f  destroy %.1f",
+        static_cast<double>(info.crash.bump_threshold),
+        static_cast<double>(info.crash.hard_impact_threshold),
+        static_cast<double>(info.crash.ejection_threshold),
+        static_cast<double>(info.crash.destruction_threshold));
+    ImGui::Text(
+        "Direct dot min %.2f  retention %.2f  cooldown %u",
+        static_cast<double>(info.crash.min_direct_impact_dot),
+        static_cast<double>(info.crash.velocity_retention),
+        info.crash.event_cooldown_ticks);
+  }
+
+  const std::optional<server::VehicleCrashDebugInfo> crash =
+      server.last_vehicle_crash_debug(info.vehicle_id);
+  ImGui::Separator();
+  if (!crash.has_value()) {
+    ImGui::TextUnformatted("Server crash: no move processed");
+  } else {
+    const server::VehicleCrashDebugInfo& server_info = crash.value();
+    ImGui::Text(
+        "Server tick %llu  seq %u  %s",
+        static_cast<unsigned long long>(server_info.server_tick),
+        server_info.sequence,
+        server_info.accepted_move ? "accepted" : "rejected");
+    ImGui::Text(
+        "Reason %s  correction %s",
+        vehicle_correction_reason_label(server_info.validation_reason),
+        server_info.sent_correction ? "yes" : "no");
+    ImGui::Text(
+        "Sweeps prev %s  proposed %s  final-solid %s  contact %s",
+        server_info.previous_velocity_sweep_hit_solid ? "yes" : "no",
+        server_info.proposed_sweep_hit_solid ? "yes" : "no",
+        server_info.final_aabb_overlaps_solid ? "yes" : "no",
+        server_info.had_collision_contact ? "yes" : "no");
+    ImGui::Text(
+        "Severity %s  impact %.2f  dot %.2f",
+        crash_severity_label(server_info.severity),
+        static_cast<double>(server_info.normal_impact_speed),
+        static_cast<double>(server_info.direct_impact_dot));
+    if (server_info.had_collision_contact) {
+      imgui_vec3_line("Server normal", server_info.contact_normal);
+      imgui_vec3_line("Pre-impact velocity", server_info.pre_impact_velocity);
+    }
+    imgui_vec3_line("Accepted velocity", server_info.accepted_velocity);
+    ImGui::Text(
+        "Outcome applied %s  cooldown %s  damage %.1f  ejected %u  destroyed %s  explosion %s",
+        server_info.consequence_applied ? "yes" : "no",
+        server_info.cooldown_suppressed ? "yes" : "no",
+        static_cast<double>(server_info.damage_applied),
+        server_info.ejected_occupants,
+        server_info.vehicle_destroyed ? "yes" : "no",
+        server_info.explosion_broadcast ? "yes" : "no");
+    if (server_info.cooldown_suppressed) {
+      ImGui::Text(
+          "Cooldown until tick %llu",
+          static_cast<unsigned long long>(server_info.cooldown_until));
+    }
+  }
+
+  ImGui::End();
+}
+
 void render_player_tab(
     DebugMenuState& state,
     server::ServerRuntime& server,
@@ -851,6 +1075,7 @@ void render_player_tab(
   }
 
   ImGui::SeparatorText("Toggles");
+  ImGui::Checkbox("Vehicle debug overlay", &state.show_vehicle_debug_overlay);
   ImGui::Checkbox("Chunk boundaries", &state.show_chunk_boundaries);
   ImGui::Checkbox("Collision bounds", &state.show_collision_bounds);
   ImGui::Checkbox("Lighting view", &state.show_lighting_view);
@@ -2118,6 +2343,7 @@ DebugMenuResult render_debug_menu(
         world_jobs.pressure_snapshot());
     record_snapshot_profile_sample(state);
   }
+  render_vehicle_debug_overlay(state, server, client);
   if (!state.open) {
     return result;
   }

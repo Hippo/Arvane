@@ -56,7 +56,86 @@ arv::server::VehicleMovementValidationContext controller_context() {
   return context;
 }
 
+arv::entity::VehicleCrashDefinition crash_tuning() {
+  arv::entity::VehicleCrashDefinition crash;
+  crash.enabled = true;
+  crash.bump_threshold = 2.0F;
+  crash.hard_impact_threshold = 8.0F;
+  crash.ejection_threshold = 16.0F;
+  crash.destruction_threshold = 24.0F;
+  crash.min_direct_impact_dot = 0.35F;
+  return crash;
+}
+
 } // namespace
+
+TEST(VehicleCrashAssessmentTests, UsesImpactSpeedIntoNormalInsteadOfRawSpeed) {
+  auto contact = arv::server::VehicleCrashContact{
+      {-1.0F, 0.0F, 0.0F},
+      {0.0F, 0.0F, -40.0F},
+      true};
+
+  const auto assessment =
+      arv::server::assess_vehicle_crash(crash_tuning(), contact);
+
+  EXPECT_EQ(assessment.severity, arv::entity::CrashSeverity::None);
+  EXPECT_FLOAT_EQ(assessment.normal_impact_speed, 0.0F);
+}
+
+TEST(VehicleCrashAssessmentTests, ClassifiesDirectThresholds) {
+  auto contact = arv::server::VehicleCrashContact{
+      {-1.0F, 0.0F, 0.0F},
+      {18.0F, 0.0F, 0.0F},
+      true};
+
+  auto assessment = arv::server::assess_vehicle_crash(crash_tuning(), contact);
+
+  EXPECT_EQ(assessment.severity, arv::entity::CrashSeverity::Ejection);
+  EXPECT_FLOAT_EQ(assessment.normal_impact_speed, 18.0F);
+
+  contact.pre_impact_velocity = {28.0F, 0.0F, 0.0F};
+  assessment = arv::server::assess_vehicle_crash(crash_tuning(), contact);
+
+  EXPECT_EQ(assessment.severity, arv::entity::CrashSeverity::Destruction);
+}
+
+TEST(VehicleCrashAssessmentTests, ShallowScrapesAreCappedAtBump) {
+  auto contact = arv::server::VehicleCrashContact{
+      {-1.0F, 0.0F, 0.0F},
+      {2.1F, 0.0F, -30.0F},
+      true};
+
+  const auto assessment =
+      arv::server::assess_vehicle_crash(crash_tuning(), contact);
+
+  EXPECT_EQ(assessment.severity, arv::entity::CrashSeverity::Bump);
+  EXPECT_LT(assessment.direct_impact_dot, 0.35F);
+}
+
+TEST(VehicleCrashAssessmentTests, AircraftLandingUsesVerticalImpactOnly) {
+  arv::entity::VehicleCrashDefinition aircraft = crash_tuning();
+  aircraft.bump_threshold = 6.0F;
+  aircraft.hard_impact_threshold = 16.0F;
+  aircraft.ejection_threshold = 34.0F;
+  aircraft.destruction_threshold = 46.0F;
+  const auto rough_landing = arv::server::VehicleCrashContact{
+      {0.0F, 1.0F, 0.0F},
+      {32.0F, -5.0F, 0.0F},
+      true};
+
+  auto assessment = arv::server::assess_vehicle_crash(aircraft, rough_landing);
+
+  EXPECT_EQ(assessment.severity, arv::entity::CrashSeverity::None);
+  EXPECT_FLOAT_EQ(assessment.normal_impact_speed, 5.0F);
+
+  const auto hard_landing = arv::server::VehicleCrashContact{
+      {0.0F, 1.0F, 0.0F},
+      {12.0F, -20.0F, 0.0F},
+      true};
+  assessment = arv::server::assess_vehicle_crash(aircraft, hard_landing);
+
+  EXPECT_EQ(assessment.severity, arv::entity::CrashSeverity::HardImpact);
+}
 
 TEST(VehicleMovementValidationTests, AcceptsFirstFiniteControllerMove) {
   const auto result = arv::server::validate_serverbound_vehicle_move(

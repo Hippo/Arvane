@@ -287,6 +287,8 @@ struct ServerRuntimeImpl {
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
   [[nodiscard]] const world::NaturalSpawnCounters& natural_spawn_counters() const noexcept;
+  [[nodiscard]] std::optional<VehicleCrashDebugInfo> last_vehicle_crash_debug(
+      EntityNetID vehicle_id) const;
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
   [[nodiscard]] bool set_player_fly_speed(PlayerID player_id, f32 fly_speed);
@@ -336,6 +338,14 @@ struct ServerRuntimeImpl {
   void handle_vehicle_action(
       net::ConnectionID connection_id,
       const protocol::ServerboundVehicleAction& action);
+  [[nodiscard]] bool apply_vehicle_crash(
+      EntityID vehicle_entity,
+      EntityNetID vehicle_net_id,
+      const entity::VehicleDefinition& definition,
+      const VehicleCrashAssessment& assessment,
+      const VehicleCrashContact& contact,
+      AcceptedVehicleMovementState& accepted,
+      VehicleCrashDebugInfo* debug);
   void handle_chunk_interest_update(
       net::ConnectionID connection_id,
       const protocol::ServerboundChunkInterestUpdate& interest);
@@ -424,6 +434,10 @@ struct ServerRuntimeImpl {
   void broadcast_vehicle_state(
       EntityNetID vehicle_net_id,
       const AcceptedVehicleMovementState& accepted);
+  void broadcast_vehicle_crash_particles(
+      Vec3f position,
+      Vec3f normal,
+      u32 seed);
   void broadcast_entity_passengers(EntityID rideable_id);
   void broadcast_ride_started(
       EntityID passenger_id,
@@ -528,6 +542,9 @@ struct ServerRuntimeImpl {
   std::vector<PendingEntityAttack> pending_entity_attacks_;
   HashMap<PlayerID, AcceptedPlayerMovementState> accepted_player_movement_;
   HashMap<EntityNetID, AcceptedVehicleMovementState> accepted_vehicle_movement_;
+  HashMap<EntityNetID, TickIndex> vehicle_crash_cooldowns_;
+  HashMap<EntityNetID, VehicleCrashDebugInfo> last_vehicle_crash_debug_;
+  HashMap<PlayerID, TickIndex> crash_remount_cooldowns_;
   HashMap<PlayerID, double> last_player_move_correction_seconds_;
   HashMap<PlayerID, protocol::BlockBreakProgress> last_sent_block_break_progress_;
   arv::text::TextVariableStore text_variables_;

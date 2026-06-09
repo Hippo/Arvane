@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/client/local_player_controller.hpp"
+#include "arv/client/vehicle_debug.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/connection_state.hpp"
 
@@ -41,10 +42,15 @@ public:
   void apply_vehicle_correction(
       const protocol::ClientboundVehicleCorrection& correction) noexcept;
   void clear_vehicle_prediction() noexcept;
+  [[nodiscard]] const std::optional<VehicleDebugTelemetry>& vehicle_debug_telemetry()
+      const noexcept {
+    return vehicle_debug_;
+  }
 
 private:
   void remember_vehicle_impact(Vec3f impact_normal) noexcept;
   void clear_vehicle_impact_memory() noexcept;
+  void clear_vehicle_debug_telemetry() noexcept;
 
   f32 movement_send_rate_hz_{protocol::DefaultClientMovementSendRateHz};
   Seconds movement_send_accumulator_seconds_{};
@@ -62,6 +68,7 @@ private:
   u8 predicted_vehicle_impact_ticks_{};
   std::string predicted_vehicle_animation_name_{};
   Seconds predicted_vehicle_animation_time_{};
+  std::optional<VehicleDebugTelemetry> vehicle_debug_{};
 };
 
 } // namespace detail

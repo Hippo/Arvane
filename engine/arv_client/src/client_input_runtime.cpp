@@ -384,6 +384,45 @@ struct VehicleMovementProfile {
   return vehicle_horizontal_impact_normal_from_delta(impact_delta);
 }
 
+[[nodiscard]] std::optional<Vec3f> vehicle_impact_normal(
+    const physics::MovementResolution& resolved,
+    Vec3f pre_impact_velocity) noexcept {
+  Vec3f best_normal{};
+  f32 best_impact = 0.0F;
+  const auto consider = [&](Vec3f normal) {
+    const f32 impact = std::max(0.0F, dot(pre_impact_velocity * -1.0F, normal));
+    if (impact > best_impact) {
+      best_impact = impact;
+      best_normal = normal;
+    }
+  };
+  if (resolved.hit_x) {
+    const f32 direction =
+        std::abs(resolved.attempted_delta.x) > 0.0001F
+            ? resolved.attempted_delta.x
+            : pre_impact_velocity.x;
+    consider({direction > 0.0F ? -1.0F : 1.0F, 0.0F, 0.0F});
+  }
+  if (resolved.hit_y) {
+    const f32 direction =
+        std::abs(resolved.attempted_delta.y) > 0.0001F
+            ? resolved.attempted_delta.y
+            : pre_impact_velocity.y;
+    consider({0.0F, direction > 0.0F ? -1.0F : 1.0F, 0.0F});
+  }
+  if (resolved.hit_z) {
+    const f32 direction =
+        std::abs(resolved.attempted_delta.z) > 0.0001F
+            ? resolved.attempted_delta.z
+            : pre_impact_velocity.z;
+    consider({0.0F, 0.0F, direction > 0.0F ? -1.0F : 1.0F});
+  }
+  if (best_impact <= 0.0F) {
+    return std::nullopt;
+  }
+  return best_normal;
+}
+
 [[nodiscard]] Vec3f project_velocity_out_of_impact(
     Vec3f velocity,
     Vec3f impact_normal) noexcept {
@@ -503,12 +542,14 @@ void ClientInputRuntime::send_fixed_tick_input(
       }
       predicted_vehicle_id_.reset();
       clear_vehicle_impact_memory();
+      clear_vehicle_debug_telemetry();
       return;
     }
     dismount_request_sent_ = false;
     if (!player_controller.mounted_controls_vehicle()) {
       predicted_vehicle_id_.reset();
       clear_vehicle_impact_memory();
+      clear_vehicle_debug_telemetry();
       return;
     }
     const EntityNetID vehicle_id = player_controller.mounted_vehicle_id().value();
@@ -516,6 +557,7 @@ void ClientInputRuntime::send_fixed_tick_input(
     if (mirror == nullptr) {
       predicted_vehicle_id_.reset();
       clear_vehicle_impact_memory();
+      clear_vehicle_debug_telemetry();
       return;
     }
     const entity::VehicleDefinition* definition =
@@ -540,6 +582,7 @@ void ClientInputRuntime::send_fixed_tick_input(
       clear_vehicle_impact_memory();
     }
 
+    const Vec3f debug_previous_velocity = predicted_vehicle_velocity_;
     movement_send_accumulator_seconds_ += tick_seconds;
     const Seconds send_interval =
         1.0 / static_cast<Seconds>(std::max(movement_send_rate_hz_, 1.0F));
@@ -869,11 +912,25 @@ void ClientInputRuntime::send_fixed_tick_input(
       attempted_delta = predicted_vehicle_velocity_ * dt;
     }
 
+    bool hit_collision_this_tick = false;
+    Vec3f collision_normal{};
+    f32 collision_normal_impact_speed = 0.0F;
+    const Vec3f pre_collision_velocity = predicted_vehicle_velocity_;
     if (collision_query != nullptr) {
       const Aabb3f bounds =
           vehicle_bounds(predicted_vehicle_position_, profile.collision_size);
       const physics::MovementResolution resolved =
           physics::resolve_movement(*collision_query, bounds, attempted_delta);
+      hit_collision_this_tick = resolved.hit_x || resolved.hit_y || resolved.hit_z;
+      if (hit_collision_this_tick) {
+        if (const std::optional<Vec3f> normal =
+                vehicle_impact_normal(resolved, pre_collision_velocity);
+            normal.has_value()) {
+          collision_normal = normal.value();
+          collision_normal_impact_speed =
+              std::max(0.0F, dot(pre_collision_velocity * -1.0F, collision_normal));
+        }
+      }
       predicted_vehicle_position_ =
           predicted_vehicle_position_ + resolved.applied_delta;
       if (resolved.hit_x) {
@@ -970,6 +1027,52 @@ void ClientInputRuntime::send_fixed_tick_input(
         predicted_vehicle_rotation_,
         active_animation_span);
 
+    protocol::VehicleMoveFlags reported_flags = predicted_flags;
+    if (command.jump_pressed) {
+      reported_flags |= protocol::VehicleMoveFlags::Jump;
+    }
+    if (command.secondary_held) {
+      reported_flags |= protocol::VehicleMoveFlags::Brake;
+    }
+    if (command.sprint_held) {
+      reported_flags |= protocol::VehicleMoveFlags::Sprint;
+    }
+
+    const f32 acceleration_dt = std::max(dt, 1.0F / 240.0F);
+    VehicleDebugTelemetry telemetry;
+    telemetry.vehicle_id = vehicle_id;
+    telemetry.definition = definition == nullptr ? mirror->entity_type_name : definition->name;
+    telemetry.physics = profile.physics;
+    telemetry.position = predicted_vehicle_position_;
+    telemetry.velocity = predicted_vehicle_velocity_;
+    telemetry.previous_velocity = debug_previous_velocity;
+    telemetry.acceleration =
+        (predicted_vehicle_velocity_ - debug_previous_velocity) *
+        (1.0F / acceleration_dt);
+    telemetry.angular_velocity = reported_angular_velocity;
+    telemetry.rotation = predicted_vehicle_rotation_;
+    telemetry.speed = length(predicted_vehicle_velocity_);
+    telemetry.horizontal_speed = horizontal_length(predicted_vehicle_velocity_);
+    telemetry.throttle = throttle;
+    telemetry.steer = steer;
+    telemetry.dt_seconds = dt;
+    telemetry.client_tick = tick_index;
+    telemetry.last_sent_sequence =
+        send_this_tick
+            ? next_vehicle_movement_sequence_
+            : (next_vehicle_movement_sequence_ > 1U ? next_vehicle_movement_sequence_ - 1U : 0U);
+    telemetry.flags = reported_flags;
+    telemetry.sent_this_tick = send_this_tick;
+    telemetry.hit_collision_this_tick = hit_collision_this_tick;
+    telemetry.collision_normal = collision_normal;
+    telemetry.collision_normal_impact_speed = collision_normal_impact_speed;
+    telemetry.impact_memory_ticks = predicted_vehicle_impact_ticks_;
+    telemetry.has_crash_tuning = definition != nullptr && definition->crash.enabled;
+    if (definition != nullptr) {
+      telemetry.crash = definition->crash;
+    }
+    vehicle_debug_ = std::move(telemetry);
+
     if (!send_this_tick) {
       return;
     }
@@ -986,21 +1089,13 @@ void ClientInputRuntime::send_fixed_tick_input(
     move.angular_velocity = reported_angular_velocity;
     move.throttle = throttle;
     move.steer = steer;
-    move.flags = predicted_flags;
-    if (command.jump_pressed) {
-      move.flags |= protocol::VehicleMoveFlags::Jump;
-    }
-    if (command.secondary_held) {
-      move.flags |= protocol::VehicleMoveFlags::Brake;
-    }
-    if (command.sprint_held) {
-      move.flags |= protocol::VehicleMoveFlags::Sprint;
-    }
+    move.flags = reported_flags;
     (void)sender.send_vehicle_move(move);
     return;
   }
   predicted_vehicle_id_.reset();
   clear_vehicle_impact_memory();
+  clear_vehicle_debug_telemetry();
   dismount_request_sent_ = false;
   player_controller.update_local_movement(command, collision_query, tick_seconds);
 
@@ -1051,6 +1146,10 @@ void ClientInputRuntime::clear_vehicle_impact_memory() noexcept {
   predicted_vehicle_impact_ticks_ = 0U;
 }
 
+void ClientInputRuntime::clear_vehicle_debug_telemetry() noexcept {
+  vehicle_debug_.reset();
+}
+
 void ClientInputRuntime::apply_vehicle_correction(
     const protocol::ClientboundVehicleCorrection& correction) noexcept {
   const Vec3f correction_delta = predicted_vehicle_position_ - correction.position;
@@ -1075,6 +1174,7 @@ void ClientInputRuntime::clear_vehicle_prediction() noexcept {
   predicted_vehicle_rotation_ = {};
   predicted_vehicle_yaw_ = 0.0F;
   clear_vehicle_impact_memory();
+  clear_vehicle_debug_telemetry();
   predicted_vehicle_animation_name_.clear();
   predicted_vehicle_animation_time_ = 0.0;
 }

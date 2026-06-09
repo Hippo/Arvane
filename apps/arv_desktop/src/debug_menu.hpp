@@ -58,6 +58,7 @@ struct DebugMenuState {
   bool show_chunk_boundaries{};
   bool show_collision_bounds{};
   bool show_lighting_view{};
+  bool show_vehicle_debug_overlay{true};
   std::string console_command{};
   std::vector<std::string> console_log{};
   bool profile_sampling_paused{};

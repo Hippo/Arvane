@@ -154,6 +154,38 @@ void ServerRuntimeImpl::broadcast_vehicle_state(
   });
 }
 
+void ServerRuntimeImpl::broadcast_vehicle_crash_particles(
+    Vec3f position,
+    Vec3f normal,
+    u32 seed) {
+  protocol::ClientboundSpawnParticles particles;
+  particles.world_id = default_world_.id();
+  particles.particle_type = "arvane:explosion";
+  particles.position = position;
+  particles.normal =
+      length(normal) > 0.001F ? normalize_or_zero(normal) : Vec3f{0.0F, 1.0F, 0.0F};
+  particles.extents = {0.65F, 0.65F, 0.65F};
+  particles.radius = 1.2F;
+  particles.count = 48U;
+  particles.seed = seed;
+  particles.shape = protocol::ParticleSpawnShape::Sphere;
+  const std::vector<u8> payload =
+      protocol::serialize_clientbound_spawn_particles(particles);
+  sessions_.for_each_session([&](const ServerSession& session) {
+    if (!session.authenticated || session.closing ||
+        session.world_id != default_world_.id()) {
+      return;
+    }
+    (void)send_protocol_message(
+        *transport_,
+        session.connection_id,
+        protocol::MessageType::ClientboundSpawnParticles,
+        protocol::ReliabilityClass::UnreliableEvent,
+        protocol::NetworkLane::Gameplay,
+        payload);
+  });
+}
+
 void ServerRuntimeImpl::broadcast_entity_passengers(EntityID rideable_id) {
   const entity::RideableComponent* rideable =
       default_world_.find_entity_rideable(rideable_id);

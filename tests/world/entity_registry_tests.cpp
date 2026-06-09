@@ -4,11 +4,24 @@
 
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <filesystem>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace {
+
+std::string read_text_file(const std::filesystem::path& path) {
+  std::ifstream input(path);
+  std::ostringstream output;
+  output << input.rdbuf();
+  return output.str();
+}
+
+} // namespace
 
 TEST(EntityRegistryTests, BuildsBuiltinsAndConfiguredEntityTypes) {
   auto parsed = arv::entity::parse_entity_definitions_json(R"json(
@@ -262,6 +275,27 @@ TEST(VehicleDefinitionRegistryTests, LoadsValidVehicleDefinitions) {
         "max_step_height": 0.6,
         "requires_ground": true,
         "requires_water": false
+      },
+      "crash": {
+        "bump_threshold": 3.0,
+        "hard_impact_threshold": 9.0,
+        "ejection_threshold": 18.0,
+        "destruction_threshold": 26.0,
+        "explosion_threshold": 30.0,
+        "min_direct_impact_dot": 0.45,
+        "event_cooldown_ticks": 30,
+        "velocity_retention": 0.08,
+        "ejection_velocity_scale": 0.55,
+        "ejection_upward_velocity": 5.0,
+        "ejection_min_horizontal_speed": 4.0,
+        "ejection_max_horizontal_speed": 16.0,
+        "ejection_max_vertical_speed": 9.0,
+        "remount_cooldown_ticks": 50,
+        "damage": {
+          "hard_impact": 2.0,
+          "ejection": 4.0,
+          "destruction": 12.0
+        }
       }
     }
   ]
@@ -285,6 +319,32 @@ TEST(VehicleDefinitionRegistryTests, LoadsValidVehicleDefinitions) {
       arv::degrees_to_radians(130.0F),
       0.00001F);
   EXPECT_TRUE(buggy->authority.requires_ground);
+  EXPECT_TRUE(buggy->crash.enabled);
+  EXPECT_FLOAT_EQ(buggy->crash.hard_impact_threshold, 9.0F);
+  EXPECT_FLOAT_EQ(buggy->crash.ejection_threshold, 18.0F);
+  EXPECT_FLOAT_EQ(buggy->crash.explosion_threshold, 30.0F);
+  EXPECT_FLOAT_EQ(buggy->crash.min_direct_impact_dot, 0.45F);
+  EXPECT_EQ(buggy->crash.event_cooldown_ticks, 30U);
+  EXPECT_FLOAT_EQ(buggy->crash.ejection_max_horizontal_speed, 16.0F);
+  EXPECT_FLOAT_EQ(buggy->crash.destruction_damage, 12.0F);
+}
+
+TEST(VehicleDefinitionRegistryTests, BaseBuggyCrashDestructionIsInsideAuthorityEnvelope) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(
+      read_text_file("arvane_home/packs/arvane_base/data/arvane/vehicles.json"));
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  auto registry_result = arv::entity::VehicleDefinitionRegistry::build(std::move(parsed.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+
+  const arv::entity::VehicleDefinition* buggy =
+      registry_result.value().find("arvane:buggy");
+  ASSERT_NE(buggy, nullptr);
+  ASSERT_TRUE(buggy->crash.enabled);
+  EXPECT_GT(buggy->crash.destruction_threshold, buggy->crash.ejection_threshold);
+  EXPECT_LE(buggy->crash.destruction_threshold, buggy->authority.max_speed);
+  EXPECT_LE(buggy->crash.explosion_threshold, buggy->authority.max_speed);
+  EXPECT_TRUE(buggy->crash.destroy_on_destruction);
+  EXPECT_TRUE(buggy->crash.explode_on_destruction);
 }
 
 TEST(VehicleDefinitionRegistryTests, LoadsAircraftAndSubmersibleDefinitions) {
@@ -462,6 +522,55 @@ TEST(VehicleDefinitionRegistryTests, RejectsInvalidCollisionSize) {
 )json");
   ASSERT_FALSE(parsed);
   EXPECT_NE(parsed.error().message.find("collision.size"), std::string::npos);
+}
+
+TEST(VehicleDefinitionRegistryTests, RejectsInvalidCrashThresholdOrdering) {
+  auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
+{
+  "name": "arvane:bad_buggy",
+  "kind": "vehicle",
+  "physics": "ground_vehicle",
+  "collision": { "type": "aabb", "size": [1.0, 1.0, 1.0] },
+  "seats": [
+    {
+      "id": "driver",
+      "role": "driver",
+      "local_position": [0.0, 0.0, 0.0],
+      "local_rotation": [0.0, 0.0, 0.0, 1.0],
+      "controls_vehicle": true,
+      "camera_mode": "third_person_follow"
+    }
+  ],
+  "movement": {
+    "max_forward_speed": 1.0,
+    "max_reverse_speed": 1.0,
+    "acceleration": 1.0,
+    "brake_force": 1.0,
+    "drag": 1.0,
+    "turn_rate": 1.0,
+    "lateral_grip": 1.0,
+    "gravity_scale": 1.0,
+    "max_step_height": 1.0
+  },
+  "authority": {
+    "max_speed": 1.0,
+    "max_acceleration": 1.0,
+    "max_deceleration": 1.0,
+    "max_angular_speed": 1.0,
+    "max_vertical_speed": 1.0,
+    "requires_ground": false,
+    "requires_water": false
+  },
+  "crash": {
+    "bump_threshold": 3.0,
+    "hard_impact_threshold": 9.0,
+    "ejection_threshold": 18.0,
+    "destruction_threshold": 12.0
+  }
+}
+)json");
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().message.find("destruction_threshold"), std::string::npos);
 }
 
 TEST(VehicleDefinitionRegistryTests, RejectsUnknownPhysicsKind) {

@@ -19,6 +19,12 @@ struct AcceptedVehicleMovementState {
   bool has_accepted_move{};
 };
 
+struct VehicleCrashContact {
+  Vec3f normal{};
+  Vec3f pre_impact_velocity{};
+  bool resolved_safe{};
+};
+
 struct VehicleMovementValidationContext {
   double receive_time_seconds{};
   TickIndex server_tick{};
@@ -31,9 +37,17 @@ struct VehicleMovementValidationContext {
   bool swept_path_chunks_loaded{true};
   bool has_collision_resolved_state{};
   AcceptedVehicleMovementState collision_resolved_state{};
+  bool has_collision_contact{};
+  VehicleCrashContact collision_contact{};
   bool has_ground_support{true};
   u32 water_support_samples{};
   f32 water_occupancy{1.0F};
+};
+
+struct VehicleCrashAssessment {
+  entity::CrashSeverity severity{entity::CrashSeverity::None};
+  f32 normal_impact_speed{};
+  f32 direct_impact_dot{};
 };
 
 struct VehicleMovementValidationResult {
@@ -50,5 +64,9 @@ struct VehicleMovementValidationResult {
     const AcceptedVehicleMovementState& previous,
     const VehicleMovementValidationContext& context,
     const entity::VehicleAuthorityDefinition& authority) noexcept;
+
+[[nodiscard]] VehicleCrashAssessment assess_vehicle_crash(
+    const entity::VehicleCrashDefinition& crash,
+    const VehicleCrashContact& contact) noexcept;
 
 } // namespace arv::server

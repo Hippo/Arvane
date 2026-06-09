@@ -91,6 +91,10 @@
         "arvane:collision": {
           "box": [1.4, 0.6, 2.4]
         },
+        "arvane:health": {
+          "max": 8,
+          "current": 8
+        },
         "arvane:rideable": {
           "definition": "arvane:oak_boat"
         },
@@ -113,6 +117,10 @@
         "arvane:velocity": {},
         "arvane:collision": {
           "box": [1.8, 1.2, 3.2]
+        },
+        "arvane:health": {
+          "max": 30,
+          "current": 30
         },
         "arvane:rideable": {
           "definition": "arvane:buggy"
@@ -138,6 +146,10 @@
         "arvane:collision": {
           "box": [4.0, 1.5, 3.0625]
         },
+        "arvane:health": {
+          "max": 40,
+          "current": 40
+        },
         "arvane:rideable": {
           "definition": "arvane:plane"
         },
@@ -160,6 +172,10 @@
         "arvane:velocity": {},
         "arvane:collision": {
           "box": [2.0, 1.5, 2.25]
+        },
+        "arvane:health": {
+          "max": 50,
+          "current": 50
         },
         "arvane:rideable": {
           "definition": "arvane:submarine"

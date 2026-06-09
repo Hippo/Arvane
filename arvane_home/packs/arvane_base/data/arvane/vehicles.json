@@ -83,6 +83,15 @@
         "requires_ground": false,
         "requires_water": true,
         "min_water_support_samples": 2
+      },
+      "crash": {
+        "bump_threshold": 2.5,
+        "hard_impact_threshold": 7.0,
+        "min_direct_impact_dot": 0.45,
+        "event_cooldown_ticks": 24,
+        "velocity_retention": 0.25,
+        "explode_on_destruction": false,
+        "destroy_on_destruction": false
       }
     },
     {
@@ -131,6 +140,27 @@
         "max_step_height": 0.6,
         "requires_ground": true,
         "requires_water": false
+      },
+      "crash": {
+        "bump_threshold": 3.0,
+        "hard_impact_threshold": 8.0,
+        "ejection_threshold": 15.0,
+        "destruction_threshold": 20.0,
+        "explosion_threshold": 20.0,
+        "min_direct_impact_dot": 0.45,
+        "event_cooldown_ticks": 30,
+        "velocity_retention": 0.08,
+        "ejection_velocity_scale": 0.55,
+        "ejection_upward_velocity": 5.0,
+        "ejection_min_horizontal_speed": 4.0,
+        "ejection_max_horizontal_speed": 16.0,
+        "ejection_max_vertical_speed": 9.0,
+        "remount_cooldown_ticks": 50,
+        "damage": {
+          "hard_impact": 2.0,
+          "ejection": 4.0,
+          "destruction": 12.0
+        }
       }
     },
     {
@@ -180,6 +210,27 @@
         "requires_water": false,
         "requires_swept_collision": true,
         "max_unloaded_chunk_entry_distance": 0.0
+      },
+      "crash": {
+        "bump_threshold": 8.0,
+        "hard_impact_threshold": 18.0,
+        "ejection_threshold": 34.0,
+        "destruction_threshold": 46.0,
+        "explosion_threshold": 50.0,
+        "min_direct_impact_dot": 0.35,
+        "event_cooldown_ticks": 30,
+        "velocity_retention": 0.04,
+        "ejection_velocity_scale": 0.5,
+        "ejection_upward_velocity": 6.0,
+        "ejection_min_horizontal_speed": 6.0,
+        "ejection_max_horizontal_speed": 22.0,
+        "ejection_max_vertical_speed": 12.0,
+        "remount_cooldown_ticks": 70,
+        "damage": {
+          "hard_impact": 3.0,
+          "ejection": 7.0,
+          "destruction": 20.0
+        }
       }
     },
     {
@@ -225,6 +276,15 @@
         "requires_ground": false,
         "requires_water": false,
         "min_water_occupancy": 0.35
+      },
+      "crash": {
+        "bump_threshold": 4.0,
+        "hard_impact_threshold": 12.0,
+        "min_direct_impact_dot": 0.45,
+        "event_cooldown_ticks": 24,
+        "velocity_retention": 0.3,
+        "explode_on_destruction": false,
+        "destroy_on_destruction": false
       }
     }
   ]

@@ -14,6 +14,7 @@
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/plugin/plugin_manager.hpp"
+#include "arv/protocol/vehicles.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/server/chunk_streamer.hpp"
 #include "arv/server/server_combat.hpp"
@@ -182,6 +183,36 @@ struct DroppedItemStack {
   player::ItemStack stack{};
 };
 
+struct VehicleCrashDebugInfo {
+  EntityNetID vehicle_id{};
+  std::string definition{};
+  TickIndex server_tick{};
+  u32 sequence{};
+  bool accepted_move{};
+  bool sent_correction{};
+  protocol::VehicleCorrectionReason validation_reason{
+      protocol::VehicleCorrectionReason::Unknown};
+  bool final_aabb_overlaps_solid{};
+  bool proposed_sweep_hit_solid{};
+  bool previous_velocity_sweep_hit_solid{};
+  bool had_collision_contact{};
+  bool contact_resolved_safe{};
+  Vec3f contact_normal{};
+  Vec3f pre_impact_velocity{};
+  Vec3f packet_velocity{};
+  Vec3f accepted_velocity{};
+  entity::CrashSeverity severity{entity::CrashSeverity::None};
+  f32 normal_impact_speed{};
+  f32 direct_impact_dot{};
+  bool cooldown_suppressed{};
+  TickIndex cooldown_until{};
+  bool consequence_applied{};
+  f32 damage_applied{};
+  u32 ejected_occupants{};
+  bool explosion_broadcast{};
+  bool vehicle_destroyed{};
+};
+
 [[nodiscard]] world::NaturalSpawningConfig make_natural_spawning_config(
     const io::NaturalSpawningConfig& config) noexcept;
 
@@ -228,6 +259,8 @@ public:
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
   [[nodiscard]] const world::NaturalSpawnCounters& natural_spawn_counters() const noexcept;
+  [[nodiscard]] std::optional<VehicleCrashDebugInfo> last_vehicle_crash_debug(
+      EntityNetID vehicle_id) const;
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
   [[nodiscard]] bool set_player_fly_speed(PlayerID player_id, f32 fly_speed);

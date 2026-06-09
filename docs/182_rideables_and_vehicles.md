@@ -150,6 +150,75 @@ The built-in buggy uses `arvane:animation/automobile`; the client and accepted
 server state select its `driving` clip when moving along the buggy's visual
 front and its `reverse` clip when moving backward.
 
+### Crash Tuning
+
+Vehicles may opt into mounted crash handling with an optional `crash` object:
+
+```json
+{
+  "crash": {
+    "bump_threshold": 3.0,
+    "hard_impact_threshold": 8.0,
+    "ejection_threshold": 15.0,
+    "destruction_threshold": 20.0,
+    "explosion_threshold": 20.0,
+    "min_direct_impact_dot": 0.45,
+    "event_cooldown_ticks": 30,
+    "velocity_retention": 0.08,
+    "ejection_velocity_scale": 0.55,
+    "ejection_upward_velocity": 5.0,
+    "ejection_min_horizontal_speed": 4.0,
+    "ejection_max_horizontal_speed": 16.0,
+    "ejection_max_vertical_speed": 9.0,
+    "remount_cooldown_ticks": 50,
+    "damage": {
+      "hard_impact": 2.0,
+      "ejection": 4.0,
+      "destruction": 12.0
+    },
+    "destroy_on_destruction": true,
+    "explode_on_destruction": true
+  }
+}
+```
+
+The server classifies contacts as `None`, `Bump`, `HardImpact`, `Ejection`, or
+`Destruction`. Severity uses the server-derived contact normal and previous
+accepted vehicle velocity:
+
+```text
+normal_impact = max(0, dot(-preImpactVelocity, collisionNormal))
+```
+
+Raw speed alone does not crash a vehicle. Shallow scrapes below
+`min_direct_impact_dot` are capped at bump severity, so a fast tangential wall
+slide does not become an ejection or destruction event. Low vertical-speed
+aircraft landings also stay tolerant because terrain landing severity is based
+on vertical impact into the upward contact normal, not total airspeed.
+
+`event_cooldown_ticks` suppresses repeated crash consequences from the same
+vehicle. `velocity_retention` damps accepted vehicle velocity after hard impacts
+or worse. Ejection places occupants at the normal safe dismount position or the
+airborne aircraft top position, then applies clamped launch velocity from the
+previous vehicle velocity plus upward impulse and starts a short remount
+cooldown. Destruction ejects occupants first, then despawns the vehicle when
+`destroy_on_destruction` is true. Explosion reuses `ClientboundSpawnParticles`
+with `arvane:explosion`; there is no separate crash packet in V1.
+
+The built-in buggy uses bump, hard-impact, rare high-speed ejection, and
+extreme-speed destruction/explosion thresholds. The built-in plane uses higher
+thresholds so rough low-speed landings are tolerated while severe wall or
+terrain impacts can eject the pilot or destroy the aircraft. The boat and
+submarine use bump/hard-impact tuning only.
+
+The desktop debug menu has a default-on `Vehicle debug overlay` toggle in the
+Player tab. While controlling a vehicle, the overlay shows local predicted
+speed, velocity, acceleration, collision normal impact, authored thresholds, and
+the server's latest crash assessment. This is useful when a wall hit only looks
+like a hard stop: hard impacts can apply damping/damage without ejection, while
+ejection/destruction require the server-computed normal-impact speed to cross
+their thresholds.
+
 ### Aircraft Definitions
 
 Aircraft use:
@@ -270,6 +339,8 @@ The server:
 - validates submersible water occupancy from server world data
 - writes accepted vehicle transform and velocity
 - updates passenger attachment transforms
+- derives crash severity from accepted collision/contact evidence when crash
+  tuning is enabled
 - sends `ClientboundVehicleCorrection` when rejecting a move
 - broadcasts accepted `ClientboundVehicleState`
 
@@ -280,6 +351,10 @@ that vehicle. `ClientboundVehicleCorrection` is the explicit guardrail snap.
 When a vehicle has no mounted occupants, the server owns the remaining simple
 motion and damps stale velocity through the same AABB collision path so an
 unmounted buggy coasts briefly and settles instead of running forever.
+Mounted crash consequences are server-authoritative and derive from the last
+accepted state plus server collision/contact resolution. There is no
+`ServerboundVehicleCrash` message, and correction snaps without safe contact
+evidence do not trigger crash consequences.
 
 ---
 
@@ -307,6 +382,10 @@ Observers use the existing replicated entity mirror interpolation path for
 vehicle transform smoothing. Passenger relationships are stored on client
 mirrors so rendering and UI can identify mounted entities.
 
+Crash destruction uses existing entity despawn replication. Crash explosion VFX
+uses `ClientboundSpawnParticles` with the built-in `arvane:explosion` particle
+type on the gameplay lane.
+
 ---
 
 ## Dismounting
@@ -333,6 +412,27 @@ authored vehicle definition during restore.
 Seat occupancy and controller state are runtime/session state and are not
 persisted in V1.
 
+Vehicle crash tuning is authored data and requires no save-format change.
+Damaged-but-not-destroyed vehicle health uses the ordinary runtime health
+component; V1 does not persist changed vehicle health separately from the
+existing persistent entity record.
+
+---
+
+## Manual Crash Smoke
+
+When tuning crash behavior, smoke test these cases in a local world:
+
+- buggy into a wall/tree at low speed: bump or ordinary correction only
+- buggy into a wall/tree at medium speed: hard stop without occupant ejection
+- buggy into a wall/tree at high speed: occupant ejection, safe placement, short
+  remount cooldown
+- buggy into a wall/tree at extreme speed: occupants eject first, then the
+  vehicle despawns and explosion particles play
+- plane rough low-vertical-speed landing: tolerated landing or bump, not ejection
+- plane high-speed wall/terrain impact: pilot ejection when safe, or destruction
+  at the extreme threshold
+
 ---
 
 ## V1 Limitations
@@ -352,6 +452,9 @@ persisted in V1.
   unloaded-chunk entries instead of expanding client interest ahead of velocity.
 - Observer interpolation uses the existing entity mirror path; there is no
   aircraft-specific snapshot rate or interpolation buffer yet.
+- Crash consequences are evaluated for mounted, client-owned vehicle movement.
+  Unmounted coasting vehicles still use server collision damping but do not emit
+  crash ejection/destruction events in V1.
 - V1 passenger state is not saved across server restarts.
 - Vehicle item placement, crafting, audio, VFX, and animation beyond the buggy's
   minimal forward/reverse wheel clips are out of scope for this pass.

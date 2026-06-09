@@ -423,6 +423,11 @@ const world::NaturalSpawnCounters& ServerRuntime::natural_spawn_counters() const
   return impl_->natural_spawn_counters();
 }
 
+std::optional<VehicleCrashDebugInfo> ServerRuntime::last_vehicle_crash_debug(
+    EntityNetID vehicle_id) const {
+  return impl_->last_vehicle_crash_debug(vehicle_id);
+}
+
 bool ServerRuntime::set_player_game_mode(PlayerID player_id, std::string_view mode_id) {
   return impl_->set_player_game_mode(player_id, mode_id);
 }
@@ -515,6 +520,9 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   plugins_ = start_info.plugins;
   command_registry_ = command::CommandRegistry{};
   accepted_vehicle_movement_.clear();
+  vehicle_crash_cooldowns_.clear();
+  last_vehicle_crash_debug_.clear();
+  crash_remount_cooldowns_.clear();
   if (start_info.register_commands) {
     start_info.register_commands(command_registry_);
   }
@@ -940,6 +948,15 @@ usize ServerRuntimeImpl::pending_fluid_job_count() const noexcept {
 
 const world::NaturalSpawnCounters& ServerRuntimeImpl::natural_spawn_counters() const noexcept {
   return natural_spawns_.counters();
+}
+
+std::optional<VehicleCrashDebugInfo> ServerRuntimeImpl::last_vehicle_crash_debug(
+    EntityNetID vehicle_id) const {
+  const auto found = last_vehicle_crash_debug_.find(vehicle_id);
+  if (found == last_vehicle_crash_debug_.end()) {
+    return std::nullopt;
+  }
+  return found->second;
 }
 
 command::CommandResult ServerRuntimeImpl::execute_command(

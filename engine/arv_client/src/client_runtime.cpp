@@ -468,6 +468,10 @@ net::NetworkResult ClientRuntime::send_vehicle_move(
   return impl_->sender.send_vehicle_move(move);
 }
 
+std::optional<VehicleDebugTelemetry> ClientRuntime::vehicle_debug_telemetry() const {
+  return impl_->input.vehicle_debug_telemetry();
+}
+
 std::vector<ClientAttackFeedback> ClientRuntime::drain_attack_feedback() {
   std::vector<ClientAttackFeedback> drained = std::move(impl_->attack_feedback);
   impl_->attack_feedback.clear();

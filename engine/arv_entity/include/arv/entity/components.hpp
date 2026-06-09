@@ -203,6 +203,38 @@ struct VehicleAuthorityDefinition {
   u32 min_water_support_samples{};
 };
 
+enum class CrashSeverity : u8 {
+  None,
+  Bump,
+  HardImpact,
+  Ejection,
+  Destruction,
+};
+
+struct VehicleCrashDefinition {
+  bool enabled{};
+  f32 bump_threshold{};
+  f32 hard_impact_threshold{};
+  f32 ejection_threshold{};
+  f32 destruction_threshold{};
+  f32 explosion_threshold{};
+  f32 min_direct_impact_dot{0.35F};
+  u32 event_cooldown_ticks{20U};
+  f32 velocity_retention{};
+  f32 ejection_velocity_scale{0.6F};
+  f32 ejection_upward_velocity{4.0F};
+  f32 ejection_min_horizontal_speed{};
+  f32 ejection_max_horizontal_speed{18.0F};
+  f32 ejection_max_vertical_speed{10.0F};
+  u32 remount_cooldown_ticks{40U};
+  f32 bump_damage{};
+  f32 hard_impact_damage{};
+  f32 ejection_damage{};
+  f32 destruction_damage{};
+  bool destroy_on_destruction{true};
+  bool explode_on_destruction{true};
+};
+
 struct LivingMountMovementDefinition {
   f32 walk_speed{};
   f32 sprint_speed{};
@@ -285,6 +317,7 @@ struct VehicleDefinition {
   AircraftMovementDefinition aircraft{};
   SubmersibleMovementDefinition submersible{};
   VehicleAuthorityDefinition authority{};
+  VehicleCrashDefinition crash{};
 };
 
 class VehicleDefinitionRegistry {

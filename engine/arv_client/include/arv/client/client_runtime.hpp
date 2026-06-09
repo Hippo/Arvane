@@ -5,6 +5,7 @@
 #include "arv/client/local_identity.hpp"
 #include "arv/client/local_player_controller.hpp"
 #include "arv/client/particles.hpp"
+#include "arv/client/vehicle_debug.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/physics/collision.hpp"
@@ -188,6 +189,7 @@ public:
   net::NetworkResult request_dismount();
   net::NetworkResult send_vehicle_action(protocol::ServerboundVehicleAction action);
   net::NetworkResult send_vehicle_move(const protocol::ServerboundVehicleMove& move);
+  [[nodiscard]] std::optional<VehicleDebugTelemetry> vehicle_debug_telemetry() const;
   [[nodiscard]] std::vector<ClientAttackFeedback> drain_attack_feedback();
   [[nodiscard]] usize replicated_entity_count() const noexcept;
   [[nodiscard]] const ReplicatedEntityMirror* find_replicated_entity(
