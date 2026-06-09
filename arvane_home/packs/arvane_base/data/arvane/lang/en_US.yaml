@@ -77,6 +77,9 @@ ui:
   common:
     ellipsis: "..."
     unknown: "?"
+  loading:
+    world: Loading World
+    closing_game: Closing Game
   inventory:
     title: Inventory
   tab:

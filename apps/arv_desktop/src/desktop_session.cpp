@@ -47,6 +47,14 @@ const DesktopGameSession* DesktopSessionManager::active_session() const noexcept
   return game_session_.get();
 }
 
+bool DesktopSessionManager::shutdown_pending() const noexcept {
+  return pending_shutdown_ != nullptr;
+}
+
+bool DesktopSessionManager::shutdown_failed() const noexcept {
+  return shutdown_failed_;
+}
+
 void DesktopSessionManager::poll_shutdown() {
   if (pending_shutdown_ == nullptr ||
       !pending_shutdown_->finished.load(std::memory_order_acquire)) {

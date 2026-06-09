@@ -21,6 +21,10 @@
 namespace arv::desktop {
 namespace {
 
+constexpr f32 LoadingDotCycleSeconds = 1.15F;
+constexpr f32 LoadingDotPhaseStep = 0.58F;
+constexpr f32 TwoPi = 6.2831853071795864769F;
+
 [[nodiscard]] u64 ui_cache_hash_append_byte(u64 hash, u8 value) noexcept {
   constexpr u64 Prime = 1099511628211ULL;
   hash ^= value;
@@ -287,6 +291,91 @@ namespace {
 }
 
 } // namespace
+
+void DesktopFrameLoop::append_loading_screen_ui(
+    render::FramePacket& frame,
+    DesktopLoadingScreen screen,
+    std::chrono::steady_clock::time_point now) {
+  const ui::UiTheme& theme = ui_theme_;
+  ui::UiTree loading_tree;
+  loading_tree.set_theme(&theme);
+
+  ui::UiElement backdrop;
+  backdrop.stable_id = "loading.backdrop";
+  backdrop.type = ui::UiElementType::Panel;
+  backdrop.layout.width_mode = ui::UiSizeMode::Fill;
+  backdrop.layout.height_mode = ui::UiSizeMode::Fill;
+  backdrop.style.background = theme.colors.background;
+  backdrop.hit_test = false;
+  loading_tree.add_child(loading_tree.root_id(), std::move(backdrop));
+
+  ui::UiElement stack;
+  stack.stable_id = "loading.stack";
+  stack.type = ui::UiElementType::VerticalStack;
+  stack.layout.anchor = ui::UiAnchor::Center;
+  stack.layout.spacing = theme.layout.spacing_lg;
+  stack.hit_test = false;
+  const ui::UiNodeID stack_id =
+      loading_tree.add_child(loading_tree.root_id(), std::move(stack));
+
+  ui::UiElement title;
+  title.stable_id = "loading.title";
+  title.type = ui::UiElementType::Text;
+  title.text = screen == DesktopLoadingScreen::ClosingGame
+                   ? assets_.language.text("ui.loading.closing_game")
+                   : assets_.language.text("ui.loading.world");
+  title.style.foreground = theme.colors.text;
+  title.style.text_role = ui::UiTextRole::Title;
+  title.layout.anchor = ui::UiAnchor::TopCenter;
+  title.hit_test = false;
+  loading_tree.add_child(stack_id, std::move(title));
+
+  ui::UiElement dots;
+  dots.stable_id = "loading.dots";
+  dots.type = ui::UiElementType::HorizontalStack;
+  dots.layout.anchor = ui::UiAnchor::TopCenter;
+  dots.layout.spacing = theme.layout.spacing_sm;
+  dots.hit_test = false;
+  const ui::UiNodeID dots_id =
+      loading_tree.add_child(stack_id, std::move(dots));
+
+  const f32 seconds =
+      std::chrono::duration<f32>(now - app_start_time_).count();
+  const f32 dot_size = std::max(8.0F, theme.layout.spacing_sm + 1.0F);
+  for (u32 index = 0; index < 3U; ++index) {
+    const f32 wave = 0.5F + 0.5F * std::sin(
+        (seconds / LoadingDotCycleSeconds) * TwoPi -
+        static_cast<f32>(index) * LoadingDotPhaseStep);
+    Vec4f color = theme.colors.accent;
+    color.w = 0.34F + wave * 0.66F;
+
+    ui::UiElement dot;
+    dot.stable_id = "loading.dot." + std::to_string(index);
+    dot.type = ui::UiElementType::Panel;
+    dot.layout.width_mode = ui::UiSizeMode::Fixed;
+    dot.layout.height_mode = ui::UiSizeMode::Fixed;
+    dot.layout.width = dot_size;
+    dot.layout.height = dot_size;
+    dot.style.background = color;
+    dot.style.radius = dot_size * 0.5F;
+    dot.hit_test = false;
+    loading_tree.add_child(dots_id, std::move(dot));
+  }
+
+  loading_tree.layout_with_metrics(ui_metrics_, &ui_text_measurer_);
+  ui::append_ui_draw_commands(
+      loading_tree,
+      assets_.font_system,
+      assets_.ui_font_stacks,
+      frame,
+      ui_metrics_,
+      seconds);
+  if (assets_.font_system.atlas_dirty()) {
+    renderer_.set_ui_font_atlas(
+        texture_array_upload_from_image(assets_.font_system.atlas_image()));
+    assets_.font_system.clear_atlas_dirty();
+  }
+}
 
 void DesktopFrameLoop::append_menu_player_skin_preview(
     render::FramePacket& frame,

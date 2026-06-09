@@ -57,6 +57,12 @@ struct UiBuildCacheKey {
   }
 };
 
+enum class DesktopLoadingScreen : u8 {
+  None,
+  LoadingWorld,
+  ClosingGame,
+};
+
 class DesktopFrameLoop : private ui::UIClipboard {
 public:
   DesktopFrameLoop(
@@ -82,6 +88,21 @@ public:
   [[nodiscard]] int run();
 
 private:
+  struct PendingSingleplayerStart {
+    std::string server_save_name{};
+    std::string world_name{"default"};
+    std::optional<u64> create_seed{};
+    bool create_new{};
+    bool refresh_worlds_after_start{};
+    std::string save_display_name{};
+    client::LocalPlayerIdentity local_identity{};
+  };
+
+  struct PendingRemoteStart {
+    ui::JoinServerCommand command{};
+    client::LocalPlayerIdentity local_identity{};
+  };
+
   [[nodiscard]] ui::UIScreenManager& active_screen_manager() noexcept;
   [[nodiscard]] const ui::UIScreenManager& active_screen_manager() const noexcept;
   void push_main_menu_root();
@@ -131,6 +152,17 @@ private:
   void refresh_runtime_player_tuning();
   void rebuild_outline_render_assets();
   void invalidate_ui_tree_cache() noexcept;
+  void queue_singleplayer_start(PendingSingleplayerStart start);
+  void queue_remote_start(PendingRemoteStart start);
+  void clear_pending_world_start() noexcept;
+  [[nodiscard]] bool process_loading_world_frame();
+  [[nodiscard]] bool finish_pending_world_start();
+  [[nodiscard]] bool begin_closing_game();
+  [[nodiscard]] bool render_loading_screen_frame(DesktopLoadingScreen screen);
+  void append_loading_screen_ui(
+      render::FramePacket& frame,
+      DesktopLoadingScreen screen,
+      std::chrono::steady_clock::time_point now);
   [[nodiscard]] bool handle_session_disconnect(DesktopGameSession* active_session);
   void handle_remote_connection_ready(DesktopGameSession* active_session);
 
@@ -309,6 +341,9 @@ private:
   u8 observed_hotbar_slot_{};
   bool hotbar_item_observation_initialized_{};
   bool gameplay_menu_stack_active_{};
+  DesktopLoadingScreen loading_screen_{DesktopLoadingScreen::None};
+  std::optional<PendingSingleplayerStart> pending_singleplayer_start_{};
+  std::optional<PendingRemoteStart> pending_remote_start_{};
 
   static constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
   static constexpr auto HotbarItemPopupVisibleDuration =

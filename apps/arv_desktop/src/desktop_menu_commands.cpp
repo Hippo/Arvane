@@ -77,6 +77,106 @@ inline constexpr i32 MaxConfigurableChunkDistance = 32;
 
 } // namespace
 
+void DesktopFrameLoop::queue_singleplayer_start(PendingSingleplayerStart start) {
+  pending_singleplayer_start_ = std::move(start);
+  pending_remote_start_.reset();
+  loading_screen_ = DesktopLoadingScreen::LoadingWorld;
+  window_.set_cursor_captured(false);
+  invalidate_ui_tree_cache();
+}
+
+void DesktopFrameLoop::queue_remote_start(PendingRemoteStart start) {
+  pending_remote_start_ = std::move(start);
+  pending_singleplayer_start_.reset();
+  loading_screen_ = DesktopLoadingScreen::LoadingWorld;
+  window_.set_cursor_captured(false);
+  invalidate_ui_tree_cache();
+}
+
+void DesktopFrameLoop::clear_pending_world_start() noexcept {
+  pending_singleplayer_start_.reset();
+  pending_remote_start_.reset();
+}
+
+bool DesktopFrameLoop::begin_closing_game() {
+  clear_pending_world_start();
+  loading_screen_ = DesktopLoadingScreen::ClosingGame;
+  window_.set_cursor_captured(false);
+  invalidate_ui_tree_cache();
+  if (!sessions_.shutdown_pending() && !sessions_.begin_save_and_shutdown()) {
+    return false;
+  }
+  return true;
+}
+
+bool DesktopFrameLoop::process_loading_world_frame() {
+  if (!render_loading_screen_frame(DesktopLoadingScreen::LoadingWorld)) {
+    return false;
+  }
+  sessions_.poll_shutdown();
+  if (window_.should_close()) {
+    return begin_closing_game();
+  }
+  if (sessions_.shutdown_pending()) {
+    return true;
+  }
+  if (sessions_.shutdown_failed()) {
+    clear_pending_world_start();
+    loading_screen_ = DesktopLoadingScreen::None;
+    return false;
+  }
+  return finish_pending_world_start();
+}
+
+bool DesktopFrameLoop::finish_pending_world_start() {
+  if (pending_remote_start_.has_value()) {
+    PendingRemoteStart start = std::move(pending_remote_start_.value());
+    clear_pending_world_start();
+    const ui::JoinServerCommand& command = start.command;
+    if (sessions_.start_remote(command, start.local_identity)) {
+      gameplay_menu_stack_active_ = false;
+      gameplay_screen_manager_.clear();
+      screen_manager_.replace(ui::make_multiplayer_connecting_screen(
+          ui::ServerListEntry{command.name, command.address}));
+    } else if (sessions_.active_session() == nullptr) {
+      screen_manager_.replace(ui::make_multiplayer_disconnect_screen(
+          assets_.language.text("ui.menu.disconnect.server_offline"),
+          ui::ServerListEntry{command.name, command.address}));
+    }
+    loading_screen_ = DesktopLoadingScreen::None;
+    invalidate_ui_tree_cache();
+    return !sessions_.shutdown_failed();
+  }
+
+  if (pending_singleplayer_start_.has_value()) {
+    PendingSingleplayerStart start = std::move(pending_singleplayer_start_.value());
+    clear_pending_world_start();
+    if (sessions_.start_singleplayer(
+            std::move(start.server_save_name),
+            std::move(start.world_name),
+            start.create_seed,
+            start.create_new,
+            std::move(start.save_display_name),
+            start.local_identity)) {
+      gameplay_menu_stack_active_ = true;
+      reset_gameplay_menu_stack();
+      if (start.refresh_worlds_after_start) {
+        menu_state_.refresh_worlds();
+      }
+      reset_main_menu_stack();
+    } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
+      screen_manager_.push(ui::make_single_player_menu_screen());
+    }
+    loading_screen_ = DesktopLoadingScreen::None;
+    invalidate_ui_tree_cache();
+    return !sessions_.shutdown_failed();
+  }
+
+  loading_screen_ = DesktopLoadingScreen::None;
+  invalidate_ui_tree_cache();
+  return true;
+}
+
 bool DesktopFrameLoop::process_menu_commands() {
   if (const std::optional<ui::SetRenderSettingsCommand> command =
           menu_state_.take_render_settings_request();
@@ -140,15 +240,8 @@ bool DesktopFrameLoop::process_menu_commands() {
     const client::LocalPlayerIdentity* local_identity = menu_state_.active_local_profile();
     if (local_identity == nullptr) {
       core::error("identity", "cannot join server without a selected local profile");
-    } else if (sessions_.start_remote(command.value(), *local_identity)) {
-      gameplay_menu_stack_active_ = false;
-      gameplay_screen_manager_.clear();
-      screen_manager_.replace(ui::make_multiplayer_connecting_screen(
-          ui::ServerListEntry{command->name, command->address}));
-    } else if (sessions_.active_session() == nullptr) {
-      screen_manager_.replace(ui::make_multiplayer_disconnect_screen(
-          assets_.language.text("ui.menu.disconnect.server_offline"),
-          ui::ServerListEntry{command->name, command->address}));
+    } else {
+      queue_remote_start({command.value(), *local_identity});
     }
     invalidate_ui_tree_cache();
   }
@@ -161,19 +254,15 @@ bool DesktopFrameLoop::process_menu_commands() {
     const client::LocalPlayerIdentity* local_identity = menu_state_.active_local_profile();
     if (local_identity == nullptr) {
       core::error("identity", "cannot create world without a selected local profile");
-    } else if (sessions_.start_singleplayer(
-            server_save_name,
-            "default",
-            seed,
-            true,
-            command->name,
-            *local_identity)) {
-      gameplay_menu_stack_active_ = true;
-      reset_gameplay_menu_stack();
-      menu_state_.refresh_worlds();
-      reset_main_menu_stack();
-    } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
-      screen_manager_.push(ui::make_single_player_menu_screen());
+    } else {
+      queue_singleplayer_start({
+          server_save_name,
+          "default",
+          seed,
+          true,
+          true,
+          command->name,
+          *local_identity});
     }
     invalidate_ui_tree_cache();
   }
@@ -183,26 +272,23 @@ bool DesktopFrameLoop::process_menu_commands() {
     const client::LocalPlayerIdentity* local_identity = menu_state_.active_local_profile();
     if (local_identity == nullptr) {
       core::error("identity", "cannot start singleplayer without a selected local profile");
-    } else if (sessions_.start_singleplayer(
-            command->server_save_name,
-            command->world_name,
-            std::nullopt,
-            false,
-            {},
-            *local_identity)) {
-      gameplay_menu_stack_active_ = true;
-      reset_gameplay_menu_stack();
-      reset_main_menu_stack();
-    } else if (sessions_.active_session() == nullptr && screen_manager_.empty()) {
-      screen_manager_.push(ui::make_single_player_menu_screen());
+    } else {
+      queue_singleplayer_start({
+          command->server_save_name,
+          command->world_name,
+          std::nullopt,
+          false,
+          false,
+          {},
+          *local_identity});
     }
     invalidate_ui_tree_cache();
   }
   if (menu_state_.quit_requested) {
-    if (!sessions_.begin_save_and_shutdown()) {
+    menu_state_.quit_requested = false;
+    if (!begin_closing_game()) {
       return false;
     }
-    window_.request_close();
   }
   return true;
 }

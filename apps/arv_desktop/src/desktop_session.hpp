@@ -125,6 +125,8 @@ public:
   [[nodiscard]] DesktopGameSession* active_session() noexcept;
   [[nodiscard]] const DesktopGameSession* active_session() const noexcept;
 
+  [[nodiscard]] bool shutdown_pending() const noexcept;
+  [[nodiscard]] bool shutdown_failed() const noexcept;
   void poll_shutdown();
   [[nodiscard]] bool begin_save_and_shutdown();
   [[nodiscard]] bool save_and_shutdown();

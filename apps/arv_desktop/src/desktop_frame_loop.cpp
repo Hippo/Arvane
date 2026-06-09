@@ -115,8 +115,32 @@ DesktopFrameLoop::DesktopFrameLoop(
 }
 
 int DesktopFrameLoop::run() {
-  while (!window_.should_close()) {
+  while (true) {
     ARV_PROFILE_ZONE("Frame time");
+    if (window_.should_close() && loading_screen_ != DesktopLoadingScreen::ClosingGame) {
+      if (!begin_closing_game()) {
+        return 1;
+      }
+    }
+    if (loading_screen_ == DesktopLoadingScreen::ClosingGame) {
+      if (!render_loading_screen_frame(DesktopLoadingScreen::ClosingGame)) {
+        return 1;
+      }
+      sessions_.poll_shutdown();
+      if (!sessions_.shutdown_pending()) {
+        return sessions_.shutdown_failed() ? 1 : 0;
+      }
+      ARV_PROFILE_FRAME_MARK("Frame");
+      continue;
+    }
+    if (loading_screen_ == DesktopLoadingScreen::LoadingWorld) {
+      if (!process_loading_world_frame()) {
+        return 1;
+      }
+      ARV_PROFILE_FRAME_MARK("Frame");
+      continue;
+    }
+
     sessions_.poll_shutdown();
     FrameTiming timing = begin_frame();
     platform::InputSnapshot platform_input = poll_platform_input();
@@ -245,6 +269,21 @@ int DesktopFrameLoop::run() {
   }
 
   return 0;
+}
+
+bool DesktopFrameLoop::render_loading_screen_frame(DesktopLoadingScreen screen) {
+  FrameTiming timing = begin_frame();
+  platform::InputSnapshot platform_input = poll_platform_input();
+  update_framebuffer_size();
+  begin_debug_frame(platform_input, timing);
+
+  render::FramePacket frame;
+  append_loading_screen_ui(frame, screen, timing.now);
+  return submit_render_and_present(
+      std::move(frame),
+      timing,
+      false,
+      nullptr);
 }
 
 ui::UIScreenManager& DesktopFrameLoop::active_screen_manager() noexcept {
