@@ -929,6 +929,30 @@ void apply_vehicle_accepted_state_to_world(
   return launch;
 }
 
+[[nodiscard]] VehicleDamageStage vehicle_damage_stage(
+    const entity::EntityHealth* health) noexcept {
+  if (health == nullptr || !std::isfinite(health->max) || health->max <= 0.0F ||
+      !std::isfinite(health->current)) {
+    return VehicleDamageStage::Healthy;
+  }
+  if (health->current <= 0.0F) {
+    return VehicleDamageStage::Destroyed;
+  }
+  const f32 ratio = health->current / health->max;
+  if (ratio <= 0.25F) {
+    return VehicleDamageStage::Critical;
+  }
+  if (ratio <= 0.5F) {
+    return VehicleDamageStage::Damaged;
+  }
+  return VehicleDamageStage::Healthy;
+}
+
+[[nodiscard]] TickIndex vehicle_smoke_interval_ticks(
+    VehicleDamageStage stage) noexcept {
+  return stage == VehicleDamageStage::Critical ? 15U : 45U;
+}
+
 } // namespace
 
 net::NetworkResult send_protocol_message(
@@ -1958,6 +1982,191 @@ void ServerRuntimeImpl::handle_vehicle_action(
   (void)action;
 }
 
+void ServerRuntimeImpl::tick_vehicle_damage_effects() {
+  for (auto it = vehicle_smoke_states_.begin();
+       it != vehicle_smoke_states_.end();) {
+    const std::optional<EntityID> entity =
+        default_world_.entity_for_network_id(it->first);
+    if (!entity.has_value() || !default_world_.entity_exists(entity.value()) ||
+        default_world_.find_entity_vehicle_physics(entity.value()) == nullptr) {
+      const auto stale = it++;
+      vehicle_smoke_states_.erase(stale);
+      continue;
+    }
+    const VehicleDamageStage stage =
+        vehicle_damage_stage(default_world_.find_entity_health(entity.value()));
+    if (stage == VehicleDamageStage::Healthy ||
+        stage == VehicleDamageStage::Destroyed) {
+      const auto stale = it++;
+      vehicle_smoke_states_.erase(stale);
+      continue;
+    }
+    ++it;
+  }
+
+  for (const EntityID entity : default_world_.entity_ids()) {
+    if (default_world_.find_entity_vehicle_physics(entity) == nullptr) {
+      continue;
+    }
+    const std::optional<EntityNetID> net_id =
+        default_world_.network_id_for_entity(entity);
+    if (!net_id.has_value()) {
+      continue;
+    }
+    const VehicleDamageStage stage =
+        vehicle_damage_stage(default_world_.find_entity_health(entity));
+    if (stage == VehicleDamageStage::Healthy ||
+        stage == VehicleDamageStage::Destroyed) {
+      vehicle_smoke_states_.erase(net_id.value());
+      continue;
+    }
+
+    VehicleSmokeState& state = vehicle_smoke_states_[net_id.value()];
+    if (state.stage != stage) {
+      state.stage = stage;
+      state.next_smoke_tick = tick_index_;
+    }
+    if (tick_index_ < state.next_smoke_tick) {
+      continue;
+    }
+    broadcast_vehicle_smoke_particles(
+        vehicle_effect_position(default_world_, entity) + Vec3f{0.0F, 0.08F, 0.0F},
+        stage,
+        static_cast<u32>(
+            net_id->value ^
+            (static_cast<u64>(tick_index_) << 8U) ^
+            (stage == VehicleDamageStage::Critical ? 0x9e3779b9ULL : 0x85ebca6bULL)));
+    state.stage = stage;
+    state.next_smoke_tick =
+        tick_index_ + vehicle_smoke_interval_ticks(stage);
+  }
+}
+
+bool ServerRuntimeImpl::destroy_vehicle_from_damage(
+    EntityID vehicle_entity,
+    Vec3f normal,
+    u32 seed,
+    bool broadcast_explosion) {
+  if (!default_world_.entity_exists(vehicle_entity)) {
+    return false;
+  }
+  const std::optional<EntityNetID> vehicle_net_id =
+      default_world_.network_id_for_entity(vehicle_entity);
+  const Vec3f effect_position =
+      vehicle_effect_position(default_world_, vehicle_entity);
+
+  if (block_registry_ != nullptr) {
+    const std::vector<EntityID> occupants =
+        vehicle_occupants(default_world_, vehicle_entity);
+    const std::optional<Vec3f> ejection_position =
+        crash_ejection_position(
+            default_world_,
+            *block_registry_,
+            vehicle_entity,
+            player_tuning_);
+    if (ejection_position.has_value()) {
+      bool dismounted_any = false;
+      for (const EntityID occupant : occupants) {
+        const std::optional<PlayerID> player_id =
+            default_world_.player_for_entity(occupant);
+        if (!default_world_.dismount_entity(occupant)) {
+          continue;
+        }
+        dismounted_any = true;
+        (void)default_world_.set_entity_position(
+            occupant,
+            ejection_position.value());
+        if (entity::EntityVelocity* velocity =
+                default_world_.find_entity_velocity(occupant);
+            velocity != nullptr) {
+          velocity->linear = {0.0F, 3.0F, 0.0F};
+        }
+        if (player_id.has_value()) {
+          player::PlayerState* player_state =
+              default_world_.find_player(player_id.value());
+          if (player_state != nullptr) {
+            player_state->position = ejection_position.value();
+            player_state->velocity = {0.0F, 3.0F, 0.0F};
+            player_state->grounded = false;
+            player_state->knockback_control_suppression_ticks =
+                std::max<u32>(player_state->knockback_control_suppression_ticks, 4U);
+            sessions_.for_each_session([&](const ServerSession& occupant_session) {
+              if (!occupant_session.authenticated ||
+                  occupant_session.player_id != player_id.value()) {
+                return;
+              }
+              send_player_velocity(occupant_session, *player_state);
+            });
+          }
+        }
+        broadcast_ride_ended(
+            occupant,
+            vehicle_entity,
+            ejection_position.value());
+      }
+      if (dismounted_any) {
+        if (vehicle_net_id.has_value()) {
+          accepted_vehicle_movement_.erase(vehicle_net_id.value());
+        }
+        broadcast_entity_passengers(vehicle_entity);
+      }
+    }
+  }
+
+  if (broadcast_explosion) {
+    broadcast_vehicle_crash_particles(effect_position, normal, seed);
+  }
+  if (!default_world_.destroy_entity(
+          vehicle_entity,
+          world::EntityDespawnReason::Removed)) {
+    return false;
+  }
+  if (vehicle_net_id.has_value()) {
+    accepted_vehicle_movement_.erase(vehicle_net_id.value());
+    vehicle_crash_cooldowns_.erase(vehicle_net_id.value());
+    vehicle_smoke_states_.erase(vehicle_net_id.value());
+  }
+  default_world_.flush_entity_despawns();
+  broadcast_pending_ride_ended_events();
+  return true;
+}
+
+void ServerRuntimeImpl::handle_vehicle_damage_result(
+    EntityID vehicle_entity,
+    const world::DamageResult& damage,
+    Vec3f normal,
+    u32 seed) {
+  if (!damage.applied ||
+      default_world_.find_entity_vehicle_physics(vehicle_entity) == nullptr) {
+    return;
+  }
+  const std::optional<EntityNetID> net_id =
+      default_world_.network_id_for_entity(vehicle_entity);
+  if (damage.killed) {
+    (void)destroy_vehicle_from_damage(
+        vehicle_entity,
+        normal,
+        seed,
+        true);
+    return;
+  }
+  if (!net_id.has_value()) {
+    return;
+  }
+  const VehicleDamageStage stage =
+      vehicle_damage_stage(default_world_.find_entity_health(vehicle_entity));
+  if (stage == VehicleDamageStage::Healthy ||
+      stage == VehicleDamageStage::Destroyed) {
+    vehicle_smoke_states_.erase(net_id.value());
+    return;
+  }
+  VehicleSmokeState& state = vehicle_smoke_states_[net_id.value()];
+  if (state.stage != stage) {
+    state.stage = VehicleDamageStage::Healthy;
+    state.next_smoke_tick = tick_index_;
+  }
+}
+
 bool ServerRuntimeImpl::apply_vehicle_crash(
     EntityID vehicle_entity,
     EntityNetID vehicle_net_id,
@@ -2008,12 +2217,14 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
         accepted);
   }
 
+  world::DamageResult crash_damage;
   if (damage > 0.0F) {
-    (void)default_world_.apply_damage(
+    crash_damage = default_world_.apply_damage(
         {vehicle_entity,
          vehicle_entity,
          damage,
-         world::DamageCause::Generic});
+         world::DamageCause::Generic,
+         false});
   }
 
   if (crash_severity_at_least(assessment.severity, entity::CrashSeverity::Ejection) &&
@@ -2084,24 +2295,34 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
     }
   }
 
-  if (assessment.severity == entity::CrashSeverity::Destruction) {
-    if (crash_should_explode(definition.crash, assessment)) {
-      broadcast_vehicle_crash_particles(
-          vehicle_effect_position(default_world_, vehicle_entity),
-          contact.normal,
-          static_cast<u32>(
-              vehicle_net_id.value ^ static_cast<u64>(tick_index_)));
+  if (crash_damage.applied) {
+    handle_vehicle_damage_result(
+        vehicle_entity,
+        crash_damage,
+        contact.normal,
+        static_cast<u32>(
+            vehicle_net_id.value ^ static_cast<u64>(tick_index_) ^ 0x51ed2705ULL));
+    if (!default_world_.entity_exists(vehicle_entity)) {
       if (debug != nullptr) {
         debug->explosion_broadcast = true;
+        debug->vehicle_destroyed = true;
+        debug->accepted_velocity = accepted.velocity;
       }
+      return true;
     }
+  }
+
+  if (assessment.severity == entity::CrashSeverity::Destruction) {
+    const bool explode = crash_should_explode(definition.crash, assessment);
     if (definition.crash.destroy_on_destruction &&
-        default_world_.destroy_entity(vehicle_entity, world::EntityDespawnReason::Removed)) {
-      accepted_vehicle_movement_.erase(vehicle_net_id);
-      vehicle_crash_cooldowns_.erase(vehicle_net_id);
-      default_world_.flush_entity_despawns();
-      broadcast_pending_ride_ended_events();
+        destroy_vehicle_from_damage(
+            vehicle_entity,
+            contact.normal,
+            static_cast<u32>(
+                vehicle_net_id.value ^ static_cast<u64>(tick_index_)),
+            explode)) {
       if (debug != nullptr) {
+        debug->explosion_broadcast = explode;
         debug->vehicle_destroyed = true;
         debug->accepted_velocity = accepted.velocity;
       }

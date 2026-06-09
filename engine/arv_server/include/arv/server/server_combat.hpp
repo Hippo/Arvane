@@ -60,6 +60,8 @@ struct AttackResult {
   bool damage_applied{};
   bool critical_hit{};
   bool knockback_applied{};
+  std::optional<EntityID> damaged_entity{};
+  world::DamageResult damage{};
   std::optional<PlayerID> knockback_player_id{};
   Vec3f knockback_velocity{};
   u32 knockback_control_suppression_ticks{};

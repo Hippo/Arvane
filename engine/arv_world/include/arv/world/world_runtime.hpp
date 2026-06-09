@@ -111,6 +111,7 @@ struct DamageRequest {
   EntityID target{};
   f32 amount{};
   DamageCause cause{DamageCause::Generic};
+  bool destroy_on_kill{true};
 };
 
 struct DamageResult {

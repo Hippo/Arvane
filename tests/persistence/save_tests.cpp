@@ -147,7 +147,13 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
        arv::WorldID{1},
        {4.0F, 5.0F, 6.0F},
        {0.0F, 0.0F, 0.0F, 1.0F},
-       {0.1F, 0.2F, 0.3F}},
+       {0.1F, 0.2F, 0.3F},
+       {},
+       0.0F,
+       true,
+       6.0F,
+       10.0F,
+       true},
       {"entity-test-uuid-b",
        "arvane:test_entity",
        arv::WorldID{1},
@@ -272,6 +278,10 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(entity_a->world_id, (arv::WorldID{1}));
   EXPECT_EQ(entity_a->position, (arv::Vec3f{4.0F, 5.0F, 6.0F}));
   EXPECT_EQ(entity_a->velocity, (arv::Vec3f{0.1F, 0.2F, 0.3F}));
+  EXPECT_TRUE(entity_a->has_health);
+  EXPECT_FLOAT_EQ(entity_a->health_current, 6.0F);
+  EXPECT_FLOAT_EQ(entity_a->health_max, 10.0F);
+  EXPECT_TRUE(entity_a->health_invulnerable);
   const auto entity_b = std::find_if(
       loaded.value().entities.begin(),
       loaded.value().entities.end(),

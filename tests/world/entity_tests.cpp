@@ -958,13 +958,23 @@ TEST(WorldEntityTests, PersistentEntityRecordsRoundTripThroughWorldRuntime) {
   info.persistent_uuid = "entity-test-uuid";
   info.position = {4.0F, 5.0F, 6.0F};
   info.velocity = {0.5F, 0.0F, -0.5F};
-  (void)world.create_entity(std::move(info));
+  arv::entity::EntityComponentSet components;
+  components.health = arv::entity::AuthoredHealthComponent{10.0F, 6.0F, true};
+  info.authored_components = components;
+  const arv::EntityID entity = world.create_entity(std::move(info));
+  arv::entity::EntityHealth* health = world.find_entity_health(entity);
+  ASSERT_NE(health, nullptr);
+  health->current = 4.0F;
 
   const std::vector<arv::entity::PersistentEntityRecord> records =
       world.persistent_entity_records();
   ASSERT_EQ(records.size(), 1U);
   EXPECT_EQ(records.front().uuid, "entity-test-uuid");
   EXPECT_EQ(records.front().type_name, "arvane:test_persistent");
+  EXPECT_TRUE(records.front().has_health);
+  EXPECT_FLOAT_EQ(records.front().health_current, 4.0F);
+  EXPECT_FLOAT_EQ(records.front().health_max, 10.0F);
+  EXPECT_TRUE(records.front().health_invulnerable);
 
   arv::world::WorldRuntime loaded{arv::WorldID{3}};
   loaded.restore_persistent_entities(records);
@@ -974,6 +984,10 @@ TEST(WorldEntityTests, PersistentEntityRecordsRoundTripThroughWorldRuntime) {
   ASSERT_EQ(loaded_records.size(), 1U);
   EXPECT_EQ(loaded_records.front().uuid, "entity-test-uuid");
   EXPECT_EQ(loaded_records.front().position, (arv::Vec3f{4.0F, 5.0F, 6.0F}));
+  ASSERT_TRUE(loaded_records.front().has_health);
+  EXPECT_FLOAT_EQ(loaded_records.front().health_current, 4.0F);
+  EXPECT_FLOAT_EQ(loaded_records.front().health_max, 10.0F);
+  EXPECT_TRUE(loaded_records.front().health_invulnerable);
 }
 
 TEST(WorldEntityTests, DroppedItemsArePersistentEntitiesWithStackPayloads) {

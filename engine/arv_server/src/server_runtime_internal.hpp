@@ -147,6 +147,18 @@ struct PendingEntityAttack {
   protocol::ServerboundAttackEntity attack{};
 };
 
+enum class VehicleDamageStage : u8 {
+  Healthy,
+  Damaged,
+  Critical,
+  Destroyed,
+};
+
+struct VehicleSmokeState {
+  VehicleDamageStage stage{VehicleDamageStage::Healthy};
+  TickIndex next_smoke_tick{};
+};
+
 class ServerWorldJobRuntime {
 public:
   ServerWorldJobRuntime();
@@ -414,6 +426,17 @@ struct ServerRuntimeImpl {
   void tick_dropped_item_pickups(Seconds tick_seconds);
   void spawn_dropped_item_stack(WorldID world_id, Vec3f position, player::ItemStack stack);
   void expire_timed_out_skin_uploads();
+  void tick_vehicle_damage_effects();
+  void handle_vehicle_damage_result(
+      EntityID vehicle_entity,
+      const world::DamageResult& damage,
+      Vec3f normal,
+      u32 seed);
+  [[nodiscard]] bool destroy_vehicle_from_damage(
+      EntityID vehicle_entity,
+      Vec3f normal,
+      u32 seed,
+      bool broadcast_explosion);
 
   void tick_chunk_streaming();
 
@@ -437,6 +460,10 @@ struct ServerRuntimeImpl {
   void broadcast_vehicle_crash_particles(
       Vec3f position,
       Vec3f normal,
+      u32 seed);
+  void broadcast_vehicle_smoke_particles(
+      Vec3f position,
+      VehicleDamageStage stage,
       u32 seed);
   void broadcast_entity_passengers(EntityID rideable_id);
   void broadcast_ride_started(
@@ -544,6 +571,7 @@ struct ServerRuntimeImpl {
   HashMap<EntityNetID, AcceptedVehicleMovementState> accepted_vehicle_movement_;
   HashMap<EntityNetID, TickIndex> vehicle_crash_cooldowns_;
   HashMap<EntityNetID, VehicleCrashDebugInfo> last_vehicle_crash_debug_;
+  HashMap<EntityNetID, VehicleSmokeState> vehicle_smoke_states_;
   HashMap<PlayerID, TickIndex> crash_remount_cooldowns_;
   HashMap<PlayerID, double> last_player_move_correction_seconds_;
   HashMap<PlayerID, protocol::BlockBreakProgress> last_sent_block_break_progress_;

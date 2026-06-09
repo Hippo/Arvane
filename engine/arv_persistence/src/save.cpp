@@ -215,6 +215,13 @@ namespace {
         static_cast<f64>(entity.dropped_item_pickup_delay_seconds));
     components.set("dropped_item", std::move(dropped_item));
   }
+  if (entity.has_health) {
+    io::DataValue health = io::DataValue::object();
+    health.set("current", static_cast<f64>(entity.health_current));
+    health.set("max", static_cast<f64>(entity.health_max));
+    health.set("invulnerable", entity.health_invulnerable);
+    components.set("health", std::move(health));
+  }
 
   io::DataValue node = io::DataValue::object();
   node.set("uuid", entity.uuid);
@@ -255,6 +262,18 @@ namespace {
           delay != nullptr && io::is_number_value(*delay)) {
         record.dropped_item_pickup_delay_seconds =
             static_cast<Seconds>(delay->as_f64_or(0.0));
+      }
+    }
+    if (const io::DataValue* health = member(*components, "health");
+        health != nullptr && health->kind() == io::DataKind::Object) {
+      const io::DataValue* current = member(*health, "current");
+      const io::DataValue* max = member(*health, "max");
+      if (current != nullptr && io::is_number_value(*current) &&
+          max != nullptr && io::is_number_value(*max)) {
+        record.has_health = true;
+        record.health_current = static_cast<f32>(current->as_f64_or(0.0));
+        record.health_max = static_cast<f32>(max->as_f64_or(1.0));
+        record.health_invulnerable = bool_value_or(*health, "invulnerable", false);
       }
     }
   }

@@ -541,6 +541,10 @@ struct PersistentEntityRecord {
   Vec3f velocity{};
   std::optional<player::ItemStack> dropped_item_stack{};
   Seconds dropped_item_pickup_delay_seconds{};
+  bool has_health{};
+  f32 health_current{};
+  f32 health_max{};
+  bool health_invulnerable{};
 };
 
 struct DroppedItemEntitySnapshot {

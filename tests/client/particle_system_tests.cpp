@@ -183,6 +183,15 @@ TEST(ParticleSystemTests, LoadsBasePackStaticAndAnimatedParticles) {
         explosion->frames[index].asset_id,
         "arvane:texture/particle/explosion_" + std::to_string(index));
   }
+  const arv::client::ParticleType* vehicle_smoke =
+      assets.value().registry.find("arvane:vehicle_smoke");
+  ASSERT_NE(vehicle_smoke, nullptr);
+  ASSERT_EQ(vehicle_smoke->frames.size(), 12U);
+  for (arv::usize index = 0; index < vehicle_smoke->frames.size(); ++index) {
+    EXPECT_EQ(
+        vehicle_smoke->frames[index].asset_id,
+        "arvane:texture/particle/smoke_" + std::to_string(index));
+  }
   EXPECT_FALSE(assets.value().atlas.pages.empty());
 }
 

@@ -121,6 +121,16 @@ void set_test_player_held_item(
           count}));
 }
 
+void tick_integrated(
+    arv::server::ServerRuntime& server,
+    arv::client::ClientRuntime& client,
+    arv::u32 count = 1U) {
+  for (arv::u32 tick = 0; tick < count; ++tick) {
+    server.tick();
+    client.fixed_tick(server.tick_index());
+  }
+}
+
 arv::server::FluidContainerInteractionConfig make_test_fluid_containers() {
   return {"arvane:bucket", "arvane:water_bucket"};
 }
@@ -164,16 +174,42 @@ arv::client::ParticleRegistry make_critical_particle_registry() {
 
 arv::client::ParticleRegistry make_explosion_particle_registry() {
   arv::client::ParticleRegistry registry;
-  arv::client::ParticleType type;
-  type.name = "arvane:explosion";
-  type.frames.push_back(
+  arv::client::ParticleType explosion;
+  explosion.name = "arvane:explosion";
+  explosion.frames.push_back(
       {"arvane:texture/particle/explosion_0", {0.0F, 0.0F}, {16.0F, 16.0F}, 0U, 16U, 16U});
-  type.count = {1U, 1U};
-  type.lifetime_seconds = {1.0F, 1.0F};
-  type.size_start = {0.3F, 0.3F};
-  type.size_end = {0.6F, 0.6F};
-  type.color = {{1.0F, 1.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 1.0F, 0.0F}};
-  (void)registry.add(std::move(type));
+  explosion.count = {1U, 1U};
+  explosion.lifetime_seconds = {1.0F, 1.0F};
+  explosion.size_start = {0.3F, 0.3F};
+  explosion.size_end = {0.6F, 0.6F};
+  explosion.color = {{1.0F, 1.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 1.0F, 0.0F}};
+  (void)registry.add(std::move(explosion));
+
+  arv::client::ParticleType smoke;
+  smoke.name = "arvane:vehicle_smoke";
+  smoke.frames.push_back(
+      {"arvane:texture/particle/smoke_0", {0.0F, 0.0F}, {16.0F, 16.0F}, 0U, 16U, 16U});
+  smoke.count = {1U, 1U};
+  smoke.lifetime_seconds = {1.0F, 1.0F};
+  smoke.size_start = {0.2F, 0.2F};
+  smoke.size_end = {0.8F, 0.8F};
+  smoke.color = {{0.45F, 0.45F, 0.45F, 1.0F}, {0.2F, 0.2F, 0.2F, 0.0F}};
+  (void)registry.add(std::move(smoke));
+  return registry;
+}
+
+arv::client::ParticleRegistry make_vehicle_smoke_particle_registry() {
+  arv::client::ParticleRegistry registry;
+  arv::client::ParticleType smoke;
+  smoke.name = "arvane:vehicle_smoke";
+  smoke.frames.push_back(
+      {"arvane:texture/particle/smoke_0", {0.0F, 0.0F}, {16.0F, 16.0F}, 0U, 16U, 16U});
+  smoke.count = {1U, 1U};
+  smoke.lifetime_seconds = {1.0F, 1.0F};
+  smoke.size_start = {0.2F, 0.2F};
+  smoke.size_end = {0.8F, 0.8F};
+  smoke.color = {{0.45F, 0.45F, 0.45F, 1.0F}, {0.2F, 0.2F, 0.2F, 0.0F}};
+  (void)registry.add(std::move(smoke));
   return registry;
 }
 
@@ -234,7 +270,8 @@ arv::EntityID create_networked_test_mount(
 
 arv::entity::VehicleCrashDefinition test_buggy_crash_tuning(
     arv::f32 ejection_threshold,
-    arv::f32 destruction_threshold = 0.0F) {
+    arv::f32 destruction_threshold = 0.0F,
+    arv::f32 ejection_damage = 8.0F) {
   arv::entity::VehicleCrashDefinition crash;
   crash.enabled = true;
   crash.bump_threshold = 1.0F;
@@ -245,6 +282,9 @@ arv::entity::VehicleCrashDefinition test_buggy_crash_tuning(
   crash.min_direct_impact_dot = 0.35F;
   crash.event_cooldown_ticks = 40U;
   crash.velocity_retention = 0.0F;
+  crash.hard_impact_damage = 4.0F;
+  crash.ejection_damage = ejection_damage;
+  crash.destruction_damage = 30.0F;
   crash.ejection_velocity_scale = 0.5F;
   crash.ejection_upward_velocity = 5.0F;
   crash.ejection_min_horizontal_speed = 4.0F;
@@ -302,6 +342,7 @@ arv::EntityID create_networked_test_buggy(
     arv::Vec3f position) {
   arv::entity::EntityComponentSet components;
   components.collision = arv::entity::AuthoredCollisionComponent{{1.8F, 1.2F, 3.2F}};
+  components.health = arv::entity::AuthoredHealthComponent{30.0F};
   components.rideable =
       arv::entity::AuthoredRideableComponent{"arvane:test_buggy"};
   components.vehicle_physics =
@@ -1038,7 +1079,7 @@ TEST(PlayerInteractionTests, BuggyHighSpeedCrashEjectsPassengerAndBlocksImmediat
   const arv::player::ItemRegistry item_registry =
       arv::testsupport::make_test_item_registry(block_registry);
   const arv::entity::VehicleDefinitionRegistry vehicle_registry =
-      make_buggy_request_vehicle_registry(test_buggy_crash_tuning(6.0F));
+      make_buggy_request_vehicle_registry(test_buggy_crash_tuning(6.0F, 0.0F, 16.0F));
   auto transports = arv::net::make_in_process_transport_pair();
 
   arv::server::ServerRuntime server(std::move(transports.server));
@@ -1053,6 +1094,8 @@ TEST(PlayerInteractionTests, BuggyHighSpeedCrashEjectsPassengerAndBlocksImmediat
 
   arv::client::ClientRuntime client(std::move(transports.client));
   client.configure_vehicles(&vehicle_registry);
+  arv::client::ParticleRegistry smoke_particles = make_vehicle_smoke_particle_registry();
+  client.configure_particles(&smoke_particles);
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
 
@@ -1109,8 +1152,14 @@ TEST(PlayerInteractionTests, BuggyHighSpeedCrashEjectsPassengerAndBlocksImmediat
   move.flags = arv::protocol::VehicleMoveFlags::OnGround;
   ASSERT_TRUE(client.send_vehicle_move(move));
   server.tick();
+  client.fixed_tick(server.tick_index());
 
   EXPECT_TRUE(server.voxel_world().entity_exists(buggy));
+  const arv::entity::EntityHealth* damaged_buggy =
+      server.voxel_world().find_entity_health(buggy);
+  ASSERT_NE(damaged_buggy, nullptr);
+  EXPECT_FLOAT_EQ(damaged_buggy->current, 14.0F);
+  EXPECT_EQ(client.particle_stats().spawned_total, 7U);
   EXPECT_FALSE(server.voxel_world().mounted_rideable(player_entity.value()).has_value());
   const arv::player::PlayerState& ejected_player = connected_player(server);
   EXPECT_GT(ejected_player.velocity.y, 0.0F);
@@ -1240,6 +1289,109 @@ TEST(PlayerInteractionTests, BuggyExtremeCrashDestroysVehicleAfterEjectingPassen
   EXPECT_FALSE(server.voxel_world().entity_exists(buggy));
   EXPECT_FALSE(server.voxel_world().mounted_rideable(player_entity.value()).has_value());
   EXPECT_GT(client.particle_stats().spawned_total, 0U);
+}
+
+TEST(PlayerInteractionTests, VehicleAttacksDamageSmokeAndExplodeAtZeroHealth) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_buggy_request_vehicle_registry();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  start_info.combat.critical_chance = 0.0F;
+  start_info.combat.base_horizontal_knockback = 0.0F;
+  start_info.combat.sprint_horizontal_bonus = 0.0F;
+  start_info.combat.base_vertical_knockback = 0.0F;
+  start_info.combat.airborne_vertical_knockback = 0.0F;
+  start_info.combat.vertical_knockback_cap = 0.0F;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  arv::client::ParticleRegistry smoke_particles = make_vehicle_smoke_particle_registry();
+  arv::client::ParticleRegistry explosion_particles = make_explosion_particle_registry();
+  client.configure_particles(&smoke_particles);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  set_test_player_held_item(server, item_registry, "arvane:wood_sword");
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.0F, 1.0F, 0.0F};
+  player_state.velocity = {};
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(player_state.player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(server.voxel_world().set_entity_position(
+      player_entity.value(),
+      player_state.position));
+
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  place_server_test_floor(server.voxel_world(), stone, -4, 6, -4, 4);
+
+  const arv::EntityID buggy = create_networked_test_buggy(
+      server,
+      vehicle_registry,
+      {2.0F, 1.01F, 0.0F});
+  const std::optional<arv::EntityNetID> buggy_net =
+      server.voxel_world().network_id_for_entity(buggy);
+  ASSERT_TRUE(buggy_net.has_value());
+
+  tick_integrated(server, client);
+  EXPECT_EQ(client.particle_stats().spawned_total, 0U);
+
+  ASSERT_TRUE(client.request_attack_entity(buggy_net.value()));
+  tick_integrated(server, client);
+  ASSERT_TRUE(server.voxel_world().entity_exists(buggy));
+  const arv::entity::EntityHealth* health =
+      server.voxel_world().find_entity_health(buggy);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 25.0F);
+  EXPECT_EQ(client.particle_stats().spawned_total, 0U);
+
+  tick_integrated(server, client, 25U);
+  ASSERT_TRUE(client.request_attack_entity(buggy_net.value()));
+  tick_integrated(server, client);
+  tick_integrated(server, client, 25U);
+  const arv::u64 before_damaged_smoke = client.particle_stats().spawned_total;
+  ASSERT_TRUE(client.request_attack_entity(buggy_net.value()));
+  tick_integrated(server, client);
+  health = server.voxel_world().find_entity_health(buggy);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 15.0F);
+  const arv::u64 damaged_smoke_total = client.particle_stats().spawned_total;
+  EXPECT_EQ(damaged_smoke_total - before_damaged_smoke, 7U);
+
+  tick_integrated(server, client, 25U);
+  ASSERT_TRUE(client.request_attack_entity(buggy_net.value()));
+  tick_integrated(server, client);
+  EXPECT_EQ(client.particle_stats().spawned_total, damaged_smoke_total);
+  tick_integrated(server, client, 25U);
+  const arv::u64 before_critical_smoke = client.particle_stats().spawned_total;
+  ASSERT_TRUE(client.request_attack_entity(buggy_net.value()));
+  tick_integrated(server, client);
+  health = server.voxel_world().find_entity_health(buggy);
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 5.0F);
+  const arv::u64 critical_smoke_total = client.particle_stats().spawned_total;
+  EXPECT_EQ(critical_smoke_total - before_critical_smoke, 14U);
+
+  tick_integrated(server, client, 25U);
+  client.configure_particles(&explosion_particles);
+  ASSERT_TRUE(client.request_attack_entity(buggy_net.value()));
+  tick_integrated(server, client);
+
+  EXPECT_FALSE(server.voxel_world().entity_exists(buggy));
+  EXPECT_GT(client.particle_stats().spawned_total, critical_smoke_total);
 }
 
 TEST(PlayerInteractionTests, BuggyDiagonalCollisionCorrectionSlidesToResolvedSafePosition) {

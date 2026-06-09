@@ -186,6 +186,44 @@ void ServerRuntimeImpl::broadcast_vehicle_crash_particles(
   });
 }
 
+void ServerRuntimeImpl::broadcast_vehicle_smoke_particles(
+    Vec3f position,
+    VehicleDamageStage stage,
+    u32 seed) {
+  if (stage != VehicleDamageStage::Damaged &&
+      stage != VehicleDamageStage::Critical) {
+    return;
+  }
+  protocol::ClientboundSpawnParticles particles;
+  particles.world_id = default_world_.id();
+  particles.particle_type = "arvane:vehicle_smoke";
+  particles.position = position;
+  particles.normal = {0.0F, 1.0F, 0.0F};
+  particles.extents =
+      stage == VehicleDamageStage::Critical
+          ? Vec3f{0.6F, 0.35F, 0.6F}
+          : Vec3f{0.4F, 0.22F, 0.4F};
+  particles.radius = stage == VehicleDamageStage::Critical ? 0.75F : 0.5F;
+  particles.count = stage == VehicleDamageStage::Critical ? 14U : 7U;
+  particles.seed = seed;
+  particles.shape = protocol::ParticleSpawnShape::Sphere;
+  const std::vector<u8> payload =
+      protocol::serialize_clientbound_spawn_particles(particles);
+  sessions_.for_each_session([&](const ServerSession& session) {
+    if (!session.authenticated || session.closing ||
+        session.world_id != default_world_.id()) {
+      return;
+    }
+    (void)send_protocol_message(
+        *transport_,
+        session.connection_id,
+        protocol::MessageType::ClientboundSpawnParticles,
+        protocol::ReliabilityClass::UnreliableEvent,
+        protocol::NetworkLane::Gameplay,
+        payload);
+  });
+}
+
 void ServerRuntimeImpl::broadcast_entity_passengers(EntityID rideable_id) {
   const entity::RideableComponent* rideable =
       default_world_.find_entity_rideable(rideable_id);

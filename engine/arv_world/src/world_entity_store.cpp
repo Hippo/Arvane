@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -920,6 +921,13 @@ std::vector<entity::PersistentEntityRecord> WorldEntityStore::persistent_records
       record.dropped_item_stack = dropped->stack;
       record.dropped_item_pickup_delay_seconds = dropped->pickup_delay_seconds;
     }
+    if (const auto* health = registry_.try_get<entity::EntityHealth>(entity_handle);
+        health != nullptr) {
+      record.has_health = true;
+      record.health_current = health->current;
+      record.health_max = health->max;
+      record.health_invulnerable = health->invulnerable;
+    }
     records.push_back(std::move(record));
   }
   return records;
@@ -954,7 +962,27 @@ void WorldEntityStore::restore_persistent_entities(
     info.dropped_item_stack = record.dropped_item_stack;
     info.dropped_item_pickup_delay_seconds = record.dropped_item_pickup_delay_seconds;
     info.vehicle_definitions = vehicle_definitions;
-    (void)create_entity(std::move(info));
+    const EntityID entity_id = create_entity(std::move(info));
+    if (record.has_health) {
+      entity::EntityHealth* health = find_health(entity_id);
+      if (health == nullptr) {
+        const entt::entity entity_handle = handle(entity_id);
+        if (entity_handle != entt::null && registry_.valid(entity_handle)) {
+          health = &registry_.emplace_or_replace<entity::EntityHealth>(entity_handle);
+        }
+      }
+      if (health != nullptr) {
+        if (std::isfinite(record.health_max) && record.health_max > 0.0F) {
+          health->max = record.health_max;
+        }
+        health->current =
+            std::clamp(
+                std::isfinite(record.health_current) ? record.health_current : health->current,
+                0.0F,
+                health->max);
+        health->invulnerable = record.health_invulnerable;
+      }
+    }
   }
 }
 

@@ -524,16 +524,21 @@ AttackResult validate_and_apply_entity_attack(
     return rejected(AttackRejectReason::TargetDead);
   }
 
+  const bool target_is_vehicle =
+      world.find_entity_vehicle_physics(target.value()) != nullptr;
   const world::DamageResult damage = world.apply_damage({
       attacker.value(),
       target.value(),
       critical_hit ? attack.damage_amount * critical_damage_multiplier(config)
                    : attack.damage_amount,
-      world::DamageCause::EntityAttack});
+      world::DamageCause::EntityAttack,
+      !target_is_vehicle});
   AttackResult result;
   result.accepted = true;
   result.damage_applied = damage.applied;
   result.critical_hit = critical_hit && damage.applied;
+  result.damaged_entity = target.value();
+  result.damage = damage;
   result.reject_reason = AttackRejectReason::None;
   if (damage.applied) {
     apply_attack_knockback(
@@ -603,6 +608,17 @@ void ServerRuntimeImpl::process_pending_entity_attacks() {
           session->player_id.value,
           pending.attack.target_entity.value,
           pending.attack.sequence);
+    }
+    if (result.damage_applied && result.damaged_entity.has_value()) {
+      handle_vehicle_damage_result(
+          result.damaged_entity.value(),
+          result.damage,
+          {0.0F, 1.0F, 0.0F},
+          critical_hash(
+              player_state->player_id,
+              pending.attack.target_entity,
+              pending.attack.sequence,
+              tick_index_) ^ 0xc2b2ae35U);
     }
     if (result.critical_hit) {
       const std::optional<EntityID> target_entity =

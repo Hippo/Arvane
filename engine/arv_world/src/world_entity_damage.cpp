@@ -91,7 +91,7 @@ DamageResult WorldRuntime::apply_damage(const DamageRequest& request) noexcept {
     if (const std::optional<PlayerID> player_id = player_for_entity(request.target);
         player_id.has_value()) {
       respawn_player(*this, player_id.value(), request.target, *health);
-    } else {
+    } else if (request.destroy_on_kill) {
       (void)destroy_entity(request.target, EntityDespawnReason::Removed);
     }
   }

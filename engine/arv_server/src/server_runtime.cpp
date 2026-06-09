@@ -745,6 +745,7 @@ void ServerRuntimeImpl::tick() {
       entity_goals_,
       vehicle_registry_);
   process_pending_entity_attacks();
+  tick_vehicle_damage_effects();
   default_world_.flush_entity_despawns();
   broadcast_pending_ride_ended_events();
   world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
