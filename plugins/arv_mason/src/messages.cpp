@@ -36,6 +36,10 @@ std::string MasonPlugin::message_source(
     MasonMessageArgs args) const {
   std::string message{messages_.get(key)};
   if (message.empty()) {
+    const MasonMessages defaults = default_messages();
+    message = std::string{defaults.get(key)};
+  }
+  if (message.empty()) {
     message = std::string{key};
   }
   replace_all(message, "{arv_mason_prefix}", messages_.prefix);

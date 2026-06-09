@@ -66,8 +66,12 @@ The selection command is provided by `arv_base`, and Mason reads the current
 selection through the Plugin SDK.
 
 `/mason marker` adds a wood sword marker item to your inventory. Marker items
-are identified by `arv_mason.marker = true` in stack data. Left click a block
-with the marker to set point A; right click a block to set point B.
+are identified by `arv_mason.marker = true` in stack data. The item display
+name comes from `arv_mason.display_name`, which defaults to `Marker`. Left
+click a block with the marker to set point A; right click a block to set point
+B. Marker click feedback comes from `arv_mason.select_a_message` and
+`arv_mason.select_b_message` on the stack, with `{position}` expanded to the
+selected block position.
 
 Editing:
 
@@ -166,6 +170,10 @@ Default messages start with:
 ```yaml
 prefix: "<red>Mason<gray>></>"
 example-message: "{arv_mason_prefix} My message"
+marker-display-name: "Marker"
+marker-given: "{arv_mason_prefix} Marker added to your inventory."
+marker-select-a: "{arv_mason_prefix} Position A set to {position}."
+marker-select-b: "{arv_mason_prefix} Position B set to {position}."
 ```
 
 The prefix is registered as the resolved global variable

@@ -3,6 +3,7 @@
 #include "arv_mason/ids.hpp"
 
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace arv_mason {
@@ -33,6 +34,33 @@ arv::Result MasonPlugin::handle_marker(arv::CommandContext& ctx, const Args& arg
     return document.result;
   }
   if (arv::Result marker_data = document.value.set_bool("marker", true); !marker_data) {
+    error(ctx, "marker-create-failed", {{"error", marker_data.message()}});
+    return marker_data;
+  }
+  std::string display_name{messages_.get("marker-display-name")};
+  if (display_name.empty()) {
+    const MasonMessages defaults = default_messages();
+    display_name = std::string{defaults.get("marker-display-name")};
+  }
+  if (display_name.empty()) {
+    display_name = "Marker";
+  }
+  if (arv::Result marker_data = document.value.set_string("display_name", display_name);
+      !marker_data) {
+    error(ctx, "marker-create-failed", {{"error", marker_data.message()}});
+    return marker_data;
+  }
+  const std::string select_a_message =
+      message_source("marker-select-a", {{"position", "{position}"}});
+  if (arv::Result marker_data = document.value.set_string("select_a_message", select_a_message);
+      !marker_data) {
+    error(ctx, "marker-create-failed", {{"error", marker_data.message()}});
+    return marker_data;
+  }
+  const std::string select_b_message =
+      message_source("marker-select-b", {{"position", "{position}"}});
+  if (arv::Result marker_data = document.value.set_string("select_b_message", select_b_message);
+      !marker_data) {
     error(ctx, "marker-create-failed", {{"error", marker_data.message()}});
     return marker_data;
   }

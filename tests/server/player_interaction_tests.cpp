@@ -131,10 +131,18 @@ arv::server::BlockBreakBehaviorRegistry make_base_block_break_behaviors() {
   return registry;
 }
 
-arv::io::DataDocument make_mason_marker_data() {
+arv::io::DataDocument make_mason_marker_data(
+    std::string_view select_a_message = {},
+    std::string_view select_b_message = {}) {
   arv::io::DataDocument document{1U, arv::io::DataValue::object()};
   arv::io::DataValue mason = arv::io::DataValue::object();
   mason.set("marker", true);
+  if (!select_a_message.empty()) {
+    mason.set("select_a_message", std::string{select_a_message});
+  }
+  if (!select_b_message.empty()) {
+    mason.set("select_b_message", std::string{select_b_message});
+  }
   document.root.set("arv_mason", std::move(mason));
   return document;
 }
@@ -1574,25 +1582,34 @@ TEST(PlayerInteractionTests, MasonMarkerClicksSetSelectionWithoutEditingBlocks) 
   ASSERT_TRUE(sword.has_value());
   ASSERT_TRUE(player_state.inventory.set_slot(
       0,
-      arv::player::ItemStack{sword.value(), 1U, make_mason_marker_data()}));
+      arv::player::ItemStack{
+          sword.value(),
+          1U,
+          make_mason_marker_data("A selected: {position}", "B selected: {position}")}));
 
   client.submit_input(arv::client::InputFrame{.primary_pressed = true});
   client.fixed_tick(server.tick_index());
   server.tick();
+  client.fixed_tick(server.tick_index());
 
   EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), dirt);
   ASSERT_TRUE(player_state.selection.world.has_value());
   ASSERT_TRUE(player_state.selection.a.has_value());
   EXPECT_EQ(player_state.selection.world.value(), server.voxel_world().id());
   EXPECT_EQ(player_state.selection.a.value(), (arv::BlockPos{{3, 1, 0}}));
+  ASSERT_EQ(client.chat_messages().size(), 1U);
+  EXPECT_EQ(client.chat_messages().back(), "A selected: 3, 1, 0");
 
   client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
   client.fixed_tick(server.tick_index());
   server.tick();
+  client.fixed_tick(server.tick_index());
 
   EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), dirt);
   ASSERT_TRUE(player_state.selection.b.has_value());
   EXPECT_EQ(player_state.selection.b.value(), (arv::BlockPos{{3, 1, 0}}));
+  ASSERT_EQ(client.chat_messages().size(), 2U);
+  EXPECT_EQ(client.chat_messages().back(), "B selected: 3, 1, 0");
 }
 
 TEST(PlayerInteractionTests, StairPlacementResolvesFacingAndHalfState) {

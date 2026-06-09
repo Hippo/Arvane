@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifndef ARV_TEST_EXAMPLE_PLUGIN_PATH
@@ -350,6 +351,10 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
       player_services,
       "/mm");
   ASSERT_EQ(marker_result.status, arv::command::CommandStatus::Success);
+  ASSERT_FALSE(marker_result.messages.empty());
+  EXPECT_NE(
+      marker_result.messages.front().text.find("Marker added to your inventory"),
+      std::string::npos);
   const std::optional<arv::player::ItemID> sword =
       item_registry.find_item("arvane:wood_sword");
   ASSERT_TRUE(sword.has_value());
@@ -362,6 +367,22 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
         arv::io::find_path(*slot->data, "arv_mason.marker");
     marker_found = marker != nullptr && marker->as_bool_or(false);
     if (marker_found) {
+      const arv::io::DataValue* display_name =
+          arv::io::find_path(*slot->data, "arv_mason.display_name");
+      ASSERT_NE(display_name, nullptr);
+      EXPECT_EQ(display_name->as_string_or({}), "Marker");
+      const arv::io::DataValue* select_a_message =
+          arv::io::find_path(*slot->data, "arv_mason.select_a_message");
+      ASSERT_NE(select_a_message, nullptr);
+      EXPECT_NE(
+          select_a_message->as_string_or({}).find("Position A set to {position}"),
+          std::string_view::npos);
+      const arv::io::DataValue* select_b_message =
+          arv::io::find_path(*slot->data, "arv_mason.select_b_message");
+      ASSERT_NE(select_b_message, nullptr);
+      EXPECT_NE(
+          select_b_message->as_string_or({}).find("Position B set to {position}"),
+          std::string_view::npos);
       break;
     }
   }

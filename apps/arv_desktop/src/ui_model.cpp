@@ -2,6 +2,7 @@
 
 #include "asset_helpers.hpp"
 
+#include "arv/io/data_document.hpp"
 #include "arv/render/block_model_geometry.hpp"
 
 #include <algorithm>
@@ -56,6 +57,23 @@ inline constexpr std::array<voxel::BlockFace, 3> UiBlockModelFaces{{
       break;
   }
   return {1.0F, 1.0F, 1.0F, 1.0F};
+}
+
+[[nodiscard]] std::optional<std::string> mason_marker_display_name(
+    const player::ItemStack& stack) {
+  if (!stack.data.has_value()) {
+    return std::nullopt;
+  }
+  const io::DataValue* value =
+      io::find_path(*stack.data, "arv_mason.display_name");
+  if (value == nullptr || value->kind() != io::DataKind::String) {
+    return std::nullopt;
+  }
+  const std::string_view display_name = value->as_string_or({});
+  if (display_name.empty()) {
+    return std::nullopt;
+  }
+  return std::string{display_name};
 }
 
 [[nodiscard]] f32 block_model_face_depth(const std::array<Vec3i, 4>& corners) noexcept {
@@ -139,7 +157,8 @@ void sort_projected_quad(
   ui::UiItemStackView view;
   const player::ItemRecord* item = item_registry.item(stack.item);
   view.item_name = item == nullptr ? std::string{player::MissingItemName} : item->name;
-  view.display_name = item == nullptr ? view.item_name : item->display_name;
+  view.display_name = mason_marker_display_name(stack).value_or(
+      item == nullptr ? view.item_name : item->display_name);
   view.count = stack.count;
   view.texture_icon = missing_icon;
   view.render_type = item == nullptr ? player::ItemRenderType::Texture : item->render_type;

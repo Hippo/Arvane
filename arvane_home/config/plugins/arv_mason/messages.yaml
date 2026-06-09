@@ -13,8 +13,11 @@ data:
   example-message: "{arv_mason_prefix} My message"
   help: "{arv_mason_prefix} /mason marker, set, replace, copy, paste, undo, redo, confirm."
   marker-create-failed: "{arv_mason_prefix} Failed to create marker item data: {error}."
+  marker-display-name: Marker
   marker-give-failed: "{arv_mason_prefix} Failed to give marker item: {error}."
   marker-given: "{arv_mason_prefix} Marker added to your inventory."
+  marker-select-a: "{arv_mason_prefix} Position A set to {position}."
+  marker-select-b: "{arv_mason_prefix} Position B set to {position}."
   no-pending-confirm: "{arv_mason_prefix} No Mason operation is awaiting confirmation."
   nothing-redo: "{arv_mason_prefix} Nothing to redo."
   nothing-undo: "{arv_mason_prefix} Nothing to undo."

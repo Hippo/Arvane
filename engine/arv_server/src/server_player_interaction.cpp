@@ -1,6 +1,7 @@
 #include "server_runtime_internal.hpp"
 
 #include "arv/io/data_document.hpp"
+#include "arv/text/chat_message.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace arv::server::detail {
 namespace {
@@ -294,18 +296,72 @@ namespace {
   return held.has_value() ? held->item : player::AirItemID;
 }
 
-[[nodiscard]] bool held_item_is_mason_marker(
+[[nodiscard]] const player::ItemStack* held_item_stack(
     const player::PlayerState& player_state) noexcept {
   const std::optional<player::ItemStack>& held =
       player_state.inventory.slot(player_state.selected_hotbar_slot);
-  if (!held.has_value() || !held->data.has_value()) {
+  return held.has_value() ? &held.value() : nullptr;
+}
+
+[[nodiscard]] bool item_stack_is_mason_marker(
+    const player::ItemStack& stack) noexcept {
+  if (!stack.data.has_value()) {
     return false;
   }
-  const io::DataValue* marker = io::find_path(*held->data, "arv_mason.marker");
+  const io::DataValue* marker = io::find_path(*stack.data, "arv_mason.marker");
   return marker != nullptr && marker->as_bool_or(false);
 }
 
-[[nodiscard]] bool handle_mason_marker_interaction(
+[[nodiscard]] std::optional<std::string_view> marker_string_data(
+    const player::ItemStack& stack,
+    std::string_view path) noexcept {
+  if (!stack.data.has_value()) {
+    return std::nullopt;
+  }
+  const io::DataValue* value = io::find_path(*stack.data, path);
+  if (value == nullptr || value->kind() != io::DataKind::String) {
+    return std::nullopt;
+  }
+  const std::string_view text = value->as_string_or({});
+  return text.empty() ? std::nullopt : std::optional<std::string_view>{text};
+}
+
+void replace_all(std::string& text, std::string_view needle, std::string_view value) {
+  if (needle.empty()) {
+    return;
+  }
+  for (std::size_t pos = text.find(needle); pos != std::string::npos;
+       pos = text.find(needle, pos + value.size())) {
+    text.replace(pos, needle.size(), value);
+  }
+}
+
+[[nodiscard]] std::string format_block_position(BlockPos pos) {
+  return std::to_string(pos.value.x) + ", " +
+         std::to_string(pos.value.y) + ", " +
+         std::to_string(pos.value.z);
+}
+
+[[nodiscard]] std::string marker_feedback_message(
+    const player::ItemStack& stack,
+    std::string_view path,
+    BlockPos pos) {
+  const std::optional<std::string_view> message_template =
+      marker_string_data(stack, path);
+  if (!message_template.has_value()) {
+    return {};
+  }
+  std::string message{message_template.value()};
+  replace_all(message, "{position}", format_block_position(pos));
+  return message;
+}
+
+struct MasonMarkerInteractionResult {
+  bool handled{};
+  std::vector<std::string> feedback_messages{};
+};
+
+[[nodiscard]] MasonMarkerInteractionResult handle_mason_marker_interaction(
     player::PlayerState& player_state,
     const player::PlayerCommand& command,
     const physics::ICollisionQuery& interaction_query,
@@ -315,8 +371,9 @@ namespace {
   const bool marker_button_active =
       command.primary_pressed || command.primary_held ||
       command.secondary_pressed || command.secondary_held;
-  if (!marker_button_active || !held_item_is_mason_marker(player_state)) {
-    return false;
+  const player::ItemStack* held = held_item_stack(player_state);
+  if (!marker_button_active || held == nullptr || !item_stack_is_mason_marker(*held)) {
+    return {};
   }
 
   auto hit = physics::raycast_blocks(
@@ -325,17 +382,26 @@ namespace {
       look_direction,
       reach_distance);
   if (!hit.has_value()) {
-    return true;
+    return {.handled = true};
   }
 
+  MasonMarkerInteractionResult result{.handled = true};
   player_state.selection.world = player_state.world_id;
   if (command.primary_pressed) {
     player_state.selection.a = hit->block;
+    result.feedback_messages.push_back(marker_feedback_message(
+        *held,
+        "arv_mason.select_a_message",
+        hit->block));
   }
   if (command.secondary_pressed) {
     player_state.selection.b = hit->block;
+    result.feedback_messages.push_back(marker_feedback_message(
+        *held,
+        "arv_mason.select_b_message",
+        hit->block));
   }
-  return true;
+  return result;
 }
 
 [[nodiscard]] std::optional<player::ItemID> mined_block_drop_item(
@@ -374,13 +440,35 @@ void ServerRuntimeImpl::apply_player_interaction_command(
     Vec3f look_direction,
     const physics::KinematicConfig& physics_config,
     Seconds tick_seconds) {
-  if (handle_mason_marker_interaction(
-          player_state,
-          command,
-          interaction_query,
-          eye_position,
-          look_direction,
-          player_tuning_.reach_distance)) {
+  const MasonMarkerInteractionResult marker_interaction = handle_mason_marker_interaction(
+      player_state,
+      command,
+      interaction_query,
+      eye_position,
+      look_direction,
+      player_tuning_.reach_distance);
+  if (marker_interaction.handled) {
+    auto send_system_to_player = [this, player_id = player_state.player_id](
+                                     std::string_view message) {
+      if (message.empty()) {
+        return;
+      }
+      const ServerSession* recipient = nullptr;
+      sessions_.for_each_session([&](const ServerSession& session) {
+        if (session.player_id == player_id && session.authenticated && !session.closing) {
+          recipient = &session;
+        }
+      });
+      if (recipient == nullptr) {
+        return;
+      }
+      send_system_message(
+          *recipient,
+          arv::text::ChatMessageTemplate::parse(message).to_rich_text());
+    };
+    for (const std::string& message : marker_interaction.feedback_messages) {
+      send_system_to_player(message);
+    }
     clear_block_break_attempt(player_state.player_id);
     return;
   }
