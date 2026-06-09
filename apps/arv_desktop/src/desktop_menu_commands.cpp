@@ -103,6 +103,9 @@ bool DesktopFrameLoop::begin_closing_game() {
   loading_screen_ = DesktopLoadingScreen::ClosingGame;
   window_.set_cursor_captured(false);
   invalidate_ui_tree_cache();
+  if (sessions_.start_pending()) {
+    return true;
+  }
   if (!sessions_.shutdown_pending() && !sessions_.begin_save_and_shutdown()) {
     return false;
   }
@@ -125,15 +128,50 @@ bool DesktopFrameLoop::process_loading_world_frame() {
     loading_screen_ = DesktopLoadingScreen::None;
     return false;
   }
-  return finish_pending_world_start();
+  if (sessions_.start_pending()) {
+    const std::optional<bool> start_result = sessions_.poll_start();
+    if (!start_result.has_value()) {
+      return true;
+    }
+    return complete_pending_world_start(start_result.value());
+  }
+  return begin_pending_world_start();
 }
 
-bool DesktopFrameLoop::finish_pending_world_start() {
+bool DesktopFrameLoop::begin_pending_world_start() {
+  if (pending_remote_start_.has_value()) {
+    const PendingRemoteStart& start = pending_remote_start_.value();
+    if (!sessions_.begin_start_remote(start.command, start.local_identity)) {
+      return complete_pending_world_start(false);
+    }
+    return true;
+  }
+
+  if (pending_singleplayer_start_.has_value()) {
+    const PendingSingleplayerStart& start = pending_singleplayer_start_.value();
+    if (!sessions_.begin_start_singleplayer(
+            start.server_save_name,
+            start.world_name,
+            start.create_seed,
+            start.create_new,
+            start.save_display_name,
+            start.local_identity)) {
+      return complete_pending_world_start(false);
+    }
+    return true;
+  }
+
+  loading_screen_ = DesktopLoadingScreen::None;
+  invalidate_ui_tree_cache();
+  return true;
+}
+
+bool DesktopFrameLoop::complete_pending_world_start(bool started) {
   if (pending_remote_start_.has_value()) {
     PendingRemoteStart start = std::move(pending_remote_start_.value());
     clear_pending_world_start();
     const ui::JoinServerCommand& command = start.command;
-    if (sessions_.start_remote(command, start.local_identity)) {
+    if (started) {
       gameplay_menu_stack_active_ = false;
       gameplay_screen_manager_.clear();
       screen_manager_.replace(ui::make_multiplayer_connecting_screen(
@@ -151,13 +189,7 @@ bool DesktopFrameLoop::finish_pending_world_start() {
   if (pending_singleplayer_start_.has_value()) {
     PendingSingleplayerStart start = std::move(pending_singleplayer_start_.value());
     clear_pending_world_start();
-    if (sessions_.start_singleplayer(
-            std::move(start.server_save_name),
-            std::move(start.world_name),
-            start.create_seed,
-            start.create_new,
-            std::move(start.save_display_name),
-            start.local_identity)) {
+    if (started) {
       gameplay_menu_stack_active_ = true;
       reset_gameplay_menu_stack();
       if (start.refresh_worlds_after_start) {

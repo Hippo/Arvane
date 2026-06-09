@@ -156,7 +156,8 @@ private:
   void queue_remote_start(PendingRemoteStart start);
   void clear_pending_world_start() noexcept;
   [[nodiscard]] bool process_loading_world_frame();
-  [[nodiscard]] bool finish_pending_world_start();
+  [[nodiscard]] bool begin_pending_world_start();
+  [[nodiscard]] bool complete_pending_world_start(bool started);
   [[nodiscard]] bool begin_closing_game();
   [[nodiscard]] bool render_loading_screen_frame(DesktopLoadingScreen screen);
   void append_loading_screen_ui(

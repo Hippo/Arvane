@@ -126,6 +126,18 @@ int DesktopFrameLoop::run() {
       if (!render_loading_screen_frame(DesktopLoadingScreen::ClosingGame)) {
         return 1;
       }
+      if (sessions_.start_pending()) {
+        const std::optional<bool> start_result = sessions_.poll_start();
+        if (!start_result.has_value()) {
+          ARV_PROFILE_FRAME_MARK("Frame");
+          continue;
+        }
+        if (start_result.value() &&
+            !sessions_.shutdown_pending() &&
+            !sessions_.begin_save_and_shutdown()) {
+          return 1;
+        }
+      }
       sessions_.poll_shutdown();
       if (!sessions_.shutdown_pending()) {
         return sessions_.shutdown_failed() ? 1 : 0;

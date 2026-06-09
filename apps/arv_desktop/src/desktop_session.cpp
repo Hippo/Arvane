@@ -29,6 +29,13 @@ struct DesktopSessionManager::PendingShutdown {
   std::atomic_bool succeeded{};
 };
 
+struct DesktopSessionManager::PendingStart {
+  std::thread thread;
+  std::atomic_bool finished{};
+  std::atomic_bool succeeded{};
+  std::unique_ptr<DesktopGameSession> session{};
+};
+
 DesktopGameSession::DesktopGameSession(TickRate base_tps) : ticks(base_tps) {
 }
 
@@ -36,6 +43,7 @@ DesktopSessionManager::DesktopSessionManager(DesktopSessionDependencies dependen
 }
 
 DesktopSessionManager::~DesktopSessionManager() {
+  (void)finish_pending_start();
   (void)finish_pending_shutdown();
 }
 
@@ -55,12 +63,26 @@ bool DesktopSessionManager::shutdown_failed() const noexcept {
   return shutdown_failed_;
 }
 
+bool DesktopSessionManager::start_pending() const noexcept {
+  return pending_start_ != nullptr;
+}
+
 void DesktopSessionManager::poll_shutdown() {
   if (pending_shutdown_ == nullptr ||
       !pending_shutdown_->finished.load(std::memory_order_acquire)) {
     return;
   }
   (void)finish_pending_shutdown();
+}
+
+std::optional<bool> DesktopSessionManager::poll_start() {
+  if (pending_start_ == nullptr) {
+    return true;
+  }
+  if (!pending_start_->finished.load(std::memory_order_acquire)) {
+    return std::nullopt;
+  }
+  return finish_pending_start();
 }
 
 void DesktopSessionManager::remove_session_chunk_meshes(DesktopGameSession& session) const {
@@ -150,6 +172,36 @@ bool DesktopSessionManager::finish_pending_shutdown() {
   return !shutdown_failed_;
 }
 
+void DesktopSessionManager::adopt_started_session(
+    std::unique_ptr<DesktopGameSession> session) {
+  if (session == nullptr) {
+    return;
+  }
+  session->client_world.bind_owner_thread();
+  if (session->integrated_server != nullptr) {
+    session->integrated_server->voxel_world().bind_owner_thread();
+  }
+  game_session_ = std::move(session);
+}
+
+bool DesktopSessionManager::finish_pending_start() {
+  if (pending_start_ == nullptr) {
+    return true;
+  }
+
+  if (pending_start_->thread.joinable()) {
+    pending_start_->thread.join();
+  }
+  const bool succeeded = pending_start_->succeeded.load(std::memory_order_acquire);
+  std::unique_ptr<DesktopGameSession> session = std::move(pending_start_->session);
+  pending_start_.reset();
+  if (succeeded && session != nullptr) {
+    adopt_started_session(std::move(session));
+    return true;
+  }
+  return false;
+}
+
 bool DesktopSessionManager::begin_save_and_shutdown() {
   if (pending_shutdown_ != nullptr && !finish_pending_shutdown()) {
     return false;
@@ -192,7 +244,7 @@ bool DesktopSessionManager::save_and_shutdown() {
   return succeeded && !shutdown_failed_;
 }
 
-bool DesktopSessionManager::start_singleplayer(
+std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_session(
     std::string server_save_name,
     std::string world_name,
     std::optional<u64> create_seed,
@@ -201,13 +253,10 @@ bool DesktopSessionManager::start_singleplayer(
     const client::LocalPlayerIdentity& local_identity) {
   if (server_save_name.empty()) {
     core::error("save", "cannot start a singleplayer world without a server save name");
-    return false;
+    return nullptr;
   }
   if (world_name.empty()) {
     world_name = "default";
-  }
-  if (!save_and_shutdown()) {
-    return false;
   }
 
   const std::filesystem::path server_save_root =
@@ -219,7 +268,7 @@ bool DesktopSessionManager::start_singleplayer(
       dependencies_.item_registry);
   if (!loaded_save_result) {
     core::error("save", loaded_save_result.error().message);
-    return false;
+    return nullptr;
   }
   const persistence::LoadedSaveData loaded_save =
       std::move(loaded_save_result.value());
@@ -241,7 +290,7 @@ bool DesktopSessionManager::start_singleplayer(
             "world '{}' requires pack '{}', but it is not active",
             world_name,
             expected.id);
-        return false;
+        return nullptr;
       }
     }
   }
@@ -251,7 +300,7 @@ bool DesktopSessionManager::start_singleplayer(
         "world '{}' was not found in server save '{}'",
         world_name,
         server_save_name);
-    return false;
+    return nullptr;
   }
 
   auto session = std::make_unique<DesktopGameSession>(dependencies_.config.simulation.base_tps);
@@ -292,7 +341,7 @@ bool DesktopSessionManager::start_singleplayer(
       dependencies_.block_registry);
   if (!worldgen_palette) {
     core::error("worldgen", worldgen_palette.error().message);
-    return false;
+    return nullptr;
   }
 
   server::ServerChunkGenerationSettings chunk_generation;
@@ -406,7 +455,7 @@ bool DesktopSessionManager::start_singleplayer(
   auto server_start = integrated_server->start(server_start_info);
   if (!server_start) {
     core::error("server", server_start.error().message);
-    return false;
+    return nullptr;
   }
 
   if (loaded_save.has_world_metadata) {
@@ -443,7 +492,7 @@ bool DesktopSessionManager::start_singleplayer(
   if (!connect_result) {
     core::error("client", connect_result.error().message);
     integrated_server->shutdown();
-    return false;
+    return nullptr;
   }
 
   session->integrated_server = std::move(integrated_server);
@@ -483,7 +532,7 @@ bool DesktopSessionManager::start_singleplayer(
           dependencies_.block_atlas.render_data,
           &dependencies_.fluid_render_data)) {
     session->integrated_server->shutdown();
-    return false;
+    return nullptr;
   }
   refresh_inventory_slots(*session);
   core::info(
@@ -491,22 +540,88 @@ bool DesktopSessionManager::start_singleplayer(
       "entered singleplayer world '{}' from server save '{}'",
       session->world_save_name,
       session->server_save_name);
-  game_session_ = std::move(session);
+  return session;
+}
+
+bool DesktopSessionManager::begin_start_singleplayer(
+    std::string server_save_name,
+    std::string world_name,
+    std::optional<u64> create_seed,
+    bool create_new,
+    std::string save_display_name,
+    client::LocalPlayerIdentity local_identity) {
+  if (pending_start_ != nullptr) {
+    return false;
+  }
+  if (!save_and_shutdown()) {
+    return false;
+  }
+
+  auto pending = std::make_unique<PendingStart>();
+  PendingStart* state = pending.get();
+  pending->thread = std::thread(
+      [this,
+       state,
+       server_save_name = std::move(server_save_name),
+       world_name = std::move(world_name),
+       create_seed,
+       create_new,
+       save_display_name = std::move(save_display_name),
+       local_identity = std::move(local_identity)]() mutable {
+        std::unique_ptr<DesktopGameSession> session;
+        try {
+          session = build_singleplayer_session(
+              std::move(server_save_name),
+              std::move(world_name),
+              create_seed,
+              create_new,
+              std::move(save_display_name),
+              local_identity);
+        } catch (const std::exception& ex) {
+          core::error("desktop", "singleplayer world start failed: {}", ex.what());
+        } catch (...) {
+          core::error("desktop", "singleplayer world start failed with an unknown exception");
+        }
+        state->succeeded.store(session != nullptr, std::memory_order_release);
+        state->session = std::move(session);
+        state->finished.store(true, std::memory_order_release);
+      });
+  pending_start_ = std::move(pending);
   return true;
 }
 
-bool DesktopSessionManager::start_remote(
+bool DesktopSessionManager::start_singleplayer(
+    std::string server_save_name,
+    std::string world_name,
+    std::optional<u64> create_seed,
+    bool create_new,
+    std::string save_display_name,
+    const client::LocalPlayerIdentity& local_identity) {
+  if (!save_and_shutdown()) {
+    return false;
+  }
+  std::unique_ptr<DesktopGameSession> session = build_singleplayer_session(
+      std::move(server_save_name),
+      std::move(world_name),
+      create_seed,
+      create_new,
+      std::move(save_display_name),
+      local_identity);
+  if (session == nullptr) {
+    return false;
+  }
+  adopt_started_session(std::move(session));
+  return true;
+}
+
+std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_remote_session(
     const ui::JoinServerCommand& command,
     const client::LocalPlayerIdentity& local_identity) {
   const std::optional<net::NetworkAddress> address =
       parse_server_address(command.address);
   if (!address.has_value()) {
     core::error("client", "invalid server address '{}'", command.address);
-    return false;
-  }
-
-  if (!save_and_shutdown()) {
-    return false;
+    return nullptr;
   }
 
   if (gns_environment_ == nullptr) {
@@ -515,7 +630,7 @@ bool DesktopSessionManager::start_remote(
   if (!gns_environment_->initialized()) {
     core::error("net", gns_environment_->error_message());
     gns_environment_.reset();
-    return false;
+    return nullptr;
   }
 
   auto session = std::make_unique<DesktopGameSession>(dependencies_.config.simulation.base_tps);
@@ -543,7 +658,7 @@ bool DesktopSessionManager::start_remote(
   auto connect_result = client->connect(address.value());
   if (!connect_result) {
     core::error("client", connect_result.error().message);
-    return false;
+    return nullptr;
   }
 
   session->client = std::move(client);
@@ -553,7 +668,54 @@ bool DesktopSessionManager::start_remote(
       command.name,
       address->host,
       address->port);
-  game_session_ = std::move(session);
+  return session;
+}
+
+bool DesktopSessionManager::begin_start_remote(
+    ui::JoinServerCommand command,
+    client::LocalPlayerIdentity local_identity) {
+  if (pending_start_ != nullptr) {
+    return false;
+  }
+  if (!save_and_shutdown()) {
+    return false;
+  }
+
+  auto pending = std::make_unique<PendingStart>();
+  PendingStart* state = pending.get();
+  pending->thread = std::thread(
+      [this,
+       state,
+       command = std::move(command),
+       local_identity = std::move(local_identity)]() mutable {
+        std::unique_ptr<DesktopGameSession> session;
+        try {
+          session = build_remote_session(command, local_identity);
+        } catch (const std::exception& ex) {
+          core::error("desktop", "remote server start failed: {}", ex.what());
+        } catch (...) {
+          core::error("desktop", "remote server start failed with an unknown exception");
+        }
+        state->succeeded.store(session != nullptr, std::memory_order_release);
+        state->session = std::move(session);
+        state->finished.store(true, std::memory_order_release);
+      });
+  pending_start_ = std::move(pending);
+  return true;
+}
+
+bool DesktopSessionManager::start_remote(
+    const ui::JoinServerCommand& command,
+    const client::LocalPlayerIdentity& local_identity) {
+  if (!save_and_shutdown()) {
+    return false;
+  }
+  std::unique_ptr<DesktopGameSession> session =
+      build_remote_session(command, local_identity);
+  if (session == nullptr) {
+    return false;
+  }
+  adopt_started_session(std::move(session));
   return true;
 }
 

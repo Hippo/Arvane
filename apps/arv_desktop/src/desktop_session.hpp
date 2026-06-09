@@ -127,9 +127,19 @@ public:
 
   [[nodiscard]] bool shutdown_pending() const noexcept;
   [[nodiscard]] bool shutdown_failed() const noexcept;
+  [[nodiscard]] bool start_pending() const noexcept;
   void poll_shutdown();
+  [[nodiscard]] std::optional<bool> poll_start();
   [[nodiscard]] bool begin_save_and_shutdown();
   [[nodiscard]] bool save_and_shutdown();
+
+  [[nodiscard]] bool begin_start_singleplayer(
+      std::string server_save_name,
+      std::string world_name,
+      std::optional<u64> create_seed,
+      bool create_new,
+      std::string save_display_name,
+      client::LocalPlayerIdentity local_identity);
 
   [[nodiscard]] bool start_singleplayer(
       std::string server_save_name,
@@ -138,6 +148,10 @@ public:
       bool create_new,
       std::string save_display_name,
       const client::LocalPlayerIdentity& local_identity);
+
+  [[nodiscard]] bool begin_start_remote(
+      ui::JoinServerCommand command,
+      client::LocalPlayerIdentity local_identity);
 
   [[nodiscard]] bool start_remote(
       const ui::JoinServerCommand& command,
@@ -154,14 +168,28 @@ public:
 
 private:
   struct PendingShutdown;
+  struct PendingStart;
 
   void remove_session_chunk_meshes(DesktopGameSession& session) const;
   [[nodiscard]] bool shutdown_session(std::unique_ptr<DesktopGameSession> session);
   [[nodiscard]] bool finish_pending_shutdown();
+  [[nodiscard]] bool finish_pending_start();
+  void adopt_started_session(std::unique_ptr<DesktopGameSession> session);
+  [[nodiscard]] std::unique_ptr<DesktopGameSession> build_singleplayer_session(
+      std::string server_save_name,
+      std::string world_name,
+      std::optional<u64> create_seed,
+      bool create_new,
+      std::string save_display_name,
+      const client::LocalPlayerIdentity& local_identity);
+  [[nodiscard]] std::unique_ptr<DesktopGameSession> build_remote_session(
+      const ui::JoinServerCommand& command,
+      const client::LocalPlayerIdentity& local_identity);
 
   DesktopSessionDependencies dependencies_;
   std::unique_ptr<DesktopGameSession> game_session_{};
   std::unique_ptr<PendingShutdown> pending_shutdown_{};
+  std::unique_ptr<PendingStart> pending_start_{};
   std::unique_ptr<net::GameNetworkingSocketsEnvironment> gns_environment_{};
   bool shutdown_failed_{};
 };
