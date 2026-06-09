@@ -17,5 +17,6 @@ void append_chat_ui(UiTree& tree, ChatUiModel model);
 void append_tab_menu_ui(UiTree& tree, TabMenuUiModel model);
 void append_scoreboard_ui(UiTree& tree, ScoreboardUiModel model);
 void append_debug_hud(UiTree& tree, DebugHudModel model);
+void append_ride_prompt_hud(UiTree& tree, RidePromptModel model);
 
 } // namespace arv::ui::widgets_detail

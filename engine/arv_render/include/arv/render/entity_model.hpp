@@ -125,6 +125,7 @@ struct EntityAnimationAsset {
 struct EntityModelAsset {
   EntityModelID id{};
   std::string name{};
+  bool translucent{};
   Vec3f center_origin{};
   std::vector<EntityModelBone> bones{};
   std::vector<EntityModelMeshVertex> vertices{};

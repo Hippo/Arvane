@@ -22,9 +22,17 @@ surface_rule_set: arvane:worldgen/surface_rule_set/mountain
 spawns:
   passive:
     - entity: arvane:pig
-      weight: 8
-      min_group: 2
-      max_group: 4
+      weight: 2
+      min_group: 1
+      max_group: 2
+      conditions:
+        surface: true
+        block_tags_below:
+          - arvane:spawn/grass_like
+    - entity: arvane:horse
+      weight: 3
+      min_group: 1
+      max_group: 2
       conditions:
         surface: true
         block_tags_below:

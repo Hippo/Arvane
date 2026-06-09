@@ -23,6 +23,7 @@ struct ItemTextureMeshInput {
 struct ItemBlockModelInput {
   EntityModelID id{};
   std::string name{};
+  bool translucent{};
   std::array<std::array<Vec2i, 4>, voxel::BlockFaceCount> face_uvs{};
   std::array<u16, voxel::BlockFaceCount> face_pages{};
   std::array<bool, voxel::BlockFaceCount> face_valid{};

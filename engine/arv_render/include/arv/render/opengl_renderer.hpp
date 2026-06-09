@@ -210,12 +210,13 @@ private:
 
   void draw_sky();
   void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
-  void draw_entities();
+  void draw_entities(bool translucent);
   void draw_entities_for(
       const std::vector<EntityDrawItem>& entities,
       const RenderView& view,
       const SkyUniforms& sky,
-      f32 aspect);
+      f32 aspect,
+      bool translucent);
   void draw_entity_previews();
   void draw_particles(ParticleRenderBlendMode blend_mode);
   void draw_ui();

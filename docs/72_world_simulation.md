@@ -1308,11 +1308,11 @@ natural_spawning:
       save_transient: true
 ```
 
-The base passive pig tables intentionally avoid a light-level condition for now
-so starter passive mobs are not blocked by newly generated or stale saved
-lighting. They require a standing surface tagged `arvane:spawn/grass_like`;
-replaceable non-fluid body/head blocks such as short grass do not block the
-spawn.
+The base passive pig and horse tables intentionally avoid a light-level
+condition for now so starter passive mobs are not blocked by newly generated or
+stale saved lighting. They require a standing surface tagged
+`arvane:spawn/grass_like`; replaceable non-fluid body/head blocks such as short
+grass do not block the spawn.
 
 The same category keys used by biome spawn tables are used by `caps` and
 `despawning`: `passive`, `hostile`, `ambient`, `water`, `underground`, and

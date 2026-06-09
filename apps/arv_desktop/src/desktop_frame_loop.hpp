@@ -291,7 +291,8 @@ private:
   void build_gameplay_ui(
       DesktopGameSession& active_session,
       const platform::InputSnapshot& platform_input,
-      std::chrono::steady_clock::time_point now);
+      std::chrono::steady_clock::time_point now,
+      ui::RidePromptModel ride_prompt);
 
   [[nodiscard]] bool submit_render_and_present(
       render::FramePacket frame,

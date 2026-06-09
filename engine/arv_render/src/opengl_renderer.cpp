@@ -630,7 +630,7 @@ void OpenGLRenderer::render() {
   glDisable(GL_BLEND);
   glDepthMask(GL_TRUE);
   draw_chunk_list(frame_.opaque_chunks, false);
-  draw_entities();
+  draw_entities(false);
   draw_sky();
   glUseProgram(chunk_program_);
   glActiveTexture(GL_TEXTURE0);
@@ -642,6 +642,7 @@ void OpenGLRenderer::render() {
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glDepthMask(GL_FALSE);
   draw_chunk_list(frame_.transparent_chunks, true);
+  draw_entities(true);
   draw_particles(ParticleRenderBlendMode::Alpha);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE);
   draw_particles(ParticleRenderBlendMode::Additive);
@@ -1539,16 +1540,17 @@ void OpenGLRenderer::draw_chunk_list(const std::vector<ChunkDrawItem>& draw_item
   }
 }
 
-void OpenGLRenderer::draw_entities() {
+void OpenGLRenderer::draw_entities(bool translucent) {
   const f32 aspect = height_ == 0 ? 1.0F : static_cast<f32>(width_) / static_cast<f32>(height_);
-  draw_entities_for(frame_.entities, frame_.world_view, frame_.sky, aspect);
+  draw_entities_for(frame_.entities, frame_.world_view, frame_.sky, aspect, translucent);
 }
 
 void OpenGLRenderer::draw_entities_for(
     const std::vector<EntityDrawItem>& entities,
     const RenderView& view,
     const SkyUniforms& sky,
-    f32 aspect) {
+    f32 aspect,
+    bool translucent) {
   ARV_PROFILE_ZONE("Entity draw batch");
   if (entities.empty() || entity_models_.empty() || entity_gpu_models_.empty()) {
     return;
@@ -1565,6 +1567,9 @@ void OpenGLRenderer::draw_entities_for(
     if (model == entity_models_.end() || gpu == entity_gpu_models_.end()) {
       continue;
     }
+    if (model->second.translucent != translucent) {
+      continue;
+    }
     if (gpu->second.index_count == 0 || model->second.bones.size() > MaxEntityShaderBones) {
       continue;
     }
@@ -1577,7 +1582,14 @@ void OpenGLRenderer::draw_entities_for(
   std::sort(
       entity_draw_order_.begin(),
       entity_draw_order_.end(),
-      [](const EntityDrawItem* lhs, const EntityDrawItem* rhs) {
+      [translucent, &view](const EntityDrawItem* lhs, const EntityDrawItem* rhs) {
+        if (translucent) {
+          const f32 lhs_distance = distance_squared(lhs->position, view.position);
+          const f32 rhs_distance = distance_squared(rhs->position, view.position);
+          if (const i32 compare = compare_f32(lhs_distance, rhs_distance); compare != 0) {
+            return compare > 0;
+          }
+        }
         if (lhs->model_id != rhs->model_id) {
           return lhs->model_id < rhs->model_id;
         }
@@ -1888,7 +1900,7 @@ void OpenGLRenderer::draw_entity_previews() {
         preview.clear_color.w);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     const f32 aspect = h == 0 ? 1.0F : static_cast<f32>(w) / static_cast<f32>(h);
-    draw_entities_for(preview.entities, preview.view, preview.sky, aspect);
+    draw_entities_for(preview.entities, preview.view, preview.sky, aspect, false);
   }
 
   glViewport(0, 0, static_cast<GLsizei>(width_), static_cast<GLsizei>(height_));

@@ -769,6 +769,38 @@ TEST(HotbarHudTests, BlockModelIconsUseProjectedModelQuads) {
   EXPECT_TRUE(model_quad->image.custom_points);
 }
 
+TEST(GameplayUiTests, BuildsRidePromptWithAccentKeyText) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  arv::ui::GameplayUiModel model;
+  model.ride_prompt.visible = true;
+  model.ride_prompt.key_label = "F";
+  model.ride_prompt.viewport = {800.0F, 600.0F};
+
+  arv::ui::build_gameplay_ui(tree, std::move(model));
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* panel = tree.find_by_stable_id("hud.ride_prompt");
+  const auto* prefix = tree.find_by_stable_id("hud.ride_prompt.prefix");
+  const auto* key = tree.find_by_stable_id("hud.ride_prompt.key");
+  const auto* suffix = tree.find_by_stable_id("hud.ride_prompt.suffix");
+  ASSERT_NE(panel, nullptr);
+  ASSERT_NE(prefix, nullptr);
+  ASSERT_NE(key, nullptr);
+  ASSERT_NE(suffix, nullptr);
+  EXPECT_FALSE(panel->hit_test);
+  EXPECT_EQ(panel->type, arv::ui::UiElementType::HorizontalStack);
+  EXPECT_GT(panel->style.radius, 0.0F);
+  EXPECT_GT(panel->rect.y, 300.0F);
+  EXPECT_EQ(prefix->text, "Press ");
+  EXPECT_EQ(key->text, "F");
+  EXPECT_EQ(suffix->text, " to Ride");
+  EXPECT_EQ(prefix->style.foreground, tree.theme().colors.text);
+  EXPECT_EQ(key->style.foreground, tree.theme().colors.accent);
+  EXPECT_EQ(suffix->style.foreground, tree.theme().colors.text);
+}
+
 TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;

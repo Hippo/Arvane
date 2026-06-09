@@ -797,6 +797,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     input.name = item_registry.item(pending.item_id) == nullptr
                      ? std::string{player::MissingItemName}
                      : item_registry.item(pending.item_id)->name;
+    input.translucent = variant->render_category == voxel::RenderCategory::Transparent;
     if (pending.model_definition != nullptr) {
       auto render_boxes = asset::build_block_model_render_boxes(
           assets.texture_atlas,

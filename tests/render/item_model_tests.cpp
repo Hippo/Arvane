@@ -49,11 +49,28 @@ TEST(ItemModelTests, DoesNotEmitInteriorSideFacesBetweenVisiblePixels) {
 
   EXPECT_EQ(model.vertices.size(), 40U);
   EXPECT_EQ(model.indices.size(), 60U);
+  EXPECT_FALSE(model.translucent);
+}
+
+TEST(ItemModelTests, PartiallyTransparentTextureItemMarksModelTranslucent) {
+  std::vector<arv::u8> pixels(1U * 1U * 4U, 255U);
+  pixels[3] = 128U;
+
+  const arv::render::EntityModelAsset model = arv::render::build_extruded_texture_item_model({arv::render::EntityModelID{44},
+                                                                                              "glass_shard",
+                                                                                              1U,
+                                                                                              1U,
+                                                                                              std::span<const arv::u8>{pixels.data(), pixels.size()},
+                                                                                              {0, 0},
+                                                                                              0,
+                                                                                              2.0F});
+
+  EXPECT_TRUE(model.translucent);
 }
 
 TEST(ItemModelTests, BuildsBlockItemCubeFromFaceUvs) {
   arv::render::ItemBlockModelInput input;
-  input.id = arv::render::EntityModelID{44};
+  input.id = arv::render::EntityModelID{45};
   input.name = "block_item";
   for (const arv::voxel::BlockFace face : arv::voxel::AllBlockFaces) {
     const arv::usize index = arv::voxel::face_index(face);
@@ -64,11 +81,12 @@ TEST(ItemModelTests, BuildsBlockItemCubeFromFaceUvs) {
 
   const arv::render::EntityModelAsset model = arv::render::build_block_item_model(input);
 
-  EXPECT_EQ(model.id, (arv::render::EntityModelID{44}));
+  EXPECT_EQ(model.id, (arv::render::EntityModelID{45}));
   EXPECT_EQ(model.vertices.size(), 24U);
   EXPECT_EQ(model.indices.size(), 36U);
   ASSERT_FALSE(model.vertices.empty());
   EXPECT_EQ(model.vertices.front().atlas_page, 4U);
+  EXPECT_FALSE(model.translucent);
 }
 
 TEST(ItemModelTests, BuildsBlockItemFromModelBoxes) {
@@ -83,16 +101,18 @@ TEST(ItemModelTests, BuildsBlockItemFromModelBoxes) {
   const std::array<arv::voxel::BlockModelBoxRenderData, 1> boxes{{box}};
 
   arv::render::ItemBlockModelInput input;
-  input.id = arv::render::EntityModelID{45};
+  input.id = arv::render::EntityModelID{46};
   input.name = "model_block_item";
+  input.translucent = true;
   input.model_boxes =
       std::span<const arv::voxel::BlockModelBoxRenderData>{boxes.data(), boxes.size()};
 
   const arv::render::EntityModelAsset model = arv::render::build_block_item_model(input);
 
-  EXPECT_EQ(model.id, (arv::render::EntityModelID{45}));
+  EXPECT_EQ(model.id, (arv::render::EntityModelID{46}));
   EXPECT_EQ(model.vertices.size(), 24U);
   EXPECT_EQ(model.indices.size(), 36U);
+  EXPECT_TRUE(model.translucent);
   for (const arv::render::EntityModelMeshVertex& vertex : model.vertices) {
     EXPECT_GE(vertex.position.y, -8.0F);
     EXPECT_LE(vertex.position.y, 0.0F);
@@ -109,14 +129,14 @@ TEST(ItemModelTests, BlockOutlineUsesUnionOfTouchingModelBoxes) {
   const std::array<arv::voxel::BlockModelBoxRenderData, 2> split_cube{{left, right}};
 
   arv::render::BlockOutlineModelInput split_input;
-  split_input.id = arv::render::EntityModelID{46};
+  split_input.id = arv::render::EntityModelID{47};
   split_input.name = "split_outline";
   split_input.uvs = {{{0, 1}, {1, 1}, {0, 0}, {1, 0}}};
   split_input.model_boxes =
       std::span<const arv::voxel::BlockModelBoxRenderData>{split_cube.data(), split_cube.size()};
 
   arv::render::BlockOutlineModelInput cube_input;
-  cube_input.id = arv::render::EntityModelID{47};
+  cube_input.id = arv::render::EntityModelID{48};
   cube_input.name = "cube_outline";
   cube_input.uvs = split_input.uvs;
 

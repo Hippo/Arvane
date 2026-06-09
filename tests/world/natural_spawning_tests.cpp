@@ -464,10 +464,23 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
                spawn.category == arv::world::SpawnCategory::Passive;
       });
   ASSERT_NE(pig, plains->second.spawns.end());
-  EXPECT_EQ(pig->min_group, 3U);
-  EXPECT_EQ(pig->max_group, 5U);
+  EXPECT_EQ(pig->weight, 5U);
+  EXPECT_EQ(pig->min_group, 2U);
+  EXPECT_EQ(pig->max_group, 3U);
   EXPECT_TRUE(pig->conditions.requires_surface);
   EXPECT_FALSE(pig->conditions.min_light.has_value());
+  const auto horse = std::find_if(
+      plains->second.spawns.begin(),
+      plains->second.spawns.end(),
+      [](const arv::world::worldgen::BiomeSpawnEntryConfig& spawn) {
+        return spawn.entity.id == "arvane:horse" &&
+               spawn.category == arv::world::SpawnCategory::Passive;
+      });
+  ASSERT_NE(horse, plains->second.spawns.end());
+  EXPECT_EQ(horse->weight, 7U);
+  EXPECT_EQ(horse->min_group, 1U);
+  EXPECT_EQ(horse->max_group, 2U);
+  EXPECT_TRUE(horse->conditions.requires_surface);
 
   const arv::voxel::BlockRegistry blocks =
       load_first_party_block_registry(packs.value());
@@ -497,6 +510,14 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
                  spawn.category == arv::world::SpawnCategory::Passive;
         });
     EXPECT_NE(found_pig, biome->second.spawns.end()) << biome_id;
+    const auto found_horse = std::find_if(
+        biome->second.spawns.begin(),
+        biome->second.spawns.end(),
+        [](const arv::world::worldgen::BiomeSpawnEntryConfig& spawn) {
+          return spawn.entity.id == "arvane:horse" &&
+                 spawn.category == arv::world::SpawnCategory::Passive;
+        });
+    EXPECT_NE(found_horse, biome->second.spawns.end()) << biome_id;
   }
 }
 

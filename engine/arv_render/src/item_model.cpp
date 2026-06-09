@@ -50,6 +50,20 @@ using OccupancyGrid = std::array<bool, 16U * 16U * 16U>;
   return input.rgba_pixels[offset + 3U] != 0U;
 }
 
+[[nodiscard]] bool has_translucent_pixel(const ItemTextureMeshInput& input) noexcept {
+  if (!valid_texture_input(input)) {
+    return false;
+  }
+  const usize pixel_count = static_cast<usize>(input.width) * static_cast<usize>(input.height);
+  for (usize index = 0; index < pixel_count; ++index) {
+    const u8 alpha = input.rgba_pixels[index * 4U + 3U];
+    if (alpha > 0U && alpha < 255U) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void append_quad(EntityModelAsset& asset, const Quad& quad) {
   const u32 base = static_cast<u32>(asset.vertices.size());
   for (usize index = 0; index < quad.positions.size(); ++index) {
@@ -679,6 +693,7 @@ EntityModelAsset build_extruded_texture_item_model(const ItemTextureMeshInput& i
   EntityModelAsset asset;
   asset.id = input.id;
   asset.name = input.name;
+  asset.translucent = has_translucent_pixel(input);
   if (!valid_texture_input(input)) {
     return asset;
   }
@@ -698,6 +713,7 @@ EntityModelAsset build_block_item_model(const ItemBlockModelInput& input) {
   EntityModelAsset asset;
   asset.id = input.id;
   asset.name = input.name;
+  asset.translucent = input.translucent;
 
   if (!input.model_boxes.empty()) {
     for (const voxel::BlockModelBoxRenderData& box : input.model_boxes) {

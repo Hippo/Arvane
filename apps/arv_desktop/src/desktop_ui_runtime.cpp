@@ -2,6 +2,7 @@
 
 #include "asset_helpers.hpp"
 #include "desktop_input_routing.hpp"
+#include "input_adapter.hpp"
 #include "desktop_skin_textures.hpp"
 #include "ui_model.hpp"
 
@@ -183,12 +184,31 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   return line;
 }
 
+[[nodiscard]] std::string mount_binding_label(
+    const platform::InputBindings& input_bindings) {
+  const platform::ActionBindingList& bindings =
+      platform::bindings_for_action(input_bindings, platform::LogicalAction::Mount);
+  return bindings.empty() ? std::string{} : binding_label(bindings.front());
+}
+
+[[nodiscard]] bool local_player_is_mounted(const client::ClientRuntime& client) {
+  const std::optional<EntityNetID> local_entity = client.local_entity_id();
+  if (!local_entity.has_value()) {
+    return false;
+  }
+  const client::ReplicatedEntityMirror* mirror =
+      client.find_replicated_entity(local_entity.value());
+  return mirror != nullptr && mirror->parent_rideable.has_value();
+}
+
 [[nodiscard]] u64 gameplay_ui_signature(
     const DesktopGameSession& session,
     const platform::InputSnapshot& platform_input,
     u32 displayed_fps,
     std::string_view hotbar_item_popup_name,
-    f32 hotbar_item_popup_alpha) noexcept {
+    f32 hotbar_item_popup_alpha,
+    bool ride_prompt_visible,
+    std::string_view ride_prompt_key_label) noexcept {
   constexpr u64 OffsetBasis = 1469598103934665603ULL;
   u64 hash = OffsetBasis;
   hash = ui_cache_hash_append_u64(
@@ -208,6 +228,8 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_selection_end());
   hash = ui_cache_hash_append_string(hash, hotbar_item_popup_name);
   hash = ui_cache_hash_append_f32(hash, hotbar_item_popup_alpha);
+  hash = ui_cache_hash_append_bool(hash, ride_prompt_visible);
+  hash = ui_cache_hash_append_string(hash, ride_prompt_key_label);
   hash = ui_cache_hash_append_u64(hash, displayed_fps);
   if (const std::optional<EntityNetID> local_entity = session.client->local_entity_id();
       local_entity.has_value()) {
@@ -469,6 +491,23 @@ void DesktopFrameLoop::build_ui(
   menu_context.viewport = ui_metrics_.logical_size;
   menu_context.screens = &screens;
 
+  ui::RidePromptModel ride_prompt;
+  if (has_active_session && active_session != nullptr &&
+      active_session->client != nullptr &&
+      !debug_menu_.open &&
+      !screens.blocks_gameplay_input() &&
+      !active_session->client->inventory_open() &&
+      !active_session->client->chat_open() &&
+      !local_player_is_mounted(*active_session->client)) {
+    std::string key_label = mount_binding_label(input_bindings_);
+    if (!key_label.empty() &&
+        targeted_rideable_entity(*active_session).has_value()) {
+      ride_prompt.visible = true;
+      ride_prompt.key_label = std::move(key_label);
+      ride_prompt.viewport = ui_metrics_.logical_size;
+    }
+  }
+
   const UiBuildCacheKey next_cache_key{
       ui_cache_dimension(ui_metrics_.logical_size.x),
       ui_cache_dimension(ui_metrics_.logical_size.y),
@@ -482,13 +521,15 @@ void DesktopFrameLoop::build_ui(
                 platform_input,
                 displayed_fps_,
                 hotbar_item_popup_name_,
-                hotbar_item_popup_alpha(now))
+                hotbar_item_popup_alpha(now),
+                ride_prompt.visible,
+                ride_prompt.key_label)
           : 0U};
   const bool rebuild_ui_tree =
       !ui_tree_cache_valid_ || !(next_cache_key == ui_tree_cache_key_);
   if (rebuild_ui_tree) {
     if (has_active_session) {
-      build_gameplay_ui(*active_session, platform_input, now);
+      build_gameplay_ui(*active_session, platform_input, now, std::move(ride_prompt));
     } else {
       ui_tree_.clear();
     }
@@ -812,7 +853,8 @@ bool DesktopFrameLoop::route_chat_mouse_input(
 void DesktopFrameLoop::build_gameplay_ui(
     DesktopGameSession& active_session,
     const platform::InputSnapshot& platform_input,
-    std::chrono::steady_clock::time_point now) {
+    std::chrono::steady_clock::time_point now,
+    ui::RidePromptModel ride_prompt) {
   const f32 item_popup_alpha = hotbar_item_popup_alpha(now);
   ui::HealthHudModel health;
   health.viewport = ui_metrics_.logical_size;
@@ -885,6 +927,7 @@ void DesktopFrameLoop::build_gameplay_ui(
           {},
           {true, displayed_fps_},
           health,
+          std::move(ride_prompt),
       });
 }
 

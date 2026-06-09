@@ -8,7 +8,15 @@
 #include "arv/base/ui/widgets/scoreboard.hpp"
 #include "arv/base/ui/widgets/tab_menu.hpp"
 
+#include <string>
+
 namespace arv::ui {
+
+struct RidePromptModel {
+  bool visible{};
+  std::string key_label{};
+  Vec2f viewport{};
+};
 
 struct GameplayUiModel {
   HotbarHudModel hotbar{};
@@ -18,6 +26,7 @@ struct GameplayUiModel {
   ScoreboardUiModel scoreboard{};
   DebugHudModel debug{};
   HealthHudModel health{};
+  RidePromptModel ride_prompt{};
 };
 
 void build_gameplay_ui(UiTree& tree, GameplayUiModel model);
