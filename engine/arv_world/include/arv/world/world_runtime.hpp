@@ -148,6 +148,7 @@ struct EntityCreateInfo {
 enum class DamageCause : u8 {
   Generic,
   EntityAttack,
+  Explosion,
 };
 
 struct DamageRequest {
@@ -170,6 +171,17 @@ struct ReplicatedBlockUpdate {
   voxel::BlockVariantID old_state{};
   voxel::BlockVariantID new_state{};
   TickIndex server_tick{};
+};
+
+struct BlockMutation {
+  BlockPos pos{};
+  voxel::BlockVariantID new_state{};
+};
+
+struct BlockMutationBatchResult {
+  u32 applied{};
+  std::vector<ChunkSectionCoord> touched_sections{};
+  std::vector<ChunkSectionCoord> dirty_sections{};
 };
 
 struct WorldHeightSettings {
@@ -367,6 +379,8 @@ public:
   [[nodiscard]] voxel::LightWord get_light(BlockPos pos) const noexcept;
   [[nodiscard]] voxel::FluidCell get_fluid(BlockPos pos) const noexcept;
   bool set_block(BlockPos pos, voxel::BlockVariantID variant) noexcept;
+  BlockMutationBatchResult apply_block_mutation_batch(
+      std::span<const BlockMutation> mutations) noexcept;
   bool set_fluid(
       BlockPos pos,
       voxel::FluidCell fluid,

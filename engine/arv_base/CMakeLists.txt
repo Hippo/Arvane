@@ -34,6 +34,7 @@ add_library(arv_base STATIC
   src/core_commands.cpp
   src/entities/entity_goal_registration.cpp
   src/entities/entity_registration.cpp
+  src/explosion_command.cpp
   src/flyspeed_command.cpp
   src/fluids/fluid_registration.cpp
   src/gamemode_command.cpp

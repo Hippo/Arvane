@@ -91,6 +91,7 @@ add_executable(arv_tests
   voxel/chunk_storage_tests.cpp
   voxel/light_tests.cpp
   world/entity_registry_tests.cpp
+  world/explosion_tests.cpp
   world/fluid_tests.cpp
   world/entity_tests.cpp
   world/lighting_tests.cpp

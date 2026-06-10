@@ -202,8 +202,10 @@ or worse. Ejection places occupants at the normal safe dismount position or the
 airborne aircraft top position, then applies clamped launch velocity from the
 previous vehicle velocity plus upward impulse and starts a short remount
 cooldown. Destruction ejects occupants first, then despawns the vehicle when
-`destroy_on_destruction` is true. Explosion reuses `ClientboundSpawnParticles`
-with `arvane:explosion`; there is no separate crash packet in V1.
+`destroy_on_destruction` is true. If `explode_on_destruction` is enabled,
+destruction creates a server-authoritative explosion with the `arvane:vehicle`
+profile. Clients receive `ClientboundExplosionEvent` and expand it into local
+`arvane:explosion` particles; there is no separate crash packet in V1.
 
 The built-in buggy uses bump, hard-impact, rare high-speed ejection, and
 extreme-speed destruction/explosion thresholds. The built-in plane uses higher
@@ -383,8 +385,8 @@ vehicle transform smoothing. Passenger relationships are stored on client
 mirrors so rendering and UI can identify mounted entities.
 
 Crash destruction uses existing entity despawn replication. Crash explosion VFX
-uses `ClientboundSpawnParticles` with the built-in `arvane:explosion` particle
-type on the gameplay lane.
+uses `ClientboundExplosionEvent`; clients expand the event into the built-in
+`arvane:explosion` particle type on the gameplay lane.
 
 ---
 

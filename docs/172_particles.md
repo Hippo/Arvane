@@ -96,3 +96,7 @@ particle texture.
 
 The packet is `ServerToClient`, `UnreliableEvent`, and on the `Gameplay` lane.
 There is no `ServerboundSpawnParticles`.
+
+Server-authoritative explosions use `ClientboundExplosionEvent`. The client
+handles that event by spawning local `arvane:explosion` particles, while block
+mutations, entity damage, and drops remain regular authoritative replication.

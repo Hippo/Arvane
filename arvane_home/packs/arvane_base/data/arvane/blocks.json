@@ -3,6 +3,11 @@
     {
       "name": "arvane:air",
       "render_category": "none",
+      "blast": {
+        "resistance": 0.0,
+        "destroyable_by_explosions": false,
+        "drops_items": false
+      },
       "properties": {
         "replaceable": true,
         "hardness": -1.0
@@ -16,6 +21,9 @@
         "arvane:mineable/shovel",
         "arvane:spawn/grass_like"
       ],
+      "blast": {
+        "resistance": 0.5
+      },
       "textures": "arvane:texture/block/dirt",
       "properties": {
         "solid": true,
@@ -33,6 +41,10 @@
       "buoyancy": 1.0,
       "drops": null,
       "render_category": "transparent",
+      "blast": {
+        "resistance": 0.15,
+        "drops_items": false
+      },
       "textures": "arvane:texture/block/glass",
       "properties": {
         "solid": true,
@@ -48,6 +60,9 @@
       "tags": [
         "arvane:mineable/pickaxe"
       ],
+      "blast": {
+        "resistance": 0.3
+      },
       "textures": "arvane:texture/block/glowstone",
       "properties": {
         "solid": true,
@@ -74,6 +89,9 @@
         "arvane:mineable/shovel",
         "arvane:spawn/grass_like"
       ],
+      "blast": {
+        "resistance": 0.6
+      },
       "textures": {
         "top": "arvane:texture/block/grass_top",
         "side": "arvane:texture/block/grass_side",
@@ -98,6 +116,9 @@
       "tags": [
         "arvane:mineable/shovel"
       ],
+      "blast": {
+        "resistance": 0.45
+      },
       "textures": "arvane:texture/block/sand",
       "properties": {
         "solid": true,
@@ -117,6 +138,9 @@
       "tags": [
         "arvane:mineable/pickaxe"
       ],
+      "blast": {
+        "resistance": 6.0
+      },
       "textures": "arvane:texture/block/iron_ore",
       "properties": {
         "solid": true,
@@ -135,6 +159,10 @@
       "tags": [
         "arvane:mineable/axe"
       ],
+      "blast": {
+        "resistance": 2.5,
+        "flammable": true
+      },
       "textures": {
         "top": "arvane:texture/block/oak_log_top",
         "bottom": "arvane:texture/block/oak_log_top",
@@ -156,6 +184,10 @@
       "buoyancy": 1.0,
       "render_category": "cutout",
       "render_tint": "foliage",
+      "blast": {
+        "resistance": 0.2,
+        "flammable": true
+      },
       "textures": "arvane:texture/block/oak_leaves",
       "properties": {
         "solid": true,
@@ -169,6 +201,11 @@
       "render_category": "transparent",
       "textures": "arvane:texture/block/grass_top",
       "is_item": false,
+      "blast": {
+        "resistance": 0.0,
+        "flammable": true,
+        "drops_items": false
+      },
       "properties": {
         "replaceable": true,
         "full_cube": false,
@@ -182,6 +219,9 @@
       "tags": [
         "arvane:mineable/pickaxe"
       ],
+      "blast": {
+        "resistance": 4.5
+      },
       "textures": "arvane:texture/block/stone",
       "properties": {
         "solid": true,
@@ -199,6 +239,12 @@
       "render_category": "transparent",
       "textures": "arvane:texture/block/water",
       "is_item": false,
+      "blast": {
+        "resistance": 100.0,
+        "destroyable_by_explosions": false,
+        "absorbs_blast": true,
+        "drops_items": false
+      },
       "properties": {
         "replaceable": true,
         "fluid": true,
@@ -212,6 +258,9 @@
       "tags": [
         "arvane:mineable/pickaxe"
       ],
+      "blast": {
+        "resistance": 4.5
+      },
       "model": {
         "path": "arvane:model/block/stairs",
         "textures": [

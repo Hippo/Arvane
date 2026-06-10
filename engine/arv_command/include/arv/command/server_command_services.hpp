@@ -104,6 +104,33 @@ struct SaveAllCommandResult {
   u32 saved_entities{};
 };
 
+struct ExplosionCommandRequest {
+  WorldID world_id{};
+  Vec3f origin{};
+  std::string profile_id{"arvane:tnt"};
+  std::optional<EntityID> source_entity{};
+  u64 seed{};
+  std::optional<f32> power{};
+  std::optional<f32> radius{};
+  std::optional<bool> block_damage_enabled{};
+  std::optional<bool> entity_damage_enabled{};
+  std::optional<bool> drops_enabled{};
+  std::optional<bool> fire_enabled{};
+  std::optional<bool> future_sound_enabled{};
+  std::optional<u32> max_destroyed_blocks{};
+  std::optional<u32> max_rays{};
+  std::optional<u32> max_drops{};
+};
+
+struct ExplosionCommandResult {
+  bool success{};
+  std::string message{};
+  std::string profile_id{};
+  Vec3f origin{};
+  u32 destroyed_blocks{};
+  u32 affected_entities{};
+};
+
 struct DebugCommandStats {
   TickIndex tick_index{};
   TickRate tick_rate{};
@@ -167,6 +194,8 @@ using ClearStatusEffectsFn =
 using ListStatusEffectsFn =
     FunctionRef<std::vector<StatusEffectCommandState>(EntityID)>;
 using SaveAllFn = FunctionRef<SaveAllCommandResult(bool)>;
+using CreateExplosionFn =
+    FunctionRef<ExplosionCommandResult(const ExplosionCommandRequest&)>;
 using BroadcastSystemMessageFn = FunctionRef<bool(std::string_view)>;
 using KickPlayerFn = FunctionRef<bool(PlayerID, std::string_view)>;
 using DebugStatsFn = FunctionRef<DebugCommandStats(WorldID)>;
@@ -216,6 +245,7 @@ struct ServerCommandServices {
   ClearStatusEffectsFn clear_status_effects{};
   ListStatusEffectsFn list_status_effects{};
   SaveAllFn save_all{};
+  CreateExplosionFn create_explosion{};
   BroadcastSystemMessageFn broadcast_system_message{};
   KickPlayerFn kick_player{};
   DebugStatsFn debug_stats{};

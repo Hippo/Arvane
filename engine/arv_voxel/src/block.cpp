@@ -53,6 +53,35 @@ void read_f32_property(const io::DataValue& object, const char* key, f32& value)
   }
 }
 
+[[nodiscard]] std::optional<BlockRegistryError> read_blast_properties(
+    const io::DataValue& object,
+    BlockDefinition& definition) {
+  if (object.kind() != io::DataKind::Object) {
+    return BlockRegistryError{"blast must be an object for " + definition.name};
+  }
+
+  read_f32_property(object, "resistance", definition.blast.resistance);
+  read_bool_property(
+      object,
+      "destroyable",
+      definition.blast.destroyable_by_explosions);
+  read_bool_property(
+      object,
+      "destroyable_by_explosions",
+      definition.blast.destroyable_by_explosions);
+  read_bool_property(object, "absorbs_blast", definition.blast.absorbs_blast);
+  read_bool_property(object, "flammable", definition.blast.flammable);
+  read_bool_property(object, "drops", definition.blast.drops_items);
+  read_bool_property(object, "drops_items", definition.blast.drops_items);
+
+  if (!std::isfinite(definition.blast.resistance) ||
+      definition.blast.resistance < 0.0F) {
+    return BlockRegistryError{
+        "blast resistance must be finite and non-negative for " + definition.name};
+  }
+  return std::nullopt;
+}
+
 void set_texture_slot(
     std::array<std::string, BlockFaceCount>& textures,
     BlockFace face,
@@ -704,6 +733,11 @@ BlockRegistry::Result BlockRegistry::build(
     if (!std::isfinite(definition.physics.slipperiness)) {
       return Result::failure({"block slipperiness must be finite for " + definition.name});
     }
+    if (!std::isfinite(definition.blast.resistance) ||
+        definition.blast.resistance < 0.0F) {
+      return Result::failure(
+          {"block blast resistance must be finite and non-negative for " + definition.name});
+    }
     if (!definition.behavior_id.empty() && options.behavior_exists &&
         !options.behavior_exists(definition.behavior_id)) {
       return Result::failure(
@@ -754,6 +788,7 @@ BlockRegistry::Result BlockRegistry::build(
     block.behavior_id = definition.behavior_id;
     block.tags = definition.tags;
     block.properties = definition.properties;
+    block.blast = definition.blast;
     block.physics = definition.physics;
     block.drops = definition.drops;
     block.is_item = definition.is_item;
@@ -779,6 +814,7 @@ BlockRegistry::Result BlockRegistry::build(
       variant.behavior_id = definition.behavior_id;
       variant.state_values = std::move(expanded_variant.state_values);
       variant.properties = definition.properties;
+      variant.blast = definition.blast;
       variant.physics = definition.physics;
       variant.render_category = definition.render_category;
       variant.render_tint = definition.render_tint;
@@ -1070,6 +1106,13 @@ std::optional<std::string> BlockRegistry::validate_air_definition(const BlockDef
       definition.properties.full_cube || definition.properties.ao_occluder) {
     return "arvane:air violates air behavior invariants";
   }
+  if (definition.blast.destroyable_by_explosions ||
+      definition.blast.absorbs_blast ||
+      definition.blast.flammable ||
+      definition.blast.drops_items ||
+      definition.blast.resistance != 0.0F) {
+    return "arvane:air violates air blast invariants";
+  }
   return std::nullopt;
 }
 
@@ -1077,6 +1120,9 @@ BlockDefinition make_air_definition() {
   BlockDefinition definition;
   definition.name = std::string{AirBlockName};
   definition.properties.replaceable = true;
+  definition.blast.resistance = 0.0F;
+  definition.blast.destroyable_by_explosions = false;
+  definition.blast.drops_items = false;
   definition.render_category = RenderCategory::None;
   definition.is_item = false;
   return definition;
@@ -1136,6 +1182,11 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
 
       BlockDefinition definition;
       definition.name = std::string{name_iter->as_string_or({})};
+      if (definition.name == AirBlockName) {
+        definition.blast.resistance = 0.0F;
+        definition.blast.destroyable_by_explosions = false;
+        definition.blast.drops_items = false;
+      }
 
       const io::DataValue* display_name_iter = item.get("display_name");
       if (display_name_iter != nullptr) {
@@ -1225,6 +1276,14 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
           definition.properties.emits_light =
               definition.properties.emission_r != 0 || definition.properties.emission_g != 0 ||
               definition.properties.emission_b != 0;
+        }
+      }
+
+      if (const io::DataValue* blast_iter = item.get("blast");
+          blast_iter != nullptr) {
+        if (auto blast_error = read_blast_properties(*blast_iter, definition);
+            blast_error.has_value()) {
+          return BlockDefinitionsResult::failure(blast_error.value());
         }
       }
 

@@ -3,6 +3,7 @@
 #include "arv/server/server_runtime.hpp"
 
 #include "arv/command/command_dispatcher.hpp"
+#include "arv/command/server_command_services.hpp"
 #include "arv/core/rate_limiter.hpp"
 #include "arv/physics/collision.hpp"
 #include "arv/protocol/auth.hpp"
@@ -11,6 +12,7 @@
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
+#include "arv/protocol/explosion.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/particles.hpp"
@@ -29,6 +31,7 @@
 #include "arv/server/vehicle_movement_validation.hpp"
 #include "arv/text/variables.hpp"
 #include "arv/world/world_generation.hpp"
+#include "arv/world/explosion.hpp"
 #include "arv/world/world_lighting.hpp"
 
 #include <atomic>
@@ -325,6 +328,10 @@ struct ServerRuntimeImpl {
   [[nodiscard]] command::CommandPermissionResult check_command_permission(
       const command::CommandSender& sender,
       const command::Command& command_def);
+  [[nodiscard]] command::ExplosionCommandResult create_explosion_from_command(
+      const command::ExplosionCommandRequest& request);
+  [[nodiscard]] std::optional<world::ExplosionResult> execute_explosion_request(
+      world::ExplosionRequest request);
   [[nodiscard]] plugin::PluginNetworkSendResult send_plugin_network_packet(
       const plugin::PluginNetworkSendRequest& request);
   [[nodiscard]] plugin::PluginNetworkSendResult send_plugin_chat_message(
@@ -439,6 +446,9 @@ struct ServerRuntimeImpl {
       bool broadcast_explosion);
 
   void tick_chunk_streaming();
+  void broadcast_explosion_event(const world::ExplosionResult& result);
+  void spawn_explosion_drops(const world::ExplosionResult& result);
+  void send_explosion_player_velocities(const world::ExplosionResult& result);
 
   void send_player_move_correction(
       const ServerSession& session,
@@ -457,10 +467,6 @@ struct ServerRuntimeImpl {
   void broadcast_vehicle_state(
       EntityNetID vehicle_net_id,
       const AcceptedVehicleMovementState& accepted);
-  void broadcast_vehicle_crash_particles(
-      Vec3f position,
-      Vec3f normal,
-      u32 seed);
   void broadcast_vehicle_smoke_particles(
       Vec3f position,
       VehicleDamageStage stage,

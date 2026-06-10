@@ -241,6 +241,31 @@ These may be defined at the block level or overridden per variant if necessary.
 
 ---
 
+### Blast Properties
+
+Blocks may define a `blast` object for server-authoritative explosions:
+
+```json
+{
+  "blast": {
+    "resistance": 4.5,
+    "destroyable_by_explosions": true,
+    "absorbs_blast": false,
+    "flammable": false,
+    "drops_items": true
+  }
+}
+```
+
+`resistance` is a non-negative finite value that reduces ray power.
+`destroyable_by_explosions` determines whether the explosion may replace the
+block with air. `absorbs_blast` stops the ray after this block is encountered.
+`drops_items` gates whether normal block drops may be spawned when the block is
+destroyed. Air is always non-destructible by explosions, has zero resistance,
+and does not drop.
+
+---
+
 ### Tags
 
 Tags are group memberships used for behavior queries.

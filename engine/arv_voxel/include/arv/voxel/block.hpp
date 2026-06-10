@@ -102,6 +102,14 @@ struct BlockProperties {
   u8 emission_b{};
 };
 
+struct BlockBlastProperties {
+  f32 resistance{1.0F};
+  bool destroyable_by_explosions{true};
+  bool absorbs_blast{};
+  bool flammable{};
+  bool drops_items{true};
+};
+
 inline constexpr f32 DefaultBlockSlipperiness = 0.6F;
 
 struct BlockPhysicsProperties {
@@ -134,6 +142,7 @@ struct BlockDefinition {
   std::string behavior_id{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
+  BlockBlastProperties blast{};
   BlockPhysicsProperties physics{};
   BlockDropDefinition drops{};
   RenderCategory render_category{RenderCategory::None};
@@ -154,6 +163,7 @@ struct BlockRecord {
   std::string behavior_id{};
   std::vector<std::string> tags{};
   BlockProperties properties{};
+  BlockBlastProperties blast{};
   BlockPhysicsProperties physics{};
   BlockDropDefinition drops{};
   bool is_item{true};
@@ -179,6 +189,7 @@ struct BlockVariantRecord {
   std::string behavior_id{};
   std::vector<BlockStateValue> state_values{};
   BlockProperties properties{};
+  BlockBlastProperties blast{};
   BlockPhysicsProperties physics{};
   RenderCategory render_category{RenderCategory::None};
   BlockRenderTint render_tint{BlockRenderTint::None};

@@ -630,7 +630,9 @@ A block update may not be silently lost if it changes authoritative world state.
 texture asset override, position, normal, extents/radius, count, seed, and spawn
 shape. Block-break dust uses the old block state's authored particle texture in
 this override field. Server-confirmed critical entity attacks use the
-`arvane:critical_hit` particle type.
+`arvane:critical_hit` particle type. Server-authoritative explosions use
+`ClientboundExplosionEvent`; the client turns that event into local
+`arvane:explosion` particles.
 
 ---
 

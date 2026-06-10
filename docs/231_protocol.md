@@ -284,7 +284,7 @@ Message types are grouped by range.
 | `0x0200 - 0x02FF` | Registry sync                           |
 | `0x0300 - 0x03FF` | World join/leave                        |
 | `0x0400 - 0x04FF` | Chunk streaming                         |
-| `0x0500 - 0x05FF` | Block updates                           |
+| `0x0500 - 0x05FF` | Block updates and world events          |
 | `0x0600 - 0x06FF` | Entity replication                      |
 | `0x0700 - 0x07FF` | Player input                            |
 | `0x0800 - 0x08FF` | Inventory/interaction                   |
@@ -672,6 +672,29 @@ If a block update arrives before chunk data, the client may either:
 * request chunk resync
 
 The server remains authoritative.
+
+### Explosion Event
+
+Unreliable event.
+
+`ClientboundExplosionEvent` announces a server-authoritative explosion to nearby
+clients for local visual and future sound effects. It does not carry block
+mutations, entity damage, or drops; those remain ordinary authoritative world
+replication.
+
+```text
+ClientboundExplosionEvent
+{
+    WorldID world_id;
+    Vec3Fixed origin;
+    string profile_id;
+    f32 radius;
+    u64 seed;
+    bool visual_enabled;
+    bool future_sound_enabled;
+    string future_sound_id;
+}
+```
 
 ---
 

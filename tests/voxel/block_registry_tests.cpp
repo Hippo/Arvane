@@ -58,6 +58,9 @@ TEST(BlockRegistryTests, AssignsAirToZeroAndPreservesAirInvariants) {
   EXPECT_FALSE(air->properties.opaque);
   EXPECT_FALSE(air->properties.blocks_light);
   EXPECT_EQ(air->render_category, arv::voxel::RenderCategory::None);
+  EXPECT_FLOAT_EQ(air->blast.resistance, 0.0F);
+  EXPECT_FALSE(air->blast.destroyable_by_explosions);
+  EXPECT_FALSE(air->blast.drops_items);
 }
 
 TEST(BlockRegistryTests, RejectsDuplicateBlockDefinitions) {
@@ -110,6 +113,13 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
     "behavior": "test:block_behavior/glass",
     "buoyancy": 0.75,
     "drops": null,
+    "blast": {
+      "resistance": 0.3,
+      "destroyable_by_explosions": true,
+      "absorbs_blast": false,
+      "flammable": false,
+      "drops_items": false
+    },
     "render_category": "transparent",
     "tags": ["arvane:transparent"],
     "properties": {
@@ -176,6 +186,13 @@ TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   EXPECT_EQ(glass_block->behavior_id, "test:block_behavior/glass");
   EXPECT_FLOAT_EQ(glass_block->item_buoyancy, 0.75F);
   EXPECT_EQ(glass_block->drops.kind, arv::voxel::BlockDropKind::None);
+  EXPECT_FLOAT_EQ(glass_block->blast.resistance, 0.3F);
+  EXPECT_TRUE(glass_block->blast.destroyable_by_explosions);
+  EXPECT_FALSE(glass_block->blast.absorbs_blast);
+  EXPECT_FALSE(glass_block->blast.flammable);
+  EXPECT_FALSE(glass_block->blast.drops_items);
+  EXPECT_FLOAT_EQ(glass->blast.resistance, 0.3F);
+  EXPECT_FALSE(glass->blast.drops_items);
   const arv::voxel::BlockVariantRecord* leaves =
       registry.variant(registry.find_variant("arvane:oak_leaves").value());
   ASSERT_NE(leaves, nullptr);

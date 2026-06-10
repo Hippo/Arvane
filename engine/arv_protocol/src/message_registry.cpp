@@ -160,6 +160,9 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundSpawnParticles, "ClientboundSpawnParticles",
                              MessageDirection::ServerToClient, ReliabilityClass::UnreliableEvent,
                              NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundExplosionEvent, "ClientboundExplosionEvent",
+                             MessageDirection::ServerToClient, ReliabilityClass::UnreliableEvent,
+                             NetworkLane::Gameplay});
   registry.register_message({MessageType::ClientboundEntitySpawn, "ClientboundEntitySpawn",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});

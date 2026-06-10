@@ -985,6 +985,10 @@ Examples:
 * cooldown or rate limit
 * permission-dependent limit
 
+The built-in `/explode` command is an intentionally capped server-bound command.
+It validates radius, power, max destroyed blocks, max rays, and max drops before
+calling the authoritative explosion service. Its alias is `/boom`.
+
 Limits may be command-specific.
 
 Command limits may be configurable later.

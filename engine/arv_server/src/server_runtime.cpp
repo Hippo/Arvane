@@ -1762,6 +1762,10 @@ command::CommandResult ServerRuntimeImpl::execute_command(
     out.saved_entities = static_cast<u32>(entities.size());
     return out;
   };
+  auto create_explosion =
+      [this](const command::ExplosionCommandRequest& request) {
+        return create_explosion_from_command(request);
+      };
   auto broadcast_message = [this](std::string_view message) {
     broadcast_system_message(arv::text::plain_rich_text(std::string{message}));
     return true;
@@ -1834,6 +1838,8 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   domain_services.list_status_effects =
       command::ListStatusEffectsFn{list_status_effects};
   domain_services.save_all = command::SaveAllFn{save_all};
+  domain_services.create_explosion =
+      command::CreateExplosionFn{create_explosion};
   domain_services.broadcast_system_message =
       command::BroadcastSystemMessageFn{broadcast_message};
   domain_services.kick_player = command::KickPlayerFn{kick_player};

@@ -7,6 +7,7 @@
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_replication.hpp"
+#include "arv/protocol/explosion.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/particles.hpp"
@@ -633,6 +634,30 @@ void ClientNetworkRouter::handle_message(
       desc.count = spawn.value().count;
       desc.seed = spawn.value().seed;
       desc.shape = spawn.value().shape;
+      (void)runtime.particles.spawn_burst(
+          desc,
+          runtime.player_controller.camera().position());
+      return;
+    }
+    case protocol::MessageType::ClientboundExplosionEvent: {
+      auto event = protocol::deserialize_clientbound_explosion_event(decoded.value().payload);
+      if (!event || !event.value().visual_enabled ||
+          event.value().world_id != runtime.player_controller.camera().world_id()) {
+        return;
+      }
+      ParticleBurstDesc desc;
+      desc.type_name = "arvane:explosion";
+      desc.position = event.value().origin;
+      desc.normal = {0.0F, 1.0F, 0.0F};
+      const f32 visual_radius = std::max(0.35F, event.value().radius * 0.35F);
+      desc.extents = {visual_radius, visual_radius, visual_radius};
+      desc.radius = visual_radius;
+      desc.count = static_cast<u16>(std::clamp<f32>(
+          24.0F + event.value().radius * 8.0F,
+          16.0F,
+          160.0F));
+      desc.seed = static_cast<u32>(event.value().seed ^ (event.value().seed >> 32U));
+      desc.shape = protocol::ParticleSpawnShape::Sphere;
       (void)runtime.particles.spawn_burst(
           desc,
           runtime.player_controller.camera().position());

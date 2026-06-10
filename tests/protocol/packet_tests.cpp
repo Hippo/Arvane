@@ -3,6 +3,7 @@
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
+#include "arv/protocol/explosion.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/message_registry.hpp"
@@ -100,6 +101,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto world_time = registry.lookup(arv::protocol::MessageType::ClientboundWorldTime);
   const auto block_updates = registry.lookup(arv::protocol::MessageType::ClientboundBlockUpdateBatch);
   const auto spawn_particles = registry.lookup(arv::protocol::MessageType::ClientboundSpawnParticles);
+  const auto explosion_event = registry.lookup(arv::protocol::MessageType::ClientboundExplosionEvent);
   const auto entity_spawn = registry.lookup(arv::protocol::MessageType::ClientboundEntitySpawn);
   const auto entity_snapshot = registry.lookup(arv::protocol::MessageType::ClientboundEntitySnapshot);
   const auto dropped_item_snapshot =
@@ -153,6 +155,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(world_time.has_value());
   ASSERT_TRUE(block_updates.has_value());
   ASSERT_TRUE(spawn_particles.has_value());
+  ASSERT_TRUE(explosion_event.has_value());
   ASSERT_TRUE(entity_spawn.has_value());
   ASSERT_TRUE(entity_snapshot.has_value());
   ASSERT_TRUE(dropped_item_snapshot.has_value());
@@ -210,6 +213,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(world_time->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(block_updates->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(spawn_particles->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
+  EXPECT_EQ(explosion_event->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
   EXPECT_EQ(entity_spawn->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(entity_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(dropped_item_snapshot->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
@@ -245,6 +249,9 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(spawn_particles->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(spawn_particles->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(spawn_particles->name, "ClientboundSpawnParticles");
+  EXPECT_EQ(explosion_event->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(explosion_event->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(explosion_event->name, "ClientboundExplosionEvent");
   EXPECT_EQ(entity_spawn->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(entity_snapshot->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(dropped_item_snapshot->lane, arv::protocol::NetworkLane::Gameplay);
@@ -263,7 +270,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 63U);
+  EXPECT_EQ(registry.size(), 64U);
 }
 
 TEST(ProtocolTests, VehiclePacketsRoundTripThroughSerialization) {
@@ -843,6 +850,44 @@ TEST(ProtocolTests, SpawnParticlesRoundTripsAndRejectsMalformedCounts) {
   packet.particle_type.clear();
   EXPECT_FALSE(arv::protocol::deserialize_clientbound_spawn_particles(
       arv::protocol::serialize_clientbound_spawn_particles(packet)));
+}
+
+TEST(ProtocolTests, ExplosionEventRoundTripsAndRejectsMalformedFields) {
+  arv::protocol::ClientboundExplosionEvent packet;
+  packet.world_id = arv::WorldID{5};
+  packet.origin = {1.0F, 2.0F, 3.0F};
+  packet.profile_id = "arvane:tnt";
+  packet.radius = 4.5F;
+  packet.seed = 99U;
+  packet.visual_enabled = true;
+  packet.future_sound_enabled = false;
+
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_explosion_event(packet);
+  const auto decoded = arv::protocol::deserialize_clientbound_explosion_event(bytes);
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded.value().world_id, (arv::WorldID{5}));
+  EXPECT_EQ(decoded.value().origin, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+  EXPECT_EQ(decoded.value().profile_id, "arvane:tnt");
+  EXPECT_EQ(decoded.value().radius, 4.5F);
+  EXPECT_EQ(decoded.value().seed, 99U);
+  EXPECT_TRUE(decoded.value().visual_enabled);
+  EXPECT_FALSE(decoded.value().future_sound_enabled);
+  EXPECT_TRUE(decoded.value().future_sound_id.empty());
+
+  packet.profile_id.clear();
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_explosion_event(
+      arv::protocol::serialize_clientbound_explosion_event(packet)));
+
+  packet.profile_id = "arvane:tnt";
+  packet.radius = -1.0F;
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_explosion_event(
+      arv::protocol::serialize_clientbound_explosion_event(packet)));
+
+  packet.radius = 1.0F;
+  packet.future_sound_id.assign(arv::protocol::MaxExplosionSoundIDBytes + 1U, 'x');
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_explosion_event(
+      arv::protocol::serialize_clientbound_explosion_event(packet)));
 }
 
 TEST(ProtocolTests, EntityReplicationMessagesRoundTripAndRejectMalformedCounts) {

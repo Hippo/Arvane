@@ -5,6 +5,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/chunk_streaming.hpp
   include/arv/protocol/entity_interaction.hpp
   include/arv/protocol/entity_replication.hpp
+  include/arv/protocol/explosion.hpp
   include/arv/protocol/handshake.hpp
   include/arv/protocol/inventory_sync.hpp
   include/arv/protocol/item_stack_wire.hpp
@@ -31,6 +32,7 @@ add_library(arv_protocol STATIC
   src/chunk_streaming.cpp
   src/entity_interaction.cpp
   src/entity_replication.cpp
+  src/explosion.cpp
   src/handshake.cpp
   src/inventory_sync.cpp
   src/item_stack_wire.cpp

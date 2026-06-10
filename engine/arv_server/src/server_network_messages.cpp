@@ -2114,7 +2114,13 @@ bool ServerRuntimeImpl::destroy_vehicle_from_damage(
   }
 
   if (broadcast_explosion) {
-    broadcast_vehicle_crash_particles(effect_position, normal, seed);
+    world::ExplosionRequest explosion;
+    explosion.world_id = default_world_.id();
+    explosion.origin = effect_position;
+    explosion.profile_id = "arvane:vehicle";
+    explosion.source_entity = vehicle_entity;
+    explosion.seed = seed;
+    (void)execute_explosion_request(std::move(explosion));
   }
   if (!default_world_.destroy_entity(
           vehicle_entity,

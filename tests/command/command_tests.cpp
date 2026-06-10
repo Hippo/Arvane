@@ -837,6 +837,45 @@ TEST(CommandTests, SelectionCommandStoresCurrentPlayerSelection) {
   EXPECT_FALSE(player.selection.b.has_value());
 }
 
+TEST(CommandTests, ExplodeCommandRequiresPermissionAndUsesServerExplosion) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.position = {1.5F, 2.0F, 3.5F};
+
+  const std::optional<arv::voxel::BlockVariantID> stone =
+      harness.block_registry.find_variant("arvane:stone");
+  ASSERT_TRUE(stone.has_value());
+  (void)harness.server.voxel_world().ensure_chunk_section({{0, 0, 0}});
+  const arv::BlockPos target{{1, 2, 3}};
+  ASSERT_TRUE(harness.server.voxel_world().set_block(target, stone.value()));
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  arv::command::CommandResult result = harness.server.execute_command(
+      sender.value(),
+      "/explode ~ ~ ~ arvane:small --no-block-damage --seed 123");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_EQ(harness.server.voxel_world().get_block(target), stone.value());
+
+  player.permission_overrides.custom_overrides["command.explode"] =
+      arv::player::TriState::Allow;
+  sender = connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  result = harness.server.execute_command(
+      sender.value(),
+      "/explode ~ ~ ~ arvane:small --no-block-damage --seed 123");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Created explosion arvane:small"));
+  EXPECT_EQ(harness.server.voxel_world().get_block(target), stone.value());
+
+  result = harness.server.execute_command(
+      sender.value(),
+      "/boom 1.5 2 3.5 arvane:shockwave --seed 124");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Created explosion arvane:shockwave"));
+}
+
 TEST(CommandTests, BlueprintCommandSavesListsAndPastesWorldBlueprints) {
   RunningServerHarness harness;
   arv::player::PlayerState& player = connected_player(harness.server);
