@@ -169,6 +169,7 @@ struct ServerStartInfo {
   io::SkinConfig skins{};
   const arv::text::LanguageCatalog* language{};
   const player::GameModeRegistry* game_modes{};
+  std::string command_permission_denied_message{"No permission"};
   std::span<const StarterInventoryItem> starter_inventory{};
   FluidContainerInteractionConfig fluid_containers{};
   std::function<void(command::CommandRegistry&)> register_commands{};

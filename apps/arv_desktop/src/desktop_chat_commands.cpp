@@ -19,8 +19,16 @@ command::CommandResult DesktopFrameLoop::execute_chat_command(
     DesktopGameSession& session,
     std::string_view command_text) {
   if (session.integrated_server == nullptr) {
-    return command::CommandResult::invalid_source(
-        assets_.language.text("ui.chat.command.remote_unavailable"));
+    if (session.client == nullptr) {
+      return command::CommandResult::invalid_source(
+          assets_.language.text("ui.chat.command.no_player_session"));
+    }
+    const net::NetworkResult send_result =
+        session.client->send_chat_message(std::string{command_text});
+    if (!send_result) {
+      return command::CommandResult::failure(send_result.error().message);
+    }
+    return command::CommandResult::success();
   }
 
   const server::ServerSession* server_session =
@@ -63,10 +71,15 @@ void DesktopFrameLoop::handle_chat_command_submit(
   if (!command_text.has_value()) {
     return;
   }
-  client::append_command_result_to_chat(
-      *active_session->client,
-      execute_chat_command(*active_session, command_text.value()),
-      assets_.language);
+  const bool remote_command = active_session->integrated_server == nullptr;
+  const command::CommandResult result =
+      execute_chat_command(*active_session, command_text.value());
+  if (!remote_command || !result.succeeded()) {
+    client::append_command_result_to_chat(
+        *active_session->client,
+        result,
+        assets_.language);
+  }
 }
 
 } // namespace arv::desktop

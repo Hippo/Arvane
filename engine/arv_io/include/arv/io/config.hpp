@@ -99,6 +99,10 @@ struct DedicatedServerConfig {
   std::string world{"default"};
 };
 
+struct CommandConfig {
+  std::string permission_denied_message{"No permission"};
+};
+
 struct NativePluginsConfig {
   bool enabled{true};
   std::vector<std::string> allowed_packs{};
@@ -508,6 +512,7 @@ struct EngineConfig {
   SimulationConfig simulation{};
   NetworkConfig network{};
   DedicatedServerConfig server{};
+  CommandConfig commands{};
   NativePluginsConfig native_plugins{};
   MultiplayerConfig multiplayer{};
   SkinConfig skins{};

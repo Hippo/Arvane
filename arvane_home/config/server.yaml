@@ -1,3 +1,5 @@
+commands:
+  permission_denied_message: No permission
 network:
   bind_address: 0.0.0.0
   keep_alive:

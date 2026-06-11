@@ -869,7 +869,7 @@ Expected player profile ID, got "Hippo".
 Unknown online player: Steve.
 Unknown world: test_world.
 Relative coordinate requires an anchor.
-Permission denied: arvane.command.player.teleport.
+No permission
 ```
 
 Errors should be deterministic and testable.

@@ -344,6 +344,15 @@ void ClientRuntime::suggest_chat_command(std::string command) {
   impl_->ui.suggest_chat_command(std::move(command));
 }
 
+net::NetworkResult ClientRuntime::send_chat_message(
+    std::string message,
+    std::optional<std::string> channel) {
+  if (impl_->connection.state() != net::ConnectionState::InGame) {
+    return net::NetworkResult::failure(net::NetworkError{"client is not in game"});
+  }
+  return impl_->sender.send_chat_message({std::move(message), std::move(channel)});
+}
+
 std::optional<std::string> ClientRuntime::commit_chat_draft_to_history() {
   return impl_->ui.commit_chat_draft_to_history();
 }

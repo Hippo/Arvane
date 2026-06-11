@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -51,7 +52,8 @@ struct RunningServerHarness {
 
   explicit RunningServerHarness(
       arv::io::MovementValidationConfig movement = arv::io::MovementValidationConfig{},
-      arv::Location world_spawn = arv::default_spawn_location())
+      arv::Location world_spawn = arv::default_spawn_location(),
+      std::string permission_denied_message = "No permission")
       : temp("arvane_command_"),
         block_registry(arv::testsupport::make_test_block_registry()),
         item_registry(arv::testsupport::make_test_item_registry(block_registry)),
@@ -73,6 +75,7 @@ struct RunningServerHarness {
     start_info.world_spawn = world_spawn;
     start_info.world_name = "default";
     start_info.server_save_root = temp.path / "save";
+    start_info.command_permission_denied_message = std::move(permission_denied_message);
     EXPECT_TRUE(server.start(start_info));
 
     EXPECT_TRUE(client.connect_integrated());
@@ -98,6 +101,24 @@ std::optional<arv::command::CommandSender> connected_player_sender(
       result.messages.end(),
       [&](const arv::command::CommandMessage& message) {
         return message.text.find(needle) != std::string::npos;
+      });
+}
+
+void submit_chat_text(arv::client::ClientRuntime& client, std::string_view text) {
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  client.submit_input(arv::client::InputFrame{.text_input = std::string{text}});
+  client.submit_input(arv::client::InputFrame{.text_submit_pressed = true});
+}
+
+[[nodiscard]] bool client_chat_contains(
+    const arv::client::ClientRuntime& client,
+    std::string_view needle) {
+  const std::span<const std::string> messages = client.chat_messages();
+  return std::any_of(
+      messages.begin(),
+      messages.end(),
+      [&](const std::string& message) {
+        return message.find(needle) != std::string::npos;
       });
 }
 
@@ -277,6 +298,44 @@ TEST(CommandTests, ServerBoundPlayerCommandRequiresPermission) {
       "/test.secure");
 
   EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_TRUE(result_contains(result, "Permission denied: arvane.command.secure."));
+  EXPECT_FALSE(executed);
+}
+
+TEST(CommandTests, PermissionDeniedCanCarryIntentionalBlankMessage) {
+  arv::command::CommandRegistry registry;
+  bool executed = false;
+  arv::command::Command command;
+  command.name = "test.secure";
+  command.domain = arv::command::CommandDomain::ServerBound;
+  command.permission = "arvane.command.secure";
+  command.execute = [&executed](arv::command::CommandCtx&) {
+    executed = true;
+    return arv::command::CommandResult::success();
+  };
+  ASSERT_TRUE(registry.register_command(std::move(command)));
+
+  arv::command::CommandSender sender;
+  sender.kind = arv::command::CommandSourceKind::Player;
+  sender.player_id = arv::PlayerID{1};
+  auto permission_check =
+      [](const arv::command::CommandSender&, const arv::command::Command&) {
+        return arv::command::CommandPermissionResult::deny("");
+      };
+  arv::command::CommandServices services{
+      nullptr,
+      arv::command::CommandPermissionCheckFn{permission_check},
+  };
+
+  const arv::command::CommandResult result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      sender,
+      services,
+      "/test.secure");
+
+  EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_TRUE(result.messages.empty());
   EXPECT_FALSE(executed);
 }
 
@@ -342,6 +401,23 @@ TEST(CommandTests, HelpCommandUsesRegisteredMetadataAndAliases) {
   EXPECT_TRUE(result_contains(result, "Aliases: /spawnentity, /entityspawn"));
   EXPECT_TRUE(result_contains(result, "Permission: arvane.command.summon"));
   EXPECT_TRUE(result_contains(result, "arvane:cow"));
+}
+
+TEST(CommandTests, ConsoleCommandsDoNotNeedSlashAndBypassPlayerPermissions) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "help");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Commands page 1/"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "tp local_player 10 20 -30");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(player.position, (arv::Vec3f{10.0F, 20.0F, -30.0F}));
 }
 
 TEST(CommandTests, CoreWorldCommandsMutateStateAndValidateArguments) {
@@ -535,7 +611,8 @@ TEST(CommandTests, TimeSubcommandsRequireSubactionPermission) {
 
   EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
   EXPECT_EQ(harness.server.voxel_world().clock().day_time_tick, before);
-  EXPECT_TRUE(result_contains(result, "arvane.command.time.set"));
+  EXPECT_TRUE(result_contains(result, "No permission"));
+  EXPECT_FALSE(result_contains(result, "arvane.command.time.set"));
 }
 
 TEST(CommandTests, ConsoleTeleportMovesNamedOnlinePlayer) {
@@ -703,6 +780,21 @@ TEST(CommandTests, PlayerGamemodeAliasUsesSamePermission) {
   EXPECT_TRUE(player.resolved_permissions.core.can_fly);
 }
 
+TEST(CommandTests, ServerboundChatCommandExecutesThroughPermissions) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides["arvane.command.gamemode.creative"] =
+      arv::player::TriState::Allow;
+
+  submit_chat_text(harness.client, "/gmc");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_EQ(player.game_mode_id, arv::base::ids::CreativeGameModeID);
+  EXPECT_TRUE(player.resolved_permissions.core.can_fly);
+  EXPECT_TRUE(client_chat_contains(harness.client, "Set game mode to creative."));
+}
+
 TEST(CommandTests, PlayerGamemodeCommandIsDeniedWithoutModePermission) {
   RunningServerHarness harness;
   arv::player::PlayerState& player = connected_player(harness.server);
@@ -715,6 +807,55 @@ TEST(CommandTests, PlayerGamemodeCommandIsDeniedWithoutModePermission) {
 
   ASSERT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
   EXPECT_EQ(player.game_mode_id, arv::base::ids::SurvivalGameModeID);
+  EXPECT_TRUE(result_contains(result, "No permission"));
+  EXPECT_FALSE(result_contains(result, "arvane.command.gamemode.creative"));
+}
+
+TEST(CommandTests, ServerboundChatCommandDeniesWithoutPermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+
+  submit_chat_text(harness.client, "/gmc");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_EQ(player.game_mode_id, arv::base::ids::SurvivalGameModeID);
+  EXPECT_TRUE(client_chat_contains(harness.client, "No permission"));
+  EXPECT_FALSE(client_chat_contains(harness.client, "arvane.command.gamemode.creative"));
+}
+
+TEST(CommandTests, ServerboundChatCommandOmitsBlankPermissionDeniedMessage) {
+  RunningServerHarness harness{
+      arv::io::MovementValidationConfig{},
+      arv::default_spawn_location(),
+      ""};
+  arv::player::PlayerState& player = connected_player(harness.server);
+
+  submit_chat_text(harness.client, "/gmc");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_EQ(player.game_mode_id, arv::base::ids::SurvivalGameModeID);
+  EXPECT_FALSE(client_chat_contains(harness.client, "No permission"));
+  EXPECT_FALSE(client_chat_contains(harness.client, "Permission denied"));
+  EXPECT_TRUE(harness.client.chat_messages().empty());
+}
+
+TEST(CommandTests, PermissionDeniedMessageUsesServerConfig) {
+  RunningServerHarness harness{
+      arv::io::MovementValidationConfig{},
+      arv::default_spawn_location(),
+      "You cannot do that."};
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/gamemode creative");
+
+  EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_TRUE(result_contains(result, "You cannot do that."));
+  EXPECT_FALSE(result_contains(result, "arvane.command.gamemode.creative"));
 }
 
 TEST(CommandTests, GlobalWildcardPermissionAllowsGamemodeCommand) {

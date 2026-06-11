@@ -629,6 +629,25 @@ TEST(ClientRuntimeTests, ChatSubmitSendsRawServerboundIntentWhenInGame) {
   EXPECT_TRUE(client.chat_messages().empty());
 }
 
+TEST(ClientRuntimeTests, DirectChatSendSendsSlashCommandIntentWhenInGame) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  (void)server_transport->poll_events();
+
+  ASSERT_TRUE(client.send_chat_message("/gmc"));
+
+  const std::vector<arv::protocol::ServerboundChatMessage> messages =
+      serverbound_chat_messages(server_transport->poll_events());
+  ASSERT_EQ(messages.size(), 1U);
+  EXPECT_EQ(messages.front().message, "/gmc");
+  EXPECT_FALSE(messages.front().channel.has_value());
+}
+
 TEST(ClientRuntimeTests, ClientboundChatAppendsRichHistory) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);

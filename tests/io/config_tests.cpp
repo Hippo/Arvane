@@ -71,6 +71,8 @@ network:
   keep_alive:
     interval_seconds: 7
     client_timeout_seconds: 31
+commands:
+  permission_denied_message: ""
 native_plugins:
   enabled: true
   allowed_packs:
@@ -258,6 +260,7 @@ chunk_pipeline:
   EXPECT_EQ(result.value().network.port, 28000U);
   EXPECT_EQ(result.value().network.keep_alive.interval_seconds, 7U);
   EXPECT_EQ(result.value().network.keep_alive.client_timeout_seconds, 31U);
+  EXPECT_TRUE(result.value().commands.permission_denied_message.empty());
   EXPECT_TRUE(result.value().native_plugins.enabled);
   ASSERT_EQ(result.value().native_plugins.allowed_packs.size(), 2U);
   EXPECT_EQ(result.value().native_plugins.allowed_packs[0], "example_plugin_pack");
@@ -531,6 +534,7 @@ TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
   EXPECT_EQ(config.skins.storage.max_skins_per_profile, 16U);
   EXPECT_EQ(config.network.keep_alive.interval_seconds, 5U);
   EXPECT_EQ(config.network.keep_alive.client_timeout_seconds, 30U);
+  EXPECT_EQ(config.commands.permission_denied_message, "No permission");
   EXPECT_TRUE(config.native_plugins.enabled);
   EXPECT_TRUE(config.native_plugins.allowed_packs.empty());
   EXPECT_EQ(config.multiplayer.keep_alive.server_timeout_seconds, 30U);
@@ -887,6 +891,8 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   EXPECT_NE(written_shared.value().find("simulation:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("language:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("native_plugins:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("commands:"), std::string::npos);
+  EXPECT_NE(written_shared.value().find("permission_denied_message: No permission"), std::string::npos);
   EXPECT_NE(written_shared.value().find("enabled: true"), std::string::npos);
   EXPECT_NE(written_shared.value().find("allowed_packs:"), std::string::npos);
   EXPECT_NE(written_shared.value().find("gameplay:"), std::string::npos);
@@ -908,6 +914,8 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
       arv::io::read_text_file(server_config_file, "generated server config");
   ASSERT_TRUE(written_server);
   EXPECT_NE(written_server.value().find("network:"), std::string::npos);
+  EXPECT_NE(written_server.value().find("commands:"), std::string::npos);
+  EXPECT_NE(written_server.value().find("permission_denied_message: No permission"), std::string::npos);
   EXPECT_EQ(written_server.value().find("native_plugins:"), std::string::npos);
   EXPECT_NE(written_server.value().find("world: default"), std::string::npos);
 }
@@ -993,6 +1001,7 @@ TEST(ConfigTests, SaveConfigFilesCanonicalizesSplitConfigFiles) {
   ASSERT_TRUE(written_server);
   EXPECT_EQ(written_server.value().find("obsolete_server"), std::string::npos);
   EXPECT_EQ(written_server.value().find("native_plugins:"), std::string::npos);
+  EXPECT_NE(written_server.value().find("permission_denied_message: No permission"), std::string::npos);
   EXPECT_NE(written_server.value().find("world: preserved_server"), std::string::npos);
 }
 

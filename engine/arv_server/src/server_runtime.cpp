@@ -706,6 +706,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   keep_alive_enabled_ = start_info.keep_alive_enabled;
   skins_ = start_info.skins;
   language_ = start_info.language;
+  command_permission_denied_message_ = start_info.command_permission_denied_message;
   plugins_ = start_info.plugins;
   command_registry_ = command::CommandRegistry{};
   accepted_vehicle_movement_.clear();
@@ -1931,11 +1932,7 @@ command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
     return command::CommandPermissionResult::allow();
   }
 
-  return command::CommandPermissionResult::deny(arv::text::format_or_fallback(
-      language_,
-      "command.dispatcher.permission_denied",
-      {{"permission", command_def.permission}},
-      "Permission denied: {permission}."));
+  return command::CommandPermissionResult::deny(command_permission_denied_message_);
 }
 
 } // namespace detail

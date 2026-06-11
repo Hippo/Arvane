@@ -5,11 +5,28 @@
 
 namespace arv::io::detail {
 
+namespace {
+
+void read_command_config(const DataValue& root, EngineConfig& config) {
+  const DataValue* commands = root.get("commands");
+  if (commands == nullptr) {
+    return;
+  }
+  read_scalar(*commands, "permission_denied_message", config.commands.permission_denied_message);
+}
+
+void put_command_config(DataValue& root, const EngineConfig& config) {
+  put(root, "commands.permission_denied_message", config.commands.permission_denied_message);
+}
+
+} // namespace
+
 void read_config_node(const DataValue& root, EngineConfig& config) {
   read_scalar(root, "world", config.server.world);
   read_runtime_sections(root, config);
   read_network_sections(root, config);
   read_plugin_sections(root, config);
+  read_command_config(root, config);
   read_gameplay_sections(root, config);
   read_render_ui_sections(root, config);
 }
@@ -18,6 +35,7 @@ void put_full_config(DataValue& root, const EngineConfig& config) {
   put_runtime_full(root, config);
   put_network_full(root, config);
   put_plugin_policy_config(root, config);
+  put_command_config(root, config);
   put_gameplay_full(root, config);
   put_render_ui_full(root, config);
 }
@@ -69,6 +87,7 @@ ConfigResult save_default_shared_config_file(
   DataValue root = DataValue::object();
   put_runtime_shared(root, config);
   put_plugin_policy_config(root, config);
+  put_command_config(root, config);
   put_gameplay_shared(root, config);
   return write_config_document_file(path, root, config);
 }
@@ -90,6 +109,7 @@ ConfigResult save_default_server_config_file(
   DataValue root = DataValue::object();
   put(root, "world", config.server.world);
   put_network_server(root, config);
+  put_command_config(root, config);
   return write_config_document_file(path, root, config);
 }
 

@@ -391,6 +391,8 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
   server_start_info.keep_alive = dependencies_.config.network.keep_alive;
   server_start_info.keep_alive_enabled = false;
   server_start_info.language = &dependencies_.language;
+  server_start_info.command_permission_denied_message =
+      dependencies_.config.commands.permission_denied_message;
   server_start_info.skins.enabled = true;
   server_start_info.skins.allow_uploads = true;
   for (io::SkinResolutionConfig& resolution : server_start_info.skins.resolutions) {

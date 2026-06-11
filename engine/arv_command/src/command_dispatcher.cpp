@@ -55,7 +55,7 @@ namespace {
     return CommandResult::success();
   }
 
-  if (!permission.message.empty()) {
+  if (permission.has_message) {
     return CommandResult::permission_denied(permission.message);
   }
 

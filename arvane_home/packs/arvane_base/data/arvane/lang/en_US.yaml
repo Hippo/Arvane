@@ -94,11 +94,10 @@ ui:
       success: Command succeeded.
       failure: Command failed.
       usage_error: Invalid command usage.
-      permission_denied: Permission denied.
+      permission_denied: No permission
       unknown_command: Unknown command.
       invalid_source: Command cannot be used from here.
       internal_error: Command failed internally.
-      remote_unavailable: Server command networking is not available for remote sessions yet.
       no_player_session: No player session is available for command execution.
       no_sender: No player command sender is available.
   connection:
@@ -273,7 +272,7 @@ command:
   dispatcher:
     console_only: Command is restricted to the server console.
     permission_service_unavailable: Command permission service is unavailable.
-    permission_denied: "Permission denied: {permission}."
+    permission_denied: "No permission"
     permission_missing_player_context: "Permission denied: missing player context."
     permission_player_not_online: "Permission denied: player is not online."
     no_command: No command entered.

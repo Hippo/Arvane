@@ -166,6 +166,9 @@ public:
   void close_chat() noexcept;
   void add_chat_message(std::string message);
   void suggest_chat_command(std::string command);
+  net::NetworkResult send_chat_message(
+      std::string message,
+      std::optional<std::string> channel = std::nullopt);
   [[nodiscard]] std::optional<std::string> commit_chat_draft_to_history();
   void request_chat_url_confirmation(std::string url);
   void cancel_chat_url_confirmation() noexcept;

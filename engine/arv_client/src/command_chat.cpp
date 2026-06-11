@@ -45,7 +45,7 @@ void append_command_result_to_chat(
     client.add_chat_message(message.text);
     wrote_message = true;
   }
-  if (!wrote_message) {
+  if (!wrote_message && result.status != command::CommandStatus::PermissionDenied) {
     client.add_chat_message(fallback_command_result_message(language, result.status));
   }
 }

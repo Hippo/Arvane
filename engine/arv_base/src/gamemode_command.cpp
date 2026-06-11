@@ -36,9 +36,9 @@ constexpr std::array<BuiltInModeCommand, 5> BuiltInModeCommands{{
 [[nodiscard]] command::CommandResult permission_denied(
     command::CommandCtx& ctx,
     std::string permission,
-    std::string message = {}) {
-  if (!message.empty()) {
-    return command::CommandResult::permission_denied(std::move(message));
+    const command::CommandPermissionResult& result) {
+  if (result.has_message) {
+    return command::CommandResult::permission_denied(result.message);
   }
   return command::CommandResult::permission_denied(arv::text::format_or_fallback(
       ctx.services.language,
@@ -69,7 +69,7 @@ constexpr std::array<BuiltInModeCommand, 5> BuiltInModeCommands{{
   if (result.allowed) {
     return command::CommandResult::success();
   }
-  return permission_denied(ctx, permission, result.message);
+  return permission_denied(ctx, permission, result);
 }
 
 [[nodiscard]] command::CommandResult set_sender_game_mode(

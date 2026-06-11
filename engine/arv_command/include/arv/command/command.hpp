@@ -167,14 +167,19 @@ struct Command {
 
 struct CommandPermissionResult {
   bool allowed{};
+  bool has_message{};
   std::string message{};
 
   [[nodiscard]] static CommandPermissionResult allow() {
-    return {true, {}};
+    return {true, false, {}};
   }
 
   [[nodiscard]] static CommandPermissionResult deny(std::string message) {
-    return {false, std::move(message)};
+    return {false, true, std::move(message)};
+  }
+
+  [[nodiscard]] static CommandPermissionResult deny_without_message() {
+    return {false, false, {}};
   }
 };
 

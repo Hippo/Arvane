@@ -153,6 +153,8 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.fluid_containers = runtime_config.fluid_containers;
   server_start_info.register_commands = base::register_server_commands;
   server_start_info.language = &registries.language;
+  server_start_info.command_permission_denied_message =
+      config.commands.permission_denied_message;
   server_start_info.player_tuning = runtime_config.player_tuning;
   server_start_info.fluid_definition = runtime_config.water_fluid;
   server_start_info.chunk_streaming = runtime_config.chunk_streaming;

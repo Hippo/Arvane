@@ -95,6 +95,66 @@ void configure_skin_transfer_state(
              seconds_to_ticks(skins.uploads.idle_timeout_seconds, tick_rate));
 }
 
+[[nodiscard]] bool is_command_chat_message(std::string_view message) noexcept {
+  return !message.empty() && message.front() == '/';
+}
+
+[[nodiscard]] bool command_message_is_error(
+    command::CommandMessageKind kind) noexcept {
+  return kind == command::CommandMessageKind::Error;
+}
+
+[[nodiscard]] bool command_status_is_error(
+    command::CommandStatus status) noexcept {
+  return status != command::CommandStatus::Success;
+}
+
+[[nodiscard]] std::string fallback_command_result_message(
+    const arv::text::LanguageCatalog* language,
+    command::CommandStatus status) {
+  switch (status) {
+    case command::CommandStatus::Success:
+      return arv::text::text_or_fallback(
+          language,
+          "ui.chat.command.success",
+          "Command succeeded.");
+    case command::CommandStatus::Failure:
+      return arv::text::text_or_fallback(
+          language,
+          "ui.chat.command.failure",
+          "Command failed.");
+    case command::CommandStatus::UsageError:
+      return arv::text::text_or_fallback(
+          language,
+          "ui.chat.command.usage_error",
+          "Invalid command usage.");
+    case command::CommandStatus::PermissionDenied:
+      return arv::text::text_or_fallback(
+          language,
+          "ui.chat.command.permission_denied",
+          "Permission denied.");
+    case command::CommandStatus::UnknownCommand:
+      return arv::text::text_or_fallback(
+          language,
+          "ui.chat.command.unknown_command",
+          "Unknown command.");
+    case command::CommandStatus::InvalidSource:
+      return arv::text::text_or_fallback(
+          language,
+          "ui.chat.command.invalid_source",
+          "Command cannot be used from here.");
+    case command::CommandStatus::InternalError:
+      return arv::text::text_or_fallback(
+          language,
+          "ui.chat.command.internal_error",
+          "Command failed internally.");
+  }
+  return arv::text::text_or_fallback(
+      language,
+      "ui.chat.command.failure",
+      "Command failed.");
+}
+
 void clear_active_skin_upload(
     SkinTransferSessionState& state,
     u32& active_skin_uploads_global) noexcept {
@@ -2517,13 +2577,61 @@ void ServerRuntimeImpl::handle_chat_message(
     return;
   }
 
+  std::string normalized_message = std::move(normalized.value());
+  if (is_command_chat_message(normalized_message)) {
+    std::optional<command::CommandSender> sender =
+        command_sender_for_session(session->session_id);
+    if (!sender.has_value()) {
+      send_error_message(
+          *session,
+          chat_formatter_.format_error_message(arv::text::text_or_fallback(
+              language_,
+              "ui.chat.command.no_sender",
+              "No player command sender is available.")));
+      return;
+    }
+
+    const command::CommandResult result =
+        execute_command(sender.value(), normalized_message);
+    bool sent_message = false;
+    for (const command::CommandMessage& message : result.messages) {
+      if (message.text.empty()) {
+        continue;
+      }
+      if (command_message_is_error(message.kind)) {
+        send_error_message(
+            *session,
+            chat_formatter_.format_error_message(message.text));
+      } else {
+        send_system_message(
+            *session,
+            chat_formatter_.format_system_message(message.text));
+      }
+      sent_message = true;
+    }
+    if (!sent_message && result.status != command::CommandStatus::PermissionDenied) {
+      const std::string fallback =
+          fallback_command_result_message(language_, result.status);
+      if (command_status_is_error(result.status)) {
+        send_error_message(
+            *session,
+            chat_formatter_.format_error_message(fallback));
+      } else {
+        send_system_message(
+            *session,
+            chat_formatter_.format_system_message(fallback));
+      }
+    }
+    return;
+  }
+
   arv::text::ChatFormatContext context;
   context.language = language_;
   context.sender_profile_id = session->profile_id.string();
   context.sender_name =
       session->display_name.empty() ? session->profile_name : session->display_name;
   context.channel = channel;
-  context.raw_message = std::move(normalized.value());
+  context.raw_message = std::move(normalized_message);
   arv::text::RichText formatted = chat_formatter_.format_player_chat(context);
   const arv::text::RichTextValidation validation = arv::text::validate_rich_text(formatted);
   if (!validation.valid) {

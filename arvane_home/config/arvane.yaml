@@ -7,6 +7,8 @@ chunks:
   load_distance: 12
   simulation_distance: 2
   unload_margin: 1
+commands:
+  permission_denied_message: No permission
 gameplay:
   block_breaking:
     base_seconds_per_hardness: 1

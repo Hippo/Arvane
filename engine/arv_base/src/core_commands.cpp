@@ -231,9 +231,9 @@ constexpr u32 MaxGiveCount = 4096U;
 [[nodiscard]] command::CommandResult permission_denied(
     command::CommandCtx& ctx,
     std::string permission,
-    std::string message = {}) {
-  if (!message.empty()) {
-    return command::CommandResult::permission_denied(std::move(message));
+    const command::CommandPermissionResult& result) {
+  if (result.has_message) {
+    return command::CommandResult::permission_denied(result.message);
   }
   return command::CommandResult::permission_denied(format_msg(
       ctx,
@@ -262,7 +262,7 @@ constexpr u32 MaxGiveCount = 4096U;
   if (result.allowed) {
     return command::CommandResult::success();
   }
-  return permission_denied(ctx, checked.permission, result.message);
+  return permission_denied(ctx, checked.permission, result);
 }
 
 [[nodiscard]] bool command_visible_to_sender(

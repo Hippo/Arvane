@@ -859,13 +859,20 @@ bool DesktopFrameLoop::route_chat_mouse_input(
               }
               handled = true;
               break;
-            case arv::text::ClickAction::RunCommand:
-              client::append_command_result_to_chat(
-                  *active_session.client,
-                  execute_chat_command(active_session, click.value),
-                  assets_.language);
+            case arv::text::ClickAction::RunCommand: {
+              const bool remote_command =
+                  active_session.integrated_server == nullptr;
+              const command::CommandResult result =
+                  execute_chat_command(active_session, click.value);
+              if (!remote_command || !result.succeeded()) {
+                client::append_command_result_to_chat(
+                    *active_session.client,
+                    result,
+                    assets_.language);
+              }
               handled = true;
               break;
+            }
             case arv::text::ClickAction::CopyToClipboard:
               // TODO(arvane): Route through a platform clipboard abstraction when
               // one exists outside debug ImGui tooling.
