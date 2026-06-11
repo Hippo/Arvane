@@ -1102,7 +1102,7 @@ handshaking
     accepts handshake follow-up messages
 
 syncing
-    accepts registry/asset/session sync messages
+    accepts pack manifest/status/request/chunk messages, registry snapshot, and session sync messages
 
 gameplay
     accepts movement, interaction, chat, and replication acknowledgements

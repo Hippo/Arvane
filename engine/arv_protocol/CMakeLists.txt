@@ -14,6 +14,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/message_registry.hpp
   include/arv/protocol/message_type.hpp
   include/arv/protocol/message_writer.hpp
+  include/arv/protocol/pack_sync.hpp
   include/arv/protocol/particles.hpp
   include/arv/protocol/player_input.hpp
   include/arv/protocol/protocol_version.hpp
@@ -38,6 +39,7 @@ add_library(arv_protocol STATIC
   src/item_stack_wire.cpp
   src/message_envelope.cpp
   src/message_registry.cpp
+  src/pack_sync.cpp
   src/particles.cpp
   src/player_input.cpp
   src/session_control.cpp

@@ -14,6 +14,7 @@ constexpr std::string_view kPacksDirectoryName = "packs";
 constexpr std::string_view kPluginsDirectoryName = "plugins";
 constexpr std::string_view kConfigDirectoryName = "config";
 constexpr std::string_view kSavesDirectoryName = "saves";
+constexpr std::string_view kWorldsDirectoryName = "worlds";
 constexpr std::string_view kLogsDirectoryName = "logs";
 constexpr std::string_view kCacheDirectoryName = "cache";
 constexpr std::string_view kLangDirectoryName = "lang";
@@ -352,6 +353,7 @@ void read_runtime_sections(const DataValue& root, EngineConfig& config) {
   const DataValue* paths = root.get("paths");
   if (paths != nullptr) {
     read_path_scalar(*paths, "arvane_home", config.paths.arvane_home_root);
+    read_path_scalar(*paths, "server_root", config.paths.server_root);
     read_path_scalar(*paths, "config_file", config.paths.config_file);
     read_path_scalar(*paths, "input_bindings_file", config.paths.input_bindings_file);
     read_path_scalar(*paths, "server_list_file", config.paths.server_list_file);
@@ -558,6 +560,7 @@ void put_natural_spawning_config(
 
 void put_runtime_full(DataValue& root, const EngineConfig& config) {
   put(root, "paths.arvane_home", config_path_string(config.paths.project_root, config.paths.arvane_home_path()));
+  put(root, "paths.server_root", config_path_string(config.paths.project_root, config.paths.server_root_path()));
   put(root, "paths.input_bindings_file", config_path_string(config.paths.project_root, config.paths.input_bindings_file));
   put(root, "paths.server_list_file", config_path_string(config.paths.project_root, config.paths.server_list_file));
   put(root, "language.locale", config.language.locale);
@@ -647,6 +650,15 @@ void resolve_runtime_paths(const ConfigLoadOptions& options, EngineConfig& confi
   config.paths.arvane_home_root =
       detail::resolve_project_relative(config.paths.project_root, arvane_home_root);
 
+  const std::filesystem::path server_root =
+      !options.explicit_server_root_path.empty()
+          ? options.explicit_server_root_path
+          : (config.paths.server_root.empty()
+                 ? std::filesystem::path{DefaultServerRootDirectoryName}
+                 : config.paths.server_root);
+  config.paths.server_root =
+      detail::resolve_project_relative(config.paths.project_root, server_root);
+
   config.paths.asset_root = detail::normalize_lexical(
       config.paths.arvane_home_path() / std::filesystem::path{detail::kAssetsDirectoryName});
   config.paths.pack_root = detail::normalize_lexical(
@@ -663,12 +675,25 @@ void resolve_runtime_paths(const ConfigLoadOptions& options, EngineConfig& confi
       config.paths.arvane_home_path() / std::filesystem::path{detail::kCacheDirectoryName});
   config.paths.lang_root = detail::normalize_lexical(
       config.paths.arvane_home_path() / std::filesystem::path{detail::kLangDirectoryName});
+  config.paths.server_pack_root = detail::normalize_lexical(
+      config.paths.server_root_path() / std::filesystem::path{detail::kPacksDirectoryName});
+  config.paths.server_worlds_root = detail::normalize_lexical(
+      config.paths.server_root_path() / std::filesystem::path{detail::kWorldsDirectoryName});
+  config.paths.server_cache_root = detail::normalize_lexical(
+      config.paths.server_root_path() / std::filesystem::path{detail::kCacheDirectoryName});
+  config.paths.server_logs_root = detail::normalize_lexical(
+      config.paths.server_root_path() / std::filesystem::path{detail::kLogsDirectoryName});
 
   const std::filesystem::path config_file =
       !options.explicit_config_path.empty()
           ? options.explicit_config_path
           : (config.paths.config_file.empty()
-                 ? detail::default_profile_config_path_from(config.paths.config_path(), options.profile)
+                 ? (options.profile == ConfigProfile::Server
+                        ? config.paths.server_root_path() /
+                              std::filesystem::path{DefaultServerConfigFileName}
+                        : detail::default_profile_config_path_from(
+                              config.paths.config_path(),
+                              options.profile))
                  : config.paths.config_file);
   config.paths.config_file = detail::resolve_project_relative(config.paths.project_root, config_file);
 
@@ -688,7 +713,8 @@ void resolve_runtime_paths(const ConfigLoadOptions& options, EngineConfig& confi
 
   const std::filesystem::path server_config_file =
       config.paths.server_config_file.empty()
-          ? detail::default_server_config_path_from(config.paths.config_path())
+          ? config.paths.server_root_path() /
+                std::filesystem::path{DefaultServerConfigFileName}
           : config.paths.server_config_file;
   config.paths.server_config_file =
       detail::resolve_project_relative(config.paths.project_root, server_config_file);

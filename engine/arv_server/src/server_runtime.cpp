@@ -727,6 +727,17 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
       start_info.starter_inventory.begin(),
       start_info.starter_inventory.end());
   fluid_containers_ = start_info.fluid_containers;
+  pack_sync_ = start_info.pack_sync;
+  if (pack_sync_.enabled) {
+    if (pack_sync_.registry_hash.empty() ||
+        pack_sync_.registry_snapshot_json.empty()) {
+      return net::NetworkResult::failure(
+          net::NetworkError{"pack sync requires a registry snapshot"});
+    }
+    if (pack_sync_.chunk_size == 0U) {
+      pack_sync_.chunk_size = protocol::PackSyncDefaultChunkSize;
+    }
+  }
   configure_chunk_streaming(start_info.chunk_streaming);
   chunk_generation_ = start_info.chunk_generation;
   if (chunk_generation_.has_value() && chunk_generation_->enabled) {

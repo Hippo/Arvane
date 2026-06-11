@@ -33,6 +33,7 @@ struct ClientRuntime::Impl {
         dropped_items,
         skins,
         particles,
+        pack_sync,
         world_time_update,
         language,
         vehicle_registry,
@@ -86,6 +87,7 @@ struct ClientRuntime::Impl {
     chunks.clear();
     inventory.reset();
     particles.clear();
+    pack_sync.clear();
     world_time_update.reset();
     player_controller.leave_world();
     chunk_interest.set_world_id(WorldID{});
@@ -108,6 +110,7 @@ struct ClientRuntime::Impl {
   ClientDroppedItemMirrorStore dropped_items{};
   detail::ClientSkinRuntime skins{};
   ParticleSystem particles{};
+  detail::ClientPackSyncState pack_sync{};
   std::optional<protocol::ClientboundWorldTime> world_time_update{};
   u32 next_attack_sequence{1};
   std::vector<ClientAttackFeedback> attack_feedback{};
@@ -529,6 +532,14 @@ const protocol::PlayerProfileInfo* ClientRuntime::profile_info_for_player(
 
 std::vector<protocol::PlayerProfileInfo> ClientRuntime::player_profile_infos() const {
   return impl_->skins.profiles();
+}
+
+std::span<const std::filesystem::path> ClientRuntime::multiplayer_pack_cache_paths() const noexcept {
+  return impl_->pack_sync.loaded_bundle_paths;
+}
+
+const std::string& ClientRuntime::multiplayer_registry_snapshot_json() const noexcept {
+  return impl_->pack_sync.registry_snapshot_payload;
 }
 
 } // namespace arv::client

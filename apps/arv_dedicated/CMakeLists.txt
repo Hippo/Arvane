@@ -4,6 +4,7 @@ set(ARV_DEDICATED_SOURCES
   src/dedicated_lifetime_log.cpp
   src/dedicated_registry_loader.cpp
   src/dedicated_runtime_config.cpp
+  src/dedicated_runtime_layout.cpp
   src/dedicated_save_state.cpp
   src/dedicated_server_bootstrap.cpp
   src/dedicated_signals.cpp

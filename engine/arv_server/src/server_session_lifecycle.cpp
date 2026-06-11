@@ -2,12 +2,14 @@
 
 #include "arv/core/log.hpp"
 #include "arv/crypto/random.hpp"
+#include "arv/io/files.hpp"
 #include "arv/protocol/world_time.hpp"
 #include "arv/text/language.hpp"
 #include "arv/server/skin_runtime.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -26,6 +28,76 @@ namespace {
       clock.time_scale,
       clock.daylight_cycle,
   };
+}
+
+[[nodiscard]] const ServerPackSyncBundle* find_pack_sync_bundle(
+    const ServerPackSyncConfig& config,
+    std::string_view bundle_hash) noexcept {
+  const auto found = std::find_if(
+      config.required_bundles.begin(),
+      config.required_bundles.end(),
+      [&](const ServerPackSyncBundle& bundle) {
+        return bundle.descriptor.bundle_hash == bundle_hash;
+      });
+  return found == config.required_bundles.end() ? nullptr : &*found;
+}
+
+[[nodiscard]] bool hashes_cover_required_bundles(
+    const ServerPackSyncConfig& config,
+    std::span<const std::string> hashes) {
+  HashSet<std::string_view> available;
+  for (const std::string& hash : hashes) {
+    available.insert(hash);
+  }
+  for (const ServerPackSyncBundle& bundle : config.required_bundles) {
+    if (available.find(bundle.descriptor.bundle_hash) == available.end()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool status_hashes_cover_required_bundles(
+    const ServerPackSyncConfig& config,
+    const protocol::ServerboundPackSyncStatus& status) {
+  std::vector<std::string> hashes;
+  hashes.reserve(
+      status.already_cached_bundle_hashes.size() +
+      status.needed_bundle_hashes.size());
+  hashes.insert(
+      hashes.end(),
+      status.already_cached_bundle_hashes.begin(),
+      status.already_cached_bundle_hashes.end());
+  hashes.insert(
+      hashes.end(),
+      status.needed_bundle_hashes.begin(),
+      status.needed_bundle_hashes.end());
+  return hashes_cover_required_bundles(config, hashes);
+}
+
+[[nodiscard]] u64 pack_sync_total_download_size(
+    std::span<const ServerPackSyncBundle> bundles) noexcept {
+  u64 total = 0U;
+  for (const ServerPackSyncBundle& bundle : bundles) {
+    const u64 size = bundle.descriptor.compressed_size;
+    if (std::numeric_limits<u64>::max() - total < size) {
+      return std::numeric_limits<u64>::max();
+    }
+    total += size;
+  }
+  return total;
+}
+
+[[nodiscard]] u64 pack_sync_max_bundle_size(
+    const ServerPackSyncConfig& config) noexcept {
+  if (config.max_bundle_size != 0U) {
+    return config.max_bundle_size;
+  }
+  u64 maximum = 0U;
+  for (const ServerPackSyncBundle& bundle : config.required_bundles) {
+    maximum = std::max(maximum, bundle.descriptor.compressed_size);
+  }
+  return maximum;
 }
 
 } // namespace
@@ -238,6 +310,213 @@ bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
       true};
   session.connection_state = net::ConnectionState::WorldJoin;
   return true;
+}
+
+void ServerRuntimeImpl::begin_authenticated_session_join(ServerSession& session) {
+  const player::PlayerState* player_state = default_world_.find_player(session.player_id);
+  if (player_state == nullptr) {
+    return;
+  }
+
+  send_skin_rules(session, *player_state);
+  if (pack_sync_.enabled) {
+    session.connection_state = net::ConnectionState::RegistrySync;
+    send_pack_manifest(session);
+    return;
+  }
+
+  finish_authenticated_session_join(session);
+}
+
+void ServerRuntimeImpl::finish_authenticated_session_join(ServerSession& session) {
+  const player::PlayerState* player_state = default_world_.find_player(session.player_id);
+  if (player_state == nullptr) {
+    return;
+  }
+
+  send_world_join_result(session, *player_state);
+  session.connection_state = net::ConnectionState::InGame;
+  sessions_.for_each_session([&](const ServerSession& subject) {
+    if (subject.authenticated && subject.world_id == session.world_id) {
+      send_player_profile_info_to(session, subject);
+    }
+  });
+  broadcast_player_profile_info(session);
+}
+
+void ServerRuntimeImpl::send_pack_manifest(const ServerSession& session) {
+  protocol::ClientboundPackManifest manifest;
+  manifest.registry_hash = pack_sync_.registry_hash;
+  manifest.max_bundle_size = pack_sync_max_bundle_size(pack_sync_);
+  manifest.total_download_size =
+      pack_sync_total_download_size(pack_sync_.required_bundles);
+  manifest.required_bundles.reserve(pack_sync_.required_bundles.size());
+  for (const ServerPackSyncBundle& bundle : pack_sync_.required_bundles) {
+    manifest.required_bundles.push_back(bundle.descriptor);
+  }
+
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundPackManifest,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_clientbound_pack_manifest(manifest));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::send_registry_snapshot(const ServerSession& session) {
+  protocol::ClientboundRegistrySnapshot snapshot;
+  snapshot.registry_hash = pack_sync_.registry_hash;
+  snapshot.registry_snapshot_payload = pack_sync_.registry_snapshot_json;
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundRegistrySnapshot,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_clientbound_registry_snapshot(snapshot));
+  log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+}
+
+void ServerRuntimeImpl::send_pack_data_chunks(
+    const ServerSession& session,
+    std::string_view bundle_hash) {
+  const ServerPackSyncBundle* bundle = find_pack_sync_bundle(pack_sync_, bundle_hash);
+  if (bundle == nullptr) {
+    kick_client(
+        session.connection_id,
+        arv::text::text_or_fallback(
+            language_,
+            "server.disconnect.pack_sync_unknown_bundle",
+            "Requested pack bundle is not available."));
+    return;
+  }
+
+  auto bytes = io::read_binary_file(bundle->bundle_path);
+  if (!bytes) {
+    kick_client(
+        session.connection_id,
+        arv::text::text_or_fallback(
+            language_,
+            "server.disconnect.pack_sync_bundle_read_failed",
+            "Pack bundle could not be read."));
+    return;
+  }
+  if (bundle->descriptor.compressed_size != 0U &&
+      bytes.value().size() != bundle->descriptor.compressed_size) {
+    kick_client(
+        session.connection_id,
+        arv::text::text_or_fallback(
+            language_,
+            "server.disconnect.pack_sync_bundle_size_mismatch",
+            "Pack bundle changed while syncing."));
+    return;
+  }
+
+  const u32 chunk_size =
+      pack_sync_.chunk_size == 0U ? protocol::PackSyncDefaultChunkSize : pack_sync_.chunk_size;
+  const u64 byte_count = static_cast<u64>(bytes.value().size());
+  const u32 chunk_count =
+      byte_count == 0U
+          ? 1U
+          : static_cast<u32>((byte_count + chunk_size - 1U) / chunk_size);
+  for (u32 chunk_index = 0U; chunk_index < chunk_count; ++chunk_index) {
+    const u64 offset = static_cast<u64>(chunk_index) * chunk_size;
+    const usize remaining =
+        offset >= byte_count
+            ? 0U
+            : static_cast<usize>(byte_count - offset);
+    const usize count = std::min<usize>(remaining, chunk_size);
+    protocol::ClientboundPackDataChunk chunk;
+    chunk.bundle_hash = std::string{bundle_hash};
+    chunk.chunk_index = chunk_index;
+    chunk.chunk_count = chunk_count;
+    chunk.byte_offset = offset;
+    chunk.bytes.assign(
+        bytes.value().begin() + static_cast<std::ptrdiff_t>(offset),
+        bytes.value().begin() + static_cast<std::ptrdiff_t>(offset + count));
+    const net::NetworkResult send_result = send_protocol_message(
+        *transport_,
+        session.connection_id,
+        protocol::MessageType::ClientboundPackDataChunk,
+        protocol::ReliabilityClass::ReliableOrdered,
+        protocol::NetworkLane::ChunkStreaming,
+        protocol::serialize_clientbound_pack_data_chunk(chunk));
+    log_send_failure_if_dedicated(mode_, session.connection_id, send_result);
+    if (!send_result) {
+      return;
+    }
+  }
+}
+
+void ServerRuntimeImpl::handle_pack_sync_status(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundPackSyncStatus& status) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated ||
+      session->connection_state != net::ConnectionState::RegistrySync) {
+    return;
+  }
+
+  if (!status.failed_bundle_hashes.empty() ||
+      status.status == protocol::PackSyncStatus::RejectedByUser ||
+      status.status == protocol::PackSyncStatus::DownloadFailed ||
+      status.status == protocol::PackSyncStatus::VerificationFailed) {
+    kick_client(
+        connection_id,
+        status.failure_reason.empty()
+            ? arv::text::text_or_fallback(
+                  language_,
+                  "server.disconnect.pack_sync_failed",
+                  "Required pack sync failed.")
+            : status.failure_reason);
+    return;
+  }
+
+  if (status.status == protocol::PackSyncStatus::NeedsDownload) {
+    if (status.needed_bundle_hashes.empty() &&
+        status_hashes_cover_required_bundles(pack_sync_, status)) {
+      send_registry_snapshot(*session);
+    }
+    return;
+  }
+
+  if (status_hashes_cover_required_bundles(pack_sync_, status)) {
+    send_registry_snapshot(*session);
+  }
+}
+
+void ServerRuntimeImpl::handle_pack_request(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundPackRequest& request) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated ||
+      session->connection_state != net::ConnectionState::RegistrySync) {
+    return;
+  }
+  send_pack_data_chunks(*session, request.bundle_hash);
+}
+
+void ServerRuntimeImpl::handle_pack_ready(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundPackReady& ready) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated ||
+      session->connection_state != net::ConnectionState::RegistrySync) {
+    return;
+  }
+  if (ready.registry_hash != pack_sync_.registry_hash ||
+      !hashes_cover_required_bundles(pack_sync_, ready.loaded_bundle_hashes)) {
+    kick_client(
+        connection_id,
+        arv::text::text_or_fallback(
+            language_,
+            "server.disconnect.pack_sync_mismatch",
+            "Required pack sync did not match the server."));
+    return;
+  }
+  finish_authenticated_session_join(*session);
 }
 
 void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) {

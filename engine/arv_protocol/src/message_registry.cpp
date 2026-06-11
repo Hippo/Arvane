@@ -136,6 +136,24 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundSkinUploadFailed, "ClientboundSkinUploadFailed",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});
+  registry.register_message({MessageType::ClientboundPackManifest, "ClientboundPackManifest",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::ServerboundPackSyncStatus, "ServerboundPackSyncStatus",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::ServerboundPackRequest, "ServerboundPackRequest",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::ClientboundPackDataChunk, "ClientboundPackDataChunk",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::ChunkStreaming});
+  registry.register_message({MessageType::ClientboundRegistrySnapshot, "ClientboundRegistrySnapshot",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
+  registry.register_message({MessageType::ServerboundPackReady, "ServerboundPackReady",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Session});
   registry.register_message({MessageType::ClientboundWorldJoinResult, "ClientboundWorldJoinResult",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Session});

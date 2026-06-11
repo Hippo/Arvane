@@ -4,6 +4,7 @@
 /obj/
 /out/
 /cmake-build-*/
+/arvane_server/
 
 # IDE
 .vscode/
@@ -37,3 +38,4 @@ compile_commands.json
 .DS_Store
 .codex
 *.pk
+PLANS.md

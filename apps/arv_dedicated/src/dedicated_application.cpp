@@ -4,6 +4,7 @@
 #include "dedicated_lifetime_log.hpp"
 #include "dedicated_registry_loader.hpp"
 #include "dedicated_runtime_config.hpp"
+#include "dedicated_runtime_layout.hpp"
 #include "dedicated_save_state.hpp"
 #include "dedicated_server_bootstrap.hpp"
 #include "dedicated_signals.hpp"
@@ -11,13 +12,16 @@
 #include "dedicated_worldgen_loader.hpp"
 
 #include "arv/asset/pack.hpp"
+#include "arv/asset/pack_bundle.hpp"
 #include "arv/base/base_commands.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/plugin/plugin_manager.hpp"
+#include "arv/protocol/pack_sync.hpp"
 
+#include <filesystem>
 #include <utility>
 #include <vector>
 
@@ -35,7 +39,12 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(dedicated_error("config", config_result.error().message));
   }
   const io::EngineConfig config = config_result.value();
-  auto pack_manager_result = asset::PackManager::load(config.paths.arvane_home_path());
+  auto layout_result = ensure_dedicated_runtime_layout(config);
+  if (!layout_result) {
+    return fail(layout_result.error());
+  }
+  auto pack_manager_result =
+      asset::PackManager::load_from_packs_root(config.paths.server_packs_path());
   if (!pack_manager_result) {
     return fail(dedicated_error("packs", pack_manager_result.error().describe()));
   }
@@ -46,9 +55,11 @@ int DedicatedApplication::run(int argc, char** argv) {
       persistence::required_pack_metadata(active_required_packs);
   core::info(
       "dedicated",
-      "config={} arvane_home={} world={} listen={}:{} save_root={}",
+      "config={} arvane_home={} server_root={} packs={} world={} listen={}:{} save_root={}",
       config.paths.config_file.string(),
       config.paths.arvane_home_path().string(),
+      config.paths.server_root_path().string(),
+      config.paths.server_packs_path().string(),
       config.server.world,
       config.network.bind_address,
       config.network.port,
@@ -86,6 +97,45 @@ int DedicatedApplication::run(int argc, char** argv) {
   }
   DedicatedRegistries registries = std::move(registries_result.value());
 
+  auto client_bundle_result = asset::build_client_pack_bundle(
+      pack_manager,
+      registries.client_registry_snapshot_json);
+  if (!client_bundle_result) {
+    return fail(dedicated_error("pack-sync", client_bundle_result.error().message));
+  }
+  asset::ClientPackBundleBuildResult client_bundle =
+      std::move(client_bundle_result.value());
+  const std::filesystem::path bundle_cache_dir =
+      config.paths.server_cache_path() / "client-pack-exports";
+  const std::filesystem::path bundle_path =
+      bundle_cache_dir / (client_bundle.bundle_hash + ".apack");
+  if (!std::filesystem::exists(bundle_path)) {
+    auto write_bundle =
+        asset::write_client_pack_bundle_file(bundle_path, client_bundle);
+    if (!write_bundle) {
+      return fail(dedicated_error("pack-sync", write_bundle.error().message));
+    }
+  }
+  core::info(
+      "dedicated",
+      "exported client pack bundle: hash={} compressed={} uncompressed={} path={}",
+      client_bundle.bundle_hash,
+      client_bundle.compressed_size,
+      client_bundle.uncompressed_size,
+      bundle_path.string());
+  DedicatedPackLockInfo pack_lock;
+  pack_lock.registry_hash = registries.client_registry_snapshot_hash;
+  pack_lock.created_with_arvane_version =
+      std::string{persistence::CurrentGameVersion};
+  pack_lock.packs.reserve(pack_manager.stack().size());
+  for (const asset::PackSource& pack : pack_manager.stack()) {
+    pack_lock.packs.push_back({
+        pack.manifest.id,
+        pack.manifest.version,
+        pack.content_hash,
+        client_bundle.bundle_hash});
+  }
+
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::LoadingWorlds);
   auto worldgen_result = load_dedicated_worldgen(
       config,
@@ -109,6 +159,13 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(loaded_world_result.error());
   }
   DedicatedLoadedWorld loaded_world = std::move(loaded_world_result.value());
+  auto pack_lock_result = check_or_create_world_pack_lock(
+      config.paths.dedicated_server_save_path(),
+      config.server.world,
+      pack_lock);
+  if (!pack_lock_result) {
+    return fail(pack_lock_result.error());
+  }
 
   auto worldgen_palette = resolve_dedicated_worldgen_palette(
       loaded_world.active_generation_config,
@@ -127,6 +184,21 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(start_info_result.error());
   }
   server::ServerStartInfo server_start_info = std::move(start_info_result.value());
+  server_start_info.pack_sync.enabled = true;
+  server_start_info.pack_sync.registry_hash = registries.client_registry_snapshot_hash;
+  server_start_info.pack_sync.registry_snapshot_json =
+      registries.client_registry_snapshot_json;
+  server_start_info.pack_sync.max_bundle_size =
+      static_cast<u64>(client_bundle.apack_bytes.size());
+  server_start_info.pack_sync.required_bundles.push_back({
+      protocol::PackBundleDescriptor{
+          "arvane:server_pack_stack",
+          "Server Pack Stack",
+          pack_lock.created_with_arvane_version,
+          client_bundle.bundle_hash,
+          static_cast<u64>(client_bundle.apack_bytes.size()),
+          client_bundle.uncompressed_size},
+      bundle_path});
   server_start_info.register_commands =
       [&plugin_manager](command::CommandRegistry& registry) {
         base::register_server_commands(registry);

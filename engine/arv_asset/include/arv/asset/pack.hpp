@@ -88,7 +88,7 @@ struct PackError {
 struct PackSource {
   PackManifest manifest{};
   std::filesystem::path root{};
-  u64 content_hash{};
+  std::string content_hash{};
 };
 
 struct PackDataFile {
@@ -111,7 +111,7 @@ struct ResolvedPackPath {
 struct RequiredPack {
   std::string id{};
   std::string version{};
-  u64 content_hash{};
+  std::string content_hash{};
   PackSide required_side{PackSide::Both};
   std::vector<std::string> namespaces{};
   bool native_client_code_required{};

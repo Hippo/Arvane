@@ -35,6 +35,8 @@ set(ENTT_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(ENTT_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC ON)
+set(ZSTD_BUILD_SHARED OFF)
 
 FetchContent_Declare(
   Taskflow
@@ -114,6 +116,15 @@ FetchContent_Declare(
   UPDATE_DISCONNECTED TRUE
 )
 FetchContent_MakeAvailable(spdlog)
+
+FetchContent_Declare(
+  zstd
+  GIT_REPOSITORY https://github.com/facebook/zstd.git
+  GIT_TAG v1.5.7
+  SOURCE_SUBDIR build/cmake
+  UPDATE_DISCONNECTED TRUE
+)
+FetchContent_MakeAvailable(zstd)
 
 if(ARVANE_ENABLE_PROFILING AND ARVANE_ENABLE_TRACY)
   FetchContent_Declare(

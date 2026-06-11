@@ -231,13 +231,13 @@ ClientboundHello
 }
 ```
 
-### 3. Registry Sync
+### 3. Pack and Registry Sync
 
 Server sends registry metadata required for this connection.
 
 The client must not assume local runtime IDs match server runtime IDs.
 
-Registry sync may include:
+Pack and registry sync may include:
 
 * block registry hash
 * item registry hash
@@ -245,6 +245,18 @@ Registry sync may include:
 * biome registry hash
 * required plugin list
 * server-assigned runtime ID tables
+* required client pack bundle hashes
+* chunked client pack bundle transfer
+* server-owned client registry snapshot
+
+Current V1 dedicated-server sync sends `ClientboundPackManifest` after
+authentication and before world join. The client compares bundle hashes against
+`arvane_home/cache/server-packs/`, requests missing bundles with
+`ServerboundPackRequest`, installs verified `.apack` bundles into the
+content-addressed cache, verifies `ClientboundRegistrySnapshot`, then replies
+with `ServerboundPackReady`. The server does not send
+`ClientboundWorldJoinResult` until `ServerboundPackReady` matches the required
+bundle set and registry hash.
 
 ### 4. World Join
 
@@ -281,7 +293,7 @@ Message types are grouped by range.
 | ----------------: | --------------------------------------- |
 | `0x0000 - 0x00FF` | Core protocol/control                   |
 | `0x0100 - 0x01FF` | Login/session                           |
-| `0x0200 - 0x02FF` | Registry sync                           |
+| `0x0200 - 0x02FF` | Registry and pack sync                  |
 | `0x0300 - 0x03FF` | World join/leave                        |
 | `0x0400 - 0x04FF` | Chunk streaming                         |
 | `0x0500 - 0x05FF` | Block updates and world events          |
@@ -300,6 +312,29 @@ payloads and chunks use the chunk-streaming bulk lane.
 Directional packet names use `ClientboundX` for server-to-client packets and
 `ServerboundX` for client-to-server packets. Bidirectional utility packets such
 as `Ping`, `Pong`, and `DisconnectReason` keep neutral names.
+
+---
+
+## Pack Sync Messages
+
+Pack sync messages are reliable ordered. Manifest, status, requests, registry
+snapshot, and ready notifications use the `Session` lane. Bundle byte chunks use
+the `ChunkStreaming` lane.
+
+The V1 message set is:
+
+| Message | Direction | Purpose |
+| --- | --- | --- |
+| `ClientboundPackManifest` | Server to client | Lists required bundle descriptors, registry hash, maximum bundle size, and total download size. |
+| `ServerboundPackSyncStatus` | Client to server | Reports cache hits, needed bundles, loaded bundles, or failure status. |
+| `ServerboundPackRequest` | Client to server | Requests one missing bundle by hash. |
+| `ClientboundPackDataChunk` | Server to client | Sends a bounded byte slice of a requested `.apack` bundle. |
+| `ClientboundRegistrySnapshot` | Server to client | Sends the server-owned client-visible registry snapshot payload and hash. |
+| `ServerboundPackReady` | Client to server | Confirms verified bundles and registry snapshot before world join. |
+
+For V1 all advertised bundles are required. A client-side rejection, download
+failure, verification failure, registry hash mismatch, or missing loaded bundle
+disconnects the session before world join.
 
 ---
 
@@ -1342,14 +1377,10 @@ The server should compare client-provided registry hashes against authoritative 
 
 If the hashes match, gameplay may continue after normal session setup.
 
-If the hashes do not match, the server may either:
-
-* reject the connection
-* require registry synchronization
-* require a matching asset/data pack
-* allow connection only in a limited diagnostic mode
-
-Early milestones may reject mismatched registries rather than implementing registry sync.
+If the hashes do not match, the server may either reject the connection or
+require pack/registry synchronization before world join. The current dedicated
+server path uses the pack-sync phase for required client content and registry
+snapshot verification.
 
 The protocol must not assume that runtime IDs are stable across client and server until the handshake and registry compatibility step has completed.
 
@@ -1359,7 +1390,8 @@ Asset compatibility is separate from protocol compatibility.
 
 A client may speak the correct protocol but still lack required textures, models, fonts, UI definitions, or block/entity data.
 
-The server should be able to advertise required asset pack hashes or data pack hashes during the handshake.
+The server can advertise required asset/data content through
+`ClientboundPackManifest` during the follow-up sync phase.
 
 Early milestones may use a single coarse asset hash. Later versions may split this into more granular hashes, such as:
 
@@ -1398,8 +1430,8 @@ After a successful handshake, the connection may proceed through additional sync
 
 Possible follow-up phases include:
 
-1. Registry synchronization or validation
-2. Asset/data pack validation
+1. Asset/data pack synchronization and validation
+2. Registry snapshot synchronization or validation
 3. Player/session initialization
 4. Initial world assignment
 5. Initial chunk streaming

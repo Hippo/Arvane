@@ -1642,6 +1642,33 @@ void ServerRuntimeImpl::handle_message(
       handle_skin_upload_end(connection_id, end.value());
       return;
     }
+    case protocol::MessageType::ServerboundPackSyncStatus: {
+      auto status = protocol::deserialize_serverbound_pack_sync_status(decoded.value().payload);
+      if (!status) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_pack_sync_status(connection_id, std::move(status.value()));
+      return;
+    }
+    case protocol::MessageType::ServerboundPackRequest: {
+      auto request = protocol::deserialize_serverbound_pack_request(decoded.value().payload);
+      if (!request) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_pack_request(connection_id, request.value());
+      return;
+    }
+    case protocol::MessageType::ServerboundPackReady: {
+      auto ready = protocol::deserialize_serverbound_pack_ready(decoded.value().payload);
+      if (!ready) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_pack_ready(connection_id, std::move(ready.value()));
+      return;
+    }
     default:
       return;
   }
@@ -1686,6 +1713,9 @@ void ServerRuntimeImpl::handle_client_hello(
   }
 
   protocol::ClientboundHello server_hello = protocol::make_clientbound_hello(client_hello, policy);
+  if (server_hello.accepted && pack_sync_.enabled) {
+    server_hello.required_followup_sync = true;
+  }
   if (server_hello.accepted && sessions_.find_by_connection(connection_id) == nullptr) {
     ServerSession& session = sessions_.create(
         connection_id,
@@ -1712,19 +1742,7 @@ void ServerRuntimeImpl::handle_client_hello(
         session != nullptr) {
       if (mode_ == ServerMode::Integrated) {
         send_auth_result(*session, true);
-        if (const player::PlayerState* player_state =
-                default_world_.find_player(session->player_id);
-            player_state != nullptr) {
-          send_skin_rules(*session, *player_state);
-          send_world_join_result(*session, *player_state);
-          session->connection_state = net::ConnectionState::InGame;
-          sessions_.for_each_session([&](const ServerSession& subject) {
-            if (subject.authenticated && subject.world_id == session->world_id) {
-              send_player_profile_info_to(*session, subject);
-            }
-          });
-          broadcast_player_profile_info(*session);
-        }
+        begin_authenticated_session_join(*session);
       } else if (!session->authenticated) {
         send_auth_challenge(*session);
       }
@@ -1770,18 +1788,7 @@ void ServerRuntimeImpl::handle_auth_response(
     return;
   }
   send_auth_result(*session, true);
-  if (const player::PlayerState* player_state = default_world_.find_player(session->player_id);
-      player_state != nullptr) {
-    send_skin_rules(*session, *player_state);
-    send_world_join_result(*session, *player_state);
-    session->connection_state = net::ConnectionState::InGame;
-    sessions_.for_each_session([&](const ServerSession& subject) {
-      if (subject.authenticated && subject.world_id == session->world_id) {
-        send_player_profile_info_to(*session, subject);
-      }
-    });
-    broadcast_player_profile_info(*session);
-  }
+  begin_authenticated_session_join(*session);
 }
 
 void ServerRuntimeImpl::handle_keep_alive(

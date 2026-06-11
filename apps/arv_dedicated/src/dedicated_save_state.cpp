@@ -3,11 +3,14 @@
 #include "dedicated_worldgen_loader.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/io/data_codecs.hpp"
 #include "arv/text/language.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <span>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -17,6 +20,140 @@ namespace {
 [[nodiscard]] u64 generated_world_seed() noexcept {
   const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
   return static_cast<u64>(now == 0 ? 1 : now);
+}
+
+[[nodiscard]] const io::DataValue* member(
+    const io::DataValue& object,
+    std::string_view key) noexcept {
+  return object.get(key);
+}
+
+[[nodiscard]] std::string string_value_or(
+    const io::DataValue& object,
+    std::string_view key,
+    std::string fallback = {}) {
+  const io::DataValue* value = member(object, key);
+  return value != nullptr && value->kind() == io::DataKind::String
+             ? std::string{value->as_string_or({})}
+             : std::move(fallback);
+}
+
+[[nodiscard]] io::DataValue pack_lock_to_value(const DedicatedPackLockInfo& info) {
+  io::DataValue root = io::DataValue::object();
+  root.set("format_version", static_cast<u64>(1U));
+  io::DataValue packs = io::DataValue::array();
+  for (const DedicatedPackLockPack& pack : info.packs) {
+    io::DataValue entry = io::DataValue::object();
+    entry.set("pack_id", pack.id);
+    entry.set("version", pack.version);
+    entry.set("content_hash", pack.content_hash);
+    entry.set("client_bundle_hash", pack.client_bundle_hash);
+    packs.push(std::move(entry));
+  }
+  root.set("packs", std::move(packs));
+  root.set("registry_hash", info.registry_hash);
+  root.set("created_with_arvane_version", info.created_with_arvane_version);
+  return root;
+}
+
+[[nodiscard]] Expected<DedicatedPackLockInfo, DedicatedError> pack_lock_from_value(
+    const io::DataValue& root) {
+  if (root.kind() != io::DataKind::Object) {
+    return Expected<DedicatedPackLockInfo, DedicatedError>::failure(
+        dedicated_error("pack-lock", "pack-lock.json root must be an object"));
+  }
+  const io::DataValue* format = member(root, "format_version");
+  if (format == nullptr || !io::is_integer_value(*format) ||
+      format->as_u64_or(0U) != 1U) {
+    return Expected<DedicatedPackLockInfo, DedicatedError>::failure(
+        dedicated_error("pack-lock", "unsupported pack-lock format_version"));
+  }
+
+  DedicatedPackLockInfo info;
+  info.registry_hash = string_value_or(root, "registry_hash");
+  info.created_with_arvane_version =
+      string_value_or(root, "created_with_arvane_version");
+  const io::DataValue* packs = member(root, "packs");
+  const io::DataValue::Array* pack_array =
+      packs == nullptr ? nullptr : packs->array_if();
+  if (pack_array == nullptr) {
+    return Expected<DedicatedPackLockInfo, DedicatedError>::failure(
+        dedicated_error("pack-lock", "pack-lock.json packs must be an array"));
+  }
+  info.packs.reserve(pack_array->size());
+  for (const io::DataValue& node : *pack_array) {
+    if (node.kind() != io::DataKind::Object) {
+      return Expected<DedicatedPackLockInfo, DedicatedError>::failure(
+          dedicated_error("pack-lock", "pack-lock pack entries must be objects"));
+    }
+    DedicatedPackLockPack pack;
+    pack.id = string_value_or(node, "pack_id");
+    pack.version = string_value_or(node, "version");
+    pack.content_hash = string_value_or(node, "content_hash");
+    pack.client_bundle_hash = string_value_or(node, "client_bundle_hash");
+    info.packs.push_back(std::move(pack));
+  }
+  return Expected<DedicatedPackLockInfo, DedicatedError>::success(std::move(info));
+}
+
+[[nodiscard]] bool pack_lock_matches(
+    const DedicatedPackLockInfo& expected,
+    const DedicatedPackLockInfo& actual,
+    std::string& mismatch) {
+  if (actual.registry_hash != expected.registry_hash) {
+    mismatch = "registry hash mismatch";
+    return false;
+  }
+  if (actual.packs.size() != expected.packs.size()) {
+    mismatch = "pack count mismatch";
+    return false;
+  }
+  for (usize index = 0; index < expected.packs.size(); ++index) {
+    const DedicatedPackLockPack& lhs = expected.packs[index];
+    const DedicatedPackLockPack& rhs = actual.packs[index];
+    if (lhs.id != rhs.id || lhs.version != rhs.version ||
+        lhs.content_hash != rhs.content_hash ||
+        lhs.client_bundle_hash != rhs.client_bundle_hash) {
+      mismatch = "pack mismatch for index " + std::to_string(index);
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] Expected<std::string, DedicatedError> read_text_file(
+    const std::filesystem::path& path) {
+  std::ifstream input(path);
+  if (!input) {
+    return Expected<std::string, DedicatedError>::failure(
+        dedicated_error("pack-lock", "failed to open " + path.string()));
+  }
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  return Expected<std::string, DedicatedError>::success(buffer.str());
+}
+
+[[nodiscard]] Expected<void, DedicatedError> write_text_file(
+    const std::filesystem::path& path,
+    std::string_view text) {
+  std::error_code error;
+  std::filesystem::create_directories(path.parent_path(), error);
+  if (error) {
+    return Expected<void, DedicatedError>::failure(
+        dedicated_error("pack-lock", "failed to create pack-lock directory: " + error.message()));
+  }
+  std::ofstream output(path, std::ios::trunc);
+  if (!output) {
+    return Expected<void, DedicatedError>::failure(
+        dedicated_error("pack-lock", "failed to open pack-lock for write: " + path.string()));
+  }
+  output << text;
+  output.flush();
+  if (!output) {
+    return Expected<void, DedicatedError>::failure(
+        dedicated_error("pack-lock", "failed to write pack-lock: " + path.string()));
+  }
+  return Expected<void, DedicatedError>::success();
 }
 
 [[nodiscard]] server::ServerPlayerSaveState to_server_player_save(
@@ -380,6 +517,59 @@ Expected<void, DedicatedError> save_dedicated_world(
       saved_chunks.size(),
       player_saves.size(),
       saved_entities.size());
+  return Expected<void, DedicatedError>::success();
+}
+
+Expected<void, DedicatedError> check_or_create_world_pack_lock(
+    const std::filesystem::path& server_root,
+    std::string_view world_name,
+    const DedicatedPackLockInfo& lock_info) {
+  const std::filesystem::path lock_path =
+      server_root / "worlds" / std::string{world_name} / "pack-lock.json";
+  std::error_code error;
+  if (!std::filesystem::exists(lock_path, error)) {
+    io::DataValue root = pack_lock_to_value(lock_info);
+    auto encoded = io::encode_json_value(root);
+    if (!encoded) {
+      return Expected<void, DedicatedError>::failure(
+          dedicated_error("pack-lock", "failed to encode pack-lock.json: " + encoded.error().describe()));
+    }
+    auto write = write_text_file(lock_path, encoded.value());
+    if (!write) {
+      return write;
+    }
+    core::info(
+        "dedicated",
+        "created pack lock for world '{}' at {}",
+        world_name,
+        lock_path.string());
+    return Expected<void, DedicatedError>::success();
+  }
+  if (error) {
+    return Expected<void, DedicatedError>::failure(
+        dedicated_error("pack-lock", "failed to inspect pack-lock.json: " + error.message()));
+  }
+
+  auto text = read_text_file(lock_path);
+  if (!text) {
+    return Expected<void, DedicatedError>::failure(text.error());
+  }
+  auto decoded = io::decode_json_value(text.value());
+  if (!decoded) {
+    return Expected<void, DedicatedError>::failure(
+        dedicated_error("pack-lock", "failed to parse pack-lock.json: " + decoded.error().describe()));
+  }
+  auto loaded = pack_lock_from_value(decoded.value().root);
+  if (!loaded) {
+    return Expected<void, DedicatedError>::failure(loaded.error());
+  }
+  std::string mismatch;
+  if (!pack_lock_matches(lock_info, loaded.value(), mismatch)) {
+    return Expected<void, DedicatedError>::failure(
+        dedicated_error(
+            "pack-lock",
+            "world pack-lock.json does not match current server packs: " + mismatch));
+  }
   return Expected<void, DedicatedError>::success();
 }
 

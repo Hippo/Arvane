@@ -1,3 +1,5 @@
+#include "arv/asset/pack.hpp"
+#include "arv/asset/pack_bundle.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/local_identity.hpp"
 #include "arv/net/gns_transport.hpp"
@@ -14,6 +16,8 @@
 #include "arv/server/world_registry.hpp"
 #include "arv/world/world_generation.hpp"
 #include "support/server_harness.hpp"
+#include "support/temp_dir.hpp"
+#include "support/temp_files.hpp"
 #include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
@@ -21,9 +25,11 @@
 #include <array>
 #include <chrono>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -32,6 +38,8 @@
 namespace {
 
 using arv::testsupport::connected_player;
+using arv::testsupport::ScopedTempDir;
+using arv::testsupport::write_text;
 
 std::vector<arv::u8> raw_client_hello_packet(
     const arv::client::LocalPlayerIdentity& identity) {
@@ -286,6 +294,31 @@ surface:
   return settings;
 }
 
+void write_pack_sync_test_manifest(
+    const std::filesystem::path& packs_root,
+    std::string_view id,
+    std::string_view name_space) {
+  write_text(
+      packs_root / std::string{id} / "pack.yaml",
+      "schema_version: 1\n"
+      "id: \"" +
+          std::string{id} + "\"\n"
+                            "display_name: \"" +
+          std::string{id} + "\"\n"
+                            "version: \"1.0.0\"\n"
+                            "namespaces:\n"
+                            "  - \"" +
+          std::string{name_space} + "\"\n"
+                                    "side: \"both\"\n"
+                                    "dependencies: []\n"
+                                    "load_after: []\n"
+                                    "load_before: []\n"
+                                    "capabilities:\n"
+                                    "  assets: true\n"
+                                    "  data: true\n"
+                                    "  native_plugin: false\n");
+}
+
 std::optional<arv::u16> start_gns_server_runtime(
     arv::server::ServerRuntime& server,
     arv::server::ServerStartInfo start_info) {
@@ -333,6 +366,92 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
   EXPECT_NE(server.worlds().find(arv::server::DefaultWorldID), nullptr);
   EXPECT_TRUE(client.has_authoritative_inventory());
   EXPECT_GT(client.replicated_entity_count(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, PackSyncCompletesBeforeWorldJoin) {
+  ScopedTempDir temp("arvane_pack_sync_join_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_text(packs / "enabled.yaml", "enabled:\n  - \"sync_pack\"\n");
+  write_pack_sync_test_manifest(packs, "sync_pack", "sync_pack");
+  write_text(
+      packs / "sync_pack/data/sync_pack/blocks.json",
+      "{\"blocks\":[]}\n");
+  write_text(
+      packs / "sync_pack/assets/sync_pack/textures/block/test.png",
+      "png");
+  auto pack_manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(pack_manager) << pack_manager.error().describe();
+  auto bundle = arv::asset::build_client_pack_bundle(
+      pack_manager.value(),
+      "{\"format_version\":1,\"blocks\":[]}");
+  ASSERT_TRUE(bundle) << bundle.error().message;
+  const std::filesystem::path bundle_file =
+      temp.path / "server-cache" / (bundle.value().bundle_hash + ".apack");
+  auto write_bundle =
+      arv::asset::write_client_pack_bundle_file(bundle_file, bundle.value());
+  ASSERT_TRUE(write_bundle) << write_bundle.error().message;
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair(4096U);
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.pack_sync.enabled = true;
+  start_info.pack_sync.registry_hash = bundle.value().registry_hash;
+  start_info.pack_sync.registry_snapshot_json = "{\"format_version\":1,\"blocks\":[]}";
+  start_info.pack_sync.max_bundle_size =
+      static_cast<arv::u64>(bundle.value().apack_bytes.size());
+  start_info.pack_sync.required_bundles.push_back({
+      arv::protocol::PackBundleDescriptor{
+          "sync_pack",
+          "Sync Pack",
+          "1.0.0",
+          bundle.value().bundle_hash,
+          static_cast<arv::u64>(bundle.value().apack_bytes.size()),
+          bundle.value().uncompressed_size},
+      bundle_file});
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity("PackTester");
+  identity.arvane_home = temp.path / "client_home";
+  client.set_local_identity(std::move(identity));
+  ASSERT_TRUE(client.connect_integrated());
+
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::RegistrySync);
+  const arv::server::ServerSession* session = server.sessions().first();
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->connection_state, arv::net::ConnectionState::RegistrySync);
+
+  for (int attempt = 0; attempt < 8 &&
+                        client.connection_state() != arv::net::ConnectionState::InGame;
+       ++attempt) {
+    server.tick();
+    client.fixed_tick(server.tick_index());
+  }
+
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  ASSERT_TRUE(arv::asset::client_pack_cache_contains(
+      (temp.path / "client_home" / "cache" / "server-packs"),
+      bundle.value().bundle_hash));
+  ASSERT_EQ(client.multiplayer_pack_cache_paths().size(), 1U);
+  EXPECT_EQ(
+      client.multiplayer_pack_cache_paths().front(),
+      temp.path / "client_home" / "cache" / "server-packs" / bundle.value().bundle_hash);
+  EXPECT_EQ(
+      client.multiplayer_registry_snapshot_json(),
+      "{\"format_version\":1,\"blocks\":[]}");
+  EXPECT_EQ(session->connection_state, arv::net::ConnectionState::InGame);
 }
 
 TEST(IntegratedHandshakeTests, ClientChatIsFormattedAndBroadcastByServer) {

@@ -1,6 +1,7 @@
 #include "arv/asset/pack.hpp"
 
 #include "arv/asset/resource.hpp"
+#include "arv/crypto/hash.hpp"
 #include "arv/io/data_codecs.hpp"
 #include "arv/io/files.hpp"
 
@@ -18,8 +19,6 @@ namespace {
 constexpr std::string_view DefaultBasePackID = "arvane_base";
 constexpr std::string_view EnabledPacksFileName = "enabled.yaml";
 constexpr u32 SupportedNativePluginApiVersion = 1U;
-constexpr u64 FnvOffset = 14695981039346656037ULL;
-constexpr u64 FnvPrime = 1099511628211ULL;
 
 [[nodiscard]] PackError pack_error(
     std::string phase,
@@ -439,38 +438,18 @@ constexpr u64 FnvPrime = 1099511628211ULL;
   return actual == requirement;
 }
 
-[[nodiscard]] u64 fnv_append(u64 hash, std::string_view text) noexcept {
-  for (const char ch : text) {
-    hash ^= static_cast<u8>(ch);
-    hash *= FnvPrime;
-  }
-  return hash;
-}
-
-[[nodiscard]] u64 hash_file(u64 hash, const std::filesystem::path& path) {
-  std::ifstream input(path, std::ios::binary);
-  char buffer[4096];
-  while (input) {
-    input.read(buffer, sizeof(buffer));
-    const std::streamsize count = input.gcount();
-    for (std::streamsize i = 0; i < count; ++i) {
-      hash ^= static_cast<u8>(buffer[i]);
-      hash *= FnvPrime;
-    }
-  }
-  return hash;
-}
-
 [[nodiscard]] bool hash_included_relative_path(const std::filesystem::path& relative) {
   const std::string first = relative.begin() == relative.end() ? std::string{} : relative.begin()->string();
-  return first == "pack.yaml" || first == "assets" || first == "data" || first == "native";
+  return first == "pack.yaml" || first == "assets" || first == "data" ||
+         first == "native" || first == "server";
 }
 
-[[nodiscard]] u64 compute_pack_content_hash(const std::filesystem::path& root) {
+[[nodiscard]] Expected<std::string, PackError> compute_pack_content_hash(
+    const std::filesystem::path& root) {
   std::vector<std::filesystem::path> files;
   std::error_code error;
   if (!std::filesystem::exists(root, error)) {
-    return 0U;
+    return Expected<std::string, PackError>::success({});
   }
   for (const std::filesystem::directory_entry& entry :
        std::filesystem::recursive_directory_iterator(
@@ -494,14 +473,26 @@ constexpr u64 FnvPrime = 1099511628211ULL;
     return lhs.generic_string() < rhs.generic_string();
   });
 
-  u64 hash = FnvOffset;
+  std::string combined;
   for (const std::filesystem::path& relative : files) {
-    hash = fnv_append(hash, relative.generic_string());
-    hash = fnv_append(hash, "\n");
-    hash = hash_file(hash, root / relative);
-    hash = fnv_append(hash, "\n");
+    auto file_hash = crypto::hash_256_file(root / relative);
+    if (!file_hash) {
+      return Expected<std::string, PackError>::failure(pack_error(
+          "pack hashing",
+          file_hash.error().message,
+          {},
+          relative));
+    }
+    combined += relative.generic_string();
+    combined += '\n';
+    combined += crypto::hash_256_hex(file_hash.value());
+    combined += '\n';
   }
-  return hash;
+  const auto* first = reinterpret_cast<const std::byte*>(combined.data());
+  const crypto::Hash256 content_hash =
+      crypto::hash_256(std::span<const std::byte>{first, combined.size()});
+  return Expected<std::string, PackError>::success(
+      crypto::hash_256_hex(content_hash));
 }
 
 [[nodiscard]] PackError validate_manifest(const PackManifest& manifest, const std::filesystem::path& file) {
@@ -741,7 +732,11 @@ constexpr u64 FnvPrime = 1099511628211ULL;
     PackSource source;
     source.root = entry.path();
     source.manifest = std::move(manifest.value());
-    source.content_hash = compute_pack_content_hash(source.root);
+    auto content_hash = compute_pack_content_hash(source.root);
+    if (!content_hash) {
+      return Expected<std::vector<PackSource>, PackError>::failure(content_hash.error());
+    }
+    source.content_hash = std::move(content_hash.value());
     packs.push_back(std::move(source));
   }
   std::sort(packs.begin(), packs.end(), [](const PackSource& lhs, const PackSource& rhs) {
@@ -1835,7 +1830,7 @@ PackValidationResult PackManager::validate_required_packs(
           {},
           installed->manifest.version));
     }
-    if (expected.content_hash != 0U && installed->content_hash != expected.content_hash) {
+    if (!expected.content_hash.empty() && installed->content_hash != expected.content_hash) {
       return PackValidationResult::failure(pack_error(
           "pack lock validation",
           "required pack content hash mismatch",

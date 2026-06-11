@@ -8,6 +8,7 @@
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/message_registry.hpp"
 #include "arv/protocol/message_writer.hpp"
+#include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/particles.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
@@ -130,6 +131,18 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto skin_rules = registry.lookup(arv::protocol::MessageType::ClientboundSkinRules);
   const auto skin_data = registry.lookup(arv::protocol::MessageType::ClientboundSkinData);
   const auto skin_upload_data = registry.lookup(arv::protocol::MessageType::ServerboundSkinUploadData);
+  const auto pack_manifest =
+      registry.lookup(arv::protocol::MessageType::ClientboundPackManifest);
+  const auto pack_status =
+      registry.lookup(arv::protocol::MessageType::ServerboundPackSyncStatus);
+  const auto pack_request =
+      registry.lookup(arv::protocol::MessageType::ServerboundPackRequest);
+  const auto pack_chunk =
+      registry.lookup(arv::protocol::MessageType::ClientboundPackDataChunk);
+  const auto registry_snapshot =
+      registry.lookup(arv::protocol::MessageType::ClientboundRegistrySnapshot);
+  const auto pack_ready =
+      registry.lookup(arv::protocol::MessageType::ServerboundPackReady);
 
   ASSERT_TRUE(ping.has_value());
   ASSERT_TRUE(move.has_value());
@@ -174,6 +187,12 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(skin_rules.has_value());
   ASSERT_TRUE(skin_data.has_value());
   ASSERT_TRUE(skin_upload_data.has_value());
+  ASSERT_TRUE(pack_manifest.has_value());
+  ASSERT_TRUE(pack_status.has_value());
+  ASSERT_TRUE(pack_request.has_value());
+  ASSERT_TRUE(pack_chunk.has_value());
+  ASSERT_TRUE(registry_snapshot.has_value());
+  ASSERT_TRUE(pack_ready.has_value());
   EXPECT_EQ(ping->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
   EXPECT_EQ(move->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(correction->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
@@ -234,6 +253,16 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(chat_send->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(chat_receive->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(text_variables->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(pack_manifest->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(pack_manifest->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(pack_status->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(pack_request->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(pack_chunk->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(pack_chunk->lane, arv::protocol::NetworkLane::ChunkStreaming);
+  EXPECT_EQ(registry_snapshot->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(registry_snapshot->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(pack_ready->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(pack_ready->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(ping->lane, arv::protocol::NetworkLane::Debug);
   EXPECT_EQ(move->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(correction->lane, arv::protocol::NetworkLane::Movement);
@@ -270,7 +299,70 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 64U);
+  EXPECT_EQ(registry.size(), 70U);
+}
+
+TEST(ProtocolTests, PackSyncPacketsRoundTrip) {
+  arv::protocol::ClientboundPackManifest manifest;
+  manifest.registry_hash = std::string(64U, 'a');
+  manifest.max_bundle_size = 1024U;
+  manifest.total_download_size = 512U;
+  manifest.required_bundles.push_back(
+      {"arvane_base", "Arvane Base", "0.1.0", std::string(64U, 'b'), 128U, 256U});
+
+  const auto decoded_manifest = arv::protocol::deserialize_clientbound_pack_manifest(
+      arv::protocol::serialize_clientbound_pack_manifest(manifest));
+  ASSERT_TRUE(decoded_manifest) << decoded_manifest.error().message;
+  ASSERT_EQ(decoded_manifest.value().required_bundles.size(), 1U);
+  EXPECT_EQ(decoded_manifest.value().required_bundles.front().bundle_hash, std::string(64U, 'b'));
+  EXPECT_EQ(decoded_manifest.value().registry_hash, std::string(64U, 'a'));
+
+  arv::protocol::ServerboundPackSyncStatus status;
+  status.status = arv::protocol::PackSyncStatus::NeedsDownload;
+  status.needed_bundle_hashes.push_back(std::string(64U, 'c'));
+  const auto decoded_status = arv::protocol::deserialize_serverbound_pack_sync_status(
+      arv::protocol::serialize_serverbound_pack_sync_status(status));
+  ASSERT_TRUE(decoded_status) << decoded_status.error().message;
+  EXPECT_EQ(decoded_status.value().status, arv::protocol::PackSyncStatus::NeedsDownload);
+  ASSERT_EQ(decoded_status.value().needed_bundle_hashes.size(), 1U);
+
+  const arv::protocol::ServerboundPackRequest request{std::string(64U, 'd')};
+  const auto decoded_request = arv::protocol::deserialize_serverbound_pack_request(
+      arv::protocol::serialize_serverbound_pack_request(request));
+  ASSERT_TRUE(decoded_request) << decoded_request.error().message;
+  EXPECT_EQ(decoded_request.value().bundle_hash, request.bundle_hash);
+
+  const arv::protocol::ClientboundPackDataChunk chunk{
+      std::string(64U, 'e'),
+      1U,
+      3U,
+      64U,
+      {1U, 2U, 3U}};
+  const auto decoded_chunk = arv::protocol::deserialize_clientbound_pack_data_chunk(
+      arv::protocol::serialize_clientbound_pack_data_chunk(chunk));
+  ASSERT_TRUE(decoded_chunk) << decoded_chunk.error().message;
+  EXPECT_EQ(decoded_chunk.value().bundle_hash, chunk.bundle_hash);
+  EXPECT_EQ(decoded_chunk.value().chunk_index, 1U);
+  EXPECT_EQ(decoded_chunk.value().bytes, chunk.bytes);
+
+  const std::string large_snapshot_payload(70U * 1024U, 'r');
+  const arv::protocol::ClientboundRegistrySnapshot snapshot{
+      std::string(64U, 'f'),
+      large_snapshot_payload};
+  const auto decoded_snapshot = arv::protocol::deserialize_clientbound_registry_snapshot(
+      arv::protocol::serialize_clientbound_registry_snapshot(snapshot));
+  ASSERT_TRUE(decoded_snapshot) << decoded_snapshot.error().message;
+  EXPECT_EQ(decoded_snapshot.value().registry_hash, snapshot.registry_hash);
+  EXPECT_EQ(decoded_snapshot.value().registry_snapshot_payload, snapshot.registry_snapshot_payload);
+
+  const arv::protocol::ServerboundPackReady ready{
+      std::string(64U, '0'),
+      {std::string(64U, '1')}};
+  const auto decoded_ready = arv::protocol::deserialize_serverbound_pack_ready(
+      arv::protocol::serialize_serverbound_pack_ready(ready));
+  ASSERT_TRUE(decoded_ready) << decoded_ready.error().message;
+  EXPECT_EQ(decoded_ready.value().registry_hash, ready.registry_hash);
+  ASSERT_EQ(decoded_ready.value().loaded_bundle_hashes.size(), 1U);
 }
 
 TEST(ProtocolTests, VehiclePacketsRoundTripThroughSerialization) {

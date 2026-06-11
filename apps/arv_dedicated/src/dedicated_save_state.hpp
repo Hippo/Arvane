@@ -15,6 +15,7 @@
 
 #include <filesystem>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -24,6 +25,19 @@ class LanguageCatalog;
 } // namespace arv::text
 
 namespace arv::dedicated {
+
+struct DedicatedPackLockPack {
+  std::string id{};
+  std::string version{};
+  std::string content_hash{};
+  std::string client_bundle_hash{};
+};
+
+struct DedicatedPackLockInfo {
+  std::vector<DedicatedPackLockPack> packs{};
+  std::string registry_hash{};
+  std::string created_with_arvane_version{};
+};
 
 struct DedicatedLoadedWorld {
   std::filesystem::path server_save_root;
@@ -63,6 +77,11 @@ struct DedicatedLoadedWorld {
     u64 item_registry_hash,
     const arv::text::LanguageCatalog& language,
     std::span<const persistence::RequiredPackMetadata> required_packs);
+
+[[nodiscard]] Expected<void, DedicatedError> check_or_create_world_pack_lock(
+    const std::filesystem::path& server_root,
+    std::string_view world_name,
+    const DedicatedPackLockInfo& lock_info);
 
 [[nodiscard]] std::vector<persistence::SavedChunkSection> capture_saved_chunks(
     const world::WorldRuntime& world);

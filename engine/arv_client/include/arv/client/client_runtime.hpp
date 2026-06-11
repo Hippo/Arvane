@@ -17,6 +17,7 @@
 #include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_time.hpp"
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
@@ -207,6 +208,8 @@ public:
   [[nodiscard]] const protocol::PlayerProfileInfo* profile_info_for_player(
       PlayerID player_id) const noexcept;
   [[nodiscard]] std::vector<protocol::PlayerProfileInfo> player_profile_infos() const;
+  [[nodiscard]] std::span<const std::filesystem::path> multiplayer_pack_cache_paths() const noexcept;
+  [[nodiscard]] const std::string& multiplayer_registry_snapshot_json() const noexcept;
 
 private:
   struct Impl;

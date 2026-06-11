@@ -14,6 +14,7 @@
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/plugin/plugin_manager.hpp"
+#include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/vehicles.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/server/chunk_streamer.hpp"
@@ -129,6 +130,20 @@ struct FluidContainerInteractionConfig {
   std::string filled_source_item_name{};
 };
 
+struct ServerPackSyncBundle {
+  protocol::PackBundleDescriptor descriptor{};
+  std::filesystem::path bundle_path{};
+};
+
+struct ServerPackSyncConfig {
+  bool enabled{};
+  std::vector<ServerPackSyncBundle> required_bundles{};
+  std::string registry_hash{};
+  std::string registry_snapshot_json{};
+  u64 max_bundle_size{};
+  u32 chunk_size{protocol::PackSyncDefaultChunkSize};
+};
+
 struct ServerStartInfo {
   ServerMode mode{ServerMode::Integrated};
   TickRate base_tps{DefaultBaseTps};
@@ -172,6 +187,7 @@ struct ServerStartInfo {
   std::string command_permission_denied_message{"No permission"};
   std::span<const StarterInventoryItem> starter_inventory{};
   FluidContainerInteractionConfig fluid_containers{};
+  ServerPackSyncConfig pack_sync{};
   std::function<void(command::CommandRegistry&)> register_commands{};
   plugin::PluginManager* plugins{};
 };

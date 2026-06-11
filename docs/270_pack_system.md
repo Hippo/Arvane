@@ -152,21 +152,23 @@ Those systems may be added later without changing the core pack model.
 
 ## Runtime Behavior
 
-The runtime loads the enabled pack stack from `arvane_home/packs/enabled.yaml`.
-If the enabled list is absent, `arvane_base` is the default stack. Pack loading
-validates manifests, namespaces, dependency order, version constraints, native
-metadata paths, and path traversal before content is used.
+Local client/singleplayer runtime loads the enabled pack stack from
+`arvane_home/packs/enabled.yaml`. Dedicated server runtime loads authoritative
+packs from `arvane_server/packs/enabled.yaml`. If the enabled list is absent,
+`arvane_base` is the default stack. Pack loading validates manifests,
+namespaces, dependency order, version constraints, native metadata paths, and
+path traversal before content is used.
 
 Assets resolve by resource ID through the ordered pack stack. Later packs have
 higher priority for eligible asset overrides. Registry-affecting data is stricter:
 duplicate definitions are rejected unless the overriding data explicitly declares
 override intent.
 
-World metadata records required pack IDs. Loading a locked world fails clearly
-when a required pack is missing. Worlds do not lock against content hashes
-because saved content resolves through stable string IDs. Multiplayer protocol
-packets for full required-pack negotiation remain an integration point; that
-flow may use richer version/hash metadata without changing world saves.
+World metadata records required pack IDs. Dedicated worlds also have
+`worlds/<world>/pack-lock.json`, which stores the ordered server pack set,
+arv_crypto content hashes, the generated client bundle hash, and the
+client-visible registry snapshot hash. Loading a locked dedicated world fails
+clearly when the current pack stack or registry snapshot does not match.
 
 Native plugin declarations are manifest metadata only. Normal pack discovery and
 content loading never load native libraries.
@@ -187,7 +189,12 @@ gameplay defaults, and command implementations.
 
 ## Pack Directory Layout
 
-Packs live under `arvane_home/packs/`.
+Local packs live under `arvane_home/packs/`. Dedicated server packs live under
+`arvane_server/packs/` and are authoritative for multiplayer.
+On first dedicated startup, an absent or unconfigured server pack root is
+created and seeded with `arvane_base` from the local installed pack root; once
+`enabled.yaml` or any pack manifest exists under `arvane_server/packs/`, that
+server pack root is left untouched.
 
 ```text
 arvane_home/
@@ -252,18 +259,84 @@ arvane_home/
           libexample_plugin_pack.dylib
         macos-x86_64/
           libexample_plugin_pack.dylib
+
+arvane_server/
+  server.yaml
+  packs/
+    enabled.yaml
+    arvane_base/
+      pack.yaml
+      assets/
+      data/
+      server/
+  worlds/
+    default/
+      pack-lock.json
+  cache/
+    client-pack-exports/
+      <bundle-hash>.apack
 ```
 
-A pack has four major content roots:
+A pack has major content roots:
 
 ```text
 assets/  - presentation resources
 data/    - game definitions and configuration
 config/  - user-editable pack configuration
 native/  - optional executable plugin code
+server/  - server-only implementation/configuration, never client-exported
 ```
 
 These roots must not be treated as equivalent. Each root has different loading rules.
+
+## Multiplayer Client Bundles
+
+Dedicated startup builds a generated client-safe `.apack` from the active
+server pack stack and stores it in:
+
+```text
+arvane_server/cache/client-pack-exports/<bundle-hash>.apack
+```
+
+The exporter uses a fixed V1 allowlist:
+
+```text
+data/<namespace>/blocks.json
+data/<namespace>/items.json
+data/<namespace>/entities.json
+data/<namespace>/vehicles.json
+data/<namespace>/item_animations.json
+data/<namespace>/lang/
+data/<namespace>/particles/
+assets/<namespace>/textures/
+assets/<namespace>/models/
+assets/<namespace>/animations/
+assets/<namespace>/lang/
+assets/<namespace>/sounds/
+```
+
+It rejects unsafe relative paths, absolute paths, parent references, duplicate
+export paths, symlinks, and executable extensions. It never exports `server/`,
+`native/`, `config/`, worlds, players, permissions, or secrets.
+
+The `.apack` header contains `APACK`, a format version, manifest JSON, declared
+compressed/uncompressed sizes, the bundle hash, and a zstd-compressed payload.
+The payload is a deterministic file table. Bundle, registry snapshot, per-file,
+and pack content hashes are stable lowercase hex strings produced through
+`arv_crypto`.
+
+Clients do not install downloaded multiplayer packs into `arvane_home/packs`.
+Verified bundles are extracted into:
+
+```text
+arvane_home/cache/server-packs/<bundle-hash>/
+```
+
+Extraction validates the bundle hash, zstd payload, file hashes, size/count
+limits, and all relative paths before moving the cache entry into place.
+`ClientRuntime` exposes the verified cache paths and server registry snapshot to
+the desktop layer; rebuilding render/resource registries from those generated
+bundle roots is the follow-up mount step for remote-only visual content.
 
 ---
 

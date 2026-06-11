@@ -35,6 +35,7 @@ TEST(ConfigTests, ParsesYamlConfigWithDefaults) {
   const auto result = arv::io::parse_config_yaml(R"(
 paths:
   arvane_home: custom_home
+  server_root: custom_server_root
 language:
   locale: en_GB
   fallback_locale: en_US
@@ -238,6 +239,7 @@ chunk_pipeline:
 
   ASSERT_TRUE(result);
   EXPECT_EQ(result.value().paths.arvane_home_path(), std::filesystem::path("custom_home"));
+  EXPECT_EQ(result.value().paths.server_root_path(), std::filesystem::path("custom_server_root"));
   EXPECT_EQ(result.value().language.locale, "en_GB");
   EXPECT_EQ(result.value().language.fallback_locale, "en_US");
   EXPECT_EQ(result.value().server.world, "test-world");
@@ -701,12 +703,17 @@ TEST(ConfigTests, ResolvesDefaultRuntimePathsFromProjectRoot) {
   arv::io::resolve_runtime_paths(options, config);
 
   EXPECT_EQ(config.paths.arvane_home_path(), std::filesystem::path("/tmp/arvane_project/arvane_home"));
+  EXPECT_EQ(config.paths.server_root_path(), std::filesystem::path("/tmp/arvane_project/arvane_server"));
   EXPECT_EQ(config.paths.assets_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/assets"));
   EXPECT_EQ(config.paths.packs_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/packs"));
   EXPECT_EQ(config.paths.plugins_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/plugins"));
   EXPECT_EQ(config.paths.config_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/config"));
   EXPECT_EQ(config.paths.saves_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/saves"));
   EXPECT_EQ(config.paths.lang_path(), std::filesystem::path("/tmp/arvane_project/arvane_home/lang"));
+  EXPECT_EQ(config.paths.server_packs_path(), std::filesystem::path("/tmp/arvane_project/arvane_server/packs"));
+  EXPECT_EQ(config.paths.server_worlds_path(), std::filesystem::path("/tmp/arvane_project/arvane_server/worlds"));
+  EXPECT_EQ(config.paths.server_cache_path(), std::filesystem::path("/tmp/arvane_project/arvane_server/cache"));
+  EXPECT_EQ(config.paths.server_logs_path(), std::filesystem::path("/tmp/arvane_project/arvane_server/logs"));
   EXPECT_EQ(config.paths.config_file, std::filesystem::path("/tmp/arvane_project/arvane_home/config/client.yaml"));
   EXPECT_EQ(
       config.paths.shared_config_file,
@@ -716,7 +723,7 @@ TEST(ConfigTests, ResolvesDefaultRuntimePathsFromProjectRoot) {
       std::filesystem::path("/tmp/arvane_project/arvane_home/config/client.yaml"));
   EXPECT_EQ(
       config.paths.server_config_file,
-      std::filesystem::path("/tmp/arvane_project/arvane_home/config/server.yaml"));
+      std::filesystem::path("/tmp/arvane_project/arvane_server/server.yaml"));
   EXPECT_EQ(
       config.paths.input_bindings_file,
       std::filesystem::path("/tmp/arvane_project/arvane_home/config/input_bindings.yaml"));
@@ -725,7 +732,7 @@ TEST(ConfigTests, ResolvesDefaultRuntimePathsFromProjectRoot) {
       std::filesystem::path("/tmp/arvane_project/arvane_home/config/server_list.json"));
   EXPECT_EQ(
       config.paths.dedicated_server_save_path(),
-      std::filesystem::path("/tmp/arvane_project/arvane_home/server-save"));
+      std::filesystem::path("/tmp/arvane_project/arvane_server"));
 }
 
 TEST(ConfigTests, ResolvesServerRuntimeConfigPathFromProjectRoot) {
@@ -736,7 +743,7 @@ TEST(ConfigTests, ResolvesServerRuntimeConfigPathFromProjectRoot) {
 
   arv::io::resolve_runtime_paths(options, config);
 
-  EXPECT_EQ(config.paths.config_file, std::filesystem::path("/tmp/arvane_project/arvane_home/config/server.yaml"));
+  EXPECT_EQ(config.paths.config_file, std::filesystem::path("/tmp/arvane_project/arvane_server/server.yaml"));
 }
 
 TEST(ConfigTests, ConstructsServerSavePathsUnderArvaneHomeSaves) {
@@ -833,7 +840,7 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomePacks) {
       result.value().paths.config_path() / "client.yaml");
   EXPECT_EQ(
       result.value().paths.server_config_file,
-      result.value().paths.config_path() / "server.yaml");
+      result.value().paths.server_root_path() / "server.yaml");
   EXPECT_EQ(
       result.value().paths.input_bindings_file,
       result.value().paths.config_path() / "input_bindings.yaml");
@@ -878,7 +885,7 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   const std::filesystem::path client_config_file =
       temp_root / "arvane_home/config/client.yaml";
   const std::filesystem::path server_config_file =
-      temp_root / "arvane_home/config/server.yaml";
+      temp_root / "arvane_server/server.yaml";
   EXPECT_EQ(result.value().paths.config_file, client_config_file);
   EXPECT_TRUE(std::filesystem::exists(shared_config_file));
   EXPECT_TRUE(std::filesystem::exists(client_config_file));
@@ -932,7 +939,7 @@ native_plugins:
     - arv_mason
 )");
   write_file(temp.path / "arvane_home/config/client.yaml", "\n");
-  write_file(temp.path / "arvane_home/config/server.yaml", "world: dedicated\n");
+  write_file(temp.path / "arvane_server/server.yaml", "world: dedicated\n");
 
   arv::io::ConfigLoadOptions client_options;
   client_options.project_root = temp.path;

@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstddef>
+#include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
@@ -21,7 +22,15 @@ struct Hash256 {
   constexpr bool operator==(const Hash256&) const = default;
 };
 
+struct HashError {
+  std::string message{};
+};
+
 [[nodiscard]] Hash256 hash_256(std::span<const std::byte> data) noexcept;
+[[nodiscard]] Expected<Hash256, HashError> hash_256_file(
+    const std::filesystem::path& path);
+[[nodiscard]] std::string hash_256_hex(Hash256 hash);
+[[nodiscard]] Expected<Hash256, HexError> parse_hash_256_hex(std::string_view text);
 
 class PlayerProfileID {
 public:

@@ -1,5 +1,6 @@
 #include "client_network_messages.hpp"
 
+#include "arv/asset/pack_bundle.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/protocol/auth.hpp"
@@ -24,8 +25,11 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
 #include <span>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 namespace arv::client::detail {
@@ -62,6 +66,7 @@ void apply_world_leave(
   runtime.dropped_items.clear();
   runtime.chunks.clear();
   runtime.inventory.reset();
+  runtime.pack_sync.clear();
   runtime.world_time_update.reset();
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
@@ -84,6 +89,294 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
 void disconnect_and_clear(ClientRuntimeContext& runtime, std::string_view reason) {
   runtime.connection.disconnect_local(reason);
   clear_multiplayer_runtime(runtime);
+}
+
+[[nodiscard]] std::filesystem::path client_server_pack_cache_root(
+    const LocalPlayerIdentity& identity) {
+  std::filesystem::path root = identity.arvane_home;
+  if (root.empty()) {
+    root = std::filesystem::temp_directory_path() / "arvane_ephemeral_client";
+  }
+  return root / "cache" / "server-packs";
+}
+
+[[nodiscard]] std::span<const std::byte> text_bytes(std::string_view text) noexcept {
+  return {
+      reinterpret_cast<const std::byte*>(text.data()),
+      text.size()};
+}
+
+[[nodiscard]] std::string hash_text_hex(std::string_view text) {
+  return crypto::hash_256_hex(crypto::hash_256(text_bytes(text)));
+}
+
+[[nodiscard]] bool contains_string(
+    std::span<const std::string> values,
+    std::string_view value) noexcept {
+  return std::find(values.begin(), values.end(), value) != values.end();
+}
+
+[[nodiscard]] bool all_required_bundles_loaded(const ClientPackSyncState& state) {
+  for (const std::string& hash : state.required_bundle_hashes) {
+    if (!contains_string(state.loaded_bundle_hashes, hash)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void remember_loaded_bundle(ClientPackSyncState& state, std::string hash) {
+  if (!contains_string(state.loaded_bundle_hashes, hash)) {
+    state.loaded_bundle_hashes.push_back(std::move(hash));
+  }
+}
+
+void remember_loaded_bundle_path(
+    ClientPackSyncState& state,
+    std::filesystem::path path) {
+  if (std::find(state.loaded_bundle_paths.begin(), state.loaded_bundle_paths.end(), path) ==
+      state.loaded_bundle_paths.end()) {
+    state.loaded_bundle_paths.push_back(std::move(path));
+  }
+}
+
+void send_pack_sync_failure(
+    ClientRuntimeContext& runtime,
+    protocol::PackSyncStatus status,
+    std::string reason,
+    std::string failed_hash = {}) {
+  protocol::ServerboundPackSyncStatus packet;
+  packet.status = status;
+  if (!failed_hash.empty()) {
+    packet.failed_bundle_hashes.push_back(std::move(failed_hash));
+  }
+  packet.failure_reason = reason;
+  (void)runtime.sender.send_pack_sync_status(packet);
+  disconnect_and_clear(runtime, reason);
+}
+
+[[nodiscard]] bool write_temp_apack_file(
+    const std::filesystem::path& path,
+    std::span<const u8> bytes,
+    std::string& error_message) {
+  std::error_code error;
+  std::filesystem::create_directories(path.parent_path(), error);
+  if (error) {
+    error_message = "Could not create the server pack cache.";
+    return false;
+  }
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output) {
+    error_message = "Could not write the downloaded server pack.";
+    return false;
+  }
+  if (!bytes.empty()) {
+    output.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+  }
+  output.flush();
+  if (!output) {
+    error_message = "Could not finish writing the downloaded server pack.";
+    return false;
+  }
+  return true;
+}
+
+void send_loaded_pack_status(ClientRuntimeContext& runtime) {
+  protocol::ServerboundPackSyncStatus status;
+  status.status = protocol::PackSyncStatus::Loaded;
+  status.already_cached_bundle_hashes = runtime.pack_sync.loaded_bundle_hashes;
+  (void)runtime.sender.send_pack_sync_status(status);
+}
+
+void handle_pack_manifest(
+    ClientRuntimeContext& runtime,
+    protocol::ClientboundPackManifest manifest) {
+  if (manifest.pack_sync_protocol_version != protocol::PackSyncProtocolVersion) {
+    send_pack_sync_failure(
+        runtime,
+        protocol::PackSyncStatus::VerificationFailed,
+        "Server pack sync protocol is not supported.");
+    return;
+  }
+
+  runtime.pack_sync.clear();
+  runtime.pack_sync.expected_registry_hash = std::move(manifest.registry_hash);
+  std::vector<std::string> missing_hashes;
+  protocol::ServerboundPackSyncStatus status;
+
+  const std::filesystem::path cache_root =
+      client_server_pack_cache_root(runtime.identity);
+  for (protocol::PackBundleDescriptor& descriptor : manifest.required_bundles) {
+    if (!asset::is_valid_bundle_hash(descriptor.bundle_hash) ||
+        descriptor.compressed_size == 0U ||
+        (manifest.max_bundle_size != 0U &&
+         descriptor.compressed_size > manifest.max_bundle_size)) {
+      send_pack_sync_failure(
+          runtime,
+          protocol::PackSyncStatus::VerificationFailed,
+          "Server sent an invalid pack manifest.",
+          descriptor.bundle_hash);
+      return;
+    }
+    if (!runtime.pack_sync.required_bundle_hashes.insert(descriptor.bundle_hash).second) {
+      send_pack_sync_failure(
+          runtime,
+          protocol::PackSyncStatus::VerificationFailed,
+          "Server sent duplicate pack bundle descriptors.",
+          descriptor.bundle_hash);
+      return;
+    }
+
+    if (asset::client_pack_cache_contains(cache_root, descriptor.bundle_hash)) {
+      remember_loaded_bundle(runtime.pack_sync, descriptor.bundle_hash);
+      remember_loaded_bundle_path(
+          runtime.pack_sync,
+          asset::client_pack_cache_path(cache_root, descriptor.bundle_hash));
+      status.already_cached_bundle_hashes.push_back(descriptor.bundle_hash);
+      continue;
+    }
+
+    missing_hashes.push_back(descriptor.bundle_hash);
+    status.needed_bundle_hashes.push_back(descriptor.bundle_hash);
+    ClientPackSyncDownload download;
+    download.descriptor = std::move(descriptor);
+    download.bytes.resize(static_cast<usize>(download.descriptor.compressed_size));
+    runtime.pack_sync.downloads.emplace(
+        download.descriptor.bundle_hash,
+        std::move(download));
+  }
+
+  status.status =
+      missing_hashes.empty()
+          ? protocol::PackSyncStatus::AlreadyCached
+          : protocol::PackSyncStatus::NeedsDownload;
+  if (!runtime.sender.send_pack_sync_status(status)) {
+    disconnect_and_clear(
+        runtime,
+        arv::text::text_or_fallback(
+            runtime.language,
+            "ui.connection.lost",
+            "Lost connection to the server."));
+    return;
+  }
+
+  runtime.connection.set_state(net::ConnectionState::RegistrySync);
+  for (const std::string& hash : missing_hashes) {
+    if (!runtime.sender.send_pack_request({hash})) {
+      disconnect_and_clear(
+          runtime,
+          arv::text::text_or_fallback(
+              runtime.language,
+              "ui.connection.lost",
+              "Lost connection to the server."));
+      return;
+    }
+  }
+}
+
+void complete_downloaded_bundle(
+    ClientRuntimeContext& runtime,
+    ClientPackSyncDownload& download) {
+  const std::filesystem::path cache_root =
+      client_server_pack_cache_root(runtime.identity);
+  const std::filesystem::path temp_path =
+      cache_root / "tmp" / (download.descriptor.bundle_hash + ".apack");
+  std::string write_error;
+  if (!write_temp_apack_file(temp_path, download.bytes, write_error)) {
+    send_pack_sync_failure(
+        runtime,
+        protocol::PackSyncStatus::DownloadFailed,
+        write_error,
+        download.descriptor.bundle_hash);
+    return;
+  }
+
+  auto install = asset::install_client_pack_bundle_from_file(
+      temp_path,
+      cache_root,
+      download.descriptor.bundle_hash);
+  std::error_code cleanup_error;
+  std::filesystem::remove(temp_path, cleanup_error);
+  if (!install) {
+    send_pack_sync_failure(
+        runtime,
+        protocol::PackSyncStatus::VerificationFailed,
+        install.error().message,
+        download.descriptor.bundle_hash);
+    return;
+  }
+
+  remember_loaded_bundle(runtime.pack_sync, install.value().bundle_hash);
+  remember_loaded_bundle_path(runtime.pack_sync, install.value().cache_path);
+  runtime.pack_sync.downloads.erase(download.descriptor.bundle_hash);
+  send_loaded_pack_status(runtime);
+}
+
+void handle_pack_data_chunk(
+    ClientRuntimeContext& runtime,
+    protocol::ClientboundPackDataChunk chunk) {
+  auto found = runtime.pack_sync.downloads.find(chunk.bundle_hash);
+  if (found == runtime.pack_sync.downloads.end()) {
+    return;
+  }
+  ClientPackSyncDownload& download = found->second;
+  if (chunk.chunk_count == 0U ||
+      chunk.chunk_index >= chunk.chunk_count ||
+      (download.chunk_count != 0U && download.chunk_count != chunk.chunk_count) ||
+      chunk.byte_offset > download.bytes.size() ||
+      chunk.bytes.size() > download.bytes.size() - static_cast<usize>(chunk.byte_offset)) {
+    send_pack_sync_failure(
+        runtime,
+        protocol::PackSyncStatus::VerificationFailed,
+        "Server sent an invalid pack bundle chunk.",
+        chunk.bundle_hash);
+    return;
+  }
+  if (download.received_chunks.find(chunk.chunk_index) !=
+      download.received_chunks.end()) {
+    return;
+  }
+  download.chunk_count = chunk.chunk_count;
+  std::copy(
+      chunk.bytes.begin(),
+      chunk.bytes.end(),
+      download.bytes.begin() + static_cast<std::ptrdiff_t>(chunk.byte_offset));
+  download.received_chunks.insert(chunk.chunk_index);
+  download.received_bytes += chunk.bytes.size();
+  if (download.received_chunks.size() == download.chunk_count &&
+      download.received_bytes == download.bytes.size()) {
+    complete_downloaded_bundle(runtime, download);
+  }
+}
+
+void handle_registry_snapshot(
+    ClientRuntimeContext& runtime,
+    protocol::ClientboundRegistrySnapshot snapshot) {
+  if (snapshot.registry_hash != runtime.pack_sync.expected_registry_hash ||
+      hash_text_hex(snapshot.registry_snapshot_payload) != snapshot.registry_hash ||
+      !all_required_bundles_loaded(runtime.pack_sync)) {
+    send_pack_sync_failure(
+        runtime,
+        protocol::PackSyncStatus::VerificationFailed,
+        "Server registry snapshot did not match the pack manifest.");
+    return;
+  }
+
+  runtime.pack_sync.registry_snapshot_payload =
+      std::move(snapshot.registry_snapshot_payload);
+  protocol::ServerboundPackReady ready;
+  ready.registry_hash = snapshot.registry_hash;
+  ready.loaded_bundle_hashes = runtime.pack_sync.loaded_bundle_hashes;
+  if (!runtime.sender.send_pack_ready(ready)) {
+    disconnect_and_clear(
+        runtime,
+        arv::text::text_or_fallback(
+            runtime.language,
+            "ui.connection.lost",
+            "Lost connection to the server."));
+    return;
+  }
+  runtime.connection.set_state(net::ConnectionState::WorldJoin);
 }
 
 [[nodiscard]] const entity::VehicleSeatDefinition* find_vehicle_seat(
@@ -297,6 +590,33 @@ void ClientNetworkRouter::handle_message(
           }
         }
       }
+      return;
+    }
+    case protocol::MessageType::ClientboundPackManifest: {
+      auto manifest = protocol::deserialize_clientbound_pack_manifest(decoded.value().payload);
+      if (!manifest) {
+        disconnect_and_clear(runtime, arv::text::text_or_fallback(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_pack_manifest(runtime, std::move(manifest.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundPackDataChunk: {
+      auto chunk = protocol::deserialize_clientbound_pack_data_chunk(decoded.value().payload);
+      if (!chunk) {
+        disconnect_and_clear(runtime, arv::text::text_or_fallback(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_pack_data_chunk(runtime, std::move(chunk.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundRegistrySnapshot: {
+      auto snapshot = protocol::deserialize_clientbound_registry_snapshot(decoded.value().payload);
+      if (!snapshot) {
+        disconnect_and_clear(runtime, arv::text::text_or_fallback(runtime.language, "ui.connection.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_registry_snapshot(runtime, std::move(snapshot.value()));
       return;
     }
     case protocol::MessageType::ClientboundSkinRules: {

@@ -6,6 +6,7 @@
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
+#include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
@@ -303,6 +304,51 @@ net::NetworkResult ClientProtocolSender::send_skin_upload_end(
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::ChunkStreaming,
       protocol::serialize_skin_upload_end(end));
+}
+
+net::NetworkResult ClientProtocolSender::send_pack_sync_status(
+    const protocol::ServerboundPackSyncStatus& status) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundPackSyncStatus,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_serverbound_pack_sync_status(status));
+}
+
+net::NetworkResult ClientProtocolSender::send_pack_request(
+    const protocol::ServerboundPackRequest& request) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundPackRequest,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_serverbound_pack_request(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_pack_ready(
+    const protocol::ServerboundPackReady& ready) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundPackReady,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Session,
+      protocol::serialize_serverbound_pack_ready(ready));
 }
 
 } // namespace arv::client::detail

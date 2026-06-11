@@ -107,6 +107,7 @@ ConfigResult save_default_server_config_file(
     const std::filesystem::path& path,
     const EngineConfig& config) {
   DataValue root = DataValue::object();
+  put(root, "paths.server_root", config_path_string(config.paths.project_root, config.paths.server_root_path()));
   put(root, "world", config.server.world);
   put_network_server(root, config);
   put_command_config(root, config);

@@ -1,11 +1,16 @@
 #include "arv/asset/pack.hpp"
+#include "arv/asset/pack_bundle.hpp"
 #include "arv/asset/resource.hpp"
 #include "support/temp_dir.hpp"
 #include "support/temp_files.hpp"
 
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -67,6 +72,25 @@ std::string native_manifest_extra(
                                    "    " +
          arv::asset::native_plugin_platform_key() + ": \"" +
          std::string{library_path} + "\"\n";
+}
+
+void write_binary(
+    const std::filesystem::path& path,
+    std::span<const arv::u8> bytes) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  output.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+bool contains_bundle_file(
+    std::span<const arv::asset::ClientPackBundleFileInfo> files,
+    std::string_view path) {
+  return std::find_if(
+             files.begin(),
+             files.end(),
+             [&](const arv::asset::ClientPackBundleFileInfo& file) {
+               return file.path == path;
+             }) != files.end();
 }
 
 } // namespace
@@ -390,6 +414,90 @@ TEST(PackHashTests, IsDeterministicAndChangesWithContent) {
   EXPECT_NE(first.value().stack()[0].content_hash, changed.value().stack()[0].content_hash);
 }
 
+TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
+  ScopedTempDir temp("arvane_pack_bundle_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_enabled(packs, "enabled:\n  - \"arvane_base\"\n");
+  write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
+  write_text(
+      packs / "arvane_base/data/arvane/blocks.json",
+      "{\"blocks\":[{\"name\":\"arvane:stone\"}]}\n");
+  write_text(
+      packs / "arvane_base/assets/arvane/textures/block/stone.png",
+      "fake-png");
+  write_text(
+      packs / "arvane_base/server/spawn_rules.yaml",
+      "secret: server-only\n");
+  write_text(
+      packs / "arvane_base/assets/arvane/textures/block/tool.exe",
+      "not exported\n");
+
+  auto manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(manager) << manager.error().describe();
+  auto first = arv::asset::build_client_pack_bundle(
+      manager.value(),
+      "{\"format_version\":1,\"blocks\":[]}");
+  auto second = arv::asset::build_client_pack_bundle(
+      manager.value(),
+      "{\"format_version\":1,\"blocks\":[]}");
+  ASSERT_TRUE(first) << first.error().message;
+  ASSERT_TRUE(second) << second.error().message;
+  EXPECT_EQ(first.value().bundle_hash, second.value().bundle_hash);
+  EXPECT_TRUE(arv::asset::is_valid_bundle_hash(first.value().bundle_hash));
+  EXPECT_TRUE(contains_bundle_file(first.value().files, "manifest.json"));
+  EXPECT_TRUE(contains_bundle_file(first.value().files, "registry-client.json"));
+  EXPECT_TRUE(contains_bundle_file(first.value().files, "data/arvane/blocks.json"));
+  EXPECT_TRUE(contains_bundle_file(
+      first.value().files,
+      "assets/arvane/textures/block/stone.png"));
+  EXPECT_FALSE(contains_bundle_file(first.value().files, "server/spawn_rules.yaml"));
+  EXPECT_FALSE(contains_bundle_file(
+      first.value().files,
+      "assets/arvane/textures/block/tool.exe"));
+
+  EXPECT_TRUE(arv::asset::is_client_bundle_relative_path_allowed(
+      "assets/arvane/textures/block/stone.png"));
+  EXPECT_FALSE(arv::asset::is_client_bundle_relative_path_allowed("../escape.txt"));
+  EXPECT_FALSE(arv::asset::is_client_bundle_relative_path_allowed(
+      "assets/arvane/textures/block/tool.exe"));
+
+  const std::filesystem::path bundle_file = temp.path / "bundle.apack";
+  auto write_bundle = arv::asset::write_client_pack_bundle_file(
+      bundle_file,
+      first.value());
+  ASSERT_TRUE(write_bundle) << write_bundle.error().message;
+
+  const std::filesystem::path cache_root = temp.path / "cache";
+  auto install = arv::asset::install_client_pack_bundle_from_file(
+      bundle_file,
+      cache_root,
+      first.value().bundle_hash);
+  ASSERT_TRUE(install) << install.error().message;
+  EXPECT_FALSE(install.value().cache_hit);
+  EXPECT_TRUE(arv::asset::client_pack_cache_contains(cache_root, first.value().bundle_hash));
+  EXPECT_TRUE(std::filesystem::is_regular_file(
+      install.value().cache_path / "registry-client.json"));
+  EXPECT_FALSE(std::filesystem::exists(
+      install.value().cache_path / "server" / "spawn_rules.yaml"));
+
+  auto cached = arv::asset::install_client_pack_bundle_from_file(
+      bundle_file,
+      cache_root,
+      first.value().bundle_hash);
+  ASSERT_TRUE(cached) << cached.error().message;
+  EXPECT_TRUE(cached.value().cache_hit);
+
+  std::vector<arv::u8> corrupted = first.value().apack_bytes;
+  corrupted.back() ^= 0xFFU;
+  const std::filesystem::path corrupt_file = temp.path / "corrupt.apack";
+  write_binary(corrupt_file, corrupted);
+  auto corrupt = arv::asset::install_client_pack_bundle_from_file(
+      corrupt_file,
+      temp.path / "corrupt-cache",
+      first.value().bundle_hash);
+  EXPECT_FALSE(corrupt);
+}
+
 TEST(PackLockTests, ValidatesRequiredPacks) {
   ScopedTempDir temp("arvane_pack_lock_");
   const std::filesystem::path packs = temp.path / "packs";
@@ -403,6 +511,7 @@ TEST(PackLockTests, ValidatesRequiredPacks) {
   ASSERT_TRUE(manager) << manager.error().describe();
   std::vector<arv::asset::RequiredPack> required = manager.value().required_packs();
   EXPECT_TRUE(manager.value().validate_required_packs(required));
-  required.front().content_hash += 1U;
+  required.front().content_hash.back() =
+      required.front().content_hash.back() == '0' ? '1' : '0';
   EXPECT_FALSE(manager.value().validate_required_packs(required));
 }

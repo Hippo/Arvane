@@ -13,6 +13,7 @@
 namespace arv::io {
 
 inline constexpr std::string_view DefaultArvaneHomeDirectoryName = "arvane_home";
+inline constexpr std::string_view DefaultServerRootDirectoryName = "arvane_server";
 inline constexpr std::string_view DefaultSharedConfigFileName = "arvane.yaml";
 inline constexpr std::string_view DefaultClientConfigFileName = "client.yaml";
 inline constexpr std::string_view DefaultServerConfigFileName = "server.yaml";
@@ -440,6 +441,7 @@ struct ChunkPipelineConfig {
 struct PathConfig {
   std::filesystem::path project_root{"."};
   std::filesystem::path arvane_home_root{};
+  std::filesystem::path server_root{};
   std::filesystem::path asset_root{};
   std::filesystem::path pack_root{};
   std::filesystem::path plugins_root{};
@@ -448,6 +450,10 @@ struct PathConfig {
   std::filesystem::path logs_root{};
   std::filesystem::path cache_root{};
   std::filesystem::path lang_root{};
+  std::filesystem::path server_pack_root{};
+  std::filesystem::path server_worlds_root{};
+  std::filesystem::path server_cache_root{};
+  std::filesystem::path server_logs_root{};
   std::filesystem::path config_file{};
   std::filesystem::path shared_config_file{};
   std::filesystem::path client_config_file{};
@@ -457,6 +463,10 @@ struct PathConfig {
 
   [[nodiscard]] const std::filesystem::path& arvane_home_path() const noexcept {
     return arvane_home_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& server_root_path() const noexcept {
+    return server_root;
   }
 
   [[nodiscard]] const std::filesystem::path& assets_path() const noexcept {
@@ -491,12 +501,28 @@ struct PathConfig {
     return lang_root;
   }
 
+  [[nodiscard]] const std::filesystem::path& server_packs_path() const noexcept {
+    return server_pack_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& server_worlds_path() const noexcept {
+    return server_worlds_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& server_cache_path() const noexcept {
+    return server_cache_root;
+  }
+
+  [[nodiscard]] const std::filesystem::path& server_logs_path() const noexcept {
+    return server_logs_root;
+  }
+
   [[nodiscard]] std::filesystem::path server_save_path(std::string_view save_name) const {
     return saves_root / std::filesystem::path{save_name};
   }
 
   [[nodiscard]] std::filesystem::path dedicated_server_save_path() const {
-    return arvane_home_root / std::filesystem::path{DefaultDedicatedServerSaveDirectoryName};
+    return server_root;
   }
 };
 
@@ -543,6 +569,7 @@ enum class ConfigProfile {
 struct ConfigLoadOptions {
   std::filesystem::path explicit_config_path{};
   std::filesystem::path explicit_arvane_home_path{};
+  std::filesystem::path explicit_server_root_path{};
   std::filesystem::path project_root{};
   ConfigProfile profile{ConfigProfile::Client};
   bool missing_config_is_error{};

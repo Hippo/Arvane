@@ -442,7 +442,7 @@ Rules:
 Dedicated server skin storage:
 
 ```text
-server-save/player_assets/skins/<skin_hash>.png
+<server-root>/player_assets/skins/<skin_hash>.png
 ```
 
 Client downloaded skin cache:

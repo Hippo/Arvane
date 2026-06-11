@@ -50,43 +50,14 @@ This applies to:
 - singleplayer (integrated server)
 
 In development, singleplayer server saves live under `arvane_home/saves/`.
-The dedicated server uses one fixed server save root at
-`arvane_home/server-save/`; its active world is selected by the top-level
-`world` property in `arvane_home/config/server.yaml`.
+The dedicated server uses `arvane_server/` as its fixed server root; its active
+world is selected by the top-level `world` property in
+`arvane_server/server.yaml`.
 
 Example:
 
 ```text
 arvane_home/
-  server-save/
-    save.json
-    players/
-      <player_uuid>.dat
-    plugin_data/
-      <pack_id>/
-        server/
-          <safe_key_path>.bin
-    player_assets/
-      skins/
-        <skin_hash>.png
-    worlds/
-      default/
-        world.json
-        blueprints/
-          <name>.abp
-        regions/
-          r.<x>.<z>.arvr
-    plugin_config/
-      <world_id>/
-        <pack_id>/
-          <safe_key_path>.yaml
-    plugin_data/
-      <pack_id>/
-        world/
-        players/
-        entities/
-        blocks/
-        chunks/
   saves/
     server-save-1/
       save.json
@@ -105,13 +76,43 @@ arvane_home/
         permissions.json
         whitelist.json
         ops.json
+arvane_server/
+  save.json
+  players/
+    <player_uuid>.dat
+  plugin_data/
+    <pack_id>/
+      server/
+        <safe_key_path>.bin
+  player_assets/
+    skins/
+      <skin_hash>.png
+  worlds/
+    default/
+      pack-lock.json
+      world.json
+      blueprints/
+        <name>.abp
+      regions/
+        r.<x>.<z>.arvr
+  plugin_config/
+    <world_id>/
+      <pack_id>/
+        <safe_key_path>.yaml
+  plugin_data/
+    <pack_id>/
+      world/
+      players/
+      entities/
+      blocks/
+      chunks/
 ```
 
 Notes:
 
 * `arvane_home/saves/<server-save-name>/` is the top-level save boundary
   for singleplayer server saves
-* `arvane_home/server-save/` is the top-level save boundary for `arv_dedicated`
+* `arvane_server/` is the top-level save boundary for `arv_dedicated`
 * Each world is fully independent
 * A “dimension” is simply another world
 * Worlds do not nest inside each other
@@ -179,11 +180,12 @@ Each world stores:
 
 ### Player Runtime State
 
-Player save JSON lives under `server-save/players/` and stores the last known
-position, velocity, rotation, game mode, permissions, inventory, skin selection,
-and optional respawn location. The `respawn` field uses the same compact
-location shape as world spawn (`x`, `y`, `z`, `yaw_radians`, `pitch_radians`).
-When `respawn` is absent, player death respawns at the current world spawn.
+Player save JSON lives under the save root's `players/` directory and stores
+the last known position, velocity, rotation, game mode, permissions, inventory,
+skin selection, and optional respawn location. The `respawn` field uses the same
+compact location shape as world spawn (`x`, `y`, `z`, `yaw_radians`,
+`pitch_radians`). When `respawn` is absent, player death respawns at the current
+world spawn.
 
 ### Player Skin State
 

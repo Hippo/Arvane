@@ -6,6 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -49,11 +51,39 @@ TEST(CryptoTests, Ed25519VerifyRejectsWrongKeyAndModifiedPayload) {
 
 TEST(CryptoTests, Hash256IsStable) {
   const std::vector<std::byte> message = bytes_for("stable hash input");
+  const std::vector<std::byte> different = bytes_for("different hash input");
 
   const arv::crypto::Hash256 lhs = arv::crypto::hash_256(message);
   const arv::crypto::Hash256 rhs = arv::crypto::hash_256(message);
+  const arv::crypto::Hash256 other = arv::crypto::hash_256(different);
 
   EXPECT_EQ(lhs, rhs);
+  EXPECT_NE(lhs, other);
+}
+
+TEST(CryptoTests, HashFileMatchesHashBytesAndHexRoundTrips) {
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "arvane_hash_file_test.txt";
+  {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(output);
+    output << "file hash payload";
+  }
+
+  const std::vector<std::byte> bytes = bytes_for("file hash payload");
+  const arv::crypto::Hash256 bytes_hash = arv::crypto::hash_256(bytes);
+  const auto file_hash = arv::crypto::hash_256_file(path);
+  ASSERT_TRUE(file_hash) << file_hash.error().message;
+  EXPECT_EQ(file_hash.value(), bytes_hash);
+
+  const std::string hex = arv::crypto::hash_256_hex(file_hash.value());
+  EXPECT_EQ(hex.size(), arv::crypto::hash_256_size * 2U);
+  const auto parsed = arv::crypto::parse_hash_256_hex(hex);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_EQ(parsed.value(), file_hash.value());
+
+  std::error_code error;
+  std::filesystem::remove(path, error);
 }
 
 TEST(CryptoTests, HexEncodingIsLowercasePrefixedAndRejectsMalformedText) {

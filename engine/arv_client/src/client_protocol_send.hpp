@@ -10,6 +10,7 @@
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_type.hpp"
+#include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/skins.hpp"
@@ -56,6 +57,12 @@ public:
       const protocol::ServerboundSkinUploadChunk& chunk);
   net::NetworkResult send_skin_upload_end(
       const protocol::ServerboundSkinUploadEnd& end);
+  net::NetworkResult send_pack_sync_status(
+      const protocol::ServerboundPackSyncStatus& status);
+  net::NetworkResult send_pack_request(
+      const protocol::ServerboundPackRequest& request);
+  net::NetworkResult send_pack_ready(
+      const protocol::ServerboundPackReady& ready);
 
 private:
   ClientConnectionRuntime& connection_;

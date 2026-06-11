@@ -25,6 +25,9 @@ struct DedicatedRegistries {
 
   entity::EntityRegistry entity_registry;
   entity::VehicleDefinitionRegistry vehicle_registry;
+
+  std::string client_registry_snapshot_json{};
+  std::string client_registry_snapshot_hash{};
 };
 
 [[nodiscard]] Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(

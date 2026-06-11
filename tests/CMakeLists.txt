@@ -49,11 +49,13 @@ add_executable(arv_tests
   core/rate_limiter_tests.cpp
   core/types_tests.cpp
   data/data_document_tests.cpp
+  dedicated/dedicated_runtime_layout_tests.cpp
   desktop/chunk_view_tests.cpp
   desktop/debug_imgui_tests.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/chunk_view.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/debug_imgui.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/desktop_render_builders.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_dedicated/src/dedicated_runtime_layout.cpp
   io/config_tests.cpp
   text/language_tests.cpp
   text/rich_text_tests.cpp
@@ -104,6 +106,7 @@ add_executable(arv_tests
 
 target_include_directories(arv_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/apps/arv_dedicated/src
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src
 )
 target_compile_definitions(arv_tests PRIVATE

@@ -111,8 +111,8 @@ User-provided skins are untrusted binary assets. Local profile-owned skins live
 in `arvane_home/skins/`; server-downloaded skins live in
 `arvane_home/cache/skins/`. They are decoded and validated through the asset
 PNG loader, but they are not authored pack assets.
-Servers store accepted uploads under `server-save/player_assets/skins/` by
-server-computed content hash.
+Servers store accepted uploads under the active save root at
+`player_assets/skins/` by server-computed content hash.
 
 ---
 

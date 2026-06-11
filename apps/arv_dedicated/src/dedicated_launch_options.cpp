@@ -20,6 +20,8 @@ DedicatedLaunchOptions parse_launch_options(int argc, char** argv) {
       explicit_config = true;
     } else if (arg == "--arvane-home") {
       options.config.explicit_arvane_home_path = std::filesystem::path{argv[++i]};
+    } else if (arg == "--server-root") {
+      options.config.explicit_server_root_path = std::filesystem::path{argv[++i]};
     } else if (arg == "--project-root") {
       options.config.project_root = std::filesystem::path{argv[++i]};
     }

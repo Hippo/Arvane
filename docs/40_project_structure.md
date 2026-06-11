@@ -29,7 +29,8 @@ Arvane is structured around four top-level areas:
 
 ```text
 engine/      → reusable runtime systems and linked built-in modules
-arvane_home/ → runtime packs, assets, data, config, saves
+arvane_home/ → client/local runtime packs, assets, data, config, saves
+arvane_server/ → dedicated server runtime root
 apps/        → executable products
 sdk/         → standalone public authoring SDKs
 ```
@@ -50,13 +51,18 @@ Defines reusable runtime systems and infrastructure.
 
 ## 2. Runtime Home (`arvane_home/`)
 
-Stores runtime content and user/server state.
+Stores client/local runtime content and user state.
 
 * `packs/arvane_base/` contains data and assets for the built-in `arvane`
   namespace
 * `packs/enabled.yaml` selects the active pack stack
-* `config/`, `server-save/`, and `saves/` contain runtime-local state
+* `config/` contains client/local config
+* `saves/` contains singleplayer integrated-server save roots
+* `cache/server-packs/` stores verified downloaded multiplayer pack bundles
 * C++ source code does not live in this directory
+
+Dedicated servers use `arvane_server/` for authoritative packs, worlds, cache,
+logs, and `server.yaml`.
 
 ---
 
@@ -96,6 +102,12 @@ arvane/
 │  ├─ saves/
 │  ├─ logs/
 │  └─ cache/
+├─ arvane_server/
+│  ├─ server.yaml
+│  ├─ packs/
+│  ├─ worlds/
+│  ├─ cache/
+│  └─ logs/
 ├─ tests/
 ├─ examples/
 ├─ sdk/
@@ -139,14 +151,12 @@ It contains:
 
 * `packs/`
 * `config/`
-* `server-save/`
 * `saves/`
 * optional `logs/`
 * optional `cache/`
 
-`server-save/` is the single dedicated-server save root used by
-`arv_dedicated`. `saves/` contains **singleplayer server save directories**,
-not individual world directories.
+`saves/` contains **singleplayer server save directories**, not individual
+world directories. Dedicated-server worlds live under `arvane_server/worlds/`.
 
 `config/server_list.json` stores the desktop client's saved multiplayer server
 entries. It is client UI configuration, not world or server-save data.
@@ -165,15 +175,27 @@ arvane_home/
         arvane/
   config/
     server_list.json
-  server-save/
-    players/
-    worlds/
-      default/
   saves/
     server-save-1/
       players/
       worlds/
         default/
+  cache/
+    server-packs/
+
+arvane_server/
+  server.yaml
+  packs/
+    enabled.yaml
+    arvane_base/
+  worlds/
+    default/
+      pack-lock.json
+      world.json
+      regions/
+  cache/
+    client-pack-exports/
+  logs/
 ```
 
 Code should not hardcode root-relative runtime paths outside the central filesystem/path utility.

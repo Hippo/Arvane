@@ -362,13 +362,23 @@ arvane/
         saves/
         logs/
         cache/
+    arvane_server/
+        server.yaml
+        packs/
+        worlds/
+        cache/
+        logs/
     docs/
     engine/
     apps/
     CMakeLists.txt
 ```
 
-`arvane_home/` is the canonical development runtime home directory.
+`arvane_home/` is the canonical development client/local runtime home
+directory. Dedicated server runtime data lives in `arvane_server/`.
+Dedicated startup creates missing `arvane_server/` subdirectories and seeds a
+clean server pack root with `arvane_base` from the local installed packs so the
+server can boot without manual directory setup.
 
 Examples of runtime files include:
 
@@ -380,7 +390,10 @@ Examples of runtime files include:
 * test assets
 * config-driven block, item, and world generation definitions
 
-The engine may later support mounted resource packs or user-provided asset directories, but the default development behavior should remain rooted at `arvane_home/`.
+The engine may later support mounted resource packs or user-provided asset
+directories, but the default client/local development behavior should remain
+rooted at `arvane_home/`; dedicated server state remains rooted at
+`arvane_server/`.
 
 Code should resolve runtime paths through the central filesystem/path utility rather than hardcoding root-relative strings such as `assets/`, `config/`, `plugins/`, or `saves/`.
 
@@ -390,7 +403,7 @@ When loading configuration or data files, Arvane should use the following search
 
 1. Explicit path provided by command-line argument
 2. Explicit path provided by runtime configuration
-3. Default path inside `arvane_home/`
+3. Default path inside `arvane_home/` or `arvane_server/`, depending on profile
 4. Built-in default values
 
 For example, when resolving the runtime home and default config file:
@@ -406,7 +419,7 @@ runtime config paths.arvane_home
 runtime config paths.config_file
 ./arvane_home/config/arvane.yaml
 ./arvane_home/config/client.yaml
-./arvane_home/config/server.yaml
+./arvane_server/server.yaml
 built-in fallback behavior
 ```
 

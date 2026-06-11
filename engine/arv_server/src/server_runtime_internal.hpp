@@ -492,6 +492,20 @@ struct ServerRuntimeImpl {
       std::string_view reason_if_rejected = {});
   void send_auth_challenge(ServerSession& session);
   [[nodiscard]] bool complete_authenticated_session(ServerSession& session);
+  void begin_authenticated_session_join(ServerSession& session);
+  void finish_authenticated_session_join(ServerSession& session);
+  void send_pack_manifest(const ServerSession& session);
+  void send_registry_snapshot(const ServerSession& session);
+  void send_pack_data_chunks(const ServerSession& session, std::string_view bundle_hash);
+  void handle_pack_sync_status(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundPackSyncStatus& status);
+  void handle_pack_request(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundPackRequest& request);
+  void handle_pack_ready(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundPackReady& ready);
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
   void send_world_time(const ServerSession& session);
   void broadcast_world_time(WorldID world_id);
@@ -565,6 +579,7 @@ struct ServerRuntimeImpl {
   voxel::FluidDefinition fluid_definition_{};
   std::vector<StarterInventoryItem> starter_inventory_{};
   FluidContainerInteractionConfig fluid_containers_{};
+  ServerPackSyncConfig pack_sync_{};
   ServerChunkStreamer chunk_streamer_{};
   std::optional<ServerChunkGenerationSettings> chunk_generation_{};
   std::vector<QueuedChunkStreamMessage> queued_chunk_stream_messages_;
