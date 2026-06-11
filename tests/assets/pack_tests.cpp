@@ -498,6 +498,81 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
   EXPECT_FALSE(corrupt);
 }
 
+TEST(PackBundleTests, LoadsClientBundleRootAsSyntheticPack) {
+  ScopedTempDir temp("arvane_client_bundle_root_");
+  const std::filesystem::path bundle = temp.path / "cache" / "abc123";
+  write_text(bundle / "manifest.json", "{\"format_version\":1}\n");
+  write_text(bundle / "registry-client.json", "{\"format_version\":1}\n");
+  write_text(
+      bundle / "data/custom/blocks.json",
+      "{\"blocks\":[{\"name\":\"custom:glowstone\"}]}\n");
+  write_text(
+      bundle / "assets/custom/textures/block/glowstone.png",
+      "fake-png");
+
+  const std::filesystem::path roots[] = {bundle};
+  auto manager = arv::asset::PackManager::load_client_bundle_roots(roots);
+  ASSERT_TRUE(manager) << manager.error().describe();
+  ASSERT_EQ(manager.value().stack().size(), 1U);
+  EXPECT_EQ(manager.value().stack().front().manifest.id, "server_bundle_0");
+  ASSERT_EQ(manager.value().stack().front().manifest.namespaces.size(), 1U);
+  EXPECT_EQ(manager.value().stack().front().manifest.namespaces.front(), "custom");
+
+  auto merged = manager.value().load_merged_json_array_text("blocks", "blocks");
+  ASSERT_TRUE(merged) << merged.error().describe();
+  EXPECT_NE(merged.value().find("\"name\": \"custom:glowstone\""), std::string::npos);
+
+  auto resolved = manager.value().resolve_asset_path(
+      "custom:texture/block/glowstone",
+      arv::asset::AssetKind::Texture);
+  ASSERT_TRUE(resolved) << resolved.error().describe();
+  EXPECT_EQ(
+      resolved.value().relative_path.generic_string(),
+      "assets/custom/textures/block/glowstone.png");
+}
+
+TEST(PackBundleTests, RemoteResourceManagerFallsBackToLocalPackAssets) {
+  ScopedTempDir temp("arvane_remote_resource_fallback_");
+  const std::filesystem::path bundle = temp.path / "cache" / "abc123";
+  write_text(bundle / "manifest.json", "{\"format_version\":1}\n");
+  write_text(bundle / "registry-client.json", "{\"format_version\":1}\n");
+  write_text(
+      bundle / "assets/custom/textures/block/glowstone.png",
+      "fake-png");
+
+  const std::filesystem::path local_packs = temp.path / "packs";
+  write_enabled(local_packs, "enabled:\n  - \"arvane_base\"\n");
+  write_pack_manifest(local_packs, "arvane_base", "  - \"arvane\"\n");
+  write_text(
+      local_packs / "arvane_base/assets/arvane/fonts/font.ttf",
+      "fake-font");
+
+  const std::filesystem::path roots[] = {bundle};
+  auto remote = arv::asset::PackManager::load_client_bundle_roots(roots);
+  ASSERT_TRUE(remote) << remote.error().describe();
+  auto fallback = arv::asset::PackManager::load_from_packs_root(local_packs);
+  ASSERT_TRUE(fallback) << fallback.error().describe();
+
+  arv::asset::ResourceManager resources(
+      std::move(remote.value()),
+      std::move(fallback.value()));
+  auto remote_texture = resources.resolve_asset(
+      {"custom:texture/block/glowstone"},
+      arv::asset::AssetKind::Texture);
+  ASSERT_TRUE(remote_texture) << remote_texture.error().describe();
+  EXPECT_EQ(
+      remote_texture.value().path,
+      bundle / "assets/custom/textures/block/glowstone.png");
+
+  auto local_font = resources.resolve_asset(
+      {"arvane:font/font"},
+      arv::asset::AssetKind::Font);
+  ASSERT_TRUE(local_font) << local_font.error().describe();
+  EXPECT_EQ(
+      local_font.value().path,
+      local_packs / "arvane_base/assets/arvane/fonts/font.ttf");
+}
+
 TEST(PackLockTests, ValidatesRequiredPacks) {
   ScopedTempDir temp("arvane_pack_lock_");
   const std::filesystem::path packs = temp.path / "packs";

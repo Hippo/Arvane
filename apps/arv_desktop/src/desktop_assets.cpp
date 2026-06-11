@@ -5,6 +5,7 @@
 #include "arv/client/particles.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
+#include "arv/io/data_codecs.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/text/language.hpp"
@@ -13,6 +14,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -232,7 +235,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
     const ui::UiDisplayMetrics& ui_metrics,
     const voxel::BlockBehaviorRegistry& block_behaviors,
     const player::ItemBehaviorRegistry& item_behaviors,
-    const world::EntityGoalRegistry& entity_goals) {
+    const world::EntityGoalRegistry& entity_goals,
+    DesktopAssetLoadOptions options) {
   DesktopLoadedAssets loaded;
   renderer.configure_player_skin_atlas(
       player_skin_atlas_config_from(config.render.atlases.player_skins));
@@ -312,10 +316,15 @@ DesktopLoadedAssetsResult load_desktop_assets(
   const auto block_behavior_exists = [&block_behaviors](std::string_view id) {
     return block_behaviors.contains(id);
   };
+  voxel::BlockRegistryBuildOptions block_options;
+  if (options.validate_behavior_ids) {
+    block_options.behavior_exists =
+        FunctionRef<bool(std::string_view)>{block_behavior_exists};
+  }
   auto block_registry_result =
       voxel::BlockRegistry::build(
           std::move(block_definitions.value()),
-          {.behavior_exists = FunctionRef<bool(std::string_view)>{block_behavior_exists}});
+          block_options);
   if (!block_registry_result) {
     return asset_failure("blocks", block_registry_result.error().message);
   }
@@ -369,11 +378,17 @@ DesktopLoadedAssetsResult load_desktop_assets(
   const auto item_behavior_exists = [&item_behaviors](std::string_view id) {
     return item_behaviors.contains(id);
   };
+  player::ItemRegistryBuildOptions item_options;
+  if (options.validate_behavior_ids) {
+    item_options.behavior_exists =
+        FunctionRef<bool(std::string_view)>{item_behavior_exists};
+  }
+  item_options.default_block_item_behavior_id =
+      std::string{base::ids::BlockItemBehaviorID};
   auto item_registry_result = player::ItemRegistry::build_from_blocks_and_items(
       loaded.block_registry,
       std::move(item_definitions.value()),
-      {.behavior_exists = FunctionRef<bool(std::string_view)>{item_behavior_exists},
-       .default_block_item_behavior_id = std::string{base::ids::BlockItemBehaviorID}});
+      item_options);
   if (!item_registry_result) {
     return asset_failure("items", item_registry_result.error().message);
   }
@@ -430,7 +445,8 @@ DesktopLoadedAssetsResult load_desktop_assets(
   auto entity_registry_result =
       base::build_base_entity_registry(
           std::move(entity_definitions.value()),
-          &entity_goals);
+          options.validate_behavior_ids ? &entity_goals : nullptr,
+          options.validate_behavior_ids);
   if (!entity_registry_result) {
     return asset_failure("entities", entity_registry_result.error().message);
   }
@@ -507,22 +523,139 @@ DesktopLoadedAssetsResult load_desktop_assets(
   renderer.set_particle_texture_atlas(
       texture_array_upload_from_atlas(loaded.particle_assets.atlas));
 
-  auto worldgen_registry = world::worldgen::load_worldgen_registry_from_packs(packs);
-  if (!worldgen_registry) {
-    return asset_failure("worldgen", worldgen_registry.error().describe());
-  }
+  if (options.load_worldgen) {
+    auto worldgen_registry = world::worldgen::load_worldgen_registry_from_packs(packs);
+    if (!worldgen_registry) {
+      return asset_failure("worldgen", worldgen_registry.error().describe());
+    }
 
-  auto resolved_worldgen = world::worldgen::resolve_dimension(
-      worldgen_registry.value(),
-      base::ids::OverworldWorldgenDataID,
-      loaded.block_registry);
-  if (!resolved_worldgen) {
-    return asset_failure("worldgen", resolved_worldgen.error().describe());
+    auto resolved_worldgen = world::worldgen::resolve_dimension(
+        worldgen_registry.value(),
+        base::ids::OverworldWorldgenDataID,
+        loaded.block_registry);
+    if (!resolved_worldgen) {
+      return asset_failure("worldgen", resolved_worldgen.error().describe());
+    }
+    loaded.default_generation_config =
+        world::config_from_resolved_dimension(std::move(resolved_worldgen.value()));
   }
-  loaded.default_generation_config =
-      world::config_from_resolved_dimension(std::move(resolved_worldgen.value()));
 
   return DesktopLoadedAssetsResult::success(std::move(loaded));
+}
+
+namespace {
+
+[[nodiscard]] DesktopAssetValidationResult registry_validation_failure(
+    std::string message) {
+  return DesktopAssetValidationResult::failure(
+      {"registry", std::move(message)});
+}
+
+[[nodiscard]] const io::DataValue::Array* snapshot_array(
+    const io::DataValue& root,
+    std::string_view key) {
+  const io::DataValue* value = root.get(key);
+  return value == nullptr ? nullptr : value->array_if();
+}
+
+[[nodiscard]] bool numeric_id_matches(
+    const io::DataValue& entry,
+    u32 expected) {
+  const io::DataValue* numeric_id = entry.get("numeric_id");
+  return numeric_id != nullptr &&
+         io::is_integer_value(*numeric_id) &&
+         numeric_id->as_u64_or(UINT64_MAX) == expected;
+}
+
+[[nodiscard]] std::optional<std::string> resource_id_from(
+    const io::DataValue& entry) {
+  const io::DataValue* resource_id = entry.get("resource_id");
+  if (resource_id == nullptr || !io::is_string_value(*resource_id)) {
+    return std::nullopt;
+  }
+  return std::string{resource_id->as_string_or({})};
+}
+
+} // namespace
+
+DesktopAssetValidationResult validate_desktop_assets_against_registry_snapshot(
+    std::string_view snapshot_json,
+    const DesktopLoadedAssets& assets) {
+  auto decoded = io::decode_json_value(snapshot_json);
+  if (!decoded) {
+    return registry_validation_failure(
+        "failed to parse registry snapshot: " + decoded.error().describe());
+  }
+  const io::DataValue& root = decoded.value().root;
+  const io::DataValue* format = root.get("format_version");
+  if (format == nullptr || !io::is_integer_value(*format) ||
+      format->as_u64_or(0U) != 1U) {
+    return registry_validation_failure("unsupported registry snapshot format_version");
+  }
+
+  const io::DataValue::Array* blocks = snapshot_array(root, "blocks");
+  if (blocks == nullptr || blocks->size() != assets.block_registry.block_count()) {
+    return registry_validation_failure("block registry snapshot count mismatch");
+  }
+  for (const io::DataValue& entry : *blocks) {
+    const std::optional<std::string> name = resource_id_from(entry);
+    if (!name.has_value()) {
+      return registry_validation_failure("block snapshot entry is missing resource_id");
+    }
+    const std::optional<voxel::BlockID> id = assets.block_registry.find_block(name.value());
+    if (!id.has_value() || !numeric_id_matches(entry, id->value)) {
+      return registry_validation_failure("block registry numeric ID mismatch for " + name.value());
+    }
+  }
+
+  const io::DataValue::Array* variants = snapshot_array(root, "block_variants");
+  if (variants == nullptr || variants->size() != assets.block_registry.variant_count()) {
+    return registry_validation_failure("block variant registry snapshot count mismatch");
+  }
+  for (const io::DataValue& entry : *variants) {
+    const io::DataValue* debug_name = entry.get("debug_name");
+    if (debug_name == nullptr || !io::is_string_value(*debug_name)) {
+      return registry_validation_failure("block variant snapshot entry is missing debug_name");
+    }
+    const std::string name{debug_name->as_string_or({})};
+    const std::optional<voxel::BlockVariantID> id =
+        assets.block_registry.find_variant(name);
+    if (!id.has_value() || !numeric_id_matches(entry, id->value)) {
+      return registry_validation_failure("block variant numeric ID mismatch for " + name);
+    }
+  }
+
+  const io::DataValue::Array* items = snapshot_array(root, "items");
+  if (items == nullptr || items->size() != assets.item_registry.item_count()) {
+    return registry_validation_failure("item registry snapshot count mismatch");
+  }
+  for (const io::DataValue& entry : *items) {
+    const std::optional<std::string> name = resource_id_from(entry);
+    if (!name.has_value()) {
+      return registry_validation_failure("item snapshot entry is missing resource_id");
+    }
+    const std::optional<player::ItemID> id = assets.item_registry.find_item(name.value());
+    if (!id.has_value() || !numeric_id_matches(entry, id->value)) {
+      return registry_validation_failure("item registry numeric ID mismatch for " + name.value());
+    }
+  }
+
+  const io::DataValue::Array* entities = snapshot_array(root, "entities");
+  if (entities == nullptr || entities->size() != assets.entity_registry.type_count()) {
+    return registry_validation_failure("entity registry snapshot count mismatch");
+  }
+  for (const io::DataValue& entry : *entities) {
+    const std::optional<std::string> name = resource_id_from(entry);
+    if (!name.has_value()) {
+      return registry_validation_failure("entity snapshot entry is missing resource_id");
+    }
+    const std::optional<EntityTypeID> id = assets.entity_registry.find_type(name.value());
+    if (!id.has_value() || !numeric_id_matches(entry, id->value)) {
+      return registry_validation_failure("entity registry numeric ID mismatch for " + name.value());
+    }
+  }
+
+  return DesktopAssetValidationResult::success();
 }
 
 } // namespace arv::desktop

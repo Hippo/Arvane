@@ -92,6 +92,10 @@ class ResourceManager {
 public:
   explicit ResourceManager(std::filesystem::path asset_root);
   explicit ResourceManager(PackManager pack_manager);
+  ResourceManager(PackManager pack_manager, PackManager fallback_pack_manager);
+
+  void reset(PackManager pack_manager);
+  void reset(PackManager pack_manager, PackManager fallback_pack_manager);
 
   [[nodiscard]] const std::filesystem::path& asset_root() const noexcept {
     return asset_root_;
@@ -122,6 +126,7 @@ private:
 
   std::filesystem::path asset_root_{};
   std::optional<PackManager> pack_manager_{};
+  std::optional<PackManager> fallback_pack_manager_{};
   std::vector<TextureResource> textures_{{}};
   HashMap<std::string, TextureResourceHandle> texture_cache_{};
 };

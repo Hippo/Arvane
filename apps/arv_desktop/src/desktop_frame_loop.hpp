@@ -20,8 +20,11 @@
 #include "arv/sched/job_system.hpp"
 
 #include <chrono>
+#include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace arv::desktop {
 
@@ -63,6 +66,11 @@ enum class DesktopLoadingScreen : u8 {
   ClosingGame,
 };
 
+enum class DesktopAssetSource : u8 {
+  Local,
+  Remote,
+};
+
 class DesktopFrameLoop : private ui::UIClipboard {
 public:
   DesktopFrameLoop(
@@ -83,7 +91,10 @@ public:
       const voxel::FluidDefinition& water_fluid,
       player::PlayerTuning& player_tuning,
       DesktopMenuState& menu_state,
-      ui::UIScreenManager& screen_manager);
+      ui::UIScreenManager& screen_manager,
+      const voxel::BlockBehaviorRegistry& block_behaviors,
+      const player::ItemBehaviorRegistry& item_behaviors,
+      const world::EntityGoalRegistry& entity_goals);
 
   [[nodiscard]] int run();
 
@@ -166,6 +177,15 @@ private:
       std::chrono::steady_clock::time_point now);
   [[nodiscard]] bool handle_session_disconnect(DesktopGameSession* active_session);
   void handle_remote_connection_ready(DesktopGameSession* active_session);
+  [[nodiscard]] bool ensure_local_assets(bool force = false);
+  [[nodiscard]] bool ensure_remote_assets(DesktopGameSession& active_session);
+  [[nodiscard]] bool reload_desktop_assets(
+      asset::PackManager packs,
+      std::optional<asset::PackManager> fallback_packs,
+      DesktopAssetLoadOptions options,
+      std::string_view registry_snapshot,
+      DesktopAssetSource source,
+      std::vector<std::filesystem::path> remote_pack_cache_paths = {});
 
   [[nodiscard]] const player::ItemRecord* selected_held_item(
       const DesktopGameSession& session) const noexcept;
@@ -321,6 +341,9 @@ private:
   player::PlayerTuning& player_tuning_;
   DesktopMenuState& menu_state_;
   ui::UIScreenManager& screen_manager_;
+  const voxel::BlockBehaviorRegistry& block_behaviors_;
+  const player::ItemBehaviorRegistry& item_behaviors_;
+  const world::EntityGoalRegistry& entity_goals_;
   ui::UIScreenManager gameplay_screen_manager_{};
   platform::FramebufferSize framebuffer_{};
   ui::UiDisplayMetrics ui_metrics_{};
@@ -344,6 +367,9 @@ private:
   bool hotbar_item_observation_initialized_{};
   bool gameplay_menu_stack_active_{};
   DesktopLoadingScreen loading_screen_{DesktopLoadingScreen::None};
+  DesktopAssetSource asset_source_{DesktopAssetSource::Local};
+  std::string active_remote_registry_snapshot_json_{};
+  std::vector<std::filesystem::path> active_remote_pack_cache_paths_{};
   std::optional<PendingSingleplayerStart> pending_singleplayer_start_{};
   std::optional<PendingRemoteStart> pending_remote_start_{};
 

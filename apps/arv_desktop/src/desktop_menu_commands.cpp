@@ -139,8 +139,18 @@ bool DesktopFrameLoop::process_loading_world_frame() {
 }
 
 bool DesktopFrameLoop::begin_pending_world_start() {
+  if (sessions_.active_session() != nullptr) {
+    if (!sessions_.begin_save_and_shutdown()) {
+      return complete_pending_world_start(false);
+    }
+    return true;
+  }
+
   if (pending_remote_start_.has_value()) {
     const PendingRemoteStart& start = pending_remote_start_.value();
+    if (!ensure_local_assets()) {
+      return complete_pending_world_start(false);
+    }
     if (!sessions_.begin_start_remote(start.command, start.local_identity)) {
       return complete_pending_world_start(false);
     }
@@ -149,6 +159,9 @@ bool DesktopFrameLoop::begin_pending_world_start() {
 
   if (pending_singleplayer_start_.has_value()) {
     const PendingSingleplayerStart& start = pending_singleplayer_start_.value();
+    if (!ensure_local_assets()) {
+      return complete_pending_world_start(false);
+    }
     if (!sessions_.begin_start_singleplayer(
             start.server_save_name,
             start.world_name,
@@ -542,6 +555,10 @@ void DesktopFrameLoop::handle_remote_connection_ready(DesktopGameSession* active
   if (active_session == nullptr || active_session->client == nullptr ||
       !active_session->remote_server.has_value() ||
       active_session->client->connection_state() != net::ConnectionState::InGame) {
+    return;
+  }
+  if (!ensure_remote_assets(*active_session)) {
+    active_session->client->disconnect();
     return;
   }
   const ui::UIScreen* screen = screen_manager_.current();

@@ -67,6 +67,28 @@ ResourceManager::ResourceManager(PackManager pack_manager)
       pack_manager_(std::move(pack_manager)) {
 }
 
+ResourceManager::ResourceManager(PackManager pack_manager, PackManager fallback_pack_manager)
+    : asset_root_(pack_manager.packs_root()),
+      pack_manager_(std::move(pack_manager)),
+      fallback_pack_manager_(std::move(fallback_pack_manager)) {
+}
+
+void ResourceManager::reset(PackManager pack_manager) {
+  asset_root_ = pack_manager.packs_root();
+  pack_manager_ = std::move(pack_manager);
+  fallback_pack_manager_.reset();
+  textures_.assign(1U, {});
+  texture_cache_.clear();
+}
+
+void ResourceManager::reset(PackManager pack_manager, PackManager fallback_pack_manager) {
+  asset_root_ = pack_manager.packs_root();
+  pack_manager_ = std::move(pack_manager);
+  fallback_pack_manager_ = std::move(fallback_pack_manager);
+  textures_.assign(1U, {});
+  texture_cache_.clear();
+}
+
 std::filesystem::path ResourceManager::resolve_asset_path(
     const AssetID& asset_id,
     AssetKind kind) const {
@@ -74,6 +96,12 @@ std::filesystem::path ResourceManager::resolve_asset_path(
     auto resolved = pack_manager_->resolve_asset_path(asset_id.value, kind);
     if (resolved) {
       return resolved.value().path;
+    }
+    if (fallback_pack_manager_.has_value()) {
+      auto fallback = fallback_pack_manager_->resolve_asset_path(asset_id.value, kind);
+      if (fallback) {
+        return fallback.value().path;
+      }
     }
     return {};
   }
@@ -154,7 +182,12 @@ PackPathResult ResourceManager::resolve_asset(
     const AssetID& asset_id,
     AssetKind kind) const {
   if (pack_manager_.has_value()) {
-    return pack_manager_->resolve_asset_path(asset_id.value, kind);
+    auto resolved = pack_manager_->resolve_asset_path(asset_id.value, kind);
+    if (resolved || !fallback_pack_manager_.has_value()) {
+      return resolved;
+    }
+    auto fallback = fallback_pack_manager_->resolve_asset_path(asset_id.value, kind);
+    return fallback ? std::move(fallback) : std::move(resolved);
   }
   if (!is_valid_asset_id(asset_id.value)) {
     return PackPathResult::failure(

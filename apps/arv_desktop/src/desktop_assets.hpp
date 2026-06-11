@@ -21,6 +21,7 @@
 #include "arv/world/world_generation.hpp"
 
 #include <string>
+#include <string_view>
 
 namespace arv::desktop {
 
@@ -49,6 +50,12 @@ struct DesktopAssetLoadError {
 };
 
 using DesktopLoadedAssetsResult = Expected<DesktopLoadedAssets, DesktopAssetLoadError>;
+using DesktopAssetValidationResult = Expected<void, DesktopAssetLoadError>;
+
+struct DesktopAssetLoadOptions {
+  bool validate_behavior_ids{true};
+  bool load_worldgen{true};
+};
 
 [[nodiscard]] DesktopLoadedAssetsResult load_desktop_assets(
     asset::ResourceManager& resources,
@@ -59,6 +66,11 @@ using DesktopLoadedAssetsResult = Expected<DesktopLoadedAssets, DesktopAssetLoad
     const ui::UiDisplayMetrics& ui_metrics,
     const voxel::BlockBehaviorRegistry& block_behaviors,
     const player::ItemBehaviorRegistry& item_behaviors,
-    const world::EntityGoalRegistry& entity_goals);
+    const world::EntityGoalRegistry& entity_goals,
+    DesktopAssetLoadOptions options = {});
+
+[[nodiscard]] DesktopAssetValidationResult validate_desktop_assets_against_registry_snapshot(
+    std::string_view snapshot_json,
+    const DesktopLoadedAssets& assets);
 
 } // namespace arv::desktop

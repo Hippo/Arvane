@@ -55,7 +55,8 @@ std::vector<entity::EntityDefinition> base_entity_definitions() {
 
 entity::EntityRegistry::Result build_base_entity_registry(
     std::vector<entity::EntityDefinition> pack_definitions,
-    const world::EntityGoalRegistry* goal_registry) {
+    const world::EntityGoalRegistry* goal_registry,
+    bool validate_goal_ids) {
   std::vector<entity::EntityDefinition> definitions = base_entity_definitions();
 
   HashMap<std::string, usize> definition_indices;
@@ -83,6 +84,10 @@ entity::EntityRegistry::Result build_base_entity_registry(
           definitions[existing->second],
           std::move(definition));
     }
+  }
+
+  if (!validate_goal_ids) {
+    return entity::EntityRegistry::build(std::move(definitions));
   }
 
   world::EntityGoalRegistry fallback_goal_registry;

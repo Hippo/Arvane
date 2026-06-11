@@ -4,6 +4,7 @@ set(ARV_CLIENT_SOURCES
   src/asset_helpers.cpp
   src/chunk_view.cpp
   src/desktop_application.cpp
+  src/desktop_asset_reload.cpp
   src/desktop_assets.cpp
   src/desktop_chat_commands.cpp
   src/desktop_frame_pacing.cpp

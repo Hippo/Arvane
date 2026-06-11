@@ -57,7 +57,8 @@ void register_base_block_break_behaviors(server::BlockBreakBehaviorRegistry& reg
 [[nodiscard]] std::vector<entity::EntityDefinition> base_entity_definitions();
 [[nodiscard]] entity::EntityRegistry::Result build_base_entity_registry(
     std::vector<entity::EntityDefinition> pack_definitions,
-    const world::EntityGoalRegistry* goal_registry = nullptr);
+    const world::EntityGoalRegistry* goal_registry = nullptr,
+    bool validate_goal_ids = true);
 
 [[nodiscard]] voxel::FluidDefinition make_base_water_fluid_definition(
     voxel::FluidTypeID type = voxel::DefaultWaterFluidTypeID) noexcept;

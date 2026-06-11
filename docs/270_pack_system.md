@@ -335,8 +335,17 @@ arvane_home/cache/server-packs/<bundle-hash>/
 Extraction validates the bundle hash, zstd payload, file hashes, size/count
 limits, and all relative paths before moving the cache entry into place.
 `ClientRuntime` exposes the verified cache paths and server registry snapshot to
-the desktop layer; rebuilding render/resource registries from those generated
-bundle roots is the follow-up mount step for remote-only visual content.
+the desktop layer. When a remote session reaches `InGame`, the desktop client
+mounts those generated bundle roots as a client-only pack stack, rebuilds the
+resource manager and render registries, and validates the rebuilt numeric IDs
+against the server-owned registry snapshot before draining chunk data. Local
+packs remain available as a fallback for client-only resources that are not part
+of the server export, such as fonts, shaders, and UI themes.
+
+The remote pack stack is session-scoped. Starting a local/singleplayer world or
+returning to the menu after a remote disconnect restores the local
+`arvane_home/packs` stack, which prevents custom server blocks/items/entities
+from staying in the client registries after the multiplayer session ends.
 
 ---
 

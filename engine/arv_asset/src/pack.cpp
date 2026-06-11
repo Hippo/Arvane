@@ -1323,6 +1323,95 @@ Expected<PackManager, PackError> PackManager::load_from_packs_root(
   return Expected<PackManager, PackError>::success(std::move(manager));
 }
 
+Expected<PackManager, PackError> PackManager::load_client_bundle_roots(
+    std::span<const std::filesystem::path> bundle_roots) {
+  if (bundle_roots.empty()) {
+    return Expected<PackManager, PackError>::failure(
+        pack_error("client bundle loading", "no client bundle cache roots were provided"));
+  }
+
+  PackManager manager;
+  manager.packs_root_ = bundle_roots.front().parent_path();
+  manager.stack_.reserve(bundle_roots.size());
+
+  for (usize index = 0; index < bundle_roots.size(); ++index) {
+    const std::filesystem::path& root = bundle_roots[index];
+    std::error_code error;
+    if (!std::filesystem::is_directory(root, error)) {
+      return Expected<PackManager, PackError>::failure(
+          pack_error("client bundle loading", "client bundle cache root is not a directory", {}, root));
+    }
+    if (!file_exists_inside_root(root, root / "manifest.json")) {
+      return Expected<PackManager, PackError>::failure(
+          pack_error("client bundle loading", "client bundle manifest.json is missing", {}, root));
+    }
+    if (!file_exists_inside_root(root, root / "registry-client.json")) {
+      return Expected<PackManager, PackError>::failure(
+          pack_error("client bundle loading", "client bundle registry-client.json is missing", {}, root));
+    }
+
+    HashSet<std::string> namespace_set;
+    const auto collect_namespaces = [&](const std::filesystem::path& base) -> std::optional<PackError> {
+      if (!std::filesystem::is_directory(base, error)) {
+        error.clear();
+        return std::nullopt;
+      }
+      for (const std::filesystem::directory_entry& entry :
+           std::filesystem::directory_iterator(base, error)) {
+        if (error) {
+          error.clear();
+          continue;
+        }
+        if (!entry.is_directory(error)) {
+          error.clear();
+          continue;
+        }
+        const std::string name_space = entry.path().filename().string();
+        if (!is_valid_pack_id(name_space)) {
+          return pack_error(
+              "client bundle loading",
+              "invalid client bundle namespace: " + name_space,
+              {},
+              entry.path());
+        }
+        namespace_set.insert(name_space);
+      }
+      return std::nullopt;
+    };
+    if (std::optional<PackError> ns_error = collect_namespaces(root / "data");
+        ns_error.has_value()) {
+      return Expected<PackManager, PackError>::failure(std::move(ns_error.value()));
+    }
+    if (std::optional<PackError> ns_error = collect_namespaces(root / "assets");
+        ns_error.has_value()) {
+      return Expected<PackManager, PackError>::failure(std::move(ns_error.value()));
+    }
+    if (namespace_set.empty()) {
+      return Expected<PackManager, PackError>::failure(
+          pack_error("client bundle loading", "client bundle has no data or asset namespaces", {}, root));
+    }
+
+    PackSource source;
+    source.root = root;
+    source.manifest.schema_version = 1U;
+    source.manifest.id = "server_bundle_" + std::to_string(index);
+    source.manifest.display_name = "Server Bundle " + std::to_string(index + 1U);
+    source.manifest.version = "0";
+    source.manifest.side = PackSide::Client;
+    source.manifest.capabilities = {
+        .assets = true,
+        .data = true,
+        .config = false,
+        .native_plugin = false};
+    source.manifest.namespaces.assign(namespace_set.begin(), namespace_set.end());
+    std::sort(source.manifest.namespaces.begin(), source.manifest.namespaces.end());
+    source.content_hash = root.filename().string();
+    manager.stack_.push_back(std::move(source));
+  }
+
+  return Expected<PackManager, PackError>::success(std::move(manager));
+}
+
 const PackSource* PackManager::find_pack(std::string_view id) const noexcept {
   const auto found = std::find_if(stack_.begin(), stack_.end(), [&](const PackSource& pack) {
     return pack.manifest.id == id;

@@ -279,7 +279,10 @@ int DesktopApplication::run(int argc, char** argv) {
       water_fluid,
       player_tuning,
       menu_state,
-      screen_manager};
+      screen_manager,
+      block_behaviors,
+      item_behaviors,
+      entity_goals};
   const int loop_result = frame_loop.run();
 
   const auto config_save_result =

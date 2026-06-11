@@ -141,6 +141,8 @@ public:
   [[nodiscard]] static PackManagerResult load(const std::filesystem::path& arvane_home);
   [[nodiscard]] static PackManagerResult load_from_packs_root(
       const std::filesystem::path& packs_root);
+  [[nodiscard]] static PackManagerResult load_client_bundle_roots(
+      std::span<const std::filesystem::path> bundle_roots);
 
   [[nodiscard]] const std::filesystem::path& packs_root() const noexcept {
     return packs_root_;

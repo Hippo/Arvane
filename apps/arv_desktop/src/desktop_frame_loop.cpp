@@ -85,29 +85,35 @@ DesktopFrameLoop::DesktopFrameLoop(
     const voxel::FluidDefinition& water_fluid,
     player::PlayerTuning& player_tuning,
     DesktopMenuState& menu_state,
-    ui::UIScreenManager& screen_manager) : config_(config),
-                                           resources_(resources),
-                                           window_(window),
-                                           render_thread_(render_thread),
-                                           renderer_(renderer),
-                                           input_bindings_(input_bindings),
-                                           debug_imgui_(debug_imgui),
-                                           debug_menu_(debug_menu),
-                                           assets_(assets),
-                                           world_jobs_(world_jobs),
-                                           sessions_(sessions),
-                                           ui_tree_(ui_tree),
-                                           ui_text_measurer_(ui_text_measurer),
-                                           ui_theme_(ui_theme),
-                                           water_fluid_(water_fluid),
-                                           player_tuning_(player_tuning),
-                                           menu_state_(menu_state),
-                                           screen_manager_(screen_manager),
-                                           framebuffer_(window.framebuffer_size()),
-                                           ui_metrics_(
-                                               ui::UiDisplayMetrics::from_window_and_framebuffer(
-                                                   size_vec(window.window_size()),
-                                                   size_vec(framebuffer_))) {
+    ui::UIScreenManager& screen_manager,
+    const voxel::BlockBehaviorRegistry& block_behaviors,
+    const player::ItemBehaviorRegistry& item_behaviors,
+    const world::EntityGoalRegistry& entity_goals) : config_(config),
+                                                     resources_(resources),
+                                                     window_(window),
+                                                     render_thread_(render_thread),
+                                                     renderer_(renderer),
+                                                     input_bindings_(input_bindings),
+                                                     debug_imgui_(debug_imgui),
+                                                     debug_menu_(debug_menu),
+                                                     assets_(assets),
+                                                     world_jobs_(world_jobs),
+                                                     sessions_(sessions),
+                                                     ui_tree_(ui_tree),
+                                                     ui_text_measurer_(ui_text_measurer),
+                                                     ui_theme_(ui_theme),
+                                                     water_fluid_(water_fluid),
+                                                     player_tuning_(player_tuning),
+                                                     menu_state_(menu_state),
+                                                     screen_manager_(screen_manager),
+                                                     block_behaviors_(block_behaviors),
+                                                     item_behaviors_(item_behaviors),
+                                                     entity_goals_(entity_goals),
+                                                     framebuffer_(window.framebuffer_size()),
+                                                     ui_metrics_(
+                                                         ui::UiDisplayMetrics::from_window_and_framebuffer(
+                                                             size_vec(window.window_size()),
+                                                             size_vec(framebuffer_))) {
   const auto start = std::chrono::steady_clock::now();
   previous_time_ = start;
   app_start_time_ = start;
@@ -154,6 +160,10 @@ int DesktopFrameLoop::run() {
     }
 
     sessions_.poll_shutdown();
+    if (!sessions_.shutdown_pending() && sessions_.active_session() == nullptr &&
+        !ensure_local_assets()) {
+      return 1;
+    }
     FrameTiming timing = begin_frame();
     platform::InputSnapshot platform_input = poll_platform_input();
     update_framebuffer_size();

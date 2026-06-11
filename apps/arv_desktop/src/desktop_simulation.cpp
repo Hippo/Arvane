@@ -64,6 +64,10 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
         }
       }
       if (active_session.client->connection_state() == net::ConnectionState::InGame) {
+        if (!ensure_remote_assets(active_session)) {
+          active_session.client->disconnect();
+          return true;
+        }
         update_block_outline_target(active_session);
         sessions_.collect_client_chunk_stream(active_session);
       }
@@ -92,6 +96,10 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
   }
 
   if (active_session.client->connection_state() != net::ConnectionState::InGame) {
+    return true;
+  }
+  if (!ensure_remote_assets(active_session)) {
+    active_session.client->disconnect();
     return true;
   }
 
