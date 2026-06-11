@@ -568,7 +568,7 @@ NetworkResult GameNetworkingSocketsTransport::send_outbound_command(const Outbou
 
   SteamNetworkingMessage_t* messages[1]{message};
   int64 result_or_message_number = 0;
-  sockets_->SendMessages(1, messages, &result_or_message_number);
+  sockets_->SendMessages(1, messages, &result_or_message_number, true);
   if (result_or_message_number < 0) {
     const EResult result = static_cast<EResult>(-result_or_message_number);
     if (result == k_EResultIgnored &&
