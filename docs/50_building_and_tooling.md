@@ -37,6 +37,25 @@ All development environments and IDE integrations should rely on CMake rather th
 
 ---
 
+## Dependency Management
+
+The root CMake project is responsible for third-party dependency acquisition.
+Dependencies that provide usable CMake projects should be declared with
+`FetchContent` at pinned revisions so a fresh checkout can configure without
+manual package installation.
+
+By default, Arvane fetches package-style dependencies such as GLFW, FreeType,
+HarfBuzz, and GameNetworkingSockets from their upstream repositories.
+Developers who want to use preinstalled packages for these dependencies can
+configure with `-DARVANE_USE_SYSTEM_DEPENDENCIES=ON`. This package-style fetch
+fallback can be disabled with `-DARVANE_FETCH_DEPENDENCIES=OFF`, but then those
+dependencies must already provide the expected CMake targets.
+
+Platform SDK libraries such as OpenGL may still be discovered with
+`find_package` because they are supplied by the host toolchain or graphics stack.
+
+---
+
 ## SDK
 
 Native plugins are built against the standalone SDK target:
