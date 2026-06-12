@@ -14,4 +14,10 @@ add_library(arv_physics STATIC
   src/raycast.cpp
 )
 target_include_directories(arv_physics PUBLIC include)
-target_link_libraries(arv_physics PUBLIC arv_core arv_player arv_voxel)
+target_link_libraries(arv_physics PUBLIC arv_core_headers arv_player_headers arv_voxel_headers)
+if(TARGET arv_core)
+  target_link_libraries(arv_physics PUBLIC arv_core)
+endif()
+if(TARGET arv_voxel)
+  target_link_libraries(arv_physics PUBLIC arv_voxel)
+endif()

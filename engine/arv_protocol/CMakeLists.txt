@@ -55,6 +55,12 @@ add_library(arv_protocol_player_movement STATIC
 target_include_directories(arv_protocol_player_movement PUBLIC include)
 target_link_libraries(arv_protocol_player_movement PUBLIC arv_protocol_headers)
 
+add_library(arv_protocol_player_input STATIC
+  src/player_input.cpp
+)
+target_include_directories(arv_protocol_player_input PUBLIC include)
+target_link_libraries(arv_protocol_player_input PUBLIC arv_protocol_headers arv_player_headers arv_voxel_headers)
+
 add_library(arv_protocol_entity_replication STATIC
   src/entity_updates.cpp
 )
@@ -75,7 +81,6 @@ add_library(arv_protocol STATIC
   src/item_stack_wire.cpp
   src/message_registry.cpp
   src/particles.cpp
-  src/player_input.cpp
   src/skins.cpp
   src/text_variables.cpp
   src/vehicles.cpp
@@ -83,4 +88,4 @@ add_library(arv_protocol STATIC
 )
 target_include_directories(arv_protocol PUBLIC include)
 target_link_libraries(arv_protocol PUBLIC arv_protocol_headers)
-target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_player_movement arv_protocol_entity_replication arv_core arv_crypto arv_player arv_text arv_voxel)
+target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_core arv_crypto arv_player arv_text arv_voxel)

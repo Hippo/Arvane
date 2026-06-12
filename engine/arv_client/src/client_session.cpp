@@ -275,11 +275,41 @@ bool ClientSession::submit_player_move(protocol::ServerboundPlayerMove move) {
   return true;
 }
 
-std::optional<protocol::ClientboundPlayerMoveCorrection> ClientSession::take_player_move_correction() {
+std::optional<protocol::ClientboundPlayerMoveCorrection>
+ClientSession::take_player_move_correction() {
   std::optional<protocol::ClientboundPlayerMoveCorrection> correction =
       std::move(latest_player_move_correction_);
   latest_player_move_correction_.reset();
   return correction;
+}
+
+std::optional<protocol::ClientboundPlayerVelocity> ClientSession::take_player_velocity() {
+  std::optional<protocol::ClientboundPlayerVelocity> velocity =
+      std::move(latest_player_velocity_);
+  latest_player_velocity_.reset();
+  return velocity;
+}
+
+std::optional<protocol::ClientboundSetMovementHz> ClientSession::take_movement_settings() {
+  std::optional<protocol::ClientboundSetMovementHz> settings =
+      std::move(latest_movement_settings_);
+  latest_movement_settings_.reset();
+  return settings;
+}
+
+std::optional<protocol::ClientboundPlayerPermissions> ClientSession::take_player_permissions() {
+  std::optional<protocol::ClientboundPlayerPermissions> permissions =
+      std::move(latest_player_permissions_);
+  latest_player_permissions_.reset();
+  return permissions;
+}
+
+std::optional<protocol::ClientboundPlayerMovementTuning>
+ClientSession::take_player_movement_tuning() {
+  std::optional<protocol::ClientboundPlayerMovementTuning> tuning =
+      std::move(latest_player_movement_tuning_);
+  latest_player_movement_tuning_.reset();
+  return tuning;
 }
 
 void ClientSession::send_pack_sync_failure(std::string reason, std::string failed_hash) {
@@ -793,6 +823,46 @@ void ClientSession::handle_message(std::span<const u8> payload) {
       handle_entity_snapshot(std::move(snapshot.value()));
       return;
     }
+    case protocol::MessageType::ClientboundPlayerVelocity: {
+      auto velocity = protocol::deserialize_clientbound_player_velocity(
+          decoded.value().payload);
+      if (!velocity) {
+        disconnect("invalid player velocity");
+        return;
+      }
+      latest_player_velocity_ = velocity.value();
+      return;
+    }
+    case protocol::MessageType::ClientboundSetMovementHz: {
+      auto settings = protocol::deserialize_clientbound_set_movement_hz(
+          decoded.value().payload);
+      if (!settings) {
+        disconnect("invalid movement settings");
+        return;
+      }
+      latest_movement_settings_ = settings.value();
+      return;
+    }
+    case protocol::MessageType::ClientboundPlayerPermissions: {
+      auto permissions = protocol::deserialize_clientbound_player_permissions(
+          decoded.value().payload);
+      if (!permissions) {
+        disconnect("invalid player permissions");
+        return;
+      }
+      latest_player_permissions_ = std::move(permissions.value());
+      return;
+    }
+    case protocol::MessageType::ClientboundPlayerMovementTuning: {
+      auto tuning = protocol::deserialize_clientbound_player_movement_tuning(
+          decoded.value().payload);
+      if (!tuning) {
+        disconnect("invalid player movement tuning");
+        return;
+      }
+      latest_player_movement_tuning_ = tuning.value();
+      return;
+    }
     case protocol::MessageType::ClientboundPlayerMoveCorrection: {
       auto correction = protocol::deserialize_clientbound_player_move_correction(
           decoded.value().payload);
@@ -816,6 +886,10 @@ void ClientSession::handle_connection_closed(std::string reason) {
   chunk_sections_.clear();
   entity_mirrors_.clear();
   latest_player_move_correction_.reset();
+  latest_player_velocity_.reset();
+  latest_movement_settings_.reset();
+  latest_player_permissions_.reset();
+  latest_player_movement_tuning_.reset();
   previous_chunk_interest_center_.reset();
   next_chunk_interest_sequence_ = 1;
   next_player_move_sequence_ = 1;

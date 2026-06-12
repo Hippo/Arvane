@@ -12,10 +12,11 @@ set(ARV_WEB_SHELL_FILES
 add_executable(arv_web
   src/main.cpp
   src/web_chunk_mesh.cpp
+  src/web_player_movement.cpp
 )
 
 target_compile_features(arv_web PRIVATE cxx_std_20)
-target_link_libraries(arv_web PRIVATE arv_client_session arv_net)
+target_link_libraries(arv_web PRIVATE arv_client_session arv_net arv_physics)
 set_target_properties(arv_web PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${ARV_WEB_DIST_DIR}"
   OUTPUT_NAME "arv_web"

@@ -11,6 +11,7 @@
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_updates.hpp"
 #include "arv/protocol/pack_sync.hpp"
+#include "arv/protocol/player_input.hpp"
 #include "arv/protocol/player_movement.hpp"
 
 #include <filesystem>
@@ -111,6 +112,10 @@ public:
   }
 
   [[nodiscard]] std::optional<protocol::ClientboundPlayerMoveCorrection> take_player_move_correction();
+  [[nodiscard]] std::optional<protocol::ClientboundPlayerVelocity> take_player_velocity();
+  [[nodiscard]] std::optional<protocol::ClientboundSetMovementHz> take_movement_settings();
+  [[nodiscard]] std::optional<protocol::ClientboundPlayerPermissions> take_player_permissions();
+  [[nodiscard]] std::optional<protocol::ClientboundPlayerMovementTuning> take_player_movement_tuning();
 
   [[nodiscard]] bool submit_player_move(protocol::ServerboundPlayerMove move);
 
@@ -161,6 +166,10 @@ private:
   std::vector<protocol::ClientboundChunkSectionData> chunk_sections_{};
   std::vector<ClientSessionEntityMirror> entity_mirrors_{};
   std::optional<protocol::ClientboundPlayerMoveCorrection> latest_player_move_correction_{};
+  std::optional<protocol::ClientboundPlayerVelocity> latest_player_velocity_{};
+  std::optional<protocol::ClientboundSetMovementHz> latest_movement_settings_{};
+  std::optional<protocol::ClientboundPlayerPermissions> latest_player_permissions_{};
+  std::optional<protocol::ClientboundPlayerMovementTuning> latest_player_movement_tuning_{};
   u32 next_chunk_interest_sequence_{1};
   u32 next_player_move_sequence_{1};
   std::optional<ChunkSectionCoord> previous_chunk_interest_center_{};

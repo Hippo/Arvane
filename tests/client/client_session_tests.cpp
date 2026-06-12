@@ -10,6 +10,7 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/pack_sync.hpp"
+#include "arv/protocol/player_input.hpp"
 #include "arv/protocol/player_movement.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "support/temp_dir.hpp"
@@ -468,6 +469,68 @@ TEST(ClientSessionTests, CompletesAuthPackDownloadRegistrySyncAndWorldJoin) {
   EXPECT_EQ(received_correction->flags, correction.flags);
   EXPECT_EQ(received_correction->reason, correction.reason);
   EXPECT_FALSE(session.take_player_move_correction().has_value());
+
+  arv::protocol::ClientboundPlayerVelocity velocity;
+  velocity.server_tick = 14;
+  velocity.player_id = arv::PlayerID{3};
+  velocity.velocity = {1.0F, 2.0F, 3.0F};
+  velocity.knockback_control_suppression_ticks = 4;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundPlayerVelocity,
+      arv::protocol::serialize_clientbound_player_velocity(velocity));
+  session.pump();
+  std::optional<arv::protocol::ClientboundPlayerVelocity> received_velocity =
+      session.take_player_velocity();
+  ASSERT_TRUE(received_velocity.has_value());
+  EXPECT_EQ(received_velocity->player_id, velocity.player_id);
+  EXPECT_EQ(received_velocity->velocity, velocity.velocity);
+  EXPECT_FALSE(session.take_player_velocity().has_value());
+
+  const arv::protocol::ClientboundSetMovementHz movement_settings{30.0F};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundSetMovementHz,
+      arv::protocol::serialize_clientbound_set_movement_hz(movement_settings));
+  session.pump();
+  std::optional<arv::protocol::ClientboundSetMovementHz> received_settings =
+      session.take_movement_settings();
+  ASSERT_TRUE(received_settings.has_value());
+  EXPECT_FLOAT_EQ(received_settings->movement_hz, 30.0F);
+  EXPECT_FALSE(session.take_movement_settings().has_value());
+
+  arv::protocol::ClientboundPlayerPermissions permissions;
+  permissions.game_mode_id = "creative";
+  permissions.core = arv::player::survival_core_permissions();
+  permissions.core.can_fly = true;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundPlayerPermissions,
+      arv::protocol::serialize_clientbound_player_permissions(permissions));
+  session.pump();
+  std::optional<arv::protocol::ClientboundPlayerPermissions> received_permissions =
+      session.take_player_permissions();
+  ASSERT_TRUE(received_permissions.has_value());
+  EXPECT_EQ(received_permissions->game_mode_id, "creative");
+  EXPECT_TRUE(received_permissions->core.can_fly);
+  EXPECT_FALSE(session.take_player_permissions().has_value());
+
+  const arv::protocol::ClientboundPlayerMovementTuning movement_tuning{9.5F, 6.25F};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundPlayerMovementTuning,
+      arv::protocol::serialize_clientbound_player_movement_tuning(movement_tuning));
+  session.pump();
+  std::optional<arv::protocol::ClientboundPlayerMovementTuning> received_tuning =
+      session.take_player_movement_tuning();
+  ASSERT_TRUE(received_tuning.has_value());
+  EXPECT_FLOAT_EQ(received_tuning->fly_speed, 9.5F);
+  EXPECT_FLOAT_EQ(received_tuning->fly_vertical_speed, 6.25F);
+  EXPECT_FALSE(session.take_player_movement_tuning().has_value());
 
   arv::protocol::ClientboundChunkSectionData chunk_data;
   chunk_data.world_id = arv::WorldID{1};

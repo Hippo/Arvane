@@ -8,6 +8,14 @@ set(ARV_IO_HEADERS
   include/arv/io/storage.hpp
 )
 
+add_library(arv_io_headers INTERFACE)
+target_include_directories(arv_io_headers INTERFACE include)
+target_link_libraries(arv_io_headers INTERFACE arv_core_headers)
+
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  return()
+endif()
+
 add_library(arv_io STATIC
   src/codec_binary.cpp
   src/codec_json.cpp
@@ -29,7 +37,7 @@ add_library(arv_io STATIC
   src/storage.cpp
 )
 target_include_directories(arv_io PUBLIC include)
-target_link_libraries(arv_io PUBLIC arv_core arv_platform)
+target_link_libraries(arv_io PUBLIC arv_io_headers arv_core arv_platform)
 target_link_libraries(arv_io PRIVATE yaml-cpp nlohmann_json::nlohmann_json)
 target_compile_definitions(arv_io PRIVATE
   "ARVANE_PROJECT_ROOT=\"${PROJECT_SOURCE_DIR}\""

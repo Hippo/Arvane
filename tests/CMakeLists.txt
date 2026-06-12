@@ -106,7 +106,9 @@ add_executable(arv_tests
   world/world_runtime_tests.cpp
   world/world_time_tests.cpp
   web/web_chunk_mesh_tests.cpp
+  web/web_player_movement_tests.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_web/src/web_chunk_mesh.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_web/src/web_player_movement.cpp
 )
 
 target_include_directories(arv_tests PRIVATE

@@ -34,6 +34,7 @@ target_link_libraries(arv_client_session
     arv_crypto
     arv_net
     arv_protocol_entity_replication
+    arv_protocol_player_input
     arv_protocol_player_movement
     arv_protocol_session
     arv_protocol_stream
