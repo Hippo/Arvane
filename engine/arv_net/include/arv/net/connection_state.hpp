@@ -1,7 +1,6 @@
 #pragma once
 
 #include "arv/core/id.hpp"
-#include "arv/core/types.hpp"
 
 namespace arv::net {
 

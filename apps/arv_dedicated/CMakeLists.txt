@@ -23,6 +23,7 @@ target_link_libraries(arv_dedicated PRIVATE
   arv_io
   arv_text
   arv_net
+  arv_net_gns
   arv_persistence
   arv_plugin
   arv_player

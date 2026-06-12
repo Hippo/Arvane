@@ -203,6 +203,7 @@ TEST(ChunkViewTests, RetargetKeepsResidentDrawItemsForLoadedChunkReuse) {
   NullRenderTarget target;
   arv::render::RenderCommandQueue renderer{target};
   arv::sched::JobSystem jobs;
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
   arv::io::ChunkDistanceConfig distances;
   distances.render_distance = 2;
   arv::io::ChunkPipelineConfig pipeline;
@@ -215,7 +216,7 @@ TEST(ChunkViewTests, RetargetKeepsResidentDrawItemsForLoadedChunkReuse) {
   EXPECT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -249,6 +250,7 @@ TEST(ChunkViewTests, RetargetKeepsCandidateSetDeduplicatedOnMovement) {
   NullRenderTarget target;
   arv::render::RenderCommandQueue renderer{target};
   arv::sched::JobSystem jobs;
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
   arv::desktop::ChunkViewState chunk_view;
   arv::io::ChunkDistanceConfig distances;
   distances.render_distance = 1;
@@ -262,7 +264,7 @@ TEST(ChunkViewTests, RetargetKeepsCandidateSetDeduplicatedOnMovement) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -276,7 +278,7 @@ TEST(ChunkViewTests, RetargetKeepsCandidateSetDeduplicatedOnMovement) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -316,6 +318,7 @@ TEST(ChunkViewTests, SchedulesMultipleChunkSectionsPerMeshJobBatch) {
   NullRenderTarget target;
   arv::render::RenderCommandQueue renderer{target};
   arv::sched::JobSystem jobs;
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
   jobs.start();
   arv::desktop::ChunkViewState chunk_view;
   arv::io::ChunkDistanceConfig distances;
@@ -329,7 +332,7 @@ TEST(ChunkViewTests, SchedulesMultipleChunkSectionsPerMeshJobBatch) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -368,6 +371,7 @@ TEST(ChunkViewTests, MeshSchedulingRespectsSectionPreparationBudget) {
   NullRenderTarget target;
   arv::render::RenderCommandQueue renderer{target};
   arv::sched::JobSystem jobs;
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
   jobs.start();
   arv::desktop::ChunkViewState chunk_view;
   arv::io::ChunkDistanceConfig distances;
@@ -382,7 +386,7 @@ TEST(ChunkViewTests, MeshSchedulingRespectsSectionPreparationBudget) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -404,6 +408,7 @@ TEST(ChunkViewTests, CancelChunkViewMeshJobsSignalsPendingJobsAndClearsViewState
   arv::sched::JobSystemConfig config;
   config.background_cpu_workers = 1U;
   arv::sched::JobSystem jobs{config};
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
   jobs.start();
   arv::desktop::ChunkViewState chunk_view;
   std::atomic_bool cancellation_observed{false};
@@ -428,7 +433,7 @@ TEST(ChunkViewTests, CancelChunkViewMeshJobsSignalsPendingJobsAndClearsViewState
   chunk_view.pending_meshes.push_back(
       {{{coord, 1U, 1U, 1U}}, std::move(job)});
 
-  arv::desktop::cancel_chunk_view_mesh_jobs(jobs, chunk_view);
+  arv::desktop::cancel_chunk_view_mesh_jobs(tasks, chunk_view);
 
   EXPECT_TRUE(chunk_view.pending_meshes.empty());
   EXPECT_TRUE(chunk_view.mesh_in_flight.empty());
@@ -454,6 +459,7 @@ TEST(ChunkViewTests, CompletedMeshWaitsForUploadReceiptBeforeRemeshing) {
   NullRenderTarget target;
   arv::render::RenderCommandQueue renderer{target};
   arv::sched::JobSystem jobs;
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
   jobs.start();
   arv::desktop::ChunkViewState chunk_view;
   arv::io::ChunkDistanceConfig distances;
@@ -468,7 +474,7 @@ TEST(ChunkViewTests, CompletedMeshWaitsForUploadReceiptBeforeRemeshing) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -485,7 +491,7 @@ TEST(ChunkViewTests, CompletedMeshWaitsForUploadReceiptBeforeRemeshing) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -505,7 +511,7 @@ TEST(ChunkViewTests, CompletedMeshWaitsForUploadReceiptBeforeRemeshing) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -528,6 +534,7 @@ TEST(ChunkViewTests, EmptySectionsPublishWithoutSchedulingMeshJob) {
   NullRenderTarget target;
   arv::render::RenderCommandQueue renderer{target};
   arv::sched::JobSystem jobs;
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
   arv::desktop::ChunkViewState chunk_view;
   arv::io::ChunkDistanceConfig distances;
   distances.render_distance = 1;
@@ -542,7 +549,7 @@ TEST(ChunkViewTests, EmptySectionsPublishWithoutSchedulingMeshJob) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,
@@ -576,6 +583,7 @@ TEST(ChunkViewTests, EmptySectionsDropResidentDrawItems) {
   NullRenderTarget target;
   arv::render::RenderCommandQueue renderer{target};
   arv::sched::JobSystem jobs;
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
   arv::desktop::ChunkViewState chunk_view;
   chunk_view.draw_items.emplace(
       arv::ChunkSectionCoord{{0, 0, 0}},
@@ -592,7 +600,7 @@ TEST(ChunkViewTests, EmptySectionsDropResidentDrawItems) {
   ASSERT_TRUE(arv::desktop::update_chunk_view(
       world,
       renderer,
-      jobs,
+      tasks,
       chunk_view,
       distances,
       pipeline,

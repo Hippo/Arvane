@@ -89,11 +89,21 @@ struct KeepAliveConfig {
   u32 client_timeout_seconds{30U};
 };
 
+struct WebNetworkConfig {
+  bool enabled{false};
+  std::string bind_address{"0.0.0.0"};
+  u16 port{42070};
+  std::string path{"/arvane"};
+  u32 max_frame_bytes{1024U * 1024U};
+  u32 max_pending_bytes{4U * 1024U * 1024U};
+};
+
 struct NetworkConfig {
   std::string bind_address{"0.0.0.0"};
   u16 port{42069};
   MovementValidationConfig movement{};
   KeepAliveConfig keep_alive{};
+  WebNetworkConfig web{};
 };
 
 struct DedicatedServerConfig {

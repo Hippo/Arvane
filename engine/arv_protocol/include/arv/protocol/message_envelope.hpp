@@ -25,6 +25,7 @@ struct DecodedMessage {
 
 inline constexpr usize MessageEnvelopeHeaderSize = sizeof(u16) + sizeof(u16) + sizeof(u32) +
                                                    sizeof(u32) + sizeof(u32) + sizeof(u32);
+inline constexpr usize MaxPacketFrameBytes = 1024U * 1024U;
 
 std::vector<u8> serialize_envelope(MessageEnvelope envelope, std::span<const u8> payload);
 

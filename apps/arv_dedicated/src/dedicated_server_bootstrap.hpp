@@ -20,7 +20,8 @@ namespace arv::dedicated {
 [[nodiscard]] Expected<void, DedicatedError> initialize_game_networking_environment(
     const net::GameNetworkingSocketsEnvironment& gns);
 
-[[nodiscard]] std::unique_ptr<net::ITransport> make_dedicated_server_transport();
+[[nodiscard]] std::unique_ptr<net::ITransport> make_dedicated_server_transport(
+    const io::NetworkConfig& network);
 
 [[nodiscard]] Expected<void, DedicatedError> start_dedicated_server_runtime(
     server::ServerRuntime& server,

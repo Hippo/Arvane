@@ -5,6 +5,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/chunk_streaming.hpp
   include/arv/protocol/entity_interaction.hpp
   include/arv/protocol/entity_replication.hpp
+  include/arv/protocol/entity_updates.hpp
   include/arv/protocol/explosion.hpp
   include/arv/protocol/handshake.hpp
   include/arv/protocol/inventory_sync.hpp
@@ -17,6 +18,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/pack_sync.hpp
   include/arv/protocol/particles.hpp
   include/arv/protocol/player_input.hpp
+  include/arv/protocol/player_movement.hpp
   include/arv/protocol/protocol_version.hpp
   include/arv/protocol/session_control.hpp
   include/arv/protocol/skins.hpp
@@ -26,28 +28,59 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/world_time.hpp
 )
 
-add_library(arv_protocol STATIC
+add_library(arv_protocol_headers INTERFACE)
+target_include_directories(arv_protocol_headers INTERFACE include)
+target_link_libraries(arv_protocol_headers INTERFACE arv_core_headers)
+
+add_library(arv_protocol_session STATIC
   src/auth.cpp
+  src/handshake.cpp
+  src/message_envelope.cpp
+  src/pack_sync.cpp
+  src/session_control.cpp
+  src/world_join.cpp
+)
+target_include_directories(arv_protocol_session PUBLIC include)
+target_link_libraries(arv_protocol_session PUBLIC arv_protocol_headers arv_crypto)
+
+add_library(arv_protocol_stream STATIC
+  src/chunk_streaming.cpp
+)
+target_include_directories(arv_protocol_stream PUBLIC include)
+target_link_libraries(arv_protocol_stream PUBLIC arv_protocol_headers arv_voxel_headers)
+
+add_library(arv_protocol_player_movement STATIC
+  src/player_movement.cpp
+)
+target_include_directories(arv_protocol_player_movement PUBLIC include)
+target_link_libraries(arv_protocol_player_movement PUBLIC arv_protocol_headers)
+
+add_library(arv_protocol_entity_replication STATIC
+  src/entity_updates.cpp
+)
+target_include_directories(arv_protocol_entity_replication PUBLIC include)
+target_link_libraries(arv_protocol_entity_replication PUBLIC arv_protocol_headers)
+
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  return()
+endif()
+
+add_library(arv_protocol STATIC
   src/block_updates.cpp
   src/chat.cpp
-  src/chunk_streaming.cpp
   src/entity_interaction.cpp
   src/entity_replication.cpp
   src/explosion.cpp
-  src/handshake.cpp
   src/inventory_sync.cpp
   src/item_stack_wire.cpp
-  src/message_envelope.cpp
   src/message_registry.cpp
-  src/pack_sync.cpp
   src/particles.cpp
   src/player_input.cpp
-  src/session_control.cpp
   src/skins.cpp
   src/text_variables.cpp
   src/vehicles.cpp
-  src/world_join.cpp
   src/world_time.cpp
 )
 target_include_directories(arv_protocol PUBLIC include)
-target_link_libraries(arv_protocol PUBLIC arv_core arv_crypto arv_player arv_text arv_voxel)
+target_link_libraries(arv_protocol PUBLIC arv_protocol_headers)
+target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_player_movement arv_protocol_entity_replication arv_core arv_crypto arv_player arv_text arv_voxel)

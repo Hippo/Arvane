@@ -84,6 +84,7 @@ public:
       DebugMenuState& debug_menu,
       DesktopLoadedAssets& assets,
       sched::JobSystem& world_jobs,
+      sched::ITaskExecutor& client_tasks,
       DesktopSessionManager& sessions,
       ui::UiTree& ui_tree,
       ui::FontUiTextMeasurer& ui_text_measurer,
@@ -333,6 +334,7 @@ private:
   DebugMenuState& debug_menu_;
   DesktopLoadedAssets& assets_;
   sched::JobSystem& world_jobs_;
+  sched::ITaskExecutor& client_tasks_;
   DesktopSessionManager& sessions_;
   ui::UiTree& ui_tree_;
   ui::FontUiTextMeasurer& ui_text_measurer_;

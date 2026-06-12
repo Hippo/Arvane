@@ -1,6 +1,6 @@
 #include "client_network_messages.hpp"
 
-#include "arv/asset/pack_bundle.hpp"
+#include "arv/asset/pack_bundle_cache.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/protocol/auth.hpp"
@@ -21,6 +21,7 @@
 #include "arv/protocol/world_time.hpp"
 #include "arv/text/language.hpp"
 
+#include "arv/client/client_pack_sync.hpp"
 #include "client_runtime_internal.hpp"
 
 #include <algorithm>
@@ -200,56 +201,40 @@ void handle_pack_manifest(
   }
 
   runtime.pack_sync.clear();
-  runtime.pack_sync.expected_registry_hash = std::move(manifest.registry_hash);
-  std::vector<std::string> missing_hashes;
-  protocol::ServerboundPackSyncStatus status;
-
   const std::filesystem::path cache_root =
       client_server_pack_cache_root(runtime.identity);
-  for (protocol::PackBundleDescriptor& descriptor : manifest.required_bundles) {
-    if (!asset::is_valid_bundle_hash(descriptor.bundle_hash) ||
-        descriptor.compressed_size == 0U ||
-        (manifest.max_bundle_size != 0U &&
-         descriptor.compressed_size > manifest.max_bundle_size)) {
-      send_pack_sync_failure(
-          runtime,
-          protocol::PackSyncStatus::VerificationFailed,
-          "Server sent an invalid pack manifest.",
-          descriptor.bundle_hash);
-      return;
-    }
-    if (!runtime.pack_sync.required_bundle_hashes.insert(descriptor.bundle_hash).second) {
-      send_pack_sync_failure(
-          runtime,
-          protocol::PackSyncStatus::VerificationFailed,
-          "Server sent duplicate pack bundle descriptors.",
-          descriptor.bundle_hash);
-      return;
-    }
+  auto plan = prepare_client_pack_sync_manifest(cache_root, std::move(manifest));
+  if (!plan) {
+    send_pack_sync_failure(
+        runtime,
+        plan.error().status,
+        plan.error().reason,
+        plan.error().failed_hash);
+    return;
+  }
 
-    if (asset::client_pack_cache_contains(cache_root, descriptor.bundle_hash)) {
-      remember_loaded_bundle(runtime.pack_sync, descriptor.bundle_hash);
-      remember_loaded_bundle_path(
-          runtime.pack_sync,
-          asset::client_pack_cache_path(cache_root, descriptor.bundle_hash));
-      status.already_cached_bundle_hashes.push_back(descriptor.bundle_hash);
-      continue;
-    }
-
-    missing_hashes.push_back(descriptor.bundle_hash);
-    status.needed_bundle_hashes.push_back(descriptor.bundle_hash);
+  ClientPackSyncManifestPlan manifest_plan = std::move(plan.value());
+  runtime.pack_sync.expected_registry_hash = std::move(manifest_plan.registry_hash);
+  for (std::string& hash : manifest_plan.required_bundle_hashes) {
+    runtime.pack_sync.required_bundle_hashes.insert(std::move(hash));
+  }
+  for (std::string& hash : manifest_plan.loaded_bundle_hashes) {
+    remember_loaded_bundle(runtime.pack_sync, std::move(hash));
+  }
+  for (std::filesystem::path& path : manifest_plan.loaded_bundle_paths) {
+    remember_loaded_bundle_path(runtime.pack_sync, std::move(path));
+  }
+  for (ClientPackSyncDownloadPlan& download_plan : manifest_plan.downloads) {
     ClientPackSyncDownload download;
-    download.descriptor = std::move(descriptor);
+    download.descriptor = std::move(download_plan.descriptor);
     download.bytes.resize(static_cast<usize>(download.descriptor.compressed_size));
     runtime.pack_sync.downloads.emplace(
         download.descriptor.bundle_hash,
         std::move(download));
   }
 
-  status.status =
-      missing_hashes.empty()
-          ? protocol::PackSyncStatus::AlreadyCached
-          : protocol::PackSyncStatus::NeedsDownload;
+  protocol::ServerboundPackSyncStatus status = std::move(manifest_plan.status);
+  const std::vector<std::string> missing_hashes = std::move(manifest_plan.missing_bundle_hashes);
   if (!runtime.sender.send_pack_sync_status(status)) {
     disconnect_and_clear(
         runtime,

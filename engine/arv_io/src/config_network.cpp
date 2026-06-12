@@ -56,6 +56,17 @@ void read_keep_alive_config(
   read_scalar(keep_alive, "client_timeout_seconds", config.client_timeout_seconds);
 }
 
+void read_web_network_config(
+    const DataValue& web,
+    WebNetworkConfig& config) {
+  read_scalar(web, "enabled", config.enabled);
+  read_scalar(web, "bind_address", config.bind_address);
+  read_scalar(web, "port", config.port);
+  read_scalar(web, "path", config.path);
+  read_scalar(web, "max_frame_bytes", config.max_frame_bytes);
+  read_scalar(web, "max_pending_bytes", config.max_pending_bytes);
+}
+
 void read_multiplayer_config(
     const DataValue& multiplayer,
     MultiplayerConfig& config) {
@@ -190,11 +201,24 @@ void put_network_keep_alive_config(
   put_under(root, prefix, "client_timeout_seconds", keep_alive.client_timeout_seconds);
 }
 
+void put_web_network_config(
+    DataValue& root,
+    std::string_view prefix,
+    const WebNetworkConfig& web) {
+  put_under(root, prefix, "enabled", web.enabled);
+  put_under(root, prefix, "bind_address", web.bind_address);
+  put_under(root, prefix, "port", web.port);
+  put_under(root, prefix, "path", web.path);
+  put_under(root, prefix, "max_frame_bytes", web.max_frame_bytes);
+  put_under(root, prefix, "max_pending_bytes", web.max_pending_bytes);
+}
+
 void put_network_config(DataValue& root, const NetworkConfig& network) {
   put(root, "network.bind_address", network.bind_address);
   put(root, "network.port", network.port);
   put_network_movement_config(root, "network.movement", network.movement);
   put_network_keep_alive_config(root, "network.keep_alive", network.keep_alive);
+  put_web_network_config(root, "network.web", network.web);
 }
 
 void put_multiplayer_config(DataValue& root, const MultiplayerConfig& multiplayer) {
@@ -260,6 +284,10 @@ void read_network_sections(const DataValue& root, EngineConfig& config) {
     const DataValue* keep_alive = network->get("keep_alive");
     if (keep_alive != nullptr) {
       read_keep_alive_config(*keep_alive, config.network.keep_alive);
+    }
+    const DataValue* web = network->get("web");
+    if (web != nullptr) {
+      read_web_network_config(*web, config.network.web);
     }
   }
 

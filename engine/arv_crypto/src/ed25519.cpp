@@ -1,6 +1,7 @@
 #include "arv/crypto/ed25519.hpp"
 
 #include "arv/crypto/crypto_init.hpp"
+#include "arv/crypto/random.hpp"
 
 #include "sodium_bytes.hpp"
 
@@ -28,13 +29,19 @@ Ed25519PublicKeyResult parse_prefixed_ed25519_public_key(std::string_view text) 
 Ed25519KeyPair generate_ed25519_keypair() noexcept {
   static_assert(ed25519_public_key_size == crypto_sign_PUBLICKEYBYTES);
   static_assert(ed25519_private_key_size == crypto_sign_SECRETKEYBYTES);
+  static_assert(crypto_sign_SEEDBYTES == 32);
   Ed25519KeyPair key_pair;
   if (!initialize_crypto()) {
     return key_pair;
   }
-  (void)crypto_sign_keypair(
+
+  std::array<std::byte, crypto_sign_SEEDBYTES> seed{};
+  fill_random(seed);
+  (void)crypto_sign_seed_keypair(
       reinterpret_cast<unsigned char*>(key_pair.public_key.bytes.data()),
-      reinterpret_cast<unsigned char*>(key_pair.private_key.bytes.data()));
+      reinterpret_cast<unsigned char*>(key_pair.private_key.bytes.data()),
+      reinterpret_cast<const unsigned char*>(seed.data()));
+  sodium_memzero(seed.data(), seed.size());
   return key_pair;
 }
 

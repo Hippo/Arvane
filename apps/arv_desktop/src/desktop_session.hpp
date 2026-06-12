@@ -89,6 +89,7 @@ struct DesktopSessionDependencies {
   const io::EngineConfig& config;
   render::RenderCommandQueue& renderer;
   sched::JobSystem& world_jobs;
+  sched::ITaskExecutor& client_tasks;
   const voxel::BlockRegistry& block_registry;
   u64 block_registry_hash{};
   const player::ItemRegistry& item_registry;

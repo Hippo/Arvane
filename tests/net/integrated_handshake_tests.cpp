@@ -4,12 +4,15 @@
 #include "arv/client/local_identity.hpp"
 #include "arv/net/gns_transport.hpp"
 #include "arv/net/in_process_transport.hpp"
+#include "arv/net/websocket_server_transport.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/message_type.hpp"
+#include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/player_movement.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/world_join.hpp"
 #include "arv/server/server_runtime.hpp"
@@ -22,10 +25,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <deque>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -34,6 +41,12 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace {
 
@@ -88,6 +101,36 @@ void send_raw_keep_alive(
        std::move(packet),
        arv::protocol::MessageType::ServerboundKeepAlive,
        arv::protocol::NetworkLane::Session});
+}
+
+std::vector<arv::u8> raw_auth_response_packet(
+    const arv::client::LocalPlayerIdentity& identity,
+    const arv::protocol::ClientboundAuthChallenge& challenge) {
+  const arv::crypto::PlayerProfileID profile_id =
+      identity.profile_id.empty()
+          ? arv::crypto::derive_profile_id_from_public_key(identity.key_pair.public_key)
+          : identity.profile_id;
+  const std::vector<arv::u8> signed_payload = arv::protocol::build_auth_signed_payload(
+      {arv::protocol::CurrentProtocolVersion,
+       challenge.server_instance_id,
+       challenge.session_id,
+       profile_id,
+       identity.key_pair.public_key,
+       challenge.nonce,
+       challenge.expires_server_tick});
+  const auto* first = reinterpret_cast<const std::byte*>(signed_payload.data());
+  arv::protocol::ServerboundAuthResponse response;
+  response.signature = arv::crypto::sign_ed25519(
+      std::span<const std::byte>{first, signed_payload.size()},
+      identity.key_pair.private_key);
+  return arv::protocol::serialize_envelope(
+      {arv::protocol::CurrentProtocolVersion,
+       arv::protocol::MessageType::ServerboundAuthResponse,
+       0,
+       0,
+       0,
+       0},
+      arv::protocol::serialize_auth_response(response));
 }
 
 std::vector<std::string> kick_reasons(std::span<const arv::net::NetworkEvent> events) {
@@ -334,6 +377,233 @@ std::optional<arv::u16> start_gns_server_runtime(
   return std::nullopt;
 }
 
+struct RawWebSocketSocket {
+  int fd{-1};
+
+  RawWebSocketSocket() = default;
+  ~RawWebSocketSocket() {
+    close();
+  }
+
+  RawWebSocketSocket(const RawWebSocketSocket&) = delete;
+  RawWebSocketSocket& operator=(const RawWebSocketSocket&) = delete;
+
+  RawWebSocketSocket(RawWebSocketSocket&& other) noexcept
+      : fd(other.fd),
+        read_buffer(std::move(other.read_buffer)) {
+    other.fd = -1;
+  }
+
+  RawWebSocketSocket& operator=(RawWebSocketSocket&& other) noexcept {
+    if (this != &other) {
+      close();
+      fd = other.fd;
+      read_buffer = std::move(other.read_buffer);
+      other.fd = -1;
+    }
+    return *this;
+  }
+
+  [[nodiscard]] bool connect(arv::u16 port) {
+    close();
+    fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+      return false;
+    }
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+      close();
+      return false;
+    }
+    const int flags = ::fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+      close();
+      return false;
+    }
+    return true;
+  }
+
+  void close() {
+    if (fd >= 0) {
+      (void)::close(fd);
+      fd = -1;
+    }
+    read_buffer.clear();
+  }
+
+  [[nodiscard]] bool send_text(std::string_view text) {
+    return send_bytes(
+        std::span<const arv::u8>{
+            reinterpret_cast<const arv::u8*>(text.data()),
+            text.size()});
+  }
+
+  [[nodiscard]] bool send_binary(std::span<const arv::u8> payload) {
+    std::vector<arv::u8> frame;
+    frame.push_back(0x82U);
+    if (payload.size() <= 125U) {
+      frame.push_back(static_cast<arv::u8>(0x80U | payload.size()));
+    } else if (payload.size() <= std::numeric_limits<arv::u16>::max()) {
+      frame.push_back(0x80U | 126U);
+      frame.push_back(static_cast<arv::u8>((payload.size() >> 8U) & 0xFFU));
+      frame.push_back(static_cast<arv::u8>(payload.size() & 0xFFU));
+    } else {
+      frame.push_back(0x80U | 127U);
+      const arv::u64 size = static_cast<arv::u64>(payload.size());
+      for (int shift = 56; shift >= 0; shift -= 8) {
+        frame.push_back(static_cast<arv::u8>((size >> shift) & 0xFFU));
+      }
+    }
+    constexpr std::array<arv::u8, 4> mask{0x45U, 0x23U, 0xA1U, 0x0FU};
+    frame.insert(frame.end(), mask.begin(), mask.end());
+    for (arv::usize i = 0; i < payload.size(); ++i) {
+      frame.push_back(static_cast<arv::u8>(payload[i] ^ mask[i % 4U]));
+    }
+    return send_bytes(frame);
+  }
+
+  void read_available() {
+    std::array<arv::u8, 4096> bytes{};
+    while (fd >= 0) {
+      const ssize_t received = ::recv(fd, bytes.data(), bytes.size(), 0);
+      if (received > 0) {
+        read_buffer.insert(read_buffer.end(), bytes.begin(), bytes.begin() + received);
+        continue;
+      }
+      if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        return;
+      }
+      return;
+    }
+  }
+
+  [[nodiscard]] bool consume_upgrade_response() {
+    const std::string text{read_buffer.begin(), read_buffer.end()};
+    const arv::usize header_end = text.find("\r\n\r\n");
+    if (header_end == std::string::npos ||
+        text.find("101 Switching Protocols") == std::string::npos) {
+      return false;
+    }
+    read_buffer.erase(
+        read_buffer.begin(),
+        read_buffer.begin() + static_cast<arv::isize>(header_end + 4U));
+    return true;
+  }
+
+  [[nodiscard]] std::vector<std::vector<arv::u8>> drain_binary_messages() {
+    read_available();
+    std::vector<std::vector<arv::u8>> messages;
+    while (read_buffer.size() >= 2U) {
+      const arv::u8 opcode = read_buffer[0] & 0x0FU;
+      arv::u64 payload_size = read_buffer[1] & 0x7FU;
+      arv::usize offset = 2U;
+      if (payload_size == 126U) {
+        if (read_buffer.size() < offset + 2U) {
+          break;
+        }
+        payload_size = (static_cast<arv::u64>(read_buffer[offset]) << 8U) |
+                       static_cast<arv::u64>(read_buffer[offset + 1U]);
+        offset += 2U;
+      } else if (payload_size == 127U) {
+        if (read_buffer.size() < offset + 8U) {
+          break;
+        }
+        payload_size = 0U;
+        for (arv::usize i = 0; i < 8U; ++i) {
+          payload_size = (payload_size << 8U) |
+                         static_cast<arv::u64>(read_buffer[offset + i]);
+        }
+        offset += 8U;
+      }
+      if (read_buffer.size() < offset + static_cast<arv::usize>(payload_size)) {
+        break;
+      }
+      if (opcode == 0x2U) {
+        messages.emplace_back(
+            read_buffer.begin() + static_cast<arv::isize>(offset),
+            read_buffer.begin() + static_cast<arv::isize>(offset + payload_size));
+      }
+      read_buffer.erase(
+          read_buffer.begin(),
+          read_buffer.begin() + static_cast<arv::isize>(offset + payload_size));
+    }
+    return messages;
+  }
+
+  [[nodiscard]] bool send_bytes(std::span<const arv::u8> bytes) {
+    while (!bytes.empty()) {
+#ifdef MSG_NOSIGNAL
+      const ssize_t sent = ::send(fd, bytes.data(), bytes.size(), MSG_NOSIGNAL);
+#else
+      const ssize_t sent = ::send(fd, bytes.data(), bytes.size(), 0);
+#endif
+      if (sent > 0) {
+        bytes = bytes.subspan(static_cast<arv::usize>(sent));
+        continue;
+      }
+      if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  std::vector<arv::u8> read_buffer{};
+};
+
+[[nodiscard]] std::vector<arv::u8> raw_protocol_packet(
+    arv::protocol::MessageType type,
+    std::span<const arv::u8> payload) {
+  return arv::protocol::serialize_envelope(
+      {arv::protocol::CurrentProtocolVersion,
+       type,
+       0,
+       0,
+       0,
+       0},
+      payload);
+}
+
+[[nodiscard]] bool send_raw_protocol_packet(
+    RawWebSocketSocket& socket,
+    arv::protocol::MessageType type,
+    std::vector<arv::u8> payload) {
+  return socket.send_binary(raw_protocol_packet(type, payload));
+}
+
+struct WebSocketRuntimeHarness {
+  std::unique_ptr<arv::server::ServerRuntime> server{};
+  arv::u16 port{};
+};
+
+std::optional<WebSocketRuntimeHarness> start_websocket_server_runtime(
+    arv::server::ServerStartInfo start_info,
+    std::string_view path = "/arvane-test") {
+  const auto seed = static_cast<arv::u16>(
+      std::chrono::steady_clock::now().time_since_epoch().count() % 1000);
+  for (arv::u16 attempt = 0; attempt < 100; ++attempt) {
+    const arv::u16 port = static_cast<arv::u16>(47000U + ((seed + attempt) % 1000U));
+    auto transport = std::make_unique<arv::net::WebSocketServerTransport>(
+        arv::net::WebSocketServerTransportOptions{
+            "127.0.0.1",
+            port,
+            std::string{path},
+            1024U * 1024U,
+            4U * 1024U * 1024U});
+    auto server = std::make_unique<arv::server::ServerRuntime>(std::move(transport));
+    start_info.listen_address = {"127.0.0.1", port};
+    if (server->start(start_info)) {
+      return WebSocketRuntimeHarness{std::move(server), port};
+    }
+  }
+  return std::nullopt;
+}
+
 } // namespace
 
 TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshake) {
@@ -423,6 +693,9 @@ TEST(IntegratedHandshakeTests, PackSyncCompletesBeforeWorldJoin) {
   arv::client::LocalPlayerIdentity identity =
       arv::client::make_ephemeral_local_identity("PackTester");
   identity.arvane_home = temp.path / "client_home";
+  const std::filesystem::path stale_partial =
+      identity.arvane_home / "cache" / "server-packs" / "tmp" / "stale.partial";
+  write_text(stale_partial / "manifest.json", "partial\n");
   client.set_local_identity(std::move(identity));
   ASSERT_TRUE(client.connect_integrated());
 
@@ -444,6 +717,7 @@ TEST(IntegratedHandshakeTests, PackSyncCompletesBeforeWorldJoin) {
   ASSERT_TRUE(arv::asset::client_pack_cache_contains(
       (temp.path / "client_home" / "cache" / "server-packs"),
       bundle.value().bundle_hash));
+  EXPECT_FALSE(std::filesystem::exists(stale_partial));
   ASSERT_EQ(client.multiplayer_pack_cache_paths().size(), 1U);
   EXPECT_EQ(
       client.multiplayer_pack_cache_paths().front(),
@@ -1146,6 +1420,383 @@ TEST(IntegratedHandshakeTests, RemoteConnectPathReceivesGeneratedChunks) {
   EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
   ASSERT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
+}
+
+TEST(IntegratedHandshakeTests, WebSocketLoopbackRunsServerProtocolHandshake) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Dedicated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.player_tuning = arv::player::default_player_tuning();
+  start_info.fluid_definition = arv::voxel::make_water_fluid_definition();
+
+  std::optional<WebSocketRuntimeHarness> harness =
+      start_websocket_server_runtime(start_info);
+  ASSERT_TRUE(harness.has_value());
+
+  RawWebSocketSocket client;
+  ASSERT_TRUE(client.connect(harness->port));
+  ASSERT_TRUE(client.send_text(
+      "GET /arvane-test HTTP/1.1\r\n"
+      "Host: 127.0.0.1\r\n"
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+      "Sec-WebSocket-Version: 13\r\n\r\n"));
+
+  bool upgraded = false;
+  for (int attempt = 0; attempt < 100 && !upgraded; ++attempt) {
+    harness->server->tick();
+    client.read_available();
+    upgraded = client.consume_upgrade_response();
+    if (!upgraded) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  ASSERT_TRUE(upgraded);
+
+  const arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity("WebSocketTester");
+  ASSERT_TRUE(client.send_binary(raw_client_hello_packet(identity)));
+
+  bool saw_clientbound_hello = false;
+  bool sent_auth_response = false;
+  bool saw_world_join = false;
+  for (int attempt = 0; attempt < 100 && (!saw_clientbound_hello || !saw_world_join);
+       ++attempt) {
+    harness->server->tick();
+    for (const std::vector<arv::u8>& message : client.drain_binary_messages()) {
+      const auto decoded = arv::protocol::deserialize_envelope(message);
+      ASSERT_TRUE(decoded) << decoded.error().message;
+      if (decoded.value().envelope.message_type ==
+          arv::protocol::MessageType::ClientboundHello) {
+        saw_clientbound_hello = true;
+      }
+      if (decoded.value().envelope.message_type ==
+          arv::protocol::MessageType::ClientboundAuthChallenge) {
+        const auto challenge =
+            arv::protocol::deserialize_auth_challenge(decoded.value().payload);
+        ASSERT_TRUE(challenge) << challenge.error().message;
+        if (!sent_auth_response) {
+          ASSERT_TRUE(client.send_binary(raw_auth_response_packet(identity, challenge.value())));
+          sent_auth_response = true;
+        }
+      }
+      if (decoded.value().envelope.message_type ==
+          arv::protocol::MessageType::ClientboundWorldJoinResult) {
+        const auto world_join =
+            arv::protocol::deserialize_clientbound_world_join_result(decoded.value().payload);
+        ASSERT_TRUE(world_join) << world_join.error().message;
+        EXPECT_TRUE(world_join.value().accepted);
+        saw_world_join = true;
+      }
+    }
+    if (!saw_clientbound_hello || !saw_world_join) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  EXPECT_TRUE(saw_clientbound_hello);
+  EXPECT_TRUE(saw_world_join);
+  ASSERT_EQ(harness->server->sessions().size(), 1U);
+  const arv::server::ServerSession* session = harness->server->sessions().first();
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->connection_state, arv::net::ConnectionState::InGame);
+}
+
+TEST(IntegratedHandshakeTests, WebSocketLoopbackCompletesPackSyncStreamsChunksAndRejectsInvalidMovement) {
+  ScopedTempDir temp("arvane_ws_pack_sync_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_text(packs / "enabled.yaml", "enabled:\n  - \"sync_pack\"\n");
+  write_pack_sync_test_manifest(packs, "sync_pack", "sync_pack");
+  write_text(
+      packs / "sync_pack/data/sync_pack/blocks.json",
+      "{\"blocks\":[]}\n");
+  write_text(
+      packs / "sync_pack/assets/sync_pack/textures/block/test.png",
+      "png");
+  auto pack_manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(pack_manager) << pack_manager.error().describe();
+  constexpr std::string_view RegistrySnapshot = "{\"format_version\":1,\"blocks\":[]}";
+  auto bundle = arv::asset::build_client_pack_bundle(
+      pack_manager.value(),
+      std::string{RegistrySnapshot});
+  ASSERT_TRUE(bundle) << bundle.error().message;
+  const auto& built_bundle = bundle.value();
+  const std::filesystem::path bundle_file =
+      temp.path / "server-cache" / (built_bundle.bundle_hash + ".apack");
+  auto write_bundle =
+      arv::asset::write_client_pack_bundle_file(bundle_file, built_bundle);
+  ASSERT_TRUE(write_bundle) << write_bundle.error().message;
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  arv::server::ServerChunkStreamingConfig streaming_config;
+  streaming_config.max_view_distance = 0;
+  streaming_config.max_chunks_sent_per_player_tick = 1;
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Dedicated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.player_tuning = arv::player::default_player_tuning();
+  start_info.fluid_definition = arv::voxel::make_water_fluid_definition();
+  start_info.chunk_streaming = streaming_config;
+  start_info.chunk_generation = make_generation_settings(block_registry);
+  start_info.max_generation_results_per_tick = 2;
+  start_info.max_pending_generation_jobs = 4;
+  start_info.pack_sync.enabled = true;
+  start_info.pack_sync.registry_hash = built_bundle.registry_hash;
+  start_info.pack_sync.registry_snapshot_json = std::string{RegistrySnapshot};
+  start_info.pack_sync.max_bundle_size =
+      static_cast<arv::u64>(built_bundle.apack_bytes.size());
+  start_info.pack_sync.required_bundles.push_back({
+      arv::protocol::PackBundleDescriptor{
+          "sync_pack",
+          "Sync Pack",
+          "1.0.0",
+          built_bundle.bundle_hash,
+          static_cast<arv::u64>(built_bundle.apack_bytes.size()),
+          built_bundle.uncompressed_size},
+      bundle_file});
+
+  std::optional<WebSocketRuntimeHarness> harness =
+      start_websocket_server_runtime(start_info);
+  ASSERT_TRUE(harness.has_value());
+
+  RawWebSocketSocket client;
+  ASSERT_TRUE(client.connect(harness->port));
+  ASSERT_TRUE(client.send_text(
+      "GET /arvane-test HTTP/1.1\r\n"
+      "Host: 127.0.0.1\r\n"
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+      "Sec-WebSocket-Version: 13\r\n\r\n"));
+
+  bool upgraded = false;
+  for (int attempt = 0; attempt < 100 && !upgraded; ++attempt) {
+    harness->server->tick();
+    client.read_available();
+    upgraded = client.consume_upgrade_response();
+    if (!upgraded) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  ASSERT_TRUE(upgraded);
+
+  const arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity("WebSocketPackTester");
+  ASSERT_TRUE(client.send_binary(raw_client_hello_packet(identity)));
+
+  std::vector<arv::u8> downloaded_bundle(built_bundle.apack_bytes.size());
+  std::vector<bool> received_bundle_chunks;
+  arv::u32 received_bundle_chunk_count = 0;
+  arv::u64 received_bundle_bytes = 0;
+  bool saw_clientbound_hello = false;
+  bool sent_auth_response = false;
+  bool saw_pack_manifest = false;
+  bool sent_download_request = false;
+  bool sent_loaded_status = false;
+  bool saw_registry_snapshot = false;
+  bool sent_pack_ready = false;
+  bool sent_chunk_interest = false;
+  bool sent_invalid_move = false;
+  bool saw_chunk_data = false;
+  bool saw_movement_correction = false;
+  std::optional<arv::protocol::ClientboundWorldJoinResult> world_join;
+
+  for (int attempt = 0;
+       attempt < 1500 && (!world_join.has_value() || !saw_chunk_data || !saw_movement_correction);
+       ++attempt) {
+    harness->server->tick();
+    for (const std::vector<arv::u8>& message : client.drain_binary_messages()) {
+      const auto decoded = arv::protocol::deserialize_envelope(message);
+      ASSERT_TRUE(decoded) << decoded.error().message;
+      switch (decoded.value().envelope.message_type) {
+      case arv::protocol::MessageType::ClientboundHello:
+        saw_clientbound_hello = true;
+        break;
+      case arv::protocol::MessageType::ClientboundAuthChallenge: {
+        const auto challenge =
+            arv::protocol::deserialize_auth_challenge(decoded.value().payload);
+        ASSERT_TRUE(challenge) << challenge.error().message;
+        if (!sent_auth_response) {
+          ASSERT_TRUE(client.send_binary(raw_auth_response_packet(identity, challenge.value())));
+          sent_auth_response = true;
+        }
+        break;
+      }
+      case arv::protocol::MessageType::ClientboundPackManifest: {
+        const auto manifest =
+            arv::protocol::deserialize_clientbound_pack_manifest(decoded.value().payload);
+        ASSERT_TRUE(manifest) << manifest.error().message;
+        ASSERT_EQ(manifest.value().required_bundles.size(), 1U);
+        EXPECT_EQ(manifest.value().registry_hash, built_bundle.registry_hash);
+        EXPECT_EQ(manifest.value().required_bundles.front().bundle_hash, built_bundle.bundle_hash);
+        saw_pack_manifest = true;
+        if (!sent_download_request) {
+          arv::protocol::ServerboundPackSyncStatus status;
+          status.status = arv::protocol::PackSyncStatus::NeedsDownload;
+          status.needed_bundle_hashes.push_back(built_bundle.bundle_hash);
+          ASSERT_TRUE(send_raw_protocol_packet(
+              client,
+              arv::protocol::MessageType::ServerboundPackSyncStatus,
+              arv::protocol::serialize_serverbound_pack_sync_status(status)));
+          ASSERT_TRUE(send_raw_protocol_packet(
+              client,
+              arv::protocol::MessageType::ServerboundPackRequest,
+              arv::protocol::serialize_serverbound_pack_request({built_bundle.bundle_hash})));
+          sent_download_request = true;
+        }
+        break;
+      }
+      case arv::protocol::MessageType::ClientboundPackDataChunk: {
+        const auto chunk =
+            arv::protocol::deserialize_clientbound_pack_data_chunk(decoded.value().payload);
+        ASSERT_TRUE(chunk) << chunk.error().message;
+        EXPECT_EQ(chunk.value().bundle_hash, built_bundle.bundle_hash);
+        ASSERT_NE(chunk.value().chunk_count, 0U);
+        ASSERT_LT(chunk.value().chunk_index, chunk.value().chunk_count);
+        ASSERT_LE(
+            chunk.value().byte_offset + static_cast<arv::u64>(chunk.value().bytes.size()),
+            static_cast<arv::u64>(downloaded_bundle.size()));
+        if (received_bundle_chunks.empty()) {
+          received_bundle_chunks.assign(chunk.value().chunk_count, false);
+        }
+        ASSERT_EQ(received_bundle_chunks.size(), chunk.value().chunk_count);
+        if (!received_bundle_chunks[chunk.value().chunk_index]) {
+          std::copy(
+              chunk.value().bytes.begin(),
+              chunk.value().bytes.end(),
+              downloaded_bundle.begin() +
+                  static_cast<std::ptrdiff_t>(chunk.value().byte_offset));
+          received_bundle_chunks[chunk.value().chunk_index] = true;
+          ++received_bundle_chunk_count;
+          received_bundle_bytes += chunk.value().bytes.size();
+        }
+        if (!sent_loaded_status &&
+            received_bundle_chunk_count == received_bundle_chunks.size() &&
+            received_bundle_bytes == downloaded_bundle.size()) {
+          EXPECT_EQ(downloaded_bundle, built_bundle.apack_bytes);
+          arv::protocol::ServerboundPackSyncStatus status;
+          status.status = arv::protocol::PackSyncStatus::Loaded;
+          status.already_cached_bundle_hashes.push_back(built_bundle.bundle_hash);
+          ASSERT_TRUE(send_raw_protocol_packet(
+              client,
+              arv::protocol::MessageType::ServerboundPackSyncStatus,
+              arv::protocol::serialize_serverbound_pack_sync_status(status)));
+          sent_loaded_status = true;
+        }
+        break;
+      }
+      case arv::protocol::MessageType::ClientboundRegistrySnapshot: {
+        const auto snapshot =
+            arv::protocol::deserialize_clientbound_registry_snapshot(decoded.value().payload);
+        ASSERT_TRUE(snapshot) << snapshot.error().message;
+        EXPECT_EQ(snapshot.value().registry_hash, built_bundle.registry_hash);
+        EXPECT_EQ(snapshot.value().registry_snapshot_payload, RegistrySnapshot);
+        saw_registry_snapshot = true;
+        if (!sent_pack_ready) {
+          arv::protocol::ServerboundPackReady ready;
+          ready.registry_hash = snapshot.value().registry_hash;
+          ready.loaded_bundle_hashes.push_back(built_bundle.bundle_hash);
+          ASSERT_TRUE(send_raw_protocol_packet(
+              client,
+              arv::protocol::MessageType::ServerboundPackReady,
+              arv::protocol::serialize_serverbound_pack_ready(ready)));
+          sent_pack_ready = true;
+        }
+        break;
+      }
+      case arv::protocol::MessageType::ClientboundWorldJoinResult: {
+        const auto result =
+            arv::protocol::deserialize_clientbound_world_join_result(decoded.value().payload);
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_TRUE(result.value().accepted);
+        world_join = result.value();
+        if (!sent_chunk_interest) {
+          const arv::ChunkSectionCoord center{{
+              arv::floor_div(
+                  static_cast<arv::i32>(std::floor(result.value().spawn_position.x)),
+                  arv::ChunkSize),
+              arv::floor_div(
+                  static_cast<arv::i32>(std::floor(result.value().spawn_position.y)),
+                  arv::ChunkSize),
+              arv::floor_div(
+                  static_cast<arv::i32>(std::floor(result.value().spawn_position.z)),
+                  arv::ChunkSize),
+          }};
+          arv::protocol::ServerboundChunkInterestUpdate update;
+          update.world_id = result.value().world_id;
+          update.center_chunk = center;
+          update.client_view_distance = 0;
+          update.sequence_id = 1;
+          ASSERT_TRUE(send_raw_protocol_packet(
+              client,
+              arv::protocol::MessageType::ServerboundChunkInterestUpdate,
+              arv::protocol::serialize_serverbound_chunk_interest_update(update)));
+          sent_chunk_interest = true;
+        }
+        if (!sent_invalid_move) {
+          arv::protocol::ServerboundPlayerMove move;
+          move.sequence = 1;
+          move.client_tick = 1;
+          move.position = {1000.0F, 20.0F, 1000.0F};
+          move.flags = arv::protocol::PlayerMoveFlags::OnGround;
+          ASSERT_TRUE(send_raw_protocol_packet(
+              client,
+              arv::protocol::MessageType::ServerboundPlayerMove,
+              arv::protocol::serialize_serverbound_player_move(move)));
+          sent_invalid_move = true;
+        }
+        break;
+      }
+      case arv::protocol::MessageType::ClientboundChunkSectionData: {
+        const auto chunk =
+            arv::protocol::deserialize_clientbound_chunk_section_data(decoded.value().payload);
+        ASSERT_TRUE(chunk) << chunk.error().message;
+        ASSERT_TRUE(world_join.has_value());
+        EXPECT_EQ(chunk.value().world_id, world_join->world_id);
+        saw_chunk_data = true;
+        break;
+      }
+      case arv::protocol::MessageType::ClientboundPlayerMoveCorrection:
+        saw_movement_correction = true;
+        break;
+      default:
+        break;
+      }
+    }
+    if (!world_join.has_value() || !saw_chunk_data || !saw_movement_correction) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  EXPECT_TRUE(saw_clientbound_hello);
+  EXPECT_TRUE(saw_pack_manifest);
+  EXPECT_TRUE(sent_download_request);
+  EXPECT_TRUE(sent_loaded_status);
+  EXPECT_TRUE(saw_registry_snapshot);
+  EXPECT_TRUE(sent_pack_ready);
+  EXPECT_TRUE(world_join.has_value());
+  EXPECT_TRUE(sent_chunk_interest);
+  EXPECT_TRUE(saw_chunk_data);
+  EXPECT_TRUE(sent_invalid_move);
+  EXPECT_TRUE(saw_movement_correction);
+  ASSERT_EQ(harness->server->sessions().size(), 1U);
+  const arv::server::ServerSession* session = harness->server->sessions().first();
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->connection_state, arv::net::ConnectionState::InGame);
+  EXPECT_GT(harness->server->voxel_world().loaded_chunk_count(), 0U);
 }
 
 TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackReceivesGeneratedChunks) {

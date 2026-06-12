@@ -24,6 +24,19 @@ bool valid_config_pack_id(std::string_view id) noexcept {
   return true;
 }
 
+[[nodiscard]] bool valid_websocket_path(std::string_view path) noexcept {
+  if (path.empty() || path.front() != '/') {
+    return false;
+  }
+  for (const char c : path) {
+    const bool control = static_cast<unsigned char>(c) <= 0x20U;
+    if (control || c == '?' || c == '#' || c == '\\') {
+      return false;
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] bool is_supported_skin_resolution(u16 size) noexcept {
   return size == 64U || size == 128U || size == 256U || size == 512U ||
          size == 1024U || size == 2048U;
@@ -98,6 +111,24 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   if (config.network.keep_alive.client_timeout_seconds <=
       config.network.keep_alive.interval_seconds) {
     return ConfigError{"network.keep_alive.client_timeout_seconds must be greater than interval_seconds"};
+  }
+  if (config.network.web.enabled) {
+    if (config.network.web.bind_address.empty()) {
+      return ConfigError{"network.web.bind_address must be non-empty when enabled"};
+    }
+    if (config.network.web.port == 0U) {
+      return ConfigError{"network.web.port must be non-zero when enabled"};
+    }
+    if (!valid_websocket_path(config.network.web.path)) {
+      return ConfigError{"network.web.path must start with / and not contain whitespace, query, fragment, or backslash"};
+    }
+    if (config.network.web.max_frame_bytes == 0U ||
+        config.network.web.max_pending_bytes == 0U) {
+      return ConfigError{"network.web byte limits must be non-zero when enabled"};
+    }
+    if (config.network.web.max_pending_bytes < config.network.web.max_frame_bytes) {
+      return ConfigError{"network.web.max_pending_bytes must be >= max_frame_bytes"};
+    }
   }
   for (const std::string& pack_id : config.native_plugins.allowed_packs) {
     if (!valid_config_pack_id(pack_id)) {

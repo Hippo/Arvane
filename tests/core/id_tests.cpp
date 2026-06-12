@@ -1,4 +1,5 @@
 #include "arv/core/id.hpp"
+#include "arv/core/types.hpp"
 
 #include <gtest/gtest.h>
 

@@ -21,6 +21,7 @@
 #include "arv/platform/glfw_window.hpp"
 #include "arv/plugin/plugin_manager.hpp"
 #include "arv/sched/job_system.hpp"
+#include "arv/sched/task_executor.hpp"
 #include "arv/world/entity_goal_registry.hpp"
 
 #include <utility>
@@ -201,6 +202,7 @@ int DesktopApplication::run(int argc, char** argv) {
       make_client_job_system_config(config.jobs, thread_budget);
   sched::JobSystem world_jobs{client_job_config};
   world_jobs.start();
+  sched::JobSystemTaskExecutor client_tasks{world_jobs};
   core::info(
       "jobs",
       "hardware_threads={} reserved_threads={} server_workers={} client_workers={} client_critical={} client_io={}",
@@ -219,6 +221,7 @@ int DesktopApplication::run(int argc, char** argv) {
           config,
           render_commands,
           world_jobs,
+          client_tasks,
           assets.block_registry,
           assets.block_registry_hash,
           assets.item_registry,
@@ -272,6 +275,7 @@ int DesktopApplication::run(int argc, char** argv) {
       debug_menu,
       assets,
       world_jobs,
+      client_tasks,
       sessions,
       ui_tree,
       ui_text_measurer,

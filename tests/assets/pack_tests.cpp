@@ -468,6 +468,15 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
   ASSERT_TRUE(write_bundle) << write_bundle.error().message;
 
   const std::filesystem::path cache_root = temp.path / "cache";
+  const std::filesystem::path incomplete_cache_root = temp.path / "incomplete-cache";
+  const std::filesystem::path incomplete_cache =
+      arv::asset::client_pack_cache_path(incomplete_cache_root, first.value().bundle_hash);
+  write_text(incomplete_cache / "manifest.json", first.value().manifest_json);
+  write_text(incomplete_cache / "registry-client.json", "{\"format_version\":1,\"blocks\":[]}");
+  EXPECT_FALSE(arv::asset::client_pack_cache_contains(
+      incomplete_cache_root,
+      first.value().bundle_hash));
+
   auto install = arv::asset::install_client_pack_bundle_from_file(
       bundle_file,
       cache_root,
@@ -486,6 +495,16 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
       first.value().bundle_hash);
   ASSERT_TRUE(cached) << cached.error().message;
   EXPECT_TRUE(cached.value().cache_hit);
+
+  write_text(install.value().cache_path / "manifest.json", "corrupt\n");
+  EXPECT_FALSE(arv::asset::client_pack_cache_contains(cache_root, first.value().bundle_hash));
+  auto repaired = arv::asset::install_client_pack_bundle_from_file(
+      bundle_file,
+      cache_root,
+      first.value().bundle_hash);
+  ASSERT_TRUE(repaired) << repaired.error().message;
+  EXPECT_FALSE(repaired.value().cache_hit);
+  EXPECT_TRUE(arv::asset::client_pack_cache_contains(cache_root, first.value().bundle_hash));
 
   std::vector<arv::u8> corrupted = first.value().apack_bytes;
   corrupted.back() ^= 0xFFU;

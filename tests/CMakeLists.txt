@@ -33,10 +33,12 @@ add_executable(arv_tests
   base/base_behavior_tests.cpp
   blueprint/blueprint_codec_tests.cpp
   client/chunk_interest_tests.cpp
+  client/client_session_tests.cpp
   client/client_runtime_tests.cpp
   client/camera_tests.cpp
   client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp
+  client/pack_sync_plan_tests.cpp
   client/particle_system_tests.cpp
   client/local_profile_tests.cpp
   client/ui_tests.cpp
@@ -61,6 +63,7 @@ add_executable(arv_tests
   text/rich_text_tests.cpp
   net/in_process_transport_tests.cpp
   net/integrated_handshake_tests.cpp
+  net/websocket_server_transport_tests.cpp
   persistence/region_file_tests.cpp
   persistence/save_tests.cpp
   physics/collision_tests.cpp
@@ -102,12 +105,15 @@ add_executable(arv_tests
   world/world_generation_tests.cpp
   world/world_runtime_tests.cpp
   world/world_time_tests.cpp
+  web/web_chunk_mesh_tests.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_web/src/web_chunk_mesh.cpp
 )
 
 target_include_directories(arv_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_SOURCE_DIR}/apps/arv_dedicated/src
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src
+  ${CMAKE_SOURCE_DIR}/apps/arv_web/src
 )
 target_compile_definitions(arv_tests PRIVATE
   ARVANE_TEST_ASSET_ROOT="${CMAKE_SOURCE_DIR}/arvane_home/packs/arvane_base/assets/arvane"
@@ -131,6 +137,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_base_ui
   arv_blueprint
   arv_client
+  arv_client_session
   arv_command
   arv_core
   arv_crypto
@@ -138,6 +145,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_io
   arv_text
   arv_net
+  arv_net_gns
   arv_persistence
   arv_physics
   arv_plugin

@@ -11,6 +11,7 @@ set(ARV_CORE_HEADERS
   include/arv/core/log.hpp
   include/arv/core/math.hpp
   include/arv/core/perf_stats.hpp
+  include/arv/core/primitives.hpp
   include/arv/core/profiling.hpp
   include/arv/core/rate_limiter.hpp
   include/arv/core/string.hpp
@@ -19,11 +20,31 @@ set(ARV_CORE_HEADERS
   include/arv/core/types.hpp
 )
 
+add_library(arv_core_headers INTERFACE)
+target_include_directories(arv_core_headers INTERFACE include)
+if(TARGET unordered_dense)
+  target_link_libraries(arv_core_headers INTERFACE unordered_dense)
+endif()
+if(TARGET concurrentqueue)
+  target_link_libraries(arv_core_headers INTERFACE concurrentqueue)
+endif()
+if(TARGET readerwriterqueue)
+  target_link_libraries(arv_core_headers INTERFACE readerwriterqueue)
+endif()
+if(TARGET spdlog::spdlog)
+  target_link_libraries(arv_core_headers INTERFACE spdlog::spdlog)
+endif()
+
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  return()
+endif()
+
 add_library(arv_core STATIC
   src/log.cpp
   src/perf_stats.cpp
 )
 target_include_directories(arv_core PUBLIC include)
+target_link_libraries(arv_core PUBLIC arv_core_headers)
 target_link_libraries(arv_core PUBLIC unordered_dense spdlog::spdlog concurrentqueue readerwriterqueue)
 target_compile_definitions(arv_core PUBLIC
   ARVANE_ENABLE_PROFILING=$<BOOL:${ARVANE_ENABLE_PROFILING}>

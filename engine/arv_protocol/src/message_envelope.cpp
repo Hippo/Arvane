@@ -22,6 +22,9 @@ Expected<DecodedMessage, ProtocolError> deserialize_envelope(std::span<const u8>
   if (bytes.size() < MessageEnvelopeHeaderSize) {
     return Expected<DecodedMessage, ProtocolError>::failure(ProtocolError{"packet shorter than envelope"});
   }
+  if (bytes.size() > MaxPacketFrameBytes) {
+    return Expected<DecodedMessage, ProtocolError>::failure(ProtocolError{"packet exceeds maximum frame size"});
+  }
 
   MessageReader reader(bytes);
   auto version = reader.read<u16>();

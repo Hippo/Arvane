@@ -70,6 +70,17 @@ TEST(ProtocolTests, RejectsPayloadSizeMismatch) {
   EXPECT_FALSE(decoded);
 }
 
+TEST(ProtocolTests, RejectsOversizedPacketFrameBeforePayloadCopy) {
+  std::vector<arv::u8> packet = arv::protocol::serialize_envelope(
+      {arv::protocol::CurrentProtocolVersion, arv::protocol::MessageType::Ping, 0, 1, 0, 0},
+      {});
+  packet.resize(arv::protocol::MaxPacketFrameBytes + 1U, 0xAB);
+
+  const auto decoded = arv::protocol::deserialize_envelope(packet);
+  ASSERT_FALSE(decoded);
+  EXPECT_EQ(decoded.error().message, "packet exceeds maximum frame size");
+}
+
 TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto registry = arv::protocol::MessageRegistry::make_core_registry();
   const auto ping = registry.lookup(arv::protocol::MessageType::Ping);

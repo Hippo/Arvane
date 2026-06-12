@@ -80,6 +80,7 @@ target_link_libraries(arv_desktop PRIVATE
   arv_io
   arv_text
   arv_net
+  arv_net_gns
   arv_platform
   arv_persistence
   arv_plugin

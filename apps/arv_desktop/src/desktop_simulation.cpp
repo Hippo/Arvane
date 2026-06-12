@@ -115,7 +115,7 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
   return update_chunk_view(
       active_session.client_world,
       renderer_,
-      world_jobs_,
+      client_tasks_,
       active_session.chunk_view,
       config_.chunks,
       config_.chunk_pipeline,

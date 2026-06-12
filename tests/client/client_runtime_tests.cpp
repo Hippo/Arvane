@@ -10,6 +10,7 @@
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/particles.hpp"
+#include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/text_variables.hpp"
@@ -156,6 +157,50 @@ std::vector<arv::protocol::ServerboundKeepAlive> serverbound_keep_alives(
     }
   }
   return keep_alives;
+}
+
+std::vector<arv::protocol::ServerboundPackSyncStatus> serverbound_pack_sync_statuses(
+    const std::vector<arv::net::NetworkEvent>& events) {
+  std::vector<arv::protocol::ServerboundPackSyncStatus> statuses;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ServerboundPackSyncStatus) {
+      continue;
+    }
+    const auto status =
+        arv::protocol::deserialize_serverbound_pack_sync_status(decoded.value().payload);
+    if (status) {
+      statuses.push_back(status.value());
+    }
+  }
+  return statuses;
+}
+
+std::vector<arv::protocol::ServerboundPackReady> serverbound_pack_ready_messages(
+    const std::vector<arv::net::NetworkEvent>& events) {
+  std::vector<arv::protocol::ServerboundPackReady> ready_messages;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (!decoded ||
+        decoded.value().envelope.message_type !=
+            arv::protocol::MessageType::ServerboundPackReady) {
+      continue;
+    }
+    const auto ready =
+        arv::protocol::deserialize_serverbound_pack_ready(decoded.value().payload);
+    if (ready) {
+      ready_messages.push_back(ready.value());
+    }
+  }
+  return ready_messages;
 }
 
 std::vector<arv::protocol::ServerboundChatMessage> serverbound_chat_messages(
@@ -2351,4 +2396,62 @@ TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {
   EXPECT_FALSE(client.local_player_id().has_value());
   EXPECT_FALSE(client.local_entity_id().has_value());
   EXPECT_TRUE(client.drain_received_block_updates().empty());
+}
+
+TEST(ClientRuntimeTests, RegistrySnapshotMismatchReportsFailureAndBlocksJoin) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  (void)server_transport->poll_events();
+
+  arv::protocol::ClientboundHello hello;
+  hello.accepted = true;
+  hello.assigned_session_id = arv::SessionID{1};
+  hello.assigned_player_id = arv::PlayerID{1};
+  hello.initial_world_id = arv::WorldID{1};
+  hello.required_followup_sync = true;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundHello,
+      arv::protocol::serialize_clientbound_hello(hello));
+  client.fixed_tick(1);
+  ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::RegistrySync);
+
+  arv::protocol::ClientboundPackManifest manifest;
+  manifest.registry_hash = std::string(64U, 'a');
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundPackManifest,
+      arv::protocol::serialize_clientbound_pack_manifest(manifest));
+  client.fixed_tick(2);
+
+  std::vector<arv::protocol::ServerboundPackSyncStatus> statuses =
+      serverbound_pack_sync_statuses(server_transport->poll_events());
+  ASSERT_EQ(statuses.size(), 1U);
+  EXPECT_EQ(statuses.front().status, arv::protocol::PackSyncStatus::AlreadyCached);
+  EXPECT_TRUE(statuses.front().needed_bundle_hashes.empty());
+  ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::RegistrySync);
+
+  arv::protocol::ClientboundRegistrySnapshot snapshot;
+  snapshot.registry_hash = std::string(64U, 'b');
+  snapshot.registry_snapshot_payload = "{\"format_version\":1,\"blocks\":[]}";
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundRegistrySnapshot,
+      arv::protocol::serialize_clientbound_registry_snapshot(snapshot));
+  client.fixed_tick(3);
+
+  const std::vector<arv::net::NetworkEvent> events = server_transport->poll_events();
+  statuses = serverbound_pack_sync_statuses(events);
+  ASSERT_EQ(statuses.size(), 1U);
+  EXPECT_EQ(statuses.front().status, arv::protocol::PackSyncStatus::VerificationFailed);
+  EXPECT_TRUE(statuses.front().failure_reason.find("registry snapshot") != std::string::npos);
+  EXPECT_TRUE(serverbound_pack_ready_messages(events).empty());
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::Disconnected);
 }

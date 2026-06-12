@@ -70,6 +70,7 @@ public:
 private:
   friend class CancellationSource;
   friend class JobSystem;
+  friend class SingleThreadTaskExecutor;
 
   explicit CancellationToken(std::shared_ptr<std::atomic_bool> canceled) noexcept;
 

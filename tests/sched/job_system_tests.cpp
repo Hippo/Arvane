@@ -1,6 +1,7 @@
 #include "arv/sched/completion_queue.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/sched/owner_thread.hpp"
+#include "arv/sched/task_executor.hpp"
 
 #include <gtest/gtest.h>
 
@@ -239,6 +240,141 @@ TEST(JobSystemTests, CompletionQueueDrainsConcurrentWorkerResults) {
     EXPECT_EQ(drained[static_cast<arv::usize>(value)], value);
   }
   EXPECT_TRUE(completions.empty());
+}
+
+TEST(TaskExecutorTests, SingleThreadExecutorRunsOnlyWhenPumped) {
+  arv::sched::SingleThreadTaskExecutor executor;
+  int value = 0;
+
+  const arv::sched::JobHandle handle = executor.submit(
+      desc("single", arv::sched::JobLane::BackgroundCpu),
+      [&value](const arv::sched::CancellationToken&) {
+        value = 7;
+      });
+
+  ASSERT_TRUE(handle.valid());
+  EXPECT_EQ(value, 0);
+  executor.pump({1ms, 1});
+  EXPECT_EQ(value, 7);
+  EXPECT_EQ(executor.stats().completed, 1U);
+}
+
+TEST(TaskExecutorTests, SingleThreadExecutorRespectsMaxTasksPerPump) {
+  arv::sched::SingleThreadTaskExecutor executor;
+  std::vector<int> values;
+
+  for (int value = 0; value < 3; ++value) {
+    ASSERT_TRUE(executor.submit(
+        desc("single", arv::sched::JobLane::BackgroundCpu),
+        [&values, value](const arv::sched::CancellationToken&) {
+          values.push_back(value);
+        }).valid());
+  }
+
+  executor.pump({1ms, 2});
+  ASSERT_EQ(values.size(), 2U);
+  EXPECT_EQ(executor.queued_count(), 1U);
+  executor.pump({1ms, 2});
+  ASSERT_EQ(values.size(), 3U);
+  EXPECT_EQ(values[2], 2);
+}
+
+TEST(TaskExecutorTests, SingleThreadExecutorMaintainsQueuedStatsWhenPumped) {
+  arv::sched::SingleThreadTaskExecutor executor;
+
+  ASSERT_TRUE(executor.submit(
+      desc("queued_1", arv::sched::JobLane::BackgroundCpu),
+      [](const arv::sched::CancellationToken&) {}).valid());
+  ASSERT_TRUE(executor.submit(
+      desc("queued_2", arv::sched::JobLane::BackgroundCpu),
+      [](const arv::sched::CancellationToken&) {}).valid());
+
+  EXPECT_EQ(executor.stats().queued_background_cpu, 2U);
+  executor.pump({1ms, 1});
+  EXPECT_EQ(executor.stats().completed, 1U);
+  EXPECT_EQ(executor.stats().queued_background_cpu, 1U);
+  EXPECT_EQ(executor.stats().running_background_cpu, 0U);
+  executor.pump({1ms, 1});
+  EXPECT_EQ(executor.stats().queued_background_cpu, 0U);
+}
+
+TEST(TaskExecutorTests, SingleThreadExecutorRespectsTimeBudgetBetweenTasks) {
+  std::chrono::steady_clock::time_point now{};
+  arv::sched::SingleThreadTaskExecutor executor{[&now] {
+    return now;
+  }};
+  std::vector<int> values;
+
+  ASSERT_TRUE(executor.submit(
+      desc("first", arv::sched::JobLane::BackgroundCpu),
+      [&values, &now](const arv::sched::CancellationToken&) {
+        values.push_back(1);
+        now += 2ms;
+      }).valid());
+  ASSERT_TRUE(executor.submit(
+      desc("second", arv::sched::JobLane::BackgroundCpu),
+      [&values](const arv::sched::CancellationToken&) {
+        values.push_back(2);
+      }).valid());
+
+  executor.pump({1ms, 8});
+  ASSERT_EQ(values.size(), 1U);
+  EXPECT_EQ(executor.queued_count(), 1U);
+}
+
+TEST(TaskExecutorTests, SingleThreadExecutorCanceledQueuedTaskDoesNotRun) {
+  arv::sched::SingleThreadTaskExecutor executor;
+  bool ran = false;
+
+  const arv::sched::JobHandle handle = executor.submit(
+      desc("cancel", arv::sched::JobLane::BackgroundCpu),
+      [&ran](const arv::sched::CancellationToken&) {
+        ran = true;
+      });
+
+  executor.cancel(handle);
+  executor.pump({1ms, 8});
+  EXPECT_FALSE(ran);
+  EXPECT_EQ(executor.stats().canceled, 1U);
+  EXPECT_EQ(executor.stats().started, 0U);
+}
+
+TEST(TaskExecutorTests, SingleThreadExecutorPumpsCompletionsOnTarget) {
+  arv::sched::SingleThreadTaskExecutor executor;
+  int value = 0;
+  arv::sched::JobDesc job_desc = desc("completion", arv::sched::JobLane::BackgroundCpu);
+  job_desc.completion_target = arv::sched::JobCompletionTarget::Main;
+
+  ASSERT_TRUE(executor.submit_with_completion(
+      std::move(job_desc),
+      [](const arv::sched::CancellationToken&) {},
+      [&value] {
+        value = 5;
+      }).valid());
+
+  executor.pump({1ms, 1});
+  EXPECT_EQ(value, 0);
+  executor.pump_completions(arv::sched::JobCompletionTarget::World, 8);
+  EXPECT_EQ(value, 0);
+  executor.pump_completions(arv::sched::JobCompletionTarget::Main, 8);
+  EXPECT_EQ(value, 5);
+}
+
+TEST(TaskExecutorTests, JobSystemTaskExecutorDelegatesToNativeJobSystem) {
+  auto jobs = make_test_job_system();
+  arv::sched::JobSystemTaskExecutor executor{jobs};
+  std::atomic<int> value{0};
+
+  const arv::sched::JobHandle handle = executor.submit(
+      desc("native_executor", arv::sched::JobLane::BackgroundCpu),
+      [&value](const arv::sched::CancellationToken&) {
+        value.store(9, std::memory_order_release);
+      });
+
+  ASSERT_TRUE(handle.valid());
+  jobs.join();
+  EXPECT_TRUE(executor.supports_parallelism());
+  EXPECT_EQ(value.load(std::memory_order_acquire), 9);
 }
 
 TEST(JobSystemTests, SpscQueueMovesValuesWithoutBlocking) {

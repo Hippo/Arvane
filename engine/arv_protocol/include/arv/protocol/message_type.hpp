@@ -1,6 +1,6 @@
 #pragma once
 
-#include "arv/core/types.hpp"
+#include "arv/core/primitives.hpp"
 
 namespace arv::protocol {
 

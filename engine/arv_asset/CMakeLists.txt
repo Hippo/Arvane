@@ -1,10 +1,42 @@
 set(ARV_ASSET_HEADERS
   include/arv/asset/font.hpp
+  include/arv/asset/pack_bundle_cache.hpp
   include/arv/asset/pack_bundle.hpp
   include/arv/asset/pack.hpp
   include/arv/asset/resource.hpp
   include/arv/asset/texture_atlas.hpp
 )
+
+if(TARGET libzstd_static)
+  set(ARV_ASSET_ZSTD_TARGET libzstd_static)
+elseif(TARGET zstd::libzstd_static)
+  set(ARV_ASSET_ZSTD_TARGET zstd::libzstd_static)
+elseif(TARGET zstd::libzstd)
+  set(ARV_ASSET_ZSTD_TARGET zstd::libzstd)
+elseif(TARGET zstd::libzstd_shared)
+  set(ARV_ASSET_ZSTD_TARGET zstd::libzstd_shared)
+elseif(TARGET zstd)
+  set(ARV_ASSET_ZSTD_TARGET zstd)
+else()
+  message(FATAL_ERROR "zstd target is missing; the root CMakeLists.txt must provide zstd via FetchContent")
+endif()
+
+add_library(arv_asset_bundle STATIC
+  src/pack_bundle_cache.cpp
+)
+
+target_include_directories(arv_asset_bundle PUBLIC include)
+
+target_link_libraries(arv_asset_bundle
+  PUBLIC
+    arv_crypto
+  PRIVATE
+    ${ARV_ASSET_ZSTD_TARGET}
+)
+
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  return()
+endif()
 
 add_library(arv_asset STATIC
   src/font.cpp
@@ -16,20 +48,11 @@ add_library(arv_asset STATIC
 
 target_include_directories(arv_asset PUBLIC include)
 
-if(TARGET libzstd_static)
-  set(ARV_ASSET_ZSTD_TARGET libzstd_static)
-elseif(TARGET zstd::libzstd_static)
-  set(ARV_ASSET_ZSTD_TARGET zstd::libzstd_static)
-elseif(TARGET zstd)
-  set(ARV_ASSET_ZSTD_TARGET zstd)
-else()
-  message(FATAL_ERROR "zstd target is missing; the root CMakeLists.txt must provide zstd via FetchContent")
-endif()
-
 target_link_libraries(arv_asset
   PUBLIC
     arv_core
     arv_voxel
+    arv_asset_bundle
   PRIVATE
     arv_crypto
     arv_io

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Arvane Web</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="web-client" aria-label="Arvane web client">
+      <canvas id="arvane-canvas" tabindex="0"></canvas>
+      <section class="session-panel" aria-label="Server connection">
+        <div>
+          <p class="kicker">Arvane Web V1</p>
+          <h1>Multiplayer Client</h1>
+        </div>
+        <label class="server-field" for="server-url">
+          <span>Server</span>
+          <input id="server-url" type="url" value="ws://localhost:42070/arvane" spellcheck="false" autocomplete="off">
+        </label>
+        <div class="actions">
+          <button id="connect-button" type="button">Connect</button>
+          <button id="disconnect-button" type="button">Disconnect</button>
+        </div>
+        <p id="status-line" class="status" role="status">Loading runtime</p>
+      </section>
+    </main>
+    <script src="loader.js"></script>
+    <script async src="arv_web.js"></script>
+  </body>
+</html>

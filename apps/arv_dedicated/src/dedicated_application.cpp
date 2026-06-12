@@ -212,7 +212,7 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(gns_result.error());
   }
 
-  server::ServerRuntime server_runtime(make_dedicated_server_transport());
+  server::ServerRuntime server_runtime(make_dedicated_server_transport(config.network));
   auto start_result = start_dedicated_server_runtime(
       server_runtime,
       server_start_info);

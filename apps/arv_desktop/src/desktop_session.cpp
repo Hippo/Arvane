@@ -98,7 +98,7 @@ bool DesktopSessionManager::shutdown_session(std::unique_ptr<DesktopGameSession>
   }
 
   if (session->integrated_server == nullptr) {
-    cancel_chunk_view_mesh_jobs(dependencies_.world_jobs, session->chunk_view);
+    cancel_chunk_view_mesh_jobs(dependencies_.client_tasks, session->chunk_view);
     remove_session_chunk_meshes(*session);
     dependencies_.world_jobs.join();
     return true;
@@ -149,7 +149,7 @@ bool DesktopSessionManager::shutdown_session(std::unique_ptr<DesktopGameSession>
     return false;
   }
 
-  cancel_chunk_view_mesh_jobs(dependencies_.world_jobs, session->chunk_view);
+  cancel_chunk_view_mesh_jobs(dependencies_.client_tasks, session->chunk_view);
   remove_session_chunk_meshes(*session);
   dependencies_.world_jobs.join();
   session->integrated_server->shutdown();
@@ -523,7 +523,7 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
   if (!update_chunk_view(
           session->client_world,
           dependencies_.renderer,
-          dependencies_.world_jobs,
+          dependencies_.client_tasks,
           session->chunk_view,
           dependencies_.config.chunks,
           dependencies_.config.chunk_pipeline,

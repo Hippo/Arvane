@@ -1,2 +1,11 @@
-add_subdirectory(arv_desktop)
-add_subdirectory(arv_dedicated)
+if(ARVANE_BUILD_WEB)
+  if(NOT EMSCRIPTEN)
+    message(FATAL_ERROR "ARVANE_BUILD_WEB requires an Emscripten toolchain")
+  endif()
+  add_subdirectory(arv_web)
+endif()
+
+if(NOT EMSCRIPTEN)
+  add_subdirectory(arv_desktop)
+  add_subdirectory(arv_dedicated)
+endif()

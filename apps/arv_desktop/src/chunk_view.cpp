@@ -378,7 +378,7 @@ void drain_mesh_upload_receipts(
 void schedule_mesh_jobs(
     world::WorldRuntime& world,
     render::RenderCommandQueue& renderer,
-    sched::JobSystem& job_system,
+    sched::ITaskExecutor& tasks,
     ChunkViewState& view,
     const io::ChunkPipelineConfig& pipeline,
     const voxel::BlockRegistry& block_registry,
@@ -502,7 +502,8 @@ void schedule_mesh_jobs(
     desc.lane = sched::JobLane::BackgroundCpu;
     desc.domain = sched::JobDomain::Meshing;
     desc.completion_target = sched::JobCompletionTarget::Render;
-    auto job = job_system.submit_result(
+    auto job = sched::submit_task_result(
+        tasks,
         std::move(desc),
         [world_id,
          inputs = std::move(inputs),
@@ -647,9 +648,9 @@ void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord) {
   set_draw_items_dirty(view);
 }
 
-void cancel_chunk_view_mesh_jobs(sched::JobSystem& job_system, ChunkViewState& view) noexcept {
+void cancel_chunk_view_mesh_jobs(sched::ITaskExecutor& tasks, ChunkViewState& view) noexcept {
   for (const ChunkViewState::PendingMesh& pending : view.pending_meshes) {
-    job_system.cancel(pending.job.handle());
+    tasks.cancel(pending.job.handle());
   }
   view.pending_meshes.clear();
   view.mesh_in_flight.clear();
@@ -658,7 +659,7 @@ void cancel_chunk_view_mesh_jobs(sched::JobSystem& job_system, ChunkViewState& v
 bool update_chunk_view(
     world::WorldRuntime& world,
     render::RenderCommandQueue& renderer,
-    sched::JobSystem& job_system,
+    sched::ITaskExecutor& tasks,
     ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
     const io::ChunkPipelineConfig& pipeline,
@@ -692,7 +693,7 @@ bool update_chunk_view(
   schedule_mesh_jobs(
       world,
       renderer,
-      job_system,
+      tasks,
       view,
       pipeline,
       block_registry,

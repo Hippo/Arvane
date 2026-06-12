@@ -69,6 +69,13 @@ simulation:
       flow_interval_ticks: 37
 network:
   port: 28000
+  web:
+    enabled: true
+    bind_address: 127.0.0.1
+    port: 28080
+    path: /arvane-test
+    max_frame_bytes: 65536
+    max_pending_bytes: 131072
   keep_alive:
     interval_seconds: 7
     client_timeout_seconds: 31
@@ -260,6 +267,12 @@ chunk_pipeline:
   EXPECT_EQ(result.value().simulation.fluids.water.flow_interval_ticks, 11U);
   EXPECT_EQ(result.value().simulation.fluids.lava.flow_interval_ticks, 37U);
   EXPECT_EQ(result.value().network.port, 28000U);
+  EXPECT_TRUE(result.value().network.web.enabled);
+  EXPECT_EQ(result.value().network.web.bind_address, "127.0.0.1");
+  EXPECT_EQ(result.value().network.web.port, 28080U);
+  EXPECT_EQ(result.value().network.web.path, "/arvane-test");
+  EXPECT_EQ(result.value().network.web.max_frame_bytes, 65536U);
+  EXPECT_EQ(result.value().network.web.max_pending_bytes, 131072U);
   EXPECT_EQ(result.value().network.keep_alive.interval_seconds, 7U);
   EXPECT_EQ(result.value().network.keep_alive.client_timeout_seconds, 31U);
   EXPECT_TRUE(result.value().commands.permission_denied_message.empty());
@@ -536,6 +549,12 @@ TEST(ConfigTests, SkinSecurityDefaultsMatchDocumentedLimits) {
   EXPECT_EQ(config.skins.storage.max_skins_per_profile, 16U);
   EXPECT_EQ(config.network.keep_alive.interval_seconds, 5U);
   EXPECT_EQ(config.network.keep_alive.client_timeout_seconds, 30U);
+  EXPECT_FALSE(config.network.web.enabled);
+  EXPECT_EQ(config.network.web.bind_address, "0.0.0.0");
+  EXPECT_EQ(config.network.web.port, 42070U);
+  EXPECT_EQ(config.network.web.path, "/arvane");
+  EXPECT_EQ(config.network.web.max_frame_bytes, 1024U * 1024U);
+  EXPECT_EQ(config.network.web.max_pending_bytes, 4U * 1024U * 1024U);
   EXPECT_EQ(config.commands.permission_denied_message, "No permission");
   EXPECT_TRUE(config.native_plugins.enabled);
   EXPECT_TRUE(config.native_plugins.allowed_packs.empty());
@@ -644,6 +663,32 @@ network:
 )");
 
   EXPECT_FALSE(result);
+}
+
+TEST(ConfigTests, RejectsInvalidEnabledWebNetworkConfig) {
+  for (const std::string yaml : {
+           R"(
+network:
+  web:
+    enabled: true
+    port: 0
+)",
+           R"(
+network:
+  web:
+    enabled: true
+    path: arvane
+)",
+           R"(
+network:
+  web:
+    enabled: true
+    max_frame_bytes: 64
+    max_pending_bytes: 32
+)"}) {
+    const auto result = arv::io::parse_config_yaml(yaml);
+    EXPECT_FALSE(result) << yaml;
+  }
 }
 
 TEST(ConfigTests, RejectsInvalidNativePluginAllowlistPackId) {
@@ -916,11 +961,14 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   EXPECT_NE(written_client.value().find("max_history_messages:"), std::string::npos);
   EXPECT_NE(written_client.value().find("input_bindings_file:"), std::string::npos);
   EXPECT_NE(written_client.value().find("server_list_file:"), std::string::npos);
+  EXPECT_EQ(written_client.value().find("web:"), std::string::npos);
 
   const auto written_server =
       arv::io::read_text_file(server_config_file, "generated server config");
   ASSERT_TRUE(written_server);
   EXPECT_NE(written_server.value().find("network:"), std::string::npos);
+  EXPECT_NE(written_server.value().find("web:"), std::string::npos);
+  EXPECT_NE(written_server.value().find("path: /arvane"), std::string::npos);
   EXPECT_NE(written_server.value().find("commands:"), std::string::npos);
   EXPECT_NE(written_server.value().find("permission_denied_message: No permission"), std::string::npos);
   EXPECT_EQ(written_server.value().find("native_plugins:"), std::string::npos);

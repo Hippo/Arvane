@@ -5,13 +5,75 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ARVANE_BUILD_TESTS "Build Arvane tests" ON)
 option(ARVANE_BUILD_BENCHMARKS "Build Arvane benchmarks" ON)
+option(ARVANE_BUILD_WEB "Build the Emscripten browser client" OFF)
+option(ARVANE_BUILD_SDK_EXAMPLES "Build standalone SDK examples" ON)
 option(ARVANE_ENABLE_PROFILING "Enable Arvane profiling instrumentation and timing counters" ON)
 option(ARVANE_ENABLE_TRACY "Enable Tracy profiling zones when profiling is enabled" ON)
 option(ARVANE_FETCH_DEPENDENCIES "Fetch package-style third-party dependencies when system packages are unavailable or not preferred" ON)
 option(ARVANE_USE_SYSTEM_DEPENDENCIES "Prefer system packages for dependencies that also support FetchContent" OFF)
 
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  set(ARVANE_BUILD_TESTS OFF CACHE BOOL "Build Arvane tests" FORCE)
+  set(ARVANE_BUILD_BENCHMARKS OFF CACHE BOOL "Build Arvane benchmarks" FORCE)
+  set(ARVANE_BUILD_SDK_EXAMPLES OFF CACHE BOOL "Build standalone SDK examples" FORCE)
+endif()
+
 if(NOT ARVANE_BUILD_TESTS)
   set(BUILD_TESTING OFF CACHE BOOL "Build tests" FORCE)
+endif()
+
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  include(FetchContent)
+  set(BUILD_TESTING OFF CACHE BOOL "Build dependency tests" FORCE)
+  FetchContent_Declare(
+    concurrentqueue
+    GIT_REPOSITORY https://github.com/cameron314/concurrentqueue.git
+    GIT_TAG v1.0.5
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(concurrentqueue)
+  FetchContent_Declare(
+    readerwriterqueue
+    GIT_REPOSITORY https://github.com/cameron314/readerwriterqueue.git
+    GIT_TAG v1.0.7
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(readerwriterqueue)
+  FetchContent_Declare(
+    unordered_dense
+    GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
+    GIT_TAG v4.8.1
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(unordered_dense)
+  FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG v1.17.0
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(spdlog)
+  set(ZSTD_BUILD_STATIC ON CACHE BOOL "Build zstd static library" FORCE)
+  set(ZSTD_BUILD_SHARED OFF CACHE BOOL "Build zstd shared library" FORCE)
+  set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "Build zstd command-line tools" FORCE)
+  set(ZSTD_BUILD_TESTS OFF CACHE BOOL "Build zstd tests" FORCE)
+  FetchContent_Declare(
+    zstd
+    GIT_REPOSITORY https://github.com/facebook/zstd.git
+    GIT_TAG v1.5.7
+    SOURCE_SUBDIR build/cmake
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(zstd)
+  add_subdirectory(engine/arv_core)
+  add_subdirectory(engine/arv_crypto)
+  add_subdirectory(engine/arv_voxel)
+  add_subdirectory(engine/arv_protocol)
+  add_subdirectory(engine/arv_net)
+  add_subdirectory(engine/arv_asset)
+  add_subdirectory(engine/arv_client)
+  add_subdirectory(apps)
+  return()
 endif()
 
 include(FetchContent)
@@ -284,7 +346,6 @@ add_subdirectory(apps)
 if(ARVANE_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
-option(ARVANE_BUILD_SDK_EXAMPLES "Build standalone SDK examples" ON)
 if(ARVANE_BUILD_SDK_EXAMPLES)
   add_subdirectory(examples/plugins)
 endif()

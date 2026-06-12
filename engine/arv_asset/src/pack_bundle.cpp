@@ -4,10 +4,9 @@
 #include "arv/io/data_codecs.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <fstream>
-#include <optional>
+#include <span>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -17,7 +16,6 @@
 namespace arv::asset {
 namespace {
 
-inline constexpr u32 MaxBundlePathBytes = 64U * 1024U;
 inline constexpr usize BundleHashHexSize = crypto::hash_256_size * 2U;
 
 struct BundleFileEntry {
@@ -26,20 +24,8 @@ struct BundleFileEntry {
   std::string hash{};
 };
 
-struct DecodedBundle {
-  std::string bundle_hash{};
-  std::string manifest_json{};
-  std::vector<BundleFileEntry> files{};
-};
-
 [[nodiscard]] PackBundleError bundle_error(std::string message) {
   return PackBundleError{std::move(message)};
-}
-
-[[nodiscard]] std::span<const std::byte> bytes_view(std::string_view text) noexcept {
-  return {
-      reinterpret_cast<const std::byte*>(text.data()),
-      text.size()};
 }
 
 [[nodiscard]] std::span<const std::byte> bytes_view(std::span<const u8> bytes) noexcept {
@@ -52,15 +38,6 @@ struct DecodedBundle {
   return crypto::hash_256_hex(crypto::hash_256(bytes_view(bytes)));
 }
 
-[[nodiscard]] std::string hash_text_hex(std::string_view text) {
-  return crypto::hash_256_hex(crypto::hash_256(bytes_view(text)));
-}
-
-void append_u16(std::vector<u8>& out, u16 value) {
-  out.push_back(static_cast<u8>(value & 0xFFU));
-  out.push_back(static_cast<u8>((value >> 8U) & 0xFFU));
-}
-
 void append_u32(std::vector<u8>& out, u32 value) {
   for (u32 shift = 0; shift < 32U; shift += 8U) {
     out.push_back(static_cast<u8>((value >> shift) & 0xFFU));
@@ -71,38 +48,6 @@ void append_u64(std::vector<u8>& out, u64 value) {
   for (u32 shift = 0; shift < 64U; shift += 8U) {
     out.push_back(static_cast<u8>((value >> shift) & 0xFFU));
   }
-}
-
-[[nodiscard]] std::optional<u16> read_u16(std::span<const u8> bytes, usize& offset) {
-  if (bytes.size() - offset < sizeof(u16)) {
-    return std::nullopt;
-  }
-  const u16 value = static_cast<u16>(bytes[offset]) |
-                    static_cast<u16>(static_cast<u16>(bytes[offset + 1U]) << 8U);
-  offset += sizeof(u16);
-  return value;
-}
-
-[[nodiscard]] std::optional<u32> read_u32(std::span<const u8> bytes, usize& offset) {
-  if (bytes.size() - offset < sizeof(u32)) {
-    return std::nullopt;
-  }
-  u32 value = 0;
-  for (u32 shift = 0; shift < 32U; shift += 8U) {
-    value |= static_cast<u32>(bytes[offset++]) << shift;
-  }
-  return value;
-}
-
-[[nodiscard]] std::optional<u64> read_u64(std::span<const u8> bytes, usize& offset) {
-  if (bytes.size() - offset < sizeof(u64)) {
-    return std::nullopt;
-  }
-  u64 value = 0;
-  for (u32 shift = 0; shift < 64U; shift += 8U) {
-    value |= static_cast<u64>(bytes[offset++]) << shift;
-  }
-  return value;
 }
 
 [[nodiscard]] bool has_prefix(std::string_view text, std::string_view prefix) noexcept {
@@ -123,6 +68,12 @@ void append_u64(std::vector<u8>& out, u64 value) {
       path.find('\\') != std::string_view::npos ||
       path.find(':') != std::string_view::npos) {
     return false;
+  }
+  for (const char ch : path) {
+    const auto value = static_cast<unsigned char>(ch);
+    if (value < 0x20U || value == 0x7FU) {
+      return false;
+    }
   }
   usize start = 0U;
   while (start <= path.size()) {
@@ -345,35 +296,6 @@ void append_u64(std::vector<u8>& out, u64 value) {
   return Expected<std::vector<u8>, PackBundleError>::success(std::move(compressed));
 }
 
-[[nodiscard]] Expected<std::vector<u8>, PackBundleError> decompress_payload(
-    std::span<const u8> compressed,
-    u64 expected_uncompressed_size,
-    const ClientPackBundleLimits& limits) {
-  if (compressed.size() > limits.max_compressed_size) {
-    return Expected<std::vector<u8>, PackBundleError>::failure(
-        bundle_error("compressed bundle exceeds size limit"));
-  }
-  if (expected_uncompressed_size > limits.max_uncompressed_size) {
-    return Expected<std::vector<u8>, PackBundleError>::failure(
-        bundle_error("uncompressed bundle exceeds size limit"));
-  }
-  std::vector<u8> payload(static_cast<usize>(expected_uncompressed_size));
-  const usize decompressed_size = ZSTD_decompress(
-      payload.data(),
-      payload.size(),
-      compressed.data(),
-      compressed.size());
-  if (ZSTD_isError(decompressed_size)) {
-    return Expected<std::vector<u8>, PackBundleError>::failure(
-        bundle_error("zstd decompression failed: " + std::string{ZSTD_getErrorName(decompressed_size)}));
-  }
-  if (decompressed_size != expected_uncompressed_size) {
-    return Expected<std::vector<u8>, PackBundleError>::failure(
-        bundle_error("zstd decompressed size mismatch"));
-  }
-  return Expected<std::vector<u8>, PackBundleError>::success(std::move(payload));
-}
-
 [[nodiscard]] std::vector<u8> build_apack_bytes(
     std::string_view manifest_json,
     std::span<const u8> compressed_payload,
@@ -393,145 +315,6 @@ void append_u64(std::vector<u8>& out, u64 value) {
   out.insert(out.end(), bundle_hash.begin(), bundle_hash.end());
   out.insert(out.end(), compressed_payload.begin(), compressed_payload.end());
   return out;
-}
-
-[[nodiscard]] Expected<DecodedBundle, PackBundleError> decode_apack(
-    std::span<const u8> apack,
-    std::string_view expected_bundle_hash,
-    const ClientPackBundleLimits& limits) {
-  usize offset = 0U;
-  if (apack.size() < ClientPackBundleMagic.size() ||
-      std::string_view{reinterpret_cast<const char*>(apack.data()), ClientPackBundleMagic.size()} !=
-          ClientPackBundleMagic) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("invalid client pack bundle magic"));
-  }
-  offset += ClientPackBundleMagic.size();
-
-  const std::optional<u32> version = read_u32(apack, offset);
-  const std::optional<u32> manifest_size = read_u32(apack, offset);
-  if (!version.has_value() || !manifest_size.has_value()) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("truncated client pack bundle header"));
-  }
-  if (version.value() != ClientPackBundleFormatVersion) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("unsupported client pack bundle version"));
-  }
-  if (apack.size() - offset < manifest_size.value()) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("truncated client pack bundle manifest"));
-  }
-  std::string manifest_json{
-      reinterpret_cast<const char*>(apack.data() + offset),
-      manifest_size.value()};
-  offset += manifest_size.value();
-
-  const std::optional<u64> compressed_size = read_u64(apack, offset);
-  const std::optional<u64> uncompressed_size = read_u64(apack, offset);
-  if (!compressed_size.has_value() || !uncompressed_size.has_value()) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("truncated client pack bundle sizes"));
-  }
-  if (apack.size() - offset < BundleHashHexSize) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("truncated client pack bundle hash"));
-  }
-  std::string bundle_hash{
-      reinterpret_cast<const char*>(apack.data() + offset),
-      BundleHashHexSize};
-  offset += BundleHashHexSize;
-  if (!is_valid_bundle_hash(bundle_hash)) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("invalid client pack bundle hash"));
-  }
-  if (!expected_bundle_hash.empty() && expected_bundle_hash != bundle_hash) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("client pack bundle hash does not match manifest"));
-  }
-  if (compressed_size.value() > limits.max_compressed_size ||
-      apack.size() - offset != compressed_size.value()) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("client pack bundle compressed size mismatch"));
-  }
-
-  const std::span<const u8> compressed{apack.data() + offset, static_cast<usize>(compressed_size.value())};
-  auto payload = decompress_payload(compressed, uncompressed_size.value(), limits);
-  if (!payload) {
-    return Expected<DecodedBundle, PackBundleError>::failure(payload.error());
-  }
-  if (hash_bytes_hex(payload.value()) != bundle_hash) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("client pack bundle payload hash mismatch"));
-  }
-
-  std::span<const u8> payload_bytes{payload.value().data(), payload.value().size()};
-  usize payload_offset = 0U;
-  const std::optional<u32> file_count = read_u32(payload_bytes, payload_offset);
-  if (!file_count.has_value()) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("truncated client pack bundle payload"));
-  }
-  if (file_count.value() > limits.max_files) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("client pack bundle has too many files"));
-  }
-
-  DecodedBundle decoded;
-  decoded.bundle_hash = std::move(bundle_hash);
-  decoded.manifest_json = std::move(manifest_json);
-  HashSet<std::string> seen_paths;
-  decoded.files.reserve(file_count.value());
-  for (u32 index = 0; index < file_count.value(); ++index) {
-    const std::optional<u32> path_size = read_u32(payload_bytes, payload_offset);
-    if (!path_size.has_value() || path_size.value() == 0U ||
-        path_size.value() > MaxBundlePathBytes ||
-        payload_bytes.size() - payload_offset < path_size.value()) {
-      return Expected<DecodedBundle, PackBundleError>::failure(
-          bundle_error("invalid client pack bundle path"));
-    }
-    std::string path{
-        reinterpret_cast<const char*>(payload_bytes.data() + payload_offset),
-        path_size.value()};
-    payload_offset += path_size.value();
-    if (!is_client_bundle_relative_path_allowed(path)) {
-      return Expected<DecodedBundle, PackBundleError>::failure(
-          bundle_error("unsafe client pack bundle path: " + path));
-    }
-    if (!seen_paths.insert(path).second) {
-      return Expected<DecodedBundle, PackBundleError>::failure(
-          bundle_error("duplicate client pack bundle path: " + path));
-    }
-
-    const std::optional<u64> file_size = read_u64(payload_bytes, payload_offset);
-    if (!file_size.has_value() || file_size.value() > limits.max_file_size ||
-        payload_bytes.size() - payload_offset < BundleHashHexSize + file_size.value()) {
-      return Expected<DecodedBundle, PackBundleError>::failure(
-          bundle_error("invalid client pack bundle file size"));
-    }
-    std::string file_hash{
-        reinterpret_cast<const char*>(payload_bytes.data() + payload_offset),
-        BundleHashHexSize};
-    payload_offset += BundleHashHexSize;
-    if (!is_valid_bundle_hash(file_hash)) {
-      return Expected<DecodedBundle, PackBundleError>::failure(
-          bundle_error("invalid client pack bundle file hash"));
-    }
-    std::vector<u8> bytes(
-        payload_bytes.begin() + static_cast<std::ptrdiff_t>(payload_offset),
-        payload_bytes.begin() + static_cast<std::ptrdiff_t>(payload_offset + file_size.value()));
-    payload_offset += static_cast<usize>(file_size.value());
-    if (hash_bytes_hex(bytes) != file_hash) {
-      return Expected<DecodedBundle, PackBundleError>::failure(
-          bundle_error("client pack bundle file hash mismatch: " + path));
-    }
-    decoded.files.push_back({std::move(path), std::move(bytes), std::move(file_hash)});
-  }
-  if (payload_offset != payload_bytes.size()) {
-    return Expected<DecodedBundle, PackBundleError>::failure(
-        bundle_error("trailing bytes in client pack bundle payload"));
-  }
-  return Expected<DecodedBundle, PackBundleError>::success(std::move(decoded));
 }
 
 [[nodiscard]] PackBundleResult write_file_bytes(
@@ -559,101 +342,7 @@ void append_u64(std::vector<u8>& out, u64 value) {
   return PackBundleResult::success();
 }
 
-[[nodiscard]] PackBundleInstallResult install_decoded_bundle(
-    DecodedBundle decoded,
-    const std::filesystem::path& cache_root) {
-  const std::filesystem::path final_path = client_pack_cache_path(cache_root, decoded.bundle_hash);
-  if (client_pack_cache_contains(cache_root, decoded.bundle_hash)) {
-    return PackBundleInstallResult::success(
-        {std::move(decoded.bundle_hash), final_path, true});
-  }
-
-  const std::filesystem::path tmp_root =
-      cache_root / "tmp" / (decoded.bundle_hash + ".partial");
-  std::error_code error;
-  std::filesystem::remove_all(tmp_root, error);
-  error.clear();
-  std::filesystem::create_directories(tmp_root, error);
-  if (error) {
-    return PackBundleInstallResult::failure(
-        bundle_error("failed to create temporary client pack cache: " + error.message()));
-  }
-
-  for (const BundleFileEntry& file : decoded.files) {
-    const std::filesystem::path output_path = tmp_root / std::filesystem::path{file.path};
-    auto write = write_file_bytes(output_path, file.bytes);
-    if (!write) {
-      std::filesystem::remove_all(tmp_root, error);
-      return PackBundleInstallResult::failure(write.error());
-    }
-  }
-
-  std::filesystem::create_directories(final_path.parent_path(), error);
-  if (error) {
-    std::filesystem::remove_all(tmp_root, error);
-    return PackBundleInstallResult::failure(
-        bundle_error("failed to create client pack cache root: " + error.message()));
-  }
-  std::filesystem::rename(tmp_root, final_path, error);
-  if (error) {
-    if (std::filesystem::exists(final_path)) {
-      error.clear();
-      std::filesystem::remove_all(tmp_root, error);
-      return PackBundleInstallResult::success(
-          {std::move(decoded.bundle_hash), final_path, true});
-    }
-    std::filesystem::remove_all(tmp_root, error);
-    return PackBundleInstallResult::failure(
-        bundle_error("failed to finalize client pack cache entry"));
-  }
-  return PackBundleInstallResult::success(
-      {std::move(decoded.bundle_hash), final_path, false});
-}
-
 } // namespace
-
-bool is_valid_bundle_hash(std::string_view hash) noexcept {
-  if (hash.size() != BundleHashHexSize) {
-    return false;
-  }
-  for (const char ch : hash) {
-    const bool digit = ch >= '0' && ch <= '9';
-    const bool lower_hex = ch >= 'a' && ch <= 'f';
-    if (!digit && !lower_hex) {
-      return false;
-    }
-  }
-  return true;
-}
-
-std::filesystem::path client_pack_cache_path(
-    const std::filesystem::path& cache_root,
-    std::string_view bundle_hash) {
-  return cache_root / std::filesystem::path{std::string{bundle_hash}};
-}
-
-bool client_pack_cache_contains(
-    const std::filesystem::path& cache_root,
-    std::string_view bundle_hash) {
-  if (!is_valid_bundle_hash(bundle_hash)) {
-    return false;
-  }
-  std::error_code error;
-  const std::filesystem::path path = client_pack_cache_path(cache_root, bundle_hash);
-  return std::filesystem::is_directory(path, error) &&
-         std::filesystem::is_regular_file(path / "manifest.json", error) &&
-         std::filesystem::is_regular_file(path / "registry-client.json", error);
-}
-
-bool is_client_bundle_relative_path_allowed(std::string_view path) noexcept {
-  if (!safe_generic_path(path) || executable_extension(path)) {
-    return false;
-  }
-  return path == "manifest.json" ||
-         path == "registry-client.json" ||
-         allowed_data_path(path) ||
-         allowed_assets_path(path);
-}
 
 PackBundleBuildResult build_client_pack_bundle(
     const PackManager& packs,
@@ -734,30 +423,6 @@ PackBundleResult write_client_pack_bundle_file(
     const std::filesystem::path& path,
     const ClientPackBundleBuildResult& bundle) {
   return write_file_bytes(path, bundle.apack_bytes);
-}
-
-PackBundleInstallResult install_client_pack_bundle_from_file(
-    const std::filesystem::path& apack_path,
-    const std::filesystem::path& cache_root,
-    std::string_view expected_bundle_hash,
-    ClientPackBundleLimits limits) {
-  if (!expected_bundle_hash.empty() &&
-      client_pack_cache_contains(cache_root, expected_bundle_hash)) {
-    return PackBundleInstallResult::success(
-        {std::string{expected_bundle_hash},
-         client_pack_cache_path(cache_root, expected_bundle_hash),
-         true});
-  }
-
-  auto bytes = read_binary_file(apack_path, limits.max_compressed_size + 1024ULL * 1024ULL);
-  if (!bytes) {
-    return PackBundleInstallResult::failure(bytes.error());
-  }
-  auto decoded = decode_apack(bytes.value(), expected_bundle_hash, limits);
-  if (!decoded) {
-    return PackBundleInstallResult::failure(decoded.error());
-  }
-  return install_decoded_bundle(std::move(decoded.value()), cache_root);
 }
 
 } // namespace arv::asset

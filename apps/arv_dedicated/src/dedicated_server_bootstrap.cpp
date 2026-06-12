@@ -2,6 +2,8 @@
 
 #include "arv/core/log.hpp"
 #include "arv/net/gns_transport.hpp"
+#include "arv/net/multiplex_transport.hpp"
+#include "arv/net/websocket_server_transport.hpp"
 
 #include <memory>
 
@@ -16,8 +18,30 @@ Expected<void, DedicatedError> initialize_game_networking_environment(
   return Expected<void, DedicatedError>::success();
 }
 
-std::unique_ptr<net::ITransport> make_dedicated_server_transport() {
-  return std::make_unique<net::GameNetworkingSocketsTransport>();
+std::unique_ptr<net::ITransport> make_dedicated_server_transport(
+    const io::NetworkConfig& network) {
+  if (!network.web.enabled) {
+    return std::make_unique<net::GameNetworkingSocketsTransport>();
+  }
+
+  auto transport = std::make_unique<net::MultiplexTransport>();
+  transport->add_transport({
+      "native",
+      std::make_unique<net::GameNetworkingSocketsTransport>(),
+      net::ListenAddress{network.bind_address, network.port},
+  });
+  transport->add_transport({
+      "websocket",
+      std::make_unique<net::WebSocketServerTransport>(
+          net::WebSocketServerTransportOptions{
+              network.web.bind_address,
+              network.web.port,
+              network.web.path,
+              network.web.max_frame_bytes,
+              network.web.max_pending_bytes}),
+      net::ListenAddress{network.web.bind_address, network.web.port},
+  });
+  return transport;
 }
 
 Expected<void, DedicatedError> start_dedicated_server_runtime(
@@ -74,6 +98,14 @@ void log_dedicated_server_ready(
       config.network.bind_address,
       config.network.port,
       config.simulation.base_tps);
+  if (config.network.web.enabled) {
+    core::info(
+        "dedicated",
+        "websocket listening on {}:{}{}",
+        config.network.web.bind_address,
+        config.network.web.port,
+        config.network.web.path);
+  }
 }
 
 } // namespace arv::dedicated

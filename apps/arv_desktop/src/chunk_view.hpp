@@ -7,6 +7,7 @@
 #include "arv/render/render_commands.hpp"
 #include "arv/render/render_types.hpp"
 #include "arv/sched/job_system.hpp"
+#include "arv/sched/task_executor.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_runtime.hpp"
 
@@ -80,12 +81,12 @@ struct ChunkViewState {
 
 void request_chunk_view_mesh_rescan(ChunkViewState& view) noexcept;
 void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord);
-void cancel_chunk_view_mesh_jobs(sched::JobSystem& job_system, ChunkViewState& view) noexcept;
+void cancel_chunk_view_mesh_jobs(sched::ITaskExecutor& tasks, ChunkViewState& view) noexcept;
 
 [[nodiscard]] bool update_chunk_view(
     world::WorldRuntime& world,
     render::RenderCommandQueue& renderer,
-    sched::JobSystem& job_system,
+    sched::ITaskExecutor& tasks,
     ChunkViewState& view,
     const io::ChunkDistanceConfig& distances,
     const io::ChunkPipelineConfig& pipeline,

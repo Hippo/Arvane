@@ -1,5 +1,6 @@
 #include "arv/net/gns_transport.hpp"
 #include "arv/net/in_process_transport.hpp"
+#include "arv/net/multiplex_transport.hpp"
 #include "support/net_events.hpp"
 
 #include <gtest/gtest.h>
@@ -129,6 +130,91 @@ TEST(InProcessTransportTests, SendFailsWhenPeerQueueIsFull) {
 
   EXPECT_TRUE(saw_failure);
   EXPECT_NE(failure_message.find("full"), std::string::npos);
+}
+
+TEST(MultiplexTransportTests, TranslatesConnectionIdsAndRoutesMessages) {
+  auto native_pair = arv::net::make_in_process_transport_pair();
+  auto web_pair = arv::net::make_in_process_transport_pair();
+
+  arv::net::MultiplexTransport server;
+  server.add_transport({"native", std::move(native_pair.server)});
+  server.add_transport({"websocket", std::move(web_pair.server)});
+  ASSERT_TRUE(server.start_listening({"in-process", 0}));
+
+  ASSERT_TRUE(native_pair.client->connect({"in-process", 0}));
+  ASSERT_TRUE(web_pair.client->connect({"in-process", 0}));
+
+  const std::vector<arv::net::NetworkEvent> accepted = server.poll_events();
+  std::vector<arv::net::ConnectionID> server_ids;
+  for (const arv::net::NetworkEvent& event : accepted) {
+    if (event.type == arv::net::NetworkEventType::ConnectionAccepted) {
+      server_ids.push_back(event.connection_id);
+    }
+  }
+  ASSERT_EQ(server_ids.size(), 2U);
+  ASSERT_NE(server_ids[0], server_ids[1]);
+  (void)native_pair.client->poll_events();
+  (void)web_pair.client->poll_events();
+
+  ASSERT_TRUE(native_pair.client->send(
+      {arv::net::ConnectionID{1},
+       arv::protocol::ReliabilityClass::ReliableOrdered,
+       std::vector<arv::u8>{1, 2, 3}}));
+  const std::vector<arv::net::NetworkEvent> native_events = server.poll_events();
+  const arv::net::NetworkEvent* native_message =
+      find_event(native_events, arv::net::NetworkEventType::MessageReceived);
+  ASSERT_NE(native_message, nullptr);
+  EXPECT_EQ(native_message->connection_id, server_ids[0]);
+  EXPECT_EQ(native_message->payload, (std::vector<arv::u8>{1, 2, 3}));
+
+  ASSERT_TRUE(server.send(
+      {server_ids[1],
+       arv::protocol::ReliabilityClass::ReliableOrdered,
+       std::vector<arv::u8>{4, 5}}));
+  const std::vector<arv::net::NetworkEvent> web_events = web_pair.client->poll_events();
+  const arv::net::NetworkEvent* web_message =
+      find_event(web_events, arv::net::NetworkEventType::MessageReceived);
+  ASSERT_NE(web_message, nullptr);
+  EXPECT_EQ(web_message->connection_id, arv::net::ConnectionID{1});
+  EXPECT_EQ(web_message->payload, (std::vector<arv::u8>{4, 5}));
+}
+
+TEST(MultiplexTransportTests, CloseConnectionUsesMappedChildTransport) {
+  auto native_pair = arv::net::make_in_process_transport_pair();
+  auto web_pair = arv::net::make_in_process_transport_pair();
+
+  arv::net::MultiplexTransport server;
+  server.add_transport({"native", std::move(native_pair.server)});
+  server.add_transport({"websocket", std::move(web_pair.server)});
+  ASSERT_TRUE(server.start_listening({"in-process", 0}));
+
+  ASSERT_TRUE(native_pair.client->connect({"in-process", 0}));
+  ASSERT_TRUE(web_pair.client->connect({"in-process", 0}));
+
+  const std::vector<arv::net::NetworkEvent> accepted = server.poll_events();
+  std::vector<arv::net::ConnectionID> server_ids;
+  for (const arv::net::NetworkEvent& event : accepted) {
+    if (event.type == arv::net::NetworkEventType::ConnectionAccepted) {
+      server_ids.push_back(event.connection_id);
+    }
+  }
+  ASSERT_EQ(server_ids.size(), 2U);
+  (void)native_pair.client->poll_events();
+  (void)web_pair.client->poll_events();
+
+  ASSERT_TRUE(server.close_connection(server_ids[1], "test close"));
+
+  const std::vector<arv::net::NetworkEvent> native_events = native_pair.client->poll_events();
+  EXPECT_EQ(
+      find_event(native_events, arv::net::NetworkEventType::ConnectionClosed),
+      nullptr);
+
+  const std::vector<arv::net::NetworkEvent> web_events = web_pair.client->poll_events();
+  const arv::net::NetworkEvent* closed =
+      find_event(web_events, arv::net::NetworkEventType::ConnectionClosed);
+  ASSERT_NE(closed, nullptr);
+  EXPECT_EQ(closed->reason, "test close");
+  EXPECT_EQ(server.state(server_ids[1]), arv::net::ConnectionState::Disconnected);
 }
 
 TEST(GameNetworkingSocketsTransportTests, ReliabilityFlagsUseNormalUnreliableByDefault) {
