@@ -348,7 +348,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
       resources,
       loaded.block_registry,
       block_models,
-      atlas_build_options_from(config.render.atlases.blocks, 4, true));
+      atlas_build_options_from(config.render.atlases.blocks, 4, false));
   if (!block_atlas_result) {
     return asset_failure("assets", block_atlas_result.error().message);
   }

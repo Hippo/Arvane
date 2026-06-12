@@ -262,6 +262,7 @@ private:
   void update_framebuffer_size();
   void update_block_outline_target(DesktopGameSession& active_session);
 
+  void clear_player_skin_render_cache();
   void refresh_player_skin_render_assets(DesktopGameSession& active_session);
   void refresh_menu_profile_render_assets();
 

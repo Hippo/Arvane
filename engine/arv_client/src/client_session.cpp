@@ -66,6 +66,12 @@ namespace {
   return std::find(values.begin(), values.end(), value) != values.end();
 }
 
+[[nodiscard]] bool matches_joined_or_pending_world(
+    const std::optional<ClientSessionWorldJoin>& world_join,
+    WorldID packet_world) noexcept {
+  return !world_join.has_value() || packet_world == world_join->world_id;
+}
+
 [[nodiscard]] bool is_message_allowed_for_state(
     protocol::MessageType type,
     net::ConnectionState state) noexcept {
@@ -524,7 +530,7 @@ void ClientSession::handle_chunk_section_unload(protocol::ClientboundChunkSectio
 }
 
 void ClientSession::handle_entity_spawn(protocol::ClientboundEntitySpawn spawn) {
-  if (!world_join_.has_value() || spawn.world_id != world_join_->world_id) {
+  if (!matches_joined_or_pending_world(world_join_, spawn.world_id)) {
     return;
   }
   auto found = std::find_if(
@@ -551,7 +557,7 @@ void ClientSession::handle_entity_spawn(protocol::ClientboundEntitySpawn spawn) 
 }
 
 void ClientSession::handle_entity_despawn(protocol::ClientboundEntityDespawn despawn) {
-  if (!world_join_.has_value() || despawn.world_id != world_join_->world_id) {
+  if (!matches_joined_or_pending_world(world_join_, despawn.world_id)) {
     return;
   }
   const auto new_end = std::remove_if(
@@ -564,7 +570,7 @@ void ClientSession::handle_entity_despawn(protocol::ClientboundEntityDespawn des
 }
 
 void ClientSession::handle_entity_snapshot(protocol::ClientboundEntitySnapshot snapshot) {
-  if (!world_join_.has_value() || snapshot.world_id != world_join_->world_id) {
+  if (!matches_joined_or_pending_world(world_join_, snapshot.world_id)) {
     return;
   }
   for (protocol::EntitySnapshotEntry& entry : snapshot.entities) {
@@ -764,6 +770,11 @@ void ClientSession::handle_message(std::span<const u8> payload) {
           join.value().initial_tick,
           join.value().tick_rate,
           join.value().effective_view_distance};
+      std::erase_if(
+          entity_mirrors_,
+          [&](const ClientSessionEntityMirror& mirror) {
+            return mirror.world_id != world_join_->world_id;
+          });
       connection_state_ = net::ConnectionState::InGame;
       const ChunkSectionCoord center{{
           floor_div(static_cast<i32>(std::floor(join.value().spawn_position.x)), ChunkSize),

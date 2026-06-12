@@ -252,8 +252,7 @@ TextureAtlasResult build_texture_atlas(
                 << " does not match required block texture size "
                 << base_width << "x" << base_height;
         return TextureAtlasResult::failure({input.asset_id.value,
-                                            {},
-                                            "build texture atlas",
+                                            {},                                            "build texture atlas",
                                             message.str()});
       }
     }

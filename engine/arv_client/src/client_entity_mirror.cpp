@@ -69,12 +69,18 @@ void snap_entity_render_transform(ReplicatedEntityMirror& mirror) noexcept {
   mirror.interpolation_duration_seconds = 0.0F;
 }
 
+[[nodiscard]] bool matches_current_or_pending_world(
+    WorldID packet_world,
+    WorldID current_world) noexcept {
+  return current_world.value == 0U || packet_world == current_world;
+}
+
 } // namespace
 
 void ClientEntityMirrorStore::apply_spawn(
     protocol::ClientboundEntitySpawn spawn,
     WorldID current_world) {
-  if (spawn.world_id != current_world) {
+  if (!matches_current_or_pending_world(spawn.world_id, current_world)) {
     return;
   }
   ReplicatedEntityMirror& mirror = entities_[spawn.entity_id];
@@ -111,7 +117,7 @@ void ClientEntityMirrorStore::apply_spawn(
 void ClientEntityMirrorStore::apply_despawn(
     const protocol::ClientboundEntityDespawn& despawn,
     WorldID current_world) {
-  if (despawn.world_id != current_world) {
+  if (!matches_current_or_pending_world(despawn.world_id, current_world)) {
     return;
   }
   for (auto& [entity_id, mirror] : entities_) {
@@ -136,7 +142,7 @@ void ClientEntityMirrorStore::apply_snapshot(
     WorldID current_world,
     TickRate server_tick_rate,
     std::optional<EntityNetID> locally_controlled_vehicle) {
-  if (snapshot.world_id != current_world) {
+  if (!matches_current_or_pending_world(snapshot.world_id, current_world)) {
     return;
   }
   for (const protocol::EntitySnapshotEntry& entry : snapshot.entities) {
@@ -402,6 +408,14 @@ std::vector<ReplicatedEntityMirror> ClientEntityMirrorStore::mirrors() const {
     mirrors.push_back(mirror);
   }
   return mirrors;
+}
+
+void ClientEntityMirrorStore::prune_except_world(WorldID world_id) {
+  std::erase_if(
+      entities_,
+      [&](const auto& entry) {
+        return entry.second.world_id != world_id;
+      });
 }
 
 void ClientEntityMirrorStore::clear() noexcept {

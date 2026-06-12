@@ -797,6 +797,27 @@ TEST(ClientSessionTests, TracksEntityMirrorsAndRejectsMalformedEntityPackets) {
   session.pump();
   ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::WorldJoin);
 
+  {
+    arv::protocol::ClientboundEntitySpawn early_spawn;
+    early_spawn.world_id = arv::WorldID{4};
+    early_spawn.entity_id = arv::EntityNetID{11};
+    early_spawn.entity_type = arv::EntityTypeID{6};
+    early_spawn.entity_type_name = "arvane:test_entity";
+    early_spawn.position = {10.0F, 11.0F, 12.0F};
+    early_spawn.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
+    early_spawn.owning_player = arv::PlayerID{2};
+    scripted->push_message(
+        arv::protocol::MessageType::ClientboundEntitySpawn,
+        arv::protocol::serialize_clientbound_entity_spawn(early_spawn));
+    session.pump();
+  }
+
+  ASSERT_FALSE(session.world_join().has_value());
+  ASSERT_EQ(session.entity_mirrors().size(), 1U);
+  EXPECT_EQ(session.entity_mirrors().front().entity_id, arv::EntityNetID{11});
+  ASSERT_TRUE(session.entity_mirrors().front().owning_player.has_value());
+  EXPECT_EQ(session.entity_mirrors().front().owning_player.value(), arv::PlayerID{2});
+
   arv::protocol::ClientboundWorldJoinResult join;
   join.accepted = true;
   join.world_id = arv::WorldID{4};

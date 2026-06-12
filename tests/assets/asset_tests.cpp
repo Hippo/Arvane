@@ -2,6 +2,7 @@
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <span>
@@ -165,6 +166,97 @@ TEST(TextureAtlasTests, FailsWhenConfiguredPagesAreFull) {
       {.max_page_size = 4, .max_pages = 1, .padding = 0});
 
   EXPECT_FALSE(atlas);
+}
+
+TEST(TextureAtlasTests, BuildsBlockAtlasWithMixedTextureSizesByDefault) {
+  auto definitions = arv::voxel::parse_block_definitions_json(R"json(
+[
+  {
+    "name": "arvane:air",
+    "render_category": "none",
+    "properties": { "replaceable": true }
+  },
+  {
+    "name": "arvane:lowres_block",
+    "render_category": "opaque",
+    "textures": "arvane:texture/block/cobblestone",
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "opaque": true,
+      "blocks_light": true,
+      "full_cube": true,
+      "ao_occluder": true
+    }
+  },
+  {
+    "name": "arvane:hires_block",
+    "render_category": "opaque",
+    "textures": "arvane:texture/block/water",
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "opaque": true,
+      "blocks_light": true,
+      "full_cube": true,
+      "ao_occluder": true
+    }
+  }
+]
+)json");
+  ASSERT_TRUE(definitions) << definitions.error().message;
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+
+  arv::asset::ResourceManager resources(ARVANE_TEST_ASSET_ROOT);
+  auto atlas_result =
+      arv::asset::build_block_texture_atlas(resources, registry_result.value());
+
+  ASSERT_TRUE(atlas_result) << atlas_result.error().message;
+  const arv::asset::TextureAtlasEntry* lowres_entry =
+      atlas_result.value().atlas.find("arvane:texture/block/cobblestone");
+  const arv::asset::TextureAtlasEntry* hires_entry =
+      atlas_result.value().atlas.find("arvane:texture/block/water");
+  ASSERT_NE(lowres_entry, nullptr);
+  ASSERT_NE(hires_entry, nullptr);
+  EXPECT_EQ(lowres_entry->width, 16U);
+  EXPECT_EQ(lowres_entry->height, 16U);
+  EXPECT_EQ(hires_entry->width, 32U);
+  EXPECT_EQ(hires_entry->height, 32U);
+
+  const auto lowres_variant =
+      registry_result.value().find_variant("arvane:lowres_block");
+  const auto hires_variant =
+      registry_result.value().find_variant("arvane:hires_block");
+  ASSERT_TRUE(lowres_variant.has_value());
+  ASSERT_TRUE(hires_variant.has_value());
+
+  const arv::voxel::BlockFaceRenderData* lowres_face =
+      atlas_result.value().render_data.face(
+          lowres_variant.value(),
+          arv::voxel::BlockFace::PositiveY);
+  const arv::voxel::BlockFaceRenderData* hires_face =
+      atlas_result.value().render_data.face(
+          hires_variant.value(),
+          arv::voxel::BlockFace::PositiveY);
+  ASSERT_NE(lowres_face, nullptr);
+  ASSERT_NE(hires_face, nullptr);
+
+  const auto uv_extent = [](const std::array<arv::Vec2i, 4>& uvs) {
+    arv::i32 min_x = uvs.front().x;
+    arv::i32 max_x = uvs.front().x;
+    arv::i32 min_y = uvs.front().y;
+    arv::i32 max_y = uvs.front().y;
+    for (const arv::Vec2i uv : uvs) {
+      min_x = std::min(min_x, uv.x);
+      max_x = std::max(max_x, uv.x);
+      min_y = std::min(min_y, uv.y);
+      max_y = std::max(max_y, uv.y);
+    }
+    return arv::Vec2i{max_x - min_x, max_y - min_y};
+  };
+  EXPECT_EQ(uv_extent(lowres_face->uvs), (arv::Vec2i{16, 16}));
+  EXPECT_EQ(uv_extent(hires_face->uvs), (arv::Vec2i{32, 32}));
 }
 
 TEST(TextureAtlasTests, BuildsBlockAtlasRenderDataForInputTexturedModels) {

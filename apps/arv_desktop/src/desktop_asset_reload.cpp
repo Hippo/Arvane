@@ -40,6 +40,7 @@ bool DesktopFrameLoop::reload_desktop_assets(
 
   renderer_.clear_entity_models();
   renderer_.clear_entity_animations();
+  clear_player_skin_render_cache();
   auto loaded_assets = load_desktop_assets(
       next_resources,
       renderer_,

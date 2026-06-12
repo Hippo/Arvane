@@ -96,6 +96,12 @@ namespace {
 
 } // namespace
 
+void DesktopFrameLoop::clear_player_skin_render_cache() {
+  player_skin_regions_.clear();
+  menu_state_.set_player_skin_texture_views({}, {});
+  invalidate_ui_tree_cache();
+}
+
 void DesktopFrameLoop::refresh_player_skin_render_assets(DesktopGameSession& active_session) {
   if (active_session.client == nullptr) {
     return;
@@ -196,21 +202,22 @@ void DesktopFrameLoop::refresh_menu_profile_render_assets() {
 
   HashMap<std::string, ui::PlayerSkinTextureView> texture_views;
   ui::PlayerSkinTextureView default_texture;
-  for (const auto& [skin_hash, handle] : player_skin_regions_) {
+  for (auto skin = player_skin_regions_.begin(); skin != player_skin_regions_.end();) {
+    const render::TextureRegionHandle handle = skin->second;
     std::optional<render::PlayerSkinTextureSnapshot> snapshot =
-        renderer_.player_skin_texture_snapshot(skin_hash, handle);
+        renderer_.player_skin_texture_snapshot(skin->first, handle);
     if (!snapshot.has_value()) {
+      skin = player_skin_regions_.erase(skin);
       continue;
     }
     (void)renderer_.mark_player_skin_texture_used(handle, true);
     ui::PlayerSkinTextureView view = player_skin_texture_view(snapshot.value());
-    if (skin_hash == DefaultMenuPlayerSkinKey) {
+    if (skin->first == DefaultMenuPlayerSkinKey) {
       default_texture = view;
-    } else if (skin_hash == DefaultMenuPlayerSlimSkinKey) {
-      continue;
-    } else {
-      texture_views[skin_hash] = view;
+    } else if (skin->first != DefaultMenuPlayerSlimSkinKey) {
+      texture_views[skin->first] = view;
     }
+    ++skin;
   }
   menu_state_.set_player_skin_texture_views(std::move(texture_views), default_texture);
 }

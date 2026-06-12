@@ -453,7 +453,9 @@ void ServerRuntimeImpl::send_entity_replication() {
 
   for (const SessionID session_id : sessions_.session_ids()) {
     const ServerSession* session = sessions_.find(session_id);
-    if (session == nullptr || session->world_id != default_world_.id()) {
+    if (session == nullptr || !session->authenticated || session->closing ||
+        session->connection_state != net::ConnectionState::InGame ||
+        session->world_id != default_world_.id()) {
       continue;
     }
 

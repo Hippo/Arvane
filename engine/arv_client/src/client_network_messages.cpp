@@ -53,6 +53,7 @@ void apply_world_join_result(
       result.spawn_position,
       result.initial_tick,
       result.tick_rate);
+  runtime.entities.prune_except_world(result.world_id);
   runtime.chunk_interest.set_world_id(result.world_id);
   runtime.connection.set_state(net::ConnectionState::InGame);
 }

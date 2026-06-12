@@ -865,6 +865,86 @@ TEST(ClientRuntimeTests, WorldJoinKeepsLocalPlayerBodyAtServerSpawn) {
   EXPECT_EQ(client.local_entity_id().value(), (arv::EntityNetID{1}));
 }
 
+TEST(ClientRuntimeTests, EntitySpawnReceivedBeforeWorldJoinSurvivesJoin) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  (void)server_transport->poll_events();
+
+  arv::protocol::ClientboundEntitySpawn spawn;
+  spawn.world_id = arv::WorldID{1};
+  spawn.entity_id = arv::EntityNetID{42};
+  spawn.entity_type = arv::EntityTypeID{2};
+  spawn.entity_type_name = "arvane:remote_player";
+  spawn.position = {3.0F, 4.0F, 5.0F};
+  spawn.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
+  spawn.owning_player = arv::PlayerID{2};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundEntitySpawn,
+      arv::protocol::serialize_clientbound_entity_spawn(spawn));
+
+  arv::protocol::ClientboundHello hello;
+  hello.accepted = true;
+  hello.assigned_session_id = arv::SessionID{1};
+  hello.assigned_player_id = arv::PlayerID{1};
+  hello.initial_world_id = arv::WorldID{1};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundHello,
+      arv::protocol::serialize_clientbound_hello(hello));
+
+  arv::protocol::ClientboundWorldJoinResult join;
+  join.accepted = true;
+  join.world_id = arv::WorldID{1};
+  join.player_id = arv::PlayerID{1};
+  join.local_entity_id = arv::EntityNetID{1};
+  join.spawn_position = {8.0F, 20.0F, -20.0F};
+  join.initial_tick = 1;
+  join.tick_rate = arv::DefaultBaseTps;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundWorldJoinResult,
+      arv::protocol::serialize_clientbound_world_join_result(join));
+
+  client.fixed_tick(1);
+  ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  const arv::client::ReplicatedEntityMirror* mirror =
+      client.find_replicated_entity(arv::EntityNetID{42});
+  ASSERT_NE(mirror, nullptr);
+  EXPECT_EQ(mirror->world_id, arv::WorldID{1});
+  EXPECT_EQ(mirror->position, (arv::Vec3f{3.0F, 4.0F, 5.0F}));
+  ASSERT_TRUE(mirror->owning_player.has_value());
+  EXPECT_EQ(mirror->owning_player.value(), arv::PlayerID{2});
+
+  arv::protocol::ClientboundEntitySnapshot snapshot;
+  snapshot.world_id = arv::WorldID{1};
+  snapshot.server_tick = 2;
+  snapshot.entities.push_back({arv::EntityNetID{42},
+                               {6.0F, 7.0F, 8.0F},
+                               {1.0F, 0.0F, 0.0F},
+                               {0.0F, 0.0F, 0.0F, 1.0F},
+                               0});
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundEntitySnapshot,
+      arv::protocol::serialize_clientbound_entity_snapshot(snapshot),
+      arv::protocol::ReliabilityClass::UnreliableLatestWins);
+  client.fixed_tick(2);
+
+  mirror = client.find_replicated_entity(arv::EntityNetID{42});
+  ASSERT_NE(mirror, nullptr);
+  EXPECT_EQ(mirror->position, (arv::Vec3f{6.0F, 7.0F, 8.0F}));
+  EXPECT_EQ(mirror->last_server_tick, 2U);
+}
+
 TEST(ClientRuntimeTests, KickPacketDisconnectsAndStoresReason) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);

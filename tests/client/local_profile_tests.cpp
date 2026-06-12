@@ -154,7 +154,14 @@ TEST(LocalProfileTests, DerivesSkinCachePaths) {
   const std::filesystem::path home = "/tmp/arvane";
   const std::string hash =
       "0x13a465fc6616da8d2afacaf00a8276aa841662820f9337de127f815ee71cc55d";
+  const arv::client::LocalProfileSkin local_skin{
+      hash,
+      arv::protocol::SkinImageFormat::Png,
+      64,
+      64,
+      hash + ".png"};
 
+  EXPECT_EQ(arv::client::local_skin_path(home, local_skin), home / "skins" / local_skin.file);
   EXPECT_EQ(
       arv::client::cached_skin_path(home, hash),
       home / "cache" / "skins" / (hash + ".png"));

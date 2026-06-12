@@ -54,6 +54,12 @@ struct TextureAtlasBuildOptions {
   bool require_uniform_non_fallback_size{true};
 };
 
+[[nodiscard]] inline TextureAtlasBuildOptions default_block_texture_atlas_options() noexcept {
+  TextureAtlasBuildOptions options;
+  options.require_uniform_non_fallback_size = false;
+  return options;
+}
+
 struct BlockTextureAtlas {
   TextureAtlas atlas{};
   voxel::BlockRenderData render_data{};
@@ -77,13 +83,13 @@ using BlockModelRenderBoxesResult =
 [[nodiscard]] BlockTextureAtlasResult build_block_texture_atlas(
     ResourceManager& resources,
     const voxel::BlockRegistry& registry,
-    TextureAtlasBuildOptions options = {});
+    TextureAtlasBuildOptions options = default_block_texture_atlas_options());
 
 [[nodiscard]] BlockTextureAtlasResult build_block_texture_atlas(
     ResourceManager& resources,
     const voxel::BlockRegistry& registry,
     std::span<const BlockModelAssetData> block_models,
-    TextureAtlasBuildOptions options = {});
+    TextureAtlasBuildOptions options = default_block_texture_atlas_options());
 
 [[nodiscard]] BlockModelAssetDataResult load_block_model_definitions(
     ResourceManager& resources,

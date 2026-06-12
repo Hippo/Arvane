@@ -39,6 +39,7 @@ public:
   [[nodiscard]] const ReplicatedEntityMirror* find(EntityNetID entity_id) const noexcept;
   [[nodiscard]] std::vector<ReplicatedEntityMirror> mirrors() const;
 
+  void prune_except_world(WorldID world_id);
   void clear() noexcept;
 
 private:
