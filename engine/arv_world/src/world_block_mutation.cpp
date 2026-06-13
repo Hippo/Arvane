@@ -78,6 +78,7 @@ bool WorldRuntime::Impl::set_fluid_cell(
   }
 
   const SectionLocalPos local = block_to_local(pos);
+  const voxel::BlockVariantID current_block = chunk->block(local);
   const bool affects_lighting = definition.reduces_sky_light || definition.emits_light;
   if (!chunk->set_fluid(local, fluid, affects_lighting)) {
     return false;
@@ -98,6 +99,8 @@ bool WorldRuntime::Impl::set_fluid_cell(
         fluid.empty() ? FluidUpdateReason::FluidRemoved : FluidUpdateReason::FluidAdded,
         definition.flow_interval_ticks);
   }
+  replicated_block_updates.push_back(
+      {pos, current_block, current_block, fluid, tick_index});
   return true;
 }
 
@@ -150,7 +153,7 @@ bool WorldRuntime::set_block(BlockPos pos, voxel::BlockVariantID variant) noexce
   impl_->dirty.mark_lighting_content_dirty();
   impl_->tick_queues.enqueue_neighbor_block_updates(pos);
   FluidSolver::enqueue_neighbor_updates(*this, pos, FluidUpdateReason::BlockChanged);
-  impl_->replicated_block_updates.push_back({pos, old_variant, variant, impl_->tick_index});
+  impl_->replicated_block_updates.push_back({pos, old_variant, variant, {}, impl_->tick_index});
   return true;
 }
 
@@ -211,7 +214,7 @@ BlockMutationBatchResult WorldRuntime::apply_block_mutation_batch(
     impl_->tick_queues.enqueue_neighbor_block_updates(mutation.pos);
     FluidSolver::enqueue_neighbor_updates(*this, mutation.pos, FluidUpdateReason::BlockChanged);
     impl_->replicated_block_updates.push_back(
-        {mutation.pos, old_variant, mutation.new_state, impl_->tick_index});
+        {mutation.pos, old_variant, mutation.new_state, {}, impl_->tick_index});
   }
 
   if (result.applied == 0U) {

@@ -43,6 +43,7 @@ target_link_libraries(arv_client_session
     arv_client_dropped_items
     arv_net
     arv_player
+    arv_protocol_block_updates
     arv_protocol_dropped_items
     arv_protocol_entity_replication
     arv_protocol_inventory_sync

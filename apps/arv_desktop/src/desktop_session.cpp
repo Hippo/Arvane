@@ -860,6 +860,13 @@ void DesktopSessionManager::apply_pending_client_chunk_stream(
       if (session.client_world.set_block(update.pos, update.new_state)) {
         changed = true;
       }
+      if (update.has_fluid &&
+          session.client_world.set_fluid(
+              update.pos,
+              update.new_fluid,
+              dependencies_.water_fluid)) {
+        changed = true;
+      }
     }
     (void)session.client_world.drain_replicated_block_updates();
   }

@@ -15,6 +15,12 @@ std::vector<u8> serialize_clientbound_block_update_batch(const ClientboundBlockU
     writer.write<u32>(update.new_state.value);
     writer.write<u32>(update.update_flags);
     writer.write<u64>(update.server_tick);
+    writer.write_bool(update.has_fluid);
+    if (update.has_fluid) {
+      writer.write<u32>(update.new_fluid.type.value);
+      writer.write<u8>(update.new_fluid.level);
+      writer.write<u8>(static_cast<u8>(update.new_fluid.flags));
+    }
   }
   return std::move(writer).take_bytes();
 }
@@ -42,14 +48,31 @@ Expected<ClientboundBlockUpdateBatch, ProtocolError> deserialize_clientbound_blo
     auto state = reader.read<u32>();
     auto flags = reader.read<u32>();
     auto tick = reader.read<u64>();
-    if (!pos || !state || !flags || !tick) {
+    auto has_fluid = reader.read_bool();
+    if (!pos || !state || !flags || !tick || !has_fluid) {
       return Expected<ClientboundBlockUpdateBatch, ProtocolError>::failure(
           ProtocolError{"failed to decode block update entry"});
     }
-    batch.updates.push_back({pos.value(),
-                             voxel::BlockVariantID{state.value()},
-                             flags.value(),
-                             tick.value()});
+    BlockUpdate update{
+        pos.value(),
+        voxel::BlockVariantID{state.value()},
+        flags.value(),
+        tick.value()};
+    update.has_fluid = has_fluid.value();
+    if (update.has_fluid) {
+      auto fluid_type = reader.read<u32>();
+      auto fluid_level = reader.read<u8>();
+      auto fluid_flags = reader.read<u8>();
+      if (!fluid_type || !fluid_level || !fluid_flags) {
+        return Expected<ClientboundBlockUpdateBatch, ProtocolError>::failure(
+            ProtocolError{"failed to decode block update fluid entry"});
+      }
+      update.new_fluid = {
+          voxel::FluidTypeID{fluid_type.value()},
+          fluid_level.value(),
+          static_cast<voxel::FluidFlags>(fluid_flags.value())};
+    }
+    batch.updates.push_back(update);
   }
   auto trailing = require_no_trailing_bytes(reader, "block update message");
   if (!trailing) {

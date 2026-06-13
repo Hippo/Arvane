@@ -1077,6 +1077,8 @@ TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
       block_registry.find_variant("arvane:stone").value();
   const arv::voxel::BlockVariantID dirt =
       block_registry.find_variant("arvane:dirt").value();
+  const arv::voxel::FluidDefinition water =
+      arv::voxel::make_water_fluid_definition();
   auto transports = arv::net::make_in_process_transport_pair();
   arv::server::ServerRuntime server(std::move(transports.server));
   arv::server::ServerChunkStreamingConfig streaming_config;
@@ -1088,7 +1090,7 @@ TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
                             &block_registry,
                             &item_registry,
                             arv::player::default_player_tuning(),
-                            arv::voxel::make_water_fluid_definition(),
+                            water,
                             streaming_config}));
   server.voxel_world().configure_height({1, 1});
 
@@ -1121,6 +1123,21 @@ TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
   EXPECT_EQ(updates.front().world_id, arv::server::DefaultWorldID);
   EXPECT_EQ(updates.front().updates.front().pos, changed_block);
   EXPECT_EQ(updates.front().updates.front().new_state, dirt);
+  EXPECT_FALSE(updates.front().updates.front().has_fluid);
+
+  const arv::BlockPos changed_fluid =
+      arv::chunk_local_to_block(expected_chunk, {{2, 2, 3}});
+  ASSERT_TRUE(server.voxel_world().place_fluid_source(changed_fluid, water));
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  updates = client.drain_received_block_updates();
+  ASSERT_EQ(updates.size(), 1U);
+  ASSERT_EQ(updates.front().updates.size(), 1U);
+  EXPECT_EQ(updates.front().updates.front().pos, changed_fluid);
+  EXPECT_TRUE(updates.front().updates.front().has_fluid);
+  EXPECT_EQ(
+      updates.front().updates.front().new_fluid,
+      arv::voxel::make_fluid_source(water));
 }
 
 TEST(IntegratedHandshakeTests, DroppedItemsReplicateAfterRelevantChunkStreaming) {

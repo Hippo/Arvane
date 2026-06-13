@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <span>
 #include <sstream>
 #include <system_error>
@@ -94,6 +95,7 @@ namespace {
       return state == net::ConnectionState::WorldJoin;
     case protocol::MessageType::ClientboundChunkSectionData:
     case protocol::MessageType::ClientboundChunkSectionUnload:
+    case protocol::MessageType::ClientboundBlockUpdateBatch:
     case protocol::MessageType::ClientboundEntitySpawn:
     case protocol::MessageType::ClientboundEntityDespawn:
     case protocol::MessageType::ClientboundEntitySnapshot:
@@ -123,6 +125,17 @@ namespace {
       << " in session state "
       << static_cast<unsigned int>(state);
   return out.str();
+}
+
+void mark_section_content_changed(
+    protocol::ClientboundChunkSectionData& section,
+    u64 server_tick) noexcept {
+  const u64 next_content_version =
+      section.chunk_content_version == std::numeric_limits<u64>::max()
+          ? section.chunk_content_version
+          : section.chunk_content_version + 1U;
+  section.chunk_content_version = std::max(next_content_version, server_tick);
+  section.chunk_version = std::max(section.chunk_version, section.chunk_content_version);
 }
 
 [[nodiscard]] bool write_temp_apack_file(
@@ -543,6 +556,32 @@ void ClientSession::handle_chunk_section_unload(protocol::ClientboundChunkSectio
   chunk_sections_.erase(new_end, chunk_sections_.end());
 }
 
+void ClientSession::handle_block_update_batch(protocol::ClientboundBlockUpdateBatch batch) {
+  if (!world_join_.has_value() || batch.world_id != world_join_->world_id) {
+    return;
+  }
+  for (const protocol::BlockUpdate& update : batch.updates) {
+    const ChunkSectionCoord coord = block_to_chunk(update.pos);
+    auto found = std::find_if(
+        chunk_sections_.begin(),
+        chunk_sections_.end(),
+        [&](const protocol::ClientboundChunkSectionData& existing) {
+          return existing.world_id == batch.world_id && existing.coord == coord;
+        });
+    if (found == chunk_sections_.end()) {
+      continue;
+    }
+
+    const usize index = voxel::local_index(block_to_local(update.pos));
+    found->blocks[index] = update.new_state;
+    if (update.has_fluid) {
+      found->has_fluids = true;
+      found->fluids[index] = update.new_fluid;
+    }
+    mark_section_content_changed(*found, update.server_tick);
+  }
+}
+
 void ClientSession::handle_entity_spawn(protocol::ClientboundEntitySpawn spawn) {
   if (!matches_joined_or_pending_world(world_join_, spawn.world_id)) {
     return;
@@ -853,6 +892,16 @@ void ClientSession::handle_message(std::span<const u8> payload) {
         return;
       }
       handle_chunk_section_unload(unload.value());
+      return;
+    }
+    case protocol::MessageType::ClientboundBlockUpdateBatch: {
+      auto updates = protocol::deserialize_clientbound_block_update_batch(
+          decoded.value().payload);
+      if (!updates) {
+        disconnect("invalid block update batch");
+        return;
+      }
+      handle_block_update_batch(std::move(updates.value()));
       return;
     }
     case protocol::MessageType::ClientboundEntitySpawn: {

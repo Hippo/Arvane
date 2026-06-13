@@ -170,6 +170,7 @@ struct ReplicatedBlockUpdate {
   BlockPos pos{};
   voxel::BlockVariantID old_state{};
   voxel::BlockVariantID new_state{};
+  std::optional<voxel::FluidCell> new_fluid{};
   TickIndex server_tick{};
 };
 

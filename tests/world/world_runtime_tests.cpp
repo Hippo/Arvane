@@ -39,6 +39,31 @@ TEST(WorldRuntimeTests, ReplicatedBlockUpdatesPreserveOldAndNewState) {
   EXPECT_EQ(updates.front().new_state, arv::voxel::BlockVariantID{3});
 }
 
+TEST(WorldRuntimeTests, ReplicatedBlockUpdatesIncludeFluidChanges) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.ensure_chunk({{0, 0, 0}});
+  const arv::BlockPos pos{{1, 2, 3}};
+  const arv::voxel::FluidDefinition water =
+      arv::voxel::make_water_fluid_definition();
+
+  ASSERT_TRUE(world.place_fluid_source(pos, water));
+  std::vector<arv::world::ReplicatedBlockUpdate> updates =
+      world.drain_replicated_block_updates();
+  ASSERT_EQ(updates.size(), 1U);
+  EXPECT_EQ(updates.front().pos, pos);
+  EXPECT_EQ(updates.front().new_state, arv::voxel::AirBlockVariantID);
+  ASSERT_TRUE(updates.front().new_fluid.has_value());
+  EXPECT_EQ(
+      updates.front().new_fluid.value(),
+      arv::voxel::make_fluid_source(water));
+
+  ASSERT_TRUE(world.set_fluid(pos, arv::voxel::empty_fluid_cell(), water));
+  updates = world.drain_replicated_block_updates();
+  ASSERT_EQ(updates.size(), 1U);
+  ASSERT_TRUE(updates.front().new_fluid.has_value());
+  EXPECT_TRUE(updates.front().new_fluid->empty());
+}
+
 TEST(WorldRuntimeTests, ChunkColumnsUseConfiguredHeightForSectionLookup) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   world.configure_height({-2, 1});

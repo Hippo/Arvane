@@ -455,10 +455,22 @@ layout(location = 3) in uint a_atlas_page;
 uniform mat4 u_mvp;
 uniform vec3 u_chunk_origin;
 uniform vec2 u_atlas_inv_size;
+uniform float u_animation_time_seconds;
 out vec2 v_uv;
 out float v_light;
 flat out uint v_atlas_page;
 flat out uint v_material_class;
+flat out uint v_animation_id;
+flat out uint v_material_flags;
+const uint VertexAnimationWaterStill = 1u;
+const uint VertexAnimationWaterFlow = 2u;
+const uint VertexAnimationWaterSurface = 3u;
+const uint VertexMaterialFlagDisableAo = 8u;
+bool is_water_animation(uint animation_id) {
+  return animation_id == VertexAnimationWaterStill ||
+         animation_id == VertexAnimationWaterFlow ||
+         animation_id == VertexAnimationWaterSurface;
+}
 void main() {
   uint block_x = a_pos_ao & 31u;
   uint block_y = (a_pos_ao >> 5u) & 31u;
@@ -469,18 +481,28 @@ void main() {
   uint ao = (a_pos_ao >> 30u) & 3u;
   vec3 local_pos = vec3(block_x, block_y, block_z) +
       vec3(model_x, model_y, model_z) * (1.0 / 16.0);
+  uint animation_id = (a_light_face_material >> 23u) & 15u;
+  if (is_water_animation(animation_id) && animation_id == VertexAnimationWaterSurface) {
+    float wave_phase =
+        dot((u_chunk_origin + local_pos).xz, vec2(1.73, 1.19)) +
+        u_animation_time_seconds * 1.4;
+    local_pos.y += sin(wave_phase) * 0.025;
+  }
   uint atlas_u = a_uv & 65535u;
   uint atlas_v = (a_uv >> 16u) & 65535u;
   v_uv = (vec2(float(atlas_u), float(atlas_v)) + vec2(0.5)) * u_atlas_inv_size;
   v_atlas_page = a_atlas_page;
   v_material_class = (a_light_face_material >> 19u) & 15u;
+  v_animation_id = animation_id;
+  v_material_flags = (a_light_face_material >> 27u) & 31u;
 
   float block_r = float((a_light_face_material >> 0u) & 15u);
   float block_g = float((a_light_face_material >> 4u) & 15u);
   float block_b = float((a_light_face_material >> 8u) & 15u);
   float sky = float((a_light_face_material >> 12u) & 15u);
   float light = max(max(max(block_r, block_g), block_b), sky) / 15.0;
-  float ao_factor = mix(0.58, 1.0, float(ao) / 3.0);
+  bool disable_ao = (v_material_flags & VertexMaterialFlagDisableAo) != 0u;
+  float ao_factor = disable_ao ? 1.0 : mix(0.58, 1.0, float(ao) / 3.0);
   v_light = clamp(light, 0.18, 1.0) * ao_factor;
   gl_Position = u_mvp * vec4(u_chunk_origin + local_pos, 1.0);
 }
@@ -496,15 +518,42 @@ in vec2 v_uv;
 in float v_light;
 flat in uint v_atlas_page;
 flat in uint v_material_class;
+flat in uint v_animation_id;
+flat in uint v_material_flags;
 out vec4 out_color;
+const uint VertexMaterialClassCutout = 1u;
+const uint VertexMaterialClassWater = 3u;
+const uint VertexMaterialClassFoliage = 5u;
+const uint VertexAnimationWaterStill = 1u;
+const uint VertexAnimationWaterFlow = 2u;
+const uint VertexAnimationWaterSurface = 3u;
+const uint VertexMaterialFlagTintFromBiome = 1u;
+const uint VertexMaterialFlagTintFromFluid = 2u;
+vec3 biome_tint_for_vertex(uint material_class) {
+  return material_class == VertexMaterialClassFoliage ? vec3(0.42, 0.68, 0.28) : vec3(1.0);
+}
+vec3 fluid_tint_for_vertex(uint material_class) {
+  return material_class == VertexMaterialClassWater ? vec3(0.42, 0.66, 0.88) : vec3(1.0);
+}
+bool is_water_animation(uint animation_id) {
+  return animation_id == VertexAnimationWaterStill ||
+         animation_id == VertexAnimationWaterFlow ||
+         animation_id == VertexAnimationWaterSurface;
+}
 void main() {
   vec4 texel = texture(u_chunk_atlas, vec3(v_uv, float(v_atlas_page)));
-  bool water = v_material_class == 3u;
+  bool water = v_material_class == VertexMaterialClassWater;
   if (texel.a < (water ? 0.01 : 0.1)) {
     discard;
   }
+  if ((v_material_flags & VertexMaterialFlagTintFromBiome) != 0u) {
+    texel.rgb *= biome_tint_for_vertex(v_material_class);
+  }
+  if ((v_material_flags & VertexMaterialFlagTintFromFluid) != 0u) {
+    texel.rgb *= fluid_tint_for_vertex(v_material_class);
+  }
   float alpha = water ? max(texel.a * u_alpha, 0.42) : texel.a * u_alpha;
-  float shimmer = water
+  float shimmer = water && is_water_animation(v_animation_id)
       ? sin(u_animation_time_seconds * 1.7 + v_uv.x * 96.0 + v_uv.y * 64.0) * 0.035
       : 0.0;
   float lit = water ? clamp(max(v_light, 0.72) + shimmer, 0.0, 1.0) : v_light;

@@ -6,6 +6,7 @@
 #include "arv/core/time.hpp"
 #include "arv/protocol/message_writer.hpp"
 #include "arv/voxel/block.hpp"
+#include "arv/voxel/fluid.hpp"
 
 #include <span>
 #include <vector>
@@ -17,6 +18,8 @@ struct BlockUpdate {
   voxel::BlockVariantID new_state{};
   u32 update_flags{};
   u64 server_tick{};
+  bool has_fluid{};
+  voxel::FluidCell new_fluid{};
 };
 
 struct ClientboundBlockUpdateBatch {

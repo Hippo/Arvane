@@ -49,6 +49,12 @@ add_library(arv_protocol_stream STATIC
 target_include_directories(arv_protocol_stream PUBLIC include)
 target_link_libraries(arv_protocol_stream PUBLIC arv_protocol_headers arv_voxel_headers)
 
+add_library(arv_protocol_block_updates STATIC
+  src/block_updates.cpp
+)
+target_include_directories(arv_protocol_block_updates PUBLIC include)
+target_link_libraries(arv_protocol_block_updates PUBLIC arv_protocol_headers arv_voxel_headers)
+
 add_library(arv_protocol_player_movement STATIC
   src/player_movement.cpp
 )
@@ -91,7 +97,6 @@ if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
 endif()
 
 add_library(arv_protocol STATIC
-  src/block_updates.cpp
   src/chat.cpp
   src/entity_interaction.cpp
   src/explosion.cpp
@@ -104,4 +109,4 @@ add_library(arv_protocol STATIC
 )
 target_include_directories(arv_protocol PUBLIC include)
 target_link_libraries(arv_protocol PUBLIC arv_protocol_headers)
-target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_protocol_dropped_items arv_protocol_inventory_sync arv_core arv_crypto arv_player arv_text arv_voxel)
+target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_block_updates arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_protocol_dropped_items arv_protocol_inventory_sync arv_core arv_crypto arv_player arv_text arv_voxel)

@@ -11,6 +11,7 @@
 #include "arv/player/inventory.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/client/dropped_item_mirror.hpp"
+#include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_updates.hpp"
 #include "arv/protocol/entity_replication.hpp"
@@ -188,6 +189,7 @@ private:
   void send_chunk_interest(ChunkSectionCoord center, i32 view_distance);
   void handle_chunk_section_data(protocol::ClientboundChunkSectionData data);
   void handle_chunk_section_unload(protocol::ClientboundChunkSectionUnload unload);
+  void handle_block_update_batch(protocol::ClientboundBlockUpdateBatch batch);
   void handle_entity_spawn(protocol::ClientboundEntitySpawn spawn);
   void handle_entity_despawn(protocol::ClientboundEntityDespawn despawn);
   void handle_entity_snapshot(protocol::ClientboundEntitySnapshot snapshot);

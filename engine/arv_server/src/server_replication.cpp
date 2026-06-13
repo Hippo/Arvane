@@ -344,10 +344,16 @@ void ServerRuntimeImpl::send_block_updates() {
               block_to_chunk(update.pos))) {
         continue;
       }
-      batch.updates.push_back({update.pos,
-                               update.new_state,
-                               0U,
-                               update.server_tick});
+      protocol::BlockUpdate packet_update;
+      packet_update.pos = update.pos;
+      packet_update.new_state = update.new_state;
+      packet_update.update_flags = 0U;
+      packet_update.server_tick = update.server_tick;
+      if (update.new_fluid.has_value()) {
+        packet_update.has_fluid = true;
+        packet_update.new_fluid = update.new_fluid.value();
+      }
+      batch.updates.push_back(packet_update);
     }
     if (batch.updates.empty()) {
       continue;

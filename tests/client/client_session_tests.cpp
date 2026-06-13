@@ -6,6 +6,7 @@
 #include "arv/crypto/hash.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/protocol/auth.hpp"
+#include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/entity_updates.hpp"
 #include "arv/protocol/handshake.hpp"
@@ -557,6 +558,30 @@ TEST(ClientSessionTests, CompletesAuthPackDownloadRegistrySyncAndWorldJoin) {
   EXPECT_EQ(session.chunk_sections().front().coord, chunk_data.coord);
   EXPECT_EQ(session.chunk_sections().front().blocks.front(), arv::voxel::BlockVariantID{7});
   EXPECT_EQ(session.chunk_sections().front().lights.front(), arv::voxel::pack_light(1, 2, 3, 4));
+
+  arv::protocol::ClientboundBlockUpdateBatch block_updates;
+  block_updates.world_id = arv::WorldID{1};
+  block_updates.server_tick = 200;
+  block_updates.updates.push_back({
+      arv::BlockPos{{0, 0, 0}},
+      arv::voxel::BlockVariantID{8},
+      0U,
+      200U,
+      true,
+      arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition()),
+  });
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundBlockUpdateBatch,
+      arv::protocol::serialize_clientbound_block_update_batch(block_updates));
+  session.pump();
+
+  ASSERT_EQ(session.chunk_sections().size(), 1U);
+  EXPECT_EQ(session.chunk_sections().front().blocks.front(), arv::voxel::BlockVariantID{8});
+  EXPECT_TRUE(session.chunk_sections().front().has_fluids);
+  EXPECT_TRUE(session.chunk_sections().front().fluids.front().source());
+  EXPECT_GT(session.chunk_sections().front().chunk_content_version, chunk_data.chunk_content_version);
 
   send_to_client(
       *server_transport,

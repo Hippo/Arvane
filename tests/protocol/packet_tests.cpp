@@ -891,18 +891,35 @@ TEST(ProtocolTests, BlockUpdateBatchRoundTripsAndRejectsMalformedCounts) {
                            arv::voxel::BlockVariantID{9},
                            7,
                            120});
+  batch.updates.push_back(
+      {arv::BlockPos{{4, 5, 6}},
+       arv::voxel::AirBlockVariantID,
+       0,
+       121,
+       true,
+       arv::voxel::make_flowing_fluid(
+           arv::voxel::make_water_fluid_definition(),
+           4U)});
 
   const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_block_update_batch(batch);
   const auto decoded = arv::protocol::deserialize_clientbound_block_update_batch(bytes);
 
   ASSERT_TRUE(decoded);
-  ASSERT_EQ(decoded.value().updates.size(), 1U);
+  ASSERT_EQ(decoded.value().updates.size(), 2U);
   EXPECT_EQ(decoded.value().world_id, (arv::WorldID{5}));
   EXPECT_EQ(decoded.value().server_tick, 123U);
   EXPECT_EQ(decoded.value().updates.front().pos, (arv::BlockPos{{1, -2, 3}}));
   EXPECT_EQ(decoded.value().updates.front().new_state, (arv::voxel::BlockVariantID{9}));
   EXPECT_EQ(decoded.value().updates.front().update_flags, 7U);
   EXPECT_EQ(decoded.value().updates.front().server_tick, 120U);
+  EXPECT_FALSE(decoded.value().updates.front().has_fluid);
+  EXPECT_EQ(decoded.value().updates[1].pos, (arv::BlockPos{{4, 5, 6}}));
+  EXPECT_TRUE(decoded.value().updates[1].has_fluid);
+  EXPECT_EQ(
+      decoded.value().updates[1].new_fluid,
+      arv::voxel::make_flowing_fluid(
+          arv::voxel::make_water_fluid_definition(),
+          4U));
 
   arv::protocol::MessageWriter malformed;
   malformed.write<arv::u32>(5);
