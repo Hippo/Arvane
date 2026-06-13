@@ -988,6 +988,33 @@ TEST(ClientSessionTests, TracksInventoryAndDroppedItemsForLightweightClient) {
   ASSERT_TRUE(session.inventory_cursor_stack().has_value());
   EXPECT_EQ(session.inventory_cursor_stack()->item, arv::player::ItemID{6});
 
+  arv::protocol::ClientboundPlayerBlockBreakProgress break_progress;
+  break_progress.server_tick = 15U;
+  break_progress.player_id = arv::PlayerID{2};
+  break_progress.block_break.active = true;
+  break_progress.block_break.block = arv::BlockPos{{4, 5, 6}};
+  break_progress.block_break.variant = arv::voxel::BlockVariantID{7};
+  break_progress.block_break.progress = 0.45F;
+  break_progress.block_break.stage = 4U;
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundPlayerBlockBreakProgress,
+      arv::protocol::serialize_clientbound_player_block_break_progress(break_progress));
+  session.pump();
+
+  EXPECT_TRUE(session.block_break_progress().active);
+  EXPECT_EQ(session.block_break_progress().block, (arv::BlockPos{{4, 5, 6}}));
+  EXPECT_EQ(session.block_break_progress().variant, arv::voxel::BlockVariantID{7});
+  EXPECT_FLOAT_EQ(session.block_break_progress().progress, 0.45F);
+  EXPECT_EQ(session.block_break_progress().stage, 4U);
+
+  break_progress.player_id = arv::PlayerID{99};
+  break_progress.block_break.block = arv::BlockPos{{9, 9, 9}};
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundPlayerBlockBreakProgress,
+      arv::protocol::serialize_clientbound_player_block_break_progress(break_progress));
+  session.pump();
+  EXPECT_EQ(session.block_break_progress().block, (arv::BlockPos{{4, 5, 6}}));
+
   inventory.slots[0] = arv::player::ItemStack{arv::player::ItemID{9}, 1U};
   scripted->push_message(
       arv::protocol::MessageType::ClientboundInventoryUpdate,
@@ -1028,6 +1055,7 @@ TEST(ClientSessionTests, TracksInventoryAndDroppedItemsForLightweightClient) {
 
   session.disconnect("test reset");
   EXPECT_FALSE(session.has_authoritative_inventory());
+  EXPECT_FALSE(session.block_break_progress().active);
   EXPECT_EQ(session.dropped_item_count(), 0U);
 }
 
@@ -1068,6 +1096,45 @@ TEST(ClientSessionTests, AcceptsInventoryUpdateDuringRegistrySync) {
   ASSERT_TRUE(session.inventory().slot(0).has_value());
   EXPECT_EQ(session.inventory().slot(0)->item, arv::player::ItemID{5});
   EXPECT_EQ(session.inventory().slot(0)->count, 12U);
+}
+
+TEST(ClientSessionTests, AcceptsBlockBreakProgressDuringRegistrySync) {
+  auto transport = std::make_unique<ScriptedClientTransport>();
+  ScriptedClientTransport* scripted = transport.get();
+  arv::client::ClientSession session(std::move(transport));
+  const auto connection_id = session.connect({"in-process", 0});
+  ASSERT_TRUE(connection_id);
+  scripted->push_event({
+      arv::net::NetworkEventType::ConnectionAccepted,
+      connection_id.value()});
+  session.pump();
+
+  arv::protocol::ClientboundHello server_hello;
+  server_hello.accepted = true;
+  server_hello.required_followup_sync = true;
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundHello,
+      arv::protocol::serialize_clientbound_hello(server_hello));
+  session.pump();
+  ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::RegistrySync);
+
+  arv::protocol::ClientboundPlayerBlockBreakProgress progress;
+  progress.server_tick = 1U;
+  progress.player_id = arv::PlayerID{2};
+  progress.block_break.active = true;
+  progress.block_break.block = arv::BlockPos{{1, 2, 3}};
+  progress.block_break.variant = arv::voxel::BlockVariantID{4};
+  progress.block_break.progress = 0.25F;
+  progress.block_break.stage = 2U;
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundPlayerBlockBreakProgress,
+      arv::protocol::serialize_clientbound_player_block_break_progress(progress));
+  session.pump();
+
+  EXPECT_EQ(session.connection_state(), arv::net::ConnectionState::RegistrySync);
+  EXPECT_TRUE(scripted->close_reasons.empty());
+  EXPECT_TRUE(session.block_break_progress().active);
+  EXPECT_EQ(session.block_break_progress().block, (arv::BlockPos{{1, 2, 3}}));
 }
 
 TEST(ClientSessionTests, RegistrySnapshotMismatchBlocksWorldJoin) {

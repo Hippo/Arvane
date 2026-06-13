@@ -151,6 +151,10 @@ public:
     return has_authoritative_inventory_;
   }
 
+  [[nodiscard]] const protocol::BlockBreakProgress& block_break_progress() const noexcept {
+    return block_break_progress_;
+  }
+
   [[nodiscard]] std::optional<protocol::ClientboundPlayerMoveCorrection> take_player_move_correction();
   [[nodiscard]] std::optional<protocol::ClientboundPlayerVelocity> take_player_velocity();
   [[nodiscard]] std::optional<protocol::ClientboundSetMovementHz> take_movement_settings();
@@ -189,6 +193,7 @@ private:
   void handle_entity_snapshot(protocol::ClientboundEntitySnapshot snapshot);
   void handle_dropped_item_snapshot(protocol::ClientboundDroppedItemSnapshot snapshot);
   void handle_inventory_update(protocol::ClientboundInventoryUpdate update);
+  void handle_block_break_progress(protocol::ClientboundPlayerBlockBreakProgress progress);
   void handle_message(std::span<const u8> payload);
   void handle_connection_closed(std::string reason);
 
@@ -212,6 +217,7 @@ private:
   std::optional<player::ItemStack> inventory_cursor_stack_{};
   u32 inventory_revision_{};
   bool has_authoritative_inventory_{};
+  protocol::BlockBreakProgress block_break_progress_{};
   std::optional<protocol::ClientboundPlayerMoveCorrection> latest_player_move_correction_{};
   std::optional<protocol::ClientboundPlayerVelocity> latest_player_velocity_{};
   std::optional<protocol::ClientboundSetMovementHz> latest_movement_settings_{};

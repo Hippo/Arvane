@@ -2124,6 +2124,47 @@ TEST(PlayerInteractionTests, PrimaryBreakAccumulatesProgressBeforeRemovingHardBl
   EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), arv::voxel::AirBlockVariantID);
 }
 
+TEST(PlayerInteractionTests, TimedBlockBreakSurvivesMissingInputPacketTick) {
+  const arv::voxel::BlockRegistry block_registry = make_timed_break_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID dirt = block_registry.find_variant("arvane:dirt").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.block_breaking.hand_speed_multiplier = 1.0F;
+  ASSERT_TRUE(server.start(start_info));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, dirt));
+  prepare_test_player(server, item_registry);
+
+  client.submit_input(arv::client::InputFrame{.primary_pressed = true, .primary_held = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  EXPECT_TRUE(client.block_break_progress().active);
+  EXPECT_EQ(client.block_break_progress().block, (arv::BlockPos{{3, 1, 0}}));
+  EXPECT_GT(client.block_break_progress().progress, 0.0F);
+  EXPECT_LT(client.block_break_progress().progress, 1.0F);
+
+  client.submit_input(arv::client::InputFrame{.primary_held = false});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  EXPECT_FALSE(client.block_break_progress().active);
+}
+
 TEST(PlayerInteractionTests, MatchingToolBreaksMineableBlocksFasterThanHand) {
   const arv::voxel::BlockRegistry block_registry = make_timed_break_block_registry();
   const arv::player::ItemRegistry item_registry =

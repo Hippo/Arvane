@@ -32,16 +32,10 @@ const player::ItemRecord* DesktopFrameLoop::selected_held_item(
   if (session.client == nullptr || !session.client->has_authoritative_inventory()) {
     return nullptr;
   }
-  const usize selected_slot = session.client->selected_hotbar_slot();
-  const player::Inventory& inventory = session.client->inventory();
-  if (selected_slot >= inventory.slot_count()) {
-    return nullptr;
-  }
-  const std::optional<player::ItemStack>& stack = inventory.slot(selected_slot);
-  if (!stack.has_value() || stack->count == 0U) {
-    return nullptr;
-  }
-  return assets_.item_registry.item(stack->item);
+  return client::selected_inventory_item(
+      session.client->inventory(),
+      session.client->selected_hotbar_slot(),
+      assets_.item_registry);
 }
 
 bool DesktopFrameLoop::selected_water_bucket_can_leave_empty_bucket(
@@ -347,13 +341,9 @@ bool DesktopFrameLoop::held_item_animation_condition_passes(
     const DesktopGameSession& session,
     const player::ItemRecord* item,
     player::HeldItemAnimationPlayCondition condition) const {
-  switch (condition) {
-    case player::HeldItemAnimationPlayCondition::Always:
-      return true;
-    case player::HeldItemAnimationPlayCondition::PlacementSucceeds:
-      return preview_held_item_placement_succeeds(session, item);
-  }
-  return false;
+  return client::held_item_animation_condition_passes(
+      condition,
+      {.placement_succeeds = preview_held_item_placement_succeeds(session, item)});
 }
 
 HeldItemActionPlayResult DesktopFrameLoop::play_held_item_action(
@@ -361,21 +351,22 @@ HeldItemActionPlayResult DesktopFrameLoop::play_held_item_action(
     const player::ItemRecord* item,
     std::string_view action,
     Seconds now_seconds) const noexcept {
-  const client::HeldItemAnimationResolution animation =
-      client::resolve_held_item_animation_binding(
-          item,
-          action,
-          assets_.item_animation_library);
-  if (animation.clip == nullptr) {
-    return animation.disabled
-               ? HeldItemActionPlayResult::Suppressed
-               : HeldItemActionPlayResult::NoAnimation;
+  const client::HeldItemActionPlayResult result = client::play_held_item_action(
+      session.held_item_animation,
+      item,
+      action,
+      assets_.item_animation_library,
+      {.placement_succeeds = preview_held_item_placement_succeeds(session, item)},
+      now_seconds);
+  switch (result) {
+    case client::HeldItemActionPlayResult::NoAnimation:
+      return HeldItemActionPlayResult::NoAnimation;
+    case client::HeldItemActionPlayResult::Suppressed:
+      return HeldItemActionPlayResult::Suppressed;
+    case client::HeldItemActionPlayResult::Played:
+      return HeldItemActionPlayResult::Played;
   }
-  if (!held_item_animation_condition_passes(session, item, animation.play_condition)) {
-    return HeldItemActionPlayResult::Suppressed;
-  }
-  session.held_item_animation.play(*animation.clip, now_seconds);
-  return HeldItemActionPlayResult::Played;
+  return HeldItemActionPlayResult::NoAnimation;
 }
 
 void DesktopFrameLoop::spawn_local_block_face_particles(

@@ -56,6 +56,7 @@ private:
   Seconds movement_send_accumulator_seconds_{};
   u32 next_movement_sequence_{1};
   u32 next_vehicle_movement_sequence_{1};
+  protocol::PlayerActionFlags last_sent_action_flags_{protocol::PlayerActionFlags::None};
   u8 last_sent_hotbar_slot_{};
   bool sent_movement_packet_{};
   bool dismount_request_sent_{};

@@ -3,6 +3,7 @@
 #include "arv/core/expected.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
+#include "arv/player/inventory.hpp"
 #include "arv/player/item.hpp"
 
 #include <optional>
@@ -63,6 +64,16 @@ struct HeldItemAnimationResolution {
   player::HeldItemAnimationPlayCondition play_condition{
       player::HeldItemAnimationPlayCondition::Always};
   bool disabled{};
+};
+
+enum class HeldItemActionPlayResult : u8 {
+  NoAnimation,
+  Suppressed,
+  Played,
+};
+
+struct HeldItemAnimationConditionState {
+  bool placement_succeeds{};
 };
 
 class ItemAnimationLibrary {
@@ -126,5 +137,22 @@ parse_item_animation_library_json(std::string_view text);
     const player::ItemRecord* item,
     std::string_view action,
     const ItemAnimationLibrary& library) noexcept;
+
+[[nodiscard]] bool held_item_animation_condition_passes(
+    player::HeldItemAnimationPlayCondition condition,
+    HeldItemAnimationConditionState state) noexcept;
+
+[[nodiscard]] HeldItemActionPlayResult play_held_item_action(
+    HeldItemAnimationPlayer& player,
+    const player::ItemRecord* item,
+    std::string_view action,
+    const ItemAnimationLibrary& library,
+    HeldItemAnimationConditionState condition_state,
+    Seconds now_seconds) noexcept;
+
+[[nodiscard]] const player::ItemRecord* selected_inventory_item(
+    const player::Inventory& inventory,
+    usize selected_slot,
+    const player::ItemRegistry& item_registry) noexcept;
 
 } // namespace arv::client

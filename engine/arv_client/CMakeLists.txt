@@ -123,6 +123,18 @@ target_link_libraries(arv_client_item_ui
     arv_io_data
 )
 
+add_library(arv_client_item_animation STATIC
+  src/item_animation.cpp
+)
+target_include_directories(arv_client_item_animation PUBLIC include)
+target_link_libraries(arv_client_item_animation
+  PUBLIC
+    arv_core_headers
+    arv_player
+  PRIVATE
+    arv_io_data
+)
+
 add_library(arv_client_dropped_items STATIC
   src/client_dropped_item_mirror.cpp
 )
@@ -139,6 +151,7 @@ target_include_directories(arv_client_item_rendering PUBLIC include)
 target_link_libraries(arv_client_item_rendering
   PUBLIC
     arv_client_dropped_items
+    arv_client_item_animation
     arv_client_render_assets
     arv_render_headers
 )
@@ -161,10 +174,9 @@ add_library(arv_client STATIC
   src/client_runtime.cpp
   src/client_skin_runtime.cpp
   src/client_ui_state.cpp
-  src/item_animation.cpp
   src/local_identity.cpp
   src/particles.cpp
 )
 target_include_directories(arv_client PUBLIC include)
-target_link_libraries(arv_client PUBLIC arv_client_chunk_collision arv_client_chunk_snapshot arv_client_dropped_items arv_client_item_rendering arv_client_item_ui arv_client_local_player arv_client_render_assets arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
+target_link_libraries(arv_client PUBLIC arv_client_chunk_collision arv_client_chunk_snapshot arv_client_dropped_items arv_client_item_animation arv_client_item_rendering arv_client_item_ui arv_client_local_player arv_client_render_assets arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
 target_link_libraries(arv_client PRIVATE arv_asset arv_client_pack_sync arv_client_session arv_command arv_entity arv_io arv_text)

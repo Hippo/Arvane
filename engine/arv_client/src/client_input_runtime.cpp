@@ -1084,10 +1084,12 @@ void ClientInputRuntime::send_fixed_tick_input(
       1.0 / static_cast<Seconds>(std::max(movement_send_rate_hz_, 1.0F));
   const protocol::PlayerActionFlags action_flags =
       action_flags_from_player_command(command);
+  const bool action_flags_changed =
+      !sent_movement_packet_ || action_flags != last_sent_action_flags_;
   const bool hotbar_changed =
       !sent_movement_packet_ || command.selected_hotbar_slot != last_sent_hotbar_slot_;
   if (movement_send_accumulator_seconds_ < send_interval && !has_action(action_flags) &&
-      !hotbar_changed) {
+      !action_flags_changed && !hotbar_changed) {
     return;
   }
   movement_send_accumulator_seconds_ = 0.0;
@@ -1097,6 +1099,7 @@ void ClientInputRuntime::send_fixed_tick_input(
           tick_index,
           action_flags);
   (void)sender.send_player_move(move);
+  last_sent_action_flags_ = action_flags;
   last_sent_hotbar_slot_ = command.selected_hotbar_slot;
   sent_movement_packet_ = true;
 }

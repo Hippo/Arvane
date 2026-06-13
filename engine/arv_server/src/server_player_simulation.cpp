@@ -253,15 +253,16 @@ void ServerRuntimeImpl::tick_players() {
       continue;
     }
 
-    player::PlayerCommand command;
+    std::optional<player::PlayerCommand> pending_command;
     if (auto found = pending_player_commands_.find(session->player_id);
         found != pending_player_commands_.end()) {
-      command = found->second;
+      pending_command = found->second;
       pending_player_commands_.erase(found);
-    } else {
-      command.client_tick = player_state->last_processed_input_tick + 1U;
-      command.selected_hotbar_slot = player_state->selected_hotbar_slot;
     }
+    if (!pending_command.has_value()) {
+      continue;
+    }
+    const player::PlayerCommand& command = pending_command.value();
 
     update_sprint_knockback_state(combat_states_[session_id], command);
     apply_player_action_command(*player_state, command);

@@ -19,6 +19,7 @@ target_link_libraries(arv_web
   PRIVATE
     arv_client_chunk_snapshot
     arv_client_chunk_collision
+    arv_client_item_animation
     arv_client_local_player
     arv_client_item_rendering
     arv_client_item_ui

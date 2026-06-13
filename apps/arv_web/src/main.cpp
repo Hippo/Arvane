@@ -7,6 +7,7 @@
 #include "arv/client/chunk_snapshot.hpp"
 #include "arv/client/client_session.hpp"
 #include "arv/client/entity_render_assets.hpp"
+#include "arv/client/item_animation.hpp"
 #include "arv/client/item_rendering.hpp"
 #include "arv/client/item_ui_model.hpp"
 #include "arv/client/local_player_controller.hpp"
@@ -54,6 +55,8 @@ struct BrowserInputState {
   bool secondary_held{};
   bool primary_pressed{};
   bool secondary_pressed{};
+  bool primary_animation_pressed{};
+  bool secondary_animation_pressed{};
   bool toggle_fly_pressed{};
   std::optional<arv::u8> hotbar_select{};
   arv::i8 hotbar_scroll_steps{};
@@ -63,8 +66,12 @@ struct BrowserInputState {
   double movement_accumulator_seconds{};
   double movement_send_accumulator_seconds{};
   double movement_send_rate_hz{arv::protocol::DefaultClientMovementSendRateHz};
+  arv::protocol::PlayerActionFlags last_sent_action_flags{
+      arv::protocol::PlayerActionFlags::None};
   arv::u64 client_tick{};
   arv::client::LocalPlayerController player{};
+  arv::client::HeldItemAnimationPlayer held_item_animation{};
+  bool held_item_secondary_use_active{};
   bool player_initialized{};
 };
 
@@ -140,6 +147,8 @@ struct ChunkRenderer {
   GLint chunk_origin_location{-1};
   GLint chunk_atlas_location{-1};
   GLint chunk_atlas_inv_size_location{-1};
+  GLint chunk_alpha_location{-1};
+  GLint chunk_animation_time_location{-1};
   GLuint chunk_texture{};
   arv::u32 chunk_texture_width{};
   arv::u32 chunk_texture_height{};
@@ -189,6 +198,7 @@ struct WebBlockRenderAssets {
 
 struct WebEntityRenderAssets {
   arv::client::ClientEntityRenderAssets loaded{};
+  arv::client::ItemAnimationLibrary item_animation_library{};
   arv::asset::TextureAtlas item_atlas{};
   std::vector<std::filesystem::path> pack_cache_paths{};
   std::string registry_snapshot_json{};
@@ -448,6 +458,7 @@ uniform vec2 u_atlas_inv_size;
 out vec2 v_uv;
 out float v_light;
 flat out uint v_atlas_page;
+flat out uint v_material_class;
 void main() {
   uint block_x = a_pos_ao & 31u;
   uint block_y = (a_pos_ao >> 5u) & 31u;
@@ -462,6 +473,7 @@ void main() {
   uint atlas_v = (a_uv >> 16u) & 65535u;
   v_uv = (vec2(float(atlas_u), float(atlas_v)) + vec2(0.5)) * u_atlas_inv_size;
   v_atlas_page = a_atlas_page;
+  v_material_class = (a_light_face_material >> 19u) & 15u;
 
   float block_r = float((a_light_face_material >> 0u) & 15u);
   float block_g = float((a_light_face_material >> 4u) & 15u);
@@ -478,16 +490,25 @@ precision highp float;
 precision highp int;
 precision highp sampler2DArray;
 uniform sampler2DArray u_chunk_atlas;
+uniform float u_alpha;
+uniform float u_animation_time_seconds;
 in vec2 v_uv;
 in float v_light;
 flat in uint v_atlas_page;
+flat in uint v_material_class;
 out vec4 out_color;
 void main() {
   vec4 texel = texture(u_chunk_atlas, vec3(v_uv, float(v_atlas_page)));
-  if (texel.a < 0.1) {
+  bool water = v_material_class == 3u;
+  if (texel.a < (water ? 0.01 : 0.1)) {
     discard;
   }
-  out_color = vec4(texel.rgb * v_light, texel.a);
+  float alpha = water ? max(texel.a * u_alpha, 0.42) : texel.a * u_alpha;
+  float shimmer = water
+      ? sin(u_animation_time_seconds * 1.7 + v_uv.x * 96.0 + v_uv.y * 64.0) * 0.035
+      : 0.0;
+  float lit = water ? clamp(max(v_light, 0.72) + shimmer, 0.0, 1.0) : v_light;
+  out_color = vec4(texel.rgb * lit, alpha);
 }
 )";
   static constexpr const char* color_vertex_shader_source = R"(#version 300 es
@@ -713,6 +734,10 @@ void main() {
       glGetUniformLocation(g_app.renderer.chunk_program, "u_chunk_atlas");
   g_app.renderer.chunk_atlas_inv_size_location =
       glGetUniformLocation(g_app.renderer.chunk_program, "u_atlas_inv_size");
+  g_app.renderer.chunk_alpha_location =
+      glGetUniformLocation(g_app.renderer.chunk_program, "u_alpha");
+  g_app.renderer.chunk_animation_time_location =
+      glGetUniformLocation(g_app.renderer.chunk_program, "u_animation_time_seconds");
   g_app.renderer.color_mvp_location =
       glGetUniformLocation(g_app.renderer.color_program, "u_mvp");
   g_app.renderer.entity_mvp_location =
@@ -1261,6 +1286,32 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
     return false;
   }
 
+  auto item_animation_text =
+      packs.load_merged_json_array_text("item_animations", "animations");
+  if (!item_animation_text) {
+    set_status(
+        "failed to load web item animations: " +
+        item_animation_text.error().describe());
+    return false;
+  }
+  auto item_animation_library = arv::client::parse_item_animation_library_json(
+      item_animation_text.value());
+  if (!item_animation_library) {
+    set_status(
+        "failed to parse web item animations: " +
+        item_animation_library.error().message);
+    return false;
+  }
+  auto item_animation_references = arv::client::validate_item_animation_references(
+      loaded_assets.value().item_registry,
+      item_animation_library.value());
+  if (!item_animation_references) {
+    set_status(
+        "failed to validate web item animations: " +
+        item_animation_references.error().message);
+    return false;
+  }
+
   auto item_atlas = arv::client::build_item_texture_atlas(
       resources,
       loaded_assets.value().item_registry,
@@ -1291,6 +1342,7 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   upload_entity_models(loaded_assets.value().render_assets);
 
   g_app.entity_assets.loaded = std::move(loaded_assets.value());
+  g_app.entity_assets.item_animation_library = std::move(item_animation_library.value());
   g_app.entity_assets.item_atlas = std::move(item_atlas.value());
   g_app.entity_assets.registry_snapshot_json = g_app.session->registry_snapshot_json();
   g_app.entity_assets.pack_cache_paths = std::move(paths);
@@ -1389,6 +1441,114 @@ void apply_bone_rotation_overrides(
   }
 }
 
+[[nodiscard]] const arv::player::ItemRecord* selected_web_held_item() noexcept {
+  if (g_app.session == nullptr ||
+      !g_app.session->has_authoritative_inventory() ||
+      !g_app.entity_assets.ready) {
+    return nullptr;
+  }
+  return arv::client::selected_inventory_item(
+      g_app.session->inventory(),
+      g_app.input.player.selected_hotbar_slot(),
+      g_app.entity_assets.loaded.item_registry);
+}
+
+void update_held_item_animation_from_input(
+    const arv::client::InputFrame& input,
+    arv::Seconds now_seconds) {
+  if (g_app.session == nullptr ||
+      !g_app.entity_assets.ready ||
+      g_app.entity_assets.item_animation_library.clip_count() == 0U ||
+      !g_app.session->has_authoritative_inventory()) {
+    g_app.input.held_item_secondary_use_active = false;
+    g_app.input.held_item_animation.stop(now_seconds);
+    return;
+  }
+
+  const arv::player::ItemRecord* held_item = selected_web_held_item();
+  if (held_item == nullptr) {
+    g_app.input.held_item_secondary_use_active = false;
+    g_app.input.held_item_animation.stop(now_seconds);
+    return;
+  }
+
+  constexpr arv::client::HeldItemAnimationConditionState OptimisticServerAction{
+      .placement_succeeds = true};
+  if (input.primary_pressed) {
+    (void)arv::client::play_held_item_action(
+        g_app.input.held_item_animation,
+        held_item,
+        arv::client::HeldItemActionPrimaryUse,
+        g_app.entity_assets.item_animation_library,
+        OptimisticServerAction,
+        now_seconds);
+  }
+
+  if (input.primary_held &&
+      g_app.session->block_break_progress().active &&
+      g_app.input.held_item_animation.finished(now_seconds)) {
+    (void)arv::client::play_held_item_action(
+        g_app.input.held_item_animation,
+        held_item,
+        arv::client::HeldItemActionPrimaryUse,
+        g_app.entity_assets.item_animation_library,
+        OptimisticServerAction,
+        now_seconds);
+  }
+
+  if (input.secondary_pressed) {
+    arv::client::HeldItemActionPlayResult result =
+        arv::client::play_held_item_action(
+            g_app.input.held_item_animation,
+            held_item,
+            arv::client::HeldItemActionSecondaryUseStart,
+            g_app.entity_assets.item_animation_library,
+            OptimisticServerAction,
+            now_seconds);
+    if (result == arv::client::HeldItemActionPlayResult::NoAnimation) {
+      result = arv::client::play_held_item_action(
+          g_app.input.held_item_animation,
+          held_item,
+          arv::client::HeldItemActionSecondaryUseHold,
+          g_app.entity_assets.item_animation_library,
+          OptimisticServerAction,
+          now_seconds);
+    }
+    g_app.input.held_item_secondary_use_active =
+        result != arv::client::HeldItemActionPlayResult::Suppressed;
+  }
+
+  if (input.secondary_held &&
+      g_app.input.held_item_secondary_use_active &&
+      g_app.input.held_item_animation.finished(now_seconds)) {
+    const arv::client::HeldItemAnimationResolution hold_animation =
+        arv::client::resolve_held_item_animation_binding(
+            held_item,
+            arv::client::HeldItemActionSecondaryUseHold,
+            g_app.entity_assets.item_animation_library);
+    if (hold_animation.clip != nullptr &&
+        arv::client::held_item_animation_condition_passes(
+            hold_animation.play_condition,
+            OptimisticServerAction) &&
+        g_app.input.held_item_animation.active_clip() != hold_animation.clip) {
+      g_app.input.held_item_animation.play(*hold_animation.clip, now_seconds);
+    }
+  }
+
+  if (!input.secondary_held && g_app.input.held_item_secondary_use_active) {
+    g_app.input.held_item_secondary_use_active = false;
+    if (arv::client::play_held_item_action(
+            g_app.input.held_item_animation,
+            held_item,
+            arv::client::HeldItemActionSecondaryUseEnd,
+            g_app.entity_assets.item_animation_library,
+            OptimisticServerAction,
+            now_seconds) != arv::client::HeldItemActionPlayResult::Played) {
+      g_app.input.held_item_animation.stop(now_seconds);
+    }
+  }
+}
+
 [[nodiscard]] std::vector<arv::render::EntityDrawItem> build_entity_draw_items(
     arv::Seconds animation_time_seconds) {
   std::vector<arv::render::EntityDrawItem> draws;
@@ -1400,7 +1560,7 @@ void apply_bone_rotation_overrides(
   draws.reserve(
       g_app.session->entity_mirrors().size() +
       g_app.session->dropped_item_count() +
-      1U);
+      2U);
   for (const arv::client::ClientSessionEntityMirror& mirror :
        g_app.session->entity_mirrors()) {
     if (join.has_value() && mirror.world_id != join->world_id) {
@@ -1460,6 +1620,27 @@ void apply_bone_rotation_overrides(
       join->world_id,
       animation_time_seconds);
 
+  const arv::protocol::BlockBreakProgress& block_break =
+      g_app.session->block_break_progress();
+  if (block_break.active &&
+      block_break.variant.value <
+          g_app.entity_assets.loaded.render_assets.break_overlay_model_by_variant.size() &&
+      block_break.stage < arv::client::BreakStageTextureCount) {
+    const arv::render::EntityModelID model_id =
+        g_app.entity_assets.loaded.render_assets
+            .break_overlay_model_by_variant[block_break.variant.value][block_break.stage];
+    if (model_id.value != 0U) {
+      arv::render::EntityDrawItem item;
+      item.model_id = model_id;
+      item.position = {
+          static_cast<arv::f32>(block_break.block.value.x) + 0.5F,
+          static_cast<arv::f32>(block_break.block.value.y) + 0.5F,
+          static_cast<arv::f32>(block_break.block.value.z) + 0.5F};
+      item.scale = 1.0F;
+      item_frame.entities.push_back(std::move(item));
+    }
+  }
+
   if (g_app.session->has_authoritative_inventory()) {
     const arv::usize selected_slot = g_app.input.player.selected_hotbar_slot();
     const arv::player::Inventory& inventory = g_app.session->inventory();
@@ -1471,7 +1652,8 @@ void apply_bone_rotation_overrides(
             item_frame,
             g_app.entity_assets.loaded.render_assets,
             held_stack.value(),
-            item_frame.camera);
+            item_frame.camera,
+            g_app.input.held_item_animation.sample(animation_time_seconds));
       }
     }
   }
@@ -1965,6 +2147,9 @@ void render_remote_world() {
         g_app.renderer.chunk_atlas_inv_size_location,
         1.0F / static_cast<float>(std::max(g_app.renderer.chunk_texture_width, 1U)),
         1.0F / static_cast<float>(std::max(g_app.renderer.chunk_texture_height, 1U)));
+    glUniform1f(
+        g_app.renderer.chunk_animation_time_location,
+        static_cast<float>(animation_time_seconds));
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.chunk_texture);
     const auto draw_chunk_mesh = [](const ChunkGpuMesh& chunk, const IndexedGpuMesh& mesh) {
@@ -1983,13 +2168,31 @@ void render_remote_world() {
       glBindVertexArray(mesh.vao);
       glDrawElements(GL_TRIANGLES, mesh.index_count, GL_UNSIGNED_INT, nullptr);
     };
+    glUniform1f(g_app.renderer.chunk_alpha_location, 1.0F);
     for (const ChunkGpuMesh& mesh : g_app.renderer.meshes) {
       draw_chunk_mesh(mesh, mesh.opaque);
     }
     draw_entity_models(mvp, false, animation_time_seconds);
+    glUseProgram(g_app.renderer.chunk_program);
+    glUniformMatrix4fv(
+        g_app.renderer.chunk_mvp_location,
+        1,
+        GL_FALSE,
+        mvp.values.data());
+    glUniform1i(g_app.renderer.chunk_atlas_location, 0);
+    glUniform2f(
+        g_app.renderer.chunk_atlas_inv_size_location,
+        1.0F / static_cast<float>(std::max(g_app.renderer.chunk_texture_width, 1U)),
+        1.0F / static_cast<float>(std::max(g_app.renderer.chunk_texture_height, 1U)));
+    glUniform1f(
+        g_app.renderer.chunk_animation_time_location,
+        static_cast<float>(animation_time_seconds));
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.chunk_texture);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
+    glUniform1f(g_app.renderer.chunk_alpha_location, 0.55F);
     for (const ChunkGpuMesh& mesh : g_app.renderer.meshes) {
       draw_chunk_mesh(mesh, mesh.transparent);
     }
@@ -2233,6 +2436,7 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
   if (event->button == 0) {
     if (down && !g_app.input.primary_held) {
       g_app.input.primary_pressed = true;
+      g_app.input.primary_animation_pressed = true;
     }
     g_app.input.primary_held = down;
     return EM_TRUE;
@@ -2240,6 +2444,7 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
   if (event->button == 2) {
     if (down && !g_app.input.secondary_held) {
       g_app.input.secondary_pressed = true;
+      g_app.input.secondary_animation_pressed = true;
     }
     g_app.input.secondary_held = down;
     return EM_TRUE;
@@ -2277,6 +2482,7 @@ void initialize_web_player(
   g_app.input.last_frame_time = now;
   g_app.input.movement_accumulator_seconds = 0.0;
   g_app.input.movement_send_accumulator_seconds = 0.0;
+  g_app.input.last_sent_action_flags = arv::protocol::PlayerActionFlags::None;
   g_app.input.client_tick = join.initial_tick;
   g_app.input.player_initialized = true;
 }
@@ -2334,11 +2540,19 @@ void submit_web_movement(double now) {
   input.mouse_delta_y = static_cast<float>(g_app.input.mouse_dy);
   g_app.input.mouse_dx = 0.0;
   g_app.input.mouse_dy = 0.0;
+  arv::client::InputFrame animation_input = input;
+  animation_input.primary_pressed = g_app.input.primary_animation_pressed;
+  animation_input.secondary_pressed = g_app.input.secondary_animation_pressed;
+  g_app.input.primary_animation_pressed = false;
+  g_app.input.secondary_animation_pressed = false;
   g_app.input.jump_pressed = false;
   g_app.input.toggle_fly_pressed = false;
   g_app.input.hotbar_select.reset();
   g_app.input.hotbar_scroll_steps = 0;
   g_app.input.player.submit_input(std::move(input));
+  update_held_item_animation_from_input(
+      animation_input,
+      static_cast<arv::Seconds>(now - g_app.start_time));
 
   const arv::TickRate tick_rate =
       join.tick_rate == 0U ? arv::DefaultBaseTps : join.tick_rate;
@@ -2366,9 +2580,12 @@ void submit_web_movement(double now) {
         arv::client::action_flags_from_player_command(command);
     const bool has_action =
         action_flags != arv::protocol::PlayerActionFlags::None;
+    const bool action_flags_changed =
+        action_flags != g_app.input.last_sent_action_flags;
     const double send_interval =
         1.0 / static_cast<double>(std::max(g_app.input.movement_send_rate_hz, 1.0));
-    if (g_app.input.movement_send_accumulator_seconds < send_interval && !has_action) {
+    if (g_app.input.movement_send_accumulator_seconds < send_interval && !has_action &&
+        !action_flags_changed) {
       continue;
     }
     g_app.input.movement_send_accumulator_seconds = 0.0;
@@ -2376,6 +2593,7 @@ void submit_web_movement(double now) {
     arv::protocol::ServerboundPlayerMove move =
         g_app.input.player.build_movement_packet(0, client_tick, action_flags);
     (void)g_app.session->submit_player_move(move);
+    g_app.input.last_sent_action_flags = action_flags;
     g_app.input.primary_pressed = false;
     g_app.input.secondary_pressed = false;
   }

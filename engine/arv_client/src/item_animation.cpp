@@ -514,4 +514,53 @@ HeldItemAnimationResolution resolve_held_item_animation_binding(
   return {};
 }
 
+bool held_item_animation_condition_passes(
+    player::HeldItemAnimationPlayCondition condition,
+    HeldItemAnimationConditionState state) noexcept {
+  switch (condition) {
+    case player::HeldItemAnimationPlayCondition::Always:
+      return true;
+    case player::HeldItemAnimationPlayCondition::PlacementSucceeds:
+      return state.placement_succeeds;
+  }
+  return false;
+}
+
+HeldItemActionPlayResult play_held_item_action(
+    HeldItemAnimationPlayer& player,
+    const player::ItemRecord* item,
+    std::string_view action,
+    const ItemAnimationLibrary& library,
+    HeldItemAnimationConditionState condition_state,
+    Seconds now_seconds) noexcept {
+  const HeldItemAnimationResolution animation =
+      resolve_held_item_animation_binding(item, action, library);
+  if (animation.clip == nullptr) {
+    return animation.disabled
+               ? HeldItemActionPlayResult::Suppressed
+               : HeldItemActionPlayResult::NoAnimation;
+  }
+  if (!held_item_animation_condition_passes(
+          animation.play_condition,
+          condition_state)) {
+    return HeldItemActionPlayResult::Suppressed;
+  }
+  player.play(*animation.clip, now_seconds);
+  return HeldItemActionPlayResult::Played;
+}
+
+const player::ItemRecord* selected_inventory_item(
+    const player::Inventory& inventory,
+    usize selected_slot,
+    const player::ItemRegistry& item_registry) noexcept {
+  if (selected_slot >= inventory.slot_count()) {
+    return nullptr;
+  }
+  const std::optional<player::ItemStack>& stack = inventory.slot(selected_slot);
+  if (!stack.has_value() || stack->count == 0U) {
+    return nullptr;
+  }
+  return item_registry.item(stack->item);
+}
+
 } // namespace arv::client

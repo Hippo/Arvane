@@ -1022,6 +1022,9 @@ net::NetworkResult send_protocol_message(
     protocol::ReliabilityClass reliability,
     protocol::NetworkLane lane,
     std::vector<u8> payload) {
+  if (transport.state(connection_id) == net::ConnectionState::Disconnected) {
+    return net::NetworkResult::success();
+  }
   std::vector<u8> packet = protocol::serialize_envelope(
       {protocol::CurrentProtocolVersion, message_type, 0, 0, 0, 0},
       payload);

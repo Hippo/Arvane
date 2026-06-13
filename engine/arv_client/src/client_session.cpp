@@ -102,6 +102,7 @@ namespace {
              state == net::ConnectionState::WorldJoin ||
              state == net::ConnectionState::InGame;
     case protocol::MessageType::ClientboundInventoryUpdate:
+    case protocol::MessageType::ClientboundPlayerBlockBreakProgress:
       return state == net::ConnectionState::RegistrySync ||
              state == net::ConnectionState::WorldJoin ||
              state == net::ConnectionState::InGame;
@@ -198,6 +199,7 @@ net::ConnectResult ClientSession::connect(const net::NetworkAddress& address) {
   inventory_cursor_stack_.reset();
   inventory_revision_ = 0;
   has_authoritative_inventory_ = false;
+  block_break_progress_ = {};
   latest_player_move_correction_.reset();
   previous_chunk_interest_center_.reset();
   next_chunk_interest_sequence_ = 1;
@@ -635,6 +637,14 @@ void ClientSession::handle_inventory_update(
   has_authoritative_inventory_ = true;
 }
 
+void ClientSession::handle_block_break_progress(
+    protocol::ClientboundPlayerBlockBreakProgress progress) {
+  if (world_join_.has_value() && progress.player_id != world_join_->player_id) {
+    return;
+  }
+  block_break_progress_ = progress.block_break;
+}
+
 void ClientSession::handle_message(std::span<const u8> payload) {
   auto decoded = protocol::deserialize_envelope(payload);
   if (!decoded) {
@@ -810,6 +820,7 @@ void ClientSession::handle_message(std::span<const u8> payload) {
           join.value().initial_tick,
           join.value().tick_rate,
           join.value().effective_view_distance};
+      block_break_progress_ = {};
       std::erase_if(
           entity_mirrors_,
           [&](const ClientSessionEntityMirror& mirror) {
@@ -894,6 +905,16 @@ void ClientSession::handle_message(std::span<const u8> payload) {
       handle_inventory_update(std::move(update.value()));
       return;
     }
+    case protocol::MessageType::ClientboundPlayerBlockBreakProgress: {
+      auto progress = protocol::deserialize_clientbound_player_block_break_progress(
+          decoded.value().payload);
+      if (!progress) {
+        disconnect("invalid block break progress");
+        return;
+      }
+      handle_block_break_progress(progress.value());
+      return;
+    }
     case protocol::MessageType::ClientboundPlayerVelocity: {
       auto velocity = protocol::deserialize_clientbound_player_velocity(
           decoded.value().payload);
@@ -961,6 +982,7 @@ void ClientSession::handle_connection_closed(std::string reason) {
   inventory_cursor_stack_.reset();
   inventory_revision_ = 0;
   has_authoritative_inventory_ = false;
+  block_break_progress_ = {};
   latest_player_move_correction_.reset();
   latest_player_velocity_.reset();
   latest_movement_settings_.reset();
