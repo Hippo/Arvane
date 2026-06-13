@@ -3,6 +3,7 @@
 #include <GLES3/gl3.h>
 
 #include "arv/client/client_session.hpp"
+#include "arv/client/local_player_controller.hpp"
 #include "arv/crypto/crypto_init.hpp"
 #include "arv/crypto/ed25519.hpp"
 #include "arv/crypto/hash.hpp"
@@ -21,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -31,6 +33,7 @@ struct BrowserInputState {
   bool left{};
   bool right{};
   bool jump{};
+  bool jump_pressed{};
   bool sneak{};
   bool sprint{};
   bool primary_held{};
@@ -45,10 +48,8 @@ struct BrowserInputState {
   double movement_send_accumulator_seconds{};
   double movement_send_rate_hz{arv::protocol::DefaultClientMovementSendRateHz};
   arv::u64 client_tick{};
-  arv::web::WebPlayerMovementState movement{};
-  arv::player::PlayerTuning movement_tuning{arv::player::default_player_tuning()};
-  arv::physics::PlayerMovementAuthority movement_authority{false, true};
-  bool spawn_initialized{};
+  arv::client::LocalPlayerController player{};
+  bool player_initialized{};
 };
 
 struct ChunkGpuMesh {
@@ -203,12 +204,11 @@ void clear_chunk_meshes() {
 }
 
 void reset_input(bool keep_view = false) {
-  const float yaw = g_app.input.movement.yaw_radians;
-  const float pitch = g_app.input.movement.pitch_radians;
+  const float yaw = g_app.input.player.camera().yaw_radians();
+  const float pitch = g_app.input.player.camera().pitch_radians();
   g_app.input = {};
   if (keep_view) {
-    g_app.input.movement.yaw_radians = yaw;
-    g_app.input.movement.pitch_radians = pitch;
+    g_app.input.player.camera().set_rotation(yaw, pitch);
   }
 }
 
@@ -361,11 +361,10 @@ void sync_entity_mesh() {
     return;
   }
 
-  std::vector<arv::web::WebEntityMarker> markers;
-  markers.reserve(g_app.session->entity_mirrors().size());
-  for (const arv::client::ClientSessionEntityMirror& mirror : g_app.session->entity_mirrors()) {
-    markers.push_back({mirror.position, mirror.entity_type, mirror.state_flags});
-  }
+  const std::vector<arv::web::WebEntityMarker> markers =
+      arv::web::build_visible_fallback_entity_markers(
+          g_app.session->entity_mirrors(),
+          g_app.session->world_join());
   const std::vector<arv::web::WebChunkVertex> vertices =
       arv::web::build_fallback_entity_vertices(markers);
   upload_vertices(
@@ -437,21 +436,17 @@ void render_remote_world() {
     return;
   }
 
-  const float aspect = static_cast<float>(g_app.width) / static_cast<float>(std::max(g_app.height, 1));
-  const arv::Vec3f eye =
-      g_app.input.movement.position +
-      arv::Vec3f{
-          0.0F,
-          arv::web::web_player_eye_height(
-              g_app.input.movement,
-              g_app.input.movement_tuning),
-          0.0F};
-  const arv::Vec3f center =
-      eye + arv::view_forward(
-                g_app.input.movement.yaw_radians,
-                g_app.input.movement.pitch_radians);
+  const float aspect =
+      static_cast<float>(g_app.width) / static_cast<float>(std::max(g_app.height, 1));
+  const arv::client::CameraShell& camera = g_app.input.player.camera();
+  const arv::Vec3f eye = camera.position();
+  const arv::Vec3f center = eye + camera.forward_vector();
   const arv::web::Mat4 mvp = arv::web::multiply(
-      arv::web::perspective(arv::degrees_to_radians(70.0F), aspect, 0.05F, 512.0F),
+      arv::web::perspective(
+          arv::degrees_to_radians(camera.fov_y_degrees()),
+          aspect,
+          arv::client::DefaultCameraNearPlane,
+          512.0F),
       arv::web::look_at(eye, center, {0.0F, 1.0F, 0.0F}));
 
   glUseProgram(g_app.renderer.program);
@@ -493,7 +488,9 @@ const char* connection_state_label(arv::net::ConnectionState state) {
   return "unknown";
 }
 
-void poll_session() {
+bool ensure_web_player_initialized(double now);
+
+void poll_session(double now) {
   if (g_app.session == nullptr) {
     return;
   }
@@ -501,22 +498,17 @@ void poll_session() {
   g_app.session->pump();
   const arv::net::ConnectionState state = g_app.session->connection_state();
   if (state == arv::net::ConnectionState::InGame) {
+    (void)ensure_web_player_initialized(now);
     if (std::optional<arv::protocol::ClientboundPlayerMoveCorrection> correction =
             g_app.session->take_player_move_correction();
         correction.has_value()) {
-      arv::web::apply_web_player_move_correction(
-          g_app.input.movement,
-          correction.value());
-      g_app.input.spawn_initialized = true;
+      g_app.input.player.apply_move_correction(correction.value());
       set_status("server movement correction applied");
     }
     if (std::optional<arv::protocol::ClientboundPlayerVelocity> velocity =
             g_app.session->take_player_velocity();
         velocity.has_value() && g_app.session->world_join().has_value()) {
-      arv::web::apply_web_player_velocity(
-          g_app.input.movement,
-          velocity.value(),
-          g_app.session->world_join()->player_id);
+      g_app.input.player.apply_player_velocity(velocity.value());
     }
     if (std::optional<arv::protocol::ClientboundSetMovementHz> settings =
             g_app.session->take_movement_settings();
@@ -527,17 +519,12 @@ void poll_session() {
     if (std::optional<arv::protocol::ClientboundPlayerPermissions> permissions =
             g_app.session->take_player_permissions();
         permissions.has_value()) {
-      arv::web::apply_web_player_permissions(
-          g_app.input.movement,
-          g_app.input.movement_authority,
-          permissions.value());
+      g_app.input.player.apply_player_permissions(permissions.value());
     }
     if (std::optional<arv::protocol::ClientboundPlayerMovementTuning> tuning =
             g_app.session->take_player_movement_tuning();
         tuning.has_value()) {
-      arv::web::apply_web_player_movement_tuning(
-          g_app.input.movement_tuning,
-          tuning.value());
+      g_app.input.player.apply_player_movement_tuning(tuning.value());
     }
   }
   g_app.connected = state != arv::net::ConnectionState::Disconnected &&
@@ -638,6 +625,9 @@ bool set_key_state(const char* code, bool down, bool repeat) {
     return true;
   }
   if (std::strcmp(code, "Space") == 0) {
+    if (down && !repeat && !g_app.input.jump) {
+      g_app.input.jump_pressed = true;
+    }
     g_app.input.jump = down;
     return true;
   }
@@ -700,6 +690,37 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
   return EM_FALSE;
 }
 
+void initialize_web_player(
+    const arv::client::ClientSessionWorldJoin& join,
+    double now) {
+  const float yaw = g_app.input.player.camera().yaw_radians();
+  const float pitch = g_app.input.player.camera().pitch_radians();
+  g_app.input.player = {};
+  g_app.input.player.camera().set_rotation(yaw, pitch);
+  g_app.input.player.enter_world(
+      join.world_id,
+      join.player_id,
+      join.local_entity_id,
+      join.spawn_position,
+      join.initial_tick,
+      join.tick_rate == 0U ? arv::DefaultBaseTps : join.tick_rate);
+  g_app.input.last_frame_time = now;
+  g_app.input.movement_accumulator_seconds = 0.0;
+  g_app.input.movement_send_accumulator_seconds = 0.0;
+  g_app.input.client_tick = join.initial_tick;
+  g_app.input.player_initialized = true;
+}
+
+bool ensure_web_player_initialized(double now) {
+  if (g_app.session == nullptr || !g_app.session->world_join().has_value()) {
+    return false;
+  }
+  if (!g_app.input.player_initialized) {
+    initialize_web_player(*g_app.session->world_join(), now);
+  }
+  return true;
+}
+
 void submit_web_movement(double now) {
   if (g_app.session == nullptr ||
       g_app.session->connection_state() != arv::net::ConnectionState::InGame ||
@@ -708,18 +729,8 @@ void submit_web_movement(double now) {
   }
 
   const auto& join = *g_app.session->world_join();
-  if (!g_app.input.spawn_initialized) {
-    const float yaw = g_app.input.movement.yaw_radians;
-    const float pitch = g_app.input.movement.pitch_radians;
-    g_app.input.movement = {};
-    g_app.input.movement.position = join.spawn_position;
-    g_app.input.movement.yaw_radians = yaw;
-    g_app.input.movement.pitch_radians = pitch;
-    g_app.input.last_frame_time = now;
-    g_app.input.movement_accumulator_seconds = 0.0;
-    g_app.input.movement_send_accumulator_seconds = 0.0;
-    g_app.input.client_tick = join.initial_tick;
-    g_app.input.spawn_initialized = true;
+  if (!ensure_web_player_initialized(now)) {
+    return;
   }
 
   const double dt_seconds = std::clamp(
@@ -728,26 +739,27 @@ void submit_web_movement(double now) {
       0.1);
   g_app.input.last_frame_time = now;
 
-  arv::web::WebPlayerMovementInput movement_input;
-  movement_input.forward = g_app.input.forward;
-  movement_input.back = g_app.input.back;
-  movement_input.left = g_app.input.left;
-  movement_input.right = g_app.input.right;
-  movement_input.jump = g_app.input.jump;
-  movement_input.sneak = g_app.input.sneak;
-  movement_input.sprint = g_app.input.sprint;
-  movement_input.toggle_fly_pressed = g_app.input.toggle_fly_pressed;
-  movement_input.mouse_dx = static_cast<float>(g_app.input.mouse_dx);
-  movement_input.mouse_dy = static_cast<float>(g_app.input.mouse_dy);
+  arv::client::InputFrame input;
+  input.move_forward = g_app.input.forward;
+  input.move_backward = g_app.input.back;
+  input.move_left = g_app.input.left;
+  input.move_right = g_app.input.right;
+  input.jump_pressed = g_app.input.jump_pressed;
+  input.jump_held = g_app.input.jump;
+  input.sneak_held = g_app.input.sneak;
+  input.sprint_held = g_app.input.sprint;
+  input.toggle_fly_pressed = g_app.input.toggle_fly_pressed;
+  input.primary_pressed = g_app.input.primary_pressed;
+  input.primary_held = g_app.input.primary_held;
+  input.secondary_pressed = g_app.input.secondary_pressed;
+  input.secondary_held = g_app.input.secondary_held;
+  input.mouse_delta_x = static_cast<float>(g_app.input.mouse_dx);
+  input.mouse_delta_y = static_cast<float>(g_app.input.mouse_dy);
   g_app.input.mouse_dx = 0.0;
   g_app.input.mouse_dy = 0.0;
-  arv::web::apply_web_player_look(
-      g_app.input.movement,
-      movement_input.mouse_dx,
-      movement_input.mouse_dy,
-      g_app.input.movement_tuning);
-  movement_input.mouse_dx = 0.0F;
-  movement_input.mouse_dy = 0.0F;
+  g_app.input.jump_pressed = false;
+  g_app.input.toggle_fly_pressed = false;
+  g_app.input.player.submit_input(std::move(input));
 
   const arv::TickRate tick_rate =
       join.tick_rate == 0U ? arv::DefaultBaseTps : join.tick_rate;
@@ -762,57 +774,29 @@ void submit_web_movement(double now) {
     ++fixed_steps;
     g_app.input.movement_accumulator_seconds -= tick_seconds;
 
-    const arv::web::WebPlayerMovementStep movement_step =
-        arv::web::simulate_web_player_movement(
-            g_app.input.movement,
-            movement_input,
-            g_app.session->chunk_sections(),
-            tick_seconds,
-            g_app.input.movement_tuning,
-            g_app.input.movement_authority);
-    g_app.input.movement = movement_step.state;
+    const arv::u64 client_tick = g_app.input.client_tick++;
+    const arv::player::PlayerCommand command =
+        g_app.input.player.consume_command(client_tick);
+    arv::web::WebChunkCollisionQuery collision_query(g_app.session->chunk_sections());
+    g_app.input.player.update_local_movement(command, &collision_query, tick_seconds);
     g_app.input.movement_send_accumulator_seconds += tick_seconds;
 
-    arv::protocol::PlayerActionFlags action_flags = arv::protocol::PlayerActionFlags::None;
-    if (g_app.input.primary_pressed) {
-      action_flags |= arv::protocol::PlayerActionFlags::PrimaryPressed;
-    }
-    if (g_app.input.primary_held) {
-      action_flags |= arv::protocol::PlayerActionFlags::PrimaryHeld;
-    }
-    if (g_app.input.secondary_pressed) {
-      action_flags |= arv::protocol::PlayerActionFlags::SecondaryPressed;
-    }
-    if (g_app.input.secondary_held) {
-      action_flags |= arv::protocol::PlayerActionFlags::SecondaryHeld;
-    }
-    if (g_app.input.toggle_fly_pressed) {
-      action_flags |= arv::protocol::PlayerActionFlags::ToggleFlyPressed;
-    }
+    const arv::protocol::PlayerActionFlags action_flags =
+        arv::client::action_flags_from_player_command(command);
     const bool has_action =
         action_flags != arv::protocol::PlayerActionFlags::None;
     const double send_interval =
         1.0 / static_cast<double>(std::max(g_app.input.movement_send_rate_hz, 1.0));
-    const arv::u64 client_tick = g_app.input.client_tick++;
     if (g_app.input.movement_send_accumulator_seconds < send_interval && !has_action) {
-      movement_input.toggle_fly_pressed = false;
       continue;
     }
     g_app.input.movement_send_accumulator_seconds = 0.0;
 
-    arv::protocol::ServerboundPlayerMove move;
-    move.client_tick = client_tick;
-    move.position = g_app.input.movement.position;
-    move.velocity = g_app.input.movement.velocity;
-    move.yaw_radians = g_app.input.movement.yaw_radians;
-    move.pitch_radians = g_app.input.movement.pitch_radians;
-    move.flags = movement_step.flags;
-    move.action_flags = action_flags;
+    arv::protocol::ServerboundPlayerMove move =
+        g_app.input.player.build_movement_packet(0, client_tick, action_flags);
     (void)g_app.session->submit_player_move(move);
     g_app.input.primary_pressed = false;
     g_app.input.secondary_pressed = false;
-    g_app.input.toggle_fly_pressed = false;
-    movement_input.toggle_fly_pressed = false;
   }
 }
 
@@ -931,9 +915,9 @@ EMSCRIPTEN_KEEPALIVE void arv_web_frame() {
     return;
   }
 
-  poll_session();
-  resize_canvas();
   const double now = emscripten_get_now() * 0.001;
+  poll_session(now);
+  resize_canvas();
   submit_web_movement(now);
   const float pulse = static_cast<float>(0.5 + 0.5 * std::sin((now - g_app.start_time) * 0.85));
   const float base = g_app.connected ? 0.16F : (g_app.connecting ? 0.12F : 0.09F);

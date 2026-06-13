@@ -201,6 +201,20 @@ TEST(LocalPlayerControllerTests, DoubleTapJumpDoesNotRequestFlyWithoutPermission
   EXPECT_FALSE(controller.consume_command(21).toggle_fly_pressed);
 }
 
+TEST(LocalPlayerControllerTests, ExplicitFlyToggleInputFlowsIntoCommandAndActionFlags) {
+  arv::client::LocalPlayerController controller;
+
+  controller.submit_input(arv::client::InputFrame{.toggle_fly_pressed = true});
+  const arv::player::PlayerCommand command = controller.consume_command(20);
+  const arv::protocol::PlayerActionFlags action_flags =
+      arv::client::action_flags_from_player_command(command);
+
+  EXPECT_TRUE(command.toggle_fly_pressed);
+  EXPECT_TRUE(arv::protocol::has_action_flag(
+      action_flags,
+      arv::protocol::PlayerActionFlags::ToggleFlyPressed));
+}
+
 TEST(LocalPlayerControllerTests, DoubleTapJumpEnablesLocalFlyingPrediction) {
   arv::client::LocalPlayerController controller;
   controller.enter_world(

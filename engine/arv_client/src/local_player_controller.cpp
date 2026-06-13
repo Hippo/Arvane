@@ -59,6 +59,7 @@ void LocalPlayerController::submit_input(InputFrame input) noexcept {
   mount_pressed_ = mount_pressed_ || input.mount_pressed;
   primary_pressed_ = primary_pressed_ || input.primary_pressed;
   secondary_pressed_ = secondary_pressed_ || input.secondary_pressed;
+  toggle_fly_pressed_ = toggle_fly_pressed_ || input.toggle_fly_pressed;
 
   if (input.hotbar_select.has_value() &&
       player::is_valid_hotbar_slot(input.hotbar_select.value())) {
@@ -103,13 +104,15 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
   command.primary_held = primary_held_;
   command.secondary_pressed = secondary_pressed_;
   command.secondary_held = secondary_held_;
-  command.toggle_fly_pressed = consume_fly_toggle_request(tick_index);
+  command.toggle_fly_pressed =
+      toggle_fly_pressed_ || consume_fly_toggle_request(tick_index);
   command.selected_hotbar_slot = selected_hotbar_slot_;
 
   jump_pressed_ = false;
   mount_pressed_ = false;
   primary_pressed_ = false;
   secondary_pressed_ = false;
+  toggle_fly_pressed_ = false;
   look_delta_x_ = 0.0F;
   look_delta_y_ = 0.0F;
   return command;
@@ -486,6 +489,27 @@ bool LocalPlayerController::consume_fly_toggle_request(TickIndex tick_index) noe
 
   last_jump_press_tick_ = tick_index;
   return false;
+}
+
+protocol::PlayerActionFlags action_flags_from_player_command(
+    const player::PlayerCommand& command) noexcept {
+  protocol::PlayerActionFlags flags = protocol::PlayerActionFlags::None;
+  if (command.primary_pressed) {
+    flags |= protocol::PlayerActionFlags::PrimaryPressed;
+  }
+  if (command.primary_held) {
+    flags |= protocol::PlayerActionFlags::PrimaryHeld;
+  }
+  if (command.secondary_pressed) {
+    flags |= protocol::PlayerActionFlags::SecondaryPressed;
+  }
+  if (command.secondary_held) {
+    flags |= protocol::PlayerActionFlags::SecondaryHeld;
+  }
+  if (command.toggle_fly_pressed) {
+    flags |= protocol::PlayerActionFlags::ToggleFlyPressed;
+  }
+  return flags;
 }
 
 physics::PlayerMovementAuthority LocalPlayerController::movement_authority() const noexcept {

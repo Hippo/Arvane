@@ -46,34 +46,35 @@ namespace {
 } // namespace
 
 client::InputFrame to_client_input(const platform::InputSnapshot& input) {
-  return {
-      input.move_forward,
-      input.move_backward,
-      input.move_left,
-      input.move_right,
-      input.jump_pressed,
-      input.jump_held,
-      input.sneak_held,
-      input.sprint_held,
-      input.mount_pressed,
-      input.vehicle_roll_left_held,
-      input.vehicle_roll_right_held,
-      input.primary_pressed,
-      input.primary_held,
-      input.secondary_pressed,
-      input.secondary_held,
-      input.open_inventory_pressed,
-      input.open_chat_pressed,
-      input.tab_menu_held,
-      input.hotbar_select,
-      input.hotbar_scroll_steps,
-      input.mouse_delta_x,
-      input.mouse_delta_y,
-      input.text_input,
-      input.text_backspace_pressed,
-      input.text_submit_pressed,
-      input.text_cancel_pressed,
-      client_text_edit_events_from(input.text_edit_events)};
+  client::InputFrame frame;
+  frame.move_forward = input.move_forward;
+  frame.move_backward = input.move_backward;
+  frame.move_left = input.move_left;
+  frame.move_right = input.move_right;
+  frame.jump_pressed = input.jump_pressed;
+  frame.jump_held = input.jump_held;
+  frame.sneak_held = input.sneak_held;
+  frame.sprint_held = input.sprint_held;
+  frame.mount_pressed = input.mount_pressed;
+  frame.vehicle_roll_left_held = input.vehicle_roll_left_held;
+  frame.vehicle_roll_right_held = input.vehicle_roll_right_held;
+  frame.primary_pressed = input.primary_pressed;
+  frame.primary_held = input.primary_held;
+  frame.secondary_pressed = input.secondary_pressed;
+  frame.secondary_held = input.secondary_held;
+  frame.open_inventory_pressed = input.open_inventory_pressed;
+  frame.open_chat_pressed = input.open_chat_pressed;
+  frame.tab_menu_held = input.tab_menu_held;
+  frame.hotbar_select = input.hotbar_select;
+  frame.hotbar_scroll_steps = input.hotbar_scroll_steps;
+  frame.mouse_delta_x = input.mouse_delta_x;
+  frame.mouse_delta_y = input.mouse_delta_y;
+  frame.text_input = input.text_input;
+  frame.text_backspace_pressed = input.text_backspace_pressed;
+  frame.text_submit_pressed = input.text_submit_pressed;
+  frame.text_cancel_pressed = input.text_cancel_pressed;
+  frame.text_edit_events = client_text_edit_events_from(input.text_edit_events);
+  return frame;
 }
 
 ui::InputBindingDevice ui_device_from(platform::InputDeviceType type) noexcept {

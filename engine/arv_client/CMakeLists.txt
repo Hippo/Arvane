@@ -43,12 +43,27 @@ target_link_libraries(arv_client_session
     arv_client_pack_sync
 )
 
+add_library(arv_client_local_player STATIC
+  src/camera_shell.cpp
+  src/local_player_controller.cpp
+)
+target_include_directories(arv_client_local_player PUBLIC include)
+target_link_libraries(arv_client_local_player
+  PUBLIC
+    arv_core_headers
+    arv_physics
+    arv_player_headers
+    arv_protocol_headers
+    arv_protocol_player_input
+    arv_protocol_player_movement
+    arv_render_headers
+)
+
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
   return()
 endif()
 
 add_library(arv_client STATIC
-  src/camera_shell.cpp
   src/chunk_interest.cpp
   src/command_chat.cpp
   src/client_chunk_inbox.cpp
@@ -65,9 +80,8 @@ add_library(arv_client STATIC
   src/client_ui_state.cpp
   src/item_animation.cpp
   src/local_identity.cpp
-  src/local_player_controller.cpp
   src/particles.cpp
 )
 target_include_directories(arv_client PUBLIC include)
-target_link_libraries(arv_client PUBLIC arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
+target_link_libraries(arv_client PUBLIC arv_client_local_player arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
 target_link_libraries(arv_client PRIVATE arv_asset arv_client_pack_sync arv_client_session arv_command arv_entity arv_io arv_text)

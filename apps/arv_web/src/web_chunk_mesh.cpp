@@ -197,6 +197,29 @@ std::vector<WebChunkVertex> build_fallback_entity_vertices(
   return vertices;
 }
 
+std::vector<WebEntityMarker> build_visible_fallback_entity_markers(
+    std::span<const client::ClientSessionEntityMirror> mirrors,
+    const std::optional<client::ClientSessionWorldJoin>& join) {
+  std::vector<WebEntityMarker> markers;
+  markers.reserve(mirrors.size());
+  for (const client::ClientSessionEntityMirror& mirror : mirrors) {
+    if (join.has_value()) {
+      if (mirror.world_id != join->world_id) {
+        continue;
+      }
+      const bool is_local_player =
+          mirror.entity_id == join->local_entity_id ||
+          (mirror.owning_player.has_value() &&
+           mirror.owning_player.value() == join->player_id);
+      if (is_local_player) {
+        continue;
+      }
+    }
+    markers.push_back({mirror.position, mirror.entity_type, mirror.state_flags});
+  }
+  return markers;
+}
+
 Mat4 multiply(Mat4 lhs, Mat4 rhs) noexcept {
   Mat4 result{};
   for (int column = 0; column < 4; ++column) {
@@ -224,12 +247,12 @@ Mat4 perspective(float fov_y_radians, float aspect, float near_z, float far_z) n
 
 Mat4 look_at(Vec3f eye, Vec3f center, Vec3f up) noexcept {
   const Vec3f forward = normalize_or_zero(center - eye);
-  const Vec3f side = normalize_or_zero(cross(forward, up));
-  const Vec3f camera_up = cross(side, forward);
+  const Vec3f side = normalize_or_zero(cross(up, forward));
+  const Vec3f camera_up = cross(forward, side);
   return {{
-      side.x, side.y, side.z, 0.0F,
-      camera_up.x, camera_up.y, camera_up.z, 0.0F,
-      -forward.x, -forward.y, -forward.z, 0.0F,
+      side.x, camera_up.x, -forward.x, 0.0F,
+      side.y, camera_up.y, -forward.y, 0.0F,
+      side.z, camera_up.z, -forward.z, 0.0F,
       -dot(side, eye), -dot(camera_up, eye), dot(forward, eye), 1.0F}};
 }
 

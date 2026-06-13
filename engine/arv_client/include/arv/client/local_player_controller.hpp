@@ -24,6 +24,7 @@ struct InputFrame {
   bool jump_held{};
   bool sneak_held{};
   bool sprint_held{};
+  bool toggle_fly_pressed{};
   bool mount_pressed{};
   bool vehicle_roll_left_held{};
   bool vehicle_roll_right_held{};
@@ -202,6 +203,7 @@ private:
   bool primary_pressed_{};
   bool secondary_pressed_{};
   std::optional<TickIndex> last_jump_press_tick_{};
+  bool toggle_fly_pressed_{};
   f32 look_delta_x_{};
   f32 look_delta_y_{};
   Vec3f body_position_{8.0F, 20.0F, -20.0F};
@@ -212,5 +214,8 @@ private:
   f32 current_eye_height_{player::DefaultStandingEyeHeight};
   f32 target_eye_height_{player::DefaultStandingEyeHeight};
 };
+
+[[nodiscard]] protocol::PlayerActionFlags action_flags_from_player_command(
+    const player::PlayerCommand& command) noexcept;
 
 } // namespace arv::client

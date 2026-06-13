@@ -53,6 +53,22 @@ void expect_all_finite(const arv::web::Mat4& matrix) {
   }
 }
 
+arv::Vec3f transform_point(const arv::web::Mat4& matrix, arv::Vec3f point) {
+  return {
+      matrix.values[0] * point.x + matrix.values[4] * point.y +
+          matrix.values[8] * point.z + matrix.values[12],
+      matrix.values[1] * point.x + matrix.values[5] * point.y +
+          matrix.values[9] * point.z + matrix.values[13],
+      matrix.values[2] * point.x + matrix.values[6] * point.y +
+          matrix.values[10] * point.z + matrix.values[14]};
+}
+
+void expect_near_vec3(arv::Vec3f actual, arv::Vec3f expected, float epsilon = 0.0001F) {
+  EXPECT_NEAR(actual.x, expected.x, epsilon);
+  EXPECT_NEAR(actual.y, expected.y, epsilon);
+  EXPECT_NEAR(actual.z, expected.z, epsilon);
+}
+
 } // namespace
 
 TEST(WebChunkMeshTests, AirChunkProducesNoFallbackVertices) {
@@ -126,9 +142,44 @@ TEST(WebChunkMeshTests, DeadEntityMarkersUseDistinctFallbackColor) {
   EXPECT_EQ(vertices.front().color, (arv::Vec3f{0.45F, 0.12F, 0.14F}));
 }
 
+TEST(WebChunkMeshTests, FallbackEntityMarkersHideLocalPlayerForFirstPersonView) {
+  arv::client::ClientSessionWorldJoin join;
+  join.world_id = arv::WorldID{1};
+  join.player_id = arv::PlayerID{2};
+  join.local_entity_id = arv::EntityNetID{3};
+
+  std::array<arv::client::ClientSessionEntityMirror, 4> mirrors{};
+  mirrors[0].world_id = arv::WorldID{1};
+  mirrors[0].entity_id = arv::EntityNetID{3};
+  mirrors[0].entity_type = arv::EntityTypeID{10};
+  mirrors[0].position = {1.0F, 2.0F, 3.0F};
+  mirrors[1].world_id = arv::WorldID{1};
+  mirrors[1].entity_id = arv::EntityNetID{4};
+  mirrors[1].entity_type = arv::EntityTypeID{11};
+  mirrors[1].owning_player = arv::PlayerID{2};
+  mirrors[1].position = {4.0F, 5.0F, 6.0F};
+  mirrors[2].world_id = arv::WorldID{1};
+  mirrors[2].entity_id = arv::EntityNetID{5};
+  mirrors[2].entity_type = arv::EntityTypeID{12};
+  mirrors[2].owning_player = arv::PlayerID{9};
+  mirrors[2].position = {7.0F, 8.0F, 9.0F};
+  mirrors[2].state_flags = arv::protocol::EntityStateFlagHasHealth;
+  mirrors[3].world_id = arv::WorldID{99};
+  mirrors[3].entity_id = arv::EntityNetID{6};
+  mirrors[3].entity_type = arv::EntityTypeID{13};
+  mirrors[3].position = {10.0F, 11.0F, 12.0F};
+
+  const auto markers = arv::web::build_visible_fallback_entity_markers(mirrors, join);
+
+  ASSERT_EQ(markers.size(), 1U);
+  EXPECT_EQ(markers.front().position, (arv::Vec3f{7.0F, 8.0F, 9.0F}));
+  EXPECT_EQ(markers.front().entity_type, arv::EntityTypeID{12});
+  EXPECT_EQ(markers.front().state_flags, arv::protocol::EntityStateFlagHasHealth);
+}
+
 TEST(WebChunkMeshTests, CameraMatricesAreColumnMajorAndFiniteForWebGlUniforms) {
   const arv::web::Mat4 identity_view =
-      arv::web::look_at({0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, -1.0F}, {0.0F, 1.0F, 0.0F});
+      arv::web::look_at({0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F});
   const arv::web::Mat4 projection =
       arv::web::perspective(arv::degrees_to_radians(70.0F), 16.0F / 9.0F, 0.05F, 512.0F);
   const arv::web::Mat4 combined = arv::web::multiply(projection, identity_view);
@@ -138,10 +189,34 @@ TEST(WebChunkMeshTests, CameraMatricesAreColumnMajorAndFiniteForWebGlUniforms) {
   expect_all_finite(combined);
   EXPECT_FLOAT_EQ(identity_view.values[0], 1.0F);
   EXPECT_FLOAT_EQ(identity_view.values[5], 1.0F);
-  EXPECT_FLOAT_EQ(identity_view.values[10], 1.0F);
+  EXPECT_FLOAT_EQ(identity_view.values[10], -1.0F);
   EXPECT_FLOAT_EQ(identity_view.values[15], 1.0F);
   EXPECT_FLOAT_EQ(projection.values[11], -1.0F);
-  for (arv::usize i = 0; i < projection.values.size(); ++i) {
-    EXPECT_FLOAT_EQ(combined.values[i], projection.values[i]);
-  }
+  expect_near_vec3(
+      transform_point(identity_view, {0.0F, 0.0F, 1.0F}),
+      {0.0F, 0.0F, -1.0F});
+  expect_near_vec3(
+      transform_point(identity_view, {1.0F, 0.0F, 0.0F}),
+      {1.0F, 0.0F, 0.0F});
+}
+
+TEST(WebChunkMeshTests, MouseLookRotatesFirstPersonViewWithoutMovingEye) {
+  const arv::Vec3f eye{8.0F, 2.62F, 8.0F};
+  const float yaw = 1.2F;
+  const float pitch = -0.35F;
+  const arv::Vec3f forward = arv::view_forward(yaw, pitch);
+  const arv::web::Mat4 view = arv::web::look_at(
+      eye,
+      eye + forward,
+      {0.0F, 1.0F, 0.0F});
+
+  expect_near_vec3(transform_point(view, eye), {0.0F, 0.0F, 0.0F});
+  expect_near_vec3(
+      transform_point(view, eye + forward * 4.0F),
+      {0.0F, 0.0F, -4.0F});
+
+  const arv::Vec3f right = arv::horizontal_right(yaw);
+  expect_near_vec3(
+      transform_point(view, eye + right),
+      {1.0F, 0.0F, 0.0F});
 }

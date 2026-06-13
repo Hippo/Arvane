@@ -27,27 +27,6 @@ inline constexpr u8 VehicleImpactMemoryTicks = 8U;
   return !input.text_input.empty() && input.text_input.front() == '/';
 }
 
-[[nodiscard]] protocol::PlayerActionFlags action_flags_from_command(
-    const player::PlayerCommand& command) noexcept {
-  protocol::PlayerActionFlags flags = protocol::PlayerActionFlags::None;
-  if (command.primary_pressed) {
-    flags |= protocol::PlayerActionFlags::PrimaryPressed;
-  }
-  if (command.primary_held) {
-    flags |= protocol::PlayerActionFlags::PrimaryHeld;
-  }
-  if (command.secondary_pressed) {
-    flags |= protocol::PlayerActionFlags::SecondaryPressed;
-  }
-  if (command.secondary_held) {
-    flags |= protocol::PlayerActionFlags::SecondaryHeld;
-  }
-  if (command.toggle_fly_pressed) {
-    flags |= protocol::PlayerActionFlags::ToggleFlyPressed;
-  }
-  return flags;
-}
-
 [[nodiscard]] bool has_action(protocol::PlayerActionFlags flags) noexcept {
   return flags != protocol::PlayerActionFlags::None;
 }
@@ -508,6 +487,7 @@ void ClientInputRuntime::submit_input(
     input.jump_held = false;
     input.sneak_held = false;
     input.sprint_held = false;
+    input.toggle_fly_pressed = false;
     input.mount_pressed = false;
     input.vehicle_roll_left_held = false;
     input.vehicle_roll_right_held = false;
@@ -1102,7 +1082,8 @@ void ClientInputRuntime::send_fixed_tick_input(
   movement_send_accumulator_seconds_ += tick_seconds;
   const Seconds send_interval =
       1.0 / static_cast<Seconds>(std::max(movement_send_rate_hz_, 1.0F));
-  const protocol::PlayerActionFlags action_flags = action_flags_from_command(command);
+  const protocol::PlayerActionFlags action_flags =
+      action_flags_from_player_command(command);
   const bool hotbar_changed =
       !sent_movement_packet_ || command.selected_hotbar_slot != last_sent_hotbar_slot_;
   if (movement_send_accumulator_seconds_ < send_interval && !has_action(action_flags) &&
