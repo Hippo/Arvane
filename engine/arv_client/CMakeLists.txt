@@ -2,6 +2,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/block_render_assets.hpp
   include/arv/client/camera_shell.hpp
   include/arv/client/chat_history.hpp
+  include/arv/client/chunk_collision_query.hpp
   include/arv/client/chunk_interest.hpp
   include/arv/client/chunk_snapshot.hpp
   include/arv/client/client_pack_sync.hpp
@@ -73,6 +74,17 @@ target_link_libraries(arv_client_chunk_snapshot
     arv_voxel
 )
 
+add_library(arv_client_chunk_collision STATIC
+  src/chunk_collision_query.cpp
+)
+target_include_directories(arv_client_chunk_collision PUBLIC include)
+target_link_libraries(arv_client_chunk_collision
+  PUBLIC
+    arv_physics
+    arv_protocol_stream
+    arv_voxel
+)
+
 add_library(arv_client_render_assets STATIC
   src/block_render_assets.cpp
   src/entity_render_assets.cpp
@@ -112,5 +124,5 @@ add_library(arv_client STATIC
   src/particles.cpp
 )
 target_include_directories(arv_client PUBLIC include)
-target_link_libraries(arv_client PUBLIC arv_client_chunk_snapshot arv_client_local_player arv_client_render_assets arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
+target_link_libraries(arv_client PUBLIC arv_client_chunk_collision arv_client_chunk_snapshot arv_client_local_player arv_client_render_assets arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
 target_link_libraries(arv_client PRIVATE arv_asset arv_client_pack_sync arv_client_session arv_command arv_entity arv_io arv_text)

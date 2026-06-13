@@ -12,13 +12,13 @@ set(ARV_WEB_SHELL_FILES
 add_executable(arv_web
   src/main.cpp
   src/web_chunk_mesh.cpp
-  src/web_player_movement.cpp
 )
 
 target_compile_features(arv_web PRIVATE cxx_std_20)
 target_link_libraries(arv_web
   PRIVATE
     arv_client_chunk_snapshot
+    arv_client_chunk_collision
     arv_client_local_player
     arv_client_render_assets
     arv_client_session

@@ -3,6 +3,7 @@
 #include <GLES3/gl3.h>
 
 #include "arv/client/block_render_assets.hpp"
+#include "arv/client/chunk_collision_query.hpp"
 #include "arv/client/chunk_snapshot.hpp"
 #include "arv/client/client_session.hpp"
 #include "arv/client/entity_render_assets.hpp"
@@ -17,7 +18,6 @@
 #include "arv/protocol/protocol_version.hpp"
 #include "arv/render/chunk_mesher.hpp"
 #include "web_chunk_mesh.hpp"
-#include "web_player_movement.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1744,6 +1744,10 @@ void submit_web_movement(double now) {
   if (!ensure_web_player_initialized(now)) {
     return;
   }
+  if (!ensure_block_render_assets_loaded()) {
+    g_app.input.last_frame_time = now;
+    return;
+  }
 
   const double dt_seconds = std::clamp(
       now - g_app.input.last_frame_time,
@@ -1789,7 +1793,9 @@ void submit_web_movement(double now) {
     const arv::u64 client_tick = g_app.input.client_tick++;
     const arv::player::PlayerCommand command =
         g_app.input.player.consume_command(client_tick);
-    arv::web::WebChunkCollisionQuery collision_query(g_app.session->chunk_sections());
+    arv::client::ChunkSectionCollisionQuery collision_query(
+        g_app.session->chunk_sections(),
+        g_app.block_assets.loaded.block_registry);
     g_app.input.player.update_local_movement(command, &collision_query, tick_seconds);
     g_app.input.movement_send_accumulator_seconds += tick_seconds;
 
