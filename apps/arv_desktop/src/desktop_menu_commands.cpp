@@ -490,7 +490,7 @@ void DesktopFrameLoop::refresh_runtime_player_tuning() {
 }
 
 void DesktopFrameLoop::rebuild_outline_render_assets() {
-  EntityRenderAssetsResult result = build_entity_render_assets(
+  EntityRenderAssetsResult result = arv::desktop::build_entity_render_assets(
       resources_,
       assets_.entity_registry,
       assets_.item_registry,

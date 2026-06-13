@@ -17,18 +17,19 @@ target_link_libraries(arv_render_headers INTERFACE arv_core_headers arv_voxel_he
 add_library(arv_render_mesh STATIC
   src/block_model_geometry.cpp
   src/chunk_mesher.cpp
+  src/entity_model.cpp
+  src/item_model.cpp
   src/render_types.cpp
 )
 target_include_directories(arv_render_mesh PUBLIC include)
 target_link_libraries(arv_render_mesh PUBLIC arv_render_headers arv_core arv_voxel)
+target_link_libraries(arv_render_mesh PRIVATE arv_io_data)
 
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
   return()
 endif()
 
 add_library(arv_render STATIC
-  src/entity_model.cpp
-  src/item_model.cpp
   src/opengl_renderer.cpp
   src/paged_texture_atlas.cpp
   src/render_commands.cpp

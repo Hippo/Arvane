@@ -862,6 +862,8 @@ TEST(ClientSessionTests, TracksEntityMirrorsAndRejectsMalformedEntityPackets) {
   entry.velocity = {1.0F, 0.0F, -1.0F};
   entry.rotation = {0.0F, 0.25F, 0.0F, 0.9682458F};
   entry.state_flags = arv::protocol::EntityStateFlagHasHealth;
+  entry.animations.push_back({"arvane:animation/player/walk", arv::Seconds{1.25}});
+  entry.animations.push_back({"arvane:animation/player/swing", arv::Seconds{0.5}});
   entry.head_rotation_degrees = {5.0F, 10.0F, 0.0F};
   entry.health_current = 8.0F;
   entry.health_max = 10.0F;
@@ -875,6 +877,11 @@ TEST(ClientSessionTests, TracksEntityMirrorsAndRejectsMalformedEntityPackets) {
   EXPECT_EQ(session.entity_mirrors().front().position, (arv::Vec3f{13.0F, 14.0F, 15.0F}));
   EXPECT_EQ(session.entity_mirrors().front().velocity, (arv::Vec3f{1.0F, 0.0F, -1.0F}));
   EXPECT_EQ(session.entity_mirrors().front().state_flags, arv::protocol::EntityStateFlagHasHealth);
+  ASSERT_EQ(session.entity_mirrors().front().animations.size(), 2U);
+  EXPECT_EQ(session.entity_mirrors().front().animations[0].name, "arvane:animation/player/walk");
+  EXPECT_FLOAT_EQ(session.entity_mirrors().front().animations[0].time_seconds, arv::Seconds{1.25F});
+  EXPECT_EQ(session.entity_mirrors().front().animations[1].name, "arvane:animation/player/swing");
+  EXPECT_FLOAT_EQ(session.entity_mirrors().front().animations[1].time_seconds, arv::Seconds{0.5F});
   EXPECT_EQ(session.entity_mirrors().front().head_rotation_degrees, (arv::Vec3f{5.0F, 10.0F, 0.0F}));
   EXPECT_FLOAT_EQ(session.entity_mirrors().front().health_current, 8.0F);
   EXPECT_FLOAT_EQ(session.entity_mirrors().front().health_max, 10.0F);

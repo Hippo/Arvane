@@ -472,7 +472,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
   }
   loaded.vehicle_registry = std::move(vehicle_registry_result.value());
 
-  auto entity_render_assets_result = build_entity_render_assets(
+  auto entity_render_assets_result = arv::desktop::build_entity_render_assets(
       resources,
       loaded.entity_registry,
       loaded.item_registry,

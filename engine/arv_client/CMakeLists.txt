@@ -8,6 +8,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/client_session.hpp
   include/arv/client/command_chat.hpp
   include/arv/client/client_runtime.hpp
+  include/arv/client/entity_render_assets.hpp
   include/arv/client/item_animation.hpp
   include/arv/client/local_identity.hpp
   include/arv/client/local_player_controller.hpp
@@ -74,12 +75,15 @@ target_link_libraries(arv_client_chunk_snapshot
 
 add_library(arv_client_render_assets STATIC
   src/block_render_assets.cpp
+  src/entity_render_assets.cpp
   src/render_asset_upload.cpp
 )
 target_include_directories(arv_client_render_assets PUBLIC include)
 target_link_libraries(arv_client_render_assets
   PUBLIC
     arv_asset_core
+    arv_entity
+    arv_player
     arv_render_mesh
     arv_render_headers
 )

@@ -588,6 +588,7 @@ void ClientSession::handle_entity_snapshot(protocol::ClientboundEntitySnapshot s
     found->velocity = entry.velocity;
     found->rotation = entry.rotation;
     found->state_flags = entry.state_flags;
+    found->animations = std::move(entry.animations);
     found->head_rotation_degrees = entry.head_rotation_degrees;
     found->health_current = entry.health_current;
     found->health_max = entry.health_max;

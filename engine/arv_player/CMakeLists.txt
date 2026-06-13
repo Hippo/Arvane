@@ -11,10 +11,6 @@ add_library(arv_player_headers INTERFACE)
 target_include_directories(arv_player_headers INTERFACE include)
 target_link_libraries(arv_player_headers INTERFACE arv_core_headers arv_io_headers arv_voxel_headers)
 
-if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
-  return()
-endif()
-
 add_library(arv_player STATIC
   src/inventory.cpp
   src/item.cpp
@@ -22,4 +18,4 @@ add_library(arv_player STATIC
   src/selection.cpp
 )
 target_include_directories(arv_player PUBLIC include)
-target_link_libraries(arv_player PUBLIC arv_player_headers arv_core arv_io arv_voxel)
+target_link_libraries(arv_player PUBLIC arv_player_headers arv_core arv_io_data arv_voxel)

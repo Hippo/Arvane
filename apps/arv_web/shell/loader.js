@@ -8,6 +8,7 @@
   const sessionLogPath = '/arvane_home/logs/web-session.log';
   const defaultServerUrl = serverUrl ? serverUrl.value : 'ws://localhost:42070/arvane';
   const pendingLogLines = [];
+  const runtimeCacheKey = String(Date.now());
   let storageMetadataReady = false;
 
   function timestamp() {
@@ -157,6 +158,12 @@
 
   window.Module = {
     canvas,
+    locateFile(path) {
+      if (path === 'arv_web.wasm') {
+        return `${path}?v=${runtimeCacheKey}`;
+      }
+      return path;
+    },
     arvWebStorageReady: false,
     arvWebStorageError: '',
     arvWebStorageFlushing: false,
@@ -231,6 +238,16 @@
     }
   };
 
+  function loadRuntime() {
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = `arv_web.js?v=${runtimeCacheKey}`;
+    script.onerror = function () {
+      setStatus('Failed to load runtime script');
+    };
+    document.body.appendChild(script);
+  }
+
   connectButton.addEventListener('click', function () {
     const url = serverUrl.value.trim();
     if (!url) {
@@ -258,4 +275,5 @@
   });
 
   setStatus('Loading runtime');
+  loadRuntime();
 })();

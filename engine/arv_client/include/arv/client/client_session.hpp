@@ -53,6 +53,7 @@ struct ClientSessionEntityMirror {
   Quatf rotation{};
   u32 spawn_flags{};
   u32 state_flags{};
+  std::vector<protocol::EntityAnimationPlayback> animations{};
   Vec3f head_rotation_degrees{};
   f32 health_current{};
   f32 health_max{};
