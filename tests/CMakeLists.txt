@@ -33,6 +33,7 @@ add_executable(arv_tests
   base/base_behavior_tests.cpp
   blueprint/blueprint_codec_tests.cpp
   client/chunk_interest_tests.cpp
+  client/chunk_snapshot_tests.cpp
   client/client_session_tests.cpp
   client/client_runtime_tests.cpp
   client/camera_tests.cpp

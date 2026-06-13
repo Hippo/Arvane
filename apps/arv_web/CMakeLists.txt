@@ -16,7 +16,16 @@ add_executable(arv_web
 )
 
 target_compile_features(arv_web PRIVATE cxx_std_20)
-target_link_libraries(arv_web PRIVATE arv_client_local_player arv_client_session arv_net arv_physics)
+target_link_libraries(arv_web
+  PRIVATE
+    arv_client_chunk_snapshot
+    arv_client_local_player
+    arv_client_render_assets
+    arv_client_session
+    arv_net
+    arv_physics
+    arv_render_mesh
+)
 set_target_properties(arv_web PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${ARV_WEB_DIST_DIR}"
   OUTPUT_NAME "arv_web"

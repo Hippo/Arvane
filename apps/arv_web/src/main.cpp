@@ -2,8 +2,11 @@
 #include <emscripten/html5.h>
 #include <GLES3/gl3.h>
 
+#include "arv/client/block_render_assets.hpp"
+#include "arv/client/chunk_snapshot.hpp"
 #include "arv/client/client_session.hpp"
 #include "arv/client/local_player_controller.hpp"
+#include "arv/client/render_asset_upload.hpp"
 #include "arv/crypto/crypto_init.hpp"
 #include "arv/crypto/ed25519.hpp"
 #include "arv/crypto/hash.hpp"
@@ -11,16 +14,20 @@
 #include "arv/net/websocket_client_transport.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/protocol_version.hpp"
+#include "arv/render/chunk_mesher.hpp"
 #include "web_chunk_mesh.hpp"
 #include "web_player_movement.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -52,23 +59,45 @@ struct BrowserInputState {
   bool player_initialized{};
 };
 
+struct IndexedGpuMesh {
+  GLuint vao{};
+  GLuint vbo{};
+  GLuint ebo{};
+  GLsizei index_count{};
+};
+
 struct ChunkGpuMesh {
   arv::ChunkSectionCoord coord{};
   arv::u64 content_version{};
-  GLuint vao{};
-  GLuint vbo{};
-  GLsizei vertex_count{};
+  arv::u64 light_version{};
+  IndexedGpuMesh opaque{};
+  IndexedGpuMesh transparent{};
 };
 
 struct ChunkRenderer {
-  GLuint program{};
-  GLint mvp_location{-1};
+  GLuint chunk_program{};
+  GLint chunk_mvp_location{-1};
+  GLint chunk_origin_location{-1};
+  GLint chunk_atlas_location{-1};
+  GLint chunk_atlas_inv_size_location{-1};
+  GLuint chunk_texture{};
+  arv::u32 chunk_texture_width{};
+  arv::u32 chunk_texture_height{};
+  GLuint color_program{};
+  GLint color_mvp_location{-1};
   std::vector<ChunkGpuMesh> meshes{};
   GLuint entity_vao{};
   GLuint entity_vbo{};
   GLsizei entity_vertex_count{};
   bool announced_first_upload{};
   bool announced_first_entity_upload{};
+};
+
+struct WebBlockRenderAssets {
+  arv::client::ClientBlockRenderAssets loaded{};
+  std::vector<std::filesystem::path> pack_cache_paths{};
+  std::string registry_snapshot_json{};
+  bool ready{};
 };
 
 struct WebApplication {
@@ -86,6 +115,7 @@ struct WebApplication {
   std::unique_ptr<arv::client::ClientSession> session{};
   BrowserInputState input{};
   ChunkRenderer renderer{};
+  WebBlockRenderAssets block_assets{};
 };
 
 WebApplication g_app;
@@ -169,7 +199,11 @@ void set_status(const std::string& text) {
   arv_web_set_status(text.c_str());
 }
 
-void destroy_mesh(ChunkGpuMesh& mesh) {
+void destroy_indexed_mesh(IndexedGpuMesh& mesh) {
+  if (mesh.ebo != 0U) {
+    glDeleteBuffers(1, &mesh.ebo);
+    mesh.ebo = 0U;
+  }
   if (mesh.vbo != 0U) {
     glDeleteBuffers(1, &mesh.vbo);
     mesh.vbo = 0U;
@@ -178,7 +212,12 @@ void destroy_mesh(ChunkGpuMesh& mesh) {
     glDeleteVertexArrays(1, &mesh.vao);
     mesh.vao = 0U;
   }
-  mesh.vertex_count = 0;
+  mesh.index_count = 0;
+}
+
+void destroy_mesh(ChunkGpuMesh& mesh) {
+  destroy_indexed_mesh(mesh.opaque);
+  destroy_indexed_mesh(mesh.transparent);
 }
 
 void destroy_entity_mesh() {
@@ -201,6 +240,21 @@ void clear_chunk_meshes() {
   destroy_entity_mesh();
   g_app.renderer.announced_first_upload = false;
   g_app.renderer.announced_first_entity_upload = false;
+}
+
+void destroy_chunk_texture() {
+  if (g_app.renderer.chunk_texture != 0U) {
+    glDeleteTextures(1, &g_app.renderer.chunk_texture);
+  }
+  g_app.renderer.chunk_texture = 0U;
+  g_app.renderer.chunk_texture_width = 0U;
+  g_app.renderer.chunk_texture_height = 0U;
+}
+
+void clear_block_render_assets() {
+  clear_chunk_meshes();
+  destroy_chunk_texture();
+  g_app.block_assets = {};
 }
 
 void reset_input(bool keep_view = false) {
@@ -231,7 +285,62 @@ void reset_input(bool keep_view = false) {
 }
 
 [[nodiscard]] bool initialize_chunk_renderer() {
-  static constexpr const char* vertex_shader_source = R"(#version 300 es
+  static constexpr const char* chunk_vertex_shader_source = R"(#version 300 es
+precision highp float;
+precision highp int;
+layout(location = 0) in uint a_pos_ao;
+layout(location = 1) in uint a_uv;
+layout(location = 2) in uint a_light_face_material;
+layout(location = 3) in uint a_atlas_page;
+uniform mat4 u_mvp;
+uniform vec3 u_chunk_origin;
+uniform vec2 u_atlas_inv_size;
+out vec2 v_uv;
+out float v_light;
+flat out uint v_atlas_page;
+void main() {
+  uint block_x = a_pos_ao & 31u;
+  uint block_y = (a_pos_ao >> 5u) & 31u;
+  uint block_z = (a_pos_ao >> 10u) & 31u;
+  uint model_x = (a_pos_ao >> 15u) & 31u;
+  uint model_y = (a_pos_ao >> 20u) & 31u;
+  uint model_z = (a_pos_ao >> 25u) & 31u;
+  uint ao = (a_pos_ao >> 30u) & 3u;
+  vec3 local_pos = vec3(block_x, block_y, block_z) +
+      vec3(model_x, model_y, model_z) * (1.0 / 16.0);
+  uint atlas_u = a_uv & 65535u;
+  uint atlas_v = (a_uv >> 16u) & 65535u;
+  v_uv = (vec2(float(atlas_u), float(atlas_v)) + vec2(0.5)) * u_atlas_inv_size;
+  v_atlas_page = a_atlas_page;
+
+  float block_r = float((a_light_face_material >> 0u) & 15u);
+  float block_g = float((a_light_face_material >> 4u) & 15u);
+  float block_b = float((a_light_face_material >> 8u) & 15u);
+  float sky = float((a_light_face_material >> 12u) & 15u);
+  float light = max(max(max(block_r, block_g), block_b), sky) / 15.0;
+  float ao_factor = mix(0.58, 1.0, float(ao) / 3.0);
+  v_light = clamp(light, 0.18, 1.0) * ao_factor;
+  gl_Position = u_mvp * vec4(u_chunk_origin + local_pos, 1.0);
+}
+)";
+  static constexpr const char* chunk_fragment_shader_source = R"(#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+uniform sampler2DArray u_chunk_atlas;
+in vec2 v_uv;
+in float v_light;
+flat in uint v_atlas_page;
+out vec4 out_color;
+void main() {
+  vec4 texel = texture(u_chunk_atlas, vec3(v_uv, float(v_atlas_page)));
+  if (texel.a < 0.1) {
+    discard;
+  }
+  out_color = vec4(texel.rgb * v_light, texel.a);
+}
+)";
+  static constexpr const char* color_vertex_shader_source = R"(#version 300 es
 precision highp float;
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_color;
@@ -242,7 +351,7 @@ void main() {
   gl_Position = u_mvp * vec4(a_position, 1.0);
 }
 )";
-  static constexpr const char* fragment_shader_source = R"(#version 300 es
+  static constexpr const char* color_fragment_shader_source = R"(#version 300 es
 precision highp float;
 in vec3 v_color;
 out vec4 out_color;
@@ -251,36 +360,62 @@ void main() {
 }
 )";
 
-  const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_shader_source);
-  if (vertex_shader == 0U) {
-    return false;
-  }
-  const GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
-  if (fragment_shader == 0U) {
+  const auto link_program = [](const char* label, const char* vertex_source, const char* fragment_source) -> GLuint {
+    const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_source);
+    if (vertex_shader == 0U) {
+      return 0U;
+    }
+    const GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
+    if (fragment_shader == 0U) {
+      glDeleteShader(vertex_shader);
+      return 0U;
+    }
+
+    const GLuint program = glCreateProgram();
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
     glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+      std::array<char, 512> log{};
+      GLsizei length{};
+      glGetProgramInfoLog(program, static_cast<GLsizei>(log.size()), &length, log.data());
+      set_status(std::string{label} + " link failed: " + log.data());
+      glDeleteProgram(program);
+      return 0U;
+    }
+    return program;
+  };
+
+  g_app.renderer.chunk_program = link_program(
+      "chunk renderer",
+      chunk_vertex_shader_source,
+      chunk_fragment_shader_source);
+  if (g_app.renderer.chunk_program == 0U) {
+    return false;
+  }
+  g_app.renderer.color_program = link_program(
+      "color renderer",
+      color_vertex_shader_source,
+      color_fragment_shader_source);
+  if (g_app.renderer.color_program == 0U) {
     return false;
   }
 
-  const GLuint program = glCreateProgram();
-  glAttachShader(program, vertex_shader);
-  glAttachShader(program, fragment_shader);
-  glLinkProgram(program);
-  glDeleteShader(vertex_shader);
-  glDeleteShader(fragment_shader);
-
-  GLint linked = GL_FALSE;
-  glGetProgramiv(program, GL_LINK_STATUS, &linked);
-  if (linked != GL_TRUE) {
-    std::array<char, 512> log{};
-    GLsizei length{};
-    glGetProgramInfoLog(program, static_cast<GLsizei>(log.size()), &length, log.data());
-    set_status(std::string{"chunk renderer link failed: "} + log.data());
-    glDeleteProgram(program);
-    return false;
-  }
-
-  g_app.renderer.program = program;
-  g_app.renderer.mvp_location = glGetUniformLocation(program, "u_mvp");
+  g_app.renderer.chunk_mvp_location =
+      glGetUniformLocation(g_app.renderer.chunk_program, "u_mvp");
+  g_app.renderer.chunk_origin_location =
+      glGetUniformLocation(g_app.renderer.chunk_program, "u_chunk_origin");
+  g_app.renderer.chunk_atlas_location =
+      glGetUniformLocation(g_app.renderer.chunk_program, "u_chunk_atlas");
+  g_app.renderer.chunk_atlas_inv_size_location =
+      glGetUniformLocation(g_app.renderer.chunk_program, "u_atlas_inv_size");
+  g_app.renderer.color_mvp_location =
+      glGetUniformLocation(g_app.renderer.color_program, "u_mvp");
   return true;
 }
 
@@ -328,7 +463,190 @@ void upload_vertices(
   glBindVertexArray(0U);
 }
 
+void upload_indexed_mesh(IndexedGpuMesh& gpu, const arv::render::CpuMeshBuffer& mesh) {
+  destroy_indexed_mesh(gpu);
+  if (mesh.vertex_bytes.empty() || mesh.indices.empty()) {
+    return;
+  }
+
+  glGenVertexArrays(1, &gpu.vao);
+  glGenBuffers(1, &gpu.vbo);
+  glGenBuffers(1, &gpu.ebo);
+  glBindVertexArray(gpu.vao);
+  glBindBuffer(GL_ARRAY_BUFFER, gpu.vbo);
+  glBufferData(
+      GL_ARRAY_BUFFER,
+      static_cast<GLsizeiptr>(mesh.vertex_bytes.size()),
+      mesh.vertex_bytes.data(),
+      GL_STATIC_DRAW);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpu.ebo);
+  glBufferData(
+      GL_ELEMENT_ARRAY_BUFFER,
+      static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(arv::u32)),
+      mesh.indices.data(),
+      GL_STATIC_DRAW);
+
+  glEnableVertexAttribArray(0U);
+  glVertexAttribIPointer(
+      0U,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(arv::render::ChunkVertex),
+      reinterpret_cast<const void*>(offsetof(arv::render::ChunkVertex, pos_ao)));
+  glEnableVertexAttribArray(1U);
+  glVertexAttribIPointer(
+      1U,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(arv::render::ChunkVertex),
+      reinterpret_cast<const void*>(offsetof(arv::render::ChunkVertex, uv)));
+  glEnableVertexAttribArray(2U);
+  glVertexAttribIPointer(
+      2U,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(arv::render::ChunkVertex),
+      reinterpret_cast<const void*>(
+          offsetof(arv::render::ChunkVertex, light_face_material_hints)));
+  glEnableVertexAttribArray(3U);
+  glVertexAttribIPointer(
+      3U,
+      1,
+      GL_UNSIGNED_INT,
+      sizeof(arv::render::ChunkVertex),
+      reinterpret_cast<const void*>(offsetof(arv::render::ChunkVertex, atlas_page)));
+  glBindVertexArray(0U);
+  gpu.index_count = static_cast<GLsizei>(mesh.indices.size());
+}
+
+[[nodiscard]] arv::u32 full_mipmap_max_level(arv::u32 width, arv::u32 height) noexcept {
+  arv::u32 size = std::max(width, height);
+  arv::u32 level = 0U;
+  while (size > 1U) {
+    size /= 2U;
+    ++level;
+  }
+  return level;
+}
+
+[[nodiscard]] bool upload_chunk_texture_array(
+    const arv::render::TextureArrayUploadData& upload) {
+  destroy_chunk_texture();
+  if (!upload.valid()) {
+    set_status("block texture atlas upload was empty");
+    return false;
+  }
+
+  GLint max_texture_size = 0;
+  GLint max_array_layers = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+  glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &max_array_layers);
+  if ((max_texture_size > 0 &&
+       (upload.width > static_cast<arv::u32>(max_texture_size) ||
+        upload.height > static_cast<arv::u32>(max_texture_size))) ||
+      (max_array_layers > 0 && upload.layers > static_cast<arv::u32>(max_array_layers))) {
+    set_status("block texture atlas exceeds WebGL texture-array limits");
+    return false;
+  }
+
+  glGenTextures(1, &g_app.renderer.chunk_texture);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.chunk_texture);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+  const arv::u32 full_max_level = full_mipmap_max_level(upload.width, upload.height);
+  const arv::u32 max_level = upload.limit_mipmap_levels
+                                 ? std::min(upload.max_mipmap_level, full_max_level)
+                                 : full_max_level;
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(max_level));
+  glTexImage3D(
+      GL_TEXTURE_2D_ARRAY,
+      0,
+      GL_RGBA8,
+      static_cast<GLsizei>(upload.width),
+      static_cast<GLsizei>(upload.height),
+      static_cast<GLsizei>(upload.layers),
+      0,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      upload.rgba_pixels.data());
+  glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
+  g_app.renderer.chunk_texture_width = upload.width;
+  g_app.renderer.chunk_texture_height = upload.height;
+  return true;
+}
+
+[[nodiscard]] std::vector<std::filesystem::path> copy_pack_paths(
+    std::span<const std::filesystem::path> paths) {
+  return {paths.begin(), paths.end()};
+}
+
+[[nodiscard]] bool same_pack_paths(
+    std::span<const std::filesystem::path> left,
+    const std::vector<std::filesystem::path>& right) {
+  return left.size() == right.size() &&
+         std::equal(left.begin(), left.end(), right.begin());
+}
+
+[[nodiscard]] bool ensure_block_render_assets_loaded() {
+  if (g_app.session == nullptr ||
+      g_app.session->registry_snapshot_json().empty()) {
+    return false;
+  }
+  const std::span<const std::filesystem::path> cache_paths =
+      g_app.session->multiplayer_pack_cache_paths();
+  if (cache_paths.empty()) {
+    return false;
+  }
+  if (g_app.block_assets.ready &&
+      g_app.block_assets.registry_snapshot_json == g_app.session->registry_snapshot_json() &&
+      same_pack_paths(cache_paths, g_app.block_assets.pack_cache_paths) &&
+      g_app.renderer.chunk_texture != 0U) {
+    return true;
+  }
+
+  clear_block_render_assets();
+  std::vector<std::filesystem::path> paths = copy_pack_paths(cache_paths);
+  auto packs_result = arv::asset::PackManager::load_client_bundle_roots(paths);
+  if (!packs_result) {
+    set_status("failed to mount web block assets: " + packs_result.error().describe());
+    return false;
+  }
+
+  arv::asset::PackManager packs = std::move(packs_result.value());
+  arv::asset::ResourceManager resources(packs);
+  auto loaded_assets = arv::client::load_client_block_render_assets(packs, resources);
+  if (!loaded_assets) {
+    set_status(
+        "failed to load web block assets: " +
+        loaded_assets.error().category +
+        ": " +
+        loaded_assets.error().message);
+    return false;
+  }
+
+  const arv::render::TextureArrayUploadData atlas_upload =
+      arv::client::texture_array_upload_from_atlas(
+          loaded_assets.value().block_atlas.atlas);
+  if (!upload_chunk_texture_array(atlas_upload)) {
+    return false;
+  }
+
+  g_app.block_assets.loaded = std::move(loaded_assets.value());
+  g_app.block_assets.registry_snapshot_json = g_app.session->registry_snapshot_json();
+  g_app.block_assets.pack_cache_paths = std::move(paths);
+  g_app.block_assets.ready = true;
+  set_status("web block textures and models ready");
+  return true;
+}
+
 void upload_chunk_mesh(const arv::protocol::ClientboundChunkSectionData& section) {
+  if (!ensure_block_render_assets_loaded()) {
+    return;
+  }
   auto found = std::find_if(
       g_app.renderer.meshes.begin(),
       g_app.renderer.meshes.end(),
@@ -338,17 +656,26 @@ void upload_chunk_mesh(const arv::protocol::ClientboundChunkSectionData& section
   if (found == g_app.renderer.meshes.end()) {
     found = g_app.renderer.meshes.insert(
         g_app.renderer.meshes.end(),
-        ChunkGpuMesh{section.coord, section.chunk_content_version, 0U, 0U, 0});
+        ChunkGpuMesh{section.coord, section.chunk_content_version, section.chunk_light_version});
   } else {
     destroy_mesh(*found);
     found->content_version = section.chunk_content_version;
+    found->light_version = section.chunk_light_version;
   }
 
-  const std::vector<arv::web::WebChunkVertex> vertices =
-      arv::web::build_fallback_chunk_vertices(section);
-  upload_vertices(found->vao, found->vbo, found->vertex_count, vertices, GL_STATIC_DRAW);
+  const arv::voxel::ChunkSnapshot snapshot =
+      arv::client::chunk_snapshot_from_section_data(section);
+  const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(
+      section.world_id,
+      snapshot,
+      g_app.block_assets.loaded.block_registry,
+      &g_app.block_assets.loaded.block_atlas.render_data,
+      &g_app.block_assets.loaded.fluid_render_data);
+  upload_indexed_mesh(found->opaque, mesh.opaque);
+  upload_indexed_mesh(found->transparent, mesh.transparent);
 
-  if (found->vertex_count > 0 && !g_app.renderer.announced_first_upload) {
+  if ((found->opaque.index_count > 0 || found->transparent.index_count > 0) &&
+      !g_app.renderer.announced_first_upload) {
     g_app.renderer.announced_first_upload = true;
     set_status("remote chunk mesh uploaded");
   }
@@ -385,6 +712,9 @@ void sync_chunk_meshes() {
     clear_chunk_meshes();
     return;
   }
+  if (!ensure_block_render_assets_loaded()) {
+    return;
+  }
 
   const std::vector<arv::protocol::ClientboundChunkSectionData>& sections =
       g_app.session->chunk_sections();
@@ -414,7 +744,8 @@ void sync_chunk_meshes() {
           return arv::web::same_chunk_section_coord(mesh.coord, section.coord);
         });
     if (found != g_app.renderer.meshes.end() &&
-        found->content_version == section.chunk_content_version) {
+        found->content_version == section.chunk_content_version &&
+        found->light_version == section.chunk_light_version) {
       continue;
     }
     upload_chunk_mesh(section);
@@ -425,7 +756,7 @@ void sync_chunk_meshes() {
 }
 
 void render_remote_world() {
-  if (g_app.renderer.program == 0U ||
+  if ((g_app.renderer.chunk_program == 0U || g_app.renderer.color_program == 0U) ||
       g_app.session == nullptr ||
       g_app.session->connection_state() != arv::net::ConnectionState::InGame) {
     return;
@@ -441,24 +772,65 @@ void render_remote_world() {
   const arv::client::CameraShell& camera = g_app.input.player.camera();
   const arv::Vec3f eye = camera.position();
   const arv::Vec3f center = eye + camera.forward_vector();
-  const arv::web::Mat4 mvp = arv::web::multiply(
-      arv::web::perspective(
+  const arv::Mat4f mvp = arv::multiply_mat4f(
+      arv::perspective_mat4f(
           arv::degrees_to_radians(camera.fov_y_degrees()),
           aspect,
           arv::client::DefaultCameraNearPlane,
           512.0F),
-      arv::web::look_at(eye, center, {0.0F, 1.0F, 0.0F}));
+      arv::look_at_mat4f(eye, center, {0.0F, 1.0F, 0.0F}));
 
-  glUseProgram(g_app.renderer.program);
-  glUniformMatrix4fv(g_app.renderer.mvp_location, 1, GL_FALSE, mvp.values.data());
-  for (const ChunkGpuMesh& mesh : g_app.renderer.meshes) {
-    if (mesh.vertex_count == 0 || mesh.vao == 0U) {
-      continue;
+  if (g_app.renderer.chunk_texture != 0U) {
+    glUseProgram(g_app.renderer.chunk_program);
+    glUniformMatrix4fv(
+        g_app.renderer.chunk_mvp_location,
+        1,
+        GL_FALSE,
+        mvp.values.data());
+    glUniform1i(g_app.renderer.chunk_atlas_location, 0);
+    glUniform2f(
+        g_app.renderer.chunk_atlas_inv_size_location,
+        1.0F / static_cast<float>(std::max(g_app.renderer.chunk_texture_width, 1U)),
+        1.0F / static_cast<float>(std::max(g_app.renderer.chunk_texture_height, 1U)));
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.chunk_texture);
+    const auto draw_chunk_mesh = [](const ChunkGpuMesh& chunk, const IndexedGpuMesh& mesh) {
+      if (mesh.index_count == 0 || mesh.vao == 0U) {
+        return;
+      }
+      const arv::Vec3f origin{
+          static_cast<float>(chunk.coord.value.x * arv::ChunkSize),
+          static_cast<float>(chunk.coord.value.y * arv::ChunkSize),
+          static_cast<float>(chunk.coord.value.z * arv::ChunkSize)};
+      glUniform3f(
+          g_app.renderer.chunk_origin_location,
+          origin.x,
+          origin.y,
+          origin.z);
+      glBindVertexArray(mesh.vao);
+      glDrawElements(GL_TRIANGLES, mesh.index_count, GL_UNSIGNED_INT, nullptr);
+    };
+    for (const ChunkGpuMesh& mesh : g_app.renderer.meshes) {
+      draw_chunk_mesh(mesh, mesh.opaque);
     }
-    glBindVertexArray(mesh.vao);
-    glDrawArrays(GL_TRIANGLES, 0, mesh.vertex_count);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    for (const ChunkGpuMesh& mesh : g_app.renderer.meshes) {
+      draw_chunk_mesh(mesh, mesh.transparent);
+    }
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
   }
+
   if (g_app.renderer.entity_vertex_count > 0 && g_app.renderer.entity_vao != 0U) {
+    glUseProgram(g_app.renderer.color_program);
+    glUniformMatrix4fv(
+        g_app.renderer.color_mvp_location,
+        1,
+        GL_FALSE,
+        mvp.values.data());
     glBindVertexArray(g_app.renderer.entity_vao);
     glDrawArrays(GL_TRIANGLES, 0, g_app.renderer.entity_vertex_count);
   }
@@ -554,7 +926,7 @@ void poll_session(double now) {
   }
   if (state == arv::net::ConnectionState::Disconnected) {
     g_app.flushed_after_pack_ready = false;
-    clear_chunk_meshes();
+    clear_block_render_assets();
     reset_input(true);
   }
 }
@@ -941,7 +1313,7 @@ EMSCRIPTEN_KEEPALIVE void arv_web_connect(const char* url) {
     g_app.session.reset();
     arv_web_flush_storage();
   }
-  clear_chunk_meshes();
+  clear_block_render_assets();
   reset_input(true);
   auto transport = std::make_unique<arv::net::WebSocketClientTransport>();
   arv::client::ClientSessionIdentity identity =
@@ -974,7 +1346,7 @@ EMSCRIPTEN_KEEPALIVE void arv_web_disconnect() {
     g_app.session->disconnect("browser disconnect");
     g_app.session.reset();
   }
-  clear_chunk_meshes();
+  clear_block_render_assets();
   reset_input(true);
   arv_web_flush_storage();
   g_app.connected = false;

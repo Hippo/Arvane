@@ -347,4 +347,54 @@ template<typename T>
   return {};
 }
 
+[[nodiscard]] constexpr Mat4f multiply_mat4f(Mat4f lhs, Mat4f rhs) noexcept {
+  Mat4f result{{}};
+  for (int column = 0; column < 4; ++column) {
+    for (int row = 0; row < 4; ++row) {
+      for (int k = 0; k < 4; ++k) {
+        result.values[static_cast<usize>(column * 4 + row)] +=
+            lhs.values[static_cast<usize>(k * 4 + row)] *
+            rhs.values[static_cast<usize>(column * 4 + k)];
+      }
+    }
+  }
+  return result;
+}
+
+[[nodiscard]] inline Mat4f perspective_mat4f(
+    f32 fov_y_radians,
+    f32 aspect,
+    f32 near_z,
+    f32 far_z) noexcept {
+  const f32 f = 1.0F / std::tan(fov_y_radians * 0.5F);
+  Mat4f result{{}};
+  result.values[0] = f / std::max(aspect, 0.001F);
+  result.values[5] = f;
+  result.values[10] = (far_z + near_z) / (near_z - far_z);
+  result.values[11] = -1.0F;
+  result.values[14] = (2.0F * far_z * near_z) / (near_z - far_z);
+  return result;
+}
+
+[[nodiscard]] inline Mat4f look_at_mat4f(Vec3f eye, Vec3f center, Vec3f up) noexcept {
+  const Vec3f forward = normalize_or_zero(center - eye);
+  const Vec3f side = normalize_or_zero(cross(up, forward));
+  const Vec3f camera_up = cross(forward, side);
+  return {{
+      side.x, camera_up.x, -forward.x, 0.0F,
+      side.y, camera_up.y, -forward.y, 0.0F,
+      side.z, camera_up.z, -forward.z, 0.0F,
+      -dot(side, eye), -dot(camera_up, eye), dot(forward, eye), 1.0F}};
+}
+
+[[nodiscard]] constexpr Vec3f transform_point(Mat4f matrix, Vec3f point) noexcept {
+  return {
+      matrix.values[0] * point.x + matrix.values[4] * point.y +
+          matrix.values[8] * point.z + matrix.values[12],
+      matrix.values[1] * point.x + matrix.values[5] * point.y +
+          matrix.values[9] * point.z + matrix.values[13],
+      matrix.values[2] * point.x + matrix.values[6] * point.y +
+          matrix.values[10] * point.z + matrix.values[14]};
+}
+
 } // namespace arv

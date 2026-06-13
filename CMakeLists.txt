@@ -65,6 +65,31 @@ if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
     UPDATE_DISCONNECTED TRUE
   )
   FetchContent_MakeAvailable(zstd)
+  add_subdirectory(vendors/stb)
+  set(RECTPACK2D_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    rectpack2D
+    GIT_REPOSITORY https://github.com/TeamHypersomnia/rectpack2D.git
+    GIT_TAG master
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(rectpack2D)
+  set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG yaml-cpp-0.9.0
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(yaml-cpp)
+  set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG master
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(json)
   add_subdirectory(engine/arv_core)
   add_subdirectory(engine/arv_io)
   add_subdirectory(engine/arv_crypto)

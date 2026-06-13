@@ -35,10 +35,6 @@ if(TARGET spdlog::spdlog)
   target_link_libraries(arv_core_headers INTERFACE spdlog::spdlog)
 endif()
 
-if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
-  return()
-endif()
-
 add_library(arv_core STATIC
   src/log.cpp
   src/perf_stats.cpp

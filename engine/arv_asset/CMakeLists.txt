@@ -34,6 +34,27 @@ target_link_libraries(arv_asset_bundle
     ${ARV_ASSET_ZSTD_TARGET}
 )
 
+add_library(arv_asset_core STATIC
+  src/pack.cpp
+  src/resource.cpp
+  src/texture_atlas.cpp
+)
+
+target_include_directories(arv_asset_core PUBLIC include)
+
+target_link_libraries(arv_asset_core
+  PUBLIC
+    arv_core
+    arv_voxel
+    arv_asset_bundle
+  PRIVATE
+    arv_crypto
+    arv_io_data
+    rectpack2D
+    stb
+    ${ARV_ASSET_ZSTD_TARGET}
+)
+
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
   return()
 endif()
@@ -41,24 +62,16 @@ endif()
 add_library(arv_asset STATIC
   src/font.cpp
   src/pack_bundle.cpp
-  src/pack.cpp
-  src/resource.cpp
-  src/texture_atlas.cpp
 )
 
 target_include_directories(arv_asset PUBLIC include)
 
 target_link_libraries(arv_asset
   PUBLIC
-    arv_core
-    arv_voxel
-    arv_asset_bundle
+    arv_asset_core
   PRIVATE
     arv_crypto
-    arv_io
+    arv_io_data
     Freetype::Freetype
     harfbuzz::harfbuzz
-    rectpack2D
-    stb
-    ${ARV_ASSET_ZSTD_TARGET}
 )

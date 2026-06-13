@@ -1,7 +1,9 @@
 set(ARV_CLIENT_HEADERS
+  include/arv/client/block_render_assets.hpp
   include/arv/client/camera_shell.hpp
   include/arv/client/chat_history.hpp
   include/arv/client/chunk_interest.hpp
+  include/arv/client/chunk_snapshot.hpp
   include/arv/client/client_pack_sync.hpp
   include/arv/client/client_session.hpp
   include/arv/client/command_chat.hpp
@@ -10,6 +12,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/local_identity.hpp
   include/arv/client/local_player_controller.hpp
   include/arv/client/particles.hpp
+  include/arv/client/render_asset_upload.hpp
 )
 
 add_library(arv_client_pack_sync STATIC
@@ -59,6 +62,28 @@ target_link_libraries(arv_client_local_player
     arv_render_headers
 )
 
+add_library(arv_client_chunk_snapshot STATIC
+  src/chunk_snapshot.cpp
+)
+target_include_directories(arv_client_chunk_snapshot PUBLIC include)
+target_link_libraries(arv_client_chunk_snapshot
+  PUBLIC
+    arv_protocol_stream
+    arv_voxel
+)
+
+add_library(arv_client_render_assets STATIC
+  src/block_render_assets.cpp
+  src/render_asset_upload.cpp
+)
+target_include_directories(arv_client_render_assets PUBLIC include)
+target_link_libraries(arv_client_render_assets
+  PUBLIC
+    arv_asset_core
+    arv_render_mesh
+    arv_render_headers
+)
+
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
   return()
 endif()
@@ -83,5 +108,5 @@ add_library(arv_client STATIC
   src/particles.cpp
 )
 target_include_directories(arv_client PUBLIC include)
-target_link_libraries(arv_client PUBLIC arv_client_local_player arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
+target_link_libraries(arv_client PUBLIC arv_client_chunk_snapshot arv_client_local_player arv_client_render_assets arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
 target_link_libraries(arv_client PRIVATE arv_asset arv_client_pack_sync arv_client_session arv_command arv_entity arv_io arv_text)

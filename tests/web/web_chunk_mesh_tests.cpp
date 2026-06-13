@@ -1,7 +1,5 @@
 #include "web_chunk_mesh.hpp"
 
-#include "arv/voxel/storage.hpp"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -10,24 +8,6 @@
 #include <span>
 
 namespace {
-
-arv::protocol::ClientboundChunkSectionData make_section(arv::ChunkSectionCoord coord = {{0, 0, 0}}) {
-  arv::protocol::ClientboundChunkSectionData section;
-  section.world_id = arv::WorldID{1};
-  section.coord = coord;
-  section.chunk_content_version = 1;
-  section.blocks.fill(arv::voxel::AirBlockVariantID);
-  return section;
-}
-
-void set_block(
-    arv::protocol::ClientboundChunkSectionData& section,
-    int x,
-    int y,
-    int z,
-    arv::voxel::BlockVariantID block) {
-  section.blocks[arv::voxel::local_index(arv::SectionLocalPos{{x, y, z}})] = block;
-}
 
 struct Bounds {
   arv::Vec3f min{};
@@ -47,20 +27,10 @@ Bounds bounds_for(std::span<const arv::web::WebChunkVertex> vertices) {
   return bounds;
 }
 
-void expect_all_finite(const arv::web::Mat4& matrix) {
+void expect_all_finite(const arv::Mat4f& matrix) {
   for (float value : matrix.values) {
     EXPECT_TRUE(std::isfinite(value));
   }
-}
-
-arv::Vec3f transform_point(const arv::web::Mat4& matrix, arv::Vec3f point) {
-  return {
-      matrix.values[0] * point.x + matrix.values[4] * point.y +
-          matrix.values[8] * point.z + matrix.values[12],
-      matrix.values[1] * point.x + matrix.values[5] * point.y +
-          matrix.values[9] * point.z + matrix.values[13],
-      matrix.values[2] * point.x + matrix.values[6] * point.y +
-          matrix.values[10] * point.z + matrix.values[14]};
 }
 
 void expect_near_vec3(arv::Vec3f actual, arv::Vec3f expected, float epsilon = 0.0001F) {
@@ -70,44 +40,6 @@ void expect_near_vec3(arv::Vec3f actual, arv::Vec3f expected, float epsilon = 0.
 }
 
 } // namespace
-
-TEST(WebChunkMeshTests, AirChunkProducesNoFallbackVertices) {
-  const auto vertices = arv::web::build_fallback_chunk_vertices(make_section());
-  EXPECT_TRUE(vertices.empty());
-}
-
-TEST(WebChunkMeshTests, SingleServerBlockProducesSixOpaqueCubeFacesAtWorldPosition) {
-  auto section = make_section({{2, -1, -3}});
-  set_block(section, 1, 2, 3, arv::voxel::BlockVariantID{7});
-
-  const auto vertices = arv::web::build_fallback_chunk_vertices(section);
-
-  ASSERT_EQ(vertices.size(), 36U);
-  const Bounds bounds = bounds_for(vertices);
-  EXPECT_EQ(bounds.min, (arv::Vec3f{33.0F, -14.0F, -45.0F}));
-  EXPECT_EQ(bounds.max, (arv::Vec3f{34.0F, -13.0F, -44.0F}));
-  for (const arv::web::WebChunkVertex& vertex : vertices) {
-    EXPECT_GE(vertex.color.x, 0.0F);
-    EXPECT_GE(vertex.color.y, 0.0F);
-    EXPECT_GE(vertex.color.z, 0.0F);
-    EXPECT_LE(vertex.color.x, 1.0F);
-    EXPECT_LE(vertex.color.y, 1.0F);
-    EXPECT_LE(vertex.color.z, 1.0F);
-  }
-}
-
-TEST(WebChunkMeshTests, AdjacentServerBlocksHideSharedFace) {
-  auto section = make_section();
-  set_block(section, 1, 2, 3, arv::voxel::BlockVariantID{7});
-  set_block(section, 2, 2, 3, arv::voxel::BlockVariantID{8});
-
-  const auto vertices = arv::web::build_fallback_chunk_vertices(section);
-
-  EXPECT_EQ(vertices.size(), 60U);
-  const Bounds bounds = bounds_for(vertices);
-  EXPECT_EQ(bounds.min, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
-  EXPECT_EQ(bounds.max, (arv::Vec3f{3.0F, 3.0F, 4.0F}));
-}
 
 TEST(WebChunkMeshTests, EntityMarkersBuildUprightFallbackCubes) {
   const std::array<arv::web::WebEntityMarker, 2> markers{{
@@ -178,11 +110,11 @@ TEST(WebChunkMeshTests, FallbackEntityMarkersHideLocalPlayerForFirstPersonView) 
 }
 
 TEST(WebChunkMeshTests, CameraMatricesAreColumnMajorAndFiniteForWebGlUniforms) {
-  const arv::web::Mat4 identity_view =
-      arv::web::look_at({0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F});
-  const arv::web::Mat4 projection =
-      arv::web::perspective(arv::degrees_to_radians(70.0F), 16.0F / 9.0F, 0.05F, 512.0F);
-  const arv::web::Mat4 combined = arv::web::multiply(projection, identity_view);
+  const arv::Mat4f identity_view =
+      arv::look_at_mat4f({0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F});
+  const arv::Mat4f projection =
+      arv::perspective_mat4f(arv::degrees_to_radians(70.0F), 16.0F / 9.0F, 0.05F, 512.0F);
+  const arv::Mat4f combined = arv::multiply_mat4f(projection, identity_view);
 
   expect_all_finite(identity_view);
   expect_all_finite(projection);
@@ -193,10 +125,10 @@ TEST(WebChunkMeshTests, CameraMatricesAreColumnMajorAndFiniteForWebGlUniforms) {
   EXPECT_FLOAT_EQ(identity_view.values[15], 1.0F);
   EXPECT_FLOAT_EQ(projection.values[11], -1.0F);
   expect_near_vec3(
-      transform_point(identity_view, {0.0F, 0.0F, 1.0F}),
+      arv::transform_point(identity_view, {0.0F, 0.0F, 1.0F}),
       {0.0F, 0.0F, -1.0F});
   expect_near_vec3(
-      transform_point(identity_view, {1.0F, 0.0F, 0.0F}),
+      arv::transform_point(identity_view, {1.0F, 0.0F, 0.0F}),
       {1.0F, 0.0F, 0.0F});
 }
 
@@ -205,18 +137,18 @@ TEST(WebChunkMeshTests, MouseLookRotatesFirstPersonViewWithoutMovingEye) {
   const float yaw = 1.2F;
   const float pitch = -0.35F;
   const arv::Vec3f forward = arv::view_forward(yaw, pitch);
-  const arv::web::Mat4 view = arv::web::look_at(
+  const arv::Mat4f view = arv::look_at_mat4f(
       eye,
       eye + forward,
       {0.0F, 1.0F, 0.0F});
 
-  expect_near_vec3(transform_point(view, eye), {0.0F, 0.0F, 0.0F});
+  expect_near_vec3(arv::transform_point(view, eye), {0.0F, 0.0F, 0.0F});
   expect_near_vec3(
-      transform_point(view, eye + forward * 4.0F),
+      arv::transform_point(view, eye + forward * 4.0F),
       {0.0F, 0.0F, -4.0F});
 
   const arv::Vec3f right = arv::horizontal_right(yaw);
   expect_near_vec3(
-      transform_point(view, eye + right),
+      arv::transform_point(view, eye + right),
       {1.0F, 0.0F, 0.0F});
 }

@@ -1,8 +1,11 @@
 #include "arv/core/log.hpp"
 
-#include <spdlog/async.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
+
+#ifndef __EMSCRIPTEN__
+#include <spdlog/async.h>
+#endif
 
 #include <atomic>
 #include <memory>
@@ -46,15 +49,19 @@ std::atomic<arv::core::LogLevel> g_log_level{
     return existing;
   }
 
+  auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_st>();
+#ifdef __EMSCRIPTEN__
+  auto logger = std::make_shared<spdlog::logger>("arvane", std::move(sink));
+#else
   constexpr std::size_t QueueSize = 8192;
   constexpr std::size_t WorkerThreads = 1;
   spdlog::init_thread_pool(QueueSize, WorkerThreads);
-  auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_st>();
   auto logger = std::make_shared<spdlog::async_logger>(
       "arvane",
       std::move(sink),
       spdlog::thread_pool(),
       spdlog::async_overflow_policy::overrun_oldest);
+#endif
   spdlog::register_logger(logger);
   logger->set_pattern("[%^%l%$] %v");
   logger->set_level(to_spdlog_level(g_log_level.load(std::memory_order_relaxed)));
