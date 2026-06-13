@@ -73,6 +73,7 @@ struct ChunkGpuMesh {
   arv::ChunkSectionCoord coord{};
   arv::u64 content_version{};
   arv::u64 light_version{};
+  arv::u64 dependency_signature{};
   IndexedGpuMesh opaque{};
   IndexedGpuMesh transparent{};
 };
@@ -134,6 +135,10 @@ struct WebEntityRenderAssets {
   std::string registry_snapshot_json{};
   bool ready{};
 };
+
+using ChunkSectionIndex = arv::HashMap<
+    arv::ChunkSectionCoord,
+    const arv::protocol::ClientboundChunkSectionData*>;
 
 struct WebApplication {
   EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context{};
@@ -932,6 +937,16 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
          std::equal(left.begin(), left.end(), right.begin());
 }
 
+[[nodiscard]] ChunkSectionIndex build_chunk_section_index(
+    std::span<const arv::protocol::ClientboundChunkSectionData> sections) {
+  ChunkSectionIndex index;
+  index.reserve(sections.size());
+  for (const arv::protocol::ClientboundChunkSectionData& section : sections) {
+    index[section.coord] = &section;
+  }
+  return index;
+}
+
 [[nodiscard]] bool ensure_block_render_assets_loaded() {
   if (g_app.session == nullptr ||
       g_app.session->registry_snapshot_json().empty()) {
@@ -1046,10 +1061,14 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   return true;
 }
 
-void upload_chunk_mesh(const arv::protocol::ClientboundChunkSectionData& section) {
+void upload_chunk_mesh(
+    const arv::protocol::ClientboundChunkSectionData& section,
+    arv::client::ChunkSectionDataLookup section_lookup) {
   if (!ensure_block_render_assets_loaded()) {
     return;
   }
+  const arv::u64 dependency_signature =
+      arv::client::chunk_meshing_dependency_signature(section, section_lookup);
   auto found = std::find_if(
       g_app.renderer.meshes.begin(),
       g_app.renderer.meshes.end(),
@@ -1059,15 +1078,20 @@ void upload_chunk_mesh(const arv::protocol::ClientboundChunkSectionData& section
   if (found == g_app.renderer.meshes.end()) {
     found = g_app.renderer.meshes.insert(
         g_app.renderer.meshes.end(),
-        ChunkGpuMesh{section.coord, section.chunk_content_version, section.chunk_light_version});
+        ChunkGpuMesh{
+            section.coord,
+            section.chunk_content_version,
+            section.chunk_light_version,
+            dependency_signature});
   } else {
     destroy_mesh(*found);
     found->content_version = section.chunk_content_version;
     found->light_version = section.chunk_light_version;
+    found->dependency_signature = dependency_signature;
   }
 
   const arv::voxel::ChunkSnapshot snapshot =
-      arv::client::chunk_snapshot_from_section_data(section);
+      arv::client::chunk_meshing_snapshot_from_section_data(section, section_lookup);
   const arv::render::ChunkMeshData mesh = arv::render::build_chunk_mesh(
       section.world_id,
       snapshot,
@@ -1318,6 +1342,13 @@ void sync_chunk_meshes() {
 
   const std::vector<arv::protocol::ClientboundChunkSectionData>& sections =
       g_app.session->chunk_sections();
+  const ChunkSectionIndex section_index = build_chunk_section_index(sections);
+  auto section_lookup =
+      [&](arv::ChunkSectionCoord coord)
+          -> const arv::protocol::ClientboundChunkSectionData* {
+    const auto found = section_index.find(coord);
+    return found == section_index.end() ? nullptr : found->second;
+  };
   const auto stale_begin = std::remove_if(
       g_app.renderer.meshes.begin(),
       g_app.renderer.meshes.end(),
@@ -1337,6 +1368,10 @@ void sync_chunk_meshes() {
 
   int uploads_this_frame = 0;
   for (const arv::protocol::ClientboundChunkSectionData& section : sections) {
+    const arv::u64 dependency_signature =
+        arv::client::chunk_meshing_dependency_signature(
+            section,
+            arv::client::ChunkSectionDataLookup{section_lookup});
     const auto found = std::find_if(
         g_app.renderer.meshes.begin(),
         g_app.renderer.meshes.end(),
@@ -1345,10 +1380,11 @@ void sync_chunk_meshes() {
         });
     if (found != g_app.renderer.meshes.end() &&
         found->content_version == section.chunk_content_version &&
-        found->light_version == section.chunk_light_version) {
+        found->light_version == section.chunk_light_version &&
+        found->dependency_signature == dependency_signature) {
       continue;
     }
-    upload_chunk_mesh(section);
+    upload_chunk_mesh(section, arv::client::ChunkSectionDataLookup{section_lookup});
     if (++uploads_this_frame >= 1) {
       break;
     }
