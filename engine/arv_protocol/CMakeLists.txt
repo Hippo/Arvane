@@ -67,6 +67,25 @@ add_library(arv_protocol_entity_replication STATIC
 target_include_directories(arv_protocol_entity_replication PUBLIC include)
 target_link_libraries(arv_protocol_entity_replication PUBLIC arv_protocol_headers)
 
+add_library(arv_protocol_item_stack_wire STATIC
+  src/item_stack_wire.cpp
+)
+target_include_directories(arv_protocol_item_stack_wire PUBLIC include)
+target_link_libraries(arv_protocol_item_stack_wire PUBLIC arv_protocol_headers arv_player_headers)
+target_link_libraries(arv_protocol_item_stack_wire PRIVATE arv_io_data)
+
+add_library(arv_protocol_dropped_items STATIC
+  src/entity_replication.cpp
+)
+target_include_directories(arv_protocol_dropped_items PUBLIC include)
+target_link_libraries(arv_protocol_dropped_items PUBLIC arv_protocol_entity_replication arv_protocol_item_stack_wire)
+
+add_library(arv_protocol_inventory_sync STATIC
+  src/inventory_sync.cpp
+)
+target_include_directories(arv_protocol_inventory_sync PUBLIC include)
+target_link_libraries(arv_protocol_inventory_sync PUBLIC arv_protocol_headers arv_player_headers arv_protocol_item_stack_wire)
+
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
   return()
 endif()
@@ -75,10 +94,7 @@ add_library(arv_protocol STATIC
   src/block_updates.cpp
   src/chat.cpp
   src/entity_interaction.cpp
-  src/entity_replication.cpp
   src/explosion.cpp
-  src/inventory_sync.cpp
-  src/item_stack_wire.cpp
   src/message_registry.cpp
   src/particles.cpp
   src/skins.cpp
@@ -88,4 +104,4 @@ add_library(arv_protocol STATIC
 )
 target_include_directories(arv_protocol PUBLIC include)
 target_link_libraries(arv_protocol PUBLIC arv_protocol_headers)
-target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_core arv_crypto arv_player arv_text arv_voxel)
+target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_protocol_dropped_items arv_protocol_inventory_sync arv_core arv_crypto arv_player arv_text arv_voxel)

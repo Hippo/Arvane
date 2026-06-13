@@ -2,6 +2,7 @@
 
 #include "arv/client/camera_shell.hpp"
 #include "arv/client/chat_history.hpp"
+#include "arv/client/dropped_item_mirror.hpp"
 #include "arv/client/local_identity.hpp"
 #include "arv/client/local_player_controller.hpp"
 #include "arv/client/particles.hpp"
@@ -71,21 +72,6 @@ struct ReplicatedEntityMirror {
   std::string parent_seat_id{};
   bool controls_parent_vehicle{};
   std::vector<ReplicatedPassengerMirror> passengers{};
-};
-
-struct DroppedItemMirror {
-  EntityNetID drop_id{};
-  WorldID world_id{};
-  Vec3f previous_position{};
-  Vec3f position{};
-  Vec3f velocity{};
-  Vec3f render_position{};
-  Vec3f interpolation_start_position{};
-  player::ItemStack stack{};
-  u64 last_server_tick{};
-  u64 last_position_change_server_tick{};
-  Seconds interpolation_elapsed_seconds{};
-  Seconds interpolation_duration_seconds{};
 };
 
 struct ClientAttackFeedback {

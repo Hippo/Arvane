@@ -8,8 +8,13 @@
 #include "arv/crypto/hash.hpp"
 #include "arv/net/connection_state.hpp"
 #include "arv/net/transport.hpp"
+#include "arv/player/inventory.hpp"
+#include "arv/player/player_constants.hpp"
+#include "arv/client/dropped_item_mirror.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_updates.hpp"
+#include "arv/protocol/entity_replication.hpp"
+#include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/player_movement.hpp"
@@ -112,6 +117,40 @@ public:
     return entity_mirrors_;
   }
 
+  void advance_entity_interpolation(Seconds delta_seconds) noexcept {
+    dropped_items_.advance_interpolation(delta_seconds);
+  }
+
+  [[nodiscard]] usize dropped_item_count() const noexcept {
+    return dropped_items_.count();
+  }
+
+  [[nodiscard]] const DroppedItemMirror* find_dropped_item(
+      EntityNetID drop_id) const noexcept {
+    return dropped_items_.find(drop_id);
+  }
+
+  [[nodiscard]] std::vector<DroppedItemMirror> dropped_item_mirrors() const {
+    return dropped_items_.mirrors();
+  }
+
+  [[nodiscard]] const player::Inventory& inventory() const noexcept {
+    return inventory_;
+  }
+
+  [[nodiscard]] const std::optional<player::ItemStack>& inventory_cursor_stack()
+      const noexcept {
+    return inventory_cursor_stack_;
+  }
+
+  [[nodiscard]] u32 inventory_revision() const noexcept {
+    return inventory_revision_;
+  }
+
+  [[nodiscard]] bool has_authoritative_inventory() const noexcept {
+    return has_authoritative_inventory_;
+  }
+
   [[nodiscard]] std::optional<protocol::ClientboundPlayerMoveCorrection> take_player_move_correction();
   [[nodiscard]] std::optional<protocol::ClientboundPlayerVelocity> take_player_velocity();
   [[nodiscard]] std::optional<protocol::ClientboundSetMovementHz> take_movement_settings();
@@ -148,6 +187,8 @@ private:
   void handle_entity_spawn(protocol::ClientboundEntitySpawn spawn);
   void handle_entity_despawn(protocol::ClientboundEntityDespawn despawn);
   void handle_entity_snapshot(protocol::ClientboundEntitySnapshot snapshot);
+  void handle_dropped_item_snapshot(protocol::ClientboundDroppedItemSnapshot snapshot);
+  void handle_inventory_update(protocol::ClientboundInventoryUpdate update);
   void handle_message(std::span<const u8> payload);
   void handle_connection_closed(std::string reason);
 
@@ -166,6 +207,11 @@ private:
   std::unordered_map<std::string, PackDownload> downloads_{};
   std::vector<protocol::ClientboundChunkSectionData> chunk_sections_{};
   std::vector<ClientSessionEntityMirror> entity_mirrors_{};
+  ClientDroppedItemMirrorStore dropped_items_{};
+  player::Inventory inventory_{player::DefaultPlayerInventorySlotCount};
+  std::optional<player::ItemStack> inventory_cursor_stack_{};
+  u32 inventory_revision_{};
+  bool has_authoritative_inventory_{};
   std::optional<protocol::ClientboundPlayerMoveCorrection> latest_player_move_correction_{};
   std::optional<protocol::ClientboundPlayerVelocity> latest_player_velocity_{};
   std::optional<protocol::ClientboundSetMovementHz> latest_movement_settings_{};

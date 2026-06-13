@@ -6,6 +6,7 @@
 #include "ui_model.hpp"
 
 #include "arv/base/base_ids.hpp"
+#include "arv/client/item_ui_model.hpp"
 #include "arv/client/local_identity.hpp"
 #include "arv/core/log.hpp"
 #include "arv/net/in_process_transport.hpp"
@@ -750,12 +751,12 @@ void DesktopSessionManager::refresh_inventory_slots(DesktopGameSession& session)
   session.inventory_slots.clear();
   session.carried_inventory_stack.reset();
   if (session.client != nullptr && session.client->has_authoritative_inventory()) {
-    session.inventory_slots = inventory_slots_for_ui(
+    session.inventory_slots = client::inventory_slots_for_ui(
         session.client->inventory(),
         dependencies_.item_registry,
         dependencies_.item_atlas,
         dependencies_.block_atlas);
-    session.carried_inventory_stack = item_stack_for_ui(
+    session.carried_inventory_stack = client::item_stack_for_ui(
         session.client->inventory_cursor_stack(),
         dependencies_.item_registry,
         dependencies_.item_atlas,

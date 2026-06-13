@@ -20,11 +20,15 @@ target_link_libraries(arv_web
     arv_client_chunk_snapshot
     arv_client_chunk_collision
     arv_client_local_player
+    arv_client_item_rendering
+    arv_client_item_ui
     arv_client_render_assets
     arv_client_session
+    arv_base_ui
     arv_net
     arv_physics
     arv_render_mesh
+    arv_ui
 )
 set_target_properties(arv_web PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${ARV_WEB_DIST_DIR}"

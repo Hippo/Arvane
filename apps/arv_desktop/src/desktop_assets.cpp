@@ -2,6 +2,7 @@
 
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
+#include "arv/client/item_ui_model.hpp"
 #include "arv/client/particles.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
@@ -420,7 +421,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("item_animations", item_animation_references.error().message);
   }
 
-  auto item_atlas_result = build_item_texture_atlas(
+  auto item_atlas_result = client::build_item_texture_atlas(
       resources,
       loaded.item_registry,
       atlas_build_options_from(config.render.atlases.ui, 2, true));

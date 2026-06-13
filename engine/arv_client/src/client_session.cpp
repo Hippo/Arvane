@@ -6,7 +6,9 @@
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_updates.hpp"
+#include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
+#include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/player_movement.hpp"
@@ -95,6 +97,11 @@ namespace {
     case protocol::MessageType::ClientboundEntitySpawn:
     case protocol::MessageType::ClientboundEntityDespawn:
     case protocol::MessageType::ClientboundEntitySnapshot:
+    case protocol::MessageType::ClientboundDroppedItemSnapshot:
+      return state == net::ConnectionState::RegistrySync ||
+             state == net::ConnectionState::WorldJoin ||
+             state == net::ConnectionState::InGame;
+    case protocol::MessageType::ClientboundInventoryUpdate:
       return state == net::ConnectionState::RegistrySync ||
              state == net::ConnectionState::WorldJoin ||
              state == net::ConnectionState::InGame;
@@ -186,6 +193,11 @@ net::ConnectResult ClientSession::connect(const net::NetworkAddress& address) {
   server_requires_pack_sync_.reset();
   chunk_sections_.clear();
   entity_mirrors_.clear();
+  dropped_items_.clear();
+  inventory_ = player::Inventory{player::DefaultPlayerInventorySlotCount};
+  inventory_cursor_stack_.reset();
+  inventory_revision_ = 0;
+  has_authoritative_inventory_ = false;
   latest_player_move_correction_.reset();
   previous_chunk_interest_center_.reset();
   next_chunk_interest_sequence_ = 1;
@@ -596,6 +608,33 @@ void ClientSession::handle_entity_snapshot(protocol::ClientboundEntitySnapshot s
   }
 }
 
+void ClientSession::handle_dropped_item_snapshot(
+    protocol::ClientboundDroppedItemSnapshot snapshot) {
+  if (!world_join_.has_value() || snapshot.world_id != world_join_->world_id) {
+    return;
+  }
+  dropped_items_.apply_snapshot(
+      snapshot,
+      world_join_->world_id,
+      world_join_->tick_rate == 0U ? DefaultBaseTps : world_join_->tick_rate);
+}
+
+void ClientSession::handle_inventory_update(
+    protocol::ClientboundInventoryUpdate update) {
+  if (update.inventory_id != protocol::PlayerInventoryID ||
+      update.revision <= inventory_revision_) {
+    return;
+  }
+
+  inventory_ = player::Inventory{update.slots.size()};
+  for (usize index = 0; index < update.slots.size(); ++index) {
+    (void)inventory_.set_slot(index, update.slots[index]);
+  }
+  inventory_cursor_stack_ = std::move(update.carried_stack);
+  inventory_revision_ = update.revision;
+  has_authoritative_inventory_ = true;
+}
+
 void ClientSession::handle_message(std::span<const u8> payload) {
   auto decoded = protocol::deserialize_envelope(payload);
   if (!decoded) {
@@ -835,6 +874,26 @@ void ClientSession::handle_message(std::span<const u8> payload) {
       handle_entity_snapshot(std::move(snapshot.value()));
       return;
     }
+    case protocol::MessageType::ClientboundDroppedItemSnapshot: {
+      auto snapshot = protocol::deserialize_clientbound_dropped_item_snapshot(
+          decoded.value().payload);
+      if (!snapshot) {
+        disconnect("invalid dropped item snapshot");
+        return;
+      }
+      handle_dropped_item_snapshot(std::move(snapshot.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundInventoryUpdate: {
+      auto update = protocol::deserialize_clientbound_inventory_update(
+          decoded.value().payload);
+      if (!update) {
+        disconnect("invalid inventory update");
+        return;
+      }
+      handle_inventory_update(std::move(update.value()));
+      return;
+    }
     case protocol::MessageType::ClientboundPlayerVelocity: {
       auto velocity = protocol::deserialize_clientbound_player_velocity(
           decoded.value().payload);
@@ -897,6 +956,11 @@ void ClientSession::handle_connection_closed(std::string reason) {
   world_join_.reset();
   chunk_sections_.clear();
   entity_mirrors_.clear();
+  dropped_items_.clear();
+  inventory_ = player::Inventory{player::DefaultPlayerInventorySlotCount};
+  inventory_cursor_stack_.reset();
+  inventory_revision_ = 0;
+  has_authoritative_inventory_ = false;
   latest_player_move_correction_.reset();
   latest_player_velocity_.reset();
   latest_movement_settings_.reset();

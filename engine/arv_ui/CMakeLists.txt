@@ -9,5 +9,10 @@ add_library(arv_ui STATIC
   src/theme.cpp
 )
 target_include_directories(arv_ui PUBLIC include)
-target_link_libraries(arv_ui PUBLIC arv_asset arv_core arv_render)
-target_link_libraries(arv_ui PRIVATE arv_io)
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  target_link_libraries(arv_ui PUBLIC arv_asset arv_core arv_render_headers)
+  target_link_libraries(arv_ui PRIVATE arv_io_data)
+else()
+  target_link_libraries(arv_ui PUBLIC arv_asset arv_core arv_render)
+  target_link_libraries(arv_ui PRIVATE arv_io)
+endif()

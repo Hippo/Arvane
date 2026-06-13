@@ -7,8 +7,11 @@
 #include "arv/client/chunk_snapshot.hpp"
 #include "arv/client/client_session.hpp"
 #include "arv/client/entity_render_assets.hpp"
+#include "arv/client/item_rendering.hpp"
+#include "arv/client/item_ui_model.hpp"
 #include "arv/client/local_player_controller.hpp"
 #include "arv/client/render_asset_upload.hpp"
+#include "arv/base/ui/widgets/gameplay.hpp"
 #include "arv/crypto/crypto_init.hpp"
 #include "arv/crypto/ed25519.hpp"
 #include "arv/crypto/hash.hpp"
@@ -17,6 +20,7 @@
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/protocol_version.hpp"
 #include "arv/render/chunk_mesher.hpp"
+#include "arv/ui/core/ui.hpp"
 #include "web_chunk_mesh.hpp"
 
 #include <algorithm>
@@ -51,6 +55,8 @@ struct BrowserInputState {
   bool primary_pressed{};
   bool secondary_pressed{};
   bool toggle_fly_pressed{};
+  std::optional<arv::u8> hotbar_select{};
+  arv::i8 hotbar_scroll_steps{};
   double mouse_dx{};
   double mouse_dy{};
   double last_frame_time{};
@@ -85,6 +91,49 @@ struct EntityGpuModel {
   GLsizei index_count{};
 };
 
+struct WebUiVertex {
+  arv::Vec2f position{};
+  arv::Vec2f uv{};
+  arv::Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
+  float page{};
+};
+
+class WebUiTextMeasurer final : public arv::ui::IUiTextMeasurer {
+public:
+  [[nodiscard]] arv::Vec2f measure(
+      std::string_view text,
+      arv::ui::UiTextRole role = arv::ui::UiTextRole::Body) const override {
+    const float height = line_height(role);
+    return {
+        static_cast<float>(text.size()) * height * 0.52F,
+        height};
+  }
+
+  [[nodiscard]] float line_height(
+      arv::ui::UiTextRole role = arv::ui::UiTextRole::Body) const override {
+    switch (role) {
+      case arv::ui::UiTextRole::Small:
+        return 14.0F;
+      case arv::ui::UiTextRole::Heading:
+        return 22.0F;
+      case arv::ui::UiTextRole::Title:
+        return 28.0F;
+      case arv::ui::UiTextRole::Mono:
+      case arv::ui::UiTextRole::Body:
+        break;
+    }
+    return 18.0F;
+  }
+};
+
+struct WebUiState {
+  arv::ui::UiTree tree{};
+  arv::asset::FontSystem fonts{};
+  arv::ui::UiFontStacks font_stacks{};
+  WebUiTextMeasurer text_measurer{};
+  bool ready{};
+};
+
 struct ChunkRenderer {
   GLuint chunk_program{};
   GLint chunk_mvp_location{-1};
@@ -110,6 +159,15 @@ struct ChunkRenderer {
   GLuint entity_texture{};
   arv::u32 entity_texture_width{};
   arv::u32 entity_texture_height{};
+  GLuint item_texture{};
+  arv::u32 item_texture_width{};
+  arv::u32 item_texture_height{};
+  GLuint ui_program{};
+  GLint ui_viewport_location{-1};
+  GLint ui_atlas_location{-1};
+  GLint ui_mode_location{-1};
+  GLuint ui_vao{};
+  GLuint ui_vbo{};
   std::vector<ChunkGpuMesh> meshes{};
   arv::HashMap<arv::render::EntityModelID, EntityGpuModel> entity_models{};
   GLuint entity_vao{};
@@ -131,6 +189,7 @@ struct WebBlockRenderAssets {
 
 struct WebEntityRenderAssets {
   arv::client::ClientEntityRenderAssets loaded{};
+  arv::asset::TextureAtlas item_atlas{};
   std::vector<std::filesystem::path> pack_cache_paths{};
   std::string registry_snapshot_json{};
   bool ready{};
@@ -157,6 +216,7 @@ struct WebApplication {
   ChunkRenderer renderer{};
   WebBlockRenderAssets block_assets{};
   WebEntityRenderAssets entity_assets{};
+  WebUiState ui{};
 };
 
 WebApplication g_app;
@@ -322,10 +382,20 @@ void destroy_entity_texture() {
   g_app.renderer.entity_texture_height = 0U;
 }
 
+void destroy_item_texture() {
+  if (g_app.renderer.item_texture != 0U) {
+    glDeleteTextures(1, &g_app.renderer.item_texture);
+  }
+  g_app.renderer.item_texture = 0U;
+  g_app.renderer.item_texture_width = 0U;
+  g_app.renderer.item_texture_height = 0U;
+}
+
 void clear_entity_render_assets() {
   destroy_entity_mesh();
   destroy_entity_gpu_models();
   destroy_entity_texture();
+  destroy_item_texture();
   g_app.entity_assets = {};
   g_app.renderer.announced_first_entity_upload = false;
 }
@@ -531,6 +601,49 @@ void main() {
   out_color = vec4(texel.rgb * v_color * light, texel.a);
 }
 )";
+  static constexpr const char* ui_vertex_shader_source = R"(#version 300 es
+precision highp float;
+precision highp int;
+layout(location = 0) in vec2 a_position;
+layout(location = 1) in vec2 a_uv;
+layout(location = 2) in vec4 a_color;
+layout(location = 3) in float a_page;
+uniform vec2 u_viewport;
+out vec2 v_uv;
+out vec4 v_color;
+flat out int v_page;
+void main() {
+  vec2 viewport = max(u_viewport, vec2(1.0, 1.0));
+  vec2 ndc = vec2(
+      (a_position.x / viewport.x) * 2.0 - 1.0,
+      1.0 - (a_position.y / viewport.y) * 2.0);
+  v_uv = a_uv;
+  v_color = a_color;
+  v_page = int(a_page + 0.5);
+  gl_Position = vec4(ndc, 0.0, 1.0);
+}
+)";
+  static constexpr const char* ui_fragment_shader_source = R"(#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+uniform sampler2DArray u_atlas;
+uniform int u_mode;
+in vec2 v_uv;
+in vec4 v_color;
+flat in int v_page;
+out vec4 out_color;
+void main() {
+  vec4 color = v_color;
+  if (u_mode == 1) {
+    color *= texture(u_atlas, vec3(v_uv, float(v_page)));
+  }
+  if (color.a <= 0.01) {
+    discard;
+  }
+  out_color = color;
+}
+)";
 
   const auto link_program = [](const char* label, const char* vertex_source, const char* fragment_source) -> GLuint {
     const GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_source);
@@ -584,6 +697,13 @@ void main() {
   if (g_app.renderer.entity_program == 0U) {
     return false;
   }
+  g_app.renderer.ui_program = link_program(
+      "ui renderer",
+      ui_vertex_shader_source,
+      ui_fragment_shader_source);
+  if (g_app.renderer.ui_program == 0U) {
+    return false;
+  }
 
   g_app.renderer.chunk_mvp_location =
       glGetUniformLocation(g_app.renderer.chunk_program, "u_mvp");
@@ -615,6 +735,51 @@ void main() {
       glGetUniformLocation(g_app.renderer.entity_program, "u_bone_rotations[0]");
   g_app.renderer.entity_bone_positions_location =
       glGetUniformLocation(g_app.renderer.entity_program, "u_bone_positions[0]");
+  g_app.renderer.ui_viewport_location =
+      glGetUniformLocation(g_app.renderer.ui_program, "u_viewport");
+  g_app.renderer.ui_atlas_location =
+      glGetUniformLocation(g_app.renderer.ui_program, "u_atlas");
+  g_app.renderer.ui_mode_location =
+      glGetUniformLocation(g_app.renderer.ui_program, "u_mode");
+
+  glGenVertexArrays(1, &g_app.renderer.ui_vao);
+  glGenBuffers(1, &g_app.renderer.ui_vbo);
+  glBindVertexArray(g_app.renderer.ui_vao);
+  glBindBuffer(GL_ARRAY_BUFFER, g_app.renderer.ui_vbo);
+  glEnableVertexAttribArray(0U);
+  glVertexAttribPointer(
+      0U,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(WebUiVertex),
+      reinterpret_cast<const void*>(offsetof(WebUiVertex, position)));
+  glEnableVertexAttribArray(1U);
+  glVertexAttribPointer(
+      1U,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(WebUiVertex),
+      reinterpret_cast<const void*>(offsetof(WebUiVertex, uv)));
+  glEnableVertexAttribArray(2U);
+  glVertexAttribPointer(
+      2U,
+      4,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(WebUiVertex),
+      reinterpret_cast<const void*>(offsetof(WebUiVertex, color)));
+  glEnableVertexAttribArray(3U);
+  glVertexAttribPointer(
+      3U,
+      1,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(WebUiVertex),
+      reinterpret_cast<const void*>(offsetof(WebUiVertex, page)));
+  glBindBuffer(GL_ARRAY_BUFFER, 0U);
+  glBindVertexArray(0U);
   return true;
 }
 
@@ -925,6 +1090,56 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   return true;
 }
 
+[[nodiscard]] bool upload_item_texture_array(
+    const arv::render::TextureArrayUploadData& upload) {
+  destroy_item_texture();
+  if (!upload.valid()) {
+    set_status("item texture atlas upload was empty");
+    return false;
+  }
+
+  GLint max_texture_size = 0;
+  GLint max_array_layers = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+  glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &max_array_layers);
+  if ((max_texture_size > 0 &&
+       (upload.width > static_cast<arv::u32>(max_texture_size) ||
+        upload.height > static_cast<arv::u32>(max_texture_size))) ||
+      (max_array_layers > 0 && upload.layers > static_cast<arv::u32>(max_array_layers))) {
+    set_status("item texture atlas exceeds WebGL texture-array limits");
+    return false;
+  }
+
+  glGenTextures(1, &g_app.renderer.item_texture);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.item_texture);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+  const arv::u32 full_max_level = full_mipmap_max_level(upload.width, upload.height);
+  const arv::u32 max_level = upload.limit_mipmap_levels
+                                 ? std::min(upload.max_mipmap_level, full_max_level)
+                                 : full_max_level;
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(max_level));
+  glTexImage3D(
+      GL_TEXTURE_2D_ARRAY,
+      0,
+      GL_RGBA8,
+      static_cast<GLsizei>(upload.width),
+      static_cast<GLsizei>(upload.height),
+      static_cast<GLsizei>(upload.layers),
+      0,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      upload.rgba_pixels.data());
+  glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
+  g_app.renderer.item_texture_width = upload.width;
+  g_app.renderer.item_texture_height = upload.height;
+  return true;
+}
+
 [[nodiscard]] std::vector<std::filesystem::path> copy_pack_paths(
     std::span<const std::filesystem::path> paths) {
   return {paths.begin(), paths.end()};
@@ -1016,6 +1231,7 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
       g_app.entity_assets.registry_snapshot_json == g_app.session->registry_snapshot_json() &&
       same_pack_paths(cache_paths, g_app.entity_assets.pack_cache_paths) &&
       g_app.renderer.entity_texture != 0U &&
+      g_app.renderer.item_texture != 0U &&
       !g_app.renderer.entity_models.empty()) {
     return true;
   }
@@ -1045,6 +1261,27 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
     return false;
   }
 
+  auto item_atlas = arv::client::build_item_texture_atlas(
+      resources,
+      loaded_assets.value().item_registry,
+      {.max_page_size = 1024,
+       .max_pages = 2,
+       .padding = 2,
+       .require_uniform_non_fallback_size = false});
+  if (!item_atlas) {
+    set_status(
+        "failed to build web item atlas: " +
+        item_atlas.error().operation +
+        ": " +
+        item_atlas.error().message);
+    return false;
+  }
+  const arv::render::TextureArrayUploadData item_atlas_upload =
+      arv::client::texture_array_upload_from_atlas(item_atlas.value());
+  if (!upload_item_texture_array(item_atlas_upload)) {
+    return false;
+  }
+
   const arv::render::TextureArrayUploadData atlas_upload =
       arv::client::texture_array_upload_from_atlas(
           loaded_assets.value().render_assets.texture_atlas);
@@ -1054,6 +1291,7 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   upload_entity_models(loaded_assets.value().render_assets);
 
   g_app.entity_assets.loaded = std::move(loaded_assets.value());
+  g_app.entity_assets.item_atlas = std::move(item_atlas.value());
   g_app.entity_assets.registry_snapshot_json = g_app.session->registry_snapshot_json();
   g_app.entity_assets.pack_cache_paths = std::move(paths);
   g_app.entity_assets.ready = true;
@@ -1151,14 +1389,18 @@ void apply_bone_rotation_overrides(
   }
 }
 
-[[nodiscard]] std::vector<arv::render::EntityDrawItem> build_entity_draw_items() {
+[[nodiscard]] std::vector<arv::render::EntityDrawItem> build_entity_draw_items(
+    arv::Seconds animation_time_seconds) {
   std::vector<arv::render::EntityDrawItem> draws;
   if (g_app.session == nullptr || !g_app.entity_assets.ready) {
     return draws;
   }
   const std::optional<arv::client::ClientSessionWorldJoin>& join =
       g_app.session->world_join();
-  draws.reserve(g_app.session->entity_mirrors().size());
+  draws.reserve(
+      g_app.session->entity_mirrors().size() +
+      g_app.session->dropped_item_count() +
+      1U);
   for (const arv::client::ClientSessionEntityMirror& mirror :
        g_app.session->entity_mirrors()) {
     if (join.has_value() && mirror.world_id != join->world_id) {
@@ -1198,10 +1440,52 @@ void apply_bone_rotation_overrides(
     }
     draws.push_back(std::move(draw));
   }
+  if (!join.has_value()) {
+    return draws;
+  }
+
+  arv::render::FramePacket item_frame;
+  item_frame.camera = g_app.input.player.camera().snapshot(
+      static_cast<arv::u32>(std::max(g_app.width, 1)),
+      static_cast<arv::u32>(std::max(g_app.height, 1)),
+      0.0F);
+  item_frame.world_view = arv::render::render_view_from_camera(item_frame.camera);
+  item_frame.world_view.world_id = join->world_id;
+  const std::vector<arv::client::DroppedItemMirror> dropped_items =
+      g_app.session->dropped_item_mirrors();
+  arv::client::append_dropped_item_draws(
+      item_frame,
+      g_app.entity_assets.loaded.render_assets,
+      dropped_items,
+      join->world_id,
+      animation_time_seconds);
+
+  if (g_app.session->has_authoritative_inventory()) {
+    const arv::usize selected_slot = g_app.input.player.selected_hotbar_slot();
+    const arv::player::Inventory& inventory = g_app.session->inventory();
+    if (selected_slot < inventory.slot_count()) {
+      const std::optional<arv::player::ItemStack>& held_stack =
+          inventory.slot(selected_slot);
+      if (held_stack.has_value() && held_stack->count > 0U) {
+        arv::client::append_held_item_draw(
+            item_frame,
+            g_app.entity_assets.loaded.render_assets,
+            held_stack.value(),
+            item_frame.camera);
+      }
+    }
+  }
+  draws.insert(
+      draws.end(),
+      item_frame.entities.begin(),
+      item_frame.entities.end());
   return draws;
 }
 
-void draw_entity_models(const arv::Mat4f& mvp, bool translucent) {
+void draw_entity_models(
+    const arv::Mat4f& mvp,
+    bool translucent,
+    arv::Seconds animation_time_seconds) {
   if (g_app.renderer.entity_program == 0U ||
       g_app.renderer.entity_texture == 0U ||
       !g_app.entity_assets.ready ||
@@ -1209,7 +1493,8 @@ void draw_entity_models(const arv::Mat4f& mvp, bool translucent) {
     return;
   }
 
-  std::vector<arv::render::EntityDrawItem> draws = build_entity_draw_items();
+  std::vector<arv::render::EntityDrawItem> draws =
+      build_entity_draw_items(animation_time_seconds);
   const arv::Vec3f eye = g_app.input.player.camera().position();
   std::sort(
       draws.begin(),
@@ -1391,6 +1676,254 @@ void sync_chunk_meshes() {
   }
 }
 
+void append_ui_quad_vertices(
+    std::vector<WebUiVertex>& vertices,
+    const std::array<arv::Vec2f, 4>& positions,
+    const std::array<arv::Vec2f, 4>& uvs,
+    arv::Vec4f color,
+    arv::u32 page) {
+  const auto push = [&](arv::usize index) {
+    vertices.push_back({positions[index], uvs[index], color, static_cast<float>(page)});
+  };
+  push(0U);
+  push(1U);
+  push(2U);
+  push(0U);
+  push(2U);
+  push(3U);
+}
+
+void append_ui_axis_quad_vertices(
+    std::vector<WebUiVertex>& vertices,
+    arv::Vec2f min,
+    arv::Vec2f max,
+    arv::Vec4f color) {
+  if (max.x <= min.x || max.y <= min.y || color.w <= 0.0F) {
+    return;
+  }
+  const std::array<arv::Vec2f, 4> positions{{
+      min,
+      {max.x, min.y},
+      max,
+      {min.x, max.y},
+  }};
+  constexpr std::array<arv::Vec2f, 4> uvs{{
+      {0.0F, 0.0F},
+      {1.0F, 0.0F},
+      {1.0F, 1.0F},
+      {0.0F, 1.0F},
+  }};
+  append_ui_quad_vertices(vertices, positions, uvs, color, 0U);
+}
+
+void append_ui_rect_vertices(
+    std::vector<WebUiVertex>& vertices,
+    const arv::render::UIRectDrawItem& rect) {
+  arv::Vec2f min = rect.min;
+  arv::Vec2f max = rect.max;
+  if (rect.clip) {
+    min.x = std::max(min.x, rect.clip_min.x);
+    min.y = std::max(min.y, rect.clip_min.y);
+    max.x = std::min(max.x, rect.clip_max.x);
+    max.y = std::min(max.y, rect.clip_max.y);
+  }
+  append_ui_axis_quad_vertices(vertices, min, max, rect.color);
+
+  const float border = std::max(rect.border_width, 0.0F);
+  if (border <= 0.0F || rect.border_color.w <= 0.0F ||
+      max.x <= min.x || max.y <= min.y) {
+    return;
+  }
+  append_ui_axis_quad_vertices(vertices, min, {max.x, min.y + border}, rect.border_color);
+  append_ui_axis_quad_vertices(vertices, {min.x, max.y - border}, max, rect.border_color);
+  append_ui_axis_quad_vertices(vertices, min, {min.x + border, max.y}, rect.border_color);
+  append_ui_axis_quad_vertices(vertices, {max.x - border, min.y}, max, rect.border_color);
+}
+
+void draw_ui_vertices(
+    const std::vector<WebUiVertex>& vertices,
+    GLint mode,
+    GLuint texture) {
+  if (vertices.empty() || g_app.renderer.ui_program == 0U ||
+      g_app.renderer.ui_vao == 0U || g_app.renderer.ui_vbo == 0U) {
+    return;
+  }
+  if (mode == 1 && texture == 0U) {
+    return;
+  }
+
+  glUseProgram(g_app.renderer.ui_program);
+  glUniform2f(
+      g_app.renderer.ui_viewport_location,
+      static_cast<float>(std::max(g_app.width, 1)),
+      static_cast<float>(std::max(g_app.height, 1)));
+  glUniform1i(g_app.renderer.ui_mode_location, mode);
+  glUniform1i(g_app.renderer.ui_atlas_location, 0);
+  if (mode == 1) {
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture);
+  }
+  glBindVertexArray(g_app.renderer.ui_vao);
+  glBindBuffer(GL_ARRAY_BUFFER, g_app.renderer.ui_vbo);
+  glBufferData(
+      GL_ARRAY_BUFFER,
+      static_cast<GLsizeiptr>(vertices.size() * sizeof(WebUiVertex)),
+      vertices.data(),
+      GL_DYNAMIC_DRAW);
+  glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
+  glBindBuffer(GL_ARRAY_BUFFER, 0U);
+  glBindVertexArray(0U);
+  if (mode == 1) {
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
+  }
+}
+
+void draw_ui_frame(const arv::render::FramePacket& frame) {
+  std::vector<WebUiVertex> color_vertices;
+  std::vector<WebUiVertex> terrain_vertices;
+  std::vector<WebUiVertex> item_vertices;
+  color_vertices.reserve(frame.ui_rects.size() * 30U);
+  terrain_vertices.reserve(frame.ui_textured_quads.size() * 6U);
+  item_vertices.reserve(frame.ui_textured_quads.size() * 6U);
+
+  for (const arv::render::UIRectDrawItem& rect : frame.ui_rects) {
+    append_ui_rect_vertices(color_vertices, rect);
+  }
+  for (const arv::render::UITexturedQuadDrawItem& quad : frame.ui_textured_quads) {
+    switch (quad.source) {
+      case arv::render::UiTextureSource::TerrainAtlas:
+        append_ui_quad_vertices(
+            terrain_vertices,
+            quad.positions,
+            quad.uvs,
+            quad.color,
+            quad.page);
+        break;
+      case arv::render::UiTextureSource::ItemAtlas:
+        append_ui_quad_vertices(
+            item_vertices,
+            quad.positions,
+            quad.uvs,
+            quad.color,
+            quad.page);
+        break;
+      case arv::render::UiTextureSource::White:
+        append_ui_quad_vertices(
+            color_vertices,
+            quad.positions,
+            quad.uvs,
+            quad.color,
+            0U);
+        break;
+      case arv::render::UiTextureSource::FontAtlas:
+      case arv::render::UiTextureSource::PlayerSkinAtlas:
+        break;
+    }
+  }
+
+  glDisable(GL_DEPTH_TEST);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  draw_ui_vertices(color_vertices, 0, 0U);
+  draw_ui_vertices(terrain_vertices, 1, g_app.renderer.chunk_texture);
+  draw_ui_vertices(item_vertices, 1, g_app.renderer.item_texture);
+  glDisable(GL_BLEND);
+  glEnable(GL_DEPTH_TEST);
+}
+
+[[nodiscard]] bool ensure_web_ui_ready() {
+  if (g_app.ui.ready) {
+    return true;
+  }
+  auto body = g_app.ui.fonts.load_face(
+      {},
+      18U,
+      {"arvane:font/web_stub/body"});
+  if (!body) {
+    set_status("failed to initialize web UI font stub: " + body.error().message);
+    return false;
+  }
+  const std::array<arv::asset::FontFaceHandle, 1> faces{{body.value()}};
+  const arv::asset::FontStack stack = g_app.ui.fonts.make_stack(faces);
+  g_app.ui.font_stacks.small = stack;
+  g_app.ui.font_stacks.body = stack;
+  g_app.ui.font_stacks.heading = stack;
+  g_app.ui.font_stacks.title = stack;
+  g_app.ui.font_stacks.mono = stack;
+  g_app.ui.ready = true;
+  return true;
+}
+
+[[nodiscard]] std::optional<arv::ui::HealthHudModel> local_health_hud_model() {
+  if (g_app.session == nullptr || !g_app.session->world_join().has_value()) {
+    return std::nullopt;
+  }
+  const arv::client::ClientSessionWorldJoin& join = *g_app.session->world_join();
+  for (const arv::client::ClientSessionEntityMirror& mirror :
+       g_app.session->entity_mirrors()) {
+    if (mirror.entity_id != join.local_entity_id ||
+        mirror.world_id != join.world_id ||
+        mirror.health_max <= 0.0F) {
+      continue;
+    }
+    return arv::ui::HealthHudModel{
+        true,
+        std::max(mirror.health_current, 0.0F),
+        std::max(mirror.health_max, 1.0F),
+        1.0F,
+        {static_cast<float>(g_app.width), static_cast<float>(g_app.height)}};
+  }
+  return std::nullopt;
+}
+
+void render_gameplay_ui(arv::Seconds time_seconds) {
+  if (g_app.session == nullptr ||
+      g_app.session->connection_state() != arv::net::ConnectionState::InGame ||
+      !g_app.entity_assets.ready ||
+      g_app.renderer.item_texture == 0U ||
+      !ensure_web_ui_ready()) {
+    return;
+  }
+
+  std::vector<arv::ui::UiItemStackView> inventory_slots;
+  if (g_app.session->has_authoritative_inventory()) {
+    inventory_slots = arv::client::inventory_slots_for_ui(
+        g_app.session->inventory(),
+        g_app.entity_assets.loaded.item_registry,
+        g_app.entity_assets.item_atlas,
+        g_app.block_assets.loaded.block_atlas);
+  }
+
+  const arv::usize hotbar_count =
+      std::min<arv::usize>(arv::player::DefaultHotbarSlotCount, inventory_slots.size());
+  arv::ui::GameplayUiModel model;
+  model.hotbar.selected_slot = g_app.input.player.selected_hotbar_slot();
+  model.hotbar.slot_count = arv::player::DefaultHotbarSlotCount;
+  model.hotbar.viewport = {
+      static_cast<float>(g_app.width),
+      static_cast<float>(g_app.height)};
+  model.hotbar.slots = {inventory_slots.data(), hotbar_count};
+  if (std::optional<arv::ui::HealthHudModel> health = local_health_hud_model();
+      health.has_value()) {
+    model.health = health.value();
+  }
+
+  arv::ui::build_gameplay_ui(g_app.ui.tree, std::move(model));
+  const arv::Vec2f viewport{
+      static_cast<float>(g_app.width),
+      static_cast<float>(g_app.height)};
+  g_app.ui.tree.layout(viewport, &g_app.ui.text_measurer);
+  arv::render::FramePacket frame;
+  arv::ui::append_ui_draw_commands(
+      g_app.ui.tree,
+      g_app.ui.fonts,
+      g_app.ui.font_stacks,
+      frame,
+      arv::ui::UiDisplayMetrics::from_logical_size(viewport),
+      time_seconds);
+  draw_ui_frame(frame);
+}
+
 void render_remote_world() {
   if ((g_app.renderer.chunk_program == 0U || g_app.renderer.color_program == 0U) ||
       g_app.session == nullptr ||
@@ -1407,6 +1940,8 @@ void render_remote_world() {
 
   const float aspect =
       static_cast<float>(g_app.width) / static_cast<float>(std::max(g_app.height, 1));
+  const arv::Seconds animation_time_seconds =
+      static_cast<arv::Seconds>(emscripten_get_now() * 0.001 - g_app.start_time);
   const arv::client::CameraShell& camera = g_app.input.player.camera();
   const arv::Vec3f eye = camera.position();
   const arv::Vec3f center = eye + camera.forward_vector();
@@ -1451,14 +1986,14 @@ void render_remote_world() {
     for (const ChunkGpuMesh& mesh : g_app.renderer.meshes) {
       draw_chunk_mesh(mesh, mesh.opaque);
     }
-    draw_entity_models(mvp, false);
+    draw_entity_models(mvp, false, animation_time_seconds);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
     for (const ChunkGpuMesh& mesh : g_app.renderer.meshes) {
       draw_chunk_mesh(mesh, mesh.transparent);
     }
-    draw_entity_models(mvp, true);
+    draw_entity_models(mvp, true, animation_time_seconds);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
@@ -1620,6 +2155,16 @@ EM_BOOL on_canvas_click(int, const EmscriptenMouseEvent*, void*) {
 }
 
 bool set_key_state(const char* code, bool down, bool repeat) {
+  for (int slot = 0; slot < 9; ++slot) {
+    char digit_code[] = "Digit1";
+    digit_code[5] = static_cast<char>('1' + slot);
+    if (std::strcmp(code, digit_code) == 0) {
+      if (down && !repeat) {
+        g_app.input.hotbar_select = static_cast<arv::u8>(slot);
+      }
+      return true;
+    }
+  }
   if (std::strcmp(code, "KeyW") == 0 || std::strcmp(code, "ArrowUp") == 0) {
     g_app.input.forward = down;
     return true;
@@ -1702,6 +2247,19 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
   return EM_FALSE;
 }
 
+EM_BOOL on_wheel(int, const EmscriptenWheelEvent* event, void*) {
+  if (event == nullptr || !g_app.pointer_locked || event->deltaY == 0.0) {
+    return EM_FALSE;
+  }
+  const int step = event->deltaY > 0.0 ? -1 : 1;
+  const int combined = std::clamp(
+      static_cast<int>(g_app.input.hotbar_scroll_steps) + step,
+      -127,
+      127);
+  g_app.input.hotbar_scroll_steps = static_cast<arv::i8>(combined);
+  return EM_TRUE;
+}
+
 void initialize_web_player(
     const arv::client::ClientSessionWorldJoin& join,
     double now) {
@@ -1754,6 +2312,7 @@ void submit_web_movement(double now) {
       0.0,
       0.1);
   g_app.input.last_frame_time = now;
+  g_app.session->advance_entity_interpolation(static_cast<arv::Seconds>(dt_seconds));
 
   arv::client::InputFrame input;
   input.move_forward = g_app.input.forward;
@@ -1769,12 +2328,16 @@ void submit_web_movement(double now) {
   input.primary_held = g_app.input.primary_held;
   input.secondary_pressed = g_app.input.secondary_pressed;
   input.secondary_held = g_app.input.secondary_held;
+  input.hotbar_select = g_app.input.hotbar_select;
+  input.hotbar_scroll_steps = g_app.input.hotbar_scroll_steps;
   input.mouse_delta_x = static_cast<float>(g_app.input.mouse_dx);
   input.mouse_delta_y = static_cast<float>(g_app.input.mouse_dy);
   g_app.input.mouse_dx = 0.0;
   g_app.input.mouse_dy = 0.0;
   g_app.input.jump_pressed = false;
   g_app.input.toggle_fly_pressed = false;
+  g_app.input.hotbar_select.reset();
+  g_app.input.hotbar_scroll_steps = 0;
   g_app.input.player.submit_input(std::move(input));
 
   const arv::TickRate tick_rate =
@@ -1862,6 +2425,7 @@ void install_callbacks() {
   emscripten_set_mousemove_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, EM_TRUE, on_mouse_move);
   emscripten_set_mousedown_callback("#arvane-canvas", nullptr, EM_TRUE, on_mouse_button);
   emscripten_set_mouseup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, EM_TRUE, on_mouse_button);
+  emscripten_set_wheel_callback("#arvane-canvas", nullptr, EM_TRUE, on_wheel);
 }
 
 } // namespace
@@ -1942,6 +2506,7 @@ EMSCRIPTEN_KEEPALIVE void arv_web_frame() {
   glClearColor(base + pulse * 0.04F, 0.12F + pulse * 0.03F, 0.14F + pulse * 0.02F, 1.0F);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   render_remote_world();
+  render_gameplay_ui(static_cast<arv::Seconds>(now - g_app.start_time));
 }
 
 EMSCRIPTEN_KEEPALIVE void arv_web_connect(const char* url) {

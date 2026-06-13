@@ -6,8 +6,10 @@
 #include "arv/crypto/hash.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/protocol/auth.hpp"
+#include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/entity_updates.hpp"
 #include "arv/protocol/handshake.hpp"
+#include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/player_input.hpp"
@@ -930,6 +932,142 @@ TEST(ClientSessionTests, TracksEntityMirrorsAndRejectsMalformedEntityPackets) {
   EXPECT_EQ(session.connection_state(), arv::net::ConnectionState::Disconnected);
   ASSERT_TRUE(session.disconnect_reason().has_value());
   EXPECT_NE(session.disconnect_reason()->find("invalid entity spawn"), std::string::npos);
+}
+
+TEST(ClientSessionTests, TracksInventoryAndDroppedItemsForLightweightClient) {
+  auto transport = std::make_unique<ScriptedClientTransport>();
+  ScriptedClientTransport* scripted = transport.get();
+  arv::client::ClientSession session(std::move(transport));
+  const auto connection_id = session.connect({"in-process", 0});
+  ASSERT_TRUE(connection_id);
+  scripted->push_event({
+      arv::net::NetworkEventType::ConnectionAccepted,
+      connection_id.value()});
+  session.pump();
+
+  arv::protocol::ClientboundHello server_hello;
+  server_hello.accepted = true;
+  server_hello.required_followup_sync = false;
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundHello,
+      arv::protocol::serialize_clientbound_hello(server_hello));
+  session.pump();
+  ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::WorldJoin);
+
+  arv::protocol::ClientboundWorldJoinResult join;
+  join.accepted = true;
+  join.world_id = arv::WorldID{7};
+  join.player_id = arv::PlayerID{2};
+  join.local_entity_id = arv::EntityNetID{3};
+  join.spawn_position = {1.0F, 2.0F, 3.0F};
+  join.tick_rate = arv::DefaultBaseTps;
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundWorldJoinResult,
+      arv::protocol::serialize_clientbound_world_join_result(join));
+  session.pump();
+  ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::InGame);
+
+  arv::protocol::ClientboundInventoryUpdate inventory;
+  inventory.inventory_id = arv::protocol::PlayerInventoryID;
+  inventory.revision = 1U;
+  inventory.selected_hotbar_slot = 0U;
+  inventory.slots.resize(arv::player::DefaultPlayerInventorySlotCount);
+  inventory.slots[0] = arv::player::ItemStack{arv::player::ItemID{5}, 12U};
+  inventory.carried_stack = arv::player::ItemStack{arv::player::ItemID{6}, 1U};
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundInventoryUpdate,
+      arv::protocol::serialize_clientbound_inventory_update(inventory));
+  session.pump();
+
+  EXPECT_TRUE(session.has_authoritative_inventory());
+  EXPECT_EQ(session.inventory_revision(), 1U);
+  ASSERT_EQ(session.inventory().slot_count(), arv::player::DefaultPlayerInventorySlotCount);
+  ASSERT_TRUE(session.inventory().slot(0).has_value());
+  EXPECT_EQ(session.inventory().slot(0)->item, arv::player::ItemID{5});
+  EXPECT_EQ(session.inventory().slot(0)->count, 12U);
+  ASSERT_TRUE(session.inventory_cursor_stack().has_value());
+  EXPECT_EQ(session.inventory_cursor_stack()->item, arv::player::ItemID{6});
+
+  inventory.slots[0] = arv::player::ItemStack{arv::player::ItemID{9}, 1U};
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundInventoryUpdate,
+      arv::protocol::serialize_clientbound_inventory_update(inventory));
+  session.pump();
+  ASSERT_TRUE(session.inventory().slot(0).has_value());
+  EXPECT_EQ(session.inventory().slot(0)->item, arv::player::ItemID{5});
+
+  arv::protocol::ClientboundDroppedItemSnapshot dropped;
+  dropped.world_id = arv::WorldID{7};
+  dropped.server_tick = 12U;
+  dropped.drops.push_back({
+      arv::EntityNetID{44},
+      arv::player::ItemStack{arv::player::ItemID{5}, 3U},
+      {4.0F, 5.0F, 6.0F},
+      {0.25F, 0.0F, 0.0F}});
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundDroppedItemSnapshot,
+      arv::protocol::serialize_clientbound_dropped_item_snapshot(dropped));
+  session.pump();
+
+  EXPECT_EQ(session.dropped_item_count(), 1U);
+  const arv::client::DroppedItemMirror* mirror =
+      session.find_dropped_item(arv::EntityNetID{44});
+  ASSERT_NE(mirror, nullptr);
+  EXPECT_EQ(mirror->world_id, arv::WorldID{7});
+  EXPECT_EQ(mirror->stack.item, arv::player::ItemID{5});
+  EXPECT_EQ(mirror->stack.count, 3U);
+  EXPECT_EQ(mirror->render_position, (arv::Vec3f{4.0F, 5.0F, 6.0F}));
+
+  dropped.world_id = arv::WorldID{8};
+  dropped.drops.clear();
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundDroppedItemSnapshot,
+      arv::protocol::serialize_clientbound_dropped_item_snapshot(dropped));
+  session.pump();
+  EXPECT_EQ(session.dropped_item_count(), 1U);
+
+  session.disconnect("test reset");
+  EXPECT_FALSE(session.has_authoritative_inventory());
+  EXPECT_EQ(session.dropped_item_count(), 0U);
+}
+
+TEST(ClientSessionTests, AcceptsInventoryUpdateDuringRegistrySync) {
+  auto transport = std::make_unique<ScriptedClientTransport>();
+  ScriptedClientTransport* scripted = transport.get();
+  arv::client::ClientSession session(std::move(transport));
+  const auto connection_id = session.connect({"in-process", 0});
+  ASSERT_TRUE(connection_id);
+  scripted->push_event({
+      arv::net::NetworkEventType::ConnectionAccepted,
+      connection_id.value()});
+  session.pump();
+
+  arv::protocol::ClientboundHello server_hello;
+  server_hello.accepted = true;
+  server_hello.required_followup_sync = true;
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundHello,
+      arv::protocol::serialize_clientbound_hello(server_hello));
+  session.pump();
+  ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::RegistrySync);
+
+  arv::protocol::ClientboundInventoryUpdate inventory;
+  inventory.inventory_id = arv::protocol::PlayerInventoryID;
+  inventory.revision = 1U;
+  inventory.selected_hotbar_slot = 0U;
+  inventory.slots.resize(arv::player::DefaultPlayerInventorySlotCount);
+  inventory.slots[0] = arv::player::ItemStack{arv::player::ItemID{5}, 12U};
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundInventoryUpdate,
+      arv::protocol::serialize_clientbound_inventory_update(inventory));
+  session.pump();
+
+  EXPECT_EQ(session.connection_state(), arv::net::ConnectionState::RegistrySync);
+  EXPECT_TRUE(scripted->close_reasons.empty());
+  EXPECT_TRUE(session.has_authoritative_inventory());
+  ASSERT_TRUE(session.inventory().slot(0).has_value());
+  EXPECT_EQ(session.inventory().slot(0)->item, arv::player::ItemID{5});
+  EXPECT_EQ(session.inventory().slot(0)->count, 12U);
 }
 
 TEST(ClientSessionTests, RegistrySnapshotMismatchBlocksWorldJoin) {

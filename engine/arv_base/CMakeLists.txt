@@ -26,6 +26,31 @@ set(ARV_BASE_UI_HEADERS
   include/arv/base/ui/widgets/tab_menu.hpp
 )
 
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  add_library(arv_base_ui STATIC
+    include/arv/base/ui/widgets/chat.hpp
+    include/arv/base/ui/widgets/debug_hud.hpp
+    include/arv/base/ui/widgets/gameplay.hpp
+    include/arv/base/ui/widgets/health.hpp
+    include/arv/base/ui/widgets/hotbar.hpp
+    include/arv/base/ui/widgets/inventory.hpp
+    include/arv/base/ui/widgets/items.hpp
+    include/arv/base/ui/widgets/scoreboard.hpp
+    include/arv/base/ui/widgets/tab_menu.hpp
+    src/ui/widgets/chat.cpp
+    src/ui/widgets/debug_hud.cpp
+    src/ui/widgets/gameplay.cpp
+    src/ui/widgets/health.cpp
+    src/ui/widgets/hotbar.cpp
+    src/ui/widgets/inventory.cpp
+    src/ui/widgets/scoreboard.cpp
+    src/ui/widgets/tab_menu.cpp
+  )
+  target_include_directories(arv_base_ui PUBLIC include)
+  target_link_libraries(arv_base_ui PUBLIC arv_core arv_player arv_protocol_headers arv_render_headers arv_text arv_ui arv_voxel)
+  return()
+endif()
+
 add_library(arv_base STATIC
   src/base_commands.cpp
   src/blueprint_command.cpp

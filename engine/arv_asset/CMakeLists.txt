@@ -56,22 +56,26 @@ target_link_libraries(arv_asset_core
 )
 
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
-  return()
+  add_library(arv_asset STATIC
+    src/font_stub.cpp
+  )
+else()
+  add_library(arv_asset STATIC
+    src/font.cpp
+    src/pack_bundle.cpp
+  )
 endif()
-
-add_library(arv_asset STATIC
-  src/font.cpp
-  src/pack_bundle.cpp
-)
 
 target_include_directories(arv_asset PUBLIC include)
 
-target_link_libraries(arv_asset
-  PUBLIC
-    arv_asset_core
-  PRIVATE
-    arv_crypto
-    arv_io_data
-    Freetype::Freetype
-    harfbuzz::harfbuzz
-)
+target_link_libraries(arv_asset PUBLIC arv_asset_core)
+
+if(NOT (EMSCRIPTEN AND ARVANE_BUILD_WEB))
+  target_link_libraries(arv_asset
+    PRIVATE
+      arv_crypto
+      arv_io_data
+      Freetype::Freetype
+      harfbuzz::harfbuzz
+  )
+endif()

@@ -4,9 +4,7 @@
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/render/render_types.hpp"
-#include "arv/base/ui.hpp"
 
-#include <array>
 #include <span>
 #include <string>
 #include <vector>
@@ -23,22 +21,6 @@ using client::EntityRenderAssetsResult;
     const asset::Image& image);
 [[nodiscard]] render::TextureArrayUploadData texture_array_upload_from_atlas(
     const asset::TextureAtlas& atlas);
-
-[[nodiscard]] std::array<Vec2f, 4> normalized_uvs(
-    const std::array<Vec2i, 4>& pixels,
-    u32 width,
-    u32 height);
-
-[[nodiscard]] ui::UiImageData image_data_from_atlas_entry(
-    const asset::TextureAtlasEntry& entry,
-    u32 page_width,
-    u32 page_height,
-    render::UiTextureSource source);
-
-[[nodiscard]] asset::TextureAtlasResult build_item_texture_atlas(
-    asset::ResourceManager& resources,
-    const player::ItemRegistry& item_registry,
-    asset::TextureAtlasBuildOptions options = {.max_page_size = 1024, .max_pages = 1, .padding = 2});
 
 [[nodiscard]] EntityRenderAssetsResult build_entity_render_assets(
     asset::ResourceManager& resources,

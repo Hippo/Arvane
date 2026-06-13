@@ -1,5 +1,6 @@
 #include "desktop_render_builders.hpp"
 
+#include "arv/client/item_rendering.hpp"
 #include "arv/render/render_culling.hpp"
 
 #include <algorithm>
@@ -9,50 +10,6 @@
 
 namespace arv::desktop {
 namespace {
-
-[[nodiscard]] Quatf camera_basis_rotation(
-    Vec3f right,
-    Vec3f up,
-    Vec3f forward) noexcept {
-  const f32 m00 = right.x;
-  const f32 m01 = up.x;
-  const f32 m02 = forward.x;
-  const f32 m10 = right.y;
-  const f32 m11 = up.y;
-  const f32 m12 = forward.y;
-  const f32 m20 = right.z;
-  const f32 m21 = up.z;
-  const f32 m22 = forward.z;
-  const f32 trace = m00 + m11 + m22;
-
-  if (trace > 0.0F) {
-    const f32 scale = std::sqrt(trace + 1.0F) * 2.0F;
-    return normalize_quat({(m21 - m12) / scale,
-                           (m02 - m20) / scale,
-                           (m10 - m01) / scale,
-                           0.25F * scale});
-  }
-  if (m00 > m11 && m00 > m22) {
-    const f32 scale = std::sqrt(1.0F + m00 - m11 - m22) * 2.0F;
-    return normalize_quat({0.25F * scale,
-                           (m01 + m10) / scale,
-                           (m02 + m20) / scale,
-                           (m21 - m12) / scale});
-  }
-  if (m11 > m22) {
-    const f32 scale = std::sqrt(1.0F + m11 - m00 - m22) * 2.0F;
-    return normalize_quat({(m01 + m10) / scale,
-                           0.25F * scale,
-                           (m12 + m21) / scale,
-                           (m02 - m20) / scale});
-  }
-
-  const f32 scale = std::sqrt(1.0F + m22 - m00 - m11) * 2.0F;
-  return normalize_quat({(m02 + m20) / scale,
-                         (m12 + m21) / scale,
-                         0.25F * scale,
-                         (m10 - m01) / scale});
-}
 
 [[nodiscard]] f32 approach(f32 current, f32 target, f32 step) noexcept {
   if (current < target) {
@@ -115,25 +72,6 @@ namespace {
           (BaseBackOffset + SneakBackOffset * sneak_progress);
   position.y -= EyeToBodyOriginY;
   return position;
-}
-
-void append_item_draw(
-    render::FramePacket& frame,
-    const EntityRenderAssets& entity_render_assets,
-    player::ItemStack stack,
-    Vec3f position,
-    Quatf rotation,
-    f32 scale) {
-  const auto model = entity_render_assets.model_by_item.find(stack.item);
-  if (model == entity_render_assets.model_by_item.end()) {
-    return;
-  }
-  render::EntityDrawItem item;
-  item.model_id = model->second;
-  item.position = position;
-  item.rotation = rotation;
-  item.scale = scale;
-  frame.entities.push_back(std::move(item));
 }
 
 [[nodiscard]] render::SkyUniforms sky_uniforms_from_clock(
@@ -347,23 +285,12 @@ void populate_world_frame_draw_items(
 
   const std::vector<client::DroppedItemMirror> dropped_items =
       session.client->dropped_item_mirrors();
-  for (usize dropped_index = 0; dropped_index < dropped_items.size(); ++dropped_index) {
-    const client::DroppedItemMirror& dropped = dropped_items[dropped_index];
-    if (dropped.world_id != frame.world_view.world_id || dropped.stack.count == 0U) {
-      continue;
-    }
-    const f32 phase =
-        entity_animation_time * 2.75F + static_cast<f32>(dropped_index) * 0.37F;
-    append_item_draw(
-        frame,
-        entity_render_assets,
-        dropped.stack,
-        {dropped.render_position.x,
-         dropped.render_position.y + 0.42F + std::sin(phase) * 0.055F,
-         dropped.render_position.z},
-        yaw_rotation(entity_animation_time * 1.8F + static_cast<f32>(dropped_index)),
-        0.42F);
-  }
+  client::append_dropped_item_draws(
+      frame,
+      entity_render_assets,
+      dropped_items,
+      frame.world_view.world_id,
+      entity_animation_time);
 
   const protocol::BlockBreakProgress& block_break =
       session.client->block_break_progress();
@@ -415,33 +342,16 @@ void populate_world_frame_draw_items(
     return;
   }
 
-  const render::CameraSnapshot& camera = frame.camera;
-  constexpr f32 HalfPi = PiRadians * 0.5F;
   const f32 animation_time_seconds =
       std::chrono::duration<f32>(now - app_start_time).count();
   const client::HeldItemAnimationPose animation_pose =
       session.held_item_animation.sample(animation_time_seconds);
-  // Animation position is local held-item space: X right, Y up, Z forward.
-  const Vec3f held_position =
-      camera.position + camera.forward * (0.70F + animation_pose.position.z) +
-      camera.right * (0.34F + animation_pose.position.x) -
-      camera.up * (0.30F - animation_pose.position.y);
-  const Quatf base_rotation = multiply_quat(
-      camera_basis_rotation(camera.right, camera.up, camera.forward),
-      yaw_rotation(-HalfPi));
-  const Quatf held_rotation = multiply_quat(
-      base_rotation,
-      euler_degrees_rotation(animation_pose.rotation_degrees));
-  const f32 animation_scale = std::max(
-      (animation_pose.scale.x + animation_pose.scale.y + animation_pose.scale.z) / 3.0F,
-      0.0F);
-  append_item_draw(
+  client::append_held_item_draw(
       frame,
       entity_render_assets,
       held_stack.value(),
-      held_position,
-      held_rotation,
-      0.42F * animation_scale);
+      frame.camera,
+      animation_pose);
 }
 
 } // namespace arv::desktop
