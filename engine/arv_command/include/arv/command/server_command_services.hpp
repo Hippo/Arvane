@@ -197,6 +197,7 @@ using SaveAllFn = FunctionRef<SaveAllCommandResult(bool)>;
 using CreateExplosionFn =
     FunctionRef<ExplosionCommandResult(const ExplosionCommandRequest&)>;
 using BroadcastSystemMessageFn = FunctionRef<bool(std::string_view)>;
+using SendPrivateMessageFn = FunctionRef<bool(SessionID, std::string_view)>;
 using KickPlayerFn = FunctionRef<bool(PlayerID, std::string_view)>;
 using DebugStatsFn = FunctionRef<DebugCommandStats(WorldID)>;
 using PlayerSelectionByIDFn =
@@ -247,6 +248,7 @@ struct ServerCommandServices {
   SaveAllFn save_all{};
   CreateExplosionFn create_explosion{};
   BroadcastSystemMessageFn broadcast_system_message{};
+  SendPrivateMessageFn send_private_message{};
   KickPlayerFn kick_player{};
   DebugStatsFn debug_stats{};
   PlayerSelectionByIDFn player_selection_by_id{};

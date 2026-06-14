@@ -16,7 +16,7 @@ constexpr std::string_view TeleportPermission = ids::TeleportPermissionNode;
 
 [[nodiscard]] command::CommandResult usage_error(const command::CommandCtx& ctx) {
   return command::CommandResult::usage_error(
-      arv::text::text_or_fallback(ctx.services.language, "command.tp.usage", "Usage: /tp [target] <x> <y> <z>."));
+      arv::text::text_or_fallback(ctx.services.language, "command.tp.usage", "Usage: /tp [target] <x> <y> <z> or /tp <target_player> <destination_player>."));
 }
 
 [[nodiscard]] std::string format_position(Vec3f position) {
@@ -77,17 +77,65 @@ named_target(
   if (services == nullptr ||
       !services->online_player_by_id ||
       !services->online_player_by_name ||
-      !services->teleport_player) {
+      !services->teleport_player ||
+      !services->teleport_player_location) {
     return command::CommandResult::internal_error(arv::text::text_or_fallback(ctx.services.language,
         "command.tp.services_unavailable",
         "Server command services are unavailable."));
   }
 
-  if (ctx.args.size() != 3U && ctx.args.size() != 4U) {
+  if (ctx.args.size() != 2U && ctx.args.size() != 3U && ctx.args.size() != 4U) {
     return usage_error(ctx);
   }
 
   command::CommandArgReader args = ctx.reader();
+  if (ctx.args.size() == 2U) {
+    auto target_name = args.read_token("target player");
+    if (!target_name) {
+      return target_name.error();
+    }
+    Expected<OnlinePlayerCommandTarget, command::CommandResult> target =
+        named_target(ctx, *services, target_name.value());
+    if (!target) {
+      return target.error();
+    }
+
+    auto destination_name = args.read_token("destination player");
+    if (!destination_name) {
+      return destination_name.error();
+    }
+    Expected<OnlinePlayerCommandTarget, command::CommandResult> destination =
+        named_target(ctx, *services, destination_name.value());
+    if (!destination) {
+      return destination.error();
+    }
+
+    auto end = args.expect_end();
+    if (!end) {
+      return end.error();
+    }
+
+    const Location destination_location = location_from_position(
+        destination.value().position,
+        destination.value().yaw_radians,
+        destination.value().pitch_radians,
+        destination.value().world_id);
+    if (!services->teleport_player_location(
+            target.value().player_id,
+            destination_location)) {
+      return command::CommandResult::failure(
+          arv::text::text_or_fallback(ctx.services.language, "command.tp.unable_to_teleport", "Unable to teleport player."));
+    }
+
+    return command::CommandResult::success(arv::text::format_or_fallback(
+        ctx.services.language,
+        "command.tp.success_to_player",
+        {{"name", target.value().display_name},
+         {"destination", destination.value().display_name},
+         {"position", format_position(destination.value().position)}},
+        "Teleported {name} to {destination}."));
+  }
+
   Expected<OnlinePlayerCommandTarget, command::CommandResult> target =
       Expected<OnlinePlayerCommandTarget, command::CommandResult>::failure(
           usage_error(ctx));
@@ -139,8 +187,25 @@ void register_tp_command(command::CommandRegistry& registry) {
   tp.name = "player.teleport";
   tp.domain = command::CommandDomain::ServerBound;
   tp.permission = std::string{TeleportPermission};
-  tp.description = "Teleports an online player to a position.";
-  tp.usage = "/tp [target] <x> <y> <z>";
+  tp.description = "Teleports an online player to a position or another player.";
+  tp.usage = "/tp [target] <x> <y> <z>\n/tp <target_player> <destination_player>";
+  tp.arguments = {
+      {"target",
+       command::CommandArgumentType::String,
+       false,
+       false,
+       {},
+       "Online player name or @s."},
+      {"destination",
+       command::CommandArgumentType::String,
+       true,
+       false,
+       {},
+       "Coordinates or online destination player."},
+  };
+  tp.technical_notes =
+      "Uses ServerCommandServices to resolve online players and performs server-authoritative teleports.";
+  tp.examples = {"/tp ~ ~5 ~", "/tp local_player 10 20 -30", "/tp @s @s"};
   tp.execute = execute_tp;
 
   const auto command_result = registry.register_command(std::move(tp));

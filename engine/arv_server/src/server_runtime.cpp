@@ -1782,6 +1782,15 @@ command::CommandResult ServerRuntimeImpl::execute_command(
     broadcast_system_message(arv::text::plain_rich_text(std::string{message}));
     return true;
   };
+  auto send_private_message = [this](SessionID session_id, std::string_view message) {
+    const ServerSession* session = sessions_.find(session_id);
+    if (session == nullptr || !transport_) {
+      return false;
+    }
+    return this->send_private_message(
+        *session,
+        arv::text::plain_rich_text(std::string{message}));
+  };
   auto kick_player = [this](PlayerID player_id, std::string_view reason) {
     for (const SessionID session_id : sessions_.session_ids()) {
       const ServerSession* session = sessions_.find(session_id);
@@ -1854,6 +1863,8 @@ command::CommandResult ServerRuntimeImpl::execute_command(
       command::CreateExplosionFn{create_explosion};
   domain_services.broadcast_system_message =
       command::BroadcastSystemMessageFn{broadcast_message};
+  domain_services.send_private_message =
+      command::SendPrivateMessageFn{send_private_message};
   domain_services.kick_player = command::KickPlayerFn{kick_player};
   domain_services.debug_stats = command::DebugStatsFn{debug_stats};
   domain_services.player_selection_by_id = command::PlayerSelectionByIDFn{get_selection};

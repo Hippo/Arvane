@@ -2,6 +2,7 @@
 #include "arv/base/base_commands.hpp"
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
+#include "arv/base/command_services.hpp"
 #include "arv/command/command_system.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/permissions.hpp"
@@ -19,6 +20,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -650,6 +652,88 @@ TEST(CommandTests, PlayerTeleportUsesPermissionAndRelativeCoordinates) {
   EXPECT_EQ(player.position, (arv::Vec3f{1.0F, 7.0F, -4.0F}));
 }
 
+TEST(CommandTests, TeleportCanMoveTargetPlayerToDestinationPlayer) {
+  arv::command::CommandRegistry registry;
+  arv::base::register_server_commands(registry);
+
+  const std::vector<arv::command::OnlinePlayerCommandTarget> players{
+      {arv::SessionID{1},
+       arv::PlayerID{11},
+       arv::WorldID{1},
+       "Alice",
+       {1.0F, 2.0F, 3.0F},
+       0.0F,
+       0.0F},
+      {arv::SessionID{2},
+       arv::PlayerID{12},
+       arv::WorldID{1},
+       "Bob",
+       {8.0F, 9.0F, 10.0F},
+       1.25F,
+       -0.5F},
+  };
+  auto by_id = [&players](arv::PlayerID player_id) {
+    for (const auto& player : players) {
+      if (player.player_id == player_id) {
+        return std::optional<arv::command::OnlinePlayerCommandTarget>{player};
+      }
+    }
+    return std::optional<arv::command::OnlinePlayerCommandTarget>{};
+  };
+  auto by_name = [&players](std::string_view name) {
+    for (const auto& player : players) {
+      if (player.display_name == name) {
+        return std::optional<arv::command::OnlinePlayerCommandTarget>{player};
+      }
+    }
+    return std::optional<arv::command::OnlinePlayerCommandTarget>{};
+  };
+  bool coordinate_teleport_called = false;
+  auto teleport_player = [&coordinate_teleport_called](arv::PlayerID, arv::Vec3f) {
+    coordinate_teleport_called = true;
+    return false;
+  };
+  std::optional<arv::PlayerID> teleported_player;
+  std::optional<arv::Location> teleported_location;
+  auto teleport_player_location =
+      [&teleported_player, &teleported_location](
+          arv::PlayerID player_id,
+          arv::Location location) {
+        teleported_player = player_id;
+        teleported_location = location;
+        return true;
+      };
+
+  arv::command::ServerCommandServices domain_services;
+  domain_services.online_player_by_id =
+      arv::command::OnlinePlayerByIDFn{by_id};
+  domain_services.online_player_by_name =
+      arv::command::OnlinePlayerByNameFn{by_name};
+  domain_services.teleport_player =
+      arv::command::TeleportPlayerFn{teleport_player};
+  domain_services.teleport_player_location =
+      arv::command::TeleportPlayerLocationFn{teleport_player_location};
+
+  arv::command::CommandServices services;
+  services.domain_services = &domain_services;
+  arv::command::CommandSender sender = arv::server::server_console_command_sender();
+  const arv::command::CommandResult result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      sender,
+      services,
+      "/tp Alice Bob");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_FALSE(coordinate_teleport_called);
+  ASSERT_TRUE(teleported_player.has_value());
+  EXPECT_EQ(teleported_player.value(), arv::PlayerID{11});
+  ASSERT_TRUE(teleported_location.has_value());
+  EXPECT_EQ(arv::location_position(teleported_location.value()), (arv::Vec3f{8.0F, 9.0F, 10.0F}));
+  EXPECT_FLOAT_EQ(teleported_location->yaw_radians, 1.25F);
+  EXPECT_FLOAT_EQ(teleported_location->pitch_radians, -0.5F);
+}
+
 TEST(CommandTests, PlayerTeleportIsDeniedWithoutPermission) {
   RunningServerHarness harness;
   arv::player::PlayerState& player = connected_player(harness.server);
@@ -795,6 +879,21 @@ TEST(CommandTests, ServerboundChatCommandExecutesThroughPermissions) {
   EXPECT_TRUE(client_chat_contains(harness.client, "Set game mode to creative."));
 }
 
+TEST(CommandTests, ServerboundMsgCommandSendsPrivateMessage) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.permission_overrides.custom_overrides[
+      std::string{arv::base::ids::MsgPermissionNode}] =
+      arv::player::TriState::Allow;
+
+  submit_chat_text(harness.client, "/msg @s hello there");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_TRUE(client_chat_contains(harness.client, "[local_player -> you] hello there"));
+  EXPECT_TRUE(client_chat_contains(harness.client, "Message sent to local_player."));
+}
+
 TEST(CommandTests, PlayerGamemodeCommandIsDeniedWithoutModePermission) {
   RunningServerHarness harness;
   arv::player::PlayerState& player = connected_player(harness.server);
@@ -822,6 +921,17 @@ TEST(CommandTests, ServerboundChatCommandDeniesWithoutPermission) {
   EXPECT_EQ(player.game_mode_id, arv::base::ids::SurvivalGameModeID);
   EXPECT_TRUE(client_chat_contains(harness.client, "No permission"));
   EXPECT_FALSE(client_chat_contains(harness.client, "arvane.command.gamemode.creative"));
+}
+
+TEST(CommandTests, ServerboundMsgCommandIsDeniedWithoutPermission) {
+  RunningServerHarness harness;
+
+  submit_chat_text(harness.client, "/msg @s hello there");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_TRUE(client_chat_contains(harness.client, "No permission"));
+  EXPECT_FALSE(client_chat_contains(harness.client, "[local_player -> you] hello there"));
 }
 
 TEST(CommandTests, ServerboundChatCommandOmitsBlankPermissionDeniedMessage) {

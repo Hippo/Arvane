@@ -519,6 +519,9 @@ struct ServerRuntimeImpl {
       const ServerSession& receiver,
       const ServerSession& subject);
   void broadcast_player_profile_info(const ServerSession& subject);
+  [[nodiscard]] bool send_private_message(
+      const ServerSession& recipient,
+      arv::text::RichText message);
   void send_system_message(const ServerSession& recipient, arv::text::RichText message);
   void send_error_message(const ServerSession& recipient, arv::text::RichText message);
   void broadcast_system_message(arv::text::RichText message);

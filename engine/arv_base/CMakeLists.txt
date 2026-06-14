@@ -72,6 +72,7 @@ add_library(arv_base STATIC
   src/gameplay/block_break_registration.cpp
   src/items/item_behavior_registration.cpp
   src/gameplay/starter_inventory.cpp
+  src/msg_command.cpp
   src/selection_command.cpp
   src/spawn_command.cpp
   src/gamemodes/gamemode_registration.cpp

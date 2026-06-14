@@ -280,13 +280,21 @@ command:
     wrong_domain: "Command is not available in this domain: {command}."
     no_executor: "Command has no executor: {command}."
   tp:
-    usage: "Usage: /tp [target] <x> <y> <z>."
+    usage: "Usage: /tp [target] <x> <y> <z> or /tp <target_player> <destination_player>."
     console_requires_target: Teleport from server console requires an explicit target.
     sender_not_online: Command sender is not an online player.
     unknown_player: "Unknown online player: {name}."
     services_unavailable: Server command services are unavailable.
     unable_to_teleport: Unable to teleport player.
     success: Teleported {name} to {position}.
+    success_to_player: Teleported {name} to {destination}.
+  msg:
+    usage: "Usage: /msg <player> <message>."
+    player_required: Private messages require an online player sender.
+    unknown_player: "Unknown online player: {name}."
+    services_unavailable: Server command services are unavailable.
+    unable_to_send: Unable to send private message.
+    sent: Message sent to {name}.
   spawn:
     usage: "Usage: /spawn."
     player_required: This command requires an online player sender.

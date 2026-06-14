@@ -2702,6 +2702,36 @@ void ServerRuntimeImpl::send_system_message(
   log_send_failure_if_dedicated(mode_, recipient.connection_id, send_result);
 }
 
+bool ServerRuntimeImpl::send_private_message(
+    const ServerSession& recipient,
+    arv::text::RichText message) {
+  if (recipient.closing ||
+      recipient.connection_state == net::ConnectionState::Disconnected ||
+      recipient.connection_state == net::ConnectionState::Disconnecting ||
+      !recipient.authenticated) {
+    return false;
+  }
+  const arv::text::RichTextValidation validation = arv::text::validate_rich_text(message);
+  if (!validation.valid) {
+    core::warn("chat", "refusing to send invalid private chat: {}", validation.message);
+    return false;
+  }
+  const protocol::ClientboundChatMessage packet{
+      next_chat_message_id_++,
+      "arvane:system",
+      protocol::ChatMessageKind::PrivateMessage,
+      std::move(message)};
+  const net::NetworkResult send_result = send_protocol_message(
+      *transport_,
+      recipient.connection_id,
+      protocol::MessageType::ClientboundChatMessage,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_clientbound_chat_message(packet));
+  log_send_failure_if_dedicated(mode_, recipient.connection_id, send_result);
+  return static_cast<bool>(send_result);
+}
+
 void ServerRuntimeImpl::send_error_message(
     const ServerSession& recipient,
     arv::text::RichText message) {
