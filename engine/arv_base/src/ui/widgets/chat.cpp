@@ -470,6 +470,7 @@ void append_chat_ui(UiTree& tree, ChatUiModel model) {
         row.layout.height_mode = UiSizeMode::Fixed;
         row.layout.width = chat_text_width;
         row.layout.height = chat_line_height;
+        row.layout.spacing = ChatLetterSpacing;
         row.style.background = {0.0F, 0.0F, 0.0F, 0.0F};
         row.hit_test = false;
         row.clip_children = true;

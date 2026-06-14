@@ -7,6 +7,7 @@
 #include "ui_model.hpp"
 
 #include "arv/client/command_chat.hpp"
+#include "arv/client/gameplay_interactions.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -159,14 +160,8 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   return bindings.empty() ? std::string{} : binding_label(bindings.front());
 }
 
-[[nodiscard]] bool local_player_is_mounted(const client::ClientRuntime& client) {
-  const std::optional<EntityNetID> local_entity = client.local_entity_id();
-  if (!local_entity.has_value()) {
-    return false;
-  }
-  const client::ReplicatedEntityMirror* mirror =
-      client.find_replicated_entity(local_entity.value());
-  return mirror != nullptr && mirror->parent_rideable.has_value();
+[[nodiscard]] bool desktop_local_player_is_mounted(const client::ClientRuntime& runtime) {
+  return client::local_player_is_mounted(runtime);
 }
 
 [[nodiscard]] u64 gameplay_ui_signature(
@@ -467,7 +462,7 @@ void DesktopFrameLoop::build_ui(
       !screens.blocks_gameplay_input() &&
       !active_session->client->inventory_open() &&
       !active_session->client->chat_open() &&
-      !local_player_is_mounted(*active_session->client)) {
+      !desktop_local_player_is_mounted(*active_session->client)) {
     std::string key_label = mount_binding_label(input_bindings_);
     if (!key_label.empty() &&
         targeted_rideable_entity(*active_session).has_value()) {

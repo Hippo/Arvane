@@ -796,6 +796,13 @@ TEST(GameplayUiTests, BuildsRidePromptWithAccentKeyText) {
   EXPECT_EQ(prefix->text, "Press ");
   EXPECT_EQ(key->text, "F");
   EXPECT_EQ(suffix->text, " to Ride");
+  EXPECT_NEAR(key->rect.x - (prefix->rect.x + prefix->rect.width), 0.0F, 0.001F);
+  EXPECT_NEAR(suffix->rect.x - (key->rect.x + key->rect.width), 0.0F, 0.001F);
+  EXPECT_NEAR(
+      panel->rect.width,
+      prefix->rect.width + key->rect.width + suffix->rect.width +
+          tree.theme().layout.spacing_md * 2.0F,
+      0.001F);
   EXPECT_EQ(prefix->style.foreground, tree.theme().colors.text);
   EXPECT_EQ(key->style.foreground, tree.theme().colors.accent);
   EXPECT_EQ(suffix->style.foreground, tree.theme().colors.text);
@@ -910,6 +917,12 @@ TEST(GameplayUiTests, RichChatRunsExposeColorAndHitActions) {
   const auto* run_panel = tree.find_by_stable_id("chat.line.0.run.0");
   ASSERT_NE(run_panel, nullptr);
   EXPECT_EQ(run_panel->action, "chat_run");
+  const auto* separator_panel = tree.find_by_stable_id("chat.line.0.run.1");
+  ASSERT_NE(separator_panel, nullptr);
+  const arv::f32 run_gap =
+      separator_panel->rect.x - (run_panel->rect.x + run_panel->rect.width);
+  EXPECT_GT(run_gap, 0.0F);
+  EXPECT_LE(run_gap, 2.0F);
   const auto hover = tree.route_mouse_move(
       {run_panel->rect.x + 1.0F, run_panel->rect.y + 1.0F});
   ASSERT_TRUE(hover.has_value());

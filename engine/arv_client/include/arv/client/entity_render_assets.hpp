@@ -48,6 +48,7 @@ struct EntityRenderAssets {
 struct ClientEntityRenderAssets {
   player::ItemRegistry item_registry{};
   entity::EntityRegistry entity_registry{};
+  entity::VehicleDefinitionRegistry vehicle_registry{};
   EntityRenderAssets render_assets{};
 };
 

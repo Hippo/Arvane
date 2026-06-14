@@ -20,7 +20,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace arv::web {
@@ -105,39 +104,11 @@ struct WebUiVertex {
   float page{};
 };
 
-class WebUiTextMeasurer final : public ui::IUiTextMeasurer {
-public:
-  [[nodiscard]] Vec2f measure(
-      std::string_view text,
-      ui::UiTextRole role = ui::UiTextRole::Body) const override {
-    const float height = line_height(role);
-    return {
-        static_cast<float>(text.size()) * height * 0.52F,
-        height};
-  }
-
-  [[nodiscard]] float line_height(
-      ui::UiTextRole role = ui::UiTextRole::Body) const override {
-    switch (role) {
-      case ui::UiTextRole::Small:
-        return 14.0F;
-      case ui::UiTextRole::Heading:
-        return 22.0F;
-      case ui::UiTextRole::Title:
-        return 28.0F;
-      case ui::UiTextRole::Mono:
-      case ui::UiTextRole::Body:
-        break;
-    }
-    return 18.0F;
-  }
-};
-
 struct WebUiState {
   ui::UiTree tree{};
   asset::FontSystem fonts{};
   ui::UiFontStacks font_stacks{};
-  WebUiTextMeasurer text_measurer{};
+  std::optional<ui::FontUiTextMeasurer> text_measurer{};
   ui::UiTheme theme{ui::make_default_ui_theme()};
   text::LanguageCatalog language{};
   ui::UIScreenManager screen_manager{};

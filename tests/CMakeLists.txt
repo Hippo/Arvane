@@ -38,6 +38,7 @@ add_executable(arv_tests
   client/client_session_tests.cpp
   client/client_runtime_tests.cpp
   client/camera_tests.cpp
+  client/gameplay_interactions_tests.cpp
   client/gameplay_ui_model_tests.cpp
   client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp

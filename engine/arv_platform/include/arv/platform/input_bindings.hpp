@@ -102,6 +102,7 @@ ActionBindingList& bindings_for_action(InputBindings& bindings, LogicalAction ac
 [[nodiscard]] std::optional<std::string> canonical_input_code(
     InputDeviceType type,
     std::string_view code) noexcept;
+[[nodiscard]] std::string input_binding_label(const InputBinding& binding);
 [[nodiscard]] bool is_valid_input_binding(const InputBinding& binding) noexcept;
 [[nodiscard]] bool is_required_logical_action(LogicalAction action) noexcept;
 [[nodiscard]] InputBindings default_input_bindings();

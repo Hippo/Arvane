@@ -3,8 +3,8 @@
 #include "desktop_runtime_config.hpp"
 
 #include "arv/base/base_ids.hpp"
+#include "arv/client/gameplay_interactions.hpp"
 #include "arv/client/item_animation.hpp"
-#include "arv/player/player_constants.hpp"
 #include "arv/world/world_queries.hpp"
 
 #include <algorithm>
@@ -189,27 +189,7 @@ bool DesktopFrameLoop::preview_held_item_placement_succeeds(
 
 Aabb3f DesktopFrameLoop::replicated_entity_attack_bounds(
     const client::ReplicatedEntityMirror& mirror) const noexcept {
-  Vec3f box{1.0F, 1.0F, 1.0F};
-  if (const entity::EntityTypeRecord* type = assets_.entity_registry.type(mirror.entity_type);
-      type != nullptr && type->components.collision.has_value()) {
-    box = type->components.collision->box;
-  } else if (mirror.owning_player.has_value()) {
-    box = {
-        player::DefaultPlayerBodyWidth,
-        player::DefaultPlayerBodyHeight,
-        player::DefaultPlayerBodyWidth};
-  }
-
-  const f32 half_x = std::max(box.x, 0.0F) * 0.5F;
-  const f32 half_z = std::max(box.z, 0.0F) * 0.5F;
-  const f32 height = std::max(box.y, 0.0F);
-  return {
-      {mirror.position.x - half_x,
-       mirror.position.y,
-       mirror.position.z - half_z},
-      {mirror.position.x + half_x,
-       mirror.position.y + height,
-       mirror.position.z + half_z}};
+  return client::replicated_entity_interaction_bounds(mirror, assets_.entity_registry);
 }
 
 std::optional<EntityNetID> DesktopFrameLoop::targeted_attack_entity(
@@ -219,47 +199,18 @@ std::optional<EntityNetID> DesktopFrameLoop::targeted_attack_entity(
     return std::nullopt;
   }
 
-  const client::CameraShell& camera = session.client->camera();
-  const Vec3f origin = camera.position();
-  const Vec3f direction = camera.forward_vector();
-  f32 max_distance = config_.gameplay.combat.default_attack_range;
-  if (held_item != nullptr && held_item->attack_data.has_value()) {
-    max_distance = held_item->attack_data->attack_range;
-  }
-
   world::WorldCollisionQuery query(
       session.client_world,
       assets_.block_registry,
       false);
-  if (const std::optional<physics::BlockRaycastHit> block_hit = physics::raycast_blocks(
-          query,
-          origin,
-          direction,
-          max_distance);
-      block_hit.has_value() && !assets_.block_registry.is_air(block_hit->variant)) {
-    max_distance = std::min(max_distance, block_hit->distance);
-  }
-
-  std::optional<EntityNetID> best_entity;
-  f32 best_distance = max_distance;
-  const std::optional<EntityNetID> local_entity = session.client->local_entity_id();
-  for (const client::ReplicatedEntityMirror& mirror :
-       session.client->replicated_entity_mirrors()) {
-    if ((local_entity.has_value() && mirror.entity_id == local_entity.value()) ||
-        mirror.dead) {
-      continue;
-    }
-    const std::optional<physics::RayAabbHit> hit = physics::ray_intersects_aabb(
-        origin,
-        direction,
-        replicated_entity_attack_bounds(mirror),
-        best_distance);
-    if (hit.has_value() && hit->distance <= best_distance) {
-      best_distance = hit->distance;
-      best_entity = mirror.entity_id;
-    }
-  }
-  return best_entity;
+  return client::targeted_attack_entity(
+      {*session.client,
+       query,
+       assets_.block_registry,
+       assets_.entity_registry,
+       assets_.vehicle_registry},
+      held_item,
+      config_.gameplay.combat.default_attack_range);
 }
 
 std::optional<EntityNetID> DesktopFrameLoop::targeted_rideable_entity(
@@ -268,73 +219,55 @@ std::optional<EntityNetID> DesktopFrameLoop::targeted_rideable_entity(
     return std::nullopt;
   }
 
-  const client::CameraShell& camera = session.client->camera();
-  const Vec3f origin = camera.position();
-  const Vec3f direction = camera.forward_vector();
-  f32 max_distance = config_.physics.reach_distance + 1.5F;
-
   world::WorldCollisionQuery query(
       session.client_world,
       assets_.block_registry,
       false);
-  if (const std::optional<physics::BlockRaycastHit> block_hit = physics::raycast_blocks(
-          query,
-          origin,
-          direction,
-          max_distance);
-      block_hit.has_value() && !assets_.block_registry.is_air(block_hit->variant)) {
-    max_distance = std::min(max_distance, block_hit->distance);
-  }
-
-  std::optional<EntityNetID> best_entity;
-  f32 best_distance = max_distance;
-  const std::optional<EntityNetID> local_entity = session.client->local_entity_id();
-  for (const client::ReplicatedEntityMirror& mirror :
-       session.client->replicated_entity_mirrors()) {
-    if ((local_entity.has_value() && mirror.entity_id == local_entity.value()) ||
-        mirror.dead) {
-      continue;
-    }
-    const entity::EntityTypeRecord* type =
-        assets_.entity_registry.type(mirror.entity_type);
-    const bool type_is_rideable =
-        type != nullptr && type->components.rideable.has_value();
-    const bool definition_is_rideable =
-        assets_.vehicle_registry.find(mirror.entity_type_name) != nullptr;
-    if (!type_is_rideable && !definition_is_rideable) {
-      continue;
-    }
-    const std::optional<physics::RayAabbHit> hit = physics::ray_intersects_aabb(
-        origin,
-        direction,
-        replicated_entity_attack_bounds(mirror),
-        best_distance);
-    if (hit.has_value() && hit->distance <= best_distance) {
-      best_distance = hit->distance;
-      best_entity = mirror.entity_id;
-    }
-  }
-  return best_entity;
+  return client::targeted_rideable_entity(
+      {*session.client,
+       query,
+       assets_.block_registry,
+       assets_.entity_registry,
+       assets_.vehicle_registry},
+      config_.physics.reach_distance + 1.5F);
 }
 
 bool DesktopFrameLoop::send_local_ride_request_if_targeted(
     DesktopGameSession& session) const {
-  const std::optional<EntityNetID> target = targeted_rideable_entity(session);
-  if (!target.has_value()) {
+  if (session.client == nullptr) {
     return false;
   }
-  return static_cast<bool>(session.client->request_ride_entity(target.value()));
+  world::WorldCollisionQuery query(
+      session.client_world,
+      assets_.block_registry,
+      false);
+  return client::request_ride_entity_if_targeted(
+      *session.client,
+      query,
+      assets_.block_registry,
+      assets_.entity_registry,
+      assets_.vehicle_registry,
+      config_.physics.reach_distance + 1.5F);
 }
 
 void DesktopFrameLoop::send_local_entity_attack_if_targeted(
     DesktopGameSession& session,
     const player::ItemRecord* held_item) const {
-  const std::optional<EntityNetID> target = targeted_attack_entity(session, held_item);
-  if (!target.has_value()) {
+  if (session.client == nullptr) {
     return;
   }
-  (void)session.client->request_attack_entity(target.value());
-  (void)session.client->drain_attack_feedback();
+  world::WorldCollisionQuery query(
+      session.client_world,
+      assets_.block_registry,
+      false);
+  (void)client::request_attack_entity_if_targeted(
+      *session.client,
+      query,
+      assets_.block_registry,
+      assets_.entity_registry,
+      assets_.vehicle_registry,
+      held_item,
+      config_.gameplay.combat.default_attack_range);
 }
 
 bool DesktopFrameLoop::held_item_animation_condition_passes(

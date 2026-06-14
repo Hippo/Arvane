@@ -222,6 +222,31 @@ bool is_valid_input_binding(const InputBinding& binding) noexcept {
   return canonical_input_code(binding.device_type, binding.input_code).has_value();
 }
 
+std::string input_binding_label(const InputBinding& binding) {
+  std::string label;
+  if (has_input_modifier(binding.modifiers, InputModifier::Control)) {
+    label += "Ctrl + ";
+  }
+  if (has_input_modifier(binding.modifiers, InputModifier::Shift)) {
+    label += "Shift + ";
+  }
+  if (has_input_modifier(binding.modifiers, InputModifier::Alt)) {
+    label += "Alt + ";
+  }
+  switch (binding.device_type) {
+    case InputDeviceType::Keyboard:
+      label += binding.input_code;
+      break;
+    case InputDeviceType::MouseButton:
+      label += "Mouse " + binding.input_code;
+      break;
+    case InputDeviceType::MouseWheel:
+      label += "Wheel " + binding.input_code;
+      break;
+  }
+  return label;
+}
+
 bool is_required_logical_action(LogicalAction action) noexcept {
   switch (action) {
     case LogicalAction::MoveForward:

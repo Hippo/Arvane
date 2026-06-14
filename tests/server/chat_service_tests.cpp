@@ -49,6 +49,8 @@ TEST(ServerChatTests, FormatterBuildsRichTextWithPlayerInteractions) {
   const std::vector<arv::text::RichTextRun> runs =
       arv::text::flatten_rich_text(rich);
   ASSERT_GE(runs.size(), 3U);
+  EXPECT_EQ(runs[1].text, ": ");
+  EXPECT_EQ(runs[2].text, "hello");
   ASSERT_TRUE(runs.front().click_event.has_value());
   EXPECT_EQ(runs.front().click_event->action, arv::text::ClickAction::SuggestCommand);
   EXPECT_EQ(runs.front().click_event->value, "/msg Hippo ");

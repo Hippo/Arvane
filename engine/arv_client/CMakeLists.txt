@@ -12,6 +12,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/client_runtime.hpp
   include/arv/client/dropped_item_mirror.hpp
   include/arv/client/entity_render_assets.hpp
+  include/arv/client/gameplay_interactions.hpp
   include/arv/client/gameplay_ui_model.hpp
   include/arv/client/item_animation.hpp
   include/arv/client/item_rendering.hpp
@@ -173,6 +174,7 @@ add_library(arv_client_runtime STATIC
   src/client_runtime.cpp
   src/client_skin_runtime.cpp
   src/client_ui_state.cpp
+  src/gameplay_interactions.cpp
   src/gameplay_ui_model.cpp
   src/local_identity.cpp
   src/particles.cpp

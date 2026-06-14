@@ -8,6 +8,7 @@
 #include "arv/client/chunk_snapshot.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/entity_render_assets.hpp"
+#include "arv/client/gameplay_interactions.hpp"
 #include "arv/client/item_animation.hpp"
 #include "arv/client/item_rendering.hpp"
 #include "arv/client/item_ui_model.hpp"
@@ -235,6 +236,7 @@ void destroy_font_texture() {
 
 void clear_web_ui_assets() {
   destroy_font_texture();
+  g_app.ui.text_measurer.reset();
   g_app.ui.fonts = arv::asset::FontSystem{};
   g_app.ui.font_stacks = {};
   g_app.ui.ready = false;
@@ -1330,6 +1332,9 @@ void load_web_language(const arv::asset::PackManager& packs) {
   upload_entity_models(loaded_assets.value().render_assets);
 
   g_app.entity_assets.loaded = std::move(loaded_assets.value());
+  if (g_app.session != nullptr) {
+    g_app.session->configure_vehicles(&g_app.entity_assets.loaded.vehicle_registry);
+  }
   g_app.entity_assets.item_animation_library = std::move(item_animation_library.value());
   g_app.entity_assets.item_atlas = std::move(item_atlas.value());
   g_app.entity_assets.registry_snapshot_json = *registry_snapshot;
@@ -1439,6 +1444,82 @@ void apply_bone_rotation_overrides(
       g_app.session->inventory(),
       g_app.session->selected_hotbar_slot(),
       g_app.entity_assets.loaded.item_registry);
+}
+
+[[nodiscard]] std::string action_binding_label(
+    arv::platform::LogicalAction action) {
+  const arv::platform::ActionBindingList& bindings =
+      arv::platform::bindings_for_action(g_app.input_bindings, action);
+  return bindings.empty()
+             ? std::string{}
+             : arv::platform::input_binding_label(bindings.front());
+}
+
+[[nodiscard]] bool web_entity_interactions_available() noexcept {
+  return g_app.session != nullptr &&
+         g_app.block_assets.ready &&
+         g_app.entity_assets.ready;
+}
+
+[[nodiscard]] arv::f32 web_default_attack_range() noexcept {
+  return arv::io::GameplayConfig{}.combat.default_attack_range;
+}
+
+[[nodiscard]] arv::f32 web_ride_target_range() noexcept {
+  return arv::player::DefaultReachDistance + 1.5F;
+}
+
+[[nodiscard]] std::optional<arv::EntityNetID> targeted_web_rideable_entity() {
+  if (!web_entity_interactions_available()) {
+    return std::nullopt;
+  }
+  const arv::client::ChunkSectionCollisionQuery query(
+      g_app.chunk_sections,
+      g_app.block_assets.loaded.block_registry);
+  return arv::client::targeted_rideable_entity(
+      {*g_app.session,
+       query,
+       g_app.block_assets.loaded.block_registry,
+       g_app.entity_assets.loaded.entity_registry,
+       g_app.entity_assets.loaded.vehicle_registry},
+      web_ride_target_range());
+}
+
+void send_web_entity_interactions_from_input(
+    const arv::client::InputFrame& input,
+    arv::Seconds now_seconds) {
+  if (!web_entity_interactions_available() ||
+      g_app.ui.screen_manager.blocks_gameplay_input() ||
+      g_app.session->inventory_open() ||
+      g_app.session->chat_open()) {
+    return;
+  }
+
+  const arv::client::ChunkSectionCollisionQuery query(
+      g_app.chunk_sections,
+      g_app.block_assets.loaded.block_registry);
+  if (input.primary_pressed) {
+    (void)arv::client::request_attack_entity_if_targeted(
+        *g_app.session,
+        query,
+        g_app.block_assets.loaded.block_registry,
+        g_app.entity_assets.loaded.entity_registry,
+        g_app.entity_assets.loaded.vehicle_registry,
+        selected_web_held_item(),
+        web_default_attack_range());
+  }
+  if (input.mount_pressed &&
+      !arv::client::local_player_is_mounted(*g_app.session) &&
+      arv::client::request_ride_entity_if_targeted(
+          *g_app.session,
+          query,
+          g_app.block_assets.loaded.block_registry,
+          g_app.entity_assets.loaded.entity_registry,
+          g_app.entity_assets.loaded.vehicle_registry,
+          web_ride_target_range())) {
+    g_app.input.held_item_secondary_use_active = false;
+    g_app.input.held_item_animation.stop(now_seconds);
+  }
 }
 
 void update_held_item_animation_from_input(
@@ -2159,6 +2240,10 @@ void draw_ui_frame(const arv::render::FramePacket& frame) {
     return false;
   }
   g_app.ui.font_framebuffer_scale = framebuffer_scale;
+  g_app.ui.text_measurer.emplace(
+      g_app.ui.fonts,
+      g_app.ui.font_stacks,
+      framebuffer_scale);
   g_app.ui.ready = true;
   return true;
 }
@@ -2217,6 +2302,22 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
                 static_cast<float>(g_app.input.cursor_x),
                 static_cast<float>(g_app.input.cursor_y)}
           : arv::Vec2f{viewport.x * 0.5F, viewport.y * 0.5F};
+
+  arv::ui::RidePromptModel ride_prompt;
+  if (web_entity_interactions_available() &&
+      !g_app.ui.screen_manager.blocks_gameplay_input() &&
+      !g_app.session->inventory_open() &&
+      !g_app.session->chat_open() &&
+      !arv::client::local_player_is_mounted(*g_app.session)) {
+    std::string key_label =
+        action_binding_label(arv::platform::LogicalAction::Mount);
+    if (!key_label.empty() && targeted_web_rideable_entity().has_value()) {
+      ride_prompt.visible = true;
+      ride_prompt.key_label = std::move(key_label);
+      ride_prompt.viewport = viewport;
+    }
+  }
+
   arv::ui::GameplayUiModel model =
       arv::client::build_gameplay_ui_model(
           {
@@ -2234,6 +2335,7 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
               .tab_title = "Players",
               .viewport = viewport,
               .cursor_position = cursor_position,
+              .ride_prompt = std::move(ride_prompt),
               .debug_fps_visible = false,
           });
 
@@ -2244,7 +2346,9 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
     context.viewport = viewport;
     g_app.ui.screen_manager.append_to(context);
   }
-  g_app.ui.tree.layout_with_metrics(metrics, &g_app.ui.text_measurer);
+  g_app.ui.tree.layout_with_metrics(
+      metrics,
+      g_app.ui.text_measurer.has_value() ? &g_app.ui.text_measurer.value() : nullptr);
   arv::render::FramePacket frame;
   arv::ui::append_ui_draw_commands(
       g_app.ui.tree,
@@ -2784,6 +2888,9 @@ void submit_web_input_and_tick_runtime(double now) {
   arv::client::InputFrame animation_input = input;
   animation_input.primary_pressed = g_app.input.primary_animation_pressed;
   animation_input.secondary_pressed = g_app.input.secondary_animation_pressed;
+  const arv::Seconds gameplay_time_seconds =
+      static_cast<arv::Seconds>(now - g_app.start_time);
+  send_web_entity_interactions_from_input(input, gameplay_time_seconds);
   g_app.session->submit_input(std::move(input));
   const bool wants_cursor_after = ui_wants_cursor();
   if (wants_cursor_after) {
@@ -2793,7 +2900,7 @@ void submit_web_input_and_tick_runtime(double now) {
   }
   update_held_item_animation_from_input(
       animation_input,
-      static_cast<arv::Seconds>(now - g_app.start_time));
+      gameplay_time_seconds);
   clear_per_frame_input_edges();
 
   g_app.session->advance_entity_interpolation(static_cast<arv::Seconds>(dt_seconds));

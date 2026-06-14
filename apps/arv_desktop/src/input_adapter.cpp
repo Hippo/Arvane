@@ -90,28 +90,7 @@ ui::InputBindingDevice ui_device_from(platform::InputDeviceType type) noexcept {
 }
 
 std::string binding_label(const platform::InputBinding& binding) {
-  std::string label;
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Control)) {
-    label += "Ctrl + ";
-  }
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Shift)) {
-    label += "Shift + ";
-  }
-  if (platform::has_input_modifier(binding.modifiers, platform::InputModifier::Alt)) {
-    label += "Alt + ";
-  }
-  switch (binding.device_type) {
-    case platform::InputDeviceType::Keyboard:
-      label += binding.input_code;
-      break;
-    case platform::InputDeviceType::MouseButton:
-      label += "Mouse " + binding.input_code;
-      break;
-    case platform::InputDeviceType::MouseWheel:
-      label += "Wheel " + binding.input_code;
-      break;
-  }
-  return label;
+  return platform::input_binding_label(binding);
 }
 
 ui::CapturedInputView captured_input_from(const platform::RawInputEvent& event) {
