@@ -4,6 +4,7 @@
 
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/base/ui.hpp"
+#include "arv/client/block_outline_target.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/item_animation.hpp"
 #include "arv/client/particles.hpp"
@@ -42,10 +43,7 @@ class LanguageCatalog;
 
 namespace arv::desktop {
 
-struct BlockOutlineTarget {
-  BlockPos block{};
-  voxel::BlockVariantID variant{};
-};
+using BlockOutlineTarget = client::BlockOutlineTarget;
 
 struct DesktopGameSession {
   explicit DesktopGameSession(TickRate base_tps);

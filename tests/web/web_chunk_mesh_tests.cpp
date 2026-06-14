@@ -1,4 +1,4 @@
-#include "web_chunk_mesh.hpp"
+#include "web_entity_fallback.hpp"
 
 #include <gtest/gtest.h>
 
@@ -41,10 +41,10 @@ void expect_near_vec3(arv::Vec3f actual, arv::Vec3f expected, float epsilon = 0.
 
 } // namespace
 
-TEST(WebChunkMeshTests, EntityMarkersBuildUprightFallbackCubes) {
+TEST(WebEntityFallbackTests, EntityMarkersBuildUprightFallbackCubes) {
   const std::array<arv::web::WebEntityMarker, 2> markers{{
-      {{4.0F, 5.0F, 6.0F}, arv::EntityTypeID{2}, 0U},
-      {{8.0F, 9.0F, 10.0F}, arv::EntityTypeID{3}, arv::protocol::EntityStateFlagHasHealth},
+      {{4.0F, 5.0F, 6.0F}, arv::EntityTypeID{2}, false},
+      {{8.0F, 9.0F, 10.0F}, arv::EntityTypeID{3}, false},
   }};
 
   const auto vertices = arv::web::build_fallback_entity_vertices(markers);
@@ -63,9 +63,9 @@ TEST(WebChunkMeshTests, EntityMarkersBuildUprightFallbackCubes) {
   }
 }
 
-TEST(WebChunkMeshTests, DeadEntityMarkersUseDistinctFallbackColor) {
+TEST(WebEntityFallbackTests, DeadEntityMarkersUseDistinctFallbackColor) {
   const std::array<arv::web::WebEntityMarker, 1> markers{{
-      {{0.0F, 0.0F, 0.0F}, arv::EntityTypeID{1}, arv::protocol::EntityStateFlagDead},
+      {{0.0F, 0.0F, 0.0F}, arv::EntityTypeID{1}, true},
   }};
 
   const auto vertices = arv::web::build_fallback_entity_vertices(markers);
@@ -74,42 +74,40 @@ TEST(WebChunkMeshTests, DeadEntityMarkersUseDistinctFallbackColor) {
   EXPECT_EQ(vertices.front().color, (arv::Vec3f{0.45F, 0.12F, 0.14F}));
 }
 
-TEST(WebChunkMeshTests, FallbackEntityMarkersHideLocalPlayerForFirstPersonView) {
-  arv::client::ClientSessionWorldJoin join;
-  join.world_id = arv::WorldID{1};
-  join.player_id = arv::PlayerID{2};
-  join.local_entity_id = arv::EntityNetID{3};
-
-  std::array<arv::client::ClientSessionEntityMirror, 4> mirrors{};
+TEST(WebEntityFallbackTests, FallbackEntityMarkersHideLocalPlayerForFirstPersonView) {
+  std::array<arv::client::ReplicatedEntityMirror, 4> mirrors{};
   mirrors[0].world_id = arv::WorldID{1};
   mirrors[0].entity_id = arv::EntityNetID{3};
   mirrors[0].entity_type = arv::EntityTypeID{10};
-  mirrors[0].position = {1.0F, 2.0F, 3.0F};
+  mirrors[0].render_position = {1.0F, 2.0F, 3.0F};
   mirrors[1].world_id = arv::WorldID{1};
   mirrors[1].entity_id = arv::EntityNetID{4};
   mirrors[1].entity_type = arv::EntityTypeID{11};
   mirrors[1].owning_player = arv::PlayerID{2};
-  mirrors[1].position = {4.0F, 5.0F, 6.0F};
+  mirrors[1].render_position = {4.0F, 5.0F, 6.0F};
   mirrors[2].world_id = arv::WorldID{1};
   mirrors[2].entity_id = arv::EntityNetID{5};
   mirrors[2].entity_type = arv::EntityTypeID{12};
   mirrors[2].owning_player = arv::PlayerID{9};
-  mirrors[2].position = {7.0F, 8.0F, 9.0F};
-  mirrors[2].state_flags = arv::protocol::EntityStateFlagHasHealth;
+  mirrors[2].render_position = {7.0F, 8.0F, 9.0F};
   mirrors[3].world_id = arv::WorldID{99};
   mirrors[3].entity_id = arv::EntityNetID{6};
   mirrors[3].entity_type = arv::EntityTypeID{13};
-  mirrors[3].position = {10.0F, 11.0F, 12.0F};
+  mirrors[3].render_position = {10.0F, 11.0F, 12.0F};
 
-  const auto markers = arv::web::build_visible_fallback_entity_markers(mirrors, join);
+  const auto markers = arv::web::build_visible_fallback_entity_markers(
+      mirrors,
+      arv::WorldID{1},
+      arv::EntityNetID{3},
+      arv::PlayerID{2});
 
   ASSERT_EQ(markers.size(), 1U);
   EXPECT_EQ(markers.front().position, (arv::Vec3f{7.0F, 8.0F, 9.0F}));
   EXPECT_EQ(markers.front().entity_type, arv::EntityTypeID{12});
-  EXPECT_EQ(markers.front().state_flags, arv::protocol::EntityStateFlagHasHealth);
+  EXPECT_FALSE(markers.front().dead);
 }
 
-TEST(WebChunkMeshTests, CameraMatricesAreColumnMajorAndFiniteForWebGlUniforms) {
+TEST(WebEntityFallbackTests, CameraMatricesAreColumnMajorAndFiniteForWebGlUniforms) {
   const arv::Mat4f identity_view =
       arv::look_at_mat4f({0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F});
   const arv::Mat4f projection =
@@ -132,7 +130,7 @@ TEST(WebChunkMeshTests, CameraMatricesAreColumnMajorAndFiniteForWebGlUniforms) {
       {1.0F, 0.0F, 0.0F});
 }
 
-TEST(WebChunkMeshTests, MouseLookRotatesFirstPersonViewWithoutMovingEye) {
+TEST(WebEntityFallbackTests, MouseLookRotatesFirstPersonViewWithoutMovingEye) {
   const arv::Vec3f eye{8.0F, 2.62F, 8.0F};
   const float yaw = 1.2F;
   const float pitch = -0.35F;

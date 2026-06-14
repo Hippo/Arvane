@@ -28,6 +28,9 @@ set(ARV_BASE_UI_HEADERS
 
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
   add_library(arv_base_ui STATIC
+    include/arv/base/ui/screens/pause_menu.hpp
+    include/arv/base/ui/screens/screen.hpp
+    include/arv/base/ui/screens/settings.hpp
     include/arv/base/ui/widgets/chat.hpp
     include/arv/base/ui/widgets/debug_hud.hpp
     include/arv/base/ui/widgets/gameplay.hpp
@@ -37,6 +40,9 @@ if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
     include/arv/base/ui/widgets/items.hpp
     include/arv/base/ui/widgets/scoreboard.hpp
     include/arv/base/ui/widgets/tab_menu.hpp
+    src/ui/screens/pause_menu.cpp
+    src/ui/screens/screen_manager.cpp
+    src/ui/screens/settings.cpp
     src/ui/widgets/chat.cpp
     src/ui/widgets/debug_hud.cpp
     src/ui/widgets/gameplay.cpp

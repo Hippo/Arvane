@@ -1,0 +1,55 @@
+#pragma once
+
+#include "arv/base/ui/widgets/gameplay.hpp"
+#include "arv/client/client_runtime.hpp"
+#include "arv/io/config.hpp"
+
+#include <chrono>
+#include <optional>
+#include <span>
+#include <string_view>
+#include <vector>
+
+namespace arv::text {
+class LanguageCatalog;
+} // namespace arv::text
+
+namespace arv::client {
+
+struct GameplayUiModelInput {
+  const ClientRuntime& client;
+  const io::UiConfig::ChatConfig& chat_config;
+  std::span<const ui::UiItemStackView> inventory_slots{};
+  std::optional<ui::UiItemStackView> carried_inventory_stack{};
+  std::span<const ui::ChatLineView> chat_lines{};
+  usize chat_history_scroll_offset{};
+  std::span<const ui::PlayerListEntryView> tab_players{};
+  std::string_view inventory_title{};
+  std::string_view tab_title{};
+  Vec2f viewport{};
+  Vec2f cursor_position{};
+  u32 displayed_fps{};
+  std::string_view hotbar_item_popup_name{};
+  f32 hotbar_item_popup_alpha{};
+  ui::RidePromptModel ride_prompt{};
+  const arv::text::LanguageCatalog* language{};
+  bool debug_fps_visible{true};
+};
+
+[[nodiscard]] usize gameplay_chat_history_max_scroll_offset(
+    usize history_size,
+    usize max_visible_messages) noexcept;
+
+[[nodiscard]] usize gameplay_chat_scroll_steps(f32 wheel_y) noexcept;
+
+void refresh_gameplay_chat_lines(
+    std::vector<ui::ChatLineView>& chat_lines,
+    const ClientRuntime& client,
+    const io::UiConfig::ChatConfig& chat_config,
+    std::chrono::steady_clock::time_point now,
+    usize& history_scroll_offset);
+
+[[nodiscard]] ui::GameplayUiModel build_gameplay_ui_model(
+    GameplayUiModelInput input);
+
+} // namespace arv::client

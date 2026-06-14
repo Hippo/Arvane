@@ -11,7 +11,10 @@ set(ARV_WEB_SHELL_FILES
 
 add_executable(arv_web
   src/main.cpp
-  src/web_chunk_mesh.cpp
+  src/web_application.cpp
+  src/web_entity_fallback.cpp
+  src/web_input.cpp
+  src/web_platform.cpp
 )
 
 target_compile_features(arv_web PRIVATE cxx_std_20)
@@ -19,15 +22,16 @@ target_link_libraries(arv_web
   PRIVATE
     arv_client_chunk_snapshot
     arv_client_chunk_collision
+    arv_client_runtime
     arv_client_item_animation
     arv_client_local_player
     arv_client_item_rendering
     arv_client_item_ui
     arv_client_render_assets
-    arv_client_session
     arv_base_ui
     arv_net
     arv_physics
+    arv_platform_input
     arv_render_mesh
     arv_ui
 )

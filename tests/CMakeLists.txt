@@ -32,11 +32,13 @@ add_executable(arv_tests
   assets/pack_tests.cpp
   base/base_behavior_tests.cpp
   blueprint/blueprint_codec_tests.cpp
+  client/block_outline_target_tests.cpp
   client/chunk_interest_tests.cpp
   client/chunk_snapshot_tests.cpp
   client/client_session_tests.cpp
   client/client_runtime_tests.cpp
   client/camera_tests.cpp
+  client/gameplay_ui_model_tests.cpp
   client/item_animation_tests.cpp
   client/local_player_controller_tests.cpp
   client/pack_sync_plan_tests.cpp

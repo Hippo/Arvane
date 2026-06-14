@@ -92,21 +92,63 @@ add_library(arv_protocol_inventory_sync STATIC
 target_include_directories(arv_protocol_inventory_sync PUBLIC include)
 target_link_libraries(arv_protocol_inventory_sync PUBLIC arv_protocol_headers arv_player_headers arv_protocol_item_stack_wire)
 
+add_library(arv_protocol_chat STATIC
+  src/chat.cpp
+)
+target_include_directories(arv_protocol_chat PUBLIC include)
+target_link_libraries(arv_protocol_chat PUBLIC arv_protocol_headers arv_text)
+
+add_library(arv_protocol_entity_interaction STATIC
+  src/entity_interaction.cpp
+)
+target_include_directories(arv_protocol_entity_interaction PUBLIC include)
+target_link_libraries(arv_protocol_entity_interaction PUBLIC arv_protocol_headers)
+
+add_library(arv_protocol_explosion STATIC
+  src/explosion.cpp
+)
+target_include_directories(arv_protocol_explosion PUBLIC include)
+target_link_libraries(arv_protocol_explosion PUBLIC arv_protocol_headers)
+
+add_library(arv_protocol_particles STATIC
+  src/particles.cpp
+)
+target_include_directories(arv_protocol_particles PUBLIC include)
+target_link_libraries(arv_protocol_particles PUBLIC arv_protocol_headers)
+
+add_library(arv_protocol_skins STATIC
+  src/skins.cpp
+)
+target_include_directories(arv_protocol_skins PUBLIC include)
+target_link_libraries(arv_protocol_skins PUBLIC arv_protocol_headers)
+target_link_libraries(arv_protocol_skins PRIVATE arv_crypto)
+
+add_library(arv_protocol_text_variables STATIC
+  src/text_variables.cpp
+)
+target_include_directories(arv_protocol_text_variables PUBLIC include)
+target_link_libraries(arv_protocol_text_variables PUBLIC arv_protocol_headers)
+target_link_libraries(arv_protocol_text_variables PRIVATE arv_text)
+
+add_library(arv_protocol_vehicles STATIC
+  src/vehicles.cpp
+)
+target_include_directories(arv_protocol_vehicles PUBLIC include)
+target_link_libraries(arv_protocol_vehicles PUBLIC arv_protocol_headers)
+
+add_library(arv_protocol_world_time STATIC
+  src/world_time.cpp
+)
+target_include_directories(arv_protocol_world_time PUBLIC include)
+target_link_libraries(arv_protocol_world_time PUBLIC arv_protocol_headers)
+
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
   return()
 endif()
 
 add_library(arv_protocol STATIC
-  src/chat.cpp
-  src/entity_interaction.cpp
-  src/explosion.cpp
   src/message_registry.cpp
-  src/particles.cpp
-  src/skins.cpp
-  src/text_variables.cpp
-  src/vehicles.cpp
-  src/world_time.cpp
 )
 target_include_directories(arv_protocol PUBLIC include)
 target_link_libraries(arv_protocol PUBLIC arv_protocol_headers)
-target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_block_updates arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_protocol_dropped_items arv_protocol_inventory_sync arv_core arv_crypto arv_player arv_text arv_voxel)
+target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_block_updates arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_protocol_dropped_items arv_protocol_inventory_sync arv_protocol_chat arv_protocol_entity_interaction arv_protocol_explosion arv_protocol_particles arv_protocol_skins arv_protocol_text_variables arv_protocol_vehicles arv_protocol_world_time arv_core arv_crypto arv_player arv_text arv_voxel)

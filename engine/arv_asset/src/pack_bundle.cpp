@@ -104,6 +104,7 @@ void append_u64(std::vector<u8>& out, u64 value) {
   return has_prefix(category, "textures/") ||
          has_prefix(category, "models/") ||
          has_prefix(category, "animations/") ||
+         has_prefix(category, "fonts/") ||
          has_prefix(category, "lang/") ||
          has_prefix(category, "sounds/");
 }

@@ -3,26 +3,36 @@
 #include <GLES3/gl3.h>
 
 #include "arv/client/block_render_assets.hpp"
+#include "arv/client/block_outline_target.hpp"
 #include "arv/client/chunk_collision_query.hpp"
 #include "arv/client/chunk_snapshot.hpp"
-#include "arv/client/client_session.hpp"
+#include "arv/client/client_runtime.hpp"
 #include "arv/client/entity_render_assets.hpp"
 #include "arv/client/item_animation.hpp"
 #include "arv/client/item_rendering.hpp"
 #include "arv/client/item_ui_model.hpp"
-#include "arv/client/local_player_controller.hpp"
+#include "arv/client/local_identity.hpp"
 #include "arv/client/render_asset_upload.hpp"
+#include "arv/client/gameplay_ui_model.hpp"
+#include "arv/base/ui/screens/pause_menu.hpp"
 #include "arv/base/ui/widgets/gameplay.hpp"
 #include "arv/crypto/crypto_init.hpp"
 #include "arv/crypto/ed25519.hpp"
 #include "arv/crypto/hash.hpp"
+#include "arv/io/config.hpp"
 #include "arv/net/transport.hpp"
 #include "arv/net/websocket_client_transport.hpp"
+#include "arv/player/inventory.hpp"
+#include "arv/player/player_constants.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/protocol_version.hpp"
 #include "arv/render/chunk_mesher.hpp"
+#include "arv/text/language.hpp"
 #include "arv/ui/core/ui.hpp"
-#include "web_chunk_mesh.hpp"
+#include "web_application.hpp"
+#include "web_entity_fallback.hpp"
+#include "web_input.hpp"
+#include "web_platform.hpp"
 
 #include <algorithm>
 #include <array>
@@ -30,284 +40,97 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
 
-constexpr arv::usize MaxEntityShaderBones = 128U;
+using namespace arv::web;
 
-struct BrowserInputState {
-  bool forward{};
-  bool back{};
-  bool left{};
-  bool right{};
-  bool jump{};
-  bool jump_pressed{};
-  bool sneak{};
-  bool sprint{};
-  bool primary_held{};
-  bool secondary_held{};
-  bool primary_pressed{};
-  bool secondary_pressed{};
-  bool primary_animation_pressed{};
-  bool secondary_animation_pressed{};
-  bool toggle_fly_pressed{};
-  std::optional<arv::u8> hotbar_select{};
-  arv::i8 hotbar_scroll_steps{};
-  double mouse_dx{};
-  double mouse_dy{};
-  double last_frame_time{};
-  double movement_accumulator_seconds{};
-  double movement_send_accumulator_seconds{};
-  double movement_send_rate_hz{arv::protocol::DefaultClientMovementSendRateHz};
-  arv::protocol::PlayerActionFlags last_sent_action_flags{
-      arv::protocol::PlayerActionFlags::None};
-  arv::u64 client_tick{};
-  arv::client::LocalPlayerController player{};
-  arv::client::HeldItemAnimationPlayer held_item_animation{};
-  bool held_item_secondary_use_active{};
-  bool player_initialized{};
-};
+void disconnect_web_session();
 
-struct IndexedGpuMesh {
-  GLuint vao{};
-  GLuint vbo{};
-  GLuint ebo{};
-  GLsizei index_count{};
-};
-
-struct ChunkGpuMesh {
-  arv::ChunkSectionCoord coord{};
-  arv::u64 content_version{};
-  arv::u64 light_version{};
-  arv::u64 dependency_signature{};
-  IndexedGpuMesh opaque{};
-  IndexedGpuMesh transparent{};
-};
-
-struct EntityGpuModel {
-  GLuint vao{};
-  GLuint vbo{};
-  GLuint ebo{};
-  GLsizei index_count{};
-};
-
-struct WebUiVertex {
-  arv::Vec2f position{};
-  arv::Vec2f uv{};
-  arv::Vec4f color{1.0F, 1.0F, 1.0F, 1.0F};
-  float page{};
-};
-
-class WebUiTextMeasurer final : public arv::ui::IUiTextMeasurer {
+class WebUiBridge final : public arv::ui::UICommandSink,
+                          public arv::ui::UIScreenDataSource,
+                          public arv::ui::UIClipboard {
 public:
-  [[nodiscard]] arv::Vec2f measure(
-      std::string_view text,
-      arv::ui::UiTextRole role = arv::ui::UiTextRole::Body) const override {
-    const float height = line_height(role);
-    return {
-        static_cast<float>(text.size()) * height * 0.52F,
-        height};
-  }
-
-  [[nodiscard]] float line_height(
-      arv::ui::UiTextRole role = arv::ui::UiTextRole::Body) const override {
-    switch (role) {
-      case arv::ui::UiTextRole::Small:
-        return 14.0F;
-      case arv::ui::UiTextRole::Heading:
-        return 22.0F;
-      case arv::ui::UiTextRole::Title:
-        return 28.0F;
-      case arv::ui::UiTextRole::Mono:
-      case arv::ui::UiTextRole::Body:
-        break;
-    }
-    return 18.0F;
-  }
-};
-
-struct WebUiState {
-  arv::ui::UiTree tree{};
-  arv::asset::FontSystem fonts{};
-  arv::ui::UiFontStacks font_stacks{};
-  WebUiTextMeasurer text_measurer{};
-  bool ready{};
-};
-
-struct ChunkRenderer {
-  GLuint chunk_program{};
-  GLint chunk_mvp_location{-1};
-  GLint chunk_origin_location{-1};
-  GLint chunk_atlas_location{-1};
-  GLint chunk_atlas_inv_size_location{-1};
-  GLint chunk_alpha_location{-1};
-  GLint chunk_animation_time_location{-1};
-  GLuint chunk_texture{};
-  arv::u32 chunk_texture_width{};
-  arv::u32 chunk_texture_height{};
-  GLuint color_program{};
-  GLint color_mvp_location{-1};
-  GLuint entity_program{};
-  GLint entity_mvp_location{-1};
-  GLint entity_position_location{-1};
-  GLint entity_rotation_location{-1};
-  GLint entity_scale_location{-1};
-  GLint entity_atlas_location{-1};
-  GLint entity_atlas_size_location{-1};
-  GLint entity_bone_count_location{-1};
-  GLint entity_bone_pivots_location{-1};
-  GLint entity_bone_rotations_location{-1};
-  GLint entity_bone_positions_location{-1};
-  GLuint entity_texture{};
-  arv::u32 entity_texture_width{};
-  arv::u32 entity_texture_height{};
-  GLuint item_texture{};
-  arv::u32 item_texture_width{};
-  arv::u32 item_texture_height{};
-  GLuint ui_program{};
-  GLint ui_viewport_location{-1};
-  GLint ui_atlas_location{-1};
-  GLint ui_mode_location{-1};
-  GLuint ui_vao{};
-  GLuint ui_vbo{};
-  std::vector<ChunkGpuMesh> meshes{};
-  arv::HashMap<arv::render::EntityModelID, EntityGpuModel> entity_models{};
-  GLuint entity_vao{};
-  GLuint entity_vbo{};
-  GLsizei entity_vertex_count{};
-  std::array<arv::Vec3f, MaxEntityShaderBones> entity_bone_pivots{};
-  std::array<arv::Vec3f, MaxEntityShaderBones> entity_bone_rotations{};
-  std::array<arv::Vec3f, MaxEntityShaderBones> entity_bone_positions{};
-  bool announced_first_upload{};
-  bool announced_first_entity_upload{};
-};
-
-struct WebBlockRenderAssets {
-  arv::client::ClientBlockRenderAssets loaded{};
-  std::vector<std::filesystem::path> pack_cache_paths{};
-  std::string registry_snapshot_json{};
-  bool ready{};
-};
-
-struct WebEntityRenderAssets {
-  arv::client::ClientEntityRenderAssets loaded{};
-  arv::client::ItemAnimationLibrary item_animation_library{};
-  arv::asset::TextureAtlas item_atlas{};
-  std::vector<std::filesystem::path> pack_cache_paths{};
-  std::string registry_snapshot_json{};
-  bool ready{};
-};
-
-using ChunkSectionIndex = arv::HashMap<
-    arv::ChunkSectionCoord,
-    const arv::protocol::ClientboundChunkSectionData*>;
-
-struct WebApplication {
-  EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context{};
-  int width{1};
-  int height{1};
-  double start_time{};
-  bool pointer_locked{};
-  bool focused{true};
-  bool visible{true};
-  bool connected{};
-  bool connecting{};
-  bool flushed_after_pack_ready{};
-  arv::net::ConnectionState last_connection_state{arv::net::ConnectionState::Disconnected};
-  std::unique_ptr<arv::client::ClientSession> session{};
-  BrowserInputState input{};
-  ChunkRenderer renderer{};
-  WebBlockRenderAssets block_assets{};
-  WebEntityRenderAssets entity_assets{};
-  WebUiState ui{};
-};
-
-WebApplication g_app;
-
-EM_JS(void, arv_web_set_status, (const char* text), {
-  const value = UTF8ToString(text);
-  if (typeof window.arvWebSetStatus === 'function') {
-    window.arvWebSetStatus(value);
-  } else {
-    console.log(value);
-  }
-});
-
-EM_JS(void, arv_web_note_runtime_ready, (), {
-  if (typeof window.arvWebRuntimeReady === 'function') {
-    window.arvWebRuntimeReady();
-  }
-});
-
-EM_JS(int, arv_web_storage_ready, (), {
-  return Module && Module.arvWebStorageReady ? 1 : 0;
-});
-
-EM_JS(void, arv_web_flush_storage, (), {
-  if (!Module || !Module.arvWebStorageReady || Module.arvWebStorageFlushing) {
-    return;
-  }
-  if (typeof FS === 'undefined' || typeof FS.syncfs !== 'function') {
-    return;
-  }
-  Module.arvWebStorageFlushing = true;
-  FS.syncfs(false, function(error) {
-    Module.arvWebStorageFlushing = false;
-    if (error) {
-      Module.arvWebStorageError = String(error);
-      if (typeof window.arvWebSetStatus === 'function') {
-        window.arvWebSetStatus('storage sync failed: ' + Module.arvWebStorageError);
-      }
+  void submit(arv::ui::UICommand command) override {
+    if (std::holds_alternative<arv::ui::BackToMainMenuCommand>(command) ||
+        std::holds_alternative<arv::ui::QuitGameCommand>(command)) {
+      disconnect_web_session();
       return;
     }
-    if (typeof window.arvWebSetStatus === 'function') {
-      window.arvWebSetStatus('storage synced');
+    if (std::holds_alternative<arv::ui::ResumeGameCommand>(command)) {
+      return;
     }
-  });
-});
+  }
 
-EM_JS(int, arv_web_canvas_width, (), {
-  const canvas = document.getElementById('arvane-canvas');
-  if (!canvas) {
-    return 1;
+  [[nodiscard]] arv::ui::RenderSettingsView render_settings() const override {
+    return {};
   }
-  return Math.max(1, Math.floor(canvas.clientWidth * (window.devicePixelRatio || 1)));
-});
 
-EM_JS(int, arv_web_canvas_height, (), {
-  const canvas = document.getElementById('arvane-canvas');
-  if (!canvas) {
-    return 1;
+  [[nodiscard]] arv::ui::ControlsSettingsView controls_settings() const override {
+    return {};
   }
-  return Math.max(1, Math.floor(canvas.clientHeight * (window.devicePixelRatio || 1)));
-});
 
-EM_JS(void, arv_web_set_canvas_size, (int width, int height), {
-  const canvas = document.getElementById('arvane-canvas');
-  if (!canvas) {
-    return;
+  [[nodiscard]] arv::ui::InterfaceSettingsView interface_settings() const override {
+    return {};
   }
-  if (canvas.width !== width) {
-    canvas.width = width;
-  }
-  if (canvas.height !== height) {
-    canvas.height = height;
-  }
-});
 
-void set_status(const char* text) {
-  arv_web_set_status(text);
+  [[nodiscard]] std::string text() const override {
+    return clipboard_;
+  }
+
+  void set_text(std::string text) override {
+    clipboard_ = std::move(text);
+  }
+
+private:
+  std::string clipboard_{};
+};
+
+WebUiBridge g_ui_bridge;
+
+[[nodiscard]] arv::ui::UiDisplayMetrics web_ui_metrics() {
+  const float framebuffer_width =
+      static_cast<float>(std::max(g_app.width, 1));
+  const float framebuffer_height =
+      static_cast<float>(std::max(g_app.height, 1));
+  const float scale = static_cast<float>(std::max(0.25, device_pixel_ratio()));
+  return arv::ui::UiDisplayMetrics::from_window_and_framebuffer(
+      {
+          framebuffer_width / scale,
+          framebuffer_height / scale,
+      },
+      {
+          framebuffer_width,
+          framebuffer_height,
+      });
 }
 
-void set_status(const std::string& text) {
-  arv_web_set_status(text.c_str());
+[[nodiscard]] arv::ui::UIContext make_web_ui_context() {
+  const arv::ui::UiDisplayMetrics metrics = web_ui_metrics();
+  return {
+      g_app.ui.tree,
+      metrics.logical_size,
+      &g_ui_bridge,
+      &g_ui_bridge,
+      &g_app.ui.screen_manager,
+      &g_app.ui.theme,
+      &g_app.ui.language,
+      &g_ui_bridge};
+}
+
+void reset_gameplay_screen_stack() {
+  g_app.ui.screen_manager.clear();
+  g_app.ui.screen_manager.push(arv::ui::make_gameplay_screen());
 }
 
 void destroy_indexed_mesh(IndexedGpuMesh& mesh) {
@@ -401,6 +224,22 @@ void destroy_item_texture() {
   g_app.renderer.item_texture_height = 0U;
 }
 
+void destroy_font_texture() {
+  if (g_app.renderer.font_texture != 0U) {
+    glDeleteTextures(1, &g_app.renderer.font_texture);
+  }
+  g_app.renderer.font_texture = 0U;
+  g_app.renderer.font_texture_width = 0U;
+  g_app.renderer.font_texture_height = 0U;
+}
+
+void clear_web_ui_assets() {
+  destroy_font_texture();
+  g_app.ui.fonts = arv::asset::FontSystem{};
+  g_app.ui.font_stacks = {};
+  g_app.ui.ready = false;
+}
+
 void clear_entity_render_assets() {
   destroy_entity_mesh();
   destroy_entity_gpu_models();
@@ -414,16 +253,8 @@ void clear_block_render_assets() {
   clear_chunk_meshes();
   destroy_chunk_texture();
   clear_entity_render_assets();
+  clear_web_ui_assets();
   g_app.block_assets = {};
-}
-
-void reset_input(bool keep_view = false) {
-  const float yaw = g_app.input.player.camera().yaw_radians();
-  const float pitch = g_app.input.player.camera().pitch_radians();
-  g_app.input = {};
-  if (keep_view) {
-    g_app.input.player.camera().set_rotation(yaw, pitch);
-  }
 }
 
 [[nodiscard]] GLuint compile_shader(GLenum kind, const char* source) {
@@ -1214,6 +1045,51 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   return true;
 }
 
+[[nodiscard]] bool upload_font_texture_array(
+    const arv::render::TextureArrayUploadData& upload) {
+  destroy_font_texture();
+  if (!upload.valid()) {
+    set_status("font atlas upload was empty");
+    return false;
+  }
+
+  GLint max_texture_size = 0;
+  GLint max_array_layers = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+  glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &max_array_layers);
+  if ((max_texture_size > 0 &&
+       (upload.width > static_cast<arv::u32>(max_texture_size) ||
+        upload.height > static_cast<arv::u32>(max_texture_size))) ||
+      (max_array_layers > 0 && upload.layers > static_cast<arv::u32>(max_array_layers))) {
+    set_status("font atlas exceeds WebGL texture-array limits");
+    return false;
+  }
+
+  glGenTextures(1, &g_app.renderer.font_texture);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.font_texture);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
+  glTexImage3D(
+      GL_TEXTURE_2D_ARRAY,
+      0,
+      GL_RGBA8,
+      static_cast<GLsizei>(upload.width),
+      static_cast<GLsizei>(upload.height),
+      static_cast<GLsizei>(upload.layers),
+      0,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      upload.rgba_pixels.data());
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
+  g_app.renderer.font_texture_width = upload.width;
+  g_app.renderer.font_texture_height = upload.height;
+  return true;
+}
+
 [[nodiscard]] std::vector<std::filesystem::path> copy_pack_paths(
     std::span<const std::filesystem::path> paths) {
   return {paths.begin(), paths.end()};
@@ -1236,9 +1112,69 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   return index;
 }
 
+[[nodiscard]] bool load_web_ui_font_stack(
+    arv::asset::ResourceManager& resources,
+    arv::asset::FontSystem& font_system,
+    const std::string& asset_name,
+    arv::u32 pixel_size,
+    arv::asset::FontStack& stack,
+    bool include_fallbacks) {
+  std::vector<arv::asset::FontFaceHandle> faces;
+  const arv::asset::AssetID primary_id{asset_name};
+  const std::filesystem::path primary_path =
+      resources.resolve_asset_path(primary_id, arv::asset::AssetKind::Font);
+  auto primary = font_system.load_face(primary_path, pixel_size, primary_id);
+  if (!primary) {
+    set_status("failed to load web UI font: " + primary.error().message);
+    return false;
+  }
+  faces.emplace_back(primary.value());
+
+  if (include_fallbacks) {
+    for (const arv::asset::AssetID fallback : {
+             arv::asset::AssetID{"arvane:font/symbol"},
+             arv::asset::AssetID{"arvane:font/arabic"},
+             arv::asset::AssetID{"arvane:font/emoji"},
+         }) {
+      const std::filesystem::path path =
+          resources.resolve_asset_path(fallback, arv::asset::AssetKind::Font);
+      if (!std::filesystem::exists(path)) {
+        continue;
+      }
+      auto face = font_system.load_face(path, pixel_size, fallback);
+      if (face) {
+        faces.emplace_back(face.value());
+      }
+    }
+  }
+
+  stack = font_system.make_stack(faces);
+  return true;
+}
+
+void load_web_language(const arv::asset::PackManager& packs) {
+  const auto files = packs.data_files_at("lang/en_US.yaml");
+  std::vector<std::filesystem::path> paths;
+  paths.reserve(files.size());
+  for (const arv::asset::PackDataFile& file : files) {
+    paths.push_back(file.path);
+  }
+  auto language = arv::text::load_language_files(paths, "en_US");
+  if (!language) {
+    return;
+  }
+  g_app.ui.language = std::move(language.value());
+  if (g_app.session != nullptr) {
+    g_app.session->configure_language(&g_app.ui.language);
+  }
+}
+
 [[nodiscard]] bool ensure_block_render_assets_loaded() {
+  const std::string* registry_snapshot = g_app.session == nullptr
+      ? nullptr
+      : &g_app.session->multiplayer_registry_snapshot_json();
   if (g_app.session == nullptr ||
-      g_app.session->registry_snapshot_json().empty()) {
+      registry_snapshot->empty()) {
     return false;
   }
   const std::span<const std::filesystem::path> cache_paths =
@@ -1247,7 +1183,7 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
     return false;
   }
   if (g_app.block_assets.ready &&
-      g_app.block_assets.registry_snapshot_json == g_app.session->registry_snapshot_json() &&
+      g_app.block_assets.registry_snapshot_json == *registry_snapshot &&
       same_pack_paths(cache_paths, g_app.block_assets.pack_cache_paths) &&
       g_app.renderer.chunk_texture != 0U) {
     return true;
@@ -1281,7 +1217,7 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   }
 
   g_app.block_assets.loaded = std::move(loaded_assets.value());
-  g_app.block_assets.registry_snapshot_json = g_app.session->registry_snapshot_json();
+  g_app.block_assets.registry_snapshot_json = *registry_snapshot;
   g_app.block_assets.pack_cache_paths = std::move(paths);
   g_app.block_assets.ready = true;
   set_status("web block textures and models ready");
@@ -1292,8 +1228,11 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   if (!ensure_block_render_assets_loaded()) {
     return false;
   }
+  const std::string* registry_snapshot = g_app.session == nullptr
+      ? nullptr
+      : &g_app.session->multiplayer_registry_snapshot_json();
   if (g_app.session == nullptr ||
-      g_app.session->registry_snapshot_json().empty()) {
+      registry_snapshot->empty()) {
     return false;
   }
   const std::span<const std::filesystem::path> cache_paths =
@@ -1302,7 +1241,7 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
     return false;
   }
   if (g_app.entity_assets.ready &&
-      g_app.entity_assets.registry_snapshot_json == g_app.session->registry_snapshot_json() &&
+      g_app.entity_assets.registry_snapshot_json == *registry_snapshot &&
       same_pack_paths(cache_paths, g_app.entity_assets.pack_cache_paths) &&
       g_app.renderer.entity_texture != 0U &&
       g_app.renderer.item_texture != 0U &&
@@ -1393,7 +1332,7 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   g_app.entity_assets.loaded = std::move(loaded_assets.value());
   g_app.entity_assets.item_animation_library = std::move(item_animation_library.value());
   g_app.entity_assets.item_atlas = std::move(item_atlas.value());
-  g_app.entity_assets.registry_snapshot_json = g_app.session->registry_snapshot_json();
+  g_app.entity_assets.registry_snapshot_json = *registry_snapshot;
   g_app.entity_assets.pack_cache_paths = std::move(paths);
   g_app.entity_assets.ready = true;
   set_status("web entity models, textures, and animations ready");
@@ -1412,7 +1351,7 @@ void upload_chunk_mesh(
       g_app.renderer.meshes.begin(),
       g_app.renderer.meshes.end(),
       [&](const ChunkGpuMesh& mesh) {
-        return arv::web::same_chunk_section_coord(mesh.coord, section.coord);
+        return mesh.coord == section.coord;
       });
   if (found == g_app.renderer.meshes.end()) {
     found = g_app.renderer.meshes.insert(
@@ -1498,7 +1437,7 @@ void apply_bone_rotation_overrides(
   }
   return arv::client::selected_inventory_item(
       g_app.session->inventory(),
-      g_app.input.player.selected_hotbar_slot(),
+      g_app.session->selected_hotbar_slot(),
       g_app.entity_assets.loaded.item_registry);
 }
 
@@ -1604,25 +1543,24 @@ void update_held_item_animation_from_input(
   if (g_app.session == nullptr || !g_app.entity_assets.ready) {
     return draws;
   }
-  const std::optional<arv::client::ClientSessionWorldJoin>& join =
-      g_app.session->world_join();
-  draws.reserve(
-      g_app.session->entity_mirrors().size() +
-      g_app.session->dropped_item_count() +
-      2U);
-  for (const arv::client::ClientSessionEntityMirror& mirror :
-       g_app.session->entity_mirrors()) {
-    if (join.has_value() && mirror.world_id != join->world_id) {
+  const arv::WorldID world_id = g_app.session->camera().world_id();
+  const std::optional<arv::EntityNetID> local_entity_id =
+      g_app.session->local_entity_id();
+  const std::optional<arv::PlayerID> local_player_id =
+      g_app.session->local_player_id();
+  const std::vector<arv::client::ReplicatedEntityMirror> mirrors =
+      g_app.session->replicated_entity_mirrors();
+  draws.reserve(mirrors.size() + g_app.session->dropped_item_count() + 2U);
+  for (const arv::client::ReplicatedEntityMirror& mirror : mirrors) {
+    if (mirror.world_id != world_id) {
       continue;
     }
-    if (join.has_value()) {
-      const bool is_local_player =
-          mirror.entity_id == join->local_entity_id ||
-          (mirror.owning_player.has_value() &&
-           mirror.owning_player.value() == join->player_id);
-      if (is_local_player) {
-        continue;
-      }
+    const bool is_local_player =
+        (local_entity_id.has_value() && mirror.entity_id == local_entity_id.value()) ||
+        (local_player_id.has_value() && mirror.owning_player.has_value() &&
+         mirror.owning_player.value() == local_player_id.value());
+    if (is_local_player) {
+      continue;
     }
     const auto model =
         g_app.entity_assets.loaded.render_assets.model_by_type.find(mirror.entity_type);
@@ -1637,8 +1575,8 @@ void update_held_item_animation_from_input(
         animation != g_app.entity_assets.loaded.render_assets.animation_by_type.end()) {
       draw.animation_id = animation->second;
     }
-    draw.position = mirror.position;
-    draw.rotation = mirror.rotation;
+    draw.position = mirror.render_position;
+    draw.rotation = mirror.render_rotation;
     draw.scale = 1.0F;
     draw.animations.reserve(mirror.animations.size());
     for (const arv::protocol::EntityAnimationPlayback& animation : mirror.animations) {
@@ -1649,25 +1587,54 @@ void update_held_item_animation_from_input(
     }
     draws.push_back(std::move(draw));
   }
-  if (!join.has_value()) {
+  if (!local_entity_id.has_value()) {
     return draws;
   }
 
   arv::render::FramePacket item_frame;
-  item_frame.camera = g_app.input.player.camera().snapshot(
+  item_frame.camera = g_app.session->camera().snapshot(
       static_cast<arv::u32>(std::max(g_app.width, 1)),
       static_cast<arv::u32>(std::max(g_app.height, 1)),
       0.0F);
   item_frame.world_view = arv::render::render_view_from_camera(item_frame.camera);
-  item_frame.world_view.world_id = join->world_id;
+  item_frame.world_view.world_id = world_id;
   const std::vector<arv::client::DroppedItemMirror> dropped_items =
       g_app.session->dropped_item_mirrors();
   arv::client::append_dropped_item_draws(
       item_frame,
       g_app.entity_assets.loaded.render_assets,
       dropped_items,
-      join->world_id,
+      world_id,
       animation_time_seconds);
+
+  const arv::client::CameraShell& camera = g_app.session->camera();
+  const arv::client::ChunkSectionCollisionQuery outline_query(
+      g_app.chunk_sections,
+      g_app.block_assets.loaded.block_registry);
+  const std::optional<arv::client::BlockOutlineTarget> outline_target =
+      arv::client::find_block_outline_target(
+          outline_query,
+          g_app.block_assets.loaded.block_registry,
+          camera.position(),
+          camera.forward_vector(),
+          arv::player::DefaultReachDistance);
+  if (outline_target.has_value() &&
+      outline_target->variant.value <
+          g_app.entity_assets.loaded.render_assets.outline_model_by_variant.size()) {
+    const arv::render::EntityModelID model_id =
+        g_app.entity_assets.loaded.render_assets
+            .outline_model_by_variant[outline_target->variant.value];
+    if (model_id.value != 0U) {
+      arv::render::EntityDrawItem item;
+      item.model_id = model_id;
+      item.position = {
+          static_cast<arv::f32>(outline_target->block.value.x) + 0.5F,
+          static_cast<arv::f32>(outline_target->block.value.y) + 0.5F,
+          static_cast<arv::f32>(outline_target->block.value.z) + 0.5F};
+      item.scale = 1.0F;
+      item_frame.entities.push_back(std::move(item));
+    }
+  }
 
   const arv::protocol::BlockBreakProgress& block_break =
       g_app.session->block_break_progress();
@@ -1691,7 +1658,7 @@ void update_held_item_animation_from_input(
   }
 
   if (g_app.session->has_authoritative_inventory()) {
-    const arv::usize selected_slot = g_app.input.player.selected_hotbar_slot();
+    const arv::usize selected_slot = g_app.session->selected_hotbar_slot();
     const arv::player::Inventory& inventory = g_app.session->inventory();
     if (selected_slot < inventory.slot_count()) {
       const std::optional<arv::player::ItemStack>& held_stack =
@@ -1726,7 +1693,9 @@ void draw_entity_models(
 
   std::vector<arv::render::EntityDrawItem> draws =
       build_entity_draw_items(animation_time_seconds);
-  const arv::Vec3f eye = g_app.input.player.camera().position();
+  const arv::Vec3f eye = g_app.session == nullptr
+      ? arv::Vec3f{}
+      : g_app.session->camera().position();
   std::sort(
       draws.begin(),
       draws.end(),
@@ -1828,10 +1797,14 @@ void sync_entity_mesh() {
     return;
   }
 
+  const std::vector<arv::client::ReplicatedEntityMirror> mirrors =
+      g_app.session->replicated_entity_mirrors();
   const std::vector<arv::web::WebEntityMarker> markers =
       arv::web::build_visible_fallback_entity_markers(
-          g_app.session->entity_mirrors(),
-          g_app.session->world_join());
+          mirrors,
+          g_app.session->camera().world_id(),
+          g_app.session->local_entity_id(),
+          g_app.session->local_player_id());
   const std::vector<arv::web::WebChunkVertex> vertices =
       arv::web::build_fallback_entity_vertices(markers);
   upload_vertices(
@@ -1857,7 +1830,7 @@ void sync_chunk_meshes() {
   }
 
   const std::vector<arv::protocol::ClientboundChunkSectionData>& sections =
-      g_app.session->chunk_sections();
+      g_app.chunk_sections;
   const ChunkSectionIndex section_index = build_chunk_section_index(sections);
   auto section_lookup =
       [&](arv::ChunkSectionCoord coord)
@@ -1873,7 +1846,7 @@ void sync_chunk_meshes() {
             sections.begin(),
             sections.end(),
             [&](const arv::protocol::ClientboundChunkSectionData& section) {
-              return arv::web::same_chunk_section_coord(section.coord, mesh.coord);
+              return section.coord == mesh.coord;
             }) == sections.end();
         if (missing) {
           destroy_mesh(mesh);
@@ -1892,7 +1865,7 @@ void sync_chunk_meshes() {
         g_app.renderer.meshes.begin(),
         g_app.renderer.meshes.end(),
         [&](const ChunkGpuMesh& mesh) {
-          return arv::web::same_chunk_section_coord(mesh.coord, section.coord);
+          return mesh.coord == section.coord;
         });
     if (found != g_app.renderer.meshes.end() &&
         found->content_version == section.chunk_content_version &&
@@ -1922,6 +1895,51 @@ void append_ui_quad_vertices(
   push(0U);
   push(2U);
   push(3U);
+}
+
+void append_ui_glyph_vertices(
+    std::vector<WebUiVertex>& vertices,
+    const arv::render::UIGlyphDrawItem& glyph) {
+  arv::Vec2f min = glyph.min;
+  arv::Vec2f max = glyph.max;
+  arv::Vec2f uv_min = glyph.uv_min;
+  arv::Vec2f uv_max = glyph.uv_max;
+  if (glyph.clip) {
+    const arv::Vec2f original_min = min;
+    const arv::Vec2f original_max = max;
+    min.x = std::max(min.x, glyph.clip_min.x);
+    min.y = std::max(min.y, glyph.clip_min.y);
+    max.x = std::min(max.x, glyph.clip_max.x);
+    max.y = std::min(max.y, glyph.clip_max.y);
+    if (max.x <= min.x || max.y <= min.y ||
+        original_max.x <= original_min.x || original_max.y <= original_min.y) {
+      return;
+    }
+    const float left_t = (min.x - original_min.x) / (original_max.x - original_min.x);
+    const float right_t = (max.x - original_min.x) / (original_max.x - original_min.x);
+    const float top_t = (min.y - original_min.y) / (original_max.y - original_min.y);
+    const float bottom_t = (max.y - original_min.y) / (original_max.y - original_min.y);
+    const arv::Vec2f original_uv_min = uv_min;
+    const arv::Vec2f original_uv_max = uv_max;
+    uv_min.x = original_uv_min.x + (original_uv_max.x - original_uv_min.x) * left_t;
+    uv_max.x = original_uv_min.x + (original_uv_max.x - original_uv_min.x) * right_t;
+    uv_min.y = original_uv_min.y + (original_uv_max.y - original_uv_min.y) * top_t;
+    uv_max.y = original_uv_min.y + (original_uv_max.y - original_uv_min.y) * bottom_t;
+  }
+
+  const std::array<arv::Vec2f, 4> positions{{
+      min,
+      {max.x, min.y},
+      max,
+      {min.x, max.y},
+  }};
+  const std::array<arv::Vec2f, 4> uvs{{
+      uv_min,
+      {uv_max.x, uv_min.y},
+      uv_max,
+      {uv_min.x, uv_max.y},
+  }};
+  append_ui_quad_vertices(vertices, positions, uvs, glyph.color, glyph.page);
 }
 
 void append_ui_axis_quad_vertices(
@@ -2011,9 +2029,11 @@ void draw_ui_vertices(
 
 void draw_ui_frame(const arv::render::FramePacket& frame) {
   std::vector<WebUiVertex> color_vertices;
+  std::vector<WebUiVertex> font_vertices;
   std::vector<WebUiVertex> terrain_vertices;
   std::vector<WebUiVertex> item_vertices;
   color_vertices.reserve(frame.ui_rects.size() * 30U);
+  font_vertices.reserve(frame.ui_glyphs.size() * 6U);
   terrain_vertices.reserve(frame.ui_textured_quads.size() * 6U);
   item_vertices.reserve(frame.ui_textured_quads.size() * 6U);
 
@@ -2047,9 +2067,19 @@ void draw_ui_frame(const arv::render::FramePacket& frame) {
             0U);
         break;
       case arv::render::UiTextureSource::FontAtlas:
+        append_ui_quad_vertices(
+            font_vertices,
+            quad.positions,
+            quad.uvs,
+            quad.color,
+            quad.page);
+        break;
       case arv::render::UiTextureSource::PlayerSkinAtlas:
         break;
     }
+  }
+  for (const arv::render::UIGlyphDrawItem& glyph : frame.ui_glyphs) {
+    append_ui_glyph_vertices(font_vertices, glyph);
   }
 
   glDisable(GL_DEPTH_TEST);
@@ -2058,66 +2088,105 @@ void draw_ui_frame(const arv::render::FramePacket& frame) {
   draw_ui_vertices(color_vertices, 0, 0U);
   draw_ui_vertices(terrain_vertices, 1, g_app.renderer.chunk_texture);
   draw_ui_vertices(item_vertices, 1, g_app.renderer.item_texture);
+  draw_ui_vertices(font_vertices, 1, g_app.renderer.font_texture);
   glDisable(GL_BLEND);
   glEnable(GL_DEPTH_TEST);
 }
 
 [[nodiscard]] bool ensure_web_ui_ready() {
+  const arv::ui::UiDisplayMetrics metrics = web_ui_metrics();
+  const float framebuffer_scale = metrics.scalar_to_framebuffer(1.0F);
+  if (g_app.ui.ready &&
+      std::abs(g_app.ui.font_framebuffer_scale - framebuffer_scale) > 0.01F) {
+    clear_web_ui_assets();
+  }
   if (g_app.ui.ready) {
     return true;
   }
-  auto body = g_app.ui.fonts.load_face(
-      {},
-      18U,
-      {"arvane:font/web_stub/body"});
-  if (!body) {
-    set_status("failed to initialize web UI font stub: " + body.error().message);
+  if (g_app.session == nullptr) {
     return false;
   }
-  const std::array<arv::asset::FontFaceHandle, 1> faces{{body.value()}};
-  const arv::asset::FontStack stack = g_app.ui.fonts.make_stack(faces);
-  g_app.ui.font_stacks.small = stack;
-  g_app.ui.font_stacks.body = stack;
-  g_app.ui.font_stacks.heading = stack;
-  g_app.ui.font_stacks.title = stack;
-  g_app.ui.font_stacks.mono = stack;
+  const std::span<const std::filesystem::path> cache_paths =
+      g_app.session->multiplayer_pack_cache_paths();
+  if (cache_paths.empty()) {
+    return false;
+  }
+  auto packs_result = arv::asset::PackManager::load_client_bundle_roots(
+      cache_paths);
+  if (!packs_result) {
+    set_status("failed to mount web UI assets: " + packs_result.error().describe());
+    return false;
+  }
+  arv::asset::PackManager packs = std::move(packs_result.value());
+  arv::asset::ResourceManager resources(packs);
+  load_web_language(packs);
+  const arv::ui::UiThemeTypography& type = g_app.ui.theme.typography;
+  if (!load_web_ui_font_stack(
+          resources,
+          g_app.ui.fonts,
+          type.default_font,
+          metrics.font_pixel_size(type.size_sm),
+          g_app.ui.font_stacks.small,
+          false) ||
+      !load_web_ui_font_stack(
+          resources,
+          g_app.ui.fonts,
+          type.default_font,
+          metrics.font_pixel_size(type.size_md),
+          g_app.ui.font_stacks.body,
+          true) ||
+      !load_web_ui_font_stack(
+          resources,
+          g_app.ui.fonts,
+          type.heading_font,
+          metrics.font_pixel_size(type.size_lg),
+          g_app.ui.font_stacks.heading,
+          false) ||
+      !load_web_ui_font_stack(
+          resources,
+          g_app.ui.fonts,
+          type.heading_font,
+          metrics.font_pixel_size(type.size_xl),
+          g_app.ui.font_stacks.title,
+          false) ||
+      !load_web_ui_font_stack(
+          resources,
+          g_app.ui.fonts,
+          type.monospace_font,
+          metrics.font_pixel_size(type.size_md),
+          g_app.ui.font_stacks.mono,
+          false)) {
+    return false;
+  }
+  g_app.ui.font_framebuffer_scale = framebuffer_scale;
   g_app.ui.ready = true;
   return true;
 }
 
-[[nodiscard]] std::optional<arv::ui::HealthHudModel> local_health_hud_model() {
-  if (g_app.session == nullptr || !g_app.session->world_join().has_value()) {
-    return std::nullopt;
+[[nodiscard]] bool sync_web_ui_font_atlas() {
+  if (!g_app.ui.fonts.atlas_dirty()) {
+    return true;
   }
-  const arv::client::ClientSessionWorldJoin& join = *g_app.session->world_join();
-  for (const arv::client::ClientSessionEntityMirror& mirror :
-       g_app.session->entity_mirrors()) {
-    if (mirror.entity_id != join.local_entity_id ||
-        mirror.world_id != join.world_id ||
-        mirror.health_max <= 0.0F) {
-      continue;
-    }
-    return arv::ui::HealthHudModel{
-        true,
-        std::max(mirror.health_current, 0.0F),
-        std::max(mirror.health_max, 1.0F),
-        1.0F,
-        {static_cast<float>(g_app.width), static_cast<float>(g_app.height)}};
+  const arv::render::TextureArrayUploadData upload =
+      arv::client::texture_array_upload_from_image(g_app.ui.fonts.atlas_image());
+  if (!upload_font_texture_array(upload)) {
+    return false;
   }
-  return std::nullopt;
+  g_app.ui.fonts.clear_atlas_dirty();
+  return true;
 }
 
 void render_gameplay_ui(arv::Seconds time_seconds) {
   if (g_app.session == nullptr ||
       g_app.session->connection_state() != arv::net::ConnectionState::InGame ||
-      !g_app.entity_assets.ready ||
-      g_app.renderer.item_texture == 0U ||
       !ensure_web_ui_ready()) {
     return;
   }
 
   std::vector<arv::ui::UiItemStackView> inventory_slots;
-  if (g_app.session->has_authoritative_inventory()) {
+  const bool item_ui_ready =
+      g_app.entity_assets.ready && g_app.renderer.item_texture != 0U;
+  if (item_ui_ready && g_app.session->has_authoritative_inventory()) {
     inventory_slots = arv::client::inventory_slots_for_ui(
         g_app.session->inventory(),
         g_app.entity_assets.loaded.item_registry,
@@ -2125,33 +2194,68 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
         g_app.block_assets.loaded.block_atlas);
   }
 
-  const arv::usize hotbar_count =
-      std::min<arv::usize>(arv::player::DefaultHotbarSlotCount, inventory_slots.size());
-  arv::ui::GameplayUiModel model;
-  model.hotbar.selected_slot = g_app.input.player.selected_hotbar_slot();
-  model.hotbar.slot_count = arv::player::DefaultHotbarSlotCount;
-  model.hotbar.viewport = {
-      static_cast<float>(g_app.width),
-      static_cast<float>(g_app.height)};
-  model.hotbar.slots = {inventory_slots.data(), hotbar_count};
-  if (std::optional<arv::ui::HealthHudModel> health = local_health_hud_model();
-      health.has_value()) {
-    model.health = health.value();
+  std::optional<arv::ui::UiItemStackView> cursor_stack;
+  if (item_ui_ready) {
+    cursor_stack = arv::client::item_stack_for_ui(
+        g_app.session->inventory_cursor_stack(),
+        g_app.entity_assets.loaded.item_registry,
+        g_app.entity_assets.item_atlas,
+        g_app.block_assets.loaded.block_atlas);
   }
+  arv::io::UiConfig::ChatConfig chat_config;
+  arv::client::refresh_gameplay_chat_lines(
+      g_app.ui.chat_lines,
+      *g_app.session,
+      chat_config,
+      std::chrono::steady_clock::now(),
+      g_app.ui.chat_history_scroll_offset);
+  const arv::ui::UiDisplayMetrics metrics = web_ui_metrics();
+  const arv::Vec2f viewport = metrics.logical_size;
+  const arv::Vec2f cursor_position =
+      g_app.input.cursor_initialized
+          ? arv::Vec2f{
+                static_cast<float>(g_app.input.cursor_x),
+                static_cast<float>(g_app.input.cursor_y)}
+          : arv::Vec2f{viewport.x * 0.5F, viewport.y * 0.5F};
+  arv::ui::GameplayUiModel model =
+      arv::client::build_gameplay_ui_model(
+          {
+              .client = *g_app.session,
+              .chat_config = chat_config,
+              .inventory_slots = std::span<const arv::ui::UiItemStackView>{
+                  inventory_slots.data(),
+                  inventory_slots.size()},
+              .carried_inventory_stack = cursor_stack,
+              .chat_lines = std::span<const arv::ui::ChatLineView>{
+                  g_app.ui.chat_lines.data(),
+                  g_app.ui.chat_lines.size()},
+              .chat_history_scroll_offset = g_app.ui.chat_history_scroll_offset,
+              .inventory_title = "Inventory",
+              .tab_title = "Players",
+              .viewport = viewport,
+              .cursor_position = cursor_position,
+              .debug_fps_visible = false,
+          });
 
+  g_app.ui.tree.set_theme(&g_app.ui.theme);
   arv::ui::build_gameplay_ui(g_app.ui.tree, std::move(model));
-  const arv::Vec2f viewport{
-      static_cast<float>(g_app.width),
-      static_cast<float>(g_app.height)};
-  g_app.ui.tree.layout(viewport, &g_app.ui.text_measurer);
+  if (g_app.ui.screen_manager.has_active_screen()) {
+    arv::ui::UIContext context = make_web_ui_context();
+    context.viewport = viewport;
+    g_app.ui.screen_manager.append_to(context);
+  }
+  g_app.ui.tree.layout_with_metrics(metrics, &g_app.ui.text_measurer);
   arv::render::FramePacket frame;
   arv::ui::append_ui_draw_commands(
       g_app.ui.tree,
       g_app.ui.fonts,
       g_app.ui.font_stacks,
       frame,
-      arv::ui::UiDisplayMetrics::from_logical_size(viewport),
+      metrics,
       time_seconds);
+  if (!sync_web_ui_font_atlas()) {
+    return;
+  }
   draw_ui_frame(frame);
 }
 
@@ -2173,7 +2277,7 @@ void render_remote_world() {
       static_cast<float>(g_app.width) / static_cast<float>(std::max(g_app.height, 1));
   const arv::Seconds animation_time_seconds =
       static_cast<arv::Seconds>(emscripten_get_now() * 0.001 - g_app.start_time);
-  const arv::client::CameraShell& camera = g_app.input.player.camera();
+  const arv::client::CameraShell& camera = g_app.session->camera();
   const arv::Vec3f eye = camera.position();
   const arv::Vec3f center = eye + camera.forward_vector();
   const arv::Mat4f mvp = arv::multiply_mat4f(
@@ -2287,49 +2391,135 @@ const char* connection_state_label(arv::net::ConnectionState state) {
   return "unknown";
 }
 
-bool ensure_web_player_initialized(double now);
+WebShellState shell_state_for_connection(arv::net::ConnectionState state) noexcept {
+  switch (state) {
+    case arv::net::ConnectionState::InGame:
+      return WebShellState::Game;
+    case arv::net::ConnectionState::Disconnected:
+      return WebShellState::Connect;
+    case arv::net::ConnectionState::Connecting:
+    case arv::net::ConnectionState::TransportConnected:
+    case arv::net::ConnectionState::ProtocolHandshake:
+    case arv::net::ConnectionState::RegistrySync:
+    case arv::net::ConnectionState::WorldJoin:
+    case arv::net::ConnectionState::Disconnecting:
+      return WebShellState::Connecting;
+  }
+  return WebShellState::Connect;
+}
 
-void poll_session(double now) {
+void mark_web_section_content_changed(
+    arv::protocol::ClientboundChunkSectionData& section,
+    arv::u64 server_tick) noexcept {
+  const arv::u64 next_content_version =
+      section.chunk_content_version == std::numeric_limits<arv::u64>::max()
+          ? section.chunk_content_version
+          : section.chunk_content_version + 1U;
+  section.chunk_content_version = std::max(next_content_version, server_tick);
+  section.chunk_version = std::max(section.chunk_version, section.chunk_content_version);
+}
+
+void apply_web_chunk_section_data(arv::protocol::ClientboundChunkSectionData data) {
+  const arv::WorldID world_id = g_app.session == nullptr
+      ? arv::WorldID{}
+      : g_app.session->camera().world_id();
+  if (data.world_id != world_id) {
+    return;
+  }
+  auto found = std::find_if(
+      g_app.chunk_sections.begin(),
+      g_app.chunk_sections.end(),
+      [&](const arv::protocol::ClientboundChunkSectionData& existing) {
+        return existing.world_id == data.world_id && existing.coord == data.coord;
+      });
+  if (found == g_app.chunk_sections.end()) {
+    g_app.chunk_sections.push_back(std::move(data));
+  } else {
+    *found = std::move(data);
+  }
+}
+
+void apply_web_chunk_section_unload(
+    const arv::protocol::ClientboundChunkSectionUnload& unload) {
+  const arv::WorldID world_id = g_app.session == nullptr
+      ? arv::WorldID{}
+      : g_app.session->camera().world_id();
+  if (unload.world_id != world_id) {
+    return;
+  }
+  const auto new_end = std::remove_if(
+      g_app.chunk_sections.begin(),
+      g_app.chunk_sections.end(),
+      [&](const arv::protocol::ClientboundChunkSectionData& existing) {
+        return existing.world_id == unload.world_id && existing.coord == unload.coord;
+      });
+  g_app.chunk_sections.erase(new_end, g_app.chunk_sections.end());
+}
+
+void apply_web_block_update_batch(arv::protocol::ClientboundBlockUpdateBatch batch) {
+  const arv::WorldID world_id = g_app.session == nullptr
+      ? arv::WorldID{}
+      : g_app.session->camera().world_id();
+  if (batch.world_id != world_id) {
+    return;
+  }
+  for (const arv::protocol::BlockUpdate& update : batch.updates) {
+    const arv::ChunkSectionCoord coord = arv::block_to_chunk(update.pos);
+    auto found = std::find_if(
+        g_app.chunk_sections.begin(),
+        g_app.chunk_sections.end(),
+        [&](const arv::protocol::ClientboundChunkSectionData& existing) {
+          return existing.world_id == batch.world_id && existing.coord == coord;
+        });
+    if (found == g_app.chunk_sections.end()) {
+      continue;
+    }
+
+    const arv::usize index = arv::voxel::local_index(arv::block_to_local(update.pos));
+    found->blocks[index] = update.new_state;
+    if (update.has_fluid) {
+      found->has_fluids = true;
+      found->fluids[index] = update.new_fluid;
+    }
+    mark_web_section_content_changed(*found, update.server_tick);
+  }
+}
+
+void collect_runtime_chunk_stream() {
   if (g_app.session == nullptr) {
     return;
   }
 
-  g_app.session->pump();
-  const arv::net::ConnectionState state = g_app.session->connection_state();
-  if (state == arv::net::ConnectionState::InGame) {
-    (void)ensure_web_player_initialized(now);
-    if (std::optional<arv::protocol::ClientboundPlayerMoveCorrection> correction =
-            g_app.session->take_player_move_correction();
-        correction.has_value()) {
-      g_app.input.player.apply_move_correction(correction.value());
-      set_status("server movement correction applied");
-    }
-    if (std::optional<arv::protocol::ClientboundPlayerVelocity> velocity =
-            g_app.session->take_player_velocity();
-        velocity.has_value() && g_app.session->world_join().has_value()) {
-      g_app.input.player.apply_player_velocity(velocity.value());
-    }
-    if (std::optional<arv::protocol::ClientboundSetMovementHz> settings =
-            g_app.session->take_movement_settings();
-        settings.has_value() && std::isfinite(settings->movement_hz)) {
-      g_app.input.movement_send_rate_hz =
-          std::max(1.0, static_cast<double>(settings->movement_hz));
-    }
-    if (std::optional<arv::protocol::ClientboundPlayerPermissions> permissions =
-            g_app.session->take_player_permissions();
-        permissions.has_value()) {
-      g_app.input.player.apply_player_permissions(permissions.value());
-    }
-    if (std::optional<arv::protocol::ClientboundPlayerMovementTuning> tuning =
-            g_app.session->take_player_movement_tuning();
-        tuning.has_value()) {
-      g_app.input.player.apply_player_movement_tuning(tuning.value());
-    }
+  std::vector<arv::protocol::ClientboundChunkSectionUnload> unloads =
+      g_app.session->drain_received_chunk_section_unloads();
+  for (const arv::protocol::ClientboundChunkSectionUnload& unload : unloads) {
+    apply_web_chunk_section_unload(unload);
   }
+
+  std::vector<arv::protocol::ClientboundChunkSectionData> chunks =
+      g_app.session->drain_received_chunk_section_data();
+  for (arv::protocol::ClientboundChunkSectionData& chunk : chunks) {
+    apply_web_chunk_section_data(std::move(chunk));
+  }
+
+  std::vector<arv::protocol::ClientboundBlockUpdateBatch> block_updates =
+      g_app.session->drain_received_block_updates();
+  for (arv::protocol::ClientboundBlockUpdateBatch& batch : block_updates) {
+    apply_web_block_update_batch(std::move(batch));
+  }
+}
+
+void poll_session() {
+  if (g_app.session == nullptr) {
+    return;
+  }
+
+  const arv::net::ConnectionState state = g_app.session->connection_state();
   g_app.connected = state != arv::net::ConnectionState::Disconnected &&
                     state != arv::net::ConnectionState::Connecting;
   g_app.connecting = state == arv::net::ConnectionState::Connecting ||
                      state == arv::net::ConnectionState::ProtocolHandshake;
+  set_shell_state(shell_state_for_connection(state));
   if (state != g_app.last_connection_state) {
     g_app.last_connection_state = state;
     if (state == arv::net::ConnectionState::Disconnected &&
@@ -2343,232 +2533,181 @@ void poll_session(double now) {
   if (!g_app.flushed_after_pack_ready &&
       (state == arv::net::ConnectionState::WorldJoin ||
        state == arv::net::ConnectionState::InGame) &&
-      !g_app.session->registry_snapshot_json().empty()) {
+      !g_app.session->multiplayer_registry_snapshot_json().empty()) {
     g_app.flushed_after_pack_ready = true;
     set_status(
         "server registry verified; syncing " +
         std::to_string(g_app.session->multiplayer_pack_cache_paths().size()) +
         " cached pack root(s)");
-    arv_web_flush_storage();
+    flush_storage();
   }
   if (state == arv::net::ConnectionState::Disconnected) {
     g_app.flushed_after_pack_ready = false;
+    g_app.chunk_sections.clear();
     clear_block_render_assets();
+    g_app.ui.screen_manager.clear();
     reset_input(true);
+  } else if (state == arv::net::ConnectionState::InGame &&
+             g_app.ui.screen_manager.empty()) {
+    reset_gameplay_screen_stack();
   }
 }
 
-void resize_canvas() {
-  const int width = arv_web_canvas_width();
-  const int height = arv_web_canvas_height();
-  if (width == g_app.width && height == g_app.height) {
-    return;
+[[nodiscard]] std::optional<arv::usize> inventory_slot_from_ui_action(
+    const arv::ui::UiAction& action) noexcept {
+  if (action.action_id != "inventory_slot") {
+    return std::nullopt;
   }
 
-  g_app.width = width;
-  g_app.height = height;
-  arv_web_set_canvas_size(width, height);
-  glViewport(0, 0, width, height);
-}
-
-EM_BOOL on_resize(int, const EmscriptenUiEvent*, void*) {
-  resize_canvas();
-  return EM_FALSE;
-}
-
-EM_BOOL on_focus(int event_type, const EmscriptenFocusEvent*, void*) {
-  g_app.focused = event_type == EMSCRIPTEN_EVENT_FOCUS;
-  if (!g_app.focused) {
-    reset_input(true);
-  }
-  set_status(g_app.focused ? "focused" : "focus lost");
-  return EM_FALSE;
-}
-
-EM_BOOL on_visibility(int, const EmscriptenVisibilityChangeEvent* event, void*) {
-  g_app.visible = event != nullptr && !event->hidden;
-  set_status(g_app.visible ? "visible" : "paused while hidden");
-  return EM_FALSE;
-}
-
-EM_BOOL on_pointerlock(int, const EmscriptenPointerlockChangeEvent* event, void*) {
-  g_app.pointer_locked = event != nullptr && event->isActive;
-  g_app.input.mouse_dx = 0.0;
-  g_app.input.mouse_dy = 0.0;
-  set_status(g_app.pointer_locked ? "pointer locked" : "pointer released");
-  return EM_FALSE;
-}
-
-EM_BOOL on_canvas_click(int, const EmscriptenMouseEvent*, void*) {
-  if (!g_app.pointer_locked) {
-    emscripten_request_pointerlock("#arvane-canvas", EM_TRUE);
-  }
-  return EM_TRUE;
-}
-
-bool set_key_state(const char* code, bool down, bool repeat) {
-  for (int slot = 0; slot < 9; ++slot) {
-    char digit_code[] = "Digit1";
-    digit_code[5] = static_cast<char>('1' + slot);
-    if (std::strcmp(code, digit_code) == 0) {
-      if (down && !repeat) {
-        g_app.input.hotbar_select = static_cast<arv::u8>(slot);
+  constexpr std::array<std::string_view, 2> prefixes{{
+      "hud.hotbar.slot.",
+      "inventory.slot.",
+  }};
+  for (std::string_view prefix : prefixes) {
+    const std::string_view id{action.element_id};
+    if (!id.starts_with(prefix)) {
+      continue;
+    }
+    const std::string_view suffix = id.substr(prefix.size());
+    if (suffix.empty()) {
+      return std::nullopt;
+    }
+    arv::usize value = 0U;
+    for (const char ch : suffix) {
+      if (ch < '0' || ch > '9') {
+        return std::nullopt;
       }
-      return true;
+      value = value * 10U + static_cast<arv::usize>(ch - '0');
     }
+    return value;
   }
-  if (std::strcmp(code, "KeyW") == 0 || std::strcmp(code, "ArrowUp") == 0) {
-    g_app.input.forward = down;
-    return true;
-  }
-  if (std::strcmp(code, "KeyS") == 0 || std::strcmp(code, "ArrowDown") == 0) {
-    g_app.input.back = down;
-    return true;
-  }
-  if (std::strcmp(code, "KeyA") == 0 || std::strcmp(code, "ArrowLeft") == 0) {
-    g_app.input.left = down;
-    return true;
-  }
-  if (std::strcmp(code, "KeyD") == 0 || std::strcmp(code, "ArrowRight") == 0) {
-    g_app.input.right = down;
-    return true;
-  }
-  if (std::strcmp(code, "Space") == 0) {
-    if (down && !repeat && !g_app.input.jump) {
-      g_app.input.jump_pressed = true;
-    }
-    g_app.input.jump = down;
-    return true;
-  }
-  if (std::strcmp(code, "ShiftLeft") == 0 || std::strcmp(code, "ShiftRight") == 0) {
-    g_app.input.sneak = down;
-    return true;
-  }
-  if (std::strcmp(code, "ControlLeft") == 0 || std::strcmp(code, "ControlRight") == 0) {
-    g_app.input.sprint = down;
-    return true;
-  }
-  if (std::strcmp(code, "KeyF") == 0) {
-    if (down && !repeat) {
-      g_app.input.toggle_fly_pressed = true;
-    }
-    return true;
-  }
-  return false;
+  return std::nullopt;
 }
 
-EM_BOOL on_key(int event_type, const EmscriptenKeyboardEvent* event, void*) {
-  if (event == nullptr) {
-    return EM_FALSE;
-  }
-  const bool down = event_type == EMSCRIPTEN_EVENT_KEYDOWN;
-  if (set_key_state(event->code, down, event->repeat)) {
-    return EM_TRUE;
-  }
-  return EM_FALSE;
-}
-
-EM_BOOL on_mouse_move(int, const EmscriptenMouseEvent* event, void*) {
-  if (event == nullptr || !g_app.pointer_locked) {
-    return EM_FALSE;
-  }
-  g_app.input.mouse_dx += event->movementX;
-  g_app.input.mouse_dy += event->movementY;
-  return EM_TRUE;
-}
-
-EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*) {
-  if (event == nullptr) {
-    return EM_FALSE;
-  }
-  const bool down = event_type == EMSCRIPTEN_EVENT_MOUSEDOWN;
-  if (event->button == 0) {
-    if (down && !g_app.input.primary_held) {
-      g_app.input.primary_pressed = true;
-      g_app.input.primary_animation_pressed = true;
-    }
-    g_app.input.primary_held = down;
-    return EM_TRUE;
-  }
-  if (event->button == 2) {
-    if (down && !g_app.input.secondary_held) {
-      g_app.input.secondary_pressed = true;
-      g_app.input.secondary_animation_pressed = true;
-    }
-    g_app.input.secondary_held = down;
-    return EM_TRUE;
-  }
-  return EM_FALSE;
-}
-
-EM_BOOL on_wheel(int, const EmscriptenWheelEvent* event, void*) {
-  if (event == nullptr || !g_app.pointer_locked || event->deltaY == 0.0) {
-    return EM_FALSE;
-  }
-  const int step = event->deltaY > 0.0 ? -1 : 1;
-  const int combined = std::clamp(
-      static_cast<int>(g_app.input.hotbar_scroll_steps) + step,
-      -127,
-      127);
-  g_app.input.hotbar_scroll_steps = static_cast<arv::i8>(combined);
-  return EM_TRUE;
-}
-
-void initialize_web_player(
-    const arv::client::ClientSessionWorldJoin& join,
-    double now) {
-  const float yaw = g_app.input.player.camera().yaw_radians();
-  const float pitch = g_app.input.player.camera().pitch_radians();
-  g_app.input.player = {};
-  g_app.input.player.camera().set_rotation(yaw, pitch);
-  g_app.input.player.enter_world(
-      join.world_id,
-      join.player_id,
-      join.local_entity_id,
-      join.spawn_position,
-      join.initial_tick,
-      join.tick_rate == 0U ? arv::DefaultBaseTps : join.tick_rate);
-  g_app.input.last_frame_time = now;
-  g_app.input.movement_accumulator_seconds = 0.0;
-  g_app.input.movement_send_accumulator_seconds = 0.0;
-  g_app.input.last_sent_action_flags = arv::protocol::PlayerActionFlags::None;
-  g_app.input.client_tick = join.initial_tick;
-  g_app.input.player_initialized = true;
-}
-
-bool ensure_web_player_initialized(double now) {
-  if (g_app.session == nullptr || !g_app.session->world_join().has_value()) {
+[[nodiscard]] bool apply_inventory_action(
+    const std::optional<arv::ui::UiAction>& action,
+    arv::player::InventoryClickButton button) {
+  if (g_app.session == nullptr || !action.has_value()) {
     return false;
   }
-  if (!g_app.input.player_initialized) {
-    initialize_web_player(*g_app.session->world_join(), now);
+  const std::optional<arv::usize> slot =
+      inventory_slot_from_ui_action(action.value());
+  if (!slot.has_value()) {
+    return false;
   }
+  (void)g_app.session->request_inventory_slot_click(slot.value(), button);
   return true;
 }
 
-void submit_web_movement(double now) {
+[[nodiscard]] bool route_inventory_mouse_input() {
+  if (g_app.session == nullptr || !g_app.session->inventory_open()) {
+    return false;
+  }
+  bool changed = false;
+  const arv::Vec2f cursor{
+      static_cast<float>(g_app.input.cursor_x),
+      static_cast<float>(g_app.input.cursor_y)};
+  (void)g_app.ui.tree.route_mouse_move(cursor);
+  if (g_app.input.mouse_left_pressed) {
+    const std::optional<arv::ui::UiNodeID> hit = g_app.ui.tree.hit_test(cursor);
+    changed = apply_inventory_action(
+                  g_app.ui.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Left),
+                  arv::player::InventoryClickButton::Primary) ||
+              changed;
+    if (!changed && !hit.has_value() &&
+        g_app.session->inventory_cursor_stack().has_value()) {
+      (void)g_app.session->request_inventory_drop_cursor(false);
+      changed = true;
+    }
+  }
+  if (g_app.input.mouse_right_pressed) {
+    const std::optional<arv::ui::UiNodeID> hit = g_app.ui.tree.hit_test(cursor);
+    changed = apply_inventory_action(
+                  g_app.ui.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Right),
+                  arv::player::InventoryClickButton::Secondary) ||
+              changed;
+    if (!changed && !hit.has_value() &&
+        g_app.session->inventory_cursor_stack().has_value()) {
+      (void)g_app.session->request_inventory_drop_cursor(true);
+      changed = true;
+    }
+  }
+  if (g_app.input.mouse_left_released) {
+    (void)g_app.ui.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Left);
+  }
+  if (g_app.input.mouse_right_released) {
+    (void)g_app.ui.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Right);
+  }
+  return changed;
+}
+
+void route_screen_mouse_input(arv::ui::UIContext& context) {
+  const arv::Vec2f cursor{
+      static_cast<float>(g_app.input.cursor_x),
+      static_cast<float>(g_app.input.cursor_y)};
+  (void)g_app.ui.tree.route_mouse_move(cursor);
+  if (g_app.input.mouse_left_pressed) {
+    const std::optional<arv::ui::UiAction> action =
+        g_app.ui.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Left);
+    if (action.has_value()) {
+      (void)g_app.ui.screen_manager.route_action(action.value(), context);
+    }
+  }
+  if (g_app.input.mouse_left_released) {
+    (void)g_app.ui.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Left);
+  }
+  if (g_app.input.mouse_right_pressed) {
+    (void)g_app.ui.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Right);
+  }
+  if (g_app.input.mouse_right_released) {
+    (void)g_app.ui.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Right);
+  }
+  if (g_app.input.mouse_wheel_y != 0.0) {
+    (void)g_app.ui.screen_manager.handle_scroll(
+        cursor,
+        static_cast<float>(g_app.input.mouse_wheel_y),
+        context);
+  }
+}
+
+void handle_pause_menu_input(arv::ui::UIContext& context) {
+  if (!g_app.input.pause_menu_pressed) {
+    return;
+  }
   if (g_app.session == nullptr ||
-      g_app.session->connection_state() != arv::net::ConnectionState::InGame ||
-      !g_app.session->world_join().has_value()) {
+      g_app.session->connection_state() != arv::net::ConnectionState::InGame) {
+    g_app.input.pause_menu_pressed = false;
     return;
   }
+  const bool has_client_overlay =
+      g_app.session->inventory_open() || g_app.session->chat_open();
+  if (g_app.ui.screen_manager.empty()) {
+    reset_gameplay_screen_stack();
+  }
+  const arv::ui::UIScreen* current = g_app.ui.screen_manager.current();
+  const bool on_gameplay_root =
+      current != nullptr && current->type() == arv::ui::MenuScreenType::Gameplay;
+  if (current != nullptr && !on_gameplay_root) {
+    (void)g_app.ui.screen_manager.handle_cancel(context);
+    g_app.input.text_cancel_pressed = false;
+  } else if (on_gameplay_root && !has_client_overlay) {
+    (void)g_app.ui.screen_manager.handle_cancel(context);
+    g_app.input.text_cancel_pressed = false;
+  }
+  g_app.input.pause_menu_pressed = false;
+}
 
-  const auto& join = *g_app.session->world_join();
-  if (!ensure_web_player_initialized(now)) {
+void route_web_ui_input() {
+  arv::ui::UIContext context = make_web_ui_context();
+  handle_pause_menu_input(context);
+  if (g_app.ui.screen_manager.blocks_gameplay_input()) {
+    route_screen_mouse_input(context);
     return;
   }
-  if (!ensure_block_render_assets_loaded()) {
-    g_app.input.last_frame_time = now;
-    return;
-  }
+  (void)route_inventory_mouse_input();
+}
 
-  const double dt_seconds = std::clamp(
-      now - g_app.input.last_frame_time,
-      0.0,
-      0.1);
-  g_app.input.last_frame_time = now;
-  g_app.session->advance_entity_interpolation(static_cast<arv::Seconds>(dt_seconds));
-
+[[nodiscard]] arv::client::InputFrame build_browser_input_frame() {
   arv::client::InputFrame input;
   input.move_forward = g_app.input.forward;
   input.move_backward = g_app.input.back;
@@ -2578,7 +2717,13 @@ void submit_web_movement(double now) {
   input.jump_held = g_app.input.jump;
   input.sneak_held = g_app.input.sneak;
   input.sprint_held = g_app.input.sprint;
+  input.mount_pressed = g_app.input.mount_pressed;
+  input.vehicle_roll_left_held = g_app.input.vehicle_roll_left_held;
+  input.vehicle_roll_right_held = g_app.input.vehicle_roll_right_held;
   input.toggle_fly_pressed = g_app.input.toggle_fly_pressed;
+  input.open_inventory_pressed = g_app.input.open_inventory_pressed;
+  input.open_chat_pressed = g_app.input.open_chat_pressed;
+  input.tab_menu_held = g_app.input.tab_menu_held;
   input.primary_pressed = g_app.input.primary_pressed;
   input.primary_held = g_app.input.primary_held;
   input.secondary_pressed = g_app.input.secondary_pressed;
@@ -2587,24 +2732,77 @@ void submit_web_movement(double now) {
   input.hotbar_scroll_steps = g_app.input.hotbar_scroll_steps;
   input.mouse_delta_x = static_cast<float>(g_app.input.mouse_dx);
   input.mouse_delta_y = static_cast<float>(g_app.input.mouse_dy);
+  input.text_input = g_app.input.text_input;
+  input.text_backspace_pressed = g_app.input.text_backspace_pressed;
+  input.text_submit_pressed = g_app.input.text_submit_pressed;
+  input.text_cancel_pressed = g_app.input.text_cancel_pressed;
+  return input;
+}
+
+void clear_per_frame_input_edges() {
   g_app.input.mouse_dx = 0.0;
   g_app.input.mouse_dy = 0.0;
-  arv::client::InputFrame animation_input = input;
-  animation_input.primary_pressed = g_app.input.primary_animation_pressed;
-  animation_input.secondary_pressed = g_app.input.secondary_animation_pressed;
+  g_app.input.mouse_left_pressed = false;
+  g_app.input.mouse_right_pressed = false;
+  g_app.input.mouse_left_released = false;
+  g_app.input.mouse_right_released = false;
+  g_app.input.mouse_wheel_y = 0.0;
   g_app.input.primary_animation_pressed = false;
   g_app.input.secondary_animation_pressed = false;
   g_app.input.jump_pressed = false;
+  g_app.input.mount_pressed = false;
   g_app.input.toggle_fly_pressed = false;
+  g_app.input.open_inventory_pressed = false;
+  g_app.input.open_chat_pressed = false;
+  g_app.input.text_input.clear();
+  g_app.input.text_backspace_pressed = false;
+  g_app.input.text_submit_pressed = false;
+  g_app.input.text_cancel_pressed = false;
+  g_app.input.pause_menu_pressed = false;
   g_app.input.hotbar_select.reset();
   g_app.input.hotbar_scroll_steps = 0;
-  g_app.input.player.submit_input(std::move(input));
+  g_app.input.primary_pressed = false;
+  g_app.input.secondary_pressed = false;
+}
+
+void submit_web_input_and_tick_runtime(double now) {
+  if (g_app.session == nullptr) {
+    return;
+  }
+  const bool wanted_cursor_before = ui_wants_cursor();
+  const double dt_seconds = std::clamp(
+      now - g_app.input.last_frame_time,
+      0.0,
+      0.1);
+  g_app.input.last_frame_time = now;
+
+  route_web_ui_input();
+  arv::client::InputFrame input = build_browser_input_frame();
+  if (g_app.ui.screen_manager.blocks_gameplay_input()) {
+    input = {};
+  }
+  arv::client::InputFrame animation_input = input;
+  animation_input.primary_pressed = g_app.input.primary_animation_pressed;
+  animation_input.secondary_pressed = g_app.input.secondary_animation_pressed;
+  g_app.session->submit_input(std::move(input));
+  const bool wants_cursor_after = ui_wants_cursor();
+  if (wants_cursor_after) {
+    release_pointer_lock();
+  } else if (wanted_cursor_before && !g_app.pointer_locked) {
+    request_pointer_lock();
+  }
   update_held_item_animation_from_input(
       animation_input,
       static_cast<arv::Seconds>(now - g_app.start_time));
+  clear_per_frame_input_edges();
+
+  g_app.session->advance_entity_interpolation(static_cast<arv::Seconds>(dt_seconds));
+  g_app.session->advance_particles(static_cast<arv::Seconds>(dt_seconds));
 
   const arv::TickRate tick_rate =
-      join.tick_rate == 0U ? arv::DefaultBaseTps : join.tick_rate;
+      g_app.session->server_tick_rate() == 0U
+          ? arv::DefaultBaseTps
+          : g_app.session->server_tick_rate();
   const arv::Seconds tick_seconds = arv::tick_duration_seconds(tick_rate);
   g_app.input.movement_accumulator_seconds = std::min(
       g_app.input.movement_accumulator_seconds + dt_seconds,
@@ -2616,36 +2814,48 @@ void submit_web_movement(double now) {
     ++fixed_steps;
     g_app.input.movement_accumulator_seconds -= tick_seconds;
 
-    const arv::u64 client_tick = g_app.input.client_tick++;
-    const arv::player::PlayerCommand command =
-        g_app.input.player.consume_command(client_tick);
-    arv::client::ChunkSectionCollisionQuery collision_query(
-        g_app.session->chunk_sections(),
-        g_app.block_assets.loaded.block_registry);
-    g_app.input.player.update_local_movement(command, &collision_query, tick_seconds);
-    g_app.input.movement_send_accumulator_seconds += tick_seconds;
-
-    const arv::protocol::PlayerActionFlags action_flags =
-        arv::client::action_flags_from_player_command(command);
-    const bool has_action =
-        action_flags != arv::protocol::PlayerActionFlags::None;
-    const bool action_flags_changed =
-        action_flags != g_app.input.last_sent_action_flags;
-    const double send_interval =
-        1.0 / static_cast<double>(std::max(g_app.input.movement_send_rate_hz, 1.0));
-    if (g_app.input.movement_send_accumulator_seconds < send_interval && !has_action &&
-        !action_flags_changed) {
-      continue;
+    const bool was_in_game =
+        g_app.session->connection_state() == arv::net::ConnectionState::InGame;
+    if (was_in_game) {
+      if (g_app.input.client_tick == 0U) {
+        g_app.input.client_tick = g_app.session->world_initial_tick();
+      }
+      ++g_app.input.client_tick;
     }
-    g_app.input.movement_send_accumulator_seconds = 0.0;
 
-    arv::protocol::ServerboundPlayerMove move =
-        g_app.input.player.build_movement_packet(0, client_tick, action_flags);
-    (void)g_app.session->submit_player_move(move);
-    g_app.input.last_sent_action_flags = action_flags;
-    g_app.input.primary_pressed = false;
-    g_app.input.secondary_pressed = false;
+    std::optional<arv::client::ChunkSectionCollisionQuery> collision_query;
+    if (g_app.block_assets.ready) {
+      collision_query.emplace(
+          g_app.chunk_sections,
+          g_app.block_assets.loaded.block_registry);
+    }
+    g_app.session->fixed_tick(
+        g_app.input.client_tick,
+        collision_query.has_value() ? &collision_query.value() : nullptr);
+    collect_runtime_chunk_stream();
+    if (!was_in_game &&
+        g_app.session->connection_state() == arv::net::ConnectionState::InGame) {
+      g_app.input.client_tick = g_app.session->world_initial_tick();
+    }
   }
+}
+
+void disconnect_web_session() {
+  if (g_app.session != nullptr) {
+    g_app.session->disconnect();
+    g_app.session.reset();
+  }
+  clear_block_render_assets();
+  g_app.chunk_sections.clear();
+  g_app.ui.screen_manager.clear();
+  reset_input(true);
+  flush_storage();
+  g_app.connected = false;
+  g_app.connecting = false;
+  g_app.flushed_after_pack_ready = false;
+  g_app.last_connection_state = arv::net::ConnectionState::Disconnected;
+  set_shell_state(WebShellState::Connect);
+  set_status("disconnected");
 }
 
 bool initialize_webgl() {
@@ -2680,21 +2890,6 @@ bool initialize_webgl() {
   return true;
 }
 
-void install_callbacks() {
-  emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_TRUE, on_resize);
-  emscripten_set_focus_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_TRUE, on_focus);
-  emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_TRUE, on_focus);
-  emscripten_set_visibilitychange_callback(nullptr, EM_TRUE, on_visibility);
-  emscripten_set_pointerlockchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, EM_TRUE, on_pointerlock);
-  emscripten_set_click_callback("#arvane-canvas", nullptr, EM_TRUE, on_canvas_click);
-  emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, EM_TRUE, on_key);
-  emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, EM_TRUE, on_key);
-  emscripten_set_mousemove_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, EM_TRUE, on_mouse_move);
-  emscripten_set_mousedown_callback("#arvane-canvas", nullptr, EM_TRUE, on_mouse_button);
-  emscripten_set_mouseup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, EM_TRUE, on_mouse_button);
-  emscripten_set_wheel_callback("#arvane-canvas", nullptr, EM_TRUE, on_wheel);
-}
-
 } // namespace
 
 extern "C" {
@@ -2704,8 +2899,8 @@ EMSCRIPTEN_KEEPALIVE int arv_web_crypto_self_test() {
     return 1;
   }
 
-  const arv::client::ClientSessionIdentity identity =
-      arv::client::make_ephemeral_client_session_identity("WebSelfTest");
+  const arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity("WebSelfTest");
   const arv::crypto::Ed25519KeyPair& key_pair = identity.key_pair;
   const std::array<std::byte, 17> short_message{
       std::byte{'a'}, std::byte{'r'}, std::byte{'v'}, std::byte{'a'},
@@ -2765,9 +2960,9 @@ EMSCRIPTEN_KEEPALIVE void arv_web_frame() {
   }
 
   const double now = emscripten_get_now() * 0.001;
-  poll_session(now);
+  poll_session();
   resize_canvas();
-  submit_web_movement(now);
+  submit_web_input_and_tick_runtime(now);
   const float pulse = static_cast<float>(0.5 + 0.5 * std::sin((now - g_app.start_time) * 0.85));
   const float base = g_app.connected ? 0.16F : (g_app.connecting ? 0.12F : 0.09F);
   glClearColor(base + pulse * 0.04F, 0.12F + pulse * 0.03F, 0.14F + pulse * 0.02F, 1.0F);
@@ -2777,7 +2972,7 @@ EMSCRIPTEN_KEEPALIVE void arv_web_frame() {
 }
 
 EMSCRIPTEN_KEEPALIVE void arv_web_connect(const char* url) {
-  if (arv_web_storage_ready() == 0) {
+  if (!storage_ready()) {
     set_status("browser storage is not ready");
     return;
   }
@@ -2787,19 +2982,19 @@ EMSCRIPTEN_KEEPALIVE void arv_web_connect(const char* url) {
   }
 
   if (g_app.session != nullptr) {
-    g_app.session->disconnect("browser reconnect");
-    g_app.session.reset();
-    arv_web_flush_storage();
+    disconnect_web_session();
   }
   clear_block_render_assets();
+  g_app.chunk_sections.clear();
+  g_app.ui.screen_manager.clear();
   reset_input(true);
   auto transport = std::make_unique<arv::net::WebSocketClientTransport>();
-  arv::client::ClientSessionIdentity identity =
-      arv::client::make_ephemeral_client_session_identity("WebPlayer");
+  arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity("WebPlayer");
   identity.arvane_home = "/arvane_home";
-  g_app.session = std::make_unique<arv::client::ClientSession>(
-      std::move(transport),
-      std::move(identity));
+  g_app.session = std::make_unique<arv::client::ClientRuntime>(std::move(transport));
+  g_app.session->set_local_identity(std::move(identity));
+  g_app.session->set_chunk_view_distance(4);
   arv::net::NetworkAddress address;
   address.host = url;
   address.port = 0U;
@@ -2808,6 +3003,7 @@ EMSCRIPTEN_KEEPALIVE void arv_web_connect(const char* url) {
     g_app.connected = false;
     g_app.connecting = false;
     g_app.session.reset();
+    set_shell_state(WebShellState::Connect);
     set_status("WebSocket connect failed: " + connected.error().message);
     return;
   }
@@ -2816,34 +3012,25 @@ EMSCRIPTEN_KEEPALIVE void arv_web_connect(const char* url) {
   g_app.connecting = true;
   g_app.flushed_after_pack_ready = false;
   g_app.last_connection_state = arv::net::ConnectionState::Connecting;
+  set_shell_state(WebShellState::Connecting);
   set_status("connecting WebSocket");
 }
 
 EMSCRIPTEN_KEEPALIVE void arv_web_disconnect() {
-  if (g_app.session != nullptr) {
-    g_app.session->disconnect("browser disconnect");
-    g_app.session.reset();
-  }
-  clear_block_render_assets();
-  reset_input(true);
-  arv_web_flush_storage();
-  g_app.connected = false;
-  g_app.connecting = false;
-  g_app.flushed_after_pack_ready = false;
-  g_app.last_connection_state = arv::net::ConnectionState::Disconnected;
-  set_status("disconnected");
+  disconnect_web_session();
 }
 
 } // extern "C"
 
 int main() {
   g_app.start_time = emscripten_get_now() * 0.001;
+  set_shell_state(WebShellState::Boot);
   set_status("starting Arvane web client");
   if (!initialize_webgl()) {
     return 1;
   }
-  install_callbacks();
-  arv_web_note_runtime_ready();
+  install_input_callbacks();
+  note_runtime_ready();
   emscripten_set_main_loop(arv_web_frame, 0, EM_TRUE);
   return 0;
 }

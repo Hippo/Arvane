@@ -134,3 +134,14 @@ h1 {
 .runtime-ready .status {
   color: var(--accent);
 }
+
+.session-panel[hidden] {
+  display: none !important;
+}
+
+body.in-game .session-panel,
+body[data-arv-state="game"] .session-panel,
+.web-client[data-arv-state="game"] .session-panel {
+  display: none !important;
+  pointer-events: none;
+}

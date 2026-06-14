@@ -457,6 +457,8 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
 
   EXPECT_TRUE(arv::asset::is_client_bundle_relative_path_allowed(
       "assets/arvane/textures/block/stone.png"));
+  EXPECT_TRUE(arv::asset::is_client_bundle_relative_path_allowed(
+      "assets/arvane/fonts/font.ttf"));
   EXPECT_FALSE(arv::asset::is_client_bundle_relative_path_allowed("../escape.txt"));
   EXPECT_FALSE(arv::asset::is_client_bundle_relative_path_allowed(
       "assets/arvane/textures/block/tool.exe"));

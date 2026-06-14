@@ -1,5 +1,6 @@
 set(ARV_CLIENT_HEADERS
   include/arv/client/block_render_assets.hpp
+  include/arv/client/block_outline_target.hpp
   include/arv/client/camera_shell.hpp
   include/arv/client/chat_history.hpp
   include/arv/client/chunk_collision_query.hpp
@@ -11,6 +12,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/client_runtime.hpp
   include/arv/client/dropped_item_mirror.hpp
   include/arv/client/entity_render_assets.hpp
+  include/arv/client/gameplay_ui_model.hpp
   include/arv/client/item_animation.hpp
   include/arv/client/item_rendering.hpp
   include/arv/client/item_ui_model.hpp
@@ -83,6 +85,7 @@ target_link_libraries(arv_client_chunk_snapshot
 )
 
 add_library(arv_client_chunk_collision STATIC
+  src/block_outline_target.cpp
   src/chunk_collision_query.cpp
 )
 target_include_directories(arv_client_chunk_collision PUBLIC include)
@@ -157,13 +160,8 @@ target_link_libraries(arv_client_item_rendering
     arv_render_headers
 )
 
-if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
-  return()
-endif()
-
-add_library(arv_client STATIC
+add_library(arv_client_runtime STATIC
   src/chunk_interest.cpp
-  src/command_chat.cpp
   src/client_chunk_inbox.cpp
   src/client_connection.cpp
   src/client_entity_mirror.cpp
@@ -175,9 +173,57 @@ add_library(arv_client STATIC
   src/client_runtime.cpp
   src/client_skin_runtime.cpp
   src/client_ui_state.cpp
+  src/gameplay_ui_model.cpp
   src/local_identity.cpp
   src/particles.cpp
 )
+target_include_directories(arv_client_runtime PUBLIC include)
+target_link_libraries(arv_client_runtime
+  PUBLIC
+    arv_asset_core
+    arv_base_ui
+    arv_client_chunk_collision
+    arv_client_chunk_snapshot
+    arv_client_dropped_items
+    arv_client_local_player
+    arv_core
+    arv_crypto
+    arv_entity
+    arv_io_headers
+    arv_net
+    arv_physics
+    arv_player
+    arv_protocol_block_updates
+    arv_protocol_chat
+    arv_protocol_dropped_items
+    arv_protocol_entity_interaction
+    arv_protocol_entity_replication
+    arv_protocol_explosion
+    arv_protocol_inventory_sync
+    arv_protocol_particles
+    arv_protocol_player_input
+    arv_protocol_player_movement
+    arv_protocol_session
+    arv_protocol_skins
+    arv_protocol_stream
+    arv_protocol_text_variables
+    arv_protocol_vehicles
+    arv_protocol_world_time
+    arv_render_mesh
+    arv_text
+  PRIVATE
+    arv_asset_bundle
+    arv_client_pack_sync
+    arv_io_data
+)
+
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  return()
+endif()
+
+add_library(arv_client STATIC
+  src/command_chat.cpp
+)
 target_include_directories(arv_client PUBLIC include)
-target_link_libraries(arv_client PUBLIC arv_client_chunk_collision arv_client_chunk_snapshot arv_client_dropped_items arv_client_item_animation arv_client_item_rendering arv_client_item_ui arv_client_local_player arv_client_render_assets arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
+target_link_libraries(arv_client PUBLIC arv_client_runtime arv_client_chunk_collision arv_client_chunk_snapshot arv_client_dropped_items arv_client_item_animation arv_client_item_rendering arv_client_item_ui arv_client_local_player arv_client_render_assets arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
 target_link_libraries(arv_client PRIVATE arv_asset arv_client_pack_sync arv_client_session arv_command arv_entity arv_io arv_text)

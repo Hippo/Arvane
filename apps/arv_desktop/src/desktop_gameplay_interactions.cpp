@@ -588,15 +588,12 @@ void DesktopFrameLoop::update_block_outline_target(DesktopGameSession& active_se
       assets_.block_registry,
       false);
   const client::CameraShell& camera = active_session.client->camera();
-  const std::optional<physics::BlockRaycastHit> hit = physics::raycast_blocks(
+  active_session.block_outline_target = client::find_block_outline_target(
       query,
+      assets_.block_registry,
       camera.position(),
       camera.forward_vector(),
       config_.physics.reach_distance);
-  if (!hit.has_value() || assets_.block_registry.is_air(hit->variant)) {
-    return;
-  }
-  active_session.block_outline_target = BlockOutlineTarget{hit->block, hit->variant};
 }
 
 } // namespace arv::desktop

@@ -1,6 +1,8 @@
 (function () {
   const statusLine = document.getElementById('status-line');
   const canvas = document.getElementById('arvane-canvas');
+  const shellRoot = document.querySelector('.web-client');
+  const connectionPanel = document.querySelector('.session-panel');
   const connectButton = document.getElementById('connect-button');
   const disconnectButton = document.getElementById('disconnect-button');
   const serverUrl = document.getElementById('server-url');
@@ -10,6 +12,14 @@
   const pendingLogLines = [];
   const runtimeCacheKey = String(Date.now());
   let storageMetadataReady = false;
+  let shellState = 'boot';
+  let panelParent = connectionPanel ? connectionPanel.parentNode : null;
+  let panelMarker = null;
+
+  if (connectionPanel && panelParent) {
+    panelMarker = document.createComment('arvane-session-panel');
+    panelParent.insertBefore(panelMarker, connectionPanel);
+  }
 
   function timestamp() {
     return new Date().toISOString();
@@ -134,8 +144,40 @@
   }
 
   window.arvWebSetStatus = setStatus;
+  function setShellState(nextState) {
+    const normalized = ['boot', 'connect', 'connecting', 'game'].includes(nextState)
+      ? nextState
+      : 'connect';
+    shellState = normalized;
+    document.body.dataset.arvState = normalized;
+    document.body.classList.toggle('in-game', normalized === 'game');
+    if (shellRoot) {
+      shellRoot.dataset.arvState = normalized;
+    }
+    const showPanel = normalized !== 'game';
+    if (connectionPanel) {
+      connectionPanel.hidden = !showPanel;
+      connectionPanel.inert = !showPanel;
+      connectionPanel.setAttribute('aria-hidden', showPanel ? 'false' : 'true');
+      if (showPanel) {
+        if (!connectionPanel.isConnected && panelParent && panelMarker) {
+          panelParent.insertBefore(connectionPanel, panelMarker.nextSibling);
+        }
+      } else if (connectionPanel.isConnected) {
+        connectionPanel.remove();
+      }
+    }
+  }
+
+  window.arvWebSetShellState = setShellState;
+  window.arvWebSetConnectionPanelVisible = function (visible) {
+    setShellState(visible ? 'connect' : 'game');
+  };
   window.arvWebRuntimeReady = function () {
     document.body.classList.add('runtime-ready');
+    if (shellState === 'boot') {
+      setShellState('connect');
+    }
     setStatus(Module.arvWebStorageReady ? 'Ready (storage mounted)' : 'Ready (storage unavailable)');
   };
 
@@ -257,8 +299,10 @@
     saveClientSettings(url);
     syncBrowserStorage('connect settings');
     if (typeof Module.ccall === 'function') {
+      setShellState('connecting');
       Module.ccall('arv_web_connect', null, ['string'], [url]);
     } else {
+      setShellState('connect');
       setStatus('Runtime is not ready yet');
     }
   });
@@ -267,6 +311,7 @@
     if (typeof Module.ccall === 'function') {
       Module.ccall('arv_web_disconnect', null, [], []);
     }
+    setShellState('connect');
     syncBrowserStorage('disconnect');
   });
 
@@ -275,5 +320,6 @@
   });
 
   setStatus('Loading runtime');
+  setShellState('boot');
   loadRuntime();
 })();

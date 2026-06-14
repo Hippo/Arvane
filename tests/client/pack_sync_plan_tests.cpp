@@ -107,6 +107,7 @@ TEST(ClientPackSyncPlanTests, UsesVerifiedCacheAndCleansStaleTemporaryEntries) {
   write_pack_manifest(packs, "sync_pack", "sync_pack");
   write_text(packs / "sync_pack/data/sync_pack/blocks.json", "{\"blocks\":[]}\n");
   write_text(packs / "sync_pack/assets/sync_pack/textures/block/test.png", "png");
+  write_text(packs / "sync_pack/assets/sync_pack/fonts/font.ttf", "fake-font");
 
   auto pack_manager = arv::asset::PackManager::load_from_packs_root(packs);
   ASSERT_TRUE(pack_manager) << pack_manager.error().describe();
@@ -125,6 +126,8 @@ TEST(ClientPackSyncPlanTests, UsesVerifiedCacheAndCleansStaleTemporaryEntries) {
       cache_root,
       bundle.value().bundle_hash);
   ASSERT_TRUE(install) << install.error().message;
+  EXPECT_TRUE(std::filesystem::is_regular_file(
+      install.value().cache_path / "assets/sync_pack/fonts/font.ttf"));
 
   const std::filesystem::path stale_partial = cache_root / "tmp" / "stale.partial";
   write_text(stale_partial / "manifest.json", "partial\n");
