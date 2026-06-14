@@ -971,6 +971,7 @@ TEST(ConfigTests, MissingSplitConfigReturnsDefaultsAndWritesConfigFiles) {
   EXPECT_NE(written_server.value().find("path: /arvane"), std::string::npos);
   EXPECT_NE(written_server.value().find("commands:"), std::string::npos);
   EXPECT_NE(written_server.value().find("permission_denied_message: No permission"), std::string::npos);
+  EXPECT_EQ(written_server.value().find("server_root:"), std::string::npos);
   EXPECT_EQ(written_server.value().find("native_plugins:"), std::string::npos);
   EXPECT_NE(written_server.value().find("world: default"), std::string::npos);
 }

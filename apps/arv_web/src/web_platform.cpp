@@ -6,6 +6,7 @@
 #include <GLES3/gl3.h>
 
 #include <algorithm>
+#include <string>
 
 namespace {
 
@@ -67,6 +68,33 @@ EM_JS(void, arv_web_set_shell_state, (const char* state), {
   const value = UTF8ToString(state);
   if (typeof window.arvWebSetShellState === 'function') {
     window.arvWebSetShellState(value);
+  }
+});
+
+EM_JS(int, arv_web_open_url, (const char* url), {
+  const value = UTF8ToString(url);
+  try {
+    const opened = window.open(value, '_blank', 'noopener,noreferrer');
+    return opened ? 1 : 0;
+  } catch (error) {
+    console.warn('[arv_web] failed to open URL', error);
+    return 0;
+  }
+});
+
+EM_JS(int, arv_web_copy_text_to_clipboard, (const char* text), {
+  const value = UTF8ToString(text);
+  if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+    return 0;
+  }
+  try {
+    navigator.clipboard.writeText(value).catch(function(error) {
+      console.warn('[arv_web] clipboard write failed', error);
+    });
+    return 1;
+  } catch (error) {
+    console.warn('[arv_web] clipboard write failed', error);
+    return 0;
   }
 });
 
@@ -181,6 +209,16 @@ void set_shell_state(WebShellState state) {
       arv_web_set_shell_state("game");
       break;
   }
+}
+
+bool open_url(std::string_view url) {
+  const std::string owned{url};
+  return arv_web_open_url(owned.c_str()) != 0;
+}
+
+bool copy_text_to_clipboard(std::string_view text) {
+  const std::string owned{text};
+  return arv_web_copy_text_to_clipboard(owned.c_str()) != 0;
 }
 
 double device_pixel_ratio() {

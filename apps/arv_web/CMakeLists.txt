@@ -15,6 +15,7 @@ add_executable(arv_web
   src/web_entity_fallback.cpp
   src/web_input.cpp
   src/web_platform.cpp
+  src/web_player_skin_atlas.cpp
 )
 
 target_compile_features(arv_web PRIVATE cxx_std_20)

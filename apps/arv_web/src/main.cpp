@@ -13,8 +13,10 @@
 #include "arv/client/item_rendering.hpp"
 #include "arv/client/item_ui_model.hpp"
 #include "arv/client/local_identity.hpp"
+#include "arv/client/player_skin_rendering.hpp"
 #include "arv/client/render_asset_upload.hpp"
 #include "arv/client/gameplay_ui_model.hpp"
+#include "arv/client/ui_interactions.hpp"
 #include "arv/base/ui/screens/pause_menu.hpp"
 #include "arv/base/ui/widgets/gameplay.hpp"
 #include "arv/crypto/crypto_init.hpp"
@@ -29,11 +31,13 @@
 #include "arv/protocol/protocol_version.hpp"
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/text/language.hpp"
+#include "arv/text/rich_text.hpp"
 #include "arv/ui/core/ui.hpp"
 #include "web_application.hpp"
 #include "web_entity_fallback.hpp"
 #include "web_input.hpp"
 #include "web_platform.hpp"
+#include "web_player_skin_atlas.hpp"
 
 #include <algorithm>
 #include <array>
@@ -216,6 +220,18 @@ void destroy_entity_texture() {
   g_app.renderer.entity_texture_height = 0U;
 }
 
+void destroy_player_skin_texture() {
+  if (g_app.renderer.player_skin_texture != 0U) {
+    glDeleteTextures(1, &g_app.renderer.player_skin_texture);
+  }
+  g_app.renderer.player_skin_texture = 0U;
+  g_app.renderer.player_skin_texture_width = 0U;
+  g_app.renderer.player_skin_texture_height = 0U;
+  g_app.renderer.player_skin_texture_layers = 0U;
+  g_app.renderer.player_skin_allocator.clear();
+  g_app.renderer.player_skin_regions.clear();
+}
+
 void destroy_item_texture() {
   if (g_app.renderer.item_texture != 0U) {
     glDeleteTextures(1, &g_app.renderer.item_texture);
@@ -246,6 +262,7 @@ void clear_entity_render_assets() {
   destroy_entity_mesh();
   destroy_entity_gpu_models();
   destroy_entity_texture();
+  destroy_player_skin_texture();
   destroy_item_texture();
   g_app.entity_assets = {};
   g_app.renderer.announced_first_entity_upload = false;
@@ -430,11 +447,14 @@ uniform int u_bone_count;
 uniform vec3 u_bone_pivots[128];
 uniform vec3 u_bone_rotations[128];
 uniform vec3 u_bone_positions[128];
+uniform vec4 u_player_skin_region;
+uniform int u_player_skin_page;
 out vec2 v_uv;
 out vec3 v_color;
 flat out uint v_flags;
 flat out uint v_texture_domain;
 flat out uint v_atlas_page;
+out vec4 v_player_skin_region;
 
 vec3 rotate_euler_degrees(vec3 value, vec3 degrees) {
   vec3 r = radians(degrees);
@@ -474,7 +494,8 @@ void main() {
   v_color = a_color;
   v_flags = a_flags;
   v_texture_domain = a_texture_domain;
-  v_atlas_page = a_atlas_page;
+  v_atlas_page = a_texture_domain == 2u ? uint(u_player_skin_page) : a_atlas_page;
+  v_player_skin_region = u_player_skin_region;
   gl_Position = u_mvp * vec4(world, 1.0);
 }
 )";
@@ -483,16 +504,32 @@ precision highp float;
 precision highp int;
 precision highp sampler2DArray;
 uniform sampler2DArray u_entity_atlas;
+uniform sampler2DArray u_player_skin_atlas;
 uniform vec2 u_atlas_size;
+uniform vec2 u_player_skin_atlas_size;
 in vec2 v_uv;
 in vec3 v_color;
 flat in uint v_flags;
 flat in uint v_texture_domain;
 flat in uint v_atlas_page;
+in vec4 v_player_skin_region;
 out vec4 out_color;
-void main() {
+
+vec4 sample_entity_texel() {
+  if (v_texture_domain == 2u &&
+      v_player_skin_region.z > 0.0 &&
+      v_player_skin_region.w > 0.0) {
+    vec2 skin_atlas_size = max(u_player_skin_atlas_size, vec2(1.0, 1.0));
+    vec2 skin_uv =
+        (v_player_skin_region.xy + v_uv * v_player_skin_region.zw) / skin_atlas_size;
+    return texture(u_player_skin_atlas, vec3(skin_uv, float(v_atlas_page)));
+  }
   vec2 atlas_size = max(u_atlas_size, vec2(1.0, 1.0));
-  vec4 texel = texture(u_entity_atlas, vec3(v_uv / atlas_size, float(v_atlas_page)));
+  return texture(u_entity_atlas, vec3(v_uv / atlas_size, float(v_atlas_page)));
+}
+
+void main() {
+  vec4 texel = sample_entity_texel();
   bool skin_base = (v_flags & 1u) != 0u;
   bool skin_decor = (v_flags & 2u) != 0u;
   if (skin_base && texel.a < 0.1) {
@@ -634,6 +671,14 @@ void main() {
       glGetUniformLocation(g_app.renderer.entity_program, "u_entity_atlas");
   g_app.renderer.entity_atlas_size_location =
       glGetUniformLocation(g_app.renderer.entity_program, "u_atlas_size");
+  g_app.renderer.entity_player_skin_atlas_location =
+      glGetUniformLocation(g_app.renderer.entity_program, "u_player_skin_atlas");
+  g_app.renderer.entity_player_skin_atlas_size_location =
+      glGetUniformLocation(g_app.renderer.entity_program, "u_player_skin_atlas_size");
+  g_app.renderer.entity_player_skin_region_location =
+      glGetUniformLocation(g_app.renderer.entity_program, "u_player_skin_region");
+  g_app.renderer.entity_player_skin_page_location =
+      glGetUniformLocation(g_app.renderer.entity_program, "u_player_skin_page");
   g_app.renderer.entity_bone_count_location =
       glGetUniformLocation(g_app.renderer.entity_program, "u_bone_count");
   g_app.renderer.entity_bone_pivots_location =
@@ -995,6 +1040,125 @@ void upload_entity_models(const arv::client::EntityRenderAssets& assets) {
   g_app.renderer.entity_texture_width = upload.width;
   g_app.renderer.entity_texture_height = upload.height;
   return true;
+}
+
+[[nodiscard]] bool ensure_player_skin_texture_array() {
+  if (g_app.renderer.player_skin_texture != 0U) {
+    return true;
+  }
+
+  GLint max_texture_size = 0;
+  GLint max_array_layers = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+  glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &max_array_layers);
+
+  constexpr arv::u16 PreferredPageSize = 2048U;
+  constexpr arv::u16 PreferredMaxPages = 8U;
+  const GLint texture_limit =
+      max_texture_size > 0 ? max_texture_size : static_cast<GLint>(PreferredPageSize);
+  const GLint layer_limit =
+      max_array_layers > 0 ? max_array_layers : static_cast<GLint>(PreferredMaxPages);
+  const arv::u16 page_size = static_cast<arv::u16>(
+      std::max<GLint>(1, std::min<GLint>(PreferredPageSize, texture_limit)));
+  const arv::u16 layers = static_cast<arv::u16>(
+      std::max<GLint>(1, std::min<GLint>(PreferredMaxPages, layer_limit)));
+
+  g_app.renderer.player_skin_allocator.configure({page_size, page_size, layers});
+  glGenTextures(1, &g_app.renderer.player_skin_texture);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.player_skin_texture);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
+  glTexImage3D(
+      GL_TEXTURE_2D_ARRAY,
+      0,
+      GL_RGBA8,
+      page_size,
+      page_size,
+      layers,
+      0,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      nullptr);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
+  g_app.renderer.player_skin_texture_width = page_size;
+  g_app.renderer.player_skin_texture_height = page_size;
+  g_app.renderer.player_skin_texture_layers = layers;
+  return g_app.renderer.player_skin_texture != 0U;
+}
+
+[[nodiscard]] bool upload_web_player_skin_texture(
+    std::string skin_hash,
+    const arv::asset::Image& image) {
+  if (skin_hash.empty() ||
+      g_app.renderer.player_skin_regions.find(skin_hash) !=
+          g_app.renderer.player_skin_regions.end()) {
+    return true;
+  }
+  if (image.empty() ||
+      image.width > std::numeric_limits<arv::u16>::max() ||
+      image.height > std::numeric_limits<arv::u16>::max() ||
+      image.pixels.size() !=
+          static_cast<arv::usize>(image.width) * static_cast<arv::usize>(image.height) * 4U ||
+      !ensure_player_skin_texture_array()) {
+    return false;
+  }
+
+  const auto handle = g_app.renderer.player_skin_allocator.allocate(
+      static_cast<arv::u16>(image.width),
+      static_cast<arv::u16>(image.height));
+  if (!handle.has_value()) {
+    set_status("web player skin atlas is full");
+    return false;
+  }
+  const auto region = g_app.renderer.player_skin_allocator.resolve(handle.value());
+  if (!region.has_value()) {
+    return false;
+  }
+
+  glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.player_skin_texture);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexSubImage3D(
+      GL_TEXTURE_2D_ARRAY,
+      0,
+      region->x,
+      region->y,
+      region->page_index,
+      static_cast<GLsizei>(image.width),
+      static_cast<GLsizei>(image.height),
+      1,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      image.pixels.data());
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
+  g_app.renderer.player_skin_regions[std::move(skin_hash)] = handle.value();
+  return true;
+}
+
+void refresh_web_player_skin_render_assets() {
+  if (g_app.session == nullptr || !g_app.entity_assets.ready) {
+    return;
+  }
+
+  const arv::client::LocalPlayerIdentity& identity = g_app.session->local_identity();
+  for (const arv::protocol::PlayerProfileInfo& profile :
+       g_app.session->player_profile_infos()) {
+    const std::string& skin_hash = profile.skin.skin_hash;
+    if (skin_hash.empty() ||
+        g_app.renderer.player_skin_regions.find(skin_hash) !=
+            g_app.renderer.player_skin_regions.end()) {
+      continue;
+    }
+    std::optional<arv::asset::Image> image =
+        arv::client::load_valid_player_skin_render_image(identity, profile.skin);
+    if (!image.has_value()) {
+      continue;
+    }
+    (void)upload_web_player_skin_texture(skin_hash, image.value());
+  }
 }
 
 [[nodiscard]] bool upload_item_texture_array(
@@ -1649,8 +1813,34 @@ void update_held_item_animation_from_input(
       continue;
     }
 
+    arv::render::EntityModelID model_id = model->second;
+    arv::render::TextureRegionHandle player_skin_region;
+    const arv::protocol::PlayerProfileInfo* profile =
+        mirror.owning_player.has_value()
+            ? g_app.session->profile_info_for_player(mirror.owning_player.value())
+            : nullptr;
+    const bool slim_player = profile != nullptr && profile->skin.slim_model;
+    if (slim_player &&
+        g_app.entity_assets.loaded.render_assets.player_slim_model.value != 0U) {
+      model_id = g_app.entity_assets.loaded.render_assets.player_slim_model;
+    }
+    if (profile != nullptr && !profile->skin.skin_hash.empty()) {
+      const auto region = g_app.renderer.player_skin_regions.find(profile->skin.skin_hash);
+      if (region != g_app.renderer.player_skin_regions.end() &&
+          region->second.valid() &&
+          g_app.renderer.player_skin_allocator.resolve(region->second).has_value()) {
+        player_skin_region = region->second;
+        if (slim_player &&
+            g_app.entity_assets.loaded.render_assets.player_slim_skin_model.value != 0U) {
+          model_id = g_app.entity_assets.loaded.render_assets.player_slim_skin_model;
+        } else if (g_app.entity_assets.loaded.render_assets.player_skin_model.value != 0U) {
+          model_id = g_app.entity_assets.loaded.render_assets.player_skin_model;
+        }
+      }
+    }
+
     arv::render::EntityDrawItem draw;
-    draw.model_id = model->second;
+    draw.model_id = model_id;
     if (const auto animation =
             g_app.entity_assets.loaded.render_assets.animation_by_type.find(mirror.entity_type);
         animation != g_app.entity_assets.loaded.render_assets.animation_by_type.end()) {
@@ -1659,6 +1849,7 @@ void update_held_item_animation_from_input(
     draw.position = mirror.render_position;
     draw.rotation = mirror.render_rotation;
     draw.scale = 1.0F;
+    draw.player_skin_region = player_skin_region;
     draw.animations.reserve(mirror.animations.size());
     for (const arv::protocol::EntityAnimationPlayback& animation : mirror.animations) {
       draw.animations.push_back({animation.name, animation.time_seconds});
@@ -1772,6 +1963,7 @@ void draw_entity_models(
     return;
   }
 
+  refresh_web_player_skin_render_assets();
   std::vector<arv::render::EntityDrawItem> draws =
       build_entity_draw_items(animation_time_seconds);
   const arv::Vec3f eye = g_app.session == nullptr
@@ -1800,8 +1992,19 @@ void draw_entity_models(
       g_app.renderer.entity_atlas_size_location,
       static_cast<float>(std::max(g_app.renderer.entity_texture_width, 1U)),
       static_cast<float>(std::max(g_app.renderer.entity_texture_height, 1U)));
+  glUniform1i(g_app.renderer.entity_player_skin_atlas_location, 1);
+  glUniform2f(
+      g_app.renderer.entity_player_skin_atlas_size_location,
+      static_cast<float>(std::max(g_app.renderer.player_skin_texture_width, 1U)),
+      static_cast<float>(std::max(g_app.renderer.player_skin_texture_height, 1U)));
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D_ARRAY, g_app.renderer.entity_texture);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(
+      GL_TEXTURE_2D_ARRAY,
+      g_app.renderer.player_skin_texture != 0U
+          ? g_app.renderer.player_skin_texture
+          : g_app.renderer.entity_texture);
 
   for (const arv::render::EntityDrawItem& draw : draws) {
     const arv::render::EntityModelAsset* model = find_entity_model(draw.model_id);
@@ -1861,10 +2064,36 @@ void draw_entity_models(
         draw.rotation.z,
         draw.rotation.w);
     glUniform1f(g_app.renderer.entity_scale_location, draw.scale);
+    arv::Vec4f player_skin_region{};
+    arv::u32 player_skin_page = 0U;
+    if (draw.player_skin_region.valid()) {
+      const auto region =
+          g_app.renderer.player_skin_allocator.resolve(draw.player_skin_region);
+      if (region.has_value()) {
+        player_skin_region = {
+            static_cast<arv::f32>(region->x),
+            static_cast<arv::f32>(region->y),
+            static_cast<arv::f32>(region->width),
+            static_cast<arv::f32>(region->height)};
+        player_skin_page = region->page_index;
+      }
+    }
+    glUniform4f(
+        g_app.renderer.entity_player_skin_region_location,
+        player_skin_region.x,
+        player_skin_region.y,
+        player_skin_region.z,
+        player_skin_region.w);
+    glUniform1i(
+        g_app.renderer.entity_player_skin_page_location,
+        static_cast<GLint>(player_skin_page));
     glBindVertexArray(gpu->second.vao);
     glDrawElements(GL_TRIANGLES, gpu->second.index_count, GL_UNSIGNED_INT, nullptr);
   }
 
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
+  glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D_ARRAY, 0U);
 }
 
@@ -2287,12 +2516,26 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
         g_app.entity_assets.item_atlas,
         g_app.block_assets.loaded.block_atlas);
   }
+  const auto ui_now = std::chrono::steady_clock::now();
+  if (item_ui_ready && g_app.session->has_authoritative_inventory()) {
+    arv::client::update_hotbar_item_popup(
+        g_app.ui.hotbar_item_popup,
+        g_app.session->selected_hotbar_slot(),
+        std::span<const arv::ui::UiItemStackView>{
+            inventory_slots.data(),
+            inventory_slots.size()},
+        ui_now);
+  } else {
+    arv::client::reset_hotbar_item_popup(g_app.ui.hotbar_item_popup);
+  }
+  const arv::f32 item_popup_alpha =
+      arv::client::hotbar_item_popup_alpha(g_app.ui.hotbar_item_popup, ui_now);
   arv::io::UiConfig::ChatConfig chat_config;
   arv::client::refresh_gameplay_chat_lines(
       g_app.ui.chat_lines,
       *g_app.session,
       chat_config,
-      std::chrono::steady_clock::now(),
+      ui_now,
       g_app.ui.chat_history_scroll_offset);
   const arv::ui::UiDisplayMetrics metrics = web_ui_metrics();
   const arv::Vec2f viewport = metrics.logical_size;
@@ -2335,7 +2578,14 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
               .tab_title = "Players",
               .viewport = viewport,
               .cursor_position = cursor_position,
+              .hotbar_item_popup_name = item_popup_alpha > 0.0F
+                  ? std::string_view{
+                        g_app.ui.hotbar_item_popup.popup_name.data(),
+                        g_app.ui.hotbar_item_popup.popup_name.size()}
+                  : std::string_view{},
+              .hotbar_item_popup_alpha = item_popup_alpha,
               .ride_prompt = std::move(ride_prompt),
+              .language = &g_app.ui.language,
               .debug_fps_visible = false,
           });
 
@@ -2349,6 +2599,35 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
   g_app.ui.tree.layout_with_metrics(
       metrics,
       g_app.ui.text_measurer.has_value() ? &g_app.ui.text_measurer.value() : nullptr);
+  const std::optional<arv::ui::UiAction> hover_action =
+      g_app.ui.tree.route_mouse_move(cursor_position);
+  const bool added_inventory_tooltip =
+      arv::client::append_inventory_hover_tooltip_if_needed(
+          g_app.ui.tree,
+          g_app.session->inventory_open(),
+          cursor_stack,
+          std::span<const arv::ui::UiItemStackView>{
+              inventory_slots.data(),
+              inventory_slots.size()},
+          metrics,
+          cursor_position,
+          hover_action);
+  const bool added_chat_tooltip =
+      arv::client::append_chat_hover_tooltip_if_needed(
+          g_app.ui.tree,
+          g_app.session->chat_open(),
+          std::span<const arv::ui::ChatLineView>{
+              g_app.ui.chat_lines.data(),
+              g_app.ui.chat_lines.size()},
+          metrics,
+          cursor_position,
+          hover_action);
+  if (added_inventory_tooltip || added_chat_tooltip) {
+    g_app.ui.tree.layout_with_metrics(
+        metrics,
+        g_app.ui.text_measurer.has_value() ? &g_app.ui.text_measurer.value() : nullptr);
+    (void)g_app.ui.tree.route_mouse_move(cursor_position);
+  }
   arv::render::FramePacket frame;
   arv::ui::append_ui_draw_commands(
       g_app.ui.tree,
@@ -2659,33 +2938,7 @@ void poll_session() {
 
 [[nodiscard]] std::optional<arv::usize> inventory_slot_from_ui_action(
     const arv::ui::UiAction& action) noexcept {
-  if (action.action_id != "inventory_slot") {
-    return std::nullopt;
-  }
-
-  constexpr std::array<std::string_view, 2> prefixes{{
-      "hud.hotbar.slot.",
-      "inventory.slot.",
-  }};
-  for (std::string_view prefix : prefixes) {
-    const std::string_view id{action.element_id};
-    if (!id.starts_with(prefix)) {
-      continue;
-    }
-    const std::string_view suffix = id.substr(prefix.size());
-    if (suffix.empty()) {
-      return std::nullopt;
-    }
-    arv::usize value = 0U;
-    for (const char ch : suffix) {
-      if (ch < '0' || ch > '9') {
-        return std::nullopt;
-      }
-      value = value * 10U + static_cast<arv::usize>(ch - '0');
-    }
-    return value;
-  }
-  return std::nullopt;
+  return arv::client::inventory_slot_from_ui_action(action);
 }
 
 [[nodiscard]] bool apply_inventory_action(
@@ -2701,6 +2954,115 @@ void poll_session() {
   }
   (void)g_app.session->request_inventory_slot_click(slot.value(), button);
   return true;
+}
+
+[[nodiscard]] bool route_chat_mouse_input() {
+  if (g_app.session == nullptr || !g_app.session->chat_open()) {
+    return false;
+  }
+
+  bool handled = false;
+  const arv::Vec2f cursor{
+      static_cast<float>(g_app.input.cursor_x),
+      static_cast<float>(g_app.input.cursor_y)};
+  (void)g_app.ui.tree.route_mouse_move(cursor);
+  if (g_app.input.mouse_wheel_y != 0.0) {
+    const arv::io::UiConfig::ChatConfig chat_config;
+    const arv::usize max_offset = arv::client::gameplay_chat_history_max_scroll_offset(
+        g_app.session->chat_history().size(),
+        std::max<arv::usize>(1U, chat_config.open_max_lines));
+    g_app.ui.chat_history_scroll_offset =
+        std::min(g_app.ui.chat_history_scroll_offset, max_offset);
+    const arv::usize steps =
+        arv::client::gameplay_chat_scroll_steps(
+            static_cast<arv::f32>(g_app.input.mouse_wheel_y));
+    if (steps > 0U) {
+      if (g_app.input.mouse_wheel_y > 0.0) {
+        const arv::usize remaining =
+            max_offset > g_app.ui.chat_history_scroll_offset
+                ? max_offset - g_app.ui.chat_history_scroll_offset
+                : 0U;
+        g_app.ui.chat_history_scroll_offset += std::min(steps, remaining);
+      } else {
+        g_app.ui.chat_history_scroll_offset -=
+            std::min(steps, g_app.ui.chat_history_scroll_offset);
+      }
+      handled = true;
+    }
+  }
+
+  if (g_app.input.mouse_left_pressed) {
+    const std::optional<arv::ui::UiAction> action =
+        g_app.ui.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Left);
+    if (action.has_value() && action->action_id == "chat_url_cancel") {
+      g_app.session->cancel_chat_url_confirmation();
+      handled = true;
+    } else if (action.has_value() && action->action_id == "chat_url_confirm") {
+      const std::optional<std::string> pending =
+          g_app.session->pending_chat_url_confirmation();
+      if (pending.has_value() &&
+          arv::client::safe_chat_url_scheme(pending.value()) &&
+          open_url(pending.value())) {
+        g_app.session->cancel_chat_url_confirmation();
+      } else {
+        g_app.session->acknowledge_chat_url_open_unavailable();
+      }
+      handled = true;
+    } else if (action.has_value()) {
+      const std::optional<std::pair<arv::usize, arv::usize>> run_id =
+          arv::client::chat_run_from_ui_action(action.value());
+      if (run_id.has_value() &&
+          run_id->first < g_app.ui.chat_lines.size() &&
+          run_id->second < g_app.ui.chat_lines[run_id->first].runs.size()) {
+        const arv::text::RichTextRun& run =
+            g_app.ui.chat_lines[run_id->first].runs[run_id->second];
+        if (run.click_event.has_value()) {
+          const arv::text::ClickEvent& click = run.click_event.value();
+          switch (click.action) {
+            case arv::text::ClickAction::SuggestCommand:
+              g_app.session->suggest_chat_command(click.value);
+              handled = true;
+              break;
+            case arv::text::ClickAction::OpenUrl:
+              if (arv::client::safe_chat_url_scheme(click.value)) {
+                g_app.session->request_chat_url_confirmation(click.value);
+              } else {
+                g_app.session->add_chat_message(
+                    g_app.ui.language.text("ui.chat.blocked_unsafe_url"));
+              }
+              handled = true;
+              break;
+            case arv::text::ClickAction::RunCommand: {
+              const arv::net::NetworkResult result =
+                  g_app.session->send_chat_message(click.value);
+              if (!result) {
+                g_app.session->add_chat_message(result.error().message);
+              }
+              handled = true;
+              break;
+            }
+            case arv::text::ClickAction::CopyToClipboard:
+              if (!copy_text_to_clipboard(click.value)) {
+                g_app.session->add_chat_message(
+                    g_app.ui.language.text("ui.chat.copy_unavailable"));
+              }
+              handled = true;
+              break;
+          }
+        }
+      }
+    }
+  }
+  if (g_app.input.mouse_left_released) {
+    (void)g_app.ui.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Left);
+  }
+  if (g_app.input.mouse_right_pressed) {
+    (void)g_app.ui.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Right);
+  }
+  if (g_app.input.mouse_right_released) {
+    (void)g_app.ui.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Right);
+  }
+  return handled;
 }
 
 [[nodiscard]] bool route_inventory_mouse_input() {
@@ -2808,6 +3170,7 @@ void route_web_ui_input() {
     route_screen_mouse_input(context);
     return;
   }
+  (void)route_chat_mouse_input();
   (void)route_inventory_mouse_input();
 }
 

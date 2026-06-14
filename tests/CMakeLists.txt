@@ -61,6 +61,7 @@ add_executable(arv_tests
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/chunk_view.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/debug_imgui.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_desktop/src/desktop_render_builders.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_dedicated/src/dedicated_launch_options.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_dedicated/src/dedicated_runtime_layout.cpp
   io/config_tests.cpp
   text/language_tests.cpp
@@ -110,8 +111,10 @@ add_executable(arv_tests
   world/world_runtime_tests.cpp
   world/world_time_tests.cpp
   web/web_chunk_mesh_tests.cpp
+  web/web_player_skin_atlas_tests.cpp
   web/web_player_movement_tests.cpp
   ${CMAKE_SOURCE_DIR}/apps/arv_web/src/web_chunk_mesh.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_web/src/web_player_skin_atlas.cpp
 )
 
 target_include_directories(arv_tests PRIVATE

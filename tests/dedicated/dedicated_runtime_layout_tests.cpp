@@ -1,4 +1,5 @@
 #include "dedicated_runtime_layout.hpp"
+#include "dedicated_launch_options.hpp"
 
 #include "arv/asset/pack.hpp"
 #include "arv/io/config.hpp"
@@ -8,7 +9,9 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -49,7 +52,56 @@ capabilities:
       R"({"blocks":[]})");
 }
 
+[[nodiscard]] arv::dedicated::DedicatedLaunchOptions parse_args(
+    std::vector<std::string> args) {
+  std::vector<char*> argv;
+  argv.reserve(args.size());
+  for (std::string& arg : args) {
+    argv.push_back(arg.data());
+  }
+  return arv::dedicated::parse_launch_options(
+      static_cast<int>(argv.size()),
+      argv.data());
+}
+
 } // namespace
+
+TEST(DedicatedLaunchOptionsTests, DefaultsServerRootToExecutableDirectory) {
+  const TempDir temp{"arvane_dedicated_launch_"};
+  const std::filesystem::path executable = temp.path / "arvane_server" / "arv_dedicated";
+
+  const auto options = parse_args({executable.string()});
+
+  EXPECT_EQ(options.config.profile, arv::io::ConfigProfile::Server);
+  EXPECT_EQ(
+      options.config.explicit_server_root_path,
+      std::filesystem::weakly_canonical(executable).parent_path());
+}
+
+TEST(DedicatedLaunchOptionsTests, ProjectRootKeepsDefaultServerRootResolution) {
+  const TempDir temp{"arvane_dedicated_launch_project_"};
+
+  const auto options = parse_args({
+      "arv_dedicated",
+      "--project-root",
+      temp.path.string(),
+  });
+
+  EXPECT_TRUE(options.config.explicit_server_root_path.empty());
+  EXPECT_EQ(options.config.project_root, temp.path);
+}
+
+TEST(DedicatedLaunchOptionsTests, ExplicitServerRootWins) {
+  const TempDir temp{"arvane_dedicated_launch_root_"};
+
+  const auto options = parse_args({
+      "arv_dedicated",
+      "--server-root",
+      (temp.path / "server").string(),
+  });
+
+  EXPECT_EQ(options.config.explicit_server_root_path, temp.path / "server");
+}
 
 TEST(DedicatedRuntimeLayoutTests, SeedsBasePackAndCreatesServerDirectoriesOnCleanInstall) {
   const TempDir temp{"arvane_dedicated_layout_"};

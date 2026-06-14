@@ -7,6 +7,7 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/entity_render_assets.hpp"
 #include "arv/client/item_animation.hpp"
+#include "arv/client/ui_interactions.hpp"
 #include "arv/base/ui/screens/screen.hpp"
 #include "arv/base/ui/widgets/chat.hpp"
 #include "arv/net/transport.hpp"
@@ -14,6 +15,7 @@
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/text/language.hpp"
 #include "arv/ui/core/ui.hpp"
+#include "web_player_skin_atlas.hpp"
 
 #include <array>
 #include <filesystem>
@@ -114,6 +116,7 @@ struct WebUiState {
   ui::UIScreenManager screen_manager{};
   std::vector<ui::ChatLineView> chat_lines{};
   usize chat_history_scroll_offset{};
+  client::HotbarItemPopupState hotbar_item_popup{};
   f32 font_framebuffer_scale{1.0F};
   bool ready{};
 };
@@ -138,6 +141,10 @@ struct ChunkRenderer {
   GLint entity_scale_location{-1};
   GLint entity_atlas_location{-1};
   GLint entity_atlas_size_location{-1};
+  GLint entity_player_skin_atlas_location{-1};
+  GLint entity_player_skin_atlas_size_location{-1};
+  GLint entity_player_skin_region_location{-1};
+  GLint entity_player_skin_page_location{-1};
   GLint entity_bone_count_location{-1};
   GLint entity_bone_pivots_location{-1};
   GLint entity_bone_rotations_location{-1};
@@ -145,6 +152,12 @@ struct ChunkRenderer {
   GLuint entity_texture{};
   u32 entity_texture_width{};
   u32 entity_texture_height{};
+  GLuint player_skin_texture{};
+  u32 player_skin_texture_width{};
+  u32 player_skin_texture_height{};
+  u32 player_skin_texture_layers{};
+  WebPlayerSkinRegionAllocator player_skin_allocator{};
+  HashMap<std::string, render::TextureRegionHandle> player_skin_regions{};
   GLuint item_texture{};
   u32 item_texture_width{};
   u32 item_texture_height{};

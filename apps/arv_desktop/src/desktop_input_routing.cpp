@@ -1,41 +1,12 @@
 #include "desktop_input_routing.hpp"
 
 #include "arv/client/client_runtime.hpp"
-
-#include <array>
-#include <string_view>
+#include "arv/client/ui_interactions.hpp"
 
 namespace arv::desktop {
 
 std::optional<usize> inventory_slot_from_ui_action(const ui::UiAction& action) noexcept {
-  if (action.action_id != "inventory_slot") {
-    return std::nullopt;
-  }
-
-  constexpr std::array<std::string_view, 2> prefixes{{
-      "hud.hotbar.slot.",
-      "inventory.slot.",
-  }};
-  for (std::string_view prefix : prefixes) {
-    const std::string_view id{action.element_id};
-    if (!id.starts_with(prefix)) {
-      continue;
-    }
-
-    usize value = 0;
-    const std::string_view suffix = id.substr(prefix.size());
-    if (suffix.empty()) {
-      return std::nullopt;
-    }
-    for (const char ch : suffix) {
-      if (ch < '0' || ch > '9') {
-        return std::nullopt;
-      }
-      value = value * 10U + static_cast<usize>(ch - '0');
-    }
-    return value;
-  }
-  return std::nullopt;
+  return client::inventory_slot_from_ui_action(action);
 }
 
 bool apply_inventory_action(

@@ -14,6 +14,9 @@ set(ARV_DEDICATED_SOURCES
 )
 
 add_executable(arv_dedicated ${ARV_DEDICATED_SOURCES})
+set_target_properties(arv_dedicated PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/arvane_server"
+)
 target_link_libraries(arv_dedicated PRIVATE
   arv_asset
   arv_base

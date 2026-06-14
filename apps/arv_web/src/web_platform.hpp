@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 namespace arv::web {
 
@@ -21,6 +22,8 @@ void resize_canvas();
 void request_pointer_lock();
 void release_pointer_lock();
 void set_shell_state(WebShellState state);
+[[nodiscard]] bool open_url(std::string_view url);
+[[nodiscard]] bool copy_text_to_clipboard(std::string_view text);
 [[nodiscard]] double device_pixel_ratio();
 [[nodiscard]] bool pointer_lock_uses_raw_movement();
 

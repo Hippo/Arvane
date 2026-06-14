@@ -3,6 +3,7 @@
 #include "asset_helpers.hpp"
 #include "desktop_skin_textures.hpp"
 
+#include "arv/client/player_skin_rendering.hpp"
 #include "arv/io/files.hpp"
 #include "arv/protocol/skins.hpp"
 
@@ -15,68 +16,6 @@
 
 namespace arv::desktop {
 namespace {
-
-[[nodiscard]] std::filesystem::path player_skin_render_path(
-    const client::LocalPlayerIdentity& identity,
-    std::string_view skin_hash) {
-  for (const client::LocalProfileSkin& local_skin : identity.skins) {
-    if (local_skin.skin_hash == skin_hash) {
-      return client::local_skin_path(identity.arvane_home, local_skin);
-    }
-  }
-  return client::cached_skin_path(identity.arvane_home, skin_hash);
-}
-
-[[nodiscard]] std::optional<asset::Image> load_valid_player_skin_render_image(
-    const client::LocalPlayerIdentity& identity,
-    const protocol::SkinDescriptor& skin) {
-  if (identity.arvane_home.empty() || skin.skin_hash.empty() ||
-      !protocol::is_valid_skin_hash(skin.skin_hash)) {
-    return std::nullopt;
-  }
-  std::optional<std::vector<u8>> bytes =
-      io::try_read_binary_file(player_skin_render_path(identity, skin.skin_hash));
-  if (!bytes.has_value() ||
-      protocol::skin_hash_for_bytes(*bytes) != skin.skin_hash) {
-    return std::nullopt;
-  }
-
-  auto image = asset::decode_png_image_bytes(
-      *bytes,
-      {"arvane:texture/player_skin/" + skin.skin_hash});
-  if (!image || image.value().width != skin.width ||
-      image.value().height != skin.height ||
-      image.value().pixels.size() !=
-          static_cast<usize>(skin.width) * static_cast<usize>(skin.height) * 4U) {
-    return std::nullopt;
-  }
-  return std::move(image.value());
-}
-
-[[nodiscard]] std::optional<asset::Image> load_valid_local_profile_skin_render_image(
-    const std::filesystem::path& arvane_home,
-    const client::LocalProfileSkin& skin) {
-  if (skin.skin_hash.empty() || !protocol::is_valid_skin_hash(skin.skin_hash)) {
-    return std::nullopt;
-  }
-  std::optional<std::vector<u8>> bytes =
-      io::try_read_binary_file(client::local_skin_path(arvane_home, skin));
-  if (!bytes.has_value() ||
-      protocol::skin_hash_for_bytes(*bytes) != skin.skin_hash) {
-    return std::nullopt;
-  }
-
-  auto image = asset::decode_png_image_bytes(
-      *bytes,
-      {"arvane:texture/player_skin/" + skin.skin_hash});
-  if (!image || image.value().width != skin.width ||
-      image.value().height != skin.height ||
-      image.value().pixels.size() !=
-          static_cast<usize>(skin.width) * static_cast<usize>(skin.height) * 4U) {
-    return std::nullopt;
-  }
-  return std::move(image.value());
-}
 
 [[nodiscard]] ui::PlayerSkinTextureView player_skin_texture_view(
     const render::PlayerSkinTextureSnapshot& snapshot) noexcept {
@@ -119,7 +58,7 @@ void DesktopFrameLoop::refresh_player_skin_render_assets(DesktopGameSession& act
       continue;
     }
     std::optional<asset::Image> image =
-        load_valid_player_skin_render_image(identity, profile.skin);
+        client::load_valid_player_skin_render_image(identity, profile.skin);
     if (image.has_value()) {
       new_images[skin_hash] = std::move(image.value());
     }
@@ -167,7 +106,7 @@ void DesktopFrameLoop::refresh_menu_profile_render_assets() {
       return;
     }
     std::optional<asset::Image> image =
-        load_valid_local_profile_skin_render_image(
+        client::load_valid_local_profile_skin_render_image(
             config_.paths.arvane_home_path(),
             skin);
     if (image.has_value()) {

@@ -10,6 +10,7 @@
 #include "arv/asset/resource.hpp"
 #include "arv/base/ui.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/ui_interactions.hpp"
 #include "arv/command/command.hpp"
 #include "arv/core/arena.hpp"
 #include "arv/core/time.hpp"
@@ -363,11 +364,7 @@ private:
   HashMap<std::string, render::TextureRegionHandle> player_skin_regions_{};
   UiBuildCacheKey ui_tree_cache_key_{};
   bool ui_tree_cache_valid_{};
-  std::chrono::steady_clock::time_point hotbar_item_popup_expires_at_{};
-  std::string hotbar_item_popup_name_{};
-  std::string observed_hotbar_item_name_{};
-  u8 observed_hotbar_slot_{};
-  bool hotbar_item_observation_initialized_{};
+  client::HotbarItemPopupState hotbar_item_popup_{};
   bool gameplay_menu_stack_active_{};
   DesktopLoadingScreen loading_screen_{DesktopLoadingScreen::None};
   DesktopAssetSource asset_source_{DesktopAssetSource::Local};
@@ -377,10 +374,6 @@ private:
   std::optional<PendingRemoteStart> pending_remote_start_{};
 
   static constexpr auto FpsHudRefreshInterval = std::chrono::milliseconds(250);
-  static constexpr auto HotbarItemPopupVisibleDuration =
-      std::chrono::milliseconds(1500);
-  static constexpr auto HotbarItemPopupFadeDuration =
-      std::chrono::milliseconds(350);
 };
 
 [[nodiscard]] bool session_world_ready(const DesktopGameSession* session) noexcept;

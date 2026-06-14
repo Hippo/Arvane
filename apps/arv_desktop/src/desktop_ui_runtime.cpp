@@ -8,6 +8,7 @@
 
 #include "arv/client/command_chat.hpp"
 #include "arv/client/gameplay_interactions.hpp"
+#include "arv/client/ui_interactions.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -92,65 +93,6 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
     const std::optional<ui::UiItemStackView>& stack) noexcept {
   hash = ui_cache_hash_append_bool(hash, stack.has_value());
   return stack.has_value() ? ui_cache_hash_append_item_stack(hash, stack.value()) : hash;
-}
-
-[[nodiscard]] std::optional<std::pair<usize, usize>> chat_run_from_ui_action(
-    const ui::UiAction& action) {
-  if (action.action_id != "chat_run") {
-    return std::nullopt;
-  }
-  constexpr std::string_view prefix = "chat.line.";
-  constexpr std::string_view middle = ".run.";
-  const std::string_view id{action.element_id};
-  if (!id.starts_with(prefix)) {
-    return std::nullopt;
-  }
-  const usize middle_pos = id.find(middle, prefix.size());
-  if (middle_pos == std::string_view::npos) {
-    return std::nullopt;
-  }
-  auto parse_number = [](std::string_view text) -> std::optional<usize> {
-    const usize dot = text.find('.');
-    if (dot != std::string_view::npos) {
-      text = text.substr(0U, dot);
-    }
-    if (text.empty()) {
-      return std::nullopt;
-    }
-    usize value = 0U;
-    for (const char ch : text) {
-      if (ch < '0' || ch > '9') {
-        return std::nullopt;
-      }
-      value = value * 10U + static_cast<usize>(ch - '0');
-    }
-    return value;
-  };
-  std::optional<usize> line =
-      parse_number(id.substr(prefix.size(), middle_pos - prefix.size()));
-  std::optional<usize> run =
-      parse_number(id.substr(middle_pos + middle.size()));
-  if (!line.has_value() || !run.has_value()) {
-    return std::nullopt;
-  }
-  return std::pair<usize, usize>{line.value(), run.value()};
-}
-
-[[nodiscard]] bool safe_url_scheme(std::string_view url) noexcept {
-  const usize colon = url.find(':');
-  if (colon == std::string_view::npos || colon == 0U) {
-    return false;
-  }
-  std::string scheme;
-  scheme.reserve(colon);
-  for (usize index = 0; index < colon; ++index) {
-    char ch = url[index];
-    if (ch >= 'A' && ch <= 'Z') {
-      ch = static_cast<char>(ch - 'A' + 'a');
-    }
-    scheme.push_back(ch);
-  }
-  return scheme == "http" || scheme == "https";
 }
 
 [[nodiscard]] std::string mount_binding_label(
@@ -448,8 +390,7 @@ void DesktopFrameLoop::build_ui(
         now);
     update_hotbar_item_popup(*active_session, now);
   } else {
-    hotbar_item_observation_initialized_ = false;
-    hotbar_item_popup_name_.clear();
+    client::reset_hotbar_item_popup(hotbar_item_popup_);
   }
 
   menu_context.viewport = ui_metrics_.logical_size;
@@ -484,7 +425,7 @@ void DesktopFrameLoop::build_ui(
                 *active_session,
                 platform_input,
                 displayed_fps_,
-                hotbar_item_popup_name_,
+                hotbar_item_popup_.popup_name,
                 hotbar_item_popup_alpha(now),
                 ride_prompt.visible,
                 ride_prompt.key_label)
@@ -575,145 +516,59 @@ void DesktopFrameLoop::update_hotbar_item_popup(
     DesktopGameSession& active_session,
     std::chrono::steady_clock::time_point now) {
   if (active_session.client == nullptr) {
-    hotbar_item_observation_initialized_ = false;
-    hotbar_item_popup_name_.clear();
+    client::reset_hotbar_item_popup(hotbar_item_popup_);
     return;
   }
 
-  const u8 selected_slot = active_session.client->selected_hotbar_slot();
-  std::string selected_item_name;
-  if (selected_slot < active_session.inventory_slots.size()) {
-    const ui::UiItemStackView& stack = active_session.inventory_slots[selected_slot];
-    if (!stack.empty()) {
-      selected_item_name =
-          stack.display_name.empty() ? stack.item_name : stack.display_name;
-    }
-  }
-
-  if (!hotbar_item_observation_initialized_) {
-    observed_hotbar_slot_ = selected_slot;
-    observed_hotbar_item_name_ = std::move(selected_item_name);
-    hotbar_item_observation_initialized_ = true;
-    return;
-  }
-
-  if (selected_slot == observed_hotbar_slot_ &&
-      selected_item_name == observed_hotbar_item_name_) {
-    return;
-  }
-
-  observed_hotbar_slot_ = selected_slot;
-  observed_hotbar_item_name_ = selected_item_name;
-  if (selected_item_name.empty()) {
-    hotbar_item_popup_name_.clear();
-    hotbar_item_popup_expires_at_ = now;
-    return;
-  }
-
-  hotbar_item_popup_name_ = std::move(selected_item_name);
-  hotbar_item_popup_expires_at_ = now + HotbarItemPopupVisibleDuration;
+  client::update_hotbar_item_popup(
+      hotbar_item_popup_,
+      active_session.client->selected_hotbar_slot(),
+      std::span<const ui::UiItemStackView>{
+          active_session.inventory_slots.data(),
+          active_session.inventory_slots.size()},
+      now);
 }
 
 f32 DesktopFrameLoop::hotbar_item_popup_alpha(
     std::chrono::steady_clock::time_point now) const noexcept {
-  if (hotbar_item_popup_name_.empty() || now >= hotbar_item_popup_expires_at_) {
-    return 0.0F;
-  }
-
-  const auto remaining = hotbar_item_popup_expires_at_ - now;
-  if (remaining >= HotbarItemPopupFadeDuration) {
-    return 1.0F;
-  }
-  const auto remaining_ms =
-      std::chrono::duration<f32, std::milli>(remaining).count();
-  const auto fade_ms =
-      std::chrono::duration<f32, std::milli>(HotbarItemPopupFadeDuration).count();
-  return std::clamp(remaining_ms / fade_ms, 0.0F, 1.0F);
+  return client::hotbar_item_popup_alpha(hotbar_item_popup_, now);
 }
 
 bool DesktopFrameLoop::append_inventory_hover_tooltip_if_needed(
     DesktopGameSession& active_session,
     const platform::InputSnapshot& platform_input,
     const std::optional<ui::UiAction>& hover_action) {
-  if (active_session.client == nullptr ||
-      !active_session.client->inventory_open() ||
-      (active_session.carried_inventory_stack.has_value() &&
-       !active_session.carried_inventory_stack->empty()) ||
-      ui_tree_.find_by_stable_id("inventory.tooltip") != nullptr ||
-      !hover_action.has_value() ||
-      !std::string_view{hover_action->element_id}.starts_with("inventory.slot.")) {
+  if (active_session.client == nullptr) {
     return false;
   }
-
-  const std::optional<usize> slot = inventory_slot_from_ui_action(*hover_action);
-  if (!slot.has_value() || slot.value() >= active_session.inventory_slots.size()) {
-    return false;
-  }
-
-  const ui::UiItemStackView& stack = active_session.inventory_slots[slot.value()];
-  if (stack.empty()) {
-    return false;
-  }
-  std::string tooltip_text =
-      stack.display_name.empty() ? stack.item_name : stack.display_name;
-  if (tooltip_text.empty()) {
-    return false;
-  }
-
-  ui::append_item_tooltip(
+  return client::append_inventory_hover_tooltip_if_needed(
       ui_tree_,
-      {
-          true,
-          std::move(tooltip_text),
-          ui_metrics_.logical_size,
-          {
-              platform_input.cursor_x,
-              platform_input.cursor_y,
-          },
-      });
-  return true;
+      active_session.client->inventory_open(),
+      active_session.carried_inventory_stack,
+      std::span<const ui::UiItemStackView>{
+          active_session.inventory_slots.data(),
+          active_session.inventory_slots.size()},
+      ui_metrics_,
+      {platform_input.cursor_x, platform_input.cursor_y},
+      hover_action);
 }
 
 bool DesktopFrameLoop::append_chat_hover_tooltip_if_needed(
     DesktopGameSession& active_session,
     const platform::InputSnapshot& platform_input,
     const std::optional<ui::UiAction>& hover_action) {
-  if (active_session.client == nullptr ||
-      !active_session.client->chat_open() ||
-      ui_tree_.find_by_stable_id("chat.tooltip") != nullptr ||
-      !hover_action.has_value()) {
+  if (active_session.client == nullptr) {
     return false;
   }
-  const std::optional<std::pair<usize, usize>> run_id =
-      chat_run_from_ui_action(hover_action.value());
-  if (!run_id.has_value() ||
-      run_id->first >= active_session.chat_lines.size() ||
-      run_id->second >= active_session.chat_lines[run_id->first].runs.size()) {
-    return false;
-  }
-  const arv::text::RichTextRun& run =
-      active_session.chat_lines[run_id->first].runs[run_id->second];
-  if (!run.hover_event.has_value() ||
-      run.hover_event->action != arv::text::HoverAction::ShowText ||
-      run.hover_event->show_text == nullptr) {
-    return false;
-  }
-  const std::string tooltip = arv::text::to_plain_text(*run.hover_event->show_text);
-  if (tooltip.empty()) {
-    return false;
-  }
-  ui::append_chat_tooltip(
+  return client::append_chat_hover_tooltip_if_needed(
       ui_tree_,
-      {
-          true,
-          tooltip,
-          ui_metrics_.logical_size,
-          {
-              platform_input.cursor_x,
-              platform_input.cursor_y,
-          },
-      });
-  return true;
+      active_session.client->chat_open(),
+      std::span<const ui::ChatLineView>{
+          active_session.chat_lines.data(),
+          active_session.chat_lines.size()},
+      ui_metrics_,
+      {platform_input.cursor_x, platform_input.cursor_y},
+      hover_action);
 }
 
 bool DesktopFrameLoop::route_chat_mouse_input(
@@ -759,7 +614,7 @@ bool DesktopFrameLoop::route_chat_mouse_input(
       handled = true;
     } else if (action.has_value()) {
       const std::optional<std::pair<usize, usize>> run_id =
-          chat_run_from_ui_action(action.value());
+          client::chat_run_from_ui_action(action.value());
       if (run_id.has_value() &&
           run_id->first < active_session.chat_lines.size() &&
           run_id->second < active_session.chat_lines[run_id->first].runs.size()) {
@@ -773,7 +628,7 @@ bool DesktopFrameLoop::route_chat_mouse_input(
               handled = true;
               break;
             case arv::text::ClickAction::OpenUrl:
-              if (safe_url_scheme(click.value)) {
+              if (client::safe_chat_url_scheme(click.value)) {
                 active_session.client->request_chat_url_confirmation(click.value);
               } else {
                 active_session.client->add_chat_message(
@@ -852,8 +707,8 @@ void DesktopFrameLoop::build_gameplay_ui(
               displayed_fps_,
               item_popup_alpha > 0.0F
                   ? std::string_view{
-                        hotbar_item_popup_name_.data(),
-                        hotbar_item_popup_name_.size()}
+                        hotbar_item_popup_.popup_name.data(),
+                        hotbar_item_popup_.popup_name.size()}
                   : std::string_view{},
               item_popup_alpha,
               std::move(ride_prompt),

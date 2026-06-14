@@ -19,8 +19,10 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/item_ui_model.hpp
   include/arv/client/local_identity.hpp
   include/arv/client/local_player_controller.hpp
+  include/arv/client/player_skin_rendering.hpp
   include/arv/client/particles.hpp
   include/arv/client/render_asset_upload.hpp
+  include/arv/client/ui_interactions.hpp
 )
 
 add_library(arv_client_pack_sync STATIC
@@ -177,7 +179,9 @@ add_library(arv_client_runtime STATIC
   src/gameplay_interactions.cpp
   src/gameplay_ui_model.cpp
   src/local_identity.cpp
+  src/player_skin_rendering.cpp
   src/particles.cpp
+  src/ui_interactions.cpp
 )
 target_include_directories(arv_client_runtime PUBLIC include)
 target_link_libraries(arv_client_runtime
