@@ -13,6 +13,9 @@ using namespace screens_detail;
 
 class GameplayScreen final : public UIScreen {
 public:
+  explicit GameplayScreen(PauseMenuOptions options) : options_(options) {
+  }
+
   [[nodiscard]] MenuScreenType type() const noexcept override {
     return MenuScreenType::Gameplay;
   }
@@ -29,7 +32,7 @@ public:
     if (ctx.screens == nullptr) {
       return false;
     }
-    ctx.screens->push(make_pause_menu_screen());
+    ctx.screens->push(make_pause_menu_screen(options_));
     return true;
   }
 
@@ -40,10 +43,16 @@ public:
   [[nodiscard]] bool blocks_gameplay_input() const noexcept override {
     return false;
   }
+
+private:
+  PauseMenuOptions options_{};
 };
 
 class PauseMenuScreen final : public UIScreen {
 public:
+  explicit PauseMenuScreen(PauseMenuOptions options) : options_(options) {
+  }
+
   [[nodiscard]] MenuScreenType type() const noexcept override {
     return MenuScreenType::PauseMenu;
   }
@@ -78,15 +87,17 @@ public:
         UiControlRole::Primary);
     add_button(ctx.tree, stack, "menu.pause.settings", tr(ctx, "ui.menu.common.settings"), "pause.settings");
     add_button(ctx.tree, stack, "menu.pause.main_menu", tr(ctx, "ui.menu.pause.back_to_main_menu"), "pause.main_menu");
-    add_button(
-        ctx.tree,
-        stack,
-        "menu.pause.quit",
-        tr(ctx, "ui.menu.common.quit"),
-        "pause.quit",
-        true,
-        false,
-        UiControlRole::Danger);
+    if (options_.show_quit) {
+      add_button(
+          ctx.tree,
+          stack,
+          "menu.pause.quit",
+          tr(ctx, "ui.menu.common.quit"),
+          "pause.quit",
+          true,
+          false,
+          UiControlRole::Danger);
+    }
   }
 
   bool handle_action(const UiAction& action, UIContext& ctx) override {
@@ -123,16 +134,19 @@ public:
   [[nodiscard]] bool pauses_singleplayer() const noexcept override {
     return true;
   }
+
+private:
+  PauseMenuOptions options_{};
 };
 
 } // namespace
 
-std::unique_ptr<UIScreen> make_gameplay_screen() {
-  return std::make_unique<GameplayScreen>();
+std::unique_ptr<UIScreen> make_gameplay_screen(PauseMenuOptions options) {
+  return std::make_unique<GameplayScreen>(options);
 }
 
-std::unique_ptr<UIScreen> make_pause_menu_screen() {
-  return std::make_unique<PauseMenuScreen>();
+std::unique_ptr<UIScreen> make_pause_menu_screen(PauseMenuOptions options) {
+  return std::make_unique<PauseMenuScreen>(options);
 }
 
 } // namespace arv::ui

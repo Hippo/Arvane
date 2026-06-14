@@ -35,6 +35,7 @@ target_link_libraries(arv_web
     arv_platform_input
     arv_render_mesh
     arv_ui
+    arv_world_time
 )
 set_target_properties(arv_web PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${ARV_WEB_DIST_DIR}"

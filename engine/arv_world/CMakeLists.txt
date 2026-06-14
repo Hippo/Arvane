@@ -34,6 +34,16 @@ set(ARV_WORLD_HEADERS
   include/arv/world/world_time.hpp
 )
 
+add_library(arv_world_time STATIC
+  src/world_time.cpp
+)
+target_include_directories(arv_world_time PUBLIC include)
+target_link_libraries(arv_world_time PUBLIC arv_core_headers)
+
+if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
+  return()
+endif()
+
 add_library(arv_world STATIC
   src/entity_goal_utils.cpp
   src/entity_goal_registry.cpp
@@ -54,7 +64,6 @@ add_library(arv_world STATIC
   src/worldgen/structure_candidate.cpp
   src/worldgen/terrain_profile.cpp
   src/worldgen/terrain_query.cpp
-  src/world_time.cpp
   src/world_runtime_internal.cpp
   src/world_runtime.cpp
   src/world_chunk_store.cpp
@@ -72,5 +81,5 @@ add_library(arv_world STATIC
   src/world_region_runtime.cpp
 )
 target_include_directories(arv_world PUBLIC include)
-target_link_libraries(arv_world PUBLIC arv_asset arv_blueprint arv_core arv_entity arv_physics arv_player arv_voxel EnTT::EnTT)
+target_link_libraries(arv_world PUBLIC arv_asset arv_blueprint arv_core arv_entity arv_physics arv_player arv_voxel arv_world_time EnTT::EnTT)
 target_link_libraries(arv_world PRIVATE arv_io FastNoise2)

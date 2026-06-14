@@ -22,6 +22,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/player_skin_rendering.hpp
   include/arv/client/particles.hpp
   include/arv/client/render_asset_upload.hpp
+  include/arv/client/sky_rendering.hpp
   include/arv/client/ui_interactions.hpp
 )
 
@@ -103,15 +104,18 @@ add_library(arv_client_render_assets STATIC
   src/block_render_assets.cpp
   src/entity_render_assets.cpp
   src/render_asset_upload.cpp
+  src/sky_rendering.cpp
 )
 target_include_directories(arv_client_render_assets PUBLIC include)
 target_link_libraries(arv_client_render_assets
   PUBLIC
     arv_asset_core
     arv_entity
+    arv_io_headers
     arv_player
     arv_render_mesh
     arv_render_headers
+    arv_world_time
 )
 
 add_library(arv_client_item_ui STATIC

@@ -15,6 +15,7 @@
 #include "arv/client/local_identity.hpp"
 #include "arv/client/player_skin_rendering.hpp"
 #include "arv/client/render_asset_upload.hpp"
+#include "arv/client/sky_rendering.hpp"
 #include "arv/client/gameplay_ui_model.hpp"
 #include "arv/client/ui_interactions.hpp"
 #include "arv/base/ui/screens/pause_menu.hpp"
@@ -62,6 +63,137 @@ using namespace arv::web;
 
 void disconnect_web_session();
 
+inline constexpr arv::i32 MaxConfigurableChunkDistance = 32;
+
+[[nodiscard]] arv::ui::RenderSettingsView default_web_render_settings() noexcept {
+  arv::ui::RenderSettingsView settings;
+  settings.load_distance = 4;
+  settings.view_distance = 4;
+  settings.stream_distance = 4;
+  return settings;
+}
+
+[[nodiscard]] arv::ui::RenderSettingsView normalized_web_render_settings(
+    arv::ui::RenderSettingsView settings) noexcept {
+  settings.load_distance =
+      std::clamp(settings.load_distance, 1, MaxConfigurableChunkDistance);
+  settings.simulation_distance =
+      std::clamp(settings.simulation_distance, 0, settings.load_distance);
+  settings.stream_distance =
+      std::clamp(settings.stream_distance, 1, settings.load_distance);
+  settings.view_distance =
+      std::clamp(settings.view_distance, 1, settings.stream_distance);
+  settings.fps_cap = std::clamp<arv::u32>(settings.fps_cap, 30U, 240U);
+  settings.mesh_upload_budget =
+      std::clamp<arv::u32>(settings.mesh_upload_budget, 1U, 32U);
+  settings.star_intensity = std::clamp(settings.star_intensity, 0.0F, 3.0F);
+  settings.cloud_intensity = std::clamp(settings.cloud_intensity, 0.0F, 3.0F);
+  settings.cirrus_amount = std::clamp(settings.cirrus_amount, 0.0F, 1.0F);
+  settings.cumulus_amount = std::clamp(settings.cumulus_amount, 0.0F, 1.0F);
+  settings.outline_red = std::clamp(settings.outline_red, 0.0F, 1.0F);
+  settings.outline_green = std::clamp(settings.outline_green, 0.0F, 1.0F);
+  settings.outline_blue = std::clamp(settings.outline_blue, 0.0F, 1.0F);
+  settings.outline_thickness = std::clamp(settings.outline_thickness, 0.1F, 2.0F);
+  return settings;
+}
+
+[[nodiscard]] arv::ui::ControlsSettingsView normalized_web_controls_settings(
+    arv::ui::ControlsSettingsView settings) noexcept {
+  settings.mouse_sensitivity_percent =
+      std::clamp(settings.mouse_sensitivity_percent, 10.0F, 300.0F);
+  return settings;
+}
+
+[[nodiscard]] arv::ui::InterfaceSettingsView normalized_web_interface_settings(
+    arv::ui::InterfaceSettingsView settings) noexcept {
+  settings.chat_history_max =
+      std::clamp<arv::u32>(settings.chat_history_max, 100U, 5000U);
+  settings.chat_open_lines =
+      std::clamp<arv::u32>(settings.chat_open_lines, 1U, 16U);
+  settings.chat_passive_lines =
+      std::clamp<arv::u32>(settings.chat_passive_lines, 0U, 16U);
+  settings.chat_passive_visible_seconds =
+      std::clamp(settings.chat_passive_visible_seconds, 0.0F, 30.0F);
+  settings.chat_passive_fade_seconds =
+      std::clamp(settings.chat_passive_fade_seconds, 0.0F, 30.0F);
+  return settings;
+}
+
+[[nodiscard]] arv::player::PlayerTuning web_player_tuning(
+    const arv::ui::ControlsSettingsView& settings) noexcept {
+  arv::player::PlayerTuning tuning = arv::player::default_player_tuning();
+  tuning.mouse_sensitivity_radians =
+      arv::player::DefaultMouseSensitivityRadians *
+      (std::clamp(settings.mouse_sensitivity_percent, 10.0F, 300.0F) / 100.0F);
+  return tuning;
+}
+
+[[nodiscard]] arv::platform::InputDeviceType platform_device_from(
+    arv::ui::InputBindingDevice type) noexcept {
+  switch (type) {
+    case arv::ui::InputBindingDevice::Keyboard:
+      return arv::platform::InputDeviceType::Keyboard;
+    case arv::ui::InputBindingDevice::MouseButton:
+      return arv::platform::InputDeviceType::MouseButton;
+    case arv::ui::InputBindingDevice::MouseWheel:
+      return arv::platform::InputDeviceType::MouseWheel;
+  }
+  return arv::platform::InputDeviceType::Keyboard;
+}
+
+[[nodiscard]] arv::ui::InputBindingDevice ui_device_from(
+    arv::platform::InputDeviceType type) noexcept {
+  switch (type) {
+    case arv::platform::InputDeviceType::Keyboard:
+      return arv::ui::InputBindingDevice::Keyboard;
+    case arv::platform::InputDeviceType::MouseButton:
+      return arv::ui::InputBindingDevice::MouseButton;
+    case arv::platform::InputDeviceType::MouseWheel:
+      return arv::ui::InputBindingDevice::MouseWheel;
+  }
+  return arv::ui::InputBindingDevice::Keyboard;
+}
+
+[[nodiscard]] std::string binding_conflict_key(
+    const arv::platform::InputBinding& binding) {
+  return std::string{arv::platform::input_device_type_name(binding.device_type)} + ":" +
+         binding.input_code + ":" + std::to_string(binding.modifiers);
+}
+
+[[nodiscard]] arv::ui::InputBindingView input_binding_view_from(
+    const arv::platform::InputBinding& binding) {
+  return {
+      true,
+      ui_device_from(binding.device_type),
+      binding.input_code,
+      arv::platform::input_binding_label(binding),
+      binding.modifiers};
+}
+
+[[nodiscard]] std::optional<arv::platform::InputBinding> platform_binding_from(
+    const arv::ui::InputBindingView& binding) {
+  const arv::platform::InputDeviceType device = platform_device_from(binding.device);
+  const std::optional<std::string> canonical =
+      arv::platform::canonical_input_code(device, binding.input_code);
+  if (!canonical.has_value()) {
+    return std::nullopt;
+  }
+  return arv::platform::InputBinding{device, canonical.value(), binding.modifiers};
+}
+
+[[nodiscard]] std::string display_name_from_action(std::string_view action_name) {
+  std::string display;
+  display.reserve(action_name.size() + 4U);
+  for (arv::usize index = 0; index < action_name.size(); ++index) {
+    const char ch = action_name[index];
+    if (index > 0U && ch >= 'A' && ch <= 'Z') {
+      display.push_back(' ');
+    }
+    display.push_back(ch);
+  }
+  return display;
+}
+
 class WebUiBridge final : public arv::ui::UICommandSink,
                           public arv::ui::UIScreenDataSource,
                           public arv::ui::UIClipboard {
@@ -75,18 +207,83 @@ public:
     if (std::holds_alternative<arv::ui::ResumeGameCommand>(command)) {
       return;
     }
+    if (const auto* request =
+            std::get_if<arv::ui::SetRenderSettingsCommand>(&command);
+        request != nullptr) {
+      apply_render_settings(request->settings);
+      return;
+    }
+    if (const auto* request =
+            std::get_if<arv::ui::SetControlsSettingsCommand>(&command);
+        request != nullptr) {
+      apply_controls_settings(request->settings);
+      return;
+    }
+    if (const auto* request =
+            std::get_if<arv::ui::SetInterfaceSettingsCommand>(&command);
+        request != nullptr) {
+      apply_interface_settings(request->settings);
+      return;
+    }
+    if (const auto* request = std::get_if<arv::ui::SetKeyBindCommand>(&command);
+        request != nullptr) {
+      apply_key_bind(*request);
+      return;
+    }
+    if (const auto* request = std::get_if<arv::ui::ResetKeyBindCommand>(&command);
+        request != nullptr) {
+      apply_key_bind_reset(*request);
+      return;
+    }
   }
 
   [[nodiscard]] arv::ui::RenderSettingsView render_settings() const override {
-    return {};
+    return render_settings_;
   }
 
   [[nodiscard]] arv::ui::ControlsSettingsView controls_settings() const override {
-    return {};
+    return controls_settings_;
   }
 
   [[nodiscard]] arv::ui::InterfaceSettingsView interface_settings() const override {
-    return {};
+    return interface_settings_;
+  }
+
+  [[nodiscard]] std::vector<arv::ui::KeyBindEntryView> key_bind_entries() const override {
+    std::vector<arv::ui::KeyBindEntryView> entries;
+    arv::HashMap<std::string, arv::u32> binding_counts;
+    for (arv::usize index = 0;
+         index < static_cast<arv::usize>(arv::platform::LogicalAction::Count);
+         ++index) {
+      const auto action = static_cast<arv::platform::LogicalAction>(index);
+      for (const arv::platform::InputBinding& binding :
+           arv::platform::bindings_for_action(g_app.input_bindings, action)) {
+        ++binding_counts[binding_conflict_key(binding)];
+      }
+    }
+
+    entries.reserve(static_cast<arv::usize>(arv::platform::LogicalAction::Count));
+    for (arv::usize index = 0;
+         index < static_cast<arv::usize>(arv::platform::LogicalAction::Count);
+         ++index) {
+      const auto action = static_cast<arv::platform::LogicalAction>(index);
+      arv::ui::KeyBindEntryView entry;
+      entry.action_name = std::string{arv::platform::logical_action_name(action)};
+      entry.display_name = display_name_from_action(entry.action_name);
+      const auto& bindings = arv::platform::bindings_for_action(g_app.input_bindings, action);
+      if (!bindings.empty()) {
+        entry.primary.has_binding = true;
+        entry.primary.binding = input_binding_view_from(bindings[0]);
+        entry.primary.conflict = binding_counts[binding_conflict_key(bindings[0])] > 1U;
+      }
+      if (bindings.size() > 1U) {
+        entry.secondary.has_binding = true;
+        entry.secondary.binding = input_binding_view_from(bindings[1]);
+        entry.secondary.conflict = binding_counts[binding_conflict_key(bindings[1])] > 1U;
+      }
+      entries.push_back(std::move(entry));
+    }
+    return entries;
   }
 
   [[nodiscard]] std::string text() const override {
@@ -98,10 +295,114 @@ public:
   }
 
 private:
+  void apply_render_settings(arv::ui::RenderSettingsView settings) {
+    render_settings_ = normalized_web_render_settings(settings);
+    if (g_app.session != nullptr) {
+      g_app.session->set_chunk_view_distance(render_settings_.stream_distance);
+    }
+  }
+
+  void apply_controls_settings(arv::ui::ControlsSettingsView settings) {
+    controls_settings_ = normalized_web_controls_settings(settings);
+    if (g_app.session != nullptr) {
+      g_app.session->set_player_tuning(web_player_tuning(controls_settings_));
+    }
+  }
+
+  void apply_interface_settings(arv::ui::InterfaceSettingsView settings) {
+    interface_settings_ = normalized_web_interface_settings(settings);
+    if (g_app.session != nullptr) {
+      g_app.session->configure_chat({interface_settings_.chat_history_max});
+    }
+  }
+
+  void apply_key_bind(const arv::ui::SetKeyBindCommand& command) {
+    const std::optional<arv::platform::LogicalAction> action =
+        arv::platform::logical_action_from_name(command.action_name);
+    if (!action.has_value() || command.slot > 1U) {
+      return;
+    }
+
+    auto& action_bindings =
+        arv::platform::bindings_for_action(g_app.input_bindings, action.value());
+    if (command.binding.has_value()) {
+      const std::optional<arv::platform::InputBinding> binding =
+          platform_binding_from(command.binding.value());
+      if (!binding.has_value()) {
+        return;
+      }
+      if (action_bindings.size() <= command.slot) {
+        const arv::platform::InputBindings defaults =
+            arv::platform::default_input_bindings();
+        const auto& default_bindings =
+            arv::platform::bindings_for_action(defaults, action.value());
+        while (action_bindings.size() <= command.slot) {
+          if (action_bindings.empty() && !default_bindings.empty()) {
+            action_bindings.push_back(default_bindings.front());
+          } else {
+            action_bindings.emplace_back(binding.value());
+          }
+        }
+      }
+      action_bindings[command.slot] = binding.value();
+    } else if (command.slot == 1U && action_bindings.size() > 1U) {
+      action_bindings.erase(action_bindings.begin() + 1);
+    } else {
+      return;
+    }
+
+    if (action_bindings.size() > 2U) {
+      action_bindings.resize(2U);
+    }
+  }
+
+  void apply_key_bind_reset(const arv::ui::ResetKeyBindCommand& command) {
+    const std::optional<arv::platform::LogicalAction> action =
+        arv::platform::logical_action_from_name(command.action_name);
+    if (!action.has_value()) {
+      return;
+    }
+    const arv::platform::InputBindings defaults =
+        arv::platform::default_input_bindings();
+    auto& action_bindings =
+        arv::platform::bindings_for_action(g_app.input_bindings, action.value());
+    action_bindings = arv::platform::bindings_for_action(defaults, action.value());
+    if (action_bindings.size() > 2U) {
+      action_bindings.resize(2U);
+    }
+  }
+
+  arv::ui::RenderSettingsView render_settings_{
+      normalized_web_render_settings(default_web_render_settings())};
+  arv::ui::ControlsSettingsView controls_settings_{
+      normalized_web_controls_settings({})};
+  arv::ui::InterfaceSettingsView interface_settings_{
+      normalized_web_interface_settings({})};
   std::string clipboard_{};
 };
 
 WebUiBridge g_ui_bridge;
+
+[[nodiscard]] arv::io::UiConfig::ChatConfig web_chat_config() noexcept {
+  const arv::ui::InterfaceSettingsView settings = g_ui_bridge.interface_settings();
+  arv::io::UiConfig::ChatConfig config;
+  config.max_history_messages = settings.chat_history_max;
+  config.open_max_lines = settings.chat_open_lines;
+  config.passive_max_lines = settings.chat_passive_lines;
+  config.passive_visible_seconds = settings.chat_passive_visible_seconds;
+  config.passive_fade_seconds = settings.chat_passive_fade_seconds;
+  return config;
+}
+
+[[nodiscard]] arv::io::RenderConfig::SkyConfig web_sky_config() noexcept {
+  const arv::ui::RenderSettingsView settings = g_ui_bridge.render_settings();
+  arv::io::RenderConfig::SkyConfig config;
+  config.star_intensity = settings.star_intensity;
+  config.cloud_intensity = settings.cloud_intensity;
+  config.cirrus_amount = settings.cirrus_amount;
+  config.cumulus_amount = settings.cumulus_amount;
+  return config;
+}
 
 [[nodiscard]] arv::ui::UiDisplayMetrics web_ui_metrics() {
   const float framebuffer_width =
@@ -135,7 +436,8 @@ WebUiBridge g_ui_bridge;
 
 void reset_gameplay_screen_stack() {
   g_app.ui.screen_manager.clear();
-  g_app.ui.screen_manager.push(arv::ui::make_gameplay_screen());
+  g_app.ui.screen_manager.push(
+      arv::ui::make_gameplay_screen({.show_quit = false}));
 }
 
 void destroy_indexed_mesh(IndexedGpuMesh& mesh) {
@@ -295,6 +597,226 @@ void clear_block_render_assets() {
 }
 
 [[nodiscard]] bool initialize_chunk_renderer() {
+  static constexpr const char* sky_vertex_shader_source = R"(#version 300 es
+precision highp float;
+out vec3 v_view_ray;
+
+uniform vec3 u_camera_forward;
+uniform vec3 u_camera_right;
+uniform vec3 u_camera_up;
+uniform float u_camera_aspect;
+uniform float u_camera_fov_y_degrees;
+
+void main() {
+  vec2 ndc = vec2(
+      (gl_VertexID == 2 || gl_VertexID == 3) ? 1.0 : -1.0,
+      (gl_VertexID == 1 || gl_VertexID == 3) ? -1.0 : 1.0);
+  float focal_spread = tan(radians(u_camera_fov_y_degrees) * 0.5);
+  v_view_ray =
+      u_camera_forward +
+      u_camera_right * (ndc.x * max(u_camera_aspect, 0.01) * focal_spread) +
+      u_camera_up * (ndc.y * focal_spread);
+  gl_Position = vec4(ndc, 1.0, 1.0);
+}
+)";
+  static constexpr const char* sky_fragment_shader_source = R"(#version 300 es
+precision highp float;
+precision highp int;
+in vec3 v_view_ray;
+out vec4 out_color;
+
+uniform vec3 u_sun_direction;
+uniform vec3 u_moon_direction;
+uniform vec3 u_daylight_color;
+uniform vec3 u_ambient_color;
+uniform vec3 u_fog_color;
+uniform float u_daylight_strength;
+uniform float u_moonlight_strength;
+uniform float u_star_visibility;
+uniform float u_day_fraction;
+uniform float u_cloud_time_seconds;
+uniform float u_cirrus_amount;
+uniform float u_cumulus_amount;
+uniform float u_cloud_intensity;
+uniform float u_exposure;
+
+const float PI = 3.14159265359;
+const float Br = 0.0025;
+const float Bm = 0.0003;
+const float MieG = 0.9800;
+const vec3 Wavelength = vec3(0.650, 0.570, 0.475);
+const float EffectEpsilon = 0.001;
+
+float hash(float n) {
+  return fract(sin(n) * 43758.5453123);
+}
+
+float noise(vec3 x) {
+  vec3 f = fract(x);
+  vec3 p = floor(x);
+  float n = dot(p, vec3(1.0, 157.0, 113.0));
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(n +   0.0), hash(n +   1.0), f.x),
+                 mix(hash(n + 157.0), hash(n + 158.0), f.x), f.y),
+             mix(mix(hash(n + 113.0), hash(n + 114.0), f.x),
+                 mix(hash(n + 270.0), hash(n + 271.0), f.x), f.y), f.z);
+}
+
+const mat3 FbmMatrix = mat3(
+   0.00,  1.60,  1.20,
+  -1.60,  0.72, -0.96,
+  -1.20, -0.96,  1.28
+);
+
+float fbm(vec3 p) {
+  float f = 0.0;
+  f += noise(p) * 0.500; p = FbmMatrix * p * 1.10;
+  f += noise(p) * 0.250; p = FbmMatrix * p * 1.20;
+  f += noise(p) * 0.166; p = FbmMatrix * p * 1.30;
+  f += noise(p) * 0.083; p = FbmMatrix * p * 1.40;
+  f += noise(p) * 0.042;
+  return f;
+}
+
+vec3 view_direction() {
+  return normalize(v_view_ray);
+}
+
+vec3 scattering_color(vec3 view_dir, float sun_height, float day_amount) {
+  vec3 kr = Br / pow(Wavelength, vec3(4.0));
+  vec3 km = Bm / pow(Wavelength, vec3(0.84));
+  float horizon = max(view_dir.y, 0.0);
+  float mu = dot(view_dir, u_sun_direction);
+  float rayleigh = 3.0 / (8.0 * PI) * (1.0 + mu * mu);
+  vec3 mie = (kr + km * (1.0 - MieG * MieG) /
+      (2.0 + MieG * MieG) /
+      pow(max(1.0 + MieG * MieG - 2.0 * MieG * mu, 0.001), 1.5)) / (Br + Bm);
+
+  float low_horizon = exp(-horizon * 16.0) + 0.1;
+  vec3 day_extinction =
+      exp(-exp(-((horizon + sun_height * 4.0) *
+                  low_horizon / 80.0) / Br) *
+          low_horizon * kr / Br) *
+      exp(-horizon * exp(-horizon * 8.0) * 4.0) *
+      exp(-horizon * 2.0) * 4.0;
+
+  vec3 sky = rayleigh * mie * day_extinction * u_daylight_color;
+  vec3 zenith_tint = mix(u_fog_color, vec3(0.11, 0.34, 0.90) * u_daylight_color,
+                         pow(clamp(horizon, 0.0, 1.0), 0.35));
+  sky = mix(zenith_tint * u_daylight_strength, sky, 0.65);
+
+  vec3 night = vec3(0.010, 0.016, 0.045) +
+      u_ambient_color * 0.55 +
+      vec3(0.08, 0.10, 0.15) * u_moonlight_strength *
+          smoothstep(-0.08, 0.45, u_moon_direction.y);
+  return mix(night, sky, day_amount);
+}
+
+float star_field(vec3 view_dir) {
+  vec3 cell = floor(view_dir * 300.0);
+  float seed = dot(cell, vec3(17.0, 59.0, 113.0));
+  float star = smoothstep(0.9925, 1.0, hash(seed));
+  float sparkle = 0.78 + 0.22 * sin(u_cloud_time_seconds * 0.45 + hash(seed + 19.0) * 6.28318);
+  float scale = mix(0.55, 1.25, hash(seed + 11.0));
+  return star * sparkle * scale;
+}
+
+vec3 apply_clouds(vec3 color, vec3 view_dir, float day_amount) {
+  float cirrus_amount = clamp(u_cirrus_amount, 0.0, 1.0);
+  float cumulus_amount = clamp(u_cumulus_amount, 0.0, 1.0);
+  float cloud_intensity = clamp(u_cloud_intensity, 0.0, 3.0);
+  if (cloud_intensity <= EffectEpsilon ||
+      (cirrus_amount <= EffectEpsilon && cumulus_amount <= EffectEpsilon)) {
+    return color;
+  }
+
+  float height_mask = smoothstep(-0.03, 0.16, view_dir.y);
+  if (height_mask <= EffectEpsilon) {
+    return color;
+  }
+
+  vec3 plane = view_dir / max(view_dir.y, 0.080);
+
+  float cirrus = 0.0;
+  if (cirrus_amount > EffectEpsilon) {
+    vec3 cirrus_wind = vec3(u_cloud_time_seconds * 0.010, 0.0, u_cloud_time_seconds * 0.004);
+    float cirrus_base = fbm(plane * 1.15 + cirrus_wind);
+    float cirrus_detail = fbm(plane * 3.40 + cirrus_wind * 1.7 + vec3(0.0, 8.0, 0.0));
+    cirrus = smoothstep(0.50, 0.78, cirrus_base + cirrus_detail * 0.18) *
+        cirrus_amount * 0.55;
+  }
+
+  float cumulus = 0.0;
+  if (cumulus_amount > EffectEpsilon) {
+    vec3 cumulus_wind = vec3(u_cloud_time_seconds * 0.026, 4.2, u_cloud_time_seconds * 0.016);
+    float cumulus_base = fbm(plane * 0.55 + cumulus_wind);
+    float cumulus_detail = fbm(plane * 2.10 + cumulus_wind * 1.3 + vec3(7.0, 0.0, 0.0));
+    float cumulus_shape = cumulus_base * 0.82 + cumulus_detail * 0.18;
+    cumulus = smoothstep(0.48 - cumulus_amount * 0.22, 0.76, cumulus_shape) *
+        cumulus_amount;
+  }
+
+  float density = clamp((cirrus + cumulus) * cloud_intensity, 0.0, 1.0) * height_mask;
+  float sun_lit = smoothstep(0.15, 0.95, dot(view_dir, u_sun_direction)) *
+      day_amount;
+  float moon_lit = smoothstep(-0.02, 0.42, u_moon_direction.y) *
+      u_moonlight_strength * (1.0 - day_amount);
+  vec3 cloud_shadow = mix(
+      vec3(0.035, 0.040, 0.065) + u_ambient_color * 0.65,
+      u_fog_color * 0.92 + u_daylight_color * 0.15,
+      day_amount);
+  vec3 cloud_bright = mix(
+      vec3(0.10, 0.12, 0.18) + u_ambient_color * 0.50,
+      u_daylight_color * 0.92 + u_fog_color * 0.70,
+      day_amount);
+  vec3 cloud_light = mix(
+      cloud_shadow,
+      cloud_bright,
+      clamp(day_amount * 0.38 + sun_lit * 0.35 + moon_lit * 1.60, 0.0, 0.85));
+  float opacity = density * (0.56 - day_amount * 0.16 + day_amount * 0.42);
+  return mix(color, cloud_light, clamp(opacity, 0.0, 0.88));
+}
+
+vec3 apply_moon(vec3 color, vec3 view_dir, float day_amount) {
+  if (u_moon_direction.y <= -0.02) {
+    return color;
+  }
+
+  float moon_dot = dot(view_dir, u_moon_direction);
+  float core = smoothstep(0.99955, 0.99988, moon_dot);
+  float rim = smoothstep(0.99840, 0.99960, moon_dot) * (1.0 - core) * 0.65;
+  float glow = smoothstep(0.98600, 0.99920, moon_dot) * 0.18;
+  float horizon = smoothstep(-0.02, 0.10, u_moon_direction.y) *
+      smoothstep(-0.02, 0.08, view_dir.y);
+  float night_visibility = (1.0 - smoothstep(0.02, 0.30, u_sun_direction.y)) *
+      (1.0 - day_amount * 0.35);
+  vec3 moon_color = mix(vec3(0.78, 0.84, 1.0), vec3(1.0, 0.94, 0.82), 0.65);
+  float strength = (core * 1.65 + rim * 0.55 + glow) *
+      horizon * night_visibility * (0.55 + u_moonlight_strength * 3.0);
+  return color + moon_color * strength;
+}
+
+void main() {
+  vec3 view_dir = view_direction();
+  float sun_height = u_sun_direction.y;
+  float day_amount = smoothstep(-0.08, 0.16, sun_height);
+  float above_horizon = smoothstep(-0.02, 0.10, view_dir.y);
+
+  vec3 color = scattering_color(view_dir, sun_height, day_amount);
+  float star_visibility = max(u_star_visibility, 0.0);
+  if (star_visibility > EffectEpsilon && above_horizon > EffectEpsilon) {
+    color += vec3(0.70, 0.78, 1.0) *
+        star_field(view_dir) * star_visibility * above_horizon;
+  }
+  color = apply_clouds(color, view_dir, day_amount);
+  color = apply_moon(color, view_dir, day_amount);
+
+  color = mix(u_fog_color * 0.75, color, smoothstep(-0.10, 0.18, view_dir.y));
+  color += hash(dot(gl_FragCoord.xy, vec2(12.9898, 78.233)) + u_day_fraction * 31.0) * 0.006;
+  color = vec3(1.0) - exp(-max(color, vec3(0.0)) * max(u_exposure, 0.01));
+  out_color = vec4(clamp(color, 0.0, 1.0), 1.0);
+}
+)";
   static constexpr const char* chunk_vertex_shader_source = R"(#version 300 es
 precision highp float;
 precision highp int;
@@ -616,6 +1138,13 @@ void main() {
     return program;
   };
 
+  g_app.renderer.sky_program = link_program(
+      "sky renderer",
+      sky_vertex_shader_source,
+      sky_fragment_shader_source);
+  if (g_app.renderer.sky_program == 0U) {
+    return false;
+  }
   g_app.renderer.chunk_program = link_program(
       "chunk renderer",
       chunk_vertex_shader_source,
@@ -645,6 +1174,44 @@ void main() {
     return false;
   }
 
+  g_app.renderer.sky_camera_forward_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_camera_forward");
+  g_app.renderer.sky_camera_right_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_camera_right");
+  g_app.renderer.sky_camera_up_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_camera_up");
+  g_app.renderer.sky_camera_aspect_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_camera_aspect");
+  g_app.renderer.sky_camera_fov_y_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_camera_fov_y_degrees");
+  g_app.renderer.sky_sun_direction_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_sun_direction");
+  g_app.renderer.sky_moon_direction_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_moon_direction");
+  g_app.renderer.sky_daylight_color_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_daylight_color");
+  g_app.renderer.sky_ambient_color_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_ambient_color");
+  g_app.renderer.sky_fog_color_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_fog_color");
+  g_app.renderer.sky_daylight_strength_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_daylight_strength");
+  g_app.renderer.sky_moonlight_strength_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_moonlight_strength");
+  g_app.renderer.sky_star_visibility_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_star_visibility");
+  g_app.renderer.sky_day_fraction_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_day_fraction");
+  g_app.renderer.sky_cloud_time_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_cloud_time_seconds");
+  g_app.renderer.sky_cirrus_amount_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_cirrus_amount");
+  g_app.renderer.sky_cumulus_amount_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_cumulus_amount");
+  g_app.renderer.sky_cloud_intensity_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_cloud_intensity");
+  g_app.renderer.sky_exposure_location =
+      glGetUniformLocation(g_app.renderer.sky_program, "u_exposure");
   g_app.renderer.chunk_mvp_location =
       glGetUniformLocation(g_app.renderer.chunk_program, "u_mvp");
   g_app.renderer.chunk_origin_location =
@@ -2530,7 +3097,7 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
   }
   const arv::f32 item_popup_alpha =
       arv::client::hotbar_item_popup_alpha(g_app.ui.hotbar_item_popup, ui_now);
-  arv::io::UiConfig::ChatConfig chat_config;
+  arv::io::UiConfig::ChatConfig chat_config = web_chat_config();
   arv::client::refresh_gameplay_chat_lines(
       g_app.ui.chat_lines,
       *g_app.session,
@@ -2642,6 +3209,84 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
   draw_ui_frame(frame);
 }
 
+void draw_sky(const arv::client::CameraShell& camera, float aspect) {
+  if (g_app.renderer.sky_program == 0U) {
+    return;
+  }
+  const arv::render::SkyUniforms sky =
+      arv::client::sky_uniforms_from_clock(g_app.world_clock, web_sky_config());
+  if (!sky.enabled) {
+    return;
+  }
+  if (g_app.renderer.sky_vao == 0U) {
+    glGenVertexArrays(1, &g_app.renderer.sky_vao);
+  }
+
+  const arv::Vec3f forward = camera.forward_vector();
+  const arv::Vec3f right = camera.right_vector();
+  const arv::Vec3f up = camera.up_vector();
+
+  glDepthMask(GL_FALSE);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LEQUAL);
+  glDisable(GL_BLEND);
+  glDisable(GL_CULL_FACE);
+  glUseProgram(g_app.renderer.sky_program);
+  glUniform3f(
+      g_app.renderer.sky_camera_forward_location,
+      forward.x,
+      forward.y,
+      forward.z);
+  glUniform3f(
+      g_app.renderer.sky_camera_right_location,
+      right.x,
+      right.y,
+      right.z);
+  glUniform3f(g_app.renderer.sky_camera_up_location, up.x, up.y, up.z);
+  glUniform1f(g_app.renderer.sky_camera_aspect_location, aspect);
+  glUniform1f(g_app.renderer.sky_camera_fov_y_location, camera.fov_y_degrees());
+  glUniform3f(
+      g_app.renderer.sky_sun_direction_location,
+      sky.sun_direction.x,
+      sky.sun_direction.y,
+      sky.sun_direction.z);
+  glUniform3f(
+      g_app.renderer.sky_moon_direction_location,
+      sky.moon_direction.x,
+      sky.moon_direction.y,
+      sky.moon_direction.z);
+  glUniform3f(
+      g_app.renderer.sky_daylight_color_location,
+      sky.daylight_color.x,
+      sky.daylight_color.y,
+      sky.daylight_color.z);
+  glUniform3f(
+      g_app.renderer.sky_ambient_color_location,
+      sky.ambient_color.x,
+      sky.ambient_color.y,
+      sky.ambient_color.z);
+  glUniform3f(
+      g_app.renderer.sky_fog_color_location,
+      sky.fog_color.x,
+      sky.fog_color.y,
+      sky.fog_color.z);
+  glUniform1f(g_app.renderer.sky_daylight_strength_location, sky.daylight_strength);
+  glUniform1f(g_app.renderer.sky_moonlight_strength_location, sky.moonlight_strength);
+  glUniform1f(g_app.renderer.sky_star_visibility_location, sky.star_visibility);
+  glUniform1f(g_app.renderer.sky_day_fraction_location, sky.day_fraction);
+  glUniform1f(g_app.renderer.sky_cloud_time_location, sky.cloud_time_seconds);
+  glUniform1f(g_app.renderer.sky_cirrus_amount_location, sky.cirrus_amount);
+  glUniform1f(g_app.renderer.sky_cumulus_amount_location, sky.cumulus_amount);
+  glUniform1f(g_app.renderer.sky_cloud_intensity_location, sky.cloud_intensity);
+  glUniform1f(g_app.renderer.sky_exposure_location, sky.exposure);
+
+  glBindVertexArray(g_app.renderer.sky_vao);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glBindVertexArray(0U);
+  glDepthFunc(GL_LESS);
+  glDepthMask(GL_TRUE);
+}
+
 void render_remote_world() {
   if ((g_app.renderer.chunk_program == 0U || g_app.renderer.color_program == 0U) ||
       g_app.session == nullptr ||
@@ -2650,11 +3295,6 @@ void render_remote_world() {
   }
   sync_chunk_meshes();
   sync_entity_mesh();
-  if (g_app.renderer.meshes.empty() &&
-      g_app.renderer.entity_vertex_count == 0 &&
-      (!g_app.entity_assets.ready || g_app.renderer.entity_models.empty())) {
-    return;
-  }
 
   const float aspect =
       static_cast<float>(g_app.width) / static_cast<float>(std::max(g_app.height, 1));
@@ -2670,6 +3310,14 @@ void render_remote_world() {
           arv::client::DefaultCameraNearPlane,
           512.0F),
       arv::look_at_mat4f(eye, center, {0.0F, 1.0F, 0.0F}));
+  draw_sky(camera, aspect);
+
+  if (g_app.renderer.meshes.empty() &&
+      g_app.renderer.entity_vertex_count == 0 &&
+      (!g_app.entity_assets.ready || g_app.renderer.entity_models.empty())) {
+    glUseProgram(0U);
+    return;
+  }
 
   if (g_app.renderer.chunk_texture != 0U) {
     glUseProgram(g_app.renderer.chunk_program);
@@ -2750,6 +3398,32 @@ void render_remote_world() {
   }
   glBindVertexArray(0U);
   glUseProgram(0U);
+}
+
+void apply_web_world_time_update(const arv::protocol::ClientboundWorldTime& time) {
+  if (g_app.session != nullptr &&
+      g_app.session->connection_state() == arv::net::ConnectionState::InGame &&
+      time.world_id != g_app.session->camera().world_id()) {
+    return;
+  }
+  g_app.world_clock.world_tick = time.world_tick;
+  g_app.world_clock.day_time_tick = time.day_time_tick;
+  g_app.world_clock.day_length_ticks = std::max<arv::u32>(time.day_length_ticks, 1U);
+  g_app.world_clock.day_length_seconds = time.day_length_seconds;
+  g_app.world_clock.time_scale = time.time_scale;
+  g_app.world_clock.daylight_cycle = time.daylight_cycle;
+  g_app.world_clock.day_time_accumulator = 0.0;
+}
+
+void apply_web_world_time_updates() {
+  if (g_app.session == nullptr) {
+    return;
+  }
+  if (const std::optional<arv::protocol::ClientboundWorldTime> time =
+          g_app.session->take_world_time_update();
+      time.has_value()) {
+    apply_web_world_time_update(time.value());
+  }
 }
 
 const char* connection_state_label(arv::net::ConnectionState state) {
@@ -2913,6 +3587,7 @@ void poll_session() {
       set_status(connection_state_label(state));
     }
   }
+  apply_web_world_time_updates();
   if (!g_app.flushed_after_pack_ready &&
       (state == arv::net::ConnectionState::WorldJoin ||
        state == arv::net::ConnectionState::InGame) &&
@@ -2929,6 +3604,7 @@ void poll_session() {
     g_app.chunk_sections.clear();
     clear_block_render_assets();
     g_app.ui.screen_manager.clear();
+    g_app.world_clock = arv::world::make_world_clock();
     reset_input(true);
   } else if (state == arv::net::ConnectionState::InGame &&
              g_app.ui.screen_manager.empty()) {
@@ -2967,7 +3643,7 @@ void poll_session() {
       static_cast<float>(g_app.input.cursor_y)};
   (void)g_app.ui.tree.route_mouse_move(cursor);
   if (g_app.input.mouse_wheel_y != 0.0) {
-    const arv::io::UiConfig::ChatConfig chat_config;
+    const arv::io::UiConfig::ChatConfig chat_config = web_chat_config();
     const arv::usize max_offset = arv::client::gameplay_chat_history_max_scroll_offset(
         g_app.session->chat_history().size(),
         std::max<arv::usize>(1U, chat_config.open_max_lines));
@@ -3128,6 +3804,16 @@ void route_screen_mouse_input(arv::ui::UIContext& context) {
   if (g_app.input.mouse_right_released) {
     (void)g_app.ui.tree.route_mouse_up(cursor, arv::ui::UiMouseButton::Right);
   }
+  (void)g_app.ui.screen_manager.handle_pointer(
+      cursor,
+      {
+          static_cast<float>(g_app.input.mouse_dx),
+          static_cast<float>(g_app.input.mouse_dy),
+      },
+      g_app.input.mouse_left_pressed,
+      g_app.input.mouse_left_released,
+      g_app.input.mouse_left_held,
+      context);
   if (g_app.input.mouse_wheel_y != 0.0) {
     (void)g_app.ui.screen_manager.handle_scroll(
         cursor,
@@ -3163,8 +3849,48 @@ void handle_pause_menu_input(arv::ui::UIContext& context) {
   g_app.input.pause_menu_pressed = false;
 }
 
+void clear_input_after_captured_binding() {
+  g_app.input.mouse_left_pressed = false;
+  g_app.input.mouse_right_pressed = false;
+  g_app.input.mouse_left_released = false;
+  g_app.input.mouse_right_released = false;
+  g_app.input.mouse_wheel_y = 0.0;
+  g_app.input.primary_pressed = false;
+  g_app.input.secondary_pressed = false;
+  g_app.input.primary_animation_pressed = false;
+  g_app.input.secondary_animation_pressed = false;
+  g_app.input.jump_pressed = false;
+  g_app.input.mount_pressed = false;
+  g_app.input.toggle_fly_pressed = false;
+  g_app.input.open_inventory_pressed = false;
+  g_app.input.open_chat_pressed = false;
+  g_app.input.text_backspace_pressed = false;
+  g_app.input.text_submit_pressed = false;
+  g_app.input.text_cancel_pressed = false;
+  g_app.input.pause_menu_pressed = false;
+  g_app.input.hotbar_select.reset();
+  g_app.input.hotbar_scroll_steps = 0;
+  g_app.input.captured_input.reset();
+}
+
+[[nodiscard]] bool route_captured_screen_input(arv::ui::UIContext& context) {
+  if (!g_app.input.captured_input.has_value() ||
+      !g_app.ui.screen_manager.has_active_screen()) {
+    return false;
+  }
+  const arv::ui::CapturedInputView captured = g_app.input.captured_input.value();
+  if (!g_app.ui.screen_manager.handle_captured_input(captured, context)) {
+    return false;
+  }
+  clear_input_after_captured_binding();
+  return true;
+}
+
 void route_web_ui_input() {
   arv::ui::UIContext context = make_web_ui_context();
+  if (route_captured_screen_input(context)) {
+    return;
+  }
   handle_pause_menu_input(context);
   if (g_app.ui.screen_manager.blocks_gameplay_input()) {
     route_screen_mouse_input(context);
@@ -3226,6 +3952,7 @@ void clear_per_frame_input_edges() {
   g_app.input.text_submit_pressed = false;
   g_app.input.text_cancel_pressed = false;
   g_app.input.pause_menu_pressed = false;
+  g_app.input.captured_input.reset();
   g_app.input.hotbar_select.reset();
   g_app.input.hotbar_scroll_steps = 0;
   g_app.input.primary_pressed = false;
@@ -3244,6 +3971,10 @@ void submit_web_input_and_tick_runtime(double now) {
   g_app.input.last_frame_time = now;
 
   route_web_ui_input();
+  if (g_app.session == nullptr) {
+    clear_per_frame_input_edges();
+    return;
+  }
   arv::client::InputFrame input = build_browser_input_frame();
   if (g_app.ui.screen_manager.blocks_gameplay_input()) {
     input = {};
@@ -3302,6 +4033,9 @@ void submit_web_input_and_tick_runtime(double now) {
     g_app.session->fixed_tick(
         g_app.input.client_tick,
         collision_query.has_value() ? &collision_query.value() : nullptr);
+    if (was_in_game) {
+      arv::world::tick_world_clock(g_app.world_clock);
+    }
     collect_runtime_chunk_stream();
     if (!was_in_game &&
         g_app.session->connection_state() == arv::net::ConnectionState::InGame) {
@@ -3318,6 +4052,7 @@ void disconnect_web_session() {
   clear_block_render_assets();
   g_app.chunk_sections.clear();
   g_app.ui.screen_manager.clear();
+  g_app.world_clock = arv::world::make_world_clock();
   reset_input(true);
   flush_storage();
   g_app.connected = false;
@@ -3326,6 +4061,10 @@ void disconnect_web_session() {
   g_app.last_connection_state = arv::net::ConnectionState::Disconnected;
   set_shell_state(WebShellState::Connect);
   set_status("disconnected");
+  if (g_app.context > 0) {
+    glClearColor(0.09F, 0.12F, 0.14F, 1.0F);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  }
 }
 
 bool initialize_webgl() {
@@ -3457,6 +4196,7 @@ EMSCRIPTEN_KEEPALIVE void arv_web_connect(const char* url) {
   clear_block_render_assets();
   g_app.chunk_sections.clear();
   g_app.ui.screen_manager.clear();
+  g_app.world_clock = arv::world::make_world_clock();
   reset_input(true);
   auto transport = std::make_unique<arv::net::WebSocketClientTransport>();
   arv::client::LocalPlayerIdentity identity =
@@ -3464,7 +4204,9 @@ EMSCRIPTEN_KEEPALIVE void arv_web_connect(const char* url) {
   identity.arvane_home = "/arvane_home";
   g_app.session = std::make_unique<arv::client::ClientRuntime>(std::move(transport));
   g_app.session->set_local_identity(std::move(identity));
-  g_app.session->set_chunk_view_distance(4);
+  g_app.session->set_player_tuning(web_player_tuning(g_ui_bridge.controls_settings()));
+  g_app.session->configure_chat({g_ui_bridge.interface_settings().chat_history_max});
+  g_app.session->set_chunk_view_distance(g_ui_bridge.render_settings().stream_distance);
   arv::net::NetworkAddress address;
   address.host = url;
   address.port = 0U;

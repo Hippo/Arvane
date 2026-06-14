@@ -15,6 +15,7 @@
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/text/language.hpp"
 #include "arv/ui/core/ui.hpp"
+#include "arv/world/world_time.hpp"
 #include "web_player_skin_atlas.hpp"
 
 #include <array>
@@ -57,6 +58,7 @@ struct BrowserInputState {
   bool text_submit_pressed{};
   bool text_cancel_pressed{};
   bool pause_menu_pressed{};
+  std::optional<ui::CapturedInputView> captured_input{};
   double cursor_x{};
   double cursor_y{};
   bool cursor_initialized{};
@@ -122,6 +124,27 @@ struct WebUiState {
 };
 
 struct ChunkRenderer {
+  GLuint sky_program{};
+  GLuint sky_vao{};
+  GLint sky_camera_forward_location{-1};
+  GLint sky_camera_right_location{-1};
+  GLint sky_camera_up_location{-1};
+  GLint sky_camera_aspect_location{-1};
+  GLint sky_camera_fov_y_location{-1};
+  GLint sky_sun_direction_location{-1};
+  GLint sky_moon_direction_location{-1};
+  GLint sky_daylight_color_location{-1};
+  GLint sky_ambient_color_location{-1};
+  GLint sky_fog_color_location{-1};
+  GLint sky_daylight_strength_location{-1};
+  GLint sky_moonlight_strength_location{-1};
+  GLint sky_star_visibility_location{-1};
+  GLint sky_day_fraction_location{-1};
+  GLint sky_cloud_time_location{-1};
+  GLint sky_cirrus_amount_location{-1};
+  GLint sky_cumulus_amount_location{-1};
+  GLint sky_cloud_intensity_location{-1};
+  GLint sky_exposure_location{-1};
   GLuint chunk_program{};
   GLint chunk_mvp_location{-1};
   GLint chunk_origin_location{-1};
@@ -216,6 +239,7 @@ struct WebApplication {
   net::ConnectionState last_connection_state{net::ConnectionState::Disconnected};
   std::unique_ptr<client::ClientRuntime> session{};
   std::vector<protocol::ClientboundChunkSectionData> chunk_sections{};
+  world::WorldClock world_clock{world::make_world_clock()};
   platform::InputBindings input_bindings{platform::default_input_bindings()};
   BrowserInputState input{};
   ChunkRenderer renderer{};

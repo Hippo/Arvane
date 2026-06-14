@@ -1524,6 +1524,26 @@ TEST(MenuScreenTests, PauseBackToMainMenuLeavesStackForDesktopStateSwitch) {
   EXPECT_TRUE(std::holds_alternative<arv::ui::BackToMainMenuCommand>(sink.commands[0]));
 }
 
+TEST(MenuScreenTests, PauseMenuCanHideQuitForWeb) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  CapturingCommandSink sink;
+  FixedMenuData data;
+  arv::ui::UIScreenManager screens;
+  screens.push(arv::ui::make_gameplay_screen({.show_quit = false}));
+  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
+
+  ASSERT_TRUE(screens.handle_cancel(ctx));
+  screens.update(ctx);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  EXPECT_EQ(tree.find_by_stable_id("menu.pause.quit"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("menu.pause.main_menu"), nullptr);
+  EXPECT_TRUE(screens.route_action({"menu.pause.main_menu", "pause.main_menu", "click"}, ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<arv::ui::BackToMainMenuCommand>(sink.commands[0]));
+}
+
 TEST(MenuScreenTests, SettingsHubUsesPauseBackdropAndDomainCategories) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;

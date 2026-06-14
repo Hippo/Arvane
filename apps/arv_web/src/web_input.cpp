@@ -124,6 +124,51 @@ void update_cursor_from_mouse(const EmscriptenMouseEvent& event) {
   return modifiers;
 }
 
+[[nodiscard]] arv::ui::InputBindingDevice ui_device_from(
+    arv::platform::InputDeviceType type) noexcept {
+  switch (type) {
+    case arv::platform::InputDeviceType::Keyboard:
+      return arv::ui::InputBindingDevice::Keyboard;
+    case arv::platform::InputDeviceType::MouseButton:
+      return arv::ui::InputBindingDevice::MouseButton;
+    case arv::platform::InputDeviceType::MouseWheel:
+      return arv::ui::InputBindingDevice::MouseWheel;
+  }
+  return arv::ui::InputBindingDevice::Keyboard;
+}
+
+void set_captured_input(
+    arv::platform::InputDeviceType device,
+    std::string_view code,
+    arv::u8 modifiers) {
+  const std::optional<std::string> canonical =
+      arv::platform::canonical_input_code(device, code);
+  if (!canonical.has_value()) {
+    return;
+  }
+  const arv::platform::InputBinding binding{device, canonical.value(), modifiers};
+  arv::web::g_app.input.captured_input =
+      arv::ui::CapturedInputView{
+          ui_device_from(binding.device_type),
+          binding.input_code,
+          arv::platform::input_binding_label(binding),
+          binding.modifiers};
+}
+
+[[nodiscard]] bool mouse_hit_is_cancel_capture() {
+  const arv::Vec2f cursor{
+      static_cast<float>(arv::web::g_app.input.cursor_x),
+      static_cast<float>(arv::web::g_app.input.cursor_y)};
+  const std::optional<arv::ui::UiNodeID> hit =
+      arv::web::g_app.ui.tree.hit_test(cursor);
+  if (!hit.has_value()) {
+    return false;
+  }
+  const arv::ui::UiElement* element =
+      arv::web::g_app.ui.tree.element(hit.value());
+  return element != nullptr && element->action == "key_bind.cancel_capture";
+}
+
 [[nodiscard]] bool modifiers_match(arv::u8 active, arv::u8 required) noexcept {
   return (active & required) == required;
 }
@@ -309,6 +354,17 @@ EM_BOOL on_key(int event_type, const EmscriptenKeyboardEvent* event, void*) {
     return EM_FALSE;
   }
   const bool down = event_type == EMSCRIPTEN_EVENT_KEYDOWN;
+  bool captured_for_screen = false;
+  if (down && !event->repeat) {
+    if (const std::optional<std::string> code = browser_keyboard_code(*event);
+        code.has_value()) {
+      set_captured_input(
+          arv::platform::InputDeviceType::Keyboard,
+          code.value(),
+          keyboard_modifiers(*event));
+      captured_for_screen = arv::web::g_app.ui.screen_manager.blocks_gameplay_input();
+    }
+  }
   const bool has_cursor_overlay =
       arv::web::g_app.session != nullptr &&
       (arv::web::g_app.session->inventory_open() ||
@@ -333,6 +389,9 @@ EM_BOOL on_key(int event_type, const EmscriptenKeyboardEvent* event, void*) {
     if (should_recapture_pointer && !arv::web::g_app.pointer_locked) {
       arv::web::request_pointer_lock();
     }
+    return EM_TRUE;
+  }
+  if (captured_for_screen && arv::web::g_app.input.captured_input.has_value()) {
     return EM_TRUE;
   }
   return EM_FALSE;
@@ -360,7 +419,15 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
   }
   update_cursor_from_mouse(*event);
   const bool down = event_type == EMSCRIPTEN_EVENT_MOUSEDOWN;
+  const std::string_view code =
+      event->button == 0 ? "Left" : (event->button == 2 ? "Right" : "Middle");
   if (arv::web::ui_wants_cursor()) {
+    if (down && !mouse_hit_is_cancel_capture()) {
+      set_captured_input(
+          arv::platform::InputDeviceType::MouseButton,
+          code,
+          0U);
+    }
     if (event->button == 0) {
       if (down) {
         arv::web::g_app.input.mouse_left_pressed = true;
@@ -369,6 +436,9 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
         arv::web::g_app.input.mouse_left_released = true;
         arv::web::g_app.input.mouse_left_held = false;
       }
+      return EM_TRUE;
+    }
+    if (event->button == 1) {
       return EM_TRUE;
     }
     if (event->button == 2) {
@@ -385,8 +455,6 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
   if (!arv::web::g_app.pointer_locked) {
     return EM_FALSE;
   }
-  const std::string_view code =
-      event->button == 0 ? "Left" : (event->button == 2 ? "Right" : "Middle");
   bool handled = false;
   for (arv::usize index = 0;
        index < static_cast<arv::usize>(arv::platform::LogicalAction::Count);
@@ -428,6 +496,11 @@ EM_BOOL on_wheel(int, const EmscriptenWheelEvent* event, void*) {
     return EM_FALSE;
   }
   if (arv::web::ui_wants_cursor()) {
+    const std::string_view code = event->deltaY > 0.0 ? "Down" : "Up";
+    set_captured_input(
+        arv::platform::InputDeviceType::MouseWheel,
+        code,
+        0U);
     arv::web::g_app.input.mouse_wheel_y += event->deltaY < 0.0 ? 1.0 : -1.0;
     return EM_TRUE;
   }
