@@ -281,8 +281,11 @@ StoragePathResult safe_resource_relative_path(
   return StoragePathResult::success(namespace_path.value() / relative.value());
 }
 
-ConfigStorageService::ConfigStorageService(std::filesystem::path config_root)
-    : config_root_(std::move(config_root)) {
+ConfigStorageService::ConfigStorageService(
+    std::filesystem::path config_root,
+    PluginStorageLayout layout)
+    : config_root_(std::move(config_root)),
+      layout_(layout) {
 }
 
 StorageLoadResult ConfigStorageService::load_config(
@@ -373,6 +376,10 @@ std::filesystem::path ConfigStorageService::config_path(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
   auto relative = safe_resource_relative_path(owner_pack_id, key, ".yaml");
+  if (layout_ == PluginStorageLayout::PackRoot) {
+    return config_root_ / std::string{owner_pack_id} / "config" /
+           (relative ? relative.value() : std::filesystem::path{"invalid.yaml"});
+  }
   return config_root_ / "plugins" / std::string{owner_pack_id} / "config" /
          (relative ? relative.value() : std::filesystem::path{"invalid.yaml"});
 }
@@ -381,6 +388,10 @@ std::filesystem::path ConfigStorageService::data_path(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
   auto relative = safe_resource_relative_path(owner_pack_id, key, ".json");
+  if (layout_ == PluginStorageLayout::PackRoot) {
+    return config_root_ / std::string{owner_pack_id} / "data" /
+           (relative ? relative.value() : std::filesystem::path{"invalid.json"});
+  }
   return config_root_ / "plugins" / std::string{owner_pack_id} / "data" /
          (relative ? relative.value() : std::filesystem::path{"invalid.json"});
 }
@@ -390,6 +401,11 @@ std::filesystem::path ConfigStorageService::player_data_path(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
   auto relative = safe_resource_relative_path(owner_pack_id, key, ".json");
+  if (layout_ == PluginStorageLayout::PackRoot) {
+    return config_root_ / std::string{owner_pack_id} / "data" / "players" /
+           (path_segment_safe(profile_id) ? std::string{profile_id} : std::string{"invalid"}) /
+           (relative ? relative.value() : std::filesystem::path{"invalid.json"});
+  }
   return config_root_ / "plugins" / std::string{owner_pack_id} / "data" /
          "players" /
          (path_segment_safe(profile_id) ? std::string{profile_id} : std::string{"invalid"}) /

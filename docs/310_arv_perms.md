@@ -18,8 +18,22 @@ arvane_home/packs/arv_perms/
 ```
 
 Dedicated server installs use the same layout under
-`arvane_server/packs/arv_perms/`. When writable config exists, the SDK config
-root overrides the pack defaults:
+`arvane_server/packs/arv_perms/`. In dedicated mode, mutable plugin config and
+per-player data are saved under that server pack directory so the dedicated
+server only writes below its server root:
+
+```text
+arvane_server/packs/arv_perms/
+  config/
+    config.yaml
+    groups.yaml
+  data/
+    players/
+      <PlayerProfileID>/
+        permissions.json
+```
+
+Desktop and integrated singleplayer may still use the shared SDK config root:
 
 ```text
 arvane_home/config/plugins/arv_perms/

@@ -43,6 +43,11 @@ using StorageSaveResult = Expected<void, DataStorageError>;
 using StorageRemoveResult = Expected<void, DataStorageError>;
 using StoragePathResult = Expected<std::filesystem::path, DataStorageError>;
 
+enum class PluginStorageLayout : u8 {
+  ConfigRoot,
+  PackRoot,
+};
+
 [[nodiscard]] StoragePathResult safe_resource_relative_path(
     std::string_view owner_pack_id,
     const ResourceKey& key,
@@ -50,7 +55,9 @@ using StoragePathResult = Expected<std::filesystem::path, DataStorageError>;
 
 class ConfigStorageService {
 public:
-  explicit ConfigStorageService(std::filesystem::path config_root);
+  explicit ConfigStorageService(
+      std::filesystem::path config_root,
+      PluginStorageLayout layout = PluginStorageLayout::ConfigRoot);
 
   [[nodiscard]] StorageLoadResult load_config(
       std::string_view owner_pack_id,
@@ -111,6 +118,7 @@ public:
 
 private:
   std::filesystem::path config_root_{};
+  PluginStorageLayout layout_{PluginStorageLayout::ConfigRoot};
 };
 
 enum class PersistentScopeKind : u8 {

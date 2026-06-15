@@ -48,6 +48,7 @@ struct PluginLoadOptions {
   voxel::BlockBehaviorRegistry* block_behaviors{};
   player::ItemBehaviorRegistry* item_behaviors{};
   world::EntityGoalRegistry* entity_goals{};
+  bool config_root_is_pack_root{false};
 };
 
 [[nodiscard]] std::string current_native_platform_key();

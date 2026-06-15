@@ -211,6 +211,31 @@ TEST(DataStorageTests, ConfigStorageSavesLoadsConfigDataAndPlayerData) {
       std::string{profile} / "settings.json"));
 }
 
+TEST(DataStorageTests, ConfigStoragePackRootLayoutSavesUnderPackDirectory) {
+  ScopedTempDir temp{"arv_io_pack_config_"};
+  arv::io::ConfigStorageService storage{
+      temp.path / "packs",
+      arv::io::PluginStorageLayout::PackRoot};
+  arv::io::DataDocument document{1, arv::io::DataValue::object()};
+  ASSERT_TRUE(arv::io::set_path(document, "enabled", true));
+
+  ASSERT_TRUE(storage.save_config("example_plugin", key("example_plugin:settings"), document));
+  EXPECT_TRUE(std::filesystem::exists(
+      temp.path / "packs" / "example_plugin" / "config" / "settings.yaml"));
+
+  ASSERT_TRUE(storage.save_data("example_plugin", key("example_plugin:settings"), document));
+  EXPECT_TRUE(std::filesystem::exists(
+      temp.path / "packs" / "example_plugin" / "data" / "settings.json"));
+
+  constexpr std::string_view profile =
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  ASSERT_TRUE(storage.save_player_data(profile, "example_plugin", key("example_plugin:settings"), document));
+  EXPECT_TRUE(std::filesystem::exists(
+      temp.path / "packs" / "example_plugin" / "data" / "players" /
+      std::string{profile} / "settings.json"));
+  EXPECT_FALSE(std::filesystem::exists(temp.path / "config" / "plugins"));
+}
+
 TEST(DataStorageTests, PersistentScopesRoundTripAndRemoveIndividually) {
   ScopedTempDir temp{"arv_io_persistent_"};
   arv::io::PersistentDataStorageService storage{temp.path / "save"};

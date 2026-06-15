@@ -74,11 +74,12 @@ int DedicatedApplication::run(int argc, char** argv) {
       plugin::make_native_plugin_policy(
           config.native_plugins.enabled,
           config.native_plugins.allowed_packs),
-      config.paths.config_path(),
+      config.paths.server_packs_path(),
       &runtime_config.game_modes,
       &runtime_config.block_behaviors,
       &runtime_config.item_behaviors,
       &runtime_config.entity_goals,
+      true,
   });
   if (!plugin_result) {
     return fail(dedicated_error("plugins", plugin_result.error().describe()));

@@ -129,15 +129,18 @@ struct PluginHarness {
     pack_manager = std::move(manager.value());
   }
 
-  arv::plugin::PluginLoadOptions load_options(arv::plugin::NativePluginPolicy policy) {
+  arv::plugin::PluginLoadOptions load_options(
+      arv::plugin::NativePluginPolicy policy,
+      bool pack_local_storage = false) {
     return {
         &pack_manager,
         std::move(policy),
-        temp.path / "config",
+        pack_local_storage ? packs : temp.path / "config",
         &game_modes,
         &block_behaviors,
         &item_behaviors,
         &entity_goals,
+        pack_local_storage,
     };
   }
 };
@@ -476,11 +479,11 @@ TEST(PluginLoadTests, ArvPermsPluginLoadsAndRegistersCommandAlias) {
   harness.load_packs();
 
   arv::plugin::PluginManager manager;
-  auto loaded = manager.load_plugins(harness.load_options({true, {"arv_perms"}}));
+  auto loaded = manager.load_plugins(harness.load_options({true, {"arv_perms"}}, true));
   ASSERT_TRUE(loaded) << loaded.error().describe();
   EXPECT_TRUE(manager.has_command_executor("arv_perms:perm"));
   const std::filesystem::path config_root =
-      harness.temp.path / "config" / "plugins" / "arv_perms";
+      harness.packs / "arv_perms";
   const std::filesystem::path saved_config =
       config_root / "config" / "config.yaml";
   const std::filesystem::path saved_groups =
@@ -518,11 +521,12 @@ TEST(PluginLoadTests, ArvPermsPluginLoadsAndRegistersCommandAlias) {
   ASSERT_EQ(edit_result.status, arv::command::CommandStatus::Success);
 
   const std::filesystem::path saved_player =
-      config_root / "data" / "players" / std::string{PermsProfileA} /
-      "permissions.json";
+      config_root / "data" / "players" / std::string{PermsProfileA} / "permissions.json";
   EXPECT_TRUE(std::filesystem::exists(saved_config));
   EXPECT_TRUE(std::filesystem::exists(saved_groups));
   ASSERT_TRUE(std::filesystem::exists(saved_player));
+  EXPECT_FALSE(std::filesystem::exists(
+      harness.temp.path / "config" / "plugins" / "arv_perms"));
 
   auto player_text = arv::io::read_text_file_contents(saved_player);
   ASSERT_TRUE(player_text) << player_text.error().message;
