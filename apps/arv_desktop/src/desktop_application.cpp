@@ -44,7 +44,7 @@ int DesktopApplication::run(int argc, char** argv) {
     return 1;
   }
   asset::PackManager pack_manager = std::move(pack_manager_result.value());
-  core::info("packs", "loaded {} enabled packs", pack_manager.stack().size());
+  core::info("packs", "loaded {} installed packs", pack_manager.stack().size());
   const ui::UiThemeLoadResult theme_result =
       ui::load_ui_theme(pack_manager, config.paths.config_path() / "style.yaml");
   const ui::UiTheme ui_theme = theme_result.theme;

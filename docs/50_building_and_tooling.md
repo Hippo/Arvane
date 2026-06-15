@@ -450,8 +450,7 @@ arvane_home/
 
 relative to the resolved project root. Development builds stamp the source
 project root into the runtime path resolver and prefer that root when it
-contains the canonical `arvane_home/packs/enabled.yaml` and
-`arvane_home/packs/arvane_base/pack.yaml`. This keeps deleted or stale build
+contains the canonical `arvane_home/packs/arvane_base/pack.yaml`. This keeps deleted or stale build
 directories from becoming the content root when an executable is launched from
 an unusual working directory.
 

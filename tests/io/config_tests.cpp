@@ -869,7 +869,6 @@ TEST(ConfigTests, LoadConfigDefaultsDiscoverProjectArvaneHomePacks) {
   EXPECT_EQ(
       result.value().paths.packs_path().string().find("/.local/share/Trash/"),
       std::string::npos);
-  EXPECT_TRUE(std::filesystem::exists(result.value().paths.packs_path() / "enabled.yaml"));
   EXPECT_TRUE(std::filesystem::exists(result.value().paths.packs_path() / "arvane_base/pack.yaml"));
   EXPECT_TRUE(std::filesystem::exists(
       result.value().paths.packs_path() /
@@ -898,7 +897,6 @@ TEST(ConfigTests, LoadConfigDefaultsPreferProjectRootOverWorkingDirectoryRuntime
   const TempDir temp{"arvane_stale_runtime_"};
   const std::filesystem::path& temp_root = temp.path;
 
-  write_file(temp_root / "arvane_home/packs/enabled.yaml", "enabled:\n  - arvane_base\n");
   write_file(temp_root / "arvane_home/packs/arvane_base/pack.yaml", "schema_version: 1\n");
 
   {

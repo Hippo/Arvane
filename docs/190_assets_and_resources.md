@@ -18,7 +18,7 @@ Assets must not be loaded ad hoc from random systems. Systems should request ass
 
 ## Pack Asset Layout
 
-Reloadable authored assets live in enabled packs under `arvane_home/packs/`.
+Reloadable authored assets live in installed packs under `arvane_home/packs/`.
 The built-in content pack is `arvane_base`, and it provides the `arvane`
 namespace.
 
@@ -31,7 +31,6 @@ namespaced resource IDs.
 ```
 arvane_home/
   packs/
-    enabled.yaml
     arvane_base/
       pack.yaml
       assets/
@@ -444,7 +443,7 @@ arvane:texture/block/stone
   -> arvane_home/packs/arvane_base/assets/arvane/textures/block/stone.png
 ```
 
-Resolution uses the enabled pack stack. Later packs have higher priority for
+Resolution uses the installed pack stack. Later packs have higher priority for
 eligible asset overrides, so a user texture pack can replace a base texture
 without changing the `arvane:texture/block/stone` ID.
 

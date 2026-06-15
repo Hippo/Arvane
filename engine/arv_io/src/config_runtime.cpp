@@ -166,11 +166,8 @@ std::filesystem::path normalize_lexical(std::filesystem::path path) {
 
 bool has_project_assets(const std::filesystem::path& path) {
   return std::filesystem::exists(
-             path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /
-             std::filesystem::path{kPacksDirectoryName} / "enabled.yaml") &&
-         std::filesystem::exists(
-             path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /
-             std::filesystem::path{kPacksDirectoryName} / "arvane_base" / "pack.yaml");
+      path / std::filesystem::path{DefaultArvaneHomeDirectoryName} /
+      std::filesystem::path{kPacksDirectoryName} / "arvane_base" / "pack.yaml");
 }
 
 std::filesystem::path normalize_project_search_start(std::filesystem::path start) {

@@ -103,7 +103,6 @@ TEST(ClientPackSyncPlanTests, RejectsInvalidAndDuplicateManifestEntries) {
 TEST(ClientPackSyncPlanTests, UsesVerifiedCacheAndCleansStaleTemporaryEntries) {
   ScopedTempDir temp("arvane_pack_sync_plan_cache_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_text(packs / "enabled.yaml", "enabled:\n  - \"sync_pack\"\n");
   write_pack_manifest(packs, "sync_pack", "sync_pack");
   write_text(packs / "sync_pack/data/sync_pack/blocks.json", "{\"blocks\":[]}\n");
   write_text(packs / "sync_pack/assets/sync_pack/textures/block/test.png", "png");

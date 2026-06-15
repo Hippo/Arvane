@@ -3,6 +3,7 @@
 #include "arv/command/command_dispatcher.hpp"
 #include "arv/command/command_registry.hpp"
 #include "arv/entity/components.hpp"
+#include "arv/io/files.hpp"
 #include "arv/sched/job_system.hpp"
 #include "arv/text/chat_message.hpp"
 #include "arv/text/variables.hpp"
@@ -36,10 +37,17 @@
 #define ARV_TEST_MASON_PLUGIN_PATH ""
 #endif
 
+#ifndef ARV_TEST_PERMS_PLUGIN_PATH
+#define ARV_TEST_PERMS_PLUGIN_PATH ""
+#endif
+
 namespace {
 
 using arv::testsupport::ScopedTempDir;
 using arv::testsupport::write_text;
+
+constexpr std::string_view PermsProfileA =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 std::filesystem::path copy_plugin_library(
     const std::filesystem::path& packs_root,
@@ -57,12 +65,6 @@ std::filesystem::path copy_plugin_library(
       destination,
       std::filesystem::copy_options::overwrite_existing);
   return relative;
-}
-
-void write_enabled(const std::filesystem::path& packs_root, std::string_view pack_id) {
-  write_text(
-      packs_root / "enabled.yaml",
-      "enabled:\n  - \"" + std::string{pack_id} + "\"\n");
 }
 
 void write_plugin_pack(
@@ -147,6 +149,7 @@ TEST(PluginSdkTests, FixturePluginsLinkOnlySdkAndDoNotDependOnEngineSharedLibrar
   const std::vector<std::string> plugin_paths{
       ARV_TEST_EXAMPLE_PLUGIN_PATH,
       ARV_TEST_MASON_PLUGIN_PATH,
+      ARV_TEST_PERMS_PLUGIN_PATH,
   };
   for (const std::string& plugin_path : plugin_paths) {
     ASSERT_FALSE(plugin_path.empty());
@@ -177,7 +180,6 @@ TEST(PluginSdkTests, FixturePluginsLinkOnlySdkAndDoNotDependOnEngineSharedLibrar
 
 TEST(PluginPolicyTests, DisabledAndAllowlistPoliciesSkipWithoutLoading) {
   PluginHarness harness("arvane_plugin_policy_");
-  write_enabled(harness.packs, "example_plugin_pack");
   const std::filesystem::path relative = copy_plugin_library(
       harness.packs,
       "example_plugin_pack",
@@ -206,7 +208,6 @@ TEST(PluginPolicyTests, DisabledAndAllowlistPoliciesSkipWithoutLoading) {
 
 TEST(PluginLoadTests, LoadsAllowlistedPluginAndRegistersBehaviorServicesAndCommands) {
   PluginHarness harness("arvane_plugin_load_");
-  write_enabled(harness.packs, "example_plugin_pack");
   const std::filesystem::path relative = copy_plugin_library(
       harness.packs,
       "example_plugin_pack",
@@ -261,7 +262,6 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   }
 
   PluginHarness harness("arvane_mason_plugin_");
-  write_enabled(harness.packs, "arv_mason");
   const std::filesystem::path relative = copy_plugin_library(
       harness.packs,
       "arv_mason",
@@ -393,10 +393,151 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   manager.stop_runtime();
 }
 
+TEST(PluginLoadTests, ArvPermsPluginLoadsAndRegistersCommandAlias) {
+  if (std::string_view{ARV_TEST_PERMS_PLUGIN_PATH}.empty()) {
+    GTEST_SKIP() << "arv_perms plugin path is unavailable.";
+  }
+
+  PluginHarness harness("arvane_perms_plugin_");
+  const std::filesystem::path relative = copy_plugin_library(
+      harness.packs,
+      "arv_perms",
+      ARV_TEST_PERMS_PLUGIN_PATH);
+  write_text(
+      harness.packs / "arv_perms" / "pack.yaml",
+      "schema_version: 1\n"
+      "id: \"arv_perms\"\n"
+      "display_name: \"arv_perms\"\n"
+      "version: \"1.0.0\"\n"
+      "namespaces:\n"
+      "  - \"arv_perms\"\n"
+      "  - \"arvane\"\n"
+      "side: \"server\"\n"
+      "dependencies: []\n"
+      "load_after: []\n"
+      "load_before: []\n"
+      "capabilities:\n"
+      "  assets: false\n"
+      "  data: true\n"
+      "  config: true\n"
+      "  native_plugin: true\n"
+      "commands:\n"
+      "  - alias: perms\n"
+      "    command: perm\n"
+      "    visible_in_help: true\n"
+      "permissions:\n"
+      "  - id: arvane.command.perms\n"
+      "    description: Use /perm and /perms.\n"
+      "    default: unset\n"
+      "native:\n"
+      "  api_version: 1\n"
+      "  entrypoint: \"arvane_plugin_main\"\n"
+      "  libraries:\n"
+      "    " + arv::asset::native_plugin_platform_key() + ": \"" +
+          relative.generic_string() + "\"\n");
+  write_text(
+      harness.packs / "arv_perms" / "config" / "config.yaml",
+      "schema_version: 1\n"
+      "data:\n"
+      "  default_groups:\n"
+      "    - player\n"
+      "  operator_group: admin\n"
+      "  auto_save: true\n"
+      "  save_interval_seconds: 60\n"
+      "  track_last_known_names: true\n");
+  write_text(
+      harness.packs / "arv_perms" / "config" / "groups.yaml",
+      "schema_version: 1\n"
+      "data:\n"
+      "  groups:\n"
+      "    - id: player\n"
+      "      priority: 0\n"
+      "      inherits: []\n"
+      "      core:\n"
+      "        - name: can_interact\n"
+      "          value: ALLOW\n"
+      "        - name: can_open_inventory\n"
+      "          value: ALLOW\n"
+      "      permissions:\n"
+      "        - node: arvane.chat.send\n"
+      "          value: ALLOW\n"
+      "        - node: arvane.command.help\n"
+      "          value: ALLOW\n"
+      "        - node: arvane.command.msg\n"
+      "          value: ALLOW\n"
+      "    - id: admin\n"
+      "      priority: 1000\n"
+      "      inherits:\n"
+      "        - player\n"
+      "      core: []\n"
+      "      permissions:\n"
+      "        - node: \"*\"\n"
+      "          value: ALLOW\n");
+  harness.load_packs();
+
+  arv::plugin::PluginManager manager;
+  auto loaded = manager.load_plugins(harness.load_options({true, {"arv_perms"}}));
+  ASSERT_TRUE(loaded) << loaded.error().describe();
+  EXPECT_TRUE(manager.has_command_executor("arv_perms:perm"));
+  const std::filesystem::path config_root =
+      harness.temp.path / "config" / "plugins" / "arv_perms";
+  const std::filesystem::path saved_config =
+      config_root / "config" / "config.yaml";
+  const std::filesystem::path saved_groups =
+      config_root / "config" / "groups.yaml";
+  EXPECT_TRUE(std::filesystem::exists(saved_config));
+  EXPECT_TRUE(std::filesystem::exists(saved_groups));
+
+  arv::command::CommandRegistry registry;
+  manager.register_commands(registry);
+  const arv::command::Command* command = registry.find("perm");
+  ASSERT_NE(command, nullptr);
+  EXPECT_EQ(command->permission, "arvane.command.perms");
+
+  auto alias = registry.resolve("perms");
+  ASSERT_TRUE(alias.has_value());
+  EXPECT_EQ(alias->canonical_name, "perm");
+
+  arv::command::CommandSender sender;
+  sender.kind = arv::command::CommandSourceKind::ServerConsole;
+  arv::command::CommandServices services;
+  const arv::command::CommandResult result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      sender,
+      services,
+      "/perms validate");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::command::CommandResult edit_result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      sender,
+      services,
+      "/perms user " + std::string{PermsProfileA} + " group add admin");
+  ASSERT_EQ(edit_result.status, arv::command::CommandStatus::Success);
+
+  const std::filesystem::path saved_player =
+      config_root / "data" / "players" / std::string{PermsProfileA} /
+      "permissions.json";
+  EXPECT_TRUE(std::filesystem::exists(saved_config));
+  EXPECT_TRUE(std::filesystem::exists(saved_groups));
+  ASSERT_TRUE(std::filesystem::exists(saved_player));
+
+  auto player_text = arv::io::read_text_file_contents(saved_player);
+  ASSERT_TRUE(player_text) << player_text.error().message;
+  EXPECT_NE(player_text.value().find("\"groups\""), std::string::npos);
+  EXPECT_NE(player_text.value().find("\"admin\""), std::string::npos);
+
+  auto groups_text = arv::io::read_text_file_contents(saved_groups);
+  ASSERT_TRUE(groups_text) << groups_text.error().message;
+  EXPECT_NE(groups_text.value().find("admin"), std::string::npos);
+  EXPECT_NE(groups_text.value().find("*"), std::string::npos);
+}
+
 TEST(PluginLoadTests, ReportsMissingLibraryMissingSymbolAndFalseEntrypoint) {
   {
     PluginHarness harness("arvane_plugin_missing_library_");
-    write_enabled(harness.packs, "example_plugin_pack");
     write_plugin_pack(
         harness.packs,
         "example_plugin_pack",
@@ -414,7 +555,6 @@ TEST(PluginLoadTests, ReportsMissingLibraryMissingSymbolAndFalseEntrypoint) {
 
   {
     PluginHarness harness("arvane_plugin_missing_symbol_");
-    write_enabled(harness.packs, "example_plugin_pack");
     const std::filesystem::path relative = copy_plugin_library(
         harness.packs,
         "example_plugin_pack",
@@ -431,7 +571,6 @@ TEST(PluginLoadTests, ReportsMissingLibraryMissingSymbolAndFalseEntrypoint) {
 
   {
     PluginHarness harness("arvane_plugin_false_entrypoint_");
-    write_enabled(harness.packs, "example_plugin_pack");
     const std::filesystem::path relative = copy_plugin_library(
         harness.packs,
         "example_plugin_pack",
@@ -449,7 +588,6 @@ TEST(PluginLoadTests, ReportsMissingLibraryMissingSymbolAndFalseEntrypoint) {
 
 TEST(PluginRuntimeTests, RunsSchedulerEventsAndCommandExecutor) {
   PluginHarness harness("arvane_plugin_runtime_");
-  write_enabled(harness.packs, "example_plugin_pack");
   const std::filesystem::path relative = copy_plugin_library(
       harness.packs,
       "example_plugin_pack",

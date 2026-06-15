@@ -39,7 +39,7 @@ The client may start predicted presentation animations immediately, but gameplay
 Held-item animations are loaded from:
 
 ```text
-data/<namespace>/item_animations.json in enabled packs
+data/<namespace>/item_animations.json in installed packs
 ```
 
 The built-in definitions live at

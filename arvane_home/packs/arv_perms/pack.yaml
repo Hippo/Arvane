@@ -33,6 +33,9 @@ commands:
     visible_in_help: true
 
 permissions:
+  - id: arvane.command.perms
+    description: Use /perm and /perms.
+    default: unset
   - id: arvane.permissions.admin
     description: Manage arv_perms permissions.
     default: unset

@@ -336,7 +336,6 @@ TEST(UiThemeTests, PackThemesInheritResourceIds) {
       std::filesystem::temp_directory_path() / "arvane_ui_theme_pack_inherits";
   const std::filesystem::path packs = root / "packs";
   std::filesystem::remove_all(root);
-  write_text_file(packs / "enabled.yaml", "enabled:\n  - \"arvane_base\"\n");
   write_theme_pack_manifest(packs, "arvane_base", "arvane");
   write_text_file(root / "config/style.yaml", "theme: \"arvane:theme/child\"\n");
   write_text_file(

@@ -227,7 +227,6 @@ TEST(ClientSessionTests, CompletesAuthPackDownloadRegistrySyncAndWorldJoin) {
   ScopedTempDir temp("arvane_client_session_pack_");
   const std::string registry_json = "{\"format_version\":1,\"blocks\":[]}";
   const std::filesystem::path packs = temp.path / "packs";
-  write_text(packs / "enabled.yaml", "enabled:\n  - \"sync_pack\"\n");
   write_pack_manifest(packs, "sync_pack", "sync_pack");
   write_text(packs / "sync_pack/data/sync_pack/blocks.json", "{\"blocks\":[]}\n");
   write_text(packs / "sync_pack/assets/sync_pack/textures/block/test.png", "png");
@@ -597,7 +596,6 @@ TEST(ClientSessionTests, ReconnectUsesVerifiedPackCacheAndSkipsBundleDownload) {
   ScopedTempDir temp("arvane_client_session_reconnect_");
   const std::string registry_json = "{\"format_version\":1,\"blocks\":[]}";
   const std::filesystem::path packs = temp.path / "packs";
-  write_text(packs / "enabled.yaml", "enabled:\n  - \"sync_pack\"\n");
   write_pack_manifest(packs, "sync_pack", "sync_pack");
   write_text(packs / "sync_pack/data/sync_pack/blocks.json", "{\"blocks\":[]}\n");
   write_text(packs / "sync_pack/assets/sync_pack/textures/block/test.png", "png");

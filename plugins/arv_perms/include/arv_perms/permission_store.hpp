@@ -19,7 +19,7 @@ using CustomPermissionMap = std::map<std::string, arv::PermissionValue>;
 
 struct ArvPermsConfig {
   std::vector<GroupId> default_groups{"player"};
-  std::optional<GroupId> operator_group{"owner"};
+  std::optional<GroupId> operator_group{"admin"};
   bool auto_save{true};
   int save_interval_seconds{60};
   bool track_last_known_names{true};

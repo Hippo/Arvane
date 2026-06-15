@@ -30,28 +30,6 @@ namespace {
   return std::filesystem::is_regular_file(path, error);
 }
 
-[[nodiscard]] bool server_packs_are_configured(const std::filesystem::path& packs_root) {
-  if (regular_file_exists(packs_root / "enabled.yaml")) {
-    return true;
-  }
-  std::error_code error;
-  if (!std::filesystem::is_directory(packs_root, error)) {
-    return false;
-  }
-  for (const std::filesystem::directory_entry& entry :
-       std::filesystem::directory_iterator(packs_root, error)) {
-    if (error) {
-      error.clear();
-      continue;
-    }
-    if (entry.is_directory(error) && regular_file_exists(entry.path() / "pack.yaml")) {
-      return true;
-    }
-    error.clear();
-  }
-  return false;
-}
-
 [[nodiscard]] Expected<void, DedicatedError> copy_directory_tree(
     const std::filesystem::path& source,
     const std::filesystem::path& destination) {
@@ -130,8 +108,19 @@ namespace {
 [[nodiscard]] Expected<void, DedicatedError> seed_base_pack_if_needed(
     const io::EngineConfig& config) {
   const std::filesystem::path& packs_root = config.paths.server_packs_path();
-  if (server_packs_are_configured(packs_root)) {
-    return Expected<void, DedicatedError>::success();
+  std::error_code error;
+  if (std::filesystem::is_directory(packs_root, error)) {
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(packs_root, error)) {
+      if (error) {
+        error.clear();
+        continue;
+      }
+      if (entry.is_directory(error) && regular_file_exists(entry.path() / "pack.yaml")) {
+        return Expected<void, DedicatedError>::success();
+      }
+      error.clear();
+    }
   }
 
   const std::filesystem::path source_base =

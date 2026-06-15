@@ -251,7 +251,7 @@ Registries are **not serialized**.
 
 They are rebuilt at startup from:
 
-* enabled pack data
+* installed pack data
 * built-in `arvane_base` content
 * server-required content packs
 * explicitly enabled native/plugin systems, when supported

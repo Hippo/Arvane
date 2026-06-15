@@ -16,8 +16,6 @@
 namespace arv::asset {
 namespace {
 
-constexpr std::string_view DefaultBasePackID = "arvane_base";
-constexpr std::string_view EnabledPacksFileName = "enabled.yaml";
 constexpr u32 SupportedNativePluginApiVersion = 1U;
 
 [[nodiscard]] PackError pack_error(
@@ -770,56 +768,6 @@ constexpr u32 SupportedNativePluginApiVersion = 1U;
   return {};
 }
 
-[[nodiscard]] Expected<std::vector<std::string>, PackError> load_enabled_pack_ids(
-    const std::filesystem::path& packs_root) {
-  const std::filesystem::path enabled_path = packs_root / std::filesystem::path{EnabledPacksFileName};
-  if (!io::regular_file_exists(enabled_path)) {
-    return Expected<std::vector<std::string>, PackError>::success(
-        {std::string{DefaultBasePackID}});
-  }
-  auto text = io::read_text_file_contents(enabled_path);
-  if (!text) {
-    return Expected<std::vector<std::string>, PackError>::failure(
-        pack_error("enabled packs", text.error().message, {}, enabled_path));
-  }
-  auto decoded = io::decode_yaml_value(text.value());
-  if (!decoded) {
-    return Expected<std::vector<std::string>, PackError>::failure(
-        pack_error("enabled packs", "failed to parse enabled.yaml: " + decoded.error().describe(), {}, enabled_path));
-  }
-  const io::DataValue* enabled = member(decoded.value().root, "enabled");
-  const io::DataValue::Array* enabled_array =
-      enabled == nullptr ? nullptr : enabled->array_if();
-  if (enabled_array == nullptr) {
-    return Expected<std::vector<std::string>, PackError>::failure(
-        pack_error("enabled packs", "enabled.yaml must contain an enabled list", {}, enabled_path));
-  }
-  std::vector<std::string> ids;
-  HashSet<std::string> seen;
-  ids.reserve(enabled_array->size());
-  for (const io::DataValue& entry : *enabled_array) {
-    if (!io::is_string_value(entry)) {
-      return Expected<std::vector<std::string>, PackError>::failure(
-          pack_error("enabled packs", "enabled pack entry must be a scalar", {}, enabled_path));
-    }
-    std::string id{entry.as_string_or({})};
-    if (!is_valid_pack_id(id)) {
-      return Expected<std::vector<std::string>, PackError>::failure(
-          pack_error("enabled packs", "invalid enabled pack id: " + id, {}, enabled_path));
-    }
-    if (!seen.insert(id).second) {
-      return Expected<std::vector<std::string>, PackError>::failure(
-          pack_error("enabled packs", "duplicate enabled pack id: " + id, {}, enabled_path));
-    }
-    ids.push_back(std::move(id));
-  }
-  if (ids.empty()) {
-    return Expected<std::vector<std::string>, PackError>::failure(
-        pack_error("enabled packs", "enabled pack list must not be empty", {}, enabled_path));
-  }
-  return Expected<std::vector<std::string>, PackError>::success(std::move(ids));
-}
-
 [[nodiscard]] Expected<std::vector<PackSource>, PackError> discover_packs(
     const std::filesystem::path& packs_root) {
   std::vector<PackSource> packs;
@@ -876,26 +824,12 @@ constexpr u32 SupportedNativePluginApiVersion = 1U;
   return Expected<std::vector<PackSource>, PackError>::success(std::move(packs));
 }
 
-[[nodiscard]] Expected<std::vector<PackSource>, PackError> select_and_order_packs(
-    std::vector<PackSource> discovered,
-    std::vector<std::string> enabled_ids) {
-  HashMap<std::string, usize> discovered_by_id;
-  for (usize index = 0; index < discovered.size(); ++index) {
-    discovered_by_id.emplace(discovered[index].manifest.id, index);
-  }
-
-  std::vector<PackSource> enabled;
-  enabled.reserve(enabled_ids.size());
+[[nodiscard]] Expected<std::vector<PackSource>, PackError> order_discovered_packs(
+    std::vector<PackSource> discovered) {
+  std::vector<PackSource> enabled = std::move(discovered);
   HashMap<std::string, usize> enabled_order;
-  for (usize index = 0; index < enabled_ids.size(); ++index) {
-    const std::string& id = enabled_ids[index];
-    const auto found = discovered_by_id.find(id);
-    if (found == discovered_by_id.end()) {
-      return Expected<std::vector<PackSource>, PackError>::failure(
-          pack_error("pack ordering", "enabled pack is not installed: " + id, id));
-    }
-    enabled_order.emplace(id, index);
-    enabled.push_back(std::move(discovered[found->second]));
+  for (usize index = 0; index < enabled.size(); ++index) {
+    enabled_order.emplace(enabled[index].manifest.id, index);
   }
 
   HashMap<std::string, usize> index_by_id;
@@ -1481,15 +1415,11 @@ Expected<PackManager, PackError> PackManager::load(const std::filesystem::path& 
 
 Expected<PackManager, PackError> PackManager::load_from_packs_root(
     const std::filesystem::path& packs_root) {
-  auto enabled = load_enabled_pack_ids(packs_root);
-  if (!enabled) {
-    return Expected<PackManager, PackError>::failure(enabled.error());
-  }
   auto discovered = discover_packs(packs_root);
   if (!discovered) {
     return Expected<PackManager, PackError>::failure(discovered.error());
   }
-  auto ordered = select_and_order_packs(std::move(discovered.value()), std::move(enabled.value()));
+  auto ordered = order_discovered_packs(std::move(discovered.value()));
   if (!ordered) {
     return Expected<PackManager, PackError>::failure(ordered.error());
   }
@@ -1626,7 +1556,7 @@ PackPathResult PackManager::resolve_asset_path(
   }
 
   return PackPathResult::failure(
-      pack_error("asset resolution", "asset was not found in enabled pack stack", {}, relative, id.string()));
+      pack_error("asset resolution", "asset was not found in installed pack stack", {}, relative, id.string()));
 }
 
 PackPathResult PackManager::resolve_data_path(
@@ -1669,7 +1599,7 @@ PackPathResult PackManager::resolve_data_path(
   }
 
   return PackPathResult::failure(
-      pack_error("data resolution", "data file was not found in enabled pack stack", {}, relative, id.string()));
+      pack_error("data resolution", "data file was not found in installed pack stack", {}, relative, id.string()));
 }
 
 PackPathResult PackManager::resolve_config_path(
@@ -1713,7 +1643,7 @@ PackPathResult PackManager::resolve_config_path(
   }
 
   return PackPathResult::failure(
-      pack_error("config resolution", "config file was not found in enabled pack stack", {}, relative, id.string()));
+      pack_error("config resolution", "config file was not found in installed pack stack", {}, relative, id.string()));
 }
 
 std::vector<PackDataFile> PackManager::data_files(
@@ -2063,7 +1993,7 @@ std::vector<RequiredPack> PackManager::required_packs() const {
   std::vector<RequiredPack> required;
   required.reserve(stack_.size());
   for (const PackSource& pack : stack_) {
-    if (!pack.manifest.capabilities.data) {
+    if (pack.manifest.side == PackSide::Server || !pack.manifest.capabilities.data) {
       continue;
     }
     required.push_back({pack.manifest.id,

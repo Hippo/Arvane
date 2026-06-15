@@ -1,13 +1,25 @@
 # arv_perms
 
-`arv_perms` is the first-party server permission administration plugin.
-It stores operator-authored groups as plugin config files and per-player
-assignments as individual plugin player-data JSON files. It feeds the existing
-Player Overrides permission layer; it does not replace the engine resolver.
+`arv_perms` is the first-party server permission administration plugin. It
+ships default permission YAML in its pack `config` folder, then saves mutable
+server config and per-player assignments through the Plugin SDK storage APIs. It
+feeds the existing Player Overrides permission layer; it does not replace the
+engine resolver.
 
 ## Files
 
-The V1 plugin uses the existing plugin config root:
+The pack provides first-run defaults:
+
+```text
+arvane_home/packs/arv_perms/
+  config/
+    config.yaml
+    groups.yaml
+```
+
+Dedicated server installs use the same layout under
+`arvane_server/packs/arv_perms/`. When writable config exists, the SDK config
+root overrides the pack defaults:
 
 ```text
 arvane_home/config/plugins/arv_perms/
@@ -20,8 +32,9 @@ arvane_home/config/plugins/arv_perms/
         permissions.json
 ```
 
-Missing config files are generated with safe defaults when the plugin loads.
-Player files are created individually as players are seen or edited.
+Missing writable config files are generated from the loaded defaults when the
+plugin loads. Player files are created individually as players are seen or
+edited.
 
 ## config.yaml
 
@@ -30,7 +43,7 @@ schema_version: 1
 data:
   default_groups:
     - player
-  operator_group: owner
+  operator_group: admin
   auto_save: true
   save_interval_seconds: 60
   track_last_known_names: true
@@ -52,16 +65,22 @@ data:
       core:
         - name: can_interact
           value: ALLOW
+        - name: can_open_inventory
+          value: ALLOW
       permissions:
+        - node: arvane.chat.send
+          value: ALLOW
         - node: arvane.command.help
           value: ALLOW
+        - node: arvane.command.msg
+          value: ALLOW
     - id: admin
-      priority: 100
+      priority: 1000
       inherits:
         - player
       core: []
       permissions:
-        - node: arvane.command.*
+        - node: "*"
           value: ALLOW
 ```
 
@@ -122,7 +141,9 @@ Common commands:
 ```
 
 The server console may run all commands. Player callers are checked against the
-existing resolved custom permission API using `arvane.permissions.*` nodes.
+`arvane.command.perms` command node first, then against the existing resolved
+custom permission API using `arvane.permissions.*` nodes for specific
+subcommands.
 
 ## Notes
 

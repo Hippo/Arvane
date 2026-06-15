@@ -302,10 +302,6 @@ void set_body_light(
       light));
 }
 
-void write_enabled(const std::filesystem::path& packs_root, std::string_view text) {
-  arv::testsupport::write_text(packs_root / "enabled.yaml", text);
-}
-
 void write_pack_manifest(
     const std::filesystem::path& packs_root,
     std::string_view id,
@@ -524,7 +520,6 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
 TEST(NaturalSpawnLoaderTests, RejectsInvalidSpawnCategoryWithDiagnostic) {
   arv::testsupport::ScopedTempDir temp{"arvane_spawn_loader_"};
   const std::filesystem::path packs_root = temp.path / "packs";
-  write_enabled(packs_root, "enabled:\n  - \"bad_pack\"\n");
   write_pack_manifest(packs_root, "bad_pack", "bad");
   arv::testsupport::write_text(
       packs_root / "bad_pack" / "data" / "bad" / "worldgen" / "biome" / "bad.yaml",

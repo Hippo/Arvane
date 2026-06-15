@@ -112,7 +112,7 @@ They do not contain logic. All runtime behavior is derived from:
 Entity definitions are loaded from:
 
 ```text
-data/<namespace>/entities.json in enabled packs
+data/<namespace>/entities.json in installed packs
 ```
 
 The built-in entity definitions live at

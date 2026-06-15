@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -50,6 +51,24 @@ capabilities:
   write_file(
       packs_root / "arvane_base/data/arvane/blocks.json",
       R"({"blocks":[]})");
+}
+
+void write_server_pack(const std::filesystem::path& packs_root, std::string_view id) {
+  const std::string pack_id{id};
+  write_file(
+      packs_root / pack_id / "pack.yaml",
+      "schema_version: 1\n"
+      "id: \"" + pack_id + "\"\n"
+      "display_name: \"" + pack_id + "\"\n"
+      "version: \"0.1.0\"\n"
+      "namespaces:\n"
+      "  - \"" + pack_id + "\"\n"
+      "side: \"server\"\n"
+      "capabilities:\n"
+      "  assets: false\n"
+      "  data: true\n"
+      "  config: true\n"
+      "  native_plugin: false\n");
 }
 
 [[nodiscard]] arv::dedicated::DedicatedLaunchOptions parse_args(
@@ -129,17 +148,45 @@ TEST(DedicatedRuntimeLayoutTests, SeedsBasePackAndCreatesServerDirectoriesOnClea
   EXPECT_EQ(packs.value().stack()[0].manifest.id, "arvane_base");
 }
 
-TEST(DedicatedRuntimeLayoutTests, LeavesConfiguredServerPacksUntouched) {
-  const TempDir temp{"arvane_dedicated_layout_configured_"};
+TEST(DedicatedRuntimeLayoutTests, LeavesInstalledServerPacksAsLoadableStack) {
+  const TempDir temp{"arvane_dedicated_layout_server_packs_"};
   arv::io::EngineConfig config = make_config(temp.path);
   write_base_pack(config.paths.packs_path());
-  write_file(
-      config.paths.server_packs_path() / "enabled.yaml",
-      "enabled:\n  - custom_pack\n");
+  write_base_pack(config.paths.server_packs_path());
+  write_server_pack(config.paths.server_packs_path(), "arv_perms");
 
   auto result = arv::dedicated::ensure_dedicated_runtime_layout(config);
   ASSERT_TRUE(result) << result.error().message;
 
-  EXPECT_TRUE(std::filesystem::is_regular_file(config.paths.server_packs_path() / "enabled.yaml"));
+  EXPECT_FALSE(std::filesystem::exists(config.paths.server_packs_path() / "enabled.yaml"));
+
+  auto packs = arv::asset::PackManager::load_from_packs_root(
+      config.paths.server_packs_path());
+  ASSERT_TRUE(packs) << packs.error().describe();
+  ASSERT_EQ(packs.value().stack().size(), 2U);
+  const auto has_pack = [&](std::string_view id) {
+    return std::find_if(
+               packs.value().stack().begin(),
+               packs.value().stack().end(),
+               [&](const arv::asset::PackSource& pack) {
+                 return pack.manifest.id == id;
+               }) != packs.value().stack().end();
+  };
+  EXPECT_TRUE(has_pack("arvane_base"));
+  EXPECT_TRUE(has_pack("arv_perms"));
+}
+
+TEST(DedicatedRuntimeLayoutTests, LeavesConfiguredServerPacksUntouched) {
+  const TempDir temp{"arvane_dedicated_layout_configured_"};
+  arv::io::EngineConfig config = make_config(temp.path);
+  write_base_pack(config.paths.packs_path());
+  write_server_pack(config.paths.server_packs_path(), "custom_pack");
+
+  auto result = arv::dedicated::ensure_dedicated_runtime_layout(config);
+  ASSERT_TRUE(result) << result.error().message;
+
+  EXPECT_TRUE(std::filesystem::is_regular_file(
+      config.paths.server_packs_path() / "custom_pack/pack.yaml"));
+  EXPECT_FALSE(std::filesystem::exists(config.paths.server_packs_path() / "enabled.yaml"));
   EXPECT_FALSE(std::filesystem::exists(config.paths.server_packs_path() / "arvane_base/pack.yaml"));
 }

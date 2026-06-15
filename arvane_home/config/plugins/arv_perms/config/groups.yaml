@@ -1,57 +1,21 @@
 schema_version: 1
 data:
   groups:
-    - id: admin
-      priority: 100
-      inherits:
-        - moderator
-        - builder
-      core: []
-      permissions:
-        - node: arvane.admin.*
-          value: ALLOW
-        - node: arvane.command.*
-          value: ALLOW
-        - node: arvane.permissions.*
-          value: ALLOW
-    - id: builder
-      priority: 25
+    - core: ~
+      id: admin
       inherits:
         - player
-      core:
-        - name: can_modify_world
-          value: ALLOW
       permissions:
-        - node: arvane.command.time.query
+        - node: "*"
           value: ALLOW
-    - id: moderator
-      priority: 50
-      inherits:
-        - player
-      core: []
-      permissions:
-        - node: arvane.command.ban
-          value: ALLOW
-        - node: arvane.command.kick
-          value: ALLOW
-        - node: arvane.command.teleport.other
-          value: ALLOW
-    - id: owner
       priority: 1000
-      inherits:
-        - admin
-      core: []
-      permissions:
-        - node: arvane.*
-          value: ALLOW
-    - id: player
-      priority: 0
-      inherits: []
-      core:
+    - core:
         - name: can_interact
           value: ALLOW
         - name: can_open_inventory
           value: ALLOW
+      id: player
+      inherits: ~
       permissions:
         - node: arvane.chat.send
           value: ALLOW
@@ -59,14 +23,4 @@ data:
           value: ALLOW
         - node: arvane.command.msg
           value: ALLOW
-        - node: arvane.command.spawn
-          value: ALLOW
-    - id: restricted
-      priority: 500
-      inherits: []
-      core: []
-      permissions:
-        - node: arvane.chat.send
-          value: DENY
-        - node: arvane.command.spawn
-          value: DENY
+      priority: 0

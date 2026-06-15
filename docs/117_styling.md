@@ -7,7 +7,7 @@ Arvane client UI should be configurable, consistent, and readable. The engine sh
 The preferred model is theme-driven:
 
 - `style.yaml` selects the active theme and stores broad client style preferences.
-- Theme assets in enabled packs define colors, accents, spacing, typography, and common UI element styling.
+- Theme assets in installed packs define colors, accents, spacing, typography, and common UI element styling.
 - UI screens consume named style tokens instead of embedding raw colors or arbitrary sizing rules.
 
 This keeps menus consistent, makes end-user customization approachable, and allows the client to support multiple visual identities without rewriting UI code.

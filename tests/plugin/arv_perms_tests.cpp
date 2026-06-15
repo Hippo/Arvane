@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
+
 namespace {
 
 constexpr std::string_view ProfileA =
@@ -15,8 +17,15 @@ TEST(ArvPermsTests, LoadsDefaultStoreWithoutDocuments) {
 
   ASSERT_TRUE(loaded.ok);
   EXPECT_TRUE(loaded.store.groups.contains("player"));
-  EXPECT_TRUE(loaded.store.groups.contains("owner"));
+  EXPECT_TRUE(loaded.store.groups.contains("admin"));
   EXPECT_EQ(loaded.store.config.default_groups, std::vector<std::string>{"player"});
+  EXPECT_EQ(loaded.store.config.operator_group, std::optional<std::string>{"admin"});
+  EXPECT_EQ(
+      loaded.store.groups.at("player").permissions.at("arvane.command.msg"),
+      arv::PermissionValue::Allow);
+  EXPECT_EQ(
+      loaded.store.groups.at("admin").permissions.at("*"),
+      arv::PermissionValue::Allow);
 }
 
 TEST(ArvPermsTests, ValidationRejectsMissingParentsAndInvalidPlayers) {

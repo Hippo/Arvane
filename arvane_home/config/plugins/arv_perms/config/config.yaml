@@ -1,8 +1,8 @@
 schema_version: 1
 data:
+  auto_save: true
   default_groups:
     - player
-  operator_group: owner
-  auto_save: true
+  operator_group: admin
   save_interval_seconds: 60
   track_last_known_names: true

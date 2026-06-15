@@ -19,10 +19,6 @@ namespace {
 using arv::testsupport::ScopedTempDir;
 using arv::testsupport::write_text;
 
-void write_enabled(const std::filesystem::path& packs_root, std::string_view text) {
-  write_text(packs_root / "enabled.yaml", text);
-}
-
 void write_pack_manifest(
     const std::filesystem::path& packs_root,
     std::string_view id,
@@ -233,6 +229,9 @@ TEST(PackManifestTests, LoadsCommandsAndPermissionsFromManifest) {
       "    command: perm\n"
       "    visible_in_help: true\n"
       "permissions:\n"
+      "  - id: arvane.command.perms\n"
+      "    description: Use /perm and /perms.\n"
+      "    default: unset\n"
       "  - id: arvane.permissions.admin\n"
       "    description: Manage arv_perms permissions.\n"
       "    default: unset\n");
@@ -243,15 +242,16 @@ TEST(PackManifestTests, LoadsCommandsAndPermissionsFromManifest) {
   EXPECT_EQ(manifest.value().commands.front().alias, "perms");
   EXPECT_EQ(manifest.value().commands.front().command, "perm");
   EXPECT_TRUE(manifest.value().commands.front().visible_in_help);
-  ASSERT_EQ(manifest.value().permissions.size(), 1U);
-  EXPECT_EQ(manifest.value().permissions.front().id, "arvane.permissions.admin");
-  EXPECT_EQ(manifest.value().permissions.front().default_value, "unset");
+  ASSERT_EQ(manifest.value().permissions.size(), 2U);
+  EXPECT_EQ(manifest.value().permissions[0].id, "arvane.command.perms");
+  EXPECT_EQ(manifest.value().permissions[0].default_value, "unset");
+  EXPECT_EQ(manifest.value().permissions[1].id, "arvane.permissions.admin");
+  EXPECT_EQ(manifest.value().permissions[1].default_value, "unset");
 }
 
 TEST(PackManagerTests, OrdersDependenciesAndResolvesAssetOverrides) {
   ScopedTempDir temp("arvane_pack_order_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"override_pack\"\n  - \"arvane_base\"\n");
   write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
   write_text(
       packs / "override_pack" / "pack.yaml",
@@ -290,7 +290,6 @@ TEST(PackManagerTests, OrdersDependenciesAndResolvesAssetOverrides) {
 TEST(PackManagerTests, RejectsDependencyCycles) {
   ScopedTempDir temp("arvane_pack_cycle_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"pack_a\"\n  - \"pack_b\"\n");
   write_text(
       packs / "pack_a/pack.yaml",
       "schema_version: 1\nid: \"pack_a\"\ndisplay_name: \"A\"\nversion: \"1.0.0\"\n"
@@ -312,7 +311,6 @@ TEST(PackManagerTests, RejectsDependencyCycles) {
 TEST(PackDataTests, RejectsDuplicateDefinitionsWithoutOverride) {
   ScopedTempDir temp("arvane_pack_data_duplicate_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"arvane_base\"\n  - \"override_pack\"\n");
   write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
   write_pack_manifest(packs, "override_pack", "  - \"arvane\"\n");
   write_text(
@@ -332,7 +330,6 @@ TEST(PackDataTests, RejectsDuplicateDefinitionsWithoutOverride) {
 TEST(PackDataTests, LoadsCondensedRootDataFiles) {
   ScopedTempDir temp("arvane_pack_data_root_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"arvane_base\"\n");
   write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
   write_text(
       packs / "arvane_base/data/blocks.json",
@@ -359,7 +356,6 @@ TEST(PackDataTests, LoadsCondensedRootDataFiles) {
 TEST(PackConfigTests, ResolvesRootConfigFiles) {
   ScopedTempDir temp("arvane_pack_config_root_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"arv_mason\"\n");
   write_pack_manifest(
       packs,
       "arv_mason",
@@ -385,7 +381,6 @@ TEST(PackConfigTests, ResolvesRootConfigFiles) {
 TEST(PackDataTests, AllowsExplicitOverrideAndRejectsNamespaceSquatting) {
   ScopedTempDir temp("arvane_pack_data_override_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"arvane_base\"\n  - \"override_pack\"\n");
   write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
   write_pack_manifest(packs, "override_pack", "  - \"override_pack\"\n");
   write_text(
@@ -415,7 +410,6 @@ TEST(PackDataTests, AllowsExplicitOverrideAndRejectsNamespaceSquatting) {
 TEST(PackHashTests, IsDeterministicAndChangesWithContent) {
   ScopedTempDir temp("arvane_pack_hash_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"arvane_base\"\n");
   write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
   write_text(
       packs / "arvane_base/data/arvane/blocks.json",
@@ -446,7 +440,6 @@ TEST(PackHashTests, IsDeterministicAndChangesWithContent) {
 TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
   ScopedTempDir temp("arvane_pack_bundle_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"arvane_base\"\n");
   write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
   write_text(
       packs / "arvane_base/data/arvane/blocks.json",
@@ -548,6 +541,50 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
   EXPECT_FALSE(corrupt);
 }
 
+TEST(PackBundleTests, ServerOnlyPacksDoNotChangeClientBundle) {
+  ScopedTempDir temp("arvane_pack_bundle_server_only_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
+  write_text(
+      packs / "arvane_base/data/arvane/blocks.json",
+      "{\"blocks\":[{\"name\":\"arvane:stone\"}]}\n");
+
+  auto base_manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(base_manager) << base_manager.error().describe();
+  auto base_bundle = arv::asset::build_client_pack_bundle(
+      base_manager.value(),
+      "{\"format_version\":1,\"blocks\":[]}");
+  ASSERT_TRUE(base_bundle) << base_bundle.error().message;
+
+  write_pack_manifest(
+      packs,
+      "arv_perms",
+      "  - \"arv_perms\"\n",
+      "server",
+      "assets: true\n  data: true\n  config: true\n  native_plugin: true\n");
+  write_text(
+      packs / "arv_perms/data/arv_perms/blocks.json",
+      "{\"blocks\":[{\"name\":\"arv_perms:test\"}]}\n");
+  write_text(
+      packs / "arv_perms/assets/arv_perms/textures/block/test.png",
+      "server-only-png");
+
+  auto server_manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(server_manager) << server_manager.error().describe();
+  auto server_bundle = arv::asset::build_client_pack_bundle(
+      server_manager.value(),
+      "{\"format_version\":1,\"blocks\":[]}");
+  ASSERT_TRUE(server_bundle) << server_bundle.error().message;
+
+  EXPECT_EQ(server_bundle.value().bundle_hash, base_bundle.value().bundle_hash);
+  EXPECT_FALSE(contains_bundle_file(
+      server_bundle.value().files,
+      "data/arv_perms/blocks.json"));
+  EXPECT_FALSE(contains_bundle_file(
+      server_bundle.value().files,
+      "assets/arv_perms/textures/block/test.png"));
+}
+
 TEST(PackBundleTests, LoadsClientBundleRootAsSyntheticPack) {
   ScopedTempDir temp("arvane_client_bundle_root_");
   const std::filesystem::path bundle = temp.path / "cache" / "abc123";
@@ -591,7 +628,6 @@ TEST(PackBundleTests, RemoteResourceManagerFallsBackToLocalPackAssets) {
       "fake-png");
 
   const std::filesystem::path local_packs = temp.path / "packs";
-  write_enabled(local_packs, "enabled:\n  - \"arvane_base\"\n");
   write_pack_manifest(local_packs, "arvane_base", "  - \"arvane\"\n");
   write_text(
       local_packs / "arvane_base/assets/arvane/fonts/font.ttf",
@@ -626,7 +662,6 @@ TEST(PackBundleTests, RemoteResourceManagerFallsBackToLocalPackAssets) {
 TEST(PackLockTests, ValidatesRequiredPacks) {
   ScopedTempDir temp("arvane_pack_lock_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_enabled(packs, "enabled:\n  - \"arvane_base\"\n");
   write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
   write_text(
       packs / "arvane_base/data/arvane/blocks.json",
@@ -639,4 +674,26 @@ TEST(PackLockTests, ValidatesRequiredPacks) {
   required.front().content_hash.back() =
       required.front().content_hash.back() == '0' ? '1' : '0';
   EXPECT_FALSE(manager.value().validate_required_packs(required));
+}
+
+TEST(PackLockTests, RequiredPacksSkipServerOnlyPacks) {
+  ScopedTempDir temp("arvane_pack_lock_server_only_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_pack_manifest(packs, "arvane_base", "  - \"arvane\"\n");
+  write_text(
+      packs / "arvane_base/data/arvane/blocks.json",
+      "{\"blocks\":[{\"name\":\"arvane:stone\"}]}\n");
+  write_pack_manifest(
+      packs,
+      "arv_perms",
+      "  - \"arv_perms\"\n",
+      "server",
+      "assets: false\n  data: true\n  config: true\n  native_plugin: true\n");
+
+  auto manager = arv::asset::PackManager::load_from_packs_root(packs);
+  ASSERT_TRUE(manager) << manager.error().describe();
+  std::vector<arv::asset::RequiredPack> required = manager.value().required_packs();
+
+  ASSERT_EQ(required.size(), 1U);
+  EXPECT_EQ(required.front().id, "arvane_base");
 }

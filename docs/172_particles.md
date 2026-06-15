@@ -15,7 +15,7 @@ submits billboard draw items in the render frame packet.
 Pack YAML -> ParticleRegistry + particle atlas -> ParticleSystem -> FramePacket.particles -> transparent render pass
 ```
 
-`DesktopLoadedAssets` loads particle definitions from enabled packs and builds a
+`DesktopLoadedAssets` loads particle definitions from installed packs and builds a
 dedicated texture-array atlas. Static particles resolve one texture into one
 atlas frame. Animated particles resolve every authored frame into atlas page and
 UV data during asset loading. Block particle textures authored through block

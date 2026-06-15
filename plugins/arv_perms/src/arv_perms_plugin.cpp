@@ -19,12 +19,14 @@ constexpr std::string_view PermDefaultEdit = "arvane.permissions.default.edit";
 constexpr std::string_view PermReload = "arvane.permissions.reload";
 constexpr std::string_view PermSave = "arvane.permissions.save";
 constexpr std::string_view PermValidate = "arvane.permissions.validate";
+constexpr std::string_view PermCommand = "arvane.command.perms";
 
 constexpr std::string_view ConfigFile = "config.yaml";
 constexpr std::string_view GroupsFile = "groups.yaml";
 constexpr std::string_view PlayerPermissionsFile = "permissions.json";
 
 constexpr std::string_view PermissionNodes[] = {
+    PermCommand,
     PermAdmin,
     PermGroupCreate,
     PermGroupDelete,
@@ -108,11 +110,11 @@ bool ArvPermsPlugin::load_store() {
     return false;
   }
   store_ = std::move(loaded.store);
-  if (needs_default_config || needs_default_groups) {
-    std::string error;
-    if (!save_config_files(error)) {
-      plugin_.logger().warn("arv_perms could not write default config: " + error);
-    }
+  std::string error;
+  if (!save_config_files(error)) {
+    const std::string action =
+        needs_default_config || needs_default_groups ? "default config" : "config";
+    plugin_.logger().warn("arv_perms could not write " + action + ": " + error);
   }
   return true;
 }
@@ -236,7 +238,7 @@ arv::Result ArvPermsPlugin::register_commands() {
           .executor_id = "arv_perms:perm",
           .name = "perm",
           .domain = arv::CommandDomain::ServerBound,
-          .permission = "",
+          .permission = std::string{PermCommand},
           .description = "Manage server permission groups and player assignments.",
           .usage = "/perm <group|user|default|save|reload|validate>",
           .public_to_players = false,

@@ -419,7 +419,7 @@ Plugin lifecycle is tied to the resolved pack stack.
 
 ### Startup Order
 
-1. Discover enabled packs.
+1. Discover installed packs.
 2. Read and validate pack manifests.
 3. Resolve dependencies and load order.
 4. Validate native plugin metadata.

@@ -55,7 +55,7 @@ Stores client/local runtime content and user state.
 
 * `packs/arvane_base/` contains data and assets for the built-in `arvane`
   namespace
-* `packs/enabled.yaml` selects the active pack stack
+* every pack directory with a `pack.yaml` is part of the active pack stack
 * `config/` contains client/local config
 * `saves/` contains singleplayer integrated-server save roots
 * `cache/server-packs/` stores verified downloaded multiplayer pack bundles
@@ -166,7 +166,6 @@ Example:
 ```text
 arvane_home/
   packs/
-    enabled.yaml
     arvane_base/
       pack.yaml
       assets/
@@ -186,7 +185,6 @@ arvane_home/
 arvane_server/
   server.yaml
   packs/
-    enabled.yaml
     arvane_base/
   worlds/
     default/

@@ -1,0 +1,26 @@
+schema_version: 1
+data:
+  groups:
+    - id: player
+      priority: 0
+      inherits: []
+      core:
+        - name: can_interact
+          value: ALLOW
+        - name: can_open_inventory
+          value: ALLOW
+      permissions:
+        - node: arvane.chat.send
+          value: ALLOW
+        - node: arvane.command.help
+          value: ALLOW
+        - node: arvane.command.msg
+          value: ALLOW
+    - id: admin
+      priority: 1000
+      inherits:
+        - player
+      core: []
+      permissions:
+        - node: "*"
+          value: ALLOW

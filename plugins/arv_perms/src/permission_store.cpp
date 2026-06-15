@@ -662,16 +662,16 @@ PermissionStore default_store() {
       arv::CorePermission::CanOpenInventory,
       arv::PermissionValue::Allow);
   player.permissions["arvane.command.help"] = arv::PermissionValue::Allow;
+  player.permissions["arvane.command.msg"] = arv::PermissionValue::Allow;
   player.permissions["arvane.chat.send"] = arv::PermissionValue::Allow;
   store.groups[player.id] = std::move(player);
 
-  PermissionGroupRecord owner;
-  owner.id = "owner";
-  owner.priority = 1000;
-  owner.inherits = {"player"};
-  owner.permissions["arvane.*"] = arv::PermissionValue::Allow;
-  owner.permissions["permissions.*"] = arv::PermissionValue::Allow;
-  store.groups[owner.id] = std::move(owner);
+  PermissionGroupRecord admin;
+  admin.id = "admin";
+  admin.priority = 1000;
+  admin.inherits = {"player"};
+  admin.permissions["*"] = arv::PermissionValue::Allow;
+  store.groups[admin.id] = std::move(admin);
 
   store.dirty = false;
   return store;

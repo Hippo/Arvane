@@ -127,11 +127,11 @@ int DedicatedApplication::run(int argc, char** argv) {
   pack_lock.registry_hash = registries.client_registry_snapshot_hash;
   pack_lock.created_with_arvane_version =
       std::string{persistence::CurrentGameVersion};
-  pack_lock.packs.reserve(pack_manager.stack().size());
-  for (const asset::PackSource& pack : pack_manager.stack()) {
+  pack_lock.packs.reserve(active_required_packs.size());
+  for (const asset::RequiredPack& pack : active_required_packs) {
     pack_lock.packs.push_back({
-        pack.manifest.id,
-        pack.manifest.version,
+        pack.id,
+        pack.version,
         pack.content_hash,
         client_bundle.bundle_hash});
   }

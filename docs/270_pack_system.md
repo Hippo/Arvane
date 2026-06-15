@@ -90,7 +90,7 @@ The meaning of the path is interpreted by the loading context. For example, `arv
 
 ### Pack Stack
 
-The pack stack is the ordered list of enabled packs. Earlier packs provide base content. Later packs may add content or override eligible content from earlier packs.
+The pack stack is the ordered list of installed packs. Earlier packs provide base content. Later packs may add content or override eligible content from earlier packs.
 
 The pack stack must be deterministic.
 
@@ -102,7 +102,7 @@ The pack system should satisfy the following goals:
 
 1. **Deterministic loading**
 
-   The same enabled packs, versions, and load order must produce the same registry and resource resolution results.
+   The same installed packs, versions, and load order must produce the same registry and resource resolution results.
 
 2. **Stable namespaced identifiers**
 
@@ -152,10 +152,9 @@ Those systems may be added later without changing the core pack model.
 
 ## Runtime Behavior
 
-Local client/singleplayer runtime loads the enabled pack stack from
-`arvane_home/packs/enabled.yaml`. Dedicated server runtime loads authoritative
-packs from `arvane_server/packs/enabled.yaml`. If the enabled list is absent,
-`arvane_base` is the default stack. Pack loading validates manifests,
+Local client/singleplayer runtime loads every pack directory under
+`arvane_home/packs/` that contains a `pack.yaml`. Dedicated server runtime loads
+every authoritative pack directory under `arvane_server/packs/`. Pack loading validates manifests,
 namespaces, dependency order, version constraints, native metadata paths, and
 path traversal before content is used.
 
@@ -191,16 +190,14 @@ gameplay defaults, and command implementations.
 
 Local packs live under `arvane_home/packs/`. Dedicated server packs live under
 `arvane_server/packs/` and are authoritative for multiplayer.
-On first dedicated startup, an absent or unconfigured server pack root is
+On first dedicated startup, an absent or empty server pack root is
 created and seeded with `arvane_base` from the local installed pack root; once
-`enabled.yaml` or any pack manifest exists under `arvane_server/packs/`, that
+any pack manifest exists under `arvane_server/packs/`, that
 server pack root is left untouched.
 
 ```text
 arvane_home/
   packs/
-    enabled.yaml
-
     arvane_base/
       pack.yaml
       assets/
@@ -259,7 +256,6 @@ arvane_home/
 arvane_server/
   server.yaml
   packs/
-    enabled.yaml
     arvane_base/
       pack.yaml
       assets/
@@ -376,22 +372,18 @@ not be placed in the runtime pack directory.
 
 ---
 
-## Enabled Pack List
+## Installed Pack Stack
 
-The enabled pack list defines the local default pack stack.
-
-```yaml
-enabled:
-  - "arvane_base"
-  - "better_oceans"
-  - "user_texture_overrides"
-```
-
-The order is meaningful.
+The installed pack directories define the local default pack stack. Any
+directory directly under the pack root with a valid `pack.yaml` participates.
+The final order is deterministic: packs are discovered by id and then reordered
+by dependencies plus `load_after` / `load_before` hints.
 
 Earlier packs are lower priority. Later packs are higher priority for eligible overrides.
 
-For singleplayer worlds, the enabled pack list may be combined with the world’s required pack list. For multiplayer, the server’s required pack list is authoritative for gameplay-affecting content.
+For singleplayer worlds, installed packs may be combined with the world’s
+required pack list. For multiplayer, the server’s required pack list is
+authoritative for gameplay-affecting content.
 
 First-party plugin packs can provide a CMake install target that copies the
 authored pack and current-platform native library into the development runtime
@@ -402,7 +394,7 @@ cmake --build build --target arv_mason_install_pack
 ```
 
 That target installs Mason to `arvane_home/packs/arv_mason/`; the pack is still
-activated through `arvane_home/packs/enabled.yaml`.
+activated by being present in the pack root.
 
 ---
 
@@ -967,7 +959,7 @@ Registry-affecting data should be loaded in a deterministic pipeline.
 
 Conceptual order:
 
-1. Discover enabled packs.
+1. Discover installed packs.
 2. Read and validate pack manifests.
 3. Resolve dependencies.
 4. Compute pack load order.
@@ -992,7 +984,7 @@ The pack load order must be deterministic.
 
 Inputs to load order include:
 
-* The enabled pack list
+* Installed pack IDs
 * Required world packs
 * Required server packs
 * Pack dependencies
@@ -1468,7 +1460,7 @@ Conflicts should be handled differently for assets and data.
 
 Asset conflicts are normal.
 
-If two enabled packs provide the same asset resource ID, the later pack wins.
+If two installed packs provide the same asset resource ID, the later pack wins.
 
 Example:
 

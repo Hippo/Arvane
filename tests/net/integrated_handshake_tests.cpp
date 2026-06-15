@@ -641,7 +641,6 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
 TEST(IntegratedHandshakeTests, PackSyncCompletesBeforeWorldJoin) {
   ScopedTempDir temp("arvane_pack_sync_join_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_text(packs / "enabled.yaml", "enabled:\n  - \"sync_pack\"\n");
   write_pack_sync_test_manifest(packs, "sync_pack", "sync_pack");
   write_text(
       packs / "sync_pack/data/sync_pack/blocks.json",
@@ -1529,7 +1528,6 @@ TEST(IntegratedHandshakeTests, WebSocketLoopbackRunsServerProtocolHandshake) {
 TEST(IntegratedHandshakeTests, WebSocketLoopbackCompletesPackSyncStreamsChunksAndRejectsInvalidMovement) {
   ScopedTempDir temp("arvane_ws_pack_sync_");
   const std::filesystem::path packs = temp.path / "packs";
-  write_text(packs / "enabled.yaml", "enabled:\n  - \"sync_pack\"\n");
   write_pack_sync_test_manifest(packs, "sync_pack", "sync_pack");
   write_text(
       packs / "sync_pack/data/sync_pack/blocks.json",

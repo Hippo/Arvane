@@ -133,6 +133,10 @@ void append_u64(std::vector<u8>& out, u64 value) {
          !executable_extension(path);
 }
 
+[[nodiscard]] bool exports_to_client(const PackSource& pack) noexcept {
+  return pack.manifest.side != PackSide::Server;
+}
+
 [[nodiscard]] Expected<std::vector<u8>, PackBundleError> read_binary_file(
     const std::filesystem::path& path,
     u64 max_size) {
@@ -170,6 +174,9 @@ void append_u64(std::vector<u8>& out, u64 value) {
   HashSet<std::string> seen;
   std::error_code error;
   for (const PackSource& pack : packs.stack()) {
+    if (!exports_to_client(pack)) {
+      continue;
+    }
     if (!std::filesystem::exists(pack.root, error)) {
       return Expected<std::vector<BundleFileEntry>, PackBundleError>::failure(
           bundle_error("pack root does not exist: " + pack.root.string()));
@@ -239,6 +246,9 @@ void append_u64(std::vector<u8>& out, u64 value) {
 [[nodiscard]] io::DataValue packs_manifest_value(const PackManager& packs) {
   io::DataValue array = io::DataValue::array();
   for (const PackSource& pack : packs.stack()) {
+    if (!exports_to_client(pack)) {
+      continue;
+    }
     io::DataValue entry = io::DataValue::object();
     entry.set("pack_id", pack.manifest.id);
     entry.set("pack_name", pack.manifest.display_name);
