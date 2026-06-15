@@ -4,6 +4,7 @@
 #include "arv/types.hpp"
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -26,6 +27,8 @@ public:
   [[nodiscard]] std::vector<std::string_view> namespaces() const;
 
   [[nodiscard]] bool owns_namespace(std::string_view name_space) const;
+
+  [[nodiscard]] std::string config_root() const;
 
 private:
   [[nodiscard]] bool available() const noexcept;

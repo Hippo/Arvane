@@ -9,6 +9,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace arv::entity {
 class EntityRegistry;
@@ -41,6 +42,9 @@ namespace arv::plugin {
 
 using PluginPlayerStableIDFn =
     std::function<std::optional<std::string>(PlayerID)>;
+using PluginPlayerDisplayNameFn =
+    std::function<std::optional<std::string>(PlayerID)>;
+using PluginOnlinePlayersFn = std::function<std::vector<PlayerID>()>;
 
 enum class PluginExtensionRegistryKind : u8 {
   EntityBehavior,
@@ -66,6 +70,8 @@ struct PluginRuntimeContext {
   std::filesystem::path server_save_root{};
   std::string world_name{};
   PluginPlayerStableIDFn player_stable_id{};
+  PluginPlayerDisplayNameFn player_display_name{};
+  PluginOnlinePlayersFn online_players{};
   PluginNetworkSendFn network_send{};
   text::TextVariableStore* text_variables{};
   PluginChatMessageSendFn chat_message_send{};

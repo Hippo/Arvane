@@ -171,32 +171,44 @@ TEST(DataStorageTests, SafeResourcePathsRejectUnsafeKeys) {
   EXPECT_FALSE(arv::asset::ResourceID::parse("example_plugin:config/../../../escape"));
 }
 
-TEST(DataStorageTests, ConfigStorageSavesLoadsAndReportsMissingOrInvalidYaml) {
+TEST(DataStorageTests, ConfigStorageSavesLoadsConfigDataAndPlayerData) {
   ScopedTempDir temp{"arv_io_config_"};
-  arv::io::ConfigStorageService storage{temp.path / "config", temp.path / "save"};
+  arv::io::ConfigStorageService storage{temp.path / "config"};
   arv::io::DataDocument document{1, arv::io::DataValue::object()};
   ASSERT_TRUE(arv::io::set_path(document, "enabled", true));
 
-  ASSERT_TRUE(storage.save_global_config("example_plugin", key("example_plugin:settings"), document));
-  auto loaded = storage.load_global_config("example_plugin", key("example_plugin:settings"));
+  ASSERT_TRUE(storage.save_config("example_plugin", key("example_plugin:settings"), document));
+  auto loaded = storage.load_config("example_plugin", key("example_plugin:settings"));
   ASSERT_TRUE(loaded) << loaded.error().describe();
   EXPECT_TRUE(arv::io::find_path(loaded.value(), "enabled")->as_bool_or(false));
   EXPECT_TRUE(std::filesystem::exists(
-      temp.path / "config" / "plugins" / "example_plugin" / "settings.yaml"));
+      temp.path / "config" / "plugins" / "example_plugin" / "config" / "settings.yaml"));
 
-  auto missing = storage.load_global_config("example_plugin", key("example_plugin:missing"));
+  auto missing = storage.load_config("example_plugin", key("example_plugin:missing"));
   ASSERT_FALSE(missing);
   EXPECT_EQ(missing.error().code, arv::io::DataStorageCode::NotFound);
 
   write_text(
-      temp.path / "config" / "plugins" / "example_plugin" / "broken.yaml",
+      temp.path / "config" / "plugins" / "example_plugin" / "config" / "broken.yaml",
       "schema_version: 1\n");
-  auto invalid = storage.load_global_config("example_plugin", key("example_plugin:broken"));
+  auto invalid = storage.load_config("example_plugin", key("example_plugin:broken"));
   ASSERT_FALSE(invalid);
   EXPECT_EQ(invalid.error().code, arv::io::DataStorageCode::Corrupt);
 
-  ASSERT_TRUE(storage.save_world_config(arv::WorldID{2}, "example_plugin", key("example_plugin:settings"), document));
-  EXPECT_TRUE(storage.exists_world_config(arv::WorldID{2}, "example_plugin", key("example_plugin:settings")));
+  ASSERT_TRUE(storage.save_data("example_plugin", key("example_plugin:settings"), document));
+  auto loaded_data = storage.load_data("example_plugin", key("example_plugin:settings"));
+  ASSERT_TRUE(loaded_data) << loaded_data.error().describe();
+  EXPECT_TRUE(arv::io::find_path(loaded_data.value(), "enabled")->as_bool_or(false));
+  EXPECT_TRUE(std::filesystem::exists(
+      temp.path / "config" / "plugins" / "example_plugin" / "data" / "settings.json"));
+
+  constexpr std::string_view profile =
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  ASSERT_TRUE(storage.save_player_data(profile, "example_plugin", key("example_plugin:settings"), document));
+  EXPECT_TRUE(storage.exists_player_data(profile, "example_plugin", key("example_plugin:settings")));
+  EXPECT_TRUE(std::filesystem::exists(
+      temp.path / "config" / "plugins" / "example_plugin" / "data" / "players" /
+      std::string{profile} / "settings.json"));
 }
 
 TEST(DataStorageTests, PersistentScopesRoundTripAndRemoveIndividually) {

@@ -342,7 +342,7 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
 
   if (cache.initialized &&
       cache.source_fingerprint == source_fingerprint &&
-      cache.permission_config_revision == permission_config_revision_ &&
+      cache.permission_registry_revision == permission_registry_revision_ &&
       cache.region_registry_revision == region_revision &&
       !region_layer_changed) {
     return;
@@ -359,7 +359,7 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
           {},
       });
   cache.source_fingerprint = source_fingerprint;
-  cache.permission_config_revision = permission_config_revision_;
+  cache.permission_registry_revision = permission_registry_revision_;
   cache.region_registry_revision = region_revision;
   cache.initialized = true;
 }

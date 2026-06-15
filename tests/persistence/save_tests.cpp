@@ -109,10 +109,6 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   player.respawn_location =
       arv::Location{40.5F, 71.0F, -12.5F, 0.75F, -0.125F};
   player.game_mode_id = std::string{arv::player::CreativeGameModeID};
-  player.permission_overrides.groups = {"admin", "builder"};
-  player.permission_overrides.overrides.can_fly = arv::player::TriState::Allow;
-  player.permission_overrides.custom_overrides["arvane.command.test"] =
-      arv::player::TriState::Deny;
   player.selected_hotbar_slot = 3;
   ASSERT_TRUE(player.inventory.set_slot(
       0,
@@ -180,7 +176,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       item_registry));
 
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "save.json"));
-  EXPECT_TRUE(std::filesystem::exists(server_save_root / "permissions.yaml"));
+  EXPECT_FALSE(std::filesystem::exists(server_save_root / "permissions.yaml"));
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "players" / "local_player.dat"));
   EXPECT_TRUE(std::filesystem::exists(server_save_root / "worlds" / "default" / "world.json"));
   EXPECT_FALSE(std::filesystem::exists(server_save_root / "worlds" / "default" / "entities.json"));
@@ -198,6 +194,8 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
     EXPECT_NE(player_json.find("\"respawn\""), std::string::npos);
     EXPECT_NE(player_json.find("\"data\""), std::string::npos);
     EXPECT_NE(player_json.find("\"player\""), std::string::npos);
+    EXPECT_EQ(player_json.find("\"groups\""), std::string::npos);
+    EXPECT_EQ(player_json.find("\"permission_overrides\""), std::string::npos);
   }
   {
     std::ifstream input(server_save_root / "worlds" / "default" / "world.json");
@@ -249,14 +247,6 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_FLOAT_EQ(loaded.value().players[0].respawn_location->yaw_radians, 0.75F);
   EXPECT_FLOAT_EQ(loaded.value().players[0].respawn_location->pitch_radians, -0.125F);
   EXPECT_EQ(loaded.value().players[0].game_mode_id, arv::player::CreativeGameModeID);
-  EXPECT_EQ(loaded.value().players[0].permission_overrides.groups,
-            (std::vector<std::string>{"admin", "builder"}));
-  EXPECT_EQ(loaded.value().players[0].permission_overrides.overrides.can_fly,
-            arv::player::TriState::Allow);
-  EXPECT_EQ(
-      loaded.value().players[0]
-          .permission_overrides.custom_overrides.at("arvane.command.test"),
-      arv::player::TriState::Deny);
   EXPECT_EQ(loaded.value().players[0].selected_hotbar_slot, 3U);
   ASSERT_TRUE(loaded.value().players[0].inventory.slot(0).has_value());
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->item, stone_item);
@@ -454,7 +444,7 @@ TEST(SaveTests, WorldHeightLoadsFromGenerationBoundsWhenChunkBoundsAreStale) {
   EXPECT_NE(world.find_chunk({{0, 6, 0}}), nullptr);
 }
 
-TEST(SaveTests, PlayerPermissionsAreWrittenEvenWhenEmpty) {
+TEST(SaveTests, PlayerPermissionsAreNotWrittenToWorldSave) {
   TempDir temp_dir;
   const std::filesystem::path server_save_root =
       temp_dir.path / "arvane_home" / "saves" / "server-save-1";
@@ -499,17 +489,11 @@ TEST(SaveTests, PlayerPermissionsAreWrittenEvenWhenEmpty) {
   const std::string text{
       std::istreambuf_iterator<char>{input},
       std::istreambuf_iterator<char>{}};
-  EXPECT_NE(text.find("\"groups\": []"), std::string::npos);
-  EXPECT_NE(text.find("\"permission_overrides\""), std::string::npos);
-  EXPECT_NE(text.find("\"core\": {}"), std::string::npos);
-  EXPECT_NE(text.find("\"permissions\": {}"), std::string::npos);
-
-  std::ifstream permissions_input(server_save_root / "permissions.yaml");
-  ASSERT_TRUE(permissions_input.is_open());
-  const std::string permissions_text{
-      std::istreambuf_iterator<char>{permissions_input},
-      std::istreambuf_iterator<char>{}};
-  EXPECT_NE(permissions_text.find("groups: {}"), std::string::npos);
+  EXPECT_EQ(text.find("\"groups\""), std::string::npos);
+  EXPECT_EQ(text.find("\"permission_overrides\""), std::string::npos);
+  EXPECT_EQ(text.find("\"core\""), std::string::npos);
+  EXPECT_EQ(text.find("\"permissions\""), std::string::npos);
+  EXPECT_FALSE(std::filesystem::exists(server_save_root / "permissions.yaml"));
 }
 
 TEST(SaveTests, DiscoversServerSavesSeparatelyFromWorldsAndLoadsRequestedWorld) {

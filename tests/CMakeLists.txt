@@ -80,6 +80,7 @@ add_executable(arv_tests
   player/permission_tests.cpp
   player/selection_tests.cpp
   plugin/plugin_system_tests.cpp
+  plugin/arv_perms_tests.cpp
   render/entity_model_tests.cpp
   render/item_model_tests.cpp
   render/mesh_handoff_tests.cpp
@@ -91,7 +92,6 @@ add_executable(arv_tests
   server/chunk_streamer_tests.cpp
   server/chat_service_tests.cpp
   server/player_movement_validation_tests.cpp
-  server/permission_config_tests.cpp
   server/player_profile_tests.cpp
   server/player_interaction_tests.cpp
   server/registry_tests.cpp
@@ -129,6 +129,7 @@ target_compile_definitions(arv_tests PRIVATE
   ARV_TEST_FAILING_PLUGIN_PATH="$<TARGET_FILE:arv_test_failing_plugin>"
   ARV_TEST_MISSING_SYMBOL_PLUGIN_PATH="$<TARGET_FILE:arv_test_missing_symbol_plugin>"
   ARV_TEST_MASON_PLUGIN_PATH="$<TARGET_FILE:arv_mason>"
+  ARV_TEST_PERMS_PLUGIN_PATH="$<TARGET_FILE:arv_perms>"
 )
 add_dependencies(arv_tests
   arv_test_example_plugin
@@ -137,6 +138,7 @@ add_dependencies(arv_tests
   arv_plugin_sdk_c_compile
   arv_plugin_sdk_cpp_compile
   arv_mason
+  arv_perms
 )
 
 target_link_libraries(arv_tests PRIVATE
@@ -165,6 +167,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_ui
   arv_voxel
   arv_world
+  arv_perms_core
   GTest::gtest
   GTest::gtest_main
   GTest::gmock

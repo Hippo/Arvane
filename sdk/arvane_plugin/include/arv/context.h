@@ -13,6 +13,7 @@ typedef struct ArvContextAPI {
   uint32_t (*namespace_count)(void* ctx);
   ArvStringView (*namespace_at)(void* ctx, uint32_t index);
   bool (*owns_namespace)(void* ctx, ArvStringView name_space);
+  ArvStringView (*config_root)(void* ctx);
 } ArvContextAPI;
 
 #ifdef __cplusplus

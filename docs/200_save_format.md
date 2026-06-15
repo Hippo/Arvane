@@ -95,10 +95,6 @@ arvane_server/
         <name>.abp
       regions/
         r.<x>.<z>.arvr
-  plugin_config/
-    <world_id>/
-      <pack_id>/
-        <safe_key_path>.yaml
   plugin_data/
     <pack_id>/
       world/

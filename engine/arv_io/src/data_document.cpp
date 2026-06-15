@@ -370,6 +370,20 @@ std::optional<std::vector<std::string>> split_data_path(
   return parts;
 }
 
+[[nodiscard]] std::optional<usize> parse_array_index(std::string_view part) noexcept {
+  if (part.empty()) {
+    return std::nullopt;
+  }
+  usize value = 0U;
+  for (const char ch : part) {
+    if (ch < '0' || ch > '9') {
+      return std::nullopt;
+    }
+    value = value * 10U + static_cast<usize>(ch - '0');
+  }
+  return value;
+}
+
 const DataValue* find_path(
     const DataDocument& document,
     std::string_view path,
@@ -386,6 +400,17 @@ const DataValue* find_path(
   std::string current_path = "root";
   for (const std::string& part : parts.value()) {
     current_path += "." + part;
+    if (const DataValue::Array* array = current->array_if(); array != nullptr) {
+      std::optional<usize> index = parse_array_index(part);
+      if (!index.has_value() || index.value() >= array->size()) {
+        if (diagnostic != nullptr) {
+          *diagnostic = {current_path, "array index was not found"};
+        }
+        return nullptr;
+      }
+      current = &(*array)[index.value()];
+      continue;
+    }
     current = current->get(part);
     if (current == nullptr) {
       if (diagnostic != nullptr) {
@@ -424,6 +449,14 @@ DataPathResult set_path(
   for (usize index = 0U; index + 1U < parts.value().size(); ++index) {
     const std::string& part = parts.value()[index];
     current_path += "." + part;
+    if (DataValue::Array* array = current->array_if(); array != nullptr) {
+      std::optional<usize> array_index = parse_array_index(part);
+      if (!array_index.has_value() || array_index.value() >= array->size()) {
+        return DataPathResult::failure({current_path, "array index was not found"});
+      }
+      current = &(*array)[array_index.value()];
+      continue;
+    }
     if (current->kind() != DataKind::Object) {
       *current = DataValue::object();
     }
@@ -435,6 +468,14 @@ DataPathResult set_path(
   }
 
   if (current->kind() != DataKind::Object) {
+    if (DataValue::Array* array = current->array_if(); array != nullptr) {
+      std::optional<usize> index = parse_array_index(parts.value().back());
+      if (!index.has_value() || index.value() >= array->size()) {
+        return DataPathResult::failure({current_path, "array index was not found"});
+      }
+      (*array)[index.value()] = std::move(value);
+      return DataPathResult::success();
+    }
     return DataPathResult::failure({current_path, "parent value is not an object"});
   }
   current->set(parts.value().back(), std::move(value));

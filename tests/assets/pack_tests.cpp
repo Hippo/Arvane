@@ -219,6 +219,35 @@ TEST(PackManifestTests, LoadsNativeMetadataAndRejectsInvalidNativeDeclarations) 
   EXPECT_NE(missing_platform.error().describe().find("missing current platform"), std::string::npos);
 }
 
+TEST(PackManifestTests, LoadsCommandsAndPermissionsFromManifest) {
+  ScopedTempDir temp("arvane_pack_manifest_commands_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_pack_manifest(
+      packs,
+      "arv_perms",
+      "  - \"arv_perms\"\n",
+      "server",
+      "assets: false\n  data: true\n  config: true\n  native_plugin: false\n",
+      "commands:\n"
+      "  - alias: perms\n"
+      "    command: perm\n"
+      "    visible_in_help: true\n"
+      "permissions:\n"
+      "  - id: arvane.permissions.admin\n"
+      "    description: Manage arv_perms permissions.\n"
+      "    default: unset\n");
+
+  auto manifest = arv::asset::load_pack_manifest(packs / "arv_perms");
+  ASSERT_TRUE(manifest) << manifest.error().describe();
+  ASSERT_EQ(manifest.value().commands.size(), 1U);
+  EXPECT_EQ(manifest.value().commands.front().alias, "perms");
+  EXPECT_EQ(manifest.value().commands.front().command, "perm");
+  EXPECT_TRUE(manifest.value().commands.front().visible_in_help);
+  ASSERT_EQ(manifest.value().permissions.size(), 1U);
+  EXPECT_EQ(manifest.value().permissions.front().id, "arvane.permissions.admin");
+  EXPECT_EQ(manifest.value().permissions.front().default_value, "unset");
+}
+
 TEST(PackManagerTests, OrdersDependenciesAndResolvesAssetOverrides) {
   ScopedTempDir temp("arvane_pack_order_");
   const std::filesystem::path packs = temp.path / "packs";
@@ -309,8 +338,8 @@ TEST(PackDataTests, LoadsCondensedRootDataFiles) {
       packs / "arvane_base/data/blocks.json",
       "{\"blocks\":[{\"name\":\"arvane:stone\"}]}\n");
   write_text(
-      packs / "arvane_base/data/commands.yaml",
-      "schema_version: 1\naliases: []\n");
+      packs / "arvane_base/data/root_meta.yaml",
+      "schema_version: 1\nroot: true\n");
 
   auto manager = arv::asset::PackManager::load_from_packs_root(packs);
   ASSERT_TRUE(manager) << manager.error().describe();
@@ -322,9 +351,9 @@ TEST(PackDataTests, LoadsCondensedRootDataFiles) {
   ASSERT_TRUE(resolved) << resolved.error().describe();
   EXPECT_EQ(resolved.value().relative_path.generic_string(), "data/blocks.json");
 
-  const auto command_files = manager.value().data_files_at("commands.yaml");
-  ASSERT_EQ(command_files.size(), 1U);
-  EXPECT_EQ(command_files.front().relative_path.generic_string(), "data/commands.yaml");
+  const auto root_meta_files = manager.value().data_files_at("root_meta.yaml");
+  ASSERT_EQ(root_meta_files.size(), 1U);
+  EXPECT_EQ(root_meta_files.front().relative_path.generic_string(), "data/root_meta.yaml");
 }
 
 TEST(PackConfigTests, ResolvesRootConfigFiles) {

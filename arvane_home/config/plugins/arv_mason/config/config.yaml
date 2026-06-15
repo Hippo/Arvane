@@ -1,0 +1,16 @@
+schema_version: 1
+data:
+  behavior:
+    default_paste_air: false
+    require_confirmation_above_blocks: 100000
+    save_clipboard_per_player: false
+    save_selection_per_player: true
+    show_progress_messages: true
+  blueprints:
+    default_scope: world
+  limits:
+    max_blueprint_blocks: 1000000
+    max_clipboard_blocks: 250000
+    max_history_entries: 15
+    max_operation_blocks_per_tick: 8192
+    max_selection_blocks: 250000

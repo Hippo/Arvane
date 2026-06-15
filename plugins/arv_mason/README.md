@@ -53,7 +53,7 @@ Root command:
 ```
 
 Native command definitions are registered in code. Short aliases live in
-`pack/data/commands.yaml`.
+the pack manifest under `commands:`.
 
 Selection:
 
@@ -136,8 +136,8 @@ Mason loads `config.yaml` and `messages.yaml` through the Plugin SDK ConfigAPI
 file helpers. They resolve to:
 
 ```text
-arvane_home/config/plugins/arv_mason/config.yaml
-arvane_home/config/plugins/arv_mason/messages.yaml
+arvane_home/config/plugins/arv_mason/config/config.yaml
+arvane_home/config/plugins/arv_mason/config/messages.yaml
 ```
 
 Missing or invalid config falls back to safe defaults, and Mason attempts to

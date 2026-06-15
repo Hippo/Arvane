@@ -108,6 +108,33 @@ typedef struct ArvPermissionsAPI {
       ArvPlayerID player,
       ArvStringView* out_groups,
       uint64_t max_groups);
+  ArvResult (*upsert_group)(
+      void* ctx,
+      const ArvPermissionGroupDefinition* definition);
+  ArvResult (*remove_registered_group)(
+      void* ctx,
+      ArvStringView group_id);
+  ArvResult (*set_groups)(
+      void* ctx,
+      ArvPlayerID player,
+      const ArvStringView* groups,
+      size_t group_count);
+  ArvResult (*set_core_override)(
+      void* ctx,
+      ArvPlayerID player,
+      ArvCorePermission permission,
+      ArvPermissionValue value);
+  ArvResult (*set_custom_override)(
+      void* ctx,
+      ArvPlayerID player,
+      ArvStringView node,
+      ArvPermissionValue value);
+  ArvResult (*set_overrides)(
+      void* ctx,
+      ArvPlayerID player,
+      ArvCorePermissionSet core,
+      const ArvCustomPermissionEntry* custom_permissions,
+      size_t custom_permission_count);
 } ArvPermissionsAPI;
 
 #ifdef __cplusplus

@@ -49,6 +49,50 @@ public:
 
   [[nodiscard]] std::size_t size(std::string_view path = {}) const;
 
+  [[nodiscard]] Expected<bool, Result> array_bool_value(
+      std::string_view path,
+      std::size_t index) const;
+  [[nodiscard]] bool array_bool_value(
+      std::string_view path,
+      std::size_t index,
+      bool fallback) const;
+
+  [[nodiscard]] Expected<std::int64_t, Result> array_i64_value(
+      std::string_view path,
+      std::size_t index) const;
+  [[nodiscard]] std::int64_t array_i64_value(
+      std::string_view path,
+      std::size_t index,
+      std::int64_t fallback) const;
+
+  [[nodiscard]] Expected<std::uint64_t, Result> array_u64_value(
+      std::string_view path,
+      std::size_t index) const;
+  [[nodiscard]] std::uint64_t array_u64_value(
+      std::string_view path,
+      std::size_t index,
+      std::uint64_t fallback) const;
+
+  [[nodiscard]] Expected<double, Result> array_f64_value(
+      std::string_view path,
+      std::size_t index) const;
+  [[nodiscard]] double array_f64_value(
+      std::string_view path,
+      std::size_t index,
+      double fallback) const;
+
+  [[nodiscard]] Expected<std::string_view, Result> array_string_value(
+      std::string_view path,
+      std::size_t index) const;
+  [[nodiscard]] std::string_view array_string_value(
+      std::string_view path,
+      std::size_t index,
+      std::string_view fallback) const;
+
+  [[nodiscard]] Expected<std::string_view, Result> object_key_at(
+      std::string_view path,
+      std::size_t index) const;
+
   [[nodiscard]] Result set_null(std::string_view path) const;
 
   [[nodiscard]] Result set_bool(std::string_view path, bool value) const;
@@ -66,6 +110,16 @@ public:
   [[nodiscard]] Result set_array(std::string_view path) const;
 
   [[nodiscard]] Result set_object(std::string_view path) const;
+
+  [[nodiscard]] Result array_push_null(std::string_view path) const;
+  [[nodiscard]] Result array_push_bool(std::string_view path, bool value) const;
+  [[nodiscard]] Result array_push_i64(std::string_view path, std::int64_t value) const;
+  [[nodiscard]] Result array_push_u64(std::string_view path, std::uint64_t value) const;
+  [[nodiscard]] Result array_push_f64(std::string_view path, double value) const;
+  [[nodiscard]] Result array_push_string(
+      std::string_view path,
+      std::string_view value) const;
+  [[nodiscard]] Result array_push_object(std::string_view path) const;
 
   [[nodiscard]] Expected<bool, Result> bool_value(std::string_view path) const;
   [[nodiscard]] bool bool_value(std::string_view path, bool fallback) const;

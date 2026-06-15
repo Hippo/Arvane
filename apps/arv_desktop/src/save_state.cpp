@@ -20,7 +20,6 @@ namespace {
   save.grounded = player.grounded;
   save.movement_mode = player.movement_mode;
   save.game_mode_id = player.game_mode_id;
-  save.permission_overrides = player.permission_overrides;
   save.respawn_location = player.respawn_location;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
@@ -98,7 +97,6 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     save.grounded = player_state->grounded;
     save.movement_mode = player_state->movement_mode;
     save.game_mode_id = player_state->game_mode_id;
-    save.permission_overrides = player_state->permission_overrides;
     save.respawn_location = player_state->respawn_location;
     save.selected_hotbar_slot = player_state->selected_hotbar_slot;
     save.inventory = player_state->inventory;
@@ -154,7 +152,6 @@ void apply_loaded_player_saves(
     player_state.grounded = found->grounded;
     player_state.movement_mode = found->movement_mode;
     player_state.game_mode_id = found->game_mode_id;
-    player_state.permission_overrides = found->permission_overrides;
     player_state.respawn_location = found->respawn_location;
     player_state.selected_hotbar_slot = found->selected_hotbar_slot;
     player_state.inventory = found->inventory;
@@ -178,7 +175,6 @@ std::vector<server::ServerPlayerSaveState> to_server_player_saves(
     save.grounded = player.grounded;
     save.movement_mode = player.movement_mode;
     save.game_mode_id = player.game_mode_id;
-    save.permission_overrides = player.permission_overrides;
     save.respawn_location = player.respawn_location;
     save.selected_hotbar_slot = player.selected_hotbar_slot;
     save.inventory = player.inventory;

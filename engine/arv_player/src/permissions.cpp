@@ -362,6 +362,35 @@ PermissionGroupRegistry::Result PermissionGroupRegistry::add_group(PermissionGro
   return Result::success();
 }
 
+PermissionGroupRegistry::Result PermissionGroupRegistry::upsert_group(
+    PermissionGroup group) {
+  if (group.id.empty()) {
+    return Result::failure({"permission group id is empty"});
+  }
+  const auto found = group_indices_.find(group.id);
+  if (found != group_indices_.end()) {
+    groups_[found->second] = std::move(group);
+    return Result::success();
+  }
+  group_indices_[group.id] = groups_.size();
+  groups_.push_back(std::move(group));
+  return Result::success();
+}
+
+PermissionGroupRegistry::Result PermissionGroupRegistry::remove_group(
+    std::string_view id) {
+  const auto found = group_indices_.find(std::string{id});
+  if (found == group_indices_.end()) {
+    return Result::failure({"missing permission group: " + std::string{id}});
+  }
+  groups_.erase(groups_.begin() + found->second);
+  group_indices_.clear();
+  for (usize index = 0; index < groups_.size(); ++index) {
+    group_indices_[groups_[index].id] = index;
+  }
+  return Result::success();
+}
+
 const PermissionGroup* PermissionGroupRegistry::find(std::string_view id) const noexcept {
   const auto found = group_indices_.find(std::string{id});
   return found == group_indices_.end() ? nullptr : &groups_[found->second];

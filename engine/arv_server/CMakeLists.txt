@@ -2,7 +2,6 @@ set(ARV_SERVER_HEADERS
   include/arv/server/chat_service.hpp
   include/arv/server/chunk_streamer.hpp
   include/arv/server/dedicated_lifetime.hpp
-  include/arv/server/permission_config.hpp
   include/arv/server/player_movement_validation.hpp
   include/arv/server/player_profile.hpp
   include/arv/server/server_combat.hpp
@@ -18,7 +17,6 @@ add_library(arv_server STATIC
   src/block_break_behavior_registry.cpp
   src/chat_service.cpp
   src/chunk_streamer.cpp
-  src/permission_config.cpp
   src/player_movement_validation.cpp
   src/player_profile.cpp
   src/server_commands.cpp

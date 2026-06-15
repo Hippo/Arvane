@@ -172,7 +172,6 @@ namespace {
   save.game_mode_id = player.game_mode_id;
   save.selected_skin_hash = player.selected_skin_hash;
   save.selected_skin_slim_model = player.selected_skin_slim_model;
-  save.permission_overrides = player.permission_overrides;
   save.respawn_location = player.respawn_location;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
@@ -195,7 +194,6 @@ namespace {
   save.game_mode_id = player.game_mode_id;
   save.selected_skin_hash = player.selected_skin_hash;
   save.selected_skin_slim_model = player.selected_skin_slim_model;
-  save.permission_overrides = player.permission_overrides;
   save.respawn_location = player.respawn_location;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
@@ -282,7 +280,6 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
       save.selected_skin_hash = previous->selected_skin_hash;
       save.selected_skin_slim_model = previous->selected_skin_slim_model;
     }
-    save.permission_overrides = player_state->permission_overrides;
     save.respawn_location = player_state->respawn_location;
     save.selected_hotbar_slot = player_state->selected_hotbar_slot;
     save.inventory = player_state->inventory;

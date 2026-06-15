@@ -47,6 +47,15 @@ bool api_owns_namespace(void* context, ArvStringView name_space) {
   return ctx != nullptr && owns_namespace(ctx->info(), abi_view(name_space));
 }
 
+ArvStringView api_config_root(void* context) {
+  PluginCallContext* ctx = call_context(context);
+  if (ctx == nullptr || ctx->impl == nullptr || ctx->impl->options.config_root.empty()) {
+    return literal_view("");
+  }
+  ctx->result_message = ctx->impl->options.config_root.generic_string();
+  return stable_view(ctx->result_message);
+}
+
 void log_for_plugin(
     void* context,
     core::LogLevel level,
@@ -104,6 +113,7 @@ void fill_context_api(PluginAPIStorage& storage) {
       &api_namespace_count,
       &api_namespace_at,
       &api_owns_namespace,
+      &api_config_root,
   };
   storage.logger_api = {
       &api_log_trace,

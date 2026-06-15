@@ -69,7 +69,8 @@ void write_plugin_pack(
     const std::filesystem::path& packs_root,
     std::string_view pack_id,
     const std::filesystem::path& relative_library,
-    std::string_view entrypoint = "arvane_plugin_main") {
+    std::string_view entrypoint = "arvane_plugin_main",
+    std::string_view extra_manifest = "") {
   write_text(
       packs_root / std::string{pack_id} / "pack.yaml",
       "schema_version: 1\n"
@@ -88,7 +89,8 @@ void write_plugin_pack(
                                  "capabilities:\n"
                                  "  assets: false\n"
                                  "  data: true\n"
-                                 "  native_plugin: true\n"
+                                 "  native_plugin: true\n" +
+          std::string{extra_manifest} +
                                  "native:\n"
                                  "  api_version: 1\n"
                                  "  entrypoint: \"" +
@@ -246,7 +248,7 @@ TEST(PluginLoadTests, LoadsAllowlistedPluginAndRegistersBehaviorServicesAndComma
   EXPECT_TRUE(harness.game_modes.find("example_plugin_pack:builder") != nullptr);
   EXPECT_TRUE(std::filesystem::exists(
       harness.temp.path / "config" / "plugins" / "example_plugin_pack" /
-      "settings.yaml"));
+      "config" / "settings.yaml"));
 
   arv::command::CommandRegistry command_registry;
   manager.register_commands(command_registry);
@@ -264,11 +266,12 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
       harness.packs,
       "arv_mason",
       ARV_TEST_MASON_PLUGIN_PATH);
-  write_plugin_pack(harness.packs, "arv_mason", relative);
-  write_text(
-      harness.packs / "arv_mason" / "data" / "commands.yaml",
-      "schema_version: 1\n"
-      "aliases:\n"
+  write_plugin_pack(
+      harness.packs,
+      "arv_mason",
+      relative,
+      "arvane_plugin_main",
+      "commands:\n"
       "  - alias: mmarker\n"
       "    command: mason.marker\n"
       "    visible_in_help: true\n"
@@ -287,9 +290,9 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
   EXPECT_TRUE(manager.has_command_executor("arv_mason:command/marker"));
   EXPECT_TRUE(manager.has_command_executor("arv_mason:command/copy"));
   EXPECT_TRUE(std::filesystem::exists(
-      harness.temp.path / "config" / "plugins" / "arv_mason" / "config.yaml"));
+      harness.temp.path / "config" / "plugins" / "arv_mason" / "config" / "config.yaml"));
   EXPECT_TRUE(std::filesystem::exists(
-      harness.temp.path / "config" / "plugins" / "arv_mason" / "messages.yaml"));
+      harness.temp.path / "config" / "plugins" / "arv_mason" / "config" / "messages.yaml"));
 
   arv::command::CommandRegistry registry;
   manager.register_commands(registry);

@@ -1,0 +1,80 @@
+schema_version: 1
+
+id: "arv_perms"
+display_name: "Permissions"
+version: "0.1.0"
+description: "First-party persistent server permission management."
+
+authors:
+  - "Arvane"
+
+namespaces:
+  - "arv_perms"
+  - "arvane"
+
+side: "server"
+
+engine:
+  min_version: "0.1.0"
+
+dependencies:
+  - id: "arvane_base"
+    version: ">=0.1.0"
+
+capabilities:
+  assets: true
+  data: true
+  config: true
+  native_plugin: true
+
+commands:
+  - alias: perms
+    command: perm
+    visible_in_help: true
+
+permissions:
+  - id: arvane.permissions.admin
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.group.create
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.group.delete
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.group.edit
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.group.info
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.user.edit
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.user.info
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.check
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.default.edit
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.reload
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.save
+    description: Manage arv_perms permissions.
+    default: unset
+  - id: arvane.permissions.validate
+    description: Manage arv_perms permissions.
+    default: unset
+
+native:
+  api_version: 1
+  entrypoint: "arvane_plugin_main"
+  libraries:
+    linux-x86_64: "native/linux-x86_64/libarv_perms.so"
+    windows-x86_64: "native/windows-x86_64/arv_perms.dll"
+    macos-arm64: "native/macos-arm64/libarv_perms.dylib"
+    macos-x86_64: "native/macos-x86_64/libarv_perms.dylib"

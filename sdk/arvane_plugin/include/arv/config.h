@@ -8,34 +8,54 @@
 extern "C" {
 #endif
 
-typedef enum ArvConfigScopeKind {
-  ARV_CONFIG_SCOPE_GLOBAL = 0,
-  ARV_CONFIG_SCOPE_WORLD = 1
-} ArvConfigScopeKind;
-
-typedef struct ArvConfigScope {
-  ArvConfigScopeKind kind;
-  ArvWorldID world;
-} ArvConfigScope;
-
 typedef struct ArvConfigAPI {
-  ArvResult (*load)(
+  ArvResult (*load_config)(
       void* ctx,
-      const ArvConfigScope* scope,
       ArvResourceID key,
       ArvDataDocumentHandle* out_document);
-  ArvResult (*save)(
+  ArvResult (*save_config)(
       void* ctx,
-      const ArvConfigScope* scope,
       ArvResourceID key,
       ArvDataDocumentHandle document);
-  bool (*exists)(
+  bool (*config_exists)(
       void* ctx,
-      const ArvConfigScope* scope,
       ArvResourceID key);
-  ArvResult (*remove)(
+  ArvResult (*remove_config)(
       void* ctx,
-      const ArvConfigScope* scope,
+      ArvResourceID key);
+
+  ArvResult (*load_data)(
+      void* ctx,
+      ArvResourceID key,
+      ArvDataDocumentHandle* out_document);
+  ArvResult (*save_data)(
+      void* ctx,
+      ArvResourceID key,
+      ArvDataDocumentHandle document);
+  bool (*data_exists)(
+      void* ctx,
+      ArvResourceID key);
+  ArvResult (*remove_data)(
+      void* ctx,
+      ArvResourceID key);
+
+  ArvResult (*load_player_data)(
+      void* ctx,
+      ArvStringView profile_id,
+      ArvResourceID key,
+      ArvDataDocumentHandle* out_document);
+  ArvResult (*save_player_data)(
+      void* ctx,
+      ArvStringView profile_id,
+      ArvResourceID key,
+      ArvDataDocumentHandle document);
+  bool (*player_data_exists)(
+      void* ctx,
+      ArvStringView profile_id,
+      ArvResourceID key);
+  ArvResult (*remove_player_data)(
+      void* ctx,
+      ArvStringView profile_id,
       ArvResourceID key);
 } ArvConfigAPI;
 

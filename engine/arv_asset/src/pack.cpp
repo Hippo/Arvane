@@ -54,6 +54,15 @@ constexpr u32 SupportedNativePluginApiVersion = 1U;
          c == '/';
 }
 
+[[nodiscard]] bool contains_ascii_space(std::string_view text) noexcept {
+  for (const unsigned char ch : text) {
+    if (std::isspace(ch) != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 [[nodiscard]] bool valid_native_entrypoint(std::string_view entrypoint) noexcept {
   if (entrypoint.empty()) {
     return false;
@@ -401,6 +410,128 @@ constexpr u32 SupportedNativePluginApiVersion = 1U;
     return std::nullopt;
   }
   return node->as_bool_or(fallback);
+}
+
+[[nodiscard]] std::optional<PackCommandAlias> read_command_alias(
+    const io::DataValue& entry,
+    usize index,
+    PackError& error,
+    const std::filesystem::path& file,
+    std::string_view pack_id) {
+  if (!io::is_object_value(entry)) {
+    error = pack_error(
+        "manifest validation",
+        "commands[" + std::to_string(index) + "] must be a map",
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+
+  const io::DataValue* alias = member(entry, "alias");
+  if (alias == nullptr || !io::is_string_value(*alias)) {
+    error = pack_error(
+        "manifest validation",
+        "commands[" + std::to_string(index) + "] requires scalar alias",
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+  const io::DataValue* command = member(entry, "command");
+  if (command == nullptr || !io::is_string_value(*command)) {
+    error = pack_error(
+        "manifest validation",
+        "commands[" + std::to_string(index) + "] requires scalar command",
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+
+  PackCommandAlias result;
+  result.alias = std::string{alias->as_string_or({})};
+  result.command = std::string{command->as_string_or({})};
+  if (result.alias.empty() || contains_ascii_space(result.alias) ||
+      result.command.empty() || contains_ascii_space(result.command)) {
+    error = pack_error(
+        "manifest validation",
+        "commands[" + std::to_string(index) + "] alias and command must be non-empty without whitespace",
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+  if (const io::DataValue* visible = member(entry, "visible_in_help");
+      visible != nullptr) {
+    if (visible->kind() != io::DataKind::Bool) {
+      error = pack_error(
+          "manifest validation",
+          "commands[" + std::to_string(index) + "].visible_in_help must be a boolean",
+          std::string{pack_id},
+          file);
+      return std::nullopt;
+    }
+    result.visible_in_help = visible->as_bool_or(false);
+  }
+  return result;
+}
+
+[[nodiscard]] std::optional<PackPermissionNode> read_permission_node(
+    const io::DataValue& entry,
+    usize index,
+    PackError& error,
+    const std::filesystem::path& file,
+    std::string_view pack_id) {
+  if (!io::is_object_value(entry)) {
+    error = pack_error(
+        "manifest validation",
+        "permissions[" + std::to_string(index) + "] must be a map",
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+  const io::DataValue* id = member(entry, "id");
+  if (id == nullptr || !io::is_string_value(*id)) {
+    error = pack_error(
+        "manifest validation",
+        "permissions[" + std::to_string(index) + "] requires scalar id",
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+
+  PackPermissionNode result;
+  result.id = std::string{id->as_string_or({})};
+  if (result.id.empty() || contains_ascii_space(result.id)) {
+    error = pack_error(
+        "manifest validation",
+        "permissions[" + std::to_string(index) + "] id must be non-empty without whitespace",
+        std::string{pack_id},
+        file);
+    return std::nullopt;
+  }
+  if (const io::DataValue* description = member(entry, "description");
+      description != nullptr) {
+    if (!io::is_string_value(*description)) {
+      error = pack_error(
+          "manifest validation",
+          "permissions[" + std::to_string(index) + "].description must be scalar",
+          std::string{pack_id},
+          file);
+      return std::nullopt;
+    }
+    result.description = std::string{description->as_string_or({})};
+  }
+  if (const io::DataValue* default_value = member(entry, "default");
+      default_value != nullptr) {
+    if (!io::is_string_value(*default_value)) {
+      error = pack_error(
+          "manifest validation",
+          "permissions[" + std::to_string(index) + "].default must be scalar",
+          std::string{pack_id},
+          file);
+      return std::nullopt;
+    }
+    result.default_value = std::string{default_value->as_string_or({})};
+  }
+  return result;
 }
 
 [[nodiscard]] bool dependency_version_satisfied(std::string_view actual, std::string_view requirement) {
@@ -1230,6 +1361,52 @@ PackManifestResult load_pack_manifest(const std::filesystem::path& pack_root) {
       data.value(),
       config.value(),
       native_plugin.value()};
+
+  if (const io::DataValue* commands = member(root, "commands");
+      commands != nullptr) {
+    const io::DataValue::Array* array = commands->array_if();
+    if (array == nullptr) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "commands must be a list", manifest.id, manifest_path));
+    }
+    manifest.commands.reserve(array->size());
+    for (usize index = 0U; index < array->size(); ++index) {
+      PackError command_error;
+      auto command = read_command_alias(
+          (*array)[index],
+          index,
+          command_error,
+          manifest_path,
+          manifest.id);
+      if (!command.has_value()) {
+        return PackManifestResult::failure(std::move(command_error));
+      }
+      manifest.commands.push_back(std::move(command.value()));
+    }
+  }
+
+  if (const io::DataValue* permissions = member(root, "permissions");
+      permissions != nullptr) {
+    const io::DataValue::Array* array = permissions->array_if();
+    if (array == nullptr) {
+      return PackManifestResult::failure(
+          pack_error("manifest validation", "permissions must be a list", manifest.id, manifest_path));
+    }
+    manifest.permissions.reserve(array->size());
+    for (usize index = 0U; index < array->size(); ++index) {
+      PackError permission_error;
+      auto permission = read_permission_node(
+          (*array)[index],
+          index,
+          permission_error,
+          manifest_path,
+          manifest.id);
+      if (!permission.has_value()) {
+        return PackManifestResult::failure(std::move(permission_error));
+      }
+      manifest.permissions.push_back(std::move(permission.value()));
+    }
+  }
 
   if (const io::DataValue* builtin = member(root, "builtin"); builtin != nullptr) {
     if (!io::is_object_value(*builtin)) {

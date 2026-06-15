@@ -57,6 +57,13 @@ bool Context::owns_namespace(std::string_view name_space) const {
   return api_->context->owns_namespace(api_->context_ctx, view(name_space));
 }
 
+std::string Context::config_root() const {
+  if (!available() || api_->context->config_root == nullptr) {
+    return {};
+  }
+  return std::string{view(api_->context->config_root(api_->context_ctx))};
+}
+
 bool Context::available() const noexcept {
   return api_ != nullptr && api_->context != nullptr;
 }

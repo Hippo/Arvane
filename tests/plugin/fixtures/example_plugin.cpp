@@ -655,10 +655,8 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
     api->data->release_document(api->data_ctx, config_document);
     return false;
   }
-  ArvConfigScope global_config{ARV_CONFIG_SCOPE_GLOBAL, 0};
-  if (!result_ok(api->config->save(
+  if (!result_ok(api->config->save_config(
           api->config_ctx,
-          &global_config,
           arv_cstr("example_plugin_pack:settings"),
           config_document))) {
     api->data->release_document(api->data_ctx, config_document);
@@ -667,9 +665,8 @@ extern "C" ARV_EXPORT bool arvane_plugin_main(const ArvAPI* api) {
   api->data->release_document(api->data_ctx, config_document);
   ArvDataDocumentHandle loaded_config{};
   bool enabled = false;
-  if (!result_ok(api->config->load(
+  if (!result_ok(api->config->load_config(
           api->config_ctx,
-          &global_config,
           arv_cstr("example_plugin_pack:settings"),
           &loaded_config)) ||
       !result_ok(api->data->get_bool(

@@ -226,7 +226,6 @@ data/blocks.yaml
 data/items.yaml
 data/entities.yaml
 data/worldgen/features/crystal_cluster.yaml
-data/commands.yaml
 ```
 
 Native plugin code registers behavior referenced by that data.
@@ -945,8 +944,8 @@ Rules:
 
 * command IDs are resource IDs
 * native command descriptors own command name, domain, permission, description, usage, and callback
-* data files should configure runtime policy or behavior, not duplicate static native metadata
-* good uses for `data/commands.yaml` include aliases, command enable/disable configuration, permission overrides, command limits, macro commands, and scripted commands
+* command aliases are declared in the pack manifest under `commands:`
+* plugin-owned data files may still configure runtime policy, command limits, macro commands, or scripted commands
 * server-bound commands execute on the server and require permission checks
 * client-bound commands execute locally and must not require server permission
 * command output should use the Text API so colors, hover events, and click events remain structured
@@ -969,13 +968,10 @@ plugin.commands().register_command(
 );
 ```
 
-Data may add policy or aliases:
+`pack.yaml` may add aliases:
 
 ```yaml
-# data/commands.yaml
-schema_version: 1
-
-aliases:
+commands:
   - alias: h
     command: heal
     visible_in_help: false
@@ -1183,16 +1179,20 @@ Engine-side `DataDocument` also supports typed path decoding through `value<T>(p
 Config remains a separate API because it is human-editable settings:
 
 ```cpp
-plugin.config().global().load_file_or_default<MyConfig>("config.yaml");
-plugin.config().global().save_file("config.yaml", config);
-plugin.config().world(world).save_file("world_settings.yaml", config);
+plugin.config().load_file_or_default<MyConfig>("config.yaml");
+plugin.config().save_file("config.yaml", config);
+plugin.config().load_data_file_or_default<MyState>("state.json");
+plugin.config().save_player_data_file(profile_id, "permissions.json", player_state);
 ```
 
 The C++ file helpers resolve the file name inside the calling plugin's config
 directory, so `config.yaml` maps to
-`arvane_home/config/plugins/<pack_id>/config.yaml`. Lower-level namespaced keys
-such as `example_plugin:settings` remain available for advanced cases and are
-still sanitized before touching storage.
+`arvane_home/config/plugins/<pack_id>/config/config.yaml`. Data helpers store
+JSON under `arvane_home/config/plugins/<pack_id>/data/`, and player-data
+helpers store one JSON document per profile under
+`arvane_home/config/plugins/<pack_id>/data/players/<PlayerProfileID>/`.
+Lower-level namespaced keys such as `example_plugin:settings` remain available
+for advanced cases and are still sanitized before touching storage.
 
 Persistent data remains separate because it is save/runtime state with explicit lifetime scopes:
 
@@ -1210,7 +1210,7 @@ Rules:
 * config file helpers use the calling plugin pack ID automatically
 * lower-level config and persistent keys must be namespaced resource IDs owned by the plugin pack
 * keys are mapped to sanitized storage paths; plugins never provide raw filesystem paths
-* config stores YAML by default and missing config returns `NotFound`
+* config stores YAML; plugin data and player data store JSON
 * persistent data stores backend-agnostic binary `DataDocument` records by default
 * persistent records include schema versions and are preserved when the plugin is absent
 * player scope resolves the SDK player handle to a stable server profile identity before touching storage
@@ -1220,8 +1220,9 @@ Rules:
 Recommended storage roots are implementation details, not plugin contracts:
 
 ```text
-arvane_home/config/plugins/<pack_id>/<config_file>.yaml
-arvane_home/saves/<world>/plugin_config/<world_id>/<pack_id>/<safe_key_path>.yaml
+arvane_home/config/plugins/<pack_id>/config/<safe_key_path>.yaml
+arvane_home/config/plugins/<pack_id>/data/<safe_key_path>.json
+arvane_home/config/plugins/<pack_id>/data/players/<PlayerProfileID>/<safe_key_path>.json
 arvane_home/saves/<world>/plugin_data/<pack_id>/<scope>/<stable_identity>/<safe_key_path>.bin
 ```
 
@@ -2959,13 +2960,10 @@ ARV_MAIN(plugin) {
 }
 ```
 
-Command data:
+Command aliases in `pack.yaml`:
 
 ```yaml
-# data/commands.yaml
-schema_version: 1
-
-aliases:
+commands:
   - alias: h
     command: heal
     visible_in_help: false

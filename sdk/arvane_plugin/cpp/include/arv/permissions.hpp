@@ -5,6 +5,7 @@
 #include "arv/types.hpp"
 
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -68,6 +69,11 @@ public:
   [[nodiscard]] Result register_group(
       const PermissionGroupDefinition& definition) const;
 
+  [[nodiscard]] Result upsert_group(
+      const PermissionGroupDefinition& definition) const;
+
+  [[nodiscard]] Result remove_registered_group(std::string_view group_id) const;
+
   [[nodiscard]] ValueResult<bool> has_group(
       ArvPlayerID player,
       std::string_view group_id) const;
@@ -79,6 +85,25 @@ public:
   [[nodiscard]] Result remove_group(
       ArvPlayerID player,
       std::string_view group_id) const;
+
+  [[nodiscard]] Result set_groups(
+      ArvPlayerID player,
+      std::span<const std::string_view> groups) const;
+
+  [[nodiscard]] Result set_core_override(
+      ArvPlayerID player,
+      CorePermission permission,
+      PermissionValue value) const;
+
+  [[nodiscard]] Result set_custom_override(
+      ArvPlayerID player,
+      std::string_view node,
+      PermissionValue value) const;
+
+  [[nodiscard]] Result set_overrides(
+      ArvPlayerID player,
+      CorePermissionSet core,
+      std::span<const CustomPermissionEntry> custom_permissions) const;
 
   [[nodiscard]] std::vector<std::string_view> groups(ArvPlayerID player) const;
 

@@ -217,8 +217,6 @@ arvane_home/
         blocks.yaml
         items.yaml
         entities.yaml
-        commands.yaml
-        permissions.yaml
         worldgen/
           noise/
           features/
@@ -246,8 +244,6 @@ arvane_home/
         example_plugin_pack/
       data/
         blocks.yaml
-        commands.yaml
-        permissions.yaml
       config/
         messages.yaml
       native/
@@ -793,8 +789,6 @@ data/dimensions.yaml
 data/recipes.yaml
 data/loot_tables.yaml
 data/tags.yaml
-data/commands.yaml
-data/permissions.yaml
 ```
 
 Examples:
@@ -803,7 +797,6 @@ Examples:
 data/blocks.yaml
 data/items.yaml
 data/biomes.yaml
-data/commands.yaml
 data/worldgen/noise/abyssal_depth.yaml
 data/worldgen/features/coral_patch.yaml
 ```
@@ -858,21 +851,18 @@ registry.register_command({
 });
 ```
 
-Data command files are useful when they define runtime policy or behavior:
+Command aliases belong in `pack.yaml`:
 
 ```yaml
-schema_version: 1
-
-aliases:
+commands:
   - alias: time
     command: world.time
     visible_in_help: true
 ```
 
-Good uses for `data/commands.yaml` include aliases, command enable/disable
-configuration, permission overrides, command limits, macro commands, and
-scripted commands. The file should not duplicate static native metadata without
-adding behavior.
+Permission nodes also belong in `pack.yaml` under `permissions:`. More complex
+runtime command policy can still be modeled by plugin-owned data files, but the
+static alias/permission declarations are manifest metadata.
 
 ---
 

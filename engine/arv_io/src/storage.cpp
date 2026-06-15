@@ -158,6 +158,40 @@ DataStorageError storage_error(
       std::span{reinterpret_cast<const u8*>(text.data()), text.size()});
 }
 
+[[nodiscard]] StorageLoadResult load_json_document(const std::filesystem::path& path) {
+  auto text = read_text_file_contents(path);
+  if (!text.has_value()) {
+    return StorageLoadResult::failure(storage_error(
+        DataStorageCode::NotFound,
+        path,
+        "file was not found"));
+  }
+  auto decoded = decode_json(text.value());
+  if (!decoded) {
+    return StorageLoadResult::failure(storage_error(
+        DataStorageCode::Corrupt,
+        path,
+        decoded.error().describe()));
+  }
+  return StorageLoadResult::success(std::move(decoded.value()));
+}
+
+[[nodiscard]] StorageSaveResult save_json_document(
+    const std::filesystem::path& path,
+    const DataDocument& document) {
+  auto encoded = encode_json(document);
+  if (!encoded) {
+    return StorageSaveResult::failure(storage_error(
+        DataStorageCode::InvalidArgument,
+        path,
+        encoded.error().describe()));
+  }
+  const std::string& text = encoded.value();
+  return write_bytes_atomic(
+      path,
+      std::span{reinterpret_cast<const u8*>(text.data()), text.size()});
+}
+
 [[nodiscard]] StorageLoadResult load_binary_document(const std::filesystem::path& path) {
   auto bytes = read_binary_file(path);
   if (!bytes.has_value()) {
@@ -247,85 +281,119 @@ StoragePathResult safe_resource_relative_path(
   return StoragePathResult::success(namespace_path.value() / relative.value());
 }
 
-ConfigStorageService::ConfigStorageService(
-    std::filesystem::path config_root,
-    std::filesystem::path world_save_root)
-    : config_root_(std::move(config_root)),
-      world_save_root_(std::move(world_save_root)) {
+ConfigStorageService::ConfigStorageService(std::filesystem::path config_root)
+    : config_root_(std::move(config_root)) {
 }
 
-StorageLoadResult ConfigStorageService::load_global_config(
+StorageLoadResult ConfigStorageService::load_config(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
-  return load_yaml_document(global_path(owner_pack_id, key));
+  return load_yaml_document(config_path(owner_pack_id, key));
 }
 
-StorageSaveResult ConfigStorageService::save_global_config(
+StorageSaveResult ConfigStorageService::save_config(
     std::string_view owner_pack_id,
     const ResourceKey& key,
     const DataDocument& document) const {
-  return save_yaml_document(global_path(owner_pack_id, key), document);
+  return save_yaml_document(config_path(owner_pack_id, key), document);
 }
 
-bool ConfigStorageService::exists_global_config(
+bool ConfigStorageService::exists_config(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
   std::error_code error;
-  return std::filesystem::is_regular_file(global_path(owner_pack_id, key), error);
+  return std::filesystem::is_regular_file(config_path(owner_pack_id, key), error);
 }
 
-StorageRemoveResult ConfigStorageService::remove_global_config(
+StorageRemoveResult ConfigStorageService::remove_config(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
-  return remove_file(global_path(owner_pack_id, key));
+  return remove_file(config_path(owner_pack_id, key));
 }
 
-StorageLoadResult ConfigStorageService::load_world_config(
-    WorldID world,
+StorageLoadResult ConfigStorageService::load_data(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
-  return load_yaml_document(world_path(world, owner_pack_id, key));
+  return load_json_document(data_path(owner_pack_id, key));
 }
 
-StorageSaveResult ConfigStorageService::save_world_config(
-    WorldID world,
+StorageSaveResult ConfigStorageService::save_data(
     std::string_view owner_pack_id,
     const ResourceKey& key,
     const DataDocument& document) const {
-  return save_yaml_document(world_path(world, owner_pack_id, key), document);
+  return save_json_document(data_path(owner_pack_id, key), document);
 }
 
-bool ConfigStorageService::exists_world_config(
-    WorldID world,
+bool ConfigStorageService::exists_data(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
   std::error_code error;
-  return std::filesystem::is_regular_file(world_path(world, owner_pack_id, key), error);
+  return std::filesystem::is_regular_file(data_path(owner_pack_id, key), error);
 }
 
-StorageRemoveResult ConfigStorageService::remove_world_config(
-    WorldID world,
+StorageRemoveResult ConfigStorageService::remove_data(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
-  return remove_file(world_path(world, owner_pack_id, key));
+  return remove_file(data_path(owner_pack_id, key));
 }
 
-std::filesystem::path ConfigStorageService::global_path(
+StorageLoadResult ConfigStorageService::load_player_data(
+    std::string_view profile_id,
+    std::string_view owner_pack_id,
+    const ResourceKey& key) const {
+  return load_json_document(player_data_path(profile_id, owner_pack_id, key));
+}
+
+StorageSaveResult ConfigStorageService::save_player_data(
+    std::string_view profile_id,
+    std::string_view owner_pack_id,
+    const ResourceKey& key,
+    const DataDocument& document) const {
+  return save_json_document(player_data_path(profile_id, owner_pack_id, key), document);
+}
+
+bool ConfigStorageService::exists_player_data(
+    std::string_view profile_id,
+    std::string_view owner_pack_id,
+    const ResourceKey& key) const {
+  std::error_code error;
+  return std::filesystem::is_regular_file(
+      player_data_path(profile_id, owner_pack_id, key),
+      error);
+}
+
+StorageRemoveResult ConfigStorageService::remove_player_data(
+    std::string_view profile_id,
+    std::string_view owner_pack_id,
+    const ResourceKey& key) const {
+  return remove_file(player_data_path(profile_id, owner_pack_id, key));
+}
+
+std::filesystem::path ConfigStorageService::config_path(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
   auto relative = safe_resource_relative_path(owner_pack_id, key, ".yaml");
-  return config_root_ / "plugins" / std::string{owner_pack_id} /
+  return config_root_ / "plugins" / std::string{owner_pack_id} / "config" /
          (relative ? relative.value() : std::filesystem::path{"invalid.yaml"});
 }
 
-std::filesystem::path ConfigStorageService::world_path(
-    WorldID world,
+std::filesystem::path ConfigStorageService::data_path(
     std::string_view owner_pack_id,
     const ResourceKey& key) const {
-  auto relative = safe_resource_relative_path(owner_pack_id, key, ".yaml");
-  return world_save_root_ / "plugin_config" / std::to_string(world.value) /
-         std::string{owner_pack_id} /
-         (relative ? relative.value() : std::filesystem::path{"invalid.yaml"});
+  auto relative = safe_resource_relative_path(owner_pack_id, key, ".json");
+  return config_root_ / "plugins" / std::string{owner_pack_id} / "data" /
+         (relative ? relative.value() : std::filesystem::path{"invalid.json"});
+}
+
+std::filesystem::path ConfigStorageService::player_data_path(
+    std::string_view profile_id,
+    std::string_view owner_pack_id,
+    const ResourceKey& key) const {
+  auto relative = safe_resource_relative_path(owner_pack_id, key, ".json");
+  return config_root_ / "plugins" / std::string{owner_pack_id} / "data" /
+         "players" /
+         (path_segment_safe(profile_id) ? std::string{profile_id} : std::string{"invalid"}) /
+         (relative ? relative.value() : std::filesystem::path{"invalid.json"});
 }
 
 PersistentDataStorageService::PersistentDataStorageService(std::filesystem::path save_root)

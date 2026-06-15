@@ -25,6 +25,20 @@ typedef struct ArvPlayersAPI {
       void* ctx,
       ArvPlayerID player,
       ArvPlayerSelection* out_selection);
+  uint64_t (*online_players)(
+      void* ctx,
+      ArvPlayerID* out_players,
+      uint64_t max_players);
+  ArvStringView (*profile_id)(
+      void* ctx,
+      ArvPlayerID player);
+  ArvStringView (*display_name)(
+      void* ctx,
+      ArvPlayerID player);
+  bool (*find_by_profile_id)(
+      void* ctx,
+      ArvStringView profile_id,
+      ArvPlayerID* out_player);
 } ArvPlayersAPI;
 
 #ifdef __cplusplus

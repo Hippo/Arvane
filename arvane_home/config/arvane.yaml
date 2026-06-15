@@ -65,6 +65,7 @@ language:
 native_plugins:
   allowed_packs:
     - arv_mason
+    - arv_perms
   enabled: true
 natural_spawning:
   attempts_per_player_per_category: 24

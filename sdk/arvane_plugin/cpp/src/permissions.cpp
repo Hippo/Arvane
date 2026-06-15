@@ -1,6 +1,32 @@
 #include "arv/permissions.hpp"
 
 namespace arv {
+namespace {
+
+struct AbiGroupDefinition {
+  std::vector<ArvStringView> inherits{};
+  ArvPermissionGroupDefinition definition{};
+};
+
+[[nodiscard]] AbiGroupDefinition make_abi_group_definition(
+    const PermissionGroupDefinition& definition) {
+  AbiGroupDefinition abi;
+  abi.inherits.reserve(definition.inherits.size());
+  for (std::string_view inherited : definition.inherits) {
+    abi.inherits.push_back(view(inherited));
+  }
+  abi.definition.id = view(definition.id);
+  abi.definition.priority = definition.priority;
+  abi.definition.inherits = abi.inherits.data();
+  abi.definition.inherit_count = abi.inherits.size();
+  abi.definition.core = definition.core;
+  abi.definition.custom_permissions = definition.custom_permissions.data();
+  abi.definition.custom_permission_count =
+      definition.custom_permissions.size();
+  return abi;
+}
+
+} // namespace
 
 Permissions::Permissions(const ArvAPI* api) noexcept : api_(api) {
 }
@@ -85,24 +111,32 @@ Result Permissions::register_group(
       api_->permissions->register_group == nullptr) {
     return Result::unsupported("permissions API is unavailable");
   }
-  std::vector<ArvStringView> inherits;
-  inherits.reserve(definition.inherits.size());
-  for (std::string_view inherited : definition.inherits) {
-    inherits.push_back(view(inherited));
-  }
-
-  ArvPermissionGroupDefinition abi_definition{};
-  abi_definition.id = view(definition.id);
-  abi_definition.priority = definition.priority;
-  abi_definition.inherits = inherits.data();
-  abi_definition.inherit_count = inherits.size();
-  abi_definition.core = definition.core;
-  abi_definition.custom_permissions = definition.custom_permissions.data();
-  abi_definition.custom_permission_count =
-      definition.custom_permissions.size();
+  AbiGroupDefinition abi_definition = make_abi_group_definition(definition);
   return Result{api_->permissions->register_group(
       api_->permissions_ctx,
-      &abi_definition)};
+      &abi_definition.definition)};
+}
+
+Result Permissions::upsert_group(
+    const PermissionGroupDefinition& definition) const {
+  if (api_ == nullptr || api_->permissions == nullptr ||
+      api_->permissions->upsert_group == nullptr) {
+    return Result::unsupported("permissions API upsert_group is unavailable");
+  }
+  AbiGroupDefinition abi_definition = make_abi_group_definition(definition);
+  return Result{api_->permissions->upsert_group(
+      api_->permissions_ctx,
+      &abi_definition.definition)};
+}
+
+Result Permissions::remove_registered_group(std::string_view group_id) const {
+  if (api_ == nullptr || api_->permissions == nullptr ||
+      api_->permissions->remove_registered_group == nullptr) {
+    return Result::unsupported("permissions API remove_registered_group is unavailable");
+  }
+  return Result{api_->permissions->remove_registered_group(
+      api_->permissions_ctx,
+      view(group_id))};
 }
 
 ValueResult<bool> Permissions::has_group(
@@ -147,6 +181,71 @@ Result Permissions::remove_group(
       api_->permissions_ctx,
       player,
       view(group_id))};
+}
+
+Result Permissions::set_groups(
+    ArvPlayerID player,
+    std::span<const std::string_view> groups) const {
+  if (api_ == nullptr || api_->permissions == nullptr ||
+      api_->permissions->set_groups == nullptr) {
+    return Result::unsupported("permissions API set_groups is unavailable");
+  }
+  std::vector<ArvStringView> abi_groups;
+  abi_groups.reserve(groups.size());
+  for (std::string_view group : groups) {
+    abi_groups.push_back(view(group));
+  }
+  return Result{api_->permissions->set_groups(
+      api_->permissions_ctx,
+      player,
+      abi_groups.data(),
+      abi_groups.size())};
+}
+
+Result Permissions::set_core_override(
+    ArvPlayerID player,
+    CorePermission permission,
+    PermissionValue value) const {
+  if (api_ == nullptr || api_->permissions == nullptr ||
+      api_->permissions->set_core_override == nullptr) {
+    return Result::unsupported("permissions API set_core_override is unavailable");
+  }
+  return Result{api_->permissions->set_core_override(
+      api_->permissions_ctx,
+      player,
+      static_cast<ArvCorePermission>(permission),
+      static_cast<ArvPermissionValue>(value))};
+}
+
+Result Permissions::set_custom_override(
+    ArvPlayerID player,
+    std::string_view node,
+    PermissionValue value) const {
+  if (api_ == nullptr || api_->permissions == nullptr ||
+      api_->permissions->set_custom_override == nullptr) {
+    return Result::unsupported("permissions API set_custom_override is unavailable");
+  }
+  return Result{api_->permissions->set_custom_override(
+      api_->permissions_ctx,
+      player,
+      view(node),
+      static_cast<ArvPermissionValue>(value))};
+}
+
+Result Permissions::set_overrides(
+    ArvPlayerID player,
+    CorePermissionSet core,
+    std::span<const CustomPermissionEntry> custom_permissions) const {
+  if (api_ == nullptr || api_->permissions == nullptr ||
+      api_->permissions->set_overrides == nullptr) {
+    return Result::unsupported("permissions API set_overrides is unavailable");
+  }
+  return Result{api_->permissions->set_overrides(
+      api_->permissions_ctx,
+      player,
+      core,
+      custom_permissions.data(),
+      custom_permissions.size())};
 }
 
 std::vector<std::string_view> Permissions::groups(ArvPlayerID player) const {

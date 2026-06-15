@@ -55,6 +55,18 @@ struct PackBuiltinManifest {
   std::string module{};
 };
 
+struct PackCommandAlias {
+  std::string alias{};
+  std::string command{};
+  bool visible_in_help{};
+};
+
+struct PackPermissionNode {
+  std::string id{};
+  std::string description{};
+  std::string default_value{"unset"};
+};
+
 struct PackManifest {
   u32 schema_version{};
   std::string id{};
@@ -70,6 +82,8 @@ struct PackManifest {
   std::vector<std::string> load_after{};
   std::vector<std::string> load_before{};
   PackCapabilities capabilities{};
+  std::vector<PackCommandAlias> commands{};
+  std::vector<PackPermissionNode> permissions{};
   std::optional<PackBuiltinManifest> builtin{};
   std::optional<PackNativeManifest> native{};
 };

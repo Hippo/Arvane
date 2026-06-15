@@ -129,6 +129,8 @@ public:
   using LayerResult = Expected<PermissionLayer, PermissionError>;
 
   [[nodiscard]] Result add_group(PermissionGroup group);
+  [[nodiscard]] Result upsert_group(PermissionGroup group);
+  [[nodiscard]] Result remove_group(std::string_view id);
   [[nodiscard]] const PermissionGroup* find(std::string_view id) const noexcept;
   [[nodiscard]] LayerResult resolve_groups(std::span<const std::string> group_ids) const;
   [[nodiscard]] std::span<const PermissionGroup> groups() const noexcept;

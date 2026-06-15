@@ -676,137 +676,6 @@ Expected<void, PersistenceError> write_json_atomic(
   return inventory;
 }
 
-[[nodiscard]] const char* tri_state_name(player::TriState value) noexcept {
-  switch (value) {
-    case player::TriState::Allow:
-      return "ALLOW";
-    case player::TriState::Deny:
-      return "DENY";
-    case player::TriState::Unset:
-      return "UNSET";
-  }
-  return "UNSET";
-}
-
-[[nodiscard]] std::optional<player::TriState> tri_state_from_value(
-    const io::DataValue& node) {
-  if (node.kind() == io::DataKind::Bool) {
-    return node.as_bool_or(false) ? player::TriState::Allow : player::TriState::Deny;
-  }
-  if (node.kind() != io::DataKind::String) {
-    return std::nullopt;
-  }
-
-  return player::tri_state_from_string(node.as_string_or({}));
-}
-
-[[nodiscard]] Expected<std::string, PersistenceError> encode_default_permission_config() {
-  return Expected<std::string, PersistenceError>::success(
-      "# Permission groups for this server save.\n"
-      "groups: {}\n");
-}
-
-void write_core_value(io::DataValue& node, std::string_view name, player::TriState value) {
-  if (value != player::TriState::Unset) {
-    node.set(std::string{name}, tri_state_name(value));
-  }
-}
-
-[[nodiscard]] io::DataValue core_permissions_to_value(const player::CorePermissionSet& core) {
-  io::DataValue node = io::DataValue::object();
-  write_core_value(node, "can_take_damage", core.can_take_damage);
-  write_core_value(node, "can_modify_world", core.can_modify_world);
-  write_core_value(node, "can_interact", core.can_interact);
-  write_core_value(node, "can_open_inventory", core.can_open_inventory);
-  write_core_value(node, "has_creative_inventory", core.has_creative_inventory);
-  write_core_value(node, "can_fly", core.can_fly);
-  write_core_value(node, "has_collision", core.has_collision);
-  write_core_value(node, "is_visible_to_others", core.is_visible_to_others);
-  return node;
-}
-
-[[nodiscard]] io::DataValue custom_permissions_to_value(
-    const player::CustomPermissionMap& custom) {
-  io::DataValue node = io::DataValue::object();
-  for (const auto& [permission, value] : custom) {
-    if (value != player::TriState::Unset) {
-      node.set(permission, tri_state_name(value));
-    }
-  }
-  return node;
-}
-
-[[nodiscard]] io::DataValue player_permissions_to_value(
-    const player::PlayerPermissions& permissions) {
-  io::DataValue node = io::DataValue::object();
-  node.set("core", core_permissions_to_value(permissions.overrides));
-  node.set("permissions", custom_permissions_to_value(permissions.custom_overrides));
-  return node;
-}
-
-void read_group_list(player::PlayerPermissions& permissions, const io::DataValue& node) {
-  const io::DataValue::Array* array = node.array_if();
-  if (array == nullptr) {
-    return;
-  }
-  for (const io::DataValue& entry : *array) {
-    if (entry.kind() == io::DataKind::String) {
-      permissions.groups.emplace_back(entry.as_string_or({}));
-    }
-  }
-}
-
-void read_core_permissions(player::PlayerPermissions& permissions, const io::DataValue& node) {
-  const io::DataValue::Object* object = node.object_if();
-  if (object == nullptr) {
-    return;
-  }
-  for (const auto& [key, child] : *object) {
-    const std::optional<player::TriState> value = tri_state_from_value(child);
-    if (value.has_value()) {
-      (void)player::set_core_permission_by_name(
-          permissions.overrides,
-          key,
-          value.value());
-    }
-  }
-}
-
-void read_custom_permissions(player::PlayerPermissions& permissions, const io::DataValue& node) {
-  const io::DataValue::Object* object = node.object_if();
-  if (object == nullptr) {
-    return;
-  }
-  for (const auto& [key, child] : *object) {
-    const std::optional<player::TriState> value = tri_state_from_value(child);
-    if (value.has_value() && player::is_valid_custom_permission_node(key)) {
-      permissions.custom_overrides[key] = value.value();
-    }
-  }
-}
-
-[[nodiscard]] player::PlayerPermissions player_permissions_from_value(
-    const io::DataValue& player_json) {
-  player::PlayerPermissions permissions;
-  if (const io::DataValue* groups = member(player_json, "groups"); groups != nullptr) {
-    read_group_list(permissions, *groups);
-  }
-
-  if (const io::DataValue* overrides = member(player_json, "permission_overrides");
-      overrides != nullptr && overrides->kind() == io::DataKind::Object) {
-    if (const io::DataValue* groups = member(*overrides, "groups"); groups != nullptr) {
-      read_group_list(permissions, *groups);
-    }
-    if (const io::DataValue* core = member(*overrides, "core"); core != nullptr) {
-      read_core_permissions(permissions, *core);
-    }
-    if (const io::DataValue* custom = member(*overrides, "permissions"); custom != nullptr) {
-      read_custom_permissions(permissions, *custom);
-    }
-  }
-  return permissions;
-}
-
 [[nodiscard]] std::filesystem::path player_file_path(
     const std::filesystem::path& root,
     const PlayerSaveData& player) {
@@ -815,25 +684,6 @@ void read_custom_permissions(player::PlayerPermissions& permissions, const io::D
           ? player.profile_id.string() + ".json"
           : player.profile_name + ".dat";
   return root / "players" / filename;
-}
-
-Expected<void, PersistenceError> ensure_permission_config_file(
-    const std::filesystem::path& root) {
-  const std::filesystem::path path = root / "permissions.yaml";
-  std::error_code error;
-  if (std::filesystem::exists(path, error)) {
-    return Expected<void, PersistenceError>::success();
-  }
-  if (error) {
-    return Expected<void, PersistenceError>::failure(
-        PersistenceError{"failed to inspect permission config file: " + error.message()});
-  }
-
-  auto encoded = encode_default_permission_config();
-  if (!encoded) {
-    return Expected<void, PersistenceError>::failure(encoded.error());
-  }
-  return write_text_atomic(path, encoded.value());
 }
 
 } // namespace
@@ -1029,11 +879,6 @@ Expected<void, PersistenceError> save_server_root(
     return save_result;
   }
 
-  save_result = ensure_permission_config_file(root);
-  if (!save_result) {
-    return save_result;
-  }
-
   const world::WorldHeightSettings world_height =
       world::world_height_settings_from_generation_config(world.generation_config);
   world::WorldClock saved_clock = world.clock;
@@ -1103,14 +948,6 @@ Expected<void, PersistenceError> save_server_root(
     player_json.set("selected_hotbar_slot", static_cast<u64>(player.selected_hotbar_slot));
     player_json.set("inventory_version", static_cast<u64>(2U));
     player_json.set("inventory", inventory_to_value(player.inventory, item_registry));
-    io::DataValue groups = io::DataValue::array();
-    for (const std::string& group : player.permission_overrides.groups) {
-      groups.push(group);
-    }
-    player_json.set("groups", std::move(groups));
-    player_json.set(
-        "permission_overrides",
-        player_permissions_to_value(player.permission_overrides));
     auto player_result =
         write_json_atomic(player_file_path(root, player), player_json, "player save JSON");
     if (!player_result) {
@@ -1404,7 +1241,6 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
             respawn != nullptr) {
           player_save.respawn_location = location_from_value(*respawn);
         }
-        player_save.permission_overrides = player_permissions_from_value(player_json);
         player_save.selected_hotbar_slot =
             static_cast<u8>(u64_value_or(player_json, "selected_hotbar_slot", 0U));
         if (const io::DataValue* inventory = member(player_json, "inventory");

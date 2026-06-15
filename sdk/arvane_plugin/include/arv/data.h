@@ -104,11 +104,52 @@ typedef struct ArvDataAPI {
       ArvDataDocumentHandle document,
       ArvStringView path,
       ArvStringView value);
+  ArvResult (*array_push_object)(
+      void* ctx,
+      ArvDataDocumentHandle document,
+      ArvStringView path);
 
   size_t (*size)(
       void* ctx,
       ArvDataDocumentHandle document,
       ArvStringView path);
+
+  ArvResult (*array_get_bool)(
+      void* ctx,
+      ArvDataDocumentHandle document,
+      ArvStringView path,
+      size_t index,
+      bool* out);
+  ArvResult (*array_get_i64)(
+      void* ctx,
+      ArvDataDocumentHandle document,
+      ArvStringView path,
+      size_t index,
+      int64_t* out);
+  ArvResult (*array_get_u64)(
+      void* ctx,
+      ArvDataDocumentHandle document,
+      ArvStringView path,
+      size_t index,
+      uint64_t* out);
+  ArvResult (*array_get_f64)(
+      void* ctx,
+      ArvDataDocumentHandle document,
+      ArvStringView path,
+      size_t index,
+      double* out);
+  ArvResult (*array_get_string)(
+      void* ctx,
+      ArvDataDocumentHandle document,
+      ArvStringView path,
+      size_t index,
+      ArvStringView* out);
+  ArvResult (*object_key_at)(
+      void* ctx,
+      ArvDataDocumentHandle document,
+      ArvStringView path,
+      size_t index,
+      ArvStringView* out);
 
   ArvResult (*get_bool)(
       void* ctx,

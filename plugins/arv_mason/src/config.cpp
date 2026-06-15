@@ -134,11 +134,11 @@ void validate_config(MasonConfig& config) {
 
 MasonConfig load_config(const arv::Config& config, const arv::Logger& logger) {
   MasonConfig value = default_config();
-  auto loaded = config.global().load_file<MasonConfig>(ids::config_file);
+  auto loaded = config.load_file<MasonConfig>(ids::config_file);
   if (!loaded) {
     logger.warn("Mason config was not loaded; using safe defaults.");
     validate_config(value);
-    (void)config.global().save_file(ids::config_file, value);
+    (void)config.save_file(ids::config_file, value);
     return value;
   }
   value = std::move(loaded.value);
@@ -149,10 +149,10 @@ MasonConfig load_config(const arv::Config& config, const arv::Logger& logger) {
 
 MasonMessages load_messages(const arv::Config& config, const arv::Logger& logger) {
   MasonMessages value = default_messages();
-  auto loaded = config.global().load_file<MasonMessages>(ids::messages_file);
+  auto loaded = config.load_file<MasonMessages>(ids::messages_file);
   if (!loaded) {
     logger.warn("Mason messages config was not loaded; using built-in messages.");
-    (void)config.global().save_file(ids::messages_file, value);
+    (void)config.save_file(ids::messages_file, value);
     return value;
   }
   value = std::move(loaded.value);

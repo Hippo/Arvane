@@ -128,7 +128,6 @@ namespace {
   save.game_mode_id = player.game_mode_id;
   save.selected_skin_hash = player.selected_skin_hash;
   save.selected_skin_slim_model = player.selected_skin_slim_model;
-  save.permission_overrides = player.permission_overrides;
   save.respawn_location = player.respawn_location;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
@@ -151,7 +150,6 @@ namespace {
   save.grounded = player_state.grounded;
   save.movement_mode = player_state.movement_mode;
   save.game_mode_id = player_state.game_mode_id;
-  save.permission_overrides = player_state.permission_overrides;
   save.respawn_location = player_state.respawn_location;
   save.selected_hotbar_slot = player_state.selected_hotbar_slot;
   save.inventory = player_state.inventory;
@@ -772,16 +770,6 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   crypto::fill_random(server_instance_id_);
   network_thread_enabled_ = start_info.use_network_thread;
 
-  if (!server_save_root_.empty()) {
-    auto loaded_permissions = load_server_permission_groups(server_save_root_);
-    if (!loaded_permissions) {
-      return net::NetworkResult::failure(
-          net::NetworkError{loaded_permissions.error().message});
-    }
-    permission_groups_ = std::move(loaded_permissions.value());
-    ++permission_config_revision_;
-  }
-
   if (block_registry_ == nullptr || item_registry_ == nullptr) {
     return net::NetworkResult::failure(net::NetworkError{"server start requires block and item registries"});
   }
@@ -852,6 +840,25 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
           });
           return stable_id;
         },
+        [this](PlayerID player_id) -> std::optional<std::string> {
+          std::optional<std::string> display_name;
+          sessions_.for_each_session([&](const ServerSession& session) {
+            if (session.player_id == player_id) {
+              display_name = session.display_name.empty() ? session.profile_name
+                                                          : session.display_name;
+            }
+          });
+          return display_name;
+        },
+        [this]() {
+          std::vector<PlayerID> players;
+          sessions_.for_each_session([&](const ServerSession& session) {
+            if (session.authenticated && !session.closing) {
+              players.push_back(session.player_id);
+            }
+          });
+          return players;
+        },
         [this](const plugin::PluginNetworkSendRequest& request) {
           return send_plugin_network_packet(request);
         },
@@ -912,6 +919,25 @@ void ServerRuntimeImpl::tick() {
             }
           });
           return stable_id;
+        },
+        [this](PlayerID player_id) -> std::optional<std::string> {
+          std::optional<std::string> display_name;
+          sessions_.for_each_session([&](const ServerSession& session) {
+            if (session.player_id == player_id) {
+              display_name = session.display_name.empty() ? session.profile_name
+                                                          : session.display_name;
+            }
+          });
+          return display_name;
+        },
+        [this]() {
+          std::vector<PlayerID> players;
+          sessions_.for_each_session([&](const ServerSession& session) {
+            if (session.authenticated && !session.closing) {
+              players.push_back(session.player_id);
+            }
+          });
+          return players;
         },
         [this](const plugin::PluginNetworkSendRequest& request) {
           return send_plugin_network_packet(request);
@@ -1115,7 +1141,7 @@ const player::GameModeRegistry& ServerRuntimeImpl::game_modes() const noexcept {
 }
 
 player::GameModeRegistry& ServerRuntimeImpl::game_modes() noexcept {
-  ++permission_config_revision_;
+  ++permission_registry_revision_;
   return game_modes_;
 }
 
@@ -1124,7 +1150,7 @@ const player::PermissionGroupRegistry& ServerRuntimeImpl::permission_groups() co
 }
 
 player::PermissionGroupRegistry& ServerRuntimeImpl::permission_groups() noexcept {
-  ++permission_config_revision_;
+  ++permission_registry_revision_;
   return permission_groups_;
 }
 

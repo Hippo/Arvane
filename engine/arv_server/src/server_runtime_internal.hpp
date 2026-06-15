@@ -25,7 +25,6 @@
 #include "arv/sched/completion_queue.hpp"
 #include "arv/sched/owner_thread.hpp"
 #include "arv/server/chat_service.hpp"
-#include "arv/server/permission_config.hpp"
 #include "arv/server/player_movement_validation.hpp"
 #include "arv/server/player_profile.hpp"
 #include "arv/server/vehicle_movement_validation.hpp"
@@ -135,7 +134,7 @@ struct PendingNaturalSpawnJob {
 
 struct PlayerPermissionCache {
   u64 source_fingerprint{};
-  u64 permission_config_revision{};
+  u64 permission_registry_revision{};
   u64 region_registry_revision{};
   bool initialized{};
   bool has_last_region_query{};
@@ -589,7 +588,7 @@ struct ServerRuntimeImpl {
   player::GameModeRegistry game_modes_{};
   player::PermissionGroupRegistry permission_groups_{};
   std::filesystem::path server_save_root_{};
-  u64 permission_config_revision_{};
+  u64 permission_registry_revision_{};
   HashMap<PlayerID, PlayerPermissionCache> permission_caches_;
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   std::vector<PendingEntityAttack> pending_entity_attacks_;

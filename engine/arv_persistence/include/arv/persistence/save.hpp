@@ -67,7 +67,6 @@ struct PlayerSaveData {
   std::string game_mode_id{std::string{player::SurvivalGameModeID}};
   std::string selected_skin_hash{};
   bool selected_skin_slim_model{};
-  player::PlayerPermissions permission_overrides{};
   std::optional<Location> respawn_location{};
   u8 selected_hotbar_slot{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};

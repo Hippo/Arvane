@@ -50,53 +50,67 @@ using StoragePathResult = Expected<std::filesystem::path, DataStorageError>;
 
 class ConfigStorageService {
 public:
-  ConfigStorageService(
-      std::filesystem::path config_root,
-      std::filesystem::path world_save_root = {});
+  explicit ConfigStorageService(std::filesystem::path config_root);
 
-  [[nodiscard]] StorageLoadResult load_global_config(
+  [[nodiscard]] StorageLoadResult load_config(
       std::string_view owner_pack_id,
       const ResourceKey& key) const;
-  [[nodiscard]] StorageSaveResult save_global_config(
+  [[nodiscard]] StorageSaveResult save_config(
       std::string_view owner_pack_id,
       const ResourceKey& key,
       const DataDocument& document) const;
-  [[nodiscard]] bool exists_global_config(
+  [[nodiscard]] bool exists_config(
       std::string_view owner_pack_id,
       const ResourceKey& key) const;
-  [[nodiscard]] StorageRemoveResult remove_global_config(
+  [[nodiscard]] StorageRemoveResult remove_config(
       std::string_view owner_pack_id,
       const ResourceKey& key) const;
 
-  [[nodiscard]] StorageLoadResult load_world_config(
-      WorldID world,
+  [[nodiscard]] StorageLoadResult load_data(
       std::string_view owner_pack_id,
       const ResourceKey& key) const;
-  [[nodiscard]] StorageSaveResult save_world_config(
-      WorldID world,
+  [[nodiscard]] StorageSaveResult save_data(
       std::string_view owner_pack_id,
       const ResourceKey& key,
       const DataDocument& document) const;
-  [[nodiscard]] bool exists_world_config(
-      WorldID world,
+  [[nodiscard]] bool exists_data(
       std::string_view owner_pack_id,
       const ResourceKey& key) const;
-  [[nodiscard]] StorageRemoveResult remove_world_config(
-      WorldID world,
+  [[nodiscard]] StorageRemoveResult remove_data(
       std::string_view owner_pack_id,
       const ResourceKey& key) const;
 
-  [[nodiscard]] std::filesystem::path global_path(
+  [[nodiscard]] StorageLoadResult load_player_data(
+      std::string_view profile_id,
       std::string_view owner_pack_id,
       const ResourceKey& key) const;
-  [[nodiscard]] std::filesystem::path world_path(
-      WorldID world,
+  [[nodiscard]] StorageSaveResult save_player_data(
+      std::string_view profile_id,
+      std::string_view owner_pack_id,
+      const ResourceKey& key,
+      const DataDocument& document) const;
+  [[nodiscard]] bool exists_player_data(
+      std::string_view profile_id,
+      std::string_view owner_pack_id,
+      const ResourceKey& key) const;
+  [[nodiscard]] StorageRemoveResult remove_player_data(
+      std::string_view profile_id,
+      std::string_view owner_pack_id,
+      const ResourceKey& key) const;
+
+  [[nodiscard]] std::filesystem::path config_path(
+      std::string_view owner_pack_id,
+      const ResourceKey& key) const;
+  [[nodiscard]] std::filesystem::path data_path(
+      std::string_view owner_pack_id,
+      const ResourceKey& key) const;
+  [[nodiscard]] std::filesystem::path player_data_path(
+      std::string_view profile_id,
       std::string_view owner_pack_id,
       const ResourceKey& key) const;
 
 private:
   std::filesystem::path config_root_{};
-  std::filesystem::path world_save_root_{};
 };
 
 enum class PersistentScopeKind : u8 {

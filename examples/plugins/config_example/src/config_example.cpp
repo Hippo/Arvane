@@ -29,8 +29,8 @@ struct arv::Codec<SampleConfig> {
 };
 
 ARV_MAIN(plugin) {
-  SampleConfig config = plugin.config().global().load_or_default<SampleConfig>(
+  SampleConfig config = plugin.config().load_or_default<SampleConfig>(
       "config_example:sample_config");
   config.max_items = config.max_items < 1 ? 1 : config.max_items;
-  return plugin.config().global().save("config_example:sample_config", config).ok_value();
+  return plugin.config().save("config_example:sample_config", config).ok_value();
 }
