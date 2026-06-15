@@ -75,6 +75,7 @@ struct BlockBreakAttempt {
 struct EntityReplicationState {
   HashSet<EntityNetID> known_entities{};
   HashSet<EntityNetID> known_dropped_items{};
+  usize next_snapshot_entry_offset{};
 };
 
 struct InventoryReplicationState {

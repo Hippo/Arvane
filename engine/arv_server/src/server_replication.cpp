@@ -1,11 +1,48 @@
 #include "server_runtime_internal.hpp"
 
+#include "arv/protocol/message_envelope.hpp"
+
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <utility>
 
 namespace arv::server::detail {
 namespace {
+
+inline constexpr usize EntitySnapshotPayloadHeaderBytes =
+    sizeof(u32) + sizeof(u64) + sizeof(u32);
+inline constexpr usize EntitySnapshotBaseEntryBytes =
+    sizeof(u32) + // entity id
+    (sizeof(u32) * 3U) + // position
+    (sizeof(u32) * 3U) + // velocity
+    (sizeof(u32) * 4U) + // rotation
+    sizeof(u32) + // state flags
+    sizeof(u32) + // animation count
+    (sizeof(u32) * 3U) + // head rotation
+    sizeof(u32) + // current health
+    sizeof(u32); // max health
+inline constexpr usize MaxEntitySnapshotPacketFrameBytes = 16U * 1024U;
+inline constexpr usize MaxEntitySnapshotTickFrameBytes = 32U * 1024U;
+static_assert(
+    MaxEntitySnapshotPacketFrameBytes >
+    protocol::MessageEnvelopeHeaderSize + EntitySnapshotPayloadHeaderBytes);
+
+[[nodiscard]] usize serialized_entity_snapshot_entry_bytes(
+    const protocol::EntitySnapshotEntry& entry) noexcept {
+  usize bytes = EntitySnapshotBaseEntryBytes;
+  for (const protocol::EntityAnimationPlayback& animation : entry.animations) {
+    const usize name_bytes = std::min<usize>(
+        animation.name.size(),
+        static_cast<usize>(std::numeric_limits<u16>::max()));
+    bytes += sizeof(u16) + name_bytes + sizeof(u32);
+  }
+  return bytes;
+}
+
+[[nodiscard]] usize entity_snapshot_frame_bytes(usize payload_bytes) noexcept {
+  return protocol::MessageEnvelopeHeaderSize + payload_bytes;
+}
 
 [[nodiscard]] protocol::ClientboundPlayerMoveCorrection make_player_move_correction(
     u32 rejected_sequence,
@@ -543,22 +580,79 @@ void ServerRuntimeImpl::send_entity_replication() {
 
     state.known_entities = std::move(relevant_now);
     if (snapshot_entries.empty()) {
+      state.next_snapshot_entry_offset = 0U;
       continue;
     }
 
     // TODO(arvane): Replace full snapshot entries with per-component delta
     // compression once component replication masks are specified.
-    protocol::ClientboundEntitySnapshot snapshot_message;
-    snapshot_message.world_id = session->world_id;
-    snapshot_message.server_tick = tick_index_;
-    snapshot_message.entities = std::move(snapshot_entries);
-    (void)send_protocol_message(
-        *transport_,
-        session->connection_id,
-        protocol::MessageType::ClientboundEntitySnapshot,
-        protocol::ReliabilityClass::UnreliableLatestWins,
-        protocol::NetworkLane::Movement,
-        protocol::serialize_clientbound_entity_snapshot(snapshot_message));
+    if (state.next_snapshot_entry_offset >= snapshot_entries.size()) {
+      state.next_snapshot_entry_offset = 0U;
+    }
+
+    usize next_index = state.next_snapshot_entry_offset;
+    usize visited_entries = 0U;
+    usize sent_frame_bytes = 0U;
+    usize packet_payload_bytes = EntitySnapshotPayloadHeaderBytes;
+    std::vector<protocol::EntitySnapshotEntry> packet_entries;
+    packet_entries.reserve(std::min<usize>(snapshot_entries.size(), 128U));
+
+    auto flush_packet = [&]() {
+      if (packet_entries.empty()) {
+        return;
+      }
+      protocol::ClientboundEntitySnapshot snapshot_message;
+      snapshot_message.world_id = session->world_id;
+      snapshot_message.server_tick = tick_index_;
+      snapshot_message.entities = std::move(packet_entries);
+      (void)send_protocol_message(
+          *transport_,
+          session->connection_id,
+          protocol::MessageType::ClientboundEntitySnapshot,
+          protocol::ReliabilityClass::UnreliableLatestWins,
+          protocol::NetworkLane::Movement,
+          protocol::serialize_clientbound_entity_snapshot(snapshot_message));
+      sent_frame_bytes += entity_snapshot_frame_bytes(packet_payload_bytes);
+      packet_payload_bytes = EntitySnapshotPayloadHeaderBytes;
+      packet_entries = {};
+      packet_entries.reserve(std::min<usize>(snapshot_entries.size(), 128U));
+    };
+
+    while (visited_entries < snapshot_entries.size()) {
+      const protocol::EntitySnapshotEntry& entry = snapshot_entries[next_index];
+      const usize entry_bytes = serialized_entity_snapshot_entry_bytes(entry);
+      if (!packet_entries.empty() &&
+          entity_snapshot_frame_bytes(packet_payload_bytes + entry_bytes) >
+              MaxEntitySnapshotPacketFrameBytes) {
+        flush_packet();
+        if (sent_frame_bytes >= MaxEntitySnapshotTickFrameBytes) {
+          break;
+        }
+      }
+
+      const usize candidate_frame_bytes =
+          entity_snapshot_frame_bytes(packet_payload_bytes + entry_bytes);
+      if (packet_entries.empty() && sent_frame_bytes > 0U &&
+          sent_frame_bytes + candidate_frame_bytes >
+              MaxEntitySnapshotTickFrameBytes) {
+        break;
+      }
+
+      packet_entries.push_back(entry);
+      packet_payload_bytes += entry_bytes;
+      next_index = (next_index + 1U) % snapshot_entries.size();
+      ++visited_entries;
+
+      if (candidate_frame_bytes >= MaxEntitySnapshotPacketFrameBytes) {
+        flush_packet();
+        if (sent_frame_bytes >= MaxEntitySnapshotTickFrameBytes) {
+          break;
+        }
+      }
+    }
+
+    flush_packet();
+    state.next_snapshot_entry_offset = next_index;
   }
 }
 

@@ -7,6 +7,7 @@
 #include "arv/net/websocket_server_transport.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/entity_updates.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/message_type.hpp"
@@ -636,6 +637,97 @@ TEST(IntegratedHandshakeTests, ClientAndServerReachInGameThroughProtocolHandshak
   EXPECT_NE(server.worlds().find(arv::server::DefaultWorldID), nullptr);
   EXPECT_TRUE(client.has_authoritative_inventory());
   EXPECT_GT(client.replicated_entity_count(), 0U);
+}
+
+TEST(IntegratedHandshakeTests, LargeEntitySnapshotsAreByteBudgetedAcrossTicks) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto scripted_transport = std::make_unique<ScriptedServerTransport>();
+  ScriptedServerTransport* transport = scripted_transport.get();
+  arv::server::ServerRuntime server(std::move(scripted_transport));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
+
+  const arv::client::LocalPlayerIdentity identity =
+      arv::client::make_ephemeral_local_identity("SnapshotBudgetTester");
+  transport->push_message(arv::net::ConnectionID{1}, raw_client_hello_packet(identity));
+  server.tick();
+
+  const arv::server::ServerSession* session = server.sessions().first();
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->connection_state, arv::net::ConnectionState::InGame);
+  transport->sent.clear();
+
+  std::vector<arv::EntityNetID> created_entities;
+  constexpr arv::usize ExtraEntityCount = 800U;
+  created_entities.reserve(ExtraEntityCount);
+  for (arv::usize index = 0; index < ExtraEntityCount; ++index) {
+    arv::world::EntityCreateInfo info;
+    info.type_id = arv::EntityTypeID{777U};
+    info.type_name = "arvane:test_snapshot_entity";
+    info.position = {
+        static_cast<arv::f32>(index % 40U),
+        64.0F,
+        static_cast<arv::f32>(index / 40U)};
+    info.owning_player = session->player_id;
+    const arv::EntityID entity = server.voxel_world().create_entity(std::move(info));
+    const std::optional<arv::EntityNetID> net_id =
+        server.voxel_world().network_id_for_entity(entity);
+    ASSERT_TRUE(net_id.has_value());
+    created_entities.push_back(net_id.value());
+  }
+
+  arv::HashSet<arv::EntityNetID> seen_snapshot_entities;
+  arv::usize first_tick_snapshot_entities = 0U;
+  arv::usize first_tick_snapshot_packets = 0U;
+  server.tick();
+  for (const arv::net::TransportMessage& message : transport->sent) {
+    if (message.message_type != arv::protocol::MessageType::ClientboundEntitySnapshot) {
+      continue;
+    }
+    ++first_tick_snapshot_packets;
+    EXPECT_EQ(message.reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
+    EXPECT_EQ(message.lane, arv::protocol::NetworkLane::Movement);
+    EXPECT_LE(message.payload.size(), 16U * 1024U);
+    const auto envelope = arv::protocol::deserialize_envelope(message.payload);
+    ASSERT_TRUE(envelope) << envelope.error().message;
+    const auto snapshot =
+        arv::protocol::deserialize_clientbound_entity_snapshot(envelope.value().payload);
+    ASSERT_TRUE(snapshot) << snapshot.error().message;
+    first_tick_snapshot_entities += snapshot.value().entities.size();
+    for (const arv::protocol::EntitySnapshotEntry& entry : snapshot.value().entities) {
+      seen_snapshot_entities.insert(entry.entity_id);
+    }
+  }
+  ASSERT_GT(first_tick_snapshot_packets, 0U);
+  EXPECT_LT(first_tick_snapshot_entities, created_entities.size());
+
+  for (int tick = 0; tick < 8 && seen_snapshot_entities.size() < created_entities.size(); ++tick) {
+    transport->sent.clear();
+    server.tick();
+    for (const arv::net::TransportMessage& message : transport->sent) {
+      if (message.message_type != arv::protocol::MessageType::ClientboundEntitySnapshot) {
+        continue;
+      }
+      EXPECT_LE(message.payload.size(), 16U * 1024U);
+      const auto envelope = arv::protocol::deserialize_envelope(message.payload);
+      ASSERT_TRUE(envelope) << envelope.error().message;
+      const auto snapshot =
+          arv::protocol::deserialize_clientbound_entity_snapshot(envelope.value().payload);
+      ASSERT_TRUE(snapshot) << snapshot.error().message;
+      for (const arv::protocol::EntitySnapshotEntry& entry : snapshot.value().entities) {
+        seen_snapshot_entities.insert(entry.entity_id);
+      }
+    }
+  }
+
+  for (const arv::EntityNetID entity_id : created_entities) {
+    EXPECT_NE(seen_snapshot_entities.find(entity_id), seen_snapshot_entities.end());
+  }
 }
 
 TEST(IntegratedHandshakeTests, PackSyncCompletesBeforeWorldJoin) {

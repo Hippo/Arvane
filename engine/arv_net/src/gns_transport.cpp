@@ -571,8 +571,11 @@ NetworkResult GameNetworkingSocketsTransport::send_outbound_command(const Outbou
   sockets_->SendMessages(1, messages, &result_or_message_number, true);
   if (result_or_message_number < 0) {
     const EResult result = static_cast<EResult>(-result_or_message_number);
-    if (result == k_EResultIgnored &&
-        command.message.reliability != protocol::ReliabilityClass::ReliableOrdered) {
+    const bool droppable_unreliable =
+        command.message.reliability == protocol::ReliabilityClass::UnreliableLatestWins ||
+        command.message.reliability == protocol::ReliabilityClass::UnreliableEvent;
+    if ((result == k_EResultIgnored || result == k_EResultLimitExceeded) &&
+        droppable_unreliable) {
       return NetworkResult::success();
     }
     return NetworkResult::failure(
