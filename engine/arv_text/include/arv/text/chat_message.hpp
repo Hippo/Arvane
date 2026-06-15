@@ -11,11 +11,20 @@
 
 namespace arv::text {
 
+struct ChatMarkupPermissions {
+  bool color{true};
+  bool click{true};
+  bool hover{true};
+};
+
 class ChatMessageTemplate {
 public:
   ChatMessageTemplate() = default;
 
   [[nodiscard]] static ChatMessageTemplate parse(std::string_view source);
+  [[nodiscard]] static ChatMessageTemplate parse(
+      std::string_view source,
+      ChatMarkupPermissions permissions);
   [[nodiscard]] static ChatMessageTemplate raw(std::string source);
 
   [[nodiscard]] const std::string& source() const noexcept;

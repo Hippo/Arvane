@@ -16,6 +16,7 @@
 #include "arv/protocol/player_movement.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/player/permissions.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/server/world_registry.hpp"
 #include "arv/world/world_generation.hpp"
@@ -837,6 +838,9 @@ TEST(IntegratedHandshakeTests, ClientChatIsFormattedAndBroadcastByServer) {
   server.tick();
   client.fixed_tick(server.tick_index());
   ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  arv::testsupport::connected_player(server)
+      .permission_overrides.custom_overrides["arvane.chat.send"] =
+      arv::player::TriState::Allow;
 
   client.submit_input({.open_chat_pressed = true});
   client.submit_input({.text_input = "{\"text\":\"fake admin\"}"});

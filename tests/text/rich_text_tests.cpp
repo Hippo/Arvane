@@ -117,6 +117,25 @@ TEST(ChatMessageTemplateTests, ColorTagsReplacePreviousColorScope) {
   EXPECT_EQ(runs[2].style.color, (arv::text::RgbColor{0xFFU, 0xFFU, 0xFFU}));
 }
 
+TEST(ChatMessageTemplateTests, PermissionsCanRejectPlayerAuthoredMarkup) {
+  arv::text::ChatMarkupPermissions no_color;
+  no_color.color = false;
+  const auto denied_color =
+      arv::text::ChatMessageTemplate::parse("<red>Hi", no_color);
+  EXPECT_FALSE(denied_color.parsed());
+  EXPECT_EQ(denied_color.to_string(), "<red>Hi");
+
+  arv::text::ChatMarkupPermissions no_events;
+  no_events.click = false;
+  no_events.hover = false;
+  EXPECT_FALSE(arv::text::ChatMessageTemplate::parse(
+                   "<click:suggest_command:msg Hippo>Hi", no_events)
+                   .parsed());
+  EXPECT_FALSE(arv::text::ChatMessageTemplate::parse(
+                   "<hover:show_text:Hi>Hover", no_events)
+                   .parsed());
+}
+
 TEST(ChatMessageTemplateTests, ResolvedVariablesCanProvideMarkupBeforeParsing) {
   arv::text::TextVariableStore variables;
   variables.set_global("arv_mason_prefix", "<red>Mason<gray>></>");

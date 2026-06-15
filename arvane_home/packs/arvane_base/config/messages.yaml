@@ -2,7 +2,7 @@ command:
   dispatcher:
     console_only: Command is restricted to the server console.
     permission_service_unavailable: Command permission service is unavailable.
-    permission_denied: "No permission"
+    permission_denied: "<red>No permission"
     permission_missing_player_context: "Permission denied: missing player context."
     permission_player_not_online: "Permission denied: player is not online."
     no_command: No command entered.

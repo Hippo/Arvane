@@ -9,6 +9,7 @@
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/server/skin_runtime.hpp"
+#include "arv/text/chat_message.hpp"
 #include "arv/text/language.hpp"
 #include "arv/world/world_queries.hpp"
 
@@ -31,6 +32,10 @@ namespace {
 inline constexpr f32 VehicleCollisionStopSpeedEpsilonBlocksPerSecond = 0.02F;
 inline constexpr f32 MinVehicleValidationDtSeconds = 1.0F / 60.0F;
 inline constexpr f32 MaxVehicleValidationDtSeconds = 0.25F;
+inline constexpr std::string_view ChatSendPermission = "arvane.chat.send";
+inline constexpr std::string_view ChatColorPermission = "arvane.chat.color";
+inline constexpr std::string_view ChatClickPermission = "arvane.chat.click";
+inline constexpr std::string_view ChatHoverPermission = "arvane.chat.hover";
 
 void configure_skin_transfer_state(
     SkinTransferSessionState& state,
@@ -107,6 +112,10 @@ void configure_skin_transfer_state(
 [[nodiscard]] bool command_status_is_error(
     command::CommandStatus status) noexcept {
   return status != command::CommandStatus::Success;
+}
+
+[[nodiscard]] arv::text::RichText authored_chat_message(std::string_view message) {
+  return arv::text::ChatMessageTemplate::parse(message).to_rich_text();
 }
 
 [[nodiscard]] std::string fallback_command_result_message(
@@ -2611,11 +2620,11 @@ void ServerRuntimeImpl::handle_chat_message(
       if (command_message_is_error(message.kind)) {
         send_error_message(
             *session,
-            chat_formatter_.format_error_message(message.text));
+            authored_chat_message(message.text));
       } else {
         send_system_message(
             *session,
-            chat_formatter_.format_system_message(message.text));
+            authored_chat_message(message.text));
       }
       sent_message = true;
     }
@@ -2625,12 +2634,32 @@ void ServerRuntimeImpl::handle_chat_message(
       if (command_status_is_error(result.status)) {
         send_error_message(
             *session,
-            chat_formatter_.format_error_message(fallback));
+            authored_chat_message(fallback));
       } else {
         send_system_message(
             *session,
-            chat_formatter_.format_system_message(fallback));
+            authored_chat_message(fallback));
       }
+    }
+    return;
+  }
+
+  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  if (player_state == nullptr) {
+    send_error_message(
+        *session,
+        chat_formatter_.format_error_message(arv::text::text_or_fallback(
+            language_,
+            "ui.chat.command.no_sender",
+            "No player command sender is available.")));
+    return;
+  }
+  refresh_player_permissions(*player_state);
+  if (!player_state->resolved_permissions.has(ChatSendPermission)) {
+    if (!command_permission_denied_message_.empty()) {
+      send_error_message(
+          *session,
+          authored_chat_message(command_permission_denied_message_));
     }
     return;
   }
@@ -2642,6 +2671,12 @@ void ServerRuntimeImpl::handle_chat_message(
       session->display_name.empty() ? session->profile_name : session->display_name;
   context.channel = channel;
   context.raw_message = std::move(normalized_message);
+  context.message_markup.color =
+      player_state->resolved_permissions.has(ChatColorPermission);
+  context.message_markup.click =
+      player_state->resolved_permissions.has(ChatClickPermission);
+  context.message_markup.hover =
+      player_state->resolved_permissions.has(ChatHoverPermission);
   arv::text::RichText formatted = chat_formatter_.format_player_chat(context);
   const arv::text::RichTextValidation validation = arv::text::validate_rich_text(formatted);
   if (!validation.valid) {

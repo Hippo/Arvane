@@ -164,7 +164,8 @@ void append_segment(
 
 [[nodiscard]] bool apply_tag(
     std::string_view token,
-    std::vector<ChatScope>& scopes) {
+    std::vector<ChatScope>& scopes,
+    ChatMarkupPermissions permissions) {
   if (token == "/") {
     if (scopes.empty()) {
       return false;
@@ -174,6 +175,9 @@ void append_segment(
   }
 
   if (std::optional<RgbColor> color = parse_hex_color(token); color.has_value()) {
+    if (!permissions.color) {
+      return false;
+    }
     close_active_color(scopes);
     if (scopes.size() >= RichTextLimits{}.max_depth) {
       return false;
@@ -184,6 +188,9 @@ void append_segment(
     return true;
   }
   if (std::optional<RgbColor> color = named_chat_color(token); color.has_value()) {
+    if (!permissions.color) {
+      return false;
+    }
     close_active_color(scopes);
     if (scopes.size() >= RichTextLimits{}.max_depth) {
       return false;
@@ -200,6 +207,9 @@ void append_segment(
 
   constexpr std::string_view click_prefix = "click:";
   if (token.starts_with(click_prefix)) {
+    if (!permissions.click) {
+      return false;
+    }
     const std::string_view rest = token.substr(click_prefix.size());
     const usize separator = rest.find(':');
     if (separator == std::string_view::npos || separator == 0U) {
@@ -220,6 +230,9 @@ void append_segment(
 
   constexpr std::string_view hover_prefix = "hover:";
   if (token.starts_with(hover_prefix)) {
+    if (!permissions.hover) {
+      return false;
+    }
     const std::string_view rest = token.substr(hover_prefix.size());
     constexpr std::string_view show_text_prefix = "show_text:";
     if (!rest.starts_with(show_text_prefix)) {
@@ -255,6 +268,12 @@ std::optional<RgbColor> named_chat_color(std::string_view name) {
 }
 
 ChatMessageTemplate ChatMessageTemplate::parse(std::string_view source) {
+  return parse(source, {});
+}
+
+ChatMessageTemplate ChatMessageTemplate::parse(
+    std::string_view source,
+    ChatMarkupPermissions permissions) {
   if (!is_valid_utf8(source)) {
     return raw(std::string{source});
   }
@@ -286,7 +305,10 @@ ChatMessageTemplate ChatMessageTemplate::parse(std::string_view source) {
       return raw(std::string{source});
     }
     append_segment(root, source.substr(segment_start, index - segment_start), scopes);
-    if (!apply_tag(source.substr(index + 1U, close - index - 1U), scopes)) {
+    if (!apply_tag(
+            source.substr(index + 1U, close - index - 1U),
+            scopes,
+            permissions)) {
       return raw(std::string{source});
     }
     index = close + 1U;

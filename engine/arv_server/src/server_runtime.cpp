@@ -1985,7 +1985,18 @@ command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
     return command::CommandPermissionResult::allow();
   }
 
-  return command::CommandPermissionResult::deny(command_permission_denied_message_);
+  if (command_permission_denied_message_.empty()) {
+    return command::CommandPermissionResult::deny(command_permission_denied_message_);
+  }
+
+  if (command_permission_denied_message_ != "No permission") {
+    return command::CommandPermissionResult::deny(command_permission_denied_message_);
+  }
+
+  return command::CommandPermissionResult::deny(arv::text::text_or_fallback(
+      language_,
+      "command.dispatcher.permission_denied",
+      command_permission_denied_message_));
 }
 
 } // namespace detail

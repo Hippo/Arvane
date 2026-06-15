@@ -29,8 +29,13 @@ RichText ChatFormatter::format_player_chat(const ChatFormatContext& context) con
           "server.chat.hover_message",
           {{"name", sender_name}},
           "Click to message {name}"))
-      .append(": ", chat_color(0xA8U, 0xA8U, 0xA8U))
-      .append_literal(context.raw_message, chat_color(0xDDU, 0xDDU, 0xDDU));
+      .append(": ", chat_color(0xA8U, 0xA8U, 0xA8U));
+
+  RichText message = ChatMessageTemplate::parse(
+      context.raw_message,
+      context.message_markup).to_rich_text();
+  message.style = chat_color(0xDDU, 0xDDU, 0xDDU);
+  builder.append_component(std::move(message));
   return builder.build();
 }
 

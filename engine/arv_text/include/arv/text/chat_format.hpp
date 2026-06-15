@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/text/chat_message.hpp"
 #include "arv/text/language.hpp"
 #include "arv/text/rich_text.hpp"
 
@@ -17,6 +18,7 @@ struct ChatFormatContext {
   std::string raw_message{};
   std::optional<std::string> rank_id{};
   std::optional<RichText> rank_prefix{};
+  ChatMarkupPermissions message_markup{};
   bool is_private_message{};
   bool is_system_message{};
 };

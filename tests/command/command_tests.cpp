@@ -8,6 +8,8 @@
 #include "arv/player/permissions.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/server_runtime.hpp"
+#include "arv/text/language.hpp"
+#include "arv/text/rich_text.hpp"
 #include "arv/world/world_time.hpp"
 #include "support/server_harness.hpp"
 #include "support/temp_dir.hpp"
@@ -55,7 +57,8 @@ struct RunningServerHarness {
   explicit RunningServerHarness(
       arv::io::MovementValidationConfig movement = arv::io::MovementValidationConfig{},
       arv::Location world_spawn = arv::default_spawn_location(),
-      std::string permission_denied_message = "No permission")
+      std::string permission_denied_message = "No permission",
+      const arv::text::LanguageCatalog* language = nullptr)
       : temp("arvane_command_"),
         block_registry(arv::testsupport::make_test_block_registry()),
         item_registry(arv::testsupport::make_test_item_registry(block_registry)),
@@ -78,12 +81,20 @@ struct RunningServerHarness {
     start_info.world_name = "default";
     start_info.server_save_root = temp.path / "save";
     start_info.command_permission_denied_message = std::move(permission_denied_message);
+    start_info.language = language;
     EXPECT_TRUE(server.start(start_info));
 
     EXPECT_TRUE(client.connect_integrated());
     complete_integrated_handshake(server, client);
   }
 };
+
+void grant_custom_permission(
+    arv::player::PlayerState& player,
+    std::string_view node) {
+  player.permission_overrides.custom_overrides[std::string{node}] =
+      arv::player::TriState::Allow;
+}
 
 std::optional<arv::command::CommandSender> connected_player_sender(
     RunningServerHarness& harness) {
@@ -122,6 +133,15 @@ void submit_chat_text(arv::client::ClientRuntime& client, std::string_view text)
       [&](const std::string& message) {
         return message.find(needle) != std::string::npos;
       });
+}
+
+[[nodiscard]] std::vector<arv::text::RichTextRun> last_chat_runs(
+    const arv::client::ClientRuntime& client) {
+  EXPECT_FALSE(client.chat_history().empty());
+  if (client.chat_history().empty()) {
+    return {};
+  }
+  return arv::text::flatten_rich_text(client.chat_history().back().message);
 }
 
 [[nodiscard]] arv::u32 inventory_count(
@@ -864,6 +884,50 @@ TEST(CommandTests, PlayerGamemodeAliasUsesSamePermission) {
   EXPECT_TRUE(player.resolved_permissions.core.can_fly);
 }
 
+TEST(CommandTests, ServerboundChatMessageRequiresSendPermission) {
+  RunningServerHarness harness;
+
+  submit_chat_text(harness.client, "hello there");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_TRUE(client_chat_contains(harness.client, "No permission"));
+  EXPECT_FALSE(client_chat_contains(harness.client, "local_player: hello there"));
+}
+
+TEST(CommandTests, ServerboundChatColorMarkupRequiresPermission) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  grant_custom_permission(player, "arvane.chat.send");
+
+  submit_chat_text(harness.client, "<red>Hi");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_TRUE(client_chat_contains(harness.client, "local_player: <red>Hi"));
+  const std::vector<arv::text::RichTextRun> runs = last_chat_runs(harness.client);
+  ASSERT_GE(runs.size(), 3U);
+  EXPECT_EQ(runs.back().text, "<red>Hi");
+  EXPECT_EQ(runs.back().style.color, (arv::text::RgbColor{0xDDU, 0xDDU, 0xDDU}));
+}
+
+TEST(CommandTests, ServerboundChatColorMarkupFormatsWhenPermitted) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  grant_custom_permission(player, "arvane.chat.send");
+  grant_custom_permission(player, "arvane.chat.color");
+
+  submit_chat_text(harness.client, "<red>Hi");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_TRUE(client_chat_contains(harness.client, "local_player: Hi"));
+  const std::vector<arv::text::RichTextRun> runs = last_chat_runs(harness.client);
+  ASSERT_GE(runs.size(), 3U);
+  EXPECT_EQ(runs.back().text, "Hi");
+  EXPECT_EQ(runs.back().style.color, (arv::text::RgbColor{0xFFU, 0x55U, 0x55U}));
+}
+
 TEST(CommandTests, ServerboundChatCommandExecutesThroughPermissions) {
   RunningServerHarness harness;
   arv::player::PlayerState& player = connected_player(harness.server);
@@ -921,6 +985,26 @@ TEST(CommandTests, ServerboundChatCommandDeniesWithoutPermission) {
   EXPECT_EQ(player.game_mode_id, arv::base::ids::SurvivalGameModeID);
   EXPECT_TRUE(client_chat_contains(harness.client, "No permission"));
   EXPECT_FALSE(client_chat_contains(harness.client, "arvane.command.gamemode.creative"));
+}
+
+TEST(CommandTests, ServerboundChatCommandDenialUsesAuthoredTemplateColor) {
+  arv::text::LanguageCatalog language;
+  language.set("command.dispatcher.permission_denied", "<red>No permission");
+  RunningServerHarness harness{
+      arv::io::MovementValidationConfig{},
+      arv::default_spawn_location(),
+      "No permission",
+      &language};
+
+  submit_chat_text(harness.client, "/gmc");
+  harness.server.tick();
+  harness.client.fixed_tick(harness.server.tick_index());
+
+  EXPECT_TRUE(client_chat_contains(harness.client, "No permission"));
+  const std::vector<arv::text::RichTextRun> runs = last_chat_runs(harness.client);
+  ASSERT_FALSE(runs.empty());
+  EXPECT_EQ(runs.back().text, "No permission");
+  EXPECT_EQ(runs.back().style.color, (arv::text::RgbColor{0xFFU, 0x55U, 0x55U}));
 }
 
 TEST(CommandTests, ServerboundMsgCommandIsDeniedWithoutPermission) {

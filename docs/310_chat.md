@@ -402,7 +402,7 @@ Avoid alpha in server-authored chat colors. Alpha-controlled text can produce in
 
 `arv_text` provides `ChatMessageTemplate` as the shared authoring format for config files and plugin SDK helpers. It is a text-layer feature: the template parses to `RichText`, resolves shared variables, and can then be sent as a normal `ClientboundChatMessage`.
 
-Supported v1 markup:
+Supported markup:
 
 ```text
 <#ff8800>Hello <#aaaaaa>World
