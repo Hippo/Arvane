@@ -96,6 +96,14 @@ struct SavedServerSummary {
   std::filesystem::path server_save_root{};
 };
 
+struct WorldFileOperationOptions {
+  // 0 means automatic: use a capped, short-lived file-operation fan-out for
+  // world load/save phases.
+  u32 max_threads{};
+};
+
+[[nodiscard]] u32 resolve_world_file_operation_threads(
+    WorldFileOperationOptions options = {}) noexcept;
 [[nodiscard]] u64 hash_block_registry(const voxel::BlockRegistry& registry) noexcept;
 [[nodiscard]] u64 hash_item_registry(const player::ItemRegistry& registry) noexcept;
 [[nodiscard]] std::vector<RequiredPackMetadata> required_pack_metadata(
@@ -116,7 +124,8 @@ Expected<void, PersistenceError> save_server_root(
     std::span<const PlayerSaveData> players,
     std::span<const entity::PersistentEntityRecord> entities,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry);
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options = {});
 Expected<void, PersistenceError> save_server_root(
     const std::filesystem::path& root,
     const SaveMetadata& save,
@@ -124,15 +133,18 @@ Expected<void, PersistenceError> save_server_root(
     std::span<const SavedChunkSection> chunks,
     std::span<const PlayerSaveData> players,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry);
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options = {});
 [[nodiscard]] Expected<LoadedSaveData, PersistenceError> load_server_root(
     const std::filesystem::path& root,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry);
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options = {});
 [[nodiscard]] Expected<LoadedSaveData, PersistenceError> load_server_root(
     const std::filesystem::path& root,
     std::string_view world_name,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry);
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options = {});
 
 } // namespace arv::persistence

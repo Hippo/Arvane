@@ -347,6 +347,134 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(legacy_loaded.value().world.required_packs[1].id, "test_pack");
 }
 
+TEST(SaveTests, ParallelWorldFileOptionsRoundTripIndependentFiles) {
+  TempDir temp_dir;
+  const std::filesystem::path server_save_root =
+      temp_dir.path / "arvane_home" / "saves" / "server-save-parallel";
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone = block_registry.find_variant("arvane:stone").value();
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+
+  EXPECT_EQ(
+      arv::persistence::resolve_world_file_operation_threads({.max_threads = 4U}),
+      4U);
+  EXPECT_EQ(
+      arv::persistence::resolve_world_file_operation_threads({.max_threads = 99U}),
+      64U);
+
+  arv::persistence::PlayerSaveData player_a;
+  player_a.profile_name = "alpha";
+  player_a.display_name = "Alpha";
+  player_a.world_name = "default";
+  ASSERT_TRUE(player_a.inventory.set_slot(
+      0,
+      arv::player::ItemStack{stone_item, 2, stack_data("alpha")}));
+
+  arv::persistence::PlayerSaveData player_b;
+  player_b.profile_name = "beta";
+  player_b.display_name = "Beta";
+  player_b.world_name = "default";
+  player_b.position = {32.0F, 64.0F, -8.0F};
+
+  const arv::persistence::SaveMetadata save_metadata{
+      arv::persistence::CurrentSaveFormatVersion,
+      std::string{arv::persistence::CurrentGameVersion},
+      arv::persistence::hash_block_registry(block_registry),
+      arv::persistence::hash_item_registry(item_registry),
+      "Parallel Save"};
+  const arv::persistence::WorldMetadata world_metadata{
+      "default",
+      77,
+      123,
+      make_worldgen_config(),
+      0,
+      3,
+      save_metadata.block_registry_hash,
+      save_metadata.item_registry_hash};
+  const std::vector<arv::persistence::SavedChunkSection> chunks{
+      make_saved_chunk({{0, 0, 0}}, stone),
+      make_saved_chunk({{arv::RegionSizeInChunks, 0, 0}}, stone),
+      make_saved_chunk({{-1, 0, -1}}, stone)};
+  const std::vector<arv::persistence::PlayerSaveData> players{player_a, player_b};
+  const std::vector<arv::entity::PersistentEntityRecord> entities{
+      {"entity-origin",
+       "arvane:test_entity",
+       arv::WorldID{1},
+       {4.0F, 5.0F, 6.0F}},
+      {"entity-positive",
+       "arvane:test_entity",
+       arv::WorldID{1},
+       {static_cast<float>(arv::RegionSizeInChunks * arv::ChunkSize + 4),
+        5.0F,
+        6.0F}},
+      {"entity-negative",
+       "arvane:test_entity",
+       arv::WorldID{1},
+       {-4.0F, 5.0F, -4.0F}}};
+
+  const arv::persistence::WorldFileOperationOptions file_options{.max_threads = 4U};
+  ASSERT_TRUE(arv::persistence::save_server_root(
+      server_save_root,
+      save_metadata,
+      world_metadata,
+      chunks,
+      players,
+      entities,
+      block_registry,
+      item_registry,
+      file_options));
+
+  EXPECT_TRUE(std::filesystem::exists(
+      server_save_root / "worlds" / "default" / "regions" / "r.-1.-1.arvr"));
+  EXPECT_TRUE(std::filesystem::exists(
+      server_save_root / "worlds" / "default" / "regions" / "r.0.0.arvr"));
+  EXPECT_TRUE(std::filesystem::exists(
+      server_save_root / "worlds" / "default" / "regions" / "r.1.0.arvr"));
+  EXPECT_TRUE(std::filesystem::exists(
+      server_save_root / "worlds" / "default" / "entities" / "r.-1.-1.json"));
+  EXPECT_TRUE(std::filesystem::exists(
+      server_save_root / "worlds" / "default" / "entities" / "r.0.0.json"));
+  EXPECT_TRUE(std::filesystem::exists(
+      server_save_root / "worlds" / "default" / "entities" / "r.1.0.json"));
+
+  auto loaded = arv::persistence::load_server_root(
+      server_save_root,
+      "default",
+      block_registry,
+      item_registry,
+      file_options);
+  ASSERT_TRUE(loaded);
+  ASSERT_TRUE(loaded.value().has_world_metadata);
+  EXPECT_EQ(loaded.value().world.seed, 77U);
+  EXPECT_EQ(loaded.value().chunks.size(), chunks.size());
+  EXPECT_EQ(loaded.value().entities.size(), entities.size());
+  EXPECT_EQ(loaded.value().players.size(), players.size());
+
+  const auto positive_entity = std::find_if(
+      loaded.value().entities.begin(),
+      loaded.value().entities.end(),
+      [](const arv::entity::PersistentEntityRecord& record) {
+        return record.uuid == "entity-positive";
+      });
+  ASSERT_NE(positive_entity, loaded.value().entities.end());
+  EXPECT_EQ(
+      positive_entity->position.x,
+      static_cast<float>(arv::RegionSizeInChunks * arv::ChunkSize + 4));
+
+  const auto alpha_player = std::find_if(
+      loaded.value().players.begin(),
+      loaded.value().players.end(),
+      [](const arv::persistence::PlayerSaveData& player) {
+        return player.profile_name == "alpha";
+      });
+  ASSERT_NE(alpha_player, loaded.value().players.end());
+  ASSERT_TRUE(alpha_player->inventory.slot(0).has_value());
+  EXPECT_EQ(alpha_player->inventory.slot(0)->item, stone_item);
+}
+
 TEST(SaveTests, WorldHeightLoadsFromGenerationBoundsWhenChunkBoundsAreStale) {
   TempDir temp_dir;
   const std::filesystem::path server_save_root =

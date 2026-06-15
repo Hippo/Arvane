@@ -7,15 +7,161 @@
 #include "arv/world/world_runtime.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <exception>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <system_error>
+#include <thread>
 
 namespace arv::persistence {
+
+u32 resolve_world_file_operation_threads(WorldFileOperationOptions options) noexcept {
+  constexpr u32 AutomaticFallbackThreads = 4U;
+  constexpr u32 AutomaticMaxThreads = 8U;
+  constexpr u32 ConfiguredMaxThreads = 64U;
+  if (options.max_threads != 0U) {
+    return std::clamp(options.max_threads, 1U, ConfiguredMaxThreads);
+  }
+
+  const unsigned hardware_threads = std::thread::hardware_concurrency();
+  const u32 detected =
+      hardware_threads == 0U ? AutomaticFallbackThreads : static_cast<u32>(hardware_threads);
+  return std::clamp(detected, 2U, AutomaticMaxThreads);
+}
+
 namespace {
+
+struct RegionSaveJob {
+  RegionCoord region{};
+  std::filesystem::path path{};
+  std::vector<SavedChunkSection> chunks{};
+};
+
+struct EntityRegionSaveJob {
+  RegionCoord region{};
+  std::filesystem::path path{};
+  std::vector<entity::PersistentEntityRecord> entities{};
+};
+
+template<typename Job, typename Fn>
+Expected<void, PersistenceError> run_world_file_jobs(
+    std::span<const Job> jobs,
+    WorldFileOperationOptions options,
+    Fn&& fn) {
+  if (jobs.empty()) {
+    return Expected<void, PersistenceError>::success();
+  }
+
+  const u32 worker_count =
+      std::min<u32>(resolve_world_file_operation_threads(options), static_cast<u32>(jobs.size()));
+  if (worker_count <= 1U) {
+    for (usize index = 0; index < jobs.size(); ++index) {
+      try {
+        auto result = fn(jobs[index], index);
+        if (!result) {
+          return result;
+        }
+      } catch (const std::exception& ex) {
+        return Expected<void, PersistenceError>::failure(
+            PersistenceError{"world file operation failed: " + std::string{ex.what()}});
+      } catch (...) {
+        return Expected<void, PersistenceError>::failure(
+            PersistenceError{"world file operation failed with an unknown exception"});
+      }
+    }
+    return Expected<void, PersistenceError>::success();
+  }
+
+  std::atomic<usize> next_index{};
+  std::atomic_bool failed{};
+  std::mutex error_mutex;
+  std::optional<PersistenceError> first_error;
+  auto store_error = [&](PersistenceError error) {
+    {
+      std::lock_guard lock{error_mutex};
+      if (!first_error.has_value()) {
+        first_error = std::move(error);
+      }
+    }
+    failed.store(true, std::memory_order_release);
+  };
+  auto worker = [&] {
+    for (;;) {
+      if (failed.load(std::memory_order_acquire)) {
+        return;
+      }
+      const usize index = next_index.fetch_add(1U, std::memory_order_relaxed);
+      if (index >= jobs.size()) {
+        return;
+      }
+      try {
+        auto result = fn(jobs[index], index);
+        if (result) {
+          continue;
+        }
+        store_error(result.error());
+      } catch (const std::exception& ex) {
+        store_error(PersistenceError{
+            "world file operation failed: " + std::string{ex.what()}});
+      } catch (...) {
+        store_error(PersistenceError{
+            "world file operation failed with an unknown exception"});
+      }
+      return;
+    }
+  };
+
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  for (u32 index = 0; index < worker_count; ++index) {
+    workers.emplace_back(worker);
+  }
+  for (std::thread& thread : workers) {
+    if (thread.joinable()) {
+      thread.join();
+    }
+  }
+
+  if (first_error.has_value()) {
+    return Expected<void, PersistenceError>::failure(std::move(first_error.value()));
+  }
+  return Expected<void, PersistenceError>::success();
+}
+
+template<typename Job, typename Result, typename Fn>
+Expected<std::vector<Result>, PersistenceError> collect_world_file_jobs(
+    std::span<const Job> jobs,
+    WorldFileOperationOptions options,
+    Fn&& fn) {
+  std::vector<std::optional<Result>> results(jobs.size());
+  auto completed = run_world_file_jobs(
+      jobs,
+      options,
+      [&](const Job& job, usize index) -> Expected<void, PersistenceError> {
+        auto result = fn(job);
+        if (!result) {
+          return Expected<void, PersistenceError>::failure(result.error());
+        }
+        results[index] = std::move(result.value());
+        return Expected<void, PersistenceError>::success();
+      });
+  if (!completed) {
+    return Expected<std::vector<Result>, PersistenceError>::failure(completed.error());
+  }
+
+  std::vector<Result> out;
+  out.reserve(results.size());
+  for (std::optional<Result>& result : results) {
+    if (result.has_value()) {
+      out.push_back(std::move(result.value()));
+    }
+  }
+  return Expected<std::vector<Result>, PersistenceError>::success(std::move(out));
+}
 
 [[nodiscard]] u64 fnv1a_append(u64 hash, std::string_view text) noexcept {
   for (const char ch : text) {
@@ -686,6 +832,141 @@ Expected<void, PersistenceError> write_json_atomic(
   return root / "players" / filename;
 }
 
+Expected<void, PersistenceError> write_player_save_file(
+    const std::filesystem::path& root,
+    const PlayerSaveData& save,
+    const player::ItemRegistry& item_registry) {
+  io::DataValue player_json = io::DataValue::object();
+  player_json.set("profile_id", save.profile_id.string());
+  player_json.set("profile_name", save.profile_name);
+  player_json.set("display_name", save.display_name);
+  player_json.set("world_name", save.world_name);
+  player_json.set("position", vec3_to_value(save.position));
+  player_json.set("velocity", vec3_to_value(save.velocity));
+  player_json.set("yaw_radians", static_cast<f64>(save.yaw_radians));
+  player_json.set("pitch_radians", static_cast<f64>(save.pitch_radians));
+  player_json.set("grounded", save.grounded);
+  player_json.set(
+      "movement_mode",
+      save.movement_mode == player::MovementMode::Flying ? "flying" : "walking");
+  player_json.set("game_mode", save.game_mode_id);
+  player_json.set("selected_skin_hash", save.selected_skin_hash);
+  player_json.set("selected_skin_slim_model", save.selected_skin_slim_model);
+  if (save.respawn_location.has_value()) {
+    player_json.set("respawn", location_to_value(save.respawn_location.value(), false));
+  }
+  player_json.set("selected_hotbar_slot", static_cast<u64>(save.selected_hotbar_slot));
+  player_json.set("inventory_version", static_cast<u64>(2U));
+  player_json.set("inventory", inventory_to_value(save.inventory, item_registry));
+  return write_json_atomic(player_file_path(root, save), player_json, "player save JSON");
+}
+
+Expected<void, PersistenceError> write_entity_region_file(
+    const EntityRegionSaveJob& job,
+    const player::ItemRegistry& item_registry) {
+  io::DataValue entity_array = io::DataValue::array();
+  for (const entity::PersistentEntityRecord& entity : job.entities) {
+    entity_array.push(entity_record_to_value(entity, item_registry));
+  }
+
+  io::DataValue region_node = io::DataValue::object();
+  region_node.set("x", static_cast<i64>(job.region.x));
+  region_node.set("z", static_cast<i64>(job.region.z));
+  io::DataValue entity_file = io::DataValue::object();
+  entity_file.set("entity_version", static_cast<u64>(1U));
+  entity_file.set("region", std::move(region_node));
+  entity_file.set("entities", std::move(entity_array));
+  return write_json_atomic(job.path, entity_file, "entity region JSON");
+}
+
+[[nodiscard]] Expected<std::vector<entity::PersistentEntityRecord>, PersistenceError>
+load_entity_region_file(
+    const std::filesystem::path& path,
+    const player::ItemRegistry& item_registry) {
+  auto entity_file = read_json_file(path, "entity region JSON");
+  if (!entity_file) {
+    return Expected<std::vector<entity::PersistentEntityRecord>, PersistenceError>::failure(
+        entity_file.error());
+  }
+
+  std::vector<entity::PersistentEntityRecord> out;
+  const io::DataValue entity_json = std::move(entity_file.value());
+  const io::DataValue* entities = member(entity_json, "entities");
+  const io::DataValue::Array* entity_array =
+      entities == nullptr ? nullptr : entities->array_if();
+  if (entity_array != nullptr) {
+    out.reserve(entity_array->size());
+    for (const io::DataValue& entry : *entity_array) {
+      out.emplace_back(entity_record_from_json(entry, item_registry));
+    }
+  }
+  return Expected<std::vector<entity::PersistentEntityRecord>, PersistenceError>::success(
+      std::move(out));
+}
+
+[[nodiscard]] Expected<PlayerSaveData, PersistenceError> load_player_save_file(
+    const std::filesystem::path& path,
+    const player::ItemRegistry& item_registry) {
+  auto player_file = read_json_file(path, "player save JSON");
+  if (!player_file) {
+    return Expected<PlayerSaveData, PersistenceError>::failure(player_file.error());
+  }
+  const io::DataValue player_json = std::move(player_file.value());
+
+  PlayerSaveData player_save;
+  const std::string profile_id_text =
+      string_value_or(player_json, "profile_id", std::string{});
+  if (!profile_id_text.empty()) {
+    auto profile_id = crypto::parse_player_profile_id(profile_id_text);
+    if (!profile_id) {
+      return Expected<PlayerSaveData, PersistenceError>::failure(
+          PersistenceError{profile_id.error().message});
+    }
+    player_save.profile_id = profile_id.value();
+  }
+  player_save.profile_name =
+      string_value_or(player_json, "profile_name", std::string{"local_player"});
+  player_save.display_name =
+      string_value_or(player_json, "display_name", player_save.profile_name);
+  player_save.world_name = string_value_or(player_json, "world_name", std::string{});
+  if (const io::DataValue* value = member(player_json, "position"); value != nullptr) {
+    player_save.position = vec3_from_value(*value);
+  }
+  if (const io::DataValue* value = member(player_json, "velocity"); value != nullptr) {
+    player_save.velocity = vec3_from_value(*value);
+  }
+  player_save.yaw_radians =
+      static_cast<f32>(f64_value_or(player_json, "yaw_radians", 0.0));
+  player_save.pitch_radians =
+      static_cast<f32>(f64_value_or(player_json, "pitch_radians", 0.0));
+  player_save.grounded = bool_value_or(player_json, "grounded", false);
+  player_save.movement_mode =
+      string_value_or(player_json, "movement_mode", std::string{}) == "flying"
+          ? player::MovementMode::Flying
+          : player::MovementMode::Walking;
+  player_save.game_mode_id =
+      string_value_or(player_json, "game_mode", player_save.game_mode_id);
+  player_save.selected_skin_hash =
+      string_value_or(player_json, "selected_skin_hash", std::string{});
+  player_save.selected_skin_slim_model =
+      !player_save.selected_skin_hash.empty() &&
+      bool_value_or(player_json, "selected_skin_slim_model", false);
+  if (const io::DataValue* respawn = member(player_json, "respawn");
+      respawn != nullptr) {
+    player_save.respawn_location = location_from_value(*respawn);
+  }
+  player_save.selected_hotbar_slot =
+      static_cast<u8>(u64_value_or(player_json, "selected_hotbar_slot", 0U));
+  if (const io::DataValue* inventory = member(player_json, "inventory");
+      inventory != nullptr) {
+    player_save.inventory = inventory_from_json(
+        *inventory,
+        item_registry,
+        player::DefaultPlayerInventorySlotCount);
+  }
+  return Expected<PlayerSaveData, PersistenceError>::success(std::move(player_save));
+}
+
 } // namespace
 
 std::vector<RequiredPackMetadata> required_pack_metadata(
@@ -864,7 +1145,8 @@ Expected<void, PersistenceError> save_server_root(
     std::span<const PlayerSaveData> players,
     std::span<const entity::PersistentEntityRecord> entities,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry) {
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options) {
   const std::string save_name = save.name.empty() ? root.filename().string() : save.name;
   io::DataValue registry_refs = io::DataValue::object();
   registry_refs.set("block_registry_hash", save.block_registry_hash);
@@ -914,42 +1196,58 @@ Expected<void, PersistenceError> save_server_root(
   for (const SavedChunkSection& chunk : chunks) {
     regions[chunk_column_to_region(chunk_to_column(chunk.coord))].push_back(chunk);
   }
+  std::vector<RegionSaveJob> region_jobs;
+  region_jobs.reserve(regions.size());
   for (auto& [region, region_chunks] : regions) {
-    const std::filesystem::path region_path =
+    region_jobs.push_back({
+        region,
         root / "worlds" / world.name / "regions" /
-        ("r." + std::to_string(region.x) + "." + std::to_string(region.z) + ".arvr");
-    auto region_result =
-        write_region_file(region_path, region, region_chunks, block_registry, world_height.min_chunk_y);
-    if (!region_result) {
-      return region_result;
+            ("r." + std::to_string(region.x) + "." + std::to_string(region.z) + ".arvr"),
+        std::move(region_chunks)});
+  }
+  std::sort(region_jobs.begin(), region_jobs.end(), [](const auto& lhs, const auto& rhs) {
+    if (lhs.region.x != rhs.region.x) {
+      return lhs.region.x < rhs.region.x;
     }
+    return lhs.region.z < rhs.region.z;
+  });
+  auto region_result = run_world_file_jobs(
+      std::span<const RegionSaveJob>{region_jobs},
+      options,
+      [&](const RegionSaveJob& job, usize) {
+        return write_region_file(
+            job.path,
+            job.region,
+            job.chunks,
+            block_registry,
+            world_height.min_chunk_y);
+      });
+  if (!region_result) {
+    return region_result;
   }
 
+  std::vector<std::filesystem::path> player_paths;
+  player_paths.reserve(players.size());
   for (const PlayerSaveData& player : players) {
-    io::DataValue player_json = io::DataValue::object();
-    player_json.set("profile_id", player.profile_id.string());
-    player_json.set("profile_name", player.profile_name);
-    player_json.set("display_name", player.display_name);
-    player_json.set("world_name", player.world_name);
-    player_json.set("position", vec3_to_value(player.position));
-    player_json.set("velocity", vec3_to_value(player.velocity));
-    player_json.set("yaw_radians", static_cast<f64>(player.yaw_radians));
-    player_json.set("pitch_radians", static_cast<f64>(player.pitch_radians));
-    player_json.set("grounded", player.grounded);
-    player_json.set(
-        "movement_mode",
-        player.movement_mode == player::MovementMode::Flying ? "flying" : "walking");
-    player_json.set("game_mode", player.game_mode_id);
-    player_json.set("selected_skin_hash", player.selected_skin_hash);
-    player_json.set("selected_skin_slim_model", player.selected_skin_slim_model);
-    if (player.respawn_location.has_value()) {
-      player_json.set("respawn", location_to_value(player.respawn_location.value(), false));
+    player_paths.push_back(player_file_path(root, player));
+  }
+  std::sort(player_paths.begin(), player_paths.end());
+  const bool duplicate_player_path =
+      std::adjacent_find(player_paths.begin(), player_paths.end()) != player_paths.end();
+  if (duplicate_player_path) {
+    for (const PlayerSaveData& player : players) {
+      auto player_result = write_player_save_file(root, player, item_registry);
+      if (!player_result) {
+        return player_result;
+      }
     }
-    player_json.set("selected_hotbar_slot", static_cast<u64>(player.selected_hotbar_slot));
-    player_json.set("inventory_version", static_cast<u64>(2U));
-    player_json.set("inventory", inventory_to_value(player.inventory, item_registry));
-    auto player_result =
-        write_json_atomic(player_file_path(root, player), player_json, "player save JSON");
+  } else {
+    auto player_result = run_world_file_jobs(
+        players,
+        options,
+        [&](const PlayerSaveData& player, usize) {
+          return write_player_save_file(root, player, item_registry);
+        });
     if (!player_result) {
       return player_result;
     }
@@ -972,26 +1270,28 @@ Expected<void, PersistenceError> save_server_root(
     }
     entity_regions[entity_region_for_position(entity.position)].push_back(entity);
   }
-  for (const auto& [region, region_entities] : entity_regions) {
-    io::DataValue entity_array = io::DataValue::array();
-    for (const entity::PersistentEntityRecord& entity : region_entities) {
-      entity_array.push(entity_record_to_value(entity, item_registry));
-    }
-
-    io::DataValue region_node = io::DataValue::object();
-    region_node.set("x", static_cast<i64>(region.x));
-    region_node.set("z", static_cast<i64>(region.z));
-    io::DataValue entity_file = io::DataValue::object();
-    entity_file.set("entity_version", static_cast<u64>(1U));
-    entity_file.set("region", std::move(region_node));
-    entity_file.set("entities", std::move(entity_array));
-    auto entity_result = write_json_atomic(
+  std::vector<EntityRegionSaveJob> entity_jobs;
+  entity_jobs.reserve(entity_regions.size());
+  for (auto& [region, region_entities] : entity_regions) {
+    entity_jobs.push_back({
+        region,
         entity_region_file_path(root, world.name, region),
-        entity_file,
-        "entity region JSON");
-    if (!entity_result) {
-      return entity_result;
+        std::move(region_entities)});
+  }
+  std::sort(entity_jobs.begin(), entity_jobs.end(), [](const auto& lhs, const auto& rhs) {
+    if (lhs.region.x != rhs.region.x) {
+      return lhs.region.x < rhs.region.x;
     }
+    return lhs.region.z < rhs.region.z;
+  });
+  auto entity_result = run_world_file_jobs(
+      std::span<const EntityRegionSaveJob>{entity_jobs},
+      options,
+      [&](const EntityRegionSaveJob& job, usize) {
+        return write_entity_region_file(job, item_registry);
+      });
+  if (!entity_result) {
+    return entity_result;
   }
 
   return Expected<void, PersistenceError>::success();
@@ -1004,7 +1304,8 @@ Expected<void, PersistenceError> save_server_root(
     std::span<const SavedChunkSection> chunks,
     std::span<const PlayerSaveData> players,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry) {
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options) {
   return save_server_root(
       root,
       save,
@@ -1013,14 +1314,16 @@ Expected<void, PersistenceError> save_server_root(
       players,
       std::span<const entity::PersistentEntityRecord>{},
       block_registry,
-      item_registry);
+      item_registry,
+      options);
 }
 
 Expected<LoadedSaveData, PersistenceError> load_server_root(
     const std::filesystem::path& root,
     std::optional<std::string_view> requested_world_name,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry) {
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options) {
   LoadedSaveData loaded;
   try {
     if (!std::filesystem::exists(root / "save.json")) {
@@ -1134,122 +1437,87 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
 
     const std::filesystem::path regions_dir = worlds_root / loaded.world.name / "regions";
     if (std::filesystem::exists(regions_dir)) {
+      std::vector<std::filesystem::path> region_paths;
       for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(regions_dir)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".arvr") {
           continue;
         }
-
-        auto region_result = read_region_file(entry.path(), block_registry, saved_region_min_chunk_y);
-        if (!region_result) {
-          return Expected<LoadedSaveData, PersistenceError>::failure(region_result.error());
+        region_paths.push_back(entry.path());
+      }
+      std::sort(region_paths.begin(), region_paths.end());
+      auto region_results = collect_world_file_jobs<
+          std::filesystem::path,
+          DecodedRegionFile>(
+          std::span<const std::filesystem::path>{region_paths},
+          options,
+          [&](const std::filesystem::path& path) {
+            return read_region_file(path, block_registry, saved_region_min_chunk_y);
+          });
+      if (!region_results) {
+        return Expected<LoadedSaveData, PersistenceError>::failure(region_results.error());
+      }
+      for (DecodedRegionFile& region : region_results.value()) {
+        for (SavedChunkSection& chunk : region.chunks) {
+          loaded.chunks.push_back(std::move(chunk));
         }
-        const auto& region_chunks = region_result.value().chunks;
-        loaded.chunks.insert(loaded.chunks.end(), region_chunks.begin(), region_chunks.end());
       }
     }
 
-    auto load_entities_file = [&](const std::filesystem::path& path) -> Expected<void, PersistenceError> {
-      auto entity_file = read_json_file(path, "entity region JSON");
-      if (!entity_file) {
-        return Expected<void, PersistenceError>::failure(entity_file.error());
-      }
-      const io::DataValue entity_json = std::move(entity_file.value());
-      const io::DataValue* entities = member(entity_json, "entities");
-      const io::DataValue::Array* entity_array =
-          entities == nullptr ? nullptr : entities->array_if();
-      if (entity_array != nullptr) {
-        for (const io::DataValue& entry : *entity_array) {
-          loaded.entities.emplace_back(entity_record_from_json(entry, item_registry));
-        }
-      }
-      return Expected<void, PersistenceError>::success();
-    };
-
     const std::filesystem::path entities_dir = worlds_root / loaded.world.name / "entities";
+    std::vector<std::filesystem::path> entity_paths;
     if (std::filesystem::exists(entities_dir)) {
       for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(entities_dir)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".json") {
           continue;
         }
-        auto entity_result = load_entities_file(entry.path());
-        if (!entity_result) {
-          return Expected<LoadedSaveData, PersistenceError>::failure(entity_result.error());
-        }
+        entity_paths.push_back(entry.path());
       }
     } else {
       const std::filesystem::path entities_file = worlds_root / loaded.world.name / "entities.json";
       if (std::filesystem::exists(entities_file)) {
-        auto entity_result = load_entities_file(entities_file);
-        if (!entity_result) {
-          return Expected<LoadedSaveData, PersistenceError>::failure(entity_result.error());
-        }
+        entity_paths.push_back(entities_file);
+      }
+    }
+    std::sort(entity_paths.begin(), entity_paths.end());
+    auto entity_results = collect_world_file_jobs<
+        std::filesystem::path,
+        std::vector<entity::PersistentEntityRecord>>(
+        std::span<const std::filesystem::path>{entity_paths},
+        options,
+        [&](const std::filesystem::path& path) {
+          return load_entity_region_file(path, item_registry);
+        });
+    if (!entity_results) {
+      return Expected<LoadedSaveData, PersistenceError>::failure(entity_results.error());
+    }
+    for (std::vector<entity::PersistentEntityRecord>& records : entity_results.value()) {
+      for (entity::PersistentEntityRecord& record : records) {
+        loaded.entities.push_back(std::move(record));
       }
     }
 
     const std::filesystem::path players_dir = root / "players";
     if (std::filesystem::exists(players_dir)) {
+      std::vector<std::filesystem::path> player_paths;
       for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(players_dir)) {
         if (!entry.is_regular_file()) {
           continue;
         }
-
-        auto player_file = read_json_file(entry.path(), "player save JSON");
-        if (!player_file) {
-          return Expected<LoadedSaveData, PersistenceError>::failure(player_file.error());
-        }
-        const io::DataValue player_json = std::move(player_file.value());
-
-        PlayerSaveData player_save;
-        const std::string profile_id_text =
-            string_value_or(player_json, "profile_id", std::string{});
-        if (!profile_id_text.empty()) {
-          auto profile_id = crypto::parse_player_profile_id(profile_id_text);
-          if (!profile_id) {
-            return Expected<LoadedSaveData, PersistenceError>::failure(
-                PersistenceError{profile_id.error().message});
-          }
-          player_save.profile_id = profile_id.value();
-        }
-        player_save.profile_name =
-            string_value_or(player_json, "profile_name", std::string{"local_player"});
-        player_save.display_name =
-            string_value_or(player_json, "display_name", player_save.profile_name);
-        player_save.world_name = string_value_or(player_json, "world_name", std::string{});
-        if (const io::DataValue* value = member(player_json, "position"); value != nullptr) {
-          player_save.position = vec3_from_value(*value);
-        }
-        if (const io::DataValue* value = member(player_json, "velocity"); value != nullptr) {
-          player_save.velocity = vec3_from_value(*value);
-        }
-        player_save.yaw_radians =
-            static_cast<f32>(f64_value_or(player_json, "yaw_radians", 0.0));
-        player_save.pitch_radians =
-            static_cast<f32>(f64_value_or(player_json, "pitch_radians", 0.0));
-        player_save.grounded = bool_value_or(player_json, "grounded", false);
-        player_save.movement_mode =
-            string_value_or(player_json, "movement_mode", std::string{}) == "flying"
-                ? player::MovementMode::Flying
-                : player::MovementMode::Walking;
-        player_save.game_mode_id =
-            string_value_or(player_json, "game_mode", player_save.game_mode_id);
-        player_save.selected_skin_hash =
-            string_value_or(player_json, "selected_skin_hash", std::string{});
-        player_save.selected_skin_slim_model =
-            !player_save.selected_skin_hash.empty() &&
-            bool_value_or(player_json, "selected_skin_slim_model", false);
-        if (const io::DataValue* respawn = member(player_json, "respawn");
-            respawn != nullptr) {
-          player_save.respawn_location = location_from_value(*respawn);
-        }
-        player_save.selected_hotbar_slot =
-            static_cast<u8>(u64_value_or(player_json, "selected_hotbar_slot", 0U));
-        if (const io::DataValue* inventory = member(player_json, "inventory");
-            inventory != nullptr) {
-          player_save.inventory = inventory_from_json(
-              *inventory,
-              item_registry,
-              player::DefaultPlayerInventorySlotCount);
-        }
+        player_paths.push_back(entry.path());
+      }
+      std::sort(player_paths.begin(), player_paths.end());
+      auto player_results = collect_world_file_jobs<
+          std::filesystem::path,
+          PlayerSaveData>(
+          std::span<const std::filesystem::path>{player_paths},
+          options,
+          [&](const std::filesystem::path& path) {
+            return load_player_save_file(path, item_registry);
+          });
+      if (!player_results) {
+        return Expected<LoadedSaveData, PersistenceError>::failure(player_results.error());
+      }
+      for (PlayerSaveData& player_save : player_results.value()) {
         loaded.players.push_back(std::move(player_save));
       }
     }
@@ -1264,16 +1532,28 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
 Expected<LoadedSaveData, PersistenceError> load_server_root(
     const std::filesystem::path& root,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry) {
-  return load_server_root(root, std::optional<std::string_view>{}, block_registry, item_registry);
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options) {
+  return load_server_root(
+      root,
+      std::optional<std::string_view>{},
+      block_registry,
+      item_registry,
+      options);
 }
 
 Expected<LoadedSaveData, PersistenceError> load_server_root(
     const std::filesystem::path& root,
     std::string_view world_name,
     const voxel::BlockRegistry& block_registry,
-    const player::ItemRegistry& item_registry) {
-  return load_server_root(root, std::optional<std::string_view>{world_name}, block_registry, item_registry);
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options) {
+  return load_server_root(
+      root,
+      std::optional<std::string_view>{world_name},
+      block_registry,
+      item_registry,
+      options);
 }
 
 } // namespace arv::persistence

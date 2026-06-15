@@ -220,7 +220,7 @@ Lighting jobs are a bounded-job example. A lighting task solves a configurable b
 
 `BackgroundCpu` is for throughput work. Current use includes chunk generation, chunk meshing, and lighting propagation. These jobs must operate on snapshots or copied inputs and return results for owner-thread validation.
 
-`BlockingIo` is reserved for disk or operating-system waits. Startup and shutdown save/load paths may remain synchronous, but gameplay-time region reads, save flushes, and asset reads should use `BlockingIo` before any CPU-heavy parse stage is moved back to `BackgroundCpu`.
+`BlockingIo` is reserved for disk or operating-system waits. Gameplay-time region reads, save flushes, and asset reads should use `BlockingIo` before any CPU-heavy parse stage is moved back to `BackgroundCpu`. World startup and shutdown are special lifecycle phases: persistence may use a short-lived, capped file-operation fan-out for independent region/entity/player files, even when gameplay-time `BlockingIo` lanes stay conservative.
 
 Each job also carries a domain such as `ChunkGeneration`, `Meshing`, `Lighting`, `Liquids`, `EntityAi`, `Pathfinding`, `SaveLoad`, `Assets`, `Networking`, or `Rendering`. Domains are used for in-flight budgets and diagnostics. A domain budget of zero means unbounded; nonzero budgets reject excess submissions so the owning system can keep candidates queued for a later tick.
 
@@ -838,7 +838,7 @@ Liquids do not have a dedicated liquid thread. The world owner maintains pending
 
 Entity behavior currently uses lightweight `BrainComponent` goals on the world owner with per-brain tick intervals. This keeps existing behavior deterministic and immediate. No long pathfinding implementation exists yet. When expensive planning or path search is added, planning jobs must use copied entity/world inputs, submit as `CriticalCpu` `EntityAi` for short plans or `BackgroundCpu` `Pathfinding` for long searches, and return intents or paths that the world owner validates before mutating components.
 
-Save/load and region I/O are synchronous during startup and shutdown. Gameplay-time disk work should use `BlockingIo` `SaveLoad` jobs, then hand parse/decompression work to `BackgroundCpu` if it is CPU-heavy, then apply loaded world state on the world owner.
+Save/load metadata remains synchronous during startup and shutdown, but independent world files may be read or written through `persistence::WorldFileOperationOptions` with an automatic capped worker count. Gameplay-time disk work should use `BlockingIo` `SaveLoad` jobs, then hand parse/decompression work to `BackgroundCpu` if it is CPU-heavy, then apply loaded world state on the world owner.
 
 ---
 
