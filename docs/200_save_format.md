@@ -89,7 +89,6 @@ arvane_server/
       <skin_hash>.png
   worlds/
     default/
-      pack-lock.json
       world.json
       blueprints/
         <name>.abp
@@ -258,24 +257,12 @@ They are rebuilt at startup from:
 
 Save data contains only the information required to resolve saved content.
 
-World metadata records the required pack set used to interpret that world:
-
-```json
-{
-  "packs": {
-    "required": [
-      "arvane_base"
-    ]
-  },
-  "content_lock": {
-    "enabled": true
-  }
-}
-```
-
-When `content_lock.enabled` is true, loading refuses worlds whose required
-pack IDs are missing. Worlds do not lock against pack hashes because region and
-entity data are reconstructed from stable string IDs such as `arvane:stone`.
+World metadata does not record a required pack set, pack content hash, or
+registry hash as a startup requirement. Older save files may still contain
+`packs`, `content_lock`, or `registry_refs`; loaders tolerate those fields for
+compatibility, but new saves do not emit them. Region, entity, and item data are
+reconstructed from stable string IDs such as `arvane:stone` and file-local ID
+tables.
 
 ---
 

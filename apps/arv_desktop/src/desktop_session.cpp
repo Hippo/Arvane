@@ -13,7 +13,6 @@
 #include "arv/persistence/save.hpp"
 #include "arv/render/render_commands.hpp"
 
-#include <algorithm>
 #include <atomic>
 #include <array>
 #include <exception>
@@ -120,8 +119,8 @@ bool DesktopSessionManager::shutdown_session(std::unique_ptr<DesktopGameSession>
   const persistence::SaveMetadata save_metadata{
       persistence::CurrentSaveFormatVersion,
       std::string{persistence::CurrentGameVersion},
-      dependencies_.block_registry_hash,
-      dependencies_.item_registry_hash,
+      0U,
+      0U,
       session->server_save_display_name};
   persistence::WorldMetadata world_metadata{
       session->world_save_name,
@@ -130,11 +129,9 @@ bool DesktopSessionManager::shutdown_session(std::unique_ptr<DesktopGameSession>
       session->generation_config,
       session->min_chunk_y,
       session->max_chunk_y,
-      dependencies_.block_registry_hash,
-      dependencies_.item_registry_hash,
-      session->integrated_server->voxel_world().clock(),
-      persistence::required_pack_metadata(dependencies_.required_packs),
-      true};
+      0U,
+      0U,
+      session->integrated_server->voxel_world().clock()};
   world_metadata.spawn_point = session->integrated_server->voxel_world().spawn_point();
   auto save_result = persistence::save_server_root(
       session->server_save_root,
@@ -273,28 +270,6 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
   }
   const persistence::LoadedSaveData loaded_save =
       std::move(loaded_save_result.value());
-  if (loaded_save.has_world_metadata &&
-      loaded_save.world.content_lock_enabled &&
-      !loaded_save.world.required_packs.empty()) {
-    const std::vector<persistence::RequiredPackMetadata>& required =
-        loaded_save.world.required_packs;
-    for (const persistence::RequiredPackMetadata& expected : required) {
-      const auto found = std::find_if(
-          dependencies_.required_packs.begin(),
-          dependencies_.required_packs.end(),
-          [&](const asset::RequiredPack& actual) {
-            return actual.id == expected.id;
-          });
-      if (found == dependencies_.required_packs.end()) {
-        core::error(
-            "packs",
-            "world '{}' requires pack '{}', but it is not active",
-            world_name,
-            expected.id);
-        return nullptr;
-      }
-    }
-  }
   if (!create_new && !loaded_save.has_world_metadata) {
     core::error(
         "save",

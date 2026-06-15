@@ -3,14 +3,10 @@
 #include "dedicated_worldgen_loader.hpp"
 
 #include "arv/core/log.hpp"
-#include "arv/io/data_codecs.hpp"
 #include "arv/text/language.hpp"
 
 #include <algorithm>
 #include <chrono>
-#include <fstream>
-#include <span>
-#include <sstream>
 #include <string>
 #include <utility>
 
@@ -20,140 +16,6 @@ namespace {
 [[nodiscard]] u64 generated_world_seed() noexcept {
   const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
   return static_cast<u64>(now == 0 ? 1 : now);
-}
-
-[[nodiscard]] const io::DataValue* member(
-    const io::DataValue& object,
-    std::string_view key) noexcept {
-  return object.get(key);
-}
-
-[[nodiscard]] std::string string_value_or(
-    const io::DataValue& object,
-    std::string_view key,
-    std::string fallback = {}) {
-  const io::DataValue* value = member(object, key);
-  return value != nullptr && value->kind() == io::DataKind::String
-             ? std::string{value->as_string_or({})}
-             : std::move(fallback);
-}
-
-[[nodiscard]] io::DataValue pack_lock_to_value(const DedicatedPackLockInfo& info) {
-  io::DataValue root = io::DataValue::object();
-  root.set("format_version", static_cast<u64>(1U));
-  io::DataValue packs = io::DataValue::array();
-  for (const DedicatedPackLockPack& pack : info.packs) {
-    io::DataValue entry = io::DataValue::object();
-    entry.set("pack_id", pack.id);
-    entry.set("version", pack.version);
-    entry.set("content_hash", pack.content_hash);
-    entry.set("client_bundle_hash", pack.client_bundle_hash);
-    packs.push(std::move(entry));
-  }
-  root.set("packs", std::move(packs));
-  root.set("registry_hash", info.registry_hash);
-  root.set("created_with_arvane_version", info.created_with_arvane_version);
-  return root;
-}
-
-[[nodiscard]] Expected<DedicatedPackLockInfo, DedicatedError> pack_lock_from_value(
-    const io::DataValue& root) {
-  if (root.kind() != io::DataKind::Object) {
-    return Expected<DedicatedPackLockInfo, DedicatedError>::failure(
-        dedicated_error("pack-lock", "pack-lock.json root must be an object"));
-  }
-  const io::DataValue* format = member(root, "format_version");
-  if (format == nullptr || !io::is_integer_value(*format) ||
-      format->as_u64_or(0U) != 1U) {
-    return Expected<DedicatedPackLockInfo, DedicatedError>::failure(
-        dedicated_error("pack-lock", "unsupported pack-lock format_version"));
-  }
-
-  DedicatedPackLockInfo info;
-  info.registry_hash = string_value_or(root, "registry_hash");
-  info.created_with_arvane_version =
-      string_value_or(root, "created_with_arvane_version");
-  const io::DataValue* packs = member(root, "packs");
-  const io::DataValue::Array* pack_array =
-      packs == nullptr ? nullptr : packs->array_if();
-  if (pack_array == nullptr) {
-    return Expected<DedicatedPackLockInfo, DedicatedError>::failure(
-        dedicated_error("pack-lock", "pack-lock.json packs must be an array"));
-  }
-  info.packs.reserve(pack_array->size());
-  for (const io::DataValue& node : *pack_array) {
-    if (node.kind() != io::DataKind::Object) {
-      return Expected<DedicatedPackLockInfo, DedicatedError>::failure(
-          dedicated_error("pack-lock", "pack-lock pack entries must be objects"));
-    }
-    DedicatedPackLockPack pack;
-    pack.id = string_value_or(node, "pack_id");
-    pack.version = string_value_or(node, "version");
-    pack.content_hash = string_value_or(node, "content_hash");
-    pack.client_bundle_hash = string_value_or(node, "client_bundle_hash");
-    info.packs.push_back(std::move(pack));
-  }
-  return Expected<DedicatedPackLockInfo, DedicatedError>::success(std::move(info));
-}
-
-[[nodiscard]] bool pack_lock_matches(
-    const DedicatedPackLockInfo& expected,
-    const DedicatedPackLockInfo& actual,
-    std::string& mismatch) {
-  if (actual.registry_hash != expected.registry_hash) {
-    mismatch = "registry hash mismatch";
-    return false;
-  }
-  if (actual.packs.size() != expected.packs.size()) {
-    mismatch = "pack count mismatch";
-    return false;
-  }
-  for (usize index = 0; index < expected.packs.size(); ++index) {
-    const DedicatedPackLockPack& lhs = expected.packs[index];
-    const DedicatedPackLockPack& rhs = actual.packs[index];
-    if (lhs.id != rhs.id || lhs.version != rhs.version ||
-        lhs.content_hash != rhs.content_hash ||
-        lhs.client_bundle_hash != rhs.client_bundle_hash) {
-      mismatch = "pack mismatch for index " + std::to_string(index);
-      return false;
-    }
-  }
-  return true;
-}
-
-[[nodiscard]] Expected<std::string, DedicatedError> read_text_file(
-    const std::filesystem::path& path) {
-  std::ifstream input(path);
-  if (!input) {
-    return Expected<std::string, DedicatedError>::failure(
-        dedicated_error("pack-lock", "failed to open " + path.string()));
-  }
-  std::ostringstream buffer;
-  buffer << input.rdbuf();
-  return Expected<std::string, DedicatedError>::success(buffer.str());
-}
-
-[[nodiscard]] Expected<void, DedicatedError> write_text_file(
-    const std::filesystem::path& path,
-    std::string_view text) {
-  std::error_code error;
-  std::filesystem::create_directories(path.parent_path(), error);
-  if (error) {
-    return Expected<void, DedicatedError>::failure(
-        dedicated_error("pack-lock", "failed to create pack-lock directory: " + error.message()));
-  }
-  std::ofstream output(path, std::ios::trunc);
-  if (!output) {
-    return Expected<void, DedicatedError>::failure(
-        dedicated_error("pack-lock", "failed to open pack-lock for write: " + path.string()));
-  }
-  output << text;
-  output.flush();
-  if (!output) {
-    return Expected<void, DedicatedError>::failure(
-        dedicated_error("pack-lock", "failed to write pack-lock: " + path.string()));
-  }
-  return Expected<void, DedicatedError>::success();
 }
 
 [[nodiscard]] server::ServerPlayerSaveState to_server_player_save(
@@ -302,11 +164,8 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     const io::EngineConfig& config,
     const world::WorldGenerationConfig& default_generation_config,
     const voxel::BlockRegistry& block_registry,
-    u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
-    u64 item_registry_hash,
-    const arv::text::LanguageCatalog& language,
-    std::span<const persistence::RequiredPackMetadata> required_packs) {
+    const arv::text::LanguageCatalog& language) {
   DedicatedLoadedWorld loaded_world;
   loaded_world.server_save_root = config.paths.dedicated_server_save_path();
   auto loaded_save_result = persistence::load_server_root(
@@ -363,8 +222,6 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
                   &language,
                   "server.save.default_name",
                   "Dedicated Server");
-    save_metadata.block_registry_hash = block_registry_hash;
-    save_metadata.item_registry_hash = item_registry_hash;
 
     persistence::WorldMetadata world_metadata;
     world_metadata.name = config.server.world;
@@ -372,10 +229,6 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
     world_metadata.generation_config = loaded_world.active_generation_config;
     world_metadata.min_chunk_y = loaded_world.world_height.min_chunk_y;
     world_metadata.max_chunk_y = loaded_world.world_height.max_chunk_y;
-    world_metadata.block_registry_hash = block_registry_hash;
-    world_metadata.item_registry_hash = item_registry_hash;
-    world_metadata.required_packs.assign(required_packs.begin(), required_packs.end());
-    world_metadata.content_lock_enabled = true;
     world_metadata.spawn_point = loaded_world.world_spawn;
 
     auto create_save_result = persistence::save_server_root(
@@ -404,42 +257,6 @@ Expected<DedicatedLoadedWorld, DedicatedError> load_or_create_dedicated_world(
         loaded_world.world_seed);
   }
 
-  if (loaded_world.loaded_save.world.block_registry_hash != 0U &&
-      loaded_world.loaded_save.world.block_registry_hash != block_registry_hash) {
-    core::warn(
-        "save",
-        "world block registry hash differs from current registry: saved={} current={}",
-        loaded_world.loaded_save.world.block_registry_hash,
-        block_registry_hash);
-  }
-  if (loaded_world.loaded_save.world.item_registry_hash != 0U &&
-      loaded_world.loaded_save.world.item_registry_hash != item_registry_hash) {
-    core::warn(
-        "save",
-        "world item registry hash differs from current registry: saved={} current={}",
-        loaded_world.loaded_save.world.item_registry_hash,
-        item_registry_hash);
-  }
-  if (loaded_world.loaded_save.has_world_metadata &&
-      loaded_world.loaded_save.world.content_lock_enabled &&
-      !loaded_world.loaded_save.world.required_packs.empty()) {
-    for (const persistence::RequiredPackMetadata& expected :
-         loaded_world.loaded_save.world.required_packs) {
-      const auto found = std::find_if(
-          required_packs.begin(),
-          required_packs.end(),
-          [&](const persistence::RequiredPackMetadata& actual) {
-            return actual.id == expected.id;
-          });
-      if (found == required_packs.end()) {
-        return Expected<DedicatedLoadedWorld, DedicatedError>::failure(
-            dedicated_error(
-                "packs",
-                "world requires pack '" + expected.id + "', but it is not active"));
-      }
-    }
-  }
-
   loaded_world.saved_players.reserve(loaded_world.loaded_save.players.size());
   for (const persistence::PlayerSaveData& player : loaded_world.loaded_save.players) {
     loaded_world.saved_players.emplace_back(to_server_player_save(player));
@@ -457,11 +274,8 @@ Expected<void, DedicatedError> save_dedicated_world(
     u64 world_seed,
     world::WorldHeightSettings world_height,
     const voxel::BlockRegistry& block_registry,
-    u64 block_registry_hash,
     const player::ItemRegistry& item_registry,
-    u64 item_registry_hash,
-    const arv::text::LanguageCatalog& language,
-    std::span<const persistence::RequiredPackMetadata> required_packs) {
+    const arv::text::LanguageCatalog& language) {
   const std::vector<persistence::SavedChunkSection> saved_chunks =
       capture_saved_chunks(server.voxel_world());
   const std::vector<persistence::PlayerSaveData> player_saves =
@@ -471,8 +285,8 @@ Expected<void, DedicatedError> save_dedicated_world(
   const persistence::SaveMetadata save_metadata{
       persistence::CurrentSaveFormatVersion,
       std::string{persistence::CurrentGameVersion},
-      block_registry_hash,
-      item_registry_hash,
+      0U,
+      0U,
       loaded_save.save.name.empty()
           ? arv::text::text_or_fallback(
                 &language,
@@ -486,11 +300,9 @@ Expected<void, DedicatedError> save_dedicated_world(
       active_generation_config,
       world_height.min_chunk_y,
       world_height.max_chunk_y,
-      block_registry_hash,
-      item_registry_hash,
+      0U,
+      0U,
       server.voxel_world().clock()};
-  world_metadata.required_packs.assign(required_packs.begin(), required_packs.end());
-  world_metadata.content_lock_enabled = true;
   world_metadata.spawn_point = server.voxel_world().spawn_point();
   auto save_result = persistence::save_server_root(
       server_save_root,
@@ -514,59 +326,6 @@ Expected<void, DedicatedError> save_dedicated_world(
       saved_chunks.size(),
       player_saves.size(),
       saved_entities.size());
-  return Expected<void, DedicatedError>::success();
-}
-
-Expected<void, DedicatedError> check_or_create_world_pack_lock(
-    const std::filesystem::path& server_root,
-    std::string_view world_name,
-    const DedicatedPackLockInfo& lock_info) {
-  const std::filesystem::path lock_path =
-      server_root / "worlds" / std::string{world_name} / "pack-lock.json";
-  std::error_code error;
-  if (!std::filesystem::exists(lock_path, error)) {
-    io::DataValue root = pack_lock_to_value(lock_info);
-    auto encoded = io::encode_json_value(root);
-    if (!encoded) {
-      return Expected<void, DedicatedError>::failure(
-          dedicated_error("pack-lock", "failed to encode pack-lock.json: " + encoded.error().describe()));
-    }
-    auto write = write_text_file(lock_path, encoded.value());
-    if (!write) {
-      return write;
-    }
-    core::info(
-        "dedicated",
-        "created pack lock for world '{}' at {}",
-        world_name,
-        lock_path.string());
-    return Expected<void, DedicatedError>::success();
-  }
-  if (error) {
-    return Expected<void, DedicatedError>::failure(
-        dedicated_error("pack-lock", "failed to inspect pack-lock.json: " + error.message()));
-  }
-
-  auto text = read_text_file(lock_path);
-  if (!text) {
-    return Expected<void, DedicatedError>::failure(text.error());
-  }
-  auto decoded = io::decode_json_value(text.value());
-  if (!decoded) {
-    return Expected<void, DedicatedError>::failure(
-        dedicated_error("pack-lock", "failed to parse pack-lock.json: " + decoded.error().describe()));
-  }
-  auto loaded = pack_lock_from_value(decoded.value().root);
-  if (!loaded) {
-    return Expected<void, DedicatedError>::failure(loaded.error());
-  }
-  std::string mismatch;
-  if (!pack_lock_matches(lock_info, loaded.value(), mismatch)) {
-    return Expected<void, DedicatedError>::failure(
-        dedicated_error(
-            "pack-lock",
-            "world pack-lock.json does not match current server packs: " + mismatch));
-  }
   return Expected<void, DedicatedError>::success();
 }
 

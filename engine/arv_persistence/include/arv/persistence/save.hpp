@@ -4,7 +4,6 @@
 #include "arv/core/location.hpp"
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
-#include "arv/asset/pack.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/persistence/region_file.hpp"
@@ -28,6 +27,7 @@ inline constexpr std::string_view CurrentGameVersion = "0.1.0";
 struct SaveMetadata {
   u32 save_format_version{CurrentSaveFormatVersion};
   std::string game_version{std::string{CurrentGameVersion}};
+  // Legacy compatibility fields. New save files do not emit registry hashes.
   u64 block_registry_hash{};
   u64 item_registry_hash{};
   std::string name{};
@@ -45,11 +45,13 @@ struct WorldMetadata {
   // Compatibility mirror; generated-world height is derived from generation_config.
   i32 min_chunk_y{};
   i32 max_chunk_y{};
+  // Legacy compatibility fields. New save files do not emit registry hashes.
   u64 block_registry_hash{};
   u64 item_registry_hash{};
   world::WorldClock clock{world::make_world_clock()};
+  // Legacy compatibility fields. New save files do not emit saved pack metadata.
   std::vector<RequiredPackMetadata> required_packs{};
-  bool content_lock_enabled{true};
+  bool content_lock_enabled{};
   std::optional<Location> spawn_point{};
 };
 
@@ -106,8 +108,6 @@ struct WorldFileOperationOptions {
     WorldFileOperationOptions options = {}) noexcept;
 [[nodiscard]] u64 hash_block_registry(const voxel::BlockRegistry& registry) noexcept;
 [[nodiscard]] u64 hash_item_registry(const player::ItemRegistry& registry) noexcept;
-[[nodiscard]] std::vector<RequiredPackMetadata> required_pack_metadata(
-    std::span<const asset::RequiredPack> packs);
 void upsert_player_save(
     std::vector<PlayerSaveData>& players,
     PlayerSaveData save);

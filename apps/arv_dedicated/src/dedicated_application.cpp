@@ -49,10 +49,6 @@ int DedicatedApplication::run(int argc, char** argv) {
     return fail(dedicated_error("packs", pack_manager_result.error().describe()));
   }
   asset::PackManager pack_manager = std::move(pack_manager_result.value());
-  const std::vector<asset::RequiredPack> active_required_packs =
-      pack_manager.required_packs();
-  const std::vector<persistence::RequiredPackMetadata> required_packs =
-      persistence::required_pack_metadata(active_required_packs);
   core::info(
       "dedicated",
       "config={} arvane_home={} server_root={} packs={} world={} listen={}:{} save_root={}",
@@ -124,19 +120,6 @@ int DedicatedApplication::run(int argc, char** argv) {
       client_bundle.compressed_size,
       client_bundle.uncompressed_size,
       bundle_path.string());
-  DedicatedPackLockInfo pack_lock;
-  pack_lock.registry_hash = registries.client_registry_snapshot_hash;
-  pack_lock.created_with_arvane_version =
-      std::string{persistence::CurrentGameVersion};
-  pack_lock.packs.reserve(active_required_packs.size());
-  for (const asset::RequiredPack& pack : active_required_packs) {
-    pack_lock.packs.push_back({
-        pack.id,
-        pack.version,
-        pack.content_hash,
-        client_bundle.bundle_hash});
-  }
-
   transition_lifetime(lifetime_, server::DedicatedServerLifetimeState::LoadingWorlds);
   auto worldgen_result = load_dedicated_worldgen(
       config,
@@ -151,22 +134,12 @@ int DedicatedApplication::run(int argc, char** argv) {
       config,
       worldgen.default_config,
       registries.block_registry,
-      registries.block_registry_hash,
       registries.item_registry,
-      registries.item_registry_hash,
-      registries.language,
-      required_packs);
+      registries.language);
   if (!loaded_world_result) {
     return fail(loaded_world_result.error());
   }
   DedicatedLoadedWorld loaded_world = std::move(loaded_world_result.value());
-  auto pack_lock_result = check_or_create_world_pack_lock(
-      config.paths.dedicated_server_save_path(),
-      config.server.world,
-      pack_lock);
-  if (!pack_lock_result) {
-    return fail(pack_lock_result.error());
-  }
 
   auto worldgen_palette = resolve_dedicated_worldgen_palette(
       loaded_world.active_generation_config,
@@ -195,7 +168,7 @@ int DedicatedApplication::run(int argc, char** argv) {
       protocol::PackBundleDescriptor{
           "arvane:server_pack_stack",
           "Server Pack Stack",
-          pack_lock.created_with_arvane_version,
+          std::string{persistence::CurrentGameVersion},
           client_bundle.bundle_hash,
           static_cast<u64>(client_bundle.apack_bytes.size()),
           client_bundle.uncompressed_size},
@@ -246,11 +219,8 @@ int DedicatedApplication::run(int argc, char** argv) {
       loaded_world.world_seed,
       loaded_world.world_height,
       registries.block_registry,
-      registries.block_registry_hash,
       registries.item_registry,
-      registries.item_registry_hash,
-      registries.language,
-      required_packs);
+      registries.language);
   if (!save_result) {
     return fail(save_result.error());
   }

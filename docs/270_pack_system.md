@@ -118,11 +118,14 @@ The pack system should satisfy the following goals:
 
 5. **Save compatibility**
 
-   Worlds must record the pack set required to interpret their saved content.
+   Saves must be reconstructable from stable string IDs and local ID tables
+   without pinning the world to an old pack stack.
 
 6. **Multiplayer compatibility**
 
-   Servers must be able to declare required packs. Clients must be able to validate whether they have compatible content before joining.
+   Servers must send the active client-visible pack bundle when players join.
+   Clients validate the runtime bundle and registry snapshot before entering the
+   world.
 
 7. **Good diagnostics**
 
@@ -163,11 +166,12 @@ higher priority for eligible asset overrides. Registry-affecting data is stricte
 duplicate definitions are rejected unless the overriding data explicitly declares
 override intent.
 
-World metadata records required pack IDs. Dedicated worlds also have
-`worlds/<world>/pack-lock.json`, which stores the ordered server pack set,
-arv_crypto content hashes, the generated client bundle hash, and the
-client-visible registry snapshot hash. Loading a locked dedicated world fails
-clearly when the current pack stack or registry snapshot does not match.
+World saves do not lock against a pack list, pack content hash, or registry
+hash. Startup rebuilds registries from the packs currently present in the pack
+folder, and saved chunks/entities/items resolve through stable string IDs or
+file-local ID tables. Older saves that still contain pack metadata are
+accepted as compatibility data, but it is not used as a hard startup
+requirement.
 
 Native plugin declarations are manifest metadata only. Normal pack discovery and
 content loading never load native libraries.
@@ -263,7 +267,6 @@ arvane_server/
       server/
   worlds/
     default/
-      pack-lock.json
   cache/
     client-pack-exports/
       <bundle-hash>.apack
@@ -381,9 +384,9 @@ by dependencies plus `load_after` / `load_before` hints.
 
 Earlier packs are lower priority. Later packs are higher priority for eligible overrides.
 
-For singleplayer worlds, installed packs may be combined with the world’s
-required pack list. For multiplayer, the server’s required pack list is
-authoritative for gameplay-affecting content.
+For singleplayer worlds, the installed pack directories define the active
+gameplay stack. For multiplayer, the server’s exported client bundle is
+authoritative for client-visible gameplay content for that session.
 
 First-party plugin packs can provide a CMake install target that copies the
 authored pack and current-platform native library into the development runtime
@@ -812,9 +815,9 @@ resolve under `config/`. A pack can provide either a condensed root file such as
 `config/messages.yaml` or a namespaced file such as
 `config/<namespace>/messages.yaml`.
 
-Unlike `data/`, config content is not part of the world-required pack content
-hash. Editing a message or local preference should not make an existing world
-pack lock fail validation.
+Unlike `data/`, config content is user-editable and does not participate in
+registry construction or client bundle compatibility checks. Editing a message
+or local preference should not affect world startup.
 
 ### Data-Driven Command Policy
 
@@ -1120,9 +1123,11 @@ If the client is missing required content, it should fail with a clear message r
 
 ---
 
-## Server-Required Packs
+## Server Pack Sync
 
-A server-required pack is a pack that the client must have in a compatible form to join the server.
+A server exports the current client-visible pack stack when a player joins.
+The exported bundle contains assets/data needed by the client plus the
+client-visible registry snapshot.
 
 Examples:
 
@@ -1132,7 +1137,8 @@ better_oceans
 server_blocks
 ```
 
-The client should validate the required pack set before completing the join flow.
+The client should validate the bundle hash and registry snapshot received
+during the runtime sync flow before completing the join.
 
 If automatic pack download is supported later, it must still respect native-code safety rules. Native code should not be downloaded and executed silently.
 
@@ -1156,26 +1162,11 @@ In multiplayer, local client packs are layered after server-required client asse
 
 ---
 
-## World Pack Lock
+## World Save Compatibility
 
-A world should record the pack set required to interpret its saved content.
-
-Example:
-
-```yaml
-packs:
-  required:
-    - "arvane_base"
-    - "better_oceans"
-
-content_lock:
-  enabled: true
-```
-
-The world pack lock protects saves from being loaded with missing content.
-It records pack IDs only. Pack versions and hashes are intentionally not part of
-world load validation because saved chunks, entities, and palettes resolve from
-stable string IDs.
+A world should store stable string IDs, palettes, and local ID tables needed to
+interpret its saved content. It should not store a required pack list, pack
+content hash, or registry hash as a hard next-startup requirement.
 
 If a world references:
 
@@ -1658,6 +1649,6 @@ Pack
   native/  -> optional privileged executable code
 ```
 
-Assets may be overridden through pack order. Data definitions require stricter merge semantics. Config is user-editable and excluded from world pack-lock hashes. Native code requires explicit enablement.
+Assets may be overridden through pack order. Data definitions require stricter merge semantics. Config is user-editable and excluded from registry construction and client bundle compatibility. Native code requires explicit enablement.
 
 This gives Arvane one unified content pipeline for built-in content, user asset packs, server-required content, world generation packs, and future native plugin extensions while preserving save safety, multiplayer compatibility, and clear security boundaries.

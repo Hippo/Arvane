@@ -464,17 +464,6 @@ Expected<std::vector<Result>, PersistenceError> collect_world_file_jobs(
   return node;
 }
 
-[[nodiscard]] io::DataValue required_packs_to_value(
-    std::span<const RequiredPackMetadata> packs) {
-  io::DataValue required = io::DataValue::array();
-  for (const RequiredPackMetadata& pack : packs) {
-    required.push(pack.id);
-  }
-  io::DataValue node = io::DataValue::object();
-  node.set("required", std::move(required));
-  return node;
-}
-
 [[nodiscard]] std::vector<RequiredPackMetadata> required_packs_from_value(
     const io::DataValue& node) {
   std::vector<RequiredPackMetadata> packs;
@@ -969,16 +958,6 @@ load_entity_region_file(
 
 } // namespace
 
-std::vector<RequiredPackMetadata> required_pack_metadata(
-    std::span<const asset::RequiredPack> packs) {
-  std::vector<RequiredPackMetadata> result;
-  result.reserve(packs.size());
-  for (const asset::RequiredPack& pack : packs) {
-    result.push_back({pack.id});
-  }
-  return result;
-}
-
 void upsert_player_save(
     std::vector<PlayerSaveData>& players,
     PlayerSaveData save) {
@@ -1148,14 +1127,10 @@ Expected<void, PersistenceError> save_server_root(
     const player::ItemRegistry& item_registry,
     WorldFileOperationOptions options) {
   const std::string save_name = save.name.empty() ? root.filename().string() : save.name;
-  io::DataValue registry_refs = io::DataValue::object();
-  registry_refs.set("block_registry_hash", save.block_registry_hash);
-  registry_refs.set("item_registry_hash", save.item_registry_hash);
   io::DataValue save_json = io::DataValue::object();
   save_json.set("name", save_name);
   save_json.set("save_format_version", static_cast<u64>(save.save_format_version));
   save_json.set("game_version", save.game_version);
-  save_json.set("registry_refs", std::move(registry_refs));
   auto save_result = write_json_atomic(root / "save.json", save_json, "save metadata JSON");
   if (!save_result) {
     return save_result;
@@ -1165,22 +1140,14 @@ Expected<void, PersistenceError> save_server_root(
       world::world_height_settings_from_generation_config(world.generation_config);
   world::WorldClock saved_clock = world.clock;
   saved_clock.world_tick = world.tick_index;
-  io::DataValue world_registry_refs = io::DataValue::object();
-  world_registry_refs.set("block_registry_hash", world.block_registry_hash);
-  world_registry_refs.set("item_registry_hash", world.item_registry_hash);
-  io::DataValue content_lock = io::DataValue::object();
-  content_lock.set("enabled", world.content_lock_enabled);
   io::DataValue world_json = io::DataValue::object();
   world_json.set("name", world.name);
   world_json.set("seed", world.seed);
   world_json.set("tick_index", static_cast<u64>(world.tick_index));
   world_json.set("min_chunk_y", static_cast<i64>(world_height.min_chunk_y));
   world_json.set("max_chunk_y", static_cast<i64>(world_height.max_chunk_y));
-  world_json.set("registry_refs", std::move(world_registry_refs));
   world_json.set("generation_config", world_generation_to_value(world.generation_config));
   world_json.set("time", world_clock_to_value(saved_clock));
-  world_json.set("packs", required_packs_to_value(world.required_packs));
-  world_json.set("content_lock", std::move(content_lock));
   if (world.spawn_point.has_value()) {
     world_json.set("spawn", location_to_value(world.spawn_point.value(), false));
   }

@@ -223,9 +223,7 @@ int DesktopApplication::run(int argc, char** argv) {
           world_jobs,
           client_tasks,
           assets.block_registry,
-          assets.block_registry_hash,
           assets.item_registry,
-          assets.item_registry_hash,
           game_modes,
           block_break_behaviors,
           std::move(starter_inventory),
@@ -247,7 +245,6 @@ int DesktopApplication::run(int argc, char** argv) {
           assets.default_generation_config,
           thread_budget,
           assets.language,
-          pack_manager.required_packs(),
           &plugin_manager,
       }};
 

@@ -122,20 +122,10 @@ struct ResolvedPackPath {
   std::filesystem::path path{};
 };
 
-struct RequiredPack {
-  std::string id{};
-  std::string version{};
-  std::string content_hash{};
-  PackSide required_side{PackSide::Both};
-  std::vector<std::string> namespaces{};
-  bool native_client_code_required{};
-};
-
 using PackManifestResult = Expected<PackManifest, PackError>;
 using PackManagerResult = Expected<class PackManager, PackError>;
 using PackPathResult = Expected<ResolvedPackPath, PackError>;
 using PackTextResult = Expected<std::string, PackError>;
-using PackValidationResult = Expected<void, PackError>;
 
 [[nodiscard]] std::string pack_side_to_string(PackSide side);
 [[nodiscard]] std::optional<PackSide> pack_side_from_string(std::string_view value);
@@ -202,10 +192,6 @@ public:
   [[nodiscard]] PackTextResult load_merged_json_array_text(
       std::string_view category,
       std::string_view root_key) const;
-
-  [[nodiscard]] std::vector<RequiredPack> required_packs() const;
-  [[nodiscard]] PackValidationResult validate_required_packs(
-      std::span<const RequiredPack> required) const;
 
 private:
   std::filesystem::path packs_root_{};

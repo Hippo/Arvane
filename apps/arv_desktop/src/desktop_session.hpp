@@ -89,9 +89,7 @@ struct DesktopSessionDependencies {
   sched::JobSystem& world_jobs;
   sched::ITaskExecutor& client_tasks;
   const voxel::BlockRegistry& block_registry;
-  u64 block_registry_hash{};
   const player::ItemRegistry& item_registry;
-  u64 item_registry_hash{};
   const player::GameModeRegistry& game_modes;
   const server::BlockBreakBehaviorRegistry& block_break_behaviors;
   std::vector<server::StarterInventoryItem> starter_inventory{};
@@ -110,7 +108,6 @@ struct DesktopSessionDependencies {
   const world::WorldGenerationConfig& default_generation_config;
   const sched::RuntimeThreadBudgetPlan& thread_budget;
   const arv::text::LanguageCatalog& language;
-  std::vector<asset::RequiredPack> required_packs{};
   plugin::PluginManager* plugins{};
 };
 

@@ -129,9 +129,6 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       3,
       save_metadata.block_registry_hash,
       save_metadata.item_registry_hash};
-  world_metadata.required_packs = {
-      arv::persistence::RequiredPackMetadata{"arvane_base"},
-      arv::persistence::RequiredPackMetadata{"test_pack"}};
   world_metadata.spawn_point =
       arv::Location{12.5F, 34.0F, -8.5F, 1.0F, -0.25F};
   const std::vector<arv::persistence::SavedChunkSection> chunks{
@@ -198,16 +195,27 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
     EXPECT_EQ(player_json.find("\"permission_overrides\""), std::string::npos);
   }
   {
+    std::ifstream input(server_save_root / "save.json");
+    ASSERT_TRUE(input);
+    const std::string save_json{
+        std::istreambuf_iterator<char>{input},
+        std::istreambuf_iterator<char>{}};
+    EXPECT_EQ(save_json.find("\"registry_refs\""), std::string::npos);
+  }
+  {
     std::ifstream input(server_save_root / "worlds" / "default" / "world.json");
     ASSERT_TRUE(input);
     const std::string world_json{
         std::istreambuf_iterator<char>{input},
         std::istreambuf_iterator<char>{}};
-    EXPECT_NE(world_json.find("\"arvane_base\""), std::string::npos);
-    EXPECT_NE(world_json.find("\"test_pack\""), std::string::npos);
     EXPECT_NE(world_json.find("\"spawn\""), std::string::npos);
     EXPECT_NE(world_json.find("\"x\""), std::string::npos);
     EXPECT_EQ(world_json.find("\"position\""), std::string::npos);
+    EXPECT_EQ(world_json.find("\"registry_refs\""), std::string::npos);
+    EXPECT_EQ(world_json.find("\"packs\""), std::string::npos);
+    EXPECT_EQ(world_json.find("\"content_lock\""), std::string::npos);
+    EXPECT_EQ(world_json.find("\"arvane_base\""), std::string::npos);
+    EXPECT_EQ(world_json.find("\"test_pack\""), std::string::npos);
     EXPECT_EQ(world_json.find("content_hash"), std::string::npos);
   }
 
@@ -225,9 +233,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(loaded.value().world.tick_index, 99U);
   EXPECT_EQ(loaded.value().world.min_chunk_y, 0);
   EXPECT_EQ(loaded.value().world.max_chunk_y, 4);
-  ASSERT_EQ(loaded.value().world.required_packs.size(), 2U);
-  EXPECT_EQ(loaded.value().world.required_packs[0].id, "arvane_base");
-  EXPECT_EQ(loaded.value().world.required_packs[1].id, "test_pack");
+  EXPECT_TRUE(loaded.value().world.required_packs.empty());
   ASSERT_TRUE(loaded.value().world.spawn_point.has_value());
   EXPECT_EQ(
       arv::location_position(*loaded.value().world.spawn_point),
@@ -307,11 +313,8 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
     std::string world_json{
         std::istreambuf_iterator<char>{input},
         std::istreambuf_iterator<char>{}};
-    const std::string current_required = R"json(    "required": [
-      "arvane_base",
-      "test_pack"
-    ])json";
-    const std::string legacy_required = R"json(    "required": [
+    const std::string legacy_lock = R"json(  "packs": {
+    "required": [
       {
         "content_hash": 123456789,
         "id": "arvane_base",
@@ -327,10 +330,15 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
         "id": "test_pack",
         "version": "0.0.0"
       }
-    ])json";
-    const std::size_t required_offset = world_json.find(current_required);
-    ASSERT_NE(required_offset, std::string::npos);
-    world_json.replace(required_offset, current_required.size(), legacy_required);
+    ]
+  },
+  "content_lock": {
+    "enabled": true
+  },
+)json";
+    const std::size_t spawn_offset = world_json.find("  \"spawn\":");
+    ASSERT_NE(spawn_offset, std::string::npos);
+    world_json.insert(spawn_offset, legacy_lock);
 
     std::ofstream output(world_path, std::ios::trunc);
     ASSERT_TRUE(output);

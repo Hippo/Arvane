@@ -1,0 +1,12 @@
+{
+  "data": {
+    "core_overrides": [],
+    "groups": [
+      "player"
+    ],
+    "last_known_name": "Hippah",
+    "permission_overrides": [],
+    "player_id": "0xa4cd5fe5bc96862103c0102171b130d25eef19a53d01675c7d32407ce66fae48"
+  },
+  "schema_version": 1
+}

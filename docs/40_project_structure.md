@@ -188,7 +188,6 @@ arvane_server/
     arvane_base/
   worlds/
     default/
-      pack-lock.json
       world.json
       regions/
   cache/

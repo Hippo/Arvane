@@ -1,0 +1,12 @@
+{
+  "data": {
+    "core_overrides": [],
+    "groups": [
+      "player"
+    ],
+    "last_known_name": "Hippo",
+    "permission_overrides": [],
+    "player_id": "0x7b851c7188122a3ab9d173548a21a8ea0640575003be964c33aacc893a95cb79"
+  },
+  "schema_version": 1
+}
