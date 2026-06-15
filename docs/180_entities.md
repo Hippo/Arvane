@@ -210,7 +210,10 @@ ambient
 utility
 ```
 
-No gameplay meaning.
+No gameplay meaning. A pig is not passive because `category` says `passive`,
+and a monster is not hostile because `category` says `hostile`; behavior comes
+from ECS components and brain goals. A mod can make a hostile pig by attaching
+targeting and attack goals without changing engine code.
 
 ---
 

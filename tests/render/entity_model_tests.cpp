@@ -354,6 +354,55 @@ TEST(EntityModelTests, LoadsAnimationAssetFromAnimationFolder) {
   EXPECT_EQ(asset.value().id, (arv::render::EntityAnimationID{2}));
 }
 
+TEST(EntityModelTests, HorseAnimationBindsToHorseModel) {
+  const std::filesystem::path horse_path =
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "models" / "entity" / "horse.json";
+  const std::filesystem::path horse_animation_path =
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT} / "animations" / "horse.json";
+
+  auto parsed_model = arv::render::parse_entity_model_json(read_text(horse_path));
+  ASSERT_TRUE(parsed_model) << parsed_model.error().message;
+  const std::vector<arv::render::EntityModelTextureBinding> bindings{{"arvane:texture/entity/horse",
+                                                                      {0, 0},
+                                                                      {64, 64},
+                                                                      64,
+                                                                      64}};
+  auto model = arv::render::build_entity_model_asset(
+      arv::render::EntityModelID{1},
+      parsed_model.value(),
+      bindings);
+  ASSERT_TRUE(model) << model.error().message;
+
+  auto parsed_animation = arv::render::parse_entity_animation_json(
+      read_text(horse_animation_path),
+      horse_animation_path.string());
+  ASSERT_TRUE(parsed_animation) << parsed_animation.error().message;
+  ASSERT_EQ(parsed_animation.value().clips.size(), 1U);
+  EXPECT_EQ(parsed_animation.value().clips.front().name, "walk");
+
+  auto animation = arv::render::build_entity_animation_asset(
+      arv::render::EntityAnimationID{1},
+      "arvane:animation/horse",
+      std::move(parsed_animation.value()));
+  ASSERT_TRUE(animation) << animation.error().message;
+  EXPECT_FALSE(arv::render::validate_entity_animation_bindings(
+                   model.value(),
+                   animation.value())
+                   .has_value());
+
+  std::vector<arv::Vec3f> rotations(model.value().bones.size());
+  arv::render::sample_entity_model_animation(
+      model.value(),
+      &animation.value(),
+      "walk",
+      0.5F,
+      std::span<arv::Vec3f>{rotations});
+  const std::optional<arv::usize> front_left =
+      find_bone_index(model.value(), "front_left_leg");
+  ASSERT_TRUE(front_left.has_value());
+  EXPECT_EQ(rotations[front_left.value()], (arv::Vec3f{30.0F, 0.0F, 0.0F}));
+}
+
 TEST(EntityModelTests, RejectsUnsupportedAnimationChannels) {
   auto parsed = arv::render::parse_entity_animation_json(R"json({
     "animations": [{

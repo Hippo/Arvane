@@ -12,30 +12,30 @@
     "body": {},
     "front_left_leg": {
       "pivot": [
-        1,
+        -3,
         11,
-        1
+        -9
       ]
     },
     "back_left_leg": {
       "pivot": [
-        1,
+        -3,
         11,
-        19
+        9
       ]
     },
     "front_right_leg": {
       "pivot": [
-        7,
+        3,
         11,
-        1
+        -9
       ]
     },
     "back_right_leg": {
       "pivot": [
-        7,
+        3,
         11,
-        19
+        9
       ]
     },
     "tail": {

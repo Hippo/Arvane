@@ -16,12 +16,34 @@ namespace arv::world {
 
 class WorldRuntime;
 
+enum class EntityGoalCategory : u32 {
+  Movement = 1U << 0U,
+  Look = 1U << 1U,
+  Target = 1U << 2U,
+  Attack = 1U << 3U,
+  Utility = 1U << 4U,
+};
+
+using EntityGoalCategoryMask = u32;
+
+[[nodiscard]] constexpr EntityGoalCategoryMask goal_category_mask(
+    EntityGoalCategory category) noexcept {
+  return static_cast<EntityGoalCategoryMask>(category);
+}
+
+[[nodiscard]] constexpr bool goal_categories_overlap(
+    EntityGoalCategoryMask lhs,
+    EntityGoalCategoryMask rhs) noexcept {
+  return (lhs & rhs) != 0U;
+}
+
 struct EntityGoalRegistryError {
   std::string message{};
 };
 
 struct EntityGoalContext {
   WorldRuntime& world;
+  const voxel::BlockRegistry* block_registry{};
   EntityID entity_id{};
   TickIndex tick_index{};
   const entity::EntityTransform& transform;
@@ -48,6 +70,7 @@ struct EntityGoalBlockedContext {
 };
 
 struct EntityGoalHandler {
+  EntityGoalCategoryMask categories{goal_category_mask(EntityGoalCategory::Utility)};
   std::function<bool(EntityGoalContext&)> can_start{};
   std::function<bool(EntityGoalContext&)> can_continue{};
   std::function<void(EntityGoalContext&)> start{};

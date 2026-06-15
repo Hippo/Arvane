@@ -251,31 +251,90 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
 
   AuthoredGoalDefinition goal;
   goal.type = std::string{type->as_string_or({})};
+  if (goal.type.empty()) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+        {"brain goal type must not be empty"});
+  }
   if (const io::DataValue* value = goal_json.get("priority"); value != nullptr) {
+    if (value->kind() != io::DataKind::I64 && value->kind() != io::DataKind::U64) {
+      return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+          {"brain goal priority must be an integer"});
+    }
     goal.priority = static_cast<i32>(value->as_i64_or(goal.priority));
   }
-  if (const io::DataValue* value = goal_json.get("radius"); value != nullptr) {
-    goal.radius = static_cast<f32>(value->as_f64_or(goal.radius));
+  auto radius = read_optional_f32(goal_json, "radius", "brain goal", goal.radius);
+  if (!radius) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(radius.error());
   }
-  if (const io::DataValue* value = goal_json.get("speed_multiplier"); value != nullptr) {
-    goal.speed_multiplier = static_cast<f32>(value->as_f64_or(goal.speed_multiplier));
+  goal.radius = std::max(0.0F, radius.value());
+  auto speed_multiplier =
+      read_optional_f32(goal_json, "speed_multiplier", "brain goal", goal.speed_multiplier);
+  if (!speed_multiplier) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+        speed_multiplier.error());
   }
-  if (const io::DataValue* value = goal_json.get("duration_ticks"); value != nullptr) {
-    goal.duration_ticks = static_cast<u32>(value->as_u64_or(goal.duration_ticks));
+  goal.speed_multiplier = std::max(0.0F, speed_multiplier.value());
+  auto duration_ticks =
+      read_optional_u32(goal_json, "duration_ticks", "brain goal", goal.duration_ticks);
+  if (!duration_ticks) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+        duration_ticks.error());
   }
-  if (const io::DataValue* value = goal_json.get("cooldown_ticks"); value != nullptr) {
-    goal.cooldown_ticks = static_cast<u32>(value->as_u64_or(goal.cooldown_ticks));
+  goal.duration_ticks = duration_ticks.value();
+  auto cooldown_ticks =
+      read_optional_u32(goal_json, "cooldown_ticks", "brain goal", goal.cooldown_ticks);
+  if (!cooldown_ticks) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+        cooldown_ticks.error());
   }
-  if (const io::DataValue* value = goal_json.get("range"); value != nullptr) {
-    goal.range = static_cast<f32>(value->as_f64_or(goal.range));
+  goal.cooldown_ticks = cooldown_ticks.value();
+  auto range = read_optional_f32(goal_json, "range", "brain goal", goal.range);
+  if (!range) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(range.error());
   }
-  if (const io::DataValue* value = goal_json.get("target");
-      value != nullptr && value->kind() == io::DataKind::String) {
+  goal.range = std::max(0.0F, range.value());
+  auto damage = read_optional_f32(goal_json, "damage", "brain goal", goal.damage);
+  if (!damage) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(damage.error());
+  }
+  goal.damage = std::max(0.0F, damage.value());
+  auto memory_ticks =
+      read_optional_u32(goal_json, "memory_ticks", "brain goal", goal.memory_ticks);
+  if (!memory_ticks) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+        memory_ticks.error());
+  }
+  goal.memory_ticks = memory_ticks.value();
+  auto require_line_of_sight = read_optional_bool(
+      goal_json,
+      "require_line_of_sight",
+      "brain goal",
+      goal.require_line_of_sight);
+  if (!require_line_of_sight) {
+    return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+        require_line_of_sight.error());
+  }
+  goal.require_line_of_sight = require_line_of_sight.value();
+  if (const io::DataValue* value = goal_json.get("target"); value != nullptr) {
+    if (value->kind() != io::DataKind::String) {
+      return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+          {"brain goal target must be a string"});
+    }
     goal.target = std::string{value->as_string_or({})};
   }
-  if (const io::DataValue* value = goal_json.get("animation");
-      value != nullptr && value->kind() == io::DataKind::String) {
+  if (const io::DataValue* value = goal_json.get("animation"); value != nullptr) {
+    if (value->kind() != io::DataKind::String) {
+      return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+          {"brain goal animation must be a string"});
+    }
     goal.animation = std::string{value->as_string_or({})};
+  }
+  if (const io::DataValue* value = goal_json.get("attack_animation"); value != nullptr) {
+    if (value->kind() != io::DataKind::String) {
+      return Expected<AuthoredGoalDefinition, EntityRegistryError>::failure(
+          {"brain goal attack_animation must be a string"});
+    }
+    goal.attack_animation = std::string{value->as_string_or({})};
   }
   return Expected<AuthoredGoalDefinition, EntityRegistryError>::success(std::move(goal));
 }

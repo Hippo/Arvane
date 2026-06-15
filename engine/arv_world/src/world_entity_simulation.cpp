@@ -8,6 +8,7 @@
 #include <cmath>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace arv::world::detail {
 namespace {
@@ -332,6 +333,7 @@ void update_player_animation_state(
 u32 WorldEntitySimulation::tick_brains(
     WorldRuntime& world,
     WorldEntityStore& entities,
+    const voxel::BlockRegistry* block_registry,
     const EntityGoalRegistry* goal_registry) {
   if (goal_registry == nullptr) {
     return 0;
@@ -352,18 +354,20 @@ u32 WorldEntitySimulation::tick_brains(
     }
     brain.next_tick = tick_index + std::max<u32>(1U, brain.tick_interval);
 
-    const auto set_animation = [&](std::string_view animation_name) {
-      auto& animation = registry.get_or_emplace<entity::EntityAnimationState>(handle);
+    const auto ensure_animation = [&](std::string_view animation_name) {
       if (animation_name.empty()) {
-        animation.active.clear();
         return;
       }
-      if (animation.active.size() == 1U &&
-          animation.active.front().name == animation_name) {
-        return;
+      auto& animation = registry.get_or_emplace<entity::EntityAnimationState>(handle);
+      const auto found = std::find_if(
+          animation.active.begin(),
+          animation.active.end(),
+          [&](const entity::EntityAnimationPlayback& active) {
+            return active.name == animation_name;
+          });
+      if (found == animation.active.end()) {
+        animation.active.push_back({std::string{animation_name}, 0.0F});
       }
-      animation.active.clear();
-      animation.active.push_back({std::string{animation_name}, 0.0F});
     };
     const auto clear_movement_intent = [&]() {
       if (auto* intent = registry.try_get<entity::MovementIntent>(handle);
@@ -380,23 +384,34 @@ u32 WorldEntitySimulation::tick_brains(
     const auto make_context = [&](entity::GoalSlot& goal, usize index) {
       return EntityGoalContext{
           world,
+          block_registry,
           runtime.entity_id,
           tick_index,
           transform,
           brain,
           goal,
           index,
-          FunctionRef<void(std::string_view)>{set_animation},
+          FunctionRef<void(std::string_view)>{ensure_animation},
           FunctionRef<void()>{clear_movement_intent},
           FunctionRef<entity::MovementIntent&()>{movement_intent},
       };
+    };
+
+    const auto goal_handler = [&](usize index) -> const EntityGoalHandler* {
+      return index < brain.goals.size() ? goal_registry->find(brain.goals[index].type) : nullptr;
+    };
+    const auto goal_categories = [&](usize index) -> EntityGoalCategoryMask {
+      const EntityGoalHandler* handler = goal_handler(index);
+      return handler == nullptr || handler->categories == 0U
+                 ? goal_category_mask(EntityGoalCategory::Utility)
+                 : handler->categories;
     };
     const auto goal_can_start = [&](usize index) {
       entity::GoalSlot& goal = brain.goals[index];
       if (goal.state.cooldown_until > tick_index) {
         return false;
       }
-      const EntityGoalHandler* handler = goal_registry->find(goal.type);
+      const EntityGoalHandler* handler = goal_handler(index);
       if (handler == nullptr) {
         return false;
       }
@@ -405,7 +420,7 @@ u32 WorldEntitySimulation::tick_brains(
     };
     const auto goal_can_continue = [&](usize index) {
       entity::GoalSlot& goal = brain.goals[index];
-      const EntityGoalHandler* handler = goal_registry->find(goal.type);
+      const EntityGoalHandler* handler = goal_handler(index);
       if (handler == nullptr) {
         return false;
       }
@@ -415,79 +430,162 @@ u32 WorldEntitySimulation::tick_brains(
     };
     const auto start_goal = [&](usize index) {
       entity::GoalSlot& goal = brain.goals[index];
+      if (goal.state.active) {
+        return;
+      }
       goal.state.remaining_ticks = std::max<u32>(1U, goal.duration_ticks);
       if (brain.blackboard.home_position == Vec3f{}) {
         brain.blackboard.home_position = transform.position;
       }
       goal.state.movement_direction = {};
-      if (const EntityGoalHandler* handler = goal_registry->find(goal.type);
+      goal.state.triggered_animation.clear();
+      goal.state.triggered_animation_until = {};
+      goal.state.active = true;
+      if (const EntityGoalHandler* handler = goal_handler(index);
           handler != nullptr && handler->start) {
         EntityGoalContext context = make_context(goal, index);
         handler->start(context);
       }
-      set_animation(goal.animation);
-      brain.active_goal = index;
     };
     const auto stop_goal = [&](usize index, entity::GoalStopReason reason) {
       entity::GoalSlot& goal = brain.goals[index];
-      clear_movement_intent();
+      if (!goal.state.active) {
+        return;
+      }
+      if (const EntityGoalHandler* handler = goal_handler(index);
+          handler != nullptr && handler->stop) {
+        EntityGoalContext context = make_context(goal, index);
+        handler->stop(context, reason);
+      }
       if (reason == entity::GoalStopReason::Completed && goal.cooldown_ticks > 0U) {
         goal.state.cooldown_until = tick_index + goal.cooldown_ticks;
       }
+      goal.state.active = false;
       goal.state.remaining_ticks = 0U;
-      if (brain.active_goal.has_value() && brain.active_goal.value() == index) {
-        brain.active_goal = std::nullopt;
-      }
     };
     const auto tick_goal = [&](usize index) {
       entity::GoalSlot& goal = brain.goals[index];
       if (goal.state.remaining_ticks > 0U) {
         --goal.state.remaining_ticks;
       }
-      const EntityGoalHandler* handler = goal_registry->find(goal.type);
+      const EntityGoalHandler* handler = goal_handler(index);
       if (handler != nullptr && handler->tick) {
         EntityGoalContext context = make_context(goal, index);
         handler->tick(context);
-      } else {
-        clear_movement_intent();
       }
-      set_animation(goal.animation);
     };
-
-    if (brain.active_goal.has_value()) {
-      const usize active = brain.active_goal.value();
-      if (active >= brain.goals.size() || !goal_can_continue(active)) {
-        if (active < brain.goals.size()) {
-          stop_goal(active, entity::GoalStopReason::Completed);
-        } else {
-          brain.active_goal = std::nullopt;
+    const auto active_goal_conflicts_with = [&](usize candidate) {
+      std::vector<usize> conflicts;
+      const EntityGoalCategoryMask candidate_categories = goal_categories(candidate);
+      for (usize index = 0; index < brain.goals.size(); ++index) {
+        if (!brain.goals[index].state.active) {
+          continue;
+        }
+        if (goal_categories_overlap(candidate_categories, goal_categories(index))) {
+          conflicts.push_back(index);
         }
       }
-    }
+      return conflicts;
+    };
+    const auto sync_goal_animations = [&]() {
+      entity::EntityAnimationState* animation =
+          registry.try_get<entity::EntityAnimationState>(handle);
+      const auto previous_time = [&](std::string_view name) -> Seconds {
+        if (animation == nullptr) {
+          return 0.0F;
+        }
+        for (const entity::EntityAnimationPlayback& active : animation->active) {
+          if (active.name == name) {
+            return active.time_seconds;
+          }
+        }
+        return 0.0F;
+      };
 
-    std::optional<usize> candidate;
+      std::vector<entity::EntityAnimationPlayback> next;
+      const auto add_animation = [&](std::string_view name) {
+        if (name.empty()) {
+          return;
+        }
+        const bool duplicate = std::any_of(
+            next.begin(),
+            next.end(),
+            [&](const entity::EntityAnimationPlayback& active) {
+              return active.name == name;
+            });
+        if (!duplicate) {
+          next.push_back({std::string{name}, previous_time(name)});
+        }
+      };
+
+      for (const entity::GoalSlot& goal : brain.goals) {
+        if (!goal.state.active) {
+          continue;
+        }
+        add_animation(goal.animation);
+        if (!goal.state.triggered_animation.empty() &&
+            goal.state.triggered_animation_until > tick_index) {
+          add_animation(goal.state.triggered_animation);
+        }
+      }
+
+      if (animation == nullptr && next.empty()) {
+        return;
+      }
+      animation = &registry.get_or_emplace<entity::EntityAnimationState>(handle);
+      animation->active = std::move(next);
+    };
+
     for (usize index = 0; index < brain.goals.size(); ++index) {
-      if (goal_can_start(index)) {
-        candidate = index;
-        break;
+      if (!brain.goals[index].state.active) {
+        continue;
       }
-    }
-    if (!brain.active_goal.has_value() && candidate.has_value()) {
-      start_goal(candidate.value());
-    } else if (brain.active_goal.has_value() && candidate.has_value()) {
-      const usize active = brain.active_goal.value();
-      if (brain.goals[candidate.value()].priority < brain.goals[active].priority) {
-        stop_goal(active, entity::GoalStopReason::Interrupted);
-        start_goal(candidate.value());
+      const EntityGoalHandler* handler = goal_handler(index);
+      if (handler == nullptr) {
+        stop_goal(index, entity::GoalStopReason::Invalid);
+      } else if (!goal_can_continue(index)) {
+        stop_goal(index, entity::GoalStopReason::Completed);
       }
     }
 
-    if (brain.active_goal.has_value()) {
-      tick_goal(brain.active_goal.value());
-    } else {
-      clear_movement_intent();
-      set_animation({});
+    for (usize index = 0; index < brain.goals.size(); ++index) {
+      if (brain.goals[index].state.active || !goal_can_start(index)) {
+        continue;
+      }
+
+      const std::vector<usize> conflicts = active_goal_conflicts_with(index);
+      bool blocked_by_higher_or_equal_priority = false;
+      for (usize conflict : conflicts) {
+        if (brain.goals[conflict].priority <= brain.goals[index].priority) {
+          blocked_by_higher_or_equal_priority = true;
+          break;
+        }
+      }
+      if (blocked_by_higher_or_equal_priority) {
+        continue;
+      }
+      for (usize conflict : conflicts) {
+        stop_goal(conflict, entity::GoalStopReason::Interrupted);
+      }
+      start_goal(index);
     }
+
+    bool has_active_movement_goal = false;
+    for (usize index = 0; index < brain.goals.size(); ++index) {
+      if (!brain.goals[index].state.active) {
+        continue;
+      }
+      tick_goal(index);
+      if (goal_categories_overlap(
+              goal_categories(index),
+              goal_category_mask(EntityGoalCategory::Movement))) {
+        has_active_movement_goal = true;
+      }
+    }
+    if (!has_active_movement_goal) {
+      clear_movement_intent();
+    }
+    sync_goal_animations();
     ++updated;
   }
   return updated;
@@ -555,6 +653,8 @@ u32 WorldEntitySimulation::tick_entity_physics(
     auto& transform = view.get<entity::EntityTransform>(handle);
     auto& velocity = view.get<entity::EntityVelocity>(handle);
     const auto& collision = view.get<entity::EntityCollision>(handle);
+    entity::MovementIntent* intent = registry.try_get<entity::MovementIntent>(handle);
+    const entity::EntityMovement* movement = registry.try_get<entity::EntityMovement>(handle);
     entity::VehiclePhysicsComponent* vehicle_physics =
         registry.try_get<entity::VehiclePhysicsComponent>(handle);
     if (vehicle_physics != nullptr) {
@@ -591,6 +691,101 @@ u32 WorldEntitySimulation::tick_entity_physics(
                     std::max(0.0F, vehicle_gravity_scale(*vehicle_physics, definition)) *
                     static_cast<f32>(tick_seconds),
             -physics_config.terminal_velocity);
+      }
+
+      const bool ai_controlled_living_mount =
+          vehicle_physics->kind == entity::VehiclePhysicsKind::LivingMount &&
+          intent != nullptr && movement != nullptr;
+      if (ai_controlled_living_mount) {
+        const Vec3f direction = normalize_or_zero(intent->desired_direction);
+        const f32 speed = std::max(0.0F, movement->walk_speed) *
+                          std::max(0.0F, intent->speed_multiplier);
+        if (grounded) {
+          velocity.linear.x = direction.x * speed;
+          velocity.linear.z = direction.z * speed;
+        } else {
+          velocity.linear.x =
+              velocity.linear.x * (1.0F - AirborneIntentBlend) +
+              direction.x * speed * AirborneIntentBlend;
+          velocity.linear.z =
+              velocity.linear.z * (1.0F - AirborneIntentBlend) +
+              direction.z * speed * AirborneIntentBlend;
+        }
+        if (direction.y > 0.0F) {
+          velocity.linear.y = std::max(velocity.linear.y, direction.y * speed);
+        }
+
+        const Vec3f movement_delta = velocity.linear * tick_seconds;
+        const physics::MovementResolution resolved = physics::resolve_movement(
+            collision_query,
+            bounds,
+            movement_delta,
+            physics_config.collision_epsilon);
+
+        transform.previous_position = transform.position;
+        transform.previous_rotation = transform.rotation;
+        transform.position = transform.position + resolved.applied_delta;
+        if (resolved.hit_x) {
+          velocity.linear.x = 0.0F;
+        }
+        if (resolved.hit_y) {
+          velocity.linear.y = 0.0F;
+        }
+        if (resolved.hit_z) {
+          velocity.linear.z = 0.0F;
+        }
+        if (grounded && (resolved.hit_x || resolved.hit_z)) {
+          if (can_jump_up_one_block(
+                  collision_query,
+                  bounds,
+                  movement_delta,
+                  physics_config.collision_epsilon)) {
+            velocity.linear.y = std::max(velocity.linear.y, physics_config.jump_velocity);
+          } else if (auto* brain = registry.try_get<entity::BrainComponent>(handle);
+                     brain != nullptr && goal_registry != nullptr) {
+            for (usize active = 0; active < brain->goals.size(); ++active) {
+              entity::GoalSlot& goal = brain->goals[active];
+              if (!goal.state.active) {
+                continue;
+              }
+              const EntityGoalHandler* handler = goal_registry->find(goal.type);
+              if (handler == nullptr ||
+                  !goal_categories_overlap(
+                      handler->categories,
+                      goal_category_mask(EntityGoalCategory::Movement)) ||
+                  !handler->blocked) {
+                continue;
+              }
+              EntityGoalBlockedContext context{
+                  world,
+                  runtime.entity_id,
+                  world.tick_index(),
+                  collision_query,
+                  bounds,
+                  *brain,
+                  goal,
+                  active,
+                  intent,
+                  movement_delta,
+                  physics_config.collision_epsilon};
+              handler->blocked(context);
+              break;
+            }
+          }
+        }
+
+        const Vec3f facing_direction =
+            has_horizontal_motion(resolved.applied_delta) ? resolved.applied_delta
+                                                          : velocity.linear;
+        if (has_horizontal_motion(facing_direction)) {
+          transform.rotation =
+              yaw_rotation(model_yaw_from_horizontal_direction(facing_direction));
+        }
+        vehicle_physics->linear_velocity = velocity.linear;
+        vehicle_physics->grounded = resolved.grounded;
+        entities.update_chunk(handle);
+        ++updated;
+        continue;
       }
 
       const f32 authored_drag =
@@ -644,8 +839,6 @@ u32 WorldEntitySimulation::tick_entity_physics(
       ++updated;
       continue;
     }
-    entity::MovementIntent* intent = registry.try_get<entity::MovementIntent>(handle);
-    const entity::EntityMovement* movement = registry.try_get<entity::EntityMovement>(handle);
 
     const Aabb3f bounds = entity_body_bounds(transform.position, collision.box);
     const bool has_ground_support = physics::has_support_below(
@@ -711,28 +904,34 @@ u32 WorldEntitySimulation::tick_entity_physics(
               physics_config.collision_epsilon)) {
         velocity.linear.y = std::max(velocity.linear.y, physics_config.jump_velocity);
       } else if (auto* brain = registry.try_get<entity::BrainComponent>(handle);
-                 brain != nullptr) {
-        if (goal_registry != nullptr &&
-            brain->active_goal.has_value() &&
-            brain->active_goal.value() < brain->goals.size()) {
-          const usize active = brain->active_goal.value();
+                 brain != nullptr && goal_registry != nullptr) {
+        for (usize active = 0; active < brain->goals.size(); ++active) {
           entity::GoalSlot& goal = brain->goals[active];
-          if (const EntityGoalHandler* handler = goal_registry->find(goal.type);
-              handler != nullptr && handler->blocked) {
-            EntityGoalBlockedContext context{
-                world,
-                runtime.entity_id,
-                world.tick_index(),
-                collision_query,
-                bounds,
-                *brain,
-                goal,
-                active,
-                intent,
-                movement_delta,
-                physics_config.collision_epsilon};
-            handler->blocked(context);
+          if (!goal.state.active) {
+            continue;
           }
+          const EntityGoalHandler* handler = goal_registry->find(goal.type);
+          if (handler == nullptr ||
+              !goal_categories_overlap(
+                  handler->categories,
+                  goal_category_mask(EntityGoalCategory::Movement)) ||
+              !handler->blocked) {
+            continue;
+          }
+          EntityGoalBlockedContext context{
+              world,
+              runtime.entity_id,
+              world.tick_index(),
+              collision_query,
+              bounds,
+              *brain,
+              goal,
+              active,
+              intent,
+              movement_delta,
+              physics_config.collision_epsilon};
+          handler->blocked(context);
+          break;
         }
       }
     }
@@ -810,7 +1009,7 @@ u32 WorldEntitySimulation::tick_entities(
     ++updated;
   }
 
-  updated += tick_brains(world, entities, goal_registry);
+  updated += tick_brains(world, entities, block_registry, goal_registry);
   updated += tick_entity_physics(
       world,
       entities,

@@ -84,8 +84,12 @@ void apply_authored_components(
       goal.duration_ticks = std::max<u32>(1U, source.duration_ticks);
       goal.cooldown_ticks = source.cooldown_ticks;
       goal.range = source.range;
+      goal.damage = source.damage;
+      goal.memory_ticks = source.memory_ticks;
+      goal.require_line_of_sight = source.require_line_of_sight;
       goal.target = source.target;
       goal.animation = source.animation;
+      goal.attack_animation = source.attack_animation;
       brain.goals.push_back(std::move(goal));
     }
     std::stable_sort(

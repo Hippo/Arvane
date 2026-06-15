@@ -43,13 +43,14 @@ behavior:
   brain:
     tick_rate: 5
     goals:
-      - type: arvane:float_in_fluid
+      - type: arvane:swim_in_fluid
         priority: 0
 
       - type: arvane:melee_attack
         priority: 2
         target: nearest_player
         range: 1.8
+        damage: 3
         cooldown_ticks: 20
 
       - type: arvane:wander
@@ -78,7 +79,7 @@ struct BrainComponent {
     SmallVector<GoalSlot, 8> goals;
 
     // Runtime state.
-    GoalHandle active_goal;
+    GoalActiveSet active_goals;
     GoalBlackboard blackboard;
 };
 ```
@@ -87,7 +88,7 @@ The exact storage may differ, but the model should preserve:
 
 * behavior asset/reference
 * configured goals
-* active goal state
+* per-goal active state
 * cooldowns/timers
 * blackboard memory
 * tick throttling
@@ -193,21 +194,20 @@ The brain decides which goal is active.
 Basic algorithm:
 
 ```text
-1. If the active goal exists and can_continue returns false:
-     stop active goal.
+1. Stop active goals whose handlers are missing or whose can_continue returns false.
 
-2. Scan goals in priority order.
+2. Scan inactive goals in priority order.
 
-3. The first goal whose can_start returns true becomes the candidate.
+3. A goal whose can_start returns true becomes a candidate.
 
-4. If no active goal exists:
+4. If the candidate does not conflict with active goal categories:
      start candidate.
 
-5. If candidate has higher priority than the active goal:
-     stop active goal with interrupted reason.
+5. If the candidate conflicts only with lower-priority active goals:
+     stop those active goals with interrupted reason.
      start candidate.
 
-6. Tick the active goal.
+6. Tick all active goals in priority order.
 ```
 
 A lower priority number means higher importance.
@@ -216,7 +216,7 @@ Example:
 
 ```yaml
 goals:
-  - type: float_in_fluid
+  - type: swim_in_fluid
     priority: 0
   - type: panic
     priority: 1
@@ -226,7 +226,34 @@ goals:
     priority: 8
 ```
 
-In this example, `float_in_fluid` can interrupt `melee_attack`, and `melee_attack` can interrupt `wander`.
+In this example, `swim_in_fluid` can interrupt `melee_attack`, and `melee_attack` can interrupt `wander`.
+
+Goals with different categories can run together. This makes hostile behavior a
+data composition instead of a hardcoded entity category:
+
+```yaml
+goals:
+  - type: arvane:nearest_target
+    priority: 1
+    target: nearest_player
+    radius: 24
+
+  - type: arvane:look_at_target
+    priority: 2
+
+  - type: arvane:move_to_target
+    priority: 3
+    range: 1.8
+    speed_multiplier: 0.9
+    animation: walk
+
+  - type: arvane:melee_attack
+    priority: 4
+    range: 1.8
+    damage: 3
+    cooldown_ticks: 20
+    attack_animation: bite
+```
 
 ---
 
@@ -246,7 +273,9 @@ enum class GoalCategory : u32 {
 };
 ```
 
-Initial implementation may allow only one active goal. A later implementation may allow multiple active goals if their categories do not conflict.
+The runtime can run multiple active goals when their categories do not conflict.
+For example, target acquisition, looking, moving, and attacking can be active
+together, while two movement goals cannot both write velocity intent.
 
 Example:
 
@@ -255,7 +284,7 @@ look_at_target     -> Look
 move_to_target     -> Movement
 melee_attack       -> Attack
 acquire_target     -> Target
-float_in_fluid     -> Movement
+swim_in_fluid      -> Movement
 ```
 
 This allows an entity to look at a target while moving, but prevents two movement goals from fighting over velocity.
@@ -363,7 +392,7 @@ Example:
 ```yaml
 - type: arvane:nearest_target
   priority: 3
-  target_groups: [arvane:player]
+  target: nearest_player
   radius: 24
   require_line_of_sight: true
   memory_ticks: 100
@@ -547,20 +576,18 @@ The current `arv_base` registration set is:
 ```text
 arvane:idle
 arvane:wander
-arvane:float_in_fluid
-```
-
-Additional reusable goals can be added behind stable IDs:
-
-```text
-arvane:look_at_target
+arvane:swim_in_fluid
 arvane:nearest_target
 arvane:move_to_target
+arvane:look_at_target
 arvane:melee_attack
-arvane:flee
-arvane:avoid_hazard
-arvane:despawn_when_far
+arvane:flee_from_target
+arvane:return_home
 ```
+
+`arvane:swim_in_fluid` recovers land entities from water by moving upward and
+steering toward dry supported space when possible. `arvane:melee_attack` only
+deals damage when authored data supplies a positive `damage` value.
 
 Avoid adding entity-specific goals like:
 

@@ -61,8 +61,12 @@ struct AuthoredGoalDefinition {
   u32 duration_ticks{60};
   u32 cooldown_ticks{};
   f32 range{};
+  f32 damage{};
+  u32 memory_ticks{};
+  bool require_line_of_sight{};
   std::string target{};
   std::string animation{};
+  std::string attack_animation{};
 };
 
 struct AuthoredBrainComponent {
@@ -431,9 +435,12 @@ enum class GoalStopReason : u8 {
 };
 
 struct GoalRuntimeState {
+  bool active{};
   u32 remaining_ticks{};
   TickIndex cooldown_until{};
   Vec3f movement_direction{};
+  std::string triggered_animation{};
+  TickIndex triggered_animation_until{};
 };
 
 struct GoalSlot {
@@ -444,13 +451,18 @@ struct GoalSlot {
   u32 duration_ticks{60};
   u32 cooldown_ticks{};
   f32 range{};
+  f32 damage{};
+  u32 memory_ticks{};
+  bool require_line_of_sight{};
   std::string target{};
   std::string animation{};
+  std::string attack_animation{};
   GoalRuntimeState state{};
 };
 
 struct GoalBlackboard {
   std::optional<EntityID> target_entity{};
+  TickIndex target_memory_until{};
   Vec3f home_position{};
   Vec3f wander_destination{};
 };
@@ -460,7 +472,6 @@ struct BrainComponent {
   u32 tick_interval{1};
   TickIndex next_tick{};
   std::vector<GoalSlot> goals{};
-  std::optional<usize> active_goal{};
   GoalBlackboard blackboard{};
 };
 

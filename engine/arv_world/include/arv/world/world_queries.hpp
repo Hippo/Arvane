@@ -1,8 +1,11 @@
 #pragma once
 
 #include "arv/physics/collision.hpp"
+#include "arv/physics/raycast.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_runtime.hpp"
+
+#include <algorithm>
 
 namespace arv::world {
 
@@ -64,6 +67,26 @@ private:
   }
   const voxel::BlockVariantRecord* record = registry.variant(world.get_block(pos));
   return record != nullptr && record->properties.fluid;
+}
+
+[[nodiscard]] inline bool world_has_line_of_sight(
+    const WorldRuntime& world,
+    const voxel::BlockRegistry& registry,
+    Vec3f origin,
+    Vec3f target) noexcept {
+  const Vec3f delta = target - origin;
+  const f32 total = length(delta);
+  if (total <= 0.001F) {
+    return true;
+  }
+
+  WorldCollisionQuery query{world, registry, false};
+  return !physics::raycast_blocks(
+              query,
+              origin,
+              delta,
+              std::max(0.0F, total - 0.05F))
+              .has_value();
 }
 
 } // namespace arv::world

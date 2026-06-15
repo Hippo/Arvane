@@ -387,6 +387,7 @@ private:
   [[nodiscard]] u32 tick_brains(
       WorldRuntime& world,
       WorldEntityStore& entities,
+      const voxel::BlockRegistry* block_registry,
       const EntityGoalRegistry* goal_registry);
   [[nodiscard]] u32 tick_entity_physics(
       WorldRuntime& world,

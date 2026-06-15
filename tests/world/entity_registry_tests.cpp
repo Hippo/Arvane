@@ -153,6 +153,69 @@ TEST(EntityRegistryTests, ParsesOptionalPresentationAnimation) {
   EXPECT_EQ(pig->animation_asset, "arvane:animation/pig");
 }
 
+TEST(EntityRegistryTests, ParsesExtendedGoalFields) {
+  auto parsed = arv::entity::parse_entity_definitions_json(R"json(
+{
+  "name": "test:hostile_pig",
+  "components": {
+    "arvane:brain": {
+      "goals": [
+        {
+          "type": "arvane:melee_attack",
+          "priority": 2,
+          "range": 1.7,
+          "damage": 3.5,
+          "cooldown_ticks": 12,
+          "memory_ticks": 80,
+          "require_line_of_sight": true,
+          "target": "nearest_player",
+          "animation": "walk",
+          "attack_animation": "bite"
+        }
+      ]
+    }
+  }
+}
+)json");
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_TRUE(parsed.value().front().components.brain.has_value());
+  ASSERT_EQ(parsed.value().front().components.brain->goals.size(), 1U);
+
+  const arv::entity::AuthoredGoalDefinition& goal =
+      parsed.value().front().components.brain->goals.front();
+  EXPECT_EQ(goal.type, "arvane:melee_attack");
+  EXPECT_FLOAT_EQ(goal.range, 1.7F);
+  EXPECT_FLOAT_EQ(goal.damage, 3.5F);
+  EXPECT_EQ(goal.cooldown_ticks, 12U);
+  EXPECT_EQ(goal.memory_ticks, 80U);
+  EXPECT_TRUE(goal.require_line_of_sight);
+  EXPECT_EQ(goal.target, "nearest_player");
+  EXPECT_EQ(goal.animation, "walk");
+  EXPECT_EQ(goal.attack_animation, "bite");
+}
+
+TEST(EntityRegistryTests, LoadsFirstPartyHorseBrainAndAnimation) {
+  auto parsed = arv::entity::parse_entity_definitions_json(
+      read_text_file("arvane_home/packs/arvane_base/data/arvane/entities.json"));
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  auto registry_result =
+      arv::base::build_base_entity_registry(std::move(parsed.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+
+  const std::optional<arv::EntityTypeID> horse_id =
+      registry_result.value().find_type("arvane:horse");
+  ASSERT_TRUE(horse_id.has_value());
+  const arv::entity::EntityTypeRecord* horse =
+      registry_result.value().type(horse_id.value());
+  ASSERT_NE(horse, nullptr);
+  EXPECT_EQ(horse->animation_asset, "arvane:animation/horse");
+  ASSERT_TRUE(horse->components.brain.has_value());
+  ASSERT_GE(horse->components.brain->goals.size(), 3U);
+  EXPECT_EQ(horse->components.brain->goals[0].type, "arvane:swim_in_fluid");
+  EXPECT_EQ(horse->components.brain->goals[1].type, "arvane:wander");
+  EXPECT_EQ(horse->components.brain->goals[2].type, "arvane:idle");
+}
+
 TEST(EntityRegistryTests, RejectsInvalidPresentationAnimationAssetKind) {
   auto parsed = arv::entity::parse_entity_definitions_json(R"json(
 {

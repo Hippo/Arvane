@@ -21,9 +21,9 @@
           "tick_rate": 5,
           "goals": [
             {
-              "type": "arvane:float_in_fluid",
+              "type": "arvane:swim_in_fluid",
               "priority": 0,
-              "speed_multiplier": 0.5,
+              "speed_multiplier": 0.7,
               "animation": "walk"
             },
             {
@@ -73,10 +73,38 @@
         },
         "arvane:vehicle_physics": {
           "definition": "arvane:horse"
+        },
+        "arvane:brain": {
+          "behavior": "arvane:horse_behavior",
+          "tick_rate": 5,
+          "goals": [
+            {
+              "type": "arvane:swim_in_fluid",
+              "priority": 0,
+              "speed_multiplier": 0.65,
+              "animation": "walk"
+            },
+            {
+              "type": "arvane:wander",
+              "priority": 8,
+              "radius": 16,
+              "speed_multiplier": 0.45,
+              "duration_ticks": 90,
+              "cooldown_ticks": 45,
+              "animation": "walk"
+            },
+            {
+              "type": "arvane:idle",
+              "priority": 10,
+              "duration_ticks": 50,
+              "animation": ""
+            }
+          ]
         }
       },
       "presentation": {
-        "model": "arvane:model/entity/horse"
+        "model": "arvane:model/entity/horse",
+        "animation": "arvane:animation/horse"
       },
       "spawnable": true,
       "persistent_by_default": true,

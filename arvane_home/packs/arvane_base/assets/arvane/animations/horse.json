@@ -1,0 +1,187 @@
+{
+  "animations": [
+    {
+      "name": "walk",
+      "length": 1.5,
+      "loop": "loop",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "back_left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "back_right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "front_left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0,
+          "bone": "front_right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "back_left_leg",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "back_right_leg",
+          "channel": "rotation",
+          "value": [
+            30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "front_left_leg",
+          "channel": "rotation",
+          "value": [
+            30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "front_right_leg",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "back_left_leg",
+          "channel": "rotation",
+          "value": [
+            30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "back_right_leg",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "front_left_leg",
+          "channel": "rotation",
+          "value": [
+            -30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1,
+          "bone": "front_right_leg",
+          "channel": "rotation",
+          "value": [
+            30,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "back_left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "back_right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "front_left_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 1.5,
+          "bone": "front_right_leg",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    }
+  ]
+}

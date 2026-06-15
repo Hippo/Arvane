@@ -36,7 +36,7 @@ arv::EntityID create_goal_driven_entity(
   arv::entity::BrainComponent* brain = world.find_entity_brain(entity);
   EXPECT_NE(brain, nullptr);
   if (brain != nullptr && !brain->goals.empty()) {
-    brain->active_goal = 0U;
+    brain->goals[0].state.active = true;
     brain->goals[0].state.remaining_ticks = 20U;
     brain->goals[0].state.movement_direction = {1.0F, 0.0F, 0.0F};
   }
@@ -90,6 +90,99 @@ arv::entity::VehicleDefinitionRegistry make_test_vehicle_registry() {
   auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(buggy)});
   EXPECT_TRUE(registry);
   return std::move(registry.value());
+}
+
+const arv::entity::GoalSlot* first_active_goal(
+    const arv::entity::BrainComponent& brain) {
+  for (const arv::entity::GoalSlot& goal : brain.goals) {
+    if (goal.state.active) {
+      return &goal;
+    }
+  }
+  return nullptr;
+}
+
+const arv::entity::GoalSlot* find_goal(
+    const arv::entity::BrainComponent& brain,
+    std::string_view type) {
+  for (const arv::entity::GoalSlot& goal : brain.goals) {
+    if (goal.type == type) {
+      return &goal;
+    }
+  }
+  return nullptr;
+}
+
+bool goal_is_active(
+    const arv::entity::BrainComponent& brain,
+    std::string_view type) {
+  const arv::entity::GoalSlot* goal = find_goal(brain, type);
+  return goal != nullptr && goal->state.active;
+}
+
+arv::entity::VehicleDefinitionRegistry make_test_living_mount_registry() {
+  arv::entity::VehicleDefinition mount;
+  mount.name = "arvane:test_horse";
+  mount.kind = arv::entity::VehicleKind::Mount;
+  mount.physics = arv::entity::VehiclePhysicsKind::LivingMount;
+  mount.collision_size = {1.4F, 1.6F, 1.4F};
+  mount.seats.push_back({"saddle",
+                         "saddle",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 1.1F, 0.0F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::MountedThirdPerson});
+  mount.living_mount.walk_speed = 4.0F;
+  mount.living_mount.sprint_speed = 7.0F;
+  mount.living_mount.acceleration = 16.0F;
+  mount.living_mount.turn_rate = arv::degrees_to_radians(180.0F);
+  mount.living_mount.jump_strength = 7.0F;
+  mount.living_mount.gravity_scale = 1.0F;
+  mount.living_mount.step_height = 0.6F;
+  mount.living_mount.friction = 0.82F;
+  mount.authority.max_speed = 8.0F;
+  mount.authority.max_acceleration = 16.0F;
+  mount.authority.max_deceleration = 22.0F;
+  mount.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
+  mount.authority.max_vertical_speed = 8.0F;
+  mount.authority.max_step_height = 0.6F;
+  mount.authority.requires_ground = true;
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(mount)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
+arv::entity::EntityComponentSet make_hostile_brain_components(float damage) {
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{0.8F, 1.2F, 0.8F}};
+  components.movement = arv::entity::AuthoredMovementComponent{2.0F};
+  components.health = arv::entity::AuthoredHealthComponent{10.0F, 10.0F, false};
+  components.brain = arv::entity::AuthoredBrainComponent{};
+  components.brain->tick_interval = 1U;
+  components.brain->goals.push_back({.type = "arvane:nearest_target",
+                                     .priority = 1,
+                                     .radius = 8.0F,
+                                     .duration_ticks = 80U,
+                                     .memory_ticks = 40U,
+                                     .target = "nearest_player"});
+  components.brain->goals.push_back({.type = "arvane:move_to_target",
+                                     .priority = 2,
+                                     .speed_multiplier = 1.0F,
+                                     .duration_ticks = 80U,
+                                     .range = 0.5F,
+                                     .animation = "walk"});
+  components.brain->goals.push_back({.type = "arvane:look_at_target",
+                                     .priority = 2,
+                                     .duration_ticks = 80U});
+  components.brain->goals.push_back({.type = "arvane:melee_attack",
+                                     .priority = 3,
+                                     .duration_ticks = 80U,
+                                     .cooldown_ticks = 10U,
+                                     .range = 3.0F,
+                                     .damage = damage,
+                                     .attack_animation = "bite"});
+  return components;
 }
 
 arv::EntityID create_test_rideable(
@@ -446,6 +539,204 @@ TEST(WorldEntityTests, AuthoredComponentsCreateBrainMovementAndAnimationState) {
   EXPECT_TRUE(animation->active.empty());
 }
 
+TEST(WorldEntityTests, MultiGoalBrainRunsTargetMoveLookAndAttackTogether) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{7});
+  player.position = {2.5F, 0.0F, 0.0F};
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
+
+  arv::world::EntityCreateInfo info;
+  info.type_name = "test:hostile_pig";
+  info.position = {0.0F, 0.0F, 0.0F};
+  info.authored_components = make_hostile_brain_components(2.0F);
+  const arv::EntityID hostile = world.create_entity(std::move(info));
+
+  world.set_tick_index(1);
+  (void)world.tick_entities(nullptr, &goals);
+  world.set_tick_index(2);
+  (void)world.tick_entities(nullptr, &goals);
+
+  const arv::entity::BrainComponent* brain = world.find_entity_brain(hostile);
+  ASSERT_NE(brain, nullptr);
+  EXPECT_TRUE(goal_is_active(*brain, "arvane:nearest_target"));
+  EXPECT_TRUE(goal_is_active(*brain, "arvane:move_to_target"));
+  EXPECT_TRUE(goal_is_active(*brain, "arvane:look_at_target"));
+  EXPECT_TRUE(goal_is_active(*brain, "arvane:melee_attack"));
+
+  const std::optional<arv::EntityID> player_entity =
+      world.entity_for_player(arv::PlayerID{7});
+  ASSERT_TRUE(player_entity.has_value());
+  const arv::entity::EntityHealth* health =
+      world.find_entity_health(player_entity.value());
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 18.0F);
+
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(hostile);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_GT(transform->position.x, 0.0F);
+
+  const arv::entity::EntityAnimationState* animation =
+      world.find_entity_animation_state(hostile);
+  ASSERT_NE(animation, nullptr);
+  EXPECT_NE(find_active_animation(*animation, "walk"), nullptr);
+  EXPECT_NE(find_active_animation(*animation, "bite"), nullptr);
+}
+
+TEST(WorldEntityTests, MeleeAttackRequiresDamageAndHonorsCooldownAndRange) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{7});
+  player.position = {2.0F, 0.0F, 0.0F};
+  const std::optional<arv::EntityID> player_entity =
+      world.entity_for_player(arv::PlayerID{7});
+  ASSERT_TRUE(player_entity.has_value());
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
+
+  arv::world::EntityCreateInfo harmless_info;
+  harmless_info.type_name = "test:harmless";
+  harmless_info.position = {0.0F, 0.0F, 0.0F};
+  harmless_info.authored_components = make_hostile_brain_components(0.0F);
+  const arv::EntityID harmless = world.create_entity(std::move(harmless_info));
+  ASSERT_NE(harmless, (arv::EntityID{}));
+
+  world.set_tick_index(1);
+  (void)world.tick_entities(nullptr, &goals);
+  world.set_tick_index(2);
+  (void)world.tick_entities(nullptr, &goals);
+  const arv::entity::EntityHealth* health =
+      world.find_entity_health(player_entity.value());
+  ASSERT_NE(health, nullptr);
+  EXPECT_FLOAT_EQ(health->current, 20.0F);
+
+  arv::world::EntityCreateInfo attacker_info;
+  attacker_info.type_name = "test:attacker";
+  attacker_info.position = {0.0F, 0.0F, 0.0F};
+  attacker_info.authored_components = make_hostile_brain_components(3.0F);
+  const arv::EntityID attacker = world.create_entity(std::move(attacker_info));
+  ASSERT_NE(attacker, (arv::EntityID{}));
+
+  world.set_tick_index(3);
+  (void)world.tick_entities(nullptr, &goals);
+  world.set_tick_index(4);
+  (void)world.tick_entities(nullptr, &goals);
+  EXPECT_FLOAT_EQ(health->current, 17.0F);
+  world.set_tick_index(5);
+  (void)world.tick_entities(nullptr, &goals);
+  EXPECT_FLOAT_EQ(health->current, 17.0F);
+
+  player.position = {20.0F, 0.0F, 0.0F};
+  for (int tick = 0; tick < 12; ++tick) {
+    world.set_tick_index(static_cast<arv::TickIndex>(6 + tick));
+    (void)world.tick_entities(nullptr, &goals);
+  }
+  EXPECT_FLOAT_EQ(health->current, 17.0F);
+
+  const arv::entity::BrainComponent* brain = world.find_entity_brain(attacker);
+  ASSERT_NE(brain, nullptr);
+  EXPECT_FALSE(goal_is_active(*brain, "arvane:melee_attack"));
+}
+
+TEST(WorldEntityTests, SwimInFluidMovesTowardDrySupportedEscape) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID water =
+      registry.find_variant("arvane:water").value();
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{2, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{0, 1, 0}}, water));
+
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{0.8F, 0.9F, 0.8F}};
+  components.movement = arv::entity::AuthoredMovementComponent{2.0F};
+  components.brain = arv::entity::AuthoredBrainComponent{};
+  components.brain->tick_interval = 1U;
+  components.brain->goals.push_back({.type = "arvane:swim_in_fluid",
+                                     .priority = 0,
+                                     .speed_multiplier = 1.0F,
+                                     .duration_ticks = 20U,
+                                     .animation = "walk"});
+  arv::world::EntityCreateInfo info;
+  info.type_name = "test:swimmer";
+  info.position = {0.5F, 1.0F, 0.5F};
+  info.authored_components = components;
+  const arv::EntityID swimmer = world.create_entity(std::move(info));
+
+  world.set_tick_index(1);
+  (void)world.tick_entities(&registry, &goals);
+
+  const arv::entity::MovementIntent* intent =
+      world.find_entity_movement_intent(swimmer);
+  ASSERT_NE(intent, nullptr);
+  EXPECT_GT(intent->desired_direction.y, 0.0F);
+  EXPECT_GT(intent->desired_direction.x, 0.0F);
+  const arv::entity::EntityTransform* transform =
+      world.find_entity_transform(swimmer);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_GT(transform->position.y, 1.0F);
+  EXPECT_GT(transform->position.x, 0.5F);
+}
+
+TEST(WorldEntityTests, UnmountedLivingMountConsumesMovementIntentButOccupiedMountDoesNot) {
+  const arv::entity::VehicleDefinitionRegistry vehicles =
+      make_test_living_mount_registry();
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  place_test_floor(world, stone, -2, 6, -2, 2);
+
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{1.4F, 1.6F, 1.4F}};
+  components.movement = arv::entity::AuthoredMovementComponent{4.0F};
+  components.rideable = arv::entity::AuthoredRideableComponent{"arvane:test_horse"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_horse"};
+  components.brain = arv::entity::AuthoredBrainComponent{};
+  components.brain->tick_interval = 1U;
+  components.brain->goals.push_back({.type = "arvane:wander",
+                                     .priority = 1,
+                                     .speed_multiplier = 1.0F,
+                                     .duration_ticks = 20U,
+                                     .animation = "walk"});
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
+
+  arv::world::EntityCreateInfo first_info;
+  first_info.type_name = "test:horse";
+  first_info.position = {0.0F, 1.0F, 0.0F};
+  first_info.authored_components = components;
+  first_info.vehicle_definitions = &vehicles;
+  const arv::EntityID unmounted = world.create_entity(std::move(first_info));
+  ASSERT_NE(unmounted, (arv::EntityID{}));
+
+  (void)world.tick_entities(&registry, &goals, &vehicles);
+  const arv::entity::EntityTransform* unmounted_transform =
+      world.find_entity_transform(unmounted);
+  ASSERT_NE(unmounted_transform, nullptr);
+  EXPECT_GT(
+      arv::horizontal_length(
+          unmounted_transform->position - arv::Vec3f{0.0F, 1.0F, 0.0F}),
+      0.0F);
+
+  arv::world::EntityCreateInfo occupied_info;
+  occupied_info.type_name = "test:horse";
+  occupied_info.position = {3.0F, 1.0F, 0.0F};
+  occupied_info.authored_components = components;
+  occupied_info.vehicle_definitions = &vehicles;
+  const arv::EntityID occupied = world.create_entity(std::move(occupied_info));
+  ASSERT_NE(occupied, (arv::EntityID{}));
+  const arv::EntityID passenger = world.create_entity();
+  ASSERT_TRUE(world.mount_entity(occupied, passenger, std::string_view{"saddle"}));
+
+  (void)world.tick_entities(&registry, &goals, &vehicles);
+  const arv::entity::EntityTransform* occupied_transform =
+      world.find_entity_transform(occupied);
+  ASSERT_NE(occupied_transform, nullptr);
+  EXPECT_FLOAT_EQ(occupied_transform->position.x, 3.0F);
+}
+
 TEST(WorldEntityTests, HealthDamageAndInvulnerabilityAreCentralized) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::world::EntityCreateInfo source_info;
@@ -752,10 +1043,9 @@ TEST(WorldEntityTests, GoalDrivenEntitiesDoNotJumpIntoTallWalls) {
 
   const arv::entity::BrainComponent* brain = world.find_entity_brain(entity);
   ASSERT_NE(brain, nullptr);
-  ASSERT_TRUE(brain->active_goal.has_value());
-  ASSERT_LT(brain->active_goal.value(), brain->goals.size());
-  const arv::Vec3f direction =
-      brain->goals[brain->active_goal.value()].state.movement_direction;
+  const arv::entity::GoalSlot* active_goal = first_active_goal(*brain);
+  ASSERT_NE(active_goal, nullptr);
+  const arv::Vec3f direction = active_goal->state.movement_direction;
   EXPECT_GT(direction.x * direction.x + direction.z * direction.z, 0.0F);
   EXPECT_NE(direction, (arv::Vec3f{1.0F, 0.0F, 0.0F}));
 
@@ -783,10 +1073,10 @@ TEST(WorldEntityTests, GoalDrivenEntitiesPickOpenDirectionWhenOppositeWallIsBloc
 
   const arv::entity::BrainComponent* brain = world.find_entity_brain(entity);
   ASSERT_NE(brain, nullptr);
-  ASSERT_TRUE(brain->active_goal.has_value());
-  ASSERT_LT(brain->active_goal.value(), brain->goals.size());
+  const arv::entity::GoalSlot* active_goal = first_active_goal(*brain);
+  ASSERT_NE(active_goal, nullptr);
   EXPECT_NEAR(
-      std::abs(brain->goals[brain->active_goal.value()].state.movement_direction.z),
+      std::abs(active_goal->state.movement_direction.z),
       1.0F,
       0.15F);
 

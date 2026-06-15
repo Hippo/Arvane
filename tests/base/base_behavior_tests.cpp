@@ -2,6 +2,7 @@
 #include "arv/base/base_module.hpp"
 #include "arv/player/item.hpp"
 #include "arv/voxel/block.hpp"
+#include "arv/world/entity_goal_registry.hpp"
 
 #include <gtest/gtest.h>
 
@@ -17,4 +18,20 @@ TEST(BaseBehaviorTests, RegistersBaseBlockAndItemBehaviorIds) {
   EXPECT_TRUE(item_behaviors.contains(arv::base::ids::ToolItemBehaviorID));
   EXPECT_TRUE(item_behaviors.contains(arv::base::ids::EmptyFluidContainerItemBehaviorID));
   EXPECT_TRUE(item_behaviors.contains(arv::base::ids::FilledFluidContainerItemBehaviorID));
+}
+
+TEST(BaseBehaviorTests, RegistersBaseEntityGoalIds) {
+  arv::world::EntityGoalRegistry entity_goals;
+
+  arv::base::register_base_entity_goals(entity_goals);
+
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::IdleGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::WanderGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::SwimInFluidGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::NearestTargetGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::MoveToTargetGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::LookAtTargetGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::MeleeAttackGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::FleeFromTargetGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::ReturnHomeGoalID));
 }
