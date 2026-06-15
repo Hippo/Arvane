@@ -19,22 +19,18 @@ surface_rule_set: arvane:worldgen/surface_rule_set/grassy_land
 
 spawns:
   passive:
-    - entity: arvane:pig
-      weight: 3
-      min_group: 1
-      max_group: 3
-      conditions:
-        surface: true
-        block_tags_below:
-          - arvane:spawn/grass_like
-    - entity: arvane:horse
-      weight: 4
-      min_group: 1
-      max_group: 2
-      conditions:
-        surface: true
-        block_tags_below:
-          - arvane:spawn/grass_like
+    use:
+      - table: arvane:worldgen/spawn_table/temperate_passive
+        weight_scale: 1.0
+    rate_scale: 0.28
+    density_cap_scale: 0.45
+    remove: []
+    overrides:
+      arvane:pig_grass:
+        weight: 1
+      arvane:horse_grass:
+        weight: 2
+    add: []
 
 features:
   stages:

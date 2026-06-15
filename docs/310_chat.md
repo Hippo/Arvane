@@ -398,26 +398,6 @@ The client applies chat opacity, fade-out opacity, disabled-state opacity, and a
 
 Avoid alpha in server-authored chat colors. Alpha-controlled text can produce invisible or misleading messages. If opacity is needed, it should be a client display concern.
 
-## Formatting codes
-
-The network payload must not use legacy inline formatting codes as the canonical representation.
-
-Do not send this over the protocol:
-
-```text
-§c[Admin] §fHippo: hello
-```
-
-Do not send this as the canonical representation:
-
-```text
-&c[Admin] &fHippo: hello
-```
-
-Formatting codes may be accepted in server config files or plugin convenience APIs, but they must be parsed and converted into structured `RichText` before being sent to clients.
-
-Player-authored chat text should not be parsed for formatting unless the server explicitly supports permission-gated formatting.
-
 ## Chat message templates
 
 `arv_text` provides `ChatMessageTemplate` as the shared authoring format for config files and plugin SDK helpers. It is a text-layer feature: the template parses to `RichText`, resolves shared variables, and can then be sent as a normal `ClientboundChatMessage`.

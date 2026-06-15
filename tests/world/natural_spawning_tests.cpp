@@ -327,6 +327,41 @@ void write_pack_manifest(
                                       "  native_plugin: false\n");
 }
 
+arv::world::worldgen::RegistryResult load_spawn_loader_fixture(
+    std::string_view condition_yaml,
+    std::string_view table_yaml,
+    std::string_view biome_spawns_yaml) {
+  arv::testsupport::ScopedTempDir temp{"arvane_spawn_loader_"};
+  const std::filesystem::path packs_root = temp.path / "packs";
+  write_pack_manifest(packs_root, "bad_pack", "bad");
+  if (!condition_yaml.empty()) {
+    arv::testsupport::write_text(
+        packs_root / "bad_pack" / "data" / "bad" / "worldgen" / "spawn_condition" /
+            "grass.yaml",
+        std::string{condition_yaml});
+  }
+  if (!table_yaml.empty()) {
+    arv::testsupport::write_text(
+        packs_root / "bad_pack" / "data" / "bad" / "worldgen" / "spawn_table" /
+            "common.yaml",
+        std::string{table_yaml});
+  }
+  arv::testsupport::write_text(
+      packs_root / "bad_pack" / "data" / "bad" / "worldgen" / "biome" / "bad.yaml",
+      "id: bad:worldgen/biome/bad\n"
+      "version: 1\n"
+      "display_name: Bad\n"
+      "spawns:\n" +
+          std::string{biome_spawns_yaml});
+
+  auto packs = arv::asset::PackManager::load_from_packs_root(packs_root);
+  if (!packs) {
+    return arv::world::worldgen::RegistryResult::failure(
+        {"bad_pack", "packs", packs.error().describe()});
+  }
+  return arv::world::worldgen::load_worldgen_registry_from_packs(packs.value());
+}
+
 arv::voxel::BlockRegistry load_first_party_block_registry(
     const arv::asset::PackManager& packs) {
   auto block_definition_text = packs.load_merged_json_array_text("blocks", "blocks");
@@ -449,33 +484,57 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
   auto registry = arv::world::worldgen::load_worldgen_registry_from_packs(packs.value());
   ASSERT_TRUE(registry) << registry.error().describe();
 
+  const auto condition =
+      registry.value().spawn_conditions.find(
+          "arvane:worldgen/spawn_condition/surface_grass_like");
+  ASSERT_NE(condition, registry.value().spawn_conditions.end());
+  EXPECT_TRUE(condition->second.requires_surface);
+  ASSERT_EQ(condition->second.block_tags_below.size(), 1U);
+  EXPECT_EQ(condition->second.block_tags_below.front().id, "arvane:spawn/grass_like");
+
+  const auto table =
+      registry.value().spawn_tables.find("arvane:worldgen/spawn_table/temperate_passive");
+  ASSERT_NE(table, registry.value().spawn_tables.end());
+  EXPECT_EQ(table->second.category, arv::world::SpawnCategory::Passive);
+  ASSERT_EQ(table->second.entries.size(), 2U);
+  EXPECT_EQ(table->second.entries[0].id.id, "arvane:pig_grass");
+  EXPECT_EQ(table->second.entries[1].id.id, "arvane:horse_grass");
+
   const auto plains = registry.value().biomes.find("arvane:worldgen/biome/plains");
   ASSERT_NE(plains, registry.value().biomes.end());
   ASSERT_FALSE(plains->second.spawns.empty());
+  const auto& plains_passive =
+      plains->second.spawn_categories[
+          arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)];
+  EXPECT_TRUE(plains_passive.specified);
+  EXPECT_FLOAT_EQ(plains_passive.rate_scale, 0.35F);
+  EXPECT_FLOAT_EQ(plains_passive.density_cap_scale, 0.55F);
   const auto pig = std::find_if(
       plains->second.spawns.begin(),
       plains->second.spawns.end(),
       [](const arv::world::worldgen::BiomeSpawnEntryConfig& spawn) {
-        return spawn.entity.id == "arvane:pig" &&
+        return spawn.id.id == "arvane:pig_grass" &&
+               spawn.entity.id == "arvane:pig" &&
                spawn.category == arv::world::SpawnCategory::Passive;
       });
   ASSERT_NE(pig, plains->second.spawns.end());
-  EXPECT_EQ(pig->weight, 5U);
-  EXPECT_EQ(pig->min_group, 2U);
-  EXPECT_EQ(pig->max_group, 3U);
+  EXPECT_EQ(pig->weight, 2U);
+  EXPECT_EQ(pig->min_group, 1U);
+  EXPECT_EQ(pig->max_group, 2U);
   EXPECT_TRUE(pig->conditions.requires_surface);
   EXPECT_FALSE(pig->conditions.min_light.has_value());
   const auto horse = std::find_if(
       plains->second.spawns.begin(),
       plains->second.spawns.end(),
       [](const arv::world::worldgen::BiomeSpawnEntryConfig& spawn) {
-        return spawn.entity.id == "arvane:horse" &&
+        return spawn.id.id == "arvane:horse_grass" &&
+               spawn.entity.id == "arvane:horse" &&
                spawn.category == arv::world::SpawnCategory::Passive;
       });
   ASSERT_NE(horse, plains->second.spawns.end());
-  EXPECT_EQ(horse->weight, 7U);
+  EXPECT_EQ(horse->weight, 3U);
   EXPECT_EQ(horse->min_group, 1U);
-  EXPECT_EQ(horse->max_group, 2U);
+  EXPECT_EQ(horse->max_group, 1U);
   EXPECT_TRUE(horse->conditions.requires_surface);
 
   const arv::voxel::BlockRegistry blocks =
@@ -498,11 +557,20 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
        }) {
     const auto biome = registry.value().biomes.find(std::string{biome_id});
     ASSERT_NE(biome, registry.value().biomes.end()) << biome_id;
+    const auto& passive =
+        biome->second.spawn_categories[
+            arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)];
+    EXPECT_TRUE(passive.specified) << biome_id;
+    EXPECT_GT(passive.rate_scale, 0.0F) << biome_id;
+    EXPECT_LE(passive.rate_scale, 0.35F) << biome_id;
+    EXPECT_GT(passive.density_cap_scale, 0.0F) << biome_id;
+    EXPECT_LE(passive.density_cap_scale, 0.55F) << biome_id;
     const auto found_pig = std::find_if(
         biome->second.spawns.begin(),
         biome->second.spawns.end(),
         [](const arv::world::worldgen::BiomeSpawnEntryConfig& spawn) {
-          return spawn.entity.id == "arvane:pig" &&
+          return spawn.id.id == "arvane:pig_grass" &&
+                 spawn.entity.id == "arvane:pig" &&
                  spawn.category == arv::world::SpawnCategory::Passive;
         });
     EXPECT_NE(found_pig, biome->second.spawns.end()) << biome_id;
@@ -510,11 +578,31 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
         biome->second.spawns.begin(),
         biome->second.spawns.end(),
         [](const arv::world::worldgen::BiomeSpawnEntryConfig& spawn) {
-          return spawn.entity.id == "arvane:horse" &&
+          return spawn.id.id == "arvane:horse_grass" &&
+                 spawn.entity.id == "arvane:horse" &&
                  spawn.category == arv::world::SpawnCategory::Passive;
         });
     EXPECT_NE(found_horse, biome->second.spawns.end()) << biome_id;
   }
+
+  const arv::entity::EntityRegistry entities =
+      load_first_party_entity_registry(packs.value());
+  auto dimension = arv::world::worldgen::resolve_dimension(
+      registry.value(),
+      "arvane:worldgen/dimension/overworld",
+      blocks);
+  ASSERT_TRUE(dimension) << dimension.error().describe();
+  const arv::world::SpawnRuleRegistry rules =
+      arv::world::SpawnRuleRegistry::build_from_dimension(
+          *dimension.value(),
+          entities,
+          blocks);
+  ASSERT_TRUE(rules.diagnostics().empty()) << rules.diagnostics().front().describe();
+  const arv::world::BiomeSpawnTable* plains_table =
+      rules.find_table("arvane:worldgen/biome/plains", arv::world::SpawnCategory::Passive);
+  ASSERT_NE(plains_table, nullptr);
+  EXPECT_FLOAT_EQ(plains_table->rate_scale, 0.35F);
+  EXPECT_FLOAT_EQ(plains_table->density_cap_scale, 0.55F);
 }
 
 TEST(NaturalSpawnLoaderTests, RejectsInvalidSpawnCategoryWithDiagnostic) {
@@ -536,6 +624,105 @@ TEST(NaturalSpawnLoaderTests, RejectsInvalidSpawnCategoryWithDiagnostic) {
   auto registry = arv::world::worldgen::load_worldgen_registry_from_packs(packs.value());
   ASSERT_FALSE(registry);
   EXPECT_NE(registry.error().describe().find("unknown spawn category"), std::string::npos)
+      << registry.error().describe();
+}
+
+TEST(NaturalSpawnLoaderTests, RejectsOldInlineBiomeSpawnListFormat) {
+  auto registry = load_spawn_loader_fixture(
+      "",
+      "",
+      "  passive:\n"
+      "    - entity: bad:pig\n"
+      "      weight: 1\n");
+
+  ASSERT_FALSE(registry);
+  EXPECT_NE(registry.error().describe().find("must be an object"), std::string::npos)
+      << registry.error().describe();
+}
+
+TEST(NaturalSpawnLoaderTests, RejectsMissingSpawnTableReference) {
+  auto registry = load_spawn_loader_fixture(
+      "",
+      "",
+      "  passive:\n"
+      "    use:\n"
+      "      - table: bad:worldgen/spawn_table/missing\n"
+      "    rate_scale: 0.5\n"
+      "    density_cap_scale: 0.5\n"
+      "    remove: []\n"
+      "    add: []\n");
+
+  ASSERT_FALSE(registry);
+  EXPECT_NE(registry.error().describe().find("unknown spawn table"), std::string::npos)
+      << registry.error().describe();
+}
+
+TEST(NaturalSpawnLoaderTests, RejectsMissingSpawnConditionReference) {
+  auto registry = load_spawn_loader_fixture(
+      "",
+      "category: passive\n"
+      "entries:\n"
+      "  - id: bad:pig_grass\n"
+      "    entity: bad:pig\n"
+      "    weight: 1\n"
+      "    conditions: bad:worldgen/spawn_condition/missing\n",
+      "  passive:\n"
+      "    use:\n"
+      "      - table: bad:worldgen/spawn_table/common\n"
+      "    rate_scale: 0.5\n"
+      "    density_cap_scale: 0.5\n"
+      "    remove: []\n"
+      "    add: []\n");
+
+  ASSERT_FALSE(registry);
+  EXPECT_NE(registry.error().describe().find("unknown spawn condition"), std::string::npos)
+      << registry.error().describe();
+}
+
+TEST(NaturalSpawnLoaderTests, RejectsInvalidSpawnTableGroupRange) {
+  auto registry = load_spawn_loader_fixture(
+      "surface: true\n",
+      "category: passive\n"
+      "entries:\n"
+      "  - id: bad:pig_grass\n"
+      "    entity: bad:pig\n"
+      "    weight: 1\n"
+      "    min_group: 4\n"
+      "    max_group: 2\n"
+      "    conditions: bad:worldgen/spawn_condition/grass\n",
+      "  passive:\n"
+      "    use:\n"
+      "      - table: bad:worldgen/spawn_table/common\n"
+      "    rate_scale: 0.5\n"
+      "    density_cap_scale: 0.5\n"
+      "    remove: []\n"
+      "    add: []\n");
+
+  ASSERT_FALSE(registry);
+  EXPECT_NE(registry.error().describe().find("min_group must be <= max_group"), std::string::npos)
+      << registry.error().describe();
+}
+
+TEST(NaturalSpawnLoaderTests, RejectsEmptyResolvedBiomeSpawnList) {
+  auto registry = load_spawn_loader_fixture(
+      "surface: true\n",
+      "category: passive\n"
+      "entries:\n"
+      "  - id: bad:pig_grass\n"
+      "    entity: bad:pig\n"
+      "    weight: 1\n"
+      "    conditions: bad:worldgen/spawn_condition/grass\n",
+      "  passive:\n"
+      "    use:\n"
+      "      - table: bad:worldgen/spawn_table/common\n"
+      "    rate_scale: 0.5\n"
+      "    density_cap_scale: 0.5\n"
+      "    remove:\n"
+      "      - bad:pig_grass\n"
+      "    add: []\n");
+
+  ASSERT_FALSE(registry);
+  EXPECT_NE(registry.error().describe().find("must not be empty"), std::string::npos)
       << registry.error().describe();
 }
 
@@ -994,6 +1181,45 @@ TEST(NaturalSpawnJobTests, ApplyVehicleSpawnIntentUsesVehicleDefinitions) {
   ASSERT_NE(spawned, (arv::EntityID{}));
   EXPECT_NE(world.find_entity_rideable(spawned), nullptr);
   EXPECT_NE(world.find_entity_vehicle_physics(spawned), nullptr);
+}
+
+TEST(NaturalSpawnServerTests, RejectsInvalidSpawnEntriesBeforeRuntimeUse) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  auto items_result =
+      arv::player::ItemRegistry::build_from_blocks_and_items(blocks, {});
+  ASSERT_TRUE(items_result);
+  const arv::player::ItemRegistry items = std::move(items_result.value());
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  const auto dimension = make_flat_spawn_dimension(
+      {make_spawn_config("test:missing", arv::world::SpawnCategory::Passive, 20U)});
+
+  arv::world::WorldGenerationConfig generation_config =
+      arv::world::config_from_resolved_dimension(dimension);
+  auto palette = arv::world::resolve_world_generation_palette(generation_config, blocks);
+  ASSERT_TRUE(palette) << palette.error().message;
+  arv::server::ServerChunkGenerationSettings generation;
+  generation.enabled = true;
+  generation.seed = 42U;
+  generation.config = generation_config;
+  generation.palette = std::move(palette.value());
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &blocks;
+  start_info.item_registry = &items;
+  start_info.entity_registry = &entities;
+  start_info.chunk_generation = std::move(generation);
+  start_info.natural_spawning.enabled = true;
+
+  const arv::net::NetworkResult started = server.start(start_info);
+  ASSERT_FALSE(started);
+  EXPECT_NE(started.error().message.find("invalid spawn entries"), std::string::npos)
+      << started.error().message;
+  EXPECT_NE(started.error().message.find("unknown entity type"), std::string::npos)
+      << started.error().message;
 }
 
 TEST(NaturalSpawnServerTests, RunsNaturalSpawningAsAsyncWorldJob) {

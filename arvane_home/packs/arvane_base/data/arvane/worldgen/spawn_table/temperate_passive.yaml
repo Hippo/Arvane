@@ -1,0 +1,16 @@
+category: passive
+
+entries:
+  - id: arvane:pig_grass
+    entity: arvane:pig
+    weight: 2
+    min_group: 1
+    max_group: 2
+    conditions: arvane:worldgen/spawn_condition/surface_grass_like
+
+  - id: arvane:horse_grass
+    entity: arvane:horse
+    weight: 2
+    min_group: 1
+    max_group: 1
+    conditions: arvane:worldgen/spawn_condition/surface_grass_like

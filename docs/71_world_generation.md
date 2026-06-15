@@ -1016,22 +1016,16 @@ features:
 
 spawns:
   passive:
-    - entity: arvane:pig
-      weight: 5
-      min_group: 2
-      max_group: 3
-      conditions:
-        surface: true
-        block_tags_below:
-          - arvane:spawn/grass_like
-    - entity: arvane:horse
-      weight: 7
-      min_group: 1
-      max_group: 2
-      conditions:
-        surface: true
-        block_tags_below:
-          - arvane:spawn/grass_like
+    use:
+      - table: arvane:worldgen/spawn_table/temperate_passive
+        weight_scale: 1.0
+    rate_scale: 0.35
+    density_cap_scale: 0.55
+    remove: []
+    overrides:
+      arvane:horse_grass:
+        weight: 3
+    add: []
 
 colors:
   grass: "#6BAA45"
@@ -1152,27 +1146,23 @@ Biome features are only considered when the generated position belongs to the bi
 
 ### `spawns`
 
-Optional natural entity spawn tables for the biome.
+Optional natural entity spawn composition for the biome. Biomes do not contain
+the old inline-only spawn entry list. They compose reusable spawn tables and
+then apply local rate, density, remove, override, and add modifiers.
 
 ```yaml
 spawns:
   passive:
-    - entity: arvane:pig
-      weight: 5
-      min_group: 2
-      max_group: 3
-      conditions:
-        surface: true
-        block_tags_below:
-          - arvane:spawn/grass_like
-    - entity: arvane:horse
-      weight: 7
-      min_group: 1
-      max_group: 2
-      conditions:
-        surface: true
-        block_tags_below:
-          - arvane:spawn/grass_like
+    use:
+      - table: arvane:worldgen/spawn_table/temperate_passive
+        weight_scale: 1.0
+    rate_scale: 0.35
+    density_cap_scale: 0.55
+    remove: []
+    overrides:
+      arvane:horse_grass:
+        weight: 3
+    add: []
 ```
 
 Spawn categories are:
@@ -1184,22 +1174,80 @@ Spawn categories are:
 - `underground`
 - `special`
 
-Each entry uses a stable entity type ID. The referenced entity type must exist
-in the active entity registry and must be marked `spawnable: true`. Invalid
-entity references, non-spawnable entity types, and unknown block tags are
-reported as spawn diagnostics and skipped when the runtime spawn registry is
-built. Malformed spawn YAML, unknown fields, invalid categories, invalid group
-sizes, and invalid condition values fail worldgen data loading.
+Biome category fields:
+
+| Field | Purpose |
+|---|---|
+| `use` | Ordered list of reusable spawn tables to import. |
+| `use[].table` | Spawn table resource ID. The table category must match the biome category. |
+| `use[].weight_scale` | Optional multiplier applied to imported entry weights before biome overrides. |
+| `rate_scale` | Per-biome/category spawn rate multiplier. Values below `1.0` make candidate attempts continue less often. |
+| `density_cap_scale` | Per-biome/category multiplier for the local natural entity density cap. |
+| `remove` | Spawn entry IDs to delete after all referenced tables are loaded. |
+| `overrides` | Map of spawn entry ID to local field overrides. Keys are entry IDs, not entity IDs. |
+| `add` | Biome-specific spawn entries appended after overrides. |
+
+The resolved category must contain at least one spawn entry with positive total
+weight. Referencing a missing table, removing or overriding an unknown entry ID,
+using a duplicate entry ID, or producing an empty resolved list fails worldgen
+data loading.
+
+Spawn table files live under:
+
+```text
+data/<namespace>/worldgen/spawn_table/<name>.yaml
+```
+
+Example:
+
+```yaml
+category: passive
+
+entries:
+  - id: arvane:pig_grass
+    entity: arvane:pig
+    weight: 2
+    min_group: 1
+    max_group: 2
+    conditions: arvane:worldgen/spawn_condition/surface_grass_like
+```
+
+Spawn table weights are relative only within the resolved biome category. They
+decide which entry is picked after an attempt reaches that biome/category.
+They do not control how often attempts are made; use biome `rate_scale` for
+frequency and `density_cap_scale` for local crowding.
+
+Reusable spawn condition files live under:
+
+```text
+data/<namespace>/worldgen/spawn_condition/<name>.yaml
+```
+
+Example:
+
+```yaml
+surface: true
+block_tags_below:
+  - arvane:spawn/grass_like
+```
 
 Entry fields:
 
 | Field | Purpose |
 |---|---|
+| `id` | Stable spawn entry ID used by biome `remove` and `overrides`. |
 | `entity` | Stable entity type ID to create. |
 | `weight` | Positive relative weight within the category table. |
 | `min_group` | Minimum number of entities required for a group spawn. |
 | `max_group` | Maximum group size. Must be greater than or equal to `min_group`. |
-| `conditions` | Optional placement predicates. |
+| `conditions` | Optional reusable condition resource ID or inline placement predicates. |
+
+The referenced entity type must exist in the active entity registry and must be
+marked `spawnable: true`. Invalid entity references, non-spawnable entity
+types, and unknown block tags are reported as spawn diagnostics and prevent
+server startup before natural spawning uses the table. Malformed spawn YAML,
+unknown fields, invalid categories, invalid group sizes, missing condition IDs,
+and invalid condition values fail worldgen data loading.
 
 Supported condition fields:
 

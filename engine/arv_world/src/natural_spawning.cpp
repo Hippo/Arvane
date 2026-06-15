@@ -165,15 +165,37 @@ namespace {
   return category_count < per_player_cap && category_count < caps.per_world_soft;
 }
 
+[[nodiscard]] u32 scaled_local_max(
+    const NaturalSpawningConfig& config,
+    SpawnCategory category,
+    f32 density_cap_scale) noexcept {
+  const SpawnCategoryCapConfig& caps = config.caps[spawn_category_index(category)];
+  if (caps.local_max == 0U || !std::isfinite(density_cap_scale) ||
+      density_cap_scale <= 0.0F) {
+    return 0U;
+  }
+  const double scaled =
+      std::floor(static_cast<double>(caps.local_max) * static_cast<double>(density_cap_scale));
+  if (scaled <= 1.0) {
+    return 1U;
+  }
+  constexpr double MaxU32 = static_cast<double>(std::numeric_limits<u32>::max());
+  if (scaled >= MaxU32) {
+    return std::numeric_limits<u32>::max();
+  }
+  return static_cast<u32>(scaled);
+}
+
 [[nodiscard]] bool has_local_budget(
     const std::vector<NaturalSpawnEntitySnapshot>& natural_entities,
     BlockPos pos,
     SpawnCategory category,
     EntityTypeID type,
-    const NaturalSpawningConfig& config) noexcept {
+    const NaturalSpawningConfig& config,
+    f32 density_cap_scale = 1.0F) noexcept {
   (void)type;
-  const SpawnCategoryCapConfig& caps = config.caps[spawn_category_index(category)];
-  if (caps.local_max == 0U) {
+  const u32 local_max = scaled_local_max(config, category, density_cap_scale);
+  if (local_max == 0U) {
     return false;
   }
   const f32 radius = static_cast<f32>(config.local_density_radius_blocks);
@@ -186,7 +208,7 @@ namespace {
       continue;
     }
     ++count;
-    if (count >= caps.local_max) {
+    if (count >= local_max) {
       return false;
     }
   }
@@ -357,6 +379,15 @@ SpawnRuleRegistry SpawnRuleRegistry::build_from_dimension(
   for (const worldgen::ResolvedBiome& biome : dimension.biomes) {
     BiomeTables tables;
     tables.biome_id = biome.raw.id;
+    for (const SpawnCategory category : AllSpawnCategories) {
+      const usize category_index = spawn_category_index(category);
+      const worldgen::BiomeSpawnCategoryConfig& config =
+          biome.raw.spawn_categories[category_index];
+      if (config.specified) {
+        tables.categories[category_index].rate_scale = config.rate_scale;
+        tables.categories[category_index].density_cap_scale = config.density_cap_scale;
+      }
+    }
     for (const worldgen::BiomeSpawnEntryConfig& raw_entry : biome.raw.spawns) {
       const usize category = spawn_category_index(raw_entry.category);
       const std::optional<EntityTypeID> type_id =
@@ -551,9 +582,10 @@ bool SpawnLoadTracker::has_local_budget(
     BlockPos pos,
     SpawnCategory category,
     EntityTypeID type,
-    const NaturalSpawningConfig& config) const noexcept {
-  const SpawnCategoryCapConfig& caps = config.caps[spawn_category_index(category)];
-  if (caps.local_max == 0U) {
+    const NaturalSpawningConfig& config,
+    f32 density_cap_scale) const noexcept {
+  const u32 local_max = scaled_local_max(config, category, density_cap_scale);
+  if (local_max == 0U) {
     return false;
   }
   const f32 radius = static_cast<f32>(config.local_density_radius_blocks);
@@ -574,7 +606,7 @@ bool SpawnLoadTracker::has_local_budget(
     const bool same_type = entity_type != nullptr && entity_type->type_id == type;
     (void)same_type;
     ++count;
-    if (count >= caps.local_max) {
+    if (count >= local_max) {
       return false;
     }
   }
@@ -837,6 +869,13 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
           ++result.counters.rejected_no_biome_table;
           continue;
         }
+        if (table->rate_scale < 1.0F) {
+          std::uniform_real_distribution<f32> rate_dist(0.0F, 1.0F);
+          if (rate_dist(rng) >= table->rate_scale) {
+            ++result.counters.rejected_conditions;
+            continue;
+          }
+        }
 
         std::uniform_int_distribution<u32> weight_dist(0U, table->total_weight - 1U);
         const SpawnEntry* entry = table->weighted_pick(weight_dist(rng));
@@ -857,7 +896,8 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
                 candidate,
                 category,
                 entry->entity_type,
-                request.config)) {
+                request.config,
+                table->density_cap_scale)) {
           ++result.counters.rejected_local_density;
           continue;
         }
@@ -1247,6 +1287,13 @@ u32 NaturalSpawnSystem::attempt_spawn_near_player(
     ++counters_.rejected_no_biome_table;
     return 0U;
   }
+  if (table->rate_scale < 1.0F) {
+    std::uniform_real_distribution<f32> rate_dist(0.0F, 1.0F);
+    if (rate_dist(rng_) >= table->rate_scale) {
+      ++counters_.rejected_conditions;
+      return 0U;
+    }
+  }
 
   std::uniform_int_distribution<u32> weight_dist(0U, table->total_weight - 1U);
   const SpawnEntry* entry = table->weighted_pick(weight_dist(rng_));
@@ -1263,7 +1310,8 @@ u32 NaturalSpawnSystem::attempt_spawn_near_player(
           candidate,
           category,
           entry->entity_type,
-          config_)) {
+          config_,
+          table->density_cap_scale)) {
     ++counters_.rejected_local_density;
     return 0U;
   }

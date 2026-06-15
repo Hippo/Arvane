@@ -794,6 +794,11 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
       for (const world::SpawnDiagnostic& diagnostic : rules.diagnostics()) {
         core::warn("natural_spawning", diagnostic.describe());
       }
+      if (!rules.diagnostics().empty()) {
+        return net::NetworkResult::failure(net::NetworkError{
+            "natural spawning data has invalid spawn entries: " +
+            rules.diagnostics().front().describe()});
+      }
       core::info(
           "natural_spawning",
           "loaded {} natural spawn entries (diagnostics={})",

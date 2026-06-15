@@ -48,12 +48,26 @@ struct BiomeSpawnConditionConfig {
 };
 
 struct BiomeSpawnEntryConfig {
+  ResourceRef id{};
   ResourceRef entity{};
   SpawnCategory category{SpawnCategory::Passive};
   u32 weight{};
   u8 min_group{1};
   u8 max_group{1};
   BiomeSpawnConditionConfig conditions{};
+};
+
+struct BiomeSpawnCategoryConfig {
+  bool specified{};
+  f32 rate_scale{1.0F};
+  f32 density_cap_scale{1.0F};
+};
+
+struct SpawnTableConfig {
+  std::string id{};
+  u32 version{SupportedSchemaVersion};
+  SpawnCategory category{SpawnCategory::Passive};
+  std::vector<BiomeSpawnEntryConfig> entries{};
 };
 
 struct BiomeConfig {
@@ -65,6 +79,7 @@ struct BiomeConfig {
   ResourceRef surface_rule_set{};
   std::vector<StageFeatureList> features{};
   BiomeColors colors{};
+  std::array<BiomeSpawnCategoryConfig, SpawnCategoryCount> spawn_categories{};
   std::vector<BiomeSpawnEntryConfig> spawns{};
 };
 

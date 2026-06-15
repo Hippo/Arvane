@@ -1255,6 +1255,12 @@ system samples candidate positions around online players, resolves the
 candidate biome from the active dimension terrain profile, and looks up the
 biome's spawn table for the sampled category.
 
+Biome spawn data is resolved from reusable worldgen spawn tables plus
+biome-local modifiers. Table entry weights only choose between entries after a
+candidate reaches a biome/category. Biome `rate_scale` lowers how often
+candidate attempts proceed in that biome, and `density_cap_scale` lowers the
+local natural entity cap for sparse or fragile biomes.
+
 Natural spawning must not create chunk residency pressure. A candidate is valid
 only when its target chunk section is already loaded and either active or
 horizontally near a player in the spawn radius. That horizontal fallback lets
@@ -1312,7 +1318,9 @@ The base passive pig and horse tables intentionally avoid a light-level
 condition for now so starter passive mobs are not blocked by newly generated or
 stale saved lighting. They require a standing surface tagged
 `arvane:spawn/grass_like`; replaceable non-fluid body/head blocks such as short
-grass do not block the spawn.
+grass do not block the spawn. Base biomes apply conservative passive
+`rate_scale` and `density_cap_scale` values so wildlife stays sparse rather
+than constantly clustering near players.
 
 The same category keys used by biome spawn tables are used by `caps` and
 `despawning`: `passive`, `hostile`, `ambient`, `water`, `underground`, and

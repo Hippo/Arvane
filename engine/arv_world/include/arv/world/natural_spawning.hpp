@@ -62,6 +62,8 @@ struct SpawnDiagnostic {
 struct BiomeSpawnTable {
   std::vector<SpawnEntry> entries{};
   u32 total_weight{};
+  f32 rate_scale{1.0F};
+  f32 density_cap_scale{1.0F};
 
   [[nodiscard]] bool empty() const noexcept;
   [[nodiscard]] const SpawnEntry* weighted_pick(u32 roll) const noexcept;
@@ -238,7 +240,8 @@ public:
       BlockPos pos,
       SpawnCategory category,
       EntityTypeID type,
-      const NaturalSpawningConfig& config) const noexcept;
+      const NaturalSpawningConfig& config,
+      f32 density_cap_scale = 1.0F) const noexcept;
 
 private:
   SpawnLoadSnapshot snapshot_{};
