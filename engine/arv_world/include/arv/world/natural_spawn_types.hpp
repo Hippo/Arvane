@@ -77,6 +77,7 @@ struct NaturalSpawningConfig {
   u32 attempts_per_player_per_category{24};
   u32 max_successes_per_player_per_tick{6};
   u32 max_successes_per_world_per_tick{48};
+  u32 max_natural_entities{100};
   u32 local_density_radius_blocks{32};
   std::array<SpawnCategoryCapConfig, SpawnCategoryCount> caps{{
       {48, 1024, 24},

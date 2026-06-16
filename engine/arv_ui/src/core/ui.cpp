@@ -87,6 +87,62 @@ constexpr usize MaxTextMeasureCacheEntries = 512;
   return content.y + child.layout.offset.y;
 }
 
+[[nodiscard]] usize clamp_utf8_boundary(std::string_view text, usize offset) noexcept {
+  offset = std::min(offset, text.size());
+  while (offset > 0U && offset < text.size() &&
+         (static_cast<unsigned char>(text[offset]) & 0xC0U) == 0x80U) {
+    --offset;
+  }
+  return offset;
+}
+
+[[nodiscard]] usize text_unit_count(std::string_view text) noexcept {
+  usize count = 0;
+  for (const unsigned char byte : text) {
+    if ((byte & 0xC0U) != 0x80U) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+[[nodiscard]] f32 measured_prefix_width(
+    const IUiTextMeasurer& text_measurer,
+    const UiElement& element,
+    std::string_view text,
+    usize offset) {
+  offset = clamp_utf8_boundary(text, offset);
+  if (offset == 0U) {
+    return 0.0F;
+  }
+  const std::string_view prefix = text.substr(0U, offset);
+  const Vec2f measured = text_measurer.measure(prefix, element.style.text_role);
+  const usize units = text_unit_count(prefix);
+  return measured.x +
+         (units > 0U ? element.style.letter_spacing * static_cast<f32>(units - 1U) : 0.0F);
+}
+
+[[nodiscard]] f32 text_input_offset_x(
+    const UiElement& element,
+    const UiRect& content,
+    const IUiTextMeasurer* text_measurer) {
+  if (!element.text_input.has_value() ||
+      !element.text_input->active ||
+      text_measurer == nullptr ||
+      element.text.empty() ||
+      content.width <= 0.0F) {
+    return 0.0F;
+  }
+  const f32 cursor_x = measured_prefix_width(
+      *text_measurer,
+      element,
+      element.text,
+      element.text_input->cursor);
+  constexpr f32 CursorMargin = 12.0F;
+  const f32 max_cursor_x = std::max(0.0F, content.width - CursorMargin);
+  return std::min(0.0F, max_cursor_x - cursor_x);
+}
+
 [[nodiscard]] std::string_view element_type_name(UiElementType type) noexcept {
   switch (type) {
     case UiElementType::Root:
@@ -668,6 +724,10 @@ void UiTree::arrange_element(
   const std::optional<UiRect> child_clip =
       current->clip_children ? std::optional<UiRect>{current->clip} : inherited_clip;
   const UiRect content = inset(rect, current->layout.padding);
+  const f32 input_text_offset_x = text_input_offset_x(*current, content, text_measurer);
+  if (current->text_input.has_value()) {
+    current->text_input->text_offset_x = input_text_offset_x;
+  }
 
   if (current->type == UiElementType::Root || current->type == UiElementType::Panel ||
       current->type == UiElementType::Button || current->type == UiElementType::Slot) {
@@ -681,6 +741,9 @@ void UiTree::arrange_element(
           anchored_child_y(content, *child_element),
           child_element->rect.width,
           child_element->rect.height};
+      if (current->text_input.has_value() && child_element->type == UiElementType::Text) {
+        child_rect.x += input_text_offset_x;
+      }
       arrange_element(child, child_rect, text_measurer, child_clip);
     }
   } else if (current->type == UiElementType::VerticalStack) {
@@ -822,25 +885,6 @@ UiDocumentValidation validate_ui_document(const UiDocument& document, UiDocument
   return static_cast<f32>(std::round(value));
 }
 
-[[nodiscard]] usize clamp_utf8_boundary(std::string_view text, usize offset) noexcept {
-  offset = std::min(offset, text.size());
-  while (offset > 0U && offset < text.size() &&
-         (static_cast<unsigned char>(text[offset]) & 0xC0U) == 0x80U) {
-    --offset;
-  }
-  return offset;
-}
-
-[[nodiscard]] usize text_unit_count(std::string_view text) noexcept {
-  usize count = 0;
-  for (const unsigned char byte : text) {
-    if ((byte & 0xC0U) != 0x80U) {
-      ++count;
-    }
-  }
-  return count;
-}
-
 [[nodiscard]] f32 measured_prefix_width(
     asset::FontSystem& fonts,
     const asset::FontStack& stack,
@@ -882,7 +926,9 @@ void append_text_input_visuals(
   const usize selection_end = clamp_utf8_boundary(text, element.text_input->selection_end);
   const f32 tracking = metrics.scalar_to_framebuffer(element.style.letter_spacing);
   const Vec2f text_origin =
-      metrics.framebuffer_from_logical(Vec2f{content.x, content.y});
+      metrics.framebuffer_from_logical(Vec2f{
+          content.x + element.text_input->text_offset_x,
+          content.y});
   const f32 content_height = metrics.scalar_to_framebuffer(content.height);
   f32 line_height = content_height;
   if (!stack.faces.empty()) {

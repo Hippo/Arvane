@@ -343,6 +343,10 @@ void ClientRuntime::add_chat_message(std::string message) {
   impl_->ui.add_chat_message(std::move(message));
 }
 
+void ClientRuntime::add_chat_message(protocol::ClientboundChatMessage message) {
+  impl_->ui.add_chat_message(std::move(message));
+}
+
 void ClientRuntime::suggest_chat_command(std::string command) {
   impl_->ui.suggest_chat_command(std::move(command));
 }

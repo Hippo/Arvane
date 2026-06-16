@@ -241,6 +241,9 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
       config.natural_spawning.max_successes_per_world_per_tick == 0U) {
     return ConfigError{"natural_spawning success budgets must be non-zero"};
   }
+  if (config.natural_spawning.max_natural_entities == 0U) {
+    return ConfigError{"natural_spawning.max_natural_entities must be non-zero"};
+  }
   if (config.natural_spawning.local_density_radius_blocks == 0U) {
     return ConfigError{"natural_spawning.local_density_radius_blocks must be non-zero"};
   }

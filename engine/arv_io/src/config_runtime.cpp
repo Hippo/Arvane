@@ -122,6 +122,10 @@ void read_natural_spawning_config(
       config.max_successes_per_world_per_tick);
   read_scalar(
       *natural,
+      "max_natural_entities",
+      config.max_natural_entities);
+  read_scalar(
+      *natural,
       "local_density_radius_blocks",
       config.local_density_radius_blocks);
   if (const DataValue* caps = natural->get("caps"); caps != nullptr) {
@@ -501,6 +505,10 @@ void put_natural_spawning_config(
       root,
       "natural_spawning.max_successes_per_world_per_tick",
       config.max_successes_per_world_per_tick);
+  put(
+      root,
+      "natural_spawning.max_natural_entities",
+      config.max_natural_entities);
   put(
       root,
       "natural_spawning.local_density_radius_blocks",

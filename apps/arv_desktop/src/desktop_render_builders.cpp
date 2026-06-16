@@ -168,7 +168,7 @@ void append_block_attached_model_draws(
           chunk_local_to_block(coord, entry.local);
       render::EntityDrawItem item;
       item.model_id = model_id;
-      item.position = block_center(block);
+      item.position = block_floor_center(block);
       if (variant_id.value < entity_render_assets.block_attached_rotation_by_variant.size()) {
         item.rotation =
             entity_render_assets.block_attached_rotation_by_variant[variant_id.value];

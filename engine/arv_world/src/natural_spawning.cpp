@@ -165,6 +165,27 @@ namespace {
   return category_count < per_player_cap && category_count < caps.per_world_soft;
 }
 
+[[nodiscard]] u32 natural_entity_count(const SpawnLoadSnapshot& load) noexcept {
+  u32 count = 0U;
+  for (const u32 category_count : load.natural_by_category) {
+    count += category_count;
+  }
+  return count;
+}
+
+[[nodiscard]] u32 remaining_natural_entity_budget(
+    const SpawnLoadSnapshot& load,
+    const NaturalSpawningConfig& config) noexcept {
+  const u32 count = natural_entity_count(load);
+  return count >= config.max_natural_entities ? 0U : config.max_natural_entities - count;
+}
+
+[[nodiscard]] bool has_natural_entity_budget(
+    const SpawnLoadSnapshot& load,
+    const NaturalSpawningConfig& config) noexcept {
+  return remaining_natural_entity_budget(load, config) > 0U;
+}
+
 [[nodiscard]] u32 scaled_local_max(
     const NaturalSpawningConfig& config,
     SpawnCategory category,
@@ -774,6 +795,10 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
   u32 world_successes = 0U;
 
   for (const SpawnCategory category : AllSpawnCategories) {
+    if (!has_natural_entity_budget(planning_load, request.config)) {
+      ++result.counters.rejected_world_cap;
+      break;
+    }
     if (!has_world_budget(
             planning_load,
             category,
@@ -883,6 +908,11 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
           ++result.counters.rejected_no_biome_table;
           continue;
         }
+        u32 global_remaining = remaining_natural_entity_budget(planning_load, request.config);
+        if (global_remaining == 0U) {
+          ++result.counters.rejected_world_cap;
+          break;
+        }
         if (!has_world_budget(
                 planning_load,
                 category,
@@ -907,7 +937,7 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
         }
 
         std::uniform_int_distribution<u32> group_dist(entry->min_group, entry->max_group);
-        const u32 desired_count = group_dist(rng);
+        const u32 desired_count = std::min(group_dist(rng), global_remaining);
         NaturalSpawnIntent intent;
         intent.entry = *entry;
         intent.positions.reserve(desired_count);
@@ -1089,6 +1119,11 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
       ++counters_.rejected_world_cap;
       continue;
     }
+    u32 global_remaining = remaining_natural_entity_budget(live_load, config_);
+    if (global_remaining == 0U) {
+      ++counters_.rejected_world_cap;
+      break;
+    }
     if (!load_tracker_.has_local_budget(
             world,
             root,
@@ -1114,6 +1149,13 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
     if (valid_positions.size() < intent.entry.min_group) {
       ++counters_.rejected_group_failed;
       continue;
+    }
+    if (valid_positions.size() > global_remaining) {
+      valid_positions.resize(global_remaining);
+      if (valid_positions.size() < intent.entry.min_group) {
+        ++counters_.rejected_group_failed;
+        continue;
+      }
     }
 
     const NaturalDespawnCategoryConfig& despawn_config =

@@ -1,4 +1,6 @@
+#include "arv/client/command_chat.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/command/command.hpp"
 #include "arv/core/text_edit.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/net/in_process_transport.hpp"
@@ -16,6 +18,7 @@
 #include "arv/protocol/text_variables.hpp"
 #include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
+#include "arv/text/language.hpp"
 #include "arv/text/variables.hpp"
 #include "arv/world/world_queries.hpp"
 #include "arv/world/world_runtime.hpp"
@@ -650,6 +653,24 @@ TEST(ClientRuntimeTests, SlashTextOpensChatWithCommandPrefix) {
   EXPECT_TRUE(client.chat_open());
   EXPECT_EQ(client.chat_draft(), "/");
   EXPECT_TRUE(client.chat_messages().empty());
+}
+
+TEST(ClientRuntimeTests, LocalCommandResultParsesAuthoredChatMarkup) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+  arv::text::LanguageCatalog language;
+  const arv::command::CommandResult result =
+      arv::command::CommandResult::permission_denied("<red>No permission");
+
+  arv::client::append_command_result_to_chat(client, result, language);
+
+  ASSERT_EQ(client.chat_messages().size(), 1U);
+  EXPECT_EQ(client.chat_messages().front(), "No permission");
+  ASSERT_EQ(client.chat_history().size(), 1U);
+  const std::vector<arv::text::RichTextRun> runs =
+      arv::text::flatten_rich_text(client.chat_history().front().message);
+  ASSERT_FALSE(runs.empty());
+  EXPECT_EQ(runs.back().text, "No permission");
+  EXPECT_EQ(runs.back().style.color, (arv::text::RgbColor{0xFFU, 0x55U, 0x55U}));
 }
 
 TEST(ClientRuntimeTests, ChatSubmitSendsRawServerboundIntentWhenInGame) {

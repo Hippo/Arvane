@@ -2,9 +2,12 @@
 
 #include "arv/client/client_runtime.hpp"
 #include "arv/command/command.hpp"
+#include "arv/protocol/chat.hpp"
+#include "arv/text/chat_message.hpp"
 #include "arv/text/language.hpp"
 
 #include <string>
+#include <string_view>
 
 namespace arv::client {
 namespace {
@@ -31,6 +34,27 @@ namespace {
   return language.text("ui.chat.command.failure");
 }
 
+[[nodiscard]] bool command_message_is_error(
+    command::CommandMessageKind kind) noexcept {
+  return kind == command::CommandMessageKind::Error;
+}
+
+[[nodiscard]] bool command_status_is_error(
+    command::CommandStatus status) noexcept {
+  return status != command::CommandStatus::Success;
+}
+
+[[nodiscard]] protocol::ClientboundChatMessage command_chat_packet(
+    std::string_view message,
+    bool error) {
+  protocol::ClientboundChatMessage packet;
+  packet.message_id = 0U;
+  packet.channel = std::string{protocol::ChatChannelSystem};
+  packet.kind = error ? protocol::ChatMessageKind::Error : protocol::ChatMessageKind::System;
+  packet.message = text::ChatMessageTemplate::parse(message).to_rich_text();
+  return packet;
+}
+
 } // namespace
 
 void append_command_result_to_chat(
@@ -42,11 +66,15 @@ void append_command_result_to_chat(
     if (message.text.empty()) {
       continue;
     }
-    client.add_chat_message(message.text);
+    client.add_chat_message(command_chat_packet(
+        message.text,
+        command_message_is_error(message.kind)));
     wrote_message = true;
   }
   if (!wrote_message && result.status != command::CommandStatus::PermissionDenied) {
-    client.add_chat_message(fallback_command_result_message(language, result.status));
+    client.add_chat_message(command_chat_packet(
+        fallback_command_result_message(language, result.status),
+        command_status_is_error(result.status)));
   }
 }
 

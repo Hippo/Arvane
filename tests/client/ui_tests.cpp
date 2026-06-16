@@ -928,6 +928,41 @@ TEST(GameplayUiTests, RichChatRunsExposeColorAndHitActions) {
   EXPECT_EQ(hover->action_id, "chat_run");
 }
 
+TEST(GameplayUiTests, LongChatInputKeepsCursorVisible) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  const std::string draft =
+      "this is a deliberately long chat draft that should stay visible at the typing edge";
+
+  arv::ui::ChatUiModel model;
+  model.visible = true;
+  model.input_active = true;
+  model.draft = draft;
+  model.draft_cursor = draft.size();
+  model.draft_selection_start = draft.size();
+  model.draft_selection_end = draft.size();
+  arv::ui::build_chat_ui(tree, std::move(model));
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* input = tree.find_by_stable_id("chat.input");
+  ASSERT_NE(input, nullptr);
+  ASSERT_TRUE(input->text_input.has_value());
+  EXPECT_LT(input->text_input->text_offset_x, 0.0F);
+  const auto* input_text = tree.find_by_stable_id("chat.input.text");
+  ASSERT_NE(input_text, nullptr);
+  EXPECT_LT(input_text->rect.x, input->rect.x + input->layout.padding.left);
+
+  const arv::f32 cursor_width =
+      static_cast<arv::f32>(input->text_input->cursor) * 8.0F +
+      static_cast<arv::f32>(input->text_input->cursor - 1U) *
+          input->style.letter_spacing;
+  const arv::f32 cursor_x =
+      input->rect.x + input->layout.padding.left +
+      input->text_input->text_offset_x + cursor_width;
+  EXPECT_GE(cursor_x, input->rect.x + input->layout.padding.left);
+  EXPECT_LE(cursor_x, input->rect.x + input->rect.width - input->layout.padding.right);
+}
+
 TEST(GameplayUiTests, ChatWrapsLongMessagesIntoAdditionalRows) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;

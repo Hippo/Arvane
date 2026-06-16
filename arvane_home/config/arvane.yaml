@@ -135,6 +135,7 @@ natural_spawning:
   interval_ticks: 10
   local_density_radius_blocks: 32
   max_distance_from_player_blocks: 96
+  max_natural_entities: 100
   max_successes_per_player_per_tick: 6
   max_successes_per_world_per_tick: 48
   min_distance_from_player_blocks: 24

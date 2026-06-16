@@ -931,6 +931,43 @@ TEST(NaturalSpawnSystemTests, SpawnsMarkedNaturalEntitiesInLoadedActiveTerrain) 
   EXPECT_EQ(natural_count, system.counters().successes_total);
 }
 
+TEST(NaturalSpawnSystemTests, RespectsGlobalNaturalEntityCap) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  const auto dimension = make_flat_spawn_dimension(
+      {make_spawn_config("test:pig", arv::world::SpawnCategory::Passive, 20U)});
+  arv::world::WorldRuntime world = make_spawn_world(blocks, dimension);
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = {0.0F, 1.0F, 0.0F};
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.min_distance_from_player_blocks = 0U;
+  config.max_distance_from_player_blocks = 32U;
+  config.attempts_per_player_per_category = 64U;
+  config.max_successes_per_player_per_tick = 4U;
+  config.max_successes_per_world_per_tick = 4U;
+  config.max_natural_entities = 1U;
+  config.local_density_radius_blocks = 4U;
+  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)].local_max = 4U;
+  system.configure(config);
+  system.set_rules(
+      arv::world::SpawnRuleRegistry::build_from_dimension(*dimension, entities, blocks));
+
+  system.tick(world, blocks, entities, 1U);
+
+  arv::u32 natural_count = 0U;
+  for (const arv::EntityID id : world.entity_ids()) {
+    if (world.find_entity_natural_spawn(id) != nullptr) {
+      ++natural_count;
+    }
+  }
+  EXPECT_EQ(natural_count, 1U);
+  EXPECT_EQ(system.counters().successes_total, 1U);
+  EXPECT_GT(system.counters().rejected_world_cap, 0U);
+}
+
 TEST(NaturalSpawnJobTests, BuildsSpawnAndDespawnPlansWithoutMutatingWorld) {
   const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
   const arv::entity::EntityRegistry entities = make_spawn_entity_registry();

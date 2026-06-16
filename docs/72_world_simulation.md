@@ -1299,6 +1299,7 @@ natural_spawning:
   attempts_per_player_per_category: 24
   max_successes_per_player_per_tick: 6
   max_successes_per_world_per_tick: 48
+  max_natural_entities: 100
   local_density_radius_blocks: 32
   caps:
     passive:
@@ -1325,6 +1326,11 @@ than constantly clustering near players.
 The same category keys used by biome spawn tables are used by `caps` and
 `despawning`: `passive`, `hostile`, `ambient`, `water`, `underground`, and
 `special`.
+
+`max_natural_entities` is a global natural-spawn ceiling for the world. It
+limits entities created by the natural spawning system across all categories,
+separate from player entities, vehicles, dropped items, and other manually
+created entities.
 
 ---
 

@@ -455,6 +455,7 @@ world::NaturalSpawningConfig make_natural_spawning_config(
   out.attempts_per_player_per_category = config.attempts_per_player_per_category;
   out.max_successes_per_player_per_tick = config.max_successes_per_player_per_tick;
   out.max_successes_per_world_per_tick = config.max_successes_per_world_per_tick;
+  out.max_natural_entities = config.max_natural_entities;
   out.local_density_radius_blocks = config.local_density_radius_blocks;
   auto copy_cap = [](const io::NaturalSpawningCategoryCapConfig& from) {
     return world::SpawnCategoryCapConfig{

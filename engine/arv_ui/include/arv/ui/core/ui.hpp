@@ -131,6 +131,7 @@ struct UiTextInputVisual {
   usize cursor{};
   usize selection_start{};
   usize selection_end{};
+  f32 text_offset_x{};
 };
 
 struct UiElement {

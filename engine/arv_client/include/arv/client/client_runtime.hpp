@@ -153,6 +153,7 @@ public:
   [[nodiscard]] const arv::text::TextVariableStore& text_variables() const noexcept;
   void close_chat() noexcept;
   void add_chat_message(std::string message);
+  void add_chat_message(protocol::ClientboundChatMessage message);
   void suggest_chat_command(std::string command);
   net::NetworkResult send_chat_message(
       std::string message,

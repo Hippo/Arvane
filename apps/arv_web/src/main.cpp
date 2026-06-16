@@ -2471,7 +2471,7 @@ void update_held_item_animation_from_input(
           arv::chunk_local_to_block(section.coord, arv::voxel::local_pos(index));
       arv::render::EntityDrawItem item;
       item.model_id = model_id;
-      item.position = arv::block_center(block);
+      item.position = arv::block_floor_center(block);
       if (variant_id.value <
           g_app.entity_assets.loaded.render_assets
               .block_attached_rotation_by_variant.size()) {
