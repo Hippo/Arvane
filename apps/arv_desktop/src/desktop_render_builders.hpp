@@ -19,8 +19,10 @@ namespace arv::desktop {
 void populate_world_frame_draw_items(
     render::FramePacket& frame,
     DesktopGameSession& session,
+    ChunkViewState& chunk_view,
     const EntityRenderAssets& entity_render_assets,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
+    const io::ChunkDistanceConfig& chunk_distances,
     const io::RenderConfig& render_config,
     bool show_chunk_boundaries,
     std::chrono::steady_clock::time_point now,

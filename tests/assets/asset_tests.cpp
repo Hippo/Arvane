@@ -355,10 +355,10 @@ TEST(TextureAtlasTests, CachesStateTransformedModelBoxesWithoutRotatingUvs) {
       atlas_result.value().render_data.model_boxes(stairs_variant.value());
   ASSERT_EQ(boxes.size(), 2U);
 
-  EXPECT_EQ(boxes.back().min.x, 8);
+  EXPECT_EQ(boxes.back().min.x, 0);
   EXPECT_EQ(boxes.back().max.x, 16);
   EXPECT_EQ(boxes.back().min.z, 0);
-  EXPECT_EQ(boxes.back().max.z, 16);
+  EXPECT_EQ(boxes.back().max.z, 8);
 
   const auto& east_face =
       boxes.back().faces[arv::voxel::face_index(arv::voxel::BlockFace::PositiveX)];
@@ -374,7 +374,8 @@ TEST(TextureAtlasTests, CachesStateTransformedModelBoxesWithoutRotatingUvs) {
       north_face->uvs[0].x > north_face->uvs[1].x
           ? north_face->uvs[0].x - north_face->uvs[1].x
           : north_face->uvs[1].x - north_face->uvs[0].x;
-  EXPECT_EQ(uv_width, north_uv_width * 2);
+  EXPECT_EQ(uv_width, 8);
+  EXPECT_EQ(north_uv_width, 16);
 }
 
 TEST(TextureAtlasTests, AppliesModelCollisionBoxesPerVariantAtStartup) {
@@ -482,7 +483,19 @@ TEST(TextureAtlasTests, LoadsBlockAttachedChestModelAndCollisionFromAuthoredMode
     EXPECT_LE(box.max.y, 1.0F);
     EXPECT_LE(box.max.z, 1.0F);
   }
-  EXPECT_FALSE(block_atlas.value().render_data.model_boxes(chest_variant.value()).empty());
+  const std::span<const arv::voxel::BlockModelBoxRenderData> render_boxes =
+      block_atlas.value().render_data.model_boxes(chest_variant.value());
+  ASSERT_EQ(render_boxes.size(), 3U);
+  EXPECT_EQ(render_boxes.front().min, (arv::Vec3i{1, 0, 1}));
+  EXPECT_EQ(render_boxes.front().max, (arv::Vec3i{15, 10, 15}));
+  for (const arv::voxel::BlockModelBoxRenderData& render_box : render_boxes) {
+    EXPECT_GE(render_box.min.x, 0);
+    EXPECT_GE(render_box.min.y, 0);
+    EXPECT_GE(render_box.min.z, 0);
+    EXPECT_LE(render_box.max.x, 16);
+    EXPECT_LE(render_box.max.y, 16);
+    EXPECT_LE(render_box.max.z, 16);
+  }
 }
 
 TEST(TextureAtlasTests, LoadsBlockAttachedChestModelFromPackBlockData) {

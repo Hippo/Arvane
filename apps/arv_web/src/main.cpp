@@ -31,6 +31,7 @@
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/protocol_version.hpp"
 #include "arv/render/chunk_mesher.hpp"
+#include "arv/render/render_culling.hpp"
 #include "arv/text/language.hpp"
 #include "arv/text/rich_text.hpp"
 #include "arv/ui/core/ui.hpp"
@@ -2452,6 +2453,9 @@ void update_held_item_animation_from_input(
     if (section.world_id != world_id) {
       continue;
     }
+    if (!arv::render::chunk_aabb_intersects_view(item_frame.world_view, section.coord)) {
+      continue;
+    }
     for (arv::usize index = 0; index < arv::voxel::ChunkVolume; ++index) {
       const arv::voxel::BlockVariantID variant_id = section.blocks[index];
       if (variant_id.value >= block_attached_models.size()) {
@@ -2468,6 +2472,13 @@ void update_held_item_animation_from_input(
       arv::render::EntityDrawItem item;
       item.model_id = model_id;
       item.position = arv::block_center(block);
+      if (variant_id.value <
+          g_app.entity_assets.loaded.render_assets
+              .block_attached_rotation_by_variant.size()) {
+        item.rotation =
+            g_app.entity_assets.loaded.render_assets
+                .block_attached_rotation_by_variant[variant_id.value];
+      }
       item.scale = 1.0F;
       item_frame.entities.push_back(std::move(item));
     }

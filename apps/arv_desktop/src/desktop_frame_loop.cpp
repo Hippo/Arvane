@@ -632,8 +632,10 @@ usize DesktopFrameLoop::build_world_frame(
   populate_world_frame_draw_items(
       frame,
       *active_session,
+      active_session->chunk_view,
       assets_.entity_render_assets,
       player_skin_regions_,
+      config_.chunks,
       config_.render,
       debug_menu_.show_chunk_boundaries,
       now,

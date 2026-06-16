@@ -49,8 +49,8 @@ TEST(EntityModelTests, LoadsBlockModelWithSharedSchema) {
   EXPECT_NE(parsed.value().bones.find("root"), parsed.value().bones.end());
   ASSERT_EQ(parsed.value().boxes.size(), 2U);
   EXPECT_EQ(parsed.value().boxes.front().bone, "root");
-  EXPECT_EQ(parsed.value().boxes.front().min, (arv::Vec3f{0.0F, 0.0F, 0.0F}));
-  EXPECT_EQ(parsed.value().boxes.front().max, (arv::Vec3f{16.0F, 8.0F, 16.0F}));
+  EXPECT_EQ(parsed.value().boxes.front().min, (arv::Vec3f{-8.0F, 0.0F, -8.0F}));
+  EXPECT_EQ(parsed.value().boxes.front().max, (arv::Vec3f{8.0F, 8.0F, 8.0F}));
 }
 
 TEST(EntityModelTests, LoadsEntityModelWithSharedSchemaAndBoneNames) {

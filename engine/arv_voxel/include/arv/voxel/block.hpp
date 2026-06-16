@@ -477,6 +477,9 @@ private:
     BlockFace face,
     BlockModelTransform transform) noexcept;
 
+[[nodiscard]] Vec3f block_model_coord_to_block_coord(Vec3f point) noexcept;
+[[nodiscard]] Vec3i block_model_coord_to_block_coord(Vec3i point) noexcept;
+
 [[nodiscard]] Vec3i transform_model_point(
     Vec3i point,
     Vec3i center_origin,

@@ -636,6 +636,7 @@ void request_chunk_view_mesh_rescan(ChunkViewState& view) noexcept {
 void remove_chunk_view_chunk(ChunkViewState& view, ChunkSectionCoord coord) {
   view.draw_items.erase(coord);
   view.empty_mesh_content_versions.erase(coord);
+  view.block_attached_model_cache.erase(coord);
   view.mesh_candidate_set.erase(coord);
   for (auto iter = view.mesh_candidates.begin(); iter != view.mesh_candidates.end();) {
     if (*iter == coord) {

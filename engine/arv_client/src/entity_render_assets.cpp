@@ -101,6 +101,12 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
   return render::EntityModelID{BlockAttachedEntityModelIDBase + variant.value};
 }
 
+[[nodiscard]] Quatf block_attached_rotation(
+    voxel::BlockModelTransform transform) noexcept {
+  const i32 turns = (transform.quarter_turns_y % 4 + 4) % 4;
+  return yaw_rotation(-static_cast<f32>(turns) * PiRadians * 0.5F);
+}
+
 [[nodiscard]] std::string normalize_item_model_asset(std::string_view model) {
   if (model.empty()) {
     return {};
@@ -265,6 +271,7 @@ EntityRenderAssetsResult build_entity_render_assets(
   struct PendingModel {
     EntityTypeID type_id{};
     std::optional<player::ItemID> item_id{};
+    std::optional<voxel::BlockVariantID> block_attached_variant{};
     render::EntityModelID model_id{};
     render::EntityModelDefinition definition{};
     bool first_person_player{};
@@ -386,6 +393,7 @@ EntityRenderAssetsResult build_entity_render_assets(
 
     pending_models.push_back({type.id,
                               std::nullopt,
+                              std::nullopt,
                               render::EntityModelID{type.id.value},
                               definition,
                               false,
@@ -397,6 +405,7 @@ EntityRenderAssetsResult build_entity_render_assets(
       continue;
     }
     pending_models.push_back({type.id,
+                              std::nullopt,
                               std::nullopt,
                               first_person_player_model_id(),
                               make_first_person_player_definition(definition),
@@ -413,6 +422,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
     pending_models.push_back({type.id,
                               std::nullopt,
+                              std::nullopt,
                               player_skin_model_id(),
                               std::move(dynamic_skin_definition),
                               false,
@@ -428,6 +438,7 @@ EntityRenderAssetsResult build_entity_render_assets(
           std::string{DynamicPlayerSkinTextureAsset};
     }
     pending_models.push_back({type.id,
+                              std::nullopt,
                               std::nullopt,
                               first_person_player_skin_model_id(),
                               std::move(first_person_dynamic_skin),
@@ -466,6 +477,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
     pending_models.push_back({type.id,
                               std::nullopt,
+                              std::nullopt,
                               player_slim_model_id(),
                               slim_definition,
                               false,
@@ -474,6 +486,7 @@ EntityRenderAssetsResult build_entity_render_assets(
                               false});
 
     pending_models.push_back({type.id,
+                              std::nullopt,
                               std::nullopt,
                               first_person_player_slim_model_id(),
                               make_first_person_player_definition(slim_definition),
@@ -490,6 +503,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
     pending_models.push_back({type.id,
                               std::nullopt,
+                              std::nullopt,
                               player_slim_skin_model_id(),
                               std::move(slim_dynamic_skin_definition),
                               false,
@@ -505,6 +519,7 @@ EntityRenderAssetsResult build_entity_render_assets(
           std::string{DynamicPlayerSkinTextureAsset};
     }
     pending_models.push_back({type.id,
+                              std::nullopt,
                               std::nullopt,
                               first_person_player_slim_skin_model_id(),
                               std::move(first_person_slim_dynamic_skin),
@@ -556,6 +571,7 @@ EntityRenderAssetsResult build_entity_render_assets(
         }
         pending_models.push_back({EntityTypeID{},
                                   item_id,
+                                  std::nullopt,
                                   model_id,
                                   std::move(model_definition.value()),
                                   false,
@@ -587,6 +603,40 @@ EntityRenderAssetsResult build_entity_render_assets(
                                                     "build block item model",
                                                     "block model was not loaded"});
         }
+        if (variant->render_mode == voxel::BlockRenderMode::BlockEntityModel &&
+            !variant->model.asset.empty()) {
+          auto model_text = resources.load_text({variant->model.asset}, asset::AssetKind::Model);
+          if (!model_text) {
+            return EntityRenderAssetsResult::failure(model_text.error());
+          }
+          auto entity_model_definition =
+              render::parse_entity_model_json(model_text.value());
+          if (!entity_model_definition) {
+            return EntityRenderAssetsResult::failure({variant->model.asset,
+                                                      resources.resolve_asset_path({variant->model.asset}, asset::AssetKind::Model),
+                                                      "parse block item model",
+                                                      entity_model_definition.error().message});
+          }
+          render::EntityModelDefinition definition =
+              std::move(entity_model_definition.value());
+          if (definition.name.empty()) {
+            definition.name = asset_leaf_name(variant->model.asset);
+          }
+          for (std::string& texture : definition.texture_assets) {
+            texture = resolve_entity_input_texture(texture);
+            add_texture(texture);
+          }
+          pending_models.push_back({EntityTypeID{},
+                                    item_id,
+                                    std::nullopt,
+                                    model_id,
+                                    std::move(definition),
+                                    false,
+                                    false,
+                                    false,
+                                    false});
+          break;
+        }
         if (model_definition != nullptr) {
           for (const std::string& texture : model_definition->texture_assets) {
             add_texture(texture);
@@ -613,17 +663,34 @@ EntityRenderAssetsResult build_entity_render_assets(
         variant->model.asset.empty()) {
       continue;
     }
-    const voxel::BlockModelDefinition* model_definition =
-        block_model_by_variant[variant_value];
-    if (model_definition == nullptr) {
+    auto model_text = resources.load_text({variant->model.asset}, asset::AssetKind::Model);
+    if (!model_text) {
+      return EntityRenderAssetsResult::failure(model_text.error());
+    }
+    auto model_definition = render::parse_entity_model_json(model_text.value());
+    if (!model_definition) {
       return EntityRenderAssetsResult::failure({variant->model.asset,
                                                 resources.resolve_asset_path({variant->model.asset}, asset::AssetKind::Model),
-                                                "build block-attached model",
-                                                "block model was not loaded"});
+                                                "parse block-attached model",
+                                                model_definition.error().message});
     }
-    for (const std::string& texture : model_definition->texture_assets) {
+    render::EntityModelDefinition definition = std::move(model_definition.value());
+    if (definition.name.empty()) {
+      definition.name = asset_leaf_name(variant->model.asset);
+    }
+    for (std::string& texture : definition.texture_assets) {
+      texture = resolve_entity_input_texture(texture);
       add_texture(texture);
     }
+    pending_models.push_back({EntityTypeID{},
+                              std::nullopt,
+                              voxel::BlockVariantID{variant_value},
+                              block_attached_model_id(voxel::BlockVariantID{variant_value}),
+                              std::move(definition),
+                              false,
+                              false,
+                              false,
+                              false});
   }
   add_texture(std::string{WhiteTextureAsset});
   add_texture("arvane:texture/missing");
@@ -665,6 +732,8 @@ EntityRenderAssetsResult build_entity_render_assets(
   }
   EntityRenderAssets assets;
   assets.texture_atlas = std::move(atlas_result.value());
+  assets.block_attached_model_by_variant.resize(block_registry.variant_count());
+  assets.block_attached_rotation_by_variant.resize(block_registry.variant_count());
 
   for (const PendingModel& pending : pending_models) {
     std::vector<render::EntityModelTextureBinding> bindings;
@@ -737,6 +806,15 @@ EntityRenderAssetsResult build_entity_render_assets(
     }
     if (pending.item_id.has_value()) {
       assets.model_by_item[pending.item_id.value()] = pending.model_id;
+    } else if (pending.block_attached_variant.has_value()) {
+      assets.block_attached_model_by_variant[pending.block_attached_variant->value] =
+          pending.model_id;
+      if (const voxel::BlockVariantRecord* variant =
+              block_registry.variant(pending.block_attached_variant.value());
+          variant != nullptr) {
+        assets.block_attached_rotation_by_variant[pending.block_attached_variant->value] =
+            block_attached_rotation(variant->model_transform);
+      }
     } else if (pending.first_person_player && pending.player_skin_atlas &&
                pending.slim_player) {
       assets.first_person_player_slim_skin_model = pending.model_id;
@@ -829,7 +907,6 @@ EntityRenderAssetsResult build_entity_render_assets(
 
   assets.break_overlay_model_by_variant.resize(block_registry.variant_count());
   assets.outline_model_by_variant.resize(block_registry.variant_count());
-  assets.block_attached_model_by_variant.resize(block_registry.variant_count());
   const asset::TextureAtlasEntry* white_entry =
       assets.texture_atlas.find(std::string{WhiteTextureAsset});
   if (white_entry == nullptr) {
@@ -870,18 +947,6 @@ EntityRenderAssetsResult build_entity_render_assets(
       const std::span<const voxel::BlockModelBoxRenderData> cached_boxes =
           block_render_data.model_boxes(variant_id);
       model_boxes.assign(cached_boxes.begin(), cached_boxes.end());
-    }
-
-    if (variant->render_mode == voxel::BlockRenderMode::BlockEntityModel &&
-        !variant->model.asset.empty()) {
-      render::ItemBlockModelInput input;
-      input.id = block_attached_model_id(variant_id);
-      input.name = variant->debug_name + "#block_attached";
-      input.translucent = variant->render_category == voxel::RenderCategory::Transparent;
-      input.model_boxes =
-          std::span<const voxel::BlockModelBoxRenderData>{model_boxes.data(), model_boxes.size()};
-      assets.block_attached_model_by_variant[variant_value] = input.id;
-      assets.models.push_back(render::build_block_item_model(input));
     }
 
     for (usize stage = 0; stage < BreakStageTextureCount; ++stage) {

@@ -494,16 +494,19 @@ void set_side_textures(
   const auto finite_vec3 = [finite](Vec3f value) noexcept {
     return finite(value.x) && finite(value.y) && finite(value.z);
   };
-  const auto in_range = [](f32 value) noexcept {
+  const auto in_xz_range = [](f32 value) noexcept {
+    return value >= -8.0F && value <= 8.0F;
+  };
+  const auto in_y_range = [](f32 value) noexcept {
     return value >= 0.0F && value <= 16.0F;
   };
   if (!finite_vec3(box.min) || !finite_vec3(box.max) || !finite_vec3(box.origin) ||
       !finite_vec3(box.rotation) || !finite(box.inflate)) {
     return BlockRegistryError{"block model box coordinates, transforms, and inflate must be finite"};
   }
-  if (!in_range(box.min.x) || !in_range(box.min.y) || !in_range(box.min.z) ||
-      !in_range(box.max.x) || !in_range(box.max.y) || !in_range(box.max.z)) {
-    return BlockRegistryError{"block model box coordinates must be in the range 0..16"};
+  if (!in_xz_range(box.min.x) || !in_y_range(box.min.y) || !in_xz_range(box.min.z) ||
+      !in_xz_range(box.max.x) || !in_y_range(box.max.y) || !in_xz_range(box.max.z)) {
+    return BlockRegistryError{"block model box coordinates must use x/z in -8..8 and y in 0..16"};
   }
   if (box.min.x > box.max.x || box.min.y > box.max.y || box.min.z > box.max.z) {
     return BlockRegistryError{"block model box min must be less than or equal to max"};
@@ -1729,6 +1732,14 @@ BlockFace transform_block_face(
   return face;
 }
 
+Vec3f block_model_coord_to_block_coord(Vec3f point) noexcept {
+  return {point.x + 8.0F, point.y, point.z + 8.0F};
+}
+
+Vec3i block_model_coord_to_block_coord(Vec3i point) noexcept {
+  return {point.x + 8, point.y, point.z + 8};
+}
+
 Vec3i transform_model_point(
     Vec3i point,
     Vec3i center_origin,
@@ -1835,23 +1846,27 @@ std::vector<Aabb3f> make_block_model_collision_boxes(
     BlockModelTransform transform) {
   std::vector<Aabb3f> boxes;
   boxes.reserve(model.boxes.size());
+  const Vec3f center_origin_units =
+      block_model_coord_to_block_coord(model.center_origin);
   const Vec3f center_origin{
-      model.center_origin.x / 16.0F,
-      model.center_origin.y / 16.0F,
-      model.center_origin.z / 16.0F};
+      center_origin_units.x / 16.0F,
+      center_origin_units.y / 16.0F,
+      center_origin_units.z / 16.0F};
   for (const BlockModelBoxDefinition& box : model.boxes) {
     if (box.min.x >= box.max.x || box.min.y >= box.max.y || box.min.z >= box.max.z) {
       continue;
     }
+    const Vec3f min_units = block_model_coord_to_block_coord(box.min);
+    const Vec3f max_units = block_model_coord_to_block_coord(box.max);
     const Vec3f min{
-        static_cast<f32>(box.min.x) / 16.0F,
-        static_cast<f32>(box.min.y) / 16.0F,
-        static_cast<f32>(box.min.z) / 16.0F,
+        min_units.x / 16.0F,
+        min_units.y / 16.0F,
+        min_units.z / 16.0F,
     };
     const Vec3f max{
-        static_cast<f32>(box.max.x) / 16.0F,
-        static_cast<f32>(box.max.y) / 16.0F,
-        static_cast<f32>(box.max.z) / 16.0F,
+        max_units.x / 16.0F,
+        max_units.y / 16.0F,
+        max_units.z / 16.0F,
     };
 
     const std::array<Vec3f, 8> corners{{

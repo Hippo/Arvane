@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <span>
 #include <string_view>
 
 namespace arv::desktop {
@@ -89,6 +90,95 @@ namespace {
          std::abs(coord.value.z - center.value.z) <= distances.render_distance;
 }
 
+[[nodiscard]] const std::vector<ChunkViewState::BlockAttachedModelEntry>&
+block_attached_entries_for_chunk(
+    ChunkViewState& chunk_view,
+    const voxel::ChunkSection& chunk,
+    ChunkSectionCoord coord,
+    std::span<const render::EntityModelID> block_attached_models) {
+  const u64 content_version = chunk.content_version();
+  auto cached = chunk_view.block_attached_model_cache.find(coord);
+  if (cached != chunk_view.block_attached_model_cache.end() &&
+      cached->second.content_version == content_version) {
+    return cached->second.entries;
+  }
+
+  ChunkViewState::BlockAttachedModelCache next;
+  next.content_version = content_version;
+  for (usize index = 0; index < voxel::ChunkVolume; ++index) {
+    const voxel::BlockVariantID variant_id =
+        chunk.block(voxel::local_pos(index));
+    if (variant_id.value >= block_attached_models.size() ||
+        block_attached_models[variant_id.value].value == 0U) {
+      continue;
+    }
+    next.entries.push_back({voxel::local_pos(index), variant_id});
+  }
+  auto [iter, inserted] =
+      chunk_view.block_attached_model_cache.insert_or_assign(coord, std::move(next));
+  (void)inserted;
+  return iter->second.entries;
+}
+
+void append_block_attached_model_draws(
+    render::FramePacket& frame,
+    DesktopGameSession& session,
+    ChunkViewState& chunk_view,
+    const EntityRenderAssets& entity_render_assets,
+    const io::ChunkDistanceConfig& distances) {
+  const std::vector<render::ChunkDrawItem>& resident_chunks =
+      chunk_draw_items(chunk_view);
+  const std::vector<render::EntityModelID>& block_attached_models =
+      entity_render_assets.block_attached_model_by_variant;
+  for (const render::ChunkDrawItem& draw_item : resident_chunks) {
+    const ChunkSectionCoord coord = draw_item.key.coord;
+    if (draw_item.key.world_id != frame.world_view.world_id) {
+      continue;
+    }
+    if (!chunk_inside_render_window(chunk_view, distances, coord)) {
+      continue;
+    }
+    if (!render::chunk_aabb_intersects_view(frame.world_view, coord)) {
+      continue;
+    }
+
+    const voxel::ChunkSection* chunk = session.client_world.find_chunk(coord);
+    if (chunk == nullptr) {
+      chunk_view.block_attached_model_cache.erase(coord);
+      continue;
+    }
+    const std::vector<ChunkViewState::BlockAttachedModelEntry>& entries =
+        block_attached_entries_for_chunk(
+            chunk_view,
+            *chunk,
+            coord,
+            block_attached_models);
+    for (const ChunkViewState::BlockAttachedModelEntry& entry : entries) {
+      const voxel::BlockVariantID variant_id = entry.variant_id;
+      if (variant_id.value >= block_attached_models.size()) {
+        continue;
+      }
+      const render::EntityModelID model_id =
+          block_attached_models[variant_id.value];
+      if (model_id.value == 0U) {
+        continue;
+      }
+
+      const BlockPos block =
+          chunk_local_to_block(coord, entry.local);
+      render::EntityDrawItem item;
+      item.model_id = model_id;
+      item.position = block_center(block);
+      if (variant_id.value < entity_render_assets.block_attached_rotation_by_variant.size()) {
+        item.rotation =
+            entity_render_assets.block_attached_rotation_by_variant[variant_id.value];
+      }
+      item.scale = 1.0F;
+      frame.entities.push_back(std::move(item));
+    }
+  }
+}
+
 } // namespace
 
 usize populate_chunk_draw_lists(
@@ -139,8 +229,10 @@ usize populate_chunk_draw_lists(
 void populate_world_frame_draw_items(
     render::FramePacket& frame,
     DesktopGameSession& session,
+    ChunkViewState& chunk_view,
     const EntityRenderAssets& entity_render_assets,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
+    const io::ChunkDistanceConfig& chunk_distances,
     const io::RenderConfig& render_config,
     bool show_chunk_boundaries,
     std::chrono::steady_clock::time_point now,
@@ -270,32 +362,12 @@ void populate_world_frame_draw_items(
       frame.world_view.world_id,
       entity_animation_time);
 
-  for (const ChunkSectionCoord coord : session.client_world.loaded_chunk_coords()) {
-    const voxel::ChunkSection* chunk = session.client_world.find_chunk(coord);
-    if (chunk == nullptr) {
-      continue;
-    }
-    for (usize index = 0; index < voxel::ChunkVolume; ++index) {
-      const voxel::BlockVariantID variant_id =
-          chunk->block(voxel::local_pos(index));
-      if (variant_id.value >= entity_render_assets.block_attached_model_by_variant.size()) {
-        continue;
-      }
-      const render::EntityModelID model_id =
-          entity_render_assets.block_attached_model_by_variant[variant_id.value];
-      if (model_id.value == 0U) {
-        continue;
-      }
-
-      const BlockPos block =
-          chunk_local_to_block(coord, voxel::local_pos(index));
-      render::EntityDrawItem item;
-      item.model_id = model_id;
-      item.position = block_center(block);
-      item.scale = 1.0F;
-      frame.entities.push_back(std::move(item));
-    }
-  }
+  append_block_attached_model_draws(
+      frame,
+      session,
+      chunk_view,
+      entity_render_assets,
+      chunk_distances);
 
   const protocol::BlockBreakProgress& block_break =
       session.client->block_break_progress();

@@ -343,8 +343,8 @@ TEST(BlockRegistryTests, BlockModelTexturesCanResolveInputsOrSpecificAssets) {
   "bones": {"root": {}},
   "boxes": [{
     "bone": "root",
-    "min": [0, 0, 0],
-    "max": [16, 8, 16],
+    "min": [-8, 0, -8],
+    "max": [8, 8, 8],
     "up": {"texture": 0, "uv": [0, 0, 16, 16]},
     "down": {"texture": -1}
   }]
@@ -372,22 +372,22 @@ TEST(BlockRegistryTests, AuthoredModelDerivesCenterOriginFromBoxBounds) {
   "bones": {"root": {}},
   "boxes": [{
     "bone": "root",
-    "min": [0, 0, 0],
-    "max": [16, 8, 16],
+    "min": [-8, 0, -8],
+    "max": [8, 8, 8],
     "up": {"texture": 0, "uv": [0, 0, 16, 16]}
   }, {
     "bone": "root",
-    "min": [0, 8, 0],
-    "max": [16, 16, 8],
+    "min": [-8, 8, -8],
+    "max": [0, 16, 8],
     "north": {"texture": 0, "uv": [0, 0, 16, 8]}
   }]
 }
 )json");
 
   ASSERT_TRUE(model) << model.error().message;
-  EXPECT_FLOAT_EQ(model.value().center_origin.x, 8.0F);
+  EXPECT_FLOAT_EQ(model.value().center_origin.x, 0.0F);
   EXPECT_FLOAT_EQ(model.value().center_origin.y, 8.0F);
-  EXPECT_FLOAT_EQ(model.value().center_origin.z, 8.0F);
+  EXPECT_FLOAT_EQ(model.value().center_origin.z, 0.0F);
 }
 
 TEST(BlockRegistryTests, BlockModelCollisionBoxesApplyStateTransform) {
@@ -398,13 +398,13 @@ TEST(BlockRegistryTests, BlockModelCollisionBoxesApplyStateTransform) {
   "bones": {"root": {}},
   "boxes": [{
     "bone": "root",
-    "min": [0, 0, 0],
-    "max": [16, 8, 16],
+    "min": [-8, 0, -8],
+    "max": [8, 8, 8],
     "up": {"texture": 0, "uv": [0, 0, 16, 16]}
   }, {
     "bone": "root",
-    "min": [0, 8, 0],
-    "max": [16, 16, 8],
+    "min": [-8, 8, -8],
+    "max": [0, 16, 8],
     "north": {"texture": 0, "uv": [0, 0, 16, 8]}
   }]
 }
@@ -418,10 +418,12 @@ TEST(BlockRegistryTests, BlockModelCollisionBoxesApplyStateTransform) {
   ASSERT_EQ(boxes.size(), 2U);
   EXPECT_FLOAT_EQ(boxes.front().min.y, 0.5F);
   EXPECT_FLOAT_EQ(boxes.front().max.y, 1.0F);
-  EXPECT_FLOAT_EQ(boxes.back().min.x, 0.5F);
+  EXPECT_FLOAT_EQ(boxes.back().min.x, 0.0F);
   EXPECT_FLOAT_EQ(boxes.back().max.x, 1.0F);
   EXPECT_FLOAT_EQ(boxes.back().min.y, 0.0F);
   EXPECT_FLOAT_EQ(boxes.back().max.y, 0.5F);
+  EXPECT_FLOAT_EQ(boxes.back().min.z, 0.0F);
+  EXPECT_FLOAT_EQ(boxes.back().max.z, 0.5F);
 }
 
 TEST(BlockRegistryTests, BlockModelRejectsUnsupportedCubeRotation) {
@@ -432,9 +434,9 @@ TEST(BlockRegistryTests, BlockModelRejectsUnsupportedCubeRotation) {
   "bones": {"root": {}},
   "boxes": [{
     "bone": "root",
-    "min": [0, 0, 0],
-    "max": [16, 16, 16],
-    "origin": [8, 8, 8],
+    "min": [-8, 0, -8],
+    "max": [8, 16, 8],
+    "origin": [0, 8, 0],
     "rotation": [0, 45, 0],
     "up": {"texture": 0, "uv": [0, 0, 16, 16]}
   }]

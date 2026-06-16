@@ -44,8 +44,19 @@ struct ChunkViewState {
     sched::JobFuture<TimedChunkMeshBatchResult> job;
   };
 
+  struct BlockAttachedModelEntry {
+    SectionLocalPos local{};
+    voxel::BlockVariantID variant_id{};
+  };
+
+  struct BlockAttachedModelCache {
+    u64 content_version{};
+    std::vector<BlockAttachedModelEntry> entries{};
+  };
+
   HashMap<ChunkSectionCoord, render::ChunkDrawItem> draw_items;
   HashMap<ChunkSectionCoord, u64> empty_mesh_content_versions;
+  HashMap<ChunkSectionCoord, BlockAttachedModelCache> block_attached_model_cache;
   std::vector<PendingMesh> pending_meshes;
   HashSet<ChunkSectionCoord> mesh_in_flight;
 

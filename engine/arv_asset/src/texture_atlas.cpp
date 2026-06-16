@@ -200,10 +200,11 @@ void copy_with_edge_padding(
 }
 
 [[nodiscard]] Vec3i model_coord_to_render_coord(Vec3f value) noexcept {
+  const Vec3f block_coord = voxel::block_model_coord_to_block_coord(value);
   return {
-      static_cast<i32>(std::lround(value.x)),
-      static_cast<i32>(std::lround(value.y)),
-      static_cast<i32>(std::lround(value.z))};
+      static_cast<i32>(std::lround(block_coord.x)),
+      static_cast<i32>(std::lround(block_coord.y)),
+      static_cast<i32>(std::lround(block_coord.z))};
 }
 
 } // namespace
