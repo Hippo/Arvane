@@ -70,6 +70,11 @@ enum class RenderCategory : u8 {
   Transparent,
 };
 
+enum class BlockRenderMode : u8 {
+  Terrain,
+  BlockEntityModel,
+};
+
 enum class BlockRenderTint : u8 {
   None,
   Foliage,
@@ -146,12 +151,14 @@ struct BlockDefinition {
   BlockPhysicsProperties physics{};
   BlockDropDefinition drops{};
   RenderCategory render_category{RenderCategory::None};
+  BlockRenderMode render_mode{BlockRenderMode::Terrain};
   bool is_item{true};
   f32 item_buoyancy{1.0F};
   bool hide_same_variant_faces{true};
   BlockRenderTint render_tint{BlockRenderTint::None};
   std::array<std::string, BlockFaceCount> texture_assets{};
   std::string particle_texture_asset{};
+  std::string container_type{};
   BlockModelReference model{};
   std::vector<StatePropertyDefinition> states{};
 };
@@ -166,6 +173,7 @@ struct BlockRecord {
   BlockBlastProperties blast{};
   BlockPhysicsProperties physics{};
   BlockDropDefinition drops{};
+  std::string container_type{};
   bool is_item{true};
   f32 item_buoyancy{1.0F};
   std::string particle_texture_asset{};
@@ -192,10 +200,12 @@ struct BlockVariantRecord {
   BlockBlastProperties blast{};
   BlockPhysicsProperties physics{};
   RenderCategory render_category{RenderCategory::None};
+  BlockRenderMode render_mode{BlockRenderMode::Terrain};
   BlockRenderTint render_tint{BlockRenderTint::None};
   bool hide_same_variant_faces{};
   std::array<std::string, BlockFaceCount> texture_assets{};
   std::string particle_texture_asset{};
+  std::string container_type{};
   BlockModelReference model{};
   BlockModelTransform model_transform{};
   u32 block_body_index{};
@@ -479,6 +489,9 @@ private:
 
 [[nodiscard]] std::vector<Aabb3f> make_block_model_collision_boxes(
     const BlockModelDefinition& model,
+    BlockModelTransform transform = {});
+[[nodiscard]] std::vector<Aabb3f> make_block_attached_model_collision_boxes(
+    const AuthoredModelDefinition& model,
     BlockModelTransform transform = {});
 
 } // namespace arv::voxel

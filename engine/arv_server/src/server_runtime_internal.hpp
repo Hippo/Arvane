@@ -10,6 +10,7 @@
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/explosion.hpp"
@@ -148,6 +149,16 @@ struct PlayerPermissionCache {
 struct PendingEntityAttack {
   SessionID session_id{};
   protocol::ServerboundAttackEntity attack{};
+};
+
+struct ContainerSession {
+  u32 session_id{};
+  SessionID player_session_id{};
+  PlayerID player_id{};
+  WorldID world_id{};
+  BlockPos block{};
+  std::string container_type{};
+  u32 revision{};
 };
 
 enum class VehicleDamageStage : u8 {
@@ -371,6 +382,15 @@ struct ServerRuntimeImpl {
   void handle_inventory_action_request(
       net::ConnectionID connection_id,
       const protocol::ServerboundInventoryActionRequest& request);
+  void handle_open_container_block(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundOpenContainerBlock& request);
+  void handle_container_action(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundContainerAction& action);
+  void handle_close_container(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundCloseContainer& request);
   void handle_chat_message(
       net::ConnectionID connection_id,
       const protocol::ServerboundChatMessage& message);
@@ -432,6 +452,21 @@ struct ServerRuntimeImpl {
 
   void tick_dropped_item_pickups(Seconds tick_seconds);
   void spawn_dropped_item_stack(WorldID world_id, Vec3f position, player::ItemStack stack);
+  void tick_container_sessions();
+  void close_container_session(
+      u32 container_session_id,
+      protocol::ContainerCloseReason reason,
+      bool return_cursor = true);
+  void close_container_sessions_for_player_session(
+      SessionID session_id,
+      protocol::ContainerCloseReason reason);
+  void close_container_sessions_at(
+      WorldID world_id,
+      BlockPos block,
+      protocol::ContainerCloseReason reason);
+  void drop_and_remove_block_container(WorldID world_id, BlockPos block);
+  void send_container_content(ContainerSession& session);
+  void send_container_content_to_viewers(WorldID world_id, BlockPos block);
   void expire_timed_out_skin_uploads();
   void tick_vehicle_damage_effects();
   void handle_vehicle_damage_result(
@@ -568,6 +603,8 @@ struct ServerRuntimeImpl {
   std::vector<net::NetworkEvent> inbound_events_;
   const voxel::BlockRegistry* block_registry_{};
   const player::ItemRegistry* item_registry_{};
+  const player::ContainerTypeRegistry* container_types_{};
+  const player::ContainerUiLayoutRegistry* container_layouts_{};
   const entity::EntityRegistry* entity_registry_{};
   const entity::VehicleDefinitionRegistry* vehicle_registry_{};
   const world::EntityGoalRegistry* entity_goals_{};
@@ -603,6 +640,7 @@ struct ServerRuntimeImpl {
   HashMap<PlayerID, protocol::BlockBreakProgress> last_sent_block_break_progress_;
   arv::text::TextVariableStore text_variables_;
   HashMap<PlayerID, BlockBreakAttempt> block_break_attempts_;
+  HashMap<u32, ContainerSession> container_sessions_;
   HashMap<SessionID, PlayerCombatState> combat_states_;
   HashSet<SessionID> logged_chunk_interest_sessions_;
   HashSet<SessionID> logged_chunk_delivery_sessions_;
@@ -618,6 +656,7 @@ struct ServerRuntimeImpl {
   std::string command_permission_denied_message_{"No permission"};
   plugin::PluginManager* plugins_{};
   protocol::ChatMessageId next_chat_message_id_{1U};
+  u32 next_container_session_id_{1U};
   u32 active_skin_uploads_global_{};
   u64 skin_storage_bytes_{};
   ServerWorldJobRuntime world_jobs_;

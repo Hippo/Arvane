@@ -389,7 +389,9 @@ BlockModelAssetDataResult load_block_model_definitions(
         return BlockModelAssetDataResult::failure(model_text.error());
       }
       auto model_definition =
-          voxel::parse_block_model_json(model_text.value(), variant->model.texture_inputs);
+          variant->render_mode == voxel::BlockRenderMode::BlockEntityModel
+              ? voxel::parse_authored_model_json(model_text.value())
+              : voxel::parse_block_model_json(model_text.value(), variant->model.texture_inputs);
       if (!model_definition) {
         return BlockModelAssetDataResult::failure({variant->model.asset,
                                                    resources.resolve_asset_path({variant->model.asset}, AssetKind::Model),
@@ -416,11 +418,15 @@ void apply_block_model_collision_boxes(
       registry.set_collision_boxes(block_model.variant_id, {});
       continue;
     }
-    registry.set_collision_boxes(
-        block_model.variant_id,
-        voxel::make_block_model_collision_boxes(
-            block_model.definition,
-            variant->model_transform));
+    const std::vector<Aabb3f> boxes =
+        variant->render_mode == voxel::BlockRenderMode::BlockEntityModel
+            ? voxel::make_block_attached_model_collision_boxes(
+                  block_model.definition,
+                  variant->model_transform)
+            : voxel::make_block_model_collision_boxes(
+                  block_model.definition,
+                  variant->model_transform);
+    registry.set_collision_boxes(block_model.variant_id, boxes);
   }
 }
 

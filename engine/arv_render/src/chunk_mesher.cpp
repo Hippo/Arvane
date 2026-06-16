@@ -779,6 +779,9 @@ ChunkMeshData build_chunk_mesh(
     if (self == nullptr || self->render_category == voxel::RenderCategory::None) {
       continue;
     }
+    if (self->render_mode == voxel::BlockRenderMode::BlockEntityModel) {
+      continue;
+    }
 
     CpuMeshBuffer& output = self->render_category == voxel::RenderCategory::Transparent
                                 ? mesh.transparent

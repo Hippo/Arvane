@@ -1,6 +1,7 @@
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/explosion.hpp"
@@ -135,6 +136,20 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   const auto inventory_action =
       registry.lookup(arv::protocol::MessageType::ServerboundInventoryActionRequest);
   const auto inventory_update = registry.lookup(arv::protocol::MessageType::ClientboundInventoryUpdate);
+  const auto open_container_block =
+      registry.lookup(arv::protocol::MessageType::ServerboundOpenContainerBlock);
+  const auto open_container =
+      registry.lookup(arv::protocol::MessageType::ClientboundOpenContainer);
+  const auto container_action =
+      registry.lookup(arv::protocol::MessageType::ServerboundContainerAction);
+  const auto container_set_slot =
+      registry.lookup(arv::protocol::MessageType::ClientboundContainerSetSlot);
+  const auto container_set_content =
+      registry.lookup(arv::protocol::MessageType::ClientboundContainerSetContent);
+  const auto close_container =
+      registry.lookup(arv::protocol::MessageType::ServerboundCloseContainer);
+  const auto close_container_client =
+      registry.lookup(arv::protocol::MessageType::ClientboundCloseContainer);
   const auto chat_send = registry.lookup(arv::protocol::MessageType::ServerboundChatMessage);
   const auto chat_receive = registry.lookup(arv::protocol::MessageType::ClientboundChatMessage);
   const auto text_variables =
@@ -192,6 +207,13 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(passengers_set.has_value());
   ASSERT_TRUE(inventory_action.has_value());
   ASSERT_TRUE(inventory_update.has_value());
+  ASSERT_TRUE(open_container_block.has_value());
+  ASSERT_TRUE(open_container.has_value());
+  ASSERT_TRUE(container_action.has_value());
+  ASSERT_TRUE(container_set_slot.has_value());
+  ASSERT_TRUE(container_set_content.has_value());
+  ASSERT_TRUE(close_container.has_value());
+  ASSERT_TRUE(close_container_client.has_value());
   ASSERT_TRUE(chat_send.has_value());
   ASSERT_TRUE(chat_receive.has_value());
   ASSERT_TRUE(text_variables.has_value());
@@ -258,6 +280,13 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(passengers_set->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
   EXPECT_EQ(inventory_action->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(inventory_update->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(open_container_block->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(open_container->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(container_action->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(container_set_slot->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(container_set_content->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(close_container->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(close_container_client->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(chat_send->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(chat_receive->direction, arv::protocol::MessageDirection::ServerToClient);
   EXPECT_EQ(text_variables->direction, arv::protocol::MessageDirection::ServerToClient);
@@ -304,13 +333,20 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(passengers_set->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_action->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(inventory_update->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(open_container_block->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(open_container->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(container_action->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(container_set_slot->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(container_set_content->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(close_container->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(close_container_client->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(chat_send->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(chat_receive->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(text_variables->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 70U);
+  EXPECT_EQ(registry.size(), 77U);
 }
 
 TEST(ProtocolTests, PackSyncPacketsRoundTrip) {
@@ -1175,4 +1211,123 @@ TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
   oversized_data.write<arv::u32>(arv::player::MaxItemStackDataBytes + 1U);
   EXPECT_FALSE(arv::protocol::deserialize_clientbound_inventory_update(
       std::move(oversized_data).take_bytes()));
+}
+
+TEST(ProtocolTests, ContainerSyncMessagesRoundTripAndRejectMalformedEnums) {
+  arv::protocol::ServerboundOpenContainerBlock open_request;
+  open_request.world_id = arv::WorldID{4};
+  open_request.block = {{7, 8, 9}};
+  open_request.client_action_id = 12;
+  const auto decoded_open_request =
+      arv::protocol::deserialize_serverbound_open_container_block(
+          arv::protocol::serialize_serverbound_open_container_block(open_request));
+  ASSERT_TRUE(decoded_open_request) << decoded_open_request.error().message;
+  EXPECT_EQ(decoded_open_request.value().world_id, arv::WorldID{4});
+  EXPECT_EQ(decoded_open_request.value().block, (arv::BlockPos{{7, 8, 9}}));
+  EXPECT_EQ(decoded_open_request.value().client_action_id, 12U);
+
+  arv::protocol::ClientboundOpenContainer open;
+  open.session_id = 22;
+  open.revision = 3;
+  open.container_type = "arvane:chest";
+  open.title = "Chest";
+  open.ui_layout = "arvane:chest";
+  open.container_slots = {
+      arv::player::ItemStack{arv::player::ItemID{10}, 5, stack_data("chest")},
+      std::nullopt};
+  open.player_slots = {
+      std::nullopt,
+      arv::player::ItemStack{arv::player::ItemID{11}, 2}};
+  open.carried_stack = arv::player::ItemStack{arv::player::ItemID{12}, 1};
+  const auto decoded_open = arv::protocol::deserialize_clientbound_open_container(
+      arv::protocol::serialize_clientbound_open_container(open));
+  ASSERT_TRUE(decoded_open) << decoded_open.error().message;
+  EXPECT_EQ(decoded_open.value().session_id, 22U);
+  EXPECT_EQ(decoded_open.value().container_type, "arvane:chest");
+  EXPECT_EQ(decoded_open.value().ui_layout, "arvane:chest");
+  ASSERT_EQ(decoded_open.value().container_slots.size(), 2U);
+  ASSERT_TRUE(decoded_open.value().container_slots[0].has_value());
+  EXPECT_TRUE(arv::player::item_stack_data_equal(
+      decoded_open.value().container_slots[0]->data,
+      std::optional<arv::io::DataDocument>{stack_data("chest")}));
+  ASSERT_EQ(decoded_open.value().player_slots.size(), 2U);
+  ASSERT_TRUE(decoded_open.value().player_slots[1].has_value());
+  EXPECT_EQ(decoded_open.value().player_slots[1]->item, arv::player::ItemID{11});
+  ASSERT_TRUE(decoded_open.value().carried_stack.has_value());
+  EXPECT_EQ(decoded_open.value().carried_stack->item, arv::player::ItemID{12});
+
+  arv::protocol::ServerboundContainerAction action;
+  action.session_id = 22;
+  action.client_action_id = 13;
+  action.kind = arv::protocol::ContainerActionKind::ShiftTransfer;
+  action.source = arv::player::ContainerSlotSource::PlayerInventory;
+  action.slot_index = 5;
+  action.button = arv::player::InventoryClickButton::Secondary;
+  const auto decoded_action = arv::protocol::deserialize_serverbound_container_action(
+      arv::protocol::serialize_serverbound_container_action(action));
+  ASSERT_TRUE(decoded_action) << decoded_action.error().message;
+  EXPECT_EQ(decoded_action.value().kind, arv::protocol::ContainerActionKind::ShiftTransfer);
+  EXPECT_EQ(decoded_action.value().source, arv::player::ContainerSlotSource::PlayerInventory);
+  EXPECT_EQ(decoded_action.value().button, arv::player::InventoryClickButton::Secondary);
+
+  arv::protocol::ClientboundContainerSetSlot set_slot;
+  set_slot.session_id = 22;
+  set_slot.revision = 4;
+  set_slot.source = arv::player::ContainerSlotSource::OpenedContainer;
+  set_slot.slot_index = 6;
+  set_slot.stack = arv::player::ItemStack{arv::player::ItemID{14}, 9};
+  const auto decoded_set_slot =
+      arv::protocol::deserialize_clientbound_container_set_slot(
+          arv::protocol::serialize_clientbound_container_set_slot(set_slot));
+  ASSERT_TRUE(decoded_set_slot) << decoded_set_slot.error().message;
+  EXPECT_EQ(decoded_set_slot.value().slot_index, 6U);
+  ASSERT_TRUE(decoded_set_slot.value().stack.has_value());
+  EXPECT_EQ(decoded_set_slot.value().stack->count, 9U);
+
+  arv::protocol::ClientboundContainerSetContent content;
+  content.session_id = 22;
+  content.revision = 5;
+  content.container_slots = open.container_slots;
+  content.player_slots = open.player_slots;
+  const auto decoded_content =
+      arv::protocol::deserialize_clientbound_container_set_content(
+          arv::protocol::serialize_clientbound_container_set_content(content));
+  ASSERT_TRUE(decoded_content) << decoded_content.error().message;
+  EXPECT_EQ(decoded_content.value().revision, 5U);
+  EXPECT_EQ(decoded_content.value().container_slots.size(), 2U);
+  EXPECT_EQ(decoded_content.value().player_slots.size(), 2U);
+
+  arv::protocol::ServerboundCloseContainer close_request{22, 14};
+  const auto decoded_close_request =
+      arv::protocol::deserialize_serverbound_close_container(
+          arv::protocol::serialize_serverbound_close_container(close_request));
+  ASSERT_TRUE(decoded_close_request) << decoded_close_request.error().message;
+  EXPECT_EQ(decoded_close_request.value().session_id, 22U);
+  EXPECT_EQ(decoded_close_request.value().client_action_id, 14U);
+
+  arv::protocol::ClientboundCloseContainer close{22, arv::protocol::ContainerCloseReason::TooFar};
+  const auto decoded_close = arv::protocol::deserialize_clientbound_close_container(
+      arv::protocol::serialize_clientbound_close_container(close));
+  ASSERT_TRUE(decoded_close) << decoded_close.error().message;
+  EXPECT_EQ(decoded_close.value().reason, arv::protocol::ContainerCloseReason::TooFar);
+
+  arv::protocol::MessageWriter invalid_action;
+  invalid_action.write<arv::u32>(22);
+  invalid_action.write<arv::u32>(15);
+  invalid_action.write<arv::u8>(255);
+  invalid_action.write<arv::u8>(0);
+  invalid_action.write<arv::u32>(0);
+  invalid_action.write<arv::u8>(0);
+  EXPECT_FALSE(arv::protocol::deserialize_serverbound_container_action(
+      std::move(invalid_action).take_bytes()));
+
+  arv::protocol::MessageWriter malformed_slots;
+  malformed_slots.write<arv::u32>(22);
+  malformed_slots.write<arv::u32>(5);
+  malformed_slots.write_string("arvane:chest");
+  malformed_slots.write_string("Chest");
+  malformed_slots.write_string("arvane:chest");
+  malformed_slots.write<arv::u32>(arv::protocol::MaxContainerSlots + 1U);
+  EXPECT_FALSE(arv::protocol::deserialize_clientbound_open_container(
+      std::move(malformed_slots).take_bytes()));
 }

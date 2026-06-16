@@ -1,4 +1,5 @@
 set(ARV_PLAYER_HEADERS
+  include/arv/player/container.hpp
   include/arv/player/inventory.hpp
   include/arv/player/item.hpp
   include/arv/player/permissions.hpp
@@ -12,6 +13,7 @@ target_include_directories(arv_player_headers INTERFACE include)
 target_link_libraries(arv_player_headers INTERFACE arv_core_headers arv_io_headers arv_voxel_headers)
 
 add_library(arv_player STATIC
+  src/container.cpp
   src/inventory.cpp
   src/item.cpp
   src/permissions.cpp

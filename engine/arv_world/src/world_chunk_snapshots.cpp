@@ -15,6 +15,10 @@ namespace {
 
 using DependencyMask = detail::ChunkDependencyMask;
 
+[[nodiscard]] u16 block_container_key(SectionLocalPos local) noexcept {
+  return static_cast<u16>(voxel::local_index(local));
+}
+
 [[nodiscard]] voxel::ChunkSnapshotSkyLightOverlayView make_generated_lighting_snapshot_overlay(
     const GenerationSurfaceProfile& surface,
     ChunkSectionCoord coord,
@@ -338,12 +342,149 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
   return published_any;
 }
 
+BlockAttachedContainer* WorldRuntime::ensure_block_container(
+    BlockPos pos,
+    std::string container_type,
+    u32 slot_count) {
+  assert_owner_thread();
+  const ChunkSectionCoord coord = block_to_chunk(pos);
+  const SectionLocalPos local = block_to_local(pos);
+  auto& section = impl_->block_containers[coord];
+  auto [iter, inserted] = section.emplace(
+      block_container_key(local),
+      BlockAttachedContainer{
+          std::move(container_type),
+          player::Inventory{slot_count},
+      });
+  if (!inserted) {
+    if (!container_type.empty()) {
+      iter->second.container_type = std::move(container_type);
+    }
+    if (iter->second.inventory.slot_count() != slot_count) {
+      player::Inventory resized{slot_count};
+      const usize copy_count = std::min<usize>(
+          iter->second.inventory.slot_count(),
+          resized.slot_count());
+      for (usize slot = 0; slot < copy_count; ++slot) {
+        (void)resized.set_slot(slot, iter->second.inventory.slot(slot));
+      }
+      iter->second.inventory = std::move(resized);
+    }
+  }
+  return &iter->second;
+}
+
+BlockAttachedContainer* WorldRuntime::find_block_container(BlockPos pos) noexcept {
+  assert_owner_thread();
+  const ChunkSectionCoord coord = block_to_chunk(pos);
+  auto section = impl_->block_containers.find(coord);
+  if (section == impl_->block_containers.end()) {
+    return nullptr;
+  }
+  auto container = section->second.find(block_container_key(block_to_local(pos)));
+  return container == section->second.end() ? nullptr : &container->second;
+}
+
+const BlockAttachedContainer* WorldRuntime::find_block_container(BlockPos pos) const noexcept {
+  assert_owner_thread();
+  const ChunkSectionCoord coord = block_to_chunk(pos);
+  auto section = impl_->block_containers.find(coord);
+  if (section == impl_->block_containers.end()) {
+    return nullptr;
+  }
+  auto container = section->second.find(block_container_key(block_to_local(pos)));
+  return container == section->second.end() ? nullptr : &container->second;
+}
+
+bool WorldRuntime::remove_block_container(BlockPos pos) noexcept {
+  assert_owner_thread();
+  const ChunkSectionCoord coord = block_to_chunk(pos);
+  auto section = impl_->block_containers.find(coord);
+  if (section == impl_->block_containers.end()) {
+    return false;
+  }
+  const usize erased = section->second.erase(block_container_key(block_to_local(pos)));
+  if (section->second.empty()) {
+    impl_->block_containers.erase(section);
+  }
+  return erased != 0U;
+}
+
+std::vector<SavedBlockContainer> WorldRuntime::saved_block_containers(
+    ChunkSectionCoord coord) const {
+  assert_owner_thread();
+  std::vector<SavedBlockContainer> saved;
+  auto section = impl_->block_containers.find(coord);
+  if (section == impl_->block_containers.end()) {
+    return saved;
+  }
+  std::vector<std::pair<u16, const BlockAttachedContainer*>> ordered;
+  ordered.reserve(section->second.size());
+  for (const auto& [local_key, container] : section->second) {
+    ordered.push_back({local_key, &container});
+  }
+  std::sort(
+      ordered.begin(),
+      ordered.end(),
+      [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+      });
+
+  for (const auto& [local_key, container] : ordered) {
+    SavedBlockContainer record;
+    record.local = voxel::local_pos(local_key);
+    record.container_type = container->container_type;
+    record.slot_count = static_cast<u32>(container->inventory.slot_count());
+    const auto& slots = container->inventory.slots();
+    for (usize slot = 0; slot < slots.size(); ++slot) {
+      if (!slots[slot].has_value()) {
+        continue;
+      }
+      record.slots.push_back({
+          static_cast<u32>(slot),
+          slots[slot].value(),
+      });
+    }
+    saved.push_back(std::move(record));
+  }
+  return saved;
+}
+
+void WorldRuntime::restore_saved_block_containers(
+    ChunkSectionCoord coord,
+    std::span<const SavedBlockContainer> containers) {
+  assert_owner_thread();
+  auto& section = impl_->block_containers[coord];
+  section.clear();
+  for (const SavedBlockContainer& record : containers) {
+    if (!voxel::is_valid_local(record.local) ||
+        record.container_type.empty() ||
+        record.slot_count == 0U) {
+      continue;
+    }
+    BlockAttachedContainer container;
+    container.container_type = record.container_type;
+    container.inventory = player::Inventory{record.slot_count};
+    for (const BlockContainerSlotRecord& slot : record.slots) {
+      if (slot.slot >= record.slot_count) {
+        continue;
+      }
+      (void)container.inventory.set_slot(slot.slot, slot.stack);
+    }
+    section[block_container_key(record.local)] = std::move(container);
+  }
+  if (section.empty()) {
+    impl_->block_containers.erase(coord);
+  }
+}
+
 void WorldRuntime::restore_saved_chunk(
     ChunkSectionCoord coord,
     std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
     std::array<voxel::LightWord, voxel::ChunkVolume> lights,
     std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids,
-    bool lighting_authoritative) noexcept {
+    bool lighting_authoritative,
+    std::span<const SavedBlockContainer> containers) {
   assert_owner_thread();
   voxel::ChunkSection& chunk =
       impl_->chunks.ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded, impl_->dirty);
@@ -352,6 +493,7 @@ void WorldRuntime::restore_saved_chunk(
       std::move(lights),
       std::move(fluids),
       lighting_authoritative);
+  restore_saved_block_containers(coord, containers);
   if (lighting_authoritative) {
     chunk.clear_dirty(voxel::ChunkDirtyFlags::Lighting);
     impl_->dirty.forget_lighting_chunk(coord);

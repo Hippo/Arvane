@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <utility>
 
 namespace arv::client {
 namespace {
@@ -55,6 +56,37 @@ std::optional<usize> inventory_slot_from_ui_action(
       continue;
     }
     return parse_unsigned_prefix_number(id.substr(prefix.size()));
+  }
+  return std::nullopt;
+}
+
+std::optional<ContainerSlotActionRef> container_slot_from_ui_action(
+    const ui::UiAction& action) noexcept {
+  if (action.action_id != "inventory_slot") {
+    return std::nullopt;
+  }
+
+  const std::string_view id{action.element_id};
+  constexpr std::string_view container_prefix = "container.slot.";
+  if (id.starts_with(container_prefix)) {
+    const std::optional<usize> slot =
+        parse_unsigned_prefix_number(id.substr(container_prefix.size()));
+    if (slot.has_value()) {
+      return ContainerSlotActionRef{
+          player::ContainerSlotSource::OpenedContainer,
+          slot.value()};
+    }
+  }
+
+  constexpr std::string_view player_prefix = "container.player_slot.";
+  if (id.starts_with(player_prefix)) {
+    const std::optional<usize> slot =
+        parse_unsigned_prefix_number(id.substr(player_prefix.size()));
+    if (slot.has_value()) {
+      return ContainerSlotActionRef{
+          player::ContainerSlotSource::PlayerInventory,
+          slot.value()};
+    }
   }
   return std::nullopt;
 }
@@ -184,6 +216,55 @@ bool append_inventory_hover_tooltip_if_needed(
   }
 
   const ui::UiItemStackView& stack = inventory_slots[slot.value()];
+  if (stack.empty()) {
+    return false;
+  }
+  std::string tooltip_text = stack_display_name(stack);
+  if (tooltip_text.empty()) {
+    return false;
+  }
+
+  ui::append_item_tooltip(
+      tree,
+      {
+          true,
+          std::move(tooltip_text),
+          metrics.logical_size,
+          cursor_position,
+      });
+  return true;
+}
+
+bool append_container_hover_tooltip_if_needed(
+    ui::UiTree& tree,
+    bool container_open,
+    const std::optional<ui::UiItemStackView>& carried_stack,
+    std::span<const ui::UiItemStackView> container_slots,
+    std::span<const ui::UiItemStackView> player_slots,
+    const ui::UiDisplayMetrics& metrics,
+    Vec2f cursor_position,
+    const std::optional<ui::UiAction>& hover_action) {
+  if (!container_open ||
+      (carried_stack.has_value() && !carried_stack->empty()) ||
+      tree.find_by_stable_id("inventory.tooltip") != nullptr ||
+      !hover_action.has_value()) {
+    return false;
+  }
+
+  const std::optional<ContainerSlotActionRef> slot =
+      container_slot_from_ui_action(hover_action.value());
+  if (!slot.has_value()) {
+    return false;
+  }
+  const std::span<const ui::UiItemStackView> slots =
+      slot->source == player::ContainerSlotSource::OpenedContainer
+          ? container_slots
+          : player_slots;
+  if (slot->slot >= slots.size()) {
+    return false;
+  }
+
+  const ui::UiItemStackView& stack = slots[slot->slot];
   if (stack.empty()) {
     return false;
   }

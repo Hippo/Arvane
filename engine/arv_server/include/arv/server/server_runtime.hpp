@@ -10,6 +10,7 @@
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/transport.hpp"
+#include "arv/player/container.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
@@ -189,6 +190,8 @@ struct ServerStartInfo {
   ServerPackSyncConfig pack_sync{};
   std::function<void(command::CommandRegistry&)> register_commands{};
   plugin::PluginManager* plugins{};
+  const player::ContainerTypeRegistry* container_types{};
+  const player::ContainerUiLayoutRegistry* container_layouts{};
 };
 
 struct DroppedItemStack {

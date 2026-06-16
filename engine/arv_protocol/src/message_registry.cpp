@@ -220,6 +220,27 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundInventoryUpdate, "ClientboundInventoryUpdate",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});
+  registry.register_message({MessageType::ServerboundOpenContainerBlock, "ServerboundOpenContainerBlock",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundOpenContainer, "ClientboundOpenContainer",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ServerboundContainerAction, "ServerboundContainerAction",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundContainerSetSlot, "ClientboundContainerSetSlot",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundContainerSetContent, "ClientboundContainerSetContent",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ServerboundCloseContainer, "ServerboundCloseContainer",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundCloseContainer, "ClientboundCloseContainer",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
   registry.register_message({MessageType::ServerboundChatMessage, "ServerboundChatMessage",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});

@@ -698,6 +698,7 @@ void ServerRuntimeImpl::tick_block_break_attempt(
 
   if (!std::isfinite(required_seconds) || required_seconds <= 0.0F) {
     if (default_world_.set_block(hit->block, voxel::AirBlockVariantID)) {
+      drop_and_remove_block_container(player_state.world_id, hit->block);
       if (!player_state.resolved_permissions.core.has_creative_inventory) {
         const std::optional<player::ItemID> drop_item =
             item_registry_ != nullptr
@@ -744,6 +745,7 @@ void ServerRuntimeImpl::tick_block_break_attempt(
 
   if (attempt.elapsed_seconds >= attempt.required_seconds &&
       default_world_.set_block(hit->block, voxel::AirBlockVariantID)) {
+    drop_and_remove_block_container(player_state.world_id, hit->block);
     if (!player_state.resolved_permissions.core.has_creative_inventory) {
       const std::optional<player::ItemID> drop_item =
           item_registry_ != nullptr

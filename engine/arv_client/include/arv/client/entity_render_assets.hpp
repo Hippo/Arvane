@@ -43,6 +43,7 @@ struct EntityRenderAssets {
   HashMap<player::ItemID, render::EntityModelID> model_by_item{};
   std::vector<std::array<render::EntityModelID, BreakStageTextureCount>> break_overlay_model_by_variant{};
   std::vector<render::EntityModelID> outline_model_by_variant{};
+  std::vector<render::EntityModelID> block_attached_model_by_variant{};
 };
 
 struct ClientEntityRenderAssets {

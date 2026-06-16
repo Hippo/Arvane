@@ -14,6 +14,7 @@
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
+#include "arv/player/container.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/permissions.hpp"
 #include "arv/plugin/plugin_manager.hpp"
@@ -68,6 +69,7 @@ struct DesktopGameSession {
   core::FixedTimestepAccumulator ticks;
   TickIndex client_tick_index{};
   std::vector<ui::UiItemStackView> inventory_slots{};
+  std::vector<ui::UiItemStackView> container_slots{};
   std::optional<ui::UiItemStackView> carried_inventory_stack{};
   std::vector<ui::PlayerListEntryView> tab_players{};
   std::vector<ui::ChatLineView> chat_lines{};
@@ -90,6 +92,8 @@ struct DesktopSessionDependencies {
   sched::ITaskExecutor& client_tasks;
   const voxel::BlockRegistry& block_registry;
   const player::ItemRegistry& item_registry;
+  const player::ContainerTypeRegistry& container_types;
+  const player::ContainerUiLayoutRegistry& container_layouts;
   const player::GameModeRegistry& game_modes;
   const server::BlockBreakBehaviorRegistry& block_break_behaviors;
   std::vector<server::StarterInventoryItem> starter_inventory{};

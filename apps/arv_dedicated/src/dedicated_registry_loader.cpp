@@ -335,6 +335,45 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
       registries.block_registry.variant_count(),
       registries.block_registry_hash);
 
+  auto container_type_text = packs.load_merged_json_array_text("container_types", "container_types");
+  if (!container_type_text) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("container_types", container_type_text.error().describe()));
+  }
+  auto container_type_definitions =
+      player::parse_container_type_definitions_json(container_type_text.value());
+  if (!container_type_definitions) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("container_types", container_type_definitions.error().message));
+  }
+  auto container_type_registry =
+      player::ContainerTypeRegistry::build(std::move(container_type_definitions.value()));
+  if (!container_type_registry) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("container_types", container_type_registry.error().message));
+  }
+  registries.container_types = std::move(container_type_registry.value());
+
+  auto container_layout_text =
+      packs.load_merged_json_array_text("container_layouts", "container_layouts");
+  if (!container_layout_text) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("container_layouts", container_layout_text.error().describe()));
+  }
+  auto container_layout_definitions =
+      player::parse_container_ui_layout_definitions_json(container_layout_text.value());
+  if (!container_layout_definitions) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("container_layouts", container_layout_definitions.error().message));
+  }
+  auto container_layout_registry =
+      player::ContainerUiLayoutRegistry::build(std::move(container_layout_definitions.value()));
+  if (!container_layout_registry) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("container_layouts", container_layout_registry.error().message));
+  }
+  registries.container_layouts = std::move(container_layout_registry.value());
+
   auto item_definition_text = packs.load_merged_json_array_text("items", "items");
   if (!item_definition_text) {
     return Expected<DedicatedRegistries, DedicatedError>::failure(

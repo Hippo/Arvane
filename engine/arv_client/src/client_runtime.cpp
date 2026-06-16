@@ -418,6 +418,56 @@ bool ClientRuntime::has_authoritative_inventory() const noexcept {
   return impl_->inventory.has_authoritative_inventory();
 }
 
+bool ClientRuntime::container_open() const noexcept {
+  return impl_->inventory.container_open();
+}
+
+const std::string& ClientRuntime::active_container_type() const noexcept {
+  return impl_->inventory.active_container_type();
+}
+
+const std::string& ClientRuntime::active_container_title() const noexcept {
+  return impl_->inventory.active_container_title();
+}
+
+const std::string& ClientRuntime::active_container_layout() const noexcept {
+  return impl_->inventory.active_container_layout();
+}
+
+const player::Inventory& ClientRuntime::active_container_inventory() const noexcept {
+  return impl_->inventory.active_container_inventory();
+}
+
+net::NetworkResult ClientRuntime::request_open_container_block(WorldID world_id, BlockPos block) {
+  return impl_->inventory.request_open_container_block(
+      impl_->sender,
+      world_id,
+      block,
+      impl_->connection.state());
+}
+
+net::NetworkResult ClientRuntime::request_container_slot_click(
+    player::ContainerSlotSource source,
+    usize slot_index,
+    player::InventoryClickButton button) {
+  return impl_->inventory.request_container_slot_click(
+      impl_->sender,
+      source,
+      slot_index,
+      button,
+      impl_->connection.state());
+}
+
+net::NetworkResult ClientRuntime::request_container_shift_transfer(
+    player::ContainerSlotSource source,
+    usize slot_index) {
+  return impl_->inventory.request_container_shift_transfer(
+      impl_->sender,
+      source,
+      slot_index,
+      impl_->connection.state());
+}
+
 net::NetworkResult ClientRuntime::request_inventory_slot_click(
     usize slot_index,
     player::InventoryClickButton button) {

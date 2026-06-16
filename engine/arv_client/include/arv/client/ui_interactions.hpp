@@ -3,6 +3,7 @@
 #include "arv/base/ui/widgets/chat.hpp"
 #include "arv/base/ui/widgets/inventory.hpp"
 #include "arv/core/time.hpp"
+#include "arv/player/container.hpp"
 #include "arv/ui/core/ui.hpp"
 
 #include <chrono>
@@ -22,7 +23,15 @@ struct HotbarItemPopupState {
   bool observation_initialized{};
 };
 
+struct ContainerSlotActionRef {
+  player::ContainerSlotSource source{player::ContainerSlotSource::OpenedContainer};
+  usize slot{};
+};
+
 [[nodiscard]] std::optional<usize> inventory_slot_from_ui_action(
+    const ui::UiAction& action) noexcept;
+
+[[nodiscard]] std::optional<ContainerSlotActionRef> container_slot_from_ui_action(
     const ui::UiAction& action) noexcept;
 
 [[nodiscard]] std::optional<std::pair<usize, usize>> chat_run_from_ui_action(
@@ -47,6 +56,16 @@ void update_hotbar_item_popup(
     bool inventory_open,
     const std::optional<ui::UiItemStackView>& carried_stack,
     std::span<const ui::UiItemStackView> inventory_slots,
+    const ui::UiDisplayMetrics& metrics,
+    Vec2f cursor_position,
+    const std::optional<ui::UiAction>& hover_action);
+
+[[nodiscard]] bool append_container_hover_tooltip_if_needed(
+    ui::UiTree& tree,
+    bool container_open,
+    const std::optional<ui::UiItemStackView>& carried_stack,
+    std::span<const ui::UiItemStackView> container_slots,
+    std::span<const ui::UiItemStackView> player_slots,
     const ui::UiDisplayMetrics& metrics,
     Vec2f cursor_position,
     const std::optional<ui::UiAction>& hover_action);

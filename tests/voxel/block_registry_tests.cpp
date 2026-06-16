@@ -99,6 +99,60 @@ TEST(BlockRegistryTests, ExpandsStateSchemasIntoResolvedVariants) {
   EXPECT_TRUE(east_top_record->model_transform.mirror_y);
 }
 
+TEST(BlockRegistryTests, ParsesContainerAndBlockEntityRenderMode) {
+  auto definitions = arv::voxel::parse_block_definitions_json(R"json(
+[
+  {
+    "name": "arvane:air",
+    "render_category": "none",
+    "properties": { "replaceable": true }
+  },
+  {
+    "name": "arvane:chest",
+    "display_name": "Chest",
+    "render_category": "opaque",
+    "render_mode": "block_entity_model",
+    "container": { "type": "arvane:chest" },
+    "model": { "path": "arvane:model/entity/chest" },
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "opaque": false,
+      "blocks_light": false,
+      "full_cube": false,
+      "ao_occluder": false
+    },
+    "states": {
+      "facing": ["north", "east", "south", "west"]
+    }
+  }
+]
+)json");
+  ASSERT_TRUE(definitions) << definitions.error().message;
+
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+  const arv::voxel::BlockRegistry registry = std::move(registry_result.value());
+
+  const std::optional<arv::voxel::BlockID> chest_id = registry.find_block("arvane:chest");
+  ASSERT_TRUE(chest_id);
+  const arv::voxel::BlockRecord* chest = registry.block(chest_id.value());
+  ASSERT_NE(chest, nullptr);
+  EXPECT_EQ(chest->container_type, "arvane:chest");
+  EXPECT_EQ(chest->variants.size(), 4U);
+
+  const std::optional<arv::voxel::BlockVariantID> east =
+      registry.find_variant("arvane:chest[facing=east]");
+  ASSERT_TRUE(east);
+  const arv::voxel::BlockVariantRecord* variant = registry.variant(east.value());
+  ASSERT_NE(variant, nullptr);
+  EXPECT_EQ(variant->container_type, "arvane:chest");
+  EXPECT_EQ(variant->render_mode, arv::voxel::BlockRenderMode::BlockEntityModel);
+  EXPECT_EQ(variant->render_category, arv::voxel::RenderCategory::Opaque);
+  EXPECT_EQ(variant->model.asset, "arvane:model/entity/chest");
+  EXPECT_EQ(variant->model_transform.quarter_turns_y, 1);
+}
+
 TEST(BlockRegistryTests, ParsesDataDrivenJsonDefinitions) {
   auto definitions = arv::voxel::parse_block_definitions_json(R"json(
 [

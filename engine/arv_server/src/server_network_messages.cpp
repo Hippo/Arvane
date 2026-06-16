@@ -6,6 +6,7 @@
 #include "arv/physics/player_movement.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chat.hpp"
+#include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/server/skin_runtime.hpp"
@@ -1580,6 +1581,33 @@ void ServerRuntimeImpl::handle_message(
         return;
       }
       handle_inventory_action_request(connection_id, request.value());
+      return;
+    }
+    case protocol::MessageType::ServerboundOpenContainerBlock: {
+      auto request = protocol::deserialize_serverbound_open_container_block(decoded.value().payload);
+      if (!request) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_open_container_block(connection_id, request.value());
+      return;
+    }
+    case protocol::MessageType::ServerboundContainerAction: {
+      auto action = protocol::deserialize_serverbound_container_action(decoded.value().payload);
+      if (!action) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_container_action(connection_id, action.value());
+      return;
+    }
+    case protocol::MessageType::ServerboundCloseContainer: {
+      auto request = protocol::deserialize_serverbound_close_container(decoded.value().payload);
+      if (!request) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_close_container(connection_id, request.value());
       return;
     }
     case protocol::MessageType::ServerboundChatMessage: {

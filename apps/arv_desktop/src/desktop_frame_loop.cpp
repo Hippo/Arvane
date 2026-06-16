@@ -567,12 +567,15 @@ void DesktopFrameLoop::submit_client_input_and_update_cursor(
     bool inventory_changed_by_ui,
     std::chrono::steady_clock::time_point now) {
   if (has_active_session) {
+    const bool container_open_requested =
+        try_open_container_from_secondary(*active_session, client_input);
     update_held_item_animation_from_input(
         *active_session,
         client_input,
         std::chrono::duration<Seconds>(now - app_start_time_).count());
     active_session->last_gameplay_input = client_input;
     active_session->client->submit_input(std::move(client_input));
+    inventory_changed_by_ui = inventory_changed_by_ui || container_open_requested;
     if (std::optional<std::string> clipboard =
             active_session->client->consume_pending_clipboard_text();
         clipboard.has_value()) {

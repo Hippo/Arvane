@@ -234,6 +234,44 @@
       }
     },
     {
+      "name": "arvane:chest",
+      "display_name": "Chest",
+      "buoyancy": 1.0,
+      "render_category": "opaque",
+      "render_mode": "block_entity_model",
+      "container": {
+        "type": "arvane:chest"
+      },
+      "tags": [
+        "arvane:mineable/axe"
+      ],
+      "blast": {
+        "resistance": 2.5,
+        "flammable": true
+      },
+      "model": {
+        "path": "arvane:model/entity/chest"
+      },
+      "states": {
+        "facing": [
+          "north",
+          "south",
+          "east",
+          "west"
+        ]
+      },
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": false,
+        "blocks_light": false,
+        "full_cube": false,
+        "ao_occluder": false,
+        "drops_with_wrong_tool": true,
+        "hardness": 2.5
+      }
+    },
+    {
       "name": "arvane:water",
       "behavior": "arvane:block_behavior/fluid",
       "render_category": "transparent",

@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 
@@ -87,6 +88,43 @@ TEST(RegionFileTests, ChunkSerializationAllowsSectionsOutsideLegacyMetadataWindo
   ASSERT_NE(upper, nullptr);
   EXPECT_EQ(lower->blocks[0], stone);
   EXPECT_EQ(upper->blocks[0], dirt);
+}
+
+TEST(RegionFileTests, BlockContainerSerializationRoundTripsOccupiedSlots) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  const arv::player::ItemID dirt_item =
+      item_registry.find_item("arvane:dirt").value();
+
+  arv::persistence::SavedChunkSection chunk =
+      make_saved_chunk({{0, 0, 0}}, stone, true);
+  arv::world::SavedBlockContainer container;
+  container.local = {{2, 3, 4}};
+  container.container_type = "arvane:chest";
+  container.slot_count = 27;
+  container.slots.push_back({5, arv::player::ItemStack{dirt_item, 12}});
+  chunk.block_containers.push_back(std::move(container));
+
+  const std::vector<arv::persistence::SavedChunkSection> chunks{std::move(chunk)};
+  auto encoded = arv::persistence::encode_region_file({0, 0}, chunks, block_registry, 0);
+  ASSERT_TRUE(encoded) << encoded.error().message;
+  auto decoded = arv::persistence::decode_region_file(encoded.value(), block_registry, 0);
+  ASSERT_TRUE(decoded) << decoded.error().message;
+
+  ASSERT_EQ(decoded.value().chunks.size(), 1U);
+  ASSERT_EQ(decoded.value().chunks[0].block_containers.size(), 1U);
+  const arv::world::SavedBlockContainer& loaded =
+      decoded.value().chunks[0].block_containers[0];
+  EXPECT_EQ(loaded.local, (arv::SectionLocalPos{{2, 3, 4}}));
+  EXPECT_EQ(loaded.container_type, "arvane:chest");
+  EXPECT_EQ(loaded.slot_count, 27U);
+  ASSERT_EQ(loaded.slots.size(), 1U);
+  EXPECT_EQ(loaded.slots[0].slot, 5U);
+  EXPECT_EQ(loaded.slots[0].stack.item, dirt_item);
+  EXPECT_EQ(loaded.slots[0].stack.count, 12U);
 }
 
 TEST(RegionFileTests, ChunkSerializationAllowsMoreThanU8SectionsPerColumn) {

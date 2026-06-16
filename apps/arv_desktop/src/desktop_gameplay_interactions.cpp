@@ -514,6 +514,45 @@ void DesktopFrameLoop::update_held_item_animation_from_input(
   }
 }
 
+bool DesktopFrameLoop::try_open_container_from_secondary(
+    DesktopGameSession& session,
+    client::InputFrame& client_input) const {
+  if (!client_input.secondary_pressed ||
+      session.client == nullptr ||
+      session.client->inventory_open() ||
+      session.client->chat_open()) {
+    return false;
+  }
+
+  world::WorldCollisionQuery query(session.client_world, assets_.block_registry, false);
+  const std::optional<physics::BlockRaycastHit> hit = physics::raycast_blocks(
+      query,
+      session.client->camera().position(),
+      session.client->camera().forward_vector(),
+      config_.physics.reach_distance);
+  if (!hit.has_value()) {
+    return false;
+  }
+  const voxel::BlockVariantRecord* variant =
+      assets_.block_registry.variant(hit->variant);
+  if (variant == nullptr || variant->container_type.empty()) {
+    return false;
+  }
+
+  const net::NetworkResult result = session.client->request_open_container_block(
+      session.client->camera().world_id(),
+      hit->block);
+  if (!result) {
+    return false;
+  }
+
+  client_input.secondary_pressed = false;
+  client_input.secondary_held = false;
+  session.held_item_secondary_use_active = false;
+  session.held_item_animation.stop(0.0);
+  return true;
+}
+
 void DesktopFrameLoop::update_block_outline_target(DesktopGameSession& active_session) {
   active_session.block_outline_target.reset();
   world::WorldCollisionQuery query(

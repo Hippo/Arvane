@@ -1,4 +1,5 @@
 #include "arv/asset/font.hpp"
+#include "arv/asset/pack.hpp"
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
 
@@ -422,6 +423,105 @@ TEST(TextureAtlasTests, AppliesModelCollisionBoxesPerVariantAtStartup) {
   EXPECT_FLOAT_EQ(boxes.front().min.y, 0.0F);
   EXPECT_FLOAT_EQ(boxes.front().max.y, 0.5F);
   EXPECT_FLOAT_EQ(boxes.back().max.y, 1.0F);
+}
+
+TEST(TextureAtlasTests, LoadsBlockAttachedChestModelAndCollisionFromAuthoredModel) {
+  auto definitions = arv::voxel::parse_block_definitions_json(R"json(
+[
+  {
+    "name": "arvane:air",
+    "render_category": "none",
+    "properties": { "replaceable": true }
+  },
+  {
+    "name": "arvane:chest",
+    "render_category": "opaque",
+    "render_mode": "block_entity_model",
+    "container_type": "arvane:chest",
+    "model": {
+      "path": "arvane:model/entity/chest"
+    },
+    "states": {
+      "facing": ["north", "east"]
+    },
+    "properties": {
+      "solid": true,
+      "collidable": true,
+      "full_cube": false
+    }
+  }
+]
+)json");
+  ASSERT_TRUE(definitions) << definitions.error().message;
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+  arv::voxel::BlockRegistry registry = std::move(registry_result.value());
+
+  const auto chest_variant = registry.find_variant("arvane:chest[facing=north]");
+  ASSERT_TRUE(chest_variant.has_value());
+
+  arv::asset::ResourceManager resources(ARVANE_TEST_ASSET_ROOT);
+  auto block_models = arv::asset::load_block_model_definitions(resources, registry);
+  ASSERT_TRUE(block_models) << block_models.error().message;
+
+  arv::asset::apply_block_model_collision_boxes(registry, block_models.value());
+  auto block_atlas = arv::asset::build_block_texture_atlas(
+      resources,
+      registry,
+      block_models.value());
+  ASSERT_TRUE(block_atlas) << block_atlas.error().message;
+
+  const std::span<const arv::Aabb3f> boxes =
+      registry.collision_boxes(chest_variant.value());
+  ASSERT_EQ(boxes.size(), 3U);
+  for (const arv::Aabb3f& box : boxes) {
+    EXPECT_GE(box.min.x, 0.0F);
+    EXPECT_GE(box.min.y, 0.0F);
+    EXPECT_GE(box.min.z, 0.0F);
+    EXPECT_LE(box.max.x, 1.0F);
+    EXPECT_LE(box.max.y, 1.0F);
+    EXPECT_LE(box.max.z, 1.0F);
+  }
+  EXPECT_FALSE(block_atlas.value().render_data.model_boxes(chest_variant.value()).empty());
+}
+
+TEST(TextureAtlasTests, LoadsBlockAttachedChestModelFromPackBlockData) {
+  const std::filesystem::path packs_root =
+      std::filesystem::path{ARVANE_TEST_ASSET_ROOT}
+          .parent_path()
+          .parent_path()
+          .parent_path();
+  auto pack_manager_result =
+      arv::asset::PackManager::load_from_packs_root(packs_root);
+  ASSERT_TRUE(pack_manager_result) << pack_manager_result.error().describe();
+  auto blocks_text =
+      pack_manager_result.value().load_merged_json_array_text("blocks", "blocks");
+  ASSERT_TRUE(blocks_text) << blocks_text.error().describe();
+
+  auto definitions =
+      arv::voxel::parse_block_definitions_json(blocks_text.value());
+  ASSERT_TRUE(definitions) << definitions.error().message;
+  auto registry_result =
+      arv::voxel::BlockRegistry::build(std::move(definitions.value()));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+  arv::voxel::BlockRegistry registry = std::move(registry_result.value());
+
+  const auto chest_variant = registry.find_variant("arvane:chest[facing=north]");
+  ASSERT_TRUE(chest_variant.has_value());
+  const arv::voxel::BlockVariantRecord* chest =
+      registry.variant(chest_variant.value());
+  ASSERT_NE(chest, nullptr);
+  ASSERT_EQ(chest->render_mode, arv::voxel::BlockRenderMode::BlockEntityModel);
+
+  arv::asset::ResourceManager resources(std::move(pack_manager_result.value()));
+  auto block_models = arv::asset::load_block_model_definitions(resources, registry);
+  ASSERT_TRUE(block_models) << block_models.error().message;
+  arv::asset::apply_block_model_collision_boxes(registry, block_models.value());
+
+  const std::span<const arv::Aabb3f> boxes =
+      registry.collision_boxes(chest_variant.value());
+  ASSERT_FALSE(boxes.empty());
+  EXPECT_GT(boxes.front().max.y, 0.5F);
 }
 
 TEST(FontTests, ShapesMeasuresAndCachesGlyphs) {

@@ -55,6 +55,40 @@ ClientBlockRenderAssetsResult load_client_block_render_assets(
   }
   loaded.block_registry = std::move(block_registry_result.value());
 
+  auto container_type_text =
+      packs.load_merged_json_array_text("container_types", "container_types");
+  if (!container_type_text) {
+    return asset_failure("container_types", container_type_text.error().describe());
+  }
+  auto container_type_definitions =
+      player::parse_container_type_definitions_json(container_type_text.value());
+  if (!container_type_definitions) {
+    return asset_failure("container_types", container_type_definitions.error().message);
+  }
+  auto container_type_registry =
+      player::ContainerTypeRegistry::build(std::move(container_type_definitions.value()));
+  if (!container_type_registry) {
+    return asset_failure("container_types", container_type_registry.error().message);
+  }
+  loaded.container_types = std::move(container_type_registry.value());
+
+  auto container_layout_text =
+      packs.load_merged_json_array_text("container_layouts", "container_layouts");
+  if (!container_layout_text) {
+    return asset_failure("container_layouts", container_layout_text.error().describe());
+  }
+  auto container_layout_definitions =
+      player::parse_container_ui_layout_definitions_json(container_layout_text.value());
+  if (!container_layout_definitions) {
+    return asset_failure("container_layouts", container_layout_definitions.error().message);
+  }
+  auto container_layout_registry =
+      player::ContainerUiLayoutRegistry::build(std::move(container_layout_definitions.value()));
+  if (!container_layout_registry) {
+    return asset_failure("container_layouts", container_layout_registry.error().message);
+  }
+  loaded.container_layouts = std::move(container_layout_registry.value());
+
   auto block_models_result =
       asset::load_block_model_definitions(resources, loaded.block_registry);
   if (!block_models_result) {

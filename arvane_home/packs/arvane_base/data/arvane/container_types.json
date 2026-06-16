@@ -1,0 +1,11 @@
+{
+  "container_types": [
+    {
+      "name": "arvane:chest",
+      "id": "arvane:chest",
+      "slot_count": 27,
+      "title": "Chest",
+      "ui_layout": "arvane:chest"
+    }
+  ]
+}

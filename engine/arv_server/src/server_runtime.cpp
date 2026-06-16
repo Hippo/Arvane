@@ -182,6 +182,7 @@ namespace {
     saved.lights = chunk->lights();
     saved.fluids = chunk->fluids();
     saved.lighting_valid = !chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting);
+    saved.block_containers = world.saved_block_containers(coord);
     chunks.push_back(std::move(saved));
   }
   return chunks;
@@ -689,6 +690,8 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   player_saves_.load(start_info.saved_players);
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
+  container_types_ = start_info.container_types;
+  container_layouts_ = start_info.container_layouts;
   entity_registry_ = start_info.entity_registry;
   vehicle_registry_ = start_info.vehicle_registry;
   entity_goals_ = start_info.entity_goals;
@@ -716,7 +719,9 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   }
   skin_transfers_.clear();
   chat_rate_limits_.clear();
+  container_sessions_.clear();
   next_chat_message_id_ = 1U;
+  next_container_session_id_ = 1U;
   online_profile_sessions_.clear();
   active_skin_uploads_global_ = 0U;
   skin_storage_bytes_ = current_skin_storage_bytes(server_save_root_);
@@ -983,6 +988,7 @@ void ServerRuntimeImpl::tick() {
   world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
   world_jobs_.schedule_lighting_jobs(default_world_, block_registry_);
   tick_chunk_streaming();
+  tick_container_sessions();
   world_jobs_.schedule_generation_jobs(default_world_, chunk_streamer_, chunk_generation_);
   send_player_block_break_progress();
   send_block_updates();

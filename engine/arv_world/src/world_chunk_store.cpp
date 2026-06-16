@@ -490,6 +490,7 @@ bool WorldRuntime::unload_chunk(ChunkSectionCoord coord) noexcept {
     return false;
   }
 
+  impl_->block_containers.erase(coord);
   impl_->dirty.mark_mesh_content_dirty();
   impl_->dirty.mark_loaded_chunk_neighbors_dirty(*this, coord);
   impl_->dirty.recompute_lighting_work_pending(*this);

@@ -5,6 +5,7 @@
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
+#include "arv/player/container.hpp"
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/voxel/block.hpp"
 
@@ -16,6 +17,8 @@ namespace arv::client {
 
 struct ClientBlockRenderAssets {
   voxel::BlockRegistry block_registry{};
+  player::ContainerTypeRegistry container_types{};
+  player::ContainerUiLayoutRegistry container_layouts{};
   std::vector<asset::BlockModelAssetData> block_models{};
   asset::BlockTextureAtlas block_atlas{};
   render::FluidRenderData fluid_render_data{};

@@ -156,6 +156,13 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   for (const ui::UiItemStackView& slot : session.inventory_slots) {
     hash = ui_cache_hash_append_item_stack(hash, slot);
   }
+  hash = ui_cache_hash_append_bool(hash, session.client->container_open());
+  hash = ui_cache_hash_append_string(hash, session.client->active_container_title());
+  hash = ui_cache_hash_append_string(hash, session.client->active_container_layout());
+  hash = ui_cache_hash_append_u64(hash, session.container_slots.size());
+  for (const ui::UiItemStackView& slot : session.container_slots) {
+    hash = ui_cache_hash_append_item_stack(hash, slot);
+  }
   hash = ui_cache_hash_append_optional_item_stack(hash, session.carried_inventory_stack);
   if (session.client->inventory_open()) {
     hash = ui_cache_hash_append_f32(hash, platform_input.cursor_x);
@@ -550,7 +557,20 @@ bool DesktopFrameLoop::append_inventory_hover_tooltip_if_needed(
           active_session.inventory_slots.size()},
       ui_metrics_,
       {platform_input.cursor_x, platform_input.cursor_y},
-      hover_action);
+      hover_action) ||
+      client::append_container_hover_tooltip_if_needed(
+          ui_tree_,
+          active_session.client->container_open(),
+          active_session.carried_inventory_stack,
+          std::span<const ui::UiItemStackView>{
+              active_session.container_slots.data(),
+              active_session.container_slots.size()},
+          std::span<const ui::UiItemStackView>{
+              active_session.inventory_slots.data(),
+              active_session.inventory_slots.size()},
+          ui_metrics_,
+          {platform_input.cursor_x, platform_input.cursor_y},
+          hover_action);
 }
 
 bool DesktopFrameLoop::append_chat_hover_tooltip_if_needed(
@@ -680,6 +700,10 @@ void DesktopFrameLoop::build_gameplay_ui(
     std::chrono::steady_clock::time_point now,
     ui::RidePromptModel ride_prompt) {
   const f32 item_popup_alpha = hotbar_item_popup_alpha(now);
+  const player::ContainerUiLayoutDefinition* container_layout =
+      active_session.client->container_open()
+          ? assets_.container_layouts.find(active_session.client->active_container_layout())
+          : nullptr;
   ui::build_gameplay_ui(
       ui_tree_,
       gameplay_ui_model_for_ui(
@@ -689,6 +713,9 @@ void DesktopFrameLoop::build_gameplay_ui(
               std::span<const ui::UiItemStackView>{
                   active_session.inventory_slots.data(),
                   active_session.inventory_slots.size()},
+              std::span<const ui::UiItemStackView>{
+                  active_session.container_slots.data(),
+                  active_session.container_slots.size()},
               active_session.carried_inventory_stack,
               std::span<const ui::ChatLineView>{
                   active_session.chat_lines.data(),
@@ -698,6 +725,8 @@ void DesktopFrameLoop::build_gameplay_ui(
                   active_session.tab_players.data(),
                   active_session.tab_players.size()},
               assets_.language.text("ui.inventory.title"),
+              active_session.client->active_container_title(),
+              container_layout,
               assets_.language.text("ui.tab.players"),
               ui_metrics_.logical_size,
               {

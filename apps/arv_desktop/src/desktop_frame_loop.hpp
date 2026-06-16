@@ -231,6 +231,9 @@ private:
       DesktopGameSession& session,
       const client::InputFrame& client_input,
       Seconds now_seconds) const;
+  [[nodiscard]] bool try_open_container_from_secondary(
+      DesktopGameSession& session,
+      client::InputFrame& client_input) const;
   void spawn_local_block_hit_particles(DesktopGameSession& session) const;
   void spawn_local_block_face_particles(
       DesktopGameSession& session,

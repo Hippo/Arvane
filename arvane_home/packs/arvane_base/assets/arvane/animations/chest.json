@@ -1,0 +1,62 @@
+{
+  "animations": [
+    {
+      "name": "open",
+      "length": 0.5,
+      "loop": "hold",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "lid",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "lid",
+          "channel": "rotation",
+          "value": [
+            90,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "close",
+      "length": 0.5,
+      "loop": "hold",
+      "keyframes": [
+        {
+          "time": 0,
+          "bone": "lid",
+          "channel": "rotation",
+          "value": [
+            90,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        },
+        {
+          "time": 0.5,
+          "bone": "lid",
+          "channel": "rotation",
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "interpolation": "linear"
+        }
+      ]
+    }
+  ]
+}

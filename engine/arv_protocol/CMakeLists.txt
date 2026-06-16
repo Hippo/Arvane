@@ -3,6 +3,7 @@ set(ARV_PROTOCOL_HEADERS
   include/arv/protocol/block_updates.hpp
   include/arv/protocol/chat.hpp
   include/arv/protocol/chunk_streaming.hpp
+  include/arv/protocol/container_sync.hpp
   include/arv/protocol/entity_interaction.hpp
   include/arv/protocol/entity_replication.hpp
   include/arv/protocol/entity_updates.hpp
@@ -92,6 +93,12 @@ add_library(arv_protocol_inventory_sync STATIC
 target_include_directories(arv_protocol_inventory_sync PUBLIC include)
 target_link_libraries(arv_protocol_inventory_sync PUBLIC arv_protocol_headers arv_player_headers arv_protocol_item_stack_wire)
 
+add_library(arv_protocol_container_sync STATIC
+  src/container_sync.cpp
+)
+target_include_directories(arv_protocol_container_sync PUBLIC include)
+target_link_libraries(arv_protocol_container_sync PUBLIC arv_protocol_headers arv_player_headers arv_protocol_item_stack_wire)
+
 add_library(arv_protocol_chat STATIC
   src/chat.cpp
 )
@@ -151,4 +158,4 @@ add_library(arv_protocol STATIC
 )
 target_include_directories(arv_protocol PUBLIC include)
 target_link_libraries(arv_protocol PUBLIC arv_protocol_headers)
-target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_block_updates arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_protocol_dropped_items arv_protocol_inventory_sync arv_protocol_chat arv_protocol_entity_interaction arv_protocol_explosion arv_protocol_particles arv_protocol_skins arv_protocol_text_variables arv_protocol_vehicles arv_protocol_world_time arv_core arv_crypto arv_player arv_text arv_voxel)
+target_link_libraries(arv_protocol PUBLIC arv_protocol_session arv_protocol_stream arv_protocol_block_updates arv_protocol_player_movement arv_protocol_player_input arv_protocol_entity_replication arv_protocol_dropped_items arv_protocol_inventory_sync arv_protocol_container_sync arv_protocol_chat arv_protocol_entity_interaction arv_protocol_explosion arv_protocol_particles arv_protocol_skins arv_protocol_text_variables arv_protocol_vehicles arv_protocol_world_time arv_core arv_crypto arv_player arv_text arv_voxel)

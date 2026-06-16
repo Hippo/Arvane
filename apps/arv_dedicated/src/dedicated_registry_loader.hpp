@@ -7,6 +7,7 @@
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
+#include "arv/player/container.hpp"
 #include "arv/player/item.hpp"
 #include "arv/text/language.hpp"
 #include "arv/voxel/block.hpp"
@@ -22,6 +23,9 @@ struct DedicatedRegistries {
 
   player::ItemRegistry item_registry;
   u64 item_registry_hash{};
+
+  player::ContainerTypeRegistry container_types;
+  player::ContainerUiLayoutRegistry container_layouts;
 
   entity::EntityRegistry entity_registry;
   entity::VehicleDefinitionRegistry vehicle_registry;

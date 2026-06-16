@@ -11,6 +11,7 @@
 #include "arv/core/types.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
+#include "arv/player/container.hpp"
 #include "arv/player/item.hpp"
 #include "arv/render/chunk_mesher.hpp"
 #include "arv/render/render_commands.hpp"
@@ -30,6 +31,8 @@ struct DesktopLoadedAssets {
   u64 block_registry_hash{};
   player::ItemRegistry item_registry{};
   u64 item_registry_hash{};
+  player::ContainerTypeRegistry container_types{};
+  player::ContainerUiLayoutRegistry container_layouts{};
   client::ItemAnimationLibrary item_animation_library{};
   entity::EntityRegistry entity_registry{};
   entity::VehicleDefinitionRegistry vehicle_registry{};

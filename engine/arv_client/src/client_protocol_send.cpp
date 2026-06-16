@@ -3,6 +3,7 @@
 #include "arv/crypto/hash.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chat.hpp"
+#include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
@@ -214,6 +215,51 @@ net::NetworkResult ClientProtocolSender::send_inventory_action(
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Gameplay,
       protocol::serialize_serverbound_inventory_action_request(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_open_container_block(
+    const protocol::ServerboundOpenContainerBlock& request) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundOpenContainerBlock,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_open_container_block(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_container_action(
+    const protocol::ServerboundContainerAction& action) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundContainerAction,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_container_action(action));
+}
+
+net::NetworkResult ClientProtocolSender::send_close_container(
+    const protocol::ServerboundCloseContainer& request) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundCloseContainer,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_close_container(request));
 }
 
 net::NetworkResult ClientProtocolSender::send_attack_entity(

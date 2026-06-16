@@ -22,6 +22,8 @@ block:
       display_name: Short Grass
     stone:
       display_name: Stone
+    chest:
+      display_name: Chest
     water:
       display_name: Water
     stone_stairs:
@@ -45,6 +47,8 @@ item:
       display_name: Sand
     short_grass:
       display_name: Short Grass
+    chest:
+      display_name: Chest
     wood_pickaxe:
       display_name: Wood Pickaxe
     wood_sword:

@@ -270,6 +270,33 @@ void populate_world_frame_draw_items(
       frame.world_view.world_id,
       entity_animation_time);
 
+  for (const ChunkSectionCoord coord : session.client_world.loaded_chunk_coords()) {
+    const voxel::ChunkSection* chunk = session.client_world.find_chunk(coord);
+    if (chunk == nullptr) {
+      continue;
+    }
+    for (usize index = 0; index < voxel::ChunkVolume; ++index) {
+      const voxel::BlockVariantID variant_id =
+          chunk->block(voxel::local_pos(index));
+      if (variant_id.value >= entity_render_assets.block_attached_model_by_variant.size()) {
+        continue;
+      }
+      const render::EntityModelID model_id =
+          entity_render_assets.block_attached_model_by_variant[variant_id.value];
+      if (model_id.value == 0U) {
+        continue;
+      }
+
+      const BlockPos block =
+          chunk_local_to_block(coord, voxel::local_pos(index));
+      render::EntityDrawItem item;
+      item.model_id = model_id;
+      item.position = block_center(block);
+      item.scale = 1.0F;
+      frame.entities.push_back(std::move(item));
+    }
+  }
+
   const protocol::BlockBreakProgress& block_break =
       session.client->block_break_progress();
   if (session.block_outline_target.has_value()) {

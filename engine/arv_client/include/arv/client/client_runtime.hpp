@@ -12,6 +12,7 @@
 #include "arv/physics/collision.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/skins.hpp"
@@ -171,6 +172,19 @@ public:
   [[nodiscard]] const std::optional<player::ItemStack>& inventory_cursor_stack() const noexcept;
   [[nodiscard]] u32 inventory_revision() const noexcept;
   [[nodiscard]] bool has_authoritative_inventory() const noexcept;
+  [[nodiscard]] bool container_open() const noexcept;
+  [[nodiscard]] const std::string& active_container_type() const noexcept;
+  [[nodiscard]] const std::string& active_container_title() const noexcept;
+  [[nodiscard]] const std::string& active_container_layout() const noexcept;
+  [[nodiscard]] const player::Inventory& active_container_inventory() const noexcept;
+  net::NetworkResult request_open_container_block(WorldID world_id, BlockPos block);
+  net::NetworkResult request_container_slot_click(
+      player::ContainerSlotSource source,
+      usize slot_index,
+      player::InventoryClickButton button);
+  net::NetworkResult request_container_shift_transfer(
+      player::ContainerSlotSource source,
+      usize slot_index);
   net::NetworkResult request_inventory_slot_click(
       usize slot_index,
       player::InventoryClickButton button);

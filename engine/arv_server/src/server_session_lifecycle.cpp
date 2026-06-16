@@ -540,6 +540,9 @@ void ServerRuntimeImpl::cleanup_connection(net::ConnectionID connection_id) {
     combat_states_.erase(session->session_id);
     logged_chunk_interest_sessions_.erase(session->session_id);
     logged_chunk_delivery_sessions_.erase(session->session_id);
+    close_container_sessions_for_player_session(
+        session->session_id,
+        protocol::ContainerCloseReason::InvalidSession);
     if (auto transfer = skin_transfers_.find(session->session_id);
         transfer != skin_transfers_.end() && transfer->second.active_upload.has_value() &&
         active_skin_uploads_global_ > 0U) {

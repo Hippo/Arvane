@@ -137,6 +137,9 @@ ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
   const usize hotbar_slot_count =
       std::min<usize>(input.inventory_slots.size(), player::DefaultHotbarSlotCount);
 
+  const bool container_open = input.client.container_open() &&
+                              input.container_layout != nullptr;
+
   return {
       {
           input.client.selected_hotbar_slot(),
@@ -149,7 +152,7 @@ ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
           input.hotbar_item_popup_alpha,
       },
       {
-          input.client.inventory_open(),
+          input.client.inventory_open() && !container_open,
           std::string{input.inventory_title},
           input.client.selected_hotbar_slot(),
           player::DefaultHotbarSlotCount,
@@ -169,6 +172,18 @@ ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
       {input.debug_fps_visible, input.displayed_fps},
       health_model_for_client(input.client, input.viewport),
       std::move(input.ride_prompt),
+      {
+          container_open,
+          std::string{input.container_title},
+          input.container_layout,
+          input.client.selected_hotbar_slot(),
+          player::DefaultHotbarSlotCount,
+          input.viewport,
+          input.container_slots,
+          input.inventory_slots,
+          input.carried_inventory_stack,
+          input.cursor_position,
+      },
   };
 }
 

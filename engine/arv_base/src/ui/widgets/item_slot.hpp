@@ -187,7 +187,8 @@ inline void append_slot(
     const UiItemStackView* stack,
     bool selected,
     bool show_number,
-    f32 size) {
+    f32 size,
+    Vec2f offset = {}) {
   const UiTheme& theme = tree.theme();
   UiElement item;
   item.stable_id = stable_id;
@@ -196,6 +197,7 @@ inline void append_slot(
   item.layout.height_mode = UiSizeMode::Fixed;
   item.layout.width = size;
   item.layout.height = size;
+  item.layout.offset = offset;
   item.style.background = selected ? theme.colors.surface_selected : theme.colors.surface_alt;
   item.style.background.w = std::min(item.style.background.w, 0.90F);
   item.style.background_hover = theme.colors.surface_hover;

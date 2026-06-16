@@ -7,6 +7,7 @@
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/explosion.hpp"
 #include "arv/protocol/handshake.hpp"
@@ -1027,6 +1028,42 @@ void ClientNetworkRouter::handle_message(
         return;
       }
       runtime.inventory.apply_update(std::move(update.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundOpenContainer: {
+      auto open = protocol::deserialize_clientbound_open_container(decoded.value().payload);
+      if (!open) {
+        return;
+      }
+      runtime.inventory.apply_container_open(std::move(open.value()));
+      runtime.ui.open_inventory();
+      return;
+    }
+    case protocol::MessageType::ClientboundContainerSetContent: {
+      auto content =
+          protocol::deserialize_clientbound_container_set_content(decoded.value().payload);
+      if (!content) {
+        return;
+      }
+      runtime.inventory.apply_container_content(std::move(content.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundContainerSetSlot: {
+      auto slot =
+          protocol::deserialize_clientbound_container_set_slot(decoded.value().payload);
+      if (!slot) {
+        return;
+      }
+      runtime.inventory.apply_container_slot(std::move(slot.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundCloseContainer: {
+      auto close = protocol::deserialize_clientbound_close_container(decoded.value().payload);
+      if (!close) {
+        return;
+      }
+      runtime.inventory.apply_container_close(close.value());
+      runtime.ui.close_ui();
       return;
     }
     default:

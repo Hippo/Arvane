@@ -65,6 +65,7 @@ void build_gameplay_ui(UiTree& tree, GameplayUiModel model) {
   widgets_detail::append_chat_ui(tree, model.chat);
   widgets_detail::append_tab_menu_ui(tree, model.tab_menu);
   widgets_detail::append_inventory_ui(tree, model.inventory);
+  widgets_detail::append_container_ui(tree, std::move(model.container));
 }
 
 } // namespace arv::ui

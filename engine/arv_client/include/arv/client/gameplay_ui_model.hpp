@@ -3,6 +3,7 @@
 #include "arv/base/ui/widgets/gameplay.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/io/config.hpp"
+#include "arv/player/container.hpp"
 
 #include <chrono>
 #include <optional>
@@ -20,11 +21,14 @@ struct GameplayUiModelInput {
   const ClientRuntime& client;
   const io::UiConfig::ChatConfig& chat_config;
   std::span<const ui::UiItemStackView> inventory_slots{};
+  std::span<const ui::UiItemStackView> container_slots{};
   std::optional<ui::UiItemStackView> carried_inventory_stack{};
   std::span<const ui::ChatLineView> chat_lines{};
   usize chat_history_scroll_offset{};
   std::span<const ui::PlayerListEntryView> tab_players{};
   std::string_view inventory_title{};
+  std::string_view container_title{};
+  const player::ContainerUiLayoutDefinition* container_layout{};
   std::string_view tab_title{};
   Vec2f viewport{};
   Vec2f cursor_position{};

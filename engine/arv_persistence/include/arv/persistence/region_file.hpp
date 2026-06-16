@@ -7,6 +7,7 @@
 #include "arv/voxel/block.hpp"
 #include "arv/voxel/light.hpp"
 #include "arv/voxel/storage.hpp"
+#include "arv/world/block_container.hpp"
 
 #include <array>
 #include <filesystem>
@@ -20,7 +21,7 @@ struct PersistenceError {
   std::string message{};
 };
 
-inline constexpr u16 CurrentRegionFormatVersion = 3;
+inline constexpr u16 CurrentRegionFormatVersion = 4;
 inline constexpr u16 MinimumReadableRegionFormatVersion = 1;
 inline constexpr u16 RegionHeaderSize = 48;
 inline constexpr u32 RegionChunkSlotCount =
@@ -45,6 +46,7 @@ struct SavedChunkSection {
   std::array<voxel::LightWord, voxel::ChunkVolume> lights{};
   std::array<voxel::FluidCell, voxel::ChunkVolume> fluids{};
   bool lighting_valid{true};
+  std::vector<world::SavedBlockContainer> block_containers{};
 };
 
 struct DecodedRegionFile {

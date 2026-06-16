@@ -2,6 +2,7 @@
 
 #include "arv/player/player_constants.hpp"
 #include "arv/base/ui/widgets/items.hpp"
+#include "arv/player/container.hpp"
 
 #include <optional>
 #include <span>
@@ -27,7 +28,21 @@ struct ItemTooltipUiModel {
   Vec2f cursor_position{};
 };
 
+struct ContainerUiModel {
+  bool visible{};
+  std::string title{};
+  const player::ContainerUiLayoutDefinition* layout{};
+  u8 selected_hotbar_slot{};
+  u8 hotbar_slot_count{player::DefaultHotbarSlotCount};
+  Vec2f viewport{};
+  std::span<const UiItemStackView> container_slots{};
+  std::span<const UiItemStackView> player_slots{};
+  std::optional<UiItemStackView> cursor_stack{};
+  Vec2f cursor_position{};
+};
+
 void build_inventory_ui(UiTree& tree, InventoryUiModel model);
+void append_container_ui(UiTree& tree, ContainerUiModel model);
 void append_item_tooltip(UiTree& tree, ItemTooltipUiModel model);
 
 } // namespace arv::ui

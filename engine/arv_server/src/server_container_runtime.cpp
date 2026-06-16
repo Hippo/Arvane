@@ -1,0 +1,500 @@
+#include "server_runtime_internal.hpp"
+
+#include "arv/protocol/container_sync.hpp"
+
+#include <algorithm>
+#include <vector>
+
+namespace arv::server::detail {
+namespace {
+
+[[nodiscard]] bool same_container_source(
+    const ContainerSession& session,
+    WorldID world_id,
+    BlockPos block) noexcept {
+  return session.world_id == world_id && session.block == block;
+}
+
+[[nodiscard]] std::vector<u32> container_session_ids_at(
+    const HashMap<u32, ContainerSession>& sessions,
+    WorldID world_id,
+    BlockPos block) {
+  std::vector<u32> ids;
+  for (const auto& [session_id, session] : sessions) {
+    if (same_container_source(session, world_id, block)) {
+      ids.push_back(session_id);
+    }
+  }
+  return ids;
+}
+
+[[nodiscard]] std::vector<u32> container_session_ids_for_player_session(
+    const HashMap<u32, ContainerSession>& sessions,
+    SessionID player_session_id) {
+  std::vector<u32> ids;
+  for (const auto& [session_id, session] : sessions) {
+    if (session.player_session_id == player_session_id) {
+      ids.push_back(session_id);
+    }
+  }
+  return ids;
+}
+
+[[nodiscard]] std::vector<std::optional<player::ItemStack>> inventory_slots(
+    const player::Inventory& inventory) {
+  return inventory.slots();
+}
+
+[[nodiscard]] bool player_can_reach_container_block(
+    const player::PlayerState& player_state,
+    const player::PlayerTuning& tuning,
+    BlockPos block,
+    f32 grace_blocks) noexcept {
+  const f32 reach = std::max(0.0F, tuning.reach_distance + grace_blocks);
+  const Vec3f eye = player_eye_position(player_state, tuning);
+  return distance_squared(eye, block_center(block)) <= reach * reach;
+}
+
+[[nodiscard]] const voxel::BlockVariantRecord* loaded_container_variant_at(
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry* block_registry,
+    WorldID world_id,
+    BlockPos block) {
+  if (block_registry == nullptr || world_id != world.id()) {
+    return nullptr;
+  }
+  if (world.find_chunk(block_to_chunk(block)) == nullptr) {
+    return nullptr;
+  }
+  const voxel::BlockVariantID variant_id = world.get_block(block);
+  if (block_registry->is_air(variant_id)) {
+    return nullptr;
+  }
+  const voxel::BlockVariantRecord* variant = block_registry->variant(variant_id);
+  if (variant == nullptr || variant->container_type.empty()) {
+    return nullptr;
+  }
+  return variant;
+}
+
+[[nodiscard]] protocol::ContainerCloseReason validate_container_session(
+    const ContainerSession& container_session,
+    const SessionRegistry& sessions,
+    const world::WorldRuntime& world,
+    const voxel::BlockRegistry* block_registry,
+    const player::ContainerTypeRegistry* container_types,
+    const player::PlayerTuning& tuning,
+    f32 reach_grace_blocks) {
+  const ServerSession* player_session = sessions.find(container_session.player_session_id);
+  if (player_session == nullptr || !player_session->authenticated || player_session->closing ||
+      player_session->player_id != container_session.player_id ||
+      player_session->world_id != container_session.world_id) {
+    return protocol::ContainerCloseReason::InvalidSession;
+  }
+
+  const player::PlayerState* player_state = world.find_player(container_session.player_id);
+  if (player_state == nullptr || player_state->world_id != container_session.world_id) {
+    return protocol::ContainerCloseReason::InvalidSession;
+  }
+
+  if (world.find_chunk(block_to_chunk(container_session.block)) == nullptr) {
+    return protocol::ContainerCloseReason::ChunkUnloaded;
+  }
+
+  const voxel::BlockVariantRecord* variant = loaded_container_variant_at(
+      world,
+      block_registry,
+      container_session.world_id,
+      container_session.block);
+  if (variant == nullptr || variant->container_type != container_session.container_type) {
+    return protocol::ContainerCloseReason::ContainerRemoved;
+  }
+
+  if (container_types == nullptr ||
+      container_types->find(container_session.container_type) == nullptr ||
+      world.find_block_container(container_session.block) == nullptr) {
+    return protocol::ContainerCloseReason::ContainerRemoved;
+  }
+
+  if (!player_can_reach_container_block(
+          *player_state,
+          tuning,
+          container_session.block,
+          reach_grace_blocks)) {
+    return protocol::ContainerCloseReason::TooFar;
+  }
+
+  return protocol::ContainerCloseReason::Closed;
+}
+
+[[nodiscard]] player::Inventory* inventory_for_source(
+    player::ContainerSlotSource source,
+    player::PlayerState& player_state,
+    world::BlockAttachedContainer& container) noexcept {
+  switch (source) {
+    case player::ContainerSlotSource::OpenedContainer:
+      return &container.inventory;
+    case player::ContainerSlotSource::PlayerInventory:
+      return &player_state.inventory;
+  }
+  return nullptr;
+}
+
+[[nodiscard]] player::Inventory* destination_for_shift_transfer(
+    player::ContainerSlotSource source,
+    player::PlayerState& player_state,
+    world::BlockAttachedContainer& container) noexcept {
+  switch (source) {
+    case player::ContainerSlotSource::OpenedContainer:
+      return &player_state.inventory;
+    case player::ContainerSlotSource::PlayerInventory:
+      return &container.inventory;
+  }
+  return nullptr;
+}
+
+[[nodiscard]] bool shift_transfer_stack(
+    player::Inventory& source,
+    usize source_slot,
+    player::Inventory& destination,
+    const player::ItemRegistry& item_registry) {
+  const std::optional<player::ItemStack> source_stack = source.slot(source_slot);
+  if (!source_stack.has_value()) {
+    return false;
+  }
+  (void)source.clear_slot(source_slot);
+  const player::InventoryInsertResult insert_result =
+      destination.insert_stack(source_stack.value(), item_registry);
+  if (insert_result.leftover.has_value()) {
+    (void)source.set_slot(source_slot, insert_result.leftover);
+  }
+  return !insert_result.leftover.has_value() ||
+         insert_result.leftover->count != source_stack->count;
+}
+
+} // namespace
+
+void ServerRuntimeImpl::handle_open_container_block(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundOpenContainerBlock& request) {
+  ServerSession* session = sessions_.find_by_connection(connection_id);
+  if (session == nullptr || !session->authenticated || session->closing ||
+      request.world_id != session->world_id || request.world_id != default_world_.id() ||
+      container_types_ == nullptr || item_registry_ == nullptr) {
+    return;
+  }
+
+  const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  if (player_state == nullptr || player_state->world_id != request.world_id) {
+    return;
+  }
+  if (!player_can_reach_container_block(
+          *player_state,
+          player_tuning_,
+          request.block,
+          0.0F)) {
+    return;
+  }
+
+  const voxel::BlockVariantRecord* variant = loaded_container_variant_at(
+      default_world_,
+      block_registry_,
+      request.world_id,
+      request.block);
+  if (variant == nullptr) {
+    return;
+  }
+
+  const player::ContainerTypeDefinition* container_type =
+      container_types_->find(variant->container_type);
+  if (container_type == nullptr || container_type->slot_count == 0U ||
+      container_type->slot_count > protocol::MaxContainerSlots) {
+    return;
+  }
+  if (container_layouts_ != nullptr &&
+      container_layouts_->find(container_type->ui_layout) == nullptr) {
+    return;
+  }
+
+  world::BlockAttachedContainer* container = default_world_.ensure_block_container(
+      request.block,
+      container_type->id,
+      container_type->slot_count);
+  if (container == nullptr) {
+    return;
+  }
+
+  close_container_sessions_for_player_session(
+      session->session_id,
+      protocol::ContainerCloseReason::Closed);
+
+  u32 container_session_id = next_container_session_id_++;
+  if (container_session_id == 0U) {
+    container_session_id = next_container_session_id_++;
+  }
+  ContainerSession container_session;
+  container_session.session_id = container_session_id;
+  container_session.player_session_id = session->session_id;
+  container_session.player_id = session->player_id;
+  container_session.world_id = request.world_id;
+  container_session.block = request.block;
+  container_session.container_type = container_type->id;
+  container_session.revision = 1U;
+  auto [iter, inserted] =
+      container_sessions_.emplace(container_session_id, std::move(container_session));
+  if (!inserted) {
+    return;
+  }
+
+  const protocol::ClientboundOpenContainer packet{
+      iter->second.session_id,
+      iter->second.revision,
+      container_type->id,
+      container_type->title,
+      container_type->ui_layout,
+      inventory_slots(container->inventory),
+      inventory_slots(player_state->inventory),
+      player_state->inventory_cursor_stack};
+  (void)send_protocol_message(
+      *transport_,
+      session->connection_id,
+      protocol::MessageType::ClientboundOpenContainer,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_clientbound_open_container(packet));
+}
+
+void ServerRuntimeImpl::handle_container_action(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundContainerAction& action) {
+  ServerSession* player_session = sessions_.find_by_connection(connection_id);
+  auto session_iter = container_sessions_.find(action.session_id);
+  if (player_session == nullptr || !player_session->authenticated ||
+      player_session->closing || session_iter == container_sessions_.end() ||
+      session_iter->second.player_session_id != player_session->session_id ||
+      item_registry_ == nullptr) {
+    return;
+  }
+
+  ContainerSession& container_session = session_iter->second;
+  const protocol::ContainerCloseReason validation = validate_container_session(
+      container_session,
+      sessions_,
+      default_world_,
+      block_registry_,
+      container_types_,
+      player_tuning_,
+      0.75F);
+  if (validation != protocol::ContainerCloseReason::Closed) {
+    close_container_session(container_session.session_id, validation);
+    return;
+  }
+
+  player::PlayerState* player_state = default_world_.find_player(container_session.player_id);
+  world::BlockAttachedContainer* container =
+      default_world_.find_block_container(container_session.block);
+  if (player_state == nullptr || container == nullptr) {
+    close_container_session(
+        container_session.session_id,
+        protocol::ContainerCloseReason::ContainerRemoved);
+    return;
+  }
+
+  bool changed = false;
+  switch (action.kind) {
+    case protocol::ContainerActionKind::SlotClick: {
+      player::Inventory* inventory =
+          inventory_for_source(action.source, *player_state, *container);
+      if (inventory != nullptr) {
+        const player::InventoryOperationResult result =
+            player::apply_inventory_slot_click(
+                *inventory,
+                action.slot_index,
+                action.button,
+                player_state->inventory_cursor_stack,
+                *item_registry_);
+        changed = result.accepted();
+      }
+      break;
+    }
+    case protocol::ContainerActionKind::ShiftTransfer: {
+      player::Inventory* source =
+          inventory_for_source(action.source, *player_state, *container);
+      player::Inventory* destination =
+          destination_for_shift_transfer(action.source, *player_state, *container);
+      if (source != nullptr && destination != nullptr &&
+          source->is_valid_slot(action.slot_index)) {
+        changed = shift_transfer_stack(
+            *source,
+            action.slot_index,
+            *destination,
+            *item_registry_);
+      }
+      break;
+    }
+    case protocol::ContainerActionKind::DropCursor:
+      changed = drop_player_inventory_cursor(player_state->player_id).has_value();
+      break;
+    case protocol::ContainerActionKind::DropOneCursor:
+      changed = drop_one_from_player_inventory_cursor(player_state->player_id).has_value();
+      break;
+  }
+
+  if (changed) {
+    send_container_content_to_viewers(
+        container_session.world_id,
+        container_session.block);
+  } else {
+    send_container_content(container_session);
+  }
+}
+
+void ServerRuntimeImpl::handle_close_container(
+    net::ConnectionID connection_id,
+    const protocol::ServerboundCloseContainer& request) {
+  ServerSession* player_session = sessions_.find_by_connection(connection_id);
+  auto session_iter = container_sessions_.find(request.session_id);
+  if (player_session == nullptr || session_iter == container_sessions_.end() ||
+      session_iter->second.player_session_id != player_session->session_id) {
+    return;
+  }
+  close_container_session(
+      request.session_id,
+      protocol::ContainerCloseReason::Closed);
+}
+
+void ServerRuntimeImpl::tick_container_sessions() {
+  std::vector<std::pair<u32, protocol::ContainerCloseReason>> sessions_to_close;
+  for (const auto& [session_id, container_session] : container_sessions_) {
+    const protocol::ContainerCloseReason validation = validate_container_session(
+        container_session,
+        sessions_,
+        default_world_,
+        block_registry_,
+        container_types_,
+        player_tuning_,
+        0.75F);
+    if (validation != protocol::ContainerCloseReason::Closed) {
+      sessions_to_close.emplace_back(session_id, validation);
+    }
+  }
+
+  for (const auto& [session_id, reason] : sessions_to_close) {
+    close_container_session(session_id, reason);
+  }
+}
+
+void ServerRuntimeImpl::close_container_session(
+    u32 container_session_id,
+    protocol::ContainerCloseReason reason,
+    bool return_cursor) {
+  auto iter = container_sessions_.find(container_session_id);
+  if (iter == container_sessions_.end()) {
+    return;
+  }
+  const ContainerSession session = iter->second;
+  container_sessions_.erase(iter);
+
+  if (return_cursor) {
+    (void)close_player_inventory_menu(session.player_id);
+  }
+
+  const ServerSession* player_session = sessions_.find(session.player_session_id);
+  if (player_session == nullptr || player_session->closing || !player_session->authenticated ||
+      transport_ == nullptr) {
+    return;
+  }
+
+  const protocol::ClientboundCloseContainer packet{session.session_id, reason};
+  (void)send_protocol_message(
+      *transport_,
+      player_session->connection_id,
+      protocol::MessageType::ClientboundCloseContainer,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_clientbound_close_container(packet));
+}
+
+void ServerRuntimeImpl::close_container_sessions_for_player_session(
+    SessionID session_id,
+    protocol::ContainerCloseReason reason) {
+  const std::vector<u32> sessions_to_close =
+      container_session_ids_for_player_session(container_sessions_, session_id);
+  for (const u32 container_session_id : sessions_to_close) {
+    close_container_session(container_session_id, reason);
+  }
+}
+
+void ServerRuntimeImpl::close_container_sessions_at(
+    WorldID world_id,
+    BlockPos block,
+    protocol::ContainerCloseReason reason) {
+  const std::vector<u32> sessions_to_close =
+      container_session_ids_at(container_sessions_, world_id, block);
+  for (const u32 container_session_id : sessions_to_close) {
+    close_container_session(container_session_id, reason);
+  }
+}
+
+void ServerRuntimeImpl::drop_and_remove_block_container(WorldID world_id, BlockPos block) {
+  if (world_id != default_world_.id()) {
+    return;
+  }
+
+  close_container_sessions_at(
+      world_id,
+      block,
+      protocol::ContainerCloseReason::ContainerRemoved);
+
+  world::BlockAttachedContainer* container = default_world_.find_block_container(block);
+  if (container == nullptr) {
+    return;
+  }
+
+  const Vec3f drop_position = block_center(block);
+  for (const std::optional<player::ItemStack>& stack : container->inventory.slots()) {
+    if (stack.has_value() && stack->count > 0U) {
+      spawn_dropped_item_stack(world_id, drop_position, stack.value());
+    }
+  }
+  (void)default_world_.remove_block_container(block);
+}
+
+void ServerRuntimeImpl::send_container_content(ContainerSession& session) {
+  const ServerSession* player_session = sessions_.find(session.player_session_id);
+  const player::PlayerState* player_state = default_world_.find_player(session.player_id);
+  const world::BlockAttachedContainer* container =
+      default_world_.find_block_container(session.block);
+  if (player_session == nullptr || player_state == nullptr || container == nullptr ||
+      player_session->closing || !player_session->authenticated || transport_ == nullptr) {
+    return;
+  }
+
+  ++session.revision;
+  const protocol::ClientboundContainerSetContent packet{
+      session.session_id,
+      session.revision,
+      inventory_slots(container->inventory),
+      inventory_slots(player_state->inventory),
+      player_state->inventory_cursor_stack};
+  (void)send_protocol_message(
+      *transport_,
+      player_session->connection_id,
+      protocol::MessageType::ClientboundContainerSetContent,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_clientbound_container_set_content(packet));
+}
+
+void ServerRuntimeImpl::send_container_content_to_viewers(WorldID world_id, BlockPos block) {
+  const std::vector<u32> viewer_ids =
+      container_session_ids_at(container_sessions_, world_id, block);
+  for (const u32 session_id : viewer_ids) {
+    auto iter = container_sessions_.find(session_id);
+    if (iter != container_sessions_.end()) {
+      send_container_content(iter->second);
+    }
+  }
+}
+
+} // namespace arv::server::detail

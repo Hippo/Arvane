@@ -322,6 +322,55 @@ TEST(WorldRuntimeTests, NonAuthoritativeSavedLightingQueuesRelight) {
   EXPECT_EQ(world.make_lighting_snapshot().pending_dirty_sections, 1U);
 }
 
+TEST(WorldRuntimeTests, BlockContainersSaveRestoreRemoveAndUnloadBySection) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+
+  arv::world::BlockAttachedContainer* container =
+      world.ensure_block_container({{2, 3, 4}}, "arvane:chest", 27);
+  ASSERT_NE(container, nullptr);
+  ASSERT_TRUE(container->inventory.set_slot(
+      5,
+      arv::player::ItemStack{arv::player::ItemID{42}, 3}));
+
+  std::vector<arv::world::SavedBlockContainer> saved =
+      world.saved_block_containers({{0, 0, 0}});
+  ASSERT_EQ(saved.size(), 1U);
+  EXPECT_EQ(saved[0].local, (arv::SectionLocalPos{{2, 3, 4}}));
+  EXPECT_EQ(saved[0].container_type, "arvane:chest");
+  EXPECT_EQ(saved[0].slot_count, 27U);
+  ASSERT_EQ(saved[0].slots.size(), 1U);
+  EXPECT_EQ(saved[0].slots[0].slot, 5U);
+  EXPECT_EQ(saved[0].slots[0].stack.count, 3U);
+
+  arv::world::WorldRuntime loaded{arv::WorldID{2}};
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks{};
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::LightWord, arv::voxel::ChunkVolume> lights{};
+  lights.fill(arv::voxel::NoLight);
+  loaded.restore_saved_chunk(
+      {{0, 0, 0}},
+      std::move(blocks),
+      std::move(lights),
+      std::nullopt,
+      true,
+      saved);
+
+  const arv::world::BlockAttachedContainer* restored =
+      loaded.find_block_container({{2, 3, 4}});
+  ASSERT_NE(restored, nullptr);
+  EXPECT_EQ(restored->container_type, "arvane:chest");
+  ASSERT_TRUE(restored->inventory.slot(5).has_value());
+  EXPECT_EQ(restored->inventory.slot(5)->item, arv::player::ItemID{42});
+  EXPECT_EQ(restored->inventory.slot(5)->count, 3U);
+
+  EXPECT_TRUE(loaded.remove_block_container({{2, 3, 4}}));
+  EXPECT_EQ(loaded.find_block_container({{2, 3, 4}}), nullptr);
+  (void)loaded.ensure_block_container({{2, 3, 4}}, "arvane:chest", 27);
+  EXPECT_TRUE(loaded.unload_chunk({{0, 0, 0}}));
+  EXPECT_EQ(loaded.find_block_container({{2, 3, 4}}), nullptr);
+}
+
 TEST(WorldRuntimeTests, PublishingGeneratedChunkInvalidatesDirectNeighborsForRelightAndRemesh) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& neighbor = world.ensure_chunk({{0, 0, 0}});

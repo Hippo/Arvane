@@ -2446,6 +2446,33 @@ void update_held_item_animation_from_input(
       world_id,
       animation_time_seconds);
 
+  const auto& block_attached_models =
+      g_app.entity_assets.loaded.render_assets.block_attached_model_by_variant;
+  for (const arv::protocol::ClientboundChunkSectionData& section : g_app.chunk_sections) {
+    if (section.world_id != world_id) {
+      continue;
+    }
+    for (arv::usize index = 0; index < arv::voxel::ChunkVolume; ++index) {
+      const arv::voxel::BlockVariantID variant_id = section.blocks[index];
+      if (variant_id.value >= block_attached_models.size()) {
+        continue;
+      }
+      const arv::render::EntityModelID model_id =
+          block_attached_models[variant_id.value];
+      if (model_id.value == 0U) {
+        continue;
+      }
+
+      const arv::BlockPos block =
+          arv::chunk_local_to_block(section.coord, arv::voxel::local_pos(index));
+      arv::render::EntityDrawItem item;
+      item.model_id = model_id;
+      item.position = arv::block_center(block);
+      item.scale = 1.0F;
+      item_frame.entities.push_back(std::move(item));
+    }
+  }
+
   const arv::client::CameraShell& camera = g_app.session->camera();
   const arv::client::ChunkSectionCollisionQuery outline_query(
       g_app.chunk_sections,

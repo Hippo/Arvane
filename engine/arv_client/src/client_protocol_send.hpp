@@ -7,6 +7,7 @@
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_type.hpp"
@@ -45,6 +46,12 @@ public:
 
   net::NetworkResult send_inventory_action(
       protocol::ServerboundInventoryActionRequest request);
+  net::NetworkResult send_open_container_block(
+      const protocol::ServerboundOpenContainerBlock& request);
+  net::NetworkResult send_container_action(
+      const protocol::ServerboundContainerAction& action);
+  net::NetworkResult send_close_container(
+      const protocol::ServerboundCloseContainer& request);
   net::NetworkResult send_attack_entity(
       const protocol::ServerboundAttackEntity& attack);
 

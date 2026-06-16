@@ -76,6 +76,7 @@ add_executable(arv_tests
   protocol/auth_tests.cpp
   protocol/chat_tests.cpp
   protocol/packet_tests.cpp
+  player/container_tests.cpp
   player/inventory_tests.cpp
   player/permission_tests.cpp
   player/selection_tests.cpp
@@ -91,6 +92,7 @@ add_executable(arv_tests
   sched/job_system_tests.cpp
   server/chunk_streamer_tests.cpp
   server/chat_service_tests.cpp
+  server/container_runtime_tests.cpp
   server/player_movement_validation_tests.cpp
   server/player_profile_tests.cpp
   server/player_interaction_tests.cpp

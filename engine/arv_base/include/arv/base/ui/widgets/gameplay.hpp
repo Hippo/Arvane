@@ -27,6 +27,7 @@ struct GameplayUiModel {
   DebugHudModel debug{};
   HealthHudModel health{};
   RidePromptModel ride_prompt{};
+  ContainerUiModel container{};
 };
 
 void build_gameplay_ui(UiTree& tree, GameplayUiModel model);

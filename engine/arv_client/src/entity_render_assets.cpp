@@ -23,6 +23,7 @@ constexpr u32 FirstPersonPlayerSkinEntityModelID = 5'000'001U;
 constexpr u32 FirstPersonPlayerSlimEntityModelID = 5'000'002U;
 constexpr u32 FirstPersonPlayerSlimSkinEntityModelID = 5'000'003U;
 constexpr u32 ChunkBoundsEntityModelID = 6'000'000U;
+constexpr u32 BlockAttachedEntityModelIDBase = 7'000'000U;
 constexpr std::string_view WhiteTextureAsset = "arvane:texture/generated_white";
 constexpr std::string_view DefaultPlayerSkinTextureAsset =
     "arvane:texture/default_skin/default";
@@ -93,6 +94,11 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
 [[nodiscard]] render::EntityModelID block_outline_model_id(
     voxel::BlockVariantID variant) noexcept {
   return render::EntityModelID{BlockOutlineEntityModelIDBase + variant.value};
+}
+
+[[nodiscard]] render::EntityModelID block_attached_model_id(
+    voxel::BlockVariantID variant) noexcept {
+  return render::EntityModelID{BlockAttachedEntityModelIDBase + variant.value};
 }
 
 [[nodiscard]] std::string normalize_item_model_asset(std::string_view model) {
@@ -599,6 +605,26 @@ EntityRenderAssetsResult build_entity_render_assets(
   for (usize stage = 0; stage < BreakStageTextureCount; ++stage) {
     add_texture(break_stage_texture_asset(stage));
   }
+  for (u32 variant_value = 0; variant_value < block_registry.variant_count(); ++variant_value) {
+    const voxel::BlockVariantRecord* variant =
+        block_registry.variant(voxel::BlockVariantID{variant_value});
+    if (variant == nullptr ||
+        variant->render_mode != voxel::BlockRenderMode::BlockEntityModel ||
+        variant->model.asset.empty()) {
+      continue;
+    }
+    const voxel::BlockModelDefinition* model_definition =
+        block_model_by_variant[variant_value];
+    if (model_definition == nullptr) {
+      return EntityRenderAssetsResult::failure({variant->model.asset,
+                                                resources.resolve_asset_path({variant->model.asset}, asset::AssetKind::Model),
+                                                "build block-attached model",
+                                                "block model was not loaded"});
+    }
+    for (const std::string& texture : model_definition->texture_assets) {
+      add_texture(texture);
+    }
+  }
   add_texture(std::string{WhiteTextureAsset});
   add_texture("arvane:texture/missing");
 
@@ -803,6 +829,7 @@ EntityRenderAssetsResult build_entity_render_assets(
 
   assets.break_overlay_model_by_variant.resize(block_registry.variant_count());
   assets.outline_model_by_variant.resize(block_registry.variant_count());
+  assets.block_attached_model_by_variant.resize(block_registry.variant_count());
   const asset::TextureAtlasEntry* white_entry =
       assets.texture_atlas.find(std::string{WhiteTextureAsset});
   if (white_entry == nullptr) {
@@ -843,6 +870,18 @@ EntityRenderAssetsResult build_entity_render_assets(
       const std::span<const voxel::BlockModelBoxRenderData> cached_boxes =
           block_render_data.model_boxes(variant_id);
       model_boxes.assign(cached_boxes.begin(), cached_boxes.end());
+    }
+
+    if (variant->render_mode == voxel::BlockRenderMode::BlockEntityModel &&
+        !variant->model.asset.empty()) {
+      render::ItemBlockModelInput input;
+      input.id = block_attached_model_id(variant_id);
+      input.name = variant->debug_name + "#block_attached";
+      input.translucent = variant->render_category == voxel::RenderCategory::Transparent;
+      input.model_boxes =
+          std::span<const voxel::BlockModelBoxRenderData>{model_boxes.data(), model_boxes.size()};
+      assets.block_attached_model_by_variant[variant_value] = input.id;
+      assets.models.push_back(render::build_block_item_model(input));
     }
 
     for (usize stage = 0; stage < BreakStageTextureCount; ++stage) {

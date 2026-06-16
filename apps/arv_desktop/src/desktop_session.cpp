@@ -332,6 +332,8 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
   server_start_info.listen_address = {"in-process", 0};
   server_start_info.block_registry = &dependencies_.block_registry;
   server_start_info.item_registry = &dependencies_.item_registry;
+  server_start_info.container_types = &dependencies_.container_types;
+  server_start_info.container_layouts = &dependencies_.container_layouts;
   server_start_info.game_modes = &dependencies_.game_modes;
   server_start_info.starter_inventory =
       std::span<const server::StarterInventoryItem>{dependencies_.starter_inventory};
@@ -447,7 +449,8 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
         chunk.blocks,
         chunk.lights,
         chunk.fluids,
-        chunk.lighting_valid);
+        chunk.lighting_valid,
+        chunk.block_containers);
   }
   integrated_server->voxel_world().restore_persistent_entities(
       loaded_save.entities,
@@ -724,6 +727,7 @@ void DesktopSessionManager::delete_singleplayer_save(
 
 void DesktopSessionManager::refresh_inventory_slots(DesktopGameSession& session) const {
   session.inventory_slots.clear();
+  session.container_slots.clear();
   session.carried_inventory_stack.reset();
   if (session.client != nullptr && session.client->has_authoritative_inventory()) {
     session.inventory_slots = client::inventory_slots_for_ui(
@@ -731,6 +735,13 @@ void DesktopSessionManager::refresh_inventory_slots(DesktopGameSession& session)
         dependencies_.item_registry,
         dependencies_.item_atlas,
         dependencies_.block_atlas);
+    if (session.client->container_open()) {
+      session.container_slots = client::inventory_slots_for_ui(
+          session.client->active_container_inventory(),
+          dependencies_.item_registry,
+          dependencies_.item_atlas,
+          dependencies_.block_atlas);
+    }
     session.carried_inventory_stack = client::item_stack_for_ui(
         session.client->inventory_cursor_stack(),
         dependencies_.item_registry,

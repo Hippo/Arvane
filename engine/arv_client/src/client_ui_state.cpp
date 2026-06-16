@@ -65,6 +65,12 @@ void ClientUiState::toggle_inventory_if_allowed(
   }
 }
 
+void ClientUiState::open_inventory() noexcept {
+  inventory_open_ = true;
+  chat_open_ = false;
+  reset_chat_history_navigation();
+}
+
 void ClientUiState::open_chat() {
   chat_open_ = true;
   inventory_open_ = false;

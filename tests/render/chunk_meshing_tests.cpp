@@ -365,6 +365,37 @@ TEST(ChunkMeshingTests, CustomBlockModelEmitsBoxFacesForNonFullCubeVariant) {
       arv::voxel::BlockFace::PositiveY));
 }
 
+TEST(ChunkMeshingTests, BlockEntityModelRenderModeSkipsTerrainMesh) {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+  arv::voxel::BlockDefinition chest;
+  chest.name = "arvane:chest";
+  chest.render_category = arv::voxel::RenderCategory::Opaque;
+  chest.render_mode = arv::voxel::BlockRenderMode::BlockEntityModel;
+  chest.properties.solid = true;
+  chest.properties.collidable = true;
+  chest.properties.opaque = false;
+  chest.properties.full_cube = false;
+  chest.model.asset = "arvane:model/entity/chest";
+  definitions.push_back(std::move(chest));
+  auto registry_result = arv::voxel::BlockRegistry::build(std::move(definitions));
+  ASSERT_TRUE(registry_result) << registry_result.error().message;
+  const arv::voxel::BlockRegistry registry = std::move(registry_result.value());
+  const arv::voxel::BlockVariantID chest_variant =
+      registry.find_variant("arvane:chest").value();
+
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  ASSERT_TRUE(chunk.set_block({{1, 1, 1}}, chest_variant));
+
+  const arv::voxel::ChunkSnapshot snapshot =
+      arv::voxel::make_chunk_snapshot_without_neighbors(chunk);
+  const arv::render::ChunkMeshData mesh =
+      arv::render::build_chunk_mesh(arv::WorldID{1}, snapshot, registry);
+
+  EXPECT_EQ(face_count(mesh.opaque), 0U);
+  EXPECT_EQ(face_count(mesh.transparent), 0U);
+}
+
 TEST(ChunkMeshingTests, CustomBlockModelBoundaryFacesRespectNeighborOcclusion) {
   const arv::voxel::BlockRegistry registry = make_model_registry();
   const arv::voxel::BlockRenderData render_data = make_slab_render_data(registry);

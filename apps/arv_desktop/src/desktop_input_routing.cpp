@@ -5,6 +5,15 @@
 
 namespace arv::desktop {
 
+namespace {
+
+[[nodiscard]] bool shift_modifier_pressed(const platform::InputSnapshot& input) noexcept {
+  return input.raw_input.has_value() &&
+         platform::has_input_modifier(input.raw_input->binding.modifiers, platform::InputModifier::Shift);
+}
+
+} // namespace
+
 std::optional<usize> inventory_slot_from_ui_action(const ui::UiAction& action) noexcept {
   return client::inventory_slot_from_ui_action(action);
 }
@@ -24,6 +33,25 @@ bool apply_inventory_action(
   return false;
 }
 
+bool apply_container_action(
+    client::ClientRuntime& client,
+    const std::optional<ui::UiAction>& action,
+    player::InventoryClickButton button) {
+  if (!action.has_value()) {
+    return false;
+  }
+  if (const std::optional<client::ContainerSlotActionRef> slot =
+          client::container_slot_from_ui_action(action.value());
+      slot.has_value()) {
+    (void)client.request_container_slot_click(
+        slot->source,
+        slot->slot,
+        button);
+    return true;
+  }
+  return false;
+}
+
 bool route_inventory_mouse_input(
     ui::UiTree& ui_tree,
     client::ClientRuntime& client,
@@ -34,11 +62,23 @@ bool route_inventory_mouse_input(
   (void)ui_tree.route_mouse_move(cursor);
   if (platform_input.mouse_left_pressed) {
     const std::optional<ui::UiNodeID> hit = ui_tree.hit_test(cursor);
-    changed = apply_inventory_action(
-                  client,
-                  ui_tree.route_mouse_down(cursor, ui::UiMouseButton::Left),
-                  player::InventoryClickButton::Primary) ||
-              changed;
+    const std::optional<ui::UiAction> action =
+        ui_tree.route_mouse_down(cursor, ui::UiMouseButton::Left);
+    if (client.container_open() && shift_modifier_pressed(platform_input)) {
+      std::optional<client::ContainerSlotActionRef> slot;
+      if (action.has_value()) {
+        slot = client::container_slot_from_ui_action(action.value());
+      }
+      if (slot.has_value()) {
+        (void)client.request_container_shift_transfer(slot->source, slot->slot);
+        changed = true;
+      }
+    }
+    changed =
+        changed ||
+        (client.container_open()
+             ? apply_container_action(client, action, player::InventoryClickButton::Primary)
+             : apply_inventory_action(client, action, player::InventoryClickButton::Primary));
     if (!changed && !hit.has_value() && has_carried_stack) {
       (void)client.request_inventory_drop_cursor(false);
       changed = true;
@@ -46,11 +86,13 @@ bool route_inventory_mouse_input(
   }
   if (platform_input.mouse_right_pressed) {
     const std::optional<ui::UiNodeID> hit = ui_tree.hit_test(cursor);
-    changed = apply_inventory_action(
-                  client,
-                  ui_tree.route_mouse_down(cursor, ui::UiMouseButton::Right),
-                  player::InventoryClickButton::Secondary) ||
-              changed;
+    const std::optional<ui::UiAction> action =
+        ui_tree.route_mouse_down(cursor, ui::UiMouseButton::Right);
+    changed =
+        (client.container_open()
+             ? apply_container_action(client, action, player::InventoryClickButton::Secondary)
+             : apply_inventory_action(client, action, player::InventoryClickButton::Secondary)) ||
+        changed;
     if (!changed && !hit.has_value() && has_carried_stack) {
       (void)client.request_inventory_drop_cursor(true);
       changed = true;

@@ -1,4 +1,5 @@
 set(ARV_WORLD_HEADERS
+  include/arv/world/block_container.hpp
   include/arv/world/fluid_solver.hpp
   include/arv/world/entity_goal_utils.hpp
   include/arv/world/entity_goal_registry.hpp

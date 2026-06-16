@@ -28,6 +28,17 @@ namespace {
   return Expected<RenderCategory, BlockRegistryError>::failure({"invalid render_category: " + value});
 }
 
+[[nodiscard]] Expected<BlockRenderMode, BlockRegistryError> parse_block_render_mode(
+    const std::string& value) {
+  if (value == "terrain") {
+    return Expected<BlockRenderMode, BlockRegistryError>::success(BlockRenderMode::Terrain);
+  }
+  if (value == "block_entity_model") {
+    return Expected<BlockRenderMode, BlockRegistryError>::success(BlockRenderMode::BlockEntityModel);
+  }
+  return Expected<BlockRenderMode, BlockRegistryError>::failure({"invalid render_mode: " + value});
+}
+
 [[nodiscard]] Expected<BlockRenderTint, BlockRegistryError> parse_render_tint(
     const std::string& value) {
   if (value == "none") {
@@ -791,6 +802,7 @@ BlockRegistry::Result BlockRegistry::build(
     block.blast = definition.blast;
     block.physics = definition.physics;
     block.drops = definition.drops;
+    block.container_type = definition.container_type;
     block.is_item = definition.is_item;
     block.item_buoyancy = definition.item_buoyancy;
     block.particle_texture_asset = definition.particle_texture_asset;
@@ -817,10 +829,12 @@ BlockRegistry::Result BlockRegistry::build(
       variant.blast = definition.blast;
       variant.physics = definition.physics;
       variant.render_category = definition.render_category;
+      variant.render_mode = definition.render_mode;
       variant.render_tint = definition.render_tint;
       variant.hide_same_variant_faces = definition.hide_same_variant_faces;
       variant.texture_assets = definition.texture_assets;
       variant.particle_texture_asset = definition.particle_texture_asset;
+      variant.container_type = definition.container_type;
       variant.model = definition.model;
       variant.model_transform = model_transform_for_state_values(variant.state_values);
       variant.renders_face.fill(definition.render_category != RenderCategory::None && definition.properties.full_cube);
@@ -1101,6 +1115,12 @@ std::optional<std::string> BlockRegistry::validate_air_definition(const BlockDef
   if (definition.render_category != RenderCategory::None) {
     return "arvane:air must not render geometry";
   }
+  if (definition.render_mode != BlockRenderMode::Terrain) {
+    return "arvane:air must use terrain render mode";
+  }
+  if (!definition.container_type.empty()) {
+    return "arvane:air must not define a container";
+  }
   if (definition.properties.solid || definition.properties.collidable || definition.properties.opaque ||
       definition.properties.blocks_light || definition.properties.emits_light || definition.properties.fluid ||
       definition.properties.full_cube || definition.properties.ao_occluder) {
@@ -1218,6 +1238,43 @@ BlockDefinitionsResult parse_block_definitions_json(std::string_view text) {
           return BlockDefinitionsResult::failure(parsed_category.error());
         }
         definition.render_category = parsed_category.value();
+      }
+
+      const io::DataValue* render_mode_iter = item.get("render_mode");
+      if (render_mode_iter != nullptr) {
+        if (render_mode_iter->kind() != io::DataKind::String) {
+          return BlockDefinitionsResult::failure({"render_mode must be a string for " + definition.name});
+        }
+        auto parsed_mode = parse_block_render_mode(std::string{render_mode_iter->as_string_or({})});
+        if (!parsed_mode) {
+          return BlockDefinitionsResult::failure(parsed_mode.error());
+        }
+        definition.render_mode = parsed_mode.value();
+      }
+
+      const io::DataValue* container_iter = item.get("container");
+      if (container_iter != nullptr) {
+        if (container_iter->kind() != io::DataKind::Object) {
+          return BlockDefinitionsResult::failure({"container must be an object for " + definition.name});
+        }
+        const io::DataValue* type = container_iter->get("type");
+        if (type == nullptr || type->kind() != io::DataKind::String) {
+          return BlockDefinitionsResult::failure({"container.type must be a string for " + definition.name});
+        }
+        definition.container_type = std::string{type->as_string_or({})};
+        if (definition.container_type.empty()) {
+          return BlockDefinitionsResult::failure({"container.type must be non-empty for " + definition.name});
+        }
+      }
+      const io::DataValue* container_type_iter = item.get("container_type");
+      if (container_type_iter != nullptr) {
+        if (container_type_iter->kind() != io::DataKind::String) {
+          return BlockDefinitionsResult::failure({"container_type must be a string for " + definition.name});
+        }
+        definition.container_type = std::string{container_type_iter->as_string_or({})};
+        if (definition.container_type.empty()) {
+          return BlockDefinitionsResult::failure({"container_type must be non-empty for " + definition.name});
+        }
       }
 
       const io::DataValue* tint_iter = item.get("render_tint");
@@ -1812,6 +1869,52 @@ std::vector<Aabb3f> make_block_model_collision_boxes(
     Vec3f transformed_max = transformed_min;
     for (const Vec3f corner : corners) {
       const Vec3f transformed = transform_model_point(corner, center_origin, transform);
+      transformed_min.x = std::min(transformed_min.x, transformed.x);
+      transformed_min.y = std::min(transformed_min.y, transformed.y);
+      transformed_min.z = std::min(transformed_min.z, transformed.z);
+      transformed_max.x = std::max(transformed_max.x, transformed.x);
+      transformed_max.y = std::max(transformed_max.y, transformed.y);
+      transformed_max.z = std::max(transformed_max.z, transformed.z);
+    }
+    boxes.push_back({transformed_min, transformed_max});
+  }
+  return boxes;
+}
+
+std::vector<Aabb3f> make_block_attached_model_collision_boxes(
+    const AuthoredModelDefinition& model,
+    BlockModelTransform transform) {
+  std::vector<Aabb3f> boxes;
+  boxes.reserve(model.boxes.size());
+  constexpr Vec3f BlockCenter{0.5F, 0.0F, 0.5F};
+  const auto model_to_block = [](Vec3f point) noexcept {
+    return Vec3f{
+        0.5F + point.x / 16.0F,
+        point.y / 16.0F,
+        0.5F + point.z / 16.0F};
+  };
+
+  for (const AuthoredModelBoxDefinition& box : model.boxes) {
+    if (box.min.x >= box.max.x || box.min.y >= box.max.y || box.min.z >= box.max.z) {
+      continue;
+    }
+    const Vec3f min = model_to_block(box.min);
+    const Vec3f max = model_to_block(box.max);
+    const std::array<Vec3f, 8> corners{{
+        {min.x, min.y, min.z},
+        {max.x, min.y, min.z},
+        {min.x, max.y, min.z},
+        {max.x, max.y, min.z},
+        {min.x, min.y, max.z},
+        {max.x, min.y, max.z},
+        {min.x, max.y, max.z},
+        {max.x, max.y, max.z},
+    }};
+
+    Vec3f transformed_min = transform_model_point(corners.front(), BlockCenter, transform);
+    Vec3f transformed_max = transformed_min;
+    for (const Vec3f corner : corners) {
+      const Vec3f transformed = transform_model_point(corner, BlockCenter, transform);
       transformed_min.x = std::min(transformed_min.x, transformed.x);
       transformed_min.y = std::min(transformed_min.y, transformed.y);
       transformed_min.z = std::min(transformed_min.z, transformed.z);

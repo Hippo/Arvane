@@ -145,11 +145,128 @@ void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
   (void)model.viewport;
 }
 
+[[nodiscard]] const UiItemStackView* container_stack_for_slot(
+    const ContainerUiModel& model,
+    player::ContainerSlotSource source,
+    usize slot_index) noexcept {
+  switch (source) {
+    case player::ContainerSlotSource::OpenedContainer:
+      return slot_index < model.container_slots.size()
+                 ? &model.container_slots[slot_index]
+                 : nullptr;
+    case player::ContainerSlotSource::PlayerInventory:
+      return slot_index < model.player_slots.size()
+                 ? &model.player_slots[slot_index]
+                 : nullptr;
+  }
+  return nullptr;
+}
+
+[[nodiscard]] std::string container_slot_stable_id(
+    player::ContainerSlotSource source,
+    usize slot_index) {
+  switch (source) {
+    case player::ContainerSlotSource::OpenedContainer:
+      return "container.slot." + std::to_string(slot_index);
+    case player::ContainerSlotSource::PlayerInventory:
+      return "container.player_slot." + std::to_string(slot_index);
+  }
+  return "container.slot." + std::to_string(slot_index);
+}
+
+void append_container_slot_group(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const ContainerUiModel& model,
+    const player::ContainerSlotGroupDefinition& group) {
+  const u32 columns = std::max(1U, group.columns);
+  for (u32 offset = 0U; offset < group.slot_count; ++offset) {
+    const usize slot_index = static_cast<usize>(group.start_slot + offset);
+    const u32 column = offset % columns;
+    const u32 row = offset / columns;
+    const Vec2f position{
+        group.position.x + static_cast<f32>(column) * group.slot_spacing.x,
+        group.position.y + static_cast<f32>(row) * group.slot_spacing.y};
+    const UiItemStackView* stack =
+        container_stack_for_slot(model, group.source, slot_index);
+    const bool selected =
+        group.source == player::ContainerSlotSource::PlayerInventory &&
+        slot_index < model.hotbar_slot_count &&
+        slot_index == model.selected_hotbar_slot;
+    append_slot(
+        tree,
+        panel_id,
+        container_slot_stable_id(group.source, slot_index),
+        static_cast<u8>(std::min<usize>(slot_index, 255U)),
+        stack,
+        selected,
+        false,
+        InventorySlotSize,
+        position);
+  }
+}
+
+void append_container_ui(UiTree& tree, ContainerUiModel model) {
+  if (!model.visible || model.layout == nullptr) {
+    return;
+  }
+
+  const UiTheme& theme = tree.theme();
+  UiElement panel = fixed_panel(
+      "container.panel",
+      model.layout->size.x,
+      model.layout->size.y,
+      theme.colors.surface);
+  panel.layout.anchor = UiAnchor::Center;
+  panel.style.background.w = std::min(panel.style.background.w, 0.96F);
+  style_surface(panel, theme, theme.widgets.panel.radius);
+  panel.hit_test = true;
+  const UiNodeID panel_id = tree.add_child(tree.root_id(), std::move(panel));
+
+  UiElement title =
+      text_element("container.title", model.title, theme.colors.text, UiTextRole::Heading);
+  title.layout.offset = {18.0F, 10.0F};
+  tree.add_child(panel_id, std::move(title));
+
+  for (const player::ContainerSlotGroupDefinition& group : model.layout->slot_groups) {
+    append_container_slot_group(tree, panel_id, model, group);
+  }
+
+  if (model.cursor_stack.has_value() && !model.cursor_stack->empty()) {
+    UiElement cursor_slot;
+    cursor_slot.stable_id = "container.cursor_stack";
+    cursor_slot.type = UiElementType::Slot;
+    cursor_slot.layout.width_mode = UiSizeMode::Fixed;
+    cursor_slot.layout.height_mode = UiSizeMode::Fixed;
+    cursor_slot.layout.width = InventorySlotSize;
+    cursor_slot.layout.height = InventorySlotSize;
+    cursor_slot.layout.offset = {
+        model.cursor_position.x - InventorySlotSize * 0.5F,
+        model.cursor_position.y - InventorySlotSize * 0.5F};
+    cursor_slot.style.background = {0.0F, 0.0F, 0.0F, 0.0F};
+    cursor_slot.hit_test = false;
+    const UiNodeID cursor_slot_id = tree.add_child(tree.root_id(), std::move(cursor_slot));
+    add_item_slot_children(
+        tree,
+        cursor_slot_id,
+        "container.cursor_stack",
+        0,
+        &model.cursor_stack.value(),
+        false);
+  }
+
+  (void)model.viewport;
+}
+
 } // namespace widgets_detail
 
 void build_inventory_ui(UiTree& tree, InventoryUiModel model) {
   tree.clear();
   widgets_detail::append_inventory_ui(tree, model);
+}
+
+void append_container_ui(UiTree& tree, ContainerUiModel model) {
+  widgets_detail::append_container_ui(tree, std::move(model));
 }
 
 void append_item_tooltip(UiTree& tree, ItemTooltipUiModel model) {

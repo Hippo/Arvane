@@ -225,6 +225,22 @@ decode_fluid_cells(std::span<const u8> bytes) {
   return Expected<u8, PersistenceError>::success(static_cast<u8>(value.value()));
 }
 
+[[nodiscard]] Expected<u32, PersistenceError> u32_field(
+    const io::DataValue& object,
+    std::string_view key,
+    std::string_view parent_path) {
+  auto value = integer_field(object, key, parent_path);
+  if (!value) {
+    return Expected<u32, PersistenceError>::failure(value.error());
+  }
+  if (value.value() < 0 ||
+      value.value() > static_cast<i64>(std::numeric_limits<u32>::max())) {
+    return Expected<u32, PersistenceError>::failure(
+        make_error(field_path(parent_path, key) + " is out of u32 range"));
+  }
+  return Expected<u32, PersistenceError>::success(static_cast<u32>(value.value()));
+}
+
 [[nodiscard]] Expected<bool, PersistenceError> bool_field(
     const io::DataValue& object,
     std::string_view key,
@@ -286,6 +302,170 @@ decode_fluid_cells(std::span<const u8> bytes) {
         make_error(field_path(parent_path, key) + " must be an array"));
   }
   return Expected<const io::DataValue::Array*, PersistenceError>::success(array);
+}
+
+[[nodiscard]] io::DataValue encode_item_stack(player::ItemStack stack) {
+  io::DataValue value = io::DataValue::object();
+  value.set("item", io::DataValue{static_cast<u64>(stack.item.value)});
+  value.set("count", io::DataValue{static_cast<u64>(stack.count)});
+  if (stack.data.has_value()) {
+    io::DataValue data = io::DataValue::object();
+    data.set("schema_version", io::DataValue{static_cast<u64>(stack.data->schema_version)});
+    data.set("root", stack.data->root);
+    value.set("data", std::move(data));
+  }
+  return value;
+}
+
+[[nodiscard]] Expected<player::ItemStack, PersistenceError> decode_item_stack(
+    const io::DataValue& value,
+    std::string_view path) {
+  if (value.kind() != io::DataKind::Object) {
+    return Expected<player::ItemStack, PersistenceError>::failure(
+        make_error(std::string{path} + " must be an object"));
+  }
+  auto item = u32_field(value, "item", path);
+  auto count = u32_field(value, "count", path);
+  if (!item) {
+    return Expected<player::ItemStack, PersistenceError>::failure(item.error());
+  }
+  if (!count) {
+    return Expected<player::ItemStack, PersistenceError>::failure(count.error());
+  }
+  if (count.value() == 0U ||
+      count.value() > static_cast<u32>(std::numeric_limits<u16>::max())) {
+    return Expected<player::ItemStack, PersistenceError>::failure(
+        make_error(field_path(path, "count") + " is out of item stack range"));
+  }
+
+  player::ItemStack stack;
+  stack.item = player::ItemID{item.value()};
+  stack.count = static_cast<u16>(count.value());
+  if (const io::DataValue* data = value.get("data"); data != nullptr) {
+    if (data->kind() != io::DataKind::Object) {
+      return Expected<player::ItemStack, PersistenceError>::failure(
+          make_error(field_path(path, "data") + " must be an object"));
+    }
+    const std::string data_path = field_path(path, "data");
+    auto schema_version = u32_field(*data, "schema_version", data_path);
+    if (!schema_version) {
+      return Expected<player::ItemStack, PersistenceError>::failure(schema_version.error());
+    }
+    const io::DataValue* root = data->get("root");
+    if (root == nullptr) {
+      return Expected<player::ItemStack, PersistenceError>::failure(
+          make_error("missing region field " + field_path(data_path, "root")));
+    }
+    stack.data = io::DataDocument{schema_version.value(), *root};
+  }
+  return Expected<player::ItemStack, PersistenceError>::success(std::move(stack));
+}
+
+[[nodiscard]] io::DataValue encode_block_containers(
+    std::span<const world::SavedBlockContainer> containers) {
+  io::DataValue values = io::DataValue::array();
+  for (const world::SavedBlockContainer& container : containers) {
+    io::DataValue node = io::DataValue::object();
+    node.set("x", io::DataValue{static_cast<i64>(container.local.value.x)});
+    node.set("y", io::DataValue{static_cast<i64>(container.local.value.y)});
+    node.set("z", io::DataValue{static_cast<i64>(container.local.value.z)});
+    node.set("container_type", io::DataValue{container.container_type});
+    node.set("slot_count", io::DataValue{static_cast<u64>(container.slot_count)});
+
+    io::DataValue slots = io::DataValue::array();
+    for (const world::BlockContainerSlotRecord& slot : container.slots) {
+      io::DataValue slot_node = io::DataValue::object();
+      slot_node.set("slot", io::DataValue{static_cast<u64>(slot.slot)});
+      slot_node.set("stack", encode_item_stack(slot.stack));
+      slots.push(std::move(slot_node));
+    }
+    node.set("slots", std::move(slots));
+    values.push(std::move(node));
+  }
+  return values;
+}
+
+[[nodiscard]] Expected<std::vector<world::SavedBlockContainer>, PersistenceError>
+decode_block_containers(
+    const io::DataValue& chunk_node,
+    std::string_view chunk_path) {
+  std::vector<world::SavedBlockContainer> containers;
+  const io::DataValue* containers_node = chunk_node.get("block_containers");
+  if (containers_node == nullptr) {
+    return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::success(
+        std::move(containers));
+  }
+  const io::DataValue::Array* array = containers_node->array_if();
+  if (array == nullptr) {
+    return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(
+        make_error(field_path(chunk_path, "block_containers") + " must be an array"));
+  }
+
+  containers.reserve(array->size());
+  for (usize index = 0; index < array->size(); ++index) {
+    const io::DataValue& node = (*array)[index];
+    const std::string container_path =
+        field_path(chunk_path, "block_containers") + "[" + std::to_string(index) + "]";
+    if (node.kind() != io::DataKind::Object) {
+      return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(
+          make_error(container_path + " must be an object"));
+    }
+    auto x = i32_field(node, "x", container_path);
+    auto y = i32_field(node, "y", container_path);
+    auto z = i32_field(node, "z", container_path);
+    auto container_type = string_field(node, "container_type", container_path);
+    auto slot_count = u32_field(node, "slot_count", container_path);
+    auto slots = array_field(node, "slots", container_path);
+    if (!x) {
+      return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(x.error());
+    }
+    if (!y) {
+      return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(y.error());
+    }
+    if (!z) {
+      return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(z.error());
+    }
+    if (!container_type) {
+      return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(container_type.error());
+    }
+    if (!slot_count) {
+      return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(slot_count.error());
+    }
+    if (!slots) {
+      return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(slots.error());
+    }
+
+    world::SavedBlockContainer container;
+    container.local = {{x.value(), y.value(), z.value()}};
+    container.container_type = std::move(container_type.value());
+    container.slot_count = slot_count.value();
+    container.slots.reserve(slots.value()->size());
+    for (usize slot_index = 0; slot_index < slots.value()->size(); ++slot_index) {
+      const io::DataValue& slot_node = (*slots.value())[slot_index];
+      const std::string slot_path =
+          container_path + ".slots[" + std::to_string(slot_index) + "]";
+      if (slot_node.kind() != io::DataKind::Object) {
+        return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(
+            make_error(slot_path + " must be an object"));
+      }
+      auto slot = u32_field(slot_node, "slot", slot_path);
+      auto stack_field = required_field(slot_node, "stack", slot_path);
+      if (!slot) {
+        return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(slot.error());
+      }
+      if (!stack_field) {
+        return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(stack_field.error());
+      }
+      auto stack = decode_item_stack(*stack_field.value(), field_path(slot_path, "stack"));
+      if (!stack) {
+        return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(stack.error());
+      }
+      container.slots.push_back({slot.value(), std::move(stack.value())});
+    }
+    containers.push_back(std::move(container));
+  }
+  return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::success(
+      std::move(containers));
 }
 
 [[nodiscard]] Expected<io::DataDocument, PersistenceError> decode_region_document(
@@ -499,6 +679,7 @@ Expected<std::vector<u8>, PersistenceError> encode_region_file(
         io::DataValue::bytes(
             {reinterpret_cast<const u8*>(section->lights.data()), LightingBytesPerSection}));
     chunk.set("fluids", io::DataValue::bytes(packed_fluids));
+    chunk.set("block_containers", encode_block_containers(section->block_containers));
     chunk_values.push(std::move(chunk));
   }
   root.set("chunks", std::move(chunk_values));
@@ -570,6 +751,7 @@ Expected<DecodedRegionFile, PersistenceError> decode_region_file(
     auto block_data = bytes_field(chunk_node, "blocks", chunk_path);
     auto lighting_data = bytes_field(chunk_node, "lights", chunk_path);
     auto fluid_data = bytes_field(chunk_node, "fluids", chunk_path);
+    auto block_containers = decode_block_containers(chunk_node, chunk_path);
     if (!chunk_x) {
       return Expected<DecodedRegionFile, PersistenceError>::failure(chunk_x.error());
     }
@@ -593,6 +775,9 @@ Expected<DecodedRegionFile, PersistenceError> decode_region_file(
     }
     if (!fluid_data) {
       return Expected<DecodedRegionFile, PersistenceError>::failure(fluid_data.error());
+    }
+    if (!block_containers) {
+      return Expected<DecodedRegionFile, PersistenceError>::failure(block_containers.error());
     }
     if (lighting_data.value().size() != LightingBytesPerSection) {
       return Expected<DecodedRegionFile, PersistenceError>::failure(
@@ -625,6 +810,7 @@ Expected<DecodedRegionFile, PersistenceError> decode_region_file(
     }
     std::memcpy(section.lights.data(), lighting_data.value().data(), LightingBytesPerSection);
     section.fluids = std::move(fluids.value());
+    section.block_containers = std::move(block_containers.value());
     decoded.chunks.push_back(std::move(section));
   }
 

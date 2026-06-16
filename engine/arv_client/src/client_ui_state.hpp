@@ -28,6 +28,7 @@ public:
   [[nodiscard]] bool chat_open() const noexcept;
 
   void toggle_inventory_if_allowed(const player::ResolvedPermissions& permissions);
+  void open_inventory() noexcept;
   void open_chat();
   void open_chat_with_draft(std::string draft);
   void close_chat() noexcept;

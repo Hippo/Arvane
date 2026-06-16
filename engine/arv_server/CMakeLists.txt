@@ -23,6 +23,7 @@ add_library(arv_server STATIC
   src/server_chunk_jobs.cpp
   src/server_chunk_streaming_runtime.cpp
   src/server_combat.cpp
+  src/server_container_runtime.cpp
   src/server_dropped_items.cpp
   src/server_explosion.cpp
   src/server_inventory_runtime.cpp

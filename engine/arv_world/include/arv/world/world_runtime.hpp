@@ -8,6 +8,7 @@
 #include "arv/entity/components.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/player/player_state.hpp"
+#include "arv/world/block_container.hpp"
 #include "arv/voxel/storage.hpp"
 #include "arv/world/fluid_solver.hpp"
 #include "arv/world/natural_spawn_types.hpp"
@@ -382,6 +383,18 @@ public:
   bool set_block(BlockPos pos, voxel::BlockVariantID variant) noexcept;
   BlockMutationBatchResult apply_block_mutation_batch(
       std::span<const BlockMutation> mutations) noexcept;
+  [[nodiscard]] BlockAttachedContainer* ensure_block_container(
+      BlockPos pos,
+      std::string container_type,
+      u32 slot_count);
+  [[nodiscard]] BlockAttachedContainer* find_block_container(BlockPos pos) noexcept;
+  [[nodiscard]] const BlockAttachedContainer* find_block_container(BlockPos pos) const noexcept;
+  bool remove_block_container(BlockPos pos) noexcept;
+  [[nodiscard]] std::vector<SavedBlockContainer> saved_block_containers(
+      ChunkSectionCoord coord) const;
+  void restore_saved_block_containers(
+      ChunkSectionCoord coord,
+      std::span<const SavedBlockContainer> containers);
   bool set_fluid(
       BlockPos pos,
       voxel::FluidCell fluid,
@@ -405,7 +418,8 @@ public:
       std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks,
       std::array<voxel::LightWord, voxel::ChunkVolume> lights,
       std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids,
-      bool lighting_authoritative) noexcept;
+      bool lighting_authoritative,
+      std::span<const SavedBlockContainer> containers = {});
   [[nodiscard]] EntityID create_entity(EntityCreateInfo info = {});
   [[nodiscard]] EntityID create_dropped_item(
       player::ItemStack stack,

@@ -469,6 +469,7 @@ struct WorldRuntime::Impl {
   std::optional<WorldGenerationConfig> generation_config{};
   u64 generation_seed{};
   std::vector<ReplicatedBlockUpdate> replicated_block_updates;
+  HashMap<ChunkSectionCoord, HashMap<u16, BlockAttachedContainer>> block_containers;
 };
 
 } // namespace arv::world
