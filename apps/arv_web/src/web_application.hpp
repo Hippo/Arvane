@@ -216,6 +216,7 @@ struct WebEntityRenderAssets {
   client::ClientEntityRenderAssets loaded{};
   client::ItemAnimationLibrary item_animation_library{};
   asset::TextureAtlas item_atlas{};
+  ui::UiImageData crosshair_image{};
   std::vector<std::filesystem::path> pack_cache_paths{};
   std::string registry_snapshot_json{};
   bool ready{};
@@ -246,6 +247,10 @@ struct WebApplication {
   WebBlockRenderAssets block_assets{};
   WebEntityRenderAssets entity_assets{};
   WebUiState ui{};
+  std::optional<protocol::ContainerBlockSource> last_container_animation_source{};
+  std::optional<protocol::ContainerBlockSource> active_container_animation_source{};
+  std::string active_container_animation_clip{};
+  Seconds active_container_animation_started_at{};
 };
 
 extern WebApplication g_app;

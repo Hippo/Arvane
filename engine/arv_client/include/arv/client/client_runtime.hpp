@@ -178,6 +178,8 @@ public:
   [[nodiscard]] const std::string& active_container_title() const noexcept;
   [[nodiscard]] const std::string& active_container_layout() const noexcept;
   [[nodiscard]] const player::Inventory& active_container_inventory() const noexcept;
+  [[nodiscard]] std::optional<protocol::ContainerBlockSource>
+  active_container_block_source() const noexcept;
   net::NetworkResult request_open_container_block(WorldID world_id, BlockPos block);
   net::NetworkResult request_container_slot_click(
       player::ContainerSlotSource source,

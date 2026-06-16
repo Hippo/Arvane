@@ -442,6 +442,11 @@ const player::Inventory& ClientRuntime::active_container_inventory() const noexc
   return impl_->inventory.active_container_inventory();
 }
 
+std::optional<protocol::ContainerBlockSource>
+ClientRuntime::active_container_block_source() const noexcept {
+  return impl_->inventory.active_container_block_source();
+}
+
 net::NetworkResult ClientRuntime::request_open_container_block(WorldID world_id, BlockPos block) {
   return impl_->inventory.request_open_container_block(
       impl_->sender,

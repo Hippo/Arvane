@@ -65,6 +65,9 @@ using namespace arv::web;
 void disconnect_web_session();
 
 inline constexpr arv::i32 MaxConfigurableChunkDistance = 32;
+inline constexpr arv::Seconds BlockContainerAnimationLengthSeconds = 0.5;
+inline constexpr std::string_view BlockContainerOpenAnimation = "open";
+inline constexpr std::string_view BlockContainerCloseAnimation = "close";
 
 [[nodiscard]] arv::ui::RenderSettingsView default_web_render_settings() noexcept {
   arv::ui::RenderSettingsView settings;
@@ -2034,13 +2037,17 @@ void load_web_language(const arv::asset::PackManager& packs) {
     return false;
   }
 
+  const std::array<arv::asset::AssetID, 1> ui_texture_assets{{
+      arv::asset::AssetID{std::string{arv::client::GameplayCrosshairTextureAsset}},
+  }};
   auto item_atlas = arv::client::build_item_texture_atlas(
       resources,
       loaded_assets.value().item_registry,
       {.max_page_size = 1024,
        .max_pages = 2,
        .padding = 2,
-       .require_uniform_non_fallback_size = false});
+       .require_uniform_non_fallback_size = false},
+      ui_texture_assets);
   if (!item_atlas) {
     set_status(
         "failed to build web item atlas: " +
@@ -2053,6 +2060,16 @@ void load_web_language(const arv::asset::PackManager& packs) {
       arv::client::texture_array_upload_from_atlas(item_atlas.value());
   if (!upload_item_texture_array(item_atlas_upload)) {
     return false;
+  }
+  if (const arv::asset::TextureAtlasEntry* crosshair =
+          item_atlas.value().find(arv::client::GameplayCrosshairTextureAsset);
+      crosshair != nullptr && !item_atlas.value().pages.empty()) {
+    g_app.entity_assets.crosshair_image =
+        arv::client::image_data_from_atlas_entry(
+            *crosshair,
+            item_atlas.value().pages.front().image.width,
+            item_atlas.value().pages.front().image.height,
+            arv::render::UiTextureSource::ItemAtlas);
   }
 
   const arv::render::TextureArrayUploadData atlas_upload =
@@ -2350,12 +2367,68 @@ void update_held_item_animation_from_input(
   }
 }
 
+void start_block_container_animation(
+    arv::protocol::ContainerBlockSource source,
+    std::string_view clip,
+    arv::Seconds now_seconds) {
+  g_app.active_container_animation_source = source;
+  g_app.active_container_animation_clip = std::string{clip};
+  g_app.active_container_animation_started_at = now_seconds;
+}
+
+void update_block_container_animation(arv::Seconds now_seconds) {
+  const std::optional<arv::protocol::ContainerBlockSource> current_source =
+      g_app.session == nullptr
+          ? std::nullopt
+          : g_app.session->active_container_block_source();
+  if (current_source != g_app.last_container_animation_source) {
+    if (current_source.has_value()) {
+      start_block_container_animation(
+          current_source.value(),
+          BlockContainerOpenAnimation,
+          now_seconds);
+    } else if (g_app.last_container_animation_source.has_value()) {
+      start_block_container_animation(
+          g_app.last_container_animation_source.value(),
+          BlockContainerCloseAnimation,
+          now_seconds);
+    }
+    g_app.last_container_animation_source = current_source;
+  }
+
+  if (g_app.active_container_animation_source.has_value() &&
+      g_app.active_container_animation_clip == BlockContainerCloseAnimation &&
+      now_seconds - g_app.active_container_animation_started_at >
+          BlockContainerAnimationLengthSeconds) {
+    g_app.active_container_animation_source.reset();
+    g_app.active_container_animation_clip.clear();
+  }
+}
+
+void append_block_container_animation_playback(
+    arv::render::EntityDrawItem& item,
+    arv::protocol::ContainerBlockSource source,
+    arv::Seconds now_seconds) {
+  if (!g_app.active_container_animation_source.has_value() ||
+      g_app.active_container_animation_source.value() != source ||
+      g_app.active_container_animation_clip.empty()) {
+    return;
+  }
+  item.animations.push_back({
+      g_app.active_container_animation_clip,
+      static_cast<arv::f32>(
+          std::max<arv::Seconds>(
+              0.0,
+              now_seconds - g_app.active_container_animation_started_at))});
+}
+
 [[nodiscard]] std::vector<arv::render::EntityDrawItem> build_entity_draw_items(
     arv::Seconds animation_time_seconds) {
   std::vector<arv::render::EntityDrawItem> draws;
   if (g_app.session == nullptr || !g_app.entity_assets.ready) {
     return draws;
   }
+  update_block_container_animation(animation_time_seconds);
   const arv::WorldID world_id = g_app.session->camera().world_id();
   const std::optional<arv::EntityNetID> local_entity_id =
       g_app.session->local_entity_id();
@@ -2449,6 +2522,8 @@ void update_held_item_animation_from_input(
 
   const auto& block_attached_models =
       g_app.entity_assets.loaded.render_assets.block_attached_model_by_variant;
+  const auto& block_attached_animations =
+      g_app.entity_assets.loaded.render_assets.block_attached_animation_by_variant;
   for (const arv::protocol::ClientboundChunkSectionData& section : g_app.chunk_sections) {
     if (section.world_id != world_id) {
       continue;
@@ -2471,6 +2546,9 @@ void update_held_item_animation_from_input(
           arv::chunk_local_to_block(section.coord, arv::voxel::local_pos(index));
       arv::render::EntityDrawItem item;
       item.model_id = model_id;
+      if (variant_id.value < block_attached_animations.size()) {
+        item.animation_id = block_attached_animations[variant_id.value];
+      }
       item.position = arv::block_floor_center(block);
       if (variant_id.value <
           g_app.entity_assets.loaded.render_assets
@@ -2480,6 +2558,12 @@ void update_held_item_animation_from_input(
                 .block_attached_rotation_by_variant[variant_id.value];
       }
       item.scale = 1.0F;
+      if (item.animation_id.value != 0U) {
+        append_block_container_animation_playback(
+            item,
+            arv::protocol::ContainerBlockSource{world_id, block},
+            animation_time_seconds);
+      }
       item_frame.entities.push_back(std::move(item));
     }
   }
@@ -3189,6 +3273,11 @@ void render_gameplay_ui(arv::Seconds time_seconds) {
                         g_app.ui.hotbar_item_popup.popup_name.size()}
                   : std::string_view{},
               .hotbar_item_popup_alpha = item_popup_alpha,
+              .crosshair = {
+                  .visible = g_app.entity_assets.crosshair_image.valid,
+                  .viewport = viewport,
+                  .image = g_app.entity_assets.crosshair_image,
+              },
               .ride_prompt = std::move(ride_prompt),
               .language = &g_app.ui.language,
               .debug_fps_visible = false,

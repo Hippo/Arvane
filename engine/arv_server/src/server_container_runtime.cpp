@@ -254,7 +254,8 @@ void ServerRuntimeImpl::handle_open_container_block(
       container_type->ui_layout,
       inventory_slots(container->inventory),
       inventory_slots(player_state->inventory),
-      player_state->inventory_cursor_stack};
+      player_state->inventory_cursor_stack,
+      protocol::ContainerBlockSource{request.world_id, request.block}};
   (void)send_protocol_message(
       *transport_,
       session->connection_id,

@@ -74,6 +74,38 @@ void write_optional_stack(
   return Expected<std::optional<player::ItemStack>, ProtocolError>::success(stack.value());
 }
 
+void write_optional_block_source(
+    MessageWriter& writer,
+    const std::optional<ContainerBlockSource>& source) {
+  writer.write_bool(source.has_value());
+  if (!source.has_value()) {
+    return;
+  }
+  writer.write<u32>(source->world_id.value);
+  write_block_pos(writer, source->block);
+}
+
+[[nodiscard]] Expected<std::optional<ContainerBlockSource>, ProtocolError>
+read_optional_block_source(MessageReader& reader) {
+  auto has_source = reader.read_bool();
+  if (!has_source) {
+    return Expected<std::optional<ContainerBlockSource>, ProtocolError>::failure(
+        has_source.error());
+  }
+  if (!has_source.value()) {
+    return Expected<std::optional<ContainerBlockSource>, ProtocolError>::success(
+        std::nullopt);
+  }
+  auto world_id = reader.read<u32>();
+  auto block = read_block_pos(reader);
+  if (!world_id || !block) {
+    return Expected<std::optional<ContainerBlockSource>, ProtocolError>::failure(
+        ProtocolError{"failed to decode container block source"});
+  }
+  return Expected<std::optional<ContainerBlockSource>, ProtocolError>::success(
+      ContainerBlockSource{WorldID{world_id.value()}, block.value()});
+}
+
 void write_stack_slots(
     MessageWriter& writer,
     const std::vector<std::optional<player::ItemStack>>& slots) {
@@ -146,6 +178,7 @@ std::vector<u8> serialize_clientbound_open_container(
   write_stack_slots(writer, packet.container_slots);
   write_stack_slots(writer, packet.player_slots);
   write_optional_stack(writer, packet.carried_stack);
+  write_optional_block_source(writer, packet.block_source);
   return std::move(writer).take_bytes();
 }
 
@@ -160,8 +193,9 @@ Expected<ClientboundOpenContainer, ProtocolError> deserialize_clientbound_open_c
   auto container_slots = read_stack_slots(reader);
   auto player_slots = read_stack_slots(reader);
   auto carried = read_optional_stack(reader);
+  auto block_source = read_optional_block_source(reader);
   if (!session_id || !revision || !container_type || !title || !ui_layout ||
-      !container_slots || !player_slots || !carried) {
+      !container_slots || !player_slots || !carried || !block_source) {
     return Expected<ClientboundOpenContainer, ProtocolError>::failure(
         ProtocolError{"failed to decode open container"});
   }
@@ -178,6 +212,7 @@ Expected<ClientboundOpenContainer, ProtocolError> deserialize_clientbound_open_c
   packet.container_slots = std::move(container_slots.value());
   packet.player_slots = std::move(player_slots.value());
   packet.carried_stack = std::move(carried.value());
+  packet.block_source = std::move(block_source.value());
   return Expected<ClientboundOpenContainer, ProtocolError>::success(std::move(packet));
 }
 

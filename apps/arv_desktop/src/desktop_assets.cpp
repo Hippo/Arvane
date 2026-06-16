@@ -13,6 +13,7 @@
 #include "arv/world/worldgen/loader.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -455,16 +456,31 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("item_animations", item_animation_references.error().message);
   }
 
+  const std::array<asset::AssetID, 1> ui_texture_assets{{
+      asset::AssetID{std::string{client::GameplayCrosshairTextureAsset}},
+  }};
   auto item_atlas_result = client::build_item_texture_atlas(
       resources,
       loaded.item_registry,
-      atlas_build_options_from(config.render.atlases.ui, 2, true));
+      atlas_build_options_from(config.render.atlases.ui, 2, true),
+      ui_texture_assets);
   if (!item_atlas_result) {
     return asset_failure("assets", item_atlas_result.error().message);
   }
   loaded.item_atlas = std::move(item_atlas_result.value());
   if (loaded.item_atlas.pages.empty()) {
     return asset_failure("assets", "item texture atlas did not produce a page");
+  }
+  if (const asset::TextureAtlasEntry* crosshair =
+          loaded.item_atlas.find(client::GameplayCrosshairTextureAsset);
+      crosshair != nullptr) {
+    const u32 item_atlas_width = loaded.item_atlas.pages.front().image.width;
+    const u32 item_atlas_height = loaded.item_atlas.pages.front().image.height;
+    loaded.crosshair_image = client::image_data_from_atlas_entry(
+        *crosshair,
+        item_atlas_width,
+        item_atlas_height,
+        render::UiTextureSource::ItemAtlas);
   }
   renderer.set_ui_item_atlas(texture_array_upload_from_atlas(loaded.item_atlas));
 

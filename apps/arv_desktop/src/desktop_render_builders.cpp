@@ -5,6 +5,7 @@
 #include "arv/render/render_culling.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <optional>
 #include <span>
@@ -12,6 +13,10 @@
 
 namespace arv::desktop {
 namespace {
+
+constexpr f32 BlockContainerAnimationLengthSeconds = 0.5F;
+constexpr std::string_view BlockContainerOpenAnimation = "open";
+constexpr std::string_view BlockContainerCloseAnimation = "close";
 
 [[nodiscard]] f32 approach(f32 current, f32 target, f32 step) noexcept {
   if (current < target) {
@@ -120,12 +125,80 @@ block_attached_entries_for_chunk(
   return iter->second.entries;
 }
 
+[[nodiscard]] f32 animation_elapsed_seconds(
+    std::chrono::steady_clock::time_point now,
+    std::chrono::steady_clock::time_point started_at) noexcept {
+  return std::max(0.0F, std::chrono::duration<f32>(now - started_at).count());
+}
+
+void start_block_container_animation(
+    DesktopGameSession& session,
+    protocol::ContainerBlockSource source,
+    std::string_view clip,
+    std::chrono::steady_clock::time_point now) {
+  session.active_container_animation_source = source;
+  session.active_container_animation_clip = std::string{clip};
+  session.active_container_animation_started_at = now;
+}
+
+void update_block_container_animation(
+    DesktopGameSession& session,
+    std::chrono::steady_clock::time_point now) {
+  const std::optional<protocol::ContainerBlockSource> current_source =
+      session.client == nullptr
+          ? std::nullopt
+          : session.client->active_container_block_source();
+  if (current_source != session.last_container_animation_source) {
+    if (current_source.has_value()) {
+      start_block_container_animation(
+          session,
+          current_source.value(),
+          BlockContainerOpenAnimation,
+          now);
+    } else if (session.last_container_animation_source.has_value()) {
+      start_block_container_animation(
+          session,
+          session.last_container_animation_source.value(),
+          BlockContainerCloseAnimation,
+          now);
+    }
+    session.last_container_animation_source = current_source;
+  }
+
+  if (session.active_container_animation_source.has_value() &&
+      session.active_container_animation_clip == BlockContainerCloseAnimation &&
+      animation_elapsed_seconds(
+          now,
+          session.active_container_animation_started_at) >
+          BlockContainerAnimationLengthSeconds) {
+    session.active_container_animation_source.reset();
+    session.active_container_animation_clip.clear();
+  }
+}
+
+void append_block_container_animation_playback(
+    render::EntityDrawItem& item,
+    const DesktopGameSession& session,
+    protocol::ContainerBlockSource source,
+    std::chrono::steady_clock::time_point now) {
+  if (!session.active_container_animation_source.has_value() ||
+      session.active_container_animation_source.value() != source ||
+      session.active_container_animation_clip.empty()) {
+    return;
+  }
+  item.animations.push_back({
+      session.active_container_animation_clip,
+      animation_elapsed_seconds(now, session.active_container_animation_started_at)});
+}
+
 void append_block_attached_model_draws(
     render::FramePacket& frame,
     DesktopGameSession& session,
     ChunkViewState& chunk_view,
     const EntityRenderAssets& entity_render_assets,
-    const io::ChunkDistanceConfig& distances) {
+    const io::ChunkDistanceConfig& distances,
+    std::chrono::steady_clock::time_point now) {
+  update_block_container_animation(session, now);
   const std::vector<render::ChunkDrawItem>& resident_chunks =
       chunk_draw_items(chunk_view);
   const std::vector<render::EntityModelID>& block_attached_models =
@@ -168,12 +241,24 @@ void append_block_attached_model_draws(
           chunk_local_to_block(coord, entry.local);
       render::EntityDrawItem item;
       item.model_id = model_id;
+      if (variant_id.value <
+          entity_render_assets.block_attached_animation_by_variant.size()) {
+        item.animation_id =
+            entity_render_assets.block_attached_animation_by_variant[variant_id.value];
+      }
       item.position = block_floor_center(block);
       if (variant_id.value < entity_render_assets.block_attached_rotation_by_variant.size()) {
         item.rotation =
             entity_render_assets.block_attached_rotation_by_variant[variant_id.value];
       }
       item.scale = 1.0F;
+      if (item.animation_id.value != 0U) {
+        append_block_container_animation_playback(
+            item,
+            session,
+            protocol::ContainerBlockSource{frame.world_view.world_id, block},
+            now);
+      }
       frame.entities.push_back(std::move(item));
     }
   }
@@ -367,7 +452,8 @@ void populate_world_frame_draw_items(
       session,
       chunk_view,
       entity_render_assets,
-      chunk_distances);
+      chunk_distances,
+      now);
 
   const protocol::BlockBreakProgress& block_break =
       session.client->block_break_progress();

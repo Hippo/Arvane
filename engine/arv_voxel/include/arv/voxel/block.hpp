@@ -138,6 +138,7 @@ struct BlockStateValue {
 
 struct BlockModelReference {
   std::string asset{};
+  std::string animation_asset{};
   std::vector<std::string> texture_inputs{};
 };
 
@@ -447,6 +448,8 @@ private:
 [[nodiscard]] BlockDefinition make_air_definition();
 
 [[nodiscard]] std::string normalize_block_model_asset(std::string_view model);
+
+[[nodiscard]] std::string normalize_block_animation_asset(std::string_view animation);
 
 [[nodiscard]] std::string normalize_block_texture_asset(std::string_view texture);
 

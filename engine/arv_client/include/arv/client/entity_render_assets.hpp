@@ -44,6 +44,7 @@ struct EntityRenderAssets {
   std::vector<std::array<render::EntityModelID, BreakStageTextureCount>> break_overlay_model_by_variant{};
   std::vector<render::EntityModelID> outline_model_by_variant{};
   std::vector<render::EntityModelID> block_attached_model_by_variant{};
+  std::vector<render::EntityAnimationID> block_attached_animation_by_variant{};
   std::vector<Quatf> block_attached_rotation_by_variant{};
 };
 

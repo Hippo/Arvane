@@ -27,6 +27,8 @@ public:
   [[nodiscard]] const std::string& active_container_title() const noexcept;
   [[nodiscard]] const std::string& active_container_layout() const noexcept;
   [[nodiscard]] const player::Inventory& active_container_inventory() const noexcept;
+  [[nodiscard]] std::optional<protocol::ContainerBlockSource>
+  active_container_block_source() const noexcept;
 
   net::NetworkResult request_open_container_block(
       detail::ClientProtocolSender& sender,
@@ -86,6 +88,7 @@ private:
     std::string title{};
     std::string layout{};
     player::Inventory inventory{};
+    std::optional<protocol::ContainerBlockSource> block_source{};
   };
 
   player::Inventory inventory_{player::DefaultPlayerInventorySlotCount};

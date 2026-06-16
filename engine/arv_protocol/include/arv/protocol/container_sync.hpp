@@ -35,6 +35,13 @@ struct ServerboundOpenContainerBlock {
   u32 client_action_id{};
 };
 
+struct ContainerBlockSource {
+  WorldID world_id{};
+  BlockPos block{};
+
+  bool operator==(const ContainerBlockSource&) const = default;
+};
+
 struct ClientboundOpenContainer {
   u32 session_id{};
   u32 revision{};
@@ -44,6 +51,7 @@ struct ClientboundOpenContainer {
   std::vector<std::optional<player::ItemStack>> container_slots{};
   std::vector<std::optional<player::ItemStack>> player_slots{};
   std::optional<player::ItemStack> carried_stack{};
+  std::optional<ContainerBlockSource> block_source{};
 };
 
 struct ServerboundContainerAction {

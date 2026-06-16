@@ -35,6 +35,7 @@ struct GameplayUiModelInput {
   u32 displayed_fps{};
   std::string_view hotbar_item_popup_name{};
   f32 hotbar_item_popup_alpha{};
+  ui::CrosshairHudModel crosshair{};
   ui::RidePromptModel ride_prompt{};
   const arv::text::LanguageCatalog* language{};
   bool debug_fps_visible{true};

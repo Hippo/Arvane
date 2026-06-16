@@ -261,6 +261,17 @@ void set_side_textures(
     return BlockRegistryError{"model path must not be empty for " + definition.name};
   }
 
+  if (const io::DataValue* animation = model.get("animation"); animation != nullptr) {
+    if (animation->kind() != io::DataKind::String) {
+      return BlockRegistryError{"model.animation must be a string for " + definition.name};
+    }
+    definition.model.animation_asset =
+        normalize_block_animation_asset(animation->as_string_or({}));
+    if (definition.model.animation_asset.empty()) {
+      return BlockRegistryError{"model.animation must not be empty for " + definition.name};
+    }
+  }
+
   if (const io::DataValue* textures = model.get("textures"); textures != nullptr) {
     const io::DataValue::Array* texture_array = textures->array_if();
     if (texture_array == nullptr) {
@@ -1159,6 +1170,16 @@ std::string normalize_block_model_asset(std::string_view model) {
     return std::string{model};
   }
   return "arvane:model/block/" + std::string{model};
+}
+
+std::string normalize_block_animation_asset(std::string_view animation) {
+  if (animation.empty()) {
+    return {};
+  }
+  if (animation.find(':') != std::string_view::npos) {
+    return std::string{animation};
+  }
+  return "arvane:animation/" + strip_file_extension(animation);
 }
 
 std::string normalize_block_texture_asset(std::string_view texture) {

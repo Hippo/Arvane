@@ -81,6 +81,10 @@ struct DesktopGameSession {
   u32 particle_seed_counter{1U};
   std::optional<std::chrono::steady_clock::time_point> first_person_sneak_visual_updated_at{};
   f32 first_person_sneak_visual_progress{};
+  std::optional<protocol::ContainerBlockSource> last_container_animation_source{};
+  std::optional<protocol::ContainerBlockSource> active_container_animation_source{};
+  std::string active_container_animation_clip{};
+  std::chrono::steady_clock::time_point active_container_animation_started_at{};
   bool held_item_secondary_use_active{};
   bool ui_snapshot_initialized{};
 };

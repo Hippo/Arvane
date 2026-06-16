@@ -28,7 +28,8 @@ namespace {
     "render_category": "opaque",
     "render_mode": "block_entity_model",
     "model": {
-      "path": "arvane:model/entity/chest"
+      "path": "arvane:model/entity/chest",
+      "animation": "arvane:animation/chest"
     },
     "states": {
       "facing": ["north", "east"]
@@ -53,6 +54,17 @@ namespace {
   for (const arv::render::EntityModelAsset& model : assets.models) {
     if (model.id == id) {
       return &model;
+    }
+  }
+  return nullptr;
+}
+
+[[nodiscard]] const arv::render::EntityAnimationAsset* find_animation(
+    const arv::client::EntityRenderAssets& assets,
+    arv::render::EntityAnimationID id) noexcept {
+  for (const arv::render::EntityAnimationAsset& animation : assets.animations) {
+    if (animation.id == id) {
+      return &animation;
     }
   }
   return nullptr;
@@ -95,13 +107,20 @@ TEST(EntityRenderAssetsTests, BlockAttachedModelsUseEntityModelBaker) {
           block_models.value().size()});
   ASSERT_TRUE(assets) << assets.error().message;
   ASSERT_LT(chest_variant->value, assets.value().block_attached_model_by_variant.size());
+  ASSERT_LT(chest_variant->value, assets.value().block_attached_animation_by_variant.size());
   ASSERT_LT(east_chest_variant->value, assets.value().block_attached_rotation_by_variant.size());
   const arv::render::EntityModelID model_id =
       assets.value().block_attached_model_by_variant[chest_variant->value];
+  const arv::render::EntityAnimationID animation_id =
+      assets.value().block_attached_animation_by_variant[chest_variant->value];
   ASSERT_NE(model_id.value, 0U);
+  ASSERT_NE(animation_id.value, 0U);
   EXPECT_EQ(
       assets.value().block_attached_model_by_variant[east_chest_variant->value].value,
       7'000'000U + east_chest_variant->value);
+  EXPECT_EQ(
+      assets.value().block_attached_animation_by_variant[east_chest_variant->value].value,
+      8'000'000U + east_chest_variant->value);
   EXPECT_FLOAT_EQ(
       assets.value().block_attached_rotation_by_variant[chest_variant->value].w,
       1.0F);
@@ -114,6 +133,12 @@ TEST(EntityRenderAssetsTests, BlockAttachedModelsUseEntityModelBaker) {
   ASSERT_EQ(built_model->bones.size(), 2U);
   EXPECT_EQ(built_model->bones[0].name, "base");
   EXPECT_EQ(built_model->bones[1].name, "lid");
+  const arv::render::EntityAnimationAsset* built_animation =
+      find_animation(assets.value(), animation_id);
+  ASSERT_NE(built_animation, nullptr);
+  ASSERT_EQ(built_animation->clips.size(), 2U);
+  EXPECT_EQ(built_animation->clips[0].name, "open");
+  EXPECT_EQ(built_animation->clips[1].name, "close");
 
   auto model_text = resources.load_text({"arvane:model/entity/chest"}, arv::asset::AssetKind::Model);
   ASSERT_TRUE(model_text) << model_text.error().message;

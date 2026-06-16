@@ -250,7 +250,8 @@
         "flammable": true
       },
       "model": {
-        "path": "arvane:model/entity/chest"
+        "path": "arvane:model/entity/chest",
+        "animation": "arvane:animation/chest"
       },
       "states": {
         "facing": [

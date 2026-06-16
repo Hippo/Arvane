@@ -40,6 +40,7 @@ struct DesktopLoadedAssets {
   asset::BlockTextureAtlas block_atlas{};
   render::FluidRenderData fluid_render_data{};
   asset::TextureAtlas item_atlas{};
+  ui::UiImageData crosshair_image{};
   EntityRenderAssets entity_render_assets{};
   client::ParticleAssets particle_assets{};
   asset::FontSystem font_system{};

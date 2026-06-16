@@ -18,6 +18,13 @@ struct RidePromptModel {
   Vec2f viewport{};
 };
 
+struct CrosshairHudModel {
+  bool visible{};
+  Vec2f viewport{};
+  UiImageData image{};
+  f32 size{24.0F};
+};
+
 struct GameplayUiModel {
   HotbarHudModel hotbar{};
   InventoryUiModel inventory{};
@@ -28,6 +35,7 @@ struct GameplayUiModel {
   HealthHudModel health{};
   RidePromptModel ride_prompt{};
   ContainerUiModel container{};
+  CrosshairHudModel crosshair{};
 };
 
 void build_gameplay_ui(UiTree& tree, GameplayUiModel model);

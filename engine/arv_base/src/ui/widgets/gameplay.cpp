@@ -15,6 +15,26 @@ constexpr Vec2f RidePromptOffset{0.0F, 54.0F};
 
 } // namespace
 
+void append_crosshair_hud(UiTree& tree, CrosshairHudModel model) {
+  if (!model.visible || !model.image.valid || model.size <= 0.0F) {
+    return;
+  }
+
+  UiElement crosshair;
+  crosshair.stable_id = "hud.crosshair";
+  crosshair.type = UiElementType::Image;
+  crosshair.layout.width_mode = UiSizeMode::Fixed;
+  crosshair.layout.height_mode = UiSizeMode::Fixed;
+  crosshair.layout.width = model.size;
+  crosshair.layout.height = model.size;
+  crosshair.layout.anchor = UiAnchor::Center;
+  crosshair.image = model.image;
+  crosshair.hit_test = false;
+  tree.add_child(tree.root_id(), std::move(crosshair));
+
+  (void)model.viewport;
+}
+
 void append_ride_prompt_hud(UiTree& tree, RidePromptModel model) {
   if (!model.visible || model.key_label.empty()) {
     return;
@@ -57,6 +77,7 @@ void append_ride_prompt_hud(UiTree& tree, RidePromptModel model) {
 
 void build_gameplay_ui(UiTree& tree, GameplayUiModel model) {
   tree.clear();
+  widgets_detail::append_crosshair_hud(tree, model.crosshair);
   widgets_detail::append_health_hud(tree, model.health);
   widgets_detail::append_hotbar_hud(tree, model.hotbar);
   widgets_detail::append_ride_prompt_hud(tree, std::move(model.ride_prompt));

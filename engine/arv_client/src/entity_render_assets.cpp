@@ -24,6 +24,7 @@ constexpr u32 FirstPersonPlayerSlimEntityModelID = 5'000'002U;
 constexpr u32 FirstPersonPlayerSlimSkinEntityModelID = 5'000'003U;
 constexpr u32 ChunkBoundsEntityModelID = 6'000'000U;
 constexpr u32 BlockAttachedEntityModelIDBase = 7'000'000U;
+constexpr u32 BlockAttachedEntityAnimationIDBase = 8'000'000U;
 constexpr std::string_view WhiteTextureAsset = "arvane:texture/generated_white";
 constexpr std::string_view DefaultPlayerSkinTextureAsset =
     "arvane:texture/default_skin/default";
@@ -99,6 +100,11 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
 [[nodiscard]] render::EntityModelID block_attached_model_id(
     voxel::BlockVariantID variant) noexcept {
   return render::EntityModelID{BlockAttachedEntityModelIDBase + variant.value};
+}
+
+[[nodiscard]] render::EntityAnimationID block_attached_animation_id(
+    voxel::BlockVariantID variant) noexcept {
+  return render::EntityAnimationID{BlockAttachedEntityAnimationIDBase + variant.value};
 }
 
 [[nodiscard]] Quatf block_attached_rotation(
@@ -281,6 +287,7 @@ EntityRenderAssetsResult build_entity_render_assets(
   };
   struct PendingAnimation {
     EntityTypeID type_id{};
+    std::optional<voxel::BlockVariantID> block_attached_variant{};
     render::EntityAnimationID animation_id{};
     std::string asset_id{};
     render::EntityAnimationDefinition definition{};
@@ -321,6 +328,8 @@ EntityRenderAssetsResult build_entity_render_assets(
   std::vector<PendingModel> pending_models;
   std::vector<PendingAnimation> pending_animations;
   HashMap<EntityTypeID, usize> pending_animation_by_type;
+  std::vector<std::optional<usize>> pending_animation_by_block_variant(
+      block_registry.variant_count());
   std::vector<PendingTextureItem> pending_texture_items;
   std::vector<PendingBlockItem> pending_block_items;
   std::vector<asset::AssetID> texture_ids;
@@ -376,6 +385,7 @@ EntityRenderAssetsResult build_entity_render_assets(
       const usize animation_index = pending_animations.size();
       pending_animation_by_type[type.id] = animation_index;
       pending_animations.push_back({type.id,
+                                    std::nullopt,
                                     render::EntityAnimationID{type.id.value},
                                     type.animation_asset,
                                     std::move(animation_definition.value())});
@@ -682,6 +692,31 @@ EntityRenderAssetsResult build_entity_render_assets(
       texture = resolve_entity_input_texture(texture);
       add_texture(texture);
     }
+    if (!variant->model.animation_asset.empty()) {
+      auto animation_text =
+          resources.load_text({variant->model.animation_asset}, asset::AssetKind::Animation);
+      if (!animation_text) {
+        return EntityRenderAssetsResult::failure(animation_text.error());
+      }
+      auto animation_definition = render::parse_entity_animation_json(
+          animation_text.value(),
+          resources
+              .resolve_asset_path({variant->model.animation_asset}, asset::AssetKind::Animation)
+              .string());
+      if (!animation_definition) {
+        return EntityRenderAssetsResult::failure({variant->model.animation_asset,
+                                                  resources.resolve_asset_path({variant->model.animation_asset}, asset::AssetKind::Animation),
+                                                  "parse block-attached animation",
+                                                  animation_definition.error().message});
+      }
+      const usize animation_index = pending_animations.size();
+      pending_animation_by_block_variant[variant_value] = animation_index;
+      pending_animations.push_back({EntityTypeID{},
+                                    voxel::BlockVariantID{variant_value},
+                                    block_attached_animation_id(voxel::BlockVariantID{variant_value}),
+                                    variant->model.animation_asset,
+                                    std::move(animation_definition.value())});
+    }
     pending_models.push_back({EntityTypeID{},
                               std::nullopt,
                               voxel::BlockVariantID{variant_value},
@@ -733,6 +768,7 @@ EntityRenderAssetsResult build_entity_render_assets(
   EntityRenderAssets assets;
   assets.texture_atlas = std::move(atlas_result.value());
   assets.block_attached_model_by_variant.resize(block_registry.variant_count());
+  assets.block_attached_animation_by_variant.resize(block_registry.variant_count());
   assets.block_attached_rotation_by_variant.resize(block_registry.variant_count());
 
   for (const PendingModel& pending : pending_models) {
@@ -807,13 +843,42 @@ EntityRenderAssetsResult build_entity_render_assets(
     if (pending.item_id.has_value()) {
       assets.model_by_item[pending.item_id.value()] = pending.model_id;
     } else if (pending.block_attached_variant.has_value()) {
-      assets.block_attached_model_by_variant[pending.block_attached_variant->value] =
+      const u32 variant_index = pending.block_attached_variant->value;
+      assets.block_attached_model_by_variant[variant_index] =
           pending.model_id;
       if (const voxel::BlockVariantRecord* variant =
               block_registry.variant(pending.block_attached_variant.value());
           variant != nullptr) {
-        assets.block_attached_rotation_by_variant[pending.block_attached_variant->value] =
+        assets.block_attached_rotation_by_variant[variant_index] =
             block_attached_rotation(variant->model_transform);
+      }
+      if (variant_index < pending_animation_by_block_variant.size() &&
+          pending_animation_by_block_variant[variant_index].has_value()) {
+        PendingAnimation& animation =
+            pending_animations[pending_animation_by_block_variant[variant_index].value()];
+        auto animation_asset = render::build_entity_animation_asset(
+            animation.animation_id,
+            animation.asset_id,
+            std::move(animation.definition));
+        if (!animation_asset) {
+          return EntityRenderAssetsResult::failure({animation.asset_id,
+                                                    {},
+                                                    "build block-attached animation",
+                                                    animation_asset.error().message});
+        }
+        if (std::optional<render::EntityModelError> binding_error =
+                render::validate_entity_animation_bindings(
+                    built_model,
+                    animation_asset.value());
+            binding_error.has_value()) {
+          return EntityRenderAssetsResult::failure({animation.asset_id,
+                                                    {},
+                                                    "validate block-attached animation",
+                                                    binding_error->message});
+        }
+        assets.block_attached_animation_by_variant[variant_index] =
+            animation.animation_id;
+        assets.animations.push_back(std::move(animation_asset.value()));
       }
     } else if (pending.first_person_player && pending.player_skin_atlas &&
                pending.slim_player) {

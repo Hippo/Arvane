@@ -51,6 +51,11 @@ const player::Inventory& ClientInventoryRuntime::active_container_inventory() co
   return active_container_.has_value() ? active_container_->inventory : EmptyInventory;
 }
 
+std::optional<protocol::ContainerBlockSource>
+ClientInventoryRuntime::active_container_block_source() const noexcept {
+  return active_container_.has_value() ? active_container_->block_source : std::nullopt;
+}
+
 net::NetworkResult ClientInventoryRuntime::request_open_container_block(
     detail::ClientProtocolSender& sender,
     WorldID world_id,
@@ -180,6 +185,7 @@ void ClientInventoryRuntime::apply_container_open(protocol::ClientboundOpenConta
   for (usize index = 0; index < open.container_slots.size(); ++index) {
     (void)container.inventory.set_slot(index, open.container_slots[index]);
   }
+  container.block_source = std::move(open.block_source);
   active_container_ = std::move(container);
 
   inventory_ = player::Inventory{open.player_slots.size()};

@@ -139,6 +139,10 @@ ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
 
   const bool container_open = input.client.container_open() &&
                               input.container_layout != nullptr;
+  ui::CrosshairHudModel crosshair = std::move(input.crosshair);
+  crosshair.viewport = input.viewport;
+  crosshair.visible = crosshair.visible && !input.client.inventory_open() &&
+                      !chat_open && !container_open;
 
   return {
       {
@@ -184,6 +188,7 @@ ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
           input.carried_inventory_stack,
           input.cursor_position,
       },
+      std::move(crosshair),
   };
 }
 

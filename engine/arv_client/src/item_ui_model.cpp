@@ -263,7 +263,8 @@ ui::UiImageData image_data_from_atlas_entry(
 asset::TextureAtlasResult build_item_texture_atlas(
     asset::ResourceManager& resources,
     const player::ItemRegistry& item_registry,
-    asset::TextureAtlasBuildOptions options) {
+    asset::TextureAtlasBuildOptions options,
+    std::span<const asset::AssetID> extra_texture_assets) {
   std::vector<asset::AssetID> texture_ids;
   HashSet<std::string> seen;
   const auto add_texture = [&](std::string texture) {
@@ -278,6 +279,9 @@ asset::TextureAtlasResult build_item_texture_atlas(
       continue;
     }
     add_texture(item->texture_asset);
+  }
+  for (const asset::AssetID& texture : extra_texture_assets) {
+    add_texture(texture.value);
   }
 
   std::vector<asset::TextureAtlasInput> inputs;

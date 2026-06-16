@@ -740,6 +740,7 @@ void DesktopFrameLoop::build_gameplay_ui(
                         hotbar_item_popup_.popup_name.size()}
                   : std::string_view{},
               item_popup_alpha,
+              {assets_.crosshair_image.valid, ui_metrics_.logical_size, assets_.crosshair_image},
               std::move(ride_prompt),
               &assets_.language,
           }));

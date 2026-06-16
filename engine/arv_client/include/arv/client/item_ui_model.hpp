@@ -8,9 +8,14 @@
 
 #include <array>
 #include <optional>
+#include <span>
+#include <string_view>
 #include <vector>
 
 namespace arv::client {
+
+inline constexpr std::string_view GameplayCrosshairTextureAsset =
+    "arvane:texture/ui/crosshair";
 
 [[nodiscard]] std::array<Vec2f, 4> normalized_uvs(
     const std::array<Vec2i, 4>& pixels,
@@ -27,7 +32,8 @@ namespace arv::client {
     asset::ResourceManager& resources,
     const player::ItemRegistry& item_registry,
     asset::TextureAtlasBuildOptions options =
-        {.max_page_size = 1024, .max_pages = 1, .padding = 2});
+        {.max_page_size = 1024, .max_pages = 1, .padding = 2},
+    std::span<const asset::AssetID> extra_texture_assets = {});
 
 [[nodiscard]] std::vector<ui::UiItemStackView> inventory_slots_for_ui(
     const player::Inventory& inventory,

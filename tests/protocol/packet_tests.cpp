@@ -1239,6 +1239,9 @@ TEST(ProtocolTests, ContainerSyncMessagesRoundTripAndRejectMalformedEnums) {
       std::nullopt,
       arv::player::ItemStack{arv::player::ItemID{11}, 2}};
   open.carried_stack = arv::player::ItemStack{arv::player::ItemID{12}, 1};
+  open.block_source = arv::protocol::ContainerBlockSource{
+      arv::WorldID{4},
+      arv::BlockPos{{7, 8, 9}}};
   const auto decoded_open = arv::protocol::deserialize_clientbound_open_container(
       arv::protocol::serialize_clientbound_open_container(open));
   ASSERT_TRUE(decoded_open) << decoded_open.error().message;
@@ -1255,6 +1258,9 @@ TEST(ProtocolTests, ContainerSyncMessagesRoundTripAndRejectMalformedEnums) {
   EXPECT_EQ(decoded_open.value().player_slots[1]->item, arv::player::ItemID{11});
   ASSERT_TRUE(decoded_open.value().carried_stack.has_value());
   EXPECT_EQ(decoded_open.value().carried_stack->item, arv::player::ItemID{12});
+  ASSERT_TRUE(decoded_open.value().block_source.has_value());
+  EXPECT_EQ(decoded_open.value().block_source->world_id, arv::WorldID{4});
+  EXPECT_EQ(decoded_open.value().block_source->block, (arv::BlockPos{{7, 8, 9}}));
 
   arv::protocol::ServerboundContainerAction action;
   action.session_id = 22;

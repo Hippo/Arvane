@@ -113,7 +113,10 @@ TEST(BlockRegistryTests, ParsesContainerAndBlockEntityRenderMode) {
     "render_category": "opaque",
     "render_mode": "block_entity_model",
     "container": { "type": "arvane:chest" },
-    "model": { "path": "arvane:model/entity/chest" },
+    "model": {
+      "path": "arvane:model/entity/chest",
+      "animation": "arvane:animation/chest"
+    },
     "properties": {
       "solid": true,
       "collidable": true,
@@ -150,6 +153,7 @@ TEST(BlockRegistryTests, ParsesContainerAndBlockEntityRenderMode) {
   EXPECT_EQ(variant->render_mode, arv::voxel::BlockRenderMode::BlockEntityModel);
   EXPECT_EQ(variant->render_category, arv::voxel::RenderCategory::Opaque);
   EXPECT_EQ(variant->model.asset, "arvane:model/entity/chest");
+  EXPECT_EQ(variant->model.animation_asset, "arvane:animation/chest");
   EXPECT_EQ(variant->model_transform.quarter_turns_y, 1);
 }
 

@@ -807,6 +807,38 @@ TEST(GameplayUiTests, BuildsRidePromptWithAccentKeyText) {
   EXPECT_EQ(suffix->style.foreground, tree.theme().colors.text);
 }
 
+TEST(GameplayUiTests, BuildsCenteredCrosshairImage) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  arv::ui::GameplayUiModel model;
+  model.crosshair.visible = true;
+  model.crosshair.viewport = {800.0F, 600.0F};
+  model.crosshair.size = 24.0F;
+  model.crosshair.image.valid = true;
+  model.crosshair.image.source = arv::render::UiTextureSource::ItemAtlas;
+  model.crosshair.image.page = 0U;
+  model.crosshair.image.uvs = {{
+      {0.0F, 0.0F},
+      {1.0F, 0.0F},
+      {1.0F, 1.0F},
+      {0.0F, 1.0F},
+  }};
+
+  arv::ui::build_gameplay_ui(tree, std::move(model));
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* crosshair = tree.find_by_stable_id("hud.crosshair");
+  ASSERT_NE(crosshair, nullptr);
+  EXPECT_EQ(crosshair->type, arv::ui::UiElementType::Image);
+  EXPECT_FALSE(crosshair->hit_test);
+  EXPECT_EQ(crosshair->image.source, arv::render::UiTextureSource::ItemAtlas);
+  EXPECT_NEAR(crosshair->rect.x, 388.0F, 0.001F);
+  EXPECT_NEAR(crosshair->rect.y, 288.0F, 0.001F);
+  EXPECT_NEAR(crosshair->rect.width, 24.0F, 0.001F);
+  EXPECT_NEAR(crosshair->rect.height, 24.0F, 0.001F);
+}
+
 TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;
