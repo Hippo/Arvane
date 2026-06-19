@@ -698,6 +698,21 @@ TEST(HotbarHudTests, BuildsTransientItemNamePopup) {
   EXPECT_NEAR(label->style.foreground.w, 0.5F, 0.001F);
 }
 
+TEST(HotbarHudTests, HiddenModelSkipsHudAndItemPopup) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  arv::ui::HotbarHudModel model;
+  model.visible = false;
+  model.item_name_popup = "Stone";
+  model.item_name_popup_alpha = 1.0F;
+
+  arv::ui::build_hotbar_hud(tree, std::move(model));
+  tree.layout({800.0F, 600.0F}, &text);
+
+  EXPECT_EQ(tree.find_by_stable_id("hud.hotbar"), nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("hud.hotbar.item_name"), nullptr);
+}
+
 TEST(HotbarHudTests, BlockItemIconsKeepSideTextureTopAtTop) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;
@@ -1118,6 +1133,122 @@ TEST(InventoryUiTests, PlacesHotbarBelowInventoryWithSeparator) {
   EXPECT_LT(separator->rect.y, hotbar_first->rect.y);
   EXPECT_LE(separator->rect.width, main_first->rect.width * 9.0F + 4.0F * 8.0F);
   EXPECT_EQ(separator->rect.width, hotbar->rect.width);
+}
+
+TEST(InventoryUiTests, MenuSlotsDoNotShowHotbarSelection) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  std::vector<arv::ui::UiItemStackView> slots(36);
+
+  arv::ui::build_inventory_ui(
+      tree,
+      {true, "Inventory", 0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* hotbar_first = tree.find_by_stable_id("inventory.slot.0");
+  ASSERT_NE(hotbar_first, nullptr);
+  EXPECT_FALSE(hotbar_first->selected);
+}
+
+TEST(InventoryUiTests, ContainerPlayerSlotsDoNotShowHotbarSelection) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  std::vector<arv::ui::UiItemStackView> container_slots(27);
+  std::vector<arv::ui::UiItemStackView> player_slots(36);
+  arv::player::ContainerUiLayoutDefinition layout;
+  layout.size = {426.0F, 332.0F};
+  layout.slot_groups.push_back(
+      {"hotbar",
+       arv::player::ContainerSlotSource::PlayerInventory,
+       0U,
+       9U,
+       9U,
+       {18.0F, 292.0F},
+       {44.0F, 44.0F}});
+
+  arv::ui::append_container_ui(
+      tree,
+      {true,
+       "Chest",
+       &layout,
+       0,
+       9,
+       {800.0F, 600.0F},
+       {container_slots.data(), container_slots.size()},
+       {player_slots.data(), player_slots.size()}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* hotbar_first = tree.find_by_stable_id("container.player_slot.0");
+  ASSERT_NE(hotbar_first, nullptr);
+  EXPECT_FALSE(hotbar_first->selected);
+}
+
+TEST(InventoryUiTests, ContainerSeparatesSectionsAndKeepsHotbarBelowInventoryRows) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+  std::vector<arv::ui::UiItemStackView> container_slots(27);
+  std::vector<arv::ui::UiItemStackView> player_slots(36);
+  arv::player::ContainerUiLayoutDefinition layout;
+  layout.size = {426.0F, 386.0F};
+  layout.slot_groups.push_back(
+      {"chest",
+       arv::player::ContainerSlotSource::OpenedContainer,
+       0U,
+       27U,
+       9U,
+       {18.0F, 38.0F},
+       {44.0F, 44.0F}});
+  layout.slot_groups.push_back(
+      {"inventory",
+       arv::player::ContainerSlotSource::PlayerInventory,
+       9U,
+       27U,
+       9U,
+       {18.0F, 184.0F},
+       {44.0F, 44.0F}});
+  layout.slot_groups.push_back(
+      {"hotbar",
+       arv::player::ContainerSlotSource::PlayerInventory,
+       0U,
+       9U,
+       9U,
+       {18.0F, 328.0F},
+       {44.0F, 44.0F}});
+
+  arv::ui::append_container_ui(
+      tree,
+      {true,
+       "Chest",
+       &layout,
+       0,
+       9,
+       {800.0F, 600.0F},
+       {container_slots.data(), container_slots.size()},
+       {player_slots.data(), player_slots.size()}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* chest_last = tree.find_by_stable_id("container.slot.26");
+  const auto* inventory_first = tree.find_by_stable_id("container.player_slot.9");
+  const auto* inventory_last = tree.find_by_stable_id("container.player_slot.35");
+  const auto* hotbar_first = tree.find_by_stable_id("container.player_slot.0");
+  const auto* chest_separator =
+      tree.find_by_stable_id("container.separator.chest.inventory");
+  const auto* hotbar_separator =
+      tree.find_by_stable_id("container.separator.inventory.hotbar");
+  ASSERT_NE(chest_last, nullptr);
+  ASSERT_NE(inventory_first, nullptr);
+  ASSERT_NE(inventory_last, nullptr);
+  ASSERT_NE(hotbar_first, nullptr);
+  ASSERT_NE(chest_separator, nullptr);
+  ASSERT_NE(hotbar_separator, nullptr);
+
+  EXPECT_LT(chest_last->rect.y + chest_last->rect.height, inventory_first->rect.y);
+  EXPECT_LT(inventory_last->rect.y + inventory_last->rect.height, hotbar_first->rect.y);
+  EXPECT_GT(chest_separator->rect.y, chest_last->rect.y + chest_last->rect.height);
+  EXPECT_LT(chest_separator->rect.y, inventory_first->rect.y);
+  EXPECT_GT(hotbar_separator->rect.y, inventory_last->rect.y + inventory_last->rect.height);
+  EXPECT_LT(hotbar_separator->rect.y, hotbar_first->rect.y);
+  EXPECT_EQ(chest_separator->rect.width, hotbar_separator->rect.width);
 }
 
 TEST(InventoryUiTests, AppendsItemTooltipNearCursor) {

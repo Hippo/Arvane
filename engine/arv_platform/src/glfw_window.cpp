@@ -541,6 +541,7 @@ InputSnapshot OpenGLWindow::poll_input() {
   input.jump_held = action_hold_active(window_, input_bindings_, LogicalAction::Jump);
   input.sneak_held = action_hold_active(window_, input_bindings_, LogicalAction::Sneak);
   input.sprint_held = action_hold_active(window_, input_bindings_, LogicalAction::Sprint);
+  input.shift_modifier_held = shift_down;
   input.vehicle_roll_left_held =
       action_hold_active(window_, input_bindings_, LogicalAction::VehicleRollLeft);
   input.vehicle_roll_right_held =
@@ -567,6 +568,14 @@ InputSnapshot OpenGLWindow::poll_input() {
                                 input_bindings_,
                                 LogicalAction::SecondaryInteract,
                                 previous_action_active_[logical_action_index(LogicalAction::SecondaryInteract)],
+                                wheel_up_steps,
+                                wheel_down_steps) > 0;
+  input.drop_item_held = action_hold_active(window_, input_bindings_, LogicalAction::DropItem);
+  input.drop_item_pressed = action_press_count(
+                                window_,
+                                input_bindings_,
+                                LogicalAction::DropItem,
+                                previous_action_active_[logical_action_index(LogicalAction::DropItem)],
                                 wheel_up_steps,
                                 wheel_down_steps) > 0;
   input.mount_pressed = action_press_count(

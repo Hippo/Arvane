@@ -244,6 +244,12 @@ void apply_logical_action(
       }
       arv::web::g_app.input.secondary_held = down;
       break;
+    case LogicalAction::DropItem:
+      if (down && !repeat && !arv::web::g_app.input.drop_item_held) {
+        arv::web::g_app.input.drop_item_pressed = true;
+      }
+      arv::web::g_app.input.drop_item_held = down;
+      break;
     case LogicalAction::OpenInventory:
       if (down && !repeat) {
         arv::web::g_app.input.open_inventory_pressed = true;
@@ -354,6 +360,10 @@ EM_BOOL on_key(int event_type, const EmscriptenKeyboardEvent* event, void*) {
     return EM_FALSE;
   }
   const bool down = event_type == EMSCRIPTEN_EVENT_KEYDOWN;
+  if (const std::optional<std::string> code = browser_keyboard_code(*event);
+      code.has_value() && (code.value() == "LShift" || code.value() == "RShift")) {
+    arv::web::g_app.input.shift_modifier_held = down;
+  }
   bool captured_for_screen = false;
   if (down && !event->repeat) {
     if (const std::optional<std::string> code = browser_keyboard_code(*event);

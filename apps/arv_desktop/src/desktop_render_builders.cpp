@@ -493,7 +493,10 @@ void populate_world_frame_draw_items(
     }
   }
 
-  if (!session.client->has_authoritative_inventory()) {
+  if (!session.client->has_authoritative_inventory() ||
+      session.client->inventory_open() ||
+      session.client->chat_open() ||
+      session.client->container_open()) {
     return;
   }
   const usize selected_slot = session.client->selected_hotbar_slot();

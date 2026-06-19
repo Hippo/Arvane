@@ -55,9 +55,19 @@ public:
       player::InventoryClickButton button,
       net::ConnectionState connection_state);
 
+  net::NetworkResult request_shift_transfer(
+      detail::ClientProtocolSender& sender,
+      usize slot_index,
+      net::ConnectionState connection_state);
+
   net::NetworkResult request_drop_cursor(
       detail::ClientProtocolSender& sender,
       bool one_item,
+      net::ConnectionState connection_state);
+
+  net::NetworkResult request_drop_slot(
+      detail::ClientProtocolSender& sender,
+      usize slot_index,
       net::ConnectionState connection_state);
 
   net::NetworkResult request_close(

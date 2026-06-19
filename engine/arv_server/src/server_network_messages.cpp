@@ -3486,11 +3486,21 @@ void ServerRuntimeImpl::handle_inventory_action_request(
           request.slot_index,
           request.button);
       return;
+    case protocol::InventoryActionKind::ShiftTransfer:
+      (void)shift_transfer_player_inventory_slot(
+          session->player_id,
+          request.slot_index);
+      return;
     case protocol::InventoryActionKind::DropCursor:
       (void)drop_player_inventory_cursor(session->player_id);
       return;
     case protocol::InventoryActionKind::DropOneCursor:
       (void)drop_one_from_player_inventory_cursor(session->player_id);
+      return;
+    case protocol::InventoryActionKind::DropOneSlot:
+      (void)drop_one_from_player_inventory_slot(
+          session->player_id,
+          request.slot_index);
       return;
     case protocol::InventoryActionKind::CloseMenu:
       (void)close_player_inventory_menu(session->player_id);

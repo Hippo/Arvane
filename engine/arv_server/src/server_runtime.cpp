@@ -653,6 +653,18 @@ std::optional<player::ItemStack> ServerRuntime::drop_one_from_player_inventory_c
   return impl_->drop_one_from_player_inventory_cursor(player_id);
 }
 
+std::optional<player::ItemStack> ServerRuntime::drop_one_from_player_inventory_slot(
+    PlayerID player_id,
+    usize slot_index) {
+  return impl_->drop_one_from_player_inventory_slot(player_id, slot_index);
+}
+
+player::InventoryOperationResult ServerRuntime::shift_transfer_player_inventory_slot(
+    PlayerID player_id,
+    usize slot_index) {
+  return impl_->shift_transfer_player_inventory_slot(player_id, slot_index);
+}
+
 player::InventoryOperationResult ServerRuntime::close_player_inventory_menu(PlayerID player_id) {
   return impl_->close_player_inventory_menu(player_id);
 }

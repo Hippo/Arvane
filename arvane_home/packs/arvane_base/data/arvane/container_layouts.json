@@ -5,7 +5,7 @@
       "id": "arvane:chest",
       "size": [
         426,
-        332
+        386
       ],
       "slot_groups": [
         {
@@ -46,7 +46,7 @@
           "columns": 9,
           "position": [
             18,
-            292
+            328
           ],
           "slot_spacing": [
             44,

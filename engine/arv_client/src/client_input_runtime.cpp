@@ -1,6 +1,7 @@
 #include "client_input_runtime.hpp"
 
 #include "client_entity_mirror.hpp"
+#include "client_inventory_runtime.hpp"
 #include "client_protocol_send.hpp"
 #include "client_ui_state.hpp"
 
@@ -22,6 +23,9 @@ inline constexpr f32 VehicleGravityBlocksPerSecondSquared = 32.0F;
 inline constexpr f32 VehicleTerminalVelocityBlocksPerSecond = 55.0F;
 inline constexpr f32 VehicleImpactProjectedStopSpeedBlocksPerSecond = 0.02F;
 inline constexpr u8 VehicleImpactMemoryTicks = 8U;
+inline constexpr Seconds DropItemRepeatInitialDelaySeconds = 0.35;
+inline constexpr Seconds DropItemRepeatIntervalSeconds = 0.10;
+inline constexpr u32 MaxDropItemRequestsPerTick = 4U;
 
 [[nodiscard]] bool command_chat_shortcut_requested(const InputFrame& input) noexcept {
   return !input.text_input.empty() && input.text_input.front() == '/';
@@ -495,11 +499,18 @@ void ClientInputRuntime::submit_input(
     input.primary_held = false;
     input.secondary_pressed = false;
     input.secondary_held = false;
+    input.drop_item_pressed = false;
+    input.drop_item_held = false;
     input.hotbar_select.reset();
     input.hotbar_scroll_steps = 0;
     input.mouse_delta_x = 0.0F;
     input.mouse_delta_y = 0.0F;
   }
+
+  if (input.drop_item_pressed) {
+    drop_item_pressed_ = true;
+  }
+  drop_item_held_ = input.drop_item_held;
 
   player_controller.submit_input(std::move(input));
 }
@@ -507,11 +518,41 @@ void ClientInputRuntime::submit_input(
 void ClientInputRuntime::send_fixed_tick_input(
     TickIndex tick_index,
     LocalPlayerController& player_controller,
+    ClientInventoryRuntime& inventory,
     ClientProtocolSender& sender,
     ClientEntityMirrorStore& entities,
     const entity::VehicleDefinitionRegistry* vehicle_registry,
     const physics::ICollisionQuery* collision_query,
     Seconds tick_seconds) {
+  u32 drop_requests = 0U;
+  if (drop_item_pressed_) {
+    drop_requests = 1U;
+    drop_item_held_seconds_ = 0.0;
+    drop_item_repeat_accumulator_seconds_ = 0.0;
+  }
+  if (drop_item_held_) {
+    drop_item_held_seconds_ += tick_seconds;
+    if (!drop_item_pressed_ &&
+        drop_item_held_seconds_ >= DropItemRepeatInitialDelaySeconds) {
+      drop_item_repeat_accumulator_seconds_ += tick_seconds;
+      while (drop_item_repeat_accumulator_seconds_ >= DropItemRepeatIntervalSeconds &&
+             drop_requests < MaxDropItemRequestsPerTick) {
+        drop_item_repeat_accumulator_seconds_ -= DropItemRepeatIntervalSeconds;
+        ++drop_requests;
+      }
+    }
+  } else {
+    drop_item_held_seconds_ = 0.0;
+    drop_item_repeat_accumulator_seconds_ = 0.0;
+  }
+  drop_item_pressed_ = false;
+  for (u32 index = 0U; index < drop_requests; ++index) {
+    (void)inventory.request_drop_slot(
+        sender,
+        player_controller.selected_hotbar_slot(),
+        net::ConnectionState::InGame);
+  }
+
   const player::PlayerCommand command = player_controller.consume_command(tick_index);
   if (player_controller.mounted_vehicle_id().has_value()) {
     if (command.mount_pressed) {

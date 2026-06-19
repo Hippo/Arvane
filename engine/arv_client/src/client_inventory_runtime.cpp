@@ -117,6 +117,18 @@ net::NetworkResult ClientInventoryRuntime::request_slot_click(
   return send_request_if_in_game(sender, request, connection_state);
 }
 
+net::NetworkResult ClientInventoryRuntime::request_shift_transfer(
+    detail::ClientProtocolSender& sender,
+    usize slot_index,
+    net::ConnectionState connection_state) {
+  protocol::ServerboundInventoryActionRequest request;
+  request.inventory_id = protocol::PlayerInventoryID;
+  request.client_action_id = next_action_id_++;
+  request.kind = protocol::InventoryActionKind::ShiftTransfer;
+  request.slot_index = static_cast<u32>(slot_index);
+  return send_request_if_in_game(sender, request, connection_state);
+}
+
 net::NetworkResult ClientInventoryRuntime::request_drop_cursor(
     detail::ClientProtocolSender& sender,
     bool one_item,
@@ -135,6 +147,18 @@ net::NetworkResult ClientInventoryRuntime::request_drop_cursor(
   request.client_action_id = next_action_id_++;
   request.kind = one_item ? protocol::InventoryActionKind::DropOneCursor
                           : protocol::InventoryActionKind::DropCursor;
+  return send_request_if_in_game(sender, request, connection_state);
+}
+
+net::NetworkResult ClientInventoryRuntime::request_drop_slot(
+    detail::ClientProtocolSender& sender,
+    usize slot_index,
+    net::ConnectionState connection_state) {
+  protocol::ServerboundInventoryActionRequest request;
+  request.inventory_id = protocol::PlayerInventoryID;
+  request.client_action_id = next_action_id_++;
+  request.kind = protocol::InventoryActionKind::DropOneSlot;
+  request.slot_index = static_cast<u32>(slot_index);
   return send_request_if_in_game(sender, request, connection_state);
 }
 

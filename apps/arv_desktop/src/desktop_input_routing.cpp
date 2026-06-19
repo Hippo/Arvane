@@ -8,8 +8,11 @@ namespace arv::desktop {
 namespace {
 
 [[nodiscard]] bool shift_modifier_pressed(const platform::InputSnapshot& input) noexcept {
-  return input.raw_input.has_value() &&
-         platform::has_input_modifier(input.raw_input->binding.modifiers, platform::InputModifier::Shift);
+  return input.shift_modifier_held ||
+         (input.raw_input.has_value() &&
+          platform::has_input_modifier(
+              input.raw_input->binding.modifiers,
+              platform::InputModifier::Shift));
 }
 
 } // namespace
@@ -28,6 +31,20 @@ bool apply_inventory_action(
   if (const std::optional<usize> slot = inventory_slot_from_ui_action(action.value());
       slot.has_value()) {
     (void)client.request_inventory_slot_click(slot.value(), button);
+    return true;
+  }
+  return false;
+}
+
+bool apply_inventory_shift_transfer(
+    client::ClientRuntime& client,
+    const std::optional<ui::UiAction>& action) {
+  if (!action.has_value()) {
+    return false;
+  }
+  if (const std::optional<usize> slot = inventory_slot_from_ui_action(action.value());
+      slot.has_value()) {
+    (void)client.request_inventory_shift_transfer(slot.value());
     return true;
   }
   return false;
@@ -73,6 +90,8 @@ bool route_inventory_mouse_input(
         (void)client.request_container_shift_transfer(slot->source, slot->slot);
         changed = true;
       }
+    } else if (!client.container_open() && shift_modifier_pressed(platform_input)) {
+      changed = apply_inventory_shift_transfer(client, action);
     }
     changed =
         changed ||

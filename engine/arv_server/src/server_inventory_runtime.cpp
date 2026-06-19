@@ -1,8 +1,74 @@
 #include "server_runtime_internal.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace arv::server::detail {
+namespace {
+
+[[nodiscard]] player::InventoryOperationResult shift_transfer_stack_to_range(
+    player::Inventory& inventory,
+    usize source_slot,
+    usize destination_first,
+    usize destination_last_exclusive,
+    const player::ItemRegistry& item_registry) {
+  if (!inventory.is_valid_slot(source_slot) ||
+      destination_first >= destination_last_exclusive ||
+      destination_first >= inventory.slot_count()) {
+    return {player::InventoryOperationResultKind::RejectedInvalidSlot};
+  }
+
+  destination_last_exclusive =
+      std::min(destination_last_exclusive, inventory.slot_count());
+  if (source_slot >= destination_first && source_slot < destination_last_exclusive) {
+    return {player::InventoryOperationResultKind::NoOp};
+  }
+
+  const std::optional<player::ItemStack> source_stack = inventory.slot(source_slot);
+  if (!source_stack.has_value() || source_stack->count == 0U) {
+    return {player::InventoryOperationResultKind::NoOp};
+  }
+
+  player::ItemStack remaining = source_stack.value();
+  (void)inventory.clear_slot(source_slot);
+
+  for (usize slot = destination_first;
+       slot < destination_last_exclusive && remaining.count > 0U;
+       ++slot) {
+    const std::optional<player::ItemStack>& target = inventory.slot(slot);
+    if (!target.has_value() ||
+        !player::item_stacks_compatible(target.value(), remaining)) {
+      continue;
+    }
+    (void)inventory.merge_stack_into_slot(slot, remaining, item_registry);
+  }
+
+  for (usize slot = destination_first;
+       slot < destination_last_exclusive && remaining.count > 0U;
+       ++slot) {
+    if (inventory.slot(slot).has_value()) {
+      continue;
+    }
+    (void)inventory.merge_stack_into_slot(slot, remaining, item_registry);
+  }
+
+  if (remaining.count > 0U) {
+    (void)inventory.set_slot(source_slot, remaining);
+  }
+
+  const u16 moved = static_cast<u16>(source_stack->count - remaining.count);
+  if (moved == 0U) {
+    return {player::InventoryOperationResultKind::RejectedFullInventory, 0U, source_stack};
+  }
+  return {
+      remaining.count == 0U
+          ? player::InventoryOperationResultKind::Success
+          : player::InventoryOperationResultKind::PartialSuccess,
+      moved,
+      source_stack};
+}
+
+} // namespace
 
 player::InventoryInsertResult ServerRuntimeImpl::insert_player_inventory_stack(
     PlayerID player_id,
@@ -66,10 +132,9 @@ std::optional<player::ItemStack> ServerRuntimeImpl::drop_player_inventory_cursor
   }
 
   std::optional<player::ItemStack> dropped = player_state->inventory_cursor_stack;
-  spawn_dropped_item_stack(
-      player_state->world_id,
-      player_state->position,
-      dropped.value());
+  if (!spawn_player_thrown_item_stack(*player_state, dropped.value())) {
+    return std::nullopt;
+  }
   player_state->inventory_cursor_stack.reset();
   return dropped;
 }
@@ -84,16 +149,67 @@ std::optional<player::ItemStack> ServerRuntimeImpl::drop_one_from_player_invento
 
   player::ItemStack dropped =
       player::item_stack_with_count(player_state->inventory_cursor_stack.value(), 1U);
-  spawn_dropped_item_stack(
-      player_state->world_id,
-      player_state->position,
-      dropped);
+  if (!spawn_player_thrown_item_stack(*player_state, dropped)) {
+    return std::nullopt;
+  }
   player_state->inventory_cursor_stack->count =
       static_cast<u16>(player_state->inventory_cursor_stack->count - 1U);
   if (player_state->inventory_cursor_stack->count == 0U) {
     player_state->inventory_cursor_stack.reset();
   }
   return dropped;
+}
+
+std::optional<player::ItemStack> ServerRuntimeImpl::drop_one_from_player_inventory_slot(
+    PlayerID player_id,
+    usize slot_index) {
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr ||
+      slot_index >= player::DefaultHotbarSlotCount ||
+      !player_state->inventory.is_valid_slot(slot_index)) {
+    return std::nullopt;
+  }
+
+  const std::optional<player::ItemStack>& slot_stack =
+      player_state->inventory.slot(slot_index);
+  if (!slot_stack.has_value() || slot_stack->count == 0U) {
+    return std::nullopt;
+  }
+
+  player::ItemStack dropped = player::item_stack_with_count(slot_stack.value(), 1U);
+  if (!spawn_player_thrown_item_stack(*player_state, dropped)) {
+    return std::nullopt;
+  }
+  return player_state->inventory.remove_amount(slot_index, 1U);
+}
+
+player::InventoryOperationResult ServerRuntimeImpl::shift_transfer_player_inventory_slot(
+    PlayerID player_id,
+    usize slot_index) {
+  player::PlayerState* player_state = default_world_.find_player(player_id);
+  if (player_state == nullptr || item_registry_ == nullptr ||
+      !player_state->inventory.is_valid_slot(slot_index)) {
+    return {player::InventoryOperationResultKind::RejectedInvalidSlot};
+  }
+
+  const usize hotbar_count = std::min<usize>(
+      player::DefaultHotbarSlotCount,
+      player_state->inventory.slot_count());
+  if (slot_index < hotbar_count) {
+    return shift_transfer_stack_to_range(
+        player_state->inventory,
+        slot_index,
+        hotbar_count,
+        player_state->inventory.slot_count(),
+        *item_registry_);
+  }
+
+  return shift_transfer_stack_to_range(
+      player_state->inventory,
+      slot_index,
+      0U,
+      hotbar_count,
+      *item_registry_);
 }
 
 player::InventoryOperationResult ServerRuntimeImpl::close_player_inventory_menu(PlayerID player_id) {

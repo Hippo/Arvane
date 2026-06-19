@@ -1151,6 +1151,23 @@ TEST(ProtocolTests, InventorySyncMessagesRoundTripAndRejectMalformedCounts) {
   EXPECT_EQ(decoded_request.value().slot_index, 3U);
   EXPECT_EQ(decoded_request.value().button, arv::player::InventoryClickButton::Secondary);
 
+  request.kind = arv::protocol::InventoryActionKind::ShiftTransfer;
+  request.slot_index = 12;
+  const auto decoded_shift = arv::protocol::deserialize_serverbound_inventory_action_request(
+      arv::protocol::serialize_serverbound_inventory_action_request(request));
+  ASSERT_TRUE(decoded_shift);
+  EXPECT_EQ(decoded_shift.value().kind, arv::protocol::InventoryActionKind::ShiftTransfer);
+  EXPECT_EQ(decoded_shift.value().slot_index, 12U);
+
+  request.kind = arv::protocol::InventoryActionKind::DropOneSlot;
+  request.slot_index = 2;
+  const auto decoded_drop_slot =
+      arv::protocol::deserialize_serverbound_inventory_action_request(
+          arv::protocol::serialize_serverbound_inventory_action_request(request));
+  ASSERT_TRUE(decoded_drop_slot);
+  EXPECT_EQ(decoded_drop_slot.value().kind, arv::protocol::InventoryActionKind::DropOneSlot);
+  EXPECT_EQ(decoded_drop_slot.value().slot_index, 2U);
+
   arv::protocol::MessageWriter invalid_action;
   invalid_action.write<arv::u32>(arv::protocol::PlayerInventoryID.value);
   invalid_action.write<arv::u32>(43);

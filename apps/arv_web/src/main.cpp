@@ -2618,7 +2618,10 @@ void append_block_container_animation_playback(
     }
   }
 
-  if (g_app.session->has_authoritative_inventory()) {
+  if (g_app.session->has_authoritative_inventory() &&
+      !g_app.session->inventory_open() &&
+      !g_app.session->chat_open() &&
+      !g_app.session->container_open()) {
     const arv::usize selected_slot = g_app.session->selected_hotbar_slot();
     const arv::player::Inventory& inventory = g_app.session->inventory();
     if (selected_slot < inventory.slot_count()) {
@@ -3759,6 +3762,20 @@ void poll_session() {
   return true;
 }
 
+[[nodiscard]] bool apply_inventory_shift_transfer(
+    const std::optional<arv::ui::UiAction>& action) {
+  if (g_app.session == nullptr || !action.has_value()) {
+    return false;
+  }
+  const std::optional<arv::usize> slot =
+      inventory_slot_from_ui_action(action.value());
+  if (!slot.has_value()) {
+    return false;
+  }
+  (void)g_app.session->request_inventory_shift_transfer(slot.value());
+  return true;
+}
+
 [[nodiscard]] bool route_chat_mouse_input() {
   if (g_app.session == nullptr || !g_app.session->chat_open()) {
     return false;
@@ -3879,10 +3896,15 @@ void poll_session() {
   (void)g_app.ui.tree.route_mouse_move(cursor);
   if (g_app.input.mouse_left_pressed) {
     const std::optional<arv::ui::UiNodeID> hit = g_app.ui.tree.hit_test(cursor);
-    changed = apply_inventory_action(
-                  g_app.ui.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Left),
-                  arv::player::InventoryClickButton::Primary) ||
-              changed;
+    const std::optional<arv::ui::UiAction> action =
+        g_app.ui.tree.route_mouse_down(cursor, arv::ui::UiMouseButton::Left);
+    if (g_app.input.shift_modifier_held && !g_app.session->container_open()) {
+      changed = apply_inventory_shift_transfer(action);
+    }
+    changed = changed ||
+              apply_inventory_action(
+                  action,
+                  arv::player::InventoryClickButton::Primary);
     if (!changed && !hit.has_value() &&
         g_app.session->inventory_cursor_stack().has_value()) {
       (void)g_app.session->request_inventory_drop_cursor(false);
@@ -3988,6 +4010,8 @@ void clear_input_after_captured_binding() {
   g_app.input.secondary_animation_pressed = false;
   g_app.input.jump_pressed = false;
   g_app.input.mount_pressed = false;
+  g_app.input.drop_item_pressed = false;
+  g_app.input.drop_item_held = false;
   g_app.input.toggle_fly_pressed = false;
   g_app.input.open_inventory_pressed = false;
   g_app.input.open_chat_pressed = false;
@@ -4048,6 +4072,8 @@ void route_web_ui_input() {
   input.primary_held = g_app.input.primary_held;
   input.secondary_pressed = g_app.input.secondary_pressed;
   input.secondary_held = g_app.input.secondary_held;
+  input.drop_item_pressed = g_app.input.drop_item_pressed;
+  input.drop_item_held = g_app.input.drop_item_held;
   input.hotbar_select = g_app.input.hotbar_select;
   input.hotbar_scroll_steps = g_app.input.hotbar_scroll_steps;
   input.mouse_delta_x = static_cast<float>(g_app.input.mouse_dx);
@@ -4071,6 +4097,7 @@ void clear_per_frame_input_edges() {
   g_app.input.secondary_animation_pressed = false;
   g_app.input.jump_pressed = false;
   g_app.input.mount_pressed = false;
+  g_app.input.drop_item_pressed = false;
   g_app.input.toggle_fly_pressed = false;
   g_app.input.open_inventory_pressed = false;
   g_app.input.open_chat_pressed = false;

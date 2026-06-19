@@ -295,6 +295,12 @@ public:
   [[nodiscard]] std::optional<player::ItemStack> drop_player_inventory_cursor(PlayerID player_id);
   [[nodiscard]] std::optional<player::ItemStack> drop_one_from_player_inventory_cursor(
       PlayerID player_id);
+  [[nodiscard]] std::optional<player::ItemStack> drop_one_from_player_inventory_slot(
+      PlayerID player_id,
+      usize slot_index);
+  [[nodiscard]] player::InventoryOperationResult shift_transfer_player_inventory_slot(
+      PlayerID player_id,
+      usize slot_index);
   [[nodiscard]] player::InventoryOperationResult close_player_inventory_menu(PlayerID player_id);
   [[nodiscard]] command::CommandResult execute_command(
       command::CommandSender sender,

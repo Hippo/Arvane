@@ -1,4 +1,7 @@
 bindings:
+  DropItem:
+    - device: keyboard
+      key: Q
   Hotbar1:
     - device: keyboard
       key: 1

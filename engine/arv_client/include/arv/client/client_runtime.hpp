@@ -191,6 +191,7 @@ public:
   net::NetworkResult request_inventory_slot_click(
       usize slot_index,
       player::InventoryClickButton button);
+  net::NetworkResult request_inventory_shift_transfer(usize slot_index);
   net::NetworkResult request_inventory_drop_cursor(bool one_item);
   net::NetworkResult request_inventory_close();
   net::NetworkResult request_attack_entity(EntityNetID target_entity);

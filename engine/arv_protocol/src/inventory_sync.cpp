@@ -13,6 +13,8 @@ namespace {
     case InventoryActionKind::DropCursor:
     case InventoryActionKind::DropOneCursor:
     case InventoryActionKind::CloseMenu:
+    case InventoryActionKind::ShiftTransfer:
+    case InventoryActionKind::DropOneSlot:
       return true;
   }
   return false;

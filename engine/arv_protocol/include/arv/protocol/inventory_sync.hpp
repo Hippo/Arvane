@@ -12,10 +12,12 @@
 namespace arv::protocol {
 
 enum class InventoryActionKind : u8 {
-  SlotClick,
-  DropCursor,
-  DropOneCursor,
-  CloseMenu,
+  SlotClick = 0,
+  DropCursor = 1,
+  DropOneCursor = 2,
+  CloseMenu = 3,
+  ShiftTransfer = 4,
+  DropOneSlot = 5,
 };
 
 struct ServerboundInventoryActionRequest {

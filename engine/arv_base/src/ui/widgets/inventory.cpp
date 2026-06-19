@@ -4,6 +4,7 @@
 #include "widget_common.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -26,15 +27,13 @@ void append_inventory_slot_range(
   for (usize slot_index = first_slot; slot_index < last_slot_exclusive; ++slot_index) {
     const UiItemStackView* stack_view =
         slot_index < model.slots.size() ? &model.slots[slot_index] : nullptr;
-    const bool selected =
-        slot_index < model.hotbar_slot_count && slot_index == model.selected_hotbar_slot;
     append_slot(
         tree,
         grid_id,
         "inventory.slot." + std::to_string(slot_index),
         static_cast<u8>(slot_index),
         stack_view,
-        selected,
+        false,
         false,
         InventorySlotSize);
   }
@@ -174,6 +173,111 @@ void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
   return "container.slot." + std::to_string(slot_index);
 }
 
+struct ContainerSlotGroupBounds {
+  f32 left{};
+  f32 top{};
+  f32 right{};
+  f32 bottom{};
+};
+
+[[nodiscard]] std::optional<ContainerSlotGroupBounds> container_slot_group_bounds(
+    const player::ContainerSlotGroupDefinition& group) {
+  if (group.slot_count == 0U) {
+    return std::nullopt;
+  }
+  const u32 columns = std::max(1U, group.columns);
+  const u32 rows = (group.slot_count + columns - 1U) / columns;
+  const u32 last_row_count =
+      group.slot_count - (rows - 1U) * columns;
+  const u32 max_columns = rows == 1U ? last_row_count : columns;
+  return ContainerSlotGroupBounds{
+      group.position.x,
+      group.position.y,
+      group.position.x +
+          static_cast<f32>(max_columns - 1U) * group.slot_spacing.x +
+          InventorySlotSize,
+      group.position.y +
+          static_cast<f32>(rows - 1U) * group.slot_spacing.y +
+          InventorySlotSize};
+}
+
+[[nodiscard]] bool should_separate_container_groups(
+    const player::ContainerSlotGroupDefinition& previous,
+    const player::ContainerSlotGroupDefinition& current) noexcept {
+  if (previous.source != current.source) {
+    return true;
+  }
+  if (previous.source != player::ContainerSlotSource::PlayerInventory) {
+    return false;
+  }
+
+  const bool previous_is_hotbar =
+      previous.start_slot < player::DefaultHotbarSlotCount;
+  const bool current_is_hotbar =
+      current.start_slot < player::DefaultHotbarSlotCount;
+  return previous_is_hotbar != current_is_hotbar;
+}
+
+void append_container_separator(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const UiTheme& theme,
+    std::string stable_id,
+    f32 left,
+    f32 right,
+    f32 y) {
+  UiElement separator;
+  separator.stable_id = std::move(stable_id);
+  separator.type = UiElementType::Panel;
+  separator.layout.width_mode = UiSizeMode::Fixed;
+  separator.layout.height_mode = UiSizeMode::Fixed;
+  separator.layout.width = std::max(0.0F, right - left);
+  separator.layout.height = 2.0F;
+  separator.layout.offset = {left, y};
+  separator.style.background = theme.colors.border_focus;
+  separator.style.background.w = 0.58F;
+  separator.hit_test = false;
+  tree.add_child(panel_id, std::move(separator));
+}
+
+void append_container_group_separators(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const UiTheme& theme,
+    const player::ContainerUiLayoutDefinition& layout) {
+  for (usize index = 1U; index < layout.slot_groups.size(); ++index) {
+    const player::ContainerSlotGroupDefinition& previous =
+        layout.slot_groups[index - 1U];
+    const player::ContainerSlotGroupDefinition& current =
+        layout.slot_groups[index];
+    if (!should_separate_container_groups(previous, current)) {
+      continue;
+    }
+
+    const std::optional<ContainerSlotGroupBounds> previous_bounds =
+        container_slot_group_bounds(previous);
+    const std::optional<ContainerSlotGroupBounds> current_bounds =
+        container_slot_group_bounds(current);
+    if (!previous_bounds.has_value() || !current_bounds.has_value() ||
+        current_bounds->top <= previous_bounds->bottom) {
+      continue;
+    }
+
+    const f32 left = std::min(previous_bounds->left, current_bounds->left);
+    const f32 right = std::max(previous_bounds->right, current_bounds->right);
+    const f32 y =
+        (previous_bounds->bottom + current_bounds->top) * 0.5F - 1.0F;
+    append_container_separator(
+        tree,
+        panel_id,
+        theme,
+        "container.separator." + previous.id + "." + current.id,
+        left,
+        right,
+        y);
+  }
+}
+
 void append_container_slot_group(
     UiTree& tree,
     UiNodeID panel_id,
@@ -189,17 +293,13 @@ void append_container_slot_group(
         group.position.y + static_cast<f32>(row) * group.slot_spacing.y};
     const UiItemStackView* stack =
         container_stack_for_slot(model, group.source, slot_index);
-    const bool selected =
-        group.source == player::ContainerSlotSource::PlayerInventory &&
-        slot_index < model.hotbar_slot_count &&
-        slot_index == model.selected_hotbar_slot;
     append_slot(
         tree,
         panel_id,
         container_slot_stable_id(group.source, slot_index),
         static_cast<u8>(std::min<usize>(slot_index, 255U)),
         stack,
-        selected,
+        false,
         false,
         InventorySlotSize,
         position);
@@ -231,6 +331,7 @@ void append_container_ui(UiTree& tree, ContainerUiModel model) {
   for (const player::ContainerSlotGroupDefinition& group : model.layout->slot_groups) {
     append_container_slot_group(tree, panel_id, model, group);
   }
+  append_container_group_separators(tree, panel_id, theme, *model.layout);
 
   if (model.cursor_stack.has_value() && !model.cursor_stack->empty()) {
     UiElement cursor_slot;

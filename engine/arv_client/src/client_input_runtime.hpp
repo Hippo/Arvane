@@ -19,6 +19,11 @@ class ClientEntityMirrorStore;
 namespace detail {
 
 class ClientProtocolSender;
+} // namespace detail
+
+class ClientInventoryRuntime;
+
+namespace detail {
 
 class ClientInputRuntime {
 public:
@@ -32,6 +37,7 @@ public:
   void send_fixed_tick_input(
       TickIndex tick_index,
       LocalPlayerController& player_controller,
+      ClientInventoryRuntime& inventory,
       ClientProtocolSender& sender,
       ClientEntityMirrorStore& entities,
       const arv::entity::VehicleDefinitionRegistry* vehicle_registry,
@@ -60,6 +66,10 @@ private:
   u8 last_sent_hotbar_slot_{};
   bool sent_movement_packet_{};
   bool dismount_request_sent_{};
+  bool drop_item_pressed_{};
+  bool drop_item_held_{};
+  Seconds drop_item_held_seconds_{};
+  Seconds drop_item_repeat_accumulator_seconds_{};
   std::optional<EntityNetID> predicted_vehicle_id_{};
   Vec3f predicted_vehicle_position_{};
   Vec3f predicted_vehicle_velocity_{};

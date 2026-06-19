@@ -58,7 +58,7 @@ namespace {
 [[nodiscard]] arv::player::ContainerUiLayoutRegistry make_container_layout_registry() {
   arv::player::ContainerUiLayoutDefinition chest;
   chest.id = "arvane:chest";
-  chest.size = {426.0F, 332.0F};
+  chest.size = {426.0F, 386.0F};
   chest.slot_groups.push_back(
       {"container",
        arv::player::ContainerSlotSource::OpenedContainer,
@@ -81,7 +81,7 @@ namespace {
        0U,
        9U,
        9U,
-       {18.0F, 292.0F},
+       {18.0F, 328.0F},
        {44.0F, 44.0F}});
 
   std::vector<arv::player::ContainerUiLayoutDefinition> definitions;

@@ -47,6 +47,8 @@ struct BrowserInputState {
   bool secondary_pressed{};
   bool primary_animation_pressed{};
   bool secondary_animation_pressed{};
+  bool drop_item_pressed{};
+  bool drop_item_held{};
   bool toggle_fly_pressed{};
   bool open_inventory_pressed{};
   bool open_chat_pressed{};
@@ -58,6 +60,7 @@ struct BrowserInputState {
   bool text_submit_pressed{};
   bool text_cancel_pressed{};
   bool pause_menu_pressed{};
+  bool shift_modifier_held{};
   std::optional<ui::CapturedInputView> captured_input{};
   double cursor_x{};
   double cursor_y{};

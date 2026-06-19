@@ -330,6 +330,12 @@ struct ServerRuntimeImpl {
   [[nodiscard]] std::optional<player::ItemStack> drop_player_inventory_cursor(PlayerID player_id);
   [[nodiscard]] std::optional<player::ItemStack> drop_one_from_player_inventory_cursor(
       PlayerID player_id);
+  [[nodiscard]] std::optional<player::ItemStack> drop_one_from_player_inventory_slot(
+      PlayerID player_id,
+      usize slot_index);
+  [[nodiscard]] player::InventoryOperationResult shift_transfer_player_inventory_slot(
+      PlayerID player_id,
+      usize slot_index);
   [[nodiscard]] player::InventoryOperationResult close_player_inventory_menu(PlayerID player_id);
   [[nodiscard]] command::CommandResult execute_command(
       command::CommandSender sender,
@@ -451,7 +457,15 @@ struct ServerRuntimeImpl {
       Seconds tick_seconds);
 
   void tick_dropped_item_pickups(Seconds tick_seconds);
-  void spawn_dropped_item_stack(WorldID world_id, Vec3f position, player::ItemStack stack);
+  bool spawn_dropped_item_stack(WorldID world_id, Vec3f position, player::ItemStack stack);
+  bool spawn_dropped_item_stack(
+      WorldID world_id,
+      Vec3f position,
+      Vec3f velocity,
+      player::ItemStack stack);
+  bool spawn_player_thrown_item_stack(
+      const player::PlayerState& player_state,
+      player::ItemStack stack);
   void tick_container_sessions();
   void close_container_session(
       u32 container_session_id,

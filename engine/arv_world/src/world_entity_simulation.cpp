@@ -87,6 +87,34 @@ struct DroppedItemLiquidProbe {
   return item == nullptr ? player::DefaultItemBuoyancy : item->buoyancy;
 }
 
+void apply_dropped_item_ground_friction(
+    Vec3f& velocity,
+    Seconds tick_seconds) noexcept {
+  constexpr f32 GroundFrictionBlocksPerSecondSquared = 18.0F;
+  constexpr f32 StopSpeedBlocksPerSecond = 0.03F;
+  const f32 horizontal_speed_sq = horizontal_length_squared(velocity);
+  if (horizontal_speed_sq <=
+      StopSpeedBlocksPerSecond * StopSpeedBlocksPerSecond) {
+    velocity.x = 0.0F;
+    velocity.z = 0.0F;
+    return;
+  }
+
+  const f32 horizontal_speed = std::sqrt(horizontal_speed_sq);
+  const f32 next_speed = std::max(
+      0.0F,
+      horizontal_speed - GroundFrictionBlocksPerSecondSquared * tick_seconds);
+  if (next_speed <= StopSpeedBlocksPerSecond) {
+    velocity.x = 0.0F;
+    velocity.z = 0.0F;
+    return;
+  }
+
+  const f32 scale = next_speed / horizontal_speed;
+  velocity.x *= scale;
+  velocity.z *= scale;
+}
+
 [[nodiscard]] bool player_animation_is_sneaking(std::string_view animation_name) noexcept {
   return animation_name == "sneak" ||
          animation_name == "sneak_idle" ||
@@ -1097,8 +1125,11 @@ u32 WorldEntitySimulation::tick_dropped_items(
           velocity.linear.y = std::max(
               velocity.linear.y - physics_config.gravity_per_second * tick_seconds,
               -physics_config.terminal_velocity);
-        } else if (velocity.linear.y < 0.0F) {
-          velocity.linear.y = 0.0F;
+        } else {
+          apply_dropped_item_ground_friction(velocity.linear, tick_seconds);
+          if (velocity.linear.y < 0.0F) {
+            velocity.linear.y = 0.0F;
+          }
         }
       }
 

@@ -62,6 +62,8 @@ client::InputFrame to_client_input(const platform::InputSnapshot& input) {
   frame.primary_held = input.primary_held;
   frame.secondary_pressed = input.secondary_pressed;
   frame.secondary_held = input.secondary_held;
+  frame.drop_item_pressed = input.drop_item_pressed;
+  frame.drop_item_held = input.drop_item_held;
   frame.open_inventory_pressed = input.open_inventory_pressed;
   frame.open_chat_pressed = input.open_chat_pressed;
   frame.tab_menu_held = input.tab_menu_held;

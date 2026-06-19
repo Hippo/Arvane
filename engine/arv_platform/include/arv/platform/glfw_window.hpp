@@ -75,9 +75,12 @@ struct InputSnapshot {
   bool primary_held{};
   bool secondary_pressed{};
   bool secondary_held{};
+  bool drop_item_pressed{};
+  bool drop_item_held{};
   bool open_inventory_pressed{};
   bool open_chat_pressed{};
   bool tab_menu_held{};
+  bool shift_modifier_held{};
   bool pause_menu_pressed{};
   bool debug_menu_toggle_pressed{};
   std::optional<u8> hotbar_select{};

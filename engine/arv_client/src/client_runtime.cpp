@@ -65,6 +65,7 @@ struct ClientRuntime::Impl {
       input.send_fixed_tick_input(
           tick_index,
           player_controller,
+          inventory,
           sender,
           entities,
           vehicle_registry,
@@ -484,6 +485,13 @@ net::NetworkResult ClientRuntime::request_inventory_slot_click(
       impl_->sender,
       slot_index,
       button,
+      impl_->connection.state());
+}
+
+net::NetworkResult ClientRuntime::request_inventory_shift_transfer(usize slot_index) {
+  return impl_->inventory.request_shift_transfer(
+      impl_->sender,
+      slot_index,
       impl_->connection.state());
 }
 

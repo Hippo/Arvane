@@ -36,6 +36,7 @@ constexpr std::array<ActionNameEntry, static_cast<usize>(LogicalAction::Count)> 
     {LogicalAction::Hotbar9, "Hotbar9"},
     {LogicalAction::NextHotbarSlot, "NextHotbarSlot"},
     {LogicalAction::PrevHotbarSlot, "PrevHotbarSlot"},
+    {LogicalAction::DropItem, "DropItem"},
     {LogicalAction::OpenInventory, "OpenInventory"},
     {LogicalAction::OpenChat, "OpenChat"},
     {LogicalAction::ShowTabMenu, "ShowTabMenu"},
@@ -289,6 +290,7 @@ InputBindings default_input_bindings() {
   set_default_binding(bindings, LogicalAction::Hotbar9, InputDeviceType::Keyboard, "9");
   set_default_binding(bindings, LogicalAction::NextHotbarSlot, InputDeviceType::MouseWheel, "Up");
   set_default_binding(bindings, LogicalAction::PrevHotbarSlot, InputDeviceType::MouseWheel, "Down");
+  set_default_binding(bindings, LogicalAction::DropItem, InputDeviceType::Keyboard, "Q");
   set_default_binding(bindings, LogicalAction::OpenInventory, InputDeviceType::Keyboard, "E");
   set_default_binding(bindings, LogicalAction::OpenChat, InputDeviceType::Keyboard, "T");
   set_default_binding(bindings, LogicalAction::ShowTabMenu, InputDeviceType::Keyboard, "Tab");

@@ -51,6 +51,10 @@ void append_hotbar_item_name_popup(UiTree& tree, const HotbarHudModel& model) {
 }
 
 void append_hotbar_hud(UiTree& tree, HotbarHudModel model) {
+  if (!model.visible) {
+    return;
+  }
+
   const UiTheme& theme = tree.theme();
   const u8 slot_count = static_cast<u8>(
       std::max<u32>(1U, std::min<u32>(model.slot_count, player::DefaultHotbarSlotCount)));

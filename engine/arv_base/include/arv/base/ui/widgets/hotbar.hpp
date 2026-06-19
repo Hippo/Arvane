@@ -15,6 +15,7 @@ struct HotbarHudModel {
   std::span<const UiItemStackView> slots{};
   std::string item_name_popup{};
   f32 item_name_popup_alpha{};
+  bool visible{true};
 };
 
 void build_hotbar_hud(UiTree& tree, HotbarHudModel model);

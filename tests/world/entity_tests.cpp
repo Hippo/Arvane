@@ -908,6 +908,43 @@ TEST(WorldEntityTests, DroppedItemsFallOntoTerrainAndStop) {
   EXPECT_FLOAT_EQ(velocity->linear.y, 0.0F);
 }
 
+TEST(WorldEntityTests, ThrownDroppedItemsLoseHorizontalVelocityOnTerrain) {
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  for (int x = 0; x < 6; ++x) {
+    ASSERT_TRUE(world.set_block({{x, 0, 0}}, stone));
+  }
+
+  const arv::EntityID drop = world.create_dropped_item(
+      {stone_item, 1U},
+      {1.5F, 3.0F, 0.5F},
+      {4.0F, 0.0F, 1.0F});
+
+  for (int tick = 0; tick < 180; ++tick) {
+    (void)world.tick_dropped_items(
+        arv::tick_duration_seconds(arv::DefaultBaseTps),
+        &block_registry,
+        &item_registry);
+  }
+
+  const arv::entity::EntityTransform* transform = world.find_entity_transform(drop);
+  const arv::entity::EntityVelocity* velocity = world.find_entity_velocity(drop);
+  ASSERT_NE(transform, nullptr);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_NEAR(transform->position.y, 1.001F, 0.002F);
+  EXPECT_GT(transform->position.x, 1.5F);
+  EXPECT_NEAR(arv::horizontal_length(velocity->linear), 0.0F, 0.0001F);
+  EXPECT_FLOAT_EQ(velocity->linear.y, 0.0F);
+}
+
 TEST(WorldEntityTests, DroppedItemsFloatTowardLiquidSurfaceByDefault) {
   const arv::voxel::BlockRegistry block_registry =
       arv::testsupport::make_test_block_registry();
