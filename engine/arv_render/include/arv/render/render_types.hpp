@@ -498,6 +498,7 @@ struct ChunkDrawItem {
 struct EntityBoneRotationOverride {
   std::string bone_name{};
   Vec3f rotation_degrees{};
+  bool replace{};
 
   bool operator==(const EntityBoneRotationOverride&) const = default;
 };

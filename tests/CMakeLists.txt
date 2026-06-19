@@ -42,6 +42,7 @@ add_executable(arv_tests
   client/gameplay_interactions_tests.cpp
   client/gameplay_ui_model_tests.cpp
   client/item_animation_tests.cpp
+  client/item_rendering_tests.cpp
   client/local_player_controller_tests.cpp
   client/pack_sync_plan_tests.cpp
   client/particle_system_tests.cpp

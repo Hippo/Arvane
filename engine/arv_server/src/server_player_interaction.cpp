@@ -83,6 +83,14 @@ namespace {
   return registry.find_variant(variant_name).value_or(default_variant);
 }
 
+void play_right_hand_interaction_animation(world::WorldRuntime& world, PlayerID player_id) {
+  const std::optional<EntityID> entity_id = world.entity_for_player(player_id);
+  if (!entity_id.has_value()) {
+    return;
+  }
+  (void)world.play_entity_animation(entity_id.value(), "hit_right");
+}
+
 [[nodiscard]] bool block_stops_bucket_raycast(
     const world::WorldRuntime& world,
     const voxel::BlockRegistry& registry,
@@ -518,6 +526,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
               voxel::empty_fluid_cell(),
               fluid_definition_)) {
         player_state.inventory = std::move(next_inventory.value());
+        play_right_hand_interaction_animation(default_world_, player_state.player_id);
       }
       return;
     }
@@ -560,6 +569,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       }
       if (default_world_.place_fluid_source(place_pos, fluid_definition_)) {
         player_state.inventory = std::move(next_inventory.value());
+        play_right_hand_interaction_animation(default_world_, player_state.player_id);
       }
       return;
     }
@@ -620,6 +630,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
 
     if (default_world_.set_block(place_pos, placed_variant)) {
       (void)player_state.inventory.consume_one(player_state.selected_hotbar_slot);
+      play_right_hand_interaction_animation(default_world_, player_state.player_id);
     }
   }
 }

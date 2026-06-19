@@ -13,9 +13,9 @@ namespace {
 
 inline constexpr f32 KnockbackSuppressedInputBlend = 0.25F;
 
-enum class PlayerAttackButton : u8 {
-  Primary,
-  Secondary,
+enum class PlayerHand : u8 {
+  Right,
+  Left,
 };
 
 void restart_player_entity_animation(
@@ -31,12 +31,18 @@ void restart_player_entity_animation(
       std::string{animation_name});
 }
 
-[[nodiscard]] std::string_view player_hit_animation_name(
-    PlayerAttackButton button) noexcept {
-  switch (button) {
-    case PlayerAttackButton::Primary:
+[[nodiscard]] PlayerHand selected_player_action_hand(
+    const player::PlayerState& /*player_state*/) noexcept {
+  // The selected hotbar item is currently the only held-item slot, and it is
+  // carried in the right hand. Offhand support should branch here.
+  return PlayerHand::Right;
+}
+
+[[nodiscard]] std::string_view player_hit_animation_name(PlayerHand hand) noexcept {
+  switch (hand) {
+    case PlayerHand::Right:
       return "hit_right";
-    case PlayerAttackButton::Secondary:
+    case PlayerHand::Left:
       return "hit_left";
   }
   return "hit_right";
@@ -382,12 +388,7 @@ void ServerRuntimeImpl::apply_player_action_command(
     restart_player_entity_animation(
         default_world_,
         player_state.player_id,
-        player_hit_animation_name(PlayerAttackButton::Primary));
-  } else if (command.secondary_pressed) {
-    restart_player_entity_animation(
-        default_world_,
-        player_state.player_id,
-        player_hit_animation_name(PlayerAttackButton::Secondary));
+        player_hit_animation_name(selected_player_action_hand(player_state)));
   }
 
   (void)default_world_.set_player_visual_pose(

@@ -66,21 +66,6 @@ constexpr std::string_view BlockContainerCloseAnimation = "close";
   return session.first_person_sneak_visual_progress;
 }
 
-[[nodiscard]] Vec3f first_person_player_body_position(
-    const client::CameraShell& camera,
-    f32 sneak_progress) noexcept {
-  constexpr f32 EyeToBodyOriginY = 1.80F;
-  constexpr f32 BaseBackOffset = 0.42F;
-  constexpr f32 SneakBackOffset = 0.30F;
-
-  Vec3f position =
-      camera.position() -
-      horizontal_forward(camera.yaw_radians()) *
-          (BaseBackOffset + SneakBackOffset * sneak_progress);
-  position.y -= EyeToBodyOriginY;
-  return position;
-}
-
 [[nodiscard]] bool chunk_inside_render_window(
     const ChunkViewState& chunk_view,
     const io::ChunkDistanceConfig& distances,
@@ -333,6 +318,24 @@ void populate_world_frame_draw_items(
   frame.sky = client::sky_uniforms_from_clock(sky_world.clock(), render_config.sky);
   const std::optional<PlayerID> local_player_id = session.client->local_player_id();
   const std::optional<EntityNetID> local_entity_id = session.client->local_entity_id();
+  f32 first_person_sneak_progress = session.first_person_sneak_visual_progress;
+
+  std::optional<player::ItemStack> visible_held_stack;
+  if (session.client->has_authoritative_inventory() &&
+      !session.client->inventory_open() &&
+      !session.client->chat_open() &&
+      !session.client->container_open()) {
+    const usize selected_slot = session.client->selected_hotbar_slot();
+    const player::Inventory& inventory = session.client->inventory();
+    if (selected_slot < inventory.slot_count()) {
+      const std::optional<player::ItemStack>& slot = inventory.slot(selected_slot);
+      if (slot.has_value() && slot->count > 0U) {
+        visible_held_stack = slot.value();
+      }
+    }
+  }
+  const client::HeldItemAnimationPose held_item_pose =
+      session.held_item_animation.sample(entity_animation_time);
 
   if (show_chunk_boundaries && entity_render_assets.chunk_bounds_model.value != 0U) {
     const ChunkSectionCoord chunk = world_position_chunk_section_coord(session.client->player_position());
@@ -360,8 +363,14 @@ void populate_world_frame_draw_items(
     const bool is_local_player =
         (local_entity_id.has_value() && mirror.entity_id == local_entity_id.value()) ||
         (local_player_id.has_value() && mirror.owning_player == local_player_id.value());
-    if (is_local_player && !render_config.show_local_player_body) {
-      continue;
+    if (is_local_player) {
+      first_person_sneak_progress = update_first_person_sneak_visual_progress(
+          session,
+          mirror.animations,
+          now);
+      if (!render_config.show_local_player_body) {
+        continue;
+      }
     }
     const protocol::PlayerProfileInfo* profile =
         mirror.owning_player.has_value()
@@ -408,13 +417,9 @@ void populate_world_frame_draw_items(
             ? session.client->player_position()
             : mirror.render_position;
     if (is_local_player) {
-      const f32 sneak_progress = update_first_person_sneak_visual_progress(
-          session,
-          mirror.animations,
-          now);
-      position = first_person_player_body_position(
-          session.client->camera(),
-          sneak_progress);
+      position = client::first_person_player_body_position(
+          frame.camera,
+          first_person_sneak_progress);
     }
     render::EntityDrawItem item;
     item.model_id = model_id;
@@ -424,7 +429,7 @@ void populate_world_frame_draw_items(
     item.position = position;
     item.rotation =
         is_local_player
-            ? model_forward_yaw_rotation(session.client->camera().yaw_radians())
+            ? client::first_person_player_body_rotation(frame.camera)
             : mirror.render_rotation;
     item.scale = 1.0F;
     item.animations.reserve(mirror.animations.size());
@@ -434,6 +439,9 @@ void populate_world_frame_draw_items(
     item.player_skin_region = player_skin_region;
     if (mirror.owning_player.has_value()) {
       item.bone_rotation_overrides.push_back({"head", mirror.head_rotation_degrees});
+    }
+    if (is_local_player && visible_held_stack.has_value()) {
+      client::apply_first_person_held_item_arm_pose(item, held_item_pose);
     }
     frame.entities.push_back(std::move(item));
   }
@@ -493,31 +501,17 @@ void populate_world_frame_draw_items(
     }
   }
 
-  if (!session.client->has_authoritative_inventory() ||
-      session.client->inventory_open() ||
-      session.client->chat_open() ||
-      session.client->container_open()) {
-    return;
-  }
-  const usize selected_slot = session.client->selected_hotbar_slot();
-  const player::Inventory& inventory = session.client->inventory();
-  const std::optional<player::ItemStack>& held_stack =
-      selected_slot < inventory.slot_count() ? inventory.slot(selected_slot)
-                                             : std::optional<player::ItemStack>{};
-  if (!held_stack.has_value() || held_stack->count == 0U) {
+  if (!visible_held_stack.has_value()) {
     return;
   }
 
-  const f32 animation_time_seconds =
-      std::chrono::duration<f32>(now - app_start_time).count();
-  const client::HeldItemAnimationPose animation_pose =
-      session.held_item_animation.sample(animation_time_seconds);
   client::append_held_item_draw(
       frame,
       entity_render_assets,
-      held_stack.value(),
+      visible_held_stack.value(),
       frame.camera,
-      animation_pose);
+      held_item_pose,
+      first_person_sneak_progress);
 }
 
 } // namespace arv::desktop

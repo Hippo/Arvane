@@ -18,6 +18,7 @@
 #include "arv/client/sky_rendering.hpp"
 #include "arv/client/gameplay_ui_model.hpp"
 #include "arv/client/ui_interactions.hpp"
+#include "arv/base/base_ids.hpp"
 #include "arv/base/ui/screens/pause_menu.hpp"
 #include "arv/base/ui/widgets/gameplay.hpp"
 #include "arv/crypto/crypto_init.hpp"
@@ -28,6 +29,8 @@
 #include "arv/net/websocket_client_transport.hpp"
 #include "arv/player/inventory.hpp"
 #include "arv/player/player_constants.hpp"
+#include "arv/physics/kinematics.hpp"
+#include "arv/physics/raycast.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/protocol_version.hpp"
 #include "arv/render/chunk_mesher.hpp"
@@ -2177,7 +2180,9 @@ void apply_bone_rotation_overrides(
         continue;
       }
       bone_rotations[bone_index] =
-          bone_rotations[bone_index] + bone_override.rotation_degrees;
+          bone_override.replace
+              ? bone_override.rotation_degrees
+              : bone_rotations[bone_index] + bone_override.rotation_degrees;
       break;
     }
   }
@@ -2193,6 +2198,163 @@ void apply_bone_rotation_overrides(
       g_app.session->inventory(),
       g_app.session->selected_hotbar_slot(),
       g_app.entity_assets.loaded.item_registry);
+}
+
+[[nodiscard]] std::optional<arv::BlockPos> local_web_secondary_place_pos(
+    const arv::client::ChunkSectionCollisionQuery& query) {
+  if (g_app.session == nullptr) {
+    return std::nullopt;
+  }
+  const arv::client::CameraShell& camera = g_app.session->camera();
+  const std::optional<arv::physics::BlockRaycastHit> hit =
+      arv::physics::raycast_blocks(
+          query,
+          camera.position(),
+          camera.forward_vector(),
+          arv::player::DefaultReachDistance);
+  if (!hit.has_value()) {
+    return std::nullopt;
+  }
+
+  arv::BlockPos place_pos = hit->block;
+  if (!g_app.block_assets.loaded.block_registry.is_replaceable(hit->variant)) {
+    place_pos.value =
+        place_pos.value + arv::voxel::block_face_offset(hit->face);
+  }
+  if (!query.is_block_loaded(place_pos)) {
+    return std::nullopt;
+  }
+  return place_pos;
+}
+
+[[nodiscard]] bool selected_web_water_bucket_can_leave_empty_bucket() noexcept {
+  if (g_app.session == nullptr ||
+      !g_app.session->has_authoritative_inventory() ||
+      !g_app.entity_assets.ready) {
+    return false;
+  }
+
+  const std::optional<arv::player::ItemID> bucket_id =
+      g_app.entity_assets.loaded.item_registry.find_item(arv::base::ids::BucketItemID);
+  if (!bucket_id.has_value()) {
+    return false;
+  }
+  const arv::player::ItemRecord* bucket =
+      g_app.entity_assets.loaded.item_registry.item(bucket_id.value());
+  if (bucket == nullptr) {
+    return false;
+  }
+
+  const arv::usize selected_slot = g_app.session->selected_hotbar_slot();
+  const arv::player::Inventory& inventory = g_app.session->inventory();
+  if (selected_slot >= inventory.slot_count()) {
+    return false;
+  }
+  const std::optional<arv::player::ItemStack>& held = inventory.slot(selected_slot);
+  if (!held.has_value() || held->count == 0U) {
+    return false;
+  }
+  if (held->count == 1U) {
+    return true;
+  }
+
+  for (arv::usize slot_index = 0; slot_index < inventory.slot_count(); ++slot_index) {
+    if (slot_index == selected_slot) {
+      continue;
+    }
+    const std::optional<arv::player::ItemStack>& slot = inventory.slot(slot_index);
+    if (!slot.has_value()) {
+      return true;
+    }
+    if (slot->item == bucket_id.value() && slot->count < bucket->max_stack_size) {
+      return true;
+    }
+  }
+  return false;
+}
+
+[[nodiscard]] bool preview_web_block_placement_succeeds(
+    const arv::player::ItemRecord& item,
+    const arv::client::ChunkSectionCollisionQuery& query) {
+  if (g_app.session == nullptr || !item.placement_variant.has_value()) {
+    return false;
+  }
+
+  const std::optional<arv::BlockPos> place_pos = local_web_secondary_place_pos(query);
+  if (!place_pos.has_value()) {
+    return false;
+  }
+
+  const arv::voxel::BlockVariantID existing = query.block_variant(place_pos.value());
+  if (!(g_app.block_assets.loaded.block_registry.is_air(existing) ||
+        g_app.block_assets.loaded.block_registry.is_replaceable(existing))) {
+    return false;
+  }
+
+  const arv::physics::KinematicConfig physics_config;
+  const arv::Aabb3f player_bounds = arv::physics::make_body_bounds(
+      g_app.session->player_position(),
+      physics_config,
+      arv::physics::PlayerCollisionPose::Standing);
+  for (const arv::Aabb3f& local_box :
+       g_app.block_assets.loaded.block_registry.collision_boxes(
+           item.placement_variant.value())) {
+    const arv::Aabb3f world_box{
+        {local_box.min.x + static_cast<arv::f32>(place_pos->value.x),
+         local_box.min.y + static_cast<arv::f32>(place_pos->value.y),
+         local_box.min.z + static_cast<arv::f32>(place_pos->value.z)},
+        {local_box.max.x + static_cast<arv::f32>(place_pos->value.x),
+         local_box.max.y + static_cast<arv::f32>(place_pos->value.y),
+         local_box.max.z + static_cast<arv::f32>(place_pos->value.z)}};
+    if (player_bounds.overlaps(world_box)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool preview_web_water_bucket_placement_succeeds(
+    const arv::client::ChunkSectionCollisionQuery& query) {
+  if (!selected_web_water_bucket_can_leave_empty_bucket()) {
+    return false;
+  }
+
+  const std::optional<arv::BlockPos> place_pos = local_web_secondary_place_pos(query);
+  if (!place_pos.has_value()) {
+    return false;
+  }
+
+  const arv::voxel::BlockVariantID existing_block = query.block_variant(place_pos.value());
+  if (!(g_app.block_assets.loaded.block_registry.is_air(existing_block) ||
+        g_app.block_assets.loaded.block_registry.is_replaceable(existing_block))) {
+    return false;
+  }
+
+  const arv::voxel::FluidCell existing_fluid = query.fluid_cell(place_pos.value());
+  return existing_fluid.empty() ||
+         (existing_fluid.type == arv::voxel::DefaultWaterFluidTypeID &&
+          !existing_fluid.source());
+}
+
+[[nodiscard]] bool preview_web_held_item_placement_succeeds(
+    const arv::player::ItemRecord* item) {
+  if (g_app.session == nullptr ||
+      item == nullptr ||
+      !g_app.block_assets.ready ||
+      !g_app.session->resolved_permissions().core.can_modify_world) {
+    return false;
+  }
+
+  const arv::client::ChunkSectionCollisionQuery query(
+      g_app.chunk_sections,
+      g_app.block_assets.loaded.block_registry);
+  if (item->placement_variant.has_value()) {
+    return preview_web_block_placement_succeeds(*item, query);
+  }
+  if (item->name == arv::base::ids::WaterBucketItemID) {
+    return preview_web_water_bucket_placement_succeeds(query);
+  }
+  return false;
 }
 
 [[nodiscard]] std::string action_binding_label(
@@ -2290,15 +2452,15 @@ void update_held_item_animation_from_input(
     return;
   }
 
-  constexpr arv::client::HeldItemAnimationConditionState OptimisticServerAction{
-      .placement_succeeds = true};
+  const arv::client::HeldItemAnimationConditionState predicted_action{
+      .placement_succeeds = preview_web_held_item_placement_succeeds(held_item)};
   if (input.primary_pressed) {
     (void)arv::client::play_held_item_action(
         g_app.input.held_item_animation,
         held_item,
         arv::client::HeldItemActionPrimaryUse,
         g_app.entity_assets.item_animation_library,
-        OptimisticServerAction,
+        predicted_action,
         now_seconds);
   }
 
@@ -2310,7 +2472,7 @@ void update_held_item_animation_from_input(
         held_item,
         arv::client::HeldItemActionPrimaryUse,
         g_app.entity_assets.item_animation_library,
-        OptimisticServerAction,
+        predicted_action,
         now_seconds);
   }
 
@@ -2321,7 +2483,7 @@ void update_held_item_animation_from_input(
             held_item,
             arv::client::HeldItemActionSecondaryUseStart,
             g_app.entity_assets.item_animation_library,
-            OptimisticServerAction,
+            predicted_action,
             now_seconds);
     if (result == arv::client::HeldItemActionPlayResult::NoAnimation) {
       result = arv::client::play_held_item_action(
@@ -2329,7 +2491,7 @@ void update_held_item_animation_from_input(
           held_item,
           arv::client::HeldItemActionSecondaryUseHold,
           g_app.entity_assets.item_animation_library,
-          OptimisticServerAction,
+          predicted_action,
           now_seconds);
     }
     g_app.input.held_item_secondary_use_active =
@@ -2347,7 +2509,7 @@ void update_held_item_animation_from_input(
     if (hold_animation.clip != nullptr &&
         arv::client::held_item_animation_condition_passes(
             hold_animation.play_condition,
-            OptimisticServerAction) &&
+            predicted_action) &&
         g_app.input.held_item_animation.active_clip() != hold_animation.clip) {
       g_app.input.held_item_animation.play(*hold_animation.clip, now_seconds);
     }
@@ -2360,7 +2522,7 @@ void update_held_item_animation_from_input(
             held_item,
             arv::client::HeldItemActionSecondaryUseEnd,
             g_app.entity_assets.item_animation_library,
-            OptimisticServerAction,
+            predicted_action,
             now_seconds) != arv::client::HeldItemActionPlayResult::Played) {
       g_app.input.held_item_animation.stop(now_seconds);
     }
@@ -2434,6 +2596,28 @@ void append_block_container_animation_playback(
       g_app.session->local_entity_id();
   const std::optional<arv::PlayerID> local_player_id =
       g_app.session->local_player_id();
+  const arv::render::CameraSnapshot camera_snapshot =
+      g_app.session->camera().snapshot(
+          static_cast<arv::u32>(std::max(g_app.width, 1)),
+          static_cast<arv::u32>(std::max(g_app.height, 1)),
+          0.0F);
+  std::optional<arv::player::ItemStack> visible_held_stack;
+  if (g_app.session->has_authoritative_inventory() &&
+      !g_app.session->inventory_open() &&
+      !g_app.session->chat_open() &&
+      !g_app.session->container_open()) {
+    const arv::usize selected_slot = g_app.session->selected_hotbar_slot();
+    const arv::player::Inventory& inventory = g_app.session->inventory();
+    if (selected_slot < inventory.slot_count()) {
+      const std::optional<arv::player::ItemStack>& slot =
+          inventory.slot(selected_slot);
+      if (slot.has_value() && slot->count > 0U) {
+        visible_held_stack = slot.value();
+      }
+    }
+  }
+  const arv::client::HeldItemAnimationPose held_item_pose =
+      g_app.input.held_item_animation.sample(animation_time_seconds);
   const std::vector<arv::client::ReplicatedEntityMirror> mirrors =
       g_app.session->replicated_entity_mirrors();
   draws.reserve(mirrors.size() + g_app.session->dropped_item_count() + 2U);
@@ -2445,9 +2629,6 @@ void append_block_container_animation_playback(
         (local_entity_id.has_value() && mirror.entity_id == local_entity_id.value()) ||
         (local_player_id.has_value() && mirror.owning_player.has_value() &&
          mirror.owning_player.value() == local_player_id.value());
-    if (is_local_player) {
-      continue;
-    }
     const auto model =
         g_app.entity_assets.loaded.render_assets.model_by_type.find(mirror.entity_type);
     if (model == g_app.entity_assets.loaded.render_assets.model_by_type.end()) {
@@ -2455,6 +2636,7 @@ void append_block_container_animation_playback(
     }
 
     arv::render::EntityModelID model_id = model->second;
+    bool using_first_person_skin = false;
     arv::render::TextureRegionHandle player_skin_region;
     const arv::protocol::PlayerProfileInfo* profile =
         mirror.owning_player.has_value()
@@ -2477,6 +2659,33 @@ void append_block_container_animation_playback(
         } else if (g_app.entity_assets.loaded.render_assets.player_skin_model.value != 0U) {
           model_id = g_app.entity_assets.loaded.render_assets.player_skin_model;
         }
+        if (is_local_player && slim_player &&
+            g_app.entity_assets.loaded.render_assets
+                    .first_person_player_slim_skin_model.value != 0U) {
+          model_id =
+              g_app.entity_assets.loaded.render_assets.first_person_player_slim_skin_model;
+          using_first_person_skin = true;
+        } else if (is_local_player &&
+                   g_app.entity_assets.loaded.render_assets
+                           .first_person_player_skin_model.value != 0U) {
+          model_id =
+              g_app.entity_assets.loaded.render_assets.first_person_player_skin_model;
+          using_first_person_skin = true;
+        }
+      }
+    }
+    if (is_local_player &&
+        g_app.entity_assets.loaded.render_assets.first_person_player_model.value != 0U) {
+      if (!using_first_person_skin) {
+        if (slim_player &&
+            g_app.entity_assets.loaded.render_assets
+                    .first_person_player_slim_model.value != 0U) {
+          model_id =
+              g_app.entity_assets.loaded.render_assets.first_person_player_slim_model;
+        } else {
+          model_id =
+              g_app.entity_assets.loaded.render_assets.first_person_player_model;
+        }
       }
     }
 
@@ -2487,8 +2696,14 @@ void append_block_container_animation_playback(
         animation != g_app.entity_assets.loaded.render_assets.animation_by_type.end()) {
       draw.animation_id = animation->second;
     }
-    draw.position = mirror.render_position;
-    draw.rotation = mirror.render_rotation;
+    draw.position =
+        is_local_player
+            ? arv::client::first_person_player_body_position(camera_snapshot)
+            : mirror.render_position;
+    draw.rotation =
+        is_local_player
+            ? arv::client::first_person_player_body_rotation(camera_snapshot)
+            : mirror.render_rotation;
     draw.scale = 1.0F;
     draw.player_skin_region = player_skin_region;
     draw.animations.reserve(mirror.animations.size());
@@ -2498,6 +2713,9 @@ void append_block_container_animation_playback(
     if (mirror.owning_player.has_value()) {
       draw.bone_rotation_overrides.push_back({"head", mirror.head_rotation_degrees});
     }
+    if (is_local_player && visible_held_stack.has_value()) {
+      arv::client::apply_first_person_held_item_arm_pose(draw, held_item_pose);
+    }
     draws.push_back(std::move(draw));
   }
   if (!local_entity_id.has_value()) {
@@ -2505,10 +2723,7 @@ void append_block_container_animation_playback(
   }
 
   arv::render::FramePacket item_frame;
-  item_frame.camera = g_app.session->camera().snapshot(
-      static_cast<arv::u32>(std::max(g_app.width, 1)),
-      static_cast<arv::u32>(std::max(g_app.height, 1)),
-      0.0F);
+  item_frame.camera = camera_snapshot;
   item_frame.world_view = arv::render::render_view_from_camera(item_frame.camera);
   item_frame.world_view.world_id = world_id;
   const std::vector<arv::client::DroppedItemMirror> dropped_items =
@@ -2618,24 +2833,13 @@ void append_block_container_animation_playback(
     }
   }
 
-  if (g_app.session->has_authoritative_inventory() &&
-      !g_app.session->inventory_open() &&
-      !g_app.session->chat_open() &&
-      !g_app.session->container_open()) {
-    const arv::usize selected_slot = g_app.session->selected_hotbar_slot();
-    const arv::player::Inventory& inventory = g_app.session->inventory();
-    if (selected_slot < inventory.slot_count()) {
-      const std::optional<arv::player::ItemStack>& held_stack =
-          inventory.slot(selected_slot);
-      if (held_stack.has_value() && held_stack->count > 0U) {
-        arv::client::append_held_item_draw(
-            item_frame,
-            g_app.entity_assets.loaded.render_assets,
-            held_stack.value(),
-            item_frame.camera,
-            g_app.input.held_item_animation.sample(animation_time_seconds));
-      }
-    }
+  if (visible_held_stack.has_value()) {
+    arv::client::append_held_item_draw(
+        item_frame,
+        g_app.entity_assets.loaded.render_assets,
+        visible_held_stack.value(),
+        item_frame.camera,
+        held_item_pose);
   }
   draws.insert(
       draws.end(),

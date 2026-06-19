@@ -251,6 +251,9 @@ void apply_ui_scissor(UiClip clip, u32 framebuffer_height) {
         rotation != 0) {
       return rotation;
     }
+    if (lhs[index].replace != rhs[index].replace) {
+      return lhs[index].replace ? 1 : -1;
+    }
   }
   if (lhs.size() < rhs.size()) {
     return -1;
@@ -301,7 +304,9 @@ void apply_bone_rotation_overrides(
         continue;
       }
       bone_rotations[bone_index] =
-          bone_rotations[bone_index] + bone_override.rotation_degrees;
+          bone_override.replace
+              ? bone_override.rotation_degrees
+              : bone_rotations[bone_index] + bone_override.rotation_degrees;
       break;
     }
   }

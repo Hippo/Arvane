@@ -1880,7 +1880,7 @@ TEST(PlayerInteractionTests, SprintKnockbackBonusRequiresResetAfterHit) {
   EXPECT_FLOAT_EQ(velocity->linear.x, 7.0F);
 }
 
-TEST(PlayerInteractionTests, PrimaryButtonSwingsRightHandAndSecondarySwingsLeftHand) {
+TEST(PlayerInteractionTests, PrimarySwingsRightHandAndSecondaryAirDoesNotSwing) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
       arv::testsupport::make_test_item_registry(block_registry);
@@ -1903,6 +1903,9 @@ TEST(PlayerInteractionTests, PrimaryButtonSwingsRightHandAndSecondarySwingsLeftH
       server.voxel_world().entity_for_player(player_state.player_id);
   ASSERT_TRUE(player_entity.has_value());
 
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  prepare_test_player(server, item_registry);
+
   client.submit_input(arv::client::InputFrame{.primary_pressed = true});
   client.fixed_tick(server.tick_index());
   server.tick();
@@ -1918,8 +1921,11 @@ TEST(PlayerInteractionTests, PrimaryButtonSwingsRightHandAndSecondarySwingsLeftH
   server.tick();
   animation = server.voxel_world().find_entity_animation_state(player_entity.value());
   ASSERT_NE(animation, nullptr);
-  EXPECT_NE(find_active_animation(*animation, "hit_left"), nullptr);
   EXPECT_EQ(find_active_animation(*animation, "hit_right"), nullptr);
+  EXPECT_EQ(find_active_animation(*animation, "hit_left"), nullptr);
+
+  ASSERT_TRUE(player_state.inventory.slot(0).has_value());
+  EXPECT_EQ(player_state.inventory.slot(0)->count, 2U);
 }
 
 TEST(PlayerInteractionTests, SecondaryPlaceFlowsThroughServerAuthorityAndConsumesHeldStack) {
@@ -1946,12 +1952,20 @@ TEST(PlayerInteractionTests, SecondaryPlaceFlowsThroughServerAuthorityAndConsume
   (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
   ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, dirt));
   prepare_test_player(server, item_registry);
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(connected_player(server).player_id);
+  ASSERT_TRUE(player_entity.has_value());
 
   client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
   client.fixed_tick(server.tick_index());
   server.tick();
 
   EXPECT_EQ(server.voxel_world().get_block({{2, 1, 0}}), stone);
+  const arv::entity::EntityAnimationState* animation =
+      server.voxel_world().find_entity_animation_state(player_entity.value());
+  ASSERT_NE(animation, nullptr);
+  EXPECT_NE(find_active_animation(*animation, "hit_right"), nullptr);
+  EXPECT_EQ(find_active_animation(*animation, "hit_left"), nullptr);
   const arv::player::PlayerState& player_state = connected_player(server);
   ASSERT_TRUE(player_state.inventory.slot(0).has_value());
   EXPECT_EQ(player_state.inventory.slot(0)->count, 1U);
