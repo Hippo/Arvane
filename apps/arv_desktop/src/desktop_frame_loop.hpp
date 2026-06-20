@@ -10,6 +10,8 @@
 #include "arv/asset/resource.hpp"
 #include "arv/base/ui.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/gameplay_interactions.hpp"
+#include "arv/client/player_skin_rendering.hpp"
 #include "arv/client/ui_interactions.hpp"
 #include "arv/command/command.hpp"
 #include "arv/core/arena.hpp"
@@ -34,12 +36,6 @@ struct FrameTiming {
   std::chrono::duration<Seconds> delta{};
   double frame_delta_ms{};
   std::chrono::steady_clock::time_point frame_work_start{};
-};
-
-enum class HeldItemActionPlayResult : u8 {
-  NoAnimation,
-  Suppressed,
-  Played,
 };
 
 struct UiBuildCacheKey {
@@ -191,49 +187,21 @@ private:
 
   [[nodiscard]] const player::ItemRecord* selected_held_item(
       const DesktopGameSession& session) const noexcept;
-  [[nodiscard]] bool selected_water_bucket_can_leave_empty_bucket(
-      const DesktopGameSession& session) const noexcept;
-  [[nodiscard]] std::optional<BlockPos> local_secondary_place_pos(
-      const DesktopGameSession& session,
-      const physics::ICollisionQuery& query) const;
-  [[nodiscard]] bool preview_block_placement_succeeds(
-      const DesktopGameSession& session,
-      const player::ItemRecord& item,
-      const physics::ICollisionQuery& query) const;
-  [[nodiscard]] bool preview_water_bucket_placement_succeeds(
-      const DesktopGameSession& session,
-      const physics::ICollisionQuery& query) const;
   [[nodiscard]] bool preview_held_item_placement_succeeds(
       const DesktopGameSession& session,
       const player::ItemRecord* item) const;
-  [[nodiscard]] Aabb3f replicated_entity_attack_bounds(
-      const client::ReplicatedEntityMirror& mirror) const noexcept;
-  [[nodiscard]] std::optional<EntityNetID> targeted_attack_entity(
-      const DesktopGameSession& session,
-      const player::ItemRecord* held_item) const;
   [[nodiscard]] std::optional<EntityNetID> targeted_rideable_entity(
       const DesktopGameSession& session) const;
-  [[nodiscard]] bool send_local_ride_request_if_targeted(
-      DesktopGameSession& session) const;
-  void send_local_entity_attack_if_targeted(
+  [[nodiscard]] client::GameplayInteractionDispatchResult
+  dispatch_gameplay_interactions_from_input(
       DesktopGameSession& session,
-      const player::ItemRecord* held_item) const;
-  [[nodiscard]] bool held_item_animation_condition_passes(
-      const DesktopGameSession& session,
-      const player::ItemRecord* item,
-      player::HeldItemAnimationPlayCondition condition) const;
-  [[nodiscard]] HeldItemActionPlayResult play_held_item_action(
-      DesktopGameSession& session,
-      const player::ItemRecord* item,
-      std::string_view action,
-      Seconds now_seconds) const noexcept;
+      const client::InputFrame& client_input,
+      bool gameplay_blocked) const;
   void update_held_item_animation_from_input(
       DesktopGameSession& session,
       const client::InputFrame& client_input,
-      Seconds now_seconds) const;
-  [[nodiscard]] bool try_open_container_from_secondary(
-      DesktopGameSession& session,
-      client::InputFrame& client_input) const;
+      Seconds now_seconds,
+      bool stop_for_ride_request) const;
   void spawn_local_block_hit_particles(DesktopGameSession& session) const;
   void spawn_local_block_face_particles(
       DesktopGameSession& session,
@@ -283,6 +251,7 @@ private:
   void append_menu_player_skin_preview(
       render::FramePacket& frame,
       const ui::UIContext& menu_context);
+  [[nodiscard]] bool sync_ui_font_atlas();
   void build_ui(
       render::FramePacket& frame,
       const platform::InputSnapshot& platform_input,
@@ -298,19 +267,6 @@ private:
       bool has_active_integrated_session,
       bool fixed_tick_ran,
       std::chrono::steady_clock::time_point now);
-  void update_hotbar_item_popup(
-      DesktopGameSession& active_session,
-      std::chrono::steady_clock::time_point now);
-  [[nodiscard]] f32 hotbar_item_popup_alpha(
-      std::chrono::steady_clock::time_point now) const noexcept;
-  [[nodiscard]] bool append_inventory_hover_tooltip_if_needed(
-      DesktopGameSession& active_session,
-      const platform::InputSnapshot& platform_input,
-      const std::optional<ui::UiAction>& hover_action);
-  [[nodiscard]] bool append_chat_hover_tooltip_if_needed(
-      DesktopGameSession& active_session,
-      const platform::InputSnapshot& platform_input,
-      const std::optional<ui::UiAction>& hover_action);
   [[nodiscard]] bool route_chat_mouse_input(
       DesktopGameSession& active_session,
       const platform::InputSnapshot& platform_input);
@@ -318,7 +274,8 @@ private:
       DesktopGameSession& active_session,
       const platform::InputSnapshot& platform_input,
       std::chrono::steady_clock::time_point now,
-      ui::RidePromptModel ride_prompt);
+      ui::RidePromptModel ride_prompt,
+      FunctionRef<void()> append_active_screens);
 
   [[nodiscard]] bool submit_render_and_present(
       render::FramePacket frame,
@@ -364,7 +321,7 @@ private:
   double last_frame_work_ms_{};
   std::chrono::steady_clock::time_point last_frame_spike_log_{};
   u64 profile_frame_index_{};
-  HashMap<std::string, render::TextureRegionHandle> player_skin_regions_{};
+  client::PlayerSkinReceiptMap player_skin_regions_{};
   UiBuildCacheKey ui_tree_cache_key_{};
   bool ui_tree_cache_valid_{};
   client::HotbarItemPopupState hotbar_item_popup_{};

@@ -8,9 +8,12 @@
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
+#include "arv/physics/collision.hpp"
 #include "arv/protocol/particles.hpp"
 #include "arv/render/render_types.hpp"
+#include "arv/voxel/block.hpp"
 
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -161,6 +164,8 @@ using ParticleAssetsResult = Expected<ParticleAssets, ParticleLoadError>;
     asset::ResourceManager& resources,
     asset::TextureAtlasBuildOptions options,
     std::span<const std::string> extra_texture_assets = {});
+[[nodiscard]] std::vector<std::string> block_particle_texture_assets(
+    const voxel::BlockRegistry& registry);
 
 [[nodiscard]] usize particle_animation_frame_index(
     const ParticleAnimation& animation,
@@ -199,6 +204,65 @@ struct ParticleBurstDesc {
   u32 seed{1U};
   protocol::ParticleSpawnShape shape{protocol::ParticleSpawnShape::Point};
 };
+
+inline constexpr Seconds DefaultLocalBlockMiningParticleIntervalSeconds = 0.09;
+inline constexpr Seconds DefaultLocalSprintParticleIntervalSeconds = 0.12;
+
+struct LocalParticleSeedState {
+  u32 next_sequence{1U};
+};
+
+struct LocalBlockMiningParticleState {
+  Seconds next_spawn_time_seconds{};
+};
+
+struct LocalSprintGroundParticleState {
+  Seconds accumulator_seconds{};
+};
+
+struct LocalBlockFaceParticleBurstInput {
+  const physics::ICollisionQuery& collision_query;
+  const voxel::BlockRegistry& block_registry;
+  LocalParticleSeedState& seed_state;
+  Vec3f origin{};
+  Vec3f direction{};
+  f32 max_distance{};
+  u16 count{};
+  f32 extent{};
+  f32 radius{};
+};
+
+struct LocalSprintGroundParticleInput {
+  const physics::ICollisionQuery& collision_query;
+  const voxel::BlockRegistry& block_registry;
+  LocalParticleSeedState& seed_state;
+  bool sprint_held{};
+  bool move_forward{};
+  bool move_backward{};
+  bool sneak_held{};
+  bool player_grounded{};
+  Vec3f player_position{};
+  Vec3f player_velocity{};
+  Seconds delta_seconds{};
+  Seconds interval_seconds{DefaultLocalSprintParticleIntervalSeconds};
+};
+
+[[nodiscard]] u32 next_local_particle_seed(
+    LocalParticleSeedState& state,
+    BlockPos pos) noexcept;
+
+[[nodiscard]] std::optional<ParticleBurstDesc> build_local_block_face_particle_burst(
+    const LocalBlockFaceParticleBurstInput& input);
+
+[[nodiscard]] bool consume_local_block_mining_particle_due(
+    LocalBlockMiningParticleState& state,
+    bool mining_block,
+    Seconds now_seconds,
+    Seconds interval_seconds = DefaultLocalBlockMiningParticleIntervalSeconds) noexcept;
+
+[[nodiscard]] std::optional<ParticleBurstDesc> update_local_sprint_ground_particle_burst(
+    LocalSprintGroundParticleState& state,
+    const LocalSprintGroundParticleInput& input);
 
 class ParticleSystem {
 public:

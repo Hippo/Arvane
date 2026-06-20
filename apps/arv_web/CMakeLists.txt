@@ -12,10 +12,22 @@ set(ARV_WEB_SHELL_FILES
 add_executable(arv_web
   src/main.cpp
   src/web_application.cpp
+  src/web_canvas_context.cpp
+  src/web_chunk_renderer.cpp
+  src/web_client_host.cpp
+  src/web_client_assets.cpp
+  src/web_client_tick.cpp
+  src/web_crypto_self_test.cpp
+  src/web_entity_frame.cpp
   src/web_entity_fallback.cpp
+  src/web_gameplay_interactions.cpp
+  src/web_gameplay_ui_frame.cpp
   src/web_input.cpp
   src/web_platform.cpp
-  src/web_player_skin_atlas.cpp
+  src/web_player_skins.cpp
+  src/web_render_host.cpp
+  src/web_ui_host.cpp
+  src/web_world_frame.cpp
 )
 
 target_compile_features(arv_web PRIVATE cxx_std_20)
@@ -23,16 +35,27 @@ target_link_libraries(arv_web
   PRIVATE
     arv_client_chunk_snapshot
     arv_client_chunk_collision
+    arv_client_block_container_animation
+    arv_client_input
+    arv_client_settings
+    arv_client_ui_routing
     arv_client_runtime
     arv_client_item_animation
+    arv_client_gameplay_assets
+    arv_client_gameplay_ui_frame
+    arv_client_frame_composer
     arv_client_local_player
     arv_client_item_rendering
     arv_client_item_ui
+    arv_client_ui_assets
     arv_client_render_assets
+    arv_client_remote_chunk_stream
+    arv_client_world_time
     arv_base_ui
     arv_net
     arv_physics
     arv_platform_input
+    arv_render_webgl
     arv_render_mesh
     arv_ui
     arv_world_time

@@ -574,7 +574,11 @@ void OpenGLRenderer::render() {
   ensure_white_texture();
 
   glEnable(GL_DEPTH_TEST);
-  glClearColor(0.08F, 0.10F, 0.12F, 1.0F);
+  glClearColor(
+      frame_.clear_color.x,
+      frame_.clear_color.y,
+      frame_.clear_color.z,
+      frame_.clear_color.w);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
   if (!ensure_chunk_program()) {

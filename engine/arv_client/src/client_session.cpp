@@ -21,7 +21,6 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <limits>
 #include <span>
 #include <sstream>
 #include <system_error>
@@ -125,17 +124,6 @@ namespace {
       << " in session state "
       << static_cast<unsigned int>(state);
   return out.str();
-}
-
-void mark_section_content_changed(
-    protocol::ClientboundChunkSectionData& section,
-    u64 server_tick) noexcept {
-  const u64 next_content_version =
-      section.chunk_content_version == std::numeric_limits<u64>::max()
-          ? section.chunk_content_version
-          : section.chunk_content_version + 1U;
-  section.chunk_content_version = std::max(next_content_version, server_tick);
-  section.chunk_version = std::max(section.chunk_version, section.chunk_content_version);
 }
 
 [[nodiscard]] bool write_temp_apack_file(
@@ -530,56 +518,21 @@ void ClientSession::handle_chunk_section_data(protocol::ClientboundChunkSectionD
   if (!world_join_.has_value() || data.world_id != world_join_->world_id) {
     return;
   }
-  auto found = std::find_if(
-      chunk_sections_.begin(),
-      chunk_sections_.end(),
-      [&](const protocol::ClientboundChunkSectionData& existing) {
-        return existing.world_id == data.world_id && existing.coord == data.coord;
-      });
-  if (found == chunk_sections_.end()) {
-    chunk_sections_.push_back(std::move(data));
-  } else {
-    *found = std::move(data);
-  }
+  (void)chunk_sections_.apply_section_data(world_join_->world_id, std::move(data));
 }
 
 void ClientSession::handle_chunk_section_unload(protocol::ClientboundChunkSectionUnload unload) {
   if (!world_join_.has_value() || unload.world_id != world_join_->world_id) {
     return;
   }
-  const auto new_end = std::remove_if(
-      chunk_sections_.begin(),
-      chunk_sections_.end(),
-      [&](const protocol::ClientboundChunkSectionData& existing) {
-        return existing.world_id == unload.world_id && existing.coord == unload.coord;
-      });
-  chunk_sections_.erase(new_end, chunk_sections_.end());
+  (void)chunk_sections_.apply_section_unload(world_join_->world_id, unload);
 }
 
 void ClientSession::handle_block_update_batch(protocol::ClientboundBlockUpdateBatch batch) {
   if (!world_join_.has_value() || batch.world_id != world_join_->world_id) {
     return;
   }
-  for (const protocol::BlockUpdate& update : batch.updates) {
-    const ChunkSectionCoord coord = block_to_chunk(update.pos);
-    auto found = std::find_if(
-        chunk_sections_.begin(),
-        chunk_sections_.end(),
-        [&](const protocol::ClientboundChunkSectionData& existing) {
-          return existing.world_id == batch.world_id && existing.coord == coord;
-        });
-    if (found == chunk_sections_.end()) {
-      continue;
-    }
-
-    const usize index = voxel::local_index(block_to_local(update.pos));
-    found->blocks[index] = update.new_state;
-    if (update.has_fluid) {
-      found->has_fluids = true;
-      found->fluids[index] = update.new_fluid;
-    }
-    mark_section_content_changed(*found, update.server_tick);
-  }
+  (void)chunk_sections_.apply_block_update_batch(world_join_->world_id, batch);
 }
 
 void ClientSession::handle_entity_spawn(protocol::ClientboundEntitySpawn spawn) {

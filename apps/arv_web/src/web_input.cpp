@@ -38,8 +38,8 @@ EM_BOOL on_visibility(int, const EmscriptenVisibilityChangeEvent* event, void*) 
 
 EM_BOOL on_pointerlock(int, const EmscriptenPointerlockChangeEvent* event, void*) {
   arv::web::g_app.pointer_locked = event != nullptr && event->isActive;
-  arv::web::g_app.input.mouse_dx = 0.0;
-  arv::web::g_app.input.mouse_dy = 0.0;
+  arv::web::g_app.input.snapshot.mouse_delta_x = 0.0F;
+  arv::web::g_app.input.snapshot.mouse_delta_y = 0.0F;
   arv::web::set_status(arv::web::g_app.pointer_locked ? "pointer locked" : "pointer released");
   return EM_FALSE;
 }
@@ -55,8 +55,8 @@ EM_BOOL on_canvas_click(int, const EmscriptenMouseEvent*, void*) {
 }
 
 void update_cursor_from_mouse(const EmscriptenMouseEvent& event) {
-  arv::web::g_app.input.cursor_x = static_cast<double>(event.targetX);
-  arv::web::g_app.input.cursor_y = static_cast<double>(event.targetY);
+  arv::web::g_app.input.snapshot.cursor_x = static_cast<float>(event.targetX);
+  arv::web::g_app.input.snapshot.cursor_y = static_cast<float>(event.targetY);
   arv::web::g_app.input.cursor_initialized = true;
 }
 
@@ -124,19 +124,6 @@ void update_cursor_from_mouse(const EmscriptenMouseEvent& event) {
   return modifiers;
 }
 
-[[nodiscard]] arv::ui::InputBindingDevice ui_device_from(
-    arv::platform::InputDeviceType type) noexcept {
-  switch (type) {
-    case arv::platform::InputDeviceType::Keyboard:
-      return arv::ui::InputBindingDevice::Keyboard;
-    case arv::platform::InputDeviceType::MouseButton:
-      return arv::ui::InputBindingDevice::MouseButton;
-    case arv::platform::InputDeviceType::MouseWheel:
-      return arv::ui::InputBindingDevice::MouseWheel;
-  }
-  return arv::ui::InputBindingDevice::Keyboard;
-}
-
 void set_captured_input(
     arv::platform::InputDeviceType device,
     std::string_view code,
@@ -147,18 +134,14 @@ void set_captured_input(
     return;
   }
   const arv::platform::InputBinding binding{device, canonical.value(), modifiers};
-  arv::web::g_app.input.captured_input =
-      arv::ui::CapturedInputView{
-          ui_device_from(binding.device_type),
-          binding.input_code,
-          arv::platform::input_binding_label(binding),
-          binding.modifiers};
+  arv::web::g_app.input.snapshot.raw_input =
+      arv::platform::RawInputEvent{binding};
 }
 
 [[nodiscard]] bool mouse_hit_is_cancel_capture() {
   const arv::Vec2f cursor{
-      static_cast<float>(arv::web::g_app.input.cursor_x),
-      static_cast<float>(arv::web::g_app.input.cursor_y)};
+      arv::web::g_app.input.snapshot.cursor_x,
+      arv::web::g_app.input.snapshot.cursor_y};
   const std::optional<arv::ui::UiNodeID> hit =
       arv::web::g_app.ui.tree.hit_test(cursor);
   if (!hit.has_value()) {
@@ -194,79 +177,80 @@ void apply_logical_action(
     bool down,
     bool repeat) {
   using arv::platform::LogicalAction;
+  arv::platform::InputSnapshot& input = arv::web::g_app.input.snapshot;
   switch (action) {
     case LogicalAction::MoveForward:
-      arv::web::g_app.input.forward = down;
+      input.move_forward = down;
       break;
     case LogicalAction::MoveBackward:
-      arv::web::g_app.input.back = down;
+      input.move_backward = down;
       break;
     case LogicalAction::MoveLeft:
-      arv::web::g_app.input.left = down;
+      input.move_left = down;
       break;
     case LogicalAction::MoveRight:
-      arv::web::g_app.input.right = down;
+      input.move_right = down;
       break;
     case LogicalAction::Jump:
-      if (down && !repeat && !arv::web::g_app.input.jump) {
-        arv::web::g_app.input.jump_pressed = true;
+      if (down && !repeat && !input.jump_held) {
+        input.jump_pressed = true;
       }
-      arv::web::g_app.input.jump = down;
+      input.jump_held = down;
       break;
     case LogicalAction::Sneak:
-      arv::web::g_app.input.sneak = down;
+      input.sneak_held = down;
       break;
     case LogicalAction::Sprint:
-      arv::web::g_app.input.sprint = down;
+      input.sprint_held = down;
       break;
     case LogicalAction::Mount:
       if (down && !repeat) {
-        arv::web::g_app.input.mount_pressed = true;
+        input.mount_pressed = true;
       }
       break;
     case LogicalAction::VehicleRollLeft:
-      arv::web::g_app.input.vehicle_roll_left_held = down;
+      input.vehicle_roll_left_held = down;
       break;
     case LogicalAction::VehicleRollRight:
-      arv::web::g_app.input.vehicle_roll_right_held = down;
+      input.vehicle_roll_right_held = down;
       break;
     case LogicalAction::PrimaryInteract:
-      if (down && !arv::web::g_app.input.primary_held) {
-        arv::web::g_app.input.primary_pressed = true;
+      if (down && !input.primary_held) {
+        input.primary_pressed = true;
         arv::web::g_app.input.primary_animation_pressed = true;
       }
-      arv::web::g_app.input.primary_held = down;
+      input.primary_held = down;
       break;
     case LogicalAction::SecondaryInteract:
-      if (down && !arv::web::g_app.input.secondary_held) {
-        arv::web::g_app.input.secondary_pressed = true;
+      if (down && !input.secondary_held) {
+        input.secondary_pressed = true;
         arv::web::g_app.input.secondary_animation_pressed = true;
       }
-      arv::web::g_app.input.secondary_held = down;
+      input.secondary_held = down;
       break;
     case LogicalAction::DropItem:
-      if (down && !repeat && !arv::web::g_app.input.drop_item_held) {
-        arv::web::g_app.input.drop_item_pressed = true;
+      if (down && !repeat && !input.drop_item_held) {
+        input.drop_item_pressed = true;
       }
-      arv::web::g_app.input.drop_item_held = down;
+      input.drop_item_held = down;
       break;
     case LogicalAction::OpenInventory:
       if (down && !repeat) {
-        arv::web::g_app.input.open_inventory_pressed = true;
+        input.open_inventory_pressed = true;
       }
       break;
     case LogicalAction::OpenChat:
       if (down && !repeat) {
-        arv::web::g_app.input.open_chat_pressed = true;
+        input.open_chat_pressed = true;
       }
       break;
     case LogicalAction::ShowTabMenu:
-      arv::web::g_app.input.tab_menu_held = down;
+      input.tab_menu_held = down;
       break;
     case LogicalAction::TogglePauseMenu:
       if (down && !repeat) {
-        arv::web::g_app.input.text_cancel_pressed = true;
-        arv::web::g_app.input.pause_menu_pressed = true;
+        input.text_cancel_pressed = true;
+        input.pause_menu_pressed = true;
       }
       break;
     case LogicalAction::Hotbar1:
@@ -282,7 +266,7 @@ void apply_logical_action(
         const auto slot = static_cast<arv::u8>(
             static_cast<arv::u8>(action) -
             static_cast<arv::u8>(LogicalAction::Hotbar1));
-        arv::web::g_app.input.hotbar_select = slot;
+        input.hotbar_select = slot;
       }
       break;
     case LogicalAction::NextHotbarSlot:
@@ -332,16 +316,17 @@ bool set_key_state(const EmscriptenKeyboardEvent& event, bool down) {
 }
 
 [[nodiscard]] bool chat_text_key(const EmscriptenKeyboardEvent& event) {
+  arv::platform::InputSnapshot& input = arv::web::g_app.input.snapshot;
   if (std::strcmp(event.key, "Backspace") == 0) {
-    arv::web::g_app.input.text_backspace_pressed = true;
+    input.text_backspace_pressed = true;
     return true;
   }
   if (std::strcmp(event.key, "Enter") == 0) {
-    arv::web::g_app.input.text_submit_pressed = true;
+    input.text_submit_pressed = true;
     return true;
   }
   if (std::strcmp(event.key, "Escape") == 0) {
-    arv::web::g_app.input.text_cancel_pressed = true;
+    input.text_cancel_pressed = true;
     return true;
   }
   if (event.ctrlKey || event.metaKey || event.altKey) {
@@ -349,7 +334,7 @@ bool set_key_state(const EmscriptenKeyboardEvent& event, bool down) {
   }
   const std::string_view text{event.charValue[0] != '\0' ? event.charValue : event.key};
   if (!text.empty() && text.size() <= 4U) {
-    arv::web::g_app.input.text_input.append(text);
+    input.text_input.append(text);
     return true;
   }
   return false;
@@ -362,7 +347,7 @@ EM_BOOL on_key(int event_type, const EmscriptenKeyboardEvent* event, void*) {
   const bool down = event_type == EMSCRIPTEN_EVENT_KEYDOWN;
   if (const std::optional<std::string> code = browser_keyboard_code(*event);
       code.has_value() && (code.value() == "LShift" || code.value() == "RShift")) {
-    arv::web::g_app.input.shift_modifier_held = down;
+    arv::web::g_app.input.snapshot.shift_modifier_held = down;
   }
   bool captured_for_screen = false;
   if (down && !event->repeat) {
@@ -401,7 +386,7 @@ EM_BOOL on_key(int event_type, const EmscriptenKeyboardEvent* event, void*) {
     }
     return EM_TRUE;
   }
-  if (captured_for_screen && arv::web::g_app.input.captured_input.has_value()) {
+  if (captured_for_screen && arv::web::g_app.input.snapshot.raw_input.has_value()) {
     return EM_TRUE;
   }
   return EM_FALSE;
@@ -418,8 +403,10 @@ EM_BOOL on_mouse_move(int, const EmscriptenMouseEvent* event, void*) {
   const double scale = arv::web::pointer_lock_uses_raw_movement()
       ? 1.0
       : BrowserCssPixelToDesktopMouseUnitScale;
-  arv::web::g_app.input.mouse_dx += static_cast<double>(event->movementX) * scale;
-  arv::web::g_app.input.mouse_dy += static_cast<double>(event->movementY) * scale;
+  arv::web::g_app.input.snapshot.mouse_delta_x +=
+      static_cast<float>(static_cast<double>(event->movementX) * scale);
+  arv::web::g_app.input.snapshot.mouse_delta_y +=
+      static_cast<float>(static_cast<double>(event->movementY) * scale);
   return EM_TRUE;
 }
 
@@ -429,6 +416,7 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
   }
   update_cursor_from_mouse(*event);
   const bool down = event_type == EMSCRIPTEN_EVENT_MOUSEDOWN;
+  arv::platform::InputSnapshot& input = arv::web::g_app.input.snapshot;
   const std::string_view code =
       event->button == 0 ? "Left" : (event->button == 2 ? "Right" : "Middle");
   if (arv::web::ui_wants_cursor()) {
@@ -440,11 +428,11 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
     }
     if (event->button == 0) {
       if (down) {
-        arv::web::g_app.input.mouse_left_pressed = true;
-        arv::web::g_app.input.mouse_left_held = true;
+        input.mouse_left_pressed = true;
+        input.mouse_left_held = true;
       } else {
-        arv::web::g_app.input.mouse_left_released = true;
-        arv::web::g_app.input.mouse_left_held = false;
+        input.mouse_left_released = true;
+        input.mouse_left_held = false;
       }
       return EM_TRUE;
     }
@@ -453,11 +441,11 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
     }
     if (event->button == 2) {
       if (down) {
-        arv::web::g_app.input.mouse_right_pressed = true;
-        arv::web::g_app.input.mouse_right_held = true;
+        input.mouse_right_pressed = true;
+        input.mouse_right_held = true;
       } else {
-        arv::web::g_app.input.mouse_right_released = true;
-        arv::web::g_app.input.mouse_right_held = false;
+        input.mouse_right_released = true;
+        input.mouse_right_held = false;
       }
       return EM_TRUE;
     }
@@ -483,19 +471,19 @@ EM_BOOL on_mouse_button(int event_type, const EmscriptenMouseEvent* event, void*
     return EM_TRUE;
   }
   if (event->button == 0) {
-    if (down && !arv::web::g_app.input.primary_held) {
-      arv::web::g_app.input.primary_pressed = true;
+    if (down && !input.primary_held) {
+      input.primary_pressed = true;
       arv::web::g_app.input.primary_animation_pressed = true;
     }
-    arv::web::g_app.input.primary_held = down;
+    input.primary_held = down;
     return EM_TRUE;
   }
   if (event->button == 2) {
-    if (down && !arv::web::g_app.input.secondary_held) {
-      arv::web::g_app.input.secondary_pressed = true;
+    if (down && !input.secondary_held) {
+      input.secondary_pressed = true;
       arv::web::g_app.input.secondary_animation_pressed = true;
     }
-    arv::web::g_app.input.secondary_held = down;
+    input.secondary_held = down;
     return EM_TRUE;
   }
   return EM_FALSE;
@@ -511,7 +499,8 @@ EM_BOOL on_wheel(int, const EmscriptenWheelEvent* event, void*) {
         arv::platform::InputDeviceType::MouseWheel,
         code,
         0U);
-    arv::web::g_app.input.mouse_wheel_y += event->deltaY < 0.0 ? 1.0 : -1.0;
+    arv::web::g_app.input.snapshot.mouse_wheel_y +=
+        event->deltaY < 0.0 ? 1.0F : -1.0F;
     return EM_TRUE;
   }
   if (!arv::web::g_app.pointer_locked) {
@@ -537,10 +526,11 @@ EM_BOOL on_wheel(int, const EmscriptenWheelEvent* event, void*) {
     return EM_FALSE;
   }
   const int combined = std::clamp(
-      static_cast<int>(arv::web::g_app.input.hotbar_scroll_steps) + step,
+      static_cast<int>(arv::web::g_app.input.snapshot.hotbar_scroll_steps) + step,
       -127,
       127);
-  arv::web::g_app.input.hotbar_scroll_steps = static_cast<arv::i8>(combined);
+  arv::web::g_app.input.snapshot.hotbar_scroll_steps =
+      static_cast<arv::i8>(combined);
   return EM_TRUE;
 }
 

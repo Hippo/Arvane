@@ -401,6 +401,14 @@ std::vector<protocol::ClientboundBlockUpdateBatch> ClientRuntime::drain_received
   return impl_->chunks.drain_block_updates();
 }
 
+ClientChunkStreamPackets ClientRuntime::drain_chunk_stream_packets() {
+  ClientChunkStreamPackets packets;
+  packets.unloads = impl_->chunks.drain_chunk_section_unloads();
+  packets.sections = impl_->chunks.drain_chunk_section_data();
+  packets.block_updates = impl_->chunks.drain_block_updates();
+  return packets;
+}
+
 std::optional<protocol::ClientboundWorldTime> ClientRuntime::take_world_time_update() {
   std::optional<protocol::ClientboundWorldTime> update = impl_->world_time_update;
   impl_->world_time_update.reset();
@@ -607,6 +615,34 @@ std::span<const std::filesystem::path> ClientRuntime::multiplayer_pack_cache_pat
 
 const std::string& ClientRuntime::multiplayer_registry_snapshot_json() const noexcept {
   return impl_->pack_sync.registry_snapshot_payload;
+}
+
+RemoteClientFixedTickResult advance_remote_client_fixed_tick(
+    ClientRuntime& client,
+    TickIndex& client_tick,
+    const physics::ICollisionQuery* collision_query) {
+  const bool was_in_game = client.connection_state() == net::ConnectionState::InGame;
+  if (was_in_game) {
+    if (client_tick == 0U) {
+      client_tick = client.world_initial_tick();
+    }
+    ++client_tick;
+  }
+
+  const TickIndex submitted_tick = client_tick;
+  client.fixed_tick(submitted_tick, collision_query);
+
+  const bool entered_game =
+      !was_in_game && client.connection_state() == net::ConnectionState::InGame;
+  if (entered_game) {
+    client_tick = client.world_initial_tick();
+  }
+
+  return {
+      .was_in_game = was_in_game,
+      .entered_game = entered_game,
+      .submitted_tick = submitted_tick,
+  };
 }
 
 } // namespace arv::client

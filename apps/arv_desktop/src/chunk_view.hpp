@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/client/camera_shell.hpp"
+#include "arv/client/item_rendering.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/types.hpp"
 #include "arv/io/config.hpp"
@@ -44,14 +45,9 @@ struct ChunkViewState {
     sched::JobFuture<TimedChunkMeshBatchResult> job;
   };
 
-  struct BlockAttachedModelEntry {
-    SectionLocalPos local{};
-    voxel::BlockVariantID variant_id{};
-  };
-
   struct BlockAttachedModelCache {
     u64 content_version{};
-    std::vector<BlockAttachedModelEntry> entries{};
+    std::vector<client::BlockAttachedModelSectionEntry> entries{};
   };
 
   HashMap<ChunkSectionCoord, render::ChunkDrawItem> draw_items;

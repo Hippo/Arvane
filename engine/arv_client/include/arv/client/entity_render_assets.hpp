@@ -58,6 +58,8 @@ struct ClientEntityRenderAssets {
 struct ClientEntityRenderAssetLoadOptions {
   FunctionRef<bool(std::string_view)> item_behavior_exists{};
   FunctionRef<bool(std::string_view)> entity_goal_exists{};
+  FunctionRef<entity::EntityRegistry::Result(std::vector<entity::EntityDefinition>)>
+      build_entity_registry{};
   std::string default_block_item_behavior_id{"arvane:item_behavior/block"};
   bool validate_entity_goal_ids{};
   BlockOutlineRenderConfig outline_config{};

@@ -2,7 +2,10 @@
 
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
-#include "arv/client/item_ui_model.hpp"
+#include "arv/client/block_render_assets.hpp"
+#include "arv/client/client_gameplay_assets.hpp"
+#include "arv/client/client_ui_assets.hpp"
+#include "arv/client/render_asset_upload.hpp"
 #include "arv/client/particles.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
@@ -13,7 +16,6 @@
 #include "arv/world/worldgen/loader.hpp"
 
 #include <algorithm>
-#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -31,67 +33,6 @@ namespace {
       {std::move(category), std::move(message)});
 }
 
-[[nodiscard]] std::optional<DesktopAssetLoadError> apply_block_language(
-    const arv::text::LanguageCatalog& language,
-    voxel::BlockRegistry& registry) {
-  for (u32 index = 0; index < registry.block_count(); ++index) {
-    const voxel::BlockID block_id{index};
-    const voxel::BlockRecord* block = registry.block(block_id);
-    if (block == nullptr) {
-      continue;
-    }
-    const std::string key = arv::text::block_display_name_key(block->name);
-    const std::optional<std::string_view> text = language.find(key);
-    if (!text.has_value()) {
-      return DesktopAssetLoadError{"lang", "missing language key: " + key};
-    }
-    registry.set_display_name(block_id, std::string{text.value()});
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<DesktopAssetLoadError> apply_item_language(
-    const arv::text::LanguageCatalog& language,
-    const voxel::BlockRegistry& blocks,
-    player::ItemRegistry& registry) {
-  for (u32 index = 0; index < registry.item_count(); ++index) {
-    const player::ItemID item_id{index};
-    const player::ItemRecord* item = registry.item(item_id);
-    if (item == nullptr) {
-      continue;
-    }
-    const std::string key = arv::text::item_display_name_key(item->name);
-    if (const std::optional<std::string_view> text = language.find(key);
-        text.has_value()) {
-      registry.set_display_name(item_id, std::string{text.value()});
-      continue;
-    }
-    if (item->source_block.has_value()) {
-      if (const voxel::BlockRecord* block = blocks.block(item->source_block.value());
-          block != nullptr && !block->display_name.empty()) {
-        registry.set_display_name(item_id, block->display_name);
-        continue;
-      }
-    }
-    return DesktopAssetLoadError{"lang", "missing language key: " + key};
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<DesktopAssetLoadError> apply_entity_language(
-    const arv::text::LanguageCatalog& language,
-    entity::EntityRegistry& registry) {
-  for (const entity::EntityTypeRecord& entity : registry.records()) {
-    const std::string key = arv::text::entity_display_name_key(entity.name);
-    const std::optional<std::string_view> text = language.find(key);
-    if (!text.has_value()) {
-      return DesktopAssetLoadError{"lang", "missing language key: " + key};
-    }
-    registry.set_display_name(entity.id, std::string{text.value()});
-  }
-  return std::nullopt;
-}
-
 [[nodiscard]] render::PlayerSkinAtlasConfig player_skin_atlas_config_from(
     const io::RenderConfig::PlayerSkinAtlasConfig& source) noexcept {
   render::PlayerSkinAtlasConfig config;
@@ -106,53 +47,6 @@ namespace {
   return config;
 }
 
-[[nodiscard]] arv::text::LanguageResult load_pack_language(
-    const asset::PackManager& packs,
-    std::string locale,
-    std::string fallback_locale) {
-  const auto language_paths_for = [&](std::string_view selected_locale) {
-    return packs.data_files_at("lang/" + std::string{selected_locale} + ".yaml");
-  };
-  const auto paths_only = [](const std::vector<asset::PackDataFile>& files) {
-    std::vector<std::filesystem::path> paths;
-    paths.reserve(files.size());
-    for (const asset::PackDataFile& file : files) {
-      paths.push_back(file.path);
-    }
-    return paths;
-  };
-
-  std::vector<std::filesystem::path> fallback_paths =
-      paths_only(language_paths_for(fallback_locale));
-  auto fallback = arv::text::load_language_files(fallback_paths, fallback_locale);
-  if (!fallback) {
-    return fallback;
-  }
-
-  arv::text::LanguageCatalog catalog = std::move(fallback.value());
-  if (locale != fallback_locale) {
-    std::vector<std::filesystem::path> selected_paths =
-        paths_only(language_paths_for(locale));
-    auto selected = arv::text::load_language_files(selected_paths, locale);
-    if (!selected) {
-      return selected;
-    }
-    catalog.merge_from(std::move(selected.value()));
-  }
-  if (auto messages = packs.load_config_text("arvane:messages", ".yaml");
-      messages) {
-    auto config_messages = arv::text::parse_language_yaml(
-        messages.value(),
-        catalog.locale());
-    if (!config_messages) {
-      return config_messages;
-    }
-    catalog.merge_from(std::move(config_messages.value()));
-  }
-  catalog.set_locale(std::move(locale));
-  return arv::text::LanguageResult::success(std::move(catalog));
-}
-
 [[nodiscard]] asset::TextureAtlasBuildOptions atlas_build_options_from(
     const io::RenderConfig::StaticAtlasConfig& source,
     u32 padding,
@@ -162,68 +56,6 @@ namespace {
       .max_pages = source.max_pages,
       .padding = padding,
       .require_uniform_non_fallback_size = require_uniform_non_fallback_size};
-}
-
-[[nodiscard]] std::vector<std::string> block_particle_texture_assets(
-    const voxel::BlockRegistry& registry) {
-  std::vector<std::string> textures;
-  for (u32 index = 0; index < registry.block_count(); ++index) {
-    const voxel::BlockRecord* block = registry.block(voxel::BlockID{index});
-    if (block == nullptr || block->particle_texture_asset.empty()) {
-      continue;
-    }
-    if (std::find(textures.begin(), textures.end(), block->particle_texture_asset) ==
-        textures.end()) {
-      textures.push_back(block->particle_texture_asset);
-    }
-  }
-  return textures;
-}
-
-using UiFontStackLoadResult = Expected<void, DesktopAssetLoadError>;
-
-[[nodiscard]] UiFontStackLoadResult load_ui_font_stack(
-    asset::ResourceManager& resources,
-    asset::FontSystem& font_system,
-    std::string asset_name,
-    u32 pixel_size,
-    asset::FontStack& stack,
-    bool include_fallbacks) {
-  std::vector<asset::FontFaceHandle> faces;
-  asset::AssetID primary_id{std::move(asset_name)};
-  const std::filesystem::path primary_path =
-      resources.resolve_asset_path(primary_id, asset::AssetKind::Font);
-  auto primary = font_system.load_face(
-      primary_path,
-      pixel_size,
-      primary_id);
-  if (!primary) {
-    return UiFontStackLoadResult::failure({"assets", primary.error().message});
-  }
-  faces.emplace_back(primary.value());
-
-  if (include_fallbacks) {
-    for (const asset::AssetID fallback : {
-             asset::AssetID{"arvane:font/symbol"},
-             asset::AssetID{"arvane:font/arabic"},
-             asset::AssetID{"arvane:font/emoji"},
-         }) {
-      const std::filesystem::path path =
-          resources.resolve_asset_path(fallback, asset::AssetKind::Font);
-      if (!std::filesystem::exists(path)) {
-        continue;
-      }
-      auto face = font_system.load_face(path, pixel_size, fallback);
-      if (face) {
-        faces.emplace_back(face.value());
-      } else {
-        core::warn("assets", face.error().message);
-      }
-    }
-  }
-
-  stack = font_system.make_stack(faces);
-  return UiFontStackLoadResult::success();
 }
 
 } // namespace
@@ -243,7 +75,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
   renderer.configure_player_skin_atlas(
       player_skin_atlas_config_from(config.render.atlases.player_skins));
 
-  auto language_result = load_pack_language(
+  auto language_result = client::load_pack_language(
       packs,
       config.language.locale,
       config.language.fallback_locale);
@@ -253,293 +85,156 @@ DesktopLoadedAssetsResult load_desktop_assets(
   loaded.language = std::move(language_result.value());
 
   core::info("assets", "loading UI font stacks");
-  if (auto font_result = load_ui_font_stack(
-          resources,
-          loaded.font_system,
-          theme.typography.default_font,
-          ui_metrics.font_pixel_size(theme.typography.size_sm),
-          loaded.ui_font_stacks.small,
-          false);
-      !font_result) {
-    return DesktopLoadedAssetsResult::failure(font_result.error());
+  const auto font_warning = [](const client::UiFontFallbackWarning& warning) {
+    core::warn("assets", warning.message);
+  };
+  auto font_stacks_result = client::load_ui_font_stacks(
+      resources,
+      loaded.font_system,
+      theme,
+      ui_metrics,
+      FunctionRef<void(const client::UiFontFallbackWarning&)>{font_warning});
+  if (!font_stacks_result) {
+    return DesktopLoadedAssetsResult::failure(
+        {font_stacks_result.error().category, font_stacks_result.error().message});
   }
-  if (auto font_result = load_ui_font_stack(
-          resources,
-          loaded.font_system,
-          theme.typography.default_font,
-          ui_metrics.font_pixel_size(theme.typography.size_md),
-          loaded.ui_font_stacks.body,
-          true);
-      !font_result) {
-    return DesktopLoadedAssetsResult::failure(font_result.error());
-  }
-  if (auto font_result = load_ui_font_stack(
-          resources,
-          loaded.font_system,
-          theme.typography.heading_font,
-          ui_metrics.font_pixel_size(theme.typography.size_lg),
-          loaded.ui_font_stacks.heading,
-          false);
-      !font_result) {
-    return DesktopLoadedAssetsResult::failure(font_result.error());
-  }
-  if (auto font_result = load_ui_font_stack(
-          resources,
-          loaded.font_system,
-          theme.typography.heading_font,
-          ui_metrics.font_pixel_size(theme.typography.size_xl),
-          loaded.ui_font_stacks.title,
-          false);
-      !font_result) {
-    return DesktopLoadedAssetsResult::failure(font_result.error());
-  }
-  if (auto font_result = load_ui_font_stack(
-          resources,
-          loaded.font_system,
-          theme.typography.monospace_font,
-          ui_metrics.font_pixel_size(theme.typography.size_md),
-          loaded.ui_font_stacks.mono,
-          false);
-      !font_result) {
-    return DesktopLoadedAssetsResult::failure(font_result.error());
-  }
+  loaded.ui_font_stacks = std::move(font_stacks_result.value());
   core::info("assets", "loaded UI font stacks");
-
-  auto block_definition_text = packs.load_merged_json_array_text("blocks", "blocks");
-  if (!block_definition_text) {
-    return asset_failure("blocks", block_definition_text.error().describe());
-  }
-
-  auto block_definitions = voxel::parse_block_definitions_json(block_definition_text.value());
-  if (!block_definitions) {
-    return asset_failure("blocks", block_definitions.error().message);
-  }
 
   const auto block_behavior_exists = [&block_behaviors](std::string_view id) {
     return block_behaviors.contains(id);
   };
-  voxel::BlockRegistryBuildOptions block_options;
+  const auto register_fluid_render_data =
+      [](render::FluidRenderData& fluid_render_data,
+         const voxel::BlockRegistry& block_registry)
+      -> Expected<void, std::string> {
+    return base::register_base_fluid_render_data(
+        fluid_render_data,
+        block_registry);
+  };
+  client::ClientBlockRenderAssetLoadOptions block_asset_options;
   if (options.validate_behavior_ids) {
-    block_options.behavior_exists =
+    block_asset_options.block_behavior_exists =
         FunctionRef<bool(std::string_view)>{block_behavior_exists};
   }
-  auto block_registry_result =
-      voxel::BlockRegistry::build(
-          std::move(block_definitions.value()),
-          block_options);
-  if (!block_registry_result) {
-    return asset_failure("blocks", block_registry_result.error().message);
-  }
-  loaded.block_registry = std::move(block_registry_result.value());
-  if (auto error = apply_block_language(loaded.language, loaded.block_registry);
-      error.has_value()) {
-    return DesktopLoadedAssetsResult::failure(error.value());
-  }
+  block_asset_options.register_fluid_render_data =
+      FunctionRef<Expected<void, std::string>(
+          render::FluidRenderData&,
+          const voxel::BlockRegistry&)>{register_fluid_render_data};
+  block_asset_options.atlas_options =
+      atlas_build_options_from(config.render.atlases.blocks, 4, false);
 
-  auto container_type_text =
-      packs.load_merged_json_array_text("container_types", "container_types");
-  if (!container_type_text) {
-    return asset_failure("container_types", container_type_text.error().describe());
+  core::info("assets", "loading block render assets");
+  auto block_assets_result = client::load_client_block_render_assets(
+      packs,
+      resources,
+      block_asset_options);
+  if (!block_assets_result) {
+    return asset_failure(
+        block_assets_result.error().category,
+        block_assets_result.error().message);
   }
-  auto container_type_definitions =
-      player::parse_container_type_definitions_json(container_type_text.value());
-  if (!container_type_definitions) {
-    return asset_failure("container_types", container_type_definitions.error().message);
-  }
-  auto container_type_registry =
-      player::ContainerTypeRegistry::build(std::move(container_type_definitions.value()));
-  if (!container_type_registry) {
-    return asset_failure("container_types", container_type_registry.error().message);
-  }
-  loaded.container_types = std::move(container_type_registry.value());
-
-  auto container_layout_text =
-      packs.load_merged_json_array_text("container_layouts", "container_layouts");
-  if (!container_layout_text) {
-    return asset_failure("container_layouts", container_layout_text.error().describe());
-  }
-  auto container_layout_definitions =
-      player::parse_container_ui_layout_definitions_json(container_layout_text.value());
-  if (!container_layout_definitions) {
-    return asset_failure("container_layouts", container_layout_definitions.error().message);
-  }
-  auto container_layout_registry =
-      player::ContainerUiLayoutRegistry::build(std::move(container_layout_definitions.value()));
-  if (!container_layout_registry) {
-    return asset_failure("container_layouts", container_layout_registry.error().message);
-  }
-  loaded.container_layouts = std::move(container_layout_registry.value());
-
-  auto block_models_result = asset::load_block_model_definitions(resources, loaded.block_registry);
-  if (!block_models_result) {
-    return asset_failure("assets", block_models_result.error().message);
+  client::ClientBlockRenderAssets block_assets =
+      std::move(block_assets_result.value());
+  loaded.block_registry = std::move(block_assets.block_registry);
+  if (auto names = client::apply_client_block_display_names(
+          loaded.language,
+          loaded.block_registry);
+      !names) {
+    return asset_failure(names.error().category, names.error().message);
   }
   std::vector<asset::BlockModelAssetData> block_models =
-      std::move(block_models_result.value());
-  asset::apply_block_model_collision_boxes(loaded.block_registry, block_models);
+      std::move(block_assets.block_models);
+  loaded.container_types = std::move(block_assets.container_types);
+  loaded.container_layouts = std::move(block_assets.container_layouts);
+  loaded.block_atlas = std::move(block_assets.block_atlas);
+  loaded.fluid_render_data = std::move(block_assets.fluid_render_data);
   loaded.block_registry_hash = persistence::hash_block_registry(loaded.block_registry);
-
-  core::info("assets", "building block texture atlas");
-  auto block_atlas_result = asset::build_block_texture_atlas(
-      resources,
-      loaded.block_registry,
-      block_models,
-      atlas_build_options_from(config.render.atlases.blocks, 4, false));
-  if (!block_atlas_result) {
-    return asset_failure("assets", block_atlas_result.error().message);
-  }
-  loaded.block_atlas = std::move(block_atlas_result.value());
-  if (loaded.block_atlas.atlas.pages.empty()) {
-    return asset_failure("assets", "block texture atlas did not produce a page");
-  }
-  auto fluid_render_result = base::register_base_fluid_render_data(
-      loaded.fluid_render_data,
-      loaded.block_registry);
-  if (!fluid_render_result) {
-    return asset_failure("fluids", fluid_render_result.error());
-  }
   render::TextureArrayUploadData terrain_atlas_upload =
-      texture_array_upload_from_atlas(loaded.block_atlas.atlas);
+      client::texture_array_upload_from_atlas(loaded.block_atlas.atlas);
   renderer.set_chunk_texture_atlas(std::move(terrain_atlas_upload));
-
-  auto item_definition_text = packs.load_merged_json_array_text("items", "items");
-  if (!item_definition_text) {
-    return asset_failure("items", item_definition_text.error().describe());
-  }
-  auto item_definitions = player::parse_item_definitions_json(item_definition_text.value());
-  if (!item_definitions) {
-    return asset_failure("items", item_definitions.error().message);
-  }
+  core::info("assets", "loaded block render assets");
 
   const auto item_behavior_exists = [&item_behaviors](std::string_view id) {
     return item_behaviors.contains(id);
   };
-  player::ItemRegistryBuildOptions item_options;
+  const bool validate_behavior_ids = options.validate_behavior_ids;
+  const auto build_entity_registry =
+      [&entity_goals, validate_behavior_ids](
+          std::vector<entity::EntityDefinition> definitions)
+      -> entity::EntityRegistry::Result {
+    return base::build_base_entity_registry(
+        std::move(definitions),
+        validate_behavior_ids ? &entity_goals : nullptr,
+        validate_behavior_ids);
+  };
+  client::ClientEntityRenderAssetLoadOptions entity_asset_options;
   if (options.validate_behavior_ids) {
-    item_options.behavior_exists =
+    entity_asset_options.item_behavior_exists =
         FunctionRef<bool(std::string_view)>{item_behavior_exists};
   }
-  item_options.default_block_item_behavior_id =
+  entity_asset_options.build_entity_registry =
+      FunctionRef<entity::EntityRegistry::Result(
+          std::vector<entity::EntityDefinition>)>{build_entity_registry};
+  entity_asset_options.default_block_item_behavior_id =
       std::string{base::ids::BlockItemBehaviorID};
-  auto item_registry_result = player::ItemRegistry::build_from_blocks_and_items(
-      loaded.block_registry,
-      std::move(item_definitions.value()),
-      item_options);
-  if (!item_registry_result) {
-    return asset_failure("items", item_registry_result.error().message);
-  }
-  loaded.item_registry = std::move(item_registry_result.value());
-  if (auto error = apply_item_language(
-          loaded.language,
-          loaded.block_registry,
-          loaded.item_registry);
-      error.has_value()) {
-    return DesktopLoadedAssetsResult::failure(error.value());
-  }
-  loaded.item_registry_hash = persistence::hash_item_registry(loaded.item_registry);
+  entity_asset_options.outline_config = client::BlockOutlineRenderConfig{
+      {config.render.block_outline.color_r,
+       config.render.block_outline.color_g,
+       config.render.block_outline.color_b},
+      config.render.block_outline.thickness};
+  entity_asset_options.atlas_options =
+      atlas_build_options_from(config.render.atlases.entities, 2, false);
 
-  auto item_animation_text =
-      packs.load_merged_json_array_text("item_animations", "animations");
-  if (!item_animation_text) {
-    return asset_failure("item_animations", item_animation_text.error().describe());
-  }
-  auto item_animation_library = client::parse_item_animation_library_json(
-      item_animation_text.value());
-  if (!item_animation_library) {
-    return asset_failure("item_animations", item_animation_library.error().message);
-  }
-  loaded.item_animation_library = std::move(item_animation_library.value());
-  auto item_animation_references = client::validate_item_animation_references(
-      loaded.item_registry,
-      loaded.item_animation_library);
-  if (!item_animation_references) {
-    return asset_failure("item_animations", item_animation_references.error().message);
-  }
-
-  const std::array<asset::AssetID, 1> ui_texture_assets{{
-      asset::AssetID{std::string{client::GameplayCrosshairTextureAsset}},
-  }};
-  auto item_atlas_result = client::build_item_texture_atlas(
+  client::ClientGameplayAssetLoadOptions gameplay_asset_options;
+  gameplay_asset_options.entity_assets = entity_asset_options;
+  gameplay_asset_options.ui_texture_atlas_options =
+      atlas_build_options_from(config.render.atlases.ui, 2, true);
+  auto gameplay_assets_result = client::load_client_gameplay_assets(
+      packs,
       resources,
-      loaded.item_registry,
-      atlas_build_options_from(config.render.atlases.ui, 2, true),
-      ui_texture_assets);
-  if (!item_atlas_result) {
-    return asset_failure("assets", item_atlas_result.error().message);
-  }
-  loaded.item_atlas = std::move(item_atlas_result.value());
-  if (loaded.item_atlas.pages.empty()) {
-    return asset_failure("assets", "item texture atlas did not produce a page");
-  }
-  if (const asset::TextureAtlasEntry* crosshair =
-          loaded.item_atlas.find(client::GameplayCrosshairTextureAsset);
-      crosshair != nullptr) {
-    const u32 item_atlas_width = loaded.item_atlas.pages.front().image.width;
-    const u32 item_atlas_height = loaded.item_atlas.pages.front().image.height;
-    loaded.crosshair_image = client::image_data_from_atlas_entry(
-        *crosshair,
-        item_atlas_width,
-        item_atlas_height,
-        render::UiTextureSource::ItemAtlas);
-  }
-  renderer.set_ui_item_atlas(texture_array_upload_from_atlas(loaded.item_atlas));
-
-  auto entity_definition_text = packs.load_merged_json_array_text("entities", "entities");
-  if (!entity_definition_text) {
-    return asset_failure("entities", entity_definition_text.error().describe());
-  }
-  auto entity_definitions =
-      entity::parse_entity_definitions_json(entity_definition_text.value());
-  if (!entity_definitions) {
-    return asset_failure("entities", entity_definitions.error().message);
-  }
-  auto entity_registry_result =
-      base::build_base_entity_registry(
-          std::move(entity_definitions.value()),
-          options.validate_behavior_ids ? &entity_goals : nullptr,
-          options.validate_behavior_ids);
-  if (!entity_registry_result) {
-    return asset_failure("entities", entity_registry_result.error().message);
-  }
-  loaded.entity_registry = std::move(entity_registry_result.value());
-  if (auto error = apply_entity_language(loaded.language, loaded.entity_registry);
-      error.has_value()) {
-    return DesktopLoadedAssetsResult::failure(error.value());
-  }
-
-  auto vehicle_definition_text = packs.load_merged_json_array_text("vehicles", "vehicles");
-  if (!vehicle_definition_text) {
-    return asset_failure("vehicles", vehicle_definition_text.error().describe());
-  }
-  auto vehicle_definitions =
-      entity::parse_vehicle_definitions_json(vehicle_definition_text.value());
-  if (!vehicle_definitions) {
-    return asset_failure("vehicles", vehicle_definitions.error().message);
-  }
-  auto vehicle_registry_result =
-      entity::VehicleDefinitionRegistry::build(std::move(vehicle_definitions.value()));
-  if (!vehicle_registry_result) {
-    return asset_failure("vehicles", vehicle_registry_result.error().message);
-  }
-  loaded.vehicle_registry = std::move(vehicle_registry_result.value());
-
-  auto entity_render_assets_result = arv::desktop::build_entity_render_assets(
-      resources,
-      loaded.entity_registry,
-      loaded.item_registry,
       loaded.block_registry,
       loaded.block_atlas.render_data,
       block_models,
-      BlockOutlineRenderConfig{
-          {config.render.block_outline.color_r,
-           config.render.block_outline.color_g,
-           config.render.block_outline.color_b},
-          config.render.block_outline.thickness},
-      atlas_build_options_from(config.render.atlases.entities, 2, false));
-  if (!entity_render_assets_result) {
-    return asset_failure("entities", entity_render_assets_result.error().message);
+      gameplay_asset_options);
+  if (!gameplay_assets_result) {
+    return asset_failure(
+        gameplay_assets_result.error().category,
+        gameplay_assets_result.error().message);
   }
-  loaded.entity_render_assets = std::move(entity_render_assets_result.value());
+  client::ClientGameplayAssets gameplay_assets =
+      std::move(gameplay_assets_result.value());
+  client::ClientEntityRenderAssets entity_assets =
+      std::move(gameplay_assets.entity_assets);
+  loaded.item_registry = std::move(entity_assets.item_registry);
+  if (auto names = client::apply_client_item_display_names(
+          loaded.language,
+          loaded.block_registry,
+          loaded.item_registry);
+      !names) {
+    return asset_failure(names.error().category, names.error().message);
+  }
+  loaded.item_registry_hash = persistence::hash_item_registry(loaded.item_registry);
+
+  loaded.item_animation_library =
+      std::move(gameplay_assets.item_animation_library);
+
+  client::ClientUiTextureAssets ui_assets =
+      std::move(gameplay_assets.ui_texture_assets);
+  loaded.item_atlas = std::move(ui_assets.item_atlas);
+  loaded.crosshair_image = ui_assets.crosshair_image;
+  renderer.set_ui_item_atlas(
+      client::texture_array_upload_from_atlas(loaded.item_atlas));
+
+  loaded.entity_registry = std::move(entity_assets.entity_registry);
+  if (auto names = client::apply_client_entity_display_names(
+          loaded.language,
+          loaded.entity_registry);
+      !names) {
+    return asset_failure(names.error().category, names.error().message);
+  }
+  loaded.vehicle_registry = std::move(entity_assets.vehicle_registry);
+  loaded.entity_render_assets = std::move(entity_assets.render_assets);
   if (!loaded.entity_render_assets.models.empty()) {
     if (loaded.entity_render_assets.texture_atlas.pages.empty()) {
       return asset_failure(
@@ -547,18 +242,28 @@ DesktopLoadedAssetsResult load_desktop_assets(
           "entity models were loaded without an entity texture atlas");
     }
     render::TextureArrayUploadData entity_atlas_upload =
-        texture_array_upload_from_atlas(loaded.entity_render_assets.texture_atlas);
+        client::texture_array_upload_from_atlas(
+            loaded.entity_render_assets.texture_atlas);
     renderer.set_entity_texture_atlas(std::move(entity_atlas_upload));
-    for (const render::EntityModelAsset& model : loaded.entity_render_assets.models) {
+    const auto upload_model = [&renderer](const render::EntityModelAsset& model) {
       renderer.set_entity_model(model);
-    }
-    for (const render::EntityAnimationAsset& animation : loaded.entity_render_assets.animations) {
+    };
+    const auto upload_animation =
+        [&renderer](const render::EntityAnimationAsset& animation) {
       renderer.set_entity_animation(animation);
-    }
+    };
+    (void)client::upload_entity_render_asset_records(
+        loaded.entity_render_assets.models,
+        loaded.entity_render_assets.animations,
+        {.upload_model =
+             FunctionRef<void(const render::EntityModelAsset&)>{upload_model},
+         .upload_animation =
+             FunctionRef<void(const render::EntityAnimationAsset&)>{
+                 upload_animation}});
   }
 
   std::vector<std::string> block_particle_textures =
-      block_particle_texture_assets(loaded.block_registry);
+      client::block_particle_texture_assets(loaded.block_registry);
   auto particle_assets_result = client::load_particle_assets_from_packs(
       packs,
       resources,
@@ -572,7 +277,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
     return asset_failure("particles", "particle texture atlas did not produce a page");
   }
   renderer.set_particle_texture_atlas(
-      texture_array_upload_from_atlas(loaded.particle_assets.atlas));
+      client::texture_array_upload_from_atlas(loaded.particle_assets.atlas));
 
   if (options.load_worldgen) {
     auto worldgen_registry = world::worldgen::load_worldgen_registry_from_packs(packs);

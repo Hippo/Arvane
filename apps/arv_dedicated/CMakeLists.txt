@@ -14,8 +14,12 @@ set(ARV_DEDICATED_SOURCES
 )
 
 add_executable(arv_dedicated ${ARV_DEDICATED_SOURCES})
-set_target_properties(arv_dedicated PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/arvane_server"
+add_custom_command(TARGET arv_dedicated POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/arvane_server"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE:arv_dedicated>"
+          "${CMAKE_SOURCE_DIR}/arvane_server/$<TARGET_FILE_NAME:arv_dedicated>"
+  VERBATIM
 )
 target_link_libraries(arv_dedicated PRIVATE
   arv_asset

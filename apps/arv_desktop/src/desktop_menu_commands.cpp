@@ -1,12 +1,15 @@
 #include "desktop_frame_loop.hpp"
 
-#include "asset_helpers.hpp"
 #include "desktop_runtime_config.hpp"
 #include "desktop_save_helpers.hpp"
 
+#include "arv/client/client_settings.hpp"
+#include "arv/client/entity_render_assets.hpp"
+#include "arv/client/render_asset_upload.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/input_bindings.hpp"
 #include "arv/net/connection_state.hpp"
+#include "arv/player/player_constants.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -14,8 +17,6 @@
 
 namespace arv::desktop {
 namespace {
-
-inline constexpr i32 MaxConfigurableChunkDistance = 32;
 
 [[nodiscard]] const std::filesystem::path& client_config_path(const io::EngineConfig& config) noexcept {
   return config.paths.client_config_file.empty() ? config.paths.config_file : config.paths.client_config_file;
@@ -32,47 +33,11 @@ inline constexpr i32 MaxConfigurableChunkDistance = 32;
 
 [[nodiscard]] bool outline_settings_equal(
     const io::RenderConfig::BlockOutlineConfig& lhs,
-    const ui::RenderSettingsView& rhs) noexcept {
-  return lhs.color_r == rhs.outline_red &&
-         lhs.color_g == rhs.outline_green &&
-         lhs.color_b == rhs.outline_blue &&
-         lhs.thickness == rhs.outline_thickness;
-}
-
-[[nodiscard]] ui::RenderSettingsView normalized_chunk_distances(
-    ui::RenderSettingsView settings) noexcept {
-  settings.load_distance =
-      std::clamp(settings.load_distance, 1, MaxConfigurableChunkDistance);
-  settings.simulation_distance =
-      std::clamp(settings.simulation_distance, 0, settings.load_distance);
-  settings.stream_distance =
-      std::clamp(settings.stream_distance, 1, settings.load_distance);
-  settings.view_distance =
-      std::clamp(settings.view_distance, 1, settings.stream_distance);
-  return settings;
-}
-
-[[nodiscard]] platform::InputDeviceType platform_device_from(ui::InputBindingDevice type) noexcept {
-  switch (type) {
-    case ui::InputBindingDevice::Keyboard:
-      return platform::InputDeviceType::Keyboard;
-    case ui::InputBindingDevice::MouseButton:
-      return platform::InputDeviceType::MouseButton;
-    case ui::InputBindingDevice::MouseWheel:
-      return platform::InputDeviceType::MouseWheel;
-  }
-  return platform::InputDeviceType::Keyboard;
-}
-
-[[nodiscard]] std::optional<platform::InputBinding> platform_binding_from(
-    const ui::InputBindingView& binding) {
-  const platform::InputDeviceType device = platform_device_from(binding.device);
-  const std::optional<std::string> canonical =
-      platform::canonical_input_code(device, binding.input_code);
-  if (!canonical.has_value()) {
-    return std::nullopt;
-  }
-  return platform::InputBinding{device, canonical.value(), binding.modifiers};
+    const io::RenderConfig::BlockOutlineConfig& rhs) noexcept {
+  return lhs.color_r == rhs.color_r &&
+         lhs.color_g == rhs.color_g &&
+         lhs.color_b == rhs.color_b &&
+         lhs.thickness == rhs.thickness;
 }
 
 } // namespace
@@ -339,31 +304,27 @@ bool DesktopFrameLoop::process_menu_commands() {
 }
 
 void DesktopFrameLoop::apply_render_settings(const ui::SetRenderSettingsCommand& command) {
-  const ui::RenderSettingsView settings = normalized_chunk_distances(command.settings);
+  const ui::RenderSettingsView settings =
+      client::normalized_render_settings(command.settings);
+  const io::RenderConfig::SkyConfig sky_settings =
+      client::sky_config_from_render_settings(settings);
+  const io::RenderConfig::BlockOutlineConfig outline_settings =
+      client::block_outline_config_from_render_settings(settings);
   const bool outline_changed =
-      !outline_settings_equal(config_.render.block_outline, settings);
+      !outline_settings_equal(config_.render.block_outline, outline_settings);
 
   config_.window.vsync = settings.frame_sync == ui::SettingsFrameSyncMode::VSync;
   config_.render.frame_pacing_enabled =
       settings.frame_sync == ui::SettingsFrameSyncMode::FpsCap;
-  config_.render.frame_pacing_target_fps =
-      std::clamp<u32>(settings.fps_cap, 30U, 240U);
+  config_.render.frame_pacing_target_fps = settings.fps_cap;
   config_.chunks.load_distance = settings.load_distance;
   config_.chunks.simulation_distance = settings.simulation_distance;
   config_.chunks.render_distance = settings.view_distance;
   config_.chunks.stream_distance = settings.stream_distance;
-  config_.render.max_chunk_mesh_uploads_per_frame =
-      std::clamp<u32>(settings.mesh_upload_budget, 1U, 32U);
+  config_.render.max_chunk_mesh_uploads_per_frame = settings.mesh_upload_budget;
   config_.render.show_local_player_body = settings.show_local_player_body;
-  config_.render.sky.star_intensity = std::clamp(settings.star_intensity, 0.0F, 3.0F);
-  config_.render.sky.cloud_intensity = std::clamp(settings.cloud_intensity, 0.0F, 3.0F);
-  config_.render.sky.cirrus_amount = std::clamp(settings.cirrus_amount, 0.0F, 1.0F);
-  config_.render.sky.cumulus_amount = std::clamp(settings.cumulus_amount, 0.0F, 1.0F);
-  config_.render.block_outline.color_r = std::clamp(settings.outline_red, 0.0F, 1.0F);
-  config_.render.block_outline.color_g = std::clamp(settings.outline_green, 0.0F, 1.0F);
-  config_.render.block_outline.color_b = std::clamp(settings.outline_blue, 0.0F, 1.0F);
-  config_.render.block_outline.thickness =
-      std::clamp(settings.outline_thickness, 0.1F, 2.0F);
+  config_.render.sky = sky_settings;
+  config_.render.block_outline = outline_settings;
 
   render_thread_.set_vsync(config_.window.vsync && !config_.render.frame_pacing_enabled);
   renderer_.set_chunk_mesh_upload_budget(config_.render.max_chunk_mesh_uploads_per_frame);
@@ -383,25 +344,18 @@ void DesktopFrameLoop::apply_render_settings(const ui::SetRenderSettingsCommand&
 }
 
 void DesktopFrameLoop::apply_controls_settings(const ui::SetControlsSettingsCommand& command) {
-  constexpr f32 DefaultSensitivity = 0.0025F;
-  const f32 percent =
-      std::clamp(command.settings.mouse_sensitivity_percent, 10.0F, 300.0F);
-  config_.physics.mouse_sensitivity_radians = DefaultSensitivity * (percent / 100.0F);
+  config_.physics.mouse_sensitivity_radians =
+      client::mouse_sensitivity_radians_from_percent(
+          command.settings.mouse_sensitivity_percent,
+          player::DefaultMouseSensitivityRadians);
   refresh_runtime_player_tuning();
   persist_client_settings();
 }
 
 void DesktopFrameLoop::apply_interface_settings(const ui::SetInterfaceSettingsCommand& command) {
-  const ui::InterfaceSettingsView settings = command.settings;
-  config_.ui.chat.max_history_messages =
-      std::clamp<u32>(settings.chat_history_max, 100U, 5000U);
-  config_.ui.chat.open_max_lines = std::clamp<u32>(settings.chat_open_lines, 1U, 16U);
-  config_.ui.chat.passive_max_lines =
-      std::clamp<u32>(settings.chat_passive_lines, 0U, 16U);
-  config_.ui.chat.passive_visible_seconds =
-      std::clamp(settings.chat_passive_visible_seconds, 0.0F, 30.0F);
-  config_.ui.chat.passive_fade_seconds =
-      std::clamp(settings.chat_passive_fade_seconds, 0.0F, 30.0F);
+  const ui::InterfaceSettingsView settings =
+      client::normalized_interface_settings(command.settings);
+  config_.ui.chat = client::chat_config_from_interface_settings(settings);
   if (DesktopGameSession* session = sessions_.active_session();
       session != nullptr && session->client != nullptr) {
     session->client->configure_chat({config_.ui.chat.max_history_messages});
@@ -410,56 +364,16 @@ void DesktopFrameLoop::apply_interface_settings(const ui::SetInterfaceSettingsCo
 }
 
 void DesktopFrameLoop::apply_key_bind(const ui::SetKeyBindCommand& command) {
-  const std::optional<platform::LogicalAction> action =
-      platform::logical_action_from_name(command.action_name);
-  if (!action.has_value() || command.slot > 1U) {
+  if (!client::apply_key_bind(input_bindings_, command)) {
     return;
-  }
-
-  auto& action_bindings = platform::bindings_for_action(input_bindings_, action.value());
-  if (command.binding.has_value()) {
-    const std::optional<platform::InputBinding> binding =
-        platform_binding_from(command.binding.value());
-    if (!binding.has_value()) {
-      return;
-    }
-    if (action_bindings.size() <= command.slot) {
-      const platform::InputBindings defaults = platform::default_input_bindings();
-      const auto& default_bindings =
-          platform::bindings_for_action(defaults, action.value());
-      while (action_bindings.size() <= command.slot) {
-        if (action_bindings.empty() && !default_bindings.empty()) {
-          action_bindings.push_back(default_bindings.front());
-        } else {
-          action_bindings.emplace_back(binding.value());
-        }
-      }
-    }
-    action_bindings[command.slot] = binding.value();
-  } else if (command.slot == 1U && action_bindings.size() > 1U) {
-    action_bindings.erase(action_bindings.begin() + 1);
-  } else {
-    return;
-  }
-
-  if (action_bindings.size() > 2U) {
-    action_bindings.resize(2U);
   }
   window_.set_input_bindings(input_bindings_);
   persist_input_bindings();
 }
 
 void DesktopFrameLoop::apply_key_bind_reset(const ui::ResetKeyBindCommand& command) {
-  const std::optional<platform::LogicalAction> action =
-      platform::logical_action_from_name(command.action_name);
-  if (!action.has_value()) {
+  if (!client::reset_key_bind(input_bindings_, command)) {
     return;
-  }
-  const platform::InputBindings defaults = platform::default_input_bindings();
-  auto& action_bindings = platform::bindings_for_action(input_bindings_, action.value());
-  action_bindings = platform::bindings_for_action(defaults, action.value());
-  if (action_bindings.size() > 2U) {
-    action_bindings.resize(2U);
   }
   window_.set_input_bindings(input_bindings_);
   persist_input_bindings();
@@ -490,7 +404,7 @@ void DesktopFrameLoop::refresh_runtime_player_tuning() {
 }
 
 void DesktopFrameLoop::rebuild_outline_render_assets() {
-  EntityRenderAssetsResult result = arv::desktop::build_entity_render_assets(
+  client::EntityRenderAssetsResult result = client::build_entity_render_assets(
       resources_,
       assets_.entity_registry,
       assets_.item_registry,
@@ -513,15 +427,25 @@ void DesktopFrameLoop::rebuild_outline_render_assets() {
 
   assets_.entity_render_assets = std::move(result.value());
   renderer_.set_entity_texture_atlas(
-      texture_array_upload_from_atlas(assets_.entity_render_assets.texture_atlas));
+      client::texture_array_upload_from_atlas(
+          assets_.entity_render_assets.texture_atlas));
   renderer_.clear_entity_models();
   renderer_.clear_entity_animations();
-  for (const render::EntityModelAsset& model : assets_.entity_render_assets.models) {
+  const auto upload_model = [this](const render::EntityModelAsset& model) {
     renderer_.set_entity_model(model);
-  }
-  for (const render::EntityAnimationAsset& animation : assets_.entity_render_assets.animations) {
+  };
+  const auto upload_animation =
+      [this](const render::EntityAnimationAsset& animation) {
     renderer_.set_entity_animation(animation);
-  }
+  };
+  (void)client::upload_entity_render_asset_records(
+      assets_.entity_render_assets.models,
+      assets_.entity_render_assets.animations,
+      {.upload_model =
+           FunctionRef<void(const render::EntityModelAsset&)>{upload_model},
+       .upload_animation =
+           FunctionRef<void(const render::EntityAnimationAsset&)>{
+               upload_animation}});
 }
 
 bool DesktopFrameLoop::handle_session_disconnect(DesktopGameSession* active_session) {

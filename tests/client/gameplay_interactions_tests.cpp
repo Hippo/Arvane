@@ -1,10 +1,13 @@
 #include "arv/client/gameplay_interactions.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/net/in_process_transport.hpp"
+#include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
+#include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
+#include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_join.hpp"
@@ -66,6 +69,29 @@ namespace {
 
   auto result = arv::entity::VehicleDefinitionRegistry::build({std::move(vehicle)});
   EXPECT_TRUE(result);
+  return std::move(result.value());
+}
+
+[[nodiscard]] arv::voxel::BlockRegistry make_container_interaction_block_registry() {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:stone"));
+
+  arv::voxel::BlockDefinition chest;
+  chest.name = "arvane:chest";
+  chest.display_name = "Chest";
+  chest.properties.solid = true;
+  chest.properties.collidable = true;
+  chest.properties.full_cube = true;
+  chest.properties.hardness = 1.0F;
+  chest.render_category = arv::voxel::RenderCategory::Opaque;
+  chest.render_mode = arv::voxel::BlockRenderMode::BlockEntityModel;
+  chest.container_type = "arvane:chest";
+  chest.texture_assets.fill("arvane:texture/block/chest");
+  definitions.push_back(std::move(chest));
+
+  auto result = arv::voxel::BlockRegistry::build(std::move(definitions));
+  EXPECT_TRUE(result) << result.error().message;
   return std::move(result.value());
 }
 
@@ -144,6 +170,43 @@ void aim_forward(arv::client::ClientRuntime& client) {
   client.camera().set_rotation(0.0F, 0.0F);
 }
 
+void send_inventory_update(
+    arv::client::ClientRuntime& client,
+    arv::net::ITransport& server_transport,
+    arv::net::ConnectionID connection_id,
+    std::vector<std::optional<arv::player::ItemStack>> slots,
+    arv::u32 revision = 2U) {
+  arv::protocol::ClientboundInventoryUpdate update;
+  update.inventory_id = arv::protocol::PlayerInventoryID;
+  update.revision = revision;
+  update.selected_hotbar_slot = 0;
+  update.slots = std::move(slots);
+  send_to_client(
+      server_transport,
+      connection_id,
+      arv::protocol::MessageType::ClientboundInventoryUpdate,
+      arv::protocol::serialize_clientbound_inventory_update(update));
+  client.fixed_tick(revision + 10U);
+  ASSERT_TRUE(client.has_authoritative_inventory());
+}
+
+void send_modify_world_permission(
+    arv::client::ClientRuntime& client,
+    arv::net::ITransport& server_transport,
+    arv::net::ConnectionID connection_id,
+    bool can_modify_world) {
+  arv::protocol::ClientboundPlayerPermissions permissions;
+  permissions.game_mode_id = "test";
+  permissions.core = arv::player::survival_core_permissions();
+  permissions.core.can_modify_world = can_modify_world;
+  send_to_client(
+      server_transport,
+      connection_id,
+      arv::protocol::MessageType::ClientboundPlayerPermissions,
+      arv::protocol::serialize_clientbound_player_permissions(permissions));
+  client.fixed_tick(can_modify_world ? 40U : 41U);
+}
+
 [[nodiscard]] std::optional<arv::protocol::DecodedMessage> first_serverbound_message(
     const std::vector<arv::net::NetworkEvent>& events,
     arv::protocol::MessageType type) {
@@ -157,6 +220,40 @@ void aim_forward(arv::client::ClientRuntime& client) {
     }
   }
   return std::nullopt;
+}
+
+[[nodiscard]] std::vector<arv::protocol::MessageType> serverbound_message_types(
+    const std::vector<arv::net::NetworkEvent>& events) {
+  std::vector<arv::protocol::MessageType> types;
+  for (const arv::net::NetworkEvent& event : events) {
+    if (event.type != arv::net::NetworkEventType::MessageReceived) {
+      continue;
+    }
+    const auto decoded = arv::protocol::deserialize_envelope(event.payload);
+    if (decoded) {
+      types.push_back(decoded.value().envelope.message_type);
+    }
+  }
+  return types;
+}
+
+void mark_local_player_mounted(
+    arv::client::ClientRuntime& client,
+    arv::net::ITransport& server_transport,
+    arv::net::ConnectionID connection_id,
+    arv::EntityNetID rideable_id) {
+  arv::protocol::ClientboundRideStarted ride;
+  ride.passenger_id = arv::EntityNetID{1};
+  ride.rideable_id = rideable_id;
+  ride.seat_id = "driver";
+  ride.controls_vehicle = true;
+  send_to_client(
+      server_transport,
+      connection_id,
+      arv::protocol::MessageType::ClientboundRideStarted,
+      arv::protocol::serialize_clientbound_ride_started(ride));
+  client.fixed_tick(90);
+  ASSERT_TRUE(arv::client::local_player_is_mounted(client));
 }
 
 } // namespace
@@ -329,4 +426,472 @@ TEST(ClientGameplayInteractionsTests, RequestHelpersSendAttackAndRidePackets) {
       ride_message->payload);
   ASSERT_TRUE(request);
   EXPECT_EQ(request.value().rideable_id, (arv::EntityNetID{10}));
+}
+
+TEST(ClientGameplayInteractionsTests, RequestHelperSendsOpenContainerBlockPacket) {
+  const arv::voxel::BlockRegistry blocks =
+      make_container_interaction_block_registry();
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  aim_forward(client);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::BlockPos target_block{{0, 1, 2}};
+  const arv::voxel::BlockVariantID stone =
+      blocks.find_variant("arvane:stone").value();
+  ASSERT_TRUE(world.set_block(target_block, stone));
+  arv::world::WorldCollisionQuery query(world, blocks, false);
+
+  EXPECT_FALSE(
+      arv::client::targeted_container_block({client, query, blocks, 5.0F})
+          .has_value());
+
+  const arv::voxel::BlockVariantID chest =
+      blocks.find_variant("arvane:chest").value();
+  ASSERT_TRUE(world.set_block(target_block, chest));
+  const std::optional<arv::BlockPos> targeted_container =
+      arv::client::targeted_container_block({client, query, blocks, 5.0F});
+  ASSERT_TRUE(targeted_container.has_value());
+  EXPECT_EQ(targeted_container.value(), target_block);
+
+  (void)server_transport->poll_events();
+  ASSERT_TRUE(arv::client::request_open_container_block_if_targeted(
+      client,
+      query,
+      blocks,
+      5.0F));
+
+  const std::vector<arv::net::NetworkEvent> server_events =
+      server_transport->poll_events();
+  const auto open_message = first_serverbound_message(
+      server_events,
+      arv::protocol::MessageType::ServerboundOpenContainerBlock);
+  ASSERT_TRUE(open_message.has_value());
+  const auto request = arv::protocol::deserialize_serverbound_open_container_block(
+      open_message->payload);
+  ASSERT_TRUE(request);
+  EXPECT_EQ(request.value().world_id, (arv::WorldID{1}));
+  EXPECT_EQ(request.value().block, target_block);
+}
+
+TEST(ClientGameplayInteractionsTests, DispatchOrdersContainerAttackRideRequests) {
+  const arv::entity::EntityRegistry entities = make_interaction_entity_registry();
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_interaction_vehicle_registry();
+  const arv::voxel::BlockRegistry blocks =
+      make_container_interaction_block_registry();
+  const arv::EntityTypeID vehicle_type =
+      entities.find_type("arvane:test_vehicle_only").value();
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  spawn_entity(
+      client,
+      *server_transport,
+      connection_id.value(),
+      arv::EntityNetID{10},
+      vehicle_type,
+      "arvane:test_vehicle_only",
+      {0.5F, 1.0F, 1.3F});
+  aim_forward(client);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::BlockPos container_block{{0, 1, 3}};
+  const arv::voxel::BlockVariantID chest =
+      blocks.find_variant("arvane:chest").value();
+  ASSERT_TRUE(world.set_block(container_block, chest));
+  arv::world::WorldCollisionQuery query(world, blocks, false);
+  (void)server_transport->poll_events();
+
+  const arv::client::GameplayInteractionDispatchResult result =
+      arv::client::dispatch_gameplay_interactions(
+          {.client = client,
+           .collision_query = query,
+           .block_registry = blocks,
+           .entity_registry = entities,
+           .vehicle_registry = vehicles,
+           .secondary_pressed = true,
+           .primary_pressed = true,
+           .mount_pressed = true,
+           .reach_distance = 5.0F,
+           .default_attack_range = 5.0F,
+           .ride_range = 5.0F});
+  EXPECT_TRUE(result.opened_container);
+  EXPECT_TRUE(result.attacked_entity);
+  EXPECT_TRUE(result.requested_ride);
+  EXPECT_TRUE(result.consume_secondary_use);
+  EXPECT_TRUE(result.stop_held_item_animation);
+
+  const std::vector<arv::protocol::MessageType> types =
+      serverbound_message_types(server_transport->poll_events());
+  ASSERT_EQ(types.size(), 3U);
+  EXPECT_EQ(types[0], arv::protocol::MessageType::ServerboundOpenContainerBlock);
+  EXPECT_EQ(types[1], arv::protocol::MessageType::ServerboundAttackEntity);
+  EXPECT_EQ(types[2], arv::protocol::MessageType::ServerboundRideEntityRequest);
+}
+
+TEST(ClientGameplayInteractionsTests, DispatchBlockedByGameplayUiDoesNothing) {
+  const arv::entity::EntityRegistry entities = make_interaction_entity_registry();
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_interaction_vehicle_registry();
+  const arv::voxel::BlockRegistry blocks =
+      make_container_interaction_block_registry();
+  const arv::EntityTypeID vehicle_type =
+      entities.find_type("arvane:test_vehicle_only").value();
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  spawn_entity(
+      client,
+      *server_transport,
+      connection_id.value(),
+      arv::EntityNetID{10},
+      vehicle_type,
+      "arvane:test_vehicle_only",
+      {0.5F, 1.0F, 1.3F});
+  aim_forward(client);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::voxel::BlockVariantID chest =
+      blocks.find_variant("arvane:chest").value();
+  ASSERT_TRUE(world.set_block({{0, 1, 3}}, chest));
+  arv::world::WorldCollisionQuery query(world, blocks, false);
+  (void)server_transport->poll_events();
+
+  const arv::client::GameplayInteractionDispatchResult result =
+      arv::client::dispatch_gameplay_interactions(
+          {.client = client,
+           .collision_query = query,
+           .block_registry = blocks,
+           .entity_registry = entities,
+           .vehicle_registry = vehicles,
+           .gameplay_blocked = true,
+           .secondary_pressed = true,
+           .primary_pressed = true,
+           .mount_pressed = true,
+           .reach_distance = 5.0F,
+           .default_attack_range = 5.0F,
+           .ride_range = 5.0F});
+  EXPECT_FALSE(result.opened_container);
+  EXPECT_FALSE(result.attacked_entity);
+  EXPECT_FALSE(result.requested_ride);
+  EXPECT_FALSE(result.consume_secondary_use);
+  EXPECT_FALSE(result.stop_held_item_animation);
+  EXPECT_TRUE(serverbound_message_types(server_transport->poll_events()).empty());
+}
+
+TEST(ClientGameplayInteractionsTests, DispatchContainerMissDoesNotConsumeSecondary) {
+  const arv::entity::EntityRegistry entities = make_interaction_entity_registry();
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_interaction_vehicle_registry();
+  const arv::voxel::BlockRegistry blocks =
+      make_container_interaction_block_registry();
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  aim_forward(client);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::voxel::BlockVariantID stone =
+      blocks.find_variant("arvane:stone").value();
+  ASSERT_TRUE(world.set_block({{0, 1, 2}}, stone));
+  arv::world::WorldCollisionQuery query(world, blocks, false);
+  (void)server_transport->poll_events();
+
+  const arv::client::GameplayInteractionDispatchResult result =
+      arv::client::dispatch_gameplay_interactions(
+          {.client = client,
+           .collision_query = query,
+           .block_registry = blocks,
+           .entity_registry = entities,
+           .vehicle_registry = vehicles,
+           .secondary_pressed = true,
+           .reach_distance = 5.0F});
+  EXPECT_FALSE(result.opened_container);
+  EXPECT_FALSE(result.consume_secondary_use);
+  EXPECT_FALSE(result.stop_held_item_animation);
+  EXPECT_TRUE(serverbound_message_types(server_transport->poll_events()).empty());
+}
+
+TEST(ClientGameplayInteractionsTests, DispatchDoesNotRequestRideWhenMounted) {
+  const arv::entity::EntityRegistry entities = make_interaction_entity_registry();
+  const arv::entity::VehicleDefinitionRegistry vehicles = make_interaction_vehicle_registry();
+  const arv::voxel::BlockRegistry blocks = arv::testsupport::make_test_block_registry();
+  const arv::EntityTypeID mob_type = entities.find_type("arvane:test_mob").value();
+  const arv::EntityTypeID vehicle_type =
+      entities.find_type("arvane:test_vehicle_only").value();
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  spawn_entity(
+      client,
+      *server_transport,
+      connection_id.value(),
+      arv::EntityNetID{1},
+      mob_type,
+      "arvane:test_mob",
+      {0.5F, 1.0F, -4.0F});
+  spawn_entity(
+      client,
+      *server_transport,
+      connection_id.value(),
+      arv::EntityNetID{10},
+      vehicle_type,
+      "arvane:test_vehicle_only",
+      {0.5F, 1.0F, 1.3F});
+  mark_local_player_mounted(
+      client,
+      *server_transport,
+      connection_id.value(),
+      arv::EntityNetID{99});
+  aim_forward(client);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  arv::world::WorldCollisionQuery query(world, blocks, false);
+  (void)server_transport->poll_events();
+
+  const arv::client::GameplayInteractionDispatchResult result =
+      arv::client::dispatch_gameplay_interactions(
+          {.client = client,
+           .collision_query = query,
+           .block_registry = blocks,
+           .entity_registry = entities,
+           .vehicle_registry = vehicles,
+           .mount_pressed = true,
+           .ride_range = 5.0F});
+  EXPECT_FALSE(result.requested_ride);
+  EXPECT_FALSE(result.stop_held_item_animation);
+  EXPECT_TRUE(serverbound_message_types(server_transport->poll_events()).empty());
+}
+
+TEST(ClientGameplayInteractionsTests, HeldItemPlacementPreviewUsesSharedBlockPrediction) {
+  const arv::voxel::BlockRegistry blocks = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry items = arv::testsupport::make_test_item_registry(blocks);
+  const arv::player::ItemID stone_item_id =
+      items.find_item("arvane:stone").value();
+  const arv::player::ItemRecord* stone_item = items.item(stone_item_id);
+  ASSERT_NE(stone_item, nullptr);
+  ASSERT_TRUE(stone_item->placement_variant.has_value());
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  send_inventory_update(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {arv::player::ItemStack{stone_item_id, 4U}});
+  aim_forward(client);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::voxel::BlockVariantID stone =
+      blocks.find_variant("arvane:stone").value();
+  ASSERT_TRUE(world.set_block({{0, 1, 2}}, stone));
+  arv::world::WorldCollisionQuery query(world, blocks, false);
+
+  EXPECT_TRUE(arv::client::held_item_placement_preview_succeeds(
+      {.client = client,
+       .collision_query = query,
+       .block_registry = blocks,
+       .item_registry = items},
+      stone_item));
+
+  send_modify_world_permission(
+      client,
+      *server_transport,
+      connection_id.value(),
+      false);
+  EXPECT_FALSE(arv::client::held_item_placement_preview_succeeds(
+      {.client = client,
+       .collision_query = query,
+       .block_registry = blocks,
+       .item_registry = items},
+      stone_item));
+}
+
+TEST(ClientGameplayInteractionsTests, VisibleHeldItemStackRequiresVisibleGameplayState) {
+  const arv::voxel::BlockRegistry blocks = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry items = arv::testsupport::make_test_item_registry(blocks);
+  const arv::player::ItemID stone_item_id =
+      items.find_item("arvane:stone").value();
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  EXPECT_FALSE(arv::client::visible_held_item_stack(client).has_value());
+
+  send_inventory_update(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {std::nullopt},
+      2U);
+  EXPECT_FALSE(arv::client::visible_held_item_stack(client).has_value());
+
+  send_inventory_update(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {arv::player::ItemStack{stone_item_id, 4U}},
+      3U);
+  const std::optional<arv::player::ItemStack> visible =
+      arv::client::visible_held_item_stack(client);
+  ASSERT_TRUE(visible.has_value());
+  EXPECT_EQ(visible->item, stone_item_id);
+  EXPECT_EQ(visible->count, 4U);
+
+  client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
+  EXPECT_TRUE(client.chat_open());
+  EXPECT_FALSE(arv::client::visible_held_item_stack(client).has_value());
+}
+
+TEST(ClientGameplayInteractionsTests, HeldItemPlacementPreviewRejectsPlayerOverlap) {
+  const arv::voxel::BlockRegistry blocks = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry items = arv::testsupport::make_test_item_registry(blocks);
+  const arv::player::ItemID stone_item_id =
+      items.find_item("arvane:stone").value();
+  const arv::player::ItemRecord* stone_item = items.item(stone_item_id);
+  ASSERT_NE(stone_item, nullptr);
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  send_inventory_update(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {arv::player::ItemStack{stone_item_id, 1U}});
+  client.camera().set_position({0.5F, 0.5F, -1.5F});
+  client.camera().set_rotation(0.0F, 0.0F);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::voxel::BlockVariantID stone =
+      blocks.find_variant("arvane:stone").value();
+  ASSERT_TRUE(world.set_block({{0, 0, 1}}, stone));
+  arv::world::WorldCollisionQuery query(world, blocks, false);
+
+  EXPECT_FALSE(arv::client::held_item_placement_preview_succeeds(
+      {.client = client,
+       .collision_query = query,
+       .block_registry = blocks,
+       .item_registry = items},
+      stone_item));
+}
+
+TEST(ClientGameplayInteractionsTests, HeldItemPlacementPreviewChecksWaterBucketCapacityAndFluid) {
+  const arv::voxel::BlockRegistry blocks = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry items = arv::testsupport::make_test_item_registry(blocks);
+  const arv::player::ItemID water_bucket_item_id =
+      items.find_item("arvane:water_bucket").value();
+  const arv::player::ItemID dirt_item_id =
+      items.find_item("arvane:dirt").value();
+  const arv::player::ItemRecord* water_bucket = items.item(water_bucket_item_id);
+  ASSERT_NE(water_bucket, nullptr);
+
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  aim_forward(client);
+
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::voxel::BlockVariantID stone =
+      blocks.find_variant("arvane:stone").value();
+  ASSERT_TRUE(world.set_block({{0, 1, 2}}, stone));
+  arv::world::WorldCollisionQuery query(world, blocks, false);
+  const arv::client::HeldItemPlacementPreviewQuery preview{
+      .client = client,
+      .collision_query = query,
+      .block_registry = blocks,
+      .item_registry = items,
+      .config = {.empty_bucket_item_name = "arvane:bucket",
+                 .water_bucket_item_name = "arvane:water_bucket"}};
+
+  send_inventory_update(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {arv::player::ItemStack{water_bucket_item_id, 1U}},
+      2U);
+  EXPECT_TRUE(arv::client::held_item_placement_preview_succeeds(
+      preview,
+      water_bucket));
+
+  send_inventory_update(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {arv::player::ItemStack{water_bucket_item_id, 2U},
+       arv::player::ItemStack{dirt_item_id, 64U}},
+      3U);
+  EXPECT_FALSE(arv::client::held_item_placement_preview_succeeds(
+      preview,
+      water_bucket));
+
+  send_inventory_update(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {arv::player::ItemStack{water_bucket_item_id, 2U},
+       std::nullopt},
+      4U);
+  ASSERT_TRUE(arv::client::held_item_placement_preview_succeeds(
+      preview,
+      water_bucket));
+
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+  ASSERT_TRUE(world.set_fluid(
+      {{0, 1, 1}},
+      arv::voxel::make_fluid_source(water),
+      water));
+  EXPECT_FALSE(arv::client::held_item_placement_preview_succeeds(
+      preview,
+      water_bucket));
 }

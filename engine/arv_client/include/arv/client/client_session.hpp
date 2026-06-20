@@ -11,6 +11,7 @@
 #include "arv/player/inventory.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/client/dropped_item_mirror.hpp"
+#include "arv/client/remote_chunk_stream.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_updates.hpp"
@@ -108,9 +109,9 @@ public:
     return world_join_;
   }
 
-  [[nodiscard]] const std::vector<protocol::ClientboundChunkSectionData>& chunk_sections()
-      const noexcept {
-    return chunk_sections_;
+  [[nodiscard]] const std::vector<protocol::ClientboundChunkSectionData>&
+  chunk_sections() const noexcept {
+    return chunk_sections_.sections();
   }
 
   [[nodiscard]] std::span<const ClientSessionEntityMirror> entity_mirrors()
@@ -212,7 +213,7 @@ private:
   std::vector<std::string> loaded_bundle_hashes_{};
   std::vector<std::filesystem::path> loaded_bundle_paths_{};
   std::unordered_map<std::string, PackDownload> downloads_{};
-  std::vector<protocol::ClientboundChunkSectionData> chunk_sections_{};
+  RemoteChunkSectionStore chunk_sections_{};
   std::vector<ClientSessionEntityMirror> entity_mirrors_{};
   ClientDroppedItemMirrorStore dropped_items_{};
   player::Inventory inventory_{player::DefaultPlayerInventorySlotCount};

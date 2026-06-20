@@ -12,6 +12,10 @@
 #include <string_view>
 #include <vector>
 
+namespace arv::asset {
+class PackManager;
+}
+
 namespace arv::client {
 
 inline constexpr std::string_view HeldItemActionPrimaryUse = "primary_use";
@@ -29,6 +33,11 @@ enum class ItemAnimationEasing : u8 {
 };
 
 struct ItemAnimationError {
+  std::string message{};
+};
+
+struct ItemAnimationLibraryLoadError {
+  std::string operation{};
   std::string message{};
 };
 
@@ -75,6 +84,46 @@ enum class HeldItemActionPlayResult : u8 {
 struct HeldItemAnimationConditionState {
   bool placement_succeeds{};
 };
+
+struct HeldItemAnimationInputState {
+  bool primary_pressed{};
+  bool repeat_primary_use{};
+  bool secondary_pressed{};
+  bool secondary_held{};
+};
+
+enum class HeldItemAnimationUnavailablePolicy : u8 {
+  StopPlayback,
+  ClearSecondaryUseOnly,
+};
+
+struct HeldItemAnimationPlaybackFrameInput {
+  bool primary_pressed{};
+  bool primary_held{};
+  bool secondary_pressed{};
+  bool secondary_held{};
+  bool block_break_active{};
+  bool animations_available{true};
+  HeldItemAnimationUnavailablePolicy unavailable_policy{
+      HeldItemAnimationUnavailablePolicy::StopPlayback};
+  bool force_stop{};
+  const player::ItemRecord* held_item{};
+  HeldItemAnimationConditionState condition_state{};
+  Seconds now_seconds{};
+};
+
+struct HeldItemAnimationPlaybackFrameResult {
+  bool cleared_secondary_use{};
+  bool stopped{};
+  bool advanced{};
+};
+
+[[nodiscard]] HeldItemAnimationInputState held_item_animation_input_from_edges(
+    bool primary_pressed,
+    bool primary_held,
+    bool secondary_pressed,
+    bool secondary_held,
+    bool block_break_active) noexcept;
 
 class ItemAnimationLibrary {
 public:
@@ -128,6 +177,11 @@ parse_item_animation_library_json(std::string_view text);
     const player::ItemRegistry& item_registry,
     const ItemAnimationLibrary& library);
 
+[[nodiscard]] Expected<ItemAnimationLibrary, ItemAnimationLibraryLoadError>
+load_item_animation_library_from_packs(
+    const asset::PackManager& packs,
+    const player::ItemRegistry& item_registry);
+
 [[nodiscard]] const ItemAnimationClip* resolve_held_item_animation(
     const player::ItemRecord* item,
     std::string_view action,
@@ -149,6 +203,27 @@ parse_item_animation_library_json(std::string_view text);
     const ItemAnimationLibrary& library,
     HeldItemAnimationConditionState condition_state,
     Seconds now_seconds) noexcept;
+
+void update_held_item_animation_playback(
+    HeldItemAnimationPlayer& player,
+    bool& secondary_use_active,
+    HeldItemAnimationInputState input,
+    const player::ItemRecord* held_item,
+    const ItemAnimationLibrary& library,
+    HeldItemAnimationConditionState condition_state,
+    Seconds now_seconds) noexcept;
+
+void stop_held_item_animation_playback(
+    HeldItemAnimationPlayer& player,
+    bool& secondary_use_active,
+    Seconds now_seconds) noexcept;
+
+[[nodiscard]] HeldItemAnimationPlaybackFrameResult
+update_held_item_animation_playback_from_frame(
+    HeldItemAnimationPlayer& player,
+    bool& secondary_use_active,
+    const ItemAnimationLibrary& library,
+    HeldItemAnimationPlaybackFrameInput input) noexcept;
 
 [[nodiscard]] const player::ItemRecord* selected_inventory_item(
     const player::Inventory& inventory,

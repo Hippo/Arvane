@@ -3,11 +3,12 @@
 #include "desktop_runtime_config.hpp"
 #include "desktop_save_helpers.hpp"
 #include "save_state.hpp"
-#include "ui_model.hpp"
 
 #include "arv/base/base_ids.hpp"
+#include "arv/client/client_chunk_stream_packets.hpp"
 #include "arv/client/item_ui_model.hpp"
 #include "arv/client/local_identity.hpp"
+#include "arv/client/client_world_time.hpp"
 #include "arv/core/log.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/persistence/save.hpp"
@@ -726,40 +727,27 @@ void DesktopSessionManager::delete_singleplayer_save(
 }
 
 void DesktopSessionManager::refresh_inventory_slots(DesktopGameSession& session) const {
-  session.inventory_slots.clear();
-  session.container_slots.clear();
-  session.carried_inventory_stack.reset();
-  if (session.client != nullptr && session.client->has_authoritative_inventory()) {
-    session.inventory_slots = client::inventory_slots_for_ui(
-        session.client->inventory(),
-        dependencies_.item_registry,
-        dependencies_.item_atlas,
-        dependencies_.block_atlas);
-    if (session.client->container_open()) {
-      session.container_slots = client::inventory_slots_for_ui(
-          session.client->active_container_inventory(),
-          dependencies_.item_registry,
-          dependencies_.item_atlas,
-          dependencies_.block_atlas);
-    }
-    session.carried_inventory_stack = client::item_stack_for_ui(
-        session.client->inventory_cursor_stack(),
-        dependencies_.item_registry,
-        dependencies_.item_atlas,
-        dependencies_.block_atlas);
+  if (session.client == nullptr) {
+    session.inventory_slots.clear();
+    session.container_slots.clear();
+    session.carried_inventory_stack.reset();
+    return;
   }
-}
 
-[[nodiscard]] world::WorldClock clock_from_packet(
-    const protocol::ClientboundWorldTime& time) {
-  world::WorldClock clock;
-  clock.world_tick = time.world_tick;
-  clock.day_time_tick = time.day_time_tick;
-  clock.day_length_ticks = std::max<u32>(time.day_length_ticks, 1U);
-  clock.day_length_seconds = time.day_length_seconds;
-  clock.time_scale = time.time_scale;
-  clock.daylight_cycle = time.daylight_cycle;
-  return clock;
+  client::InventoryUiProjection projection = client::project_inventory_ui(
+      {
+          .has_authoritative_inventory = session.client->has_authoritative_inventory(),
+          .container_open = session.client->container_open(),
+          .inventory = session.client->inventory(),
+          .container_inventory = session.client->active_container_inventory(),
+          .carried_stack = session.client->inventory_cursor_stack(),
+          .item_registry = dependencies_.item_registry,
+          .item_atlas = dependencies_.item_atlas,
+          .block_atlas = dependencies_.block_atlas,
+      });
+  session.inventory_slots = std::move(projection.inventory_slots);
+  session.container_slots = std::move(projection.container_slots);
+  session.carried_inventory_stack = std::move(projection.carried_stack);
 }
 
 void DesktopSessionManager::collect_client_chunk_stream(DesktopGameSession& session) const {
@@ -767,27 +755,30 @@ void DesktopSessionManager::collect_client_chunk_stream(DesktopGameSession& sess
           session.client->take_world_time_update();
       time.has_value() && time->world_id == session.client_world.id()) {
     session.client_world.set_clock(
-        clock_from_packet(time.value()),
+        client::world_clock_from_time_packet(time.value()),
         session.client->server_tick_rate());
   }
 
-  std::vector<protocol::ClientboundChunkSectionUnload> drained_unloads =
-      session.client->drain_received_chunk_section_unloads();
-  for (const protocol::ClientboundChunkSectionUnload& unload : drained_unloads) {
-    session.pending_client_chunk_unloads.emplace_back(unload);
-  }
+  client::ClientChunkStreamPackets packets =
+      session.client->drain_chunk_stream_packets();
+  struct EnqueuePacket {
+    DesktopGameSession& session;
 
-  std::vector<protocol::ClientboundChunkSectionData> drained_chunks =
-      session.client->drain_received_chunk_section_data();
-  for (protocol::ClientboundChunkSectionData& data : drained_chunks) {
-    session.pending_client_chunk_data.emplace_back(std::move(data));
-  }
+    void operator()(const protocol::ClientboundChunkSectionUnload& unload) const {
+      session.pending_client_chunk_unloads.emplace_back(unload);
+    }
 
-  std::vector<protocol::ClientboundBlockUpdateBatch> drained_block_updates =
-      session.client->drain_received_block_updates();
-  for (protocol::ClientboundBlockUpdateBatch& batch : drained_block_updates) {
-    session.pending_client_block_updates.emplace_back(std::move(batch));
-  }
+    void operator()(protocol::ClientboundChunkSectionData&& data) const {
+      session.pending_client_chunk_data.emplace_back(std::move(data));
+    }
+
+    void operator()(protocol::ClientboundBlockUpdateBatch&& batch) const {
+      session.pending_client_block_updates.emplace_back(std::move(batch));
+    }
+  };
+  client::consume_client_chunk_stream_packets(
+      packets,
+      EnqueuePacket{.session = session});
 }
 
 void DesktopSessionManager::apply_pending_client_chunk_stream(

@@ -6,8 +6,10 @@
 #include "support/temp_files.hpp"
 
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -57,6 +59,44 @@ arv::protocol::PackBundleDescriptor descriptor_for(
 }
 
 } // namespace
+
+TEST(ClientPackSyncPlanTests, CopiesAndComparesPackCacheIdentity) {
+  std::vector<std::filesystem::path> paths{
+      "/tmp/arvane/cache/a",
+      "/tmp/arvane/cache/b"};
+
+  std::vector<std::filesystem::path> copied =
+      arv::client::copy_client_pack_cache_paths(
+          std::span<const std::filesystem::path>{paths});
+  EXPECT_EQ(copied, paths);
+
+  paths.push_back("/tmp/arvane/cache/c");
+  EXPECT_NE(copied, paths);
+  EXPECT_TRUE(arv::client::client_pack_cache_paths_equal(
+      std::span<const std::filesystem::path>{copied},
+      std::span<const std::filesystem::path>{copied}));
+  EXPECT_FALSE(arv::client::client_pack_cache_paths_equal(
+      std::span<const std::filesystem::path>{copied},
+      std::span<const std::filesystem::path>{paths}));
+
+  const std::vector<std::filesystem::path> reordered{
+      copied[1],
+      copied[0]};
+  EXPECT_FALSE(arv::client::client_pack_cache_paths_equal(
+      std::span<const std::filesystem::path>{copied},
+      std::span<const std::filesystem::path>{reordered}));
+
+  EXPECT_TRUE(arv::client::client_pack_cache_identity_matches(
+      "registry-a",
+      std::span<const std::filesystem::path>{copied},
+      "registry-a",
+      std::span<const std::filesystem::path>{copied}));
+  EXPECT_FALSE(arv::client::client_pack_cache_identity_matches(
+      "registry-a",
+      std::span<const std::filesystem::path>{copied},
+      "registry-b",
+      std::span<const std::filesystem::path>{copied}));
+}
 
 TEST(ClientPackSyncPlanTests, RejectsInvalidAndDuplicateManifestEntries) {
   ScopedTempDir temp("arvane_pack_sync_plan_invalid_");

@@ -25,4 +25,11 @@ render::SkyUniforms sky_uniforms_from_clock(
   return uniforms;
 }
 
+void configure_frame_sky(
+    render::FramePacket& frame,
+    const world::WorldClock& clock,
+    const io::RenderConfig::SkyConfig& sky_config) noexcept {
+  frame.sky = sky_uniforms_from_clock(clock, sky_config);
+}
+
 } // namespace arv::client

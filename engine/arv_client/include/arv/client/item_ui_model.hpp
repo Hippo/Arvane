@@ -17,6 +17,23 @@ namespace arv::client {
 inline constexpr std::string_view GameplayCrosshairTextureAsset =
     "arvane:texture/ui/crosshair";
 
+struct InventoryUiProjectionInput {
+  bool has_authoritative_inventory{};
+  bool container_open{};
+  const player::Inventory& inventory;
+  const player::Inventory& container_inventory;
+  const std::optional<player::ItemStack>& carried_stack;
+  const player::ItemRegistry& item_registry;
+  const asset::TextureAtlas& item_atlas;
+  const asset::BlockTextureAtlas& block_atlas;
+};
+
+struct InventoryUiProjection {
+  std::vector<ui::UiItemStackView> inventory_slots{};
+  std::vector<ui::UiItemStackView> container_slots{};
+  std::optional<ui::UiItemStackView> carried_stack{};
+};
+
 [[nodiscard]] std::array<Vec2f, 4> normalized_uvs(
     const std::array<Vec2i, 4>& pixels,
     u32 width,
@@ -46,5 +63,8 @@ inline constexpr std::string_view GameplayCrosshairTextureAsset =
     const player::ItemRegistry& item_registry,
     const asset::TextureAtlas& item_atlas,
     const asset::BlockTextureAtlas& block_atlas);
+
+[[nodiscard]] InventoryUiProjection project_inventory_ui(
+    const InventoryUiProjectionInput& input);
 
 } // namespace arv::client

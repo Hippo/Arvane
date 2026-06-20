@@ -5,7 +5,9 @@
 #include "arv/protocol/pack_sync.hpp"
 
 #include <filesystem>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::client {
@@ -36,5 +38,18 @@ using ClientPackSyncManifestPlanResult =
 [[nodiscard]] ClientPackSyncManifestPlanResult prepare_client_pack_sync_manifest(
     const std::filesystem::path& cache_root,
     protocol::ClientboundPackManifest manifest);
+
+[[nodiscard]] std::vector<std::filesystem::path> copy_client_pack_cache_paths(
+    std::span<const std::filesystem::path> paths);
+
+[[nodiscard]] bool client_pack_cache_paths_equal(
+    std::span<const std::filesystem::path> left,
+    std::span<const std::filesystem::path> right);
+
+[[nodiscard]] bool client_pack_cache_identity_matches(
+    std::string_view active_registry_snapshot_json,
+    std::span<const std::filesystem::path> active_pack_cache_paths,
+    std::string_view registry_snapshot_json,
+    std::span<const std::filesystem::path> pack_cache_paths);
 
 } // namespace arv::client

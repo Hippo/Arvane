@@ -1,9 +1,9 @@
 #include "web_platform.hpp"
 
 #include "web_application.hpp"
+#include "web_render_host.hpp"
 
 #include <emscripten.h>
-#include <GLES3/gl3.h>
 
 #include <algorithm>
 #include <string>
@@ -239,7 +239,7 @@ void resize_canvas() {
   g_app.width = width;
   g_app.height = height;
   arv_web_set_canvas_size(width, height);
-  glViewport(0, 0, width, height);
+  resize_web_render_host(width, height);
 }
 
 } // namespace arv::web

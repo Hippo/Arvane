@@ -158,6 +158,13 @@ public:
     return receipts;
   }
 
+  std::vector<arv::render::RenderCommandDiagnostic> drain_diagnostics() override {
+    record("drain_diagnostics");
+    std::vector<arv::render::RenderCommandDiagnostic> drained;
+    drained.swap(diagnostics);
+    return drained;
+  }
+
   arv::render::RenderMetricsSnapshot metrics_snapshot() const override {
     return metrics;
   }
@@ -168,6 +175,7 @@ public:
   std::optional<arv::render::TextureRegionHandle> uploaded_skin_handle;
   std::optional<arv::render::PlayerSkinTextureSnapshot> skin_snapshot;
   std::vector<arv::render::ChunkMeshUploadReceipt> receipts;
+  std::vector<arv::render::RenderCommandDiagnostic> diagnostics;
   bool mark_used_result{true};
 
 private:
@@ -216,6 +224,22 @@ TEST(RenderCommandQueueTests, SyncReturnValuesAreServedByRenderThread) {
   const auto skin_upload = commands.upload_player_skin_texture("skin-a", {});
   ASSERT_TRUE(skin_upload.has_value());
   commands.flush();
+  ASSERT_FALSE(target.operation_thread_hashes.empty());
+  EXPECT_EQ(target.operation_thread_hashes.back(), render_thread.thread.owner_thread_hash());
+}
+
+TEST(RenderCommandQueueTests, DrainsDiagnosticsThroughRenderThread) {
+  RecordingRenderTarget target;
+  target.diagnostics.push_back({.message = "texture upload failed"});
+  RunningRenderThread render_thread;
+  arv::render::RenderCommandQueue commands{target, render_thread.thread};
+
+  std::vector<arv::render::RenderCommandDiagnostic> diagnostics =
+      commands.drain_diagnostics();
+
+  ASSERT_EQ(diagnostics.size(), 1U);
+  EXPECT_EQ(diagnostics[0].message, "texture upload failed");
+  EXPECT_TRUE(commands.drain_diagnostics().empty());
   ASSERT_FALSE(target.operation_thread_hashes.empty());
   EXPECT_EQ(target.operation_thread_hashes.back(), render_thread.thread.owner_thread_hash());
 }

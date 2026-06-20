@@ -6,6 +6,7 @@
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/protocol/chat.hpp"
+#include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/handshake.hpp"
@@ -2106,6 +2107,77 @@ TEST(ClientRuntimeTests, MovementHzPacketOverridesDefaultClientSendRate) {
   EXPECT_EQ(player_move_count(server_transport->poll_events()), 1U);
 }
 
+TEST(ClientRuntimeTests, RemoteFixedTickSeedsClientTickWhenWorldJoinCompletes) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  (void)server_transport->poll_events();
+
+  arv::protocol::ClientboundHello hello;
+  hello.accepted = true;
+  hello.assigned_session_id = arv::SessionID{1};
+  hello.assigned_player_id = arv::PlayerID{1};
+  hello.initial_world_id = arv::WorldID{1};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundHello,
+      arv::protocol::serialize_clientbound_hello(hello));
+
+  arv::protocol::ClientboundWorldJoinResult join;
+  join.accepted = true;
+  join.world_id = arv::WorldID{1};
+  join.player_id = arv::PlayerID{1};
+  join.local_entity_id = arv::EntityNetID{1};
+  join.spawn_position = {8.0F, 20.0F, -20.0F};
+  join.initial_tick = 5;
+  join.tick_rate = arv::DefaultBaseTps;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundWorldJoinResult,
+      arv::protocol::serialize_clientbound_world_join_result(join));
+
+  arv::TickIndex client_tick = 0U;
+  const arv::client::RemoteClientFixedTickResult result =
+      arv::client::advance_remote_client_fixed_tick(client, client_tick);
+
+  EXPECT_FALSE(result.was_in_game);
+  EXPECT_TRUE(result.entered_game);
+  EXPECT_EQ(result.submitted_tick, 0U);
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_EQ(client.world_initial_tick(), 5U);
+  EXPECT_EQ(client_tick, 5U);
+  EXPECT_EQ(player_move_count(server_transport->poll_events()), 0U);
+}
+
+TEST(ClientRuntimeTests, RemoteFixedTickIncrementsClientTickWhileInGame) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+  (void)server_transport->poll_events();
+
+  arv::TickIndex client_tick = 0U;
+  const arv::client::RemoteClientFixedTickResult result =
+      arv::client::advance_remote_client_fixed_tick(client, client_tick);
+
+  EXPECT_TRUE(result.was_in_game);
+  EXPECT_FALSE(result.entered_game);
+  EXPECT_EQ(client_tick, client.world_initial_tick() + 1U);
+  EXPECT_EQ(result.submitted_tick, client_tick);
+  const std::vector<arv::protocol::ServerboundPlayerMove> moves =
+      serverbound_player_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  EXPECT_EQ(moves.back().client_tick, client_tick);
+}
+
 TEST(ClientRuntimeTests, PlayerPermissionsPacketUpdatesLocalGameModeAndCorePermissions) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
@@ -2407,6 +2479,73 @@ TEST(ClientRuntimeTests, InventoryAndBlockUpdatesRejectInactiveOrStaleState) {
   EXPECT_EQ(client.inventory_revision(), 2U);
 }
 
+TEST(ClientRuntimeTests, DrainChunkStreamPacketsReturnsAllPendingChunkQueues) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  const arv::protocol::ClientboundChunkSectionUnload unload{
+      arv::WorldID{1}, arv::ChunkSectionCoord{{1, 2, 3}}};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundChunkSectionUnload,
+      arv::protocol::serialize_clientbound_chunk_section_unload(unload));
+
+  arv::protocol::ClientboundChunkSectionData section;
+  section.world_id = arv::WorldID{1};
+  section.coord = arv::ChunkSectionCoord{{4, 5, 6}};
+  section.chunk_version = 7U;
+  section.chunk_content_version = 8U;
+  section.chunk_light_version = 9U;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundChunkSectionData,
+      arv::protocol::serialize_clientbound_chunk_section_data(section));
+
+  arv::protocol::ClientboundBlockUpdateBatch block_updates;
+  block_updates.world_id = arv::WorldID{1};
+  block_updates.server_tick = 2U;
+  block_updates.updates.push_back(
+      {arv::BlockPos{{0, 1, 2}}, arv::voxel::BlockVariantID{3U}, 0U, 4U});
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundBlockUpdateBatch,
+      arv::protocol::serialize_clientbound_block_update_batch(block_updates));
+
+  client.fixed_tick(2);
+
+  arv::client::ClientChunkStreamPackets packets =
+      client.drain_chunk_stream_packets();
+  const arv::client::ClientChunkStreamPacketCounts counts =
+      arv::client::count_client_chunk_stream_packets(packets);
+  EXPECT_EQ(counts.unloads, 1U);
+  EXPECT_EQ(counts.sections, 1U);
+  EXPECT_EQ(counts.block_update_batches, 1U);
+  EXPECT_EQ(counts.block_updates, 1U);
+  ASSERT_EQ(packets.unloads.size(), 1U);
+  EXPECT_EQ(packets.unloads.front().coord, unload.coord);
+  ASSERT_EQ(packets.sections.size(), 1U);
+  EXPECT_EQ(packets.sections.front().coord, section.coord);
+  EXPECT_EQ(packets.sections.front().chunk_version, 7U);
+  ASSERT_EQ(packets.block_updates.size(), 1U);
+  ASSERT_EQ(packets.block_updates.front().updates.size(), 1U);
+  EXPECT_EQ(
+      packets.block_updates.front().updates.front().pos,
+      (arv::BlockPos{{0, 1, 2}}));
+
+  packets = client.drain_chunk_stream_packets();
+  EXPECT_TRUE(packets.unloads.empty());
+  EXPECT_TRUE(packets.sections.empty());
+  EXPECT_TRUE(packets.block_updates.empty());
+}
+
 TEST(ClientRuntimeTests, ClientboundSpawnParticlesCreatesLocalParticlesForCurrentWorld) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
@@ -2449,6 +2588,33 @@ TEST(ClientRuntimeTests, ClientboundSpawnParticlesCreatesLocalParticlesForCurren
   EXPECT_EQ(frame.particles.size(), 2U);
   ASSERT_FALSE(frame.particles.empty());
   EXPECT_EQ(frame.particles.front().uv_min, (arv::Vec2f{32.0F, 0.0F}));
+}
+
+TEST(ClientRuntimeTests, BuildFramePacketProjectsCameraMatrices) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.camera().set_world_id(arv::WorldID{7});
+  client.camera().set_position({3.0F, 4.0F, 5.0F});
+  client.camera().set_rotation(0.5F, -0.25F);
+  client.camera().set_fov_y_degrees(80.0F);
+
+  const arv::render::FramePacket frame =
+      client.build_frame_packet(0.25F, 1280U, 720U);
+
+  EXPECT_EQ(frame.camera.world_id, arv::WorldID{7});
+  EXPECT_EQ(frame.camera.viewport_width, 1280U);
+  EXPECT_EQ(frame.camera.viewport_height, 720U);
+  EXPECT_FLOAT_EQ(frame.camera.partial_tick_alpha, 0.25F);
+  EXPECT_FLOAT_EQ(frame.camera.near_plane, arv::client::DefaultCameraNearPlane);
+  EXPECT_FLOAT_EQ(frame.camera.far_plane, arv::client::DefaultCameraFarPlane);
+  EXPECT_NE(frame.camera.view, arv::identity_mat4f());
+  EXPECT_NE(frame.camera.projection, arv::identity_mat4f());
+  EXPECT_NE(frame.camera.view_projection, arv::identity_mat4f());
+  EXPECT_EQ(frame.world_view.world_id, frame.camera.world_id);
+  EXPECT_EQ(frame.world_view.view, frame.camera.view);
+  EXPECT_EQ(frame.world_view.projection, frame.camera.projection);
+  EXPECT_EQ(frame.world_view.view_projection, frame.camera.view_projection);
+  EXPECT_FLOAT_EQ(frame.world_view.far_plane, arv::client::DefaultCameraFarPlane);
 }
 
 TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {

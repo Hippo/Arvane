@@ -26,6 +26,9 @@ struct ClientBlockRenderAssets {
 
 struct ClientBlockRenderAssetLoadOptions {
   FunctionRef<bool(std::string_view)> block_behavior_exists{};
+  FunctionRef<Expected<void, std::string>(
+      render::FluidRenderData&,
+      const voxel::BlockRegistry&)> register_fluid_render_data{};
   asset::TextureAtlasBuildOptions atlas_options{
       asset::default_block_texture_atlas_options()};
 };
@@ -39,7 +42,7 @@ using ClientBlockRenderAssetsResult =
     Expected<ClientBlockRenderAssets, ClientBlockRenderAssetLoadError>;
 
 [[nodiscard]] ClientBlockRenderAssetsResult load_client_block_render_assets(
-    asset::PackManager& packs,
+    const asset::PackManager& packs,
     asset::ResourceManager& resources,
     ClientBlockRenderAssetLoadOptions options = {});
 

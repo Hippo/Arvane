@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/render/paged_texture_region_allocator.hpp"
 #include "arv/render/render_types.hpp"
 
 #include <glad/glad.h>
@@ -59,7 +60,7 @@ public:
   }
 
   [[nodiscard]] u64 allocated_pixels() const noexcept {
-    return allocated_pixels_;
+    return allocator_.allocated_pixels();
   }
 
   [[nodiscard]] u64 capacity_pixels() const noexcept {
@@ -69,26 +70,6 @@ public:
   [[nodiscard]] f32 usage_ratio() const noexcept;
 
 private:
-  struct Rect {
-    u16 x{};
-    u16 y{};
-    u16 width{};
-    u16 height{};
-  };
-
-  struct PageAllocator {
-    std::vector<Rect> free_rects{};
-  };
-
-  struct RegionSlot {
-    AtlasRegion region{};
-    u32 generation{1};
-    bool occupied{};
-  };
-
-  [[nodiscard]] std::optional<Rect> allocate_from_page(PageAllocator& page, u16 width, u16 height);
-  [[nodiscard]] TextureRegionHandle publish_region(AtlasRegion region);
-  [[nodiscard]] bool validate_handle(TextureRegionHandle handle) const noexcept;
   void reset_allocators();
 
   Config config_{};
@@ -97,29 +78,7 @@ private:
   u16 actual_max_pages_{};
   GLuint gl_texture_array_{};
   bool initialized_{};
-  std::vector<PageAllocator> pages_{};
-  std::vector<RegionSlot> slots_{{}};
-  std::vector<u32> free_slot_ids_{};
-  u64 allocated_pixels_{};
-};
-
-struct PlayerSkinAtlasConfig {
-  u16 page_size{2048};
-  u16 max_pages{8};
-
-  struct CleanupConfig {
-    u32 interval_seconds{60};
-    u32 evict_after_unused_seconds{300};
-  };
-
-  struct PressureCleanupConfig {
-    bool enabled{true};
-    f32 usage_threshold{0.85F};
-    f32 target_usage{0.65F};
-  };
-
-  CleanupConfig cleanup{};
-  PressureCleanupConfig pressure_cleanup{};
+  PagedTextureRegionAllocator allocator_{};
 };
 
 struct ResidentSkinTexture {

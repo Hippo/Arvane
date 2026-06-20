@@ -32,20 +32,36 @@ add_executable(arv_tests
   assets/pack_tests.cpp
   base/base_behavior_tests.cpp
   blueprint/blueprint_codec_tests.cpp
+  client/block_render_assets_tests.cpp
   client/block_outline_target_tests.cpp
+  client/block_container_animation_tests.cpp
   client/chunk_interest_tests.cpp
   client/chunk_snapshot_tests.cpp
+  client/client_frame_composer_tests.cpp
+  client/client_gameplay_assets_tests.cpp
   client/client_session_tests.cpp
+  client/client_input_mapping_tests.cpp
   client/client_runtime_tests.cpp
+  client/client_settings_tests.cpp
+  client/client_ui_assets_tests.cpp
+  client/client_ui_interactions_tests.cpp
+  client/client_ui_routing_tests.cpp
+  client/client_world_time_tests.cpp
   client/camera_tests.cpp
   client/entity_render_assets_tests.cpp
   client/gameplay_interactions_tests.cpp
+  client/gameplay_ui_frame_tests.cpp
   client/gameplay_ui_model_tests.cpp
   client/item_animation_tests.cpp
+  client/item_ui_model_tests.cpp
   client/item_rendering_tests.cpp
   client/local_player_controller_tests.cpp
   client/pack_sync_plan_tests.cpp
   client/particle_system_tests.cpp
+  client/player_skin_rendering_tests.cpp
+  client/remote_chunk_stream_tests.cpp
+  client/render_asset_upload_tests.cpp
+  client/sky_rendering_tests.cpp
   client/local_profile_tests.cpp
   client/ui_tests.cpp
   command/command_tests.cpp
@@ -88,6 +104,7 @@ add_executable(arv_tests
   render/item_model_tests.cpp
   render/mesh_handoff_tests.cpp
   render/paged_texture_atlas_tests.cpp
+  render/paged_texture_region_allocator_tests.cpp
   render/render_commands_tests.cpp
   render/render_culling_tests.cpp
   render/chunk_meshing_tests.cpp
@@ -115,10 +132,9 @@ add_executable(arv_tests
   world/world_runtime_tests.cpp
   world/world_time_tests.cpp
   web/web_chunk_mesh_tests.cpp
-  web/web_player_skin_atlas_tests.cpp
+  web/web_chunk_renderer_tests.cpp
   web/web_player_movement_tests.cpp
-  ${CMAKE_SOURCE_DIR}/apps/arv_web/src/web_chunk_mesh.cpp
-  ${CMAKE_SOURCE_DIR}/apps/arv_web/src/web_player_skin_atlas.cpp
+  ${CMAKE_SOURCE_DIR}/apps/arv_web/src/web_entity_fallback.cpp
 )
 
 target_include_directories(arv_tests PRIVATE

@@ -9,14 +9,14 @@ namespace arv::web {
 namespace {
 
 void append_vertex(
-    std::vector<WebChunkVertex>& vertices,
+    std::vector<WebFallbackColorVertex>& vertices,
     Vec3f position,
     Vec3f color) {
   vertices.push_back({position, color});
 }
 
 void append_box_face(
-    std::vector<WebChunkVertex>& vertices,
+    std::vector<WebFallbackColorVertex>& vertices,
     voxel::BlockFace face,
     Vec3f min,
     Vec3f max,
@@ -68,9 +68,9 @@ void append_box_face(
 
 } // namespace
 
-std::vector<WebChunkVertex> build_fallback_entity_vertices(
+std::vector<WebFallbackColorVertex> build_fallback_entity_vertices(
     std::span<const WebEntityMarker> markers) {
-  std::vector<WebChunkVertex> vertices;
+  std::vector<WebFallbackColorVertex> vertices;
   vertices.reserve(markers.size() * 36U);
   for (WebEntityMarker marker : markers) {
     const Vec3f min{

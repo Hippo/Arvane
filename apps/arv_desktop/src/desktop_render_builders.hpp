@@ -1,8 +1,8 @@
 #pragma once
 
-#include "asset_helpers.hpp"
 #include "desktop_session.hpp"
 
+#include "arv/client/entity_render_assets.hpp"
 #include "arv/core/types.hpp"
 #include "arv/io/config.hpp"
 #include "arv/render/render_types.hpp"
@@ -20,7 +20,7 @@ void populate_world_frame_draw_items(
     render::FramePacket& frame,
     DesktopGameSession& session,
     ChunkViewState& chunk_view,
-    const EntityRenderAssets& entity_render_assets,
+    const client::EntityRenderAssets& entity_render_assets,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
     const io::ChunkDistanceConfig& chunk_distances,
     const io::RenderConfig& render_config,

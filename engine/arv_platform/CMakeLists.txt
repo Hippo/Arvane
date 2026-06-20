@@ -1,6 +1,7 @@
 set(ARV_PLATFORM_HEADERS
   include/arv/platform/glfw_window.hpp
   include/arv/platform/input_bindings.hpp
+  include/arv/platform/input_snapshot.hpp
 )
 
 if(NOT TARGET arv_platform_input_headers)

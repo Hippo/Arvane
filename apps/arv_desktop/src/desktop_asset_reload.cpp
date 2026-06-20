@@ -1,30 +1,15 @@
 #include "desktop_frame_loop.hpp"
 
 #include "arv/asset/pack.hpp"
+#include "arv/client/client_pack_sync.hpp"
 #include "arv/core/log.hpp"
 #include "arv/net/connection_state.hpp"
 
-#include <algorithm>
 #include <optional>
 #include <span>
 #include <utility>
 
 namespace arv::desktop {
-namespace {
-
-[[nodiscard]] std::vector<std::filesystem::path> copy_paths(
-    std::span<const std::filesystem::path> paths) {
-  return {paths.begin(), paths.end()};
-}
-
-[[nodiscard]] bool same_paths(
-    std::span<const std::filesystem::path> left,
-    const std::vector<std::filesystem::path>& right) {
-  return left.size() == right.size() &&
-         std::equal(left.begin(), left.end(), right.begin());
-}
-
-} // namespace
 
 bool DesktopFrameLoop::reload_desktop_assets(
     asset::PackManager packs,
@@ -130,12 +115,16 @@ bool DesktopFrameLoop::ensure_remote_assets(DesktopGameSession& active_session) 
   }
 
   if (asset_source_ == DesktopAssetSource::Remote &&
-      registry_snapshot == active_remote_registry_snapshot_json_ &&
-      same_paths(cache_paths, active_remote_pack_cache_paths_)) {
+      client::client_pack_cache_identity_matches(
+          active_remote_registry_snapshot_json_,
+          std::span<const std::filesystem::path>{active_remote_pack_cache_paths_},
+          registry_snapshot,
+          cache_paths)) {
     return true;
   }
 
-  std::vector<std::filesystem::path> remote_paths = copy_paths(cache_paths);
+  std::vector<std::filesystem::path> remote_paths =
+      client::copy_client_pack_cache_paths(cache_paths);
   auto remote_packs = asset::PackManager::load_client_bundle_roots(remote_paths);
   if (!remote_packs) {
     core::error("packs", remote_packs.error().describe());

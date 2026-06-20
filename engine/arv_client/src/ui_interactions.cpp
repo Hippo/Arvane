@@ -328,4 +328,48 @@ bool append_chat_hover_tooltip_if_needed(
   return true;
 }
 
+GameplayHoverTooltipResult update_gameplay_hover_tooltips(
+    GameplayHoverTooltipInput input) {
+  if (input.tree == nullptr || input.metrics == nullptr) {
+    return {};
+  }
+
+  ui::UiTree& tree = *input.tree;
+  const ui::UiDisplayMetrics& metrics = *input.metrics;
+  const std::optional<ui::UiAction> hover_action =
+      tree.route_mouse_move(input.cursor_position);
+  GameplayHoverTooltipResult result;
+  result.inventory_added = append_inventory_hover_tooltip_if_needed(
+      tree,
+      input.inventory_open,
+      input.carried_stack,
+      input.inventory_slots,
+      metrics,
+      input.cursor_position,
+      hover_action);
+  result.container_added = append_container_hover_tooltip_if_needed(
+      tree,
+      input.container_open,
+      input.carried_stack,
+      input.container_slots,
+      input.inventory_slots,
+      metrics,
+      input.cursor_position,
+      hover_action);
+  result.chat_added = append_chat_hover_tooltip_if_needed(
+      tree,
+      input.chat_open,
+      input.chat_lines,
+      metrics,
+      input.cursor_position,
+      hover_action);
+
+  if (result.inventory_added || result.container_added || result.chat_added) {
+    tree.layout_with_metrics(metrics, input.text_measurer);
+    (void)tree.route_mouse_move(input.cursor_position);
+    result.relaid_out = true;
+  }
+  return result;
+}
+
 } // namespace arv::client

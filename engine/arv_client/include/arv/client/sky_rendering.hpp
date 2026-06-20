@@ -10,4 +10,9 @@ namespace arv::client {
     const world::WorldClock& clock,
     const io::RenderConfig::SkyConfig& sky_config) noexcept;
 
+void configure_frame_sky(
+    render::FramePacket& frame,
+    const world::WorldClock& clock,
+    const io::RenderConfig::SkyConfig& sky_config) noexcept;
+
 } // namespace arv::client

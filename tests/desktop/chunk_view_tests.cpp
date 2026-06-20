@@ -118,6 +118,11 @@ public:
     return receipts;
   }
 
+  [[nodiscard]] std::vector<arv::render::RenderCommandDiagnostic>
+  drain_diagnostics() override {
+    return {};
+  }
+
   [[nodiscard]] arv::render::RenderMetricsSnapshot metrics_snapshot() const override {
     return {};
   }

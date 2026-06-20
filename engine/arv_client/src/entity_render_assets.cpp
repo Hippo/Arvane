@@ -1095,7 +1095,9 @@ ClientEntityRenderAssetsResult load_client_entity_render_assets(
     return asset_failure("entities", entity_definitions.error().message);
   }
   auto entity_registry_result =
-      build_client_entity_registry(std::move(entity_definitions.value()), options);
+      options.build_entity_registry
+          ? options.build_entity_registry(std::move(entity_definitions.value()))
+          : build_client_entity_registry(std::move(entity_definitions.value()), options);
   if (!entity_registry_result) {
     return asset_failure("entities", entity_registry_result.error().message);
   }

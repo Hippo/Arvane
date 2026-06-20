@@ -1,6 +1,7 @@
 #include "arv/client/gameplay_ui_model.hpp"
 
 #include "arv/player/player_constants.hpp"
+#include "arv/text/language.hpp"
 #include "arv/text/rich_text.hpp"
 
 #include <algorithm>
@@ -117,6 +118,26 @@ void refresh_gameplay_chat_lines(
   std::reverse(chat_lines.begin(), chat_lines.end());
 }
 
+ui::RidePromptModel build_ride_prompt_model(RidePromptModelInput input) {
+  ui::RidePromptModel model;
+  model.viewport = input.viewport;
+  if (!input.interactions_available ||
+      input.gameplay_blocked ||
+      input.inventory_open ||
+      input.chat_open ||
+      input.local_player_mounted ||
+      input.key_label.empty() ||
+      !input.has_targeted_rideable) {
+    return model;
+  }
+  if (!input.has_targeted_rideable()) {
+    return model;
+  }
+  model.visible = true;
+  model.key_label = std::string{input.key_label};
+  return model;
+}
+
 ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
   const bool chat_open = input.client.chat_open();
   ui::ChatUiModel chat_model{
@@ -191,6 +212,63 @@ ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
       },
       std::move(crosshair),
   };
+}
+
+ui::GameplayUiModel build_gameplay_ui_model_from_snapshots(
+    GameplayUiSnapshotModelInput input) {
+  const player::ContainerUiLayoutDefinition* container_layout =
+      input.client.container_open() && input.container_layouts != nullptr
+          ? input.container_layouts->find(input.client.active_container_layout())
+          : nullptr;
+
+  std::string inventory_title;
+  if (!input.inventory_title.empty()) {
+    inventory_title = std::move(input.inventory_title);
+  } else if (input.language != nullptr) {
+    inventory_title = input.language->text("ui.inventory.title", "Inventory");
+  } else {
+    inventory_title = "Inventory";
+  }
+
+  std::string tab_title;
+  if (!input.tab_title.empty()) {
+    tab_title = std::move(input.tab_title);
+  } else if (input.language != nullptr) {
+    tab_title = input.language->text("ui.tab.players", "Players");
+  } else {
+    tab_title = "Players";
+  }
+
+  input.ride_prompt.viewport = input.viewport;
+  const std::string_view hotbar_item_popup_name =
+      input.hotbar_item_popup_alpha > 0.0F
+          ? input.hotbar_item_popup_name
+          : std::string_view{};
+
+  return build_gameplay_ui_model(
+      {
+          .client = input.client,
+          .chat_config = input.chat_config,
+          .inventory_slots = input.inventory_slots,
+          .container_slots = input.container_slots,
+          .carried_inventory_stack = std::move(input.carried_inventory_stack),
+          .chat_lines = input.chat_lines,
+          .chat_history_scroll_offset = input.chat_history_scroll_offset,
+          .tab_players = input.tab_players,
+          .inventory_title = inventory_title,
+          .container_title = input.client.active_container_title(),
+          .container_layout = container_layout,
+          .tab_title = tab_title,
+          .viewport = input.viewport,
+          .cursor_position = input.cursor_position,
+          .displayed_fps = input.displayed_fps,
+          .hotbar_item_popup_name = hotbar_item_popup_name,
+          .hotbar_item_popup_alpha = input.hotbar_item_popup_alpha,
+          .crosshair = std::move(input.crosshair),
+          .ride_prompt = std::move(input.ride_prompt),
+          .language = input.language,
+          .debug_fps_visible = input.debug_fps_visible,
+      });
 }
 
 } // namespace arv::client

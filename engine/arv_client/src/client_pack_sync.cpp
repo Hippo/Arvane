@@ -2,6 +2,7 @@
 
 #include "arv/asset/pack_bundle_cache.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace arv::client {
@@ -80,6 +81,27 @@ ClientPackSyncManifestPlanResult prepare_client_pack_sync_manifest(
           ? protocol::PackSyncStatus::AlreadyCached
           : protocol::PackSyncStatus::NeedsDownload;
   return ClientPackSyncManifestPlanResult::success(std::move(plan));
+}
+
+std::vector<std::filesystem::path> copy_client_pack_cache_paths(
+    std::span<const std::filesystem::path> paths) {
+  return {paths.begin(), paths.end()};
+}
+
+bool client_pack_cache_paths_equal(
+    std::span<const std::filesystem::path> left,
+    std::span<const std::filesystem::path> right) {
+  return left.size() == right.size() &&
+         std::equal(left.begin(), left.end(), right.begin());
+}
+
+bool client_pack_cache_identity_matches(
+    std::string_view active_registry_snapshot_json,
+    std::span<const std::filesystem::path> active_pack_cache_paths,
+    std::string_view registry_snapshot_json,
+    std::span<const std::filesystem::path> pack_cache_paths) {
+  return active_registry_snapshot_json == registry_snapshot_json &&
+         client_pack_cache_paths_equal(active_pack_cache_paths, pack_cache_paths);
 }
 
 } // namespace arv::client

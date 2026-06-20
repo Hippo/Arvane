@@ -14,9 +14,9 @@ struct Bounds {
   arv::Vec3f max{};
 };
 
-Bounds bounds_for(std::span<const arv::web::WebChunkVertex> vertices) {
+Bounds bounds_for(std::span<const arv::web::WebFallbackColorVertex> vertices) {
   Bounds bounds{vertices.front().position, vertices.front().position};
-  for (const arv::web::WebChunkVertex& vertex : vertices) {
+  for (const arv::web::WebFallbackColorVertex& vertex : vertices) {
     bounds.min.x = std::min(bounds.min.x, vertex.position.x);
     bounds.min.y = std::min(bounds.min.y, vertex.position.y);
     bounds.min.z = std::min(bounds.min.z, vertex.position.z);
@@ -53,7 +53,7 @@ TEST(WebEntityFallbackTests, EntityMarkersBuildUprightFallbackCubes) {
   const Bounds bounds = bounds_for(vertices);
   EXPECT_EQ(bounds.min, (arv::Vec3f{3.7F, 5.0F, 5.7F}));
   EXPECT_EQ(bounds.max, (arv::Vec3f{8.3F, 10.8F, 10.3F}));
-  for (const arv::web::WebChunkVertex& vertex : vertices) {
+  for (const arv::web::WebFallbackColorVertex& vertex : vertices) {
     EXPECT_GE(vertex.color.x, 0.0F);
     EXPECT_GE(vertex.color.y, 0.0F);
     EXPECT_GE(vertex.color.z, 0.0F);

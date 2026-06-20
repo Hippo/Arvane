@@ -2,11 +2,11 @@
 
 #include "debug_menu.hpp"
 #include "desktop_frame_pacing.hpp"
-#include "desktop_input_routing.hpp"
 #include "desktop_render_builders.hpp"
-#include "input_adapter.hpp"
 #include "ui_model.hpp"
 
+#include "arv/client/client_input_mapping.hpp"
+#include "arv/client/client_ui_routing.hpp"
 #include "arv/core/log.hpp"
 #include "arv/core/perf_stats.hpp"
 #include "arv/core/profiling.hpp"
@@ -38,31 +38,6 @@ template <typename Size>
   return {
       static_cast<f32>(size.width),
       static_cast<f32>(size.height)};
-}
-
-[[nodiscard]] ui::UITextEditCommand ui_text_edit_command_from(
-    platform::TextEditCommand command) noexcept {
-  switch (command) {
-    case platform::TextEditCommand::MoveLeft:
-      return ui::UITextEditCommand::MoveLeft;
-    case platform::TextEditCommand::MoveRight:
-      return ui::UITextEditCommand::MoveRight;
-    case platform::TextEditCommand::MoveUp:
-      return ui::UITextEditCommand::MoveUp;
-    case platform::TextEditCommand::MoveDown:
-      return ui::UITextEditCommand::MoveDown;
-    case platform::TextEditCommand::DeleteForward:
-      return ui::UITextEditCommand::DeleteForward;
-    case platform::TextEditCommand::Copy:
-      return ui::UITextEditCommand::Copy;
-    case platform::TextEditCommand::Paste:
-      return ui::UITextEditCommand::Paste;
-    case platform::TextEditCommand::Cut:
-      return ui::UITextEditCommand::Cut;
-    case platform::TextEditCommand::SelectAll:
-      return ui::UITextEditCommand::SelectAll;
-  }
-  return ui::UITextEditCommand::MoveLeft;
 }
 
 } // namespace
@@ -196,7 +171,9 @@ int DesktopFrameLoop::run() {
         has_world_session);
 
     client::InputFrame client_input =
-        has_world_session ? to_client_input(platform_input) : client::InputFrame{};
+        has_world_session
+            ? client::input_frame_from_platform_snapshot(platform_input)
+            : client::InputFrame{};
     bool inventory_changed_by_ui = route_input(
         platform_input,
         menu_context,
@@ -449,18 +426,28 @@ void DesktopFrameLoop::handle_pause_menu_input(
   const bool has_client_overlay =
       has_live_session &&
       (active_session->client->inventory_open() || active_session->client->chat_open());
-  if (gameplay_menu_stack_active_ && screens.empty()) {
-    reset_gameplay_menu_stack();
+  if (gameplay_menu_stack_active_) {
+    const auto reset_gameplay_stack = [&]() {
+      reset_gameplay_menu_stack();
+    };
+    const client::GameplayPauseMenuRoutingCallbacks callbacks{
+        .reset_gameplay_screen_stack = reset_gameplay_stack,
+    };
+    (void)client::route_gameplay_pause_menu_input(
+        screens,
+        menu_context,
+        platform_input.pause_menu_pressed,
+        gameplay_menu_stack_active_,
+        has_session,
+        has_client_overlay,
+        callbacks);
+    return;
   }
+
   const ui::UIScreen* current_screen = screens.current();
-  const bool on_gameplay_root =
-      gameplay_menu_stack_active_ && current_screen != nullptr &&
-      current_screen->type() == ui::MenuScreenType::Gameplay;
-  if (current_screen != nullptr && !on_gameplay_root) {
+  if (current_screen != nullptr) {
     (void)screens.handle_cancel(menu_context);
-  } else if (on_gameplay_root && has_session && !has_client_overlay) {
-    (void)screens.handle_cancel(menu_context);
-  } else if (!gameplay_menu_stack_active_ && screens.empty()) {
+  } else if (screens.empty()) {
     screens.push(ui::make_main_menu_screen());
   }
 }
@@ -469,36 +456,11 @@ void DesktopFrameLoop::handle_captured_menu_input(
     platform::InputSnapshot& platform_input,
     ui::UIContext& menu_context,
     ui::UIScreenManager& screens) {
-  if (debug_menu_.open || !screens.has_active_screen() ||
-      !platform_input.raw_input.has_value()) {
+  if (debug_menu_.open ||
+      !client::route_captured_screen_input(screens, menu_context, platform_input)) {
     return;
   }
-  if (platform_input.raw_input->binding.device_type == platform::InputDeviceType::MouseButton) {
-    const std::optional<ui::UiNodeID> hit =
-        ui_tree_.hit_test({platform_input.cursor_x, platform_input.cursor_y});
-    if (hit.has_value()) {
-      const ui::UiElement* element = ui_tree_.element(hit.value());
-      if (element != nullptr && element->action == "key_bind.cancel_capture") {
-        return;
-      }
-    }
-  }
-  const ui::CapturedInputView captured =
-      captured_input_from(platform_input.raw_input.value());
-  if (!screens.handle_captured_input(captured, menu_context)) {
-    return;
-  }
-  platform_input.pause_menu_pressed = false;
-  platform_input.text_cancel_pressed = false;
-  platform_input.text_submit_pressed = false;
-  platform_input.text_backspace_pressed = false;
-  platform_input.open_inventory_pressed = false;
-  platform_input.open_chat_pressed = false;
-  platform_input.debug_menu_toggle_pressed = false;
-  platform_input.hotbar_select.reset();
-  platform_input.hotbar_scroll_steps = 0;
-  platform_input.mouse_wheel_y = 0.0F;
-  platform_input.raw_input.reset();
+  client::clear_platform_input_captured_binding_edges(platform_input);
 }
 
 bool DesktopFrameLoop::route_input(
@@ -515,36 +477,9 @@ bool DesktopFrameLoop::route_input(
 
   bool inventory_changed_by_ui = false;
   if (!debug_menu_.open && menu_blocks_gameplay) {
-    (void)route_screen_mouse_input(screens, menu_context, platform_input);
-    (void)screens.handle_pointer(
-        {platform_input.cursor_x, platform_input.cursor_y},
-        {platform_input.mouse_delta_x, platform_input.mouse_delta_y},
-        platform_input.mouse_left_pressed,
-        platform_input.mouse_left_released,
-        platform_input.mouse_left_held,
-        menu_context);
-    if (platform_input.mouse_wheel_y != 0.0F) {
-      (void)screens.handle_scroll(
-          {platform_input.cursor_x, platform_input.cursor_y},
-          platform_input.mouse_wheel_y,
-          menu_context);
-    }
-    for (const platform::TextEditEvent& event : platform_input.text_edit_events) {
-      (void)screens.handle_text_edit(
-          {ui_text_edit_command_from(event.command), event.extend_selection},
-          menu_context);
-    }
-    if (!platform_input.text_input.empty()) {
-      (void)screens.handle_text_input(platform_input.text_input, menu_context);
-    }
-    if (platform_input.text_backspace_pressed) {
-      (void)screens.handle_backspace(menu_context);
-    }
-    if (platform_input.text_submit_pressed) {
-      (void)screens.handle_submit(menu_context);
-    }
+    (void)client::route_blocking_screen_input(screens, menu_context, platform_input);
   } else if (!debug_menu_.open && has_session && active_session->client->inventory_open()) {
-    inventory_changed_by_ui = route_inventory_mouse_input(
+    inventory_changed_by_ui = client::route_inventory_mouse_input(
         ui_tree_,
         *active_session->client,
         platform_input,
@@ -567,15 +502,29 @@ void DesktopFrameLoop::submit_client_input_and_update_cursor(
     bool inventory_changed_by_ui,
     std::chrono::steady_clock::time_point now) {
   if (has_active_session) {
-    const bool container_open_requested =
-        try_open_container_from_secondary(*active_session, client_input);
+    const bool gameplay_blocked =
+        debug_menu_.open || active_screen_manager().blocks_gameplay_input();
+    const client::GameplayInteractionDispatchResult interactions =
+        dispatch_gameplay_interactions_from_input(
+            *active_session,
+            client_input,
+            gameplay_blocked);
+    if (interactions.consume_secondary_use) {
+      client_input.secondary_pressed = false;
+      client_input.secondary_held = false;
+      client::stop_held_item_animation_playback(
+          active_session->held_item_animation,
+          active_session->held_item_secondary_use_active,
+          0.0);
+    }
     update_held_item_animation_from_input(
         *active_session,
         client_input,
-        std::chrono::duration<Seconds>(now - app_start_time_).count());
+        std::chrono::duration<Seconds>(now - app_start_time_).count(),
+        interactions.requested_ride);
     active_session->last_gameplay_input = client_input;
     active_session->client->submit_input(std::move(client_input));
-    inventory_changed_by_ui = inventory_changed_by_ui || container_open_requested;
+    inventory_changed_by_ui = inventory_changed_by_ui || interactions.opened_container;
     if (std::optional<std::string> clipboard =
             active_session->client->consume_pending_clipboard_text();
         clipboard.has_value()) {

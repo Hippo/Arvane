@@ -2,26 +2,24 @@
 
 #include "arv/core/types.hpp"
 #include "arv/render/entity_model.hpp"
-#include "arv/render/paged_texture_atlas.hpp"
 #include "arv/render/render_types.hpp"
-#include "arv/sched/owner_thread.hpp"
 
 #include <atomic>
 #include <functional>
-#include <future>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
-namespace arv::render {
+namespace arv::sched {
+class OwnerThread;
+}
 
-class OpenGLRenderer;
+namespace arv::render {
 
 struct RenderMetricsSnapshot {
   usize pending_mesh_upload_count{};
@@ -38,6 +36,10 @@ struct RenderMetricsSnapshot {
   u32 texture_uploads_last_frame{};
   u64 texture_upload_bytes_last_frame{};
   bool gpu_profile_context_initialized{};
+};
+
+struct RenderCommandDiagnostic {
+  std::string message{};
 };
 
 struct PlayerSkinTextureSnapshot {
@@ -101,74 +103,29 @@ public:
   [[nodiscard]] virtual std::vector<ChunkMeshUploadReceipt>
   drain_chunk_mesh_upload_receipts() = 0;
 
+  [[nodiscard]] virtual std::vector<RenderCommandDiagnostic>
+  drain_diagnostics() = 0;
   [[nodiscard]] virtual RenderMetricsSnapshot metrics_snapshot() const = 0;
 };
 
-class OpenGLRenderCommandTarget final : public IRenderCommandTarget {
+class IRenderCommandOwnerThread {
 public:
-  explicit OpenGLRenderCommandTarget(OpenGLRenderer& renderer);
+  virtual ~IRenderCommandOwnerThread() = default;
 
-  void resize(u32 width, u32 height) override;
-  void submit_frame(FramePacket packet) override;
-  void render() override;
-  void begin_shutdown() override;
-
-  void set_chunk_shader_sources(
-      std::string vertex_source,
-      std::string fragment_source) override;
-  void set_entity_shader_sources(
-      std::string vertex_source,
-      std::string fragment_source) override;
-  void set_ui_shader_sources(
-      std::string vertex_source,
-      std::string fragment_source) override;
-  void set_sky_shader_sources(
-      std::string vertex_source,
-      std::string fragment_source) override;
-  void set_particle_shader_sources(
-      std::string vertex_source,
-      std::string fragment_source) override;
-
-  void set_chunk_texture_atlas(TextureArrayUploadData upload) override;
-  void set_entity_texture_atlas(TextureArrayUploadData upload) override;
-  void set_particle_texture_atlas(TextureArrayUploadData upload) override;
-  void set_ui_font_atlas(TextureArrayUploadData upload) override;
-  void set_ui_item_atlas(TextureArrayUploadData upload) override;
-
-  void configure_player_skin_atlas(PlayerSkinAtlasConfig config) override;
-  [[nodiscard]] std::optional<TextureRegionHandle> upload_player_skin_texture(
-      std::string skin_hash,
-      TextureUploadData upload) override;
-  [[nodiscard]] std::optional<PlayerSkinTextureSnapshot> player_skin_texture_snapshot(
-      std::string_view skin_hash,
-      TextureRegionHandle handle) const override;
-  [[nodiscard]] bool mark_player_skin_texture_used(
-      TextureRegionHandle handle,
-      bool pinned) override;
-
-  void set_entity_model(EntityModelAsset model) override;
-  void set_entity_animation(EntityAnimationAsset animation) override;
-  void clear_entity_models() override;
-  void clear_entity_animations() override;
-
-  void set_chunk_mesh_upload_budget(u32 max_uploads_per_frame) override;
-  void enqueue_chunk_mesh_upload(ChunkMeshUpload upload) override;
-  void remove_chunk_mesh(ChunkMeshKey key) override;
-  [[nodiscard]] std::vector<ChunkMeshUploadReceipt>
-  drain_chunk_mesh_upload_receipts() override;
-
-  [[nodiscard]] RenderMetricsSnapshot metrics_snapshot() const override;
-
-private:
-  OpenGLRenderer& renderer_;
+  [[nodiscard]] virtual usize owner_thread_hash() const noexcept = 0;
+  [[nodiscard]] virtual bool is_owner_thread() const noexcept = 0;
+  [[nodiscard]] virtual bool post(std::function<void()> command) = 0;
+  virtual void call(std::function<void()> command) = 0;
 };
 
 class RenderCommandQueue final {
 public:
   explicit RenderCommandQueue(IRenderCommandTarget& target);
+  RenderCommandQueue(IRenderCommandTarget& target, IRenderCommandOwnerThread& owner_thread);
   RenderCommandQueue(IRenderCommandTarget& target, sched::OwnerThread& owner_thread);
 
-  void attach_owner_thread(sched::OwnerThread& owner_thread) noexcept;
+  void attach_owner_thread(IRenderCommandOwnerThread& owner_thread) noexcept;
+  void attach_owner_thread(sched::OwnerThread& owner_thread);
   void clear_owner_thread() noexcept;
   [[nodiscard]] usize owner_thread_hash() const noexcept;
   [[nodiscard]] bool is_owner_thread() const noexcept;
@@ -227,6 +184,7 @@ public:
   void remove_chunk_mesh(ChunkMeshKey key);
   [[nodiscard]] std::vector<ChunkMeshUploadReceipt> drain_chunk_mesh_upload_receipts();
 
+  [[nodiscard]] std::vector<RenderCommandDiagnostic> drain_diagnostics();
   [[nodiscard]] usize pending_mesh_upload_count();
   [[nodiscard]] u32 mesh_uploads_last_frame();
   [[nodiscard]] double mesh_upload_time_ms_last_frame();
@@ -267,6 +225,36 @@ private:
   void publish_metrics_snapshot_on_owner();
   void store_metrics_snapshot(RenderMetricsSnapshot snapshot);
 
+  template<typename Result, bool IsReference = std::is_reference_v<Result>>
+  struct CallResultStorage {
+    std::optional<Result> value;
+
+    template<typename Work>
+    void invoke(Work& work, IRenderCommandTarget& target) {
+      value.emplace(std::invoke(work, target));
+    }
+
+    Result take() {
+      return std::move(*value);
+    }
+  };
+
+  template<typename Result>
+  struct CallResultStorage<Result, true> {
+    using Pointee = std::remove_reference_t<Result>;
+
+    Pointee* value{};
+
+    template<typename Work>
+    void invoke(Work& work, IRenderCommandTarget& target) {
+      value = std::addressof(std::invoke(work, target));
+    }
+
+    Result take() {
+      return *value;
+    }
+  };
+
   template<typename Fn>
   auto call_on_owner(Fn&& fn)
       -> std::invoke_result_t<std::decay_t<Fn>&, IRenderCommandTarget&> {
@@ -287,13 +275,14 @@ private:
     }
 
     auto command_started = std::make_shared<std::atomic_bool>(false);
+    auto work_ptr = std::make_shared<Work>(std::move(work));
     pending_command_count_.fetch_add(1U, std::memory_order_acq_rel);
     if constexpr (std::is_void_v<Result>) {
       try {
-        owner_thread_->call([this, work = std::move(work), command_started]() mutable {
+        owner_thread_->call([this, work_ptr, command_started]() mutable {
           command_started->store(true, std::memory_order_release);
           try {
-            std::invoke(work, target_);
+            std::invoke(*work_ptr, target_);
             publish_metrics_snapshot_on_owner();
             pending_command_count_.fetch_sub(1U, std::memory_order_acq_rel);
           } catch (...) {
@@ -309,15 +298,15 @@ private:
       }
       return;
     } else {
+      CallResultStorage<Result> storage;
       try {
-        return owner_thread_->call(
-            [this, work = std::move(work), command_started]() mutable -> Result {
+        owner_thread_->call(
+            [this, work_ptr, command_started, &storage]() mutable {
           command_started->store(true, std::memory_order_release);
           try {
-            Result result = std::invoke(work, target_);
+            storage.invoke(*work_ptr, target_);
             publish_metrics_snapshot_on_owner();
             pending_command_count_.fetch_sub(1U, std::memory_order_acq_rel);
-            return result;
           } catch (...) {
             pending_command_count_.fetch_sub(1U, std::memory_order_acq_rel);
             throw;
@@ -329,11 +318,13 @@ private:
         }
         throw;
       }
+      return storage.take();
     }
   }
 
   IRenderCommandTarget& target_;
-  sched::OwnerThread* owner_thread_{};
+  std::unique_ptr<IRenderCommandOwnerThread> owned_owner_thread_{};
+  IRenderCommandOwnerThread* owner_thread_{};
   std::atomic<usize> pending_command_count_{0U};
   AtomicMetricsSnapshot metrics_snapshot_{};
 };

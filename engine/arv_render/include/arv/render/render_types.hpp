@@ -174,6 +174,25 @@ struct TextureRegionHandle {
   constexpr bool operator==(const TextureRegionHandle&) const = default;
 };
 
+struct PlayerSkinAtlasConfig {
+  u16 page_size{2048};
+  u16 max_pages{8};
+
+  struct CleanupConfig {
+    u32 interval_seconds{60};
+    u32 evict_after_unused_seconds{300};
+  };
+
+  struct PressureCleanupConfig {
+    bool enabled{true};
+    f32 usage_threshold{0.85F};
+    f32 target_usage{0.65F};
+  };
+
+  CleanupConfig cleanup{};
+  PressureCleanupConfig pressure_cleanup{};
+};
+
 enum VertexMaterialFlags : u8 {
   VertexMaterialFlag_None = 0,
   VertexMaterialFlag_TintFromBiome = 1U << 0U,
@@ -553,6 +572,7 @@ struct EntityVertex {
 };
 
 struct FramePacket {
+  Vec4f clear_color{0.08F, 0.10F, 0.12F, 1.0F};
   CameraSnapshot camera{};
   RenderView world_view{};
   SkyUniforms sky{};

@@ -28,6 +28,27 @@ struct ContainerSlotActionRef {
   usize slot{};
 };
 
+struct GameplayHoverTooltipInput {
+  ui::UiTree* tree{};
+  bool inventory_open{};
+  bool container_open{};
+  bool chat_open{};
+  std::optional<ui::UiItemStackView> carried_stack{};
+  std::span<const ui::UiItemStackView> inventory_slots{};
+  std::span<const ui::UiItemStackView> container_slots{};
+  std::span<const ui::ChatLineView> chat_lines{};
+  const ui::UiDisplayMetrics* metrics{};
+  const ui::IUiTextMeasurer* text_measurer{};
+  Vec2f cursor_position{};
+};
+
+struct GameplayHoverTooltipResult {
+  bool inventory_added{};
+  bool container_added{};
+  bool chat_added{};
+  bool relaid_out{};
+};
+
 [[nodiscard]] std::optional<usize> inventory_slot_from_ui_action(
     const ui::UiAction& action) noexcept;
 
@@ -77,5 +98,8 @@ void update_hotbar_item_popup(
     const ui::UiDisplayMetrics& metrics,
     Vec2f cursor_position,
     const std::optional<ui::UiAction>& hover_action);
+
+[[nodiscard]] GameplayHoverTooltipResult update_gameplay_hover_tooltips(
+    GameplayHoverTooltipInput input);
 
 } // namespace arv::client

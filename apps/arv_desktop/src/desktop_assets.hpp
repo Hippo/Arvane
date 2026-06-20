@@ -1,10 +1,9 @@
 #pragma once
 
-#include "asset_helpers.hpp"
-
 #include "arv/asset/font.hpp"
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
+#include "arv/client/entity_render_assets.hpp"
 #include "arv/client/item_animation.hpp"
 #include "arv/client/particles.hpp"
 #include "arv/core/expected.hpp"
@@ -41,7 +40,7 @@ struct DesktopLoadedAssets {
   render::FluidRenderData fluid_render_data{};
   asset::TextureAtlas item_atlas{};
   ui::UiImageData crosshair_image{};
-  EntityRenderAssets entity_render_assets{};
+  client::EntityRenderAssets entity_render_assets{};
   client::ParticleAssets particle_assets{};
   asset::FontSystem font_system{};
   ui::UiFontStacks ui_font_stacks{};

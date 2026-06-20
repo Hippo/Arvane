@@ -138,6 +138,8 @@ struct DecodedBundle {
   }
   const std::string_view leaf = rest.substr(slash + 1U);
   return leaf == "blocks.json" ||
+         leaf == "container_layouts.json" ||
+         leaf == "container_types.json" ||
          leaf == "items.json" ||
          leaf == "entities.json" ||
          leaf == "vehicles.json" ||

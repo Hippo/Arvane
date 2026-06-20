@@ -1,5 +1,6 @@
 #include "arv/client/item_animation.hpp"
 
+#include "arv/asset/pack.hpp"
 #include "arv/io/data_codecs.hpp"
 
 #include <algorithm>
@@ -474,6 +475,36 @@ Expected<void, ItemAnimationError> validate_item_animation_references(
   return Expected<void, ItemAnimationError>::success();
 }
 
+Expected<ItemAnimationLibrary, ItemAnimationLibraryLoadError>
+load_item_animation_library_from_packs(
+    const asset::PackManager& packs,
+    const player::ItemRegistry& item_registry) {
+  auto item_animation_text =
+      packs.load_merged_json_array_text("item_animations", "animations");
+  if (!item_animation_text) {
+    return Expected<ItemAnimationLibrary, ItemAnimationLibraryLoadError>::failure(
+        {"load", item_animation_text.error().describe()});
+  }
+
+  auto item_animation_library =
+      parse_item_animation_library_json(item_animation_text.value());
+  if (!item_animation_library) {
+    return Expected<ItemAnimationLibrary, ItemAnimationLibraryLoadError>::failure(
+        {"parse", item_animation_library.error().message});
+  }
+
+  auto item_animation_references = validate_item_animation_references(
+      item_registry,
+      item_animation_library.value());
+  if (!item_animation_references) {
+    return Expected<ItemAnimationLibrary, ItemAnimationLibraryLoadError>::failure(
+        {"validate", item_animation_references.error().message});
+  }
+
+  return Expected<ItemAnimationLibrary, ItemAnimationLibraryLoadError>::success(
+      std::move(item_animation_library.value()));
+}
+
 const ItemAnimationClip* resolve_held_item_animation(
     const player::ItemRecord* item,
     std::string_view action,
@@ -526,6 +557,20 @@ bool held_item_animation_condition_passes(
   return false;
 }
 
+HeldItemAnimationInputState held_item_animation_input_from_edges(
+    bool primary_pressed,
+    bool primary_held,
+    bool secondary_pressed,
+    bool secondary_held,
+    bool block_break_active) noexcept {
+  return {
+      .primary_pressed = primary_pressed,
+      .repeat_primary_use = primary_held && block_break_active,
+      .secondary_pressed = secondary_pressed,
+      .secondary_held = secondary_held,
+  };
+}
+
 HeldItemActionPlayResult play_held_item_action(
     HeldItemAnimationPlayer& player,
     const player::ItemRecord* item,
@@ -547,6 +592,141 @@ HeldItemActionPlayResult play_held_item_action(
   }
   player.play(*animation.clip, now_seconds);
   return HeldItemActionPlayResult::Played;
+}
+
+void update_held_item_animation_playback(
+    HeldItemAnimationPlayer& player,
+    bool& secondary_use_active,
+    HeldItemAnimationInputState input,
+    const player::ItemRecord* held_item,
+    const ItemAnimationLibrary& library,
+    HeldItemAnimationConditionState condition_state,
+    Seconds now_seconds) noexcept {
+  if (held_item == nullptr) {
+    secondary_use_active = false;
+    player.stop(now_seconds);
+    return;
+  }
+
+  if (input.primary_pressed) {
+    (void)play_held_item_action(
+        player,
+        held_item,
+        HeldItemActionPrimaryUse,
+        library,
+        condition_state,
+        now_seconds);
+  }
+
+  if (input.repeat_primary_use && player.finished(now_seconds)) {
+    (void)play_held_item_action(
+        player,
+        held_item,
+        HeldItemActionPrimaryUse,
+        library,
+        condition_state,
+        now_seconds);
+  }
+
+  if (input.secondary_pressed) {
+    HeldItemActionPlayResult result = play_held_item_action(
+        player,
+        held_item,
+        HeldItemActionSecondaryUseStart,
+        library,
+        condition_state,
+        now_seconds);
+    if (result == HeldItemActionPlayResult::NoAnimation) {
+      result = play_held_item_action(
+          player,
+          held_item,
+          HeldItemActionSecondaryUseHold,
+          library,
+          condition_state,
+          now_seconds);
+    }
+    secondary_use_active = result != HeldItemActionPlayResult::Suppressed;
+  }
+
+  if (input.secondary_held && secondary_use_active && player.finished(now_seconds)) {
+    const HeldItemAnimationResolution hold_animation =
+        resolve_held_item_animation_binding(
+            held_item,
+            HeldItemActionSecondaryUseHold,
+            library);
+    if (hold_animation.clip != nullptr &&
+        held_item_animation_condition_passes(
+            hold_animation.play_condition,
+            condition_state) &&
+        player.active_clip() != hold_animation.clip) {
+      player.play(*hold_animation.clip, now_seconds);
+    }
+  }
+
+  if (!input.secondary_held && secondary_use_active) {
+    secondary_use_active = false;
+    if (play_held_item_action(
+            player,
+            held_item,
+            HeldItemActionSecondaryUseEnd,
+            library,
+            condition_state,
+            now_seconds) != HeldItemActionPlayResult::Played) {
+      player.stop(now_seconds);
+    }
+  }
+}
+
+void stop_held_item_animation_playback(
+    HeldItemAnimationPlayer& player,
+    bool& secondary_use_active,
+    Seconds now_seconds) noexcept {
+  secondary_use_active = false;
+  player.stop(now_seconds);
+}
+
+HeldItemAnimationPlaybackFrameResult update_held_item_animation_playback_from_frame(
+    HeldItemAnimationPlayer& player,
+    bool& secondary_use_active,
+    const ItemAnimationLibrary& library,
+    HeldItemAnimationPlaybackFrameInput input) noexcept {
+  if (!input.animations_available) {
+    if (input.unavailable_policy ==
+        HeldItemAnimationUnavailablePolicy::ClearSecondaryUseOnly) {
+      secondary_use_active = false;
+      return {.cleared_secondary_use = true};
+    }
+    stop_held_item_animation_playback(
+        player,
+        secondary_use_active,
+        input.now_seconds);
+    return {.stopped = true};
+  }
+
+  if (input.force_stop ||
+      library.clip_count() == 0U ||
+      input.held_item == nullptr) {
+    stop_held_item_animation_playback(
+        player,
+        secondary_use_active,
+        input.now_seconds);
+    return {.stopped = true};
+  }
+
+  update_held_item_animation_playback(
+      player,
+      secondary_use_active,
+      held_item_animation_input_from_edges(
+          input.primary_pressed,
+          input.primary_held,
+          input.secondary_pressed,
+          input.secondary_held,
+          input.block_break_active),
+      input.held_item,
+      library,
+      input.condition_state,
+      input.now_seconds);
+  return {.advanced = true};
 }
 
 const player::ItemRecord* selected_inventory_item(

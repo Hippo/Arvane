@@ -43,25 +43,14 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
             active_session.integrated_server->tick_index(),
             &local_collision_query);
       } else {
-        const bool was_in_game =
-            active_session.client->connection_state() == net::ConnectionState::InGame;
-        if (was_in_game) {
-          if (active_session.client_tick_index == 0U) {
-            active_session.client_tick_index = active_session.client->world_initial_tick();
-          }
-          ++active_session.client_tick_index;
-        }
         world::WorldCollisionQuery local_collision_query(
             active_session.client_world,
             assets_.block_registry,
             true);
-        active_session.client->fixed_tick(
+        (void)client::advance_remote_client_fixed_tick(
+            *active_session.client,
             active_session.client_tick_index,
             &local_collision_query);
-        if (!was_in_game &&
-            active_session.client->connection_state() == net::ConnectionState::InGame) {
-          active_session.client_tick_index = active_session.client->world_initial_tick();
-        }
       }
       if (active_session.client->connection_state() == net::ConnectionState::InGame) {
         if (!ensure_remote_assets(active_session)) {

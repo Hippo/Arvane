@@ -4,9 +4,11 @@
 
 #include "arv/asset/texture_atlas.hpp"
 #include "arv/base/ui.hpp"
+#include "arv/client/block_container_animation.hpp"
 #include "arv/client/block_outline_target.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/item_animation.hpp"
+#include "arv/client/item_rendering.hpp"
 #include "arv/client/particles.hpp"
 #include "arv/command/command_registry.hpp"
 #include "arv/core/fixed_timestep.hpp"
@@ -76,15 +78,11 @@ struct DesktopGameSession {
   usize chat_history_scroll_offset{};
   client::HeldItemAnimationPlayer held_item_animation{};
   client::InputFrame last_gameplay_input{};
-  Seconds next_block_mining_particle_seconds{};
-  Seconds sprint_particle_accumulator{};
-  u32 particle_seed_counter{1U};
-  std::optional<std::chrono::steady_clock::time_point> first_person_sneak_visual_updated_at{};
-  f32 first_person_sneak_visual_progress{};
-  std::optional<protocol::ContainerBlockSource> last_container_animation_source{};
-  std::optional<protocol::ContainerBlockSource> active_container_animation_source{};
-  std::string active_container_animation_clip{};
-  std::chrono::steady_clock::time_point active_container_animation_started_at{};
+  client::LocalBlockMiningParticleState block_mining_particles{};
+  client::LocalSprintGroundParticleState sprint_ground_particles{};
+  client::LocalParticleSeedState particle_seeds{};
+  client::FirstPersonSneakVisualState first_person_sneak_visual{};
+  client::BlockContainerAnimationState block_container_animation{};
   bool held_item_secondary_use_active{};
   bool ui_snapshot_initialized{};
 };

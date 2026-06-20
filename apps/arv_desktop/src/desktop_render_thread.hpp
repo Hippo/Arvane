@@ -3,6 +3,7 @@
 #include "debug_imgui.hpp"
 
 #include "arv/platform/glfw_window.hpp"
+#include "arv/render/opengl_render_commands.hpp"
 #include "arv/render/opengl_renderer.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/sched/owner_thread.hpp"

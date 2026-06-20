@@ -445,6 +445,12 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
       packs / "arvane_base/data/arvane/blocks.json",
       "{\"blocks\":[{\"name\":\"arvane:stone\"}]}\n");
   write_text(
+      packs / "arvane_base/data/arvane/container_types.json",
+      "{\"container_types\":[]}\n");
+  write_text(
+      packs / "arvane_base/data/arvane/container_layouts.json",
+      "{\"container_layouts\":[]}\n");
+  write_text(
       packs / "arvane_base/assets/arvane/textures/block/stone.png",
       "fake-png");
   write_text(
@@ -469,6 +475,12 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
   EXPECT_TRUE(contains_bundle_file(first.value().files, "manifest.json"));
   EXPECT_TRUE(contains_bundle_file(first.value().files, "registry-client.json"));
   EXPECT_TRUE(contains_bundle_file(first.value().files, "data/arvane/blocks.json"));
+  EXPECT_TRUE(contains_bundle_file(
+      first.value().files,
+      "data/arvane/container_types.json"));
+  EXPECT_TRUE(contains_bundle_file(
+      first.value().files,
+      "data/arvane/container_layouts.json"));
   EXPECT_TRUE(contains_bundle_file(
       first.value().files,
       "assets/arvane/textures/block/stone.png"));

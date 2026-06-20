@@ -2,10 +2,14 @@
 
 #include "arv/asset/pack.hpp"
 #include "arv/asset/resource.hpp"
+#include "arv/world/world_queries.hpp"
+#include "arv/world/world_runtime.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,6 +38,23 @@ namespace {
 [[nodiscard]] std::filesystem::path test_arvane_home() {
   std::filesystem::path path{ARVANE_TEST_ASSET_ROOT};
   return path.parent_path().parent_path().parent_path().parent_path();
+}
+
+[[nodiscard]] arv::voxel::BlockRegistry make_local_particle_block_registry() {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+  arv::voxel::BlockDefinition stone =
+      arv::voxel::make_full_cube_definition("arvane:stone");
+  stone.particle_texture_asset = "arvane:texture/block/stone";
+  definitions.push_back(std::move(stone));
+
+  auto registry = arv::voxel::BlockRegistry::build(std::move(definitions));
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
+void ensure_loaded_chunk(arv::world::WorldRuntime& world, arv::ChunkSectionCoord coord) {
+  (void)world.ensure_chunk(coord);
 }
 
 } // namespace
@@ -75,6 +96,169 @@ animation:
   fps: 0
 )yaml");
   EXPECT_FALSE(bad_fps);
+}
+
+TEST(ParticleSystemTests, CollectsUniqueBlockParticleTextureAssets) {
+  std::vector<arv::voxel::BlockDefinition> definitions;
+  definitions.push_back(arv::voxel::make_air_definition());
+  arv::voxel::BlockDefinition stone =
+      arv::voxel::make_full_cube_definition("arvane:stone");
+  stone.particle_texture_asset = "arvane:texture/block/stone";
+  definitions.push_back(std::move(stone));
+  arv::voxel::BlockDefinition grass =
+      arv::voxel::make_full_cube_definition("arvane:grass");
+  grass.particle_texture_asset = "arvane:texture/block/grass";
+  definitions.push_back(std::move(grass));
+  arv::voxel::BlockDefinition stone_stairs =
+      arv::voxel::make_full_cube_definition("arvane:stone_stairs");
+  stone_stairs.particle_texture_asset = "arvane:texture/block/stone";
+  definitions.push_back(std::move(stone_stairs));
+
+  auto registry = arv::voxel::BlockRegistry::build(std::move(definitions));
+  ASSERT_TRUE(registry);
+
+  const std::vector<std::string> textures =
+      arv::client::block_particle_texture_assets(registry.value());
+
+  ASSERT_EQ(textures.size(), 2U);
+  EXPECT_NE(
+      std::find(
+          textures.begin(),
+          textures.end(),
+          "arvane:texture/block/stone"),
+      textures.end());
+  EXPECT_NE(
+      std::find(
+          textures.begin(),
+          textures.end(),
+          "arvane:texture/block/grass"),
+      textures.end());
+}
+
+TEST(ParticleSystemTests, BuildsLocalBlockFaceBurstFromRaycastHit) {
+  const arv::voxel::BlockRegistry registry = make_local_particle_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  ensure_loaded_chunk(world, {{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{3, 1, 0}}, stone));
+
+  const arv::world::WorldCollisionQuery query(world, registry, false);
+  arv::client::LocalParticleSeedState seeds;
+  const std::optional<arv::client::ParticleBurstDesc> burst =
+      arv::client::build_local_block_face_particle_burst(
+          {
+              .collision_query = query,
+              .block_registry = registry,
+              .seed_state = seeds,
+              .origin = {0.5F, 1.62F, 0.5F},
+              .direction = {1.0F, 0.0F, 0.0F},
+              .max_distance = 5.0F,
+              .count = 5U,
+              .extent = 0.22F,
+              .radius = 0.025F,
+          });
+
+  ASSERT_TRUE(burst.has_value());
+  EXPECT_EQ(burst->type_name, "arvane:block_dust");
+  EXPECT_EQ(burst->texture_asset, "arvane:texture/block/stone");
+  EXPECT_EQ(burst->normal, (arv::Vec3f{-1.0F, 0.0F, 0.0F}));
+  EXPECT_EQ(burst->count, 5U);
+  EXPECT_EQ(burst->shape, arv::protocol::ParticleSpawnShape::BlockFace);
+  EXPECT_EQ(seeds.next_sequence, 2U);
+  arv::client::LocalParticleSeedState expected_seed_state;
+  EXPECT_EQ(
+      burst->seed,
+      arv::client::next_local_particle_seed(
+          expected_seed_state,
+          arv::BlockPos{{3, 1, 0}}));
+  EXPECT_NE(burst->seed, 0U);
+}
+
+TEST(ParticleSystemTests, LocalBlockFaceBurstDoesNotConsumeSeedOnMiss) {
+  const arv::voxel::BlockRegistry registry = make_local_particle_block_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  ensure_loaded_chunk(world, {{0, 0, 0}});
+  const arv::world::WorldCollisionQuery query(world, registry, false);
+  arv::client::LocalParticleSeedState seeds;
+
+  const std::optional<arv::client::ParticleBurstDesc> burst =
+      arv::client::build_local_block_face_particle_burst(
+          {
+              .collision_query = query,
+              .block_registry = registry,
+              .seed_state = seeds,
+              .origin = {0.5F, 1.62F, 0.5F},
+              .direction = {1.0F, 0.0F, 0.0F},
+              .max_distance = 5.0F,
+              .count = 5U,
+              .extent = 0.22F,
+              .radius = 0.025F,
+          });
+
+  EXPECT_FALSE(burst.has_value());
+  EXPECT_EQ(seeds.next_sequence, 1U);
+}
+
+TEST(ParticleSystemTests, LocalBlockMiningParticlesRespectIntervalAndReset) {
+  arv::client::LocalBlockMiningParticleState state;
+
+  EXPECT_TRUE(arv::client::consume_local_block_mining_particle_due(state, true, 0.0));
+  EXPECT_FALSE(arv::client::consume_local_block_mining_particle_due(state, true, 0.04));
+  EXPECT_TRUE(arv::client::consume_local_block_mining_particle_due(state, true, 0.09));
+  EXPECT_FALSE(arv::client::consume_local_block_mining_particle_due(state, false, 0.10));
+  EXPECT_TRUE(arv::client::consume_local_block_mining_particle_due(state, true, 0.11));
+}
+
+TEST(ParticleSystemTests, LocalSprintGroundParticlesRequireForwardGroundedSprint) {
+  const arv::voxel::BlockRegistry registry = make_local_particle_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  ensure_loaded_chunk(world, {{0, 0, 0}});
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  const arv::world::WorldCollisionQuery query(world, registry, false);
+
+  arv::client::LocalSprintGroundParticleState state;
+  arv::client::LocalParticleSeedState seeds;
+  const auto make_input = [&](arv::Seconds delta_seconds) {
+    return arv::client::LocalSprintGroundParticleInput{
+        .collision_query = query,
+        .block_registry = registry,
+        .seed_state = seeds,
+        .sprint_held = true,
+        .move_forward = true,
+        .move_backward = false,
+        .sneak_held = false,
+        .player_grounded = true,
+        .player_position = {0.5F, 1.0F, 0.5F},
+        .player_velocity = {0.0F, 0.0F, 2.0F},
+        .delta_seconds = delta_seconds,
+    };
+  };
+
+  EXPECT_FALSE(
+      arv::client::update_local_sprint_ground_particle_burst(
+          state,
+          make_input(0.05))
+          .has_value());
+  std::optional<arv::client::ParticleBurstDesc> burst =
+      arv::client::update_local_sprint_ground_particle_burst(
+          state,
+          make_input(0.07));
+  ASSERT_TRUE(burst.has_value());
+  EXPECT_EQ(burst->type_name, "arvane:block_dust");
+  EXPECT_EQ(burst->texture_asset, "arvane:texture/block/stone");
+  EXPECT_EQ(burst->normal, (arv::Vec3f{0.0F, 1.0F, 0.0F}));
+  EXPECT_EQ(burst->count, 3U);
+  EXPECT_EQ(seeds.next_sequence, 2U);
+
+  auto stopped = make_input(0.20);
+  stopped.move_forward = false;
+  EXPECT_FALSE(
+      arv::client::update_local_sprint_ground_particle_burst(state, stopped)
+          .has_value());
+  EXPECT_FLOAT_EQ(state.accumulator_seconds, 0.0);
 }
 
 TEST(ParticleSystemTests, SimulatesLifetimeAndRendersAnimatedFrames) {

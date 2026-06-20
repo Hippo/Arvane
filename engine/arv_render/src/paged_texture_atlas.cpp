@@ -59,16 +59,7 @@ PagedTextureAtlas::PagedTextureAtlas(Config config)
 }
 
 void PagedTextureAtlas::reset_allocators() {
-  pages_.clear();
-  pages_.resize(actual_max_pages_);
-  for (PageAllocator& page : pages_) {
-    page.free_rects.clear();
-    page.free_rects.push_back({0, 0, actual_page_width_, actual_page_height_});
-  }
-  slots_.clear();
-  slots_.push_back({});
-  free_slot_ids_.clear();
-  allocated_pixels_ = 0;
+  allocator_.configure({actual_page_width_, actual_page_height_, actual_max_pages_});
 }
 
 bool PagedTextureAtlas::initialize_on_render_thread() {
@@ -140,109 +131,16 @@ void PagedTextureAtlas::destroy_on_render_thread() {
   reset_allocators();
 }
 
-std::optional<PagedTextureAtlas::Rect> PagedTextureAtlas::allocate_from_page(
-    PageAllocator& page,
-    u16 width,
-    u16 height) {
-  for (usize index = 0; index < page.free_rects.size(); ++index) {
-    const Rect free = page.free_rects[index];
-    if (free.width < width || free.height < height) {
-      continue;
-    }
-
-    page.free_rects.erase(page.free_rects.begin() + static_cast<std::ptrdiff_t>(index));
-    if (free.width > width) {
-      page.free_rects.push_back({
-          static_cast<u16>(free.x + width),
-          free.y,
-          static_cast<u16>(free.width - width),
-          height});
-    }
-    if (free.height > height) {
-      page.free_rects.push_back({
-          free.x,
-          static_cast<u16>(free.y + height),
-          free.width,
-          static_cast<u16>(free.height - height)});
-    }
-    return Rect{free.x, free.y, width, height};
-  }
-  return std::nullopt;
-}
-
-TextureRegionHandle PagedTextureAtlas::publish_region(AtlasRegion region) {
-  u32 id = 0;
-  if (!free_slot_ids_.empty()) {
-    id = free_slot_ids_.back();
-    free_slot_ids_.pop_back();
-  } else {
-    id = static_cast<u32>(slots_.size());
-    slots_.push_back({});
-  }
-
-  RegionSlot& slot = slots_[id];
-  slot.region = region;
-  slot.occupied = true;
-  return {id, slot.generation};
-}
-
 std::optional<TextureRegionHandle> PagedTextureAtlas::allocate(u16 width, u16 height) {
-  if (width == 0U || height == 0U || width > actual_page_width_ || height > actual_page_height_) {
-    return std::nullopt;
-  }
-
-  for (u16 page_index = 0; page_index < pages_.size(); ++page_index) {
-    std::optional<Rect> rect = allocate_from_page(pages_[page_index], width, height);
-    if (!rect.has_value()) {
-      continue;
-    }
-
-    allocated_pixels_ += static_cast<u64>(width) * height;
-    return publish_region({
-        page_index,
-        rect->x,
-        rect->y,
-        rect->width,
-        rect->height});
-  }
-  return std::nullopt;
-}
-
-bool PagedTextureAtlas::validate_handle(TextureRegionHandle handle) const noexcept {
-  return handle.id != 0U &&
-         handle.id < slots_.size() &&
-         slots_[handle.id].occupied &&
-         slots_[handle.id].generation == handle.generation;
+  return allocator_.allocate(width, height);
 }
 
 void PagedTextureAtlas::free(TextureRegionHandle handle) {
-  if (!validate_handle(handle)) {
-    return;
-  }
-
-  RegionSlot& slot = slots_[handle.id];
-  const AtlasRegion region = slot.region;
-  if (region.page_index < pages_.size()) {
-    pages_[region.page_index].free_rects.push_back({
-        region.x,
-        region.y,
-        region.width,
-        region.height});
-  }
-  allocated_pixels_ -= std::min<u64>(
-      allocated_pixels_,
-      static_cast<u64>(region.width) * region.height);
-  slot.region = {};
-  slot.occupied = false;
-  ++slot.generation;
-  free_slot_ids_.push_back(handle.id);
+  allocator_.free(handle);
 }
 
 std::optional<AtlasRegion> PagedTextureAtlas::resolve(TextureRegionHandle handle) const {
-  if (!validate_handle(handle)) {
-    return std::nullopt;
-  }
-  return slots_[handle.id].region;
+  return allocator_.resolve(handle);
 }
 
 bool PagedTextureAtlas::upload_rgba8_on_render_thread(
@@ -282,11 +180,7 @@ bool PagedTextureAtlas::upload_rgba8_on_render_thread(
 }
 
 f32 PagedTextureAtlas::usage_ratio() const noexcept {
-  const u64 capacity = capacity_pixels();
-  if (capacity == 0U) {
-    return 0.0F;
-  }
-  return static_cast<f32>(allocated_pixels_) / static_cast<f32>(capacity);
+  return allocator_.usage_ratio();
 }
 
 PlayerSkinAtlas::PlayerSkinAtlas(PlayerSkinAtlasConfig config)

@@ -31,7 +31,7 @@ void register_default_fluid_render_data(
 } // namespace
 
 ClientBlockRenderAssetsResult load_client_block_render_assets(
-    asset::PackManager& packs,
+    const asset::PackManager& packs,
     asset::ResourceManager& resources,
     ClientBlockRenderAssetLoadOptions options) {
   ClientBlockRenderAssets loaded;
@@ -112,9 +112,18 @@ ClientBlockRenderAssetsResult load_client_block_render_assets(
     return asset_failure("assets", "block texture atlas did not produce a page");
   }
 
-  register_default_fluid_render_data(
-      loaded.fluid_render_data,
-      loaded.block_registry);
+  if (options.register_fluid_render_data) {
+    auto fluid_render_result = options.register_fluid_render_data(
+        loaded.fluid_render_data,
+        loaded.block_registry);
+    if (!fluid_render_result) {
+      return asset_failure("fluids", fluid_render_result.error());
+    }
+  } else {
+    register_default_fluid_render_data(
+        loaded.fluid_render_data,
+        loaded.block_registry);
+  }
   return ClientBlockRenderAssetsResult::success(std::move(loaded));
 }
 

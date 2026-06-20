@@ -353,4 +353,31 @@ std::optional<ui::UiItemStackView> item_stack_for_ui(
       missing_icon_for(item_atlas, item_atlas_width, item_atlas_height));
 }
 
+InventoryUiProjection project_inventory_ui(
+    const InventoryUiProjectionInput& input) {
+  InventoryUiProjection projection;
+  if (!input.has_authoritative_inventory) {
+    return projection;
+  }
+
+  projection.inventory_slots = inventory_slots_for_ui(
+      input.inventory,
+      input.item_registry,
+      input.item_atlas,
+      input.block_atlas);
+  if (input.container_open) {
+    projection.container_slots = inventory_slots_for_ui(
+        input.container_inventory,
+        input.item_registry,
+        input.item_atlas,
+        input.block_atlas);
+  }
+  projection.carried_stack = item_stack_for_ui(
+      input.carried_stack,
+      input.item_registry,
+      input.item_atlas,
+      input.block_atlas);
+  return projection;
+}
+
 } // namespace arv::client

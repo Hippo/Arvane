@@ -1,10 +1,10 @@
 #include "desktop_menu_state.hpp"
 
-#include "input_adapter.hpp"
-
+#include "arv/client/client_settings.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/config.hpp"
 #include "arv/persistence/save.hpp"
+#include "arv/player/player_constants.hpp"
 
 #include <algorithm>
 #include <iterator>
@@ -75,34 +75,6 @@ namespace {
 
 [[nodiscard]] std::string display_name_or_default(std::string name) {
   return name.empty() ? std::string{"local_player"} : std::move(name);
-}
-
-[[nodiscard]] std::string binding_conflict_key(const platform::InputBinding& binding) {
-  return std::string{platform::input_device_type_name(binding.device_type)} + ":" +
-         binding.input_code + ":" + std::to_string(binding.modifiers);
-}
-
-[[nodiscard]] ui::InputBindingView input_binding_view_from(
-    const platform::InputBinding& binding) {
-  return {
-      true,
-      ui_device_from(binding.device_type),
-      binding.input_code,
-      binding_label(binding),
-      binding.modifiers};
-}
-
-[[nodiscard]] std::string display_name_from_action(std::string_view action_name) {
-  std::string display;
-  display.reserve(action_name.size() + 4U);
-  for (usize index = 0; index < action_name.size(); ++index) {
-    const char ch = action_name[index];
-    if (index > 0U && ch >= 'A' && ch <= 'Z') {
-      display.push_back(' ');
-    }
-    display.push_back(ch);
-  }
-  return display;
 }
 
 } // namespace
@@ -241,11 +213,10 @@ ui::ControlsSettingsView DesktopMenuState::controls_settings() const {
   if (config_ == nullptr) {
     return {};
   }
-  constexpr f32 DefaultSensitivity = 0.0025F;
   return {
-      DefaultSensitivity > 0.0F
-          ? (config_->physics.mouse_sensitivity_radians / DefaultSensitivity) * 100.0F
-          : 100.0F};
+      client::mouse_sensitivity_percent_from_radians(
+          config_->physics.mouse_sensitivity_radians,
+          player::DefaultMouseSensitivityRadians)};
 }
 
 ui::InterfaceSettingsView DesktopMenuState::interface_settings() const {
@@ -261,40 +232,10 @@ ui::InterfaceSettingsView DesktopMenuState::interface_settings() const {
 }
 
 std::vector<ui::KeyBindEntryView> DesktopMenuState::key_bind_entries() const {
-  std::vector<ui::KeyBindEntryView> entries;
   if (input_bindings_ == nullptr) {
-    return entries;
+    return {};
   }
-
-  HashMap<std::string, u32> binding_counts;
-  for (usize index = 0; index < static_cast<usize>(platform::LogicalAction::Count); ++index) {
-    const auto action = static_cast<platform::LogicalAction>(index);
-    for (const platform::InputBinding& binding :
-         platform::bindings_for_action(*input_bindings_, action)) {
-      ++binding_counts[binding_conflict_key(binding)];
-    }
-  }
-
-  entries.reserve(static_cast<usize>(platform::LogicalAction::Count));
-  for (usize index = 0; index < static_cast<usize>(platform::LogicalAction::Count); ++index) {
-    const auto action = static_cast<platform::LogicalAction>(index);
-    ui::KeyBindEntryView entry;
-    entry.action_name = std::string{platform::logical_action_name(action)};
-    entry.display_name = display_name_from_action(entry.action_name);
-    const auto& bindings = platform::bindings_for_action(*input_bindings_, action);
-    if (!bindings.empty()) {
-      entry.primary.has_binding = true;
-      entry.primary.binding = input_binding_view_from(bindings[0]);
-      entry.primary.conflict = binding_counts[binding_conflict_key(bindings[0])] > 1U;
-    }
-    if (bindings.size() > 1U) {
-      entry.secondary.has_binding = true;
-      entry.secondary.binding = input_binding_view_from(bindings[1]);
-      entry.secondary.conflict = binding_counts[binding_conflict_key(bindings[1])] > 1U;
-    }
-    entries.push_back(std::move(entry));
-  }
-  return entries;
+  return client::key_bind_entries_from_input_bindings(*input_bindings_);
 }
 
 const client::LocalPlayerIdentity* DesktopMenuState::active_local_profile() const noexcept {

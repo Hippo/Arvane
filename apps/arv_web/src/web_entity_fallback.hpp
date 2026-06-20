@@ -9,7 +9,7 @@
 
 namespace arv::web {
 
-struct WebChunkVertex {
+struct WebFallbackColorVertex {
   Vec3f position{};
   Vec3f color{};
 };
@@ -20,7 +20,7 @@ struct WebEntityMarker {
   bool dead{};
 };
 
-[[nodiscard]] std::vector<WebChunkVertex> build_fallback_entity_vertices(
+[[nodiscard]] std::vector<WebFallbackColorVertex> build_fallback_entity_vertices(
     std::span<const WebEntityMarker> markers);
 [[nodiscard]] std::vector<WebEntityMarker> build_visible_fallback_entity_markers(
     std::span<const client::ReplicatedEntityMirror> mirrors,

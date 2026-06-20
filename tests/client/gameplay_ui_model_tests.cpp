@@ -1,5 +1,6 @@
 #include "arv/client/gameplay_ui_model.hpp"
 #include "arv/player/player_constants.hpp"
+#include "arv/text/language.hpp"
 
 #include <gtest/gtest.h>
 
@@ -29,6 +30,63 @@ namespace {
 }
 
 } // namespace
+
+TEST(GameplayUiModelProjectionTests, BuildsRidePromptModelWhenGameplayCanMount) {
+  const auto has_targeted_rideable = []() -> bool {
+    return true;
+  };
+
+  const arv::ui::RidePromptModel prompt =
+      arv::client::build_ride_prompt_model(
+          {
+              .interactions_available = true,
+              .key_label = "M",
+              .viewport = {1280.0F, 720.0F},
+              .has_targeted_rideable = has_targeted_rideable,
+          });
+
+  EXPECT_TRUE(prompt.visible);
+  EXPECT_EQ(prompt.key_label, "M");
+  EXPECT_FLOAT_EQ(prompt.viewport.x, 1280.0F);
+  EXPECT_FLOAT_EQ(prompt.viewport.y, 720.0F);
+}
+
+TEST(GameplayUiModelProjectionTests, RidePromptModelSkipsTargetLookupWhenBlocked) {
+  bool target_lookup_called = false;
+  const auto has_targeted_rideable = [&target_lookup_called]() -> bool {
+    target_lookup_called = true;
+    return true;
+  };
+
+  const arv::ui::RidePromptModel prompt =
+      arv::client::build_ride_prompt_model(
+          {
+              .interactions_available = true,
+              .gameplay_blocked = true,
+              .key_label = "M",
+              .has_targeted_rideable = has_targeted_rideable,
+          });
+
+  EXPECT_FALSE(prompt.visible);
+  EXPECT_FALSE(target_lookup_called);
+}
+
+TEST(GameplayUiModelProjectionTests, RidePromptModelRequiresTargetedRideable) {
+  const auto has_targeted_rideable = []() -> bool {
+    return false;
+  };
+
+  const arv::ui::RidePromptModel prompt =
+      arv::client::build_ride_prompt_model(
+          {
+              .interactions_available = true,
+              .key_label = "M",
+              .has_targeted_rideable = has_targeted_rideable,
+          });
+
+  EXPECT_FALSE(prompt.visible);
+  EXPECT_TRUE(prompt.key_label.empty());
+}
 
 TEST(GameplayUiModelProjectionTests, PassiveChatProjectionKeepsLatestVisibleLines) {
   arv::client::ClientRuntime client = make_client();
@@ -138,4 +196,66 @@ TEST(GameplayUiModelProjectionTests, BuildsRuntimeBackedOpenChatAndInventoryMode
   EXPECT_EQ(model.debug.fps, 144U);
   EXPECT_TRUE(model.ride_prompt.visible);
   EXPECT_EQ(model.ride_prompt.key_label, "R");
+}
+
+TEST(GameplayUiModelProjectionTests, SnapshotBuilderUsesLanguageFallbackAndPopupGate) {
+  arv::client::ClientRuntime client = make_client();
+  arv::text::LanguageCatalog language;
+  language.set("ui.inventory.title", "Localized Inventory");
+  language.set("ui.tab.players", "Localized Players");
+
+  arv::ui::RidePromptModel ride_prompt;
+  ride_prompt.visible = true;
+  ride_prompt.key_label = "R";
+
+  const arv::ui::GameplayUiModel model =
+      arv::client::build_gameplay_ui_model_from_snapshots(
+          {
+              .client = client,
+              .chat_config = arv::io::UiConfig::ChatConfig{},
+              .viewport = {800.0F, 450.0F},
+              .cursor_position = {12.0F, 34.0F},
+              .hotbar_item_popup_name = "Stone",
+              .hotbar_item_popup_alpha = 0.0F,
+              .crosshair = {.visible = true},
+              .ride_prompt = std::move(ride_prompt),
+              .language = &language,
+              .debug_fps_visible = false,
+          });
+
+  EXPECT_EQ(model.inventory.title, "Localized Inventory");
+  EXPECT_EQ(model.tab_menu.header, "Localized Players");
+  EXPECT_TRUE(model.hotbar.item_name_popup.empty());
+  EXPECT_FLOAT_EQ(model.hotbar.item_name_popup_alpha, 0.0F);
+  EXPECT_TRUE(model.crosshair.visible);
+  EXPECT_FLOAT_EQ(model.crosshair.viewport.x, 800.0F);
+  EXPECT_FLOAT_EQ(model.crosshair.viewport.y, 450.0F);
+  EXPECT_TRUE(model.ride_prompt.visible);
+  EXPECT_FLOAT_EQ(model.ride_prompt.viewport.x, 800.0F);
+  EXPECT_FLOAT_EQ(model.ride_prompt.viewport.y, 450.0F);
+  EXPECT_FALSE(model.debug.show_fps);
+}
+
+TEST(GameplayUiModelProjectionTests, SnapshotBuilderKeepsExplicitTitlesAndVisiblePopup) {
+  arv::client::ClientRuntime client = make_client();
+  arv::text::LanguageCatalog language;
+  language.set("ui.inventory.title", "Ignored Inventory");
+  language.set("ui.tab.players", "Ignored Players");
+
+  const arv::ui::GameplayUiModel model =
+      arv::client::build_gameplay_ui_model_from_snapshots(
+          {
+              .client = client,
+              .chat_config = arv::io::UiConfig::ChatConfig{},
+              .inventory_title = "Backpack",
+              .tab_title = "Crew",
+              .hotbar_item_popup_name = "Pickaxe",
+              .hotbar_item_popup_alpha = 0.5F,
+              .language = &language,
+          });
+
+  EXPECT_EQ(model.inventory.title, "Backpack");
+  EXPECT_EQ(model.tab_menu.header, "Crew");
+  EXPECT_EQ(model.hotbar.item_name_popup, "Pickaxe");
+  EXPECT_FLOAT_EQ(model.hotbar.item_name_popup_alpha, 0.5F);
 }

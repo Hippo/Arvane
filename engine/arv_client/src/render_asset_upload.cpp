@@ -49,4 +49,41 @@ render::TextureArrayUploadData texture_array_upload_from_atlas(
   return upload;
 }
 
+bool upload_texture_array_with_status(
+    const render::TextureArrayUploadData& upload,
+    std::string_view invalid_status,
+    FunctionRef<bool(const render::TextureArrayUploadData&)> upload_backend,
+    FunctionRef<void(std::string_view)> report_status) {
+  if (!upload.valid()) {
+    if (report_status) {
+      report_status(invalid_status);
+    }
+    return false;
+  }
+  if (!upload_backend) {
+    return false;
+  }
+  return upload_backend(upload);
+}
+
+EntityRenderAssetUploadSummary upload_entity_render_asset_records(
+    std::span<const render::EntityModelAsset> models,
+    std::span<const render::EntityAnimationAsset> animations,
+    const EntityRenderAssetUploadCallbacks& callbacks) {
+  EntityRenderAssetUploadSummary summary;
+  if (callbacks.upload_model) {
+    for (const render::EntityModelAsset& model : models) {
+      callbacks.upload_model(model);
+      ++summary.models;
+    }
+  }
+  if (callbacks.upload_animation) {
+    for (const render::EntityAnimationAsset& animation : animations) {
+      callbacks.upload_animation(animation);
+      ++summary.animations;
+    }
+  }
+  return summary;
+}
+
 } // namespace arv::client

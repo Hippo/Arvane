@@ -1,4 +1,5 @@
 set(ARV_CLIENT_HEADERS
+  include/arv/client/block_container_animation.hpp
   include/arv/client/block_render_assets.hpp
   include/arv/client/block_outline_target.hpp
   include/arv/client/camera_shell.hpp
@@ -6,13 +7,21 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/chunk_collision_query.hpp
   include/arv/client/chunk_interest.hpp
   include/arv/client/chunk_snapshot.hpp
+  include/arv/client/client_chunk_stream_packets.hpp
+  include/arv/client/client_frame_composer.hpp
+  include/arv/client/client_gameplay_assets.hpp
   include/arv/client/client_pack_sync.hpp
+  include/arv/client/client_input_mapping.hpp
+  include/arv/client/client_settings.hpp
   include/arv/client/client_session.hpp
+  include/arv/client/client_ui_assets.hpp
   include/arv/client/command_chat.hpp
   include/arv/client/client_runtime.hpp
+  include/arv/client/client_world_time.hpp
   include/arv/client/dropped_item_mirror.hpp
   include/arv/client/entity_render_assets.hpp
   include/arv/client/gameplay_interactions.hpp
+  include/arv/client/gameplay_ui_frame.hpp
   include/arv/client/gameplay_ui_model.hpp
   include/arv/client/item_animation.hpp
   include/arv/client/item_rendering.hpp
@@ -21,6 +30,8 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/local_player_controller.hpp
   include/arv/client/player_skin_rendering.hpp
   include/arv/client/particles.hpp
+  include/arv/client/remote_chunk_stream.hpp
+  include/arv/client/replicated_entity_mirror.hpp
   include/arv/client/render_asset_upload.hpp
   include/arv/client/sky_rendering.hpp
   include/arv/client/ui_interactions.hpp
@@ -38,6 +49,17 @@ target_link_libraries(arv_client_pack_sync
     arv_asset_bundle
 )
 
+add_library(arv_client_remote_chunk_stream STATIC
+  src/remote_chunk_stream.cpp
+)
+target_include_directories(arv_client_remote_chunk_stream PUBLIC include)
+target_link_libraries(arv_client_remote_chunk_stream
+  PUBLIC
+    arv_protocol_block_updates
+    arv_protocol_stream
+    arv_voxel
+)
+
 add_library(arv_client_session STATIC
   src/client_session.cpp
 )
@@ -47,6 +69,7 @@ target_link_libraries(arv_client_session
     arv_core_headers
     arv_crypto
     arv_client_dropped_items
+    arv_client_remote_chunk_stream
     arv_net
     arv_player
     arv_protocol_block_updates
@@ -101,6 +124,16 @@ target_link_libraries(arv_client_chunk_collision
     arv_voxel
 )
 
+add_library(arv_client_world_time STATIC
+  src/client_world_time.cpp
+)
+target_include_directories(arv_client_world_time PUBLIC include)
+target_link_libraries(arv_client_world_time
+  PUBLIC
+    arv_protocol_world_time
+    arv_world_time
+)
+
 add_library(arv_client_render_assets STATIC
   src/block_render_assets.cpp
   src/entity_render_assets.cpp
@@ -135,6 +168,26 @@ target_link_libraries(arv_client_item_ui
     arv_io_data
 )
 
+add_library(arv_client_ui_assets STATIC
+  src/client_ui_assets.cpp
+)
+target_include_directories(arv_client_ui_assets PUBLIC include)
+target_link_libraries(arv_client_ui_assets
+  PUBLIC
+    arv_asset
+    arv_base_ui
+    arv_entity
+    arv_player
+    arv_render_mesh
+    arv_render_headers
+    arv_text
+    arv_ui
+    arv_voxel
+  PRIVATE
+    arv_client_render_assets
+    arv_client_item_ui
+)
+
 add_library(arv_client_item_animation STATIC
   src/item_animation.cpp
 )
@@ -144,7 +197,44 @@ target_link_libraries(arv_client_item_animation
     arv_core_headers
     arv_player
   PRIVATE
+    arv_asset_core
     arv_io_data
+)
+
+add_library(arv_client_gameplay_assets STATIC
+  src/client_gameplay_assets.cpp
+)
+target_include_directories(arv_client_gameplay_assets PUBLIC include)
+target_link_libraries(arv_client_gameplay_assets
+  PUBLIC
+    arv_client_item_animation
+    arv_client_render_assets
+    arv_client_ui_assets
+)
+
+add_library(arv_client_input STATIC
+  src/client_input_mapping.cpp
+)
+target_include_directories(arv_client_input PUBLIC include)
+target_link_libraries(arv_client_input
+  PUBLIC
+    arv_base_ui
+    arv_client_local_player
+    arv_platform_input
+)
+
+add_library(arv_client_settings STATIC
+  src/client_settings.cpp
+)
+target_include_directories(arv_client_settings PUBLIC include)
+target_link_libraries(arv_client_settings
+  PUBLIC
+    arv_base_ui
+    arv_io_headers
+    arv_platform_input
+    arv_player_headers
+  PRIVATE
+    arv_client_input
 )
 
 add_library(arv_client_dropped_items STATIC
@@ -156,15 +246,43 @@ target_link_libraries(arv_client_dropped_items
     arv_protocol_dropped_items
 )
 
+add_library(arv_client_block_container_animation STATIC
+  src/block_container_animation.cpp
+)
+target_include_directories(arv_client_block_container_animation PUBLIC include)
+target_link_libraries(arv_client_block_container_animation
+  PUBLIC
+    arv_core_headers
+    arv_protocol_container_sync
+    arv_render_headers
+)
+
 add_library(arv_client_item_rendering STATIC
   src/item_rendering.cpp
 )
 target_include_directories(arv_client_item_rendering PUBLIC include)
 target_link_libraries(arv_client_item_rendering
   PUBLIC
+    arv_client_block_container_animation
+    arv_client_chunk_collision
     arv_client_dropped_items
     arv_client_item_animation
     arv_client_render_assets
+    arv_protocol_entity_replication
+    arv_protocol_player_input
+    arv_render_headers
+    arv_voxel
+)
+
+add_library(arv_client_frame_composer STATIC
+  src/client_frame_composer.cpp
+)
+target_include_directories(arv_client_frame_composer PUBLIC include)
+target_link_libraries(arv_client_frame_composer
+  PUBLIC
+    arv_client_item_rendering
+    arv_player
+    arv_protocol_player_input
     arv_render_headers
 )
 
@@ -222,11 +340,36 @@ target_link_libraries(arv_client_runtime
     arv_protocol_vehicles
     arv_protocol_world_time
     arv_render_mesh
+    arv_voxel
     arv_text
   PRIVATE
     arv_asset_bundle
     arv_client_pack_sync
     arv_io_data
+)
+
+add_library(arv_client_gameplay_ui_frame STATIC
+  src/gameplay_ui_frame.cpp
+)
+target_include_directories(arv_client_gameplay_ui_frame PUBLIC include)
+target_link_libraries(arv_client_gameplay_ui_frame
+  PUBLIC
+    arv_client_runtime
+    arv_client_ui_assets
+)
+
+add_library(arv_client_ui_routing STATIC
+  src/client_ui_routing.cpp
+)
+target_include_directories(arv_client_ui_routing PUBLIC include)
+target_link_libraries(arv_client_ui_routing
+  PUBLIC
+    arv_base_ui
+    arv_client_runtime
+    arv_platform_input
+  PRIVATE
+    arv_client_input
+    arv_player
 )
 
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
@@ -237,5 +380,5 @@ add_library(arv_client STATIC
   src/command_chat.cpp
 )
 target_include_directories(arv_client PUBLIC include)
-target_link_libraries(arv_client PUBLIC arv_client_runtime arv_client_chunk_collision arv_client_chunk_snapshot arv_client_dropped_items arv_client_item_animation arv_client_item_rendering arv_client_item_ui arv_client_local_player arv_client_render_assets arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
+target_link_libraries(arv_client PUBLIC arv_client_runtime arv_client_block_container_animation arv_client_chunk_collision arv_client_chunk_snapshot arv_client_dropped_items arv_client_input arv_client_settings arv_client_ui_routing arv_client_item_animation arv_client_gameplay_assets arv_client_gameplay_ui_frame arv_client_item_rendering arv_client_frame_composer arv_client_item_ui arv_client_ui_assets arv_client_local_player arv_client_render_assets arv_client_remote_chunk_stream arv_client_world_time arv_core arv_crypto arv_net arv_physics arv_player arv_protocol arv_render)
 target_link_libraries(arv_client PRIVATE arv_asset arv_client_pack_sync arv_client_session arv_command arv_entity arv_io arv_text)

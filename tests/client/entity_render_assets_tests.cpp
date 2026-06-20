@@ -1,5 +1,8 @@
+#include "arv/asset/pack.hpp"
 #include "arv/asset/resource.hpp"
 #include "arv/asset/texture_atlas.hpp"
+#include "arv/base/base_module.hpp"
+#include "arv/client/block_render_assets.hpp"
 #include "arv/client/entity_render_assets.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/player/item.hpp"
@@ -8,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -48,6 +52,11 @@ namespace {
   return std::move(registry.value());
 }
 
+[[nodiscard]] std::filesystem::path test_arvane_home() {
+  std::filesystem::path path{ARVANE_TEST_ASSET_ROOT};
+  return path.parent_path().parent_path().parent_path().parent_path();
+}
+
 [[nodiscard]] const arv::render::EntityModelAsset* find_model(
     const arv::client::EntityRenderAssets& assets,
     arv::render::EntityModelID id) noexcept {
@@ -71,6 +80,50 @@ namespace {
 }
 
 } // namespace
+
+TEST(EntityRenderAssetsTests, ClientEntityLoaderUsesCustomEntityRegistryBuilder) {
+  auto packs = arv::asset::PackManager::load(test_arvane_home());
+  ASSERT_TRUE(packs) << packs.error().describe();
+  arv::asset::ResourceManager resources(packs.value());
+
+  auto block_assets =
+      arv::client::load_client_block_render_assets(packs.value(), resources);
+  ASSERT_TRUE(block_assets) << block_assets.error().message;
+
+  int builder_calls = 0;
+  const auto build_entity_registry =
+      [&builder_calls](
+          std::vector<arv::entity::EntityDefinition> definitions)
+      -> arv::entity::EntityRegistry::Result {
+    ++builder_calls;
+    return arv::base::build_base_entity_registry(
+        std::move(definitions),
+        nullptr,
+        false);
+  };
+  arv::client::ClientEntityRenderAssetLoadOptions options;
+  options.build_entity_registry =
+      arv::FunctionRef<arv::entity::EntityRegistry::Result(
+          std::vector<arv::entity::EntityDefinition>)>{build_entity_registry};
+
+  auto entity_assets = arv::client::load_client_entity_render_assets(
+      packs.value(),
+      resources,
+      block_assets.value().block_registry,
+      block_assets.value().block_atlas.render_data,
+      block_assets.value().block_models,
+      options);
+
+  ASSERT_TRUE(entity_assets) << entity_assets.error().message;
+  EXPECT_EQ(builder_calls, 1);
+  const std::optional<arv::EntityTypeID> player_type =
+      entity_assets.value().entity_registry.find_type(
+          arv::entity::PlayerEntityTypeName);
+  ASSERT_TRUE(player_type.has_value());
+  EXPECT_EQ(player_type.value(), arv::entity::PlayerEntityTypeID);
+  EXPECT_FALSE(entity_assets.value().render_assets.models.empty());
+  EXPECT_FALSE(entity_assets.value().vehicle_registry.records().empty());
+}
 
 TEST(EntityRenderAssetsTests, BlockAttachedModelsUseEntityModelBaker) {
   arv::voxel::BlockRegistry registry = make_chest_block_registry();

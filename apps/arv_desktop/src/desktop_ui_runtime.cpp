@@ -1,13 +1,15 @@
 #include "desktop_frame_loop.hpp"
 
-#include "asset_helpers.hpp"
-#include "desktop_input_routing.hpp"
-#include "input_adapter.hpp"
-#include "desktop_skin_textures.hpp"
 #include "ui_model.hpp"
 
 #include "arv/client/command_chat.hpp"
+#include "arv/client/client_input_mapping.hpp"
+#include "arv/client/client_ui_assets.hpp"
+#include "arv/client/client_ui_routing.hpp"
 #include "arv/client/gameplay_interactions.hpp"
+#include "arv/client/gameplay_ui_frame.hpp"
+#include "arv/client/gameplay_ui_model.hpp"
+#include "arv/client/player_skin_rendering.hpp"
 #include "arv/client/ui_interactions.hpp"
 
 #include <algorithm>
@@ -95,17 +97,6 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   return stack.has_value() ? ui_cache_hash_append_item_stack(hash, stack.value()) : hash;
 }
 
-[[nodiscard]] std::string mount_binding_label(
-    const platform::InputBindings& input_bindings) {
-  const platform::ActionBindingList& bindings =
-      platform::bindings_for_action(input_bindings, platform::LogicalAction::Mount);
-  return bindings.empty() ? std::string{} : binding_label(bindings.front());
-}
-
-[[nodiscard]] bool desktop_local_player_is_mounted(const client::ClientRuntime& runtime) {
-  return client::local_player_is_mounted(runtime);
-}
-
 [[nodiscard]] u64 gameplay_ui_signature(
     const DesktopGameSession& session,
     const platform::InputSnapshot& platform_input,
@@ -164,7 +155,7 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
     hash = ui_cache_hash_append_item_stack(hash, slot);
   }
   hash = ui_cache_hash_append_optional_item_stack(hash, session.carried_inventory_stack);
-  if (session.client->inventory_open()) {
+  if (session.client->inventory_open() || session.client->container_open()) {
     hash = ui_cache_hash_append_f32(hash, platform_input.cursor_x);
     hash = ui_cache_hash_append_f32(hash, platform_input.cursor_y);
   }
@@ -298,18 +289,26 @@ void DesktopFrameLoop::append_loading_screen_ui(
   }
 
   loading_tree.layout_with_metrics(ui_metrics_, &ui_text_measurer_);
-  ui::append_ui_draw_commands(
+  const auto sync_font_atlas = [this]() -> bool {
+    return sync_ui_font_atlas();
+  };
+  (void)client::append_ui_draw_commands_with_font_sync(
       loading_tree,
       assets_.font_system,
       assets_.ui_font_stacks,
       frame,
       ui_metrics_,
-      seconds);
-  if (assets_.font_system.atlas_dirty()) {
-    renderer_.set_ui_font_atlas(
-        texture_array_upload_from_image(assets_.font_system.atlas_image()));
-    assets_.font_system.clear_atlas_dirty();
-  }
+      seconds,
+      sync_font_atlas);
+}
+
+bool DesktopFrameLoop::sync_ui_font_atlas() {
+  const auto upload_font_atlas =
+      [this](const render::TextureArrayUploadData& upload) -> bool {
+    renderer_.set_ui_font_atlas(upload);
+    return true;
+  };
+  return client::sync_ui_font_atlas(assets_.font_system, upload_font_atlas);
 }
 
 void DesktopFrameLoop::append_menu_player_skin_preview(
@@ -341,21 +340,12 @@ void DesktopFrameLoop::append_menu_player_skin_preview(
     return;
   }
 
-  std::string skin_hash = request->skin_hash;
-  const std::string default_skin_hash =
-      request->slim_model ? std::string{DefaultMenuPlayerSlimSkinKey}
-                          : std::string{DefaultMenuPlayerSkinKey};
-  if (skin_hash.empty()) {
-    skin_hash = default_skin_hash;
-  }
-  auto skin_region = player_skin_regions_.find(skin_hash);
-  if (skin_region == player_skin_regions_.end() || !skin_region->second.valid()) {
-    skin_region = player_skin_regions_.find(default_skin_hash);
-  }
-  if (skin_region == player_skin_regions_.end() || !skin_region->second.valid()) {
-    skin_region = player_skin_regions_.find(std::string{DefaultMenuPlayerSkinKey});
-  }
-  if (skin_region == player_skin_regions_.end() || !skin_region->second.valid()) {
+  std::optional<render::TextureRegionHandle> skin_region =
+      client::menu_player_skin_preview_region(
+          player_skin_regions_,
+          request->skin_hash,
+          request->slim_model);
+  if (!skin_region.has_value()) {
     return;
   }
 
@@ -373,7 +363,7 @@ void DesktopFrameLoop::append_menu_player_skin_preview(
   player.position = {0.0F, -0.02F, 0.0F};
   player.rotation = model_forward_yaw_rotation(request->yaw_radians + PiRadians);
   player.scale = 1.0F;
-  player.player_skin_region = skin_region->second;
+  player.player_skin_region = skin_region.value();
   preview.entities.push_back(std::move(player));
   frame.entity_previews.push_back(std::move(preview));
 }
@@ -395,7 +385,17 @@ void DesktopFrameLoop::build_ui(
         has_active_integrated_session,
         fixed_tick_ran,
         now);
-    update_hotbar_item_popup(*active_session, now);
+    if (active_session->client == nullptr) {
+      client::reset_hotbar_item_popup(hotbar_item_popup_);
+    } else {
+      client::update_hotbar_item_popup(
+          hotbar_item_popup_,
+          active_session->client->selected_hotbar_slot(),
+          std::span<const ui::UiItemStackView>{
+              active_session->inventory_slots.data(),
+              active_session->inventory_slots.size()},
+          now);
+    }
   } else {
     client::reset_hotbar_item_popup(hotbar_item_popup_);
   }
@@ -403,22 +403,38 @@ void DesktopFrameLoop::build_ui(
   menu_context.viewport = ui_metrics_.logical_size;
   menu_context.screens = &screens;
 
-  ui::RidePromptModel ride_prompt;
-  if (has_active_session && active_session != nullptr &&
-      active_session->client != nullptr &&
-      !debug_menu_.open &&
-      !screens.blocks_gameplay_input() &&
-      !active_session->client->inventory_open() &&
-      !active_session->client->chat_open() &&
-      !desktop_local_player_is_mounted(*active_session->client)) {
-    std::string key_label = mount_binding_label(input_bindings_);
-    if (!key_label.empty() &&
-        targeted_rideable_entity(*active_session).has_value()) {
-      ride_prompt.visible = true;
-      ride_prompt.key_label = std::move(key_label);
-      ride_prompt.viewport = ui_metrics_.logical_size;
-    }
-  }
+  const bool ride_prompt_client_ready =
+      has_active_session && active_session != nullptr &&
+      active_session->client != nullptr;
+  const std::string ride_prompt_key_label =
+      ride_prompt_client_ready
+          ? client::first_action_binding_label(
+                input_bindings_,
+                platform::LogicalAction::Mount)
+          : std::string{};
+  const auto has_targeted_rideable = [this, active_session]() -> bool {
+    return active_session != nullptr &&
+           targeted_rideable_entity(*active_session).has_value();
+  };
+  ui::RidePromptModel ride_prompt =
+      client::build_ride_prompt_model(
+          {
+              .interactions_available =
+                  ride_prompt_client_ready && !debug_menu_.open,
+              .gameplay_blocked = screens.blocks_gameplay_input(),
+              .inventory_open =
+                  ride_prompt_client_ready &&
+                  active_session->client->inventory_open(),
+              .chat_open =
+                  ride_prompt_client_ready &&
+                  active_session->client->chat_open(),
+              .local_player_mounted =
+                  ride_prompt_client_ready &&
+                  client::local_player_is_mounted(*active_session->client),
+              .key_label = ride_prompt_key_label,
+              .viewport = ui_metrics_.logical_size,
+              .has_targeted_rideable = has_targeted_rideable,
+          });
 
   const UiBuildCacheKey next_cache_key{
       ui_cache_dimension(ui_metrics_.logical_size.x),
@@ -433,7 +449,7 @@ void DesktopFrameLoop::build_ui(
                 platform_input,
                 displayed_fps_,
                 hotbar_item_popup_.popup_name,
-                hotbar_item_popup_alpha(now),
+                client::hotbar_item_popup_alpha(hotbar_item_popup_, now),
                 ride_prompt.visible,
                 ride_prompt.key_label)
           : 0U};
@@ -441,50 +457,93 @@ void DesktopFrameLoop::build_ui(
       !ui_tree_cache_valid_ || !(next_cache_key == ui_tree_cache_key_);
   if (rebuild_ui_tree) {
     if (has_active_session) {
-      build_gameplay_ui(*active_session, platform_input, now, std::move(ride_prompt));
+      if (screens.has_active_screen()) {
+        const auto append_active_screens = [&]() {
+          screens.append_to(menu_context);
+        };
+        build_gameplay_ui(
+            *active_session,
+            platform_input,
+            now,
+            std::move(ride_prompt),
+            append_active_screens);
+      } else {
+        build_gameplay_ui(
+            *active_session,
+            platform_input,
+            now,
+            std::move(ride_prompt),
+            {});
+      }
     } else {
       ui_tree_.clear();
+      if (screens.has_active_screen()) {
+        screens.append_to(menu_context);
+      }
+      ui_tree_.layout_with_metrics(ui_metrics_, &ui_text_measurer_);
     }
-
-    if (screens.has_active_screen()) {
-      screens.append_to(menu_context);
-    }
-    ui_tree_.layout_with_metrics(ui_metrics_, &ui_text_measurer_);
     ui_tree_cache_key_ = next_cache_key;
     ui_tree_cache_valid_ = true;
   }
-  const std::optional<ui::UiAction> hover_action =
-      ui_tree_.route_mouse_move({platform_input.cursor_x, platform_input.cursor_y});
-  const bool added_inventory_tooltip =
-      has_active_session &&
-      append_inventory_hover_tooltip_if_needed(
-          *active_session,
-          platform_input,
-          hover_action);
-  const bool added_chat_tooltip =
-      has_active_session &&
-      append_chat_hover_tooltip_if_needed(
-          *active_session,
-          platform_input,
-          hover_action);
-  if (added_inventory_tooltip || added_chat_tooltip) {
-    ui_tree_.layout_with_metrics(ui_metrics_, &ui_text_measurer_);
-    (void)ui_tree_.route_mouse_move(
-        {platform_input.cursor_x, platform_input.cursor_y});
-  }
-  append_menu_player_skin_preview(frame, menu_context);
-  ui::append_ui_draw_commands(
-      ui_tree_,
-      assets_.font_system,
-      assets_.ui_font_stacks,
-      frame,
-      ui_metrics_,
-      std::chrono::duration<f32>(now - app_start_time_).count());
-  if (assets_.font_system.atlas_dirty()) {
-    renderer_.set_ui_font_atlas(
-        texture_array_upload_from_image(assets_.font_system.atlas_image()));
-    assets_.font_system.clear_atlas_dirty();
-  }
+  const auto sync_font_atlas = [this]() -> bool {
+    return sync_ui_font_atlas();
+  };
+  const auto append_before_ui_draw = [&]() {
+    append_menu_player_skin_preview(frame, menu_context);
+  };
+  (void)client::append_gameplay_ui_frame(
+      {
+          .tree = &ui_tree_,
+          .metrics = &ui_metrics_,
+          .text_measurer = &ui_text_measurer_,
+          .cursor_position = {platform_input.cursor_x, platform_input.cursor_y},
+          .hover = {
+              .inventory_open =
+                  has_active_session &&
+                  active_session != nullptr &&
+                  active_session->client != nullptr &&
+                  active_session->client->inventory_open(),
+              .container_open =
+                  has_active_session &&
+                  active_session != nullptr &&
+                  active_session->client != nullptr &&
+                  active_session->client->container_open(),
+              .chat_open =
+                  has_active_session &&
+                  active_session != nullptr &&
+                  active_session->client != nullptr &&
+                  active_session->client->chat_open(),
+              .carried_stack =
+                  active_session != nullptr
+                      ? active_session->carried_inventory_stack
+                      : std::optional<ui::UiItemStackView>{},
+              .inventory_slots =
+                  active_session != nullptr
+                      ? std::span<const ui::UiItemStackView>{
+                            active_session->inventory_slots.data(),
+                            active_session->inventory_slots.size()}
+                      : std::span<const ui::UiItemStackView>{},
+              .container_slots =
+                  active_session != nullptr
+                      ? std::span<const ui::UiItemStackView>{
+                            active_session->container_slots.data(),
+                            active_session->container_slots.size()}
+                      : std::span<const ui::UiItemStackView>{},
+              .chat_lines =
+                  active_session != nullptr
+                      ? std::span<const ui::ChatLineView>{
+                            active_session->chat_lines.data(),
+                            active_session->chat_lines.size()}
+                      : std::span<const ui::ChatLineView>{},
+          },
+          .before_draw_append = append_before_ui_draw,
+          .font_system = &assets_.font_system,
+          .font_stacks = &assets_.ui_font_stacks,
+          .frame = &frame,
+          .time_seconds =
+              std::chrono::duration<f32>(now - app_start_time_).count(),
+          .sync_font_atlas = sync_font_atlas,
+      });
 }
 
 void DesktopFrameLoop::update_gameplay_ui_snapshots(
@@ -511,84 +570,12 @@ void DesktopFrameLoop::update_gameplay_ui_snapshots(
     active_session.tab_players.clear();
   }
 
-  refresh_gameplay_chat_lines_for_ui(
+  client::refresh_gameplay_chat_lines(
       active_session.chat_lines,
       *active_session.client,
       config_.ui.chat,
       now,
       active_session.chat_history_scroll_offset);
-}
-
-void DesktopFrameLoop::update_hotbar_item_popup(
-    DesktopGameSession& active_session,
-    std::chrono::steady_clock::time_point now) {
-  if (active_session.client == nullptr) {
-    client::reset_hotbar_item_popup(hotbar_item_popup_);
-    return;
-  }
-
-  client::update_hotbar_item_popup(
-      hotbar_item_popup_,
-      active_session.client->selected_hotbar_slot(),
-      std::span<const ui::UiItemStackView>{
-          active_session.inventory_slots.data(),
-          active_session.inventory_slots.size()},
-      now);
-}
-
-f32 DesktopFrameLoop::hotbar_item_popup_alpha(
-    std::chrono::steady_clock::time_point now) const noexcept {
-  return client::hotbar_item_popup_alpha(hotbar_item_popup_, now);
-}
-
-bool DesktopFrameLoop::append_inventory_hover_tooltip_if_needed(
-    DesktopGameSession& active_session,
-    const platform::InputSnapshot& platform_input,
-    const std::optional<ui::UiAction>& hover_action) {
-  if (active_session.client == nullptr) {
-    return false;
-  }
-  return client::append_inventory_hover_tooltip_if_needed(
-      ui_tree_,
-      active_session.client->inventory_open(),
-      active_session.carried_inventory_stack,
-      std::span<const ui::UiItemStackView>{
-          active_session.inventory_slots.data(),
-          active_session.inventory_slots.size()},
-      ui_metrics_,
-      {platform_input.cursor_x, platform_input.cursor_y},
-      hover_action) ||
-      client::append_container_hover_tooltip_if_needed(
-          ui_tree_,
-          active_session.client->container_open(),
-          active_session.carried_inventory_stack,
-          std::span<const ui::UiItemStackView>{
-              active_session.container_slots.data(),
-              active_session.container_slots.size()},
-          std::span<const ui::UiItemStackView>{
-              active_session.inventory_slots.data(),
-              active_session.inventory_slots.size()},
-          ui_metrics_,
-          {platform_input.cursor_x, platform_input.cursor_y},
-          hover_action);
-}
-
-bool DesktopFrameLoop::append_chat_hover_tooltip_if_needed(
-    DesktopGameSession& active_session,
-    const platform::InputSnapshot& platform_input,
-    const std::optional<ui::UiAction>& hover_action) {
-  if (active_session.client == nullptr) {
-    return false;
-  }
-  return client::append_chat_hover_tooltip_if_needed(
-      ui_tree_,
-      active_session.client->chat_open(),
-      std::span<const ui::ChatLineView>{
-          active_session.chat_lines.data(),
-          active_session.chat_lines.size()},
-      ui_metrics_,
-      {platform_input.cursor_x, platform_input.cursor_y},
-      hover_action);
 }
 
 bool DesktopFrameLoop::route_chat_mouse_input(
@@ -597,153 +584,100 @@ bool DesktopFrameLoop::route_chat_mouse_input(
   if (active_session.client == nullptr) {
     return false;
   }
-
-  bool handled = false;
-  const Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
-  (void)ui_tree_.route_mouse_move(cursor);
-  if (platform_input.mouse_wheel_y != 0.0F) {
-    const usize max_offset = chat_history_max_scroll_offset(
-        active_session.client->chat_history().size(),
-        std::max<usize>(1U, config_.ui.chat.open_max_lines));
-    active_session.chat_history_scroll_offset =
-        std::min(active_session.chat_history_scroll_offset, max_offset);
-    const usize steps = chat_history_scroll_steps(platform_input.mouse_wheel_y);
-    if (steps > 0U) {
-      if (platform_input.mouse_wheel_y > 0.0F) {
-        const usize remaining = max_offset > active_session.chat_history_scroll_offset
-            ? max_offset - active_session.chat_history_scroll_offset
-            : 0U;
-        active_session.chat_history_scroll_offset += std::min(steps, remaining);
-      } else {
-        active_session.chat_history_scroll_offset -=
-            std::min(steps, active_session.chat_history_scroll_offset);
-      }
-      handled = true;
-    }
-  }
-  if (platform_input.mouse_left_pressed) {
-    const std::optional<ui::UiAction> action =
-        ui_tree_.route_mouse_down(cursor, ui::UiMouseButton::Left);
-    if (action.has_value() && action->action_id == "chat_url_cancel") {
-      active_session.client->cancel_chat_url_confirmation();
-      handled = true;
-    } else if (action.has_value() && action->action_id == "chat_url_confirm") {
-      // TODO(arvane): Open the confirmed URL through a platform browser abstraction
-      // once one exists. Confirmation is intentionally wired before any native open.
-      active_session.client->acknowledge_chat_url_open_unavailable();
-      handled = true;
-    } else if (action.has_value()) {
-      const std::optional<std::pair<usize, usize>> run_id =
-          client::chat_run_from_ui_action(action.value());
-      if (run_id.has_value() &&
-          run_id->first < active_session.chat_lines.size() &&
-          run_id->second < active_session.chat_lines[run_id->first].runs.size()) {
-        const arv::text::RichTextRun& run =
-            active_session.chat_lines[run_id->first].runs[run_id->second];
-        if (run.click_event.has_value()) {
-          const arv::text::ClickEvent& click = run.click_event.value();
-          switch (click.action) {
-            case arv::text::ClickAction::SuggestCommand:
-              active_session.client->suggest_chat_command(click.value);
-              handled = true;
-              break;
-            case arv::text::ClickAction::OpenUrl:
-              if (client::safe_chat_url_scheme(click.value)) {
-                active_session.client->request_chat_url_confirmation(click.value);
-              } else {
-                active_session.client->add_chat_message(
-                    assets_.language.text("ui.chat.blocked_unsafe_url"));
-              }
-              handled = true;
-              break;
-            case arv::text::ClickAction::RunCommand: {
-              const bool remote_command =
-                  active_session.integrated_server == nullptr;
-              const command::CommandResult result =
-                  execute_chat_command(active_session, click.value);
-              if (!remote_command || !result.succeeded()) {
-                client::append_command_result_to_chat(
-                    *active_session.client,
-                    result,
-                    assets_.language);
-              }
-              handled = true;
-              break;
-            }
-            case arv::text::ClickAction::CopyToClipboard:
-              // TODO(arvane): Route through a platform clipboard abstraction when
-              // one exists outside debug ImGui tooling.
-              active_session.client->add_chat_message(
-                  assets_.language.text("ui.chat.copy_unavailable"));
-              handled = true;
-              break;
-          }
+  const auto open_url_unavailable = [](std::string_view) {
+    return false;
+  };
+  const auto copy_to_clipboard_unavailable = [](std::string_view) {
+    return false;
+  };
+  const auto run_command_click =
+      [&](std::string_view command_text) {
+        const bool remote_command =
+            active_session.integrated_server == nullptr;
+        const command::CommandResult result =
+            execute_chat_command(active_session, std::string{command_text});
+        if (!remote_command || !result.succeeded()) {
+          client::append_command_result_to_chat(
+              *active_session.client,
+              result,
+              assets_.language);
         }
-      }
-    }
-  }
-  if (platform_input.mouse_left_released) {
-    (void)ui_tree_.route_mouse_up(cursor, ui::UiMouseButton::Left);
-  }
-  if (platform_input.mouse_right_pressed) {
-    (void)ui_tree_.route_mouse_down(cursor, ui::UiMouseButton::Right);
-  }
-  if (platform_input.mouse_right_released) {
-    (void)ui_tree_.route_mouse_up(cursor, ui::UiMouseButton::Right);
-  }
-  return handled;
+      };
+  const client::ChatMouseRoutingCallbacks callbacks{
+      .open_url = open_url_unavailable,
+      .copy_to_clipboard = copy_to_clipboard_unavailable,
+      .run_command = run_command_click,
+      .blocked_unsafe_url_message =
+          assets_.language.text("ui.chat.blocked_unsafe_url"),
+      .copy_unavailable_message =
+          assets_.language.text("ui.chat.copy_unavailable"),
+  };
+  return client::route_chat_mouse_input(
+      ui_tree_,
+      *active_session.client,
+      platform_input,
+      std::span<const ui::ChatLineView>{
+          active_session.chat_lines.data(),
+          active_session.chat_lines.size()},
+      active_session.client->chat_history().size(),
+      config_.ui.chat.open_max_lines,
+      active_session.chat_history_scroll_offset,
+      callbacks);
 }
 
 void DesktopFrameLoop::build_gameplay_ui(
     DesktopGameSession& active_session,
     const platform::InputSnapshot& platform_input,
     std::chrono::steady_clock::time_point now,
-    ui::RidePromptModel ride_prompt) {
-  const f32 item_popup_alpha = hotbar_item_popup_alpha(now);
-  const player::ContainerUiLayoutDefinition* container_layout =
-      active_session.client->container_open()
-          ? assets_.container_layouts.find(active_session.client->active_container_layout())
-          : nullptr;
-  ui::build_gameplay_ui(
-      ui_tree_,
-      gameplay_ui_model_for_ui(
+    ui::RidePromptModel ride_prompt,
+    FunctionRef<void()> append_active_screens) {
+  const f32 item_popup_alpha =
+      client::hotbar_item_popup_alpha(hotbar_item_popup_, now);
+  (void)client::build_gameplay_ui_tree(
+      {
+          .tree = &ui_tree_,
+          .theme = &ui_theme_,
+          .model = client::build_gameplay_ui_model_from_snapshots(
           {
-              *active_session.client,
-              config_.ui.chat,
-              std::span<const ui::UiItemStackView>{
+              .client = *active_session.client,
+              .chat_config = config_.ui.chat,
+              .inventory_slots = std::span<const ui::UiItemStackView>{
                   active_session.inventory_slots.data(),
                   active_session.inventory_slots.size()},
-              std::span<const ui::UiItemStackView>{
+              .container_slots = std::span<const ui::UiItemStackView>{
                   active_session.container_slots.data(),
                   active_session.container_slots.size()},
-              active_session.carried_inventory_stack,
-              std::span<const ui::ChatLineView>{
+              .carried_inventory_stack = active_session.carried_inventory_stack,
+              .chat_lines = std::span<const ui::ChatLineView>{
                   active_session.chat_lines.data(),
                   active_session.chat_lines.size()},
-              active_session.chat_history_scroll_offset,
-              std::span<const ui::PlayerListEntryView>{
+              .chat_history_scroll_offset = active_session.chat_history_scroll_offset,
+              .tab_players = std::span<const ui::PlayerListEntryView>{
                   active_session.tab_players.data(),
                   active_session.tab_players.size()},
-              assets_.language.text("ui.inventory.title"),
-              active_session.client->active_container_title(),
-              container_layout,
-              assets_.language.text("ui.tab.players"),
-              ui_metrics_.logical_size,
-              {
+              .inventory_title = assets_.language.text("ui.inventory.title"),
+              .tab_title = assets_.language.text("ui.tab.players"),
+              .container_layouts = &assets_.container_layouts,
+              .viewport = ui_metrics_.logical_size,
+              .cursor_position = {
                   platform_input.cursor_x,
                   platform_input.cursor_y,
               },
-              displayed_fps_,
-              item_popup_alpha > 0.0F
-                  ? std::string_view{
-                        hotbar_item_popup_.popup_name.data(),
-                        hotbar_item_popup_.popup_name.size()}
-                  : std::string_view{},
-              item_popup_alpha,
-              {assets_.crosshair_image.valid, ui_metrics_.logical_size, assets_.crosshair_image},
-              std::move(ride_prompt),
-              &assets_.language,
-          }));
+              .displayed_fps = displayed_fps_,
+              .hotbar_item_popup_name = hotbar_item_popup_.popup_name,
+              .hotbar_item_popup_alpha = item_popup_alpha,
+              .crosshair = {
+                  assets_.crosshair_image.valid,
+                  ui_metrics_.logical_size,
+                  assets_.crosshair_image,
+              },
+              .ride_prompt = std::move(ride_prompt),
+              .language = &assets_.language,
+          }),
+          .append_active_screens = append_active_screens,
+          .metrics = &ui_metrics_,
+          .text_measurer = &ui_text_measurer_,
+      });
 }
 
 } // namespace arv::desktop

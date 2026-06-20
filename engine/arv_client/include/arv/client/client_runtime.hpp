@@ -2,10 +2,12 @@
 
 #include "arv/client/camera_shell.hpp"
 #include "arv/client/chat_history.hpp"
+#include "arv/client/client_chunk_stream_packets.hpp"
 #include "arv/client/dropped_item_mirror.hpp"
 #include "arv/client/local_identity.hpp"
 #include "arv/client/local_player_controller.hpp"
 #include "arv/client/particles.hpp"
+#include "arv/client/replicated_entity_mirror.hpp"
 #include "arv/client/vehicle_debug.hpp"
 #include "arv/core/time.hpp"
 #include "arv/net/transport.hpp"
@@ -37,44 +39,6 @@ class VehicleDefinitionRegistry;
 
 namespace arv::client {
 
-struct ReplicatedPassengerMirror {
-  EntityNetID passenger_id{};
-  std::string seat_id{};
-  bool controls_vehicle{};
-};
-
-struct ReplicatedEntityMirror {
-  EntityNetID entity_id{};
-  EntityTypeID entity_type{};
-  std::string entity_type_name{};
-  WorldID world_id{};
-  Vec3f previous_position{};
-  Vec3f position{};
-  Vec3f velocity{};
-  Vec3f render_position{};
-  Vec3f interpolation_start_position{};
-  Quatf previous_rotation{};
-  Quatf rotation{};
-  Quatf render_rotation{};
-  Quatf interpolation_start_rotation{};
-  u64 last_server_tick{};
-  u64 last_transform_change_server_tick{};
-  Seconds interpolation_elapsed_seconds{};
-  Seconds interpolation_duration_seconds{};
-  std::optional<PlayerID> owning_player{};
-  std::vector<protocol::EntityAnimationPlayback> animations{};
-  Vec3f head_rotation_degrees{};
-  bool has_health{};
-  f32 health_current{};
-  f32 health_max{};
-  bool dead{};
-  bool invulnerable{};
-  std::optional<EntityNetID> parent_rideable{};
-  std::string parent_seat_id{};
-  bool controls_parent_vehicle{};
-  std::vector<ReplicatedPassengerMirror> passengers{};
-};
-
 struct ClientAttackFeedback {
   EntityNetID target_entity{};
   Vec3f target_position{};
@@ -89,6 +53,12 @@ struct ClientNetworkSettings {
 
 struct ClientChatSettings {
   usize max_history_messages{DefaultMaxChatHistoryMessages};
+};
+
+struct RemoteClientFixedTickResult {
+  bool was_in_game{};
+  bool entered_game{};
+  TickIndex submitted_tick{};
 };
 
 class ClientRuntime {
@@ -168,6 +138,7 @@ public:
   [[nodiscard]] std::vector<protocol::ClientboundChunkSectionData> drain_received_chunk_section_data();
   [[nodiscard]] std::vector<protocol::ClientboundChunkSectionUnload> drain_received_chunk_section_unloads();
   [[nodiscard]] std::vector<protocol::ClientboundBlockUpdateBatch> drain_received_block_updates();
+  [[nodiscard]] ClientChunkStreamPackets drain_chunk_stream_packets();
   [[nodiscard]] std::optional<protocol::ClientboundWorldTime> take_world_time_update();
   [[nodiscard]] const player::Inventory& inventory() const noexcept;
   [[nodiscard]] const std::optional<player::ItemStack>& inventory_cursor_stack() const noexcept;
@@ -219,5 +190,10 @@ private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
+
+[[nodiscard]] RemoteClientFixedTickResult advance_remote_client_fixed_tick(
+    ClientRuntime& client,
+    TickIndex& client_tick,
+    const physics::ICollisionQuery* collision_query = nullptr);
 
 } // namespace arv::client

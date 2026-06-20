@@ -530,6 +530,108 @@ void ParticleRegistry::add_frame_reference(const ParticleAtlasFrame& frame) {
   frames_.push_back(frame);
 }
 
+u32 next_local_particle_seed(LocalParticleSeedState& state, BlockPos pos) noexcept {
+  const u32 sequence = state.next_sequence++;
+  const u64 x = static_cast<u64>(static_cast<i64>(pos.value.x) * 73856093LL);
+  const u64 y = static_cast<u64>(static_cast<i64>(pos.value.y) * 19349663LL);
+  const u64 z = static_cast<u64>(static_cast<i64>(pos.value.z) * 83492791LL);
+  const u32 seed = static_cast<u32>(x ^ y ^ z ^ sequence);
+  return seed == 0U ? 1U : seed;
+}
+
+std::optional<ParticleBurstDesc> build_local_block_face_particle_burst(
+    const LocalBlockFaceParticleBurstInput& input) {
+  const std::optional<physics::BlockRaycastHit> hit = physics::raycast_blocks(
+      input.collision_query,
+      input.origin,
+      input.direction,
+      input.max_distance);
+  if (!hit.has_value() || input.block_registry.is_air(hit->variant)) {
+    return std::nullopt;
+  }
+
+  const voxel::BlockVariantRecord* variant =
+      input.block_registry.variant(hit->variant);
+  const Vec3i offset = voxel::block_face_offset(hit->face);
+  const Vec3f normal{
+      static_cast<f32>(offset.x),
+      static_cast<f32>(offset.y),
+      static_cast<f32>(offset.z)};
+
+  ParticleBurstDesc desc;
+  desc.type_name = "arvane:block_dust";
+  if (variant != nullptr) {
+    desc.texture_asset = variant->particle_texture_asset;
+  }
+  desc.position = hit->hit_point + normal * 0.035F;
+  desc.normal = normal;
+  desc.extents = {input.extent, input.extent, 0.0F};
+  desc.radius = input.radius;
+  desc.count = input.count;
+  desc.seed = next_local_particle_seed(input.seed_state, hit->block);
+  desc.shape = protocol::ParticleSpawnShape::BlockFace;
+  return desc;
+}
+
+bool consume_local_block_mining_particle_due(
+    LocalBlockMiningParticleState& state,
+    bool mining_block,
+    Seconds now_seconds,
+    Seconds interval_seconds) noexcept {
+  if (!mining_block) {
+    state.next_spawn_time_seconds = 0.0;
+    return false;
+  }
+  if (now_seconds < state.next_spawn_time_seconds) {
+    return false;
+  }
+  state.next_spawn_time_seconds = now_seconds + std::max<Seconds>(interval_seconds, 0.0);
+  return true;
+}
+
+std::optional<ParticleBurstDesc> update_local_sprint_ground_particle_burst(
+    LocalSprintGroundParticleState& state,
+    const LocalSprintGroundParticleInput& input) {
+  const f32 horizontal_speed_sq =
+      input.player_velocity.x * input.player_velocity.x +
+      input.player_velocity.z * input.player_velocity.z;
+  const bool sprinting_on_ground =
+      input.sprint_held &&
+      input.move_forward &&
+      !input.move_backward &&
+      !input.sneak_held &&
+      input.player_grounded &&
+      horizontal_speed_sq > 1.0F;
+  if (!sprinting_on_ground) {
+    state.accumulator_seconds = 0.0;
+    return std::nullopt;
+  }
+
+  const Seconds interval = std::max<Seconds>(input.interval_seconds, 0.0);
+  if (interval <= 0.0) {
+    state.accumulator_seconds = 0.0;
+  } else {
+    state.accumulator_seconds += std::max<Seconds>(input.delta_seconds, 0.0);
+    if (state.accumulator_seconds < interval) {
+      return std::nullopt;
+    }
+    state.accumulator_seconds = std::fmod(state.accumulator_seconds, interval);
+  }
+
+  return build_local_block_face_particle_burst(
+      {
+          .collision_query = input.collision_query,
+          .block_registry = input.block_registry,
+          .seed_state = input.seed_state,
+          .origin = input.player_position + Vec3f{0.0F, 0.08F, 0.0F},
+          .direction = {0.0F, -1.0F, 0.0F},
+          .max_distance = 0.35F,
+          .count = 3U,
+          .extent = 0.28F,
+          .radius = 0.02F,
+      });
+}
+
 asset::TextureAtlasBuildOptions default_particle_atlas_options() noexcept {
   return asset::TextureAtlasBuildOptions{1024U, 4U, 2U, false};
 }
@@ -825,6 +927,22 @@ ParticleAssetsResult load_particle_assets_from_packs(
   assets.registry = std::move(registry);
   assets.atlas = std::move(atlas.value());
   return ParticleAssetsResult::success(std::move(assets));
+}
+
+std::vector<std::string> block_particle_texture_assets(
+    const voxel::BlockRegistry& registry) {
+  std::vector<std::string> textures;
+  for (u32 index = 0; index < registry.block_count(); ++index) {
+    const voxel::BlockRecord* block = registry.block(voxel::BlockID{index});
+    if (block == nullptr || block->particle_texture_asset.empty()) {
+      continue;
+    }
+    if (std::find(textures.begin(), textures.end(), block->particle_texture_asset) ==
+        textures.end()) {
+      textures.push_back(block->particle_texture_asset);
+    }
+  }
+  return textures;
 }
 
 usize particle_animation_frame_index(
