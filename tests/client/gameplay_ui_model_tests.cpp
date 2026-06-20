@@ -47,8 +47,27 @@ TEST(GameplayUiModelProjectionTests, BuildsRidePromptModelWhenGameplayCanMount) 
 
   EXPECT_TRUE(prompt.visible);
   EXPECT_EQ(prompt.key_label, "M");
+  EXPECT_EQ(prompt.suffix, " to Ride");
+  EXPECT_FLOAT_EQ(prompt.alpha, 1.0F);
   EXPECT_FLOAT_EQ(prompt.viewport.x, 1280.0F);
   EXPECT_FLOAT_EQ(prompt.viewport.y, 720.0F);
+}
+
+TEST(GameplayUiModelProjectionTests, BuildsMountExitPromptModelWhileMountedAndFading) {
+  const arv::ui::RidePromptModel prompt =
+      arv::client::build_ride_prompt_model(
+          {
+              .interactions_available = true,
+              .local_player_mounted = true,
+              .mount_exit_prompt_alpha = 0.45F,
+              .key_label = "F",
+              .viewport = {1280.0F, 720.0F},
+          });
+
+  EXPECT_TRUE(prompt.visible);
+  EXPECT_EQ(prompt.key_label, "F");
+  EXPECT_EQ(prompt.suffix, " to Exit");
+  EXPECT_FLOAT_EQ(prompt.alpha, 0.45F);
 }
 
 TEST(GameplayUiModelProjectionTests, RidePromptModelSkipsTargetLookupWhenBlocked) {

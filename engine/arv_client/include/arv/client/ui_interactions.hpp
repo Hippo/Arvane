@@ -23,6 +23,12 @@ struct HotbarItemPopupState {
   bool observation_initialized{};
 };
 
+struct MountExitPromptState {
+  std::chrono::steady_clock::time_point expires_at{};
+  bool observed_mounted{};
+  bool observation_initialized{};
+};
+
 struct ContainerSlotActionRef {
   player::ContainerSlotSource source{player::ContainerSlotSource::OpenedContainer};
   usize slot{};
@@ -70,6 +76,17 @@ void update_hotbar_item_popup(
 
 [[nodiscard]] f32 hotbar_item_popup_alpha(
     const HotbarItemPopupState& state,
+    std::chrono::steady_clock::time_point now) noexcept;
+
+void reset_mount_exit_prompt(MountExitPromptState& state) noexcept;
+
+void update_mount_exit_prompt(
+    MountExitPromptState& state,
+    bool mounted,
+    std::chrono::steady_clock::time_point now);
+
+[[nodiscard]] f32 mount_exit_prompt_alpha(
+    const MountExitPromptState& state,
     std::chrono::steady_clock::time_point now) noexcept;
 
 [[nodiscard]] bool append_inventory_hover_tooltip_if_needed(

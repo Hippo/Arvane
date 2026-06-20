@@ -902,6 +902,64 @@ TEST(PlayerInteractionTests, PlaneDismountRequestWorksInMidair) {
   EXPECT_NEAR(dismounted_player.position.z, plane_position.z, 0.0001F);
 }
 
+TEST(PlayerInteractionTests, MountDismountRequestWorksInMidairWithoutSafeGround) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_mount_request_vehicle_registry();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.0F, 20.0F, 0.0F};
+  player_state.velocity = {};
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(player_state.player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(server.voxel_world().set_entity_position(
+      player_entity.value(),
+      player_state.position));
+
+  const arv::Vec3f mount_position{2.0F, 20.0F, 0.0F};
+  const arv::EntityID mount = create_networked_test_mount(
+      server,
+      vehicle_registry,
+      mount_position);
+  const std::optional<arv::EntityNetID> mount_net =
+      server.voxel_world().network_id_for_entity(mount);
+  ASSERT_TRUE(mount_net.has_value());
+
+  ASSERT_TRUE(client.request_ride_entity(mount_net.value()));
+  server.tick();
+  ASSERT_EQ(
+      server.voxel_world().mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{mount});
+
+  ASSERT_TRUE(client.request_dismount());
+  server.tick();
+
+  EXPECT_FALSE(server.voxel_world().mounted_rideable(player_entity.value()).has_value());
+  const arv::player::PlayerState& dismounted_player = connected_player(server);
+  EXPECT_NEAR(dismounted_player.position.x, mount_position.x, 0.0001F);
+  EXPECT_GT(dismounted_player.position.y, mount_position.y + 3.0F);
+  EXPECT_NEAR(dismounted_player.position.z, mount_position.z, 0.0001F);
+}
+
 TEST(PlayerInteractionTests, AcceptedBuggyVehicleMoveUpdatesDrivingAndReverseAnimations) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =

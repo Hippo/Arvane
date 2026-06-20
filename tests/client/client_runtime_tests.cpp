@@ -282,6 +282,39 @@ arv::entity::VehicleDefinitionRegistry make_client_buggy_registry() {
   return std::move(registry.value());
 }
 
+arv::entity::VehicleDefinitionRegistry make_client_living_mount_registry() {
+  arv::entity::VehicleDefinition horse;
+  horse.name = "arvane:test_horse";
+  horse.kind = arv::entity::VehicleKind::Mount;
+  horse.physics = arv::entity::VehiclePhysicsKind::LivingMount;
+  horse.collision_size = {1.4F, 1.6F, 1.4F};
+  horse.seats.push_back({"saddle",
+                         "saddle",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 1.1F, 0.0F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::MountedThirdPerson});
+  horse.living_mount.walk_speed = 4.0F;
+  horse.living_mount.sprint_speed = 7.0F;
+  horse.living_mount.acceleration = 16.0F;
+  horse.living_mount.turn_rate = arv::degrees_to_radians(180.0F);
+  horse.living_mount.jump_strength = 7.0F;
+  horse.living_mount.gravity_scale = 1.0F;
+  horse.living_mount.step_height = 1.0F;
+  horse.living_mount.friction = 0.82F;
+  horse.authority.max_speed = 8.0F;
+  horse.authority.max_acceleration = 16.0F;
+  horse.authority.max_deceleration = 22.0F;
+  horse.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
+  horse.authority.max_vertical_speed = 30.0F;
+  horse.authority.max_step_height = 1.05F;
+  horse.authority.requires_ground = false;
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(horse)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
 arv::entity::VehicleDefinitionRegistry make_client_air_vehicle_registry() {
   arv::entity::VehicleDefinition plane;
   plane.name = "arvane:test_plane";
@@ -1342,6 +1375,124 @@ TEST(ClientRuntimeTests, GroundVehiclePredictionClampsAgainstWallAndMovesSeatAnc
   EXPECT_NEAR(last.velocity.z, 0.0F, 0.0001F);
   EXPECT_NEAR(client.player_position().x, last.position.x, 0.0001F);
   EXPECT_NEAR(client.player_position().y, last.position.y + 0.8F, 0.0001F);
+  EXPECT_NEAR(client.player_position().z, last.position.z, 0.0001F);
+}
+
+TEST(ClientRuntimeTests, LivingMountPredictionFallsWhenUnsupported) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_living_mount_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 4.0F, 0.0F});
+  spawn_and_mount_test_vehicle(
+      client,
+      *server_transport,
+      connection_id.value(),
+      "arvane:test_horse",
+      "saddle",
+      arv::EntityNetID{10},
+      {0.0F, 4.0F, 0.0F});
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::world::WorldCollisionQuery query(world, block_registry, false);
+
+  for (arv::TickIndex tick = 3; tick < 8; ++tick) {
+    client.submit_input(arv::client::InputFrame{});
+    client.fixed_tick(tick, &query);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundVehicleMove& last = moves.back();
+  EXPECT_LT(last.position.y, 4.0F);
+  EXPECT_LT(last.velocity.y, 0.0F);
+  EXPECT_FALSE(arv::protocol::has_vehicle_move_flag(
+      last.flags,
+      arv::protocol::VehicleMoveFlags::OnGround));
+  EXPECT_NEAR(client.player_position().y, last.position.y + 1.1F, 0.0001F);
+}
+
+TEST(ClientRuntimeTests, LivingMountPredictionStepsOntoOneBlockObstacle) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_living_mount_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+  spawn_and_mount_test_vehicle(
+      client,
+      *server_transport,
+      connection_id.value(),
+      "arvane:test_horse",
+      "saddle",
+      arv::EntityNetID{10},
+      {0.0F, 1.0F, 0.0F});
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  for (const arv::ChunkSectionCoord coord : {
+           arv::ChunkSectionCoord{{-1, 0, -1}},
+           arv::ChunkSectionCoord{{-1, 0, 0}},
+           arv::ChunkSectionCoord{{0, 0, -1}},
+           arv::ChunkSectionCoord{{0, 0, 0}},
+       }) {
+    (void)world.ensure_chunk(coord);
+  }
+  for (arv::i32 z = -3; z <= 8; ++z) {
+    for (arv::i32 x = -4; x <= 4; ++x) {
+      ASSERT_TRUE(world.set_block({{x, 0, z}}, stone));
+    }
+  }
+  for (arv::i32 z = 2; z <= 4; ++z) {
+    for (arv::i32 x = -2; x <= 2; ++x) {
+      ASSERT_TRUE(world.set_block({{x, 1, z}}, stone));
+    }
+  }
+  const arv::world::WorldCollisionQuery query(world, block_registry, false);
+
+  bool stepped_up = false;
+  bool advanced_on_step = false;
+  for (arv::TickIndex tick = 3; tick < 100; ++tick) {
+    client.submit_input(arv::client::InputFrame{.move_forward = true});
+    client.fixed_tick(tick, &query);
+    if (client.player_position().y > 2.6F) {
+      stepped_up = true;
+      if (client.player_position().z > 1.25F) {
+        advanced_on_step = true;
+        break;
+      }
+    }
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundVehicleMove& last = moves.back();
+  EXPECT_TRUE(stepped_up);
+  EXPECT_TRUE(advanced_on_step);
+  EXPECT_GT(last.position.y, 1.5F);
+  EXPECT_GT(last.position.z, 1.25F);
+  EXPECT_TRUE(arv::protocol::has_vehicle_move_flag(
+      last.flags,
+      arv::protocol::VehicleMoveFlags::OnGround));
+  EXPECT_NEAR(client.player_position().x, last.position.x, 0.0001F);
+  EXPECT_NEAR(client.player_position().y, last.position.y + 1.1F, 0.0001F);
   EXPECT_NEAR(client.player_position().z, last.position.z, 0.0001F);
 }
 

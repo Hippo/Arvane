@@ -15,6 +15,8 @@ namespace arv::ui {
 struct RidePromptModel {
   bool visible{};
   std::string key_label{};
+  std::string suffix{" to Ride"};
+  f32 alpha{1.0F};
   Vec2f viewport{};
 };
 

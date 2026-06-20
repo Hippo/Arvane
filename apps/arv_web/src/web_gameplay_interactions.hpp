@@ -4,6 +4,8 @@
 #include "arv/client/local_player_controller.hpp"
 #include "arv/core/types.hpp"
 
+#include <chrono>
+
 namespace arv::web {
 
 void send_web_entity_interactions_from_input(
@@ -16,6 +18,7 @@ void update_web_local_particles_from_input(
     const client::InputFrame& input,
     Seconds now_seconds,
     Seconds delta_seconds);
-[[nodiscard]] ui::RidePromptModel web_ride_prompt_model();
+[[nodiscard]] ui::RidePromptModel web_ride_prompt_model(
+    std::chrono::steady_clock::time_point now);
 
 } // namespace arv::web

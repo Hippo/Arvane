@@ -66,6 +66,7 @@ struct GameplayInteractionDispatchResult {
   bool opened_container{};
   bool attacked_entity{};
   bool requested_ride{};
+  bool requested_dismount{};
   bool consume_secondary_use{};
   bool stop_held_item_animation{};
 };
@@ -99,6 +100,8 @@ struct GameplayInteractionDispatchResult {
     const entity::EntityRegistry& entity_registry,
     const entity::VehicleDefinitionRegistry& vehicle_registry,
     f32 max_distance);
+
+[[nodiscard]] bool request_dismount_if_mounted(ClientRuntime& client);
 
 [[nodiscard]] std::optional<BlockPos> targeted_container_block(
     const ContainerBlockTargetQuery& query);

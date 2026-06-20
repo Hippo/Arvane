@@ -635,7 +635,7 @@ TEST(ClientGameplayInteractionsTests, DispatchContainerMissDoesNotConsumeSeconda
   EXPECT_TRUE(serverbound_message_types(server_transport->poll_events()).empty());
 }
 
-TEST(ClientGameplayInteractionsTests, DispatchDoesNotRequestRideWhenMounted) {
+TEST(ClientGameplayInteractionsTests, DispatchRequestsDismountWhenMounted) {
   const arv::entity::EntityRegistry entities = make_interaction_entity_registry();
   const arv::entity::VehicleDefinitionRegistry vehicles = make_interaction_vehicle_registry();
   const arv::voxel::BlockRegistry blocks = arv::testsupport::make_test_block_registry();
@@ -688,8 +688,16 @@ TEST(ClientGameplayInteractionsTests, DispatchDoesNotRequestRideWhenMounted) {
            .mount_pressed = true,
            .ride_range = 5.0F});
   EXPECT_FALSE(result.requested_ride);
+  EXPECT_TRUE(result.requested_dismount);
   EXPECT_FALSE(result.stop_held_item_animation);
-  EXPECT_TRUE(serverbound_message_types(server_transport->poll_events()).empty());
+  const auto dismount_message = first_serverbound_message(
+      server_transport->poll_events(),
+      arv::protocol::MessageType::ServerboundDismountRequest);
+  ASSERT_TRUE(dismount_message.has_value());
+  const auto request = arv::protocol::deserialize_serverbound_dismount_request(
+      dismount_message->payload);
+  ASSERT_TRUE(request);
+  EXPECT_EQ(request.value().rideable_id, (arv::EntityNetID{99}));
 }
 
 TEST(ClientGameplayInteractionsTests, HeldItemPlacementPreviewUsesSharedBlockPrediction) {

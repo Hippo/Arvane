@@ -828,23 +828,20 @@ void apply_vehicle_accepted_state_to_world(
   return state;
 }
 
-[[nodiscard]] std::optional<Vec3f> airborne_aircraft_dismount_position(
+[[nodiscard]] std::optional<Vec3f> fallback_rideable_dismount_position(
     const world::WorldRuntime& world,
     EntityID rideable_entity,
     const player::PlayerTuning& tuning) noexcept {
-  const entity::VehiclePhysicsComponent* vehicle_physics =
-      world.find_entity_vehicle_physics(rideable_entity);
-  if (vehicle_physics == nullptr ||
-      vehicle_physics->kind != entity::VehiclePhysicsKind::Aircraft) {
-    return std::nullopt;
-  }
   const entity::EntityTransform* transform = world.find_entity_transform(rideable_entity);
   const entity::EntityCollision* collision = world.find_entity_collision(rideable_entity);
-  if (transform == nullptr || collision == nullptr) {
+  if (transform == nullptr) {
     return std::nullopt;
   }
+  const f32 rideable_height =
+      collision == nullptr ? 0.0F : std::max(collision->box.y, 0.0F);
   const f32 vertical_clearance =
-      collision->box.y + tuning.body_height + physics::CollisionEpsilon;
+      rideable_height + std::max(tuning.body_height, 0.0F) +
+      physics::CollisionEpsilon;
   return transform->position + Vec3f{0.0F, vertical_clearance, 0.0F};
 }
 
@@ -964,7 +961,7 @@ void apply_vehicle_accepted_state_to_world(
   if (position.has_value()) {
     return position;
   }
-  return airborne_aircraft_dismount_position(
+  return fallback_rideable_dismount_position(
       world,
       vehicle_entity,
       tuning);
@@ -2023,7 +2020,7 @@ void ServerRuntimeImpl::handle_dismount_request(
     net::ConnectionID connection_id,
     const protocol::ServerboundDismountRequest& request) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
-  if (session == nullptr || !session->authenticated || block_registry_ == nullptr) {
+  if (session == nullptr || !session->authenticated) {
     return;
   }
   const std::optional<EntityID> passenger_entity =
@@ -2042,14 +2039,17 @@ void ServerRuntimeImpl::handle_dismount_request(
     return;
   }
 
-  std::optional<Vec3f> dismount_position =
-      default_world_.find_safe_dismount_position(
-          rideable_entity.value(),
-          *block_registry_,
-          player_tuning_);
+  std::optional<Vec3f> dismount_position;
+  if (block_registry_ != nullptr) {
+    dismount_position =
+        default_world_.find_safe_dismount_position(
+            rideable_entity.value(),
+            *block_registry_,
+            player_tuning_);
+  }
   if (!dismount_position.has_value()) {
     dismount_position =
-        airborne_aircraft_dismount_position(
+        fallback_rideable_dismount_position(
             default_world_,
             rideable_entity.value(),
             player_tuning_);

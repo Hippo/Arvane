@@ -280,6 +280,66 @@ struct VehicleMovementProfile {
       std::max(physics::CollisionEpsilon * 2.0F, 0.05F));
 }
 
+[[nodiscard]] std::optional<physics::MovementResolution> try_vehicle_step_up(
+    const physics::ICollisionQuery& collision_query,
+    const Aabb3f& bounds,
+    Vec3f attempted_delta,
+    const physics::MovementResolution& normal_movement,
+    f32 step_height) {
+  constexpr f32 Epsilon = physics::CollisionEpsilon;
+  const Vec3f horizontal_delta{attempted_delta.x, 0.0F, attempted_delta.z};
+  if (step_height <= Epsilon ||
+      horizontal_length_squared(horizontal_delta) <= Epsilon * Epsilon ||
+      attempted_delta.y > Epsilon ||
+      !(normal_movement.hit_x || normal_movement.hit_z)) {
+    return std::nullopt;
+  }
+
+  const physics::MovementResolution lift =
+      physics::resolve_movement(collision_query, bounds, {0.0F, step_height, 0.0F});
+  if (lift.applied_delta.y <= Epsilon) {
+    return std::nullopt;
+  }
+
+  const Aabb3f lifted_bounds = translated(bounds, lift.applied_delta);
+  const physics::MovementResolution horizontal =
+      physics::resolve_movement(collision_query, lifted_bounds, horizontal_delta);
+  const f32 normal_horizontal_distance =
+      horizontal_length_squared(normal_movement.applied_delta);
+  const f32 stepped_horizontal_distance =
+      horizontal_length_squared(horizontal.applied_delta);
+  if (horizontal.hit_x || horizontal.hit_z ||
+      stepped_horizontal_distance <= normal_horizontal_distance + Epsilon * Epsilon) {
+    return std::nullopt;
+  }
+
+  const Aabb3f after_horizontal = translated(lifted_bounds, horizontal.applied_delta);
+  const physics::MovementResolution settle =
+      physics::resolve_movement(
+          collision_query,
+          after_horizontal,
+          {0.0F, -lift.applied_delta.y, 0.0F});
+  const Aabb3f settled_bounds = translated(after_horizontal, settle.applied_delta);
+  if (!settle.hit_down &&
+      !physics::has_support_below(collision_query, settled_bounds, Epsilon * 2.0F)) {
+    return std::nullopt;
+  }
+
+  physics::MovementResolution stepped;
+  stepped.attempted_delta = attempted_delta;
+  stepped.applied_delta = {
+      horizontal.applied_delta.x,
+      lift.applied_delta.y + settle.applied_delta.y,
+      horizontal.applied_delta.z};
+  stepped.hit_x = horizontal.hit_x;
+  stepped.hit_y = lift.hit_y || settle.hit_y;
+  stepped.hit_z = horizontal.hit_z;
+  stepped.hit_down = settle.hit_down;
+  stepped.grounded = true;
+  stepped.resolved_bounds = settled_bounds;
+  return stepped;
+}
+
 [[nodiscard]] bool vehicle_sample_contains_fluid(
     const physics::ICollisionQuery& collision_query,
     Vec3f sample) noexcept {
@@ -615,6 +675,8 @@ void ClientInputRuntime::send_fixed_tick_input(
     const f32 throttle = std::clamp(static_cast<f32>(command.move_z), -1.0F, 1.0F);
     const f32 steer = std::clamp(static_cast<f32>(command.move_x), -1.0F, 1.0F);
     const f32 previous_yaw = predicted_vehicle_yaw_;
+    const bool living_mount =
+        profile.physics == entity::VehiclePhysicsKind::LivingMount;
     const bool ground_vehicle =
         profile.physics == entity::VehiclePhysicsKind::GroundVehicle;
     const bool aircraft =
@@ -627,7 +689,8 @@ void ClientInputRuntime::send_fixed_tick_input(
     bool vehicle_grounded = protocol::has_vehicle_move_flag(
         profile.base_flags,
         protocol::VehicleMoveFlags::OnGround);
-    if ((ground_vehicle || aircraft || submersible) && collision_query != nullptr) {
+    if ((living_mount || ground_vehicle || aircraft || submersible) &&
+        collision_query != nullptr) {
       vehicle_grounded = vehicle_has_ground_support(
           *collision_query,
           predicted_vehicle_position_,
@@ -892,7 +955,8 @@ void ClientInputRuntime::send_fixed_tick_input(
       const Vec3f forward = horizontal_forward(predicted_vehicle_yaw_);
       const f32 current_speed = dot(predicted_vehicle_velocity_, forward);
       f32 next_speed = current_speed;
-      const bool has_ground_traction = !ground_vehicle || vehicle_grounded;
+      const bool has_ground_traction =
+          !(living_mount || ground_vehicle) || vehicle_grounded;
       if (command.secondary_held && has_ground_traction) {
         next_speed = approach(current_speed, 0.0F, profile.brake_force * dt);
       } else if (std::abs(throttle) > 0.01F && has_ground_traction) {
@@ -908,7 +972,7 @@ void ClientInputRuntime::send_fixed_tick_input(
         }
       }
       f32 next_vertical_speed = predicted_vehicle_velocity_.y;
-      if (ground_vehicle) {
+      if (living_mount || ground_vehicle) {
         if (vehicle_grounded) {
           next_vertical_speed = std::max(next_vertical_speed, 0.0F);
         } else {
@@ -940,8 +1004,20 @@ void ClientInputRuntime::send_fixed_tick_input(
     if (collision_query != nullptr) {
       const Aabb3f bounds =
           vehicle_bounds(predicted_vehicle_position_, profile.collision_size);
-      const physics::MovementResolution resolved =
+      physics::MovementResolution resolved =
           physics::resolve_movement(*collision_query, bounds, attempted_delta);
+      if (living_mount && vehicle_grounded) {
+        if (std::optional<physics::MovementResolution> stepped =
+                try_vehicle_step_up(
+                    *collision_query,
+                    bounds,
+                    attempted_delta,
+                    resolved,
+                    profile.step_height);
+            stepped.has_value()) {
+          resolved = stepped.value();
+        }
+      }
       hit_collision_this_tick = resolved.hit_x || resolved.hit_y || resolved.hit_z;
       if (hit_collision_this_tick) {
         if (const std::optional<Vec3f> normal =
@@ -963,7 +1039,7 @@ void ClientInputRuntime::send_fixed_tick_input(
       if (resolved.hit_z) {
         predicted_vehicle_velocity_.z = 0.0F;
       }
-      if (ground_vehicle || aircraft || submersible) {
+      if (living_mount || ground_vehicle || aircraft || submersible) {
         vehicle_grounded = resolved.grounded;
       }
       if (ground_vehicle) {

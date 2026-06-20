@@ -13,6 +13,10 @@ constexpr auto HotbarItemPopupVisibleDuration =
     std::chrono::milliseconds(1500);
 constexpr auto HotbarItemPopupFadeDuration =
     std::chrono::milliseconds(350);
+constexpr auto MountExitPromptVisibleDuration =
+    std::chrono::milliseconds(2400);
+constexpr auto MountExitPromptFadeDuration =
+    std::chrono::milliseconds(700);
 
 [[nodiscard]] std::string stack_display_name(const ui::UiItemStackView& stack) {
   return stack.display_name.empty() ? stack.item_name : stack.display_name;
@@ -191,6 +195,47 @@ f32 hotbar_item_popup_alpha(
       std::chrono::duration<f32, std::milli>(remaining).count();
   const auto fade_ms =
       std::chrono::duration<f32, std::milli>(HotbarItemPopupFadeDuration).count();
+  return std::clamp(remaining_ms / fade_ms, 0.0F, 1.0F);
+}
+
+void reset_mount_exit_prompt(MountExitPromptState& state) noexcept {
+  state = {};
+}
+
+void update_mount_exit_prompt(
+    MountExitPromptState& state,
+    bool mounted,
+    std::chrono::steady_clock::time_point now) {
+  if (!state.observation_initialized) {
+    state.observed_mounted = mounted;
+    state.observation_initialized = true;
+    return;
+  }
+
+  if (mounted && !state.observed_mounted) {
+    state.expires_at =
+        now + MountExitPromptVisibleDuration + MountExitPromptFadeDuration;
+  } else if (!mounted) {
+    state.expires_at = now;
+  }
+  state.observed_mounted = mounted;
+}
+
+f32 mount_exit_prompt_alpha(
+    const MountExitPromptState& state,
+    std::chrono::steady_clock::time_point now) noexcept {
+  if (!state.observed_mounted || now >= state.expires_at) {
+    return 0.0F;
+  }
+
+  const auto remaining = state.expires_at - now;
+  if (remaining >= MountExitPromptFadeDuration) {
+    return 1.0F;
+  }
+  const auto remaining_ms =
+      std::chrono::duration<f32, std::milli>(remaining).count();
+  const auto fade_ms =
+      std::chrono::duration<f32, std::milli>(MountExitPromptFadeDuration).count();
   return std::clamp(remaining_ms / fade_ms, 0.0F, 1.0F);
 }
 

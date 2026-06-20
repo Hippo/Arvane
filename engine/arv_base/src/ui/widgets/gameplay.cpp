@@ -13,6 +13,11 @@ namespace {
 
 constexpr Vec2f RidePromptOffset{0.0F, 54.0F};
 
+[[nodiscard]] Vec4f with_alpha(Vec4f color, f32 alpha) noexcept {
+  color.w *= std::clamp(alpha, 0.0F, 1.0F);
+  return color;
+}
+
 } // namespace
 
 void append_crosshair_hud(UiTree& tree, CrosshairHudModel model) {
@@ -36,7 +41,9 @@ void append_crosshair_hud(UiTree& tree, CrosshairHudModel model) {
 }
 
 void append_ride_prompt_hud(UiTree& tree, RidePromptModel model) {
-  if (!model.visible || model.key_label.empty()) {
+  const f32 alpha = std::clamp(model.alpha, 0.0F, 1.0F);
+  if (!model.visible || model.key_label.empty() || model.suffix.empty() ||
+      alpha <= 0.0F) {
     return;
   }
 
@@ -58,17 +65,28 @@ void append_ride_prompt_hud(UiTree& tree, RidePromptModel model) {
   prompt.style.background.w = std::min(prompt.style.background.w, 0.86F);
   prompt.hit_test = false;
   style_surface(prompt, theme, theme.layout.radius_md);
+  prompt.style.background = with_alpha(prompt.style.background, alpha);
+  prompt.style.border = with_alpha(prompt.style.border, alpha);
   const UiNodeID prompt_id = tree.add_child(tree.root_id(), std::move(prompt));
 
   tree.add_child(
       prompt_id,
-      text_element("hud.ride_prompt.prefix", "Press ", theme.colors.text));
+      text_element(
+          "hud.ride_prompt.prefix",
+          "Press ",
+          with_alpha(theme.colors.text, alpha)));
   tree.add_child(
       prompt_id,
-      text_element("hud.ride_prompt.key", std::move(model.key_label), theme.colors.accent));
+      text_element(
+          "hud.ride_prompt.key",
+          std::move(model.key_label),
+          with_alpha(theme.colors.accent, alpha)));
   tree.add_child(
       prompt_id,
-      text_element("hud.ride_prompt.suffix", " to Ride", theme.colors.text));
+      text_element(
+          "hud.ride_prompt.suffix",
+          std::move(model.suffix),
+          with_alpha(theme.colors.text, alpha)));
 
   (void)model.viewport;
 }

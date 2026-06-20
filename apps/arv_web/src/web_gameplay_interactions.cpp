@@ -146,6 +146,9 @@ void send_web_entity_interactions_from_input(
     input.secondary_held = false;
     g_app.input.secondary_animation_pressed = false;
   }
+  if (interactions.requested_ride || interactions.requested_dismount) {
+    input.mount_pressed = false;
+  }
   if (interactions.stop_held_item_animation) {
     client::stop_held_item_animation_playback(
         g_app.input.held_item_animation,
@@ -240,8 +243,18 @@ void update_web_local_particles_from_input(
   }
 }
 
-ui::RidePromptModel web_ride_prompt_model() {
+ui::RidePromptModel web_ride_prompt_model(std::chrono::steady_clock::time_point now) {
   const bool interactions_available = web_entity_interactions_available();
+  const bool local_player_mounted =
+      g_app.session != nullptr && client::local_player_is_mounted(*g_app.session);
+  if (g_app.session != nullptr) {
+    client::update_mount_exit_prompt(
+        g_app.ui.mount_exit_prompt,
+        local_player_mounted,
+        now);
+  } else {
+    client::reset_mount_exit_prompt(g_app.ui.mount_exit_prompt);
+  }
   const std::string key_label =
       interactions_available
           ? client::first_action_binding_label(
@@ -258,9 +271,9 @@ ui::RidePromptModel web_ride_prompt_model() {
           .inventory_open =
               g_app.session != nullptr && g_app.session->inventory_open(),
           .chat_open = g_app.session != nullptr && g_app.session->chat_open(),
-          .local_player_mounted =
-              g_app.session != nullptr &&
-              client::local_player_is_mounted(*g_app.session),
+          .local_player_mounted = local_player_mounted,
+          .mount_exit_prompt_alpha =
+              client::mount_exit_prompt_alpha(g_app.ui.mount_exit_prompt, now),
           .key_label = key_label,
           .has_targeted_rideable = has_targeted_rideable,
       });

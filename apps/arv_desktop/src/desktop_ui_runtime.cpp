@@ -104,7 +104,9 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
     std::string_view hotbar_item_popup_name,
     f32 hotbar_item_popup_alpha,
     bool ride_prompt_visible,
-    std::string_view ride_prompt_key_label) noexcept {
+    std::string_view ride_prompt_key_label,
+    std::string_view ride_prompt_suffix,
+    f32 ride_prompt_alpha) noexcept {
   constexpr u64 OffsetBasis = 1469598103934665603ULL;
   u64 hash = OffsetBasis;
   hash = ui_cache_hash_append_u64(
@@ -127,6 +129,8 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   hash = ui_cache_hash_append_f32(hash, hotbar_item_popup_alpha);
   hash = ui_cache_hash_append_bool(hash, ride_prompt_visible);
   hash = ui_cache_hash_append_string(hash, ride_prompt_key_label);
+  hash = ui_cache_hash_append_string(hash, ride_prompt_suffix);
+  hash = ui_cache_hash_append_f32(hash, ride_prompt_alpha);
   hash = ui_cache_hash_append_u64(hash, displayed_fps);
   if (const std::optional<EntityNetID> local_entity = session.client->local_entity_id();
       local_entity.has_value()) {
@@ -387,6 +391,7 @@ void DesktopFrameLoop::build_ui(
         now);
     if (active_session->client == nullptr) {
       client::reset_hotbar_item_popup(hotbar_item_popup_);
+      client::reset_mount_exit_prompt(mount_exit_prompt_);
     } else {
       client::update_hotbar_item_popup(
           hotbar_item_popup_,
@@ -395,9 +400,14 @@ void DesktopFrameLoop::build_ui(
               active_session->inventory_slots.data(),
               active_session->inventory_slots.size()},
           now);
+      client::update_mount_exit_prompt(
+          mount_exit_prompt_,
+          client::local_player_is_mounted(*active_session->client),
+          now);
     }
   } else {
     client::reset_hotbar_item_popup(hotbar_item_popup_);
+    client::reset_mount_exit_prompt(mount_exit_prompt_);
   }
 
   menu_context.viewport = ui_metrics_.logical_size;
@@ -431,6 +441,8 @@ void DesktopFrameLoop::build_ui(
               .local_player_mounted =
                   ride_prompt_client_ready &&
                   client::local_player_is_mounted(*active_session->client),
+              .mount_exit_prompt_alpha =
+                  client::mount_exit_prompt_alpha(mount_exit_prompt_, now),
               .key_label = ride_prompt_key_label,
               .viewport = ui_metrics_.logical_size,
               .has_targeted_rideable = has_targeted_rideable,
@@ -451,7 +463,9 @@ void DesktopFrameLoop::build_ui(
                 hotbar_item_popup_.popup_name,
                 client::hotbar_item_popup_alpha(hotbar_item_popup_, now),
                 ride_prompt.visible,
-                ride_prompt.key_label)
+                ride_prompt.key_label,
+                ride_prompt.suffix,
+                ride_prompt.alpha)
           : 0U};
   const bool rebuild_ui_tree =
       !ui_tree_cache_valid_ || !(next_cache_key == ui_tree_cache_key_);

@@ -125,16 +125,23 @@ ui::RidePromptModel build_ride_prompt_model(RidePromptModelInput input) {
       input.gameplay_blocked ||
       input.inventory_open ||
       input.chat_open ||
-      input.local_player_mounted ||
-      input.key_label.empty() ||
-      !input.has_targeted_rideable) {
+      input.key_label.empty()) {
     return model;
   }
-  if (!input.has_targeted_rideable()) {
+  if (input.local_player_mounted) {
+    model.visible = input.mount_exit_prompt_alpha > 0.0F;
+    model.key_label = std::string{input.key_label};
+    model.suffix = " to Exit";
+    model.alpha = std::clamp(input.mount_exit_prompt_alpha, 0.0F, 1.0F);
+    return model;
+  }
+  if (!input.has_targeted_rideable || !input.has_targeted_rideable()) {
     return model;
   }
   model.visible = true;
   model.key_label = std::string{input.key_label};
+  model.suffix = " to Ride";
+  model.alpha = 1.0F;
   return model;
 }
 

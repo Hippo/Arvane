@@ -24,6 +24,7 @@ struct WebUiState {
   std::vector<ui::ChatLineView> chat_lines{};
   usize chat_history_scroll_offset{};
   client::HotbarItemPopupState hotbar_item_popup{};
+  client::MountExitPromptState mount_exit_prompt{};
   f32 font_framebuffer_scale{1.0F};
   bool ready{};
 };

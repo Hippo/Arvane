@@ -44,6 +44,10 @@ Important invariants:
 - mounted passenger transforms are derived from the seat transform
 - pressing the `Mount` action mounts the targeted rideable when unmounted and
   requests a dismount when already mounted
+- mounted living mounts check terrain support and fall under gravity when they
+  leave the ground
+- mounted living mounts use their authored `movement.step_height` to step onto
+  small supported obstacles, including the built-in horse's one-block step
 
 ---
 
@@ -145,6 +149,11 @@ third-person follow camera.
 `turn_rate` and `authority.max_angular_speed` are authored in degrees per
 second for readability. The loader converts them to radians per second for
 runtime prediction and validation.
+
+Living mounts may author `movement.step_height`; client prediction uses this
+height when a grounded mount is ridden into a supported obstacle. The built-in
+horse uses `1.0` so it can climb one full block while mounted, with
+`authority.max_step_height` allowing a small validation tolerance.
 
 The built-in buggy uses `arvane:animation/automobile`; the client and accepted
 server state select its `driving` clip when moving along the buggy's visual
@@ -336,7 +345,8 @@ The server:
 - rejects final AABB hulls that overlap solid terrain
 - rejects required swept vehicle paths that cross solid terrain
 - rejects aircraft movement into unloaded chunks when configured
-- validates required ground support when a ground vehicle claims `OnGround`
+- validates required ground support when a ground-bound vehicle claims
+  `OnGround`
 - validates required water support
 - validates submersible water occupancy from server world data
 - writes accepted vehicle transform and velocity
@@ -398,7 +408,9 @@ The server searches side, front, rear, and top candidate positions around the
 rideable. A candidate is accepted only if the player AABB does not overlap
 solid blocks and either has support below or is in fluid.
 
-If no safe candidate exists, V1 keeps the passenger mounted.
+If no safe candidate exists, the server still completes the dismount by placing
+the passenger above the rideable. Dismount is always allowed once the passenger
+is mounted.
 
 ---
 

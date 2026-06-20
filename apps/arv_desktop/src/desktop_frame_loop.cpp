@@ -517,6 +517,9 @@ void DesktopFrameLoop::submit_client_input_and_update_cursor(
           active_session->held_item_secondary_use_active,
           0.0);
     }
+    if (interactions.requested_ride || interactions.requested_dismount) {
+      client_input.mount_pressed = false;
+    }
     update_held_item_animation_from_input(
         *active_session,
         client_input,

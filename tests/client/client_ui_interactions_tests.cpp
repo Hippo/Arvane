@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -39,6 +40,53 @@ public:
 }
 
 } // namespace
+
+TEST(ClientUiInteractionsTests, MountExitPromptShowsOnMountTransitionThenFades) {
+  arv::client::MountExitPromptState state;
+  const std::chrono::steady_clock::time_point start{};
+
+  arv::client::update_mount_exit_prompt(state, false, start);
+  EXPECT_FLOAT_EQ(arv::client::mount_exit_prompt_alpha(state, start), 0.0F);
+
+  const auto mounted_at = start + std::chrono::milliseconds(10);
+  arv::client::update_mount_exit_prompt(state, true, mounted_at);
+  EXPECT_FLOAT_EQ(arv::client::mount_exit_prompt_alpha(state, mounted_at), 1.0F);
+  EXPECT_FLOAT_EQ(
+      arv::client::mount_exit_prompt_alpha(
+          state,
+          mounted_at + std::chrono::milliseconds(2400)),
+      1.0F);
+  const arv::f32 fading_alpha =
+      arv::client::mount_exit_prompt_alpha(
+          state,
+          mounted_at + std::chrono::milliseconds(2750));
+  EXPECT_GT(fading_alpha, 0.0F);
+  EXPECT_LT(fading_alpha, 1.0F);
+  EXPECT_FLOAT_EQ(
+      arv::client::mount_exit_prompt_alpha(
+          state,
+          mounted_at + std::chrono::milliseconds(3200)),
+      0.0F);
+
+  arv::client::update_mount_exit_prompt(
+      state,
+      false,
+      mounted_at + std::chrono::milliseconds(100));
+  EXPECT_FLOAT_EQ(
+      arv::client::mount_exit_prompt_alpha(
+          state,
+          mounted_at + std::chrono::milliseconds(100)),
+      0.0F);
+}
+
+TEST(ClientUiInteractionsTests, MountExitPromptDoesNotShowForInitialMountedObservation) {
+  arv::client::MountExitPromptState state;
+  const std::chrono::steady_clock::time_point start{};
+
+  arv::client::update_mount_exit_prompt(state, true, start);
+
+  EXPECT_FLOAT_EQ(arv::client::mount_exit_prompt_alpha(state, start), 0.0F);
+}
 
 TEST(ClientUiInteractionsTests, UpdateGameplayHoverTooltipsAppendsInventoryTooltip) {
   constexpr arv::Vec2f Viewport{800.0F, 600.0F};

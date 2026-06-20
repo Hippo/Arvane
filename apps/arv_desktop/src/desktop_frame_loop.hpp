@@ -325,6 +325,7 @@ private:
   UiBuildCacheKey ui_tree_cache_key_{};
   bool ui_tree_cache_valid_{};
   client::HotbarItemPopupState hotbar_item_popup_{};
+  client::MountExitPromptState mount_exit_prompt_{};
   bool gameplay_menu_stack_active_{};
   DesktopLoadingScreen loading_screen_{DesktopLoadingScreen::None};
   DesktopAssetSource asset_source_{DesktopAssetSource::Local};

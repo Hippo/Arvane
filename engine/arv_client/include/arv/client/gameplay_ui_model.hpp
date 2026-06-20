@@ -25,6 +25,7 @@ struct RidePromptModelInput {
   bool inventory_open{};
   bool chat_open{};
   bool local_player_mounted{};
+  f32 mount_exit_prompt_alpha{};
   std::string_view key_label{};
   Vec2f viewport{};
   FunctionRef<bool()> has_targeted_rideable{};

@@ -160,6 +160,13 @@ bool request_ride_entity_if_targeted(
   return static_cast<bool>(client.request_ride_entity(target.value()));
 }
 
+bool request_dismount_if_mounted(ClientRuntime& client) {
+  if (!local_player_is_mounted(client)) {
+    return false;
+  }
+  return static_cast<bool>(client.request_dismount());
+}
+
 std::optional<BlockPos> targeted_container_block(
     const ContainerBlockTargetQuery& query) {
   if (query.client.inventory_open() || query.client.chat_open()) {
@@ -229,16 +236,20 @@ GameplayInteractionDispatchResult dispatch_gameplay_interactions(
         input.default_attack_range);
   }
 
-  if (input.mount_pressed && !local_player_is_mounted(input.client)) {
-    result.requested_ride = request_ride_entity_if_targeted(
-        input.client,
-        input.collision_query,
-        input.block_registry,
-        input.entity_registry,
-        input.vehicle_registry,
-        input.ride_range);
-    if (result.requested_ride) {
-      result.stop_held_item_animation = true;
+  if (input.mount_pressed) {
+    if (local_player_is_mounted(input.client)) {
+      result.requested_dismount = request_dismount_if_mounted(input.client);
+    } else {
+      result.requested_ride = request_ride_entity_if_targeted(
+          input.client,
+          input.collision_query,
+          input.block_registry,
+          input.entity_registry,
+          input.vehicle_registry,
+          input.ride_range);
+      if (result.requested_ride) {
+        result.stop_held_item_animation = true;
+      }
     }
   }
 

@@ -15,6 +15,7 @@
 #include "web_ui_host.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <utility>
 
@@ -63,10 +64,11 @@ void render_remote_world(Vec4f clear_color) {
   }
 
   frame.clear_color = clear_color;
+  const auto ui_now = std::chrono::steady_clock::now();
   append_web_gameplay_ui_to_frame(
       frame,
       animation_time_seconds,
-      web_ride_prompt_model());
+      web_ride_prompt_model(ui_now));
 
   if (frame.opaque_chunks.empty() &&
       frame.transparent_chunks.empty() &&

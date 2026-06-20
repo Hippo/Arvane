@@ -822,6 +822,37 @@ TEST(GameplayUiTests, BuildsRidePromptWithAccentKeyText) {
   EXPECT_EQ(suffix->style.foreground, tree.theme().colors.text);
 }
 
+TEST(GameplayUiTests, BuildsFadingMountExitPromptWithSameBoxedLayout) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  arv::ui::GameplayUiModel model;
+  model.ride_prompt.visible = true;
+  model.ride_prompt.key_label = "F";
+  model.ride_prompt.suffix = " to Exit";
+  model.ride_prompt.alpha = 0.5F;
+  model.ride_prompt.viewport = {800.0F, 600.0F};
+
+  arv::ui::build_gameplay_ui(tree, std::move(model));
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* panel = tree.find_by_stable_id("hud.ride_prompt");
+  const auto* prefix = tree.find_by_stable_id("hud.ride_prompt.prefix");
+  const auto* key = tree.find_by_stable_id("hud.ride_prompt.key");
+  const auto* suffix = tree.find_by_stable_id("hud.ride_prompt.suffix");
+  ASSERT_NE(panel, nullptr);
+  ASSERT_NE(prefix, nullptr);
+  ASSERT_NE(key, nullptr);
+  ASSERT_NE(suffix, nullptr);
+  EXPECT_EQ(prefix->text, "Press ");
+  EXPECT_EQ(key->text, "F");
+  EXPECT_EQ(suffix->text, " to Exit");
+  EXPECT_NEAR(panel->style.background.w, 0.43F, 0.001F);
+  EXPECT_NEAR(prefix->style.foreground.w, 0.5F, 0.001F);
+  EXPECT_NEAR(key->style.foreground.w, 0.5F, 0.001F);
+  EXPECT_NEAR(suffix->style.foreground.w, 0.5F, 0.001F);
+}
+
 TEST(GameplayUiTests, BuildsCenteredCrosshairImage) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;
