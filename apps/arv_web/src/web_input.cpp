@@ -14,7 +14,33 @@
 
 namespace {
 
-inline constexpr double BrowserCssPixelToDesktopMouseUnitScale = 800.0 / 96.0;
+// clang-format off
+EM_JS(int, arv_web_dom_text_entry_active, (), {
+  const element = document.activeElement;
+  if (!element || !element.tagName) {
+    return 0;
+  }
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'textarea' || tag === 'select') {
+    return 1;
+  }
+  if (tag === 'input') {
+    const type = (element.type || 'text').toLowerCase();
+    return ['button', 'checkbox', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type) ? 0 : 1;
+  }
+  return element.isContentEditable ? 1 : 0;
+});
+// clang-format on
+
+[[nodiscard]] bool browser_dom_text_entry_active() noexcept {
+  return arv_web_dom_text_entry_active() != 0;
+}
+
+[[nodiscard]] bool gameplay_input_active() noexcept {
+  return arv::web::g_app.session != nullptr &&
+         arv::web::g_app.session->connection_state() ==
+             arv::net::ConnectionState::InGame;
+}
 
 EM_BOOL on_resize(int, const EmscriptenUiEvent*, void*) {
   arv::web::resize_canvas();
@@ -344,6 +370,9 @@ EM_BOOL on_key(int event_type, const EmscriptenKeyboardEvent* event, void*) {
   if (event == nullptr) {
     return EM_FALSE;
   }
+  if (browser_dom_text_entry_active() || !gameplay_input_active()) {
+    return EM_FALSE;
+  }
   const bool down = event_type == EMSCRIPTEN_EVENT_KEYDOWN;
   if (const std::optional<std::string> code = browser_keyboard_code(*event);
       code.has_value() && (code.value() == "LShift" || code.value() == "RShift")) {
@@ -400,13 +429,10 @@ EM_BOOL on_mouse_move(int, const EmscriptenMouseEvent* event, void*) {
   if (!arv::web::g_app.pointer_locked || arv::web::ui_wants_cursor()) {
     return arv::web::ui_wants_cursor() ? EM_TRUE : EM_FALSE;
   }
-  const double scale = arv::web::pointer_lock_uses_raw_movement()
-      ? 1.0
-      : BrowserCssPixelToDesktopMouseUnitScale;
   arv::web::g_app.input.snapshot.mouse_delta_x +=
-      static_cast<float>(static_cast<double>(event->movementX) * scale);
+      static_cast<float>(event->movementX);
   arv::web::g_app.input.snapshot.mouse_delta_y +=
-      static_cast<float>(static_cast<double>(event->movementY) * scale);
+      static_cast<float>(event->movementY);
   return EM_TRUE;
 }
 

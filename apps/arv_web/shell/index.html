@@ -9,20 +9,79 @@
   <body data-arv-state="boot">
     <main class="web-client" data-arv-state="boot" aria-label="Arvane web client">
       <canvas id="arvane-canvas" tabindex="0"></canvas>
-      <section class="session-panel" aria-label="Server connection">
-        <div>
-          <p class="kicker">Arvane Web V1</p>
-          <h1>Multiplayer Client</h1>
+      <section class="session-panel" aria-label="Arvane main menu">
+        <div class="menu-layout">
+          <header class="menu-intro">
+            <p class="kicker">Arvane Web</p>
+            <h1>Multiplayer</h1>
+            <p id="status-line" class="status" role="status">Loading runtime</p>
+          </header>
+
+          <div class="menu-workspace">
+            <section class="profile-section" aria-labelledby="profile-heading">
+              <div class="section-heading">
+                <p class="eyebrow">Profile</p>
+                <h2 id="profile-heading">Player</h2>
+              </div>
+              <form id="profile-form" class="profile-form">
+                <label class="menu-field" for="player-name">
+                  <span>Username</span>
+                  <input id="player-name" type="text" maxlength="32" value="WebPlayer" spellcheck="false" autocomplete="nickname">
+                </label>
+                <button id="save-profile-button" class="secondary-button" type="submit">Save Username</button>
+              </form>
+              <div class="skin-block">
+                <div>
+                  <p class="eyebrow">Skin</p>
+                  <p id="skin-summary" class="skin-summary">Default skin</p>
+                  <p id="skin-detail" class="fine-print">Classic model</p>
+                </div>
+                <label class="skin-model-toggle">
+                  <input id="skin-model" type="checkbox">
+                  <span>Slim arms</span>
+                </label>
+                <input id="skin-file" type="file" accept="image/png" hidden>
+                <button id="pick-skin-button" class="secondary-button" type="button">Choose PNG</button>
+              </div>
+            </section>
+
+            <section class="server-section" aria-labelledby="servers-heading">
+              <div class="section-heading server-heading">
+                <div>
+                  <p class="eyebrow">Servers</p>
+                  <h2 id="servers-heading">Server List</h2>
+                </div>
+                <button id="new-server-button" class="ghost-button" type="button">New</button>
+              </div>
+              <div id="server-list" class="server-list" role="listbox" aria-label="Saved servers"></div>
+              <form id="server-form" class="server-form">
+                <label class="menu-field" for="server-name">
+                  <span>Name</span>
+                  <input id="server-name" type="text" value="Local" spellcheck="false" autocomplete="off">
+                </label>
+                <label class="menu-field wide-field" for="server-url">
+                  <span>Address</span>
+                  <input id="server-url" type="text" value="ws://localhost:42070/arvane" spellcheck="false" autocomplete="off" inputmode="url">
+                </label>
+                <div class="server-edit-actions">
+                  <button id="save-server-button" class="secondary-button" type="submit">Save Server</button>
+                  <button id="remove-server-button" class="ghost-button" type="button">Remove</button>
+                </div>
+              </form>
+            </section>
+          </div>
+
+          <footer class="menu-footer">
+            <div>
+              <p class="eyebrow">Connection</p>
+              <p id="selected-server-line" class="selected-server">ws://localhost:42070/arvane</p>
+            </div>
+            <div class="actions">
+              <button id="connect-button" type="button">Connect</button>
+              <button id="disconnect-button" type="button">Disconnect</button>
+            </div>
+          </footer>
         </div>
-        <label class="server-field" for="server-url">
-          <span>Server</span>
-          <input id="server-url" type="url" value="ws://localhost:42070/arvane" spellcheck="false" autocomplete="off">
-        </label>
-        <div class="actions">
-          <button id="connect-button" type="button">Connect</button>
-          <button id="disconnect-button" type="button">Disconnect</button>
-        </div>
-        <p id="status-line" class="status" role="status">Loading runtime</p>
       </section>
     </main>
     <script src="loader.js"></script>

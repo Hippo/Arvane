@@ -25,6 +25,7 @@ add_executable(arv_web
   src/web_input.cpp
   src/web_platform.cpp
   src/web_player_skins.cpp
+  src/web_profile.cpp
   src/web_render_host.cpp
   src/web_ui_host.cpp
   src/web_world_frame.cpp
@@ -78,7 +79,7 @@ target_link_options(arv_web PRIVATE
   "-sFILESYSTEM=1"
   "-sFORCE_FILESYSTEM=1"
   "-sASSERTIONS=1"
-  "-sEXPORTED_FUNCTIONS=['_main','_arv_web_frame','_arv_web_connect','_arv_web_disconnect','_arv_web_crypto_self_test']"
+  "-sEXPORTED_FUNCTIONS=['_main','_arv_web_frame','_arv_web_connect','_arv_web_disconnect','_arv_web_refresh_profile','_arv_web_set_player_name','_arv_web_import_skin','_arv_web_set_skin_model','_arv_web_crypto_self_test']"
   "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']"
 )
 

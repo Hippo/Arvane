@@ -52,7 +52,7 @@ Current Emscripten target flags are:
 -sFILESYSTEM=1
 -sFORCE_FILESYSTEM=1
 -sASSERTIONS=1
--sEXPORTED_FUNCTIONS=['_main','_arv_web_frame','_arv_web_connect','_arv_web_disconnect','_arv_web_crypto_self_test']
+-sEXPORTED_FUNCTIONS=['_main','_arv_web_frame','_arv_web_connect','_arv_web_disconnect','_arv_web_refresh_profile','_arv_web_set_player_name','_arv_web_import_skin','_arv_web_set_skin_model','_arv_web_crypto_self_test']
 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']
 ```
 
@@ -100,11 +100,17 @@ Browser persistence uses a browser-backed `arvane_home` layout:
 ```txt
 /arvane_home/
   config/
+    client.yaml
+    server_list.json
   cache/server-packs/
+  cache/skins/
+  imports/
+  keys/
   logs/
+  skins/
 ```
 
-The shell mounts `/arvane_home` with IDBFS before `main()` runs, syncs browser storage into memory, creates the V1 cache/config/log directories, and blocks Connect until storage is ready. It also requests an IDBFS writeback after verified pack/registry sync reaches world join, plus on Disconnect. Only settings, logs, and verified server pack cache data are in scope for V1. Browser local worlds and local multiplayer pack overrides are intentionally out of scope.
+The shell mounts `/arvane_home` with IDBFS before `main()` runs, syncs browser storage into memory, creates the V1 cache/config/profile/log directories, and blocks Connect until storage is ready. It also requests an IDBFS writeback after profile edits, server-list changes, verified pack/registry sync reaching world join, and Disconnect. Browser local worlds and local multiplayer pack overrides are intentionally out of scope.
 
 On a clean browser profile, the first successful join downloads the required `.apack` bundle into `/arvane_home/cache/server-packs/<bundle-hash>/` and writes the verified cache marker last. A page reload or reconnect creates a fresh session over the same browser-backed `/arvane_home`; if the cache marker and file hashes still verify, the client reports the bundle as `AlreadyCached` and skips `ServerboundPackRequest`. Missing, partial, or corrupted cache entries are not trusted and are handled by the normal pack-sync download/verification path.
 
@@ -125,6 +131,7 @@ Start `arv_dedicated` with `network.web.enabled: true`, open `http://localhost:8
 ## Debugging
 
 - Browser status messages appear in the page panel and console.
+- `_arv_web_refresh_profile`, `_arv_web_set_player_name`, `_arv_web_import_skin`, and `_arv_web_set_skin_model` are exported for the browser main menu.
 - `_arv_web_crypto_self_test` is exported for browser-console diagnostics; it should return `0`.
 - The Connect button creates a browser `WebSocketClientTransport`, wraps it in `arv::client::ClientSession`, and pumps that session from the frame loop.
 - The thin session sends `ServerboundHello`, signs `ClientboundAuthChallenge`, handles server hello/auth results, plans pack sync, downloads required APACK bundles, installs them into `/arvane_home/cache/server-packs`, verifies registry snapshots, sends `ServerboundPackReady`, records `ClientboundWorldJoinResult`, sends initial chunk interest, and stores received chunk section payloads for the renderer.

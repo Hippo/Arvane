@@ -10,6 +10,7 @@
 #include "web_canvas_context.hpp"
 #include "web_client_assets.hpp"
 #include "web_platform.hpp"
+#include "web_profile.hpp"
 #include "web_render_host.hpp"
 #include "web_ui_host.hpp"
 
@@ -174,11 +175,14 @@ void connect_web_session(const char* url) {
   }
   reset_web_session_host_state();
   auto transport = std::make_unique<net::WebSocketClientTransport>();
-  client::LocalPlayerIdentity identity =
-      client::make_ephemeral_local_identity("WebPlayer");
-  identity.arvane_home = "/arvane_home";
+  auto identity = load_web_local_identity();
+  if (!identity) {
+    set_shell_state(WebShellState::Connect);
+    set_status("profile load failed: " + identity.error().message);
+    return;
+  }
   g_app.session = std::make_unique<client::ClientRuntime>(std::move(transport));
-  g_app.session->set_local_identity(std::move(identity));
+  g_app.session->set_local_identity(std::move(identity.value()));
   apply_web_ui_settings_to_session(*g_app.session);
   net::NetworkAddress address;
   address.host = url;
